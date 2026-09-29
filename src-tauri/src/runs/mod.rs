@@ -18,7 +18,7 @@ pub mod orchestration;
 mod plan;
 mod quota;
 mod roster;
-mod routing;
+pub(crate) mod routing;
 mod rules;
 mod scheduler;
 pub(crate) mod store;
@@ -168,25 +168,86 @@ pub async fn run_start_orchestration(
     account_id: Option<String>,
     auto_account: bool,
 ) -> Result<Task, String> {
-    let objective = objective.trim().to_string();
+    let db = db_of(&app)?;
+    let (request, complexity) = lead_request(agent_id, model, complexity, account_id, auto_account);
+    let assignment = assign(&db, request).await?;
+    let spec = Orchestration {
+        workspace_id: &workspace_id,
+        cwd: &cwd,
+        objective: &objective,
+        title: None,
+        max_parallel,
+        budget_usd,
+        mission_id: None,
+    };
+    start_orchestration(&db, &spec, &assignment, complexity, |_, _| Ok(()), |task| launch_lead(&app, task))
+}
+
+/// Lo que define un run orquestado, venga de la flota o de una misión.
+pub(crate) struct Orchestration<'a> {
+    pub workspace_id: &'a str,
+    pub cwd: &'a str,
+    pub objective: &'a str,
+    /// El título de la tarjeta del lead. `None` = la primera línea del objetivo.
+    pub title: Option<&'a str>,
+    pub max_parallel: i64,
+    pub budget_usd: Option<f64>,
+    pub mission_id: Option<&'a str>,
+}
+
+/// El pedido de ruteo de un lead. Sin modelo ni complejidad va a `hard`: de cómo reparte
+/// depende lo que cuesta todo lo demás.
+pub(crate) fn lead_request(
+    agent_id: Option<String>,
+    model: Option<String>,
+    complexity: Option<routing::Complexity>,
+    account_id: Option<String>,
+    auto_account: bool,
+) -> (routing::RouteRequest, Option<routing::Complexity>) {
+    let complexity = complexity.or((agent_id.is_none() && model.is_none()).then_some(routing::Complexity::Hard));
+    (route_request(agent_id, model, complexity, account_id, auto_account), complexity)
+}
+
+/// Crea el run y su lead, y lo lanza con `launch`.
+///
+/// El run y el lead se crean en UNA transacción junto con lo que `on_created` escriba (una
+/// misión se marca corriendo ahí): o queda todo, o nada. Si después el lanzamiento falla,
+/// las filas quedan como fallidas —el motivo es lo que hay que poder ver— y el estado se
+/// recalcula por `refresh_run_status`, que es quien arrastra a la misión.
+pub(crate) fn start_orchestration(
+    db: &DbConnection,
+    spec: &Orchestration,
+    assignment: &routing::Assignment,
+    complexity: Option<routing::Complexity>,
+    on_created: impl FnOnce(&rusqlite::Connection, &Task) -> Result<(), String>,
+    launch: impl FnOnce(&Task) -> Result<(), String>,
+) -> Result<Task, String> {
+    let objective = spec.objective.trim();
     if objective.is_empty() {
         return Err("falta el objetivo".into());
     }
-    let db = db_of(&app)?;
-    let complexity = complexity.or((agent_id.is_none() && model.is_none()).then_some(routing::Complexity::Hard));
-    let assignment = assign(&db, route_request(agent_id, model, complexity, account_id, auto_account)).await?;
+    // Antes de crear nada: una fila de un lead que nunca podía lanzarse es ruido.
+    ensure_headless(&assignment.agent_id)?;
     let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
-    let max_parallel = max_parallel.clamp(1, 6);
+    let max_parallel = spec.max_parallel.clamp(1, 6);
 
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let run = store::create_run_with(&conn, &workspace_id, &objective, &cwd, max_parallel, budget_usd)?;
-        let title: String = objective.lines().next().unwrap_or("").chars().take(80).collect();
-        let budget = budget_usd.map(|b| format!(" El run tiene un presupuesto de ${b:.2}: ninguna tarea nueva arranca después de gastarlo."))
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let run = store::create_run_with(&tx, spec.workspace_id, objective, spec.cwd, max_parallel, spec.budget_usd)?;
+        if let Some(mission_id) = spec.mission_id {
+            store::set_run_mission(&tx, &run.id, mission_id)?;
+        }
+        let title: String = match spec.title {
+            Some(t) => t.chars().take(80).collect(),
+            None => objective.lines().next().unwrap_or("").chars().take(80).collect(),
+        };
+        let budget = spec.budget_usd
+            .map(|b| format!(" El run tiene un presupuesto de ${b:.2}: ninguna tarea nueva arranca después de gastarlo."))
             .unwrap_or_default();
         let prompt = format!("{objective}\n\n(Hasta {max_parallel} tareas en paralelo.{budget})");
-        store::create_task(
-            &conn,
+        let task = store::create_task(
+            &tx,
             &store::NewTask {
                 run_id: &run.id,
                 title: &title,
@@ -194,30 +255,39 @@ pub async fn run_start_orchestration(
                 agent_id: &assignment.agent_id,
                 account_id: assignment.account_id.as_deref(),
                 model: assignment.model.as_deref(),
-                cwd: &cwd,
+                cwd: spec.cwd,
                 complexity: complexity.map(routing::Complexity::as_str),
                 routed_by: Some(assignment.routed_by.as_str()),
                 route_note: note.as_deref(),
                 role: Some(types::role::LEAD),
                 ..Default::default()
             },
-        )?
+        )?;
+        on_created(&tx, &task)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        task
     };
 
+    if let Err(e) = launch(&task) {
+        let conn = db.lock().map_err(|err| err.to_string())?;
+        store::finish_task(&conn, &task.id, &types::TaskOutcome::failed(e.clone()))?;
+        store::refresh_run_status(&conn, &task.run_id)?;
+        return Err(e);
+    }
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    store::task_by_id(&conn, &task.id)?.ok_or_else(|| "la tarea se perdió al lanzarla".into())
+}
+
+/// Lanza un lead por el supervisor, con las tools de orquestación: leer el run, dejar hechos
+/// y repartir tareas.
+pub(crate) fn launch_lead(app: &AppHandle, task: &Task) -> Result<(), String> {
     use crate::ipc::mcp::{orchestration_tool_names, OrchestrationPower::*};
     let extras = supervisor::LaunchExtras {
         prompt: None,
         system_prompt: Some(context::LEAD_SYSTEM_PROMPT.to_string()),
         allowed_tools: orchestration_tool_names(&[Read, Note, Spawn]),
     };
-    if let Err(e) = supervisor::start(&app, task.clone(), extras) {
-        let conn = db.lock().map_err(|err| err.to_string())?;
-        store::finish_task(&conn, &task.id, &types::TaskOutcome::failed(e.clone()))?;
-        let _ = store::refresh_run_status(&conn, &task.run_id);
-        return Err(e);
-    }
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    store::task_by_id(&conn, &task.id)?.ok_or_else(|| "la tarea se perdió al lanzarla".into())
+    supervisor::start(app, task.clone(), extras)
 }
 
 /// Lanza una tarea de un plan que le tocó correr: su worktree si va aislada, y su prompt con
@@ -288,29 +358,41 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
 /// Para un run entero: lo que espera no arranca y lo que corre se detiene.
 #[tauri::command]
 pub fn run_cancel_run(app: AppHandle, run_id: String) -> Result<(), String> {
-    let db = db_of(&app)?;
+    cancel_run(&app, &run_id)
+}
+
+pub(crate) fn cancel_run(app: &AppHandle, run_id: &str) -> Result<(), String> {
+    let db = db_of(app)?;
+    let ids = cancel_run_with(&db, run_id, |id| supervisor::cancel(app, id))?;
+    scheduler::bump(run_id);
+    for id in &ids {
+        supervisor::notify_changed(app, id);
+    }
+    Ok(())
+}
+
+/// Cancela lo que espera, para lo que corre con `stop` y recalcula el run. Devuelve las
+/// tareas del run, para avisar que cambiaron.
+pub(crate) fn cancel_run_with(
+    db: &DbConnection,
+    run_id: &str,
+    mut stop: impl FnMut(&str) -> Result<(), String>,
+) -> Result<Vec<String>, String> {
     let live: Vec<String> = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        store::cancel_pending(&conn, &run_id, "se canceló el run")?;
-        store::tasks_of_run(&conn, &run_id)?
+        store::cancel_pending(&conn, run_id, "se canceló el run")?;
+        store::tasks_of_run(&conn, run_id)?
             .into_iter()
             .filter(|t| matches!(t.status.as_str(), types::status::READY | types::status::RUNNING))
             .map(|t| t.id)
             .collect()
     };
     for id in &live {
-        supervisor::cancel(&app, id)?;
+        stop(id)?;
     }
-    let ids: Vec<String> = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        store::refresh_run_status(&conn, &run_id)?;
-        store::tasks_of_run(&conn, &run_id)?.into_iter().map(|t| t.id).collect()
-    };
-    scheduler::bump(&run_id);
-    for id in &ids {
-        supervisor::notify_changed(&app, id);
-    }
-    Ok(())
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    store::refresh_run_status(&conn, run_id)?;
+    Ok(store::tasks_of_run(&conn, run_id)?.into_iter().map(|t| t.id).collect())
 }
 
 /// Lo que se dejaron escrito los agentes de un run.
@@ -355,13 +437,16 @@ fn route_request(
 /// Corre el ruteo fuera del hilo async: la primera vez sondea el roster, que lanza procesos.
 async fn assign(db: &DbConnection, request: routing::RouteRequest) -> Result<routing::Assignment, String> {
     let db = db.clone();
-    tauri::async_runtime::spawn_blocking(move || {
-        let roster = roster::snapshot(&db, false)?;
-        let tiers = routing::load_tiers(&db);
-        routing::route(&roster, &tiers, &request, crate::util::now_ts())
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || route_now(&db, &request))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// El ruteo en el hilo actual. Bloquea: la primera vez sondea el roster.
+pub(crate) fn route_now(db: &DbConnection, request: &routing::RouteRequest) -> Result<routing::Assignment, String> {
+    let roster = roster::snapshot(db, false)?;
+    let tiers = routing::load_tiers(db);
+    routing::route(&roster, &tiers, request, crate::util::now_ts())
 }
 
 /// Qué agentes, modelos y cuentas hay para lanzar ahora. `refresh` vuelve a sondear las
