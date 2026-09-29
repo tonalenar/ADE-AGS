@@ -23,7 +23,7 @@ mod rules;
 mod scheduler;
 pub(crate) mod store;
 mod supervisor;
-mod types;
+pub(crate) mod types;
 mod worktrees;
 #[cfg(test)]
 mod test;
@@ -498,6 +498,18 @@ pub fn run_set_tiers(tiers: routing::Tiers, db: tauri::State<DbConnection>) -> R
     }
     routing::save_tiers(&db, &tiers)?;
     Ok(tiers)
+}
+
+/// Procesos headless vivos. Para probar que algo NO lanzó un agente.
+#[cfg(test)]
+pub(crate) fn live_task_count() -> usize {
+    supervisor::live_count()
+}
+
+/// Worktrees en la carpeta de la app. Para probar que algo NO creó uno.
+#[cfg(test)]
+pub(crate) fn worktree_count() -> usize {
+    worktrees_base().ok().and_then(|b| std::fs::read_dir(b).ok()).map_or(0, |d| d.count())
 }
 
 /// Dónde viven los worktrees de las tareas. Fuera del repo a propósito: adentro habría que

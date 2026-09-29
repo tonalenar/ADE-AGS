@@ -15,6 +15,8 @@
 
 pub(crate) mod store;
 mod types;
+#[cfg(test)]
+mod test;
 
 pub use types::{Mission, MissionDetail, MissionInput, MissionSummary};
 

@@ -61,6 +61,12 @@ fn live() -> std::sync::MutexGuard<'static, HashMap<String, ProcessGroup>> {
     LIVE.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Cuántas tareas headless tienen un proceso vivo. Para probar que algo NO lanzó uno.
+#[cfg(test)]
+pub(crate) fn live_count() -> usize {
+    live().len()
+}
+
 #[derive(serde::Serialize, Clone)]
 #[serde(rename_all = "camelCase")]
 struct TaskEventPayload {

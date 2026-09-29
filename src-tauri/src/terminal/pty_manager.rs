@@ -57,6 +57,12 @@ fn registry() -> MutexGuard<'static, HashMap<u32, PtySession>> {
     PTY_REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+/// Cuántos PTYs vivos hay. Para probar que algo NO abrió una terminal.
+#[cfg(test)]
+pub(crate) fn live_pty_count() -> usize {
+    registry().len()
+}
+
 fn buffers() -> MutexGuard<'static, HashMap<u32, PtyBuffer>> {
     PTY_BUFFERS.lock().unwrap_or_else(|e| e.into_inner())
 }

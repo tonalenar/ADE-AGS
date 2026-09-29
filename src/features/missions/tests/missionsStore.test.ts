@@ -1,0 +1,168 @@
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+vi.mock("../ipc", () => ({
+  listMissions: vi.fn(),
+  getMission: vi.fn(),
+  createMission: vi.fn(),
+  updateMission: vi.fn(),
+  startMission: vi.fn(),
+  cancelMission: vi.fn(),
+}));
+
+import * as ipc from "../ipc";
+import { resetMissionsStore, useMissionsStore } from "../store";
+import type { Mission, MissionDetail, MissionInput, MissionStatus, MissionSummary } from "../types";
+
+const m = vi.mocked(ipc);
+
+function mission(patch: Partial<Mission> = {}): Mission {
+  return {
+    id: "m1",
+    workspaceId: "w",
+    title: "Hola",
+    objective: "Crear hello.txt contendo ADE AGS",
+    cwd: "/tmp/proy",
+    status: "draft",
+    maxParallel: 2,
+    budgetUsd: null,
+    leadAgentId: null,
+    leadModel: null,
+    leadAccountId: null,
+    autoAccount: true,
+    complexity: "hard",
+    activeRunId: null,
+    createdAt: 0,
+    updatedAt: 0,
+    startedAt: null,
+    endedAt: null,
+    ...patch,
+  };
+}
+
+const summary = (patch: Partial<Mission> = {}, tasks = { tasksDone: 0, tasksTotal: 0 }): MissionSummary => ({
+  ...mission(patch), spentUsd: 0, leadAgent: null, ...tasks,
+});
+
+const detail = (patch: Partial<Mission> = {}): MissionDetail => ({ mission: mission(patch), runs: [], tasks: [], facts: [] });
+
+const input: MissionInput = {
+  title: "Hola", objective: "o", cwd: "/tmp/proy", maxParallel: 2, budgetUsd: null,
+  leadAgentId: null, leadModel: null, leadAccountId: null, autoAccount: true, complexity: "hard",
+};
+
+/** Lo que la base tiene "ahora": lo que devuelven list/get. */
+function backend(status: MissionStatus, tasks = { tasksDone: 0, tasksTotal: 0 }) {
+  const runId = status === "draft" ? null : "r1";
+  m.listMissions.mockResolvedValue([summary({ status, activeRunId: runId }, tasks)]);
+  m.getMission.mockResolvedValue(detail({ status, activeRunId: runId }));
+}
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  resetMissionsStore();
+});
+
+describe("missions store", () => {
+  it("lista vacía", async () => {
+    m.listMissions.mockResolvedValue([]);
+    await useMissionsStore.getState().load("w");
+    const s = useMissionsStore.getState();
+    expect(s.loaded).toBe(true);
+    expect(s.missions).toEqual([]);
+    expect(m.getMission).not.toHaveBeenCalled();
+  });
+
+  it("crear guarda un borrador y no lo arranca", async () => {
+    m.createMission.mockResolvedValue(mission());
+    backend("draft");
+    const created = await useMissionsStore.getState().create("w", input);
+    expect(created.status).toBe("draft");
+    expect(m.createMission).toHaveBeenCalledWith("w", input);
+    expect(m.startMission).not.toHaveBeenCalled();
+    const s = useMissionsStore.getState();
+    expect(s.missions.map((x) => x.status)).toEqual(["draft"]);
+    expect(s.details.m1.mission.status).toBe("draft");
+  });
+
+  it("editar relee la lista y el detalle", async () => {
+    m.updateMission.mockResolvedValue(mission({ title: "Otro" }));
+    backend("draft");
+    await useMissionsStore.getState().update("w", "m1", { ...input, title: "Otro" });
+    expect(m.updateMission).toHaveBeenCalledWith("m1", { ...input, title: "Otro" });
+    expect(m.getMission).toHaveBeenCalledWith("m1");
+  });
+
+  it("start pasa a running con su run", async () => {
+    m.startMission.mockResolvedValue(mission({ status: "running", activeRunId: "r1" }));
+    backend("running", { tasksDone: 0, tasksTotal: 1 });
+    const started = await useMissionsStore.getState().start("w", "m1");
+    expect(started.status).toBe("running");
+    const s = useMissionsStore.getState();
+    expect(s.missions[0]).toMatchObject({ status: "running", activeRunId: "r1", tasksTotal: 1 });
+    expect(s.details.m1.mission.activeRunId).toBe("r1");
+  });
+
+  it("un provider que no corre sin terminal: el error sube y la lista igual se relee", async () => {
+    m.startMission.mockRejectedValue("'bash' no se puede correr sin terminal: no puede ser lead");
+    backend("draft");
+    await expect(useMissionsStore.getState().start("w", "m1")).rejects.toMatch(/sin terminal/);
+    expect(m.listMissions).toHaveBeenCalledTimes(1);
+    expect(useMissionsStore.getState().missions[0].status).toBe("draft");
+  });
+
+  it("si el lead no arranca, se ve la misión failed", async () => {
+    m.startMission.mockRejectedValue("no se pudo lanzar");
+    backend("failed");
+    await expect(useMissionsStore.getState().start("w", "m1")).rejects.toBeTruthy();
+    expect(useMissionsStore.getState().details.m1.mission.status).toBe("failed");
+  });
+
+  it("cancel refleja cancelled", async () => {
+    m.cancelMission.mockResolvedValue(mission({ status: "cancelled" }));
+    backend("cancelled");
+    await useMissionsStore.getState().cancel("w", "m1");
+    expect(m.cancelMission).toHaveBeenCalledWith("m1");
+    expect(useMissionsStore.getState().missions[0].status).toBe("cancelled");
+  });
+
+  it("loadDetail guarda el detalle por id", async () => {
+    m.getMission.mockResolvedValue(detail({ status: "done" }));
+    const d = await useMissionsStore.getState().loadDetail("m1");
+    expect(d.mission.status).toBe("done");
+    expect(useMissionsStore.getState().details.m1).toBe(d);
+  });
+
+  it("un evento de tarea actualiza el avance y el estado", async () => {
+    backend("running", { tasksDone: 1, tasksTotal: 3 });
+    await useMissionsStore.getState().onTaskChanged("w", "m1");
+    backend("done", { tasksDone: 3, tasksTotal: 3 });
+    await useMissionsStore.getState().onTaskChanged("w", "m1");
+    const s = useMissionsStore.getState();
+    expect(s.missions[0]).toMatchObject({ status: "done", tasksDone: 3 });
+    expect(s.details.m1.mission.status).toBe("done");
+  });
+
+  it("sin detalle abierto, un evento solo relee la lista", async () => {
+    backend("running");
+    await useMissionsStore.getState().onTaskChanged("w", null);
+    expect(m.listMissions).toHaveBeenCalledTimes(1);
+    expect(m.getMission).not.toHaveBeenCalled();
+  });
+
+  it("una ráfaga de eventos no dispara un viaje por evento", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((r) => { release = r; });
+    m.listMissions.mockImplementation(async () => {
+      await gate;
+      return [summary({ status: "running" })];
+    });
+    m.getMission.mockResolvedValue(detail({ status: "running" }));
+
+    const store = useMissionsStore.getState();
+    const calls = [store.onTaskChanged("w", "m1"), store.onTaskChanged("w", "m1"), store.onTaskChanged("w", "m1")];
+    release();
+    await Promise.all(calls);
+    // Uno en vuelo y uno más por los que llegaron mientras tanto.
+    expect(m.listMissions).toHaveBeenCalledTimes(2);
+  });
+});
