@@ -472,6 +472,11 @@ pub fn cancel_pending(conn: &Connection, run_id: &str, reason: &str) -> Result<u
 /// Si el run es de una misión, la misión lo sigue desde acá y solo desde acá: su estado es
 /// el del run que la está cumpliendo, no uno propio que pueda divergir.
 pub fn refresh_run_status(conn: &Connection, run_id: &str) -> Result<String, String> {
+    refresh_run(conn, run_id).map(|(status, _)| status)
+}
+
+/// `refresh_run_status`, y además la misión si su estado cambió por esto.
+pub fn refresh_run(conn: &Connection, run_id: &str) -> Result<(String, Option<String>), String> {
     let statuses: Vec<String> = {
         let mut stmt = conn.prepare("SELECT status FROM tasks WHERE run_id = ?1").map_err(|e| e.to_string())?;
         let rows = stmt.query_map([run_id], |r| r.get(0)).map_err(|e| e.to_string())?;
@@ -493,8 +498,8 @@ pub fn refresh_run_status(conn: &Connection, run_id: &str) -> Result<String, Str
         rusqlite::params![next, now_ts(), run_id],
     )
     .map_err(|e| e.to_string())?;
-    crate::missions::store::refresh_for_run(conn, run_id)?;
-    Ok(next.to_string())
+    let mission = crate::missions::store::refresh_for_run(conn, run_id)?;
+    Ok((next.to_string(), mission))
 }
 
 // ── Lo que se dejan escrito ─────────────────────────────────────

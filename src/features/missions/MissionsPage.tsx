@@ -18,6 +18,8 @@ import type { MissionDetail, MissionSummary } from "./types";
 
 /** El evento del supervisor cuando cambia una tarea. Debe coincidir con `runs/supervisor.rs`. */
 const TASK_CHANGED = "cc-task-changed";
+/** El de una misión creada, editada, arrancada, cerrada o cancelada. Ver `missions/mod.rs`. */
+const MISSION_CHANGED = "cc-mission-changed";
 
 const STATUS_TONE: Record<MissionPhase, string> = {
   draft: "bg-gray-200 text-gray-700 dark:bg-white/10 dark:text-white/60",
@@ -45,6 +47,7 @@ export function MissionsPage() {
   const load = useMissionsStore((s) => s.load);
   const loadDetail = useMissionsStore((s) => s.loadDetail);
   const onTaskChanged = useMissionsStore((s) => s.onTaskChanged);
+  const onMissionChanged = useMissionsStore((s) => s.onMissionChanged);
 
   const [selected, setSelected] = useState<string | null>(null);
   const [dialog, setDialog] = useState<"new" | "edit" | null>(null);
@@ -68,6 +71,14 @@ export function MissionsPage() {
     });
     return () => { off.then((f) => f()).catch(() => {}); };
   }, [workspaceId, selected, onTaskChanged]);
+
+  useEffect(() => {
+    if (!workspaceId) return;
+    const off = listen<string>(MISSION_CHANGED, (e) => {
+      onMissionChanged(workspaceId, e.payload, selected).catch(console.error);
+    });
+    return () => { off.then((f) => f()).catch(() => {}); };
+  }, [workspaceId, selected, onMissionChanged]);
 
   const summary = missions.find((m) => m.id === selected) ?? null;
   const detail = selected ? details[selected] ?? null : null;

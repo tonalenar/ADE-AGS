@@ -3,7 +3,8 @@
  *
  * No hay polling. Lo que cambia una misión en curso es que cambie una de sus tareas, y eso
  * ya lo avisa el supervisor con `cc-task-changed`; al recibirlo se relee la lista (una
- * consulta) y el detalle abierto.
+ * consulta) y el detalle abierto. Crear, editar, arrancar, cerrar y cancelar la avisan con
+ * `cc-mission-changed`, así otra ventana se entera de lo que se hizo en esta.
  */
 import { create } from "zustand";
 
@@ -23,6 +24,8 @@ interface MissionsState {
   cancel: (workspaceId: string, missionId: string) => Promise<Mission>;
   /** Una tarea cambió: se relee la lista y, si hay uno abierto, su detalle. */
   onTaskChanged: (workspaceId: string, openMissionId: string | null) => Promise<void>;
+  /** Una misión cambió: se relee la lista, y su detalle solo si es la abierta. */
+  onMissionChanged: (workspaceId: string, missionId: string, openMissionId: string | null) => Promise<void>;
 }
 
 /**
@@ -33,7 +36,7 @@ interface MissionsState {
 let inFlight: Promise<void> | null = null;
 let again = false;
 
-export const useMissionsStore = create<MissionsState>((set) => {
+export const useMissionsStore = create<MissionsState>((set, get) => {
   const refresh = async (workspaceId: string, missionId: string | null) => {
     const [missions, detail] = await Promise.all([
       ipc.listMissions(workspaceId),
@@ -105,6 +108,17 @@ export const useMissionsStore = create<MissionsState>((set) => {
         }
       })();
       return inFlight;
+    },
+
+    onMissionChanged: (workspaceId, missionId, openMissionId) => {
+      if (missionId !== openMissionId && get().details[missionId]) {
+        // Uno cerrado que quedó viejo: se vuelve a pedir al abrirlo, no ahora.
+        set((s) => {
+          const { [missionId]: _stale, ...details } = s.details;
+          return { details };
+        });
+      }
+      return get().onTaskChanged(workspaceId, missionId === openMissionId ? openMissionId : null);
     },
   };
 });

@@ -141,6 +141,7 @@ pub fn tick(app: &AppHandle, run_id: &str) {
     let Some(db) = db_of(app) else { return };
     let _one = TICK.lock().unwrap_or_else(|e| e.into_inner());
 
+    let mut mission_changed = None;
     let (to_launch, skipped) = {
         let Ok(conn) = db.lock() else { return };
         let Ok(Some(run)) = store::run_by_id(&conn, run_id) else { return };
@@ -162,7 +163,9 @@ pub fn tick(app: &AppHandle, run_id: &str) {
                 to_launch.push(task);
             }
         }
-        let _ = store::refresh_run_status(&conn, run_id);
+        if let Ok((_, Some(mission))) = store::refresh_run(&conn, run_id) {
+            mission_changed = Some(mission);
+        }
         (to_launch, skipped)
     };
 
@@ -181,8 +184,13 @@ pub fn tick(app: &AppHandle, run_id: &str) {
     for task in to_launch {
         again |= !super::launch_planned(app, &db, task);
     }
-    if let Ok(conn) = db.lock() {
-        let _ = store::refresh_run_status(&conn, run_id);
+    if let Ok(conn) = db.lock()
+        && let Ok((_, Some(mission))) = store::refresh_run(&conn, run_id)
+    {
+        mission_changed = Some(mission);
+    }
+    if let Some(mission) = &mission_changed {
+        crate::missions::notify(app, mission);
     }
     bump(run_id);
     drop(_one);

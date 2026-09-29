@@ -610,3 +610,94 @@ fn migrar_desde_v18_no_convierte_runs_en_misiones() {
     assert_eq!(runs_store::tasks_of_run(&conn, "r").unwrap().len(), 1);
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM missions"), 0);
 }
+
+// ── `cc-mission-changed` ────────────────────────────────────────
+
+mod eventos {
+    use super::*;
+    use crate::missions::{mission_create, mission_update, MISSION_CHANGED};
+    use tauri::{Listener, Manager};
+
+    /// Una app de prueba con la base, y lo que va llegando por `cc-mission-changed`.
+    fn app_que_escucha(db: DbConnection) -> (tauri::App<tauri::test::MockRuntime>, Arc<Mutex<Vec<String>>>) {
+        let app = tauri::test::mock_app();
+        app.manage(db);
+        let vistos = Arc::new(Mutex::new(Vec::new()));
+        let v = vistos.clone();
+        app.listen_any(MISSION_CHANGED, move |e| {
+            v.lock().unwrap().push(serde_json::from_str::<String>(e.payload()).unwrap());
+        });
+        (app, vistos)
+    }
+
+    #[test]
+    fn crear_y_editar_avisan_con_el_id() {
+        let (app, vistos) = app_que_escucha(db());
+        let m = mission_create(app.handle().clone(), "w1".into(), pedido(), app.state()).unwrap();
+        assert_eq!(*vistos.lock().unwrap(), vec![m.id.clone()]);
+
+        mission_update(app.handle().clone(), m.id.clone(), MissionInput { title: "Otro".into(), ..pedido() }, app.state())
+            .unwrap();
+        assert_eq!(*vistos.lock().unwrap(), vec![m.id.clone(), m.id]);
+    }
+
+    #[test]
+    fn un_pedido_invalido_no_avisa() {
+        let (app, vistos) = app_que_escucha(db());
+        let vacio = MissionInput { objective: "  ".into(), ..pedido() };
+        assert!(mission_create(app.handle().clone(), "w1".into(), vacio, app.state()).is_err());
+        assert!(vistos.lock().unwrap().is_empty());
+    }
+
+    /// El scheduler avisa cuando `refresh_run` dice que la misión cambió: solo al cerrarse,
+    /// no en cada vuelta mientras sigue corriendo.
+    #[test]
+    fn el_cierre_del_run_dice_que_mision_cambio_y_solo_entonces() {
+        let db = db();
+        let id = borrador(&db);
+        let lead = arrancar(&db, &id);
+        {
+            let conn = db.lock().unwrap();
+            assert_eq!(runs_store::refresh_run(&conn, &lead.run_id).unwrap(), ("running".into(), None));
+            runs_store::mark_running(&conn, &lead.id, "s-1", "/tmp/e.jsonl").unwrap();
+            runs_store::finish_task(&conn, &lead.id, &TaskOutcome { ok: true, ..Default::default() }).unwrap();
+            assert_eq!(runs_store::refresh_run(&conn, &lead.run_id).unwrap(), ("done".into(), Some(id.clone())));
+            assert_eq!(runs_store::refresh_run(&conn, &lead.run_id).unwrap(), ("done".into(), None), "ya avisado");
+        }
+        assert_eq!(estado(&db, &id), status::DONE);
+    }
+
+    #[test]
+    fn fallar_y_cancelar_tambien_avisan() {
+        for (outcome, esperado) in [
+            (Some(TaskOutcome::failed("x")), status::FAILED),
+            (None, status::CANCELLED),
+        ] {
+            let db = db();
+            let id = borrador(&db);
+            let lead = arrancar(&db, &id);
+            let conn = db.lock().unwrap();
+            match outcome {
+                Some(o) => {
+                    runs_store::finish_task(&conn, &lead.id, &o).unwrap();
+                }
+                None => {
+                    runs_store::cancel_pending(&conn, &lead.run_id, "se canceló").unwrap();
+                    conn.execute("UPDATE tasks SET status = 'cancelled' WHERE id = ?1", [&lead.id]).unwrap();
+                }
+            }
+            let (_, cambio) = runs_store::refresh_run(&conn, &lead.run_id).unwrap();
+            assert_eq!(cambio.as_deref(), Some(id.as_str()), "{esperado}");
+            assert_eq!(store::get(&conn, &id).unwrap().unwrap().status, esperado);
+        }
+    }
+
+    #[test]
+    fn un_run_sin_mision_no_avisa_por_ninguna() {
+        let db = db();
+        let conn = db.lock().unwrap();
+        let run = runs_store::create_run(&conn, "w1", "suelto", "/p").unwrap();
+        assert_eq!(store::mission_of_run(&conn, &run.id).unwrap(), None);
+        assert_eq!(runs_store::refresh_run(&conn, &run.id).unwrap().1, None);
+    }
+}

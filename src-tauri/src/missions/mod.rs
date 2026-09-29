@@ -23,13 +23,29 @@ pub use types::{Mission, MissionDetail, MissionInput, MissionSummary};
 use std::path::Path;
 
 use rusqlite::Connection;
-use tauri::{AppHandle, Manager};
+use tauri::{AppHandle, Emitter, Manager, Runtime};
 
 use crate::database::DbConnection;
 use crate::runs::routing::{Assignment, RouteRequest};
 use crate::runs::{Complexity, Task};
 
 use types::status;
+
+/// "Esta misión cambió": la creación, una edición, el arranque, el cierre y la cancelación.
+/// Lleva solo el id; cada vista recarga lo suyo. El avance de las tareas va por
+/// `cc-task-changed` y la cola de permisos por `cc-task-approvals`, como en la flota.
+pub const MISSION_CHANGED: &str = "cc-mission-changed";
+
+pub(crate) fn notify<R: Runtime>(app: &AppHandle<R>, mission_id: &str) {
+    let _ = app.emit(MISSION_CHANGED, mission_id);
+}
+
+/// Avisa por la misión que el run está cumpliendo, si hay.
+pub(crate) fn notify_for_run<R: Runtime>(app: &AppHandle<R>, conn: &Connection, run_id: &str) {
+    if let Ok(Some(id)) = store::mission_of_run(conn, run_id) {
+        notify(app, &id);
+    }
+}
 
 fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
     Ok(app
@@ -159,23 +175,33 @@ pub(crate) fn cancel(
 // ── Comandos ────────────────────────────────────────────────────
 
 #[tauri::command]
-pub fn mission_create(
+pub fn mission_create<R: Runtime>(
+    app: AppHandle<R>,
     workspace_id: String,
     input: MissionInput,
     db: tauri::State<DbConnection>,
 ) -> Result<Mission, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    create(&conn, &workspace_id, &input)
+    let mission = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        create(&conn, &workspace_id, &input)?
+    };
+    notify(&app, &mission.id);
+    Ok(mission)
 }
 
 #[tauri::command]
-pub fn mission_update(
+pub fn mission_update<R: Runtime>(
+    app: AppHandle<R>,
     mission_id: String,
     input: MissionInput,
     db: tauri::State<DbConnection>,
 ) -> Result<Mission, String> {
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    update(&conn, &mission_id, &input)
+    let mission = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        update(&conn, &mission_id, &input)?
+    };
+    notify(&app, &mission.id);
+    Ok(mission)
 }
 
 #[tauri::command]
@@ -196,12 +222,15 @@ pub fn mission_get(mission_id: String, db: tauri::State<DbConnection>) -> Result
 pub async fn mission_start(app: AppHandle, mission_id: String) -> Result<Mission, String> {
     let db = db_of(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        start(
+        let result = start(
             &db,
             &mission_id,
             |request| crate::runs::route_now(&db, request),
             |lead| crate::runs::launch_lead(&app, lead),
-        )
+        );
+        // También si falló: un lead que no se pudo lanzar deja la misión en `failed`.
+        notify(&app, &mission_id);
+        result
     })
     .await
     .map_err(|e| e.to_string())?
@@ -210,5 +239,7 @@ pub async fn mission_start(app: AppHandle, mission_id: String) -> Result<Mission
 #[tauri::command]
 pub fn mission_cancel(app: AppHandle, mission_id: String) -> Result<Mission, String> {
     let db = db_of(&app)?;
-    cancel(&db, &mission_id, |run_id| crate::runs::cancel_run(&app, run_id))
+    let result = cancel(&db, &mission_id, |run_id| crate::runs::cancel_run(&app, run_id));
+    notify(&app, &mission_id);
+    result
 }

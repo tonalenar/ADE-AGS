@@ -166,3 +166,40 @@ describe("missions store", () => {
     expect(m.listMissions).toHaveBeenCalledTimes(2);
   });
 });
+
+describe("cc-mission-changed", () => {
+  it("lo que otra ventana arrancó se ve en esta, con el detalle abierto", async () => {
+    backend("draft");
+    await useMissionsStore.getState().load("w");
+    await useMissionsStore.getState().loadDetail("m1");
+
+    // Otra ventana apretó "Iniciar": acá solo llega el evento.
+    backend("running", { tasksDone: 0, tasksTotal: 1 });
+    await useMissionsStore.getState().onMissionChanged("w", "m1", "m1");
+    const s = useMissionsStore.getState();
+    expect(s.missions[0]).toMatchObject({ status: "running", activeRunId: "r1" });
+    expect(s.details.m1.mission.status).toBe("running");
+    expect(m.startMission).not.toHaveBeenCalled();
+  });
+
+  it("una misión creada en otra ventana aparece en la lista", async () => {
+    m.listMissions.mockResolvedValue([]);
+    await useMissionsStore.getState().load("w");
+    backend("draft");
+    await useMissionsStore.getState().onMissionChanged("w", "m1", null);
+    expect(useMissionsStore.getState().missions.map((x) => x.id)).toEqual(["m1"]);
+    expect(m.getMission).not.toHaveBeenCalled();
+  });
+
+  it("si la que cambió no es la abierta, no se pide su detalle y el viejo se descarta", async () => {
+    m.getMission.mockResolvedValue(detail({ status: "running", activeRunId: "r1" }));
+    await useMissionsStore.getState().loadDetail("m1");
+    m.getMission.mockClear();
+
+    backend("done");
+    await useMissionsStore.getState().onMissionChanged("w", "m1", "otra");
+    expect(m.getMission).not.toHaveBeenCalledWith("m1");
+    expect(useMissionsStore.getState().details.m1).toBeUndefined();
+    expect(useMissionsStore.getState().missions[0].status).toBe("done");
+  });
+});

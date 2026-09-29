@@ -323,18 +323,31 @@ pub fn refresh_status(conn: &Connection, id: &str) -> Result<Option<String>, Str
 ///
 /// Solo el run ACTIVO mueve a la misión: cuando haya varios intentos, el que terminó
 /// antes no puede pisar el estado del que corre ahora.
-pub fn refresh_for_run(conn: &Connection, run_id: &str) -> Result<(), String> {
-    let mission: Option<String> = conn
+///
+/// Devuelve la misión si su estado cambió, para que quien tenga la app avise.
+pub fn refresh_for_run(conn: &Connection, run_id: &str) -> Result<Option<String>, String> {
+    let mission: Option<(String, String)> = conn
         .query_row(
-            "SELECT m.id FROM runs r JOIN missions m ON m.id = r.mission_id AND m.active_run_id = r.id
+            "SELECT m.id, m.status FROM runs r JOIN missions m ON m.id = r.mission_id AND m.active_run_id = r.id
              WHERE r.id = ?1",
             [run_id],
-            |r| r.get(0),
+            |r| Ok((r.get(0)?, r.get(1)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    if let Some(id) = mission {
-        refresh_status(conn, &id)?;
-    }
-    Ok(())
+    let Some((id, before)) = mission else { return Ok(None) };
+    let after = refresh_status(conn, &id)?;
+    Ok((after.as_deref() != Some(before.as_str())).then_some(id))
+}
+
+/// La misión que el run está cumpliendo ahora, si hay.
+pub fn mission_of_run(conn: &Connection, run_id: &str) -> Result<Option<String>, String> {
+    conn.query_row(
+        "SELECT m.id FROM runs r JOIN missions m ON m.id = r.mission_id AND m.active_run_id = r.id
+         WHERE r.id = ?1",
+        [run_id],
+        |r| r.get(0),
+    )
+    .optional()
+    .map_err(|e| e.to_string())
 }

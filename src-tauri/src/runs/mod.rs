@@ -369,6 +369,10 @@ pub(crate) fn cancel_run(app: &AppHandle, run_id: &str) -> Result<(), String> {
     for id in &ids {
         supervisor::notify_changed(app, id);
     }
+    // Cancelado desde la flota: la misión que lo cumplía también cambió.
+    if let Ok(conn) = db.lock() {
+        crate::missions::notify_for_run(app, &conn, run_id);
+    }
     Ok(())
 }
 
