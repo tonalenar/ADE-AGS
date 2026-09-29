@@ -17,6 +17,8 @@
 //!   toca a cada una ([`AgentDef::sessions`]), que era la parte que estaba implícita.
 //! - **El icono** (`src/features/agents/agentIcons.tsx`). Es un componente de React; no
 //!   puede cruzar el límite. Se sigue eligiendo por el mismo `id` que se define acá.
+//! - **Lanzar sin terminal, armar el entorno de una cuenta, y qué está implementado de
+//!   verdad.** Eso es [`super::adapter`]: la fila no se convierte en el comportamiento.
 
 use serde::{Deserialize, Serialize};
 

@@ -4,12 +4,16 @@
 //! una sola fila ahí. [`detector`] le agrega lo que solo se sabe sondeando esta máquina
 //! (si está instalada y con qué versión), y [`custom`] guarda las que declara el usuario.
 
+mod adapter;
 mod custom;
 mod detector;
 mod registry;
 #[cfg(test)]
+mod contract;
+#[cfg(test)]
 mod test;
 
+pub use adapter::*;
 pub use custom::*;
 pub use detector::*;
 pub use registry::*;

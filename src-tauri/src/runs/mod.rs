@@ -28,6 +28,8 @@ mod worktrees;
 #[cfg(test)]
 mod test;
 
+pub(crate) use adapters::{Codex, Gemini, Kimi, OpenCode};
+pub(crate) use agents::{ClaudeCode, HeadlessAgent};
 pub use store::sweep_orphans;
 pub use types::{Fact, Run, Task};
 
