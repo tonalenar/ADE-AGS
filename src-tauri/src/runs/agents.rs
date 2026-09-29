@@ -55,17 +55,13 @@ pub trait HeadlessAgent {
     }
 }
 
-/// El adaptador de una TUI concreta. Uno nuevo por corrida: los que no son Claude Code
-/// van juntando el resultado mientras leen (ver `adapters.rs`).
+/// El `HeadlessAgent` de una corrida. Uno nuevo por lanzamiento: los que no son Claude
+/// Code van juntando el resultado mientras leen (ver `adapters.rs`).
+///
+/// Quién tiene implementación lo decide el registro de providers. Este `match` no vuelve:
+/// un id desconocido, el shell y una TUI custom responden `None`.
 pub fn adapter_for(agent_id: &str) -> Option<Box<dyn HeadlessAgent + Send + Sync>> {
-    match agent_id {
-        "claude-code" => Some(Box::new(ClaudeCode)),
-        "opencode" => Some(Box::<super::adapters::OpenCode>::default()),
-        "codex" => Some(Box::<super::adapters::Codex>::default()),
-        "gemini-cli" => Some(Box::<super::adapters::Gemini>::default()),
-        "kimi-code" => Some(Box::<super::adapters::Kimi>::default()),
-        _ => None,
-    }
+    crate::agents::adapter_for(agent_id)?.headless()
 }
 
 // ── Claude Code ─────────────────────────────────────────────────

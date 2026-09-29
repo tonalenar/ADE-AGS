@@ -41,7 +41,11 @@ pub(super) fn remove_symlink_best_effort(path: &Path) {
 /// Solo resuelve los agentes soportados de fábrica; para una TUI custom hay que usar
 /// `links_dir_for_conn`, que consulta la carpeta que el usuario le declaró.
 pub fn links_dir_for(cwd: &str, agent_id: &str) -> Option<PathBuf> {
-    let subdir = crate::agents::agent_def(agent_id)?.skills_dir?;
+    let adapter = crate::agents::adapter_for(agent_id)?;
+    if !adapter.capabilities().skills {
+        return None;
+    }
+    let subdir = adapter.def().skills_dir?;
     Some(Path::new(cwd).join(subdir))
 }
 
@@ -54,6 +58,9 @@ pub(super) fn links_dir_for_conn(conn: &rusqlite::Connection, cwd: &str, agent_i
         return Some(dir);
     }
     let custom = crate::agents::find(conn, agent_id)?;
+    if !crate::agents::custom_capabilities(&custom).skills {
+        return None;
+    }
     let raw = custom.skills_dir?;
     let raw = raw.trim().trim_start_matches("./");
     if raw.is_empty() {

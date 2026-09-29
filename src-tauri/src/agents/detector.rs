@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use super::registry::{self, AgentDef, SHELL_AGENT_ID};
+use super::adapter::AgentAdapter;
 
 /// Cuánto se espera a un `--version`. Una TUI que tarda más está haciendo otra cosa —una
 /// migración, un chequeo de actualización, esperando algo— y la lista no puede quedar
@@ -55,12 +55,12 @@ pub fn version_line(stdout: &[u8], stderr: &[u8]) -> Option<String> {
     })
 }
 
-fn probe_agent(def: &AgentDef) -> AgentInfo {
-    // `bash` es la salida de emergencia a una terminal pelada, no una TUI que se instale:
-    // se reporta disponible sin sondear. En Windows el binario ni siquiera está en el
-    // PATH con ese nombre, así que sondearlo lo daría por ausente.
-    let is_shell = def.id == SHELL_AGENT_ID;
-    let path = if is_shell { None } else { crate::util::find_program(def.command) };
+fn probe_agent(adapter: &'static dyn AgentAdapter) -> AgentInfo {
+    let def = adapter.def();
+    // El shell de emergencia se reporta disponible sin sondear. En Windows el binario ni
+    // siquiera está en el PATH con ese nombre, así que sondearlo lo daría por ausente.
+    let assumed = adapter.assumes_installed();
+    let path = if assumed { None } else { crate::util::find_program(def.command) };
 
     // Con la ruta que se encontró y no con el nombre: en Windows un `opencode.cmd` de npm
     // no se ejecuta por su nombre a secas. Con tope y sin stdin: una TUI que se pone a
@@ -78,7 +78,7 @@ fn probe_agent(def: &AgentDef) -> AgentInfo {
         id: def.id.to_string(),
         label: def.label.to_string(),
         command: def.command.to_string(),
-        available: is_shell || path.is_some(),
+        available: assumed || path.is_some(),
         version,
         path: path.map(|p| p.to_string_lossy().into_owned()),
         resume: def.resume.map(str::to_string),
@@ -102,9 +102,10 @@ fn probe_agent(def: &AgentDef) -> AgentInfo {
 pub async fn detect_agents() -> Result<Vec<AgentInfo>, String> {
     tokio::task::spawn_blocking(|| {
         std::thread::scope(|scope| {
-            let probes: Vec<_> = registry::AGENTS
+            let probes: Vec<_> = super::adapter::adapters()
                 .iter()
-                .map(|def| scope.spawn(move || probe_agent(def)))
+                .copied()
+                .map(|adapter| scope.spawn(move || probe_agent(adapter)))
                 .collect();
             probes.into_iter().filter_map(|p| p.join().ok()).collect()
         })

@@ -606,7 +606,8 @@ pub(super) struct OpencodeSession {
 const OPENCODE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub(super) fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<OpencodeSession> {
-    let mut command = crate::util::program("opencode");
+    let (program, env_var) = opencode_invocation();
+    let mut command = crate::util::program(program);
     command
         .args(["session", "list", "--format", "json", "-n", "50"])
         .current_dir(cwd)
@@ -614,7 +615,7 @@ pub(super) fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<Openco
     // Misma variable con la que se lanzó la tab (ver `accounts`): sin esto, `session list`
     // listaría las sesiones de la cuenta del sistema y el título saldría cruzado.
     if let Some(dir) = profile {
-        command.env("XDG_DATA_HOME", dir);
+        command.env(env_var, dir);
     }
     // Con plazo: esta función corre en el camino de cerrar una tab, y un `opencode`
     // colgado no puede dejar a la app esperándolo para siempre.
@@ -865,7 +866,23 @@ pub(super) fn custom_title(path: &Path, fallback: &str) -> SessionTitleResult {
 /// TUI que no está en el registro cae en `None`, que es la rama de las TUIs custom: son
 /// justamente las que declaran a mano dónde buscar.
 fn source_of(agent_id: &str) -> SessionSource {
-    crate::agents::agent_def(agent_id).map_or(SessionSource::None, |d| d.sessions)
+    // La fila del provider elige la estrategia. El `match` de abajo sigue siendo el parser
+    // de cada formato. Una TUI que no está en el registro cae en `None`: es la rama custom.
+    crate::agents::adapter_for(agent_id)
+        .map(|adapter| adapter.def().sessions)
+        .unwrap_or(SessionSource::None)
+}
+
+/// Binario y variable de cuenta de OpenCode, leídos de su fila.
+///
+/// El parser de su JSON sigue siendo de OpenCode. El nombre del ejecutable y la variable
+/// no: si la fila cambia, `session list` y `export` siguen a la fila.
+pub(super) fn opencode_invocation() -> (&'static str, &'static str) {
+    let def = crate::agents::adapter_for("opencode").map(|adapter| adapter.def());
+    (
+        def.map(|d| d.command).unwrap_or("opencode"),
+        def.and_then(|d| d.profile).map(|p| p.env_var).unwrap_or("XDG_DATA_HOME"),
+    )
 }
 
 /// Archivo de sesión de una entrada del historial, resolviendo por el camino propio de

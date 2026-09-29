@@ -15,7 +15,7 @@ use std::time::{Duration, Instant};
 
 use serde::Serialize;
 
-use crate::agents::{ModelSource, AGENTS, SHELL_AGENT_ID};
+use crate::agents::ModelSource;
 use crate::database::DbConnection;
 
 use super::agents::adapter_for;
@@ -222,7 +222,10 @@ fn probe() -> Probed {
     let mut installed = HashMap::new();
     let mut models = HashMap::new();
 
-    for def in AGENTS.iter().filter(|a| a.id != SHELL_AGENT_ID) {
+    // La flota solo ofrece lo que sabe lanzar. El shell queda afuera por no tener headless,
+    // no por un id escrito acá.
+    for adapter in crate::agents::adapters().iter().copied().filter(|a| a.has_headless()) {
+        let def = adapter.def();
         let present = crate::agents::command_exists(def.command);
         installed.insert(def.id, present);
         let list = match def.models {
@@ -281,10 +284,12 @@ pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
     let created = crate::accounts::list_accounts(&conn)?;
     let running = running_by_account(&conn)?;
 
-    let agents = AGENTS
+    let agents = crate::agents::adapters()
         .iter()
-        .filter(|a| a.id != SHELL_AGENT_ID)
-        .map(|def| {
+        .copied()
+        .filter(|adapter| adapter.has_headless())
+        .map(|adapter| {
+            let def = adapter.def();
             let installed = probed.installed.get(def.id).copied().unwrap_or(false);
             let has_adapter = adapter_for(def.id).is_some();
             let unavailable = if !installed {
@@ -296,7 +301,7 @@ pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
             };
 
             let mut accounts = Vec::new();
-            if def.profile.is_some() {
+            if adapter.capabilities().accounts {
                 let system = crate::accounts::system_account(def.id);
                 let rows = created.iter().filter(|a| a.agent_id == def.id);
                 for (account_id, account) in system

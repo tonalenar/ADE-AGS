@@ -161,7 +161,10 @@ impl OpenCode {
     /// Claude Code sin broker. Las ediciones sí, que es el trabajo de un worker en su
     /// worktree.
     fn config(ctx: &LaunchCtx) -> String {
-        let prefix = crate::ipc::mcp::tool_prefix(crate::agents::McpStyle::OpencodeConfig);
+        let style = crate::agents::adapter_for("opencode")
+            .map(|adapter| adapter.def().mcp)
+            .unwrap_or(crate::agents::McpStyle::None);
+        let prefix = crate::ipc::mcp::tool_prefix(style);
         // El mismo servidor que se le pasa a Claude Code en el `--mcp-config` de la tarea.
         let server = ctx
             .mcp_config

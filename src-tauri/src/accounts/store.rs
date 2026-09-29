@@ -115,8 +115,9 @@ pub fn env_for_account(db: &DbConnection, account_id: &str) -> Option<HashMap<St
             |row| Ok((row.get(0)?, row.get(1)?)),
         )
         .ok()?;
-    let spec = spec_for(&agent_id)?;
-    Some(HashMap::from([(spec.env_var.to_string(), dir)]))
+    // La variable sale del provider. Sin perfil (Gemini, Kimi, una TUI desconocida) no hay
+    // mapa: no se hereda el de otra.
+    crate::agents::adapter_for(&agent_id)?.account_env(&dir)
 }
 
 /// Directorio de perfil de una cuenta. Es la raíz donde la TUI guarda TODO lo suyo —

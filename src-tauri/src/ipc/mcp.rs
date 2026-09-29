@@ -1256,7 +1256,9 @@ pub fn tab_browser_mcp(
     // Una TUI custom, o una de fábrica a la que todavía no se le verificó cómo enchufarle
     // un MCP: la tab arranca igual, sin las tools. Mandarle el formato de otra no falla al
     // arrancar — arranca sin nada y sin decir por qué.
-    let style = crate::agents::agent_def(&agent_id).map(|a| a.mcp).unwrap_or(McpStyle::None);
+    let style = crate::agents::adapter_for(&agent_id)
+        .map(|adapter| adapter.def().mcp)
+        .unwrap_or(McpStyle::None);
     if style == McpStyle::None {
         return None;
     }

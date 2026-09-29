@@ -391,7 +391,7 @@ pub fn run_set_tiers(tiers: routing::Tiers, db: tauri::State<DbConnection>) -> R
         if entries.is_empty() {
             return Err(format!("el tramo {} necesita al menos un modelo", c.as_str()));
         }
-        if let Some(bad) = entries.iter().find(|e| crate::agents::agent_def(&e.agent_id).is_none()) {
+        if let Some(bad) = entries.iter().find(|e| crate::agents::adapter_for(&e.agent_id).is_none()) {
             return Err(format!("'{}' no es un agente conocido", bad.agent_id));
         }
         if entries.iter().any(|e| e.model.trim().is_empty()) {
