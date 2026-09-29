@@ -1,10 +1,10 @@
 # Provider architecture
 
-Proposta para evoluir o registry atual até algo no formato `AgentProvider` / `AgentAdapter`, sem reescrever a app. As fases A e B estão no código. As fases C–E continuam proposta. Gemini segue com `profile: None`.
+Proposta para evoluir o registry atual até algo no formato `AgentProvider` / `AgentAdapter`, sem reescrever a app. As fases A, B e C estão no código. As fases D e E continuam proposta. Gemini segue com `profile: None`. O contrato da fase C está em [PROVIDER_CONTRACT.md](./PROVIDER_CONTRACT.md). O inventário do que mudou e do que ficou está em [PROVIDER_AUDIT.md](./PROVIDER_AUDIT.md).
 
 ## O que já é um provider, sem esse nome
 
-`AgentDef` em `src-tauri/src/agents/registry.rs` já é uma linha declarativa. O frontend não tem uma segunda tabela. Contas, skills, resume e o estilo de MCP saem dessa linha. A frota escolhe o adapter em `runs/agents.rs` com um `match` no `id`.
+`AgentDef` em `src-tauri/src/agents/registry.rs` é a linha declarativa. O frontend não tem uma segunda tabela. Contas, skills, resume e o estilo de MCP saem dessa linha. A frota pedia o `HeadlessAgent` com um `match` no `id`. Desde a fase C, `runs::agents::adapter_for` chama `agents::adapter_for` e fica com o que `headless()` devolver.
 
 O que está espalhado, e é o problema real:
 
@@ -12,8 +12,8 @@ O que está espalhado, e é o problema real:
 |---|---|---|
 | Detectar binário e versão | `agents/detector.rs` | I/O, timeout, regra especial do shell |
 | Layout do home da conta | `DefaultHome` e `SystemMarkerRoot` em `ProfileDef`. `default_dir` só lê esses campos | Claude guarda `.claude.json` no home, não dentro de `~/.claude`. OpenCode aninha `opencode/` debaixo do `XDG_DATA_HOME`. Gemini aninha `.gemini/` debaixo do `GEMINI_CLI_HOME` |
-| Achar e titular a sessão | `match` de `SessionSource` em `session/title.rs` | Cada CLI tem um formato. Gemini e Kimi ainda ignoram o diretório da conta |
-| Lançar headless e parsear eventos | trait `HeadlessAgent` + `match` em `adapter_for` | Argv e dialeto JSON são código |
+| Achar e titular a sessão | `match` de `SessionSource` em `session/title.rs` | Cada CLI tem um formato. A fase B passou o diretório da conta a Gemini e Kimi. O parser continua |
+| Lançar headless e parsear eventos | trait `HeadlessAgent`. O `match` do id saiu de `adapter_for` na fase C | Argv e dialeto JSON continuam sendo código, agora atrás de `headless()` |
 | Injetar o MCP da app | `McpStyle` + `ipc/mcp.rs` | Só dois estilos existem |
 | Listar modelos | `ModelSource` | Claude é lista fixa, OpenCode é subprocesso, o resto é `Unknown` |
 | Uso e custo | `usage/` (Claude) e o que cada adapter soma no stream | Não há interface |
@@ -44,9 +44,9 @@ mcp
 headless:       id do adapter já existente, não uma reescrita
 ```
 
-`AgentAdapter` é o comportamento que não cabe numa linha: spawn headless, parse do stream, descoberta de sessão quando o `SessionSource` não bastar, leitura de usage. A primeira versão do trait é fina e tem default que chama o código de hoje. Só o provider que divergir implementa o método.
+`AgentAdapter` é o comportamento que não cabe numa linha. A fase C implementou a versão fina: `headless()`, `account_env()` e `assumes_installed()`, com default que não lança e não finge conta. O parse do stream continua em `HeadlessAgent`. A descoberta de sessão continua no `match` de `SessionSource`. Usage continua só em Claude. Não entrou no trait.
 
-TUIs custom implementam o mesmo trait com os defaults vazios. Não ganham frota nem conta de graça.
+TUIs custom não implementam o trait nesta fase. `custom_capabilities` responde as mesmas perguntas, com frota e conta em falso. A fase E é que as aproxima do mesmo contrato.
 
 ## Migração, sem big bang
 
@@ -72,14 +72,9 @@ Implementado na descoberta. Com `profile == None`, Gemini continua em `~/.gemini
 
 ### Fase C — trait fino por cima do que existe
 
-```text
-trait AgentAdapter {
-    fn def(&self) -> &'static AgentDef;
-    fn launch_headless(...) -> Launch;   // delega ao HeadlessAgent atual
-}
-```
+Implementada. `AgentAdapter` em `agents/adapter.rs` não copia os campos da fila. Expõe o que realmente varia: `headless()`, `account_env()` e `assumes_installed()`. `capabilities()` é derivado da fila mais a existência do `HeadlessAgent`. Os seis providers de fábrica, inclusive bash e o Gemini sem binário instalado, estão num slice estático. `HeadlessAgent` não foi apagado.
 
-`adapter_for` vira uma tabela de adapters, não um `match` que conhece strings soltas. O `match` pode permanecer por uma fase como o miolo de cada adapter. `HeadlessAgent` não é apagado.
+O que não entrou no trait, de propósito: parsers de sessão, os dois formatos de MCP, a listagem de modelos e o consumo de Claude. Detalhe e o caminho para um provider novo em [PROVIDER_CONTRACT.md](./PROVIDER_CONTRACT.md).
 
 ### Fase D — Gemini é o primeiro provider novo de verdade
 
@@ -117,4 +112,4 @@ Custom agents passam a ser um provider com capabilities opcionais, não um segun
 
 1. Fase A, com teste que falha se uma variável nova cair em `~/.claude`.
 2. Fase B, com teste de sessão Gemini num diretório que não é o home.
-3. Fase D, atrás de uma verificação manual do marcador no `gemini` desta máquina. O binário não está instalado; a fase D espera. A e B não dependem dele.
+3. Fase C, o contrato fino. Feita: registro estático, capabilities reais, frota e contas perguntam ao adapter. A fase D continua atrás de uma verificação manual do marcador no `gemini` desta máquina. O binário não está instalado; a fase D espera.
