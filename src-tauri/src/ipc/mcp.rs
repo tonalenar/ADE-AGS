@@ -891,8 +891,13 @@ const BROWSER_READ_ONLY: &[&str] = &[
 /// agente.
 const DESTRUCTIVE: &[&str] = &["browser_eval", "task_cancel"];
 
+/// Si es una de las tools de orquestación (de cualquier poder).
+pub(crate) fn is_orchestration_tool(name: &str) -> bool {
+    ORCHESTRATION_TOOLS.iter().any(|t| t.name == name)
+}
+
 /// Si una tool solo lee: no cambia la página, el repo, el host ni el run.
-fn is_read_only(name: &str) -> bool {
+pub(crate) fn is_read_only(name: &str) -> bool {
     BROWSER_READ_ONLY.contains(&name)
         || ORCHESTRATION_TOOLS.iter().any(|t| t.name == name && t.power == OrchestrationPower::Read)
         || GIT_TOOLS.iter().any(|t| t.name == name && t.read_only)

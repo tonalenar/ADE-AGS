@@ -200,7 +200,10 @@ impl OpenCode {
             .map(|c| c.entry("permission").or_insert_with(|| json!({})))
             .and_then(Value::as_object_mut);
         if let Some(p) = permission {
-            p.insert("edit".into(), json!("allow"));
+            // Un lead no edita: `"ask"`, que sin terminal es rechazado. No `"deny"`: saca
+            // las tools del pedido, y el plan gratuito de OpenCode rechaza un pedido que no
+            // tiene las suyas ("FreeTierError … only be used from within OpenCode", verificado).
+            p.insert("edit".into(), json!(if ctx.read_only { "ask" } else { "allow" }));
             p.insert("bash".into(), json!("ask"));
             p.insert("external_directory".into(), json!("ask"));
             // Las de su papel en el run (las decide quien arma el lanzamiento), con el
@@ -290,13 +293,13 @@ impl HeadlessAgent for Codex {
     fn launch(&self, prompt: &str, model: Option<&str>, _budget_usd: Option<f64>, ctx: &LaunchCtx) -> Launch {
         // `workspace-write`: edita y corre comandos adentro de la carpeta de la tarea, en el
         // sandbox de Codex (sin red, sin tocar afuera). Es lo más parecido a un worker en su
-        // worktree, y con `exec` no hay a quién preguntarle nada más.
+        // worktree, y con `exec` no hay a quién preguntarle nada más. Un lead, `read-only`.
         let mut args: Vec<String> = vec![
             "exec".into(),
             "--json".into(),
             "--skip-git-repo-check".into(),
             "--sandbox".into(),
-            "workspace-write".into(),
+            if ctx.read_only { "read-only" } else { "workspace-write" }.into(),
         ];
         if let Some(m) = model {
             args.push("--model".into());
@@ -401,13 +404,14 @@ impl HeadlessAgent for Gemini {
         // `auto_edit`: las ediciones pasan y el resto (el shell) queda sin aprobar, que sin
         // terminal es rechazado. `--skip-trust` porque la carpeta de un worktree recién
         // creado nunca fue marcada como confiable, y sin eso Gemini no arranca sin pantalla.
+        // Un lead va con `default`: ediciones y shell quedan sin aprobar, o sea rechazados.
         let mut args: Vec<String> = vec![
             "--prompt".into(),
             full_prompt(prompt, ctx, false),
             "--output-format".into(),
             "stream-json".into(),
             "--approval-mode".into(),
-            "auto_edit".into(),
+            if ctx.read_only { "default" } else { "auto_edit" }.into(),
             "--skip-trust".into(),
             // El único además de Claude Code que acepta el id de sesión de afuera.
             "--session-id".into(),
@@ -536,5 +540,10 @@ impl HeadlessAgent for Kimi {
 
     fn finish(&self, emitted: Option<TaskOutcome>, code: i32) -> TaskOutcome {
         emitted.unwrap_or_else(|| lock(&self.0).outcome(code))
+    }
+
+    /// `--prompt` siempre aprueba solo: no hay cómo sacarle las ediciones ni el shell.
+    fn enforces_read_only(&self) -> bool {
+        false
     }
 }

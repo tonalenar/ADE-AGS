@@ -56,6 +56,7 @@ fn ctx_sin_broker() -> LaunchCtx<'static> {
         system_prompt: None,
         allowed_tools: vec![],
         json_schema: None,
+        read_only: false,
     }
 }
 
@@ -67,6 +68,7 @@ fn ctx_con_broker() -> LaunchCtx<'static> {
         system_prompt: None,
         allowed_tools: vec![],
         json_schema: None,
+        read_only: false,
     }
 }
 
@@ -2160,6 +2162,7 @@ mod otras_tuis {
             system_prompt: Some("Reglas del run".into()),
             allowed_tools: vec![],
             json_schema: schema.map(str::to_string),
+            read_only: false,
         }
     }
 
@@ -2349,6 +2352,7 @@ mod lanzamiento_real {
             system_prompt: None,
             allowed_tools: vec![],
             json_schema: None,
+            read_only: false,
         };
         let var = format!("CC_E2E_{}_MODEL", agent_id.replace('-', "_").to_uppercase());
         let model = std::env::var(var).ok();
@@ -2395,5 +2399,185 @@ mod lanzamiento_real {
     #[ignore = "corre la CLI real de OpenCode"]
     fn opencode_arranca_recibe_el_prompt_y_se_parsea() {
         assert_pong("opencode");
+    }
+}
+
+// ── La política del lead ────────────────────────────────────────
+
+mod politica_del_lead {
+    use super::super::policy::{lead_may_use, LEAD_BLOCKED_TOOLS, LEAD_DENIED};
+    use super::*;
+
+    fn tarea_con_rol(conn: &Connection, run_id: &str, rol: Option<&'static str>) -> String {
+        store::create_task(
+            conn,
+            &NewTask {
+                run_id,
+                title: "t",
+                prompt: "p",
+                agent_id: "claude-code",
+                cwd: "/tmp/proy",
+                role: rol,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id
+    }
+
+    fn aprobaciones(db: &crate::database::DbConnection, task_id: &str) -> i64 {
+        db.lock()
+            .unwrap()
+            .query_row("SELECT COUNT(*) FROM task_approvals WHERE task_id = ?1", [task_id], |r| r.get(0))
+            .unwrap()
+    }
+
+    #[test]
+    fn el_lead_lee_y_orquesta() {
+        for tool in ["Read", "Grep", "Glob", "LS", "WebFetch", "WebSearch"] {
+            assert!(lead_may_use(tool), "{tool}");
+        }
+        for tool in ["agent_roster", "run_plan", "run_await", "task_result", "task_add", "fact_add", "facts_read"] {
+            assert!(lead_may_use(&format!("mcp__controlcode__{tool}")), "{tool}");
+        }
+    }
+
+    #[test]
+    fn el_lead_no_modifica_el_workspace() {
+        for tool in ["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell", "write", "bash"] {
+            assert!(!lead_may_use(tool), "{tool}");
+        }
+        // Lo que no está en la lista de lectura u orquestación queda afuera por defecto.
+        assert!(!lead_may_use("mcp__otro__delete_everything"));
+        assert!(!lead_may_use("mcp__controlcode__browser_click"));
+        assert!(!lead_may_use("KillShell"));
+    }
+
+    /// Denegado en el acto: sin pasar por la consola, sin fila en el registro, y aunque
+    /// una regla de la carpeta lo permitiera.
+    #[test]
+    fn un_write_del_lead_se_rechaza_sin_encolar_una_aprobacion() {
+        let _serial = con_broker_limpio();
+        let db = db_compartida();
+        let lead = {
+            let conn = db.lock().unwrap();
+            let run = run_en(&conn);
+            store::upsert_rule(&conn, "/tmp/proy", "Write", true).unwrap();
+            tarea_con_rol(&conn, &run, Some(role::LEAD))
+        };
+
+        let verdict = broker::resolve(
+            &db,
+            &lead,
+            "Write",
+            serde_json::json!({"file_path": "/tmp/proy/a.txt", "content": "x"}),
+            Duration::from_secs(5),
+        );
+        assert!(!verdict.allow);
+        assert_eq!(verdict.by, broker::DecidedBy::Policy);
+        assert_eq!(verdict.reason.as_deref(), Some(LEAD_DENIED));
+        assert!(broker::pending().is_empty(), "no llegó a la consola");
+        assert_eq!(aprobaciones(&db, &lead), 0, "ni quedó anotado como pedido");
+    }
+
+    #[test]
+    fn un_bash_del_lead_tampoco_llega_a_la_consola() {
+        let _serial = con_broker_limpio();
+        let db = db_compartida();
+        let lead = {
+            let conn = db.lock().unwrap();
+            let run = run_en(&conn);
+            tarea_con_rol(&conn, &run, Some(role::LEAD))
+        };
+        let verdict =
+            broker::resolve(&db, &lead, "Bash", serde_json::json!({"command": "ls"}), Duration::from_secs(5));
+        assert_eq!(verdict.by, broker::DecidedBy::Policy);
+        assert!(broker::pending().is_empty());
+    }
+
+    /// Workers y tareas manuales siguen como antes: una regla decide o se le pregunta a
+    /// una persona.
+    #[test]
+    fn workers_y_tareas_manuales_no_cambian() {
+        let _serial = con_broker_limpio();
+        let db = db_compartida();
+        let (worker, manual, con_regla) = {
+            let conn = db.lock().unwrap();
+            let run = run_en(&conn);
+            store::upsert_rule(&conn, "/tmp/proy", "Edit", true).unwrap();
+            (
+                tarea_con_rol(&conn, &run, Some(role::WORKER)),
+                tarea_con_rol(&conn, &run, None),
+                tarea_con_rol(&conn, &run, Some(role::WORKER)),
+            )
+        };
+
+        let v = broker::resolve(&db, &con_regla, "Edit", serde_json::json!({"file_path": "/tmp/proy/a"}), Duration::from_secs(5));
+        assert!(v.allow);
+        assert_eq!(v.by, broker::DecidedBy::Rule);
+
+        for id in [&worker, &manual] {
+            let db2 = db.clone();
+            let id2 = id.clone();
+            let h = std::thread::spawn(move || {
+                broker::resolve(&db2, &id2, "Write", serde_json::json!({"file_path": "/tmp/proy/b"}), Duration::from_secs(5))
+            });
+            let pedido = loop {
+                if let Some(p) = broker::pending().into_iter().find(|p| &p.task_id == id) {
+                    break p;
+                }
+                std::thread::yield_now();
+            };
+            broker::decide(&pedido.id, true, None);
+            let v = h.join().unwrap();
+            assert!(v.allow, "la persona lo permitió");
+            assert_eq!(v.by, broker::DecidedBy::User);
+            assert_eq!(aprobaciones(&db, id), 1);
+        }
+    }
+
+    #[test]
+    fn claude_code_como_lead_no_recibe_las_tools_que_modifican() {
+        let mut ctx = ctx_con_broker();
+        ctx.read_only = true;
+        let args = claude().launch("p", None, None, &ctx).args;
+        let i = args.iter().position(|a| a == "--disallowedTools").expect("tools sacadas");
+        for tool in LEAD_BLOCKED_TOOLS {
+            assert!(args[i + 1].split(',').any(|t| t == *tool), "{tool}");
+        }
+
+        let worker = claude().launch("p", None, None, &ctx_con_broker()).args;
+        assert!(!worker.iter().any(|a| a == "--disallowedTools"));
+    }
+
+    #[test]
+    fn cada_tui_traduce_read_only_a_lo_que_hace_cumplir() {
+        let mut ctx = ctx_sin_broker();
+        ctx.read_only = true;
+
+        let codex = adapter_for("codex").unwrap().launch("p", None, None, &ctx).args;
+        let i = codex.iter().position(|a| a == "--sandbox").unwrap();
+        assert_eq!(codex[i + 1], "read-only");
+
+        let opencode = adapter_for("opencode").unwrap().launch("p", None, None, &ctx).env;
+        let config: serde_json::Value = serde_json::from_str(&opencode["OPENCODE_CONFIG_CONTENT"]).unwrap();
+        // `ask` sin terminal = rechazado ("permission requested: edit … auto-rejecting").
+        assert_eq!(config.pointer("/permission/edit").and_then(|v| v.as_str()), Some("ask"));
+        assert_eq!(config.pointer("/permission/bash").and_then(|v| v.as_str()), Some("ask"));
+        let worker = adapter_for("opencode").unwrap().launch("p", None, None, &ctx_sin_broker()).env;
+        let worker: serde_json::Value = serde_json::from_str(&worker["OPENCODE_CONFIG_CONTENT"]).unwrap();
+        assert_eq!(worker.pointer("/permission/edit").and_then(|v| v.as_str()), Some("allow"));
+
+        let gemini = adapter_for("gemini-cli").unwrap().launch("p", None, None, &ctx).args;
+        let i = gemini.iter().position(|a| a == "--approval-mode").unwrap();
+        assert_eq!(gemini[i + 1], "default");
+    }
+
+    #[test]
+    fn kimi_no_puede_ser_lead() {
+        assert!(!adapter_for("kimi-code").unwrap().enforces_read_only());
+        for id in ["claude-code", "codex", "opencode", "gemini-cli"] {
+            assert!(adapter_for(id).unwrap().enforces_read_only(), "{id}");
+        }
     }
 }

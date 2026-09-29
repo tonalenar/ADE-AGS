@@ -34,6 +34,9 @@ pub struct LaunchCtx<'a> {
     pub allowed_tools: Vec<String>,
     /// JSON Schema que la CLI hace cumplir al resultado.
     pub json_schema: Option<String>,
+    /// La tarea no puede modificar el workspace (un lead, ver `policy`). Cada adapter lo
+    /// traduce a lo que su CLI hace cumplir; el broker lo vuelve a comprobar por pedido.
+    pub read_only: bool,
 }
 
 pub trait HeadlessAgent {
@@ -52,6 +55,11 @@ pub trait HeadlessAgent {
             None if code == 0 => TaskOutcome { ok: true, ..Default::default() },
             None => TaskOutcome::failed(format!("el agente terminó con código {code} sin dar resultado")),
         }
+    }
+
+    /// Si su CLI hace cumplir `LaunchCtx::read_only`. Una que no puede no corre como lead.
+    fn enforces_read_only(&self) -> bool {
+        true
     }
 }
 
@@ -125,6 +133,12 @@ impl HeadlessAgent for ClaudeCode {
                 args.push("--permission-prompts".into());
                 args.push("none".into());
             }
+        }
+        if ctx.read_only {
+            // Fuera del modelo, no solo denegadas al pedirlas: sin broker `acceptEdits`
+            // las aprobaría solas.
+            args.push("--disallowedTools".into());
+            args.push(super::policy::LEAD_BLOCKED_TOOLS.join(","));
         }
         if let Some(m) = model {
             args.push("--model".into());

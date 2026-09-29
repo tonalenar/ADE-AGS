@@ -134,6 +134,14 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let Some(adapter) = adapter_for(&task.agent_id) else {
         return Err(format!("todavía no se sabe correr '{}' sin terminal", task.agent_id));
     };
+    let read_only = super::policy::is_coordinator(&task);
+    if read_only && !adapter.enforces_read_only() {
+        return Err(format!(
+            "'{}' no puede correr como lead: su modo sin terminal aprueba todo solo y no hay \
+             cómo impedirle modificar el workspace",
+            task.agent_id
+        ));
+    }
 
     let db = app
         .try_state::<DbConnection>()
@@ -164,6 +172,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         system_prompt: extras.system_prompt,
         allowed_tools: extras.allowed_tools,
         json_schema: task.result_schema.clone(),
+        read_only,
     };
     let prompt = extras.prompt.unwrap_or_else(|| task.prompt.clone());
     let launch = adapter.launch(&prompt, task.model.as_deref(), task.budget_usd, &ctx);
