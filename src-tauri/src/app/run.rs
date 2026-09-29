@@ -174,6 +174,13 @@ pub fn run() {
             crate::runs::run_preview_route,
             crate::runs::run_get_tiers,
             crate::runs::run_set_tiers,
+            // Misiones: la intención durable por encima de los runs
+            crate::missions::mission_create,
+            crate::missions::mission_update,
+            crate::missions::mission_list,
+            crate::missions::mission_get,
+            crate::missions::mission_start,
+            crate::missions::mission_cancel,
             // Cuentas múltiples por TUI
             crate::accounts::account_capable_agents,
             crate::accounts::list_agent_accounts,
