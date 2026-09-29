@@ -1016,6 +1016,54 @@ fn lanzada_desde_una_subcarpeta_corre_en_esa_subcarpeta_del_worktree() {
     assert!(wt.task_cwd.join("index.ts").exists());
 }
 
+/// El `canonicalize` de Windows antepone `\\?\`, y git 2.55 rechaza esa forma en
+/// `worktree add` / `remove`. La carpeta además tiene espacio y un carácter no ASCII:
+/// las dos cosas viajan en el argumento y no se pueden recortar junto con el prefijo.
+#[test]
+fn un_worktree_con_espacios_y_unicode_se_crea_y_se_borra() {
+    let parent = std::env::temp_dir().join(format!("cc wt café {}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(parent.join("base de worktrees")).unwrap();
+    let repo_dir = parent.join("repo");
+    std::fs::create_dir_all(&repo_dir).unwrap();
+    sh_git(&repo_dir, &["init", "-q", "-b", "main"]);
+    std::fs::write(repo_dir.join("léeme.md"), "hola\n").unwrap();
+    sh_git(&repo_dir, &["add", "."]);
+    sh_git(&repo_dir, &["commit", "-q", "-m", "inicio"]);
+
+    let repo_canon = repo_dir.canonicalize().unwrap();
+    let base_canon = parent.join("base de worktrees").canonicalize().unwrap();
+    #[cfg(windows)]
+    assert!(
+        repo_canon.to_string_lossy().starts_with(r"\\?\"),
+        "el arreglo se prueba con la forma verbatim que produce canonicalize: {repo_canon:?}"
+    );
+
+    let wt = worktrees::create(&base_canon, &repo_canon, "tarea café").unwrap();
+    assert!(wt.root.join("léeme.md").exists(), "el checkout está en el worktree");
+    #[cfg(windows)]
+    assert!(
+        !wt.root.to_string_lossy().starts_with(r"\\?\"),
+        "la ruta que se le guardó a git no lleva el prefijo verbatim: {}",
+        wt.root.display()
+    );
+
+    let removed = worktrees::remove(
+        &repo_canon,
+        &wt,
+        &wt.task_cwd.join(".claude/skills"),
+        &parent.join("skills"),
+    )
+    .unwrap();
+    assert!(!wt.root.exists(), "el worktree se borró");
+    assert!(!removed.branch_kept);
+    assert!(
+        !sh_git(&repo_dir, &["worktree", "list"]).contains(&*wt.root.to_string_lossy()),
+        "git ya no lo tiene registrado"
+    );
+
+    let _ = std::fs::remove_dir_all(&parent);
+}
+
 #[test]
 fn sin_repo_o_sin_commits_se_dice_por_que_no_hay_worktree() {
     let suelta = Tmp::new("suelta");
@@ -1288,7 +1336,13 @@ fn aislar_una_tarea_la_muda_al_worktree_sin_mover_el_proyecto() {
     let aislada = super::isolate_task(&base.0, &db, &task).unwrap();
 
     let root = aislada.worktree_path.clone().expect("anota el worktree");
-    assert!(root.starts_with(&*base.0.to_string_lossy()));
+    // La ruta guardada es la que acepta git. En Windows no conserva el `\\?\` de
+    // `canonicalize`, así que el prefijo se compara como path y no como texto.
+    assert!(
+        Path::new(&root).starts_with(crate::util::external_path(&base.0)),
+        "{root} no está bajo {}",
+        base.0.display()
+    );
     assert_eq!(aislada.cwd, root, "corre adentro");
     assert!(aislada.branch.as_deref().unwrap().starts_with("cc/arreglar-el-login-"));
     assert!(!aislada.worktree_removed);

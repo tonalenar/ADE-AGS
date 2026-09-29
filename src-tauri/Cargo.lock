@@ -610,6 +610,7 @@ dependencies = [
  "cairo-rs",
  "cc",
  "dirs 5.0.1",
+ "dunce",
  "futures-util",
  "http-body-util",
  "hyper",

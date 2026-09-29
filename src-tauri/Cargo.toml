@@ -50,6 +50,10 @@ rusqlite = { version = "0.31", features = ["bundled"] }
 uuid = { version = "1", features = ["v4"] }
 dirs = "5"
 lazy_static = "1"
+# En Windows, `canonicalize` devuelve `\\?\C:\...` y git 2.55 rechaza ese prefijo.
+# `dunce` lo quita solo cuando el resultado sigue siendo una ruta Win32 válida.
+# En Unix es identidad. Ver `util::external_path`.
+dunce = "1.0.5"
 
 # Fase 5 — Skills manager (symlinks globales)
 serde_yaml = "0.9"

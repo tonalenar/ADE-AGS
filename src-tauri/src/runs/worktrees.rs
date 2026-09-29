@@ -26,7 +26,7 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
-use crate::util::output_with_timeout;
+use crate::util::{external_path, output_with_timeout};
 
 /// `worktree add` hace un checkout completo: en un repo grande tarda.
 const GIT_SLOW: Duration = Duration::from_secs(120);
@@ -51,8 +51,11 @@ pub struct Worktree {
 /// es un repo" y "falló" son lo mismo). Acá no: "la rama ya existe" o "el repo no tiene
 /// commits" es justo lo que el usuario necesita leer.
 fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
+    // `-C` también: el directorio canónico llega como `\\?\C:\...` y git lo rechaza
+    // igual que al argumento de `worktree add`.
+    let dir = external_path(dir);
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(dir).args(args);
+    cmd.arg("-C").arg(&dir).args(args);
     let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("no se pudo correr git: {e}"))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string())
@@ -120,14 +123,14 @@ pub fn create_from(base: &Path, project_cwd: &Path, title: &str, start: &str) ->
 
     let short = Uuid::new_v4().simple().to_string()[..8].to_string();
     let branch = format!("{BRANCH_PREFIX}{}-{short}", branch_slug(title));
-    let root = base.join(&short);
+    // `base` suele llegar ya canónico (`\\?\...` en Windows). La comparación de arriba
+    // necesita esa forma; git, no. Se guarda la forma que git acepta para que el
+    // `worktree remove` posterior use la misma ruta que quedó registrada.
+    let root = external_path(&base.join(&short));
 
     std::fs::create_dir_all(base).map_err(|e| e.to_string())?;
-    git(
-        &repo,
-        &["worktree", "add", "-b", &branch, &root.to_string_lossy(), start],
-        GIT_SLOW,
-    )?;
+    let root_arg = root.to_string_lossy();
+    git(&repo, &["worktree", "add", "-b", &branch, &root_arg, start], GIT_SLOW)?;
 
     let task_cwd = if rel.as_os_str().is_empty() { root.clone() } else { root.join(&rel) };
     Ok(Worktree { root, task_cwd, branch })
@@ -249,7 +252,9 @@ pub fn remove(repo_hint: &Path, wt: &Worktree, links_dir: &Path, skills_dir: &Pa
             let _ = std::fs::remove_dir(parent);
         }
 
-        git(repo_hint, &["worktree", "remove", &wt.root.to_string_lossy()], GIT_SLOW)?;
+        let root = external_path(&wt.root);
+        let root_arg = root.to_string_lossy();
+        git(repo_hint, &["worktree", "remove", &root_arg], GIT_SLOW)?;
     } else {
         // Borrado a mano por fuera de la app: git todavía lo tiene registrado.
         let _ = git(repo_hint, &["worktree", "prune"], GIT_FAST);
