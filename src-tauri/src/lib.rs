@@ -11,6 +11,7 @@ mod forge;
 mod graphify;
 pub mod ipc;
 mod marketplace;
+mod missions;
 mod orchestrator;
 mod prelaunch;
 mod preview;

@@ -17,6 +17,8 @@ pub struct Run {
     pub spent_usd: f64,
     pub created_at: i64,
     pub ended_at: Option<i64>,
+    /// La misión que este run intenta cumplir. `None` = lanzado a mano desde la flota.
+    pub mission_id: Option<String>,
 }
 
 /// Una tarjeta de la consola: un agente headless con su trabajo.

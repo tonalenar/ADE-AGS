@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 18;
+const SCHEMA_VERSION: i32 = 19;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -576,6 +576,49 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
          );
          CREATE INDEX IF NOT EXISTS idx_run_facts_run ON run_facts(run_id);",
     )?;
+
+    // v19 — Misiones: la intención del usuario, que dura más que un intento de cumplirla.
+    //
+    // Un run es UNA ejecución; si falla o se cancela, lo que se quería lograr sigue siendo
+    // lo mismo. La misión guarda ese pedido y la preferencia de cómo correrlo (agente,
+    // modelo, cuenta por id, nunca credenciales), y apunta al run que la está cumpliendo.
+    // Nace en `draft`: crearla no lanza nada.
+    //
+    // `runs.mission_id` es nullable a propósito: los runs de antes y los que se lanzan a mano
+    // desde la flota no tienen misión, y ninguno se convierte en una al migrar.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS missions (
+             id              TEXT PRIMARY KEY,
+             workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+             title           TEXT NOT NULL,
+             objective       TEXT NOT NULL,
+             cwd             TEXT NOT NULL,
+             -- draft | running | done | failed | cancelled
+             status          TEXT NOT NULL DEFAULT 'draft',
+             max_parallel    INTEGER NOT NULL DEFAULT 2,
+             budget_usd      REAL,
+             -- NULL = lo elige el ruteo por complejidad.
+             lead_agent_id   TEXT,
+             lead_model      TEXT,
+             -- Con auto_account = 0, NULL es la cuenta del sistema.
+             lead_account_id TEXT,
+             auto_account    INTEGER NOT NULL DEFAULT 1,
+             complexity      TEXT,
+             active_run_id   TEXT REFERENCES runs(id) ON DELETE SET NULL,
+             created_at      INTEGER NOT NULL,
+             updated_at      INTEGER NOT NULL,
+             started_at      INTEGER,
+             ended_at        INTEGER
+         );
+         CREATE INDEX IF NOT EXISTS idx_missions_workspace ON missions(workspace_id);",
+    )?;
+    if !has_column(conn, "runs", "mission_id") {
+        conn.execute(
+            "ALTER TABLE runs ADD COLUMN mission_id TEXT REFERENCES missions(id) ON DELETE SET NULL",
+            [],
+        )?;
+    }
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_runs_mission ON runs(mission_id);")?;
 
     // Columna agregada después de que `tabs` ya existía en instalaciones reales, así que
     // se suma con ALTER en vez de recrear la tabla (que perdería las tabs guardadas).

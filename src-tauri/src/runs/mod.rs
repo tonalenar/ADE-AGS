@@ -21,7 +21,7 @@ mod roster;
 mod routing;
 mod rules;
 mod scheduler;
-mod store;
+pub(crate) mod store;
 mod supervisor;
 mod types;
 mod worktrees;
@@ -30,6 +30,7 @@ mod test;
 
 pub(crate) use adapters::{Codex, Gemini, Kimi, OpenCode};
 pub(crate) use agents::{ClaudeCode, HeadlessAgent};
+pub(crate) use routing::Complexity;
 pub use store::sweep_orphans;
 pub use types::{Fact, Run, Task};
 
@@ -317,6 +318,18 @@ pub fn run_cancel_run(app: AppHandle, run_id: String) -> Result<(), String> {
 pub fn run_list_facts(run_id: String, db: tauri::State<DbConnection>) -> Result<Vec<Fact>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::facts_of_run(&conn, &run_id)
+}
+
+/// Que el provider exista en el registro y la flota sepa correrlo sin terminal. Se pregunta
+/// al registro, no por nombre: un provider nuevo con `HeadlessAgent` entra solo, y la
+/// terminal de emergencia queda afuera por no tenerlo.
+pub(crate) fn ensure_headless(agent_id: &str) -> Result<(), String> {
+    let adapter = crate::agents::adapter_for(agent_id)
+        .ok_or_else(|| format!("'{agent_id}' no es un provider conocido"))?;
+    if !adapter.capabilities().headless {
+        return Err(format!("'{agent_id}' no se puede correr sin terminal: no puede ser lead"));
+    }
+    Ok(())
 }
 
 fn route_request(

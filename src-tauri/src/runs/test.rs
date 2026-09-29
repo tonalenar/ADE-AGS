@@ -1789,6 +1789,7 @@ fn run_de(max_parallel: i64) -> Run {
         spent_usd: 0.0,
         created_at: 0,
         ended_at: None,
+        mission_id: None,
     }
 }
 

@@ -14,7 +14,7 @@ use crate::util::now_ts;
 use super::types::{status, Fact, Run, Task, TaskOutcome};
 
 const RUN_COLUMNS: &str = "id, workspace_id, objective, cwd, status, max_parallel, budget_usd, \
-                           spent_usd, created_at, ended_at";
+                           spent_usd, created_at, ended_at, mission_id";
 
 const TASK_COLUMNS: &str = "id, run_id, title, prompt, agent_id, account_id, model, cwd, \
                             budget_usd, status, session_id, attempt, result, error, cost_usd, \
@@ -35,6 +35,7 @@ fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
         spent_usd: row.get(7)?,
         created_at: row.get(8)?,
         ended_at: row.get(9)?,
+        mission_id: row.get(10)?,
     })
 }
 
@@ -132,6 +133,28 @@ pub fn create_run_with(
     )
     .map_err(|e| e.to_string())?;
     run_by_id(conn, &id)?.ok_or_else(|| "el run no quedó guardado".to_string())
+}
+
+/// Ata un run recién creado a la misión que intenta cumplir.
+pub fn set_run_mission(conn: &Connection, run_id: &str, mission_id: &str) -> Result<(), String> {
+    conn.execute("UPDATE runs SET mission_id = ?1 WHERE id = ?2", [mission_id, run_id])
+        .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Los intentos de una misión, el más reciente primero.
+pub fn runs_of_mission(conn: &Connection, mission_id: &str) -> Result<Vec<Run>, String> {
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {RUN_COLUMNS} FROM runs WHERE mission_id = ?1 ORDER BY created_at DESC, rowid DESC"
+        ))
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([mission_id], row_to_run)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(rows)
 }
 
 #[derive(Default)]
@@ -445,6 +468,9 @@ pub fn cancel_pending(conn: &Connection, run_id: &str, reason: &str) -> Result<u
 ///
 /// `running` mientras quede algo que pueda cambiar solo; al cerrarse todo, `done` si todas
 /// terminaron bien, `cancelled` si alguna se canceló y ninguna falló, y `failed` si no.
+///
+/// Si el run es de una misión, la misión lo sigue desde acá y solo desde acá: su estado es
+/// el del run que la está cumpliendo, no uno propio que pueda divergir.
 pub fn refresh_run_status(conn: &Connection, run_id: &str) -> Result<String, String> {
     let statuses: Vec<String> = {
         let mut stmt = conn.prepare("SELECT status FROM tasks WHERE run_id = ?1").map_err(|e| e.to_string())?;
@@ -467,6 +493,7 @@ pub fn refresh_run_status(conn: &Connection, run_id: &str) -> Result<String, Str
         rusqlite::params![next, now_ts(), run_id],
     )
     .map_err(|e| e.to_string())?;
+    crate::missions::store::refresh_for_run(conn, run_id)?;
     Ok(next.to_string())
 }
 
