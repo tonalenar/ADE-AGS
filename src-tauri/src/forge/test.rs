@@ -178,7 +178,11 @@ fn git_manda_el_token_y_no_usa_otro_helper() {
     // Un helper que, si git lo llegara a usar, dejaría una marca.
     let marker = std::env::temp_dir().join(format!("cc-forge-helper-{}", std::process::id()));
     let _ = std::fs::remove_file(&marker);
-    let helper = format!("!touch {}; echo", marker.display());
+    // Git trata `\` como escape no config. No Windows `Path::display` gravaria
+    // `C:\Users\...` e o comando morre com "bad config line" sem chegar ao HTTP,
+    // e o `accept` deste teste fica bloqueado para sempre.
+    let helper_path = marker.display().to_string().replace('\\', "/");
+    let helper = format!("!touch {helper_path}; echo");
     let env = env_for(&[
         (format!("http.{base}/.extraheader"), basic("x-access-token", "secreto")),
         (format!("credential.{base}.helper"), String::new()),
