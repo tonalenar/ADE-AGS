@@ -1,6 +1,6 @@
 # Provider architecture
 
-Proposta para evoluir o registry atual até algo no formato `AgentProvider` / `AgentAdapter`, sem reescrever a app. A fase A está no código. As fases B–E continuam proposta. Gemini segue com `profile: None`.
+Proposta para evoluir o registry atual até algo no formato `AgentProvider` / `AgentAdapter`, sem reescrever a app. As fases A e B estão no código. As fases C–E continuam proposta. Gemini segue com `profile: None`.
 
 ## O que já é um provider, sem esse nome
 
@@ -67,6 +67,8 @@ Implementado. `default_dir` não faz mais `match` no nome da variável. Um perfi
 `session_file_for`, `discover_session_id_sync` e `get_session_title_sync` passam `profile` para Gemini e Kimi do mesmo jeito que já passam para Claude e Codex. Com `profile == None`, o caminho continua `~/.gemini`. Os testes de `session/test.rs` que usam um diretório temporário continuam válidos. Só se acrescenta um caso em que o profile não é o home.
 
 Ainda sem ligar multi-conta. Isto evita o bug em que a segunda conta seria criada e a tab reabriria a sessão da primeira.
+
+Implementado na descoberta. Com `profile == None`, Gemini continua em `~/.gemini` e Kimi em `KIMI_CODE_HOME` ou `~/.kimi-code`. Com diretório de conta, Gemini lê `<profile>/.gemini` e Kimi lê `<profile>/sessions`. `gemini-cli` e `kimi-code` seguem com `profile: None` no registro.
 
 ### Fase C — trait fino por cima do que existe
 
