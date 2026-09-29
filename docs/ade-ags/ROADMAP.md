@@ -36,6 +36,8 @@ Depende de: 3. Pode andar em paralelo com 4, mas não antes de 3, porque missão
 
 **v0 concluído** em `feat/mission-engine-v0`: Mission persistida em cima de `runs/`, ciclo draft → running → done/failed/cancelled, UI e E2E real. Detalhe e o que ficou fora em [MISSION_ENGINE.md](./MISSION_ENGINE.md).
 
+**Mission Runtime v0.1** em `fix/mission-runtime-v01` (aguardando revisão): launcher Windows sem `cmd.exe` para shims npm, política do lead imposta no broker e na CLI, aprovações na tela da Mission (mesma fila da Fleet), evento `cc-mission-changed`, progresso só de workers e E2E real com lead + 3 workers. Detalhe em [MISSION_RUNTIME.md](./MISSION_RUNTIME.md). Não inclui Roles, Squads, Handoff estruturado, Shared Memory nem Map Mode: essas etapas continuam abertas abaixo.
+
 ## 6. Task Engine
 
 Tasks com estado, dependência, retry e roteamento. Grande parte já está em `runs/` (scheduler, DAG, `run plan`, complexidade). O trabalho é alinhar o vocabulário da missão a essas tabelas, não escrever outro supervisor.

@@ -1,5 +1,9 @@
 # Mission Engine
 
+**Mission Engine = domínio. Mission Runtime = execução e coordenação.**
+
+Este documento é o domínio: a Mission persistida, seus estados e comandos. Como ela roda (launcher, política do lead, aprovações, eventos, progresso) está em [MISSION_RUNTIME.md](./MISSION_RUNTIME.md).
+
 ## Auditoria (antes do v0)
 
 Leitura de `src-tauri/src/runs/`, `database/schema.rs`, `app/run.rs` e `src/features/runs/` na base `01feebe`.
@@ -93,7 +97,7 @@ draft ──Start──▶ running ──run done──▶ done
 
 ## UI
 
-Rota modal `#/missions`, botão na barra lateral abaixo da Fleet. Lista (título, status, pasta, lead, data, gasto, "n / m tarefas"), formulário de criação/edição e detalhe (objetivo, provider, conta, orçamento, gasto, run atual, tasks, dependências, estado dos agentes, resultado/erro, facts do run ativo). Ações: draft → Iniciar; running → Cancelar; finalizada → nenhuma. Atualiza pelo evento `cc-task-changed` do supervisor, com refresh coalescido; sem polling.
+Rota modal `#/missions`, botão na barra lateral abaixo da Fleet. Lista (título, status, pasta, lead, data, gasto, progresso dos workers), formulário de criação/edição e detalhe (objetivo, provider, conta, orçamento, gasto, run atual, lead à parte, tasks, dependências, estado dos agentes, aprovações pendentes, resultado/erro, facts do run ativo). Ações: draft → Iniciar; running → Cancelar; finalizada → nenhuma. Atualiza por `cc-task-changed` e `cc-mission-changed`, com refresh coalescido; sem polling. Desde o v0.1, ver [MISSION_RUNTIME.md](./MISSION_RUNTIME.md).
 
 ## O que o v0 NÃO faz
 
@@ -102,16 +106,17 @@ Rota modal `#/missions`, botão na barra lateral abaixo da Fleet. Lista (título
 - Maestro, Roles, Squads, Shared Memory, Map Mode, sub-missions, templates, cron, automações, cloud/sync/colaboração.
 - Facts por Mission: a Mission mostra os facts do run ativo.
 - Handoff estruturado: o `tasks.handoff` só é exibido.
-- Aprovações de permissão dentro da tela de Missions: continuam na Fleet.
 - Estimativa de custo ou usage universal.
 
-## Débito técnico conhecido
+## Débito técnico do v0 (resolvido no v0.1)
 
-- Não existe evento `mission-changed`. A tela se atualiza por `cc-task-changed`; editar uma Mission numa janela não reflete em outra aberta ao mesmo tempo até o próximo evento de task ou reabertura.
-- A contagem "n / m tarefas" inclui o lead.
-- Aprovações pendentes de uma task da Mission só aparecem na Fleet. No E2E o lead ficou parado esperando aprovação sem aviso na tela de Missions.
-- Windows: providers instalados via npm (`codex.cmd`, `opencode.cmd`) falham ao lançar headless com prompt multi-linha (`batch file arguments are invalid`, proteção do Rust para `.cmd`). É do supervisor, anterior ao v0; a Mission só registra a falha corretamente.
-- O prompt de lead não impede o modelo de tentar agir sozinho: no E2E o lead tentou `Write` em vez de `Spawn`, e a tarefa só avançou com aprovação manual.
+Todos tratados em `fix/mission-runtime-v01`; detalhe em [MISSION_RUNTIME.md](./MISSION_RUNTIME.md).
+
+- ~~Não existe evento `mission-changed`~~ → `cc-mission-changed` em create, update, start, status final e cancel.
+- ~~A contagem "n / m tarefas" inclui o lead~~ → progresso só de workers, lead à parte, "Lead planejando" sem workers.
+- ~~Aprovações pendentes só aparecem na Fleet~~ → a tela de Missions mostra a mesma fila do broker, com Allow/Deny/Remember.
+- ~~Windows: `codex.cmd` / `opencode.cmd` falham com prompt multi-linha~~ → `util::external_command` lança o alvo real do shim npm, sem `cmd.exe`.
+- ~~O prompt de lead não impede o modelo de agir sozinho~~ → política do lead imposta no broker e na CLI de cada provider; o prompt manda delegar tudo.
 
 ## E2E (29/09/2026, Windows, build release)
 
