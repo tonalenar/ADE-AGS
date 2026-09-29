@@ -169,13 +169,14 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let launch = adapter.launch(&prompt, task.model.as_deref(), task.budget_usd, &ctx);
 
     // Con la ruta completa: en Windows, un `claude.cmd` instalado con npm no se ejecuta por
-    // su nombre a secas (ver `util::path_env::find_program`).
+    // su nombre a secas (ver `util::path_env::find_program`). Y sin shell en el medio: el
+    // prompt no puede pasar por `cmd.exe` (ver `util::launch`).
     let program = crate::util::find_program(&launch.program)
-        .map(std::path::PathBuf::into_os_string)
-        .unwrap_or_else(|| launch.program.clone().into());
-    let mut command = tokio::process::Command::new(program);
+        .unwrap_or_else(|| std::path::PathBuf::from(&launch.program));
+    let command = crate::util::external_command(&program, &launch.args)
+        .map_err(|e| format!("no se pudo lanzar '{}': {e}", launch.program))?;
+    let mut command = tokio::process::Command::from(command);
     command
-        .args(&launch.args)
         .current_dir(&task.cwd)
         .envs(&launch.env)
         .stdin(Stdio::null())

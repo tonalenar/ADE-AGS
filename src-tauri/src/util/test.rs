@@ -245,3 +245,189 @@ fn un_perfil_que_se_cuelga_no_deja_colgada_la_app() {
         std::fs::remove_dir_all(&home).ok();
     }
 }
+
+// ── Lanzar sin shell (`launch`) ─────────────────────────────────
+
+mod launch {
+    use std::path::{Path, PathBuf};
+
+    use super::super::launch::{is_batch, parse_npm_shim, resolve_batch, Resolved};
+    use super::temp_dir;
+
+    /// Los argumentos que un prompt real puede traer y que `cmd.exe` interpretaría.
+    pub(super) fn hostile_args() -> Vec<String> {
+        [
+            "linha 1\nlinha 2\n\n\"aspas\"",
+            "A&B",
+            "A|B",
+            "100%",
+            "café",
+            "C:\\pasta com espaço\\",
+            "%PATH%",
+            "!USERNAME!",
+            "<in >out ^caret",
+            "x & echo INJECTED> injected.txt",
+            "",
+        ]
+        .map(String::from)
+        .to_vec()
+    }
+
+    /// Crea un archivo vacío en `dir` + `rel` (con `/`), y devuelve su ruta con el
+    /// separador del sistema: es como la arma el parser.
+    fn touch(dir: &Path, rel: &str) -> PathBuf {
+        let path = rel.split('/').fold(dir.to_path_buf(), |p, part| p.join(part));
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        std::fs::write(&path, b"").unwrap();
+        path
+    }
+
+    const OPENCODE_SHIM: &str = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\"%dp0%\\node_modules\\opencode-ai\\bin\\opencode.exe\"   %*\r\n";
+
+    const CODEX_SHIM: &str = "@ECHO off\r\nGOTO start\r\n:find_dp0\r\nSET dp0=%~dp0\r\nEXIT /b\r\n:start\r\nSETLOCAL\r\nCALL :find_dp0\r\n\r\nIF EXIST \"%dp0%\\node.exe\" (\r\n  SET \"_prog=%dp0%\\node.exe\"\r\n) ELSE (\r\n  SET \"_prog=node\"\r\n  SET PATHEXT=%PATHEXT:;.JS;=;%\r\n)\r\n\r\nendLocal & goto #_undefined_# 2>NUL || title %COMSPEC% & \"%_prog%\"  \"%dp0%\\node_modules\\@openai\\codex\\bin\\codex.js\" %*\r\n";
+
+    const OLD_SHIM: &str = "@IF EXIST \"%~dp0\\node.exe\" (\r\n  \"%~dp0\\node.exe\"  \"%~dp0\\node_modules\\foo\\bin\\foo.js\" %*\r\n) ELSE (\r\n  @SETLOCAL\r\n  @SET PATHEXT=%PATHEXT:;.JS;=;%\r\n  node  \"%~dp0\\node_modules\\foo\\bin\\foo.js\" %*\r\n)\r\n";
+
+    #[test]
+    fn reconoce_scripts_de_cmd_por_la_extension() {
+        assert!(is_batch(Path::new("C:/npm/codex.cmd")));
+        assert!(is_batch(Path::new("C:/npm/tool.BAT")));
+        assert!(!is_batch(Path::new("C:/npm/opencode.exe")));
+        assert!(!is_batch(Path::new("/usr/local/bin/claude")));
+    }
+
+    #[test]
+    fn un_shim_de_exe_lanza_el_exe_directamente() {
+        let dir = temp_dir("shim-exe");
+        let exe = touch(&dir, "node_modules/opencode-ai/bin/opencode.exe");
+        let got = parse_npm_shim(OPENCODE_SHIM, &dir, &|_| None).expect("shim reconocido");
+        assert_eq!(got, Resolved { program: exe, prefix: vec![] });
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn un_shim_de_node_sin_node_al_lado_usa_el_del_path() {
+        let dir = temp_dir("shim-node");
+        let script = touch(&dir, "node_modules/@openai/codex/bin/codex.js");
+        let node = touch(&dir, "elsewhere/node.exe");
+        let n = node.clone();
+        let got = parse_npm_shim(CODEX_SHIM, &dir, &move |name| (name == "node").then(|| n.clone())).expect("shim reconocido");
+        assert_eq!(got, Resolved { program: node, prefix: vec![script.into_os_string()] });
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn un_shim_de_node_prefiere_el_node_de_su_carpeta() {
+        let dir = temp_dir("shim-node-local");
+        let script = touch(&dir, "node_modules/@openai/codex/bin/codex.js");
+        let local = touch(&dir, "node.exe");
+        let got = parse_npm_shim(CODEX_SHIM, &dir, &|_| panic!("no debería buscar en el PATH")).expect("shim reconocido");
+        assert_eq!(got, Resolved { program: local, prefix: vec![script.into_os_string()] });
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn un_shim_viejo_con_dp0_tambien_se_lee() {
+        let dir = temp_dir("shim-old");
+        let script = touch(&dir, "node_modules/foo/bin/foo.js");
+        let node = touch(&dir, "path/node.exe");
+        let n = node.clone();
+        let got = parse_npm_shim(OLD_SHIM, &dir, &move |name| (name == "node").then(|| n.clone())).expect("shim reconocido");
+        assert_eq!(got, Resolved { program: node, prefix: vec![script.into_os_string()] });
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn un_shim_cuyo_objetivo_no_existe_no_se_resuelve() {
+        let dir = temp_dir("shim-missing");
+        assert_eq!(parse_npm_shim(OPENCODE_SHIM, &dir, &|_| None), None);
+        assert_eq!(parse_npm_shim(CODEX_SHIM, &dir, &|_| None), None);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    #[test]
+    fn un_bat_desconocido_con_saltos_de_linea_se_rechaza_antes_de_lanzar() {
+        let path = Path::new("C:/tools/plain.bat");
+        let err = resolve_batch(path, "@echo %*\r\n", true, |_| None).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        assert!(err.to_string().contains("saltos de línea"), "{err}");
+        // Sin saltos, queda en manos del escapado de la biblioteca estándar.
+        let ok = resolve_batch(path, "@echo %*\r\n", false, |_| None).unwrap();
+        assert_eq!(ok, Resolved { program: path.to_path_buf(), prefix: vec![] });
+    }
+
+    #[cfg(windows)]
+    fn node_exe() -> Option<PathBuf> {
+        crate::util::find_program("node").filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("exe")))
+    }
+
+    #[cfg(windows)]
+    const ECHO_ARGS_JS: &str = "process.stdout.write(JSON.stringify(process.argv.slice(2)))";
+
+    #[cfg(windows)]
+    fn run_json(mut cmd: std::process::Command, cwd: &Path) -> Vec<String> {
+        let out = cmd.current_dir(cwd).output().expect("lanzó");
+        assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+        serde_json::from_slice(&out.stdout).unwrap_or_else(|e| panic!("{e}: {}", String::from_utf8_lossy(&out.stdout)))
+    }
+
+    /// Lo que motivó el módulo: un shim de npm con un prompt de varias líneas y
+    /// metacaracteres. Los argumentos tienen que llegar al programa exactamente como se
+    /// mandaron, sin que `cmd.exe` los toque.
+    #[cfg(windows)]
+    #[test]
+    fn un_shim_de_npm_recibe_los_argumentos_intactos() {
+        let Some(node) = node_exe() else { return };
+        let dir = temp_dir("shim-real");
+        let js = dir.join("node_modules").join("echo-args").join("bin").join("echo.js");
+        std::fs::create_dir_all(js.parent().unwrap()).unwrap();
+        std::fs::write(&js, ECHO_ARGS_JS).unwrap();
+        let shim = dir.join("echo-args.cmd");
+        std::fs::write(&shim, CODEX_SHIM.replace("@openai\\codex\\bin\\codex.js", "echo-args\\bin\\echo.js")).unwrap();
+        assert!(node.is_file());
+
+        let args = hostile_args();
+        let cmd = crate::util::external_command(&shim, &args).expect("el shim se resolvió");
+        assert_eq!(run_json(cmd, &dir), args);
+        assert!(!dir.join("injected.txt").exists(), "cmd.exe interpretó un argumento");
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Un `.exe` se lanza directo, con los mismos argumentos intactos.
+    #[cfg(windows)]
+    #[test]
+    fn un_exe_recibe_los_argumentos_intactos() {
+        let Some(node) = node_exe() else { return };
+        let dir = temp_dir("exe-real");
+        let js = dir.join("echo.js");
+        std::fs::write(&js, ECHO_ARGS_JS).unwrap();
+        let mut args = vec![js.to_string_lossy().into_owned()];
+        args.extend(hostile_args());
+        let cmd = crate::util::external_command(&node, &args).expect("exe directo");
+        assert_eq!(run_json(cmd, &dir), hostile_args());
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
+    /// Un `.bat` que no es de npm: lo que `cmd.exe` interpretaría llega escapado, y un salto
+    /// de línea no llega nunca a lanzarse.
+    #[cfg(windows)]
+    #[test]
+    fn un_bat_desconocido_no_permite_inyectar_comandos() {
+        let dir = temp_dir("bat-real");
+        let bat = dir.join("plain.bat");
+        std::fs::write(&bat, "@echo off\r\necho %*\r\n").unwrap();
+
+        let out = crate::util::external_command(&bat, &["x & echo INJECTED> injected.txt", "A|B", "100%PATH%"])
+            .expect("sin saltos de línea se puede lanzar")
+            .current_dir(&dir)
+            .output()
+            .expect("lanzó");
+        let text = String::from_utf8_lossy(&out.stdout);
+        assert!(!dir.join("injected.txt").exists(), "cmd.exe ejecutó un argumento: {text}");
+        assert!(text.contains("INJECTED") && text.contains("A|B") && text.contains("%PATH%"), "{text}");
+
+        let err = crate::util::external_command(&bat, &["linha 1\nlinha 2"]).unwrap_err();
+        assert_eq!(err.kind(), std::io::ErrorKind::InvalidInput);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+}

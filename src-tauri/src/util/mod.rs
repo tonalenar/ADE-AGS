@@ -1,6 +1,7 @@
 //! Piezas chicas que no son de ningún dominio en particular.
 
 pub mod external_path;
+pub mod launch;
 pub mod path_env;
 mod proc;
 mod time;
@@ -8,6 +9,7 @@ mod time;
 mod test;
 
 pub use external_path::external_path;
+pub use launch::external_command;
 pub use path_env::{find_program, program};
 pub use proc::output_with_timeout;
 pub use time::now_ts;

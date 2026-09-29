@@ -2210,6 +2210,26 @@ mod otras_tuis {
         assert_eq!(fin.error.as_deref(), Some("sin crédito"));
     }
 
+    /// Visto en una corrida real de Codex: un `error` como ítem es un aviso y el turno sigue.
+    /// Solo es el motivo si la corrida termina mal.
+    #[test]
+    fn codex_un_error_como_item_no_corta_la_corrida() {
+        let lines = r#"{"type":"thread.started","thread_id":"th-1"}
+{"type":"item.completed","item":{"id":"item_0","type":"error","message":"Skill descriptions were shortened"}}
+{"type":"item.completed","item":{"id":"item_1","type":"agent_message","text":"PONG"}}
+{"type":"turn.completed","usage":{"input_tokens":10,"output_tokens":2}}"#;
+        let agent = adapter_for("codex").unwrap();
+        run(agent.as_ref(), lines);
+        let fin = agent.finish(None, 0);
+        assert!(fin.ok, "{:?}", fin.error);
+        assert_eq!(fin.result.as_deref(), Some("PONG"));
+
+        let agent = adapter_for("codex").unwrap();
+        run(agent.as_ref(), r#"{"type":"item.completed","item":{"id":"item_0","type":"error","message":"sin cuota"}}"#);
+        let fin = agent.finish(None, 1);
+        assert_eq!(fin.error.as_deref(), Some("sin cuota"));
+    }
+
     #[test]
     fn opencode_no_corre_comandos_sin_aprobar_y_el_pedido_lleva_las_reglas() {
         let launch = adapter_for("opencode").unwrap().launch("hacé X", Some("opencode/big-pickle"), None, &ctx(Some("{}")));
@@ -2298,5 +2318,82 @@ mod otras_tuis {
         assert!(eventos.iter().any(|e| matches!(e, AgentEvent::Tool { label, .. } if label == "Bash(ls -la)")));
         let fin = agent.finish(None, 0);
         assert_eq!(fin.result.as_deref(), Some("No hay nada."));
+    }
+}
+
+// ── Lanzamiento real de las TUIs instaladas ─────────────────────
+
+/// Corren la CLI de verdad, con el mismo camino que el supervisor (`find_program` +
+/// `external_command`) y el mismo adaptador. Van con `#[ignore]`: necesitan la CLI
+/// instalada, con login, y gastan una respuesta mínima. Se corren a mano:
+///
+/// `cargo test --lib lanzamiento_real -- --ignored --nocapture`
+///
+/// El modelo se puede elegir con `CC_E2E_<AGENTE>_MODEL` (p. ej. `CC_E2E_OPENCODE_MODEL`).
+mod lanzamiento_real {
+    use super::super::agents::{adapter_for, LaunchCtx};
+    use super::super::types::{AgentEvent, TaskOutcome};
+
+    /// Varias líneas y lo que `cmd.exe` interpretaría: si el prompt pasara por un shell, no
+    /// llegaría entero (o no llegaría).
+    const PROMPT: &str = "Reply with only the word PONG. Do not use any tool. Ignore this data block:\n<data>\nlinha 1\nlinha 2\n\n\"aspas\"\nA&B\nA|B\n100%\ncafé\nC:\\pasta com espaço\\\n</data>";
+
+    fn run_real(agent_id: &str) -> (Vec<AgentEvent>, TaskOutcome) {
+        let dir = std::env::temp_dir().join(format!("cc-launch-{agent_id}-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let agent = adapter_for(agent_id).unwrap();
+        let ctx = LaunchCtx {
+            session_id: &uuid::Uuid::new_v4().to_string(),
+            account_env: Default::default(),
+            mcp_config: None,
+            system_prompt: None,
+            allowed_tools: vec![],
+            json_schema: None,
+        };
+        let var = format!("CC_E2E_{}_MODEL", agent_id.replace('-', "_").to_uppercase());
+        let model = std::env::var(var).ok();
+        let launch = agent.launch(PROMPT, model.as_deref(), None, &ctx);
+        let program = crate::util::find_program(&launch.program).unwrap_or_else(|| panic!("'{}' no está instalado", launch.program));
+        println!("{agent_id}: {} → {:?}", launch.program, program);
+        let out = crate::util::external_command(&program, &launch.args)
+            .expect("el lanzador resolvió el programa")
+            .current_dir(&dir)
+            .envs(&launch.env)
+            .stdin(std::process::Stdio::null())
+            .output()
+            .expect("el proceso arrancó");
+        let stdout = String::from_utf8_lossy(&out.stdout);
+        let events: Vec<AgentEvent> = stdout.lines().flat_map(|l| agent.parse_line(l)).collect();
+        let emitted = events.iter().rev().find_map(|e| match e {
+            AgentEvent::Finished { outcome } => Some(outcome.clone()),
+            _ => None,
+        });
+        let outcome = agent.finish(emitted, out.status.code().unwrap_or(-1));
+        println!("{agent_id}: code {:?}, {} eventos, outcome {:?}", out.status.code(), events.len(), outcome);
+        if !outcome.ok {
+            println!("stderr: {}", String::from_utf8_lossy(&out.stderr));
+        }
+        std::fs::remove_dir_all(&dir).ok();
+        (events, outcome)
+    }
+
+    fn assert_pong(agent_id: &str) {
+        let (events, outcome) = run_real(agent_id);
+        assert!(events.iter().any(|e| matches!(e, AgentEvent::Started { .. })), "el parser no vio el arranque");
+        assert!(outcome.ok, "{:?}", outcome.error);
+        let result = outcome.result.unwrap_or_default();
+        assert!(result.to_uppercase().contains("PONG"), "respondió: {result}");
+    }
+
+    #[test]
+    #[ignore = "corre la CLI real de Codex"]
+    fn codex_arranca_recibe_el_prompt_y_se_parsea() {
+        assert_pong("codex");
+    }
+
+    #[test]
+    #[ignore = "corre la CLI real de OpenCode"]
+    fn opencode_arranca_recibe_el_prompt_y_se_parsea() {
+        assert_pong("opencode");
     }
 }

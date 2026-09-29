@@ -36,6 +36,9 @@ struct Tally {
     tokens_out: Option<i64>,
     cost: Option<f64>,
     error: Option<String>,
+    /// Un problema que la TUI informó sin cortar la corrida. Solo es el motivo si la
+    /// corrida igual termina mal.
+    warning: Option<String>,
 }
 
 impl Tally {
@@ -65,7 +68,12 @@ impl Tally {
             error: if ok {
                 None
             } else {
-                Some(self.error.clone().unwrap_or_else(|| format!("el agente terminó con código {code}")))
+                Some(
+                    self.error
+                        .clone()
+                        .or_else(|| self.warning.clone())
+                        .unwrap_or_else(|| format!("el agente terminó con código {code}")),
+                )
             },
             cost_usd: self.cost,
             tokens_in: self.tokens_in,
@@ -336,8 +344,11 @@ impl HeadlessAgent for Codex {
                         vec![tool_event(tool, item.get("arguments").unwrap_or(&Value::Null))]
                     }
                     Some("web_search") => vec![tool_event("WebSearch", &item)],
+                    // Un `error` como ítem no corta el turno (p. ej. "Skill descriptions were
+                    // shortened…"): la corrida sigue y contesta. Lo que corta llega como
+                    // `turn.failed` o como `error` de primer nivel.
                     Some("error") => {
-                        tally.error = item.get("message").and_then(Value::as_str).map(str::to_string);
+                        tally.warning = item.get("message").and_then(Value::as_str).map(str::to_string);
                         Vec::new()
                     }
                     _ => Vec::new(),
