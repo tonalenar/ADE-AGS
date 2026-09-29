@@ -189,6 +189,29 @@ pub fn format_roster(roster: &roster::Roster, tiers: &routing::Tiers, now: i64) 
 
 /// `run_plan` (varias, y puede crear el run) y `task_add` (una).
 fn add_tasks(app: &AppHandle, db: &DbConnection, payload: &Value, whole_plan: bool) -> Result<String, String> {
+    let (run_id, created) = plan_tasks(db, payload, whole_plan, |db| roster::snapshot(db, false))?;
+
+    scheduler::tick(app, &run_id);
+
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let run = store::run_by_id(&conn, &run_id)?.ok_or("el run se perdió")?;
+    let head = if whole_plan {
+        format!("Plan aceptado: {} tarea(s) en el run {}.", created.len(), run.id)
+    } else {
+        format!("Tarea '{}' agregada al run {}.", created[0], run.id)
+    };
+    Ok(format!("{head}\n\n{}", board(&conn, &run)?))
+}
+
+/// Valida, rutea y crea las filas del plan, sin despachar nada. Devuelve el run y las keys
+/// creadas, en orden. `snapshot` es el roster: se recibe para probar el plan sin sondear
+/// las CLIs de la máquina.
+pub(crate) fn plan_tasks(
+    db: &DbConnection,
+    payload: &Value,
+    whole_plan: bool,
+    snapshot: impl FnOnce(&DbConnection) -> Result<roster::Roster, String>,
+) -> Result<(String, Vec<String>), String> {
     let args = args(payload);
     let tasks: Vec<PlanTask> = if whole_plan {
         serde_json::from_value(args.get("tasks").cloned().unwrap_or(Value::Null))
@@ -227,7 +250,7 @@ fn add_tasks(app: &AppHandle, db: &DbConnection, payload: &Value, whole_plan: bo
     let order = plan::validate(&tasks, &existing_keys)?;
 
     // Asignar TODAS antes de crear ninguna: si una no tiene a quién ir, no se crea nada.
-    let roster = roster::snapshot(db, false)?;
+    let roster = snapshot(db)?;
     let tiers = routing::load_tiers(db);
     let now = crate::util::now_ts();
     let mut assignments = HashMap::new();
@@ -315,17 +338,7 @@ fn add_tasks(app: &AppHandle, db: &DbConnection, payload: &Value, whole_plan: bo
         }
         run.id
     };
-
-    scheduler::tick(app, &run_id);
-
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let run = store::run_by_id(&conn, &run_id)?.ok_or("el run se perdió")?;
-    let head = if whole_plan {
-        format!("Plan aceptado: {} tarea(s) en el run {}.", order.len(), run.id)
-    } else {
-        format!("Tarea '{}' agregada al run {}.", order[0].key, run.id)
-    };
-    Ok(format!("{head}\n\n{}", board(&conn, &run)?))
+    Ok((run_id, order.iter().map(|t| t.key.clone()).collect()))
 }
 
 // ── Leer ────────────────────────────────────────────────────────

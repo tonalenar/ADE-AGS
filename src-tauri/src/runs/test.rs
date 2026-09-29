@@ -2573,6 +2573,103 @@ mod politica_del_lead {
         assert_eq!(gemini[i + 1], "default");
     }
 
+    /// El contrato entero, con las funciones reales de la misión, el broker y `run_plan`:
+    /// la misión arranca, el lead intenta escribir y se le rechaza sin llegar a la consola
+    /// ni tocar el disco, y lo que sí puede hacer —repartir— crea los workers como siempre.
+    #[test]
+    fn un_lead_de_mision_no_escribe_pero_reparte() {
+        use super::super::orchestration::plan_tasks;
+        use crate::missions::MissionInput;
+        use crate::runs::routing::{Assignment, RoutedBy};
+
+        let _serial = con_broker_limpio();
+        let dir = std::env::temp_dir().join(format!("cc-lead-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let cwd = dir.to_string_lossy().into_owned();
+        let db = db_compartida();
+        db.lock()
+            .unwrap()
+            .execute("INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('w1', 'W', 0, 0)", [])
+            .unwrap();
+
+        let mission = crate::missions::create(
+            &db.lock().unwrap(),
+            "w1",
+            &MissionInput {
+                title: "Dos archivos".into(),
+                objective: "Crear backend.txt y frontend.txt".into(),
+                cwd: cwd.clone(),
+                max_parallel: Some(2),
+                auto_account: true,
+                complexity: Some(Complexity::Trivial),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        let mut lead = None;
+        crate::missions::start(
+            &db,
+            &mission.id,
+            |_| {
+                Ok(Assignment {
+                    agent_id: "claude-code".into(),
+                    model: Some("haiku".into()),
+                    account_id: None,
+                    routed_by: RoutedBy::Policy,
+                    notes: vec![],
+                })
+            },
+            |t| {
+                lead = Some(t.clone());
+                Ok(())
+            },
+        )
+        .unwrap();
+        let lead = lead.expect("se lanzó el lead");
+        assert_eq!(lead.role.as_deref(), Some(role::LEAD));
+
+        let archivo = dir.join("backend.txt");
+        for (tool, input) in [
+            ("Write", serde_json::json!({"file_path": archivo, "content": "backend"})),
+            ("Edit", serde_json::json!({"file_path": archivo, "old_string": "", "new_string": "backend"})),
+            ("Bash", serde_json::json!({"command": "echo backend > backend.txt"})),
+        ] {
+            let v = broker::resolve(&db, &lead.id, tool, input, Duration::from_secs(5));
+            assert!(!v.allow, "{tool}");
+            assert_eq!(v.by, broker::DecidedBy::Policy, "{tool}");
+            assert_eq!(v.reason.as_deref(), Some(LEAD_DENIED));
+        }
+        assert!(broker::pending().is_empty(), "ninguna aprobación en la consola");
+        assert_eq!(aprobaciones(&db, &lead.id), 0);
+        assert!(!archivo.exists(), "el workspace no cambió");
+
+        let plan = serde_json::json!({
+            "taskId": lead.id,
+            "args": { "tasks": [
+                { "key": "backend", "title": "backend.txt", "prompt": "Crea backend.txt con 'backend'",
+                  "agent": "claude-code", "model": "haiku", "isolate": false },
+                { "key": "frontend", "title": "frontend.txt", "prompt": "Crea frontend.txt con 'frontend'",
+                  "agent": "claude-code", "model": "haiku", "isolate": false },
+            ]},
+        });
+        let (run_id, keys) = plan_tasks(&db, &plan, true, |_| Ok(roster_de_prueba())).unwrap();
+        assert_eq!(run_id, lead.run_id, "el plan es del run de la misión");
+        assert_eq!(keys, ["backend", "frontend"]);
+
+        let conn = db.lock().unwrap();
+        let workers: Vec<_> = store::tasks_of_run(&conn, &run_id)
+            .unwrap()
+            .into_iter()
+            .filter(|t| t.role.as_deref() == Some(role::WORKER))
+            .collect();
+        assert_eq!(workers.len(), 2);
+        assert!(workers.iter().all(|w| w.depends_on.is_empty() && w.parent_id.as_deref() == Some(lead.id.as_str())));
+        let resumen = crate::missions::store::list(&conn, "w1").unwrap().remove(0);
+        assert_eq!((resumen.workers_done, resumen.workers_total), (0, 2));
+        drop(conn);
+        std::fs::remove_dir_all(&dir).ok();
+    }
+
     #[test]
     fn kimi_no_puede_ser_lead() {
         assert!(!adapter_for("kimi-code").unwrap().enforces_read_only());
