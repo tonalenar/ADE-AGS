@@ -225,6 +225,10 @@ fn temp_repo(label: &str) -> std::path::PathBuf {
     git_in(&dir, &["config", "user.email", "test@controlcode.dev"]);
     git_in(&dir, &["config", "user.name", "Control Code"]);
     git_in(&dir, &["config", "commit.gpgsign", "false"]);
+    // El git del sistema puede tener `core.autocrlf=true`. El producto delega en git;
+    // el repo de prueba fija LF para que el byte que se lee no dependa de esa config.
+    git_in(&dir, &["config", "core.autocrlf", "false"]);
+    git_in(&dir, &["config", "core.eol", "lf"]);
     dir
 }
 

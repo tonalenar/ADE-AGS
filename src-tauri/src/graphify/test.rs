@@ -74,12 +74,16 @@ fn cada_plataforma_de_graphify_deja_la_skill_en_otra_carpeta() {
             .clone()
     };
 
-    assert_eq!(path_of(&global, None), "/home/u/.claude/skills/graphify");
-    assert_eq!(path_of(&project, None), "/repo/.claude/skills/graphify");
+    // `Path` y no el texto: en Windows `join` usa `\`, y las dos formas son la misma ruta.
+    let misma = |actual: String, esperada: &str| {
+        assert_eq!(std::path::Path::new(&actual), std::path::Path::new(esperada), "{actual}");
+    };
+    misma(path_of(&global, None), "/home/u/.claude/skills/graphify");
+    misma(path_of(&project, None), "/repo/.claude/skills/graphify");
     // OpenCode: global y proyecto NO son la misma carpeta.
-    assert_eq!(path_of(&global, Some("opencode")), "/home/u/.config/opencode/skills/graphify");
-    assert_eq!(path_of(&project, Some("opencode")), "/repo/.opencode/skills/graphify");
-    assert_eq!(path_of(&project, Some("agents")), "/repo/.agents/skills/graphify");
+    misma(path_of(&global, Some("opencode")), "/home/u/.config/opencode/skills/graphify");
+    misma(path_of(&project, Some("opencode")), "/repo/.opencode/skills/graphify");
+    misma(path_of(&project, Some("agents")), "/repo/.agents/skills/graphify");
 }
 
 /// Las dos carpetas donde la app monta sus propios symlinks (`skills::links`) son
@@ -109,8 +113,8 @@ fn se_sabe_que_destinos_comparten_carpeta_con_las_skills_de_la_app() {
     let path = |p: Option<&str>| {
         project.iter().find(|t| t.platform.as_deref() == p).unwrap().path.clone()
     };
-    assert!(path(None).starts_with(claude.to_str().unwrap()));
-    assert!(path(Some("agents")).starts_with(agentes.to_str().unwrap()));
+    assert!(std::path::Path::new(&path(None)).starts_with(&claude));
+    assert!(std::path::Path::new(&path(Some("agents"))).starts_with(&agentes));
 }
 
 /// El comando se arma entero y no se parchea el anterior: los flags van después del

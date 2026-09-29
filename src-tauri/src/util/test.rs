@@ -69,11 +69,20 @@ fn executable(path: &std::path::Path) {
 
 /// El del shell manda (es el orden que eligió la persona), lo heredado completa y las
 /// carpetas conocidas van al final: solo deciden si nada más encontró el programa.
+/// El separador del PATH es `:` en Unix y `;` en Windows. `split_paths` usa el de
+/// esta plataforma; armar el ejemplo con `:` haría que en Windows fuera una sola entrada.
+fn path_de(partes: &[&str]) -> String {
+    std::env::join_paths(partes.iter().copied().map(std::path::Path::new))
+        .unwrap()
+        .to_string_lossy()
+        .into_owned()
+}
+
 #[test]
 fn el_path_final_respeta_el_orden_del_shell_y_no_repite() {
     let merged = merge(
-        Some("/home/u/.opencode/bin:/usr/bin"),
-        std::ffi::OsStr::new("/usr/bin:/bin"),
+        Some(&path_de(&["/home/u/.opencode/bin", "/usr/bin"])),
+        std::ffi::OsStr::new(&path_de(&["/usr/bin", "/bin"])),
         &[PathBuf::from("/home/u/.local/bin"), PathBuf::from("/usr/bin")],
     );
     assert_eq!(
@@ -86,7 +95,7 @@ fn el_path_final_respeta_el_orden_del_shell_y_no_repite() {
 /// ejecutaría un `opencode` suelto en su raíz en vez del instalado. No se deja pasar.
 #[test]
 fn una_entrada_vacia_no_llega_al_path() {
-    let merged = merge(Some("/usr/bin::/bin:"), std::ffi::OsStr::new(":/opt/x"), &[]);
+    let merged = merge(Some(&path_de(&["/usr/bin", "", "/bin", ""])), std::ffi::OsStr::new(&path_de(&["", "/opt/x"])), &[]);
     assert!(merged.iter().all(|d| !d.as_os_str().is_empty()), "{merged:?}");
     assert_eq!(merged.len(), 3);
 }
@@ -94,7 +103,7 @@ fn una_entrada_vacia_no_llega_al_path() {
 /// Si el shell no contestó, se sigue con lo heredado: la app abre igual.
 #[test]
 fn sin_shell_queda_lo_heredado_mas_lo_conocido() {
-    let merged = merge(None, std::ffi::OsStr::new("/usr/bin"), &[PathBuf::from("/home/u/.opencode/bin")]);
+    let merged = merge(None, std::ffi::OsStr::new(&path_de(&["/usr/bin"])), &[PathBuf::from("/home/u/.opencode/bin")]);
     assert_eq!(merged, ["/usr/bin", "/home/u/.opencode/bin"].map(PathBuf::from));
 }
 

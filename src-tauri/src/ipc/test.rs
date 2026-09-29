@@ -235,12 +235,24 @@ fn un_symlink_que_apunta_a_otro_lado_no_cuenta_como_instalado() {
     let link = base.join("link");
     assert!(!is_installed(&link, Some(&current)), "sin nada en el destino, no está instalado");
 
-    symlink::symlink_file(&old, &link).unwrap();
-    assert!(!is_installed(&link, Some(&current)));
-
-    let _ = symlink::remove_symlink_auto(&link);
-    symlink::symlink_file(&current, &link).unwrap();
-    assert!(is_installed(&link, Some(&current)));
+    match symlink::symlink_file(&old, &link) {
+        Ok(()) => {
+            assert!(!is_installed(&link, Some(&current)));
+            let _ = symlink::remove_symlink_auto(&link);
+            symlink::symlink_file(&current, &link).unwrap();
+            assert!(is_installed(&link, Some(&current)));
+        }
+        // Windows sin privilegio de symlink: la instalación real es una copia, y un
+        // archivo presente cuenta como instalado. No se puede fabricar el fixture del
+        // symlink; el contrato de la copia sí se puede probar.
+        Err(error) if error.raw_os_error() == Some(1314) => {
+            std::fs::copy(&current, &link).unwrap();
+            assert!(is_installed(&link, Some(&current)), "una copia del binario actual cuenta");
+            std::fs::remove_file(&link).unwrap();
+            assert!(!is_installed(&link, Some(&current)));
+        }
+        Err(error) => panic!("{error}"),
+    }
 
     let _ = std::fs::remove_dir_all(&base);
 }

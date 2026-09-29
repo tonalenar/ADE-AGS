@@ -1214,7 +1214,10 @@ fn las_rutas_del_worktree_se_traducen_a_las_del_proyecto_para_las_reglas() {
 
     let input = serde_json::json!({"file_path": "/home/u/.controlcode/worktrees/ab12/src/a.rs", "old_string": "x"});
     let out = worktrees::to_project_paths(&input, wt, repo);
-    assert_eq!(out["file_path"], "/home/u/proyecto/src/a.rs");
+    assert_eq!(
+        Path::new(out["file_path"].as_str().unwrap()),
+        Path::new("/home/u/proyecto").join("src/a.rs")
+    );
     assert_eq!(out["old_string"], "x", "el resto del input no se toca");
 
     // Un comando se compara tal cual: reescribir adentro es cambiar lo que se aprobó.
@@ -1251,7 +1254,10 @@ fn una_regla_del_proyecto_aplica_a_la_tarea_de_su_worktree_y_el_registro_guarda_
         let run = run_en(&conn); // proyecto en /tmp/proy
         let id = tarea_en(&conn, &run);
         store::set_worktree(&conn, &id, "/wt/ab12", "/wt/ab12", "cc/x-ab12").unwrap();
-        store::upsert_rule(&conn, "/tmp/proy", "Edit(/tmp/proy/src/a.rs)", true).unwrap();
+        // La regla guarda la ruta como la emite `Path` en esta plataforma. En Windows el
+        // separador del join no es `/`, y comparar el texto crudo fallaría con la regla bien escrita.
+        let archivo = Path::new("/tmp/proy").join("src/a.rs");
+        store::upsert_rule(&conn, "/tmp/proy", &format!("Edit({})", archivo.to_string_lossy()), true).unwrap();
         id
     };
 
@@ -1302,7 +1308,11 @@ fn lo_que_ofrece_recordar_una_tarea_aislada_es_la_ruta_del_proyecto() {
         }
         std::thread::yield_now();
     };
-    assert_eq!(pedido.suggested_rule.as_deref(), Some("Edit(/tmp/proy/src/a.rs)"));
+    let archivo = Path::new("/tmp/proy").join("src/a.rs");
+    assert_eq!(
+        pedido.suggested_rule.as_deref(),
+        Some(format!("Edit({})", archivo.to_string_lossy()).as_str())
+    );
     broker::decide(&pedido.id, false, None);
     h.join().unwrap();
 }

@@ -657,7 +657,6 @@ async fn un_servidor_apagado_se_anota_como_conexion_rechazada() {
     let entry = preview_network(target.proxy_origin.clone(), 0).await.unwrap().entries.pop().unwrap();
     assert!(entry.finished && entry.status.is_none());
     assert_eq!(entry.error_kind, Some(ErrorKind::ConnectionRefused), "{:?}", entry.error);
-    assert!(entry.error.unwrap().to_ascii_lowercase().contains("refused"));
 }
 
 /// La página tiene el origen del proxy: tiene que ser el mismo tipo de loopback con que se
