@@ -159,6 +159,9 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<Mission>, String> {
 
 /// Las misiones de un workspace, más recientes primero, con el avance de su run activo.
 ///
+/// El avance es de los workers: el lead no es trabajo repartido, es quien reparte, y
+/// contarlo haría que una misión recién arrancada figure "0 / 1" sin plan todavía.
+///
 /// Todo en una consulta: la lista se relee con cada cambio de una tarea, y una consulta
 /// por misión la haría crecer con el historial.
 pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>, String> {
@@ -167,11 +170,15 @@ pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>
         .prepare(&format!(
             "SELECT {cols},
                     COALESCE(r.spent_usd, 0),
-                    (SELECT COUNT(*) FROM tasks t WHERE t.run_id = m.active_run_id),
-                    (SELECT COUNT(*) FROM tasks t WHERE t.run_id = m.active_run_id AND t.status = 'done'),
-                    (SELECT t.agent_id FROM tasks t WHERE t.run_id = m.active_run_id AND t.role = 'lead'
-                     ORDER BY t.created_at, t.rowid LIMIT 1)
+                    (SELECT COUNT(*) FROM tasks t
+                     WHERE t.run_id = m.active_run_id AND COALESCE(t.role, '') <> 'lead'),
+                    (SELECT COUNT(*) FROM tasks t
+                     WHERE t.run_id = m.active_run_id AND COALESCE(t.role, '') <> 'lead' AND t.status = 'done'),
+                    l.agent_id,
+                    l.status
              FROM missions m LEFT JOIN runs r ON r.id = m.active_run_id
+             LEFT JOIN tasks l ON l.id = (SELECT t.id FROM tasks t WHERE t.run_id = m.active_run_id AND t.role = 'lead'
+                                          ORDER BY t.created_at, t.rowid LIMIT 1)
              WHERE m.workspace_id = ?1
              ORDER BY m.created_at DESC, m.rowid DESC"
         ))
@@ -181,9 +188,10 @@ pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>
             Ok(MissionSummary {
                 mission: row_to_mission(row)?,
                 spent_usd: row.get(18)?,
-                tasks_total: row.get(19)?,
-                tasks_done: row.get(20)?,
+                workers_total: row.get(19)?,
+                workers_done: row.get(20)?,
                 lead_agent: row.get(21)?,
+                lead_status: row.get(22)?,
             })
         })
         .map_err(|e| e.to_string())?

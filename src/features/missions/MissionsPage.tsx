@@ -11,7 +11,7 @@ import type { PendingApproval, Task } from "@/features/runs/types";
 import { MissionDialog } from "./MissionDialog";
 import {
   AGENT_STATES, agentStateOf, approvalsFor, blockedRuns, canEdit, countAgentStates, dependencyLabels, emptyForm,
-  formFromMission, missionAction, missionPhase, progressOf, type MissionPhase,
+  formFromMission, missionAction, missionPhase, progressOf, workersOf, type MissionPhase, type Progress,
 } from "./missionView";
 import { useMissionsStore } from "./store";
 import type { MissionDetail, MissionSummary } from "./types";
@@ -211,11 +211,22 @@ function MissionRow({ mission, phase, active, onSelect }: {
       </span>
       {(progress || mission.spentUsd > 0) && (
         <span className="flex items-center gap-2 text-[10.5px] tabular-nums text-gray-500 dark:text-white/45">
-          {progress && <span>{t("missions.progress", { done: progress.done, total: progress.total })}</span>}
+          {progress && <ProgressLabel progress={progress} />}
           {mission.spentUsd > 0 && <span>${mission.spentUsd.toFixed(3)}</span>}
         </span>
       )}
     </Button>
+  );
+}
+
+function ProgressLabel({ progress }: { progress: Progress }) {
+  const { t } = useTranslation();
+  return (
+    <span>
+      {progress.kind === "planning"
+        ? t("missions.leadPlanning")
+        : t("missions.progress", { done: progress.done, total: progress.total })}
+    </span>
   );
 }
 
@@ -237,7 +248,9 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
   const action = missionAction(mission.status);
   const blockedTasks = useMemo(() => new Set(approvals.map((a) => a.taskId)), [approvals]);
   const phase = missionPhase(mission.status, approvals.length > 0);
-  const counts = countAgentStates(tasks, blockedTasks);
+  const workers = workersOf(tasks);
+  const counts = countAgentStates(workers, blockedTasks);
+  const progress = progressOf(summary);
   const firstApproval = approvals[0]?.id ?? null;
 
   const act = async (kind: "start" | "cancel") => {
@@ -317,6 +330,12 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
             {runs.length > 1 && ` · ${t("missions.detail.attempts", { n: runs.length })}`}
           </p>
           <p className="flex flex-wrap gap-3 text-[11px] tabular-nums text-gray-500 dark:text-white/45">
+            {lead && (
+              <span className="font-medium text-violet-600 dark:text-violet-400">
+                {t("missions.leadState", { state: t(`missions.state.${agentStateOf(lead, tasks, blockedTasks)}`) })}
+              </span>
+            )}
+            {progress && <ProgressLabel progress={progress} />}
             {AGENT_STATES.filter((s) => counts[s] > 0).map((s) => (
               <span key={s}>{t(`missions.agents.${s}`, { n: counts[s] })}</span>
             ))}

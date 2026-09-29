@@ -2,7 +2,7 @@
  * Las piezas puras de la pantalla de misiones: qué acción ofrece cada estado, el avance,
  * el formulario. Sin React, para poder probarlas.
  */
-import type { Complexity, PendingApproval, Task } from "@/features/runs/types";
+import type { Complexity, PendingApproval, Task, TaskStatus } from "@/features/runs/types";
 
 import type { Mission, MissionInput, MissionStatus } from "./types";
 
@@ -24,10 +24,22 @@ export function missionAction(status: MissionStatus): "start" | "cancel" | null 
 /** Solo un borrador se reconfigura: lo demás describe cómo se ejecutó. */
 export const canEdit = (status: MissionStatus) => status === "draft";
 
-/** "3 / 5 tareas listas". `null` = todavía no hay tareas que contar. */
-export function progressOf(s: { tasksDone: number; tasksTotal: number }): { done: number; total: number } | null {
-  return s.tasksTotal > 0 ? { done: s.tasksDone, total: s.tasksTotal } : null;
+export type Progress = { kind: "planning" } | { kind: "workers"; done: number; total: number };
+
+const LIVE: ReadonlySet<TaskStatus> = new Set(["pending", "ready", "running"]);
+
+/**
+ * El avance de una misión, sin el lead: "2 / 3 workers listos", o "el lead está
+ * planificando" mientras todavía no repartió nada. `null` = nada que mostrar (un borrador,
+ * o una que terminó sin llegar a repartir).
+ */
+export function progressOf(s: { workersDone: number; workersTotal: number; leadStatus: TaskStatus | null }): Progress | null {
+  if (s.workersTotal > 0) return { kind: "workers", done: s.workersDone, total: s.workersTotal };
+  return s.leadStatus && LIVE.has(s.leadStatus) ? { kind: "planning" } : null;
 }
+
+/** Las tareas del run que no son el lead. */
+export const workersOf = (tasks: Task[]) => tasks.filter((t) => t.role !== "lead");
 
 /**
  * Lo que está haciendo cada agente, derivado de su tarea y de la cola de permisos. Es
@@ -61,7 +73,7 @@ export function agentStateOf(task: Task, tasks: Task[] = [], blocked: ReadonlySe
   }
 }
 
-/** Cuántas tareas del run activo hay en cada estado. */
+/** Cuántas de estas tareas hay en cada estado. */
 export function countAgentStates(tasks: Task[], blocked: ReadonlySet<string> = new Set()): Record<AgentState, number> {
   const counts = Object.fromEntries(AGENT_STATES.map((s) => [s, 0])) as Record<AgentState, number>;
   for (const t of tasks) counts[agentStateOf(t, tasks, blocked)] += 1;

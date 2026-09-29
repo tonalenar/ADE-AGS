@@ -132,8 +132,8 @@ fn la_lista_va_de_la_mas_nueva_a_la_mas_vieja_y_es_por_workspace() {
     let ids: Vec<String> = store::list(&conn, "w1").unwrap().into_iter().map(|s| s.mission.id).collect();
     assert_eq!(ids, vec![b.id, a.id]);
     let first = &store::list(&conn, "w1").unwrap()[0];
-    assert_eq!((first.tasks_total, first.tasks_done, first.spent_usd), (0, 0, 0.0));
-    assert_eq!(first.lead_agent, None);
+    assert_eq!((first.workers_total, first.workers_done, first.spent_usd), (0, 0, 0.0));
+    assert_eq!((first.lead_agent.as_deref(), first.lead_status.as_deref()), (None, None));
 }
 
 #[test]
@@ -394,8 +394,9 @@ fn run_terminado_bien_deja_la_mision_hecha() {
     assert_eq!(m.status, status::DONE);
     assert!(m.ended_at.is_some());
     let s = &store::list(&conn, "w1").unwrap()[0];
-    assert_eq!((s.tasks_done, s.tasks_total), (1, 1));
+    assert_eq!((s.workers_done, s.workers_total), (0, 0), "el lead no es un worker");
     assert_eq!(s.lead_agent.as_deref(), Some("claude-code"));
+    assert_eq!(s.lead_status.as_deref(), Some(task_status::DONE));
     assert!((s.spent_usd - 0.02).abs() < 1e-9);
 }
 
@@ -432,6 +433,55 @@ fn mientras_quede_un_worker_la_mision_sigue_corriendo() {
     }
     correr_y_cerrar(&db, &lead.id, TaskOutcome { ok: true, ..Default::default() });
     assert_eq!(estado(&db, &id), status::RUNNING);
+}
+
+/// El avance cuenta workers y el lead va aparte: recién arrancada, 0 workers y el lead
+/// planificando; con el plan, cuántos de los workers terminaron.
+#[test]
+fn el_avance_es_de_los_workers_y_el_lead_va_aparte() {
+    let db = db();
+    let id = borrador(&db);
+    let lead = arrancar(&db, &id);
+    let resumen = |db: &DbConnection| store::list(&db.lock().unwrap(), "w1").unwrap().remove(0);
+
+    let s = resumen(&db);
+    assert_eq!((s.workers_done, s.workers_total), (0, 0));
+    assert!(s.lead_status.is_some_and(|st| !task_status::is_final(&st)), "el lead sigue planificando");
+
+    let workers: Vec<String> = {
+        let conn = db.lock().unwrap();
+        (0..2)
+            .map(|i| {
+                runs_store::create_task(
+                    &conn,
+                    &runs_store::NewTask {
+                        run_id: &lead.run_id,
+                        title: if i == 0 { "backend" } else { "frontend" },
+                        prompt: "p",
+                        agent_id: "codex",
+                        cwd: &proyecto(),
+                        role: Some(role::WORKER),
+                        queued: true,
+                        ..Default::default()
+                    },
+                )
+                .unwrap()
+                .id
+            })
+            .collect()
+    };
+    let s = resumen(&db);
+    assert_eq!((s.workers_done, s.workers_total), (0, 2));
+
+    correr_y_cerrar(&db, &workers[0], TaskOutcome { ok: true, ..Default::default() });
+    let s = resumen(&db);
+    assert_eq!((s.workers_done, s.workers_total), (1, 2));
+
+    correr_y_cerrar(&db, &workers[1], TaskOutcome { ok: true, ..Default::default() });
+    correr_y_cerrar(&db, &lead.id, TaskOutcome { ok: true, ..Default::default() });
+    let s = resumen(&db);
+    assert_eq!((s.workers_done, s.workers_total), (2, 2));
+    assert_eq!(s.mission.status, status::DONE);
 }
 
 // ── Cancelar ────────────────────────────────────────────────────

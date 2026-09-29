@@ -1,4 +1,4 @@
-import type { Complexity, Fact, Run, Task } from "@/features/runs/types";
+import type { Complexity, Fact, Run, Task, TaskStatus } from "@/features/runs/types";
 
 /**
  * Solo los estados que el ejecutor sostiene hoy. No hay `paused` (no existe pausa real) ni
@@ -48,10 +48,13 @@ export interface MissionInput {
 /** Una fila de la lista, con el avance de su run activo. */
 export interface MissionSummary extends Mission {
   spentUsd: number;
-  tasksTotal: number;
-  tasksDone: number;
+  /** Las tareas del run activo sin contar al lead. */
+  workersTotal: number;
+  workersDone: number;
   /** A quién le tocó el lead (el ruteo puede haber elegido). */
   leadAgent: string | null;
+  /** El estado de la tarea del lead, aparte del avance. */
+  leadStatus: TaskStatus | null;
 }
 
 export interface MissionDetail {

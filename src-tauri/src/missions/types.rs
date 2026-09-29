@@ -75,10 +75,13 @@ pub struct MissionSummary {
     pub mission: Mission,
     /// Lo gastado por el run activo.
     pub spent_usd: f64,
-    pub tasks_total: i64,
-    pub tasks_done: i64,
+    /// Las tareas del run activo sin contar al lead.
+    pub workers_total: i64,
+    pub workers_done: i64,
     /// A quién le tocó el lead del run activo (el ruteo puede haber elegido).
     pub lead_agent: Option<String>,
+    /// El estado de la tarea del lead, aparte del avance.
+    pub lead_status: Option<String>,
 }
 
 /// La misión con su run activo: sus intentos, sus tareas y sus hechos.

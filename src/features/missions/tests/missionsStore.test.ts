@@ -39,8 +39,8 @@ function mission(patch: Partial<Mission> = {}): Mission {
   };
 }
 
-const summary = (patch: Partial<Mission> = {}, tasks = { tasksDone: 0, tasksTotal: 0 }): MissionSummary => ({
-  ...mission(patch), spentUsd: 0, leadAgent: null, ...tasks,
+const summary = (patch: Partial<Mission> = {}, tasks = { workersDone: 0, workersTotal: 0 }): MissionSummary => ({
+  ...mission(patch), spentUsd: 0, leadAgent: null, leadStatus: null, ...tasks,
 });
 
 const detail = (patch: Partial<Mission> = {}): MissionDetail => ({ mission: mission(patch), runs: [], tasks: [], facts: [] });
@@ -51,7 +51,7 @@ const input: MissionInput = {
 };
 
 /** Lo que la base tiene "ahora": lo que devuelven list/get. */
-function backend(status: MissionStatus, tasks = { tasksDone: 0, tasksTotal: 0 }) {
+function backend(status: MissionStatus, tasks = { workersDone: 0, workersTotal: 0 }) {
   const runId = status === "draft" ? null : "r1";
   m.listMissions.mockResolvedValue([summary({ status, activeRunId: runId }, tasks)]);
   m.getMission.mockResolvedValue(detail({ status, activeRunId: runId }));
@@ -94,11 +94,11 @@ describe("missions store", () => {
 
   it("start pasa a running con su run", async () => {
     m.startMission.mockResolvedValue(mission({ status: "running", activeRunId: "r1" }));
-    backend("running", { tasksDone: 0, tasksTotal: 1 });
+    backend("running", { workersDone: 0, workersTotal: 1 });
     const started = await useMissionsStore.getState().start("w", "m1");
     expect(started.status).toBe("running");
     const s = useMissionsStore.getState();
-    expect(s.missions[0]).toMatchObject({ status: "running", activeRunId: "r1", tasksTotal: 1 });
+    expect(s.missions[0]).toMatchObject({ status: "running", activeRunId: "r1", workersTotal: 1 });
     expect(s.details.m1.mission.activeRunId).toBe("r1");
   });
 
@@ -133,12 +133,12 @@ describe("missions store", () => {
   });
 
   it("un evento de tarea actualiza el avance y el estado", async () => {
-    backend("running", { tasksDone: 1, tasksTotal: 3 });
+    backend("running", { workersDone: 1, workersTotal: 3 });
     await useMissionsStore.getState().onTaskChanged("w", "m1");
-    backend("done", { tasksDone: 3, tasksTotal: 3 });
+    backend("done", { workersDone: 3, workersTotal: 3 });
     await useMissionsStore.getState().onTaskChanged("w", "m1");
     const s = useMissionsStore.getState();
-    expect(s.missions[0]).toMatchObject({ status: "done", tasksDone: 3 });
+    expect(s.missions[0]).toMatchObject({ status: "done", workersDone: 3 });
     expect(s.details.m1.mission.status).toBe("done");
   });
 
@@ -174,7 +174,7 @@ describe("cc-mission-changed", () => {
     await useMissionsStore.getState().loadDetail("m1");
 
     // Otra ventana apretó "Iniciar": acá solo llega el evento.
-    backend("running", { tasksDone: 0, tasksTotal: 1 });
+    backend("running", { workersDone: 0, workersTotal: 1 });
     await useMissionsStore.getState().onMissionChanged("w", "m1", "m1");
     const s = useMissionsStore.getState();
     expect(s.missions[0]).toMatchObject({ status: "running", activeRunId: "r1" });

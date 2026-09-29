@@ -4,7 +4,7 @@ import type { PendingApproval, Task, TaskStatus } from "@/features/runs/types";
 
 import {
   agentStateOf, approvalsFor, blockedRuns, canEdit, countAgentStates, dependencyLabels, emptyForm, formFromMission,
-  missingFields, missionAction, missionPhase, parseBudget, progressOf, toInput,
+  missingFields, missionAction, missionPhase, parseBudget, progressOf, toInput, workersOf,
 } from "../missionView";
 import type { Mission, MissionStatus } from "../types";
 
@@ -93,12 +93,35 @@ describe("missionAction / canEdit", () => {
 });
 
 describe("progressOf", () => {
-  it("sin tareas no hay avance que mostrar", () => {
-    expect(progressOf({ tasksDone: 0, tasksTotal: 0 })).toBeNull();
+  it("un borrador no tiene avance que mostrar", () => {
+    expect(progressOf({ workersDone: 0, workersTotal: 0, leadStatus: null })).toBeNull();
   });
 
-  it("cuenta las listas sobre el total", () => {
-    expect(progressOf({ tasksDone: 3, tasksTotal: 5 })).toEqual({ done: 3, total: 5 });
+  it("sin workers todavía, el lead está planificando", () => {
+    for (const leadStatus of ["pending", "ready", "running"] as TaskStatus[]) {
+      expect(progressOf({ workersDone: 0, workersTotal: 0, leadStatus })).toEqual({ kind: "planning" });
+    }
+  });
+
+  it("el lead no cuenta: el avance es de los workers", () => {
+    expect(progressOf({ workersDone: 1, workersTotal: 2, leadStatus: "running" }))
+      .toEqual({ kind: "workers", done: 1, total: 2 });
+  });
+
+  it("terminada: los workers completados sobre el total", () => {
+    expect(progressOf({ workersDone: 2, workersTotal: 2, leadStatus: "done" }))
+      .toEqual({ kind: "workers", done: 2, total: 2 });
+  });
+
+  it("un lead que terminó sin repartir no queda 'planificando'", () => {
+    expect(progressOf({ workersDone: 0, workersTotal: 0, leadStatus: "failed" })).toBeNull();
+  });
+
+  it("workersOf deja afuera al lead", () => {
+    const lead = { id: "l", role: "lead" } as Task;
+    const w = { id: "w", role: "worker" } as Task;
+    const manual = { id: "m", role: null } as Task;
+    expect(workersOf([lead, w, manual]).map((t) => t.id)).toEqual(["w", "m"]);
   });
 });
 
