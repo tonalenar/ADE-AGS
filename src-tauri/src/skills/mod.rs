@@ -32,7 +32,11 @@ pub use bundled::ensure_bundled_skills;
 pub(crate) use frontmatter::{rename_in_content, scan_frontmatter_for_marketplace};
 pub use install::*;
 pub use links::*;
-pub(crate) use mount::{is_mount, mount_dir, points_inside, remove_mount, same_path};
+pub(crate) use mount::{is_mount, mount_dir, points_inside, remove_mount};
+// Los tests comparan el destino del montaje. El resto del crate importa `same_path`
+// directo de `mount`, así que este reexport solo existe cuando se compilan los tests.
+#[cfg(test)]
+pub(crate) use mount::same_path;
 pub use sessions::*;
 pub use settings::*;
 pub use store::*;
