@@ -41,6 +41,8 @@ export interface Task {
   resultSchema: string | null;
   /** Por qué falló el intento anterior. */
   lastError: string | null;
+  /** Lo que dejó el agente anterior si la tarea cambió de manos. `null` = nunca cambió. */
+  handoff: string | null;
   /** Las tareas que tienen que terminar bien antes de que esta arranque. */
   dependsOn: string[];
   startedAt: number | null;
@@ -69,6 +71,8 @@ export interface Run {
   spentUsd: number;
   createdAt: number;
   endedAt: number | null;
+  /** La misión que este run intenta cumplir. `null` = lanzado a mano desde la flota. */
+  missionId: string | null;
 }
 
 /** Algo que un agente del run les dejó escrito a los demás. */

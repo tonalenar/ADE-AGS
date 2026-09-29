@@ -37,7 +37,7 @@ import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
 
 /** Las rutas que se muestran como modal encima de las terminales en vez de reemplazarlas. */
-const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/forge"];
+const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/missions", "/forge"];
 
 function toFrontendTab(row: RestoredTabRow): Tab {
   return {

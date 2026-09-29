@@ -1,6 +1,6 @@
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button, Badge, BoxIcon, ClockIcon, CloudIcon, GearIcon, NetworkIcon, StackIcon, Tooltip, UserIcon } from "neogestify-ui-components";
+import { Button, Badge, BoxIcon, ClockIcon, CloudIcon, GearIcon, LocationIcon, NetworkIcon, StackIcon, Tooltip, UserIcon } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
 import { shortcutForPath } from "@/app/shortcuts";
@@ -108,6 +108,10 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
         onClick={() => navigate("/fleet")}
       >
         <NetworkIcon className="w-[18px] h-[18px]" />
+      </RailButton>
+
+      <RailButton label={t("sidebar.missions")} path="/missions" active={on("/missions")} onClick={() => navigate("/missions")}>
+        <LocationIcon className="w-[18px] h-[18px]" />
       </RailButton>
 
       <RailButton label={t("sidebar.forge")} path="/forge" active={on("/forge")} onClick={() => navigate("/forge")}>
