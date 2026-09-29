@@ -26,3 +26,10 @@ mod util;
 mod window;
 
 pub use app::run;
+
+// Sin este manifiesto el harness de `cargo test` no arranca en Windows:
+// importa TaskDialogIndirect y el loader, sin Common Controls 6, cae en
+// comctl32 v5 (STATUS_ENTRYPOINT_NOT_FOUND). La app ya lo trae por tauri-build.
+#[cfg(all(windows, test))]
+#[link(name = "ade_test_manifest", kind = "static", modifiers = "+whole-archive")]
+unsafe extern "C" {}

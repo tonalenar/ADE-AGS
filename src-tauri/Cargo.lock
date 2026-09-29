@@ -608,6 +608,7 @@ dependencies = [
  "block2",
  "bytes",
  "cairo-rs",
+ "cc",
  "dirs 5.0.1",
  "futures-util",
  "http-body-util",
