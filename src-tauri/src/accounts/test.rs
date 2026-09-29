@@ -2,7 +2,7 @@
 
 use std::path::Path;
 
-use super::profiles::{read_identity, spec_for, system_marker_root, ProfileSpec};
+use super::profiles::{default_dir, read_identity, spec_for, system_marker_root, ProfileSpec};
 use super::store::validate_name;
 
 /// Un directorio propio por test, que se borra solo.
@@ -101,4 +101,51 @@ fn la_cuenta_principal_de_claude_se_lee_desde_el_home() {
     // Las demás siguen buscando en su propio directorio.
     let codex_dir = home.path().join(".codex");
     assert_eq!(system_marker_root(spec("codex"), home.path(), &codex_dir), codex_dir);
+}
+
+/// El directorio de la cuenta del sistema sale del perfil declarado.
+///
+/// Antes, `default_dir` hacía `match` sobre el nombre de la variable y cualquier nombre
+/// que no fuera `CODEX_HOME` o `XDG_DATA_HOME` caía en `~/.claude`. Una TUI nueva habría
+/// leído y escrito el login de Claude sin que el compilador se quejara.
+#[test]
+fn el_home_por_defecto_no_cae_en_claude() {
+    use crate::agents::{agent_def, DefaultHome, SystemMarkerRoot, AGENTS};
+
+    let home = dirs::home_dir().expect("home");
+
+    let claude = agent_def("claude-code").unwrap().profile.unwrap();
+    assert_eq!(claude.default_home, DefaultHome::HomeDot(".claude"));
+    assert_eq!(claude.system_marker, SystemMarkerRoot::UserHome);
+    assert_eq!(default_dir(spec("claude-code")).unwrap(), home.join(".claude"));
+
+    let codex = agent_def("codex").unwrap().profile.unwrap();
+    assert_eq!(codex.default_home, DefaultHome::HomeDot(".codex"));
+    assert_eq!(codex.system_marker, SystemMarkerRoot::DefaultDir);
+    assert_eq!(default_dir(spec("codex")).unwrap(), home.join(".codex"));
+
+    let opencode = agent_def("opencode").unwrap().profile.unwrap();
+    assert_eq!(opencode.default_home, DefaultHome::XdgDataHome);
+    assert_eq!(opencode.system_marker, SystemMarkerRoot::DefaultDir);
+    let xdg = std::env::var_os("XDG_DATA_HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| home.join(".local/share"));
+    assert_eq!(default_dir(spec("opencode")).unwrap(), xdg);
+
+    for def in AGENTS {
+        let Some(profile) = def.profile else { continue };
+        if def.id == "claude-code" {
+            continue;
+        }
+        assert_ne!(
+            profile.default_home,
+            DefaultHome::HomeDot(".claude"),
+            "{} no puede heredar el directorio de Claude",
+            def.id
+        );
+    }
+
+    // Gemini y Kimi siguen sin perfil: no hay variable verificada que mueva su login.
+    assert!(agent_def("gemini-cli").unwrap().profile.is_none());
+    assert!(agent_def("kimi-code").unwrap().profile.is_none());
 }

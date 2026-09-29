@@ -39,6 +39,29 @@ pub enum SessionSource {
     None,
 }
 
+/// Dónde vive la cuenta del sistema cuando nadie le apunta la variable a otro lado.
+///
+/// Es un enum a propósito: el `match` viejo tenía `_ => ~/.claude`, y cualquier variable
+/// que no estuviera escrita a mano heredaba el directorio de Claude. Un perfil nuevo tiene
+/// que elegir una variante. No hay rama por defecto.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum DefaultHome {
+    /// `<home>/<name>`. `.claude` y `.codex` son los dos casos verificados.
+    HomeDot(&'static str),
+    /// `XDG_DATA_HOME` si está definida en el momento de leer; si no, `<home>/.local/share`.
+    /// El marcador de OpenCode ya incluye el subdirectorio `opencode/`.
+    XdgDataHome,
+}
+
+/// Desde dónde se lee el marcador de login de la cuenta del sistema.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SystemMarkerRoot {
+    /// El mismo directorio que resuelve [`DefaultHome`].
+    DefaultDir,
+    /// El home del usuario. Claude guarda `.claude.json` al lado de `~/.claude`, no adentro.
+    UserHome,
+}
+
 /// Cómo se aísla el perfil de una TUI para tener varias cuentas.
 ///
 /// Solo se declara para las TUIs donde el aislamiento se verificó de verdad. Una TUI sin
@@ -56,6 +79,10 @@ pub struct ProfileDef {
     /// Ruta de claves dentro de ese JSON hasta el identificador de la cuenta. Vacío = esa
     /// TUI no expone quién está logueado y solo se puede saber SI lo está.
     pub label_path: &'static [&'static str],
+    /// Directorio de la cuenta del sistema. No se infiere de `env_var`.
+    pub default_home: DefaultHome,
+    /// Dónde buscar el marcador de esa cuenta del sistema.
+    pub system_marker: SystemMarkerRoot,
 }
 
 /// Cómo recibe una TUI el servidor MCP que le enchufa la app (el navegador y la
@@ -164,6 +191,9 @@ pub const AGENTS: &[AgentDef] = &[
             // Existe desde el primer arranque, así que su MERA existencia no prueba
             // login; `oauthAccount.emailAddress` sí, y de paso es lo que se muestra.
             label_path: &["oauthAccount", "emailAddress"],
+            default_home: DefaultHome::HomeDot(".claude"),
+            // Sin CLAUDE_CONFIG_DIR el `.claude.json` está en el home, al lado de `~/.claude`.
+            system_marker: SystemMarkerRoot::UserHome,
         }),
         resume: Some("--resume {session}"),
         sessions: SessionSource::ClaudeProjects,
@@ -194,6 +224,8 @@ pub const AGENTS: &[AgentDef] = &[
             login_command: "codex login",
             marker: "auth.json",
             label_path: &[],
+            default_home: DefaultHome::HomeDot(".codex"),
+            system_marker: SystemMarkerRoot::DefaultDir,
         }),
         resume: Some("resume {session}"),
         sessions: SessionSource::CodexRollouts,
@@ -216,6 +248,8 @@ pub const AGENTS: &[AgentDef] = &[
             login_command: "opencode auth login",
             marker: "opencode/auth.json",
             label_path: &[],
+            default_home: DefaultHome::XdgDataHome,
+            system_marker: SystemMarkerRoot::DefaultDir,
         }),
         resume: Some("--session {session}"),
         sessions: SessionSource::ProcessQuery,

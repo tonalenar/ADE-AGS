@@ -1,6 +1,6 @@
 # Provider architecture
 
-Proposta para evoluir o registry atual até algo no formato `AgentProvider` / `AgentAdapter`, sem reescrever a app. Nada disto está implementado nesta etapa.
+Proposta para evoluir o registry atual até algo no formato `AgentProvider` / `AgentAdapter`, sem reescrever a app. A fase A está no código. As fases B–E continuam proposta. Gemini segue com `profile: None`.
 
 ## O que já é um provider, sem esse nome
 
@@ -11,7 +11,7 @@ O que está espalhado, e é o problema real:
 | Capacidade | Onde vive hoje | Por que não cabe num campo a mais |
 |---|---|---|
 | Detectar binário e versão | `agents/detector.rs` | I/O, timeout, regra especial do shell |
-| Layout do home da conta | `match` em `accounts/profiles.rs` (`default_dir`, `system_marker_root`) | Claude guarda `.claude.json` no home, não dentro de `~/.claude`. OpenCode aninha `opencode/` debaixo do `XDG_DATA_HOME`. Gemini aninha `.gemini/` debaixo do `GEMINI_CLI_HOME` |
+| Layout do home da conta | `DefaultHome` e `SystemMarkerRoot` em `ProfileDef`. `default_dir` só lê esses campos | Claude guarda `.claude.json` no home, não dentro de `~/.claude`. OpenCode aninha `opencode/` debaixo do `XDG_DATA_HOME`. Gemini aninha `.gemini/` debaixo do `GEMINI_CLI_HOME` |
 | Achar e titular a sessão | `match` de `SessionSource` em `session/title.rs` | Cada CLI tem um formato. Gemini e Kimi ainda ignoram o diretório da conta |
 | Lançar headless e parsear eventos | trait `HeadlessAgent` + `match` em `adapter_for` | Argv e dialeto JSON são código |
 | Injetar o MCP da app | `McpStyle` + `ipc/mcp.rs` | Só dois estilos existem |
@@ -59,6 +59,8 @@ Mover o `match` de `default_dir` e `system_marker_root` para campos de `ProfileD
 Apagar o fallback `_ => home.join(".claude")`. Uma variável desconhecida tem que falhar na compilação ou no teste, não apontar a conta do Gemini para a pasta do Claude.
 
 Nenhum `id` novo. Nenhuma tela muda.
+
+Implementado. `default_dir` não faz mais `match` no nome da variável. Um perfil novo escolhe `DefaultHome` ou não compila. O teste `el_home_por_defecto_no_cae_en_claude` trava Claude, Codex e OpenCode e recusa `.claude` em qualquer outro perfil.
 
 ### Fase B — sessão honra o diretório da conta
 
