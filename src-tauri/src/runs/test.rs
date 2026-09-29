@@ -1083,7 +1083,7 @@ fn skills_montadas(proyecto: &Path, global: &Path) -> PathBuf {
     std::fs::write(global.join("git-helper/SKILL.md"), "---\nname: git-helper\n---\n").unwrap();
     let links = proyecto.join(".claude/skills");
     std::fs::create_dir_all(&links).unwrap();
-    symlink::symlink_auto(global.join("git-helper"), links.join("git-helper")).unwrap();
+    crate::skills::mount_dir(&global.join("git-helper"), &links.join("git-helper")).unwrap();
     links
 }
 
@@ -1095,8 +1095,16 @@ fn el_worktree_recibe_las_skills_que_tiene_el_proyecto_y_ninguna_otra() {
     let base = Tmp::new("base");
     let global = Tmp::new("global");
     let links = skills_montadas(&repo.0, &global.0);
-    // Un symlink del usuario, a otro lado: no es de la app y no se copia.
-    symlink::symlink_auto(repo.0.join("README.md"), links.join("mio")).unwrap();
+    // Un montaje del usuario, a otro lado: no es de la app y no se copia.
+    // Sin privilegio de symlink no se puede enlazar el archivo; un junction a otra
+    // carpeta es el mismo caso (un montaje que no apunta a la copia global).
+    match symlink::symlink_auto(repo.0.join("README.md"), links.join("mio")) {
+        Ok(()) => {}
+        Err(error) if error.raw_os_error() == Some(1314) => {
+            crate::skills::mount_dir(&repo.0.join("packages"), &links.join("mio")).unwrap();
+        }
+        Err(error) => panic!("{error}"),
+    }
 
     let wt = worktrees::create(&base.0, &repo.0, "x").unwrap();
     let task_links = wt.task_cwd.join(".claude/skills");

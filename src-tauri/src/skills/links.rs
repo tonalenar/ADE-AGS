@@ -14,15 +14,14 @@ use super::settings::skills_dir_from_conn;
 use super::store::{row_to_skill_info, SKILL_COLUMNS, SKILL_COLUMNS_QUALIFIED};
 use crate::util::now_ts;
 
+use super::mount::{is_mount, mount_dir, points_inside, remove_mount, same_path};
 use super::types::{SkillInfo, SymlinkHealthEntry};
 
 /// Remueve un symlink si existe, ignorando errores (ya borrado a mano, roto, etc.) —
 /// usado por delete_skill/detach_skill, donde una limpieza a medias no debe bloquear
 /// el resto de la operación.
 pub(super) fn remove_symlink_best_effort(path: &Path) {
-    if path.symlink_metadata().is_ok() {
-        let _ = symlink::remove_symlink_auto(path);
-    }
+    let _ = remove_mount(path);
 }
 
 /// Convención de path del symlink dentro del cwd de una tab, según el agente —
@@ -138,15 +137,15 @@ pub(crate) fn reconcile_link_dir(
     if let Ok(entries) = std::fs::read_dir(&dir) {
         for entry in entries.flatten() {
             let path = entry.path();
-            let Ok(meta) = path.symlink_metadata() else { continue };
-            if !meta.file_type().is_symlink() {
+            if !is_mount(&path) {
                 continue; // carpeta/archivo real del usuario
             }
             // `read_link` funciona igual con un symlink roto, así que uno colgado que
             // apunta a la copia global (skill borrada a mano) también se limpia acá.
+            // En Windows un junction no es `is_symlink`, pero sí es un montaje nuestro.
             let Ok(target) = std::fs::read_link(&path) else { continue };
-            if !target.starts_with(&skills_dir) {
-                continue; // symlink que no gestiona Control Code
+            if !points_inside(&target, &skills_dir) {
+                continue; // montaje que no gestiona Control Code
             }
             let name = entry.file_name().to_string_lossy().to_string();
             if !keep.contains(&name) {
@@ -281,9 +280,9 @@ pub(super) fn tabs_for_scope(
     }
 }
 
-/// Crea (idempotente) el symlink de `skill` en el cwd de una tab. No-op si ya apunta al
+/// Crea (idempotente) el montaje de `skill` en el cwd de una tab. No-op si ya apunta al
 /// `source_path` correcto; reemplaza si apunta a otro lado; error claro si el destino
-/// existe y no es un symlink (evita pisar un directorio/archivo real del usuario).
+/// existe y no es un symlink ni un junction (evita pisar un directorio/archivo real).
 pub(super) fn ensure_symlink(
     conn: &rusqlite::Connection,
     skill: &SkillInfo,
@@ -298,16 +297,16 @@ pub(super) fn ensure_symlink(
         return Ok(()); // agente sin carpeta de skills conocida ni declarada, se saltea
     };
 
-    if let Ok(meta) = link_path.symlink_metadata() {
-        if meta.file_type().is_symlink() {
+    if link_path.symlink_metadata().is_ok() {
+        if is_mount(&link_path) {
             let target = std::fs::read_link(&link_path).map_err(|e| e.to_string())?;
-            if target == Path::new(&skill.source_path) {
+            if same_path(&target, Path::new(&skill.source_path)) {
                 return Ok(()); // ya apunta donde debe
             }
             remove_symlink_best_effort(&link_path);
         } else {
             return Err(format!(
-                "{} ya existe y no es un symlink. Resolvé el conflicto manualmente antes de attachear la skill.",
+                "{} ya existe y no es un montaje de skill. Resolvé el conflicto manualmente antes de attachear la skill.",
                 link_path.display()
             ));
         }
@@ -316,7 +315,7 @@ pub(super) fn ensure_symlink(
     if let Some(parent) = link_path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
     }
-    symlink::symlink_dir(&skill.source_path, &link_path).map_err(|e| e.to_string())
+    mount_dir(Path::new(&skill.source_path), &link_path).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -479,10 +478,10 @@ pub fn check_symlinks_health(
 
             let issue = match link_path.symlink_metadata() {
                 Err(_) => Some("missing"),
-                Ok(meta) if !meta.file_type().is_symlink() => Some("stale_target"),
+                Ok(_) if !is_mount(&link_path) => Some("stale_target"),
                 Ok(_) => match std::fs::read_link(&link_path) {
                     Err(_) => Some("broken"),
-                    Ok(target) if target != Path::new(&skill.source_path) => Some("stale_target"),
+                    Ok(target) if !same_path(&target, Path::new(&skill.source_path)) => Some("stale_target"),
                     Ok(_) => None,
                 },
             };
