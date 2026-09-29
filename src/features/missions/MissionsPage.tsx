@@ -1,24 +1,28 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { Alert, AnimateSpin, Button, EmptyState, LocationIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
-import type { Task } from "@/features/runs/types";
+import { PermissionCard } from "@/features/runs/PermissionCard";
+import { useRunsStore } from "@/features/runs/store";
+import type { PendingApproval, Task } from "@/features/runs/types";
 
 import { MissionDialog } from "./MissionDialog";
 import {
-  AGENT_STATES, agentStateOf, canEdit, countAgentStates, dependencyLabels, emptyForm, formFromMission, missionAction, progressOf,
+  AGENT_STATES, agentStateOf, approvalsFor, blockedRuns, canEdit, countAgentStates, dependencyLabels, emptyForm,
+  formFromMission, missionAction, missionPhase, progressOf, type MissionPhase,
 } from "./missionView";
 import { useMissionsStore } from "./store";
-import type { MissionDetail, MissionStatus, MissionSummary } from "./types";
+import type { MissionDetail, MissionSummary } from "./types";
 
 /** El evento del supervisor cuando cambia una tarea. Debe coincidir con `runs/supervisor.rs`. */
 const TASK_CHANGED = "cc-task-changed";
 
-const STATUS_TONE: Record<MissionStatus, string> = {
+const STATUS_TONE: Record<MissionPhase, string> = {
   draft: "bg-gray-200 text-gray-700 dark:bg-white/10 dark:text-white/60",
   running: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
+  waiting_approval: "bg-amber-500/20 text-amber-800 dark:text-amber-300",
   done: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
   failed: "bg-red-500/15 text-red-700 dark:text-red-300",
   cancelled: "bg-gray-200 text-gray-500 dark:bg-white/8 dark:text-white/40",
@@ -68,6 +72,16 @@ export function MissionsPage() {
   const summary = missions.find((m) => m.id === selected) ?? null;
   const detail = selected ? details[selected] ?? null : null;
 
+  // La cola de permisos es la de la flota (la mantiene `useFleetEvents` desde el shell):
+  // decidir acá o allá es lo mismo, y los dos lados se enteran por el mismo evento.
+  const approvals = useRunsStore((s) => s.approvals);
+  const fleetTasks = useRunsStore((s) => s.tasks);
+  const blocked = useMemo(
+    () => blockedRuns(approvals, detail ? [...fleetTasks, ...detail.tasks] : fleetTasks),
+    [approvals, fleetTasks, detail]
+  );
+  const waiting = (m: { activeRunId: string | null }) => m.activeRunId !== null && blocked.has(m.activeRunId);
+
   return (
     <div className="flex flex-col h-full min-h-0">
       <div className="flex items-center gap-2 h-[54px] shrink-0 pl-4 pr-14 border-b border-gray-200 dark:border-white/8">
@@ -97,7 +111,13 @@ export function MissionsPage() {
             />
           ) : (
             missions.map((m) => (
-              <MissionRow key={m.id} mission={m} active={m.id === selected} onSelect={() => setSelected(m.id)} />
+              <MissionRow
+                key={m.id}
+                mission={m}
+                phase={missionPhase(m.status, waiting(m))}
+                active={m.id === selected}
+                onSelect={() => setSelected(m.id)}
+              />
             ))
           )}
         </div>
@@ -107,6 +127,7 @@ export function MissionsPage() {
             <MissionDetailView
               summary={summary}
               detail={detail}
+              approvals={approvalsFor(approvals, detail.tasks)}
               onEdit={() => setDialog("edit")}
               onError={setError}
             />
@@ -136,11 +157,11 @@ export function MissionsPage() {
   );
 }
 
-function StatusBadge({ status }: { status: MissionStatus }) {
+function StatusBadge({ phase }: { phase: MissionPhase }) {
   const { t } = useTranslation();
   return (
-    <span className={`shrink-0 px-1.5 h-[18px] inline-flex items-center rounded text-[10px] font-medium ${STATUS_TONE[status]}`}>
-      {t(`missions.status.${status}`)}
+    <span className={`shrink-0 px-1.5 h-[18px] inline-flex items-center rounded text-[10px] font-medium ${STATUS_TONE[phase]}`}>
+      {t(`missions.status.${phase}`)}
     </span>
   );
 }
@@ -149,7 +170,12 @@ function folderName(path: string): string {
   return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
 }
 
-function MissionRow({ mission, active, onSelect }: { mission: MissionSummary; active: boolean; onSelect: () => void }) {
+function MissionRow({ mission, phase, active, onSelect }: {
+  mission: MissionSummary;
+  phase: MissionPhase;
+  active: boolean;
+  onSelect: () => void;
+}) {
   const { t } = useTranslation();
   const progress = progressOf(mission);
   const lead = mission.leadAgent ?? mission.leadAgentId;
@@ -163,7 +189,7 @@ function MissionRow({ mission, active, onSelect }: { mission: MissionSummary; ac
     >
       <span className="flex items-center gap-2 min-w-0">
         <span className="flex-1 truncate text-[12px] font-medium text-gray-900 dark:text-gray-100">{mission.title}</span>
-        <StatusBadge status={mission.status} />
+        <StatusBadge phase={phase} />
       </span>
       <span className="flex items-center gap-2 min-w-0 text-[10.5px] text-gray-400 dark:text-white/35">
         <span className="truncate font-mono" title={mission.cwd}>{folderName(mission.cwd)}</span>
@@ -182,20 +208,26 @@ function MissionRow({ mission, active, onSelect }: { mission: MissionSummary; ac
   );
 }
 
-function MissionDetailView({ summary, detail, onEdit, onError }: {
+function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
   summary: MissionSummary;
   detail: MissionDetail;
+  /** Los permisos que esperan en las tareas de su run activo. */
+  approvals: PendingApproval[];
   onEdit: () => void;
   onError: (e: string) => void;
 }) {
   const { t } = useTranslation();
   const workspaceId = useTabsStore((s) => s.workspaceId);
+  const decideApproval = useRunsStore((s) => s.decideApproval);
   const [busy, setBusy] = useState(false);
   const { mission, tasks, facts, runs } = detail;
   const run = runs.find((r) => r.id === mission.activeRunId) ?? null;
   const lead = tasks.find((tk) => tk.role === "lead") ?? null;
   const action = missionAction(mission.status);
-  const counts = countAgentStates(tasks);
+  const blockedTasks = useMemo(() => new Set(approvals.map((a) => a.taskId)), [approvals]);
+  const phase = missionPhase(mission.status, approvals.length > 0);
+  const counts = countAgentStates(tasks, blockedTasks);
+  const firstApproval = approvals[0]?.id ?? null;
 
   const act = async (kind: "start" | "cancel") => {
     if (!workspaceId) return;
@@ -226,7 +258,7 @@ function MissionDetailView({ summary, detail, onEdit, onError }: {
         <div className="flex-1 min-w-0 flex flex-col gap-1">
           <span className="flex items-center gap-2">
             <h2 className="truncate text-[15px] font-semibold text-gray-900 dark:text-white">{mission.title}</h2>
-            <StatusBadge status={mission.status} />
+            <StatusBadge phase={phase} />
           </span>
           <span className="truncate font-mono text-[10.5px] text-gray-400 dark:text-white/35">{mission.cwd}</span>
         </div>
@@ -247,6 +279,9 @@ function MissionDetailView({ summary, detail, onEdit, onError }: {
       </div>
 
       {mission.status === "draft" && <Alert variant="info">{t("missions.draftNotice")}</Alert>}
+      {phase === "waiting_approval" && (
+        <Alert variant="warning">{t("missions.waitingNotice", { count: approvals.length })}</Alert>
+      )}
 
       <Section title={t("missions.detail.objective")}>
         <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-gray-700 dark:text-gray-300">{mission.objective}</p>
@@ -281,7 +316,22 @@ function MissionDetailView({ summary, detail, onEdit, onError }: {
       {tasks.length > 0 && (
         <Section title={t("missions.detail.tasks")}>
           <ul className="flex flex-col divide-y divide-gray-100 dark:divide-white/5 rounded-lg border border-gray-200 dark:border-white/8">
-            {tasks.map((task) => <TaskRow key={task.id} task={task} tasks={tasks} />)}
+            {tasks.map((task) => {
+              const approval = approvals.find((a) => a.taskId === task.id);
+              return (
+                <TaskRow
+                  key={task.id}
+                  task={task}
+                  tasks={tasks}
+                  blocked={blockedTasks}
+                  approval={approval}
+                  focused={approval?.id === firstApproval}
+                  onDecide={(allow, remember) => {
+                    if (approval) decideApproval(approval.id, allow, remember).catch((e) => onError(String(e)));
+                  }}
+                />
+              );
+            })}
           </ul>
         </Section>
       )}
@@ -302,10 +352,17 @@ function MissionDetailView({ summary, detail, onEdit, onError }: {
   );
 }
 
-function TaskRow({ task, tasks }: { task: Task; tasks: Task[] }) {
+function TaskRow({ task, tasks, blocked, approval, focused, onDecide }: {
+  task: Task;
+  tasks: Task[];
+  blocked: ReadonlySet<string>;
+  approval?: PendingApproval;
+  focused: boolean;
+  onDecide: (allow: boolean, remember: boolean) => void;
+}) {
   const { t } = useTranslation();
   const deps = dependencyLabels(task, tasks);
-  const state = agentStateOf(task);
+  const state = agentStateOf(task, tasks, blocked);
   const outcome = task.error ?? task.result;
   return (
     <li className="flex flex-col gap-1 px-3 py-2">
@@ -318,7 +375,7 @@ function TaskRow({ task, tasks }: { task: Task; tasks: Task[] }) {
         <span className="shrink-0 text-[10.5px] text-gray-400 dark:text-white/35">
           {task.agentId}{task.model ? ` · ${task.model}` : ""}
         </span>
-        <span className="shrink-0 text-[10.5px] text-gray-500 dark:text-white/45">{t(`fleet.status.${task.status}`)}</span>
+        <span className="shrink-0 text-[10.5px] text-gray-500 dark:text-white/45">{t(`missions.state.${state}`)}</span>
         {task.costUsd !== null && <span className="shrink-0 tabular-nums text-[10.5px] text-gray-400">${task.costUsd.toFixed(3)}</span>}
       </span>
       {deps.length > 0 && (
@@ -333,12 +390,19 @@ function TaskRow({ task, tasks }: { task: Task; tasks: Task[] }) {
           {outcome}
         </p>
       )}
+      {approval && (
+        <div className="-mx-3 -mb-2 pt-1">
+          <PermissionCard approval={approval} focused={focused} onDecide={onDecide} />
+        </div>
+      )}
     </li>
   );
 }
 
 const STATE_DOT = {
   working: "bg-emerald-500 animate-pulse",
+  waiting_approval: "bg-amber-500 animate-pulse",
+  waiting_deps: "bg-gray-400",
   queued: "bg-amber-400",
   done: "bg-blue-500",
   failed: "bg-red-500",

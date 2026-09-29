@@ -2,7 +2,7 @@
  * Las piezas puras de la pantalla de misiones: qué acción ofrece cada estado, el avance,
  * el formulario. Sin React, para poder probarlas.
  */
-import type { Complexity, Task } from "@/features/runs/types";
+import type { Complexity, PendingApproval, Task } from "@/features/runs/types";
 
 import type { Mission, MissionInput, MissionStatus } from "./types";
 
@@ -29,17 +29,28 @@ export function progressOf(s: { tasksDone: number; tasksTotal: number }): { done
   return s.tasksTotal > 0 ? { done: s.tasksDone, total: s.tasksTotal } : null;
 }
 
-export type AgentState = "working" | "queued" | "done" | "failed" | "stopped";
+/**
+ * Lo que está haciendo cada agente, derivado de su tarea y de la cola de permisos. Es
+ * estado de pantalla: en la base la tarea sigue `running` o `pending`.
+ */
+export type AgentState = "working" | "waiting_approval" | "waiting_deps" | "queued" | "done" | "failed" | "stopped";
 
-export const AGENT_STATES: AgentState[] = ["working", "queued", "done", "failed", "stopped"];
+export const AGENT_STATES: AgentState[] = ["working", "waiting_approval", "waiting_deps", "queued", "done", "failed", "stopped"];
 
-export function agentStateOf(task: Task): AgentState {
+/**
+ * `blocked` = ids de tareas con un permiso esperando. `tasks` son las del mismo run, para
+ * saber si una pendiente espera a otra o solo un lugar libre.
+ */
+export function agentStateOf(task: Task, tasks: Task[] = [], blocked: ReadonlySet<string> = new Set()): AgentState {
+  if (blocked.has(task.id)) return "waiting_approval";
   switch (task.status) {
     case "ready":
     case "running":
       return "working";
-    case "pending":
-      return "queued";
+    case "pending": {
+      const unfinished = task.dependsOn.some((id) => tasks.find((t) => t.id === id)?.status !== "done");
+      return unfinished ? "waiting_deps" : "queued";
+    }
     case "done":
       return "done";
     case "failed":
@@ -51,10 +62,38 @@ export function agentStateOf(task: Task): AgentState {
 }
 
 /** Cuántas tareas del run activo hay en cada estado. */
-export function countAgentStates(tasks: Task[]): Record<AgentState, number> {
-  const counts: Record<AgentState, number> = { working: 0, queued: 0, done: 0, failed: 0, stopped: 0 };
-  for (const t of tasks) counts[agentStateOf(t)] += 1;
+export function countAgentStates(tasks: Task[], blocked: ReadonlySet<string> = new Set()): Record<AgentState, number> {
+  const counts = Object.fromEntries(AGENT_STATES.map((s) => [s, 0])) as Record<AgentState, number>;
+  for (const t of tasks) counts[agentStateOf(t, tasks, blocked)] += 1;
   return counts;
+}
+
+// ── Permisos ───────────────────────────────────────────────────
+// La cola es la del broker, la misma que ve la flota (`useRunsStore.approvals`): acá solo
+// se filtra, nunca se copia.
+
+/** Los permisos que esperan en estas tareas, el más viejo primero. */
+export function approvalsFor(approvals: PendingApproval[], tasks: Task[]): PendingApproval[] {
+  const ids = new Set(tasks.map((t) => t.id));
+  return approvals.filter((a) => ids.has(a.taskId)).sort((a, b) => a.askedAt - b.askedAt);
+}
+
+/** Los runs que tienen alguna tarea esperando un permiso. */
+export function blockedRuns(approvals: PendingApproval[], tasks: Task[]): Set<string> {
+  const runOf = new Map(tasks.map((t) => [t.id, t.runId]));
+  const runs = new Set<string>();
+  for (const a of approvals) {
+    const run = runOf.get(a.taskId);
+    if (run) runs.add(run);
+  }
+  return runs;
+}
+
+/** Lo que se muestra como estado: el de la base, salvo una misión en curso que espera a alguien. */
+export type MissionPhase = MissionStatus | "waiting_approval";
+
+export function missionPhase(status: MissionStatus, waitingApproval: boolean): MissionPhase {
+  return status === "running" && waitingApproval ? "waiting_approval" : status;
 }
 
 /** Los nombres de las tareas de las que depende, como las nombra el plan. */

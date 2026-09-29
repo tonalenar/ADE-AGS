@@ -1,10 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import type { Task, TaskStatus } from "@/features/runs/types";
+import type { PendingApproval, Task, TaskStatus } from "@/features/runs/types";
 
 import {
-  agentStateOf, canEdit, countAgentStates, dependencyLabels, emptyForm, formFromMission, missingFields,
-  missionAction, parseBudget, progressOf, toInput,
+  agentStateOf, approvalsFor, blockedRuns, canEdit, countAgentStates, dependencyLabels, emptyForm, formFromMission,
+  missingFields, missionAction, missionPhase, parseBudget, progressOf, toInput,
 } from "../missionView";
 import type { Mission, MissionStatus } from "../types";
 
@@ -116,7 +116,7 @@ describe("estado de los agentes", () => {
       task({ id: "a", status: "running" }), task({ id: "b", status: "pending" }),
       task({ id: "c", status: "pending" }), task({ id: "d", status: "done" }),
     ]);
-    expect(counts).toEqual({ working: 1, queued: 2, done: 1, failed: 0, stopped: 0 });
+    expect(counts).toEqual({ working: 1, waiting_approval: 0, waiting_deps: 0, queued: 2, done: 1, failed: 0, stopped: 0 });
   });
 
   it("nombra las dependencias por su clave del plan", () => {
@@ -126,6 +126,54 @@ describe("estado de los agentes", () => {
       task({ id: "c", dependsOn: ["a", "b", "desconocida-123"] }),
     ];
     expect(dependencyLabels(tasks[2], tasks)).toEqual(["tests", "sin clave", "desconoc"]);
+  });
+});
+
+describe("permisos en la misión", () => {
+  const approval = (id: string, taskId: string, askedAt = 0): PendingApproval => ({
+    id, taskId, toolName: "Bash", input: { command: "ls" }, askedAt, suggestedRule: null,
+  });
+
+  it("una tarea con un permiso esperando está bloqueada, no trabajando", () => {
+    const t1 = task({ id: "t1", status: "running" });
+    expect(agentStateOf(t1, [t1], new Set(["t1"]))).toBe("waiting_approval");
+    expect(agentStateOf(t1, [t1])).toBe("working");
+  });
+
+  it("una pendiente distingue esperar dependencias de esperar lugar", () => {
+    const a = task({ id: "a", status: "running" });
+    const b = task({ id: "b", status: "pending", dependsOn: ["a"] });
+    const c = task({ id: "c", status: "pending" });
+    expect(agentStateOf(b, [a, b, c])).toBe("waiting_deps");
+    expect(agentStateOf(c, [a, b, c])).toBe("queued");
+    expect(agentStateOf(b, [{ ...a, status: "done" }, b])).toBe("queued");
+  });
+
+  it("filtra la cola de la flota a las tareas de la misión, la más vieja primero", () => {
+    const mine = [task({ id: "t1" }), task({ id: "t2" })];
+    const queue = [approval("x", "otra"), approval("b", "t2", 5), approval("a", "t1", 1)];
+    expect(approvalsFor(queue, mine).map((a) => a.id)).toEqual(["a", "b"]);
+  });
+
+  it("sabe qué runs tienen a alguien esperando", () => {
+    const tasks = [task({ id: "t1", runId: "r1" }), task({ id: "t2", runId: "r2" })];
+    expect([...blockedRuns([approval("a", "t2")], tasks)]).toEqual(["r2"]);
+    expect(blockedRuns([], tasks).size).toBe(0);
+  });
+
+  it("una misión en curso que espera se muestra así, sin cambiar su estado", () => {
+    expect(missionPhase("running", true)).toBe("waiting_approval");
+    expect(missionPhase("running", false)).toBe("running");
+    expect(missionPhase("done", true)).toBe("done");
+  });
+
+  it("decidir saca el bloqueo: sin el permiso, vuelve a trabajando", () => {
+    const t1 = task({ id: "t1", status: "running" });
+    const queue = [approval("a", "t1")];
+    const before = new Set(approvalsFor(queue, [t1]).map((a) => a.taskId));
+    expect(countAgentStates([t1], before).waiting_approval).toBe(1);
+    const after = new Set(approvalsFor([], [t1]).map((a) => a.taskId));
+    expect(countAgentStates([t1], after)).toMatchObject({ waiting_approval: 0, working: 1 });
   });
 });
 
