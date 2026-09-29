@@ -83,7 +83,9 @@ trait AgentAdapter {
 
 ### Fase D — Gemini é o primeiro provider novo de verdade
 
-Só depois de A e B. Aí sim `profile: Some` para `gemini-cli`. A UI, o SQLite, o PTY e a frota já ligam sozinhos: `supports_accounts` é `profile.is_some()`, e `env_for_account` já devolve `{ env_var: dir }`.
+Não implementada. Em 2026-09-29 o comando `gemini` não estava instalado nesta máquina, e `%USERPROFILE%\.gemini` é estado do Antigravity, não um home do Gemini CLI. O registro segue com `profile: None`. Detalhe em [GEMINI_MULTI_ACCOUNT.md](./GEMINI_MULTI_ACCOUNT.md).
+
+Só depois de A e B, e só depois do ensaio real de duas contas. Aí sim `profile: Some` para `gemini-cli`. A UI, o SQLite, o PTY e a frota já ligam sozinhos: `supports_accounts` é `profile.is_some()`, e `env_for_account` já devolve `{ env_var: dir }`.
 
 Contrato que o código de hoje não expressa, verificado na documentação e nas issues do Gemini CLI, não num teste deste repo:
 
@@ -115,4 +117,4 @@ Custom agents passam a ser um provider com capabilities opcionais, não um segun
 
 1. Fase A, com teste que falha se uma variável nova cair em `~/.claude`.
 2. Fase B, com teste de sessão Gemini num diretório que não é o home.
-3. Fase D, atrás de uma verificação manual do marcador no `gemini` desta máquina. Se o binário não estiver instalado, a fase D espera. A e B não dependem dele.
+3. Fase D, atrás de uma verificação manual do marcador no `gemini` desta máquina. O binário não está instalado; a fase D espera. A e B não dependem dele.
