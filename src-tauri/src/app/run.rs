@@ -181,6 +181,14 @@ pub fn run() {
             crate::missions::mission_get,
             crate::missions::mission_start,
             crate::missions::mission_cancel,
+            // Functional roles and reusable Squad routing policies
+            crate::roles::functional_roles_list,
+            crate::roles::functional_role_get,
+            crate::squads::squad_create,
+            crate::squads::squad_update,
+            crate::squads::squad_list,
+            crate::squads::squad_get,
+            crate::squads::squad_delete,
             // Cuentas múltiples por TUI
             crate::accounts::account_capable_agents,
             crate::accounts::list_agent_accounts,

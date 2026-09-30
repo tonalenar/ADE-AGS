@@ -9,19 +9,20 @@ use serde::Serialize;
 use uuid::Uuid;
 
 use crate::database::DbConnection;
+use crate::squads::Squad;
 use crate::util::now_ts;
 
 use super::types::{status, Fact, Run, Task, TaskOutcome};
 
 const RUN_COLUMNS: &str = "id, workspace_id, objective, cwd, status, max_parallel, budget_usd, \
-                           spent_usd, created_at, ended_at, mission_id";
+                           spent_usd, created_at, ended_at, mission_id, squad_id, squad_name";
 
 const TASK_COLUMNS: &str = "id, run_id, title, prompt, agent_id, account_id, model, cwd, \
                             budget_usd, status, session_id, attempt, result, error, cost_usd, \
                             tokens_in, tokens_out, events_path, started_at, ended_at, created_at, \
                             worktree_path, branch, worktree_removed, complexity, routed_by, \
                             route_note, role, plan_key, parent_id, depth, isolate, result_schema, \
-                            last_error, handoff";
+                            last_error, handoff, functional_role";
 
 fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
     Ok(Run {
@@ -36,6 +37,9 @@ fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
         created_at: row.get(8)?,
         ended_at: row.get(9)?,
         mission_id: row.get(10)?,
+        squad_id: row.get(11)?,
+        squad_name: row.get(12)?,
+        squad_members: Vec::new(),
     })
 }
 
@@ -76,6 +80,7 @@ fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         result_schema: row.get(32)?,
         last_error: row.get(33)?,
         handoff: row.get(34)?,
+        functional_role: row.get(35)?,
         // Lo llena `with_deps`: vive en otra tabla.
         depends_on: Vec::new(),
     })
@@ -142,6 +147,46 @@ pub fn set_run_mission(conn: &Connection, run_id: &str, mission_id: &str) -> Res
     Ok(())
 }
 
+/// Stores the Squad configuration selected at Mission start. Later planning resolves from
+/// these copied rows even if the reusable Squad is edited.
+pub fn set_run_squad_snapshot(conn: &Connection, run_id: &str, squad: &Squad) -> Result<(), String> {
+    conn.execute(
+        "UPDATE runs SET squad_id = ?1, squad_name = ?2 WHERE id = ?3",
+        rusqlite::params![squad.id, squad.name, run_id],
+    )
+    .map_err(|error| error.to_string())?;
+    for member in &squad.members {
+        conn.execute(
+            "INSERT INTO run_squad_members (run_id, role_id, agent_id, model, account_id,
+                                            auto_account, complexity, isolate_default)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            rusqlite::params![
+                run_id,
+                member.role_id,
+                member.agent_id,
+                member.model,
+                member.account_id,
+                member.auto_account as i64,
+                member.complexity,
+                member.isolate_default as i64,
+            ],
+        )
+        .map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+fn with_squad_members(conn: &Connection, mut run: Run) -> Result<Run, String> {
+    if run.squad_id.is_some() {
+        run.squad_members = crate::squads::store::snapshot_members_of_run(conn, &run.id)?;
+    }
+    Ok(run)
+}
+
+fn with_squad_members_many(conn: &Connection, runs: Vec<Run>) -> Result<Vec<Run>, String> {
+    runs.into_iter().map(|run| with_squad_members(conn, run)).collect()
+}
+
 /// Los intentos de una misión, el más reciente primero.
 pub fn runs_of_mission(conn: &Connection, mission_id: &str) -> Result<Vec<Run>, String> {
     let mut stmt = conn
@@ -152,9 +197,9 @@ pub fn runs_of_mission(conn: &Connection, mission_id: &str) -> Result<Vec<Run>, 
     let rows = stmt
         .query_map([mission_id], row_to_run)
         .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-    Ok(rows)
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())?;
+    with_squad_members_many(conn, rows)
 }
 
 #[derive(Default)]
@@ -172,6 +217,7 @@ pub struct NewTask<'a> {
     pub route_note: Option<&'a str>,
     /// `None` = lanzada a mano.
     pub role: Option<&'a str>,
+    pub functional_role: Option<&'a str>,
     pub plan_key: Option<&'a str>,
     pub parent_id: Option<&'a str>,
     pub depth: i64,
@@ -187,8 +233,8 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
     conn.execute(
         "INSERT INTO tasks (id, run_id, title, prompt, agent_id, account_id, model, cwd,
                             budget_usd, status, created_at, complexity, routed_by, route_note,
-                            role, plan_key, parent_id, depth, isolate, result_schema)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                            role, plan_key, parent_id, depth, isolate, result_schema, functional_role)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
         rusqlite::params![
             id,
             new.run_id,
@@ -210,6 +256,7 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
             new.depth,
             new.isolate as i64,
             new.result_schema,
+            new.functional_role,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -219,12 +266,11 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
 // ── Leer ────────────────────────────────────────────────────────
 
 pub fn run_by_id(conn: &Connection, id: &str) -> Result<Option<Run>, String> {
-    conn.query_row(&format!("SELECT {RUN_COLUMNS} FROM runs WHERE id = ?1"), [id], row_to_run)
-        .map(Some)
-        .or_else(|e| match e {
-            rusqlite::Error::QueryReturnedNoRows => Ok(None),
-            other => Err(other.to_string()),
-        })
+    let run = conn
+        .query_row(&format!("SELECT {RUN_COLUMNS} FROM runs WHERE id = ?1"), [id], row_to_run)
+        .optional()
+        .map_err(|error| error.to_string())?;
+    run.map(|run| with_squad_members(conn, run)).transpose()
 }
 
 pub fn task_by_id(conn: &Connection, id: &str) -> Result<Option<Task>, String> {
@@ -287,9 +333,9 @@ pub fn list_runs(conn: &Connection, workspace_id: &str) -> Result<Vec<Run>, Stri
     let rows = stmt
         .query_map([workspace_id], row_to_run)
         .map_err(|e| e.to_string())?
-        .filter_map(|r| r.ok())
-        .collect();
-    Ok(rows)
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())?;
+    with_squad_members_many(conn, rows)
 }
 
 /// Las tarjetas de un workspace, más recientes primero.
@@ -334,7 +380,7 @@ pub fn workspace_of_folder(conn: &Connection, cwd: &str) -> Option<String> {
 
 /// El run más reciente creado desde esa carpeta en ese workspace.
 pub fn latest_run_in_folder(conn: &Connection, workspace_id: &str, cwd: &str) -> Result<Option<Run>, String> {
-    conn.query_row(
+    let run = conn.query_row(
         &format!(
             "SELECT {RUN_COLUMNS} FROM runs WHERE workspace_id = ?1 AND cwd = ?2
              ORDER BY created_at DESC, rowid DESC LIMIT 1"
@@ -343,7 +389,8 @@ pub fn latest_run_in_folder(conn: &Connection, workspace_id: &str, cwd: &str) ->
         row_to_run,
     )
     .optional()
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    run.map(|run| with_squad_members(conn, run)).transpose()
 }
 
 // ── El plan ─────────────────────────────────────────────────────

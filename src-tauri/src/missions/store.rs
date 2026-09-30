@@ -12,7 +12,7 @@ use super::types::{status, Mission, MissionInput, MissionSummary};
 
 const COLUMNS: &str = "id, workspace_id, title, objective, cwd, status, max_parallel, budget_usd, \
                        lead_agent_id, lead_model, lead_account_id, auto_account, complexity, \
-                       active_run_id, created_at, updated_at, started_at, ended_at";
+                       active_run_id, created_at, updated_at, started_at, ended_at, squad_id";
 
 /// Lo mismo que acepta `run_start_orchestration`: más de seis a la vez deja de ser
 /// paralelismo que alguien pueda seguir.
@@ -39,6 +39,7 @@ fn row_to_mission(row: &Row) -> rusqlite::Result<Mission> {
         updated_at: row.get(15)?,
         started_at: row.get(16)?,
         ended_at: row.get(17)?,
+        squad_id: row.get(18)?,
     })
 }
 
@@ -57,6 +58,7 @@ pub struct Valid {
     pub lead_account_id: Option<String>,
     pub auto_account: bool,
     pub complexity: Option<String>,
+    pub squad_id: Option<String>,
 }
 
 fn blank_to_none(value: &Option<String>) -> Option<String> {
@@ -65,7 +67,7 @@ fn blank_to_none(value: &Option<String>) -> Option<String> {
 
 /// Revisa un pedido sin tocar la base. Junta todos los errores: corregir de a uno por
 /// intento es peor que ver la lista entera.
-pub fn validate(input: &MissionInput) -> Result<Valid, String> {
+pub fn validate(conn: &Connection, input: &MissionInput) -> Result<Valid, String> {
     let mut errors = Vec::new();
     let title = input.title.trim().to_string();
     let objective = input.objective.trim().to_string();
@@ -84,8 +86,18 @@ pub fn validate(input: &MissionInput) -> Result<Valid, String> {
     if input.budget_usd.is_some_and(|b| !b.is_finite() || b <= 0.0) {
         errors.push("el presupuesto tiene que ser positivo".to_string());
     }
-    let lead_agent_id = blank_to_none(&input.lead_agent_id);
-    let lead_model = blank_to_none(&input.lead_model);
+    let squad_id = blank_to_none(&input.squad_id);
+    if let Some(id) = &squad_id {
+        let exists: Option<i64> = conn
+            .query_row("SELECT 1 FROM squads WHERE id = ?1", [id], |row| row.get(0))
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if exists.is_none() {
+            errors.push(format!("no squad '{id}' exists"));
+        }
+    }
+    let lead_agent_id = if squad_id.is_some() { None } else { blank_to_none(&input.lead_agent_id) };
+    let lead_model = if squad_id.is_some() { None } else { blank_to_none(&input.lead_model) };
     if lead_model.is_some() && lead_agent_id.is_none() {
         errors.push("un modelo fijo necesita decir de qué agente es".to_string());
     }
@@ -107,9 +119,10 @@ pub fn validate(input: &MissionInput) -> Result<Valid, String> {
         lead_model,
         // Con la cuenta automática, una elegida antes no aplica: guardarla dejaría una
         // preferencia que nadie va a leer.
-        lead_account_id: if input.auto_account { None } else { blank_to_none(&input.lead_account_id) },
-        auto_account: input.auto_account,
-        complexity: input.complexity.map(|c| c.as_str().to_string()),
+        lead_account_id: if squad_id.is_some() || input.auto_account { None } else { blank_to_none(&input.lead_account_id) },
+        auto_account: squad_id.is_none() && input.auto_account,
+        complexity: if squad_id.is_some() { None } else { input.complexity.map(|c| c.as_str().to_string()) },
+        squad_id,
     })
 }
 
@@ -128,8 +141,8 @@ pub fn create(conn: &Connection, workspace_id: &str, valid: &Valid) -> Result<Mi
     conn.execute(
         "INSERT INTO missions (id, workspace_id, title, objective, cwd, status, max_parallel, budget_usd,
                                lead_agent_id, lead_model, lead_account_id, auto_account, complexity,
-                               created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
+                               created_at, updated_at, squad_id)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15)",
         rusqlite::params![
             id,
             workspace_id,
@@ -145,6 +158,7 @@ pub fn create(conn: &Connection, workspace_id: &str, valid: &Valid) -> Result<Mi
             valid.auto_account as i64,
             valid.complexity,
             now,
+            valid.squad_id,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -187,11 +201,11 @@ pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>
         .query_map([workspace_id], |row| {
             Ok(MissionSummary {
                 mission: row_to_mission(row)?,
-                spent_usd: row.get(18)?,
-                workers_total: row.get(19)?,
-                workers_done: row.get(20)?,
-                lead_agent: row.get(21)?,
-                lead_status: row.get(22)?,
+                spent_usd: row.get(19)?,
+                workers_total: row.get(20)?,
+                workers_done: row.get(21)?,
+                lead_agent: row.get(22)?,
+                lead_status: row.get(23)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -218,6 +232,7 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
             && current.lead_account_id == valid.lead_account_id
             && current.auto_account == valid.auto_account
             && current.complexity == valid.complexity;
+        let same_config = same_config && current.squad_id == valid.squad_id;
         if !same_config {
             return Err("la misión ya arrancó: solo se le puede cambiar el título".into());
         }
@@ -234,8 +249,8 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
         .execute(
             "UPDATE missions SET title = ?1, objective = ?2, cwd = ?3, max_parallel = ?4, budget_usd = ?5,
                                  lead_agent_id = ?6, lead_model = ?7, lead_account_id = ?8,
-                                 auto_account = ?9, complexity = ?10, updated_at = ?11
-             WHERE id = ?12 AND status = ?13",
+                                 auto_account = ?9, complexity = ?10, updated_at = ?11, squad_id = ?12
+             WHERE id = ?13 AND status = ?14",
             rusqlite::params![
                 valid.title,
                 valid.objective,
@@ -248,6 +263,7 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
                 valid.auto_account as i64,
                 valid.complexity,
                 now_ts(),
+                valid.squad_id,
                 id,
                 status::DRAFT,
             ],

@@ -249,6 +249,45 @@ pub(crate) fn plan_tasks(
 
     let order = plan::validate(&tasks, &existing_keys)?;
 
+    let squad_members = existing_run
+        .as_ref()
+        .filter(|run| run.squad_id.is_some())
+        .map(|run| run.squad_members.as_slice());
+    let mut role_errors = Vec::new();
+    if let Some(members) = squad_members {
+        let available: HashSet<&str> = members.iter().map(|member| member.role_id.as_str()).collect();
+        let available_list = members.iter().map(|member| member.role_id.as_str()).collect::<Vec<_>>().join(", ");
+        for task in &order {
+            let Some(role_id) = task.functional_role.as_deref().map(str::trim).filter(|role| !role.is_empty()) else {
+                role_errors.push(format!("'{}' must specify a functional role because this Run uses a Squad", task.key));
+                continue;
+            };
+            if !available.contains(role_id) {
+                role_errors.push(format!(
+                    "Role '{role_id}' is not available in this squad. Available roles: {}.",
+                    if available_list.is_empty() { "(none)" } else { &available_list }
+                ));
+            }
+            if task.agent.as_ref().is_some_and(|value| !value.trim().is_empty())
+                || task.model.as_ref().is_some_and(|value| !value.trim().is_empty())
+                || task.account_id.is_some()
+            {
+                role_errors.push("Tasks assigned through a squad role cannot override provider/model/account.".into());
+            }
+        }
+    } else {
+        for task in &order {
+            if let Some(role_id) = task.functional_role.as_deref().map(str::trim).filter(|role| !role.is_empty())
+                && crate::roles::get(role_id).is_none()
+            {
+                role_errors.push(format!("functional role '{role_id}' does not exist"));
+            }
+        }
+    }
+    if !role_errors.is_empty() {
+        return Err(format!("plan rejected; no tasks were created:\n{}", role_errors.join("\n")));
+    }
+
     // Asignar TODAS antes de crear ninguna: si una no tiene a quién ir, no se crea nada.
     let roster = snapshot(db)?;
     let tiers = routing::load_tiers(db);
@@ -256,15 +295,30 @@ pub(crate) fn plan_tasks(
     let mut assignments = HashMap::new();
     let mut errors = Vec::new();
     for t in &order {
-        let request = RouteRequest {
-            agent_id: t.agent.clone(),
-            model: t.model.clone().filter(|m| !m.trim().is_empty()),
-            complexity: t.complexity.or((t.agent.is_none() && t.model.is_none()).then_some(Complexity::Standard)),
-            account: AccountChoice::Auto,
+        let (request, complexity, isolate_default) = if let Some(members) = squad_members {
+            let role_id = t.functional_role.as_deref().expect("Squad role was validated");
+            let member = members.iter().find(|member| member.role_id == role_id).expect("Squad member was validated");
+            let complexity = t.complexity.or_else(|| member.complexity.as_deref().and_then(Complexity::parse));
+            let request = RouteRequest {
+                agent_id: Some(member.agent_id.clone()),
+                model: member.model.clone(),
+                complexity,
+                account: if member.auto_account { AccountChoice::Auto } else { AccountChoice::Fixed(member.account_id.clone()) },
+            };
+            (request, complexity, Some(member.isolate_default))
+        } else {
+            let complexity = t.complexity.or((t.agent.is_none() && t.model.is_none()).then_some(Complexity::Standard));
+            let request = RouteRequest {
+                agent_id: t.agent.clone(),
+                model: t.model.clone().filter(|m| !m.trim().is_empty()),
+                complexity,
+                account: t.account_id.as_ref().map_or(AccountChoice::Auto, |id| AccountChoice::Fixed(Some(id.clone()))),
+            };
+            (request, complexity, None)
         };
         match routing::route(&roster, &tiers, &request, now) {
             Ok(a) => {
-                assignments.insert(t.key.clone(), (a, request.complexity));
+                assignments.insert(t.key.clone(), (a, complexity, isolate_default));
             }
             Err(e) => errors.push(format!("{}: {e}", t.key)),
         }
@@ -299,7 +353,7 @@ pub(crate) fn plan_tasks(
 
         let mut ids: HashMap<String, String> = HashMap::new();
         for t in &order {
-            let (assignment, complexity) = &assignments[&t.key];
+            let (assignment, complexity, isolate_default) = &assignments[&t.key];
             let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
             let schema = t.result_schema.as_ref().map(Value::to_string);
             let created = store::create_task(
@@ -317,10 +371,11 @@ pub(crate) fn plan_tasks(
                     routed_by: Some(assignment.routed_by.as_str()),
                     route_note: note.as_deref(),
                     role: Some(role::WORKER),
+                    functional_role: t.functional_role.as_deref().map(str::trim).filter(|role| !role.is_empty()),
                     plan_key: Some(&t.key),
                     parent_id: caller.task.as_ref().map(|p| p.id.as_str()),
                     depth,
-                    isolate: t.isolate.unwrap_or(is_repo),
+                    isolate: t.isolate.unwrap_or_else(|| isolate_default.map_or(is_repo, |default| default && is_repo)),
                     result_schema: schema.as_deref(),
                     queued: true,
                 },

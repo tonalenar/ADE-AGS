@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Alert, AnimateSpin, Button, FolderIcon, Input, SegmentedControl, TextArea } from "neogestify-ui-components";
@@ -9,6 +10,8 @@ import { COMPLEXITIES, launchableAgents } from "@/features/runs/routingView";
 import type { Roster } from "@/features/runs/types";
 import { AccountPickerStep, AUTO_ACCOUNT } from "@/features/tabs/wizard/AccountPickerStep";
 import { AppDialog } from "@/shared/ui/AppDialog";
+import { listSquads } from "@/features/squads/ipc";
+import type { Squad } from "@/features/squads/types";
 
 import { missingFields, toInput, type MissionForm, type ModelMode } from "./missionView";
 import type { MissionInput } from "./types";
@@ -26,8 +29,10 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
   onSave: (input: MissionInput) => Promise<void>;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
   const [form, setForm] = useState<MissionForm>(initial);
   const [roster, setRoster] = useState<Roster | null>(null);
+  const [squads, setSquads] = useState<Squad[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const set = <K extends keyof MissionForm>(key: K, value: MissionForm[K]) => setForm((f) => ({ ...f, [key]: value }));
@@ -35,6 +40,7 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
   // Solo para ofrecer modelos. Crear el borrador no depende de que el roster conteste.
   useEffect(() => {
     getRoster().then(setRoster).catch(() => setRoster(null));
+    listSquads().then(setSquads).catch(() => setSquads([]));
   }, []);
 
   const agents = launchableAgents(roster);
@@ -44,7 +50,8 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
   );
 
   const missing = missingFields(form);
-  const canSave = missing.length === 0 && !busy;
+  const selectedSquad = squads.find((squad) => squad.id === form.squadId) ?? null;
+  const canSave = missing.length === 0 && (form.executionMode !== "squad" || Boolean(form.squadId)) && !busy;
 
   const pickFolder = async () => {
     const dir = await open({ directory: true, defaultPath: form.cwd || undefined });
@@ -124,54 +131,99 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
           </div>
         </Field>
 
-        <Field group label={t("fleet.orchestrate.leadModel")} hint={form.mode === "fixed" ? undefined : t("fleet.new.modelHint")}>
-          <div className="flex flex-col gap-2">
+        <Field group label={t("missions.form.executionMode")}>
+          <SegmentedControl
+            size="sm"
+            aria-label={t("missions.form.executionMode")}
+            value={form.executionMode}
+            onChange={(value) => {
+              const executionMode = value as MissionForm["executionMode"];
+              setForm((current) => ({
+                ...current,
+                executionMode,
+                mode: executionMode === "specific" ? "fixed" : current.mode === "fixed" ? "hard" : current.mode,
+                autoAccount: executionMode === "automatic" ? current.autoAccount : true,
+                accountId: executionMode === "automatic" ? current.accountId : null,
+              }));
+            }}
+            options={[
+              { value: "automatic", label: t("missions.form.automatic") },
+              { value: "specific", label: t("missions.form.specific") },
+              { value: "squad", label: t("missions.form.squad") },
+            ]}
+          />
+        </Field>
+
+        {form.executionMode === "automatic" && (
+          <Field group label={t("fleet.orchestrate.leadModel")} hint={t("fleet.new.modelHint")}>
             <SegmentedControl
               size="sm"
               aria-label={t("fleet.orchestrate.leadModel")}
-              value={form.mode}
-              onChange={(v) => {
-                const mode = v as ModelMode;
-                setForm((f) => ({
-                  ...f,
-                  mode,
-                  model: mode === "fixed" && !f.model ? (models.find((m) => m.id === "opus")?.id ?? models[0]?.id ?? "") : f.model,
-                }));
-              }}
-              options={[
-                ...COMPLEXITIES.map((c) => ({ value: c, label: t(`fleet.complexity.${c}`) })),
-                { value: "fixed", label: t("fleet.new.fixedModel") },
-              ]}
+              value={form.mode === "fixed" ? "hard" : form.mode}
+              onChange={(value) => set("mode", value as ModelMode)}
+              options={COMPLEXITIES.map((complexity) => ({ value: complexity, label: t(`fleet.complexity.${complexity}`) }))}
             />
-            {form.mode === "fixed" && (
-              <ModelSearch
-                agents={agents}
-                value={{ agentId: form.agentId, model: form.model }}
-                onChange={(pick) => setForm((f) => ({
-                  ...f,
-                  agentId: pick.agentId,
-                  model: pick.model,
-                  // Otra TUI tiene otras cuentas: la elegida ya no aplica.
-                  ...(pick.agentId !== f.agentId ? { autoAccount: true, accountId: null } : {}),
-                }))}
-              />
-            )}
-          </div>
-        </Field>
+          </Field>
+        )}
 
-        <Field group label={t("fleet.new.account")}>
-          <AccountPickerStep
-            agentId={form.agentId}
-            value={accountValue}
-            onChange={(v) => setForm((f) => ({
-              ...f,
-              autoAccount: v === AUTO_ACCOUNT,
-              accountId: v === AUTO_ACCOUNT ? null : (v ?? null),
-            }))}
-            showLabel={false}
-            allowAuto
-          />
-        </Field>
+        {form.executionMode === "specific" && (
+          <Field group label={t("missions.form.leadProviderModel")}>
+            <ModelSearch
+              agents={agents}
+              value={{ agentId: form.agentId, model: form.model }}
+              onChange={(pick) => setForm((current) => ({
+                ...current,
+                agentId: pick.agentId,
+                model: pick.model,
+                ...(pick.agentId !== current.agentId ? { autoAccount: true, accountId: null } : {}),
+              }))}
+              allowDefault
+            />
+          </Field>
+        )}
+
+        {form.executionMode === "squad" && (
+          <Field label={t("missions.form.squad")} hint={t("missions.form.squadHint")}>
+            <select
+              value={form.squadId ?? ""}
+              onChange={(event) => set("squadId", event.target.value || null)}
+              className={SELECT}
+            >
+              <option value="">{t("missions.form.chooseSquad")}</option>
+              {squads.map((squad) => (
+                <option key={squad.id} value={squad.id}>
+                  {squad.name}{squad.available ? "" : ` · ${t("squads.unavailable")}`}
+                </option>
+              ))}
+            </select>
+            {selectedSquad && <SquadExecutionSummary squad={selectedSquad} />}
+            {selectedSquad && !selectedSquad.available && (
+              <Alert variant="warning">{selectedSquad.unavailableReasons.join("; ")}</Alert>
+            )}
+            {squads.length === 0 && (
+              <div className="flex items-center justify-between gap-2 text-[10.5px] text-gray-500 dark:text-white/40">
+                <span>{t("missions.form.noSquads")}</span>
+                <Button variant="ghost" size="sm" onClick={() => navigate("/squads")}>{t("squads.manage")}</Button>
+              </div>
+            )}
+          </Field>
+        )}
+
+        {form.executionMode !== "squad" && (
+          <Field group label={t("fleet.new.account")}>
+            <AccountPickerStep
+              agentId={form.agentId}
+              value={accountValue}
+              onChange={(value) => setForm((current) => ({
+                ...current,
+                autoAccount: value === AUTO_ACCOUNT,
+                accountId: value === AUTO_ACCOUNT ? null : (value ?? null),
+              }))}
+              showLabel={false}
+              allowAuto
+            />
+          </Field>
+        )}
 
         <div className="flex items-start gap-4">
           <Field group label={t("fleet.orchestrate.parallel")} hint={t("fleet.orchestrate.parallelHint")}>
@@ -203,6 +255,39 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
   );
 }
 
+function SquadExecutionSummary({ squad }: { squad: Squad }) {
+  const { t } = useTranslation();
+  const { agents } = useRosterForLabels();
+  const agentLabel = (agentId: string) => agents.find((agent) => agent.agentId === agentId)?.label ?? agentId;
+  const modelLabel = (agentId: string, model: string | null) => {
+    if (!model) return t("squads.providerDefault");
+    return agents.find((agent) => agent.agentId === agentId)?.models.find((entry) => entry.id === model)?.label ?? model;
+  };
+  const accountLabel = (accountName: string | null, auto: boolean) => accountName ?? t(auto ? "accounts.auto" : "accounts.system");
+  return (
+    <div className="flex flex-col gap-2 rounded-lg border border-gray-200 dark:border-white/8 bg-gray-50 dark:bg-white/3 p-2.5">
+      <div className="text-[11px] font-semibold text-gray-800 dark:text-gray-200">{squad.name}</div>
+      <div className="text-[10.5px] text-gray-500 dark:text-white/45">
+        {t("squads.lead")}: {agentLabel(squad.lead.agentId)} · {modelLabel(squad.lead.agentId, squad.lead.model)} · {accountLabel(squad.lead.accountName, squad.lead.autoAccount)}
+      </div>
+      {squad.members.map((member) => (
+        <div key={member.roleId} className="flex items-center justify-between gap-3 text-[10.5px]">
+          <span className="font-medium text-gray-700 dark:text-gray-300">{t(`squads.roleNames.${member.roleId}`, { defaultValue: member.roleId })}</span>
+          <span className="truncate text-right text-gray-500 dark:text-white/45">
+            {agentLabel(member.agentId)} · {modelLabel(member.agentId, member.model)} · {accountLabel(member.accountName, member.autoAccount)}
+          </span>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function useRosterForLabels() {
+  const [agents, setAgents] = useState<Roster["agents"]>([]);
+  useEffect(() => { getRoster().then((roster) => setAgents(roster.agents)).catch(() => setAgents([])); }, []);
+  return { agents };
+}
+
 function Field({ label, hint, group = false, children }: {
   label: string;
   hint?: string;
@@ -228,3 +313,7 @@ const INPUT = `w-full rounded-lg px-2.5 h-8 outline-none text-[12px]
   border border-gray-200 dark:border-white/10
   focus:border-blue-400 dark:focus:border-blue-500
   text-gray-800 dark:text-gray-200`;
+
+const SELECT = `w-full rounded-lg px-2.5 h-8 outline-none text-[12px]
+  bg-gray-100 dark:bg-[#12161c] border border-gray-200 dark:border-white/10
+  focus:border-blue-400 dark:focus:border-blue-500 text-gray-800 dark:text-gray-200`;

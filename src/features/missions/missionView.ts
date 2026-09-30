@@ -126,6 +126,8 @@ export interface MissionForm {
   objective: string;
   cwd: string;
   mode: ModelMode;
+  executionMode: "automatic" | "specific" | "squad";
+  squadId: string | null;
   agentId: string;
   model: string;
   autoAccount: boolean;
@@ -142,6 +144,8 @@ export function emptyForm(cwd: string): MissionForm {
     objective: "",
     cwd,
     mode: "hard",
+    executionMode: "automatic",
+    squadId: null,
     agentId: "claude-code",
     model: "",
     autoAccount: true,
@@ -158,6 +162,8 @@ export function formFromMission(m: Mission): MissionForm {
     objective: m.objective,
     cwd: m.cwd,
     mode: fixed ? "fixed" : (m.complexity ?? "hard"),
+    executionMode: m.squadId ? "squad" : fixed ? "specific" : "automatic",
+    squadId: m.squadId ?? null,
     agentId: m.leadAgentId ?? "claude-code",
     model: m.leadModel ?? "",
     autoAccount: m.autoAccount,
@@ -183,7 +189,8 @@ export function missingFields(form: MissionForm): Array<"title" | "objective" | 
 }
 
 export function toInput(form: MissionForm): MissionInput {
-  const fixed = form.mode === "fixed";
+  const squad = form.executionMode === "squad";
+  const fixed = form.executionMode === "specific";
   return {
     title: form.title.trim(),
     objective: form.objective.trim(),
@@ -191,10 +198,11 @@ export function toInput(form: MissionForm): MissionInput {
     maxParallel: form.maxParallel,
     budgetUsd: parseBudget(form.budget),
     // Con complejidad no se fija el agente: el ruteo decide cuál conviene.
-    leadAgentId: fixed ? form.agentId : null,
-    leadModel: fixed ? form.model || null : null,
-    leadAccountId: form.autoAccount ? null : form.accountId,
-    autoAccount: form.autoAccount,
-    complexity: form.mode === "fixed" ? null : form.mode,
+    leadAgentId: squad ? null : fixed ? form.agentId : null,
+    leadModel: squad ? null : fixed ? form.model || null : null,
+    leadAccountId: squad || form.autoAccount ? null : form.accountId,
+    autoAccount: squad ? false : form.autoAccount,
+    complexity: squad || fixed ? null : form.mode === "fixed" ? "hard" : form.mode,
+    squadId: squad ? form.squadId : null,
   };
 }

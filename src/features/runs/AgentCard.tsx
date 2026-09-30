@@ -99,6 +99,12 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
                 {t("fleet.card.lead")}
               </span>
             )}
+            {task.functionalRole && (
+              <span className="shrink-0 px-1 rounded text-[9px] font-medium
+                text-sky-700 dark:text-sky-300 bg-sky-500/10">
+                {t(`squads.roleNames.${task.functionalRole}`, { defaultValue: task.functionalRole })}
+              </span>
+            )}
             {task.planKey && (
               <span className="shrink-0 font-mono text-[10px] font-semibold text-sky-700 dark:text-sky-300">
                 {task.planKey}

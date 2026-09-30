@@ -23,6 +23,8 @@ export interface Mission {
   leadAccountId: string | null;
   autoAccount: boolean;
   complexity: Complexity | null;
+  /** Null for existing Missions that use the current routing policy. */
+  squadId?: string | null;
   /** El run que la está cumpliendo. `null` mientras es borrador. */
   activeRunId: string | null;
   createdAt: number;
@@ -43,6 +45,7 @@ export interface MissionInput {
   leadAccountId: string | null;
   autoAccount: boolean;
   complexity: Complexity | null;
+  squadId?: string | null;
 }
 
 /** Una fila de la lista, con el avance de su run activo. */

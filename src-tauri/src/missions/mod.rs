@@ -59,12 +59,12 @@ fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
 
 /// Un borrador nuevo. Solo escribe la fila.
 pub(crate) fn create(conn: &Connection, workspace_id: &str, input: &MissionInput) -> Result<Mission, String> {
-    let valid = store::validate(input)?;
+    let valid = store::validate(conn, input)?;
     store::create(conn, workspace_id, &valid)
 }
 
 pub(crate) fn update(conn: &Connection, mission_id: &str, input: &MissionInput) -> Result<Mission, String> {
-    let valid = store::validate(input)?;
+    let valid = store::validate(conn, input)?;
     store::update(conn, mission_id, &valid)
 }
 
@@ -99,9 +99,15 @@ pub(crate) fn start(
     route: impl FnOnce(&RouteRequest) -> Result<Assignment, String>,
     launch: impl FnOnce(&Task) -> Result<(), String>,
 ) -> Result<Mission, String> {
-    let mission = {
+    let (mission, squad) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        store::get(&conn, mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?
+        let mission = store::get(&conn, mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+        let squad = mission
+            .squad_id
+            .as_deref()
+            .map(|id| crate::squads::store::get(&conn, id)?.ok_or_else(|| format!("no squad '{id}' exists")))
+            .transpose()?;
+        (mission, squad)
     };
     if mission.status != status::DRAFT {
         return Err(format!("la misión ya no es un borrador ({})", mission.status));
@@ -109,17 +115,32 @@ pub(crate) fn start(
     if !Path::new(&mission.cwd).is_dir() {
         return Err(format!("la carpeta {} no existe", mission.cwd));
     }
-    if let Some(agent) = &mission.lead_agent_id {
+    if let Some(squad) = &squad {
+        if !squad.available {
+            return Err(format!("Squad '{}' unavailable: {}", squad.name, squad.unavailable_reasons.join("; ")));
+        }
+    }
+    if let Some(agent) = squad.as_ref().map(|s| &s.lead.agent_id).or(mission.lead_agent_id.as_ref()) {
         crate::runs::ensure_headless(agent)?;
     }
 
-    let (request, complexity) = crate::runs::lead_request(
-        mission.lead_agent_id.clone(),
-        mission.lead_model.clone(),
-        mission.complexity.as_deref().and_then(Complexity::parse),
-        mission.lead_account_id.clone(),
-        mission.auto_account,
-    );
+    let (request, complexity) = if let Some(squad) = &squad {
+        crate::runs::lead_request(
+            Some(squad.lead.agent_id.clone()),
+            squad.lead.model.clone(),
+            squad.lead.complexity.as_deref().and_then(Complexity::parse),
+            squad.lead.account_id.clone(),
+            squad.lead.auto_account,
+        )
+    } else {
+        crate::runs::lead_request(
+            mission.lead_agent_id.clone(),
+            mission.lead_model.clone(),
+            mission.complexity.as_deref().and_then(Complexity::parse),
+            mission.lead_account_id.clone(),
+            mission.auto_account,
+        )
+    };
     let assignment = route(&request)?;
 
     let spec = crate::runs::Orchestration {
@@ -130,6 +151,7 @@ pub(crate) fn start(
         max_parallel: mission.max_parallel,
         budget_usd: mission.budget_usd,
         mission_id: Some(&mission.id),
+        squad: squad.as_ref(),
     };
     let mark = |conn: &Connection, lead: &Task| {
         if store::mark_started(conn, &mission.id, &lead.run_id)? {

@@ -7,6 +7,7 @@ import { SkillDetailPage } from "@/features/skills/SkillDetailPage";
 import { SessionsPage } from "@/features/sessions/SessionsPage";
 import { FleetPage } from "@/features/runs/FleetPage";
 import { MissionsPage } from "@/features/missions/MissionsPage";
+import { SquadsPage } from "@/features/squads/SquadsPage";
 import { MarketplacePage } from "@/features/marketplace/MarketplacePage";
 import { RegistriesPage } from "@/features/marketplace/RegistriesPage";
 import { ForgePage } from "@/features/forge/ForgePage";
@@ -24,6 +25,7 @@ export const router = createHashRouter([
       { path: "sessions", element: <SessionsPage /> },
       { path: "fleet", element: <FleetPage /> },
       { path: "missions", element: <MissionsPage /> },
+      { path: "squads", element: <SquadsPage /> },
       { path: "forge", element: <ForgePage /> },
       { path: "marketplace", element: <MarketplacePage /> },
       { path: "marketplace/registries", element: <RegistriesPage /> },

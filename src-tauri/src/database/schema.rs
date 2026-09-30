@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 19;
+const SCHEMA_VERSION: i32 = 20;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -619,6 +619,62 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         )?;
     }
     conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_runs_mission ON runs(mission_id);")?;
+
+    // v20 — Built-in functional roles and reusable Squads. Roles stay declarative in code;
+    // only Squad routing policies and immutable per-Run snapshots are persisted.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS squads (
+             id                  TEXT PRIMARY KEY,
+             name                TEXT NOT NULL UNIQUE,
+             description         TEXT NOT NULL DEFAULT '',
+             lead_agent_id       TEXT NOT NULL,
+             lead_model          TEXT,
+             lead_account_id     TEXT,
+             lead_auto_account   INTEGER NOT NULL DEFAULT 0,
+             lead_complexity     TEXT,
+             created_at          INTEGER NOT NULL,
+             updated_at          INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS squad_members (
+             squad_id        TEXT NOT NULL REFERENCES squads(id) ON DELETE CASCADE,
+             role_id         TEXT NOT NULL,
+             agent_id        TEXT NOT NULL,
+             model           TEXT,
+             account_id      TEXT,
+             auto_account    INTEGER NOT NULL DEFAULT 0,
+             complexity      TEXT,
+             isolate_default INTEGER NOT NULL DEFAULT 0,
+             PRIMARY KEY (squad_id, role_id)
+         );
+         CREATE INDEX IF NOT EXISTS idx_squad_members_role ON squad_members(role_id);
+         CREATE TABLE IF NOT EXISTS run_squad_members (
+             run_id          TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+             role_id         TEXT NOT NULL,
+             agent_id        TEXT NOT NULL,
+             model           TEXT,
+             account_id      TEXT,
+             auto_account    INTEGER NOT NULL DEFAULT 0,
+             complexity      TEXT,
+             isolate_default INTEGER NOT NULL DEFAULT 0,
+             PRIMARY KEY (run_id, role_id)
+         );",
+    )?;
+    if !has_column(conn, "missions", "squad_id") {
+        conn.execute("ALTER TABLE missions ADD COLUMN squad_id TEXT REFERENCES squads(id) ON DELETE RESTRICT", [])?;
+    }
+    if !has_column(conn, "runs", "squad_id") {
+        conn.execute("ALTER TABLE runs ADD COLUMN squad_id TEXT REFERENCES squads(id) ON DELETE RESTRICT", [])?;
+        conn.execute("ALTER TABLE runs ADD COLUMN squad_name TEXT", [])?;
+    } else if !has_column(conn, "runs", "squad_name") {
+        conn.execute("ALTER TABLE runs ADD COLUMN squad_name TEXT", [])?;
+    }
+    if !has_column(conn, "tasks", "functional_role") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN functional_role TEXT", [])?;
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_missions_squad ON missions(squad_id);
+         CREATE INDEX IF NOT EXISTS idx_runs_squad ON runs(squad_id);",
+    )?;
 
     // Columna agregada después de que `tabs` ya existía en instalaciones reales, así que
     // se suma con ALTER en vez de recrear la tabla (que perdería las tabs guardadas).

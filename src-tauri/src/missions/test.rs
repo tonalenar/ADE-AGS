@@ -564,6 +564,7 @@ fn orquestacion_de_flota<'a>(cwd: &'a str) -> crate::runs::Orchestration<'a> {
         max_parallel: 9,
         budget_usd: Some(2.0),
         mission_id: None,
+        squad: None,
     }
 }
 

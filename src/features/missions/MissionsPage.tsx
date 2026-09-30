@@ -7,6 +7,8 @@ import { useTabsStore } from "@/features/tabs/store";
 import { PermissionCard } from "@/features/runs/PermissionCard";
 import { useRunsStore } from "@/features/runs/store";
 import type { PendingApproval, Task } from "@/features/runs/types";
+import { useSquadsStore } from "@/features/squads/store";
+import type { Squad } from "@/features/squads/types";
 
 import { MissionDialog } from "./MissionDialog";
 import {
@@ -20,6 +22,7 @@ import type { MissionDetail, MissionSummary } from "./types";
 const TASK_CHANGED = "cc-task-changed";
 /** El de una misión creada, editada, arrancada, cerrada o cancelada. Ver `missions/mod.rs`. */
 const MISSION_CHANGED = "cc-mission-changed";
+const SQUAD_CHANGED = "cc-squad-changed";
 
 const STATUS_TONE: Record<MissionPhase, string> = {
   draft: "bg-gray-200 text-gray-700 dark:bg-white/10 dark:text-white/60",
@@ -48,6 +51,8 @@ export function MissionsPage() {
   const loadDetail = useMissionsStore((s) => s.loadDetail);
   const onTaskChanged = useMissionsStore((s) => s.onTaskChanged);
   const onMissionChanged = useMissionsStore((s) => s.onMissionChanged);
+  const squads = useSquadsStore((s) => s.squads);
+  const loadSquads = useSquadsStore((s) => s.load);
 
   const [selected, setSelected] = useState<string | null>(null);
   const [dialog, setDialog] = useState<"new" | "edit" | null>(null);
@@ -58,6 +63,13 @@ export function MissionsPage() {
   useEffect(() => {
     if (workspaceId) load(workspaceId).catch((e) => setError(String(e)));
   }, [workspaceId, load]);
+
+  useEffect(() => { loadSquads().catch((e) => setError(String(e))); }, [loadSquads]);
+
+  useEffect(() => {
+    const off = listen<{ squad_id: string }>(SQUAD_CHANGED, () => { loadSquads().catch(console.error); });
+    return () => { off.then((unlisten) => unlisten()).catch(() => {}); };
+  }, [loadSquads]);
 
   useEffect(() => {
     if (selected) loadDetail(selected).catch((e) => setError(String(e)));
@@ -82,6 +94,9 @@ export function MissionsPage() {
 
   const summary = missions.find((m) => m.id === selected) ?? null;
   const detail = selected ? details[selected] ?? null : null;
+  const selectedSquad = (detail?.mission.squadId ?? summary?.squadId)
+    ? squads.find((squad) => squad.id === (detail?.mission.squadId ?? summary?.squadId)) ?? null
+    : null;
 
   // La cola de permisos es la de la flota (la mantiene `useFleetEvents` desde el shell):
   // decidir acá o allá es lo mismo, y los dos lados se enteran por el mismo evento.
@@ -138,6 +153,7 @@ export function MissionsPage() {
             <MissionDetailView
               summary={summary}
               detail={detail}
+              squad={selectedSquad}
               approvals={approvalsFor(approvals, detail.tasks)}
               onEdit={() => setDialog("edit")}
               onError={setError}
@@ -230,9 +246,10 @@ function ProgressLabel({ progress }: { progress: Progress }) {
   );
 }
 
-function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
+function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError }: {
   summary: MissionSummary;
   detail: MissionDetail;
+  squad: Squad | null;
   /** Los permisos que esperan en las tareas de su run activo. */
   approvals: PendingApproval[];
   onEdit: () => void;
@@ -269,12 +286,17 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
 
   const provider = lead
     ? `${lead.agentId}${lead.model ? ` · ${lead.model}` : ""}`
+    : squad
+      ? `${squad.lead.agentId}${squad.lead.model ? ` · ${squad.lead.model}` : ""}`
     : mission.leadAgentId
       ? `${mission.leadAgentId}${mission.leadModel ? ` · ${mission.leadModel}` : ""}`
       : t("missions.autoProvider", { complexity: t(`fleet.complexity.${mission.complexity ?? "hard"}`) });
   const account = lead
     ? (lead.accountId ?? t("accounts.system"))
+    : squad
+      ? (squad.lead.accountName ?? (squad.lead.autoAccount ? t("accounts.auto") : t("accounts.system")))
     : mission.autoAccount ? t("missions.autoAccount") : (mission.leadAccountId ?? t("accounts.system"));
+  const unavailableSquad = Boolean(mission.squadId && (!squad || !squad.available));
 
   return (
     <div className="flex flex-col gap-4 p-5">
@@ -293,7 +315,7 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
           <Button
             variant={action === "start" ? "primary" : "danger"}
             size="sm"
-            disabled={busy}
+            disabled={busy || (action === "start" && unavailableSquad)}
             onClick={() => act(action)}
             leftIcon={busy ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
           >
@@ -303,6 +325,11 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
       </div>
 
       {mission.status === "draft" && <Alert variant="info">{t("missions.draftNotice")}</Alert>}
+      {mission.status === "draft" && mission.squadId && unavailableSquad && (
+        <Alert variant="warning">
+          {squad ? squad.unavailableReasons.join("; ") : t("missions.squadUnavailable")}
+        </Alert>
+      )}
       {phase === "waiting_approval" && (
         <Alert variant="warning">{t("missions.waitingNotice", { count: approvals.length })}</Alert>
       )}
@@ -320,6 +347,27 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
         />
         <Stat label={t("missions.detail.spent")} value={`$${summary.spentUsd.toFixed(3)}`} />
       </dl>
+
+      {run?.squadName ? (
+        <Section title={t("missions.squadUsed", { name: run.squadName })}>
+          <div className="flex flex-col gap-1.5 text-[10.5px] text-gray-500 dark:text-white/45">
+            {run.squadMembers?.map((member) => (
+              <div key={member.roleId} className="flex justify-between gap-3">
+                <span className="font-medium text-gray-700 dark:text-gray-300">
+                  {t(`squads.roleNames.${member.roleId}`, { defaultValue: member.roleId })}
+                </span>
+                <span className="truncate text-right">
+                  {member.agentId}{member.model ? ` · ${member.model}` : ""} · {member.accountId ?? t(member.autoAccount ? "accounts.auto" : "accounts.system")}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : squad ? (
+        <Section title={t("squads.title")}>
+          <SquadSummary squad={squad} />
+        </Section>
+      ) : null}
 
       {run && (
         <Section title={t("missions.detail.run")}>
@@ -401,6 +449,11 @@ function TaskRow({ task, tasks, blocked, approval, focused, onDecide }: {
         {task.role === "lead" && (
           <span className="shrink-0 text-[9.5px] font-bold uppercase text-violet-600 dark:text-violet-400">{t("fleet.card.lead")}</span>
         )}
+        {task.functionalRole && (
+          <span className="shrink-0 rounded px-1 py-px text-[9px] font-semibold text-sky-700 dark:text-sky-300 bg-sky-500/10">
+            {t(`squads.roleNames.${task.functionalRole}`, { defaultValue: task.functionalRole })}
+          </span>
+        )}
         <span className="flex-1 truncate font-medium text-gray-800 dark:text-gray-200">{task.planKey ?? task.title}</span>
         <span className="shrink-0 text-[10.5px] text-gray-400 dark:text-white/35">
           {task.agentId}{task.model ? ` · ${task.model}` : ""}
@@ -426,6 +479,24 @@ function TaskRow({ task, tasks, blocked, approval, focused, onDecide }: {
         </div>
       )}
     </li>
+  );
+}
+
+function SquadSummary({ squad }: { squad: Squad }) {
+  const { t } = useTranslation();
+  const account = (name: string | null, auto: boolean) => name ?? t(auto ? "accounts.auto" : "accounts.system");
+  return (
+    <div className="flex flex-col gap-1.5 text-[10.5px] text-gray-500 dark:text-white/45">
+      <div>{t("squads.lead")}: {squad.lead.agentId}{squad.lead.model ? ` · ${squad.lead.model}` : ""} · {account(squad.lead.accountName, squad.lead.autoAccount)}</div>
+      {squad.members.map((member) => (
+        <div key={member.roleId} className="flex justify-between gap-3">
+          <span className="font-medium text-gray-700 dark:text-gray-300">{t(`squads.roleNames.${member.roleId}`, { defaultValue: member.roleId })}</span>
+          <span className="truncate text-right">
+            {member.agentId}{member.model ? ` · ${member.model}` : ""} · {account(member.accountName, member.autoAccount)}
+          </span>
+        </div>
+      ))}
+    </div>
   );
 }
 

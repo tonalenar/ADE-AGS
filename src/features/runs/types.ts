@@ -1,4 +1,6 @@
 /** Una tarjeta de la consola: un agente headless con su trabajo. */
+import type { RunSquadMember } from "@/features/squads/types";
+
 export interface Task {
   id: string;
   runId: string;
@@ -31,6 +33,8 @@ export interface Task {
   routeNote: string | null;
   /** `lead` reparte el objetivo; `worker` es una tarea de su plan. `null` = lanzada a mano. */
   role: TaskRole | null;
+  /** Functional work category, independent from the Lead/Worker execution role. */
+  functionalRole?: string | null;
   /** El nombre corto con que el plan se refiere a ella (`api`, `tests`). */
   planKey: string | null;
   /** Quién la delegó. */
@@ -73,6 +77,9 @@ export interface Run {
   endedAt: number | null;
   /** La misión que este run intenta cumplir. `null` = lanzado a mano desde la flota. */
   missionId: string | null;
+  squadId?: string | null;
+  squadName?: string | null;
+  squadMembers?: RunSquadMember[];
 }
 
 /** Algo que un agente del run les dejó escrito a los demás. */

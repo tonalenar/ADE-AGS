@@ -1717,10 +1717,12 @@ fn pt(key: &str, deps: &[&str]) -> PlanTask {
         key: key.into(),
         title: format!("tarea {key}"),
         prompt: "hacé tu parte".into(),
+        functional_role: None,
         depends_on: deps.iter().map(|d| d.to_string()).collect(),
         complexity: None,
         agent: None,
         model: None,
+        account_id: None,
         isolate: None,
         budget_usd: None,
         result_schema: None,
@@ -1792,6 +1794,9 @@ fn run_de(max_parallel: i64) -> Run {
         created_at: 0,
         ended_at: None,
         mission_id: None,
+        squad_id: None,
+        squad_name: None,
+        squad_members: Vec::new(),
     }
 }
 
@@ -1822,6 +1827,7 @@ fn nodo(id: &str, estado: &str, deps: &[&str]) -> Task {
         routed_by: None,
         route_note: None,
         role: Some(role::WORKER.into()),
+        functional_role: None,
         plan_key: Some(id.into()),
         parent_id: None,
         depth: 1,

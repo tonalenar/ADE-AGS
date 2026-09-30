@@ -180,6 +180,7 @@ pub async fn run_start_orchestration(
         max_parallel,
         budget_usd,
         mission_id: None,
+        squad: None,
     };
     start_orchestration(&db, &spec, &assignment, complexity, |_, _| Ok(()), |task| launch_lead(&app, task))
 }
@@ -194,6 +195,7 @@ pub(crate) struct Orchestration<'a> {
     pub max_parallel: i64,
     pub budget_usd: Option<f64>,
     pub mission_id: Option<&'a str>,
+    pub squad: Option<&'a crate::squads::Squad>,
 }
 
 /// El pedido de ruteo de un lead. Sin modelo ni complejidad va a `hard`: de cómo reparte
@@ -239,6 +241,9 @@ pub(crate) fn start_orchestration(
         if let Some(mission_id) = spec.mission_id {
             store::set_run_mission(&tx, &run.id, mission_id)?;
         }
+        if let Some(squad) = spec.squad {
+            store::set_run_squad_snapshot(&tx, &run.id, squad)?;
+        }
         let title: String = match spec.title {
             Some(t) => t.chars().take(80).collect(),
             None => objective.lines().next().unwrap_or("").chars().take(80).collect(),
@@ -282,11 +287,24 @@ pub(crate) fn start_orchestration(
 /// Lanza un lead por el supervisor, con las tools de orquestación: leer el run, dejar hechos
 /// y repartir tareas.
 pub(crate) fn launch_lead(app: &AppHandle, task: &Task) -> Result<(), String> {
-    use crate::ipc::mcp::{orchestration_tool_names, OrchestrationPower::*};
+    use crate::ipc::mcp::{orchestration_tool_name, orchestration_tool_names, OrchestrationPower::*};
+    let db = db_of(app)?;
+    let run = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        store::run_by_id(&conn, &task.run_id)?.ok_or_else(|| "the lead's Run no longer exists".to_string())?
+    };
+    let mut system_prompt = context::LEAD_SYSTEM_PROMPT.to_string();
+    let mut allowed_tools = orchestration_tool_names(&[Read, Note, Spawn]);
+    if run.squad_id.is_some() {
+        system_prompt.push_str(&context::lead_squad_context(&run.squad_members));
+        // A Squad lead chooses work roles. It cannot inspect or optimize provider routing.
+        let roster_tool = orchestration_tool_name("agent_roster");
+        allowed_tools.retain(|tool| tool != &roster_tool);
+    }
     let extras = supervisor::LaunchExtras {
         prompt: None,
-        system_prompt: Some(context::LEAD_SYSTEM_PROMPT.to_string()),
-        allowed_tools: orchestration_tool_names(&[Read, Note, Spawn]),
+        system_prompt: Some(system_prompt),
+        allowed_tools,
     };
     supervisor::start(app, task.clone(), extras)
 }
