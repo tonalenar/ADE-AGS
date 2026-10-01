@@ -114,6 +114,10 @@ export function ActivityRail({ agentCount }: { agentCount: number }) {
         <LocationIcon className="w-[18px] h-[18px]" />
       </RailButton>
 
+      <RailButton label={t("sidebar.squads")} path="/squads" active={on("/squads")} onClick={() => navigate("/squads")}>
+        <StackIcon className="w-[18px] h-[18px]" />
+      </RailButton>
+
       <RailButton label={t("sidebar.forge")} path="/forge" active={on("/forge")} onClick={() => navigate("/forge")}>
         <PullRequestIcon className="w-[18px] h-[18px]" />
       </RailButton>

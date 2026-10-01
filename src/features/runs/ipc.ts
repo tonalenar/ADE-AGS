@@ -83,6 +83,8 @@ export const previewRoute = (input: RouteInput) =>
 
 /** Qué se puede lanzar ahora. `refresh` vuelve a sondear las TUIs. */
 export const getRoster = (refresh = false) => invoke<Roster>("run_roster", { refresh });
+export const refreshRosterModels = (agentId: string, accountId: string | null) =>
+  invoke<Roster>("models_refresh", { agentId, accountId });
 
 export const getTiers = () => invoke<Tiers>("run_get_tiers");
 

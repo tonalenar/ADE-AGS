@@ -71,7 +71,7 @@ fn codex() {
     assert!(caps.resume);
     assert!(caps.skills);
     assert!(!caps.mcp);
-    assert!(!caps.models);
+    assert!(caps.models);
     assert!(caps.headless);
     assert!(agent.headless().is_some());
 }

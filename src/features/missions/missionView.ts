@@ -7,15 +7,16 @@ import type { Complexity, PendingApproval, Task, TaskStatus } from "@/features/r
 import type { Mission, MissionInput, MissionStatus } from "./types";
 
 /**
- * La única acción de cada estado. Un borrador se arranca, una que corre se cancela, y una
- * terminada no ofrece nada: reintentar, duplicar o archivar quedan para otra etapa.
+ * Drafts start, running missions cancel, and failed missions can start a new attempt.
  */
-export function missionAction(status: MissionStatus): "start" | "cancel" | null {
+export function missionAction(status: MissionStatus): "start" | "retry" | "cancel" | null {
   switch (status) {
     case "draft":
       return "start";
     case "running":
       return "cancel";
+    case "failed":
+      return "retry";
     default:
       return null;
   }
@@ -126,8 +127,11 @@ export interface MissionForm {
   objective: string;
   cwd: string;
   mode: ModelMode;
+  executionMode: "automatic" | "specific" | "squad";
+  squadId: string | null;
   agentId: string;
-  model: string;
+  model: string | null;
+  reasoningEffort?: string | null;
   autoAccount: boolean;
   /** Con `autoAccount = false`. `null` = la del sistema. */
   accountId: string | null;
@@ -142,8 +146,10 @@ export function emptyForm(cwd: string): MissionForm {
     objective: "",
     cwd,
     mode: "hard",
+    executionMode: "automatic",
+    squadId: null,
     agentId: "claude-code",
-    model: "",
+    model: null,
     autoAccount: true,
     accountId: null,
     maxParallel: 2,
@@ -152,18 +158,36 @@ export function emptyForm(cwd: string): MissionForm {
 }
 
 export function formFromMission(m: Mission): MissionForm {
-  const fixed = m.leadAgentId !== null && m.complexity === null;
+  const fixed = m.leadAgentId !== null;
   return {
     title: m.title,
     objective: m.objective,
     cwd: m.cwd,
-    mode: fixed ? "fixed" : (m.complexity ?? "hard"),
+    mode: fixed ? (m.complexity ?? "fixed") : (m.complexity ?? "hard"),
+    executionMode: m.squadId ? "squad" : fixed ? "specific" : "automatic",
+    squadId: m.squadId ?? null,
     agentId: m.leadAgentId ?? "claude-code",
-    model: m.leadModel ?? "",
+    model: m.leadModel,
+    reasoningEffort: m.reasoningEffort ?? null,
     autoAccount: m.autoAccount,
     accountId: m.leadAccountId,
     maxParallel: m.maxParallel,
     budget: m.budgetUsd === null ? "" : String(m.budgetUsd),
+  };
+}
+
+/** Keep the three execution modes mutually consistent in the editable draft form. */
+export function switchExecutionMode(form: MissionForm, executionMode: MissionForm["executionMode"]): MissionForm {
+  const stayingSpecific = executionMode === "specific" && form.executionMode === "specific";
+  const stayingInSquad = executionMode === "squad" && form.executionMode === "squad";
+  return {
+    ...form,
+    executionMode,
+    reasoningEffort: stayingSpecific ? form.reasoningEffort : null,
+    squadId: stayingInSquad ? form.squadId : null,
+    mode: executionMode === "specific" ? "fixed" : form.mode === "fixed" ? "hard" : form.mode,
+    autoAccount: stayingSpecific ? form.autoAccount : true,
+    accountId: stayingSpecific ? form.accountId : null,
   };
 }
 
@@ -183,7 +207,8 @@ export function missingFields(form: MissionForm): Array<"title" | "objective" | 
 }
 
 export function toInput(form: MissionForm): MissionInput {
-  const fixed = form.mode === "fixed";
+  const squad = form.executionMode === "squad";
+  const fixed = form.executionMode === "specific";
   return {
     title: form.title.trim(),
     objective: form.objective.trim(),
@@ -191,10 +216,12 @@ export function toInput(form: MissionForm): MissionInput {
     maxParallel: form.maxParallel,
     budgetUsd: parseBudget(form.budget),
     // Con complejidad no se fija el agente: el ruteo decide cuál conviene.
-    leadAgentId: fixed ? form.agentId : null,
-    leadModel: fixed ? form.model || null : null,
-    leadAccountId: form.autoAccount ? null : form.accountId,
-    autoAccount: form.autoAccount,
-    complexity: form.mode === "fixed" ? null : form.mode,
+    leadAgentId: squad ? null : fixed ? form.agentId : null,
+    leadModel: squad ? null : fixed && form.mode === "fixed" ? form.model?.trim() || null : null,
+    reasoningEffort: fixed && form.mode === "fixed" ? form.reasoningEffort ?? null : null,
+    leadAccountId: squad || !fixed || form.autoAccount ? null : form.accountId,
+    autoAccount: squad || !fixed ? true : form.autoAccount,
+    complexity: squad || (fixed && form.mode === "fixed") ? null : form.mode === "fixed" ? "hard" : form.mode,
+    squadId: squad ? form.squadId : null,
   };
 }

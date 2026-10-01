@@ -14,9 +14,9 @@
 //! `runs::start_orchestration` que usa la flota.
 
 pub(crate) mod store;
-mod types;
 #[cfg(test)]
 mod test;
+mod types;
 
 pub use types::{Mission, MissionDetail, MissionInput, MissionSummary};
 
@@ -58,19 +58,28 @@ fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
 // ── Lo que no lanza nada ────────────────────────────────────────
 
 /// Un borrador nuevo. Solo escribe la fila.
-pub(crate) fn create(conn: &Connection, workspace_id: &str, input: &MissionInput) -> Result<Mission, String> {
-    let valid = store::validate(input)?;
+pub(crate) fn create(
+    conn: &Connection,
+    workspace_id: &str,
+    input: &MissionInput,
+) -> Result<Mission, String> {
+    let valid = store::validate(conn, input)?;
     store::create(conn, workspace_id, &valid)
 }
 
-pub(crate) fn update(conn: &Connection, mission_id: &str, input: &MissionInput) -> Result<Mission, String> {
-    let valid = store::validate(input)?;
+pub(crate) fn update(
+    conn: &Connection,
+    mission_id: &str,
+    input: &MissionInput,
+) -> Result<Mission, String> {
+    let valid = store::validate(conn, input)?;
     store::update(conn, mission_id, &valid)
 }
 
 /// La misión con sus runs, y las tareas y los hechos del run activo.
 pub(crate) fn detail(conn: &Connection, mission_id: &str) -> Result<MissionDetail, String> {
-    let mission = store::get(conn, mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+    let mission = store::get(conn, mission_id)?
+        .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
     let runs = crate::runs::store::runs_of_mission(conn, &mission.id)?;
     let (tasks, facts) = match &mission.active_run_id {
         Some(run_id) => (
@@ -79,12 +88,17 @@ pub(crate) fn detail(conn: &Connection, mission_id: &str) -> Result<MissionDetai
         ),
         None => (Vec::new(), Vec::new()),
     };
-    Ok(MissionDetail { mission, runs, tasks, facts })
+    Ok(MissionDetail {
+        mission,
+        runs,
+        tasks,
+        facts,
+    })
 }
 
 // ── Arrancar y cancelar ─────────────────────────────────────────
 
-/// Arranca un borrador: rutea el lead, crea su run atado a la misión y lo lanza.
+/// Starts a draft or retries a failed mission with a new run and lead.
 ///
 /// `route` y `launch` son el ruteo y el supervisor de `runs/`; se reciben para poder
 /// probar el ciclo entero sin lanzar un agente.
@@ -99,30 +113,64 @@ pub(crate) fn start(
     route: impl FnOnce(&RouteRequest) -> Result<Assignment, String>,
     launch: impl FnOnce(&Task) -> Result<(), String>,
 ) -> Result<Mission, String> {
-    let mission = {
+    let (mission, squad) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        store::get(&conn, mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?
+        let mission = store::get(&conn, mission_id)?
+            .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+        let squad = mission
+            .squad_id
+            .as_deref()
+            .map(|id| {
+                crate::squads::store::get(&conn, id)?
+                    .ok_or_else(|| format!("no squad '{id}' exists"))
+            })
+            .transpose()?;
+        (mission, squad)
     };
-    if mission.status != status::DRAFT {
-        return Err(format!("la misión ya no es un borrador ({})", mission.status));
+    if !matches!(mission.status.as_str(), status::DRAFT | status::FAILED) {
+        return Err("missions.error.notStartable".into());
     }
     if !Path::new(&mission.cwd).is_dir() {
         return Err(format!("la carpeta {} no existe", mission.cwd));
     }
-    if let Some(agent) = &mission.lead_agent_id {
-        crate::runs::ensure_headless(agent)?;
+    if let Some(squad) = &squad {
+        if !squad.available {
+            return Err(format!(
+                "Squad '{}' unavailable: {}",
+                squad.name,
+                squad.unavailable_reasons.join("; ")
+            ));
+        }
+    }
+    if let Some(agent) = squad
+        .as_ref()
+        .map(|s| &s.lead.agent_id)
+        .or(mission.lead_agent_id.as_ref())
+    {
+        crate::runs::ensure_orchestration(agent)?;
     }
 
-    let (request, complexity) = crate::runs::lead_request(
-        mission.lead_agent_id.clone(),
-        mission.lead_model.clone(),
-        mission.complexity.as_deref().and_then(Complexity::parse),
-        mission.lead_account_id.clone(),
-        mission.auto_account,
-    );
+    let (request, complexity) = if let Some(squad) = &squad {
+        crate::runs::lead_request(
+            Some(squad.lead.agent_id.clone()),
+            squad.lead.model.clone(),
+            squad.lead.complexity.as_deref().and_then(Complexity::parse),
+            squad.lead.account_id.clone(),
+            squad.lead.auto_account,
+        )
+    } else {
+        crate::runs::lead_request(
+            mission.lead_agent_id.clone(),
+            mission.lead_model.clone(),
+            mission.complexity.as_deref().and_then(Complexity::parse),
+            mission.lead_account_id.clone(),
+            mission.auto_account,
+        )
+    };
     let assignment = route(&request)?;
 
     let spec = crate::runs::Orchestration {
+        reasoning_effort: squad.as_ref().and_then(|team| team.lead.reasoning_effort.as_deref()).or(mission.reasoning_effort.as_deref()),
         workspace_id: &mission.workspace_id,
         cwd: &mission.cwd,
         objective: &mission.objective,
@@ -130,12 +178,13 @@ pub(crate) fn start(
         max_parallel: mission.max_parallel,
         budget_usd: mission.budget_usd,
         mission_id: Some(&mission.id),
+        squad: squad.as_ref(),
     };
     let mark = |conn: &Connection, lead: &Task| {
-        if store::mark_started(conn, &mission.id, &lead.run_id)? {
+        if store::mark_started(conn, &mission, &lead.run_id)? {
             Ok(())
         } else {
-            Err("la misión ya se había arrancado".to_string())
+            Err("missions.error.changed".to_string())
         }
     };
     crate::runs::start_orchestration(db, &spec, &assignment, complexity, mark, launch)?;
@@ -153,17 +202,24 @@ pub(crate) fn cancel(
 ) -> Result<Mission, String> {
     let mission = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        store::get(&conn, mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?
+        store::get(&conn, mission_id)?
+            .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?
     };
     match mission.status.as_str() {
         status::DRAFT => {
             let conn = db.lock().map_err(|e| e.to_string())?;
             if !store::cancel_draft(&conn, mission_id)? {
-                return Err("la misión arrancó mientras tanto: volvé a intentar para cancelar su run".into());
+                return Err(
+                    "la misión arrancó mientras tanto: volvé a intentar para cancelar su run"
+                        .into(),
+                );
             }
         }
         status::RUNNING => {
-            let run_id = mission.active_run_id.as_deref().ok_or("la misión corre sin run activo")?;
+            let run_id = mission
+                .active_run_id
+                .as_deref()
+                .ok_or("la misión corre sin run activo")?;
             cancel_run(run_id)?;
         }
         other => return Err(format!("la misión ya terminó ({other})")),
@@ -205,13 +261,19 @@ pub fn mission_update<R: Runtime>(
 }
 
 #[tauri::command]
-pub fn mission_list(workspace_id: String, db: tauri::State<DbConnection>) -> Result<Vec<MissionSummary>, String> {
+pub fn mission_list(
+    workspace_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Vec<MissionSummary>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list(&conn, &workspace_id)
 }
 
 #[tauri::command]
-pub fn mission_get(mission_id: String, db: tauri::State<DbConnection>) -> Result<MissionDetail, String> {
+pub fn mission_get(
+    mission_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<MissionDetail, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     detail(&conn, &mission_id)
 }
@@ -225,7 +287,7 @@ pub async fn mission_start(app: AppHandle, mission_id: String) -> Result<Mission
         let result = start(
             &db,
             &mission_id,
-            |request| crate::runs::route_now(&db, request),
+            |request| crate::runs::route_lead_now(&db, request),
             |lead| crate::runs::launch_lead(&app, lead),
         );
         // También si falló: un lead que no se pudo lanzar deja la misión en `failed`.
@@ -239,7 +301,9 @@ pub async fn mission_start(app: AppHandle, mission_id: String) -> Result<Mission
 #[tauri::command]
 pub fn mission_cancel(app: AppHandle, mission_id: String) -> Result<Mission, String> {
     let db = db_of(&app)?;
-    let result = cancel(&db, &mission_id, |run_id| crate::runs::cancel_run(&app, run_id));
+    let result = cancel(&db, &mission_id, |run_id| {
+        crate::runs::cancel_run(&app, run_id)
+    });
     notify(&app, &mission_id);
     result
 }

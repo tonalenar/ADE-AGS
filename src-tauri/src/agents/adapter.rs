@@ -32,7 +32,7 @@ use super::registry::{AgentDef, McpStyle, ModelSource, SHELL_AGENT_ID, SessionSo
 ///
 /// Una capacidad futura se queda en `false` hasta que el comportamiento exista. Gemini, por
 /// ejemplo, descubre sesiones y la flota sabe lanzarlo, pero no aísla cuentas.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(serde::Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Capabilities {
     pub accounts: bool,
     pub sessions: bool,
@@ -41,12 +41,16 @@ pub struct Capabilities {
     pub mcp: bool,
     pub models: bool,
     pub headless: bool,
+    pub orchestration: bool,
 }
 
 /// Comportamiento de una TUI de fábrica. La fila se lee con [`AgentAdapter::def`]; este
 /// trait no vuelve a declarar comando, resume ni estilo de MCP.
 pub trait AgentAdapter: Send + Sync {
     fn def(&self) -> &'static AgentDef;
+
+    /// The headless launcher can receive the ADE MCP orchestration tools.
+    fn supports_orchestration(&self) -> bool { false }
 
     /// La flota sabe lanzarla. `false` en el shell: no es un agente headless.
     fn has_headless(&self) -> bool {
@@ -88,6 +92,7 @@ pub trait AgentAdapter: Send + Sync {
             // `Unknown` es "no sabemos listarlos", no una lista vacía que igual cuenta.
             models: !matches!(def.models, ModelSource::Unknown),
             headless: self.has_headless(),
+            orchestration: self.supports_orchestration(),
         }
     }
 }
@@ -99,6 +104,7 @@ fn row(id: &'static str) -> &'static AgentDef {
 struct Claude;
 
 impl AgentAdapter for Claude {
+    fn supports_orchestration(&self) -> bool { true }
     fn def(&self) -> &'static AgentDef {
         row("claude-code")
     }
@@ -147,6 +153,7 @@ impl AgentAdapter for Codex {
 struct OpenCode;
 
 impl AgentAdapter for OpenCode {
+    fn supports_orchestration(&self) -> bool { true }
     fn def(&self) -> &'static AgentDef {
         row("opencode")
     }
@@ -230,5 +237,6 @@ pub fn custom_capabilities(agent: &CustomAgent) -> Capabilities {
         mcp: false,
         models: false,
         headless: false,
+        orchestration: false,
     }
 }

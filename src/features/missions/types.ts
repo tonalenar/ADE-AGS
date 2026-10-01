@@ -19,10 +19,13 @@ export interface Mission {
   /** `null` = lo elige el ruteo por complejidad. */
   leadAgentId: string | null;
   leadModel: string | null;
+  reasoningEffort?: string | null;
   /** Con `autoAccount = false`, `null` es la cuenta del sistema. */
   leadAccountId: string | null;
   autoAccount: boolean;
   complexity: Complexity | null;
+  /** Null for existing Missions that use the current routing policy. */
+  squadId?: string | null;
   /** El run que la está cumpliendo. `null` mientras es borrador. */
   activeRunId: string | null;
   createdAt: number;
@@ -40,9 +43,11 @@ export interface MissionInput {
   budgetUsd: number | null;
   leadAgentId: string | null;
   leadModel: string | null;
+  reasoningEffort?: string | null;
   leadAccountId: string | null;
   autoAccount: boolean;
   complexity: Complexity | null;
+  squadId?: string | null;
 }
 
 /** Una fila de la lista, con el avance de su run activo. */

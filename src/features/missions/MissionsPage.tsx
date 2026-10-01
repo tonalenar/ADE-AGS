@@ -4,9 +4,16 @@ import { listen } from "@tauri-apps/api/event";
 import { Alert, AnimateSpin, Button, EmptyState, LocationIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { accountProblemText } from "@/features/accounts/problem";
 import { PermissionCard } from "@/features/runs/PermissionCard";
 import { useRunsStore } from "@/features/runs/store";
+import { getRoster } from "@/features/runs/ipc";
+import { leadUnsupported } from "@/features/runs/leadProviders";
+import type { Roster } from "@/features/runs/types";
 import type { PendingApproval, Task } from "@/features/runs/types";
+import { useSquadsStore } from "@/features/squads/store";
+import { useSquadAccountLabel } from "@/features/squads/accountLabel";
+import type { Squad } from "@/features/squads/types";
 
 import { MissionDialog } from "./MissionDialog";
 import {
@@ -20,6 +27,7 @@ import type { MissionDetail, MissionSummary } from "./types";
 const TASK_CHANGED = "cc-task-changed";
 /** El de una misión creada, editada, arrancada, cerrada o cancelada. Ver `missions/mod.rs`. */
 const MISSION_CHANGED = "cc-mission-changed";
+const SQUAD_CHANGED = "cc-squad-changed";
 
 const STATUS_TONE: Record<MissionPhase, string> = {
   draft: "bg-gray-200 text-gray-700 dark:bg-white/10 dark:text-white/60",
@@ -48,6 +56,8 @@ export function MissionsPage() {
   const loadDetail = useMissionsStore((s) => s.loadDetail);
   const onTaskChanged = useMissionsStore((s) => s.onTaskChanged);
   const onMissionChanged = useMissionsStore((s) => s.onMissionChanged);
+  const squads = useSquadsStore((s) => s.squads);
+  const loadSquads = useSquadsStore((s) => s.load);
 
   const [selected, setSelected] = useState<string | null>(null);
   const [dialog, setDialog] = useState<"new" | "edit" | null>(null);
@@ -58,6 +68,13 @@ export function MissionsPage() {
   useEffect(() => {
     if (workspaceId) load(workspaceId).catch((e) => setError(String(e)));
   }, [workspaceId, load]);
+
+  useEffect(() => { loadSquads().catch((e) => setError(String(e))); }, [loadSquads]);
+
+  useEffect(() => {
+    const off = listen<{ squad_id: string }>(SQUAD_CHANGED, () => { loadSquads().catch(console.error); });
+    return () => { off.then((unlisten) => unlisten()).catch(() => {}); };
+  }, [loadSquads]);
 
   useEffect(() => {
     if (selected) loadDetail(selected).catch((e) => setError(String(e)));
@@ -82,6 +99,9 @@ export function MissionsPage() {
 
   const summary = missions.find((m) => m.id === selected) ?? null;
   const detail = selected ? details[selected] ?? null : null;
+  const selectedSquad = (detail?.mission.squadId ?? summary?.squadId)
+    ? squads.find((squad) => squad.id === (detail?.mission.squadId ?? summary?.squadId)) ?? null
+    : null;
 
   // La cola de permisos es la de la flota (la mantiene `useFleetEvents` desde el shell):
   // decidir acá o allá es lo mismo, y los dos lados se enteran por el mismo evento.
@@ -138,6 +158,7 @@ export function MissionsPage() {
             <MissionDetailView
               summary={summary}
               detail={detail}
+              squad={selectedSquad}
               approvals={approvalsFor(approvals, detail.tasks)}
               onEdit={() => setDialog("edit")}
               onError={setError}
@@ -230,19 +251,24 @@ function ProgressLabel({ progress }: { progress: Progress }) {
   );
 }
 
-function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
+function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError }: {
   summary: MissionSummary;
   detail: MissionDetail;
+  squad: Squad | null;
   /** Los permisos que esperan en las tareas de su run activo. */
   approvals: PendingApproval[];
   onEdit: () => void;
   onError: (e: string) => void;
 }) {
   const { t } = useTranslation();
+  const accountLabel = useSquadAccountLabel();
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const decideApproval = useRunsStore((s) => s.decideApproval);
   const [busy, setBusy] = useState(false);
   const { mission, tasks, facts, runs } = detail;
+  const [roster, setRoster] = useState<Roster | null>(null);
+  useEffect(() => { getRoster().then(setRoster).catch(() => setRoster(null)); }, []);
+  const unsupportedLead = leadUnsupported(roster?.agents.find((agent) => agent.agentId === mission.leadAgentId));
   const run = runs.find((r) => r.id === mission.activeRunId) ?? null;
   const lead = tasks.find((tk) => tk.role === "lead") ?? null;
   const action = missionAction(mission.status);
@@ -253,15 +279,16 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
   const progress = progressOf(summary);
   const firstApproval = approvals[0]?.id ?? null;
 
-  const act = async (kind: "start" | "cancel") => {
+  const act = async (kind: "start" | "retry" | "cancel") => {
     if (!workspaceId) return;
     setBusy(true);
     onError("");
     try {
       const store = useMissionsStore.getState();
-      await (kind === "start" ? store.start(workspaceId, mission.id) : store.cancel(workspaceId, mission.id));
+      await (kind === "cancel" ? store.cancel(workspaceId, mission.id) : store.start(workspaceId, mission.id));
     } catch (e) {
-      onError(String(e));
+      const problem = String(e);
+      onError(t(problem, { defaultValue: problem }));
     } finally {
       setBusy(false);
     }
@@ -269,12 +296,17 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
 
   const provider = lead
     ? `${lead.agentId}${lead.model ? ` · ${lead.model}` : ""}`
+    : squad
+      ? `${squad.lead.agentId}${squad.lead.model ? ` · ${squad.lead.model}` : ""}`
     : mission.leadAgentId
       ? `${mission.leadAgentId}${mission.leadModel ? ` · ${mission.leadModel}` : ""}`
       : t("missions.autoProvider", { complexity: t(`fleet.complexity.${mission.complexity ?? "hard"}`) });
   const account = lead
-    ? (lead.accountId ?? t("accounts.system"))
+    ? accountLabel(lead.accountId, false)
+    : squad
+      ? accountLabel(squad.lead.accountId, squad.lead.autoAccount)
     : mission.autoAccount ? t("missions.autoAccount") : (mission.leadAccountId ?? t("accounts.system"));
+  const unavailableSquad = Boolean(mission.squadId && (!squad || !squad.available));
 
   return (
     <div className="flex flex-col gap-4 p-5">
@@ -291,9 +323,9 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
         )}
         {action && (
           <Button
-            variant={action === "start" ? "primary" : "danger"}
+            variant={action === "cancel" ? "danger" : "primary"}
             size="sm"
-            disabled={busy}
+            disabled={busy || (action !== "cancel" && (unavailableSquad || unsupportedLead))}
             onClick={() => act(action)}
             leftIcon={busy ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
           >
@@ -303,6 +335,13 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
       </div>
 
       {mission.status === "draft" && <Alert variant="info">{t("missions.draftNotice")}</Alert>}
+      {mission.status === "failed" && <Alert variant="info">{t("missions.retryNotice")}</Alert>}
+      {action && action !== "cancel" && unsupportedLead && <Alert variant="warning">{t("squads.leadUnsupported")}</Alert>}
+      {action && action !== "cancel" && mission.squadId && unavailableSquad && (
+        <Alert variant="warning">
+          {squad ? squad.unavailableReasons.join("; ") : t("missions.squadUnavailable")}
+        </Alert>
+      )}
       {phase === "waiting_approval" && (
         <Alert variant="warning">{t("missions.waitingNotice", { count: approvals.length })}</Alert>
       )}
@@ -320,6 +359,35 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
         />
         <Stat label={t("missions.detail.spent")} value={`$${summary.spentUsd.toFixed(3)}`} />
       </dl>
+
+      {run?.squadName ? (
+        <Section title={t("missions.squadUsed", { name: run.squadName })}>
+          <div className="flex flex-col gap-1.5 text-[10.5px] text-gray-500 dark:text-white/45">
+            {lead && (
+              <div className="flex justify-between gap-3">
+                <span className="font-medium text-violet-700 dark:text-violet-300">{t("squads.lead")}</span>
+                <span className="truncate text-right">
+                  {lead.agentId}{lead.model ? ` · ${lead.model}` : ""} · {accountLabel(lead.accountId, false)}
+                </span>
+              </div>
+            )}
+            {run.squadMembers?.map((member) => (
+              <div key={member.roleId} className="flex justify-between gap-3">
+                <span className="font-medium text-gray-700 dark:text-gray-300">
+                  {t(`squads.roleNames.${member.roleId}`, { defaultValue: member.roleId })}
+                </span>
+                <span className="truncate text-right">
+                  {member.agentId}{member.model ? ` · ${member.model}` : ""} · {accountLabel(member.accountId, member.autoAccount)}
+                </span>
+              </div>
+            ))}
+          </div>
+        </Section>
+      ) : squad ? (
+        <Section title={t("squads.title")}>
+          <SquadSummary squad={squad} accountLabel={accountLabel} />
+        </Section>
+      ) : null}
 
       {run && (
         <Section title={t("missions.detail.run")}>
@@ -353,6 +421,7 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
                   key={task.id}
                   task={task}
                   tasks={tasks}
+                  accountLabel={accountLabel}
                   blocked={blockedTasks}
                   approval={approval}
                   focused={approval?.id === firstApproval}
@@ -382,9 +451,10 @@ function MissionDetailView({ summary, detail, approvals, onEdit, onError }: {
   );
 }
 
-function TaskRow({ task, tasks, blocked, approval, focused, onDecide }: {
+function TaskRow({ task, tasks, accountLabel, blocked, approval, focused, onDecide }: {
   task: Task;
   tasks: Task[];
+  accountLabel: (accountId: string | null, autoAccount: boolean) => string;
   blocked: ReadonlySet<string>;
   approval?: PendingApproval;
   focused: boolean;
@@ -393,7 +463,7 @@ function TaskRow({ task, tasks, blocked, approval, focused, onDecide }: {
   const { t } = useTranslation();
   const deps = dependencyLabels(task, tasks);
   const state = agentStateOf(task, tasks, blocked);
-  const outcome = task.error ?? task.result;
+  const outcome = task.error ? accountProblemText(task.error, t) : task.result;
   return (
     <li className="flex flex-col gap-1 px-3 py-2">
       <span className="flex items-center gap-2 min-w-0 text-[11.5px]">
@@ -401,9 +471,14 @@ function TaskRow({ task, tasks, blocked, approval, focused, onDecide }: {
         {task.role === "lead" && (
           <span className="shrink-0 text-[9.5px] font-bold uppercase text-violet-600 dark:text-violet-400">{t("fleet.card.lead")}</span>
         )}
+        {task.functionalRole && (
+          <span className="shrink-0 rounded px-1 py-px text-[9px] font-semibold text-sky-700 dark:text-sky-300 bg-sky-500/10">
+            {t(`squads.roleNames.${task.functionalRole}`, { defaultValue: task.functionalRole })}
+          </span>
+        )}
         <span className="flex-1 truncate font-medium text-gray-800 dark:text-gray-200">{task.planKey ?? task.title}</span>
         <span className="shrink-0 text-[10.5px] text-gray-400 dark:text-white/35">
-          {task.agentId}{task.model ? ` · ${task.model}` : ""}
+          {task.agentId}{task.model ? ` · ${task.model}` : ""}{task.accountId ? ` · ${accountLabel(task.accountId, false)}` : ""}
         </span>
         <span className="shrink-0 text-[10.5px] text-gray-500 dark:text-white/45">{t(`missions.state.${state}`)}</span>
         {task.costUsd !== null && <span className="shrink-0 tabular-nums text-[10.5px] text-gray-400">${task.costUsd.toFixed(3)}</span>}
@@ -426,6 +501,27 @@ function TaskRow({ task, tasks, blocked, approval, focused, onDecide }: {
         </div>
       )}
     </li>
+  );
+}
+
+function SquadSummary({ squad, accountLabel }: {
+  squad: Squad;
+  accountLabel: (accountId: string | null, autoAccount: boolean) => string;
+}) {
+  const { t } = useTranslation();
+  return (
+    <div className="flex flex-col gap-1.5 text-[10.5px] text-gray-500 dark:text-white/45">
+      <div>{t("squads.lead")}: {squad.lead.agentId}{squad.lead.model ? ` · ${squad.lead.model}` : ""} · {accountLabel(squad.lead.accountId, squad.lead.autoAccount)}</div>
+      {squad.members.map((member) => (
+        <div key={member.roleId} className="flex justify-between gap-3">
+          <span className="font-medium text-gray-700 dark:text-gray-300">{t(`squads.roleNames.${member.roleId}`, { defaultValue: member.roleId })}</span>
+          <span className="truncate text-right">
+            {member.agentId}{member.model ? ` · ${member.model}` : ""} · {accountLabel(member.accountId, member.autoAccount)}
+          </span>
+          {member.availability !== "available" && <span className="text-amber-700 dark:text-amber-300">{t(`squads.availability.${member.availability}`)}</span>}
+        </div>
+      ))}
+    </div>
   );
 }
 

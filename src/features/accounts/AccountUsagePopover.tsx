@@ -10,6 +10,7 @@ import {
 } from "./usage";
 import { accountEnv } from "./ipc";
 import type { AgentAccount } from "./types";
+import { accountProblemKey, accountProblemText } from "./problem";
 
 /** Un perfil sintético (`system:*`) no tiene fila en la base: para el backend es `null`. */
 function realAccountId(account: AgentAccount): string | null {
@@ -21,7 +22,7 @@ function realAccountId(account: AgentAccount): string | null {
  * como lo informa la TUI. Solo eso — los tokens de los transcripts son consumo, no cuota,
  * y al lado de las barras se confundían con ella.
  */
-export function AccountUsagePopover({ account }: { account: AgentAccount }) {
+export function AccountUsagePopover({ account, onLogin }: { account: AgentAccount; onLogin: () => void }) {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<AccountUsage | null>(null);
   const [live, setLive] = useState<LiveUsage | null>(null);
@@ -87,6 +88,8 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
 
   const plan = planLabel(usage?.plan.tier ?? null);
   const now = Math.floor(Date.now() / 1000);
+  const problemKey = accountProblemKey(live?.problem ?? null);
+  const needsLogin = !account.loggedIn || problemKey === "accounts.auth.expired" || problemKey === "accounts.auth.required";
 
   return (
     <div className="flex flex-col gap-3 w-72 p-3.5">
@@ -104,7 +107,7 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
           <Badge variant="accent" size="sm" className="shrink-0">{plan}</Badge>
         ) : (
           <span className={`w-1.5 h-1.5 rounded-full shrink-0
-            ${account.loggedIn ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/20"}`} />
+            ${needsLogin ? "bg-gray-300 dark:bg-white/20" : "bg-emerald-500"}`} />
         )}
       </div>
 
@@ -202,7 +205,17 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
               </div>
             </>
           ) : live ? (
-            <Alert variant="neutral">{live.problem ?? t("accounts.plan.failed")}</Alert>
+            <>
+              <Alert variant={needsLogin ? "warning" : "neutral"}>{accountProblemText(live.problem, t)}</Alert>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={onLogin}>
+                  {t("settings.accounts.relogin")}
+                </Button>
+                <Button variant="outline" size="sm" disabled={refreshing} onClick={() => setReload((n) => n + 1)}>
+                  {t("accounts.plan.refresh")}
+                </Button>
+              </div>
+            </>
           ) : null}
         </div>
       )}

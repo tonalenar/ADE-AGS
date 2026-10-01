@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 19;
+const SCHEMA_VERSION: i32 = 21;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -37,7 +37,8 @@ fn table_exists(conn: &Connection, name: &str) -> bool {
 }
 
 fn has_column(conn: &Connection, table: &str, column: &str) -> bool {
-    conn.prepare(&format!("SELECT {column} FROM {table} LIMIT 1")).is_ok()
+    conn.prepare(&format!("SELECT {column} FROM {table} LIMIT 1"))
+        .is_ok()
 }
 
 /// En qué versión está una base que todavía no tiene `user_version` (todas las creadas
@@ -106,7 +107,10 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         // Antes esto recreaba `tabs` desde cero, o sea que actualizar la app te borraba
         // todas las tabs guardadas. La columna se puede agregar sin más: las filas que ya
         // existían no saben cuándo se abrieron, y 0 es exactamente eso.
-        conn.execute("ALTER TABLE tabs ADD COLUMN opened_at INTEGER NOT NULL DEFAULT 0", [])?;
+        conn.execute(
+            "ALTER TABLE tabs ADD COLUMN opened_at INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
     }
 
     // Va ACÁ y no más abajo a propósito: el batch de más adelante crea un índice único
@@ -122,7 +126,10 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     // existían quedan con `''` = "todas las carpetas", que es exactamente lo que
     // significaban, así que nadie pierde una skill al actualizar.
     if table_exists(conn, "project_skills") && !has_column(conn, "project_skills", "cwd") {
-        conn.execute("ALTER TABLE project_skills ADD COLUMN cwd TEXT NOT NULL DEFAULT ''", [])?;
+        conn.execute(
+            "ALTER TABLE project_skills ADD COLUMN cwd TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
 
         // Los índices únicos nuevos no se pueden crear sobre filas repetidas, y repetidas
         // puede haber: hasta acá el upsert de scope='workspace' nunca encontraba conflicto
@@ -546,8 +553,14 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
             "ALTER TABLE tasks ADD COLUMN parent_id TEXT REFERENCES tasks(id) ON DELETE SET NULL",
             [],
         )?;
-        conn.execute("ALTER TABLE tasks ADD COLUMN depth INTEGER NOT NULL DEFAULT 0", [])?;
-        conn.execute("ALTER TABLE tasks ADD COLUMN isolate INTEGER NOT NULL DEFAULT 0", [])?;
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN depth INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN isolate INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
         conn.execute("ALTER TABLE tasks ADD COLUMN result_schema TEXT", [])?;
         conn.execute("ALTER TABLE tasks ADD COLUMN last_error TEXT", [])?;
     }
@@ -620,6 +633,65 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     }
     conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_runs_mission ON runs(mission_id);")?;
 
+    // v20 — Built-in functional roles and reusable Squads. Roles stay declarative in code;
+    // only Squad routing policies and immutable per-Run snapshots are persisted.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS squads (
+             id                  TEXT PRIMARY KEY,
+             name                TEXT NOT NULL UNIQUE,
+             description         TEXT NOT NULL DEFAULT '',
+             lead_agent_id       TEXT NOT NULL,
+             lead_model          TEXT,
+             lead_account_id     TEXT,
+             lead_auto_account   INTEGER NOT NULL DEFAULT 0,
+             lead_complexity     TEXT,
+             created_at          INTEGER NOT NULL,
+             updated_at          INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS squad_members (
+             squad_id        TEXT NOT NULL REFERENCES squads(id) ON DELETE CASCADE,
+             role_id         TEXT NOT NULL,
+             agent_id        TEXT NOT NULL,
+             model           TEXT,
+             account_id      TEXT,
+             auto_account    INTEGER NOT NULL DEFAULT 0,
+             complexity      TEXT,
+             isolate_default INTEGER NOT NULL DEFAULT 0,
+             PRIMARY KEY (squad_id, role_id)
+         );
+         CREATE INDEX IF NOT EXISTS idx_squad_members_role ON squad_members(role_id);
+         CREATE TABLE IF NOT EXISTS run_squad_members (
+             run_id          TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+             role_id         TEXT NOT NULL,
+             agent_id        TEXT NOT NULL,
+             model           TEXT,
+             account_id      TEXT,
+             auto_account    INTEGER NOT NULL DEFAULT 0,
+             complexity      TEXT,
+             isolate_default INTEGER NOT NULL DEFAULT 0,
+             PRIMARY KEY (run_id, role_id)
+         );",
+    )?;
+    if !has_column(conn, "missions", "squad_id") {
+        conn.execute("ALTER TABLE missions ADD COLUMN squad_id TEXT REFERENCES squads(id) ON DELETE RESTRICT", [])?;
+    }
+    if !has_column(conn, "runs", "squad_id") {
+        conn.execute(
+            "ALTER TABLE runs ADD COLUMN squad_id TEXT REFERENCES squads(id) ON DELETE RESTRICT",
+            [],
+        )?;
+        conn.execute("ALTER TABLE runs ADD COLUMN squad_name TEXT", [])?;
+    } else if !has_column(conn, "runs", "squad_name") {
+        conn.execute("ALTER TABLE runs ADD COLUMN squad_name TEXT", [])?;
+    }
+    if !has_column(conn, "tasks", "functional_role") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN functional_role TEXT", [])?;
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_missions_squad ON missions(squad_id);
+         CREATE INDEX IF NOT EXISTS idx_runs_squad ON runs(squad_id);",
+    )?;
+
     // Columna agregada después de que `tabs` ya existía en instalaciones reales, así que
     // se suma con ALTER en vez de recrear la tabla (que perdería las tabs guardadas).
     if conn.prepare("SELECT history_id FROM tabs LIMIT 1").is_err() {
@@ -628,7 +700,10 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     if conn.prepare("SELECT account_id FROM tabs LIMIT 1").is_err() {
         conn.execute("ALTER TABLE tabs ADD COLUMN account_id TEXT", [])?;
     }
-    if conn.prepare("SELECT account_id FROM session_history LIMIT 1").is_err() {
+    if conn
+        .prepare("SELECT account_id FROM session_history LIMIT 1")
+        .is_err()
+    {
         conn.execute("ALTER TABLE session_history ADD COLUMN account_id TEXT", [])?;
     }
     // Cadena de pre-lanzamiento de la tab, como JSON (ver `prelaunch::steps_to_json`). Se
@@ -637,15 +712,24 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     // Va con DEFAULT '[]' y NOT NULL para que leerla nunca tenga que distinguir vacío de
     // nulo.
     if conn.prepare("SELECT prelaunch FROM tabs LIMIT 1").is_err() {
-        conn.execute("ALTER TABLE tabs ADD COLUMN prelaunch TEXT NOT NULL DEFAULT '[]'", [])?;
+        conn.execute(
+            "ALTER TABLE tabs ADD COLUMN prelaunch TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )?;
     }
-    if conn.prepare("SELECT prelaunch FROM session_history LIMIT 1").is_err() {
+    if conn
+        .prepare("SELECT prelaunch FROM session_history LIMIT 1")
+        .is_err()
+    {
         conn.execute(
             "ALTER TABLE session_history ADD COLUMN prelaunch TEXT NOT NULL DEFAULT '[]'",
             [],
         )?;
     }
-    if conn.prepare("SELECT sibling_tabs FROM session_history LIMIT 1").is_err() {
+    if conn
+        .prepare("SELECT sibling_tabs FROM session_history LIMIT 1")
+        .is_err()
+    {
         conn.execute(
             "ALTER TABLE session_history ADD COLUMN sibling_tabs TEXT NOT NULL DEFAULT '[]'",
             [],
@@ -659,7 +743,10 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     // Con ALTER y no recreando la tabla: las skills instaladas viven en disco y sus filas
     // son lo único que las conecta con sus symlinks. Las que ya estaban quedan en NULL —
     // se muestran como locales hasta que se reinstalen.
-    if conn.prepare("SELECT registry_id FROM skills LIMIT 1").is_err() {
+    if conn
+        .prepare("SELECT registry_id FROM skills LIMIT 1")
+        .is_err()
+    {
         conn.execute("ALTER TABLE skills ADD COLUMN registry_id TEXT", [])?;
         conn.execute("ALTER TABLE skills ADD COLUMN registry_name TEXT", [])?;
     }
@@ -679,6 +766,12 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         conn.execute("ALTER TABLE skills ADD COLUMN origin_skill_id TEXT", [])?;
     }
 
+    // v21 ? per-execution reasoning effort, nullable for legacy records.
+    for table in ["tasks", "missions", "squads", "squad_members", "run_squad_members"] {
+        if !has_column(conn, table, "reasoning_effort") {
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN reasoning_effort TEXT;"))?;
+        }
+    }
     set_user_version(conn, SCHEMA_VERSION)?;
     Ok(())
 }
@@ -690,7 +783,8 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
 #[cfg(test)]
 pub(crate) fn in_memory() -> Connection {
     let conn = Connection::open_in_memory().expect("base en memoria");
-    conn.execute_batch("PRAGMA foreign_keys = ON;").expect("pragma");
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .expect("pragma");
     migrate(&conn).expect("migración del schema de prueba");
     conn
 }

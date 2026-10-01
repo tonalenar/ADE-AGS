@@ -129,22 +129,16 @@ pub struct ModelAlias {
 pub enum ModelSource {
     /// Una lista fija de alias.
     Aliases(&'static [ModelAlias]),
+    /// Catálogo visible consultado mediante `codex app-server model/list`.
+    CodexAppServer,
+    /// Modelos declarados por el perfil Claude Code y aliases observables en su CLI.
+    ClaudeCode,
     /// Se le pregunta al binario con `opencode models --verbose`, que trae proveedor,
     /// precio, contexto y si el modelo puede usar herramientas.
     OpencodeModels,
     /// No se sabe listarlos.
     Unknown,
 }
-
-/// Los alias de `claude --model`. Verificados contra `claude --help` de la 2.1.269 ("an
-/// alias for the latest model (e.g. 'fable', 'opus', or 'sonnet')") y `haiku` con una
-/// corrida real, que resolvió a `claude-haiku-4-5-20251001`. Precios de lista a junio 2026.
-const CLAUDE_MODELS: &[ModelAlias] = &[
-    ModelAlias { id: "haiku", label: "Haiku", cost_in: 1.0, cost_out: 5.0, context: 200_000 },
-    ModelAlias { id: "sonnet", label: "Sonnet", cost_in: 2.0, cost_out: 10.0, context: 1_000_000 },
-    ModelAlias { id: "opus", label: "Opus", cost_in: 5.0, cost_out: 25.0, context: 1_000_000 },
-    ModelAlias { id: "fable", label: "Fable", cost_in: 10.0, cost_out: 50.0, context: 1_000_000 },
-];
 
 /// Todo lo que la app sabe de una TUI de fábrica, en una fila.
 #[derive(Clone, Copy, Debug)]
@@ -199,7 +193,7 @@ pub const AGENTS: &[AgentDef] = &[
         }),
         resume: Some("--resume {session}"),
         sessions: SessionSource::ClaudeProjects,
-        models: ModelSource::Aliases(CLAUDE_MODELS),
+        models: ModelSource::ClaudeCode,
         mcp: McpStyle::ClaudeFlags,
     },
     AgentDef {
@@ -231,7 +225,7 @@ pub const AGENTS: &[AgentDef] = &[
         }),
         resume: Some("resume {session}"),
         sessions: SessionSource::CodexRollouts,
-        models: ModelSource::Unknown,
+        models: ModelSource::CodexAppServer,
         mcp: McpStyle::None,
     },
     AgentDef {

@@ -2,25 +2,33 @@
 
 use super::custom::SessionIdSource;
 
-
 #[test]
 fn session_id_source_parses_both_forms() {
-    assert_eq!(SessionIdSource::parse("filename"), SessionIdSource::Filename);
+    assert_eq!(
+        SessionIdSource::parse("filename"),
+        SessionIdSource::Filename
+    );
     assert_eq!(
         SessionIdSource::parse("field:session_id"),
         SessionIdSource::Field("session_id".to_string())
     );
-    assert_eq!(SessionIdSource::parse("field: id "), SessionIdSource::Field("id".to_string()));
+    assert_eq!(
+        SessionIdSource::parse("field: id "),
+        SessionIdSource::Field("id".to_string())
+    );
     // Formas inválidas caen al default en vez de romper: el descubrimiento por nombre
     // de archivo es el que funciona sin conocer nada del formato interno.
     assert_eq!(SessionIdSource::parse("field:"), SessionIdSource::Filename);
-    assert_eq!(SessionIdSource::parse("cualquier cosa"), SessionIdSource::Filename);
+    assert_eq!(
+        SessionIdSource::parse("cualquier cosa"),
+        SessionIdSource::Filename
+    );
 }
 
 // ── El registro único ───────────────────────────────────────────
 
-use super::registry::{agent_def, AGENTS};
 use super::SessionSource;
+use super::registry::{AGENTS, agent_def};
 
 /// Los valores que el registro tiene que seguir devolviendo, TUI por TUI.
 ///
@@ -45,29 +53,73 @@ fn el_registro_conserva_los_valores_que_estaban_repartidos() {
         env_var: Option<&'static str>,
         resume: Option<&'static str>,
     ) -> Esperado {
-        Esperado { id, command, skills_dir, env_var, resume }
+        Esperado {
+            id,
+            command,
+            skills_dir,
+            env_var,
+            resume,
+        }
     }
 
     let esperado = [
-        e("claude-code", "claude", Some(".claude/skills"), Some("CLAUDE_CONFIG_DIR"), Some("--resume {session}")),
-        e("gemini-cli", "gemini", Some(".agents/skills"), None, Some("--resume {session}")),
+        e(
+            "claude-code",
+            "claude",
+            Some(".claude/skills"),
+            Some("CLAUDE_CONFIG_DIR"),
+            Some("--resume {session}"),
+        ),
+        e(
+            "gemini-cli",
+            "gemini",
+            Some(".agents/skills"),
+            None,
+            Some("--resume {session}"),
+        ),
         // `resume` es SUBCOMANDO en codex, no flag: con `--resume` abriría una sesión
         // nueva en silencio.
-        e("codex", "codex", Some(".agents/skills"), Some("CODEX_HOME"), Some("resume {session}")),
-        e("opencode", "opencode", Some(".agents/skills"), Some("XDG_DATA_HOME"), Some("--session {session}")),
-        e("kimi-code", "kimi", Some(".agents/skills"), None, Some("--session {session}")),
+        e(
+            "codex",
+            "codex",
+            Some(".agents/skills"),
+            Some("CODEX_HOME"),
+            Some("resume {session}"),
+        ),
+        e(
+            "opencode",
+            "opencode",
+            Some(".agents/skills"),
+            Some("XDG_DATA_HOME"),
+            Some("--session {session}"),
+        ),
+        e(
+            "kimi-code",
+            "kimi",
+            Some(".agents/skills"),
+            None,
+            Some("--session {session}"),
+        ),
         // bash no es una TUI de agente: no gestiona skills, ni cuentas, ni sesiones.
         e("bash", "bash", None, None, None),
     ];
 
-    assert_eq!(AGENTS.len(), esperado.len(), "cambió la cantidad de TUIs de fábrica");
+    assert_eq!(
+        AGENTS.len(),
+        esperado.len(),
+        "cambió la cantidad de TUIs de fábrica"
+    );
 
     for want in &esperado {
         let id = want.id;
         let def = agent_def(id).unwrap_or_else(|| panic!("falta {id} en el registro"));
         assert_eq!(def.command, want.command, "comando de {id}");
         assert_eq!(def.skills_dir, want.skills_dir, "carpeta de skills de {id}");
-        assert_eq!(def.profile.map(|p| p.env_var), want.env_var, "variable de cuenta de {id}");
+        assert_eq!(
+            def.profile.map(|p| p.env_var),
+            want.env_var,
+            "variable de cuenta de {id}"
+        );
         assert_eq!(def.resume, want.resume, "args de reanudación de {id}");
     }
 }
@@ -108,7 +160,12 @@ fn los_consumidores_leen_del_registro() {
 fn toda_tui_que_reanuda_declara_donde_viven_sus_sesiones() {
     for def in AGENTS {
         if def.resume.is_some() {
-            assert_ne!(def.sessions, SessionSource::None, "{} reanuda pero no dice de dónde", def.id);
+            assert_ne!(
+                def.sessions,
+                SessionSource::None,
+                "{} reanuda pero no dice de dónde",
+                def.id
+            );
         }
     }
 }
@@ -136,5 +193,27 @@ fn cada_tui_dice_como_recibe_el_mcp_y_como_nombra_sus_tools() {
 
     // El catálogo que ve el frontend lo arrastra: es de ahí de donde lo lee.
     let front = crate::agents::agent_registry();
-    assert_eq!(front.iter().find(|a| a.id == "opencode").expect("falta opencode").mcp, McpStyle::OpencodeConfig);
+    assert_eq!(
+        front
+            .iter()
+            .find(|a| a.id == "opencode")
+            .expect("falta opencode")
+            .mcp,
+        McpStyle::OpencodeConfig
+    );
+}
+
+#[test]
+fn orchestration_capability_requires_implemented_ade_mcp() {
+    for (id, expected) in [("claude-code", true), ("opencode", true), ("codex", false), ("gemini-cli", false), ("kimi-code", false), ("bash", false)] {
+        let caps = super::adapter_for(id).unwrap().capabilities();
+        assert_eq!(caps.orchestration, expected, "{id}");
+        if expected { assert!(caps.headless && caps.mcp); }
+    }
+    let custom = super::custom::CustomAgent {
+        id: "custom".into(), label: "Custom".into(), command: "custom".into(),
+        resume_args: None, skills_dir: None, sessions_dir: None,
+        session_id_from: "filename".into(), env: Default::default(),
+    };
+    assert!(!super::adapter::custom_capabilities(&custom).orchestration);
 }

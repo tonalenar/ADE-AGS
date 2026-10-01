@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { AddIcon, Button, EmptyState, Kbd, NetworkIcon, SearchIcon, ShieldIcon, Tooltip } from "neogestify-ui-components";
 
 import { detectAgents } from "@/features/agents/ipc";
+import { accountProblemText } from "@/features/accounts/problem";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { AppDialog } from "@/shared/ui/AppDialog";
@@ -360,7 +361,7 @@ function TaskDetail({ task, onClose }: {
             ${task.error
               ? "text-red-600 dark:text-red-400"
               : "text-gray-800 dark:text-gray-200"}`}>
-            {task.error ?? task.result ?? t("fleet.detail.nothing")}
+            {task.error ? accountProblemText(task.error, t) : (task.result ?? t("fleet.detail.nothing"))}
           </p>
         </section>
       </div>

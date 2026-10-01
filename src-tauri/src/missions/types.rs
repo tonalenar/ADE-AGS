@@ -21,11 +21,14 @@ pub struct Mission {
     pub budget_usd: Option<f64>,
     /// `None` = lo elige el ruteo por complejidad.
     pub lead_agent_id: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub lead_model: Option<String>,
     /// Con `auto_account = false`, `None` es la cuenta del sistema.
     pub lead_account_id: Option<String>,
     pub auto_account: bool,
     pub complexity: Option<String>,
+    /// `None` keeps the existing routing/tier behavior.
+    pub squad_id: Option<String>,
     /// El run que la está cumpliendo (o la cumplió). `None` mientras es borrador.
     pub active_run_id: Option<String>,
     pub created_at: i64,
@@ -58,6 +61,7 @@ pub struct MissionInput {
     #[serde(default)]
     pub lead_agent_id: Option<String>,
     #[serde(default)]
+    pub reasoning_effort: Option<String>,
     pub lead_model: Option<String>,
     #[serde(default)]
     pub lead_account_id: Option<String>,
@@ -65,6 +69,8 @@ pub struct MissionInput {
     pub auto_account: bool,
     #[serde(default)]
     pub complexity: Option<Complexity>,
+    #[serde(default)]
+    pub squad_id: Option<String>,
 }
 
 /// Una fila de la lista: la misión y su avance, en una sola consulta.

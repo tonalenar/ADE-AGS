@@ -24,6 +24,9 @@ pub struct PlanTask {
     pub key: String,
     pub title: String,
     pub prompt: String,
+    /// Functional role. The planner-facing JSON can use the concise `role` key.
+    #[serde(default, alias = "role")]
+    pub functional_role: Option<String>,
     #[serde(default)]
     pub depends_on: Vec<String>,
     #[serde(default)]
@@ -32,6 +35,9 @@ pub struct PlanTask {
     pub agent: Option<String>,
     #[serde(default)]
     pub model: Option<String>,
+    /// Named account override. Squad assignments reject this along with provider/model.
+    #[serde(default, alias = "account")]
+    pub account_id: Option<String>,
     /// `None` = lo decide la app (aislada si el proyecto es un repo de git).
     #[serde(default)]
     pub isolate: Option<bool>,

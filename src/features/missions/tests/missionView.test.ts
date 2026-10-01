@@ -4,7 +4,7 @@ import type { PendingApproval, Task, TaskStatus } from "@/features/runs/types";
 
 import {
   agentStateOf, approvalsFor, blockedRuns, canEdit, countAgentStates, dependencyLabels, emptyForm, formFromMission,
-  missingFields, missionAction, missionPhase, parseBudget, progressOf, toInput, workersOf,
+  missingFields, missionAction, missionPhase, parseBudget, progressOf, switchExecutionMode, toInput, workersOf,
 } from "../missionView";
 import type { Mission, MissionStatus } from "../types";
 
@@ -84,8 +84,13 @@ describe("missionAction / canEdit", () => {
     expect(canEdit("running")).toBe(false);
   });
 
-  it("una terminada no ofrece ninguna acción", () => {
-    for (const s of ["done", "failed", "cancelled"] as MissionStatus[]) {
+  it("offers a new attempt for a failed mission without changing its configuration", () => {
+    expect(missionAction("failed")).toBe("retry");
+    expect(canEdit("failed")).toBe(false);
+  });
+
+  it("una concluida o cancelada no ofrece ninguna acción", () => {
+    for (const s of ["done", "cancelled"] as MissionStatus[]) {
       expect(missionAction(s)).toBeNull();
       expect(canEdit(s)).toBe(false);
     }
@@ -220,14 +225,14 @@ describe("formulario", () => {
   });
 
   it("con modelo fijo manda agente y modelo, sin complejidad", () => {
-    const input = toInput({ ...emptyForm("/p"), title: "t", objective: "o", mode: "fixed", agentId: "codex", model: "gpt-5" });
+    const input = toInput({ ...emptyForm("/p"), title: "t", objective: "o", mode: "fixed", executionMode: "specific", agentId: "codex", model: "gpt-5" });
     expect(input).toMatchObject({ complexity: null, leadAgentId: "codex", leadModel: "gpt-5" });
   });
 
   it("con cuenta automática nunca manda una cuenta elegida", () => {
     const auto = toInput({ ...emptyForm("/p"), autoAccount: true, accountId: "acc-1" });
     expect(auto.leadAccountId).toBeNull();
-    const chosen = toInput({ ...emptyForm("/p"), autoAccount: false, accountId: "acc-1" });
+    const chosen = toInput({ ...emptyForm("/p"), executionMode: "specific", mode: "fixed", autoAccount: false, accountId: "acc-1" });
     expect(chosen).toMatchObject({ autoAccount: false, leadAccountId: "acc-1" });
   });
 
@@ -242,7 +247,33 @@ describe("formulario", () => {
     const fixed = formFromMission(mission({ leadAgentId: "codex", leadModel: "gpt-5", complexity: null, budgetUsd: 2 }));
     expect(fixed).toMatchObject({ mode: "fixed", agentId: "codex", model: "gpt-5", budget: "2" });
     const routed = formFromMission(mission({ complexity: "standard" }));
-    expect(routed).toMatchObject({ mode: "standard", agentId: "claude-code", model: "", budget: "" });
+    expect(routed).toMatchObject({ mode: "standard", agentId: "claude-code", model: null, budget: "" });
     expect(toInput(formFromMission(mission()))).toMatchObject({ complexity: "hard", autoAccount: true });
+  });
+
+  it("keeps Automatic, Specific and Squad mutually exclusive in the payload", () => {
+    const automatic = { ...emptyForm("/p"), title: "t", objective: "o", agentId: "codex", model: "gpt-5" };
+    const squadDraft = switchExecutionMode(automatic, "squad");
+    const squad = { ...squadDraft, squadId: "squad-1" };
+    expect(toInput(squad)).toMatchObject({
+      squadId: "squad-1", leadAgentId: null, leadModel: null, leadAccountId: null, autoAccount: true, complexity: null,
+    });
+
+    const backToAutomatic = switchExecutionMode(squad, "automatic");
+    expect(backToAutomatic.squadId).toBeNull();
+    expect(toInput(backToAutomatic)).toMatchObject({ squadId: null, leadAgentId: null, leadModel: null, complexity: "hard" });
+
+    const specific = switchExecutionMode(squad, "specific");
+    expect(specific.squadId).toBeNull();
+    expect(toInput(specific)).toMatchObject({ squadId: null, leadAgentId: "codex", leadModel: "gpt-5", complexity: null });
+  });
+
+  it("preserves manual choices while Specific stays selected and clears account on mode change", () => {
+    const specific = switchExecutionMode(emptyForm("/p"), "specific");
+    const selected = { ...specific, agentId: "codex", model: "gpt-5", autoAccount: false, accountId: "work-account" };
+    expect(switchExecutionMode(selected, "specific")).toMatchObject(selected);
+    const automatic = switchExecutionMode(selected, "automatic");
+    expect(automatic).toMatchObject({ squadId: null, autoAccount: true, accountId: null });
+    expect(toInput(automatic)).toMatchObject({ leadAgentId: null, leadModel: null, leadAccountId: null, autoAccount: true });
   });
 });

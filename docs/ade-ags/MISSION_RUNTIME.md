@@ -6,7 +6,15 @@ O Mission Engine ([MISSION_ENGINE.md](./MISSION_ENGINE.md)) é a Mission persist
 
 Não há executor novo. O runtime é o mesmo `runs/` da frota: supervisor, broker, adapters, scheduler, routing, worktrees. O v0.1 corrige e reforça esse caminho; não cria outro.
 
-Fora deste escopo, de propósito: Squads, Roles genéricas, Handoff estruturado, Shared Memory, Map Mode.
+Este documento registra o runtime v0.1. Roles + Squads v0 adiciona roteamento funcional ao mesmo executor e está descrito em [ROLES_SQUADS.md](./ROLES_SQUADS.md). Continuam fora: Handoff estruturado, Shared Memory e Map Mode.
+
+## Roles + Squads v0
+
+Execution role (`Task.role = lead | worker`) continua separado de functional role (`Task.functional_role = backend | frontend | qa | ...`). O primeiro controla a política de execução e o Lead Guardrail; o segundo orienta o trabalho e escolhe um SquadMember. A lista de oito Roles built-in é declarativa e não contém provider/model/account.
+
+Mission sem Squad conserva routing/tier/complexity. Mission com Squad usa o Lead configurado no Squad e resolve cada worker pela Role do `run_plan`. O Run copia a configuração dos members ao iniciar; Tasks copiam a Role e provider/model/account efetivos. Editar o Squad não altera Runs ou Tasks existentes. O Lead não vê detalhes de roteamento e não pode sobrescrever provider/model/account em Tasks do Squad.
+
+Start verifica a disponibilidade do Lead. Members opcionais indisponíveis não impedem o Start, mas o plano falha inteiro se usar um deles. Modelo sem informação verificável aparece como `unknown` e é checado pelo router ao planejar. O detalhe histórico mostra o nome do Squad e suas configurações snapshotadas; cada worker mostra sua Role funcional e assignment resolvido.
 
 ## 1. Launcher Windows (`util/launch.rs`)
 

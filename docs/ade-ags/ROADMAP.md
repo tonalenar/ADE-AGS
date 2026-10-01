@@ -70,21 +70,21 @@ Depende de: 6, 8 e 9.
 
 ## 11. Roles
 
-Hoje só `lead` e `worker` em `runs/types.rs`. Roles da ADE (quem implementa, quem revisa, quem segura permissão) são metadado da task e do handoff, não um processo novo.
+Roles + Squads v0 implementa oito functional roles built-in, declarativas em código, separadas de execution role (`lead | worker`). `Task.functional_role` registra a especialidade; provider/model/account são resolvidos pelo Squad e snapshotados no Run e na Task. Detalhes em [ROLES_SQUADS.md](./ROLES_SQUADS.md).
 
-Depende de: 10.
+Custom Roles e permissões universais por Role continuam fora do v0.
 
 ## 12. Squads
 
-Conjunto nomeado de providers + contas + roles que uma missão pode escalar. Não é uma frota paralela. É um filtro em cima do roster que `run roster` já calcula.
+Roles + Squads v0 implementa Squad persistente com Lead próprio e members que mapeiam uma Role funcional para provider/model/account. A Mission draft pode escolher Automatic, Specific provider ou Squad. O Run congela a configuração; editar o Squad afeta apenas novos Runs. Não é uma frota paralela e reutiliza o router existente.
 
-Depende de: 4 e 11. Sem multi-conta, um squad não tem o que isolar.
+Não inclui fallback silencioso, troca automática de modelo, scoring ou marketplace. Retry de Mission failed já está implementado, preservando os Runs anteriores.
 
 ## 13. Shared Memory
 
 `run_facts` já guarda fatos do run e o prompt deixa claro que são dados, não instruções. Memória da ADE é esse mecanismo elevado à missão e ao projeto, ainda em SQLite local, ainda sem serviço. Não é um índice cloud e não copia produto fechado.
 
-Depende de: 5 e 9. Fica mais útil depois do handoff (10), que é quem precisa ler a memória certa.
+Depende de: 5 e 9. Próxima avaliação recomendada: Handoff estruturado; ainda não implementado.
 
 ## 14. Usage, custos e limites
 

@@ -8,11 +8,11 @@ use uuid::Uuid;
 
 use crate::util::now_ts;
 
-use super::types::{status, Mission, MissionInput, MissionSummary};
+use super::types::{Mission, MissionInput, MissionSummary, status};
 
 const COLUMNS: &str = "id, workspace_id, title, objective, cwd, status, max_parallel, budget_usd, \
                        lead_agent_id, lead_model, lead_account_id, auto_account, complexity, \
-                       active_run_id, created_at, updated_at, started_at, ended_at";
+                       active_run_id, created_at, updated_at, started_at, ended_at, squad_id, reasoning_effort";
 
 /// Lo mismo que acepta `run_start_orchestration`: más de seis a la vez deja de ser
 /// paralelismo que alguien pueda seguir.
@@ -39,6 +39,8 @@ fn row_to_mission(row: &Row) -> rusqlite::Result<Mission> {
         updated_at: row.get(15)?,
         started_at: row.get(16)?,
         ended_at: row.get(17)?,
+        squad_id: row.get(18)?,
+        reasoning_effort: row.get(19)?,
     })
 }
 
@@ -54,18 +56,26 @@ pub struct Valid {
     pub budget_usd: Option<f64>,
     pub lead_agent_id: Option<String>,
     pub lead_model: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub lead_account_id: Option<String>,
     pub auto_account: bool,
     pub complexity: Option<String>,
+    pub squad_id: Option<String>,
 }
 
 fn blank_to_none(value: &Option<String>) -> Option<String> {
-    value.as_deref().map(str::trim).filter(|s| !s.is_empty()).map(str::to_string)
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|s| !s.is_empty())
+        .map(str::to_string)
 }
 
 /// Revisa un pedido sin tocar la base. Junta todos los errores: corregir de a uno por
 /// intento es peor que ver la lista entera.
-pub fn validate(input: &MissionInput) -> Result<Valid, String> {
+pub fn validate(conn: &Connection, input: &MissionInput) -> Result<Valid, String> {
+    crate::squads::store::validate_effort_input(input.lead_model.as_deref(), input.complexity, input.reasoning_effort.as_deref())?;
+    if input.squad_id.is_some() && input.reasoning_effort.is_some() { return Err("Mission cannot override Squad effort".into()); }
     let mut errors = Vec::new();
     let title = input.title.trim().to_string();
     let objective = input.objective.trim().to_string();
@@ -84,13 +94,45 @@ pub fn validate(input: &MissionInput) -> Result<Valid, String> {
     if input.budget_usd.is_some_and(|b| !b.is_finite() || b <= 0.0) {
         errors.push("el presupuesto tiene que ser positivo".to_string());
     }
-    let lead_agent_id = blank_to_none(&input.lead_agent_id);
-    let lead_model = blank_to_none(&input.lead_model);
+    let squad_id = blank_to_none(&input.squad_id);
+    if let Some(id) = &squad_id {
+        let exists: Option<i64> = conn
+            .query_row("SELECT 1 FROM squads WHERE id = ?1", [id], |row| row.get(0))
+            .optional()
+            .map_err(|error| error.to_string())?;
+        if exists.is_none() {
+            errors.push(format!("no squad '{id}' exists"));
+        }
+        if blank_to_none(&input.lead_agent_id).is_some()
+            || blank_to_none(&input.lead_model).is_some()
+            || blank_to_none(&input.lead_account_id).is_some()
+            || input.complexity.is_some()
+            || !input.auto_account
+        {
+            errors.push(
+                "a Mission using a Squad cannot override the Squad Lead provider/model/account"
+                    .to_string(),
+            );
+        }
+    }
+    let lead_agent_id = if squad_id.is_some() {
+        None
+    } else {
+        blank_to_none(&input.lead_agent_id)
+    };
+    let lead_model = if squad_id.is_some() {
+        None
+    } else {
+        blank_to_none(&input.lead_model)
+    };
     if lead_model.is_some() && lead_agent_id.is_none() {
         errors.push("un modelo fijo necesita decir de qué agente es".to_string());
     }
+    if lead_model.is_some() && input.complexity.is_some() {
+        errors.push("Specific model and complexity routing cannot be selected together".into());
+    }
     if let Some(agent) = &lead_agent_id
-        && let Err(e) = crate::runs::ensure_headless(agent)
+        && let Err(e) = crate::runs::ensure_orchestration(agent)
     {
         errors.push(e);
     }
@@ -105,11 +147,21 @@ pub fn validate(input: &MissionInput) -> Result<Valid, String> {
         budget_usd: input.budget_usd,
         lead_agent_id,
         lead_model,
+        reasoning_effort: input.reasoning_effort.clone(),
         // Con la cuenta automática, una elegida antes no aplica: guardarla dejaría una
         // preferencia que nadie va a leer.
-        lead_account_id: if input.auto_account { None } else { blank_to_none(&input.lead_account_id) },
-        auto_account: input.auto_account,
-        complexity: input.complexity.map(|c| c.as_str().to_string()),
+        lead_account_id: if squad_id.is_some() || input.auto_account {
+            None
+        } else {
+            blank_to_none(&input.lead_account_id)
+        },
+        auto_account: squad_id.is_none() && input.auto_account,
+        complexity: if squad_id.is_some() {
+            None
+        } else {
+            input.complexity.map(|c| c.as_str().to_string())
+        },
+        squad_id,
     })
 }
 
@@ -117,7 +169,11 @@ pub fn validate(input: &MissionInput) -> Result<Valid, String> {
 
 pub fn create(conn: &Connection, workspace_id: &str, valid: &Valid) -> Result<Mission, String> {
     let exists: Option<i64> = conn
-        .query_row("SELECT 1 FROM workspaces WHERE id = ?1", [workspace_id], |r| r.get(0))
+        .query_row(
+            "SELECT 1 FROM workspaces WHERE id = ?1",
+            [workspace_id],
+            |r| r.get(0),
+        )
         .optional()
         .map_err(|e| e.to_string())?;
     if exists.is_none() {
@@ -128,8 +184,8 @@ pub fn create(conn: &Connection, workspace_id: &str, valid: &Valid) -> Result<Mi
     conn.execute(
         "INSERT INTO missions (id, workspace_id, title, objective, cwd, status, max_parallel, budget_usd,
                                lead_agent_id, lead_model, lead_account_id, auto_account, complexity,
-                               created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14)",
+                               created_at, updated_at, squad_id, reasoning_effort)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16)",
         rusqlite::params![
             id,
             workspace_id,
@@ -145,6 +201,8 @@ pub fn create(conn: &Connection, workspace_id: &str, valid: &Valid) -> Result<Mi
             valid.auto_account as i64,
             valid.complexity,
             now,
+            valid.squad_id,
+            valid.reasoning_effort,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -152,9 +210,13 @@ pub fn create(conn: &Connection, workspace_id: &str, valid: &Valid) -> Result<Mi
 }
 
 pub fn get(conn: &Connection, id: &str) -> Result<Option<Mission>, String> {
-    conn.query_row(&format!("SELECT {COLUMNS} FROM missions WHERE id = ?1"), [id], row_to_mission)
-        .optional()
-        .map_err(|e| e.to_string())
+    conn.query_row(
+        &format!("SELECT {COLUMNS} FROM missions WHERE id = ?1"),
+        [id],
+        row_to_mission,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
 }
 
 /// Las misiones de un workspace, más recientes primero, con el avance de su run activo.
@@ -165,7 +227,11 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<Mission>, String> {
 /// Todo en una consulta: la lista se relee con cada cambio de una tarea, y una consulta
 /// por misión la haría crecer con el historial.
 pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>, String> {
-    let cols = COLUMNS.split(", ").map(|c| format!("m.{}", c.trim())).collect::<Vec<_>>().join(", ");
+    let cols = COLUMNS
+        .split(", ")
+        .map(|c| format!("m.{}", c.trim()))
+        .collect::<Vec<_>>()
+        .join(", ");
     let mut stmt = conn
         .prepare(&format!(
             "SELECT {cols},
@@ -187,11 +253,11 @@ pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>
         .query_map([workspace_id], |row| {
             Ok(MissionSummary {
                 mission: row_to_mission(row)?,
-                spent_usd: row.get(18)?,
-                workers_total: row.get(19)?,
-                workers_done: row.get(20)?,
-                lead_agent: row.get(21)?,
-                lead_status: row.get(22)?,
+                spent_usd: row.get(20)?,
+                workers_total: row.get(21)?,
+                workers_done: row.get(22)?,
+                lead_agent: row.get(23)?,
+                lead_status: row.get(24)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -215,9 +281,11 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
             && current.budget_usd == valid.budget_usd
             && current.lead_agent_id == valid.lead_agent_id
             && current.lead_model == valid.lead_model
+            && current.reasoning_effort == valid.reasoning_effort
             && current.lead_account_id == valid.lead_account_id
             && current.auto_account == valid.auto_account
             && current.complexity == valid.complexity;
+        let same_config = same_config && current.squad_id == valid.squad_id;
         if !same_config {
             return Err("la misión ya arrancó: solo se le puede cambiar el título".into());
         }
@@ -234,8 +302,8 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
         .execute(
             "UPDATE missions SET title = ?1, objective = ?2, cwd = ?3, max_parallel = ?4, budget_usd = ?5,
                                  lead_agent_id = ?6, lead_model = ?7, lead_account_id = ?8,
-                                 auto_account = ?9, complexity = ?10, updated_at = ?11
-             WHERE id = ?12 AND status = ?13",
+                                 auto_account = ?9, complexity = ?10, updated_at = ?11, squad_id = ?12, reasoning_effort = ?13
+             WHERE id = ?14 AND status = ?15",
             rusqlite::params![
                 valid.title,
                 valid.objective,
@@ -248,6 +316,8 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
                 valid.auto_account as i64,
                 valid.complexity,
                 now_ts(),
+                valid.squad_id,
+            valid.reasoning_effort,
                 id,
                 status::DRAFT,
             ],
@@ -261,16 +331,17 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
 
 // ── Ciclo de vida ───────────────────────────────────────────────
 
-/// El borrador pasa a correr con este run. `false` si ya no era borrador (dos "Start"
-/// seguidos): quien llama deshace lo que creó para él.
-pub fn mark_started(conn: &Connection, id: &str, run_id: &str) -> Result<bool, String> {
+/// Claims a new attempt only if the state and previous run still match the snapshot.
+/// A stale start/retry rolls back its newly created run and lead in the caller's transaction.
+pub fn mark_started(conn: &Connection, mission: &Mission, run_id: &str) -> Result<bool, String> {
     let now = now_ts();
     let n = conn
         .execute(
             "UPDATE missions SET status = ?1, active_run_id = ?2, started_at = ?3, updated_at = ?3,
                                  ended_at = NULL
-             WHERE id = ?4 AND status = ?5",
-            rusqlite::params![status::RUNNING, run_id, now, id, status::DRAFT],
+             WHERE id = ?4 AND status = ?5 AND active_run_id IS ?6
+                   AND status IN ('draft', 'failed')",
+            rusqlite::params![status::RUNNING, run_id, now, mission.id, mission.status, mission.active_run_id],
         )
         .map_err(|e| e.to_string())?;
     Ok(n > 0)
@@ -311,8 +382,12 @@ pub fn refresh_status(conn: &Connection, id: &str) -> Result<Option<String>, Str
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    let Some((current, run_status)) = row else { return Ok(None) };
-    let Some(run_status) = run_status else { return Ok(Some(current)) };
+    let Some((current, run_status)) = row else {
+        return Ok(None);
+    };
+    let Some(run_status) = run_status else {
+        return Ok(Some(current));
+    };
     let next = status_for_run(&run_status);
     if next != current {
         let now = now_ts();
@@ -343,7 +418,9 @@ pub fn refresh_for_run(conn: &Connection, run_id: &str) -> Result<Option<String>
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    let Some((id, before)) = mission else { return Ok(None) };
+    let Some((id, before)) = mission else {
+        return Ok(None);
+    };
     let after = refresh_status(conn, &id)?;
     Ok((after.as_deref() != Some(before.as_str())).then_some(id))
 }

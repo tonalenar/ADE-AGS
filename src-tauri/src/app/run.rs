@@ -171,6 +171,7 @@ pub fn run() {
             crate::runs::run_add_rule,
             crate::runs::run_delete_rule,
             crate::runs::run_roster,
+            crate::runs::models_refresh,
             crate::runs::run_preview_route,
             crate::runs::run_get_tiers,
             crate::runs::run_set_tiers,
@@ -181,6 +182,14 @@ pub fn run() {
             crate::missions::mission_get,
             crate::missions::mission_start,
             crate::missions::mission_cancel,
+            // Functional roles and reusable Squad routing policies
+            crate::roles::functional_roles_list,
+            crate::roles::functional_role_get,
+            crate::squads::squad_create,
+            crate::squads::squad_update,
+            crate::squads::squad_list,
+            crate::squads::squad_get,
+            crate::squads::squad_delete,
             // Cuentas múltiples por TUI
             crate::accounts::account_capable_agents,
             crate::accounts::list_agent_accounts,
@@ -265,7 +274,7 @@ pub fn run() {
                 let label = window.label().to_string();
                 // Un cierre que pide el sistema se frena para guardar con progreso; el
                 // frontend cierra de verdad al terminar (ver `window::close_guard`).
-                use crate::window::close_guard::{decide, Decision};
+                use crate::window::close_guard::{Decision, decide};
                 match decide(&label) {
                     Decision::Close => {}
                     Decision::Save => {
@@ -368,7 +377,7 @@ pub fn run() {
                     // Salir con una sola ventana (Cmd+Q) sin pasar por su cierre: se trata
                     // igual que cerrarla, guardando antes. Si ya está guardando o la app ya
                     // le dio paso, no se frena otra vez.
-                    use crate::window::close_guard::{decide, Decision};
+                    use crate::window::close_guard::{Decision, decide};
                     match decide(label) {
                         Decision::Close => {}
                         Decision::Save => {
