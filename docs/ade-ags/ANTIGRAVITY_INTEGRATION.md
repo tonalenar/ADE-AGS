@@ -44,7 +44,7 @@ variant. Models without an effort suffix do not receive explicit effort options.
 For example, `claude-sonnet-4-6` rejects `--effort` in this CLI version.
 Prices and context limits remain unknown rather than being fabricated.
 
-## Multiple OAuth accounts
+## Multiple OAuth accounts — experimental/incomplete
 
 The current CLI's documented login uses the OS keyring and exposes a system
 session, not named OAuth profiles or a per-process account selector. A separate
@@ -82,8 +82,7 @@ display name, email and creation time. The v22 Handoff migration is retained.
 
 Each subject is deduplicated; connecting another Google identity creates another
 account. Verification refreshes that account's grant when needed and checks its
-Google subject. A changed client requires reconnection. Closing the panel or
-cancelling login stops its listener. No grant is supplied to the native agy CLI.
+Google subject. A changed client requires reconnection. Cancelling login stops its listener; the setup panel is no longer exposed. No grant is supplied to the native agy CLI.
 
 The following developer registration notes describe that experimental backend;
 they are not prerequisites for users of the native Antigravity integration.
@@ -97,10 +96,9 @@ They do not make Antigravity multi-account execution available:
 4. In Clients, create an OAuth client with application type **Desktop app**.
    A web client is not interchangeable with this flow. ADE uses a dynamic
    loopback port, supported for desktop clients.
-5. Enter the resulting client ID and secret only in ADE's Antigravity accounts
-   panel, save them, name an account and click Connect. Complete Google consent
-   yourself in the browser. Repeat for additional accounts.
-6. Verify Google login in ADE. This checks identity, not model entitlement.
+5. The backend has configuration and connection commands, but the setup form
+   is not exposed in ADE. These notes do not describe an available user flow.
+6. Backend identity verification checks Google login, not model entitlement.
 
 Google External/Testing refresh tokens may expire after seven days with the
 cloud-platform scope. Production consent/verification depends on Google's rules.
@@ -136,8 +134,11 @@ prompt:
 cargo test --lib native_cli_loads_task_mcp_and_lead_permissions_without_inference -- --ignored
 ```
 
-A real Mission with model inference, handoff display and restart remains a
-separate E2E check; metadata and fixture tests do not claim to replace it.
+The existing local Mission `teste` records a completed native Antigravity Lead
+and four Codex workers, with four structured handoffs. This is evidence for that
+native system-account execution, not experimental multi-account inference.
+The documentation stabilization smoke uses existing history without new inference;
+metadata and fixture tests alone do not replace execution validation.
 
 Official references:
 

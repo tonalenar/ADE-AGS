@@ -1,6 +1,6 @@
 # Roles + Squads v0
 
-Roles + Squads acrescenta roteamento funcional reutilizável ao Mission Runtime. Roles são built-in declarativas em código; provider, modelo e conta ficam na configuração de cada Squad.
+**v0 concluído nesta base ADE.** Roles + Squads acrescenta roteamento funcional reutilizável ao Mission Runtime. Roles são built-in declarativas em código; provider, modelo e conta ficam na configuração de cada Squad.
 
 ## Conceitos
 
@@ -86,6 +86,8 @@ O contexto do Lead lista IDs e descrições das Roles do snapshot, sem provider/
 
 ## Disponibilidade e contas
 
+Codex suporta task MCP, orchestration e execução headless como Lead e Worker. Antigravity nativo suporta Lead e Worker e descobre modelos via `agy models`, usando uma conta do sistema. `supports_accounts = false`: OAuth experimental não disponibiliza execução simultânea isolada por conta.
+
 A disponibilidade do Squad para Start acompanha o Lead. Members opcionais são avaliados quando o plano os usa. A UI mostra cada member, provider/modelo/conta e seu estado; uma conta removida continua persistida pelo ID e aparece como indisponível até o usuário editar o Squad.
 
 SQLite guarda account IDs. Nome de conta é apresentação resolvida pelo roster atual. Tokens, secrets e environment resolvido não são armazenados no Squad.
@@ -100,4 +102,6 @@ Uma Mission failed pode ser reenviada com Tentar novamente, criando outro Run se
 
 ## Fora do v0
 
-Roles customizadas, marketplace, permissões universais por Role, auto-scoring, troca automática de modelo, cost optimizer, Handoff estruturado, Shared Memory, Map Mode, templates, cloud e colaboração.
+Roles customizadas, marketplace, permissões universais por Role, auto-scoring, troca automática de modelo, cost optimizer, Shared Memory, Map Mode, templates, cloud e colaboração.
+
+Handoff Structured v0 foi concluído separadamente, com migration v22 e compatibilidade legacy; veja [HANDOFF_STRUCTURED.md](./HANDOFF_STRUCTURED.md).

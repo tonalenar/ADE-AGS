@@ -6,7 +6,7 @@ O Mission Engine ([MISSION_ENGINE.md](./MISSION_ENGINE.md)) é a Mission persist
 
 Não há executor novo. O runtime é o mesmo `runs/` da frota: supervisor, broker, adapters, scheduler, routing, worktrees. O v0.1 corrige e reforça esse caminho; não cria outro.
 
-Este documento registra o runtime v0.1. Roles + Squads v0 adiciona roteamento funcional ao mesmo executor e está descrito em [ROLES_SQUADS.md](./ROLES_SQUADS.md). Continuam fora: Handoff estruturado, Shared Memory e Map Mode.
+Este documento registra o runtime v0.1. Roles + Squads v0 adiciona roteamento funcional ao mesmo executor e está descrito em [ROLES_SQUADS.md](./ROLES_SQUADS.md). Handoff Structured v0 também está concluído, descrito em [HANDOFF_STRUCTURED.md](./HANDOFF_STRUCTURED.md). Shared Memory e Map Mode continuam fora.
 
 ## Roles + Squads v0
 
@@ -98,7 +98,8 @@ O lead coordena; não modifica o workspace. A regra é **por `task.role == "lead
    | --- | --- |
    | Claude Code | `--disallowedTools Write,Edit,MultiEdit,NotebookEdit,Bash,PowerShell` (as tools nem chegam ao modelo; sem broker o `acceptEdits` as aprovaria). |
    | OpenCode | `permission.edit = "ask"`, `bash = "ask"`: headless, `ask` é rejeitado ("permission requested: edit … auto-rejecting", verificado). Não `deny`: `deny` tira as tools do pedido e o free tier do OpenCode responde `FreeTierError` (verificado no E2E). |
-   | Codex | `--sandbox read-only`. |
+   | Codex | `--sandbox read-only`, com task MCP da ADE e orchestration headless. |
+   | Antigravity nativo | Perfil MCP vinculado à Task, com política que nega escrita, comandos e atuação no navegador para o Lead. |
    | Gemini | `--approval-mode default` (edição e shell ficam sem aprovar = rejeitados headless). |
    | Kimi | Não dá: `--prompt` sempre aprova sozinho. `enforces_read_only() == false` e o supervisor recusa lançá-lo como lead, com erro claro. |
 
@@ -112,8 +113,9 @@ Não há parser de shell: sem classificação confiável de "comando só leitura
 
 ### Limites conhecidos
 
-- As tools do navegador (`browser_*`) seguem no `--allowedTools` de toda task, lead incluído, como já era: só mexem no preview dentro da app, não no workspace.
-- Codex e Gemini não recebem o servidor MCP da ADE, então como lead não conseguem chamar `run_plan`. A política vale para eles, mas ainda não são leads úteis (roadmap, MCP interno).
+- A exposição das tools do navegador varia por adapter. O perfil nativo Antigravity nega atuação no navegador para o Lead; a política e a lista de tools permitidas da Task continuam sendo a referência.
+- Codex recebe task MCP e suporta orchestration, headless, Lead e Worker. Gemini CLI continua distinto e sem essa integração de orquestração.
+- Antigravity nativo suporta Lead e Worker usando a conta do sistema e modelos de `agy models`. Multi-account é experimental/incompleto, com `supports_accounts = false`; OAuth separado não equivale a isolamento do `agy`.
 
 ## 4. Aprovações dentro da Mission
 
@@ -184,3 +186,7 @@ Não demonstrado ao vivo: aprovações na tela de Missions. Exigem um worker Cla
 - Backend: launcher (10), política do lead (Read/orquestração permitidos; Write/Edit/Bash negados; worker e manual iguais; pedido negado do lead fora da fila e do registro; tradução por adapter; Kimi recusado), contrato completo (Mission start → lead Write/Edit/Bash negados sem aprovação nem arquivo → `run_plan` real cria 2 workers), eventos (create/update via comando real com `mock_app`, status final/falha/cancel via `refresh_run`), progresso só de workers.
 - Frontend: aguardando aprovação, Allow, Deny, a decisão tira o bloqueio, evento da fila atualiza a Mission, `cc-mission-changed` atualiza outra view, progresso sem lead, zero workers = "Lead planejando", terminada = workers concluídos.
 - `mission_start` e `mission_cancel` precisam do `AppHandle` concreto (lançam e param agentes), então o evento deles foi verificado no E2E, não com `mock_app`.
+
+## Estado consolidado da base ADE
+
+Mission Engine e Mission Runtime estão concluídos nesta base, com retry de Mission failed criando outro Run e preservando o histórico. Roles/Squads, model discovery, reasoning effort, PT-BR e Handoff Structured v0 reutilizam o mesmo runtime. O launcher interativo Windows também resolve o alvo dos shims npm, evitando executar `.cmd` como binário nativo (erro 193). Custos continuam parciais conforme os dados fornecidos por cada provider.
