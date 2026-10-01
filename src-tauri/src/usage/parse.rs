@@ -97,7 +97,9 @@ pub(super) fn parse_usage_screen(raw: &str) -> LiveUsage {
                 session = Some(meter);
             }
         } else if line.starts_with("Current week") {
-            let Some(meter) = meter_at(&lines, i) else { continue };
+            let Some(meter) = meter_at(&lines, i) else {
+                continue;
+            };
             match model_of(line) {
                 None => week = Some(meter),
                 Some(model) => match models.iter_mut().find(|m| m.model == model) {
@@ -114,7 +116,8 @@ pub(super) fn parse_usage_screen(raw: &str) -> LiveUsage {
         session,
         week,
         week_models: models,
-        problem: (!available).then(|| "No se encontró el panel de consumo en la salida".to_string()),
+        problem: (!available)
+            .then(|| "accounts.plan.problem.panelMissing".to_string()),
         ..Default::default()
     }
 }

@@ -35,6 +35,8 @@ pub struct Task {
     pub prompt: String,
     pub agent_id: String,
     pub account_id: Option<String>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     pub model: Option<String>,
     pub cwd: String,
     pub budget_usd: Option<f64>,
@@ -170,6 +172,10 @@ pub struct TaskOutcome {
 
 impl TaskOutcome {
     pub fn failed(message: impl Into<String>) -> Self {
-        TaskOutcome { ok: false, error: Some(message.into()), ..Default::default() }
+        TaskOutcome {
+            ok: false,
+            error: Some(message.into()),
+            ..Default::default()
+        }
     }
 }

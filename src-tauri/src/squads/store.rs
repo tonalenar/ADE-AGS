@@ -3,25 +3,56 @@ use uuid::Uuid;
 
 use crate::{roles, runs::Complexity, util::now_ts};
 
-use super::types::{Squad, SquadInput, SquadLead, SquadLeadInput, SquadMember, SquadMemberInput, ValidSquad};
+use super::types::{
+    AssignmentAvailability, Squad, SquadInput, SquadLead, SquadLeadInput, SquadMember,
+    SquadMemberInput, ValidSquad,
+};
 
 const SQUAD_COLUMNS: &str = "id, name, description, lead_agent_id, lead_model, lead_account_id, \
-                             lead_auto_account, lead_complexity, created_at, updated_at";
+                             lead_auto_account, lead_complexity, created_at, updated_at, reasoning_effort";
 
-fn clean(value: &Option<String>) -> Option<String> {
-    value.as_deref().map(str::trim).filter(|value| !value.is_empty()).map(str::to_string)
+pub(crate) fn validate_effort_input(model: Option<&str>, complexity: Option<Complexity>, effort: Option<&str>) -> Result<(), String> {
+    if let Some(effort) = effort {
+        if model.is_none() || complexity.is_some() {
+            return Err("Explicit reasoning effort requires a specific model; complexity routing uses Automatic effort".into());
+        }
+        if !matches!(effort, "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra") {
+            return Err("Unknown reasoning effort".into());
+        }
+    }
+    Ok(())
 }
 
-fn validate_provider(conn: &Connection, agent_id: &str, account_id: &Option<String>) -> Result<(), String> {
+fn clean(value: &Option<String>) -> Option<String> {
+    value
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn validate_provider(
+    conn: &Connection,
+    agent_id: &str,
+    account_id: &Option<String>,
+) -> Result<(), String> {
     crate::runs::ensure_headless(agent_id)?;
     if let Some(id) = account_id {
         let owner: Option<String> = conn
-            .query_row("SELECT agent_id FROM agent_accounts WHERE id = ?1", [id], |row| row.get(0))
+            .query_row(
+                "SELECT agent_id FROM agent_accounts WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
             .optional()
             .map_err(|error| error.to_string())?;
         match owner {
             Some(owner) if owner == agent_id => {}
-            Some(owner) => return Err(format!("account '{id}' belongs to '{owner}', not '{agent_id}'")),
+            Some(owner) => {
+                return Err(format!(
+                    "account '{id}' belongs to '{owner}', not '{agent_id}'"
+                ));
+            }
             None => return Err(format!("account '{id}' does not exist")),
         }
     }
@@ -40,12 +71,21 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
     let mut lead = input.lead.clone();
     lead.agent_id = lead.agent_id.trim().to_string();
     lead.model = clean(&lead.model);
-    lead.account_id = if lead.auto_account { None } else { clean(&lead.account_id) };
+    validate_effort_input(lead.model.as_deref(), lead.complexity, lead.reasoning_effort.as_deref())?;
+    if lead.model.is_some() && lead.complexity.is_some() {
+        return Err("lead: specific model and complexity cannot be selected together".into());
+    }
+    lead.account_id = if lead.auto_account {
+        None
+    } else {
+        clean(&lead.account_id)
+    };
     if lead.agent_id.is_empty() {
         return Err("squad lead provider is required".into());
     }
     validate_provider(conn, &lead.agent_id, &lead.account_id)
         .map_err(|error| format!("lead: {error}"))?;
+    crate::runs::ensure_orchestration(&lead.agent_id)?;
 
     let mut seen = std::collections::HashSet::new();
     let mut members = Vec::with_capacity(input.members.len());
@@ -54,13 +94,27 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
         member.role_id = member.role_id.trim().to_string();
         member.agent_id = member.agent_id.trim().to_string();
         member.model = clean(&member.model);
-        member.account_id = if member.auto_account { None } else { clean(&member.account_id) };
+        validate_effort_input(member.model.as_deref(), member.complexity, member.reasoning_effort.as_deref())?;
+        if member.model.is_some() && member.complexity.is_some() {
+            return Err(format!("role '{}': specific model and complexity cannot be selected together", member.role_id));
+        }
+        member.account_id = if member.auto_account {
+            None
+        } else {
+            clean(&member.account_id)
+        };
 
         if roles::get(&member.role_id).is_none() {
-            return Err(format!("functional role '{}' does not exist", member.role_id));
+            return Err(format!(
+                "functional role '{}' does not exist",
+                member.role_id
+            ));
         }
         if !seen.insert(member.role_id.clone()) {
-            return Err(format!("role '{}' is configured more than once in this squad", member.role_id));
+            return Err(format!(
+                "role '{}' is configured more than once in this squad",
+                member.role_id
+            ));
         }
         if member.agent_id.is_empty() {
             return Err(format!("role '{}' needs a provider", member.role_id));
@@ -78,80 +132,119 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
     })
 }
 
-fn provider_status(agent_id: &str) -> (bool, Option<String>) {
-    if let Err(error) = crate::runs::ensure_headless(agent_id) {
-        return (false, Some(error));
+fn assignment_status(
+    conn: &Connection,
+    agent_id: &str,
+    model: Option<&str>,
+    account_id: &Option<String>,
+) -> rusqlite::Result<(AssignmentAvailability, Option<String>)> {
+    let Some(adapter) = crate::agents::adapter_for(agent_id) else {
+        return Ok((
+            AssignmentAvailability::ProviderMissing,
+            Some(format!("provider '{agent_id}' is not registered")),
+        ));
+    };
+    let label = adapter.def().label;
+    if !adapter.capabilities().headless {
+        return Ok((
+            AssignmentAvailability::ProviderNotHeadless,
+            Some(format!("{label} cannot run headless")),
+        ));
     }
-    let installed = crate::agents::agent_command(agent_id).is_some_and(crate::agents::command_exists);
+    let installed = adapter.assumes_installed()
+        || crate::agents::agent_command(agent_id).is_some_and(crate::agents::command_exists);
     if !installed {
-        let label = crate::agents::agent_label(agent_id).unwrap_or(agent_id);
-        return (false, Some(format!("{label} is not installed")));
-    }
-    (true, None)
-}
-
-fn assignment_status(conn: &Connection, agent_id: &str, account_id: &Option<String>) -> (bool, Option<String>) {
-    let (available, reason) = provider_status(agent_id);
-    if !available {
-        return (false, reason);
+        return Ok((
+            AssignmentAvailability::ProviderNotInstalled,
+            Some(format!("{label} is not installed")),
+        ));
     }
     if let Some(id) = account_id {
         let owner: Option<String> = conn
-            .query_row("SELECT agent_id FROM agent_accounts WHERE id = ?1", [id], |row| row.get(0))
-            .optional()
-            .ok()
-            .flatten();
-        if owner.as_deref() != Some(agent_id) {
-            return (false, Some(format!("account '{id}' is missing or belongs to another provider")));
+            .query_row(
+                "SELECT agent_id FROM agent_accounts WHERE id = ?1",
+                [id],
+                |row| row.get(0),
+            )
+            .optional()?;
+        match owner {
+            None => {
+                return Ok((
+                    AssignmentAvailability::AccountMissing,
+                    Some(format!("account '{id}' is unavailable")),
+                ));
+            }
+            Some(owner) if owner != agent_id => {
+                return Ok((
+                    AssignmentAvailability::AccountProviderMismatch,
+                    Some(format!(
+                        "account '{id}' belongs to '{owner}', not '{agent_id}'"
+                    )),
+                ));
+            }
+            Some(_) => {}
         }
     }
-    (true, None)
+    if model.is_some_and(|value| !value.trim().is_empty()) {
+        return Ok((AssignmentAvailability::Unknown, None));
+    }
+    Ok((AssignmentAvailability::Available, None))
 }
 
 fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
     let id: String = row.get(0)?;
     let lead_agent_id: String = row.get(3)?;
     let lead_account_id: Option<String> = row.get(5)?;
-    let (lead_available, lead_reason) = assignment_status(conn, &lead_agent_id, &lead_account_id);
+    let lead_model: Option<String> = row.get(4)?;
+    let (mut lead_availability, mut lead_reason) = assignment_status(
+        conn,
+        &lead_agent_id,
+        lead_model.as_deref(),
+        &lead_account_id,
+    )?;
+    if let Err(reason) = crate::runs::ensure_orchestration(&lead_agent_id)
+        && lead_availability.can_attempt()
+    {
+        lead_availability = AssignmentAvailability::ProviderNotOrchestrating;
+        lead_reason = Some(reason);
+    }
     let lead = SquadLead {
         agent_id: lead_agent_id,
-        model: row.get(4)?,
+        model: lead_model,
+        reasoning_effort: row.get(10)?,
         account_id: lead_account_id,
         auto_account: row.get::<_, i64>(6)? != 0,
         complexity: row.get(7)?,
-        available: lead_available,
+        availability: lead_availability,
         unavailable_reason: lead_reason.clone(),
     };
     let mut stmt = conn
-        .prepare("SELECT role_id, agent_id, model, account_id, auto_account, complexity, isolate_default FROM squad_members WHERE squad_id = ?1 ORDER BY rowid")?;
+        .prepare("SELECT role_id, agent_id, model, account_id, auto_account, complexity, isolate_default, reasoning_effort FROM squad_members WHERE squad_id = ?1 ORDER BY rowid")?;
     let members = stmt
         .query_map([&id], |member| {
             let agent_id: String = member.get(1)?;
             let account_id: Option<String> = member.get(3)?;
-            let (available, unavailable_reason) = assignment_status(conn, &agent_id, &account_id);
+            let model: Option<String> = member.get(2)?;
+            let (availability, unavailable_reason) =
+                assignment_status(conn, &agent_id, model.as_deref(), &account_id)?;
             Ok(SquadMember {
                 role_id: member.get(0)?,
+                reasoning_effort: member.get(7)?,
                 agent_id,
-                model: member.get(2)?,
+                model,
                 account_id,
                 auto_account: member.get::<_, i64>(4)? != 0,
                 complexity: member.get(5)?,
                 isolate_default: member.get::<_, i64>(6)? != 0,
-                available,
+                availability,
                 unavailable_reason,
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut unavailable_reasons = Vec::new();
-    if let Some(reason) = lead_reason {
-        unavailable_reasons.push(format!("lead: {reason}"));
-    }
-    for member in &members {
-        if let Some(reason) = &member.unavailable_reason {
-            let label = roles::get(&member.role_id).map_or(member.role_id.as_str(), |role| role.label);
-            unavailable_reasons.push(format!("{label}: {reason}"));
-        }
-    }
+    let unavailable_reasons = lead_reason
+        .into_iter()
+        .map(|reason| format!("lead: {reason}"))
+        .collect();
     Ok(Squad {
         id,
         name: row.get(1)?,
@@ -160,16 +253,20 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
         members,
         created_at: row.get(8)?,
         updated_at: row.get(9)?,
-        available: unavailable_reasons.is_empty(),
+        available: lead_availability.can_attempt(),
         unavailable_reasons,
     })
 }
 
-fn insert_members(conn: &Connection, squad_id: &str, members: &[SquadMemberInput]) -> Result<(), String> {
+fn insert_members(
+    conn: &Connection,
+    squad_id: &str,
+    members: &[SquadMemberInput],
+) -> Result<(), String> {
     for member in members {
         conn.execute(
-            "INSERT INTO squad_members (squad_id, role_id, agent_id, model, account_id, auto_account, complexity, isolate_default)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            "INSERT INTO squad_members (squad_id, role_id, agent_id, model, account_id, auto_account, complexity, isolate_default, reasoning_effort)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
                 squad_id,
                 member.role_id,
@@ -179,6 +276,7 @@ fn insert_members(conn: &Connection, squad_id: &str, members: &[SquadMemberInput
                 member.auto_account as i64,
                 member.complexity.map(Complexity::as_str),
                 member.isolate_default as i64,
+                member.reasoning_effort,
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -189,7 +287,7 @@ fn insert_members(conn: &Connection, squad_id: &str, members: &[SquadMemberInput
 fn save_lead(conn: &Connection, squad_id: &str, lead: &SquadLeadInput) -> Result<(), String> {
     conn.execute(
         "UPDATE squads SET lead_agent_id = ?1, lead_model = ?2, lead_account_id = ?3,
-                            lead_auto_account = ?4, lead_complexity = ?5 WHERE id = ?6",
+                            lead_auto_account = ?4, lead_complexity = ?5, reasoning_effort = ?7 WHERE id = ?6",
         rusqlite::params![
             lead.agent_id,
             lead.model,
@@ -197,6 +295,7 @@ fn save_lead(conn: &Connection, squad_id: &str, lead: &SquadLeadInput) -> Result
             lead.auto_account as i64,
             lead.complexity.map(Complexity::as_str),
             squad_id,
+            lead.reasoning_effort,
         ],
     )
     .map_err(|error| error.to_string())?;
@@ -206,7 +305,9 @@ fn save_lead(conn: &Connection, squad_id: &str, lead: &SquadLeadInput) -> Result
 pub fn create(conn: &Connection, valid: &ValidSquad) -> Result<Squad, String> {
     let id = Uuid::new_v4().to_string();
     let now = now_ts();
-    let tx = conn.unchecked_transaction().map_err(|error| error.to_string())?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|error| error.to_string())?;
     tx.execute(
         "INSERT INTO squads (id, name, description, lead_agent_id, lead_model, lead_account_id,
                              lead_auto_account, lead_complexity, created_at, updated_at)
@@ -224,36 +325,51 @@ pub fn create(conn: &Connection, valid: &ValidSquad) -> Result<Squad, String> {
         ],
     )
     .map_err(|error| error.to_string())?;
+    save_lead(&tx, &id, &valid.lead)?;
     insert_members(&tx, &id, &valid.members)?;
     tx.commit().map_err(|error| error.to_string())?;
     get(conn, &id)?.ok_or_else(|| "squad was not saved".into())
 }
 
 pub fn get(conn: &Connection, id: &str) -> Result<Option<Squad>, String> {
-    conn.query_row(&format!("SELECT {SQUAD_COLUMNS} FROM squads WHERE id = ?1"), [id], |row| row_to_squad(conn, row))
-        .optional()
-        .map_err(|error| error.to_string())
+    conn.query_row(
+        &format!("SELECT {SQUAD_COLUMNS} FROM squads WHERE id = ?1"),
+        [id],
+        |row| row_to_squad(conn, row),
+    )
+    .optional()
+    .map_err(|error| error.to_string())
 }
 
 pub fn list(conn: &Connection) -> Result<Vec<Squad>, String> {
     let mut stmt = conn
-        .prepare(&format!("SELECT {SQUAD_COLUMNS} FROM squads ORDER BY name COLLATE NOCASE, created_at"))
+        .prepare(&format!(
+            "SELECT {SQUAD_COLUMNS} FROM squads ORDER BY name COLLATE NOCASE, created_at"
+        ))
         .map_err(|error| error.to_string())?;
-    let rows = stmt.query_map([], |row| row_to_squad(conn, row)).map_err(|error| error.to_string())?;
-    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|error| error.to_string())
+    let rows = stmt
+        .query_map([], |row| row_to_squad(conn, row))
+        .map_err(|error| error.to_string())?;
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())
 }
 
 pub fn update(conn: &Connection, id: &str, valid: &ValidSquad) -> Result<Squad, String> {
-    let tx = conn.unchecked_transaction().map_err(|error| error.to_string())?;
-    let changed = tx.execute(
-        "UPDATE squads SET name = ?1, description = ?2, updated_at = ?3 WHERE id = ?4",
-        rusqlite::params![valid.name, valid.description, now_ts(), id],
-    ).map_err(|error| error.to_string())?;
+    let tx = conn
+        .unchecked_transaction()
+        .map_err(|error| error.to_string())?;
+    let changed = tx
+        .execute(
+            "UPDATE squads SET name = ?1, description = ?2, updated_at = ?3 WHERE id = ?4",
+            rusqlite::params![valid.name, valid.description, now_ts(), id],
+        )
+        .map_err(|error| error.to_string())?;
     if changed == 0 {
         return Err(format!("no squad '{id}' exists"));
     }
     save_lead(&tx, id, &valid.lead)?;
-    tx.execute("DELETE FROM squad_members WHERE squad_id = ?1", [id]).map_err(|error| error.to_string())?;
+    tx.execute("DELETE FROM squad_members WHERE squad_id = ?1", [id])
+        .map_err(|error| error.to_string())?;
     insert_members(&tx, id, &valid.members)?;
     tx.commit().map_err(|error| error.to_string())?;
     get(conn, id)?.ok_or_else(|| "squad was not saved".into())
@@ -270,47 +386,39 @@ pub fn delete(conn: &Connection, id: &str) -> Result<(), String> {
     if refs > 0 {
         return Err("this squad is referenced by a Mission or Run and cannot be deleted".into());
     }
-    let changed = conn.execute("DELETE FROM squads WHERE id = ?1", [id]).map_err(|error| error.to_string())?;
+    let changed = conn
+        .execute("DELETE FROM squads WHERE id = ?1", [id])
+        .map_err(|error| error.to_string())?;
     if changed == 0 {
         return Err(format!("no squad '{id}' exists"));
     }
     Ok(())
 }
 
-pub fn snapshot_members(conn: &Connection, squad_id: &str) -> Result<Vec<super::types::RunSquadMember>, String> {
+pub fn snapshot_members_of_run(
+    conn: &Connection,
+    run_id: &str,
+) -> Result<Vec<super::types::RunSquadMember>, String> {
     let mut stmt = conn
-        .prepare("SELECT role_id, agent_id, model, account_id, auto_account, complexity, isolate_default
-                  FROM squad_members WHERE squad_id = ?1 ORDER BY role_id")
+        .prepare(
+            "SELECT role_id, agent_id, model, account_id, auto_account, complexity, isolate_default, reasoning_effort
+                  FROM run_squad_members WHERE run_id = ?1 ORDER BY role_id",
+        )
         .map_err(|error| error.to_string())?;
-    let rows = stmt.query_map([squad_id], |row| {
-        Ok(super::types::RunSquadMember {
-            role_id: row.get(0)?,
-            agent_id: row.get(1)?,
-            model: row.get(2)?,
-            account_id: row.get(3)?,
-            auto_account: row.get::<_, i64>(4)? != 0,
-            complexity: row.get(5)?,
-            isolate_default: row.get::<_, i64>(6)? != 0,
+    let rows = stmt
+        .query_map([run_id], |row| {
+            Ok(super::types::RunSquadMember {
+                role_id: row.get(0)?,
+                agent_id: row.get(1)?,
+                model: row.get(2)?,
+                account_id: row.get(3)?,
+                auto_account: row.get::<_, i64>(4)? != 0,
+                complexity: row.get(5)?,
+                isolate_default: row.get::<_, i64>(6)? != 0,
+                reasoning_effort: row.get(7)?,
+            })
         })
-    }).map_err(|error| error.to_string())?;
-    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|error| error.to_string())
-}
-
-pub fn snapshot_members_of_run(conn: &Connection, run_id: &str) -> Result<Vec<super::types::RunSquadMember>, String> {
-    let mut stmt = conn
-        .prepare("SELECT role_id, agent_id, model, account_id, auto_account, complexity, isolate_default
-                  FROM run_squad_members WHERE run_id = ?1 ORDER BY role_id")
         .map_err(|error| error.to_string())?;
-    let rows = stmt.query_map([run_id], |row| {
-        Ok(super::types::RunSquadMember {
-            role_id: row.get(0)?,
-            agent_id: row.get(1)?,
-            model: row.get(2)?,
-            account_id: row.get(3)?,
-            auto_account: row.get::<_, i64>(4)? != 0,
-            complexity: row.get(5)?,
-            isolate_default: row.get::<_, i64>(6)? != 0,
-        })
-    }).map_err(|error| error.to_string())?;
-    rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|error| error.to_string())
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(|error| error.to_string())
 }

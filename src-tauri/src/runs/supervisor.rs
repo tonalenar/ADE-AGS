@@ -15,8 +15,8 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::process::Stdio;
-use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering};
 
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -25,9 +25,9 @@ use uuid::Uuid;
 use crate::database::DbConnection;
 use crate::terminal::containment::ProcessGroup;
 
-use super::agents::{adapter_for, LaunchCtx};
+use super::agents::{LaunchCtx, adapter_for};
 use super::store;
-use super::types::{status, AgentEvent, Task, TaskOutcome};
+use super::types::{AgentEvent, Task, TaskOutcome, status};
 
 /// Evento que la consola escucha para pintar la actividad viva de una tarjeta.
 pub const TASK_EVENT: &str = "cc-task-event";
@@ -76,7 +76,13 @@ struct TaskEventPayload {
 }
 
 fn emit_event(app: &AppHandle, task_id: &str, event: AgentEvent) {
-    let _ = app.emit(TASK_EVENT, TaskEventPayload { task_id: task_id.to_string(), event });
+    let _ = app.emit(
+        TASK_EVENT,
+        TaskEventPayload {
+            task_id: task_id.to_string(),
+            event,
+        },
+    );
 }
 
 fn emit_changed(app: &AppHandle, task_id: &str) {
@@ -132,9 +138,13 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let runtime = tauri::async_runtime::handle();
     let _inside = runtime.inner().enter();
     let Some(adapter) = adapter_for(&task.agent_id) else {
-        return Err(format!("todavía no se sabe correr '{}' sin terminal", task.agent_id));
+        return Err(format!(
+            "todavía no se sabe correr '{}' sin terminal",
+            task.agent_id
+        ));
     };
     let read_only = super::policy::is_coordinator(&task);
+    if read_only { super::ensure_orchestration(&task.agent_id)?; }
     if read_only && !adapter.enforces_read_only() {
         return Err(format!(
             "'{}' no puede correr como lead: su modo sin terminal aprueba todo solo y no hay \
@@ -164,8 +174,14 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         None => Default::default(),
     };
 
+    if task.reasoning_effort.is_some() {
+        let roster = super::roster::snapshot(&db, false)?;
+        super::roster::validate_effort(&roster, &task.agent_id, task.account_id.as_deref(), task.model.as_deref(), task.reasoning_effort.as_deref())?;
+    }
+
     let mcp_config = write_mcp_config(app, &task.id);
     let ctx = LaunchCtx {
+        reasoning_effort: task.reasoning_effort.as_deref(),
         session_id: &session_id,
         account_env,
         mcp_config: mcp_config.clone(),
@@ -200,9 +216,9 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     // nietos, y son los que quedarían huérfanos.
     let mut group = ProcessGroup::new(GROUP_SEQ.fetch_add(1, Ordering::Relaxed));
 
-    let mut child = command.spawn().map_err(|e| {
-        format!("no se pudo lanzar '{}': {e}", launch.program)
-    })?;
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("no se pudo lanzar '{}': {e}", launch.program))?;
     group.adopt(&child);
     live().insert(task.id.clone(), group);
 
@@ -239,7 +255,9 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
                         }
                         // La TUI dice cuál es su sesión y no es la que se le pasó: la
                         // de verdad es la suya (las que no aceptan una de afuera).
-                        AgentEvent::Started { session_id: Some(ref real) } if *real != imposed_session => {
+                        AgentEvent::Started {
+                            session_id: Some(ref real),
+                        } if *real != imposed_session => {
                             if let Ok(conn) = db.lock() {
                                 let _ = store::set_session_id(&conn, &task_id, real);
                             }
@@ -336,7 +354,11 @@ fn stop(app: &AppHandle, task_id: &str, new_status: &str) -> Result<(), String> 
     }
     emit_changed(app, task_id);
     // Una tarea parada libera su lugar y deja sin cumplir lo que dependía de ella.
-    let run_id = db.lock().ok().and_then(|c| store::run_of_task(&c, task_id).ok().flatten()).map(|r| r.id);
+    let run_id = db
+        .lock()
+        .ok()
+        .and_then(|c| store::run_of_task(&c, task_id).ok().flatten())
+        .map(|r| r.id);
     if let Some(run_id) = run_id {
         super::scheduler::tick(app, &run_id);
     }

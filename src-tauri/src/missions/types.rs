@@ -21,6 +21,7 @@ pub struct Mission {
     pub budget_usd: Option<f64>,
     /// `None` = lo elige el ruteo por complejidad.
     pub lead_agent_id: Option<String>,
+    pub reasoning_effort: Option<String>,
     pub lead_model: Option<String>,
     /// Con `auto_account = false`, `None` es la cuenta del sistema.
     pub lead_account_id: Option<String>,
@@ -60,6 +61,7 @@ pub struct MissionInput {
     #[serde(default)]
     pub lead_agent_id: Option<String>,
     #[serde(default)]
+    pub reasoning_effort: Option<String>,
     pub lead_model: Option<String>,
     #[serde(default)]
     pub lead_account_id: Option<String>,

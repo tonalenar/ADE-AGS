@@ -75,7 +75,9 @@ pub fn functional_roles_list() -> Vec<FunctionalRole> {
 
 #[tauri::command]
 pub fn functional_role_get(role_id: String) -> Result<FunctionalRole, String> {
-    get(&role_id).copied().ok_or_else(|| format!("functional role '{role_id}' does not exist"))
+    get(&role_id)
+        .copied()
+        .ok_or_else(|| format!("functional role '{role_id}' does not exist"))
 }
 
 #[cfg(test)]
@@ -86,7 +88,22 @@ mod tests {
     #[test]
     fn built_in_catalog_has_unique_complete_roles_and_lookup() {
         let ids: HashSet<_> = BUILTIN_ROLES.iter().map(|role| role.id).collect();
-        assert_eq!(ids.len(), BUILTIN_ROLES.len());
+        assert_eq!(ids.len(), 8);
+        assert_eq!(
+            ids,
+            [
+                "backend",
+                "frontend",
+                "qa",
+                "reviewer",
+                "researcher",
+                "devops",
+                "integrator",
+                "generalist"
+            ]
+            .into_iter()
+            .collect()
+        );
         for role in BUILTIN_ROLES {
             assert!(!role.label.is_empty());
             assert!(!role.description.is_empty());

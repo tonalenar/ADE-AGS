@@ -12,7 +12,7 @@ use crate::database::DbConnection;
 use crate::squads::Squad;
 use crate::util::now_ts;
 
-use super::types::{status, Fact, Run, Task, TaskOutcome};
+use super::types::{Fact, Run, Task, TaskOutcome, status};
 
 const RUN_COLUMNS: &str = "id, workspace_id, objective, cwd, status, max_parallel, budget_usd, \
                            spent_usd, created_at, ended_at, mission_id, squad_id, squad_name";
@@ -22,7 +22,7 @@ const TASK_COLUMNS: &str = "id, run_id, title, prompt, agent_id, account_id, mod
                             tokens_in, tokens_out, events_path, started_at, ended_at, created_at, \
                             worktree_path, branch, worktree_removed, complexity, routed_by, \
                             route_note, role, plan_key, parent_id, depth, isolate, result_schema, \
-                            last_error, handoff, functional_role";
+                            last_error, handoff, functional_role, reasoning_effort";
 
 fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
     Ok(Run {
@@ -81,6 +81,7 @@ fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         last_error: row.get(33)?,
         handoff: row.get(34)?,
         functional_role: row.get(35)?,
+        reasoning_effort: row.get(36)?,
         // Lo llena `with_deps`: vive en otra tabla.
         depends_on: Vec::new(),
     })
@@ -99,12 +100,18 @@ fn with_deps(conn: &Connection, mut tasks: Vec<Task>) -> Result<Vec<Task>, Strin
         .map_err(|e| e.to_string())?;
     let ids: Vec<&str> = tasks.iter().map(|t| t.id.as_str()).collect();
     let pairs: Vec<(String, String)> = stmt
-        .query_map(rusqlite::params_from_iter(ids), |r| Ok((r.get(0)?, r.get(1)?)))
+        .query_map(rusqlite::params_from_iter(ids), |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
     for task in &mut tasks {
-        task.depends_on = pairs.iter().filter(|(t, _)| *t == task.id).map(|(_, d)| d.clone()).collect();
+        task.depends_on = pairs
+            .iter()
+            .filter(|(t, _)| *t == task.id)
+            .map(|(_, d)| d.clone())
+            .collect();
     }
     Ok(tasks)
 }
@@ -142,14 +149,21 @@ pub fn create_run_with(
 
 /// Ata un run recién creado a la misión que intenta cumplir.
 pub fn set_run_mission(conn: &Connection, run_id: &str, mission_id: &str) -> Result<(), String> {
-    conn.execute("UPDATE runs SET mission_id = ?1 WHERE id = ?2", [mission_id, run_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE runs SET mission_id = ?1 WHERE id = ?2",
+        [mission_id, run_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 /// Stores the Squad configuration selected at Mission start. Later planning resolves from
 /// these copied rows even if the reusable Squad is edited.
-pub fn set_run_squad_snapshot(conn: &Connection, run_id: &str, squad: &Squad) -> Result<(), String> {
+pub fn set_run_squad_snapshot(
+    conn: &Connection,
+    run_id: &str,
+    squad: &Squad,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE runs SET squad_id = ?1, squad_name = ?2 WHERE id = ?3",
         rusqlite::params![squad.id, squad.name, run_id],
@@ -158,8 +172,8 @@ pub fn set_run_squad_snapshot(conn: &Connection, run_id: &str, squad: &Squad) ->
     for member in &squad.members {
         conn.execute(
             "INSERT INTO run_squad_members (run_id, role_id, agent_id, model, account_id,
-                                            auto_account, complexity, isolate_default)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+                                            auto_account, complexity, isolate_default, reasoning_effort)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
             rusqlite::params![
                 run_id,
                 member.role_id,
@@ -169,6 +183,7 @@ pub fn set_run_squad_snapshot(conn: &Connection, run_id: &str, squad: &Squad) ->
                 member.auto_account as i64,
                 member.complexity,
                 member.isolate_default as i64,
+                member.reasoning_effort,
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -184,7 +199,9 @@ fn with_squad_members(conn: &Connection, mut run: Run) -> Result<Run, String> {
 }
 
 fn with_squad_members_many(conn: &Connection, runs: Vec<Run>) -> Result<Vec<Run>, String> {
-    runs.into_iter().map(|run| with_squad_members(conn, run)).collect()
+    runs.into_iter()
+        .map(|run| with_squad_members(conn, run))
+        .collect()
 }
 
 /// Los intentos de una misión, el más reciente primero.
@@ -210,6 +227,7 @@ pub struct NewTask<'a> {
     pub agent_id: &'a str,
     pub account_id: Option<&'a str>,
     pub model: Option<&'a str>,
+    pub reasoning_effort: Option<&'a str>,
     pub cwd: &'a str,
     pub budget_usd: Option<f64>,
     pub complexity: Option<&'a str>,
@@ -233,8 +251,8 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
     conn.execute(
         "INSERT INTO tasks (id, run_id, title, prompt, agent_id, account_id, model, cwd,
                             budget_usd, status, created_at, complexity, routed_by, route_note,
-                            role, plan_key, parent_id, depth, isolate, result_schema, functional_role)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+                            role, plan_key, parent_id, depth, isolate, result_schema, functional_role, reasoning_effort)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
         rusqlite::params![
             id,
             new.run_id,
@@ -257,6 +275,7 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
             new.isolate as i64,
             new.result_schema,
             new.functional_role,
+            new.reasoning_effort,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -267,7 +286,11 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
 
 pub fn run_by_id(conn: &Connection, id: &str) -> Result<Option<Run>, String> {
     let run = conn
-        .query_row(&format!("SELECT {RUN_COLUMNS} FROM runs WHERE id = ?1"), [id], row_to_run)
+        .query_row(
+            &format!("SELECT {RUN_COLUMNS} FROM runs WHERE id = ?1"),
+            [id],
+            row_to_run,
+        )
         .optional()
         .map_err(|error| error.to_string())?;
     run.map(|run| with_squad_members(conn, run)).transpose()
@@ -275,7 +298,11 @@ pub fn run_by_id(conn: &Connection, id: &str) -> Result<Option<Run>, String> {
 
 pub fn task_by_id(conn: &Connection, id: &str) -> Result<Option<Task>, String> {
     let task = conn
-        .query_row(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"), [id], row_to_task)
+        .query_row(
+            &format!("SELECT {TASK_COLUMNS} FROM tasks WHERE id = ?1"),
+            [id],
+            row_to_task,
+        )
         .optional()
         .map_err(|e| e.to_string())?;
     Ok(match task {
@@ -287,7 +314,9 @@ pub fn task_by_id(conn: &Connection, id: &str) -> Result<Option<Task>, String> {
 /// Las tareas de un run, en el orden en que se crearon: el orden del plan.
 pub fn tasks_of_run(conn: &Connection, run_id: &str) -> Result<Vec<Task>, String> {
     let mut stmt = conn
-        .prepare(&format!("SELECT {TASK_COLUMNS} FROM tasks WHERE run_id = ?1 ORDER BY created_at, rowid"))
+        .prepare(&format!(
+            "SELECT {TASK_COLUMNS} FROM tasks WHERE run_id = ?1 ORDER BY created_at, rowid"
+        ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
         .query_map([run_id], row_to_task)
@@ -298,7 +327,11 @@ pub fn tasks_of_run(conn: &Connection, run_id: &str) -> Result<Vec<Task>, String
 }
 
 /// Una tarea del run por su nombre en el plan o por su id.
-pub fn task_in_run(conn: &Connection, run_id: &str, key_or_id: &str) -> Result<Option<Task>, String> {
+pub fn task_in_run(
+    conn: &Connection,
+    run_id: &str,
+    key_or_id: &str,
+) -> Result<Option<Task>, String> {
     let id: Option<String> = conn
         .query_row(
             "SELECT id FROM tasks WHERE run_id = ?1 AND (id = ?2 OR plan_key = ?2) ORDER BY created_at LIMIT 1",
@@ -315,7 +348,9 @@ pub fn task_in_run(conn: &Connection, run_id: &str, key_or_id: &str) -> Result<O
 
 pub fn run_of_task(conn: &Connection, task_id: &str) -> Result<Option<Run>, String> {
     let run_id: Option<String> = conn
-        .query_row("SELECT run_id FROM tasks WHERE id = ?1", [task_id], |r| r.get(0))
+        .query_row("SELECT run_id FROM tasks WHERE id = ?1", [task_id], |r| {
+            r.get(0)
+        })
         .optional()
         .map_err(|e| e.to_string())?;
     match run_id {
@@ -348,7 +383,11 @@ pub fn list_tasks(conn: &Connection, workspace_id: &str) -> Result<Vec<Task>, St
         .prepare(&format!(
             "SELECT {} FROM tasks t JOIN runs r ON r.id = t.run_id
              WHERE r.workspace_id = ?1 ORDER BY t.created_at DESC",
-            TASK_COLUMNS.split(", ").map(|c| format!("t.{c}")).collect::<Vec<_>>().join(", ")
+            TASK_COLUMNS
+                .split(", ")
+                .map(|c| format!("t.{c}"))
+                .collect::<Vec<_>>()
+                .join(", ")
         ))
         .map_err(|e| e.to_string())?;
     let rows = stmt
@@ -370,26 +409,36 @@ pub fn workspace_of_folder(conn: &Connection, cwd: &str) -> Option<String> {
              ORDER BY w.is_open DESC, w.last_active DESC",
         )
         .ok()?;
-    let rows = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))).ok()?;
+    let rows = stmt
+        .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))
+        .ok()?;
     // En una variable a propósito: devolverlo directo haría vivir el iterador (que toma
     // prestado `stmt`) más que `stmt` mismo.
     #[allow(clippy::let_and_return)]
-    let found = rows.filter_map(Result::ok).find(|(_, c)| norm(c) == wanted).map(|(w, _)| w);
+    let found = rows
+        .filter_map(Result::ok)
+        .find(|(_, c)| norm(c) == wanted)
+        .map(|(w, _)| w);
     found
 }
 
 /// El run más reciente creado desde esa carpeta en ese workspace.
-pub fn latest_run_in_folder(conn: &Connection, workspace_id: &str, cwd: &str) -> Result<Option<Run>, String> {
-    let run = conn.query_row(
-        &format!(
-            "SELECT {RUN_COLUMNS} FROM runs WHERE workspace_id = ?1 AND cwd = ?2
+pub fn latest_run_in_folder(
+    conn: &Connection,
+    workspace_id: &str,
+    cwd: &str,
+) -> Result<Option<Run>, String> {
+    let run = conn
+        .query_row(
+            &format!(
+                "SELECT {RUN_COLUMNS} FROM runs WHERE workspace_id = ?1 AND cwd = ?2
              ORDER BY created_at DESC, rowid DESC LIMIT 1"
-        ),
-        [workspace_id, cwd],
-        row_to_run,
-    )
-    .optional()
-    .map_err(|e| e.to_string())?;
+            ),
+            [workspace_id, cwd],
+            row_to_run,
+        )
+        .optional()
+        .map_err(|e| e.to_string())?;
     run.map(|run| with_squad_members(conn, run)).transpose()
 }
 
@@ -405,14 +454,25 @@ pub fn add_dep(conn: &Connection, task_id: &str, depends_on: &str) -> Result<(),
 }
 
 /// Cambia el paralelismo o el presupuesto de un run, si vienen.
-pub fn update_run_limits(conn: &Connection, run_id: &str, max_parallel: Option<i64>, budget_usd: Option<f64>) -> Result<(), String> {
+pub fn update_run_limits(
+    conn: &Connection,
+    run_id: &str,
+    max_parallel: Option<i64>,
+    budget_usd: Option<f64>,
+) -> Result<(), String> {
     if let Some(n) = max_parallel {
-        conn.execute("UPDATE runs SET max_parallel = ?1 WHERE id = ?2", rusqlite::params![n, run_id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE runs SET max_parallel = ?1 WHERE id = ?2",
+            rusqlite::params![n, run_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     if let Some(b) = budget_usd {
-        conn.execute("UPDATE runs SET budget_usd = ?1 WHERE id = ?2", rusqlite::params![b, run_id])
-            .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE runs SET budget_usd = ?1 WHERE id = ?2",
+            rusqlite::params![b, run_id],
+        )
+        .map_err(|e| e.to_string())?;
     }
     Ok(())
 }
@@ -429,8 +489,11 @@ pub fn cancel_one_pending(conn: &Connection, task_id: &str) -> Result<bool, Stri
 }
 
 pub fn set_run_objective(conn: &Connection, run_id: &str, objective: &str) -> Result<(), String> {
-    conn.execute("UPDATE runs SET objective = ?1 WHERE id = ?2", [objective, run_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE runs SET objective = ?1 WHERE id = ?2",
+        [objective, run_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -525,15 +588,22 @@ pub fn refresh_run_status(conn: &Connection, run_id: &str) -> Result<String, Str
 /// `refresh_run_status`, y además la misión si su estado cambió por esto.
 pub fn refresh_run(conn: &Connection, run_id: &str) -> Result<(String, Option<String>), String> {
     let statuses: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT status FROM tasks WHERE run_id = ?1").map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([run_id], |r| r.get(0)).map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT status FROM tasks WHERE run_id = ?1")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([run_id], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
         rows.filter_map(|r| r.ok()).collect()
     };
     let next = if statuses.iter().any(|s| !status::is_final(s)) {
         "running"
     } else if statuses.iter().all(|s| s == status::DONE) {
         "done"
-    } else if statuses.iter().any(|s| s == status::FAILED || s == status::SKIPPED) {
+    } else if statuses
+        .iter()
+        .any(|s| s == status::FAILED || s == status::SKIPPED)
+    {
         "failed"
     } else {
         "cancelled"
@@ -551,7 +621,13 @@ pub fn refresh_run(conn: &Connection, run_id: &str) -> Result<(String, Option<St
 
 // ── Lo que se dejan escrito ─────────────────────────────────────
 
-pub fn add_fact(conn: &Connection, run_id: &str, task_id: Option<&str>, kind: &str, body: &str) -> Result<Fact, String> {
+pub fn add_fact(
+    conn: &Connection,
+    run_id: &str,
+    task_id: Option<&str>,
+    kind: &str,
+    body: &str,
+) -> Result<Fact, String> {
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO run_facts (id, run_id, task_id, kind, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
@@ -593,7 +669,13 @@ pub fn facts_of_run(conn: &Connection, run_id: &str) -> Result<Vec<Fact>, String
 // ── Cerrar ──────────────────────────────────────────────────────
 
 /// La tarea corre en un worktree: su `cwd` pasa a ser el de adentro.
-pub fn set_worktree(conn: &Connection, task_id: &str, cwd: &str, root: &str, branch: &str) -> Result<(), String> {
+pub fn set_worktree(
+    conn: &Connection,
+    task_id: &str,
+    cwd: &str,
+    root: &str,
+    branch: &str,
+) -> Result<(), String> {
     conn.execute(
         "UPDATE tasks SET cwd = ?1, worktree_path = ?2, branch = ?3 WHERE id = ?4",
         rusqlite::params![cwd, root, branch, task_id],
@@ -616,16 +698,22 @@ pub fn worktree_of_task(conn: &Connection, task_id: &str) -> Option<(String, Str
 }
 
 pub fn mark_worktree_removed(conn: &Connection, task_id: &str) -> Result<(), String> {
-    conn.execute("UPDATE tasks SET worktree_removed = 1 WHERE id = ?1", [task_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE tasks SET worktree_removed = 1 WHERE id = ?1",
+        [task_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
 /// El id de sesión que dio la TUI, cuando no se le pudo imponer uno (OpenCode, Codex): es el
 /// que sirve para reabrir la tarea como tab.
 pub fn set_session_id(conn: &Connection, task_id: &str, session_id: &str) -> Result<(), String> {
-    conn.execute("UPDATE tasks SET session_id = ?1 WHERE id = ?2", rusqlite::params![session_id, task_id])
-        .map_err(|e| e.to_string())?;
+    conn.execute(
+        "UPDATE tasks SET session_id = ?1 WHERE id = ?2",
+        rusqlite::params![session_id, task_id],
+    )
+    .map_err(|e| e.to_string())?;
     Ok(())
 }
 
@@ -654,7 +742,26 @@ pub fn mark_running(
 /// tarea que falla AL LANZARSE (un binario que no está, una cuenta borrada) nunca llegó a
 /// correr, y sin eso se quedaría en `ready` para siempre.
 pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> Result<(), String> {
-    let state = if outcome.ok { status::DONE } else { status::FAILED };
+    // Central finalization also covers IPC/runtime callers; no model-text heuristics.
+    let mut outcome = outcome.clone();
+    if outcome.ok {
+        let no_workers: bool = conn.query_row(
+            "SELECT role = 'lead' AND NOT EXISTS (
+                SELECT 1 FROM tasks worker WHERE worker.run_id = lead.run_id AND worker.role = 'worker'
+             ) FROM tasks lead WHERE lead.id = ?1",
+            [task_id], |row| Ok(row.get::<_, Option<bool>>(0)?.unwrap_or(false)),
+        ).map_err(|error| error.to_string())?;
+        if no_workers {
+            outcome.ok = false;
+            outcome.result = None;
+            outcome.error = Some("The Lead finished without creating an execution plan. No worker tasks were delegated. Check that the provider supports ADE orchestration tools.".into());
+        }
+    }
+    let state = if outcome.ok {
+        status::DONE
+    } else {
+        status::FAILED
+    };
     conn.execute(
         // Costo y tokens SUMAN: con reintentos, la tarea gastó lo de todos sus intentos, y
         // mostrar solo el último escondería lo que costó que fallara la primera vez.
@@ -708,12 +815,21 @@ pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
     let waiting = conn
         .execute(
             "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE status = ?4",
-            rusqlite::params![status::CANCELLED, "la app se cerró antes de que le tocara correr", now, status::PENDING],
+            rusqlite::params![
+                status::CANCELLED,
+                "la app se cerró antes de que le tocara correr",
+                now,
+                status::PENDING
+            ],
         )
         .map_err(|e| e.to_string())?;
     let open_runs: Vec<String> = {
-        let mut stmt = conn.prepare("SELECT id FROM runs WHERE status = 'running'").map_err(|e| e.to_string())?;
-        let rows = stmt.query_map([], |r| r.get(0)).map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare("SELECT id FROM runs WHERE status = 'running'")
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([], |r| r.get(0))
+            .map_err(|e| e.to_string())?;
         rows.filter_map(|r| r.ok()).collect()
     };
     for run in open_runs {
@@ -784,13 +900,24 @@ pub fn list_rules(conn: &Connection, cwd: &str) -> Result<Vec<RuleRow>, String> 
 /// No moverla importa: el orden decide con "gana la primera", y darle vuelta a una regla
 /// que ya existía no debería cambiar su precedencia respecto de las demás a espaldas del
 /// usuario.
-pub fn upsert_rule(conn: &Connection, cwd: &str, pattern: &str, allow: bool) -> Result<RuleRow, String> {
+pub fn upsert_rule(
+    conn: &Connection,
+    cwd: &str,
+    pattern: &str,
+    allow: bool,
+) -> Result<RuleRow, String> {
     let pattern = pattern.trim();
     conn.execute(
         "INSERT INTO permission_rules (id, cwd, pattern, allow, created_at)
          VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(cwd, pattern) DO UPDATE SET allow = excluded.allow",
-        rusqlite::params![Uuid::new_v4().to_string(), cwd, pattern, allow as i64, now_ts()],
+        rusqlite::params![
+            Uuid::new_v4().to_string(),
+            cwd,
+            pattern,
+            allow as i64,
+            now_ts()
+        ],
     )
     .map_err(|e| e.to_string())?;
 

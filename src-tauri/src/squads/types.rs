@@ -2,11 +2,36 @@ use serde::{Deserialize, Serialize};
 
 use crate::runs::Complexity;
 
+/// What the local installation can verify about a saved provider/account assignment.
+/// Explicit model IDs stay `Unknown` here because model catalogs differ by adapter; the
+/// routing layer validates them when a Mission starts or a Plan is resolved.
+#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AssignmentAvailability {
+    ProviderNotOrchestrating,
+    Available,
+    Unknown,
+    ProviderMissing,
+    ProviderNotInstalled,
+    ProviderNotHeadless,
+    AccountMissing,
+    AccountProviderMismatch,
+}
+
+impl AssignmentAvailability {
+    /// Unknown means runtime routing must check the selected model; it is not a reason to
+    /// silently replace the configured assignment or prevent the user from trying it.
+    pub fn can_attempt(self) -> bool {
+        matches!(self, Self::Available | Self::Unknown)
+    }
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct SquadLeadInput {
     pub agent_id: String,
     #[serde(default)]
+    pub reasoning_effort: Option<String>,
     pub model: Option<String>,
     #[serde(default)]
     pub account_id: Option<String>,
@@ -22,6 +47,7 @@ pub struct SquadMemberInput {
     pub role_id: String,
     pub agent_id: String,
     #[serde(default)]
+    pub reasoning_effort: Option<String>,
     pub model: Option<String>,
     #[serde(default)]
     pub account_id: Option<String>,
@@ -48,11 +74,13 @@ pub struct SquadInput {
 #[serde(rename_all = "camelCase")]
 pub struct SquadLead {
     pub agent_id: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     pub model: Option<String>,
     pub account_id: Option<String>,
     pub auto_account: bool,
     pub complexity: Option<String>,
-    pub available: bool,
+    pub availability: AssignmentAvailability,
     pub unavailable_reason: Option<String>,
 }
 
@@ -62,12 +90,14 @@ pub struct SquadLead {
 pub struct SquadMember {
     pub role_id: String,
     pub agent_id: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     pub model: Option<String>,
     pub account_id: Option<String>,
     pub auto_account: bool,
     pub complexity: Option<String>,
     pub isolate_default: bool,
-    pub available: bool,
+    pub availability: AssignmentAvailability,
     pub unavailable_reason: Option<String>,
 }
 
@@ -81,6 +111,8 @@ pub struct Squad {
     pub members: Vec<SquadMember>,
     pub created_at: i64,
     pub updated_at: i64,
+    /// Start availability follows the Lead. Optional worker roles are checked only if a
+    /// plan uses them; one unavailable member must not disable the whole Squad.
     pub available: bool,
     pub unavailable_reasons: Vec<String>,
 }
@@ -92,6 +124,8 @@ pub struct Squad {
 pub struct RunSquadMember {
     pub role_id: String,
     pub agent_id: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     pub model: Option<String>,
     pub account_id: Option<String>,
     pub auto_account: bool,
@@ -104,6 +138,7 @@ impl From<&SquadMember> for RunSquadMember {
         Self {
             role_id: member.role_id.clone(),
             agent_id: member.agent_id.clone(),
+            reasoning_effort: member.reasoning_effort.clone(),
             model: member.model.clone(),
             account_id: member.account_id.clone(),
             auto_account: member.auto_account,
@@ -118,10 +153,13 @@ impl From<&SquadMemberInput> for RunSquadMember {
         Self {
             role_id: member.role_id.clone(),
             agent_id: member.agent_id.clone(),
+            reasoning_effort: member.reasoning_effort.clone(),
             model: member.model.clone(),
             account_id: member.account_id.clone(),
             auto_account: member.auto_account,
-            complexity: member.complexity.map(|complexity| complexity.as_str().to_string()),
+            complexity: member
+                .complexity
+                .map(|complexity| complexity.as_str().to_string()),
             isolate_default: member.isolate_default,
         }
     }
