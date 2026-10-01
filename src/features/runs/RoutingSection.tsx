@@ -34,6 +34,7 @@ export function RoutingSection() {
   const [tiers, setLocal] = useState<Tiers | null>(null);
   const [roster, setRoster] = useState<Roster | null>(null);
   const [error, setError] = useState("");
+  const [refreshingModels, setRefreshingModels] = useState(false);
   /** El tramo con el buscador abierto para agregarle un modelo. */
   const [adding, setAdding] = useState<Complexity | null>(null);
 
@@ -56,6 +57,19 @@ export function RoutingSection() {
 
   const edit = (c: Complexity, list: ModelRef[]) => tiers && save({ ...tiers, [c]: list });
 
+  const refreshModels = async () => {
+    if (refreshingModels) return;
+    setRefreshingModels(true);
+    setError("");
+    try {
+      setRoster(await getRoster(true));
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setRefreshingModels(false);
+    }
+  };
+
   const agents = launchableAgents(roster);
   // Solo lo que hoy se puede correr. Las TUIs instaladas sin adaptador van aparte, dichas:
   // ofrecer sus 89 modelos para que el ruteo los descarte uno por uno sería ruido.
@@ -71,9 +85,14 @@ export function RoutingSection() {
       title={t("settings.routing")}
       description={t("settings.routing.desc")}
       action={
-        <Button variant="ghost" size="sm" disabled={!tiers} onClick={() => save(DEFAULT_TIERS)}>
-          {t("settings.routing.reset")}
-        </Button>
+        <div className="flex items-center gap-1.5">
+          <Button variant="ghost" size="sm" disabled={refreshingModels} onClick={refreshModels}>
+            {t(refreshingModels ? "models.refreshing" : "models.refresh")}
+          </Button>
+          <Button variant="ghost" size="sm" disabled={!tiers} onClick={() => save(DEFAULT_TIERS)}>
+            {t("settings.routing.reset")}
+          </Button>
+        </div>
       }
     >
       {error && <Alert variant="danger">{error}</Alert>}

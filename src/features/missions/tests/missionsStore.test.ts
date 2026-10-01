@@ -125,6 +125,19 @@ describe("missions store", () => {
     expect(useMissionsStore.getState().missions[0].status).toBe("cancelled");
   });
 
+  it("retries the same failed mission and refreshes its new active execution", async () => {
+    backend("failed");
+    await useMissionsStore.getState().loadDetail("m1");
+    const retried = mission({ status: "running", activeRunId: "r2" });
+    m.startMission.mockResolvedValue(retried);
+    m.listMissions.mockResolvedValue([summary({ status: "running", activeRunId: "r2" })]);
+    m.getMission.mockResolvedValue({ ...detail(), mission: retried });
+    await useMissionsStore.getState().start("w", "m1");
+    expect(m.startMission).toHaveBeenCalledWith("m1");
+    expect(m.createMission).not.toHaveBeenCalled();
+    expect(useMissionsStore.getState().details.m1.mission).toMatchObject({ id: "m1", status: "running", activeRunId: "r2" });
+  });
+
   it("loadDetail guarda el detalle por id", async () => {
     m.getMission.mockResolvedValue(detail({ status: "done" }));
     const d = await useMissionsStore.getState().loadDetail("m1");

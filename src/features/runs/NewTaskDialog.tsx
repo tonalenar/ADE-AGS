@@ -12,6 +12,7 @@ import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { getRoster, previewRoute, type RouteInput, type StartOrchestrationInput, type StartTaskInput } from "./ipc";
 import { COMPLEXITIES, describeAssignment, launchableAgents } from "./routingView";
+import { providerDisabled } from "./leadProviders";
 import type { Assignment, Complexity, Roster } from "./types";
 
 /** Cómo se elige el modelo: por complejidad (lo decide el ruteo) o uno fijo. */
@@ -80,7 +81,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
 
   // Las TUIs que se ofrecen salen del roster: "se sabe correr sin terminal" es algo que
   // decide el backend (tiene o no adaptador), no una lista copiada acá.
-  const agents = launchableAgents(roster);
+  const agents = launchableAgents(roster).filter((agent) => !providerDisabled(agent, kind === "orchestrate"));
   const agent = agents.find((a) => a.agentId === agentId);
   const models = useMemo(
     () => (agent?.models ?? []).filter((m) => !m.unavailable && m.toolcall !== false),

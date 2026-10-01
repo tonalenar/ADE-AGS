@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button, Tooltip } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
+import { accountProblemText } from "@/features/accounts/problem";
 
 import { isLive } from "./fleetOrder";
 import { PermissionCard } from "./PermissionCard";
@@ -167,7 +168,7 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
         {task.error && (
           <span className="line-clamp-2 font-mono text-[10.5px] leading-relaxed
             text-red-600 dark:text-red-400">
-            {task.error}
+            {accountProblemText(task.error, t)}
           </span>
         )}
       </div>

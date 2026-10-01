@@ -7,42 +7,19 @@ import type { Roster } from "@/features/runs/types";
 import { AccountPickerStep, AUTO_ACCOUNT } from "@/features/tabs/wizard/AccountPickerStep";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
+import { addSquadRole, availableSquadRoles, EMPTY_SQUAD_INPUT, removeSquadRole } from "./squadForm";
+import { modelSelectionMode, modelsForAccount, withModelEffort } from "./modelSelection";
+import { ModelSelector } from "@/features/runs/ModelSelector";
+import { leadUnsupported, providerDisabled } from "@/features/runs/leadProviders";
 import type { FunctionalRole, Squad, SquadInput, SquadMemberInput } from "./types";
 
-const EMPTY: SquadInput = {
-  name: "",
-  description: "",
-  lead: { agentId: "", model: null, accountId: null, autoAccount: true, complexity: "hard" },
-  members: [],
-};
+export { inputFromSquad } from "./squadForm";
 
-export function inputFromSquad(squad: Squad): SquadInput {
-  return {
-    name: squad.name,
-    description: squad.description,
-    lead: {
-      agentId: squad.lead.agentId,
-      model: squad.lead.model,
-      accountId: squad.lead.accountId,
-      autoAccount: squad.lead.autoAccount,
-      complexity: squad.lead.complexity,
-    },
-    members: squad.members.map((member) => ({
-      roleId: member.roleId,
-      agentId: member.agentId,
-      model: member.model,
-      accountId: member.accountId,
-      autoAccount: member.autoAccount,
-      complexity: member.complexity,
-      isolateDefault: member.isolateDefault,
-    })),
-  };
-}
-
-export function SquadDialog({ initial = EMPTY, roles, editing, onClose, onSave }: {
+export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad, onClose, onSave }: {
   initial?: SquadInput;
   roles: FunctionalRole[];
   editing: boolean;
+  squad?: Squad;
   onClose: () => void;
   onSave: (input: SquadInput) => Promise<void>;
 }) {
@@ -53,11 +30,10 @@ export function SquadDialog({ initial = EMPTY, roles, editing, onClose, onSave }
   const [error, setError] = useState("");
   useEffect(() => { getRoster().then(setRoster).catch(() => setRoster(null)); }, []);
 
-  const remainingRoles = useMemo(
-    () => roles.filter((role) => !form.members.some((member) => member.roleId === role.id)),
-    [roles, form.members]
-  );
-  const ready = Boolean(form.name.trim() && form.lead.agentId && form.members.every((member) => member.agentId));
+  const remainingRoles = useMemo(() => availableSquadRoles(roles, form.members), [roles, form.members]);
+  const canSaveAssignment = (assignment: { agentId: string; model: string | null; complexity: SquadMemberInput["complexity"] }) =>
+    Boolean(assignment.agentId && (modelSelectionMode(assignment.model, assignment.complexity) !== "specific" || assignment.model?.trim()));
+  const ready = Boolean(form.name.trim() && !leadUnsupported(roster?.agents.find((agent) => agent.agentId === form.lead.agentId)) && canSaveAssignment(form.lead) && form.members.every(canSaveAssignment));
 
   const save = async () => {
     if (!ready || busy) return;
@@ -105,14 +81,21 @@ export function SquadDialog({ initial = EMPTY, roles, editing, onClose, onSave }
         </Field>
 
         <section className="flex flex-col gap-2 rounded-xl border border-violet-300/50 dark:border-violet-400/15 bg-violet-500/5 p-3">
-          <h3 className="text-[12px] font-semibold text-gray-800 dark:text-gray-200">{t("squads.lead")}</h3>
+          <div className="flex items-center gap-2">
+            <h3 className="flex-1 text-[12px] font-semibold text-gray-800 dark:text-gray-200">{t("squads.lead")}</h3>
+       </div>
           <AgentConfig
             roster={roster}
+            lead
+            onRoster={setRoster}
             agentId={form.lead.agentId}
             model={form.lead.model}
+            reasoningEffort={form.lead.reasoningEffort}
             accountId={form.lead.accountId}
             autoAccount={form.lead.autoAccount}
             complexity={form.lead.complexity}
+            availability={squad?.lead.availability}
+            unavailableReason={squad?.lead.unavailableReason}
             onChange={(patch) => setForm((current) => ({ ...current, lead: { ...current.lead, ...patch } }))}
           />
         </section>
@@ -125,10 +108,7 @@ export function SquadDialog({ initial = EMPTY, roles, editing, onClose, onSave }
                 onChange={(event) => {
                   const roleId = event.target.value;
                   if (!roleId) return;
-                  setForm((current) => ({
-                    ...current,
-                    members: [...current.members, memberDefault(roleId)],
-                  }));
+                  setForm((current) => addSquadRole(current, roleId));
                 }}>
                 <option value="">{t("squads.form.addRole")}</option>
                 {remainingRoles.map((role) => <option key={role.id} value={role.id}>{role.label}</option>)}
@@ -147,18 +127,20 @@ export function SquadDialog({ initial = EMPTY, roles, editing, onClose, onSave }
                     <h4 className="text-[11.5px] font-semibold text-gray-800 dark:text-gray-200">{role?.label ?? member.roleId}</h4>
                     <p className="mt-0.5 text-[10px] leading-relaxed text-gray-400 dark:text-white/35">{role?.description}</p>
                   </div>
-                  <Button variant="ghost" size="sm" onClick={() => setForm((current) => ({
-                    ...current, members: current.members.filter((entry) => entry.roleId !== member.roleId),
-                  }))}>{t("squads.form.removeRole")}</Button>
+                  <Button variant="ghost" size="sm" onClick={() => setForm((current) => removeSquadRole(current, member.roleId))}>{t("squads.form.removeRole")}</Button>
                 </div>
                 <AgentConfig
                   roster={roster}
+                  onRoster={setRoster}
                   agentId={member.agentId}
                   model={member.model}
+                  reasoningEffort={member.reasoningEffort}
                   accountId={member.accountId}
                   autoAccount={member.autoAccount}
                   complexity={member.complexity}
                   isolateDefault={member.isolateDefault}
+                  availability={squad?.members.find((saved) => saved.roleId === member.roleId)?.availability}
+                  unavailableReason={squad?.members.find((saved) => saved.roleId === member.roleId)?.unavailableReason}
                   onChange={(patch) => setForm((current) => ({
                     ...current,
                     members: current.members.map((entry) => entry.roleId === member.roleId ? { ...entry, ...patch } : entry),
@@ -176,51 +158,57 @@ export function SquadDialog({ initial = EMPTY, roles, editing, onClose, onSave }
 
 type AgentPatch = Partial<Omit<SquadMemberInput, "roleId">>;
 
-function AgentConfig({ roster, agentId, model, accountId, autoAccount, complexity, isolateDefault, onChange }: {
+function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, accountId, autoAccount, complexity, isolateDefault, availability, unavailableReason, onChange, lead = false }: {
+  lead?: boolean;
   roster: Roster | null;
+  onRoster: (roster: Roster) => void;
   agentId: string;
   model: string | null;
+  reasoningEffort?: string | null;
   accountId: string | null;
   autoAccount: boolean;
   complexity: SquadMemberInput["complexity"];
   isolateDefault?: boolean;
+  availability?: Squad["lead"]["availability"];
+  unavailableReason?: string | null;
   onChange: (patch: AgentPatch) => void;
 }) {
   const { t } = useTranslation();
   const selectedAgent = roster?.agents.find((agent) => agent.agentId === agentId);
-  const modelList = `squad-models-${agentId || "none"}-${isolateDefault ? "member" : "lead"}`;
   const accountValue = autoAccount ? AUTO_ACCOUNT : (accountId ?? undefined);
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
       <Field label={t("squads.form.provider")}>
-        <select className={SELECT} value={agentId} onChange={(event) => onChange({ agentId: event.target.value, model: null, accountId: null, autoAccount: true })}>
+        <select className={SELECT} value={agentId} onChange={(event) => onChange({ agentId: event.target.value, model: null, reasoningEffort: null, accountId: null, autoAccount: true })}>
           <option value="">{t("squads.form.chooseProvider")}</option>
+          {agentId && (!roster || !roster.agents.some((agent) => agent.agentId === agentId)) && (
+            <option value={agentId}>{agentId} · {t("squads.unavailable")}</option>
+          )}
           {roster?.agents.map((agent) => (
-            <option key={agent.agentId} value={agent.agentId}>
-              {agent.label}{agent.launchable ? "" : ` · ${t("squads.unavailable")}`}
+            <option key={agent.agentId} value={agent.agentId} disabled={providerDisabled(agent, lead)}>
+              {agent.label}{lead && leadUnsupported(agent) ? " · " + t("squads.leadUnsupported") : agent.launchable ? "" : " · " + t("squads.unavailable")}
             </option>
           ))}
         </select>
+        {lead && leadUnsupported(selectedAgent) && <span role="alert" className="text-[10px] text-amber-700 dark:text-amber-300">{t("squads.leadUnsupported")}</span>}
         {selectedAgent && !selectedAgent.launchable && (
           <span className="text-[10px] text-amber-700 dark:text-amber-300">{selectedAgent.unavailable ?? t("squads.unavailable")}</span>
         )}
       </Field>
-      <Field label={t("squads.form.model")} hint={t("squads.providerDefault")}>
-        <Input size="sm" list={modelList} value={model ?? ""} onChange={(event) => onChange({ model: event.target.value || null })} className={INPUT} />
-        <datalist id={modelList}>{selectedAgent?.models.map((entry) => <option key={entry.id} value={entry.id}>{entry.label}</option>)}</datalist>
-      </Field>
+      <ModelSelector roster={roster} agentId={agentId} accountId={accountId} autoAccount={autoAccount}
+        model={model} reasoningEffort={reasoningEffort} complexity={complexity} onChange={onChange} onRoster={onRoster} />
       <Field group label={t("squads.form.account")}>
         {agentId ? (
           <AccountPickerStep agentId={agentId} value={accountValue}
-            onChange={(value) => onChange({ autoAccount: value === AUTO_ACCOUNT, accountId: value === AUTO_ACCOUNT ? null : (value ?? null) })}
-            showLabel={false} allowAuto />
+            onChange={(value) => {
+              const nextAuto = value === AUTO_ACCOUNT;
+              const nextAccount = nextAuto ? null : (value ?? null);
+              onChange({ autoAccount: nextAuto, accountId: nextAccount,
+                reasoningEffort: withModelEffort({ model, complexity }, reasoningEffort ?? null,
+                  modelsForAccount(selectedAgent, nextAccount, nextAuto)).reasoningEffort });
+            }}
+            showLabel={false} allowAuto preserveUnavailableValue />
         ) : <span className="text-[10px] text-gray-400 dark:text-white/35">{t("squads.form.chooseProvider")}</span>}
-      </Field>
-      <Field label={t("squads.form.complexity")}>
-        <select className={SELECT} value={complexity ?? ""} onChange={(event) => onChange({ complexity: (event.target.value || null) as SquadMemberInput["complexity"] })}>
-          <option value="">{t("squads.form.providerDefault")}</option>
-          {(["trivial", "standard", "hard"] as const).map((value) => <option key={value} value={value}>{t(`fleet.complexity.${value}`)}</option>)}
-        </select>
       </Field>
       {isolateDefault !== undefined && (
         <label className="md:col-span-2 flex items-center gap-2 text-[10.5px] text-gray-600 dark:text-white/55">
@@ -228,12 +216,13 @@ function AgentConfig({ roster, agentId, model, accountId, autoAccount, complexit
           {t("squads.form.isolateDefault")}
         </label>
       )}
+      {availability && availability !== "available" && (
+        <p className={`md:col-span-2 text-[10px] ${availability === "unknown" ? "text-gray-400 dark:text-white/35" : "text-amber-700 dark:text-amber-300"}`}>
+          {t(`squads.availability.${availability}`)}{unavailableReason ? ` · ${unavailableReason}` : ""}
+        </p>
+      )}
     </div>
   );
-}
-
-function memberDefault(roleId: string): SquadMemberInput {
-  return { roleId, agentId: "", model: null, accountId: null, autoAccount: true, complexity: null, isolateDefault: true };
 }
 
 function Field({ label, hint, group = false, children }: { label: string; hint?: string; group?: boolean; children: React.ReactNode }) {

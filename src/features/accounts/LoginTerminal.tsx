@@ -4,6 +4,7 @@ import { Loading } from "neogestify-ui-components";
 import { Terminal } from "@/features/terminal/Terminal";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
+import { accountLoginCommand, accountLoginEnv } from "./login";
 
 interface LoginTerminalProps {
   account: AgentAccount;
@@ -31,7 +32,13 @@ export function LoginTerminal({ account }: LoginTerminalProps) {
   const [error, setError] = useState("");
 
   useEffect(() => {
-    envFor(account.id).then(setEnv).catch((e) => setError(String(e)));
+    let stale = false;
+    setEnv(null);
+    setError("");
+    accountLoginEnv(account.id, envFor)
+      .then((next) => { if (!stale) setEnv(next); })
+      .catch((e) => { if (!stale) setError(String(e)); });
+    return () => { stale = true; };
   }, [account.id, envFor]);
 
   if (error) {
@@ -52,7 +59,7 @@ export function LoginTerminal({ account }: LoginTerminalProps) {
   return (
     <div className="h-96 rounded-lg overflow-hidden border border-gray-200 dark:border-white/10">
       <Terminal
-        command={account.loginCommand}
+        command={accountLoginCommand(account)}
         env={env}
         isActive
         // Al salir la TUI se refresca la lista: si el login funcionó, la fila de la cuenta

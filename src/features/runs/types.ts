@@ -9,6 +9,7 @@ export interface Task {
   agentId: string;
   accountId: string | null;
   model: string | null;
+  reasoningEffort?: string | null;
   cwd: string;
   budgetUsd: number | null;
   status: TaskStatus;
@@ -173,8 +174,14 @@ export interface RosterModel {
   costIn: number | null;
   costOut: number | null;
   context: number | null;
+  source: string | null;
+  availability: "available" | "unavailable" | "unknown";
+  reasoningLevels: string[] | null;
+  defaultReasoning: string | null;
   unavailable: string | null;
 }
+
+export type ModelDiscoveryState = "available" | "unavailable" | "unsupported";
 
 export interface RosterAccount {
   /** `null` = la del sistema. */
@@ -185,9 +192,12 @@ export interface RosterAccount {
   loggedIn: boolean;
   quota: Quota | null;
   running: number;
+  models: RosterModel[];
+  modelDiscovery: ModelDiscoveryState;
 }
 
 export interface RosterAgent {
+  capabilities: { headless: boolean; mcp: boolean; orchestration: boolean };
   agentId: string;
   label: string;
   installed: boolean;
@@ -195,6 +205,7 @@ export interface RosterAgent {
   launchable: boolean;
   unavailable: string | null;
   models: RosterModel[];
+  modelDiscovery: ModelDiscoveryState;
   accounts: RosterAccount[];
 }
 
@@ -215,6 +226,7 @@ export interface Assignment {
   agentId: string;
   /** `null` = el de siempre de la TUI. */
   model: string | null;
+  reasoningEffort?: string | null;
   /** `null` = la del sistema. */
   accountId: string | null;
   routedBy: RoutedBy;

@@ -15,7 +15,7 @@ export const createMission = (workspaceId: string, input: MissionInput) =>
 export const updateMission = (missionId: string, input: MissionInput) =>
   invoke<Mission>("mission_update", { missionId, input });
 
-/** Rutea el lead, crea el run y lo lanza. Falla sin crear nada si el provider no corre sin terminal. */
+/** Starts a draft or retries a failed mission in a new run, preserving earlier attempts. */
 export const startMission = (missionId: string) => invoke<Mission>("mission_start", { missionId });
 
 /** Un borrador se marca cancelado; una que corre cancela su run. */

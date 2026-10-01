@@ -1,3 +1,4 @@
+import { LANGUAGE_OPTIONS, persistLocale } from "@/i18n/locale";
 import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import {
@@ -110,7 +111,7 @@ export function SettingsPage() {
 
   const handleLanguage = (lang: string) => {
     i18n.changeLanguage(lang);
-    localStorage.setItem("language", lang);
+    persistLocale(localStorage, lang);
   };
 
   return (
@@ -148,10 +149,7 @@ export function SettingsPage() {
                   onChange={(e) => handleLanguage(e.target.value)}
                   variant="minimal"
                   size="sm"
-                  options={[
-                    { value: "es", label: "Español" },
-                    { value: "en", label: "English" },
-                  ]}
+                  options={[...LANGUAGE_OPTIONS]}
                 />
               </SettingsRow>
               <RenderingSetting />

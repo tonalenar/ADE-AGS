@@ -17,7 +17,7 @@ const found = (pattern: RegExp) =>
 
 const ids = found(/\n\s+id: "([^"]+)",\n\s+group:/g);
 const groups = [...new Set(found(/\n\s+group: "([^"]+)"/g))];
-const args = [...new Set(found(/Arg \{ name: "([^"]+)"/g))];
+const args = [...new Set(found(/Arg\s*\{\s*name: "([^"]+)"/g))];
 
 describe("el catálogo de comandos de graphify", () => {
   /// Si el parseo del fuente se rompe (se renombró un campo), todo lo de abajo pasaría

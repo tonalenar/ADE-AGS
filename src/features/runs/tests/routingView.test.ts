@@ -16,18 +16,20 @@ const quota = (utilization: number, resetsAt: number | null): Quota => ({
 });
 
 const account = (accountId: string | null, name: string, q: Quota | null = null): RosterAccount => ({
-  accountId, key: accountId ?? "system:claude-code", name, label: null, loggedIn: true, quota: q, running: 0,
+  accountId, key: accountId ?? "system:claude-code", name, label: null, loggedIn: true, quota: q, running: 0, models: [], modelDiscovery: "available",
 });
 
 const roster = (accounts: RosterAccount[]): Roster => ({
   agents: [
     {
       agentId: "claude-code", label: "Claude Code", installed: true, launchable: true, unavailable: null,
-      models: [{ id: "sonnet", label: "Sonnet", toolcall: true, local: false, costIn: 2, costOut: 10, context: null, unavailable: null }],
+      capabilities: { headless: true, mcp: true, orchestration: true }, modelDiscovery: "available",
+      models: [{ id: "sonnet", label: "Sonnet", toolcall: true, local: false, costIn: 2, costOut: 10, context: null, unavailable: null, source: null, availability: "unknown", reasoningLevels: null, defaultReasoning: null }],
       accounts,
     },
     {
       agentId: "opencode", label: "OpenCode", installed: true, launchable: false,
+      capabilities: { headless: false, mcp: false, orchestration: false }, modelDiscovery: "unavailable",
       unavailable: "todavía no se sabe correr OpenCode sin terminal", models: [], accounts: [],
     },
   ],
@@ -103,10 +105,10 @@ describe("tramos", () => {
 
 describe("searchModels", () => {
   const model = (id: string, label = id, extra: Partial<RosterModel> = {}): RosterModel => ({
-    id, label, toolcall: true, local: false, costIn: null, costOut: null, context: null, unavailable: null, ...extra,
+    id, label, toolcall: true, local: false, costIn: null, costOut: null, context: null, unavailable: null, source: null, availability: "unknown", reasoningLevels: null, defaultReasoning: null, ...extra,
   });
   const agent = (agentId: string, label: string, models: RosterModel[]): RosterAgent => ({
-    agentId, label, installed: true, launchable: true, unavailable: null, models, accounts: [],
+    agentId, label, installed: true, launchable: true, unavailable: null, models, capabilities: { headless: true, mcp: true, orchestration: true }, modelDiscovery: "available", accounts: [],
   });
   const agents = [
     agent("claude-code", "Claude Code", [model("haiku", "Haiku"), model("sonnet", "Sonnet"), model("opus", "Opus")]),
