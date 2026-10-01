@@ -16,8 +16,8 @@ use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
 use super::ask::user_ask;
 use super::browser::browser_run;
-use super::shared::bridge_call;
 use super::runs::{run_approve, run_orchestrate};
+use super::shared::bridge_call;
 use super::skills::{skill_edit, skill_install, skill_list, skill_new, skill_search, skill_show};
 use super::tabs::{tab_create, tab_list, tab_output, tab_send};
 use super::watch::{watch_add, watch_list, watch_remove, watch_wait};
@@ -72,6 +72,13 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "run.handoff" => run_orchestrate(app, "run.handoff", args),
         "run.addFact" => run_orchestrate(app, "run.addFact", args),
         "run.facts" => run_orchestrate(app, "run.facts", args),
+        "run.factBody" => run_orchestrate(app, "run.factBody", args),
+        "memory.list" => run_orchestrate(app, "memory.list", args),
+        "memory.get" => run_orchestrate(app, "memory.get", args),
+        "memory.propose" => run_orchestrate(app, "memory.propose", args),
+        "memory.update" => run_orchestrate(app, "memory.update", args),
+        "memory.delete" => run_orchestrate(app, "memory.delete", args),
+        "memory.promoteFact" => run_orchestrate(app, "memory.promoteFact", args),
         "run.cancelTask" => run_orchestrate(app, "run.cancelTask", args),
         "run.rerouteTask" => run_orchestrate(app, "run.rerouteTask", args),
         "app.status" => app_status(app),

@@ -108,9 +108,10 @@ pub async fn run_start_task(
 
     let mut task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let run = store::create_run(&conn, &workspace_id, &title, &cwd)?;
-        store::create_task(
-            &conn,
+        let tx = conn.unchecked_transaction().map_err(|e|e.to_string())?;
+        let run = store::create_run(&tx, &workspace_id, &title, &cwd)?;
+        let task = store::create_task(
+            &tx,
             &store::NewTask {
                 run_id: &run.id,
                 title: &title,
@@ -126,7 +127,9 @@ pub async fn run_start_task(
                 route_note: note.as_deref(),
                 ..Default::default()
             },
-        )?
+        )?;
+        tx.commit().map_err(|e|e.to_string())?;
+        task
     };
 
     // Si el lanzamiento falla, la fila queda igual pero como fallida: una tarea que
@@ -146,7 +149,9 @@ pub async fn run_start_task(
         }
     }
 
-    if let Err(e) = supervisor::start(&app, task.clone(), supervisor::LaunchExtras::default()) {
+    let memory = {let conn=db.lock().map_err(|e|e.to_string())?; crate::memory::snapshot_context_for_run(&conn,&task.run_id)?};
+    let extras=supervisor::LaunchExtras {prompt:Some(format!("{}{memory}",task.prompt)), ..Default::default()};
+    if let Err(e) = supervisor::start(&app, task.clone(), extras) {
         return fail(&task.id, e);
     }
 
@@ -177,8 +182,10 @@ pub async fn run_start_orchestration(
     let db = db_of(&app)?;
     let (request, complexity) = lead_request(agent_id, model, complexity, account_id, auto_account);
     let routing_db = db.clone();
-    let assignment = tauri::async_runtime::spawn_blocking(move || route_lead_now(&routing_db, &request))
-        .await.map_err(|error| error.to_string())??;
+    let assignment =
+        tauri::async_runtime::spawn_blocking(move || route_lead_now(&routing_db, &request))
+            .await
+            .map_err(|error| error.to_string())??;
     let spec = Orchestration {
         reasoning_effort: None,
         workspace_id: &workspace_id,
@@ -252,8 +259,13 @@ pub(crate) fn start_orchestration(
     // Antes de crear nada: una fila de un lead que nunca podía lanzarse es ruido.
     ensure_orchestration(&assignment.agent_id)?;
     if spec.reasoning_effort.is_some() {
-        roster::validate_effort(&roster::snapshot(db, false)?, &assignment.agent_id,
-            assignment.account_id.as_deref(), assignment.model.as_deref(), spec.reasoning_effort)?;
+        roster::validate_effort(
+            &roster::snapshot(db, false)?,
+            &assignment.agent_id,
+            assignment.account_id.as_deref(),
+            assignment.model.as_deref(),
+            spec.reasoning_effort,
+        )?;
     }
     let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
     let max_parallel = spec.max_parallel.clamp(1, 6);
@@ -261,18 +273,16 @@ pub(crate) fn start_orchestration(
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
-        let run = store::create_run_with(
+        let run = store::create_run_with_memory_snapshot(
             &tx,
             spec.workspace_id,
+            spec.mission_id,
             objective,
             spec.cwd,
             max_parallel,
             spec.budget_usd,
         )?;
-        if let Some(mission_id) = spec.mission_id {
-            store::set_run_mission(&tx, &run.id, mission_id)?;
-        }
-        if let Some(squad) = spec.squad {
+if let Some(squad) = spec.squad {
             store::set_run_squad_snapshot(&tx, &run.id, squad)?;
         }
         let title: String = match spec.title {
@@ -334,6 +344,10 @@ pub(crate) fn launch_lead(app: &AppHandle, task: &Task) -> Result<(), String> {
         store::run_by_id(&conn, &task.run_id)?
             .ok_or_else(|| "the lead's Run no longer exists".to_string())?
     };
+    let snapshot = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        crate::memory::snapshot_context_for_run(&conn, &run.id)?
+    };
     let mut system_prompt = context::LEAD_SYSTEM_PROMPT.to_string();
     let mut allowed_tools = orchestration_tool_names(&[Read, Note, Spawn]);
     if run.squad_id.is_some() {
@@ -343,7 +357,7 @@ pub(crate) fn launch_lead(app: &AppHandle, task: &Task) -> Result<(), String> {
         allowed_tools.retain(|tool| tool != &roster_tool);
     }
     let extras = supervisor::LaunchExtras {
-        prompt: None,
+        prompt: (!snapshot.is_empty()).then(|| format!("{}\n{snapshot}", task.prompt)),
         system_prompt: Some(system_prompt),
         allowed_tools,
     };
@@ -392,7 +406,15 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
         };
 
         let deps_refs: Vec<&Task> = deps.iter().collect();
-        let prompt = context::worker_prompt(&task, &run.objective, &deps_refs, &facts, to_merge);
+        let snapshot = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            crate::memory::snapshot_context_for_run(&conn, &run.id)?
+        };
+        let prompt = format!(
+            "{}{}",
+            context::worker_prompt(&task, &run.objective, &deps_refs, &facts, to_merge),
+            snapshot
+        );
         let can_delegate = task.depth < plan::MAX_DEPTH;
         use crate::ipc::mcp::{
             OrchestrationPower::*, orchestration_tool_name, orchestration_tool_names,
@@ -502,16 +524,31 @@ pub(crate) fn ensure_orchestration(agent_id: &str) -> Result<(), String> {
     ensure_headless(agent_id)?;
     let adapter = crate::agents::adapter_for(agent_id).ok_or("provider unavailable")?;
     if !adapter.capabilities().orchestration {
-        return Err(format!("{} can execute worker tasks, but does not support the ADE orchestration required to act as Lead.", adapter.def().label));
+        return Err(format!(
+            "{} can execute worker tasks, but does not support the ADE orchestration required to act as Lead.",
+            adapter.def().label
+        ));
     }
     Ok(())
 }
 
-pub(crate) fn route_lead_now(db: &DbConnection, request: &routing::RouteRequest) -> Result<routing::Assignment, String> {
-    if let Some(id) = &request.agent_id { ensure_orchestration(id)?; }
+pub(crate) fn route_lead_now(
+    db: &DbConnection,
+    request: &routing::RouteRequest,
+) -> Result<routing::Assignment, String> {
+    if let Some(id) = &request.agent_id {
+        ensure_orchestration(id)?;
+    }
     let mut roster = roster::snapshot(db, false)?;
-    roster.agents.retain(|agent| agent.capabilities.orchestration);
-    routing::route(&roster, &routing::load_tiers(db), request, crate::util::now_ts())
+    roster
+        .agents
+        .retain(|agent| agent.capabilities.orchestration);
+    routing::route(
+        &roster,
+        &routing::load_tiers(db),
+        request,
+        crate::util::now_ts(),
+    )
 }
 
 fn route_request(
@@ -566,10 +603,17 @@ pub async fn run_roster(app: AppHandle, refresh: bool) -> Result<roster::Roster,
 }
 
 #[tauri::command]
-pub async fn models_refresh(app: AppHandle, agent_id: String, account_id: Option<String>) -> Result<roster::Roster, String> {
+pub async fn models_refresh(
+    app: AppHandle,
+    agent_id: String,
+    account_id: Option<String>,
+) -> Result<roster::Roster, String> {
     let db = db_of(&app)?;
-    tauri::async_runtime::spawn_blocking(move || roster::refresh_models(&db, &agent_id, account_id.as_deref()))
-        .await.map_err(|error| error.to_string())?
+    tauri::async_runtime::spawn_blocking(move || {
+        roster::refresh_models(&db, &agent_id, account_id.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// A quién le tocaría una tarea con estos datos, sin lanzarla. Es lo que muestra el

@@ -182,6 +182,13 @@ pub fn run() {
             crate::missions::mission_get,
             crate::missions::mission_start,
             crate::missions::mission_cancel,
+            // Local, approved Mission and Workspace memory plus immutable Run snapshots.
+            crate::memory::memory_list,
+            crate::memory::memory_get,
+            crate::memory::memory_propose_user,
+            crate::memory::memory_decide_user,
+            crate::memory::memory_promote_fact_user,
+            crate::memory::run_list_memory_snapshot,
             // Functional roles and reusable Squad routing policies
             crate::roles::functional_roles_list,
             crate::roles::functional_role_get,

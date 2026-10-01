@@ -11,6 +11,7 @@ mod forge;
 mod graphify;
 pub mod ipc;
 mod marketplace;
+mod memory;
 mod missions;
 mod orchestrator;
 mod prelaunch;
@@ -19,8 +20,8 @@ mod roles;
 mod runs;
 mod scm;
 mod session;
-mod squads;
 mod skills;
+mod squads;
 mod sync;
 mod terminal;
 mod updates;
@@ -34,5 +35,9 @@ pub use app::run;
 // importa TaskDialogIndirect y el loader, sin Common Controls 6, cae en
 // comctl32 v5 (STATUS_ENTRYPOINT_NOT_FOUND). La app ya lo trae por tauri-build.
 #[cfg(all(windows, test))]
-#[link(name = "ade_test_manifest", kind = "static", modifiers = "+whole-archive")]
+#[link(
+    name = "ade_test_manifest",
+    kind = "static",
+    modifiers = "+whole-archive"
+)]
 unsafe extern "C" {}

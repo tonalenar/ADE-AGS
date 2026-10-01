@@ -54,6 +54,78 @@ fn valid_key(key: &str) -> bool {
         && key.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
 }
 
+/// Codex structured output requires closed objects and every property in required.
+/// Reject incompatible schemas without rewriting their meaning or launching inference.
+pub fn validate_result_schema(agent: &str, schema: &serde_json::Value) -> Result<(), String> {
+    if agent != "codex" { return Ok(()); }
+    if schema.get("type").and_then(serde_json::Value::as_str) != Some("object") {
+        return Err("result_schema do Codex: a raiz deve ter type=object".into());
+    }
+    fn visit(schema: &serde_json::Value, path: &str) -> Result<(), String> {
+        let Some(node) = schema.as_object() else {
+            return Err(format!("result_schema do Codex em {path}: use um objeto de schema"));
+        };
+        let is_object = node.contains_key("properties") || node.get("type").is_some_and(|t| {
+            t.as_str() == Some("object") || t.as_array().is_some_and(|types| types.iter().any(|t| t.as_str() == Some("object")))
+        });
+        if is_object {
+            if node.get("additionalProperties") != Some(&serde_json::Value::Bool(false)) {
+                return Err(format!("result_schema do Codex em {path}: additionalProperties deve ser false"));
+            }
+            let properties = node.get("properties").and_then(serde_json::Value::as_object)
+                .ok_or_else(|| format!("result_schema do Codex em {path}: properties deve ser um objeto"))?;
+            let required = node.get("required").and_then(serde_json::Value::as_array)
+                .ok_or_else(|| format!("result_schema do Codex em {path}: required deve listar todas as propriedades"))?;
+            let names: HashSet<&str> = required.iter().filter_map(serde_json::Value::as_str).collect();
+            if names.len() != required.len() || names.len() != properties.len() || properties.keys().any(|key| !names.contains(key.as_str())) {
+                return Err(format!("result_schema do Codex em {path}: required deve listar todas e somente as propriedades; use tipo nullable para campos opcionais"));
+            }
+        }
+        for keyword in ["properties", "$defs", "definitions"] {
+            if let Some(children) = node.get(keyword).and_then(serde_json::Value::as_object) {
+                for (name, child) in children { visit(child, &format!("{path}.{keyword}.{name}"))?; }
+            }
+        }
+        for keyword in ["items", "not"] {
+            if let Some(child) = node.get(keyword) { visit(child, &format!("{path}.{keyword}"))?; }
+        }
+        for keyword in ["anyOf", "oneOf", "allOf"] {
+            if let Some(children) = node.get(keyword).and_then(serde_json::Value::as_array) {
+                for (index, child) in children.iter().enumerate() { visit(child, &format!("{path}.{keyword}[{index}]"))?; }
+            }
+        }
+        Ok(())
+    }
+    visit(schema, "$")
+}
+
+#[cfg(test)]
+mod schema_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn codex_rejects_open_objects_and_optional_properties_recursively() {
+        let invalid = json!({"type":"object","properties":{"summary":{"type":"string"}},"required":["summary"]});
+        assert!(validate_result_schema("codex", &invalid).unwrap_err().contains("additionalProperties"));
+        let nested = json!({"type":"object","additionalProperties":false,"required":["items"],"properties":{"items":{"type":"array","items":{"type":"object","additionalProperties":false,"properties":{"summary":{"type":"string"}},"required":[]}}}});
+        let error = validate_result_schema("codex", &nested).unwrap_err();
+        assert!(error.contains("$.properties.items.items"));
+        assert!(error.contains("required"));
+        assert!(validate_result_schema("claude-code", &invalid).is_ok());
+    }
+
+    #[test]
+    fn codex_accepts_closed_nested_objects_nullable_properties_and_definitions() {
+        let valid = json!({"type":"object","additionalProperties":false,"required":["summary","detail"],"properties":{"summary":{"type":"string"},"detail":{"anyOf":[{"type":"null"},{"$ref":"#/$defs/detail"}]}},"$defs":{"detail":{"type":"object","additionalProperties":false,"properties":{"note":{"type":["string","null"]}},"required":["note"]}}});
+        assert!(validate_result_schema("codex", &valid).is_ok());
+        let mut invalid = valid.clone();
+        invalid["$defs"]["detail"]["additionalProperties"] = json!(true);
+        assert!(validate_result_schema("codex", &invalid).unwrap_err().contains("$.$defs.detail"));
+        assert!(validate_result_schema("codex", &json!({"type":"array"})).is_err());
+    }
+}
+
 /// Valida un plan contra las tareas que el run ya tiene (`existing`: sus claves).
 ///
 /// Devuelve las tareas en un orden en el que cada una aparece después de sus dependencias

@@ -422,7 +422,11 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     assert!(!tab.contains(&"approve_tool_use".to_string()));
     assert!(tab.contains(&"browser_click".to_string()));
     assert_eq!(task[0], "approve_tool_use");
-    assert_eq!(&task[1..], &tab[..]);
+    let memory: Vec<_> = task.iter().filter(|name| name.starts_with("memory_")).collect();
+    assert_eq!(memory.len(), 6);
+    assert!(!tab.iter().any(|name| name.starts_with("memory_")));
+    let task_without_memory: Vec<_> = task[1..].iter().filter(|name| !name.starts_with("memory_")).cloned().collect();
+    assert_eq!(task_without_memory, tab);
 
     // Lo que se permite de antemano en `--allowedTools` es exactamente lo que se ofrece:
     // un nombre de más no hace nada, uno de menos deja una tool pidiendo permiso por cada uso.
@@ -432,7 +436,7 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let all_powers = [OrchestrationPower::Read, OrchestrationPower::Note, OrchestrationPower::Delivery, OrchestrationPower::Spawn];
     let orchestration = orchestration_tool_names(&all_powers);
     assert!(!orchestration.is_empty());
-    assert!(orchestration.iter().all(|n| offered.contains(n)), "{orchestration:?}");
+    assert!(orchestration.iter().all(|n| offered.contains(n) || n.contains("__memory_")), "{orchestration:?}");
     // Preguntarle algo al usuario va para los dos lados y no es ni navegador ni orquestación.
     assert!(tab.contains(&super::mcp::ASK_TOOL.to_string()));
     // Las de git remoto: todas se ofrecen, y las que se aprueban solas son solo las que leen.
@@ -441,7 +445,7 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let git_read = super::mcp::git_read_tool_names();
     assert!(git_read.iter().all(|n| git.contains(n)), "{git_read:?}");
     assert!(!git_read.iter().any(|n| n.ends_with("git_push") || n.ends_with("_create")));
-    assert_eq!(browser.len() + orchestration.len() + git.len() + 1, offered.len());
+    assert_eq!(browser.len() + orchestration.len() - memory.len() + git.len() + 1, offered.len());
 }
 
 /// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo
@@ -790,7 +794,7 @@ fn lo_que_manda_el_puente_mcp_lo_atienden_el_despachador_y_el_frontend() {
     for command in orchestration {
         assert!(dispatched.contains(&command.to_string()), "nadie atiende {command}");
         assert!(
-            include_str!("../runs/orchestration.rs").contains(&format!("\"{command}\" =>")),
+            include_str!("../runs/orchestration.rs").contains(&format!("\"{command}\"")),
             "la orquestación no atiende {command}"
         );
     }

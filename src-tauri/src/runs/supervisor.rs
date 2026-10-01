@@ -144,6 +144,10 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         ));
     };
     let read_only = super::policy::is_coordinator(&task);
+    if let Some(schema) = &task.result_schema {
+        let schema = serde_json::from_str(schema).map_err(|error| format!("result_schema inválido: {error}"))?;
+        super::plan::validate_result_schema(&task.agent_id, &schema)?;
+    }
     if read_only { super::ensure_orchestration(&task.agent_id)?; }
     if read_only && !adapter.enforces_read_only() {
         return Err(format!(
