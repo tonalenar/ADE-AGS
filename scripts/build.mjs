@@ -1,7 +1,7 @@
 /**
  * Punto de entrada de los builds. Tres modos:
  *
- *   bun run app:build                     Solo Control Code, para esta máquina, sin
+ *   bun run app:build                     Control Code + CLI, para esta máquina, sin
  *                                         empaquetar. Es el build de todos los días:
  *                                         compila y deja el ejecutable en
  *                                         src-tauri/target/release/.
@@ -198,12 +198,13 @@ function planFor(target) {
 }
 
 function buildOnlyTheApp() {
-  console.log("\n▶ Compilando Control Code para esta máquina (sin empaquetar, sin CLI)\n");
-  run("bunx", ["tauri", "build", "--no-bundle"], { ...BASE_ENV, CC_CLI_SKIP: "1" });
+  console.log("\n▶ Compilando Control Code + CLI para esta máquina (sin empaquetar)\n");
+  // Headless agents use the bundled CLI for MCP; a stale CLI hides new tools.
+  run("bunx", ["tauri", "build", "--no-bundle"], { ...BASE_ENV, CC_CLI_SKIP: "0", CC_CLI_STRICT: "1" });
 
   const exe = join(root, "src-tauri", "target", "release", process.platform === "win32" ? "controlcode.exe" : "controlcode");
   console.log(`\n✔ Listo: ${exe}`);
-  console.log("  Para instaladores y la CLI: bun run app:build --release\n");
+  console.log("  Para instaladores: bun run app:build --release\n");
 }
 
 function buildEverything(selection) {
