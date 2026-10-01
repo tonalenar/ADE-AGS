@@ -1,5 +1,7 @@
 # Handoff Structured v0
 
+**v0 concluído nesta base ADE.** A migration do Handoff é v22; o schema global v23 acrescenta metadados do OAuth experimental, sem substituir esse contrato.
+
 ## Auditoria inicial
 
 Antes desta etapa, `tasks.handoff` era texto nullable da migration v16, produzido por `runs/mod.rs::reroute_to` usando `context::handoff_note`. Reroute preservava a Task e o worktree. Não havia entrega estruturada de conclusão.
@@ -40,3 +42,9 @@ Handoff passa contexto entre Tasks relacionadas. Shared Memory será memória du
 ## UI e compatibilidade
 
 Mission detail e Fleet Task detail exibem Handoff em seções expansíveis: Resumo, Arquivos alterados, Testes, Decisões, Riscos, Próximos passos e Artefatos. Conteúdo legado aparece como **Handoff legado**. React renderiza conteúdo como texto, sem HTML ou links executáveis. Tasks antigas recebem structuredHandoff null; o texto anterior permanece intacto. Reabrir a ADE, editar Squad ou retry de Mission não altera handoffs históricos.
+
+## Smoke de estabilização da documentação
+
+A release atual abriu em PT-BR; Missions, Squads, Fleet e seletores de provider/modelo carregaram. O histórico `teste` mostra Lead Antigravity nativo e quatro workers Codex com quatro entregas estruturadas, incluindo o resumo `HANDOFF_BACKEND_V1` na UI. A tentativa anterior `Handoff Structured E2E` terminou os processos, mas registrou ausência de entregas; não é usada como evidência de sucesso do contrato.
+
+Após fechar normalmente e reabrir a ADE, as oito tabelas operacionais comparadas mantiveram contagens e hashes de todas as linhas: Missions, Runs, Tasks, dependências, snapshots de members, Run Facts, Squads e members. Isso inclui resultados, custo salvo, roles, modelos, effort, quatro structured handoffs e um handoff legado. Schema existente v23 carregou sem falha observada. Nenhuma Mission nova ou inference foi executada nesse smoke; custo armazenado não equivale a cobertura completa de contabilização por provider.

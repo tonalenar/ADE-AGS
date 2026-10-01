@@ -30,13 +30,13 @@ Depende de: 3, e de um `gemini` instalado para confirmar o marcador. Sem o biná
 
 ## 5. Mission Engine
 
-Uma missão é o objeto que hoje não existe: objetivo, pasta, restrições, estado, e o conjunto de tasks. Por baixo, reusa `runs` / `tasks` / `task_deps`. Não cria um segundo banco.
+Uma missão é o objeto persistente já implementado: objetivo, pasta, restrições, estado, e o conjunto de tasks. Por baixo, reusa `runs` / `tasks` / `task_deps`. Não cria um segundo banco.
 
 Depende de: 3. Pode andar em paralelo com 4, mas não antes de 3, porque missão escolhe conta por provider.
 
 **v0 concluído** em `feat/mission-engine-v0`: Mission persistida em cima de `runs/`, ciclo draft → running → done/failed/cancelled, UI e E2E real. Detalhe e o que ficou fora em [MISSION_ENGINE.md](./MISSION_ENGINE.md).
 
-**Mission Runtime v0.1** em `fix/mission-runtime-v01` (aguardando revisão): launcher Windows sem `cmd.exe` para shims npm, política do lead imposta no broker e na CLI, aprovações na tela da Mission (mesma fila da Fleet), evento `cc-mission-changed`, progresso só de workers e E2E real com lead + 3 workers. Detalhe em [MISSION_RUNTIME.md](./MISSION_RUNTIME.md). Não inclui Roles, Squads, Handoff estruturado, Shared Memory nem Map Mode: essas etapas continuam abertas abaixo.
+**Mission Runtime v0.1** em `fix/mission-runtime-v01` (concluído nesta base): launcher Windows sem `cmd.exe` para shims npm, política do lead imposta no broker e na CLI, aprovações na tela da Mission (mesma fila da Fleet), evento `cc-mission-changed`, progresso só de workers e E2E real com lead + 3 workers. Detalhe em [MISSION_RUNTIME.md](./MISSION_RUNTIME.md). Roles + Squads v0 e Handoff Structured v0 também estão concluídos nesta base. Shared Memory e Map Mode continuam pendentes.
 
 ## 6. Task Engine
 
@@ -44,7 +44,7 @@ Tasks com estado, dependência, retry e roteamento. Grande parte já está em `r
 
 Depende de: 5.
 
-## 7. Worktree por missão
+## 7. Worktree por missão (pendente)
 
 Hoje o worktree é por task da frota, em `~/.controlcode/worktrees`, ramo `cc/<task>`, e não se apaga sozinho. A missão precisa de um worktree cujo ciclo de vida seja o da missão, com a mesma regra: não descartar sujo.
 
@@ -52,11 +52,11 @@ Depende de: 5 e 6. Reusa `runs/worktrees.rs`.
 
 ## 8. MCP interno da ADE
 
-O servidor `controlcode` em `ipc/mcp.rs` já é o MCP da app (browser, frota, git, pergunta, permissão). A ADE precisa do modelo "instala uma vez, anexa à missão ou à tab", que o próprio README lista como fase 11 e que ainda não existe. Gemini e Codex hoje nem recebem o servidor atual.
+O servidor `controlcode` em `ipc/mcp.rs` já é o MCP da app (browser, frota, git, pergunta, permissão). A ADE precisa do modelo "instala uma vez, anexa à missão ou à tab", que o próprio README lista como fase 11 e que ainda não existe. Codex já recebe task MCP, suporta orchestration e execução headless como Lead e Worker. Antigravity nativo também recebe MCP vinculado à Task. Gemini CLI é uma integração distinta e ainda não oferece essa orquestração.
 
 Depende de: 2 (cada provider declara o estilo de MCP) e de 5 (anexar à missão). Não depende de um backend cloud.
 
-## 9. Event Bus
+## 9. Event Bus (unificação pendente)
 
 Um barramento local para o que hoje são três canais separados: eventos Tauri da UI, watch/cursor do orquestrador de tabs, stream JSON da frota. Consumidores: UI, CLI, missão, mais tarde o map mode.
 
@@ -64,36 +64,40 @@ Depende de: 6. Sem tasks estáveis, o bus só replica evento de PTY.
 
 ## 10. Handoff estruturado
 
-`run.rerouteTask` já troca o agente e mantém branch e worktree. Falta o pacote: objetivo, fatos, arquivos, conta, o que foi tentado, o que não pode ser refeito. Texto livre de prompt não é handoff.
+**Handoff Structured v0 = concluído.** A migration v22 adiciona `structured_handoff` e preserva `handoff` legado. Dependências diretas concluídas do mesmo Run recebem as entregas em ordem determinística, como dados delimitados e não confiáveis, com validação e limites de payload. Mission e Fleet usam o mesmo componente de visualização. Retry de Mission preserva Runs anteriores, e as entregas persistem após restart. Detalhes em [HANDOFF_STRUCTURED.md](./HANDOFF_STRUCTURED.md).
 
-Depende de: 6, 8 e 9.
+Usa o scheduler e MCP existentes; não depende de um Event Bus unificado novo.
 
 ## 11. Roles
 
-Roles + Squads v0 implementa oito functional roles built-in, declarativas em código, separadas de execution role (`lead | worker`). `Task.functional_role` registra a especialidade; provider/model/account são resolvidos pelo Squad e snapshotados no Run e na Task. Detalhes em [ROLES_SQUADS.md](./ROLES_SQUADS.md).
+**v0 concluído.** Roles + Squads v0 implementa oito functional roles built-in, declarativas em código, separadas de execution role (`lead | worker`). `Task.functional_role` registra a especialidade; provider/model/account são resolvidos pelo Squad e snapshotados no Run e na Task. Detalhes em [ROLES_SQUADS.md](./ROLES_SQUADS.md).
 
 Custom Roles e permissões universais por Role continuam fora do v0.
 
 ## 12. Squads
 
-Roles + Squads v0 implementa Squad persistente com Lead próprio e members que mapeiam uma Role funcional para provider/model/account. A Mission draft pode escolher Automatic, Specific provider ou Squad. O Run congela a configuração; editar o Squad afeta apenas novos Runs. Não é uma frota paralela e reutiliza o router existente.
+**v0 concluído.** Roles + Squads v0 implementa Squad persistente com Lead próprio e members que mapeiam uma Role funcional para provider/model/account. A Mission draft pode escolher Automatic, Specific provider ou Squad. O Run congela a configuração; editar o Squad afeta apenas novos Runs. Não é uma frota paralela e reutiliza o router existente.
 
 Não inclui fallback silencioso, troca automática de modelo, scoring ou marketplace. Retry de Mission failed já está implementado, preservando os Runs anteriores.
 
 ## 13. Shared Memory
 
-`run_facts` já guarda fatos do run e o prompt deixa claro que são dados, não instruções. Memória da ADE é esse mecanismo elevado à missão e ao projeto, ainda em SQLite local, ainda sem serviço. Não é um índice cloud e não copia produto fechado.
+`run_facts` já guarda fatos do run e o prompt deixa claro que são dados, não instruções. A memória proposta eleva esse mecanismo à missão e ao projeto, em SQLite local, sem serviço. Não é um índice cloud e não copia produto fechado.
 
-Depende de: 5 e 9. Próxima avaliação recomendada: Handoff estruturado; ainda não implementado.
+**Próximo grande bloco; não implementado.** Deve separar Workspace Memory, Mission Memory e Run Facts e reutilizar o runtime/MCP existentes. O Event Bus unificado continua uma etapa separada.
 
-## 14. Usage, custos e limites
+## 14. Usage, custos e limites (parcial)
 
 Claude já expõe plano e tokens. A frota já tem `budget_usd` e soma tokens quando o stream traz. Falta o mesmo contrato para os outros providers e um teto que a missão consulte antes de escalar.
 
-Depende de: 2 e 6. Números de Gemini e Codex esperam o provider saber ler o próprio stream. Não bloqueia 4.
+Depende de: 2 e 6. Usage e custo dependem dos dados reportados pelo adapter: tokens já aparecem para Codex, mas custo por worker não tem cobertura uniforme. Não bloqueia 4.
 
-## 15. Map mode
+## 15. Map mode (pendente)
 
 Vista gráfica de missões, tasks, agentes e handoffs. Lê o event bus e o estado da missão. Não é um runtime novo e não embute código de Maestri nem de Overclock.
 
 Depende de: 9, 10, 12 e 13. É a última porque desenhar cedo fixa um modelo que essas etapas ainda vão mover.
+
+## Estado Antigravity
+
+A integração nativa oferece Lead e Worker, model discovery via `agy models` e uma conta do sistema. Multi-account permanece experimental/incompleto: `supports_accounts = false`, sem routing simultâneo por conta. OAuth experimental não isola as credenciais do `agy`. Veja [ANTIGRAVITY_INTEGRATION.md](./ANTIGRAVITY_INTEGRATION.md).
