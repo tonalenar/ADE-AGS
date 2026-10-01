@@ -2,7 +2,7 @@
 
 **Mission Engine = domínio. Mission Runtime = execução e coordenação.**
 
-Este documento é o domínio: a Mission persistida, seus estados e comandos. Como ela roda (launcher, política do lead, aprovações, eventos, progresso) está em [MISSION_RUNTIME.md](./MISSION_RUNTIME.md).
+Este documento é o domínio: a Mission persistida, seus estados e comandos. Como ela roda (launcher, política do lead, aprovações, eventos, progresso) está em [MISSION_RUNTIME.md](./MISSION_RUNTIME.md). O roteamento por equipes reutilizáveis está em [ROLES_SQUADS.md](./ROLES_SQUADS.md).
 
 ## Auditoria (antes do v0)
 
@@ -40,12 +40,13 @@ Conclusão: a Mission fica **acima** de `runs/`. Não há segundo scheduler, seg
 ## Modelo (v0)
 
 ```text
-Workspace → Mission → Run → Task → Agent
+Workspace → Mission → Squad opcional → Run → Task → Agent
 ```
 
 | Entidade | É | Vive em |
 | --- | --- | --- |
-| Mission | A intenção durável: título, objetivo, pasta, preferência de lead e de conta, paralelismo, orçamento. | `missions/`, tabela `missions` |
+| Mission | A intenção durável: título, objetivo, pasta, modo de execução, Squad opcional, paralelismo, orçamento. | `missions/`, tabela `missions` |
+| Squad | Configuração reutilizável de Lead e roteamento por Role funcional. | `squads`, `squad_members` |
 | Run | Uma tentativa de cumprir a Mission. | `runs/`, tabela `runs` (`mission_id` nullable) |
 | Task | Uma unidade entregue a um agente (lead ou worker). | `runs/`, tabela `tasks` |
 | Agent | O processo headless de um provider. | `agents/` + `runs/supervisor.rs` |
@@ -56,7 +57,13 @@ Migração 18 → 19, só aditiva:
 
 - `missions`: `id`, `workspace_id` (FK, `ON DELETE CASCADE`), `title`, `objective`, `cwd`, `status`, `max_parallel`, `budget_usd`, `lead_agent_id`, `lead_model`, `lead_account_id`, `auto_account`, `complexity`, `active_run_id` (FK `runs`, `ON DELETE SET NULL`), `created_at`, `updated_at`, `started_at`, `ended_at`. Índice por workspace.
 - `runs.mission_id` (FK `missions`, `ON DELETE SET NULL`) com índice. Runs antigos ficam com `NULL` e continuam funcionando; nenhum vira Mission.
-- Várias linhas de `runs` podem apontar para a mesma Mission. O v0 só cria uma, mas o banco não impede o retry futuro.
+- Várias linhas de `runs` podem apontar para a mesma Mission. Uma missão `failed` pode ser reenviada por **Tentar novamente**, criando um novo Run e Lead sem alterar o objetivo ou apagar os dados dos runs anteriores.
+
+Schema v20 adiciona `missions.squad_id` nullable, configuração persistente de Squads, snapshot por Run e `tasks.functional_role` nullable. Dados de Mission/Run/Task anteriores ficam sem Squad/Role funcional e preservam o routing anterior. Consulte [ROLES_SQUADS.md](./ROLES_SQUADS.md) para tabelas, constraints e resolução.
+
+### Modos de execução
+
+Um draft escolhe Automatic routing, Specific provider ou Squad. Automatic mantém tiers/complexity; Specific mantém provider/model/account explícitos; Squad escolhe o Lead configurado no Squad e resolve workers pelo functional role do plano. Os campos são enviados sem combinações contraditórias e o backend rejeita overrides manuais de Lead ou worker quando Squad é a autoridade.
 
 ### Conta: preferência, nunca credencial
 
@@ -83,10 +90,11 @@ draft ──Start──▶ running ──run done──▶ done
   │                 ├──run failed──▶ failed
   │                 └──Cancel / run cancelled──▶ cancelled
   └──Cancel──▶ cancelled
+failed ──Tentar novamente──▶ running (novo run)
 ```
 
 - Start é atômico: run, task lead e `status = running` entram na mesma transação. Se o lead não consegue ser lançado depois do commit, a task lead fica `failed` com o erro, o run é recalculado para `failed` e a Mission o acompanha. Nunca há Mission `running` sem run.
-- Start duplo: o segundo encontra `status != draft`, `mark_started` retorna falso e a transação volta atrás.
+- Start ou retry duplo: `mark_started` compara o estado e o `active_run_id` lidos antes do roteamento. Se outra execução venceu, a transação do pedido desatualizado volta atrás sem lançar o Lead. A proteção também vale quando a execução concorrente já terminou em falha.
 - Só o run ativo (`active_run_id`) move a Mission. Um run antigo que termina depois não mexe nela.
 - Edição: em `draft` tudo pode mudar; fora de `draft`, só o título. Outra mudança é recusada.
 - Criar ou editar nunca lança nada: nenhum PTY, processo headless ou worktree. Há teste que conta os três antes e depois.
@@ -97,15 +105,15 @@ draft ──Start──▶ running ──run done──▶ done
 
 ## UI
 
-Rota modal `#/missions`, botão na barra lateral abaixo da Fleet. Lista (título, status, pasta, lead, data, gasto, progresso dos workers), formulário de criação/edição e detalhe (objetivo, provider, conta, orçamento, gasto, run atual, lead à parte, tasks, dependências, estado dos agentes, aprovações pendentes, resultado/erro, facts do run ativo). Ações: draft → Iniciar; running → Cancelar; finalizada → nenhuma. Atualiza por `cc-task-changed` e `cc-mission-changed`, com refresh coalescido; sem polling. Desde o v0.1, ver [MISSION_RUNTIME.md](./MISSION_RUNTIME.md).
+Rota modal `#/missions`, botão na barra lateral abaixo da Fleet. Lista (título, status, pasta, lead, data, gasto, progresso dos workers), formulário de criação/edição e detalhe (objetivo, modo de execução, Squad/snapshot, provider, conta, orçamento, gasto, run atual, lead à parte, tasks com Role funcional, dependências, estado dos agentes, aprovações pendentes, resultado/erro, facts do run ativo). Ações: draft → Iniciar; running → Cancelar; failed → Tentar novamente; done/cancelled → nenhuma. O retry reutiliza a configuração da Mission e resolve novamente a conta e o Squad atuais. Tasks, facts, erros e custos anteriores permanecem associados aos seus runs; o detalhe mostra o novo run ativo e a contagem de execuções. Atualiza por `cc-task-changed` e `cc-mission-changed`, com refresh coalescido; sem polling. Desde o v0.1, ver [MISSION_RUNTIME.md](./MISSION_RUNTIME.md).
 
 ## O que o v0 NÃO faz
 
-- Retry, rerun, clone, duplicar, arquivar ou apagar Mission.
+- Rerun de missão concluída ou cancelada, clone, duplicar, arquivar ou apagar Mission.
 - Worktree por Mission (continua o worktree por task isolada da frota).
-- Maestro, Roles, Squads, Shared Memory, Map Mode, sub-missions, templates, cron, automações, cloud/sync/colaboração.
+- Shared Memory, Map Mode, sub-missions, templates, cron, automações, cloud/sync/colaboração.
 - Facts por Mission: a Mission mostra os facts do run ativo.
-- Handoff estruturado: o `tasks.handoff` só é exibido.
+- Handoff estruturado: o `tasks.handoff` continua em texto livre e só é exibido.
 - Estimativa de custo ou usage universal.
 
 ## Débito técnico do v0 (resolvido no v0.1)
