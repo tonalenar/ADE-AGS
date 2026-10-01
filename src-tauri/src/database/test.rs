@@ -896,7 +896,7 @@ fn v20_nuevo_crea_tablas_indices_y_referencias_de_squads() {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 21);
+    assert_eq!(version, 23);
 
     for table in ["squads", "squad_members", "run_squad_members"] {
         assert!(
@@ -996,7 +996,7 @@ fn migrar_v19_a_v20_conserva_mission_runs_y_tasks_anteriores() {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 21);
+    assert_eq!(version, 23);
     assert_eq!(
         conn.query_row(
             "SELECT title FROM missions WHERE id = 'mission-old'",
@@ -1265,7 +1265,7 @@ fn migrate_v20_to_v21_adds_nullable_effort_without_rewriting_history() {
     }
     conn.pragma_update(None, "user_version", 20).unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 21);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 23);
     let (model, effort): (String, Option<String>) = conn.query_row("SELECT model,reasoning_effort FROM tasks WHERE id='eff-t'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
     assert_eq!(model, "old-model");
     assert_eq!(effort, None);
@@ -1275,4 +1275,36 @@ fn migrate_v20_to_v21_adds_nullable_effort_without_rewriting_history() {
     for table in ["missions", "squads", "squad_members", "run_squad_members"] {
         conn.prepare(&format!("SELECT reasoning_effort FROM {table}")).unwrap();
     }
+}
+
+#[test]
+fn migrate_v21_to_v22_preserves_legacy_and_is_idempotent() {
+    let conn = schema::in_memory();
+    conn.execute_batch("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('h-w','W',0,0);
+        INSERT INTO runs(id,workspace_id,objective,cwd,created_at) VALUES('h-r','h-w','old','/p',0);
+        INSERT INTO tasks(id,run_id,title,prompt,agent_id,cwd,created_at,handoff) VALUES('h-t','h-r','old','p','codex','/p',0,'legacy');
+        ALTER TABLE tasks DROP COLUMN structured_handoff;
+        PRAGMA user_version=21;").unwrap();
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),23);
+    let (legacy, structured): (String,Option<String>) = conn.query_row("SELECT handoff,structured_handoff FROM tasks WHERE id='h-t'",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
+    assert_eq!(legacy,"legacy");assert_eq!(structured,None);
+    conn.execute("UPDATE tasks SET structured_handoff=?1 WHERE id='h-t'",[r#"{"version":1,"summary":"old delivery"}"#]).unwrap();
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.query_row("SELECT structured_handoff FROM tasks WHERE id='h-t'",[],|row|row.get::<_,String>(0)).unwrap(),r#"{"version":1,"summary":"old delivery"}"#);
+}
+
+#[test]
+fn migrate_v22_to_v23_keeps_separate_oauth_metadata_without_tokens() {
+    let conn = schema::in_memory();
+    conn.execute_batch("DROP TABLE antigravity_oauth_accounts; PRAGMA user_version=22;").unwrap();
+    schema::migrate(&conn).unwrap();
+    for (id, subject, email) in [("a", "google-a", "a@example.com"), ("b", "google-b", "b@example.com")] {
+        conn.execute("INSERT INTO antigravity_oauth_accounts VALUES(?1,?2,'Personal',?3,0)", rusqlite::params![id,subject,email]).unwrap();
+    }
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM antigravity_oauth_accounts", [], |r|r.get::<_,i64>(0)).unwrap(), 2);
+    assert!(conn.execute("INSERT INTO antigravity_oauth_accounts VALUES('c','google-a','Duplicate','c@example.com',0)", []).is_err());
+    assert!(conn.prepare("SELECT access_token,refresh_token FROM antigravity_oauth_accounts").is_err());
+    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),23);
 }

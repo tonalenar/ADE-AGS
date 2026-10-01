@@ -4,6 +4,7 @@ import { Button, EmptyState, UserIcon } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { AgentAccountsPane } from "@/features/accounts/AgentAccountsPane";
+import { AntigravityAccountsPane } from "@/features/accounts/AntigravityAccountsPane";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { GitAccountsPane } from "@/features/forge/GitAccountsPane";
 import { FORGE_KINDS, ForgeIcon, forgeLabel } from "@/features/forge/forgeMeta";
@@ -123,6 +124,10 @@ export function AccountsModal({ onClose, initial }: { onClose: () => void; initi
             );
           })}
 
+          <NavItem active={section?.kind === "agent" && section.id === "antigravity"}
+            onClick={() => setSection({ kind: "agent", id: "antigravity" })}
+            icon={<UserIcon className="w-3.5 h-3.5" />} label="Antigravity" count={0}
+            title={t("accounts.antigravity.connect")} />
           <NavHeading>{t("accounts.group.git")}</NavHeading>
           {FORGE_KINDS.map((kind) => {
             const n = gitAccounts.filter((a) => a.kind === kind).length;
@@ -151,6 +156,8 @@ export function AccountsModal({ onClose, initial }: { onClose: () => void; initi
       <div className="flex flex-col flex-1 min-w-0 min-h-0">
         {section?.kind === "git" ? (
           <GitAccountsPane kind={section.id} />
+        ) : section?.kind === "agent" && section.id === "antigravity" ? (
+          <AntigravityAccountsPane />
         ) : agent ? (
           <AgentAccountsPane agent={agent} />
         ) : (

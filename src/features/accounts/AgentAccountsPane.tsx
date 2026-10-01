@@ -14,7 +14,7 @@ import { AppDialog } from "@/shared/ui/AppDialog";
 function AccountRow({ account, onLogin, onDelete }: {
   account: AgentAccount;
   onLogin: () => void;
-  onDelete: () => void;
+  onDelete?: () => void;
 }) {
   const { t } = useTranslation();
 
@@ -68,7 +68,7 @@ function AccountRow({ account, onLogin, onDelete }: {
             ? t("settings.accounts.relogin")
             : t("settings.accounts.login.btn")}
         </Button>
-        <Tooltip content={t("settings.accounts.delete.action")} placement="left">
+        {onDelete && <Tooltip content={t("settings.accounts.delete.action")} placement="left">
           <Button variant="icon"
             onClick={onDelete}
             aria-label={t("settings.accounts.delete.action")}
@@ -79,7 +79,7 @@ function AccountRow({ account, onLogin, onDelete }: {
           >
             <TrashIcon className="w-3.5 h-3.5" />
           </Button>
-        </Tooltip>
+        </Tooltip>}
       </div>
     </div>
   );
@@ -89,6 +89,7 @@ function AccountRow({ account, onLogin, onDelete }: {
 export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
   const { t } = useTranslation();
   const accounts = useAccountsStore((s) => s.accounts);
+  const systemAccounts = useAccountsStore((s) => s.systemAccounts);
   const load = useAccountsStore((s) => s.load);
   const remove = useAccountsStore((s) => s.remove);
   const [adding, setAdding] = useState(false);
@@ -140,6 +141,9 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
       </div>
 
       <div className="flex-1 min-h-0 cc-scroll flex flex-col gap-1.5 p-3">
+        {systemAccounts.filter((a) => a.agentId === agent.agentId).map((account) => (
+          <AccountRow key={account.id} account={account} onLogin={() => setLoginFor(account)} />
+        ))}
         {rows.length === 0 ? (
           <EmptyState
             className="m-auto"
@@ -192,12 +196,12 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
       {loginFor && (
         <AppDialog
           title={t("settings.accounts.login.title", { name: loginFor.name })}
-          onClose={() => setLoginFor(null)}
+          onClose={() => { setLoginFor(null); load().catch((e) => setError(String(e))); }}
           size="lg"
           closeOnBackdrop={false}
           closeOnEsc={false}
           footer={
-            <Button variant="primary" onClick={() => { setLoginFor(null); load(); }}>
+            <Button variant="primary" onClick={() => { setLoginFor(null); load().catch((e) => setError(String(e))); }}>
               {t("settings.accounts.login.done")}
             </Button>
           }

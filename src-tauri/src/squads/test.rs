@@ -258,7 +258,7 @@ fn delete_bloquea_squads_referenciados_por_mission_y_run() {
 }
 
 #[test]
-fn codex_workers_allowed_but_lead_configuration_rejected() {
+fn all_registered_agent_providers_can_be_saved_as_lead() {
     let conn = test_db();
     let mut team = input("Capabilities");
     team.lead.agent_id = "opencode".into();
@@ -266,12 +266,26 @@ fn codex_workers_allowed_but_lead_configuration_rejected() {
     let saved = store::create(&conn, &valid).unwrap();
     assert_eq!(saved.members[0].agent_id, "codex");
     team.lead.agent_id = "codex".into();
-    assert!(store::validate(&conn, &team).unwrap_err().contains("orchestration"));
+    let codex = store::validate(&conn, &team).unwrap();
+    assert_eq!(codex.lead.agent_id, "codex");
+    team.lead.agent_id = "kimi-code".into();
+    assert!(store::validate(&conn, &team).is_ok());
     assert_eq!(store::get(&conn, &saved.id).unwrap().unwrap().lead.agent_id, "opencode");
-    conn.execute("UPDATE squads SET lead_agent_id = 'codex' WHERE id = ?1", [&saved.id]).unwrap();
+    conn.execute("UPDATE squads SET lead_agent_id = 'kimi-code' WHERE id = ?1", [&saved.id]).unwrap();
     let historical = store::get(&conn, &saved.id).unwrap().unwrap();
-    assert_eq!(historical.lead.agent_id, "codex");
+    assert_eq!(historical.lead.agent_id, "kimi-code");
     assert!(!historical.available);
+    for provider in ["claude-code", "codex", "opencode", "gemini-cli", "kimi-code", "antigravity"] {
+        let mut draft = input(&format!("Lead {provider}"));
+        draft.lead.agent_id = provider.into();
+        let valid = store::validate(&conn, &draft).unwrap();
+        let saved = store::create(&conn, &valid).unwrap();
+        assert_eq!(store::get(&conn, &saved.id).unwrap().unwrap().lead.agent_id, provider);
+        if !crate::agents::adapter_for(provider).unwrap().supports_orchestration() {
+            assert!(!saved.available, "unsupported execution must remain blocked: {provider}");
+            assert!(crate::runs::ensure_orchestration(provider).is_err());
+        }
+    }
 }
 
 #[test]

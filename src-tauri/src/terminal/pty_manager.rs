@@ -155,19 +155,36 @@ pub(super) fn split_command(command: &str) -> Vec<String> {
 /// sin ningún intermediario. Con pre-comandos hay que delegar en un shell, porque
 /// `conda activate` y compañía son funciones de shell y no programas: ejecutadas en un
 /// proceso aparte, su efecto muere con él (ver el módulo `prelaunch`).
-pub(super) fn build_launch(command: &str, prelaunch: &[String]) -> CommandBuilder {
+pub(super) fn build_launch(command: &str, prelaunch: &[String]) -> Result<CommandBuilder, String> {
     if prelaunch.is_empty() {
         let parts = split_command(command);
         let mut parts = parts.iter().map(String::as_str);
         let program = parts.next().unwrap_or(command);
+        #[cfg(windows)]
+        let resolved = {
+            let path = crate::util::find_program(program).unwrap_or_else(|| std::path::PathBuf::from(program));
+            let args: Vec<_> = parts.collect();
+            let native = crate::util::launch::external_command(&path, &args).map_err(|e| e.to_string())?;
+            if crate::util::launch::is_batch(std::path::Path::new(native.get_program())) {
+                return Err("Este script .cmd/.bat não é um shim npm reconhecido. Configure o executável ou intérprete diretamente.".into());
+            }
+            let mut cmd = CommandBuilder::new(native.get_program());
+            cmd.args(native.get_args());
+            cmd
+        };
+        #[cfg(windows)]
+        return Ok(resolved);
+        #[cfg(not(windows))]
+        {
         let mut cmd = CommandBuilder::new(program);
         for arg in parts {
             cmd.arg(arg);
         }
-        return cmd;
+        return Ok(cmd);
+        }
     }
 
-    shell_running(launch_script(command, prelaunch))
+    Ok(shell_running(launch_script(command, prelaunch)))
 }
 
 /// El shell que ejecuta el script.
@@ -227,7 +244,7 @@ pub async fn pty_create(
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-    let mut cmd = build_launch(&command, &prelaunch.unwrap_or_default());
+    let mut cmd = build_launch(&command, &prelaunch.unwrap_or_default())?;
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");

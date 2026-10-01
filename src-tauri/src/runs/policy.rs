@@ -47,6 +47,7 @@ pub fn lead_may_use(tool_name: &str) -> bool {
     if READ_ONLY_BUILTINS.iter().any(|t| t.eq_ignore_ascii_case(tool_name)) {
         return true;
     }
+    if tool_name == crate::ipc::mcp::orchestration_tool_name("task_handoff") { return false; }
     let ours = format!("mcp__{}__", crate::ipc::mcp::SERVER_NAME);
     match tool_name.strip_prefix(&ours) {
         Some(name) => crate::ipc::mcp::is_orchestration_tool(name) || crate::ipc::mcp::is_read_only(name),

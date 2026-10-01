@@ -54,17 +54,17 @@ fn el_comando_de_reanudacion_llega_entero() {
 /// de por medio. Es la garantía de que esta feature no puede romper a quien no la usa.
 #[test]
 fn sin_pasos_se_lanza_el_binario_directo_sin_shell() {
-    let cmd = build_launch("claude --resume abc", &[]);
+    let cmd = build_launch("ade-test-missing-agent --resume abc", &[]).unwrap();
     let argv: Vec<String> =
         cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
-    assert_eq!(argv, vec!["claude", "--resume", "abc"]);
+    assert_eq!(argv, vec!["ade-test-missing-agent", "--resume", "abc"]);
 }
 
 /// Con pre-comandos, el comando entero viaja como UN argumento del shell. Eso también
 /// hace que el `split_whitespace` de arriba no llegue a partirlo.
 #[test]
 fn con_pasos_el_comando_viaja_entero_como_argumento_del_shell() {
-    let cmd = build_launch("claude --resume abc", &["nvm use".into()]);
+    let cmd = build_launch("claude --resume abc", &["nvm use".into()]).unwrap();
     let argv: Vec<String> =
         cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
     let script = argv.last().expect("el script va último");
@@ -74,6 +74,40 @@ fn con_pasos_el_comando_viaja_entero_como_argumento_del_shell() {
 }
 
 // ── Recorrido del árbol de procesos (unix) ──────────────────────
+
+#[cfg(windows)]
+#[test]
+fn windows_pty_resolves_npm_shim_and_preserves_arguments() {
+    let root = std::env::temp_dir().join(format!("ade-pty-shim-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(root.join("node_modules")).unwrap();
+    std::fs::write(root.join("node.exe"), b"fixture").unwrap();
+    std::fs::write(root.join("node_modules/cli.js"), b"fixture").unwrap();
+    std::fs::write(root.join("agent"), b"#!/bin/sh").unwrap();
+    std::fs::write(root.join("agent.cmd"), "@echo off\r\nIF EXIST \"%dp0%\\node.exe\" (\r\nSET \"_prog=%dp0%\\node.exe\"\r\n)\r\n\"%_prog%\" \"%dp0%\\node_modules\\cli.js\" %*\r\n").unwrap();
+    let command = format!("\"{}\" --resume \"session with spaces & literal\"", root.join("agent").display());
+    let cmd = build_launch(&command, &[]).unwrap();
+    let argv = cmd.get_argv();
+    assert_eq!(std::path::Path::new(&argv[0]), root.join("node.exe"));
+    assert_eq!(std::path::Path::new(&argv[1]), root.join("node_modules/cli.js"));
+    assert_eq!(argv[2], "--resume");
+    assert_eq!(argv[3], "session with spaces & literal");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires the installed Codex CLI; only runs --version, no inference"]
+fn installed_codex_starts_in_windows_pty_without_inference() {
+    use portable_pty::{native_pty_system, PtySize};
+    let pair = native_pty_system().openpty(PtySize { rows:24, cols:80, pixel_width:0, pixel_height:0 }).unwrap();
+    let mut child = pair.slave.spawn_command(build_launch("codex --version", &[]).unwrap()).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() { assert!(status.success(), "{status:?}"); break; }
+        if std::time::Instant::now() >= deadline { let _ = child.kill(); panic!("Codex --version timed out"); }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
 
 #[cfg(unix)]
 mod arbol {

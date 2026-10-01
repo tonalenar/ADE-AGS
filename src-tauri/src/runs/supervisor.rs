@@ -168,7 +168,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     // existir, se aborta en vez de caer a la cuenta del sistema — que es lo mismo que hace
     // el arranque de una tab (`Terminal.tsx`), y por el mismo motivo: correr con otra
     // cuenta que la pedida gasta cupo ajeno sin avisar.
-    let account_env = match &task.account_id {
+    let mut account_env = match &task.account_id {
         Some(id) => crate::accounts::env_for_account(&db, id)
             .ok_or_else(|| format!("la cuenta '{id}' ya no existe"))?,
         None => Default::default(),
@@ -180,7 +180,20 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     }
 
     let mcp_config = write_mcp_config(app, &task.id);
+    if !extras.allowed_tools.is_empty() && mcp_config.is_none() {
+        return Err("ADE MCP configuration unavailable: build/stage the current ccode CLI before starting orchestration".into());
+    }
+    let task_profile = if task.agent_id == "antigravity" {
+        let profile = super::antigravity::TaskProfile::prepare(
+            mcp_config.as_deref(), &extras.allowed_tools, read_only, &task.cwd,
+        )?;
+        account_env.extend(profile.env());
+        Some(profile)
+    } else {
+        None
+    };
     let ctx = LaunchCtx {
+        cwd: &task.cwd,
         reasoning_effort: task.reasoning_effort.as_deref(),
         session_id: &session_id,
         account_env,
@@ -202,7 +215,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         .map_err(|e| format!("no se pudo lanzar '{}': {e}", launch.program))?;
     let mut command = tokio::process::Command::from(command);
     command
-        .current_dir(&task.cwd)
+        .current_dir(task_profile.as_ref().map_or_else(|| PathBuf::from(&task.cwd), |p| p.workspace()))
         .envs(&launch.env)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
@@ -236,6 +249,20 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let imposed_session = session_id.clone();
 
     tokio::spawn(async move {
+        // Keep the isolated config alive until the owned process has exited.
+        let _task_profile = task_profile;
+        // Drain diagnostics while stdout is streamed: a full stderr pipe must not
+        // deadlock a native CLI before it can emit its terminal result.
+        let stderr_reader = tokio::spawn(async move {
+            match stderr {
+                Some(mut reader) => {
+                    let mut bytes = Vec::new();
+                    let _ = tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut bytes).await;
+                    String::from_utf8_lossy(&bytes).trim().to_string()
+                }
+                None => String::new(),
+            }
+        });
         let mut file = tokio::fs::File::create(&events_path).await.ok();
         let mut emitted: Option<TaskOutcome> = None;
 
@@ -273,17 +300,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
             }
         }
 
-        // stderr se lee entero recién acá: no es el canal de eventos, pero es donde
-        // aparece el motivo cuando el proceso muere sin llegar a emitir nada (un flag que
-        // esta versión no acepta, una cuenta sin login).
-        let stderr_text = match stderr {
-            Some(mut e) => {
-                let mut buf = Vec::new();
-                let _ = tokio::io::AsyncReadExt::read_to_end(&mut e, &mut buf).await;
-                String::from_utf8_lossy(&buf).trim().to_string()
-            }
-            None => String::new(),
-        };
+        let stderr_text = stderr_reader.await.unwrap_or_default();
 
         let code = child.wait().await.ok().and_then(|s| s.code()).unwrap_or(-1);
         let mut outcome = adapter.finish(emitted, code);

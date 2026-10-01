@@ -12,6 +12,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AccountCapableAgent, AgentAccount } from "./types";
 
 export const listAccounts = () => invoke<AgentAccount[]>("list_agent_accounts");
+export const listSystemAccounts = () => invoke<AgentAccount[]>("system_accounts");
 
 export const listCapableAgents = () => invoke<AccountCapableAgent[]>("account_capable_agents");
 
@@ -24,3 +25,28 @@ export const deleteAccount = (id: string, deleteFiles: boolean) =>
 /** Variables con las que hay que lanzar un proceso para que corra con esta cuenta. */
 export const accountEnv = (accountId: string) =>
   invoke<Record<string, string>>("agent_account_env", { accountId });
+
+export type AntigravityOAuthAccount = { id: string; name: string; email: string; connected: boolean };
+export type AntigravityOAuthConfig = { clientId: string | null; configured: boolean };
+export type AntigravityOAuthProgress =
+  | { status: "pending" }
+  | { status: "connected"; account: AntigravityOAuthAccount }
+  | { status: "failed"; message: string };
+export const antigravityOAuthConfig = () => invoke<AntigravityOAuthConfig>("antigravity_oauth_config");
+export const configureAntigravityOAuth = (clientId: string, clientSecret: string) =>
+  invoke<void>("antigravity_oauth_configure", { clientId, clientSecret });
+export const antigravityOAuthAccounts = () => invoke<AntigravityOAuthAccount[]>("antigravity_oauth_accounts");
+export const startAntigravityOAuth = (name: string) =>
+  invoke<{ flowId: string; authorizationUrl: string }>("antigravity_oauth_start", { name });
+export const pollAntigravityOAuth = (flowId: string) =>
+  invoke<AntigravityOAuthProgress>("antigravity_oauth_poll", { flowId });
+export const cancelAntigravityOAuth = (flowId: string) => invoke<void>("antigravity_oauth_cancel", { flowId });
+export const verifyAntigravityOAuth = (accountId: string) => invoke<void>("antigravity_oauth_verify", { accountId });
+export type AntigravityAccountDiscovery = {
+  accountId: string;
+  projectId: string;
+  models: Array<{ id: string; name: string }>;
+  inferenceVerified: boolean;
+};
+export const discoverAntigravityAccount = (accountId: string) =>
+  invoke<AntigravityAccountDiscovery>("antigravity_account_discovery", { accountId });

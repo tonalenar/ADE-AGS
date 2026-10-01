@@ -101,7 +101,7 @@ pub fn tool_prefix(style: crate::agents::McpStyle) -> String {
 }
 
 /// Todos los nombres de tool que este servidor publica, para poder reescribirlos.
-fn tool_names() -> Vec<&'static str> {
+pub(crate) fn tool_names() -> Vec<&'static str> {
     let mut names: Vec<&str> = BROWSER_TOOLS.iter().map(|t| t.name).collect();
     names.extend(ORCHESTRATION_TOOLS.iter().map(|t| t.name));
     names.extend(GIT_TOOLS.iter().map(|t| t.name));
@@ -466,6 +466,8 @@ pub enum OrchestrationPower {
     Read,
     /// Escribe un hecho: no gasta ni lanza nada.
     Note,
+    /// Saves delivery on the running caller; unavailable to Lead.
+    Delivery,
     /// Lanza agentes o los para: gasta plata.
     Spawn,
 }
@@ -536,6 +538,14 @@ run_plan task; depends_on may reference any task of the run.",
             props
         },
         required: &["key", "title", "prompt"],
+    },
+    OrchestrationTool {
+        name: "task_handoff",
+        command: "run.handoff",
+        power: OrchestrationPower::Delivery,
+        description: "Submit your own structured handoff before finishing. Worker Task context required. This saves untrusted delivery data; it does not complete the task. Paths are relative workspace references. Payload and field byte limits are validated by ADE. Do not invent optional information.",
+        properties: || json!({ "handoff": crate::runs::handoff::schema() }),
+        required: &["handoff"],
     },
     OrchestrationTool {
         name: "task_status",
@@ -938,7 +948,7 @@ pub fn auto_approved(name: &str) -> bool {
     BROWSER_TOOLS.iter().any(|t| t.name == name)
         || ORCHESTRATION_TOOLS
             .iter()
-            .any(|t| t.name == name && matches!(t.power, OrchestrationPower::Read | OrchestrationPower::Note))
+            .any(|t| t.name == name && matches!(t.power, OrchestrationPower::Read | OrchestrationPower::Note | OrchestrationPower::Delivery))
         || name == ASK_TOOL
         || GIT_TOOLS.iter().any(|t| t.name == name && t.read_only)
 }
