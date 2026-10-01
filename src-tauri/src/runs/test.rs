@@ -53,6 +53,7 @@ fn tarea(conn: &Connection, run_id: &str) -> String {
 
 fn ctx_sin_broker() -> LaunchCtx<'static> {
     LaunchCtx {
+        cwd: "/tmp/proy",
         reasoning_effort: None,
         session_id: "s-1",
         account_env: Default::default(),
@@ -66,6 +67,7 @@ fn ctx_sin_broker() -> LaunchCtx<'static> {
 
 fn ctx_con_broker() -> LaunchCtx<'static> {
     LaunchCtx {
+        cwd: "/tmp/proy",
         reasoning_effort: None,
         session_id: "s-1",
         account_env: Default::default(),
@@ -2386,6 +2388,7 @@ fn nodo(id: &str, estado: &str, deps: &[&str]) -> Task {
         result_schema: None,
         last_error: None,
         handoff: None,
+        structured_handoff: None,
         depends_on: deps.iter().map(|d| d.to_string()).collect(),
         started_at: None,
         ended_at: None,
@@ -2813,6 +2816,7 @@ mod otras_tuis {
 
     fn ctx(schema: Option<&str>) -> LaunchCtx<'static> {
         LaunchCtx {
+            cwd: "/tmp/proy",
             reasoning_effort: None,
             session_id: "sess-1",
             account_env: Default::default(),
@@ -2826,6 +2830,42 @@ mod otras_tuis {
 
     fn run(agent: &dyn HeadlessAgent, lines: &str) -> Vec<AgentEvent> {
         lines.lines().flat_map(|l| agent.parse_line(l)).collect()
+    }
+
+    #[test]
+    fn codex_receives_task_mcp_without_changing_account_config() {
+        let dir = std::env::temp_dir().join(format!("ade-codex-mcp-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("task.json");
+        let command = r#"C:\Program Files\José\ccode.exe"#;
+        let server_args = ["mcp", "--task", "task-1"];
+        std::fs::write(&path, serde_json::json!({"mcpServers": {"controlcode": {
+            "command": command, "args": server_args
+        }}}).to_string()).unwrap();
+        let before = std::fs::read(&path).unwrap();
+        let mut context = ctx(None);
+        context.mcp_config = Some(path.clone());
+        context.account_env.insert("CODEX_HOME".into(), "account-home".into());
+        context.allowed_tools = vec!["mcp__controlcode__task_handoff".into(), "mcp__controlcode__task_note".into()];
+        let agent = adapter_for("codex").unwrap();
+        let launch = agent.launch("worker", None, None, &context);
+        assert_eq!(launch.env, context.account_env);
+        assert_eq!(std::fs::read(&path).unwrap(), before);
+        let overrides: Vec<_> = launch.args.windows(2).filter(|pair| pair[0] == "-c").map(|pair| pair[1].as_str()).collect();
+        assert!(overrides.contains(&format!("mcp_servers.controlcode.command={}", serde_json::to_string(command).unwrap()).as_str()));
+        assert!(overrides.contains(&"mcp_servers.controlcode.args=[\"mcp\",\"--task\",\"task-1\"]"));
+        assert!(overrides.contains(&"mcp_servers.controlcode.enabled_tools=[\"task_handoff\",\"task_note\"]"));
+        assert!(overrides.contains(&"mcp_servers.controlcode.required=true"));
+        context.read_only = true;
+        context.allowed_tools = vec!["mcp__controlcode__task_list".into()];
+        let lead = agent.launch("lead", None, None, &context);
+        assert!(lead.args.windows(2).any(|p| p == ["--sandbox", "read-only"]));
+        assert!(lead.args.contains(&"mcp_servers.controlcode.enabled_tools=[\"task_list\"]".into()));
+        assert!(!lead.args.iter().any(|arg| arg.contains("task_handoff")));
+        std::fs::write(&path, "invalid").unwrap();
+        assert_eq!(agent.launch("worker", None, None, &context).program, "ADE-invalid-task-MCP-config");
+        std::fs::remove_file(&path).unwrap();
+        std::fs::remove_dir(&dir).unwrap();
     }
 
     #[test]
@@ -3112,6 +3152,7 @@ mod lanzamiento_real {
         std::fs::create_dir_all(&dir).unwrap();
         let agent = adapter_for(agent_id).unwrap();
         let ctx = LaunchCtx {
+            cwd: "/tmp/proy",
             reasoning_effort: None,
             session_id: &uuid::Uuid::new_v4().to_string(),
             account_env: Default::default(),

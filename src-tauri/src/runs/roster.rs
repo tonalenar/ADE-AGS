@@ -309,7 +309,7 @@ impl ModelCache {
 
 pub fn refresh_models(db: &DbConnection, agent_id: &str, account_id: Option<&str>) -> Result<Roster, String> {
     let adapter = crate::agents::adapter_for(agent_id).ok_or("provider is not registered")?;
-    if !adapter.has_headless() { return Err("provider does not support headless execution".into()); }
+    if matches!(adapter.def().models, ModelSource::Unknown) { return Err("provider does not support model discovery".into()); }
     if let Some(id) = account_id {
         let conn = db.lock().map_err(|error| error.to_string())?;
         if !crate::accounts::list_accounts(&conn)?.iter().any(|account| account.id == id && account.agent_id == agent_id) {
@@ -346,6 +346,12 @@ fn discover_catalog(
     env: &HashMap<String, String>,
     installed: bool,
 ) -> ModelCatalog {
+    if matches!(def.models, ModelSource::GeminiCatalogue) {
+        return ModelCatalog {
+            models: gemini_catalogue(),
+            state: ModelDiscoveryState::Available,
+        };
+    }
     if !installed {
         return ModelCatalog::unavailable();
     }
@@ -377,6 +383,15 @@ fn discover_catalog(
             let ollama = run("ollama", &["list"]).map(|out| parse_ollama_list(&out));
             Ok(opencode_roster_models(&listed, ollama.as_deref()))
         }
+        ModelSource::AntigravityModels => {
+            let Some(output) = run_with_env(def.command, &["models"], env) else {
+                return ModelCatalog::unavailable();
+            };
+            let models = parse_antigravity_models(&output);
+            if models.is_empty() { return ModelCatalog::unavailable(); }
+            Ok(models)
+        }
+        ModelSource::GeminiCatalogue => unreachable!("handled before the installation check"),
         ModelSource::Unknown => return ModelCatalog::unsupported(),
     };
 
@@ -389,6 +404,52 @@ fn discover_catalog(
     }
 }
 
+fn catalogue_model(id: &str, label: &str, source: &str, availability: ModelAvailability) -> RosterModel {
+    RosterModel {
+        id: id.into(), label: label.into(), toolcall: None, local: false,
+        cost_in: None, cost_out: None, context: None, source: Some(source.into()),
+        availability, reasoning_levels: None, default_reasoning: None, unavailable: None,
+    }
+}
+
+fn parse_antigravity_models(output: &str) -> Vec<RosterModel> {
+    let mut seen = HashSet::new();
+    output.lines().filter_map(|line| {
+        let (id, label) = line.split_once('\t')?;
+        let (id, label) = (id.trim(), label.trim());
+        if id.is_empty() || label.is_empty()
+            || !id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '/' | ':'))
+            || !seen.insert(id.to_owned()) { return None; }
+        let mut model = catalogue_model(id, label, "native", ModelAvailability::Available);
+        // Native IDs already pin effort. agy rejects a conflicting --effort and
+        // rejects explicit effort entirely for models without an effort suffix.
+        if let Some((_, effort)) = id.rsplit_once('-')
+            && matches!(effort, "low" | "medium" | "high" | "max")
+        {
+            model.reasoning_levels = Some(vec![effort.into()]);
+            model.default_reasoning = Some(effort.into());
+        }
+        Some(model)
+    }).collect()
+}
+
+fn gemini_catalogue() -> Vec<RosterModel> {
+    // https://github.com/google-gemini/gemini-cli/blob/main/packages/core/src/config/models.ts
+    // These are provider IDs/aliases, not proof of access by the current account.
+    [
+        ("auto", "Gemini Auto"), ("pro", "Gemini Pro"),
+        ("flash", "Gemini Flash"), ("flash-lite", "Gemini Flash Lite"),
+        ("gemini-2.5-pro", "Gemini 2.5 Pro"),
+        ("gemini-3.5-flash", "Gemini 3.5 Flash"),
+        ("gemini-3.8-flash", "Gemini 3.8 Flash"),
+        ("gemini-3.1-flash-lite", "Gemini 3.1 Flash Lite"),
+        ("gemini-3.5-flash-lite", "Gemini 3.5 Flash Lite"),
+        ("gemini-3.1-pro-preview", "Gemini 3.1 Pro Preview"),
+        ("gemini-3-pro-preview", "Gemini 3 Pro Preview"),
+        ("gemini-3-flash-preview", "Gemini 3 Flash Preview"),
+    ].into_iter().map(|(id, label)| catalogue_model(id, label, "provider_catalog", ModelAvailability::Unknown)).collect()
+}
+
 fn probed(refresh: bool, accounts: &[crate::accounts::AgentAccount]) -> Probed {
     if refresh {
         MODEL_CACHE.lock().unwrap_or_else(|error| error.into_inner()).clear();
@@ -399,7 +460,7 @@ fn probed(refresh: bool, accounts: &[crate::accounts::AgentAccount]) -> Probed {
     for adapter in crate::agents::adapters()
         .iter()
         .copied()
-        .filter(|a| a.has_headless())
+        .filter(|a| a.def().id != crate::agents::SHELL_AGENT_ID)
     {
         let def = adapter.def();
         let present = crate::agents::command_exists(def.command);
@@ -520,7 +581,7 @@ pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
     let mut agents: Vec<RosterAgent> = crate::agents::adapters()
         .iter()
         .copied()
-        .filter(|adapter| adapter.has_headless())
+        .filter(|adapter| adapter.def().id != crate::agents::SHELL_AGENT_ID)
         .map(|adapter| {
             let def = adapter.def();
             let installed = probed.installed.get(def.id).copied().unwrap_or(false);
@@ -624,6 +685,28 @@ fn running_by_account(
 #[cfg(test)]
 mod model_cache_tests {
     use super::*;
+    #[test]
+    fn antigravity_catalogue_uses_native_ids_without_inventing_metadata() {
+        let models = parse_antigravity_models("Fetching available models...\ngemini-3.8-flash-high\tGemini 3.8 Flash (High)\nclaude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)\ngemini-3.8-flash-high\tDuplicate\ninvalid id\tInvalid\n");
+        assert_eq!(models.len(), 2);
+        assert_eq!(models[0].id, "gemini-3.8-flash-high");
+        assert_eq!(models[1].id, "claude-sonnet-4-6");
+        assert!(models.iter().all(|m| m.source.as_deref() == Some("native") && m.cost_in.is_none()));
+        assert_eq!(models[0].reasoning_levels.as_deref(), Some(["high".to_string()].as_slice()));
+        assert_eq!(models[0].default_reasoning.as_deref(), Some("high"));
+        assert!(models[1].reasoning_levels.is_none());
+        assert!(parse_antigravity_models("not a model catalogue").is_empty());
+    }
+    #[test]
+    fn gemini_reference_catalogue_is_visible_without_claiming_account_access() {
+        let def = crate::agents::agent_def("gemini-cli").unwrap();
+        let catalog = discover_catalog(def, &HashMap::new(), false);
+        assert!(!catalog.models.is_empty());
+        assert!(catalog.models.iter().any(|m| m.id == "gemini-3.8-flash"));
+        assert!(catalog.models.iter().all(|m| m.availability == ModelAvailability::Unknown && m.source.as_deref() == Some("provider_catalog")));
+        let agy = crate::agents::agent_def("antigravity").unwrap();
+        assert!(discover_catalog(agy, &HashMap::new(), false).models.is_empty());
+    }
     #[test]
     fn claude_history_keeps_saved_ids_unverified_and_account_scoped() {
         let conn = crate::database::test_db();

@@ -35,8 +35,17 @@ fn validate_provider(
     conn: &Connection,
     agent_id: &str,
     account_id: &Option<String>,
+    lead: bool,
 ) -> Result<(), String> {
-    crate::runs::ensure_headless(agent_id)?;
+    if lead {
+        if crate::agents::adapter_for(agent_id).is_none()
+            || agent_id == crate::agents::SHELL_AGENT_ID
+        {
+            return Err(format!("provider '{agent_id}' is not a registered agent"));
+        }
+    } else {
+        crate::runs::ensure_headless(agent_id)?;
+    }
     if let Some(id) = account_id {
         let owner: Option<String> = conn
             .query_row(
@@ -83,9 +92,8 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
     if lead.agent_id.is_empty() {
         return Err("squad lead provider is required".into());
     }
-    validate_provider(conn, &lead.agent_id, &lead.account_id)
+    validate_provider(conn, &lead.agent_id, &lead.account_id, true)
         .map_err(|error| format!("lead: {error}"))?;
-    crate::runs::ensure_orchestration(&lead.agent_id)?;
 
     let mut seen = std::collections::HashSet::new();
     let mut members = Vec::with_capacity(input.members.len());
@@ -119,7 +127,7 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
         if member.agent_id.is_empty() {
             return Err(format!("role '{}' needs a provider", member.role_id));
         }
-        validate_provider(conn, &member.agent_id, &member.account_id)
+        validate_provider(conn, &member.agent_id, &member.account_id, false)
             .map_err(|error| format!("role '{}': {error}", member.role_id))?;
         members.push(member);
     }

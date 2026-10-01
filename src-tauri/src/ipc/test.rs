@@ -429,7 +429,7 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let offered: Vec<String> = tab.iter().map(|n| format!("mcp__controlcode__{n}")).collect();
     let browser: Vec<String> = offered.iter().filter(|n| n.contains("__browser_")).cloned().collect();
     assert_eq!(browser_tool_names(), browser);
-    let all_powers = [OrchestrationPower::Read, OrchestrationPower::Note, OrchestrationPower::Spawn];
+    let all_powers = [OrchestrationPower::Read, OrchestrationPower::Note, OrchestrationPower::Delivery, OrchestrationPower::Spawn];
     let orchestration = orchestration_tool_names(&all_powers);
     assert!(!orchestration.is_empty());
     assert!(orchestration.iter().all(|n| offered.contains(n)), "{orchestration:?}");
@@ -585,6 +585,18 @@ fn una_tool_de_orquestacion_viaja_con_quien_la_pide() {
     assert_eq!(sent[0].0, "run.await");
     assert_eq!(sent[0].1, json!({ "taskId": "t-3", "args": { "timeout_s": 60, "run_id": "otro" } }));
     assert_eq!(responses[0]["result"]["content"][0]["text"], "Terminaron: api (done)");
+}
+
+#[test]
+fn task_handoff_uses_existing_mcp_task_scope_and_delivery_permission() {
+    let body=json!({"handoff":{"version":1,"summary":"done"}});
+    let (responses,sent)=mcp_session(&McpContext::Task("worker-1".into()),&[call(5,"task_handoff",body.clone())],|_,_|Ok(json!({"text":"saved"})));
+    assert_eq!(sent[0].0,"run.handoff");
+    assert_eq!(sent[0].1,json!({"taskId":"worker-1","args":body}));
+    assert_eq!(responses[0]["result"]["content"][0]["text"],"saved");
+    assert!(super::mcp::auto_approved("task_handoff"));
+    assert!(!orchestration_tool_names(&[OrchestrationPower::Read,OrchestrationPower::Note,OrchestrationPower::Spawn]).iter().any(|name|name.ends_with("task_handoff")));
+    assert!(orchestration_tool_names(&[OrchestrationPower::Delivery]).iter().any(|name|name.ends_with("task_handoff")));
 }
 
 #[test]

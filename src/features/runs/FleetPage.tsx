@@ -9,6 +9,7 @@ import { accountProblemText } from "@/features/accounts/problem";
 import { useTabsStore } from "@/features/tabs/store";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
+import { HandoffView } from "./HandoffView";
 import { AgentCard } from "./AgentCard";
 import {
   countByGroup, filterFleet, FLEET_GROUPS, liveInFolder, orchestratedRuns, sortFleet, waitingOn, type FleetGroup,
@@ -337,7 +338,7 @@ function totalCost(tasks: { costUsd: number | null }[]): number {
 
 /** Lo que el agente entregó, entero. La tarjeta solo muestra actividad. */
 function TaskDetail({ task, onClose }: {
-  task: { title: string; result: string | null; error: string | null; prompt: string };
+  task: Task;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -364,6 +365,7 @@ function TaskDetail({ task, onClose }: {
             {task.error ? accountProblemText(task.error, t) : (task.result ?? t("fleet.detail.nothing"))}
           </p>
         </section>
+        <HandoffView task={task} />
       </div>
     </AppDialog>
   );

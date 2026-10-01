@@ -33,7 +33,7 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
   const remainingRoles = useMemo(() => availableSquadRoles(roles, form.members), [roles, form.members]);
   const canSaveAssignment = (assignment: { agentId: string; model: string | null; complexity: SquadMemberInput["complexity"] }) =>
     Boolean(assignment.agentId && (modelSelectionMode(assignment.model, assignment.complexity) !== "specific" || assignment.model?.trim()));
-  const ready = Boolean(form.name.trim() && !leadUnsupported(roster?.agents.find((agent) => agent.agentId === form.lead.agentId)) && canSaveAssignment(form.lead) && form.members.every(canSaveAssignment));
+  const ready = Boolean(form.name.trim() && canSaveAssignment(form.lead) && form.members.every(canSaveAssignment));
 
   const save = async () => {
     if (!ready || busy) return;
@@ -184,9 +184,9 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, accoun
           {agentId && (!roster || !roster.agents.some((agent) => agent.agentId === agentId)) && (
             <option value={agentId}>{agentId} · {t("squads.unavailable")}</option>
           )}
-          {roster?.agents.map((agent) => (
-            <option key={agent.agentId} value={agent.agentId} disabled={providerDisabled(agent, lead)}>
-              {agent.label}{lead && leadUnsupported(agent) ? " · " + t("squads.leadUnsupported") : agent.launchable ? "" : " · " + t("squads.unavailable")}
+          {roster?.agents.filter((agent) => lead || agent.capabilities.headless).map((agent) => (
+            <option key={agent.agentId} value={agent.agentId} disabled={!lead && providerDisabled(agent, false)}>
+              {agent.label}
             </option>
           ))}
         </select>

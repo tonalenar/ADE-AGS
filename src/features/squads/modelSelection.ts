@@ -35,7 +35,7 @@ export function modelsForAccount<TModel>(
 export function modelIsUnverified(model: string | null, catalog: { id: string; source?: string | null }[]): boolean {
   if (model === null || model.trim().length === 0) return false;
   const entry = catalog.find((item) => item.id === model.trim());
-  return !entry || entry.source === "ade_history";
+  return !entry || entry.source === "ade_history" || entry.source === "provider_catalog";
 }
 
 export function reasoningOptions(model: string | null, catalog: { id: string; reasoningLevels?: string[] | null }[]): string[] {

@@ -101,6 +101,7 @@ fn el_registro_conserva_los_valores_que_estaban_repartidos() {
             Some("--session {session}"),
         ),
         // bash no es una TUI de agente: no gestiona skills, ni cuentas, ni sesiones.
+        e("antigravity", "agy", None, None, None),
         e("bash", "bash", None, None, None),
     ];
 
@@ -205,7 +206,7 @@ fn cada_tui_dice_como_recibe_el_mcp_y_como_nombra_sus_tools() {
 
 #[test]
 fn orchestration_capability_requires_implemented_ade_mcp() {
-    for (id, expected) in [("claude-code", true), ("opencode", true), ("codex", false), ("gemini-cli", false), ("kimi-code", false), ("bash", false)] {
+    for (id, expected) in [("claude-code", true), ("opencode", true), ("codex", true), ("gemini-cli", false), ("kimi-code", false), ("antigravity", true), ("bash", false)] {
         let caps = super::adapter_for(id).unwrap().capabilities();
         assert_eq!(caps.orchestration, expected, "{id}");
         if expected { assert!(caps.headless && caps.mcp); }

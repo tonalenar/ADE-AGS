@@ -5,6 +5,7 @@ import type { AccountCapableAgent, AgentAccount } from "./types";
 
 interface AccountsState {
   accounts: AgentAccount[];
+  systemAccounts: AgentAccount[];
   capable: AccountCapableAgent[];
   loaded: boolean;
 
@@ -17,14 +18,17 @@ interface AccountsState {
 
 export const useAccountsStore = create<AccountsState>()((set, get) => ({
   accounts: [],
+  systemAccounts: [],
   capable: [],
   loaded: false,
 
   load: async () => {
     // El estado de login se lee del disco en cada consulta (no se cachea en la base): el
     // login pasa dentro de la TUI, fuera del alcance de la app, y puede caducar sin aviso.
-    const [accounts, capable] = await Promise.all([ipc.listAccounts(), ipc.listCapableAgents()]);
-    set({ accounts, capable, loaded: true });
+    const [accounts, capable, systemAccounts] = await Promise.all([
+      ipc.listAccounts(), ipc.listCapableAgents(), ipc.listSystemAccounts(),
+    ]);
+    set({ accounts, capable, systemAccounts, loaded: true });
   },
 
   create: async (agentId, name) => {

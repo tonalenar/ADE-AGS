@@ -1,3 +1,4 @@
+import { HandoffView } from "@/features/runs/HandoffView";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
@@ -495,6 +496,7 @@ function TaskRow({ task, tasks, accountLabel, blocked, approval, focused, onDeci
           {outcome}
         </p>
       )}
+      <HandoffView task={task} />
       {approval && (
         <div className="-mx-3 -mb-2 pt-1">
           <PermissionCard approval={approval} focused={focused} onDecide={onDecide} />

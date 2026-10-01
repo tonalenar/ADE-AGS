@@ -69,6 +69,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "run.status" => run_orchestrate(app, "run.status", args),
         "run.result" => run_orchestrate(app, "run.result", args),
         "run.await" => run_orchestrate(app, "run.await", args),
+        "run.handoff" => run_orchestrate(app, "run.handoff", args),
         "run.addFact" => run_orchestrate(app, "run.addFact", args),
         "run.facts" => run_orchestrate(app, "run.facts", args),
         "run.cancelTask" => run_orchestrate(app, "run.cancelTask", args),

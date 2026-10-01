@@ -70,7 +70,8 @@ fn codex() {
     assert!(caps.sessions);
     assert!(caps.resume);
     assert!(caps.skills);
-    assert!(!caps.mcp);
+    assert!(caps.mcp);
+    assert!(caps.orchestration);
     assert!(caps.models);
     assert!(caps.headless);
     assert!(agent.headless().is_some());
@@ -99,7 +100,7 @@ fn gemini_cli_sin_cuentas_y_sin_exigir_el_binario() {
     assert!(caps.resume);
     assert!(caps.skills);
     assert!(!caps.mcp);
-    assert!(!caps.models);
+    assert!(caps.models);
     assert!(caps.headless);
     // El adapter existe aunque el binario no esté. La detección es otro paso.
     let _instalado = super::command_exists(def.command);

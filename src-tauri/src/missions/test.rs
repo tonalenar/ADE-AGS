@@ -1313,14 +1313,14 @@ mod eventos {
 }
 
 #[test]
-fn legacy_codex_lead_is_readable_but_blocked_before_routing_or_launch() {
+fn legacy_kimi_lead_is_readable_but_blocked_before_routing_or_launch() {
     let db = db();
     let id = borrador(&db);
     {
         let conn = db.lock().unwrap();
-        assert!(store::validate(&conn, &MissionInput { lead_agent_id: Some("codex".into()), ..pedido() }).unwrap_err().contains("orchestration"));
-        conn.execute("UPDATE missions SET lead_agent_id = 'codex' WHERE id = ?1", [&id]).unwrap();
-        assert_eq!(store::get(&conn, &id).unwrap().unwrap().lead_agent_id.as_deref(), Some("codex"));
+        assert!(store::validate(&conn, &MissionInput { lead_agent_id: Some("kimi-code".into()), ..pedido() }).unwrap_err().contains("orchestration"));
+        conn.execute("UPDATE missions SET lead_agent_id = 'kimi-code' WHERE id = ?1", [&id]).unwrap();
+        assert_eq!(store::get(&conn, &id).unwrap().unwrap().lead_agent_id.as_deref(), Some("kimi-code"));
     }
     let error = start(&db, &id, |_| panic!("must not route"), |_| panic!("must not launch")).unwrap_err();
     assert!(error.contains("orchestration"), "{error}");
@@ -1328,7 +1328,27 @@ fn legacy_codex_lead_is_readable_but_blocked_before_routing_or_launch() {
 }
 
 #[test]
-fn legacy_squad_codex_lead_start_is_blocked_without_execution() {
+fn codex_lead_is_validated_and_dispatched_with_lead_permissions() {
+    let db = db();
+    let id = {
+        let conn = db.lock().unwrap();
+        create(&conn, "w1", &MissionInput {
+            lead_agent_id: Some("codex".into()), ..pedido()
+        }).unwrap().id
+    };
+    let launched = RefCell::new(None);
+    start(&db, &id, |_| Ok(asignacion("codex")), |task| {
+        *launched.borrow_mut() = Some(task.clone());
+        Ok(())
+    }).unwrap();
+    let lead = launched.into_inner().unwrap();
+    assert_eq!(lead.agent_id, "codex");
+    assert_eq!(lead.role.as_deref(), Some(role::LEAD));
+    assert_eq!(store::get(&db.lock().unwrap(), &id).unwrap().unwrap().status, status::RUNNING);
+}
+
+#[test]
+fn legacy_squad_kimi_lead_start_is_blocked_without_execution() {
     let db = db();
     let id;
     {
@@ -1336,7 +1356,7 @@ fn legacy_squad_codex_lead_start_is_blocked_without_execution() {
         let squad_id = squad_para_mission(&conn);
         let mission = create(&conn, "w1", &MissionInput { squad_id: Some(squad_id.clone()), complexity: None, ..pedido() }).unwrap();
         id = mission.id;
-        conn.execute("UPDATE squads SET lead_agent_id = 'codex' WHERE id = ?1", [&squad_id]).unwrap();
+        conn.execute("UPDATE squads SET lead_agent_id = 'kimi-code' WHERE id = ?1", [&squad_id]).unwrap();
     }
     let error = start(&db, &id, |_| panic!("must not route"), |_| panic!("must not launch")).unwrap_err();
     assert!(error.contains("unavailable"), "{error}");

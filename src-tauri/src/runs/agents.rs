@@ -20,6 +20,8 @@ pub struct Launch {
 
 /// Lo que hace falta saber para armar el lanzamiento y que no está en la tarea.
 pub struct LaunchCtx<'a> {
+    /// Actual task workspace, including its worktree when applicable.
+    pub cwd: &'a str,
     /// El id de sesión que la app le IMPONE a la TUI. Se decide antes de lanzar para que
     /// la fila y la sesión queden atadas desde el principio.
     pub session_id: &'a str,

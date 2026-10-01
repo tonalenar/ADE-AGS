@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "summary": "Backend entregue",
+  "changed_files": [{"path": "src/api.ts", "description": "Endpoint implementado"}],
+  "tests": [{"command": "bun run test", "status": "passed", "notes": "Suíte completa"}],
+  "decisions": ["Manter contrato"],
+  "risks": ["Revisar integração"],
+  "next_steps": ["Validar QA"],
+  "artifacts": [{"label": "Relatório", "path": "docs/report.md"}]
+}

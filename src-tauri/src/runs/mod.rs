@@ -12,8 +12,10 @@
 mod activity;
 mod adapters;
 mod agents;
+mod antigravity;
 mod broker;
 mod context;
+pub(crate) mod handoff;
 mod model_discovery;
 pub mod orchestration;
 mod plan;
@@ -32,6 +34,7 @@ mod worktrees;
 
 pub(crate) use adapters::{Codex, Gemini, Kimi, OpenCode};
 pub(crate) use agents::{ClaudeCode, HeadlessAgent};
+pub(crate) use antigravity::Antigravity;
 pub(crate) use routing::Complexity;
 pub use store::sweep_orphans;
 pub use types::{Fact, Run, Task};
@@ -394,7 +397,7 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
         use crate::ipc::mcp::{
             OrchestrationPower::*, orchestration_tool_name, orchestration_tool_names,
         };
-        let mut allowed = orchestration_tool_names(&[Read, Note]);
+        let mut allowed = orchestration_tool_names(&[Read, Note, Delivery]);
         allowed.push(orchestration_tool_name(crate::ipc::mcp::ASK_TOOL));
         if can_delegate {
             allowed.push(orchestration_tool_name("task_add"));

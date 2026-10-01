@@ -359,6 +359,39 @@ impl HeadlessAgent for Codex {
         if let Some(effort) = ctx.reasoning_effort {
             args.extend(["-c".into(), format!("model_reasoning_effort=\"{effort}\"")]);
         }
+        if let Some(path) = &ctx.mcp_config {
+            // Override only this execution; never rewrite the account's config.toml.
+            let config = std::fs::read(path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+            let server = config.as_ref().and_then(|v| v.pointer("/mcpServers/controlcode"));
+            let command = server.and_then(|v| v.get("command")).and_then(Value::as_str);
+            let server_args = server.and_then(|v| v.get("args")).and_then(Value::as_array);
+            if let (Some(command), Some(server_args)) = (command, server_args)
+                && !command.is_empty()
+                && server_args.iter().all(Value::is_string)
+            {
+                let tools: Vec<&str> = ctx.allowed_tools.iter()
+                    .filter_map(|name| name.strip_prefix("mcp__controlcode__"))
+                    .collect();
+                for (key, value) in [
+                    ("command", serde_json::to_string(command).unwrap()),
+                    ("args", serde_json::to_string(server_args).unwrap()),
+                    ("enabled_tools", serde_json::to_string(&tools).unwrap()),
+                    ("enabled", "true".into()),
+                    ("required", "true".into()),
+                ] {
+                    args.extend(["-c".into(), format!("mcp_servers.controlcode.{key}={value}")]);
+                }
+            } else {
+                // A broken task config must fail before inference, not silently lose MCP.
+                return Launch {
+                    program: "ADE-invalid-task-MCP-config".into(),
+                    args: vec![],
+                    env: ctx.account_env.clone(),
+                };
+            }
+        }
         if let Some(m) = model {
             args.push("--model".into());
             args.push(m.into());

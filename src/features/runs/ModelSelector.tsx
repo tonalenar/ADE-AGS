@@ -25,7 +25,8 @@ export function ModelSelector({ roster, agentId, accountId, autoAccount, model, 
   const selectModel = (patch: { model: string | null; complexity: Complexity | null }) => onChange(withModelEffort(patch, reasoningEffort, catalog));
   const groups = [
     { label: t("models.native"), models: catalog.filter((entry) => entry.source === "native") },
-    { label: t("models.more"), models: catalog.filter((entry) => entry.source !== "native" && entry.source !== "ade_history") },
+    { label: t("models.reference"), models: catalog.filter((entry) => entry.source === "provider_catalog") },
+    { label: t("models.more"), models: catalog.filter((entry) => entry.source !== "native" && entry.source !== "ade_history" && entry.source !== "provider_catalog") },
     { label: t("models.history"), models: catalog.filter((entry) => entry.source === "ade_history") },
   ];
   const refresh = async () => {

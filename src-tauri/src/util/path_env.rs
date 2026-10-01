@@ -374,6 +374,7 @@ pub fn known_dirs(home: &Path) -> Vec<PathBuf> {
                 Some(home.join("scoop").join("shims")),
                 env_dir("LOCALAPPDATA", "Microsoft\\WinGet\\Links"),
                 env_dir("LOCALAPPDATA", "Volta\\bin"),
+                env_dir("LOCALAPPDATA", "agy\\bin"),
                 env_dir("ProgramData", "chocolatey\\bin"),
             ]
             .into_iter()

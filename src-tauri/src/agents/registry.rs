@@ -136,6 +136,10 @@ pub enum ModelSource {
     /// Se le pregunta al binario con `opencode models --verbose`, que trae proveedor,
     /// precio, contexto y si el modelo puede usar herramientas.
     OpencodeModels,
+    /// Official Gemini CLI model IDs, with account entitlement left unverified.
+    GeminiCatalogue,
+    /// Models returned by the authenticated `agy models` command.
+    AntigravityModels,
     /// No se sabe listarlos.
     Unknown,
 }
@@ -205,7 +209,7 @@ pub const AGENTS: &[AgentDef] = &[
         profile: None,
         resume: Some("--resume {session}"),
         sessions: SessionSource::GeminiTmp,
-        models: ModelSource::Unknown,
+        models: ModelSource::GeminiCatalogue,
         mcp: McpStyle::None,
     },
     AgentDef {
@@ -264,6 +268,19 @@ pub const AGENTS: &[AgentDef] = &[
         resume: Some("--session {session}"),
         sessions: SessionSource::KimiSessions,
         models: ModelSource::Unknown,
+        mcp: McpStyle::None,
+    },
+    AgentDef {
+        id: "antigravity",
+        label: "Antigravity",
+        command: "agy",
+        version_flag: "--version",
+        skills_dir: None,
+        // Native OS keyring account. Task config isolation does not isolate OAuth accounts.
+        profile: None,
+        resume: None,
+        sessions: SessionSource::None,
+        models: ModelSource::AntigravityModels,
         mcp: McpStyle::None,
     },
     AgentDef {

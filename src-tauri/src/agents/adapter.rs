@@ -51,6 +51,8 @@ pub trait AgentAdapter: Send + Sync {
 
     /// The headless launcher can receive the ADE MCP orchestration tools.
     fn supports_orchestration(&self) -> bool { false }
+    /// The task launcher can inject ADE MCP independently of terminal/Lead support.
+    fn has_task_mcp(&self) -> bool { self.supports_orchestration() }
 
     /// La flota sabe lanzarla. `false` en el shell: no es un agente headless.
     fn has_headless(&self) -> bool {
@@ -88,7 +90,7 @@ pub trait AgentAdapter: Send + Sync {
             sessions: def.sessions != SessionSource::None,
             resume: def.resume.is_some(),
             skills: def.skills_dir.is_some(),
-            mcp: def.mcp != McpStyle::None,
+            mcp: def.mcp != McpStyle::None || self.has_task_mcp(),
             // `Unknown` es "no sabemos listarlos", no una lista vacía que igual cuenta.
             models: !matches!(def.models, ModelSource::Unknown),
             headless: self.has_headless(),
@@ -137,6 +139,8 @@ impl AgentAdapter for Gemini {
 struct Codex;
 
 impl AgentAdapter for Codex {
+    fn supports_orchestration(&self) -> bool { true }
+    fn has_task_mcp(&self) -> bool { true }
     fn def(&self) -> &'static AgentDef {
         row("codex")
     }
@@ -204,7 +208,17 @@ static BASH: Bash = Bash;
 
 /// El mismo orden que [`super::registry::AGENTS`]. La detección y el catálogo del frontend
 /// dependen de ese orden.
-static ADAPTERS: [&dyn AgentAdapter; 6] = [&CLAUDE, &GEMINI, &CODEX, &OPENCODE, &KIMI, &BASH];
+struct Antigravity;
+impl AgentAdapter for Antigravity {
+    fn def(&self) -> &'static AgentDef { row("antigravity") }
+    fn supports_orchestration(&self) -> bool { true }
+    fn has_headless(&self) -> bool { true }
+    fn headless(&self) -> Option<Box<dyn crate::runs::HeadlessAgent + Send + Sync>> {
+        Some(Box::new(crate::runs::Antigravity::default()))
+    }
+}
+static ANTIGRAVITY: Antigravity = Antigravity;
+static ADAPTERS: [&dyn AgentAdapter; 7] = [&CLAUDE, &GEMINI, &CODEX, &OPENCODE, &KIMI, &ANTIGRAVITY, &BASH];
 
 /// Todos los providers de fábrica. No aloca: son estáticos.
 pub fn adapters() -> &'static [&'static dyn AgentAdapter] {

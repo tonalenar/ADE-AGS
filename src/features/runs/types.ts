@@ -48,6 +48,7 @@ export interface Task {
   lastError: string | null;
   /** Lo que dejó el agente anterior si la tarea cambió de manos. `null` = nunca cambió. */
   handoff: string | null;
+  structuredHandoff?: StructuredHandoff | null;
   /** Las tareas que tienen que terminar bien antes de que esta arranque. */
   dependsOn: string[];
   startedAt: number | null;
@@ -231,4 +232,16 @@ export interface Assignment {
   accountId: string | null;
   routedBy: RoutedBy;
   notes: string[];
+}
+
+/** The nested delivery uses the versioned snake_case wire schema; Task uses camelCase. */
+export interface StructuredHandoff {
+  version: 1;
+  summary: string;
+  changed_files: { path: string; description?: string }[];
+  tests: { command: string; status: "passed" | "failed" | "not_run"; notes?: string }[];
+  decisions: string[];
+  risks: string[];
+  next_steps: string[];
+  artifacts: { label: string; path: string }[];
 }

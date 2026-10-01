@@ -22,7 +22,7 @@ const TASK_COLUMNS: &str = "id, run_id, title, prompt, agent_id, account_id, mod
                             tokens_in, tokens_out, events_path, started_at, ended_at, created_at, \
                             worktree_path, branch, worktree_removed, complexity, routed_by, \
                             route_note, role, plan_key, parent_id, depth, isolate, result_schema, \
-                            last_error, handoff, functional_role, reasoning_effort";
+                            last_error, handoff, functional_role, reasoning_effort, structured_handoff";
 
 fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
     Ok(Run {
@@ -82,6 +82,10 @@ fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
         handoff: row.get(34)?,
         functional_role: row.get(35)?,
         reasoning_effort: row.get(36)?,
+        structured_handoff: row.get::<_, Option<String>>(37)?.map(|raw| {
+            let value = serde_json::from_str(&raw).map_err(|e| rusqlite::Error::FromSqlConversionFailure(37, rusqlite::types::Type::Text, Box::new(e)))?;
+            super::handoff::parse(&value).map_err(|e| rusqlite::Error::FromSqlConversionFailure(37, rusqlite::types::Type::Text, Box::new(std::io::Error::other(e))))
+        }).transpose()?,
         // Lo llena `with_deps`: vive en otra tabla.
         depends_on: Vec::new(),
     })
@@ -523,7 +527,7 @@ pub fn skip_task(conn: &Connection, task_id: &str, reason: &str) -> Result<bool,
 pub fn requeue_for_retry(conn: &Connection, task_id: &str, error: &str) -> Result<bool, String> {
     let n = conn
         .execute(
-            "UPDATE tasks SET status = ?1, last_error = ?2, error = NULL, result = NULL,
+            "UPDATE tasks SET status = ?1, last_error = ?2, error = NULL, result = NULL, structured_handoff = NULL,
                               ended_at = NULL, session_id = NULL
              WHERE id = ?3 AND status = ?4",
             rusqlite::params![status::PENDING, error, task_id, status::FAILED],
@@ -552,7 +556,7 @@ pub fn reroute_task(
     let n = conn
         .execute(
             "UPDATE tasks SET agent_id = ?1, model = ?2, account_id = ?3, routed_by = ?4, route_note = ?5,
-                              handoff = ?6, status = ?7, attempt = 0, session_id = NULL,
+                              handoff = ?6, structured_handoff = NULL, status = ?7, attempt = 0, session_id = NULL,
                               result = NULL, error = NULL, last_error = NULL,
                               started_at = NULL, ended_at = NULL
              WHERE id = ?8 AND status NOT IN (?9, ?10)",
@@ -731,6 +735,18 @@ pub fn mark_running(
         rusqlite::params![status::RUNNING, session_id, events_path, now_ts(), task_id],
     )
     .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+/// Save delivery only for the caller's running worker, without changing lifecycle/routing.
+pub fn save_handoff(conn: &Connection, task_id: &str, value: &serde_json::Value) -> Result<(), String> {
+    let handoff = super::handoff::parse(value)?;
+    let raw = serde_json::to_string(&handoff).map_err(|e| e.to_string())?;
+    let changed = conn.execute(
+        "UPDATE tasks SET structured_handoff = ?1 WHERE id = ?2 AND role = 'worker' AND status = 'running'",
+        rusqlite::params![raw, task_id],
+    ).map_err(|e| e.to_string())?;
+    if changed != 1 { return Err("Only the current running worker can submit its handoff; historical tasks are immutable".into()); }
     Ok(())
 }
 
