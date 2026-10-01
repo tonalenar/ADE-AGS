@@ -6,7 +6,15 @@ O Mission Engine ([MISSION_ENGINE.md](./MISSION_ENGINE.md)) é a Mission persist
 
 Não há executor novo. O runtime é o mesmo `runs/` da frota: supervisor, broker, adapters, scheduler, routing, worktrees. O v0.1 corrige e reforça esse caminho; não cria outro.
 
-Este documento registra o runtime v0.1. Roles + Squads v0 adiciona roteamento funcional ao mesmo executor e está descrito em [ROLES_SQUADS.md](./ROLES_SQUADS.md). Handoff Structured v0 também está concluído, descrito em [HANDOFF_STRUCTURED.md](./HANDOFF_STRUCTURED.md). Shared Memory e Map Mode continuam fora.
+Este documento registra o runtime v0.1. Roles + Squads v0 adiciona roteamento funcional ao mesmo executor e está descrito em [ROLES_SQUADS.md](./ROLES_SQUADS.md). Handoff Structured v0 também está concluído, descrito em [HANDOFF_STRUCTURED.md](./HANDOFF_STRUCTURED.md). Shared Memory v0 usa o MCP e o runtime existentes; o Event Bus unificado e Map Mode continuam etapas separadas.
+
+## Shared Memory e Run Facts
+
+No início de cada Run, a transação que cria Run e Lead também grava `run_memory_snapshot` e seus metadados. A seleção considera apenas revisões aprovadas do Workspace e da Mission anexada: prioridade decrescente, Mission antes de Workspace em empate, depois key e ID. O limite é de 16 entradas e 16 KiB agregados; entradas grandes são truncadas em fronteira UTF-8 e o snapshot registra truncamento e omissões. Um Run vazio também possui metadados de snapshot.
+
+O Lead recebe o snapshot em `LaunchExtras.prompt`, separado do system prompt. Workers recebem o mesmo snapshot no prompt de contexto. O conteúdo é JSON delimitado como `UNTRUSTED DATA`; ele não pode alterar role, functional role, provider, model, conta, effort, tools, permissões, Lead Guardrail ou Squad routing. O runtime não ativa uma proposta durante um Run.
+
+`facts_read` agora pagina Run Facts e informa cursor, `hasMore` e truncamento do preview. `fact_read` busca o corpo completo em blocos UTF-8 limitados. Run Fact continua pertencendo a apenas um Run; sua promoção é uma ação explícita que cria uma proposta de Shared Memory, sem converter o fato nem alterar o histórico do Run. Ver [SHARED_MEMORY.md](./SHARED_MEMORY.md) para o contrato e os limites.
 
 ## Roles + Squads v0
 
@@ -190,3 +198,5 @@ Não demonstrado ao vivo: aprovações na tela de Missions. Exigem um worker Cla
 ## Estado consolidado da base ADE
 
 Mission Engine e Mission Runtime estão concluídos nesta base, com retry de Mission failed criando outro Run e preservando o histórico. Roles/Squads, model discovery, reasoning effort, PT-BR e Handoff Structured v0 reutilizam o mesmo runtime. O launcher interativo Windows também resolve o alvo dos shims npm, evitando executar `.cmd` como binário nativo (erro 193). Custos continuam parciais conforme os dados fornecidos por cada provider.
+
+Shared Memory v0 está **validada no WIP `feat/shared-memory-v0`**, com gates e E2E real concluídos em 01/10/2026: retry, MCP, Fact, handoff, proposta aprovada pelo usuário e persistência após restart. Alterações ainda sem commit ou merge. Ver [SHARED_MEMORY.md](./SHARED_MEMORY.md).

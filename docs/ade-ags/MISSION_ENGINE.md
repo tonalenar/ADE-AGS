@@ -103,6 +103,12 @@ failed ──Tentar novamente──▶ running (novo run)
 
 `mission_create`, `mission_update`, `mission_list`, `mission_get`, `mission_start`, `mission_cancel`.
 
+## Shared Memory v0
+
+Shared Memory é uma camada local de contexto aprovada pelo usuário, separada do estado da Mission e dos fatos temporários do Run. Workspace Memory é compartilhada no workspace; Mission Memory pertence a uma única Mission. No Start e em cada retry, `runs::start_orchestration` seleciona as entradas aprovadas e grava um snapshot imutável na mesma transação que cria o Run e o Lead. Editar ou excluir uma memória depois não altera Runs antigos nem o snapshot de um Run em andamento.
+
+Lead e Worker podem consultar memória e criar propostas de criação, atualização, tombstone ou promoção de Run Fact. A Task, o Run, a Mission e o Workspace são resolvidos pelo backend; o modelo não informa owners. Propostas ficam `proposed` até o usuário aprovar ou rejeitar na tela. Atualização e exclusão usam `expected_revision` e não substituem a revisão ativa antes da aprovação. O contrato completo, migration v24, quotas e testes está em [SHARED_MEMORY.md](./SHARED_MEMORY.md).
+
 ## UI
 
 Rota modal `#/missions`, botão na barra lateral abaixo da Fleet. Lista (título, status, pasta, lead, data, gasto, progresso dos workers), formulário de criação/edição e detalhe (objetivo, modo de execução, Squad/snapshot, provider, conta, orçamento, gasto, run atual, lead à parte, tasks com Role funcional, dependências, estado dos agentes, aprovações pendentes, resultado/erro, facts do run ativo). Ações: draft → Iniciar; running → Cancelar; failed → Tentar novamente; done/cancelled → nenhuma. O retry reutiliza a configuração da Mission e resolve novamente a conta e o Squad atuais. Tasks, facts, erros e custos anteriores permanecem associados aos seus runs; o detalhe mostra o novo run ativo e a contagem de execuções. Atualiza por `cc-task-changed` e `cc-mission-changed`, com refresh coalescido; sem polling. Desde o v0.1, ver [MISSION_RUNTIME.md](./MISSION_RUNTIME.md).
@@ -135,3 +141,5 @@ Repo git descartável em `%TEMP%\ade-mission-e2e`, Mission "Criar um arquivo hel
 3. Três tentativas falharam por ambiente, e cada uma terminou em Mission/run/lead `failed` com o erro visível: Claude haiku (403 do gateway free tier), Codex (`batch file arguments are invalid`), Claude sem modelo (modelo padrão inválido em headless).
 4. Quarta tentativa: Claude Code com `claude-code/spacexai/grok-build-0.1` → `hello.txt` com `ADE AGS`, commit local; aprovações concedidas manualmente (Write, leitura, commit), push negado. Mission `done`, 1 / 1, US$ 0,115.
 5. ADE fechada e reaberta → as quatro Missions visíveis com status, gasto e resultado.
+
+Shared Memory v0 está **validada no WIP `feat/shared-memory-v0`**, com gates e E2E real concluídos em 01/10/2026: retry, MCP, Fact, handoff, proposta aprovada pelo usuário e persistência após restart. Alterações ainda sem commit ou merge. Ver [SHARED_MEMORY.md](./SHARED_MEMORY.md).
