@@ -790,6 +790,15 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         email TEXT NOT NULL, created_at INTEGER NOT NULL
     );",
     )?;
+    // Índices de las consultas que corren en cada evento de la flota y en cada guardado:
+    // la lista de runs de un workspace (`ORDER BY created_at DESC`), las tasks de un run en
+    // orden, y buscar el historial de una sesión por su id. Sin ellos son recorridos enteros
+    // de tablas que solo crecen.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_runs_workspace_created ON runs(workspace_id, created_at);
+         CREATE INDEX IF NOT EXISTS idx_tasks_run_created ON tasks(run_id, created_at);
+         CREATE INDEX IF NOT EXISTS idx_session_history_session ON session_history(session_id);",
+    )?;
     // New databases are stamped at the latest version by legacy detection; create v24
     // tables whenever the baseline DDL did not create them itself.
     conn.execute_batch("SAVEPOINT migrate_memory_v24")?;
