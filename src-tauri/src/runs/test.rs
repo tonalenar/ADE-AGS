@@ -2390,6 +2390,7 @@ fn nodo(id: &str, estado: &str, deps: &[&str]) -> Task {
         handoff: None,
         structured_handoff: None,
         depends_on: deps.iter().map(|d| d.to_string()).collect(),
+        auto_account: true,
         started_at: None,
         ended_at: None,
         created_at: 0,
@@ -3504,6 +3505,7 @@ mod politica_del_lead {
                     account_id: None,
                     routed_by: RoutedBy::Policy,
                     notes: vec![],
+                    auto_account: true,
                 })
             },
             |t| {
@@ -3657,6 +3659,7 @@ mod politica_del_lead {
                 account_id: None,
                 routed_by: RoutedBy::Manual,
                 notes: Vec::new(),
+                auto_account: true,
             };
             start_orchestration(
                 db,
@@ -3965,4 +3968,102 @@ fn el_cupo_de_codex_se_lee_como_el_de_claude() {
 
     // Con API key no hay ventanas.
     assert!(parse_codex_rate_limits(&serde_json::json!({ "rateLimits": { "primary": null, "secondary": null } })).is_none());
+}
+
+// ── Fallas de cuenta ─────────────────────────────────────────────
+
+/// Frases reales de las CLIs y de las APIs que tienen detrás.
+#[test]
+fn una_falla_se_clasifica_por_lo_que_dijo_la_cli() {
+    use super::failure::{classify, FailureKind::*};
+    // Límite de uso.
+    for text in [
+        "Claude AI usage limit reached|1790962038",
+        "5-hour limit reached ∙ resets 3pm",
+        "You've hit your usage limit. Upgrade to Pro or try again in 2 hours.",
+        "stream error: exceeded retry limit, last status: 429 Too Many Requests",
+        "provider returned status code: 429",
+        r#"{"type":"error","error":{"type":"rate_limit_error","message":"Number of request tokens has exceeded your per-minute rate limit"}}"#,
+        "You exceeded your current quota, please check your plan and billing details.",
+    ] {
+        assert_eq!(classify(text), RateLimited, "{text}");
+    }
+    // Credencial.
+    for text in [
+        "Invalid API key · Please run /login",
+        "OAuth token has expired. Please obtain a new token or refresh your existing token.",
+        r#"{"type":"error","error":{"type":"authentication_error","message":"invalid x-api-key"}}"#,
+        "Your access token could not be refreshed because your refresh token was already used.",
+        "unexpected status 401 Unauthorized",
+        "request failed: HTTP 401",
+        "Not logged in",
+        "Your credit balance is too low to access the Anthropic API.",
+    ] {
+        assert_eq!(classify(text), AuthExpired, "{text}");
+    }
+    // Lo demás, incluidos números que solo se parecen a un código HTTP.
+    for text in [
+        "error[E0308]: mismatched types at src/main.rs:401:5",
+        "test result: FAILED. 4290 passed; 1 failed",
+        "context window limit: prompt is too long",
+        "el agente terminó sin resultado",
+        "",
+    ] {
+        assert_eq!(classify(text), Other, "{text}");
+    }
+}
+
+#[test]
+fn una_tarea_recuerda_si_su_cuenta_la_eligio_el_ruteo() {
+    let conn = crate::database::test_db();
+    let run = run_en(&conn);
+    let crear = |auto: bool| {
+        store::create_task(
+            &conn,
+            &NewTask { run_id: &run, title: "t", prompt: "p", agent_id: "codex", cwd: "/tmp/proy", auto_account: auto, ..Default::default() },
+        )
+        .unwrap()
+    };
+    assert!(crear(true).auto_account);
+    let fijada = crear(false);
+    assert!(!fijada.auto_account);
+
+    // Pasarla a otra cuenta a mano la deja fijada en esa; el ruteo automático, automática.
+    conn.execute("UPDATE tasks SET status = 'failed' WHERE id = ?1", [&fijada.id]).unwrap();
+    assert!(store::reroute_task(&conn, &fijada.id, "codex", None, Some("otra"), "manual", None, "nota", true).unwrap());
+    assert!(store::task_by_id(&conn, &fijada.id).unwrap().unwrap().auto_account);
+}
+
+#[test]
+fn una_tarea_despachada_puede_fallar_sin_correr_y_su_error_se_etiqueta() {
+    let conn = crate::database::test_db();
+    let run = run_en(&conn);
+    let id = tarea(&conn, &run);
+    assert!(store::mark_dispatched(&conn, &id).is_ok());
+    conn.execute("UPDATE tasks SET status = 'ready' WHERE id = ?1", [&id]).unwrap();
+    assert!(store::fail_dispatched(&conn, &id, "[límite de uso] sin cupo").unwrap());
+    let t = store::task_by_id(&conn, &id).unwrap().unwrap();
+    assert_eq!(t.status, status::FAILED);
+
+    store::tag_error(&conn, &id, "[cuenta fijada]").unwrap();
+    store::tag_error(&conn, &id, "[cuenta fijada]").unwrap(); // no se repite
+    let error = store::task_by_id(&conn, &id).unwrap().unwrap().error.unwrap();
+    assert_eq!(error, "[cuenta fijada] [límite de uso] sin cupo");
+}
+
+#[test]
+fn una_credencial_rechazada_saca_a_la_cuenta_del_ruteo_por_un_tiempo() {
+    use super::failure::{auth_failed_recently, clear_auth_failure, record_auth_failure, AUTH_FAILURE_TTL_SECS};
+    let db: crate::database::DbConnection = std::sync::Arc::new(std::sync::Mutex::new(crate::database::test_db()));
+    record_auth_failure(&db, "cuenta-a", 1000);
+    {
+        let conn = db.lock().unwrap();
+        assert!(auth_failed_recently(&conn, "cuenta-a", 1000 + 60));
+        assert!(!auth_failed_recently(&conn, "cuenta-b", 1000 + 60));
+        // Sin techo una cuenta relogueada por fuera quedaría afuera para siempre.
+        assert!(!auth_failed_recently(&conn, "cuenta-a", 1000 + AUTH_FAILURE_TTL_SECS));
+    }
+    // Verificarla y que ande la devuelve al ruteo.
+    clear_auth_failure(&db, "cuenta-a");
+    assert!(!auth_failed_recently(&db.lock().unwrap(), "cuenta-a", 1000 + 60));
 }

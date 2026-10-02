@@ -622,6 +622,10 @@ pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
                         // Codex no deja el mail en un archivo legible: el de la última
                         // verificación (ver `accounts::refresh_codex_account`).
                         .or_else(|| crate::accounts::load_identity(&conn, &key).and_then(|i| i.email));
+                    // Una credencial que una tarea vio rechazada hace poco cuenta como sin
+                    // sesión: el ruteo la saltea hasta que se la verifique de nuevo.
+                    let logged_in = account.logged_in
+                        && !super::failure::auth_failed_recently(&conn, &key, crate::util::now_ts());
                     let catalog = probed
                         .catalogs
                         .get(&(def.id.to_string(), account_id.clone()))
@@ -637,7 +641,7 @@ pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
                         key,
                         name: account.name.clone(),
                         label,
-                        logged_in: account.logged_in,
+                        logged_in,
                         models: catalog.models,
                         model_discovery: catalog.state,
                     });

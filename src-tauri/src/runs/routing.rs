@@ -155,6 +155,9 @@ pub struct Assignment {
     /// Lo que se descartó y por qué, en el orden en que se probó. Vacío si salió a la
     /// primera.
     pub notes: Vec<String>,
+    /// La cuenta la eligió el ruteo (`AccountChoice::Auto`): la tarea se puede pasar a otra
+    /// con cupo. Con una cuenta fijada, nunca (ver `runs::failure`).
+    pub auto_account: bool,
 }
 
 /// Asigna una tarea. `Err` trae el motivo en palabras: es lo que se le muestra a quien la
@@ -195,6 +198,7 @@ fn manual(roster: &Roster, req: &RouteRequest, now: i64) -> Result<Assignment, S
         account_id,
         routed_by: RoutedBy::Manual,
         notes,
+        auto_account: matches!(req.account, AccountChoice::Auto),
     })
 }
 
@@ -248,6 +252,7 @@ fn by_tier(
                         RoutedBy::Fallback
                     },
                     notes,
+                    auto_account: matches!(req.account, AccountChoice::Auto),
                 });
             }
             Err(reason) => notes.push(format!("{what}: {reason}")),

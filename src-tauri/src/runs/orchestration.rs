@@ -579,6 +579,7 @@ pub(crate) fn plan_tasks(
                     prompt: &t.prompt,
                     agent_id: &assignment.agent_id,
                     account_id: assignment.account_id.as_deref(),
+                    auto_account: assignment.auto_account,
                     model: assignment.model.as_deref(),
                     reasoning_effort: squad_members
                         .and_then(|members| {

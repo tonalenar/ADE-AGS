@@ -198,6 +198,20 @@ pub fn tick(app: &AppHandle, run_id: &str) {
     // Afuera del lock a propósito: pasar una tarea a otro agente la para y vuelve a mirar
     // el run, y las dos cosas entran por acá.
     let mut moved = false;
+    // Una cuenta fijada (por el usuario, el Squad o la misión) no se cambia sola: la tarea se
+    // saltea diciendo por qué, y quien la fijó decide si esperar o cambiarla.
+    let (out_of_quota, pinned): (Vec<Task>, Vec<Task>) = out_of_quota.into_iter().partition(|t| t.auto_account);
+    for task in pinned {
+        let reason = format!(
+            "[límite de uso] la cuenta fijada ({}) está sin cupo; no se cambia sola: esperá a que se reinicie o pasala a otra cuenta",
+            task.account_id.as_deref().unwrap_or("la del sistema")
+        );
+        if let Ok(conn) = db.lock() {
+            let _ = store::fail_dispatched(&conn, &task.id, &reason);
+        }
+        super::supervisor::notify_changed(app, &task.id);
+        moved = true;
+    }
     for task in out_of_quota {
         match hand_to_another(app, &db, &task) {
             Ok(()) => moved = true,
@@ -226,6 +240,16 @@ fn out_of_quota(db: &DbConnection, task: &Task) -> bool {
 /// cupo, así que alcanza con volver a rutearla; si no hay ninguna disponible, falla y se
 /// la deja intentar igual.
 fn hand_to_another(app: &AppHandle, db: &DbConnection, task: &Task) -> Result<(), String> {
+    let reason = format!(
+        "la cuenta con la que iba a correr ({}) se quedó sin ventana de 5 h",
+        task.account_id.as_deref().unwrap_or("la del sistema")
+    );
+    reroute_elsewhere(app, db, task, &reason)
+}
+
+/// Vuelve a rutear la tarea con cuenta automática. El ruteo ya descarta las cuentas sin cupo
+/// o con la credencial caída, así que lo que sale es otra; si sale la misma, no hay a dónde.
+fn reroute_elsewhere(app: &AppHandle, db: &DbConnection, task: &Task, reason: &str) -> Result<(), String> {
     let request = super::routing::RouteRequest {
         agent_id: (task.complexity.is_none()).then(|| task.agent_id.clone()),
         model: task.complexity.is_none().then(|| task.model.clone()).flatten(),
@@ -239,25 +263,89 @@ fn hand_to_another(app: &AppHandle, db: &DbConnection, task: &Task) -> Result<()
     {
         return Err("no hay otra cuenta con cupo".into());
     }
-    let reason = format!(
-        "la cuenta con la que iba a correr ({}) se quedó sin ventana de 5 h",
-        task.account_id.as_deref().unwrap_or("la del sistema")
-    );
-    super::reroute_to(app, &task.id, assignment, &reason).map(|_| ())
+    super::reroute_to(app, &task.id, assignment, reason).map(|_| ())
 }
 
 /// Una tarea de un run terminó: reintentarla si corresponde, y ver qué más arranca.
+///
+/// Un fallo de cuenta (límite de uso, credencial) no se reintenta con la misma cuenta: se
+/// anota la cuenta como no disponible y, si la eligió el ruteo, la tarea pasa a otra. Ver
+/// `runs::failure`.
 pub fn on_task_finished(app: &AppHandle, task_id: &str) {
+    use super::failure::FailureKind;
     let Some(db) = db_of(app) else { return };
-    let run_id = {
+    let (run_id, account_failure) = {
         let Ok(conn) = db.lock() else { return };
         let Ok(Some(task)) = store::task_by_id(&conn, task_id) else { return };
-        if should_retry(&task) {
-            let error = task.error.clone().unwrap_or_default();
-            let _ = store::requeue_for_retry(&conn, task_id, &error);
-        }
-        task.run_id
+        let kind = (task.status == status::FAILED)
+            .then(|| super::failure::classify(task.error.as_deref().unwrap_or("")));
+        let account_failure = match kind {
+            Some(kind @ (FailureKind::RateLimited | FailureKind::AuthExpired)) => {
+                let tag = if kind == FailureKind::RateLimited { "[límite de uso]" } else { "[credencial]" };
+                let _ = store::tag_error(&conn, task_id, tag);
+                Some((task.clone(), kind))
+            }
+            _ => {
+                if should_retry(&task) {
+                    let error = task.error.clone().unwrap_or_default();
+                    let _ = store::requeue_for_retry(&conn, task_id, &error);
+                }
+                None
+            }
+        };
+        (task.run_id, account_failure)
     };
+    if let Some((task, kind)) = account_failure {
+        on_account_failure(app, &db, &task, kind);
+    }
     super::supervisor::notify_changed(app, task_id);
     tick(app, &run_id);
+}
+
+/// La cuenta de una tarea falló: queda fuera del ruteo (hasta que se reinicie su ventana o
+/// se la verifique) y, si la eligió el ruteo, la tarea pasa a otra con el trabajo hecho.
+fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: super::failure::FailureKind) {
+    use super::failure::FailureKind;
+    let key = super::quota::account_key(&task.agent_id, task.account_id.as_deref());
+    let now = crate::util::now_ts();
+    let account = task.account_id.as_deref().unwrap_or("la del sistema");
+    let reason = match kind {
+        FailureKind::RateLimited => {
+            mark_exhausted(db, &key, now);
+            format!("la cuenta {account} llegó a su límite de uso")
+        }
+        _ => {
+            super::failure::record_auth_failure(db, &key, now);
+            format!("la credencial de la cuenta {account} fue rechazada (hay que volver a loguearla)")
+        }
+    };
+    let pinned = !task.auto_account;
+    let lead = task.role.as_deref() == Some(role::LEAD);
+    if pinned || lead {
+        // Una cuenta fijada no se cambia sola, y el lead no se pasa a otro agente: falla
+        // diciendo por qué, y decide quien la fijó.
+        if let Ok(conn) = db.lock() {
+            let why = if lead { "[lead: no se reasigna solo]" } else { "[cuenta fijada: no se cambia sola]" };
+            let _ = store::tag_error(&conn, &task.id, why);
+        }
+        return;
+    }
+    if let Err(e) = reroute_elsewhere(app, db, task, &reason) {
+        eprintln!("[runs] '{}' no pudo pasar a otra cuenta: {e}", task.title);
+        if let Ok(conn) = db.lock() {
+            let _ = store::tag_error(&conn, &task.id, "[sin otra cuenta disponible]");
+        }
+    }
+}
+
+/// Anota la cuenta como sin cupo, sin pisar lo que ya se sabía de sus ventanas. El rechazo
+/// sin fecha vence solo a las 5 h (ver `Quota::exhausted_at`).
+fn mark_exhausted(db: &DbConnection, key: &str, now: i64) {
+    let mut quota = db.lock().ok().and_then(|conn| super::quota::load(&conn, key)).unwrap_or_default();
+    if quota.exhausted_at(now) {
+        return;
+    }
+    quota.rejected = true;
+    quota.rejected_until = None;
+    super::quota::record(db, key, quota, now);
 }

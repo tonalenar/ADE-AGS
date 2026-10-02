@@ -61,6 +61,7 @@ fn asignacion(agent: &str) -> Assignment {
         account_id: None,
         routed_by: RoutedBy::Policy,
         notes: vec![],
+        auto_account: true,
     }
 }
 

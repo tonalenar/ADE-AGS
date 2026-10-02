@@ -802,6 +802,12 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              ALTER TABLE agent_accounts ADD COLUMN key_hint TEXT;",
         )?;
     }
+    // Si la cuenta de una tarea la eligió el ruteo (se puede cambiar por otra con cupo) o la
+    // fijó alguien (nunca se cambia sola). Las tareas viejas quedan en 1: es lo que hacía el
+    // scheduler con todas hasta ahora.
+    if table_exists(conn, "tasks") && !has_column(conn, "tasks", "auto_account") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN auto_account INTEGER NOT NULL DEFAULT 1", [])?;
+    }
     // Índices de las consultas que corren en cada evento de la flota y en cada guardado:
     // la lista de runs de un workspace (`ORDER BY created_at DESC`), las tasks de un run en
     // orden, y buscar el historial de una sesión por su id. Sin ellos son recorridos enteros

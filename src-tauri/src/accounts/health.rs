@@ -196,6 +196,9 @@ fn enrich(
     if health.status != HealthStatus::Ok {
         return health;
     }
+    // La cuenta funciona: si una tarea la había visto con la credencial rechazada (y por eso
+    // el ruteo la salteaba), vuelve a estar disponible.
+    crate::runs::failure::clear_auth_failure(db, account_key);
     match agent_id {
         "codex" => {
             if let Some(account) = refresh_codex_account(db, account_key, env) {

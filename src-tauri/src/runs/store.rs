@@ -22,7 +22,8 @@ const TASK_COLUMNS: &str = "id, run_id, title, prompt, agent_id, account_id, mod
                             tokens_in, tokens_out, events_path, started_at, ended_at, created_at, \
                             worktree_path, branch, worktree_removed, complexity, routed_by, \
                             route_note, role, plan_key, parent_id, depth, isolate, result_schema, \
-                            last_error, handoff, functional_role, reasoning_effort, structured_handoff";
+                            last_error, handoff, functional_role, reasoning_effort, structured_handoff, \
+                            auto_account";
 
 fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
     Ok(Run {
@@ -101,6 +102,7 @@ fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
                 })
             })
             .transpose()?,
+        auto_account: row.get::<_, i64>(38)? != 0,
         // Lo llena `with_deps`: vive en otra tabla.
         depends_on: Vec::new(),
     })
@@ -276,6 +278,8 @@ pub struct NewTask<'a> {
     /// Arranca esperando (`pending`) en vez de lista para lanzar. Es lo que crea un plan: la
     /// tarea existe, pero la lanza el scheduler cuando le toca.
     pub queued: bool,
+    /// La cuenta la eligió el ruteo: se puede cambiar por otra con cupo (ver `Task::auto_account`).
+    pub auto_account: bool,
 }
 
 pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
@@ -283,8 +287,9 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
     conn.execute(
         "INSERT INTO tasks (id, run_id, title, prompt, agent_id, account_id, model, cwd,
                             budget_usd, status, created_at, complexity, routed_by, route_note,
-                            role, plan_key, parent_id, depth, isolate, result_schema, functional_role, reasoning_effort)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22)",
+                            role, plan_key, parent_id, depth, isolate, result_schema, functional_role, reasoning_effort,
+                            auto_account)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
         rusqlite::params![
             id,
             new.run_id,
@@ -308,6 +313,7 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
             new.result_schema,
             new.functional_role,
             new.reasoning_effort,
+            new.auto_account as i64,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -540,6 +546,29 @@ pub fn mark_dispatched(conn: &Connection, task_id: &str) -> Result<bool, String>
     Ok(n > 0)
 }
 
+/// Una tarea ya despachada que no se va a lanzar: falla con el motivo, sin haber corrido. Queda
+/// como cualquier falla, así que se puede pasar a otra cuenta o agente (`reroute_task`).
+pub fn fail_dispatched(conn: &Connection, task_id: &str, reason: &str) -> Result<bool, String> {
+    let n = conn
+        .execute(
+            "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE id = ?4 AND status = ?5",
+            rusqlite::params![status::FAILED, reason, now_ts(), task_id, status::READY],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(n > 0)
+}
+
+/// Le antepone al error de una tarea terminada de qué tipo fue, para que quien la mira (la
+/// consola, el lead) sepa qué hacer sin leer el log de la CLI.
+pub fn tag_error(conn: &Connection, task_id: &str, tag: &str) -> Result<(), String> {
+    conn.execute(
+        "UPDATE tasks SET error = ?1 || ' ' || COALESCE(error, '') WHERE id = ?2 AND COALESCE(error, '') NOT LIKE ?1 || '%'",
+        rusqlite::params![tag, task_id],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(())
+}
+
 /// No va a correr, y por qué. Solo sobre tareas que esperaban.
 pub fn skip_task(conn: &Connection, task_id: &str, reason: &str) -> Result<bool, String> {
     let n = conn
@@ -580,17 +609,18 @@ pub fn reroute_task(
     routed_by: &str,
     route_note: Option<&str>,
     handoff: &str,
+    auto_account: bool,
 ) -> Result<bool, String> {
     let n = conn
         .execute(
             "UPDATE tasks SET agent_id = ?1, model = ?2, account_id = ?3, routed_by = ?4, route_note = ?5,
                               handoff = ?6, structured_handoff = NULL, status = ?7, attempt = 0, session_id = NULL,
                               result = NULL, error = NULL, last_error = NULL,
-                              started_at = NULL, ended_at = NULL
+                              started_at = NULL, ended_at = NULL, auto_account = ?11
              WHERE id = ?8 AND status NOT IN (?9, ?10)",
             rusqlite::params![
                 agent_id, model, account_id, routed_by, route_note, handoff, status::PENDING, task_id,
-                status::RUNNING, status::READY
+                status::RUNNING, status::READY, auto_account as i64
             ],
         )
         .map_err(|e| e.to_string())?;

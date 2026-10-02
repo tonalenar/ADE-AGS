@@ -15,6 +15,7 @@ mod agents;
 mod antigravity;
 mod broker;
 mod context;
+pub(crate) mod failure;
 pub(crate) mod handoff;
 pub(crate) mod model_discovery;
 pub mod orchestration;
@@ -118,6 +119,7 @@ pub async fn run_start_task(
                 prompt: &prompt,
                 agent_id: &assignment.agent_id,
                 account_id: assignment.account_id.as_deref(),
+                auto_account: assignment.auto_account,
                 model: assignment.model.as_deref(),
                 reasoning_effort: None,
                 cwd: &cwd,
@@ -307,6 +309,7 @@ if let Some(squad) = spec.squad {
                 prompt: &prompt,
                 agent_id: &assignment.agent_id,
                 account_id: assignment.account_id.as_deref(),
+                auto_account: assignment.auto_account,
                 model: assignment.model.as_deref(),
                 reasoning_effort: spec.reasoning_effort,
                 cwd: spec.cwd,
@@ -907,6 +910,7 @@ pub fn reroute_to(
                 .then(|| assignment.notes.join("; "))
                 .as_deref(),
             &note,
+            assignment.auto_account,
         )?;
         if !moved {
             return Err(
