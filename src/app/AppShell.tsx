@@ -8,6 +8,7 @@ import { initTabsPersistence } from "@/features/tabs/persistence";
 import { SideHead } from "@/app/SideHead";
 import { ActivityRail, RAIL_COMPACT_W, RAIL_EXPANDED_W } from "@/app/ActivityRail";
 import { CommandPalette } from "@/features/palette/CommandPalette";
+import { initCanvasSync } from "@/features/canvas/store";
 import { StatusBar } from "@/app/StatusBar";
 import { TabBar } from "@/features/tabs/TabBar";
 import { WorkspacesPanel } from "@/features/workspaces/WorkspacesPanel";
@@ -145,6 +146,8 @@ export function AppShell() {
     initViewTabsPersistence(myLabel);
     // Después de las vistas: el árbol guardado se contrasta contra las tabs que existen.
     initLayoutSync(myLabel);
+    // El canvas de agentes: posiciones y conexiones, por carpeta (ver features/canvas).
+    initCanvasSync(myLabel);
     loadWindowState(myLabel)
       .then((restored) => {
         if (restored) {

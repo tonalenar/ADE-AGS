@@ -45,6 +45,12 @@ TABS
                                               así se sigue la conversación con
                                               una tab que ya está abierta
 
+AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
+  peers                                       Quién está conectado con vos
+  peer ask <nombre> \"...\" [--timeout 600]    Le pregunta y ESPERA su respuesta
+  peer tell <nombre> \"...\"                    Le avisa algo, sin esperar
+  peer check <nombre> [--lines 60]            Lo que se ve ahora en su terminal
+
 OBSERVAR TABS (modo push — evita el polling)
   watch add <id> [--idle 20]                  Empieza a observar una tab
   watch remove <id>                           Deja de observarla
@@ -194,6 +200,10 @@ fn main() -> ExitCode {
         }
     };
 
+    // Quién pregunta: la app le pone `ADE_TAB_ID` a cada terminal. Sin eso, la regla de
+    // "solo a los conectados" no tendría contra qué comparar.
+    let parsed = with_caller(&command, parsed);
+
     match send(&command, parsed) {
         Ok(response) => {
             let body = if response.ok {
@@ -231,6 +241,17 @@ impl CliError {
     }
 }
 
+/// Agrega `from` a los comandos `peer.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
+fn with_caller(command: &str, mut parsed: Value) -> Value {
+    if !command.starts_with("peer.") || parsed.get("from").is_some() {
+        return parsed;
+    }
+    if let (Ok(tab), Some(map)) = (std::env::var("ADE_TAB_ID"), parsed.as_object_mut()) {
+        map.insert("from".into(), Value::String(tab));
+    }
+    parsed
+}
+
 /// Grupos que se escriben solos porque tienen una sola acción útil.
 fn shortcut(word: &str) -> Option<&'static str> {
     match word {
@@ -238,6 +259,7 @@ fn shortcut(word: &str) -> Option<&'static str> {
         "accounts" => Some("account.list"),
         "prelaunch" => Some("prelaunch.list"),
         "skills" => Some("skill.list"),
+        "peers" => Some("peer.list"),
         _ => None,
     }
 }
@@ -260,6 +282,9 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "tab.output" | "tab.close" | "watch.add" | "watch.remove" => &["tab"],
         "tab.create" => &["cwd"],
         "workspace.open" => &["workspace"],
+        // `ccode peer ask Revisor "..."`: el nombre del agente y después el mensaje.
+        "peer.ask" | "peer.tell" => &["to", "text"],
+        "peer.check" => &["to"],
         _ => &[],
     }
 }
@@ -429,6 +454,13 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             let requested = args.pointer("/args/timeout_s").and_then(Value::as_u64).unwrap_or(300).clamp(10, 1800);
             Duration::from_secs(requested + 30)
         }
+        // `peer ask` espera el turno entero del otro agente; antes de escribirle espera hasta
+        // 60s a que se calle (no se interrumpe a quien está trabajando).
+        "peer.ask" => {
+            let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(600).clamp(10, 3600);
+            Duration::from_secs(requested + 90)
+        }
+        "peer.tell" => Duration::from_secs(90),
         // Validar un plan puede sondear el roster (lanzar `opencode models`) y crear worktrees.
         "run.plan" | "run.addTask" | "run.roster" => Duration::from_secs(120),
         "run.approve" => {

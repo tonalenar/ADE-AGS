@@ -1653,5 +1653,18 @@
   "home.card.accounts": "Contas",
   "home.card.accountsEmpty": "Nenhuma conta detectada.",
   "home.card.loggedIn": "sessão iniciada",
-  "home.card.loggedOut": "sem sessão"
+  "home.card.loggedOut": "sem sessão",
+  "canvas.mode.tabs": "Abas",
+  "canvas.mode.canvas": "Canvas",
+  "canvas.zoomIn": "Aproximar",
+  "canvas.zoomOut": "Afastar",
+  "canvas.actual": "100%",
+  "canvas.liveHint": "Volta a 100% no agente ativo: os terminais só ficam interativos em 100%.",
+  "canvas.fit": "Ver todos",
+  "canvas.focusHint": "Arraste para mover · duplo clique para abrir em 100%",
+  "canvas.links_one": "{{count}} conexão",
+  "canvas.links_other": "{{count}} conexões",
+  "canvas.disconnect": "Remover conexão",
+  "palette.cmd.canvas": "Mudar para o canvas",
+  "palette.cmd.tabsMode": "Mudar para abas"
 }

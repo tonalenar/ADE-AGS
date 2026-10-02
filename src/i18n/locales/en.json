@@ -1653,5 +1653,18 @@
   "home.card.accounts": "Accounts",
   "home.card.accountsEmpty": "No accounts detected.",
   "home.card.loggedIn": "signed in",
-  "home.card.loggedOut": "signed out"
+  "home.card.loggedOut": "signed out",
+  "canvas.mode.tabs": "Tabs",
+  "canvas.mode.canvas": "Canvas",
+  "canvas.zoomIn": "Zoom in",
+  "canvas.zoomOut": "Zoom out",
+  "canvas.actual": "100%",
+  "canvas.liveHint": "Back to 100% on the active agent: terminals are only interactive at 100%.",
+  "canvas.fit": "Fit all",
+  "canvas.focusHint": "Drag to move · double-click to open at 100%",
+  "canvas.links_one": "{{count}} connection",
+  "canvas.links_other": "{{count}} connections",
+  "canvas.disconnect": "Remove connection",
+  "palette.cmd.canvas": "Switch to canvas",
+  "palette.cmd.tabsMode": "Switch to tabs"
 }

@@ -430,7 +430,10 @@ export function Terminal({
               : undefined,
             browser.env,
             accountEnv,
-            env
+            env,
+            // Quién es esta terminal. `ccode peer ...` lo reenvía como `from`, y es contra
+            // eso que el backend compara las conexiones del canvas.
+            tabId ? { ADE_TAB_ID: tabId } : undefined
           ),
           prelaunch: resolvedPrelaunch,
         });

@@ -15,6 +15,7 @@ use tauri::AppHandle;
 use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
 use super::ask::user_ask;
+use super::peers::{peer_ask, peer_check, peer_list, peer_tell};
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
 use super::shared::bridge_call;
@@ -32,6 +33,11 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "tab.send" => tab_send(app, args),
         "tab.create" => tab_create(app, args),
         "tab.close" => bridge_call(app, "tab.close", args),
+        // Conversar con los agentes conectados en el canvas (ver `peers`).
+        "peer.list" => peer_list(app, args),
+        "peer.ask" => peer_ask(app, args),
+        "peer.tell" => peer_tell(app, args),
+        "peer.check" => peer_check(app, args),
         "agent.list" => agent_list(app),
         "account.list" => account_list(app),
         "prelaunch.list" => prelaunch_list(app),

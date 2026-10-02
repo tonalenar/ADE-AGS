@@ -15,6 +15,8 @@ import { useTabsStore } from "@/features/tabs/store";
 import { openNewAgentWizard } from "@/features/tabs/tabActions";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
+import { CanvasView } from "@/features/canvas/CanvasView";
+import { useWorkMode } from "@/features/canvas/store";
 
 /**
  * El área de tabs, dividida en grupos como los editores de VS Code.
@@ -34,6 +36,7 @@ import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
  */
 export function EditorArea() {
   const layout = useWorkspaceLayout();
+  const canvas = useWorkMode() === "canvas";
   const containerRef = useRef<HTMLDivElement>(null);
   const groups = layout ? allGroups(layout.root) : [];
   const groupIds = groups.map((g) => g.id).join("|");
@@ -72,18 +75,22 @@ export function EditorArea() {
 
   return (
     <div ref={containerRef} data-editor-area className="absolute inset-0">
+      {/* El canvas va ABAJO: TerminalPanel ubica cada terminal viva encima de su nodo. */}
+      {canvas && <CanvasView />}
       {/* TerminalPanel siempre montado para preservar PTYs */}
       <TerminalPanel />
       {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. */}
       <ViewTabsHost />
-      <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
-        {layout ? (
-          <NodeView node={layout.root} focused={layout.focused} divided={groups.length > 1} />
-        ) : (
-          <div data-slot="" className="h-full" />
-        )}
-      </div>
-      <TabDragOverlay />
+      {!canvas && (
+        <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
+          {layout ? (
+            <NodeView node={layout.root} focused={layout.focused} divided={groups.length > 1} />
+          ) : (
+            <div data-slot="" className="h-full" />
+          )}
+        </div>
+      )}
+      {!canvas && <TabDragOverlay />}
     </div>
   );
 }

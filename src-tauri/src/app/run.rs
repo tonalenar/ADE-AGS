@@ -33,6 +33,9 @@ pub fn run() {
             crate::terminal::pty_write,
             crate::terminal::pty_resize,
             crate::terminal::pty_kill,
+            // Canvas de agentes: posiciones y conexiones
+            crate::canvas::canvas_load,
+            crate::canvas::canvas_save,
             // Persistencia SQLite — workspaces (layouts guardados de ventanas/tabs)
             crate::database::db_list_workspaces,
             crate::database::db_save_workspace,

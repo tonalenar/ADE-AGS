@@ -256,7 +256,7 @@ fn match_one_skill(installed: &[InstalledSkill], wanted: &str) -> Result<String,
 /// nada sí cuenta como quieta.
 ///
 /// Devuelve `false` si se agotó el tiempo (o si el proceso murió).
-fn wait_until_quiet(
+pub(super) fn wait_until_quiet(
     pty_id: u32,
     quiet: std::time::Duration,
     max: std::time::Duration,
@@ -312,7 +312,7 @@ fn wait_until_ready(pty_id: u32) -> bool {
 /// Separarlo reproduce lo que hace una persona: escribir, ver el texto aparecer, y recién
 /// entonces apretar Enter. El silencio entre medio es lo que garantiza que llegue en una
 /// lectura distinta, incluso si la TUI tarda en repintar.
-fn submit_prompt(pty_id: u32, text: &str) -> Result<(), String> {
+pub(super) fn submit_prompt(pty_id: u32, text: &str) -> Result<(), String> {
     const ECHO_QUIET: std::time::Duration = std::time::Duration::from_millis(250);
     const ECHO_MAX: std::time::Duration = std::time::Duration::from_secs(5);
 

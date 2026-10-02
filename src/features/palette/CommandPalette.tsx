@@ -14,6 +14,7 @@ import { useRunsStore } from "@/features/runs/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { useWorkspacesStore } from "@/features/workspaces/store";
 import { useFocusInside } from "@/shared/ui/useFocusInside";
+import { boardKey, setWorkMode, useCanvasStore } from "@/features/canvas/store";
 
 import { rank, type Searchable } from "./match";
 
@@ -64,6 +65,9 @@ function PaletteDialog() {
   const focusIfOpen = useWorkspacesStore((s) => s.focusIfOpen);
   const openWorkspace = useWorkspacesStore((s) => s.openWorkspace);
   const approvals = useRunsStore((s) => s.approvals.length);
+  const activeCwd = tabs.find((tab) => tab.id === activeTabId)?.cwd ?? null;
+  const canvasKey = activeCwd ? boardKey(activeCwd) : null;
+  const canvasOn = useCanvasStore((s) => (canvasKey ? s.modes[canvasKey] === "canvas" : false));
 
   const [query, setQuery] = useState("");
   const [cursor, setCursor] = useState(0);
@@ -137,6 +141,17 @@ function PaletteDialog() {
       });
     }
 
+    if (canvasKey) {
+      list.push({
+        id: "act:canvas",
+        group: "actions",
+        title: canvasOn ? t("palette.cmd.tabsMode") : t("palette.cmd.canvas"),
+        keywords: ["canvas", "abas", "tabs", "nodes", "conectar", "connect"],
+        icon: <StackIcon className={icon} />,
+        run: () => { setWorkMode(canvasKey, canvasOn ? "tabs" : "canvas"); navigate("/workspace"); },
+      });
+    }
+
     list.push(
       {
         id: "act:theme",
@@ -191,7 +206,7 @@ function PaletteDialog() {
 
     return list;
     // `ui` muda de identidade a cada render do store; os campos usados estão listados.
-  }, [tabs, approvals, workspaces, theme, ui.workspacesCollapsed, ui.explorerCollapsed, ui.railExpanded, t]);
+  }, [tabs, approvals, workspaces, theme, canvasKey, canvasOn, ui.workspacesCollapsed, ui.explorerCollapsed, ui.railExpanded, t]);
 
   // Sem busca, os grupos na ordem fixa. Com busca, uma lista só por relevância — os
   // grupos atrapalhariam: o melhor resultado tem que ser o primeiro, venha de onde vier.

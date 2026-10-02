@@ -10,6 +10,7 @@ import type { ViewOwner } from "@/features/tabs/viewTabs";
 import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
 import { respondToCli } from "./ipc";
+import { screenOf } from "@/features/terminal/terminalRegistry";
 
 /**
  * Lado frontend del puente de la CLI (ver `ipc/bridge.rs`).
@@ -198,6 +199,17 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
   return { text: answer };
 }
 
+/** El texto dibujado de una terminal, para `ccode peer ask/check` (ver `screenOf`). */
+function handleScreen(args: Record<string, unknown>) {
+  const tabId = str(args, "tabId");
+  if (!tabId) throw new Error("Falta tabId");
+  const from = typeof args.from === "number" ? args.from : null;
+  const max = typeof args.max === "number" ? args.max : 200;
+  const screen = screenOf(tabId, from, max);
+  if (!screen) throw new Error(`La tab ${tabId} no tiene una terminal abierta en esta ventana`);
+  return screen;
+}
+
 async function handle(command: string, args: Record<string, unknown>): Promise<unknown> {
   switch (command) {
     case "tab.create": return handleCreateTab(args);
@@ -205,6 +217,7 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "tab.ptyId": return handlePtyId(args);
     case "browser.run": return handleBrowser(args);
     case "user.ask": return handleAsk(args);
+    case "tab.screen": return handleScreen(args);
     default: throw new Error(`El frontend no sabe atender '${command}'`);
   }
 }
