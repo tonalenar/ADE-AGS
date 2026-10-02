@@ -488,11 +488,20 @@ function body with `return`; `await` works. Use it for what the other tools can'
     },
 ];
 
-/// Los nombres completos de las tools del navegador, como los ve el agente
-/// (`mcp__controlcode__browser_click`). Es lo que va en `--allowedTools`.
+/// Las del navegador que NO se aprueban solas, aunque el resto sí.
+///
+/// Las dos sacan datos de la máquina hacia la página, que puede ser cualquier sitio (una
+/// página con prompt injection pide justo esto): `browser_upload` lee un archivo del disco
+/// y `browser_eval` corre código arbitrario con acceso a todo lo que la página ve. El resto
+/// del navegador mira y toca la página; estas dos las aprueba la persona, cada vez.
+const BROWSER_NEEDS_APPROVAL: &[&str] = &["browser_upload", "browser_eval"];
+
+/// Los nombres completos de las tools del navegador que se aprueban solas, como los ve el
+/// agente (`mcp__controlcode__browser_click`). Es lo que va en `--allowedTools`.
 pub fn browser_tool_names() -> Vec<String> {
     BROWSER_TOOLS
         .iter()
+        .filter(|t| !BROWSER_NEEDS_APPROVAL.contains(&t.name))
         .map(|t| format!("mcp__{SERVER_NAME}__{}", t.name))
         .collect()
 }
@@ -1165,7 +1174,8 @@ pub(crate) fn annotations(name: &str) -> Value {
 /// Lo que se aprueba solo en las TUIs que piden permiso por tool. Una sola regla para todas
 /// (Claude Code lo recibe en `--allowedTools`, OpenCode como `permission`):
 ///
-/// - el navegador entero: manejar la página del proyecto es para lo que está;
+/// - el navegador, menos subir archivos y correr código (ver [`BROWSER_NEEDS_APPROVAL`]):
+///   manejar la página del proyecto es para lo que está;
 /// - mirar un run y dejar un hecho: no gasta nada;
 /// - preguntarle algo al usuario: pedir permiso para preguntar sería interrumpirlo dos veces;
 /// - leer el git remoto (PRs, issues, repos, CI) y traer (`fetch`).
@@ -1173,7 +1183,7 @@ pub(crate) fn annotations(name: &str) -> Value {
 /// Lanzar o parar agentes y escribir en el host (subir, abrir, comentar) lo aprueba la
 /// persona, cada vez.
 pub fn auto_approved(name: &str) -> bool {
-    BROWSER_TOOLS.iter().any(|t| t.name == name)
+    (BROWSER_TOOLS.iter().any(|t| t.name == name) && !BROWSER_NEEDS_APPROVAL.contains(&name))
         || ORCHESTRATION_TOOLS.iter().any(|t| {
             t.name == name
                 && matches!(

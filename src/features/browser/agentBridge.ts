@@ -350,6 +350,8 @@ function mocksText(mocks: Mock[]): string {
 }
 
 async function execute(
+  /** La carpeta del proyecto: el límite de lo que el agente puede subir a la página. */
+  cwd: string,
   host: BrowserHost,
   request: BrowserRequest,
   opened: boolean,
@@ -568,7 +570,8 @@ async function execute(
     case "drag":
       return inPage(host, { op: "drag", from: required(request, "from"), to: required(request, "to") }, true);
     case "upload": {
-      const file = await previewReadUpload(required(request, "path"));
+      // Solo archivos del proyecto: la página que los recibe puede ser cualquiera.
+      const file = await previewReadUpload(required(request, "path"), cwd);
       return inPage(host, {
         op: "upload", target: required(request, "target"), name: file.name, mime: file.mime, data: file.data,
       }, true);
@@ -622,5 +625,5 @@ export async function runBrowserRequest(
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
     throw new Error("The browser for this project has no page loaded. Use browser_navigate with the project URL.");
   }
-  return execute(host, request, opened, owner);
+  return execute(cwd, host, request, opened, owner);
 }

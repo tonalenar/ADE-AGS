@@ -1173,3 +1173,45 @@ async fn la_pagina_llama_a_su_api_en_otro_origen_con_cors_y_cookies() {
     let public = fwd(&other.proxy_origin, &api("/public"), "same-origin").send().await.unwrap();
     assert_eq!(public.text().await.unwrap(), "public");
 }
+
+// ── browser_upload: solo archivos del proyecto ───────────────────
+
+use super::capture::upload_path_within;
+
+#[test]
+fn browser_upload_solo_lee_archivos_del_proyecto() {
+    let base = std::env::temp_dir().join(format!("cc-upload-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let project = base.join("proyecto");
+    std::fs::create_dir_all(project.join("fixtures")).unwrap();
+    std::fs::write(project.join("fixtures").join("foto.png"), b"png").unwrap();
+    std::fs::write(base.join("secreto.txt"), b"no").unwrap();
+    let root = project.to_string_lossy().to_string();
+
+    let inside = project.join("fixtures").join("foto.png");
+    assert!(upload_path_within(&inside.to_string_lossy(), &root).is_ok());
+
+    // Afuera, directo o subiendo con `..`.
+    let outside = base.join("secreto.txt");
+    assert!(upload_path_within(&outside.to_string_lossy(), &root).is_err());
+    let climbing = project.join("fixtures").join("..").join("..").join("secreto.txt");
+    assert!(upload_path_within(&climbing.to_string_lossy(), &root).is_err());
+
+    // Una carpeta hermana cuyo nombre empieza igual no es "adentro".
+    let sibling = base.join("proyecto-otro");
+    std::fs::create_dir_all(&sibling).unwrap();
+    std::fs::write(sibling.join("x"), b"x").unwrap();
+    assert!(upload_path_within(&sibling.join("x").to_string_lossy(), &root).is_err());
+
+    // Un symlink dentro del proyecto que apunta afuera tampoco (donde se puedan crear: en
+    // Windows hace falta el modo desarrollador).
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(&outside, project.join("link")).is_ok();
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_file(&outside, project.join("link")).is_ok();
+    if linked {
+        assert!(upload_path_within(&project.join("link").to_string_lossy(), &root).is_err());
+    }
+
+    std::fs::remove_dir_all(base).ok();
+}
