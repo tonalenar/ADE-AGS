@@ -29,6 +29,12 @@ export interface CanvasPortal {
   name: string;
   url: string;
   box: Box;
+  /** `android` = la pantalla de un emulador o teléfono (ver `DeviceNode`), no un navegador. */
+  kind?: "android";
+  /** El dispositivo de adb que muestra; sin él, el único que haya. */
+  serial?: string;
+  /** El emulador (AVD) que arranca. */
+  avd?: string;
 }
 
 export const PORTAL_PREFIX = "portal-";
@@ -278,6 +284,9 @@ export function removeNote(board: Board, id: string): Board {
 // ── Portales ────────────────────────────────────────────────────────
 
 export const PORTAL_SIZE = { w: 640, h: 440 };
+/** Un teléfono es alto y angosto. */
+export const PHONE_SIZE = { w: 320, h: 640 };
+export const PHONE_MIN = { w: 240, h: 420 };
 export const PORTAL_MIN = { w: 320, h: 240 };
 
 function allBoxes(board: Board): Box[] {
@@ -307,23 +316,26 @@ export function uniquePortalName(board: Board, wanted: string, except?: string):
 /** Agrega un portal; con `near`, a la derecha de ese nodo y conectado a él. */
 export function addPortal(
   board: Board,
-  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number } },
+  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android"; avd?: string },
 ): { board: Board; name: string } {
-  const name = uniquePortalName(board, portal.name ?? "Portal");
+  const android = portal.kind === "android";
+  const size = android ? PHONE_SIZE : PORTAL_SIZE;
+  const name = uniquePortalName(board, portal.name ?? (android ? "Android" : "Portal"));
   const others = allBoxes(board);
   const anchor = portal.near ? boxOf(board, portal.near) : undefined;
   let box: Box;
   if (anchor) {
-    box = { x: anchor.x + anchor.w + GAP, y: anchor.y, ...PORTAL_SIZE };
+    box = { x: anchor.x + anchor.w + GAP, y: anchor.y, ...size };
     for (let k = 1; k <= 50 && others.some((o) => overlaps(o, box)); k++) {
-      box = { ...box, y: anchor.y + k * (PORTAL_SIZE.h + GAP / 2) };
+      box = { ...box, y: anchor.y + k * (size.h + GAP / 2) };
     }
   } else if (portal.at) {
-    box = { x: Math.round(portal.at.x), y: Math.round(portal.at.y), ...PORTAL_SIZE };
+    box = { x: Math.round(portal.at.x), y: Math.round(portal.at.y), ...size };
   } else {
-    box = nextFreeBox(others, PORTAL_SIZE);
+    box = nextFreeBox(others, size);
   }
-  const next = { ...board, portals: { ...board.portals, [portal.id]: { name, url: portal.url ?? "", box } } };
+  const made: CanvasPortal = { name, url: portal.url ?? "", box, ...(android ? { kind: "android" as const, ...(portal.avd ? { avd: portal.avd } : {}) } : {}) };
+  const next = { ...board, portals: { ...board.portals, [portal.id]: made } };
   return { board: anchor && portal.near ? addEdge(next, portal.near, portal.id) : next, name };
 }
 

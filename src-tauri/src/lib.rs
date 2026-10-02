@@ -19,6 +19,7 @@ mod memory;
 mod missions;
 mod notifier;
 mod orchestrator;
+mod android;
 mod pet;
 mod prelaunch;
 mod preview;

@@ -276,7 +276,10 @@ async function handlePortal(args: Record<string, unknown>) {
     const near = str(args, "near");
     if (!cwd || !near) throw new Error("Faltan cwd o near");
     const key = boardKey(cwd);
-    const created = canvasActions.addPortal(key, { name: str(args, "name"), url: str(args, "url"), near });
+    const android = str(args, "kind") === "android";
+    const created = canvasActions.addPortal(key, {
+      name: str(args, "name"), url: str(args, "url"), near, ...(android ? { kind: "android" as const, avd: str(args, "avd") } : {}),
+    });
     await flushSave(key);
     return created;
   }
