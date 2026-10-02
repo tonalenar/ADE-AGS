@@ -192,6 +192,20 @@ export function Terminal({
       // escala en vez de invadir la celda siguiente. Sin esto, una barra de progreso o un
       // prompt con iconos corre todo lo que tiene a la derecha.
       rescaleOverlappingGlyphs: true,
+      // Los links OSC 8 (texto con un link escondido detrás) que imprime un agente. Sin
+      // esto xterm usa su manejador por defecto: un `confirm` y `window.open` dentro del
+      // webview de la app. Van por el mismo camino que los links de texto (ver
+      // `WebLinksAddon` más abajo): solo http(s), localhost a una tab, el resto al
+      // navegador del sistema. Cualquier otro esquema (`file:`, `javascript:`) no se abre.
+      linkHandler: {
+        allowNonHttpProtocols: false,
+        activate: (event, uri) => {
+          event.preventDefault();
+          if (!/^https?:\/\//i.test(uri)) return;
+          if (cwd && isLocalUrl(uri)) useViewTabsStore.getState().openBrowser(cwd, uri);
+          else openUrl(uri).catch(console.error);
+        },
+      },
       vtExtensions: {
         // Protocolo de teclado de Kitty: la TUI lo pide si lo quiere, y con él distingue
         // lo que la codificación vieja confunde — Shift+Enter de Enter, Ctrl+I de Tab,
