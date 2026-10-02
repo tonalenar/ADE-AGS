@@ -174,6 +174,7 @@ pub fn run() {
             crate::runs::run_roster,
             crate::runs::account_usage_summary,
             crate::runs::account_limits_get,
+            crate::runs::sandbox_status,
             crate::runs::account_limits_set,
             crate::runs::models_refresh,
             crate::runs::run_preview_route,

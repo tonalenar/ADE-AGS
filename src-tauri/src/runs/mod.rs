@@ -26,6 +26,7 @@ pub(crate) mod quota;
 mod roster;
 pub(crate) mod routing;
 mod rules;
+pub mod sandbox;
 mod scheduler;
 pub(crate) mod store;
 mod supervisor;
@@ -1175,4 +1176,11 @@ pub fn run_delete_rule(id: String, db: tauri::State<DbConnection>) -> Result<boo
 /// Cierra los pedidos que quedaron colgados de una ejecución anterior de la app.
 pub fn sweep_orphan_approvals(db: &DbConnection) -> Result<usize, String> {
     broker::sweep_orphans(db)
+}
+
+/// Qué aísla el sandbox de los agentes en esta máquina, con el modo configurado.
+#[tauri::command]
+pub fn sandbox_status(app: AppHandle) -> Result<sandbox::Status, String> {
+    let db = db_of(&app)?;
+    Ok(sandbox::status(sandbox::Mode::from_db(&db)))
 }
