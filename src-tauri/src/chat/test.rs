@@ -93,3 +93,13 @@ fn la_conversacion_conserva_su_forma_en_el_archivo() {
     let back: Conversation = serde_json::from_str(&json).unwrap();
     assert_eq!(back, c);
 }
+
+#[test]
+fn el_aviso_del_sistema_muestra_una_linea_corta() {
+    assert_eq!(preview("hola\n  mundo", 50), "hola mundo");
+    let largo = "palabra ".repeat(40);
+    let p = preview(&largo, 20);
+    assert!(p.ends_with('…'), "{p}");
+    assert!(p.chars().count() <= 20, "{p}");
+    assert_eq!(preview("", 10), "");
+}

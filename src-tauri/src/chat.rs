@@ -89,6 +89,16 @@ pub fn parse_thread(raw: &str) -> Result<&'static str, String> {
     Ok(THREADS.iter().find(|t| **t == id).copied().unwrap_or(DEFAULT_THREAD))
 }
 
+/// Lo que cabe de una respuesta en un aviso del sistema: una sola línea, cortada con "…".
+pub fn preview(text: &str, max: usize) -> String {
+    let flat = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    if flat.chars().count() <= max {
+        return flat;
+    }
+    let cut: String = flat.chars().take(max.saturating_sub(1)).collect();
+    format!("{}…", cut.trim_end())
+}
+
 /// El texto de un mensaje: sin caracteres de control (salvo saltos de línea y tabulaciones),
 /// sin espacios sobrantes en los extremos y dentro del límite.
 pub fn clean_text(raw: &str) -> Result<String, String> {

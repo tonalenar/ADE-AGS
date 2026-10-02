@@ -65,7 +65,15 @@ pub(super) fn chat_say(app: &AppHandle, args: &Value) -> Result<Value, String> {
         Ok(thread)
     })?;
     changed(app, &from);
-    Ok(json!({ "delivered": true, "thread": thread, "progress": kind == Kind::Progress }))
+    // Una respuesta (no el progreso) con la app en segundo plano: además, un aviso del
+    // sistema, con las reglas del notificador (se apaga en la configuración y no sale si
+    // estás mirando la app).
+    let mut system = false;
+    if kind == Kind::Say {
+        let name = open_tabs(app).ok().and_then(|tabs| tabs.into_iter().find(|t| t.id == from)).map(|t| t.name);
+        system = crate::notifier::show_custom(app, name.as_deref().unwrap_or("ADE AGS"), &chat::preview(&text, 180));
+    }
+    Ok(json!({ "delivered": true, "thread": thread, "progress": kind == Kind::Progress, "system": system }))
 }
 
 /// `ccode recall [thread|list] [--turns N | --all]`: lo que se habló, para quien llega sin
