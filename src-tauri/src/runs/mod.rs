@@ -947,6 +947,15 @@ pub fn reroute_to(
             );
         }
     }
+    // Un cambio de manos es lo que el Map Mode dibuja como arista de traspaso.
+    crate::bus::publish(
+        Some(app),
+        crate::bus::Publish::new("task.rerouted").task(task_id).run(&task.run_id).data(serde_json::json!({
+            "from": { "agentId": task.agent_id, "model": task.model, "accountId": task.account_id },
+            "to": { "agentId": assignment.agent_id, "model": assignment.model, "accountId": assignment.account_id },
+            "reason": reason,
+        })),
+    );
     supervisor::notify_changed(app, task_id);
     // No se tiquea acá: el scheduler llama a esto con su propio lock tomado, y volver a
     // entrar lo trabaría. Tiquean los de afuera.

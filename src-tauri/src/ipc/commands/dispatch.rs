@@ -15,6 +15,7 @@ use tauri::AppHandle;
 use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
 use super::ask::user_ask;
+use super::events::{events_since, events_wait};
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
 use super::shared::bridge_call;
@@ -82,6 +83,9 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "run.cancelTask" => run_orchestrate(app, "run.cancelTask", args),
         "run.rerouteTask" => run_orchestrate(app, "run.rerouteTask", args),
         "app.status" => app_status(app),
+        // El bus de eventos (ver `crate::bus`): ponerse al día y esperar lo siguiente.
+        "events.since" => events_since(args),
+        "events.wait" => events_wait(args),
         other => Err(format!("Comando desconocido: {other}")),
     };
 

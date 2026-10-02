@@ -190,6 +190,7 @@ pub fn run() {
             crate::missions::mission_accept_task,
             crate::missions::mission_reject_task,
             crate::missions::mission_apply,
+            crate::bus::bus_since,
             // Local, approved Mission and Workspace memory plus immutable Run snapshots.
             crate::memory::memory_list,
             crate::memory::memory_get,

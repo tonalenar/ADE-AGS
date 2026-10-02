@@ -39,7 +39,12 @@ pub const APPROVALS_CHANGED: &str = "cc-task-approvals";
 /// Avisa que la cola de permisos cambió. Se manda el estado entero y no el delta porque
 /// son unos pocos pedidos y así una ventana que se perdió un evento se recupera sola.
 pub fn notify_approvals(app: &AppHandle) {
-    let _ = app.emit(APPROVALS_CHANGED, super::broker::pending());
+    let pending = super::broker::pending();
+    crate::bus::publish(
+        Some(app),
+        crate::bus::Publish::new("approvals.changed").data(serde_json::json!({ "pending": pending.len() })),
+    );
+    let _ = app.emit(APPROVALS_CHANGED, pending);
 }
 
 /// Nombre del grupo de contención. No se cruza con los ids de PTY porque va por otro
@@ -76,6 +81,9 @@ struct TaskEventPayload {
 }
 
 fn emit_event(app: &AppHandle, task_id: &str, event: AgentEvent) {
+    if let Some(data) = activity_data(&event) {
+        crate::bus::publish(Some(app), crate::bus::Publish::new("task.activity").task(task_id).data(data));
+    }
     let _ = app.emit(
         TASK_EVENT,
         TaskEventPayload {
@@ -85,7 +93,25 @@ fn emit_event(app: &AppHandle, task_id: &str, event: AgentEvent) {
     );
 }
 
+/// Lo que va al bus de la actividad de una tarea: qué herramienta usa, qué dijo (corto), si
+/// arrancó o terminó. El texto entero ya va por `cc-task-event` y al NDJSON de la tarea;
+/// el bus guarda historia y no tiene por qué cargar párrafos.
+fn activity_data(event: &AgentEvent) -> Option<serde_json::Value> {
+    use serde_json::json;
+    Some(match event {
+        AgentEvent::Started { .. } => json!({ "kind": "started" }),
+        AgentEvent::Tool { label, .. } => json!({ "kind": "tool", "label": label }),
+        AgentEvent::Text { text } => {
+            let short: String = text.chars().take(200).collect();
+            json!({ "kind": "text", "text": short })
+        }
+        AgentEvent::Finished { outcome } => json!({ "kind": "finished", "ok": outcome.ok }),
+        AgentEvent::Quota { .. } => return None,
+    })
+}
+
 fn emit_changed(app: &AppHandle, task_id: &str) {
+    crate::bus::publish(Some(app), crate::bus::Publish::new("task.changed").task(task_id));
     let _ = app.emit(TASK_CHANGED, task_id.to_string());
 }
 

@@ -51,6 +51,12 @@ OBSERVAR TABS (modo push — evita el polling)
   watch list                                  Tabs observadas y el límite vigente
   watch wait [--timeout 300] [--max 20]       Espera a que alguna tenga novedades
 
+EVENTOS (el bus de la flota y las misiones)
+  events since [--after <seq>] [filtros]      Lo que pasó después de ese número
+  events wait --after <seq> [--timeout 60] [filtros]
+                                              Espera al próximo evento (sin polling)
+  Filtros: --topics task.,mission. --run <id> --mission <id> --task <id> --limit 100
+
 VENTANAS
   window list                                 Ventanas abiertas
   window create                               Abre una ventana nueva
@@ -414,6 +420,11 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
     match command {
         "watch.wait" => {
             let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(300);
+            Duration::from_secs(requested + 15)
+        }
+        // Igual: bloquea hasta que llega un evento o vence su plazo (tope 600 s).
+        "events.wait" => {
+            let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(60).clamp(1, 600);
             Duration::from_secs(requested + 15)
         }
         // Los topes del backend suman ~40s (15 para que aparezca el PTY + 25 de arranque).

@@ -38,6 +38,7 @@ use types::status;
 pub const MISSION_CHANGED: &str = "cc-mission-changed";
 
 pub(crate) fn notify<R: Runtime>(app: &AppHandle<R>, mission_id: &str) {
+    crate::bus::publish(Some(app), crate::bus::Publish::new("mission.changed").mission(mission_id));
     let _ = app.emit(MISSION_CHANGED, mission_id);
 }
 
