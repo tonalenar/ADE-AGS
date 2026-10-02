@@ -53,3 +53,38 @@ fn una_tab_no_es_vecina_de_si_misma() {
     let b = boards(&[("proj", vec![edge("1", "a", "a")])]);
     assert!(peers_of(&b, "a").is_empty());
 }
+
+fn with_orchestrator(mut b: Boards, key: &str, tab: &str) -> Boards {
+    b.get_mut(key).unwrap().orchestrators.push(tab.into());
+    b
+}
+
+#[test]
+fn el_equipo_sigue_las_conexiones_en_varios_pasos() {
+    let b = boards(&[("proj", vec![edge("1", "lider", "a"), edge("2", "a", "b"), edge("3", "x", "y")])]);
+    let team: Vec<String> = team_of(&b, "lider").into_iter().collect();
+    assert_eq!(team, vec!["a".to_string(), "b".to_string()]);
+}
+
+#[test]
+fn una_orquestadora_alcanza_a_todo_su_equipo() {
+    let b = boards(&[("proj", vec![edge("1", "lider", "a"), edge("2", "a", "b")])]);
+    let b = with_orchestrator(b, "proj", "lider");
+    assert!(reachable(&b, "lider").contains("b"));
+}
+
+/// Estar en el equipo de una orquestadora no da su alcance: `a` sigue hablando solo con
+/// quien está conectada directamente.
+#[test]
+fn el_resto_del_equipo_sigue_con_alcance_directo() {
+    let b = boards(&[("proj", vec![edge("1", "lider", "a"), edge("2", "a", "b"), edge("3", "b", "c")])]);
+    let b = with_orchestrator(b, "proj", "lider");
+    assert!(!reachable(&b, "a").contains("c"));
+    assert!(reachable(&b, "a").contains("lider"));
+}
+
+#[test]
+fn sin_marca_no_hay_orquestadora() {
+    let b = boards(&[("proj", vec![edge("1", "lider", "a")])]);
+    assert!(!is_orchestrator(&b, "lider"));
+}

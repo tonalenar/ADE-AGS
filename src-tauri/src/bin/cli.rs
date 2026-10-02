@@ -50,6 +50,11 @@ AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
   peer ask <nombre> \"...\" [--timeout 600]    Le pregunta y ESPERA su respuesta
   peer tell <nombre> \"...\"                    Le avisa algo, sin esperar
   peer check <nombre> [--lines 60]            Lo que se ve ahora en su terminal
+  Solo orquestadores (corona en el canvas):
+  peer recruit <nombre> --agent <id>          Abre un agente nuevo, ya conectado
+              [--prompt \"...\"] [--account <n>]  · con su primera tarea
+  peer connect <a> <b>                        Conecta dos agentes del equipo
+  peer disconnect <a> <b>                     Los desconecta
 
 OBSERVAR TABS (modo push — evita el polling)
   watch add <id> [--idle 20]                  Empieza a observar una tab
@@ -285,6 +290,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         // `ccode peer ask Revisor "..."`: el nombre del agente y después el mensaje.
         "peer.ask" | "peer.tell" => &["to", "text"],
         "peer.check" => &["to"],
+        "peer.recruit" => &["name"],
+        "peer.connect" | "peer.disconnect" => &["a", "b"],
         _ => &[],
     }
 }
@@ -461,6 +468,8 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             Duration::from_secs(requested + 90)
         }
         "peer.tell" => Duration::from_secs(90),
+        // Abrir la tab, esperar su PTY (15s) y que arranque (25s) antes de darle la tarea.
+        "peer.recruit" => Duration::from_secs(120),
         // Validar un plan puede sondear el roster (lanzar `opencode models`) y crear worktrees.
         "run.plan" | "run.addTask" | "run.roster" => Duration::from_secs(120),
         "run.approve" => {

@@ -18,7 +18,7 @@ use std::time::{Duration, Instant};
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
-use super::tabs::{pty_id_for_tab, submit_prompt, tab_list, wait_until_quiet};
+use super::tabs::{pty_id_for_tab, submit_prompt, tab_create, tab_list, wait_for_pty, wait_until_quiet, wait_until_ready};
 use crate::ipc::bridge::{ask_frontend, unwrap_frontend_result};
 use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_opt};
 
@@ -63,10 +63,11 @@ fn caller(args: &Value) -> Result<String, String> {
     })
 }
 
-/// Las tabs conectadas con `from` que siguen abiertas.
+/// Las tabs que `from` alcanza y siguen abiertas: sus vecinas o, si es orquestadora, todo
+/// su equipo (ver `canvas::reachable`).
 fn peers(app: &AppHandle, from: &str) -> Result<(Option<OpenTab>, Vec<OpenTab>), String> {
     let boards = crate::canvas::load_boards();
-    let ids = crate::canvas::peers_of(&boards, from);
+    let ids = crate::canvas::reachable(&boards, from);
     let tabs = open_tabs(app)?;
     let me = tabs.iter().find(|t| t.id == from).cloned();
     let list = tabs.into_iter().filter(|t| ids.contains(&t.id)).collect();
@@ -116,10 +117,118 @@ pub(crate) fn framed(from_name: &str, text: &str, expects_reply: bool) -> String
 pub(super) fn peer_list(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let (me, list) = peers(app, &from)?;
-    Ok(json!({
-        "you": me.as_ref().map(describe),
-        "peers": list.iter().map(describe).collect::<Vec<_>>(),
-    }))
+    let boards = crate::canvas::load_boards();
+    let direct = crate::canvas::peers_of(&boards, &from);
+    let flagged = |t: &OpenTab| {
+        let mut v = describe(t);
+        v["direct"] = json!(direct.contains(&t.id));
+        v["orchestrator"] = json!(crate::canvas::is_orchestrator(&boards, &t.id));
+        v
+    };
+    let you = me.as_ref().map(|m| {
+        let mut v = describe(m);
+        v["orchestrator"] = json!(crate::canvas::is_orchestrator(&boards, &m.id));
+        v
+    });
+    Ok(json!({ "you": you, "peers": list.iter().map(flagged).collect::<Vec<_>>() }))
+}
+
+// ── Orquestadora ────────────────────────────────────────────────────
+
+/// La tab que pide, si está marcada como orquestadora. Las acciones que cambian el equipo
+/// (sumar un agente, conectar o desconectar) son solo suyas.
+fn orchestrator(app: &AppHandle, args: &Value) -> Result<OpenTab, String> {
+    let from = caller(args)?;
+    if !crate::canvas::is_orchestrator(&crate::canvas::load_boards(), &from) {
+        return Err("Só um orquestrador pode fazer isso. O usuário marca um agente como orquestrador no canvas (coroa no cabeçalho do nó).".into());
+    }
+    open_tabs(app)?
+        .into_iter()
+        .find(|t| t.id == from)
+        .ok_or_else(|| "A sua aba não está aberta em nenhuma janela.".to_string())
+}
+
+/// Con quiénes puede operar una orquestadora: su equipo y las demás tabs de su misma
+/// carpeta (así suma al equipo a un agente que el usuario ya tenía abierto).
+fn operable(app: &AppHandle, me: &OpenTab) -> Result<Vec<OpenTab>, String> {
+    let team = crate::canvas::team_of(&crate::canvas::load_boards(), &me.id);
+    Ok(open_tabs(app)?
+        .into_iter()
+        .filter(|t| t.id != me.id && (team.contains(&t.id) || t.cwd == me.cwd))
+        .collect())
+}
+
+/// Resuelve un nombre entre `candidates` o a la propia orquestadora.
+fn resolve_member<'a>(me: &'a OpenTab, candidates: &'a [OpenTab], name: &str) -> Result<&'a OpenTab, String> {
+    if me.id == name || me.name.eq_ignore_ascii_case(name.trim()) {
+        return Ok(me);
+    }
+    resolve_peer(candidates, name)
+}
+
+/// Le pide al frontend que cambie su canvas: es él quien lo tiene en memoria y lo guarda,
+/// así que escribir el archivo desde acá se perdería con su próximo guardado.
+fn canvas_change(app: &AppHandle, me: &OpenTab, command: &str, args: Value) -> Result<(), String> {
+    let raw = ask_frontend(app, command, &args, Some(&me.window))?;
+    unwrap_frontend_result(raw).map(|_| ())
+}
+
+pub(super) fn peer_connect(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let me = orchestrator(app, args)?;
+    let candidates = operable(app, &me)?;
+    let a = resolve_member(&me, &candidates, &arg_str(args, "a")?)?.clone();
+    let b = resolve_member(&me, &candidates, &arg_str(args, "b")?)?.clone();
+    if a.id == b.id {
+        return Err("Não dá para conectar um agente com ele mesmo.".into());
+    }
+    canvas_change(app, &me, "canvas.connect", json!({ "cwd": me.cwd, "a": a.id, "b": b.id }))?;
+    Ok(json!({ "connected": [describe(&a), describe(&b)] }))
+}
+
+pub(super) fn peer_disconnect(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let me = orchestrator(app, args)?;
+    let candidates = operable(app, &me)?;
+    let a = resolve_member(&me, &candidates, &arg_str(args, "a")?)?.clone();
+    let b = resolve_member(&me, &candidates, &arg_str(args, "b")?)?.clone();
+    canvas_change(app, &me, "canvas.disconnect", json!({ "cwd": me.cwd, "a": a.id, "b": b.id }))?;
+    Ok(json!({ "disconnected": [describe(&a), describe(&b)] }))
+}
+
+/// Suma un agente al equipo: abre una tab en la carpeta de la orquestadora, la pone debajo
+/// de ella en el canvas, la conecta y, si hay `--prompt`, le da la primera tarea.
+///
+/// La tarea va DESPUÉS de conectar: el agente nuevo tiene que poder contestar con
+/// `ccode peer tell` desde su primer turno.
+pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let me = orchestrator(app, args)?;
+    let name = arg_str(args, "name")?;
+    let agent = arg_str(args, "agent")?;
+    if name.trim().is_empty() {
+        return Err("O agente novo precisa de um nome.".into());
+    }
+    let taken = open_tabs(app)?.into_iter().any(|t| t.cwd == me.cwd && t.name.eq_ignore_ascii_case(name.trim()));
+    if taken {
+        return Err(format!("Já existe um agente chamado '{name}' nesta pasta. Escolha outro nome."));
+    }
+
+    let mut create = json!({ "cwd": me.cwd, "agent": agent, "title": name, "window": me.window });
+    if let Some(account) = arg_str_opt(args, "account") {
+        create["account"] = json!(account);
+    }
+    let created = tab_create(app, &create)?;
+    let tab_id = created.get("tabId").and_then(Value::as_str).ok_or("A aba foi criada sem id")?.to_string();
+
+    canvas_change(app, &me, "canvas.recruited", json!({ "cwd": me.cwd, "tabId": tab_id, "near": me.id }))?;
+
+    let mut out = json!({ "recruited": { "id": tab_id, "name": name, "agent": agent, "cwd": me.cwd } });
+    if let Some(prompt) = arg_str_opt(args, "prompt").filter(|p| !p.trim().is_empty()) {
+        let pty = wait_for_pty(app, &tab_id, Some(&me.window))?;
+        let ready = wait_until_ready(pty);
+        submit_prompt(pty, &framed(&me.name, &prompt, false))?;
+        out["promptSent"] = json!(true);
+        out["promptWaitedForReady"] = json!(ready);
+    }
+    Ok(out)
 }
 
 /// Lo que se ve en la terminal de una tab, leído del buffer de xterm (texto ya dibujado,

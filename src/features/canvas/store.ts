@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { useTabsStore } from "@/features/tabs/store";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
-import { addEdge, emptyBoard, reconcile, removeEdge, type Board } from "./board";
+import { addEdge, emptyBoard, placeBelow, reconcile, removeEdge, removeEdgeBetween, toggleOrchestrator, type Board } from "./board";
 import type { Box, Rect, Viewport } from "./geometry";
 
 export type WorkMode = "tabs" | "canvas";
@@ -75,6 +75,14 @@ export const canvasActions = {
   setViewport: (key: string, viewport: Viewport) => updateBoard(key, (b) => ({ ...b, viewport })),
   connect: (key: string, a: string, b: string) => updateBoard(key, (board) => addEdge(board, a, b)),
   disconnect: (key: string, edgeId: string) => updateBoard(key, (board) => removeEdge(board, edgeId)),
+  disconnectPair: (key: string, a: string, b: string) => updateBoard(key, (board) => removeEdgeBetween(board, a, b)),
+  toggleOrchestrator: (key: string, tabId: string) => updateBoard(key, (board) => toggleOrchestrator(board, tabId)),
+  /** Un agente que sumó una orquestadora: debajo de ella y conectado. Si la tab todavía no
+   *  tiene nodo (la sincronización corre después), se le da uno primero. */
+  recruited: (key: string, tabId: string, near: string) => updateBoard(key, (board) => {
+    const withNode = tabId in board.nodes ? board : reconcile(board, [...Object.keys(board.nodes), tabId]);
+    return addEdge(placeBelow(withNode, tabId, near), near, tabId);
+  }),
   setLiveRects: (liveRects: Record<string, Rect>) => {
     const prev = useCanvasStore.getState().liveRects;
     if (JSON.stringify(prev) !== JSON.stringify(liveRects)) useCanvasStore.setState({ liveRects });
@@ -140,7 +148,7 @@ export function initCanvasSync(label: string): () => void {
       const mine = Object.fromEntries(
         Object.entries(saved ?? {})
           .filter(([k]) => k.startsWith(`${label}|`))
-          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [] }]),
+          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [] }]),
       );
       useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards } });
       unsub = useTabsStore.subscribe(syncBoards);

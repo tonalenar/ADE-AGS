@@ -40,6 +40,9 @@ pub struct Board {
     pub edges: Vec<Edge>,
     #[serde(default)]
     pub viewport: Value,
+    /// Tabs marcadas como orquestadoras: alcanzan a todo su equipo, no solo a sus vecinas.
+    #[serde(default)]
+    pub orchestrators: Vec<String>,
 }
 
 pub type Boards = HashMap<String, Board>;
@@ -105,6 +108,37 @@ pub fn peers_of(boards: &Boards, tab: &str) -> BTreeSet<String> {
             }
         })
         .collect()
+}
+
+/// ¿Está `tab` marcada como orquestadora en algún canvas?
+pub fn is_orchestrator(boards: &Boards, tab: &str) -> bool {
+    boards.values().any(|b| b.orchestrators.iter().any(|o| o == tab))
+}
+
+/// El equipo de `tab`: todas las tabs a las que se llega desde ella siguiendo conexiones,
+/// en cualquier cantidad de pasos. Sin ella misma.
+pub fn team_of(boards: &Boards, tab: &str) -> BTreeSet<String> {
+    let mut seen = BTreeSet::from([tab.to_string()]);
+    let mut pending = vec![tab.to_string()];
+    while let Some(current) = pending.pop() {
+        for next in peers_of(boards, &current) {
+            if seen.insert(next.clone()) {
+                pending.push(next);
+            }
+        }
+    }
+    seen.remove(tab);
+    seen
+}
+
+/// A quién puede hablarle `tab`. Una orquestadora, a todo su equipo; cualquier otra, solo a
+/// las conectadas directamente con ella.
+pub fn reachable(boards: &Boards, tab: &str) -> BTreeSet<String> {
+    if is_orchestrator(boards, tab) {
+        team_of(boards, tab)
+    } else {
+        peers_of(boards, tab)
+    }
 }
 
 // ── Comandos Tauri ───────────────────────────────────────────────────

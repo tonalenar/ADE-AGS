@@ -15,7 +15,7 @@ use tauri::AppHandle;
 use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
 use super::ask::user_ask;
-use super::peers::{peer_ask, peer_check, peer_list, peer_tell};
+use super::peers::{peer_ask, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_tell};
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
 use super::shared::bridge_call;
@@ -38,6 +38,9 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "peer.ask" => peer_ask(app, args),
         "peer.tell" => peer_tell(app, args),
         "peer.check" => peer_check(app, args),
+        "peer.recruit" => peer_recruit(app, args),
+        "peer.connect" => peer_connect(app, args),
+        "peer.disconnect" => peer_disconnect(app, args),
         "agent.list" => agent_list(app),
         "account.list" => account_list(app),
         "prelaunch.list" => prelaunch_list(app),

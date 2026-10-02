@@ -11,6 +11,7 @@ import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
 import { respondToCli } from "./ipc";
 import { screenOf } from "@/features/terminal/terminalRegistry";
+import { boardKey, canvasActions } from "@/features/canvas/store";
 
 /**
  * Lado frontend del puente de la CLI (ver `ipc/bridge.rs`).
@@ -88,7 +89,10 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
   // Ídem con `--pre`/`--pre-preset`: el backend ya resolvió los nombres de preset a ids y
   // falló si alguno no existía (ver `resolve_prelaunch_steps`).
   const prelaunch = Array.isArray(args.prelaunch) ? (args.prelaunch as PrelaunchStep[]) : [];
-  const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch });
+  // Un nombre propio (el que le da una orquestadora al sumar un agente) queda como título
+  // fijo: es el nombre con el que los demás agentes lo van a llamar.
+  const title = str(args, "title");
+  const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch, title, titleIsCustom: title ? true : undefined });
 
   // Mismo gate que el wizard del "+": las skills tienen que estar en disco antes de que
   // el proceso arranque. Se espera acá (y no solo se registra) para que la CLI no
@@ -199,6 +203,26 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
   return { text: answer };
 }
 
+/** Cambios al canvas pedidos por una orquestadora (`ccode peer connect/disconnect`). El
+ *  permiso ya lo verificó el backend; acá solo se aplica, en el canvas de esa carpeta. */
+function handleCanvas(args: Record<string, unknown>, apply: (key: string, a: string, b: string) => void) {
+  const cwd = str(args, "cwd");
+  const a = str(args, "a");
+  const b = str(args, "b");
+  if (!cwd || !a || !b) throw new Error("Faltan cwd, a o b");
+  apply(boardKey(cwd), a, b);
+  return { ok: true };
+}
+
+function handleRecruited(args: Record<string, unknown>) {
+  const cwd = str(args, "cwd");
+  const tabId = str(args, "tabId");
+  const near = str(args, "near");
+  if (!cwd || !tabId || !near) throw new Error("Faltan cwd, tabId o near");
+  canvasActions.recruited(boardKey(cwd), tabId, near);
+  return { ok: true };
+}
+
 /** El texto dibujado de una terminal, para `ccode peer ask/check` (ver `screenOf`). */
 function handleScreen(args: Record<string, unknown>) {
   const tabId = str(args, "tabId");
@@ -218,6 +242,9 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "browser.run": return handleBrowser(args);
     case "user.ask": return handleAsk(args);
     case "tab.screen": return handleScreen(args);
+    case "canvas.connect": return handleCanvas(args, (key, a, b) => canvasActions.connect(key, a, b));
+    case "canvas.disconnect": return handleCanvas(args, (key, a, b) => canvasActions.disconnectPair(key, a, b));
+    case "canvas.recruited": return handleRecruited(args);
     default: throw new Error(`El frontend no sabe atender '${command}'`);
   }
 }

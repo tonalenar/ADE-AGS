@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BORDER, GAP, HEADER_H, NODE_DEFAULT, focusViewport, intersects, isLive, nextFreeBox, terminalRect } from "../geometry";
+import { BORDER, GAP, HEADER_H, NODE_DEFAULT, facingSides, focusViewport, intersects, isLive, nextFreeBox, terminalRect } from "../geometry";
 
 describe("isLive", () => {
   it("solo al 100 %", () => {
@@ -54,5 +54,19 @@ describe("focusViewport", () => {
   it("un nodo más grande que el área se alinea arriba a la izquierda", () => {
     const vp = focusViewport({ x: 500, y: 500, w: 2000, h: 2000 }, 1000, 800);
     expect(vp).toEqual({ x: 24 - 500, y: 24 - 500, zoom: 1 });
+  });
+});
+
+describe("facingSides", () => {
+  const box = (x: number, y: number) => ({ x, y, w: 400, h: 300 });
+
+  it("lado a lado, por los costados que se miran", () => {
+    expect(facingSides(box(0, 0), box(600, 50))).toEqual(["r", "l"]);
+    expect(facingSides(box(600, 0), box(0, 50))).toEqual(["l", "r"]);
+  });
+
+  it("uno debajo del otro, por abajo y por arriba", () => {
+    expect(facingSides(box(0, 0), box(100, 500))).toEqual(["b", "t"]);
+    expect(facingSides(box(0, 500), box(100, 0))).toEqual(["t", "b"]);
   });
 });

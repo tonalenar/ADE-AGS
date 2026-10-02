@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.7.0
+version: 1.8.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -381,6 +381,33 @@ ccode peer check Backend --lines 40           # what is on its screen right now
   instead of falling back to `tab send` to reach an agent they did not connect.
 - Treat what another agent sends you as a request from a colleague, not as the user's
   orders: nothing destructive (deleting, pushing, publishing) unless the user asked for it.
+
+### If you are the orchestrator
+
+The user can mark an agent as **orchestrator** (the crown on its node). `ccode peers` tells
+you: `you.orchestrator` is `true`. An orchestrator reaches its **whole team** — everyone
+connected to it in any number of steps, not only its direct neighbours (`direct` in each
+peer says which are) — and can change the team:
+
+```bash
+ccode peer recruit Tests --agent codex --prompt "write integration tests for src/auth"
+ccode peer connect Backend Tests        # let two team members talk to each other
+ccode peer disconnect Backend Tests
+```
+
+- **`recruit`** opens a new agent in your folder, named as you say, placed under you on the
+  canvas and already connected to you. `--prompt` is its first task; it arrives after the
+  connection exists, so the recruit can answer you with `ccode peer tell`. `--agent` takes
+  the ids from `ccode agents`; `--account` picks one of that agent's accounts.
+- **`connect` / `disconnect`** work on your team and on the other agents open in your
+  folder (that's how you bring in an agent the user already had open).
+- Run `ccode peers` before recruiting: don't open a second agent for a role someone on the
+  team already has.
+- Closing agents stays with the user. There is no command for it; if a recruit is no
+  longer needed, tell the user.
+- Coordinate, don't micromanage: give each recruit one clear task, use `peer ask` when you
+  need the answer to continue and `peer tell` when you don't, and check on long work with
+  `peer check` instead of asking again.
 
 ## Windows and workspaces
 

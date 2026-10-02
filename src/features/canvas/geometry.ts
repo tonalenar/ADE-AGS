@@ -87,6 +87,22 @@ export function nextFreeBox(existing: Box[], size = NODE_DEFAULT): Box {
   return { x: 0, y: bottom + GAP, w: size.w, h: size.h };
 }
 
+/** Un lado del nodo, que es también el id de su punto de conexión. */
+export type Side = "l" | "r" | "t" | "b";
+
+/**
+ * Por qué lados sale y entra la línea entre dos nodos: los que se miran. Si están más uno
+ * encima del otro que uno al lado del otro, arriba y abajo; si no, los costados. Con un
+ * solo par de costados, un equipo apilado como organigrama dibujaba curvas que cruzaban
+ * los nodos.
+ */
+export function facingSides(a: Box, b: Box): [Side, Side] {
+  const dx = b.x + b.w / 2 - (a.x + a.w / 2);
+  const dy = b.y + b.h / 2 - (a.y + a.h / 2);
+  if (Math.abs(dy) > Math.abs(dx)) return dy > 0 ? ["b", "t"] : ["t", "b"];
+  return dx >= 0 ? ["r", "l"] : ["l", "r"];
+}
+
 /**
  * La vista que centra un nodo al 100 %. Si no entra en el área, se alinea arriba a la
  * izquierda con un margen: así se ve el comienzo de la terminal en vez de su centro.

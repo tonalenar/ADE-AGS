@@ -16,7 +16,7 @@ import { screenOf } from "@/features/terminal/terminalRegistry";
 
 import { emptyBoard, neighbors } from "./board";
 import {
-  HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, focusViewport, intersects, isLive, terminalRect,
+  HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, terminalRect,
   type Box, type Rect, type Viewport,
 } from "./geometry";
 import { boardKey, canvasActions, useActiveBoardKey, useCanvasStore } from "./store";
@@ -26,7 +26,9 @@ interface AgentNodeData extends Record<string, unknown> {
   box: Box;
   live: boolean;
   links: number;
+  orchestrator: boolean;
   onFocus: (tabId: string) => void;
+  onToggleOrchestrator: (tabId: string) => void;
 }
 
 type AgentFlowNode = Node<AgentNodeData, "agent">;
@@ -131,7 +133,13 @@ function CanvasInner() {
       selected: tab.id === activeTabId,
       dragHandle: ".ade-node-drag",
       deletable: false,
-      data: { tab, box, live, links: neighbors(board, tab.id).length, onFocus: focusNode },
+      data: {
+        tab, box, live,
+        links: neighbors(board, tab.id).length,
+        orchestrator: board.orchestrators.includes(tab.id),
+        onFocus: focusNode,
+        onToggleOrchestrator: (id: string) => key && canvasActions.toggleOrchestrator(key, id),
+      },
     }];
     // `focusNode` cambia con cada render y no aporta nada nuevo al nodo.
   }), [tabs, board, activeTabId, live]);
@@ -140,15 +148,8 @@ function CanvasInner() {
     const a = board.nodes[e.a];
     const b = board.nodes[e.b];
     // Sale por el lado que mira al otro nodo: la curva no cruza su propio nodo.
-    const aLeft = a && b ? a.x + a.w / 2 <= b.x + b.w / 2 : true;
-    return {
-      id: e.id,
-      source: e.a,
-      target: e.b,
-      sourceHandle: aLeft ? "r" : "l",
-      targetHandle: aLeft ? "l" : "r",
-      type: "link",
-    };
+    const [sourceHandle, targetHandle] = a && b ? facingSides(a, b) : ["r", "l"];
+    return { id: e.id, source: e.a, target: e.b, sourceHandle, targetHandle, type: "link" };
   }), [board.edges, board.nodes]);
 
   const onNodesChange = (changes: NodeChange<AgentFlowNode>[]) => {
@@ -245,7 +246,7 @@ function CanvasControls({ zoom, onFit, onReset }: { zoom: number; onFit: () => v
 
 const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const { t } = useTranslation();
-  const { tab, box, live, links, onFocus } = data;
+  const { tab, box, live, links, orchestrator, onFocus, onToggleOrchestrator } = data;
   const Icon = agentIcon(tab.agentId, tab.agentId);
   const handle = "w-2.5! h-2.5! border-2! border-white! dark:border-surface-deep! bg-gray-400! dark:bg-gray-500!";
 
@@ -255,7 +256,9 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
         border bg-white dark:bg-surface
         ${selected
           ? "border-accent-500 dark:border-accent-400 shadow-[0_0_0_1px_var(--color-accent-400)]"
-          : "border-gray-300 dark:border-white/12"}`}
+          : orchestrator
+            ? "border-glow/70 shadow-[0_0_0_1px_color-mix(in_oklab,var(--color-glow)_35%,transparent)]"
+            : "border-gray-300 dark:border-white/12"}`}
     >
       <NodeResizer isVisible={selected} minWidth={NODE_MIN.w} minHeight={NODE_MIN.h}
         lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
@@ -264,6 +267,10 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
           debajo de la terminal viva, que se dibuja encima del nodo. */}
       <Handle id="l" type="source" position={Position.Left} style={{ top: HEADER_H / 2 }} className={handle} />
       <Handle id="r" type="source" position={Position.Right} style={{ top: HEADER_H / 2 }} className={handle} />
+      {/* Arriba y abajo, para los equipos apilados. El de abajo queda medio tapado por la
+          terminal viva al 100 %: se usa sobre todo para dibujar, y ahí el canvas está alejado. */}
+      <Handle id="t" type="source" position={Position.Top} className={handle} />
+      <Handle id="b" type="source" position={Position.Bottom} className={handle} />
 
       <div
         className="ade-node-drag flex items-center gap-2 px-3 shrink-0 cursor-grab active:cursor-grabbing select-none
@@ -275,7 +282,26 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
         <Icon className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
         <span className="truncate text-[12.5px] font-medium text-gray-800 dark:text-gray-100">{tab.title}</span>
         <span className="truncate text-[11px] text-gray-400 dark:text-gray-500">{tab.agentLabel}</span>
+        {orchestrator && (
+          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider px-1.5 rounded
+            text-amber-700 dark:text-glow bg-glow/15">
+            {t("canvas.orchestrator")}
+          </span>
+        )}
         <span className="flex-1" />
+        {/* `nodrag`: sin esto el clic arrastraría el nodo en vez de apretar el botón. */}
+        <Button variant="custom"
+          onClick={() => onToggleOrchestrator(tab.id)}
+          aria-pressed={orchestrator}
+          title={orchestrator ? t("canvas.orchestratorOff") : t("canvas.orchestratorOn")}
+          className={`nodrag cc-t shrink-0 flex items-center justify-center w-6 h-6 rounded-md
+            ${orchestrator
+              ? "text-amber-600 dark:text-glow"
+              : "text-gray-300 dark:text-white/20 hover:text-gray-600 dark:hover:text-white/60"}
+            hover:bg-gray-200/70 dark:hover:bg-white/8`}
+        >
+          <CrownIcon className="w-3.5 h-3.5" />
+        </Button>
         {links > 0 && (
           <span className="shrink-0 text-[10.5px] tabular-nums px-1.5 rounded-full
             bg-gray-200/70 dark:bg-white/8 text-gray-500 dark:text-gray-400" title={t("canvas.links", { count: links })}>
@@ -291,6 +317,15 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
     </div>
   );
 });
+
+function CrownIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
+      <path d="M3 7.5 7.5 11 12 4l4.5 7L21 7.5 19 18H5L3 7.5Z" />
+      <rect x="5" y="19.5" width="14" height="2" rx="1" />
+    </svg>
+  );
+}
 
 /** Las últimas líneas de la terminal, como texto: escalan con el zoom sin romper nada. */
 function Preview({ tabId, rows, onOpen }: { tabId: string; rows: number; onOpen: () => void }) {

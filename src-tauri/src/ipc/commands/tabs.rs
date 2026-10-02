@@ -63,7 +63,7 @@ pub(super) fn pty_id_for_tab(app: &AppHandle, tab_id: &str, window: Option<&str>
 
 /// Igual, pero esperando: una tab recién creada todavía no tiene PTY (lo abre el frontend
 /// al montar la terminal, un par de ciclos después de responder "creada").
-fn wait_for_pty(app: &AppHandle, tab_id: &str, window: Option<&str>) -> Result<u32, String> {
+pub(super) fn wait_for_pty(app: &AppHandle, tab_id: &str, window: Option<&str>) -> Result<u32, String> {
     const TIMEOUT: std::time::Duration = std::time::Duration::from_secs(15);
     const POLL: std::time::Duration = std::time::Duration::from_millis(200);
 
@@ -292,7 +292,7 @@ pub(super) fn wait_until_quiet(
 }
 
 /// Espera a que la TUI termine de arrancar.
-fn wait_until_ready(pty_id: u32) -> bool {
+pub(super) fn wait_until_ready(pty_id: u32) -> bool {
     wait_until_quiet(
         pty_id,
         std::time::Duration::from_millis(700),

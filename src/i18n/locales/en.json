@@ -1666,5 +1666,8 @@
   "canvas.links_other": "{{count}} connections",
   "canvas.disconnect": "Remove connection",
   "palette.cmd.canvas": "Switch to canvas",
-  "palette.cmd.tabsMode": "Switch to tabs"
+  "palette.cmd.tabsMode": "Switch to tabs",
+  "canvas.orchestrator": "Orchestrator",
+  "canvas.orchestratorOn": "Make orchestrator: reaches the whole team and can recruit and connect agents",
+  "canvas.orchestratorOff": "Stop being orchestrator"
 }

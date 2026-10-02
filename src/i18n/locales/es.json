@@ -1666,5 +1666,8 @@
   "canvas.links_other": "{{count}} conexiones",
   "canvas.disconnect": "Quitar conexión",
   "palette.cmd.canvas": "Cambiar al canvas",
-  "palette.cmd.tabsMode": "Cambiar a tabs"
+  "palette.cmd.tabsMode": "Cambiar a tabs",
+  "canvas.orchestrator": "Orquestador",
+  "canvas.orchestratorOn": "Hacer orquestador: alcanza a todo el equipo y puede sumar y conectar agentes",
+  "canvas.orchestratorOff": "Dejar de ser orquestador"
 }
