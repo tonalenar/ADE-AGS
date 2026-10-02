@@ -91,6 +91,9 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     let resolved = resolve_closing_tabs(&state, db);
 
     let conn = db.lock().map_err(|e| e.to_string())?;
+    // Una sola transacción: un commit (un fsync) por guardado y no uno por fila, y un
+    // guardado que falla a la mitad no deja la ventana con la mitad de sus tabs.
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
     let now = now_ts();
 
     conn.execute(
@@ -138,15 +141,20 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     // Tabs que estaban guardadas en esta ventana y ya no vienen en el payload nuevo =
     // tabs que el usuario cerró — se archivan en `session_history` antes de perderlas
     // (ver comentario de `archive_tab_row`).
-    let mut existing_ids_stmt = conn
-        .prepare("SELECT id FROM tabs WHERE window_id = ?1")
+    let mut existing_stmt = conn
+        .prepare("SELECT id, title FROM tabs WHERE window_id = ?1")
         .map_err(|e| e.to_string())?;
-    let existing_ids: Vec<String> = existing_ids_stmt
-        .query_map([&window_id], |r| r.get(0))
+    let existing: Vec<(String, Option<String>)> = existing_stmt
+        .query_map([&window_id], |r| Ok((r.get(0)?, r.get(1)?)))
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
-    drop(existing_ids_stmt);
+    drop(existing_stmt);
+    let existing_ids: Vec<String> = existing.iter().map(|(id, _)| id.clone()).collect();
+    // Lo que ven las OTRAS vistas (el Home, la lista de workspaces): qué tabs hay y cómo se
+    // llaman. Mover la ventana o refrescar el scrollback no les cambia nada.
+    let visible_change = state.authoritative && existing.len() != state.tabs.len()
+        || state.tabs.iter().any(|t| !existing.iter().any(|(id, title)| id == &t.id && title.as_deref() == Some(t.title.as_str())));
     let incoming_ids: std::collections::HashSet<&str> =
         state.tabs.iter().map(|t| t.id.as_str()).collect();
 
@@ -193,7 +201,7 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
                cwd = excluded.cwd,
                tab_order = excluded.tab_order,
                session_id = excluded.session_id,
-               scrollback = excluded.scrollback,
+               scrollback = CASE WHEN ?17 THEN tabs.scrollback ELSE excluded.scrollback END,
                history_id = excluded.history_id,
                account_id = excluded.account_id,
                prelaunch = excluded.prelaunch,
@@ -214,18 +222,23 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
                 t.account_id,
                 crate::prelaunch::steps_to_json(&t.prelaunch),
                 t.opened_at,
-                now
+                now,
+                t.scrollback_unchanged
             ],
         )
         .map_err(|e| e.to_string())?;
     }
 
+    tx.commit().map_err(|e| e.to_string())?;
     crate::skills::reconcile_link_dirs(&conn, &orphaned_dirs);
 
-    // El conteo de tabs de este workspace pudo haber cambiado (tab agregada/cerrada) —
-    // se notifica a todas las ventanas (ej. el Home de otra ventana) para que refresquen.
-    use tauri::Emitter;
-    let _ = app.emit("cc-workspace-changed", ());
+    // El conteo o los títulos de las tabs de este workspace cambiaron (tab agregada,
+    // cerrada, renombrada): se notifica a todas las ventanas (ej. el Home de otra ventana)
+    // para que refresquen. Si no cambió nada de eso, refrescarlas es trabajo tirado.
+    if visible_change {
+        use tauri::Emitter;
+        let _ = app.emit("cc-workspace-changed", ());
+    }
 
     Ok(())
 }
