@@ -101,6 +101,17 @@ pub struct PreviewTarget {
     pub target_origin: String,
 }
 
+/// Un POST, PUT o PATCH sin cuerpo tiene que viajar con `Content-Length: 0`: el cliente no lo
+/// pone solo con un cuerpo vacío, y servidores como los de Google responden 411 (Length
+/// Required) a las balizas `gen_204` que mandan los sitios sin cuerpo.
+pub(super) fn needs_zero_length(method: &Method, body: &Bytes) -> bool {
+    body.is_empty() && matches!(*method, Method::POST | Method::PUT | Method::PATCH)
+}
+
+fn with_zero_length(builder: reqwest::RequestBuilder, zero: bool) -> reqwest::RequestBuilder {
+    if zero { builder.header(CONTENT_LENGTH, "0") } else { builder }
+}
+
 fn full(body: impl Into<Bytes>) -> Body {
     Full::new(body.into()).map_err(|never| match never {}).boxed()
 }
@@ -535,7 +546,8 @@ async fn forward(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Respons
         return error_page(502, &ctx.target_origin, &message);
     }
 
-    let upstream = match ctx.client.request(method, &url).headers(headers).body(body).send().await {
+    let zero = needs_zero_length(&method, &body);
+    let upstream = match with_zero_length(ctx.client.request(method, &url).headers(headers).body(body), zero).send().await {
         Ok(upstream) => upstream,
         Err(e) => {
             let (kind, message) = classify(&e);
@@ -828,7 +840,8 @@ async fn forward_foreign(req: Request<Incoming>, ctx: &Ctx, started: Instant) ->
         }
     }
 
-    let upstream = match client.request(method, url.clone()).headers(headers).body(body).send().await {
+    let zero = needs_zero_length(&method, &body);
+    let upstream = match with_zero_length(client.request(method, url.clone()).headers(headers).body(body), zero).send().await {
         Ok(upstream) => upstream,
         Err(e) => {
             let (kind, message) = classify(&e);
