@@ -248,7 +248,7 @@ async function handleNote(args: Record<string, unknown>) {
     const near = str(args, "near");
     if (!cwd || !near) throw new Error("Faltan cwd o near");
     const key = boardKey(cwd);
-    const created = canvasActions.addNote(key, { name: str(args, "name"), content: str(args, "content") ?? "", near });
+    const created = canvasActions.addNote(key, { name: str(args, "name"), content: str(args, "content") ?? "", near, stackWith: str(args, "stackWith") });
     await flushSave(key);
     return created;
   }

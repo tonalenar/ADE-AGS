@@ -511,12 +511,16 @@ a spec between agents connected to the same note.
 ccode notes                                   # the notes you reach
 ccode note create "- [ ] tests" --name Plan  # next to you, already connected
 ccode note create --file plan.md --name Plan  # multi-line content: write a file first
+ccode note create "…" --name Detail --stack Plan  # born inside Plan's stack, sharing its spot
 ccode note read Plan                          # with line numbers
 ccode note read Plan 10 20                    # 20 lines starting at line 10
 ccode note write Plan --file plan.md          # replace the whole content
 ccode note edit Plan "- [ ] tests" "- [x] tests"   # replace a snippet that appears once
 ```
 
+- Notes can be **stacked**: the user (or `--stack`) piles several notes in one spot and only the
+  front one is drawn. Every note in a stack still reads and writes like any other, front or not;
+  `ccode notes` shows a `stack` id on those that share one.
 - Read before you write: the user may have edited the note since your last read.
 - Prefer `edit` for small changes; it fails if the snippet is missing or appears more than
   once, so you never change the wrong line.

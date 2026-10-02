@@ -104,7 +104,12 @@ pub(crate) fn replace_once(content: &str, old: &str, new: &str) -> Result<String
 }
 
 fn describe(n: &Reachable) -> Value {
-    json!({ "id": n.id, "name": n.note.name, "lines": n.note.content.lines().count() })
+    let mut out = json!({ "id": n.id, "name": n.note.name, "lines": n.note.content.lines().count() });
+    // En una pila, con quién comparte lugar (todas se leen y escriben igual, esté al frente o no).
+    if let Some(stack) = &n.note.stack {
+        out["stack"] = json!(stack);
+    }
+    out
 }
 
 /// La ventana que tiene ese canvas: la clave es `ventana|carpeta`.
@@ -148,6 +153,11 @@ pub(super) fn note_create(app: &AppHandle, args: &Value) -> Result<Value, String
     let mut req = json!({ "op": "create", "cwd": me.cwd, "near": me.id, "content": content });
     if let Some(name) = arg_str_opt(args, "name").filter(|n| !n.trim().is_empty()) {
         req["name"] = json!(name.trim());
+    }
+    // `--stack <nota>`: nace dentro de la pila de una nota que alcanza.
+    if let Some(wanted) = arg_str_opt(args, "stack").filter(|n| !n.trim().is_empty()) {
+        let notes = reachable(&canvas::load_boards(), &from);
+        req["stackWith"] = json!(resolve_note(&notes, &wanted)?.id);
     }
     let raw = ask_frontend(app, "canvas.note", &req, Some(&me.window))?;
     let created = unwrap_frontend_result(raw)?;
@@ -197,6 +207,14 @@ mod test {
     fn sin_notas_explica_como_crear_una() {
         let err = resolve_note(&[], "Plano").unwrap_err();
         assert!(err.contains("ccode note create"), "{err}");
+    }
+
+    #[test]
+    fn una_nota_en_pila_dice_cual_y_una_suelta_no() {
+        let mut stacked = note("note-1", "Plano");
+        stacked.note.stack = Some("note-0".into());
+        assert_eq!(describe(&stacked)["stack"], "note-0");
+        assert!(describe(&note("note-2", "Suelta")).get("stack").is_none());
     }
 
     #[test]

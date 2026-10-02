@@ -98,6 +98,12 @@ pub struct Note {
     /// Posición y tamaño: son del frontend, acá no se interpretan.
     #[serde(default, rename = "box")]
     pub r#box: Value,
+    /// La pila de notas a la que pertenece (las de una pila comparten caja y se ve la del
+    /// frente). Tiene que viajar acá: si no, guardar el canvas deshace las pilas.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub stack: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub front: Option<bool>,
 }
 
 /// Los ids de nota llevan este prefijo (el frontend los crea así): nunca chocan con un id
