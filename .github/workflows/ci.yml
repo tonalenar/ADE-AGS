@@ -53,4 +53,4 @@ jobs:
           bun run test
 
       - name: Tests de Rust
-        run: cd src-tauri && cargo test --lib
+        run: cd src-tauri && cargo test --lib --bin ccode

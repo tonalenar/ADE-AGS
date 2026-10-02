@@ -49,14 +49,14 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
               group flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left
               transition-colors duration-200
               ${isSelected
-                ? "border-blue-500 bg-linear-to-br from-blue-50 to-violet-50 dark:from-blue-500/10 dark:to-violet-500/10 shadow-sm"
+                ? "border-accent-500 bg-accent-50 dark:bg-accent-500/10 shadow-sm"
                 : "border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] hover:border-gray-300 dark:hover:border-white/20 hover:shadow-sm"}
             `}
           >
             <span className={`shrink-0 flex items-center justify-center w-9 h-9 rounded-lg
               transition-colors duration-200
               ${isSelected
-                ? "bg-blue-500/10 text-blue-600 dark:bg-blue-400/15 dark:text-blue-300"
+                ? "bg-accent-500/10 text-accent-600 dark:bg-accent-400/15 dark:text-accent-300"
                 : "bg-gray-200/70 text-gray-500 dark:bg-white/6 dark:text-gray-400 group-hover:text-gray-700 dark:group-hover:text-gray-200"}`}>
               <AgentIcon className="w-5 h-5" />
             </span>
@@ -65,7 +65,7 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
               <span className="flex items-center gap-1.5 min-w-0">
                 <span className={`truncate text-[12.5px] font-semibold transition-colors
                   ${isSelected
-                    ? "text-blue-700 dark:text-blue-300"
+                    ? "text-accent-700 dark:text-accent-300"
                     : "text-gray-800 dark:text-gray-100 group-hover:text-gray-900 dark:group-hover:text-white"}`}>
                   {agent.label}
                 </span>
@@ -78,7 +78,7 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
               </span>
               <span className={`truncate font-mono text-[10.5px] transition-colors
                 ${isSelected
-                  ? "text-blue-500/70 dark:text-blue-400/70"
+                  ? "text-accent-500/70 dark:text-accent-400/70"
                   : "text-gray-400 dark:text-white/35"}`}>
                 {agent.command}
               </span>

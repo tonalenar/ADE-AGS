@@ -284,20 +284,42 @@ pub fn mission_get(
 /// preguntarles versión y modelos.
 #[tauri::command]
 pub async fn mission_start(app: AppHandle, mission_id: String) -> Result<Mission, String> {
-    let db = db_of(&app)?;
-    tauri::async_runtime::spawn_blocking(move || {
-        let result = start(
-            &db,
-            &mission_id,
-            |request| crate::runs::route_lead_now(&db, request),
-            |lead| crate::runs::launch_lead(&app, lead),
-        );
-        // También si falló: un lead que no se pudo lanzar deja la misión en `failed`.
-        notify(&app, &mission_id);
-        result
-    })
-    .await
-    .map_err(|e| e.to_string())?
+    tauri::async_runtime::spawn_blocking(move || start_now(&app, &mission_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Arranca (o reintenta) una misión en el hilo actual. Bloquea: el ruteo puede sondear el
+/// roster. Lo usan la pantalla y la CLI (`ccode mission start|run`).
+pub(crate) fn start_now(app: &AppHandle, mission_id: &str) -> Result<Mission, String> {
+    let db = db_of(app)?;
+    let result = start(
+        &db,
+        mission_id,
+        |request| crate::runs::route_lead_now(&db, request),
+        |lead| crate::runs::launch_lead(app, lead),
+    );
+    // También si falló: un lead que no se pudo lanzar deja la misión en `failed`.
+    notify(app, mission_id);
+    result
+}
+
+/// Crea una misión en borrador. Para la CLI: la pantalla usa `mission_create`.
+pub(crate) fn create_now(app: &AppHandle, workspace_id: &str, input: &MissionInput) -> Result<Mission, String> {
+    let db = db_of(app)?;
+    let mission = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        create(&conn, workspace_id, input)?
+    };
+    notify(app, &mission.id);
+    Ok(mission)
+}
+
+/// El detalle de una misión: ella, sus runs y las tareas del run activo.
+pub(crate) fn detail_now(app: &AppHandle, mission_id: &str) -> Result<MissionDetail, String> {
+    let db = db_of(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    detail(&conn, mission_id)
 }
 
 /// Lo que entregó cada tarea aislada del run actual, y cómo va su revisión.

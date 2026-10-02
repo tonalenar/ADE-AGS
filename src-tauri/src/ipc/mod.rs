@@ -10,7 +10,7 @@
 
 pub mod bridge;
 pub mod cancel;
-mod commands;
+pub(crate) mod commands;
 pub mod install;
 pub mod mcp;
 pub mod protocol;
@@ -18,4 +18,5 @@ mod server;
 #[cfg(test)]
 mod test;
 
-pub use server::{cleanup, export_instance_env, start};
+pub use commands::routine::start_scheduler as start_routine_scheduler;
+pub use server::{cleanup, export_instance_env, other_instance_alive, start};

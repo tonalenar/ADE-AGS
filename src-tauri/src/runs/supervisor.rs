@@ -241,13 +241,22 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     // prompt no puede pasar por `cmd.exe` (ver `util::launch`).
     let program = crate::util::find_program(&launch.program)
         .unwrap_or_else(|| std::path::PathBuf::from(&launch.program));
-    let mut command = crate::util::external_command(&program, &launch.args)
+    let workspace = task_profile.as_ref().map_or_else(|| PathBuf::from(&task.cwd), |p| p.workspace());
+    // Ver `sandbox`: el agente escribe solo en su carpeta, su cuenta y los temporales.
+    let sandbox_mode = super::sandbox::Mode::from_db(&db);
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
+    let policy = super::sandbox::Policy::for_task(&workspace, read_only, &launch.env, home.as_deref());
+    let wrapped = super::sandbox::wrap(sandbox_mode, &program, &launch.args, &policy)?;
+    let mut command = crate::util::external_command(&wrapped.program, &wrapped.args)
         .map_err(|e| format!("no se pudo lanzar '{}': {e}", launch.program))?;
+    if sandbox_mode != super::sandbox::Mode::Off {
+        super::sandbox::scrub_env(&mut command);
+    }
     // Con una cuenta de la app, una API key heredada no le gana a su login.
     crate::agents::apply_account_env(&mut command, &launch.env);
     let mut command = tokio::process::Command::from(command);
     command
-        .current_dir(task_profile.as_ref().map_or_else(|| PathBuf::from(&task.cwd), |p| p.workspace()))
+        .current_dir(&workspace)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

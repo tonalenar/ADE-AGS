@@ -10,7 +10,14 @@ export interface AnnotatedCapture {
   url: string;
 }
 
-const oneLine = (s: string) => s.replace(/\s+/g, " ").trim();
+/**
+ * Una línea sin caracteres de control. Todo lo que sale de la página lo controla la página,
+ * y este texto se pega en la terminal del agente: un `\r` lo mandaría a mitad de camino y un
+ * ESC sería una secuencia de terminal. Con bracketed paste xterm ya neutraliza el ESC, pero
+ * no todas las TUIs lo usan.
+ */
+// eslint-disable-next-line no-control-regex
+const oneLine = (s: string) => s.replace(/\s+/g, " ").replace(/[\u0000-\u001f\u007f-\u009f]/g, "").trim();
 
 /**
  * El texto que recibe el agente por cada tanda de elementos marcados y capturas anotadas.
@@ -35,17 +42,17 @@ export function composePickMessage(
   const lines: string[] = [];
 
   if (elements.length > 0) {
-    const firstUrl = toDisplayUrl(elements[0].url);
+    const firstUrl = oneLine(toDisplayUrl(elements[0].url));
     lines.push(`The user marked ${elements.length} element(s) in ${firstUrl}:`, "");
     elements.forEach((el, i) => {
       const text = el.text ? ` «${oneLine(el.text)}»` : "";
-      lines.push(`${i + 1}. <${el.tag}>${text}`);
-      const url = toDisplayUrl(el.url);
+      lines.push(`${i + 1}. <${oneLine(el.tag)}>${text}`);
+      const url = oneLine(toDisplayUrl(el.url));
       // La página se repite solo si cambió: juntar elementos de dos pantallas es válido.
-      if (url !== firstUrl) lines.push(`   page: ${url}`);
-      if (el.component) lines.push(`   component: ${el.component.name} (${el.component.framework})`);
-      lines.push(`   selector: ${el.selector}`);
-      const attrs = Object.entries(el.attributes).map(([k, v]) => `${k}="${v}"`).join(" ");
+      if (url !== oneLine(firstUrl)) lines.push(`   page: ${url}`);
+      if (el.component) lines.push(`   component: ${oneLine(el.component.name)} (${oneLine(el.component.framework)})`);
+      lines.push(`   selector: ${oneLine(el.selector)}`);
+      const attrs = Object.entries(el.attributes).map(([k, v]) => `${oneLine(k)}="${oneLine(v)}"`).join(" ");
       if (attrs) lines.push(`   attributes: ${attrs}`);
       lines.push(`   html: ${oneLine(el.html)}`);
       lines.push("");

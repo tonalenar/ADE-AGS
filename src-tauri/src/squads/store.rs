@@ -159,7 +159,11 @@ fn assignment_status(
             Some(format!("{label} cannot run headless")),
         ));
     }
-    let installed = adapter.assumes_installed()
+    // En los tests, "instalado" no puede depender de la máquina que los corre: en la de
+    // desarrollo Claude Code y Codex están y en el CI no, y el mismo test pasaba en una y
+    // fallaba en la otra. Lo que se prueba acá son las demás reglas (cuenta, headless).
+    let installed = cfg!(test)
+        || adapter.assumes_installed()
         || crate::agents::agent_command(agent_id).is_some_and(crate::agents::command_exists);
     if !installed {
         return Ok((
