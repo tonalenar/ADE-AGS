@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AlertaToast, Button } from "neogestify-ui-components";
+import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { comparablePath } from "@/features/tabs/viewTabs";
@@ -29,8 +29,9 @@ const same = (a: string, b: string) => comparablePath(a).replace(/\/+$/, "") ===
  * piso no tiene ninguna, se abre un agente del mismo tipo que el activo: sin tab no hay
  * canvas que mostrar, y un piso vacío sin nada que hacer no sirve.
  *
- * No se borran desde acá: descartar un worktree con trabajo adentro no tiene vuelta atrás.
- * La ruta se ve al pasar el mouse, para quien quiera quitarlo con `git worktree remove`.
+ * Borrar un piso (la ×, con confirmación) descarta su worktree con las salvaguardas del
+ * backend: se niega si hay cambios sin commitear, y la rama con commits propios se conserva.
+ * Con agentes abiertos en el piso no se borra: se les sacaría la carpeta de debajo.
  */
 export function FloorBar({ inline = false }: { inline?: boolean }) {
   const { t } = useTranslation();
@@ -44,6 +45,13 @@ export function FloorBar({ inline = false }: { inline?: boolean }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const input = useRef<HTMLInputElement>(null);
+  /** El piso que espera confirmación de borrado (se desarma solo a los 3 s). */
+  const [armed, setArmed] = useState<string | null>(null);
+  useEffect(() => {
+    if (!armed) return;
+    const timer = window.setTimeout(() => setArmed(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [armed]);
 
   // La lista se vuelve a pedir al cambiar de carpeta y cuando algo crea un piso (un agente
   // con `ccode floor create`, otra ventana).
@@ -98,6 +106,28 @@ export function FloorBar({ inline = false }: { inline?: boolean }) {
     }
   };
 
+  const drop = async (floor: Floor) => {
+    if (armed !== floor.id) {
+      setArmed(floor.id);
+      return;
+    }
+    setArmed(null);
+    if (useTabsStore.getState().tabs.some((tab) => same(tab.cwd, floor.cwd))) {
+      AlertaToast(t("canvas.floor.title"), t("canvas.floor.inUse"), "warning", 6000);
+      return;
+    }
+    setBusy(true);
+    try {
+      const dropped = await invoke<{ name: string; branch: string; branchKept: boolean }>("floor_delete", { id: floor.id });
+      setList(await invoke<FloorList>("floor_list", { cwd: active.cwd }));
+      AlertaToast(t("canvas.floor.title"), t(dropped.branchKept ? "canvas.floor.deletedKept" : "canvas.floor.deleted", { name: dropped.name, branch: dropped.branch }), "info", 7000);
+    } catch (e) {
+      AlertaToast(t("canvas.floor.title"), String(e), "error", 9000);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const pill = (isActive: boolean) =>
     `cc-t h-6 px-2.5 rounded-md text-[11.5px] font-medium max-w-40 truncate
      ${isActive
@@ -114,10 +144,21 @@ export function FloorBar({ inline = false }: { inline?: boolean }) {
         {t("canvas.floor.ground")}
       </Button>
       {list.floors.map((floor) => (
-        <Button key={floor.id} variant="custom" className={pill(same(active.cwd, floor.cwd))}
-          onClick={() => enter(floor.cwd)} title={`${floor.branch}\n${floor.cwd}`}>
-          {floor.name}
-        </Button>
+        <span key={floor.id} className="group/floor relative inline-flex items-center">
+          <Button variant="custom" className={pill(same(active.cwd, floor.cwd))}
+            onClick={() => enter(floor.cwd)} title={`${floor.branch}\n${floor.cwd}`}>
+            {floor.name}
+          </Button>
+          <Button variant="custom" disabled={busy} onClick={() => void drop(floor)}
+            title={armed === floor.id ? t("canvas.floor.deleteConfirm") : t("canvas.floor.delete")}
+            aria-label={armed === floor.id ? t("canvas.floor.deleteConfirm") : t("canvas.floor.delete")}
+            className={`cc-t h-5 flex items-center justify-center rounded-md
+              ${armed === floor.id
+                ? "px-1.5 ml-0.5 text-[10.5px] font-medium text-white bg-red-500 hover:bg-red-600"
+                : "w-0 overflow-hidden opacity-0 group-hover/floor:w-5 group-hover/floor:opacity-100 text-gray-400 hover:text-red-500"}`}>
+            {armed === floor.id ? t("canvas.floor.deleteConfirm") : <CloseIcon className="w-2.5 h-2.5" />}
+          </Button>
+        </span>
       ))}
       {adding ? (
         <input

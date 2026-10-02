@@ -17,11 +17,14 @@
 //! - Las conexiones entre agentes valen entre pisos: un orquestador en la planta baja
 //!   recluta en un piso y habla con él (ver `canvas::peers_of`, que mira todos los canvas).
 //!
-//! ## Lo que NO hace
+//! ## Borrar un piso
 //!
-//! No borra pisos. Descartar un worktree con trabajo adentro no tiene vuelta atrás, y
-//! decidirlo es de la persona: la carpeta y la rama quedan donde están (la ruta se ve al
-//! listar) y se quitan con `git worktree remove`.
+//! Solo lo pide la persona, desde la pantalla (no hay comando de CLI: ningún agente borra
+//! pisos). Descartar un worktree con trabajo adentro no tiene vuelta atrás, así que se usa
+//! el mismo descarte seguro de las tareas (`runs::worktrees::remove`): se niega si hay
+//! cambios sin commitear y los lista, y la rama solo se borra si ya está mergeada; con
+//! commits propios queda, y se avisa. La pantalla además se niega si hay agentes abiertos
+//! en el piso.
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -193,6 +196,51 @@ pub fn create(cwd: &str, name: &str, start: Option<&str>) -> Result<Floor, Strin
     Ok(floor)
 }
 
+/// Saca un piso de la lista por id.
+pub fn take(floors: &mut Vec<Floor>, id: &str) -> Result<Floor, String> {
+    let at = floors.iter().position(|f| f.id == id).ok_or("Esse andar já não existe.")?;
+    Ok(floors.remove(at))
+}
+
+/// Lo que pasó al borrar un piso.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Dropped {
+    pub name: String,
+    pub branch: String,
+    /// La rama quedó porque tiene commits que no están en ningún otro lado.
+    pub branch_kept: bool,
+}
+
+/// Borra un piso: descarta su worktree (con las salvaguardas de `worktrees::remove`) y
+/// recién entonces lo saca de la lista. Si el descarte falla, el piso sigue donde estaba.
+pub fn remove(id: &str, skills_dir: &Path) -> Result<Dropped, String> {
+    let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
+    let mut floors = read_file();
+    let floor = floors.iter().find(|f| f.id == id).cloned().ok_or("Esse andar já não existe.")?;
+
+    // Las skills que la app montó en el piso (una carpeta por agente) estorban a git: son
+    // derivadas y se recrean solas.
+    for adapter in crate::agents::adapters() {
+        if let Some(dir) = crate::skills::links_dir_for(&floor.cwd, adapter.def().id) {
+            for link in crate::runs::worktrees::managed_links(&dir, skills_dir) {
+                let _ = crate::skills::remove_mount(&link);
+            }
+        }
+    }
+
+    let wt = crate::runs::worktrees::Worktree {
+        root: PathBuf::from(&floor.root),
+        task_cwd: PathBuf::from(&floor.cwd),
+        branch: floor.branch.clone(),
+    };
+    let removed = crate::runs::worktrees::remove(Path::new(&floor.ground), &wt, Path::new(""), skills_dir)?;
+
+    take(&mut floors, id)?;
+    write_file(&floors)?;
+    Ok(Dropped { name: floor.name, branch: floor.branch, branch_kept: removed.branch_kept })
+}
+
 /// Lo que ve el frontend de una planta baja: ella misma y sus pisos.
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -226,6 +274,20 @@ pub fn floor_create(app: tauri::AppHandle, cwd: String, name: String, from: Opti
     Ok(floor)
 }
 
+/// `async`: `git worktree remove` borra una carpeta entera.
+#[tauri::command(async)]
+pub fn floor_delete(app: tauri::AppHandle, id: String) -> Result<Dropped, String> {
+    use tauri::{Emitter, Manager};
+    let db = app.try_state::<crate::database::DbConnection>().ok_or("la base no está disponible")?.inner().clone();
+    let skills_dir = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        crate::skills::skills_dir_from_conn(&conn)?
+    };
+    let dropped = remove(&id, &skills_dir)?;
+    let _ = app.emit(CHANGED_EVENT, &id);
+    Ok(dropped)
+}
+
 #[cfg(test)]
 mod test {
     use super::*;
@@ -239,6 +301,15 @@ mod test {
             root: format!("/wt/{name}"),
             branch: format!("cc/{name}"),
         }
+    }
+
+    #[test]
+    fn se_saca_un_piso_por_id_y_uno_inexistente_se_dice() {
+        let mut floors = vec![floor("A", "/p"), floor("B", "/p")];
+        assert_eq!(take(&mut floors, "id-A").unwrap().name, "A");
+        assert_eq!(floors.len(), 1);
+        assert!(take(&mut floors, "id-A").unwrap_err().contains("já não existe"));
+        assert_eq!(floors[0].name, "B", "el otro no se toca");
     }
 
     #[test]

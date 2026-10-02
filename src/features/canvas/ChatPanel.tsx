@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { AIChatCard } from "./AIChatCard";
 import { unreadOf, useUnreadStore } from "./chatUnread";
 import { useActiveBoardKey, boardKey } from "./store";
 
@@ -152,46 +153,63 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="pointer-events-auto absolute right-3 bottom-16 w-[26rem] h-[min(34rem,70%)] flex flex-col rounded-lg
-      border border-gray-200 dark:border-white/10 bg-white/98 dark:bg-surface-raised/98 shadow-lg overflow-hidden">
-      <div className="flex items-center gap-1 px-2 h-9 shrink-0 border-b border-gray-200 dark:border-white/10">
-        <span className="px-1 text-[12.5px] font-medium text-gray-800 dark:text-gray-100">{t("canvas.chat.title")}</span>
-        <div className="flex-1 min-w-0 flex items-center gap-0.5 overflow-x-auto">
-          {agents.map((a) => (
-            <Button key={a.id} variant="custom" onClick={() => setTabId(a.id)}
-              className={`cc-t h-6 px-2 rounded-md text-[11.5px] font-medium shrink-0 max-w-32 truncate
-                ${a.id === currentId
-                  ? "bg-gray-100 dark:bg-white/12 text-gray-900 dark:text-white"
-                  : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"}`}>
-              {a.title}
-              {a.id !== currentId && unreadOf(unread[a.id]) > 0 && <Badge n={unreadOf(unread[a.id])} />}
-            </Button>
-          ))}
-        </div>
+    <AIChatCard
+      className="pointer-events-auto absolute right-3 bottom-16 w-[26rem] max-w-[calc(100%-1.5rem)] h-[min(34rem,70%)]"
+      title={t("canvas.chat.title")}
+      subtitle={current?.title ?? t("canvas.chat.subtitle")}
+      greeting={t("canvas.chat.greeting")}
+      prompt={t(current ? "canvas.chat.empty" : "canvas.chat.noAgents")}
+      placeholder={t("canvas.chat.composerPlaceholder")}
+      inputLabel={t("canvas.chat.placeholder", { name: current?.title ?? "" })}
+      sendLabel={t("canvas.chat.send")}
+      message={draft}
+      onMessageChange={setDraft}
+      onSend={() => void send()}
+      busy={sending}
+      disabled={!current}
+      composerHint={current && <span className="flex items-center gap-1.5">
+        <span className="h-1.5 w-1.5 rounded-full" style={{ background: THREAD_COLOR[thread] }} />
+        {t(`canvas.chat.thread.${thread}`)}
+      </span>}
+      actions={<>
+        <button type="button" onClick={load} disabled={!current} title={t("canvas.chat.refresh")} aria-label={t("canvas.chat.refresh")}
+          className="cc-t flex h-[30px] w-[30px] items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:text-gray-900 active:rotate-180 disabled:opacity-40 dark:border-white/12 dark:text-gray-400 dark:hover:text-white">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden>
+            <path d="M20 11a8 8 0 1 0-2.4 6.4M20 4v7h-7" />
+          </svg>
+        </button>
         <Button variant="custom" onClick={() => useUnreadStore.getState().setSound(!sound)} aria-pressed={sound}
           title={sound ? t("canvas.chat.soundOn") : t("canvas.chat.soundOff")} aria-label={sound ? t("canvas.chat.soundOn") : t("canvas.chat.soundOff")}
-          className="cc-t w-6 h-6 shrink-0 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+          className="cc-t w-[30px] h-[30px] shrink-0 flex items-center justify-center rounded-full text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5" aria-hidden>
             <path d="M11 5 6 9H3v6h3l5 4V5Z" />
             {sound ? <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" /> : <path d="m16 9 5 6M21 9l-5 6" />}
           </svg>
         </Button>
         <Button variant="custom" onClick={onClose} aria-label={t("canvas.chat.close")}
-          className="cc-t w-6 h-6 shrink-0 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
-          <CloseIcon className="w-3 h-3" />
+          className="cc-t w-[30px] h-[30px] shrink-0 flex items-center justify-center rounded-full text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">
+          <CloseIcon className="w-3.5 h-3.5" />
         </Button>
-      </div>
-
-      {!current ? (
-        <p className="p-4 text-[12px] leading-relaxed text-gray-500 dark:text-gray-400">{t("canvas.chat.noAgents")}</p>
-      ) : (
-        <>
-          <div className="flex items-center gap-1.5 px-3 h-8 shrink-0 border-b border-gray-100 dark:border-white/6">
+      </>}
+      toolbar={current && <div className="shrink-0 border-b border-gray-100 dark:border-white/6">
+        {agents.length > 1 && <div className="flex gap-1.5 overflow-x-auto px-5 pt-3 pb-1">
+          {agents.map((a) => (
+            <button key={a.id} type="button" onClick={() => setTabId(a.id)} title={a.title} aria-pressed={a.id === currentId}
+              className={`cc-t flex h-7 max-w-40 shrink-0 items-center rounded-full px-2.5 text-[11px] font-medium
+                ${a.id === currentId
+                  ? "bg-gray-900 text-white dark:bg-white dark:text-gray-950"
+                  : "bg-gray-100 text-gray-500 hover:bg-gray-200 dark:bg-white/6 dark:text-gray-400 dark:hover:bg-white/10"}`}>
+              <span className="truncate">{a.title}</span>
+              {a.id !== currentId && unreadOf(unread[a.id]) > 0 && <Badge n={unreadOf(unread[a.id])} />}
+            </button>
+          ))}
+        </div>}
+          <div className="flex items-center gap-2.5 px-5 h-11">
             {THREADS.map((th) => (
               <button key={th} type="button" onClick={() => setThread(th)}
                 title={`${t(`canvas.chat.thread.${th}`)}${counts[th] ? ` · ${counts[th]}` : ""}`}
                 aria-label={t(`canvas.chat.thread.${th}`)} aria-pressed={thread === th}
-                className="cc-t relative w-4 h-4 rounded-full"
+                className="cc-t relative w-4 h-4 rounded-full hover:scale-110"
                 style={{
                   background: THREAD_COLOR[th],
                   opacity: thread === th ? 1 : counts[th] ? 0.7 : 0.3,
@@ -204,15 +222,13 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
               </button>
             ))}
           </div>
-
-          <div className="flex-1 min-h-0 overflow-y-auto px-3 py-2 space-y-2">
-            {messages.length === 0 ? (
-              <p className="pt-6 text-center text-[12px] text-gray-400 dark:text-gray-500">{t("canvas.chat.empty")}</p>
-            ) : (
-              messages.map((m) => (
+      </div>}
+    >
+      {current && messages.length > 0 ? <div className="space-y-3" role="log" aria-label={t("canvas.chat.title")}>
+              {messages.map((m) => (
                 <div key={m.id} className={`flex flex-col ${m.kind === "user" ? "items-end" : "items-start"}`}>
                   <div
-                    className={`max-w-[85%] px-2.5 py-1.5 rounded-lg text-[12.5px] leading-snug whitespace-pre-wrap break-words
+                    className={`max-w-[85%] px-3 py-2 rounded-[16px] text-[12.5px] leading-relaxed whitespace-pre-wrap break-words
                       ${m.kind === "user"
                         ? "text-white"
                         : m.kind === "progress"
@@ -224,35 +240,10 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
                   </div>
                   <span className="mt-0.5 text-[10px] text-gray-400 dark:text-gray-500">{clock(m.at)}</span>
                 </div>
-              ))
-            )}
+              ))}
             <div ref={bottom} />
-          </div>
-
-          <div className="flex items-end gap-2 p-2 shrink-0 border-t border-gray-200 dark:border-white/10">
-            <textarea
-              value={draft}
-              onChange={(e) => setDraft(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                  e.preventDefault();
-                  void send();
-                }
-              }}
-              rows={2}
-              placeholder={t("canvas.chat.placeholder", { name: current.title })}
-              aria-label={t("canvas.chat.placeholder", { name: current.title })}
-              className="flex-1 resize-none rounded-md px-2 py-1.5 text-[12.5px] outline-none bg-gray-50 dark:bg-white/5
-                border border-gray-200 dark:border-white/10 focus:border-accent-400 text-gray-800 dark:text-gray-100"
-            />
-            <Button variant="custom" onClick={() => void send()} disabled={sending || !draft.trim()}
-              className="cc-t h-8 px-3 rounded-md text-[12px] font-medium text-white bg-accent-500 hover:bg-accent-600 disabled:opacity-40">
-              {sending ? "…" : t("canvas.chat.send")}
-            </Button>
-          </div>
-        </>
-      )}
-    </div>
+      </div> : undefined}
+    </AIChatCard>
   );
 }
 
