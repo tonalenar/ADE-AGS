@@ -345,7 +345,9 @@ pub fn parse_tree(xml: &str) -> Vec<UiNode> {
             clickable: attr(tag, "clickable") == "true",
             bounds,
         };
-        if (!node.label().is_empty() || node.clickable) && bounds[2] > bounds[0] && bounds[3] > bounds[1] {
+        // Un contenedor que solo tiene un id (`content`, `app_bar`) no dice nada: se queda solo lo que
+        // muestra texto, tiene descripción o se puede tocar.
+        if (!node.text.is_empty() || !node.desc.is_empty() || node.clickable) && bounds[2] > bounds[0] && bounds[3] > bounds[1] {
             out.push(node);
         }
     }

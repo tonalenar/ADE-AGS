@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.16.0
+version: 1.17.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -544,6 +544,31 @@ ccode portal console Docs --level errors
 - Not available on a portal: running JavaScript, uploading files, cookies and storage. A
   portal may be on any site; those stay with the user and the project browser tools.
 - There is no delete command: closing a portal stays with the user.
+
+### Android devices on the canvas
+
+An Android device is a node showing the screen of an emulator or a phone (USB debugging on),
+driven over `adb`. Like portals, you drive the ones **connected to you** (an orchestrator:
+those of its team), by name:
+
+```bash
+ccode devices                                  # yours, what adb sees, and the emulators (AVDs) you can start
+ccode device create Pixel --avd Pixel_8        # next to you, already connected
+ccode device start Pixel                       # boots its emulator and waits until it is ready
+ccode device launch Pixel com.android.settings # open an app by package name
+ccode device tree Pixel                        # one line per element: text, @(x,y) where to tap
+ccode device tap Pixel --text "Wi-Fi"          # finds the element by text/description/id, or --x 540 --y 1200
+ccode device swipe Pixel --dir up              # or --x1 --y1 --x2 --y2 [--ms 300]
+ccode device type Pixel "hello world"          # plain ASCII only (adb `input text`)
+ccode device key Pixel back                    # back, home, recents, enter, menu, power, delete…
+ccode device shot Pixel                        # returns the path of a PNG you can read
+```
+
+- Read `tree` (or take a `shot`) before tapping; `tap --text` is safer than guessing coordinates.
+- If more than one device is online, the user picks which one the node shows; with just one, it
+  is used automatically.
+- Not available: installing or uninstalling apps, shell access, file transfer. There is no delete
+  command: closing the node stays with the user.
 
 ### Telling the user
 
