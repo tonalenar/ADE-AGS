@@ -39,7 +39,7 @@ export function WorkspaceList({ workspaces, onSelect }: WorkspaceListProps) {
         </span>
         <Button variant="custom"
           onClick={() => navigate("/workspaces")}
-          className="text-[11px] font-medium text-blue-500 dark:text-blue-400 hover:underline inline-block"
+          className="text-[11px] font-medium text-accent-500 dark:text-accent-400 hover:underline inline-block"
         >
           {t("workspace.manage.link")}
         </Button>

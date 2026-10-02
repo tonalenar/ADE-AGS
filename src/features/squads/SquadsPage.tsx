@@ -67,7 +67,7 @@ export function SquadsPage() {
   };
 
   return (
-    <div className="flex flex-col h-full min-h-0 bg-white dark:bg-[#0b0f14]">
+    <div className="flex flex-col h-full min-h-0 bg-white dark:bg-surface-sunken">
       <div className="flex items-center gap-3 px-4 h-11 shrink-0 border-b border-gray-200 dark:border-white/8">
         <span className="flex-1 text-[13.5px] font-bold text-gray-900 dark:text-white">{t("squads.title")}</span>
         <span className="text-[10.5px] text-gray-400 dark:text-white/35">{t("squads.roleIsWork")}</span>
@@ -84,7 +84,7 @@ export function SquadsPage() {
           ) : squads.map((squad) => (
             <Button key={squad.id} variant="custom" onClick={() => setSelectedId(squad.id)} aria-pressed={selectedId === squad.id}
               className={`cc-t w-full flex flex-col items-stretch gap-1 px-3 py-2.5 text-left rounded-none border-b border-gray-100 dark:border-white/5
-                ${selectedId === squad.id ? "bg-blue-500/10" : "hover:bg-gray-100 dark:hover:bg-white/4"}`}>
+                ${selectedId === squad.id ? "bg-accent-500/10" : "hover:bg-gray-100 dark:hover:bg-white/4"}`}>
               <span className="flex items-center gap-2">
                 <span className="flex-1 truncate text-[12px] font-medium text-gray-900 dark:text-gray-100">{squad.name}</span>
                 {!squad.available && <span className="text-[9px] font-semibold text-amber-700 dark:text-amber-300">{t("squads.unavailable")}</span>}

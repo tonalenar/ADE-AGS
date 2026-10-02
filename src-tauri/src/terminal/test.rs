@@ -1,7 +1,7 @@
 //! Tests de la terminal: cómo se arma el lanzamiento y cómo se contiene el árbol de
 //! procesos de una tab.
 
-use super::pty_manager::{build_launch, launch_script};
+use super::pty_manager::{build_launch, launch_script, PARENT_SESSION_ENV};
 
 // ── Lanzamiento del agente ──────────────────────────────────────
 
@@ -422,4 +422,17 @@ fn un_caracter_partido_entre_lecturas_sale_entero() {
     // Un comienzo de secuencia que nunca se completa sale al cerrar.
     assert_eq!(stream.push(b"x\xe2\x94"), "x");
     assert_eq!(stream.finish(), "\u{fffd}");
+}
+
+// ── Variables heredadas de una sesión de Claude Code ────────────
+
+#[test]
+fn las_marcas_de_sesion_padre_no_pasan_a_los_terminales() {
+    // Sin esto el Claude de adentro se cree sesión hija y no guarda transcript.
+    assert!(PARENT_SESSION_ENV.contains(&"CLAUDE_CODE_CHILD_SESSION"));
+    assert!(PARENT_SESSION_ENV.contains(&"CLAUDE_CODE_SESSION_ID"));
+    // La configuración del usuario NO es una marca de sesión: no se toca.
+    for keep in ["ANTHROPIC_MODEL", "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"] {
+        assert!(!PARENT_SESSION_ENV.contains(&keep), "{keep}");
+    }
 }
