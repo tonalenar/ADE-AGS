@@ -118,3 +118,19 @@ describe("papeles", () => {
     expect(reconcile(b, ["t1"]).roles).toEqual({ t1: "QA" });
   });
 });
+
+describe("pisos", () => {
+  it("una conexión con un agente de otro piso sobrevive mientras ese agente siga abierto", () => {
+    // `t1` está en este canvas; `w1` es su recluta en otro piso (otro canvas).
+    let b = reconcile(emptyBoard(), ["t1"]);
+    b = addEdge(b, "t1", "w1", "e1");
+    expect(reconcile(b, ["t1"], ["t1", "w1"]).edges).toHaveLength(1);
+    expect(reconcile(b, ["t1"], ["t1"]).edges).toEqual([]);
+  });
+
+  it("sin el tercer argumento se comporta como antes", () => {
+    let b = reconcile(emptyBoard(), ["t1"]);
+    b = addEdge(b, "t1", "w1", "e1");
+    expect(reconcile(b, ["t1"]).edges).toEqual([]);
+  });
+});

@@ -36,6 +36,9 @@ pub fn run() {
             // Canvas de agentes: posiciones y conexiones
             crate::canvas::canvas_load,
             crate::canvas::canvas_save,
+            // Pisos: worktrees aislados del proyecto, cada uno con su canvas
+            crate::floors::floor_list,
+            crate::floors::floor_create,
             // Persistencia SQLite — workspaces (layouts guardados de ventanas/tabs)
             crate::database::db_list_workspaces,
             crate::database::db_save_workspace,

@@ -22,6 +22,7 @@ import {
   HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, terminalRect,
   type Box, type Rect, type Viewport,
 } from "./geometry";
+import { FloorBar } from "./FloorBar";
 import { boardKey, canvasActions, useActiveBoardKey, useCanvasStore } from "./store";
 
 interface AgentNodeData extends Record<string, unknown> {
@@ -204,7 +205,8 @@ function CanvasInner() {
     [noteNodes, portalNodes, agentNodes],
   );
 
-  const edges: Edge[] = useMemo(() => board.edges.map((e) => {
+  // Una conexión con un agente de otro piso no tiene punta en este canvas: no se dibuja.
+  const edges: Edge[] = useMemo(() => board.edges.filter((e) => boxOf(board, e.a) && boxOf(board, e.b)).map((e) => {
     const a = boxOf(board, e.a);
     const b = boxOf(board, e.b);
     // Sale por el lado que mira al otro nodo: la curva no cruza su propio nodo.
@@ -259,6 +261,9 @@ function CanvasInner() {
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} />
       </ReactFlow>
+      <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
+        <FloorBar />
+      </div>
       <CanvasControls zoom={vp.zoom}
         onAddPortal={() => {
           if (!key) return;

@@ -31,7 +31,7 @@ mod supervisor;
 #[cfg(test)]
 mod test;
 pub(crate) mod types;
-mod worktrees;
+pub(crate) mod worktrees;
 
 pub(crate) use adapters::{Codex, Gemini, Kimi, OpenCode};
 pub(crate) use agents::{ClaudeCode, HeadlessAgent};

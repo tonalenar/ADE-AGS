@@ -1683,5 +1683,13 @@
   "canvas.portalName": "Nombre del portal",
   "canvas.portalDelete": "Borrar portal",
   "canvas.portalDeleteConfirm": "¿Borrar?",
-  "canvas.role": "Rol: {{role}}"
+  "canvas.role": "Rol: {{role}}",
+  "canvas.floor.title": "Pisos",
+  "canvas.floor.ground": "Planta baja",
+  "canvas.floor.groundHint": "El proyecto original",
+  "canvas.floor.add": "+ Piso",
+  "canvas.floor.addHint": "Una copia aislada nueva del proyecto (worktree + rama) con su propio canvas.",
+  "canvas.floor.name": "Nombre del piso",
+  "canvas.floor.namePlaceholder": "Nombre del piso…",
+  "canvas.floor.noAgent": "No hay un agente disponible para abrir en este piso."
 }

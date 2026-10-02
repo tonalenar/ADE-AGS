@@ -5,6 +5,7 @@ mod app;
 mod ask;
 mod notes;
 mod notify;
+mod floor;
 mod peers;
 mod role;
 mod portals;

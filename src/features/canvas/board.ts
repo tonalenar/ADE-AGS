@@ -63,13 +63,16 @@ export function emptyBoard(): Board {
  * sería un permiso colgando). Devuelve el MISMO objeto si no cambió nada, para que quien
  * lo guarda no escriba por gusto.
  */
-export function reconcile(board: Board, tabIds: string[]): Board {
+export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = tabIds): Board {
   const open = new Set(tabIds);
   const kept = Object.entries(board.nodes).filter(([id]) => open.has(id));
   const missing = tabIds.filter((id) => !(id in board.nodes));
   // Las notas no se cierran con ninguna tab: una conexión con una nota vale mientras la
   // nota exista.
-  const alive = (id: string) => open.has(id) || id in board.notes || id in board.portals;
+  // Una conexión puede llegar a un agente de OTRO piso (otro canvas de la misma ventana):
+  // vale mientras ese agente siga abierto, aunque no tenga nodo acá.
+  const anywhere = new Set(allTabIds);
+  const alive = (id: string) => open.has(id) || anywhere.has(id) || id in board.notes || id in board.portals;
   const edges = board.edges.filter((e) => alive(e.a) && alive(e.b));
   const orchestrators = board.orchestrators.filter((id) => open.has(id));
   // El papel de una tab cerrada se va con ella.

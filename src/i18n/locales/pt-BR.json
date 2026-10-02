@@ -1683,5 +1683,13 @@
   "canvas.portalName": "Nome do portal",
   "canvas.portalDelete": "Apagar portal",
   "canvas.portalDeleteConfirm": "Apagar?",
-  "canvas.role": "Papel: {{role}}"
+  "canvas.role": "Papel: {{role}}",
+  "canvas.floor.title": "Andares",
+  "canvas.floor.ground": "Térreo",
+  "canvas.floor.groundHint": "O projeto original",
+  "canvas.floor.add": "+ Andar",
+  "canvas.floor.addHint": "Nova cópia isolada do projeto (worktree + branch) com o seu próprio canvas.",
+  "canvas.floor.name": "Nome do andar",
+  "canvas.floor.namePlaceholder": "Nome do andar…",
+  "canvas.floor.noAgent": "Não há um agente disponível para abrir neste andar."
 }

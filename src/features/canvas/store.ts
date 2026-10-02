@@ -176,7 +176,7 @@ function syncBoards(): void {
   const keys = new Set([...byKey.keys(), ...Object.keys(boards).filter((k) => k.startsWith(`${windowLabel}|`))]);
   for (const key of keys) {
     const current = boards[key] ?? emptyBoard();
-    const next = reconcile(current, byKey.get(key) ?? []);
+    const next = reconcile(current, byKey.get(key) ?? [], tabs.map((t) => t.id));
     if (next !== current || !(key in boards)) updateBoard(key, () => next);
   }
 }

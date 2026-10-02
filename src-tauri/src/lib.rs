@@ -8,6 +8,7 @@ mod canvas;
 mod app;
 mod database;
 mod explorer;
+mod floors;
 mod forge;
 mod graphify;
 pub mod ipc;

@@ -206,7 +206,12 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
     if name.trim().is_empty() {
         return Err("O agente novo precisa de um nome.".into());
     }
-    let taken = open_tabs(app)?.into_iter().any(|t| t.cwd == me.cwd && t.name.eq_ignore_ascii_case(name.trim()));
+    // Dónde corre el agente nuevo: aquí, o en el piso que se pida.
+    let cwd = match arg_str_opt(args, "floor").filter(|f| !f.trim().is_empty()) {
+        Some(wanted) => super::floor::recruit_cwd(&me.cwd, &wanted)?,
+        None => me.cwd.clone(),
+    };
+    let taken = open_tabs(app)?.into_iter().any(|t| t.cwd == cwd && t.name.eq_ignore_ascii_case(name.trim()));
     if taken {
         return Err(format!("Já existe um agente chamado '{name}' nesta pasta. Escolha outro nome."));
     }
@@ -218,7 +223,7 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         None => None,
     };
 
-    let mut create = json!({ "cwd": me.cwd, "agent": agent, "title": name, "window": me.window });
+    let mut create = json!({ "cwd": cwd, "agent": agent, "title": name, "window": me.window });
     if let Some(account) = arg_str_opt(args, "account") {
         create["account"] = json!(account);
     }
@@ -226,9 +231,9 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let tab_id = created.get("tabId").and_then(Value::as_str).ok_or("A aba foi criada sem id")?.to_string();
 
     let label = role.as_ref().map(|r| r.label.clone());
-    canvas_change(app, &me, "canvas.recruited", json!({ "cwd": me.cwd, "tabId": tab_id, "near": me.id, "role": label }))?;
+    canvas_change(app, &me, "canvas.recruited", json!({ "cwd": cwd, "tabId": tab_id, "near": me.id, "role": label }))?;
 
-    let mut out = json!({ "recruited": { "id": tab_id, "name": name, "agent": agent, "cwd": me.cwd } });
+    let mut out = json!({ "recruited": { "id": tab_id, "name": name, "agent": agent, "cwd": cwd } });
     let prompt = arg_str_opt(args, "prompt").filter(|p| !p.trim().is_empty());
     // Con papel, el agente siempre recibe un primer mensaje: sin tarea, espera la primera.
     if let Some(text) = first_message(role.as_ref(), prompt.as_deref(), &me.name) {

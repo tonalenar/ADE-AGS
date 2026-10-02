@@ -1683,5 +1683,13 @@
   "canvas.portalName": "Portal name",
   "canvas.portalDelete": "Delete portal",
   "canvas.portalDeleteConfirm": "Delete?",
-  "canvas.role": "Role: {{role}}"
+  "canvas.role": "Role: {{role}}",
+  "canvas.floor.title": "Floors",
+  "canvas.floor.ground": "Ground",
+  "canvas.floor.groundHint": "The original project",
+  "canvas.floor.add": "+ Floor",
+  "canvas.floor.addHint": "A new isolated copy of the project (worktree + branch) with its own canvas.",
+  "canvas.floor.name": "Floor name",
+  "canvas.floor.namePlaceholder": "Floor name…",
+  "canvas.floor.noAgent": "There is no agent available to open on this floor."
 }

@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.12.0
+version: 1.13.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -421,6 +421,28 @@ ccode peer disconnect Backend Tests
 - Coordinate, don't micromanage: give each recruit one clear task, use `peer ask` when you
   need the answer to continue and `peer tell` when you don't, and check on long work with
   `peer check` instead of asking again.
+
+### Floors
+
+A floor is an isolated copy of the project — its own git worktree on its own branch, with
+its own canvas. What a team does on a floor is invisible to the others until someone merges
+it, so use one for a risky refactor or a second line of work that must not collide with
+files others are editing. The original project is the **ground** floor.
+
+```bash
+ccode floors                                   # floors of this project, and which one you are on
+ccode floor create Refactor                    # orchestrator only; starts from HEAD
+ccode floor create Hotfix --from release/1.2   # or from a branch
+ccode peer recruit Lena --agent claude --floor Refactor --role backend
+ccode peer recruit Qa --agent codex --floor ground   # back on the original project
+```
+
+- Connections work across floors: you can `peer ask` a recruit on another floor, and it can
+  answer you. Notes and portals are per canvas, so share information across floors through
+  `peer tell` or the repository, not through a note.
+- A floor starts from the last commit, not from uncommitted changes in the ground folder.
+- There is no delete command: the folder and branch stay until the user removes them.
+- A floor is heavy (a full checkout). Don't create one for a small task.
 
 ### Notes on the canvas
 
