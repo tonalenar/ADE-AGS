@@ -3,6 +3,14 @@
 mod agents;
 mod app;
 mod ask;
+mod notes;
+mod notify;
+mod floor;
+pub mod chat;
+mod peers;
+pub mod routine;
+mod role;
+mod portals;
 mod browser;
 mod dispatch;
 mod events;

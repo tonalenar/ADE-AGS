@@ -4,6 +4,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
+import { useCanvasStore, useWorkMode } from "@/features/canvas/store";
 import {
   activate, agentKey, allGroups, closeGroup, createLayout, findGroup, focusGroup as focusInTree, isAgentKey, keyId,
   moveItem, parseLayout, reconcile, resize, split, viewKey, type SplitSide, type WorkspaceLayout,
@@ -328,6 +329,9 @@ export function placeStyle(rect: Rect | null): { position: "absolute"; left?: nu
     : { position: "absolute", inset: 0 };
 }
 
+/** El "grupo" de las terminales que ubica el canvas: no hay árbol que enfocar. */
+export const CANVAS_GROUP = "canvas";
+
 export interface Placement {
   groupId: string;
   /** `null` = sin dividir (o todavía sin medir): ocupa toda el área. */
@@ -355,6 +359,17 @@ export function usePlacements(): Placements {
     const view = s.views.find((v) => v.id === s.activeViewId);
     return view && comparablePath(view.cwd) === activeCwd ? view.id : null;
   });
+  const mode = useWorkMode();
+  const liveRects = useCanvasStore((s) => s.liveRects);
+
+  // En el canvas cada terminal va encima de su nodo, y se ven las que el canvas dice que
+  // están vivas (al 100 % y dentro del área). El teclado va a la del agente activo.
+  if (mode === "canvas") {
+    const visible = new Map<string, Placement>();
+    for (const [tabId, rect] of Object.entries(liveRects)) visible.set(agentKey(tabId), { groupId: CANVAS_GROUP, rect });
+    const focused = activeTabId ? agentKey(activeTabId) : null;
+    return { visible, focusedItem: focused && visible.has(focused) ? focused : null };
+  }
 
   if (!layout) {
     const focusedItem = activeViewId ? viewKey(activeViewId) : activeTabId ? agentKey(activeTabId) : null;

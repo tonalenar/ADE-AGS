@@ -122,6 +122,17 @@ fn mission_status(db: &DbConnection, id: &str) -> Option<(String, String)> {
     conn.query_row("SELECT status, title FROM missions WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).ok()
 }
 
+/// Un aviso que pide un agente o una rotina (`ccode notify`, un recordatorio): el mismo
+/// aviso del sistema que usan las misiones, con las mismas reglas — solo si ninguna ventana
+/// tiene el foco y no se apagó en la configuración. Devuelve si se mostró.
+pub fn show_custom(app: &AppHandle, title: &str, body: &str) -> bool {
+    let Some(db) = app.try_state::<DbConnection>() else { return false };
+    if !enabled(&db) || app_focused(app) {
+        return false;
+    }
+    app.notification().builder().title(title).body(body).show().is_ok()
+}
+
 /// Arranca el notificador en su propio hilo. Empieza desde lo que se publique de acá en
 /// adelante: lo que pasó antes de abrir la app no es noticia.
 pub fn start(app: AppHandle) {

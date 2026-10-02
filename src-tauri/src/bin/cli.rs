@@ -45,6 +45,64 @@ TABS
                                               así se sigue la conversación con
                                               una tab que ya está abierta
 
+AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
+  peers                                       Quién está conectado con vos
+  peer ask <nombre> \"...\" [--timeout 600]    Le pregunta y ESPERA su respuesta
+  peer tell <nombre> \"...\"                    Le avisa algo, sin esperar
+  peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'  Le pregunta a varios A LA VEZ y espera a todos
+  peer check <nombre> [--lines 60]            Lo que se ve ahora en su terminal
+  notify \"mensaje\"                            Avisa al usuario (aviso en pantalla; barra de tareas)
+  Solo orquestadores (corona en el canvas):
+  peer recruit <nombre> --agent <id>          Abre un agente nuevo, ya conectado
+              [--prompt \"...\"] [--account <n>]  · con su primera tarea
+              [--role <papel>]                  · con un papel (ver roles)
+              [--floor <piso>]                  · en ese piso (o `ground`, la planta baja)
+  peer connect <a> <b>                        Conecta dos agentes del equipo
+  peer disconnect <a> <b>                     Los desconecta
+
+PORTALES DEL CANVAS — navegadores conectados con esta terminal (orquestador: los del equipo)
+  portals                                     Los portales que manejás
+  portal create [<nombre>] [<url>]            Crea uno a tu lado, ya conectado
+  portal navigate <portal> <url>              Va a una URL
+  portal snapshot <portal> [--full]           El árbol de la página, con refs (@e3)
+  portal click|hover <portal> <@ref|selector>
+  portal type <portal> <@ref> \"texto\" [--clear] [--submit]
+  portal press <portal> <tecla> [--target <ref>]   · scroll · select · wait · history
+  portal screenshot|console|layout <portal>   Foto, consola y medidas
+                                              (sin eval, upload ni cookies: eso es del usuario)
+
+CHAT CON EL USUARIO — su chat por hilos (siete colores); lo que escribís en la terminal NO le llega
+  say \"texto\" [--progress] [--thread <color>]  Le contestás en el chat (--progress: aviso, tu turno sigue)
+      [--file <ruta>]                         · el texto desde un archivo
+  recall [<color>|list] [--turns 10 | --all]  Lo que se habló en un hilo (list: los hilos con actividad)
+
+ROTINAS — mensajes a la hora, a vos, a un agente que alcanzás o al usuario
+  routines                                    Las tuyas (en un shell: todas)
+  routine create <nombre> \"texto\" <cuándo>   · --every 30m | --at 09:00 [--days seg,qua] | --in 45m
+              [--to <agente>] [--remind]      · a quién: vos (default), otro agente, o --remind al usuario
+  routine show|run|enable|disable|delete <nombre>
+  routine edit <nombre> [\"texto\"] [--rename <n>] [<cuándo>]
+                                              (mínimo 5 min; no recupera lo que pasó con la app cerrada)
+
+PISOS — copias aisladas del proyecto (worktree + rama + canvas propio)
+  floors                                      Los pisos de este proyecto y en cuál estás
+  floor create <nombre> [--from <rama>]       Solo orquestadores; parte de HEAD o de esa rama
+                                              (borrarlos queda en manos del usuario)
+
+PAPELES (para recrutar con --role)
+  roles                                       Los papeles: catálogo + los del usuario
+  role show <papel>                           Sus instrucciones
+  role create <nombre> \"instrucciones\"        Solo orquestadores; también --file <ruta>
+  role edit <papel> \"instrucciones\" [--name]  Solo orquestadores; el catálogo no se edita
+
+NOTAS DEL CANVAS — las conectadas con esta terminal (orquestador: las del equipo)
+  notes                                       Las notas que alcanzás
+  note create [\"texto\"] [--name <n>]          Crea una nota a tu lado, ya conectada
+              [--file <ruta>]                 · el contenido desde un archivo
+  note read <nota> [desde] [cantidad]         La lee con números de línea
+  note write <nota> \"texto\" [--file <ruta>]   Reemplaza todo el contenido
+  note edit <nota> \"viejo\" \"nuevo\"           Cambia un trecho que aparece UNA vez
+
 OBSERVAR TABS (modo push — evita el polling)
   watch add <id> [--idle 20]                  Empieza a observar una tab
   watch remove <id>                           Deja de observarla
@@ -217,6 +275,10 @@ fn main() -> ExitCode {
         }
     };
 
+    // Quién pregunta: la app le pone `ADE_TAB_ID` a cada terminal. Sin eso, la regla de
+    // "solo a los conectados" no tendría contra qué comparar.
+    let parsed = with_caller(&command, parsed);
+
     match send(&command, parsed) {
         Ok(response) => {
             let body = if response.ok {
@@ -254,6 +316,18 @@ impl CliError {
     }
 }
 
+/// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
+fn with_caller(command: &str, mut parsed: Value) -> Value {
+    const GROUPS: [&str; 9] = ["peer.", "note.", "portal.", "notify.", "role.", "floor.", "routine.", "say.", "recall."];
+    if !GROUPS.iter().any(|g| command.starts_with(g)) || parsed.get("from").is_some() {
+        return parsed;
+    }
+    if let (Ok(tab), Some(map)) = (std::env::var("ADE_TAB_ID"), parsed.as_object_mut()) {
+        map.insert("from".into(), Value::String(tab));
+    }
+    parsed
+}
+
 /// Grupos que se escriben solos porque tienen una sola acción útil.
 fn shortcut(word: &str) -> Option<&'static str> {
     match word {
@@ -261,6 +335,17 @@ fn shortcut(word: &str) -> Option<&'static str> {
         "accounts" => Some("account.list"),
         "prelaunch" => Some("prelaunch.list"),
         "skills" => Some("skill.list"),
+        "peers" => Some("peer.list"),
+        "notes" => Some("note.list"),
+        "portals" => Some("portal.list"),
+        // `ccode notify "terminé"`: avisar es lo único que se hace con eso.
+        "notify" => Some("notify.send"),
+        "roles" => Some("role.list"),
+        "floors" => Some("floor.list"),
+        "routines" => Some("routine.list"),
+        // `ccode say "pronto"`: hablarle al usuario es lo único que se hace con `say`.
+        "say" => Some("say.send"),
+        "recall" => Some("recall.get"),
         _ => None,
     }
 }
@@ -287,6 +372,38 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" => &["mission"],
         "mission.accept" => &["mission", "task"],
         "approval.decide" => &["approval"],
+        // `ccode peer ask Revisor "..."`: el nombre del agente y después el mensaje.
+        "peer.ask" | "peer.tell" => &["to", "text"],
+        "peer.check" => &["to"],
+        "peer.recruit" => &["name"],
+        "peer.connect" | "peer.disconnect" => &["a", "b"],
+        // `ccode note read Plano 10 20`: desde la línea 10, 20 líneas.
+        "notify.send" => &["message"],
+        // `ccode role create "Revisor" "Procure falhas..."`; el texto también va con --file.
+        "floor.create" => &["name"],
+        "say.send" => &["text"],
+        "recall.get" => &["thread"],
+        // `ccode routine create Testes "rode os testes" --at 09:00`
+        "routine.create" => &["name", "text"],
+        "routine.edit" => &["name", "text"],
+        "routine.show" | "routine.enable" | "routine.disable" | "routine.run" | "routine.delete" => &["name"],
+        "role.show" => &["role"],
+        "role.create" => &["name", "content"],
+        "role.edit" => &["role", "content"],
+        "note.create" => &["content"],
+        "note.read" => &["name", "start", "count"],
+        "note.write" => &["name", "content"],
+        "note.edit" => &["name", "old", "new"],
+        // `ccode portal click Web @e3`: el portal primero, después lo que cada acción pide.
+        "portal.create" => &["name", "url"],
+        "portal.navigate" => &["name", "url"],
+        "portal.history" => &["name", "action"],
+        "portal.click" | "portal.hover" => &["name", "target"],
+        "portal.type" => &["name", "target", "text"],
+        "portal.press" => &["name", "key"],
+        "portal.select" => &["name", "target", "value"],
+        "portal.scroll" | "portal.wait" | "portal.snapshot" | "portal.screenshot" | "portal.console"
+        | "portal.layout" => &["name"],
         _ => &[],
     }
 }
@@ -420,7 +537,7 @@ fn value_for(key: &str, raw: &str) -> Value {
         ),
         // Un número mal escrito se manda tal cual como string: el backend lo rechaza con
         // un mensaje que nombra el flag, mejor que un "0" silencioso acá.
-        "lines" | "timeout" | "max" | "idle" => {
+        "lines" | "timeout" | "max" | "idle" | "start" | "count" | "turns" => {
             raw.parse::<u64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.into()))
         }
         _ => Value::String(raw.to_string()),
@@ -469,6 +586,19 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             let requested = args.pointer("/args/timeout_s").and_then(Value::as_u64).unwrap_or(300).clamp(10, 1800);
             Duration::from_secs(requested + 30)
         }
+        // `peer ask` espera el turno entero del otro agente; antes de escribirle espera hasta
+        // 60s a que se calle (no se interrumpe a quien está trabajando).
+        "peer.ask" => {
+            let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(600).clamp(10, 3600);
+            Duration::from_secs(requested + 90)
+        }
+        "peer.tell" => Duration::from_secs(90),
+        // Cargar una página o esperar un texto puede tardar; el backend corta a los 90 s.
+        c if c.starts_with("portal.") => Duration::from_secs(120),
+        // `routine run` espera a que el agente de destino se calle (hasta 60 s).
+        "routine.run" => Duration::from_secs(120),
+        // Abrir la tab, esperar su PTY (15s) y que arranque (25s) antes de darle la tarea.
+        "peer.recruit" => Duration::from_secs(120),
         // Validar un plan puede sondear el roster (lanzar `opencode models`) y crear worktrees.
         "run.plan" | "run.addTask" | "run.roster" => Duration::from_secs(120),
         "run.approve" => {

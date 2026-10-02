@@ -20,6 +20,7 @@ import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
 import { CloneRepoDialog } from "@/features/forge/CloneRepoDialog";
+import { AccountsCard, AttentionCard, HomeHeader, OpenAgentsCard } from "@/features/workspaces/HomeCards";
 
 export function HomePage() {
   const { t } = useTranslation();
@@ -86,26 +87,25 @@ export function HomePage() {
   };
 
   return (
-    <div className="cc-scroll flex flex-col items-center h-full px-6 py-12
-      bg-gray-50 dark:bg-gray-950">
+    <div className="@container cc-scroll h-full px-6 py-10 bg-gray-50 dark:bg-surface">
 
-      <div className="w-full max-w-xl flex flex-col gap-8">
+      {/* A central de comando: à esquerda o que se FAZ (lançar um agente, reabrir um
+          workspace); à direita o que ESTÁ acontecendo (quem espera você, quem está aberto,
+          com que conta). Em tela estreita a coluna da direita desce para baixo. */}
+      <div className="w-full max-w-5xl mx-auto flex flex-col gap-8">
 
-        {/* Header */}
-        <div className="flex flex-col gap-1.5 w-full items-center text-center">
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent
-            bg-linear-to-r from-blue-600 to-violet-600
-            dark:from-blue-400 dark:to-violet-400">
-            {t("app.title")}
-          </h1>
-          <p className="text-sm text-gray-500 dark:text-gray-400">
-            {t("app.subtitle")}
-          </p>
-        </div>
+        <HomeHeader />
+
+        <div className="grid gap-6 items-start @3xl:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="flex flex-col gap-6 min-w-0">
+
+        <h2 className="-mb-3 text-[11px] font-semibold uppercase tracking-widest text-gray-400 dark:text-gray-500">
+          {t("home.card.newAgent")}
+        </h2>
 
         {/* Open project card */}
-        <div className="w-full rounded-xl border border-gray-200 dark:border-gray-700
-          bg-white dark:bg-gray-800/50 p-6 flex flex-col gap-7 shadow-sm">
+        <div className="w-full rounded-xl border border-gray-200 dark:border-white/8
+          bg-white dark:bg-surface-raised p-6 flex flex-col gap-7">
 
           {/* Folder */}
           <div className="flex flex-col gap-3">
@@ -207,6 +207,15 @@ export function HomePage() {
         {workspaces.length > 0 && (
           <WorkspaceList workspaces={workspaces} onSelect={handleSelectWorkspace} />
         )}
+
+        </div>
+
+        <aside className="flex flex-col gap-4">
+          <AttentionCard />
+          <OpenAgentsCard />
+          <AccountsCard />
+        </aside>
+        </div>
 
       </div>
 

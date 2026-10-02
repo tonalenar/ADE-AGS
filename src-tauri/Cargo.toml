@@ -48,6 +48,8 @@ tokio = { version = "1", features = ["full"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Utils
+# Horas locales para las rotinas (ya llegaba como dependencia transitiva).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 uuid = { version = "1", features = ["v4"] }
 dirs = "5"
 url = "2"

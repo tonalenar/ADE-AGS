@@ -15,9 +15,13 @@ interface UiState {
   /** Columna de repositorios del marketplace plegada, para que las skills se lleven
    *  todo el ancho: gestionar repos es algo que se hace de vez en cuando. */
   marketplaceReposCollapsed: boolean;
+  /** Riel con los nombres de cada sección al lado del ícono, en vez de solo íconos. */
+  railExpanded: boolean;
   settingsOpen: boolean;
   /** Las cuentas son su propia pantalla, no una sección de Configuración. */
   accountsOpen: boolean;
+  /** La paleta de comandos (Ctrl+K). */
+  paletteOpen: boolean;
 
   toggleWorkspaces: () => void;
   toggleExplorer: () => void;
@@ -32,13 +36,15 @@ interface UiState {
   toggleMarketplaceRepos: () => void;
   setSettingsOpen: (open: boolean) => void;
   setAccountsOpen: (open: boolean) => void;
+  toggleRail: () => void;
+  setPaletteOpen: (open: boolean) => void;
 }
 
 const KEY = "cc-ui-panels";
 
 /** Se recuerda entre arranques: que un panel que plegaste vuelva abierto cada vez es de
  *  las cosas que más molestan de una app de trabajo. */
-function load(): Pick<UiState, "workspacesCollapsed" | "explorerCollapsed" | "explorerView" | "marketplaceReposCollapsed"> {
+function load(): Pick<UiState, "workspacesCollapsed" | "explorerCollapsed" | "explorerView" | "marketplaceReposCollapsed" | "railExpanded"> {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
@@ -48,12 +54,13 @@ function load(): Pick<UiState, "workspacesCollapsed" | "explorerCollapsed" | "ex
         explorerCollapsed: Boolean(parsed.explorerCollapsed),
         explorerView: VIEWS.includes(parsed.explorerView as ExplorerView) ? parsed.explorerView as ExplorerView : "files",
         marketplaceReposCollapsed: Boolean(parsed.marketplaceReposCollapsed),
+        railExpanded: Boolean(parsed.railExpanded),
       };
     }
   } catch {
     /* localStorage puede fallar o traer basura; los valores por defecto sirven igual */
   }
-  return { workspacesCollapsed: false, explorerCollapsed: false, explorerView: "files", marketplaceReposCollapsed: false };
+  return { workspacesCollapsed: false, explorerCollapsed: false, explorerView: "files", marketplaceReposCollapsed: false, railExpanded: false };
 }
 
 function persist(state: UiState) {
@@ -63,6 +70,7 @@ function persist(state: UiState) {
       explorerCollapsed: state.explorerCollapsed,
       explorerView: state.explorerView,
       marketplaceReposCollapsed: state.marketplaceReposCollapsed,
+      railExpanded: state.railExpanded,
     }));
   } catch {
     /* no poder recordarlo no es motivo para no plegarlo */
@@ -73,6 +81,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   ...load(),
   settingsOpen: false,
   accountsOpen: false,
+  paletteOpen: false,
 
   toggleWorkspaces: () => {
     set({ workspacesCollapsed: !get().workspacesCollapsed });
@@ -92,4 +101,9 @@ export const useUiStore = create<UiState>((set, get) => ({
   },
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setAccountsOpen: (accountsOpen) => set({ accountsOpen }),
+  toggleRail: () => {
+    set({ railExpanded: !get().railExpanded });
+    persist(get());
+  },
+  setPaletteOpen: (paletteOpen) => set({ paletteOpen }),
 }));
