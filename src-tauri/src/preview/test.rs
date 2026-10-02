@@ -1257,3 +1257,19 @@ fn el_proxy_rechaza_otros_hosts_y_otros_origenes() {
     assert!(request_is_ours(&req("localhost:4100", Some("null"), false), 4100));
     assert!(!request_is_ours(&req("localhost:4100", Some("null"), true), 4100));
 }
+
+#[test]
+fn un_post_sin_cuerpo_viaja_con_content_length_cero() {
+    use super::proxy::needs_zero_length;
+    use hyper::body::Bytes;
+    use hyper::Method;
+    let empty = Bytes::new();
+    for m in [Method::POST, Method::PUT, Method::PATCH] {
+        assert!(needs_zero_length(&m, &empty), "{m}");
+    }
+    // GET/HEAD/DELETE no llevan cuerpo y no necesitan el encabezado; con cuerpo, el cliente lo pone.
+    for m in [Method::GET, Method::HEAD, Method::DELETE, Method::OPTIONS] {
+        assert!(!needs_zero_length(&m, &empty), "{m}");
+    }
+    assert!(!needs_zero_length(&Method::POST, &Bytes::from_static(b"x=1")));
+}
