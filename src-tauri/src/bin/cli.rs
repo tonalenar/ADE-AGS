@@ -98,6 +98,7 @@ PAPELES (para recrutar con --role)
 NOTAS DEL CANVAS — las conectadas con esta terminal (orquestador: las del equipo)
   notes                                       Las notas que alcanzás
   note create [\"texto\"] [--name <n>]          Crea una nota a tu lado, ya conectada
+              [--stack <nota>]                · en vez de al lado: dentro de la pila de esa nota (comparten lugar)
               [--file <ruta>]                 · el contenido desde un archivo
   note read <nota> [desde] [cantidad]         La lee con números de línea
   note write <nota> \"texto\" [--file <ruta>]   Reemplaza todo el contenido

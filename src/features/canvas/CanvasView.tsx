@@ -18,7 +18,7 @@ import type { BrowserView } from "@/features/tabs/viewTabs";
 import type { Tab } from "@/features/tabs/types";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 
-import {
+import { isHiddenNote, shownNote, stackMembers,
   NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isFreeNodeId, neighbors, thin, type CanvasNote, type CanvasPortal, type Stroke,
 } from "./board";
 import { CanvasToolbar, type DrawStyle, type Tool } from "./CanvasToolbar";
@@ -54,6 +54,10 @@ interface NoteNodeData extends Record<string, unknown> {
   id: string;
   note: CanvasNote;
   links: number;
+  /** Las notas de su pila (incluida ella), si está apilada. */
+  stack: { id: string; name: string }[];
+  /** Las demás notas que se ven: a cuáles se puede juntar. */
+  others: { id: string; name: string }[];
 }
 
 type NoteFlowNode = Node<NoteNodeData, "note">;
@@ -119,7 +123,10 @@ const boxSig = (b: { x: number; y: number; w: number; h: number }) => `${b.x},${
 const agentSig = (n: AgentFlowNode) =>
   [n.id, n.data.tab.title, n.data.tab.agentId, n.data.tab.agentLabel, boxSig(n.data.box), n.selected, n.data.live,
     n.data.links, n.data.orchestrator, n.data.role].join("|");
-const noteSig = (n: NoteFlowNode) => [n.id, n.data.note.name, boxSig(n.data.note.box), n.selected, n.data.links, n.data.note.content].join("|");
+const noteSig = (n: NoteFlowNode) => [
+  n.id, n.data.note.name, boxSig(n.data.note.box), n.selected, n.data.links, n.data.note.content,
+  n.data.stack.map((s) => s.id + s.name).join(","), n.data.others.map((o) => o.id + o.name).join(","),
+].join("|");
 const portalSig = (n: PortalFlowNode) =>
   [n.id, n.data.portal.name, n.data.portal.url, boxSig(n.data.portal.box), n.selected, n.data.links, n.data.cwd].join("|");
 
@@ -244,7 +251,8 @@ function CanvasInner() {
     // `focusNode` cambia con cada render y no aporta nada nuevo al nodo.
   }), [tabs, board, activeTabId, live]);
 
-  const rawNoteNodes: NoteFlowNode[] = useMemo(() => Object.entries(board.notes).map(([id, note]) => ({
+  // Las notas tapadas por otra de su pila no se dibujan: se ve la del frente.
+  const rawNoteNodes: NoteFlowNode[] = useMemo(() => Object.entries(board.notes).filter(([id]) => !isHiddenNote(board, id)).map(([id, note]) => ({
     id,
     type: "note" as const,
     position: { x: note.box.x, y: note.box.y },
@@ -252,7 +260,14 @@ function CanvasInner() {
     height: note.box.h,
     selected: id === selectedNote,
     deletable: false,
-    data: { id, note, links: neighbors(board, id).length },
+    data: {
+      id,
+      note,
+      // Las conexiones de toda la pila se cuentan en la del frente.
+      links: stackMembers(board, note.stack).concat(note.stack ? [] : [id]).reduce((n, m) => n + neighbors(board, m).length, 0),
+      stack: stackMembers(board, note.stack).map((m) => ({ id: m, name: board.notes[m].name })),
+      others: Object.entries(board.notes).filter(([oid]) => oid !== id && !isHiddenNote(board, oid)).map(([oid, o]) => ({ id: oid, name: o.name })),
+    },
   })), [board, selectedNote]);
 
   const portalCwd = tabs[0]?.cwd ?? "";
@@ -316,13 +331,22 @@ function CanvasInner() {
   );
 
   // Una conexión con un agente de otro piso no tiene punta en este canvas: no se dibuja.
-  const edges: Edge[] = useMemo(() => board.edges.filter((e) => boxOf(board, e.a) && boxOf(board, e.b)).map((e) => {
-    const a = boxOf(board, e.a);
-    const b = boxOf(board, e.b);
-    // Sale por el lado que mira al otro nodo: la curva no cruza su propio nodo.
-    const [sourceHandle, targetHandle] = a && b ? facingSides(a, b) : ["r", "l"];
-    return { id: e.id, source: e.a, target: e.b, sourceHandle, targetHandle, type: "link" };
-  }), [board]);
+  // La punta en una nota tapada se dibuja en la del frente de su pila.
+  const edges: Edge[] = useMemo(() => {
+    const seen = new Set<string>();
+    return board.edges.filter((e) => boxOf(board, e.a) && boxOf(board, e.b)).flatMap((e) => {
+      const source = shownNote(board, e.a);
+      const target = shownNote(board, e.b);
+      const pair = [source, target].sort().join("|");
+      if (source === target || seen.has(pair)) return [];
+      seen.add(pair);
+      const a = boxOf(board, source);
+      const b = boxOf(board, target);
+      // Sale por el lado que mira al otro nodo: la curva no cruza su propio nodo.
+      const [sourceHandle, targetHandle] = a && b ? facingSides(a, b) : ["r", "l"];
+      return [{ id: e.id, source, target, sourceHandle, targetHandle, type: "link" } as Edge];
+    });
+  }, [board]);
 
   const onNodesChange = (changes: NodeChange<FlowNode>[]) => {
     if (!key) return;
@@ -623,7 +647,7 @@ function Preview({ tabId, rows, onOpen }: { tabId: string; rows: number; onOpen:
 const NoteNode = memo(function NoteNode({ data, selected }: NodeProps<NoteFlowNode>) {
   const { t } = useTranslation();
   const key = useActiveBoardKey();
-  const { id, note, links } = data;
+  const { id, note, links, stack, others } = data;
   const [armed, setArmed] = useState(false);
   const handle = "w-2.5! h-2.5! border-2! border-white! dark:border-surface-deep! bg-amber-400! dark:bg-amber-500!";
 
@@ -669,6 +693,28 @@ const NoteNode = memo(function NoteNode({ data, selected }: NodeProps<NoteFlowNo
             ⇄ {links}
           </span>
         )}
+        {/* Juntar con otra nota: un `select` nativo, porque el menú propio lo cortaría el borde del nodo. */}
+        {others.length > 0 && (
+          <select
+            value=""
+            onChange={(e) => key && e.target.value && canvasActions.stackNote(key, id, e.target.value)}
+            title={t("canvas.stack.join")}
+            aria-label={t("canvas.stack.join")}
+            className="nodrag shrink-0 w-6 h-6 rounded-md text-[11px] text-center cursor-pointer outline-none appearance-none
+              bg-transparent text-gray-500 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-amber-200/60 dark:hover:bg-white/8"
+          >
+            <option value="">⧉</option>
+            {others.map((o) => <option key={o.id} value={o.id}>{t("canvas.stack.onto", { name: o.name })}</option>)}
+          </select>
+        )}
+        {note.stack && (
+          <Button variant="custom" onClick={() => key && canvasActions.unstackNote(key, id)}
+            title={t("canvas.stack.release")} aria-label={t("canvas.stack.release")}
+            className="nodrag cc-t shrink-0 w-6 h-6 flex items-center justify-center rounded-md text-[12px] text-gray-500
+              hover:text-gray-800 dark:hover:text-gray-200 hover:bg-amber-200/60 dark:hover:bg-white/8">
+            ⇱
+          </Button>
+        )}
         <Button variant="custom"
           onClick={() => {
             if (!key) return;
@@ -685,6 +731,22 @@ const NoteNode = memo(function NoteNode({ data, selected }: NodeProps<NoteFlowNo
           {armed ? t("canvas.noteDeleteConfirm") : <CloseIcon className="w-3 h-3" />}
         </Button>
       </div>
+
+      {/* Las solapas de la pila: cada nota con su nombre; la del frente, marcada. */}
+      {stack.length > 1 && (
+        <div className="nodrag nowheel flex items-center gap-0.5 px-1.5 pt-1 shrink-0 overflow-x-auto
+          border-b border-amber-200 dark:border-amber-100/10 bg-amber-100/40 dark:bg-amber-100/3">
+          {stack.map((m) => (
+            <button key={m.id} type="button" onClick={() => key && canvasActions.bringNoteToFront(key, m.id)}
+              className={`shrink-0 max-w-28 truncate px-2 h-5 rounded-t-md text-[10.5px]
+                ${m.id === id
+                  ? "bg-amber-50 dark:bg-amber-950/60 text-gray-900 dark:text-white font-medium"
+                  : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200 hover:bg-amber-200/50 dark:hover:bg-white/6"}`}>
+              {m.name}
+            </button>
+          ))}
+        </div>
+      )}
 
       <textarea
         value={note.content}

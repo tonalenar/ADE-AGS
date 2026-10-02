@@ -13,6 +13,11 @@ export interface CanvasNote {
   name: string;
   content: string;
   box: Box;
+  /** La pila a la que pertenece (las notas de una pila comparten caja y se ve una sola, la
+   *  del frente). Ausente = una nota suelta. */
+  stack?: string;
+  /** Es la que se ve de su pila. */
+  front?: boolean;
 }
 
 /** Los ids de nota llevan este prefijo: así nunca chocan con un id de tab, y el backend
@@ -239,7 +244,7 @@ function overlaps(a: Box, b: Box): boolean {
  */
 export function addNote(
   board: Board,
-  note: { id: string; name?: string; content: string; near?: string; at?: { x: number; y: number } },
+  note: { id: string; name?: string; content: string; near?: string; at?: { x: number; y: number }; stackWith?: string },
 ): { board: Board; name: string } {
   const name = uniqueNoteName(board, note.name ?? defaultNoteName(note.content));
   const others = allBoxes(board);
@@ -256,7 +261,95 @@ export function addNote(
     box = nextFreeBox(others, NOTE_SIZE);
   }
   const next = { ...board, notes: { ...board.notes, [note.id]: { name, content: note.content, box } } };
-  return { board: anchor && note.near ? addEdge(next, note.near, note.id) : next, name };
+  const edged = anchor && note.near ? addEdge(next, note.near, note.id) : next;
+  // `stackWith`: nace dentro de la pila de otra nota (y no se crea al lado de nadie).
+  return { board: note.stackWith && board.notes[note.stackWith] ? stackInto(edged, note.id, note.stackWith) : edged, name };
+}
+
+// ── Pilas de notas ──────────────────────────────────────────────────
+
+/** Las notas de una pila, en el orden en que se crearon. */
+export function stackMembers(board: Board, stack: string | undefined): string[] {
+  if (!stack) return [];
+  return Object.entries(board.notes).filter(([, n]) => n.stack === stack).map(([id]) => id);
+}
+
+/** ¿Está tapada por otra de su pila? Esas no se dibujan (los agentes las siguen viendo). */
+export function isHiddenNote(board: Board, id: string): boolean {
+  const n = board.notes[id];
+  return !!n && !!n.stack && !n.front;
+}
+
+/** La nota que se ve en lugar de `id`: ella misma, o la del frente de su pila. */
+export function shownNote(board: Board, id: string): string {
+  const n = board.notes[id];
+  if (!n || !n.stack || n.front) return id;
+  return stackMembers(board, n.stack).find((m) => board.notes[m].front) ?? id;
+}
+
+/** Saca una nota de su pila. Si la pila queda con una sola, se disuelve; si era la del frente, pasa otra. */
+function leaveStack(board: Board, id: string): Board {
+  const note = board.notes[id];
+  if (!note?.stack) return board;
+  const rest = stackMembers(board, note.stack).filter((m) => m !== id);
+  const notes = { ...board.notes };
+  const { stack: _s, front: _f, ...plain } = note;
+  notes[id] = plain;
+  if (rest.length === 1) {
+    const { stack: _s2, front: _f2, ...single } = notes[rest[0]];
+    notes[rest[0]] = single;
+  } else if (rest.length > 1 && !rest.some((m) => notes[m].front)) {
+    notes[rest[0]] = { ...notes[rest[0]], front: true };
+  }
+  return { ...board, notes };
+}
+
+/** Pone `id` al frente de su pila. */
+export function bringToFront(board: Board, id: string): Board {
+  const note = board.notes[id];
+  if (!note?.stack || note.front) return board;
+  const notes = { ...board.notes };
+  for (const m of stackMembers(board, note.stack)) notes[m] = { ...notes[m], front: m === id };
+  return { ...board, notes };
+}
+
+/**
+ * Apila `id` encima de `ontoId`: pasa a su pila (la crea si `ontoId` estaba suelta), toma
+ * su caja y queda al frente. Los agentes siguen viendo cada nota por separado.
+ */
+export function stackInto(board: Board, id: string, ontoId: string): Board {
+  const note = board.notes[id];
+  const onto = board.notes[ontoId];
+  if (!note || !onto || id === ontoId) return board;
+  if (note.stack && note.stack === onto.stack) return bringToFront(board, id);
+  const left = leaveStack(board, id);
+  const target = left.notes[ontoId];
+  const stack = target.stack ?? ontoId;
+  const notes = { ...left.notes };
+  for (const m of stackMembers(left, stack)) notes[m] = { ...notes[m], front: false };
+  notes[ontoId] = { ...notes[ontoId], stack, front: false };
+  notes[id] = { ...notes[id], stack, front: true, box: { ...target.box } };
+  return { ...left, notes };
+}
+
+/** Suelta una nota de su pila, un poco corrida para que se vea que es otra. */
+export function unstack(board: Board, id: string): Board {
+  const note = board.notes[id];
+  if (!note?.stack) return board;
+  const left = leaveStack(board, id);
+  const box = { ...note.box, x: note.box.x + 40, y: note.box.y + 40 };
+  return { ...left, notes: { ...left.notes, [id]: { ...left.notes[id], box } } };
+}
+
+/** Cambia la caja de una nota; las de su pila la comparten, así que se mueven juntas. */
+export function setNoteBox(board: Board, id: string, patch: Partial<Box>): Board {
+  const note = board.notes[id];
+  if (!note) return board;
+  const box = { ...note.box, ...patch };
+  const ids = note.stack ? stackMembers(board, note.stack) : [id];
+  const notes = { ...board.notes };
+  for (const m of ids) notes[m] = { ...notes[m], box };
+  return { ...board, notes };
 }
 
 /** Cambia una nota. Un nombre repetido se desambigua en vez de fallar. */
@@ -270,6 +363,8 @@ export function updateNote(board: Board, id: string, patch: Partial<CanvasNote>)
 /** Quita una nota y sus conexiones. */
 export function removeNote(board: Board, id: string): Board {
   if (!(id in board.notes)) return board;
+  // Antes de quitarla, que su pila siga bien (otra pasa al frente, o la pila se disuelve).
+  board = leaveStack(board, id);
   const notes = { ...board.notes };
   delete notes[id];
   return { ...board, notes, edges: board.edges.filter((e) => e.a !== id && e.b !== id) };

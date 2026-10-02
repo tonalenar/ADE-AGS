@@ -160,3 +160,21 @@ fn los_portales_sobreviven_al_ida_y_vuelta_por_el_archivo() {
     assert_eq!(back["portals"]["portal-1"]["url"], "http://localhost:5173");
     assert_eq!(back["portals"]["portal-1"]["box"]["h"], 4);
 }
+
+#[test]
+fn guardar_el_canvas_conserva_las_pilas_de_notas() {
+    // Si `Note` no llevara `stack`/`front`, pasar por este struct deshacería las pilas.
+    let raw = r#"{"nodes":{},"edges":[],"notes":{
+        "note-a":{"name":"A","content":"x","box":{"x":1,"y":2,"w":3,"h":4},"stack":"note-a","front":false},
+        "note-b":{"name":"B","content":"y","box":{"x":1,"y":2,"w":3,"h":4},"stack":"note-a","front":true},
+        "note-c":{"name":"C","content":"z","box":{"x":9,"y":9,"w":3,"h":4}}}}"#;
+    let board: Board = serde_json::from_str(raw).unwrap();
+    assert_eq!(board.notes["note-b"].stack.as_deref(), Some("note-a"));
+    assert_eq!(board.notes["note-b"].front, Some(true));
+    let back = serde_json::to_value(&board).unwrap();
+    assert_eq!(back["notes"]["note-a"]["stack"], "note-a");
+    assert_eq!(back["notes"]["note-a"]["front"], false);
+    assert_eq!(back["notes"]["note-b"]["front"], true);
+    // Una suelta no gana campos nuevos.
+    assert!(back["notes"]["note-c"].get("stack").is_none() && back["notes"]["note-c"].get("front").is_none());
+}

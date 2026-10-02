@@ -8,7 +8,7 @@ import {
   FOLDER_PREFIX, IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addFolder, addImage, addNote, addPortal,
   addStroke, addText, removeFolder, updateFolder,
   emptyBoard, placeBelow, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
-  removeStroke, removeText, toggleOrchestrator, undoStroke, updateNote, updatePortal, updateText,
+  removeStroke, removeText, toggleOrchestrator, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
   type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
 } from "./board";
 import type { Box, Rect, Viewport } from "./geometry";
@@ -75,7 +75,7 @@ export const canvasActions = {
   moveNode: (key: string, id: string, patch: Partial<Box>) =>
     updateBoard(key, (b) => {
       const note = b.notes[id];
-      if (note) return updateNote(b, id, { box: { ...note.box, ...patch } });
+      if (note) return setNoteBox(b, id, patch);
       const portal = b.portals[id];
       if (portal) return updatePortal(b, id, { box: { ...portal.box, ...patch } });
       const text = b.texts[id];
@@ -90,7 +90,7 @@ export const canvasActions = {
     }),
   /** Crea una nota y devuelve su id y su nombre final. Con `near`, al lado de ese nodo y
    *  conectada a él. */
-  addNote: (key: string, note: { name?: string; content: string; near?: string; at?: { x: number; y: number } }) => {
+  addNote: (key: string, note: { name?: string; content: string; near?: string; at?: { x: number; y: number }; stackWith?: string }) => {
     const id = `${NOTE_PREFIX}${crypto.randomUUID()}`;
     let name = "";
     updateBoard(key, (b) => {
@@ -103,6 +103,12 @@ export const canvasActions = {
   updateNote: (key: string, id: string, patch: Partial<Omit<CanvasNote, "box">>) =>
     updateBoard(key, (b) => updateNote(b, id, patch)),
   removeNote: (key: string, id: string) => updateBoard(key, (b) => removeNote(b, id)),
+  /** Apila la nota `id` sobre `ontoId`. */
+  stackNote: (key: string, id: string, ontoId: string) => updateBoard(key, (b) => stackInto(b, id, ontoId)),
+  /** Pone una nota al frente de su pila. */
+  bringNoteToFront: (key: string, id: string) => updateBoard(key, (b) => bringToFront(b, id)),
+  /** Suelta una nota de su pila. */
+  unstackNote: (key: string, id: string) => updateBoard(key, (b) => unstack(b, id)),
   /** Crea un portal y devuelve su id y su nombre final. Con `near`, al lado de ese nodo y
    *  conectado a él. */
   addPortal: (key: string, portal: { name?: string; url?: string; near?: string; at?: { x: number; y: number } }) => {
