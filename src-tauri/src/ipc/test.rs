@@ -895,3 +895,12 @@ fn una_cancelacion_se_recuerda_por_su_id() {
     assert!(crate::ipc::cancel::is_cancelled(Some("c-1")));
     assert!(!crate::ipc::cancel::is_cancelled(None), "un pedido de la CLI nunca está cancelado");
 }
+
+#[test]
+fn el_token_se_compara_entero() {
+    use super::server::token_matches;
+    assert!(token_matches("abc-123", "abc-123"));
+    assert!(!token_matches("abc-124", "abc-123"));
+    assert!(!token_matches("abc-12", "abc-123"));
+    assert!(!token_matches("", "abc-123"));
+}

@@ -2,7 +2,8 @@
 //!
 //! Ver `protocol.rs` para el formato del mensaje y el modelo de autorización.
 
-use std::io::{BufRead, BufReader, Write};
+use std::io::{BufRead, BufReader, Read, Write};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::net::{Ipv4Addr, SocketAddrV4, TcpListener, TcpStream};
 use std::path::Path;
 use std::time::Duration;
@@ -16,6 +17,24 @@ use super::protocol::{
 
 /// Cada cuánto se revisa que los handshakes sigan apuntando a esta instancia.
 const WATCH_EVERY: Duration = Duration::from_secs(3);
+
+/// Conexiones atendidas a la vez. Holgado: cada agente con un `run_await` o un permiso
+/// pendiente ocupa una mientras espera, y una flota grande tiene decenas.
+const MAX_CONNECTIONS: usize = 256;
+
+/// El tamaño máximo de una request. La más grande legítima es un handoff o una memoria,
+/// que ya tienen sus propios topes muy por debajo de esto.
+pub(super) const MAX_REQUEST_BYTES: u64 = 8 * 1024 * 1024;
+
+/// Compara el token sin cortar en el primer byte distinto, para que el tiempo de respuesta
+/// no diga cuántos caracteres se acertaron.
+pub(super) fn token_matches(given: &str, expected: &str) -> bool {
+    let (given, expected) = (given.as_bytes(), expected.as_bytes());
+    if given.len() != expected.len() {
+        return false;
+    }
+    given.iter().zip(expected).fold(0u8, |acc, (a, b)| acc | (a ^ b)) == 0
+}
 
 /// Exporta [`HANDSHAKE_ENV`] con el handshake propio de esta instancia, para que lo hereden
 /// todos sus procesos hijos.
@@ -58,13 +77,25 @@ fn try_start(app: AppHandle) -> Result<(), String> {
     std::thread::spawn(move || watch_handshakes(&handshake));
 
     std::thread::spawn(move || {
+        let open = std::sync::Arc::new(AtomicUsize::new(0));
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
+            // Cualquier proceso local puede conectarse, con token o sin él: sin tope, abrir
+            // conexiones sin mandar nada crea un thread por cada una.
+            if open.fetch_add(1, Ordering::SeqCst) >= MAX_CONNECTIONS {
+                open.fetch_sub(1, Ordering::SeqCst);
+                drop(stream);
+                continue;
+            }
             let app = app.clone();
             let token = token.clone();
+            let open = open.clone();
             // Un cliente lento (o que abre la conexión y no manda nada) no debe bloquear
             // a los demás, así que cada conexión se atiende en su propio thread.
-            std::thread::spawn(move || handle_connection(stream, &app, &token));
+            std::thread::spawn(move || {
+                handle_connection(stream, &app, &token);
+                open.fetch_sub(1, Ordering::SeqCst);
+            });
         }
     });
 
@@ -177,14 +208,22 @@ fn handle_connection(stream: TcpStream, app: &AppHandle, expected_token: &str) {
     let mut writer = write_half;
 
     let mut line = String::new();
-    if reader.read_line(&mut line).is_err() || line.trim().is_empty() {
+    // Con tope: sin él, una "línea" que nunca termina se acumula en memoria entera.
+    if (&mut reader).take(MAX_REQUEST_BYTES).read_line(&mut line).is_err() || line.trim().is_empty() {
+        return;
+    }
+    if !line.ends_with('\n') && line.len() as u64 >= MAX_REQUEST_BYTES {
+        let response = Response::err(format!("Request demasiado grande (máximo {MAX_REQUEST_BYTES} bytes)"));
+        if let Ok(json) = serde_json::to_string(&response) {
+            let _ = writeln!(writer, "{json}");
+        }
         return;
     }
 
     let mut command = String::new();
     let response = match serde_json::from_str::<Request>(&line) {
         Err(e) => Response::err(format!("Request inválida: {e}")),
-        Ok(req) if req.token != expected_token => {
+        Ok(req) if !token_matches(&req.token, expected_token) => {
             Response::err("Token inválido — volvé a leer ~/.controlcode/ipc.json")
         }
         Ok(req) => {
