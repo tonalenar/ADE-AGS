@@ -1751,6 +1751,8 @@
   "canvas.chat.hint": "Converse com um agente em balões, por threads de cor. Ele responde com ccode say.",
   "canvas.chat.close": "Fechar",
   "canvas.chat.noAgents": "Não há agentes abertos nesta pasta. O chat é só para agentes: num terminal de shell a mensagem seria executada como comando.",
+  "canvas.chat.soundOn": "Som de nova resposta: ligado (clique para silenciar)",
+  "canvas.chat.soundOff": "Som de nova resposta: desligado (clique para ligar)",
   "canvas.chat.empty": "Nada nesta thread ainda. Escreva abaixo: a mensagem chega ao agente com o nome da thread.",
   "canvas.chat.placeholder": "Mensagem para {{name}}…",
   "canvas.chat.send": "Enviar",

@@ -31,6 +31,59 @@ export function latest(messages: Msg[], thread: string): number {
   return at;
 }
 
+/**
+ * ¿Hay que sonar? Cuando algún hilo tiene más respuestas sin leer que antes y no es el que
+ * se está mirando (lo que está a la vista se lee solo, no hace falta avisar).
+ */
+export function shouldChime(
+  prev: Record<string, number> | undefined,
+  next: Record<string, number>,
+  viewing: string | null,
+): boolean {
+  return Object.entries(next).some(([thread, n]) => thread !== viewing && n > (prev?.[thread] ?? 0));
+}
+
+/** Un "ding" corto de dos notas, sin archivo de audio. Si el audio no está disponible, no pasa nada. */
+export function chime() {
+  try {
+    const Ctx = window.AudioContext ?? (window as unknown as { webkitAudioContext?: typeof AudioContext }).webkitAudioContext;
+    if (!Ctx) return;
+    const ctx = new Ctx();
+    const t0 = ctx.currentTime;
+    [[880, 0], [1318.5, 0.11]].forEach(([freq, at]) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.0001, t0 + at);
+      gain.gain.exponentialRampToValueAtTime(0.18, t0 + at + 0.015);
+      gain.gain.exponentialRampToValueAtTime(0.0001, t0 + at + 0.32);
+      osc.connect(gain).connect(ctx.destination);
+      osc.start(t0 + at);
+      osc.stop(t0 + at + 0.34);
+    });
+    window.setTimeout(() => void ctx.close(), 800);
+  } catch {
+    /* sin audio: el globo rojo basta */
+  }
+}
+
+const SOUND_KEY = "cc.chat.sound";
+export const readSound = (): boolean => {
+  try {
+    return localStorage.getItem(SOUND_KEY) !== "0";
+  } catch {
+    return true;
+  }
+};
+export const writeSound = (on: boolean) => {
+  try {
+    localStorage.setItem(SOUND_KEY, on ? "1" : "0");
+  } catch {
+    /* no se recuerda */
+  }
+};
+
 const STORE_KEY = "cc.chat.seen";
 const keyOf = (tab: string, thread: string) => `${tab}|${thread}`;
 
@@ -47,6 +100,11 @@ interface UnreadState {
   seen: Record<string, number>;
   /** tabId → hilo → cuántas sin leer. */
   unread: Record<string, Record<string, number>>;
+  /** Qué (agente, hilo) está a la vista en el panel de chat: ahí no se suena. */
+  viewing: { tabId: string; thread: string } | null;
+  sound: boolean;
+  setViewing: (v: { tabId: string; thread: string } | null) => void;
+  setSound: (on: boolean) => void;
   /** `baseline`: la carga inicial de un agente; lo que ya hay no es "nuevo". Los avisos en vivo cuentan todo. */
   ingest: (tabId: string, messages: Msg[], baseline?: boolean) => void;
   markSeen: (tabId: string, thread: string, messages: Msg[]) => void;
@@ -55,6 +113,13 @@ interface UnreadState {
 export const useUnreadStore = create<UnreadState>((set, get) => ({
   seen: readSeen(),
   unread: {},
+  viewing: null,
+  sound: readSound(),
+  setViewing: (viewing) => set({ viewing }),
+  setSound: (sound) => {
+    writeSound(sound);
+    set({ sound });
+  },
 
   ingest(tabId, messages, baseline = false) {
     // Un hilo que nunca se vio parte de lo que ya tiene: lo anterior a este seguimiento no es "nuevo".
@@ -68,9 +133,12 @@ export const useUnreadStore = create<UnreadState>((set, get) => ({
       }
     }
     if (touched) persist(seen);
+    const next = countUnread(messages, (th) => seen[keyOf(tabId, th)]);
+    const { viewing, sound, unread } = get();
+    if (!baseline && sound && shouldChime(unread[tabId], next, viewing?.tabId === tabId ? viewing.thread : null)) chime();
     set((s) => ({
       seen: touched ? seen : s.seen,
-      unread: { ...s.unread, [tabId]: countUnread(messages, (th) => seen[keyOf(tabId, th)]) },
+      unread: { ...s.unread, [tabId]: next },
     }));
   },
 

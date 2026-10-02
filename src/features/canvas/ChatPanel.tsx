@@ -77,6 +77,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   const [sending, setSending] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const unread = useUnreadStore((s) => s.unread);
+  const sound = useUnreadStore((s) => s.sound);
 
   // Con quién se habla: el agente activo si sirve, si no el primero.
   const current = agents.find((a) => a.id === tabId) ?? agents.find((a) => a.id === activeTabId) ?? agents[0];
@@ -113,6 +114,12 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     if (currentId && conversation) useUnreadStore.getState().markSeen(currentId, thread, conversation.messages);
   }, [currentId, thread, conversation, visibleUnread]);
+
+  // Mientras el panel está abierto, lo que se mira no suena; al cerrarlo, todo vuelve a sonar.
+  useEffect(() => {
+    useUnreadStore.getState().setViewing(currentId ? { tabId: currentId, thread } : null);
+    return () => useUnreadStore.getState().setViewing(null);
+  }, [currentId, thread]);
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end" });
@@ -152,6 +159,14 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
             </Button>
           ))}
         </div>
+        <Button variant="custom" onClick={() => useUnreadStore.getState().setSound(!sound)} aria-pressed={sound}
+          title={sound ? t("canvas.chat.soundOn") : t("canvas.chat.soundOff")} aria-label={sound ? t("canvas.chat.soundOn") : t("canvas.chat.soundOff")}
+          className="cc-t w-6 h-6 shrink-0 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5" aria-hidden>
+            <path d="M11 5 6 9H3v6h3l5 4V5Z" />
+            {sound ? <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" /> : <path d="m16 9 5 6M21 9l-5 6" />}
+          </svg>
+        </Button>
         <Button variant="custom" onClick={onClose} aria-label={t("canvas.chat.close")}
           className="cc-t w-6 h-6 shrink-0 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
           <CloseIcon className="w-3 h-3" />

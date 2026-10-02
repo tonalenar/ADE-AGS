@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { countUnread, latest, unreadOf } from "../chatUnread";
+import { countUnread, latest, shouldChime, unreadOf } from "../chatUnread";
 
 const m = (thread: string, kind: string, at: number) => ({ thread, kind, at });
 
@@ -24,5 +24,18 @@ describe("no leídos del chat", () => {
     expect(latest(msgs, "green")).toBe(0);
     expect(unreadOf({ blue: 2, red: 1 })).toBe(3);
     expect(unreadOf(undefined)).toBe(0);
+  });
+});
+
+describe("sonido de nueva respuesta", () => {
+  it("suena cuando un hilo sube y no es el que se mira", () => {
+    expect(shouldChime({ blue: 1 }, { blue: 2 }, null)).toBe(true);
+    expect(shouldChime(undefined, { red: 1 }, "blue")).toBe(true);
+  });
+  it("no suena si no hay nada nuevo o es lo que está a la vista", () => {
+    expect(shouldChime({ blue: 2 }, { blue: 2 }, null)).toBe(false);
+    expect(shouldChime({ blue: 2 }, { blue: 1 }, null)).toBe(false);
+    expect(shouldChime({}, { blue: 1 }, "blue")).toBe(false);
+    expect(shouldChime({ blue: 1 }, {}, null)).toBe(false);
   });
 });

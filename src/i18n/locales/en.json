@@ -1751,6 +1751,8 @@
   "canvas.chat.hint": "Talk to an agent in bubbles, in colored threads. It replies with ccode say.",
   "canvas.chat.close": "Close",
   "canvas.chat.noAgents": "No agents are open in this folder. Chat is for agents only: in a shell terminal the message would run as a command.",
+  "canvas.chat.soundOn": "New-reply sound: on (click to mute)",
+  "canvas.chat.soundOff": "New-reply sound: off (click to turn on)",
   "canvas.chat.empty": "Nothing in this thread yet. Write below: the message reaches the agent with the thread name.",
   "canvas.chat.placeholder": "Message {{name}}…",
   "canvas.chat.send": "Send",
