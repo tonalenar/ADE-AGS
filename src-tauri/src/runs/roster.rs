@@ -510,9 +510,18 @@ fn run(program: &str, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Un sondeo con el entorno de una cuenta: sin las variables que le ganarían a su login (ver
+/// `agents::overriding_env`), o los modelos serían los de otra credencial.
+pub(super) fn account_command(program: &str, args: &[&str], env: &HashMap<String, String>) -> std::process::Command {
+    let mut command = crate::util::program(program);
+    command.args(args);
+    crate::agents::apply_account_env(&mut command, env);
+    command
+}
+
 fn run_with_env(program: &str, args: &[&str], env: &HashMap<String, String>) -> Option<String> {
     let out = crate::util::output_with_timeout(
-        crate::util::program(program).args(args).envs(env),
+        &mut account_command(program, args, env),
         PROBE_TIMEOUT,
     )
     .ok()?;

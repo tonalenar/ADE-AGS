@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use url::Url;
 
-use super::roster::{ModelAvailability, RosterModel};
+use super::roster::{account_command, ModelAvailability, RosterModel};
 
 const REQUEST_TIMEOUT: Duration = Duration::from_secs(15);
 const MAX_MODEL_LIST_PAGES: usize = 100;
@@ -128,10 +128,8 @@ pub(super) fn discover_codex(
     program: &str,
     env: &HashMap<String, String>,
 ) -> Result<Vec<RosterModel>, String> {
-    let mut command = crate::util::program(program);
+    let mut command = account_command(program, &["app-server", "--listen", "stdio://"], env);
     command
-        .args(["app-server", "--listen", "stdio://"])
-        .envs(env)
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
@@ -268,7 +266,7 @@ fn enrich_claude_models(
 
 fn run_read_only(program: &str, args: &[&str], env: &HashMap<String, String>) -> Option<String> {
     let output = crate::util::output_with_timeout(
-        crate::util::program(program).args(args).envs(env),
+        &mut account_command(program, args, env),
         Duration::from_secs(5),
     )
     .ok()?;

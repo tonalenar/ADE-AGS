@@ -251,7 +251,12 @@ pub async fn pty_create(
     for var in crate::app::app_only_env() {
         cmd.env_remove(var);
     }
-    for (k, v) in env.unwrap_or_default() {
+    let env = env.unwrap_or_default();
+    // Con una cuenta de la app, una API key heredada no le gana a su login.
+    for var in crate::agents::overriding_env(env.keys()) {
+        cmd.env_remove(var);
+    }
+    for (k, v) in env {
         cmd.env(k, v);
     }
 

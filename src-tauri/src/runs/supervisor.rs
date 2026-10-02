@@ -215,12 +215,13 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     // prompt no puede pasar por `cmd.exe` (ver `util::launch`).
     let program = crate::util::find_program(&launch.program)
         .unwrap_or_else(|| std::path::PathBuf::from(&launch.program));
-    let command = crate::util::external_command(&program, &launch.args)
+    let mut command = crate::util::external_command(&program, &launch.args)
         .map_err(|e| format!("no se pudo lanzar '{}': {e}", launch.program))?;
+    // Con una cuenta de la app, una API key heredada no le gana a su login.
+    crate::agents::apply_account_env(&mut command, &launch.env);
     let mut command = tokio::process::Command::from(command);
     command
         .current_dir(task_profile.as_ref().map_or_else(|| PathBuf::from(&task.cwd), |p| p.workspace()))
-        .envs(&launch.env)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
