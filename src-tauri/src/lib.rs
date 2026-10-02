@@ -14,6 +14,7 @@ pub mod ipc;
 mod marketplace;
 mod memory;
 mod missions;
+mod notifier;
 mod orchestrator;
 mod prelaunch;
 mod preview;

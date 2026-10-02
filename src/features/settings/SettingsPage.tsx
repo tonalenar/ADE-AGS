@@ -23,6 +23,7 @@ import { ShortcutsSection } from "@/features/settings/ShortcutsSection";
 import { SyncSection } from "@/features/sync/SyncSection";
 import { UpdatesSection } from "@/features/updates/UpdatesSection";
 import { SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
+import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
 import { RenderingSetting } from "@/features/settings/RenderingSetting";
 
 /** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
@@ -153,6 +154,7 @@ export function SettingsPage() {
                 />
               </SettingsRow>
               <RenderingSetting />
+              <NotificationsSetting />
             </div>
           </SettingsSection>
         )}

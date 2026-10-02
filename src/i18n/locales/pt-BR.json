@@ -886,6 +886,8 @@
   "browser.goToAgent": "Ver",
   "browser.agentNotReady": "O terminal desse agente ainda não está pronto.",
   "settings.rendering.gpu": "Composição de GPU",
+  "settings.notifications.label": "Notificações do sistema",
+  "settings.notifications.desc": "Avisar quando uma missão terminar ou falhar, um agente esperar aprovação ou uma conta tiver problema. Só com a app em segundo plano.",
   "settings.rendering.gpu.desc": "Desativado mantém o texto nítido: quando o WebKitGTK compõe a janela na GPU, os glifos ficam borrados. Ative-o apenas se o aplicativo parecer lento nesta máquina.",
   "settings.rendering.restart": "Entra em vigor após reiniciar o aplicativo.",
   "settings.rendering.env": "A variável WEBKIT_DISABLE_COMPOSITING_MODE em seu ambiente substitui esta opção.",

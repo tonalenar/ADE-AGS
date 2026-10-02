@@ -24,6 +24,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .plugin(crate::updates::plugin())
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
@@ -354,6 +355,9 @@ pub fn run() {
             // antes de que haya ventanas, así la lista de skills ya la muestra al abrir.
             // Nunca falla el arranque — ver `crate::skills::bundled`.
             crate::skills::ensure_bundled_skills(app.handle(), &db);
+
+            // Avisos del sistema para lo que pasa con la app en segundo plano (ver `notifier`).
+            crate::notifier::start(app.handle().clone());
 
             // Las tareas headless que quedaron `running` son de una ejecución anterior:
             // sus procesos eran hijos de la app y murieron con ella. Si no se cierran acá,

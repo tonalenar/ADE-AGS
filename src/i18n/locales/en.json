@@ -886,6 +886,8 @@
   "browser.goToAgent": "View",
   "browser.agentNotReady": "That agent's terminal isn't ready yet.",
   "settings.rendering.gpu": "GPU compositing",
+  "settings.notifications.label": "System notifications",
+  "settings.notifications.desc": "Notify when a mission finishes or fails, an agent waits for approval or an account has a problem. Only while the app is in the background.",
   "settings.rendering.gpu.desc": "Off keeps text sharp: when WebKitGTK composites the window on the GPU, glyphs come out blurry. Turn it on only if the app feels slow on this machine.",
   "settings.rendering.restart": "Takes effect after restarting the app.",
   "settings.rendering.env": "The WEBKIT_DISABLE_COMPOSITING_MODE variable in your environment overrides this option.",
