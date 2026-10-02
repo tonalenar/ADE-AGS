@@ -74,6 +74,38 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean): bool
   return true;
 }
 
+export interface ScreenText {
+  lines: string[];
+  /** La línea siguiente a la última escrita: la marca para leer "desde acá" después. */
+  end: number;
+  /** Pantalla alternativa (TUIs a pantalla completa): no hay historial, solo lo visible. */
+  alt: boolean;
+}
+
+/**
+ * El texto de la terminal de una tab, ya dibujado por xterm — sin escapes ni repintados,
+ * que es lo que hace legible la respuesta de una TUI para otro agente.
+ *
+ * Con `from` devuelve desde esa línea hasta el cursor (lo que la TUI escribió después de la
+ * marca); sin él, lo que se ve ahora. En pantalla alternativa no hay "desde": lo que había
+ * se repintó encima, así que se devuelve lo visible. Las líneas vacías del final se cortan
+ * y se devuelven a lo sumo `max` (las últimas).
+ */
+export function screenOf(tabId: string, from?: number | null, max = 200): ScreenText | null {
+  const term = terminals.get(tabId);
+  if (!term) return null;
+  const buf = term.buffer.active;
+  const alt = buf.type === "alternate";
+  const end = buf.baseY + buf.cursorY + 1;
+  const start = alt || from == null ? buf.viewportY : Math.min(Math.max(0, from), end);
+  const stop = alt || from == null ? Math.min(buf.length, buf.viewportY + term.rows) : end;
+
+  const lines: string[] = [];
+  for (let y = start; y < stop; y++) lines.push(buf.getLine(y)?.translateToString(true) ?? "");
+  while (lines.length > 0 && lines[lines.length - 1].trim() === "") lines.pop();
+  return { lines: lines.slice(-max), end, alt };
+}
+
 /** Le da el foco a la terminal de la tab, para seguir escribiendo en lo que se pegó. */
 export function focusTab(tabId: string): void {
   terminals.get(tabId)?.focus();

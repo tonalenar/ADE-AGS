@@ -180,7 +180,11 @@ pub(super) fn capture(
 
         // La carpeta no está entre las de confianza y la TUI está esperando una respuesta.
         // No se contesta por el usuario: se corta y se dice.
-        if text.contains("Is this a project you created") || text.contains("trust this folder") {
+        // Se mira sin espacios: la TUI arma las columnas moviendo el cursor, así que el
+        // texto crudo viene como "Isthisaprojectyoucreated" (con eso el sondeo se quedaba
+        // esperando un panel que nunca iba a salir, y el error era un "timeout" mudo).
+        let squeezed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        if squeezed.contains("Isthisaprojectyoucreated") || squeezed.contains("trustthisfolder") {
             break Err("accounts.plan.problem.trustRequired".to_string());
         }
 
@@ -211,6 +215,13 @@ pub(super) fn capture(
             };
         }
     };
+
+    // Para cuando cambie el panel de la TUI y el parseo deje de encontrarlo: con
+    // `CC_USAGE_DUMP=<archivo>` se guarda lo crudo que se vio, y se prueba después con
+    // `CC_USAGE_CAPTURE` (ver `contra_una_captura_cruda_en_disco`).
+    if let Ok(path) = std::env::var("CC_USAGE_DUMP") {
+        let _ = std::fs::write(path, &raw);
+    }
 
     let _ = child.kill();
     let _ = child.wait();
