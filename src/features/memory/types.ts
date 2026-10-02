@@ -11,7 +11,7 @@ export interface MemoryEntry {
   missionId: string | null;
   key: string;
   kind: MemoryKind;
-  status: "active" | "deleted";
+  status: "active" | "inactive" | "deleted";
   currentRevision: number | null;
   priority: number;
   body: string | null;

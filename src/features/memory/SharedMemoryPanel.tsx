@@ -270,14 +270,15 @@ function MemoryEntryCard({ entry, busy, onInspect, onApprove, onReject, onEdit, 
   onEdit: () => void;
   onDelete: () => void;
 }) {
-  const status = entry.pendingRevision !== null ? "Proposta pendente" : entry.status === "deleted" ? "Excluída" : "Ativa";
+  const isActive = entry.status === "active" && entry.currentRevision !== null;
+  const status = entry.pendingRevision !== null ? "Proposta pendente" : entry.status === "deleted" ? "Excluída" : isActive ? "Ativa" : "Sem revisão aprovada";
   return (
     <article className="flex flex-col gap-2 rounded-lg border border-gray-200 px-3 py-2.5 dark:border-white/10">
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
         <span className="font-mono font-semibold text-gray-800 dark:text-gray-100">{entry.key}</span>
         <span className="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-white/8">{KIND_LABEL[entry.kind]}</span>
         <span className="text-gray-500 dark:text-white/45">Prioridade {entry.priority}</span>
-        <span className={`ml-auto ${entry.pendingRevision !== null ? "text-amber-700 dark:text-amber-300" : entry.status === "deleted" ? "text-gray-400" : "text-emerald-700 dark:text-emerald-300"}`}>{status}</span>
+        <span className={`ml-auto ${entry.pendingRevision !== null ? "text-amber-700 dark:text-amber-300" : isActive ? "text-emerald-700 dark:text-emerald-300" : "text-gray-400"}`}>{status}</span>
       </div>
       <p className="text-[10px] text-gray-400 dark:text-white/35">
         Revisão {entry.currentRevision ?? "—"} · {entry.authorKind ? actorLabel(entry.authorKind) : "Sem revisão aprovada"} · {dateLabel(entry.updatedAt)}

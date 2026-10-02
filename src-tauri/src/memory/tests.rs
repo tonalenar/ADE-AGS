@@ -1128,3 +1128,59 @@ fn malicious_memory_cannot_rewrite_task_routing_or_permissions() {
     assert_eq!(before.reasoning_effort, after.reasoning_effort);
     assert_eq!(before.prompt, after.prompt);
 }
+
+#[test]
+fn initial_create_rejection_is_inactive_preserves_history_and_can_be_reproposed() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    let first = propose(&conn, "workspace", None, "rejected-key", "first", "create", None);
+    let pending = detail_for_owner(&conn, &first.entry_id, "w1", None).unwrap();
+    assert_eq!(pending.entry.status, "inactive");
+    assert_eq!(pending.entry.current_revision, None);
+    assert_eq!(pending.entry.pending_revision, Some(1));
+    seed_run(&conn, "pending-run", "w1", None);
+    snapshot_run(&conn, "pending-run", "w1", None).unwrap();
+    assert!(snapshot_for_run(&conn, "pending-run").unwrap().items.is_empty());
+
+    decide(&conn, &first.entry_id, 1, false).unwrap();
+    let rejected = detail_for_owner(&conn, &first.entry_id, "w1", None).unwrap();
+    assert_eq!(rejected.entry.status, "inactive");
+    assert_eq!(rejected.entry.current_revision, None);
+    assert_eq!(rejected.entry.pending_revision, None);
+    assert_eq!(rejected.revisions[0].status, "rejected");
+    assert_eq!(owner_quota(&conn, "w1", None).unwrap().1, 0);
+    seed_run(&conn, "rejected-run", "w1", None);
+    snapshot_run(&conn, "rejected-run", "w1", None).unwrap();
+    assert!(snapshot_for_run(&conn, "rejected-run").unwrap().items.is_empty());
+    seed_task(&conn, "lead-rejected", "rejected-run", Some("lead"));
+    let response = task_tool(&conn, "lead-rejected", "memory.list", json!({"scope":"workspace"})).unwrap();
+    let page: MemoryPage = serde_json::from_str(response["text"].as_str().unwrap()).unwrap();
+    assert_eq!(page.items[0].status, "inactive");
+    let response = task_tool(&conn, "lead-rejected", "memory.get", json!({"entry_id":first.entry_id})).unwrap();
+    let detail: serde_json::Value = serde_json::from_str(response["text"].as_str().unwrap()).unwrap();
+    assert_eq!(detail["status"], "inactive");
+
+    let second = propose(&conn, "workspace", None, "rejected-key", "second", "create", None);
+    assert_eq!(second.entry_id, first.entry_id);
+    assert_eq!(second.revision, 2);
+    decide(&conn, &second.entry_id, 2, true).unwrap();
+    let approved = detail_for_owner(&conn, &second.entry_id, "w1", None).unwrap();
+    assert_eq!(approved.entry.status, "active");
+    assert_eq!(approved.entry.current_revision, Some(2));
+    assert_eq!(approved.revisions.len(), 2);
+    assert_eq!(approved.revisions[1].status, "rejected");
+    assert_eq!(owner_quota(&conn, "w1", None).unwrap().1, 1);
+
+    let update = propose(&conn, "workspace", None, "rejected-key", "third", "update", Some(2));
+    decide(&conn, &update.entry_id, update.revision, false).unwrap();
+    let unchanged = detail_for_owner(&conn, &second.entry_id, "w1", None).unwrap();
+    assert_eq!(unchanged.entry.status, "active");
+    assert_eq!(unchanged.entry.current_revision, Some(2));
+    assert_eq!(unchanged.entry.body.as_deref(), Some("second"));
+    let delete = propose(&conn, "workspace", None, "rejected-key", "second", "delete", Some(2));
+    decide(&conn, &delete.entry_id, delete.revision, true).unwrap();
+    let tombstone = detail_for_owner(&conn, &second.entry_id, "w1", None).unwrap();
+    assert_eq!(tombstone.entry.status, "deleted");
+    assert_eq!(tombstone.entry.current_revision, None);
+    assert_eq!(tombstone.revisions.len(), 4);
+}

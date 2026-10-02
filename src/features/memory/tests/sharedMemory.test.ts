@@ -38,3 +38,19 @@ describe("Shared Memory interface",()=>{
  it("reloads on memory events without polling",async()=>{await render();const listener=mock.listen.mock.calls.find(([event])=>event==="cc-memory-changed")![1];mock.list.mockResolvedValue({items:[{...entry,body:"New approved content"}],hasMore:false});await act(async()=>listener({payload:null}));expect(container.textContent).toContain("New approved content");});
  it("closes proposal dialog with Escape",async()=>{await render();await click("Propor memória");await act(async()=>document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));expect(container.querySelector('[role="dialog"]')).toBeNull();});
 });
+
+it.each(["inactive", "active"] as const)("never labels an unapproved %s entry active", async (status) => {
+ mock.list.mockResolvedValue({items:[{...entry,status,currentRevision:null,body:null}],hasMore:false});
+ await render();
+ expect(container.textContent).toContain("Sem revisão aprovada");
+ expect(container.textContent).not.toContain("Ativa");
+ expect(container.textContent).not.toContain("Propor edição");
+});
+it("shows initial create as pending without calling it active", async () => {
+ mock.list.mockResolvedValue({items:[{...entry,status:"inactive",currentRevision:null,body:null,pendingRevision:1,pendingOperation:"create",pendingBody:"proposal"}],hasMore:false});
+ await render();
+ expect(container.textContent).toContain("Proposta pendente");
+ expect(container.textContent).not.toContain("Ativa");
+ await click("Rejeitar");
+ expect(mock.decide).toHaveBeenCalledWith("e1",1,false);
+});

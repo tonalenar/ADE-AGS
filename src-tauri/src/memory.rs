@@ -547,7 +547,9 @@ fn entry_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryEntry> {
         source_fact_id: r.get(26)?,
     })
 }
-const ENTRY_SELECT:&str="SELECT e.id,e.scope,e.workspace_id,e.mission_id,e.key,e.kind,e.status,e.current_revision,e.priority,
+// v24 stores active as the initial placeholder. Public state is inactive until an
+// approved revision exists; deleted remains a distinct historical tombstone.
+const ENTRY_SELECT:&str="SELECT e.id,e.scope,e.workspace_id,e.mission_id,e.key,e.kind,CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,e.current_revision,e.priority,
 COALESCE((SELECT body FROM memory_revisions WHERE entry_id=e.id AND revision=e.current_revision AND status='approved' LIMIT 1),NULL),
 (SELECT actor_kind FROM memory_revisions WHERE entry_id=e.id AND revision=e.current_revision AND status='approved' LIMIT 1),
 (SELECT source_run_id FROM memory_revisions WHERE entry_id=e.id AND revision=e.current_revision AND status='approved' LIMIT 1),
