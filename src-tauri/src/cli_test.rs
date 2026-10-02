@@ -262,9 +262,10 @@ fn la_ayuda_nombra_todos_los_grupos_que_la_app_atiende() {
     assert!(groups.len() >= 8, "no se reconocieron las ramas del despachador: {groups:?}");
 
     for group in groups {
-        // `user.ask`, `forge.run` y `mcp.cancel` no se escriben en la terminal: los llama un
-        // agente por el MCP, y la ayuda los cuenta en la sección del servidor.
-        if group == "user" || group == "forge" || group == "mcp" {
+        // `user.ask`, `forge.run`, `mcp.cancel` y `memory.*` no se escriben en la terminal:
+        // los llama un agente por el MCP (`memory_*` son tools del servidor), y la ayuda los
+        // cuenta en la sección del servidor.
+        if group == "user" || group == "forge" || group == "mcp" || group == "memory" {
             continue;
         }
         // Como COMANDO, no en cualquier parte: buscar la palabra suelta daba por

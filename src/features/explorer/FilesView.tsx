@@ -110,8 +110,8 @@ function NameInput({ initial, depth, isDir, onCommit, onCancel }: {
         }}
         onBlur={() => finish(true)}
         className="flex-1 min-w-0 h-[19px] px-1 rounded-sm text-[11.5px] outline-none
-          bg-white dark:bg-[#0d1520] text-gray-800 dark:text-gray-100
-          border border-blue-500 dark:border-blue-400"
+          bg-white dark:bg-surface-overlay text-gray-800 dark:text-gray-100
+          border border-accent-500 dark:border-accent-400"
       />
     </div>
   );
@@ -537,7 +537,7 @@ export function FilesView({ cwd, repo, title }: {
           if (cwd) setMenu({ x: e.clientX, y: e.clientY, entry: null });
         }}
         className={`flex-1 min-h-0 cc-scroll py-1 outline-none
-          ${drag?.target === cwd ? "bg-blue-500/6 dark:bg-blue-400/6" : ""}`}
+          ${drag?.target === cwd ? "bg-accent-500/6 dark:bg-accent-400/6" : ""}`}
       >
         {loading && rows.length === 0 ? (
           <div className="flex flex-col gap-1.5 px-3.5 py-2">
@@ -592,9 +592,9 @@ export function FilesView({ cwd, repo, title }: {
                       transition-colors duration-100
                       ${isCut || drag?.path === entry.path ? "opacity-50" : ""}
                       ${dropHere
-                        ? "bg-blue-500/10 dark:bg-blue-400/10"
+                        ? "bg-accent-500/10 dark:bg-accent-400/10"
                         : selected === entry.path
-                          ? "bg-blue-500/12 dark:bg-blue-400/13"
+                          ? "bg-accent-500/12 dark:bg-accent-400/13"
                           : "hover:bg-gray-200/50 dark:hover:bg-white/4"}`}
                   >
                     <span className="w-3 shrink-0 flex items-center text-gray-400 dark:text-white/30">

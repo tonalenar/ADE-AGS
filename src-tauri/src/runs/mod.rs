@@ -26,6 +26,7 @@ pub(crate) mod quota;
 mod roster;
 pub(crate) mod routing;
 mod rules;
+pub mod sandbox;
 mod scheduler;
 pub(crate) mod store;
 mod supervisor;
@@ -1075,25 +1076,41 @@ pub fn run_decide_approval(
     remember: bool,
     db: tauri::State<DbConnection>,
 ) -> Result<bool, String> {
-    let Some(pending) = broker::get(&approval_id) else {
-        supervisor::notify_approvals(&app);
+    decide_approval(&app, &db, &approval_id, allow, remember)
+}
+
+/// Lo mismo, para quien no es un comando de Tauri (la CLI: `ccode approval decide`).
+pub(crate) fn decide_approval(
+    app: &AppHandle,
+    db: &DbConnection,
+    approval_id: &str,
+    allow: bool,
+    remember: bool,
+) -> Result<bool, String> {
+    let Some(pending) = broker::get(approval_id) else {
+        supervisor::notify_approvals(app);
         return Ok(false);
     };
 
     // La regla se guarda ANTES de contestar: si guardarla falla, el usuario tiene que
     // enterarse ahí, no después de que el agente ya siguió creyendo que quedó recordado.
     let remembered_in = if remember {
-        remember_rule(&db, &pending, allow)?
+        remember_rule(db, &pending, allow)?
     } else {
         None
     };
 
-    let decided = broker::decide(&approval_id, allow, None);
+    let decided = broker::decide(approval_id, allow, None);
     if let Some(cwd) = remembered_in {
-        broker::release_matching(&db, &cwd);
+        broker::release_matching(db, &cwd);
     }
-    supervisor::notify_approvals(&app);
+    supervisor::notify_approvals(app);
     Ok(decided)
+}
+
+/// Los pedidos de permiso que esperan a una persona. Para la CLI (`ccode approval list`).
+pub(crate) fn pending_approvals() -> Vec<broker::PendingApproval> {
+    broker::pending()
 }
 
 /// Guarda la regla exacta de un pedido. Devuelve la carpeta en la que quedó.
@@ -1159,4 +1176,11 @@ pub fn run_delete_rule(id: String, db: tauri::State<DbConnection>) -> Result<boo
 /// Cierra los pedidos que quedaron colgados de una ejecución anterior de la app.
 pub fn sweep_orphan_approvals(db: &DbConnection) -> Result<usize, String> {
     broker::sweep_orphans(db)
+}
+
+/// Qué aísla el sandbox de los agentes en esta máquina, con el modo configurado.
+#[tauri::command]
+pub fn sandbox_status(app: AppHandle) -> Result<sandbox::Status, String> {
+    let db = db_of(&app)?;
+    Ok(sandbox::status(sandbox::Mode::from_db(&db)))
 }
