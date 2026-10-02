@@ -99,16 +99,50 @@ fn run_and_record(app: &AppHandle, id: &str, reschedule: bool) -> Result<String,
     result
 }
 
+/// Recupera una rotina perdida (una vez) y anota cómo le fue; si el destino aún no está
+/// abierto, la deja pendiente para el tick siguiente.
+fn catch_up_and_record(app: &AppHandle, id: &str, started: i64) {
+    let Some(routine) = routines::all().into_iter().find(|r| r.id == id) else { return };
+    let result = fire(app, &routine);
+    let now = Local::now();
+    let mut settled = false;
+    let _ = routines::update(|all| {
+        if let Some(r) = all.iter_mut().find(|r| r.id == id) {
+            settled = routines::finish_catch_up(r, now, result.clone(), started);
+        }
+        Ok(())
+    });
+    if settled {
+        changed(app);
+    }
+}
+
 /// Arranca o agendador: recupera o que ficou atrasado do fechamento anterior e, daí em
 /// diante, olha a cada `TICK`. Cada disparo corre em sua própria hebra.
 pub fn start_scheduler(app: AppHandle) {
     std::thread::spawn(move || {
+        let started = Local::now().timestamp();
         let _ = routines::update(|all| {
             routines::recover(all, Local::now());
             Ok(())
         });
         loop {
             std::thread::sleep(TICK);
+            // Las perdidas con la app cerrada que pidieron recuperarse: una vez, cuando su
+            // destino esté abierto (al arrancar, las pestañas tardan en volver).
+            for id in routines::pending_catch_up(&routines::all()) {
+                {
+                    let mut busy = IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner());
+                    if !busy.insert(id.clone()) {
+                        continue;
+                    }
+                }
+                let app = app.clone();
+                std::thread::spawn(move || {
+                    catch_up_and_record(&app, &id, started);
+                    IN_FLIGHT.lock().unwrap_or_else(|e| e.into_inner()).remove(&id);
+                });
+            }
             let due = routines::due(&routines::all(), Local::now().timestamp());
             for id in due {
                 {
@@ -161,6 +195,7 @@ fn describe(r: &Routine) -> Value {
         "lastRun": r.last_run.map(fmt_time),
         "lastResult": r.last_result,
         "runs": r.runs,
+        "catchUp": r.catch_up,
     })
 }
 
@@ -247,6 +282,8 @@ pub(super) fn routine_create(app: &AppHandle, args: &Value) -> Result<Value, Str
             last_run: None,
             last_result: String::new(),
             runs: 0,
+            catch_up: flag(args, "catch-up") && !matches!(schedule, routines::Schedule::Every { .. }),
+            missed_at: None,
         };
         all.push(routine.clone());
         Ok(routine)
@@ -261,8 +298,9 @@ pub(super) fn routine_edit(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let new_name = arg_str_opt(args, "rename").map(|n| routines::clean_name(&n)).transpose()?;
     let new_text = arg_str_opt(args, "text").map(|t| routines::clean_text(&t)).transpose()?;
     let new_schedule = schedule_from(args)?;
-    if new_name.is_none() && new_text.is_none() && new_schedule.is_none() {
-        return Err("Nada para mudar: use --rename, --text ou um novo horário (--every, --at, --in).".into());
+    let catch_up = if flag(args, "catch-up") { Some(true) } else if flag(args, "no-catch-up") { Some(false) } else { None };
+    if new_name.is_none() && new_text.is_none() && new_schedule.is_none() && catch_up.is_none() {
+        return Err("Nada para mudar: use --rename, --text, um novo horário (--every, --at, --in) ou --catch-up / --no-catch-up.".into());
     }
 
     let now = Local::now();
@@ -280,11 +318,18 @@ pub(super) fn routine_edit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         if let Some(t) = new_text {
             r.text = t;
         }
+        if let Some(c) = catch_up {
+            r.catch_up = c;
+        }
         if let Some(s) = new_schedule {
             r.schedule = s;
             if r.enabled {
                 r.next_run = routines::next_run(&r.schedule, now).map(|t| t.timestamp());
             }
+        }
+        // Una de intervalo no se recupera nunca (ver `routines`): no se queda con la marca.
+        if matches!(r.schedule, routines::Schedule::Every { .. }) {
+            r.catch_up = false;
         }
         Ok(r.clone())
     })?;
@@ -363,6 +408,20 @@ pub fn routine_list_all() -> Vec<Routine> {
 }
 
 #[tauri::command]
+pub fn routine_set_catch_up(app: AppHandle, id: String, catch_up: bool) -> Result<(), String> {
+    routines::update(|all| {
+        let r = all.iter_mut().find(|r| r.id == id).ok_or("A rotina não existe mais.")?;
+        if catch_up && matches!(r.schedule, routines::Schedule::Every { .. }) {
+            return Err("As rotinas de intervalo não recuperam execuções perdidas: a próxima já vem logo.".into());
+        }
+        r.catch_up = catch_up;
+        Ok(())
+    })?;
+    changed(&app);
+    Ok(())
+}
+
+#[tauri::command]
 pub fn routine_set_enabled(app: AppHandle, id: String, enabled: bool) -> Result<(), String> {
     let now = Local::now();
     routines::update(|all| {
@@ -420,6 +479,8 @@ mod test {
             last_run: None,
             last_result: String::new(),
             runs: 0,
+            catch_up: false,
+            missed_at: None,
         }
     }
 

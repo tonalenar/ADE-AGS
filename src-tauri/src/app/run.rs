@@ -47,6 +47,7 @@ pub fn run() {
             // Rotinas: mensajes programados a un agente o al usuario
             crate::ipc::commands::routine::routine_list_all,
             crate::ipc::commands::routine::routine_set_enabled,
+            crate::ipc::commands::routine::routine_set_catch_up,
             crate::ipc::commands::routine::routine_run_now,
             crate::ipc::commands::routine::routine_remove,
             // Chat con los agentes, por hilos

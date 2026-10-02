@@ -80,9 +80,10 @@ ROTINAS — mensajes a la hora, a vos, a un agente que alcanzás o al usuario
   routines                                    Las tuyas (en un shell: todas)
   routine create <nombre> \"texto\" <cuándo>   · --every 30m | --at 09:00 [--days seg,qua] | --in 45m
               [--to <agente>] [--remind]      · a quién: vos (default), otro agente, o --remind al usuario
+              [--catch-up]                    · si la app estaba cerrada a la hora, corre UNA vez al abrir (diaria/única, hasta 24 h)
   routine show|run|enable|disable|delete <nombre>
-  routine edit <nombre> [\"texto\"] [--rename <n>] [<cuándo>]
-                                              (mínimo 5 min; no recupera lo que pasó con la app cerrada)
+  routine edit <nombre> [\"texto\"] [--rename <n>] [<cuándo>] [--catch-up|--no-catch-up]
+                                              (mínimo 5 min; las de intervalo no recuperan lo perdido con la app cerrada)
 
 PISOS — copias aisladas del proyecto (worktree + rama + canvas propio)
   floors                                      Los pisos de este proyecto y en cuál estás
