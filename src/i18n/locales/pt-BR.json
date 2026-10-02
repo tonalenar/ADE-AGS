@@ -1676,5 +1676,11 @@
   "canvas.noteName": "Nome da nota",
   "canvas.noteDelete": "Apagar nota",
   "canvas.noteDeleteConfirm": "Apagar?",
-  "canvas.notePlaceholder": "Escreva aqui. Agentes conectados leem e editam esta nota com `ccode note`."
+  "canvas.notePlaceholder": "Escreva aqui. Agentes conectados leem e editam esta nota com `ccode note`.",
+  "canvas.addPortal": "+ Portal",
+  "canvas.addPortalHint": "Novo navegador no centro da vista. Conecte-o a um agente para que ele o controle (ccode portal).",
+  "canvas.portalDefaultName": "Portal",
+  "canvas.portalName": "Nome do portal",
+  "canvas.portalDelete": "Apagar portal",
+  "canvas.portalDeleteConfirm": "Apagar?"
 }

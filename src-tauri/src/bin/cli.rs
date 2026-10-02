@@ -56,6 +56,17 @@ AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
   peer connect <a> <b>                        Conecta dos agentes del equipo
   peer disconnect <a> <b>                     Los desconecta
 
+PORTALES DEL CANVAS — navegadores conectados con esta terminal (orquestador: los del equipo)
+  portals                                     Los portales que manejás
+  portal create [<nombre>] [<url>]            Crea uno a tu lado, ya conectado
+  portal navigate <portal> <url>              Va a una URL
+  portal snapshot <portal> [--full]           El árbol de la página, con refs (@e3)
+  portal click|hover <portal> <@ref|selector>
+  portal type <portal> <@ref> \"texto\" [--clear] [--submit]
+  portal press <portal> <tecla> [--target <ref>]   · scroll · select · wait · history
+  portal screenshot|console|layout <portal>   Foto, consola y medidas
+                                              (sin eval, upload ni cookies: eso es del usuario)
+
 NOTAS DEL CANVAS — las conectadas con esta terminal (orquestador: las del equipo)
   notes                                       Las notas que alcanzás
   note create [\"texto\"] [--name <n>]          Crea una nota a tu lado, ya conectada
@@ -254,9 +265,9 @@ impl CliError {
     }
 }
 
-/// Agrega `from` a los comandos `peer.*` y `note.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
+/// Agrega `from` a los comandos `peer.*`, `note.*` y `portal.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    if !(command.starts_with("peer.") || command.starts_with("note.")) || parsed.get("from").is_some() {
+    if !(command.starts_with("peer.") || command.starts_with("note.") || command.starts_with("portal.")) || parsed.get("from").is_some() {
         return parsed;
     }
     if let (Ok(tab), Some(map)) = (std::env::var("ADE_TAB_ID"), parsed.as_object_mut()) {
@@ -274,6 +285,7 @@ fn shortcut(word: &str) -> Option<&'static str> {
         "skills" => Some("skill.list"),
         "peers" => Some("peer.list"),
         "notes" => Some("note.list"),
+        "portals" => Some("portal.list"),
         _ => None,
     }
 }
@@ -306,6 +318,16 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "note.read" => &["name", "start", "count"],
         "note.write" => &["name", "content"],
         "note.edit" => &["name", "old", "new"],
+        // `ccode portal click Web @e3`: el portal primero, después lo que cada acción pide.
+        "portal.create" => &["name", "url"],
+        "portal.navigate" => &["name", "url"],
+        "portal.history" => &["name", "action"],
+        "portal.click" | "portal.hover" => &["name", "target"],
+        "portal.type" => &["name", "target", "text"],
+        "portal.press" => &["name", "key"],
+        "portal.select" => &["name", "target", "value"],
+        "portal.scroll" | "portal.wait" | "portal.snapshot" | "portal.screenshot" | "portal.console"
+        | "portal.layout" => &["name"],
         _ => &[],
     }
 }
@@ -482,6 +504,8 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             Duration::from_secs(requested + 90)
         }
         "peer.tell" => Duration::from_secs(90),
+        // Cargar una página o esperar un texto puede tardar; el backend corta a los 90 s.
+        c if c.starts_with("portal.") => Duration::from_secs(120),
         // Abrir la tab, esperar su PTY (15s) y que arranque (25s) antes de darle la tarea.
         "peer.recruit" => Duration::from_secs(120),
         // Validar un plan puede sondear el roster (lanzar `opencode models`) y crear worktrees.

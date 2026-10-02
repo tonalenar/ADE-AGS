@@ -23,11 +23,27 @@ export function isNoteId(id: string): boolean {
   return id.startsWith(NOTE_PREFIX);
 }
 
+/** Un portal: un navegador como nodo del canvas, que los agentes conectados manejan con
+ *  `ccode portal ...`. La URL se guarda para reabrirlo donde estaba. */
+export interface CanvasPortal {
+  name: string;
+  url: string;
+  box: Box;
+}
+
+export const PORTAL_PREFIX = "portal-";
+
+export function isPortalId(id: string): boolean {
+  return id.startsWith(PORTAL_PREFIX);
+}
+
 /** El canvas de un proyecto. Las claves de `nodes` son ids de tab. */
 export interface Board {
   nodes: Record<string, Box>;
   /** Las notas, por id (`note-…`). No dependen de ninguna tab: se quedan aunque se cierren. */
   notes: Record<string, CanvasNote>;
+  /** Los portales, por id (`portal-…`). Como las notas, no dependen de ninguna tab. */
+  portals: Record<string, CanvasPortal>;
   edges: CanvasEdge[];
   viewport: Viewport;
   /** Las orquestadoras: alcanzan a todo su equipo y pueden sumar agentes y conectarlos. */
@@ -35,7 +51,7 @@ export interface Board {
 }
 
 export function emptyBoard(): Board {
-  return { nodes: {}, notes: {}, edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
+  return { nodes: {}, notes: {}, portals: {}, edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
 }
 
 /**
@@ -50,7 +66,7 @@ export function reconcile(board: Board, tabIds: string[]): Board {
   const missing = tabIds.filter((id) => !(id in board.nodes));
   // Las notas no se cierran con ninguna tab: una conexión con una nota vale mientras la
   // nota exista.
-  const alive = (id: string) => open.has(id) || id in board.notes;
+  const alive = (id: string) => open.has(id) || id in board.notes || id in board.portals;
   const edges = board.edges.filter((e) => alive(e.a) && alive(e.b));
   const orchestrators = board.orchestrators.filter((id) => open.has(id));
 
@@ -62,7 +78,7 @@ export function reconcile(board: Board, tabIds: string[]): Board {
   }
 
   const nodes: Record<string, Box> = Object.fromEntries(kept);
-  const noteBoxes = Object.values(board.notes).map((n) => n.box);
+  const noteBoxes = [...Object.values(board.notes), ...Object.values(board.portals)].map((n) => n.box);
   for (const id of missing) nodes[id] = nextFreeBox([...Object.values(nodes), ...noteBoxes]);
   return { ...board, nodes, edges, orchestrators };
 }
@@ -122,7 +138,7 @@ export function neighbors(board: Board, tabId: string): string[] {
 
 /** Dónde está un nodo, sea terminal o nota. */
 export function boxOf(board: Board, id: string): Box | undefined {
-  return board.nodes[id] ?? board.notes[id]?.box;
+  return board.nodes[id] ?? board.notes[id]?.box ?? board.portals[id]?.box;
 }
 
 export const NOTE_SIZE = { w: 320, h: 240 };
@@ -161,7 +177,7 @@ export function addNote(
   note: { id: string; name?: string; content: string; near?: string; at?: { x: number; y: number } },
 ): { board: Board; name: string } {
   const name = uniqueNoteName(board, note.name ?? defaultNoteName(note.content));
-  const others = [...Object.values(board.nodes), ...Object.values(board.notes).map((n) => n.box)];
+  const others = allBoxes(board);
   const anchor = note.near ? boxOf(board, note.near) : undefined;
   let box: Box;
   if (anchor) {
@@ -192,4 +208,68 @@ export function removeNote(board: Board, id: string): Board {
   const notes = { ...board.notes };
   delete notes[id];
   return { ...board, notes, edges: board.edges.filter((e) => e.a !== id && e.b !== id) };
+}
+
+// ── Portales ────────────────────────────────────────────────────────
+
+export const PORTAL_SIZE = { w: 640, h: 440 };
+export const PORTAL_MIN = { w: 320, h: 240 };
+
+function allBoxes(board: Board): Box[] {
+  return [
+    ...Object.values(board.nodes),
+    ...Object.values(board.notes).map((n) => n.box),
+    ...Object.values(board.portals).map((p) => p.box),
+  ];
+}
+
+/** Un nombre de portal que nadie más usa en este canvas. */
+export function uniquePortalName(board: Board, wanted: string, except?: string): string {
+  const taken = new Set(
+    Object.entries(board.portals).filter(([id]) => id !== except).map(([, p]) => p.name.toLowerCase()),
+  );
+  const base = wanted.trim() || "Portal";
+  if (!taken.has(base.toLowerCase())) return base;
+  for (let k = 2; ; k++) {
+    const candidate = `${base} ${k}`;
+    if (!taken.has(candidate.toLowerCase())) return candidate;
+  }
+}
+
+/** Agrega un portal; con `near`, a la derecha de ese nodo y conectado a él. */
+export function addPortal(
+  board: Board,
+  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number } },
+): { board: Board; name: string } {
+  const name = uniquePortalName(board, portal.name ?? "Portal");
+  const others = allBoxes(board);
+  const anchor = portal.near ? boxOf(board, portal.near) : undefined;
+  let box: Box;
+  if (anchor) {
+    box = { x: anchor.x + anchor.w + GAP, y: anchor.y, ...PORTAL_SIZE };
+    for (let k = 1; k <= 50 && others.some((o) => overlaps(o, box)); k++) {
+      box = { ...box, y: anchor.y + k * (PORTAL_SIZE.h + GAP / 2) };
+    }
+  } else if (portal.at) {
+    box = { x: Math.round(portal.at.x), y: Math.round(portal.at.y), ...PORTAL_SIZE };
+  } else {
+    box = nextFreeBox(others, PORTAL_SIZE);
+  }
+  const next = { ...board, portals: { ...board.portals, [portal.id]: { name, url: portal.url ?? "", box } } };
+  return { board: anchor && portal.near ? addEdge(next, portal.near, portal.id) : next, name };
+}
+
+export function updatePortal(board: Board, id: string, patch: Partial<CanvasPortal>): Board {
+  const portal = board.portals[id];
+  if (!portal) return board;
+  const named = patch.name !== undefined ? { ...patch, name: uniquePortalName(board, patch.name, id) } : patch;
+  return { ...board, portals: { ...board.portals, [id]: { ...portal, ...named } } };
+}
+
+/** Quita un portal y sus conexiones. */
+export function removePortal(board: Board, id: string): Board {
+  if (!(id in board.portals)) return board;
+  const portals = { ...board.portals };
+  delete portals[id];
+  return { ...board, portals, edges: board.edges.filter((e) => e.a !== id && e.b !== id) };
 }

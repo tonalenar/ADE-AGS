@@ -1676,5 +1676,11 @@
   "canvas.noteName": "Note name",
   "canvas.noteDelete": "Delete note",
   "canvas.noteDeleteConfirm": "Delete?",
-  "canvas.notePlaceholder": "Write here. Connected agents read and edit this note with `ccode note`."
+  "canvas.notePlaceholder": "Write here. Connected agents read and edit this note with `ccode note`.",
+  "canvas.addPortal": "+ Portal",
+  "canvas.addPortalHint": "New browser in the middle of the view. Connect it to an agent so it can drive it (ccode portal).",
+  "canvas.portalDefaultName": "Portal",
+  "canvas.portalName": "Portal name",
+  "canvas.portalDelete": "Delete portal",
+  "canvas.portalDeleteConfirm": "Delete?"
 }

@@ -627,3 +627,33 @@ export async function runBrowserRequest(
   }
   return execute(cwd, host, request, opened, owner);
 }
+
+/**
+ * Lo que un agente puede hacerle a un portal (un navegador del canvas). Una lista corta a
+ * propósito: nada que ejecute código en la página, suba archivos o lea cookies, porque un
+ * portal puede estar en cualquier sitio y quien lo maneja es un agente conectado, no el
+ * usuario. Para eso están las tools de navegador de la tab del proyecto, con su aprobación.
+ */
+export const PORTAL_OPS = new Set([
+  "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll",
+  "wait", "screenshot", "console", "layout",
+]);
+
+/** Atiende un pedido de un agente sobre un portal, por su id. */
+export async function runPortalRequest(
+  portalId: string,
+  cwd: string,
+  request: BrowserRequest,
+  owner: ViewOwner | null = null
+): Promise<string> {
+  if (!PORTAL_OPS.has(request.op)) {
+    throw new Error(`Un portal no admite '${request.op}'. Admite: ${[...PORTAL_OPS].join(", ")}.`);
+  }
+  // El nodo monta el navegador al dibujarse; si el canvas todavía no lo hizo (ventana en
+  // otra vista), se espera a que aparezca.
+  const host = await waitForHost(portalId, 15_000);
+  if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
+    throw new Error("El portal no tiene ninguna página cargada. Empiece con `ccode portal navigate <portal> <url>`.");
+  }
+  return execute(cwd, host, request, false, owner);
+}

@@ -5,6 +5,7 @@ mod app;
 mod ask;
 mod notes;
 mod peers;
+mod portals;
 mod browser;
 mod dispatch;
 mod shared;

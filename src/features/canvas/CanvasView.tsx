@@ -1,6 +1,6 @@
 import "@xyflow/react/dist/style.css";
 
-import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Background, BackgroundVariant, BaseEdge, ConnectionMode, EdgeLabelRenderer, Handle, MiniMap, NodeResizer,
@@ -11,10 +11,13 @@ import { Button, CloseIcon, useTheme } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import { useTabsStore } from "@/features/tabs/store";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
 import type { Tab } from "@/features/tabs/types";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 
-import { NOTE_MIN, boxOf, emptyBoard, isNoteId, neighbors, type CanvasNote } from "./board";
+import {
+  NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isNoteId, isPortalId, neighbors, type CanvasNote, type CanvasPortal,
+} from "./board";
 import {
   HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, terminalRect,
   type Box, type Rect, type Viewport,
@@ -40,7 +43,19 @@ interface NoteNodeData extends Record<string, unknown> {
 }
 
 type NoteFlowNode = Node<NoteNodeData, "note">;
-type FlowNode = AgentFlowNode | NoteFlowNode;
+
+interface PortalNodeData extends Record<string, unknown> {
+  id: string;
+  cwd: string;
+  portal: CanvasPortal;
+  links: number;
+}
+
+type PortalFlowNode = Node<PortalNodeData, "portal">;
+type FlowNode = AgentFlowNode | NoteFlowNode | PortalFlowNode;
+
+// El navegador pesa más de un megabyte: se baja con el primer portal, no con el canvas.
+const BrowserTab = lazy(() => import("@/features/browser/BrowserTab").then((m) => ({ default: m.BrowserTab })));
 
 /**
  * El canvas de agentes: cada terminal de la carpeta es un nodo que se mueve, se
@@ -169,7 +184,23 @@ function CanvasInner() {
     data: { id, note, links: neighbors(board, id).length },
   })), [board, selectedNote]);
 
-  const nodes: FlowNode[] = useMemo(() => [...noteNodes, ...agentNodes], [noteNodes, agentNodes]);
+  const portalCwd = tabs[0]?.cwd ?? "";
+  const portalNodes: PortalFlowNode[] = useMemo(() => Object.entries(board.portals).map(([id, portal]) => ({
+    id,
+    type: "portal" as const,
+    position: { x: portal.box.x, y: portal.box.y },
+    width: portal.box.w,
+    height: portal.box.h,
+    selected: id === selectedNote,
+    dragHandle: ".ade-node-drag",
+    deletable: false,
+    data: { id, cwd: portalCwd, portal, links: neighbors(board, id).length },
+  })), [board, selectedNote, portalCwd]);
+
+  const nodes: FlowNode[] = useMemo(
+    () => [...noteNodes, ...portalNodes, ...agentNodes],
+    [noteNodes, portalNodes, agentNodes],
+  );
 
   const edges: Edge[] = useMemo(() => board.edges.map((e) => {
     const a = boxOf(board, e.a);
@@ -187,7 +218,7 @@ function CanvasInner() {
       } else if (c.type === "dimensions" && c.resizing && c.dimensions) {
         canvasActions.moveNode(key, c.id, { w: Math.round(c.dimensions.width), h: Math.round(c.dimensions.height) });
       } else if (c.type === "select") {
-        if (isNoteId(c.id)) setSelectedNote(c.selected ? c.id : (prev) => (prev === c.id ? null : prev));
+        if (isNoteId(c.id) || isPortalId(c.id)) setSelectedNote(c.selected ? c.id : (prev) => (prev === c.id ? null : prev));
         else if (c.selected) activateTab(c.id);
       }
     }
@@ -227,6 +258,12 @@ function CanvasInner() {
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} />
       </ReactFlow>
       <CanvasControls zoom={vp.zoom}
+        onAddPortal={() => {
+          if (!key) return;
+          const at = { x: (size.width / 2 - vp.x) / vp.zoom - 320, y: (size.height / 2 - vp.y) / vp.zoom - 220 };
+          const { id } = canvasActions.addPortal(key, { name: t("canvas.portalDefaultName"), at });
+          setSelectedNote(id);
+        }}
         onAddNote={() => {
           if (!key) return;
           // En el centro de lo que se ve, para que aparezca donde el usuario está mirando.
@@ -245,8 +282,8 @@ function CanvasInner() {
 
 /** Los botones de zoom y el minimapa. Van en su propia capa, por encima de las
  *  terminales: abajo, una terminal viva los taparía. */
-function CanvasControls({ zoom, onFit, onReset, onAddNote }: {
-  zoom: number; onFit: () => void; onReset: () => void; onAddNote: () => void;
+function CanvasControls({ zoom, onFit, onReset, onAddNote, onAddPortal }: {
+  zoom: number; onFit: () => void; onReset: () => void; onAddNote: () => void; onAddPortal: () => void;
 }) {
   const { t } = useTranslation();
   const rf = useReactFlow();
@@ -257,6 +294,7 @@ function CanvasControls({ zoom, onFit, onReset, onAddNote }: {
       <div className="pointer-events-auto absolute right-3 bottom-3 flex items-center gap-0.5 p-1 rounded-lg
         border border-gray-200 dark:border-white/10 bg-white/95 dark:bg-surface-raised/95 shadow-sm">
         <Button variant="custom" className={button} onClick={onAddNote} title={t("canvas.addNoteHint")}>{t("canvas.addNote")}</Button>
+        <Button variant="custom" className={button} onClick={onAddPortal} title={t("canvas.addPortalHint")}>{t("canvas.addPortal")}</Button>
         <span className="w-px h-4 mx-1 bg-gray-200 dark:bg-white/10" />
         <Button variant="custom" className={button} onClick={() => rf.zoomOut({ duration: 160 })} aria-label={t("canvas.zoomOut")}>−</Button>
         <span className="w-11 text-center text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
@@ -486,6 +524,117 @@ function NoteIcon({ className }: { className?: string }) {
   );
 }
 
+// ── Portal ──────────────────────────────────────────────────────────
+
+/**
+ * Un portal: un navegador dentro del canvas. Es el mismo `BrowserTab` de las tabs de
+ * navegador — con su barra, su inspector y su proxy —, pero dibujado en el nodo y manejado
+ * por los agentes conectados con `ccode portal …`. Se escala con el zoom: una página, a
+ * diferencia de una terminal, aguanta bien un `transform`.
+ */
+const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<PortalFlowNode>) {
+  const { t } = useTranslation();
+  const key = useActiveBoardKey();
+  const { id, cwd, portal, links } = data;
+  const [armed, setArmed] = useState(false);
+  const handle = "w-2.5! h-2.5! border-2! border-white! dark:border-surface-deep! bg-sky-400! dark:bg-sky-500!";
+
+  // La vista del navegador se crea una vez, con la URL con que se guardó el portal.
+  const ensure = useViewTabsStore((s) => s.ensurePortalView);
+  const drop = useViewTabsStore((s) => s.dropPortalView);
+  const view = useViewTabsStore((s) => s.portalViews.find((v) => v.id === id));
+  useEffect(() => {
+    ensure(id, cwd, portal.url);
+    // Al borrar el portal (o cerrar el canvas) se suelta la vista y con ella el navegador.
+    return () => drop(id);
+    // La URL inicial solo cuenta al crear la vista.
+  }, [id, cwd]);
+
+  // Lo que el navegador va visitando se guarda en el canvas, para reabrir donde estaba.
+  const shown = view?.url ?? "";
+  useEffect(() => {
+    if (key && shown && shown !== portal.url) canvasActions.updatePortal(key, id, { url: shown });
+  }, [shown]);
+
+  useEffect(() => {
+    if (!armed) return;
+    const timer = window.setTimeout(() => setArmed(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [armed]);
+
+  return (
+    <div
+      className={`h-full w-full flex flex-col rounded-lg overflow-hidden border bg-white dark:bg-surface
+        ${selected
+          ? "border-accent-500 dark:border-accent-400 shadow-[0_0_0_1px_var(--color-accent-400)]"
+          : "border-sky-300/80 dark:border-sky-200/20"}`}
+    >
+      <NodeResizer isVisible={selected} minWidth={PORTAL_MIN.w} minHeight={PORTAL_MIN.h}
+        lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
+      <Handle id="l" type="source" position={Position.Left} className={handle} />
+      <Handle id="r" type="source" position={Position.Right} className={handle} />
+      <Handle id="t" type="source" position={Position.Top} className={handle} />
+      <Handle id="b" type="source" position={Position.Bottom} className={handle} />
+
+      <div
+        className="ade-node-drag flex items-center gap-2 pl-3 pr-1.5 shrink-0 cursor-grab active:cursor-grabbing
+          border-b border-sky-200 dark:border-sky-100/10 bg-sky-50 dark:bg-sky-100/5"
+        style={{ height: HEADER_H }}
+      >
+        <GlobeIcon className="w-3.5 h-3.5 shrink-0 text-sky-600 dark:text-sky-300/80" />
+        <input
+          value={portal.name}
+          onChange={(e) => key && canvasActions.updatePortal(key, id, { name: e.target.value })}
+          aria-label={t("canvas.portalName")}
+          spellCheck={false}
+          className="nodrag min-w-0 flex-1 bg-transparent outline-none text-[12.5px] font-medium
+            text-gray-800 dark:text-gray-100 focus:bg-white/60 dark:focus:bg-white/5 rounded px-1 -mx-1"
+        />
+        {links > 0 && (
+          <span className="shrink-0 text-[10.5px] tabular-nums px-1.5 rounded-full
+            bg-sky-200/70 dark:bg-white/8 text-sky-800 dark:text-gray-400" title={t("canvas.links", { count: links })}>
+            ⇄ {links}
+          </span>
+        )}
+        <Button variant="custom"
+          onClick={() => {
+            if (!key) return;
+            if (armed) canvasActions.removePortal(key, id);
+            else setArmed(true);
+          }}
+          title={armed ? t("canvas.portalDeleteConfirm") : t("canvas.portalDelete")}
+          aria-label={armed ? t("canvas.portalDeleteConfirm") : t("canvas.portalDelete")}
+          className={`nodrag cc-t shrink-0 flex items-center justify-center h-6 rounded-md
+            ${armed
+              ? "px-2 text-[11px] font-medium text-white bg-red-500 hover:bg-red-600"
+              : "w-6 text-gray-400 hover:text-red-500 hover:bg-sky-200/60 dark:hover:bg-white/8"}`}
+        >
+          {armed ? t("canvas.portalDeleteConfirm") : <CloseIcon className="w-3 h-3" />}
+        </Button>
+      </div>
+
+      {/* `nodrag nowheel nopan`: dentro de la página, arrastrar y la rueda son de la página. */}
+      <div className="nodrag nowheel nopan relative flex-1 min-h-0">
+        {view && (
+          <Suspense fallback={null}>
+            <BrowserTab view={view} active={selected} />
+          </Suspense>
+        )}
+      </div>
+    </div>
+  );
+});
+
+function GlobeIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"
+      strokeLinejoin="round" className={className} aria-hidden>
+      <circle cx="12" cy="12" r="9" />
+      <path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3Z" />
+    </svg>
+  );
+}
+
 // ── Conexión ────────────────────────────────────────────────────────
 
 function LinkEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, selected }: EdgeProps) {
@@ -526,5 +675,5 @@ function LinkEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
   );
 }
 
-const NODE_TYPES = { agent: AgentNode, note: NoteNode };
+const NODE_TYPES = { agent: AgentNode, note: NoteNode, portal: PortalNode };
 const EDGE_TYPES = { link: LinkEdge };

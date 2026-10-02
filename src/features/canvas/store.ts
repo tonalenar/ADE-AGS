@@ -5,8 +5,9 @@ import { useTabsStore } from "@/features/tabs/store";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
 import {
-  NOTE_PREFIX, addEdge, addNote, emptyBoard, placeBelow, reconcile, removeEdge, removeEdgeBetween, removeNote,
-  toggleOrchestrator, updateNote, type Board, type CanvasNote,
+  NOTE_PREFIX, PORTAL_PREFIX, addEdge, addNote, addPortal, emptyBoard, placeBelow, reconcile, removeEdge,
+  removeEdgeBetween, removeNote, removePortal, toggleOrchestrator, updateNote, updatePortal,
+  type Board, type CanvasNote, type CanvasPortal,
 } from "./board";
 import type { Box, Rect, Viewport } from "./geometry";
 
@@ -73,6 +74,8 @@ export const canvasActions = {
     updateBoard(key, (b) => {
       const note = b.notes[id];
       if (note) return updateNote(b, id, { box: { ...note.box, ...patch } });
+      const portal = b.portals[id];
+      if (portal) return updatePortal(b, id, { box: { ...portal.box, ...patch } });
       const box = b.nodes[id];
       if (!box) return b;
       return { ...b, nodes: { ...b.nodes, [id]: { ...box, ...patch } } };
@@ -92,6 +95,21 @@ export const canvasActions = {
   updateNote: (key: string, id: string, patch: Partial<Omit<CanvasNote, "box">>) =>
     updateBoard(key, (b) => updateNote(b, id, patch)),
   removeNote: (key: string, id: string) => updateBoard(key, (b) => removeNote(b, id)),
+  /** Crea un portal y devuelve su id y su nombre final. Con `near`, al lado de ese nodo y
+   *  conectado a él. */
+  addPortal: (key: string, portal: { name?: string; url?: string; near?: string; at?: { x: number; y: number } }) => {
+    const id = `${PORTAL_PREFIX}${crypto.randomUUID()}`;
+    let name = "";
+    updateBoard(key, (b) => {
+      const added = addPortal(b, { ...portal, id });
+      name = added.name;
+      return added.board;
+    });
+    return { id, name };
+  },
+  updatePortal: (key: string, id: string, patch: Partial<Omit<CanvasPortal, "box">>) =>
+    updateBoard(key, (b) => updatePortal(b, id, patch)),
+  removePortal: (key: string, id: string) => updateBoard(key, (b) => removePortal(b, id)),
   setViewport: (key: string, viewport: Viewport) => updateBoard(key, (b) => ({ ...b, viewport })),
   connect: (key: string, a: string, b: string) => updateBoard(key, (board) => addEdge(board, a, b)),
   disconnect: (key: string, edgeId: string) => updateBoard(key, (board) => removeEdge(board, edgeId)),
@@ -183,7 +201,7 @@ export function initCanvasSync(label: string): () => void {
       const mine = Object.fromEntries(
         Object.entries(saved ?? {})
           .filter(([k]) => k.startsWith(`${label}|`))
-          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {} }]),
+          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {} }]),
       );
       useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards } });
       unsub = useTabsStore.subscribe(syncBoards);

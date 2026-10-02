@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.9.0
+version: 1.10.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -432,6 +432,31 @@ ccode note edit Plan "- [ ] tests" "- [x] tests"   # replace a snippet that appe
 - `--name` gives a stable name. If it's taken, the note gets `Plan 2`: use the name that
   `create` returns.
 - There is no delete command: removing a note stays with the user.
+
+### Portals on the canvas
+
+A portal is a browser node on the canvas, visible to the user. You can drive the portals
+**connected to you** (an orchestrator: also those of its team) by name, the same way you
+use the browser tools but pointed at that browser:
+
+```bash
+ccode portals                                 # the portals you reach
+ccode portal create Docs https://example.com  # next to you, already connected
+ccode portal navigate Docs https://example.com/guide
+ccode portal snapshot Docs                    # page tree with refs (@e3)
+ccode portal click Docs @e3
+ccode portal type Docs @e2 "search term" --submit
+ccode portal press Docs Enter
+ccode portal screenshot Docs                  # returns the path of a PNG
+ccode portal console Docs --level errors
+```
+
+- Also available: `hover`, `select`, `scroll`, `wait`, `history` (back/forward/reload) and
+  `layout`. Every action takes the portal name first.
+- Take a `snapshot` before clicking: refs (`@e3`) come from it and change after the page does.
+- Not available on a portal: running JavaScript, uploading files, cookies and storage. A
+  portal may be on any site; those stay with the user and the project browser tools.
+- There is no delete command: closing a portal stays with the user.
 
 ## Windows and workspaces
 

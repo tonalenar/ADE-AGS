@@ -5,7 +5,7 @@ import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useAgentsStore } from "@/features/agents/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
-import { runBrowserRequest, type BrowserRequest } from "@/features/browser/agentBridge";
+import { runBrowserRequest, runPortalRequest, type BrowserRequest } from "@/features/browser/agentBridge";
 import type { ViewOwner } from "@/features/tabs/viewTabs";
 import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
@@ -263,6 +263,32 @@ async function handleNote(args: Record<string, unknown>) {
   }
   throw new Error(`Operación de nota desconocida: ${op}`);
 }
+/**
+ * Un agente creando un portal o manejándolo (`ccode portal …`). El permiso ya lo verificó
+ * el backend. `create` se guarda al instante: el comando siguiente busca el portal en el
+ * archivo.
+ */
+async function handlePortal(args: Record<string, unknown>) {
+  const op = str(args, "op");
+  if (op === "create") {
+    const cwd = str(args, "cwd");
+    const near = str(args, "near");
+    if (!cwd || !near) throw new Error("Faltan cwd o near");
+    const key = boardKey(cwd);
+    const created = canvasActions.addPortal(key, { name: str(args, "name"), url: str(args, "url"), near });
+    await flushSave(key);
+    return created;
+  }
+  if (op === "run") {
+    const cwd = str(args, "cwd");
+    const id = str(args, "id");
+    const request = args.request as BrowserRequest | undefined;
+    if (!cwd || !id || !request || typeof request.op !== "string") throw new Error("Faltan cwd, id o request");
+    return { text: await runPortalRequest(id, cwd, request, ownerOf(args)) };
+  }
+  throw new Error(`Operación de portal desconocida: ${op}`);
+}
+
 async function handle(command: string, args: Record<string, unknown>): Promise<unknown> {
   switch (command) {
     case "tab.create": return handleCreateTab(args);
@@ -275,6 +301,7 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "canvas.disconnect": return handleCanvas(args, (key, a, b) => canvasActions.disconnectPair(key, a, b));
     case "canvas.recruited": return handleRecruited(args);
     case "canvas.note": return handleNote(args);
+    case "canvas.portal": return handlePortal(args);
     default: throw new Error(`El frontend no sabe atender '${command}'`);
   }
 }

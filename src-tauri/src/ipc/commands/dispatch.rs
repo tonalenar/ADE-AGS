@@ -16,6 +16,7 @@ use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
 use super::ask::user_ask;
 use super::notes::{note_create, note_edit, note_list, note_read, note_write};
+use super::portals::{portal_action, portal_create, portal_list};
 use super::peers::{peer_ask, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_tell};
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
@@ -48,6 +49,22 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "note.create" => note_create(app, args),
         "note.write" => note_write(app, args),
         "note.edit" => note_edit(app, args),
+        // Los navegadores del canvas conectados con quien pide (ver `portals`).
+        "portal.list" => portal_list(app, args),
+        "portal.create" => portal_create(app, args),
+        "portal.navigate" => portal_action(app, args, "navigate"),
+        "portal.history" => portal_action(app, args, "history"),
+        "portal.snapshot" => portal_action(app, args, "snapshot"),
+        "portal.click" => portal_action(app, args, "click"),
+        "portal.hover" => portal_action(app, args, "hover"),
+        "portal.type" => portal_action(app, args, "type"),
+        "portal.press" => portal_action(app, args, "press"),
+        "portal.select" => portal_action(app, args, "select"),
+        "portal.scroll" => portal_action(app, args, "scroll"),
+        "portal.wait" => portal_action(app, args, "wait"),
+        "portal.screenshot" => portal_action(app, args, "screenshot"),
+        "portal.console" => portal_action(app, args, "console"),
+        "portal.layout" => portal_action(app, args, "layout"),
         "agent.list" => agent_list(app),
         "account.list" => account_list(app),
         "prelaunch.list" => prelaunch_list(app),

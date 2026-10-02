@@ -47,6 +47,27 @@ pub struct Board {
     /// el canvas las perdería al pasar por este struct.
     #[serde(default)]
     pub notes: BTreeMap<String, Note>,
+    /// Los portales (navegadores del canvas), por id (`portal-…`). Tipados por lo mismo
+    /// que las notas.
+    #[serde(default)]
+    pub portals: BTreeMap<String, Portal>,
+}
+
+/// Un portal: un navegador dentro del canvas que los agentes conectados manejan con
+/// `ccode portal …` (ver `ipc::commands::portals`).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct Portal {
+    pub name: String,
+    #[serde(default)]
+    pub url: String,
+    #[serde(default, rename = "box")]
+    pub r#box: Value,
+}
+
+pub const PORTAL_PREFIX: &str = "portal-";
+
+pub fn is_portal(id: &str) -> bool {
+    id.starts_with(PORTAL_PREFIX)
 }
 
 /// Una nota del canvas. Los agentes conectados a ella la leen y la escriben
@@ -122,7 +143,7 @@ pub fn save_board(key: &str, board: Board) -> Result<(), String> {
 /// Las notas no cuentan: una nota no es alguien a quien hablarle, y dos agentes conectados
 /// a la misma nota comparten esa nota, no un canal entre ellos.
 pub fn peers_of(boards: &Boards, tab: &str) -> BTreeSet<String> {
-    linked(boards, tab).into_iter().filter(|id| !is_note(id)).collect()
+    linked(boards, tab).into_iter().filter(|id| !is_note(id) && !is_portal(id)).collect()
 }
 
 /// Las notas que `tab` puede leer y escribir: las conectadas con ella y, si es
@@ -146,7 +167,28 @@ pub fn notes_for(boards: &Boards, tab: &str) -> Vec<(String, String)> {
     out.into_iter().collect()
 }
 
-/// Todo lo conectado con `tab` (tabs y notas), en cualquier canvas.
+/// Los portales que `tab` puede manejar: los conectados con ella y, si es orquestadora,
+/// los de su equipo. Como `(clave del canvas, id)`.
+pub fn portals_for(boards: &Boards, tab: &str) -> Vec<(String, String)> {
+    let mut owners = BTreeSet::from([tab.to_string()]);
+    if is_orchestrator(boards, tab) {
+        owners.extend(team_of(boards, tab));
+    }
+    let mut out = BTreeSet::new();
+    for (key, board) in boards {
+        for owner in &owners {
+            for e in &board.edges {
+                let other = if &e.a == owner { &e.b } else if &e.b == owner { &e.a } else { continue };
+                if is_portal(other) && board.portals.contains_key(other) {
+                    out.insert((key.clone(), other.clone()));
+                }
+            }
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// Todo lo conectado con `tab` (tabs, notas y portales), en cualquier canvas.
 fn linked(boards: &Boards, tab: &str) -> BTreeSet<String> {
     boards
         .values()

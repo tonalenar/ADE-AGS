@@ -141,3 +141,22 @@ fn las_notas_sobreviven_al_ida_y_vuelta_por_el_archivo() {
     assert_eq!(back["notes"]["note-1"]["box"]["w"], 3);
     assert_eq!(back["notes"]["note-1"]["content"], "- a");
 }
+
+#[test]
+fn un_portal_no_es_un_agente_pero_si_se_alcanza() {
+    let mut b = with_notes(vec![edge("1", "a", "portal-x"), edge("2", "b", "portal-x")], &[], &["a"]);
+    b.get_mut("main|/p").unwrap().portals.insert("portal-x".into(), Portal { name: "Web".into(), ..Default::default() });
+    assert!(peers_of(&b, "a").is_empty());
+    assert!(team_of(&b, "a").is_empty(), "un portal compartido no junta equipos");
+    assert_eq!(portals_for(&b, "a"), vec![("main|/p".to_string(), "portal-x".to_string())]);
+    assert!(portals_for(&b, "c").is_empty());
+}
+
+#[test]
+fn los_portales_sobreviven_al_ida_y_vuelta_por_el_archivo() {
+    let raw = r#"{"edges":[],"portals":{"portal-1":{"name":"Web","url":"http://localhost:5173","box":{"x":1,"y":2,"w":3,"h":4}}}}"#;
+    let board: Board = serde_json::from_str(raw).unwrap();
+    let back = serde_json::to_value(&board).unwrap();
+    assert_eq!(back["portals"]["portal-1"]["url"], "http://localhost:5173");
+    assert_eq!(back["portals"]["portal-1"]["box"]["h"], 4);
+}

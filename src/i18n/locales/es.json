@@ -1676,5 +1676,11 @@
   "canvas.noteName": "Nombre de la nota",
   "canvas.noteDelete": "Borrar nota",
   "canvas.noteDeleteConfirm": "¿Borrar?",
-  "canvas.notePlaceholder": "Escribí acá. Los agentes conectados leen y editan esta nota con `ccode note`."
+  "canvas.notePlaceholder": "Escribí acá. Los agentes conectados leen y editan esta nota con `ccode note`.",
+  "canvas.addPortal": "+ Portal",
+  "canvas.addPortalHint": "Navegador nuevo en el centro de la vista. Conectalo a un agente para que lo maneje (ccode portal).",
+  "canvas.portalDefaultName": "Portal",
+  "canvas.portalName": "Nombre del portal",
+  "canvas.portalDelete": "Borrar portal",
+  "canvas.portalDeleteConfirm": "¿Borrar?"
 }
