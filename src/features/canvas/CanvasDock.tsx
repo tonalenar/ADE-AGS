@@ -6,6 +6,7 @@ import { Button, CloseIcon } from "neogestify-ui-components";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 
+import { unreadOf, useChatUnreadWatcher, useUnreadStore } from "./chatUnread";
 import { FloorBar } from "./FloorBar";
 import { RING_COLORS, Ring } from "./Ring";
 import { UsageBoard } from "./UsageBoard";
@@ -100,6 +101,8 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onFit, onReset, petPerc
 
   const accounts = useMemo(() => [...system, ...custom].filter((a) => a.loggedIn), [system, custom]);
   const rings = useUsageRings();
+  useChatUnreadWatcher();
+  const unreadTotal = useUnreadStore((s) => Object.values(s.unread).reduce((n, by) => n + unreadOf(by), 0));
   useEffect(() => startUsagePolling(accounts), [accounts]);
   const [usageOpen, setUsageOpen] = useState(readUsageOpen);
   useEffect(() => writeUsageOpen(usageOpen), [usageOpen]);
@@ -110,7 +113,7 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onFit, onReset, petPerc
       {panel === "layers" && (
         <div className={`${popover} p-2`}><FloorBar inline /></div>
       )}
-      {usageOpen && <UsagePanel accounts={accounts} onClose={toggleUsage} />}
+      {usageOpen && panel === null && <UsagePanel accounts={accounts} onClose={toggleUsage} />}
       {panel === "map" && (
         <div className={`${popover} w-[17rem]`}>
           <div className="relative h-44">
@@ -127,7 +130,13 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onFit, onReset, petPerc
       )}
 
       <div className="pointer-events-auto absolute right-3 bottom-3 flex items-center gap-2">
-        <Pill label={t("canvas.chat.hint")} active={panel === "chat"} onClick={() => onTogglePanel("chat")}><ChatIcon /></Pill>
+        <Pill label={t("canvas.chat.hint")} active={panel === "chat"} onClick={() => onTogglePanel("chat")} className="relative">
+          <ChatIcon />
+          {unreadTotal > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold
+              leading-[17px] text-center shadow">{unreadTotal > 9 ? "9+" : unreadTotal}</span>
+          )}
+        </Pill>
         <Pill label={t("canvas.routines.hint")} active={panel === "routines"} onClick={() => onTogglePanel("routines")}><ClockIcon /></Pill>
         <Pill label={t("canvas.dock.layers")} active={panel === "layers"} onClick={() => onTogglePanel("layers")}><LayersIcon /></Pill>
         <Pill label={t("canvas.dock.usage")} active={usageOpen} onClick={toggleUsage} className="gap-1.5 px-3">
@@ -165,7 +174,7 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onFit, onReset, petPerc
 function UsagePanel({ accounts, onClose }: { accounts: AgentAccount[]; onClose: () => void }) {
   const { t } = useTranslation();
   return (
-    <div className={`${popover} w-[22rem] max-h-[calc(100%-10rem)] flex flex-col`} style={{ left: 12, right: "auto", top: 12, bottom: "auto" }}>
+    <div className={`${popover} w-[22rem] max-h-[calc(100%-5rem)] flex flex-col`}>
       <div className="flex items-center gap-1 pl-4 pr-2 h-11 shrink-0 border-b border-gray-200 dark:border-white/10">
         <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100">{t("canvas.dock.usageTitle")}</span>
         <span className="flex-1" />

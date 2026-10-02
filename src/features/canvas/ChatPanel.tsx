@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { unreadOf, useUnreadStore } from "./chatUnread";
 import { useActiveBoardKey, boardKey } from "./store";
 
 /** Los siete hilos, en el orden en que los conoce el backend (`chat::THREADS`). */
@@ -75,6 +76,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
+  const unread = useUnreadStore((s) => s.unread);
 
   // Con quién se habla: el agente activo si sirve, si no el primero.
   const current = agents.find((a) => a.id === tabId) ?? agents.find((a) => a.id === activeTabId) ?? agents[0];
@@ -105,6 +107,12 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
 
   const messages = useMemo(() => inThread(conversation?.messages ?? [], thread), [conversation, thread]);
   const counts = useMemo(() => threadCounts(conversation?.messages ?? []), [conversation]);
+
+  // Lo que está a la vista cuenta como leído: al abrir, al cambiar de hilo y cuando llega algo nuevo.
+  const visibleUnread = currentId ? unread[currentId]?.[thread] ?? 0 : 0;
+  useEffect(() => {
+    if (currentId && conversation) useUnreadStore.getState().markSeen(currentId, thread, conversation.messages);
+  }, [currentId, thread, conversation, visibleUnread]);
 
   useEffect(() => {
     bottom.current?.scrollIntoView({ block: "end" });
@@ -140,6 +148,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
                   ? "bg-gray-100 dark:bg-white/12 text-gray-900 dark:text-white"
                   : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"}`}>
               {a.title}
+              {a.id !== currentId && unreadOf(unread[a.id]) > 0 && <Badge n={unreadOf(unread[a.id])} />}
             </Button>
           ))}
         </div>
@@ -163,7 +172,12 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
                   background: THREAD_COLOR[th],
                   opacity: thread === th ? 1 : counts[th] ? 0.7 : 0.3,
                   boxShadow: thread === th ? `0 0 0 2px var(--color-surface-raised, white), 0 0 0 4px ${THREAD_COLOR[th]}` : undefined,
-                }} />
+                }}>
+                {th !== thread && (unread[current.id]?.[th] ?? 0) > 0 && (
+                  <span className="absolute -top-1.5 -right-1.5 min-w-[13px] h-[13px] px-[3px] rounded-full bg-red-500 text-white
+                    text-[8.5px] font-bold leading-[13px] text-center">{unread[current.id][th]}</span>
+                )}
+              </button>
             ))}
           </div>
 
@@ -215,5 +229,14 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
         </>
       )}
     </div>
+  );
+}
+
+/** El globito rojo con la cantidad de respuestas sin leer. */
+export function Badge({ n }: { n: number }) {
+  return (
+    <span className="ml-1 inline-flex min-w-[15px] h-[15px] px-1 items-center justify-center rounded-full bg-red-500 text-white text-[9px] font-bold leading-none">
+      {n > 9 ? "9+" : n}
+    </span>
   );
 }
