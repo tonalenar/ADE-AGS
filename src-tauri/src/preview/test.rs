@@ -6,6 +6,20 @@ use super::rewrite::{
 const TAG: &str = r#"<script src="/__controlcode__/picker.js"></script>"#;
 
 #[test]
+fn una_redireccion_se_resuelve_contra_la_url_que_la_devolvio_y_solo_si_es_web() {
+    use super::proxy::redirect_target;
+    let base = reqwest::Url::parse("https://example.com/a/b?x=1").unwrap();
+    let to = |loc: &str| redirect_target(&base, loc).map(|u| u.to_string());
+    assert_eq!(to("https://www.example.com/").as_deref(), Some("https://www.example.com/"));
+    assert_eq!(to("/login").as_deref(), Some("https://example.com/login"));
+    assert_eq!(to("c").as_deref(), Some("https://example.com/a/c"));
+    assert_eq!(to("//cdn.example.org/x").as_deref(), Some("https://cdn.example.org/x"));
+    assert_eq!(to("javascript:alert(1)"), None);
+    assert_eq!(to("file:///etc/passwd"), None);
+    assert_eq!(to("data:text/html,hola"), None);
+}
+
+#[test]
 fn el_selector_va_justo_despues_de_head() {
     let html = "<!doctype html><html lang=\"es\"><head><title>x</title></head><body></body></html>";
     let out = inject_picker(html);
@@ -1172,4 +1186,74 @@ async fn la_pagina_llama_a_su_api_en_otro_origen_con_cors_y_cookies() {
     // `*` alcanza sin credenciales.
     let public = fwd(&other.proxy_origin, &api("/public"), "same-origin").send().await.unwrap();
     assert_eq!(public.text().await.unwrap(), "public");
+}
+
+// ── browser_upload: solo archivos del proyecto ───────────────────
+
+use super::capture::upload_path_within;
+
+#[test]
+fn browser_upload_solo_lee_archivos_del_proyecto() {
+    let base = std::env::temp_dir().join(format!("cc-upload-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&base);
+    let project = base.join("proyecto");
+    std::fs::create_dir_all(project.join("fixtures")).unwrap();
+    std::fs::write(project.join("fixtures").join("foto.png"), b"png").unwrap();
+    std::fs::write(base.join("secreto.txt"), b"no").unwrap();
+    let root = project.to_string_lossy().to_string();
+
+    let inside = project.join("fixtures").join("foto.png");
+    assert!(upload_path_within(&inside.to_string_lossy(), &root).is_ok());
+
+    // Afuera, directo o subiendo con `..`.
+    let outside = base.join("secreto.txt");
+    assert!(upload_path_within(&outside.to_string_lossy(), &root).is_err());
+    let climbing = project.join("fixtures").join("..").join("..").join("secreto.txt");
+    assert!(upload_path_within(&climbing.to_string_lossy(), &root).is_err());
+
+    // Una carpeta hermana cuyo nombre empieza igual no es "adentro".
+    let sibling = base.join("proyecto-otro");
+    std::fs::create_dir_all(&sibling).unwrap();
+    std::fs::write(sibling.join("x"), b"x").unwrap();
+    assert!(upload_path_within(&sibling.join("x").to_string_lossy(), &root).is_err());
+
+    // Un symlink dentro del proyecto que apunta afuera tampoco (donde se puedan crear: en
+    // Windows hace falta el modo desarrollador).
+    #[cfg(unix)]
+    let linked = std::os::unix::fs::symlink(&outside, project.join("link")).is_ok();
+    #[cfg(windows)]
+    let linked = std::os::windows::fs::symlink_file(&outside, project.join("link")).is_ok();
+    if linked {
+        assert!(upload_path_within(&project.join("link").to_string_lossy(), &root).is_err());
+    }
+
+    std::fs::remove_dir_all(base).ok();
+}
+
+// ── Solo la tab de la app usa el proxy ───────────────────────────
+
+#[test]
+fn el_proxy_rechaza_otros_hosts_y_otros_origenes() {
+    use super::proxy::request_is_ours;
+    let req = |host: &str, origin: Option<&str>, ws: bool| {
+        let mut b = hyper::Request::builder().uri("/").header("host", host);
+        if let Some(o) = origin {
+            b = b.header("origin", o);
+        }
+        if ws {
+            b = b.header("upgrade", "websocket").header("connection", "Upgrade");
+        }
+        b.body(()).unwrap()
+    };
+    // La página misma.
+    assert!(request_is_ours(&req("localhost:4100", None, false), 4100));
+    assert!(request_is_ours(&req("127.0.0.1:4100", Some("http://127.0.0.1:4100"), true), 4100));
+    // DNS rebinding: el nombre del atacante apuntando a loopback.
+    assert!(!request_is_ours(&req("evil.example:4100", None, false), 4100));
+    // Pedido o WebSocket cruzado desde otro sitio del navegador del sistema.
+    assert!(!request_is_ours(&req("localhost:4100", Some("https://evil.example"), false), 4100));
+    assert!(!request_is_ours(&req("localhost:4100", Some("http://localhost:9999"), true), 4100));
+    // `null`: un iframe con sandbox. Pedidos sí, WebSocket no.
+    assert!(request_is_ours(&req("localhost:4100", Some("null"), false), 4100));
+    assert!(!request_is_ours(&req("localhost:4100", Some("null"), true), 4100));
 }

@@ -28,9 +28,19 @@ export function isResumable(agentId: string): boolean {
   return resumeArgsOf(agentId) !== null;
 }
 
+/**
+ * Si un id de sesión se puede pegar en la línea de comandos. Espejo de
+ * `session::title::is_safe_session_id`: el id sale de archivos que un agente puede
+ * escribir, y un `x --flag` o `x & calc` se volvería parte del comando (con prelaunch en
+ * Windows pasa por `cmd /C`). Uno que no pasa se descarta y la TUI arranca de cero.
+ */
+export function isSafeSessionId(id: string): boolean {
+  return id.length > 0 && id.length <= 128 && !id.startsWith("-") && /^[A-Za-z0-9._:-]+$/.test(id);
+}
+
 /** Construye el comando efectivo a lanzar en el PTY: relanza la sesión real si se conoce su id. */
 export function buildResumeCommand(agentId: string, command: string, sessionId?: string): string {
-  if (!sessionId) return command;
+  if (!sessionId || !isSafeSessionId(sessionId)) return command;
   const args = resumeArgsOf(agentId);
   if (!args) return command;
   return `${command} ${args.split("{session}").join(sessionId)}`;

@@ -111,6 +111,11 @@ pub struct RosterAccount {
     pub running: u32,
     pub models: Vec<RosterModel>,
     pub model_discovery: ModelDiscoveryState,
+    /// Superó su presupuesto de 24 h (ver `runs::ledger`): el ruteo no la usa mientras dure.
+    pub limit: Option<String>,
+    /// Corre tantas tareas como su máximo. No la descarta (una tarea fijada a ella espera su
+    /// turno al lanzar), pero el ruteo automático prefiere otra.
+    pub at_capacity: bool,
 }
 
 // ── Los parsers ─────────────────────────────────────────────────
@@ -510,9 +515,18 @@ fn run(program: &str, args: &[&str]) -> Option<String> {
         .then(|| String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
+/// Un sondeo con el entorno de una cuenta: sin las variables que le ganarían a su login (ver
+/// `agents::overriding_env`), o los modelos serían los de otra credencial.
+pub(super) fn account_command(program: &str, args: &[&str], env: &HashMap<String, String>) -> std::process::Command {
+    let mut command = crate::util::program(program);
+    command.args(args);
+    crate::agents::apply_account_env(&mut command, env);
+    command
+}
+
 fn run_with_env(program: &str, args: &[&str], env: &HashMap<String, String>) -> Option<String> {
     let out = crate::util::output_with_timeout(
-        crate::util::program(program).args(args).envs(env),
+        &mut account_command(program, args, env),
         PROBE_TIMEOUT,
     )
     .ok()?;
@@ -607,22 +621,44 @@ pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
                     .chain(rows.map(|a| (Some(a.id.clone()), a)))
                 {
                     let key = quota::account_key(def.id, account_id.as_deref());
+                    let label = account
+                        .label
+                        .clone()
+                        // Codex no deja el mail en un archivo legible: el de la última
+                        // verificación (ver `accounts::refresh_codex_account`).
+                        .or_else(|| crate::accounts::load_identity(&conn, &key).and_then(|i| i.email));
+                    // Una credencial que una tarea vio rechazada hace poco cuenta como sin
+                    // sesión: el ruteo la saltea hasta que se la verifique de nuevo.
+                    let logged_in = account.logged_in
+                        && !super::failure::auth_failed_recently(&conn, &key, crate::util::now_ts());
                     let catalog = probed
                         .catalogs
                         .get(&(def.id.to_string(), account_id.clone()))
                         .cloned()
                         .unwrap_or_else(ModelCatalog::unsupported);
+                    let running_now = running
+                        .get(&(def.id.to_string(), account_id.clone()))
+                        .copied()
+                        .unwrap_or(0);
+                    let now = crate::util::now_ts();
+                    let limit = super::ledger::limit_problem(
+                        &super::ledger::load_limits(&conn, &key),
+                        running_now as i64,
+                        super::ledger::spent_since(&conn, &key, now - 24 * 3600),
+                    );
                     accounts.push(RosterAccount {
                         quota: quota::load(&conn, &key),
-                        running: running
-                            .get(&(def.id.to_string(), account_id.clone()))
-                            .copied()
-                            .unwrap_or(0),
+                        running: running_now,
+                        at_capacity: matches!(limit, Some(super::ledger::Limit::Concurrency(_))),
+                        limit: match limit {
+                            Some(super::ledger::Limit::Budget(reason)) => Some(reason),
+                            _ => None,
+                        },
                         account_id,
                         key,
                         name: account.name.clone(),
-                        label: account.label.clone(),
-                        logged_in: account.logged_in,
+                        label,
+                        logged_in,
                         models: catalog.models,
                         model_discovery: catalog.state,
                     });

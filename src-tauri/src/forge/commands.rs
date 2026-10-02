@@ -6,7 +6,7 @@ use tauri::AppHandle;
 use super::api::{
     normalize_state, Api, ForgeRepo, ForgeUser, Item, ItemDetail, Label, NewIssue, NewPull, NewRelease, Release,
 };
-use super::credentials::{api_for, blocking, git_env, git_env_for_url, target, RepoTarget};
+use super::credentials::{api_for, blocking, git_env_for_remote, git_env_for_url, target, RepoTarget};
 use super::oauth::{self, DeviceStart, Poll};
 use super::provider::{normalize_host, ForgeError, ForgeKind};
 use super::secret::{self, Secret};
@@ -316,7 +316,7 @@ pub async fn forge_default_branch(app: AppHandle, cwd: String) -> Result<Option<
 pub async fn forge_checkout_pull(app: AppHandle, cwd: String, number: u64) -> Result<String, ForgeError> {
     let (t, api) = repo_api(&app, &cwd).await?;
     let head_ref = api.pull_head_ref(number);
-    let env = git_env(&app, &t.root).await;
+    let env = git_env_for_remote(&app, &t.root, &t.remote, false).await;
     blocking(move || checkout_pull(&t, number, &head_ref, &env)).await?
 }
 

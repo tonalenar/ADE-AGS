@@ -3,7 +3,8 @@ import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
 import { Terminal } from "@/features/terminal/Terminal";
 import { useTabsStore } from "@/features/tabs/store";
-import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
+import { CANVAS_GROUP, focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
+import { useWorkMode } from "@/features/canvas/store";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
 import { buildResumeCommand, isResumable } from "@/features/sessions/agentResume";
 
@@ -12,6 +13,10 @@ export function TerminalPanel() {
   const tabs = useTabsStore((s) => s.tabs);
   const setPtyId = useTabsStore((s) => s.setPtyId);
   const setSessionId = useTabsStore((s) => s.setSessionId);
+  const activateTab = useTabsStore((s) => s.activateTab);
+  // En el canvas el panel es transparente y no atrapa el puntero: abajo está el canvas, y
+  // solo las terminales vivas (encima de sus nodos) reciben clicks.
+  const canvas = useWorkMode() === "canvas";
   // El panel sigue montado (para no matar los PTYs) pero oculto fuera de /workspace, así
   // que "ser la tab activa" no alcanza para enfocar: en Skills o Settings el foco tiene que
   // quedarse en esa página, no robárselo una terminal invisible.
@@ -26,7 +31,7 @@ export function TerminalPanel() {
   return (
     // h-full en lugar de flex-1: el padre es position:absolute;inset:0 (no flex),
     // así que h-full es la única forma de darle altura real al panel.
-    <div className="relative h-full w-full overflow-hidden bg-gray-100 dark:bg-[#0d1117]">
+    <div className={`relative h-full w-full overflow-hidden ${canvas ? "pointer-events-none" : "bg-gray-100 dark:bg-surface"}`}>
       {tabs.map((tab) => {
         // El resume del agente ya reconstruye su propia conversación; reproducir
         // también el scrollback crudo aquí duplicaría/ensuciaría la salida.
@@ -43,10 +48,19 @@ export function TerminalPanel() {
               // Sin "visible" explícito: así hereda el visibility del contenedor de
               // AppShell (que lo oculta fuera de /workspace) en vez de sobreescribirlo.
               visibility: shown ? undefined : "hidden",
+              // Fuera del panel (que recorta): xterm deja de dibujar una terminal solo
+              // cuando su IntersectionObserver dice que no se ve, y `visibility:hidden`
+              // sigue "intersectando". Una oculta que recibe salida sin parar redibujaba
+              // filas que nadie mira. Se mueve sin cambiar de tamaño, así su TUI no recibe
+              // un resize; al volver, xterm la redibuja entera sola.
+              transform: shown ? undefined : "translateX(-300vw)",
               pointerEvents: shown ? "auto" : "none",
               zIndex: shown ? 1 : 0,
             }}
-            onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
+            onPointerDownCapture={() => {
+              if (placement?.groupId === CANVAS_GROUP) activateTab(tab.id);
+              else if (placement?.groupId) focusGroup(placement.groupId);
+            }}
           >
             <Terminal
               // El nonce en la key: reiniciar el agente desmonta esta terminal (lo que mata
@@ -71,7 +85,7 @@ export function TerminalPanel() {
         );
       })}
 
-      {tabs.length === 0 && (
+      {tabs.length === 0 && !canvas && (
         <div className="flex flex-col items-center justify-center h-full gap-3 text-gray-400 dark:text-white/20">
           <span className="text-5xl select-none">⌥</span>
           <p className="text-sm">{t("terminal.empty")}</p>

@@ -18,6 +18,13 @@ let initialized = false;
 // y solo se refresca en el ciclo periódico de 20s (o si todavía no hay nada cacheado).
 const scrollbackCache = new Map<number, string>();
 
+// El último scrollback que la base ya tiene de cada tab (por id de tab). Con el cache de
+// arriba el de un guardado de metadata es el MISMO string que el anterior, así que la
+// comparación es por referencia y no cuesta nada: si no cambió, se manda vacío con
+// `scrollbackUnchanged` y el backend conserva el suyo, en vez de que viajen y se
+// reescriban megabytes por tab al mover la ventana o renombrar una tab.
+const savedScrollback = new Map<string, string>();
+
 // `saveNow` es async (espera bounds + scrollback de cada PTY vía IPC) y se dispara desde
 // dos fuentes independientes (debounce de 400ms y el refresco periódico de 20s) — sin
 // serializar, dos llamadas superpuestas pueden llegar a `db_save_window_state` en orden
@@ -96,23 +103,30 @@ async function saveNow(
   }
   step({ kind: "bounds" });
 
+  const fresh = new Map<string, string>();
   const tabsPayload = await Promise.all(
-    tabs.map(async (t, i) => ({
-      id: t.id,
-      title: t.title,
-      titleIsCustom: t.titleIsCustom ?? false,
-      agentId: t.agentId,
-      agentLabel: t.agentLabel,
-      command: t.command,
-      cwd: t.cwd,
-      tabOrder: i,
-      sessionId: t.sessionId ?? null,
-      historyId: t.historyId ?? null,
-      accountId: t.accountId ?? null,
-      prelaunch: t.prelaunch ?? [],
-      scrollback: await resolveScrollback(t.ptyId).finally(() => step({ kind: "terminal", title: t.title })),
-      openedAt: t.openedAt,
-    }))
+    tabs.map(async (t, i) => {
+      const scrollback = await resolveScrollback(t.ptyId).finally(() => step({ kind: "terminal", title: t.title }));
+      const unchanged = scrollback !== null && savedScrollback.get(t.id) === scrollback;
+      if (scrollback !== null && !unchanged) fresh.set(t.id, scrollback);
+      return {
+        id: t.id,
+        title: t.title,
+        titleIsCustom: t.titleIsCustom ?? false,
+        agentId: t.agentId,
+        agentLabel: t.agentLabel,
+        command: t.command,
+        cwd: t.cwd,
+        tabOrder: i,
+        sessionId: t.sessionId ?? null,
+        historyId: t.historyId ?? null,
+        accountId: t.accountId ?? null,
+        prelaunch: t.prelaunch ?? [],
+        scrollback: unchanged ? null : scrollback,
+        scrollbackUnchanged: unchanged,
+        openedAt: t.openedAt,
+      };
+    })
   );
 
   // Podar entradas de PTYs que ya no pertenecen a ninguna tab de esta ventana (cerradas,
@@ -135,7 +149,15 @@ async function saveNow(
     // único que autoriza al backend a dar por cerradas las que falten. Ver
     // `WindowStatePayload::authoritative`.
     authoritative: hydrated,
-  }).catch(console.error);
+  }).then(
+    () => {
+      // Solo después de que la base lo tiene: si el guardado falló, el próximo lo reintenta.
+      const liveTabs = new Set(tabs.map((t) => t.id));
+      for (const id of savedScrollback.keys()) if (!liveTabs.has(id)) savedScrollback.delete(id);
+      for (const [id, scrollback] of fresh) savedScrollback.set(id, scrollback);
+    },
+    console.error,
+  );
   step({ kind: "write" });
 }
 

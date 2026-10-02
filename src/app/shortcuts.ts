@@ -9,17 +9,18 @@
  * corre ANTES que el handler del textarea de xterm. Con `preventDefault` +
  * `stopPropagation` el atajo nunca llega al proceso del agente.
  *
- * ## El precio, dicho explícitamente
+ * ## O preço, dito explicitamente
  *
- * Un Ctrl+letra no es solo un acorde: en una terminal ya significa algo. Ctrl+M ES Enter
- * (CR) y Ctrl+H ES Backspace a nivel protocolo, y Ctrl+E (fin de línea) y Ctrl+K (borrar
- * hasta el final) son edición estilo emacs que readline usa. Al capturarlos acá, esas
- * combinaciones dejan de existir DENTRO de las TUIs.
+ * Um Ctrl+letra não é só um acorde: num terminal ele já significa algo. Ctrl+M É Enter
+ * (CR) e Ctrl+H É Backspace no protocolo, e Ctrl+E (fim de linha), Ctrl+F (avançar) e
+ * Ctrl+K (apagar até o fim) são a edição estilo emacs do readline. Capturá-los aqui os
+ * apaga DENTRO das TUIs.
  *
- * En la práctica pesa poco: Enter y Backspace tienen sus propias teclas y son las que se
- * usan; lo que se pierde de verdad es la edición emacs para quien la tenga en los dedos.
- * Si molesta, se cambia una línea de la tabla de abajo y nada más — por eso la tabla es
- * el único lugar donde vive esta decisión.
+ * Por isso as seções vão em Ctrl+Shift+letra, que o terminal não distingue de Ctrl+letra
+ * para controle e que nenhuma TUI comum usa. Só a paleta fica em Ctrl+K: é o atajo que
+ * todo mundo espera para ela, e quem precisa do kill-line tem Ctrl+Shift+P como
+ * alternativa (ver `PALETTE_SHORTCUT`). A tabela de baixo continua sendo o único lugar
+ * onde essa decisão vive.
  *
  * ## Ir y volver con la misma tecla
  *
@@ -37,6 +38,8 @@ export type ShortcutAction =
   | { kind: "goto"; path: string }
   /** Configuración es un modal, no una ruta: se abre encima sin tapar las terminales. */
   | { kind: "openSettings" }
+  /** A paleta de comandos: um modal, como Configurações. */
+  | { kind: "openPalette" }
   /** `delta` en el ORDEN de la barra de tabs: +1 la siguiente, -1 la anterior. */
   | { kind: "cycleTab"; delta: 1 | -1 };
 
@@ -67,12 +70,14 @@ export interface Shortcut {
  * Ctrl+S congela la terminal con XOFF) hacen más daño que bien, y se llega desde Home.
  */
 export const SHORTCUTS: Shortcut[] = [
-  { key: "h", action: { kind: "goto", path: "/" }, display: "Ctrl+H", labelKey: "sidebar.home" },
-  { key: "e", action: { kind: "goto", path: "/sessions" }, display: "Ctrl+E", labelKey: "sidebar.sessions" },
-  { key: "k", action: { kind: "goto", path: "/skills" }, display: "Ctrl+K", labelKey: "sidebar.skills" },
-  { key: "m", action: { kind: "goto", path: "/marketplace" }, display: "Ctrl+M", labelKey: "sidebar.marketplace" },
-  { key: "f", action: { kind: "goto", path: "/fleet" }, display: "Ctrl+F", labelKey: "sidebar.fleet" },
-  { key: "g", action: { kind: "openSettings" }, path: "/settings", display: "Ctrl+G", labelKey: "sidebar.settings" },
+  { key: "k", action: { kind: "openPalette" }, display: "Ctrl+K", labelKey: "palette.open" },
+  { key: "p", shift: true, action: { kind: "openPalette" }, display: "Ctrl+Shift+P", labelKey: "palette.open" },
+  { key: "h", shift: true, action: { kind: "goto", path: "/" }, display: "Ctrl+Shift+H", labelKey: "sidebar.home" },
+  { key: "e", shift: true, action: { kind: "goto", path: "/sessions" }, display: "Ctrl+Shift+E", labelKey: "sidebar.sessions" },
+  { key: "s", shift: true, action: { kind: "goto", path: "/skills" }, display: "Ctrl+Shift+S", labelKey: "sidebar.skills" },
+  { key: "m", shift: true, action: { kind: "goto", path: "/marketplace" }, display: "Ctrl+Shift+M", labelKey: "sidebar.marketplace" },
+  { key: "f", shift: true, action: { kind: "goto", path: "/fleet" }, display: "Ctrl+Shift+F", labelKey: "sidebar.fleet" },
+  { key: ",", action: { kind: "openSettings" }, path: "/settings", display: "Ctrl+,", labelKey: "sidebar.settings" },
   { key: "tab", action: { kind: "cycleTab", delta: 1 }, display: "Ctrl+Tab", labelKey: "shortcuts.nextTab" },
   {
     key: "tab",
@@ -126,6 +131,9 @@ export function nextTabId(tabIds: string[], activeId: string | null, delta: numb
   if (current === -1) return delta > 0 ? tabIds[0] : tabIds[tabIds.length - 1];
   return tabIds[(current + delta + tabIds.length) % tabIds.length];
 }
+
+/** O atalho principal da paleta, para mostrar onde ela é oferecida. */
+export const PALETTE_SHORTCUT = "Ctrl+K";
 
 /** El acorde que lleva a esta ruta, para mostrarlo en el tooltip del botón que hace lo mismo. */
 export function shortcutForPath(path: string): string | null {

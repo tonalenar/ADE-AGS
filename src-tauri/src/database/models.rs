@@ -85,6 +85,11 @@ pub struct TabStatePayload {
     pub tab_order: i32,
     pub session_id: Option<String>,
     pub scrollback: Option<String>,
+    /// El frontend ya mandó ESTE scrollback en un guardado anterior: se conserva el que
+    /// está en la base y `scrollback` viene vacío. Así un guardado de metadata (renombrar,
+    /// mover la ventana) no viaja ni reescribe megabytes por tab.
+    #[serde(default)]
+    pub scrollback_unchanged: bool,
     pub history_id: Option<String>,
     pub account_id: Option<String>,
     #[serde(default)]

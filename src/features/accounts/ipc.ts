@@ -9,7 +9,9 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { AccountCapableAgent, AgentAccount } from "./types";
+import type {
+  AccountCapableAgent, AccountHealth, AccountLimits, AccountUsageSummary, AgentAccount, CodexUsage,
+} from "./types";
 
 export const listAccounts = () => invoke<AgentAccount[]>("list_agent_accounts");
 export const listSystemAccounts = () => invoke<AgentAccount[]>("system_accounts");
@@ -18,6 +20,13 @@ export const listCapableAgents = () => invoke<AccountCapableAgent[]>("account_ca
 
 export const createAccount = (agentId: string, name: string) =>
   invoke<AgentAccount>("create_agent_account", { agentId, name });
+
+/** Cuenta por API key: Claude Code (llavero) o Codex (`codex login --with-api-key`). */
+export const createApiKeyAccount = (agentId: string, name: string, apiKey: string, baseUrl: string | null) =>
+  invoke<AgentAccount>("create_agent_api_key_account", { agentId, name, apiKey, baseUrl });
+
+/** Le pregunta a la CLI (o al proveedor) si la cuenta funciona. No gasta tokens. */
+export const accountHealth = (accountId: string) => invoke<AccountHealth>("account_health", { accountId });
 
 export const deleteAccount = (id: string, deleteFiles: boolean) =>
   invoke<void>("delete_agent_account", { id, deleteFiles });
@@ -50,3 +59,14 @@ export type AntigravityAccountDiscovery = {
 };
 export const discoverAntigravityAccount = (accountId: string) =>
   invoke<AntigravityAccountDiscovery>("antigravity_account_discovery", { accountId });
+
+/** Cupo, mail y plan de una cuenta de Codex, preguntados a su `app-server` en el momento. */
+export const codexAccountUsage = (accountId: string) => invoke<CodexUsage>("codex_account_usage", { accountId });
+
+/** Uso de cada cuenta en los últimos `days` días, con sus límites (ver `runs::ledger`). */
+export const accountUsageSummary = (days: number) => invoke<AccountUsageSummary[]>("account_usage_summary", { days });
+
+/** `accountKey`: el id de la cuenta, o `system:<agente>`. */
+export const accountLimitsGet = (accountKey: string) => invoke<AccountLimits>("account_limits_get", { accountKey });
+export const accountLimitsSet = (accountKey: string, limits: AccountLimits) =>
+  invoke<void>("account_limits_set", { accountKey, limits });

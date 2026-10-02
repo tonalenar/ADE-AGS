@@ -152,28 +152,43 @@ fn entries_for(account: &GitAccount, token: &str) -> Vec<(String, String)> {
     ]
 }
 
-/// Las variables de git para operar en `root`: una entrada por cada remoto HTTPS cuyo host
-/// tiene cuenta. Un remoto sin cuenta queda como estaba (lo que git tenga configurado).
-pub(crate) async fn git_env(app: &tauri::AppHandle, root: &str) -> Vec<(String, String)> {
-    let r = root.to_string();
-    let remotes = blocking(move || remotes(&r)).await.unwrap_or_default();
-    let mut hosts: Vec<String> = remotes.iter().filter_map(|(_, url)| https_host(url)).collect();
-    hosts.sort();
-    hosts.dedup();
+/// La URL a la que git va a ir por `remote`: la de push si `push`, si no la de fetch.
+fn remote_url(root: &str, remote: &str, push: bool) -> Option<String> {
+    let mut args = vec!["remote", "get-url"];
+    if push {
+        args.push("--push");
+    }
+    args.extend(["--", remote]);
+    git(root, &args).and_then(|out| out.lines().next().map(str::to_string)).filter(|s| !s.is_empty())
+}
 
-    let mut entries = Vec::new();
-    for host in hosts {
-        let account = match db(app) {
-            Ok(conn) => store::pick(&conn.lock().unwrap(), Some(root), bare_host(&host)).0,
-            Err(_) => None,
-        };
-        let Some(account) = account else { continue };
-        match token(app, &account).await {
-            Ok(token) => entries.extend(entries_for(&account, &token)),
-            Err(e) => eprintln!("[forge] sin token para {host}: {e}"),
+/// Las variables de git para hablar con UN remoto de `root`: solo si es HTTPS y su host
+/// tiene cuenta. Un remoto sin cuenta (o por SSH) queda como estaba, sin token en el
+/// entorno: así el proceso que lleva el token solo contacta al host de la cuenta, y
+/// `git::network` puede limitarlo a HTTPS sin romper los remotos SSH.
+pub(crate) async fn git_env_for_remote(
+    app: &tauri::AppHandle,
+    root: &str,
+    remote: &str,
+    push: bool,
+) -> Vec<(String, String)> {
+    let (r, name) = (root.to_string(), remote.to_string());
+    let Some(url) = blocking(move || remote_url(&r, &name, push)).await.ok().flatten() else {
+        return Vec::new();
+    };
+    let Some(host) = https_host(&url) else { return Vec::new() };
+    let account = match db(app) {
+        Ok(conn) => store::pick(&conn.lock().unwrap(), Some(root), bare_host(&host)).0,
+        Err(_) => None,
+    };
+    let Some(account) = account else { return Vec::new() };
+    match token(app, &account).await {
+        Ok(token) => env_for(&entries_for(&account, &token)),
+        Err(e) => {
+            eprintln!("[forge] sin token para {host}: {e}");
+            Vec::new()
         }
     }
-    env_for(&entries)
 }
 
 /// Lo mismo para una URL suelta (clonar): con la cuenta dada, o la primera de su host.

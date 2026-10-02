@@ -230,11 +230,30 @@ fn mime_for(path: &Path) -> &'static str {
     }
 }
 
-/// Un archivo del disco, listo para que la página lo ponga en un `<input type=file>`.
+/// `path` resuelto (symlinks incluidos), si queda dentro de `root`.
+///
+/// Lo pide un agente, y la página que lo recibe puede ser cualquiera: sin este límite
+/// `browser_upload` lee `~/.ssh` o el handshake de la app y se lo entrega a un sitio. Se
+/// compara después de resolver, así que ni `..` ni un symlink dentro del proyecto sacan
+/// afuera.
+pub(crate) fn upload_path_within(path: &str, root: &str) -> Result<PathBuf, String> {
+    let root = dunce::canonicalize(root).map_err(|e| format!("could not resolve the project folder {root}: {e}"))?;
+    let file = dunce::canonicalize(path).map_err(|e| format!("could not read {path}: {e}"))?;
+    if !file.starts_with(&root) {
+        return Err(format!(
+            "browser_upload only attaches files inside the project folder ({}). {path} is outside it.",
+            root.display()
+        ));
+    }
+    Ok(file)
+}
+
+/// Un archivo del proyecto `root`, listo para que la página lo ponga en un `<input type=file>`.
 #[tauri::command]
-pub fn preview_read_upload(path: String) -> Result<UploadFile, String> {
+pub fn preview_read_upload(path: String, root: String) -> Result<UploadFile, String> {
     use base64::Engine;
-    let file = Path::new(&path);
+    let file = upload_path_within(&path, &root)?;
+    let file = file.as_path();
     let meta = fs::metadata(file).map_err(|e| format!("no se pudo leer {path}: {e}"))?;
     if meta.is_dir() {
         return Err(format!("{path} es una carpeta"));

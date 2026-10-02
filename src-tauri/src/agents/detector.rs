@@ -98,9 +98,19 @@ fn probe_agent(adapter: &'static dyn AgentAdapter) -> AgentInfo {
 ///
 /// Los sondeos van en paralelo: son independientes, y en serie la lista tardaba la SUMA de
 /// todos los `--version` — con uno lento, varios segundos de "no hay agentes".
+///
+/// El resultado se guarda [`DETECT_TTL`]: se pide al abrir cada ventana, al entrar a la
+/// flota y al panel de cuentas, y lo instalado no cambia entre esas visitas. `refresh`
+/// vuelve a sondear (el botón "buscar de nuevo" de la configuración).
 #[tauri::command]
-pub async fn detect_agents() -> Result<Vec<AgentInfo>, String> {
-    tokio::task::spawn_blocking(|| {
+pub async fn detect_agents(refresh: Option<bool>) -> Result<Vec<AgentInfo>, String> {
+    if !refresh.unwrap_or(false)
+        && let Some((at, agents)) = DETECTED.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+        && at.elapsed() < DETECT_TTL
+    {
+        return Ok(agents.clone());
+    }
+    let agents: Vec<AgentInfo> = tokio::task::spawn_blocking(|| {
         std::thread::scope(|scope| {
             let probes: Vec<_> = super::adapter::adapters()
                 .iter()
@@ -111,7 +121,16 @@ pub async fn detect_agents() -> Result<Vec<AgentInfo>, String> {
         })
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    *DETECTED.lock().unwrap_or_else(|e| e.into_inner()) = Some((std::time::Instant::now(), agents.clone()));
+    Ok(agents)
+}
+
+/// Cuánto vale una detección antes de volver a sondear.
+const DETECT_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+lazy_static::lazy_static! {
+    static ref DETECTED: std::sync::Mutex<Option<(std::time::Instant, Vec<AgentInfo>)>> = std::sync::Mutex::new(None);
 }
 
 /// Dónde busca la app los programas: qué aportó el shell del usuario, qué carpetas

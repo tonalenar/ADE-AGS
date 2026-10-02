@@ -107,7 +107,9 @@ pub(crate) fn network_with(
     env: &[(String, String)],
     limit: Duration,
 ) -> Result<String, ScmError> {
-    let mut cmd = base(root, args);
+    let hardened = if env.is_empty() { Vec::new() } else { credentialed_overrides()? };
+    let all: Vec<&str> = hardened.iter().map(String::as_str).chain(args.iter().copied()).collect();
+    let mut cmd = base(root, &all);
     cmd.envs(env.iter().map(|(k, v)| (k, v)));
     let out = output_with_timeout(&mut cmd, limit)
         .map_err(|e| ScmError::Git(format!("git {}: {e}", args.first().unwrap_or(&""))))?;
@@ -117,6 +119,43 @@ pub(crate) fn network_with(
     let stderr = String::from_utf8_lossy(&out.stderr);
     let message = if stderr.trim().is_empty() { String::from_utf8_lossy(&out.stdout) } else { stderr };
     Err(classify_failure(&message))
+}
+
+/// Los `-c` de un git que lleva el token de una cuenta en el entorno.
+///
+/// Todo proceso que git lance hereda ese entorno, y el repo lo puede escribir un agente:
+/// un `.git/hooks/pre-push`, un `core.fsmonitor`, un credential helper o un `core.sshCommand`
+/// en `.git/config` correrían con el token a la vista. Un `-c` le gana a toda la config del
+/// repo y llega también a los git hijos (submódulos), así que acá se apaga todo lo que
+/// ejecuta algo:
+///
+/// - `core.hooksPath` apunta a un ARCHIVO (el ejecutable de la app): `<archivo>/pre-push`
+///   no puede existir, y git no ve ningún hook. Una carpeta vacía la podría llenar alguien.
+/// - solo HTTPS: el token es de un host HTTPS, y así ningún transporte (ssh, file, ext)
+///   lanza un programa elegido por la config.
+/// - sin credential helper ni askpass: para el host de la cuenta ya estaba vacío, y a otro
+///   host este proceso no tiene por qué preguntarle nada.
+/// - TLS verificado: un `http.sslVerify=false` en el repo más un proxy leerían el header.
+pub(super) fn credentialed_overrides() -> Result<Vec<String>, ScmError> {
+    let no_hooks = std::env::current_exe()
+        .map_err(|e| ScmError::Git(format!("no se pudo aislar git de los hooks del repo: {e}")))?;
+    let overrides = [
+        format!("core.hooksPath={}", no_hooks.display()),
+        "core.fsmonitor=false".to_string(),
+        "core.askPass=".to_string(),
+        "credential.helper=".to_string(),
+        // `protocol.allow` solo es el default de los que no tienen política propia, y
+        // `file`, `ssh`, `git` y `http` la tienen: cada uno se apaga por nombre.
+        "protocol.allow=never".to_string(),
+        "protocol.file.allow=never".to_string(),
+        "protocol.ssh.allow=never".to_string(),
+        "protocol.git.allow=never".to_string(),
+        "protocol.http.allow=never".to_string(),
+        "protocol.ext.allow=never".to_string(),
+        "protocol.https.allow=always".to_string(),
+        "http.sslVerify=true".to_string(),
+    ];
+    Ok(overrides.into_iter().flat_map(|o| ["-c".to_string(), o]).collect())
 }
 
 /// El root del repo que contiene `cwd`, o `None` si no hay repo.

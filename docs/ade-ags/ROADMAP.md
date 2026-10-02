@@ -44,11 +44,11 @@ Tasks com estado, dependência, retry e roteamento. Grande parte já está em `r
 
 Depende de: 5.
 
-## 7. Worktree por missão (pendente)
+## 7. Worktree por missão
 
-Hoje o worktree é por task da frota, em `~/.controlcode/worktrees`, ramo `cc/<task>`, e não se apaga sozinho. A missão precisa de um worktree cujo ciclo de vida seja o da missão, com a mesma regra: não descartar sujo.
+**v1 concluído** em `feat/mission-review` (PR #11). Continua havendo um worktree por task isolada. A Mission ganhou um **worktree de integração**, criado na primeira entrega aceita na tela "Revisão das entregas", onde as branches aceitas são unidas sem tocar na cópia de trabalho do usuário. "Aplicar no projeto" faz um único merge da integração. Conflitos são sempre abortados e listados. Detalhes em [MISSION_ENGINE.md](./MISSION_ENGINE.md).
 
-Depende de: 5 e 6. Reusa `runs/worktrees.rs`.
+Pendente: resolver conflitos dentro da app e limpar a integração depois de aplicada.
 
 ## 8. MCP interno da ADE
 
@@ -56,11 +56,21 @@ O servidor `controlcode` em `ipc/mcp.rs` já é o MCP da app (browser, frota, gi
 
 Depende de: 2 (cada provider declara o estilo de MCP) e de 5 (anexar à missão). Não depende de um backend cloud.
 
-## 9. Event Bus (unificação pendente)
+## 9. Event Bus
 
-Um barramento local para o que hoje são três canais separados: eventos Tauri da UI, watch/cursor do orquestrador de tabs, stream JSON da frota. Consumidores: UI, CLI, missão, mais tarde o map mode.
+**v1 concluído** em `src-tauri/src/bus.rs`.
 
-Depende de: 6. Sem tasks estáveis, o bus só replica evento de PTY.
+- **Formato:** todo evento da frota e das missões passa por um único bus, com `seq` crescente, ids de task/run/mission e os últimos 2000 eventos em memória.
+- **Tópicos:** `task.changed`, `task.activity`, `task.rerouted`, `account.failure`, `approvals.changed` e `mission.changed`.
+- **Leitura:**
+  - `since(after)` atualiza quem chega tarde e marca `truncated` se algo já saiu do buffer.
+  - `wait` bloqueia até chegar algo novo.
+  - A UI recebe tudo pelo único evento Tauri `ade-event`.
+  - A CLI usa `ccode events since|wait`, com filtros de tópico, run, missão e task.
+
+Os canais antigos (`cc-task-*`, `cc-mission-changed`) continuam funcionando, então as telas existentes não mudaram.
+
+Pendente: migrar as telas para o bus e incluir o watch/cursor das tabs interativas.
 
 ## 10. Handoff estruturado
 
@@ -94,9 +104,19 @@ Claude já expõe plano e tokens. A frota já tem `budget_usd` e soma tokens qua
 
 Depende de: 2 e 6. Usage e custo dependem dos dados reportados pelo adapter: tokens já aparecem para Codex, mas custo por worker não tem cobertura uniforme. Não bloqueia 4.
 
-## 15. Map mode (pendente)
+## 15. Map mode
 
-Vista gráfica de missões, tasks, agentes e handoffs. Lê o event bus e o estado da missão. Não é um runtime novo e não embute código de Maestri nem de Overclock.
+**v1 concluído** (`MissionMap.tsx`, no detalhe da Mission). O mapa mostra:
+
+- o Lead no topo e as tasks em camadas, conforme as dependências;
+- arestas de dependência, e arestas tracejadas do Lead para tasks sem dependência;
+- borda e ponto coloridos pelo status;
+- agente, modelo e conta em cada task;
+- o marcador ↻ em tasks que trocaram de mãos.
+
+A ferramenta que cada agente está usando agora vem ao vivo de `task.activity` no bus. Não é um runtime novo: lê as tasks do detalhe e o bus.
+
+Pendente: zoom e pan para missões grandes, e uma visão da frota inteira fora de uma Mission.
 
 Depende de: 9, 10, 12 e 13. É a última porque desenhar cedo fixa um modelo que essas etapas ainda vão mover.
 

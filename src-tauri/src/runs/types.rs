@@ -81,6 +81,10 @@ pub struct Task {
     pub handoff: Option<String>,
     #[serde(default)]
     pub structured_handoff: Option<super::handoff::StructuredHandoff>,
+    /// La cuenta la eligió el ruteo (`AccountChoice::Auto`) y se puede cambiar por otra con
+    /// cupo. `false` = la fijó alguien (el usuario, el Squad, la misión): nunca se cambia sola.
+    #[serde(default = "default_true")]
+    pub auto_account: bool,
     /// Las tareas que tienen que terminar bien antes de que esta arranque.
     pub depends_on: Vec<String>,
     pub started_at: Option<i64>,
@@ -180,4 +184,8 @@ impl TaskOutcome {
             ..Default::default()
         }
     }
+}
+
+fn default_true() -> bool {
+    true
 }

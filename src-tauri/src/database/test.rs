@@ -103,6 +103,7 @@ fn payload(tabs: Vec<&str>, authoritative: bool) -> WindowStatePayload {
                 tab_order: 0,
                 session_id: None,
                 scrollback: None,
+                scrollback_unchanged: false,
                 history_id: None,
                 account_id: None,
                 prelaunch: Vec::new(),
@@ -1307,4 +1308,30 @@ fn migrate_v22_to_v23_keeps_separate_oauth_metadata_without_tokens() {
     assert!(conn.execute("INSERT INTO antigravity_oauth_accounts VALUES('c','google-a','Duplicate','c@example.com',0)", []).is_err());
     assert!(conn.prepare("SELECT access_token,refresh_token FROM antigravity_oauth_accounts").is_err());
     assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),24);
+}
+
+/// Un guardado de metadata (renombrar, mover la ventana) no reenvía el scrollback que la
+/// base ya tiene: viene vacío con `scrollback_unchanged`, y lo guardado se conserva.
+#[test]
+fn un_scrollback_sin_cambios_se_conserva() {
+    let db: DbConnection = std::sync::Arc::new(std::sync::Mutex::new(setup_window_save()));
+    let app = mock_app_with_main_window();
+    let scrollback_of = |db: &DbConnection| -> Option<String> {
+        db.lock().unwrap().query_row("SELECT scrollback FROM tabs WHERE id = 't1'", [], |r| r.get(0)).unwrap()
+    };
+
+    let mut first = payload(vec!["t1", "t2"], true);
+    first.tabs[0].scrollback = Some("salida del agente".into());
+    db_save_window_state_sync(first, &db, app.handle()).unwrap();
+    assert_eq!(scrollback_of(&db).as_deref(), Some("salida del agente"));
+
+    let mut metadata = payload(vec!["t1", "t2"], true);
+    metadata.tabs[0].title = "renombrada".into();
+    metadata.tabs[0].scrollback_unchanged = true;
+    db_save_window_state_sync(metadata, &db, app.handle()).unwrap();
+    assert_eq!(scrollback_of(&db).as_deref(), Some("salida del agente"));
+
+    // Sin la marca, lo que viene (aunque sea nada) reemplaza: el PTY ya no existe.
+    db_save_window_state_sync(payload(vec!["t1", "t2"], true), &db, app.handle()).unwrap();
+    assert_eq!(scrollback_of(&db), None);
 }

@@ -116,6 +116,17 @@ describe("buildResumeCommand", () => {
     expect(buildResumeCommand("kimi-code", "kimi", "abc")).toBe("kimi --session abc");
   });
 
+  /// El id sale de archivos que un agente puede escribir: uno que traería un flag o un
+  /// comando se descarta y la TUI arranca de cero.
+  it("descarta ids que inyectarían flags o comandos", () => {
+    expect(buildResumeCommand("claude-code", "claude", "x --dangerously-skip-permissions")).toBe("claude");
+    expect(buildResumeCommand("claude-code", "claude", "x & calc")).toBe("claude");
+    expect(buildResumeCommand("claude-code", "claude", "-p")).toBe("claude");
+    expect(buildResumeCommand("opencode", "opencode", "ses_9f2A.b-1")).toBe("opencode --session ses_9f2A.b-1");
+    expect(buildResumeCommand("claude-code", "claude", "3f1c2b7e-9d4a-4c1e-8a2b-5d6e7f8a9b0c"))
+      .toBe("claude --resume 3f1c2b7e-9d4a-4c1e-8a2b-5d6e7f8a9b0c");
+  });
+
   it("conserva los flags que ya traía el comando", () => {
     expect(buildResumeCommand("claude-code", "claude --model opus", "abc"))
       .toBe("claude --model opus --resume abc");

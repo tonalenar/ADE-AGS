@@ -138,7 +138,8 @@ impl HeadlessAgent for ClaudeCode {
                 args.push("host".into());
                 // El navegador de las tabs no pasa por el broker: solo toca la vista
                 // previa del proyecto adentro de la app, y pedir permiso por cada click
-                // haría imposible que una tarea pruebe una página. Las de orquestación
+                // haría imposible que una tarea pruebe una página. Subir archivos y correr
+                // código sí pasan (ver `BROWSER_NEEDS_APPROVAL`). Las de orquestación
                 // van según el rol: las decide quien arma el lanzamiento.
                 let mut allowed = crate::ipc::mcp::browser_tool_names();
                 allowed.extend(ctx.allowed_tools.iter().cloned());

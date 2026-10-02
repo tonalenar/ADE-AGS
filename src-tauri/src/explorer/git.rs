@@ -130,8 +130,19 @@ pub(crate) fn parse_status_z(raw: &str) -> HashMap<String, String> {
 }
 
 /// Todo lo que el panel necesita saber de la carpeta: repo, rama y cambios.
+///
+/// `async` y en un hilo de bloqueo: son cinco procesos de git (un `status` entero entre
+/// ellos), y como comando síncrono Tauri los corría en el hilo principal, congelando la
+/// ventana mientras tanto en un repo grande.
 #[tauri::command]
-pub fn explorer_repo_info(path: String) -> Result<RepoInfo, String> {
+pub async fn explorer_repo_info(path: String) -> Result<RepoInfo, String> {
+    tauri::async_runtime::spawn_blocking(move || repo_info_sync(&path))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+fn repo_info_sync(path: &str) -> Result<RepoInfo, String> {
+    let path = path.to_string();
     let Some(root) = git(&path, &["rev-parse", "--show-toplevel"]) else {
         // No es un repo (o no hay `git`). No es un error: se muestra el árbol pelado.
         return Ok(RepoInfo::none());

@@ -35,8 +35,16 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
   const capable = useAccountsStore((s) => s.capable);
   const accounts = useAccountsStore((s) => s.accounts);
   const create = useAccountsStore((s) => s.create);
+  const createWithApiKey = useAccountsStore((s) => s.createWithApiKey);
+  const checkHealth = useAccountsStore((s) => s.checkHealth);
   const load = useAccountsStore((s) => s.load);
   const [name, setName] = useState("");
+  // Claude Code y Codex también aceptan una API key (ver `create_agent_api_key_account`):
+  // sin terminal de login, la key se guarda y se verifica enseguida.
+  const acceptsApiKey = agentId === "claude-code" || agentId === "codex";
+  const [mode, setMode] = useState<"login" | "api_key">("login");
+  const [apiKey, setApiKey] = useState("");
+  const [baseUrl, setBaseUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   /** Cuenta ya creada: pasamos a la terminal de login. */
@@ -45,10 +53,21 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
   const agent = capable.find((c) => c.agentId === agentId);
   const taken = accounts.some((a) => a.agentId === agentId && a.name === name.trim());
 
+  const usingKey = acceptsApiKey && mode === "api_key";
+  const canCreate = !!agent && !!name.trim() && !taken && (!usingKey || apiKey.trim().length > 0);
+
   const handleCreate = async () => {
     setBusy(true);
     setError("");
     try {
+      if (usingKey) {
+        const account = await createWithApiKey(agentId, name.trim(), apiKey.trim(), baseUrl.trim() || null);
+        // La lista ya la muestra; la verificación corre en segundo plano y su resultado
+        // aparece en la fila (ver `AgentAccountsPane`).
+        void checkHealth(account.id);
+        onClose();
+        return;
+      }
       setCreated(await create(agentId, name.trim()));
     } catch (e) {
       setError(String(e));
@@ -107,10 +126,10 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
           </Button>
           <Button
             variant="primary"
-            disabled={busy || !agent || !name.trim() || taken}
+            disabled={busy || !canCreate}
             onClick={handleCreate}
           >
-            {t("settings.accounts.add.next")}
+            {usingKey ? t("settings.accounts.add.createApiKey") : t("settings.accounts.add.next")}
           </Button>
         </>
       }
@@ -143,7 +162,7 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
               setError("");
             }}
             onKeyDown={(e) => {
-              if (e.key === "Enter" && name.trim() && !taken && !busy) handleCreate();
+              if (e.key === "Enter" && canCreate && !busy) handleCreate();
             }}
             placeholder="trabajo"
             variant="outline"
@@ -151,6 +170,54 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
             error={taken ? t("settings.accounts.add.taken") : undefined}
             helperText={t("settings.accounts.add.nameHelper", { envVar: agent.envVar })}
           />
+
+          {acceptsApiKey && (
+            <div className="flex gap-1.5" role="radiogroup">
+              {(["login", "api_key"] as const).map((m) => (
+                <Button
+                  key={m}
+                  size="sm"
+                  variant={mode === m ? "primary" : "outline"}
+                  role="radio"
+                  aria-checked={mode === m}
+                  onClick={() => { setMode(m); setError(""); }}
+                >
+                  {m === "login" ? t("settings.accounts.add.mode.login") : t("settings.accounts.add.mode.apiKey")}
+                </Button>
+              ))}
+            </div>
+          )}
+
+          {usingKey && (
+            <>
+              <Input
+                label={t("settings.accounts.add.apiKey")}
+                type="password"
+                autoComplete="off"
+                spellCheck={false}
+                value={apiKey}
+                onChange={(e) => { setApiKey(e.target.value); setError(""); }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && canCreate && !busy) handleCreate();
+                }}
+                placeholder={agentId === "codex" ? "sk-…" : "sk-ant-…"}
+                variant="outline"
+                helperText={agentId === "codex"
+                  ? t("settings.accounts.add.apiKeyHelperCodex")
+                  : t("settings.accounts.add.apiKeyHelperClaude")}
+              />
+              {agentId === "claude-code" && (
+                <Input
+                  label={t("settings.accounts.add.baseUrl")}
+                  value={baseUrl}
+                  onChange={(e) => { setBaseUrl(e.target.value); setError(""); }}
+                  placeholder="https://openrouter.ai/api"
+                  variant="outline"
+                  helperText={t("settings.accounts.add.baseUrlHelper")}
+                />
+              )}
+            </>
+          )}
         </div>
       )}
 

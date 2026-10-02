@@ -37,7 +37,7 @@ export interface UploadFile {
   data: string;
 }
 
-export const previewReadUpload = (path: string) => invoke<UploadFile>("preview_read_upload", { path });
+export const previewReadUpload = (path: string, root: string) => invoke<UploadFile>("preview_read_upload", { path, root });
 
 /** Una respuesta simulada del servidor del proyecto (ver `src-tauri/src/preview/mocks.rs`). */
 export interface Mock {
