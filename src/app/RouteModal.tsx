@@ -47,7 +47,7 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
 
       <div ref={frameRef} tabIndex={-1} className="outline-none cc-rise relative flex flex-col w-full max-w-5xl h-full
         rounded-2xl overflow-hidden
-        bg-gray-50 dark:bg-[#0d1117]
+        bg-gray-50 dark:bg-surface
         border border-gray-200 dark:border-white/12
         shadow-2xl">
 

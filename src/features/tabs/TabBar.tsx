@@ -12,6 +12,8 @@ import { openNewAgentWizard, TabDialogs } from "@/features/tabs/tabActions";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { viewsOfWorkspace } from "@/features/tabs/viewTabs";
 import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
+import { ModeToggle } from "@/features/canvas/ModeToggle";
+import { useWorkMode } from "@/features/canvas/store";
 
 const BAR_BUTTON = `flex items-center justify-center h-10 shrink-0
   text-gray-400 dark:text-white/30
@@ -40,6 +42,8 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
   const activeViewId = useViewTabsStore((s) => s.activeViewId);
   const openBrowser = useViewTabsStore((s) => s.openBrowser);
   const layout = useWorkspaceLayout();
+  // En el canvas no hay grupos: dividir no aplica.
+  const canvas = useWorkMode() === "canvas";
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const groups = layout ? allGroups(layout.root) : [];
@@ -106,7 +110,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
             <GlobeIcon className="w-4 h-4" />
           </Button>
         )}
-        {only && (
+        {only && !canvas && (
           <Button variant="icon"
             onClick={(e) => {
               splitGroup(only.id, e.altKey ? "down" : "right", only.active);
@@ -122,6 +126,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
 
         {/* El resto de la franja es para arrastrar la ventana. */}
         <div className="flex-1 h-full" data-tauri-drag-region />
+        {activeTab && <ModeToggle />}
       </div>
 
       <TabDialogs />

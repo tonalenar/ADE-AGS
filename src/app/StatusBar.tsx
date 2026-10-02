@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button } from "neogestify-ui-components";
+import { Button, Tooltip } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { systemAccounts } from "@/features/accounts/usage";
@@ -15,6 +16,8 @@ import { OrchestratorIndicator } from "@/features/orchestrator/OrchestratorIndic
 import { FleetIndicator } from "@/features/runs/FleetIndicator";
 import { BranchIcon } from "@/app/icons";
 import type { RepoInfo } from "@/features/explorer/types";
+import { Mascot } from "@/shared/brand/Mascot";
+import { useMascotState } from "@/shared/brand/useMascotState";
 
 /**
  * La franja de abajo: las cuentas de cada TUI, y el estado de la tab activa.
@@ -28,6 +31,8 @@ import type { RepoInfo } from "@/features/explorer/types";
  */
 export function StatusBar({ repo }: { repo: RepoInfo | null }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const mascot = useMascotState();
   const profiles = useAccountsStore((s) => s.accounts);
   const load = useAccountsStore((s) => s.load);
   const tabs = useTabsStore((s) => s.tabs);
@@ -63,9 +68,24 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
 
   return (
     <footer className="relative flex items-center gap-2.5 h-[26px] shrink-0 px-3
-      bg-gray-100 dark:bg-[#0a0f16]
+      bg-gray-100 dark:bg-surface-sunken
       border-t border-gray-200 dark:border-white/7
       text-[10.5px] tabular-nums text-gray-500 dark:text-gray-400 select-none">
+
+      {/* O mascote é o indicador de humor da janela: repousa, trabalha ou chama você.
+          Fica parado em repouso — algo se mexendo o tempo todo no canto do olho cansa. */}
+      <Tooltip content={t(`status.mascot.${mascot.state}`, {
+        running: mascot.summary.running,
+        count: mascot.summary.needsYou,
+      })} placement="top" delay={300}>
+        <Button variant="custom"
+          onClick={() => navigate(mascot.state === "idle" ? "/" : "/fleet")}
+          aria-label={t("sidebar.home")}
+          className="cc-t flex items-center justify-center w-6 h-5 -ml-1 rounded hover:bg-gray-200 dark:hover:bg-white/8"
+        >
+          <Mascot size={16} state={mascot.state} still={mascot.state === "idle"} />
+        </Button>
+      </Tooltip>
 
       {shown.map((account) => {
         const Icon = agentIcon(account.agentId, account.agentId);
@@ -95,7 +115,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
           ref={popRef}
           className="cc-rise absolute bottom-[30px] left-3 z-50
             rounded-xl overflow-hidden
-            bg-white dark:bg-[#0d1117]
+            bg-white dark:bg-surface
             border border-gray-200 dark:border-white/12
             shadow-2xl"
         >

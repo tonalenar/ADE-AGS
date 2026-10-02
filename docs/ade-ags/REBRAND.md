@@ -47,3 +47,10 @@ Não fazer um replace em massa de "ControlCode" antes do passo 1. Há comentári
 ## Identidade mínima, já nesta etapa
 
 Os documentos em `docs/ade-ags/` chamam o produto de ADE AGS e o upstream de ControlCode. O binário, o identifier e o updater continuam os do upstream até o plano acima ser executado de propósito.
+
+## Identidade visual (passo 5, parte visual): feito
+
+- **Tokens.** A paleta inteira está no bloco `@theme` de `src/App.css`. `gray` é grafite neutro (mesmas luminosidades da escala do Tailwind), `accent` é aço frio de baixa saturação, `violet` é o secundário contido, `surface*` são os fundos do escuro e `glow` é o âmbar da marca. Os componentes não usam hex: trocar a identidade é trocar esse bloco. As únicas exceções são xterm e CodeMirror, que não leem variáveis CSS (`terminal/theme.ts`, `editor/codemirror.ts`).
+- **Mascote.** `src/shared/brand/Mascot.tsx` é um robô em pixel art 16×16 que flutua, com os estados `idle` e `working`. `MascotMark` é só a cabeça, e `Logo` é a cabeça mais o nome. As cores vêm de `--mascot-*` no `App.css`.
+- **Ícones.** A origem é `src-tauri/icons/source/ade-ags-icon.svg`. Para regenerar todos os tamanhos, renderize o SVG em PNG de 1024 px e rode `bun tauri icon <png>`.
+- **Nome visível.** O título da janela, o `<title>`, o i18n e o favicon dizem ADE AGS. O `productName`, o identifier, os binários, o updater e o MCP continuam os do upstream, como o plano acima pede. "authorize ControlCode" em `forge.add.browserHelp` fica como está, porque é o nome do app OAuth.

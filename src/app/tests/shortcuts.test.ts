@@ -16,10 +16,12 @@ function chord(partial: Partial<KeyChord> & { key: string }): KeyChord {
 
 describe("matchShortcut", () => {
   it("reconoce los acordes de la tabla", () => {
-    expect(matchShortcut(chord({ key: "m", ctrlKey: true }))?.action).toEqual({
+    expect(matchShortcut(chord({ key: "M", ctrlKey: true, shiftKey: true }))?.action).toEqual({
       kind: "goto",
       path: "/marketplace",
     });
+    expect(matchShortcut(chord({ key: "k", ctrlKey: true }))?.action).toEqual({ kind: "openPalette" });
+    expect(matchShortcut(chord({ key: ",", ctrlKey: true }))?.action).toEqual({ kind: "openSettings" });
     expect(matchShortcut(chord({ key: "Tab", ctrlKey: true }))?.action).toEqual({
       kind: "cycleTab",
       delta: 1,
@@ -33,7 +35,15 @@ describe("matchShortcut", () => {
       kind: "cycleTab",
       delta: -1,
     });
-    expect(matchShortcut(chord({ key: "m", ctrlKey: true, shiftKey: true }))).toBeNull();
+    expect(matchShortcut(chord({ key: "m", ctrlKey: true }))).toBeNull();
+  });
+
+  /// Os controles do readline (Ctrl+E fim de linha, Ctrl+F avançar, Ctrl+H backspace,
+  /// Ctrl+M Enter) têm que chegar ao terminal: nenhum deles pode ser um atalho global.
+  it("não rouba os Ctrl+letra que o terminal usa", () => {
+    for (const key of ["e", "f", "h", "m", "a", "u", "w", "r", "c", "d", "l"]) {
+      expect(matchShortcut(chord({ key, ctrlKey: true }))).toBeNull();
+    }
   });
 
   it("sin Ctrl no hay atajo", () => {
@@ -43,11 +53,11 @@ describe("matchShortcut", () => {
   /// AltGr llega como Ctrl+Alt en Windows y Linux: sin este rechazo, escribir un carácter
   /// con AltGr saltaría de sección en medio de una frase.
   it("Ctrl+Alt (AltGr) no dispara nada", () => {
-    expect(matchShortcut(chord({ key: "e", ctrlKey: true, altKey: true }))).toBeNull();
+    expect(matchShortcut(chord({ key: "k", ctrlKey: true, altKey: true }))).toBeNull();
   });
 
   it("Meta no dispara nada (Cmd+M minimiza en macOS)", () => {
-    expect(matchShortcut(chord({ key: "m", ctrlKey: true, metaKey: true }))).toBeNull();
+    expect(matchShortcut(chord({ key: "k", ctrlKey: true, metaKey: true }))).toBeNull();
   });
 
   it("la tecla llega en mayúscula cuando hay Shift", () => {
@@ -130,8 +140,8 @@ describe("nextTabId", () => {
 
 describe("shortcutForPath", () => {
   it("encuentra el acorde de una sección", () => {
-    expect(shortcutForPath("/settings")).toBe("Ctrl+G");
-    expect(shortcutForPath("/fleet")).toBe("Ctrl+F");
+    expect(shortcutForPath("/settings")).toBe("Ctrl+,");
+    expect(shortcutForPath("/fleet")).toBe("Ctrl+Shift+F");
   });
 
   it("una ruta sin atajo devuelve null", () => {

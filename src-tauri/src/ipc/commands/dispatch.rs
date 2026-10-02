@@ -17,6 +17,16 @@ use super::app::app_status;
 use super::ask::user_ask;
 use super::events::{events_since, events_wait};
 use super::missions;
+use super::notify::notify_send;
+use super::notes::{note_create, note_edit, note_list, note_read, note_write};
+use super::portals::{portal_action, portal_create, portal_list};
+use super::role::{role_create, role_edit, role_list, role_show};
+use super::floor::{floor_create, floor_list};
+use super::routine::{
+    routine_create, routine_delete, routine_disable, routine_edit, routine_enable, routine_list, routine_run, routine_show,
+};
+use super::chat::{chat_recall, chat_say};
+use super::peers::{peer_ask, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_tell};
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
 use super::shared::bridge_call;
@@ -34,6 +44,58 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "tab.send" => tab_send(app, args),
         "tab.create" => tab_create(app, args),
         "tab.close" => bridge_call(app, "tab.close", args),
+        // Conversar con los agentes conectados en el canvas (ver `peers`).
+        "peer.list" => peer_list(app, args),
+        "peer.ask" => peer_ask(app, args),
+        "peer.tell" => peer_tell(app, args),
+        "peer.check" => peer_check(app, args),
+        "peer.recruit" => peer_recruit(app, args),
+        "peer.connect" => peer_connect(app, args),
+        "peer.disconnect" => peer_disconnect(app, args),
+        // Las notas del canvas conectadas con quien pide (ver `notes`).
+        "note.list" => note_list(app, args),
+        "note.read" => note_read(app, args),
+        "note.create" => note_create(app, args),
+        "note.write" => note_write(app, args),
+        "note.edit" => note_edit(app, args),
+        // Los navegadores del canvas conectados con quien pide (ver `portals`).
+        "portal.list" => portal_list(app, args),
+        "portal.create" => portal_create(app, args),
+        "portal.navigate" => portal_action(app, args, "navigate"),
+        "portal.history" => portal_action(app, args, "history"),
+        "portal.snapshot" => portal_action(app, args, "snapshot"),
+        "portal.click" => portal_action(app, args, "click"),
+        "portal.hover" => portal_action(app, args, "hover"),
+        "portal.type" => portal_action(app, args, "type"),
+        "portal.press" => portal_action(app, args, "press"),
+        "portal.select" => portal_action(app, args, "select"),
+        "portal.scroll" => portal_action(app, args, "scroll"),
+        "portal.wait" => portal_action(app, args, "wait"),
+        "portal.screenshot" => portal_action(app, args, "screenshot"),
+        "portal.console" => portal_action(app, args, "console"),
+        "portal.layout" => portal_action(app, args, "layout"),
+        // Avisar al usuario (ver `notify`).
+        "notify.send" => notify_send(app, args),
+        // Papeles para recrutar (ver `role`).
+        "role.list" => role_list(app, args),
+        "role.show" => role_show(app, args),
+        "role.create" => role_create(app, args),
+        "role.edit" => role_edit(app, args),
+        // Pisos: espacios aislados del proyecto (ver `floor`).
+        "floor.list" => floor_list(app, args),
+        "floor.create" => floor_create(app, args),
+        // Rotinas: mensajes a la hora (ver `routine`).
+        "routine.list" => routine_list(app, args),
+        "routine.show" => routine_show(app, args),
+        "routine.create" => routine_create(app, args),
+        "routine.edit" => routine_edit(app, args),
+        "routine.enable" => routine_enable(app, args),
+        "routine.disable" => routine_disable(app, args),
+        "routine.run" => routine_run(app, args),
+        "routine.delete" => routine_delete(app, args),
+        // Chat con el usuario (ver `chat`).
+        "say.send" => chat_say(app, args),
+        "recall.get" => chat_recall(app, args),
         "agent.list" => agent_list(app),
         "account.list" => account_list(app),
         "prelaunch.list" => prelaunch_list(app),

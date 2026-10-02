@@ -205,6 +205,36 @@ pub(super) fn split_command(command: &str) -> Vec<String> {
 /// sin ningún intermediario. Con pre-comandos hay que delegar en un shell, porque
 /// `conda activate` y compañía son funciones de shell y no programas: ejecutadas en un
 /// proceso aparte, su efecto muere con él (ver el módulo `prelaunch`).
+/// Las variables con que un Claude Code (o su app de escritorio) marca "esta es una sesión
+/// mía": si el ADE AGS se abrió desde una, los terminales las heredan y el Claude de adentro
+/// se cree sesión hija (sin guardar transcript, con el socket y la identidad del padre).
+/// Se sacan de todo terminal; no se tocan las de configuración del usuario (`ANTHROPIC_*`,
+/// `CLAUDE_CODE_USE_*`...) ni las de una cuenta de la app, que se aplican después.
+pub(super) const PARENT_SESSION_ENV: &[&str] = &[
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH",
+    "CLAUDE_CODE_DESKTOP_APP_VERSION",
+    "CLAUDE_CODE_TERMINAL_MCP_TOOLS",
+    "CLAUDE_CODE_ACCOUNT_UUID",
+    "CLAUDE_CODE_ORGANIZATION_UUID",
+    "CLAUDE_CODE_USER_EMAIL",
+    "CLAUDE_CODE_OAUTH_SCOPES",
+    "CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES",
+    "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING",
+    "CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL",
+    "CLAUDE_CODE_EAGER_FLUSH",
+    "CLAUDE_CODE_REPORT_FINDINGS",
+    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE",
+    "CLAUDE_CODE_DISABLE_CRON",
+];
+
 pub(super) fn build_launch(command: &str, prelaunch: &[String]) -> Result<CommandBuilder, String> {
     if prelaunch.is_empty() {
         let parts = split_command(command);
@@ -298,7 +328,7 @@ pub async fn pty_create(
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    for var in crate::app::app_only_env() {
+    for var in crate::app::app_only_env().into_iter().chain(PARENT_SESSION_ENV.iter().copied()) {
         cmd.env_remove(var);
     }
     let env = env.unwrap_or_default();

@@ -109,7 +109,7 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
             placeholder={t("fleet.orchestrate.objectivePlaceholder")}
             className="w-full resize-none rounded-lg px-2.5 py-2 outline-none
               bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10
-              focus:border-blue-400 dark:focus:border-blue-500
+              focus:border-accent-400 dark:focus:border-accent-500
               text-[12px] leading-relaxed text-gray-800 dark:text-gray-200"
           />
         </Field>
@@ -315,9 +315,9 @@ function Field({ label, hint, group = false, children }: {
 const INPUT = `w-full rounded-lg px-2.5 h-8 outline-none text-[12px]
   bg-gray-100 dark:bg-white/5
   border border-gray-200 dark:border-white/10
-  focus:border-blue-400 dark:focus:border-blue-500
+  focus:border-accent-400 dark:focus:border-accent-500
   text-gray-800 dark:text-gray-200`;
 
 const SELECT = `w-full rounded-lg px-2.5 h-8 outline-none text-[12px]
-  bg-gray-100 dark:bg-[#12161c] border border-gray-200 dark:border-white/10
-  focus:border-blue-400 dark:focus:border-blue-500 text-gray-800 dark:text-gray-200`;
+  bg-gray-100 dark:bg-surface-raised border border-gray-200 dark:border-white/10
+  focus:border-accent-400 dark:focus:border-accent-500 text-gray-800 dark:text-gray-200`;
