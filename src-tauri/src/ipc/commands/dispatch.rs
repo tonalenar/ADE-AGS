@@ -19,6 +19,7 @@ use super::events::{events_since, events_wait};
 use super::missions;
 use super::notify::notify_send;
 use super::notes::{note_create, note_edit, note_list, note_read, note_write};
+use super::devices::{device_action, device_create, device_list};
 use super::portals::{portal_action, portal_create, portal_list};
 use super::role::{role_create, role_edit, role_list, role_show};
 use super::floor::{floor_create, floor_list};
@@ -59,6 +60,17 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "note.write" => note_write(app, args),
         "note.edit" => note_edit(app, args),
         // Los navegadores del canvas conectados con quien pide (ver `portals`).
+        // Las pantallas Android del canvas (emulador o teléfono) conectadas con quien pide (ver `devices`).
+        "device.list" => device_list(app, args),
+        "device.create" => device_create(app, args),
+        "device.start" => device_action(app, args, "start"),
+        "device.tap" => device_action(app, args, "tap"),
+        "device.swipe" => device_action(app, args, "swipe"),
+        "device.type" => device_action(app, args, "type"),
+        "device.key" => device_action(app, args, "key"),
+        "device.launch" => device_action(app, args, "launch"),
+        "device.shot" => device_action(app, args, "shot"),
+        "device.tree" => device_action(app, args, "tree"),
         "portal.list" => portal_list(app, args),
         "portal.create" => portal_create(app, args),
         "portal.navigate" => portal_action(app, args, "navigate"),

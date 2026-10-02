@@ -62,6 +62,16 @@ AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
   peer connect <a> <b>                        Conecta dos agentes del equipo
   peer disconnect <a> <b>                     Los desconecta
 
+DISPOSITIVOS ANDROID DEL CANVAS — un emulador o teléfono conectado con esta terminal (por adb)
+  devices                                     Los que manejás, lo que adb ve y los emuladores (AVD)
+  device create [<nombre>] [--avd <avd>]      Crea uno a tu lado, ya conectado
+  device start <dispositivo> [--avd <avd>]    Arranca su emulador y espera a que termine de iniciar
+  device tap <dispositivo> --x N --y N        Toca · o --text \"Entrar\" (busca el elemento en pantalla)
+  device swipe <dispositivo> --dir up|down|left|right   · o --x1 --y1 --x2 --y2 [--ms 300]
+  device type <dispositivo> \"texto\"          Escribe (solo ASCII) · device key <d> back|home|enter|...
+  device launch <dispositivo> <paquete>       Abre una app (com.android.settings)
+  device shot|tree <dispositivo>              Captura (devuelve la ruta del PNG) · elementos con su texto y dónde tocar
+
 PORTALES DEL CANVAS — navegadores conectados con esta terminal (orquestador: los del equipo)
   portals                                     Los portales que manejás
   portal create [<nombre>] [<url>]            Crea uno a tu lado, ya conectado
@@ -322,7 +332,7 @@ impl CliError {
 
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    const GROUPS: [&str; 9] = ["peer.", "note.", "portal.", "notify.", "role.", "floor.", "routine.", "say.", "recall."];
+    const GROUPS: [&str; 10] = ["peer.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall."];
     if !GROUPS.iter().any(|g| command.starts_with(g)) || parsed.get("from").is_some() {
         return parsed;
     }
@@ -342,6 +352,7 @@ fn shortcut(word: &str) -> Option<&'static str> {
         "peers" => Some("peer.list"),
         "notes" => Some("note.list"),
         "portals" => Some("portal.list"),
+        "devices" => Some("device.list"),
         // `ccode notify "terminé"`: avisar es lo único que se hace con eso.
         "notify" => Some("notify.send"),
         "roles" => Some("role.list"),
@@ -406,6 +417,13 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "portal.type" => &["name", "target", "text"],
         "portal.press" => &["name", "key"],
         "portal.select" => &["name", "target", "value"],
+        // `ccode device tap Pixel --text Entrar`: el dispositivo primero, y lo que cada acción pide.
+        "device.create" => &["name"],
+        "device.start" | "device.shot" | "device.tree" => &["name"],
+        "device.type" => &["name", "text"],
+        "device.key" => &["name", "key"],
+        "device.launch" => &["name", "package"],
+        "device.tap" | "device.swipe" => &["name"],
         "portal.scroll" | "portal.wait" | "portal.snapshot" | "portal.screenshot" | "portal.console"
         | "portal.layout" => &["name"],
         _ => &[],
@@ -599,6 +617,9 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         "peer.tell" => Duration::from_secs(90),
         // Cargar una página o esperar un texto puede tardar; el backend corta a los 90 s.
         c if c.starts_with("portal.") => Duration::from_secs(120),
+        // Arrancar un emulador y esperar a que termine de iniciar (el backend corta a los 120 s).
+        "device.start" => Duration::from_secs(150),
+        c if c.starts_with("device.") => Duration::from_secs(60),
         // `routine run` espera a que el agente de destino se calle (hasta 60 s).
         "routine.run" => Duration::from_secs(120),
         // Abrir la tab, esperar su PTY (15s) y que arranque (25s) antes de darle la tarea.

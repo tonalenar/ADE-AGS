@@ -24,6 +24,7 @@ import { isHiddenNote, shownNote, stackMembers,
 import { CanvasToolbar, type DrawStyle, type Tool } from "./CanvasToolbar";
 import { DrawingLayer } from "./DrawingLayer";
 import { ImageNode, TextNode, type ImageFlowNode, type TextFlowNode } from "./ExtraNodes";
+import { DeviceNode } from "./DeviceNode";
 import { FolderNode, baseName, type FolderFlowNode } from "./FolderNode";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
@@ -377,6 +378,12 @@ function CanvasInner() {
     const { id } = canvasActions.addPortal(key, { name: t("canvas.portalDefaultName"), at: { x: c.x - 320, y: c.y - 220 } });
     setSelectedNote(id);
   };
+  const addDeviceHere = () => {
+    if (!key) return;
+    const c = viewCenter();
+    const { id } = canvasActions.addPortal(key, { name: t("canvas.device.defaultName"), kind: "android", at: { x: c.x - 160, y: c.y - 320 } });
+    setSelectedNote(id);
+  };
   /** Una carpeta del disco: se elige con el diálogo del sistema y se pone con su árbol a la vista. */
   const addFolderHere = async () => {
     if (!key) return;
@@ -500,7 +507,7 @@ function CanvasInner() {
         <CanvasToolbar
           tool={tool} onTool={setTool} style={drawStyle} onStyle={setDrawStyle}
           onTerminal={() => openNewAgentWizard()}
-          onNote={addNoteHere} onPortal={addPortalHere} onText={addTextHere}
+          onNote={addNoteHere} onPortal={addPortalHere} onDevice={addDeviceHere} onText={addTextHere}
           onImage={() => fileInput.current?.click()} onFolder={() => void addFolderHere()}
           onUndo={() => key && canvasActions.undoStroke(key)} canUndo={board.drawings.length > 0} />
         {panel === "routines" && <RoutinesPanel onClose={() => setPanel(null)} />}
@@ -930,5 +937,13 @@ function LinkEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
   );
 }
 
-const NODE_TYPES = { agent: AgentNode, note: NoteNode, portal: PortalNode, text: TextNode, image: ImageNode, folder: FolderNode };
+/** Un portal es un navegador, o la pantalla de un Android (`kind: "android"`). */
+const PortalOrDevice = memo(function PortalOrDevice(props: NodeProps<PortalFlowNode>) {
+  const { data, selected } = props;
+  return data.portal.kind === "android"
+    ? <DeviceNode id={data.id} portal={data.portal} links={data.links} selected={!!selected} />
+    : <PortalNode {...props} />;
+});
+
+const NODE_TYPES = { agent: AgentNode, note: NoteNode, portal: PortalOrDevice, text: TextNode, image: ImageNode, folder: FolderNode };
 const EDGE_TYPES = { link: LinkEdge };

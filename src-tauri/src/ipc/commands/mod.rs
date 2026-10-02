@@ -11,6 +11,7 @@ mod peers;
 pub mod routine;
 mod role;
 mod portals;
+mod devices;
 mod browser;
 mod dispatch;
 mod events;

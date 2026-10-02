@@ -45,6 +45,13 @@ pub fn run() {
             crate::floors::floor_delete,
             // El pet sube de nivel con los tokens de los agentes
             crate::pet::pet_status,
+            crate::android::android_list,
+            crate::android::android_start_avd,
+            crate::android::android_frame,
+            crate::android::android_tap,
+            crate::android::android_swipe,
+            crate::android::android_key,
+            crate::android::android_text,
             // Rotinas: mensajes programados a un agente o al usuario
             crate::ipc::commands::routine::routine_list_all,
             crate::ipc::commands::routine::routine_set_enabled,

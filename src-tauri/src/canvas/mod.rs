@@ -80,6 +80,16 @@ pub struct Portal {
     pub url: String,
     #[serde(default, rename = "box")]
     pub r#box: Value,
+    /// `android` = en vez de un navegador, la pantalla de un emulador o teléfono (ver
+    /// `crate::android` y `ipc::commands::devices`). Ausente = un navegador.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub kind: Option<String>,
+    /// El dispositivo de `adb` que muestra (`emulator-5554`). Ausente = el único que haya.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub serial: Option<String>,
+    /// El emulador (AVD) que arranca este nodo.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub avd: Option<String>,
 }
 
 pub const PORTAL_PREFIX: &str = "portal-";
