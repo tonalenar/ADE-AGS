@@ -15,6 +15,7 @@ use tauri::AppHandle;
 use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
 use super::ask::user_ask;
+use super::notify::notify_send;
 use super::notes::{note_create, note_edit, note_list, note_read, note_write};
 use super::portals::{portal_action, portal_create, portal_list};
 use super::peers::{peer_ask, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_tell};
@@ -65,6 +66,8 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "portal.screenshot" => portal_action(app, args, "screenshot"),
         "portal.console" => portal_action(app, args, "console"),
         "portal.layout" => portal_action(app, args, "layout"),
+        // Avisar al usuario (ver `notify`).
+        "notify.send" => notify_send(app, args),
         "agent.list" => agent_list(app),
         "account.list" => account_list(app),
         "prelaunch.list" => prelaunch_list(app),

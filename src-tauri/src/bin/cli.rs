@@ -49,7 +49,9 @@ AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
   peers                                       Quién está conectado con vos
   peer ask <nombre> \"...\" [--timeout 600]    Le pregunta y ESPERA su respuesta
   peer tell <nombre> \"...\"                    Le avisa algo, sin esperar
+  peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'  Le pregunta a varios A LA VEZ y espera a todos
   peer check <nombre> [--lines 60]            Lo que se ve ahora en su terminal
+  notify \"mensaje\"                            Avisa al usuario (aviso en pantalla; barra de tareas)
   Solo orquestadores (corona en el canvas):
   peer recruit <nombre> --agent <id>          Abre un agente nuevo, ya conectado
               [--prompt \"...\"] [--account <n>]  · con su primera tarea
@@ -265,9 +267,9 @@ impl CliError {
     }
 }
 
-/// Agrega `from` a los comandos `peer.*`, `note.*` y `portal.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
+/// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*` y `notify.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    if !(command.starts_with("peer.") || command.starts_with("note.") || command.starts_with("portal.")) || parsed.get("from").is_some() {
+    if !(command.starts_with("peer.") || command.starts_with("note.") || command.starts_with("portal.") || command.starts_with("notify.")) || parsed.get("from").is_some() {
         return parsed;
     }
     if let (Ok(tab), Some(map)) = (std::env::var("ADE_TAB_ID"), parsed.as_object_mut()) {
@@ -286,6 +288,8 @@ fn shortcut(word: &str) -> Option<&'static str> {
         "peers" => Some("peer.list"),
         "notes" => Some("note.list"),
         "portals" => Some("portal.list"),
+        // `ccode notify "terminé"`: avisar es lo único que se hace con eso.
+        "notify" => Some("notify.send"),
         _ => None,
     }
 }
@@ -314,6 +318,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "peer.recruit" => &["name"],
         "peer.connect" | "peer.disconnect" => &["a", "b"],
         // `ccode note read Plano 10 20`: desde la línea 10, 20 líneas.
+        "notify.send" => &["message"],
         "note.create" => &["content"],
         "note.read" => &["name", "start", "count"],
         "note.write" => &["name", "content"],

@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.10.0
+version: 1.11.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -370,6 +370,11 @@ ccode peer check Backend --lines 40           # what is on its screen right now
 - **`ask` waits** for the other agent to finish its turn and returns what it wrote
   (`reply`). If `finished` is `false` the timeout ran out and it is still working:
   `peer check` it later instead of asking again. Default timeout 600s (`--timeout`).
+- **`ask --batch` asks several at once** and waits for all of them, so independent questions
+  take as long as the slowest one instead of the sum:
+  `ccode peer ask --batch '{"Reviewer": "review src/auth", "Tests": "run the suite"}'`
+  It returns one result per agent (`reply`, `finished`, or an `error` for just that one).
+  Names are checked first: one wrong name fails the whole batch before anyone is asked.
 - **`tell` does not wait.** Use it to hand over information or a task you will follow up
   on; the other agent can answer with `ccode peer tell <your name> "..."`.
 - Messages arrive prefixed with `[Mensagem de <name> via ADE AGS]`. When one reaches you,
@@ -457,6 +462,13 @@ ccode portal console Docs --level errors
 - Not available on a portal: running JavaScript, uploading files, cookies and storage. A
   portal may be on any site; those stay with the user and the project browser tools.
 - There is no delete command: closing a portal stays with the user.
+
+### Telling the user
+
+`ccode notify "release is ready for review"` shows the user a notice (with your name on
+it) and flashes the taskbar if the window is in the background. Use it only when the user
+asked to be told, or when you are blocked and cannot continue without them; keep it to one
+short sentence. For anything longer, write a note.
 
 ## Windows and workspaces
 

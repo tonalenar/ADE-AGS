@@ -4,6 +4,7 @@ mod agents;
 mod app;
 mod ask;
 mod notes;
+mod notify;
 mod peers;
 mod portals;
 mod browser;

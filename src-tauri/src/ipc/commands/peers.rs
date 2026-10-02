@@ -273,33 +273,109 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
 const TURN_QUIET: Duration = Duration::from_secs(5);
 const DEFAULT_TIMEOUT_S: u64 = 600;
 
-pub(super) fn peer_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    let from = caller(args)?;
-    let to = arg_str(args, "to")?;
-    let text = arg_str(args, "text")?;
-    let timeout = Duration::from_secs(arg_u64_opt(args, "timeout").unwrap_or(DEFAULT_TIMEOUT_S).clamp(10, 3600));
-    let (me, list) = peers(app, &from)?;
-    let target = resolve_peer(&list, &to)?.clone();
+/// Un `--batch` bien formado: nombre → pedido, en el orden en que se escribió. Acepta el
+/// JSON como texto (lo que llega de la línea de comandos) o ya como objeto.
+pub(crate) fn parse_batch(raw: &Value) -> Result<Vec<(String, String)>, String> {
+    let parsed;
+    let obj = match raw {
+        Value::String(text) => {
+            parsed = serde_json::from_str::<Value>(text)
+                .map_err(|e| format!("--batch tem que ser um JSON {{\"Agente\": \"pedido\"}}: {e}"))?;
+            &parsed
+        }
+        other => other,
+    };
+    let map = obj
+        .as_object()
+        .ok_or_else(|| "--batch tem que ser um objeto {\"Agente\": \"pedido\"}".to_string())?;
+    if map.is_empty() {
+        return Err("--batch está vazio: diga a quem perguntar e o quê.".into());
+    }
+    map.iter()
+        .map(|(name, prompt)| match prompt.as_str().map(str::trim) {
+            Some(p) if !p.is_empty() => Ok((name.clone(), p.to_string())),
+            _ => Err(format!("O pedido para '{name}' tem que ser um texto não vazio.")),
+        })
+        .collect()
+}
+
+/// Uma pergunta a um agente conectado, esperando o turno dele. É o que `peer ask` faz com
+/// um destino e o que `peer ask --batch` faz com vários ao mesmo tempo.
+fn ask_one(app: &AppHandle, target: &OpenTab, from_name: &str, text: &str, timeout: Duration) -> Result<Value, String> {
     let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
-    let from_name = me.map(|m| m.name).unwrap_or_else(|| from.clone());
 
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(60), false);
 
     // La marca: desde qué línea de la terminal empieza la respuesta.
-    let mark = screen(app, &target, None, 1)?.get("end").and_then(Value::as_u64);
+    let mark = screen(app, target, None, 1)?.get("end").and_then(Value::as_u64);
     let before = crate::terminal::output_total(pty).unwrap_or(0);
 
-    submit_prompt(pty, &framed(&from_name, &text, true))?;
+    submit_prompt(pty, &framed(from_name, text, true))?;
     let finished = wait_turn(pty, before, timeout);
 
-    let reply = screen(app, &target, mark, 200)?;
+    let reply = screen(app, target, mark, 200)?;
     Ok(json!({
-        "peer": describe(&target),
+        "peer": describe(target),
         // `false` = se agotó el tiempo: lo que hay es parcial y el otro sigue trabajando.
         // Conviene `peer check` más tarde en vez de volver a preguntar.
         "finished": finished,
         "reply": reply.get("lines").cloned().unwrap_or(json!([])),
     }))
+}
+
+pub(super) fn peer_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let from = caller(args)?;
+    let timeout = Duration::from_secs(arg_u64_opt(args, "timeout").unwrap_or(DEFAULT_TIMEOUT_S).clamp(10, 3600));
+    let (me, list) = peers(app, &from)?;
+    let from_name = me.map(|m| m.name).unwrap_or_else(|| from.clone());
+
+    if let Some(batch) = args.get("batch") {
+        return ask_batch(app, &list, &from_name, batch, timeout);
+    }
+
+    let to = arg_str(args, "to")?;
+    let text = arg_str(args, "text")?;
+    let target = resolve_peer(&list, &to)?.clone();
+    ask_one(app, &target, &from_name, &text, timeout)
+}
+
+/// `peer ask --batch`: pergunta a vários ao mesmo tempo e devolve cada resposta. Todos os
+/// nomes se resolvem ANTES de perguntar a qualquer um: um nome errado no meio não pode
+/// deixar metade dos agentes trabalhando numa pergunta cuja resposta ninguém vai ler.
+fn ask_batch(
+    app: &AppHandle,
+    list: &[OpenTab],
+    from_name: &str,
+    batch: &Value,
+    timeout: Duration,
+) -> Result<Value, String> {
+    let asks = parse_batch(batch)?;
+    let mut targets: Vec<(OpenTab, String)> = Vec::new();
+    for (name, text) in asks {
+        let target = resolve_peer(list, &name)?.clone();
+        if targets.iter().any(|(t, _)| t.id == target.id) {
+            return Err(format!("'{}' aparece duas vezes no --batch. Junte os pedidos num só.", target.name));
+        }
+        targets.push((target, text));
+    }
+
+    let results: Vec<Value> = std::thread::scope(|scope| {
+        let handles: Vec<_> = targets
+            .iter()
+            .map(|(target, text)| scope.spawn(move || ask_one(app, target, from_name, text, timeout)))
+            .collect();
+        handles
+            .into_iter()
+            .zip(&targets)
+            .map(|(handle, (target, _))| match handle.join() {
+                Ok(Ok(answer)) => answer,
+                // Un fallo de uno no tira las respuestas de los demás.
+                Ok(Err(error)) => json!({ "peer": describe(target), "error": error }),
+                Err(_) => json!({ "peer": describe(target), "error": "A pergunta falhou inesperadamente." }),
+            })
+            .collect()
+    });
+    Ok(json!({ "results": results }))
 }
 
 /// Espera a que el otro empiece a contestar y después a que termine.
@@ -364,6 +440,24 @@ mod test {
         let peers = vec![tab("t1", "Claude Code"), tab("t2", "Claude Code")];
         let err = resolve_peer(&peers, "claude code").unwrap_err();
         assert!(err.contains("t1") && err.contains("t2"), "{err}");
+    }
+
+    #[test]
+    fn el_batch_se_lee_del_json_de_la_cli_o_de_un_objeto() {
+        let from_cli = parse_batch(&json!(r#"{"Revisor": "mire o diff", "Backend": "rode os testes"}"#)).unwrap();
+        assert_eq!(from_cli.len(), 2);
+        assert!(from_cli.contains(&("Revisor".to_string(), "mire o diff".to_string())));
+        let as_object = parse_batch(&json!({ "A": " pedido " })).unwrap();
+        assert_eq!(as_object, vec![("A".to_string(), "pedido".to_string())]);
+    }
+
+    #[test]
+    fn un_batch_mal_formado_dice_que_esta_mal() {
+        assert!(parse_batch(&json!("no es json")).unwrap_err().contains("JSON"));
+        assert!(parse_batch(&json!(["A", "B"])).unwrap_err().contains("objeto"));
+        assert!(parse_batch(&json!({})).unwrap_err().contains("vazio"));
+        assert!(parse_batch(&json!({ "A": "" })).unwrap_err().contains("'A'"));
+        assert!(parse_batch(&json!({ "A": 3 })).unwrap_err().contains("'A'"));
     }
 
     #[test]

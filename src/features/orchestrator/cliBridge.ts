@@ -1,5 +1,6 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
+import { AlertaToast } from "neogestify-ui-components";
 import { useTabsStore } from "@/features/tabs/store";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useAgentsStore } from "@/features/agents/store";
@@ -289,6 +290,25 @@ async function handlePortal(args: Record<string, unknown>) {
   throw new Error(`Operación de portal desconocida: ${op}`);
 }
 
+/**
+ * Un agente avisándole algo al usuario (`ccode notify`). Un aviso en pantalla que dice de
+ * quién es, y, si la ventana no tiene el foco, un pedido de atención al sistema (la barra
+ * de tareas parpadea, el Dock salta).
+ */
+async function handleNotify(args: Record<string, unknown>) {
+  const message = str(args, "message");
+  if (!message) throw new Error("Falta el mensaje");
+  const from = str(args, "from") ?? "Agente";
+  AlertaToast(from, message, "info", 10000);
+  try {
+    const win = getCurrentWindow();
+    if (!(await win.isFocused())) await win.requestUserAttention(UserAttentionType.Informational);
+  } catch {
+    /* sin el pedido de atención el aviso en pantalla igual salió */
+  }
+  return { ok: true };
+}
+
 async function handle(command: string, args: Record<string, unknown>): Promise<unknown> {
   switch (command) {
     case "tab.create": return handleCreateTab(args);
@@ -302,6 +322,7 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "canvas.recruited": return handleRecruited(args);
     case "canvas.note": return handleNote(args);
     case "canvas.portal": return handlePortal(args);
+    case "user.notify": return handleNotify(args);
     default: throw new Error(`El frontend no sabe atender '${command}'`);
   }
 }
