@@ -175,7 +175,7 @@ pub(super) fn agent_list(app: &AppHandle) -> Result<Value, String> {
         .enable_all()
         .build()
         .map_err(|e| e.to_string())?
-        .block_on(crate::agents::detect_agents())?;
+        .block_on(crate::agents::detect_agents(None))?;
 
     let db = db(app)?;
     let custom = crate::agents::list_custom_agents(db)?;

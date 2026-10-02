@@ -155,6 +155,9 @@ pub struct Assignment {
     /// Lo que se descartó y por qué, en el orden en que se probó. Vacío si salió a la
     /// primera.
     pub notes: Vec<String>,
+    /// La cuenta la eligió el ruteo (`AccountChoice::Auto`): la tarea se puede pasar a otra
+    /// con cupo. Con una cuenta fijada, nunca (ver `runs::failure`).
+    pub auto_account: bool,
 }
 
 /// Asigna una tarea. `Err` trae el motivo en palabras: es lo que se le muestra a quien la
@@ -195,6 +198,7 @@ fn manual(roster: &Roster, req: &RouteRequest, now: i64) -> Result<Assignment, S
         account_id,
         routed_by: RoutedBy::Manual,
         notes,
+        auto_account: matches!(req.account, AccountChoice::Auto),
     })
 }
 
@@ -248,6 +252,7 @@ fn by_tier(
                         RoutedBy::Fallback
                     },
                     notes,
+                    auto_account: matches!(req.account, AccountChoice::Auto),
                 });
             }
             Err(reason) => notes.push(format!("{what}: {reason}")),
@@ -316,14 +321,16 @@ fn pick_account(
             // 11 % no hay diferencia que valga repartir por ella, y así el desempate lo
             // deciden las tareas que ya están corriendo — que son las que van a gastar la
             // ventana en los próximos minutos. Un cupo desconocido cuenta como libre: es una
-            // cuenta que la flota todavía no usó.
+            // cuenta que la flota todavía no usó. Antes que todo, las que no están en su
+            // máximo de simultáneas: una llena solo se elige si todas lo están (y la tarea
+            // espera su turno al lanzar, ver `scheduler::tick`).
             usable.sort_by_key(|(order, a)| {
                 let used = a
                     .quota
                     .as_ref()
                     .and_then(|q| q.five_hour_at(now))
                     .unwrap_or(0.0);
-                ((used * 10.0).floor() as i64, a.running, *order)
+                (a.at_capacity, (used * 10.0).floor() as i64, a.running, *order)
             });
             match usable.first() {
                 Some((_, account)) => Ok((account.account_id.clone(), notes)),
@@ -346,6 +353,9 @@ fn account_problem(account: &RosterAccount, now: i64) -> Option<String> {
     };
     if !account.logged_in {
         return Some(format!("la cuenta {name} no tiene sesión iniciada"));
+    }
+    if let Some(limit) = &account.limit {
+        return Some(format!("la cuenta {name} {limit}"));
     }
     let quota = account.quota.as_ref()?;
     if !quota.exhausted_at(now) {

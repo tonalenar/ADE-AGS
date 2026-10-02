@@ -443,6 +443,27 @@ fn contra_una_captura_cruda_en_disco() {
     assert!(u.session.is_some() && u.week.is_some());
 }
 
+#[test]
+fn la_carpeta_se_anota_como_la_anota_claude_code_en_windows() {
+    use super::trust::project_key;
+    assert_eq!(project_key("C:\\Users\\ana\\.controlcode\\usage-probe"), "C:/Users/ana/.controlcode/usage-probe");
+    assert_eq!(project_key("C:/Users/ana/x"), "C:/Users/ana/x", "ya normalizada");
+    assert_eq!(project_key("\\\\server\\share\\p"), "//server/share/p", "una ruta de red");
+    // Una ruta de Unix puede tener una barra invertida legítima en el nombre: no se toca.
+    assert_eq!(project_key("/home/ana/a\\b"), "/home/ana/a\\b");
+}
+
+#[test]
+fn con_la_ruta_de_windows_se_escribe_la_forma_que_la_tui_busca() {
+    let config = serde_json::json!({ "projects": {} });
+    let next = with_trusted(&config, "C:\\Users\\ana\\.controlcode\\usage-probe").expect("hay que escribirla");
+    let entry = &next["projects"]["C:/Users/ana/.controlcode/usage-probe"];
+    assert_eq!(entry["hasTrustDialogAccepted"], true);
+    assert!(next["projects"].get("C:\\Users\\ana\\.controlcode\\usage-probe").is_none(), "no la forma con barras invertidas");
+    // Y si ya está con la forma buena, no se vuelve a escribir.
+    assert!(with_trusted(&next, "C:\\Users\\ana\\.controlcode\\usage-probe").is_none());
+}
+
 // ── La carpeta del sondeo ────────────────────────────────────────
 //
 // Acá estaba el fallo del panel de consumo: se buscaba una carpeta que la cuenta ya
@@ -580,4 +601,51 @@ fn una_cuenta_sin_archivo_todavia_lo_estrena() {
     assert!(accepted(&written, "/sonda"));
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+// ── Lectura incremental de transcripts ───────────────────────────
+
+fn linea(ts: &str, output: u64) -> String {
+    format!(
+        "{{\"timestamp\":\"{ts}\",\"sessionId\":\"s1\",\"message\":{{\"usage\":{{\"input_tokens\":10,\"output_tokens\":{output}}}}}}}\n"
+    )
+}
+
+/// Un transcript solo crece: lo leído no se vuelve a leer, una línea a medio escribir se
+/// lee entera la próxima vez, y uno que se achicó (reescrito) se lee de cero.
+#[test]
+fn un_transcript_se_lee_solo_en_lo_que_crecio() {
+    use super::claude::scan_file;
+    use std::io::Write;
+    let dir = std::env::temp_dir().join(format!("cc-usage-scan-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("t.jsonl");
+    std::fs::write(&path, linea("2026-10-02T10:00:00Z", 5) + "{\"type\":\"user\",\"message\":\"hola\"}\n").unwrap();
+
+    let first = scan_file(&path, None);
+    assert_eq!(first.records.len(), 1);
+
+    // Crece: una línea completa y otra a medio escribir.
+    let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    f.write_all(linea("2026-10-02T11:00:00Z", 7).as_bytes()).unwrap();
+    let parcial = linea("2026-10-02T12:00:00Z", 9);
+    f.write_all(&parcial.as_bytes()[..20]).unwrap();
+    drop(f);
+    let second = scan_file(&path, Some(first.clone()));
+    assert_eq!(second.records.iter().map(|r| r.output).collect::<Vec<_>>(), vec![5, 7], "la parcial todavía no");
+
+    // Se completa la línea: aparece entera, sin duplicar las anteriores.
+    let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    f.write_all(&parcial.as_bytes()[20..]).unwrap();
+    drop(f);
+    let third = scan_file(&path, Some(second.clone()));
+    assert_eq!(third.records.iter().map(|r| r.output).collect::<Vec<_>>(), vec![5, 7, 9]);
+    assert_eq!(scan_file(&path, Some(third.clone())).records.len(), 3, "sin cambios no relee nada");
+
+    // Reescrito más corto: lo leído ya no vale.
+    std::fs::write(&path, linea("2026-10-02T13:00:00Z", 1)).unwrap();
+    let rewritten = scan_file(&path, Some(third));
+    assert_eq!(rewritten.records.iter().map(|r| r.output).collect::<Vec<_>>(), vec![1]);
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

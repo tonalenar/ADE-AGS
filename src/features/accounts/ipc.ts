@@ -9,7 +9,9 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { AccountCapableAgent, AccountHealth, AgentAccount, CodexUsage } from "./types";
+import type {
+  AccountCapableAgent, AccountHealth, AccountLimits, AccountUsageSummary, AgentAccount, CodexUsage,
+} from "./types";
 
 export const listAccounts = () => invoke<AgentAccount[]>("list_agent_accounts");
 export const listSystemAccounts = () => invoke<AgentAccount[]>("system_accounts");
@@ -60,3 +62,11 @@ export const discoverAntigravityAccount = (accountId: string) =>
 
 /** Cupo, mail y plan de una cuenta de Codex, preguntados a su `app-server` en el momento. */
 export const codexAccountUsage = (accountId: string) => invoke<CodexUsage>("codex_account_usage", { accountId });
+
+/** Uso de cada cuenta en los últimos `days` días, con sus límites (ver `runs::ledger`). */
+export const accountUsageSummary = (days: number) => invoke<AccountUsageSummary[]>("account_usage_summary", { days });
+
+/** `accountKey`: el id de la cuenta, o `system:<agente>`. */
+export const accountLimitsGet = (accountKey: string) => invoke<AccountLimits>("account_limits_get", { accountKey });
+export const accountLimitsSet = (accountKey: string, limits: AccountLimits) =>
+  invoke<void>("account_limits_set", { accountKey, limits });

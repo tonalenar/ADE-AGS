@@ -111,6 +111,11 @@ pub struct RosterAccount {
     pub running: u32,
     pub models: Vec<RosterModel>,
     pub model_discovery: ModelDiscoveryState,
+    /// Superó su presupuesto de 24 h (ver `runs::ledger`): el ruteo no la usa mientras dure.
+    pub limit: Option<String>,
+    /// Corre tantas tareas como su máximo. No la descarta (una tarea fijada a ella espera su
+    /// turno al lanzar), pero el ruteo automático prefiere otra.
+    pub at_capacity: bool,
 }
 
 // ── Los parsers ─────────────────────────────────────────────────
@@ -622,22 +627,38 @@ pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
                         // Codex no deja el mail en un archivo legible: el de la última
                         // verificación (ver `accounts::refresh_codex_account`).
                         .or_else(|| crate::accounts::load_identity(&conn, &key).and_then(|i| i.email));
+                    // Una credencial que una tarea vio rechazada hace poco cuenta como sin
+                    // sesión: el ruteo la saltea hasta que se la verifique de nuevo.
+                    let logged_in = account.logged_in
+                        && !super::failure::auth_failed_recently(&conn, &key, crate::util::now_ts());
                     let catalog = probed
                         .catalogs
                         .get(&(def.id.to_string(), account_id.clone()))
                         .cloned()
                         .unwrap_or_else(ModelCatalog::unsupported);
+                    let running_now = running
+                        .get(&(def.id.to_string(), account_id.clone()))
+                        .copied()
+                        .unwrap_or(0);
+                    let now = crate::util::now_ts();
+                    let limit = super::ledger::limit_problem(
+                        &super::ledger::load_limits(&conn, &key),
+                        running_now as i64,
+                        super::ledger::spent_since(&conn, &key, now - 24 * 3600),
+                    );
                     accounts.push(RosterAccount {
                         quota: quota::load(&conn, &key),
-                        running: running
-                            .get(&(def.id.to_string(), account_id.clone()))
-                            .copied()
-                            .unwrap_or(0),
+                        running: running_now,
+                        at_capacity: matches!(limit, Some(super::ledger::Limit::Concurrency(_))),
+                        limit: match limit {
+                            Some(super::ledger::Limit::Budget(reason)) => Some(reason),
+                            _ => None,
+                        },
                         account_id,
                         key,
                         name: account.name.clone(),
                         label,
-                        logged_in: account.logged_in,
+                        logged_in,
                         models: catalog.models,
                         model_discovery: catalog.state,
                     });

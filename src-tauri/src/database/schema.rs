@@ -802,6 +802,46 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              ALTER TABLE agent_accounts ADD COLUMN key_hint TEXT;",
         )?;
     }
+    // Si la cuenta de una tarea la eligió el ruteo (se puede cambiar por otra con cupo) o la
+    // fijó alguien (nunca se cambia sola). Las tareas viejas quedan en 1: es lo que hacía el
+    // scheduler con todas hasta ahora.
+    if table_exists(conn, "tasks") && !has_column(conn, "tasks", "auto_account") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN auto_account INTEGER NOT NULL DEFAULT 1", [])?;
+    }
+    // Revisión de lo que entregó una misión (ver `missions::review`): el veredicto de cada
+    // tarea (`accepted` | `rejected` | `conflict`, NULL = sin revisar) y la rama/carpeta de
+    // integración de la misión, más cuándo se aplicó al proyecto.
+    if table_exists(conn, "tasks") && !has_column(conn, "tasks", "review") {
+        conn.execute_batch(
+            "ALTER TABLE tasks ADD COLUMN review TEXT;
+             ALTER TABLE tasks ADD COLUMN review_note TEXT;",
+        )?;
+    }
+    if table_exists(conn, "missions") && !has_column(conn, "missions", "integration_branch") {
+        conn.execute_batch(
+            "ALTER TABLE missions ADD COLUMN integration_branch TEXT;
+             ALTER TABLE missions ADD COLUMN integration_path TEXT;
+             ALTER TABLE missions ADD COLUMN applied_at INTEGER;",
+        )?;
+    }
+    // Un intento de tarea por fila, con la cuenta que lo corrió (ver `runs::ledger`). Sin FK a
+    // `tasks`: borrar un run no borra lo que gastó.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS usage_events (
+             id          INTEGER PRIMARY KEY AUTOINCREMENT,
+             task_id     TEXT NOT NULL,
+             run_id      TEXT NOT NULL,
+             agent_id    TEXT NOT NULL,
+             account_key TEXT NOT NULL,
+             model       TEXT,
+             ok          INTEGER NOT NULL,
+             tokens_in   INTEGER,
+             tokens_out  INTEGER,
+             cost_usd    REAL,
+             created_at  INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_usage_events_account ON usage_events(account_key, created_at);",
+    )?;
     // Índices de las consultas que corren en cada evento de la flota y en cada guardado:
     // la lista de runs de un workspace (`ORDER BY created_at DESC`), las tasks de un run en
     // orden, y buscar el historial de una sesión por su id. Sin ellos son recorridos enteros
