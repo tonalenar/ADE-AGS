@@ -57,6 +57,18 @@ EVENTOS (el bus de la flota y las misiones)
                                               Espera al próximo evento (sin polling)
   Filtros: --topics task.,mission. --run <id> --mission <id> --task <id> --limit 100
 
+MISIONES (también sin interfaz: `controlcode --headless`)
+  mission run --objective \"...\" --cwd . [--wait] [--timeout 3600]
+              [--title ...] [--agent claude-code] [--model ...] [--account <id>]
+              [--squad <id>] [--budget 5] [--max-parallel 2]
+                                              Crea, arranca y espera; sale con 1 si falla
+  mission create|start|status|wait <id>       Paso a paso (wait: --timeout)
+  mission review <id>                         Lo que entregó cada tarea aislada
+  mission accept <id> <tarea>                 La junta en la integración de la misión
+  mission apply <id>                          Lleva lo aceptado al proyecto
+  approval list                               Pedidos de permiso esperando
+  approval decide <id> --allow|--deny [--remember]
+
 VENTANAS
   window list                                 Ventanas abiertas
   window create                               Abre una ventana nueva
@@ -84,6 +96,11 @@ FLOTA (agentes headless, los de la consola)
 
   Sin --cwd ni --run-id actúa sobre el último run lanzado desde la carpeta
   donde corrés el comando.
+
+MEMORIA COMPARTIDA (la usan los agentes por MCP; ver docs/ade-ags/SHARED_MEMORY.md)
+  memory list|get|propose|update|delete|promote-fact --json-args '{...}'
+                                              Lo aprobado del workspace y de la misión;
+                                              lo que se propone espera aprobación.
 
 NAVEGADOR
   browser run --json-args '{\"cwd\":\"...\",     Una orden al navegador de un proyecto:
@@ -266,6 +283,10 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "tab.output" | "tab.close" | "watch.add" | "watch.remove" => &["tab"],
         "tab.create" => &["cwd"],
         "workspace.open" => &["workspace"],
+        // `ccode mission wait <id>`, `ccode mission accept <id> <tarea>`.
+        "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" => &["mission"],
+        "mission.accept" => &["mission", "task"],
+        "approval.decide" => &["approval"],
         _ => &[],
     }
 }
@@ -427,6 +448,14 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(60).clamp(1, 600);
             Duration::from_secs(requested + 15)
         }
+        // Esperar una misión entera: lo que se pidió (una hora por defecto, tope 6 h), más
+        // el arranque, que puede sondear el roster.
+        "mission.wait" | "mission.run" => {
+            let requested = args.get("timeout").and_then(Value::as_u64).unwrap_or(3600).clamp(1, 6 * 3600);
+            Duration::from_secs(requested + 180)
+        }
+        // Arrancar rutea el lead (puede sondear el roster); integrar y aplicar hacen merges.
+        "mission.start" | "mission.accept" | "mission.apply" | "mission.review" => Duration::from_secs(180),
         // Los topes del backend suman ~40s (15 para que aparezca el PTY + 25 de arranque).
         "tab.create" if has_init_prompt(args) => Duration::from_secs(75),
         // `pick` espera a una persona; el resto son segundos.

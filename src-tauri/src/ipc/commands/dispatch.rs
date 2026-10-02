@@ -16,6 +16,7 @@ use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
 use super::ask::user_ask;
 use super::events::{events_since, events_wait};
+use super::missions;
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
 use super::shared::bridge_call;
@@ -86,6 +87,17 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         // El bus de eventos (ver `crate::bus`): ponerse al día y esperar lo siguiente.
         "events.since" => events_since(args),
         "events.wait" => events_wait(args),
+        // Misiones y aprobaciones sin la interfaz (modo headless, CI).
+        "mission.create" => missions::mission_create(app, args),
+        "mission.start" => missions::mission_start(app, args),
+        "mission.status" => missions::mission_status(app, args),
+        "mission.wait" => missions::mission_wait(app, args),
+        "mission.run" => missions::mission_run(app, args),
+        "mission.review" => missions::mission_review(app, args),
+        "mission.accept" => missions::mission_accept(app, args),
+        "mission.apply" => missions::mission_apply(app, args),
+        "approval.list" => missions::approval_list(app),
+        "approval.decide" => missions::approval_decide(app, args),
         other => Err(format!("Comando desconocido: {other}")),
     };
 

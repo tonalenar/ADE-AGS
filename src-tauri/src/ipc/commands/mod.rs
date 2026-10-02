@@ -6,6 +6,7 @@ mod ask;
 mod browser;
 mod dispatch;
 mod events;
+mod missions;
 mod shared;
 mod runs;
 mod skills;

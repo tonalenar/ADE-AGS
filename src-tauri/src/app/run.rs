@@ -359,23 +359,43 @@ pub fn run() {
             // Avisos del sistema para lo que pasa con la app en segundo plano (ver `notifier`).
             crate::notifier::start(app.handle().clone());
 
-            // Las tareas headless que quedaron `running` son de una ejecución anterior:
-            // sus procesos eran hijos de la app y murieron con ella. Si no se cierran acá,
-            // la consola las muestra trabajando para siempre.
-            if let Ok(n) = crate::runs::sweep_orphans(&db) {
-                if n > 0 {
-                    eprintln!("[runs] {n} tarea(s) headless quedaron colgadas del cierre anterior");
+            // Con otra instancia viva (la app abierta dos veces, `tauri dev` al lado de la
+            // instalada, una `--headless`), lo que figura "corriendo" es SUYO y sigue vivo:
+            // las limpiezas de abajo lo darían por muerto. Se saltean; las hará la última
+            // instancia que arranque sola.
+            if crate::ipc::other_instance_alive() {
+                eprintln!("[controlcode] hay otra instancia abierta: no se limpian sus tareas");
+            } else {
+                // Las tareas headless que quedaron `running` son de una ejecución anterior:
+                // sus procesos eran hijos de la app y murieron con ella. Si no se cierran acá,
+                // la consola las muestra trabajando para siempre.
+                if let Ok(n) = crate::runs::sweep_orphans(&db) {
+                    if n > 0 {
+                        eprintln!("[runs] {n} tarea(s) headless quedaron colgadas del cierre anterior");
+                    }
                 }
+                // Y sus pedidos de permiso: el agente que esperaba murió con la app, así que
+                // no los va a contestar nadie.
+                let _ = crate::runs::sweep_orphan_approvals(&db);
+                // Los `--mcp-config` de tabs cerradas y tareas borradas: nadie los apunta ya.
+                crate::ipc::mcp::sweep_configs(&db);
             }
-            // Y sus pedidos de permiso: el agente que esperaba murió con la app, así que
-            // no los va a contestar nadie.
-            let _ = crate::runs::sweep_orphan_approvals(&db);
-            // Los `--mcp-config` de tabs cerradas y tareas borradas: nadie los apunta ya.
-            crate::ipc::mcp::sweep_configs(&db);
 
-            let active_id = crate::database::db_get_last_active_workspace_id(&db)?;
-            let windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;
-            crate::window::restore_windows(app.handle(), windows, true)?;
+            // `--headless`: para CI y scripts. No se restaura el workspace ni se muestra nada;
+            // la ventana principal queda creada pero oculta (algunos comandos de la CLI la
+            // necesitan para existir) y todo lo demás —IPC, scheduler, bus— corre igual. Las
+            // misiones se manejan con `ccode mission …` (ver `ipc/commands/missions.rs`).
+            if std::env::args().any(|a| a == "--headless") {
+                use tauri::Manager;
+                for window in app.webview_windows().values() {
+                    let _ = window.hide();
+                }
+                eprintln!("[controlcode] modo headless: sin ventanas, usá `ccode mission run`");
+            } else {
+                let active_id = crate::database::db_get_last_active_workspace_id(&db)?;
+                let windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;
+                crate::window::restore_windows(app.handle(), windows, true)?;
+            }
 
             // Servidor IPC de la CLI `controlcode` (Fase 8). Va después de restaurar las
             // ventanas: varios comandos necesitan que exista al menos una para responder.
