@@ -119,8 +119,8 @@ export default defineConfig(async () => ({
         // de pintar el primer frame. Separando las dependencias pesadas y estables, el
         // chunk propio de la app queda chico y solo él se reconstruye al iterar.
         manualChunks: {
-          react: ["react", "react-dom", "react-router-dom"],
-          xterm: ["@xterm/xterm", "@xterm/addon-fit", "@xterm/addon-web-links"],
+          react: ["react", "react-dom", "react-dom/client", "react-router-dom"],
+          xterm: ["@xterm/xterm", "@xterm/addon-fit", "@xterm/addon-web-links", "@xterm/addon-webgl", "@xterm/addon-unicode11"],
           i18n: ["i18next", "react-i18next"],
         },
       },

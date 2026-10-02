@@ -43,6 +43,12 @@ export function TerminalPanel() {
               // Sin "visible" explícito: así hereda el visibility del contenedor de
               // AppShell (que lo oculta fuera de /workspace) en vez de sobreescribirlo.
               visibility: shown ? undefined : "hidden",
+              // Fuera del panel (que recorta): xterm deja de dibujar una terminal solo
+              // cuando su IntersectionObserver dice que no se ve, y `visibility:hidden`
+              // sigue "intersectando". Una oculta que recibe salida sin parar redibujaba
+              // filas que nadie mira. Se mueve sin cambiar de tamaño, así su TUI no recibe
+              // un resize; al volver, xterm la redibuja entera sola.
+              transform: shown ? undefined : "translateX(-300vw)",
               pointerEvents: shown ? "auto" : "none",
               zIndex: shown ? 1 : 0,
             }}
