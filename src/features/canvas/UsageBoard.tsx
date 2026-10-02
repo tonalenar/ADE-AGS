@@ -1,14 +1,12 @@
-import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
-import { accountEnv, codexAccountUsage } from "@/features/accounts/ipc";
 import { accountProblemKey } from "@/features/accounts/problem";
-import type { AgentAccount, CodexUsage, QuotaWindow } from "@/features/accounts/types";
-import { agentAccountUsage, claudeLiveUsage, isUsageFresh, planLabel, type LiveUsage } from "@/features/accounts/usage";
+import type { AgentAccount, QuotaWindow } from "@/features/accounts/types";
 
 import { RING_COLORS, Ring } from "./Ring";
+import { useUsageStore } from "./usageStore";
 
 // ── Piezas ──────────────────────────────────────────────────────────
 
@@ -126,41 +124,10 @@ const RefreshButton = ({ busy, onClick, label }: { busy: boolean; onClick: () =>
  */
 function ClaudeSection({ account }: { account: AgentAccount }) {
   const { t } = useTranslation();
-  const [live, setLive] = useState<LiveUsage | null>(null);
-  const [plan, setPlan] = useState<string | null>(null);
-  const [busy, setBusy] = useState(false);
-
-  const ask = useCallback(async (force: boolean) => {
-    setBusy(true);
-    try {
-      const env = account.id.startsWith("system:") ? {} : await accountEnv(account.id);
-      setLive(await claudeLiveUsage(account.id, env, force));
-    } catch (e) {
-      setLive({ available: false, session: null, week: null, weekModels: [], fetchedAt: 0, cached: false, problem: String(e) });
-    } finally {
-      setBusy(false);
-    }
-  }, [account.id]);
-
-  useEffect(() => {
-    let stale = false;
-    agentAccountUsage(account.agentId, account.id.startsWith("system:") ? null : account.id)
-      .then((u) => !stale && setPlan(planLabel(u.plan.tier)))
-      .catch(() => undefined);
-    // Primero lo guardado, al instante; después, si venció, se pregunta de verdad.
-    (async () => {
-      await ask(false);
-    })();
-    return () => { stale = true; };
-  }, [account.id, account.agentId, ask]);
-
-  // Si lo que apareció está viejo, se refresca solo una vez, sin que nadie lo pida.
-  useEffect(() => {
-    if (live && live.available && !live.cached) return;
-    if (live && live.available && live.cached && !isUsageFresh(live.fetchedAt, Math.floor(Date.now() / 1000))) void ask(true);
-    // Solo cuando llega el primer dato guardado.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [live === null]);
+  const live = useUsageStore((st) => st.claude[account.id]) ?? null;
+  const plan = useUsageStore((st) => st.plan[account.id]) ?? null;
+  const busy = useUsageStore((st) => !!st.busy[account.id]);
+  const ask = (force: boolean) => void useUsageStore.getState().refresh(account, force);
 
   const now = Math.floor(Date.now() / 1000);
   const color = RING_COLORS.claude;
@@ -169,7 +136,7 @@ function ClaudeSection({ account }: { account: AgentAccount }) {
   return (
     <section className="px-4 py-4 space-y-3.5">
       <Head account={account} plan={plan} percent={live?.available ? live.session?.percent ?? null : null} color={color}>
-        <RefreshButton busy={busy} onClick={() => void ask(true)} label={t("canvas.usage.refresh")} />
+        <RefreshButton busy={busy} onClick={() => ask(true)} label={t("canvas.usage.refresh")} />
       </Head>
 
       {live === null ? <Skeleton /> : live.available ? (
@@ -186,7 +153,7 @@ function ClaudeSection({ account }: { account: AgentAccount }) {
           )}
         </>
       ) : (
-        <Notice tone="warn" action={<RefreshButton busy={busy} onClick={() => void ask(true)} label={t("canvas.usage.retry")} />}>
+        <Notice tone="warn" action={<RefreshButton busy={busy} onClick={() => ask(true)} label={t("canvas.usage.retry")} />}>
           {problemKey ? t(problemKey) : t("canvas.usage.failed")}
         </Notice>
       )}
@@ -205,22 +172,11 @@ function ago(seconds: number, t: (k: string, o?: Record<string, unknown>) => str
 /** El cupo de Codex: sus dos ventanas, de cinco horas y de siete días. Barato de preguntar. */
 function CodexSection({ account }: { account: AgentAccount }) {
   const { t } = useTranslation();
-  const [usage, setUsage] = useState<CodexUsage | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [busy, setBusy] = useState(false);
-
-  const load = useCallback(async () => {
-    setBusy(true);
-    setFailed(false);
-    try {
-      setUsage(await codexAccountUsage(account.id));
-    } catch {
-      setFailed(true);
-    } finally {
-      setBusy(false);
-    }
-  }, [account.id]);
-  useEffect(() => { void load(); }, [load]);
+  const entry = useUsageStore((st) => st.codex[account.id]);
+  const busy = useUsageStore((st) => !!st.busy[account.id]);
+  const load = () => void useUsageStore.getState().refresh(account, true);
+  const usage = entry?.usage ?? null;
+  const failed = !!entry?.failed && !usage;
 
   const now = Math.floor(Date.now() / 1000);
   const color = RING_COLORS.codex;
@@ -231,10 +187,10 @@ function CodexSection({ account }: { account: AgentAccount }) {
   return (
     <section className="px-4 py-4 space-y-3.5">
       <Head account={account} plan={usage?.plan ?? null} percent={five ? Math.round(five.utilization * 100) : null} color={color}>
-        <RefreshButton busy={busy} onClick={() => void load()} label={t("canvas.usage.refresh")} />
+        <RefreshButton busy={busy} onClick={load} label={t("canvas.usage.refresh")} />
       </Head>
       {failed ? (
-        <Notice tone="warn" action={<RefreshButton busy={busy} onClick={() => void load()} label={t("canvas.usage.retry")} />}>{t("canvas.usage.failed")}</Notice>
+        <Notice tone="warn" action={<RefreshButton busy={busy} onClick={load} label={t("canvas.usage.retry")} />}>{t("canvas.usage.failed")}</Notice>
       ) : !usage ? <Skeleton /> : usage.auth === "apiKey" ? (
         <Notice>{t("canvas.usage.apiKey")}</Notice>
       ) : (
@@ -262,32 +218,17 @@ function OtherSection({ account }: { account: AgentAccount }) {
   );
 }
 
-/**
- * Todas las cuentas con sesión, una debajo de otra. Cada Claude arranca su terminal para
- * preguntar el cupo, así que se piden de a una (ver `Stagger`): abrirlas todas juntas
- * lanzaría varias TUIs al mismo tiempo.
- */
+/** Todas las cuentas con sesión, una debajo de otra. Los datos viven en `usageStore`. */
 export function UsageBoard({ accounts }: { accounts: AgentAccount[] }) {
   const { t } = useTranslation();
   if (accounts.length === 0) return <p className="p-5 text-[12px] text-gray-500 dark:text-gray-400">{t("canvas.dock.noAccounts")}</p>;
   return (
     <div className="divide-y divide-gray-100 dark:divide-white/6">
-      {accounts.map((a, i) => (
-        <Stagger key={a.id} index={a.agentId === "claude-code" ? accounts.slice(0, i).filter((x) => x.agentId === "claude-code").length : 0}>
+      {accounts.map((a) => (
+        <div key={a.id}>
           {a.agentId === "claude-code" ? <ClaudeSection account={a} /> : a.agentId === "codex" ? <CodexSection account={a} /> : <OtherSection account={a} />}
-        </Stagger>
+        </div>
       ))}
     </div>
   );
-}
-
-/** Monta a sus hijos después de `index` × 6 s: la segunda cuenta de Claude espera a que la primera termine. */
-function Stagger({ index, children }: { index: number; children: React.ReactNode }) {
-  const [ready, setReady] = useState(index === 0);
-  useEffect(() => {
-    if (index === 0) return;
-    const timer = window.setTimeout(() => setReady(true), index * 6000);
-    return () => window.clearTimeout(timer);
-  }, [index]);
-  return ready ? <>{children}</> : <div className="px-4 py-4 text-[11px] text-gray-400 animate-pulse">…</div>;
 }

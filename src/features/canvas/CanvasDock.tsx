@@ -3,67 +3,37 @@ import { useTranslation } from "react-i18next";
 import { MiniMap, useNodesInitialized, useReactFlow } from "@xyflow/react";
 import { Button, CloseIcon } from "neogestify-ui-components";
 
-import { accountEnv, codexAccountUsage } from "@/features/accounts/ipc";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
-import { claudeLiveUsage } from "@/features/accounts/usage";
 
 import { FloorBar } from "./FloorBar";
 import { RING_COLORS, Ring } from "./Ring";
 import { UsageBoard } from "./UsageBoard";
+import { startUsagePolling, useUsageStore } from "./usageStore";
 
 /** Qué panel está abierto sobre la barra. Uno a la vez: todos nacen en el mismo lugar. */
-export type DockPanel = "layers" | "usage" | "map" | "chat" | "routines";
+export type DockPanel = "layers" | "map" | "chat" | "routines";
 
 // ── Anillos de uso ──────────────────────────────────────────────────
 
-const isReal = (a: AgentAccount) => !a.id.startsWith("system:");
-
 /**
  * Cuánto llevan gastado de su plan las cuentas principales, para los anillos de la barra:
- * Claude (la sesión de cinco horas), Codex (su ventana de cinco horas). `null` = no se
+ * Claude (la sesión de cinco horas) y Codex (su ventana de cinco horas). `null` = no se
  * sabe (sin login, o la consulta falló): el anillo queda vacío y apagado, no en cero.
- *
- * Se pregunta al abrir y cada cinco minutos. La de Claude sale de la caché si es reciente
- * (preguntarle de verdad levanta la TUI entera), la de Codex es barata.
+ * Los datos los mantiene `usageStore`, siempre vivo mientras el canvas está abierto.
  */
-function useUsageRings(accounts: AgentAccount[]): { claude: number | null; codex: number | null } {
-  const [claude, setClaude] = useState<number | null>(null);
-  const [codex, setCodex] = useState<number | null>(null);
-
-  const claudeAccount = accounts.find((a) => a.agentId === "claude-code" && a.loggedIn);
-  const codexAccount = accounts.find((a) => a.agentId === "codex" && a.loggedIn);
-
-  useEffect(() => {
-    let stale = false;
-    const ask = async () => {
-      if (claudeAccount) {
-        try {
-          const env = isReal(claudeAccount) ? await accountEnv(claudeAccount.id) : {};
-          const live = await claudeLiveUsage(claudeAccount.id, env, false);
-          if (!stale) setClaude(live.available && live.session ? live.session.percent : null);
-        } catch {
-          if (!stale) setClaude(null);
-        }
-      }
-      if (codexAccount) {
-        try {
-          const usage = await codexAccountUsage(codexAccount.id);
-          const w = usage.quota?.fiveHour ?? null;
-          if (!stale) setCodex(w ? Math.round(w.utilization * 100) : null);
-        } catch {
-          if (!stale) setCodex(null);
-        }
-      }
-    };
-    void ask();
-    const timer = window.setInterval(ask, 5 * 60 * 1000);
-    return () => {
-      stale = true;
-      window.clearInterval(timer);
-    };
-  }, [claudeAccount?.id, codexAccount?.id]);
-
+function useUsageRings(): { claude: number | null; codex: number | null } {
+  const claude = useUsageStore((st) => {
+    for (const live of Object.values(st.claude)) if (live.available && live.session) return live.session.percent;
+    return null;
+  });
+  const codex = useUsageStore((st) => {
+    for (const e of Object.values(st.codex)) {
+      const w = e.usage?.quota?.fiveHour;
+      if (w) return Math.round(w.utilization * 100);
+    }
+    return null;
+  });
   return { claude, codex };
 }
 
@@ -129,14 +99,18 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onFit, onReset, petPerc
   }, [loaded, load]);
 
   const accounts = useMemo(() => [...system, ...custom].filter((a) => a.loggedIn), [system, custom]);
-  const rings = useUsageRings(accounts);
+  const rings = useUsageRings();
+  useEffect(() => startUsagePolling(accounts), [accounts]);
+  const [usageOpen, setUsageOpen] = useState(readUsageOpen);
+  useEffect(() => writeUsageOpen(usageOpen), [usageOpen]);
+  const toggleUsage = () => setUsageOpen((v) => !v);
 
   return (
     <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
       {panel === "layers" && (
         <div className={`${popover} p-2`}><FloorBar inline /></div>
       )}
-      {panel === "usage" && <UsagePanel accounts={accounts} onClose={() => onTogglePanel("usage")} />}
+      {usageOpen && <UsagePanel accounts={accounts} onClose={toggleUsage} />}
       {panel === "map" && (
         <div className={`${popover} w-[17rem]`}>
           <div className="relative h-44">
@@ -156,7 +130,7 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onFit, onReset, petPerc
         <Pill label={t("canvas.chat.hint")} active={panel === "chat"} onClick={() => onTogglePanel("chat")}><ChatIcon /></Pill>
         <Pill label={t("canvas.routines.hint")} active={panel === "routines"} onClick={() => onTogglePanel("routines")}><ClockIcon /></Pill>
         <Pill label={t("canvas.dock.layers")} active={panel === "layers"} onClick={() => onTogglePanel("layers")}><LayersIcon /></Pill>
-        <Pill label={t("canvas.dock.usage")} active={panel === "usage"} onClick={() => onTogglePanel("usage")} className="gap-1.5 px-3">
+        <Pill label={t("canvas.dock.usage")} active={usageOpen} onClick={toggleUsage} className="gap-1.5 px-3">
           <Ring percent={rings.claude} color={RING_COLORS.claude} />
           <Ring percent={rings.codex} color={RING_COLORS.codex} />
           <Ring percent={petPercent} color={RING_COLORS.gemini} />
@@ -191,7 +165,7 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onFit, onReset, petPerc
 function UsagePanel({ accounts, onClose }: { accounts: AgentAccount[]; onClose: () => void }) {
   const { t } = useTranslation();
   return (
-    <div className={`${popover} w-[26rem] max-h-[75%] flex flex-col`}>
+    <div className={`${popover} w-[22rem] max-h-[calc(100%-10rem)] flex flex-col`} style={{ left: 12, right: "auto", top: 12, bottom: "auto" }}>
       <div className="flex items-center gap-1 pl-4 pr-2 h-11 shrink-0 border-b border-gray-200 dark:border-white/10">
         <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100">{t("canvas.dock.usageTitle")}</span>
         <span className="flex-1" />
@@ -205,4 +179,21 @@ function UsagePanel({ accounts, onClose }: { accounts: AgentAccount[]; onClose: 
       </div>
     </div>
   );
+}
+
+// El panel de uso nace abierto y recuerda si se lo cerró: las cuotas se ven siempre, salvo que se pida lo contrario.
+const OPEN_KEY = "cc.canvas.usageOpen";
+function readUsageOpen(): boolean {
+  try {
+    return localStorage.getItem(OPEN_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+function writeUsageOpen(open: boolean) {
+  try {
+    localStorage.setItem(OPEN_KEY, open ? "1" : "0");
+  } catch {
+    /* sin almacenamiento: no se recuerda */
+  }
 }
