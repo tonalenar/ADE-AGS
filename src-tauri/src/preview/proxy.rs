@@ -45,7 +45,7 @@ use super::log::{
 };
 use super::mocks::{Mock, Mocks};
 use super::rewrite::{
-    inject_picker, is_hop_by_hop, is_local_host, is_own_host, parse_response_head, rewrite_location,
+    inject_picker, is_hop_by_hop, is_local_host, is_own_host, is_own_origin, parse_response_head, rewrite_location,
     rewrite_origin_value, skip_request_header, skip_response_header, PICKER_PATH,
 };
 use super::site::{
@@ -128,7 +128,7 @@ fn error_page(status: u16, target: &str, detail: &str) -> Response<Body> {
 /// Lo que marca una respuesta que salió de una regla y no del servidor.
 const MOCK_HEADER: &str = "x-controlcode-mock";
 
-fn is_websocket(req: &Request<Incoming>) -> bool {
+fn is_websocket<B>(req: &Request<B>) -> bool {
     req.headers()
         .get("upgrade")
         .and_then(|v| v.to_str().ok())
@@ -143,6 +143,9 @@ fn now_ms() -> i64 {
 }
 
 async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Response<Body> {
+    if !request_is_ours(&req, ctx.proxy_port) {
+        return plain_status(403);
+    }
     if req.uri().path() == PICKER_PATH {
         // Adelante, el origen REAL de la página: el runtime lo necesita para saber qué
         // pedidos van a su propio servidor y cuáles a otro (ver `cors.rs`).
@@ -175,6 +178,29 @@ async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Response<Body> {
         return serve_mock(req, &ctx, started, canned).await;
     }
     forward(req, &ctx, started).await
+}
+
+/// Si el pedido viene de la tab del navegador de la app y no de otro sitio.
+///
+/// El proxy reenvía con la sesión guardada del proyecto (cookies incluidas) y su puerto se
+/// puede adivinar, así que sin esto cualquier página abierta en el navegador del sistema
+/// podría usarlo: re-apuntando su dominio a 127.0.0.1 (DNS rebinding) para leer las
+/// respuestas, o mandando pedidos y WebSockets cruzados con la sesión del usuario.
+///
+/// - `Host` tiene que ser el nombre de loopback de este proxy: con rebinding llega el
+///   nombre del atacante.
+/// - `Origin`, cuando viene, tiene que ser el de este proxy. `null` (un iframe con sandbox)
+///   se acepta en pedidos comunes, pero no para abrir un WebSocket, que sí puede leer.
+pub(crate) fn request_is_ours<B>(req: &Request<B>, port: u16) -> bool {
+    let host = req.headers().get(HOST).and_then(|v| v.to_str().ok()).unwrap_or("");
+    if !is_own_host(host, port) {
+        return false;
+    }
+    match req.headers().get(ORIGIN).map(|v| v.to_str().unwrap_or("")) {
+        None => true,
+        Some("null") => !is_websocket(req),
+        Some(origin) => is_own_origin(origin, port),
+    }
 }
 
 /// Contesta desde una regla, y lo anota como cualquier otro pedido para que se vea en el
@@ -1242,6 +1268,58 @@ async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
     Ok(Proxy { port: local_port, origin: proxy_origin, log, mocks, site })
 }
 
+/// A dónde manda un `Location`: resuelto contra la URL que lo devolvió, y solo si sigue
+/// siendo http(s). Un `javascript:` o un `file:` en una redirección no es un destino.
+pub(crate) fn redirect_target(base: &reqwest::Url, location: &str) -> Option<reqwest::Url> {
+    base.join(location.trim()).ok().filter(|next| matches!(next.scheme(), "http" | "https"))
+}
+
+/// Cuántas redirecciones se siguen al abrir una dirección.
+const MAX_SETTLE_HOPS: usize = 5;
+
+/// Sigue las redirecciones de una dirección REMOTA hasta donde termina (`google.com` →
+/// `www.google.com`, `http` → `https`), para abrir el proxy del origen que de verdad
+/// la sirve.
+///
+/// Hace falta porque el proxy es uno por origen y solo reescribe las redirecciones de su
+/// propio origen: una que sale a otro dominio la seguiría el iframe directo, sin pasar por
+/// acá, y el sitio —que casi siempre prohíbe que lo enmarquen— se vería bloqueado. Los
+/// hosts locales no se tocan: un servidor de desarrollo que redirige lo hace dentro de
+/// su origen. Si algo falla en el camino (red, un destino raro) se devuelve lo último que
+/// se supo, y la página se abre igual con lo que haya.
+async fn settle_redirects(start: reqwest::Url) -> reqwest::Url {
+    let Some(host) = start.host_str() else { return start };
+    if is_local_host(host) {
+        return start;
+    }
+    let fragment = start.fragment().map(str::to_string);
+    let mut url = start.clone();
+    for _ in 0..MAX_SETTLE_HOPS {
+        let sent = tokio::time::timeout(Duration::from_secs(8), REMOTE_CLIENT.get(url.clone()).send()).await;
+        let Ok(Ok(response)) = sent else { break };
+        if !response.status().is_redirection() {
+            break;
+        }
+        let Some(next) = response.headers().get(LOCATION).and_then(|v| v.to_str().ok()).and_then(|loc| redirect_target(&url, loc)) else {
+            break;
+        };
+        // Un destino local desde un sitio remoto es lo que haría un ataque de rebinding.
+        if next.host_str().is_some_and(is_local_host) {
+            break;
+        }
+        url = next;
+    }
+    // Solo cambia si terminó en otro origen: dentro del mismo, la redirección ya la maneja
+    // el proxy y conviene dejar la dirección tal como se pidió.
+    if url.origin() == start.origin() {
+        return start;
+    }
+    if url.fragment().is_none() {
+        url.set_fragment(fragment.as_deref());
+    }
+    url
+}
+
 /// Resuelve qué poner en el iframe para mostrar `url`, levantando su proxy si hace falta.
 /// `picker` es el script del selector ya compilado.
 #[tauri::command]
@@ -1257,6 +1335,7 @@ pub async fn preview_resolve(url: String, picker: String) -> Result<PreviewTarge
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err("Solo se pueden abrir direcciones http o https".to_string());
     }
+    let parsed = settle_redirects(parsed).await;
     let target_origin = parsed.origin().ascii_serialization();
 
     let proxy_origin = {

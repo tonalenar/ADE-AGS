@@ -118,7 +118,7 @@ export function SessionsPage() {
       {/* ══ el buscador ═══════════════════════════════════════════════════ */}
       <div className="flex items-center gap-3 h-[54px] shrink-0 px-4
         border-b border-gray-200 dark:border-white/8">
-        <ClockIcon className="w-[15px] h-[15px] shrink-0 text-blue-500 dark:text-blue-400" />
+        <ClockIcon className="w-[15px] h-[15px] shrink-0 text-accent-500 dark:text-accent-400" />
         <input
           ref={inputRef}
           value={filters.query}
@@ -161,7 +161,7 @@ export function SessionsPage() {
               hasActiveFilters(filters) ? (
                 <Button variant="custom"
                   onClick={() => setFilters(EMPTY_FILTERS)}
-                  className="cc-t text-[11.5px] text-blue-500 dark:text-blue-400 hover:underline inline-block"
+                  className="cc-t text-[11.5px] text-accent-500 dark:text-accent-400 hover:underline inline-block"
                 >
                   {t("sessions.filters.clear")}
                 </Button>

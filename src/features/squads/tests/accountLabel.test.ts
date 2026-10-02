@@ -22,6 +22,9 @@ const workAccount: AgentAccount = {
   loggedIn: true,
   label: null,
   createdAt: 1,
+  kind: "login",
+  baseUrl: null,
+  keyHint: null,
 };
 
 describe("Squad account labels", () => {

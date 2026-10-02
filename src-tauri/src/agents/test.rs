@@ -218,3 +218,31 @@ fn orchestration_capability_requires_implemented_ade_mcp() {
     };
     assert!(!super::adapter::custom_capabilities(&custom).orchestration);
 }
+
+/// Con una cuenta de la app, una API key heredada de la app no le gana a su login; con la
+/// del sistema (sin la variable del perfil) se respeta lo que haya en el entorno.
+#[test]
+fn una_cuenta_de_la_app_no_hereda_keys_que_le_ganarian() {
+    use super::registry::{apply_account_env, overriding_env};
+    use std::collections::HashMap;
+
+    let claude = HashMap::from([("CLAUDE_CONFIG_DIR".to_string(), "/perfil".to_string())]);
+    let quitar = overriding_env(claude.keys());
+    assert!(quitar.contains(&"ANTHROPIC_API_KEY"));
+    assert!(quitar.contains(&"CLAUDE_CODE_USE_BEDROCK"));
+    assert!(!quitar.contains(&"OPENAI_API_KEY"));
+
+    let codex = HashMap::from([("CODEX_HOME".to_string(), "/perfil".to_string())]);
+    assert_eq!(overriding_env(codex.keys()), vec!["CODEX_API_KEY"]);
+
+    // La cuenta del sistema y una tab sin cuenta no traen la variable del perfil.
+    let ninguna: HashMap<String, String> = HashMap::new();
+    assert!(overriding_env(ninguna.keys()).is_empty());
+
+    let mut command = std::process::Command::new("x");
+    command.env("ANTHROPIC_API_KEY", "heredada");
+    apply_account_env(&mut command, &claude);
+    let envs: Vec<_> = command.get_envs().collect();
+    assert!(envs.contains(&(std::ffi::OsStr::new("ANTHROPIC_API_KEY"), None)), "{envs:?}");
+    assert!(envs.contains(&(std::ffi::OsStr::new("CLAUDE_CONFIG_DIR"), Some(std::ffi::OsStr::new("/perfil")))));
+}

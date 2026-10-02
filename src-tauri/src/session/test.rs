@@ -590,3 +590,17 @@ fn gemini_de_una_cuenta_busca_en_punto_gemini_del_profile() {
     );
     assert_eq!(title.title, "hola desde la cuenta");
 }
+
+#[test]
+fn un_id_de_sesion_no_puede_traer_flags_ni_comandos() {
+    use super::title::is_safe_session_id;
+    assert!(is_safe_session_id("3f1c2b7e-9d4a-4c1e-8a2b-5d6e7f8a9b0c"));
+    assert!(is_safe_session_id("ses_9f2A.b-1"));
+    assert!(is_safe_session_id("rollout-2026-10-02T07:18:43-abc"));
+    assert!(!is_safe_session_id("x --dangerously-skip-permissions"));
+    assert!(!is_safe_session_id("x & calc"));
+    assert!(!is_safe_session_id("x|y"));
+    assert!(!is_safe_session_id("-p"));
+    assert!(!is_safe_session_id(""));
+    assert!(!is_safe_session_id(&"a".repeat(129)));
+}

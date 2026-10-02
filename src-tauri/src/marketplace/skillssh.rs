@@ -71,6 +71,12 @@ const HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 /// esa carpeta lo levantamos nosotros.
 const SKILLS_AGENT: &str = "claude-code";
 
+/// La CLI de skills.sh, en una versión fija. `npx -y skills` baja y EJECUTA lo que npm diga
+/// que es la última versión en ese momento: una versión nueva rota, o un paquete
+/// comprometido, correría con los permisos del usuario sin que nadie la eligiera. Se sube a
+/// mano, probándola.
+pub(crate) const SKILLS_PACKAGE: &str = "skills@1.7.0";
+
 /// Carpeta, relativa al cwd con el que se corrió `npx skills add`, donde deja lo instalado.
 const INSTALL_SUBDIR: &str = ".claude/skills";
 
@@ -365,7 +371,7 @@ pub fn install_into(staging: &Path, target: &str) -> Result<PathBuf, String> {
     let mut cmd = npx_command();
     with_env(&mut cmd);
     cmd.current_dir(staging);
-    cmd.args(["-y", "skills", "add", target, "--agent", SKILLS_AGENT, "--yes", "--copy"]);
+    cmd.args(["-y", SKILLS_PACKAGE, "add", target, "--agent", SKILLS_AGENT, "--yes", "--copy"]);
 
     let out = crate::util::output_with_timeout(&mut cmd, ADD_TIMEOUT)
         .map_err(|e| timeout_or(e, NPX_MISSING))?;

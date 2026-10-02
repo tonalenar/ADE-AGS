@@ -36,7 +36,7 @@ Depende de: 3. Pode andar em paralelo com 4, mas não antes de 3, porque missão
 
 **v0 concluído** em `feat/mission-engine-v0`: Mission persistida em cima de `runs/`, ciclo draft → running → done/failed/cancelled, UI e E2E real. Detalhe e o que ficou fora em [MISSION_ENGINE.md](./MISSION_ENGINE.md).
 
-**Mission Runtime v0.1** em `fix/mission-runtime-v01` (concluído nesta base): launcher Windows sem `cmd.exe` para shims npm, política do lead imposta no broker e na CLI, aprovações na tela da Mission (mesma fila da Fleet), evento `cc-mission-changed`, progresso só de workers e E2E real com lead + 3 workers. Detalhe em [MISSION_RUNTIME.md](./MISSION_RUNTIME.md). Roles + Squads v0 e Handoff Structured v0 também estão concluídos nesta base. Shared Memory e Map Mode continuam pendentes.
+**Mission Runtime v0.1** em `fix/mission-runtime-v01` (concluído nesta base): launcher Windows sem `cmd.exe` para shims npm, política do lead imposta no broker e na CLI, aprovações na tela da Mission (mesma fila da Fleet), evento `cc-mission-changed`, progresso só de workers e E2E real com lead + 3 workers. Detalhe em [MISSION_RUNTIME.md](./MISSION_RUNTIME.md). Roles + Squads v0 e Handoff Structured v0 também estão concluídos nesta base. Shared Memory v0 está implementada e validada na PR #4, aguardando merge, com gates e E2E concluídos; Map Mode continua pendente.
 
 ## 6. Task Engine
 
@@ -44,11 +44,11 @@ Tasks com estado, dependência, retry e roteamento. Grande parte já está em `r
 
 Depende de: 5.
 
-## 7. Worktree por missão (pendente)
+## 7. Worktree por missão
 
-Hoje o worktree é por task da frota, em `~/.controlcode/worktrees`, ramo `cc/<task>`, e não se apaga sozinho. A missão precisa de um worktree cujo ciclo de vida seja o da missão, com a mesma regra: não descartar sujo.
+**v1 concluído** em `feat/mission-review` (PR #11). Continua havendo um worktree por task isolada. A Mission ganhou um **worktree de integração**, criado na primeira entrega aceita na tela "Revisão das entregas", onde as branches aceitas são unidas sem tocar na cópia de trabalho do usuário. "Aplicar no projeto" faz um único merge da integração. Conflitos são sempre abortados e listados. Detalhes em [MISSION_ENGINE.md](./MISSION_ENGINE.md).
 
-Depende de: 5 e 6. Reusa `runs/worktrees.rs`.
+Pendente: resolver conflitos dentro da app e limpar a integração depois de aplicada.
 
 ## 8. MCP interno da ADE
 
@@ -56,11 +56,21 @@ O servidor `controlcode` em `ipc/mcp.rs` já é o MCP da app (browser, frota, gi
 
 Depende de: 2 (cada provider declara o estilo de MCP) e de 5 (anexar à missão). Não depende de um backend cloud.
 
-## 9. Event Bus (unificação pendente)
+## 9. Event Bus
 
-Um barramento local para o que hoje são três canais separados: eventos Tauri da UI, watch/cursor do orquestrador de tabs, stream JSON da frota. Consumidores: UI, CLI, missão, mais tarde o map mode.
+**v1 concluído** em `src-tauri/src/bus.rs`.
 
-Depende de: 6. Sem tasks estáveis, o bus só replica evento de PTY.
+- **Formato:** todo evento da frota e das missões passa por um único bus, com `seq` crescente, ids de task/run/mission e os últimos 2000 eventos em memória.
+- **Tópicos:** `task.changed`, `task.activity`, `task.rerouted`, `account.failure`, `approvals.changed` e `mission.changed`.
+- **Leitura:**
+  - `since(after)` atualiza quem chega tarde e marca `truncated` se algo já saiu do buffer.
+  - `wait` bloqueia até chegar algo novo.
+  - A UI recebe tudo pelo único evento Tauri `ade-event`.
+  - A CLI usa `ccode events since|wait`, com filtros de tópico, run, missão e task.
+
+Os canais antigos (`cc-task-*`, `cc-mission-changed`) continuam funcionando, então as telas existentes não mudaram.
+
+Pendente: migrar as telas para o bus e incluir o watch/cursor das tabs interativas.
 
 ## 10. Handoff estruturado
 
@@ -82,9 +92,11 @@ Não inclui fallback silencioso, troca automática de modelo, scoring ou marketp
 
 ## 13. Shared Memory
 
-`run_facts` já guarda fatos do run e o prompt deixa claro que são dados, não instruções. A memória proposta eleva esse mecanismo à missão e ao projeto, em SQLite local, sem serviço. Não é um índice cloud e não copia produto fechado.
+**Shared Memory v0: implementação commitada e publicada na PR #4 (`feat/shared-memory-v0`), aguardando merge, com gates e E2E real concluídos em 01/10/2026.**
 
-**Próximo grande bloco; não implementado.** Deve separar Workspace Memory, Mission Memory e Run Facts e reutilizar o runtime/MCP existentes. O Event Bus unificado continua uma etapa separada.
+`run_facts` continua sendo colaboração append-only de um Run. Shared Memory v0 adiciona Workspace Memory e Mission Memory em SQLite local, com propostas e aprovação explícita do usuário. Cada Run congela um snapshot das memórias aprovadas no início; workers e Lead recebem esse snapshot como dado não confiável. Detalhes e limites em [SHARED_MEMORY.md](./SHARED_MEMORY.md).
+
+O E2E confirmou retry com snapshot atualizado, histórico antigo preservado, Lead e worker Codex, publicação de Fact e handoff, proposta de memória aprovada pelo usuário e persistência após restart. Banco original restaurado e evidências preservadas fora do repositório. Commits e push realizados; PR #4 aberta, ainda não mergeada. O Event Bus unificado e Map Mode continuam etapas separadas.
 
 ## 14. Usage, custos e limites (parcial)
 
@@ -92,9 +104,19 @@ Claude já expõe plano e tokens. A frota já tem `budget_usd` e soma tokens qua
 
 Depende de: 2 e 6. Usage e custo dependem dos dados reportados pelo adapter: tokens já aparecem para Codex, mas custo por worker não tem cobertura uniforme. Não bloqueia 4.
 
-## 15. Map mode (pendente)
+## 15. Map mode
 
-Vista gráfica de missões, tasks, agentes e handoffs. Lê o event bus e o estado da missão. Não é um runtime novo e não embute código de Maestri nem de Overclock.
+**v1 concluído** (`MissionMap.tsx`, no detalhe da Mission). O mapa mostra:
+
+- o Lead no topo e as tasks em camadas, conforme as dependências;
+- arestas de dependência, e arestas tracejadas do Lead para tasks sem dependência;
+- borda e ponto coloridos pelo status;
+- agente, modelo e conta em cada task;
+- o marcador ↻ em tasks que trocaram de mãos.
+
+A ferramenta que cada agente está usando agora vem ao vivo de `task.activity` no bus. Não é um runtime novo: lê as tasks do detalhe e o bus.
+
+Pendente: zoom e pan para missões grandes, e uma visão da frota inteira fora de uma Mission.
 
 Depende de: 9, 10, 12 e 13. É a última porque desenhar cedo fixa um modelo que essas etapas ainda vão mover.
 

@@ -1,17 +1,9 @@
 import { createHashRouter } from "react-router-dom";
 import { AppShell } from "@/app/AppShell";
 import { HomePage } from "@/features/workspaces/HomePage";
-import { WorkspacesPage } from "@/features/workspaces/WorkspacesPage";
-import { SkillsPage } from "@/features/skills/SkillsPage";
-import { SkillDetailPage } from "@/features/skills/SkillDetailPage";
-import { SessionsPage } from "@/features/sessions/SessionsPage";
-import { FleetPage } from "@/features/runs/FleetPage";
-import { MissionsPage } from "@/features/missions/MissionsPage";
-import { SquadsPage } from "@/features/squads/SquadsPage";
-import { MarketplacePage } from "@/features/marketplace/MarketplacePage";
-import { RegistriesPage } from "@/features/marketplace/RegistriesPage";
-import { ForgePage } from "@/features/forge/ForgePage";
 
+// Las páginas que no son la primera pantalla se cargan al entrar a ellas: antes iban todas
+// en el chunk principal, que había que bajar y parsear entero antes de pintar nada.
 export const router = createHashRouter([
   {
     path: "/",
@@ -19,16 +11,16 @@ export const router = createHashRouter([
     children: [
       { index: true, element: <HomePage /> },
       { path: "workspace", element: <></> },
-      { path: "workspaces", element: <WorkspacesPage /> },
-      { path: "skills", element: <SkillsPage /> },
-      { path: "skills/:id", element: <SkillDetailPage /> },
-      { path: "sessions", element: <SessionsPage /> },
-      { path: "fleet", element: <FleetPage /> },
-      { path: "missions", element: <MissionsPage /> },
-      { path: "squads", element: <SquadsPage /> },
-      { path: "forge", element: <ForgePage /> },
-      { path: "marketplace", element: <MarketplacePage /> },
-      { path: "marketplace/registries", element: <RegistriesPage /> },
+      { path: "workspaces", lazy: () => import("@/features/workspaces/WorkspacesPage").then((m) => ({ Component: m.WorkspacesPage })) },
+      { path: "skills", lazy: () => import("@/features/skills/SkillsPage").then((m) => ({ Component: m.SkillsPage })) },
+      { path: "skills/:id", lazy: () => import("@/features/skills/SkillDetailPage").then((m) => ({ Component: m.SkillDetailPage })) },
+      { path: "sessions", lazy: () => import("@/features/sessions/SessionsPage").then((m) => ({ Component: m.SessionsPage })) },
+      { path: "fleet", lazy: () => import("@/features/runs/FleetPage").then((m) => ({ Component: m.FleetPage })) },
+      { path: "missions", lazy: () => import("@/features/missions/MissionsPage").then((m) => ({ Component: m.MissionsPage })) },
+      { path: "squads", lazy: () => import("@/features/squads/SquadsPage").then((m) => ({ Component: m.SquadsPage })) },
+      { path: "forge", lazy: () => import("@/features/forge/ForgePage").then((m) => ({ Component: m.ForgePage })) },
+      { path: "marketplace", lazy: () => import("@/features/marketplace/MarketplacePage").then((m) => ({ Component: m.MarketplacePage })) },
+      { path: "marketplace/registries", lazy: () => import("@/features/marketplace/RegistriesPage").then((m) => ({ Component: m.RegistriesPage })) },
     ],
   },
 ]);

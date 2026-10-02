@@ -61,6 +61,7 @@ fn asignacion(agent: &str) -> Assignment {
         account_id: None,
         routed_by: RoutedBy::Policy,
         notes: vec![],
+        auto_account: true,
     }
 }
 
@@ -1384,4 +1385,147 @@ fn lead_with_workers_follows_dag_outcome() {
         assert_eq!(estado(&db, &id), if fail { status::FAILED } else { status::DONE });
         assert_eq!(runs_store::task_by_id(&db.lock().unwrap(), &lead.id).unwrap().unwrap().status, task_status::DONE);
     }
+}
+
+// ── Revisión de lo entregado ─────────────────────────────────────
+
+#[test]
+fn numstat_lee_binarios_y_renombres() {
+    use super::review::parse_numstat;
+    let raw = "3\t1\tsrc/a.rs\0-\t-\tlogo.png\x002\t0\t\0viejo.rs\0nuevo.rs\0";
+    let files = parse_numstat(raw);
+    assert_eq!(files.len(), 3);
+    assert_eq!((files[0].path.as_str(), files[0].added, files[0].removed), ("src/a.rs", Some(3), Some(1)));
+    assert_eq!((files[1].added, files[1].removed), (None, None), "binario");
+    assert_eq!(files[2].path, "nuevo.rs");
+}
+
+fn git_ok(dir: &std::path::Path, args: &[&str]) {
+    let out = std::process::Command::new("git").arg("-C").arg(dir).args(args).output().unwrap();
+    assert!(out.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&out.stderr));
+}
+
+fn commit_file(dir: &std::path::Path, file: &str, body: &str, msg: &str) {
+    std::fs::write(dir.join(file), body).unwrap();
+    git_ok(dir, &["add", "-A"]);
+    git_ok(dir, &["-c", "user.name=T", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", "commit", "-q", "-m", msg]);
+}
+
+/// Una misión en `running` con su run activo, sobre un repo de verdad con un commit.
+fn mision_en_repo(tmp: &std::path::Path) -> (DbConnection, std::path::PathBuf, String) {
+    let project = tmp.join("proyecto");
+    std::fs::create_dir_all(&project).unwrap();
+    git_ok(&project, &["init", "-q", "-b", "main"]);
+    git_ok(&project, &["config", "core.autocrlf", "false"]);
+    commit_file(&project, "a.txt", "uno\n", "base");
+    let db = db();
+    let run_id = {
+        let conn = db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO missions (id, workspace_id, title, objective, cwd, status, created_at, updated_at)
+             VALUES ('m1', 'w1', 'Demo', 'o', ?1, 'running', 0, 0)",
+            [project.to_string_lossy()],
+        )
+        .unwrap();
+        let run = runs_store::create_run_with_memory_snapshot(&conn, "w1", Some("m1"), "o", &project.to_string_lossy(), 2, None).unwrap();
+        conn.execute("UPDATE missions SET active_run_id = ?1 WHERE id = 'm1'", [&run.id]).unwrap();
+        run.id
+    };
+    (db, project, run_id)
+}
+
+/// Una tarea terminada en su propio worktree, que commiteó `body` en `file`.
+fn tarea_aislada(db: &DbConnection, run_id: &str, project: &std::path::Path, base: &std::path::Path, title: &str, file: &str, body: &str) -> String {
+    let conn = db.lock().unwrap();
+    let task = runs_store::create_task(
+        &conn,
+        &runs_store::NewTask { run_id, title, prompt: "p", agent_id: "claude-code", cwd: &project.to_string_lossy(), ..Default::default() },
+    )
+    .unwrap();
+    let wt = crate::runs::worktrees::create_from(base, project, title, "HEAD").unwrap();
+    commit_file(&wt.root, file, body, title);
+    runs_store::set_worktree(&conn, &task.id, &wt.task_cwd.to_string_lossy(), &wt.root.to_string_lossy(), &wt.branch).unwrap();
+    conn.execute("UPDATE tasks SET status = 'done' WHERE id = ?1", [&task.id]).unwrap();
+    task.id
+}
+
+/// Aceptar junta en la integración (no en el proyecto), un conflicto se aborta y se informa,
+/// y aplicar lleva lo aceptado al proyecto solo con el árbol limpio.
+#[test]
+fn una_mision_se_revisa_se_integra_y_se_aplica() {
+    use super::review::{self, MergeOutcome};
+    let tmp = std::env::temp_dir().join(format!("cc-review-{}", uuid::Uuid::new_v4()));
+    let base = tmp.join("worktrees");
+    let (db, project, run_id) = mision_en_repo(&tmp);
+    let nuevo = tarea_aislada(&db, &run_id, &project, &base, "agrega b", "b.txt", "nuevo\n");
+    let cambia = tarea_aislada(&db, &run_id, &project, &base, "cambia a", "a.txt", "dos\n");
+    let choca = tarea_aislada(&db, &run_id, &project, &base, "choca con a", "a.txt", "tres\n");
+
+    // Lo que se ve antes de decidir.
+    let r = review::review(&db.lock().unwrap(), "m1").unwrap();
+    assert_eq!(r.deliveries.len(), 3);
+    let b = r.deliveries.iter().find(|d| d.task_id == nuevo).unwrap();
+    assert_eq!((b.files[0].path.as_str(), b.files[0].added), ("b.txt", Some(1)));
+    assert_eq!(b.commits, vec!["agrega b".to_string()]);
+    assert!(review::task_diff(&db.lock().unwrap(), &cambia).unwrap().contains("+dos"));
+
+    // Aceptar dos que no chocan. El proyecto no se toca: todo va a la integración.
+    assert!(matches!(review::accept(&db, &base, "m1", &nuevo).unwrap(), MergeOutcome::Merged { .. }));
+    assert!(matches!(review::accept(&db, &base, "m1", &cambia).unwrap(), MergeOutcome::Merged { .. }));
+    assert!(!project.join("b.txt").exists());
+
+    // La tercera choca con la segunda: se aborta y se dice dónde.
+    match review::accept(&db, &base, "m1", &choca).unwrap() {
+        MergeOutcome::Conflict { files } => assert_eq!(files, vec!["a.txt".to_string()]),
+        other => panic!("esperaba conflicto: {other:?}"),
+    }
+    let (branch, integration) = review::integration_path(&db.lock().unwrap(), "m1").unwrap().unwrap();
+    let merge_head = std::process::Command::new("git")
+        .arg("-C")
+        .arg(&integration)
+        .args(["rev-parse", "-q", "--verify", "MERGE_HEAD"])
+        .output()
+        .unwrap();
+    assert!(!merge_head.status.success(), "la integración quedó a mitad de un merge");
+
+    let r = review::review(&db.lock().unwrap(), "m1").unwrap();
+    let estado = |id: &str| r.deliveries.iter().find(|d| d.task_id == id).unwrap().review.clone();
+    assert_eq!(estado(&nuevo).as_deref(), Some("accepted"));
+    assert_eq!(estado(&cambia).as_deref(), Some("accepted"));
+    assert_eq!(estado(&choca).as_deref(), Some("conflict"));
+    assert_eq!(r.integration_branch.as_deref(), Some(branch.as_str()));
+    assert_eq!(r.pending_commits, 4, "dos commits de tareas y dos merges");
+
+    // Aplicar con cambios sin commitear en el proyecto: se niega y dice cuáles.
+    std::fs::write(project.join("a.txt"), "a mano\n").unwrap();
+    assert!(review::apply(&db, "m1").unwrap_err().contains("a.txt"));
+    git_ok(&project, &["checkout", "--", "a.txt"]);
+    // Un archivo nuevo sin agregar no impide aplicar.
+    std::fs::write(project.join("notas.txt"), "mio\n").unwrap();
+
+    assert!(matches!(review::apply(&db, "m1").unwrap(), MergeOutcome::Merged { .. }));
+    assert_eq!(std::fs::read_to_string(project.join("a.txt")).unwrap().replace("\r\n", "\n"), "dos\n");
+    assert!(project.join("b.txt").exists());
+    assert!(review::review(&db.lock().unwrap(), "m1").unwrap().applied_at.is_some());
+
+    let _ = std::fs::remove_dir_all(&tmp);
+}
+
+/// Lo que el agente dejó sin commitear no está en su rama: aceptarla sería aceptar otra cosa.
+#[test]
+fn no_se_acepta_una_entrega_con_cambios_sin_commitear() {
+    let tmp = std::env::temp_dir().join(format!("cc-review-sucia-{}", uuid::Uuid::new_v4()));
+    let base = tmp.join("worktrees");
+    let (db, project, run_id) = mision_en_repo(&tmp);
+    let task_id = tarea_aislada(&db, &run_id, &project, &base, "t", "c.txt", "c\n");
+    let root: String = db
+        .lock()
+        .unwrap()
+        .query_row("SELECT worktree_path FROM tasks WHERE id = ?1", [&task_id], |r| r.get(0))
+        .unwrap();
+    std::fs::write(std::path::Path::new(&root).join("olvidado.txt"), "x").unwrap();
+
+    let err = super::review::accept(&db, &base, "m1", &task_id).unwrap_err();
+    assert!(err.contains("olvidado.txt"), "{err}");
+    let _ = std::fs::remove_dir_all(&tmp);
 }

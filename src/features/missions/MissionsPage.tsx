@@ -1,4 +1,5 @@
 import { HandoffView } from "@/features/runs/HandoffView";
+import { SharedMemoryPanel } from "@/features/memory/SharedMemoryPanel";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
@@ -17,6 +18,8 @@ import { useSquadAccountLabel } from "@/features/squads/accountLabel";
 import type { Squad } from "@/features/squads/types";
 
 import { MissionDialog } from "./MissionDialog";
+import { MissionMap } from "./MissionMap";
+import { MissionReviewPanel } from "./MissionReviewPanel";
 import {
   AGENT_STATES, agentStateOf, approvalsFor, blockedRuns, canEdit, countAgentStates, dependencyLabels, emptyForm,
   formFromMission, missionAction, missionPhase, progressOf, workersOf, type MissionPhase, type Progress,
@@ -34,7 +37,7 @@ const STATUS_TONE: Record<MissionPhase, string> = {
   draft: "bg-gray-200 text-gray-700 dark:bg-white/10 dark:text-white/60",
   running: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   waiting_approval: "bg-amber-500/20 text-amber-800 dark:text-amber-300",
-  done: "bg-blue-500/15 text-blue-700 dark:text-blue-300",
+  done: "bg-accent-500/15 text-accent-700 dark:text-accent-300",
   failed: "bg-red-500/15 text-red-700 dark:text-red-300",
   cancelled: "bg-gray-200 text-gray-500 dark:bg-white/8 dark:text-white/40",
 };
@@ -165,7 +168,12 @@ export function MissionsPage() {
               onError={setError}
             />
           ) : (
-            <p className="p-6 text-[12px] text-gray-400 dark:text-white/35">{t("missions.pick")}</p>
+            workspaceId ? (
+              <div className="flex flex-col gap-4 p-5">
+                <p className="text-[12px] text-gray-400 dark:text-white/35">{t("missions.pick")}</p>
+                <SharedMemoryPanel workspaceId={workspaceId} />
+              </div>
+            ) : <p className="p-6 text-[12px] text-gray-400 dark:text-white/35">{t("missions.pick")}</p>
           )}
         </div>
       </div>
@@ -218,7 +226,7 @@ function MissionRow({ mission, phase, active, onSelect }: {
       aria-pressed={active}
       className={`cc-t w-full flex flex-col items-stretch gap-1 px-3 py-2.5 text-left rounded-none
         border-b border-gray-100 dark:border-white/5
-        ${active ? "bg-blue-500/10" : "hover:bg-gray-100 dark:hover:bg-white/4"}`}
+        ${active ? "bg-accent-500/10" : "hover:bg-gray-100 dark:hover:bg-white/4"}`}
     >
       <span className="flex items-center gap-2 min-w-0">
         <span className="flex-1 truncate text-[12px] font-medium text-gray-900 dark:text-gray-100">{mission.title}</span>
@@ -266,7 +274,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError 
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const decideApproval = useRunsStore((s) => s.decideApproval);
   const [busy, setBusy] = useState(false);
-  const { mission, tasks, facts, runs } = detail;
+  const { mission, tasks, runs } = detail;
   const [roster, setRoster] = useState<Roster | null>(null);
   useEffect(() => { getRoster().then(setRoster).catch(() => setRoster(null)); }, []);
   const unsupportedLead = leadUnsupported(roster?.agents.find((agent) => agent.agentId === mission.leadAgentId));
@@ -412,6 +420,8 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError 
         </Section>
       )}
 
+      <MissionMap tasks={tasks} accountLabel={accountLabel} />
+
       {tasks.length > 0 && (
         <Section title={t("missions.detail.tasks")}>
           <ul className="flex flex-col divide-y divide-gray-100 dark:divide-white/5 rounded-lg border border-gray-200 dark:border-white/8">
@@ -436,18 +446,9 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError 
         </Section>
       )}
 
-      {facts.length > 0 && (
-        <Section title={t("fleet.runs.factsTitle")}>
-          <ul className="flex flex-col gap-1">
-            {facts.map((f) => (
-              <li key={f.id} className="text-[11.5px] text-gray-600 dark:text-white/55">
-                <span className="font-medium">[{t(`fleet.runs.kind.${f.kind}`)}]</span> {f.body}
-                <span className="text-gray-400 dark:text-white/30"> — {f.author ?? t("fleet.runs.authorUser")}</span>
-              </li>
-            ))}
-          </ul>
-        </Section>
-      )}
+      <MissionReviewPanel missionId={mission.id} refreshKey={tasks.map((task) => `${task.id}:${task.status}`).join("|")} />
+
+      {workspaceId && <SharedMemoryPanel key={`${workspaceId}-${mission.id}`} workspaceId={workspaceId} missionId={mission.id} runs={runs} activeRunId={mission.activeRunId} />}
     </div>
   );
 }
@@ -532,7 +533,7 @@ const STATE_DOT = {
   waiting_approval: "bg-amber-500 animate-pulse",
   waiting_deps: "bg-gray-400",
   queued: "bg-amber-400",
-  done: "bg-blue-500",
+  done: "bg-accent-500",
   failed: "bg-red-500",
   stopped: "bg-gray-300 dark:bg-white/20",
 } as const;

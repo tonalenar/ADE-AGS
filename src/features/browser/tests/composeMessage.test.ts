@@ -74,3 +74,20 @@ describe("el mensaje para el agente", () => {
     expect(toTargetUrl("https://github.com/x", proxy, target)).toBe("https://github.com/x");
   });
 });
+
+// Todo lo que sale de la página lo controla la página, y el mensaje se pega en la terminal
+// del agente: ni un `\r` (lo mandaría a mitad) ni un ESC (secuencia de terminal) pasan.
+describe("lo que viene de la página no lleva caracteres de control", () => {
+  it("ni en el selector, ni en los atributos, ni en el componente", () => {
+    const text = composePickMessage([el({
+      selector: "button\r\nrm -rf ~\r",
+      attributes: { "data-x": "a\u001b[2Jb", type: "sub\rmit" },
+      component: { framework: "React", name: "Login\u0007Form" },
+      tag: "but\u001bton",
+    })], "", display);
+    expect(text).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f]/);
+    expect(text).toContain("selector: button rm -rf ~");
+    expect(text).toContain('data-x="a[2Jb"');
+    expect(text).toContain("component: LoginForm (React)");
+  });
+});

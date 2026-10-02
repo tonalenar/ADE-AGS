@@ -422,17 +422,27 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     assert!(!tab.contains(&"approve_tool_use".to_string()));
     assert!(tab.contains(&"browser_click".to_string()));
     assert_eq!(task[0], "approve_tool_use");
-    assert_eq!(&task[1..], &tab[..]);
+    let memory: Vec<_> = task.iter().filter(|name| name.starts_with("memory_")).collect();
+    assert_eq!(memory.len(), 6);
+    assert!(!tab.iter().any(|name| name.starts_with("memory_")));
+    let task_without_memory: Vec<_> = task[1..].iter().filter(|name| !name.starts_with("memory_")).cloned().collect();
+    assert_eq!(task_without_memory, tab);
 
-    // Lo que se permite de antemano en `--allowedTools` es exactamente lo que se ofrece:
+    // Lo que se permite de antemano en `--allowedTools` es exactamente lo que se ofrece,
+    // menos lo que saca datos de la máquina (subir un archivo, correr código en la página):
     // un nombre de más no hace nada, uno de menos deja una tool pidiendo permiso por cada uso.
     let offered: Vec<String> = tab.iter().map(|n| format!("mcp__controlcode__{n}")).collect();
-    let browser: Vec<String> = offered.iter().filter(|n| n.contains("__browser_")).cloned().collect();
+    let browser: Vec<String> = offered
+        .iter()
+        .filter(|n| n.contains("__browser_") && !n.ends_with("__browser_upload") && !n.ends_with("__browser_eval"))
+        .cloned()
+        .collect();
     assert_eq!(browser_tool_names(), browser);
+    assert!(offered.iter().any(|n| n.ends_with("__browser_upload")), "browser_upload sigue ofreciéndose");
     let all_powers = [OrchestrationPower::Read, OrchestrationPower::Note, OrchestrationPower::Delivery, OrchestrationPower::Spawn];
     let orchestration = orchestration_tool_names(&all_powers);
     assert!(!orchestration.is_empty());
-    assert!(orchestration.iter().all(|n| offered.contains(n)), "{orchestration:?}");
+    assert!(orchestration.iter().all(|n| offered.contains(n) || n.contains("__memory_")), "{orchestration:?}");
     // Preguntarle algo al usuario va para los dos lados y no es ni navegador ni orquestación.
     assert!(tab.contains(&super::mcp::ASK_TOOL.to_string()));
     // Las de git remoto: todas se ofrecen, y las que se aprueban solas son solo las que leen.
@@ -441,7 +451,8 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let git_read = super::mcp::git_read_tool_names();
     assert!(git_read.iter().all(|n| git.contains(n)), "{git_read:?}");
     assert!(!git_read.iter().any(|n| n.ends_with("git_push") || n.ends_with("_create")));
-    assert_eq!(browser.len() + orchestration.len() + git.len() + 1, offered.len());
+    // + 2: `browser_upload` y `browser_eval`, que se ofrecen pero no se aprueban solas.
+    assert_eq!(browser.len() + 2 + orchestration.len() - memory.len() + git.len() + 1, offered.len());
 }
 
 /// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo
@@ -532,6 +543,9 @@ fn claude_y_opencode_aprueban_solas_las_mismas_tools() {
     }
     assert!(super::mcp::auto_approved("browser_click"));
     assert!(!super::mcp::auto_approved("git_push"));
+    // Sacan datos de la máquina hacia una página que puede ser cualquiera: las aprueba la persona.
+    assert!(!super::mcp::auto_approved("browser_upload"));
+    assert!(!super::mcp::auto_approved("browser_eval"));
 }
 
 /// Cada tool lleva sus anotaciones, y dicen la verdad: las de lectura no escriben, y
@@ -790,7 +804,7 @@ fn lo_que_manda_el_puente_mcp_lo_atienden_el_despachador_y_el_frontend() {
     for command in orchestration {
         assert!(dispatched.contains(&command.to_string()), "nadie atiende {command}");
         assert!(
-            include_str!("../runs/orchestration.rs").contains(&format!("\"{command}\" =>")),
+            include_str!("../runs/orchestration.rs").contains(&format!("\"{command}\"")),
             "la orquestación no atiende {command}"
         );
     }
@@ -880,4 +894,13 @@ fn una_cancelacion_se_recuerda_por_su_id() {
     crate::ipc::cancel::cancel("c-1");
     assert!(crate::ipc::cancel::is_cancelled(Some("c-1")));
     assert!(!crate::ipc::cancel::is_cancelled(None), "un pedido de la CLI nunca está cancelado");
+}
+
+#[test]
+fn el_token_se_compara_entero() {
+    use super::server::token_matches;
+    assert!(token_matches("abc-123", "abc-123"));
+    assert!(!token_matches("abc-124", "abc-123"));
+    assert!(!token_matches("abc-12", "abc-123"));
+    assert!(!token_matches("", "abc-123"));
 }

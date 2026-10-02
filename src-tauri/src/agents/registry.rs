@@ -85,6 +85,10 @@ pub struct ProfileDef {
     pub default_home: DefaultHome,
     /// Dónde buscar el marcador de esa cuenta del sistema.
     pub system_marker: SystemMarkerRoot,
+    /// Variables que, heredadas del entorno de la app, le ganarían al login de una cuenta
+    /// de la app (una API key en el entorno pasa por encima de la suscripción del perfil).
+    /// Se sacan cuando el proceso corre con una cuenta de la app, no con la del sistema.
+    pub overriding_env: &'static [&'static str],
 }
 
 /// Cómo recibe una TUI el servidor MCP que le enchufa la app (el navegador y la
@@ -194,6 +198,16 @@ pub const AGENTS: &[AgentDef] = &[
             default_home: DefaultHome::HomeDot(".claude"),
             // Sin CLAUDE_CONFIG_DIR el `.claude.json` está en el home, al lado de `~/.claude`.
             system_marker: SystemMarkerRoot::UserHome,
+            // Cualquiera de estas hace que Claude Code use otra credencial (o Bedrock/Vertex)
+            // en vez de la suscripción logueada en CLAUDE_CONFIG_DIR, y cobre por API.
+            overriding_env: &[
+                "ANTHROPIC_API_KEY",
+                "ANTHROPIC_AUTH_TOKEN",
+                "ANTHROPIC_BASE_URL",
+                "CLAUDE_CODE_OAUTH_TOKEN",
+                "CLAUDE_CODE_USE_BEDROCK",
+                "CLAUDE_CODE_USE_VERTEX",
+            ],
         }),
         resume: Some("--resume {session}"),
         sessions: SessionSource::ClaudeProjects,
@@ -226,6 +240,9 @@ pub const AGENTS: &[AgentDef] = &[
             label_path: &[],
             default_home: DefaultHome::HomeDot(".codex"),
             system_marker: SystemMarkerRoot::DefaultDir,
+            // `codex exec` usa esta key antes que el login de CODEX_HOME. `OPENAI_API_KEY` no se
+            // toca: es la que suelen necesitar los tests del propio proyecto.
+            overriding_env: &["CODEX_API_KEY"],
         }),
         resume: Some("resume {session}"),
         sessions: SessionSource::CodexRollouts,
@@ -250,6 +267,8 @@ pub const AGENTS: &[AgentDef] = &[
             label_path: &[],
             default_home: DefaultHome::XdgDataHome,
             system_marker: SystemMarkerRoot::DefaultDir,
+            // OpenCode suma las keys del entorno como providers extra; no reemplazan el login.
+            overriding_env: &[],
         }),
         resume: Some("--session {session}"),
         sessions: SessionSource::ProcessQuery,
@@ -356,4 +375,29 @@ pub fn agent_registry() -> Vec<AgentRegistryEntry> {
             mcp: a.mcp,
         })
         .collect()
+}
+
+/// Las variables heredadas que hay que sacarle a un proceso que corre con este `env`: si
+/// `env` apunta el perfil de una TUI a una cuenta de la app, las que le ganarían a ese login
+/// (ver [`ProfileDef::overriding_env`]). Con la cuenta del sistema `env` no trae la variable
+/// del perfil y no se saca nada: ahí una API key en el entorno es lo que el usuario eligió.
+pub fn overriding_env<'a>(env: impl IntoIterator<Item = &'a String>) -> Vec<&'static str> {
+    let keys: Vec<&String> = env.into_iter().collect();
+    AGENTS
+        .iter()
+        .filter_map(|a| a.profile.as_ref())
+        .filter(|p| keys.iter().any(|k| k.as_str() == p.env_var))
+        .flat_map(|p| p.overriding_env.iter().copied())
+        .collect()
+}
+
+/// `env` sobre `command`, sacando antes lo que le ganaría a la cuenta (ver [`overriding_env`]).
+pub fn apply_account_env<'a>(
+    command: &mut std::process::Command,
+    env: impl IntoIterator<Item = (&'a String, &'a String)> + Clone,
+) {
+    for var in overriding_env(env.clone().into_iter().map(|(k, _)| k)) {
+        command.env_remove(var);
+    }
+    command.envs(env);
 }

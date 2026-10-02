@@ -1,15 +1,18 @@
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
+import { AlertaToast } from "neogestify-ui-components";
 import { useTabsStore } from "@/features/tabs/store";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useAgentsStore } from "@/features/agents/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
-import { runBrowserRequest, type BrowserRequest } from "@/features/browser/agentBridge";
+import { runBrowserRequest, runPortalRequest, type BrowserRequest } from "@/features/browser/agentBridge";
 import type { ViewOwner } from "@/features/tabs/viewTabs";
 import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
 import { respondToCli } from "./ipc";
+import { screenOf } from "@/features/terminal/terminalRegistry";
+import { boardKey, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
 
 /**
  * Lado frontend del puente de la CLI (ver `ipc/bridge.rs`).
@@ -87,7 +90,10 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
   // Ídem con `--pre`/`--pre-preset`: el backend ya resolvió los nombres de preset a ids y
   // falló si alguno no existía (ver `resolve_prelaunch_steps`).
   const prelaunch = Array.isArray(args.prelaunch) ? (args.prelaunch as PrelaunchStep[]) : [];
-  const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch });
+  // Un nombre propio (el que le da una orquestadora al sumar un agente) queda como título
+  // fijo: es el nombre con el que los demás agentes lo van a llamar.
+  const title = str(args, "title");
+  const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch, title, titleIsCustom: title ? true : undefined });
 
   // Mismo gate que el wizard del "+": las skills tienen que estar en disco antes de que
   // el proceso arranque. Se espera acá (y no solo se registra) para que la CLI no
@@ -198,6 +204,111 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
   return { text: answer };
 }
 
+/** Cambios al canvas pedidos por una orquestadora (`ccode peer connect/disconnect`). El
+ *  permiso ya lo verificó el backend; acá solo se aplica, en el canvas de esa carpeta. */
+function handleCanvas(args: Record<string, unknown>, apply: (key: string, a: string, b: string) => void) {
+  const cwd = str(args, "cwd");
+  const a = str(args, "a");
+  const b = str(args, "b");
+  if (!cwd || !a || !b) throw new Error("Faltan cwd, a o b");
+  apply(boardKey(cwd), a, b);
+  return { ok: true };
+}
+
+function handleRecruited(args: Record<string, unknown>) {
+  const cwd = str(args, "cwd");
+  const tabId = str(args, "tabId");
+  const near = str(args, "near");
+  if (!cwd || !tabId || !near) throw new Error("Faltan cwd, tabId o near");
+  canvasActions.recruited(boardKey(cwd), tabId, near, str(args, "role"));
+  return { ok: true };
+}
+
+/** El texto dibujado de una terminal, para `ccode peer ask/check` (ver `screenOf`). */
+function handleScreen(args: Record<string, unknown>) {
+  const tabId = str(args, "tabId");
+  if (!tabId) throw new Error("Falta tabId");
+  const from = typeof args.from === "number" ? args.from : null;
+  const max = typeof args.max === "number" ? args.max : 200;
+  const screen = screenOf(tabId, from, max);
+  if (!screen) throw new Error(`La tab ${tabId} no tiene una terminal abierta en esta ventana`);
+  return screen;
+}
+
+
+/**
+ * Un agente creando o escribiendo una nota (`ccode note …`). El permiso ya lo verificó el
+ * backend. Se guarda al instante: el agente puede leerla en su comando siguiente, y el
+ * backend lee del archivo.
+ */
+async function handleNote(args: Record<string, unknown>) {
+  const op = str(args, "op");
+  if (op === "create") {
+    const cwd = str(args, "cwd");
+    const near = str(args, "near");
+    if (!cwd || !near) throw new Error("Faltan cwd o near");
+    const key = boardKey(cwd);
+    const created = canvasActions.addNote(key, { name: str(args, "name"), content: str(args, "content") ?? "", near });
+    await flushSave(key);
+    return created;
+  }
+  if (op === "write") {
+    const key = str(args, "key");
+    const id = str(args, "id");
+    const content = str(args, "content");
+    if (!key || !id || content === undefined) throw new Error("Faltan key, id o content");
+    if (!useCanvasStore.getState().boards[key]?.notes[id]) throw new Error("A nota não existe mais.");
+    canvasActions.updateNote(key, id, { content });
+    await flushSave(key);
+    return { ok: true };
+  }
+  throw new Error(`Operación de nota desconocida: ${op}`);
+}
+/**
+ * Un agente creando un portal o manejándolo (`ccode portal …`). El permiso ya lo verificó
+ * el backend. `create` se guarda al instante: el comando siguiente busca el portal en el
+ * archivo.
+ */
+async function handlePortal(args: Record<string, unknown>) {
+  const op = str(args, "op");
+  if (op === "create") {
+    const cwd = str(args, "cwd");
+    const near = str(args, "near");
+    if (!cwd || !near) throw new Error("Faltan cwd o near");
+    const key = boardKey(cwd);
+    const created = canvasActions.addPortal(key, { name: str(args, "name"), url: str(args, "url"), near });
+    await flushSave(key);
+    return created;
+  }
+  if (op === "run") {
+    const cwd = str(args, "cwd");
+    const id = str(args, "id");
+    const request = args.request as BrowserRequest | undefined;
+    if (!cwd || !id || !request || typeof request.op !== "string") throw new Error("Faltan cwd, id o request");
+    return { text: await runPortalRequest(id, cwd, request, ownerOf(args)) };
+  }
+  throw new Error(`Operación de portal desconocida: ${op}`);
+}
+
+/**
+ * Un agente avisándole algo al usuario (`ccode notify`). Un aviso en pantalla que dice de
+ * quién es, y, si la ventana no tiene el foco, un pedido de atención al sistema (la barra
+ * de tareas parpadea, el Dock salta).
+ */
+async function handleNotify(args: Record<string, unknown>) {
+  const message = str(args, "message");
+  if (!message) throw new Error("Falta el mensaje");
+  const from = str(args, "from") ?? "Agente";
+  AlertaToast(from, message, "info", 10000);
+  try {
+    const win = getCurrentWindow();
+    if (!(await win.isFocused())) await win.requestUserAttention(UserAttentionType.Informational);
+  } catch {
+    /* sin el pedido de atención el aviso en pantalla igual salió */
+  }
+  return { ok: true };
+}
+
 async function handle(command: string, args: Record<string, unknown>): Promise<unknown> {
   switch (command) {
     case "tab.create": return handleCreateTab(args);
@@ -205,6 +316,13 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "tab.ptyId": return handlePtyId(args);
     case "browser.run": return handleBrowser(args);
     case "user.ask": return handleAsk(args);
+    case "tab.screen": return handleScreen(args);
+    case "canvas.connect": return handleCanvas(args, (key, a, b) => canvasActions.connect(key, a, b));
+    case "canvas.disconnect": return handleCanvas(args, (key, a, b) => canvasActions.disconnectPair(key, a, b));
+    case "canvas.recruited": return handleRecruited(args);
+    case "canvas.note": return handleNote(args);
+    case "canvas.portal": return handlePortal(args);
+    case "user.notify": return handleNotify(args);
     default: throw new Error(`El frontend no sabe atender '${command}'`);
   }
 }

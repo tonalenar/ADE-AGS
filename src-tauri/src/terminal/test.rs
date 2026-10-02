@@ -1,7 +1,7 @@
 //! Tests de la terminal: cómo se arma el lanzamiento y cómo se contiene el árbol de
 //! procesos de una tab.
 
-use super::pty_manager::{build_launch, launch_script};
+use super::pty_manager::{build_launch, launch_script, PARENT_SESSION_ENV};
 
 // ── Lanzamiento del agente ──────────────────────────────────────
 
@@ -395,4 +395,44 @@ fn el_comando_se_parte_respetando_las_comillas() {
     // Un argumento vacío explícito es un argumento, no la ausencia de uno.
     assert_eq!(split_command("agente --flag \"\""), vec!["agente", "--flag", ""]);
     assert!(split_command("   ").is_empty());
+}
+
+/// Un carácter partido entre dos lecturas del PTY sale entero, no como dos `�`.
+#[test]
+fn un_caracter_partido_entre_lecturas_sale_entero() {
+    use super::pty_manager::Utf8Stream;
+    let text = "ção ─ 🚀";
+    let bytes = text.as_bytes();
+    // Todas las formas de cortarlo en dos.
+    for cut in 0..=bytes.len() {
+        let mut stream = Utf8Stream::default();
+        let mut out = stream.push(&bytes[..cut]);
+        out.push_str(&stream.push(&bytes[cut..]));
+        out.push_str(&stream.finish());
+        assert_eq!(out, text, "cortado en {cut}");
+    }
+    // Byte a byte también.
+    let mut stream = Utf8Stream::default();
+    let out: String = bytes.iter().map(|b| stream.push(&[*b])).collect();
+    assert_eq!(out, text);
+
+    // Lo inválido de verdad sigue saliendo como `�`, sin quedarse esperando.
+    let mut stream = Utf8Stream::default();
+    assert_eq!(stream.push(b"a\xffb"), "a\u{fffd}b");
+    // Un comienzo de secuencia que nunca se completa sale al cerrar.
+    assert_eq!(stream.push(b"x\xe2\x94"), "x");
+    assert_eq!(stream.finish(), "\u{fffd}");
+}
+
+// ── Variables heredadas de una sesión de Claude Code ────────────
+
+#[test]
+fn las_marcas_de_sesion_padre_no_pasan_a_los_terminales() {
+    // Sin esto el Claude de adentro se cree sesión hija y no guarda transcript.
+    assert!(PARENT_SESSION_ENV.contains(&"CLAUDE_CODE_CHILD_SESSION"));
+    assert!(PARENT_SESSION_ENV.contains(&"CLAUDE_CODE_SESSION_ID"));
+    // La configuración del usuario NO es una marca de sesión: no se toca.
+    for keep in ["ANTHROPIC_MODEL", "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"] {
+        assert!(!PARENT_SESSION_ENV.contains(&keep), "{keep}");
+    }
 }

@@ -18,7 +18,9 @@ pub(super) fn run_approve(app: &AppHandle, args: &Value) -> Result<Value, String
     let timeout = args
         .get("timeout")
         .and_then(Value::as_u64)
-        .unwrap_or(crate::ipc::mcp::APPROVAL_TIMEOUT_SECS);
+        .unwrap_or(crate::ipc::mcp::APPROVAL_TIMEOUT_SECS)
+        // Un número enorme desbordaba `Instant::now() + timeout` en el broker y tumbaba el hilo.
+        .min(crate::ipc::mcp::APPROVAL_TIMEOUT_SECS);
 
     let db = app
         .try_state::<crate::database::DbConnection>()
