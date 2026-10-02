@@ -18,6 +18,7 @@ import { useSquadAccountLabel } from "@/features/squads/accountLabel";
 import type { Squad } from "@/features/squads/types";
 
 import { MissionDialog } from "./MissionDialog";
+import { MissionReviewPanel } from "./MissionReviewPanel";
 import {
   AGENT_STATES, agentStateOf, approvalsFor, blockedRuns, canEdit, countAgentStates, dependencyLabels, emptyForm,
   formFromMission, missionAction, missionPhase, progressOf, workersOf, type MissionPhase, type Progress,
@@ -441,6 +442,8 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError 
           </ul>
         </Section>
       )}
+
+      <MissionReviewPanel missionId={mission.id} refreshKey={tasks.map((task) => `${task.id}:${task.status}`).join("|")} />
 
       {workspaceId && <SharedMemoryPanel key={`${workspaceId}-${mission.id}`} workspaceId={workspaceId} missionId={mission.id} runs={runs} activeRunId={mission.activeRunId} />}
     </div>

@@ -185,6 +185,11 @@ pub fn run() {
             crate::missions::mission_get,
             crate::missions::mission_start,
             crate::missions::mission_cancel,
+            crate::missions::mission_review,
+            crate::missions::mission_task_diff,
+            crate::missions::mission_accept_task,
+            crate::missions::mission_reject_task,
+            crate::missions::mission_apply,
             // Local, approved Mission and Workspace memory plus immutable Run snapshots.
             crate::memory::memory_list,
             crate::memory::memory_get,

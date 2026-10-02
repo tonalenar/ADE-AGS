@@ -808,6 +808,22 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     if table_exists(conn, "tasks") && !has_column(conn, "tasks", "auto_account") {
         conn.execute("ALTER TABLE tasks ADD COLUMN auto_account INTEGER NOT NULL DEFAULT 1", [])?;
     }
+    // Revisión de lo que entregó una misión (ver `missions::review`): el veredicto de cada
+    // tarea (`accepted` | `rejected` | `conflict`, NULL = sin revisar) y la rama/carpeta de
+    // integración de la misión, más cuándo se aplicó al proyecto.
+    if table_exists(conn, "tasks") && !has_column(conn, "tasks", "review") {
+        conn.execute_batch(
+            "ALTER TABLE tasks ADD COLUMN review TEXT;
+             ALTER TABLE tasks ADD COLUMN review_note TEXT;",
+        )?;
+    }
+    if table_exists(conn, "missions") && !has_column(conn, "missions", "integration_branch") {
+        conn.execute_batch(
+            "ALTER TABLE missions ADD COLUMN integration_branch TEXT;
+             ALTER TABLE missions ADD COLUMN integration_path TEXT;
+             ALTER TABLE missions ADD COLUMN applied_at INTEGER;",
+        )?;
+    }
     // Un intento de tarea por fila, con la cuenta que lo corrió (ver `runs::ledger`). Sin FK a
     // `tasks`: borrar un run no borra lo que gastó.
     conn.execute_batch(
