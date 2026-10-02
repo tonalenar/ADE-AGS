@@ -220,7 +220,7 @@ function handleRecruited(args: Record<string, unknown>) {
   const tabId = str(args, "tabId");
   const near = str(args, "near");
   if (!cwd || !tabId || !near) throw new Error("Faltan cwd, tabId o near");
-  canvasActions.recruited(boardKey(cwd), tabId, near);
+  canvasActions.recruited(boardKey(cwd), tabId, near, str(args, "role"));
   return { ok: true };
 }
 

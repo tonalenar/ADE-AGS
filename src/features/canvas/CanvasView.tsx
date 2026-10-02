@@ -30,6 +30,7 @@ interface AgentNodeData extends Record<string, unknown> {
   live: boolean;
   links: number;
   orchestrator: boolean;
+  role?: string;
   onFocus: (tabId: string) => void;
   onToggleOrchestrator: (tabId: string) => void;
 }
@@ -165,6 +166,7 @@ function CanvasInner() {
         tab, box, live,
         links: neighbors(board, tab.id).length,
         orchestrator: board.orchestrators.includes(tab.id),
+        role: board.roles[tab.id],
         onFocus: focusNode,
         onToggleOrchestrator: (id: string) => key && canvasActions.toggleOrchestrator(key, id),
       },
@@ -324,7 +326,7 @@ function CanvasControls({ zoom, onFit, onReset, onAddNote, onAddPortal }: {
 
 const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const { t } = useTranslation();
-  const { tab, box, live, links, orchestrator, onFocus, onToggleOrchestrator } = data;
+  const { tab, box, live, links, orchestrator, role, onFocus, onToggleOrchestrator } = data;
   const Icon = agentIcon(tab.agentId, tab.agentId);
   const handle = "w-2.5! h-2.5! border-2! border-white! dark:border-surface-deep! bg-gray-400! dark:bg-gray-500!";
 
@@ -360,6 +362,12 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
         <Icon className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
         <span className="truncate text-[12.5px] font-medium text-gray-800 dark:text-gray-100">{tab.title}</span>
         <span className="truncate text-[11px] text-gray-400 dark:text-gray-500">{tab.agentLabel}</span>
+        {role && (
+          <span className="shrink-0 max-w-28 truncate text-[10px] font-semibold uppercase tracking-wider px-1.5 rounded
+            text-violet-700 dark:text-violet-300 bg-violet-500/12" title={t("canvas.role", { role })}>
+            {role}
+          </span>
+        )}
         {orchestrator && (
           <span className="shrink-0 text-[10px] font-semibold uppercase tracking-wider px-1.5 rounded
             text-amber-700 dark:text-glow bg-glow/15">

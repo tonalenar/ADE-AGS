@@ -117,9 +117,10 @@ export const canvasActions = {
   toggleOrchestrator: (key: string, tabId: string) => updateBoard(key, (board) => toggleOrchestrator(board, tabId)),
   /** Un agente que sumó una orquestadora: debajo de ella y conectado. Si la tab todavía no
    *  tiene nodo (la sincronización corre después), se le da uno primero. */
-  recruited: (key: string, tabId: string, near: string) => updateBoard(key, (board) => {
+  recruited: (key: string, tabId: string, near: string, role?: string | null) => updateBoard(key, (board) => {
     const withNode = tabId in board.nodes ? board : reconcile(board, [...Object.keys(board.nodes), tabId]);
-    return addEdge(placeBelow(withNode, tabId, near), near, tabId);
+    const placed = addEdge(placeBelow(withNode, tabId, near), near, tabId);
+    return role ? { ...placed, roles: { ...placed.roles, [tabId]: role } } : placed;
   }),
   setLiveRects: (liveRects: Record<string, Rect>) => {
     const prev = useCanvasStore.getState().liveRects;
@@ -201,7 +202,7 @@ export function initCanvasSync(label: string): () => void {
       const mine = Object.fromEntries(
         Object.entries(saved ?? {})
           .filter(([k]) => k.startsWith(`${label}|`))
-          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {} }]),
+          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, roles: b?.roles ?? {} }]),
       );
       useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards } });
       unsub = useTabsStore.subscribe(syncBoards);

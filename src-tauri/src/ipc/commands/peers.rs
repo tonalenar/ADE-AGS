@@ -211,6 +211,13 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         return Err(format!("Já existe um agente chamado '{name}' nesta pasta. Escolha outro nome."));
     }
 
+    // El papel se resuelve ANTES de abrir la tab: un papel mal escrito no puede dejar un
+    // agente abierto sin su papel.
+    let role = match arg_str_opt(args, "role").filter(|r| !r.trim().is_empty()) {
+        Some(wanted) => Some(crate::canvas::roles::resolve(&crate::canvas::roles::all(), &wanted)?.clone()),
+        None => None,
+    };
+
     let mut create = json!({ "cwd": me.cwd, "agent": agent, "title": name, "window": me.window });
     if let Some(account) = arg_str_opt(args, "account") {
         create["account"] = json!(account);
@@ -218,17 +225,39 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let created = tab_create(app, &create)?;
     let tab_id = created.get("tabId").and_then(Value::as_str).ok_or("A aba foi criada sem id")?.to_string();
 
-    canvas_change(app, &me, "canvas.recruited", json!({ "cwd": me.cwd, "tabId": tab_id, "near": me.id }))?;
+    let label = role.as_ref().map(|r| r.label.clone());
+    canvas_change(app, &me, "canvas.recruited", json!({ "cwd": me.cwd, "tabId": tab_id, "near": me.id, "role": label }))?;
 
     let mut out = json!({ "recruited": { "id": tab_id, "name": name, "agent": agent, "cwd": me.cwd } });
-    if let Some(prompt) = arg_str_opt(args, "prompt").filter(|p| !p.trim().is_empty()) {
+    let prompt = arg_str_opt(args, "prompt").filter(|p| !p.trim().is_empty());
+    // Con papel, el agente siempre recibe un primer mensaje: sin tarea, espera la primera.
+    if let Some(text) = first_message(role.as_ref(), prompt.as_deref(), &me.name) {
+        out["role"] = json!(role.as_ref().map(|r| r.id.clone()));
         let pty = wait_for_pty(app, &tab_id, Some(&me.window))?;
         let ready = wait_until_ready(pty);
-        submit_prompt(pty, &framed(&me.name, &prompt, false))?;
+        submit_prompt(pty, &framed(&me.name, &text, false))?;
         out["promptSent"] = json!(true);
         out["promptWaitedForReady"] = json!(ready);
     }
     Ok(out)
+}
+
+/// Lo primero que lee un agente recién sumado: su papel (si lo tiene) y su tarea. `None` si no
+/// hay ni una cosa ni la otra.
+pub(crate) fn first_message(
+    role: Option<&crate::canvas::roles::Role>,
+    prompt: Option<&str>,
+    orchestrator: &str,
+) -> Option<String> {
+    match (role, prompt) {
+        (None, None) => None,
+        (None, Some(task)) => Some(task.to_string()),
+        (Some(r), Some(task)) => Some(format!("{}\n\nPrimeira tarefa: {task}", crate::canvas::roles::briefing(r))),
+        (Some(r), None) => Some(format!(
+            "{}\n\nAinda não há tarefa: aguarde a primeira de {orchestrator}.",
+            crate::canvas::roles::briefing(r)
+        )),
+    }
 }
 
 /// Lo que se ve en la terminal de una tab, leído del buffer de xterm (texto ya dibujado,
@@ -440,6 +469,17 @@ mod test {
         let peers = vec![tab("t1", "Claude Code"), tab("t2", "Claude Code")];
         let err = resolve_peer(&peers, "claude code").unwrap_err();
         assert!(err.contains("t1") && err.contains("t2"), "{err}");
+    }
+
+    #[test]
+    fn el_primer_mensaje_junta_papel_y_tarea() {
+        let role = crate::canvas::roles::Role { id: "qa".into(), label: "QA".into(), instructions: "Teste.".into(), builtin: true };
+        assert_eq!(first_message(None, None, "Líder"), None);
+        assert_eq!(first_message(None, Some("faça x"), "Líder").unwrap(), "faça x");
+        let both = first_message(Some(&role), Some("rode os testes"), "Líder").unwrap();
+        assert!(both.starts_with("Seu papel neste time: QA") && both.ends_with("Primeira tarefa: rode os testes"), "{both}");
+        let only_role = first_message(Some(&role), None, "Líder").unwrap();
+        assert!(only_role.contains("aguarde a primeira de Líder"), "{only_role}");
     }
 
     #[test]

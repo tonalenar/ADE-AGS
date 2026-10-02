@@ -18,6 +18,8 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod roles;
+
 #[cfg(test)]
 mod test;
 
@@ -51,6 +53,10 @@ pub struct Board {
     /// que las notas.
     #[serde(default)]
     pub portals: BTreeMap<String, Portal>,
+    /// El papel con que se recrutó cada tab (id de tab → nombre del papel), para mostrarlo
+    /// en su nodo. Es solo una etiqueta: no da ni quita permisos.
+    #[serde(default)]
+    pub roles: BTreeMap<String, String>,
 }
 
 /// Un portal: un navegador dentro del canvas que los agentes conectados manejan con

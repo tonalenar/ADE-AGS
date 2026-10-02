@@ -44,6 +44,9 @@ export interface Board {
   notes: Record<string, CanvasNote>;
   /** Los portales, por id (`portal-…`). Como las notas, no dependen de ninguna tab. */
   portals: Record<string, CanvasPortal>;
+  /** El papel con que se recrutó cada agente (id de tab → nombre del papel). Solo una
+   *  etiqueta para el nodo: no da ni quita permisos. */
+  roles: Record<string, string>;
   edges: CanvasEdge[];
   viewport: Viewport;
   /** Las orquestadoras: alcanzan a todo su equipo y pueden sumar agentes y conectarlos. */
@@ -51,7 +54,7 @@ export interface Board {
 }
 
 export function emptyBoard(): Board {
-  return { nodes: {}, notes: {}, portals: {}, edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
+  return { nodes: {}, notes: {}, portals: {}, roles: {}, edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
 }
 
 /**
@@ -69,10 +72,16 @@ export function reconcile(board: Board, tabIds: string[]): Board {
   const alive = (id: string) => open.has(id) || id in board.notes || id in board.portals;
   const edges = board.edges.filter((e) => alive(e.a) && alive(e.b));
   const orchestrators = board.orchestrators.filter((id) => open.has(id));
+  // El papel de una tab cerrada se va con ella.
+  const roleIds = Object.keys(board.roles);
+  const roles = roleIds.every((id) => open.has(id))
+    ? board.roles
+    : Object.fromEntries(Object.entries(board.roles).filter(([id]) => open.has(id)));
 
   if (
     missing.length === 0 && kept.length === Object.keys(board.nodes).length &&
-    edges.length === board.edges.length && orchestrators.length === board.orchestrators.length
+    edges.length === board.edges.length && orchestrators.length === board.orchestrators.length &&
+    roles === board.roles
   ) {
     return board;
   }
@@ -80,7 +89,7 @@ export function reconcile(board: Board, tabIds: string[]): Board {
   const nodes: Record<string, Box> = Object.fromEntries(kept);
   const noteBoxes = [...Object.values(board.notes), ...Object.values(board.portals)].map((n) => n.box);
   for (const id of missing) nodes[id] = nextFreeBox([...Object.values(nodes), ...noteBoxes]);
-  return { ...board, nodes, edges, orchestrators };
+  return { ...board, nodes, edges, orchestrators, roles };
 }
 
 /** Conecta dos terminales. Una consigo misma o una conexión repetida no hacen nada. */

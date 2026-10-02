@@ -55,6 +55,7 @@ AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
   Solo orquestadores (corona en el canvas):
   peer recruit <nombre> --agent <id>          Abre un agente nuevo, ya conectado
               [--prompt \"...\"] [--account <n>]  · con su primera tarea
+              [--role <papel>]                  · con un papel (ver roles)
   peer connect <a> <b>                        Conecta dos agentes del equipo
   peer disconnect <a> <b>                     Los desconecta
 
@@ -68,6 +69,12 @@ PORTALES DEL CANVAS — navegadores conectados con esta terminal (orquestador: l
   portal press <portal> <tecla> [--target <ref>]   · scroll · select · wait · history
   portal screenshot|console|layout <portal>   Foto, consola y medidas
                                               (sin eval, upload ni cookies: eso es del usuario)
+
+PAPELES (para recrutar con --role)
+  roles                                       Los papeles: catálogo + los del usuario
+  role show <papel>                           Sus instrucciones
+  role create <nombre> \"instrucciones\"        Solo orquestadores; también --file <ruta>
+  role edit <papel> \"instrucciones\" [--name]  Solo orquestadores; el catálogo no se edita
 
 NOTAS DEL CANVAS — las conectadas con esta terminal (orquestador: las del equipo)
   notes                                       Las notas que alcanzás
@@ -267,9 +274,9 @@ impl CliError {
     }
 }
 
-/// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*` y `notify.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
+/// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*` y `role.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    if !(command.starts_with("peer.") || command.starts_with("note.") || command.starts_with("portal.") || command.starts_with("notify.")) || parsed.get("from").is_some() {
+    if !(command.starts_with("peer.") || command.starts_with("note.") || command.starts_with("portal.") || command.starts_with("notify.") || command.starts_with("role.")) || parsed.get("from").is_some() {
         return parsed;
     }
     if let (Ok(tab), Some(map)) = (std::env::var("ADE_TAB_ID"), parsed.as_object_mut()) {
@@ -290,6 +297,7 @@ fn shortcut(word: &str) -> Option<&'static str> {
         "portals" => Some("portal.list"),
         // `ccode notify "terminé"`: avisar es lo único que se hace con eso.
         "notify" => Some("notify.send"),
+        "roles" => Some("role.list"),
         _ => None,
     }
 }
@@ -319,6 +327,10 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "peer.connect" | "peer.disconnect" => &["a", "b"],
         // `ccode note read Plano 10 20`: desde la línea 10, 20 líneas.
         "notify.send" => &["message"],
+        // `ccode role create "Revisor" "Procure falhas..."`; el texto también va con --file.
+        "role.show" => &["role"],
+        "role.create" => &["name", "content"],
+        "role.edit" => &["role", "content"],
         "note.create" => &["content"],
         "note.read" => &["name", "start", "count"],
         "note.write" => &["name", "content"],

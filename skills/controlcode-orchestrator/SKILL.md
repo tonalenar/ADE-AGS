@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.11.0
+version: 1.12.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -404,6 +404,14 @@ ccode peer disconnect Backend Tests
   canvas and already connected to you. `--prompt` is its first task; it arrives after the
   connection exists, so the recruit can answer you with `ccode peer tell`. `--agent` takes
   the ids from `ccode agents`; `--account` picks one of that agent's accounts.
+- **`--role`** gives the recruit a role: `ccode peer recruit Sec --agent claude --role reviewer`.
+  It reads the role's instructions before its first task (`--prompt`; with none, it waits
+  for yours) and its node shows the role's name. `ccode roles` lists them: the catalog
+  (backend, frontend, qa, reviewer, researcher, devops, integrator, generalist — the same
+  ones missions use) plus the user's own. `ccode role show <role>` prints the instructions.
+  You can add one for this team: `ccode role create "Security reviewer" "Look for auth and
+  injection flaws; do not edit code"` (or `--file`); `ccode role edit` changes only your own,
+  never the catalog. Prefer an existing role over creating a near-duplicate.
 - **`connect` / `disconnect`** work on your team and on the other agents open in your
   folder (that's how you bring in an agent the user already had open).
 - Run `ccode peers` before recruiting: don't open a second agent for a role someone on the

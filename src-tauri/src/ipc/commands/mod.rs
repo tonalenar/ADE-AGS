@@ -6,6 +6,7 @@ mod ask;
 mod notes;
 mod notify;
 mod peers;
+mod role;
 mod portals;
 mod browser;
 mod dispatch;

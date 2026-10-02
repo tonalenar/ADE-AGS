@@ -92,3 +92,29 @@ describe("removeEdgeBetween", () => {
     expect(removeEdgeBetween(b, "b", "a").edges).toEqual([]);
   });
 });
+
+describe("papeles", () => {
+  it("un agente recrutado con papel lo lleva en el canvas", async () => {
+    const { canvasActions, useCanvasStore } = await import("../store");
+    const key = "main|/p";
+    useCanvasStore.setState({ boards: { [key]: reconcile(emptyBoard(), ["lead", "w1"]) } });
+    canvasActions.recruited(key, "w1", "lead", "Reviewer");
+    expect(useCanvasStore.getState().boards[key].roles).toEqual({ w1: "Reviewer" });
+    expect(useCanvasStore.getState().boards[key].edges).toHaveLength(1);
+  });
+
+  it("sin papel no se anota nada", async () => {
+    const { canvasActions, useCanvasStore } = await import("../store");
+    const key = "main|/q";
+    useCanvasStore.setState({ boards: { [key]: reconcile(emptyBoard(), ["lead", "w1"]) } });
+    canvasActions.recruited(key, "w1", "lead", null);
+    expect(useCanvasStore.getState().boards[key].roles).toEqual({});
+  });
+
+  it("el papel de una tab cerrada se va con ella, y sin cambios devuelve el mismo objeto", () => {
+    let b = reconcile(emptyBoard(), ["t1", "t2"]);
+    b = { ...b, roles: { t1: "QA", t2: "Reviewer" } };
+    expect(reconcile(b, ["t1", "t2"])).toBe(b);
+    expect(reconcile(b, ["t1"]).roles).toEqual({ t1: "QA" });
+  });
+});

@@ -1682,5 +1682,6 @@
   "canvas.portalDefaultName": "Portal",
   "canvas.portalName": "Portal name",
   "canvas.portalDelete": "Delete portal",
-  "canvas.portalDeleteConfirm": "Delete?"
+  "canvas.portalDeleteConfirm": "Delete?",
+  "canvas.role": "Role: {{role}}"
 }

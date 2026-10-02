@@ -18,6 +18,7 @@ use super::ask::user_ask;
 use super::notify::notify_send;
 use super::notes::{note_create, note_edit, note_list, note_read, note_write};
 use super::portals::{portal_action, portal_create, portal_list};
+use super::role::{role_create, role_edit, role_list, role_show};
 use super::peers::{peer_ask, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_tell};
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
@@ -68,6 +69,11 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "portal.layout" => portal_action(app, args, "layout"),
         // Avisar al usuario (ver `notify`).
         "notify.send" => notify_send(app, args),
+        // Papeles para recrutar (ver `role`).
+        "role.list" => role_list(app, args),
+        "role.show" => role_show(app, args),
+        "role.create" => role_create(app, args),
+        "role.edit" => role_edit(app, args),
         "agent.list" => agent_list(app),
         "account.list" => account_list(app),
         "prelaunch.list" => prelaunch_list(app),
