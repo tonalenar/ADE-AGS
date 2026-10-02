@@ -15,6 +15,13 @@ interface ViewTabsState {
   /** Tabs que se montan aunque nadie las haya mirado: un navegador que maneja un agente
    *  tiene que tener su página cargada aunque el usuario siga en la terminal. */
   keepMountedIds: string[];
+  /** Los navegadores que viven como nodo del canvas (portales). Van aparte de `views`: no
+   *  son tabs, así que no aparecen en la barra, ni en el layout, ni se persisten acá (los
+   *  guarda el canvas). Usan el mismo `BrowserTab`, que los maneja por su id. */
+  portalViews: BrowserView[];
+  /** Crea la vista de un portal si todavía no existe. */
+  ensurePortalView: (id: string, cwd: string, url: string) => void;
+  dropPortalView: (id: string) => void;
 
   openFile: (cwd: string, path: string, reveal?: { line: number; column: number }) => void;
   /** Con `commit`, el diff de ese commit contra su padre. */
@@ -40,6 +47,13 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
   views: [],
   activeViewId: null,
   keepMountedIds: [],
+  portalViews: [],
+
+  ensurePortalView: (id, cwd, url) =>
+    set((s) => (s.portalViews.some((v) => v.id === id)
+      ? s
+      : { portalViews: [...s.portalViews, { kind: "browser", id, cwd, url, title: "" }] })),
+  dropPortalView: (id) => set((s) => ({ portalViews: s.portalViews.filter((v) => v.id !== id) })),
 
   openFile: (cwd, path, reveal) => {
     const wanted = { kind: "file", cwd, path } as const;
@@ -101,7 +115,12 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
     })),
 
   updateView: (id, patch) =>
-    set((s) => ({ views: s.views.map((v) => (v.id === id ? ({ ...v, ...patch } as ViewTab) : v)) })),
+    set((s) => ({
+      views: s.views.map((v) => (v.id === id ? ({ ...v, ...patch } as ViewTab) : v)),
+      portalViews: s.portalViews.some((v) => v.id === id)
+        ? s.portalViews.map((v) => (v.id === id ? ({ ...v, ...patch } as BrowserView) : v))
+        : s.portalViews,
+    })),
 
   retargetPath: (from, to) =>
     set((s) => ({

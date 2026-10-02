@@ -30,6 +30,7 @@ import { hasBrowserMcp, withBrowserMcp } from "@/features/browser/tabMcp";
 import { homeDir } from "@/shared/ipc/window";
 import { ptyAttach, ptyCreate, ptyKill, ptyResize, ptyWrite } from "./ipc";
 import { createFitter } from "./fit";
+import { forgetTab, markInput, markOutput } from "./activity";
 import { StatusBadge, type TerminalStatus } from "./StatusBadge";
 import { LOOKBACK_S, startSessionDiscovery } from "./sessionDiscovery";
 import { MARK_LINE, MIN_CONTRAST, TERMINAL_FONT, TERMINAL_THEMES, terminalFontSize } from "./theme";
@@ -192,6 +193,20 @@ export function Terminal({
       // escala en vez de invadir la celda siguiente. Sin esto, una barra de progreso o un
       // prompt con iconos corre todo lo que tiene a la derecha.
       rescaleOverlappingGlyphs: true,
+      // Los links OSC 8 (texto con un link escondido detrás) que imprime un agente. Sin
+      // esto xterm usa su manejador por defecto: un `confirm` y `window.open` dentro del
+      // webview de la app. Van por el mismo camino que los links de texto (ver
+      // `WebLinksAddon` más abajo): solo http(s), localhost a una tab, el resto al
+      // navegador del sistema. Cualquier otro esquema (`file:`, `javascript:`) no se abre.
+      linkHandler: {
+        allowNonHttpProtocols: false,
+        activate: (event, uri) => {
+          event.preventDefault();
+          if (!/^https?:\/\//i.test(uri)) return;
+          if (cwd && isLocalUrl(uri)) useViewTabsStore.getState().openBrowser(cwd, uri);
+          else openUrl(uri).catch(console.error);
+        },
+      },
       vtExtensions: {
         // Protocolo de teclado de Kitty: la TUI lo pide si lo quiere, y con él distingue
         // lo que la codificación vieja confunde — Shift+Enter de Enter, Ctrl+I de Tab,
@@ -293,6 +308,7 @@ export function Terminal({
         `pty-data-${ptyId}`,
         (event) => {
           term.write(event.payload.data);
+          markOutput(tabId, agentId);
         }
       );
 
@@ -430,7 +446,10 @@ export function Terminal({
               : undefined,
             browser.env,
             accountEnv,
-            env
+            env,
+            // Quién es esta terminal. `ccode peer ...` lo reenvía como `from`, y es contra
+            // eso que el backend compara las conexiones del canvas.
+            tabId ? { ADE_TAB_ID: tabId } : undefined
           ),
           prelaunch: resolvedPrelaunch,
         });
@@ -450,6 +469,7 @@ export function Terminal({
 
     // ── 5. Input del usuario → PTY ───────────────────────────
     term.onData((data) => {
+      markInput(tabId);
       if (ptyIdRef.current !== null) {
         ptyWrite(ptyIdRef.current, data).catch(console.error);
       }
@@ -524,6 +544,7 @@ export function Terminal({
       disposeScrollbar();
       disposeRail();
       unlistenData?.();
+      forgetTab(tabId);
       unlistenExit?.();
       if (ptyIdRef.current !== null) {
         // Antes había un guardia acá para no matar un PTY que estaba viajando a otra

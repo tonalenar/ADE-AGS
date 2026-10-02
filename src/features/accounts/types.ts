@@ -39,3 +39,48 @@ export interface AccountCapableAgent {
   envVar: string;
   installed: boolean;
 }
+
+/** Ver `runs::quota::QuotaWindow`: utilización de 0 a 1 (puede pasarse con excedente). */
+export interface QuotaWindow {
+  utilization: number;
+  resetsAt: number | null;
+}
+
+/** Ver `accounts::health::CodexUsage`. */
+export interface CodexUsage {
+  email: string | null;
+  plan: string | null;
+  /** `chatgpt` o `apiKey`: con API key no hay ventanas de límite. */
+  auth: string | null;
+  quota: {
+    fiveHour: QuotaWindow | null;
+    sevenDay: QuotaWindow | null;
+    rejected: boolean;
+    rejectedUntil: number | null;
+    overage: boolean;
+  } | null;
+  fetchedAt: number;
+}
+
+/** Ver `runs::ledger::AccountLimits`. `null` = sin límite. */
+export interface AccountLimits {
+  maxConcurrent: number | null;
+  dailyBudgetUsd: number | null;
+}
+
+/** Ver `runs::ledger::AccountUsage`: lo que usó una cuenta en el período pedido. */
+export interface AccountUsageSummary {
+  /** El id de la cuenta, o `system:<agente>` para la del sistema. */
+  accountKey: string;
+  agentId: string;
+  attempts: number;
+  failed: number;
+  tokensIn: number;
+  tokensOut: number;
+  /** `null` = ningún intento reportó costo (Codex): no es cero. */
+  costUsd: number | null;
+  lastAt: number | null;
+  limits: AccountLimits;
+  running: number;
+  spent24h: number;
+}

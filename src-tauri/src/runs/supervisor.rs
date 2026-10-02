@@ -39,7 +39,12 @@ pub const APPROVALS_CHANGED: &str = "cc-task-approvals";
 /// Avisa que la cola de permisos cambió. Se manda el estado entero y no el delta porque
 /// son unos pocos pedidos y así una ventana que se perdió un evento se recupera sola.
 pub fn notify_approvals(app: &AppHandle) {
-    let _ = app.emit(APPROVALS_CHANGED, super::broker::pending());
+    let pending = super::broker::pending();
+    crate::bus::publish(
+        Some(app),
+        crate::bus::Publish::new("approvals.changed").data(serde_json::json!({ "pending": pending.len() })),
+    );
+    let _ = app.emit(APPROVALS_CHANGED, pending);
 }
 
 /// Nombre del grupo de contención. No se cruza con los ids de PTY porque va por otro
@@ -76,6 +81,9 @@ struct TaskEventPayload {
 }
 
 fn emit_event(app: &AppHandle, task_id: &str, event: AgentEvent) {
+    if let Some(data) = activity_data(&event) {
+        crate::bus::publish(Some(app), crate::bus::Publish::new("task.activity").task(task_id).data(data));
+    }
     let _ = app.emit(
         TASK_EVENT,
         TaskEventPayload {
@@ -85,7 +93,25 @@ fn emit_event(app: &AppHandle, task_id: &str, event: AgentEvent) {
     );
 }
 
+/// Lo que va al bus de la actividad de una tarea: qué herramienta usa, qué dijo (corto), si
+/// arrancó o terminó. El texto entero ya va por `cc-task-event` y al NDJSON de la tarea;
+/// el bus guarda historia y no tiene por qué cargar párrafos.
+fn activity_data(event: &AgentEvent) -> Option<serde_json::Value> {
+    use serde_json::json;
+    Some(match event {
+        AgentEvent::Started { .. } => json!({ "kind": "started" }),
+        AgentEvent::Tool { label, .. } => json!({ "kind": "tool", "label": label }),
+        AgentEvent::Text { text } => {
+            let short: String = text.chars().take(200).collect();
+            json!({ "kind": "text", "text": short })
+        }
+        AgentEvent::Finished { outcome } => json!({ "kind": "finished", "ok": outcome.ok }),
+        AgentEvent::Quota { .. } => return None,
+    })
+}
+
 fn emit_changed(app: &AppHandle, task_id: &str) {
+    crate::bus::publish(Some(app), crate::bus::Publish::new("task.changed").task(task_id));
     let _ = app.emit(TASK_CHANGED, task_id.to_string());
 }
 
@@ -215,13 +241,22 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     // prompt no puede pasar por `cmd.exe` (ver `util::launch`).
     let program = crate::util::find_program(&launch.program)
         .unwrap_or_else(|| std::path::PathBuf::from(&launch.program));
-    let mut command = crate::util::external_command(&program, &launch.args)
+    let workspace = task_profile.as_ref().map_or_else(|| PathBuf::from(&task.cwd), |p| p.workspace());
+    // Ver `sandbox`: el agente escribe solo en su carpeta, su cuenta y los temporales.
+    let sandbox_mode = super::sandbox::Mode::from_db(&db);
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
+    let policy = super::sandbox::Policy::for_task(&workspace, read_only, &launch.env, home.as_deref());
+    let wrapped = super::sandbox::wrap(sandbox_mode, &program, &launch.args, &policy)?;
+    let mut command = crate::util::external_command(&wrapped.program, &wrapped.args)
         .map_err(|e| format!("no se pudo lanzar '{}': {e}", launch.program))?;
+    if sandbox_mode != super::sandbox::Mode::Off {
+        super::sandbox::scrub_env(&mut command);
+    }
     // Con una cuenta de la app, una API key heredada no le gana a su login.
     crate::agents::apply_account_env(&mut command, &launch.env);
     let mut command = tokio::process::Command::from(command);
     command
-        .current_dir(task_profile.as_ref().map_or_else(|| PathBuf::from(&task.cwd), |p| p.workspace()))
+        .current_dir(&workspace)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -251,6 +286,9 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let app = app.clone();
     let task_id = task.id.clone();
     let quota_key = super::quota::account_key(&task.agent_id, task.account_id.as_deref());
+    // Codex no informa su cupo en el stream de `exec --json` (Claude sí, ver `quota`): al
+    // terminar se le pregunta a su `app-server`, con el mismo entorno de la cuenta.
+    let codex_account_env = (task.agent_id == "codex").then(|| launch.env.clone());
     let imposed_session = session_id.clone();
 
     tokio::spawn(async move {
@@ -261,14 +299,31 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         let stderr_reader = tokio::spawn(async move {
             match stderr {
                 Some(mut reader) => {
-                    let mut bytes = Vec::new();
-                    let _ = tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut bytes).await;
-                    String::from_utf8_lossy(&bytes).trim().to_string()
+                    // Solo la cola: es lo que va al error de la tarea (ver `tail`), y un
+                    // agente que vuelca logs sin parar a stderr no puede llenar la memoria.
+                    const KEEP: usize = 64 * 1024;
+                    let mut kept: Vec<u8> = Vec::new();
+                    let mut chunk = vec![0u8; 16 * 1024];
+                    while let Ok(n) = tokio::io::AsyncReadExt::read(&mut reader, &mut chunk).await {
+                        if n == 0 {
+                            break;
+                        }
+                        kept.extend_from_slice(&chunk[..n]);
+                        if kept.len() > KEEP * 2 {
+                            kept.drain(..kept.len() - KEEP);
+                        }
+                    }
+                    let start = kept.len().saturating_sub(KEEP);
+                    String::from_utf8_lossy(&kept[start..]).trim().to_string()
                 }
                 None => String::new(),
             }
         });
-        let mut file = tokio::fs::File::create(&events_path).await.ok();
+        // Con buffer: sin él cada línea del agente eran dos escrituras al disco (y dos
+        // viajes al pool de bloqueo de tokio). Se vacía cada tanto, para que quien lea el
+        // crudo mientras corre vea casi lo último, y siempre al terminar.
+        let mut file = tokio::fs::File::create(&events_path).await.ok().map(tokio::io::BufWriter::new);
+        let mut unflushed = 0usize;
         let mut emitted: Option<TaskOutcome> = None;
 
         if let Some(out) = stdout {
@@ -277,6 +332,11 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
                 if let Some(f) = file.as_mut() {
                     let _ = f.write_all(line.as_bytes()).await;
                     let _ = f.write_all(b"\n").await;
+                    unflushed += 1;
+                    if unflushed >= 64 {
+                        let _ = f.flush().await;
+                        unflushed = 0;
+                    }
                 }
                 for event in adapter.parse_line(&line) {
                     match event {
@@ -305,6 +365,9 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
             }
         }
 
+        if let Some(f) = file.as_mut() {
+            let _ = f.flush().await;
+        }
         let stderr_text = stderr_reader.await.unwrap_or_default();
 
         let code = child.wait().await.ok().and_then(|s| s.code()).unwrap_or(-1);
@@ -328,6 +391,13 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         }
         emit_event(&app, &task_id, AgentEvent::Finished { outcome });
         emit_changed(&app, &task_id);
+
+        if let Some(env) = codex_account_env {
+            let (db, key) = (db.clone(), quota_key.clone());
+            // Aparte y sin esperarlo: levantar el `app-server` tarda un segundo, y el cupo no
+            // cambia el resultado de esta tarea, solo cómo se rutean las próximas.
+            tokio::task::spawn_blocking(move || crate::accounts::refresh_codex_account(&db, &key, &env));
+        }
         // Lo que dependía de esta tarea puede arrancar (o no va a poder nunca).
         super::scheduler::on_task_finished(&app, &task_id);
     });

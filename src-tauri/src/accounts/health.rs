@@ -59,6 +59,89 @@ impl AccountHealth {
     }
 }
 
+/// Quién es la cuenta, como lo dijo su CLI la última vez que se le preguntó. Se guarda para
+/// la lista de cuentas: Codex no deja el mail en ningún archivo que no sea el de credenciales,
+/// y preguntárselo al `app-server` en cada render costaría un proceso por cuenta.
+#[derive(Serialize, serde::Deserialize, Debug, Clone, Default, PartialEq)]
+#[serde(rename_all = "camelCase", default)]
+pub struct AccountIdentity {
+    pub email: Option<String>,
+    pub plan: Option<String>,
+}
+
+fn identity_key(account_key: &str) -> String {
+    format!("accounts.identity.{account_key}")
+}
+
+pub(crate) fn record_identity(db: &DbConnection, account_key: &str, identity: &AccountIdentity) {
+    if let Ok(raw) = serde_json::to_string(identity) {
+        let _ = crate::database::set_setting(db, &identity_key(account_key), &raw);
+    }
+}
+
+/// La identidad guardada de una cuenta, sobre una conexión ya tomada.
+pub fn load_identity(conn: &rusqlite::Connection, account_key: &str) -> Option<AccountIdentity> {
+    let raw: String = conn
+        .query_row("SELECT value FROM settings WHERE key = ?1", [identity_key(account_key)], |r| r.get(0))
+        .ok()?;
+    serde_json::from_str(&raw).ok()
+}
+
+/// Le pregunta al `app-server` de Codex quién es la cuenta y cuánto cupo le queda, y lo
+/// guarda: el cupo donde lo leen el ruteo y el scheduler (`runs::quota`), la identidad para
+/// la lista. `account_key` como en `quota::account_key`. Nada de esto gasta cupo.
+pub fn refresh_codex_account(
+    db: &DbConnection,
+    account_key: &str,
+    env: &HashMap<String, String>,
+) -> Option<crate::runs::model_discovery::CodexAccount> {
+    let program = crate::agents::agent_command("codex")?;
+    let account = crate::runs::model_discovery::codex_account(program, env).ok()?;
+    let now = crate::util::now_ts();
+    if let Some(quota) = &account.quota {
+        crate::runs::quota::record(db, account_key, quota.clone(), now);
+    }
+    if account.email.is_some() || account.plan.is_some() {
+        record_identity(db, account_key, &AccountIdentity { email: account.email.clone(), plan: account.plan.clone() });
+    }
+    Some(account)
+}
+
+/// Lo que el panel de consumo muestra de una cuenta de Codex.
+#[derive(Serialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CodexUsage {
+    pub email: Option<String>,
+    pub plan: Option<String>,
+    /// `chatgpt` o `apiKey`. Con API key no hay ventanas de límite: se cobra por uso.
+    pub auth: Option<String>,
+    pub quota: Option<crate::runs::quota::Quota>,
+    pub fetched_at: i64,
+}
+
+/// El cupo de una cuenta de Codex, preguntado en el momento (y guardado para el ruteo).
+#[tauri::command]
+pub async fn codex_account_usage(account_id: String, db: tauri::State<'_, DbConnection>) -> Result<CodexUsage, String> {
+    let db = (*db).clone();
+    tokio::task::spawn_blocking(move || {
+        let env = if account_id.starts_with("system:") {
+            HashMap::new()
+        } else {
+            super::env_for_account(&db, &account_id).ok_or("Cuenta no encontrada")?
+        };
+        let account = refresh_codex_account(&db, &account_id, &env).ok_or("No se pudo consultar a Codex")?;
+        Ok(CodexUsage {
+            email: account.email,
+            plan: account.plan,
+            auth: account.auth,
+            quota: account.quota,
+            fetched_at: crate::util::now_ts(),
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Verifica una cuenta: una creada en la app (su id) o la del sistema (`system:<agente>`).
 #[tauri::command]
 pub async fn account_health(account_id: String, db: tauri::State<'_, DbConnection>) -> Result<AccountHealth, String> {
@@ -72,7 +155,7 @@ fn check(db: &DbConnection, account_id: &str) -> AccountHealth {
     // La del sistema corre con el entorno de la app tal cual: es lo que reciben las tabs que
     // no eligen cuenta, así que es lo que hay que verificar.
     if let Some(agent_id) = account_id.strip_prefix("system:") {
-        return check_cli(agent_id, &HashMap::new());
+        return enrich(db, account_id, agent_id, &HashMap::new(), check_cli(agent_id, &HashMap::new()));
     }
     let row: Option<(String, String, Option<String>)> = db.lock().ok().and_then(|conn| {
         conn.query_row(
@@ -92,9 +175,43 @@ fn check(db: &DbConnection, account_id: &str) -> AccountHealth {
         };
     }
     match super::env_for_account(db, account_id) {
-        Some(env) => check_cli(&agent_id, &env),
+        Some(env) => {
+            let health = check_cli(&agent_id, &env);
+            enrich(db, account_id, &agent_id, &env, health)
+        }
         None => AccountHealth::new(HealthStatus::Unknown, "account environment unavailable"),
     }
+}
+
+/// Lo que la verificación aprende de paso. Para Codex, que no dice mail ni plan en `login
+/// status`: se le pregunta a su `app-server`, y de paso se guarda el cupo. Para Claude, el mail
+/// y el plan que ya trajo `auth status` se guardan para la lista.
+fn enrich(
+    db: &DbConnection,
+    account_key: &str,
+    agent_id: &str,
+    env: &HashMap<String, String>,
+    mut health: AccountHealth,
+) -> AccountHealth {
+    if health.status != HealthStatus::Ok {
+        return health;
+    }
+    // La cuenta funciona: si una tarea la había visto con la credencial rechazada (y por eso
+    // el ruteo la salteaba), vuelve a estar disponible.
+    crate::runs::failure::clear_auth_failure(db, account_key);
+    match agent_id {
+        "codex" => {
+            if let Some(account) = refresh_codex_account(db, account_key, env) {
+                health.email = account.email;
+                health.plan = account.plan;
+            }
+        }
+        _ if health.email.is_some() || health.plan.is_some() => {
+            record_identity(db, account_key, &AccountIdentity { email: health.email.clone(), plan: health.plan.clone() });
+        }
+        _ => {}
+    }
+    health
 }
 
 /// Corre la CLI con el entorno de la cuenta (sin lo que le ganaría al login, igual que al

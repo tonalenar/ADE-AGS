@@ -168,6 +168,23 @@ fn watch_handshakes(own: &Handshake) {
     }
 }
 
+/// Si hay OTRA instancia de la app viva (la app abierta dos veces, un `tauri dev` al lado de
+/// la instalada, una `--headless` de CI). Se mira antes de levantar el servidor propio, así
+/// que el handshake de esta todavía no existe y no se cuenta a sí misma.
+///
+/// Importa al arrancar: las limpiezas de inicio (`runs::sweep_orphans` y compañía) dan por
+/// muertas las tareas "corriendo", y con otra instancia viva esas tareas son SUYAS y siguen
+/// corriendo.
+pub fn other_instance_alive() -> bool {
+    let own = std::process::id();
+    let dir = instance_handshake_path(0).parent().map(Path::to_path_buf);
+    let Some(entries) = dir.and_then(|d| std::fs::read_dir(d).ok()) else { return false };
+    entries
+        .flatten()
+        .filter_map(|entry| read_handshake(&entry.path()))
+        .any(|h| h.pid != own && is_alive(&h))
+}
+
 /// Borra los handshakes propios de instancias que ya no existen: una que se cerró de golpe
 /// no llegó a hacerlo.
 fn sweep_dead_instances() {

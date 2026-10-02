@@ -54,14 +54,14 @@ export function ViewTabItem({
         max-w-52 min-w-24 rounded-t-[9px] cursor-pointer select-none transition-colors duration-150 ${className}
         ${paint && !isActive ? paint.tint : ""}
         ${isActive
-          ? "bg-gray-50 dark:bg-[#0d1117] text-gray-900 dark:text-white"
+          ? "bg-gray-50 dark:bg-surface text-gray-900 dark:text-white"
           : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-white/5 hover:text-gray-800 dark:hover:text-gray-200"}`}
     >
       {/* La barrita del agente: en el borde de adentro, donde no compite con la línea de
           "tab activa" de abajo. Es lo único que hay que mirar para saber de quién es. */}
       {paint && <span className={`absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-r ${paint.strip}`} />}
       {isActive && (
-        <span className={`absolute bottom-0 left-0 right-0 h-[2px] ${groupFocused ? "bg-blue-500" : "bg-gray-300 dark:bg-white/20"}`} />
+        <span className={`absolute bottom-0 left-0 right-0 h-[2px] ${groupFocused ? "bg-accent-500" : "bg-gray-300 dark:bg-white/20"}`} />
       )}
 
       <Icon className={`w-3.5 h-3.5 shrink-0 opacity-70 ${paint ? paint.ink : view.kind === "diff" ? "text-amber-500" : ""}`} />
