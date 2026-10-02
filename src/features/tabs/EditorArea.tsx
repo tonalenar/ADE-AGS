@@ -1,4 +1,5 @@
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useChatUnreadWatcher } from "@/features/canvas/chatUnread";
 import { createPortal } from "react-dom";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -35,6 +36,7 @@ import { useWorkMode } from "@/features/canvas/store";
  * a la terminal o al navegador de abajo.
  */
 export function EditorArea() {
+  useChatUnreadWatcher();
   const layout = useWorkspaceLayout();
   const canvas = useWorkMode() === "canvas";
   const containerRef = useRef<HTMLDivElement>(null);

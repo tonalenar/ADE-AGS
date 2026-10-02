@@ -78,6 +78,15 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   const bottom = useRef<HTMLDivElement>(null);
   const unread = useUnreadStore((s) => s.unread);
   const sound = useUnreadStore((s) => s.sound);
+  const jump = useUnreadStore((s) => s.jump);
+
+  // Se llegó desde un aviso del sistema: se abre ese agente en ese hilo.
+  useEffect(() => {
+    if (!jump) return;
+    if ((THREADS as readonly string[]).includes(jump.thread)) setThread(jump.thread as Thread);
+    setTabId(jump.tabId);
+    useUnreadStore.getState().setJump(null);
+  }, [jump]);
 
   // Con quién se habla: el agente activo si sirve, si no el primero.
   const current = agents.find((a) => a.id === tabId) ?? agents.find((a) => a.id === activeTabId) ?? agents[0];

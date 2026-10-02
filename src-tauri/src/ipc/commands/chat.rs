@@ -22,6 +22,9 @@ use crate::ipc::protocol::arg_str_opt;
 /// El evento que avisa a la pantalla que cambió una conversación; lleva el id de la tab.
 pub const CHANGED_EVENT: &str = "cc-chat-changed";
 
+/// Se mostró un aviso del sistema por una respuesta; lleva `{ tabId, thread }`.
+pub const NOTIFIED_EVENT: &str = "cc-chat-notified";
+
 fn changed(app: &AppHandle, tab_id: &str) {
     let _ = app.emit(CHANGED_EVENT, tab_id);
 }
@@ -72,6 +75,11 @@ pub(super) fn chat_say(app: &AppHandle, args: &Value) -> Result<Value, String> {
     if kind == Kind::Say {
         let name = open_tabs(app).ok().and_then(|tabs| tabs.into_iter().find(|t| t.id == from)).map(|t| t.name);
         system = crate::notifier::show_custom(app, name.as_deref().unwrap_or("ADE AGS"), &chat::preview(&text, 180));
+        if system {
+            // El plugin de avisos no devuelve el clic en escritorio: la pantalla guarda esto y,
+            // si la app recupera el foco enseguida (lo que hace el clic en el aviso), abre el chat.
+            let _ = app.emit(NOTIFIED_EVENT, json!({ "tabId": from, "thread": thread }));
+        }
     }
     Ok(json!({ "delivered": true, "thread": thread, "progress": kind == Kind::Progress, "system": system }))
 }

@@ -1,9 +1,12 @@
 import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 
 import { useTabsStore } from "@/features/tabs/store";
+
+import { setWorkMode, useActiveBoardKey } from "./store";
 
 /** Lo mínimo de un mensaje para contar: el chat entero vive en `ChatPanel`. */
 interface Msg {
@@ -68,6 +71,10 @@ export function chime() {
   }
 }
 
+/** Cuánto después de un aviso cuenta como "fue el clic en el aviso" la vuelta del foco. */
+export const JUMP_WINDOW_MS = 2 * 60 * 1000;
+export const shouldJump = (notifiedAt: number, now: number) => now - notifiedAt >= 0 && now - notifiedAt <= JUMP_WINDOW_MS;
+
 const SOUND_KEY = "cc.chat.sound";
 export const readSound = (): boolean => {
   try {
@@ -103,6 +110,9 @@ interface UnreadState {
   /** Qué (agente, hilo) está a la vista en el panel de chat: ahí no se suena. */
   viewing: { tabId: string; thread: string } | null;
   sound: boolean;
+  /** Pedido de abrir el chat en este (agente, hilo): lo toma el panel y lo borra. */
+  jump: { tabId: string; thread: string } | null;
+  setJump: (j: { tabId: string; thread: string } | null) => void;
   setViewing: (v: { tabId: string; thread: string } | null) => void;
   setSound: (on: boolean) => void;
   /** `baseline`: la carga inicial de un agente; lo que ya hay no es "nuevo". Los avisos en vivo cuentan todo. */
@@ -114,6 +124,8 @@ export const useUnreadStore = create<UnreadState>((set, get) => ({
   seen: readSeen(),
   unread: {},
   viewing: null,
+  jump: null,
+  setJump: (jump) => set({ jump }),
   sound: readSound(),
   setViewing: (viewing) => set({ viewing }),
   setSound: (sound) => {
@@ -170,9 +182,16 @@ export const unreadOf = (byThread: Record<string, number> | undefined) =>
 
 /**
  * Mantiene al día los no leídos de todos los agentes con chat: al montar y cada vez que el
- * backend avisa de un cambio. Va en la barra del canvas, que siempre está montada.
+ * backend avisa de un cambio. Va en el área de trabajo, que está montada en los dos modos (pestañas y canvas).
  */
 export function useChatUnreadWatcher() {
+  // Un aviso del sistema pidió abrir el chat: el chat vive en el canvas, así que se pasa a él.
+  const boardKey = useActiveBoardKey();
+  const jump = useUnreadStore((s) => s.jump);
+  useEffect(() => {
+    if (jump && boardKey) setWorkMode(boardKey, "canvas");
+  }, [jump, boardKey]);
+
   const agentIds = useTabsStore((s) => s.tabs.filter((t) => t.agentId !== "bash").map((t) => t.id).join(","));
   useEffect(() => {
     const ingest = (tabId: string, baseline: boolean) =>
@@ -181,8 +200,25 @@ export function useChatUnreadWatcher() {
         .catch(() => undefined);
     for (const id of agentIds.split(",").filter(Boolean)) void ingest(id, true);
     const off = listen<string>("cc-chat-changed", (e) => void ingest(e.payload, false));
+
+    // Clic en el aviso del sistema: el plugin no avisa del clic, pero la app recupera el
+    // foco. Si eso pasa enseguida después de un aviso, se abre el chat en esa respuesta.
+    let pending: { tabId: string; thread: string; at: number } | null = null;
+    const offNotified = listen<{ tabId: string; thread: string }>("cc-chat-notified", (e) => {
+      pending = { ...e.payload, at: Date.now() };
+    });
+    const onFocus = () => {
+      if (pending && shouldJump(pending.at, Date.now())) useUnreadStore.getState().setJump({ tabId: pending.tabId, thread: pending.thread });
+      pending = null;
+    };
+    window.addEventListener("focus", onFocus);
+    // El foco del DOM no siempre se entera de que la ventana volvió desde el aviso: se escucha también la ventana.
+    const offWindow = getCurrentWindow().onFocusChanged(({ payload: focused }) => focused && onFocus()).catch(() => () => undefined);
     return () => {
       off.then((fn) => fn());
+      offNotified.then((fn) => fn());
+      window.removeEventListener("focus", onFocus);
+      offWindow.then((fn) => fn());
     };
   }, [agentIds]);
 }

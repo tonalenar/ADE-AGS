@@ -490,7 +490,7 @@ function CanvasInner() {
           e.target.value = "";
           if (file) void addImageFrom(file);
         }} />
-      <CanvasDock zoom={vp.zoom} panel={panel} onTogglePanel={(p) => setPanel((cur) => (cur === p ? null : p))}
+      <CanvasDock zoom={vp.zoom} panel={panel} onTogglePanel={(p) => setPanel((cur) => (cur === p ? null : p))} onOpenChat={() => setPanel("chat")}
         petPercent={Math.round(pet.progress * 100)}
         onFit={() => rf.fitView({ padding: 0.12, maxZoom: 1, duration: 220 })}
         onReset={() => {

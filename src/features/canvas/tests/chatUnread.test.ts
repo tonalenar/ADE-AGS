@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { countUnread, latest, shouldChime, unreadOf } from "../chatUnread";
+import { JUMP_WINDOW_MS, countUnread, latest, shouldChime, shouldJump, unreadOf } from "../chatUnread";
 
 const m = (thread: string, kind: string, at: number) => ({ thread, kind, at });
 
@@ -37,5 +37,14 @@ describe("sonido de nueva respuesta", () => {
     expect(shouldChime({ blue: 2 }, { blue: 1 }, null)).toBe(false);
     expect(shouldChime({}, { blue: 1 }, "blue")).toBe(false);
     expect(shouldChime({ blue: 1 }, {}, null)).toBe(false);
+  });
+});
+
+describe("clic en el aviso del sistema", () => {
+  it("el foco que vuelve enseguida cuenta; uno tardío o anterior no", () => {
+    expect(shouldJump(1000, 1000 + 5_000)).toBe(true);
+    expect(shouldJump(1000, 1000 + JUMP_WINDOW_MS)).toBe(true);
+    expect(shouldJump(1000, 1000 + JUMP_WINDOW_MS + 1)).toBe(false);
+    expect(shouldJump(5000, 1000)).toBe(false);
   });
 });

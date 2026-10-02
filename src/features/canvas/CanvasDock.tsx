@@ -6,7 +6,7 @@ import { Button, CloseIcon } from "neogestify-ui-components";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 
-import { unreadOf, useChatUnreadWatcher, useUnreadStore } from "./chatUnread";
+import { unreadOf, useUnreadStore } from "./chatUnread";
 import { FloorBar } from "./FloorBar";
 import { RING_COLORS, Ring } from "./Ring";
 import { UsageBoard } from "./UsageBoard";
@@ -77,10 +77,12 @@ const popover = `pointer-events-auto absolute right-3 bottom-16 rounded-2xl over
  *
  * Va en su propia capa, por encima de las terminales: abajo, una terminal viva la taparía.
  */
-export function CanvasDock({ zoom, panel, onTogglePanel, onFit, onReset, petPercent }: {
+export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onReset, petPercent }: {
   zoom: number;
   panel: DockPanel | null;
   onTogglePanel: (p: DockPanel) => void;
+  /** Abre el chat (sin alternar). */
+  onOpenChat: () => void;
   onFit: () => void;
   onReset: () => void;
   /** Cuánto del nivel del pet está hecho (0–100): el tercer anillo. */
@@ -101,7 +103,14 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onFit, onReset, petPerc
 
   const accounts = useMemo(() => [...system, ...custom].filter((a) => a.loggedIn), [system, custom]);
   const rings = useUsageRings();
-  useChatUnreadWatcher();
+  // Un aviso del sistema pidió abrir el chat: se abre si no lo estaba.
+  const jump = useUnreadStore((s) => s.jump);
+  useEffect(() => {
+    // `onOpenChat` abre y no alterna: en desarrollo el efecto corre dos veces y alternar lo cerraría.
+    if (jump) onOpenChat();
+    // La función cambia en cada render del canvas: solo importa el pedido.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jump]);
   const unreadTotal = useUnreadStore((s) => Object.values(s.unread).reduce((n, by) => n + unreadOf(by), 0));
   useEffect(() => startUsagePolling(accounts), [accounts]);
   const [usageOpen, setUsageOpen] = useState(readUsageOpen);
