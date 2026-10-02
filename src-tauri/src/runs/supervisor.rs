@@ -241,13 +241,22 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     // prompt no puede pasar por `cmd.exe` (ver `util::launch`).
     let program = crate::util::find_program(&launch.program)
         .unwrap_or_else(|| std::path::PathBuf::from(&launch.program));
-    let mut command = crate::util::external_command(&program, &launch.args)
+    let workspace = task_profile.as_ref().map_or_else(|| PathBuf::from(&task.cwd), |p| p.workspace());
+    // Ver `sandbox`: el agente escribe solo en su carpeta, su cuenta y los temporales.
+    let sandbox_mode = super::sandbox::Mode::from_db(&db);
+    let home = std::env::var_os("HOME").or_else(|| std::env::var_os("USERPROFILE")).map(PathBuf::from);
+    let policy = super::sandbox::Policy::for_task(&workspace, read_only, &launch.env, home.as_deref());
+    let wrapped = super::sandbox::wrap(sandbox_mode, &program, &launch.args, &policy)?;
+    let mut command = crate::util::external_command(&wrapped.program, &wrapped.args)
         .map_err(|e| format!("no se pudo lanzar '{}': {e}", launch.program))?;
+    if sandbox_mode != super::sandbox::Mode::Off {
+        super::sandbox::scrub_env(&mut command);
+    }
     // Con una cuenta de la app, una API key heredada no le gana a su login.
     crate::agents::apply_account_env(&mut command, &launch.env);
     let mut command = tokio::process::Command::from(command);
     command
-        .current_dir(task_profile.as_ref().map_or_else(|| PathBuf::from(&task.cwd), |p| p.workspace()))
+        .current_dir(&workspace)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -290,14 +299,31 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         let stderr_reader = tokio::spawn(async move {
             match stderr {
                 Some(mut reader) => {
-                    let mut bytes = Vec::new();
-                    let _ = tokio::io::AsyncReadExt::read_to_end(&mut reader, &mut bytes).await;
-                    String::from_utf8_lossy(&bytes).trim().to_string()
+                    // Solo la cola: es lo que va al error de la tarea (ver `tail`), y un
+                    // agente que vuelca logs sin parar a stderr no puede llenar la memoria.
+                    const KEEP: usize = 64 * 1024;
+                    let mut kept: Vec<u8> = Vec::new();
+                    let mut chunk = vec![0u8; 16 * 1024];
+                    while let Ok(n) = tokio::io::AsyncReadExt::read(&mut reader, &mut chunk).await {
+                        if n == 0 {
+                            break;
+                        }
+                        kept.extend_from_slice(&chunk[..n]);
+                        if kept.len() > KEEP * 2 {
+                            kept.drain(..kept.len() - KEEP);
+                        }
+                    }
+                    let start = kept.len().saturating_sub(KEEP);
+                    String::from_utf8_lossy(&kept[start..]).trim().to_string()
                 }
                 None => String::new(),
             }
         });
-        let mut file = tokio::fs::File::create(&events_path).await.ok();
+        // Con buffer: sin él cada línea del agente eran dos escrituras al disco (y dos
+        // viajes al pool de bloqueo de tokio). Se vacía cada tanto, para que quien lea el
+        // crudo mientras corre vea casi lo último, y siempre al terminar.
+        let mut file = tokio::fs::File::create(&events_path).await.ok().map(tokio::io::BufWriter::new);
+        let mut unflushed = 0usize;
         let mut emitted: Option<TaskOutcome> = None;
 
         if let Some(out) = stdout {
@@ -306,6 +332,11 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
                 if let Some(f) = file.as_mut() {
                     let _ = f.write_all(line.as_bytes()).await;
                     let _ = f.write_all(b"\n").await;
+                    unflushed += 1;
+                    if unflushed >= 64 {
+                        let _ = f.flush().await;
+                        unflushed = 0;
+                    }
                 }
                 for event in adapter.parse_line(&line) {
                     match event {
@@ -334,6 +365,9 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
             }
         }
 
+        if let Some(f) = file.as_mut() {
+            let _ = f.flush().await;
+        }
         let stderr_text = stderr_reader.await.unwrap_or_default();
 
         let code = child.wait().await.ok().and_then(|s| s.code()).unwrap_or(-1);

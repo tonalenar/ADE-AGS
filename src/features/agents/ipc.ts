@@ -6,7 +6,8 @@ import type { AgentInfo } from "@/features/tabs/types";
 import type { CustomAgent, CustomAgentDraft } from "./types";
 
 /** Qué TUIs de las soportadas de fábrica están instaladas en esta máquina. */
-export const detectAgents = () => invoke<AgentInfo[]>("detect_agents");
+/** `refresh` vuelve a sondear; sin él puede venir de la detección de los últimos minutos. */
+export const detectAgents = (refresh = false) => invoke<AgentInfo[]>("detect_agents", { refresh });
 
 /**
  * Dónde busca la app los programas (ver `src-tauri/src/util/path_env.rs`).

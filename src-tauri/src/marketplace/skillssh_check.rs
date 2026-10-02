@@ -234,7 +234,7 @@ pub async fn search_status() -> StepResult {
 fn cli_status() -> StepResult {
     let (mut cmd, _) = tool("npx");
     with_env(&mut cmd);
-    cmd.args(["-y", "skills", "--version"]);
+    cmd.args(["-y", super::skillssh::SKILLS_PACKAGE, "--version"]);
     let timeout = CLI_TIMEOUT;
     let mut result = StepResult::new(CheckStep::Cli, CheckState::Fail);
     match crate::util::output_with_timeout(&mut cmd, timeout) {

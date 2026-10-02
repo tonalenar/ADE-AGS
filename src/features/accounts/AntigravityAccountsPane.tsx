@@ -32,7 +32,7 @@ export function AntigravityAccountsPane() {
       {open && <div className="h-96 min-h-0 overflow-hidden rounded-lg border border-gray-200 dark:border-white/10">
         <Terminal command="agy" isActive />
       </div>}
-      <a className="text-xs text-blue-500" href="https://antigravity.google/docs/cli/install/" target="_blank" rel="noreferrer">
+      <a className="text-xs text-accent-500" href="https://antigravity.google/docs/cli/install/" target="_blank" rel="noreferrer">
         {t("accounts.antigravity.docs")}
       </a>
     </div>

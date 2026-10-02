@@ -4,20 +4,26 @@
 
 mod accounts;
 mod agents;
+mod canvas;
+mod chat;
 mod app;
 mod bus;
 mod database;
 mod explorer;
+mod floors;
 mod forge;
 mod graphify;
 pub mod ipc;
 mod marketplace;
 mod memory;
 mod missions;
+mod notifier;
 mod orchestrator;
+mod pet;
 mod prelaunch;
 mod preview;
 mod roles;
+mod routines;
 mod runs;
 mod scm;
 mod session;
