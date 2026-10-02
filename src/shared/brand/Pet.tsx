@@ -136,6 +136,14 @@ export function Pet({ level, state = "idle", size = 96, className = "" }: {
 
       {burst > 0 && <circle key={burst} className="ags-pet__burst" cx="8" cy="7" r="7" fill="none" stroke={look.aura ?? "var(--mascot-glow)"} strokeWidth="0.6" />}
 
+      {/* Trabajando: anillos de energía que salen del cuerpo. */}
+      {state === "working" && (
+        <g fill="none" stroke={look.aura ?? "var(--mascot-glow)"} strokeWidth="0.5">
+          <circle className="ags-pet__pulse" cx="8" cy="7" r="6" />
+          <circle className="ags-pet__pulse ags-pet__pulse--2" cx="8" cy="7" r="6" />
+        </g>
+      )}
+
       <ellipse className="ags-mascot__shadow" cx="8" cy="15.2" rx="3.6" ry="0.55" fill="var(--mascot-shadow)" />
 
       {Array.from({ length: sparks }, (_, i) => {
@@ -196,6 +204,7 @@ export function Pet({ level, state = "idle", size = 96, className = "" }: {
         <g>
           <rect className="ags-pet__dash" x="14" y="7" width="9" height="1.2" fill={`url(#dash-${gid})`} />
           <rect className="ags-pet__dash ags-pet__dash--2" x="15" y="9.4" width="6" height="0.7" fill={`url(#dash-${gid})`} />
+          <rect className="ags-pet__dash" style={{ animationDelay: "0.4s" }} x="14" y="4.6" width="7" height="0.7" fill={`url(#dash-${gid})`} />
         </g>
       )}
     </svg>

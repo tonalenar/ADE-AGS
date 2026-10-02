@@ -18,6 +18,7 @@ import { useSkillsStore } from "@/features/skills/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { flushPendingSave } from "@/features/tabs/persistence";
+import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 
 function AgentRow({ agent, onClick, onContextMenu }: {
   agent: WorkspaceAgent;
@@ -186,6 +187,7 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
   const closeTab = useTabsStore((s) => s.closeTab);
   const tabs = useTabsStore((s) => s.tabs);
   const addTab = useTabsStore((s) => s.addTab);
+  const pet = usePetStatus();
   const skills = useSkillsStore((s) => s.skills);
   const saveSnapshot = useSnapshotsStore((s) => s.save);
   const takeSnapshot = useSnapshotsStore((s) => s.take);
@@ -361,6 +363,9 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
           ))
         )}
       </div>
+
+      {/* El pet vive acá. Con la columna plegada pasa al canvas (ver `CanvasView`). */}
+      <PetCard pet={pet} className="mx-2 mb-2 shrink-0" />
 
       {menu && (
         <ContextMenu

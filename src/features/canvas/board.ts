@@ -57,6 +57,19 @@ export interface CanvasImage {
 
 export const IMAGE_PREFIX = "image-";
 
+/** Una carpeta del disco puesta en el canvas: su árbol de archivos a la vista. Solo se lee;
+ *  ningún agente la ve. `open` son las subcarpetas desplegadas. */
+export interface CanvasFolder {
+  path: string;
+  name: string;
+  open: string[];
+  box: Box;
+}
+
+export const FOLDER_PREFIX = "folder-";
+export const FOLDER_SIZE = { w: 300, h: 380 };
+export const FOLDER_MIN = { w: 200, h: 160 };
+
 /** Un trazo a mano alzada. `points` va plano `[x0, y0, x1, y1, …]` en coordenadas del canvas. */
 export interface Stroke {
   id: string;
@@ -68,7 +81,8 @@ export interface Stroke {
 /** Los nodos que no son terminales: el canvas los mueve y guarda, pero no dependen de
  *  ninguna tab. */
 export function isFreeNodeId(id: string): boolean {
-  return id.startsWith(NOTE_PREFIX) || id.startsWith(PORTAL_PREFIX) || id.startsWith(TEXT_PREFIX) || id.startsWith(IMAGE_PREFIX);
+  return id.startsWith(NOTE_PREFIX) || id.startsWith(PORTAL_PREFIX) || id.startsWith(TEXT_PREFIX) || id.startsWith(IMAGE_PREFIX) ||
+    id.startsWith(FOLDER_PREFIX);
 }
 
 /** El canvas de un proyecto. Las claves de `nodes` son ids de tab. */
@@ -81,6 +95,7 @@ export interface Board {
   /** Rótulos, imágenes y trazos: decoración del canvas. Los agentes no los ven. */
   texts: Record<string, CanvasText>;
   images: Record<string, CanvasImage>;
+  folders: Record<string, CanvasFolder>;
   drawings: Stroke[];
   /** El papel con que se recrutó cada agente (id de tab → nombre del papel). Solo una
    *  etiqueta para el nodo: no da ni quita permisos. */
@@ -92,7 +107,7 @@ export interface Board {
 }
 
 export function emptyBoard(): Board {
-  return { nodes: {}, notes: {}, portals: {}, texts: {}, images: {}, drawings: [], roles: {}, edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
+  return { nodes: {}, notes: {}, portals: {}, texts: {}, images: {}, folders: {}, drawings: [], roles: {}, edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
 }
 
 /**
@@ -188,7 +203,7 @@ export function neighbors(board: Board, tabId: string): string[] {
 
 /** Dónde está un nodo, sea terminal o nota. */
 export function boxOf(board: Board, id: string): Box | undefined {
-  return board.nodes[id] ?? board.notes[id]?.box ?? board.portals[id]?.box ?? board.texts[id]?.box ?? board.images[id]?.box;
+  return board.nodes[id] ?? board.notes[id]?.box ?? board.portals[id]?.box ?? board.texts[id]?.box ?? board.images[id]?.box ?? board.folders[id]?.box;
 }
 
 export const NOTE_SIZE = { w: 320, h: 240 };
@@ -272,6 +287,7 @@ function allBoxes(board: Board): Box[] {
     ...Object.values(board.portals).map((p) => p.box),
     ...Object.values(board.texts).map((t) => t.box),
     ...Object.values(board.images).map((i) => i.box),
+    ...Object.values(board.folders).map((f) => f.box),
   ];
 }
 
@@ -410,4 +426,24 @@ export function strokePath(points: number[]): string {
   }
   d += ` L${points[points.length - 2]} ${points[points.length - 1]}`;
   return d;
+}
+
+// ── Carpetas ────────────────────────────────────────────────────────
+
+/** Una carpeta nueva en `at` (la esquina de arriba a la izquierda). */
+export function addFolder(board: Board, f: { id: string; path: string; name: string; at: { x: number; y: number } }): Board {
+  const box: Box = { x: Math.round(f.at.x), y: Math.round(f.at.y), ...FOLDER_SIZE };
+  return { ...board, folders: { ...board.folders, [f.id]: { path: f.path, name: f.name, open: [], box } } };
+}
+
+export function updateFolder(board: Board, id: string, patch: Partial<CanvasFolder>): Board {
+  const folder = board.folders[id];
+  return folder ? { ...board, folders: { ...board.folders, [id]: { ...folder, ...patch } } } : board;
+}
+
+export function removeFolder(board: Board, id: string): Board {
+  if (!(id in board.folders)) return board;
+  const folders = { ...board.folders };
+  delete folders[id];
+  return { ...board, folders };
 }

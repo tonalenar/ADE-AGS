@@ -24,11 +24,14 @@ import {
 import { CanvasToolbar, type DrawStyle, type Tool } from "./CanvasToolbar";
 import { DrawingLayer } from "./DrawingLayer";
 import { ImageNode, TextNode, type ImageFlowNode, type TextFlowNode } from "./ExtraNodes";
+import { FolderNode, baseName, type FolderFlowNode } from "./FolderNode";
+import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
   HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, terminalRect,
   type Box, type Rect, type Viewport,
 } from "./geometry";
 import { CanvasDock, type DockPanel } from "./CanvasDock";
+import { useUiStore } from "@/app/uiStore";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ChatPanel } from "./ChatPanel";
 import { RoutinesPanel } from "./RoutinesPanel";
@@ -63,7 +66,7 @@ interface PortalNodeData extends Record<string, unknown> {
 }
 
 type PortalFlowNode = Node<PortalNodeData, "portal">;
-type FlowNode = AgentFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode;
+type FlowNode = AgentFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode | FolderFlowNode;
 
 // El navegador pesa más de un megabyte: se baja con el primer portal, no con el canvas.
 const BrowserTab = lazy(() => import("@/features/browser/BrowserTab").then((m) => ({ default: m.BrowserTab })));
@@ -121,6 +124,8 @@ const portalSig = (n: PortalFlowNode) =>
   [n.id, n.data.portal.name, n.data.portal.url, boxSig(n.data.portal.box), n.selected, n.data.links, n.data.cwd].join("|");
 
 const textSig = (n: TextFlowNode) => [n.id, n.data.text.text, n.data.text.size, boxSig(n.data.text.box), n.selected].join("|");
+const folderSig = (n: FolderFlowNode) =>
+  [n.id, n.data.folder.path, n.data.folder.name, n.data.folder.open.join(","), boxSig(n.data.folder.box), n.selected, n.data.cwd].join("|");
 const imageSig = (n: ImageFlowNode) => [n.id, n.data.image.asset, n.data.image.name, boxSig(n.data.image.box), n.selected].join("|");
 
 function CanvasInner() {
@@ -201,6 +206,7 @@ function CanvasInner() {
   // Un panel a la vez: los dos se abren en el mismo lugar.
   const [panel, setPanel] = useState<DockPanel | null>(null);
   const pet = usePetStatus();
+  const workspacesCollapsed = useUiStore((s) => s.workspacesCollapsed);
 
   // La herramienta activa y cómo se dibuja. Dibujar y borrar son un modo; lo demás pone
   // algo en el centro de la vista y vuelve a seleccionar.
@@ -285,15 +291,28 @@ function CanvasInner() {
     data: { id, image },
   })), [board.images, selectedNote]);
 
+  const rawFolderNodes: FolderFlowNode[] = useMemo(() => Object.entries(board.folders).map(([id, folder]) => ({
+    id,
+    type: "folder" as const,
+    position: { x: folder.box.x, y: folder.box.y },
+    width: folder.box.w,
+    height: folder.box.h,
+    selected: id === selectedNote,
+    dragHandle: ".ade-node-drag",
+    deletable: false,
+    data: { id, cwd: portalCwd, folder },
+  })), [board.folders, selectedNote, portalCwd]);
+
   const agentNodes = useStable(rawAgentNodes, agentSig);
+  const folderNodes = useStable(rawFolderNodes, folderSig);
   const textNodes = useStable(rawTextNodes, textSig);
   const imageNodes = useStable(rawImageNodes, imageSig);
   const noteNodes = useStable(rawNoteNodes, noteSig);
   const portalNodes = useStable(rawPortalNodes, portalSig);
 
   const nodes: FlowNode[] = useMemo(
-    () => [...imageNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...textNodes],
-    [imageNodes, noteNodes, portalNodes, agentNodes, textNodes],
+    () => [...imageNodes, ...folderNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...textNodes],
+    [imageNodes, folderNodes, noteNodes, portalNodes, agentNodes, textNodes],
   );
 
   // Una conexión con un agente de otro piso no tiene punta en este canvas: no se dibuja.
@@ -333,6 +352,18 @@ function CanvasInner() {
     const c = viewCenter();
     const { id } = canvasActions.addPortal(key, { name: t("canvas.portalDefaultName"), at: { x: c.x - 320, y: c.y - 220 } });
     setSelectedNote(id);
+  };
+  /** Una carpeta del disco: se elige con el diálogo del sistema y se pone con su árbol a la vista. */
+  const addFolderHere = async () => {
+    if (!key) return;
+    try {
+      const picked = await pickFolder({ directory: true, multiple: false, defaultPath: portalCwd || undefined });
+      if (typeof picked !== "string") return;
+      const c = viewCenter();
+      setSelectedNote(canvasActions.addFolder(key, { path: picked, name: baseName(picked), at: { x: c.x - 150, y: c.y - 190 } }));
+    } catch (e) {
+      AlertaToast(t("canvas.tool.folder"), String(e), "error", 6000);
+    }
   };
   const addTextHere = () => {
     if (!key) return;
@@ -446,11 +477,12 @@ function CanvasInner() {
           tool={tool} onTool={setTool} style={drawStyle} onStyle={setDrawStyle}
           onTerminal={() => openNewAgentWizard()}
           onNote={addNoteHere} onPortal={addPortalHere} onText={addTextHere}
-          onImage={() => fileInput.current?.click()}
+          onImage={() => fileInput.current?.click()} onFolder={() => void addFolderHere()}
           onUndo={() => key && canvasActions.undoStroke(key)} canUndo={board.drawings.length > 0} />
         {panel === "routines" && <RoutinesPanel onClose={() => setPanel(null)} />}
         {panel === "chat" && <ChatPanel onClose={() => setPanel(null)} />}
-        <PetCard pet={pet} className="pointer-events-auto absolute left-3 bottom-3" />
+        {/* Con la columna de workspaces abierta, el pet vive ahí; plegada, viene al canvas. */}
+        {workspacesCollapsed && <PetCard pet={pet} className="pointer-events-auto absolute left-3 bottom-3" />}
       </div>
       <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="hidden"
         onChange={(e) => {
@@ -836,5 +868,5 @@ function LinkEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
   );
 }
 
-const NODE_TYPES = { agent: AgentNode, note: NoteNode, portal: PortalNode, text: TextNode, image: ImageNode };
+const NODE_TYPES = { agent: AgentNode, note: NoteNode, portal: PortalNode, text: TextNode, image: ImageNode, folder: FolderNode };
 const EDGE_TYPES = { link: LinkEdge };

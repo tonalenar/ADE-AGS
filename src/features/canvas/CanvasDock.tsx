@@ -3,37 +3,19 @@ import { useTranslation } from "react-i18next";
 import { MiniMap, useNodesInitialized, useReactFlow } from "@xyflow/react";
 import { Button, CloseIcon } from "neogestify-ui-components";
 
-import { RefreshIcon } from "@/app/icons";
-import { agentIcon } from "@/features/agents/agentIcons";
-import { AccountUsagePopover } from "@/features/accounts/AccountUsagePopover";
 import { accountEnv, codexAccountUsage } from "@/features/accounts/ipc";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 import { claudeLiveUsage } from "@/features/accounts/usage";
 
 import { FloorBar } from "./FloorBar";
+import { RING_COLORS, Ring } from "./Ring";
+import { UsageBoard } from "./UsageBoard";
 
 /** Qué panel está abierto sobre la barra. Uno a la vez: todos nacen en el mismo lugar. */
 export type DockPanel = "layers" | "usage" | "map" | "chat" | "routines";
 
 // ── Anillos de uso ──────────────────────────────────────────────────
-
-/** Un anillo de progreso: el arco es `percent` (0–100) del círculo. */
-export function Ring({ percent, color, size = 22, stroke = 2.6 }: { percent: number | null; color: string; size?: number; stroke?: number }) {
-  const r = (size - stroke) / 2;
-  const c = 2 * Math.PI * r;
-  const value = percent === null ? 0 : Math.max(0, Math.min(100, percent));
-  return (
-    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden className="shrink-0 -rotate-90">
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke="currentColor" strokeOpacity={0.14} strokeWidth={stroke} />
-      <circle cx={size / 2} cy={size / 2} r={r} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round"
-        strokeDasharray={`${(c * value) / 100} ${c}`} opacity={percent === null ? 0.25 : 1}
-        style={{ transition: "stroke-dasharray 600ms ease" }} />
-    </svg>
-  );
-}
-
-export const RING_COLORS = { claude: "#f08a5d", codex: "#34c79b", gemini: "#6aa5f5" } as const;
 
 const isReal = (a: AgentAccount) => !a.id.startsWith("system:");
 
@@ -203,57 +185,24 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onFit, onReset, petPerc
 // ── Uso de los agentes ──────────────────────────────────────────────
 
 /**
- * El panel "Uso dos agentes": una cuenta a la vez (con sus pestañas arriba), con el cupo
- * del plan que ya muestra la barra de estado. Una a la vez y no todas juntas porque
- * preguntarle a Claude levanta su TUI entera: abrir todas juntas lanzaría una por cuenta.
+ * El panel "Uso dos agentes": el cupo del plan de cada cuenta con sesión — anillo, barras
+ * por límite y cuándo se reinicia (ver `UsageBoard`).
  */
 function UsagePanel({ accounts, onClose }: { accounts: AgentAccount[]; onClose: () => void }) {
   const { t } = useTranslation();
-  const [selected, setSelected] = useState<string | null>(null);
-  const [reload, setReload] = useState(0);
-  const current = accounts.find((a) => a.id === selected) ?? accounts[0];
-
   return (
-    <div className={`${popover} w-[26rem] max-h-[70%] flex flex-col`}>
-      <div className="flex items-center gap-1 px-3 h-10 shrink-0 border-b border-gray-200 dark:border-white/10">
+    <div className={`${popover} w-[26rem] max-h-[75%] flex flex-col`}>
+      <div className="flex items-center gap-1 pl-4 pr-2 h-11 shrink-0 border-b border-gray-200 dark:border-white/10">
         <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100">{t("canvas.dock.usageTitle")}</span>
         <span className="flex-1" />
-        <Button variant="custom" onClick={() => setReload((n) => n + 1)} aria-label={t("accounts.plan.refresh")}
-          className="cc-t w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
-          <RefreshIcon className="w-3.5 h-3.5" />
-        </Button>
         <Button variant="custom" onClick={onClose} aria-label={t("canvas.dock.close")}
           className="cc-t w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
           <CloseIcon className="w-3 h-3" />
         </Button>
       </div>
-
-      {accounts.length === 0 ? (
-        <p className="p-4 text-[12px] text-gray-500 dark:text-gray-400">{t("canvas.dock.noAccounts")}</p>
-      ) : (
-        <>
-          {accounts.length > 1 && (
-            <div className="flex items-center gap-1 px-2 py-1.5 shrink-0 overflow-x-auto border-b border-gray-100 dark:border-white/6">
-              {accounts.map((a) => {
-                const Icon = agentIcon(a.agentId, a.agentId);
-                return (
-                  <Button key={a.id} variant="custom" onClick={() => setSelected(a.id)} title={a.label ?? a.name}
-                    className={`cc-t shrink-0 flex items-center gap-1.5 h-7 px-2.5 rounded-full text-[11px] font-medium max-w-44
-                      ${a.id === current?.id
-                        ? "bg-gray-100 dark:bg-white/12 text-gray-900 dark:text-white"
-                        : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"}`}>
-                    <Icon className="w-3.5 h-3.5 shrink-0" />
-                    <span className="truncate">{a.label ?? a.name}</span>
-                  </Button>
-                );
-              })}
-            </div>
-          )}
-          <div className="overflow-y-auto">
-            {current && <AccountUsagePopover key={`${current.id}:${reload}`} account={current} onLogin={() => undefined} />}
-          </div>
-        </>
-      )}
+      <div className="overflow-y-auto">
+        <UsageBoard accounts={accounts} />
+      </div>
     </div>
   );
 }

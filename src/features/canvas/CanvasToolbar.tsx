@@ -28,6 +28,7 @@ const ICONS = {
   terminal: <Svg><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9l3 3-3 3M12 15h5" /></Svg>,
   note: <Svg><path d="M5 4h14v11l-5 5H5V4Z" /><path d="M14 20v-5h5" /></Svg>,
   image: <Svg><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="1.6" /><path d="M21 16l-5-5-8 9" /></Svg>,
+  folder: <Svg><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z" /></Svg>,
   portal: <Svg><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3Z" /></Svg>,
   text: <span className="text-[15px] font-semibold leading-none">Aa</span>,
   draw: <Svg><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1Z" /><path d="M14 7l3 3" /></Svg>,
@@ -60,13 +61,14 @@ const Divider = () => <span className="w-px h-5 mx-0.5 bg-gray-200 dark:bg-white
  * volver a "seleccionar".
  */
 export function CanvasToolbar({
-  tool, onTool, onTerminal, onNote, onImage, onPortal, onText, style, onStyle, onUndo, canUndo,
+  tool, onTool, onTerminal, onNote, onImage, onFolder, onPortal, onText, style, onStyle, onUndo, canUndo,
 }: {
   tool: Tool;
   onTool: (tool: Tool) => void;
   onTerminal: () => void;
   onNote: () => void;
   onImage: () => void;
+  onFolder: () => void;
   onPortal: () => void;
   onText: () => void;
   style: DrawStyle;
@@ -86,6 +88,7 @@ export function CanvasToolbar({
         <ToolButton label={t("canvas.tool.terminal")} onClick={onTerminal}>{ICONS.terminal}</ToolButton>
         <ToolButton label={t("canvas.tool.note")} onClick={onNote}>{ICONS.note}</ToolButton>
         <ToolButton label={t("canvas.tool.image")} onClick={onImage}>{ICONS.image}</ToolButton>
+        <ToolButton label={t("canvas.tool.folder")} onClick={onFolder}>{ICONS.folder}</ToolButton>
         <ToolButton label={t("canvas.tool.portal")} onClick={onPortal}>{ICONS.portal}</ToolButton>
         <ToolButton label={t("canvas.tool.text")} onClick={onText}>{ICONS.text}</ToolButton>
         <Divider />

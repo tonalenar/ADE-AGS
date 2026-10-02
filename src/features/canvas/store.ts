@@ -5,10 +5,11 @@ import { useTabsStore } from "@/features/tabs/store";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
 import {
-  IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addImage, addNote, addPortal, addStroke, addText,
+  FOLDER_PREFIX, IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addFolder, addImage, addNote, addPortal,
+  addStroke, addText, removeFolder, updateFolder,
   emptyBoard, placeBelow, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
   removeStroke, removeText, toggleOrchestrator, undoStroke, updateNote, updatePortal, updateText,
-  type Board, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
+  type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
 } from "./board";
 import type { Box, Rect, Viewport } from "./geometry";
 
@@ -79,6 +80,8 @@ export const canvasActions = {
       if (portal) return updatePortal(b, id, { box: { ...portal.box, ...patch } });
       const text = b.texts[id];
       if (text) return updateText(b, id, { box: { ...text.box, ...patch } });
+      const folder = b.folders[id];
+      if (folder) return updateFolder(b, id, { box: { ...folder.box, ...patch } });
       const image = b.images[id];
       if (image) return { ...b, images: { ...b.images, [id]: { ...image, box: { ...image.box, ...patch } } } };
       const box = b.nodes[id];
@@ -129,6 +132,14 @@ export const canvasActions = {
     return id;
   },
   removeImage: (key: string, id: string) => updateBoard(key, (b) => removeImage(b, id)),
+  addFolder: (key: string, folder: { path: string; name: string; at: { x: number; y: number } }) => {
+    const id = `${FOLDER_PREFIX}${crypto.randomUUID()}`;
+    updateBoard(key, (b) => addFolder(b, { ...folder, id }));
+    return id;
+  },
+  updateFolder: (key: string, id: string, patch: Partial<Omit<CanvasFolder, "box">>) =>
+    updateBoard(key, (b) => updateFolder(b, id, patch)),
+  removeFolder: (key: string, id: string) => updateBoard(key, (b) => removeFolder(b, id)),
   addStroke: (key: string, stroke: Omit<Stroke, "id">) =>
     updateBoard(key, (b) => addStroke(b, { ...stroke, id: crypto.randomUUID() })),
   removeStroke: (key: string, id: string) => updateBoard(key, (b) => removeStroke(b, id)),
@@ -225,7 +236,7 @@ export function initCanvasSync(label: string): () => void {
       const mine = Object.fromEntries(
         Object.entries(saved ?? {})
           .filter(([k]) => k.startsWith(`${label}|`))
-          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, drawings: b?.drawings ?? [], roles: b?.roles ?? {} }]),
+          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], roles: b?.roles ?? {} }]),
       );
       useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards } });
       unsub = useTabsStore.subscribe(syncBoards);

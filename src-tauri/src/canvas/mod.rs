@@ -64,6 +64,9 @@ pub struct Board {
     pub texts: Value,
     #[serde(default)]
     pub images: Value,
+    /// Carpetas del disco puestas en el canvas (solo lectura, decoración).
+    #[serde(default)]
+    pub folders: Value,
     #[serde(default)]
     pub drawings: Value,
 }
