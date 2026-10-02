@@ -9,7 +9,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { AccountCapableAgent, AgentAccount } from "./types";
+import type { AccountCapableAgent, AccountHealth, AgentAccount } from "./types";
 
 export const listAccounts = () => invoke<AgentAccount[]>("list_agent_accounts");
 export const listSystemAccounts = () => invoke<AgentAccount[]>("system_accounts");
@@ -18,6 +18,13 @@ export const listCapableAgents = () => invoke<AccountCapableAgent[]>("account_ca
 
 export const createAccount = (agentId: string, name: string) =>
   invoke<AgentAccount>("create_agent_account", { agentId, name });
+
+/** Cuenta por API key: Claude Code (llavero) o Codex (`codex login --with-api-key`). */
+export const createApiKeyAccount = (agentId: string, name: string, apiKey: string, baseUrl: string | null) =>
+  invoke<AgentAccount>("create_agent_api_key_account", { agentId, name, apiKey, baseUrl });
+
+/** Le pregunta a la CLI (o al proveedor) si la cuenta funciona. No gasta tokens. */
+export const accountHealth = (accountId: string) => invoke<AccountHealth>("account_health", { accountId });
 
 export const deleteAccount = (id: string, deleteFiles: boolean) =>
   invoke<void>("delete_agent_account", { id, deleteFiles });

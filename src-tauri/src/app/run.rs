@@ -201,6 +201,8 @@ pub fn run() {
             crate::accounts::account_capable_agents,
             crate::accounts::list_agent_accounts,
             crate::accounts::create_agent_account,
+            crate::accounts::create_agent_api_key_account,
+            crate::accounts::account_health,
             crate::accounts::delete_agent_account,
             crate::accounts::agent_account_env,
             crate::accounts::system_accounts,

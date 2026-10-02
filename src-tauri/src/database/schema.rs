@@ -790,6 +790,18 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         email TEXT NOT NULL, created_at INTEGER NOT NULL
     );",
     )?;
+    // Cuentas por API key. `kind` = 'login' (el directorio con el login hecho en la TUI, lo de
+    // siempre) o 'api_key'. La key NUNCA va acá: va al llavero del sistema (Claude Code) o al
+    // perfil de la propia CLI (Codex, que la guarda con `codex login --with-api-key`).
+    // `key_hint` son sus últimos 4 caracteres, para reconocerla en la lista, y `base_url` un
+    // endpoint compatible (un gateway) en vez del de Anthropic.
+    if !has_column(conn, "agent_accounts", "kind") {
+        conn.execute_batch(
+            "ALTER TABLE agent_accounts ADD COLUMN kind TEXT NOT NULL DEFAULT 'login';
+             ALTER TABLE agent_accounts ADD COLUMN base_url TEXT;
+             ALTER TABLE agent_accounts ADD COLUMN key_hint TEXT;",
+        )?;
+    }
     // Índices de las consultas que corren en cada evento de la flota y en cada guardado:
     // la lista de runs de un workspace (`ORDER BY created_at DESC`), las tasks de un run en
     // orden, y buscar el historial de una sesión por su id. Sin ellos son recorridos enteros

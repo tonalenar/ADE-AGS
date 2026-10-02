@@ -14,6 +14,22 @@ export interface AgentAccount {
   /** Mail (u otro identificador) de la cuenta, cuando la TUI lo expone. */
   label: string | null;
   createdAt: number;
+  /** `login`: el login hecho en la TUI. `api_key`: una key (ver `accounts::secrets`). */
+  kind: "login" | "api_key";
+  /** Endpoint compatible en vez del oficial (solo cuentas `api_key` de Claude Code). */
+  baseUrl: string | null;
+  /** Los últimos caracteres de la key, para reconocerla. Nunca la key. */
+  keyHint: string | null;
+}
+
+/** Ver `accounts::health::AccountHealth`. */
+export interface AccountHealth {
+  status: "ok" | "not_logged_in" | "invalid" | "unknown";
+  /** Lo que dijo la CLI o el proveedor (`claude.ai`, `HTTP 401`). */
+  detail: string;
+  email: string | null;
+  plan: string | null;
+  checkedAt: number;
 }
 
 /** TUI que soporta cuentas múltiples. Ver `accounts::AccountCapableAgent`. */

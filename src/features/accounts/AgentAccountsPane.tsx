@@ -11,12 +11,40 @@ import { LoginTerminal } from "@/features/accounts/LoginTerminal";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 /** Una cuenta: nombre simbólico, quién está logueado, y qué se puede hacer con ella. */
+const HEALTH_VARIANT = {
+  ok: "success",
+  not_logged_in: "warning",
+  invalid: "danger",
+  unknown: "neutral",
+} as const;
+
+/** El resultado de "Verificar": lo que dijo la CLI (o el proveedor), no el marcador del disco. */
+function HealthBadge({ accountId }: { accountId: string }) {
+  const { t } = useTranslation();
+  const health = useAccountsStore((s) => s.health[accountId]);
+  if (!health) return null;
+  if (health === "checking") {
+    return <Badge variant="neutral" size="sm" className="shrink-0">{t("settings.accounts.health.checking")}</Badge>;
+  }
+  const extra = [health.email, health.plan, health.detail].filter(Boolean).join(" · ");
+  return (
+    <Tooltip content={extra} placement="bottom">
+      <Badge variant={HEALTH_VARIANT[health.status]} size="sm" className="shrink-0">
+        {t(`settings.accounts.health.${health.status}`)}
+      </Badge>
+    </Tooltip>
+  );
+}
+
 function AccountRow({ account, onLogin, onDelete }: {
   account: AgentAccount;
   onLogin: () => void;
   onDelete?: () => void;
 }) {
   const { t } = useTranslation();
+  const checkHealth = useAccountsStore((s) => s.checkHealth);
+  const checking = useAccountsStore((s) => s.health[account.id] === "checking");
+  const byKey = account.kind === "api_key";
 
   return (
     <div className="cc-t group flex items-center gap-3 px-3 h-12 rounded-lg
@@ -39,11 +67,17 @@ function AccountRow({ account, onLogin, onDelete }: {
           <span className="truncate text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">
             {account.name}
           </span>
+          {byKey && (
+            <Badge variant="info" size="sm" className="shrink-0">
+              {t("settings.accounts.add.mode.apiKey")}
+            </Badge>
+          )}
           {!account.loggedIn && (
             <Badge variant="warning" size="sm" className="shrink-0">
               {t("settings.accounts.notLoggedIn")}
             </Badge>
           )}
+          <HealthBadge accountId={account.id} />
         </div>
         {/* Cuando la TUI expone el mail se muestra: es lo que de verdad distingue una
             cuenta de otra — el nombre simbólico lo eligió el usuario y puede mentir.
@@ -60,6 +94,16 @@ function AccountRow({ account, onLogin, onDelete }: {
 
       <div className="flex items-center gap-1.5 shrink-0">
         <Button
+          variant="outline"
+          size="sm"
+          disabled={checking}
+          onClick={() => void checkHealth(account.id)}
+        >
+          {t("settings.accounts.health.check")}
+        </Button>
+        {/* Una cuenta por API key no tiene login que rehacer: se cambia la key creando
+            otra cuenta. */}
+        {!byKey && <Button
           variant={account.loggedIn ? "outline" : "primary"}
           size="sm"
           onClick={onLogin}
@@ -67,7 +111,7 @@ function AccountRow({ account, onLogin, onDelete }: {
           {account.loggedIn
             ? t("settings.accounts.relogin")
             : t("settings.accounts.login.btn")}
-        </Button>
+        </Button>}
         {onDelete && <Tooltip content={t("settings.accounts.delete.action")} placement="left">
           <Button variant="icon"
             onClick={onDelete}
