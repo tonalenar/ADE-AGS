@@ -971,12 +971,37 @@ pub async fn discover_session_id(
     .map_err(|e| e.to_string())
 }
 
+/// Si un id de sesión se puede pegar en la línea de comandos de reanudación sin riesgo.
+///
+/// Los ids salen de nombres y contenidos de archivos que la propia TUI (o cualquier agente)
+/// puede escribir, y van a parar a un comando que se parte por espacios y, con prelaunch en
+/// Windows, pasa por `cmd /C`: un archivo llamado `x --dangerously-skip-permissions.jsonl`
+/// o `x & calc.jsonl` inyectaría un flag o un comando. Los ids reales (UUID, `ses_…`,
+/// `rollout-…`) caben de sobra en este alfabeto, y no pueden empezar con `-`.
+pub fn is_safe_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && !id.starts_with('-')
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
+}
+
+/// [`discover_unchecked`], descartando ids que no pasan [`is_safe_session_id`].
+pub(crate) fn discover_session_id_sync(
+    agent_id: &str,
+    cwd: &str,
+    started_after: i64,
+    profile: Option<&Path>,
+    custom: Option<&crate::agents::CustomAgent>,
+) -> Option<String> {
+    discover_unchecked(agent_id, cwd, started_after, profile, custom).filter(|id| is_safe_session_id(id))
+}
+
 /// `custom` es la TUI personalizada ya resuelta, o `None` para las de fábrica.
 ///
 /// Se recibe resuelta en vez de un `DbConnection` porque hay un llamador que YA tiene la
 /// conexión tomada (`archive_tab_row`): volver a pedir el lock desde adentro contra un
 /// `Mutex` no reentrante sería un deadlock, no un error.
-pub(crate) fn discover_session_id_sync(
+fn discover_unchecked(
     agent_id: &str,
     cwd: &str,
     started_after: i64,
