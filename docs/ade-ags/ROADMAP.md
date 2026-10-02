@@ -36,7 +36,7 @@ Depende de: 3. Pode andar em paralelo com 4, mas não antes de 3, porque missão
 
 **v0 concluído** em `feat/mission-engine-v0`: Mission persistida em cima de `runs/`, ciclo draft → running → done/failed/cancelled, UI e E2E real. Detalhe e o que ficou fora em [MISSION_ENGINE.md](./MISSION_ENGINE.md).
 
-**Mission Runtime v0.1** em `fix/mission-runtime-v01` (concluído nesta base): launcher Windows sem `cmd.exe` para shims npm, política do lead imposta no broker e na CLI, aprovações na tela da Mission (mesma fila da Fleet), evento `cc-mission-changed`, progresso só de workers e E2E real com lead + 3 workers. Detalhe em [MISSION_RUNTIME.md](./MISSION_RUNTIME.md). Roles + Squads v0 e Handoff Structured v0 também estão concluídos nesta base. Shared Memory v0 está validada no WIP, com gates e E2E concluídos; Map Mode continua pendente.
+**Mission Runtime v0.1** em `fix/mission-runtime-v01` (concluído nesta base): launcher Windows sem `cmd.exe` para shims npm, política do lead imposta no broker e na CLI, aprovações na tela da Mission (mesma fila da Fleet), evento `cc-mission-changed`, progresso só de workers e E2E real com lead + 3 workers. Detalhe em [MISSION_RUNTIME.md](./MISSION_RUNTIME.md). Roles + Squads v0 e Handoff Structured v0 também estão concluídos nesta base. Shared Memory v0 está implementada e validada na PR #4, aguardando merge, com gates e E2E concluídos; Map Mode continua pendente.
 
 ## 6. Task Engine
 
@@ -82,11 +82,11 @@ Não inclui fallback silencioso, troca automática de modelo, scoring ou marketp
 
 ## 13. Shared Memory
 
-**Shared Memory v0: implementação validada no WIP `feat/shared-memory-v0`, com gates e E2E real concluídos em 01/10/2026.**
+**Shared Memory v0: implementação commitada e publicada na PR #4 (`feat/shared-memory-v0`), aguardando merge, com gates e E2E real concluídos em 01/10/2026.**
 
 `run_facts` continua sendo colaboração append-only de um Run. Shared Memory v0 adiciona Workspace Memory e Mission Memory em SQLite local, com propostas e aprovação explícita do usuário. Cada Run congela um snapshot das memórias aprovadas no início; workers e Lead recebem esse snapshot como dado não confiável. Detalhes e limites em [SHARED_MEMORY.md](./SHARED_MEMORY.md).
 
-O E2E confirmou retry com snapshot atualizado, histórico antigo preservado, Lead e worker Codex, publicação de Fact e handoff, proposta de memória aprovada pelo usuário e persistência após restart. Banco original restaurado e evidências preservadas fora do repositório. Alterações ainda sem commit, push ou merge. O Event Bus unificado e Map Mode continuam etapas separadas.
+O E2E confirmou retry com snapshot atualizado, histórico antigo preservado, Lead e worker Codex, publicação de Fact e handoff, proposta de memória aprovada pelo usuário e persistência após restart. Banco original restaurado e evidências preservadas fora do repositório. Commits e push realizados; PR #4 aberta, ainda não mergeada. O Event Bus unificado e Map Mode continuam etapas separadas.
 
 ## 14. Usage, custos e limites (parcial)
 

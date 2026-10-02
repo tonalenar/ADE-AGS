@@ -199,4 +199,4 @@ Não demonstrado ao vivo: aprovações na tela de Missions. Exigem um worker Cla
 
 Mission Engine e Mission Runtime estão concluídos nesta base, com retry de Mission failed criando outro Run e preservando o histórico. Roles/Squads, model discovery, reasoning effort, PT-BR e Handoff Structured v0 reutilizam o mesmo runtime. O launcher interativo Windows também resolve o alvo dos shims npm, evitando executar `.cmd` como binário nativo (erro 193). Custos continuam parciais conforme os dados fornecidos por cada provider.
 
-Shared Memory v0 está **validada no WIP `feat/shared-memory-v0`**, com gates e E2E real concluídos em 01/10/2026: retry, MCP, Fact, handoff, proposta aprovada pelo usuário e persistência após restart. Alterações ainda sem commit ou merge. Ver [SHARED_MEMORY.md](./SHARED_MEMORY.md).
+Shared Memory v0 está **implementada e validada na PR #4 (`feat/shared-memory-v0`), aguardando merge**, com gates e E2E real concluídos em 01/10/2026: retry, MCP, Fact, handoff, proposta aprovada pelo usuário e persistência após restart. Commits e push realizados; PR #4 aberta, ainda não mergeada. Ver [SHARED_MEMORY.md](./SHARED_MEMORY.md).

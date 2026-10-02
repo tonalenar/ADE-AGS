@@ -1,6 +1,6 @@
 # Shared Memory v0
 
-**Estado: implementação validada no WIP `feat/shared-memory-v0`.** Gates e E2E real concluídos em 01/10/2026; alterações ainda sem commit, push ou merge.
+**Estado: implementação commitada e publicada na PR #4 (`feat/shared-memory-v0`), aguardando merge.** Gates e E2E real concluídos em 01/10/2026; commits e push realizados; PR #4 aberta, ainda não mergeada.
 
 Shared Memory mantém contexto local e aprovado entre Runs. A implementação reutiliza SQLite, Mission Runtime e o servidor MCP `controlcode`; não usa serviço cloud nem inferência para consolidar conteúdo.
 
@@ -16,7 +16,7 @@ Shared Memory mantém contexto local e aprovado entre Runs. A implementação re
 
 ## Migration v24
 
-`memory_entries` identifica owner, `scope` (`workspace` ou `mission`), key normalizada, kind, estado (`active` ou `deleted`), revisão ativa, prioridade e timestamps. Índices únicos separam as keys de Workspace e Mission. A constraint de scope exige `mission_id` apenas para Mission Memory.
+`memory_entries` identifica owner, `scope` (`workspace` ou `mission`), key normalizada, kind, estado armazenado (`active` ou `deleted`), revisão ativa, prioridade e timestamps. UI, IPC e MCP expõem `inactive` quando o placeholder `active` ainda não tem revisão aprovada; `deleted` permanece um tombstone distinto. Uma entry `inactive` com pending revision é uma proposta; sem pending revision, não possui conteúdo ativo e conserva o histórico rejeitado. A mesma key pode receber outra proposta create. Quotas ativas e snapshots exigem revisão aprovada. Índices únicos separam as keys de Workspace e Mission. A constraint de scope exige `mission_id` apenas para Mission Memory.
 
 `memory_revisions` é o histórico append-only de `create`, `update` e `delete`, com estado `proposed`, `approved` ou `rejected`, body, hash SHA-256 de kind/body, prioridade, ator, origem Run/Task/Fact, motivo, revisão esperada e timestamps. Um índice parcial permite uma única proposta pendente por entrada. Trigger impede alterar conteúdo ou origem e permite somente a decisão da proposta.
 

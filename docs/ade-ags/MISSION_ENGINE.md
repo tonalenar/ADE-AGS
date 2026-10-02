@@ -142,4 +142,4 @@ Repo git descartável em `%TEMP%\ade-mission-e2e`, Mission "Criar um arquivo hel
 4. Quarta tentativa: Claude Code com `claude-code/spacexai/grok-build-0.1` → `hello.txt` com `ADE AGS`, commit local; aprovações concedidas manualmente (Write, leitura, commit), push negado. Mission `done`, 1 / 1, US$ 0,115.
 5. ADE fechada e reaberta → as quatro Missions visíveis com status, gasto e resultado.
 
-Shared Memory v0 está **validada no WIP `feat/shared-memory-v0`**, com gates e E2E real concluídos em 01/10/2026: retry, MCP, Fact, handoff, proposta aprovada pelo usuário e persistência após restart. Alterações ainda sem commit ou merge. Ver [SHARED_MEMORY.md](./SHARED_MEMORY.md).
+Shared Memory v0 está **implementada e validada na PR #4 (`feat/shared-memory-v0`), aguardando merge**, com gates e E2E real concluídos em 01/10/2026: retry, MCP, Fact, handoff, proposta aprovada pelo usuário e persistência após restart. Commits e push realizados; PR #4 aberta, ainda não mergeada. Ver [SHARED_MEMORY.md](./SHARED_MEMORY.md).
