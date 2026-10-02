@@ -61,3 +61,26 @@ export interface CodexUsage {
   } | null;
   fetchedAt: number;
 }
+
+/** Ver `runs::ledger::AccountLimits`. `null` = sin límite. */
+export interface AccountLimits {
+  maxConcurrent: number | null;
+  dailyBudgetUsd: number | null;
+}
+
+/** Ver `runs::ledger::AccountUsage`: lo que usó una cuenta en el período pedido. */
+export interface AccountUsageSummary {
+  /** El id de la cuenta, o `system:<agente>` para la del sistema. */
+  accountKey: string;
+  agentId: string;
+  attempts: number;
+  failed: number;
+  tokensIn: number;
+  tokensOut: number;
+  /** `null` = ningún intento reportó costo (Codex): no es cero. */
+  costUsd: number | null;
+  lastAt: number | null;
+  limits: AccountLimits;
+  running: number;
+  spent24h: number;
+}

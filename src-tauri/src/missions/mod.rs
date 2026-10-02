@@ -13,6 +13,7 @@
 //! por eso. El único camino que lanza algo es `start`, y lo hace con el mismo
 //! `runs::start_orchestration` que usa la flota.
 
+pub(crate) mod review;
 pub(crate) mod store;
 #[cfg(test)]
 mod test;
@@ -37,6 +38,7 @@ use types::status;
 pub const MISSION_CHANGED: &str = "cc-mission-changed";
 
 pub(crate) fn notify<R: Runtime>(app: &AppHandle<R>, mission_id: &str) {
+    crate::bus::publish(Some(app), crate::bus::Publish::new("mission.changed").mission(mission_id));
     let _ = app.emit(MISSION_CHANGED, mission_id);
 }
 
@@ -282,20 +284,101 @@ pub fn mission_get(
 /// preguntarles versión y modelos.
 #[tauri::command]
 pub async fn mission_start(app: AppHandle, mission_id: String) -> Result<Mission, String> {
+    tauri::async_runtime::spawn_blocking(move || start_now(&app, &mission_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Arranca (o reintenta) una misión en el hilo actual. Bloquea: el ruteo puede sondear el
+/// roster. Lo usan la pantalla y la CLI (`ccode mission start|run`).
+pub(crate) fn start_now(app: &AppHandle, mission_id: &str) -> Result<Mission, String> {
+    let db = db_of(app)?;
+    let result = start(
+        &db,
+        mission_id,
+        |request| crate::runs::route_lead_now(&db, request),
+        |lead| crate::runs::launch_lead(app, lead),
+    );
+    // También si falló: un lead que no se pudo lanzar deja la misión en `failed`.
+    notify(app, mission_id);
+    result
+}
+
+/// Crea una misión en borrador. Para la CLI: la pantalla usa `mission_create`.
+pub(crate) fn create_now(app: &AppHandle, workspace_id: &str, input: &MissionInput) -> Result<Mission, String> {
+    let db = db_of(app)?;
+    let mission = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        create(&conn, workspace_id, input)?
+    };
+    notify(app, &mission.id);
+    Ok(mission)
+}
+
+/// El detalle de una misión: ella, sus runs y las tareas del run activo.
+pub(crate) fn detail_now(app: &AppHandle, mission_id: &str) -> Result<MissionDetail, String> {
+    let db = db_of(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    detail(&conn, mission_id)
+}
+
+/// Lo que entregó cada tarea aislada del run actual, y cómo va su revisión.
+#[tauri::command]
+pub async fn mission_review(app: AppHandle, mission_id: String) -> Result<review::MissionReview, String> {
     let db = db_of(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let result = start(
-            &db,
-            &mission_id,
-            |request| crate::runs::route_lead_now(&db, request),
-            |lead| crate::runs::launch_lead(&app, lead),
-        );
-        // También si falló: un lead que no se pudo lanzar deja la misión en `failed`.
-        notify(&app, &mission_id);
-        result
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        review::review(&conn, &mission_id)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn mission_task_diff(app: AppHandle, task_id: String) -> Result<String, String> {
+    let db = db_of(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        review::task_diff(&conn, &task_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Junta la entrega en la integración de la misión. Ver `review::accept`.
+#[tauri::command]
+pub async fn mission_accept_task(app: AppHandle, mission_id: String, task_id: String) -> Result<review::MergeOutcome, String> {
+    let db = db_of(&app)?;
+    let base = dirs::home_dir().ok_or("no se pudo resolver el home")?.join(".controlcode").join("worktrees");
+    let id = mission_id.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || review::accept(&db, &base, &id, &task_id))
+        .await
+        .map_err(|e| e.to_string())?;
+    notify(&app, &mission_id);
+    outcome
+}
+
+#[tauri::command]
+pub fn mission_reject_task(app: AppHandle, mission_id: String, task_id: String) -> Result<(), String> {
+    let db = db_of(&app)?;
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        review::set_review(&conn, &task_id, Some("rejected"), None)?;
+    }
+    notify(&app, &mission_id);
+    Ok(())
+}
+
+/// Lleva al proyecto lo aceptado. Ver `review::apply`.
+#[tauri::command]
+pub async fn mission_apply(app: AppHandle, mission_id: String) -> Result<review::MergeOutcome, String> {
+    let db = db_of(&app)?;
+    let id = mission_id.clone();
+    let outcome = tauri::async_runtime::spawn_blocking(move || review::apply(&db, &id))
+        .await
+        .map_err(|e| e.to_string())?;
+    notify(&app, &mission_id);
+    outcome
 }
 
 #[tauri::command]

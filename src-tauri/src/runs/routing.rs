@@ -321,14 +321,16 @@ fn pick_account(
             // 11 % no hay diferencia que valga repartir por ella, y así el desempate lo
             // deciden las tareas que ya están corriendo — que son las que van a gastar la
             // ventana en los próximos minutos. Un cupo desconocido cuenta como libre: es una
-            // cuenta que la flota todavía no usó.
+            // cuenta que la flota todavía no usó. Antes que todo, las que no están en su
+            // máximo de simultáneas: una llena solo se elige si todas lo están (y la tarea
+            // espera su turno al lanzar, ver `scheduler::tick`).
             usable.sort_by_key(|(order, a)| {
                 let used = a
                     .quota
                     .as_ref()
                     .and_then(|q| q.five_hour_at(now))
                     .unwrap_or(0.0);
-                ((used * 10.0).floor() as i64, a.running, *order)
+                (a.at_capacity, (used * 10.0).floor() as i64, a.running, *order)
             });
             match usable.first() {
                 Some((_, account)) => Ok((account.account_id.clone(), notes)),
@@ -351,6 +353,9 @@ fn account_problem(account: &RosterAccount, now: i64) -> Option<String> {
     };
     if !account.logged_in {
         return Some(format!("la cuenta {name} no tiene sesión iniciada"));
+    }
+    if let Some(limit) = &account.limit {
+        return Some(format!("la cuenta {name} {limit}"));
     }
     let quota = account.quota.as_ref()?;
     if !quota.exhausted_at(now) {

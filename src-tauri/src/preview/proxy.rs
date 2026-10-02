@@ -1268,6 +1268,58 @@ async fn start_proxy(url: &reqwest::Url) -> Result<Proxy, String> {
     Ok(Proxy { port: local_port, origin: proxy_origin, log, mocks, site })
 }
 
+/// A dónde manda un `Location`: resuelto contra la URL que lo devolvió, y solo si sigue
+/// siendo http(s). Un `javascript:` o un `file:` en una redirección no es un destino.
+pub(crate) fn redirect_target(base: &reqwest::Url, location: &str) -> Option<reqwest::Url> {
+    base.join(location.trim()).ok().filter(|next| matches!(next.scheme(), "http" | "https"))
+}
+
+/// Cuántas redirecciones se siguen al abrir una dirección.
+const MAX_SETTLE_HOPS: usize = 5;
+
+/// Sigue las redirecciones de una dirección REMOTA hasta donde termina (`google.com` →
+/// `www.google.com`, `http` → `https`), para abrir el proxy del origen que de verdad
+/// la sirve.
+///
+/// Hace falta porque el proxy es uno por origen y solo reescribe las redirecciones de su
+/// propio origen: una que sale a otro dominio la seguiría el iframe directo, sin pasar por
+/// acá, y el sitio —que casi siempre prohíbe que lo enmarquen— se vería bloqueado. Los
+/// hosts locales no se tocan: un servidor de desarrollo que redirige lo hace dentro de
+/// su origen. Si algo falla en el camino (red, un destino raro) se devuelve lo último que
+/// se supo, y la página se abre igual con lo que haya.
+async fn settle_redirects(start: reqwest::Url) -> reqwest::Url {
+    let Some(host) = start.host_str() else { return start };
+    if is_local_host(host) {
+        return start;
+    }
+    let fragment = start.fragment().map(str::to_string);
+    let mut url = start.clone();
+    for _ in 0..MAX_SETTLE_HOPS {
+        let sent = tokio::time::timeout(Duration::from_secs(8), REMOTE_CLIENT.get(url.clone()).send()).await;
+        let Ok(Ok(response)) = sent else { break };
+        if !response.status().is_redirection() {
+            break;
+        }
+        let Some(next) = response.headers().get(LOCATION).and_then(|v| v.to_str().ok()).and_then(|loc| redirect_target(&url, loc)) else {
+            break;
+        };
+        // Un destino local desde un sitio remoto es lo que haría un ataque de rebinding.
+        if next.host_str().is_some_and(is_local_host) {
+            break;
+        }
+        url = next;
+    }
+    // Solo cambia si terminó en otro origen: dentro del mismo, la redirección ya la maneja
+    // el proxy y conviene dejar la dirección tal como se pidió.
+    if url.origin() == start.origin() {
+        return start;
+    }
+    if url.fragment().is_none() {
+        url.set_fragment(fragment.as_deref());
+    }
+    url
+}
+
 /// Resuelve qué poner en el iframe para mostrar `url`, levantando su proxy si hace falta.
 /// `picker` es el script del selector ya compilado.
 #[tauri::command]
@@ -1283,6 +1335,7 @@ pub async fn preview_resolve(url: String, picker: String) -> Result<PreviewTarge
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err("Solo se pueden abrir direcciones http o https".to_string());
     }
+    let parsed = settle_redirects(parsed).await;
     let target_origin = parsed.origin().ascii_serialization();
 
     let proxy_origin = {

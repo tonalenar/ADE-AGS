@@ -174,6 +174,9 @@ pub fn tick(app: &AppHandle, run_id: &str) {
     // un intento que se sabe que va a fallar.
     let (to_launch, out_of_quota): (Vec<Task>, Vec<Task>) =
         to_launch.into_iter().partition(|t| !out_of_quota(&db, t));
+    // Y los topes propios de cada cuenta (simultáneas, presupuesto de 24 h, ver `ledger`), en
+    // orden: cada una que pasa ocupa un lugar para la siguiente de la misma cuenta.
+    let (to_launch, limited) = within_limits(&db, to_launch);
 
     for id in &skipped {
         super::supervisor::notify_changed(app, id);
@@ -224,8 +227,78 @@ pub fn tick(app: &AppHandle, run_id: &str) {
             }
         }
     }
+    for (task, limit) in limited {
+        let account = task.account_id.clone().unwrap_or_else(|| "la del sistema".into());
+        // Con cuenta automática, otra que tenga lugar. Si no hay, o si está fijada:
+        if task.auto_account && reroute_elsewhere(app, &db, &task, &format!("la cuenta {account} {}", limit.reason())).is_ok() {
+            moved = true;
+            continue;
+        }
+        match limit {
+            // Un lugar se libera en cuanto termina una tarea de esa cuenta: espera en la cola,
+            // y `on_task_finished` vuelve a mirar este run cuando eso pase.
+            super::ledger::Limit::Concurrency(_) => {
+                if let Ok(conn) = db.lock() {
+                    let _ = store::undispatch(&conn, &task.id);
+                }
+                waiting_for_capacity(run_id);
+            }
+            // Un presupuesto no se libera hasta que pasen horas: falla con el motivo.
+            super::ledger::Limit::Budget(reason) => {
+                if let Ok(conn) = db.lock() {
+                    let _ = store::fail_dispatched(&conn, &task.id, &format!("[presupuesto] la cuenta {account} {reason}"));
+                }
+                moved = true;
+            }
+        }
+        super::supervisor::notify_changed(app, &task.id);
+    }
     if again || moved {
         tick(app, run_id);
+    }
+}
+
+/// Separa las que su cuenta deja lanzar ahora de las que llegaron a un tope propio.
+fn within_limits(db: &DbConnection, tasks: Vec<Task>) -> (Vec<Task>, Vec<(Task, super::ledger::Limit)>) {
+    let Ok(conn) = db.lock() else { return (tasks, Vec::new()) };
+    let now = crate::util::now_ts();
+    let mut admitted: HashMap<String, i64> = HashMap::new();
+    let (mut ok, mut limited) = (Vec::new(), Vec::new());
+    for task in tasks {
+        let key = super::quota::account_key(&task.agent_id, task.account_id.as_deref());
+        let already = admitted.get(&key).copied().unwrap_or(0);
+        match super::ledger::blocked(&conn, &key, now, already) {
+            Some(limit) => limited.push((task, limit)),
+            None => {
+                *admitted.entry(key).or_insert(0) += 1;
+                ok.push(task);
+            }
+        }
+    }
+    (ok, limited)
+}
+
+lazy_static::lazy_static! {
+    /// Runs con tareas esperando que una cuenta llegue a tener lugar. Ese lugar se libera
+    /// cuando termina una tarea de la cuenta, que puede ser de OTRO run: por eso no alcanza
+    /// con volver a mirar el run de la tarea que terminó.
+    static ref WAITING: Mutex<std::collections::HashSet<String>> = Mutex::new(Default::default());
+}
+
+fn waiting_for_capacity(run_id: &str) {
+    if let Ok(mut set) = WAITING.lock() {
+        set.insert(run_id.to_string());
+    }
+}
+
+/// Vuelve a mirar los runs que esperaban lugar. Los que sigan sin lugar se vuelven a anotar.
+fn wake_waiting(app: &AppHandle, except: &str) {
+    let runs: Vec<String> = match WAITING.lock() {
+        Ok(mut set) => set.drain().filter(|r| r != except).collect(),
+        Err(_) => return,
+    };
+    for run in runs {
+        tick(app, &run);
     }
 }
 
@@ -300,6 +373,8 @@ pub fn on_task_finished(app: &AppHandle, task_id: &str) {
     }
     super::supervisor::notify_changed(app, task_id);
     tick(app, &run_id);
+    // Terminar libera un lugar en su cuenta, y puede haber tareas de otros runs esperándolo.
+    wake_waiting(app, &run_id);
 }
 
 /// La cuenta de una tarea falló: queda fuera del ruteo (hasta que se reinicie su ventana o
@@ -319,6 +394,14 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
             format!("la credencial de la cuenta {account} fue rechazada (hay que volver a loguearla)")
         }
     };
+    crate::bus::publish(
+        Some(app),
+        crate::bus::Publish::new("account.failure").task(&task.id).run(&task.run_id).data(serde_json::json!({
+            "accountKey": key,
+            "kind": if kind == FailureKind::RateLimited { "rate_limited" } else { "auth" },
+            "reason": reason,
+        })),
+    );
     let pinned = !task.auto_account;
     let lead = task.role.as_deref() == Some(role::LEAD);
     if pinned || lead {
