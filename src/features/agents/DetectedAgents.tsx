@@ -31,7 +31,7 @@ export function DetectedAgents() {
   const rescan = async () => {
     setScanning(true);
     try {
-      setDetectedAgents(await detectAgents());
+      setDetectedAgents(await detectAgents(true));
     } finally {
       setScanning(false);
     }
