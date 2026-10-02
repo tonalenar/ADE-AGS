@@ -61,6 +61,7 @@ pub fn list_accounts(conn: &rusqlite::Connection) -> Result<Vec<AgentAccount>, S
             accounts.push(account);
         }
     }
+    label_from_identity(conn, &mut accounts);
     Ok(accounts)
 }
 
@@ -256,9 +257,10 @@ pub fn agent_account_env(
 /// esta app, existía antes. Sin esto, la barra de cuentas mostraba los perfiles alternativos
 /// y escondía justo la que el usuario usa siempre.
 #[tauri::command]
-pub async fn system_accounts() -> Result<Vec<AgentAccount>, String> {
-    tokio::task::spawn_blocking(|| {
-        PROFILES
+pub async fn system_accounts(db: tauri::State<'_, DbConnection>) -> Result<Vec<AgentAccount>, String> {
+    let db = (*db).clone();
+    tokio::task::spawn_blocking(move || {
+        let mut accounts: Vec<AgentAccount> = PROFILES
             .iter()
             .filter(|spec| {
                 crate::agents::agent_command(spec.agent_id)
@@ -266,10 +268,22 @@ pub async fn system_accounts() -> Result<Vec<AgentAccount>, String> {
                     .unwrap_or(false)
             })
             .filter_map(|spec| system_account(spec.agent_id))
-            .collect()
+            .collect();
+        if let Ok(conn) = db.lock() {
+            label_from_identity(&conn, &mut accounts);
+        }
+        accounts
     })
     .await
     .map_err(|e| e.to_string())
+}
+
+/// Las cuentas cuya TUI no deja el mail en un archivo legible (Codex) muestran el de la
+/// última verificación (ver `health::refresh_codex_account`).
+fn label_from_identity(conn: &rusqlite::Connection, accounts: &mut [AgentAccount]) {
+    for account in accounts.iter_mut().filter(|a| a.label.is_none()) {
+        account.label = super::health::load_identity(conn, &account.id).and_then(|i| i.email);
+    }
 }
 
 /// La cuenta principal de UNA TUI, esté instalada o no. `None` si no soporta cuentas.

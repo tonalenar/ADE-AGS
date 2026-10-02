@@ -141,6 +141,42 @@ pub(super) fn discover_codex(
     collect_codex_pages(|cursor| server.model_list(cursor))
 }
 
+/// Quién es una cuenta de Codex y cuánto cupo le queda, según su `app-server`.
+#[derive(Debug, Clone, Default)]
+pub(crate) struct CodexAccount {
+    pub email: Option<String>,
+    /// `plus`, `pro`, `team`… o `None` con API key.
+    pub plan: Option<String>,
+    /// `chatgpt` o `apiKey`.
+    pub auth: Option<String>,
+    pub quota: Option<super::quota::Quota>,
+}
+
+/// `account/read` y `account/rateLimits/read` en un solo `app-server`. Ninguna de las dos
+/// gasta cupo. Con API key no hay ventanas de límite: `quota` queda en `None`.
+pub(crate) fn codex_account(program: &str, env: &HashMap<String, String>) -> Result<CodexAccount, String> {
+    let mut command = account_command(program, &["app-server", "--listen", "stdio://"], env);
+    command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
+    }
+    let child = command.spawn().map_err(|_| "Codex app-server could not be started".to_string())?;
+    let mut server = CodexServer::new(child)?;
+    server.initialize()?;
+    let read = server.call("account/read", json!({ "refreshToken": false }))?;
+    let account = read.get("account");
+    let text = |key: &str| {
+        account.and_then(|a| a.get(key)).and_then(Value::as_str).filter(|s| !s.is_empty()).map(str::to_string)
+    };
+    let quota = server
+        .call("account/rateLimits/read", json!({}))
+        .ok()
+        .and_then(|limits| super::quota::parse_codex_rate_limits(&limits));
+    Ok(CodexAccount { email: text("email"), plan: text("planType"), auth: text("type"), quota })
+}
+
 pub(super) fn discover_claude(
     program: &str,
     env: &HashMap<String, String>,
@@ -661,6 +697,13 @@ impl CodexServer {
         }))?;
         let _ = self.response(id, "initialize")?;
         self.send(&json!({ "method": "initialized", "params": {} }))
+    }
+
+    fn call(&mut self, method: &str, params: Value) -> Result<Value, String> {
+        let id = self.next_id;
+        self.next_id += 1;
+        self.send(&json!({ "id": id, "method": method, "params": params }))?;
+        self.response(id, method)
     }
 
     fn model_list(&mut self, cursor: Option<&str>) -> Result<String, String> {

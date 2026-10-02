@@ -39,3 +39,25 @@ export interface AccountCapableAgent {
   envVar: string;
   installed: boolean;
 }
+
+/** Ver `runs::quota::QuotaWindow`: utilización de 0 a 1 (puede pasarse con excedente). */
+export interface QuotaWindow {
+  utilization: number;
+  resetsAt: number | null;
+}
+
+/** Ver `accounts::health::CodexUsage`. */
+export interface CodexUsage {
+  email: string | null;
+  plan: string | null;
+  /** `chatgpt` o `apiKey`: con API key no hay ventanas de límite. */
+  auth: string | null;
+  quota: {
+    fiveHour: QuotaWindow | null;
+    sevenDay: QuotaWindow | null;
+    rejected: boolean;
+    rejectedUntil: number | null;
+    overage: boolean;
+  } | null;
+  fetchedAt: number;
+}

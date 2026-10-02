@@ -251,6 +251,9 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let app = app.clone();
     let task_id = task.id.clone();
     let quota_key = super::quota::account_key(&task.agent_id, task.account_id.as_deref());
+    // Codex no informa su cupo en el stream de `exec --json` (Claude sí, ver `quota`): al
+    // terminar se le pregunta a su `app-server`, con el mismo entorno de la cuenta.
+    let codex_account_env = (task.agent_id == "codex").then(|| launch.env.clone());
     let imposed_session = session_id.clone();
 
     tokio::spawn(async move {
@@ -328,6 +331,13 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         }
         emit_event(&app, &task_id, AgentEvent::Finished { outcome });
         emit_changed(&app, &task_id);
+
+        if let Some(env) = codex_account_env {
+            let (db, key) = (db.clone(), quota_key.clone());
+            // Aparte y sin esperarlo: levantar el `app-server` tarda un segundo, y el cupo no
+            // cambia el resultado de esta tarea, solo cómo se rutean las próximas.
+            tokio::task::spawn_blocking(move || crate::accounts::refresh_codex_account(&db, &key, &env));
+        }
         // Lo que dependía de esta tarea puede arrancar (o no va a poder nunca).
         super::scheduler::on_task_finished(&app, &task_id);
     });

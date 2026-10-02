@@ -9,7 +9,7 @@
  */
 import { invoke } from "@tauri-apps/api/core";
 
-import type { AccountCapableAgent, AccountHealth, AgentAccount } from "./types";
+import type { AccountCapableAgent, AccountHealth, AgentAccount, CodexUsage } from "./types";
 
 export const listAccounts = () => invoke<AgentAccount[]>("list_agent_accounts");
 export const listSystemAccounts = () => invoke<AgentAccount[]>("system_accounts");
@@ -57,3 +57,6 @@ export type AntigravityAccountDiscovery = {
 };
 export const discoverAntigravityAccount = (accountId: string) =>
   invoke<AntigravityAccountDiscovery>("antigravity_account_discovery", { accountId });
+
+/** Cupo, mail y plan de una cuenta de Codex, preguntados a su `app-server` en el momento. */
+export const codexAccountUsage = (accountId: string) => invoke<CodexUsage>("codex_account_usage", { accountId });

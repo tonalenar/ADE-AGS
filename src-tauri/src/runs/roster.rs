@@ -616,6 +616,12 @@ pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
                     .chain(rows.map(|a| (Some(a.id.clone()), a)))
                 {
                     let key = quota::account_key(def.id, account_id.as_deref());
+                    let label = account
+                        .label
+                        .clone()
+                        // Codex no deja el mail en un archivo legible: el de la última
+                        // verificación (ver `accounts::refresh_codex_account`).
+                        .or_else(|| crate::accounts::load_identity(&conn, &key).and_then(|i| i.email));
                     let catalog = probed
                         .catalogs
                         .get(&(def.id.to_string(), account_id.clone()))
@@ -630,7 +636,7 @@ pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
                         account_id,
                         key,
                         name: account.name.clone(),
-                        label: account.label.clone(),
+                        label,
                         logged_in: account.logged_in,
                         models: catalog.models,
                         model_discovery: catalog.state,

@@ -3908,3 +3908,61 @@ mod politica_del_lead {
 fn empty_plan_does_not_count_as_delegation() {
     assert!(super::plan::validate(&[], &Default::default()).unwrap_err().contains("no tiene tareas"));
 }
+
+/// La respuesta real de `account/rateLimits/read` (Codex 0.159, cuenta Plus).
+#[test]
+fn el_cupo_de_codex_se_lee_como_el_de_claude() {
+    use super::quota::parse_codex_rate_limits;
+    let real = serde_json::json!({
+        "ordinaryUsageAllowed": true,
+        "rateLimits": {
+            "limitId": "codex",
+            "primary": { "usedPercent": 0, "windowDurationMins": 300, "resetsAt": 1790962038 },
+            "secondary": { "usedPercent": 49, "windowDurationMins": 10080, "resetsAt": 1791400111 },
+            "credits": { "hasCredits": false, "unlimited": false, "balance": "0" },
+            "rateLimitReachedType": null
+        }
+    });
+    let quota = parse_codex_rate_limits(&real).unwrap();
+    let five = quota.five_hour.as_ref().unwrap();
+    let week = quota.seven_day.as_ref().unwrap();
+    assert_eq!((five.utilization, five.resets_at), (0.0, Some(1790962038)));
+    assert_eq!((week.utilization, week.resets_at), (0.49, Some(1791400111)));
+    assert!(!quota.rejected && !quota.overage);
+    assert!(!quota.exhausted_at(1790950000));
+
+    // Las ventanas se reconocen por su duración, no por si vienen como primary o secondary.
+    let mut swapped = real.clone();
+    let (primary, secondary) = (real["rateLimits"]["primary"].clone(), real["rateLimits"]["secondary"].clone());
+    swapped["rateLimits"]["primary"] = secondary;
+    swapped["rateLimits"]["secondary"] = primary;
+    let q = parse_codex_rate_limits(&swapped).unwrap();
+    assert_eq!(q.five_hour.unwrap().utilization, 0.0);
+    assert_eq!(q.seven_day.unwrap().utilization, 0.49);
+
+    // Llena y bloqueada: el ruteo la saltea hasta que se reinicia la ventana llena.
+    let blocked = serde_json::json!({
+        "ordinaryUsageAllowed": false,
+        "rateLimits": {
+            "primary": { "usedPercent": 100, "windowDurationMins": 300, "resetsAt": 1790962038 },
+            "secondary": { "usedPercent": 60, "windowDurationMins": 10080, "resetsAt": 1791400111 },
+            "credits": { "hasCredits": false, "unlimited": false },
+            "rateLimitReachedType": "primary"
+        }
+    });
+    let q = parse_codex_rate_limits(&blocked).unwrap();
+    assert!(q.rejected);
+    assert_eq!(q.rejected_until, Some(1790962038));
+    assert!(q.exhausted_at(1790950000));
+    assert!(!q.exhausted_at(1790962039), "pasado el reinicio vuelve a estar disponible");
+
+    // Con créditos sigue pasado el 100 %: es excedente, no está agotada.
+    let mut with_credits = blocked.clone();
+    with_credits["ordinaryUsageAllowed"] = serde_json::json!(true);
+    with_credits["rateLimits"]["rateLimitReachedType"] = serde_json::Value::Null;
+    with_credits["rateLimits"]["credits"]["hasCredits"] = serde_json::json!(true);
+    assert!(!parse_codex_rate_limits(&with_credits).unwrap().exhausted_at(1790950000));
+
+    // Con API key no hay ventanas.
+    assert!(parse_codex_rate_limits(&serde_json::json!({ "rateLimits": { "primary": null, "secondary": null } })).is_none());
+}
