@@ -30,6 +30,56 @@ struct PtyBuffer {
 type PtyRegistry = Arc<Mutex<HashMap<u32, PtySession>>>;
 type PtyBuffers = Arc<Mutex<HashMap<u32, PtyBuffer>>>;
 
+/// Texto a partir de lecturas sueltas de bytes, sin partir caracteres.
+///
+/// Una lectura del PTY corta donde cae, y un carácter de varios bytes (acentos, emoji, las
+/// cajas que dibujan las TUIs) puede quedar mitad en una y mitad en la siguiente. Decodificar
+/// cada lectura por separado convertía las dos mitades en `�`. Acá los bytes de un carácter
+/// incompleto al final se guardan para la próxima lectura; lo inválido de verdad sigue
+/// saliendo como `�`.
+#[derive(Default)]
+pub(crate) struct Utf8Stream {
+    pending: Vec<u8>,
+}
+
+impl Utf8Stream {
+    pub(crate) fn push(&mut self, chunk: &[u8]) -> String {
+        self.pending.extend_from_slice(chunk);
+        let complete = complete_utf8_len(&self.pending);
+        let text = String::from_utf8_lossy(&self.pending[..complete]).into_owned();
+        self.pending.drain(..complete);
+        text
+    }
+
+    /// Lo que quedó pendiente al cerrarse el PTY: ya no va a completarse.
+    pub(crate) fn finish(&mut self) -> String {
+        let text = String::from_utf8_lossy(&self.pending).into_owned();
+        self.pending.clear();
+        text
+    }
+}
+
+/// Hasta dónde `bytes` se puede decodificar sin cortar un carácter que todavía puede
+/// completarse: todo, salvo un comienzo de secuencia multibyte incompleto al final.
+fn complete_utf8_len(bytes: &[u8]) -> usize {
+    // Un carácter ocupa a lo sumo 4 bytes: solo los últimos 3 pueden ser uno a medias.
+    for back in 1..=bytes.len().min(3) {
+        let i = bytes.len() - back;
+        let b = bytes[i];
+        if b & 0b1100_0000 == 0b1000_0000 {
+            continue; // byte de continuación: el comienzo está más atrás
+        }
+        let needed = match b {
+            0b1100_0000..=0b1101_1111 => 2,
+            0b1110_0000..=0b1110_1111 => 3,
+            0b1111_0000..=0b1111_0111 => 4,
+            _ => return bytes.len(), // ASCII o inválido: nada que esperar
+        };
+        return if back < needed { i } else { bytes.len() };
+    }
+    bytes.len()
+}
+
 /// Tope del buffer de scrollback que se conserva por PTY, para poder reproducirlo
 /// cuando una tab se mueve a otra ventana sin matar el proceso.
 const MAX_BUFFER_BYTES: usize = 3 * 1024 * 1024;
@@ -297,7 +347,11 @@ pub async fn pty_create(
     // toda la vida del proceso. Con unas pocas terminales abiertas se agotan los workers y
     // el resto de tareas async de la app deja de progresar.
     tokio::task::spawn_blocking(move || {
-        let mut buf = [0u8; 4096];
+        // 64 KB y no 4: `read` devuelve lo que haya, así que con poca salida la latencia es
+        // la misma, y con mucha (un build, un `npm install`) cada evento al webview lleva
+        // hasta 16 veces más — cada uno es un JSON y un `eval` en el webview.
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut text = Utf8Stream::default();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
@@ -306,11 +360,17 @@ pub async fn pty_create(
                     // Modo push del orquestador (Fase 9): si nadie observa esta tab, esto
                     // es una lectura atómica y vuelve.
                     crate::orchestrator::watch::observe(id, &buf[..n]);
-                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    app_clone.emit(&event_name, PtyDataPayload { data }).ok();
+                    let data = text.push(&buf[..n]);
+                    if !data.is_empty() {
+                        app_clone.emit(&event_name, PtyDataPayload { data }).ok();
+                    }
                 }
                 Err(_) => break,
             }
+        }
+        let rest = text.finish();
+        if !rest.is_empty() {
+            app_clone.emit(&event_name, PtyDataPayload { data: rest }).ok();
         }
         // Se recoge el estado real del hijo antes de avisar al frontend. Sin este `wait`
         // el proceso queda además como zombie hasta que muere la app, porque nadie
