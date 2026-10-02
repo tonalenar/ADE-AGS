@@ -108,6 +108,22 @@ fn describe(t: &OpenTab) -> Value {
     json!({ "id": t.id, "name": t.name, "agent": t.agent, "cwd": t.cwd })
 }
 
+/// `--raw`: llega como flag suelto (`true`), como `--raw true` o como bool.
+pub(crate) fn is_raw(args: &Value) -> bool {
+    match args.get("raw") {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::String(s)) => matches!(s.as_str(), "" | "true" | "1" | "yes"),
+        _ => false,
+    }
+}
+
+/// Lo que se escribe en la terminal del otro: el texto con su encabezado ("de quién viene y
+/// cómo contestar") o, con `--raw`, el texto tal cual — para mandarle a una TUI un comando
+/// suyo (`/compact`, `/clear`) que un encabezado delante rompería.
+pub(crate) fn outgoing(from_name: &str, text: &str, expects_reply: bool, raw: bool) -> String {
+    if raw { text.to_string() } else { framed(from_name, text, expects_reply) }
+}
+
 /// El encabezado con el que llega un mensaje: quién lo manda y cómo contestar.
 pub(crate) fn framed(from_name: &str, text: &str, expects_reply: bool) -> String {
     let how = if expects_reply {
@@ -302,7 +318,7 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
 
     // No se interrumpe a quien está a mitad de un turno: se espera a que se calle un poco.
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(60), false);
-    submit_prompt(pty, &framed(&from_name, &text, false))?;
+    submit_prompt(pty, &outgoing(&from_name, &text, false, is_raw(args)))?;
     Ok(json!({ "peer": describe(target), "sent": true }))
 }
 
@@ -339,7 +355,7 @@ pub(crate) fn parse_batch(raw: &Value) -> Result<Vec<(String, String)>, String> 
 
 /// Uma pergunta a um agente conectado, esperando o turno dele. É o que `peer ask` faz com
 /// um destino e o que `peer ask --batch` faz com vários ao mesmo tempo.
-fn ask_one(app: &AppHandle, target: &OpenTab, from_name: &str, text: &str, timeout: Duration) -> Result<Value, String> {
+fn ask_one(app: &AppHandle, target: &OpenTab, from_name: &str, text: &str, timeout: Duration, raw: bool) -> Result<Value, String> {
     let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
 
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(60), false);
@@ -348,7 +364,7 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_name: &str, text: &str, timeo
     let mark = screen(app, target, None, 1)?.get("end").and_then(Value::as_u64);
     let before = crate::terminal::output_total(pty).unwrap_or(0);
 
-    submit_prompt(pty, &framed(from_name, text, true))?;
+    submit_prompt(pty, &outgoing(from_name, text, true, raw))?;
     let finished = wait_turn(pty, before, timeout);
 
     let reply = screen(app, target, mark, 200)?;
@@ -368,13 +384,13 @@ pub(super) fn peer_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from_name = me.map(|m| m.name).unwrap_or_else(|| from.clone());
 
     if let Some(batch) = args.get("batch") {
-        return ask_batch(app, &list, &from_name, batch, timeout);
+        return ask_batch(app, &list, &from_name, batch, timeout, is_raw(args));
     }
 
     let to = arg_str(args, "to")?;
     let text = arg_str(args, "text")?;
     let target = resolve_peer(&list, &to)?.clone();
-    ask_one(app, &target, &from_name, &text, timeout)
+    ask_one(app, &target, &from_name, &text, timeout, is_raw(args))
 }
 
 /// `peer ask --batch`: pergunta a vários ao mesmo tempo e devolve cada resposta. Todos os
@@ -386,6 +402,7 @@ fn ask_batch(
     from_name: &str,
     batch: &Value,
     timeout: Duration,
+    raw: bool,
 ) -> Result<Value, String> {
     let asks = parse_batch(batch)?;
     let mut targets: Vec<(OpenTab, String)> = Vec::new();
@@ -400,7 +417,7 @@ fn ask_batch(
     let results: Vec<Value> = std::thread::scope(|scope| {
         let handles: Vec<_> = targets
             .iter()
-            .map(|(target, text)| scope.spawn(move || ask_one(app, target, from_name, text, timeout)))
+            .map(|(target, text)| scope.spawn(move || ask_one(app, target, from_name, text, timeout, raw)))
             .collect();
         handles
             .into_iter()
@@ -507,6 +524,23 @@ mod test {
         assert!(parse_batch(&json!({})).unwrap_err().contains("vazio"));
         assert!(parse_batch(&json!({ "A": "" })).unwrap_err().contains("'A'"));
         assert!(parse_batch(&json!({ "A": 3 })).unwrap_err().contains("'A'"));
+    }
+
+    #[test]
+    fn con_raw_el_texto_viaja_tal_cual_y_sin_raw_con_su_encabezado() {
+        assert_eq!(outgoing("Líder", "/compact", true, true), "/compact");
+        assert_eq!(outgoing("Líder", "/compact", false, true), "/compact");
+        assert!(outgoing("Líder", "oi", true, false).starts_with("[Mensagem de Líder via ADE AGS] oi"));
+    }
+
+    #[test]
+    fn raw_llega_como_flag_suelto_texto_o_bool() {
+        assert!(is_raw(&json!({ "raw": true })));
+        assert!(is_raw(&json!({ "raw": "" })));
+        assert!(is_raw(&json!({ "raw": "true" })));
+        assert!(!is_raw(&json!({ "raw": false })));
+        assert!(!is_raw(&json!({ "raw": "no" })));
+        assert!(!is_raw(&json!({})));
     }
 
     #[test]

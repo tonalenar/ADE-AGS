@@ -375,6 +375,10 @@ ccode peer check Backend --lines 40           # what is on its screen right now
   `ccode peer ask --batch '{"Reviewer": "review src/auth", "Tests": "run the suite"}'`
   It returns one result per agent (`reply`, `finished`, or an `error` for just that one).
   Names are checked first: one wrong name fails the whole batch before anyone is asked.
+- **`--raw`** (on `ask`, `ask --batch` and `tell`) types the text exactly as you wrote it, without
+  the `[Mensagem de <name> via ADE AGS]` header and the reply hint. Use it to hand a TUI one of
+  its own commands (`ccode peer ask --raw Backend "/compact"`), where a header in front would
+  turn the command into plain text. The other agent will not know the text came from you.
 - **`tell` does not wait.** Use it to hand over information or a task you will follow up
   on; the other agent can answer with `ccode peer tell <your name> "..."`.
 - Messages arrive prefixed with `[Mensagem de <name> via ADE AGS]`. When one reaches you,
