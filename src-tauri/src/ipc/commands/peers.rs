@@ -32,7 +32,7 @@ pub(crate) struct OpenTab {
     pub window: String,
 }
 
-fn open_tabs(app: &AppHandle) -> Result<Vec<OpenTab>, String> {
+pub(super) fn open_tabs(app: &AppHandle) -> Result<Vec<OpenTab>, String> {
     let listed = tab_list(app)?;
     let rows = listed.get("tabs").and_then(Value::as_array).cloned().unwrap_or_default();
     Ok(rows
@@ -57,7 +57,7 @@ fn open_tabs(app: &AppHandle) -> Result<Vec<OpenTab>, String> {
         .collect())
 }
 
-fn caller(args: &Value) -> Result<String, String> {
+pub(super) fn caller(args: &Value) -> Result<String, String> {
     arg_str_opt(args, "from").filter(|s| !s.is_empty()).ok_or_else(|| {
         "Este comando só funciona dentro de um terminal do ADE AGS (falta ADE_TAB_ID).".to_string()
     })

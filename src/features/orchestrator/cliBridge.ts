@@ -11,7 +11,7 @@ import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
 import { respondToCli } from "./ipc";
 import { screenOf } from "@/features/terminal/terminalRegistry";
-import { boardKey, canvasActions } from "@/features/canvas/store";
+import { boardKey, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
 
 /**
  * Lado frontend del puente de la CLI (ver `ipc/bridge.rs`).
@@ -234,6 +234,35 @@ function handleScreen(args: Record<string, unknown>) {
   return screen;
 }
 
+
+/**
+ * Un agente creando o escribiendo una nota (`ccode note …`). El permiso ya lo verificó el
+ * backend. Se guarda al instante: el agente puede leerla en su comando siguiente, y el
+ * backend lee del archivo.
+ */
+async function handleNote(args: Record<string, unknown>) {
+  const op = str(args, "op");
+  if (op === "create") {
+    const cwd = str(args, "cwd");
+    const near = str(args, "near");
+    if (!cwd || !near) throw new Error("Faltan cwd o near");
+    const key = boardKey(cwd);
+    const created = canvasActions.addNote(key, { name: str(args, "name"), content: str(args, "content") ?? "", near });
+    await flushSave(key);
+    return created;
+  }
+  if (op === "write") {
+    const key = str(args, "key");
+    const id = str(args, "id");
+    const content = str(args, "content");
+    if (!key || !id || content === undefined) throw new Error("Faltan key, id o content");
+    if (!useCanvasStore.getState().boards[key]?.notes[id]) throw new Error("A nota não existe mais.");
+    canvasActions.updateNote(key, id, { content });
+    await flushSave(key);
+    return { ok: true };
+  }
+  throw new Error(`Operación de nota desconocida: ${op}`);
+}
 async function handle(command: string, args: Record<string, unknown>): Promise<unknown> {
   switch (command) {
     case "tab.create": return handleCreateTab(args);
@@ -245,6 +274,7 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "canvas.connect": return handleCanvas(args, (key, a, b) => canvasActions.connect(key, a, b));
     case "canvas.disconnect": return handleCanvas(args, (key, a, b) => canvasActions.disconnectPair(key, a, b));
     case "canvas.recruited": return handleRecruited(args);
+    case "canvas.note": return handleNote(args);
     default: throw new Error(`El frontend no sabe atender '${command}'`);
   }
 }

@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.8.0
+version: 1.9.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -408,6 +408,30 @@ ccode peer disconnect Backend Tests
 - Coordinate, don't micromanage: give each recruit one clear task, use `peer ask` when you
   need the answer to continue and `peer tell` when you don't, and check on long work with
   `peer check` instead of asking again.
+
+### Notes on the canvas
+
+Notes are text nodes on the canvas, visible to the user. You can read and write the notes
+**connected to you** (an orchestrator: also those connected to anyone on its team). Use one
+to keep a plan, a checklist or findings where the user can see and edit them, or to share
+a spec between agents connected to the same note.
+
+```bash
+ccode notes                                   # the notes you reach
+ccode note create "- [ ] tests" --name Plan  # next to you, already connected
+ccode note create --file plan.md --name Plan  # multi-line content: write a file first
+ccode note read Plan                          # with line numbers
+ccode note read Plan 10 20                    # 20 lines starting at line 10
+ccode note write Plan --file plan.md          # replace the whole content
+ccode note edit Plan "- [ ] tests" "- [x] tests"   # replace a snippet that appears once
+```
+
+- Read before you write: the user may have edited the note since your last read.
+- Prefer `edit` for small changes; it fails if the snippet is missing or appears more than
+  once, so you never change the wrong line.
+- `--name` gives a stable name. If it's taken, the note gets `Plan 2`: use the name that
+  `create` returns.
+- There is no delete command: removing a note stays with the user.
 
 ## Windows and workspaces
 

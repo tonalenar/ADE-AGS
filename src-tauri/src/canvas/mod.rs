@@ -11,7 +11,7 @@
 //! consultas por campo. Un JSON en `~/.controlcode/canvas.json` alcanza, y no le suma una
 //! migración al schema de SQLite.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -43,6 +43,30 @@ pub struct Board {
     /// Tabs marcadas como orquestadoras: alcanzan a todo su equipo, no solo a sus vecinas.
     #[serde(default)]
     pub orchestrators: Vec<String>,
+    /// Las notas del canvas, por id (`note-…`). Tienen que estar tipadas acá: si no, guardar
+    /// el canvas las perdería al pasar por este struct.
+    #[serde(default)]
+    pub notes: BTreeMap<String, Note>,
+}
+
+/// Una nota del canvas. Los agentes conectados a ella la leen y la escriben
+/// (`ccode note …`, ver `ipc::commands::notes`).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct Note {
+    pub name: String,
+    #[serde(default)]
+    pub content: String,
+    /// Posición y tamaño: son del frontend, acá no se interpretan.
+    #[serde(default, rename = "box")]
+    pub r#box: Value,
+}
+
+/// Los ids de nota llevan este prefijo (el frontend los crea así): nunca chocan con un id
+/// de tab, y se sabe qué punta de una conexión es una nota sin buscarla.
+pub const NOTE_PREFIX: &str = "note-";
+
+pub fn is_note(id: &str) -> bool {
+    id.starts_with(NOTE_PREFIX)
 }
 
 pub type Boards = HashMap<String, Board>;
@@ -94,7 +118,36 @@ pub fn save_board(key: &str, board: Board) -> Result<(), String> {
 }
 
 /// Las tabs conectadas con `tab`, en cualquier canvas. Sin repetidos y sin ella misma.
+///
+/// Las notas no cuentan: una nota no es alguien a quien hablarle, y dos agentes conectados
+/// a la misma nota comparten esa nota, no un canal entre ellos.
 pub fn peers_of(boards: &Boards, tab: &str) -> BTreeSet<String> {
+    linked(boards, tab).into_iter().filter(|id| !is_note(id)).collect()
+}
+
+/// Las notas que `tab` puede leer y escribir: las conectadas con ella y, si es
+/// orquestadora, también las de cualquiera de su equipo. Como `(clave del canvas, id)`.
+pub fn notes_for(boards: &Boards, tab: &str) -> Vec<(String, String)> {
+    let mut owners = BTreeSet::from([tab.to_string()]);
+    if is_orchestrator(boards, tab) {
+        owners.extend(team_of(boards, tab));
+    }
+    let mut out = BTreeSet::new();
+    for (key, board) in boards {
+        for owner in &owners {
+            for e in &board.edges {
+                let other = if &e.a == owner { &e.b } else if &e.b == owner { &e.a } else { continue };
+                if is_note(other) && board.notes.contains_key(other) {
+                    out.insert((key.clone(), other.clone()));
+                }
+            }
+        }
+    }
+    out.into_iter().collect()
+}
+
+/// Todo lo conectado con `tab` (tabs y notas), en cualquier canvas.
+fn linked(boards: &Boards, tab: &str) -> BTreeSet<String> {
     boards
         .values()
         .flat_map(|b| b.edges.iter())

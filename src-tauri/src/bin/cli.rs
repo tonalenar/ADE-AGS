@@ -56,6 +56,14 @@ AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
   peer connect <a> <b>                        Conecta dos agentes del equipo
   peer disconnect <a> <b>                     Los desconecta
 
+NOTAS DEL CANVAS — las conectadas con esta terminal (orquestador: las del equipo)
+  notes                                       Las notas que alcanzás
+  note create [\"texto\"] [--name <n>]          Crea una nota a tu lado, ya conectada
+              [--file <ruta>]                 · el contenido desde un archivo
+  note read <nota> [desde] [cantidad]         La lee con números de línea
+  note write <nota> \"texto\" [--file <ruta>]   Reemplaza todo el contenido
+  note edit <nota> \"viejo\" \"nuevo\"           Cambia un trecho que aparece UNA vez
+
 OBSERVAR TABS (modo push — evita el polling)
   watch add <id> [--idle 20]                  Empieza a observar una tab
   watch remove <id>                           Deja de observarla
@@ -246,9 +254,9 @@ impl CliError {
     }
 }
 
-/// Agrega `from` a los comandos `peer.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
+/// Agrega `from` a los comandos `peer.*` y `note.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    if !command.starts_with("peer.") || parsed.get("from").is_some() {
+    if !(command.starts_with("peer.") || command.starts_with("note.")) || parsed.get("from").is_some() {
         return parsed;
     }
     if let (Ok(tab), Some(map)) = (std::env::var("ADE_TAB_ID"), parsed.as_object_mut()) {
@@ -265,6 +273,7 @@ fn shortcut(word: &str) -> Option<&'static str> {
         "prelaunch" => Some("prelaunch.list"),
         "skills" => Some("skill.list"),
         "peers" => Some("peer.list"),
+        "notes" => Some("note.list"),
         _ => None,
     }
 }
@@ -292,6 +301,11 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "peer.check" => &["to"],
         "peer.recruit" => &["name"],
         "peer.connect" | "peer.disconnect" => &["a", "b"],
+        // `ccode note read Plano 10 20`: desde la línea 10, 20 líneas.
+        "note.create" => &["content"],
+        "note.read" => &["name", "start", "count"],
+        "note.write" => &["name", "content"],
+        "note.edit" => &["name", "old", "new"],
         _ => &[],
     }
 }
@@ -425,7 +439,7 @@ fn value_for(key: &str, raw: &str) -> Value {
         ),
         // Un número mal escrito se manda tal cual como string: el backend lo rechaza con
         // un mensaje que nombra el flag, mejor que un "0" silencioso acá.
-        "lines" | "timeout" | "max" | "idle" => {
+        "lines" | "timeout" | "max" | "idle" | "start" | "count" => {
             raw.parse::<u64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.into()))
         }
         _ => Value::String(raw.to_string()),

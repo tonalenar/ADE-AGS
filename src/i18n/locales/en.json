@@ -1669,5 +1669,12 @@
   "palette.cmd.tabsMode": "Switch to tabs",
   "canvas.orchestrator": "Orchestrator",
   "canvas.orchestratorOn": "Make orchestrator: reaches the whole team and can recruit and connect agents",
-  "canvas.orchestratorOff": "Stop being orchestrator"
+  "canvas.orchestratorOff": "Stop being orchestrator",
+  "canvas.addNote": "+ Note",
+  "canvas.addNoteHint": "New note in the middle of the view. Connect it to an agent so it can read and write it (ccode note).",
+  "canvas.noteDefaultName": "Note",
+  "canvas.noteName": "Note name",
+  "canvas.noteDelete": "Delete note",
+  "canvas.noteDeleteConfirm": "Delete?",
+  "canvas.notePlaceholder": "Write here. Connected agents read and edit this note with `ccode note`."
 }

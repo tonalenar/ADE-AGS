@@ -4,7 +4,10 @@ import { create } from "zustand";
 import { useTabsStore } from "@/features/tabs/store";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
-import { addEdge, emptyBoard, placeBelow, reconcile, removeEdge, removeEdgeBetween, toggleOrchestrator, type Board } from "./board";
+import {
+  NOTE_PREFIX, addEdge, addNote, emptyBoard, placeBelow, reconcile, removeEdge, removeEdgeBetween, removeNote,
+  toggleOrchestrator, updateNote, type Board, type CanvasNote,
+} from "./board";
 import type { Box, Rect, Viewport } from "./geometry";
 
 export type WorkMode = "tabs" | "canvas";
@@ -66,12 +69,29 @@ function updateBoard(key: string, fn: (b: Board) => Board): void {
 }
 
 export const canvasActions = {
-  moveNode: (key: string, tabId: string, patch: Partial<Box>) =>
+  moveNode: (key: string, id: string, patch: Partial<Box>) =>
     updateBoard(key, (b) => {
-      const box = b.nodes[tabId];
+      const note = b.notes[id];
+      if (note) return updateNote(b, id, { box: { ...note.box, ...patch } });
+      const box = b.nodes[id];
       if (!box) return b;
-      return { ...b, nodes: { ...b.nodes, [tabId]: { ...box, ...patch } } };
+      return { ...b, nodes: { ...b.nodes, [id]: { ...box, ...patch } } };
     }),
+  /** Crea una nota y devuelve su id y su nombre final. Con `near`, al lado de ese nodo y
+   *  conectada a él. */
+  addNote: (key: string, note: { name?: string; content: string; near?: string; at?: { x: number; y: number } }) => {
+    const id = `${NOTE_PREFIX}${crypto.randomUUID()}`;
+    let name = "";
+    updateBoard(key, (b) => {
+      const added = addNote(b, { ...note, id });
+      name = added.name;
+      return added.board;
+    });
+    return { id, name };
+  },
+  updateNote: (key: string, id: string, patch: Partial<Omit<CanvasNote, "box">>) =>
+    updateBoard(key, (b) => updateNote(b, id, patch)),
+  removeNote: (key: string, id: string) => updateBoard(key, (b) => removeNote(b, id)),
   setViewport: (key: string, viewport: Viewport) => updateBoard(key, (b) => ({ ...b, viewport })),
   connect: (key: string, a: string, b: string) => updateBoard(key, (board) => addEdge(board, a, b)),
   disconnect: (key: string, edgeId: string) => updateBoard(key, (board) => removeEdge(board, edgeId)),
@@ -103,6 +123,21 @@ function scheduleSave(key: string): void {
     const board = useCanvasStore.getState().boards[key];
     if (board) invoke("canvas_save", { key, board }).catch(console.error);
   }, 300));
+}
+
+/**
+ * Guarda YA, sin la pausa. Para los cambios que pide un agente: el backend lee el archivo
+ * para decidir permisos, y el agente que acaba de crear una nota la va a querer leer en el
+ * comando siguiente — 300 ms después sería tarde.
+ */
+export async function flushSave(key: string): Promise<void> {
+  const pending = timers.get(key);
+  if (pending) {
+    clearTimeout(pending);
+    timers.delete(key);
+  }
+  const board = useCanvasStore.getState().boards[key];
+  if (board) await invoke("canvas_save", { key, board });
 }
 
 // ── Sincronización con las tabs ─────────────────────────────────────
@@ -148,7 +183,7 @@ export function initCanvasSync(label: string): () => void {
       const mine = Object.fromEntries(
         Object.entries(saved ?? {})
           .filter(([k]) => k.startsWith(`${label}|`))
-          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [] }]),
+          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {} }]),
       );
       useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards } });
       unsub = useTabsStore.subscribe(syncBoards);

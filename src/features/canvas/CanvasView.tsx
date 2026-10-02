@@ -14,7 +14,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import type { Tab } from "@/features/tabs/types";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 
-import { emptyBoard, neighbors } from "./board";
+import { NOTE_MIN, boxOf, emptyBoard, isNoteId, neighbors, type CanvasNote } from "./board";
 import {
   HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, terminalRect,
   type Box, type Rect, type Viewport,
@@ -32,6 +32,15 @@ interface AgentNodeData extends Record<string, unknown> {
 }
 
 type AgentFlowNode = Node<AgentNodeData, "agent">;
+
+interface NoteNodeData extends Record<string, unknown> {
+  id: string;
+  note: CanvasNote;
+  links: number;
+}
+
+type NoteFlowNode = Node<NoteNodeData, "note">;
+type FlowNode = AgentFlowNode | NoteFlowNode;
 
 /**
  * El canvas de agentes: cada terminal de la carpeta es un nodo que se mueve, se
@@ -52,6 +61,7 @@ export function CanvasView() {
 
 function CanvasInner() {
   const { theme } = useTheme();
+  const { t } = useTranslation();
   const key = useActiveBoardKey();
   const board = useCanvasStore((s) => (key ? s.boards[key] : undefined)) ?? emptyBoard();
   const allTabs = useTabsStore((s) => s.tabs);
@@ -121,7 +131,10 @@ function CanvasInner() {
     // Solo cuando cambia el agente activo, no con cada paneo.
   }, [activeTabId]);
 
-  const nodes: AgentFlowNode[] = useMemo(() => tabs.flatMap((tab) => {
+  // Una nota seleccionada no es un agente activo: se lleva aparte.
+  const [selectedNote, setSelectedNote] = useState<string | null>(null);
+
+  const agentNodes: AgentFlowNode[] = useMemo(() => tabs.flatMap((tab) => {
     const box = board.nodes[tab.id];
     if (!box) return [];
     return [{
@@ -144,23 +157,38 @@ function CanvasInner() {
     // `focusNode` cambia con cada render y no aporta nada nuevo al nodo.
   }), [tabs, board, activeTabId, live]);
 
+  const noteNodes: NoteFlowNode[] = useMemo(() => Object.entries(board.notes).map(([id, note]) => ({
+    id,
+    type: "note" as const,
+    position: { x: note.box.x, y: note.box.y },
+    width: note.box.w,
+    height: note.box.h,
+    selected: id === selectedNote,
+    dragHandle: ".ade-node-drag",
+    deletable: false,
+    data: { id, note, links: neighbors(board, id).length },
+  })), [board, selectedNote]);
+
+  const nodes: FlowNode[] = useMemo(() => [...noteNodes, ...agentNodes], [noteNodes, agentNodes]);
+
   const edges: Edge[] = useMemo(() => board.edges.map((e) => {
-    const a = board.nodes[e.a];
-    const b = board.nodes[e.b];
+    const a = boxOf(board, e.a);
+    const b = boxOf(board, e.b);
     // Sale por el lado que mira al otro nodo: la curva no cruza su propio nodo.
     const [sourceHandle, targetHandle] = a && b ? facingSides(a, b) : ["r", "l"];
     return { id: e.id, source: e.a, target: e.b, sourceHandle, targetHandle, type: "link" };
-  }), [board.edges, board.nodes]);
+  }), [board]);
 
-  const onNodesChange = (changes: NodeChange<AgentFlowNode>[]) => {
+  const onNodesChange = (changes: NodeChange<FlowNode>[]) => {
     if (!key) return;
     for (const c of changes) {
       if (c.type === "position" && c.position) {
         canvasActions.moveNode(key, c.id, { x: Math.round(c.position.x), y: Math.round(c.position.y) });
       } else if (c.type === "dimensions" && c.resizing && c.dimensions) {
         canvasActions.moveNode(key, c.id, { w: Math.round(c.dimensions.width), h: Math.round(c.dimensions.height) });
-      } else if (c.type === "select" && c.selected) {
-        activateTab(c.id);
+      } else if (c.type === "select") {
+        if (isNoteId(c.id)) setSelectedNote(c.selected ? c.id : (prev) => (prev === c.id ? null : prev));
+        else if (c.selected) activateTab(c.id);
       }
     }
   };
@@ -176,7 +204,7 @@ function CanvasInner() {
 
   return (
     <div ref={wrapRef} className="absolute inset-0 bg-gray-50 dark:bg-surface-deep">
-      <ReactFlow<AgentFlowNode, Edge>
+      <ReactFlow<FlowNode, Edge>
         nodes={nodes}
         edges={edges}
         nodeTypes={NODE_TYPES}
@@ -198,7 +226,15 @@ function CanvasInner() {
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} />
       </ReactFlow>
-      <CanvasControls zoom={vp.zoom} onFit={() => rf.fitView({ padding: 0.12, maxZoom: 1, duration: 220 })}
+      <CanvasControls zoom={vp.zoom}
+        onAddNote={() => {
+          if (!key) return;
+          // En el centro de lo que se ve, para que aparezca donde el usuario está mirando.
+          const at = { x: (size.width / 2 - vp.x) / vp.zoom - 160, y: (size.height / 2 - vp.y) / vp.zoom - 120 };
+          const { id } = canvasActions.addNote(key, { name: t("canvas.noteDefaultName"), content: "", at });
+          setSelectedNote(id);
+        }}
+        onFit={() => rf.fitView({ padding: 0.12, maxZoom: 1, duration: 220 })}
         onReset={() => {
           const target = activeTabId && board.nodes[activeTabId] ? activeTabId : tabs[0]?.id;
           if (target) focusNode(target);
@@ -209,7 +245,9 @@ function CanvasInner() {
 
 /** Los botones de zoom y el minimapa. Van en su propia capa, por encima de las
  *  terminales: abajo, una terminal viva los taparía. */
-function CanvasControls({ zoom, onFit, onReset }: { zoom: number; onFit: () => void; onReset: () => void }) {
+function CanvasControls({ zoom, onFit, onReset, onAddNote }: {
+  zoom: number; onFit: () => void; onReset: () => void; onAddNote: () => void;
+}) {
   const { t } = useTranslation();
   const rf = useReactFlow();
   const button = `cc-t h-7 px-2 text-[11px] font-medium rounded-md
@@ -218,6 +256,8 @@ function CanvasControls({ zoom, onFit, onReset }: { zoom: number; onFit: () => v
     <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
       <div className="pointer-events-auto absolute right-3 bottom-3 flex items-center gap-0.5 p-1 rounded-lg
         border border-gray-200 dark:border-white/10 bg-white/95 dark:bg-surface-raised/95 shadow-sm">
+        <Button variant="custom" className={button} onClick={onAddNote} title={t("canvas.addNoteHint")}>{t("canvas.addNote")}</Button>
+        <span className="w-px h-4 mx-1 bg-gray-200 dark:bg-white/10" />
         <Button variant="custom" className={button} onClick={() => rf.zoomOut({ duration: 160 })} aria-label={t("canvas.zoomOut")}>−</Button>
         <span className="w-11 text-center text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
           {Math.round(zoom * 100)}%
@@ -348,6 +388,104 @@ function Preview({ tabId, rows, onOpen }: { tabId: string; rows: number; onOpen:
   );
 }
 
+// ── Nota ────────────────────────────────────────────────────────────
+
+/**
+ * Una nota: texto libre que el usuario edita acá y los agentes conectados leen y escriben
+ * con `ccode note …`. El texto se edita directo sobre el store, así lo que escribe un
+ * agente aparece al instante y lo que escribe el usuario llega a su próximo `note read`.
+ */
+const NoteNode = memo(function NoteNode({ data, selected }: NodeProps<NoteFlowNode>) {
+  const { t } = useTranslation();
+  const key = useActiveBoardKey();
+  const { id, note, links } = data;
+  const [armed, setArmed] = useState(false);
+  const handle = "w-2.5! h-2.5! border-2! border-white! dark:border-surface-deep! bg-amber-400! dark:bg-amber-500!";
+
+  // Borrar pide un segundo clic: una nota puede ser el plan entero de un agente.
+  useEffect(() => {
+    if (!armed) return;
+    const timer = window.setTimeout(() => setArmed(false), 3000);
+    return () => window.clearTimeout(timer);
+  }, [armed]);
+
+  return (
+    <div
+      className={`h-full w-full flex flex-col rounded-lg overflow-hidden border
+        bg-amber-50 dark:bg-amber-950/40
+        ${selected
+          ? "border-accent-500 dark:border-accent-400 shadow-[0_0_0_1px_var(--color-accent-400)]"
+          : "border-amber-300/80 dark:border-amber-200/15"}`}
+    >
+      <NodeResizer isVisible={selected} minWidth={NOTE_MIN.w} minHeight={NOTE_MIN.h}
+        lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
+      <Handle id="l" type="source" position={Position.Left} className={handle} />
+      <Handle id="r" type="source" position={Position.Right} className={handle} />
+      <Handle id="t" type="source" position={Position.Top} className={handle} />
+      <Handle id="b" type="source" position={Position.Bottom} className={handle} />
+
+      <div
+        className="ade-node-drag flex items-center gap-2 pl-3 pr-1.5 shrink-0 cursor-grab active:cursor-grabbing
+          border-b border-amber-200 dark:border-amber-100/10 bg-amber-100/70 dark:bg-amber-100/5"
+        style={{ height: HEADER_H }}
+      >
+        <NoteIcon className="w-3.5 h-3.5 shrink-0 text-amber-600 dark:text-amber-300/80" />
+        <input
+          value={note.name}
+          onChange={(e) => key && canvasActions.updateNote(key, id, { name: e.target.value })}
+          aria-label={t("canvas.noteName")}
+          spellCheck={false}
+          className="nodrag min-w-0 flex-1 bg-transparent outline-none text-[12.5px] font-medium
+            text-gray-800 dark:text-gray-100 focus:bg-white/60 dark:focus:bg-white/5 rounded px-1 -mx-1"
+        />
+        {links > 0 && (
+          <span className="shrink-0 text-[10.5px] tabular-nums px-1.5 rounded-full
+            bg-amber-200/70 dark:bg-white/8 text-amber-800 dark:text-gray-400" title={t("canvas.links", { count: links })}>
+            ⇄ {links}
+          </span>
+        )}
+        <Button variant="custom"
+          onClick={() => {
+            if (!key) return;
+            if (armed) canvasActions.removeNote(key, id);
+            else setArmed(true);
+          }}
+          title={armed ? t("canvas.noteDeleteConfirm") : t("canvas.noteDelete")}
+          aria-label={armed ? t("canvas.noteDeleteConfirm") : t("canvas.noteDelete")}
+          className={`nodrag cc-t shrink-0 flex items-center justify-center h-6 rounded-md
+            ${armed
+              ? "px-2 text-[11px] font-medium text-white bg-red-500 hover:bg-red-600"
+              : "w-6 text-gray-400 hover:text-red-500 hover:bg-amber-200/60 dark:hover:bg-white/8"}`}
+        >
+          {armed ? t("canvas.noteDeleteConfirm") : <CloseIcon className="w-3 h-3" />}
+        </Button>
+      </div>
+
+      <textarea
+        value={note.content}
+        onChange={(e) => key && canvasActions.updateNote(key, id, { content: e.target.value })}
+        placeholder={t("canvas.notePlaceholder")}
+        aria-label={note.name}
+        spellCheck={false}
+        // `nowheel`: la rueda desplaza el texto, no hace zoom en el canvas.
+        className="nodrag nowheel flex-1 min-h-0 w-full resize-none bg-transparent outline-none px-3 py-2
+          font-mono text-[12px] leading-[17px] text-gray-800 dark:text-gray-200
+          placeholder:text-amber-700/40 dark:placeholder:text-gray-500"
+      />
+    </div>
+  );
+});
+
+function NoteIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"
+      strokeLinejoin="round" className={className} aria-hidden>
+      <path d="M15 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8l-5-5Z" />
+      <path d="M15 3v5h5M8 13h8M8 17h5" />
+    </svg>
+  );
+}
+
 // ── Conexión ────────────────────────────────────────────────────────
 
 function LinkEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, selected }: EdgeProps) {
@@ -388,5 +526,5 @@ function LinkEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
   );
 }
 
-const NODE_TYPES = { agent: AgentNode };
+const NODE_TYPES = { agent: AgentNode, note: NoteNode };
 const EDGE_TYPES = { link: LinkEdge };

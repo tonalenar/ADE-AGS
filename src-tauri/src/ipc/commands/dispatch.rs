@@ -15,6 +15,7 @@ use tauri::AppHandle;
 use super::agents::{account_list, agent_list, prelaunch_list};
 use super::app::app_status;
 use super::ask::user_ask;
+use super::notes::{note_create, note_edit, note_list, note_read, note_write};
 use super::peers::{peer_ask, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_tell};
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
@@ -41,6 +42,12 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "peer.recruit" => peer_recruit(app, args),
         "peer.connect" => peer_connect(app, args),
         "peer.disconnect" => peer_disconnect(app, args),
+        // Las notas del canvas conectadas con quien pide (ver `notes`).
+        "note.list" => note_list(app, args),
+        "note.read" => note_read(app, args),
+        "note.create" => note_create(app, args),
+        "note.write" => note_write(app, args),
+        "note.edit" => note_edit(app, args),
         "agent.list" => agent_list(app),
         "account.list" => account_list(app),
         "prelaunch.list" => prelaunch_list(app),

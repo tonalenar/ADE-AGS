@@ -88,3 +88,56 @@ fn sin_marca_no_hay_orquestadora() {
     let b = boards(&[("proj", vec![edge("1", "lider", "a")])]);
     assert!(!is_orchestrator(&b, "lider"));
 }
+
+fn with_notes(edges: Vec<Edge>, notes: &[&str], orchestrators: &[&str]) -> Boards {
+    let board = Board {
+        edges,
+        notes: notes.iter().map(|id| (id.to_string(), Note { name: id.to_string(), ..Default::default() })).collect(),
+        orchestrators: orchestrators.iter().map(|s| s.to_string()).collect(),
+        ..Default::default()
+    };
+    Boards::from([("main|/p".to_string(), board)])
+}
+
+#[test]
+fn una_nota_no_es_un_agente_ni_un_puente_entre_agentes() {
+    let b = with_notes(vec![edge("1", "a", "note-x"), edge("2", "b", "note-x")], &["note-x"], &["a"]);
+    assert!(peers_of(&b, "a").is_empty());
+    assert!(team_of(&b, "a").is_empty(), "una nota compartida no junta equipos");
+}
+
+#[test]
+fn las_notas_alcanzables_son_las_conectadas() {
+    let b = with_notes(vec![edge("1", "a", "note-x"), edge("2", "b", "note-y")], &["note-x", "note-y"], &[]);
+    let ids = |tab: &str| notes_for(&b, tab).into_iter().map(|(_, id)| id).collect::<Vec<_>>();
+    assert_eq!(ids("a"), vec!["note-x"]);
+    assert_eq!(ids("b"), vec!["note-y"]);
+    assert!(ids("c").is_empty());
+}
+
+#[test]
+fn una_orquestadora_alcanza_las_notas_de_su_equipo() {
+    let b = with_notes(
+        vec![edge("1", "lead", "w1"), edge("2", "w1", "note-x"), edge("3", "w2", "note-y")],
+        &["note-x", "note-y"],
+        &["lead"],
+    );
+    let ids: Vec<_> = notes_for(&b, "lead").into_iter().map(|(_, id)| id).collect();
+    assert_eq!(ids, vec!["note-x"]);
+}
+
+#[test]
+fn una_conexion_a_una_nota_borrada_no_da_acceso() {
+    let b = with_notes(vec![edge("1", "a", "note-x")], &[], &[]);
+    assert!(notes_for(&b, "a").is_empty());
+}
+
+#[test]
+fn las_notas_sobreviven_al_ida_y_vuelta_por_el_archivo() {
+    let raw = r#"{"nodes":{},"edges":[],"viewport":{},"orchestrators":[],
+        "notes":{"note-1":{"name":"Plano","content":"- a","box":{"x":1,"y":2,"w":3,"h":4}}}}"#;
+    let board: Board = serde_json::from_str(raw).unwrap();
+    let back = serde_json::to_value(&board).unwrap();
+    assert_eq!(back["notes"]["note-1"]["box"]["w"], 3);
+    assert_eq!(back["notes"]["note-1"]["content"], "- a");
+}

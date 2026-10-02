@@ -1669,5 +1669,12 @@
   "palette.cmd.tabsMode": "Cambiar a tabs",
   "canvas.orchestrator": "Orquestador",
   "canvas.orchestratorOn": "Hacer orquestador: alcanza a todo el equipo y puede sumar y conectar agentes",
-  "canvas.orchestratorOff": "Dejar de ser orquestador"
+  "canvas.orchestratorOff": "Dejar de ser orquestador",
+  "canvas.addNote": "+ Nota",
+  "canvas.addNoteHint": "Nota nueva en el centro de la vista. Conectala a un agente para que la lea y la escriba (ccode note).",
+  "canvas.noteDefaultName": "Nota",
+  "canvas.noteName": "Nombre de la nota",
+  "canvas.noteDelete": "Borrar nota",
+  "canvas.noteDeleteConfirm": "¿Borrar?",
+  "canvas.notePlaceholder": "Escribí acá. Los agentes conectados leen y editan esta nota con `ccode note`."
 }

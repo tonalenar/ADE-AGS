@@ -3,6 +3,7 @@
 mod agents;
 mod app;
 mod ask;
+mod notes;
 mod peers;
 mod browser;
 mod dispatch;
