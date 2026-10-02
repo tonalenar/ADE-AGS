@@ -129,3 +129,9 @@
   .ags-pet__burst { animation: none; }
   .ags-pet__zap, .ags-pet__dash, .ags-pet__burst { opacity: 0; }
 }
+
+/* Quieto: todo lo que se mueve, parado (el pet de la franja de abajo en reposo). */
+.ags-pet--still,
+.ags-pet--still * {
+  animation: none !important;
+}

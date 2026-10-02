@@ -6,12 +6,12 @@ import { Button, SearchIcon, WarningIcon } from "neogestify-ui-components";
 import { useUiStore } from "@/app/uiStore";
 import { PALETTE_SHORTCUT } from "@/app/shortcuts";
 import { useAccountsStore } from "@/features/accounts/store";
-import { systemAccounts } from "@/features/accounts/usage";
+import { formatTokens, systemAccounts } from "@/features/accounts/usage";
 import type { AgentAccount } from "@/features/accounts/types";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { useRunsStore } from "@/features/runs/store";
 import { useTabsStore } from "@/features/tabs/store";
-import { Mascot } from "@/shared/brand/Mascot";
+import { Pet, usePetStatus } from "@/shared/brand/Pet";
 import { useMascotState } from "@/shared/brand/useMascotState";
 
 /** O nome da pasta, que é como as pessoas reconhecem um projeto. */
@@ -68,18 +68,33 @@ export function HomeHeader() {
   const { t } = useTranslation();
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
   const { state, summary } = useMascotState();
+  const pet = usePetStatus();
 
   return (
     <div className="flex items-center gap-5">
-      <Mascot size={72} state={state} className="shrink-0" title="ADE AGS" />
+      {/* El pet de verdad (el que evoluciona), no el mascote fijo: aquí se ve crecer. */}
+      <Pet level={pet.level} state={state} size={88} className="shrink-0" />
       <div className="min-w-0 flex-1">
         <h1 className="text-2xl font-semibold tracking-tight">
           <span className="text-gray-900 dark:text-gray-50">ADE</span>{" "}
           <span className="text-gray-400 dark:text-gray-500">AGS</span>
+          <span className="ml-3 align-middle text-[12px] font-bold tracking-wider text-gray-500 dark:text-gray-400"
+            title={`${formatTokens(pet.xp)} tokens`}>
+            LV {pet.level}
+          </span>
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {t(`home.status.${state}`, { running: summary.running, count: summary.needsYou })}
         </p>
+        <div className="mt-1.5 flex items-center gap-2 max-w-64">
+          <div className="flex-1 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden"
+            role="progressbar" aria-valuenow={Math.round(pet.progress * 100)} aria-valuemin={0} aria-valuemax={100}>
+            <div className="h-full rounded-full bg-accent-500 transition-[width] duration-700" style={{ width: `${Math.round(pet.progress * 100)}%` }} />
+          </div>
+          <span className="text-[10.5px] tabular-nums text-gray-400 dark:text-gray-500">
+            {pet.toNext > 0 ? `-${formatTokens(pet.toNext)} → ${pet.level + 1}` : "MAX"}
+          </span>
+        </div>
       </div>
       <Button variant="custom"
         onClick={() => setPaletteOpen(true)}

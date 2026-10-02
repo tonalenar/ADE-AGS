@@ -79,11 +79,13 @@ export function sparkAt(i: number): { x: number; y: number; delay: number; durat
  * Flota, parpadea, y según su nivel gana aura, llamas, energía y rayos; cuando la frota
  * trabaja, cruza el cuerpo con un trazo veloz; cuando sube de nivel, estalla en un anillo.
  */
-export function Pet({ level, state = "idle", size = 96, className = "" }: {
+export function Pet({ level, state = "idle", size = 96, className = "", still = false }: {
   level: number;
   state?: MascotState;
   size?: number;
   className?: string;
+  /** Sin animación (para los lugares chicos donde algo moviéndose todo el tiempo cansa). */
+  still?: boolean;
 }) {
   const gid = useId().replace(/:/g, "");
   const stage = stageFor(level);
@@ -115,7 +117,7 @@ export function Pet({ level, state = "idle", size = 96, className = "" }: {
       height={(size * 30) / 28}
       shapeRendering="crispEdges"
       style={style}
-      className={`ags-pet ags-mascot ags-mascot--${state} ${burst ? "ags-pet--levelup" : ""} ${className}`}
+      className={`ags-pet ${still ? "ags-pet--still" : `ags-mascot ags-mascot--${state}`} ${burst ? "ags-pet--levelup" : ""} ${className}`}
       aria-hidden
     >
       <defs>
