@@ -79,6 +79,11 @@ pub(crate) fn is_own_host(host: &str, port: u16) -> bool {
     p.parse::<u16>().ok() == Some(port) && matches!(name.to_ascii_lowercase().as_str(), "localhost" | "127.0.0.1" | "[::1]")
 }
 
+/// Si un `Origin` es el de este proxy (`http://localhost:<puerto>` y sus equivalentes).
+pub(crate) fn is_own_origin(origin: &str, port: u16) -> bool {
+    origin.strip_prefix("http://").is_some_and(|host| is_own_host(host, port))
+}
+
 /// Un servidor que valida `Origin`/`Referer` (Vite con sus WebSocket, frameworks con CSRF)
 /// tiene que ver el suyo, no el del proxy.
 pub(crate) fn rewrite_origin_value(value: &str, proxy_origin: &str, target_origin: &str) -> String {

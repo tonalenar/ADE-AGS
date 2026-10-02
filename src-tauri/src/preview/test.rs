@@ -1215,3 +1215,31 @@ fn browser_upload_solo_lee_archivos_del_proyecto() {
 
     std::fs::remove_dir_all(base).ok();
 }
+
+// ── Solo la tab de la app usa el proxy ───────────────────────────
+
+#[test]
+fn el_proxy_rechaza_otros_hosts_y_otros_origenes() {
+    use super::proxy::request_is_ours;
+    let req = |host: &str, origin: Option<&str>, ws: bool| {
+        let mut b = hyper::Request::builder().uri("/").header("host", host);
+        if let Some(o) = origin {
+            b = b.header("origin", o);
+        }
+        if ws {
+            b = b.header("upgrade", "websocket").header("connection", "Upgrade");
+        }
+        b.body(()).unwrap()
+    };
+    // La página misma.
+    assert!(request_is_ours(&req("localhost:4100", None, false), 4100));
+    assert!(request_is_ours(&req("127.0.0.1:4100", Some("http://127.0.0.1:4100"), true), 4100));
+    // DNS rebinding: el nombre del atacante apuntando a loopback.
+    assert!(!request_is_ours(&req("evil.example:4100", None, false), 4100));
+    // Pedido o WebSocket cruzado desde otro sitio del navegador del sistema.
+    assert!(!request_is_ours(&req("localhost:4100", Some("https://evil.example"), false), 4100));
+    assert!(!request_is_ours(&req("localhost:4100", Some("http://localhost:9999"), true), 4100));
+    // `null`: un iframe con sandbox. Pedidos sí, WebSocket no.
+    assert!(request_is_ours(&req("localhost:4100", Some("null"), false), 4100));
+    assert!(!request_is_ours(&req("localhost:4100", Some("null"), true), 4100));
+}
