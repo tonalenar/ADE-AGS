@@ -56,7 +56,15 @@ const BODY = runs(SPRITE);
 /** A cabeça sozinha (linhas 1–10), para o logo. */
 const HEAD = runs(SPRITE.slice(0, 11));
 
-export type MascotState = "idle" | "working";
+/** `waiting`: um agente pediu permissão e está parado esperando você. */
+export type MascotState = "idle" | "working" | "waiting";
+
+/** O estado que corresponde a um resumo da frota. Puro, para testar sem store. */
+export function mascotStateFor(summary: { running: number; needsYou: number }): MascotState {
+  if (summary.needsYou > 0) return "waiting";
+  if (summary.running > 0) return "working";
+  return "idle";
+}
 
 interface MascotProps {
   size?: number;

@@ -74,8 +74,7 @@ export function FleetPage() {
   /** Un aviso sobre la última acción de una tarjeta: tomar el control, descartar. */
   const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null);
 
-  // `/` enfoca el buscador. No Ctrl+K, que es lo que muestra el mockup: acá Ctrl+K ya es
-  // Skills, y robarlo rompería un atajo que la gente ya tiene en los dedos.
+  // `/` enfoca el buscador. No Ctrl+K: ese es la paleta de comandos global.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;

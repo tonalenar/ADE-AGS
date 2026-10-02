@@ -38,7 +38,11 @@ function MenuItem({ icon, label, onClick }: { icon: React.ReactNode; label: stri
 export function SideHead({ width }: { width: number }) {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const collapsed = useUiStore((s) => s.workspacesCollapsed);
+  const workspacesCollapsed = useUiStore((s) => s.workspacesCollapsed);
+  const railExpanded = useUiStore((s) => s.railExpanded);
+  // Só fica compacto quando sobra apenas o riel estreito: com o riel expandido há
+  // largura de sobra para os controles e o nome.
+  const collapsed = workspacesCollapsed && !railExpanded;
   const toggle = useUiStore((s) => s.toggleWorkspaces);
   const hasTabs = useTabsStore((s) => s.tabs.length > 0);
   const workspaceId = useTabsStore((s) => s.workspaceId);
@@ -123,7 +127,7 @@ export function SideHead({ width }: { width: number }) {
 
         {!collapsed && <div className="flex-1" />}
 
-        <Tooltip content={collapsed ? t("panel.expand") : t("panel.collapse")} placement="right">
+        <Tooltip content={workspacesCollapsed ? t("panel.expand") : t("panel.collapse")} placement="right">
           <Button variant="icon"
             onClick={toggle}
             data-tauri-drag-region="false"

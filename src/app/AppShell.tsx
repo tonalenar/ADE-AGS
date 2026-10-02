@@ -6,7 +6,8 @@ import { useTabsStore } from "@/features/tabs/store";
 import type { Tab } from "@/features/tabs/types";
 import { initTabsPersistence } from "@/features/tabs/persistence";
 import { SideHead } from "@/app/SideHead";
-import { ActivityRail } from "@/app/ActivityRail";
+import { ActivityRail, RAIL_COMPACT_W, RAIL_EXPANDED_W } from "@/app/ActivityRail";
+import { CommandPalette } from "@/features/palette/CommandPalette";
 import { StatusBar } from "@/app/StatusBar";
 import { TabBar } from "@/features/tabs/TabBar";
 import { WorkspacesPanel } from "@/features/workspaces/WorkspacesPanel";
@@ -75,6 +76,7 @@ export function AppShell() {
   const [isMaximized, setIsMaximized] = useState(false);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const workspacesCollapsed = useUiStore((s) => s.workspacesCollapsed);
+  const railExpanded = useUiStore((s) => s.railExpanded);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const accountsOpen = useUiStore((s) => s.accountsOpen);
@@ -101,7 +103,7 @@ export function AppShell() {
 
   // El encabezado del lateral mide exactamente lo mismo que el riel más el panel, para
   // que la división vertical sea una sola línea de arriba a abajo.
-  const RAIL_W = 48;
+  const RAIL_W = railExpanded ? RAIL_EXPANDED_W : RAIL_COMPACT_W;
   const PANEL_W = 272;
   const sideWidth = RAIL_W + (workspacesCollapsed ? 0 : PANEL_W);
 
@@ -218,14 +220,14 @@ export function AppShell() {
           la derecha de la barra de título se mudó al riel y a la barra de abajo. */}
       <div className="flex shrink-0">
         <SideHead width={sideWidth} />
-        <TabBar showLights={workspacesCollapsed} />
+        <TabBar showLights={workspacesCollapsed && !railExpanded} />
       </div>
 
       <div className="flex flex-1 min-h-0">
         {/* Izquierda: los AGENTES. Es lo primero que se ve porque en un entorno de
             desarrollo para agentes lo primero es qué está corriendo; el árbol de
             archivos es el panel secundario y va del otro lado. */}
-        <ActivityRail agentCount={tabs.length} />
+        <ActivityRail agentCount={tabs.length} width={RAIL_W} />
         {!workspacesCollapsed && <WorkspacesPanel groups={groups} width={PANEL_W} />}
 
         <div className="relative flex-1 min-w-0 overflow-hidden">
@@ -285,6 +287,7 @@ export function AppShell() {
 
       {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
       {accountsOpen && <AccountsModal onClose={() => setAccountsOpen(false)} />}
+      <CommandPalette />
     </div>
   );
 }

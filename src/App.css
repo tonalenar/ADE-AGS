@@ -529,3 +529,14 @@ html.dark {
 .ags-mascot--working .ags-mascot__bot,
 .ags-mascot--working .ags-mascot__shadow { animation-duration: 1.1s; }
 .ags-mascot--working .ags-mascot__flame { animation: ags-flame 0.35s steps(2) infinite; }
+
+/* Esperando você: para de flutuar alto, e os olhos pulsam — chama sem gritar. */
+@keyframes ags-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.35; }
+}
+
+.ags-mascot--waiting .ags-mascot__bot,
+.ags-mascot--waiting .ags-mascot__shadow { animation-duration: 4s; }
+.ags-mascot--waiting .ags-mascot__eyes { animation: ags-pulse 1.1s ease-in-out infinite; }
+.ags-mascot--waiting .ags-mascot__flame { opacity: 0; }
