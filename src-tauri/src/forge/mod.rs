@@ -12,7 +12,7 @@
 //! ## Cómo le llega la cuenta a git
 //!
 //! Por variables de entorno del proceso de git, nunca por su configuración: ver
-//! [`credentials::git_env`]. El token no pasa por la línea de comandos (se vería en `ps`)
+//! [`credentials::git_env_for_remote`]. El token no pasa por la línea de comandos (se vería en `ps`)
 //! ni se escribe en `.git/config`.
 //!
 //! ## Los modelos
@@ -32,7 +32,7 @@ pub(crate) mod tools;
 mod test;
 
 pub use commands::*;
-pub(crate) use credentials::git_env;
+pub(crate) use credentials::git_env_for_remote;
 
 /// Lo que usa la sincronización (ver `crate::sync`): la API de una cuenta y cómo
 /// autenticar a git con ella, sin exponer el resto del módulo.
