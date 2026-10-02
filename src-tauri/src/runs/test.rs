@@ -1932,6 +1932,8 @@ fn cuenta(id: Option<&str>, name: &str, usada: Option<f64>) -> RosterAccount {
         running: 0,
         models: vec![],
         model_discovery: ModelDiscoveryState::Unsupported,
+        limit: None,
+        at_capacity: false,
     }
 }
 
@@ -3697,6 +3699,8 @@ mod politica_del_lead {
                     running: 0,
                     models: vec![super::modelo(model, true)],
                     model_discovery: ModelDiscoveryState::Available,
+                    limit: None,
+                    at_capacity: false,
                 }];
             }
             roster
@@ -4066,4 +4070,116 @@ fn una_credencial_rechazada_saca_a_la_cuenta_del_ruteo_por_un_tiempo() {
     // Verificarla y que ande la devuelve al ruteo.
     clear_auth_failure(&db, "cuenta-a");
     assert!(!auth_failed_recently(&db.lock().unwrap(), "cuenta-a", 1000 + 60));
+}
+
+// ── Uso y límites por cuenta ─────────────────────────────────────
+
+/// Cada intento queda con la cuenta que lo corrió, aunque después la tarea pase a otra.
+#[test]
+fn el_uso_se_anota_con_la_cuenta_de_cada_intento() {
+    use super::ledger;
+    let conn = crate::database::test_db();
+    let run = run_en(&conn);
+    let id = store::create_task(
+        &conn,
+        &NewTask { run_id: &run, title: "t", prompt: "p", agent_id: "claude-code", account_id: Some("a"), cwd: "/tmp/proy", auto_account: true, ..Default::default() },
+    )
+    .unwrap()
+    .id;
+    let terminar = |cost: Option<f64>, ok: bool| {
+        conn.execute("UPDATE tasks SET status = 'running' WHERE id = ?1", [&id]).unwrap();
+        let outcome = TaskOutcome { ok, cost_usd: cost, tokens_in: Some(100), tokens_out: Some(10), error: (!ok).then(|| "usage limit".into()), ..Default::default() };
+        store::finish_task(&conn, &id, &outcome).unwrap();
+    };
+    terminar(Some(0.50), false);
+    // Una segunda finalización del mismo intento (ya cerrado) no cuenta de nuevo.
+    store::finish_task(&conn, &id, &TaskOutcome { ok: true, cost_usd: Some(9.0), ..Default::default() }).unwrap();
+
+    // Pasa a la cuenta b y termina bien.
+    assert!(store::reroute_task(&conn, &id, "claude-code", None, Some("b"), "fallback", None, "nota", true).unwrap());
+    terminar(Some(0.25), true);
+
+    let usage = ledger::summary(&conn, 0, 10_000_000_000).unwrap();
+    let de = |key: &str| usage.iter().find(|u| u.account_key == key).cloned().unwrap();
+    let (a, b) = (de("a"), de("b"));
+    assert_eq!((a.attempts, a.failed, a.cost_usd), (1, 1, Some(0.50)));
+    assert_eq!((b.attempts, b.failed, b.cost_usd, b.tokens_in), (1, 0, Some(0.25), 100));
+}
+
+/// Sin costo reportado (Codex) no es "gratis": es que no se sabe.
+#[test]
+fn una_cuenta_sin_costo_reportado_no_figura_en_cero() {
+    let conn = crate::database::test_db();
+    let run = run_en(&conn);
+    let id = store::create_task(
+        &conn,
+        &NewTask { run_id: &run, title: "t", prompt: "p", agent_id: "codex", cwd: "/tmp/proy", ..Default::default() },
+    )
+    .unwrap()
+    .id;
+    conn.execute("UPDATE tasks SET status = 'running' WHERE id = ?1", [&id]).unwrap();
+    store::finish_task(&conn, &id, &TaskOutcome { ok: true, tokens_in: Some(5), ..Default::default() }).unwrap();
+    let usage = super::ledger::summary(&conn, 0, 10_000_000_000).unwrap();
+    assert_eq!(usage[0].account_key, "system:codex");
+    assert_eq!(usage[0].cost_usd, None);
+}
+
+#[test]
+fn los_topes_de_una_cuenta_se_distinguen() {
+    use super::ledger::{limit_problem, AccountLimits, Limit};
+    let limits = AccountLimits { max_concurrent: Some(2), daily_budget_usd: Some(5.0) };
+    assert_eq!(limit_problem(&limits, 1, 4.99), None);
+    assert!(matches!(limit_problem(&limits, 2, 0.0), Some(Limit::Concurrency(_))));
+    // El presupuesto manda: no se libera porque termine una tarea.
+    assert!(matches!(limit_problem(&limits, 2, 5.0), Some(Limit::Budget(_))));
+    assert_eq!(limit_problem(&AccountLimits::default(), 99, 999.0), None);
+}
+
+/// Con máximo 1, de dos tareas despachadas en el mismo tick arranca una, no ninguna.
+#[test]
+fn en_un_mismo_tick_cada_tarea_admitida_ocupa_su_lugar() {
+    use super::ledger::{blocked, save_limits, AccountLimits};
+    let db: crate::database::DbConnection = std::sync::Arc::new(std::sync::Mutex::new(crate::database::test_db()));
+    save_limits(&db, "a", &AccountLimits { max_concurrent: Some(1), daily_budget_usd: None }).unwrap();
+    let conn = db.lock().unwrap();
+    let run = run_en(&conn);
+    for _ in 0..2 {
+        let id = store::create_task(
+            &conn,
+            &NewTask { run_id: &run, title: "t", prompt: "p", agent_id: "claude-code", account_id: Some("a"), cwd: "/tmp/proy", ..Default::default() },
+        )
+        .unwrap()
+        .id;
+        conn.execute("UPDATE tasks SET status = 'ready' WHERE id = ?1", [&id]).unwrap();
+    }
+    assert_eq!(blocked(&conn, "a", 0, 0), None, "la primera pasa");
+    assert!(blocked(&conn, "a", 0, 1).is_some(), "la segunda espera");
+    assert_eq!(blocked(&conn, "otra", 0, 5), None, "sin límites, nada");
+}
+
+#[test]
+fn el_ruteo_prefiere_cuentas_con_lugar_y_saltea_las_sin_presupuesto() {
+    let mut roster = roster_de_prueba();
+    {
+        let cc = agente(&mut roster, "claude-code");
+        // La principal tiene más ventana, pero está en su máximo de simultáneas.
+        cc.accounts[0] = cuenta(None, "Claude Code", Some(0.0));
+        cc.accounts[0].at_capacity = true;
+        cc.accounts[1] = cuenta(Some("trabajo"), "trabajo", Some(0.50));
+    }
+    let a = routing::route(&roster, &Tiers::default(), &por_complejidad(Complexity::Standard), AHORA).unwrap();
+    assert_eq!(a.account_id.as_deref(), Some("trabajo"));
+
+    // Todas llenas: igual se asigna (la tarea espera su turno al lanzar).
+    agente(&mut roster, "claude-code").accounts[1].at_capacity = true;
+    assert!(routing::route(&roster, &Tiers::default(), &por_complejidad(Complexity::Standard), AHORA).is_ok());
+
+    // Sin presupuesto: descartada, y se dice por qué.
+    {
+        let cc = agente(&mut roster, "claude-code");
+        cc.accounts[0].limit = Some("gastó US$ 5.00 en 24 h".into());
+        cc.accounts[1].limit = Some("gastó US$ 9.00 en 24 h".into());
+    }
+    let err = routing::route(&roster, &Tiers::default(), &por_complejidad(Complexity::Standard), AHORA).unwrap_err();
+    assert!(err.contains("US$"), "{err}");
 }

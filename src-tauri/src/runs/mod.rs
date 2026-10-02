@@ -17,6 +17,7 @@ mod broker;
 mod context;
 pub(crate) mod failure;
 pub(crate) mod handoff;
+pub(crate) mod ledger;
 pub(crate) mod model_discovery;
 pub mod orchestration;
 mod plan;
@@ -593,6 +594,34 @@ pub(crate) fn route_now(
     let roster = roster::snapshot(db, false)?;
     let tiers = routing::load_tiers(db);
     routing::route(&roster, &tiers, request, crate::util::now_ts())
+}
+
+/// Lo que usó cada cuenta en los últimos `days` días (intentos, tokens, costo reportado), con
+/// sus límites y lo que corre ahora. Ver `ledger`.
+#[tauri::command]
+pub async fn account_usage_summary(app: AppHandle, days: u32) -> Result<Vec<ledger::AccountUsage>, String> {
+    let db = db_of(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let now = crate::util::now_ts();
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        ledger::summary(&conn, now - i64::from(days.clamp(1, 365)) * 24 * 3600, now)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Los límites de una cuenta (`account_key` como en `quota::account_key`).
+#[tauri::command]
+pub fn account_limits_get(app: AppHandle, account_key: String) -> Result<ledger::AccountLimits, String> {
+    let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    Ok(ledger::load_limits(&conn, &account_key))
+}
+
+#[tauri::command]
+pub fn account_limits_set(app: AppHandle, account_key: String, limits: ledger::AccountLimits) -> Result<(), String> {
+    let db = db_of(&app)?;
+    ledger::save_limits(&db, &account_key, &limits)
 }
 
 /// Qué agentes, modelos y cuentas hay para lanzar ahora. `refresh` vuelve a sondear las

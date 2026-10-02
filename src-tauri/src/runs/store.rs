@@ -558,6 +558,17 @@ pub fn fail_dispatched(conn: &Connection, task_id: &str, reason: &str) -> Result
     Ok(n > 0)
 }
 
+/// La devuelve a la cola sin que haya corrido: su cuenta no tiene lugar ahora (ver `ledger`).
+pub fn undispatch(conn: &Connection, task_id: &str) -> Result<bool, String> {
+    let n = conn
+        .execute(
+            "UPDATE tasks SET status = ?1 WHERE id = ?2 AND status = ?3",
+            rusqlite::params![status::PENDING, task_id, status::READY],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(n > 0)
+}
+
 /// Le antepone al error de una tarea terminada de qué tipo fue, para que quien la mira (la
 /// consola, el lead) sepa qué hacer sin leer el log de la CLI.
 pub fn tag_error(conn: &Connection, task_id: &str, tag: &str) -> Result<(), String> {
@@ -986,7 +997,9 @@ pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> R
     } else {
         status::FAILED
     };
-    conn.execute(
+    // Como estaba ANTES de cerrarla: la cuenta y el modelo de ESTE intento (ver `ledger`).
+    let attempt = task_by_id(conn, task_id)?;
+    let closed = conn.execute(
         // Costo y tokens SUMAN: con reintentos, la tarea gastó lo de todos sus intentos, y
         // mostrar solo el último escondería lo que costó que fallara la primera vez.
         "UPDATE tasks SET status = ?1, result = ?2, error = ?3,
@@ -1007,6 +1020,12 @@ pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> R
         ],
     )
     .map_err(|e| e.to_string())?;
+    // Solo si este llamado la cerró: una segunda finalización del mismo intento no cuenta dos veces.
+    if closed > 0
+        && let Some(task) = &attempt
+    {
+        super::ledger::record_attempt(conn, task, &outcome, now_ts())?;
+    }
 
     if let Some(cost) = outcome.cost_usd {
         conn.execute(
