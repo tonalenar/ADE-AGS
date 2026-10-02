@@ -56,12 +56,28 @@ pub(super) fn config_file(config_dir: Option<&str>) -> Option<PathBuf> {
     }
 }
 
+/// Cómo anota Claude Code una carpeta en `projects`: en Windows con barras NORMALES
+/// (`C:/Users/ana/proyecto`), no con las del sistema. Si se escribe la forma con barras
+/// invertidas, la TUI no encuentra la entrada, vuelve a preguntar "¿confiás en esta
+/// carpeta?" y el sondeo se cuelga hasta vencer el tiempo — que es lo que dejó de funcionar
+/// el panel de consumo en Windows.
+pub(super) fn project_key(dir: &str) -> String {
+    let windows_drive = dir.as_bytes().get(1) == Some(&b':');
+    if windows_drive || dir.starts_with("\\\\") {
+        dir.replace('\\', "/")
+    } else {
+        dir.to_string()
+    }
+}
+
 /// La config con `dir` marcada como aceptada, o `None` si ya lo estaba.
 ///
 /// Devolver `None` no es un detalle: es lo que hace que la app escriba el archivo una sola
 /// vez por cuenta en vez de en cada sondeo. Esa config la escribe también la propia TUI
 /// mientras corre, y cada escritura nuestra es una chance de pisarle algo.
 pub(super) fn with_trusted(config: &Value, dir: &str) -> Option<Value> {
+    let dir = project_key(dir);
+    let dir = dir.as_str();
     let accepted = config
         .get("projects")
         .and_then(|p| p.get(dir))

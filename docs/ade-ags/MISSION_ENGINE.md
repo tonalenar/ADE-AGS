@@ -113,10 +113,31 @@ Lead e Worker podem consultar memória e criar propostas de criação, atualiza�
 
 Rota modal `#/missions`, botão na barra lateral abaixo da Fleet. Lista (título, status, pasta, lead, data, gasto, progresso dos workers), formulário de criação/edição e detalhe (objetivo, modo de execução, Squad/snapshot, provider, conta, orçamento, gasto, run atual, lead à parte, tasks com Role funcional, dependências, estado dos agentes, aprovações pendentes, resultado/erro, facts do run ativo). Ações: draft → Iniciar; running → Cancelar; failed → Tentar novamente; done/cancelled → nenhuma. O retry reutiliza a configuração da Mission e resolve novamente a conta e o Squad atuais. Tasks, facts, erros e custos anteriores permanecem associados aos seus runs; o detalhe mostra o novo run ativo e a contagem de execuções. Atualiza por `cc-task-changed` e `cc-mission-changed`, com refresh coalescido; sem polling. Desde o v0.1, ver [MISSION_RUNTIME.md](./MISSION_RUNTIME.md).
 
+## Revisão das entregas e worktree de integração
+
+Cada task isolada continua no seu worktree e branch (`cc/<task>`). O detalhe da Mission ganhou a seção **Revisão das entregas** (`missions/review.rs`, `MissionReviewPanel.tsx`), que mostra para cada task do run ativo:
+
+- os commits;
+- os arquivos com +/−;
+- o diff contra o HEAD do projeto;
+- as mudanças que ficaram sem commit.
+
+As ações:
+
+- **Aceitar** faz `merge --no-ff` da branch da task no **worktree de integração** da Mission.
+  - Ele é criado na primeira aceitação, a partir do HEAD do projeto, e fica em `missions.integration_branch` / `integration_path`.
+  - A cópia de trabalho do usuário não é tocada.
+  - É recusado com a task viva ou com mudanças sem commit no worktree dela, porque essas mudanças não estão na branch.
+- **Rejeitar** só marca a task (`tasks.review`).
+- **Aplicar no projeto** faz um único `merge --no-ff` da branch de integração na branch atual do projeto.
+  - É recusado com HEAD desprendido ou com mudanças rastreadas sem commit.
+  - Arquivos não rastreados não impedem a aplicação.
+
+Um merge que dá conflito, na integração ou no projeto, é sempre abortado. Os arquivos em conflito voltam no resultado. Nenhum passo deixa um repositório no meio de um merge. Resolver o conflito fica com quem revisa: à mão, ou reencaminhando a task a um agente. A implementação não usa `git merge-tree --write-tree` (2.38+), então funciona com o git 2.34 do CI.
+
 ## O que o v0 NÃO faz
 
 - Rerun de missão concluída ou cancelada, clone, duplicar, arquivar ou apagar Mission.
-- Worktree por Mission (continua o worktree por task isolada da frota).
 - Shared Memory, Map Mode, sub-missions, templates, cron, automações, cloud/sync/colaboração.
 - Facts por Mission: a Mission mostra os facts do run ativo.
 - Handoff estruturado: o `tasks.handoff` continua em texto livre e só é exibido.

@@ -77,4 +77,4 @@ export function ModelSelector({ roster, agentId, accountId, autoAccount, model, 
   </div>;
 }
 
-const SELECT = "rounded-lg px-2.5 h-8 text-[11.5px] bg-gray-100 dark:bg-[#12161c] border border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-200";
+const SELECT = "rounded-lg px-2.5 h-8 text-[11.5px] bg-gray-100 dark:bg-surface-raised border border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-200";

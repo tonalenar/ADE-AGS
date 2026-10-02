@@ -394,6 +394,14 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
             format!("la credencial de la cuenta {account} fue rechazada (hay que volver a loguearla)")
         }
     };
+    crate::bus::publish(
+        Some(app),
+        crate::bus::Publish::new("account.failure").task(&task.id).run(&task.run_id).data(serde_json::json!({
+            "accountKey": key,
+            "kind": if kind == FailureKind::RateLimited { "rate_limited" } else { "auth" },
+            "reason": reason,
+        })),
+    );
     let pinned = !task.auto_account;
     let lead = task.role.as_deref() == Some(role::LEAD);
     if pinned || lead {
