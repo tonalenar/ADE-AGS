@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 18;
+const SCHEMA_VERSION: i32 = 24;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -37,7 +37,8 @@ fn table_exists(conn: &Connection, name: &str) -> bool {
 }
 
 fn has_column(conn: &Connection, table: &str, column: &str) -> bool {
-    conn.prepare(&format!("SELECT {column} FROM {table} LIMIT 1")).is_ok()
+    conn.prepare(&format!("SELECT {column} FROM {table} LIMIT 1"))
+        .is_ok()
 }
 
 /// En qué versión está una base que todavía no tiene `user_version` (todas las creadas
@@ -106,7 +107,10 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         // Antes esto recreaba `tabs` desde cero, o sea que actualizar la app te borraba
         // todas las tabs guardadas. La columna se puede agregar sin más: las filas que ya
         // existían no saben cuándo se abrieron, y 0 es exactamente eso.
-        conn.execute("ALTER TABLE tabs ADD COLUMN opened_at INTEGER NOT NULL DEFAULT 0", [])?;
+        conn.execute(
+            "ALTER TABLE tabs ADD COLUMN opened_at INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
     }
 
     // Va ACÁ y no más abajo a propósito: el batch de más adelante crea un índice único
@@ -122,7 +126,10 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     // existían quedan con `''` = "todas las carpetas", que es exactamente lo que
     // significaban, así que nadie pierde una skill al actualizar.
     if table_exists(conn, "project_skills") && !has_column(conn, "project_skills", "cwd") {
-        conn.execute("ALTER TABLE project_skills ADD COLUMN cwd TEXT NOT NULL DEFAULT ''", [])?;
+        conn.execute(
+            "ALTER TABLE project_skills ADD COLUMN cwd TEXT NOT NULL DEFAULT ''",
+            [],
+        )?;
 
         // Los índices únicos nuevos no se pueden crear sobre filas repetidas, y repetidas
         // puede haber: hasta acá el upsert de scope='workspace' nunca encontraba conflicto
@@ -546,8 +553,14 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
             "ALTER TABLE tasks ADD COLUMN parent_id TEXT REFERENCES tasks(id) ON DELETE SET NULL",
             [],
         )?;
-        conn.execute("ALTER TABLE tasks ADD COLUMN depth INTEGER NOT NULL DEFAULT 0", [])?;
-        conn.execute("ALTER TABLE tasks ADD COLUMN isolate INTEGER NOT NULL DEFAULT 0", [])?;
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN depth INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+        conn.execute(
+            "ALTER TABLE tasks ADD COLUMN isolate INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
         conn.execute("ALTER TABLE tasks ADD COLUMN result_schema TEXT", [])?;
         conn.execute("ALTER TABLE tasks ADD COLUMN last_error TEXT", [])?;
     }
@@ -577,6 +590,108 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
          CREATE INDEX IF NOT EXISTS idx_run_facts_run ON run_facts(run_id);",
     )?;
 
+    // v19 — Misiones: la intención del usuario, que dura más que un intento de cumplirla.
+    //
+    // Un run es UNA ejecución; si falla o se cancela, lo que se quería lograr sigue siendo
+    // lo mismo. La misión guarda ese pedido y la preferencia de cómo correrlo (agente,
+    // modelo, cuenta por id, nunca credenciales), y apunta al run que la está cumpliendo.
+    // Nace en `draft`: crearla no lanza nada.
+    //
+    // `runs.mission_id` es nullable a propósito: los runs de antes y los que se lanzan a mano
+    // desde la flota no tienen misión, y ninguno se convierte en una al migrar.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS missions (
+             id              TEXT PRIMARY KEY,
+             workspace_id    TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+             title           TEXT NOT NULL,
+             objective       TEXT NOT NULL,
+             cwd             TEXT NOT NULL,
+             -- draft | running | done | failed | cancelled
+             status          TEXT NOT NULL DEFAULT 'draft',
+             max_parallel    INTEGER NOT NULL DEFAULT 2,
+             budget_usd      REAL,
+             -- NULL = lo elige el ruteo por complejidad.
+             lead_agent_id   TEXT,
+             lead_model      TEXT,
+             -- Con auto_account = 0, NULL es la cuenta del sistema.
+             lead_account_id TEXT,
+             auto_account    INTEGER NOT NULL DEFAULT 1,
+             complexity      TEXT,
+             active_run_id   TEXT REFERENCES runs(id) ON DELETE SET NULL,
+             created_at      INTEGER NOT NULL,
+             updated_at      INTEGER NOT NULL,
+             started_at      INTEGER,
+             ended_at        INTEGER
+         );
+         CREATE INDEX IF NOT EXISTS idx_missions_workspace ON missions(workspace_id);",
+    )?;
+    if !has_column(conn, "runs", "mission_id") {
+        conn.execute(
+            "ALTER TABLE runs ADD COLUMN mission_id TEXT REFERENCES missions(id) ON DELETE SET NULL",
+            [],
+        )?;
+    }
+    conn.execute_batch("CREATE INDEX IF NOT EXISTS idx_runs_mission ON runs(mission_id);")?;
+
+    // v20 — Built-in functional roles and reusable Squads. Roles stay declarative in code;
+    // only Squad routing policies and immutable per-Run snapshots are persisted.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS squads (
+             id                  TEXT PRIMARY KEY,
+             name                TEXT NOT NULL UNIQUE,
+             description         TEXT NOT NULL DEFAULT '',
+             lead_agent_id       TEXT NOT NULL,
+             lead_model          TEXT,
+             lead_account_id     TEXT,
+             lead_auto_account   INTEGER NOT NULL DEFAULT 0,
+             lead_complexity     TEXT,
+             created_at          INTEGER NOT NULL,
+             updated_at          INTEGER NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS squad_members (
+             squad_id        TEXT NOT NULL REFERENCES squads(id) ON DELETE CASCADE,
+             role_id         TEXT NOT NULL,
+             agent_id        TEXT NOT NULL,
+             model           TEXT,
+             account_id      TEXT,
+             auto_account    INTEGER NOT NULL DEFAULT 0,
+             complexity      TEXT,
+             isolate_default INTEGER NOT NULL DEFAULT 0,
+             PRIMARY KEY (squad_id, role_id)
+         );
+         CREATE INDEX IF NOT EXISTS idx_squad_members_role ON squad_members(role_id);
+         CREATE TABLE IF NOT EXISTS run_squad_members (
+             run_id          TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+             role_id         TEXT NOT NULL,
+             agent_id        TEXT NOT NULL,
+             model           TEXT,
+             account_id      TEXT,
+             auto_account    INTEGER NOT NULL DEFAULT 0,
+             complexity      TEXT,
+             isolate_default INTEGER NOT NULL DEFAULT 0,
+             PRIMARY KEY (run_id, role_id)
+         );",
+    )?;
+    if !has_column(conn, "missions", "squad_id") {
+        conn.execute("ALTER TABLE missions ADD COLUMN squad_id TEXT REFERENCES squads(id) ON DELETE RESTRICT", [])?;
+    }
+    if !has_column(conn, "runs", "squad_id") {
+        conn.execute(
+            "ALTER TABLE runs ADD COLUMN squad_id TEXT REFERENCES squads(id) ON DELETE RESTRICT",
+            [],
+        )?;
+        conn.execute("ALTER TABLE runs ADD COLUMN squad_name TEXT", [])?;
+    } else if !has_column(conn, "runs", "squad_name") {
+        conn.execute("ALTER TABLE runs ADD COLUMN squad_name TEXT", [])?;
+    }
+    if !has_column(conn, "tasks", "functional_role") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN functional_role TEXT", [])?;
+    }
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_missions_squad ON missions(squad_id);
+         CREATE INDEX IF NOT EXISTS idx_runs_squad ON runs(squad_id);",
+    )?;
+
     // Columna agregada después de que `tabs` ya existía en instalaciones reales, así que
     // se suma con ALTER en vez de recrear la tabla (que perdería las tabs guardadas).
     if conn.prepare("SELECT history_id FROM tabs LIMIT 1").is_err() {
@@ -585,7 +700,10 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     if conn.prepare("SELECT account_id FROM tabs LIMIT 1").is_err() {
         conn.execute("ALTER TABLE tabs ADD COLUMN account_id TEXT", [])?;
     }
-    if conn.prepare("SELECT account_id FROM session_history LIMIT 1").is_err() {
+    if conn
+        .prepare("SELECT account_id FROM session_history LIMIT 1")
+        .is_err()
+    {
         conn.execute("ALTER TABLE session_history ADD COLUMN account_id TEXT", [])?;
     }
     // Cadena de pre-lanzamiento de la tab, como JSON (ver `prelaunch::steps_to_json`). Se
@@ -594,15 +712,24 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     // Va con DEFAULT '[]' y NOT NULL para que leerla nunca tenga que distinguir vacío de
     // nulo.
     if conn.prepare("SELECT prelaunch FROM tabs LIMIT 1").is_err() {
-        conn.execute("ALTER TABLE tabs ADD COLUMN prelaunch TEXT NOT NULL DEFAULT '[]'", [])?;
+        conn.execute(
+            "ALTER TABLE tabs ADD COLUMN prelaunch TEXT NOT NULL DEFAULT '[]'",
+            [],
+        )?;
     }
-    if conn.prepare("SELECT prelaunch FROM session_history LIMIT 1").is_err() {
+    if conn
+        .prepare("SELECT prelaunch FROM session_history LIMIT 1")
+        .is_err()
+    {
         conn.execute(
             "ALTER TABLE session_history ADD COLUMN prelaunch TEXT NOT NULL DEFAULT '[]'",
             [],
         )?;
     }
-    if conn.prepare("SELECT sibling_tabs FROM session_history LIMIT 1").is_err() {
+    if conn
+        .prepare("SELECT sibling_tabs FROM session_history LIMIT 1")
+        .is_err()
+    {
         conn.execute(
             "ALTER TABLE session_history ADD COLUMN sibling_tabs TEXT NOT NULL DEFAULT '[]'",
             [],
@@ -616,7 +743,10 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
     // Con ALTER y no recreando la tabla: las skills instaladas viven en disco y sus filas
     // son lo único que las conecta con sus symlinks. Las que ya estaban quedan en NULL —
     // se muestran como locales hasta que se reinstalen.
-    if conn.prepare("SELECT registry_id FROM skills LIMIT 1").is_err() {
+    if conn
+        .prepare("SELECT registry_id FROM skills LIMIT 1")
+        .is_err()
+    {
         conn.execute("ALTER TABLE skills ADD COLUMN registry_id TEXT", [])?;
         conn.execute("ALTER TABLE skills ADD COLUMN registry_name TEXT", [])?;
     }
@@ -636,8 +766,189 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         conn.execute("ALTER TABLE skills ADD COLUMN origin_skill_id TEXT", [])?;
     }
 
-    set_user_version(conn, SCHEMA_VERSION)?;
-    Ok(())
+    // v21 ? per-execution reasoning effort, nullable for legacy records.
+    for table in [
+        "tasks",
+        "missions",
+        "squads",
+        "squad_members",
+        "run_squad_members",
+    ] {
+        if !has_column(conn, table, "reasoning_effort") {
+            conn.execute_batch(&format!(
+                "ALTER TABLE {table} ADD COLUMN reasoning_effort TEXT;"
+            ))?;
+        }
+    }
+    // v22: versioned delivery, preserving the legacy reroute text.
+    if !has_column(conn, "tasks", "structured_handoff") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN structured_handoff TEXT", [])?;
+    }
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS antigravity_oauth_accounts (
+        id TEXT PRIMARY KEY, subject TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
+        email TEXT NOT NULL, created_at INTEGER NOT NULL
+    );",
+    )?;
+    // Cuentas por API key. `kind` = 'login' (el directorio con el login hecho en la TUI, lo de
+    // siempre) o 'api_key'. La key NUNCA va acá: va al llavero del sistema (Claude Code) o al
+    // perfil de la propia CLI (Codex, que la guarda con `codex login --with-api-key`).
+    // `key_hint` son sus últimos 4 caracteres, para reconocerla en la lista, y `base_url` un
+    // endpoint compatible (un gateway) en vez del de Anthropic.
+    if !has_column(conn, "agent_accounts", "kind") {
+        conn.execute_batch(
+            "ALTER TABLE agent_accounts ADD COLUMN kind TEXT NOT NULL DEFAULT 'login';
+             ALTER TABLE agent_accounts ADD COLUMN base_url TEXT;
+             ALTER TABLE agent_accounts ADD COLUMN key_hint TEXT;",
+        )?;
+    }
+    // Si la cuenta de una tarea la eligió el ruteo (se puede cambiar por otra con cupo) o la
+    // fijó alguien (nunca se cambia sola). Las tareas viejas quedan en 1: es lo que hacía el
+    // scheduler con todas hasta ahora.
+    if table_exists(conn, "tasks") && !has_column(conn, "tasks", "auto_account") {
+        conn.execute("ALTER TABLE tasks ADD COLUMN auto_account INTEGER NOT NULL DEFAULT 1", [])?;
+    }
+    // Revisión de lo que entregó una misión (ver `missions::review`): el veredicto de cada
+    // tarea (`accepted` | `rejected` | `conflict`, NULL = sin revisar) y la rama/carpeta de
+    // integración de la misión, más cuándo se aplicó al proyecto.
+    if table_exists(conn, "tasks") && !has_column(conn, "tasks", "review") {
+        conn.execute_batch(
+            "ALTER TABLE tasks ADD COLUMN review TEXT;
+             ALTER TABLE tasks ADD COLUMN review_note TEXT;",
+        )?;
+    }
+    if table_exists(conn, "missions") && !has_column(conn, "missions", "integration_branch") {
+        conn.execute_batch(
+            "ALTER TABLE missions ADD COLUMN integration_branch TEXT;
+             ALTER TABLE missions ADD COLUMN integration_path TEXT;
+             ALTER TABLE missions ADD COLUMN applied_at INTEGER;",
+        )?;
+    }
+    // Un intento de tarea por fila, con la cuenta que lo corrió (ver `runs::ledger`). Sin FK a
+    // `tasks`: borrar un run no borra lo que gastó.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS usage_events (
+             id          INTEGER PRIMARY KEY AUTOINCREMENT,
+             task_id     TEXT NOT NULL,
+             run_id      TEXT NOT NULL,
+             agent_id    TEXT NOT NULL,
+             account_key TEXT NOT NULL,
+             model       TEXT,
+             ok          INTEGER NOT NULL,
+             tokens_in   INTEGER,
+             tokens_out  INTEGER,
+             cost_usd    REAL,
+             created_at  INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_usage_events_account ON usage_events(account_key, created_at);",
+    )?;
+    // Índices de las consultas que corren en cada evento de la flota y en cada guardado:
+    // la lista de runs de un workspace (`ORDER BY created_at DESC`), las tasks de un run en
+    // orden, y buscar el historial de una sesión por su id. Sin ellos son recorridos enteros
+    // de tablas que solo crecen.
+    conn.execute_batch(
+        "CREATE INDEX IF NOT EXISTS idx_runs_workspace_created ON runs(workspace_id, created_at);
+         CREATE INDEX IF NOT EXISTS idx_tasks_run_created ON tasks(run_id, created_at);
+         CREATE INDEX IF NOT EXISTS idx_session_history_session ON session_history(session_id);",
+    )?;
+    // New databases are stamped at the latest version by legacy detection; create v24
+    // tables whenever the baseline DDL did not create them itself.
+    conn.execute_batch("SAVEPOINT migrate_memory_v24")?;
+    let memory_migration = (|| -> SqlResult<()> {
+        conn.execute_batch("CREATE TABLE IF NOT EXISTS memory_entries (
+            id TEXT PRIMARY KEY,
+            scope TEXT NOT NULL CHECK(scope IN ('workspace','mission')),
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            mission_id TEXT REFERENCES missions(id) ON DELETE CASCADE,
+            key TEXT NOT NULL CHECK(length(CAST(key AS BLOB)) BETWEEN 1 AND 128),
+            kind TEXT NOT NULL CHECK(kind IN ('decision','finding','file','constraint','note')),
+            status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','deleted')),
+            current_revision INTEGER,
+            priority INTEGER NOT NULL DEFAULT 0 CHECK(priority BETWEEN -10 AND 10),
+            created_at INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL,
+            CHECK((scope='workspace' AND mission_id IS NULL) OR
+                  (scope='mission' AND mission_id IS NOT NULL))
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_workspace_key
+            ON memory_entries(workspace_id,key) WHERE scope='workspace';
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_mission_key
+            ON memory_entries(mission_id,key) WHERE scope='mission';
+        CREATE INDEX IF NOT EXISTS idx_memory_workspace_active
+            ON memory_entries(workspace_id,status,priority DESC);
+        CREATE INDEX IF NOT EXISTS idx_memory_mission_active
+            ON memory_entries(mission_id,status,priority DESC);
+        CREATE TABLE IF NOT EXISTS memory_revisions (
+            entry_id TEXT NOT NULL REFERENCES memory_entries(id) ON DELETE CASCADE,
+            revision INTEGER NOT NULL,
+            status TEXT NOT NULL CHECK(status IN ('proposed','approved','rejected')),
+            operation TEXT NOT NULL CHECK(operation IN ('create','update','delete')),
+            kind TEXT NOT NULL CHECK(kind IN ('decision','finding','file','constraint','note')),
+            priority INTEGER NOT NULL DEFAULT 0 CHECK(priority BETWEEN -10 AND 10),
+            body TEXT NOT NULL CHECK(length(CAST(body AS BLOB)) BETWEEN 1 AND 4096),
+            content_hash TEXT NOT NULL CHECK(length(content_hash)=64),
+            actor_kind TEXT NOT NULL CHECK(actor_kind IN ('user','lead','worker')),
+            source_run_id TEXT,
+            source_task_id TEXT,
+            source_fact_id TEXT,
+            reason TEXT CHECK(reason IS NULL OR length(CAST(reason AS BLOB))<=512),
+            expected_revision INTEGER,
+            created_at INTEGER NOT NULL,
+            decided_at INTEGER,
+            PRIMARY KEY(entry_id,revision)
+        );
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_memory_one_pending_revision
+            ON memory_revisions(entry_id) WHERE status='proposed';
+        CREATE TRIGGER IF NOT EXISTS memory_revision_immutable_fields
+        BEFORE UPDATE ON memory_revisions
+        WHEN NEW.entry_id<>OLD.entry_id OR NEW.revision<>OLD.revision OR
+             NEW.operation<>OLD.operation OR NEW.kind<>OLD.kind OR NEW.priority<>OLD.priority OR NEW.body<>OLD.body OR
+             NEW.content_hash<>OLD.content_hash OR NEW.actor_kind<>OLD.actor_kind OR
+             NEW.source_run_id IS NOT OLD.source_run_id OR NEW.source_task_id IS NOT OLD.source_task_id OR
+             NEW.source_fact_id IS NOT OLD.source_fact_id OR NEW.reason IS NOT OLD.reason OR
+             NEW.expected_revision IS NOT OLD.expected_revision OR NEW.created_at<>OLD.created_at OR
+             (OLD.status<>'proposed') OR NEW.status NOT IN ('approved','rejected') OR NEW.decided_at IS NULL
+        BEGIN SELECT RAISE(ABORT,'memory revisions are immutable'); END;
+        CREATE INDEX IF NOT EXISTS idx_memory_revisions_status ON memory_revisions(status,created_at);
+        CREATE TABLE IF NOT EXISTS run_memory_snapshot (
+            run_id TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+            entry_id TEXT NOT NULL,
+            revision INTEGER NOT NULL,
+            scope TEXT NOT NULL CHECK(scope IN ('workspace','mission')),
+            key TEXT NOT NULL CHECK(length(CAST(key AS BLOB)) BETWEEN 1 AND 128),
+            kind TEXT NOT NULL CHECK(kind IN ('decision','finding','file','constraint','note')),
+            body TEXT NOT NULL CHECK(length(CAST(body AS BLOB)) BETWEEN 1 AND 4096),
+            priority INTEGER NOT NULL,
+            content_hash TEXT NOT NULL CHECK(length(content_hash)=64),
+            selection_order INTEGER NOT NULL,
+            truncated INTEGER NOT NULL DEFAULT 0 CHECK(truncated IN (0,1)),
+            PRIMARY KEY(run_id,selection_order)
+        );
+        CREATE TABLE IF NOT EXISTS run_memory_snapshot_meta (
+            run_id TEXT PRIMARY KEY REFERENCES runs(id) ON DELETE CASCADE,
+            omitted_entries INTEGER NOT NULL DEFAULT 0 CHECK(omitted_entries>=0),
+            truncated_entries INTEGER NOT NULL DEFAULT 0 CHECK(truncated_entries>=0),
+            context_bytes INTEGER NOT NULL DEFAULT 0 CHECK(context_bytes BETWEEN 0 AND 16384)
+        );
+        CREATE TRIGGER IF NOT EXISTS memory_snapshot_sealed
+        BEFORE INSERT ON run_memory_snapshot
+        WHEN EXISTS(SELECT 1 FROM run_memory_snapshot_meta WHERE run_id=NEW.run_id)
+        BEGIN SELECT RAISE(ABORT,'Run memory snapshot is sealed'); END;
+        CREATE TRIGGER IF NOT EXISTS memory_snapshot_immutable
+        BEFORE UPDATE ON run_memory_snapshot
+        BEGIN SELECT RAISE(ABORT,'Run memory snapshots are immutable'); END;
+        CREATE TRIGGER IF NOT EXISTS memory_snapshot_meta_immutable
+        BEFORE UPDATE ON run_memory_snapshot_meta
+        BEGIN SELECT RAISE(ABORT,'Run memory snapshot metadata is immutable'); END;")?;
+        set_user_version(conn, SCHEMA_VERSION)
+    })();
+    match memory_migration {
+        Ok(()) => conn.execute_batch("RELEASE migrate_memory_v24"),
+        Err(error) => {
+            conn.execute_batch("ROLLBACK TO migrate_memory_v24; RELEASE migrate_memory_v24")?;
+            Err(error)
+        }
+    }
 }
 
 /// Base en memoria con el schema REAL, para los tests. Vive en el código de producción a
@@ -647,7 +958,8 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
 #[cfg(test)]
 pub(crate) fn in_memory() -> Connection {
     let conn = Connection::open_in_memory().expect("base en memoria");
-    conn.execute_batch("PRAGMA foreign_keys = ON;").expect("pragma");
+    conn.execute_batch("PRAGMA foreign_keys = ON;")
+        .expect("pragma");
     migrate(&conn).expect("migración del schema de prueba");
     conn
 }

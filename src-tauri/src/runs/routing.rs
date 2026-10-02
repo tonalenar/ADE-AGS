@@ -65,7 +65,10 @@ pub struct ModelRef {
 
 impl ModelRef {
     fn new(agent_id: &str, model: &str) -> Self {
-        ModelRef { agent_id: agent_id.to_string(), model: model.to_string() }
+        ModelRef {
+            agent_id: agent_id.to_string(),
+            model: model.to_string(),
+        }
     }
 }
 
@@ -152,11 +155,22 @@ pub struct Assignment {
     /// Lo que se descartó y por qué, en el orden en que se probó. Vacío si salió a la
     /// primera.
     pub notes: Vec<String>,
+    /// La cuenta la eligió el ruteo (`AccountChoice::Auto`): la tarea se puede pasar a otra
+    /// con cupo. Con una cuenta fijada, nunca (ver `runs::failure`).
+    pub auto_account: bool,
 }
 
 /// Asigna una tarea. `Err` trae el motivo en palabras: es lo que se le muestra a quien la
 /// lanzó, así que tiene que alcanzar para saber qué cambiar.
-pub fn route(roster: &Roster, tiers: &Tiers, req: &RouteRequest, now: i64) -> Result<Assignment, String> {
+pub fn route(
+    roster: &Roster,
+    tiers: &Tiers,
+    req: &RouteRequest,
+    now: i64,
+) -> Result<Assignment, String> {
+    if req.model.is_some() && req.complexity.is_some() {
+        return Err("Specific model and complexity routing cannot be selected together".into());
+    }
     match (&req.model, req.complexity) {
         (Some(_), _) | (None, None) => manual(roster, req, now),
         (None, Some(c)) => by_tier(roster, tiers, req, c, now),
@@ -164,8 +178,13 @@ pub fn route(roster: &Roster, tiers: &Tiers, req: &RouteRequest, now: i64) -> Re
 }
 
 fn manual(roster: &Roster, req: &RouteRequest, now: i64) -> Result<Assignment, String> {
-    let agent_id = req.agent_id.as_deref().ok_or("falta decir qué agente la corre")?;
-    let agent = roster.agent(agent_id).ok_or_else(|| format!("'{agent_id}' no es un agente conocido"))?;
+    let agent_id = req
+        .agent_id
+        .as_deref()
+        .ok_or("falta decir qué agente la corre")?;
+    let agent = roster
+        .agent(agent_id)
+        .ok_or_else(|| format!("'{agent_id}' no es un agente conocido"))?;
     if let Some(reason) = &agent.unavailable {
         return Err(reason.clone());
     }
@@ -179,6 +198,7 @@ fn manual(roster: &Roster, req: &RouteRequest, now: i64) -> Result<Assignment, S
         account_id,
         routed_by: RoutedBy::Manual,
         notes,
+        auto_account: matches!(req.account, AccountChoice::Auto),
     })
 }
 
@@ -196,7 +216,10 @@ fn by_tier(
         .collect();
     if entries.is_empty() {
         return Err(match &req.agent_id {
-            Some(id) => format!("el tramo {} no tiene modelos de '{id}'", complexity.as_str()),
+            Some(id) => format!(
+                "el tramo {} no tiene modelos de '{id}'",
+                complexity.as_str()
+            ),
             None => format!("el tramo {} no tiene modelos", complexity.as_str()),
         });
     }
@@ -223,8 +246,13 @@ fn by_tier(
                     agent_id: agent.agent_id.clone(),
                     model: Some(entry.model.clone()),
                     account_id,
-                    routed_by: if notes.is_empty() { RoutedBy::Policy } else { RoutedBy::Fallback },
+                    routed_by: if notes.is_empty() {
+                        RoutedBy::Policy
+                    } else {
+                        RoutedBy::Fallback
+                    },
                     notes,
+                    auto_account: matches!(req.account, AccountChoice::Auto),
                 });
             }
             Err(reason) => notes.push(format!("{what}: {reason}")),
@@ -248,8 +276,9 @@ fn model_problem(agent: &RosterAgent, model: &str) -> Option<String> {
     if let Some(reason) = &listed.unavailable {
         return Some(reason.clone());
     }
-    (listed.toolcall == Some(false))
-        .then(|| "no puede usar herramientas: contestaría con texto sin tocar un archivo".to_string())
+    (listed.toolcall == Some(false)).then(|| {
+        "no puede usar herramientas: contestaría con texto sin tocar un archivo".to_string()
+    })
 }
 
 /// Con qué cuenta. Devuelve la cuenta y lo que se descartó para llegar a ella.
@@ -261,7 +290,10 @@ fn pick_account(
     // Una TUI sin cuentas corre con la que tenga el sistema: no hay nada que elegir.
     if agent.accounts.is_empty() {
         return match choice {
-            AccountChoice::Fixed(Some(id)) => Err(format!("{} no maneja cuentas: '{id}' no existe", agent.label)),
+            AccountChoice::Fixed(Some(id)) => Err(format!(
+                "{} no maneja cuentas: '{id}' no existe",
+                agent.label
+            )),
             _ => Ok((None, Vec::new())),
         };
     }
@@ -289,14 +321,24 @@ fn pick_account(
             // 11 % no hay diferencia que valga repartir por ella, y así el desempate lo
             // deciden las tareas que ya están corriendo — que son las que van a gastar la
             // ventana en los próximos minutos. Un cupo desconocido cuenta como libre: es una
-            // cuenta que la flota todavía no usó.
+            // cuenta que la flota todavía no usó. Antes que todo, las que no están en su
+            // máximo de simultáneas: una llena solo se elige si todas lo están (y la tarea
+            // espera su turno al lanzar, ver `scheduler::tick`).
             usable.sort_by_key(|(order, a)| {
-                let used = a.quota.as_ref().and_then(|q| q.five_hour_at(now)).unwrap_or(0.0);
-                ((used * 10.0).floor() as i64, a.running, *order)
+                let used = a
+                    .quota
+                    .as_ref()
+                    .and_then(|q| q.five_hour_at(now))
+                    .unwrap_or(0.0);
+                (a.at_capacity, (used * 10.0).floor() as i64, a.running, *order)
             });
             match usable.first() {
                 Some((_, account)) => Ok((account.account_id.clone(), notes)),
-                None => Err(format!("ninguna cuenta de {} se puede usar — {}", agent.label, notes.join("; "))),
+                None => Err(format!(
+                    "ninguna cuenta de {} se puede usar — {}",
+                    agent.label,
+                    notes.join("; ")
+                )),
             }
         }
     }
@@ -312,17 +354,26 @@ fn account_problem(account: &RosterAccount, now: i64) -> Option<String> {
     if !account.logged_in {
         return Some(format!("la cuenta {name} no tiene sesión iniciada"));
     }
+    if let Some(limit) = &account.limit {
+        return Some(format!("la cuenta {name} {limit}"));
+    }
     let quota = account.quota.as_ref()?;
     if !quota.exhausted_at(now) {
         return None;
     }
-    let reset = [quota.rejected_until, quota.five_hour.as_ref().and_then(|w| w.resets_at)]
-        .into_iter()
-        .flatten()
-        .filter(|at| *at > now)
-        .min();
+    let reset = [
+        quota.rejected_until,
+        quota.five_hour.as_ref().and_then(|w| w.resets_at),
+    ]
+    .into_iter()
+    .flatten()
+    .filter(|at| *at > now)
+    .min();
     Some(match reset {
-        Some(at) => format!("la cuenta {name} agotó su cupo (se reinicia en {})", minutes(at - now)),
+        Some(at) => format!(
+            "la cuenta {name} agotó su cupo (se reinicia en {})",
+            minutes(at - now)
+        ),
         None => format!("la cuenta {name} agotó su cupo"),
     })
 }

@@ -1,7 +1,7 @@
 //! Tests de la terminal: cómo se arma el lanzamiento y cómo se contiene el árbol de
 //! procesos de una tab.
 
-use super::pty_manager::{build_launch, launch_script};
+use super::pty_manager::{build_launch, launch_script, PARENT_SESSION_ENV};
 
 // ── Lanzamiento del agente ──────────────────────────────────────
 
@@ -54,17 +54,17 @@ fn el_comando_de_reanudacion_llega_entero() {
 /// de por medio. Es la garantía de que esta feature no puede romper a quien no la usa.
 #[test]
 fn sin_pasos_se_lanza_el_binario_directo_sin_shell() {
-    let cmd = build_launch("claude --resume abc", &[]);
+    let cmd = build_launch("ade-test-missing-agent --resume abc", &[]).unwrap();
     let argv: Vec<String> =
         cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
-    assert_eq!(argv, vec!["claude", "--resume", "abc"]);
+    assert_eq!(argv, vec!["ade-test-missing-agent", "--resume", "abc"]);
 }
 
 /// Con pre-comandos, el comando entero viaja como UN argumento del shell. Eso también
 /// hace que el `split_whitespace` de arriba no llegue a partirlo.
 #[test]
 fn con_pasos_el_comando_viaja_entero_como_argumento_del_shell() {
-    let cmd = build_launch("claude --resume abc", &["nvm use".into()]);
+    let cmd = build_launch("claude --resume abc", &["nvm use".into()]).unwrap();
     let argv: Vec<String> =
         cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
     let script = argv.last().expect("el script va último");
@@ -74,6 +74,40 @@ fn con_pasos_el_comando_viaja_entero_como_argumento_del_shell() {
 }
 
 // ── Recorrido del árbol de procesos (unix) ──────────────────────
+
+#[cfg(windows)]
+#[test]
+fn windows_pty_resolves_npm_shim_and_preserves_arguments() {
+    let root = std::env::temp_dir().join(format!("ade-pty-shim-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(root.join("node_modules")).unwrap();
+    std::fs::write(root.join("node.exe"), b"fixture").unwrap();
+    std::fs::write(root.join("node_modules/cli.js"), b"fixture").unwrap();
+    std::fs::write(root.join("agent"), b"#!/bin/sh").unwrap();
+    std::fs::write(root.join("agent.cmd"), "@echo off\r\nIF EXIST \"%dp0%\\node.exe\" (\r\nSET \"_prog=%dp0%\\node.exe\"\r\n)\r\n\"%_prog%\" \"%dp0%\\node_modules\\cli.js\" %*\r\n").unwrap();
+    let command = format!("\"{}\" --resume \"session with spaces & literal\"", root.join("agent").display());
+    let cmd = build_launch(&command, &[]).unwrap();
+    let argv = cmd.get_argv();
+    assert_eq!(std::path::Path::new(&argv[0]), root.join("node.exe"));
+    assert_eq!(std::path::Path::new(&argv[1]), root.join("node_modules/cli.js"));
+    assert_eq!(argv[2], "--resume");
+    assert_eq!(argv[3], "session with spaces & literal");
+    std::fs::remove_dir_all(&root).unwrap();
+}
+
+#[cfg(windows)]
+#[test]
+#[ignore = "requires the installed Codex CLI; only runs --version, no inference"]
+fn installed_codex_starts_in_windows_pty_without_inference() {
+    use portable_pty::{native_pty_system, PtySize};
+    let pair = native_pty_system().openpty(PtySize { rows:24, cols:80, pixel_width:0, pixel_height:0 }).unwrap();
+    let mut child = pair.slave.spawn_command(build_launch("codex --version", &[]).unwrap()).unwrap();
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(15);
+    loop {
+        if let Some(status) = child.try_wait().unwrap() { assert!(status.success(), "{status:?}"); break; }
+        if std::time::Instant::now() >= deadline { let _ = child.kill(); panic!("Codex --version timed out"); }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+}
 
 #[cfg(unix)]
 mod arbol {
@@ -361,4 +395,44 @@ fn el_comando_se_parte_respetando_las_comillas() {
     // Un argumento vacío explícito es un argumento, no la ausencia de uno.
     assert_eq!(split_command("agente --flag \"\""), vec!["agente", "--flag", ""]);
     assert!(split_command("   ").is_empty());
+}
+
+/// Un carácter partido entre dos lecturas del PTY sale entero, no como dos `�`.
+#[test]
+fn un_caracter_partido_entre_lecturas_sale_entero() {
+    use super::pty_manager::Utf8Stream;
+    let text = "ção ─ 🚀";
+    let bytes = text.as_bytes();
+    // Todas las formas de cortarlo en dos.
+    for cut in 0..=bytes.len() {
+        let mut stream = Utf8Stream::default();
+        let mut out = stream.push(&bytes[..cut]);
+        out.push_str(&stream.push(&bytes[cut..]));
+        out.push_str(&stream.finish());
+        assert_eq!(out, text, "cortado en {cut}");
+    }
+    // Byte a byte también.
+    let mut stream = Utf8Stream::default();
+    let out: String = bytes.iter().map(|b| stream.push(&[*b])).collect();
+    assert_eq!(out, text);
+
+    // Lo inválido de verdad sigue saliendo como `�`, sin quedarse esperando.
+    let mut stream = Utf8Stream::default();
+    assert_eq!(stream.push(b"a\xffb"), "a\u{fffd}b");
+    // Un comienzo de secuencia que nunca se completa sale al cerrar.
+    assert_eq!(stream.push(b"x\xe2\x94"), "x");
+    assert_eq!(stream.finish(), "\u{fffd}");
+}
+
+// ── Variables heredadas de una sesión de Claude Code ────────────
+
+#[test]
+fn las_marcas_de_sesion_padre_no_pasan_a_los_terminales() {
+    // Sin esto el Claude de adentro se cree sesión hija y no guarda transcript.
+    assert!(PARENT_SESSION_ENV.contains(&"CLAUDE_CODE_CHILD_SESSION"));
+    assert!(PARENT_SESSION_ENV.contains(&"CLAUDE_CODE_SESSION_ID"));
+    // La configuración del usuario NO es una marca de sesión: no se toca.
+    for keep in ["ANTHROPIC_MODEL", "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"] {
+        assert!(!PARENT_SESSION_ENV.contains(&keep), "{keep}");
+    }
 }

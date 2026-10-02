@@ -29,6 +29,17 @@ pub fn init_db() -> SqlResult<DbConnection> {
     // en vez de limpiarlas.
     conn.execute_batch("PRAGMA foreign_keys = ON;")?;
 
+    // WAL: un commit escribe al final del log en vez de reescribir páginas con doble fsync,
+    // que es lo que hacía que guardar las tabs o el progreso de la flota se notara.
+    // `synchronous=NORMAL` es lo seguro en WAL (un corte de luz pierde a lo sumo la última
+    // transacción, nunca corrompe), y `busy_timeout` espera en vez de fallar con
+    // SQLITE_BUSY si otro proceso (la CLI, un `sqlite3` abierto) tiene la base un momento.
+    conn.execute_batch(
+        "PRAGMA journal_mode = WAL;
+         PRAGMA synchronous = NORMAL;
+         PRAGMA busy_timeout = 5000;",
+    )?;
+
     super::schema::migrate(&conn)?;
     super::seeds::seed_defaults(&conn)?;
     super::queries::dedupe_session_history_once(&conn)?;

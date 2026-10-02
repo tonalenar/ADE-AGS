@@ -2,6 +2,8 @@
 
 use std::path::Path;
 
+use crate::agents::{DefaultHome, SystemMarkerRoot};
+
 /// Una TUI de fábrica que soporta cuentas: su id más cómo aísla el perfil.
 ///
 /// Los campos ya no se declaran acá: son los de [`crate::agents::ProfileDef`], que vive en
@@ -13,6 +15,8 @@ pub(super) struct ProfileSpec {
     pub(super) login_command: &'static str,
     pub(super) marker: &'static str,
     pub(super) label_path: &'static [&'static str],
+    pub(super) default_home: DefaultHome,
+    pub(super) system_marker: SystemMarkerRoot,
 }
 
 lazy_static::lazy_static! {
@@ -31,6 +35,8 @@ lazy_static::lazy_static! {
                 login_command: p.login_command,
                 marker: p.marker,
                 label_path: p.label_path,
+                default_home: p.default_home,
+                system_marker: p.system_marker,
             })
         })
         .collect();
@@ -47,14 +53,13 @@ pub(super) fn spec_for(agent_id: &str) -> Option<&'static ProfileSpec> {
 /// justamente la que se usa casi siempre.
 pub(super) fn default_dir(spec: &ProfileSpec) -> Option<std::path::PathBuf> {
     let home = dirs::home_dir()?;
-    Some(match spec.env_var {
-        // Es la raíz de datos XDG, no una carpeta de opencode: su marcador ya incluye el
-        // subdirectorio (`opencode/auth.json`).
-        "XDG_DATA_HOME" => std::env::var_os("XDG_DATA_HOME")
+    // El layout sale del perfil. No hay `_` que mande una variable desconocida a `~/.claude`.
+    Some(match spec.default_home {
+        DefaultHome::HomeDot(name) => home.join(name),
+        // Se lee al llamar, igual que antes: un test o un proceso puede haberla cambiado.
+        DefaultHome::XdgDataHome => std::env::var_os("XDG_DATA_HOME")
             .map(std::path::PathBuf::from)
             .unwrap_or_else(|| home.join(".local/share")),
-        "CODEX_HOME" => home.join(".codex"),
-        _ => home.join(".claude"),
     })
 }
 
@@ -65,9 +70,9 @@ pub(super) fn default_dir(spec: &ProfileSpec) -> Option<std::path::PathBuf> {
 /// `usage/trust.rs`, que ya lo resolvía así). Buscarlo en `~/.claude/.claude.json` era leer
 /// un archivo que no existe, y la cuenta que el usuario usa siempre figuraba sin sesión.
 pub(super) fn system_marker_root(spec: &ProfileSpec, home: &Path, default_dir: &Path) -> std::path::PathBuf {
-    match spec.env_var {
-        "CLAUDE_CONFIG_DIR" => home.to_path_buf(),
-        _ => default_dir.to_path_buf(),
+    match spec.system_marker {
+        SystemMarkerRoot::UserHome => home.to_path_buf(),
+        SystemMarkerRoot::DefaultDir => default_dir.to_path_buf(),
     }
 }
 

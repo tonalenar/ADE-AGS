@@ -4,6 +4,7 @@ import { Button, EmptyState, UserIcon } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { AgentAccountsPane } from "@/features/accounts/AgentAccountsPane";
+import { AntigravityAccountsPane } from "@/features/accounts/AntigravityAccountsPane";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { GitAccountsPane } from "@/features/forge/GitAccountsPane";
 import { FORGE_KINDS, ForgeIcon, forgeLabel } from "@/features/forge/forgeMeta";
@@ -38,7 +39,7 @@ function NavItem({ active, onClick, icon, label, count, title }: {
       title={title}
       className={`cc-t flex items-center gap-2 w-full h-8 px-2 rounded-lg text-left
         ${active
-          ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-900 dark:text-white font-semibold"
+          ? "bg-accent-500/12 dark:bg-accent-400/13 text-gray-900 dark:text-white font-semibold"
           : "text-gray-600 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-white/6"}`}
     >
       {icon}
@@ -95,7 +96,7 @@ export function AccountsModal({ onClose, initial }: { onClose: () => void; initi
   return (
     <ShellModal
       title={t("settings.accounts")}
-      icon={<UserIcon className="w-[15px] h-[15px] shrink-0 text-blue-500 dark:text-blue-400" />}
+      icon={<UserIcon className="w-[15px] h-[15px] shrink-0 text-accent-500 dark:text-accent-400" />}
       width="max-w-3xl"
       onClose={onClose}
     >
@@ -123,6 +124,10 @@ export function AccountsModal({ onClose, initial }: { onClose: () => void; initi
             );
           })}
 
+          <NavItem active={section?.kind === "agent" && section.id === "antigravity"}
+            onClick={() => setSection({ kind: "agent", id: "antigravity" })}
+            icon={<UserIcon className="w-3.5 h-3.5" />} label="Antigravity" count={0}
+            title={t("accounts.antigravity.connect")} />
           <NavHeading>{t("accounts.group.git")}</NavHeading>
           {FORGE_KINDS.map((kind) => {
             const n = gitAccounts.filter((a) => a.kind === kind).length;
@@ -151,6 +156,8 @@ export function AccountsModal({ onClose, initial }: { onClose: () => void; initi
       <div className="flex flex-col flex-1 min-w-0 min-h-0">
         {section?.kind === "git" ? (
           <GitAccountsPane kind={section.id} />
+        ) : section?.kind === "agent" && section.id === "antigravity" ? (
+          <AntigravityAccountsPane />
         ) : agent ? (
           <AgentAccountsPane agent={agent} />
         ) : (

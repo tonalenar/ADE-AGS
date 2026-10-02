@@ -1,0 +1,10 @@
+# Checkout as LF even when core.autocrlf=true.
+# Two tests read source as text and fail on CRLF: the graphify catalog regex,
+# and Vite's SSR loader, which keeps a CRLF shebang inside a function body.
+* text=auto eol=lf
+
+*.png binary
+*.ico binary
+*.icns binary
+*.exe binary
+*.dll binary

@@ -1,10 +1,14 @@
 import { useEffect, useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { Button } from "neogestify-ui-components";
+import { Button, Tooltip } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { systemAccounts } from "@/features/accounts/usage";
 import { AccountUsagePopover } from "@/features/accounts/AccountUsagePopover";
+import { LoginTerminal } from "@/features/accounts/LoginTerminal";
+import { accountLoginCommand } from "@/features/accounts/login";
+import { AppDialog } from "@/shared/ui/AppDialog";
 import type { AgentAccount } from "@/features/accounts/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { agentIcon } from "@/features/agents/agentIcons";
@@ -12,6 +16,8 @@ import { OrchestratorIndicator } from "@/features/orchestrator/OrchestratorIndic
 import { FleetIndicator } from "@/features/runs/FleetIndicator";
 import { BranchIcon } from "@/app/icons";
 import type { RepoInfo } from "@/features/explorer/types";
+import { Mascot } from "@/shared/brand/Mascot";
+import { useMascotState } from "@/shared/brand/useMascotState";
 
 /**
  * La franja de abajo: las cuentas de cada TUI, y el estado de la tab activa.
@@ -25,6 +31,8 @@ import type { RepoInfo } from "@/features/explorer/types";
  */
 export function StatusBar({ repo }: { repo: RepoInfo | null }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const mascot = useMascotState();
   const profiles = useAccountsStore((s) => s.accounts);
   const load = useAccountsStore((s) => s.load);
   const tabs = useTabsStore((s) => s.tabs);
@@ -32,6 +40,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const [system, setSystem] = useState<AgentAccount[]>([]);
   const [open, setOpen] = useState<string | null>(null);
+  const [loginFor, setLoginFor] = useState<AgentAccount | null>(null);
   const popRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -51,12 +60,32 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
   // La principal de cada TUI instalada, más los perfiles con sesión iniciada: un perfil
   // creado y nunca logueado no dice nada acá y solo llenaría la barra.
   const shown = [...system, ...profiles.filter((a) => a.loggedIn)];
+  const closeLogin = () => {
+    setLoginFor(null);
+    load().catch(console.error);
+    systemAccounts().then(setSystem).catch(console.error);
+  };
 
   return (
     <footer className="relative flex items-center gap-2.5 h-[26px] shrink-0 px-3
-      bg-gray-100 dark:bg-[#0a0f16]
+      bg-gray-100 dark:bg-surface-sunken
       border-t border-gray-200 dark:border-white/7
       text-[10.5px] tabular-nums text-gray-500 dark:text-gray-400 select-none">
+
+      {/* O mascote é o indicador de humor da janela: repousa, trabalha ou chama você.
+          Fica parado em repouso — algo se mexendo o tempo todo no canto do olho cansa. */}
+      <Tooltip content={t(`status.mascot.${mascot.state}`, {
+        running: mascot.summary.running,
+        count: mascot.summary.needsYou,
+      })} placement="top" delay={300}>
+        <Button variant="custom"
+          onClick={() => navigate(mascot.state === "idle" ? "/" : "/fleet")}
+          aria-label={t("sidebar.home")}
+          className="cc-t flex items-center justify-center w-6 h-5 -ml-1 rounded hover:bg-gray-200 dark:hover:bg-white/8"
+        >
+          <Mascot size={16} state={mascot.state} still={mascot.state === "idle"} />
+        </Button>
+      </Tooltip>
 
       {shown.map((account) => {
         const Icon = agentIcon(account.agentId, account.agentId);
@@ -86,11 +115,14 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
           ref={popRef}
           className="cc-rise absolute bottom-[30px] left-3 z-50
             rounded-xl overflow-hidden
-            bg-white dark:bg-[#0d1117]
+            bg-white dark:bg-surface
             border border-gray-200 dark:border-white/12
             shadow-2xl"
         >
-          <AccountUsagePopover account={shown.find((a) => a.id === open)!} />
+          <AccountUsagePopover
+            account={shown.find((a) => a.id === open)!}
+            onLogin={() => { setLoginFor(shown.find((a) => a.id === open)!); setOpen(null); }}
+          />
         </div>
       )}
 
@@ -116,6 +148,19 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
       <span>{t("status.agents", { n: tabs.length })}</span>
       <FleetIndicator />
       <OrchestratorIndicator />
+      {loginFor && (
+        <AppDialog
+          title={t("settings.accounts.login.title", { name: loginFor.label ?? loginFor.name })}
+          onClose={closeLogin}
+          size="lg"
+          footer={<Button variant="primary" onClick={closeLogin}>{t("settings.accounts.login.done")}</Button>}
+        >
+          <p className="text-xs text-gray-500 dark:text-white/50 mb-3">
+            {t("settings.accounts.login.helper", { command: accountLoginCommand(loginFor) })}
+          </p>
+          <LoginTerminal key={loginFor.id} account={loginFor} />
+        </AppDialog>
+      )}
     </footer>
   );
 }

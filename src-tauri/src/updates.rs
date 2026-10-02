@@ -15,7 +15,10 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Runtime};
 
-const REPO: &str = "luis3132/ControlCode";
+/// Este fork, no el ControlCode original: con el repo de arriba la ADE ofrecía instalar el
+/// binario del upstream, que comparte identificador y carpeta de datos con ella y abriría
+/// una base con un schema que no conoce.
+const REPO: &str = "tonalenar/ADE-AGS";
 
 /// La llave PÚBLICA con la que se verifican las actualizaciones. No es secreta (va en el
 /// binario), pero sin ella no hay actualización automática.

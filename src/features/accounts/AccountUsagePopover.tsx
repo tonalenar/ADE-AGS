@@ -8,8 +8,9 @@ import {
   agentAccountUsage, claudeLiveUsage, formatAgo, isUsageFresh, planLabel,
   type AccountUsage, type LiveUsage,
 } from "./usage";
-import { accountEnv } from "./ipc";
-import type { AgentAccount } from "./types";
+import { accountEnv, codexAccountUsage } from "./ipc";
+import type { AgentAccount, CodexUsage, QuotaWindow } from "./types";
+import { accountProblemKey, accountProblemText } from "./problem";
 
 /** Un perfil sintético (`system:*`) no tiene fila en la base: para el backend es `null`. */
 function realAccountId(account: AgentAccount): string | null {
@@ -21,7 +22,90 @@ function realAccountId(account: AgentAccount): string | null {
  * como lo informa la TUI. Solo eso — los tokens de los transcripts son consumo, no cuota,
  * y al lado de las barras se confundían con ella.
  */
-export function AccountUsagePopover({ account }: { account: AgentAccount }) {
+/**
+ * El cupo de una cuenta de Codex. Sale de su `app-server` (`account/rateLimits/read`), que
+ * no gasta cupo y responde en un segundo: se pregunta cada vez que se abre el panel. Con
+ * API key no hay ventanas: Codex cobra por uso.
+ */
+function CodexUsageSection({ account }: { account: AgentAccount }) {
+  const { t, i18n } = useTranslation();
+  const [usage, setUsage] = useState<CodexUsage | null>(null);
+  const [failed, setFailed] = useState("");
+  const [reload, setReload] = useState(0);
+
+  useEffect(() => {
+    let stale = false;
+    setFailed("");
+    codexAccountUsage(account.id)
+      .then((u) => { if (!stale) setUsage(u); })
+      .catch((e) => { if (!stale) setFailed(String(e)); });
+    return () => { stale = true; };
+  }, [account.id, reload]);
+
+  const resets = (at: number | null) =>
+    at ? new Date(at * 1000).toLocaleString(i18n.language, { weekday: "short", hour: "2-digit", minute: "2-digit" }) : null;
+  const meter = (label: string, w: QuotaWindow | null, variant: "accent" | "info") => {
+    if (!w) return null;
+    const percent = Math.round(w.utilization * 100);
+    const when = resets(w.resetsAt);
+    return (
+      <Progress
+        value={Math.min(percent, 100)}
+        max={100}
+        size="sm"
+        showValue
+        variant={percent >= 80 ? "warning" : variant}
+        label={
+          <span className="text-[10.5px] text-gray-500 dark:text-gray-400">
+            {label}
+            {when && <span className="ml-1.5 text-gray-400 dark:text-white/30">· {when}</span>}
+          </span>
+        }
+      />
+    );
+  };
+
+  if (failed) {
+    return (
+      <div className="flex items-center gap-2">
+        <Alert variant="neutral">{t("accounts.plan.codexFailed")}</Alert>
+        <Button variant="outline" size="sm" onClick={() => setReload((n) => n + 1)}>{t("accounts.plan.refresh")}</Button>
+      </div>
+    );
+  }
+  if (!usage) {
+    return <Progress indeterminate size="sm" label={
+      <span className="text-[10.5px] text-gray-500 dark:text-gray-400">{t("accounts.plan.asking")}</span>
+    } />;
+  }
+  if (usage.auth === "apiKey" || !usage.quota) {
+    return <p className="text-[11px] text-gray-400 dark:text-white/35">{t("accounts.plan.codexApiKey")}</p>;
+  }
+  return (
+    <div className="flex flex-col gap-2">
+      {usage.quota.rejected && <Alert variant="warning">{t("accounts.plan.codexLimited")}</Alert>}
+      {meter(t("accounts.plan.session"), usage.quota.fiveHour, "accent")}
+      {meter(t("accounts.plan.week"), usage.quota.sevenDay, "info")}
+      <div className="flex items-center gap-2 pt-0.5">
+        <span className="flex-1 text-[10px] text-gray-400 dark:text-white/30">
+          {[usage.email, usage.plan].filter(Boolean).join(" · ")}
+        </span>
+        <Button variant="icon"
+          onClick={() => { setUsage(null); setReload((n) => n + 1); }}
+          title={t("accounts.plan.refresh")}
+          className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
+            text-gray-400 dark:text-white/35
+            hover:text-gray-700 dark:hover:text-white
+            hover:bg-gray-200 dark:hover:bg-white/10 p-0"
+        >
+          <RefreshIcon className="w-3.5 h-3.5" />
+        </Button>
+      </div>
+    </div>
+  );
+}
+
+export function AccountUsagePopover({ account, onLogin }: { account: AgentAccount; onLogin: () => void }) {
   const { t } = useTranslation();
   const [usage, setUsage] = useState<AccountUsage | null>(null);
   const [live, setLive] = useState<LiveUsage | null>(null);
@@ -87,6 +171,8 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
 
   const plan = planLabel(usage?.plan.tier ?? null);
   const now = Math.floor(Date.now() / 1000);
+  const problemKey = accountProblemKey(live?.problem ?? null);
+  const needsLogin = !account.loggedIn || problemKey === "accounts.auth.expired" || problemKey === "accounts.auth.required";
 
   return (
     <div className="flex flex-col gap-3 w-72 p-3.5">
@@ -104,7 +190,7 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
           <Badge variant="accent" size="sm" className="shrink-0">{plan}</Badge>
         ) : (
           <span className={`w-1.5 h-1.5 rounded-full shrink-0
-            ${account.loggedIn ? "bg-emerald-500" : "bg-gray-300 dark:bg-white/20"}`} />
+            ${needsLogin ? "bg-gray-300 dark:bg-white/20" : "bg-emerald-500"}`} />
         )}
       </div>
 
@@ -202,14 +288,26 @@ export function AccountUsagePopover({ account }: { account: AgentAccount }) {
               </div>
             </>
           ) : live ? (
-            <Alert variant="neutral">{live.problem ?? t("accounts.plan.failed")}</Alert>
+            <>
+              <Alert variant={needsLogin ? "warning" : "neutral"}>{accountProblemText(live.problem, t)}</Alert>
+              <div className="flex items-center gap-2">
+                <Button variant="outline" size="sm" onClick={onLogin}>
+                  {t("settings.accounts.relogin")}
+                </Button>
+                <Button variant="outline" size="sm" disabled={refreshing} onClick={() => setReload((n) => n + 1)}>
+                  {t("accounts.plan.refresh")}
+                </Button>
+              </div>
+            </>
           ) : null}
         </div>
       )}
 
+      {account.agentId === "codex" && <CodexUsageSection account={account} />}
+
       {/* Las demás TUIs no dicen cuánto cupo queda. Lo que sí hay en disco (tokens de los
           transcripts) no es la cuota, y mostrarlo acá se leía como si lo fuera. */}
-      {account.agentId !== "claude-code" && (
+      {account.agentId !== "claude-code" && account.agentId !== "codex" && (
         <p className="text-[11px] text-gray-400 dark:text-white/35">
           {t("accounts.plan.unsupported")}
         </p>

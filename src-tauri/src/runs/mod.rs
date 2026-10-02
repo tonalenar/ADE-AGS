@@ -12,22 +12,33 @@
 mod activity;
 mod adapters;
 mod agents;
+mod antigravity;
 mod broker;
 mod context;
+pub(crate) mod failure;
+pub(crate) mod handoff;
+pub(crate) mod ledger;
+pub(crate) mod model_discovery;
 pub mod orchestration;
 mod plan;
-mod quota;
+mod policy;
+pub(crate) mod quota;
 mod roster;
-mod routing;
+pub(crate) mod routing;
 mod rules;
+pub mod sandbox;
 mod scheduler;
-mod store;
+pub(crate) mod store;
 mod supervisor;
-mod types;
-mod worktrees;
 #[cfg(test)]
 mod test;
+pub(crate) mod types;
+pub(crate) mod worktrees;
 
+pub(crate) use adapters::{Codex, Gemini, Kimi, OpenCode};
+pub(crate) use agents::{ClaudeCode, HeadlessAgent};
+pub(crate) use antigravity::Antigravity;
+pub(crate) use routing::Complexity;
 pub use store::sweep_orphans;
 pub use types::{Fact, Run, Task};
 
@@ -100,16 +111,19 @@ pub async fn run_start_task(
 
     let mut task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let run = store::create_run(&conn, &workspace_id, &title, &cwd)?;
-        store::create_task(
-            &conn,
+        let tx = conn.unchecked_transaction().map_err(|e|e.to_string())?;
+        let run = store::create_run(&tx, &workspace_id, &title, &cwd)?;
+        let task = store::create_task(
+            &tx,
             &store::NewTask {
                 run_id: &run.id,
                 title: &title,
                 prompt: &prompt,
                 agent_id: &assignment.agent_id,
                 account_id: assignment.account_id.as_deref(),
+                auto_account: assignment.auto_account,
                 model: assignment.model.as_deref(),
+                reasoning_effort: None,
                 cwd: &cwd,
                 budget_usd,
                 complexity: complexity.map(routing::Complexity::as_str),
@@ -117,7 +131,9 @@ pub async fn run_start_task(
                 route_note: note.as_deref(),
                 ..Default::default()
             },
-        )?
+        )?;
+        tx.commit().map_err(|e|e.to_string())?;
+        task
     };
 
     // Si el lanzamiento falla, la fila queda igual pero como fallida: una tarea que
@@ -137,7 +153,9 @@ pub async fn run_start_task(
         }
     }
 
-    if let Err(e) = supervisor::start(&app, task.clone(), supervisor::LaunchExtras::default()) {
+    let memory = {let conn=db.lock().map_err(|e|e.to_string())?; crate::memory::snapshot_context_for_run(&conn,&task.run_id)?};
+    let extras=supervisor::LaunchExtras {prompt:Some(format!("{}{memory}",task.prompt)), ..Default::default()};
+    if let Err(e) = supervisor::start(&app, task.clone(), extras) {
         return fail(&task.id, e);
     }
 
@@ -165,56 +183,190 @@ pub async fn run_start_orchestration(
     account_id: Option<String>,
     auto_account: bool,
 ) -> Result<Task, String> {
-    let objective = objective.trim().to_string();
+    let db = db_of(&app)?;
+    let (request, complexity) = lead_request(agent_id, model, complexity, account_id, auto_account);
+    let routing_db = db.clone();
+    let assignment =
+        tauri::async_runtime::spawn_blocking(move || route_lead_now(&routing_db, &request))
+            .await
+            .map_err(|error| error.to_string())??;
+    let spec = Orchestration {
+        reasoning_effort: None,
+        workspace_id: &workspace_id,
+        cwd: &cwd,
+        objective: &objective,
+        title: None,
+        max_parallel,
+        budget_usd,
+        mission_id: None,
+        squad: None,
+    };
+    start_orchestration(
+        &db,
+        &spec,
+        &assignment,
+        complexity,
+        |_, _| Ok(()),
+        |task| launch_lead(&app, task),
+    )
+}
+
+/// Lo que define un run orquestado, venga de la flota o de una misión.
+pub(crate) struct Orchestration<'a> {
+    pub reasoning_effort: Option<&'a str>,
+    pub workspace_id: &'a str,
+    pub cwd: &'a str,
+    pub objective: &'a str,
+    /// El título de la tarjeta del lead. `None` = la primera línea del objetivo.
+    pub title: Option<&'a str>,
+    pub max_parallel: i64,
+    pub budget_usd: Option<f64>,
+    pub mission_id: Option<&'a str>,
+    pub squad: Option<&'a crate::squads::Squad>,
+}
+
+/// El pedido de ruteo de un lead. Sin modelo ni complejidad va a `hard`: de cómo reparte
+/// depende lo que cuesta todo lo demás.
+pub(crate) fn lead_request(
+    agent_id: Option<String>,
+    model: Option<String>,
+    complexity: Option<routing::Complexity>,
+    account_id: Option<String>,
+    auto_account: bool,
+) -> (routing::RouteRequest, Option<routing::Complexity>) {
+    let complexity =
+        complexity.or((agent_id.is_none() && model.is_none()).then_some(routing::Complexity::Hard));
+    (
+        route_request(agent_id, model, complexity, account_id, auto_account),
+        complexity,
+    )
+}
+
+/// Crea el run y su lead, y lo lanza con `launch`.
+///
+/// El run y el lead se crean en UNA transacción junto con lo que `on_created` escriba (una
+/// misión se marca corriendo ahí): o queda todo, o nada. Si después el lanzamiento falla,
+/// las filas quedan como fallidas —el motivo es lo que hay que poder ver— y el estado se
+/// recalcula por `refresh_run_status`, que es quien arrastra a la misión.
+pub(crate) fn start_orchestration(
+    db: &DbConnection,
+    spec: &Orchestration,
+    assignment: &routing::Assignment,
+    complexity: Option<routing::Complexity>,
+    on_created: impl FnOnce(&rusqlite::Connection, &Task) -> Result<(), String>,
+    launch: impl FnOnce(&Task) -> Result<(), String>,
+) -> Result<Task, String> {
+    let objective = spec.objective.trim();
     if objective.is_empty() {
         return Err("falta el objetivo".into());
     }
-    let db = db_of(&app)?;
-    let complexity = complexity.or((agent_id.is_none() && model.is_none()).then_some(routing::Complexity::Hard));
-    let assignment = assign(&db, route_request(agent_id, model, complexity, account_id, auto_account)).await?;
+    // Antes de crear nada: una fila de un lead que nunca podía lanzarse es ruido.
+    ensure_orchestration(&assignment.agent_id)?;
+    if spec.reasoning_effort.is_some() {
+        roster::validate_effort(
+            &roster::snapshot(db, false)?,
+            &assignment.agent_id,
+            assignment.account_id.as_deref(),
+            assignment.model.as_deref(),
+            spec.reasoning_effort,
+        )?;
+    }
     let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
-    let max_parallel = max_parallel.clamp(1, 6);
+    let max_parallel = spec.max_parallel.clamp(1, 6);
 
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let run = store::create_run_with(&conn, &workspace_id, &objective, &cwd, max_parallel, budget_usd)?;
-        let title: String = objective.lines().next().unwrap_or("").chars().take(80).collect();
-        let budget = budget_usd.map(|b| format!(" El run tiene un presupuesto de ${b:.2}: ninguna tarea nueva arranca después de gastarlo."))
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let run = store::create_run_with_memory_snapshot(
+            &tx,
+            spec.workspace_id,
+            spec.mission_id,
+            objective,
+            spec.cwd,
+            max_parallel,
+            spec.budget_usd,
+        )?;
+if let Some(squad) = spec.squad {
+            store::set_run_squad_snapshot(&tx, &run.id, squad)?;
+        }
+        let title: String = match spec.title {
+            Some(t) => t.chars().take(80).collect(),
+            None => objective
+                .lines()
+                .next()
+                .unwrap_or("")
+                .chars()
+                .take(80)
+                .collect(),
+        };
+        let budget = spec.budget_usd
+            .map(|b| format!(" El run tiene un presupuesto de ${b:.2}: ninguna tarea nueva arranca después de gastarlo."))
             .unwrap_or_default();
         let prompt = format!("{objective}\n\n(Hasta {max_parallel} tareas en paralelo.{budget})");
-        store::create_task(
-            &conn,
+        let task = store::create_task(
+            &tx,
             &store::NewTask {
                 run_id: &run.id,
                 title: &title,
                 prompt: &prompt,
                 agent_id: &assignment.agent_id,
                 account_id: assignment.account_id.as_deref(),
+                auto_account: assignment.auto_account,
                 model: assignment.model.as_deref(),
-                cwd: &cwd,
+                reasoning_effort: spec.reasoning_effort,
+                cwd: spec.cwd,
                 complexity: complexity.map(routing::Complexity::as_str),
                 routed_by: Some(assignment.routed_by.as_str()),
                 route_note: note.as_deref(),
                 role: Some(types::role::LEAD),
                 ..Default::default()
             },
-        )?
+        )?;
+        on_created(&tx, &task)?;
+        tx.commit().map_err(|e| e.to_string())?;
+        task
     };
 
-    use crate::ipc::mcp::{orchestration_tool_names, OrchestrationPower::*};
-    let extras = supervisor::LaunchExtras {
-        prompt: None,
-        system_prompt: Some(context::LEAD_SYSTEM_PROMPT.to_string()),
-        allowed_tools: orchestration_tool_names(&[Read, Note, Spawn]),
-    };
-    if let Err(e) = supervisor::start(&app, task.clone(), extras) {
+    if let Err(e) = launch(&task) {
         let conn = db.lock().map_err(|err| err.to_string())?;
         store::finish_task(&conn, &task.id, &types::TaskOutcome::failed(e.clone()))?;
-        let _ = store::refresh_run_status(&conn, &task.run_id);
+        store::refresh_run_status(&conn, &task.run_id)?;
         return Err(e);
     }
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::task_by_id(&conn, &task.id)?.ok_or_else(|| "la tarea se perdió al lanzarla".into())
+}
+
+/// Lanza un lead por el supervisor, con las tools de orquestación: leer el run, dejar hechos
+/// y repartir tareas.
+pub(crate) fn launch_lead(app: &AppHandle, task: &Task) -> Result<(), String> {
+    use crate::ipc::mcp::{
+        OrchestrationPower::*, orchestration_tool_name, orchestration_tool_names,
+    };
+    let db = db_of(app)?;
+    let run = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        store::run_by_id(&conn, &task.run_id)?
+            .ok_or_else(|| "the lead's Run no longer exists".to_string())?
+    };
+    let snapshot = {
+        let conn = db.lock().map_err(|error| error.to_string())?;
+        crate::memory::snapshot_context_for_run(&conn, &run.id)?
+    };
+    let mut system_prompt = context::LEAD_SYSTEM_PROMPT.to_string();
+    let mut allowed_tools = orchestration_tool_names(&[Read, Note, Spawn]);
+    if run.squad_id.is_some() {
+        system_prompt.push_str(&context::lead_squad_context(&run.squad_members));
+        // A Squad lead chooses work roles. It cannot inspect or optimize provider routing.
+        let roster_tool = orchestration_tool_name("agent_roster");
+        allowed_tools.retain(|tool| tool != &roster_tool);
+    }
+    let extras = supervisor::LaunchExtras {
+        prompt: (!snapshot.is_empty()).then(|| format!("{}\n{snapshot}", task.prompt)),
+        system_prompt: Some(system_prompt),
+        allowed_tools,
+    };
+    supervisor::start(app, task.clone(), extras)
 }
 
 /// Lanza una tarea de un plan que le tocó correr: su worktree si va aislada, y su prompt con
@@ -245,16 +397,34 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
             .collect();
         let mut task = task.clone();
         if task.isolate {
-            let start = if dep_branches.len() == 1 { dep_branches[0].as_str() } else { "HEAD" };
+            let start = if dep_branches.len() == 1 {
+                dep_branches[0].as_str()
+            } else {
+                "HEAD"
+            };
             task = isolate_task_from(&worktrees_base()?, db, &task, start)?;
         }
-        let to_merge: &[String] = if task.isolate && dep_branches.len() > 1 { &dep_branches } else { &[] };
+        let to_merge: &[String] = if task.isolate && dep_branches.len() > 1 {
+            &dep_branches
+        } else {
+            &[]
+        };
 
         let deps_refs: Vec<&Task> = deps.iter().collect();
-        let prompt = context::worker_prompt(&task, &run.objective, &deps_refs, &facts, to_merge);
+        let snapshot = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            crate::memory::snapshot_context_for_run(&conn, &run.id)?
+        };
+        let prompt = format!(
+            "{}{}",
+            context::worker_prompt(&task, &run.objective, &deps_refs, &facts, to_merge),
+            snapshot
+        );
         let can_delegate = task.depth < plan::MAX_DEPTH;
-        use crate::ipc::mcp::{orchestration_tool_name, orchestration_tool_names, OrchestrationPower::*};
-        let mut allowed = orchestration_tool_names(&[Read, Note]);
+        use crate::ipc::mcp::{
+            OrchestrationPower::*, orchestration_tool_name, orchestration_tool_names,
+        };
+        let mut allowed = orchestration_tool_names(&[Read, Note, Delivery]);
         allowed.push(orchestration_tool_name(crate::ipc::mcp::ASK_TOOL));
         if can_delegate {
             allowed.push(orchestration_tool_name("task_add"));
@@ -285,29 +455,53 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
 /// Para un run entero: lo que espera no arranca y lo que corre se detiene.
 #[tauri::command]
 pub fn run_cancel_run(app: AppHandle, run_id: String) -> Result<(), String> {
-    let db = db_of(&app)?;
+    cancel_run(&app, &run_id)
+}
+
+pub(crate) fn cancel_run(app: &AppHandle, run_id: &str) -> Result<(), String> {
+    let db = db_of(app)?;
+    let ids = cancel_run_with(&db, run_id, |id| supervisor::cancel(app, id))?;
+    scheduler::bump(run_id);
+    for id in &ids {
+        supervisor::notify_changed(app, id);
+    }
+    // Cancelado desde la flota: la misión que lo cumplía también cambió.
+    if let Ok(conn) = db.lock() {
+        crate::missions::notify_for_run(app, &conn, run_id);
+    }
+    Ok(())
+}
+
+/// Cancela lo que espera, para lo que corre con `stop` y recalcula el run. Devuelve las
+/// tareas del run, para avisar que cambiaron.
+pub(crate) fn cancel_run_with(
+    db: &DbConnection,
+    run_id: &str,
+    mut stop: impl FnMut(&str) -> Result<(), String>,
+) -> Result<Vec<String>, String> {
     let live: Vec<String> = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        store::cancel_pending(&conn, &run_id, "se canceló el run")?;
-        store::tasks_of_run(&conn, &run_id)?
+        store::cancel_pending(&conn, run_id, "se canceló el run")?;
+        store::tasks_of_run(&conn, run_id)?
             .into_iter()
-            .filter(|t| matches!(t.status.as_str(), types::status::READY | types::status::RUNNING))
+            .filter(|t| {
+                matches!(
+                    t.status.as_str(),
+                    types::status::READY | types::status::RUNNING
+                )
+            })
             .map(|t| t.id)
             .collect()
     };
     for id in &live {
-        supervisor::cancel(&app, id)?;
+        stop(id)?;
     }
-    let ids: Vec<String> = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        store::refresh_run_status(&conn, &run_id)?;
-        store::tasks_of_run(&conn, &run_id)?.into_iter().map(|t| t.id).collect()
-    };
-    scheduler::bump(&run_id);
-    for id in &ids {
-        supervisor::notify_changed(&app, id);
-    }
-    Ok(())
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    store::refresh_run_status(&conn, run_id)?;
+    Ok(store::tasks_of_run(&conn, run_id)?
+        .into_iter()
+        .map(|t| t.id)
+        .collect())
 }
 
 /// Lo que se dejaron escrito los agentes de un run.
@@ -315,6 +509,51 @@ pub fn run_cancel_run(app: AppHandle, run_id: String) -> Result<(), String> {
 pub fn run_list_facts(run_id: String, db: tauri::State<DbConnection>) -> Result<Vec<Fact>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::facts_of_run(&conn, &run_id)
+}
+
+/// Que el provider exista en el registro y la flota sepa correrlo sin terminal. Se pregunta
+/// al registro, no por nombre: un provider nuevo con `HeadlessAgent` entra solo, y la
+/// terminal de emergencia queda afuera por no tenerlo.
+pub(crate) fn ensure_headless(agent_id: &str) -> Result<(), String> {
+    let adapter = crate::agents::adapter_for(agent_id)
+        .ok_or_else(|| format!("'{agent_id}' no es un provider conocido"))?;
+    if !adapter.capabilities().headless {
+        return Err(format!(
+            "'{agent_id}' no se puede correr sin terminal: no puede ser lead"
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn ensure_orchestration(agent_id: &str) -> Result<(), String> {
+    ensure_headless(agent_id)?;
+    let adapter = crate::agents::adapter_for(agent_id).ok_or("provider unavailable")?;
+    if !adapter.capabilities().orchestration {
+        return Err(format!(
+            "{} can execute worker tasks, but does not support the ADE orchestration required to act as Lead.",
+            adapter.def().label
+        ));
+    }
+    Ok(())
+}
+
+pub(crate) fn route_lead_now(
+    db: &DbConnection,
+    request: &routing::RouteRequest,
+) -> Result<routing::Assignment, String> {
+    if let Some(id) = &request.agent_id {
+        ensure_orchestration(id)?;
+    }
+    let mut roster = roster::snapshot(db, false)?;
+    roster
+        .agents
+        .retain(|agent| agent.capabilities.orchestration);
+    routing::route(
+        &roster,
+        &routing::load_tiers(db),
+        request,
+        crate::util::now_ts(),
+    )
 }
 
 fn route_request(
@@ -338,15 +577,52 @@ fn route_request(
 }
 
 /// Corre el ruteo fuera del hilo async: la primera vez sondea el roster, que lanza procesos.
-async fn assign(db: &DbConnection, request: routing::RouteRequest) -> Result<routing::Assignment, String> {
+async fn assign(
+    db: &DbConnection,
+    request: routing::RouteRequest,
+) -> Result<routing::Assignment, String> {
     let db = db.clone();
+    tauri::async_runtime::spawn_blocking(move || route_now(&db, &request))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// El ruteo en el hilo actual. Bloquea: la primera vez sondea el roster.
+pub(crate) fn route_now(
+    db: &DbConnection,
+    request: &routing::RouteRequest,
+) -> Result<routing::Assignment, String> {
+    let roster = roster::snapshot(db, false)?;
+    let tiers = routing::load_tiers(db);
+    routing::route(&roster, &tiers, request, crate::util::now_ts())
+}
+
+/// Lo que usó cada cuenta en los últimos `days` días (intentos, tokens, costo reportado), con
+/// sus límites y lo que corre ahora. Ver `ledger`.
+#[tauri::command]
+pub async fn account_usage_summary(app: AppHandle, days: u32) -> Result<Vec<ledger::AccountUsage>, String> {
+    let db = db_of(&app)?;
     tauri::async_runtime::spawn_blocking(move || {
-        let roster = roster::snapshot(&db, false)?;
-        let tiers = routing::load_tiers(&db);
-        routing::route(&roster, &tiers, &request, crate::util::now_ts())
+        let now = crate::util::now_ts();
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        ledger::summary(&conn, now - i64::from(days.clamp(1, 365)) * 24 * 3600, now)
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Los límites de una cuenta (`account_key` como en `quota::account_key`).
+#[tauri::command]
+pub fn account_limits_get(app: AppHandle, account_key: String) -> Result<ledger::AccountLimits, String> {
+    let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    Ok(ledger::load_limits(&conn, &account_key))
+}
+
+#[tauri::command]
+pub fn account_limits_set(app: AppHandle, account_key: String, limits: ledger::AccountLimits) -> Result<(), String> {
+    let db = db_of(&app)?;
+    ledger::save_limits(&db, &account_key, &limits)
 }
 
 /// Qué agentes, modelos y cuentas hay para lanzar ahora. `refresh` vuelve a sondear las
@@ -357,6 +633,20 @@ pub async fn run_roster(app: AppHandle, refresh: bool) -> Result<roster::Roster,
     tauri::async_runtime::spawn_blocking(move || roster::snapshot(&db, refresh))
         .await
         .map_err(|e| e.to_string())?
+}
+
+#[tauri::command]
+pub async fn models_refresh(
+    app: AppHandle,
+    agent_id: String,
+    account_id: Option<String>,
+) -> Result<roster::Roster, String> {
+    let db = db_of(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        roster::refresh_models(&db, &agent_id, account_id.as_deref())
+    })
+    .await
+    .map_err(|error| error.to_string())?
 }
 
 /// A quién le tocaría una tarea con estos datos, sin lanzarla. Es lo que muestra el
@@ -372,7 +662,11 @@ pub async fn run_preview_route(
     auto_account: bool,
 ) -> Result<routing::Assignment, String> {
     let db = db_of(&app)?;
-    assign(&db, route_request(agent_id, model, complexity, account_id, auto_account)).await
+    assign(
+        &db,
+        route_request(agent_id, model, complexity, account_id, auto_account),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -381,23 +675,54 @@ pub fn run_get_tiers(db: tauri::State<DbConnection>) -> routing::Tiers {
 }
 
 #[tauri::command]
-pub fn run_set_tiers(tiers: routing::Tiers, db: tauri::State<DbConnection>) -> Result<routing::Tiers, String> {
-    for c in [routing::Complexity::Trivial, routing::Complexity::Standard, routing::Complexity::Hard] {
+pub fn run_set_tiers(
+    tiers: routing::Tiers,
+    db: tauri::State<DbConnection>,
+) -> Result<routing::Tiers, String> {
+    for c in [
+        routing::Complexity::Trivial,
+        routing::Complexity::Standard,
+        routing::Complexity::Hard,
+    ] {
         let entries = tiers.get(c);
         // Un tramo vacío no tiene a quién asignar: lanzar con esa complejidad fallaría
         // siempre, y se enteraría quien lanza en vez de quien lo dejó vacío.
         if entries.is_empty() {
-            return Err(format!("el tramo {} necesita al menos un modelo", c.as_str()));
+            return Err(format!(
+                "el tramo {} necesita al menos un modelo",
+                c.as_str()
+            ));
         }
-        if let Some(bad) = entries.iter().find(|e| crate::agents::agent_def(&e.agent_id).is_none()) {
+        if let Some(bad) = entries
+            .iter()
+            .find(|e| crate::agents::adapter_for(&e.agent_id).is_none())
+        {
             return Err(format!("'{}' no es un agente conocido", bad.agent_id));
         }
         if entries.iter().any(|e| e.model.trim().is_empty()) {
-            return Err(format!("el tramo {} tiene un modelo sin nombre", c.as_str()));
+            return Err(format!(
+                "el tramo {} tiene un modelo sin nombre",
+                c.as_str()
+            ));
         }
     }
     routing::save_tiers(&db, &tiers)?;
     Ok(tiers)
+}
+
+/// Procesos headless vivos. Para probar que algo NO lanzó un agente.
+#[cfg(test)]
+pub(crate) fn live_task_count() -> usize {
+    supervisor::live_count()
+}
+
+/// Worktrees en la carpeta de la app. Para probar que algo NO creó uno.
+#[cfg(test)]
+pub(crate) fn worktree_count() -> usize {
+    worktrees_base()
+        .ok()
+        .and_then(|b| std::fs::read_dir(b).ok())
+        .map_or(0, |d| d.count())
 }
 
 /// Dónde viven los worktrees de las tareas. Fuera del repo a propósito: adentro habría que
@@ -412,11 +737,20 @@ fn worktrees_base() -> Result<std::path::PathBuf, String> {
 
 /// Crea el worktree de una tarea, le monta las skills del proyecto y deja la fila
 /// apuntando adentro. `base` se recibe para que los tests no escriban en el home.
-pub(crate) fn isolate_task(base: &std::path::Path, db: &DbConnection, task: &Task) -> Result<Task, String> {
+pub(crate) fn isolate_task(
+    base: &std::path::Path,
+    db: &DbConnection,
+    task: &Task,
+) -> Result<Task, String> {
     isolate_task_from(base, db, task, "HEAD")
 }
 
-pub(crate) fn isolate_task_from(base: &std::path::Path, db: &DbConnection, task: &Task, start: &str) -> Result<Task, String> {
+pub(crate) fn isolate_task_from(
+    base: &std::path::Path,
+    db: &DbConnection,
+    task: &Task,
+    start: &str,
+) -> Result<Task, String> {
     let project = std::path::Path::new(&task.cwd);
     let wt = worktrees::create_from(base, project, &task.title, start)?;
 
@@ -458,12 +792,16 @@ pub fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<Discarded
     let db = db_of(&app)?;
     let (task, project_cwd, skills_dir) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let task = store::task_by_id(&conn, &task_id)?.ok_or_else(|| "la tarea ya no existe".to_string())?;
+        let task = store::task_by_id(&conn, &task_id)?
+            .ok_or_else(|| "la tarea ya no existe".to_string())?;
         let project = store::project_cwd_of_task(&conn, &task_id).ok_or("la tarea no tiene run")?;
         (task, project, crate::skills::skills_dir_from_conn(&conn)?)
     };
 
-    if matches!(task.status.as_str(), types::status::READY | types::status::RUNNING) {
+    if matches!(
+        task.status.as_str(),
+        types::status::READY | types::status::RUNNING
+    ) {
         return Err("la tarea todavía está corriendo: parala o esperá a que termine".into());
     }
     let (Some(root), Some(branch)) = (task.worktree_path.clone(), task.branch.clone()) else {
@@ -487,7 +825,10 @@ pub fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<Discarded
         store::mark_worktree_removed(&conn, &task_id)?;
     }
     supervisor::notify_changed(&app, &task_id);
-    Ok(DiscardedWorktree { branch, branch_kept: removed.branch_kept })
+    Ok(DiscardedWorktree {
+        branch,
+        branch_kept: removed.branch_kept,
+    })
 }
 
 #[tauri::command]
@@ -565,7 +906,10 @@ pub fn reroute_to(
 
     // Se para ANTES de leer el registro: mientras el proceso vive sigue escribiendo, y el
     // relato del traspaso tiene que ser de algo que ya terminó de pasar.
-    if matches!(task.status.as_str(), types::status::PENDING | types::status::READY | types::status::RUNNING) {
+    if matches!(
+        task.status.as_str(),
+        types::status::PENDING | types::status::READY | types::status::RUNNING
+    ) {
         supervisor::hand_off(app, task_id)?;
     }
 
@@ -592,18 +936,33 @@ pub fn reroute_to(
             assignment.model.as_deref(),
             assignment.account_id.as_deref(),
             assignment.routed_by.as_str(),
-            (!assignment.notes.is_empty()).then(|| assignment.notes.join("; ")).as_deref(),
+            (!assignment.notes.is_empty())
+                .then(|| assignment.notes.join("; "))
+                .as_deref(),
             &note,
+            assignment.auto_account,
         )?;
         if !moved {
-            return Err("la tarea no está en un estado en el que se pueda pasar a otro agente".into());
+            return Err(
+                "la tarea no está en un estado en el que se pueda pasar a otro agente".into(),
+            );
         }
     }
+    // Un cambio de manos es lo que el Map Mode dibuja como arista de traspaso.
+    crate::bus::publish(
+        Some(app),
+        crate::bus::Publish::new("task.rerouted").task(task_id).run(&task.run_id).data(serde_json::json!({
+            "from": { "agentId": task.agent_id, "model": task.model, "accountId": task.account_id },
+            "to": { "agentId": assignment.agent_id, "model": assignment.model, "accountId": assignment.account_id },
+            "reason": reason,
+        })),
+    );
     supervisor::notify_changed(app, task_id);
     // No se tiquea acá: el scheduler llama a esto con su propio lock tomado, y volver a
     // entrar lo trabaría. Tiquean los de afuera.
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let updated = store::task_by_id(&conn, task_id)?.ok_or_else(|| "la tarea ya no existe".to_string())?;
+    let updated =
+        store::task_by_id(&conn, task_id)?.ok_or_else(|| "la tarea ya no existe".to_string())?;
     Ok((updated, assignment))
 }
 
@@ -634,7 +993,9 @@ pub async fn run_reroute_task(
         },
     };
     let reason = reason.unwrap_or_else(|| "lo pidió el usuario desde la consola".into());
-    reroute(&app, &task_id, request, &reason).await.map(|(task, _)| task)
+    reroute(&app, &task_id, request, &reason)
+        .await
+        .map(|(task, _)| task)
 }
 
 /// Deja la tarea lista para seguirla en una terminal y devuelve la fila con lo necesario
@@ -658,10 +1019,16 @@ pub fn run_hand_off_task(app: AppHandle, task_id: String) -> Result<Task, String
     // La sesión quedó atada a la ruta del worktree: sin la carpeta, `--resume` en otro
     // lado no la encuentra y abriría una conversación nueva haciéndose pasar por esta.
     if task.worktree_removed {
-        return Err("el worktree de esta tarea se descartó: su conversación ya no tiene dónde retomarse".into());
+        return Err(
+            "el worktree de esta tarea se descartó: su conversación ya no tiene dónde retomarse"
+                .into(),
+        );
     }
 
-    if matches!(task.status.as_str(), types::status::READY | types::status::RUNNING) {
+    if matches!(
+        task.status.as_str(),
+        types::status::READY | types::status::RUNNING
+    ) {
         supervisor::hand_off(&app, &task_id)?;
     }
 
@@ -709,25 +1076,41 @@ pub fn run_decide_approval(
     remember: bool,
     db: tauri::State<DbConnection>,
 ) -> Result<bool, String> {
-    let Some(pending) = broker::get(&approval_id) else {
-        supervisor::notify_approvals(&app);
+    decide_approval(&app, &db, &approval_id, allow, remember)
+}
+
+/// Lo mismo, para quien no es un comando de Tauri (la CLI: `ccode approval decide`).
+pub(crate) fn decide_approval(
+    app: &AppHandle,
+    db: &DbConnection,
+    approval_id: &str,
+    allow: bool,
+    remember: bool,
+) -> Result<bool, String> {
+    let Some(pending) = broker::get(approval_id) else {
+        supervisor::notify_approvals(app);
         return Ok(false);
     };
 
     // La regla se guarda ANTES de contestar: si guardarla falla, el usuario tiene que
     // enterarse ahí, no después de que el agente ya siguió creyendo que quedó recordado.
     let remembered_in = if remember {
-        remember_rule(&db, &pending, allow)?
+        remember_rule(db, &pending, allow)?
     } else {
         None
     };
 
-    let decided = broker::decide(&approval_id, allow, None);
+    let decided = broker::decide(approval_id, allow, None);
     if let Some(cwd) = remembered_in {
-        broker::release_matching(&db, &cwd);
+        broker::release_matching(db, &cwd);
     }
-    supervisor::notify_approvals(&app);
+    supervisor::notify_approvals(app);
     Ok(decided)
+}
+
+/// Los pedidos de permiso que esperan a una persona. Para la CLI (`ccode approval list`).
+pub(crate) fn pending_approvals() -> Vec<broker::PendingApproval> {
+    broker::pending()
 }
 
 /// Guarda la regla exacta de un pedido. Devuelve la carpeta en la que quedó.
@@ -752,7 +1135,10 @@ fn remember_rule(
 
 /// Las reglas de una carpeta, en el orden en que se evalúan.
 #[tauri::command]
-pub fn run_list_rules(cwd: String, db: tauri::State<DbConnection>) -> Result<Vec<store::RuleRow>, String> {
+pub fn run_list_rules(
+    cwd: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Vec<store::RuleRow>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::list_rules(&conn, &cwd)
 }
@@ -790,4 +1176,11 @@ pub fn run_delete_rule(id: String, db: tauri::State<DbConnection>) -> Result<boo
 /// Cierra los pedidos que quedaron colgados de una ejecución anterior de la app.
 pub fn sweep_orphan_approvals(db: &DbConnection) -> Result<usize, String> {
     broker::sweep_orphans(db)
+}
+
+/// Qué aísla el sandbox de los agentes en esta máquina, con el modo configurado.
+#[tauri::command]
+pub fn sandbox_status(app: AppHandle) -> Result<sandbox::Status, String> {
+    let db = db_of(&app)?;
+    Ok(sandbox::status(sandbox::Mode::from_db(&db)))
 }

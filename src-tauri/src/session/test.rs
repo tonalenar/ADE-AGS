@@ -416,6 +416,39 @@ fn kimi_points_the_transcript_at_the_main_agent_wire() {
     assert_eq!(kimi_wire_file(&dir), Some(wire));
 }
 
+/// El directorio de una cuenta es el home de Kimi, no un padre que esconda `.kimi-code`.
+/// `None` sigue siendo la cuenta del sistema. Kimi no tiene `profile` en el registro.
+#[test]
+fn kimi_de_una_cuenta_busca_sesiones_dentro_del_profile() {
+    let account = TempDir::new();
+    account.write(
+        "sessions/wd_proj_1/ses-cuenta/state.json",
+        r#"{"title":"De la cuenta","workDir":"/proj"}"#,
+    );
+    // Un layout anidado de más no es el de Kimi: el profile ya es el home.
+    account.write(
+        ".kimi-code/sessions/wd_proj_1/ses-mal/state.json",
+        r#"{"title":"Mal","workDir":"/proj"}"#,
+    );
+
+    assert_eq!(kimi_root(Some(&account.0)), account.0.join("sessions"));
+    assert_ne!(kimi_root(None), account.0.join("sessions"));
+
+    assert_eq!(
+        discover_session_id_sync("kimi-code", "/proj", 0, Some(&account.0), None).as_deref(),
+        Some("ses-cuenta"),
+    );
+    let title = get_session_title_sync(
+        "kimi-code",
+        "/proj",
+        Some("ses-cuenta".into()),
+        "sin título".into(),
+        Some(&account.0),
+        None,
+    );
+    assert_eq!(title.title, "De la cuenta");
+}
+
 #[test]
 fn kimi_survives_a_missing_or_broken_home() {
     let d = TempDir::new();
@@ -520,4 +553,54 @@ fn gemini_title_prefers_the_summary() {
     let result = gemini_title(&chat, "sin título");
     assert_eq!(result.title, "Arreglo del login");
     assert_eq!(result.source, "summary");
+}
+
+/// `GEMINI_CLI_HOME` apunta al padre y el CLI crea `.gemini` adentro. El profile de una
+/// cuenta no es el home: la sesión vive en `<profile>/.gemini`. Con `None` sigue siendo
+/// `~/.gemini`. Gemini no tiene `profile: Some` en el registro.
+#[test]
+fn gemini_de_una_cuenta_busca_en_punto_gemini_del_profile() {
+    let account = TempDir::new();
+    let body = r#"{"id":"m1","type":"user","content":[{"text":"hola desde la cuenta"}]}"#;
+    account.write(".gemini/projects.json", r#"{"projects":{"/proj":"slug"}}"#);
+    account.write(
+        ".gemini/tmp/slug/chats/session-a.jsonl",
+        &gemini_chat("ses-cuenta", "main", body),
+    );
+    // El mismo layout en la raíz del profile sería tratarlo como CLAUDE_CONFIG_DIR.
+    account.write("projects.json", r#"{"projects":{"/proj":"mal"}}"#);
+    account.write("tmp/mal/chats/session-mal.jsonl", &gemini_chat("ses-mal", "main", ""));
+
+    assert_eq!(gemini_home(Some(&account.0)), account.0.join(".gemini"));
+    let system = gemini_home(None);
+    assert!(system.ends_with(".gemini"), "{system:?}");
+    assert_ne!(system, account.0.join(".gemini"));
+
+    assert_eq!(
+        discover_session_id_sync("gemini-cli", "/proj", 0, Some(&account.0), None).as_deref(),
+        Some("ses-cuenta"),
+    );
+    let title = get_session_title_sync(
+        "gemini-cli",
+        "/proj",
+        Some("ses-cuenta".into()),
+        "sin título".into(),
+        Some(&account.0),
+        None,
+    );
+    assert_eq!(title.title, "hola desde la cuenta");
+}
+
+#[test]
+fn un_id_de_sesion_no_puede_traer_flags_ni_comandos() {
+    use super::title::is_safe_session_id;
+    assert!(is_safe_session_id("3f1c2b7e-9d4a-4c1e-8a2b-5d6e7f8a9b0c"));
+    assert!(is_safe_session_id("ses_9f2A.b-1"));
+    assert!(is_safe_session_id("rollout-2026-10-02T07:18:43-abc"));
+    assert!(!is_safe_session_id("x --dangerously-skip-permissions"));
+    assert!(!is_safe_session_id("x & calc"));
+    assert!(!is_safe_session_id("x|y"));
+    assert!(!is_safe_session_id("-p"));
+    assert!(!is_safe_session_id(""));
+    assert!(!is_safe_session_id(&"a".repeat(129)));
 }

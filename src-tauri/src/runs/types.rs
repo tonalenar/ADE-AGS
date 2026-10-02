@@ -17,6 +17,12 @@ pub struct Run {
     pub spent_usd: f64,
     pub created_at: i64,
     pub ended_at: Option<i64>,
+    /// La misión que este run intenta cumplir. `None` = lanzado a mano desde la flota.
+    pub mission_id: Option<String>,
+    /// Configuración de Squad copiada al iniciar; no se consulta la fila editable durante el run.
+    pub squad_id: Option<String>,
+    pub squad_name: Option<String>,
+    pub squad_members: Vec<crate::squads::RunSquadMember>,
 }
 
 /// Una tarjeta de la consola: un agente headless con su trabajo.
@@ -29,6 +35,8 @@ pub struct Task {
     pub prompt: String,
     pub agent_id: String,
     pub account_id: Option<String>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
     pub model: Option<String>,
     pub cwd: String,
     pub budget_usd: Option<f64>,
@@ -54,6 +62,8 @@ pub struct Task {
     pub route_note: Option<String>,
     /// `lead` | `worker`. `None` = lanzada a mano, fuera de un plan.
     pub role: Option<String>,
+    /// Papel funcional (`backend`, `qa`, …), separado del execution role anterior.
+    pub functional_role: Option<String>,
     /// El nombre corto con que el plan se refiere a ella (`api`, `tests`).
     pub plan_key: Option<String>,
     /// Quién la delegó.
@@ -69,6 +79,12 @@ pub struct Task {
     /// Lo que dejó el agente anterior cuando la tarea se pasó a otro: qué hizo, qué
     /// commiteó y en qué quedó. `None` = nunca cambió de manos.
     pub handoff: Option<String>,
+    #[serde(default)]
+    pub structured_handoff: Option<super::handoff::StructuredHandoff>,
+    /// La cuenta la eligió el ruteo (`AccountChoice::Auto`) y se puede cambiar por otra con
+    /// cupo. `false` = la fijó alguien (el usuario, el Squad, la misión): nunca se cambia sola.
+    #[serde(default = "default_true")]
+    pub auto_account: bool,
     /// Las tareas que tienen que terminar bien antes de que esta arranque.
     pub depends_on: Vec<String>,
     pub started_at: Option<i64>,
@@ -162,6 +178,14 @@ pub struct TaskOutcome {
 
 impl TaskOutcome {
     pub fn failed(message: impl Into<String>) -> Self {
-        TaskOutcome { ok: false, error: Some(message.into()), ..Default::default() }
+        TaskOutcome {
+            ok: false,
+            error: Some(message.into()),
+            ..Default::default()
+        }
     }
+}
+
+fn default_true() -> bool {
+    true
 }

@@ -143,12 +143,13 @@ pub(super) fn extract_transcript(path: &Path) -> Vec<Turn> {
 /// partes de tipo `text`: el resto son pasos internos (`step-start`, `reasoning`, `tool`,
 /// `patch`) que no forman parte de la conversación que el usuario quiere exportar.
 pub(super) fn opencode_transcript(session_id: &str, profile: Option<&str>) -> Vec<Turn> {
-    let mut command = crate::util::program("opencode");
+    let (program, env_var) = super::title::opencode_invocation();
+    let mut command = crate::util::program(program);
     command.args(["export", session_id]).stdin(std::process::Stdio::null());
     // Misma variable con la que se lanzó la tab (ver `accounts`): la sesión de una cuenta
     // alternativa no existe para la instalación del sistema.
     if let Some(dir) = profile {
-        command.env("XDG_DATA_HOME", dir);
+        command.env(env_var, dir);
     }
     let Ok(output) =
         crate::util::output_with_timeout(&mut command, std::time::Duration::from_secs(30))
@@ -334,7 +335,12 @@ pub fn session_markdown(
         .account_id
         .as_deref()
         .and_then(|id| crate::accounts::dir_for(&db, id));
-    let transcript = if entry.agent_id == "opencode" {
+    // OpenCode no deja archivo: su estrategia es preguntarle al proceso. El JSON que vuelve
+    // lo entiende `opencode_transcript`, que sigue siendo el parser de ese CLI. Otro
+    // provider con `ProcessQuery` necesitaría su propio parser; hoy no hay un segundo.
+    let asks_the_process = crate::agents::adapter_for(&entry.agent_id)
+        .is_some_and(|adapter| adapter.def().sessions == crate::agents::SessionSource::ProcessQuery);
+    let transcript = if asks_the_process {
         entry
             .session_id
             .as_deref()

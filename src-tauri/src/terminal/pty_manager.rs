@@ -30,6 +30,56 @@ struct PtyBuffer {
 type PtyRegistry = Arc<Mutex<HashMap<u32, PtySession>>>;
 type PtyBuffers = Arc<Mutex<HashMap<u32, PtyBuffer>>>;
 
+/// Texto a partir de lecturas sueltas de bytes, sin partir caracteres.
+///
+/// Una lectura del PTY corta donde cae, y un carácter de varios bytes (acentos, emoji, las
+/// cajas que dibujan las TUIs) puede quedar mitad en una y mitad en la siguiente. Decodificar
+/// cada lectura por separado convertía las dos mitades en `�`. Acá los bytes de un carácter
+/// incompleto al final se guardan para la próxima lectura; lo inválido de verdad sigue
+/// saliendo como `�`.
+#[derive(Default)]
+pub(crate) struct Utf8Stream {
+    pending: Vec<u8>,
+}
+
+impl Utf8Stream {
+    pub(crate) fn push(&mut self, chunk: &[u8]) -> String {
+        self.pending.extend_from_slice(chunk);
+        let complete = complete_utf8_len(&self.pending);
+        let text = String::from_utf8_lossy(&self.pending[..complete]).into_owned();
+        self.pending.drain(..complete);
+        text
+    }
+
+    /// Lo que quedó pendiente al cerrarse el PTY: ya no va a completarse.
+    pub(crate) fn finish(&mut self) -> String {
+        let text = String::from_utf8_lossy(&self.pending).into_owned();
+        self.pending.clear();
+        text
+    }
+}
+
+/// Hasta dónde `bytes` se puede decodificar sin cortar un carácter que todavía puede
+/// completarse: todo, salvo un comienzo de secuencia multibyte incompleto al final.
+fn complete_utf8_len(bytes: &[u8]) -> usize {
+    // Un carácter ocupa a lo sumo 4 bytes: solo los últimos 3 pueden ser uno a medias.
+    for back in 1..=bytes.len().min(3) {
+        let i = bytes.len() - back;
+        let b = bytes[i];
+        if b & 0b1100_0000 == 0b1000_0000 {
+            continue; // byte de continuación: el comienzo está más atrás
+        }
+        let needed = match b {
+            0b1100_0000..=0b1101_1111 => 2,
+            0b1110_0000..=0b1110_1111 => 3,
+            0b1111_0000..=0b1111_0111 => 4,
+            _ => return bytes.len(), // ASCII o inválido: nada que esperar
+        };
+        return if back < needed { i } else { bytes.len() };
+    }
+    bytes.len()
+}
+
 /// Tope del buffer de scrollback que se conserva por PTY, para poder reproducirlo
 /// cuando una tab se mueve a otra ventana sin matar el proceso.
 const MAX_BUFFER_BYTES: usize = 3 * 1024 * 1024;
@@ -55,6 +105,12 @@ lazy_static::lazy_static! {
 // panic desde cada comando `pty_*`.
 fn registry() -> MutexGuard<'static, HashMap<u32, PtySession>> {
     PTY_REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
+}
+
+/// Cuántos PTYs vivos hay. Para probar que algo NO abrió una terminal.
+#[cfg(test)]
+pub(crate) fn live_pty_count() -> usize {
+    registry().len()
 }
 
 fn buffers() -> MutexGuard<'static, HashMap<u32, PtyBuffer>> {
@@ -149,19 +205,66 @@ pub(super) fn split_command(command: &str) -> Vec<String> {
 /// sin ningún intermediario. Con pre-comandos hay que delegar en un shell, porque
 /// `conda activate` y compañía son funciones de shell y no programas: ejecutadas en un
 /// proceso aparte, su efecto muere con él (ver el módulo `prelaunch`).
-pub(super) fn build_launch(command: &str, prelaunch: &[String]) -> CommandBuilder {
+/// Las variables con que un Claude Code (o su app de escritorio) marca "esta es una sesión
+/// mía": si el ADE AGS se abrió desde una, los terminales las heredan y el Claude de adentro
+/// se cree sesión hija (sin guardar transcript, con el socket y la identidad del padre).
+/// Se sacan de todo terminal; no se tocan las de configuración del usuario (`ANTHROPIC_*`,
+/// `CLAUDE_CODE_USE_*`...) ni las de una cuenta de la app, que se aplican después.
+pub(super) const PARENT_SESSION_ENV: &[&str] = &[
+    "CLAUDE_CODE_CHILD_SESSION",
+    "CLAUDE_CODE_SESSION_ID",
+    "CLAUDE_CODE_HOST_SESSION_ID",
+    "CLAUDE_CODE_SESSION_ATTENDED",
+    "CLAUDE_CODE_ENTRYPOINT",
+    "CLAUDE_CODE_EXECPATH",
+    "CLAUDE_CODE_MESSAGING_SOCKET",
+    "CLAUDE_CODE_MESSAGING_TOKEN",
+    "CLAUDE_CODE_SDK_HAS_HOST_AUTH_REFRESH",
+    "CLAUDE_CODE_DESKTOP_APP_VERSION",
+    "CLAUDE_CODE_TERMINAL_MCP_TOOLS",
+    "CLAUDE_CODE_ACCOUNT_UUID",
+    "CLAUDE_CODE_ORGANIZATION_UUID",
+    "CLAUDE_CODE_USER_EMAIL",
+    "CLAUDE_CODE_OAUTH_SCOPES",
+    "CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES",
+    "CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING",
+    "CLAUDE_CODE_ENABLE_ASK_USER_QUESTION_TOOL",
+    "CLAUDE_CODE_EAGER_FLUSH",
+    "CLAUDE_CODE_REPORT_FINDINGS",
+    "CLAUDE_CODE_DISABLE_TERMINAL_TITLE",
+    "CLAUDE_CODE_DISABLE_CRON",
+];
+
+pub(super) fn build_launch(command: &str, prelaunch: &[String]) -> Result<CommandBuilder, String> {
     if prelaunch.is_empty() {
         let parts = split_command(command);
         let mut parts = parts.iter().map(String::as_str);
         let program = parts.next().unwrap_or(command);
+        #[cfg(windows)]
+        let resolved = {
+            let path = crate::util::find_program(program).unwrap_or_else(|| std::path::PathBuf::from(program));
+            let args: Vec<_> = parts.collect();
+            let native = crate::util::launch::external_command(&path, &args).map_err(|e| e.to_string())?;
+            if crate::util::launch::is_batch(std::path::Path::new(native.get_program())) {
+                return Err("Este script .cmd/.bat não é um shim npm reconhecido. Configure o executável ou intérprete diretamente.".into());
+            }
+            let mut cmd = CommandBuilder::new(native.get_program());
+            cmd.args(native.get_args());
+            cmd
+        };
+        #[cfg(windows)]
+        return Ok(resolved);
+        #[cfg(not(windows))]
+        {
         let mut cmd = CommandBuilder::new(program);
         for arg in parts {
             cmd.arg(arg);
         }
-        return cmd;
+        return Ok(cmd);
+        }
     }
 
-    shell_running(launch_script(command, prelaunch))
+    Ok(shell_running(launch_script(command, prelaunch)))
 }
 
 /// El shell que ejecuta el script.
@@ -221,14 +324,19 @@ pub async fn pty_create(
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-    let mut cmd = build_launch(&command, &prelaunch.unwrap_or_default());
+    let mut cmd = build_launch(&command, &prelaunch.unwrap_or_default())?;
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
-    for var in crate::app::app_only_env() {
+    for var in crate::app::app_only_env().into_iter().chain(PARENT_SESSION_ENV.iter().copied()) {
         cmd.env_remove(var);
     }
-    for (k, v) in env.unwrap_or_default() {
+    let env = env.unwrap_or_default();
+    // Con una cuenta de la app, una API key heredada no le gana a su login.
+    for var in crate::agents::overriding_env(env.keys()) {
+        cmd.env_remove(var);
+    }
+    for (k, v) in env {
         cmd.env(k, v);
     }
 
@@ -269,7 +377,11 @@ pub async fn pty_create(
     // toda la vida del proceso. Con unas pocas terminales abiertas se agotan los workers y
     // el resto de tareas async de la app deja de progresar.
     tokio::task::spawn_blocking(move || {
-        let mut buf = [0u8; 4096];
+        // 64 KB y no 4: `read` devuelve lo que haya, así que con poca salida la latencia es
+        // la misma, y con mucha (un build, un `npm install`) cada evento al webview lleva
+        // hasta 16 veces más — cada uno es un JSON y un `eval` en el webview.
+        let mut buf = vec![0u8; 64 * 1024];
+        let mut text = Utf8Stream::default();
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
@@ -278,11 +390,17 @@ pub async fn pty_create(
                     // Modo push del orquestador (Fase 9): si nadie observa esta tab, esto
                     // es una lectura atómica y vuelve.
                     crate::orchestrator::watch::observe(id, &buf[..n]);
-                    let data = String::from_utf8_lossy(&buf[..n]).to_string();
-                    app_clone.emit(&event_name, PtyDataPayload { data }).ok();
+                    let data = text.push(&buf[..n]);
+                    if !data.is_empty() {
+                        app_clone.emit(&event_name, PtyDataPayload { data }).ok();
+                    }
                 }
                 Err(_) => break,
             }
+        }
+        let rest = text.finish();
+        if !rest.is_empty() {
+            app_clone.emit(&event_name, PtyDataPayload { data: rest }).ok();
         }
         // Se recoge el estado real del hijo antes de avisar al frontend. Sin este `wait`
         // el proceso queda además como zombie hasta que muere la app, porque nadie

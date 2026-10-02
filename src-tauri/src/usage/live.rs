@@ -15,7 +15,7 @@ use std::io::Read;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use portable_pty::{native_pty_system, CommandBuilder, PtySize};
+use portable_pty::{CommandBuilder, PtySize, native_pty_system};
 
 use crate::database::DbConnection;
 use serde::{Deserialize, Serialize};
@@ -37,7 +37,6 @@ const SETTLE: Duration = Duration::from_millis(2500);
 /// primera pintada —que es lo que se hacía— dejaba afuera esa barra.
 const QUIET: Duration = Duration::from_millis(700);
 
-
 /// Lo último que respondió cada cuenta, en memoria. Vive en el backend y no en la ventana:
 /// así dos ventanas abiertas comparten la misma respuesta en vez de preguntar cada una por
 /// su lado. La copia de SQLite es la que sobrevive al cierre de la app.
@@ -53,7 +52,6 @@ static CACHE: LazyLock<Mutex<HashMap<String, LiveUsage>>> =
 fn stored_key(account_key: &str) -> String {
     format!("usage.live.v2.{account_key}")
 }
-
 
 /// Una de las barras del panel.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -96,14 +94,36 @@ pub struct LiveUsage {
 
 impl LiveUsage {
     fn failed(reason: impl Into<String>) -> Self {
-        LiveUsage { problem: Some(reason.into()), ..Default::default() }
+        LiveUsage {
+            problem: Some(reason.into()),
+            ..Default::default()
+        }
+    }
+}
+
+/// Detect login failures before a broken session turns into a generic usage timeout.
+pub(super) fn capture_problem(raw: &str) -> Option<&'static str> {
+    let screen = super::screen::render(raw).to_lowercase();
+    if screen.contains("oauth session expired") || screen.contains("oauth token expired") {
+        Some("accounts.auth.expired")
+    } else if screen.contains("not logged in")
+        || screen.contains("please run /login")
+        || screen.contains("failed to authenticate")
+    {
+        Some("accounts.auth.required")
+    } else {
+        None
     }
 }
 
 /// Abre `claude` en una PTY, le manda `/usage` y devuelve lo que dibujó.
 ///
 /// No es privada para poder probarla contra la TUI instalada (ver `contra_la_tui_de_verdad`).
-pub(super) fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Result<String, String> {
+pub(super) fn capture(
+    command: &str,
+    cwd: &str,
+    env: &[(String, String)],
+) -> Result<String, String> {
     let pty = native_pty_system()
         .openpty(PtySize {
             rows: super::screen::ROWS as u16,
@@ -154,10 +174,18 @@ pub(super) fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Res
         }
         let text = String::from_utf8_lossy(&raw);
 
+        if let Some(problem) = capture_problem(&text) {
+            break Err(problem.to_string());
+        }
+
         // La carpeta no está entre las de confianza y la TUI está esperando una respuesta.
         // No se contesta por el usuario: se corta y se dice.
-        if text.contains("Is this a project you created") || text.contains("trust this folder") {
-            break Err("La TUI pidió confirmar que confiás en la carpeta".to_string());
+        // Se mira sin espacios: la TUI arma las columnas moviendo el cursor, así que el
+        // texto crudo viene como "Isthisaprojectyoucreated" (con eso el sondeo se quedaba
+        // esperando un panel que nunca iba a salir, y el error era un "timeout" mudo).
+        let squeezed: String = text.chars().filter(|c| !c.is_whitespace()).collect();
+        if squeezed.contains("Isthisaprojectyoucreated") || squeezed.contains("trustthisfolder") {
+            break Err("accounts.plan.problem.trustRequired".to_string());
         }
 
         if !sent && start.elapsed() > SETTLE {
@@ -181,12 +209,19 @@ pub(super) fn capture(command: &str, cwd: &str, env: &[(String, String)]) -> Res
             break if panel {
                 Ok(text.into_owned())
             } else if sent {
-                Err("La TUI no mostró el panel de consumo a tiempo".to_string())
+                Err("accounts.plan.problem.timeout".to_string())
             } else {
-                Err("La TUI no llegó a arrancar".to_string())
+                Err("accounts.plan.problem.startup".to_string())
             };
         }
     };
+
+    // Para cuando cambie el panel de la TUI y el parseo deje de encontrarlo: con
+    // `CC_USAGE_DUMP=<archivo>` se guarda lo crudo que se vio, y se prueba después con
+    // `CC_USAGE_CAPTURE` (ver `contra_una_captura_cruda_en_disco`).
+    if let Ok(path) = std::env::var("CC_USAGE_DUMP") {
+        let _ = std::fs::write(path, &raw);
+    }
 
     let _ = child.kill();
     let _ = child.wait();
@@ -207,7 +242,10 @@ fn complete(text: &str) -> bool {
         .iter()
         .any(|l| l.starts_with("Current week (") && !l.contains("(all models)"));
 
-    has("Current session") && has("Current week (all models)") && per_model && !screen.contains("Refreshing")
+    has("Current session")
+        && has("Current week (all models)")
+        && per_model
+        && !screen.contains("Refreshing")
 }
 
 /// El consumo del plan de una cuenta, preguntado en vivo.
@@ -227,7 +265,10 @@ pub async fn claude_live_usage(
     if !force {
         if let Ok(cache) = CACHE.lock() {
             if let Some(hit) = cache.get(&account_key) {
-                return Ok(LiveUsage { cached: true, ..hit.clone() });
+                return Ok(LiveUsage {
+                    cached: true,
+                    ..hit.clone()
+                });
             }
         }
         if let Ok(Some(raw)) = crate::database::get_setting(&db, &stored_key(&account_key)) {
@@ -235,16 +276,19 @@ pub async fn claude_live_usage(
                 if let Ok(mut cache) = CACHE.lock() {
                     cache.insert(account_key.clone(), stored.clone());
                 }
-                return Ok(LiveUsage { cached: true, ..stored });
+                return Ok(LiveUsage {
+                    cached: true,
+                    ..stored
+                });
             }
         }
     }
 
     let Some(command) = crate::agents::agent_command("claude-code") else {
-        return Ok(LiveUsage::failed("No se conoce el comando de Claude Code"));
+        return Ok(LiveUsage::failed("accounts.plan.problem.commandUnknown"));
     };
     if !crate::agents::command_exists(command) {
-        return Ok(LiveUsage::failed("Claude Code no está instalado"));
+        return Ok(LiveUsage::failed("accounts.plan.problem.notInstalled"));
     }
 
     // El sondeo se abre SIEMPRE en la misma carpeta: una vacía de la app, que la app
@@ -252,14 +296,18 @@ pub async fn claude_live_usage(
     // de encontrar alguna carpeta que la cuenta ya hubiera aceptado, y una cuenta nueva no
     // tiene ninguna.
     let Some(config_path) = config_file(env.get("CLAUDE_CONFIG_DIR").map(String::as_str)) else {
-        return Ok(LiveUsage::failed("No se pudo resolver la configuración de la cuenta"));
+        return Ok(LiveUsage::failed(
+            "accounts.plan.problem.configUnavailable",
+        ));
     };
     let cwd = match probe_dir() {
         Ok(dir) => dir,
         Err(problem) => return Ok(LiveUsage::failed(problem)),
     };
     let Some(cwd) = cwd.to_str().map(str::to_string) else {
-        return Ok(LiveUsage::failed("La carpeta del sondeo tiene un nombre ilegible"));
+        return Ok(LiveUsage::failed(
+            "accounts.plan.problem.probePath",
+        ));
     };
     if let Err(problem) = trust_dir(&config_path, &cwd) {
         return Ok(LiveUsage::failed(problem));
@@ -273,7 +321,11 @@ pub async fn claude_live_usage(
     .await
     .map_err(|e| e.to_string())?;
 
-    let fresh = LiveUsage { fetched_at: crate::util::now_ts(), cached: false, ..fresh };
+    let fresh = LiveUsage {
+        fetched_at: crate::util::now_ts(),
+        cached: false,
+        ..fresh
+    };
 
     // Un fallo NO se guarda: puede ser pasajero (la TUI todavía no estaba, la carpeta se
     // acaba de confiar), y cachearlo dejaría el panel roto cinco minutos sin motivo.

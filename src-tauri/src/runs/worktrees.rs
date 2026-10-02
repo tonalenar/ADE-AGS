@@ -26,7 +26,7 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
-use crate::util::output_with_timeout;
+use crate::util::{external_path, output_with_timeout};
 
 /// `worktree add` hace un checkout completo: en un repo grande tarda.
 const GIT_SLOW: Duration = Duration::from_secs(120);
@@ -51,8 +51,11 @@ pub struct Worktree {
 /// es un repo" y "falló" son lo mismo). Acá no: "la rama ya existe" o "el repo no tiene
 /// commits" es justo lo que el usuario necesita leer.
 fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
+    // `-C` también: el directorio canónico llega como `\\?\C:\...` y git lo rechaza
+    // igual que al argumento de `worktree add`.
+    let dir = external_path(dir);
     let mut cmd = Command::new("git");
-    cmd.arg("-C").arg(dir).args(args);
+    cmd.arg("-C").arg(&dir).args(args);
     let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("no se pudo correr git: {e}"))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string())
@@ -120,14 +123,14 @@ pub fn create_from(base: &Path, project_cwd: &Path, title: &str, start: &str) ->
 
     let short = Uuid::new_v4().simple().to_string()[..8].to_string();
     let branch = format!("{BRANCH_PREFIX}{}-{short}", branch_slug(title));
-    let root = base.join(&short);
+    // `base` suele llegar ya canónico (`\\?\...` en Windows). La comparación de arriba
+    // necesita esa forma; git, no. Se guarda la forma que git acepta para que el
+    // `worktree remove` posterior use la misma ruta que quedó registrada.
+    let root = external_path(&base.join(&short));
 
     std::fs::create_dir_all(base).map_err(|e| e.to_string())?;
-    git(
-        &repo,
-        &["worktree", "add", "-b", &branch, &root.to_string_lossy(), start],
-        GIT_SLOW,
-    )?;
+    let root_arg = root.to_string_lossy();
+    git(&repo, &["worktree", "add", "-b", &branch, &root_arg, start], GIT_SLOW)?;
 
     let task_cwd = if rel.as_os_str().is_empty() { root.clone() } else { root.join(&rel) };
     Ok(Worktree { root, task_cwd, branch })
@@ -155,8 +158,8 @@ pub fn managed_links(links_dir: &Path, skills_dir: &Path) -> Vec<PathBuf> {
         .flatten()
         .map(|e| e.path())
         .filter(|p| {
-            p.symlink_metadata().map(|m| m.file_type().is_symlink()).unwrap_or(false)
-                && std::fs::read_link(p).map(|t| t.starts_with(skills_dir)).unwrap_or(false)
+            crate::skills::is_mount(p)
+                && std::fs::read_link(p).map(|t| crate::skills::points_inside(&t, skills_dir)).unwrap_or(false)
         })
         .collect()
 }
@@ -181,7 +184,7 @@ pub fn link_skills(project_links: &Path, task_links: &Path, skills_dir: &Path) -
             let (Some(name), Ok(target)) = (link.file_name(), std::fs::read_link(link)) else {
                 return false;
             };
-            symlink::symlink_auto(&target, task_links.join(name)).is_ok()
+            crate::skills::mount_dir(&target, &task_links.join(name)).is_ok()
         })
         .count()
 }
@@ -205,7 +208,10 @@ pub fn dirty_files(root: &Path, managed: &[PathBuf]) -> Result<Vec<String>, Stri
             entries.next();
         }
         let absolute = root.join(path);
-        if !managed.contains(&absolute) {
+        // El montaje en sí, y lo que git liste adentro si sigue un junction. Ese
+        // contenido vive en la copia global, no es un cambio del worktree.
+        let managed_mount = managed.iter().any(|link| absolute == *link || absolute.starts_with(link));
+        if !managed_mount {
             files.push(path.to_string());
         }
     }
@@ -241,7 +247,7 @@ pub fn remove(repo_hint: &Path, wt: &Worktree, links_dir: &Path, skills_dir: &Pa
         // Los symlinks van primero: son derivados y se recrean solos, pero para git son
         // archivos sin trackear, y con ellos adentro `worktree remove` se niega.
         for link in &managed {
-            let _ = std::fs::remove_file(link);
+            let _ = crate::skills::remove_mount(link);
         }
         let _ = std::fs::remove_dir(links_dir);
         if let Some(parent) = links_dir.parent() {
@@ -249,7 +255,9 @@ pub fn remove(repo_hint: &Path, wt: &Worktree, links_dir: &Path, skills_dir: &Pa
             let _ = std::fs::remove_dir(parent);
         }
 
-        git(repo_hint, &["worktree", "remove", &wt.root.to_string_lossy()], GIT_SLOW)?;
+        let root = external_path(&wt.root);
+        let root_arg = root.to_string_lossy();
+        git(repo_hint, &["worktree", "remove", &root_arg], GIT_SLOW)?;
     } else {
         // Borrado a mano por fuera de la app: git todavía lo tiene registrado.
         let _ = git(repo_hint, &["worktree", "prune"], GIT_FAST);

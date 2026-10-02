@@ -18,6 +18,8 @@ export interface TabStatePayload {
   accountId: string | null;
   prelaunch: PrelaunchStep[];
   scrollback: string | null;
+  /** Este scrollback ya se mandó en un guardado anterior: la base conserva el suyo. */
+  scrollbackUnchanged?: boolean;
   openedAt: number;
 }
 

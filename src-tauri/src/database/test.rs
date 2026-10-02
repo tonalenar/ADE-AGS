@@ -103,6 +103,7 @@ fn payload(tabs: Vec<&str>, authoritative: bool) -> WindowStatePayload {
                 tab_order: 0,
                 session_id: None,
                 scrollback: None,
+                scrollback_unchanged: false,
                 history_id: None,
                 account_id: None,
                 prelaunch: Vec::new(),
@@ -136,13 +137,21 @@ fn un_guardado_no_autoritativo_no_puede_borrar_tabs() {
     db_save_window_state_sync(payload(vec!["t1"], false), &db, app.handle()).unwrap();
 
     let conn = db.lock().unwrap();
-    assert_eq!(count(&conn, "SELECT COUNT(*) FROM tabs"), 2, "no se borra ninguna tab");
+    assert_eq!(
+        count(&conn, "SELECT COUNT(*) FROM tabs"),
+        2,
+        "no se borra ninguna tab"
+    );
     assert_eq!(
         count(&conn, "SELECT COUNT(*) FROM project_skills"),
         1,
         "la skill sigue attacheada"
     );
-    assert_eq!(count(&conn, "SELECT COUNT(*) FROM session_history"), 0, "no se archiva nada");
+    assert_eq!(
+        count(&conn, "SELECT COUNT(*) FROM session_history"),
+        0,
+        "no se archiva nada"
+    );
 }
 
 /// Y con el estado ya cargado sí manda: una tab ausente es una tab que el usuario cerró.
@@ -161,15 +170,22 @@ fn un_guardado_autoritativo_si_cierra_las_tabs_que_faltan() {
         "y quedó archivada en el historial"
     );
     // Lo que importa del archivado: sus skills quedan guardadas, no perdidas.
-    let skills: String =
-        conn.query_row("SELECT skills FROM session_history", [], |r| r.get(0)).unwrap();
-    assert!(skills.contains("una-skill"), "el historial guarda la skill: {skills}");
+    let skills: String = conn
+        .query_row("SELECT skills FROM session_history", [], |r| r.get(0))
+        .unwrap();
+    assert!(
+        skills.contains("una-skill"),
+        "el historial guarda la skill: {skills}"
+    );
 }
 
 // ── Siembra de repositorios ──────────────────────────────────────
 
 fn skillssh_count(conn: &Connection) -> i64 {
-    count(conn, "SELECT COUNT(*) FROM registries WHERE source_type = 'skillssh'")
+    count(
+        conn,
+        "SELECT COUNT(*) FROM registries WHERE source_type = 'skillssh'",
+    )
 }
 
 /// La fuente nueva tiene que aparecerle también a quien ya venía usando la app — o sea,
@@ -189,9 +205,11 @@ fn skills_sh_se_agrega_aunque_ya_hubiera_repositorios() {
 
     assert_eq!(skillssh_count(&conn), 1);
     let priority: i32 = conn
-        .query_row("SELECT priority FROM registries WHERE source_type = 'skillssh'", [], |r| {
-            r.get(0)
-        })
+        .query_row(
+            "SELECT priority FROM registries WHERE source_type = 'skillssh'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(priority, 1);
 }
@@ -205,9 +223,14 @@ fn skills_sh_se_siembra_una_sola_vez_y_no_revive() {
     seeds::ensure_skillssh_registry(&conn).unwrap();
     assert_eq!(skillssh_count(&conn), 1);
 
-    conn.execute("DELETE FROM registries WHERE source_type = 'skillssh'", []).unwrap();
+    conn.execute("DELETE FROM registries WHERE source_type = 'skillssh'", [])
+        .unwrap();
     seeds::ensure_skillssh_registry(&conn).unwrap();
-    assert_eq!(skillssh_count(&conn), 0, "borrado por el usuario, no vuelve");
+    assert_eq!(
+        skillssh_count(&conn),
+        0,
+        "borrado por el usuario, no vuelve"
+    );
 }
 
 // ── Reabrir una sesión ya abierta ────────────────────────────────
@@ -220,20 +243,33 @@ fn una_sesion_ya_abierta_se_encuentra_por_su_id_o_por_su_historial() {
     let conn = setup();
     insert_tab(&conn, "t1", Some("sess-1"), None);
     assert_eq!(
-        open_tab_for_session(&conn, Some("sess-1"), None, "ws").unwrap().unwrap().tab_id,
+        open_tab_for_session(&conn, Some("sess-1"), None, "ws")
+            .unwrap()
+            .unwrap()
+            .tab_id,
         "t1"
     );
 
     let conn = setup();
     insert_tab(&conn, "t1", None, Some("h1"));
-    assert_eq!(open_tab_for_session(&conn, None, Some("h1"), "ws").unwrap().unwrap().tab_id, "t1");
+    assert_eq!(
+        open_tab_for_session(&conn, None, Some("h1"), "ws")
+            .unwrap()
+            .unwrap()
+            .tab_id,
+        "t1"
+    );
 }
 
 #[test]
 fn una_sesion_que_no_esta_abierta_no_devuelve_nada() {
     let conn = setup();
     insert_tab(&conn, "t1", Some("otra"), Some("otra-h"));
-    assert!(open_tab_for_session(&conn, Some("sess-1"), Some("h1"), "ws").unwrap().is_none());
+    assert!(
+        open_tab_for_session(&conn, Some("sess-1"), Some("h1"), "ws")
+            .unwrap()
+            .is_none()
+    );
 }
 
 /// Sin este corte, `t.session_id = NULL` no matchea nunca pero la rama de historial
@@ -242,7 +278,11 @@ fn una_sesion_que_no_esta_abierta_no_devuelve_nada() {
 fn sin_ningun_identificador_no_se_busca() {
     let conn = setup();
     insert_tab(&conn, "t1", None, None);
-    assert!(open_tab_for_session(&conn, None, None, "ws").unwrap().is_none());
+    assert!(
+        open_tab_for_session(&conn, None, None, "ws")
+            .unwrap()
+            .is_none()
+    );
 }
 
 #[test]
@@ -250,7 +290,11 @@ fn no_se_enfoca_una_tab_de_una_ventana_cerrada() {
     let conn = setup();
     insert_tab(&conn, "t1", Some("sess-1"), None);
     conn.execute("UPDATE windows SET is_open = 0", []).unwrap();
-    assert!(open_tab_for_session(&conn, Some("sess-1"), None, "ws").unwrap().is_none());
+    assert!(
+        open_tab_for_session(&conn, Some("sess-1"), None, "ws")
+            .unwrap()
+            .is_none()
+    );
 }
 
 // ── Archivado: a qué sesión pertenece de verdad la tab ───────────
@@ -280,12 +324,7 @@ fn insert_tab_with_account(
 
 /// Deja en el perfil un transcript de Claude Code para ese cwd, como si la TUI acabara
 /// de escribirlo. Con `summary` se escribe además la línea de la que saca el título.
-fn write_transcript(
-    profile: &std::path::Path,
-    cwd: &str,
-    session_id: &str,
-    summary: Option<&str>,
-) {
+fn write_transcript(profile: &std::path::Path, cwd: &str, session_id: &str, summary: Option<&str>) {
     let dir = profile.join("projects").join(cwd.replace('/', "-"));
     std::fs::create_dir_all(&dir).unwrap();
     let body = match summary {
@@ -296,7 +335,8 @@ fn write_transcript(
 }
 
 fn archived_session_id(conn: &Connection) -> Option<String> {
-    conn.query_row("SELECT session_id FROM session_history", [], |r| r.get(0)).unwrap()
+    conn.query_row("SELECT session_id FROM session_history", [], |r| r.get(0))
+        .unwrap()
 }
 
 /// Archiva como lo hace la app: la sesión se resuelve con el lock SUELTO (lee disco y
@@ -322,14 +362,20 @@ fn archivar_sigue_a_la_sesion_retomada_dentro_de_la_tui() {
     let db = setup_db();
     let profile = TempDir::new();
     write_transcript(&profile.0, "/proj", "la-retomada", Some("Charla retomada"));
-    insert_tab_with_account(&db.lock().unwrap(), "tab-1", Some("la-de-arranque"), &profile.0);
+    insert_tab_with_account(
+        &db.lock().unwrap(),
+        "tab-1",
+        Some("la-de-arranque"),
+        &profile.0,
+    );
 
     archive(&db, "tab-1", "ws");
 
     let conn = db.lock().unwrap();
     assert_eq!(archived_session_id(&conn).as_deref(), Some("la-retomada"));
-    let title: Option<String> =
-        conn.query_row("SELECT title FROM session_history", [], |r| r.get(0)).unwrap();
+    let title: Option<String> = conn
+        .query_row("SELECT title FROM session_history", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(title.as_deref(), Some("Charla retomada"));
 }
 
@@ -349,7 +395,10 @@ fn la_reconciliacion_no_le_roba_la_sesion_a_otra_tab() {
 
     archive(&db, "tab-1", "ws");
 
-    assert_eq!(archived_session_id(&db.lock().unwrap()).as_deref(), Some("la-mia"));
+    assert_eq!(
+        archived_session_id(&db.lock().unwrap()).as_deref(),
+        Some("la-mia")
+    );
 }
 
 /// No encontrar nada significa "no sé", no "no tenía sesión": el id previo se conserva.
@@ -361,7 +410,10 @@ fn la_reconciliacion_conserva_el_id_previo_si_no_encuentra_nada() {
 
     archive(&db, "tab-1", "ws");
 
-    assert_eq!(archived_session_id(&db.lock().unwrap()).as_deref(), Some("la-unica"));
+    assert_eq!(
+        archived_session_id(&db.lock().unwrap()).as_deref(),
+        Some("la-unica")
+    );
 }
 
 // ── Historial: una entrada por conversación ─────────────────────
@@ -379,7 +431,11 @@ fn reabrir_y_cerrar_una_sesion_actualiza_su_entrada() {
 
         let (hid, opened_at): (String, i64) = {
             let conn = db.lock().unwrap();
-            assert_eq!(history_count(&conn), 1, "el primer cierre crea una sola entrada");
+            assert_eq!(
+                history_count(&conn),
+                1,
+                "el primer cierre crea una sola entrada"
+            );
             conn.query_row("SELECT id, opened_at FROM session_history", [], |r| {
                 Ok((r.get(0)?, r.get(1)?))
             })
@@ -391,7 +447,8 @@ fn reabrir_y_cerrar_una_sesion_actualiza_su_entrada() {
         // y se vuelve a cerrar. Debe seguir habiendo una sola entrada.
         {
             let conn = db.lock().unwrap();
-            conn.execute("DELETE FROM tabs WHERE id = 'tab-1'", []).unwrap();
+            conn.execute("DELETE FROM tabs WHERE id = 'tab-1'", [])
+                .unwrap();
             insert_tab(&conn, "tab-2", session_id, Some(&hid));
         }
         archive(&db, "tab-2", "ws");
@@ -402,8 +459,9 @@ fn reabrir_y_cerrar_una_sesion_actualiza_su_entrada() {
             1,
             "reabrir y cerrar no debe duplicar la sesión (session_id: {session_id:?})"
         );
-        let same_id: String =
-            conn.query_row("SELECT id FROM session_history", [], |r| r.get(0)).unwrap();
+        let same_id: String = conn
+            .query_row("SELECT id FROM session_history", [], |r| r.get(0))
+            .unwrap();
         assert_eq!(same_id, hid, "debe ser la MISMA entrada, actualizada");
     }
 }
@@ -417,7 +475,10 @@ fn las_sesiones_sin_ningun_id_no_se_acumulan() {
         let tab_id = format!("tab-{i}");
         insert_tab(&db.lock().unwrap(), &tab_id, None, None);
         archive(&db, &tab_id, "ws");
-        db.lock().unwrap().execute("DELETE FROM tabs WHERE id = ?1", [&tab_id]).unwrap();
+        db.lock()
+            .unwrap()
+            .execute("DELETE FROM tabs WHERE id = ?1", [&tab_id])
+            .unwrap();
     }
     assert_eq!(history_count(&db.lock().unwrap()), 1);
 }
@@ -429,20 +490,25 @@ fn el_id_de_sesion_descubierto_se_escribe_en_la_entrada_existente() {
     let db = setup_db();
     insert_tab(&db.lock().unwrap(), "tab-1", None, None);
     archive(&db, "tab-1", "ws");
-    let hid: String =
-        db.lock().unwrap().query_row("SELECT id FROM session_history", [], |r| r.get(0)).unwrap();
+    let hid: String = db
+        .lock()
+        .unwrap()
+        .query_row("SELECT id FROM session_history", [], |r| r.get(0))
+        .unwrap();
 
     {
         let conn = db.lock().unwrap();
-        conn.execute("DELETE FROM tabs WHERE id = 'tab-1'", []).unwrap();
+        conn.execute("DELETE FROM tabs WHERE id = 'tab-1'", [])
+            .unwrap();
         insert_tab(&conn, "tab-2", Some("sess-descubierta"), Some(&hid));
     }
     archive(&db, "tab-2", "ws");
 
     let conn = db.lock().unwrap();
     assert_eq!(history_count(&conn), 1);
-    let sid: Option<String> =
-        conn.query_row("SELECT session_id FROM session_history", [], |r| r.get(0)).unwrap();
+    let sid: Option<String> = conn
+        .query_row("SELECT session_id FROM session_history", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(sid.as_deref(), Some("sess-descubierta"));
 }
 
@@ -451,8 +517,13 @@ fn el_id_de_sesion_descubierto_se_escribe_en_la_entrada_existente() {
 #[test]
 fn los_duplicados_viejos_se_colapsan_al_arrancar() {
     let conn = setup();
-    for (i, (opened, closed, title)) in
-        [(100, 200, "viejo"), (300, 400, "medio"), (500, 600, "nuevo")].iter().enumerate()
+    for (i, (opened, closed, title)) in [
+        (100, 200, "viejo"),
+        (300, 400, "medio"),
+        (500, 600, "nuevo"),
+    ]
+    .iter()
+    .enumerate()
     {
         conn.execute(
             "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, opened_at, closed_at)
@@ -471,7 +542,11 @@ fn los_duplicados_viejos_se_colapsan_al_arrancar() {
 
     dedupe_session_history(&conn).unwrap();
 
-    assert_eq!(history_count(&conn), 2, "los 3 duplicados quedan en 1, la otra sesión intacta");
+    assert_eq!(
+        history_count(&conn),
+        2,
+        "los 3 duplicados quedan en 1, la otra sesión intacta"
+    );
     let (title, opened, closed): (String, i64, i64) = conn
         .query_row(
             "SELECT title, opened_at, closed_at FROM session_history WHERE cwd = '/proj'",
@@ -480,7 +555,10 @@ fn los_duplicados_viejos_se_colapsan_al_arrancar() {
         )
         .unwrap();
     assert_eq!(title, "nuevo", "sobrevive la del cierre más reciente");
-    assert_eq!(opened, 100, "pero hereda cuándo empezó realmente la conversación");
+    assert_eq!(
+        opened, 100,
+        "pero hereda cuándo empezó realmente la conversación"
+    );
     assert_eq!(closed, 600);
 }
 
@@ -502,8 +580,12 @@ fn attach_skill_row(conn: &Connection, id: &str, ws: &str, scope: &str, tab: Opt
 }
 
 fn workspace_of_attachment(conn: &Connection, id: &str) -> String {
-    conn.query_row("SELECT workspace_id FROM project_skills WHERE id = ?1", [id], |r| r.get(0))
-        .unwrap()
+    conn.query_row(
+        "SELECT workspace_id FROM project_skills WHERE id = ?1",
+        [id],
+        |r| r.get(0),
+    )
+    .unwrap()
 }
 
 /// El bug: "Guardar workspace" movía las ventanas al workspace nuevo pero dejaba los
@@ -526,9 +608,16 @@ fn guardar_un_workspace_se_lleva_sus_skills() {
     move_open_windows_to_workspace(&conn, "nuevo", "ws", 0).unwrap();
 
     let moved: String = conn
-        .query_row("SELECT workspace_id FROM windows WHERE id = 'win'", [], |r| r.get(0))
+        .query_row(
+            "SELECT workspace_id FROM windows WHERE id = 'win'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
-    assert_eq!(moved, "nuevo", "la ventana abierta se mueve al workspace nuevo");
+    assert_eq!(
+        moved, "nuevo",
+        "la ventana abierta se mueve al workspace nuevo"
+    );
     assert_eq!(workspace_of_attachment(&conn, "ps-ws"), "nuevo");
     assert_eq!(workspace_of_attachment(&conn, "ps-tab"), "nuevo");
 }
@@ -560,9 +649,16 @@ fn los_attachments_de_lo_que_se_quedo_no_se_mueven() {
     move_open_windows_to_workspace(&conn, "nuevo", "ws", 0).unwrap();
 
     let stayed: String = conn
-        .query_row("SELECT workspace_id FROM windows WHERE id = 'win-cerrada'", [], |r| r.get(0))
+        .query_row(
+            "SELECT workspace_id FROM windows WHERE id = 'win-cerrada'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
-    assert_eq!(stayed, "ws", "una ventana cerrada no se lleva al workspace nuevo");
+    assert_eq!(
+        stayed, "ws",
+        "una ventana cerrada no se lleva al workspace nuevo"
+    );
     assert_eq!(
         workspace_of_attachment(&conn, "ps-vieja"),
         "ws",
@@ -587,12 +683,16 @@ fn los_labels_de_ventana_generados_no_colisionan() {
 #[test]
 fn una_base_nueva_queda_estampada_con_su_version() {
     let conn = schema::in_memory();
-    let v: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    let v: i32 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
     assert!(v > 0, "la base tiene que quedar con su versión de schema");
 
     // Volver a migrar es un no-op.
     schema::migrate(&conn).unwrap();
-    let v2: i32 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+    let v2: i32 = conn
+        .query_row("PRAGMA user_version", [], |r| r.get(0))
+        .unwrap();
     assert_eq!(v, v2);
 }
 
@@ -615,8 +715,15 @@ fn migrar_una_base_vieja_no_le_borra_las_tabs() {
 
     schema::migrate(&conn).unwrap();
 
-    assert_eq!(count(&conn, "SELECT COUNT(*) FROM tabs"), 1, "la tab guardada sobrevive");
-    assert_eq!(count(&conn, "SELECT opened_at FROM tabs WHERE id = 't1'"), 0);
+    assert_eq!(
+        count(&conn, "SELECT COUNT(*) FROM tabs"),
+        1,
+        "la tab guardada sobrevive"
+    );
+    assert_eq!(
+        count(&conn, "SELECT opened_at FROM tabs WHERE id = 't1'"),
+        0
+    );
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM workspaces"), 1);
 }
 
@@ -638,7 +745,11 @@ fn el_modelo_viejo_se_aparta_en_vez_de_borrarse() {
         1,
         "los datos viejos siguen ahí"
     );
-    assert_eq!(count(&conn, "SELECT COUNT(*) FROM workspaces"), 0, "y la tabla nueva arranca vacía");
+    assert_eq!(
+        count(&conn, "SELECT COUNT(*) FROM workspaces"),
+        0,
+        "y la tabla nueva arranca vacía"
+    );
 }
 
 // ── Migraciones sobre una base que ya existía ────────────────────
@@ -714,7 +825,10 @@ fn migrar_una_base_v8_no_explota() {
             |r| r.get(0),
         )
         .unwrap();
-    assert_eq!(indices, 2, "los dos índices parciales deberían quedar creados");
+    assert_eq!(
+        indices, 2,
+        "los dos índices parciales deberían quedar creados"
+    );
 }
 
 /// Las filas que ya existían significaban "todas las carpetas del workspace", y eso es
@@ -732,9 +846,14 @@ fn las_filas_v8_conservan_su_alcance() {
     schema::migrate(&conn).expect("migrar");
 
     let cwd: String = conn
-        .query_row("SELECT cwd FROM project_skills WHERE id = 'ps1'", [], |r| r.get(0))
+        .query_row("SELECT cwd FROM project_skills WHERE id = 'ps1'", [], |r| {
+            r.get(0)
+        })
         .unwrap();
-    assert_eq!(cwd, "", "una fila vieja tiene que seguir valiendo para todas las carpetas");
+    assert_eq!(
+        cwd, "",
+        "una fila vieja tiene que seguir valiendo para todas las carpetas"
+    );
 }
 
 /// Hasta la v8 el upsert de scope='workspace' nunca encontraba conflicto (la UNIQUE
@@ -758,7 +877,10 @@ fn migrar_deduplica_las_filas_repetidas_de_la_v8() {
     let filas: i64 = conn
         .query_row("SELECT COUNT(*) FROM project_skills", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(filas, 1, "quedaron {filas} filas; la migración debería dejar una");
+    assert_eq!(
+        filas, 1,
+        "quedaron {filas} filas; la migración debería dejar una"
+    );
 }
 
 /// Migrar dos veces seguidas no puede fallar: la app corre `migrate` en cada arranque.
@@ -767,6 +889,158 @@ fn migrar_es_idempotente() {
     let conn = base_v8();
     schema::migrate(&conn).expect("primera migración");
     schema::migrate(&conn).expect("segunda migración sobre la ya migrada");
+}
+
+#[test]
+fn v20_nuevo_crea_tablas_indices_y_referencias_de_squads() {
+    let conn = schema::in_memory();
+    let version: i32 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 24);
+
+    for table in ["squads", "squad_members", "run_squad_members"] {
+        assert!(
+            conn.query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1",
+                [table],
+                |_| Ok(())
+            )
+            .is_ok(),
+            "missing table {table}"
+        );
+    }
+    for (table, column) in [
+        ("missions", "squad_id"),
+        ("runs", "squad_id"),
+        ("runs", "squad_name"),
+        ("tasks", "functional_role"),
+    ] {
+        assert!(
+            conn.prepare(&format!("SELECT {column} FROM {table} LIMIT 0"))
+                .is_ok(),
+            "missing {table}.{column}"
+        );
+    }
+    for index in [
+        "idx_squad_members_role",
+        "idx_missions_squad",
+        "idx_runs_squad",
+    ] {
+        assert!(
+            conn.query_row(
+                "SELECT 1 FROM sqlite_master WHERE type = 'index' AND name = ?1",
+                [index],
+                |_| Ok(())
+            )
+            .is_ok(),
+            "missing index {index}"
+        );
+    }
+
+    let mission_fk: Vec<(String, String)> = {
+        let mut statement = conn.prepare("PRAGMA foreign_key_list(missions)").unwrap();
+        statement
+            .query_map([], |row| Ok((row.get(2)?, row.get(6)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    };
+    assert!(
+        mission_fk
+            .iter()
+            .any(|(table, on_delete)| table == "squads" && on_delete == "RESTRICT")
+    );
+    let run_fk: Vec<(String, String)> = {
+        let mut statement = conn.prepare("PRAGMA foreign_key_list(runs)").unwrap();
+        statement
+            .query_map([], |row| Ok((row.get(2)?, row.get(6)?)))
+            .unwrap()
+            .collect::<rusqlite::Result<_>>()
+            .unwrap()
+    };
+    assert!(
+        run_fk
+            .iter()
+            .any(|(table, on_delete)| table == "squads" && on_delete == "RESTRICT")
+    );
+}
+
+#[test]
+fn migrar_v19_a_v20_conserva_mission_runs_y_tasks_anteriores() {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "PRAGMA foreign_keys = ON;
+         CREATE TABLE workspaces (id TEXT PRIMARY KEY);
+         CREATE TABLE missions (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, title TEXT NOT NULL,
+                                objective TEXT NOT NULL, cwd TEXT NOT NULL, created_at INTEGER NOT NULL);
+         CREATE TABLE runs (id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL, objective TEXT NOT NULL,
+                            cwd TEXT NOT NULL, status TEXT NOT NULL, max_parallel INTEGER NOT NULL,
+                            budget_usd REAL, spent_usd REAL NOT NULL, created_at INTEGER NOT NULL,
+                            ended_at INTEGER, mission_id TEXT);
+         CREATE TABLE tasks (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, title TEXT NOT NULL,
+                             prompt TEXT NOT NULL, agent_id TEXT NOT NULL, cwd TEXT NOT NULL,
+                             status TEXT NOT NULL, created_at INTEGER NOT NULL, role TEXT);
+         CREATE TABLE tabs (id TEXT PRIMARY KEY);
+         INSERT INTO workspaces (id) VALUES ('workspace-old');
+         INSERT INTO missions (id, workspace_id, title, objective, cwd, created_at)
+             VALUES ('mission-old', 'workspace-old', 'Legacy Mission', 'Keep this objective', '/old', 10);
+         INSERT INTO runs (id, workspace_id, objective, cwd, status, max_parallel, spent_usd, created_at, mission_id)
+             VALUES ('run-old', 'workspace-old', 'Legacy objective', '/old', 'done', 2, 0, 11, 'mission-old');
+         INSERT INTO tasks (id, run_id, title, prompt, agent_id, cwd, status, created_at, role)
+             VALUES ('task-old', 'run-old', 'Legacy task', 'Legacy prompt', 'codex', '/old', 'done', 12, 'worker');
+         PRAGMA user_version = 19;"
+    ).unwrap();
+
+    schema::migrate(&conn).expect("v19 → v20");
+
+    let version: i32 = conn
+        .query_row("PRAGMA user_version", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(version, 24);
+    assert_eq!(
+        conn.query_row(
+            "SELECT title FROM missions WHERE id = 'mission-old'",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "Legacy Mission"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT objective FROM runs WHERE id = 'run-old'",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "Legacy objective"
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT role || ':' || title FROM tasks WHERE id = 'task-old'",
+            [],
+            |row| row.get::<_, String>(0)
+        )
+        .unwrap(),
+        "worker:Legacy task"
+    );
+    let (mission_squad, run_squad, functional_role): (Option<String>, Option<String>, Option<String>) = conn
+        .query_row(
+            "SELECT missions.squad_id, runs.squad_id, tasks.functional_role
+             FROM missions, runs, tasks WHERE missions.id = 'mission-old' AND runs.id = 'run-old' AND tasks.id = 'task-old'",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap();
+    assert_eq!(
+        (mission_squad, run_squad, functional_role),
+        (None, None, None)
+    );
+    assert!(
+        conn.prepare("SELECT history_id, account_id FROM tabs")
+            .is_ok()
+    );
 }
 
 /// Un bucle de arranques fallidos deja una fila de ventana por intento, todas cerradas y
@@ -786,7 +1060,10 @@ fn se_barren_las_ventanas_cerradas_y_vacias() {
     let quedan: i64 = conn
         .query_row("SELECT COUNT(*) FROM windows", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(quedan, 1, "la ventana abierta del setup tiene que seguir ahí");
+    assert_eq!(
+        quedan, 1,
+        "la ventana abierta del setup tiene que seguir ahí"
+    );
 }
 
 /// Lo único que no se puede tirar: una ventana cerrada que todavía guarda sus tabs, que es
@@ -805,7 +1082,11 @@ fn no_se_barre_una_ventana_cerrada_que_conserva_sus_tabs() {
 
     assert_eq!(queries::purge_empty_closed_windows(&conn).unwrap(), 0);
     let quedan: i64 = conn
-        .query_row("SELECT COUNT(*) FROM windows WHERE id = 'cerrada'", [], |r| r.get(0))
+        .query_row(
+            "SELECT COUNT(*) FROM windows WHERE id = 'cerrada'",
+            [],
+            |r| r.get(0),
+        )
         .unwrap();
     assert_eq!(quedan, 1);
 }
@@ -839,7 +1120,8 @@ fn un_workspace_cerrado_sobrevive_a_que_borren_su_workspace() {
         [],
     )
     .unwrap();
-    conn.execute("DELETE FROM workspaces WHERE id = 'ws'", []).unwrap();
+    conn.execute("DELETE FROM workspaces WHERE id = 'ws'", [])
+        .unwrap();
 
     let quedan: i64 = conn
         .query_row("SELECT COUNT(*) FROM workspace_snapshots", [], |r| r.get(0))
@@ -903,7 +1185,8 @@ fn borrar_un_workspace_se_lleva_sus_runs_y_tareas() {
     )
     .unwrap();
 
-    conn.execute("DELETE FROM workspaces WHERE id = 'ws'", []).unwrap();
+    conn.execute("DELETE FROM workspaces WHERE id = 'ws'", [])
+        .unwrap();
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM runs"), 0);
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM tasks"), 0);
 }
@@ -925,9 +1208,11 @@ fn migrar_a_v14_agrega_el_worktree_sin_tocar_las_tareas() {
     schema::migrate(&conn).expect("migrar de v13 a v14");
 
     let (wt, removed): (Option<String>, i64) = conn
-        .query_row("SELECT worktree_path, worktree_removed FROM tasks WHERE id = 't'", [], |r| {
-            Ok((r.get(0)?, r.get(1)?))
-        })
+        .query_row(
+            "SELECT worktree_path, worktree_removed FROM tasks WHERE id = 't'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?)),
+        )
         .unwrap();
     assert_eq!((wt, removed), (None, 0));
     assert_eq!(count(&conn, "SELECT COUNT(*) FROM tasks"), 1);
@@ -953,11 +1238,100 @@ fn migrar_a_v15_agrega_el_ruteo_sin_tocar_las_tareas() {
 
     schema::migrate(&conn).expect("migrar de v14 a v15");
 
-    let (model, complexity, routed_by, note): (String, Option<String>, Option<String>, Option<String>) = conn
-        .query_row("SELECT model, complexity, routed_by, route_note FROM tasks WHERE id = 't'", [], |r| {
-            Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
-        })
+    let (model, complexity, routed_by, note): (
+        String,
+        Option<String>,
+        Option<String>,
+        Option<String>,
+    ) = conn
+        .query_row(
+            "SELECT model, complexity, routed_by, route_note FROM tasks WHERE id = 't'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
         .unwrap();
     assert_eq!(model, "opus", "la tarea que ya estaba sigue igual");
     assert_eq!((complexity, routed_by, note), (None, None, None));
+}
+
+#[test]
+fn migrate_v20_to_v21_adds_nullable_effort_without_rewriting_history() {
+    let conn = schema::in_memory();
+    conn.execute_batch("INSERT INTO workspaces (id,name,created_at,last_active) VALUES ('eff-w','W',0,0);
+        INSERT INTO runs (id,workspace_id,objective,cwd,created_at) VALUES ('eff-r','eff-w','old','/p',0);
+        INSERT INTO tasks (id,run_id,title,prompt,agent_id,model,cwd,created_at) VALUES ('eff-t','eff-r','old','p','codex','old-model','/p',0);
+        INSERT INTO squads (id,name,lead_agent_id,created_at,updated_at) VALUES ('eff-s','old squad','claude-code',0,0);").unwrap();
+    for table in ["tasks", "missions", "squads", "squad_members", "run_squad_members"] {
+        conn.execute_batch(&format!("ALTER TABLE {table} DROP COLUMN reasoning_effort;")).unwrap();
+    }
+    conn.pragma_update(None, "user_version", 20).unwrap();
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 24);
+    let (model, effort): (String, Option<String>) = conn.query_row("SELECT model,reasoning_effort FROM tasks WHERE id='eff-t'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
+    assert_eq!(model, "old-model");
+    assert_eq!(effort, None);
+    conn.execute("UPDATE tasks SET reasoning_effort='high' WHERE id='eff-t'", []).unwrap();
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.query_row("SELECT reasoning_effort FROM tasks WHERE id='eff-t'", [], |r| r.get::<_, String>(0)).unwrap(), "high");
+    for table in ["missions", "squads", "squad_members", "run_squad_members"] {
+        conn.prepare(&format!("SELECT reasoning_effort FROM {table}")).unwrap();
+    }
+}
+
+#[test]
+fn migrate_v21_to_v22_preserves_legacy_and_is_idempotent() {
+    let conn = schema::in_memory();
+    conn.execute_batch("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('h-w','W',0,0);
+        INSERT INTO runs(id,workspace_id,objective,cwd,created_at) VALUES('h-r','h-w','old','/p',0);
+        INSERT INTO tasks(id,run_id,title,prompt,agent_id,cwd,created_at,handoff) VALUES('h-t','h-r','old','p','codex','/p',0,'legacy');
+        ALTER TABLE tasks DROP COLUMN structured_handoff;
+        PRAGMA user_version=21;").unwrap();
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),24);
+    let (legacy, structured): (String,Option<String>) = conn.query_row("SELECT handoff,structured_handoff FROM tasks WHERE id='h-t'",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
+    assert_eq!(legacy,"legacy");assert_eq!(structured,None);
+    conn.execute("UPDATE tasks SET structured_handoff=?1 WHERE id='h-t'",[r#"{"version":1,"summary":"old delivery"}"#]).unwrap();
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.query_row("SELECT structured_handoff FROM tasks WHERE id='h-t'",[],|row|row.get::<_,String>(0)).unwrap(),r#"{"version":1,"summary":"old delivery"}"#);
+}
+
+#[test]
+fn migrate_v22_to_v23_keeps_separate_oauth_metadata_without_tokens() {
+    let conn = schema::in_memory();
+    conn.execute_batch("DROP TABLE antigravity_oauth_accounts; PRAGMA user_version=22;").unwrap();
+    schema::migrate(&conn).unwrap();
+    for (id, subject, email) in [("a", "google-a", "a@example.com"), ("b", "google-b", "b@example.com")] {
+        conn.execute("INSERT INTO antigravity_oauth_accounts VALUES(?1,?2,'Personal',?3,0)", rusqlite::params![id,subject,email]).unwrap();
+    }
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM antigravity_oauth_accounts", [], |r|r.get::<_,i64>(0)).unwrap(), 2);
+    assert!(conn.execute("INSERT INTO antigravity_oauth_accounts VALUES('c','google-a','Duplicate','c@example.com',0)", []).is_err());
+    assert!(conn.prepare("SELECT access_token,refresh_token FROM antigravity_oauth_accounts").is_err());
+    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),24);
+}
+
+/// Un guardado de metadata (renombrar, mover la ventana) no reenvía el scrollback que la
+/// base ya tiene: viene vacío con `scrollback_unchanged`, y lo guardado se conserva.
+#[test]
+fn un_scrollback_sin_cambios_se_conserva() {
+    let db: DbConnection = std::sync::Arc::new(std::sync::Mutex::new(setup_window_save()));
+    let app = mock_app_with_main_window();
+    let scrollback_of = |db: &DbConnection| -> Option<String> {
+        db.lock().unwrap().query_row("SELECT scrollback FROM tabs WHERE id = 't1'", [], |r| r.get(0)).unwrap()
+    };
+
+    let mut first = payload(vec!["t1", "t2"], true);
+    first.tabs[0].scrollback = Some("salida del agente".into());
+    db_save_window_state_sync(first, &db, app.handle()).unwrap();
+    assert_eq!(scrollback_of(&db).as_deref(), Some("salida del agente"));
+
+    let mut metadata = payload(vec!["t1", "t2"], true);
+    metadata.tabs[0].title = "renombrada".into();
+    metadata.tabs[0].scrollback_unchanged = true;
+    db_save_window_state_sync(metadata, &db, app.handle()).unwrap();
+    assert_eq!(scrollback_of(&db).as_deref(), Some("salida del agente"));
+
+    // Sin la marca, lo que viene (aunque sea nada) reemplaza: el PTY ya no existe.
+    db_save_window_state_sync(payload(vec!["t1", "t2"], true), &db, app.handle()).unwrap();
+    assert_eq!(scrollback_of(&db), None);
 }

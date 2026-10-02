@@ -24,9 +24,9 @@
 //! un bloque de texto con `{"behavior":"allow","updatedInput":{…}}` o
 //! `{"behavior":"deny","message":"…"}`.
 
-use serde_json::{json, Value};
+use crate::forge::tools::{GIT_TOOLS, GitTool};
+use serde_json::{Value, json};
 use std::io::{BufRead, Write};
-use crate::forge::tools::{GitTool, GIT_TOOLS};
 
 /// El nombre con el que el agente la ve: `mcp__controlcode__approve_tool_use`.
 pub const SERVER_NAME: &str = "controlcode";
@@ -62,7 +62,10 @@ impl McpContext {
             // Sin `tabId` cuando no se sabe cuál es, y no `null`: la app distingue "esta
             // tab" de "el navegador que haya", y un null los confundiría.
             McpContext::Cwd { cwd, tab: None } => json!({ "cwd": cwd }),
-            McpContext::Cwd { cwd, tab: Some(tab) } => json!({ "cwd": cwd, "tabId": tab }),
+            McpContext::Cwd {
+                cwd,
+                tab: Some(tab),
+            } => json!({ "cwd": cwd, "tabId": tab }),
         }
     }
 }
@@ -101,7 +104,7 @@ pub fn tool_prefix(style: crate::agents::McpStyle) -> String {
 }
 
 /// Todos los nombres de tool que este servidor publica, para poder reescribirlos.
-fn tool_names() -> Vec<&'static str> {
+pub(crate) fn tool_names() -> Vec<&'static str> {
     let mut names: Vec<&str> = BROWSER_TOOLS.iter().map(|t| t.name).collect();
     names.extend(ORCHESTRATION_TOOLS.iter().map(|t| t.name));
     names.extend(GIT_TOOLS.iter().map(|t| t.name));
@@ -125,8 +128,13 @@ fn prefixed<'a>(text: &'a str, prefix: &str) -> std::borrow::Cow<'a, str> {
         let mut names = tool_names();
         // Los más largos primero: si alguno fuera principio de otro, gana el completo.
         names.sort_by_key(|n| std::cmp::Reverse(n.len()));
-        let alternation = names.iter().map(|n| regex::escape(n)).collect::<Vec<_>>().join("|");
-        regex::Regex::new(&format!(r"\b(?:{alternation})\b")).expect("los nombres de tool son literales")
+        let alternation = names
+            .iter()
+            .map(|n| regex::escape(n))
+            .collect::<Vec<_>>()
+            .join("|");
+        regex::Regex::new(&format!(r"\b(?:{alternation})\b"))
+            .expect("los nombres de tool son literales")
     });
     re.replace_all(text, format!("{prefix}$0").as_str())
 }
@@ -156,8 +164,7 @@ struct BrowserTool {
     required: &'static [&'static str],
 }
 
-const TARGET: &str =
-    "Element to act on: a ref from browser_snapshot (e.g. \"e12\"), \"text=Visible text\", or a CSS selector.";
+const TARGET: &str = "Element to act on: a ref from browser_snapshot (e.g. \"e12\"), \"text=Visible text\", or a CSS selector.";
 
 const BROWSER_TOOLS: &[BrowserTool] = &[
     BrowserTool {
@@ -186,12 +193,14 @@ it is right now, with component, source file, box, styles and a ref), the screen
 you can open) and their note. Read it as soon as they say they marked something. You get the batch addressed to YOU \
 — with several agents on the same project each one reads its own — and reading it consumes that batch, so keep what \
 you need. If they have something marked but not sent yet, you get that instead.",
-        properties: || json!({
-            "id": {
-                "type": "string",
-                "description": "The id the user's message gave you (m-… for the batch, s-… for one of its screenshots). Pass it and you get exactly that one, or an error saying it is not yours. Without it you get the newest batch addressed to you.",
-            },
-        }),
+        properties: || {
+            json!({
+                "id": {
+                    "type": "string",
+                    "description": "The id the user's message gave you (m-… for the batch, s-… for one of its screenshots). Pass it and you get exactly that one, or an error saying it is not yours. Without it you get the newest batch addressed to you.",
+                },
+            })
+        },
         required: &[],
     },
     BrowserTool {
@@ -214,32 +223,38 @@ Returns what changed plus console errors and failed requests caused by the click
         name: "browser_type",
         op: "type",
         description: "Type text into an input, textarea or contenteditable (fires input/change events, works with React).",
-        properties: || json!({
-            "target": { "type": "string", "description": TARGET },
-            "text": { "type": "string" },
-            "clear": { "type": "boolean", "description": "Replace the current value instead of appending." },
-            "submit": { "type": "boolean", "description": "Press Enter afterwards (submits the form)." },
-        }),
+        properties: || {
+            json!({
+                "target": { "type": "string", "description": TARGET },
+                "text": { "type": "string" },
+                "clear": { "type": "boolean", "description": "Replace the current value instead of appending." },
+                "submit": { "type": "boolean", "description": "Press Enter afterwards (submits the form)." },
+            })
+        },
         required: &["target", "text"],
     },
     BrowserTool {
         name: "browser_press",
         op: "press",
         description: "Press a key or combo (Enter, Escape, Tab, ArrowDown, Control+a) on an element or the focused one.",
-        properties: || json!({
-            "key": { "type": "string" },
-            "target": { "type": "string", "description": TARGET },
-        }),
+        properties: || {
+            json!({
+                "key": { "type": "string" },
+                "target": { "type": "string", "description": TARGET },
+            })
+        },
         required: &["key"],
     },
     BrowserTool {
         name: "browser_select",
         op: "select",
         description: "Choose an option of a native <select> by value or visible text.",
-        properties: || json!({
-            "target": { "type": "string", "description": TARGET },
-            "value": { "type": "string" },
-        }),
+        properties: || {
+            json!({
+                "target": { "type": "string", "description": TARGET },
+                "value": { "type": "string" },
+            })
+        },
         required: &["target", "value"],
     },
     BrowserTool {
@@ -266,20 +281,24 @@ the browser tab to the front, so the user sees what you are looking at.",
         op: "drag",
         description: "Drag one element onto another (pointer events plus HTML drag events, so sortable lists and \
 drop zones both react).",
-        properties: || json!({
-            "from": { "type": "string", "description": TARGET },
-            "to": { "type": "string", "description": TARGET },
-        }),
+        properties: || {
+            json!({
+                "from": { "type": "string", "description": TARGET },
+                "to": { "type": "string", "description": TARGET },
+            })
+        },
         required: &["from", "to"],
     },
     BrowserTool {
         name: "browser_upload",
         op: "upload",
         description: "Put a file from disk into an <input type=file>, as if the user had chosen it. Up to 10 MB.",
-        properties: || json!({
-            "target": { "type": "string", "description": TARGET },
-            "path": { "type": "string", "description": "Absolute path of the file to attach." },
-        }),
+        properties: || {
+            json!({
+                "target": { "type": "string", "description": TARGET },
+                "path": { "type": "string", "description": "Absolute path of the file to attach." },
+            })
+        },
         required: &["target", "path"],
     },
     BrowserTool {
@@ -289,17 +308,19 @@ drop zones both react).",
 500, an empty list, a slow response. It is how you test what the page does when things go wrong. Rules apply to \
 requests going through Control Code's proxy (the project's own server), newest rule first, and show up in \
 browser_network marked as mocked.",
-        properties: || json!({
-            "action": { "type": "string", "enum": ["add", "list", "clear"], "description": "Default: add." },
-            "url": { "type": "string", "description": "Part of the URL, `*` as wildcard: /api/login, */users?*" },
-            "method": { "type": "string", "description": "GET, POST… Default: any." },
-            "status": { "type": "number", "description": "Default 200." },
-            "body": { "type": "string", "description": "What to answer. A body starting with { or [ is sent as JSON." },
-            "content_type": { "type": "string" },
-            "delay_ms": { "type": "number", "description": "Answer this slowly, to test spinners and timeouts." },
-            "times": { "type": "number", "description": "Use the rule only this many times (e.g. fail once, then work)." },
-            "id": { "type": "string", "description": "With action=clear: the rule to remove. Without it, all of them." },
-        }),
+        properties: || {
+            json!({
+                "action": { "type": "string", "enum": ["add", "list", "clear"], "description": "Default: add." },
+                "url": { "type": "string", "description": "Part of the URL, `*` as wildcard: /api/login, */users?*" },
+                "method": { "type": "string", "description": "GET, POST… Default: any." },
+                "status": { "type": "number", "description": "Default 200." },
+                "body": { "type": "string", "description": "What to answer. A body starting with { or [ is sent as JSON." },
+                "content_type": { "type": "string" },
+                "delay_ms": { "type": "number", "description": "Answer this slowly, to test spinners and timeouts." },
+                "times": { "type": "number", "description": "Use the rule only this many times (e.g. fail once, then work)." },
+                "id": { "type": "string", "description": "With action=clear: the rule to remove. Without it, all of them." },
+            })
+        },
         required: &[],
     },
     BrowserTool {
@@ -307,10 +328,12 @@ browser_network marked as mocked.",
         op: "dialogs",
         description: "Native dialogs (alert, confirm, prompt) are answered automatically — inside an iframe they \
 would freeze the whole app — and recorded. This reads what appeared and sets what to answer from now on.",
-        properties: || json!({
-            "action": { "type": "string", "enum": ["accept", "dismiss"], "description": "What to answer confirm/prompt. Default: accept." },
-            "prompt_text": { "type": "string", "description": "What to type into a prompt." },
-        }),
+        properties: || {
+            json!({
+                "action": { "type": "string", "enum": ["accept", "dismiss"], "description": "What to answer confirm/prompt. Default: accept." },
+                "prompt_text": { "type": "string", "description": "What to type into a prompt." },
+            })
+        },
         required: &[],
     },
     BrowserTool {
@@ -324,11 +347,13 @@ would freeze the whole app — and recorded. This reads what appeared and sets w
         name: "browser_scroll",
         op: "scroll",
         description: "Scroll the page (or an element into view / by an amount).",
-        properties: || json!({
-            "target": { "type": "string", "description": TARGET },
-            "dy": { "type": "number", "description": "Pixels to scroll down (negative = up)." },
-            "to": { "type": "string", "enum": ["top", "bottom"] },
-        }),
+        properties: || {
+            json!({
+                "target": { "type": "string", "description": TARGET },
+                "dy": { "type": "number", "description": "Pixels to scroll down (negative = up)." },
+                "to": { "type": "string", "enum": ["top", "bottom"] },
+            })
+        },
         required: &[],
     },
     BrowserTool {
@@ -336,13 +361,15 @@ would freeze the whole app — and recorded. This reads what appeared and sets w
         op: "wait",
         description: "Wait until some text or a CSS selector is visible (or gone), or until the page stops making \
 requests. Max 15 s.",
-        properties: || json!({
-            "text": { "type": "string" },
-            "selector": { "type": "string" },
-            "gone": { "type": "boolean" },
-            "idle": { "type": "boolean", "description": "Wait for the network to go quiet (no request in flight for 400 ms)." },
-            "timeout_ms": { "type": "number" },
-        }),
+        properties: || {
+            json!({
+                "text": { "type": "string" },
+                "selector": { "type": "string" },
+                "gone": { "type": "boolean" },
+                "idle": { "type": "boolean", "description": "Wait for the network to go quiet (no request in flight for 400 ms)." },
+                "timeout_ms": { "type": "number" },
+            })
+        },
         required: &[],
     },
     BrowserTool {
@@ -362,13 +389,15 @@ desktop (1440×900), desktop-large (1920×1080). Phone and tablet presets also e
 `(hover: none)` and `(pointer: coarse)` answer as on a phone, matchMedia agrees, and clicks send touch events \
 without hovering first — which is how you catch a menu that only opens on :hover. Set `touch` explicitly to \
 compare the same size with and without it. The user agent is not emulated.",
-        properties: || json!({
-            "width": { "type": "number" },
-            "height": { "type": "number" },
-            "preset": { "type": "string" },
-            "touch": { "type": "boolean", "description": "Force touch emulation on or off, instead of letting the preset decide." },
-            "reset": { "type": "boolean", "description": "Go back to filling the whole tab, with a mouse." },
-        }),
+        properties: || {
+            json!({
+                "width": { "type": "number" },
+                "height": { "type": "number" },
+                "preset": { "type": "string" },
+                "touch": { "type": "boolean", "description": "Force touch emulation on or off, instead of letting the preset decide." },
+                "reset": { "type": "boolean", "description": "Go back to filling the whole tab, with a mouse." },
+            })
+        },
         required: &[],
     },
     BrowserTool {
@@ -384,11 +413,13 @@ offending elements, small tap targets and small text.",
         op: "console",
         description: "Console messages, uncaught errors, unhandled rejections and resources that failed to load, \
 kept across reloads. Returns a cursor: pass it as `since` to get only newer messages.",
-        properties: || json!({
-            "since": { "type": "number" },
-            "level": { "type": "string", "enum": ["all", "errors", "warnings"] },
-            "limit": { "type": "number" },
-        }),
+        properties: || {
+            json!({
+                "since": { "type": "number" },
+                "level": { "type": "string", "enum": ["all", "errors", "warnings"] },
+                "limit": { "type": "number" },
+            })
+        },
         required: &[],
     },
     BrowserTool {
@@ -398,12 +429,14 @@ kept across reloads. Returns a cursor: pass it as `since` to get only newer mess
 the proxy, other origins from inside the page). Returns a cursor for `since`. Pass `request` with an id from the \
 list (e.g. \"p12\") to get that request in full: status text, request and response headers, query parameters, \
 request and response bodies, timing and the cause of a network error.",
-        properties: || json!({
-            "since": { "type": "number" },
-            "failed_only": { "type": "boolean" },
-            "limit": { "type": "number" },
-            "request": { "type": "string", "description": "Id of one request from the list (p12, g5) to see its details." },
-        }),
+        properties: || {
+            json!({
+                "since": { "type": "number" },
+                "failed_only": { "type": "boolean" },
+                "limit": { "type": "number" },
+                "request": { "type": "string", "description": "Id of one request from the list (p12, g5) to see its details." },
+            })
+        },
         required: &[],
     },
     BrowserTool {
@@ -411,12 +444,14 @@ request and response bodies, timing and the cause of a network error.",
         op: "storage",
         description: "Read or change localStorage/sessionStorage (list also shows IndexedDB databases, Cache Storage \
 and service workers).",
-        properties: || json!({
-            "action": { "type": "string", "enum": ["list", "set", "remove", "clear"] },
-            "area": { "type": "string", "enum": ["local", "session"] },
-            "key": { "type": "string" },
-            "value": { "type": "string" },
-        }),
+        properties: || {
+            json!({
+                "action": { "type": "string", "enum": ["list", "set", "remove", "clear"] },
+                "area": { "type": "string", "enum": ["local", "session"] },
+                "key": { "type": "string" },
+                "value": { "type": "string" },
+            })
+        },
         required: &["action"],
     },
     BrowserTool {
@@ -424,13 +459,15 @@ and service workers).",
         op: "cookies",
         description: "List, set or delete cookies. The list includes HttpOnly cookies, their attributes, and whether \
 the browser sent each one to the server on the last request. Delete also clears HttpOnly cookies.",
-        properties: || json!({
-            "action": { "type": "string", "enum": ["list", "set", "delete"] },
-            "name": { "type": "string" },
-            "value": { "type": "string" },
-            "path": { "type": "string" },
-            "max_age": { "type": "number", "description": "Seconds." },
-        }),
+        properties: || {
+            json!({
+                "action": { "type": "string", "enum": ["list", "set", "delete"] },
+                "name": { "type": "string" },
+                "value": { "type": "string" },
+                "path": { "type": "string" },
+                "max_age": { "type": "number", "description": "Seconds." },
+            })
+        },
         required: &["action"],
     },
     BrowserTool {
@@ -451,10 +488,22 @@ function body with `return`; `await` works. Use it for what the other tools can'
     },
 ];
 
-/// Los nombres completos de las tools del navegador, como los ve el agente
-/// (`mcp__controlcode__browser_click`). Es lo que va en `--allowedTools`.
+/// Las del navegador que NO se aprueban solas, aunque el resto sí.
+///
+/// Las dos sacan datos de la máquina hacia la página, que puede ser cualquier sitio (una
+/// página con prompt injection pide justo esto): `browser_upload` lee un archivo del disco
+/// y `browser_eval` corre código arbitrario con acceso a todo lo que la página ve. El resto
+/// del navegador mira y toca la página; estas dos las aprueba la persona, cada vez.
+const BROWSER_NEEDS_APPROVAL: &[&str] = &["browser_upload", "browser_eval"];
+
+/// Los nombres completos de las tools del navegador que se aprueban solas, como los ve el
+/// agente (`mcp__controlcode__browser_click`). Es lo que va en `--allowedTools`.
 pub fn browser_tool_names() -> Vec<String> {
-    BROWSER_TOOLS.iter().map(|t| format!("mcp__{SERVER_NAME}__{}", t.name)).collect()
+    BROWSER_TOOLS
+        .iter()
+        .filter(|t| !BROWSER_NEEDS_APPROVAL.contains(&t.name))
+        .map(|t| format!("mcp__{SERVER_NAME}__{}", t.name))
+        .collect()
 }
 
 // ── Orquestación ────────────────────────────────────────────────
@@ -466,6 +515,8 @@ pub enum OrchestrationPower {
     Read,
     /// Escribe un hecho: no gasta ni lanza nada.
     Note,
+    /// Saves delivery on the running caller; unavailable to Lead.
+    Delivery,
     /// Lanza agentes o los para: gasta plata.
     Spawn,
 }
@@ -516,12 +567,14 @@ tiers Control Code uses to pick a model.",
 cycles, every task assignable to a model) — nothing is created if anything is wrong. Tasks start as soon as their \
 dependencies finish OK, up to max_parallel at a time. From an interactive session this creates a new run; inside \
 a run it adds to your run.",
-        properties: || json!({
-            "objective": { "type": "string", "description": "What the run must achieve. Required from an interactive session." },
-            "max_parallel": { "type": "number", "description": "Tasks running at the same time (1-6). Default 2." },
-            "budget_usd": { "type": "number", "description": "No new task starts once the run spent this." },
-            "tasks": { "type": "array", "items": { "type": "object", "properties": plan_task_properties(), "required": ["key", "title", "prompt"] } },
-        }),
+        properties: || {
+            json!({
+                "objective": { "type": "string", "description": "What the run must achieve. Required from an interactive session." },
+                "max_parallel": { "type": "number", "description": "Tasks running at the same time (1-6). Default 2." },
+                "budget_usd": { "type": "number", "description": "No new task starts once the run spent this." },
+                "tasks": { "type": "array", "items": { "type": "object", "properties": plan_task_properties(), "required": ["key", "title", "prompt"] } },
+            })
+        },
         required: &["tasks"],
     },
     OrchestrationTool {
@@ -538,6 +591,14 @@ run_plan task; depends_on may reference any task of the run.",
         required: &["key", "title", "prompt"],
     },
     OrchestrationTool {
+        name: "task_handoff",
+        command: "run.handoff",
+        power: OrchestrationPower::Delivery,
+        description: "Submit your own structured handoff before finishing. Worker Task context required. This saves untrusted delivery data; it does not complete the task. Paths are relative workspace references. Payload and field byte limits are validated by ADE. Do not invent optional information.",
+        properties: || json!({ "handoff": crate::runs::handoff::schema() }),
+        required: &["handoff"],
+    },
+    OrchestrationTool {
         name: "task_status",
         command: "run.status",
         power: OrchestrationPower::Read,
@@ -550,10 +611,12 @@ run_plan task; depends_on may reference any task of the run.",
         command: "run.result",
         power: OrchestrationPower::Read,
         description: "Everything a task delivered: its full final result or error, branch and worktree, cost and attempts.",
-        properties: || json!({
-            "task": { "type": "string", "description": "The task's key or id." },
-            "run_id": { "type": "string", "description": RUN_ID },
-        }),
+        properties: || {
+            json!({
+                "task": { "type": "string", "description": "The task's key or id." },
+                "run_id": { "type": "string", "description": RUN_ID },
+            })
+        },
         required: &["task"],
     },
     OrchestrationTool {
@@ -562,10 +625,12 @@ run_plan task; depends_on may reference any task of the run.",
         power: OrchestrationPower::Read,
         description: "Block until a task of the run finishes (or is skipped/cancelled), or the timeout passes, then \
 return the board and what changed. Call it again to keep waiting.",
-        properties: || json!({
-            "timeout_s": { "type": "number", "description": "Seconds to wait (10-1800). Default 300." },
-            "run_id": { "type": "string", "description": RUN_ID },
-        }),
+        properties: || {
+            json!({
+                "timeout_s": { "type": "number", "description": "Seconds to wait (10-1800). Default 300." },
+                "run_id": { "type": "string", "description": RUN_ID },
+            })
+        },
         required: &[],
     },
     OrchestrationTool {
@@ -574,34 +639,144 @@ return the board and what changed. Call it again to keep waiting.",
         power: OrchestrationPower::Note,
         description: "Share one short fact with every agent of the run: a decision they must follow, a finding, a file \
 they need, a constraint. Tasks that start later receive the run's facts in their context.",
-        properties: || json!({
-            "kind": { "type": "string", "enum": ["decision", "finding", "file", "constraint", "note"] },
-            "body": { "type": "string", "description": "One or two sentences." },
-            "run_id": { "type": "string", "description": RUN_ID },
-        }),
+        properties: || {
+            json!({
+                "kind": { "type": "string", "enum": ["decision", "finding", "file", "constraint", "note"] },
+                "body": { "type": "string", "description": "One or two sentences." },
+                "run_id": { "type": "string", "description": RUN_ID },
+            })
+        },
         required: &["kind", "body"],
     },
     OrchestrationTool {
         name: "facts_read",
         command: "run.facts",
         power: OrchestrationPower::Read,
-        description: "Every fact the run's agents shared, with its author.",
-        properties: || json!({ "run_id": { "type": "string", "description": RUN_ID } }),
+        description: "Read Run Facts in pages. The response includes hasMore, nextCursor and truncation metadata. Each item contains a bounded preview; use fact_read to retrieve the complete body in byte chunks. Run Facts are not persistent Shared Memory.",
+        properties: || {
+            json!({
+                "run_id": { "type": "string", "description": RUN_ID },
+                "cursor": { "type": "string", "description": "Cursor returned by the previous page." },
+                "limit": { "type": "number", "description": "Page size from 1 to 32. Default 30." },
+            })
+        },
         required: &[],
+    },
+    OrchestrationTool {
+        name: "fact_read",
+        command: "run.factBody",
+        power: OrchestrationPower::Read,
+        description: "Read one Run Fact body. Large bodies are returned in byte chunks; continue with nextOffset until hasMore is false.",
+        properties: || {
+            json!({
+                "fact_id": { "type": "string" },
+                "offset_bytes": { "type": "number", "description": "Byte offset from the prior response. Default 0." },
+                "limit_bytes": { "type": "number", "description": "Maximum UTF-8 chunk size, up to 4096. Default 3000." },
+            })
+        },
+        required: &["fact_id"],
+    },
+    OrchestrationTool {
+        name: "memory_list",
+        command: "memory.list",
+        power: OrchestrationPower::Read,
+        description: "List approved and pending Shared Memory entries for this Run's authorized Workspace or Mission. Owners are derived by ADE; do not provide owner IDs.",
+        properties: || {
+            json!({
+                "scope": { "type": "string", "enum": ["workspace", "mission"] },
+                "cursor": { "type": "string" },
+                "limit": { "type": "number", "description": "Page size, up to 32." },
+            })
+        },
+        required: &["scope"],
+    },
+    OrchestrationTool {
+        name: "memory_get",
+        command: "memory.get",
+        power: OrchestrationPower::Read,
+        description: "Read one authorized memory entry. Oversized combined bodies return explicit previews; pass revision from currentRevision or pendingRevision to read that revision's complete body within 32 KiB.",
+        properties: || json!({ "entry_id": { "type": "string" }, "revision": { "type": "integer", "description": "Optional revision number for the complete body, including historical revisions." } }),
+        required: &["entry_id"],
+    },
+    OrchestrationTool {
+        name: "memory_propose",
+        command: "memory.propose",
+        power: OrchestrationPower::Note,
+        description: "Propose a new Workspace or Mission memory entry. It stays pending until the user approves it; it never becomes active automatically.",
+        properties: || {
+            json!({
+                "scope": { "type": "string", "enum": ["workspace", "mission"] },
+                "key": { "type": "string" },
+                "kind": { "type": "string", "enum": ["decision", "finding", "file", "constraint", "note"] },
+                "body": { "type": "string" },
+                "priority": { "type": "number", "description": "-10 to 10; default 0." },
+                "reason": { "type": "string" },
+            })
+        },
+        required: &["scope", "key", "kind", "body"],
+    },
+    OrchestrationTool {
+        name: "memory_update",
+        command: "memory.update",
+        power: OrchestrationPower::Note,
+        description: "Propose an update against an exact approved revision. The active revision remains unchanged until the user approves the proposal.",
+        properties: || {
+            json!({
+                "entry_id": { "type": "string" },
+                "expected_revision": { "type": "number" },
+                "kind": { "type": "string", "enum": ["decision", "finding", "file", "constraint", "note"] },
+                "body": { "type": "string" },
+                "priority": { "type": "number", "description": "-10 to 10." },
+                "reason": { "type": "string" },
+            })
+        },
+        required: &["entry_id", "expected_revision", "kind", "body", "priority"],
+    },
+    OrchestrationTool {
+        name: "memory_delete",
+        command: "memory.delete",
+        power: OrchestrationPower::Note,
+        description: "Propose a tombstone against an exact approved revision. The entry remains active until the user approves the proposal.",
+        properties: || {
+            json!({
+                "entry_id": { "type": "string" },
+                "expected_revision": { "type": "number" },
+                "reason": { "type": "string" },
+            })
+        },
+        required: &["entry_id", "expected_revision"],
+    },
+    OrchestrationTool {
+        name: "memory_promote_fact",
+        command: "memory.promoteFact",
+        power: OrchestrationPower::Note,
+        description: "Explicitly propose promoting one Run Fact into Workspace or Mission Memory. Only facts from this Run are eligible, and the user must approve the resulting proposal.",
+        properties: || {
+            json!({
+                "fact_id": { "type": "string" },
+                "scope": { "type": "string", "enum": ["workspace", "mission"] },
+                "key": { "type": "string" },
+                "priority": { "type": "number" },
+                "reason": { "type": "string" },
+            })
+        },
+        required: &["fact_id", "scope", "key"],
     },
     OrchestrationTool {
         name: "task_reroute",
         command: "run.rerouteTask",
         power: OrchestrationPower::Spawn,
         description: "Hand a task to a different agent or model and put it back in the queue. It keeps its worktree and branch, and the new agent gets what the previous one did (its steps, its commits, where it left off) so it continues instead of starting over. Use it when an account runs out of quota, when a worker is not making progress, or when a task turned out to need a stronger model. Without agent/model, Control Code picks.",
-        properties: || json!({
-            "task": { "type": "string", "description": "The task's key or id." },
-            "agent": { "type": "string", "description": "Only when it must go to a specific agent (see agent_roster)." },
-            "model": { "type": "string", "description": "Only with agent." },
-            "complexity": { "type": "string", "enum": ["trivial", "standard", "hard"], "description": "Let Control Code pick from this tier instead." },
-            "reason": { "type": "string", "description": "Why it changed hands. The new agent reads it." },
-            "run_id": { "type": "string", "description": RUN_ID },
-        }),
+        properties: || {
+            json!({
+                "task": { "type": "string", "description": "The task's key or id." },
+                "agent": { "type": "string", "description": "Only when it must go to a specific agent (see agent_roster)." },
+                "model": { "type": "string", "description": "Only with agent." },
+                "complexity": { "type": "string", "enum": ["trivial", "standard", "hard"], "description": "Let Control Code pick from this tier instead." },
+                "reason": { "type": "string", "description": "Why it changed hands. The new agent reads it." },
+                "run_id": { "type": "string", "description": RUN_ID },
+            })
+        },
         required: &["task"],
     },
     OrchestrationTool {
@@ -609,10 +784,12 @@ they need, a constraint. Tasks that start later receive the run's facts in their
         command: "run.cancelTask",
         power: OrchestrationPower::Spawn,
         description: "Stop a running task or drop a pending one. Tasks that depend on it will be skipped.",
-        properties: || json!({
-            "task": { "type": "string", "description": "The task's key or id." },
-            "run_id": { "type": "string", "description": RUN_ID },
-        }),
+        properties: || {
+            json!({
+                "task": { "type": "string", "description": "The task's key or id." },
+                "run_id": { "type": "string", "description": RUN_ID },
+            })
+        },
         required: &["task"],
     },
 ];
@@ -632,7 +809,12 @@ pub fn orchestration_tool_name(name: &str) -> String {
 }
 
 /// Le pasa el pedido a la app y devuelve su texto.
-fn orchestrate<F>(context: &McpContext, tool: &OrchestrationTool, arguments: Value, send: &mut F) -> Value
+fn orchestrate<F>(
+    context: &McpContext,
+    tool: &OrchestrationTool,
+    arguments: Value,
+    send: &mut F,
+) -> Value
 where
     F: FnMut(&str, Value) -> Result<Value, String>,
 {
@@ -640,7 +822,11 @@ where
     payload["args"] = arguments;
     match send(tool.command, payload) {
         Ok(data) => {
-            let text = data.get("text").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| data.to_string());
+            let text = data
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| data.to_string());
             json!({ "content": [{ "type": "text", "text": text }] })
         }
         Err(e) => tool_error(&e),
@@ -696,7 +882,13 @@ where
 /// Los hilos son acotados (`thread::scope`): al cerrarse stdin se les da [`EOF_GRACE`] para
 /// terminar, se cancela lo que siga pendiente y se espera a que vuelvan, así el proceso no
 /// queda colgado de la app.
-pub fn serve<R, W, F>(context: &McpContext, prefix: &str, input: R, output: W, send: F) -> std::io::Result<()>
+pub fn serve<R, W, F>(
+    context: &McpContext,
+    prefix: &str,
+    input: R,
+    output: W,
+    send: F,
+) -> std::io::Result<()>
 where
     R: BufRead,
     W: Write + Send,
@@ -704,7 +896,7 @@ where
 {
     use std::collections::HashMap;
     use std::sync::atomic::{AtomicBool, Ordering};
-    use std::sync::{mpsc, Arc, Mutex};
+    use std::sync::{Arc, Mutex, mpsc};
 
     let output = Mutex::new(output);
     let write = |value: &Value| -> std::io::Result<()> {
@@ -715,7 +907,10 @@ where
     // id del pedido (como texto JSON) → (id para la app, cancelado).
     let inflight: Mutex<HashMap<String, (String, Arc<AtomicBool>)>> = Mutex::new(HashMap::new());
     let cancel = |key: &str| {
-        let entry = inflight.lock().unwrap_or_else(|e| e.into_inner()).remove(key);
+        let entry = inflight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(key);
         if let Some((call_id, flag)) = entry {
             flag.store(true, Ordering::SeqCst);
             let _ = send("mcp.cancel", json!({ "callId": call_id }));
@@ -728,7 +923,9 @@ where
             if line.trim().is_empty() {
                 continue;
             }
-            let Ok(req) = serde_json::from_str::<Value>(&line) else { continue };
+            let Ok(req) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
 
             let method = req.get("method").and_then(Value::as_str).unwrap_or("");
             let id = req.get("id").cloned();
@@ -753,12 +950,15 @@ where
                         .pointer("/params/protocolVersion")
                         .and_then(Value::as_str)
                         .unwrap_or("2025-06-18");
-                    ok(id, json!({
-                        "protocolVersion": version,
-                        "capabilities": { "tools": {} },
-                        "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
-                        "instructions": prefixed(INSTRUCTIONS, prefix),
-                    }))
+                    ok(
+                        id,
+                        json!({
+                            "protocolVersion": version,
+                            "capabilities": { "tools": {} },
+                            "serverInfo": { "name": SERVER_NAME, "version": env!("CARGO_PKG_VERSION") },
+                            "instructions": prefixed(INSTRUCTIONS, prefix),
+                        }),
+                    )
                 }
                 // El cliente pregunta si seguimos vivos: la especificación pide contestar
                 // enseguida con un resultado vacío. Sin esto un cliente estricto nos daba por
@@ -766,8 +966,15 @@ where
                 "ping" => ok(id, json!({})),
                 "tools/list" => ok(id, json!({ "tools": tools_for(context, prefix) })),
                 "tools/call" => {
-                    let name = req.pointer("/params/name").and_then(Value::as_str).unwrap_or("").to_string();
-                    let args = req.pointer("/params/arguments").cloned().unwrap_or(json!({}));
+                    let name = req
+                        .pointer("/params/name")
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .to_string();
+                    let args = req
+                        .pointer("/params/arguments")
+                        .cloned()
+                        .unwrap_or(json!({}));
                     let token = req.pointer("/params/_meta/progressToken").cloned();
                     let key = id.to_string();
                     // Único entre todos los puentes que hablan con la misma app: el id del
@@ -785,7 +992,9 @@ where
                             let cancelled = cancelled.clone();
                             scope.spawn(move || {
                                 let started = std::time::Instant::now();
-                                while let Err(mpsc::RecvTimeoutError::Timeout) = finished.recv_timeout(PROGRESS_EVERY) {
+                                while let Err(mpsc::RecvTimeoutError::Timeout) =
+                                    finished.recv_timeout(PROGRESS_EVERY)
+                                {
                                     if cancelled.load(Ordering::SeqCst) {
                                         break;
                                     }
@@ -810,7 +1019,10 @@ where
                         };
                         let result = call_tool(context, &name, args, &mut tagged);
                         drop(done);
-                        inflight.lock().unwrap_or_else(|e| e.into_inner()).remove(&key);
+                        inflight
+                            .lock()
+                            .unwrap_or_else(|e| e.into_inner())
+                            .remove(&key);
                         // Cancelada: no se contesta (lo pide la especificación).
                         if !cancelled.load(Ordering::SeqCst) {
                             let _ = write(&ok(id, result));
@@ -830,11 +1042,19 @@ where
         // sirve a nadie, y se cancela para que el proceso no quede colgado de la app.
         let deadline = std::time::Instant::now() + EOF_GRACE;
         while std::time::Instant::now() < deadline
-            && !inflight.lock().unwrap_or_else(|e| e.into_inner()).is_empty()
+            && !inflight
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .is_empty()
         {
             std::thread::sleep(std::time::Duration::from_millis(20));
         }
-        let pending: Vec<String> = inflight.lock().unwrap_or_else(|e| e.into_inner()).keys().cloned().collect();
+        let pending: Vec<String> = inflight
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .keys()
+            .cloned()
+            .collect();
         for key in pending {
             cancel(&key);
         }
@@ -858,9 +1078,24 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
             "inputSchema": { "type": "object", "properties": properties, "required": required },
         })
     };
-    tools.extend(BROWSER_TOOLS.iter().map(|t| schema(t.name, t.description, (t.properties)(), t.required)));
-    tools.extend(ORCHESTRATION_TOOLS.iter().map(|t| schema(t.name, t.description, (t.properties)(), t.required)));
-    tools.extend(GIT_TOOLS.iter().map(|t| schema(t.name, t.description, (t.properties)(), t.required)));
+    tools.extend(
+        BROWSER_TOOLS
+            .iter()
+            .map(|t| schema(t.name, t.description, (t.properties)(), t.required)),
+    );
+    tools.extend(
+        ORCHESTRATION_TOOLS
+            .iter()
+            .filter(|tool| {
+                !tool.name.starts_with("memory_") || matches!(context, McpContext::Task(_))
+            })
+            .map(|t| schema(t.name, t.description, (t.properties)(), t.required)),
+    );
+    tools.extend(
+        GIT_TOOLS
+            .iter()
+            .map(|t| schema(t.name, t.description, (t.properties)(), t.required)),
+    );
     tools.push(ask_schema());
     // Todo el texto de una vez y en un solo lugar: el `name` queda pelado (lo prefija la
     // TUI; ponerlo acá daría `controlcode_controlcode_browser_click`) y se prefija el resto
@@ -873,7 +1108,11 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
                     prefix_strings(value, prefix);
                 }
             }
-            let name = object.get("name").and_then(Value::as_str).unwrap_or("").to_string();
+            let name = object
+                .get("name")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
             object.insert("annotations".into(), annotations(&name));
         }
     }
@@ -882,8 +1121,16 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
 
 /// Las del navegador que solo miran: no cambian la página, ni lo que guarda, ni la sesión.
 const BROWSER_READ_ONLY: &[&str] = &[
-    "browser_snapshot", "browser_describe", "browser_marked", "browser_pick", "browser_screenshot",
-    "browser_wait", "browser_layout", "browser_console", "browser_network", "browser_performance",
+    "browser_snapshot",
+    "browser_describe",
+    "browser_marked",
+    "browser_pick",
+    "browser_screenshot",
+    "browser_wait",
+    "browser_layout",
+    "browser_console",
+    "browser_network",
+    "browser_performance",
 ];
 
 /// Las que pueden romper algo que no vuelve solo: correr código arbitrario en la página
@@ -891,8 +1138,13 @@ const BROWSER_READ_ONLY: &[&str] = &[
 /// agente.
 const DESTRUCTIVE: &[&str] = &["browser_eval", "task_cancel"];
 
+/// Si es una de las tools de orquestación (de cualquier poder).
+pub(crate) fn is_orchestration_tool(name: &str) -> bool {
+    ORCHESTRATION_TOOLS.iter().any(|t| t.name == name)
+}
+
 /// Si una tool solo lee: no cambia la página, el repo, el host ni el run.
-fn is_read_only(name: &str) -> bool {
+pub(crate) fn is_read_only(name: &str) -> bool {
     BROWSER_READ_ONLY.contains(&name)
         || ORCHESTRATION_TOOLS.iter().any(|t| t.name == name && t.power == OrchestrationPower::Read)
         || GIT_TOOLS.iter().any(|t| t.name == name && t.read_only)
@@ -922,7 +1174,8 @@ pub(crate) fn annotations(name: &str) -> Value {
 /// Lo que se aprueba solo en las TUIs que piden permiso por tool. Una sola regla para todas
 /// (Claude Code lo recibe en `--allowedTools`, OpenCode como `permission`):
 ///
-/// - el navegador entero: manejar la página del proyecto es para lo que está;
+/// - el navegador, menos subir archivos y correr código (ver [`BROWSER_NEEDS_APPROVAL`]):
+///   manejar la página del proyecto es para lo que está;
 /// - mirar un run y dejar un hecho: no gasta nada;
 /// - preguntarle algo al usuario: pedir permiso para preguntar sería interrumpirlo dos veces;
 /// - leer el git remoto (PRs, issues, repos, CI) y traer (`fetch`).
@@ -930,10 +1183,16 @@ pub(crate) fn annotations(name: &str) -> Value {
 /// Lanzar o parar agentes y escribir en el host (subir, abrir, comentar) lo aprueba la
 /// persona, cada vez.
 pub fn auto_approved(name: &str) -> bool {
-    BROWSER_TOOLS.iter().any(|t| t.name == name)
-        || ORCHESTRATION_TOOLS
-            .iter()
-            .any(|t| t.name == name && matches!(t.power, OrchestrationPower::Read | OrchestrationPower::Note))
+    (BROWSER_TOOLS.iter().any(|t| t.name == name) && !BROWSER_NEEDS_APPROVAL.contains(&name))
+        || ORCHESTRATION_TOOLS.iter().any(|t| {
+            t.name == name
+                && matches!(
+                    t.power,
+                    OrchestrationPower::Read
+                        | OrchestrationPower::Note
+                        | OrchestrationPower::Delivery
+                )
+        })
         || name == ASK_TOOL
         || GIT_TOOLS.iter().any(|t| t.name == name && t.read_only)
 }
@@ -941,7 +1200,10 @@ pub fn auto_approved(name: &str) -> bool {
 /// Las tools de una tab (sin la de permisos, que es solo de las tareas de fondo), con si se
 /// aprueban solas.
 fn tab_tools() -> impl Iterator<Item = (&'static str, bool)> {
-    tool_names().into_iter().filter(|n| *n != TOOL_NAME).map(|n| (n, auto_approved(n)))
+    tool_names()
+        .into_iter()
+        .filter(|n| *n != TOOL_NAME)
+        .map(|n| (n, auto_approved(n)))
 }
 
 /// `ask_user`: la única tool que va para los dos lados —una tab y una tarea de la flota—
@@ -999,7 +1261,11 @@ where
     }
     match send("user.ask", payload) {
         Ok(data) => {
-            let text = data.get("text").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| data.to_string());
+            let text = data
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| data.to_string());
             json!({ "content": [{ "type": "text", "text": text }] })
         }
         Err(e) => tool_error(&e),
@@ -1054,7 +1320,11 @@ where
     payload["args"] = arguments;
     match send("forge.run", payload) {
         Ok(data) => {
-            let text = data.get("text").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| data.to_string());
+            let text = data
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| data.to_string());
             json!({ "content": [{ "type": "text", "text": text }] })
         }
         Err(e) => tool_error(&e),
@@ -1063,7 +1333,11 @@ where
 
 /// Las tools de git que solo leen: se aprueban solas, como las del navegador.
 pub fn git_read_tool_names() -> Vec<String> {
-    GIT_TOOLS.iter().filter(|t| t.read_only).map(|t| format!("mcp__{SERVER_NAME}__{}", t.name)).collect()
+    GIT_TOOLS
+        .iter()
+        .filter(|t| t.read_only)
+        .map(|t| format!("mcp__{SERVER_NAME}__{}", t.name))
+        .collect()
 }
 
 /// Le pasa el pedido al navegador de la app y devuelve su texto.
@@ -1081,7 +1355,11 @@ where
 
     match send("browser.run", payload) {
         Ok(data) => {
-            let text = data.get("text").and_then(Value::as_str).map(str::to_string).unwrap_or_else(|| data.to_string());
+            let text = data
+                .get("text")
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| data.to_string());
             json!({ "content": [{ "type": "text", "text": text }] })
         }
         // Un error del navegador es información para el agente ("no hay elemento e12",
@@ -1158,7 +1436,11 @@ pub fn opencode_config_content(program: &str, args: &[&str], prefix: &str) -> St
 ///
 /// `None` si no hay `ccode` al lado de la app (una build de desarrollo sin el binario): el
 /// agente arranca igual, solo que sin estas herramientas.
-pub fn write_config(app: &tauri::AppHandle, name: &str, args: &[&str]) -> Option<std::path::PathBuf> {
+pub fn write_config(
+    app: &tauri::AppHandle,
+    name: &str,
+    args: &[&str],
+) -> Option<std::path::PathBuf> {
     let ccode = crate::ipc::install::source_binary(app)?;
     let dir = dirs::home_dir()?.join(".controlcode").join("mcp");
     std::fs::create_dir_all(&dir).ok()?;
@@ -1191,15 +1473,24 @@ pub fn sweep_configs(db: &crate::database::DbConnection) -> usize {
 
 /// El barrido sobre una carpeta concreta, para poder probarlo sin tocar el `HOME` real.
 pub(crate) fn sweep_configs_in(dir: &std::path::Path, conn: &rusqlite::Connection) -> usize {
-    let Ok(entries) = std::fs::read_dir(dir) else { return 0 };
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return 0;
+    };
     let alive = |table: &str, id: &str| -> bool {
-        conn.query_row(&format!("SELECT 1 FROM {table} WHERE id = ?1"), [id], |_| Ok(())).is_ok()
+        conn.query_row(
+            &format!("SELECT 1 FROM {table} WHERE id = ?1"),
+            [id],
+            |_| Ok(()),
+        )
+        .is_ok()
     };
 
     let mut gone = 0;
     for entry in entries.flatten() {
         let name = entry.file_name().to_string_lossy().into_owned();
-        let Some(stem) = name.strip_suffix(".json") else { continue };
+        let Some(stem) = name.strip_suffix(".json") else {
+            continue;
+        };
         // La carpeta la escribe solo la app: un archivo sin tab ni tarea viva no lo apunta
         // nadie. Los de una tarea llevan su id pelado, que es como los escribe el supervisor.
         let keep = match stem.strip_prefix("tab-") {
@@ -1240,7 +1531,11 @@ pub struct TabMcp {
 /// falla. Los ids son UUID, pero se filtra igual: un nombre de archivo no se construye con
 /// algo que vino de afuera sin mirarlo.
 fn tab_config_name(tab_id: &str) -> String {
-    let safe: String = tab_id.chars().filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_').take(64).collect();
+    let safe: String = tab_id
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')
+        .take(64)
+        .collect();
     format!("tab-{safe}")
 }
 
@@ -1256,7 +1551,9 @@ pub fn tab_browser_mcp(
     // Una TUI custom, o una de fábrica a la que todavía no se le verificó cómo enchufarle
     // un MCP: la tab arranca igual, sin las tools. Mandarle el formato de otra no falla al
     // arrancar — arranca sin nada y sin decir por qué.
-    let style = crate::agents::agent_def(&agent_id).map(|a| a.mcp).unwrap_or(McpStyle::None);
+    let style = crate::agents::adapter_for(&agent_id)
+        .map(|adapter| adapter.def().mcp)
+        .unwrap_or(McpStyle::None);
     if style == McpStyle::None {
         return None;
     }
@@ -1265,7 +1562,10 @@ pub fn tab_browser_mcp(
     // de qué agente viene cada pedido, y por lo tanto a cuál contestarle con SU navegador.
     let args = ["mcp", "--cwd", &cwd, "--tab", &tab_id];
     let prefix = tool_prefix(style);
-    let mut mcp = TabMcp { tool_prefix: prefix.clone(), ..Default::default() };
+    let mut mcp = TabMcp {
+        tool_prefix: prefix.clone(),
+        ..Default::default()
+    };
 
     match style {
         McpStyle::ClaudeFlags => {

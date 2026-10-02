@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button, Tooltip } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
+import { accountProblemText } from "@/features/accounts/problem";
 
 import { isLive } from "./fleetOrder";
 import { PermissionCard } from "./PermissionCard";
@@ -47,7 +48,7 @@ const BADGE: Record<TaskStatus, string> = {
   done: "text-gray-500 dark:text-white/40 bg-gray-200/70 dark:bg-white/8",
   failed: "text-red-600 dark:text-red-400 bg-red-500/12",
   cancelled: "text-gray-500 dark:text-white/35 bg-gray-200/70 dark:bg-white/8",
-  handed_off: "text-blue-700 dark:text-blue-300 bg-blue-500/12",
+  handed_off: "text-accent-700 dark:text-accent-300 bg-accent-500/12",
 };
 
 /**
@@ -97,6 +98,12 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
               <span className="shrink-0 px-1 rounded text-[9px] font-bold uppercase tracking-wider
                 text-violet-700 dark:text-violet-300 bg-violet-500/15">
                 {t("fleet.card.lead")}
+              </span>
+            )}
+            {task.functionalRole && (
+              <span className="shrink-0 px-1 rounded text-[9px] font-medium
+                text-sky-700 dark:text-sky-300 bg-sky-500/10">
+                {t(`squads.roleNames.${task.functionalRole}`, { defaultValue: task.functionalRole })}
               </span>
             )}
             {task.planKey && (
@@ -161,7 +168,7 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
         {task.error && (
           <span className="line-clamp-2 font-mono text-[10.5px] leading-relaxed
             text-red-600 dark:text-red-400">
-            {task.error}
+            {accountProblemText(task.error, t)}
           </span>
         )}
       </div>

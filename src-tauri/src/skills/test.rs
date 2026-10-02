@@ -458,17 +458,21 @@ fn full_lifecycle_install_attach_edit_detach_delete() {
     let expected_link = links_dir_for(&tab_cwd.to_string_lossy(), "claude-code")
         .unwrap()
         .join(slug_from_source_path(&info.source_path));
-    let link_meta =
-        std::fs::symlink_metadata(&expected_link).expect("el symlink debe existir en disco");
     assert!(
-        link_meta.file_type().is_symlink(),
-        "debe ser un symlink, no una copia"
+        std::fs::symlink_metadata(&expected_link).is_ok(),
+        "el montaje debe existir en disco"
     );
+    assert!(super::is_mount(&expected_link), "symlink o junction, no una copia");
     let target = std::fs::read_link(&expected_link).unwrap();
+    assert!(
+        super::same_path(&target, Path::new(&info.source_path)),
+        "el montaje debe apuntar a la copia global: {target:?}"
+    );
+    // Escrito después de montar: si fuera una copia, este archivo no aparecería.
+    std::fs::write(Path::new(&info.source_path).join("marca-de-origen.txt"), "vivo").unwrap();
     assert_eq!(
-        target,
-        Path::new(&info.source_path),
-        "el symlink debe apuntar a la copia global"
+        std::fs::read_to_string(expected_link.join("marca-de-origen.txt")).unwrap(),
+        "vivo"
     );
 
     // Idempotencia: attachear de nuevo no debe fallar ni duplicar el link.
@@ -510,7 +514,7 @@ fn full_lifecycle_install_attach_edit_detach_delete() {
     );
 
     // 7) simular un symlink roto borrándolo a mano por fuera de la app.
-    std::fs::remove_file(&expected_link).unwrap();
+    super::remove_mount(&expected_link).unwrap();
     let health = check_symlinks_health(workspace_id.clone(), state.clone()).unwrap();
     assert_eq!(health.len(), 1);
     assert_eq!(health[0].issue, "missing");
@@ -701,7 +705,7 @@ fn reconcile_leaves_user_owned_entries_alone() {
     // Symlink a un destino fuera del directorio global de skills.
     let elsewhere = temp_dir("fuera-del-dir-global");
     let foreign_link = links_dir.join("skill-externa");
-    symlink::symlink_dir(&elsewhere, &foreign_link).unwrap();
+    super::mount_dir(&elsewhere, &foreign_link).unwrap();
 
     let source = temp_dir("source-skill");
     write_source_skill(&source);

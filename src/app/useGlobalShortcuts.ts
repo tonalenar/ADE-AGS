@@ -36,6 +36,12 @@ export function useGlobalShortcuts() {
       // en vez de volver a suscribirse cada vez que se abre o se cierra una tab.
       const { tabs, activeTabId, activateTab } = useTabsStore.getState();
 
+      if (shortcut.action.kind === "openPalette") {
+        const { paletteOpen, setPaletteOpen } = useUiStore.getState();
+        setPaletteOpen(!paletteOpen);
+        return;
+      }
+
       if (shortcut.action.kind === "openSettings") {
         // Interruptor, igual que los de sección: si ya está abierto, se cierra.
         const { settingsOpen, setSettingsOpen } = useUiStore.getState();

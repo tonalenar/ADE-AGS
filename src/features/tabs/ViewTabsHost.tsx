@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useRef, useState } from "react";
 import { useLocation } from "react-router-dom";
 
-import { BrowserTab } from "@/features/browser/BrowserTab";
-import { DiffTab } from "@/features/editor/DiffTab";
-import { FileTab } from "@/features/editor/FileTab";
+// Se cargan con la primera tab de cada tipo que se muestra: el editor (CodeMirror) y el
+// navegador pesan más de un megabyte y la mayoría de las sesiones arrancan solo con
+// terminales.
+const BrowserTab = lazy(() => import("@/features/browser/BrowserTab").then((m) => ({ default: m.BrowserTab })));
+const DiffTab = lazy(() => import("@/features/editor/DiffTab").then((m) => ({ default: m.DiffTab })));
+const FileTab = lazy(() => import("@/features/editor/FileTab").then((m) => ({ default: m.FileTab })));
 import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { viewKey } from "@/features/tabs/layout/layoutTree";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -69,9 +72,11 @@ export function ViewTabsHost() {
             }}
             onPointerDownCapture={() => placement?.groupId && focusGroup(placement.groupId)}
           >
-            {view.kind === "file" && <FileTab view={view} active={shown && onWorkspace} focused={focused} />}
-            {view.kind === "diff" && <DiffTab view={view} active={shown && onWorkspace} />}
-            {view.kind === "browser" && <BrowserTab view={view} active={focused} />}
+            <Suspense fallback={null}>
+              {view.kind === "file" && <FileTab view={view} active={shown && onWorkspace} focused={focused} />}
+              {view.kind === "diff" && <DiffTab view={view} active={shown && onWorkspace} />}
+              {view.kind === "browser" && <BrowserTab view={view} active={focused} />}
+            </Suspense>
           </div>
         );
       })}

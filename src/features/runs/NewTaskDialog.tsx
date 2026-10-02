@@ -12,6 +12,7 @@ import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { getRoster, previewRoute, type RouteInput, type StartOrchestrationInput, type StartTaskInput } from "./ipc";
 import { COMPLEXITIES, describeAssignment, launchableAgents } from "./routingView";
+import { providerDisabled } from "./leadProviders";
 import type { Assignment, Complexity, Roster } from "./types";
 
 /** Cómo se elige el modelo: por complejidad (lo decide el ruteo) o uno fijo. */
@@ -80,7 +81,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
 
   // Las TUIs que se ofrecen salen del roster: "se sabe correr sin terminal" es algo que
   // decide el backend (tiene o no adaptador), no una lista copiada acá.
-  const agents = launchableAgents(roster);
+  const agents = launchableAgents(roster).filter((agent) => !providerDisabled(agent, kind === "orchestrate"));
   const agent = agents.find((a) => a.agentId === agentId);
   const models = useMemo(
     () => (agent?.models ?? []).filter((m) => !m.unavailable && m.toolcall !== false),
@@ -206,7 +207,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
             className="w-full resize-none rounded-lg px-2.5 py-2 outline-none
               bg-gray-100 dark:bg-white/5
               border border-gray-200 dark:border-white/10
-              focus:border-blue-400 dark:focus:border-blue-500
+              focus:border-accent-400 dark:focus:border-accent-500
               text-[12px] leading-relaxed text-gray-800 dark:text-gray-200"
           />
         </Field>
@@ -388,7 +389,7 @@ function Field({ label, hint, group = false, children }: {
 const INPUT = `w-full rounded-lg px-2.5 h-8 outline-none text-[12px]
   bg-gray-100 dark:bg-white/5
   border border-gray-200 dark:border-white/10
-  focus:border-blue-400 dark:focus:border-blue-500
+  focus:border-accent-400 dark:focus:border-accent-500
   text-gray-800 dark:text-gray-200`;
 
 function firstLine(s: string): string {

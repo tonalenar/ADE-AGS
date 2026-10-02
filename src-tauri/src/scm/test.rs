@@ -225,6 +225,10 @@ fn temp_repo(label: &str) -> std::path::PathBuf {
     git_in(&dir, &["config", "user.email", "test@controlcode.dev"]);
     git_in(&dir, &["config", "user.name", "Control Code"]);
     git_in(&dir, &["config", "commit.gpgsign", "false"]);
+    // El git del sistema puede tener `core.autocrlf=true`. El producto delega en git;
+    // el repo de prueba fija LF para que el byte que se lee no dependa de esa config.
+    git_in(&dir, &["config", "core.autocrlf", "false"]);
+    git_in(&dir, &["config", "core.eol", "lf"]);
     dir
 }
 
@@ -555,6 +559,101 @@ async fn publica_una_rama_creada_desde_una_remota() {
     assert!(after.published);
     // Y el siguiente push ya es uno común.
     assert!(super::commands::push(&root, &[]).unwrap().starts_with("Pushed"));
+
+    std::fs::remove_dir_all(origin).ok();
+    std::fs::remove_dir_all(local).ok();
+}
+
+// ── git con el token de una cuenta ───────────────────────────────
+
+/// Un hook que deja una marca si git lo llega a correr.
+fn hook_que_marca(repo: &std::path::Path, hook: &str, marker: &std::path::Path) {
+    let path = repo.join(".git").join("hooks").join(hook);
+    let target = marker.display().to_string().replace('\\', "/");
+    std::fs::write(&path, format!("#!/bin/sh\ntouch \"{target}\"\n")).unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+}
+
+#[test]
+fn con_token_en_el_entorno_git_no_corre_hooks_del_repo() {
+    let dir = temp_repo("token-hooks");
+    let root = dir.to_string_lossy().to_string();
+    let marker = std::env::temp_dir().join(format!("cc-scm-hook-marca-{}", std::process::id()));
+    let _ = std::fs::remove_file(&marker);
+    hook_que_marca(&dir, "pre-commit", &marker);
+    let token = [("CC_TOKEN_DE_PRUEBA".to_string(), "secreto".to_string())];
+    let commit = ["commit", "--allow-empty", "-q", "-m", "x"];
+
+    super::git::network_with(&root, &commit, &token, super::git::LOCAL).unwrap();
+    assert!(!marker.exists(), "el hook del repo corrió con el token en el entorno");
+
+    // Sin token es el git de siempre: el hook corre (y prueba que el de arriba era real).
+    super::git::network_with(&root, &commit, &[], super::git::LOCAL).unwrap();
+    assert!(marker.exists(), "sin token el hook del repo tendría que correr");
+
+    let _ = std::fs::remove_file(&marker);
+    std::fs::remove_dir_all(dir).ok();
+}
+
+#[test]
+fn con_token_en_el_entorno_git_solo_habla_https() {
+    let origin = temp_repo("token-origen");
+    git_in(&origin, &["commit", "--allow-empty", "-q", "-m", "base"]);
+    let local = temp_repo("token-local");
+    let root = local.to_string_lossy().to_string();
+    let url = origin.to_string_lossy().to_string();
+    let token = [("CC_TOKEN_DE_PRUEBA".to_string(), "secreto".to_string())];
+
+    // Un remoto local (o ssh, o ext) lanzaría un programa elegido por la config del repo.
+    assert!(super::git::network(&root, &["fetch", "--", &url], &token).is_err());
+    super::git::network(&root, &["fetch", "--", &url], &[]).unwrap();
+
+    std::fs::remove_dir_all(origin).ok();
+    std::fs::remove_dir_all(local).ok();
+}
+
+#[test]
+fn el_pull_integra_como_git_segun_la_config() {
+    let origin = temp_repo("pull-origen");
+    std::fs::write(origin.join("a"), "1").unwrap();
+    git_in(&origin, &["add", "-A"]);
+    git_in(&origin, &["commit", "-q", "-m", "base"]);
+    let local = std::env::temp_dir().join(format!("cc-scm-pull-local-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&local);
+    git_in(&origin, &["clone", "-q", &origin.to_string_lossy(), &local.to_string_lossy()]);
+    git_in(&local, &["config", "user.email", "test@controlcode.dev"]);
+    git_in(&local, &["config", "user.name", "Control Code"]);
+    git_in(&local, &["config", "commit.gpgsign", "false"]);
+    let root = local.to_string_lossy().to_string();
+
+    // Solo detrás: avanza.
+    git_in(&origin, &["commit", "--allow-empty", "-q", "-m", "remoto 1"]);
+    git_in(&local, &["fetch", "-q", "origin"]);
+    super::commands::integrate_upstream(&root, "main").unwrap();
+
+    // La config va fija en el repo: Git for Windows trae `pull.rebase=false` en la del
+    // sistema, y el resultado no puede depender de la máquina.
+    git_in(&local, &["config", "pull.rebase", "false"]);
+    git_in(&local, &["config", "pull.ff", "only"]);
+
+    // Divergentes con `pull.ff=only`: no mezcla.
+    git_in(&origin, &["commit", "--allow-empty", "-q", "-m", "remoto 2"]);
+    git_in(&local, &["commit", "--allow-empty", "-q", "-m", "local"]);
+    git_in(&local, &["fetch", "-q", "origin"]);
+    assert!(super::commands::integrate_upstream(&root, "main").is_err());
+
+    // Con `pull.rebase=false` y sin `pull.ff=only`, merge.
+    git_in(&local, &["config", "pull.ff", "true"]);
+    super::commands::integrate_upstream(&root, "main").unwrap();
+    let parents = std::process::Command::new("git")
+        .args(["-C", &root, "rev-list", "--parents", "-n", "1", "HEAD"])
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&parents.stdout).split_whitespace().count(), 3, "no quedó un merge");
 
     std::fs::remove_dir_all(origin).ok();
     std::fs::remove_dir_all(local).ok();

@@ -1,4 +1,6 @@
 /** Una tarjeta de la consola: un agente headless con su trabajo. */
+import type { RunSquadMember } from "@/features/squads/types";
+
 export interface Task {
   id: string;
   runId: string;
@@ -7,6 +9,7 @@ export interface Task {
   agentId: string;
   accountId: string | null;
   model: string | null;
+  reasoningEffort?: string | null;
   cwd: string;
   budgetUsd: number | null;
   status: TaskStatus;
@@ -31,6 +34,8 @@ export interface Task {
   routeNote: string | null;
   /** `lead` reparte el objetivo; `worker` es una tarea de su plan. `null` = lanzada a mano. */
   role: TaskRole | null;
+  /** Functional work category, independent from the Lead/Worker execution role. */
+  functionalRole?: string | null;
   /** El nombre corto con que el plan se refiere a ella (`api`, `tests`). */
   planKey: string | null;
   /** Quién la delegó. */
@@ -41,8 +46,13 @@ export interface Task {
   resultSchema: string | null;
   /** Por qué falló el intento anterior. */
   lastError: string | null;
+  /** Lo que dejó el agente anterior si la tarea cambió de manos. `null` = nunca cambió. */
+  handoff: string | null;
+  structuredHandoff?: StructuredHandoff | null;
   /** Las tareas que tienen que terminar bien antes de que esta arranque. */
   dependsOn: string[];
+  /** La cuenta la eligió el ruteo y se puede cambiar por otra con cupo. `false` = fijada. */
+  autoAccount?: boolean;
   startedAt: number | null;
   endedAt: number | null;
   createdAt: number;
@@ -69,6 +79,11 @@ export interface Run {
   spentUsd: number;
   createdAt: number;
   endedAt: number | null;
+  /** La misión que este run intenta cumplir. `null` = lanzado a mano desde la flota. */
+  missionId: string | null;
+  squadId?: string | null;
+  squadName?: string | null;
+  squadMembers?: RunSquadMember[];
 }
 
 /** Algo que un agente del run les dejó escrito a los demás. */
@@ -162,8 +177,14 @@ export interface RosterModel {
   costIn: number | null;
   costOut: number | null;
   context: number | null;
+  source: string | null;
+  availability: "available" | "unavailable" | "unknown";
+  reasoningLevels: string[] | null;
+  defaultReasoning: string | null;
   unavailable: string | null;
 }
+
+export type ModelDiscoveryState = "available" | "unavailable" | "unsupported";
 
 export interface RosterAccount {
   /** `null` = la del sistema. */
@@ -174,9 +195,12 @@ export interface RosterAccount {
   loggedIn: boolean;
   quota: Quota | null;
   running: number;
+  models: RosterModel[];
+  modelDiscovery: ModelDiscoveryState;
 }
 
 export interface RosterAgent {
+  capabilities: { headless: boolean; mcp: boolean; orchestration: boolean };
   agentId: string;
   label: string;
   installed: boolean;
@@ -184,6 +208,7 @@ export interface RosterAgent {
   launchable: boolean;
   unavailable: string | null;
   models: RosterModel[];
+  modelDiscovery: ModelDiscoveryState;
   accounts: RosterAccount[];
 }
 
@@ -204,8 +229,21 @@ export interface Assignment {
   agentId: string;
   /** `null` = el de siempre de la TUI. */
   model: string | null;
+  reasoningEffort?: string | null;
   /** `null` = la del sistema. */
   accountId: string | null;
   routedBy: RoutedBy;
   notes: string[];
+}
+
+/** The nested delivery uses the versioned snake_case wire schema; Task uses camelCase. */
+export interface StructuredHandoff {
+  version: 1;
+  summary: string;
+  changed_files: { path: string; description?: string }[];
+  tests: { command: string; status: "passed" | "failed" | "not_run"; notes?: string }[];
+  decisions: string[];
+  risks: string[];
+  next_steps: string[];
+  artifacts: { label: string; path: string }[];
 }

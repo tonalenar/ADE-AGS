@@ -58,6 +58,8 @@ pub enum DecidedBy {
     Timeout,
     /// La tarea se canceló (o la app se cerró) mientras esperaba.
     Cancelled,
+    /// Lo que la tarea no puede hacer por su papel (ver `policy`). No se pregunta a nadie.
+    Policy,
 }
 
 impl DecidedBy {
@@ -67,6 +69,7 @@ impl DecidedBy {
             DecidedBy::Rule => "rule",
             DecidedBy::Timeout => "timeout",
             DecidedBy::Cancelled => "cancelled",
+            DecidedBy::Policy => "policy",
         }
     }
 }
@@ -229,6 +232,11 @@ pub fn resolve(
     input: serde_json::Value,
     timeout: Duration,
 ) -> Verdict {
+    // Antes que las reglas y sin encolar: lo que un lead no puede hacer no se le pregunta a
+    // nadie, así que ni un "Allow" ni una regla recordada pueden cambiar su papel.
+    if is_coordinator(db, task_id) && !super::policy::lead_may_use(tool_name) {
+        return Verdict { allow: false, reason: Some(super::policy::LEAD_DENIED.into()), by: DecidedBy::Policy };
+    }
     let rules = rules_for_task(db, task_id);
     // Las reglas y el "recordar" miran las rutas como si la tarea corriera en el proyecto,
     // no en su worktree; el registro guarda la ruta REAL que tocó el agente, que es lo que
@@ -307,6 +315,16 @@ fn in_project_terms(db: &DbConnection, task_id: &str, input: &serde_json::Value)
     match super::worktrees::repo_root_from(project, task_cwd, root) {
         Some(repo) => super::worktrees::to_project_paths(input, root, &repo),
         None => input.clone(),
+    }
+}
+
+/// Si la tarea es un lead. Una que no se puede leer se trata como lead: ante la duda, no toca.
+fn is_coordinator(db: &DbConnection, task_id: &str) -> bool {
+    let Ok(conn) = db.lock() else { return true };
+    match store::task_by_id(&conn, task_id) {
+        Ok(Some(task)) => super::policy::is_coordinator(&task),
+        Ok(None) => false,
+        Err(_) => true,
     }
 }
 

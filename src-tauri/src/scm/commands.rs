@@ -215,16 +215,109 @@ pub(crate) enum Sync {
     Push,
 }
 
+///
+/// El token de la cuenta viaja solo en el proceso que habla con el remoto de esa cuenta, y
+/// ese proceso no corre nada del repo (ver `git::network_with`). Por eso el fetch va
+/// remoto por remoto y el pull se parte en dos: traer (con token) e integrar (local, sin
+/// token), donde sí corren los hooks, filtros y drivers del repo.
 pub(crate) async fn sync(app: &tauri::AppHandle, root: String, op: Sync) -> Result<String, ScmError> {
-    let env = crate::forge::git_env(app, &root).await;
-    blocking(move || match op {
-        Sync::Fetch => network(&root, &["fetch", "--all", "--prune"], &env).map(|_| "Fetched.".to_string()),
-        // `--no-edit`: si el pull termina en un merge, git abriría un editor para el
-        // mensaje, y acá no hay editor que abrir.
-        Sync::Pull => network(&root, &["pull", "--no-edit"], &env),
-        Sync::Push => push(&root, &env),
-    })
-    .await
+    match op {
+        Sync::Fetch => {
+            let r = root.clone();
+            let remotes = blocking(move || Ok(parse_remotes(&run_text(&r, &["remote", "-v"], LOCAL)?))).await?;
+            let mut first_error = None;
+            for remote in remotes {
+                let env = crate::forge::git_env_for_remote(app, &root, &remote.name, false).await;
+                let r = root.clone();
+                let fetched = blocking(move || network(&r, &["fetch", "--prune", "--", &remote.name], &env)).await;
+                if let Err(e) = fetched {
+                    first_error.get_or_insert(e);
+                }
+            }
+            first_error.map_or_else(|| Ok("Fetched.".to_string()), Err)
+        }
+        Sync::Pull => {
+            let r = root.clone();
+            let (branch, remote) = blocking(move || upstream_remote(&r)).await?;
+            let env = crate::forge::git_env_for_remote(app, &root, &remote, false).await;
+            blocking(move || {
+                network(&root, &["fetch", "--", &remote], &env)?;
+                integrate_upstream(&root, &branch)
+            })
+            .await
+        }
+        Sync::Push => {
+            let r = root.clone();
+            let remote = blocking(move || push_remote(&r)).await?;
+            let env = crate::forge::git_env_for_remote(app, &root, &remote, true).await;
+            blocking(move || push(&root, &env)).await
+        }
+    }
+}
+
+fn config_value(root: &str, key: &str) -> Option<String> {
+    run_text(root, &["config", "--get", key], LOCAL).ok().map(|s| s.trim().to_string()).filter(|s| !s.is_empty())
+}
+
+fn current_branch(root: &str) -> Result<String, ScmError> {
+    run_text(root, &["symbolic-ref", "--short", "-q", "HEAD"], LOCAL)
+        .ok()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .ok_or_else(|| ScmError::Git("No hay una rama activa (HEAD desprendido)".to_string()))
+}
+
+/// La rama actual y el remoto de su upstream: lo que `git pull` traería.
+fn upstream_remote(root: &str) -> Result<(String, String), ScmError> {
+    let branch = current_branch(root)?;
+    let remote = config_value(root, &format!("branch.{branch}.remote"))
+        .ok_or_else(|| ScmError::Git(format!("La rama {branch} no sigue a ninguna rama remota")))?;
+    Ok((branch, remote))
+}
+
+/// La segunda mitad de `git pull`, ya con el upstream traído: rebase o merge según la
+/// configuración del usuario, como lo decidiría git. Sin configuración, solo avanza si se
+/// puede (git ≥ 2.33 también se niega a mezclar ramas divergentes sin que se lo pidan).
+pub(super) fn integrate_upstream(root: &str, branch: &str) -> Result<String, ScmError> {
+    let rebase = config_value(root, &format!("branch.{branch}.rebase"))
+        .or_else(|| config_value(root, "pull.rebase"))
+        .map(|v| v.to_lowercase());
+    match rebase.as_deref() {
+        Some("merges" | "m") => return run_text(root, &["rebase", "--rebase-merges", "@{u}"], COMMIT),
+        Some("true" | "yes" | "on" | "1" | "interactive" | "i") => {
+            return run_text(root, &["rebase", "@{u}"], COMMIT);
+        }
+        _ => {}
+    }
+    let ff = config_value(root, "pull.ff").map(|v| v.to_lowercase());
+    let mode = match (rebase.is_some(), ff.as_deref()) {
+        (_, Some("only")) => "--ff-only",
+        (_, Some("false" | "no" | "off" | "0")) => "--no-ff",
+        (_, Some(_)) | (true, None) => "--ff",
+        (false, None) => "--ff-only",
+    };
+    // `--no-edit`: si termina en un merge, git abriría un editor para el mensaje, y acá no
+    // hay editor que abrir.
+    run_text(root, &["merge", "--no-edit", mode, "@{u}"], COMMIT)
+}
+
+/// El remoto al que va a ir `push`: el que git elige para una rama publicada
+/// (`pushRemote`, `remote.pushDefault`, su upstream) o aquel en el que se la publicaría.
+pub(super) fn push_remote(root: &str) -> Result<String, ScmError> {
+    let raw = run_text(root, &["status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"], LOCAL)?;
+    let info = parse_status_v2(&raw);
+    let Some(branch) = info.branch else {
+        return Err(ScmError::Git("No hay una rama activa (HEAD desprendido)".to_string()));
+    };
+    let remotes = parse_remotes(&run_text(root, &["remote", "-v"], LOCAL)?);
+    let chosen = if is_published(info.upstream.as_deref(), &branch, &remotes) {
+        config_value(root, &format!("branch.{branch}.pushRemote"))
+            .or_else(|| config_value(root, "remote.pushDefault"))
+            .or_else(|| config_value(root, &format!("branch.{branch}.remote")))
+    } else {
+        publish_remote(info.upstream.as_deref(), &remotes).map(|r| r.name.clone())
+    };
+    chosen.ok_or_else(|| ScmError::Git("El repo no tiene ningún remoto al que subir".to_string()))
 }
 
 /// Push de la rama actual. Si todavía no tiene upstream la publica en `origin` (o en el
@@ -527,17 +620,22 @@ pub async fn scm_create_tag(
 /// Sube un tag al remoto (`origin`, o el único que haya), con la cuenta de la app. En un
 /// repo con un workflow que publica al llegar un tag, esto ES sacar la release.
 pub(crate) async fn push_tag(app: &tauri::AppHandle, root: String, name: String) -> Result<String, ScmError> {
-    let env = crate::forge::git_env(app, &root).await;
-    blocking(move || {
-        check_tag_name(&root, &name)?;
-        let remotes = parse_remotes(&run_text(&root, &["remote", "-v"], LOCAL)?);
-        let remote = remotes
+    let (r, n) = (root.clone(), name.clone());
+    let remote = blocking(move || {
+        check_tag_name(&r, &n)?;
+        let remotes = parse_remotes(&run_text(&r, &["remote", "-v"], LOCAL)?);
+        remotes
             .iter()
             .find(|r| r.name == "origin")
             .or_else(|| remotes.first())
-            .ok_or_else(|| ScmError::Git("El repo no tiene ningún remoto al que subir".to_string()))?;
-        network(&root, &["push", &remote.name, &format!("refs/tags/{name}")], &env)?;
-        Ok(format!("Pushed tag {name} to {}.", remote.name))
+            .map(|r| r.name.clone())
+            .ok_or_else(|| ScmError::Git("El repo no tiene ningún remoto al que subir".to_string()))
+    })
+    .await?;
+    let env = crate::forge::git_env_for_remote(app, &root, &remote, true).await;
+    blocking(move || {
+        network(&root, &["push", &remote, &format!("refs/tags/{name}")], &env)?;
+        Ok(format!("Pushed tag {name} to {remote}."))
     })
     .await
 }

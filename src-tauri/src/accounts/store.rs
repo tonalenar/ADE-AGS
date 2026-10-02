@@ -67,6 +67,25 @@ pub struct AgentAccount {
     /// Mail (u otro identificador) de la cuenta, cuando la TUI lo expone.
     pub label: Option<String>,
     pub created_at: i64,
+    /// `login` (el login hecho en la TUI) o `api_key`.
+    pub kind: AccountKind,
+    /// Endpoint compatible en vez del oficial (solo cuentas `api_key` de Claude Code).
+    pub base_url: Option<String>,
+    /// Los últimos caracteres de la key, para reconocerla. Nunca la key.
+    pub key_hint: Option<String>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountKind {
+    Login,
+    ApiKey,
+}
+
+impl AccountKind {
+    pub fn parse(raw: &str) -> Self {
+        if raw == "api_key" { AccountKind::ApiKey } else { AccountKind::Login }
+    }
 }
 
 /// Una TUI que soporta cuentas múltiples, con el dato de si está instalada.
@@ -79,27 +98,82 @@ pub struct AccountCapableAgent {
     pub installed: bool,
 }
 
-pub(super) fn row_to_account(
-    id: String,
-    agent_id: String,
-    name: String,
-    dir: String,
-    created_at: i64,
-) -> Option<AgentAccount> {
-    let spec = spec_for(&agent_id)?;
-    let path = PathBuf::from(&dir);
-    let (logged_in, label) = read_identity(&path, spec);
+/// Una fila de `agent_accounts`, como la lee [`row_to_account`].
+pub(super) struct AccountRow {
+    pub id: String,
+    pub agent_id: String,
+    pub name: String,
+    pub dir: String,
+    pub created_at: i64,
+    pub kind: AccountKind,
+    pub base_url: Option<String>,
+    pub key_hint: Option<String>,
+}
+
+/// Las columnas que espera [`AccountRow::from_row`], en ese orden.
+pub(super) const ACCOUNT_COLUMNS: &str = "id, agent_id, name, dir, created_at, kind, base_url, key_hint";
+
+impl AccountRow {
+    pub(super) fn from_row(row: &rusqlite::Row) -> rusqlite::Result<Self> {
+        Ok(AccountRow {
+            id: row.get(0)?,
+            agent_id: row.get(1)?,
+            name: row.get(2)?,
+            dir: row.get(3)?,
+            created_at: row.get(4)?,
+            kind: AccountKind::parse(&row.get::<_, String>(5)?),
+            base_url: row.get(6)?,
+            key_hint: row.get(7)?,
+        })
+    }
+}
+
+pub(super) fn row_to_account(row: AccountRow) -> Option<AgentAccount> {
+    let spec = spec_for(&row.agent_id)?;
+    let path = PathBuf::from(&row.dir);
+    let (marker_logged_in, label) = read_identity(&path, spec);
+    // Una cuenta de Claude Code por API key no deja marcador de login: está "lista" si la
+    // key sigue en el llavero. Codex sí lo deja (`auth.json`), y se lee como siempre.
+    let logged_in = match (row.kind, row.agent_id.as_str()) {
+        (AccountKind::ApiKey, "claude-code") => super::secrets::load(&row.id).is_some(),
+        _ => marker_logged_in,
+    };
+    let label = match row.kind {
+        AccountKind::ApiKey => Some(match (&row.base_url, &row.key_hint) {
+            (Some(url), Some(hint)) => format!("API key {hint} · {url}"),
+            (None, Some(hint)) => format!("API key {hint}"),
+            (Some(url), None) => format!("API key · {url}"),
+            (None, None) => "API key".to_string(),
+        }),
+        AccountKind::Login => label,
+    };
     Some(AgentAccount {
-        id,
-        agent_id,
-        name,
-        dir,
+        id: row.id,
+        agent_id: row.agent_id,
+        name: row.name,
+        dir: row.dir,
         env_var: spec.env_var.to_string(),
         login_command: spec.login_command.to_string(),
         logged_in,
         label,
-        created_at,
+        created_at: row.created_at,
+        kind: row.kind,
+        base_url: row.base_url,
+        key_hint: row.key_hint,
     })
+}
+
+/// Las variables con las que una cuenta `api_key` de Claude Code se autentica. Sin gateway,
+/// `ANTHROPIC_API_KEY` (cabecera `x-api-key`); con gateway, `ANTHROPIC_AUTH_TOKEN` (Bearer,
+/// que es lo que piden OpenRouter y los proxies compatibles) más `ANTHROPIC_BASE_URL`.
+pub(super) fn claude_key_env(key: &str, base_url: Option<&str>) -> HashMap<String, String> {
+    match base_url {
+        None => HashMap::from([("ANTHROPIC_API_KEY".to_string(), key.to_string())]),
+        Some(url) => HashMap::from([
+            ("ANTHROPIC_AUTH_TOKEN".to_string(), key.to_string()),
+            ("ANTHROPIC_BASE_URL".to_string(), url.to_string()),
+        ]),
+    }
 }
 
 /// Variables de entorno con las que hay que lanzar un proceso para que use esta cuenta.
@@ -107,16 +181,26 @@ pub(super) fn row_to_account(
 /// Es lo único que necesita saber quien abre una tab (o la terminal de login): un mapa que
 /// se pasa tal cual a `pty_create`.
 pub fn env_for_account(db: &DbConnection, account_id: &str) -> Option<HashMap<String, String>> {
-    let conn = db.lock().ok()?;
-    let (agent_id, dir): (String, String) = conn
-        .query_row(
-            "SELECT agent_id, dir FROM agent_accounts WHERE id = ?1",
+    let (agent_id, dir, kind, base_url): (String, String, String, Option<String>) = {
+        let conn = db.lock().ok()?;
+        conn.query_row(
+            "SELECT agent_id, dir, kind, base_url FROM agent_accounts WHERE id = ?1",
             [account_id],
-            |row| Ok((row.get(0)?, row.get(1)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
         )
-        .ok()?;
-    let spec = spec_for(&agent_id)?;
-    Some(HashMap::from([(spec.env_var.to_string(), dir)]))
+        .ok()?
+    };
+    // La variable sale del provider. Sin perfil (Gemini, Kimi, una TUI desconocida) no hay
+    // mapa: no se hereda el de otra.
+    let mut env = crate::agents::adapter_for(&agent_id)?.account_env(&dir)?;
+    // El llavero se lee FUERA del lock de la base: puede tardar (D-Bus, Keychain).
+    if AccountKind::parse(&kind) == AccountKind::ApiKey && agent_id == "claude-code" {
+        // Sin la key (borrada del llavero por fuera) la cuenta no se lanza: arrancaría con
+        // el perfil vacío y pediría login, que no es lo que el usuario eligió.
+        let key = super::secrets::load(account_id)?;
+        env.extend(claude_key_env(&key, base_url.as_deref()));
+    }
+    Some(env)
 }
 
 /// Directorio de perfil de una cuenta. Es la raíz donde la TUI guarda TODO lo suyo —

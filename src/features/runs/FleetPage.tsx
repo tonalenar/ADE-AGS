@@ -4,10 +4,12 @@ import { useTranslation } from "react-i18next";
 import { AddIcon, Button, EmptyState, Kbd, NetworkIcon, SearchIcon, ShieldIcon, Tooltip } from "neogestify-ui-components";
 
 import { detectAgents } from "@/features/agents/ipc";
+import { accountProblemText } from "@/features/accounts/problem";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
+import { HandoffView } from "./HandoffView";
 import { AgentCard } from "./AgentCard";
 import {
   countByGroup, filterFleet, FLEET_GROUPS, liveInFolder, orchestratedRuns, sortFleet, waitingOn, type FleetGroup,
@@ -72,8 +74,7 @@ export function FleetPage() {
   /** Un aviso sobre la última acción de una tarjeta: tomar el control, descartar. */
   const [notice, setNotice] = useState<{ error: boolean; text: string } | null>(null);
 
-  // `/` enfoca el buscador. No Ctrl+K, que es lo que muestra el mockup: acá Ctrl+K ya es
-  // Skills, y robarlo rompería un atajo que la gente ya tiene en los dedos.
+  // `/` enfoca el buscador. No Ctrl+K: ese es la paleta de comandos global.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "/" || e.ctrlKey || e.metaKey || e.altKey) return;
@@ -168,7 +169,7 @@ export function FleetPage() {
               className={`cc-t flex items-center gap-1.5 px-2 h-6 rounded-full text-[10.5px]
                 disabled:opacity-30
                 ${group === g
-                  ? "bg-blue-500/15 text-blue-700 dark:text-blue-300"
+                  ? "bg-accent-500/15 text-accent-700 dark:text-accent-300"
                   : "text-gray-500 dark:text-white/45 hover:bg-gray-200 dark:hover:bg-white/8"}`}
             >
               {t(`fleet.group.${g}`)}
@@ -336,7 +337,7 @@ function totalCost(tasks: { costUsd: number | null }[]): number {
 
 /** Lo que el agente entregó, entero. La tarjeta solo muestra actividad. */
 function TaskDetail({ task, onClose }: {
-  task: { title: string; result: string | null; error: string | null; prompt: string };
+  task: Task;
   onClose: () => void;
 }) {
   const { t } = useTranslation();
@@ -360,9 +361,10 @@ function TaskDetail({ task, onClose }: {
             ${task.error
               ? "text-red-600 dark:text-red-400"
               : "text-gray-800 dark:text-gray-200"}`}>
-            {task.error ?? task.result ?? t("fleet.detail.nothing")}
+            {task.error ? accountProblemText(task.error, t) : (task.result ?? t("fleet.detail.nothing"))}
           </p>
         </section>
+        <HandoffView task={task} />
       </div>
     </AppDialog>
   );

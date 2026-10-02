@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use super::registry::{self, AgentDef, SHELL_AGENT_ID};
+use super::adapter::AgentAdapter;
 
 /// Cuánto se espera a un `--version`. Una TUI que tarda más está haciendo otra cosa —una
 /// migración, un chequeo de actualización, esperando algo— y la lista no puede quedar
@@ -55,12 +55,12 @@ pub fn version_line(stdout: &[u8], stderr: &[u8]) -> Option<String> {
     })
 }
 
-fn probe_agent(def: &AgentDef) -> AgentInfo {
-    // `bash` es la salida de emergencia a una terminal pelada, no una TUI que se instale:
-    // se reporta disponible sin sondear. En Windows el binario ni siquiera está en el
-    // PATH con ese nombre, así que sondearlo lo daría por ausente.
-    let is_shell = def.id == SHELL_AGENT_ID;
-    let path = if is_shell { None } else { crate::util::find_program(def.command) };
+fn probe_agent(adapter: &'static dyn AgentAdapter) -> AgentInfo {
+    let def = adapter.def();
+    // El shell de emergencia se reporta disponible sin sondear. En Windows el binario ni
+    // siquiera está en el PATH con ese nombre, así que sondearlo lo daría por ausente.
+    let assumed = adapter.assumes_installed();
+    let path = if assumed { None } else { crate::util::find_program(def.command) };
 
     // Con la ruta que se encontró y no con el nombre: en Windows un `opencode.cmd` de npm
     // no se ejecuta por su nombre a secas. Con tope y sin stdin: una TUI que se pone a
@@ -78,7 +78,7 @@ fn probe_agent(def: &AgentDef) -> AgentInfo {
         id: def.id.to_string(),
         label: def.label.to_string(),
         command: def.command.to_string(),
-        available: is_shell || path.is_some(),
+        available: assumed || path.is_some(),
         version,
         path: path.map(|p| p.to_string_lossy().into_owned()),
         resume: def.resume.map(str::to_string),
@@ -98,19 +98,39 @@ fn probe_agent(def: &AgentDef) -> AgentInfo {
 ///
 /// Los sondeos van en paralelo: son independientes, y en serie la lista tardaba la SUMA de
 /// todos los `--version` — con uno lento, varios segundos de "no hay agentes".
+///
+/// El resultado se guarda [`DETECT_TTL`]: se pide al abrir cada ventana, al entrar a la
+/// flota y al panel de cuentas, y lo instalado no cambia entre esas visitas. `refresh`
+/// vuelve a sondear (el botón "buscar de nuevo" de la configuración).
 #[tauri::command]
-pub async fn detect_agents() -> Result<Vec<AgentInfo>, String> {
-    tokio::task::spawn_blocking(|| {
+pub async fn detect_agents(refresh: Option<bool>) -> Result<Vec<AgentInfo>, String> {
+    if !refresh.unwrap_or(false)
+        && let Some((at, agents)) = DETECTED.lock().unwrap_or_else(|e| e.into_inner()).as_ref()
+        && at.elapsed() < DETECT_TTL
+    {
+        return Ok(agents.clone());
+    }
+    let agents: Vec<AgentInfo> = tokio::task::spawn_blocking(|| {
         std::thread::scope(|scope| {
-            let probes: Vec<_> = registry::AGENTS
+            let probes: Vec<_> = super::adapter::adapters()
                 .iter()
-                .map(|def| scope.spawn(move || probe_agent(def)))
+                .copied()
+                .map(|adapter| scope.spawn(move || probe_agent(adapter)))
                 .collect();
             probes.into_iter().filter_map(|p| p.join().ok()).collect()
         })
     })
     .await
-    .map_err(|e| e.to_string())
+    .map_err(|e| e.to_string())?;
+    *DETECTED.lock().unwrap_or_else(|e| e.into_inner()) = Some((std::time::Instant::now(), agents.clone()));
+    Ok(agents)
+}
+
+/// Cuánto vale una detección antes de volver a sondear.
+const DETECT_TTL: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+
+lazy_static::lazy_static! {
+    static ref DETECTED: std::sync::Mutex<Option<(std::time::Instant, Vec<AgentInfo>)>> = std::sync::Mutex::new(None);
 }
 
 /// Dónde busca la app los programas: qué aportó el shell del usuario, qué carpetas

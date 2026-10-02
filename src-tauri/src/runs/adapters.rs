@@ -18,7 +18,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::activity::{text_line, tool_label};
 use super::agents::{HeadlessAgent, Launch, LaunchCtx};
@@ -36,6 +36,9 @@ struct Tally {
     tokens_out: Option<i64>,
     cost: Option<f64>,
     error: Option<String>,
+    /// Un problema que la TUI informó sin cortar la corrida. Solo es el motivo si la
+    /// corrida igual termina mal.
+    warning: Option<String>,
 }
 
 impl Tally {
@@ -65,7 +68,12 @@ impl Tally {
             error: if ok {
                 None
             } else {
-                Some(self.error.clone().unwrap_or_else(|| format!("el agente terminó con código {code}")))
+                Some(
+                    self.error
+                        .clone()
+                        .or_else(|| self.warning.clone())
+                        .unwrap_or_else(|| format!("el agente terminó con código {code}")),
+                )
             },
             cost_usd: self.cost,
             tokens_in: self.tokens_in,
@@ -102,14 +110,19 @@ pub(crate) fn normalize_tool(name: &str, input: &Value) -> (String, Value) {
     let canonical = match lower.as_str() {
         "read" | "read_file" | "readfile" | "read_many_files" | "view" => "Read",
         "write" | "write_file" | "writefile" | "create" => "Write",
-        "edit" | "replace" | "strreplacefile" | "str_replace" | "patch" | "apply_patch" | "multiedit" => "Edit",
+        "edit" | "replace" | "strreplacefile" | "str_replace" | "patch" | "apply_patch"
+        | "multiedit" => "Edit",
         "bash" | "shell" | "run_shell_command" | "exec_command" | "local_shell" => "Bash",
         "grep" | "search_file_content" | "grepfiles" => "Grep",
         "glob" | "list" | "list_directory" | "ls" => "Glob",
         "webfetch" | "web_fetch" | "fetch" => "WebFetch",
         _ => name,
     };
-    let pick = |keys: &[&str]| keys.iter().find_map(|k| input.get(*k).and_then(Value::as_str)).map(str::to_string);
+    let pick = |keys: &[&str]| {
+        keys.iter()
+            .find_map(|k| input.get(*k).and_then(Value::as_str))
+            .map(str::to_string)
+    };
     let mut out = serde_json::Map::new();
     if let Some(p) = pick(&["file_path", "filePath", "path", "absolute_path", "file"]) {
         out.insert("file_path".into(), json!(p));
@@ -128,7 +141,10 @@ pub(crate) fn normalize_tool(name: &str, input: &Value) -> (String, Value) {
 
 fn tool_event(name: &str, input: &Value) -> AgentEvent {
     let (name, input) = normalize_tool(name, input);
-    AgentEvent::Tool { label: tool_label(&name, &input), name }
+    AgentEvent::Tool {
+        label: tool_label(&name, &input),
+        name,
+    }
 }
 
 /// Un texto del agente: queda como su respuesta y, si tiene algo, se muestra.
@@ -161,26 +177,42 @@ impl OpenCode {
     /// Claude Code sin broker. Las ediciones sí, que es el trabajo de un worker en su
     /// worktree.
     fn config(ctx: &LaunchCtx) -> String {
-        let prefix = crate::ipc::mcp::tool_prefix(crate::agents::McpStyle::OpencodeConfig);
+        let style = crate::agents::adapter_for("opencode")
+            .map(|adapter| adapter.def().mcp)
+            .unwrap_or(crate::agents::McpStyle::None);
+        let prefix = crate::ipc::mcp::tool_prefix(style);
         // El mismo servidor que se le pasa a Claude Code en el `--mcp-config` de la tarea.
         let server = ctx
             .mcp_config
             .as_ref()
             .and_then(|p| std::fs::read_to_string(p).ok())
             .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
-            .and_then(|v| v.pointer(&format!("/mcpServers/{}", crate::ipc::mcp::SERVER_NAME)).cloned());
+            .and_then(|v| {
+                v.pointer(&format!("/mcpServers/{}", crate::ipc::mcp::SERVER_NAME))
+                    .cloned()
+            });
         let mut config = match server {
             Some(server) => {
-                let program = server.get("command").and_then(Value::as_str).unwrap_or_default().to_string();
+                let program = server
+                    .get("command")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
                 let mut args: Vec<String> = server
                     .get("args")
                     .and_then(Value::as_array)
-                    .map(|a| a.iter().filter_map(|x| x.as_str().map(str::to_string)).collect())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(str::to_string))
+                            .collect()
+                    })
                     .unwrap_or_default();
                 args.extend(["--prefix".to_string(), prefix.clone()]);
                 let args: Vec<&str> = args.iter().map(String::as_str).collect();
-                serde_json::from_str(&crate::ipc::mcp::opencode_config_content(&program, &args, &prefix))
-                    .unwrap_or_else(|_| json!({}))
+                serde_json::from_str(&crate::ipc::mcp::opencode_config_content(
+                    &program, &args, &prefix,
+                ))
+                .unwrap_or_else(|_| json!({}))
             }
             None => json!({}),
         };
@@ -189,7 +221,13 @@ impl OpenCode {
             .map(|c| c.entry("permission").or_insert_with(|| json!({})))
             .and_then(Value::as_object_mut);
         if let Some(p) = permission {
-            p.insert("edit".into(), json!("allow"));
+            // Un lead no edita: `"ask"`, que sin terminal es rechazado. No `"deny"`: saca
+            // las tools del pedido, y el plan gratuito de OpenCode rechaza un pedido que no
+            // tiene las suyas ("FreeTierError … only be used from within OpenCode", verificado).
+            p.insert(
+                "edit".into(),
+                json!(if ctx.read_only { "ask" } else { "allow" }),
+            );
             p.insert("bash".into(), json!("ask"));
             p.insert("external_directory".into(), json!("ask"));
             // Las de su papel en el run (las decide quien arma el lanzamiento), con el
@@ -205,7 +243,13 @@ impl OpenCode {
 }
 
 impl HeadlessAgent for OpenCode {
-    fn launch(&self, prompt: &str, model: Option<&str>, _budget_usd: Option<f64>, ctx: &LaunchCtx) -> Launch {
+    fn launch(
+        &self,
+        prompt: &str,
+        model: Option<&str>,
+        _budget_usd: Option<f64>,
+        ctx: &LaunchCtx,
+    ) -> Launch {
         let mut args: Vec<String> = vec!["run".into(), "--format".into(), "json".into()];
         if let Some(m) = model {
             args.push("--model".into());
@@ -217,22 +261,33 @@ impl HeadlessAgent for OpenCode {
         let mut env: HashMap<String, String> = ctx.account_env.clone();
         env.insert("OPENCODE_CONFIG_CONTENT".into(), Self::config(ctx));
         Launch {
-            program: crate::agents::agent_command("opencode").unwrap_or("opencode").to_string(),
+            program: crate::agents::agent_command("opencode")
+                .unwrap_or("opencode")
+                .to_string(),
             args,
             env,
         }
     }
 
     fn parse_line(&self, line: &str) -> Vec<AgentEvent> {
-        let Ok(v) = serde_json::from_str::<Value>(line) else { return Vec::new() };
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            return Vec::new();
+        };
         let mut tally = lock(&self.0);
         let mut out: Vec<AgentEvent> = tally
-            .start(v.get("sessionID").and_then(Value::as_str).map(str::to_string))
+            .start(
+                v.get("sessionID")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+            )
             .into_iter()
             .collect();
         let part = v.get("part").cloned().unwrap_or(Value::Null);
         match v.get("type").and_then(Value::as_str) {
-            Some("text") => out.extend(text_event(&mut tally, part.get("text").and_then(Value::as_str).unwrap_or(""))),
+            Some("text") => out.extend(text_event(
+                &mut tally,
+                part.get("text").and_then(Value::as_str).unwrap_or(""),
+            )),
             Some("tool_use") => {
                 let name = part.get("tool").and_then(Value::as_str).unwrap_or("tool");
                 let input = part.pointer("/state/input").cloned().unwrap_or(Value::Null);
@@ -243,7 +298,10 @@ impl HeadlessAgent for OpenCode {
                 let n = |p: &str| tokens.pointer(p).and_then(Value::as_i64);
                 // Como en Claude Code: el contexto que se movió, caché incluida.
                 let input = [n("/input"), n("/cache/read"), n("/cache/write")];
-                let input = input.iter().any(Option::is_some).then(|| input.iter().flatten().sum());
+                let input = input
+                    .iter()
+                    .any(Option::is_some)
+                    .then(|| input.iter().flatten().sum());
                 tally.add_tokens(input, n("/output"));
                 if let Some(c) = part.get("cost").and_then(Value::as_f64) {
                     tally.cost = Some(tally.cost.unwrap_or(0.0) + c);
@@ -276,24 +334,72 @@ impl HeadlessAgent for OpenCode {
 pub struct Codex(Mutex<Tally>);
 
 impl HeadlessAgent for Codex {
-    fn launch(&self, prompt: &str, model: Option<&str>, _budget_usd: Option<f64>, ctx: &LaunchCtx) -> Launch {
+    fn launch(
+        &self,
+        prompt: &str,
+        model: Option<&str>,
+        _budget_usd: Option<f64>,
+        ctx: &LaunchCtx,
+    ) -> Launch {
         // `workspace-write`: edita y corre comandos adentro de la carpeta de la tarea, en el
         // sandbox de Codex (sin red, sin tocar afuera). Es lo más parecido a un worker en su
-        // worktree, y con `exec` no hay a quién preguntarle nada más.
+        // worktree, y con `exec` no hay a quién preguntarle nada más. Un lead, `read-only`.
         let mut args: Vec<String> = vec![
             "exec".into(),
             "--json".into(),
             "--skip-git-repo-check".into(),
             "--sandbox".into(),
-            "workspace-write".into(),
+            if ctx.read_only {
+                "read-only"
+            } else {
+                "workspace-write"
+            }
+            .into(),
         ];
+        if let Some(effort) = ctx.reasoning_effort {
+            args.extend(["-c".into(), format!("model_reasoning_effort=\"{effort}\"")]);
+        }
+        if let Some(path) = &ctx.mcp_config {
+            // Override only this execution; never rewrite the account's config.toml.
+            let config = std::fs::read(path)
+                .ok()
+                .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
+            let server = config.as_ref().and_then(|v| v.pointer("/mcpServers/controlcode"));
+            let command = server.and_then(|v| v.get("command")).and_then(Value::as_str);
+            let server_args = server.and_then(|v| v.get("args")).and_then(Value::as_array);
+            if let (Some(command), Some(server_args)) = (command, server_args)
+                && !command.is_empty()
+                && server_args.iter().all(Value::is_string)
+            {
+                let tools: Vec<&str> = ctx.allowed_tools.iter()
+                    .filter_map(|name| name.strip_prefix("mcp__controlcode__"))
+                    .collect();
+                for (key, value) in [
+                    ("command", serde_json::to_string(command).unwrap()),
+                    ("args", serde_json::to_string(server_args).unwrap()),
+                    ("enabled_tools", serde_json::to_string(&tools).unwrap()),
+                    ("enabled", "true".into()),
+                    ("required", "true".into()),
+                ] {
+                    args.extend(["-c".into(), format!("mcp_servers.controlcode.{key}={value}")]);
+                }
+            } else {
+                // A broken task config must fail before inference, not silently lose MCP.
+                return Launch {
+                    program: "ADE-invalid-task-MCP-config".into(),
+                    args: vec![],
+                    env: ctx.account_env.clone(),
+                };
+            }
+        }
         if let Some(m) = model {
             args.push("--model".into());
             args.push(m.into());
         }
         // El único además de Claude Code que hace cumplir un schema, y lo lee de un archivo.
         let schema_file = ctx.json_schema.as_ref().and_then(|schema| {
-            let path = std::env::temp_dir().join(format!("controlcode-schema-{}.json", ctx.session_id));
+            let path =
+                std::env::temp_dir().join(format!("controlcode-schema-{}.json", ctx.session_id));
             std::fs::write(&path, schema).ok().map(|_| path)
         });
         if let Some(path) = &schema_file {
@@ -303,25 +409,37 @@ impl HeadlessAgent for Codex {
         args.push("--".into());
         args.push(full_prompt(prompt, ctx, schema_file.is_some()));
         Launch {
-            program: crate::agents::agent_command("codex").unwrap_or("codex").to_string(),
+            program: crate::agents::agent_command("codex")
+                .unwrap_or("codex")
+                .to_string(),
             args,
             env: ctx.account_env.clone(),
         }
     }
 
     fn parse_line(&self, line: &str) -> Vec<AgentEvent> {
-        let Ok(v) = serde_json::from_str::<Value>(line) else { return Vec::new() };
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            return Vec::new();
+        };
         let mut tally = lock(&self.0);
         match v.get("type").and_then(Value::as_str) {
-            Some("thread.started") => {
-                tally.start(v.get("thread_id").and_then(Value::as_str).map(str::to_string)).into_iter().collect()
-            }
+            Some("thread.started") => tally
+                .start(
+                    v.get("thread_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                )
+                .into_iter()
+                .collect(),
             Some("item.completed") => {
                 let item = v.get("item").cloned().unwrap_or(Value::Null);
                 match item.get("type").and_then(Value::as_str) {
-                    Some("agent_message") => {
-                        text_event(&mut tally, item.get("text").and_then(Value::as_str).unwrap_or("")).into_iter().collect()
-                    }
+                    Some("agent_message") => text_event(
+                        &mut tally,
+                        item.get("text").and_then(Value::as_str).unwrap_or(""),
+                    )
+                    .into_iter()
+                    .collect(),
                     Some("command_execution") => vec![tool_event("Bash", &item)],
                     Some("file_change") => item
                         .get("changes")
@@ -330,11 +448,20 @@ impl HeadlessAgent for Codex {
                         .unwrap_or_default(),
                     Some("mcp_tool_call") => {
                         let tool = item.get("tool").and_then(Value::as_str).unwrap_or("mcp");
-                        vec![tool_event(tool, item.get("arguments").unwrap_or(&Value::Null))]
+                        vec![tool_event(
+                            tool,
+                            item.get("arguments").unwrap_or(&Value::Null),
+                        )]
                     }
                     Some("web_search") => vec![tool_event("WebSearch", &item)],
+                    // Un `error` como ítem no corta el turno (p. ej. "Skill descriptions were
+                    // shortened…"): la corrida sigue y contesta. Lo que corta llega como
+                    // `turn.failed` o como `error` de primer nivel.
                     Some("error") => {
-                        tally.error = item.get("message").and_then(Value::as_str).map(str::to_string);
+                        tally.warning = item
+                            .get("message")
+                            .and_then(Value::as_str)
+                            .map(str::to_string);
                         Vec::new()
                     }
                     _ => Vec::new(),
@@ -383,17 +510,29 @@ impl Gemini {
 }
 
 impl HeadlessAgent for Gemini {
-    fn launch(&self, prompt: &str, model: Option<&str>, _budget_usd: Option<f64>, ctx: &LaunchCtx) -> Launch {
+    fn launch(
+        &self,
+        prompt: &str,
+        model: Option<&str>,
+        _budget_usd: Option<f64>,
+        ctx: &LaunchCtx,
+    ) -> Launch {
         // `auto_edit`: las ediciones pasan y el resto (el shell) queda sin aprobar, que sin
         // terminal es rechazado. `--skip-trust` porque la carpeta de un worktree recién
         // creado nunca fue marcada como confiable, y sin eso Gemini no arranca sin pantalla.
+        // Un lead va con `default`: ediciones y shell quedan sin aprobar, o sea rechazados.
         let mut args: Vec<String> = vec![
             "--prompt".into(),
             full_prompt(prompt, ctx, false),
             "--output-format".into(),
             "stream-json".into(),
             "--approval-mode".into(),
-            "auto_edit".into(),
+            if ctx.read_only {
+                "default"
+            } else {
+                "auto_edit"
+            }
+            .into(),
             "--skip-trust".into(),
             // El único además de Claude Code que acepta el id de sesión de afuera.
             "--session-id".into(),
@@ -404,19 +543,28 @@ impl HeadlessAgent for Gemini {
             args.push(m.into());
         }
         Launch {
-            program: crate::agents::agent_command("gemini-cli").unwrap_or("gemini").to_string(),
+            program: crate::agents::agent_command("gemini-cli")
+                .unwrap_or("gemini")
+                .to_string(),
             args,
             env: ctx.account_env.clone(),
         }
     }
 
     fn parse_line(&self, line: &str) -> Vec<AgentEvent> {
-        let Ok(v) = serde_json::from_str::<Value>(line) else { return Vec::new() };
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            return Vec::new();
+        };
         let mut tally = lock(&self.0);
         match v.get("type").and_then(Value::as_str) {
-            Some("init") => {
-                tally.start(v.get("session_id").and_then(Value::as_str).map(str::to_string)).into_iter().collect()
-            }
+            Some("init") => tally
+                .start(
+                    v.get("session_id")
+                        .and_then(Value::as_str)
+                        .map(str::to_string),
+                )
+                .into_iter()
+                .collect(),
             Some("message") if v.get("role").and_then(Value::as_str) == Some("assistant") => {
                 let chunk = v.get("content").and_then(Value::as_str).unwrap_or("");
                 if v.get("delta").and_then(Value::as_bool) == Some(true) {
@@ -430,7 +578,10 @@ impl HeadlessAgent for Gemini {
             Some("tool_use") => {
                 let mut out: Vec<AgentEvent> = Self::flush(&mut tally).into_iter().collect();
                 let name = v.get("tool_name").and_then(Value::as_str).unwrap_or("tool");
-                out.push(tool_event(name, v.get("parameters").unwrap_or(&Value::Null)));
+                out.push(tool_event(
+                    name,
+                    v.get("parameters").unwrap_or(&Value::Null),
+                ));
                 out
             }
             Some("result") => {
@@ -446,7 +597,9 @@ impl HeadlessAgent for Gemini {
                     );
                 }
                 let ok = tally.error.is_none();
-                out.push(AgentEvent::Finished { outcome: tally.outcome(if ok { 0 } else { 1 }) });
+                out.push(AgentEvent::Finished {
+                    outcome: tally.outcome(if ok { 0 } else { 1 }),
+                });
                 out
             }
             _ => Vec::new(),
@@ -471,7 +624,13 @@ impl HeadlessAgent for Gemini {
 pub struct Kimi(Mutex<Tally>);
 
 impl HeadlessAgent for Kimi {
-    fn launch(&self, prompt: &str, model: Option<&str>, _budget_usd: Option<f64>, ctx: &LaunchCtx) -> Launch {
+    fn launch(
+        &self,
+        prompt: &str,
+        model: Option<&str>,
+        _budget_usd: Option<f64>,
+        ctx: &LaunchCtx,
+    ) -> Launch {
         let mut args: Vec<String> = vec![
             "--prompt".into(),
             full_prompt(prompt, ctx, false),
@@ -483,14 +642,18 @@ impl HeadlessAgent for Kimi {
             args.push(m.into());
         }
         Launch {
-            program: crate::agents::agent_command("kimi-code").unwrap_or("kimi").to_string(),
+            program: crate::agents::agent_command("kimi-code")
+                .unwrap_or("kimi")
+                .to_string(),
             args,
             env: ctx.account_env.clone(),
         }
     }
 
     fn parse_line(&self, line: &str) -> Vec<AgentEvent> {
-        let Ok(v) = serde_json::from_str::<Value>(line) else { return Vec::new() };
+        let Ok(v) = serde_json::from_str::<Value>(line) else {
+            return Vec::new();
+        };
         let mut tally = lock(&self.0);
         // El id de sesión lo avisa por stderr, no en el stream.
         let mut out: Vec<AgentEvent> = tally.start(None).into_iter().collect();
@@ -507,8 +670,16 @@ impl HeadlessAgent for Kimi {
             _ => String::new(),
         };
         out.extend(text_event(&mut tally, &text));
-        for call in v.get("tool_calls").and_then(Value::as_array).into_iter().flatten() {
-            let name = call.pointer("/function/name").and_then(Value::as_str).unwrap_or("tool");
+        for call in v
+            .get("tool_calls")
+            .and_then(Value::as_array)
+            .into_iter()
+            .flatten()
+        {
+            let name = call
+                .pointer("/function/name")
+                .and_then(Value::as_str)
+                .unwrap_or("tool");
             // Los argumentos vienen como texto JSON, como en la API de chat.
             let input = call
                 .pointer("/function/arguments")
@@ -522,5 +693,10 @@ impl HeadlessAgent for Kimi {
 
     fn finish(&self, emitted: Option<TaskOutcome>, code: i32) -> TaskOutcome {
         emitted.unwrap_or_else(|| lock(&self.0).outcome(code))
+    }
+
+    /// `--prompt` siempre aprueba solo: no hay cómo sacarle las ediciones ni el shell.
+    fn enforces_read_only(&self) -> bool {
+        false
     }
 }

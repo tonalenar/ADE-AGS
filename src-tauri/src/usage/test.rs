@@ -30,14 +30,23 @@ fn un_dia_dura_un_dia() {
 
 #[test]
 fn tolera_que_falten_los_milisegundos() {
-    assert_eq!(parse_ts("2026-08-21T20:29:09Z"), parse_ts("2026-08-21T20:29:09.000Z"));
+    assert_eq!(
+        parse_ts("2026-08-21T20:29:09Z"),
+        parse_ts("2026-08-21T20:29:09.000Z")
+    );
 }
 
 #[test]
 fn una_linea_rota_no_devuelve_una_fecha_inventada() {
     // Devolver `Some(0)` metería el mensaje en 1970 y lo dejaría fuera de toda ventana,
     // que es un error silencioso; `None` lo descarta explícitamente.
-    for malo in ["", "ayer", "2026-08-21", "2026-08-21T20:29", "xxxx-xx-xxTxx:xx:xxZ"] {
+    for malo in [
+        "",
+        "ayer",
+        "2026-08-21",
+        "2026-08-21T20:29",
+        "xxxx-xx-xxTxx:xx:xxZ",
+    ] {
         assert_eq!(parse_ts(malo), None, "{malo}");
     }
 }
@@ -53,7 +62,10 @@ const NOW: i64 = 1_800_000_000;
 #[test]
 fn la_ventana_arranca_en_el_primer_mensaje() {
     let start = NOW - 3600;
-    assert_eq!(current_window_start(vec![start, NOW - 600, NOW - 60], NOW), Some(start));
+    assert_eq!(
+        current_window_start(vec![start, NOW - 600, NOW - 60], NOW),
+        Some(start)
+    );
 }
 
 #[test]
@@ -71,7 +83,10 @@ fn un_hueco_de_mas_de_cinco_horas_abre_una_ventana_nueva() {
 #[test]
 fn sin_actividad_reciente_no_hay_ventana_abierta() {
     // El último mensaje quedó fuera de la ventana: ya se reabrió y no hay nada que contar.
-    assert_eq!(current_window_start(vec![NOW - WINDOW_SECS - 60], NOW), None);
+    assert_eq!(
+        current_window_start(vec![NOW - WINDOW_SECS - 60], NOW),
+        None
+    );
 }
 
 #[test]
@@ -136,9 +151,22 @@ fn pantalla() -> String {
         } else {
             renglones.push(rotulo(&["Current", "week", "(Fable)"]));
             renglones.push(format!("██{}25% used", col(46)));
-            renglones.push(rotulo(&["Resets", "Sep", "13,", "11am", "(America/Bogota)"]));
+            renglones.push(rotulo(&[
+                "Resets",
+                "Sep",
+                "13,",
+                "11am",
+                "(America/Bogota)",
+            ]));
         }
-        renglones.push(rotulo(&["What's", "contributing", "to", "your", "limits", "usage?"]));
+        renglones.push(rotulo(&[
+            "What's",
+            "contributing",
+            "to",
+            "your",
+            "limits",
+            "usage?",
+        ]));
 
         out.push_str("\x1b[H");
         for renglon in renglones {
@@ -170,7 +198,10 @@ fn de_corrido_el_rotulo_no_existe_y_reconstruido_si() {
         }
         out
     };
-    assert!(sin_escapes.contains("Currentweek(allmodels)"), "así llega: {sin_escapes:?}");
+    assert!(
+        sin_escapes.contains("Currentweek(allmodels)"),
+        "así llega: {sin_escapes:?}"
+    );
     assert!(!sin_escapes.contains("Current week (all models)"));
 
     let pantalla = render(&cruda);
@@ -191,10 +222,17 @@ fn lee_las_tres_barras_del_panel() {
     assert_eq!(w.percent, 69);
     assert_eq!(w.resets.as_deref(), Some("Sep 13, 11am (America/Bogota)"));
 
-    assert_eq!(u.week_models.len(), 1, "la semana por modelo es la tercera barra");
+    assert_eq!(
+        u.week_models.len(),
+        1,
+        "la semana por modelo es la tercera barra"
+    );
     assert_eq!(u.week_models[0].model, "Fable");
     assert_eq!(u.week_models[0].meter.percent, 25);
-    assert_eq!(u.week_models[0].meter.resets.as_deref(), Some("Sep 13, 11am (America/Bogota)"));
+    assert_eq!(
+        u.week_models[0].meter.resets.as_deref(),
+        Some("Sep 13, 11am (America/Bogota)")
+    );
 }
 
 #[test]
@@ -211,7 +249,11 @@ fn la_semana_es_la_de_todos_los_modelos_no_la_de_uno() {
     // mostraba el 2% de Fable como si fuera el consumo de la semana.
     let u = parse_usage_screen(&pantalla());
     assert_eq!(u.week.unwrap().percent, 69);
-    assert!(!u.week_models.iter().any(|m| m.model.eq_ignore_ascii_case("all models")));
+    assert!(
+        !u.week_models
+            .iter()
+            .any(|m| m.model.eq_ignore_ascii_case("all models"))
+    );
 }
 
 #[test]
@@ -233,28 +275,53 @@ fn una_salida_sin_panel_no_inventa_ceros() {
 }
 
 #[test]
+fn usage_capture_reports_expired_auth_instead_of_timing_out() {
+    assert_eq!(
+        super::live::capture_problem("\x1b[31mFailed to authenticate: OAuth session expired and could not be refreshed\x1b[0m"),
+        Some("accounts.auth.expired")
+    );
+    assert_eq!(
+        super::live::capture_problem("Not logged in · Please run /login"),
+        Some("accounts.auth.required")
+    );
+    assert_eq!(
+        super::live::capture_problem("Current session\r\n12% used\r\n"),
+        None
+    );
+}
+
+#[test]
 fn descarta_un_porcentaje_imposible() {
-    assert!(parse_usage_screen("Current session\r\n999% used\r\n").session.is_none());
+    assert!(
+        parse_usage_screen("Current session\r\n999% used\r\n")
+            .session
+            .is_none()
+    );
 }
 
 #[test]
 fn un_rotulo_sin_barra_no_le_roba_el_numero_a_la_siguiente() {
     let texto = "Current session\r\n\r\n\r\n\r\n\r\nCurrent week (all models)\r\n42% used\r\n";
     let u = parse_usage_screen(texto);
-    assert!(u.session.is_none(), "la ventana no tiene barra y no debe tomar la semanal");
+    assert!(
+        u.session.is_none(),
+        "la ventana no tiene barra y no debe tomar la semanal"
+    );
     assert_eq!(u.week.unwrap().percent, 42);
 }
 
 #[test]
 fn se_queda_con_la_ultima_pintada_del_panel() {
     // La TUI repinta mientras abre: la primera pasada puede estar a medias.
-    let texto = "\x1b[H Current session\r\n 0% used\r\n\x1b[H Current session\r\n 37% used\x1b[K\r\n";
+    let texto =
+        "\x1b[H Current session\r\n 0% used\r\n\x1b[H Current session\r\n 37% used\x1b[K\r\n";
     assert_eq!(parse_usage_screen(texto).session.unwrap().percent, 37);
 }
 
 #[test]
 fn de_un_modelo_repetido_gana_la_ultima_pintada() {
-    let texto = "\x1b[HCurrent week (Fable)\r\n1% used\r\n\x1b[HCurrent week (Fable)\r\n44% used\x1b[K\r\n";
+    let texto =
+        "\x1b[HCurrent week (Fable)\r\n1% used\r\n\x1b[HCurrent week (Fable)\r\n44% used\x1b[K\r\n";
     let u = parse_usage_screen(texto);
     assert_eq!(u.week_models.len(), 1, "no se duplica el modelo");
     assert_eq!(u.week_models[0].meter.percent, 44);
@@ -284,7 +351,10 @@ fn lo_que_se_fue_por_arriba_sigue_estando() {
         raw.push_str(&format!("relleno {i}\r\n"));
     }
     let pantalla = render(&raw);
-    assert!(pantalla.contains("Current session"), "se perdió lo que salió de la pantalla");
+    assert!(
+        pantalla.contains("Current session"),
+        "se perdió lo que salió de la pantalla"
+    );
     assert!(pantalla.contains(&format!("relleno {}", super::screen::ROWS + 4)));
 }
 
@@ -293,7 +363,10 @@ fn los_escapes_de_color_y_el_titulo_no_dejan_basura() {
     let raw = "\x1b[32m\x1b[1mCurrent session\x1b[0m\r\n\x1b]0;titulo\x07███ 7% used\r\n";
     let pantalla = render(raw);
     assert!(!pantalla.contains('\x1b'), "quedaron escapes: {pantalla:?}");
-    assert!(!pantalla.contains("titulo"), "el título de la ventana no es texto del panel");
+    assert!(
+        !pantalla.contains("titulo"),
+        "el título de la ventana no es texto del panel"
+    );
     assert_eq!(parse_usage_screen(raw).session.unwrap().percent, 7);
 }
 
@@ -311,7 +384,10 @@ fn contra_la_captura_real_del_panel() {
 
     let semana = u.week.expect("la semana");
     assert_eq!(semana.percent, 36, "la semana completa, no la de un modelo");
-    assert_eq!(semana.resets.as_deref(), Some("Sep 20, 10:59am (America/Bogota)"));
+    assert_eq!(
+        semana.resets.as_deref(),
+        Some("Sep 20, 10:59am (America/Bogota)")
+    );
 
     assert_eq!(u.week_models.len(), 1);
     assert_eq!(u.week_models[0].model, "Fable");
@@ -336,11 +412,15 @@ fn contra_la_tui_de_verdad() {
     }
     let dir = super::trust::probe_dir().expect("la carpeta del sondeo");
     let empezo = std::time::Instant::now();
-    let pantalla = super::live::capture("claude", dir.to_str().unwrap(), &[]).expect("capturar el panel");
+    let pantalla =
+        super::live::capture("claude", dir.to_str().unwrap(), &[]).expect("capturar el panel");
     let u = parse_usage_screen(&pantalla);
     println!(
         "en {:?}: session={:?} week={:?} models={:?}",
-        empezo.elapsed(), u.session, u.week, u.week_models
+        empezo.elapsed(),
+        u.session,
+        u.week,
+        u.week_models
     );
     assert!(u.session.is_some(), "falta la barra de la ventana en curso");
     assert!(u.week.is_some(), "falta la barra de la semana");
@@ -350,7 +430,9 @@ fn contra_la_tui_de_verdad() {
 /// corre si se le pasa el archivo por variable de entorno.
 #[test]
 fn contra_una_captura_cruda_en_disco() {
-    let Ok(path) = std::env::var("CC_USAGE_CAPTURE") else { return };
+    let Ok(path) = std::env::var("CC_USAGE_CAPTURE") else {
+        return;
+    };
     let raw = std::fs::read(&path).expect("leer la captura");
     let u = parse_usage_screen(&String::from_utf8_lossy(&raw));
     println!(
@@ -359,6 +441,27 @@ fn contra_una_captura_cruda_en_disco() {
     );
     assert!(u.available, "no se encontró el panel en la captura cruda");
     assert!(u.session.is_some() && u.week.is_some());
+}
+
+#[test]
+fn la_carpeta_se_anota_como_la_anota_claude_code_en_windows() {
+    use super::trust::project_key;
+    assert_eq!(project_key("C:\\Users\\ana\\.controlcode\\usage-probe"), "C:/Users/ana/.controlcode/usage-probe");
+    assert_eq!(project_key("C:/Users/ana/x"), "C:/Users/ana/x", "ya normalizada");
+    assert_eq!(project_key("\\\\server\\share\\p"), "//server/share/p", "una ruta de red");
+    // Una ruta de Unix puede tener una barra invertida legítima en el nombre: no se toca.
+    assert_eq!(project_key("/home/ana/a\\b"), "/home/ana/a\\b");
+}
+
+#[test]
+fn con_la_ruta_de_windows_se_escribe_la_forma_que_la_tui_busca() {
+    let config = serde_json::json!({ "projects": {} });
+    let next = with_trusted(&config, "C:\\Users\\ana\\.controlcode\\usage-probe").expect("hay que escribirla");
+    let entry = &next["projects"]["C:/Users/ana/.controlcode/usage-probe"];
+    assert_eq!(entry["hasTrustDialogAccepted"], true);
+    assert!(next["projects"].get("C:\\Users\\ana\\.controlcode\\usage-probe").is_none(), "no la forma con barras invertidas");
+    // Y si ya está con la forma buena, no se vuelve a escribir.
+    assert!(with_trusted(&next, "C:\\Users\\ana\\.controlcode\\usage-probe").is_none());
 }
 
 // ── La carpeta del sondeo ────────────────────────────────────────
@@ -412,14 +515,19 @@ fn no_se_reescribe_si_ya_estaba_aceptada() {
 fn se_conserva_todo_lo_demas_de_la_configuracion() {
     // Lo importante del merge: ahí adentro está el login del usuario y el historial de sus
     // proyectos. Agregar una carpeta no puede costarle nada de eso.
-    let c = config(r#"{
+    let c = config(
+        r#"{
         "oauthAccount": {"emailAddress": "quien@ejemplo.com"},
         "projects": {"/proyecto": {"hasTrustDialogAccepted": true, "allowedTools": ["Bash"]}}
-    }"#);
+    }"#,
+    );
     let next = with_trusted(&c, "/sonda").expect("hay algo que escribir");
     assert_eq!(next["oauthAccount"]["emailAddress"], "quien@ejemplo.com");
     assert_eq!(next["projects"]["/proyecto"]["allowedTools"][0], "Bash");
-    assert!(accepted(&next, "/proyecto"), "la carpeta que ya estaba sigue aceptada");
+    assert!(
+        accepted(&next, "/proyecto"),
+        "la carpeta que ya estaba sigue aceptada"
+    );
     assert!(accepted(&next, "/sonda"));
 }
 
@@ -441,7 +549,11 @@ fn la_escritura_deja_el_archivo_valido_y_con_sus_permisos() {
     let dir = std::env::temp_dir().join(format!("cc-trust-{}", std::process::id()));
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join(".claude.json");
-    std::fs::write(&path, r#"{"oauthAccount":{"emailAddress":"quien@ejemplo.com"}}"#).unwrap();
+    std::fs::write(
+        &path,
+        r#"{"oauthAccount":{"emailAddress":"quien@ejemplo.com"}}"#,
+    )
+    .unwrap();
 
     #[cfg(unix)]
     {
@@ -466,7 +578,10 @@ fn la_escritura_deja_el_archivo_valido_y_con_sus_permisos() {
     // Segunda pasada: ya está aceptada, así que no se vuelve a tocar el archivo.
     let before = std::fs::metadata(&path).unwrap().modified().unwrap();
     trust_dir(&path, "/sonda").unwrap();
-    assert_eq!(std::fs::metadata(&path).unwrap().modified().unwrap(), before);
+    assert_eq!(
+        std::fs::metadata(&path).unwrap().modified().unwrap(),
+        before
+    );
 
     std::fs::remove_dir_all(&dir).ok();
 }
@@ -486,4 +601,51 @@ fn una_cuenta_sin_archivo_todavia_lo_estrena() {
     assert!(accepted(&written, "/sonda"));
 
     std::fs::remove_dir_all(&dir).ok();
+}
+
+// ── Lectura incremental de transcripts ───────────────────────────
+
+fn linea(ts: &str, output: u64) -> String {
+    format!(
+        "{{\"timestamp\":\"{ts}\",\"sessionId\":\"s1\",\"message\":{{\"usage\":{{\"input_tokens\":10,\"output_tokens\":{output}}}}}}}\n"
+    )
+}
+
+/// Un transcript solo crece: lo leído no se vuelve a leer, una línea a medio escribir se
+/// lee entera la próxima vez, y uno que se achicó (reescrito) se lee de cero.
+#[test]
+fn un_transcript_se_lee_solo_en_lo_que_crecio() {
+    use super::claude::scan_file;
+    use std::io::Write;
+    let dir = std::env::temp_dir().join(format!("cc-usage-scan-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("t.jsonl");
+    std::fs::write(&path, linea("2026-10-02T10:00:00Z", 5) + "{\"type\":\"user\",\"message\":\"hola\"}\n").unwrap();
+
+    let first = scan_file(&path, None);
+    assert_eq!(first.records.len(), 1);
+
+    // Crece: una línea completa y otra a medio escribir.
+    let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    f.write_all(linea("2026-10-02T11:00:00Z", 7).as_bytes()).unwrap();
+    let parcial = linea("2026-10-02T12:00:00Z", 9);
+    f.write_all(&parcial.as_bytes()[..20]).unwrap();
+    drop(f);
+    let second = scan_file(&path, Some(first.clone()));
+    assert_eq!(second.records.iter().map(|r| r.output).collect::<Vec<_>>(), vec![5, 7], "la parcial todavía no");
+
+    // Se completa la línea: aparece entera, sin duplicar las anteriores.
+    let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    f.write_all(&parcial.as_bytes()[20..]).unwrap();
+    drop(f);
+    let third = scan_file(&path, Some(second.clone()));
+    assert_eq!(third.records.iter().map(|r| r.output).collect::<Vec<_>>(), vec![5, 7, 9]);
+    assert_eq!(scan_file(&path, Some(third.clone())).records.len(), 3, "sin cambios no relee nada");
+
+    // Reescrito más corto: lo leído ya no vale.
+    std::fs::write(&path, linea("2026-10-02T13:00:00Z", 1)).unwrap();
+    let rewritten = scan_file(&path, Some(third));
+    assert_eq!(rewritten.records.iter().map(|r| r.output).collect::<Vec<_>>(), vec![1]);
+
+    let _ = std::fs::remove_dir_all(&dir);
 }

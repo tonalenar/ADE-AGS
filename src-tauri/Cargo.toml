@@ -30,11 +30,13 @@ path = "src/bin/cli.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+cc = "1"
 
 [dependencies]
 tauri = { version = "2", features = ["unstable", "macos-private-api"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-notification = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 
@@ -46,9 +48,16 @@ tokio = { version = "1", features = ["full"] }
 rusqlite = { version = "0.31", features = ["bundled"] }
 
 # Utils
+# Horas locales para las rotinas (ya llegaba como dependencia transitiva).
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
 uuid = { version = "1", features = ["v4"] }
 dirs = "5"
+url = "2"
 lazy_static = "1"
+# En Windows, `canonicalize` devuelve `\\?\C:\...` y git 2.55 rechaza ese prefijo.
+# `dunce` lo quita solo cuando el resultado sigue siendo una ruta Win32 válida.
+# En Unix es identidad. Ver `util::external_path`.
+dunce = "1.0.5"
 
 # Fase 5 — Skills manager (symlinks globales)
 serde_yaml = "0.9"
@@ -57,7 +66,7 @@ symlink = "0.1"
 # Fase 6 — Marketplace de skills (registries remotos)
 # rustls en vez de la TLS nativa del sistema: evita depender de libssl/openssl-dev
 # instalado en la máquina del usuario para poder compilar/correr.
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
 
 # Buscador de texto del panel derecho. `ignore` es el recorrido de ripgrep: respeta
 # `.gitignore` sin tener que invocar a git por cada carpeta, y trae los globs de
@@ -77,6 +86,8 @@ futures-util = "0.3"
 # Las imágenes de las tabs de archivo viajan como data URL: sin esto habría que abrirle al
 # webview el protocolo de assets sobre todo el disco. Ya venía en el árbol.
 base64 = "0.22"
+sha2 = "0.10"
+unicode-normalization = "0.1"
 keyring = { version = "3", features = ["apple-native", "windows-native", "async-secret-service", "async-io", "crypto-rust"] }
 tauri-plugin-updater = { version = "2", default-features = false, features = ["rustls-tls", "zip"] }
 trash = "5"
@@ -113,6 +124,9 @@ windows-sys = { version = "0.61", features = [
     # `JOBOBJECT_EXTENDED_LIMIT_INFORMATION` vive bajo Threading: sin estos dos features
     # los símbolos existen pero quedan compilados fuera.
     "Win32_Security",
+    "Win32_Storage_FileSystem",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
     "Win32_System_JobObjects",
     "Win32_System_Threading",
 ] }

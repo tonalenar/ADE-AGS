@@ -1,0 +1,56 @@
+# Chequeos de cada PR y de cada push a master: los mismos tests que corre el release,
+# pero antes de mergear y no recién al sacar un tag.
+#
+# Linux y no Windows por la misma razón que en `release.yml`: el binario de test de la lib
+# no arranca en el runner de Windows (STATUS_ENTRYPOINT_NOT_FOUND). Los tests con gate
+# `#[cfg(windows)]` se siguen corriendo a mano en Windows.
+
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Las mismas que `release.yml`: el crate enlaza webkit2gtk aunque los tests no abran
+      # ninguna ventana.
+      - name: Dependencias de Linux
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf \
+            build-essential curl wget file libssl-dev libxdo-dev
+
+      - name: Cache de cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ci-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ci-cargo-
+
+      - run: bun install --frozen-lockfile
+
+      - name: Tests del frontend
+        run: |
+          bunx tsc --noEmit
+          bun run test
+
+      - name: Tests de Rust
+        run: cd src-tauri && cargo test --lib --bin ccode

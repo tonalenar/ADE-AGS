@@ -20,6 +20,8 @@ pub struct Launch {
 
 /// Lo que hace falta saber para armar el lanzamiento y que no está en la tarea.
 pub struct LaunchCtx<'a> {
+    /// Actual task workspace, including its worktree when applicable.
+    pub cwd: &'a str,
     /// El id de sesión que la app le IMPONE a la TUI. Se decide antes de lanzar para que
     /// la fila y la sesión queden atadas desde el principio.
     pub session_id: &'a str,
@@ -34,11 +36,21 @@ pub struct LaunchCtx<'a> {
     pub allowed_tools: Vec<String>,
     /// JSON Schema que la CLI hace cumplir al resultado.
     pub json_schema: Option<String>,
+    /// La tarea no puede modificar el workspace (un lead, ver `policy`). Cada adapter lo
+    /// traduce a lo que su CLI hace cumplir; el broker lo vuelve a comprobar por pedido.
+    pub read_only: bool,
+    pub reasoning_effort: Option<&'a str>,
 }
 
 pub trait HeadlessAgent {
     /// argv + env ya resueltos.
-    fn launch(&self, prompt: &str, model: Option<&str>, budget_usd: Option<f64>, ctx: &LaunchCtx) -> Launch;
+    fn launch(
+        &self,
+        prompt: &str,
+        model: Option<&str>,
+        budget_usd: Option<f64>,
+        ctx: &LaunchCtx,
+    ) -> Launch;
 
     /// Traduce una línea de su stdout. Devuelve varios porque un solo mensaje puede traer
     /// texto y varias herramientas a la vez; vacío = línea sin nada que mostrar.
@@ -49,23 +61,29 @@ pub trait HeadlessAgent {
     fn finish(&self, emitted: Option<TaskOutcome>, code: i32) -> TaskOutcome {
         match emitted {
             Some(o) => o,
-            None if code == 0 => TaskOutcome { ok: true, ..Default::default() },
-            None => TaskOutcome::failed(format!("el agente terminó con código {code} sin dar resultado")),
+            None if code == 0 => TaskOutcome {
+                ok: true,
+                ..Default::default()
+            },
+            None => TaskOutcome::failed(format!(
+                "el agente terminó con código {code} sin dar resultado"
+            )),
         }
+    }
+
+    /// Si su CLI hace cumplir `LaunchCtx::read_only`. Una que no puede no corre como lead.
+    fn enforces_read_only(&self) -> bool {
+        true
     }
 }
 
-/// El adaptador de una TUI concreta. Uno nuevo por corrida: los que no son Claude Code
-/// van juntando el resultado mientras leen (ver `adapters.rs`).
+/// El `HeadlessAgent` de una corrida. Uno nuevo por lanzamiento: los que no son Claude
+/// Code van juntando el resultado mientras leen (ver `adapters.rs`).
+///
+/// Quién tiene implementación lo decide el registro de providers. Este `match` no vuelve:
+/// un id desconocido, el shell y una TUI custom responden `None`.
 pub fn adapter_for(agent_id: &str) -> Option<Box<dyn HeadlessAgent + Send + Sync>> {
-    match agent_id {
-        "claude-code" => Some(Box::new(ClaudeCode)),
-        "opencode" => Some(Box::<super::adapters::OpenCode>::default()),
-        "codex" => Some(Box::<super::adapters::Codex>::default()),
-        "gemini-cli" => Some(Box::<super::adapters::Gemini>::default()),
-        "kimi-code" => Some(Box::<super::adapters::Kimi>::default()),
-        _ => None,
-    }
+    crate::agents::adapter_for(agent_id)?.headless()
 }
 
 // ── Claude Code ─────────────────────────────────────────────────
@@ -74,7 +92,13 @@ pub fn adapter_for(agent_id: &str) -> Option<Box<dyn HeadlessAgent + Send + Sync
 pub struct ClaudeCode;
 
 impl HeadlessAgent for ClaudeCode {
-    fn launch(&self, prompt: &str, model: Option<&str>, budget_usd: Option<f64>, ctx: &LaunchCtx) -> Launch {
+    fn launch(
+        &self,
+        prompt: &str,
+        model: Option<&str>,
+        budget_usd: Option<f64>,
+        ctx: &LaunchCtx,
+    ) -> Launch {
         let mut args = vec![
             "-p".into(),
             prompt.into(),
@@ -114,7 +138,8 @@ impl HeadlessAgent for ClaudeCode {
                 args.push("host".into());
                 // El navegador de las tabs no pasa por el broker: solo toca la vista
                 // previa del proyecto adentro de la app, y pedir permiso por cada click
-                // haría imposible que una tarea pruebe una página. Las de orquestación
+                // haría imposible que una tarea pruebe una página. Subir archivos y correr
+                // código sí pasan (ver `BROWSER_NEEDS_APPROVAL`). Las de orquestación
                 // van según el rol: las decide quien arma el lanzamiento.
                 let mut allowed = crate::ipc::mcp::browser_tool_names();
                 allowed.extend(ctx.allowed_tools.iter().cloned());
@@ -129,6 +154,12 @@ impl HeadlessAgent for ClaudeCode {
                 args.push("--permission-prompts".into());
                 args.push("none".into());
             }
+        }
+        if ctx.read_only {
+            // Fuera del modelo, no solo denegadas al pedirlas: sin broker `acceptEdits`
+            // las aprobaría solas.
+            args.push("--disallowedTools".into());
+            args.push(super::policy::LEAD_BLOCKED_TOOLS.join(","));
         }
         if let Some(m) = model {
             args.push("--model".into());
@@ -154,9 +185,15 @@ impl HeadlessAgent for ClaudeCode {
         }
 
         Launch {
-            program: crate::agents::agent_command("claude-code").unwrap_or("claude").to_string(),
+            program: crate::agents::agent_command("claude-code")
+                .unwrap_or("claude")
+                .to_string(),
             args,
-            env: ctx.account_env.clone(),
+            env: {
+                let mut env = ctx.account_env.clone();
+                if let Some(effort) = ctx.reasoning_effort { env.insert("CLAUDE_CODE_EFFORT_LEVEL".into(), effort.into()); }
+                env
+            },
         }
     }
 
@@ -164,7 +201,9 @@ impl HeadlessAgent for ClaudeCode {
         // Tolerante a propósito: el formato del stream puede ganar campos entre versiones,
         // y una línea que no se entiende es una línea que no se muestra — nunca una tarea
         // que se cae. El crudo ya quedó guardado en el `.jsonl` igual.
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else { return Vec::new() };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(line) else {
+            return Vec::new();
+        };
         if let Some(quota) = super::quota::parse_rate_limit(&v) {
             return vec![AgentEvent::Quota { quota }];
         }
@@ -174,7 +213,10 @@ impl HeadlessAgent for ClaudeCode {
             // sesión (`hook_started`, `hook_response`) y tomarlos todos como arranque
             // emitiría tres "arrancó" para una sola tarea.
             Some("system") if v.get("subtype").and_then(|s| s.as_str()) == Some("init") => {
-                let session_id = v.get("session_id").and_then(|s| s.as_str()).map(str::to_string);
+                let session_id = v
+                    .get("session_id")
+                    .and_then(|s| s.as_str())
+                    .map(str::to_string);
                 vec![AgentEvent::Started { session_id }]
             }
             Some("assistant") => {
@@ -208,9 +250,11 @@ impl HeadlessAgent for ClaudeCode {
                 // Un cierre con error suele venir SIN texto: el motivo está en el
                 // `subtype` (`error_max_budget_usd`, por ejemplo). Sin este respaldo la
                 // tarjeta diría "falló" y nada más, que es lo mismo que no decir nada.
-                let error = text
-                    .clone()
-                    .or_else(|| v.get("subtype").and_then(|s| s.as_str()).map(str::to_string));
+                let error = text.clone().or_else(|| {
+                    v.get("subtype")
+                        .and_then(|s| s.as_str())
+                        .map(str::to_string)
+                });
 
                 vec![AgentEvent::Finished {
                     outcome: TaskOutcome {
@@ -242,5 +286,8 @@ fn input_tokens(v: &serde_json::Value) -> Option<i64> {
         get("cache_creation_input_tokens"),
         get("cache_read_input_tokens"),
     ];
-    parts.iter().any(|p| p.is_some()).then(|| parts.iter().flatten().sum())
+    parts
+        .iter()
+        .any(|p| p.is_some())
+        .then(|| parts.iter().flatten().sum())
 }

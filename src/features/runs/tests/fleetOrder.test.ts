@@ -38,6 +38,7 @@ function task(patch: Partial<Task> & { id: string }): Task {
     isolate: false,
     resultSchema: null,
     lastError: null,
+    handoff: null,
     dependsOn: [],
     startedAt: null,
     endedAt: null,
@@ -279,7 +280,7 @@ describe("runs orquestados", () => {
   function run(patch: Partial<Run> & { id: string }): Run {
     return {
       workspaceId: "w", objective: "o", cwd: "/p", status: "running", maxParallel: 2,
-      budgetUsd: null, spentUsd: 0, createdAt: 0, endedAt: null, ...patch,
+      budgetUsd: null, spentUsd: 0, createdAt: 0, endedAt: null, missionId: null, ...patch,
     };
   }
 

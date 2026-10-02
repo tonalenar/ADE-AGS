@@ -271,8 +271,19 @@ pub(super) fn claude_title(path: &Path, fallback: &str) -> SessionTitleResult {
 //   3. Leía el contenido completo de todos los archivos de sesión del sistema en cada
 //      intento de descubrimiento (cada 3s), no solo los de este proyecto.
 
-pub(super) fn gemini_home() -> PathBuf {
-    dirs::home_dir().unwrap_or_default().join(".gemini")
+/// Home de Gemini.
+///
+/// `GEMINI_CLI_HOME` no apunta al directorio `.gemini`: apunta al padre, y el CLI crea
+/// `.gemini` adentro. `Some(dir)` es ese padre (el directorio de una cuenta). `None` es
+/// la cuenta del sistema, `~/.gemini`.
+///
+/// El registro sigue con `profile: None` para Gemini. Esto solo prepara la lectura para
+/// cuando una cuenta exista; con `None` el camino no cambia.
+pub(super) fn gemini_home(profile: Option<&Path>) -> PathBuf {
+    match profile {
+        Some(dir) => dir.join(".gemini"),
+        None => dirs::home_dir().unwrap_or_default().join(".gemini"),
+    }
 }
 
 /// Carpeta que Gemini le asignó a este cwd, o `None` si nunca abrió una sesión acá.
@@ -339,8 +350,8 @@ pub(super) fn gemini_chat_files(home: &Path, cwd: &str) -> Vec<PathBuf> {
     files
 }
 
-pub(super) fn gemini_session_file(cwd: &str, after: Option<i64>) -> Option<PathBuf> {
-    gemini_session_file_in(&gemini_home(), cwd, after)
+pub(super) fn gemini_session_file(cwd: &str, after: Option<i64>, profile: Option<&Path>) -> Option<PathBuf> {
+    gemini_session_file_in(&gemini_home(profile), cwd, after)
 }
 
 pub(super) fn gemini_session_file_in(home: &Path, cwd: &str, after: Option<i64>) -> Option<PathBuf> {
@@ -595,7 +606,8 @@ pub(super) struct OpencodeSession {
 const OPENCODE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10);
 
 pub(super) fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<OpencodeSession> {
-    let mut command = crate::util::program("opencode");
+    let (program, env_var) = opencode_invocation();
+    let mut command = crate::util::program(program);
     command
         .args(["session", "list", "--format", "json", "-n", "50"])
         .current_dir(cwd)
@@ -603,7 +615,7 @@ pub(super) fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<Openco
     // Misma variable con la que se lanzó la tab (ver `accounts`): sin esto, `session list`
     // listaría las sesiones de la cuenta del sistema y el título saldría cruzado.
     if let Some(dir) = profile {
-        command.env("XDG_DATA_HOME", dir);
+        command.env(env_var, dir);
     }
     // Con plazo: esta función corre en el camino de cerrar una tab, y un `opencode`
     // colgado no puede dejar a la app esperándolo para siempre.
@@ -688,18 +700,26 @@ pub(super) fn opencode_is_placeholder_title(title: &str) -> bool {
 const KIMI_CWD_FIELDS: &[&str] =
     &["workDir", "workingDirectory", "cwd", "directory", "projectRoot", "work_dir", "root"];
 
-pub(super) fn kimi_root() -> PathBuf {
-    let home = std::env::var_os("KIMI_CODE_HOME")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".kimi-code"));
+/// Raíz `sessions/` de Kimi.
+///
+/// `Some(dir)` es el home de esa cuenta: las sesiones viven en `<dir>/sessions`, igual
+/// que bajo `KIMI_CODE_HOME`. `None` conserva la cuenta del sistema (`KIMI_CODE_HOME` o
+/// `~/.kimi-code`). Kimi sigue sin `profile` en el registro: no se inventó una variable.
+pub(super) fn kimi_root(profile: Option<&Path>) -> PathBuf {
+    let home = match profile {
+        Some(dir) => dir.to_path_buf(),
+        None => std::env::var_os("KIMI_CODE_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".kimi-code")),
+    };
     home.join("sessions")
 }
 
 /// Carpetas de sesión: los nietos de `sessions/` que tengan un `state.json`.
 /// Se camina en dos niveles exactos en vez de recursivamente porque adentro de cada sesión
 /// hay muchos más `.json` (`upcoming-goals.json`, `agents/*/plans/*`) que no son sesiones.
-pub(super) fn kimi_session_dirs() -> Vec<PathBuf> {
-    kimi_session_dirs_in(&kimi_root())
+pub(super) fn kimi_session_dirs(profile: Option<&Path>) -> Vec<PathBuf> {
+    kimi_session_dirs_in(&kimi_root(profile))
 }
 
 pub(super) fn kimi_session_dirs_in(root: &Path) -> Vec<PathBuf> {
@@ -744,8 +764,8 @@ pub(super) fn kimi_declared_cwd(state: &Value) -> Option<PathBuf> {
 /// El orden es por mtime del `state.json` (se reescribe en cada turno). Cuando el cwd no se
 /// puede confirmar, el piso `after` — el arranque de ESTA tab — es lo único que separa esta
 /// sesión de la de otra tab, igual que con las TUIs custom.
-pub(super) fn kimi_session_dir(cwd: Option<&str>, after: Option<i64>) -> Option<PathBuf> {
-    kimi_session_dir_in(&kimi_root(), cwd, after)
+pub(super) fn kimi_session_dir(cwd: Option<&str>, after: Option<i64>, profile: Option<&Path>) -> Option<PathBuf> {
+    kimi_session_dir_in(&kimi_root(profile), cwd, after)
 }
 
 pub(super) fn kimi_session_dir_in(root: &Path, cwd: Option<&str>, after: Option<i64>) -> Option<PathBuf> {
@@ -765,8 +785,10 @@ pub(super) fn kimi_session_dir_in(root: &Path, cwd: Option<&str>, after: Option<
         .and_then(|p| p.parent().map(Path::to_path_buf))
 }
 
-pub(super) fn kimi_session_dir_by_id(session_id: &str) -> Option<PathBuf> {
-    kimi_session_dirs().into_iter().find(|d| kimi_session_id(d).as_deref() == Some(session_id))
+pub(super) fn kimi_session_dir_by_id(session_id: &str, profile: Option<&Path>) -> Option<PathBuf> {
+    kimi_session_dirs(profile)
+        .into_iter()
+        .find(|d| kimi_session_id(d).as_deref() == Some(session_id))
 }
 
 /// `agents/main/wire.jsonl` es el stream del agente principal — la conversación. Los
@@ -844,7 +866,23 @@ pub(super) fn custom_title(path: &Path, fallback: &str) -> SessionTitleResult {
 /// TUI que no está en el registro cae en `None`, que es la rama de las TUIs custom: son
 /// justamente las que declaran a mano dónde buscar.
 fn source_of(agent_id: &str) -> SessionSource {
-    crate::agents::agent_def(agent_id).map_or(SessionSource::None, |d| d.sessions)
+    // La fila del provider elige la estrategia. El `match` de abajo sigue siendo el parser
+    // de cada formato. Una TUI que no está en el registro cae en `None`: es la rama custom.
+    crate::agents::adapter_for(agent_id)
+        .map(|adapter| adapter.def().sessions)
+        .unwrap_or(SessionSource::None)
+}
+
+/// Binario y variable de cuenta de OpenCode, leídos de su fila.
+///
+/// El parser de su JSON sigue siendo de OpenCode. El nombre del ejecutable y la variable
+/// no: si la fila cambia, `session list` y `export` siguen a la fila.
+pub(super) fn opencode_invocation() -> (&'static str, &'static str) {
+    let def = crate::agents::adapter_for("opencode").map(|adapter| adapter.def());
+    (
+        def.map(|d| d.command).unwrap_or("opencode"),
+        def.and_then(|d| d.profile).map(|p| p.env_var).unwrap_or("XDG_DATA_HOME"),
+    )
 }
 
 /// Archivo de sesión de una entrada del historial, resolviendo por el camino propio de
@@ -861,10 +899,13 @@ pub fn session_file_for(
 ) -> Option<PathBuf> {
     match source_of(agent_id) {
         SessionSource::ClaudeProjects => claude_session_file(cwd, session_id, None, profile),
-        SessionSource::GeminiTmp => match session_id {
-            Some(id) => gemini_session_file_by_id(&gemini_home(), cwd, id),
-            None => gemini_session_file(cwd, None),
-        },
+        SessionSource::GeminiTmp => {
+            let home = gemini_home(profile);
+            match session_id {
+                Some(id) => gemini_session_file_by_id(&home, cwd, id),
+                None => gemini_session_file_in(&home, cwd, None),
+            }
+        }
         SessionSource::CodexRollouts => codex_session_file(cwd, None, profile),
         // OpenCode no expone un archivo de sesión legible; su transcripción se pide con
         // `opencode export <id>` y la maneja `export::opencode_transcript` aparte.
@@ -873,8 +914,8 @@ pub fn session_file_for(
         // por sesión: se resuelve primero la carpeta y de ahí se baja al `wire.jsonl`.
         SessionSource::KimiSessions => {
             let dir = match session_id {
-                Some(id) => kimi_session_dir_by_id(id),
-                None => kimi_session_dir(Some(cwd), None),
+                Some(id) => kimi_session_dir_by_id(id, profile),
+                None => kimi_session_dir(Some(cwd), None, profile),
             }?;
             kimi_wire_file(&dir)
         }
@@ -930,12 +971,37 @@ pub async fn discover_session_id(
     .map_err(|e| e.to_string())
 }
 
+/// Si un id de sesión se puede pegar en la línea de comandos de reanudación sin riesgo.
+///
+/// Los ids salen de nombres y contenidos de archivos que la propia TUI (o cualquier agente)
+/// puede escribir, y van a parar a un comando que se parte por espacios y, con prelaunch en
+/// Windows, pasa por `cmd /C`: un archivo llamado `x --dangerously-skip-permissions.jsonl`
+/// o `x & calc.jsonl` inyectaría un flag o un comando. Los ids reales (UUID, `ses_…`,
+/// `rollout-…`) caben de sobra en este alfabeto, y no pueden empezar con `-`.
+pub fn is_safe_session_id(id: &str) -> bool {
+    !id.is_empty()
+        && id.len() <= 128
+        && !id.starts_with('-')
+        && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | ':'))
+}
+
+/// [`discover_unchecked`], descartando ids que no pasan [`is_safe_session_id`].
+pub(crate) fn discover_session_id_sync(
+    agent_id: &str,
+    cwd: &str,
+    started_after: i64,
+    profile: Option<&Path>,
+    custom: Option<&crate::agents::CustomAgent>,
+) -> Option<String> {
+    discover_unchecked(agent_id, cwd, started_after, profile, custom).filter(|id| is_safe_session_id(id))
+}
+
 /// `custom` es la TUI personalizada ya resuelta, o `None` para las de fábrica.
 ///
 /// Se recibe resuelta en vez de un `DbConnection` porque hay un llamador que YA tiene la
 /// conexión tomada (`archive_tab_row`): volver a pedir el lock desde adentro contra un
 /// `Mutex` no reentrante sería un deadlock, no un error.
-pub(crate) fn discover_session_id_sync(
+fn discover_unchecked(
     agent_id: &str,
     cwd: &str,
     started_after: i64,
@@ -949,7 +1015,7 @@ pub(crate) fn discover_session_id_sync(
             path.file_stem().map(|s| s.to_string_lossy().to_string())
         }
         SessionSource::GeminiTmp => {
-            let path = gemini_session_file(&cwd, Some(started_after))?;
+            let path = gemini_session_file(&cwd, Some(started_after), profile)?;
             // `sessionId` está en la cabecera; `find_string_field` queda de respaldo por si
             // una versión emite el archivo sin ella.
             gemini_meta(&path)
@@ -968,7 +1034,7 @@ pub(crate) fn discover_session_id_sync(
             opencode_session(&cwd, Some(started_after), profile).map(|s| s.id)
         }
         SessionSource::KimiSessions => {
-            let dir = kimi_session_dir(Some(&cwd), Some(started_after))?;
+            let dir = kimi_session_dir(Some(&cwd), Some(started_after), profile)?;
             kimi_session_id(&dir)
         }
         // TUI custom: solo si el usuario declaró dónde guarda sus sesiones.
@@ -1028,9 +1094,10 @@ pub(crate) fn get_session_title_sync(
             None => fallback_result(&fallback),
         },
         SessionSource::GeminiTmp => {
+            let home = gemini_home(profile);
             let found = match session_id.as_deref() {
-                Some(id) => gemini_session_file_by_id(&gemini_home(), &cwd, id),
-                None => gemini_session_file(&cwd, None),
+                Some(id) => gemini_session_file_by_id(&home, &cwd, id),
+                None => gemini_session_file_in(&home, &cwd, None),
             };
             match found {
                 Some(path) => gemini_title(&path, &fallback),
@@ -1049,8 +1116,8 @@ pub(crate) fn get_session_title_sync(
         }
         SessionSource::KimiSessions => {
             let found = match session_id.as_deref() {
-                Some(id) => kimi_session_dir_by_id(id),
-                None => kimi_session_dir(Some(&cwd), None),
+                Some(id) => kimi_session_dir_by_id(id, profile),
+                None => kimi_session_dir(Some(&cwd), None, profile),
             };
             match found {
                 Some(dir) => kimi_title(&dir, &fallback),
