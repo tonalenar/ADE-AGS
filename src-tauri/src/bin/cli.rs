@@ -71,6 +71,14 @@ PORTALES DEL CANVAS — navegadores conectados con esta terminal (orquestador: l
   portal screenshot|console|layout <portal>   Foto, consola y medidas
                                               (sin eval, upload ni cookies: eso es del usuario)
 
+ROTINAS — mensajes a la hora, a vos, a un agente que alcanzás o al usuario
+  routines                                    Las tuyas (en un shell: todas)
+  routine create <nombre> \"texto\" <cuándo>   · --every 30m | --at 09:00 [--days seg,qua] | --in 45m
+              [--to <agente>] [--remind]      · a quién: vos (default), otro agente, o --remind al usuario
+  routine show|run|enable|disable|delete <nombre>
+  routine edit <nombre> [\"texto\"] [--rename <n>] [<cuándo>]
+                                              (mínimo 5 min; no recupera lo que pasó con la app cerrada)
+
 PISOS — copias aisladas del proyecto (worktree + rama + canvas propio)
   floors                                      Los pisos de este proyecto y en cuál estás
   floor create <nombre> [--from <rama>]       Solo orquestadores; parte de HEAD o de esa rama
@@ -280,9 +288,9 @@ impl CliError {
     }
 }
 
-/// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*` y `floor.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
+/// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*` y `routine.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    if !(command.starts_with("peer.") || command.starts_with("note.") || command.starts_with("portal.") || command.starts_with("notify.") || command.starts_with("role.") || command.starts_with("floor.")) || parsed.get("from").is_some() {
+    if !(command.starts_with("peer.") || command.starts_with("note.") || command.starts_with("portal.") || command.starts_with("notify.") || command.starts_with("role.") || command.starts_with("floor.") || command.starts_with("routine.")) || parsed.get("from").is_some() {
         return parsed;
     }
     if let (Ok(tab), Some(map)) = (std::env::var("ADE_TAB_ID"), parsed.as_object_mut()) {
@@ -305,6 +313,7 @@ fn shortcut(word: &str) -> Option<&'static str> {
         "notify" => Some("notify.send"),
         "roles" => Some("role.list"),
         "floors" => Some("floor.list"),
+        "routines" => Some("routine.list"),
         _ => None,
     }
 }
@@ -336,6 +345,10 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "notify.send" => &["message"],
         // `ccode role create "Revisor" "Procure falhas..."`; el texto también va con --file.
         "floor.create" => &["name"],
+        // `ccode routine create Testes "rode os testes" --at 09:00`
+        "routine.create" => &["name", "text"],
+        "routine.edit" => &["name", "text"],
+        "routine.show" | "routine.enable" | "routine.disable" | "routine.run" | "routine.delete" => &["name"],
         "role.show" => &["role"],
         "role.create" => &["name", "content"],
         "role.edit" => &["role", "content"],
@@ -531,6 +544,8 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
         "peer.tell" => Duration::from_secs(90),
         // Cargar una página o esperar un texto puede tardar; el backend corta a los 90 s.
         c if c.starts_with("portal.") => Duration::from_secs(120),
+        // `routine run` espera a que el agente de destino se calle (hasta 60 s).
+        "routine.run" => Duration::from_secs(120),
         // Abrir la tab, esperar su PTY (15s) y que arranque (25s) antes de darle la tarea.
         "peer.recruit" => Duration::from_secs(120),
         // Validar un plan puede sondear el roster (lanzar `opencode models`) y crear worktrees.

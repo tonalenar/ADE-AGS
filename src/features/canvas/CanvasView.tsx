@@ -23,6 +23,7 @@ import {
   type Box, type Rect, type Viewport,
 } from "./geometry";
 import { FloorBar } from "./FloorBar";
+import { RoutinesPanel } from "./RoutinesPanel";
 import { boardKey, canvasActions, useActiveBoardKey, useCanvasStore } from "./store";
 
 interface AgentNodeData extends Record<string, unknown> {
@@ -148,7 +149,8 @@ function CanvasInner() {
     // Solo cuando cambia el agente activo, no con cada paneo.
   }, [activeTabId]);
 
-  // Una nota seleccionada no es un agente activo: se lleva aparte.
+  const [routinesOpen, setRoutinesOpen] = useState(false);
+  // Una nota o un portal seleccionado no es un agente activo: se lleva aparte.
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
 
   const agentNodes: AgentFlowNode[] = useMemo(() => tabs.flatMap((tab) => {
@@ -263,8 +265,9 @@ function CanvasInner() {
       </ReactFlow>
       <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
         <FloorBar />
+        {routinesOpen && <RoutinesPanel onClose={() => setRoutinesOpen(false)} />}
       </div>
-      <CanvasControls zoom={vp.zoom}
+      <CanvasControls zoom={vp.zoom} routinesOpen={routinesOpen} onToggleRoutines={() => setRoutinesOpen((o) => !o)}
         onAddPortal={() => {
           if (!key) return;
           const at = { x: (size.width / 2 - vp.x) / vp.zoom - 320, y: (size.height / 2 - vp.y) / vp.zoom - 220 };
@@ -289,8 +292,9 @@ function CanvasInner() {
 
 /** Los botones de zoom y el minimapa. Van en su propia capa, por encima de las
  *  terminales: abajo, una terminal viva los taparía. */
-function CanvasControls({ zoom, onFit, onReset, onAddNote, onAddPortal }: {
+function CanvasControls({ zoom, onFit, onReset, onAddNote, onAddPortal, routinesOpen, onToggleRoutines }: {
   zoom: number; onFit: () => void; onReset: () => void; onAddNote: () => void; onAddPortal: () => void;
+  routinesOpen: boolean; onToggleRoutines: () => void;
 }) {
   const { t } = useTranslation();
   const rf = useReactFlow();
@@ -302,6 +306,8 @@ function CanvasControls({ zoom, onFit, onReset, onAddNote, onAddPortal }: {
         border border-gray-200 dark:border-white/10 bg-white/95 dark:bg-surface-raised/95 shadow-sm">
         <Button variant="custom" className={button} onClick={onAddNote} title={t("canvas.addNoteHint")}>{t("canvas.addNote")}</Button>
         <Button variant="custom" className={button} onClick={onAddPortal} title={t("canvas.addPortalHint")}>{t("canvas.addPortal")}</Button>
+        <Button variant="custom" className={button} onClick={onToggleRoutines} aria-pressed={routinesOpen}
+          title={t("canvas.routines.hint")}>{t("canvas.routines.title")}</Button>
         <span className="w-px h-4 mx-1 bg-gray-200 dark:bg-white/10" />
         <Button variant="custom" className={button} onClick={() => rf.zoomOut({ duration: 160 })} aria-label={t("canvas.zoomOut")}>−</Button>
         <span className="w-11 text-center text-[11px] tabular-nums text-gray-500 dark:text-gray-400">

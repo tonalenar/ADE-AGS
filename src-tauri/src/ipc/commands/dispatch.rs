@@ -20,6 +20,9 @@ use super::notes::{note_create, note_edit, note_list, note_read, note_write};
 use super::portals::{portal_action, portal_create, portal_list};
 use super::role::{role_create, role_edit, role_list, role_show};
 use super::floor::{floor_create, floor_list};
+use super::routine::{
+    routine_create, routine_delete, routine_disable, routine_edit, routine_enable, routine_list, routine_run, routine_show,
+};
 use super::peers::{peer_ask, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_tell};
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
@@ -78,6 +81,15 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         // Pisos: espacios aislados del proyecto (ver `floor`).
         "floor.list" => floor_list(app, args),
         "floor.create" => floor_create(app, args),
+        // Rotinas: mensajes a la hora (ver `routine`).
+        "routine.list" => routine_list(app, args),
+        "routine.show" => routine_show(app, args),
+        "routine.create" => routine_create(app, args),
+        "routine.edit" => routine_edit(app, args),
+        "routine.enable" => routine_enable(app, args),
+        "routine.disable" => routine_disable(app, args),
+        "routine.run" => routine_run(app, args),
+        "routine.delete" => routine_delete(app, args),
         "agent.list" => agent_list(app),
         "account.list" => account_list(app),
         "prelaunch.list" => prelaunch_list(app),

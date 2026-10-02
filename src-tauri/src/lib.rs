@@ -19,6 +19,7 @@ mod orchestrator;
 mod prelaunch;
 mod preview;
 mod roles;
+mod routines;
 mod runs;
 mod scm;
 mod session;

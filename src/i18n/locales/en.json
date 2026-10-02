@@ -1691,5 +1691,18 @@
   "canvas.floor.addHint": "A new isolated copy of the project (worktree + branch) with its own canvas.",
   "canvas.floor.name": "Floor name",
   "canvas.floor.namePlaceholder": "Floor name…",
-  "canvas.floor.noAgent": "There is no agent available to open on this floor."
+  "canvas.floor.noAgent": "There is no agent available to open on this floor.",
+  "canvas.routines.title": "Routines",
+  "canvas.routines.hint": "Scheduled messages to an agent or to you. Create them with ccode routine create.",
+  "canvas.routines.close": "Close",
+  "canvas.routines.empty": "No routines. An agent (or you, in a terminal) creates one with `ccode routine create <name> \"text\" --every 30m | --at 09:00 | --in 45m`.",
+  "canvas.routines.on": "On",
+  "canvas.routines.off": "Off",
+  "canvas.routines.run": "Run",
+  "canvas.routines.runHint": "Fires now, without changing the schedule",
+  "canvas.routines.delete": "Delete",
+  "canvas.routines.confirm": "Delete?",
+  "canvas.routines.reminder": "reminder for you",
+  "canvas.routines.next": "next:",
+  "canvas.routines.last": "last:"
 }

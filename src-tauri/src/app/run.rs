@@ -39,6 +39,11 @@ pub fn run() {
             // Pisos: worktrees aislados del proyecto, cada uno con su canvas
             crate::floors::floor_list,
             crate::floors::floor_create,
+            // Rotinas: mensajes programados a un agente o al usuario
+            crate::ipc::commands::routine::routine_list_all,
+            crate::ipc::commands::routine::routine_set_enabled,
+            crate::ipc::commands::routine::routine_run_now,
+            crate::ipc::commands::routine::routine_remove,
             // Persistencia SQLite — workspaces (layouts guardados de ventanas/tabs)
             crate::database::db_list_workspaces,
             crate::database::db_save_workspace,
@@ -351,6 +356,9 @@ pub fn run() {
             // antes de que haya ventanas, así la lista de skills ya la muestra al abrir.
             // Nunca falla el arranque — ver `crate::skills::bundled`.
             crate::skills::ensure_bundled_skills(app.handle(), &db);
+
+            // Las rotinas se disparan solas, con la app abierta (ver `routines`).
+            crate::ipc::start_routine_scheduler(app.handle().clone());
 
             // Las tareas headless que quedaron `running` son de una ejecución anterior:
             // sus procesos eran hijos de la app y murieron con ella. Si no se cierran acá,

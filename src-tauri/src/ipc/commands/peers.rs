@@ -28,6 +28,8 @@ pub(crate) struct OpenTab {
     pub id: String,
     pub name: String,
     pub agent: String,
+    /// El id del agente (`claude`, `codex`, `bash`…): `agent` es solo la etiqueta.
+    pub agent_id: String,
     pub cwd: String,
     pub window: String,
 }
@@ -40,6 +42,7 @@ pub(super) fn open_tabs(app: &AppHandle) -> Result<Vec<OpenTab>, String> {
         .filter_map(|r| {
             let id = r.get("id")?.as_str()?.to_string();
             let agent = r.get("agentLabel").and_then(Value::as_str).unwrap_or("").to_string();
+            let agent_id = r.get("agentId").and_then(Value::as_str).unwrap_or("").to_string();
             let name = r
                 .get("title")
                 .and_then(Value::as_str)
@@ -50,6 +53,7 @@ pub(super) fn open_tabs(app: &AppHandle) -> Result<Vec<OpenTab>, String> {
                 id,
                 name,
                 agent,
+                agent_id,
                 cwd: r.get("cwd").and_then(Value::as_str).unwrap_or("").to_string(),
                 window: r.get("window").and_then(Value::as_str).unwrap_or("").to_string(),
             })
@@ -65,7 +69,7 @@ pub(super) fn caller(args: &Value) -> Result<String, String> {
 
 /// Las tabs que `from` alcanza y siguen abiertas: sus vecinas o, si es orquestadora, todo
 /// su equipo (ver `canvas::reachable`).
-fn peers(app: &AppHandle, from: &str) -> Result<(Option<OpenTab>, Vec<OpenTab>), String> {
+pub(super) fn peers(app: &AppHandle, from: &str) -> Result<(Option<OpenTab>, Vec<OpenTab>), String> {
     let boards = crate::canvas::load_boards();
     let ids = crate::canvas::reachable(&boards, from);
     let tabs = open_tabs(app)?;
@@ -446,7 +450,7 @@ mod test {
     use super::*;
 
     fn tab(id: &str, name: &str) -> OpenTab {
-        OpenTab { id: id.into(), name: name.into(), agent: "Claude Code".into(), cwd: "/p".into(), window: "main".into() }
+        OpenTab { id: id.into(), name: name.into(), agent: "Claude Code".into(), agent_id: "claude".into(), cwd: "/p".into(), window: "main".into() }
     }
 
     #[test]

@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.13.0
+version: 1.14.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -421,6 +421,32 @@ ccode peer disconnect Backend Tests
 - Coordinate, don't micromanage: give each recruit one clear task, use `peer ask` when you
   need the answer to continue and `peer tell` when you don't, and check on long work with
   `peer check` instead of asking again.
+
+### Routines
+
+A routine sends a message on a schedule: to yourself, to an agent you reach, or as a
+reminder to the user. Use one when the user asks for something recurring ("run the tests
+every morning") or "remind me in an hour". The message arrives as `[Rotina '<name>' via ADE
+AGS] <text>`: treat it as a prompt from the schedule, not as the user typing.
+
+```bash
+ccode routine create Tests "run the suite and report failures" --at 09:00 --days seg,qua,sex
+ccode routine create Sweep "check what changed since the last sweep" --every 2h --to Reviewer
+ccode routine create Standup "time for the standup" --in 45m --remind    # a notice to the user
+ccode routines                                  # yours, with next/last run and result
+ccode routine run Tests                         # fire now, schedule untouched
+ccode routine edit Tests --at 10:00
+ccode routine disable Tests / enable / delete Tests
+```
+
+- When: `--every 30m|2h|1d` (at least 5 minutes), `--at 09:00 [--days seg,ter,qua,qui,sex,sab,dom]`
+  (local time), or `--in 45m` (once). Exactly one of them.
+- It only fires while the app is open, and it does **not** catch up: what happened while the
+  app was closed is skipped (a missed one-off is marked as lost). Precision is about 15 s.
+- The text is flattened to one short line (1000 chars). Put detail in a note and say where.
+- You manage the routines you created. You cannot schedule shell commands; if the user wants
+  that, they create it from a terminal.
+- There is a limit of 30 routines. Don't create one per task: reuse and `edit`.
 
 ### Floors
 

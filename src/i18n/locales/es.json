@@ -1691,5 +1691,18 @@
   "canvas.floor.addHint": "Una copia aislada nueva del proyecto (worktree + rama) con su propio canvas.",
   "canvas.floor.name": "Nombre del piso",
   "canvas.floor.namePlaceholder": "Nombre del piso…",
-  "canvas.floor.noAgent": "No hay un agente disponible para abrir en este piso."
+  "canvas.floor.noAgent": "No hay un agente disponible para abrir en este piso.",
+  "canvas.routines.title": "Rutinas",
+  "canvas.routines.hint": "Mensajes programados a un agente o a vos. Se crean con ccode routine create.",
+  "canvas.routines.close": "Cerrar",
+  "canvas.routines.empty": "Ninguna rutina. Un agente (o vos, en una terminal) la crea con `ccode routine create <nombre> \"texto\" --every 30m | --at 09:00 | --in 45m`.",
+  "canvas.routines.on": "Activa",
+  "canvas.routines.off": "Apagada",
+  "canvas.routines.run": "Ejecutar",
+  "canvas.routines.runHint": "Dispara ahora, sin cambiar el horario",
+  "canvas.routines.delete": "Borrar",
+  "canvas.routines.confirm": "¿Borrar?",
+  "canvas.routines.reminder": "recordatorio para vos",
+  "canvas.routines.next": "próxima:",
+  "canvas.routines.last": "última:"
 }

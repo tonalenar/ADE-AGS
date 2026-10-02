@@ -7,6 +7,7 @@ mod notes;
 mod notify;
 mod floor;
 mod peers;
+pub mod routine;
 mod role;
 mod portals;
 mod browser;

@@ -609,6 +609,7 @@ dependencies = [
  "bytes",
  "cairo-rs",
  "cc",
+ "chrono",
  "dirs 5.0.1",
  "dunce",
  "futures-util",
