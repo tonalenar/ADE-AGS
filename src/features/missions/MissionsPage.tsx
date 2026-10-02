@@ -18,6 +18,7 @@ import { useSquadAccountLabel } from "@/features/squads/accountLabel";
 import type { Squad } from "@/features/squads/types";
 
 import { MissionDialog } from "./MissionDialog";
+import { MissionMap } from "./MissionMap";
 import { MissionReviewPanel } from "./MissionReviewPanel";
 import {
   AGENT_STATES, agentStateOf, approvalsFor, blockedRuns, canEdit, countAgentStates, dependencyLabels, emptyForm,
@@ -418,6 +419,8 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError 
           </p>
         </Section>
       )}
+
+      <MissionMap tasks={tasks} accountLabel={accountLabel} />
 
       {tasks.length > 0 && (
         <Section title={t("missions.detail.tasks")}>
