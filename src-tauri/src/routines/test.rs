@@ -23,6 +23,8 @@ fn routine(schedule: Schedule, next: Option<DateTime<Local>>) -> Routine {
         last_run: None,
         last_result: String::new(),
         runs: 0,
+        catch_up: false,
+        missed_at: None,
     }
 }
 
@@ -201,4 +203,72 @@ fn el_archivo_conserva_el_horario_con_su_forma() {
     assert!(json.contains("\"kind\":\"daily\"") && json.contains("targetTab"), "{json}");
     let back: Routine = serde_json::from_str(&json).unwrap();
     assert_eq!(back, r);
+}
+
+fn recoverable(schedule: Schedule, due: DateTime<Local>) -> Routine {
+    let mut r = routine(schedule, Some(due));
+    r.catch_up = true;
+    r
+}
+
+#[test]
+fn con_catch_up_una_diaria_perdida_espera_una_sola_recuperacion() {
+    let now = monday_noon();
+    let missed = now - Duration::hours(3);
+    let mut list = vec![recoverable(Schedule::Daily { hour: 9, minute: 0, days: vec![] }, missed)];
+    assert!(recover(&mut list, now));
+    assert_eq!(list[0].missed_at, Some(missed.timestamp()));
+    assert!(list[0].enabled);
+    assert!(list[0].next_run.unwrap() > now.timestamp(), "la próxima normal sigue en su hora");
+    assert_eq!(pending_catch_up(&list), vec!["r1".to_string()]);
+}
+
+#[test]
+fn sin_catch_up_o_con_intervalo_o_muy_vieja_no_se_recupera() {
+    let now = monday_noon();
+    let mut plain = routine(Schedule::Daily { hour: 9, minute: 0, days: vec![] }, Some(now - Duration::hours(3)));
+    plain.id = "plain".into();
+    let mut every = recoverable(Schedule::Every { secs: 600 }, now - Duration::hours(3));
+    every.id = "every".into();
+    let mut old = recoverable(Schedule::Daily { hour: 9, minute: 0, days: vec![] }, now - Duration::hours(30));
+    old.id = "old".into();
+    let mut list = vec![plain, every, old];
+    recover(&mut list, now);
+    assert!(pending_catch_up(&list).is_empty());
+}
+
+#[test]
+fn una_unica_recuperable_sigue_encendida_sin_proxima_vez() {
+    let now = monday_noon();
+    let at = now - Duration::hours(1);
+    let mut list = vec![recoverable(Schedule::Once { at: at.timestamp() }, at)];
+    recover(&mut list, now);
+    assert!(list[0].enabled && list[0].next_run.is_none());
+    assert_eq!(list[0].missed_at, Some(at.timestamp()));
+    assert!(finish_catch_up(&mut list[0], now, Ok("ok".into()), now.timestamp()));
+    assert!(!list[0].enabled && list[0].missed_at.is_none());
+    assert!(list[0].last_result.starts_with("recuperada"), "{}", list[0].last_result);
+    assert_eq!(list[0].runs, 1);
+}
+
+#[test]
+fn si_el_destino_no_esta_abierto_se_reintenta_y_pasado_el_plazo_se_desiste() {
+    let now = monday_noon();
+    let started = now.timestamp();
+    let mut r = recoverable(Schedule::Daily { hour: 9, minute: 0, days: vec![] }, now - Duration::hours(3));
+    r.missed_at = Some((now - Duration::hours(3)).timestamp());
+    assert!(!finish_catch_up(&mut r, now + Duration::minutes(1), Err("aba fechada".into()), started));
+    assert!(r.missed_at.is_some(), "sigue esperando");
+    assert!(finish_catch_up(&mut r, now + Duration::minutes(16), Err("aba fechada".into()), started));
+    assert!(r.missed_at.is_none() && r.last_result.starts_with("perdida"), "{}", r.last_result);
+    assert!(r.enabled, "una diaria sigue su horario normal");
+}
+
+#[test]
+fn correr_en_su_hora_supera_la_recuperacion_pendiente() {
+    let now = monday_noon();
+    let mut r = routine(Schedule::Daily { hour: 9, minute: 0, days: vec![] }, Some(now));
+    r.missed_at = Some(now.timestamp() - 100);
+    after_run(&mut r, now, "ok".into());
+    assert!(r.missed_at.is_none());
 }

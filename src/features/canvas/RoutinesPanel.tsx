@@ -21,6 +21,8 @@ export interface Routine {
   lastRun: number | null;
   lastResult: string;
   runs: number;
+  catchUp: boolean;
+  missedAt: number | null;
 }
 
 const DAYS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"];
@@ -75,6 +77,7 @@ export function RoutinesPanel({ onClose }: { onClose: () => void }) {
   const fail = (e: unknown) => AlertaToast(t("canvas.routines.title"), String(e), "error", 6000);
 
   const toggle = (r: Routine) => invoke("routine_set_enabled", { id: r.id, enabled: !r.enabled }).catch(fail);
+  const toggleCatchUp = (r: Routine) => invoke("routine_set_catch_up", { id: r.id, catchUp: !r.catchUp }).catch(fail);
   const runNow = async (r: Routine) => {
     setRunning(r.id);
     try {
@@ -120,6 +123,12 @@ export function RoutinesPanel({ onClose }: { onClose: () => void }) {
                 <Button variant="custom" className={small} onClick={() => toggle(r)} aria-pressed={r.enabled}>
                   {r.enabled ? t("canvas.routines.on") : t("canvas.routines.off")}
                 </Button>
+                <Button variant="custom" onClick={() => toggleCatchUp(r)} aria-pressed={r.catchUp}
+                  disabled={r.schedule.kind === "every"}
+                  title={r.schedule.kind === "every" ? t("canvas.routines.catchUpNever") : r.catchUp ? t("canvas.routines.catchUpOn") : t("canvas.routines.catchUpOff")}
+                  className={`${small} ${r.catchUp ? "bg-accent-500/15 text-accent-600 dark:text-accent-300" : ""}`}>
+                  {t("canvas.routines.catchUp")}
+                </Button>
                 <Button variant="custom" className={small} disabled={running === r.id} onClick={() => runNow(r)}
                   title={t("canvas.routines.runHint")}>
                   {running === r.id ? "…" : t("canvas.routines.run")}
@@ -135,6 +144,11 @@ export function RoutinesPanel({ onClose }: { onClose: () => void }) {
                 {r.enabled && r.nextRun ? ` · ${t("canvas.routines.next")} ${when(r.nextRun)}` : ""}
               </div>
               <div className="mt-0.5 truncate text-[11px] text-gray-400 dark:text-gray-500" title={r.text}>“{r.text}”</div>
+              {r.missedAt ? (
+                <div className="mt-0.5 text-[10.5px] text-amber-600 dark:text-amber-400">
+                  {t("canvas.routines.waiting")} {when(r.missedAt)}
+                </div>
+              ) : null}
               {r.lastRun ? (
                 <div className="mt-0.5 text-[10.5px] text-gray-400 dark:text-gray-500">
                   {t("canvas.routines.last")} {when(r.lastRun)} · {r.lastResult}

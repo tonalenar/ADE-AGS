@@ -10,10 +10,14 @@
 //!
 //! ## Decisões
 //!
-//! - **Sem recuperar o que se perdeu.** Se a app estava fechada na hora, a rotina não roda
-//!   quando ela abre: "todo dia às 9h" aberta às 15h dispararia fora de hora, e uma rotina
-//!   a cada 10 min rodaria 50 vezes de uma vez. Recalcula-se a partir de agora. Um lembrete
-//!   único perdido fica marcado como perdido, para que não se confunda com um que rodou.
+//! - **Recuperar o que se perdeu é opcional e limitado.** Se a app estava fechada na hora, a
+//!   rotina por padrão não roda quando ela abre: "todo dia às 9h" aberta às 15h dispararia
+//!   fora de hora. Recalcula-se a partir de agora, e um lembrete único perdido fica marcado
+//!   como perdido. Com `catch_up` ligado (`--catch-up`), uma rotina diária ou única perdida
+//!   há no máximo 24 h roda **uma vez** ao abrir (nunca uma por ocorrência perdida), assim
+//!   que o agente de destino estiver aberto; se ele não abrir em 15 min, desiste e marca
+//!   como perdida. As de intervalo ("a cada 10 min") nunca recuperam: rodariam de uma vez
+//!   tantas vezes quantas se perderam, e a próxima já vem logo.
 //! - **Intervalo mínimo de 5 minutos.** Um agente não pode se mandar uma mensagem a cada
 //!   segundo; o texto dispara um turno inteiro do outro lado.
 //! - **Um texto curto, numa linha.** O que a rotina escreve num terminal tem que ser uma
@@ -64,7 +68,18 @@ pub struct Routine {
     pub last_run: Option<i64>,
     pub last_result: String,
     pub runs: u64,
+    /// Recuperar uma execução perdida com a app fechada (ver o módulo).
+    #[serde(default)]
+    pub catch_up: bool,
+    /// A hora (unix) da execução perdida que espera ser recuperada ao abrir o agente.
+    #[serde(default)]
+    pub missed_at: Option<i64>,
 }
+
+/// O quanto uma execução perdida ainda vale a pena recuperar.
+pub const CATCH_UP_MAX_SECS: i64 = 24 * 3600;
+/// Quanto, desde que a app abriu, se espera o agente de destino antes de desistir.
+pub const CATCH_UP_RETRY_SECS: i64 = 15 * 60;
 
 // ── Horários ────────────────────────────────────────────────────────
 
@@ -243,17 +258,24 @@ pub fn find<'a>(routines: &'a [Routine], wanted: &str) -> Result<&'a Routine, St
     }
 }
 
-/// Ao abrir a app: nada do que se perdeu volta a rodar (ver o módulo). Recalcula a próxima
-/// vez a partir de agora; um lembrete único atrasado fica desligado e marcado.
+/// Ao abrir a app: o que se perdeu não volta a rodar de uma vez (ver o módulo). Recalcula a
+/// próxima vez a partir de agora; um lembrete único atrasado fica desligado e marcado. As que
+/// pediram `catch_up` (diárias ou únicas, perdidas há no máximo 24 h) ficam com `missed_at`
+/// à espera de serem recuperadas uma vez (ver [`pending_catch_up`]).
 pub fn recover(routines: &mut [Routine], now: DateTime<Local>) -> bool {
     let mut changed = false;
     for r in routines.iter_mut().filter(|r| r.enabled) {
-        let overdue = r.next_run.is_some_and(|n| n <= now.timestamp());
-        if !overdue {
-            continue;
-        }
+        let Some(due) = r.next_run.filter(|n| *n <= now.timestamp()) else { continue };
         changed = true;
+        let recoverable = r.catch_up
+            && !matches!(r.schedule, Schedule::Every { .. })
+            && now.timestamp() - due <= CATCH_UP_MAX_SECS;
+        if recoverable {
+            r.missed_at = Some(due);
+        }
         match r.schedule {
+            // A única que se recupera segue ligada, sem próxima vez, até que rode ou desista.
+            Schedule::Once { .. } if recoverable => r.next_run = None,
             Schedule::Once { .. } => {
                 r.enabled = false;
                 r.next_run = None;
@@ -265,11 +287,48 @@ pub fn recover(routines: &mut [Routine], now: DateTime<Local>) -> bool {
     changed
 }
 
+/// As que esperam ser recuperadas.
+pub fn pending_catch_up(routines: &[Routine]) -> Vec<String> {
+    routines.iter().filter(|r| r.enabled && r.missed_at.is_some()).map(|r| r.id.clone()).collect()
+}
+
+/// Anota o resultado de tentar recuperar uma rotina. `true` = resolvida (rodou ou desistiu);
+/// `false` = o destino ainda não está aberto, tenta de novo no próximo tick. `started` é
+/// quando a app abriu: passado `CATCH_UP_RETRY_SECS` dela, ou `CATCH_UP_MAX_SECS` da hora
+/// perdida, desiste.
+pub fn finish_catch_up(r: &mut Routine, now: DateTime<Local>, result: Result<String, String>, started: i64) -> bool {
+    let Some(missed) = r.missed_at else { return true };
+    let when = Local.timestamp_opt(missed, 0).single().map(|t| t.format("%H:%M").to_string()).unwrap_or_default();
+    let resolved = match result {
+        Ok(msg) => {
+            r.last_run = Some(now.timestamp());
+            r.last_result = format!("recuperada (perdeu às {when}): {msg}");
+            r.runs += 1;
+            true
+        }
+        Err(e) if now.timestamp() - started > CATCH_UP_RETRY_SECS || now.timestamp() - missed > CATCH_UP_MAX_SECS => {
+            r.last_result = format!("perdida (às {when}): {e}");
+            true
+        }
+        Err(_) => false,
+    };
+    if resolved {
+        r.missed_at = None;
+        if matches!(r.schedule, Schedule::Once { .. }) {
+            r.enabled = false;
+            r.next_run = None;
+        }
+    }
+    resolved
+}
+
 /// Registra que a rotina acabou de rodar (ou tentou) e calcula a seguinte.
 pub fn after_run(r: &mut Routine, now: DateTime<Local>, result: String) {
     r.last_run = Some(now.timestamp());
     r.last_result = result;
     r.runs += 1;
+    // Rodou na hora normal: a execução perdida que esperava ficou superada.
+    r.missed_at = None;
     match r.schedule {
         Schedule::Once { .. } => {
             r.enabled = false;
