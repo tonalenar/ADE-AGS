@@ -203,6 +203,7 @@ pub const AGENTS: &[AgentDef] = &[
             overriding_env: &[
                 "ANTHROPIC_API_KEY",
                 "ANTHROPIC_AUTH_TOKEN",
+                "ANTHROPIC_BASE_URL",
                 "CLAUDE_CODE_OAUTH_TOKEN",
                 "CLAUDE_CODE_USE_BEDROCK",
                 "CLAUDE_CODE_USE_VERTEX",

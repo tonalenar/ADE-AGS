@@ -80,7 +80,7 @@ export function TabItem({
         transition-colors duration-150 ${className}
         ${paint && !isActive ? paint.tint : ""}
         ${isActive
-          ? "bg-gray-50 dark:bg-[#0d1117] text-gray-900 dark:text-white"
+          ? "bg-gray-50 dark:bg-surface text-gray-900 dark:text-white"
           : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-white/5 hover:text-gray-800 dark:hover:text-gray-200"}
       `}
     >
@@ -88,7 +88,7 @@ export function TabItem({
       {paint && <span className={`absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-r ${paint.strip}`} />}
       {/* La tab activa se funde con el área de abajo; la línea la remata. */}
       {isActive && (
-        <span className={`absolute bottom-0 left-0 right-0 h-[2px] ${groupFocused ? "bg-blue-500" : "bg-gray-300 dark:bg-white/20"}`} />
+        <span className={`absolute bottom-0 left-0 right-0 h-[2px] ${groupFocused ? "bg-accent-500" : "bg-gray-300 dark:bg-white/20"}`} />
       )}
 
       <AgentIcon className={`w-3.5 h-3.5 shrink-0 opacity-70 ${paint ? paint.ink : ""}`} />

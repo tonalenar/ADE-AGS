@@ -31,10 +31,13 @@
 mod commands;
 pub(crate) mod antigravity_oauth;
 pub(crate) mod antigravity_access;
+mod health;
 mod profiles;
+mod secrets;
 mod store;
 #[cfg(test)]
 mod test;
 
 pub use commands::*;
+pub use health::*;
 pub use store::*;

@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 import * as ipc from "./ipc";
-import type { AccountCapableAgent, AgentAccount } from "./types";
+import type { AccountCapableAgent, AccountHealth, AgentAccount } from "./types";
 
 interface AccountsState {
   accounts: AgentAccount[];
@@ -11,6 +11,10 @@ interface AccountsState {
 
   load: () => Promise<void>;
   create: (agentId: string, name: string) => Promise<AgentAccount>;
+  createWithApiKey: (agentId: string, name: string, apiKey: string, baseUrl: string | null) => Promise<AgentAccount>;
+  /** La última verificación de cada cuenta (por id), mientras dura la sesión. */
+  health: Record<string, AccountHealth | "checking">;
+  checkHealth: (accountId: string) => Promise<AccountHealth>;
   remove: (id: string, deleteFiles: boolean) => Promise<void>;
   /** Variables con las que hay que lanzar un proceso para que corra con esta cuenta. */
   envFor: (accountId: string) => Promise<Record<string, string>>;
@@ -35,6 +39,27 @@ export const useAccountsStore = create<AccountsState>()((set, get) => ({
     const account = await ipc.createAccount(agentId, name);
     await get().load();
     return account;
+  },
+
+  createWithApiKey: async (agentId, name, apiKey, baseUrl) => {
+    const account = await ipc.createApiKeyAccount(agentId, name, apiKey, baseUrl);
+    await get().load();
+    return account;
+  },
+
+  health: {},
+
+  checkHealth: async (accountId) => {
+    set((s) => ({ health: { ...s.health, [accountId]: "checking" } }));
+    try {
+      const result = await ipc.accountHealth(accountId);
+      set((s) => ({ health: { ...s.health, [accountId]: result } }));
+      return result;
+    } catch (e) {
+      const failed: AccountHealth = { status: "unknown", detail: String(e), email: null, plan: null, checkedAt: Date.now() / 1000 };
+      set((s) => ({ health: { ...s.health, [accountId]: failed } }));
+      return failed;
+    }
   },
 
   remove: async (id, deleteFiles) => {

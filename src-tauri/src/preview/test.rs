@@ -6,6 +6,20 @@ use super::rewrite::{
 const TAG: &str = r#"<script src="/__controlcode__/picker.js"></script>"#;
 
 #[test]
+fn una_redireccion_se_resuelve_contra_la_url_que_la_devolvio_y_solo_si_es_web() {
+    use super::proxy::redirect_target;
+    let base = reqwest::Url::parse("https://example.com/a/b?x=1").unwrap();
+    let to = |loc: &str| redirect_target(&base, loc).map(|u| u.to_string());
+    assert_eq!(to("https://www.example.com/").as_deref(), Some("https://www.example.com/"));
+    assert_eq!(to("/login").as_deref(), Some("https://example.com/login"));
+    assert_eq!(to("c").as_deref(), Some("https://example.com/a/c"));
+    assert_eq!(to("//cdn.example.org/x").as_deref(), Some("https://cdn.example.org/x"));
+    assert_eq!(to("javascript:alert(1)"), None);
+    assert_eq!(to("file:///etc/passwd"), None);
+    assert_eq!(to("data:text/html,hola"), None);
+}
+
+#[test]
 fn el_selector_va_justo_despues_de_head() {
     let html = "<!doctype html><html lang=\"es\"><head><title>x</title></head><body></body></html>";
     let out = inject_picker(html);

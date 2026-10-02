@@ -13,7 +13,7 @@
  */
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import { comparablePath, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
+import { comparablePath, isLocalUrl, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
 
 import {
   consoleForAgent, isFailed, mergeCookies, networkForAgent, requestRows, type CookieRow,
@@ -261,14 +261,38 @@ async function requestDetailText(host: BrowserHost, id: string): Promise<string>
   if (id.startsWith("g")) {
     const entry = log.requests.find((e) => `g${e.id}` === id);
     if (!entry) throw new Error(`No hay ningún pedido ${id}: pedí el listado de nuevo.`);
-    return detailForAgent(detailFromPage(entry));
+    return detailForAgent(redactDetail(host, detailFromPage(entry)));
   }
   const origin = host.proxyOrigin();
   const seq = Number(id.replace(/^p/, ""));
   if (!origin || !Number.isInteger(seq)) throw new Error(`'${id}' no es un id del listado (son como p12 o g5).`);
   const detail = await previewRequest(origin, seq);
   if (!detail) throw new Error(`El pedido ${id} ya no está en el registro del proxy.`);
-  return detailForAgent(detailFromProxy(detail));
+  return detailForAgent(redactDetail(host, detailFromProxy(detail)));
+}
+
+/**
+ * Un sitio de verdad y no un servidor de esta máquina. Ahí las cookies y la cabecera
+ * `Authorization` son la sesión REAL del usuario (su staging, su producción): un agente que
+ * las lee puede llevárselas a cualquier lado, y para depurar alcanza con saber que están.
+ * En el servidor de desarrollo se muestran enteras: son de prueba y es lo que se depura.
+ */
+function isRealSite(host: BrowserHost): boolean {
+  const target = host.targetOrigin();
+  return !!target && !isLocalUrl(target);
+}
+
+const SECRET_HEADER = /^(authorization|proxy-authorization|cookie|set-cookie|x-api-key|x-auth-token|x-csrf-token)$/i;
+
+function redactValue(value: string): string {
+  return `[oculto: ${value.length} caracteres]`;
+}
+
+function redactDetail(host: BrowserHost, detail: ReturnType<typeof detailFromProxy>): ReturnType<typeof detailFromProxy> {
+  if (!isRealSite(host)) return detail;
+  const clean = (headers: typeof detail.requestHeaders) =>
+    headers.map((h) => (SECRET_HEADER.test(h.name) ? { ...h, value: redactValue(h.value) } : h));
+  return { ...detail, requestHeaders: clean(detail.requestHeaders), responseHeaders: clean(detail.responseHeaders) };
 }
 
 function inServerTerms(host: BrowserHost, text: string): string {
@@ -469,7 +493,12 @@ async function execute(
       const page = await host.channel.run({ op: "cookies", action: "list" }) as { cookies: { name: string; value: string }[] };
       const origin = host.proxyOrigin();
       const report = origin ? await previewCookies(origin).catch(() => null) : null;
-      return cookieTable(mergeCookies(page.cookies, report));
+      const rows = mergeCookies(page.cookies, report);
+      // En un sitio de verdad, la sesión real del usuario: se dice qué cookies hay y cómo
+      // están configuradas, no su valor (ver `isRealSite`).
+      if (!isRealSite(host)) return cookieTable(rows);
+      return cookieTable(rows.map((row) => ({ ...row, value: redactValue(row.value) })))
+        + "\n\n(Values hidden: this is a real site, not a local dev server, so these cookies are the user's own session.)";
     }
     case "storage": {
       const action = str(request, "action") ?? "list";
@@ -626,4 +655,34 @@ export async function runBrowserRequest(
     throw new Error("The browser for this project has no page loaded. Use browser_navigate with the project URL.");
   }
   return execute(cwd, host, request, opened, owner);
+}
+
+/**
+ * Lo que un agente puede hacerle a un portal (un navegador del canvas). Una lista corta a
+ * propósito: nada que ejecute código en la página, suba archivos o lea cookies, porque un
+ * portal puede estar en cualquier sitio y quien lo maneja es un agente conectado, no el
+ * usuario. Para eso están las tools de navegador de la tab del proyecto, con su aprobación.
+ */
+export const PORTAL_OPS = new Set([
+  "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll",
+  "wait", "screenshot", "console", "layout",
+]);
+
+/** Atiende un pedido de un agente sobre un portal, por su id. */
+export async function runPortalRequest(
+  portalId: string,
+  cwd: string,
+  request: BrowserRequest,
+  owner: ViewOwner | null = null
+): Promise<string> {
+  if (!PORTAL_OPS.has(request.op)) {
+    throw new Error(`Un portal no admite '${request.op}'. Admite: ${[...PORTAL_OPS].join(", ")}.`);
+  }
+  // El nodo monta el navegador al dibujarse; si el canvas todavía no lo hizo (ventana en
+  // otra vista), se espera a que aparezca.
+  const host = await waitForHost(portalId, 15_000);
+  if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
+    throw new Error("El portal no tiene ninguna página cargada. Empiece con `ccode portal navigate <portal> <url>`.");
+  }
+  return execute(cwd, host, request, false, owner);
 }

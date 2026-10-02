@@ -15,22 +15,25 @@ mod agents;
 mod antigravity;
 mod broker;
 mod context;
+pub(crate) mod failure;
 pub(crate) mod handoff;
-mod model_discovery;
+pub(crate) mod ledger;
+pub(crate) mod model_discovery;
 pub mod orchestration;
 mod plan;
 mod policy;
-mod quota;
+pub(crate) mod quota;
 mod roster;
 pub(crate) mod routing;
 mod rules;
+pub mod sandbox;
 mod scheduler;
 pub(crate) mod store;
 mod supervisor;
 #[cfg(test)]
 mod test;
 pub(crate) mod types;
-mod worktrees;
+pub(crate) mod worktrees;
 
 pub(crate) use adapters::{Codex, Gemini, Kimi, OpenCode};
 pub(crate) use agents::{ClaudeCode, HeadlessAgent};
@@ -118,6 +121,7 @@ pub async fn run_start_task(
                 prompt: &prompt,
                 agent_id: &assignment.agent_id,
                 account_id: assignment.account_id.as_deref(),
+                auto_account: assignment.auto_account,
                 model: assignment.model.as_deref(),
                 reasoning_effort: None,
                 cwd: &cwd,
@@ -307,6 +311,7 @@ if let Some(squad) = spec.squad {
                 prompt: &prompt,
                 agent_id: &assignment.agent_id,
                 account_id: assignment.account_id.as_deref(),
+                auto_account: assignment.auto_account,
                 model: assignment.model.as_deref(),
                 reasoning_effort: spec.reasoning_effort,
                 cwd: spec.cwd,
@@ -590,6 +595,34 @@ pub(crate) fn route_now(
     let roster = roster::snapshot(db, false)?;
     let tiers = routing::load_tiers(db);
     routing::route(&roster, &tiers, request, crate::util::now_ts())
+}
+
+/// Lo que usó cada cuenta en los últimos `days` días (intentos, tokens, costo reportado), con
+/// sus límites y lo que corre ahora. Ver `ledger`.
+#[tauri::command]
+pub async fn account_usage_summary(app: AppHandle, days: u32) -> Result<Vec<ledger::AccountUsage>, String> {
+    let db = db_of(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let now = crate::util::now_ts();
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        ledger::summary(&conn, now - i64::from(days.clamp(1, 365)) * 24 * 3600, now)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Los límites de una cuenta (`account_key` como en `quota::account_key`).
+#[tauri::command]
+pub fn account_limits_get(app: AppHandle, account_key: String) -> Result<ledger::AccountLimits, String> {
+    let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    Ok(ledger::load_limits(&conn, &account_key))
+}
+
+#[tauri::command]
+pub fn account_limits_set(app: AppHandle, account_key: String, limits: ledger::AccountLimits) -> Result<(), String> {
+    let db = db_of(&app)?;
+    ledger::save_limits(&db, &account_key, &limits)
 }
 
 /// Qué agentes, modelos y cuentas hay para lanzar ahora. `refresh` vuelve a sondear las
@@ -907,6 +940,7 @@ pub fn reroute_to(
                 .then(|| assignment.notes.join("; "))
                 .as_deref(),
             &note,
+            assignment.auto_account,
         )?;
         if !moved {
             return Err(
@@ -914,6 +948,15 @@ pub fn reroute_to(
             );
         }
     }
+    // Un cambio de manos es lo que el Map Mode dibuja como arista de traspaso.
+    crate::bus::publish(
+        Some(app),
+        crate::bus::Publish::new("task.rerouted").task(task_id).run(&task.run_id).data(serde_json::json!({
+            "from": { "agentId": task.agent_id, "model": task.model, "accountId": task.account_id },
+            "to": { "agentId": assignment.agent_id, "model": assignment.model, "accountId": assignment.account_id },
+            "reason": reason,
+        })),
+    );
     supervisor::notify_changed(app, task_id);
     // No se tiquea acá: el scheduler llama a esto con su propio lock tomado, y volver a
     // entrar lo trabaría. Tiquean los de afuera.
@@ -1033,25 +1076,41 @@ pub fn run_decide_approval(
     remember: bool,
     db: tauri::State<DbConnection>,
 ) -> Result<bool, String> {
-    let Some(pending) = broker::get(&approval_id) else {
-        supervisor::notify_approvals(&app);
+    decide_approval(&app, &db, &approval_id, allow, remember)
+}
+
+/// Lo mismo, para quien no es un comando de Tauri (la CLI: `ccode approval decide`).
+pub(crate) fn decide_approval(
+    app: &AppHandle,
+    db: &DbConnection,
+    approval_id: &str,
+    allow: bool,
+    remember: bool,
+) -> Result<bool, String> {
+    let Some(pending) = broker::get(approval_id) else {
+        supervisor::notify_approvals(app);
         return Ok(false);
     };
 
     // La regla se guarda ANTES de contestar: si guardarla falla, el usuario tiene que
     // enterarse ahí, no después de que el agente ya siguió creyendo que quedó recordado.
     let remembered_in = if remember {
-        remember_rule(&db, &pending, allow)?
+        remember_rule(db, &pending, allow)?
     } else {
         None
     };
 
-    let decided = broker::decide(&approval_id, allow, None);
+    let decided = broker::decide(approval_id, allow, None);
     if let Some(cwd) = remembered_in {
-        broker::release_matching(&db, &cwd);
+        broker::release_matching(db, &cwd);
     }
-    supervisor::notify_approvals(&app);
+    supervisor::notify_approvals(app);
     Ok(decided)
+}
+
+/// Los pedidos de permiso que esperan a una persona. Para la CLI (`ccode approval list`).
+pub(crate) fn pending_approvals() -> Vec<broker::PendingApproval> {
+    broker::pending()
 }
 
 /// Guarda la regla exacta de un pedido. Devuelve la carpeta en la que quedó.
@@ -1117,4 +1176,11 @@ pub fn run_delete_rule(id: String, db: tauri::State<DbConnection>) -> Result<boo
 /// Cierra los pedidos que quedaron colgados de una ejecución anterior de la app.
 pub fn sweep_orphan_approvals(db: &DbConnection) -> Result<usize, String> {
     broker::sweep_orphans(db)
+}
+
+/// Qué aísla el sandbox de los agentes en esta máquina, con el modo configurado.
+#[tauri::command]
+pub fn sandbox_status(app: AppHandle) -> Result<sandbox::Status, String> {
+    let db = db_of(&app)?;
+    Ok(sandbox::status(sandbox::Mode::from_db(&db)))
 }

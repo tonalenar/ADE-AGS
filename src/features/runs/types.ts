@@ -51,6 +51,8 @@ export interface Task {
   structuredHandoff?: StructuredHandoff | null;
   /** Las tareas que tienen que terminar bien antes de que esta arranque. */
   dependsOn: string[];
+  /** La cuenta la eligió el ruteo y se puede cambiar por otra con cupo. `false` = fijada. */
+  autoAccount?: boolean;
   startedAt: number | null;
   endedAt: number | null;
   createdAt: number;
