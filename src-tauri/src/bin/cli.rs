@@ -49,6 +49,8 @@ AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
   peers                                       Quién está conectado con vos
   peer ask <nombre> \"...\" [--timeout 600]    Le pregunta y ESPERA su respuesta
   peer tell <nombre> \"...\"                    Le avisa algo, sin esperar
+             (ask/tell --raw: el texto tal cual, sin el encabezado \"[Mensagem de ...]\"; para
+              mandarle a una TUI un comando suyo, p. ej. /compact o /clear)
   peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'  Le pregunta a varios A LA VEZ y espera a todos
   peer check <nombre> [--lines 60]            Lo que se ve ahora en su terminal
   notify \"mensaje\"                            Avisa al usuario (aviso en pantalla; barra de tareas)
