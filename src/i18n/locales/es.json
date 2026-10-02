@@ -1760,5 +1760,22 @@
   "canvas.chat.thread.red": "Rojo",
   "canvas.chat.thread.orange": "Naranja",
   "canvas.chat.thread.yellow": "Amarillo",
-  "canvas.chat.thread.green": "Verde"
+  "canvas.chat.thread.green": "Verde",
+  "canvas.tool.select": "Seleccionar y mover",
+  "canvas.tool.terminal": "Nuevo terminal (agente)",
+  "canvas.tool.note": "Nota",
+  "canvas.tool.image": "Imagen",
+  "canvas.tool.portal": "Portal (navegador)",
+  "canvas.tool.text": "Texto",
+  "canvas.tool.draw": "Dibujar",
+  "canvas.tool.erase": "Goma: clic en un trazo para borrarlo",
+  "canvas.tool.undo": "Deshacer el último trazo",
+  "canvas.tool.width": "Grosor {{width}}",
+  "canvas.text.placeholder": "Texto…",
+  "canvas.text.drag": "Arrastrar",
+  "canvas.text.size": "Tamaño de letra",
+  "canvas.text.delete": "Borrar texto",
+  "canvas.image.delete": "Borrar imagen",
+  "canvas.image.missing": "Imagen no encontrada",
+  "canvas.image.invalid": "Ese archivo no es una imagen válida."
 }

@@ -37,6 +37,40 @@ export function isPortalId(id: string): boolean {
   return id.startsWith(PORTAL_PREFIX);
 }
 
+/** Un texto suelto sobre el canvas: un rótulo, sin marco. Decoración: ningún agente lo ve. */
+export interface CanvasText {
+  text: string;
+  /** Tamaño de la letra, en px del canvas. */
+  size: number;
+  box: Box;
+}
+
+export const TEXT_PREFIX = "text-";
+
+/** Una imagen puesta en el canvas. El archivo vive en el disco (ver `canvas::assets`); acá
+ *  solo su id: si no, cada movimiento reescribiría la imagen entera en el canvas. */
+export interface CanvasImage {
+  name: string;
+  asset: string;
+  box: Box;
+}
+
+export const IMAGE_PREFIX = "image-";
+
+/** Un trazo a mano alzada. `points` va plano `[x0, y0, x1, y1, …]` en coordenadas del canvas. */
+export interface Stroke {
+  id: string;
+  points: number[];
+  color: string;
+  width: number;
+}
+
+/** Los nodos que no son terminales: el canvas los mueve y guarda, pero no dependen de
+ *  ninguna tab. */
+export function isFreeNodeId(id: string): boolean {
+  return id.startsWith(NOTE_PREFIX) || id.startsWith(PORTAL_PREFIX) || id.startsWith(TEXT_PREFIX) || id.startsWith(IMAGE_PREFIX);
+}
+
 /** El canvas de un proyecto. Las claves de `nodes` son ids de tab. */
 export interface Board {
   nodes: Record<string, Box>;
@@ -44,6 +78,10 @@ export interface Board {
   notes: Record<string, CanvasNote>;
   /** Los portales, por id (`portal-…`). Como las notas, no dependen de ninguna tab. */
   portals: Record<string, CanvasPortal>;
+  /** Rótulos, imágenes y trazos: decoración del canvas. Los agentes no los ven. */
+  texts: Record<string, CanvasText>;
+  images: Record<string, CanvasImage>;
+  drawings: Stroke[];
   /** El papel con que se recrutó cada agente (id de tab → nombre del papel). Solo una
    *  etiqueta para el nodo: no da ni quita permisos. */
   roles: Record<string, string>;
@@ -54,7 +92,7 @@ export interface Board {
 }
 
 export function emptyBoard(): Board {
-  return { nodes: {}, notes: {}, portals: {}, roles: {}, edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
+  return { nodes: {}, notes: {}, portals: {}, texts: {}, images: {}, drawings: [], roles: {}, edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
 }
 
 /**
@@ -150,7 +188,7 @@ export function neighbors(board: Board, tabId: string): string[] {
 
 /** Dónde está un nodo, sea terminal o nota. */
 export function boxOf(board: Board, id: string): Box | undefined {
-  return board.nodes[id] ?? board.notes[id]?.box ?? board.portals[id]?.box;
+  return board.nodes[id] ?? board.notes[id]?.box ?? board.portals[id]?.box ?? board.texts[id]?.box ?? board.images[id]?.box;
 }
 
 export const NOTE_SIZE = { w: 320, h: 240 };
@@ -232,6 +270,8 @@ function allBoxes(board: Board): Box[] {
     ...Object.values(board.nodes),
     ...Object.values(board.notes).map((n) => n.box),
     ...Object.values(board.portals).map((p) => p.box),
+    ...Object.values(board.texts).map((t) => t.box),
+    ...Object.values(board.images).map((i) => i.box),
   ];
 }
 
@@ -284,4 +324,90 @@ export function removePortal(board: Board, id: string): Board {
   const portals = { ...board.portals };
   delete portals[id];
   return { ...board, portals, edges: board.edges.filter((e) => e.a !== id && e.b !== id) };
+}
+
+// ── Textos, imágenes y trazos ───────────────────────────────────────
+
+export const TEXT_SIZES = [14, 20, 32, 48] as const;
+export const TEXT_DEFAULT = { w: 240, h: 64, size: 20 };
+export const IMAGE_MAX_SIDE = 420;
+
+/** Un rótulo nuevo, en `at` (centro de lo que se ve). */
+export function addText(board: Board, t: { id: string; at: { x: number; y: number }; text?: string; size?: number }): Board {
+  const size = t.size ?? TEXT_DEFAULT.size;
+  const box: Box = { x: Math.round(t.at.x), y: Math.round(t.at.y), w: TEXT_DEFAULT.w, h: Math.round(size * 2.6) };
+  return { ...board, texts: { ...board.texts, [t.id]: { text: t.text ?? "", size, box } } };
+}
+
+export function updateText(board: Board, id: string, patch: Partial<CanvasText>): Board {
+  const text = board.texts[id];
+  return text ? { ...board, texts: { ...board.texts, [id]: { ...text, ...patch } } } : board;
+}
+
+export function removeText(board: Board, id: string): Board {
+  if (!(id in board.texts)) return board;
+  const texts = { ...board.texts };
+  delete texts[id];
+  return { ...board, texts };
+}
+
+/** Una imagen nueva con su proporción: la lado más largo, a `IMAGE_MAX_SIDE`. */
+export function addImage(
+  board: Board,
+  img: { id: string; name: string; asset: string; width: number; height: number; at: { x: number; y: number } },
+): Board {
+  const scale = Math.min(1, IMAGE_MAX_SIDE / Math.max(img.width, img.height, 1));
+  const w = Math.max(40, Math.round(img.width * scale));
+  const h = Math.max(40, Math.round(img.height * scale));
+  const box: Box = { x: Math.round(img.at.x - w / 2), y: Math.round(img.at.y - h / 2), w, h };
+  return { ...board, images: { ...board.images, [img.id]: { name: img.name, asset: img.asset, box } } };
+}
+
+export function removeImage(board: Board, id: string): Board {
+  if (!(id in board.images)) return board;
+  const images = { ...board.images };
+  delete images[id];
+  return { ...board, images };
+}
+
+/** Los puntos de un trazo, sin los que casi no se mueven: una mano alzada deja cientos
+ *  de puntos casi iguales que solo engordan el archivo. `minDist` en px del canvas. */
+export function thin(points: number[], minDist: number): number[] {
+  if (points.length <= 4) return points;
+  const out = [points[0], points[1]];
+  for (let i = 2; i < points.length - 2; i += 2) {
+    const dx = points[i] - out[out.length - 2];
+    const dy = points[i + 1] - out[out.length - 1];
+    if (dx * dx + dy * dy >= minDist * minDist) out.push(points[i], points[i + 1]);
+  }
+  out.push(points[points.length - 2], points[points.length - 1]);
+  return out;
+}
+
+export function addStroke(board: Board, stroke: Stroke): Board {
+  return stroke.points.length < 4 ? board : { ...board, drawings: [...board.drawings, stroke] };
+}
+
+export function removeStroke(board: Board, id: string): Board {
+  const drawings = board.drawings.filter((s) => s.id !== id);
+  return drawings.length === board.drawings.length ? board : { ...board, drawings };
+}
+
+/** Quita el último trazo (deshacer). */
+export function undoStroke(board: Board): Board {
+  return board.drawings.length === 0 ? board : { ...board, drawings: board.drawings.slice(0, -1) };
+}
+
+/** El camino SVG de un trazo, suavizado con curvas entre los puntos medios. */
+export function strokePath(points: number[]): string {
+  if (points.length < 4) return "";
+  if (points.length === 4) return `M${points[0]} ${points[1]} L${points[2]} ${points[3]}`;
+  let d = `M${points[0]} ${points[1]}`;
+  for (let i = 2; i < points.length - 2; i += 2) {
+    const mx = (points[i] + points[i + 2]) / 2;
+    const my = (points[i + 1] + points[i + 3]) / 2;
+    d += ` Q${points[i]} ${points[i + 1]} ${mx} ${my}`;
+  }
+  d += ` L${points[points.length - 2]} ${points[points.length - 1]}`;
+  return d;
 }

@@ -5,9 +5,10 @@ import { useTabsStore } from "@/features/tabs/store";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
 import {
-  NOTE_PREFIX, PORTAL_PREFIX, addEdge, addNote, addPortal, emptyBoard, placeBelow, reconcile, removeEdge,
-  removeEdgeBetween, removeNote, removePortal, toggleOrchestrator, updateNote, updatePortal,
-  type Board, type CanvasNote, type CanvasPortal,
+  IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addImage, addNote, addPortal, addStroke, addText,
+  emptyBoard, placeBelow, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
+  removeStroke, removeText, toggleOrchestrator, undoStroke, updateNote, updatePortal, updateText,
+  type Board, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
 } from "./board";
 import type { Box, Rect, Viewport } from "./geometry";
 
@@ -76,6 +77,10 @@ export const canvasActions = {
       if (note) return updateNote(b, id, { box: { ...note.box, ...patch } });
       const portal = b.portals[id];
       if (portal) return updatePortal(b, id, { box: { ...portal.box, ...patch } });
+      const text = b.texts[id];
+      if (text) return updateText(b, id, { box: { ...text.box, ...patch } });
+      const image = b.images[id];
+      if (image) return { ...b, images: { ...b.images, [id]: { ...image, box: { ...image.box, ...patch } } } };
       const box = b.nodes[id];
       if (!box) return b;
       return { ...b, nodes: { ...b.nodes, [id]: { ...box, ...patch } } };
@@ -110,6 +115,24 @@ export const canvasActions = {
   updatePortal: (key: string, id: string, patch: Partial<Omit<CanvasPortal, "box">>) =>
     updateBoard(key, (b) => updatePortal(b, id, patch)),
   removePortal: (key: string, id: string) => updateBoard(key, (b) => removePortal(b, id)),
+  addText: (key: string, at: { x: number; y: number }) => {
+    const id = `${TEXT_PREFIX}${crypto.randomUUID()}`;
+    updateBoard(key, (b) => addText(b, { id, at }));
+    return id;
+  },
+  updateText: (key: string, id: string, patch: Partial<Omit<CanvasText, "box">>) =>
+    updateBoard(key, (b) => updateText(b, id, patch)),
+  removeText: (key: string, id: string) => updateBoard(key, (b) => removeText(b, id)),
+  addImage: (key: string, img: { name: string; asset: string; width: number; height: number; at: { x: number; y: number } }) => {
+    const id = `${IMAGE_PREFIX}${crypto.randomUUID()}`;
+    updateBoard(key, (b) => addImage(b, { ...img, id }));
+    return id;
+  },
+  removeImage: (key: string, id: string) => updateBoard(key, (b) => removeImage(b, id)),
+  addStroke: (key: string, stroke: Omit<Stroke, "id">) =>
+    updateBoard(key, (b) => addStroke(b, { ...stroke, id: crypto.randomUUID() })),
+  removeStroke: (key: string, id: string) => updateBoard(key, (b) => removeStroke(b, id)),
+  undoStroke: (key: string) => updateBoard(key, (b) => undoStroke(b)),
   setViewport: (key: string, viewport: Viewport) => updateBoard(key, (b) => ({ ...b, viewport })),
   connect: (key: string, a: string, b: string) => updateBoard(key, (board) => addEdge(board, a, b)),
   disconnect: (key: string, edgeId: string) => updateBoard(key, (board) => removeEdge(board, edgeId)),
@@ -202,7 +225,7 @@ export function initCanvasSync(label: string): () => void {
       const mine = Object.fromEntries(
         Object.entries(saved ?? {})
           .filter(([k]) => k.startsWith(`${label}|`))
-          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, roles: b?.roles ?? {} }]),
+          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, drawings: b?.drawings ?? [], roles: b?.roles ?? {} }]),
       );
       useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards } });
       unsub = useTabsStore.subscribe(syncBoards);

@@ -37,6 +37,8 @@ pub fn run() {
             // Canvas de agentes: posiciones y conexiones
             crate::canvas::canvas_load,
             crate::canvas::canvas_save,
+            crate::canvas::assets::canvas_asset_save,
+            crate::canvas::assets::canvas_asset_load,
             // Pisos: worktrees aislados del proyecto, cada uno con su canvas
             crate::floors::floor_list,
             crate::floors::floor_create,

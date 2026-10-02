@@ -1760,5 +1760,22 @@
   "canvas.chat.thread.red": "Red",
   "canvas.chat.thread.orange": "Orange",
   "canvas.chat.thread.yellow": "Yellow",
-  "canvas.chat.thread.green": "Green"
+  "canvas.chat.thread.green": "Green",
+  "canvas.tool.select": "Select and move",
+  "canvas.tool.terminal": "New terminal (agent)",
+  "canvas.tool.note": "Note",
+  "canvas.tool.image": "Image",
+  "canvas.tool.portal": "Portal (browser)",
+  "canvas.tool.text": "Text",
+  "canvas.tool.draw": "Draw",
+  "canvas.tool.erase": "Eraser: click a stroke to delete it",
+  "canvas.tool.undo": "Undo the last stroke",
+  "canvas.tool.width": "Width {{width}}",
+  "canvas.text.placeholder": "Text…",
+  "canvas.text.drag": "Drag",
+  "canvas.text.size": "Font size",
+  "canvas.text.delete": "Delete text",
+  "canvas.image.delete": "Delete image",
+  "canvas.image.missing": "Image not found",
+  "canvas.image.invalid": "That file is not a valid image."
 }

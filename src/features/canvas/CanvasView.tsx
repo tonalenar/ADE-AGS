@@ -7,17 +7,23 @@ import {
   Position, ReactFlow, ReactFlowProvider, getBezierPath, useReactFlow,
   type Edge, type EdgeChange, type EdgeProps, type Node, type NodeChange, type NodeProps, type Connection,
 } from "@xyflow/react";
-import { Button, CloseIcon, useTheme } from "neogestify-ui-components";
+import { invoke } from "@tauri-apps/api/core";
+import { AlertaToast, Button, CloseIcon, useTheme } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import { useTabsStore } from "@/features/tabs/store";
+import { openNewAgentWizard } from "@/features/tabs/tabActions";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
+import type { BrowserView } from "@/features/tabs/viewTabs";
 import type { Tab } from "@/features/tabs/types";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 
 import {
-  NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isNoteId, isPortalId, neighbors, type CanvasNote, type CanvasPortal,
+  NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isFreeNodeId, neighbors, thin, type CanvasNote, type CanvasPortal, type Stroke,
 } from "./board";
+import { CanvasToolbar, type DrawStyle, type Tool } from "./CanvasToolbar";
+import { DrawingLayer } from "./DrawingLayer";
+import { ImageNode, TextNode, type ImageFlowNode, type TextFlowNode } from "./ExtraNodes";
 import {
   HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, terminalRect,
   type Box, type Rect, type Viewport,
@@ -56,7 +62,7 @@ interface PortalNodeData extends Record<string, unknown> {
 }
 
 type PortalFlowNode = Node<PortalNodeData, "portal">;
-type FlowNode = AgentFlowNode | NoteFlowNode | PortalFlowNode;
+type FlowNode = AgentFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode;
 
 // El navegador pesa más de un megabyte: se baja con el primer portal, no con el canvas.
 const BrowserTab = lazy(() => import("@/features/browser/BrowserTab").then((m) => ({ default: m.BrowserTab })));
@@ -77,6 +83,44 @@ export function CanvasView() {
     </ReactFlowProvider>
   );
 }
+
+/**
+ * Devuelve los mismos objetos de nodo de la vez anterior mientras su firma no cambie.
+ *
+ * Mover un nodo cambia el canvas entero, y sin esto cada cuadro del arrastre reconstruía
+ * TODOS los nodos: cada terminal, cada nota y, sobre todo, cada portal (un navegador
+ * completo) se volvía a renderizar mientras el usuario movía uno solo. Con la identidad
+ * conservada, solo se renderiza el que se está moviendo.
+ */
+function useStable<T extends { id: string }>(nodes: T[], signature: (node: T) => string): T[] {
+  const cache = useRef(new Map<string, { signature: string; node: T }>());
+  return useMemo(() => {
+    const next = new Map<string, { signature: string; node: T }>();
+    const out = nodes.map((node) => {
+      const sig = signature(node);
+      const hit = cache.current.get(node.id);
+      const entry = hit && hit.signature === sig ? hit : { signature: sig, node };
+      next.set(node.id, entry);
+      return entry.node;
+    });
+    cache.current = next;
+    return out;
+    // `signature` es una función de módulo en cada uso: no cambia.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodes]);
+}
+
+const boxSig = (b: { x: number; y: number; w: number; h: number }) => `${b.x},${b.y},${b.w},${b.h}`;
+
+const agentSig = (n: AgentFlowNode) =>
+  [n.id, n.data.tab.title, n.data.tab.agentId, n.data.tab.agentLabel, boxSig(n.data.box), n.selected, n.data.live,
+    n.data.links, n.data.orchestrator, n.data.role].join("|");
+const noteSig = (n: NoteFlowNode) => [n.id, n.data.note.name, boxSig(n.data.note.box), n.selected, n.data.links, n.data.note.content].join("|");
+const portalSig = (n: PortalFlowNode) =>
+  [n.id, n.data.portal.name, n.data.portal.url, boxSig(n.data.portal.box), n.selected, n.data.links, n.data.cwd].join("|");
+
+const textSig = (n: TextFlowNode) => [n.id, n.data.text.text, n.data.text.size, boxSig(n.data.text.box), n.selected].join("|");
+const imageSig = (n: ImageFlowNode) => [n.id, n.data.image.asset, n.data.image.name, boxSig(n.data.image.box), n.selected].join("|");
 
 function CanvasInner() {
   const { theme } = useTheme();
@@ -124,7 +168,10 @@ function CanvasInner() {
 
   useEffect(() => () => canvasActions.setLiveRects({}), []);
 
+  const sizeRef = useRef(size);
+  sizeRef.current = size;
   const focusNode = (tabId: string) => {
+    const size = sizeRef.current;
     const box = useCanvasStore.getState().boards[key ?? ""]?.nodes[tabId];
     if (!box || size.width === 0) return;
     activateTab(tabId);
@@ -152,10 +199,18 @@ function CanvasInner() {
 
   // Un panel a la vez: los dos se abren en el mismo lugar.
   const [panel, setPanel] = useState<"routines" | "chat" | null>(null);
+
+  // La herramienta activa y cómo se dibuja. Dibujar y borrar son un modo; lo demás pone
+  // algo en el centro de la vista y vuelve a seleccionar.
+  const [tool, setTool] = useState<Tool>("select");
+  const [drawStyle, setDrawStyle] = useState<DrawStyle>({ color: "#ef4444", width: 4 });
+  const [liveStroke, setLiveStroke] = useState<Stroke | null>(null);
+  const strokeRef = useRef<Stroke | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
   // Una nota o un portal seleccionado no es un agente activo: se lleva aparte.
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
 
-  const agentNodes: AgentFlowNode[] = useMemo(() => tabs.flatMap((tab) => {
+  const rawAgentNodes: AgentFlowNode[] = useMemo(() => tabs.flatMap((tab) => {
     const box = board.nodes[tab.id];
     if (!box) return [];
     return [{
@@ -165,7 +220,9 @@ function CanvasInner() {
       width: box.w,
       height: box.h,
       selected: tab.id === activeTabId,
-      dragHandle: ".ade-node-drag",
+      // Con la terminal viva encima del nodo, solo la cabecera queda libre para agarrar;
+      // alejado, la tarjeta es una vista previa y se agarra de cualquier lado.
+      dragHandle: live ? ".ade-node-drag" : undefined,
       deletable: false,
       data: {
         tab, box, live,
@@ -179,20 +236,19 @@ function CanvasInner() {
     // `focusNode` cambia con cada render y no aporta nada nuevo al nodo.
   }), [tabs, board, activeTabId, live]);
 
-  const noteNodes: NoteFlowNode[] = useMemo(() => Object.entries(board.notes).map(([id, note]) => ({
+  const rawNoteNodes: NoteFlowNode[] = useMemo(() => Object.entries(board.notes).map(([id, note]) => ({
     id,
     type: "note" as const,
     position: { x: note.box.x, y: note.box.y },
     width: note.box.w,
     height: note.box.h,
     selected: id === selectedNote,
-    dragHandle: ".ade-node-drag",
     deletable: false,
     data: { id, note, links: neighbors(board, id).length },
   })), [board, selectedNote]);
 
   const portalCwd = tabs[0]?.cwd ?? "";
-  const portalNodes: PortalFlowNode[] = useMemo(() => Object.entries(board.portals).map(([id, portal]) => ({
+  const rawPortalNodes: PortalFlowNode[] = useMemo(() => Object.entries(board.portals).map(([id, portal]) => ({
     id,
     type: "portal" as const,
     position: { x: portal.box.x, y: portal.box.y },
@@ -204,9 +260,38 @@ function CanvasInner() {
     data: { id, cwd: portalCwd, portal, links: neighbors(board, id).length },
   })), [board, selectedNote, portalCwd]);
 
+  const rawTextNodes: TextFlowNode[] = useMemo(() => Object.entries(board.texts).map(([id, text]) => ({
+    id,
+    type: "text" as const,
+    position: { x: text.box.x, y: text.box.y },
+    width: text.box.w,
+    height: text.box.h,
+    selected: id === selectedNote,
+    dragHandle: ".ade-node-drag",
+    deletable: false,
+    data: { id, text },
+  })), [board.texts, selectedNote]);
+
+  const rawImageNodes: ImageFlowNode[] = useMemo(() => Object.entries(board.images).map(([id, image]) => ({
+    id,
+    type: "image" as const,
+    position: { x: image.box.x, y: image.box.y },
+    width: image.box.w,
+    height: image.box.h,
+    selected: id === selectedNote,
+    deletable: false,
+    data: { id, image },
+  })), [board.images, selectedNote]);
+
+  const agentNodes = useStable(rawAgentNodes, agentSig);
+  const textNodes = useStable(rawTextNodes, textSig);
+  const imageNodes = useStable(rawImageNodes, imageSig);
+  const noteNodes = useStable(rawNoteNodes, noteSig);
+  const portalNodes = useStable(rawPortalNodes, portalSig);
+
   const nodes: FlowNode[] = useMemo(
-    () => [...noteNodes, ...portalNodes, ...agentNodes],
-    [noteNodes, portalNodes, agentNodes],
+    () => [...imageNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...textNodes],
+    [imageNodes, noteNodes, portalNodes, agentNodes, textNodes],
   );
 
   // Una conexión con un agente de otro piso no tiene punta en este canvas: no se dibuja.
@@ -226,10 +311,90 @@ function CanvasInner() {
       } else if (c.type === "dimensions" && c.resizing && c.dimensions) {
         canvasActions.moveNode(key, c.id, { w: Math.round(c.dimensions.width), h: Math.round(c.dimensions.height) });
       } else if (c.type === "select") {
-        if (isNoteId(c.id) || isPortalId(c.id)) setSelectedNote(c.selected ? c.id : (prev) => (prev === c.id ? null : prev));
+        if (isFreeNodeId(c.id)) setSelectedNote(c.selected ? c.id : (prev) => (prev === c.id ? null : prev));
         else if (c.selected) activateTab(c.id);
       }
     }
+  };
+
+  /** El centro de lo que se ve, en coordenadas del canvas: donde aparece lo que se agrega. */
+  const viewCenter = () => ({ x: (size.width / 2 - vp.x) / vp.zoom, y: (size.height / 2 - vp.y) / vp.zoom });
+
+  const addNoteHere = () => {
+    if (!key) return;
+    const c = viewCenter();
+    const { id } = canvasActions.addNote(key, { name: t("canvas.noteDefaultName"), content: "", at: { x: c.x - 160, y: c.y - 120 } });
+    setSelectedNote(id);
+  };
+  const addPortalHere = () => {
+    if (!key) return;
+    const c = viewCenter();
+    const { id } = canvasActions.addPortal(key, { name: t("canvas.portalDefaultName"), at: { x: c.x - 320, y: c.y - 220 } });
+    setSelectedNote(id);
+  };
+  const addTextHere = () => {
+    if (!key) return;
+    const c = viewCenter();
+    setSelectedNote(canvasActions.addText(key, { x: c.x - 120, y: c.y - 24 }));
+    setTool("select");
+  };
+
+  /** Una imagen elegida del disco: se copia a la carpeta de la app (ver `canvas::assets`) y
+   *  el canvas guarda solo su id. */
+  const addImageFrom = async (file: File) => {
+    if (!key) return;
+    try {
+      const data = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(String(reader.result));
+        reader.onerror = () => reject(reader.error);
+        reader.readAsDataURL(file);
+      });
+      const dims = await new Promise<{ width: number; height: number }>((resolve, reject) => {
+        const img = new Image();
+        img.onload = () => resolve({ width: img.naturalWidth, height: img.naturalHeight });
+        img.onerror = () => reject(new Error(t("canvas.image.invalid")));
+        img.src = data;
+      });
+      const asset = await invoke<string>("canvas_asset_save", { data });
+      setSelectedNote(canvasActions.addImage(key, { name: file.name, asset, ...dims, at: viewCenter() }));
+    } catch (e) {
+      AlertaToast(t("canvas.tool.image"), String(e instanceof Error ? e.message : e), "error", 6000);
+    }
+  };
+
+  // Dibujar: el trazo se sigue en coordenadas del canvas y se guarda al soltar. Los eventos se
+  // atienden en captura sobre el contenedor para quitárselos a React Flow (que si no, movería
+  // el fondo), y solo si empiezan DENTRO del canvas: no en la barra de herramientas ni en los
+  // paneles, que están fuera de `.react-flow`.
+  const inCanvas = (e: React.PointerEvent) => (e.target as HTMLElement).closest(".react-flow") !== null;
+  const strokeWidth = drawStyle.width / vp.zoom;
+  const onDrawDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (tool !== "draw" || e.button !== 0 || !inCanvas(e)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const at = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    const stroke: Stroke = { id: "live", points: [at.x, at.y], color: drawStyle.color, width: strokeWidth };
+    strokeRef.current = stroke;
+    setLiveStroke(stroke);
+  };
+  const onDrawMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    const stroke = strokeRef.current;
+    if (!stroke) return;
+    const at = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+    const next = { ...stroke, points: [...stroke.points, at.x, at.y] };
+    strokeRef.current = next;
+    setLiveStroke(next);
+  };
+  const onDrawUp = () => {
+    const stroke = strokeRef.current;
+    strokeRef.current = null;
+    setLiveStroke(null);
+    if (!stroke || !key) return;
+    // Un toque sin movimiento es un punto: se dibuja como una marca corta.
+    const points = stroke.points.length === 2 ? [...stroke.points, stroke.points[0] + 0.01, stroke.points[1]] : stroke.points;
+    canvasActions.addStroke(key, { points: thin(points, 1.5 / vp.zoom), color: stroke.color, width: stroke.width });
   };
 
   const onEdgesChange = (changes: EdgeChange[]) => {
@@ -242,7 +407,10 @@ function CanvasInner() {
   };
 
   return (
-    <div ref={wrapRef} className="absolute inset-0 bg-gray-50 dark:bg-surface-deep">
+    <div ref={wrapRef} className="absolute inset-0 bg-gray-50 dark:bg-surface-deep"
+      style={{ cursor: tool === "draw" ? "crosshair" : undefined }}
+      onPointerDownCapture={onDrawDown} onPointerMoveCapture={onDrawMove} onPointerUpCapture={onDrawUp}
+      onPointerCancelCapture={onDrawUp}>
       <ReactFlow<FlowNode, Edge>
         nodes={nodes}
         edges={edges}
@@ -260,30 +428,35 @@ function CanvasInner() {
         colorMode={theme === "dark" ? "dark" : "light"}
         proOptions={{ hideAttribution: true }}
         zoomOnDoubleClick={false}
+        panOnDrag={tool === "select"}
+        nodesDraggable={tool === "select"}
+        nodesConnectable={tool === "select"}
+        elementsSelectable={tool === "select"}
         deleteKeyCode={["Delete", "Backspace"]}
         connectionLineStyle={{ stroke: "var(--color-accent-400)", strokeWidth: 2 }}
       >
         <Background variant={BackgroundVariant.Dots} gap={24} size={1.2} />
+        <DrawingLayer strokes={board.drawings} live={liveStroke} erasing={tool === "erase"}
+          onErase={(id) => key && canvasActions.removeStroke(key, id)} />
       </ReactFlow>
       <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
         <FloorBar />
+        <CanvasToolbar
+          tool={tool} onTool={setTool} style={drawStyle} onStyle={setDrawStyle}
+          onTerminal={() => openNewAgentWizard()}
+          onNote={addNoteHere} onPortal={addPortalHere} onText={addTextHere}
+          onImage={() => fileInput.current?.click()}
+          onUndo={() => key && canvasActions.undoStroke(key)} canUndo={board.drawings.length > 0} />
         {panel === "routines" && <RoutinesPanel onClose={() => setPanel(null)} />}
         {panel === "chat" && <ChatPanel onClose={() => setPanel(null)} />}
       </div>
+      <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="hidden"
+        onChange={(e) => {
+          const file = e.target.files?.[0];
+          e.target.value = "";
+          if (file) void addImageFrom(file);
+        }} />
       <CanvasControls zoom={vp.zoom} panel={panel} onTogglePanel={(p) => setPanel((cur) => (cur === p ? null : p))}
-        onAddPortal={() => {
-          if (!key) return;
-          const at = { x: (size.width / 2 - vp.x) / vp.zoom - 320, y: (size.height / 2 - vp.y) / vp.zoom - 220 };
-          const { id } = canvasActions.addPortal(key, { name: t("canvas.portalDefaultName"), at });
-          setSelectedNote(id);
-        }}
-        onAddNote={() => {
-          if (!key) return;
-          // En el centro de lo que se ve, para que aparezca donde el usuario está mirando.
-          const at = { x: (size.width / 2 - vp.x) / vp.zoom - 160, y: (size.height / 2 - vp.y) / vp.zoom - 120 };
-          const { id } = canvasActions.addNote(key, { name: t("canvas.noteDefaultName"), content: "", at });
-          setSelectedNote(id);
-        }}
         onFit={() => rf.fitView({ padding: 0.12, maxZoom: 1, duration: 220 })}
         onReset={() => {
           const target = activeTabId && board.nodes[activeTabId] ? activeTabId : tabs[0]?.id;
@@ -295,8 +468,8 @@ function CanvasInner() {
 
 /** Los botones de zoom y el minimapa. Van en su propia capa, por encima de las
  *  terminales: abajo, una terminal viva los taparía. */
-function CanvasControls({ zoom, onFit, onReset, onAddNote, onAddPortal, panel, onTogglePanel }: {
-  zoom: number; onFit: () => void; onReset: () => void; onAddNote: () => void; onAddPortal: () => void;
+function CanvasControls({ zoom, onFit, onReset, panel, onTogglePanel }: {
+  zoom: number; onFit: () => void; onReset: () => void;
   panel: "routines" | "chat" | null; onTogglePanel: (p: "routines" | "chat") => void;
 }) {
   const { t } = useTranslation();
@@ -307,8 +480,7 @@ function CanvasControls({ zoom, onFit, onReset, onAddNote, onAddPortal, panel, o
     <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
       <div className="pointer-events-auto absolute right-3 bottom-3 flex items-center gap-0.5 p-1 rounded-lg
         border border-gray-200 dark:border-white/10 bg-white/95 dark:bg-surface-raised/95 shadow-sm">
-        <Button variant="custom" className={button} onClick={onAddNote} title={t("canvas.addNoteHint")}>{t("canvas.addNote")}</Button>
-        <Button variant="custom" className={button} onClick={onAddPortal} title={t("canvas.addPortalHint")}>{t("canvas.addPortal")}</Button>
+
         <Button variant="custom" className={button} onClick={() => onTogglePanel("chat")} aria-pressed={panel === "chat"}
           title={t("canvas.chat.hint")}>{t("canvas.chat.title")}</Button>
         <Button variant="custom" className={button} onClick={() => onTogglePanel("routines")} aria-pressed={panel === "routines"}
@@ -529,10 +701,11 @@ const NoteNode = memo(function NoteNode({ data, selected }: NodeProps<NoteFlowNo
         placeholder={t("canvas.notePlaceholder")}
         aria-label={note.name}
         spellCheck={false}
-        // `nowheel`: la rueda desplaza el texto, no hace zoom en el canvas.
-        className="nodrag nowheel flex-1 min-h-0 w-full resize-none bg-transparent outline-none px-3 py-2
+        // Seleccionada, el campo es de escribir (`nodrag`); sin seleccionar, la nota se agarra
+        // de cualquier lado. `nowheel`: la rueda desplaza el texto, no hace zoom en el canvas.
+        className={`${selected ? "nodrag nowheel" : ""} flex-1 min-h-0 w-full resize-none bg-transparent outline-none px-3 py-2
           font-mono text-[12px] leading-[17px] text-gray-800 dark:text-gray-200
-          placeholder:text-amber-700/40 dark:placeholder:text-gray-500"
+          placeholder:text-amber-700/40 dark:placeholder:text-gray-500`}
       />
     </div>
   );
@@ -641,12 +814,17 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
       <div className="nodrag nowheel nopan relative flex-1 min-h-0">
         {view && (
           <Suspense fallback={null}>
-            <BrowserTab view={view} active={selected} />
+            <PortalBody view={view} active={selected} />
           </Suspense>
         )}
       </div>
     </div>
   );
+});
+
+/** El navegador dentro del portal. `memo`: mover o redimensionar el nodo no lo toca. */
+const PortalBody = memo(function PortalBody({ view, active }: { view: BrowserView; active: boolean }) {
+  return <BrowserTab view={view} active={active} />;
 });
 
 function GlobeIcon({ className }: { className?: string }) {
@@ -699,5 +877,5 @@ function LinkEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targ
   );
 }
 
-const NODE_TYPES = { agent: AgentNode, note: NoteNode, portal: PortalNode };
+const NODE_TYPES = { agent: AgentNode, note: NoteNode, portal: PortalNode, text: TextNode, image: ImageNode };
 const EDGE_TYPES = { link: LinkEdge };

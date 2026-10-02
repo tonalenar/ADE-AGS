@@ -18,6 +18,7 @@ use std::sync::Mutex;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+pub mod assets;
 pub mod roles;
 
 #[cfg(test)]
@@ -57,6 +58,14 @@ pub struct Board {
     /// en su nodo. Es solo una etiqueta: no da ni quita permisos.
     #[serde(default)]
     pub roles: BTreeMap<String, String>,
+    /// Rótulos, imágenes y trazos: decoración que dibuja y edita el frontend. El backend no
+    /// los interpreta, pero tienen que sobrevivir al guardado.
+    #[serde(default)]
+    pub texts: Value,
+    #[serde(default)]
+    pub images: Value,
+    #[serde(default)]
+    pub drawings: Value,
 }
 
 /// Un portal: un navegador dentro del canvas que los agentes conectados manejan con
