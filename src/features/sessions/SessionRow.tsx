@@ -151,7 +151,7 @@ export function SessionRow({
         onDoubleClick={() => onResume(entry)}
         className={`cc-t group flex items-center gap-2.5 h-[42px] px-2.5 rounded-lg cursor-pointer
           ${selected
-            ? "bg-blue-500/12 dark:bg-blue-400/13 shadow-[inset_0_0_0_1px_rgba(88,166,255,0.24)]"
+            ? "bg-accent-500/12 dark:bg-accent-400/13 shadow-[inset_0_0_0_1px_color-mix(in_oklab,var(--color-accent-400)_24%,transparent)]"
             : "hover:bg-gray-100 dark:hover:bg-white/5"}`}
       >
         <span className="flex items-center justify-center w-6 h-6 rounded-md shrink-0

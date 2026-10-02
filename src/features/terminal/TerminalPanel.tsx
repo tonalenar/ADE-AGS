@@ -26,7 +26,7 @@ export function TerminalPanel() {
   return (
     // h-full en lugar de flex-1: el padre es position:absolute;inset:0 (no flex),
     // así que h-full es la única forma de darle altura real al panel.
-    <div className="relative h-full w-full overflow-hidden bg-gray-100 dark:bg-[#0d1117]">
+    <div className="relative h-full w-full overflow-hidden bg-gray-100 dark:bg-surface">
       {tabs.map((tab) => {
         // El resume del agente ya reconstruye su propia conversación; reproducir
         // también el scrollback crudo aquí duplicaría/ensuciaría la salida.

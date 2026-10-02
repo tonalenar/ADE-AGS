@@ -63,7 +63,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
 
   return (
     <footer className="relative flex items-center gap-2.5 h-[26px] shrink-0 px-3
-      bg-gray-100 dark:bg-[#0a0f16]
+      bg-gray-100 dark:bg-surface-sunken
       border-t border-gray-200 dark:border-white/7
       text-[10.5px] tabular-nums text-gray-500 dark:text-gray-400 select-none">
 
@@ -95,7 +95,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
           ref={popRef}
           className="cc-rise absolute bottom-[30px] left-3 z-50
             rounded-xl overflow-hidden
-            bg-white dark:bg-[#0d1117]
+            bg-white dark:bg-surface
             border border-gray-200 dark:border-white/12
             shadow-2xl"
         >

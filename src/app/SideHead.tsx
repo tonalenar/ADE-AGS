@@ -6,6 +6,7 @@ import { Button, BoxIcon, HomeIcon, SaveIcon, Tooltip } from "neogestify-ui-comp
 import { useUiStore } from "@/app/uiStore";
 import { PanelIcon } from "@/app/icons";
 import { WindowLights } from "@/app/WindowLights";
+import { Logo } from "@/shared/brand/Logo";
 import { useTabsStore } from "@/features/tabs/store";
 import { DEFAULT_WORKSPACE_ID } from "@/features/tabs/types";
 import { useWorkspacesStore } from "@/features/workspaces/store";
@@ -74,7 +75,7 @@ export function SideHead({ width }: { width: number }) {
         data-tauri-drag-region
         style={{ width, position: "relative", zIndex: 30 }}
         className={`flex items-center h-10 shrink-0 overflow-hidden
-          bg-gray-100 dark:bg-[#080b0f]
+          bg-gray-100 dark:bg-surface-deep
           border-r border-b border-gray-200 dark:border-white/7
           select-none transition-[width] duration-150
           ${collapsed
@@ -89,19 +90,15 @@ export function SideHead({ width }: { width: number }) {
           <div className="relative min-w-0" data-tauri-drag-region="false" ref={menuRef}>
             <Button variant="custom"
               onClick={() => setMenuOpen((v) => !v)}
-              className="text-[12.5px] font-bold tracking-tight truncate
-                bg-clip-text text-transparent
-                bg-linear-to-r from-blue-600 to-violet-600
-                dark:from-blue-400 dark:to-violet-400
-                hover:opacity-80 transition-opacity inline-block"
+              className="truncate hover:opacity-80 transition-opacity inline-flex"
             >
-              Control Code
+              <Logo size={13} />
             </Button>
 
             {menuOpen && (
               <div className="absolute top-full left-0 mt-1.5 w-56 py-1 z-100
                 rounded-lg border border-gray-200 dark:border-white/10
-                bg-white dark:bg-[#0d1117] shadow-lg">
+                bg-white dark:bg-surface shadow-lg">
                 <MenuItem
                   icon={<HomeIcon className="w-4 h-4 shrink-0" />}
                   label={t("topbar.menu.home")}

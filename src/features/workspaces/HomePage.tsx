@@ -20,6 +20,7 @@ import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
 import { CloneRepoDialog } from "@/features/forge/CloneRepoDialog";
+import { Mascot } from "@/shared/brand/Mascot";
 
 export function HomePage() {
   const { t } = useTranslation();
@@ -93,10 +94,10 @@ export function HomePage() {
 
         {/* Header */}
         <div className="flex flex-col gap-1.5 w-full items-center text-center">
-          <h1 className="text-3xl font-bold bg-clip-text text-transparent
-            bg-linear-to-r from-blue-600 to-violet-600
-            dark:from-blue-400 dark:to-violet-400">
-            {t("app.title")}
+          <Mascot size={88} />
+          <h1 className="mt-2 text-3xl font-semibold tracking-tight">
+            <span className="text-gray-900 dark:text-gray-50">ADE</span>{" "}
+            <span className="text-gray-400 dark:text-gray-500">AGS</span>
           </h1>
           <p className="text-sm text-gray-500 dark:text-gray-400">
             {t("app.subtitle")}

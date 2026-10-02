@@ -195,7 +195,7 @@ export function AppShell() {
 
   return (
     <div className={`flex flex-col h-screen overflow-hidden
-      bg-gray-50 dark:bg-[#0d1117]
+      bg-gray-50 dark:bg-surface
       text-gray-900 dark:text-white
       ${isMaximized ? "" : "rounded-xl"}`}>
 
