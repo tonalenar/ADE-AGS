@@ -24,6 +24,7 @@ import { SyncSection } from "@/features/sync/SyncSection";
 import { UpdatesSection } from "@/features/updates/UpdatesSection";
 import { SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
 import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
+import { SandboxSetting } from "@/features/settings/SandboxSetting";
 import { RenderingSetting } from "@/features/settings/RenderingSetting";
 
 /** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
@@ -42,7 +43,7 @@ function AgentCapabilities({ agent }: { agent: CustomAgent }) {
     <div className="flex flex-wrap gap-1 mt-0.5">
       {caps.map((c) => (
         <span key={c} className="text-[9.5px] px-1.5 rounded
-          bg-blue-500/10 text-blue-600 dark:bg-blue-400/15 dark:text-blue-300">
+          bg-accent-500/10 text-accent-600 dark:bg-accent-400/15 dark:text-accent-300">
           {c}
         </span>
       ))}
@@ -128,7 +129,7 @@ export function SettingsPage() {
               className={`cc-t flex items-center w-full h-8 px-2.5 rounded-lg text-left
                 text-[11.5px]
                 ${s.id === section
-                  ? "bg-blue-500/12 dark:bg-blue-400/13 text-gray-900 dark:text-white font-semibold"
+                  ? "bg-accent-500/12 dark:bg-accent-400/13 text-gray-900 dark:text-white font-semibold"
                   : "text-gray-600 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-white/6"} gap-0`}
             >
               <span className="truncate">{s.label}</span>
@@ -155,6 +156,7 @@ export function SettingsPage() {
               </SettingsRow>
               <RenderingSetting />
               <NotificationsSetting />
+              <SandboxSetting />
             </div>
           </SettingsSection>
         )}

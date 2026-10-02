@@ -30,6 +30,7 @@ import { hasBrowserMcp, withBrowserMcp } from "@/features/browser/tabMcp";
 import { homeDir } from "@/shared/ipc/window";
 import { ptyAttach, ptyCreate, ptyKill, ptyResize, ptyWrite } from "./ipc";
 import { createFitter } from "./fit";
+import { forgetTab, markInput, markOutput } from "./activity";
 import { StatusBadge, type TerminalStatus } from "./StatusBadge";
 import { LOOKBACK_S, startSessionDiscovery } from "./sessionDiscovery";
 import { MARK_LINE, MIN_CONTRAST, TERMINAL_FONT, TERMINAL_THEMES, terminalFontSize } from "./theme";
@@ -307,6 +308,7 @@ export function Terminal({
         `pty-data-${ptyId}`,
         (event) => {
           term.write(event.payload.data);
+          markOutput(tabId, agentId);
         }
       );
 
@@ -444,7 +446,10 @@ export function Terminal({
               : undefined,
             browser.env,
             accountEnv,
-            env
+            env,
+            // Quién es esta terminal. `ccode peer ...` lo reenvía como `from`, y es contra
+            // eso que el backend compara las conexiones del canvas.
+            tabId ? { ADE_TAB_ID: tabId } : undefined
           ),
           prelaunch: resolvedPrelaunch,
         });
@@ -464,6 +469,7 @@ export function Terminal({
 
     // ── 5. Input del usuario → PTY ───────────────────────────
     term.onData((data) => {
+      markInput(tabId);
       if (ptyIdRef.current !== null) {
         ptyWrite(ptyIdRef.current, data).catch(console.error);
       }
@@ -538,6 +544,7 @@ export function Terminal({
       disposeScrollbar();
       disposeRail();
       unlistenData?.();
+      forgetTab(tabId);
       unlistenExit?.();
       if (ptyIdRef.current !== null) {
         // Antes había un guardia acá para no matar un PTY que estaba viajando a otra

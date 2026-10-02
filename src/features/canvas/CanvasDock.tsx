@@ -1,0 +1,217 @@
+import { useEffect, useMemo, useState } from "react";
+import { useTranslation } from "react-i18next";
+import { MiniMap, useNodesInitialized, useReactFlow } from "@xyflow/react";
+import { Button, CloseIcon } from "neogestify-ui-components";
+
+import { useAccountsStore } from "@/features/accounts/store";
+import type { AgentAccount } from "@/features/accounts/types";
+
+import { unreadOf, useUnreadStore } from "./chatUnread";
+import { FloorBar } from "./FloorBar";
+import { RING_COLORS, Ring } from "./Ring";
+import { UsageBoard } from "./UsageBoard";
+import { startUsagePolling, useUsageStore } from "./usageStore";
+
+/** Qué panel está abierto sobre la barra. Uno a la vez: todos nacen en el mismo lugar. */
+export type DockPanel = "layers" | "map" | "chat" | "routines";
+
+// ── Anillos de uso ──────────────────────────────────────────────────
+
+/**
+ * Cuánto llevan gastado de su plan las cuentas principales, para los anillos de la barra:
+ * Claude (la sesión de cinco horas) y Codex (su ventana de cinco horas). `null` = no se
+ * sabe (sin login, o la consulta falló): el anillo queda vacío y apagado, no en cero.
+ * Los datos los mantiene `usageStore`, siempre vivo mientras el canvas está abierto.
+ */
+function useUsageRings(): { claude: number | null; codex: number | null } {
+  const claude = useUsageStore((st) => {
+    for (const live of Object.values(st.claude)) if (live.available && live.session) return live.session.percent;
+    return null;
+  });
+  const codex = useUsageStore((st) => {
+    for (const e of Object.values(st.codex)) {
+      const w = e.usage?.quota?.fiveHour;
+      if (w) return Math.round(w.utilization * 100);
+    }
+    return null;
+  });
+  return { claude, codex };
+}
+
+// ── Iconos ──────────────────────────────────────────────────────────
+
+function Svg({ children }: { children: React.ReactNode }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"
+      className="w-[18px] h-[18px]" aria-hidden>{children}</svg>
+  );
+}
+const LayersIcon = () => <Svg><path d="M12 3l9 5-9 5-9-5 9-5Z" /><path d="M3 13l9 5 9-5" /></Svg>;
+const MapIcon = () => <Svg><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z" /><path d="M9 4v14M15 6v14" /></Svg>;
+const ChatIcon = () => <Svg><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.5A8 8 0 1 1 21 12Z" /></Svg>;
+const ClockIcon = () => <Svg><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>;
+const FitIcon = () => <Svg><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" /></Svg>;
+
+/** Un botón redondo de la barra. */
+function Pill({ label, active, onClick, children, className = "" }: {
+  label: string; active?: boolean; onClick: () => void; children: React.ReactNode; className?: string;
+}) {
+  return (
+    <Button variant="custom" onClick={onClick} title={label} aria-label={label} aria-pressed={active}
+      className={`cc-t h-10 min-w-10 px-2.5 flex items-center justify-center gap-1.5 rounded-full border shadow-md backdrop-blur
+        ${active
+          ? "bg-accent-500/15 border-accent-400/60 text-accent-600 dark:text-accent-300"
+          : "bg-white/92 dark:bg-surface-raised/92 border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"}
+        ${className}`}>
+      {children}
+    </Button>
+  );
+}
+
+const popover = `pointer-events-auto absolute right-3 bottom-16 rounded-2xl overflow-hidden border border-gray-200
+  dark:border-white/10 bg-white/97 dark:bg-surface-raised/97 shadow-xl`;
+
+/**
+ * La barra de abajo del canvas: andares, uso de los agentes (anillos), mapa y zoom, más el
+ * chat y las rotinas. Cada botón abre su panel hacia arriba.
+ *
+ * Va en su propia capa, por encima de las terminales: abajo, una terminal viva la taparía.
+ */
+export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onReset, petPercent }: {
+  zoom: number;
+  panel: DockPanel | null;
+  onTogglePanel: (p: DockPanel) => void;
+  /** Abre el chat (sin alternar). */
+  onOpenChat: () => void;
+  onFit: () => void;
+  onReset: () => void;
+  /** Cuánto del nivel del pet está hecho (0–100): el tercer anillo. */
+  petPercent: number;
+}) {
+  const { t } = useTranslation();
+  const rf = useReactFlow();
+  // El minimapa dibuja con las medidas de los nodos: antes de que React Flow las tenga,
+  // saca `NaN` en sus rutas. Se muestra recién cuando están.
+  const nodesReady = useNodesInitialized();
+  const loaded = useAccountsStore((s) => s.loaded);
+  const load = useAccountsStore((s) => s.load);
+  const system = useAccountsStore((s) => s.systemAccounts);
+  const custom = useAccountsStore((s) => s.accounts);
+  useEffect(() => {
+    if (!loaded) void load();
+  }, [loaded, load]);
+
+  const accounts = useMemo(() => [...system, ...custom].filter((a) => a.loggedIn), [system, custom]);
+  const rings = useUsageRings();
+  // Un aviso del sistema pidió abrir el chat: se abre si no lo estaba.
+  const jump = useUnreadStore((s) => s.jump);
+  useEffect(() => {
+    // `onOpenChat` abre y no alterna: en desarrollo el efecto corre dos veces y alternar lo cerraría.
+    if (jump) onOpenChat();
+    // La función cambia en cada render del canvas: solo importa el pedido.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [jump]);
+  const unreadTotal = useUnreadStore((s) => Object.values(s.unread).reduce((n, by) => n + unreadOf(by), 0));
+  useEffect(() => startUsagePolling(accounts), [accounts]);
+  const [usageOpen, setUsageOpen] = useState(readUsageOpen);
+  useEffect(() => writeUsageOpen(usageOpen), [usageOpen]);
+  const toggleUsage = () => setUsageOpen((v) => !v);
+
+  return (
+    <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
+      {panel === "layers" && (
+        <div className={`${popover} p-2`}><FloorBar inline /></div>
+      )}
+      {usageOpen && panel === null && <UsagePanel accounts={accounts} onClose={toggleUsage} />}
+      {panel === "map" && (
+        <div className={`${popover} w-[17rem]`}>
+          <div className="relative h-44">
+            {nodesReady && (
+              <MiniMap pannable zoomable nodeColor="var(--color-accent-400)" maskColor="rgba(0,0,0,0.3)"
+                style={{ position: "absolute", inset: 0, margin: 0, width: "100%", height: "100%", background: "transparent" }} />
+            )}
+            <Button variant="custom" onClick={() => onTogglePanel("map")} aria-label={t("canvas.dock.close")}
+              className="cc-t absolute right-2 top-2 z-10 w-6 h-6 flex items-center justify-center rounded-full bg-black/45 text-white hover:bg-black/65">
+              <CloseIcon className="w-3 h-3" />
+            </Button>
+          </div>
+        </div>
+      )}
+
+      <div className="pointer-events-auto absolute right-3 bottom-3 flex items-center gap-2">
+        <Pill label={t("canvas.chat.hint")} active={panel === "chat"} onClick={() => onTogglePanel("chat")} className="relative">
+          <ChatIcon />
+          {unreadTotal > 0 && (
+            <span className="absolute -top-1 -right-1 min-w-[17px] h-[17px] px-1 rounded-full bg-red-500 text-white text-[10px] font-bold
+              leading-[17px] text-center shadow">{unreadTotal > 9 ? "9+" : unreadTotal}</span>
+          )}
+        </Pill>
+        <Pill label={t("canvas.routines.hint")} active={panel === "routines"} onClick={() => onTogglePanel("routines")}><ClockIcon /></Pill>
+        <Pill label={t("canvas.dock.layers")} active={panel === "layers"} onClick={() => onTogglePanel("layers")}><LayersIcon /></Pill>
+        <Pill label={t("canvas.dock.usage")} active={usageOpen} onClick={toggleUsage} className="gap-1.5 px-3">
+          <Ring percent={rings.claude} color={RING_COLORS.claude} />
+          <Ring percent={rings.codex} color={RING_COLORS.codex} />
+          <Ring percent={petPercent} color={RING_COLORS.gemini} />
+        </Pill>
+        <Pill label={t("canvas.dock.map")} active={panel === "map"} onClick={() => onTogglePanel("map")}><MapIcon /></Pill>
+
+        <div className="h-10 flex items-center rounded-full border shadow-md backdrop-blur bg-white/92 dark:bg-surface-raised/92
+          border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-300">
+          <Button variant="custom" onClick={() => rf.zoomOut({ duration: 160 })} aria-label={t("canvas.zoomOut")}
+            className="cc-t w-9 h-10 flex items-center justify-center rounded-l-full text-[16px] hover:text-gray-900 dark:hover:text-white">−</Button>
+          <Button variant="custom" onClick={onReset} title={t("canvas.liveHint")}
+            className="cc-t w-12 h-10 text-[12px] font-semibold tabular-nums hover:text-gray-900 dark:hover:text-white">
+            {Math.round(zoom * 100)}%
+          </Button>
+          <Button variant="custom" onClick={() => rf.zoomIn({ duration: 160 })} aria-label={t("canvas.zoomIn")}
+            className="cc-t w-9 h-10 flex items-center justify-center text-[16px] hover:text-gray-900 dark:hover:text-white">+</Button>
+          <span className="w-px h-5 bg-gray-200 dark:bg-white/10" />
+          <Button variant="custom" onClick={onFit} aria-label={t("canvas.fit")} title={t("canvas.fit")}
+            className="cc-t w-10 h-10 flex items-center justify-center rounded-r-full hover:text-gray-900 dark:hover:text-white"><FitIcon /></Button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Uso de los agentes ──────────────────────────────────────────────
+
+/**
+ * El panel "Uso dos agentes": el cupo del plan de cada cuenta con sesión — anillo, barras
+ * por límite y cuándo se reinicia (ver `UsageBoard`).
+ */
+function UsagePanel({ accounts, onClose }: { accounts: AgentAccount[]; onClose: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <div className={`${popover} w-[22rem] max-h-[calc(100%-5rem)] flex flex-col`}>
+      <div className="flex items-center gap-1 pl-4 pr-2 h-11 shrink-0 border-b border-gray-200 dark:border-white/10">
+        <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100">{t("canvas.dock.usageTitle")}</span>
+        <span className="flex-1" />
+        <Button variant="custom" onClick={onClose} aria-label={t("canvas.dock.close")}
+          className="cc-t w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+          <CloseIcon className="w-3 h-3" />
+        </Button>
+      </div>
+      <div className="overflow-y-auto">
+        <UsageBoard accounts={accounts} />
+      </div>
+    </div>
+  );
+}
+
+// El panel de uso nace abierto y recuerda si se lo cerró: las cuotas se ven siempre, salvo que se pida lo contrario.
+const OPEN_KEY = "cc.canvas.usageOpen";
+function readUsageOpen(): boolean {
+  try {
+    return localStorage.getItem(OPEN_KEY) !== "0";
+  } catch {
+    return true;
+  }
+}
+function writeUsageOpen(open: boolean) {
+  try {
+    localStorage.setItem(OPEN_KEY, open ? "1" : "0");
+  } catch {
+    /* sin almacenamiento: no se recuerda */
+  }
+}
