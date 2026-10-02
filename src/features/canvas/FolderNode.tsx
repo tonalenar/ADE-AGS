@@ -2,13 +2,16 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
-import { Button, CloseIcon } from "neogestify-ui-components";
+import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
 
 import { readDir } from "@/features/explorer/ipc";
 import type { DirEntry } from "@/features/explorer/types";
+import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { focusTab, pasteIntoTab } from "@/features/terminal/terminalRegistry";
 
 import { FOLDER_MIN, type CanvasFolder } from "./board";
+import { beginFileDrag, consumeDrag, pathForTerminal } from "./fileDrag";
 import { canvasActions, useActiveBoardKey } from "./store";
 
 export interface FolderNodeData extends Record<string, unknown> {
@@ -118,6 +121,17 @@ export const FolderNode = memo(function FolderNode({ data, selected }: NodeProps
     for (const dir of folder.open) void load(dir);
   };
 
+  /** Soltaron `path` sobre un agente: se escribe su ruta en su terminal, sin Enter. */
+  const sendPath = (path: string, tabId: string) => {
+    const name = useTabsStore.getState().tabs.find((tab) => tab.id === tabId)?.title ?? "";
+    if (pasteIntoTab(tabId, pathForTerminal(path), false)) {
+      focusTab(tabId);
+      AlertaToast(folder.name, t("canvas.folder.sent", { name }), "info", 2500);
+    } else {
+      AlertaToast(folder.name, t("canvas.folder.noTerminal", { name }), "warning", 5000);
+    }
+  };
+
   const change = async () => {
     const picked = await pickFolder({ directory: true, multiple: false, defaultPath: folder.path });
     if (typeof picked === "string" && key) {
@@ -161,8 +175,13 @@ export const FolderNode = memo(function FolderNode({ data, selected }: NodeProps
         ) : (
           rows.map(({ entry, depth, expanded }) => (
             <button key={entry.path} type="button"
-              onClick={() => (entry.isDir ? toggle(entry.path) : useViewTabsStore.getState().openFile(cwd || folder.path, entry.path))}
-              title={entry.path}
+              onPointerDown={(e) => beginFileDrag(e, entry.name, (tabId) => sendPath(entry.path, tabId))}
+              onClick={() => {
+                if (consumeDrag()) return;
+                if (entry.isDir) toggle(entry.path);
+                else useViewTabsStore.getState().openFile(cwd || folder.path, entry.path);
+              }}
+              title={`${entry.path}\n${t("canvas.folder.dragHint")}`}
               className="w-full flex items-center gap-1.5 h-[22px] pr-2 text-left hover:bg-gray-100 dark:hover:bg-white/6
                 text-gray-700 dark:text-gray-300"
               style={{ paddingLeft: 8 + depth * 14 }}>
