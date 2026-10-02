@@ -23,6 +23,7 @@ use super::floor::{floor_create, floor_list};
 use super::routine::{
     routine_create, routine_delete, routine_disable, routine_edit, routine_enable, routine_list, routine_run, routine_show,
 };
+use super::chat::{chat_recall, chat_say};
 use super::peers::{peer_ask, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_tell};
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
@@ -90,6 +91,9 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "routine.disable" => routine_disable(app, args),
         "routine.run" => routine_run(app, args),
         "routine.delete" => routine_delete(app, args),
+        // Chat con el usuario (ver `chat`).
+        "say.send" => chat_say(app, args),
+        "recall.get" => chat_recall(app, args),
         "agent.list" => agent_list(app),
         "account.list" => account_list(app),
         "prelaunch.list" => prelaunch_list(app),

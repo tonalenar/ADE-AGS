@@ -71,6 +71,11 @@ PORTALES DEL CANVAS — navegadores conectados con esta terminal (orquestador: l
   portal screenshot|console|layout <portal>   Foto, consola y medidas
                                               (sin eval, upload ni cookies: eso es del usuario)
 
+CHAT CON EL USUARIO — su chat por hilos (siete colores); lo que escribís en la terminal NO le llega
+  say \"texto\" [--progress] [--thread <color>]  Le contestás en el chat (--progress: aviso, tu turno sigue)
+      [--file <ruta>]                         · el texto desde un archivo
+  recall [<color>|list] [--turns 10 | --all]  Lo que se habló en un hilo (list: los hilos con actividad)
+
 ROTINAS — mensajes a la hora, a vos, a un agente que alcanzás o al usuario
   routines                                    Las tuyas (en un shell: todas)
   routine create <nombre> \"texto\" <cuándo>   · --every 30m | --at 09:00 [--days seg,qua] | --in 45m
@@ -288,9 +293,10 @@ impl CliError {
     }
 }
 
-/// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*` y `routine.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
+/// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    if !(command.starts_with("peer.") || command.starts_with("note.") || command.starts_with("portal.") || command.starts_with("notify.") || command.starts_with("role.") || command.starts_with("floor.") || command.starts_with("routine.")) || parsed.get("from").is_some() {
+    const GROUPS: [&str; 9] = ["peer.", "note.", "portal.", "notify.", "role.", "floor.", "routine.", "say.", "recall."];
+    if !GROUPS.iter().any(|g| command.starts_with(g)) || parsed.get("from").is_some() {
         return parsed;
     }
     if let (Ok(tab), Some(map)) = (std::env::var("ADE_TAB_ID"), parsed.as_object_mut()) {
@@ -314,6 +320,9 @@ fn shortcut(word: &str) -> Option<&'static str> {
         "roles" => Some("role.list"),
         "floors" => Some("floor.list"),
         "routines" => Some("routine.list"),
+        // `ccode say "pronto"`: hablarle al usuario es lo único que se hace con `say`.
+        "say" => Some("say.send"),
+        "recall" => Some("recall.get"),
         _ => None,
     }
 }
@@ -345,6 +354,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "notify.send" => &["message"],
         // `ccode role create "Revisor" "Procure falhas..."`; el texto también va con --file.
         "floor.create" => &["name"],
+        "say.send" => &["text"],
+        "recall.get" => &["thread"],
         // `ccode routine create Testes "rode os testes" --at 09:00`
         "routine.create" => &["name", "text"],
         "routine.edit" => &["name", "text"],
@@ -499,7 +510,7 @@ fn value_for(key: &str, raw: &str) -> Value {
         ),
         // Un número mal escrito se manda tal cual como string: el backend lo rechaza con
         // un mensaje que nombra el flag, mejor que un "0" silencioso acá.
-        "lines" | "timeout" | "max" | "idle" | "start" | "count" => {
+        "lines" | "timeout" | "max" | "idle" | "start" | "count" | "turns" => {
             raw.parse::<u64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.into()))
         }
         _ => Value::String(raw.to_string()),

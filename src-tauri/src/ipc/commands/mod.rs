@@ -6,6 +6,7 @@ mod ask;
 mod notes;
 mod notify;
 mod floor;
+pub mod chat;
 mod peers;
 pub mod routine;
 mod role;

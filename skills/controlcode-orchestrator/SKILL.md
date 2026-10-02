@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.14.0
+version: 1.15.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -421,6 +421,32 @@ ccode peer disconnect Backend Tests
 - Coordinate, don't micromanage: give each recruit one clear task, use `peer ask` when you
   need the answer to continue and `peer tell` when you don't, and check on long work with
   `peer check` instead of asking again.
+
+### Chat with the user
+
+The user can talk to you from a chat panel instead of your terminal. Such a message arrives
+as `[Chat do usuário · thread: <color>] <text>`. **Reply with `ccode say`** — what you print
+in the terminal does not reach that chat.
+
+```bash
+ccode say "Tests pass; I changed two files, details in note Plan."
+ccode say --progress "Running the suite…"       # an interim notice; your turn goes on
+ccode say --thread green "Separate topic"      # another thread, instead of the current one
+ccode say --file reply.md                      # longer text from a file
+ccode recall                                   # the last 10 turns of the current thread
+ccode recall green --turns 3                   # or another thread; --all for everything
+ccode recall list                              # threads with activity
+```
+
+- There are seven threads (blue, purple, pink, red, orange, yellow, green), one per
+  conversation. `say` answers in the thread of the last user message unless you pass
+  `--thread`. Don't mix topics: a green question gets a green answer.
+- Send one `say` per answer, not a stream. Use `--progress` for long work, and finish with
+  a plain `say`.
+- Plain text only, up to 8000 characters. Put long reports in a note and point to it.
+- After a restart or a compacted context, `ccode recall` brings the conversation back.
+- Chat is for talking to the user. To reach another agent use `peer`; to ask a question the
+  user must answer before you continue, keep using your normal question tool.
 
 ### Routines
 

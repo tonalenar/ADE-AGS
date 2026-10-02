@@ -1704,5 +1704,19 @@
   "canvas.routines.confirm": "¿Borrar?",
   "canvas.routines.reminder": "recordatorio para vos",
   "canvas.routines.next": "próxima:",
-  "canvas.routines.last": "última:"
+  "canvas.routines.last": "última:",
+  "canvas.chat.title": "Chat",
+  "canvas.chat.hint": "Conversá con un agente en globos, por hilos de color. Él contesta con ccode say.",
+  "canvas.chat.close": "Cerrar",
+  "canvas.chat.noAgents": "No hay agentes abiertos en esta carpeta. El chat es solo para agentes: en una terminal de shell el mensaje se ejecutaría como comando.",
+  "canvas.chat.empty": "Todavía no hay nada en este hilo. Escribí abajo: el mensaje le llega al agente con el nombre del hilo.",
+  "canvas.chat.placeholder": "Mensaje para {{name}}…",
+  "canvas.chat.send": "Enviar",
+  "canvas.chat.thread.blue": "Azul",
+  "canvas.chat.thread.purple": "Violeta",
+  "canvas.chat.thread.pink": "Rosa",
+  "canvas.chat.thread.red": "Rojo",
+  "canvas.chat.thread.orange": "Naranja",
+  "canvas.chat.thread.yellow": "Amarillo",
+  "canvas.chat.thread.green": "Verde"
 }

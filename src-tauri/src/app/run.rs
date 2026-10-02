@@ -44,6 +44,9 @@ pub fn run() {
             crate::ipc::commands::routine::routine_set_enabled,
             crate::ipc::commands::routine::routine_run_now,
             crate::ipc::commands::routine::routine_remove,
+            // Chat con los agentes, por hilos
+            crate::ipc::commands::chat::chat_history,
+            crate::ipc::commands::chat::chat_send,
             // Persistencia SQLite — workspaces (layouts guardados de ventanas/tabs)
             crate::database::db_list_workspaces,
             crate::database::db_save_workspace,

@@ -23,6 +23,7 @@ import {
   type Box, type Rect, type Viewport,
 } from "./geometry";
 import { FloorBar } from "./FloorBar";
+import { ChatPanel } from "./ChatPanel";
 import { RoutinesPanel } from "./RoutinesPanel";
 import { boardKey, canvasActions, useActiveBoardKey, useCanvasStore } from "./store";
 
@@ -149,7 +150,8 @@ function CanvasInner() {
     // Solo cuando cambia el agente activo, no con cada paneo.
   }, [activeTabId]);
 
-  const [routinesOpen, setRoutinesOpen] = useState(false);
+  // Un panel a la vez: los dos se abren en el mismo lugar.
+  const [panel, setPanel] = useState<"routines" | "chat" | null>(null);
   // Una nota o un portal seleccionado no es un agente activo: se lleva aparte.
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
 
@@ -265,9 +267,10 @@ function CanvasInner() {
       </ReactFlow>
       <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
         <FloorBar />
-        {routinesOpen && <RoutinesPanel onClose={() => setRoutinesOpen(false)} />}
+        {panel === "routines" && <RoutinesPanel onClose={() => setPanel(null)} />}
+        {panel === "chat" && <ChatPanel onClose={() => setPanel(null)} />}
       </div>
-      <CanvasControls zoom={vp.zoom} routinesOpen={routinesOpen} onToggleRoutines={() => setRoutinesOpen((o) => !o)}
+      <CanvasControls zoom={vp.zoom} panel={panel} onTogglePanel={(p) => setPanel((cur) => (cur === p ? null : p))}
         onAddPortal={() => {
           if (!key) return;
           const at = { x: (size.width / 2 - vp.x) / vp.zoom - 320, y: (size.height / 2 - vp.y) / vp.zoom - 220 };
@@ -292,9 +295,9 @@ function CanvasInner() {
 
 /** Los botones de zoom y el minimapa. Van en su propia capa, por encima de las
  *  terminales: abajo, una terminal viva los taparía. */
-function CanvasControls({ zoom, onFit, onReset, onAddNote, onAddPortal, routinesOpen, onToggleRoutines }: {
+function CanvasControls({ zoom, onFit, onReset, onAddNote, onAddPortal, panel, onTogglePanel }: {
   zoom: number; onFit: () => void; onReset: () => void; onAddNote: () => void; onAddPortal: () => void;
-  routinesOpen: boolean; onToggleRoutines: () => void;
+  panel: "routines" | "chat" | null; onTogglePanel: (p: "routines" | "chat") => void;
 }) {
   const { t } = useTranslation();
   const rf = useReactFlow();
@@ -306,7 +309,9 @@ function CanvasControls({ zoom, onFit, onReset, onAddNote, onAddPortal, routines
         border border-gray-200 dark:border-white/10 bg-white/95 dark:bg-surface-raised/95 shadow-sm">
         <Button variant="custom" className={button} onClick={onAddNote} title={t("canvas.addNoteHint")}>{t("canvas.addNote")}</Button>
         <Button variant="custom" className={button} onClick={onAddPortal} title={t("canvas.addPortalHint")}>{t("canvas.addPortal")}</Button>
-        <Button variant="custom" className={button} onClick={onToggleRoutines} aria-pressed={routinesOpen}
+        <Button variant="custom" className={button} onClick={() => onTogglePanel("chat")} aria-pressed={panel === "chat"}
+          title={t("canvas.chat.hint")}>{t("canvas.chat.title")}</Button>
+        <Button variant="custom" className={button} onClick={() => onTogglePanel("routines")} aria-pressed={panel === "routines"}
           title={t("canvas.routines.hint")}>{t("canvas.routines.title")}</Button>
         <span className="w-px h-4 mx-1 bg-gray-200 dark:bg-white/10" />
         <Button variant="custom" className={button} onClick={() => rf.zoomOut({ duration: 160 })} aria-label={t("canvas.zoomOut")}>−</Button>
