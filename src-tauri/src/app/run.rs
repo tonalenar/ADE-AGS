@@ -42,6 +42,8 @@ pub fn run() {
             // Pisos: worktrees aislados del proyecto, cada uno con su canvas
             crate::floors::floor_list,
             crate::floors::floor_create,
+            // El pet sube de nivel con los tokens de los agentes
+            crate::pet::pet_status,
             // Rotinas: mensajes programados a un agente o al usuario
             crate::ipc::commands::routine::routine_list_all,
             crate::ipc::commands::routine::routine_set_enabled,
@@ -415,6 +417,8 @@ pub fn run() {
                 // Las rotinas se disparan solas, con la app abierta (ver `routines`). En modo
                 // headless no hay ventanas: no habría a quién avisar ni terminal donde escribir.
                 crate::ipc::start_routine_scheduler(app.handle().clone());
+                // El pet es de la pantalla: sin ventanas (headless) no hay a quién mostrárselo.
+                crate::pet::start(app.handle().clone());
             }
 
             // Servidor IPC de la CLI `controlcode` (Fase 8). Va después de restaurar las

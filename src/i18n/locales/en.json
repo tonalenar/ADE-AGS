@@ -1777,5 +1777,11 @@
   "canvas.text.delete": "Delete text",
   "canvas.image.delete": "Delete image",
   "canvas.image.missing": "Image not found",
-  "canvas.image.invalid": "That file is not a valid image."
+  "canvas.image.invalid": "That file is not a valid image.",
+  "canvas.dock.close": "Close",
+  "canvas.dock.layers": "Floors",
+  "canvas.dock.usage": "Agent usage",
+  "canvas.dock.usageTitle": "Agent usage",
+  "canvas.dock.map": "Map",
+  "canvas.dock.noAccounts": "No logged-in accounts. Sign in to an account under Agents to see plan usage."
 }

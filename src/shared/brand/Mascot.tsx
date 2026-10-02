@@ -53,6 +53,9 @@ function runs(rows: string[]): Run[] {
 }
 
 const BODY = runs(SPRITE);
+/** Para quem desenha o mascote com outras camadas (o pet que evolui, ver `Pet.tsx`). */
+export const MASCOT_BODY = BODY;
+export const MASCOT_FILL = FILL;
 /** A cabeça sozinha (linhas 1–10), para o logo. */
 const HEAD = runs(SPRITE.slice(0, 11));
 

@@ -128,7 +128,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   };
 
   return (
-    <div className="pointer-events-auto absolute right-3 bottom-14 w-[26rem] h-[min(34rem,70%)] flex flex-col rounded-lg
+    <div className="pointer-events-auto absolute right-3 bottom-16 w-[26rem] h-[min(34rem,70%)] flex flex-col rounded-lg
       border border-gray-200 dark:border-white/10 bg-white/98 dark:bg-surface-raised/98 shadow-lg overflow-hidden">
       <div className="flex items-center gap-1 px-2 h-9 shrink-0 border-b border-gray-200 dark:border-white/10">
         <span className="px-1 text-[12.5px] font-medium text-gray-800 dark:text-gray-100">{t("canvas.chat.title")}</span>

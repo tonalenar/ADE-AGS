@@ -3,7 +3,7 @@ import "@xyflow/react/dist/style.css";
 import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Background, BackgroundVariant, BaseEdge, ConnectionMode, EdgeLabelRenderer, Handle, MiniMap, NodeResizer,
+  Background, BackgroundVariant, BaseEdge, ConnectionMode, EdgeLabelRenderer, Handle, NodeResizer,
   Position, ReactFlow, ReactFlowProvider, getBezierPath, useReactFlow,
   type Edge, type EdgeChange, type EdgeProps, type Node, type NodeChange, type NodeProps, type Connection,
 } from "@xyflow/react";
@@ -28,7 +28,8 @@ import {
   HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, terminalRect,
   type Box, type Rect, type Viewport,
 } from "./geometry";
-import { FloorBar } from "./FloorBar";
+import { CanvasDock, type DockPanel } from "./CanvasDock";
+import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ChatPanel } from "./ChatPanel";
 import { RoutinesPanel } from "./RoutinesPanel";
 import { boardKey, canvasActions, useActiveBoardKey, useCanvasStore } from "./store";
@@ -198,7 +199,8 @@ function CanvasInner() {
   }, [activeTabId]);
 
   // Un panel a la vez: los dos se abren en el mismo lugar.
-  const [panel, setPanel] = useState<"routines" | "chat" | null>(null);
+  const [panel, setPanel] = useState<DockPanel | null>(null);
+  const pet = usePetStatus();
 
   // La herramienta activa y cómo se dibuja. Dibujar y borrar son un modo; lo demás pone
   // algo en el centro de la vista y vuelve a seleccionar.
@@ -440,7 +442,6 @@ function CanvasInner() {
           onErase={(id) => key && canvasActions.removeStroke(key, id)} />
       </ReactFlow>
       <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
-        <FloorBar />
         <CanvasToolbar
           tool={tool} onTool={setTool} style={drawStyle} onStyle={setDrawStyle}
           onTerminal={() => openNewAgentWizard()}
@@ -449,6 +450,7 @@ function CanvasInner() {
           onUndo={() => key && canvasActions.undoStroke(key)} canUndo={board.drawings.length > 0} />
         {panel === "routines" && <RoutinesPanel onClose={() => setPanel(null)} />}
         {panel === "chat" && <ChatPanel onClose={() => setPanel(null)} />}
+        <PetCard pet={pet} className="pointer-events-auto absolute left-3 bottom-3" />
       </div>
       <input ref={fileInput} type="file" accept="image/png,image/jpeg,image/gif,image/webp" className="hidden"
         onChange={(e) => {
@@ -456,56 +458,13 @@ function CanvasInner() {
           e.target.value = "";
           if (file) void addImageFrom(file);
         }} />
-      <CanvasControls zoom={vp.zoom} panel={panel} onTogglePanel={(p) => setPanel((cur) => (cur === p ? null : p))}
+      <CanvasDock zoom={vp.zoom} panel={panel} onTogglePanel={(p) => setPanel((cur) => (cur === p ? null : p))}
+        petPercent={Math.round(pet.progress * 100)}
         onFit={() => rf.fitView({ padding: 0.12, maxZoom: 1, duration: 220 })}
         onReset={() => {
           const target = activeTabId && board.nodes[activeTabId] ? activeTabId : tabs[0]?.id;
           if (target) focusNode(target);
         }} />
-    </div>
-  );
-}
-
-/** Los botones de zoom y el minimapa. Van en su propia capa, por encima de las
- *  terminales: abajo, una terminal viva los taparía. */
-function CanvasControls({ zoom, onFit, onReset, panel, onTogglePanel }: {
-  zoom: number; onFit: () => void; onReset: () => void;
-  panel: "routines" | "chat" | null; onTogglePanel: (p: "routines" | "chat") => void;
-}) {
-  const { t } = useTranslation();
-  const rf = useReactFlow();
-  const button = `cc-t h-7 px-2 text-[11px] font-medium rounded-md
-    text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-white/8`;
-  return (
-    <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
-      <div className="pointer-events-auto absolute right-3 bottom-3 flex items-center gap-0.5 p-1 rounded-lg
-        border border-gray-200 dark:border-white/10 bg-white/95 dark:bg-surface-raised/95 shadow-sm">
-
-        <Button variant="custom" className={button} onClick={() => onTogglePanel("chat")} aria-pressed={panel === "chat"}
-          title={t("canvas.chat.hint")}>{t("canvas.chat.title")}</Button>
-        <Button variant="custom" className={button} onClick={() => onTogglePanel("routines")} aria-pressed={panel === "routines"}
-          title={t("canvas.routines.hint")}>{t("canvas.routines.title")}</Button>
-        <span className="w-px h-4 mx-1 bg-gray-200 dark:bg-white/10" />
-        <Button variant="custom" className={button} onClick={() => rf.zoomOut({ duration: 160 })} aria-label={t("canvas.zoomOut")}>−</Button>
-        <span className="w-11 text-center text-[11px] tabular-nums text-gray-500 dark:text-gray-400">
-          {Math.round(zoom * 100)}%
-        </span>
-        <Button variant="custom" className={button} onClick={() => rf.zoomIn({ duration: 160 })} aria-label={t("canvas.zoomIn")}>+</Button>
-        <span className="w-px h-4 mx-1 bg-gray-200 dark:bg-white/10" />
-        <Button variant="custom" className={button} onClick={onReset} title={t("canvas.liveHint")}>{t("canvas.actual")}</Button>
-        <Button variant="custom" className={button} onClick={onFit}>{t("canvas.fit")}</Button>
-      </div>
-      <div className="pointer-events-auto">
-        <MiniMap
-          position="bottom-left"
-          pannable
-          zoomable
-          className="rounded-lg! overflow-hidden border border-gray-200 dark:border-white/10"
-          nodeColor="var(--color-gray-400)"
-          maskColor="rgba(0,0,0,0.25)"
-          style={{ width: 160, height: 110 }}
-        />
-      </div>
     </div>
   );
 }

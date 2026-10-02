@@ -32,7 +32,7 @@ const same = (a: string, b: string) => comparablePath(a).replace(/\/+$/, "") ===
  * No se borran desde acá: descartar un worktree con trabajo adentro no tiene vuelta atrás.
  * La ruta se ve al pasar el mouse, para quien quiera quitarlo con `git worktree remove`.
  */
-export function FloorBar() {
+export function FloorBar({ inline = false }: { inline?: boolean }) {
   const { t } = useTranslation();
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
@@ -105,8 +105,10 @@ export function FloorBar() {
        : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"}`;
 
   return (
-    <div className="pointer-events-auto absolute left-3 top-3 flex items-center gap-0.5 p-0.5 rounded-lg
-      border border-gray-200 dark:border-white/10 bg-gray-100/95 dark:bg-surface-raised/95 shadow-sm">
+    <div className={`pointer-events-auto flex items-center gap-0.5 p-0.5 rounded-lg
+      ${inline
+        ? ""
+        : "absolute left-3 top-3 border border-gray-200 dark:border-white/10 bg-gray-100/95 dark:bg-surface-raised/95 shadow-sm"}`}>
       <Button variant="custom" className={pill(same(active.cwd, list.ground))}
         onClick={() => enter(list.ground)} title={`${t("canvas.floor.groundHint")}\n${list.ground}`}>
         {t("canvas.floor.ground")}

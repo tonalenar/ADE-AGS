@@ -1777,5 +1777,11 @@
   "canvas.text.delete": "Apagar texto",
   "canvas.image.delete": "Apagar imagem",
   "canvas.image.missing": "Imagem não encontrada",
-  "canvas.image.invalid": "Esse arquivo não é uma imagem válida."
+  "canvas.image.invalid": "Esse arquivo não é uma imagem válida.",
+  "canvas.dock.close": "Fechar",
+  "canvas.dock.layers": "Andares",
+  "canvas.dock.usage": "Uso dos agentes",
+  "canvas.dock.usageTitle": "Uso dos agentes",
+  "canvas.dock.map": "Mapa",
+  "canvas.dock.noAccounts": "Nenhuma conta com login. Entre numa conta em Agentes para ver o uso do plano."
 }

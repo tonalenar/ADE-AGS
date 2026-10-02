@@ -95,7 +95,7 @@ export function RoutinesPanel({ onClose }: { onClose: () => void }) {
     hover:bg-gray-100 dark:hover:bg-white/8 disabled:opacity-40`;
 
   return (
-    <div className="pointer-events-auto absolute right-3 bottom-14 w-[26rem] max-h-[60%] flex flex-col rounded-lg
+    <div className="pointer-events-auto absolute right-3 bottom-16 w-[26rem] max-h-[60%] flex flex-col rounded-lg
       border border-gray-200 dark:border-white/10 bg-white/98 dark:bg-surface-raised/98 shadow-lg overflow-hidden">
       <div className="flex items-center gap-2 px-3 h-9 shrink-0 border-b border-gray-200 dark:border-white/10">
         <span className="text-[12.5px] font-medium text-gray-800 dark:text-gray-100">{t("canvas.routines.title")}</span>
