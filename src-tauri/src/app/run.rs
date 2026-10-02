@@ -42,6 +42,7 @@ pub fn run() {
             // Pisos: worktrees aislados del proyecto, cada uno con su canvas
             crate::floors::floor_list,
             crate::floors::floor_create,
+            crate::floors::floor_delete,
             // El pet sube de nivel con los tokens de los agentes
             crate::pet::pet_status,
             // Rotinas: mensajes programados a un agente o al usuario
