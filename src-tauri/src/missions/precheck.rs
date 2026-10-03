@@ -25,6 +25,10 @@ const GIT_TIMEOUT: Duration = Duration::from_secs(8);
 /// O texto que vai ao briefing não passa disto: é contexto, não um relatório.
 const MAX_RENDER: usize = 2_400;
 
+/// Carpetas que no son del producto: citarlas en un objetivo ("rode node_modules/.../tsc") no es
+/// pedir algo sobre ellas.
+const IGNORED_DIRS: &[&str] = &["node_modules", "target", "dist", ".git"];
+
 const EXTENSIONS: &[&str] = &["ts", "tsx", "js", "jsx", "rs", "json", "md", "css", "toml", "yml", "yaml", "py", "html"];
 
 // ── Extração (pura) ─────────────────────────────────────────────────
@@ -40,7 +44,8 @@ pub fn extract_paths(objective: &str) -> Vec<String> {
         let ext = token.rsplit('.').next().filter(|_| token.contains('.')).unwrap_or("");
         let looks_like_file = EXTENSIONS.contains(&ext) && !token.starts_with('.') && !token.ends_with('.');
         let looks_like_path = token.contains('/') && token.chars().any(|c| c.is_alphabetic());
-        if (looks_like_file || looks_like_path) && !out.iter().any(|p| p == token) {
+        let in_artifacts = token.split('/').any(|part| IGNORED_DIRS.contains(&part));
+        if (looks_like_file || looks_like_path) && !in_artifacts && !out.iter().any(|p| p == token) {
             out.push(token.to_string());
         }
         if out.len() >= MAX_PATHS {
@@ -184,10 +189,21 @@ fn commits_for_term(dir: &Path, term: &str) -> Vec<String> {
     git(dir, &["log", "-n", &MAX_COMMITS.to_string(), LOG_FORMAT, "--date=short", "-i", "-F", &format!("--grep={term}")])
 }
 
-fn files_with_term(dir: &Path, term: &str) -> Vec<String> {
-    let mut files = git(dir, &["grep", "-l", "-i", "-F", "-e", term, "--", ".", ":(exclude)docs", ":(exclude)*.lock", ":(exclude)*.json"]);
+/// Un archivo de pruebas o de datos no dice si la funcionalidad existe en el producto.
+fn is_product_file(path: &str) -> bool {
+    let lower = path.to_lowercase();
+    !(lower.contains("/tests/") || lower.contains("/test.rs") || lower.contains(".test.") || lower.contains("/test/") || lower.contains("testdata") || lower.contains("fixtures") || lower.ends_with(".md") || lower.starts_with("docs/"))
+}
+
+/// `None` si el término está en tantos archivos que no distingue nada ("Confirmar", "node_modules").
+fn files_with_term(dir: &Path, term: &str) -> Option<Vec<String>> {
+    let all = git(dir, &["grep", "-l", "-i", "-F", "-e", term, "--", ".", ":(exclude)*.lock", ":(exclude)*.json"]);
+    let mut files: Vec<String> = all.into_iter().filter(|f| is_product_file(f)).collect();
+    if files.len() > MAX_FILES {
+        return None;
+    }
     files.truncate(MAX_FILES);
-    files
+    Some(files)
 }
 
 /// Missões anteriores da mesma pasta que se parecem com este objetivo, da mais parecida à menos.
@@ -217,6 +233,7 @@ pub fn run(conn: &Connection, mission_id: &str, cwd: &str, objective: &str) -> P
     let dir = Path::new(cwd);
     let paths = extract_paths(objective)
         .into_iter()
+        .filter(|path| path.rsplit('.').next().is_some_and(|ext| path.contains('.') && EXTENSIONS.contains(&ext)) || dir.join(path).exists())
         .map(|path| {
             let exists = dir.join(&path).exists();
             let recent_commits = if exists { commits_for_path(dir, &path) } else { Vec::new() };
@@ -225,7 +242,10 @@ pub fn run(conn: &Connection, mission_id: &str, cwd: &str, objective: &str) -> P
         .collect();
     let terms = extract_terms(objective)
         .into_iter()
-        .map(|term| TermFinding { commits: commits_for_term(dir, &term), files: files_with_term(dir, &term), term })
+        .filter_map(|term| {
+            let files = files_with_term(dir, &term)?;
+            Some(TermFinding { commits: commits_for_term(dir, &term), files, term })
+        })
         .collect();
     Precheck { paths, terms, similar_missions: similar_missions(conn, mission_id, cwd, objective) }
 }
@@ -233,6 +253,9 @@ pub fn run(conn: &Connection, mission_id: &str, cwd: &str, objective: &str) -> P
 /// O texto do briefing: curto, em português, com os fatos e a regra de decisão. Pura.
 pub fn render(check: &Precheck) -> String {
     let mut lines: Vec<String> = Vec::new();
+    for m in &check.similar_missions {
+        lines.push(format!("- missão parecida ({}%, {}): \"{}\" ({})", (m.score * 100.0).round() as i64, m.status, m.title, &m.id[..m.id.len().min(8)]));
+    }
     for p in &check.paths {
         if !p.exists {
             lines.push(format!("- {}: não existe neste projeto.", p.path));
@@ -254,9 +277,6 @@ pub fn render(check: &Precheck) -> String {
             parts.push(format!("citado nos commits: {}", t.commits.join(" | ")));
         }
         lines.push(format!("- termo \"{}\" {}", t.term, parts.join("; ")));
-    }
-    for m in &check.similar_missions {
-        lines.push(format!("- missão parecida ({}%, {}): \"{}\" ({})", (m.score * 100.0).round() as i64, m.status, m.title, &m.id[..m.id.len().min(8)]));
     }
     if lines.is_empty() {
         return String::new();

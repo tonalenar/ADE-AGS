@@ -6,6 +6,8 @@ como o botão de apagar pool em src/features/accounts/PoolsSection.tsx. Use conf
 
 #[test]
 fn extrai_os_caminhos_citados_sem_repetir_nem_pegar_urls() {
+    // Dependências e artefatos não são o produto.
+    assert!(extract_paths("rode node_modules/typescript/bin/tsc e olhe target/debug/app.exe").is_empty());
     let paths = extract_paths(OBJECTIVE);
     assert_eq!(paths, vec!["src/features/missions/MissionsSection.tsx", "src/features/accounts/PoolsSection.tsx"]);
     assert!(extract_paths("veja https://exemplo.com/a/b e nada mais").is_empty());
@@ -112,14 +114,27 @@ fn num_repositorio_de_verdade_acha_o_arquivo_o_commit_e_o_termo() {
     sh(&dir, &["add", "-A"]);
     sh(&dir, &["commit", "-q", "-m", "feat: confirmar ao concluir (confirmFinishId)"]);
 
+    // Un test que menciona el término no prueba que la funcionalidad exista: se ignora.
+    std::fs::create_dir_all(dir.join("src/tests")).unwrap();
+    std::fs::write(dir.join("src/tests/botao.test.ts"), "confirmFinishId
+").unwrap();
+    // Y un término que está en demasiados archivos no distingue nada.
+    for i in 0..7 {
+        std::fs::write(dir.join(format!("src/comum{i}.ts")), "palavracomum
+").unwrap();
+    }
+    sh(&dir, &["add", "-A"]);
+    sh(&dir, &["commit", "-q", "-m", "test: mais arquivos"]);
+
     let conn = crate::database::test_db();
-    let check = run(&conn, "x", dir.to_str().unwrap(), "Ajuste src/Botao.tsx e src/Falta.tsx usando confirmFinishId");
+    let check = run(&conn, "x", dir.to_str().unwrap(), "Ajuste src/Botao.tsx e src/Falta.tsx usando confirmFinishId e `palavracomum`");
 
     let botao = check.paths.iter().find(|p| p.path == "src/Botao.tsx").unwrap();
     assert!(botao.exists && botao.recent_commits.iter().any(|c| c.contains("confirmar ao concluir")), "{botao:?}");
     assert!(!check.paths.iter().find(|p| p.path == "src/Falta.tsx").unwrap().exists);
     let term = check.terms.iter().find(|t| t.term == "confirmFinishId").unwrap();
-    assert_eq!(term.files, vec!["src/Botao.tsx".to_string()]);
+    assert_eq!(term.files, vec!["src/Botao.tsx".to_string()], "el archivo de prueba no cuenta");
+    assert!(check.terms.iter().all(|t| t.term != "palavracomum"), "un término en 7 archivos se descarta");
     assert!(!term.commits.is_empty());
     assert!(check.has_leads());
     let _ = std::fs::remove_dir_all(&dir);
