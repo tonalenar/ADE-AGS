@@ -211,6 +211,62 @@ pub fn load_docs(conn: &Connection, workspace_id: &str, mission_id: Option<&str>
 }
 
 /// A busca completa. A pergunta é validada (vazia ou enorme não faz sentido).
+/// Load the memory versions that were valid at one Unix timestamp. Unlike `load_docs`, this
+/// includes entries that have since been deleted because their earlier intervals may apply.
+pub fn load_docs_at(
+    conn: &Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    at: i64,
+) -> Result<Vec<Doc>, String> {
+    let entries = {
+        let mut statement = conn
+            .prepare(
+                "SELECT e.id,e.scope,e.key FROM memory_entries e
+                  WHERE e.workspace_id=?1
+                    AND (e.scope='workspace' OR (?2 IS NOT NULL AND e.scope='mission' AND e.mission_id=?2))
+                  ORDER BY e.scope,e.key COLLATE BINARY,e.id",
+            )
+            .map_err(|_| "could not read memory".to_string())?;
+        statement
+            .query_map(params![workspace_id, mission_id], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|_| "could not read memory".to_string())?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(|_| "could not read memory".to_string())?
+    };
+
+    let mut docs = Vec::new();
+    for (entry_id, scope, key) in entries {
+        let Some(interval) = super::history::validity_at(
+            conn,
+            workspace_id,
+            mission_id,
+            &entry_id,
+            at,
+        )?
+        .into_iter()
+        .next()
+        else {
+            continue;
+        };
+        docs.push(Doc {
+            entry_id,
+            scope,
+            key,
+            kind: interval.kind,
+            priority: interval.priority,
+            body: interval.body,
+        });
+    }
+    Ok(docs)
+}
+
 pub fn search(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, query: &str, limit: usize) -> Result<Vec<Hit>, String> {
     let query = query.trim();
     if query.is_empty() {
@@ -225,6 +281,30 @@ pub fn search(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, q
 /// O bloco de memória do briefing de uma missão em terminais: as entradas de maior prioridade
 /// (as da missão antes das do workspace), curtas, avisando que são dados e não instruções. Vazio
 /// se não há nenhuma. Pura sobre os documentos.
+/// Search only the memory versions valid at one Unix timestamp. `search` remains the
+/// unchanged current-state mode used when callers do not supply `--at`.
+pub fn search_at(
+    conn: &Connection,
+    workspace_id: &str,
+    mission_id: Option<&str>,
+    query: &str,
+    limit: usize,
+    at: i64,
+) -> Result<Vec<Hit>, String> {
+    let query = query.trim();
+    if query.is_empty() {
+        return Err("A busca precisa de um texto.".into());
+    }
+    if query.chars().count() > MAX_QUERY_CHARS {
+        return Err(format!("A busca tem atÃ© {MAX_QUERY_CHARS} caracteres."));
+    }
+    Ok(rank(
+        &load_docs_at(conn, workspace_id, mission_id, at)?,
+        query,
+        limit,
+    ))
+}
+
 pub fn briefing_block(docs: &[Doc], mission_id: &str, max_entries: usize, max_chars: usize) -> String {
     if docs.is_empty() {
         return String::new();

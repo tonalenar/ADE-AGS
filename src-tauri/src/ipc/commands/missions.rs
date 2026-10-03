@@ -8,6 +8,7 @@
 
 use std::time::{Duration, Instant};
 
+use rusqlite::params;
 use serde_json::{json, Value};
 use tauri::AppHandle;
 
@@ -180,11 +181,92 @@ pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, Stri
     let id = arg_str(args, "mission")?;
     let query = arg_str(args, "query")?;
     let limit = arg_u64_opt(args, "limit").unwrap_or(5) as usize;
+    let at = match args.get("at") {
+        Some(Value::String(value)) => Some(parse_memory_at(value)?),
+        Some(Value::Number(value)) => Some(
+            value
+                .as_i64()
+                .ok_or("--at must be Unix seconds or a supported date")?,
+        ),
+        Some(_) => return Err("--at must be Unix seconds or a supported date".into()),
+        None => None,
+    };
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mission = crate::missions::store::get(&conn, &id)?.ok_or_else(|| format!("no hay ninguna misión {id}"))?;
-    let hits = crate::memory::search::search(&conn, &mission.workspace_id, Some(&mission.id), &query, limit)?;
-    Ok(json!({ "query": query, "results": hits }))
+    let hits = match at {
+        Some(at) => crate::memory::search::search_at(
+            &conn,
+            &mission.workspace_id,
+            Some(&mission.id),
+            &query,
+            limit,
+            at,
+        )?,
+        None => crate::memory::search::search(
+            &conn,
+            &mission.workspace_id,
+            Some(&mission.id),
+            &query,
+            limit,
+        )?,
+    };
+    Ok(match at {
+        Some(at) => json!({ "query": query, "at": at, "results": hits }),
+        None => json!({ "query": query, "results": hits }),
+    })
+}
+
+fn parse_memory_at(value: &str) -> Result<i64, String> {
+    if let Ok(timestamp) = value.parse::<i64>() {
+        return Ok(timestamp);
+    }
+    let date_time = match value.len() {
+        10 => chrono::NaiveDate::parse_from_str(value, "%Y-%m-%d")
+            .ok()
+            .and_then(|date| date.and_hms_opt(0, 0, 0)),
+        16 => chrono::NaiveDateTime::parse_from_str(value, "%Y-%m-%dT%H:%M").ok(),
+        _ => None,
+    };
+    date_time
+        .map(|date_time| date_time.and_utc().timestamp())
+        .ok_or_else(|| "--at accepts YYYY-MM-DD, YYYY-MM-DDTHH:MM, or Unix seconds (UTC)".into())
+}
+
+/// `ags memory history --mission <id> --key <key> --scope workspace|mission`.
+pub(super) fn memory_history(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let mission_id = arg_str(args, "mission")?;
+    let key = crate::memory::normalize_key(&arg_str(args, "key")?)?;
+    let scope = arg_str(args, "scope")?;
+    if !matches!(scope.as_str(), "workspace" | "mission") {
+        return Err("--scope must be workspace or mission".into());
+    }
+
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let mission = crate::missions::store::get(&conn, &mission_id)?
+        .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+    let entry_id: String = match scope.as_str() {
+        "workspace" => conn.query_row(
+            "SELECT id FROM memory_entries WHERE workspace_id=?1 AND scope='workspace' AND key=?2",
+            params![mission.workspace_id.as_str(), key.as_str()],
+            |row| row.get(0),
+        ),
+        "mission" => conn.query_row(
+            "SELECT id FROM memory_entries WHERE workspace_id=?1 AND mission_id=?2 AND scope='mission' AND key=?3",
+            params![mission.workspace_id.as_str(), mission.id.as_str(), key.as_str()],
+            |row| row.get(0),
+        ),
+        _ => unreachable!(),
+    }
+    .map_err(|_| format!("no {scope} memory entry with key {key}"))?;
+    let history = crate::memory::history::history_for_entry(
+        &conn,
+        &mission.workspace_id,
+        Some(&mission.id),
+        &entry_id,
+    )?;
+    Ok(json!({ "entryId": entry_id, "scope": scope, "key": key, "history": history }))
 }
 
 /// `ags mission precheck <id>`: lo que el repositorio y las misiones anteriores ya dicen del objetivo.
@@ -237,4 +319,17 @@ pub(super) fn approval_decide(app: &AppHandle, args: &Value) -> Result<Value, St
         return Err("ese pedido ya no está esperando (venció o se canceló la tarea)".into());
     }
     Ok(json!({ "id": id, "allow": allow, "remembered": remember }))
+}
+
+#[cfg(test)]
+mod memory_time_tests {
+    use super::parse_memory_at;
+
+    #[test]
+    fn parses_unix_seconds_and_utc_date_forms() {
+        assert_eq!(parse_memory_at("86400").unwrap(), 86_400);
+        assert_eq!(parse_memory_at("1970-01-02").unwrap(), 86_400);
+        assert_eq!(parse_memory_at("1970-01-01T00:02").unwrap(), 120);
+        assert!(parse_memory_at("1970-1-1").is_err());
+    }
 }
