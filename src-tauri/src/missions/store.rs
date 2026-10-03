@@ -347,6 +347,37 @@ pub fn mark_started(conn: &Connection, mission: &Mission, run_id: &str) -> Resul
     Ok(n > 0)
 }
 
+/// Arranca una misión **en terminales**: queda `running` sin run activo (el trabajo lo hacen
+/// las tabs del canvas, no la flota sin terminal). Un borrador o una fallida.
+pub fn mark_started_terminals(conn: &Connection, id: &str) -> Result<bool, String> {
+    let now = now_ts();
+    let n = conn
+        .execute(
+            "UPDATE missions SET status = ?1, active_run_id = NULL, started_at = ?2, updated_at = ?2, ended_at = NULL
+             WHERE id = ?3 AND status IN ('draft', 'failed')",
+            rusqlite::params![status::RUNNING, now, id],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(n > 0)
+}
+
+/// Cierra una misión en terminales (sin run): `done` o `cancelled`. Solo si corre y no tiene
+/// run activo; una con run se cierra por su run (`refresh_status`).
+pub fn close_terminals(conn: &Connection, id: &str, outcome: &str) -> Result<bool, String> {
+    if outcome != status::DONE && outcome != status::CANCELLED {
+        return Err("Una misión se cierra como terminada o cancelada.".into());
+    }
+    let now = now_ts();
+    let n = conn
+        .execute(
+            "UPDATE missions SET status = ?1, ended_at = ?2, updated_at = ?2
+             WHERE id = ?3 AND status = ?4 AND active_run_id IS NULL",
+            rusqlite::params![outcome, now, id, status::RUNNING],
+        )
+        .map_err(|e| e.to_string())?;
+    Ok(n > 0)
+}
+
 /// Cancela un borrador. No hay proceso que parar: nunca se lanzó nada.
 pub fn cancel_draft(conn: &Connection, id: &str) -> Result<bool, String> {
     let now = now_ts();

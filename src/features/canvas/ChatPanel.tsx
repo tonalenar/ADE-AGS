@@ -7,7 +7,7 @@ import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
 import { useTabsStore } from "@/features/tabs/store";
 import { AIChatCard } from "./AIChatCard";
 import { unreadOf, useUnreadStore } from "./chatUnread";
-import { useActiveBoardKey, boardKey } from "./store";
+import { useActiveBoardKey, boardKeyOfTab } from "./store";
 
 /** Los siete hilos, en el orden en que los conoce el backend (`chat::THREADS`). */
 export const THREADS = ["blue", "purple", "pink", "red", "orange", "yellow", "green"] as const;
@@ -68,7 +68,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   const activeTabId = useTabsStore((s) => s.activeTabId);
 
   const agents = useMemo(
-    () => allTabs.filter((tab) => tab.agentId !== "bash" && key !== null && boardKey(tab.cwd) === key),
+    () => allTabs.filter((tab) => tab.agentId !== "bash" && key !== null && boardKeyOfTab(tab) === key),
     [allTabs, key],
   );
   const [tabId, setTabId] = useState<string | null>(null);

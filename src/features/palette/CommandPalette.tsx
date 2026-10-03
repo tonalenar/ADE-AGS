@@ -14,7 +14,7 @@ import { useRunsStore } from "@/features/runs/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { useWorkspacesStore } from "@/features/workspaces/store";
 import { useFocusInside } from "@/shared/ui/useFocusInside";
-import { boardKey, setWorkMode, useCanvasStore } from "@/features/canvas/store";
+import { boardKeyOfTab, setWorkMode, useCanvasStore } from "@/features/canvas/store";
 
 import { rank, type Searchable } from "./match";
 
@@ -65,8 +65,8 @@ function PaletteDialog() {
   const focusIfOpen = useWorkspacesStore((s) => s.focusIfOpen);
   const openWorkspace = useWorkspacesStore((s) => s.openWorkspace);
   const approvals = useRunsStore((s) => s.approvals.length);
-  const activeCwd = tabs.find((tab) => tab.id === activeTabId)?.cwd ?? null;
-  const canvasKey = activeCwd ? boardKey(activeCwd) : null;
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const canvasKey = activeTab ? boardKeyOfTab(activeTab) : null;
   const canvasOn = useCanvasStore((s) => (canvasKey ? s.modes[canvasKey] === "canvas" : false));
 
   const [query, setQuery] = useState("");
@@ -247,7 +247,6 @@ function PaletteDialog() {
   };
 
   const grouped = !query.trim();
-  const activeTab = tabs.find((tab) => tab.id === activeTabId);
 
   return (
     <div className="fixed inset-0 z-110 flex justify-center items-start pt-[12vh] px-4">

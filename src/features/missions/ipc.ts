@@ -18,6 +18,11 @@ export const updateMission = (missionId: string, input: MissionInput) =>
 /** Starts a draft or retries a failed mission in a new run, preserving earlier attempts. */
 export const startMission = (missionId: string) => invoke<Mission>("mission_start", { missionId });
 
+/** Arranca la misión en terminales: solo la marca en curso (las pestañas las abre la pantalla). */
+export const startMissionTerminals = (missionId: string) => invoke<Mission>("mission_start_terminals", { missionId });
+/** Da por terminada una misión en terminales. */
+export const finishMissionTerminals = (missionId: string) => invoke<Mission>("mission_finish_terminals", { missionId });
+
 /** Un borrador se marca cancelado; una que corre cancela su run. */
 export const cancelMission = (missionId: string) => invoke<Mission>("mission_cancel", { missionId });
 
