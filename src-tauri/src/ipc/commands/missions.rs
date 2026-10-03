@@ -140,7 +140,7 @@ pub(super) fn mission_review(app: &AppHandle, args: &Value) -> Result<Value, Str
 /// `ags memory suggest --mission <id> --scope workspace|mission --key <k> --body "..."`: el agente
 /// PROPONE una memoria para la próxima misión. Queda pendiente: solo el usuario la aprueba.
 pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    use crate::memory::agent::{propose_for_mission, AgentProposal, Author, LEAD_TAB_NAME};
+    use crate::memory::agent::{author_of, propose_for_mission, AgentProposal};
 
     let mission = arg_str(args, "mission")?;
     let key = arg_str(args, "key")?;
@@ -155,7 +155,7 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
         .as_deref()
         .and_then(|id| super::peers::open_tabs(app).ok()?.into_iter().find(|t| t.id == id).map(|t| t.name))
         .unwrap_or_else(|| "agente".to_string());
-    let author = if name == LEAD_TAB_NAME { Author::Lead } else { Author::Worker };
+    let author = author_of(&name);
 
     let db = db(app)?;
     let result = {

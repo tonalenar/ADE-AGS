@@ -58,6 +58,12 @@ impl Author {
     }
 }
 
+/// Quem é, pelo nome da aba: o orquestrador se reconhece pelo nome (sem importar maiúsculas nem
+/// espaços nas pontas); qualquer outro é um integrante. Pura.
+pub fn author_of(tab_name: &str) -> Author {
+    if tab_name.trim().eq_ignore_ascii_case(LEAD_TAB_NAME) { Author::Lead } else { Author::Worker }
+}
+
 /// O pedido de um agente, já com o que o servidor sabe dele.
 pub struct AgentProposal<'a> {
     pub mission_id: &'a str,

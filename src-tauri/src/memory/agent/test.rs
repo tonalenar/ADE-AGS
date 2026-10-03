@@ -94,3 +94,12 @@ fn a_memoria_da_missao_so_pertence_a_ela() {
     };
     assert_eq!(w, None, "uma memória do workspace não leva o id da missão");
 }
+
+#[test]
+fn o_orquestrador_se_reconhece_pelo_nome_da_aba() {
+    assert_eq!(author_of("Orquestrador"), Author::Lead);
+    assert_eq!(author_of("  orquestrador "), Author::Lead);
+    assert_eq!(author_of("Backend"), Author::Worker);
+    assert_eq!(author_of("agente"), Author::Worker);
+    assert_eq!(author_of(""), Author::Worker);
+}
