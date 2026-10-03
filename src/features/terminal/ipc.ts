@@ -18,6 +18,9 @@ export const ptyCreate = (args: PtyCreateArgs) => invoke<number>("pty_create", {
 /** Scrollback acumulado de un PTY vivo — reconectarse a él no lo reinicia. */
 export const ptyAttach = (id: number) => invoke<string>("pty_attach", { id });
 
+/** El terminal vivo de una tab (el más nuevo), o `null`: para reconectarse tras recargar la ventana. */
+export const ptyForTab = (tabId: string) => invoke<number | null>("pty_for_tab", { tabId });
+
 export const ptyWrite = (id: number, data: string) => invoke<void>("pty_write", { id, data });
 
 export const ptyResize = (id: number, cols: number, rows: number) =>

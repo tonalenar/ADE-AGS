@@ -28,7 +28,7 @@ import { resolvePrelaunch } from "@/features/prelaunch/ipc";
 import { reconcileTabSkills } from "@/features/skills/ipc";
 import { hasBrowserMcp, withBrowserMcp } from "@/features/browser/tabMcp";
 import { homeDir } from "@/shared/ipc/window";
-import { ptyAttach, ptyCreate, ptyKill, ptyResize, ptyWrite } from "./ipc";
+import { ptyAttach, ptyCreate, ptyForTab, ptyKill, ptyResize, ptyWrite } from "./ipc";
 import { createFitter } from "./fit";
 import { forgetTab, markInput, markOutput } from "./activity";
 import { StatusBadge, type TerminalStatus } from "./StatusBadge";
@@ -327,14 +327,20 @@ export function Terminal({
 
     const initPty = async () => {
       try {
-        if (attachPtyId != null) {
-          // Reconectar a un PTY que ya está vivo en otra ventana: nada de spawnear de nuevo.
-          const buffered = await ptyAttach(attachPtyId);
-          ptyIdRef.current = attachPtyId;
+        // Si la ventana se recargó, el agente de esta tab sigue vivo en Rust, trabajando: se
+        // reconecta a él en vez de matarlo y lanzar otro con `--resume` (que lo interrumpe a
+        // mitad de un turno). Una tab que no tiene terminal vivo sigue el camino de siempre.
+        const liveId = attachPtyId == null && tabId ? await ptyForTab(tabId).catch(() => null) : null;
+        if (cancelled) return;
+        const reattachId = attachPtyId ?? liveId;
+        if (reattachId != null) {
+          // Reconectar a un PTY que ya está vivo (en otra ventana, o antes de recargar): nada de spawnear de nuevo.
+          const buffered = await ptyAttach(reattachId);
+          ptyIdRef.current = reattachId;
           await fitOnce();
           if (buffered) term.write(buffered);
           setStatus("running");
-          onReady?.(attachPtyId);
+          onReady?.(reattachId);
 
           // Reconectar NO cancela el descubrimiento. Antes esta rama devolvía sin llamar a
           // `pollSessionId`, así que una tab arrastrada a otra ventana (o mergeada) dejaba
@@ -345,12 +351,12 @@ export function Terminal({
           const attachCwd: string = cwd ?? (await homeDir());
           pollSessionId(attachCwd, openedAt ?? Math.floor(Date.now() / 1000));
 
-          await attachListeners(attachPtyId);
+          await attachListeners(reattachId);
           // El área de terminal puede medir distinto que cuando el PTY nació (paneles
           // plegados, ventana redimensionada mientras la tab estaba en segundo plano).
           if (!cancelled) {
             sentSize = `${term.cols}x${term.rows}`;
-            ptyResize(attachPtyId, term.cols, term.rows).catch(console.error);
+            ptyResize(reattachId, term.cols, term.rows).catch(console.error);
           }
           return;
         }

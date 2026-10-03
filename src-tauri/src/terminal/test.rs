@@ -461,3 +461,16 @@ fn las_marcas_de_sesion_padre_no_pasan_a_los_terminales() {
         assert!(!PARENT_SESSION_ENV.contains(&keep), "{keep}");
     }
 }
+
+/// Al recargar la ventana, la tab se reconecta al terminal que ya corre en vez de lanzar otro.
+#[test]
+fn la_tab_encuentra_su_terminal_vivo_y_el_mas_nuevo_gana() {
+    use super::pty_manager::newest_for_tab;
+
+    let sessions = vec![(3u32, Some("tab-a")), (7, Some("tab-b")), (9, Some("tab-a")), (11, None)];
+    assert_eq!(newest_for_tab(sessions.iter().copied(), "tab-a"), Some(9));
+    assert_eq!(newest_for_tab(sessions.iter().copied(), "tab-b"), Some(7));
+    // Otra tab, o un PTY que no es de una tab, no se confunde.
+    assert_eq!(newest_for_tab(sessions.iter().copied(), "tab-z"), None);
+    assert_eq!(newest_for_tab(sessions.iter().copied(), ""), None);
+}
