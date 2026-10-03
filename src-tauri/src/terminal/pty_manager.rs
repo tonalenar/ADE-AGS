@@ -15,6 +15,9 @@ struct PtySession {
     /// Su `Drop` mata el grupo, así que cubre tanto el cierre explícito como la muerte
     /// natural del proceso — los dos caminos por los que una sesión sale del registry.
     group: ProcessGroup,
+    /// La tab de la app a la que pertenece (`ADE_TAB_ID`), para no dejar dos terminales vivos
+    /// de la misma tab. `None` en los PTYs que no son de una tab.
+    tab_id: Option<String>,
 }
 
 /// Scrollback de un PTY. `total_bytes` cuenta TODO lo que el proceso escribió alguna vez,
@@ -293,6 +296,48 @@ fn shell_running(script: String) -> CommandBuilder {
     cmd
 }
 
+/// El PATH de la app con la carpeta de su propio ejecutable al final, para que `ccode` (que
+/// viaja al lado) se encuentre en cualquier terminal de agente aunque no se haya instalado el CLI.
+/// Al final, así nunca pisa un `ccode` ya instalado. `None` si no hay nada que agregar.
+fn path_with_app_dir(current: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
+    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    if !dir.join(if cfg!(windows) { "ccode.exe" } else { "ccode" }).is_file() {
+        return None;
+    }
+    let mut dirs: Vec<std::path::PathBuf> = std::env::split_paths(current).collect();
+    if dirs.contains(&dir) {
+        return None;
+    }
+    dirs.push(dir);
+    std::env::join_paths(dirs).ok()
+}
+
+/// Codex corre los comandos de su agente en un sandbox que descarta las variables de entorno
+/// que no conoce, `ADE_TAB_ID` incluida: sin ella `ccode peers` no sabe quién pregunta. La
+/// config de Codex tiene `shell_environment_policy.set`, que SÍ llega al shell del sandbox;
+/// se la pasa con `-c` al lanzar. Solo si el programa es `codex` y la tab tiene id. Pura.
+pub(super) fn with_codex_tab_id(command: &str, tab_id: Option<&str>) -> String {
+    let Some(tab) = tab_id.filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')) else {
+        return command.to_string();
+    };
+    let trimmed = command.trim_start();
+    // El programa es la primera palabra, o lo entrecomillado si la ruta tiene espacios.
+    let head_len = match trimmed.chars().next() {
+        Some(q @ ('"' | '\'')) => trimmed[1..].find(q).map_or(trimmed.len(), |i| i + 2),
+        _ => trimmed.find(char::is_whitespace).unwrap_or(trimmed.len()),
+    };
+    let (head, tail) = trimmed.split_at(head_len);
+    let program = head.trim_matches(|c| c == '"' || c == '\'');
+    // Las dos barras: una ruta de Windows también se lee bien en un sistema que usa `/`.
+    let file = program.rsplit(['/', '\\']).next().unwrap_or("").to_ascii_lowercase();
+    let stem = file.strip_suffix(".exe").or_else(|| file.strip_suffix(".cmd")).unwrap_or(&file);
+    if stem != "codex" || command.contains("shell_environment_policy.set.ADE_TAB_ID") {
+        return command.to_string();
+    }
+    let flag = format!("'shell_environment_policy.set.ADE_TAB_ID=\"{tab}\"'");
+    format!("{head} -c {flag}{tail}")
+}
+
 /// Crea un PTY, lanza el proceso dentro, y emite eventos `pty-data-{id}` al frontend.
 ///
 /// `cols`/`rows` los manda el frontend ya medidos contra el tamaño real del contenedor
@@ -324,12 +369,20 @@ pub async fn pty_create(
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
+    let tab_id = env.as_ref().and_then(|e| e.get("ADE_TAB_ID")).cloned();
+    let command = with_codex_tab_id(&command, tab_id.as_deref());
     let mut cmd = build_launch(&command, &prelaunch.unwrap_or_default())?;
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");
     for var in crate::app::app_only_env().into_iter().chain(PARENT_SESSION_ENV.iter().copied()) {
         cmd.env_remove(var);
+    }
+    // El PATH del hijo es el del PTY (en Windows sale del registro, no del proceso de la app: la
+    // app puede tener la carpeta de su ejecutable en el suyo y el hijo no).
+    let child_path = cmd.get_env("PATH").map(|p| p.to_os_string()).unwrap_or_default();
+    if let Some(path) = path_with_app_dir(&child_path) {
+        cmd.env("PATH", path);
     }
     let env = env.unwrap_or_default();
     // Con una cuenta de la app, una API key heredada no le gana a su login.
@@ -365,7 +418,26 @@ pub async fn pty_create(
         .try_clone_reader()
         .map_err(|e| format!("Failed to get PTY reader: {e}"))?;
 
-    registry().insert(id, PtySession { master: pair.master, writer, killer: child, group });
+    // Una tab tiene UN terminal vivo. Si la ventana se recargó (o se restauró la sesión), el
+    // frontend perdió los ids de los terminales de antes y lanza otros para las mismas tabs:
+    // los viejos seguían corriendo, con la misma sesión del agente abierta ("conversation is
+    // open in another app") y su memoria. Al llegar el nuevo, el anterior de esa tab se va.
+    let replaced = {
+        let mut reg = registry();
+        let old: Vec<u32> = match &tab_id {
+            Some(tab) => reg.iter().filter(|(_, s)| s.tab_id.as_deref() == Some(tab.as_str())).map(|(k, _)| *k).collect(),
+            None => Vec::new(),
+        };
+        let removed: Vec<PtySession> = old.iter().filter_map(|k| reg.remove(k)).collect();
+        reg.insert(id, PtySession { master: pair.master, writer, killer: child, group, tab_id: tab_id.clone() });
+        (old, removed)
+    };
+    for (k, mut session) in replaced.0.iter().copied().zip(replaced.1) {
+        session.group.kill_all();
+        let _ = session.killer.kill();
+        let _ = session.killer.wait();
+        buffers().remove(&k);
+    }
     buffers().insert(id, PtyBuffer::default());
 
     let app_clone = app.clone();

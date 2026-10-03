@@ -1,6 +1,7 @@
 import { HandoffView } from "@/features/runs/HandoffView";
 import { SharedMemoryPanel } from "@/features/memory/SharedMemoryPanel";
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { Alert, AnimateSpin, Button, EmptyState, LocationIcon } from "neogestify-ui-components";
@@ -19,6 +20,7 @@ import type { Squad } from "@/features/squads/types";
 
 import { MissionDialog } from "./MissionDialog";
 import { MissionMap } from "./MissionMap";
+import { startMissionInTerminals } from "./terminals";
 import { MissionReviewPanel } from "./MissionReviewPanel";
 import {
   AGENT_STATES, agentStateOf, approvalsFor, blockedRuns, canEdit, countAgentStates, dependencyLabels, emptyForm,
@@ -273,6 +275,10 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError 
   const accountLabel = useSquadAccountLabel();
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const decideApproval = useRunsStore((s) => s.decideApproval);
+  const navigate = useNavigate();
+  const roles = useSquadsStore((s) => s.roles);
+  const loadRoles = useSquadsStore((s) => s.loadRoles);
+  useEffect(() => { loadRoles().catch(() => undefined); }, [loadRoles]);
   const [busy, setBusy] = useState(false);
   const { mission, tasks, runs } = detail;
   const [roster, setRoster] = useState<Roster | null>(null);
@@ -294,7 +300,14 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError 
     onError("");
     try {
       const store = useMissionsStore.getState();
-      await (kind === "cancel" ? store.cancel(workspaceId, mission.id) : store.start(workspaceId, mission.id));
+      if (kind === "cancel") {
+        await store.cancel(workspaceId, mission.id);
+      } else {
+        // Iniciar abre el equipo en terminales reales en el canvas de la misión.
+        await startMissionInTerminals(mission, squad ?? null, roles);
+        await store.load(workspaceId).catch(() => undefined);
+        navigate("/workspace");
+      }
     } catch (e) {
       const problem = String(e);
       onError(t(problem, { defaultValue: problem }));

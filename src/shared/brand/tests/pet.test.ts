@@ -1,6 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import { sparkAt, sparkCount, stageFor } from "../Pet";
+import { powerTier, sparkAt, sparkCount, stageFor } from "../Pet";
+
+describe("fases de poder", () => {
+  it("sobe com a quantidade de agentes trabalhando ao mesmo tempo", () => {
+    expect([0, 1, 2].map(powerTier)).toEqual([0, 1, 1]);
+    expect([3, 4].map(powerTier)).toEqual([2, 2]);
+    expect([5, 6].map(powerTier)).toEqual([3, 3]);
+    expect([7, 12].map(powerTier)).toEqual([4, 4]);
+  });
+});
 
 describe("pet", () => {
   it("evoluciona en cuatro etapas, en los niveles que dice la referencia", () => {

@@ -397,6 +397,31 @@ fn el_comando_se_parte_respetando_las_comillas() {
     assert!(split_command("   ").is_empty());
 }
 
+/// El sandbox de Codex descarta `ADE_TAB_ID`; se le pasa por su propia config, y solo a Codex.
+#[test]
+fn codex_recibe_el_id_de_la_tab_por_su_config() {
+    use super::pty_manager::{split_command, with_codex_tab_id};
+
+    let launched = with_codex_tab_id("codex resume abc", Some("tab-1"));
+    assert_eq!(
+        split_command(&launched),
+        vec!["codex", "-c", "shell_environment_policy.set.ADE_TAB_ID=\"tab-1\"", "resume", "abc"]
+    );
+    // Con ruta y .exe también es Codex.
+    assert!(with_codex_tab_id("\"C:\\bin\\codex.exe\"", Some("t")).contains("shell_environment_policy.set.ADE_TAB_ID"));
+    // Ruta entrecomillada con espacios: el flag va DESPUÉS de la ruta entera, no en medio.
+    let spaced = with_codex_tab_id("\"C:\\Program Files\\codex.exe\" resume x", Some("t"));
+    assert_eq!(
+        split_command(&spaced),
+        vec!["C:\\Program Files\\codex.exe", "-c", "shell_environment_policy.set.ADE_TAB_ID=\"t\"", "resume", "x"]
+    );
+    // Otras TUIs, sin id, ids raros o ya puesto: no se toca.
+    assert_eq!(with_codex_tab_id("claude --resume x", Some("t")), "claude --resume x");
+    assert_eq!(with_codex_tab_id("codex", None), "codex");
+    assert_eq!(with_codex_tab_id("codex", Some("a b\"c")), "codex");
+    assert_eq!(with_codex_tab_id(&launched, Some("tab-1")), launched);
+}
+
 /// Un carácter partido entre dos lecturas del PTY sale entero, no como dos `�`.
 #[test]
 fn un_caracter_partido_entre_lecturas_sale_entero() {

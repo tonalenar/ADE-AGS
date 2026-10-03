@@ -42,7 +42,48 @@ pub fn client_handshake_path() -> PathBuf {
     std::env::var_os(HANDSHAKE_ENV)
         .map(PathBuf::from)
         .filter(|p| p.is_file())
-        .unwrap_or_else(handshake_path)
+        .unwrap_or_else(|| global_handshake_for_client(handshake_path()))
+}
+
+/// Dónde buscar el handshake global desde la CLI. En el sandbox de Codex para Windows el
+/// proceso corre como otro usuario (`CodexSandboxOffline`): la API de carpeta personal del
+/// sistema devuelve la de ESE usuario, donde no hay nada, aunque `USERPROFILE` conserve la de
+/// quien abrió la app (y el archivo se pueda leer). Si el sitio habitual no tiene el archivo,
+/// se prueban esas variables; si ninguna lo tiene, se devuelve el habitual para que el error
+/// diga dónde se buscó.
+fn global_handshake_for_client(usual: PathBuf) -> PathBuf {
+    if usual.is_file() {
+        return usual;
+    }
+    ["USERPROFILE", "HOME"]
+        .iter()
+        .filter_map(|var| std::env::var_os(var))
+        .map(|home| PathBuf::from(home).join(".controlcode").join("ipc.json"))
+        .find(|p| p.is_file())
+        .unwrap_or(usual)
+}
+
+#[cfg(test)]
+mod client_path_tests {
+    use super::*;
+
+    #[test]
+    fn el_habitual_gana_si_existe() {
+        let dir = std::env::temp_dir().join(format!("cc-hs-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let usual = dir.join("ipc.json");
+        std::fs::write(&usual, "{}").unwrap();
+        assert_eq!(global_handshake_for_client(usual.clone()), usual);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn sin_nada_devuelve_el_habitual_para_que_el_error_diga_donde_busco() {
+        let usual = std::env::temp_dir().join("cc-no-existe").join("ipc.json");
+        let found = global_handshake_for_client(usual.clone());
+        // Con USERPROFILE/HOME de esta máquina puede haber un handshake real: o es ese o el habitual.
+        assert!(found == usual || found.is_file());
+    }
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone)]

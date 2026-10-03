@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
+import { useAccountsStore } from "@/features/accounts/store";
+import type { AgentAccount } from "@/features/accounts/types";
 import { canvasActions, missionBoardKey, setWorkMode } from "@/features/canvas/store";
 import type { FunctionalRole, Squad } from "@/features/squads/types";
 import { useTabsStore } from "@/features/tabs/store";
@@ -66,7 +68,7 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team
     "",
     people,
     "",
-    "COMO COORDENAR",
+    "COMO COORDENAR (use SOMENTE o `ccode`; não use `maestri` nem skills de outros apps)",
     "- `ccode peers` — quem está conectado com você.",
     '- `ccode peer ask "<nome>" "<pedido>"` — pergunta e ESPERA a resposta.',
     "- `ccode peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'` — vários ao mesmo tempo.",
@@ -95,6 +97,35 @@ export function memberBriefing(mission: Pick<Mission, "title" | "objective">, me
     .join("\n");
 }
 
+/**
+ * El briefing tal como se manda a cada TUI. Claude Code recibe el texto con sus saltos de
+ * línea; Codex y otras TUIs descartan los Enter de un pegado y lo dejan todo pegado
+ * ("MISSÃOOBJETIVO…"), así que a esas se les manda en una sola línea con los apartados
+ * separados por " | ". Pura.
+ */
+export function briefingFor(agentId: string, text: string): string {
+  if (agentId === "claude-code") return text;
+  return text
+    .split("\n")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/^- /, ""))
+    .join(" | ");
+}
+
+/** Los nombres de las cuentas pedidas que todavía no tienen sesión iniciada. `null` = la del sistema. Pura. */
+export function accountsNeedingLogin(
+  ids: Array<string | null | undefined>,
+  accounts: Pick<AgentAccount, "id" | "name" | "loggedIn" | "kind">[],
+): string[] {
+  const names = new Set<string>();
+  for (const id of ids) {
+    const account = id ? accounts.find((a) => a.id === id) : undefined;
+    if (account && account.kind === "login" && !account.loggedIn) names.add(account.name);
+  }
+  return [...names];
+}
+
 export interface StartedTeam {
   leadTabId: string;
   memberTabIds: string[];
@@ -121,6 +152,14 @@ export async function startMissionInTerminals(mission: Mission, squad: Squad | n
   const leadAgent = agentFor(leadAgentId);
   const memberAgents = team.map((m) => agentFor(m.agentId));
 
+  // Una cuenta sin login abriría el selector de login de la TUI, y el briefing se pegaría ahí.
+  // Cada cuenta tiene su perfil aislado: el login se hace una vez, a mano, en Cuentas.
+  const leadAccountId = squad && !squad.lead.autoAccount ? squad.lead.accountId ?? null : mission.autoAccount ? null : mission.leadAccountId ?? null;
+  const missing = accountsNeedingLogin([leadAccountId, ...team.map((m) => m.accountId)], useAccountsStore.getState().accounts);
+  if (missing.length > 0) {
+    throw new Error(`Falta fazer login na conta: ${missing.join(", ")}. Entre nela uma vez em Contas (cada conta tem perfil isolado) e inicie a missão de novo.`);
+  }
+
   await invoke("mission_start_terminals", { missionId: mission.id });
 
   const leadTabId = addTab({
@@ -143,8 +182,8 @@ export async function startMissionInTerminals(mission: Mission, squad: Squad | n
   setWorkMode(key, "canvas");
   activateTab(leadTabId);
 
-  sendWhenReady(leadTabId, leadBriefing(mission, team));
-  memberTabIds.forEach((tabId, i) => sendWhenReady(tabId, memberBriefing(mission, team[i])));
+  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team)));
+  memberTabIds.forEach((tabId, i) => sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i]))));
 
   return { leadTabId, memberTabIds };
 }

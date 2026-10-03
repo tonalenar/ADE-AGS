@@ -4,8 +4,36 @@ import { buildMissionTeam, emptyBoard } from "@/features/canvas/board";
 import { boardKey, boardKeyOfTab, missionBoardKey, missionOfKey, missionOfTab, useCanvasStore } from "@/features/canvas/store";
 import type { FunctionalRole, Squad } from "@/features/squads/types";
 
-import { entryTab, missionIndex, tabsByMission } from "../groups";
-import { LEAD_NAME, leadBriefing, memberBriefing, teamOf, uniqueNames } from "../terminals";
+import { entryTab, finishedMissionTabs, missionIndex, tabsByMission } from "../groups";
+
+describe("finishedMissionTabs", () => {
+  const missions = [
+    { id: "vivo", status: "running" },
+    { id: "feito", status: "done" },
+    { id: "cancelado", status: "cancelled" },
+    { id: "rascunho", status: "draft" },
+  ];
+  const index = { a: "vivo", b: "feito", c: "cancelado", d: "rascunho" };
+  it("só devolve as abas de missões terminadas, nunca as vivas nem as soltas", () => {
+    const tabs = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }, { id: "solta" }];
+    expect(finishedMissionTabs(missions, index, tabs)).toEqual(["b", "c"]);
+  });
+});
+import { LEAD_NAME, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, teamOf, uniqueNames } from "../terminals";
+
+describe("accountsNeedingLogin", () => {
+  const accounts = [
+    { id: "a", name: "Principal", loggedIn: true, kind: "login" as const },
+    { id: "b", name: "Secundária", loggedIn: false, kind: "login" as const },
+    { id: "c", name: "Chave", loggedIn: false, kind: "api_key" as const },
+  ];
+  it("aponta só as contas de login sem sessão, sem repetir", () => {
+    expect(accountsNeedingLogin(["a", "b", "b", null, undefined], accounts)).toEqual(["Secundária"]);
+  });
+  it("conta de chave de API e conta do sistema não precisam de login", () => {
+    expect(accountsNeedingLogin(["c", null, "x"], accounts)).toEqual([]);
+  });
+});
 
 const roles: FunctionalRole[] = [
   { id: "backend", label: "Backend", description: "API e dados", instructions: "Implemente a API." },
@@ -119,5 +147,17 @@ describe("a qué misión pertenece una pestaña", () => {
     expect(entryTab(["lead"], ["m1", "lead"])).toBe("lead");
     expect(entryTab(["cerrado"], ["m1", "m2"])).toBe("m1");
     expect(entryTab([], [])).toBeNull();
+  });
+});
+
+describe("briefingFor", () => {
+  const text = "Linha um\n\nOBJETIVO\n- primeiro\n- segundo";
+  it("Claude Code recebe o texto com seus saltos de linha", () => {
+    expect(briefingFor("claude-code", text)).toBe(text);
+  });
+  it("as outras TUIs recebem tudo em uma linha, sem vazias nem marcadores", () => {
+    const flat = briefingFor("codex", text);
+    expect(flat).toBe("Linha um | OBJETIVO | primeiro | segundo");
+    expect(flat).not.toContain("\n");
   });
 });
