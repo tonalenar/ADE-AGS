@@ -19,17 +19,57 @@ const SETTLE_MS = 2500;
 /** Si nunca llega a quedarse quieta (una TUI con reloj en pantalla), se manda igual. */
 const GIVE_UP_MS = 45_000;
 
+/** Avisos de tiempo de un mensaje con `sendWhenReady`, para el cronómetro de la misión. */
+export interface SendTimings {
+  /** El mensaje se pegó (la TUI ya había arrancado). */
+  onSent?: (at: number) => void;
+  /** El agente terminó de contestar: dejó de escribir. `at` es su última salida. */
+  onTurnEnd?: (at: number) => void;
+}
+
+const queuedTimings = new Map<string, SendTimings>();
+
+/** Silencio que da por terminado el turno de un agente (el mismo criterio que `peer ask`). */
+const TURN_QUIET_MS = 5000;
+/** Si un turno no termina nunca (o la terminal se cierra), se deja de mirar. */
+const TURN_GIVE_UP_MS = 20 * 60_000;
+
+/** Mira la terminal hasta que el agente se calla y avisa cuándo escribió por última vez. */
+function watchTurn(term: Terminal, onEnd: (at: number) => void): void {
+  let quiet: number | undefined;
+  let lastOutput = 0;
+  const finish = () => {
+    sub.dispose();
+    window.clearTimeout(quiet);
+    window.clearTimeout(giveUp);
+    onEnd(lastOutput);
+  };
+  const sub = term.onWriteParsed(() => {
+    lastOutput = Date.now();
+    window.clearTimeout(quiet);
+    quiet = window.setTimeout(finish, TURN_QUIET_MS);
+  });
+  const giveUp = window.setTimeout(() => {
+    sub.dispose();
+    window.clearTimeout(quiet);
+  }, TURN_GIVE_UP_MS);
+}
+
 /** Espera a que la TUI termine de arrancar y le manda `text`. */
 function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
   let timer: number | undefined;
   let sawOutput = false;
+  const timings = queuedTimings.get(tabId);
   const send = () => {
     sub.dispose();
     window.clearTimeout(timer);
     window.clearTimeout(giveUp);
     if (terminals.get(tabId) !== term) return;
     queued.delete(tabId);
+    queuedTimings.delete(tabId);
     pasteIntoTab(tabId, text, true);
+    timings?.onSent?.(Date.now());
+    if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
   };
   const sub = term.onWriteParsed(() => {
     sawOutput = true;
@@ -47,8 +87,9 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
  * Ninguna de las TUIs tiene un flag común para "arrancá con este mensaje", así que se
  * espera a que la terminal se quede quieta, que es cuando la persona empezaría a escribir.
  */
-export function sendWhenReady(tabId: string, text: string): void {
+export function sendWhenReady(tabId: string, text: string, timings?: SendTimings): void {
   queued.set(tabId, text);
+  if (timings) queuedTimings.set(tabId, timings);
   const term = terminals.get(tabId);
   if (term) sendWhenSettled(tabId, term, text);
 }

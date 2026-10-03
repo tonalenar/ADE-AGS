@@ -5,7 +5,9 @@ import type { AgentAccount } from "@/features/accounts/types";
 import { canvasActions, missionBoardKey, setWorkMode } from "@/features/canvas/store";
 import type { FunctionalRole, Squad } from "@/features/squads/types";
 import { useTabsStore } from "@/features/tabs/store";
-import { sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { sendWhenReady, type SendTimings } from "@/features/terminal/terminalRegistry";
+
+import { recordSpan } from "./timings";
 
 import type { Mission } from "./types";
 
@@ -182,8 +184,22 @@ export async function startMissionInTerminals(mission: Mission, squad: Squad | n
   setWorkMode(key, "canvas");
   activateTab(leadTabId);
 
-  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team)));
-  memberTabIds.forEach((tabId, i) => sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i]))));
+  // Cronómetro: cuánto tardó cada terminal en estar lista, y cuánto en contestar el briefing.
+  const openedAt = Date.now();
+  const timed = (actor: string): SendTimings => {
+    let sentAt = 0;
+    return {
+      onSent: (at) => {
+        sentAt = at;
+        recordSpan(mission.id, { kind: "boot", actor, startedMs: openedAt, endedMs: at });
+      },
+      onTurnEnd: (at) => sentAt > 0 && recordSpan(mission.id, { kind: "turn", actor, startedMs: sentAt, endedMs: at, detail: "briefing" }),
+    };
+  };
+  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team)), timed(LEAD_NAME));
+  memberTabIds.forEach((tabId, i) =>
+    sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i])), timed(team[i].name)),
+  );
 
   return { leadTabId, memberTabIds };
 }

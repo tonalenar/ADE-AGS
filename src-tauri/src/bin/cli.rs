@@ -143,6 +143,7 @@ MISIONES (también sin interfaz: `ade-ags --headless`)
                                               Crea, arranca y espera; sale con 1 si falla
   mission create|start|status|wait <id>       Paso a paso (wait: --timeout)
   mission review <id>                         Lo que entregó cada tarea aislada
+  mission timings <id>                        Dónde se fue el tiempo: arranque, briefing, turnos, peer ask
   mission accept <id> <tarea>                 La junta en la integración de la misión
   mission apply <id>                          Lleva lo aceptado al proyecto
   approval list                               Pedidos de permiso esperando
@@ -392,7 +393,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "tab.create" => &["cwd"],
         "workspace.open" => &["workspace"],
         // `ags mission wait <id>`, `ags mission accept <id> <tarea>`.
-        "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" => &["mission"],
+        "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" | "mission.timings" => &["mission"],
         "mission.accept" => &["mission", "task"],
         "approval.decide" => &["approval"],
         // `ags peer ask Revisor "..."`: el nombre del agente y después el mensaje.

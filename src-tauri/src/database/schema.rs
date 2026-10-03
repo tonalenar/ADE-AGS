@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 25;
+const SCHEMA_VERSION: i32 = 26;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -868,6 +868,23 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              created_at INTEGER NOT NULL
          );
          CREATE INDEX IF NOT EXISTS idx_run_checkpoints_run ON run_checkpoints(run_id, created_at);",
+    )?;
+    // v26 — Cronómetro de las misiones: cuánto tardó cada etapa (arranque de la terminal,
+    // briefing, turno de un agente, un `peer ask`). Ver `missions::timings`. Solo aditiva; se
+    // borran con su misión.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS mission_timings (
+             id         INTEGER PRIMARY KEY AUTOINCREMENT,
+             mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+             -- boot | briefing | turn | peer_ask
+             kind       TEXT NOT NULL,
+             actor      TEXT NOT NULL DEFAULT '',
+             target     TEXT NOT NULL DEFAULT '',
+             started_ms INTEGER NOT NULL,
+             ended_ms   INTEGER NOT NULL,
+             detail     TEXT NOT NULL DEFAULT ''
+         );
+         CREATE INDEX IF NOT EXISTS idx_mission_timings_mission ON mission_timings(mission_id, started_ms);",
     )?;
     // New databases are stamped at the latest version by legacy detection; create v24
     // tables whenever the baseline DDL did not create them itself.

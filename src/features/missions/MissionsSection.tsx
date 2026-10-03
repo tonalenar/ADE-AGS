@@ -7,7 +7,10 @@ import { AddIcon, AlertaToast, Button, Tooltip } from "neogestify-ui-components"
 import { useSquadsStore } from "@/features/squads/store";
 import { useTabsStore } from "@/features/tabs/store";
 
-import { finishedMissionTabs, openMission, tabsByMission, useMissionIndex } from "./groups";
+import { useCanvasStore } from "@/features/canvas/store";
+
+import { finishedMissionTabs, missionIndex, openMission, tabsByMission, useMissionIndex } from "./groups";
+import { recordSpan } from "./timings";
 import { MissionDialog } from "./MissionDialog";
 import { emptyForm } from "./missionView";
 import { useMissionsStore } from "./store";
@@ -54,6 +57,29 @@ export function MissionsSection() {
 
   useEffect(() => () => {
     if (confirmFinishTimer.current) clearTimeout(confirmFinishTimer.current);
+  }, []);
+
+  // Cronómetro: cada `peer ask` avisa cuánto esperó la respuesta; acá se le pone la misión.
+  useEffect(() => {
+    const off = listen<{ from: string; to: string; toTabId: string; startedMs: number; endedMs: number; finished: boolean }>(
+      "cc-peer-timing",
+      (e) => {
+        const { tabs: openTabs } = useTabsStore.getState();
+        const mission = missionIndex(useCanvasStore.getState().boards, openTabs)[e.payload.toTabId];
+        if (!mission) return;
+        recordSpan(mission, {
+          kind: "peer_ask",
+          actor: e.payload.from,
+          target: e.payload.to,
+          startedMs: e.payload.startedMs,
+          endedMs: e.payload.endedMs,
+          detail: e.payload.finished ? "" : "timeout",
+        });
+      },
+    );
+    return () => {
+      off.then((fn) => fn());
+    };
   }, []);
 
   useEffect(() => {

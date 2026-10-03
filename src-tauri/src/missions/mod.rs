@@ -15,6 +15,7 @@
 
 pub(crate) mod review;
 pub(crate) mod store;
+pub(crate) mod timings;
 #[cfg(test)]
 mod test;
 mod types;
@@ -428,4 +429,35 @@ pub fn mission_cancel(app: AppHandle, mission_id: String) -> Result<Mission, Str
     });
     notify(&app, &mission_id);
     result
+}
+
+// ── Cronómetro ──────────────────────────────────────────────────────
+
+/// Graba el tiempo de una etapa de la misión (ver `timings`).
+#[tauri::command]
+pub fn mission_timing_add(app: AppHandle, mission_id: String, span: timings::NewSpan) -> Result<(), String> {
+    let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    timings::add(&conn, &mission_id, &span)
+}
+
+/// Los tiempos de una misión y su resumen: dónde se fue el tiempo.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissionTimings {
+    pub spans: Vec<timings::Span>,
+    pub summary: timings::Summary,
+}
+
+pub(crate) fn timings_of(conn: &Connection, mission_id: &str) -> Result<MissionTimings, String> {
+    let spans = timings::list(conn, mission_id)?;
+    let summary = timings::summarize(&spans, 5);
+    Ok(MissionTimings { spans, summary })
+}
+
+#[tauri::command]
+pub fn mission_timings(app: AppHandle, mission_id: String) -> Result<MissionTimings, String> {
+    let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    timings_of(&conn, &mission_id)
 }
