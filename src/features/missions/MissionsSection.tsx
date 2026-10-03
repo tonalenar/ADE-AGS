@@ -7,7 +7,6 @@ import { AddIcon, AlertaToast, Button, Tooltip } from "neogestify-ui-components"
 import { useSquadsStore } from "@/features/squads/store";
 import { useTabsStore } from "@/features/tabs/store";
 
-import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
 import { totalPending } from "../memory/pendingNotice";
 import { usePendingMemoryStore } from "../memory/pendingStore";
 import { openMission, tabsByMission, useMissionIndex } from "./groups";
@@ -37,7 +36,7 @@ export function MissionsSection() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const workspaceId = useTabsStore((s) => s.workspaceId);
-  useMemoryPendingNotice(workspaceId);
+  // El aviso de sugerencias nuevas vive en `useMissionWatcher` (siempre activo); acá solo se lee el contador.
   const pending = usePendingMemoryStore((s) => s.counts);
   const pendingTotal = totalPending(pending);
   const tabs = useTabsStore((s) => s.tabs);
