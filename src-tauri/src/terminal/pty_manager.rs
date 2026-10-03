@@ -293,6 +293,23 @@ fn shell_running(script: String) -> CommandBuilder {
     cmd
 }
 
+/// El PATH de la app con la carpeta de su propio ejecutable al final, para que `ccode` (que
+/// viaja al lado) se encuentre en cualquier terminal de agente aunque no se haya instalado el CLI.
+/// Al final, así nunca pisa un `ccode` ya instalado. `None` si no hay nada que agregar.
+fn path_with_app_dir() -> Option<std::ffi::OsString> {
+    let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
+    if !dir.join(if cfg!(windows) { "ccode.exe" } else { "ccode" }).is_file() {
+        return None;
+    }
+    let current = std::env::var_os("PATH").unwrap_or_default();
+    let mut dirs: Vec<std::path::PathBuf> = std::env::split_paths(&current).collect();
+    if dirs.contains(&dir) {
+        return None;
+    }
+    dirs.push(dir);
+    std::env::join_paths(dirs).ok()
+}
+
 /// Crea un PTY, lanza el proceso dentro, y emite eventos `pty-data-{id}` al frontend.
 ///
 /// `cols`/`rows` los manda el frontend ya medidos contra el tamaño real del contenedor
@@ -330,6 +347,9 @@ pub async fn pty_create(
     cmd.env("COLORTERM", "truecolor");
     for var in crate::app::app_only_env().into_iter().chain(PARENT_SESSION_ENV.iter().copied()) {
         cmd.env_remove(var);
+    }
+    if let Some(path) = path_with_app_dir() {
+        cmd.env("PATH", path);
     }
     let env = env.unwrap_or_default();
     // Con una cuenta de la app, una API key heredada no le gana a su login.

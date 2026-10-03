@@ -1722,6 +1722,7 @@
   "rail.collapse": "Collapse the rail",
   "status.mascot.idle": "All quiet",
   "status.mascot.working": "Agents working: {{running}}",
+  "pet.working": "{{n}} working",
   "status.mascot.waiting_one": "{{count}} agent waiting for you",
   "status.mascot.waiting_other": "{{count}} agents waiting for you",
   "home.status.idle": "All quiet. Launch an agent or pick up a workspace.",

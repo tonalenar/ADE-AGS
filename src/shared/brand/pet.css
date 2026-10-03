@@ -120,11 +120,29 @@
 }
 .ags-pet__pulse--2 { animation-delay: 0.65s; }
 
+/* Chispas que giran alrededor del cuerpo. */
+@keyframes ags-pet-orbit { to { transform: rotate(360deg); } }
+.ags-pet__orbit {
+  transform-box: view-box;
+  transform-origin: 8px 7px;
+  animation: ags-pet-orbit 1.6s linear infinite;
+}
+/* "Escribiendo…": tres puntos que laten en fila. */
+@keyframes ags-pet-typing { 0%, 100% { opacity: 0.2; } 40% { opacity: 1; } }
+.ags-pet__typing rect { animation: ags-pet-typing 0.9s ease-in-out infinite; }
+/* La barra de XP respira mientras trabaja, y el texto de abajo lleva puntos que avanzan. */
+@keyframes ags-pet-bar { 0%, 100% { filter: brightness(1); } 50% { filter: brightness(1.6); } }
+.ags-pet__bar--busy { animation: ags-pet-bar 1s ease-in-out infinite; }
+@keyframes ags-pet-dots { 0% { content: ""; } 33% { content: "."; } 66% { content: ".."; } 100% { content: "..."; } }
+.ags-pet__busy { color: var(--mascot-glow); }
+.ags-pet__busy::after { content: ""; animation: ags-pet-dots 1.2s steps(1) infinite; }
+
 /* El trazo veloz, más seguido. */
 .ags-mascot--working .ags-pet__dash { animation-duration: 1.2s; }
 
 @media (prefers-reduced-motion: reduce) {
   .ags-pet__pulse { animation: none; opacity: 0; }
+  .ags-pet__orbit, .ags-pet__typing rect, .ags-pet__bar--busy, .ags-pet__busy::after { animation: none; }
   .ags-pet__aura, .ags-pet__tongue, .ags-pet__crack, .ags-pet__zap, .ags-pet__spark, .ags-pet__dash,
   .ags-pet__burst { animation: none; }
   .ags-pet__zap, .ags-pet__dash, .ags-pet__burst { opacity: 0; }

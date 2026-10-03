@@ -1722,6 +1722,7 @@
   "rail.collapse": "Contraer el riel",
   "status.mascot.idle": "Todo tranquilo",
   "status.mascot.working": "Agentes trabajando: {{running}}",
+  "pet.working": "{{n}} trabajando",
   "status.mascot.waiting_one": "{{count}} agente esperándote",
   "status.mascot.waiting_other": "{{count}} agentes esperándote",
   "home.status.idle": "Todo tranquilo. Lanzá un agente o retomá un workspace.",

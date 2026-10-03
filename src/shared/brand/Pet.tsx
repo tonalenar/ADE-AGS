@@ -1,12 +1,14 @@
 import { useEffect, useId, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 
 import { formatTokens } from "@/features/accounts/usage";
 
 import { MASCOT_BODY, MASCOT_FILL, type MascotState } from "./Mascot";
 import "./pet.css";
 import { useMascotState } from "./useMascotState";
+import { useAgentActivity } from "@/features/terminal/activity";
 
 /** Lo que el backend sabe del pet (ver `pet.rs`). */
 export interface PetStatus {
@@ -146,6 +148,22 @@ export function Pet({ level, state = "idle", size = 96, className = "", still = 
         </g>
       )}
 
+      {/* Trabajando: tres chispas orbitan el cuerpo y una burbuja de "escribiendo…" late arriba. */}
+      {state === "working" && (
+        <g>
+          <g className="ags-pet__orbit">
+            <rect x="7.5" y="-3.2" width="1" height="1" fill={look.spark} />
+            <rect x="7.5" y="-3.2" width="1" height="1" fill={look.spark} transform="rotate(120 8 7)" />
+            <rect x="7.5" y="-3.2" width="1" height="1" fill={look.spark} transform="rotate(240 8 7)" />
+          </g>
+          <g className="ags-pet__typing" fill={look.aura ?? "var(--mascot-glow)"}>
+            <rect x="13" y="-2" width="1" height="1" />
+            <rect x="15" y="-2" width="1" height="1" style={{ animationDelay: "0.2s" }} />
+            <rect x="17" y="-2" width="1" height="1" style={{ animationDelay: "0.4s" }} />
+          </g>
+        </g>
+      )}
+
       <ellipse className="ags-mascot__shadow" cx="8" cy="15.2" rx="3.6" ry="0.55" fill="var(--mascot-shadow)" />
 
       {Array.from({ length: sparks }, (_, i) => {
@@ -231,6 +249,8 @@ export function usePetStatus(): PetStatus {
 /** El pet con su nivel y sus tokens, como en el panel lateral de la referencia. */
 export function PetCard({ pet, className = "" }: { pet: PetStatus; className?: string }) {
   const { state } = useMascotState();
+  const { t } = useTranslation();
+  const busy = useAgentActivity((a) => a.count);
 
   const stage = stageFor(pet.level);
   const accent = LOOKS[stage].aura ?? "var(--mascot-glow)";
@@ -246,10 +266,12 @@ export function PetCard({ pet, className = "" }: { pet: PetStatus; className?: s
         </div>
         <div className="mt-1 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden"
           role="progressbar" aria-valuenow={Math.round(pet.progress * 100)} aria-valuemin={0} aria-valuemax={100}>
-          <div className="h-full rounded-full transition-[width] duration-700" style={{ width: `${Math.round(pet.progress * 100)}%`, background: accent }} />
+          <div className={`h-full rounded-full transition-[width] duration-700 ${state === "working" ? "ags-pet__bar--busy" : ""}`} style={{ width: `${Math.round(pet.progress * 100)}%`, background: accent }} />
         </div>
         <div className="mt-0.5 text-[10px] tabular-nums text-gray-400 dark:text-gray-500">
-          {pet.toNext > 0 ? `-${formatTokens(pet.toNext)} → ${pet.level + 1}` : "MAX"}
+          {state === "working" && busy > 0 ? (
+            <span className="ags-pet__busy">{t("pet.working", { n: busy })}</span>
+          ) : pet.toNext > 0 ? `-${formatTokens(pet.toNext)} → ${pet.level + 1}` : "MAX"}
         </div>
       </div>
     </div>

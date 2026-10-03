@@ -1722,6 +1722,7 @@
   "rail.collapse": "Recolher menu",
   "status.mascot.idle": "Tudo calmo",
   "status.mascot.working": "Agentes trabalhando: {{running}}",
+  "pet.working": "{{n}} trabalhando",
   "status.mascot.waiting_one": "{{count}} agente esperando você",
   "status.mascot.waiting_other": "{{count}} agentes esperando você",
   "home.status.idle": "Tudo calmo por aqui. Lance um agente ou retome um workspace.",

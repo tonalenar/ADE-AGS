@@ -66,7 +66,7 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team
     "",
     people,
     "",
-    "COMO COORDENAR",
+    "COMO COORDENAR (use SOMENTE o `ccode`; não use `maestri` nem skills de outros apps)",
     "- `ccode peers` — quem está conectado com você.",
     '- `ccode peer ask "<nome>" "<pedido>"` — pergunta e ESPERA a resposta.',
     "- `ccode peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'` — vários ao mesmo tempo.",
