@@ -296,13 +296,12 @@ fn shell_running(script: String) -> CommandBuilder {
 /// El PATH de la app con la carpeta de su propio ejecutable al final, para que `ccode` (que
 /// viaja al lado) se encuentre en cualquier terminal de agente aunque no se haya instalado el CLI.
 /// Al final, así nunca pisa un `ccode` ya instalado. `None` si no hay nada que agregar.
-fn path_with_app_dir() -> Option<std::ffi::OsString> {
+fn path_with_app_dir(current: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
     let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
     if !dir.join(if cfg!(windows) { "ccode.exe" } else { "ccode" }).is_file() {
         return None;
     }
-    let current = std::env::var_os("PATH").unwrap_or_default();
-    let mut dirs: Vec<std::path::PathBuf> = std::env::split_paths(&current).collect();
+    let mut dirs: Vec<std::path::PathBuf> = std::env::split_paths(current).collect();
     if dirs.contains(&dir) {
         return None;
     }
@@ -348,7 +347,10 @@ pub async fn pty_create(
     for var in crate::app::app_only_env().into_iter().chain(PARENT_SESSION_ENV.iter().copied()) {
         cmd.env_remove(var);
     }
-    if let Some(path) = path_with_app_dir() {
+    // El PATH del hijo es el del PTY (en Windows sale del registro, no del proceso de la app: la
+    // app puede tener la carpeta de su ejecutable en el suyo y el hijo no).
+    let child_path = cmd.get_env("PATH").map(|p| p.to_os_string()).unwrap_or_default();
+    if let Some(path) = path_with_app_dir(&child_path) {
         cmd.env("PATH", path);
     }
     let env = env.unwrap_or_default();
