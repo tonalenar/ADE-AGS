@@ -192,6 +192,13 @@ pub struct MemoryPage {
     pub truncated: bool,
 }
 
+#[derive(Clone, Debug, Serialize, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct MemoryPendingCounts {
+    pub workspace: i64,
+    pub by_mission: std::collections::HashMap<String, i64>,
+}
+
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProposalInput {
@@ -1252,6 +1259,50 @@ pub fn task_tool(
         _ => return Err("unknown Shared Memory tool".into()),
     };
     Ok(serde_json::json!({"text":text}))
+}
+
+#[tauri::command]
+pub fn memory_pending_counts(
+    workspace_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<MemoryPendingCounts, String> {
+    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+    pending_counts_for_workspace(&conn, &workspace_id)
+}
+
+fn pending_counts_for_workspace(
+    conn: &Connection,
+    workspace_id: &str,
+) -> Result<MemoryPendingCounts, String> {
+    let workspace = conn
+        .query_row(
+            "SELECT COUNT(*) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.scope='workspace' AND e.workspace_id=?1 AND r.status='proposed'",
+            [workspace_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| "could not check pending memory counts".to_string())?;
+
+    let mut statement = conn
+        .prepare(
+            "SELECT e.mission_id, COUNT(*) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.scope='mission' AND e.workspace_id=?1 AND r.status='proposed' GROUP BY e.mission_id",
+        )
+        .map_err(|_| "could not check pending memory counts".to_string())?;
+    let rows = statement
+        .query_map([workspace_id], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })
+        .map_err(|_| "could not check pending memory counts".to_string())?;
+    let mut by_mission = std::collections::HashMap::new();
+    for row in rows {
+        let (mission_id, count) =
+            row.map_err(|_| "could not check pending memory counts".to_string())?;
+        by_mission.insert(mission_id, count);
+    }
+
+    Ok(MemoryPendingCounts {
+        workspace,
+        by_mission,
+    })
 }
 
 #[tauri::command]

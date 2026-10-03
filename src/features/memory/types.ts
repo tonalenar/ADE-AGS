@@ -4,6 +4,11 @@ export type MemoryScope = "workspace" | "mission";
 export type MemoryKind = "decision" | "finding" | "file" | "constraint" | "note";
 export type MemoryOperation = "create" | "update" | "delete";
 
+export interface MemoryPendingCounts {
+  workspace: number;
+  byMission: Record<string, number>;
+}
+
 export interface MemoryEntry {
   id: string;
   scope: MemoryScope;

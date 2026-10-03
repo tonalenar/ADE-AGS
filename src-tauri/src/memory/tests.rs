@@ -1184,3 +1184,37 @@ fn initial_create_rejection_is_inactive_preserves_history_and_can_be_reproposed(
     assert_eq!(tombstone.entry.current_revision, None);
     assert_eq!(tombstone.revisions.len(), 4);
 }
+
+#[test]
+fn pending_counts_cover_workspace_missions_and_approval() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_mission(&conn, "m1", "w1");
+    seed_mission(&conn, "m2", "w1");
+
+    let empty = pending_counts_for_workspace(&conn, "w1").unwrap();
+    assert_eq!(empty.workspace, 0);
+    assert!(empty.by_mission.is_empty());
+    assert_eq!(
+        serde_json::to_value(&empty).unwrap(),
+        json!({"workspace": 0, "byMission": {}})
+    );
+
+    let workspace_proposal = propose(&conn, "workspace", None, "workspace-key", "body", "create", None);
+    assert_eq!(pending_counts_for_workspace(&conn, "w1").unwrap().workspace, 1);
+
+    let m1_proposal = propose(&conn, "mission", Some("m1"), "mission-key", "m1 body", "create", None);
+    propose(&conn, "mission", Some("m2"), "mission-key", "m2 body", "create", None);
+
+    let pending = pending_counts_for_workspace(&conn, "w1").unwrap();
+    assert_eq!(pending.workspace, 1);
+    assert_eq!(pending.by_mission.get("m1"), Some(&1));
+    assert_eq!(pending.by_mission.get("m2"), Some(&1));
+
+    decide(&conn, &m1_proposal.entry_id, m1_proposal.revision, true).unwrap();
+    let after_approval = pending_counts_for_workspace(&conn, "w1").unwrap();
+    assert_eq!(after_approval.workspace, 1);
+    assert_eq!(after_approval.by_mission.get("m1").copied().unwrap_or(0), 0);
+    assert_eq!(after_approval.by_mission.get("m2"), Some(&1));
+    assert_eq!(workspace_proposal.status, "proposed");
+}

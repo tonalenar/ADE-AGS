@@ -240,6 +240,7 @@ pub fn run() {
             // Local, approved Mission and Workspace memory plus immutable Run snapshots.
             crate::memory::memory_list,
             crate::memory::memory_get,
+            crate::memory::memory_pending_counts,
             crate::memory::memory_propose_user,
             crate::memory::memory_decide_user,
             crate::memory::memory_promote_fact_user,

@@ -6,7 +6,7 @@ import type { Fact, Run } from "@/features/runs/types";
 import * as memoryIpc from "./ipc";
 import type { MemoryDetail, MemoryEntry, MemoryKind, MemoryPage, MemoryProposal, MemoryScope, MemorySnapshot } from "./types";
 
-type MemoryTab = "workspace" | "mission" | "facts" | "snapshot";
+export type MemoryTab = "workspace" | "mission" | "facts" | "snapshot";
 type ProposalForm = {
   mode: "create" | "update" | "delete" | "promote";
   scope: MemoryScope;
@@ -30,13 +30,15 @@ const KIND_LABEL: Record<MemoryKind, string> = {
 };
 const OPERATION_LABEL = { create: "criação", update: "atualização", delete: "exclusão" } as const;
 
-export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], activeRunId = null }: {
+export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], activeRunId = null, initialTab }: {
   workspaceId: string;
   missionId?: string | null;
   runs?: Run[];
   activeRunId?: string | null;
+  initialTab?: MemoryTab;
 }) {
-  const [tab, setTab] = useState<MemoryTab>("workspace");
+  // Para alterar a aba inicial, quem usa este painel deve forçar a remontagem com uma key.
+  const [tab, setTab] = useState<MemoryTab>(initialTab ?? "workspace");
   const [workspacePage, setWorkspacePage] = useState<MemoryPage | null>(null);
   const [missionPage, setMissionPage] = useState<MemoryPage | null>(null);
   const [facts, setFacts] = useState<Fact[]>([]);
