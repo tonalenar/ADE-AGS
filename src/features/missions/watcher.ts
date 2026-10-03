@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCanvasStore } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 
+import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
 import { finishedMissionTabs, missionIndex, useMissionIndex } from "./groups";
 import { useMissionsStore } from "./store";
 import { recordSpan } from "./timings";
@@ -22,7 +23,8 @@ export interface PeerTimingEvent {
  * Lo que las misiones hacen en segundo plano, con la barra lateral abierta o cerrada:
  *
  * - **cronómetro**: cada `peer ask` avisa cuánto esperó; acá se le pone la misión;
- * - **barrido**: una misión terminada cierra sus pestañas (y con ellas los procesos).
+ * - **barrido**: una misión terminada cierra sus pestañas (y con ellas los procesos);
+ * - **aviso de memoria**: cuando un agente sugiere una memoria, un aviso con la acción de abrirla.
  *
  * Vive aparte de la columna de Misiones a propósito: esa columna solo existe mientras la
  * barra está expandida, y con la barra recogida nadie escuchaba ni barría.
@@ -33,6 +35,9 @@ export function useMissionWatcher(): void {
   const missions = useMissionsStore((s) => s.missions);
   const load = useMissionsStore((s) => s.load);
   const index = useMissionIndex();
+
+  // Aviso cuando un agente sugiere una memoria; también con la barra lateral recogida.
+  useMemoryPendingNotice(workspaceId);
 
   // Las misiones del workspace, al día.
   useEffect(() => {

@@ -1,7 +1,7 @@
 import { HandoffView } from "@/features/runs/HandoffView";
-import { SharedMemoryPanel } from "@/features/memory/SharedMemoryPanel";
+import { SharedMemoryPanel, type MemoryTab } from "@/features/memory/SharedMemoryPanel";
 import { useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { Alert, AnimateSpin, Button, EmptyState, LocationIcon } from "neogestify-ui-components";
@@ -53,6 +53,8 @@ const STATUS_TONE: Record<MissionPhase, string> = {
  */
 export function MissionsPage() {
   const { t } = useTranslation();
+  const location = useLocation();
+  const navigate = useNavigate();
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
@@ -67,8 +69,19 @@ export function MissionsPage() {
   const loadSquads = useSquadsStore((s) => s.load);
 
   const [selected, setSelected] = useState<string | null>(null);
+  const [focusTab, setFocusTab] = useState<MemoryTab>("workspace");
+  const [focusNonce, setFocusNonce] = useState(0);
   const [dialog, setDialog] = useState<"new" | "edit" | null>(null);
   const [error, setError] = useState("");
+
+  useEffect(() => {
+    const state = location.state as { focusMission?: string | null; memoryTab?: MemoryTab } | null;
+    if (!state) return;
+    setSelected(state.focusMission ?? null);
+    setFocusTab(state.memoryTab ?? "workspace");
+    setFocusNonce((n) => n + 1);
+    navigate(location.pathname, { replace: true, state: null });
+  }, [location.state]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const cwd = tabs.find((tb) => tb.id === activeTabId)?.cwd ?? tabs[0]?.cwd ?? "";
 
@@ -169,12 +182,18 @@ export function MissionsPage() {
               approvals={approvalsFor(approvals, detail.tasks)}
               onEdit={() => setDialog("edit")}
               onError={setError}
+              focusTab={focusTab}
+              focusNonce={focusNonce}
             />
           ) : (
             workspaceId ? (
               <div className="flex flex-col gap-4 p-5">
                 <p className="text-[12px] text-gray-400 dark:text-white/35">{t("missions.pick")}</p>
-                <SharedMemoryPanel workspaceId={workspaceId} />
+                <SharedMemoryPanel
+                  key={`${workspaceId}-${focusNonce}`}
+                  workspaceId={workspaceId}
+                  initialTab={focusTab === "mission" ? "workspace" : focusTab}
+                />
               </div>
             ) : <p className="p-6 text-[12px] text-gray-400 dark:text-white/35">{t("missions.pick")}</p>
           )}
@@ -263,7 +282,7 @@ function ProgressLabel({ progress }: { progress: Progress }) {
   );
 }
 
-function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError }: {
+function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError, focusTab, focusNonce }: {
   summary: MissionSummary;
   detail: MissionDetail;
   squad: Squad | null;
@@ -271,6 +290,8 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError 
   approvals: PendingApproval[];
   onEdit: () => void;
   onError: (e: string) => void;
+  focusTab: MemoryTab;
+  focusNonce: number;
 }) {
   const { t } = useTranslation();
   const accountLabel = useSquadAccountLabel();
@@ -468,7 +489,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError 
 
       <MissionReviewPanel missionId={mission.id} refreshKey={tasks.map((task) => `${task.id}:${task.status}`).join("|")} />
 
-      {workspaceId && <SharedMemoryPanel key={`${workspaceId}-${mission.id}`} workspaceId={workspaceId} missionId={mission.id} runs={runs} activeRunId={mission.activeRunId} />}
+      {workspaceId && <SharedMemoryPanel key={`${workspaceId}-${mission.id}-${focusNonce}`} workspaceId={workspaceId} missionId={mission.id} runs={runs} activeRunId={mission.activeRunId} initialTab={focusTab} />}
     </div>
   );
 }

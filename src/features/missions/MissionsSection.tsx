@@ -7,6 +7,8 @@ import { AddIcon, AlertaToast, Button, Tooltip } from "neogestify-ui-components"
 import { useSquadsStore } from "@/features/squads/store";
 import { useTabsStore } from "@/features/tabs/store";
 
+import { totalPending } from "../memory/pendingNotice";
+import { usePendingMemoryStore } from "../memory/pendingStore";
 import { openMission, tabsByMission, useMissionIndex } from "./groups";
 import { MissionDialog } from "./MissionDialog";
 import { emptyForm } from "./missionView";
@@ -34,6 +36,9 @@ export function MissionsSection() {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const workspaceId = useTabsStore((s) => s.workspaceId);
+  // El aviso de sugerencias nuevas vive en `useMissionWatcher` (siempre activo); acá solo se lee el contador.
+  const pending = usePendingMemoryStore((s) => s.counts);
+  const pendingTotal = totalPending(pending);
   const tabs = useTabsStore((s) => s.tabs);
   const cwd = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId)?.cwd ?? "");
   const missions = useMissionsStore((s) => s.missions);
@@ -131,6 +136,20 @@ export function MissionsSection() {
           {m.title}
         </span>
         {mine > 0 && <span className="text-[10px] tabular-nums text-gray-400 dark:text-white/35">{mine}</span>}
+        {(pending.byMission[m.id] ?? 0) > 0 && (
+          <Button
+            variant="custom"
+            title={t("missions.memoryPending.tooltip")}
+            aria-label={t("missions.memoryPending.aria", { count: pending.byMission[m.id] })}
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate("/missions", { state: { focusMission: m.id, memoryTab: "mission" } });
+            }}
+            className="cc-t shrink-0 rounded px-1 text-[10px] tabular-nums text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20"
+          >
+            {pending.byMission[m.id]}
+          </Button>
+        )}
         {m.status === "draft" && (
           <Button variant="custom" disabled={busy === m.id}
             onClick={(e) => { e.stopPropagation(); void start(m); }}
@@ -169,6 +188,20 @@ export function MissionsSection() {
         <span className="flex-1 text-[10.5px] font-bold uppercase tracking-[0.09em] text-gray-500 dark:text-gray-400">
           {t("missions.title")}
         </span>
+        {pendingTotal > 0 && (
+          <Button
+            variant="custom"
+            title={t("missions.memoryPending.tooltip")}
+            aria-label={t("missions.memoryPending.aria", { count: pendingTotal })}
+            onClick={(e) => {
+              e.stopPropagation();
+              navigate("/missions", { state: { focusMission: null, memoryTab: "workspace" } });
+            }}
+            className="cc-t shrink-0 rounded px-1 text-[10px] tabular-nums text-amber-700 dark:text-amber-300 bg-amber-500/10 hover:bg-amber-500/20"
+          >
+            {pendingTotal}
+          </Button>
+        )}
         <Tooltip content={t("missions.new")} placement="bottom">
           <Button variant="icon" onClick={() => setCreating(true)} disabled={!cwd}
             className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0 text-gray-400 dark:text-white/35
