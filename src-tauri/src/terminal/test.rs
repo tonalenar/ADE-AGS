@@ -409,6 +409,12 @@ fn codex_recibe_el_id_de_la_tab_por_su_config() {
     );
     // Con ruta y .exe también es Codex.
     assert!(with_codex_tab_id("\"C:\\bin\\codex.exe\"", Some("t")).contains("shell_environment_policy.set.ADE_TAB_ID"));
+    // Ruta entrecomillada con espacios: el flag va DESPUÉS de la ruta entera, no en medio.
+    let spaced = with_codex_tab_id("\"C:\\Program Files\\codex.exe\" resume x", Some("t"));
+    assert_eq!(
+        split_command(&spaced),
+        vec!["C:\\Program Files\\codex.exe", "-c", "shell_environment_policy.set.ADE_TAB_ID=\"t\"", "resume", "x"]
+    );
     // Otras TUIs, sin id, ids raros o ya puesto: no se toca.
     assert_eq!(with_codex_tab_id("claude --resume x", Some("t")), "claude --resume x");
     assert_eq!(with_codex_tab_id("codex", None), "codex");

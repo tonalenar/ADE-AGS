@@ -320,22 +320,22 @@ pub(super) fn with_codex_tab_id(command: &str, tab_id: Option<&str>) -> String {
     let Some(tab) = tab_id.filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')) else {
         return command.to_string();
     };
-    let (head, tail) = command.split_once(char::is_whitespace).unwrap_or((command, ""));
+    let trimmed = command.trim_start();
+    // El programa es la primera palabra, o lo entrecomillado si la ruta tiene espacios.
+    let head_len = match trimmed.chars().next() {
+        Some(q @ ('"' | '\'')) => trimmed[1..].find(q).map_or(trimmed.len(), |i| i + 2),
+        _ => trimmed.find(char::is_whitespace).unwrap_or(trimmed.len()),
+    };
+    let (head, tail) = trimmed.split_at(head_len);
     let program = head.trim_matches(|c| c == '"' || c == '\'');
-    let stem = std::path::Path::new(program)
-        .file_stem()
-        .and_then(|s| s.to_str())
-        .unwrap_or("")
-        .to_ascii_lowercase();
+    // Las dos barras: una ruta de Windows también se lee bien en un sistema que usa `/`.
+    let file = program.rsplit(['/', '\\']).next().unwrap_or("").to_ascii_lowercase();
+    let stem = file.strip_suffix(".exe").or_else(|| file.strip_suffix(".cmd")).unwrap_or(&file);
     if stem != "codex" || command.contains("shell_environment_policy.set.ADE_TAB_ID") {
         return command.to_string();
     }
     let flag = format!("'shell_environment_policy.set.ADE_TAB_ID=\"{tab}\"'");
-    if tail.is_empty() {
-        format!("{head} -c {flag}")
-    } else {
-        format!("{head} -c {flag} {tail}")
-    }
+    format!("{head} -c {flag}{tail}")
 }
 
 /// Crea un PTY, lanza el proceso dentro, y emite eventos `pty-data-{id}` al frontend.
