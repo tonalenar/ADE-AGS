@@ -483,3 +483,20 @@ pub async fn mission_precheck(app: AppHandle, mission_id: String) -> Result<Stri
     .await
     .map_err(|e| e.to_string())?
 }
+
+// ── Memoria del proyecto en el briefing ─────────────────────────────
+
+/// El bloque de memoria aprobada (workspace + misión) para el briefing del Orquestador. Vacío si
+/// no hay nada. Solo lee.
+pub(crate) fn memory_context_text(conn: &Connection, mission_id: &str) -> Result<String, String> {
+    let mission = store::get(conn, mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+    let docs = crate::memory::search::load_docs(conn, &mission.workspace_id, Some(&mission.id))?;
+    Ok(crate::memory::search::briefing_block(&docs, &mission.id, 8, 1_800))
+}
+
+#[tauri::command]
+pub fn mission_memory_context(app: AppHandle, mission_id: String) -> Result<String, String> {
+    let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    memory_context_text(&conn, &mission_id)
+}

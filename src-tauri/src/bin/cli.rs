@@ -145,6 +145,8 @@ MISIONES (también sin interfaz: `ade-ags --headless`)
   mission review <id>                         Lo que entregó cada tarea aislada
   mission timings <id>                        Dónde se fue el tiempo: arranque, briefing, turnos, peer ask
   mission precheck <id>                       Lo que el repositorio y las misiones anteriores ya dicen del objetivo
+  memory search \"<tema>\" --mission <id> [--limit 5]
+                                              Busca en la memoria aprobada del proyecto y de la misión (solo lee)
   mission accept <id> <tarea>                 La junta en la integración de la misión
   mission apply <id>                          Lleva lo aceptado al proyecto
   approval list                               Pedidos de permiso esperando
@@ -408,6 +410,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "floor.create" => &["name"],
         "say.send" => &["text"],
         "recall.get" => &["thread"],
+        "memory.search" => &["query"],
         // `ags routine create Testes "rode os testes" --at 09:00`
         "routine.create" => &["name", "text"],
         "routine.edit" => &["name", "text"],

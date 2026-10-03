@@ -56,7 +56,7 @@ export function teamOf(squad: Squad | null, roles: FunctionalRole[]): TeamMember
 export const LEAD_NAME = "Orquestrador";
 
 /** Lo primero que lee el orquestador: la misión, su equipo y cómo coordinarlo. Pura. */
-export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team: TeamMember[], findings = ""): string {
+export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team: TeamMember[], findings = "", memory = ""): string {
   const people = team.length === 0
     ? "Você ainda não tem equipe: sume agentes com `ags peer recruit <nome> --agent <id> --role <papel>`."
     : `SUA EQUIPE (já aberta e conectada a você no canvas):\n${team
@@ -71,6 +71,7 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team
     people,
     "",
     ...(findings.trim() ? [findings.trim(), ""] : []),
+    ...(memory.trim() ? [memory.trim(), ""] : []),
     "COMO COORDENAR (use SOMENTE o `ags`; não use `maestri` nem skills de outros apps)",
     "- `ags peers` — quem está conectado com você.",
     '- `ags peer ask "<nome>" "<pedido>"` — pergunta e ESPERA a resposta.',
@@ -84,7 +85,7 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team
 }
 
 /** Lo primero que lee cada integrante: de qué misión es, quién lo dirige y qué papel cumple. Pura. */
-export function memberBriefing(mission: Pick<Mission, "title" | "objective">, member: TeamMember): string {
+export function memberBriefing(mission: Pick<Mission, "title" | "objective"> & { id?: string }, member: TeamMember): string {
   return [
     `Você faz parte da equipe da missão "${mission.title}", dirigida pelo orquestrador "${LEAD_NAME}".`,
     "",
@@ -94,6 +95,7 @@ export function memberBriefing(mission: Pick<Mission, "title" | "objective">, me
     `SEU PAPEL: ${member.roleLabel}${member.roleDescription ? ` — ${member.roleDescription}` : ""}`,
     member.roleInstructions,
     "",
+    ...(mission.id ? [`Memória aprovada do projeto: \`ags memory search "<assunto>" --mission ${mission.id}\` (só lê).`, ""] : []),
     `Aguarde as instruções do orquestrador. Responda ao que ele perguntar; para avisar algo por conta própria: \`ags peer tell "${LEAD_NAME}" "<mensagem>"\`.`,
   ]
     .filter((line, i, all) => !(line === "" && all[i - 1] === ""))
@@ -166,6 +168,8 @@ export async function startMissionInTerminals(mission: Mission, squad: Squad | n
   // O que o repositório e as missões anteriores já dizem do objetivo: se o pedido já existe, o
   // Orquestrador sabe ANTES de convocar a equipe. Só leitura; se falhar, a missão segue sem isso.
   const findings = await invoke<string>("mission_precheck", { missionId: mission.id }).catch(() => "");
+  // La memoria aprobada del proyecto y de la misión (solo lectura; vacío si no hay ninguna).
+  const memory = await invoke<string>("mission_memory_context", { missionId: mission.id }).catch(() => "");
 
   await invoke("mission_start_terminals", { missionId: mission.id });
 
@@ -201,7 +205,7 @@ export async function startMissionInTerminals(mission: Mission, squad: Squad | n
       onTurnEnd: (at) => sentAt > 0 && recordSpan(mission.id, { kind: "turn", actor, startedMs: sentAt, endedMs: at, detail: "briefing" }),
     };
   };
-  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings)), timed(LEAD_NAME));
+  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory)), timed(LEAD_NAME));
   memberTabIds.forEach((tabId, i) =>
     sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i])), timed(team[i].name)),
   );
