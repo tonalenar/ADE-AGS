@@ -1332,6 +1332,18 @@ pub fn memory_get(
     let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
     detail_for_owner(&conn, &entry_id, &workspace_id, mission_id.as_deref())
 }
+
+#[tauri::command]
+pub fn memory_history(
+    entry_id: String,
+    workspace_id: String,
+    mission_id: Option<String>,
+    db: tauri::State<DbConnection>,
+) -> Result<Vec<history::MemoryValidityInterval>, String> {
+    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+    history::history_for_entry(&conn, &workspace_id, mission_id.as_deref(), &entry_id)
+}
+
 #[tauri::command]
 pub fn memory_propose_user(
     workspace_id: String,
@@ -1410,6 +1422,7 @@ pub fn memory_promote_fact_user(
 }
 
 pub mod agent;
+pub mod history;
 pub mod search;
 
 #[cfg(test)]

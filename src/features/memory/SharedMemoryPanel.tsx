@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
 import type { Fact, Run } from "@/features/runs/types";
 import * as memoryIpc from "./ipc";
-import type { MemoryDetail, MemoryEntry, MemoryKind, MemoryPage, MemoryProposal, MemoryScope, MemorySnapshot } from "./types";
+import type { MemoryDetail, MemoryEntry, MemoryKind, MemoryPage, MemoryProposal, MemoryScope, MemorySnapshot, MemoryValidityInterval } from "./types";
 
 export type MemoryTab = "workspace" | "mission" | "facts" | "snapshot";
 type ProposalForm = {
@@ -196,7 +197,8 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
       <div className="flex flex-col gap-2">
         {page.items.length === 0 && <p className="text-xs text-gray-400">Nenhuma memória registrada.</p>}
         {page.items.map((entry) => (
-          <MemoryEntryCard key={entry.id} entry={entry} busy={busy} onInspect={() => inspect(entry)}
+          <MemoryEntryCard key={entry.id} entry={entry} busy={busy} workspaceId={workspaceId} missionId={missionId}
+            onInspect={() => inspect(entry)}
             onApprove={() => decide(entry, true)} onReject={() => decide(entry, false)}
             onEdit={() => {
               if (!entry.bodyTruncated) { openEdit(entry); return; }
@@ -263,9 +265,11 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
   );
 }
 
-function MemoryEntryCard({ entry, busy, onInspect, onApprove, onReject, onEdit, onDelete }: {
+function MemoryEntryCard({ entry, busy, workspaceId, missionId, onInspect, onApprove, onReject, onEdit, onDelete }: {
   entry: MemoryEntry;
   busy: boolean;
+  workspaceId: string;
+  missionId: string | null;
   onInspect: () => void;
   onApprove: () => void;
   onReject: () => void;
@@ -301,6 +305,7 @@ function MemoryEntryCard({ entry, busy, onInspect, onApprove, onReject, onEdit, 
       )}
       <div className="flex flex-wrap gap-1.5">
         <Button variant="ghost" size="sm" disabled={busy} onClick={onInspect}>Ver revisões</Button>
+        <MemoryValidityHistory entry={entry} workspaceId={workspaceId} missionId={missionId} />
         {entry.pendingRevision !== null ? (
           <>
             <Button variant="primary" size="sm" disabled={busy} onClick={onApprove}>Aprovar</Button>
@@ -401,6 +406,69 @@ function MemoryHistory({ detail, onClose }: { detail: MemoryDetail; onClose: () 
         </article>
       ))}
     </section>
+  );
+}
+
+export function localeForLanguage(language: string): string {
+  if (language.startsWith("es")) return "es-ES";
+  if (language.startsWith("en")) return "en-US";
+  return "pt-BR";
+}
+
+function MemoryValidityHistory({ entry, workspaceId, missionId }: {
+  entry: MemoryEntry;
+  workspaceId: string;
+  missionId: string | null;
+}) {
+  const { t, i18n } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [intervals, setIntervals] = useState<MemoryValidityInterval[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const toggle = async () => {
+    if (open) { setOpen(false); return; }
+    setOpen(true);
+    if (intervals !== null) return;
+    setBusy(true);
+    setError("");
+    try {
+      const data = await memoryIpc.getMemoryHistory(entry.id, workspaceId, entry.scope === "mission" ? missionId : null);
+      setIntervals(data);
+    } catch (cause) {
+      setError(String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  const locale = localeForLanguage(i18n?.language ?? "pt-BR");
+  const formatDate = (timestamp: number) => new Date(timestamp * 1000).toLocaleString(locale);
+  return (
+    <>
+      <Button variant="ghost" size="sm" disabled={busy} onClick={toggle}>{t("memory.history.toggle")}</Button>
+      {open && (
+        <section className="basis-full flex flex-col gap-2 rounded-lg border border-violet-300/40 bg-violet-50/50 p-3 dark:border-violet-300/15 dark:bg-violet-300/5">
+          <div className="flex items-center gap-2">
+            <h4 className="mr-auto text-xs font-semibold">{t("memory.history.title", { key: entry.key })}</h4>
+            <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>{t("memory.history.close")}</Button>
+          </div>
+          {error && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+          {busy && intervals === null && <p className="text-xs text-gray-400">Carregando…</p>}
+          {intervals !== null && intervals.length === 0 && <p className="text-xs text-gray-400">{t("memory.history.empty")}</p>}
+          {intervals?.slice().reverse().map((interval) => (
+            <article key={interval.revision} className="flex flex-col gap-1 border-t border-gray-200 pt-2 dark:border-white/8">
+              <p className="text-[10px] font-semibold">Revisão {interval.revision} · {OPERATION_LABEL[interval.operation]} · {actorLabel(interval.actorKind)}</p>
+              <p className="text-[10px] text-gray-500 dark:text-white/45">{KIND_LABEL[interval.kind]} · prioridade {interval.priority}</p>
+              <pre className="whitespace-pre-wrap break-words rounded bg-white/70 p-2 text-[11px] dark:bg-black/15">{interval.body}</pre>
+              {interval.reason && <p className="text-[10px] text-gray-500 dark:text-white/45">Motivo: {interval.reason}</p>}
+              <p className="text-[10px] text-gray-500 dark:text-white/45">
+                {t("memory.history.validFrom", { date: formatDate(interval.validFrom) })}{" "}
+                {interval.validTo !== null ? t("memory.history.validUntil", { date: formatDate(interval.validTo) }) : t("memory.history.ongoing")}
+              </p>
+            </article>
+          ))}
+        </section>
+      )}
+    </>
   );
 }
 

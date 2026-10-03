@@ -282,3 +282,24 @@ fn la_ayuda_nombra_todos_los_grupos_que_la_app_atiende() {
     assert!(USAGE.contains("mcp --cwd"), "la ayuda no explica `ags mcp`");
     assert!(USAGE.contains("mcp --task"));
 }
+
+#[test]
+fn memory_history_and_temporal_search_flags_are_parsed() {
+    let search = parse(
+        "memory.search",
+        &["límites", "--mission", "m1", "--at", "2026-10-03T12:45"],
+    )
+    .unwrap();
+    assert_eq!(search["query"], "límites");
+    assert_eq!(search["mission"], "m1");
+    assert_eq!(search["at"], "2026-10-03T12:45");
+
+    let history = parse(
+        "memory.history",
+        &["--mission", "m1", "--key", "active-limits", "--scope", "mission"],
+    )
+    .unwrap();
+    assert_eq!(history["mission"], "m1");
+    assert_eq!(history["key"], "active-limits");
+    assert_eq!(history["scope"], "mission");
+}

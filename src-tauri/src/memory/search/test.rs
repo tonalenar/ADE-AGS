@@ -136,6 +136,55 @@ mod banco {
     }
 
     #[test]
+    fn temporal_search_uses_validity_while_search_without_at_keeps_current_mode() {
+        let conn = setup();
+        activate(&conn, "workspace", None, "agent-limits", "agent memory limits", true);
+        let entry_id: String = conn
+            .query_row(
+                "SELECT id FROM memory_entries WHERE workspace_id='w' AND scope='workspace' AND key='agent-limits'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let history = crate::memory::history::history_for_entry(&conn, "w", Some("m"), &entry_id).unwrap();
+        let created_at = history[0].valid_from;
+
+        assert!(search_at(&conn, "w", Some("m"), "agent", 5, created_at - 1).unwrap().is_empty());
+        assert_eq!(search_at(&conn, "w", Some("m"), "agent", 5, created_at).unwrap()[0].entry_id, entry_id);
+
+        let current_revision: i64 = conn
+            .query_row(
+                "SELECT current_revision FROM memory_entries WHERE id=?1",
+                [&entry_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let pending_update = ProposalInput {
+            scope: "workspace".into(),
+            key: "agent-limits".into(),
+            kind: "decision".into(),
+            body: "different content for a proposed update".into(),
+            priority: 0,
+            operation: "update".into(),
+            expected_revision: Some(current_revision),
+            source_fact_id: None,
+            reason: None,
+        };
+        propose(
+            &conn,
+            "workspace",
+            "w",
+            None,
+            &pending_update,
+            crate::memory::ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None },
+        )
+        .unwrap();
+
+        assert_eq!(search(&conn, "w", Some("m"), "agent", 5).unwrap()[0].entry_id, entry_id);
+        assert_eq!(search_at(&conn, "w", Some("m"), "agent", 5, created_at).unwrap()[0].entry_id, entry_id);
+    }
+
+    #[test]
     fn valida_a_pergunta() {
         let conn = setup();
         assert!(search(&conn, "w", Some("m"), "   ", 5).is_err());

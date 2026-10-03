@@ -145,8 +145,10 @@ MISIONES (también sin interfaz: `ade-ags --headless`)
   mission review <id>                         Lo que entregó cada tarea aislada
   mission timings <id>                        Dónde se fue el tiempo: arranque, briefing, turnos, peer ask
   mission precheck <id>                       Lo que el repositorio y las misiones anteriores ya dicen del objetivo
-  memory search \"<tema>\" --mission <id> [--limit 5]
-                                              Busca en la memoria aprobada del proyecto y de la misión (solo lee)
+  memory search \"<tema>\" --mission <id> [--limit 5] [--at <YYYY-MM-DD|YYYY-MM-DDTHH:MM|unix-seconds>]
+                                              Busca memoria vigente ahora o en ese instante (fechas en UTC)
+  memory history --mission <id> --key <nombre> --scope workspace|mission
+                                              Revisiones aprobadas y sus intervalos de validez
   memory suggest --mission <id> --key <nombre> --body \"...\" [--scope workspace|mission]
                  [--kind decision|constraint|finding|file|note] [--priority 0-3]
                                               SUGIERE una memoria (queda pendiente; la aprueba el usuario)
