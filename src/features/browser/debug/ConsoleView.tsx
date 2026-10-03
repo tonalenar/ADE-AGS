@@ -216,7 +216,7 @@ function ConsoleRow({ entry, open, onToggle }: { entry: LoggedConsole; open: boo
         {prefix}{entry.text}
         {open && entry.stack && (
           <span className="block mt-1 text-[10.5px] opacity-70">
-            {entry.stack.split("\n").filter((l) => !l.includes("/__controlcode__/")).join("\n")}
+            {entry.stack.split("\n").filter((l) => !l.includes("/__ags__/")).join("\n")}
           </span>
         )}
       </span>

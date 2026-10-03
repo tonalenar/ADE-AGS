@@ -107,7 +107,7 @@ fn ensure_default_settings(conn: &Connection) -> SqlResult<()> {
     )?;
     if has_skills_dir == 0 {
         let home = dirs::home_dir().expect("Cannot determine home directory");
-        let default_dir = home.join(".controlcode").join("skills");
+        let default_dir = home.join(".ags").join("skills");
         conn.execute(
             "INSERT INTO settings (key, value) VALUES ('skills_dir', ?1)",
             [default_dir.to_string_lossy().to_string()],

@@ -361,7 +361,7 @@ pub(crate) mod imp {
         let job = unsafe { CreateJobObjectW(std::ptr::null(), std::ptr::null()) };
         if !job.is_null() {
             // KILL_ON_JOB_CLOSE es lo que hace que esto sobreviva a un cierre que NO pase
-            // por nuestro código: si matan ControlCode desde el Administrador de tareas o
+            // por nuestro código: si matan ADE AGS desde el Administrador de tareas o
             // panica, el kernel cierra igual los handles del proceso muerto, y al cerrarse
             // el último handle del job se lleva a todos sus miembros.
             let mut info: JOBOBJECT_EXTENDED_LIMIT_INFORMATION = unsafe { std::mem::zeroed() };

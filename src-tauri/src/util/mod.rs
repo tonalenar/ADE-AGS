@@ -2,6 +2,7 @@
 
 pub mod external_path;
 pub mod launch;
+pub mod legacy;
 pub mod path_env;
 mod proc;
 mod time;

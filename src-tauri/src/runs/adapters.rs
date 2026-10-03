@@ -168,7 +168,7 @@ fn lock(tally: &Mutex<Tally>) -> std::sync::MutexGuard<'_, Tally> {
 pub struct OpenCode(Mutex<Tally>);
 
 impl OpenCode {
-    /// El servidor de Control Code y los permisos, por `OPENCODE_CONFIG_CONTENT`, que se
+    /// El servidor de ADE AGS y los permisos, por `OPENCODE_CONFIG_CONTENT`, que se
     /// fusiona con la config del usuario (ver `ipc::mcp::opencode_config_content`).
     ///
     /// Sin terminal, lo que OpenCode preguntaría lo rechaza solo (`opencode run`:
@@ -364,7 +364,7 @@ impl HeadlessAgent for Codex {
             let config = std::fs::read(path)
                 .ok()
                 .and_then(|bytes| serde_json::from_slice::<Value>(&bytes).ok());
-            let server = config.as_ref().and_then(|v| v.pointer("/mcpServers/controlcode"));
+            let server = config.as_ref().and_then(|v| v.pointer("/mcpServers/ags"));
             let command = server.and_then(|v| v.get("command")).and_then(Value::as_str);
             let server_args = server.and_then(|v| v.get("args")).and_then(Value::as_array);
             if let (Some(command), Some(server_args)) = (command, server_args)
@@ -372,7 +372,7 @@ impl HeadlessAgent for Codex {
                 && server_args.iter().all(Value::is_string)
             {
                 let tools: Vec<&str> = ctx.allowed_tools.iter()
-                    .filter_map(|name| name.strip_prefix("mcp__controlcode__"))
+                    .filter_map(|name| name.strip_prefix("mcp__ags__"))
                     .collect();
                 for (key, value) in [
                     ("command", serde_json::to_string(command).unwrap()),
@@ -381,7 +381,7 @@ impl HeadlessAgent for Codex {
                     ("enabled", "true".into()),
                     ("required", "true".into()),
                 ] {
-                    args.extend(["-c".into(), format!("mcp_servers.controlcode.{key}={value}")]);
+                    args.extend(["-c".into(), format!("mcp_servers.ags.{key}={value}")]);
                 }
             } else {
                 // A broken task config must fail before inference, not silently lose MCP.
@@ -399,7 +399,7 @@ impl HeadlessAgent for Codex {
         // El único además de Claude Code que hace cumplir un schema, y lo lee de un archivo.
         let schema_file = ctx.json_schema.as_ref().and_then(|schema| {
             let path =
-                std::env::temp_dir().join(format!("controlcode-schema-{}.json", ctx.session_id));
+                std::env::temp_dir().join(format!("ade-ags-schema-{}.json", ctx.session_id));
             std::fs::write(&path, schema).ok().map(|_| path)
         });
         if let Some(path) = &schema_file {

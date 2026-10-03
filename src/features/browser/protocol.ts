@@ -8,9 +8,9 @@
  */
 
 /** Firma de los mensajes que manda la página. Cualquier otro `postMessage` se ignora. */
-export type PageSource = "controlcode-preview";
+export type PageSource = "ags-preview";
 /** Firma de los mensajes que manda la app. */
-export type AppSource = "controlcode";
+export type AppSource = "ade-ags";
 
 export interface PickedComponent {
   framework: "React" | "Vue" | "Svelte";
@@ -212,5 +212,5 @@ export interface PageNetworkEntry {
 
 export function isPageMessage(data: unknown): data is PageMessage {
   return typeof data === "object" && data !== null
-    && (data as { source?: unknown }).source === ("controlcode-preview" satisfies PageSource);
+    && (data as { source?: unknown }).source === ("ags-preview" satisfies PageSource);
 }

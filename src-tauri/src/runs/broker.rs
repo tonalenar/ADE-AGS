@@ -16,7 +16,7 @@
 //! ## Por qué bloquea
 //!
 //! Mientras la app está abierta, se espera: que una persona decida ES el punto. El que
-//! espera es el `ccode mcp` del agente, no la app — acá solo queda una entrada en la cola
+//! espera es el `ags mcp` del agente, no la app — acá solo queda una entrada en la cola
 //! y un `Condvar` al que se le avisa cuando hay decisión. Es el mismo patrón que
 //! `orchestrator::watch::wait`, que ya hace long-polling para la CLI.
 

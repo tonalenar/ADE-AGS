@@ -446,7 +446,7 @@ fn contra_una_captura_cruda_en_disco() {
 #[test]
 fn la_carpeta_se_anota_como_la_anota_claude_code_en_windows() {
     use super::trust::project_key;
-    assert_eq!(project_key("C:\\Users\\ana\\.controlcode\\usage-probe"), "C:/Users/ana/.controlcode/usage-probe");
+    assert_eq!(project_key("C:\\Users\\ana\\.ags\\usage-probe"), "C:/Users/ana/.ags/usage-probe");
     assert_eq!(project_key("C:/Users/ana/x"), "C:/Users/ana/x", "ya normalizada");
     assert_eq!(project_key("\\\\server\\share\\p"), "//server/share/p", "una ruta de red");
     // Una ruta de Unix puede tener una barra invertida legítima en el nombre: no se toca.
@@ -456,12 +456,12 @@ fn la_carpeta_se_anota_como_la_anota_claude_code_en_windows() {
 #[test]
 fn con_la_ruta_de_windows_se_escribe_la_forma_que_la_tui_busca() {
     let config = serde_json::json!({ "projects": {} });
-    let next = with_trusted(&config, "C:\\Users\\ana\\.controlcode\\usage-probe").expect("hay que escribirla");
-    let entry = &next["projects"]["C:/Users/ana/.controlcode/usage-probe"];
+    let next = with_trusted(&config, "C:\\Users\\ana\\.ags\\usage-probe").expect("hay que escribirla");
+    let entry = &next["projects"]["C:/Users/ana/.ags/usage-probe"];
     assert_eq!(entry["hasTrustDialogAccepted"], true);
-    assert!(next["projects"].get("C:\\Users\\ana\\.controlcode\\usage-probe").is_none(), "no la forma con barras invertidas");
+    assert!(next["projects"].get("C:\\Users\\ana\\.ags\\usage-probe").is_none(), "no la forma con barras invertidas");
     // Y si ya está con la forma buena, no se vuelve a escribir.
-    assert!(with_trusted(&next, "C:\\Users\\ana\\.controlcode\\usage-probe").is_none());
+    assert!(with_trusted(&next, "C:\\Users\\ana\\.ags\\usage-probe").is_none());
 }
 
 // ── La carpeta del sondeo ────────────────────────────────────────

@@ -24,7 +24,7 @@ use std::sync::Mutex;
 
 /// Donde la página pide borrar una cookie: con `HttpOnly` no la puede tocar desde
 /// JavaScript, y las cookies las guarda el proxy (ver `site.rs`).
-pub(crate) const COOKIE_CLEAR_PATH: &str = "/__controlcode__/cookies/clear";
+pub(crate) const COOKIE_CLEAR_PATH: &str = "/__ags__/cookies/clear";
 
 /// Cuántos pedidos se recuerdan. Un servidor de desarrollo sirve cientos de módulos por
 /// carga; esto alcanza para varias recargas sin crecer sin techo.

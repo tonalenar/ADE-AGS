@@ -296,12 +296,12 @@ fn shell_running(script: String) -> CommandBuilder {
     cmd
 }
 
-/// El PATH de la app con la carpeta de su propio ejecutable al final, para que `ccode` (que
+/// El PATH de la app con la carpeta de su propio ejecutable al final, para que `ags` (que
 /// viaja al lado) se encuentre en cualquier terminal de agente aunque no se haya instalado el CLI.
-/// Al final, así nunca pisa un `ccode` ya instalado. `None` si no hay nada que agregar.
+/// Al final, así nunca pisa un `ags` ya instalado. `None` si no hay nada que agregar.
 fn path_with_app_dir(current: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
     let dir = std::env::current_exe().ok()?.parent()?.to_path_buf();
-    if !dir.join(if cfg!(windows) { "ccode.exe" } else { "ccode" }).is_file() {
+    if !dir.join(if cfg!(windows) { "ags.exe" } else { "ags" }).is_file() {
         return None;
     }
     let mut dirs: Vec<std::path::PathBuf> = std::env::split_paths(current).collect();
@@ -313,7 +313,7 @@ fn path_with_app_dir(current: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
 }
 
 /// Codex corre los comandos de su agente en un sandbox que descarta las variables de entorno
-/// que no conoce, `ADE_TAB_ID` incluida: sin ella `ccode peers` no sabe quién pregunta. La
+/// que no conoce, `ADE_TAB_ID` incluida: sin ella `ags peers` no sabe quién pregunta. La
 /// config de Codex tiene `shell_environment_policy.set`, que SÍ llega al shell del sandbox;
 /// se la pasa con `-c` al lanzar. Solo si el programa es `codex` y la tab tiene id. Pura.
 pub(super) fn with_codex_tab_id(command: &str, tab_id: Option<&str>) -> String {

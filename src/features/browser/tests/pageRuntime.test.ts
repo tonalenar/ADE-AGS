@@ -104,7 +104,7 @@ describe("callerOf", () => {
   it("entiende el stack de V8 y salta el propio runtime", () => {
     const stack = [
       "Error",
-      "    at con.<computed> (http://127.0.0.1:40111/__controlcode__/picker.js:1:2000)",
+      "    at con.<computed> (http://127.0.0.1:40111/__ags__/picker.js:1:2000)",
       "    at onSubmit (http://127.0.0.1:40111/src/Login.tsx?t=1712:42:9)",
       "    at HTMLUnknownElement.callCallback (http://127.0.0.1:40111/node_modules/.vite/deps/react-dom.js:3:1)",
     ].join("\n");
@@ -113,7 +113,7 @@ describe("callerOf", () => {
 
   it("entiende el stack de WebKit", () => {
     const stack = [
-      "@http://127.0.0.1:40111/__controlcode__/picker.js:1:2000",
+      "@http://127.0.0.1:40111/__ags__/picker.js:1:2000",
       "onSubmit@http://127.0.0.1:40111/src/Login.tsx:42:9",
     ].join("\n");
     expect(callerOf(stack)).toBe("/src/Login.tsx:42:9");

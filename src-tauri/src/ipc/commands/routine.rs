@@ -1,4 +1,4 @@
-//! Rotinas: `ccode routines | routine create|show|edit|enable|disable|run|delete`, e o
+//! Rotinas: `ags routines | routine create|show|edit|enable|disable|run|delete`, e o
 //! agendador que as dispara (ver `crate::routines` para o modelo e as decisões).
 //!
 //! ## Quem pode o quê
@@ -264,7 +264,7 @@ pub(super) fn routine_create(app: &AppHandle, args: &Value) -> Result<Value, Str
     let now = Local::now();
     let created = routines::update(|all| {
         if all.len() >= routines::MAX_ROUTINES {
-            return Err(format!("Já há {} rotinas, o máximo. Apague alguma com `ccode routine delete`.", routines::MAX_ROUTINES));
+            return Err(format!("Já há {} rotinas, o máximo. Apague alguma com `ags routine delete`.", routines::MAX_ROUTINES));
         }
         if all.iter().any(|r| r.name.to_lowercase() == name.to_lowercase()) {
             return Err(format!("Já existe uma rotina chamada '{name}'."));

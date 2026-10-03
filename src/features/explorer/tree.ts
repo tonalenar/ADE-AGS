@@ -20,7 +20,7 @@ function sep(path: string): string {
  * Ruta relativa al root del repo, en el formato que usa git (siempre con `/`).
  *
  * Devuelve `null` si la ruta cae fuera del root: un symlink de skill puede apuntar a
- * `~/.controlcode`, y marcarlo con el estado de un archivo homónimo del proyecto sería
+ * `~/.ags`, y marcarlo con el estado de un archivo homónimo del proyecto sería
  * peor que no marcarlo.
  */
 export function relativeTo(root: string, path: string): string | null {

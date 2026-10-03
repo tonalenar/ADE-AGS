@@ -28,7 +28,7 @@ struct GhTreeEntry {
 
 fn gh_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .user_agent("ControlCode-App")
+        .user_agent("ADE-AGS-App")
         .build()
         .map_err(|e| e.to_string())
 }
@@ -280,7 +280,7 @@ pub(super) async fn install_from_github(
     let client = gh_client()?;
     let branch = resolve_branch(&client, &owner, &repo, branch_opt).await?;
 
-    let tmp_root = std::env::temp_dir().join(format!("controlcode-marketplace-{}", Uuid::new_v4()));
+    let tmp_root = std::env::temp_dir().join(format!("ade-ags-marketplace-{}", Uuid::new_v4()));
     let install_result = async {
         let folder_prefix = format!("{}/", entry.folder_path);
         for file_path in &entry.files {

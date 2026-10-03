@@ -1,7 +1,7 @@
 //! Lo que atiende la app cuando un agente orquesta: ver el roster, declarar un plan,
 //! seguirlo, leer resultados y compartir hechos.
 //!
-//! Lo pide `ccode mcp` —el de una tarea de la flota o el de una tab— y todo vuelve como
+//! Lo pide `ags mcp` —el de una tarea de la flota o el de una tab— y todo vuelve como
 //! TEXTO para un modelo. Una tarea solo ve y toca su propio run: el `run_id` que acepten
 //! las tools es para una tab, que no tiene uno.
 
@@ -56,7 +56,7 @@ fn caller(conn: &Connection, payload: &Value) -> Result<Caller, String> {
         .and_then(Value::as_str)
         .ok_or("falta quién pide (taskId o cwd)")?;
     let workspace_id = store::workspace_of_folder(conn, cwd).ok_or_else(|| {
-        format!("{cwd} no está abierta en ningún workspace de Control Code: abrila en una tab para orquestar desde ahí")
+        format!("{cwd} no está abierta en ningún workspace de ADE AGS: abrila en una tab para orquestar desde ahí")
     })?;
     Ok(Caller {
         task: None,
@@ -201,7 +201,7 @@ pub fn roster_text(db: &DbConnection) -> Result<String, String> {
 pub fn format_roster(roster: &roster::Roster, tiers: &routing::Tiers, now: i64) -> String {
     const MAX_MODELS: usize = 12;
     let mut out =
-        String::from("Agents (use `complexity` and let Control Code pick, or name agent+model):\n");
+        String::from("Agents (use `complexity` and let ADE AGS pick, or name agent+model):\n");
     for agent in &roster.agents {
         if !agent.installed {
             continue;

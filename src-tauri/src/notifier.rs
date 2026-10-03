@@ -122,7 +122,7 @@ fn mission_status(db: &DbConnection, id: &str) -> Option<(String, String)> {
     conn.query_row("SELECT status, title FROM missions WHERE id = ?1", [id], |r| Ok((r.get(0)?, r.get(1)?))).ok()
 }
 
-/// Un aviso que pide un agente o una rotina (`ccode notify`, un recordatorio): el mismo
+/// Un aviso que pide un agente o una rotina (`ags notify`, un recordatorio): el mismo
 /// aviso del sistema que usan las misiones, con las mismas reglas — solo si ninguna ventana
 /// tiene el foco y no se apagó en la configuración. Devuelve si se mostró.
 pub fn show_custom(app: &AppHandle, title: &str, body: &str) -> bool {

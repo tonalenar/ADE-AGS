@@ -155,7 +155,7 @@ pub fn explorer_write_file(
 /// temporal hereda los permisos del original, o un script ejecutable dejaría de serlo.
 fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), String> {
     let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
-    let tmp = path.with_file_name(format!(".{name}.controlcode-{}.tmp", std::process::id()));
+    let tmp = path.with_file_name(format!(".{name}.ags-{}.tmp", std::process::id()));
     std::fs::write(&tmp, bytes).map_err(|e| format!("no se pudo escribir {}: {e}", tmp.display()))?;
 
     if let Ok(meta) = std::fs::metadata(path) {

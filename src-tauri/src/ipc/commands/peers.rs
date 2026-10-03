@@ -1,4 +1,4 @@
-//! Conversar con los agentes conectados en el canvas: `ccode peer list|ask|tell|check`.
+//! Conversar con los agentes conectados en el canvas: `ags peer list|ask|tell|check`.
 //!
 //! Es la misma maquinaria que `tab send` / `tab output` con dos diferencias:
 //!
@@ -129,7 +129,7 @@ pub(crate) fn framed(from_name: &str, text: &str, expects_reply: bool) -> String
     let how = if expects_reply {
         "Responda normalmente; sua resposta volta para quem perguntou quando você terminar.".to_string()
     } else {
-        format!("Para responder, use: ccode peer tell \"{from_name}\" \"<mensagem>\"")
+        format!("Para responder, use: ags peer tell \"{from_name}\" \"<mensagem>\"")
     };
     format!("[Mensagem de {from_name} via ADE AGS] {text}\n({how})")
 }
@@ -218,7 +218,7 @@ pub(super) fn peer_disconnect(app: &AppHandle, args: &Value) -> Result<Value, St
 /// de ella en el canvas, la conecta y, si hay `--prompt`, le da la primera tarea.
 ///
 /// La tarea va DESPUÉS de conectar: el agente nuevo tiene que poder contestar con
-/// `ccode peer tell` desde su primer turno.
+/// `ags peer tell` desde su primer turno.
 pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let me = orchestrator(app, args)?;
     let name = arg_str(args, "name")?;
@@ -548,6 +548,6 @@ mod test {
         let ask = framed("Líder", "rodar os testes", true);
         assert!(ask.starts_with("[Mensagem de Líder via ADE AGS] rodar os testes"));
         let tell = framed("Líder", "pronto", false);
-        assert!(tell.contains("ccode peer tell \"Líder\""));
+        assert!(tell.contains("ags peer tell \"Líder\""));
     }
 }

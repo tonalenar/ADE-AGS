@@ -32,7 +32,7 @@ pub struct LaunchCtx<'a> {
     pub mcp_config: Option<std::path::PathBuf>,
     /// Reglas del entorno que no son parte del pedido: qué es un run, cómo repartir.
     pub system_prompt: Option<String>,
-    /// Tools del servidor de Control Code permitidas sin preguntar, además del navegador.
+    /// Tools del servidor de ADE AGS permitidas sin preguntar, además del navegador.
     pub allowed_tools: Vec<String>,
     /// JSON Schema que la CLI hace cumplir al resultado.
     pub json_schema: Option<String>,

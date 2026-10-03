@@ -34,7 +34,7 @@ export class PageChannel {
           + "¿Sigue cargando, o navegó a un sitio que no pasa por el proxy?"));
       }, timeoutMs);
       this.pending.set(id, { op: command.op, resolve, reject, timer });
-      target.window!.postMessage({ source: "controlcode", type: "page:run", id, command } satisfies AppMessage, target.origin);
+      target.window!.postMessage({ source: "ade-ags", type: "page:run", id, command } satisfies AppMessage, target.origin);
     });
   }
 

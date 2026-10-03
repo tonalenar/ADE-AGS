@@ -1,4 +1,4 @@
-/** Instalación de la CLI `ccode` en el PATH del usuario. Ver `ipc/install.rs`. */
+/** Instalación de la CLI `ags` en el PATH del usuario. Ver `ipc/install.rs`. */
 import { invoke } from "@tauri-apps/api/core";
 
 export interface CliInstallStatus {

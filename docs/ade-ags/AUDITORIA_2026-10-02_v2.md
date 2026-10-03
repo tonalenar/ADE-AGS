@@ -31,7 +31,7 @@ Saúde da ponta `feat/agent-sandbox`: `tsc` 0 erros, vitest 588/588, `cargo test
 | 9 | Falhas classificadas + failover + quota Codex | ✅ #7, #8 |
 | 10 | Ledger de uso/custo | ✅ #9. **Pools de contas com estratégia: falta** |
 | 11 | Lazy, chunks, índices | ✅ #5, #14 |
-| 12 | Rebrand + updater + CI | ⚠️ Updater e CI ok. **Identifier ainda `com.luis.controlcode`, dados em `~/.controlcode`** (20 arquivos Rust) |
+| 12 | Rebrand + updater + CI | ⚠️ Updater e CI ok. **Identifier ainda `com.luis.controlcode`, dados em `~/.ags`** (20 arquivos Rust) |
 | 13 | Revisão de diff + worktree por missão | ✅ #11 |
 | 14 | Event bus + Map Mode | ✅ #12 |
 | — | S6 regras de permissão | ✅ #13 |
@@ -65,12 +65,12 @@ Saúde da ponta `feat/agent-sandbox`: `tsc` 0 erros, vitest 588/588, `cargo test
 
 ## 4. Canvas: ADE AGS vs Maestri
 
-O que já existe (#15, #18): terminais de agente como nós num canvas por pasta, conexões entre eles, orquestradores com alcance sobre o time, e o CLI `ccode peers | peer ask | tell | check | recruit | connect | disconnect`.
+O que já existe (#15, #18): terminais de agente como nós num canvas por pasta, conexões entre eles, orquestradores com alcance sobre o time, e o CLI `ags peers | peer ask | tell | check | recruit | connect | disconnect`.
 
 | Recurso do Maestri | ADE AGS hoje | Lacuna |
 |---|---|---|
 | Nós de terminal/agente + conexões | ✅ | — |
-| `ask` / `check` / recruit / connect | ✅ `ccode peer …` | — |
+| `ask` / `check` / recruit / connect | ✅ `ags peer …` | — |
 | `ask --batch` (vários agentes em paralelo) | ❌ | Pequena |
 | `ask --raw` (teclas, Ctrl-C, menus) | ❌ | Pequena |
 | **Notas no canvas** (create/read/write/edit, ligadas ao terminal) | ❌ | **Grande: núcleo do Maestri** |
@@ -87,10 +87,10 @@ O que já existe (#15, #18): terminais de agente como nós num canvas por pasta,
 
 ## 5. Ordem proposta para o canvas
 
-1. **Notas no canvas** + `ccode note create|read|write|edit|list` (ligação nota↔terminal pelas mesmas conexões). Base para todo o resto.
-2. `peer ask --batch`, `peer ask --raw`, `ccode notify`.
-3. **Portal no canvas**: BrowserTab como nó + `ccode portal navigate|snapshot|click|fill|type|key|screenshot`, reaproveitando as tools de browser já existentes.
-4. Roles e presets no canvas (`ccode role list|create|edit`, `peer recruit --role`).
+1. **Notas no canvas** + `ags note create|read|write|edit|list` (ligação nota↔terminal pelas mesmas conexões). Base para todo o resto.
+2. `peer ask --batch`, `peer ask --raw`, `ags notify`.
+3. **Portal no canvas**: BrowserTab como nó + `ags portal navigate|snapshot|click|fill|type|key|screenshot`, reaproveitando as tools de browser já existentes.
+4. Roles e presets no canvas (`ags role list|create|edit`, `peer recruit --role`).
 5. Fichários.
 6. Floors (worktree isolada por nível, reaproveitando `runs/worktrees.rs`).
 7. Routines.

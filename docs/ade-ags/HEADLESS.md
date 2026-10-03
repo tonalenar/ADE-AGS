@@ -1,18 +1,18 @@
 # Modo headless (CI e scripts)
 
-`controlcode --headless` sobe a app sem mostrar janelas:
+`ade-ags --headless` sobe a app sem mostrar janelas:
 
 - não restaura o workspace nem as abas, então nenhum agente interativo é lançado;
 - a janela principal fica criada e oculta;
 - IPC, agendador, event bus e notificações continuam rodando.
 
-Tudo se controla pela CLI `ccode`.
+Tudo se controla pela CLI `ags`.
 
 ## Rodar uma missão
 
 ```bash
-controlcode --headless &
-ccode mission run --objective "Corrigir os testes de src/parser" --cwd . --wait --timeout 3600
+ade-ags --headless &
+ags mission run --objective "Corrigir os testes de src/parser" --cwd . --wait --timeout 3600
 ```
 
 O `mission run` cria a missão, inicia e espera. A saída é uma linha JSON com o status e as tarefas, e o código de saída diz o resultado:
@@ -34,14 +34,14 @@ Opções:
 | `--budget` | Orçamento em US$ |
 | `--max-parallel` | Tarefas simultâneas |
 
-Também dá para fazer passo a passo: `ccode mission create|start|status|wait <id>`.
+Também dá para fazer passo a passo: `ags mission create|start|status|wait <id>`.
 
 ## Revisar e aplicar
 
 ```bash
-ccode mission review <id>          # o que cada tarefa isolada entregou
-ccode mission accept <id> <tarefa> # junta no worktree de integração
-ccode mission apply <id>           # um merge da integração no projeto
+ags mission review <id>          # o que cada tarefa isolada entregou
+ags mission accept <id> <tarefa> # junta no worktree de integração
+ags mission apply <id>           # um merge da integração no projeto
 ```
 
 Um conflito sempre é abortado e devolvido com a lista de arquivos (código 1).
@@ -54,29 +54,29 @@ Sem interface, um pedido de permissão espera e, ao vencer, é negado. Há duas 
 - **Responder pela CLI:**
 
   ```bash
-  ccode approval list
-  ccode approval decide <id> --allow [--remember]
+  ags approval list
+  ags approval decide <id> --allow [--remember]
   ```
 
 ## Acompanhar
 
 ```bash
-ccode events wait --after 0 --topics task.,mission. --timeout 60
+ags events wait --after 0 --topics task.,mission. --timeout 60
 ```
 
 ## Cuidados
 
-- **Uma instância por máquina e usuário.** O headless usa o mesmo `~/.controlcode/data.db` que a app. Com outra instância viva, a nova não limpa as tarefas "rodando", porque são da outra. Mesmo assim, rodar duas instâncias sobre o mesmo banco não é o caso de uso: em CI o runner tem o próprio home.
-- **Linux:** o webview oculto ainda precisa de um display. Use `xvfb-run controlcode --headless`.
+- **Uma instância por máquina e usuário.** O headless usa o mesmo `~/.ags/data.db` que a app. Com outra instância viva, a nova não limpa as tarefas "rodando", porque são da outra. Mesmo assim, rodar duas instâncias sobre o mesmo banco não é o caso de uso: em CI o runner tem o próprio home.
+- **Linux:** o webview oculto ainda precisa de um display. Use `xvfb-run ade-ags --headless`.
 - **Contas:** as CLIs dos agentes precisam estar instaladas e logadas no runner. Uma conta por API key (Claude Code ou Codex) é o mais simples em CI.
-- **`ccode`:** precisa encontrar o handshake. Com várias instâncias, aponte `CONTROLCODE_HANDSHAKE=~/.controlcode/ipc/<pid>.json`.
+- **`ags`:** precisa encontrar o handshake. Com várias instâncias, aponte `AGS_HANDSHAKE=~/.ags/ipc/<pid>.json`.
 
 ## Exemplo: GitHub Actions (Linux)
 
 ```yaml
 - run: sudo apt-get install -y xvfb
-- run: xvfb-run -a controlcode --headless &
-- run: sleep 5 && ccode mission run --objective "${{ inputs.objective }}" --cwd . --wait --timeout 3600
+- run: xvfb-run -a ade-ags --headless &
+- run: sleep 5 && ags mission run --objective "${{ inputs.objective }}" --cwd . --wait --timeout 3600
   env:
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
 ```

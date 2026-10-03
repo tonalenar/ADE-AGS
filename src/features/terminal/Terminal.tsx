@@ -447,7 +447,7 @@ export function Terminal({
             browser.env,
             accountEnv,
             env,
-            // Quién es esta terminal. `ccode peer ...` lo reenvía como `from`, y es contra
+            // Quién es esta terminal. `ags peer ...` lo reenvía como `from`, y es contra
             // eso que el backend compara las conexiones del canvas.
             tabId ? { ADE_TAB_ID: tabId } : undefined
           ),

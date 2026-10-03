@@ -1,6 +1,6 @@
 //! Skills que vienen con la app y se instalan solas al arrancar.
 //!
-//! Hoy es una sola: `controlcode-orchestrator`, la que le enseña a un agente externo a
+//! Hoy es una sola: `ags-orchestrator`, la que le enseña a un agente externo a
 //! manejar la app por la CLI. Tenerla en el repo y pedirle al usuario que la instale a
 //! mano desde el Marketplace no tenía sentido: es *nuestra*, la versión correcta es
 //! siempre la que trae el binario que está corriendo, y sin ella el modo orquestador
@@ -29,14 +29,14 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 /// Carpetas dentro de `skills/` del repo que se empaquetan con la app.
-pub(super) const BUNDLED: &[&str] = &["controlcode-orchestrator"];
+pub(super) const BUNDLED: &[&str] = &["ags-orchestrator"];
 
-/// Se guarda como si viniera de un repositorio llamado "Control Code": le da su propio
+/// Se guarda como si viniera de un repositorio llamado "ADE AGS": le da su propio
 /// bucket en el store (no se mezcla con las que el usuario instaló a mano) y hace que la
 /// UI muestre de dónde salió. No hay ninguna fila en `registries` con este id, y no hace
 /// falta: la columna está desnormalizada justamente para eso.
-const ORIGIN_ID: &str = "controlcode-builtin";
-const ORIGIN_NAME: &str = "Control Code";
+const ORIGIN_ID: &str = "ags-builtin";
+const ORIGIN_NAME: &str = "ADE AGS";
 
 /// Clave en `settings` con lo ya aprovisionado: `{ "<carpeta>": { version, path } }`.
 const PROVISIONED_KEY: &str = "bundled_skills";
@@ -86,7 +86,7 @@ pub fn ensure_bundled_skills(app: &AppHandle, db: &DbConnection) {
             None => Err("no se encontró la carpeta empaquetada".to_string()),
         };
         if let Err(e) = result {
-            eprintln!("[controlcode] no se pudo preparar la skill incluida '{name}': {e}");
+            eprintln!("[ade-ags] no se pudo preparar la skill incluida '{name}': {e}");
         }
     }
 }
@@ -114,7 +114,7 @@ pub(super) fn ensure_one(db: &DbConnection, name: &str, source: &Path) -> Result
             update_in_place(db, &id, source, &dest, &meta, &version)?;
             provisioned.entry(name.to_string()).and_modify(|e| e.version = version.clone());
             write_provisioned(db, &provisioned)?;
-            eprintln!("[controlcode] skill incluida '{name}' actualizada {old_version} → {version}");
+            eprintln!("[ade-ags] skill incluida '{name}' actualizada {old_version} → {version}");
         }
 
         Action::Install => {
@@ -135,7 +135,7 @@ pub(super) fn ensure_one(db: &DbConnection, name: &str, source: &Path) -> Result
                 Provisioned { version: version.clone(), path: info.source_path },
             );
             write_provisioned(db, &provisioned)?;
-            eprintln!("[controlcode] skill incluida '{name}' instalada (v{version})");
+            eprintln!("[ade-ags] skill incluida '{name}' instalada (v{version})");
         }
     }
 
@@ -227,4 +227,100 @@ fn read_provisioned(db: &DbConnection) -> ProvisionedMap {
 fn write_provisioned(db: &DbConnection, map: &ProvisionedMap) -> Result<(), String> {
     let json = serde_json::to_string(map).map_err(|e| e.to_string())?;
     crate::database::set_setting(db, PROVISIONED_KEY, &json)
+}
+
+// ── Migración desde el nombre anterior ──────────────────────────────
+
+/// El nombre de la skill incluida antes del cambio de nombre del producto.
+const LEGACY_NAME: &str = "controlcode-orchestrator";
+
+/// `<...>/skills/control-code/controlcode-orchestrator` → `<...>/skills/ade-ags/ags-orchestrator`. Pura.
+pub(super) fn migrated_skill_path(old: &str) -> String {
+    let moved = old.replace(".controlcode", ".ags");
+    let backslash = char::from(92);
+    let sep = if moved.contains(backslash) { backslash } else { '/' };
+    let mut parts: Vec<&str> = moved.split(sep).collect();
+    if parts.len() >= 2 {
+        let n = parts.len();
+        parts[n - 1] = "ags-orchestrator";
+        parts[n - 2] = "ade-ags";
+    }
+    parts.join(&sep.to_string())
+}
+
+/// Lleva a la base y al disco lo que se creó con el nombre anterior. Se llama al arrancar,
+/// ANTES de aprovisionar las skills incluidas. Idempotente y sin poder impedir el arranque.
+///
+/// - Las rutas absolutas guardadas con `.controlcode` pasan a `.ags` (la carpeta de datos se
+///   renombró; ver `util::legacy`).
+/// - La skill `controlcode-orchestrator` se RENOMBRA en el lugar (no se borra y reinstala):
+///   los vínculos con proyectos y pestañas cuelgan de su id y se perderían.
+pub fn migrate_legacy_skill(db: &DbConnection) {
+    if let Err(e) = migrate_legacy_skill_inner(db) {
+        eprintln!("[ags] no se pudo migrar la skill del nombre anterior: {e}");
+    }
+}
+
+fn migrate_legacy_skill_inner(db: &DbConnection) -> Result<(), String> {
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE settings SET value = replace(value, '.controlcode', '.ags') WHERE key = 'skills_dir' AND value LIKE '%.controlcode%'",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE skills SET source_path = replace(source_path, '.controlcode', '.ags') WHERE source_path LIKE '%.controlcode%'",
+            [],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    let mut provisioned = read_provisioned(db);
+    let Some(old) = provisioned.remove(LEGACY_NAME) else {
+        return Ok(());
+    };
+    let old_path = old.path.replace(".controlcode", ".ags");
+    let new_path = migrated_skill_path(&old.path);
+
+    // La carpeta primero: si no se puede mover, la fila sigue apuntando a donde está.
+    if old_path != new_path && Path::new(&old_path).is_dir() {
+        if let Some(parent) = Path::new(&new_path).parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        if !Path::new(&new_path).exists() {
+            std::fs::rename(&old_path, &new_path).map_err(|e| e.to_string())?;
+        }
+    }
+    let final_path = if Path::new(&new_path).is_dir() { new_path } else { old_path.clone() };
+
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE skills SET name = ?1, source_path = ?2, registry_id = ?3, registry_name = ?4, origin_skill_id = ?1
+              WHERE source_path = ?5",
+            rusqlite::params!["ags-orchestrator", final_path, ORIGIN_ID, ORIGIN_NAME, old_path],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    provisioned.insert("ags-orchestrator".to_string(), Provisioned { version: old.version, path: final_path });
+    write_provisioned(db, &provisioned)
+}
+
+#[cfg(test)]
+mod legacy_test {
+    use super::*;
+
+    #[test]
+    fn la_ruta_de_la_skill_vieja_pasa_al_nombre_nuevo_en_windows_y_unix() {
+        assert_eq!(
+            migrated_skill_path(r"C:\Users\u\.controlcode\skills\control-code\controlcode-orchestrator"),
+            r"C:\Users\u\.ags\skills\ade-ags\ags-orchestrator"
+        );
+        assert_eq!(
+            migrated_skill_path("/home/u/.controlcode/skills/control-code/controlcode-orchestrator"),
+            "/home/u/.ags/skills/ade-ags/ags-orchestrator"
+        );
+    }
 }

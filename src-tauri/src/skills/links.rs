@@ -120,7 +120,7 @@ pub(super) fn desired_skills_for_link_dir(
 /// está abierto, o de una skill que se detacheó) y crea/repara los que faltan.
 ///
 /// Solo toca symlinks que apuntan dentro del directorio global de skills — o sea, los que
-/// creó Control Code. Un `.claude/skills/<x>` propio del usuario (carpeta real o symlink
+/// creó ADE AGS. Un `.claude/skills/<x>` propio del usuario (carpeta real o symlink
 /// a otro lado) nunca se borra.
 ///
 /// Best-effort por diseño: corre en el arranque de cada tab y en cada cierre de
@@ -152,7 +152,7 @@ pub(crate) fn reconcile_link_dir(
             // En Windows un junction no es `is_symlink`, pero sí es un montaje nuestro.
             let Ok(target) = std::fs::read_link(&path) else { continue };
             if !points_inside(&target, &skills_dir) {
-                continue; // montaje que no gestiona Control Code
+                continue; // montaje que no gestiona ADE AGS
             }
             let name = entry.file_name().to_string_lossy().to_string();
             if !keep.contains(&name) {

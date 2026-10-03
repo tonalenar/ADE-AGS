@@ -1,4 +1,4 @@
-//! Lo que un agente manda por su cuenta desde `ccode mcp`: pedir permiso y orquestar.
+//! Lo que un agente manda por su cuenta desde `ags mcp`: pedir permiso y orquestar.
 //!
 //! No llegan desde una persona escribiendo en una terminal, sino desde el MCP de una tarea
 //! o de una tab. Por eso son los que **bloquean de verdad**: `run.approve` hasta una hora

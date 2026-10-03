@@ -135,7 +135,7 @@ impl From<&str> for ForgeError {
 impl std::fmt::Display for ForgeError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ForgeError::NoAccount(host) => write!(f, "No Control Code git account is signed in for {host}. Ask the user to add one in Accounts → Git."),
+            ForgeError::NoAccount(host) => write!(f, "No ADE AGS git account is signed in for {host}. Ask the user to add one in Accounts → Git."),
             ForgeError::Auth(m) | ForgeError::Unsupported(m) | ForgeError::Api(m) => f.write_str(m),
         }
     }

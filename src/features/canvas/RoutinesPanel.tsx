@@ -27,7 +27,7 @@ export interface Routine {
 
 const DAYS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"];
 
-/** El horario en palabras, como lo dice `ccode routines`. */
+/** El horario en palabras, como lo dice `ags routines`. */
 export function describeSchedule(s: Schedule): string {
   if (s.kind === "once") return "uma vez";
   if (s.kind === "every") {
@@ -46,7 +46,7 @@ function when(unix: number | null): string {
 
 /**
  * Las rotinas, para quien las mira: se prenden, se apagan, se disparan a mano y se borran.
- * Crearlas es de `ccode routine create` (un agente, o el usuario desde un terminal): acá
+ * Crearlas es de `ags routine create` (un agente, o el usuario desde un terminal): acá
  * no hay formulario de horarios, solo lo que hace falta para gobernarlas.
  */
 export function RoutinesPanel({ onClose }: { onClose: () => void }) {

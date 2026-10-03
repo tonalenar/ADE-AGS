@@ -1,4 +1,4 @@
-//! `ccode events since|wait`: el bus de eventos de la ADE desde la CLI (ver `crate::bus`).
+//! `ags events since|wait`: el bus de eventos de la ADE desde la CLI (ver `crate::bus`).
 //!
 //! Un script o un agente lead se pone al día con `since --after <seq>` y después espera lo
 //! siguiente con `wait --after <último seq>`, sin sondear.

@@ -27,7 +27,7 @@ export interface GraphifyTarget {
   /** La versión con la que se escribió la skill que hay ahí. `null` = no hay ninguna, o
    *  la hay pero sin sello. */
   installedVersion: string | null;
-  /** Si es una carpeta donde Control Code también monta skills del proyecto. */
+  /** Si es una carpeta donde ADE AGS también monta skills del proyecto. */
   sharedWithApp: boolean;
 }
 

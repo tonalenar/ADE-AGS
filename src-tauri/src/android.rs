@@ -1,5 +1,5 @@
 //! Android para el canvas: un emulador (o un teléfono por USB) que se ve y se maneja desde un
-//! nodo del canvas, y que los agentes conectados manejan con `ccode device …`.
+//! nodo del canvas, y que los agentes conectados manejan con `ags device …`.
 //!
 //! Todo va por `adb` (y `emulator` para arrancar un AVD): no hay dependencias nuevas. Este
 //! módulo es solo la capa de `adb`: encontrarlo, listar dispositivos, tocar, escribir y leer la

@@ -82,10 +82,10 @@ fn git(dir: &Path, args: &[&str], envs: &[(&str, &str)], limit: Duration) -> Res
     let mut cmd = Command::new("git");
     cmd.arg("-C").arg(external_path(dir)).args(args);
     // Identidad propia: un commit "por fuera" no puede fallar porque la máquina no tenga `user.name`.
-    cmd.env("GIT_AUTHOR_NAME", "Control Code")
-        .env("GIT_AUTHOR_EMAIL", "checkpoint@controlcode.local")
-        .env("GIT_COMMITTER_NAME", "Control Code")
-        .env("GIT_COMMITTER_EMAIL", "checkpoint@controlcode.local");
+    cmd.env("GIT_AUTHOR_NAME", "ADE AGS")
+        .env("GIT_AUTHOR_EMAIL", "checkpoint@ags.local")
+        .env("GIT_COMMITTER_NAME", "ADE AGS")
+        .env("GIT_COMMITTER_EMAIL", "checkpoint@ags.local");
     for (k, v) in envs {
         cmd.env(k, v);
     }

@@ -115,7 +115,7 @@ pub fn add(pty_id: u32, tab_id: &str, idle_secs: u64, limit: usize) -> Result<()
     }
     if map.len() >= limit {
         return Err(format!(
-            "Límite de tabs observadas alcanzado ({limit}). Soltá una con 'ccode watch remove --tab <id>' \
+            "Límite de tabs observadas alcanzado ({limit}). Soltá una con 'ags watch remove --tab <id>' \
              o subí el límite en Ajustes → Orquestador."
         ));
     }

@@ -1,4 +1,4 @@
-//! Los portales del canvas, para los agentes: `ccode portal list|create|<acción> <portal> …`.
+//! Los portales del canvas, para los agentes: `ags portal list|create|<acción> <portal> …`.
 //!
 //! Un portal es un navegador dibujado como nodo del canvas. Un agente conectado a él lo
 //! maneja con las mismas acciones de las tools de navegador (`snapshot`, `click`, `type`…),
@@ -60,7 +60,7 @@ pub(crate) fn resolve_portal<'a>(portals: &'a [Reachable], wanted: &str) -> Resu
     match matches.as_slice() {
         [one] => Ok(one),
         [] if portals.is_empty() => Err(format!(
-            "'{wanted}' não está conectado com você. Você não tem nenhum portal: crie um com `ccode portal create` ou peça ao usuário para ligar um portal ao seu terminal."
+            "'{wanted}' não está conectado com você. Você não tem nenhum portal: crie um com `ags portal create` ou peça ao usuário para ligar um portal ao seu terminal."
         )),
         [] => Err(format!(
             "'{wanted}' não está conectado com você. Portais conectados: {}",
@@ -105,7 +105,7 @@ fn flag(args: &Value, key: &str) -> bool {
 fn need(args: &Value, key: &str, action: &str) -> Result<String, String> {
     arg_str_opt(args, key)
         .filter(|s| !s.is_empty())
-        .ok_or_else(|| format!("`ccode portal {action}` precisa de --{key}."))
+        .ok_or_else(|| format!("`ags portal {action}` precisa de --{key}."))
 }
 
 /// Traduce la acción de la línea de comandos al pedido de navegador que entiende el
@@ -205,7 +205,7 @@ pub(super) fn portal_create(app: &AppHandle, args: &Value) -> Result<Value, Stri
     Ok(json!({ "created": created }))
 }
 
-/// `ccode portal <acción> <portal> …`: lo que el agente le pide a ese navegador.
+/// `ags portal <acción> <portal> …`: lo que el agente le pide a ese navegador.
 pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Result<Value, String> {
     let from = caller(args)?;
     let boards = canvas::load_boards();
@@ -246,7 +246,7 @@ mod test {
     fn un_portal_no_conectado_lista_los_que_si() {
         let err = resolve_portal(&[portal("portal-1", "Docs")], "App").unwrap_err();
         assert!(err.contains("Docs"), "{err}");
-        assert!(resolve_portal(&[], "App").unwrap_err().contains("ccode portal create"));
+        assert!(resolve_portal(&[], "App").unwrap_err().contains("ags portal create"));
     }
 
     #[test]

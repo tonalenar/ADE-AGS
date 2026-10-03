@@ -142,7 +142,7 @@ fn encuentra_por_nombre_o_id_y_el_error_ayuda() {
     assert_eq!(find(&list, "r2").unwrap().name, "Revisão");
     let err = find(&list, "nada").unwrap_err();
     assert!(err.contains("Testes") && err.contains("Revisão"), "{err}");
-    assert!(find(&[], "x").unwrap_err().contains("ccode routine create"));
+    assert!(find(&[], "x").unwrap_err().contains("ags routine create"));
     let dup = vec![routine(Schedule::Every { secs: 600 }, None), routine(Schedule::Every { secs: 600 }, None)];
     assert!(find(&dup, "Testes").unwrap_err().contains("Use o id"));
 }

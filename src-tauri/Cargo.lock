@@ -3,6 +3,55 @@
 version = 4
 
 [[package]]
+name = "ade-ags"
+version = "1.8.7"
+dependencies = [
+ "base64 0.22.1",
+ "block2",
+ "bytes",
+ "cairo-rs",
+ "cc",
+ "chrono",
+ "dirs 5.0.1",
+ "dunce",
+ "futures-util",
+ "http-body-util",
+ "hyper",
+ "hyper-util",
+ "ignore",
+ "keyring",
+ "lazy_static",
+ "libc",
+ "objc2-app-kit",
+ "objc2-foundation",
+ "objc2-web-kit",
+ "portable-pty",
+ "regex",
+ "reqwest 0.12.28",
+ "rusqlite",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "sha2",
+ "symlink",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-dialog",
+ "tauri-plugin-notification",
+ "tauri-plugin-opener",
+ "tauri-plugin-updater",
+ "tokio",
+ "trash",
+ "unicode-normalization",
+ "url",
+ "uuid",
+ "webkit2gtk",
+ "webview2-com",
+ "windows 0.62.2",
+ "windows-sys 0.61.2",
+]
+
+[[package]]
 name = "adler2"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -598,55 +647,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "4ca0197aee26d1ae37445ee532fefce43251d24cc7c166799f4d46817f1d3973"
 dependencies = [
  "crossbeam-utils",
-]
-
-[[package]]
-name = "controlcode"
-version = "1.8.7"
-dependencies = [
- "base64 0.22.1",
- "block2",
- "bytes",
- "cairo-rs",
- "cc",
- "chrono",
- "dirs 5.0.1",
- "dunce",
- "futures-util",
- "http-body-util",
- "hyper",
- "hyper-util",
- "ignore",
- "keyring",
- "lazy_static",
- "libc",
- "objc2-app-kit",
- "objc2-foundation",
- "objc2-web-kit",
- "portable-pty",
- "regex",
- "reqwest 0.12.28",
- "rusqlite",
- "serde",
- "serde_json",
- "serde_yaml",
- "sha2",
- "symlink",
- "tauri",
- "tauri-build",
- "tauri-plugin-dialog",
- "tauri-plugin-notification",
- "tauri-plugin-opener",
- "tauri-plugin-updater",
- "tokio",
- "trash",
- "unicode-normalization",
- "url",
- "uuid",
- "webkit2gtk",
- "webview2-com",
- "windows 0.62.2",
- "windows-sys 0.61.2",
 ]
 
 [[package]]

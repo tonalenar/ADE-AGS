@@ -394,7 +394,7 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
 
          -- Comandos de pre-lanzamiento guardados ('entorno conda' → 'conda activate ml').
          -- Son globales y no por agente: un `conda activate` sirve igual para cualquier
-         -- TUI. El nombre es único porque es lo que `ccode --pre-preset` recibe.
+         -- TUI. El nombre es único porque es lo que `ags --pre-preset` recibe.
          CREATE TABLE IF NOT EXISTS prelaunch_presets (
              id         TEXT PRIMARY KEY,
              name       TEXT NOT NULL UNIQUE,

@@ -11,7 +11,7 @@
  * que nadie ve sería pagar el doble por cada click de un agente que corre solo.
  */
 
-const MARK = "data-controlcode-agent";
+const MARK = "data-ade-ags-agent";
 /** Uno menos que el selector de elementos: si los dos están, el del usuario va arriba. */
 const LAYER = "2147483646";
 

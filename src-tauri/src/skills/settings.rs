@@ -16,7 +16,7 @@ pub(super) fn resolve_skills_dir(db: &DbConnection) -> Result<PathBuf, String> {
 /// reconciliación de symlinks corre en medio de operaciones que ya tienen el lock de la
 /// DB tomado (attach/detach, cierre de tabs/ventanas), y volver a lockear ahí sería un
 /// deadlock. No crea el directorio: acá solo se usa para decidir si un symlink existente
-/// apunta a la copia global (o sea, si lo gestiona Control Code) o es del usuario.
+/// apunta a la copia global (o sea, si lo gestiona ADE AGS) o es del usuario.
 pub(crate) fn skills_dir_from_conn(conn: &rusqlite::Connection) -> Result<PathBuf, String> {
     let value: Option<String> = conn
         .query_row("SELECT value FROM settings WHERE key = 'skills_dir'", [], |r| r.get(0))
@@ -30,7 +30,7 @@ pub(super) fn skills_dir_from_value(value: Option<String>) -> Result<PathBuf, St
         Some(v) => Ok(PathBuf::from(v)),
         None => {
             let home = dirs::home_dir().ok_or("Cannot determine home directory")?;
-            Ok(home.join(".controlcode").join("skills"))
+            Ok(home.join(".ags").join("skills"))
         }
     }
 }

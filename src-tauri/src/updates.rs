@@ -15,7 +15,7 @@ use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Emitter, Runtime};
 
-/// Este fork, no el ControlCode original: con el repo de arriba la ADE ofrecía instalar el
+/// Este fork, no el ADE AGS original: con el repo de arriba la ADE ofrecía instalar el
 /// binario del upstream, que comparte identificador y carpeta de datos con ella y abriría
 /// una base con un schema que no conoce.
 const REPO: &str = "tonalenar/ADE-AGS";
@@ -92,7 +92,7 @@ pub(crate) fn asset_matches(name: &str, os: &str, arch: &str, bundle: Option<&st
 
 fn http() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .user_agent("ControlCode-App")
+        .user_agent("ADE AGS-App")
         .timeout(std::time::Duration::from_secs(20))
         .build()
         .map_err(|e| e.to_string())
@@ -193,20 +193,20 @@ mod test {
     #[test]
     fn cada_sistema_elige_su_instalador() {
         let names = [
-            "controlcode-1.7.3-1.aarch64.rpm", "controlcode-1.7.3-1.x86_64.rpm", "controlcode_1.7.3_aarch64.AppImage",
-            "controlcode_1.7.3_aarch64.dmg", "controlcode_1.7.3_amd64.AppImage", "controlcode_1.7.3_amd64.deb",
-            "controlcode_1.7.3_arm64-setup.exe", "controlcode_1.7.3_arm64.deb", "controlcode_1.7.3_x64-setup.exe",
-            "controlcode_1.7.3_x64.dmg", "controlcode_1.7.3_x64_en-US.msi",
+            "ade-ags-1.7.3-1.aarch64.rpm", "ade-ags-1.7.3-1.x86_64.rpm", "ags_1.7.3_aarch64.AppImage",
+            "ags_1.7.3_aarch64.dmg", "ags_1.7.3_amd64.AppImage", "ags_1.7.3_amd64.deb",
+            "ags_1.7.3_arm64-setup.exe", "ags_1.7.3_arm64.deb", "ags_1.7.3_x64-setup.exe",
+            "ags_1.7.3_x64.dmg", "ags_1.7.3_x64_en-US.msi",
         ];
         let pick = |os: &str, arch: &str, bundle: Option<&str>| {
             names.iter().filter(|n| asset_matches(n, os, arch, bundle)).copied().collect::<Vec<_>>()
         };
-        assert_eq!(pick("linux", "x86_64", Some("rpm")), vec!["controlcode-1.7.3-1.x86_64.rpm"]);
-        assert_eq!(pick("linux", "aarch64", Some("deb")), vec!["controlcode_1.7.3_arm64.deb"]);
-        assert_eq!(pick("linux", "x86_64", None), vec!["controlcode_1.7.3_amd64.AppImage"]);
-        assert_eq!(pick("windows", "x86_64", Some("nsis")), vec!["controlcode_1.7.3_x64-setup.exe"]);
-        assert_eq!(pick("windows", "x86_64", Some("msi")), vec!["controlcode_1.7.3_x64_en-US.msi"]);
-        assert_eq!(pick("windows", "aarch64", Some("msi")), vec!["controlcode_1.7.3_arm64-setup.exe"]);
-        assert_eq!(pick("macos", "aarch64", Some("app")), vec!["controlcode_1.7.3_aarch64.dmg"]);
+        assert_eq!(pick("linux", "x86_64", Some("rpm")), vec!["ade-ags-1.7.3-1.x86_64.rpm"]);
+        assert_eq!(pick("linux", "aarch64", Some("deb")), vec!["ags_1.7.3_arm64.deb"]);
+        assert_eq!(pick("linux", "x86_64", None), vec!["ags_1.7.3_amd64.AppImage"]);
+        assert_eq!(pick("windows", "x86_64", Some("nsis")), vec!["ags_1.7.3_x64-setup.exe"]);
+        assert_eq!(pick("windows", "x86_64", Some("msi")), vec!["ags_1.7.3_x64_en-US.msi"]);
+        assert_eq!(pick("windows", "aarch64", Some("msi")), vec!["ags_1.7.3_arm64-setup.exe"]);
+        assert_eq!(pick("macos", "aarch64", Some("app")), vec!["ags_1.7.3_aarch64.dmg"]);
     }
 }

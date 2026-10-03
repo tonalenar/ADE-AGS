@@ -222,8 +222,8 @@ fn temp_repo(label: &str) -> std::path::PathBuf {
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap();
     git_in(&dir, &["init", "-q", "-b", "main"]);
-    git_in(&dir, &["config", "user.email", "test@controlcode.dev"]);
-    git_in(&dir, &["config", "user.name", "Control Code"]);
+    git_in(&dir, &["config", "user.email", "test@ags.dev"]);
+    git_in(&dir, &["config", "user.name", "ADE AGS"]);
     git_in(&dir, &["config", "commit.gpgsign", "false"]);
     // El git del sistema puede tener `core.autocrlf=true`. El producto delega en git;
     // el repo de prueba fija LF para que el byte que se lee no dependa de esa config.
@@ -341,8 +341,8 @@ async fn el_historial_trae_padres_ramas_y_lo_que_entra_y_sale() {
     let local = std::env::temp_dir().join(format!("cc-scm-grafo-local-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&local);
     git_in(&origin, &["clone", "-q", &origin.to_string_lossy(), &local.to_string_lossy()]);
-    git_in(&local, &["config", "user.email", "test@controlcode.dev"]);
-    git_in(&local, &["config", "user.name", "Control Code"]);
+    git_in(&local, &["config", "user.email", "test@ags.dev"]);
+    git_in(&local, &["config", "user.name", "ADE AGS"]);
     git_in(&local, &["config", "commit.gpgsign", "false"]);
 
     // Uno sin subir en el clon, y uno sin traer en el origen.
@@ -393,8 +393,8 @@ async fn los_tags_se_crean_listan_suben_y_borran() {
     let local = std::env::temp_dir().join(format!("cc-scm-tags-local-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&local);
     git_in(&origin, &["clone", "-q", &origin.to_string_lossy(), &local.to_string_lossy()]);
-    git_in(&local, &["config", "user.email", "test@controlcode.dev"]);
-    git_in(&local, &["config", "user.name", "Control Code"]);
+    git_in(&local, &["config", "user.email", "test@ags.dev"]);
+    git_in(&local, &["config", "user.name", "ADE AGS"]);
     git_in(&local, &["config", "tag.gpgsign", "false"]);
     std::fs::write(local.join("b"), "1").unwrap();
     git_in(&local, &["add", "-A"]);
@@ -538,8 +538,8 @@ async fn publica_una_rama_creada_desde_una_remota() {
     let local = std::env::temp_dir().join(format!("cc-scm-publicar-local-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&local);
     git_in(&origin, &["clone", "-q", &origin.to_string_lossy(), &local.to_string_lossy()]);
-    git_in(&local, &["config", "user.email", "test@controlcode.dev"]);
-    git_in(&local, &["config", "user.name", "Control Code"]);
+    git_in(&local, &["config", "user.email", "test@ags.dev"]);
+    git_in(&local, &["config", "user.name", "ADE AGS"]);
     git_in(&local, &["config", "commit.gpgsign", "false"]);
     git_in(&local, &["switch", "-q", "-c", "feat/x", "origin/main"]);
     std::fs::write(local.join("b"), "1").unwrap();
@@ -625,8 +625,8 @@ fn el_pull_integra_como_git_segun_la_config() {
     let local = std::env::temp_dir().join(format!("cc-scm-pull-local-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&local);
     git_in(&origin, &["clone", "-q", &origin.to_string_lossy(), &local.to_string_lossy()]);
-    git_in(&local, &["config", "user.email", "test@controlcode.dev"]);
-    git_in(&local, &["config", "user.name", "Control Code"]);
+    git_in(&local, &["config", "user.email", "test@ags.dev"]);
+    git_in(&local, &["config", "user.name", "ADE AGS"]);
     git_in(&local, &["config", "commit.gpgsign", "false"]);
     let root = local.to_string_lossy().to_string();
 

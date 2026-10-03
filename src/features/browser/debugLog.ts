@@ -323,7 +323,7 @@ export function consoleForAgent(
       if (e.stack && e.kind !== "console") {
         // Los marcos del propio runtime (el envoltorio de la consola) no son código del proyecto.
         const frames = e.stack.split("\n").map((l) => l.trim())
-          .filter((l) => l && !e.text.includes(l) && !l.includes("/__controlcode__/")).slice(0, 4);
+          .filter((l) => l && !e.text.includes(l) && !l.includes("/__ags__/")).slice(0, 4);
         line += frames.map((f) => `\n      ${f}`).join("");
       }
       return { id: e.id, line };

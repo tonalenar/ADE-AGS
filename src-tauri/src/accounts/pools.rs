@@ -11,7 +11,7 @@
 //! - **`sticky`**: siempre la primera de la lista que se pueda usar, y la siguiente solo cuando
 //!   esa no puede (sin sesión, sin cupo, al máximo). Es "la principal con respaldo".
 //!
-//! Se piden con `pool:<nombre>` donde iría una cuenta (`ccode tab create --account pool:Trabajo`,
+//! Se piden con `pool:<nombre>` donde iría una cuenta (`ags tab create --account pool:Trabajo`,
 //! `account` de una tarea de un plan, de un miembro de un Squad). Se guardan en los ajustes.
 //!
 //! Este módulo es el modelo y el guardado; elegir la cuenta es de `runs::routing`, que ya sabe
@@ -143,7 +143,7 @@ pub fn find<'a>(pools: &'a [Pool], wanted: &str) -> Result<&'a Pool, String> {
         .find(|p| p.id == wanted || p.name.to_lowercase() == needle)
         .ok_or_else(|| {
             if pools.is_empty() {
-                format!("Não existe o pool '{wanted}': você ainda não criou nenhum (`ccode pool create`).")
+                format!("Não existe o pool '{wanted}': você ainda não criou nenhum (`ags pool create`).")
             } else {
                 format!("Não existe o pool '{wanted}'. Pools: {}.", pools.iter().map(|p| p.name.as_str()).collect::<Vec<_>>().join(", "))
             }

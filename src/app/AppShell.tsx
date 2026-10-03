@@ -120,7 +120,7 @@ export function AppShell() {
     useAgentsStore.getState().loadCustomAgents().catch(console.error);
   }, []);
 
-  // Puente de la CLI `ccode`: esta ventana queda disponible para atender los comandos
+  // Puente de la CLI `ags`: esta ventana queda disponible para atender los comandos
   // que solo el frontend puede resolver (crear/cerrar tabs).
   useEffect(() => initCliBridge(), []);
 

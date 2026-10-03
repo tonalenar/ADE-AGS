@@ -1,6 +1,6 @@
 <div align="center">
 
-# Control Code
+# ADE AGS
 
 **An agent development environment.**
 
@@ -17,7 +17,7 @@ with the files, the diffs, git, a browser and a fleet of background agents right
 
 Coding agents moved the work. Less of the day is typing code and more of it is directing agents, reviewing what they did, unblocking them and trying the result. An IDE is still built around the editor, with the agent squeezed into a side panel. A bare terminal gives you the agent and nothing around it.
 
-Control Code puts the agents in the middle and brings the rest of the environment to them: every folder you work in is a workspace with its agents, its files, its search, its git status, and a browser to try what they built — and point at what's wrong. Hand the long tasks to agents running in the background, each in its own worktree, and answer their permission requests from wherever you are.
+ADE AGS puts the agents in the middle and brings the rest of the environment to them: every folder you work in is a workspace with its agents, its files, its search, its git status, and a browser to try what they built — and point at what's wrong. Hand the long tasks to agents running in the background, each in its own worktree, and answer their permission requests from wherever you are.
 
 Nothing is lost when you close something: workspaces reopen with every agent resuming its own conversation, and every session is archived and searchable.
 
@@ -86,9 +86,9 @@ Open a browser tab from the tab bar, or click a local URL in any terminal (`Loca
 
 ### 🧩 Skills, installed once, attached anywhere
 
-Install a skill once under `~/.controlcode/skills/`. Attach it to a folder or to a single tab from a palette (right-click in the workspaces panel).
+Install a skill once under `~/.ags/skills/`. Attach it to a folder or to a single tab from a palette (right-click in the workspaces panel).
 
-**How it works:** Control Code creates **symlinks**, never copies. One canonical copy on disk, referenced from every project that uses it — update it once, every project sees the change.
+**How it works:** ADE AGS creates **symlinks**, never copies. One canonical copy on disk, referenced from every project that uses it — update it once, every project sees the change.
 
 | | |
 |---|---|
@@ -116,7 +116,7 @@ Editing a skill that came from a repository never writes over it — saving prod
 
 ### 👥 Several accounts, and what's left of your plan
 
-Run two Claude Code accounts side by side — or two of Codex, or of OpenCode. Each account is its own agent home directory, handed to the process through an environment variable, so tabs never share credentials or history. You log in through the agent's own terminal, inside the app; Control Code never reads, copies or stores a credential.
+Run two Claude Code accounts side by side — or two of Codex, or of OpenCode. Each account is its own agent home directory, handed to the process through an environment variable, so tabs never share credentials or history. You log in through the agent's own terminal, inside the app; ADE AGS never reads, copies or stores a credential.
 
 The status bar shows your accounts. For Claude Code, click one to see **the real usage of your plan** — asked to `claude` itself — and the tokens you've used over time, read from its transcripts.
 
@@ -136,7 +136,7 @@ Close a tab and it's archived — along with the skills it had and the tabs that
 
 ### 🤖 A CLI your agent can drive
 
-`ccode` lets any agent orchestrate the app it's running inside. Ask Claude Code to *"open three tabs for this monorepo"*, or to *"start the dev server and tell me if it compiles"*, and it does it — agent tabs and plain terminal tabs alike: it opens them, types into them, reads what they printed and waits for them to finish. Output is always one line of JSON — no scraping, no heuristics. See the [CLI reference](#cli-reference).
+`ags` lets any agent orchestrate the app it's running inside. Ask Claude Code to *"open three tabs for this monorepo"*, or to *"start the dev server and tell me if it compiles"*, and it does it — agent tabs and plain terminal tabs alike: it opens them, types into them, reads what they printed and waits for them to finish. Output is always one line of JSON — no scraping, no heuristics. See the [CLI reference](#cli-reference).
 
 An orchestrator's real constraint is its context window, so reading a terminal is designed to be cheap:
 
@@ -154,7 +154,7 @@ Register any terminal tool as a first-class agent. Beyond a name and a command, 
 | Field | Enables |
 |---|---|
 | Resume arguments (`--resume {session}`) | Reopening a specific past session |
-| Skills folder (`.agents/skills`) | Control Code managing its skills |
+| Skills folder (`.agents/skills`) | ADE AGS managing its skills |
 | Sessions folder + id source | Session discovery and readable titles |
 | Environment variables | Injected when the process launches |
 
@@ -184,7 +184,7 @@ Shortcuts are captured before the terminal sees them, so they never reach the ag
 
 ```bash
 git clone https://github.com/luis3132/ControlCode.git
-cd ControlCode
+cd ADE AGS
 bun install
 bun run tauri dev
 ```
@@ -193,7 +193,7 @@ bun run tauri dev
 
 ```bash
 bun run app:build                                   # just the app, this machine, no installers
-bun run app:build --release                         # app + `ccode` CLI, packaged for everything this machine can produce
+bun run app:build --release                         # app + `ags` CLI, packaged for everything this machine can produce
 bun run app:build --release --target macos-arm64    # one target only (id or Rust triple)
 bun run app:build --list                            # what this machine can and cannot produce, and why
 ```
@@ -242,17 +242,17 @@ Rust tests live in a `test.rs` of their own per module, never mixed into the cod
 
 ## CLI reference
 
-Install `ccode` from **Settings → CLI**: a symlink into `~/.local/bin` on Linux and macOS, a copy under `%LOCALAPPDATA%\ControlCode\bin` on Windows. The `.deb` and `.rpm` packages install it to `/usr/bin` too.
+Install `ags` from **Settings → CLI**: a symlink into `~/.local/bin` on Linux and macOS, a copy under `%LOCALAPPDATA%\ADE AGS\bin` on Windows. The `.deb` and `.rpm` packages install it to `/usr/bin` too.
 
 The CLI talks to the running app. All output is a single line of JSON on **stdout**; anything meant for humans (help, usage errors) goes to **stderr**.
 
 ### Commands
 
 ```
-ccode <group> <action> [value] [--flag value ...]
+ags <group> <action> [value] [--flag value ...]
 ```
 
-The first value can be given positionally, without its flag: `ccode skill install git-helper` is `ccode skill install --skill git-helper`.
+The first value can be given positionally, without its flag: `ags skill install git-helper` is `ags skill install --skill git-helper`.
 
 #### Tabs
 
@@ -267,11 +267,11 @@ The first value can be given positionally, without its flag: `ccode skill instal
 **Terminal tabs.** `--agent bash` opens a plain shell instead of an agent, and every command above works on it. It's how an agent runs something that should stay visible and keep running — a dev server, a test watcher, a log tail:
 
 ```bash
-ccode tab create ./web --agent bash --initprompt "bun dev"   # the first command, run once the shell is up
-ccode watch add <id> --idle 5 && ccode watch wait            # returns when it goes quiet or prints an error
-ccode tab output <id>                                        # "Local: http://localhost:5173", or the error
-ccode tab send <id> "bun test"                               # run another command in it
-ccode tab send <id> $'\x03' --no-enter                       # Ctrl-C
+ags tab create ./web --agent bash --initprompt "bun dev"   # the first command, run once the shell is up
+ags watch add <id> --idle 5 && ags watch wait            # returns when it goes quiet or prints an error
+ags tab output <id>                                        # "Local: http://localhost:5173", or the error
+ags tab send <id> "bun test"                               # run another command in it
+ags tab send <id> $'\x03' --no-enter                       # Ctrl-C
 ```
 
 **Options for `tab create`**
@@ -359,7 +359,7 @@ Background agents, each in its own git worktree, shown in the fleet console. Wit
 | `--json-args '{...}'` | Pass raw arguments as JSON |
 | `--version` / `--help` | Version / usage |
 
-`ccode mcp` also exists, but it isn't for you: it's the `controlcode` MCP server the app attaches to its agents. With `--cwd <folder> [--tab <id>]` it gives an interactive tab its tools (the project browser, fleet orchestration, your git account, asking you a question); with `--task <id>` it's also the permission server a background agent asks before using a tool. It speaks JSON-RPC on stdin/stdout instead of printing one JSON line.
+`ags mcp` also exists, but it isn't for you: it's the `ade-ags` MCP server the app attaches to its agents. With `--cwd <folder> [--tab <id>]` it gives an interactive tab its tools (the project browser, fleet orchestration, your git account, asking you a question); with `--task <id>` it's also the permission server a background agent asks before using a tool. It speaks JSON-RPC on stdin/stdout instead of printing one JSON line.
 
 ### Exit codes
 
@@ -381,7 +381,7 @@ The distinct codes matter for agents: `3` means *start the app and retry*, while
 
 ### Orchestration skill
 
-`skills/controlcode-orchestrator/SKILL.md` documents all of the above for an agent: opening agent and terminal tabs, running servers and commands in them, the watch loop, holding a conversation with a tab, skills, the fleet and the browser — with the rules that keep an orchestrator from making a mess (look before creating, never poll, nothing destructive unasked). It ships with the app and installs itself, and updates itself when a new version of the app brings a new version of it, so Claude Code (or any agent that reads Agent Skills) can drive the app without you explaining the CLI first.
+`skills/ags-orchestrator/SKILL.md` documents all of the above for an agent: opening agent and terminal tabs, running servers and commands in them, the watch loop, holding a conversation with a tab, skills, the fleet and the browser — with the rules that keep an orchestrator from making a mess (look before creating, never poll, nothing destructive unasked). It ships with the app and installs itself, and updates itself when a new version of the app brings a new version of it, so Claude Code (or any agent that reads Agent Skills) can drive the app without you explaining the CLI first.
 
 ---
 
@@ -414,7 +414,7 @@ The distinct codes matter for agents: `3` means *start the app and retry*, while
 │  ├─ orchestrator/ digest, watch, read cursors        │
 │  ├─ window/       native windows, saved layouts      │
 │  ├─ database/     SQLite schema + migrations         │
-│  └─ ipc/          TCP server for `ccode`, MCP server │
+│  └─ ipc/          TCP server for `ags`, MCP server │
 └──────────────────────────────────────────────────────┘
 ```
 
@@ -424,7 +424,7 @@ Every `mod.rs` is declarative — module declarations and re-exports, no logic �
 
 Each tab owns a pty created through `portable-pty`. The frontend measures the container and passes the real `cols`/`rows` at creation time rather than resizing after the fact — many TUIs read the terminal size once at startup and never redraw correctly after a later `SIGWINCH`. After that the grid follows its container frame by frame, while the pty only hears about the size once it settles.
 
-Output is streamed to the frontend as Tauri events and mirrored into a capped in-memory scrollback buffer, which is what `ccode tab output` reads and what gets persisted with a workspace. Closing a tab kills the agent's whole process tree, not just its leader, so nothing it launched is left running.
+Output is streamed to the frontend as Tauri events and mirrored into a capped in-memory scrollback buffer, which is what `ags tab output` reads and what gets persisted with a workspace. Closing a tab kills the agent's whole process tree, not just its leader, so nothing it launched is left running.
 
 ### Skill symlinks
 
@@ -434,11 +434,11 @@ The physical symlinks are **derived** from that intent before each agent starts 
 
 ### Background agents
 
-A fleet task runs the agent headless and reads its structured event stream, which becomes the live activity on its card; the raw events are kept per task on disk. Permissions go through a tool the app provides: each task is launched with `ccode mcp` as its permission prompt tool, and with the user's own MCP configuration left out so nothing else can answer for it. `ccode mcp` forwards each request to the app and blocks until someone decides; if the app can't be reached, the answer is no.
+A fleet task runs the agent headless and reads its structured event stream, which becomes the live activity on its card; the raw events are kept per task on disk. Permissions go through a tool the app provides: each task is launched with `ags mcp` as its permission prompt tool, and with the user's own MCP configuration left out so nothing else can answer for it. `ags mcp` forwards each request to the app and blocks until someone decides; if the app can't be reached, the answer is no.
 
 ### CLI transport
 
-The app runs a TCP server bound to loopback and publishes how to reach it in `~/.controlcode/ipc.json`:
+The app runs a TCP server bound to loopback and publishes how to reach it in `~/.ags/ipc.json`:
 
 ```json
 { "port": 45123, "token": "…", "pid": 4242, "protocol": 1 }
@@ -448,7 +448,7 @@ TCP-on-loopback rather than a Unix socket, so the same code works on Windows wit
 
 The `protocol` field guards against a stale CLI: a version mismatch produces a clear message instead of a confusing deserialisation failure.
 
-Several instances can run at once (the app opened twice, a dev build next to the installed one, the restart after an update). Each one also writes its own handshake to `~/.controlcode/ipc/<pid>.json` and passes its path to everything it launches in `CONTROLCODE_HANDSHAKE`, so a tab's agents and its MCP bridge always reach the instance that opened them; `ccode` from any other terminal reaches the most recently started one. An instance only removes the shared `ipc.json` if it's still its own, and puts it back within seconds if something deletes it or leaves it pointing at an instance that's gone.
+Several instances can run at once (the app opened twice, a dev build next to the installed one, the restart after an update). Each one also writes its own handshake to `~/.ags/ipc/<pid>.json` and passes its path to everything it launches in `AGS_HANDSHAKE`, so a tab's agents and its MCP bridge always reach the instance that opened them; `ags` from any other terminal reaches the most recently started one. An instance only removes the shared `ipc.json` if it's still its own, and puts it back within seconds if something deletes it or leaves it pointing at an instance that's gone.
 
 ---
 
@@ -459,16 +459,16 @@ Several instances can run at once (the app opened twice, a dev build next to the
 Everything is local. Nothing leaves your machine except the requests to skill registries you added, and whatever the agents and your own `git` do.
 
 ```
-~/.controlcode/data.db       workspaces, tabs, skills, sessions, fleet tasks, permission rules, settings
-~/.controlcode/skills/       the single global copy of every installed skill (configurable)
-~/.controlcode/worktrees/    one git worktree per fleet task that asked for one
-~/.controlcode/runs/         raw event log of each fleet task
-~/.controlcode/ipc.json      CLI handshake — port and token of the running app
-~/.controlcode/ipc/<pid>.json the same, per running instance, for the tabs it launched
+~/.ags/data.db       workspaces, tabs, skills, sessions, fleet tasks, permission rules, settings
+~/.ags/skills/       the single global copy of every installed skill (configurable)
+~/.ags/worktrees/    one git worktree per fleet task that asked for one
+~/.ags/runs/         raw event log of each fleet task
+~/.ags/ipc.json      CLI handshake — port and token of the running app
+~/.ags/ipc/<pid>.json the same, per running instance, for the tabs it launched
 <app data>/accounts/         one home directory per agent account, written by the agent itself
 ```
 
-Inside your projects, Control Code only ever creates symlinks under the skills directory its agent expects (`.claude/skills/`, `.agents/skills/`), and removes them when no agent needs them. Per-machine display preferences — terminal zoom, GPU rendering, open file and browser tabs — live in the app's local storage.
+Inside your projects, ADE AGS only ever creates symlinks under the skills directory its agent expects (`.claude/skills/`, `.agents/skills/`), and removes them when no agent needs them. Per-machine display preferences — terminal zoom, GPU rendering, open file and browser tabs — live in the app's local storage.
 
 ### Settings
 
@@ -477,10 +477,10 @@ Inside your projects, Control Code only ever creates symlinks under the skills d
 | Appearance | Theme (dark or light), language (Spanish or English), sharp text on Linux |
 | Shortcuts | The list of keyboard shortcuts |
 | Terminal | Text zoom, cut lines on each send, GPU rendering |
-| Skills directory | Where the global copy lives — `~/.controlcode/skills/` by default |
+| Skills directory | Where the global copy lives — `~/.ags/skills/` by default |
 | TUIs | Your own tools, registered as agents |
 | Prelaunch | Saved presets |
-| CLI | Install or remove `ccode` |
+| CLI | Install or remove `ags` |
 | Orchestrator | Ceiling of simultaneously watched tabs — 3 by default |
 
 Accounts have a screen of their own, in the activity rail.
@@ -523,7 +523,7 @@ src-tauri/src/
   agents/         the table of built-in agents, PATH detection, custom TUI definitions
   accounts/       several accounts of one agent, isolated by home directory
   usage/          plan usage asked to the agent, token accounting from transcripts
-  bin/cli.rs      the `ccode` binary
+  bin/cli.rs      the `ags` binary
   database/       connection, schema and migrations, one query module per table
   explorer/       file tree, git marks, text search, reading and saving files
   scm/            source control through your own git

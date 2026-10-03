@@ -354,7 +354,7 @@ impl Api {
             )));
         }
         let http = reqwest::Client::builder()
-            .user_agent("ControlCode")
+            .user_agent("ADE AGS")
             .timeout(Duration::from_secs(30))
             .build()
             .map_err(|e| ForgeError::Api(e.to_string()))?;

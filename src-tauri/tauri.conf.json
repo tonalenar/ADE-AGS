@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "controlcode",
+  "productName": "ADE AGS",
   "version": "1.8.7",
   "identifier": "com.luis.controlcode",
   "build": {
@@ -53,17 +53,17 @@
     ],
     "resources": {
       "binaries": "binaries/",
-      "../skills/controlcode-orchestrator": "skills/controlcode-orchestrator/"
+      "../skills/ags-orchestrator": "skills/ags-orchestrator/"
     },
     "linux": {
       "deb": {
         "files": {
-          "/usr/bin/ccode": "binaries/ccode"
+          "/usr/bin/ags": "binaries/ags"
         }
       },
       "rpm": {
         "files": {
-          "/usr/bin/ccode": "binaries/ccode"
+          "/usr/bin/ags": "binaries/ags"
         }
       }
     }

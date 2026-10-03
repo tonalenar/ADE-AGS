@@ -226,7 +226,7 @@ fn match_one_skill(installed: &[InstalledSkill], wanted: &str) -> Result<String,
         [] => {
             let names: Vec<&str> = installed.iter().map(|s| s.name.as_str()).collect();
             if names.is_empty() {
-                Err(format!("No hay ninguna skill instalada, así que '{wanted}' no existe. Instalá una con 'ccode skill install --skill <nombre>'"))
+                Err(format!("No hay ninguna skill instalada, así que '{wanted}' no existe. Instalá una con 'ags skill install --skill <nombre>'"))
             } else {
                 Err(format!("No hay ninguna skill instalada llamada '{wanted}'. Instaladas: {}", names.join(", ")))
             }

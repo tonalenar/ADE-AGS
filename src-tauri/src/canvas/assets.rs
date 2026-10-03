@@ -1,4 +1,4 @@
-//! Las imágenes del canvas: se copian a `~/.controlcode/canvas-assets/` y el canvas guarda
+//! Las imágenes del canvas: se copian a `~/.ags/canvas-assets/` y el canvas guarda
 //! solo su id.
 //!
 //! Si la imagen viviera dentro del canvas, cada vez que alguien moviera un nodo se
@@ -78,7 +78,7 @@ pub fn parse_id(id: &str) -> Option<(String, Format)> {
 }
 
 fn dir() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir().ok_or("No se encontró la carpeta del usuario")?.join(".controlcode").join("canvas-assets");
+    let dir = dirs::home_dir().ok_or("No se encontró la carpeta del usuario")?.join(".ags").join("canvas-assets");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }

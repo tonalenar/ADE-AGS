@@ -3,7 +3,7 @@ use super::rewrite::{
     skip_request_header, skip_response_header,
 };
 
-const TAG: &str = r#"<script src="/__controlcode__/picker.js"></script>"#;
+const TAG: &str = r#"<script src="/__ags__/picker.js"></script>"#;
 
 #[test]
 fn una_redireccion_se_resuelve_contra_la_url_que_la_devolvio_y_solo_si_es_web() {
@@ -202,13 +202,13 @@ async fn el_html_llega_con_el_selector_y_sin_las_trabas_para_mostrarse() {
     assert!(resp.headers().get("x-frame-options").is_none());
     assert!(resp.headers().get("content-security-policy").is_none());
     let html = resp.text().await.unwrap();
-    assert!(html.contains(r#"<head><script src="/__controlcode__/picker.js"></script><title>"#), "{html}");
+    assert!(html.contains(r#"<head><script src="/__ags__/picker.js"></script><title>"#), "{html}");
 
     let picker = client()
-        .get(format!("{}/__controlcode__/picker.js", target.proxy_origin))
+        .get(format!("{}/__ags__/picker.js", target.proxy_origin))
         .send().await.unwrap().text().await.unwrap();
     // Adelante, el origen real de la página: el runtime lo usa para rutear los pedidos.
-    let prelude = format!("self.__controlcode_target=\"{}\";\n", target.target_origin);
+    let prelude = format!("self.__ags_target=\"{}\";\n", target.target_origin);
     assert_eq!(picker, format!("{prelude}window.__picker=1"), "sirve el script que mandó la app");
 
     // Lo que no es HTML pasa intacto.
@@ -464,7 +464,7 @@ async fn la_red_se_anota_solo_con_el_panel_de_debug_abierto() {
 
 /// Un pedido de la página al proxy sobre el estado del sitio, como lo hace el runtime.
 fn own(req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
-    req.header("x-controlcode", "1")
+    req.header("x-ade-ags", "1")
 }
 
 /// El proxy es el frasco de cookies del sitio: el iframe no recibe ningún `Set-Cookie`, y lo
@@ -480,7 +480,7 @@ async fn las_cookies_las_guarda_el_proxy_y_no_el_navegador() {
 
     let resp = c.get(at("/sesion")).send().await.unwrap();
     assert!(resp.headers().get("set-cookie").is_none(), "el iframe no recibe cookies: {:?}", resp.headers());
-    assert!(resp.headers().get("x-controlcode-jar").is_some(), "la página se entera de que cambió el frasco");
+    assert!(resp.headers().get("x-ags-jar").is_some(), "la página se entera de que cambió el frasco");
 
     // Lo que tenga guardado el navegador para `localhost` no llega: es de cualquier puerto.
     let seen = c.get(at("/app/eco")).header("cookie", "intrusa=1").send().await.unwrap().text().await.unwrap();
@@ -506,14 +506,14 @@ async fn las_cookies_las_guarda_el_proxy_y_no_el_navegador() {
     assert_eq!((sent.value.as_str(), sent.note), ("sid=abc; tema=oscuro", Some(HeaderNote::Rewritten)));
 
     // Borrar una cookie la saca del frasco, `HttpOnly` incluida.
-    let clear = own(c.get(at("/__controlcode__/cookies/clear?name=sid"))).send().await.unwrap();
+    let clear = own(c.get(at("/__ags__/cookies/clear?name=sid"))).send().await.unwrap();
     assert_eq!(clear.status(), 204);
     assert!(preview_cookies(target.proxy_origin.clone()).await.unwrap().set.iter().all(|c| c.name != "sid"));
     assert_eq!(c.get(at("/app/eco")).send().await.unwrap().text().await.unwrap(), "tema=oscuro");
 
     // Lo propio del proxy no se anota como tráfico de la página.
     let last = preview_network(target.proxy_origin.clone(), 0).await.unwrap().entries;
-    assert!(last.iter().all(|e| !e.url.contains("__controlcode__")), "{last:?}");
+    assert!(last.iter().all(|e| !e.url.contains("__ags__")), "{last:?}");
 }
 
 /// `document.cookie` se resuelve contra el frasco: ve lo que no es `HttpOnly`, y lo que
@@ -527,7 +527,7 @@ async fn document_cookie_lee_y_escribe_el_frasco_del_sitio() {
     c.get(at("/sesion")).send().await.unwrap();
 
     let read = |path: &str| {
-        let url = at(&format!("/__controlcode__/cookie?path={path}"));
+        let url = at(&format!("/__ags__/cookie?path={path}"));
         let c = c.clone();
         async move { own(c.get(url)).send().await.unwrap().json::<serde_json::Value>().await.unwrap() }
     };
@@ -536,7 +536,7 @@ async fn document_cookie_lee_y_escribe_el_frasco_del_sitio() {
 
     // Un script no puede pisar una HttpOnly (si pudiera, leería la sesión)…
     let write = |path: &str, line: &str| {
-        let url = at(&format!("/__controlcode__/cookie?path={path}"));
+        let url = at(&format!("/__ags__/cookie?path={path}"));
         let (c, line) = (c.clone(), line.to_string());
         async move { own(c.post(url)).body(line).send().await.unwrap().json::<serde_json::Value>().await.unwrap() }
     };
@@ -574,11 +574,11 @@ async fn el_estado_del_sitio_no_se_le_da_a_cualquiera() {
     let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
     let c = client();
     c.get(format!("{}/sesion", target.proxy_origin)).send().await.unwrap();
-    let url = format!("{}/__controlcode__/cookie?path=%2F", target.proxy_origin);
+    let url = format!("{}/__ags__/cookie?path=%2F", target.proxy_origin);
     assert_eq!(c.get(&url).send().await.unwrap().status(), 403, "sin la cabecera del runtime");
     let rebound = own(c.get(&url)).header("host", "evil.example").send().await.unwrap();
     assert_eq!(rebound.status(), 403, "por otro nombre");
-    let storage = c.post(format!("{}/__controlcode__/storage", target.proxy_origin)).body("{}").send().await.unwrap();
+    let storage = c.post(format!("{}/__ags__/storage", target.proxy_origin)).body("{}").send().await.unwrap();
     assert_eq!(storage.status(), 403);
     assert_eq!(own(c.get(&url)).send().await.unwrap().status(), 200);
 }
@@ -590,7 +590,7 @@ async fn el_storage_se_guarda_y_se_repone_una_vez() {
     let port = fake_dev_server().await;
     let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
     let c = client();
-    let url = format!("{}/__controlcode__/storage", target.proxy_origin);
+    let url = format!("{}/__ags__/storage", target.proxy_origin);
     // Recién abierto y sin nada guardado: no hay qué reponer.
     let empty: serde_json::Value = own(c.get(&url)).send().await.unwrap().json().await.unwrap();
     assert_eq!(empty, serde_json::json!({ "local": null, "session": null }));
@@ -798,7 +798,7 @@ async fn una_regla_contesta_en_lugar_del_servidor_y_queda_anotada() {
 
     let resp = client().get(format!("{}/app.js", target.proxy_origin)).send().await.unwrap();
     assert_eq!(resp.status(), 503);
-    assert_eq!(resp.headers().get("x-controlcode-mock").unwrap(), "1");
+    assert_eq!(resp.headers().get("x-ags-mock").unwrap(), "1");
     assert_eq!(resp.text().await.unwrap(), "{\"error\":\"caído\"}");
 
     let page = preview_network(target.proxy_origin.clone(), before).await.unwrap();
@@ -1031,7 +1031,7 @@ fn las_redirecciones_de_otro_origen_vuelven_al_proxy() {
     let api = "http://localhost:8080/login";
     assert_eq!(fwd_location("/me", api, page, proxy), fwd_url(proxy, "http://localhost:8080/me"));
     assert_eq!(fwd_location("http://localhost:5173/panel?x=1", api, page, proxy), "http://localhost:47000/panel?x=1");
-    assert_eq!(fwd_url(proxy, "http://a/b?c=1&d=2"), "http://localhost:47000/__controlcode__/fwd?url=http%3A%2F%2Fa%2Fb%3Fc%3D1%26d%3D2");
+    assert_eq!(fwd_url(proxy, "http://a/b?c=1&d=2"), "http://localhost:47000/__ags__/fwd?url=http%3A%2F%2Fa%2Fb%3Fc%3D1%26d%3D2");
     assert_eq!(fwd_location("mailto:x@y", api, page, proxy), "mailto:x@y");
 }
 
@@ -1101,7 +1101,7 @@ async fn la_pagina_llama_a_su_api_en_otro_origen_con_cors_y_cookies() {
     let api = |path: &str| format!("http://127.0.0.1:{api_port}{path}");
     let c = client();
     let fwd = |proxy: &str, url: &str, cred: &str| {
-        own(c.get(fwd_url(proxy, url))).header("x-controlcode-cred", cred)
+        own(c.get(fwd_url(proxy, url))).header("x-ags-cred", cred)
     };
 
     // Sin la cabecera del runtime no es un relevo para nadie.
@@ -1109,7 +1109,7 @@ async fn la_pagina_llama_a_su_api_en_otro_origen_con_cors_y_cookies() {
 
     // Login con credenciales: la cookie queda en el frasco de la API, no le llega al iframe.
     let login = own(c.post(fwd_url(&page.proxy_origin, &api("/login"))))
-        .header("x-controlcode-cred", "include")
+        .header("x-ags-cred", "include")
         .send()
         .await
         .unwrap();
@@ -1125,7 +1125,7 @@ async fn la_pagina_llama_a_su_api_en_otro_origen_con_cors_y_cookies() {
 
     // Un pedido que necesita preflight, autorizado.
     let put = own(c.put(fwd_url(&page.proxy_origin, &api("/me"))))
-        .header("x-controlcode-cred", "include")
+        .header("x-ags-cred", "include")
         .header("content-type", "application/json")
         .body("{}")
         .send()
@@ -1138,8 +1138,8 @@ async fn la_pagina_llama_a_su_api_en_otro_origen_con_cors_y_cookies() {
     // atiende igual, y la cabecera le llega.
     let before = hits.load(Ordering::SeqCst);
     let engine = own(c.put(fwd_url(&page.proxy_origin, &api("/me"))))
-        .header("x-controlcode-cred", "include")
-        .header("x-controlcode-headers", "content-type")
+        .header("x-ags-cred", "include")
+        .header("x-ags-headers", "content-type")
         .header("content-type", "application/json")
         .header("cache-control", "no-cache")
         .header("pragma", "no-cache")
@@ -1148,19 +1148,19 @@ async fn la_pagina_llama_a_su_api_en_otro_origen_con_cors_y_cookies() {
         .await
         .unwrap();
     assert_eq!(engine.status(), 200, "{:?}", engine.headers());
-    assert!(engine.headers().get("x-controlcode-cors").is_none());
+    assert!(engine.headers().get("x-ags-cors").is_none());
     assert_eq!(hits.load(Ordering::SeqCst), before + 1);
     // La misma cabecera puesta por la página sí la tiene que autorizar el preflight.
     let authored = own(c.put(fwd_url(&page.proxy_origin, &api("/me"))))
-        .header("x-controlcode-cred", "include")
-        .header("x-controlcode-headers", "content-type,cache-control")
+        .header("x-ags-cred", "include")
+        .header("x-ags-headers", "content-type,cache-control")
         .header("content-type", "application/json")
         .header("cache-control", "no-cache")
         .body("{}")
         .send()
         .await
         .unwrap();
-    assert!(authored.headers().get("x-controlcode-cors").is_some(), "{:?}", authored.headers());
+    assert!(authored.headers().get("x-ags-cors").is_some(), "{:?}", authored.headers());
 
     // Una redirección de la API vuelve a pasar por el proxy.
     let go = fwd(&page.proxy_origin, &api("/go"), "include").send().await.unwrap();
@@ -1171,16 +1171,16 @@ async fn la_pagina_llama_a_su_api_en_otro_origen_con_cors_y_cookies() {
     let other_port = fake_dev_server().await;
     let other = preview_resolve(format!("http://127.0.0.1:{other_port}/"), String::new()).await.unwrap();
     let blocked = fwd(&other.proxy_origin, &api("/me"), "include").send().await.unwrap();
-    assert!(blocked.headers().get("x-controlcode-cors").is_some(), "{:?}", blocked.headers());
+    assert!(blocked.headers().get("x-ags-cors").is_some(), "{:?}", blocked.headers());
     assert!(!blocked.text().await.unwrap().contains("sid=abc"), "no puede leer la sesión");
     let before = hits.load(Ordering::SeqCst);
     let denied = own(c.put(fwd_url(&other.proxy_origin, &api("/me"))))
-        .header("x-controlcode-cred", "include")
+        .header("x-ags-cred", "include")
         .header("content-type", "application/json")
         .send()
         .await
         .unwrap();
-    assert!(denied.headers().get("x-controlcode-cors").is_some());
+    assert!(denied.headers().get("x-ags-cors").is_some());
     assert_eq!(hits.load(Ordering::SeqCst), before, "el preflight negado no deja llegar el pedido");
 
     // `*` alcanza sin credenciales.

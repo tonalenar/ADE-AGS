@@ -12,7 +12,7 @@ const render = (markdown: string) =>
 
 describe("pipeline de la vista previa", () => {
   it("interpreta el HTML de los README en vez de mostrarlo como texto", () => {
-    const html = render('<div align="center">\n\n# Control Code\n\n<img src="logo.png" width="80">\n\n</div>');
+    const html = render('<div align="center">\n\n# ADE AGS\n\n<img src="logo.png" width="80">\n\n</div>');
     expect(html).toContain('<div align="center">');
     expect(html).toContain('<img src="logo.png" width="80"/>');
     expect(html).not.toContain("&lt;div");

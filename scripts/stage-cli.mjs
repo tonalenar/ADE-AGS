@@ -1,5 +1,5 @@
 /**
- * Compila la CLI (`ccode`) y la deja en `src-tauri/binaries/`, que es lo que
+ * Compila la CLI (`ags`) y la deja en `src-tauri/binaries/`, que es lo que
  * `bundle.resources` empaqueta dentro de la app.
  *
  * Corre desde `beforeBuildCommand`, o sea antes de que Tauri compile la app: para cuando
@@ -13,7 +13,7 @@
  *
  * - `CC_CLI_TARGET` — triple para el que compilar. Vacío = el de esta máquina.
  *   **Clave al compilar cruzado**: sin esto, un instalador de Windows armado desde Linux
- *   se llevaba adentro un `ccode` de Linux.
+ *   se llevaba adentro un `ags` de Linux.
  * - `CC_CLI_RUNNER` — reemplazo de `cargo` (ej. `cargo-xwin`) para compilar cruzado.
  * - `CC_CLI_STRICT` — `1` para que un fallo corte el build. Por defecto solo avisa: en el
  *   build de todos los días, quedarse sin el botón "Instalar CLI" no justifica no tener app.
@@ -34,7 +34,7 @@ const strict = process.env.CC_CLI_STRICT === "1";
 
 /** El `.exe` depende del SO de DESTINO, no del de la máquina que compila. */
 const isWindowsTarget = target ? target.includes("windows") : process.platform === "win32";
-const fileName = isWindowsTarget ? "ccode.exe" : "ccode";
+const fileName = isWindowsTarget ? "ags.exe" : "ags";
 
 if (process.env.CC_CLI_SKIP === "1") {
   console.log("[stage-cli] omitido (CC_CLI_SKIP=1)");
@@ -51,12 +51,12 @@ if (process.env.CC_CLI_SKIP === "1") {
 function cleanStaleBinaries() {
   mkdirSync(dest, { recursive: true });
   for (const entry of readdirSync(dest)) {
-    if (entry.startsWith("ccode")) rmSync(join(dest, entry), { force: true });
+    if (entry.startsWith("ags")) rmSync(join(dest, entry), { force: true });
   }
 }
 
 try {
-  const args = ["build", "--release", "--bin", "ccode"];
+  const args = ["build", "--release", "--bin", "ags"];
   if (target) args.push("--target", target);
 
   execFileSync(runner, args, { cwd: tauriDir, stdio: "inherit" });

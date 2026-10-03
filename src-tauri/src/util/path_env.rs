@@ -57,9 +57,9 @@ const SHELL_TIMEOUT: Duration = Duration::from_secs(5);
 
 /// La variable que el shell ve mientras se lo consulta. Es la misma idea que
 /// `VSCODE_RESOLVING_ENVIRONMENT`: quien tenga algo pesado en su perfil (un `exec tmux`,
-/// un `neofetch`) puede saltearlo con `[ -n "$CONTROLCODE_RESOLVING_ENVIRONMENT" ] && return`.
+/// un `neofetch`) puede saltearlo con `[ -n "$AGS_RESOLVING_ENVIRONMENT" ] && return`.
 #[cfg(unix)]
-pub const RESOLVING_ENV: &str = "CONTROLCODE_RESOLVING_ENVIRONMENT";
+pub const RESOLVING_ENV: &str = "AGS_RESOLVING_ENVIRONMENT";
 
 /// Qué se hizo al arrancar, para poder mostrarlo en Configuración: "no la encuentro" sin
 /// decir dónde se buscó no le sirve a nadie.
@@ -209,7 +209,7 @@ fn user_shell() -> String {
 /// apuntarlo a un `HOME` armado a mano, sin tocar el entorno del proceso.
 #[cfg(unix)]
 pub fn shell_path(shell: &str, envs: &[(&str, &std::ffi::OsStr)]) -> Result<String, String> {
-    let marker = format!("__CONTROLCODE_PATH_{}__", std::process::id());
+    let marker = format!("__AGS_PATH_{}__", std::process::id());
     // `printf` y `printenv` existen en bash, zsh, fish, dash y busybox. `printenv` es un
     // programa aparte, así que el PATH sale igual sin importar cómo lo guarde cada shell
     // (fish lo tiene como lista).
@@ -259,7 +259,7 @@ fn run_shell(
     use std::process::Stdio;
 
     let file = std::env::temp_dir().join(format!(
-        "controlcode-path-{}-{}.txt",
+        "ade-ags-path-{}-{}.txt",
         std::process::id(),
         std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_nanos()).unwrap_or(0)
     ));

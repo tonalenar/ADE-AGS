@@ -2,7 +2,7 @@
 
 **Estado: implementação commitada e publicada na PR #4 (`feat/shared-memory-v0`), aguardando merge.** Gates e E2E real concluídos em 01/10/2026; commits e push realizados; PR #4 aberta, ainda não mergeada.
 
-Shared Memory mantém contexto local e aprovado entre Runs. A implementação reutiliza SQLite, Mission Runtime e o servidor MCP `controlcode`; não usa serviço cloud nem inferência para consolidar conteúdo.
+Shared Memory mantém contexto local e aprovado entre Runs. A implementação reutiliza SQLite, Mission Runtime e o servidor MCP `ade-ags`; não usa serviço cloud nem inferência para consolidar conteúdo.
 
 ## Três tipos de informação
 

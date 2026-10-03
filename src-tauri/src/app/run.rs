@@ -7,6 +7,8 @@ use crate::database::DbConnection;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Antes que nada abra la base: ~/.controlcode (nombre anterior) pasa a ~/.ags sin perder datos.
+    crate::util::legacy::migrate_on_startup();
     let db_conn = crate::database::init_db().expect("Failed to initialize SQLite database");
     // Antes de construir Tauri, porque WebKitGTK decide cómo componer al inicializarse; y
     // antes del hilo de señales, porque toca el entorno del proceso (ver `configure`).
@@ -393,6 +395,7 @@ pub fn run() {
             // La skill de orquestación viaja con la app: se instala (o se actualiza) sola
             // antes de que haya ventanas, así la lista de skills ya la muestra al abrir.
             // Nunca falla el arranque — ver `crate::skills::bundled`.
+            crate::skills::migrate_legacy_skill(&db);
             crate::skills::ensure_bundled_skills(app.handle(), &db);
 
             // Avisos del sistema para lo que pasa con la app en segundo plano (ver `notifier`).
@@ -403,7 +406,7 @@ pub fn run() {
             // las limpiezas de abajo lo darían por muerto. Se saltean; las hará la última
             // instancia que arranque sola.
             if crate::ipc::other_instance_alive() {
-                eprintln!("[controlcode] hay otra instancia abierta: no se limpian sus tareas");
+                eprintln!("[ade-ags] hay otra instancia abierta: no se limpian sus tareas");
             } else {
                 // Las tareas headless que quedaron `running` son de una ejecución anterior:
                 // sus procesos eran hijos de la app y murieron con ella. Si no se cierran acá,
@@ -423,13 +426,13 @@ pub fn run() {
             // `--headless`: para CI y scripts. No se restaura el workspace ni se muestra nada;
             // la ventana principal queda creada pero oculta (algunos comandos de la CLI la
             // necesitan para existir) y todo lo demás —IPC, scheduler, bus— corre igual. Las
-            // misiones se manejan con `ccode mission …` (ver `ipc/commands/missions.rs`).
+            // misiones se manejan con `ags mission …` (ver `ipc/commands/missions.rs`).
             if std::env::args().any(|a| a == "--headless") {
                 use tauri::Manager;
                 for window in app.webview_windows().values() {
                     let _ = window.hide();
                 }
-                eprintln!("[controlcode] modo headless: sin ventanas, usá `ccode mission run`");
+                eprintln!("[ade-ags] modo headless: sin ventanas, usá `ags mission run`");
             } else {
                 let active_id = crate::database::db_get_last_active_workspace_id(&db)?;
                 let windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;
@@ -441,7 +444,7 @@ pub fn run() {
                 crate::pet::start(app.handle().clone());
             }
 
-            // Servidor IPC de la CLI `controlcode` (Fase 8). Va después de restaurar las
+            // Servidor IPC de la CLI `ade-ags` (Fase 8). Va después de restaurar las
             // ventanas: varios comandos necesitan que exista al menos una para responder.
             crate::ipc::start(app.handle().clone());
             Ok(())

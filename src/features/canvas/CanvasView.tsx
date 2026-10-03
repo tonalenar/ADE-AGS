@@ -80,7 +80,7 @@ const BrowserTab = lazy(() => import("@/features/browser/BrowserTab").then((m) =
 /**
  * El canvas de agentes: cada terminal de la carpeta es un nodo que se mueve, se
  * redimensiona y se conecta con otros. Una conexión deja que esos dos agentes se hablen
- * (`ccode peer ...`, ver el backend).
+ * (`ags peer ...`, ver el backend).
  *
  * El canvas va DEBAJO de las terminales: `TerminalPanel` las dibuja encima de cada nodo
  * con los rectángulos que se calculan acá (`liveRects`). Así ninguna terminal se remonta —
@@ -649,7 +649,7 @@ function Preview({ tabId, rows, onOpen }: { tabId: string; rows: number; onOpen:
 
 /**
  * Una nota: texto libre que el usuario edita acá y los agentes conectados leen y escriben
- * con `ccode note …`. El texto se edita directo sobre el store, así lo que escribe un
+ * con `ags note …`. El texto se edita directo sobre el store, así lo que escribe un
  * agente aparece al instante y lo que escribe el usuario llega a su próximo `note read`.
  */
 const NoteNode = memo(function NoteNode({ data, selected }: NodeProps<NoteFlowNode>) {
@@ -787,7 +787,7 @@ function NoteIcon({ className }: { className?: string }) {
 /**
  * Un portal: un navegador dentro del canvas. Es el mismo `BrowserTab` de las tabs de
  * navegador — con su barra, su inspector y su proxy —, pero dibujado en el nodo y manejado
- * por los agentes conectados con `ccode portal …`. Se escala con el zoom: una página, a
+ * por los agentes conectados con `ags portal …`. Se escala con el zoom: una página, a
  * diferencia de una terminal, aguanta bien un `transform`.
  */
 const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<PortalFlowNode>) {

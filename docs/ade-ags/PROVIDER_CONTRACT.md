@@ -47,7 +47,7 @@ runtime           detecção, contas, sessões, MCP, roster, frota
 | `resume` | Argumentos com `{session}`. `None` = não reabre por id |
 | `sessions` | Qual parser de `session/title.rs` usar |
 | `models` | Lista fixa, pergunta ao CLI, ou `Unknown` |
-| `mcp` | Como o servidor `controlcode` entra. O nome do servidor não muda |
+| `mcp` | Como o servidor `ade-ags` entra. O nome do servidor não muda |
 
 A fila não ganha métodos. Ícone continua no React, escolhido pelo mesmo `id`.
 
@@ -176,7 +176,7 @@ O registro não depende do binário estar instalado.
 3. Se a conta foi isolada de verdade, preencher `ProfileDef` (`env_var`, marcador, `DefaultHome`, `SystemMarkerRoot`). `account_env` passa a devolver o mapa. Sem ensaio, deixar `profile: None`.
 4. Se o formato de sessão for novo, criar uma variante de `SessionSource` e um parser em `session/title.rs`. Não colocar o parser no trait.
 5. Se a frota for lançá-lo, implementar `HeadlessAgent` ao lado dos outros em `runs/` (argv e parse do stream) e um unit struct em `adapter.rs` com `has_headless` e `headless`. Sem frota, o default `None` basta: o roster não o oferece.
-6. Se o MCP for um dos dois estilos existentes, apontar `mcp` para ele. Um terceiro estilo é um ramo novo em `ipc/mcp.rs`, não um `if qwen`. O servidor continua `controlcode`.
+6. Se o MCP for um dos dois estilos existentes, apontar `mcp` para ele. Um terceiro estilo é um ramo novo em `ipc/mcp.rs`, não um `if qwen`. O servidor continua `ade-ags`.
 7. Modelos: `Aliases` se a lista for fixa e verificada, um variante novo de `ModelSource` se houver que perguntar ao CLI, ou `Unknown`.
 8. Registrar o unit struct no slice `ADAPTERS`, na mesma ordem da linha.
 9. Acrescentar um teste em `agents/contract.rs` no formato dos outros: id, comando, capabilities, ambiente de conta, e que um id desconhecido continua de fora.

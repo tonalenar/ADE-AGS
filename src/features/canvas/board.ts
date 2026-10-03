@@ -8,7 +8,7 @@ export interface CanvasEdge {
 }
 
 /** Una nota en el canvas. Conectada a un agente, ese agente la lee y la escribe con
- *  `ccode note ...` (ver `ipc/commands/notes.rs`). */
+ *  `ags note ...` (ver `ipc/commands/notes.rs`). */
 export interface CanvasNote {
   name: string;
   content: string;
@@ -29,7 +29,7 @@ export function isNoteId(id: string): boolean {
 }
 
 /** Un portal: un navegador como nodo del canvas, que los agentes conectados manejan con
- *  `ccode portal ...`. La URL se guarda para reabrirlo donde estaba. */
+ *  `ags portal ...`. La URL se guarda para reabrirlo donde estaba. */
 export interface CanvasPortal {
   name: string;
   url: string;

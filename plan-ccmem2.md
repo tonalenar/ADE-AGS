@@ -11,7 +11,7 @@
 | Propiedad | La da el… | ¿Se pierde en monorepo? |
 |---|---|---|
 | Instalable solo (`cargo install`, brew, releases) | **empaquetado** | No |
-| No depende de ControlCode para guardar sesiones | **DB propia + cero deps de compilación** | No |
+| No depende de ADE AGS para guardar sesiones | **DB propia + cero deps de compilación** | No |
 | Las TUIs agénticas leen el historial por MCP | **protocolo MCP stdio** | No |
 | Versionado/tags propios | **tags con prefijo** (`ccmem-v0.1.0`) | No |
 | Sin duplicar el código de transcripts | **workspace de cargo** | Se **gana** |
@@ -22,22 +22,22 @@ Lo único que un repo separado da de verdad es una *marca* separada y un `git lo
 
 Estas tres reglas se escriben en el README del workspace y se testean en CI. Mientras se cumplan, estar en el mismo repo es puramente un detalle de dónde vive el código:
 
-1. **Compilación**: `ccmem-cli` y sus crates **no** dependen de `tauri`, `portable-pty`, ni `controlcode_lib`. Test en CI: `cargo tree -p ccmem-cli | grep -q tauri && exit 1`.
-2. **Runtime**: `ccmem` abre **su propia** DB en `~/.ccmem/mem.db`. `~/.controlcode/data.db` se abre en **solo lectura y de forma opcional** (`file:…?mode=ro`), tolerando `NotFound`. Test: correr toda la suite con `HOME` apuntando a un tmpdir vacío — todo verde.
+1. **Compilación**: `ccmem-cli` y sus crates **no** dependen de `tauri`, `portable-pty`, ni `ade_ags_lib`. Test en CI: `cargo tree -p ccmem-cli | grep -q tauri && exit 1`.
+2. **Runtime**: `ccmem` abre **su propia** DB en `~/.ccmem/mem.db`. `~/.ags/data.db` se abre en **solo lectura y de forma opcional** (`file:…?mode=ro`), tolerando `NotFound`. Test: correr toda la suite con `HOME` apuntando a un tmpdir vacío — todo verde.
 3. **Distribución**: `cargo install --git https://github.com/luis3132/ControlCode ccmem-cli` y los binarios de release funcionan sin que la app se instale nunca. Test: instalar el binario en un contenedor limpio y correr `ccmem doctor`.
 
 ### Y las TUIs agénticas, ¿acceden al historial por MCP?
 
-Sí, y no cambia una línea respecto del plan 1. El servidor MCP (`ccmem mcp`) es un proceso stdio que el agente lanza; expone `mem_recall_chat(query, agent?, project?, limit)` sobre la tabla `turns` — o sea, búsqueda cruda sobre **todos** los transcripts indexados de **todos** los agentes, no solo los que pasaron por ControlCode. Cualquier cliente MCP (Claude Code, Codex, Gemini CLI, OpenCode, Cursor, Windsurf, VS Code, Qwen, Kiro) lo consume igual.
+Sí, y no cambia una línea respecto del plan 1. El servidor MCP (`ccmem mcp`) es un proceso stdio que el agente lanza; expone `mem_recall_chat(query, agent?, project?, limit)` sobre la tabla `turns` — o sea, búsqueda cruda sobre **todos** los transcripts indexados de **todos** los agentes, no solo los que pasaron por ADE AGS. Cualquier cliente MCP (Claude Code, Codex, Gemini CLI, OpenCode, Cursor, Windsurf, VS Code, Qwen, Kiro) lo consume igual.
 
-El punto que importa: **el índice de chats se llena leyendo los archivos de cada CLI directamente**, no la `session_history` de ControlCode. La app aporta una señal *extra* y opcional (qué skills estaban attachadas), nunca la fuente de verdad de las sesiones. Si borrás ControlCode del disco, `ccmem` sigue indexando y sirviendo el historial completo.
+El punto que importa: **el índice de chats se llena leyendo los archivos de cada CLI directamente**, no la `session_history` de ADE AGS. La app aporta una señal *extra* y opcional (qué skills estaban attachadas), nunca la fuente de verdad de las sesiones. Si borrás ADE AGS del disco, `ccmem` sigue indexando y sirviendo el historial completo.
 
 ---
 
 ## Topología
 
 ```
-ControlCode/
+ADE AGS/
 ├── Cargo.toml                    ← NUEVO: [workspace] resolver = "2"
 │                                    members = ["src-tauri", "crates/*"]
 ├── Cargo.lock                    ← se mueve acá desde src-tauri/
@@ -48,7 +48,7 @@ ControlCode/
 │   ├── ccmem-core/               storage SQLite+FTS5, ranking, destilado, retrieval
 │   ├── ccmem-mcp/                servidor MCP stdio
 │   └── ccmem-cli/                [[bin]] ccmem
-├── src-tauri/                    la app, package `controlcode` sin cambios de nombre
+├── src-tauri/                    la app, package `ade-ags` sin cambios de nombre
 ├── src/                          frontend React
 ├── skills/                       skills que la app publica
 ├── plan.md                       plan original de la app (fases 0-10)
@@ -100,12 +100,12 @@ sha2       = "0.10"
 
 Es la única fase que este plan tiene y el plan 1 no. Cuatro cosas rompen si se saltean, y las cuatro van **en el mismo commit**:
 
-1. **`target/` se muda a la raíz.** `scripts/stage-cli.mjs` hardcodea `join(tauriDir, "target", "release", fileName)` → pasa a `join(root, "target", "release", fileName)`. Sin esto el bundle sale sin `ccode` (y el script está escrito para *no* fallar el build, así que el error sería silencioso — exactamente el modo de fallo más caro).
+1. **`target/` se muda a la raíz.** `scripts/stage-cli.mjs` hardcodea `join(tauriDir, "target", "release", fileName)` → pasa a `join(root, "target", "release", fileName)`. Sin esto el bundle sale sin `ags` (y el script está escrito para *no* fallar el build, así que el error sería silencioso — exactamente el modo de fallo más caro).
 2. **`.gitignore`**: agregar `/target` en la raíz; el `/target` de `src-tauri/.gitignore` queda muerto.
 3. **`Cargo.lock`**: borrar `src-tauri/Cargo.lock`, commitear el nuevo de la raíz.
 4. **`tauri build` sigue corriendo desde `src-tauri/`.** `tauri-build` maneja workspaces bien, pero hay que verificar una vez que `gen/schemas` se regenere igual.
 
-**Criterio de aceptación de M0**: `cargo build --workspace && cargo test --workspace` verde, `bun run tauri build --debug` produce el bundle con `binaries/ccode` adentro, y `git diff` sobre `src-tauri/src/` está vacío.
+**Criterio de aceptación de M0**: `cargo build --workspace && cargo test --workspace` verde, `bun run tauri build --debug` produce el bundle con `binaries/ags` adentro, y `git diff` sobre `src-tauri/src/` está vacío.
 
 ---
 
@@ -173,7 +173,7 @@ La invariante queda **codificada en la firma**: `remove_managed_symlink` recibe 
 | | Plan 1 (repo separado) | **Plan 2 (mismo repo)** |
 |---|---|---|
 | Duplicación de código de transcripts | Sí, entre M1 y M5 | **Ninguna, nunca** |
-| Fase de migración de ControlCode al crate | M5, obligatoria y postergable (deuda que se pudre) | **No existe** — M0 ya deja a la app usando el crate |
+| Fase de migración de ADE AGS al crate | M5, obligatoria y postergable (deuda que se pudre) | **No existe** — M0 ya deja a la app usando el crate |
 | Fase extra al inicio | — | M0, conversión a workspace (medio día) |
 | Esfuerzo total a v1.0 | ~7 fases | **~6 fases**, aprox. una semana menos |
 | CI | Dos pipelines | Uno solo, con jobs separados por crate |
@@ -181,7 +181,7 @@ La invariante queda **codificada en la firma**: `remove_managed_symlink` recibe 
 | Mitigación del riesgo | — | `src-tauri` no depende de `ccmem-core`; los crates compartidos son chicos, puros y con tests golden |
 | Marca / `git log` | Limpios y propios | Mezclados (mitigable con tags `ccmem-v*` y un `crates/ccmem-cli/README.md` propio) |
 
-**Si más adelante querés separarlo igual**: `git subtree split --prefix=crates` extrae los cinco crates con su historia intacta y ControlCode pasa a consumirlos como dependencia git. Esa puerta queda abierta y cuesta una tarde; la puerta inversa (unir dos repos que ya divergieron) cuesta semanas. Es un argumento fuerte para empezar acá.
+**Si más adelante querés separarlo igual**: `git subtree split --prefix=crates` extrae los cinco crates con su historia intacta y ADE AGS pasa a consumirlos como dependencia git. Esa puerta queda abierta y cuesta una tarde; la puerta inversa (unir dos repos que ya divergieron) cuesta semanas. Es un argumento fuerte para empezar acá.
 
 ---
 
@@ -194,7 +194,7 @@ La invariante queda **codificada en la firma**: `remove_managed_symlink` recibe 
 | **M2** | `ccmem mcp` (8 tools, JSON-RPC a mano) + `ccmem hook` (4 eventos de Claude Code) + `ccmem setup claude\|codex\|gemini\|opencode` con `--detect/--dry-run/--uninstall` + bloques gestionados + ranking + presupuesto de tokens + dedupe vía `injections`. **Acá es donde las TUIs agénticas empiezan a leer el historial solas.** | **v0.2** |
 | **M3** | Destilado con la CLI que ya tenés instalada: contrato de prompt, chunk/reduce, lock de concurrencia 1, timeouts, `judge`/`compare`, cadenas de supersede, `distill --queue` | v0.3 |
 | **M4** | Skills: `skill_catalog`/`skill_stats`, lector read-only de `data.db`, ranking de sugerencias, `IpcAttacher` + `skill.attach/detach/suggest` en el IPC + tabla `external_skill_links`, `DirectAttacher` | v0.4 |
-| **M5** | Integración visible: bundle de `ccmem` junto a `ccode`, sección Memoria en Settings, sugeridas en el diálogo de attach, SKILL.md `ccmem-memory`, y (opcional) página Memory en la app linkeando `ccmem-core` in-process | v0.5 |
+| **M5** | Integración visible: bundle de `ccmem` junto a `ags`, sección Memoria en Settings, sugeridas en el diálogo de attach, SKILL.md `ccmem-memory`, y (opcional) página Memory en la app linkeando `ccmem-core` in-process | v0.5 |
 | **M6** | `cargo-dist` (linux musl x86/arm, mac x86/arm firmado y notarizado, windows), `install.sh` con SHASUMS, tap de Homebrew, `setup` para cursor/windsurf/vscode/qwen/kiro, `ccmem daemon`, `export`/`import` | v1.0 |
 
 Todo lo demás — esquema de la DB, cursor de ingesta, redacción de secretos, contrato del destilado, escalera de retrieval, inteligencia de skills, matriz de configuración por agente, seguridad y riesgos — es literalmente el del plan 1. No se reescribe acá para que las dos variantes no se desincronicen: **`plan-ccmem.md` es la fuente de verdad de todo eso**.
@@ -210,7 +210,7 @@ Además de la verificación del plan 1, tres pruebas que existen solo porque com
 cargo tree -p ccmem-cli | grep -qi tauri && { echo "FALLA: ccmem depende de tauri"; exit 1; }
 cargo tree -p ccmem-cli | grep -qi portable-pty && exit 1
 
-# 2. Independencia de runtime: todo verde sin ControlCode en el disco
+# 2. Independencia de runtime: todo verde sin ADE AGS en el disco
 HOME=$(mktemp -d) cargo test -p ccmem-core -p ccmem-cli
 
 # 3. Independencia de distribución: instalación limpia desde el repo
@@ -219,25 +219,25 @@ HOME=$(mktemp -d) /tmp/ccmem-standalone/bin/ccmem doctor   # debe reportar 0 ses
 
 # 4. La conversión a workspace no rompió la app (M0)
 cargo build --workspace && cargo test --workspace
-bun run tauri build --debug && ls src-tauri/binaries/ccode
+bun run tauri build --debug && ls src-tauri/binaries/ags
 ```
 
 Y la prueba de la pregunta original — el historial por MCP sin la app corriendo:
 
 ```bash
-pkill -f ControlCode                       # la app apagada
+pkill -f ADE AGS                       # la app apagada
 ccmem sync --since 90d
 printf '%s\n' \
   '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2024-11-05","capabilities":{},"clientInfo":{"name":"t","version":"0"}}}' \
   '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"mem_recall_chat","arguments":{"query":"symlink reconciliation"}}}' \
   | ccmem mcp | jq -c '.result.content[0].text'
 ```
-Criterio de aprobación: devuelve turnos reales de sesiones tuyas, de más de un agente, con la app cerrada y sin haber abierto `~/.controlcode/data.db` para nada.
+Criterio de aprobación: devuelve turnos reales de sesiones tuyas, de más de un agente, con la app cerrada y sin haber abierto `~/.ags/data.db` para nada.
 
 ---
 
 ## Recomendación
 
-**Esta variante.** El repo separado compra una marca limpia y paga con ~750 líneas duplicadas y una migración (M5 del plan 1) que es fácil de postergar hasta que las dos copias divergen — y cuando divergen, el síntoma es que ControlCode y `ccmem` discrepan sobre dónde está un transcript, que es exactamente el bug más difícil de notar y más caro de depurar en todo el proyecto.
+**Esta variante.** El repo separado compra una marca limpia y paga con ~750 líneas duplicadas y una migración (M5 del plan 1) que es fácil de postergar hasta que las dos copias divergen — y cuando divergen, el síntoma es que ADE AGS y `ccmem` discrepan sobre dónde está un transcript, que es exactamente el bug más difícil de notar y más caro de depurar en todo el proyecto.
 
 El monorepo elimina esa clase de bug por construcción, ahorra una fase, y no cuesta nada en independencia siempre que las tres invariantes estén testeadas en CI. Y si la marca separada termina importando, `git subtree split` sigue disponible con la historia intacta.

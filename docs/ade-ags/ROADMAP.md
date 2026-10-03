@@ -2,7 +2,7 @@
 
 Ordem técnica. Sem datas. Cada etapa assume a anterior pronta o bastante para não inventar um segundo mecanismo paralelo.
 
-A base é o ControlCode 1.8.7 neste fork. O mapa do que já existe está em [ARCHITECTURE.md](./ARCHITECTURE.md).
+A base é o ADE AGS 1.8.7 neste fork. O mapa do que já existe está em [ARCHITECTURE.md](./ARCHITECTURE.md).
 
 ## 1. Bootstrap Windows
 
@@ -52,7 +52,7 @@ Pendente: resolver conflitos dentro da app e limpar a integração depois de apl
 
 ## 8. MCP interno da ADE
 
-O servidor `controlcode` em `ipc/mcp.rs` já é o MCP da app (browser, frota, git, pergunta, permissão). A ADE precisa do modelo "instala uma vez, anexa à missão ou à tab", que o próprio README lista como fase 11 e que ainda não existe. Codex já recebe task MCP, suporta orchestration e execução headless como Lead e Worker. Antigravity nativo também recebe MCP vinculado à Task. Gemini CLI é uma integração distinta e ainda não oferece essa orquestração.
+O servidor `ade-ags` em `ipc/mcp.rs` já é o MCP da app (browser, frota, git, pergunta, permissão). A ADE precisa do modelo "instala uma vez, anexa à missão ou à tab", que o próprio README lista como fase 11 e que ainda não existe. Codex já recebe task MCP, suporta orchestration e execução headless como Lead e Worker. Antigravity nativo também recebe MCP vinculado à Task. Gemini CLI é uma integração distinta e ainda não oferece essa orquestração.
 
 Depende de: 2 (cada provider declara o estilo de MCP) e de 5 (anexar à missão). Não depende de um backend cloud.
 
@@ -66,7 +66,7 @@ Depende de: 2 (cada provider declara o estilo de MCP) e de 5 (anexar à missão)
   - `since(after)` atualiza quem chega tarde e marca `truncated` se algo já saiu do buffer.
   - `wait` bloqueia até chegar algo novo.
   - A UI recebe tudo pelo único evento Tauri `ade-event`.
-  - A CLI usa `ccode events since|wait`, com filtros de tópico, run, missão e task.
+  - A CLI usa `ags events since|wait`, com filtros de tópico, run, missão e task.
 
 Os canais antigos (`cc-task-*`, `cc-mission-changed`) continuam funcionando, então as telas existentes não mudaram.
 

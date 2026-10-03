@@ -160,7 +160,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
 
   const postToPage = useCallback((type: SimpleAppMessage["type"]) => {
     if (!target) return;
-    iframe.current?.contentWindow?.postMessage({ source: "controlcode", type } satisfies AppMessage, target.proxyOrigin);
+    iframe.current?.contentWindow?.postMessage({ source: "ade-ags", type } satisfies AppMessage, target.proxyOrigin);
   }, [target]);
 
   // La red se anota solo con el panel de debug abierto, en el proxy y en la página: guardar
@@ -173,7 +173,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   useEffect(() => {
     if (!recordingOrigin) return;
     previewSetRecording(recordingOrigin, view.id, debugOpen).catch(() => undefined);
-    const message: SimpleAppMessage = { source: "controlcode", type: debugOpen ? "net:on" : "net:off" };
+    const message: SimpleAppMessage = { source: "ade-ags", type: debugOpen ? "net:on" : "net:off" };
     iframe.current?.contentWindow?.postMessage(message, recordingOrigin);
     if (!debugOpen) useDebugStore.getState().apply(view.id, clearNetwork);
     // Al cambiar de sitio o cerrar la tab, este deja de mirar el anterior.
@@ -354,10 +354,10 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         setDocId(msg.payload.doc);
         useDebugStore.getState().apply(view.id, (log) => startDocument(log, msg.payload.doc, url, Date.now()));
         // Con esto la página aprende a quién mandarle lo que capturó durante la carga.
-        (e.source as Window).postMessage({ source: "controlcode", type: "connect" } satisfies AppMessage, target.proxyOrigin);
+        (e.source as Window).postMessage({ source: "ade-ags", type: "connect" } satisfies AppMessage, target.proxyOrigin);
         // Cada documento arranca sin anotar la red: si el panel está abierto, se le avisa.
         if (debugOpenRef.current) {
-          (e.source as Window).postMessage({ source: "controlcode", type: "net:on" } satisfies AppMessage, target.proxyOrigin);
+          (e.source as Window).postMessage({ source: "ade-ags", type: "net:on" } satisfies AppMessage, target.proxyOrigin);
         }
         // Y el táctil se vuelve a poner: las hojas de estilo de la página nueva están sin
         // tocar, así que sin esto la emulación se apagaría sola al navegar.
@@ -498,7 +498,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     const display = (url: string) => toTargetUrl(url, target.proxyOrigin, target.targetOrigin);
     // Único: va en el aviso que recibe el agente y es con lo que lo busca después.
     const batchId = newMarkId("m");
-    // Un agente con el MCP de Control Code no necesita el volcado: se le dice qué hay y lo
+    // Un agente con el MCP de ADE AGS no necesita el volcado: se le dice qué hay y lo
     // lee con `browser_marked`, que se lo describe como está AHORA —si algo cambió o quedó
     // tapado desde que se marcó, se entera— y le da un ref para tocarlo. Al que no lo
     // tiene se le manda todo servido, que es lo único que le puede llegar.

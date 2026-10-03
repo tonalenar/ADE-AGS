@@ -27,13 +27,13 @@ export function hasBrowserMcp(agentId: string | null | undefined): boolean {
 }
 
 /** El nombre del servidor MCP de la app (`SERVER_NAME` en `src-tauri/src/ipc/mcp.rs`). */
-const SERVER_NAME = "controlcode";
+const SERVER_NAME = "ags";
 
 /**
  * Con qué nombre tiene que llamar a las tools este agente.
  *
  * OpenCode registra las de un servidor MCP con el nombre del servidor de prefijo
- * (`controlcode_browser_marked`); Claude Code las deja como vienen. Va en todo texto que
+ * (`ags_browser_marked`); Claude Code las deja como vienen. Va en todo texto que
  * mande al agente a usar una: el nombre que lee tiene que ser el que puede escribir.
  */
 export function browserToolPrefix(agentId: string | null | undefined): string {
@@ -46,10 +46,10 @@ const quote = (value: string) => (value.includes('"') ? `'${value}'` : `"${value
 const VALUE = String.raw`(?:"[^"]*"|'[^']*'|\S+)`;
 
 /**
- * Un `--mcp-config` de Control Code que quedó de una corrida anterior, con el
+ * Un `--mcp-config` de ADE AGS que quedó de una corrida anterior, con el
  * `--allowedTools` que lo acompaña.
  *
- * Se reconoce por la carpeta (`.controlcode/mcp`), no por la ruta exacta: el nombre del
+ * Se reconoce por la carpeta (`.ags/mcp`), no por la ruta exacta: el nombre del
  * archivo cambió entre versiones, y compararlo con el de ahora dejaba pasar el viejo. El
  * `--allowedTools` solo se saca si viene pegado al config, que es como lo escribe esta
  * función — uno que el usuario haya puesto en otro lado es suyo y se respeta.
@@ -88,7 +88,7 @@ export interface BrowserLaunch {
  * El lanzamiento de una tab con el navegador de la app enchufado, en el dialecto que
  * acepte esa TUI: flags para Claude Code, una variable de entorno para OpenCode.
  *
- * Si no se puede (una build sin `ccode`, o una TUI a la que todavía no se le verificó el
+ * Si no se puede (una build sin `ags`, o una TUI a la que todavía no se le verificó el
  * formato), la tab arranca como siempre: el navegador es un agregado, no una condición.
  */
 export async function withBrowserMcp(

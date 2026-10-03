@@ -1,6 +1,6 @@
-# Arquitetura atual do ControlCode, lida para a ADE AGS
+# Arquitetura atual do ADE AGS, lida para a ADE AGS
 
-Este documento descreve o ControlCode **como ele está no fork**, no commit de upstream `632a57b` (tag de versão `1.8.7`). Não propõe a arquitetura nova. A proposta de providers está em [PROVIDER_ARCHITECTURE.md](./PROVIDER_ARCHITECTURE.md). O que muda ao longo do tempo está em [ROADMAP.md](./ROADMAP.md).
+Este documento descreve o ADE AGS **como ele está no fork**, no commit de upstream `632a57b` (tag de versão `1.8.7`). Não propõe a arquitetura nova. A proposta de providers está em [PROVIDER_ARCHITECTURE.md](./PROVIDER_ARCHITECTURE.md). O que muda ao longo do tempo está em [ROADMAP.md](./ROADMAP.md).
 
 A licença do código é Apache 2.0 (`LICENSE`). O rodapé do `README.md` diz MIT. A licença que vale é o arquivo `LICENSE`.
 
@@ -12,11 +12,11 @@ Aplicação desktop local-first. O frontend não fala com a rede da ADE. O que s
 React 19 + TypeScript + Tailwind 4 + Zustand
 xterm.js · CodeMirror
         │  invoke / eventos Tauri
-Rust (crate controlcode, lib controlcode_lib)
+Rust (crate ade-ags, lib ade_ags_lib)
   terminal · runs · explorer · scm · preview
   skills · marketplace · session · agents · accounts
   usage · prelaunch · orchestrator · window
-  database (SQLite) · ipc (ccode + MCP) · forge · updates
+  database (SQLite) · ipc (ags + MCP) · forge · updates
 ```
 
 Cada `mod.rs` do backend só declara e reexporta. A árvore de pastas é o mapa.
@@ -25,8 +25,8 @@ Dois binários saem do mesmo crate:
 
 | Binário | Papel |
 |---|---|
-| `controlcode` | A app. O nome vem de `productName` em `tauri.conf.json`. Esta versão do Tauri não expõe `mainBinaryName`. |
-| `ccode` | CLI. Está em `src-tauri/src/bin/cli.rs` para reusar `ipc::protocol`. |
+| `ade-ags` | A app. O nome vem de `productName` em `tauri.conf.json`. Esta versão do Tauri não expõe `mainBinaryName`. |
+| `ags` | CLI. Está em `src-tauri/src/bin/cli.rs` para reusar `ipc::protocol`. |
 
 ## Frontend
 
@@ -42,7 +42,7 @@ Comandos Tauri cruzam a fronteira. A CLI não reimplementa essas ações: `ipc/c
 
 ## PTY e terminal
 
-`terminal/pty_manager.rs` cria um PTY com `portable-pty`. O frontend mede `cols`/`rows` antes do spawn. A saída vai ao webview por eventos `pty-data-{id}` e a uma scrollback em memória, que é o que `ccode tab output` lê.
+`terminal/pty_manager.rs` cria um PTY com `portable-pty`. O frontend mede `cols`/`rows` antes do spawn. A saída vai ao webview por eventos `pty-data-{id}` e a uma scrollback em memória, que é o que `ags tab output` lê.
 
 No Windows o script de prelaunch roda com `cmd /C`. No Unix, com `$SHELL -l -c`. O agente "bash" da tabela é a saída de emergência e é reportado sempre disponível, sem sondar o `PATH`, porque no Windows `bash` muitas vezes não existe. O shell real da tab no Windows é `cmd`.
 
@@ -102,15 +102,15 @@ Credenciais de git do forge usam o keyring do SO (`keyring` com `windows-native`
 
 ## Skills
 
-Cópia canônica em `~/.controlcode/skills/` (configurável). O projeto só recebe symlink, reconciliado antes de cada spawn a partir da *intenção* (skill nesta pasta ou nesta tab). Symlink que não aponta para o diretório global não é tocado.
+Cópia canônica em `~/.ags/skills/` (configurável). O projeto só recebe symlink, reconciliado antes de cada spawn a partir da *intenção* (skill nesta pasta ou nesta tab). Symlink que não aponta para o diretório global não é tocado.
 
 Marketplace: GitHub, pasta local, skills.sh. Registries genéricos por git e URL de manifest JSON ainda não existem (o próprio README marca a fase 6 como incompleta).
 
-A skill `skills/controlcode-orchestrator` vem no bundle e se instala sozinha.
+A skill `skills/ags-orchestrator` vem no bundle e se instala sozinha.
 
 ## MCP
 
-Hoje não há um gerenciador de servidores MCP do usuário. O que existe é o servidor MCP **da app**, nome `controlcode`, implementado em `ipc/mcp.rs` e exposto por `ccode mcp` em stdio.
+Hoje não há um gerenciador de servidores MCP do usuário. O que existe é o servidor MCP **da app**, nome `ade-ags`, implementado em `ipc/mcp.rs` e exposto por `ags mcp` em stdio.
 
 Ele dá ao agente da tab: browser do projeto, orquestração da frota, conta git, pergunta ao usuário. Numa tarefa de frota ele também é o prompt de permissão (`approve_tool_use`). Se a app não responde, a resposta é não.
 
@@ -122,15 +122,15 @@ São três camadas que já existem e não se substituem:
 
 1. **Tabs interativas.** `orchestrator/` comprime a saída (`digest`), guarda o cursor de leitura e oferece `watch` para não ficar em polling. O teto padrão é 3 tabs observadas.
 2. **Frota.** `runs/` executa o agente sem PTY, lendo um stream JSON. Há supervisor, adapters por agente, worktree, broker de permissão, regras, roteamento por complexidade, cota, scheduler e um DAG (`run plan`). Papéis hoje: `lead` e `worker`. Fatos do run (`run_facts`) são o embrião de memória compartilhada da missão, com o aviso de que são dados, não instruções.
-3. **`ccode`.** TCP em loopback. O handshake fica em `~/.controlcode/ipc.json` (porta, token, pid, `protocol`) e numa cópia por instância em `~/.controlcode/ipc/<pid>.json`, apontada por `CONTROLCODE_HANDSHAKE`. Autorização é o token. O arquivo precisa ser legível só pelo usuário.
+3. **`ags`.** TCP em loopback. O handshake fica em `~/.ags/ipc.json` (porta, token, pid, `protocol`) e numa cópia por instância em `~/.ags/ipc/<pid>.json`, apontada por `AGS_HANDSHAKE`. Autorização é o token. O arquivo precisa ser legível só pelo usuário.
 
-Um worktree de frota vive em `~/.controlcode/worktrees`, ramo `cc/<task>`. Não é descartado sozinho. Descartar recusa se há mudança sem commit.
+Um worktree de frota vive em `~/.ags/worktrees`, ramo `cc/<task>`. Não é descartado sozinho. Descartar recusa se há mudança sem commit.
 
 A frota já lança Gemini, Codex, OpenCode e Kimi em modo headless, não só o Claude. O que ainda é específico do Claude é o broker de permissão via MCP. O adapter Gemini (`runs/adapters.rs`) usa `--approval-mode auto_edit`, repassa `account_env` e não liga o MCP.
 
 ## Browser
 
-`preview/` é um proxy HTTP local na frente do dev server. Injeta o seletor de elementos e deixa o WebSocket de hot reload passar. A tab de browser marca um elemento e manda ao agente o componente, o seletor e o HTML. As tools `browser_*` saem pelo mesmo MCP `controlcode`.
+`preview/` é um proxy HTTP local na frente do dev server. Injeta o seletor de elementos e deixa o WebSocket de hot reload passar. A tab de browser marca um elemento e manda ao agente o componente, o seletor e o HTML. As tools `browser_*` saem pelo mesmo MCP `ade-ags`.
 
 ## Git
 
@@ -138,18 +138,18 @@ A frota já lança Gemini, Codex, OpenCode e Kimi em modo headless, não só o C
 
 ## Persistência local
 
-SQLite em `~/.controlcode/data.db`. Schema versionado com `PRAGMA user_version` (versão 18 neste commit). Tabelas que importam para a ADE: `workspaces`, `windows`, `tabs` (inclui `account_id`, `session_id`, `prelaunch`), `skills`, `project_skills`, `custom_agents`, `session_history`, `agent_accounts`, `prelaunch_presets`, `runs`, `tasks`, `task_approvals`, `permission_rules`, `task_deps`, `run_facts`, `git_accounts`.
+SQLite em `~/.ags/data.db`. Schema versionado com `PRAGMA user_version` (versão 18 neste commit). Tabelas que importam para a ADE: `workspaces`, `windows`, `tabs` (inclui `account_id`, `session_id`, `prelaunch`), `skills`, `project_skills`, `custom_agents`, `session_history`, `agent_accounts`, `prelaunch_presets`, `runs`, `tasks`, `task_approvals`, `permission_rules`, `task_deps`, `run_facts`, `git_accounts`.
 
 Nada disso é um serviço. Não há Postgres, Supabase nem Docker.
 
 Dois roots de dados, e os dois entram em qualquer rebrand:
 
-- `~/.controlcode/` — banco, skills, IPC, worktrees, runs. Caminho hardcoded em `database/connection.rs`.
+- `~/.ags/` — banco, skills, IPC, worktrees, runs. Caminho hardcoded em `database/connection.rs`.
 - app data do Tauri, derivado do identifier `com.luis.controlcode` — contas em `accounts/`.
 
 ## O que será mantido
 
-- Tauri 2, React, o PTY, Job Objects, SQLite local, o modelo "conta = diretório + variável de ambiente", skills por symlink, a CLI `ccode` com token em loopback, a frota com worktree e permissão negada por omissão, o browser por proxy local, o git do usuário, o keyring para segredo de git.
+- Tauri 2, React, o PTY, Job Objects, SQLite local, o modelo "conta = diretório + variável de ambiente", skills por symlink, a CLI `ags` com token em loopback, a frota com worktree e permissão negada por omissão, o browser por proxy local, o git do usuário, o keyring para segredo de git.
 - Os cinco agentes de fábrica e as TUIs custom. Nada disso sai para "abrir espaço".
 
 ## O que será adaptado
@@ -161,8 +161,8 @@ Dois roots de dados, e os dois entram em qualquer rebrand:
 
 ## O que provavelmente será substituído
 
-- A ideia de que orquestração é só a frota atual mais a skill `controlcode-orchestrator`. A ADE precisa de missão, squad e handoff como objetos de primeira classe. A frota vira um executor por baixo, não o modelo de produto.
-- O servidor MCP único e acoplado ao nome `controlcode`, quando existir o MCP interno da ADE. O mecanismo (stdio, `ccode mcp`, broker que nega se ninguém responde) permanece.
+- A ideia de que orquestração é só a frota atual mais a skill `ags-orchestrator`. A ADE precisa de missão, squad e handoff como objetos de primeira classe. A frota vira um executor por baixo, não o modelo de produto.
+- O servidor MCP único e acoplado ao nome `ade-ags`, quando existir o MCP interno da ADE. O mecanismo (stdio, `ags mcp`, broker que nega se ninguém responde) permanece.
 - Texto livre como único handoff (`run.rerouteTask` muda agente e mantém branch/worktree; não há um pacote estruturado de contexto).
 
 ## O que ainda precisa ser criado

@@ -162,7 +162,7 @@ fn watch_wait_gets_a_read_timeout_longer_than_its_own_wait() {
     assert!(custom > Duration::from_secs(900));
 }
 
-/// `ccode skills` y `ccode agents` no llevan acción; el resto sigue exigiéndola.
+/// `ags skills` y `ags agents` no llevan acción; el resto sigue exigiéndola.
 #[test]
 fn single_word_groups_map_to_their_list_action() {
     assert_eq!(shortcut("skills"), Some("skill.list"));
@@ -238,7 +238,7 @@ fn dash_prefixed_values_need_the_json_escape_hatch() {
 /// El `USAGE` se escribió a mano y se quedó atrás: llegó a no nombrar ni `mcp` —que es lo
 /// que más corre— ni ninguno de los comandos de la flota, que se podían escribir en la
 /// terminal y no figuraban en ningún lado. Esto lo vuelve un error de test en vez de algo
-/// que se descubre cuando alguien escribe `ccode` y no encuentra lo que busca.
+/// que se descubre cuando alguien escribe `ags` y no encuentra lo que busca.
 ///
 /// Se compara por GRUPO y no por comando: la ayuda agrupa (`tab create`, `tab close`) y
 /// exigir cada acción textual convertiría el test en una segunda copia del despachador.
@@ -279,6 +279,6 @@ fn la_ayuda_nombra_todos_los_grupos_que_la_app_atiende() {
     }
 
     // Y el servidor MCP, que no es un comando del despachador sino un modo del binario.
-    assert!(USAGE.contains("mcp --cwd"), "la ayuda no explica `ccode mcp`");
+    assert!(USAGE.contains("mcp --cwd"), "la ayuda no explica `ags mcp`");
     assert!(USAGE.contains("mcp --task"));
 }

@@ -12,7 +12,7 @@
 //!   hay que conservar ya vive en la base (tareas, `usage_events`, el NDJSON de cada tarea).
 //!   Si alguien pide un `seq` que ya salió del buffer, la respuesta lo dice (`truncated`).
 //! - **Esperar sin sondear** (`wait`): bloquea hasta que llega algo nuevo o vence el plazo.
-//!   Es lo que usan la CLI (`ccode events wait`) y el Map Mode.
+//!   Es lo que usan la CLI (`ags events wait`) y el Map Mode.
 //! - **Hacia la UI**: un único evento Tauri, [`EVENT`], con el evento entero.
 //!
 //! Publicar nunca toma el lock de la base: se llama desde lugares que a veces lo tienen

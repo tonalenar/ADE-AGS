@@ -26,18 +26,18 @@
 //! corriendo en su origen: ni más, ni menos.
 
 /// Donde el runtime manda los pedidos a otros orígenes: `FWD_PATH?url=<url absoluta>`.
-pub(crate) const FWD_PATH: &str = "/__controlcode__/fwd";
+pub(crate) const FWD_PATH: &str = "/__ags__/fwd";
 
 /// El modo de credenciales del pedido (`omit`, `same-origin`, `include`), que el proxy no
 /// puede deducir: es una opción del `fetch` (o el `withCredentials` de un XHR).
-pub(crate) const CRED_HEADER: &str = "x-controlcode-cred";
+pub(crate) const CRED_HEADER: &str = "x-ags-cred";
 
 /// Las cabeceras que puso la página, por nombre y separadas por coma. Lo demás que llegue
 /// lo agregó el motor del webview por su cuenta: `Cache-Control: no-cache` y `Pragma:
 /// no-cache` con la caché desactivada, por ejemplo. Un navegador las pone en la capa de
 /// red, después del chequeo de CORS, así que no piden preflight; contándolas como de la
 /// página, el proxy pedía uno que el servidor rechazaba con toda razón.
-pub(crate) const HEADERS_HEADER: &str = "x-controlcode-headers";
+pub(crate) const HEADERS_HEADER: &str = "x-ags-headers";
 
 /// Los nombres que trae `HEADERS_HEADER`, en minúsculas. `Content-Type` siempre cuenta
 /// como de la página: si no la puso ella, sale del cuerpo que mandó, y para CORS es igual.
@@ -51,7 +51,7 @@ pub(crate) fn authored_headers(value: &str) -> std::collections::HashSet<String>
 }
 
 /// En la respuesta a un pedido que CORS no dejó pasar: el motivo, para la consola.
-pub(crate) const CORS_HEADER: &str = "x-controlcode-cors";
+pub(crate) const CORS_HEADER: &str = "x-ags-cors";
 
 /// Cómo pide la página que viajen las cookies.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

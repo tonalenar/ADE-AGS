@@ -52,13 +52,13 @@ describe("el mensaje para el agente", () => {
       [el({ component: null, attributes: {}, text: "" })],
       "el botón no se ve",
       display,
-      [{ id: "s-abcd1234", url: `${proxy}/login`, path: "/tmp/controlcode/capturas/captura-1-abcd.png" }]
+      [{ id: "s-abcd1234", url: `${proxy}/login`, path: "/tmp/ade-ags/capturas/captura-1-abcd.png" }]
     );
     expect(text.split("\n").slice(-6)).toEqual([
       "Screenshots of the page annotated by the user (how they see it on screen; open each image to view it):",
       "",
       "1. [s-abcd1234] http://localhost:5173/login",
-      "/tmp/controlcode/capturas/captura-1-abcd.png",
+      "/tmp/ade-ags/capturas/captura-1-abcd.png",
       "",
       "Note from the user: el botón no se ve",
     ]);

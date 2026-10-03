@@ -28,7 +28,7 @@ mod types;
 mod test;
 
 pub use authoring::*;
-pub use bundled::ensure_bundled_skills;
+pub use bundled::{ensure_bundled_skills, migrate_legacy_skill};
 pub(crate) use frontmatter::{rename_in_content, scan_frontmatter_for_marketplace};
 pub use install::*;
 pub use links::*;

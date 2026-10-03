@@ -32,10 +32,10 @@ export function tokenPageUrl(kind: ForgeKind, host: string): string | null {
   switch (kind) {
     case "github":
       return host === "github.com"
-        ? "https://github.com/settings/tokens/new?scopes=repo,read:org,workflow&description=ControlCode"
-        : `https://${host}/settings/tokens/new?scopes=repo,read:org,workflow&description=ControlCode`;
+        ? "https://github.com/settings/tokens/new?scopes=repo,read:org,workflow&description=ADE AGS"
+        : `https://${host}/settings/tokens/new?scopes=repo,read:org,workflow&description=ADE AGS`;
     case "gitlab":
-      return `https://${host}/-/user_settings/personal_access_tokens?name=ControlCode&scopes=api,read_user,write_repository`;
+      return `https://${host}/-/user_settings/personal_access_tokens?name=ADE AGS&scopes=api,read_user,write_repository`;
     case "gitea":
       return `https://${host}/user/settings/applications`;
     default:

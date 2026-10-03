@@ -1,16 +1,16 @@
 ---
-name: controlcode-orchestrator
-description: Drive the Control Code desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.18.0
+name: ags-orchestrator
+description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
+version: 1.19.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
 ---
 
-# Orchestrating Control Code
+# Orchestrating ADE AGS
 
-Control Code is a desktop app where every tab is a real terminal: most run a coding agent,
-and some run a plain shell (the `bash` agent) for servers, builds and logs. The `ccode` CLI
+ADE AGS is a desktop app where every tab is a real terminal: most run a coding agent,
+and some run a plain shell (the `bash` agent) for servers, builds and logs. The `ags` CLI
 talks to the running app, so you can set up, drive and inspect those tabs yourself instead
 of asking the user to click through the UI.
 
@@ -27,31 +27,31 @@ of asking the user to click through the UI.
 ## Before anything else
 
 ```bash
-ccode app status
+ags app status
 ```
 
 Every command prints **one line of JSON to stdout**. Exit codes: `0` success,
 `1` the app rejected the command (read `.error`), `2` bad usage, `3` the app isn't running.
 
-If you get `3`, stop and tell the user to open Control Code — do not try to work around it.
+If you get `3`, stop and tell the user to open ADE AGS — do not try to work around it.
 
-When you run inside one of the app's tabs, `ccode` always reaches **the instance that opened
-that tab** (it inherits `CONTROLCODE_HANDSHAKE`), even if the user has another Control Code
+When you run inside one of the app's tabs, `ags` always reaches **the instance that opened
+that tab** (it inherits `AGS_HANDSHAKE`), even if the user has another ADE AGS
 open. From any other terminal it reaches the most recently started instance.
 
 Each command's main argument can be written loose, without its flag. Both forms work:
 
 ```bash
-ccode tab output t1                 # same as --tab t1
-ccode skill install git-helper      # same as --skill git-helper
-ccode skill search react            # same as --query react
-ccode tab send t1 "run the tests"   # same as --tab t1 --text "run the tests"
+ags tab output t1                 # same as --tab t1
+ags skill install git-helper      # same as --skill git-helper
+ags skill search react            # same as --query react
+ags tab send t1 "run the tests"   # same as --tab t1 --text "run the tests"
 ```
 
 ## Orient yourself first
 
 ```bash
-ccode workspace status
+ags workspace status
 ```
 
 Returns every open window and every running tab, with each tab's `id`, `cwd`, `agentId`
@@ -63,10 +63,10 @@ and opening duplicates in the same folder is the most common way to make a mess 
 Don't guess these — ask:
 
 ```bash
-ccode agents      # every agent id you can pass to --agent
-ccode accounts    # every account name you can pass to --account
-ccode skills      # every skill name you can pass to --skills (installed + cached repos)
-ccode prelaunch   # every saved command you can pass to --pre
+ags agents      # every agent id you can pass to --agent
+ags accounts    # every account name you can pass to --account
+ags skills      # every skill name you can pass to --skills (installed + cached repos)
+ags prelaunch   # every saved command you can pass to --pre
 ```
 
 `agents` lists the built-in TUIs (`claude-code`, `gemini-cli`, `codex`, `opencode`,
@@ -79,12 +79,12 @@ forgiving: `claudecode`, `claude-code` and `Claude Code` all work.
 **names** from `installed`. If what you want is only in `available`, install it first:
 
 ```bash
-ccode skill install git-helper
+ags skill install git-helper
 ```
 
 `available` is **not** the whole catalogue, and refreshing won't make it one: the skills.sh
 directory cannot be listed, only searched, so nothing from it ever appears there. Use
-`ccode skill search <text>` to reach it — see "Installing skills".
+`ags skill search <text>` to reach it — see "Installing skills".
 
 `accounts` lists the extra accounts the user created for a TUI, as `{id, agent, name}`.
 The **main account is not listed** — it isn't something the app manages, it's simply what
@@ -92,13 +92,13 @@ you get when you omit `--account`.
 
 `prelaunch` returns the commands the user saved to prepare an environment, as
 `{id, name, command}`. An empty list means the user never set any up; it is not an error,
-it just means there is nothing to reuse. `ccode prelaunch list` is the same command.
+it just means there is nothing to reuse. `ags prelaunch list` is the same command.
 
 ## Opening tabs
 
 ```bash
-ccode tab create --cwd /path/to/project --agent claude-code
-ccode tab create --cwd /repo/api --agent gemini-cli --skills git-helper,testing
+ags tab create --cwd /path/to/project --agent claude-code
+ags tab create --cwd /repo/api --agent gemini-cli --skills git-helper,testing
 ```
 
 Skills are attached before the agent boots, so they're available from its first message —
@@ -109,10 +109,10 @@ Add `--window <label>` to target a specific window; without it, tabs go to the f
 ### Running a tab under a different account
 
 A TUI can hold several accounts (separate logins, separate rate limits). Pass the name
-exactly as `ccode accounts` reports it:
+exactly as `ags accounts` reports it:
 
 ```bash
-ccode tab create --cwd /repo/api --agent claude-code --account trabajo
+ags tab create --cwd /repo/api --agent claude-code --account trabajo
 ```
 
 Account names are scoped to their TUI: `trabajo` for `claude-code` and `trabajo` for
@@ -130,12 +130,12 @@ obvious way — it will fail in a *confusing* one. `pytest` reports `ModuleNotFo
 and the agent starts "fixing" a dependency that is actually installed.
 
 ```bash
-ccode tab create --cwd /repo/ml --agent claude-code --pre "conda activate ml"
-ccode tab create --cwd /repo/api --agent codex --pre "conda environment" --pre "nvm use"
+ags tab create --cwd /repo/ml --agent claude-code --pre "conda activate ml"
+ags tab create --cwd /repo/api --agent codex --pre "conda environment" --pre "nvm use"
 ```
 
 `--pre` repeats with **no limit**, and each value can be either the **name of a saved
-command** (as `ccode prelaunch` reports it) or a **literal command**. If the text matches a
+command** (as `ags prelaunch` reports it) or a **literal command**. If the text matches a
 saved name it wins; otherwise it runs as written. The order is semantic, not cosmetic:
 `nvm use 18` has to run before anything that depends on npm.
 
@@ -156,7 +156,7 @@ specific to the task at hand.
 ### Starting an agent already working
 
 ```bash
-ccode tab create --cwd /repo/api --agent claude-code \
+ags tab create --cwd /repo/api --agent claude-code \
   --initprompt "read the failing tests in tests/ and fix them"
 ```
 
@@ -172,9 +172,9 @@ For a monorepo, one tab per subfolder is the point — each agent stays scoped t
 directory, and each can start with its own task:
 
 ```bash
-ccode tab create --cwd /repo/api --agent claude-code --initprompt "audit the auth endpoints"
-ccode tab create --cwd /repo/web --agent gemini-cli --initprompt "list unused components"
-ccode tab create --cwd /repo --agent bash
+ags tab create --cwd /repo/api --agent claude-code --initprompt "audit the auth endpoints"
+ags tab create --cwd /repo/web --agent gemini-cli --initprompt "list unused components"
+ags tab create --cwd /repo --agent bash
 ```
 
 **A prompt you send is a prompt that runs.** Treat `--initprompt` like `tab send`: it acts
@@ -200,9 +200,9 @@ your own shell.
 ### Starting one
 
 ```bash
-ccode tab create /repo/web --agent bash --initprompt "bun dev"
-ccode tab create /repo/api --agent bash --pre "nvm use 22" --initprompt "npm run dev"
-ccode tab create /repo --agent bash                  # an empty shell, to use later
+ags tab create /repo/web --agent bash --initprompt "bun dev"
+ags tab create /repo/api --agent bash --pre "nvm use 22" --initprompt "npm run dev"
+ags tab create /repo --agent bash                  # an empty shell, to use later
 ```
 
 On a shell tab, `--initprompt` is simply **the first command**: it's typed and run as soon as
@@ -212,9 +212,9 @@ environment.
 ### Running commands in it
 
 ```bash
-ccode tab send <id> "cargo test"                     # types it and presses Enter
-ccode tab send <id> $'\x03' --no-enter               # Ctrl-C — stops the server or the command
-ccode tab send <id> "q" --no-enter                   # a key, for a pager or a prompt
+ags tab send <id> "cargo test"                     # types it and presses Enter
+ags tab send <id> $'\x03' --no-enter               # Ctrl-C — stops the server or the command
+ags tab send <id> "q" --no-enter                   # a key, for a pager or a prompt
 ```
 
 A shell runs **anything** you send, with the user's permissions, in their real environment.
@@ -234,10 +234,10 @@ Use the same watch loop as with agents (next section). For a shell tab the event
   `exitCode`. A command failing inside the shell is *not* an `exit`: read the output.
 
 ```bash
-ccode tab create /repo/web --agent bash --initprompt "bun dev"
-ccode watch add <id> --idle 5            # servers go quiet fast once they're up
-ccode watch wait --timeout 120
-ccode tab output <id>                    # "Local: http://localhost:5173" — or the error
+ags tab create /repo/web --agent bash --initprompt "bun dev"
+ags watch add <id> --idle 5            # servers go quiet fast once they're up
+ags watch wait --timeout 120
+ags tab output <id>                    # "Local: http://localhost:5173" — or the error
 ```
 
 `tab output` is the same digest as for agents: errors and warnings first, progress bars
@@ -247,7 +247,7 @@ by reading it again later — you only pay for the new lines.
 ## Reading what an agent is doing
 
 ```bash
-ccode tab output <tabId>
+ags tab output <tabId>
 ```
 
 You get a **digest**, not a transcript:
@@ -273,8 +273,8 @@ Three things to know, because they change how you should call it:
 Escape hatches, for when the digest isn't enough:
 
 ```bash
-ccode tab output <tabId> --full             # whole live scrollback, still compressed
-ccode tab output <tabId> --raw --lines 80   # exact text, uncompressed; doesn't move the cursor
+ags tab output <tabId> --full             # whole live scrollback, still compressed
+ags tab output <tabId> --raw --lines 80   # exact text, uncompressed; doesn't move the cursor
 ```
 
 Reach for `--raw` when you need the literal bytes (a diff, a table, an exact path) and for
@@ -289,9 +289,9 @@ Agents take minutes, and so do builds. **Don't loop on `tab output`** — ask th
 something happens:
 
 ```bash
-ccode watch add <tabId>            # start watching (default: idle after 20s of silence)
-ccode watch add <tabId> --idle 60  # a slower agent
-ccode watch wait --timeout 300     # blocks until something happens
+ags watch add <tabId>            # start watching (default: idle after 20s of silence)
+ags watch add <tabId> --idle 60  # a slower agent
+ags watch wait --timeout 300     # blocks until something happens
 ```
 
 `watch wait` returns as soon as any watched tab has news, and each event is consumed once:
@@ -313,8 +313,8 @@ or give up and tell the user. The typical loop is: `watch add` each tab you care
 `watch wait` → `tab output` only on the tab the event named → repeat.
 
 ```bash
-ccode watch list                   # what you're watching, and the limit
-ccode watch remove <tabId>         # stop when you're done with it
+ags watch list                   # what you're watching, and the limit
+ags watch remove <tabId>         # stop when you're done with it
 ```
 
 **There is a limit** (3 tabs by default) and `watch add` fails once you hit it. That's
@@ -326,13 +326,13 @@ more, the setting lives in Settings → Orchestrator mode.
 
 A tab is a live agent session, so you can keep talking to it — `--initprompt` starts the
 conversation, `tab send` continues it. The tab id is the handle; it stays valid as long as
-the tab is open (`ccode tab list` tells you which still are).
+the tab is open (`ags tab list` tells you which still are).
 
 ```bash
-ccode tab send t1 "run the tests and summarise the failures"
-ccode watch wait --timeout 600          # wait for it to finish
-ccode tab output t1                     # read what it answered
-ccode tab send t1 "now fix the first one"
+ags tab send t1 "run the tests and summarise the failures"
+ags watch wait --timeout 600          # wait for it to finish
+ags tab output t1                     # read what it answered
+ags tab send t1 "now fix the first one"
 ```
 
 That's the full orchestration loop: **send → wait → read → send again**, driving another
@@ -343,8 +343,8 @@ For control characters (Escape to cancel, Ctrl-C, or filling a prompt without su
 it) use `--no-enter`, which sends the raw keys:
 
 ```bash
-ccode tab send t1 $'\x1b' --no-enter     # Escape — cancels what the agent is doing
-ccode tab send t1 $'\x03' --no-enter     # Ctrl-C
+ags tab send t1 $'\x1b' --no-enter     # Escape — cancels what the agent is doing
+ags tab send t1 $'\x03' --no-enter     # Ctrl-C
 ```
 
 Sending text into another agent means it will act on it. Treat it like running a command
@@ -361,10 +361,10 @@ and only them: you can reach the agents connected **directly** to you, nobody el
 are (`ADE_TAB_ID` is set in every terminal it opens).
 
 ```bash
-ccode peers                                   # who is connected to you, and who you are
-ccode peer ask Reviewer "review the diff in src/auth and list real bugs only"
-ccode peer tell Backend "API contract is in docs/api.md, start from there"
-ccode peer check Backend --lines 40           # what is on its screen right now
+ags peers                                   # who is connected to you, and who you are
+ags peer ask Reviewer "review the diff in src/auth and list real bugs only"
+ags peer tell Backend "API contract is in docs/api.md, start from there"
+ags peer check Backend --lines 40           # what is on its screen right now
 ```
 
 - **`ask` waits** for the other agent to finish its turn and returns what it wrote
@@ -372,15 +372,15 @@ ccode peer check Backend --lines 40           # what is on its screen right now
   `peer check` it later instead of asking again. Default timeout 600s (`--timeout`).
 - **`ask --batch` asks several at once** and waits for all of them, so independent questions
   take as long as the slowest one instead of the sum:
-  `ccode peer ask --batch '{"Reviewer": "review src/auth", "Tests": "run the suite"}'`
+  `ags peer ask --batch '{"Reviewer": "review src/auth", "Tests": "run the suite"}'`
   It returns one result per agent (`reply`, `finished`, or an `error` for just that one).
   Names are checked first: one wrong name fails the whole batch before anyone is asked.
 - **`--raw`** (on `ask`, `ask --batch` and `tell`) types the text exactly as you wrote it, without
   the `[Mensagem de <name> via ADE AGS]` header and the reply hint. Use it to hand a TUI one of
-  its own commands (`ccode peer ask --raw Backend "/compact"`), where a header in front would
+  its own commands (`ags peer ask --raw Backend "/compact"`), where a header in front would
   turn the command into plain text. The other agent will not know the text came from you.
 - **`tell` does not wait.** Use it to hand over information or a task you will follow up
-  on; the other agent can answer with `ccode peer tell <your name> "..."`.
+  on; the other agent can answer with `ags peer tell <your name> "..."`.
 - Messages arrive prefixed with `[Mensagem de <name> via ADE AGS]`. When one reaches you,
   do what it asks if it fits your task, and reply briefly: answer a `tell` with
   `peer tell`; for an `ask` just answer normally — your turn's output goes back to them.
@@ -393,32 +393,32 @@ ccode peer check Backend --lines 40           # what is on its screen right now
 
 ### If you are the orchestrator
 
-The user can mark an agent as **orchestrator** (the crown on its node). `ccode peers` tells
+The user can mark an agent as **orchestrator** (the crown on its node). `ags peers` tells
 you: `you.orchestrator` is `true`. An orchestrator reaches its **whole team** — everyone
 connected to it in any number of steps, not only its direct neighbours (`direct` in each
 peer says which are) — and can change the team:
 
 ```bash
-ccode peer recruit Tests --agent codex --prompt "write integration tests for src/auth"
-ccode peer connect Backend Tests        # let two team members talk to each other
-ccode peer disconnect Backend Tests
+ags peer recruit Tests --agent codex --prompt "write integration tests for src/auth"
+ags peer connect Backend Tests        # let two team members talk to each other
+ags peer disconnect Backend Tests
 ```
 
 - **`recruit`** opens a new agent in your folder, named as you say, placed under you on the
   canvas and already connected to you. `--prompt` is its first task; it arrives after the
-  connection exists, so the recruit can answer you with `ccode peer tell`. `--agent` takes
-  the ids from `ccode agents`; `--account` picks one of that agent's accounts.
-- **`--role`** gives the recruit a role: `ccode peer recruit Sec --agent claude --role reviewer`.
+  connection exists, so the recruit can answer you with `ags peer tell`. `--agent` takes
+  the ids from `ags agents`; `--account` picks one of that agent's accounts.
+- **`--role`** gives the recruit a role: `ags peer recruit Sec --agent claude --role reviewer`.
   It reads the role's instructions before its first task (`--prompt`; with none, it waits
-  for yours) and its node shows the role's name. `ccode roles` lists them: the catalog
+  for yours) and its node shows the role's name. `ags roles` lists them: the catalog
   (backend, frontend, qa, reviewer, researcher, devops, integrator, generalist — the same
-  ones missions use) plus the user's own. `ccode role show <role>` prints the instructions.
-  You can add one for this team: `ccode role create "Security reviewer" "Look for auth and
-  injection flaws; do not edit code"` (or `--file`); `ccode role edit` changes only your own,
+  ones missions use) plus the user's own. `ags role show <role>` prints the instructions.
+  You can add one for this team: `ags role create "Security reviewer" "Look for auth and
+  injection flaws; do not edit code"` (or `--file`); `ags role edit` changes only your own,
   never the catalog. Prefer an existing role over creating a near-duplicate.
 - **`connect` / `disconnect`** work on your team and on the other agents open in your
   folder (that's how you bring in an agent the user already had open).
-- Run `ccode peers` before recruiting: don't open a second agent for a role someone on the
+- Run `ags peers` before recruiting: don't open a second agent for a role someone on the
   team already has.
 - Closing agents stays with the user. There is no command for it; if a recruit is no
   longer needed, tell the user.
@@ -429,17 +429,17 @@ ccode peer disconnect Backend Tests
 ### Chat with the user
 
 The user can talk to you from a chat panel instead of your terminal. Such a message arrives
-as `[Chat do usuário · thread: <color>] <text>`. **Reply with `ccode say`** — what you print
+as `[Chat do usuário · thread: <color>] <text>`. **Reply with `ags say`** — what you print
 in the terminal does not reach that chat.
 
 ```bash
-ccode say "Tests pass; I changed two files, details in note Plan."
-ccode say --progress "Running the suite…"       # an interim notice; your turn goes on
-ccode say --thread green "Separate topic"      # another thread, instead of the current one
-ccode say --file reply.md                      # longer text from a file
-ccode recall                                   # the last 10 turns of the current thread
-ccode recall green --turns 3                   # or another thread; --all for everything
-ccode recall list                              # threads with activity
+ags say "Tests pass; I changed two files, details in note Plan."
+ags say --progress "Running the suite…"       # an interim notice; your turn goes on
+ags say --thread green "Separate topic"      # another thread, instead of the current one
+ags say --file reply.md                      # longer text from a file
+ags recall                                   # the last 10 turns of the current thread
+ags recall green --turns 3                   # or another thread; --all for everything
+ags recall list                              # threads with activity
 ```
 
 - There are seven threads (blue, purple, pink, red, orange, yellow, green), one per
@@ -448,7 +448,7 @@ ccode recall list                              # threads with activity
 - Send one `say` per answer, not a stream. Use `--progress` for long work, and finish with
   a plain `say`.
 - Plain text only, up to 8000 characters. Put long reports in a note and point to it.
-- After a restart or a compacted context, `ccode recall` brings the conversation back.
+- After a restart or a compacted context, `ags recall` brings the conversation back.
 - Chat is for talking to the user. To reach another agent use `peer`; to ask a question the
   user must answer before you continue, keep using your normal question tool.
 
@@ -460,13 +460,13 @@ every morning") or "remind me in an hour". The message arrives as `[Rotina '<nam
 AGS] <text>`: treat it as a prompt from the schedule, not as the user typing.
 
 ```bash
-ccode routine create Tests "run the suite and report failures" --at 09:00 --days seg,qua,sex
-ccode routine create Sweep "check what changed since the last sweep" --every 2h --to Reviewer
-ccode routine create Standup "time for the standup" --in 45m --remind    # a notice to the user
-ccode routines                                  # yours, with next/last run and result
-ccode routine run Tests                         # fire now, schedule untouched
-ccode routine edit Tests --at 10:00
-ccode routine disable Tests / enable / delete Tests
+ags routine create Tests "run the suite and report failures" --at 09:00 --days seg,qua,sex
+ags routine create Sweep "check what changed since the last sweep" --every 2h --to Reviewer
+ags routine create Standup "time for the standup" --in 45m --remind    # a notice to the user
+ags routines                                  # yours, with next/last run and result
+ags routine run Tests                         # fire now, schedule untouched
+ags routine edit Tests --at 10:00
+ags routine disable Tests / enable / delete Tests
 ```
 
 - When: `--every 30m|2h|1d` (at least 5 minutes), `--at 09:00 [--days seg,ter,qua,qui,sex,sab,dom]`
@@ -490,11 +490,11 @@ it, so use one for a risky refactor or a second line of work that must not colli
 files others are editing. The original project is the **ground** floor.
 
 ```bash
-ccode floors                                   # floors of this project, and which one you are on
-ccode floor create Refactor                    # orchestrator only; starts from HEAD
-ccode floor create Hotfix --from release/1.2   # or from a branch
-ccode peer recruit Lena --agent claude --floor Refactor --role backend
-ccode peer recruit Qa --agent codex --floor ground   # back on the original project
+ags floors                                   # floors of this project, and which one you are on
+ags floor create Refactor                    # orchestrator only; starts from HEAD
+ags floor create Hotfix --from release/1.2   # or from a branch
+ags peer recruit Lena --agent claude --floor Refactor --role backend
+ags peer recruit Qa --agent codex --floor ground   # back on the original project
 ```
 
 - Connections work across floors: you can `peer ask` a recruit on another floor, and it can
@@ -512,19 +512,19 @@ to keep a plan, a checklist or findings where the user can see and edit them, or
 a spec between agents connected to the same note.
 
 ```bash
-ccode notes                                   # the notes you reach
-ccode note create "- [ ] tests" --name Plan  # next to you, already connected
-ccode note create --file plan.md --name Plan  # multi-line content: write a file first
-ccode note create "…" --name Detail --stack Plan  # born inside Plan's stack, sharing its spot
-ccode note read Plan                          # with line numbers
-ccode note read Plan 10 20                    # 20 lines starting at line 10
-ccode note write Plan --file plan.md          # replace the whole content
-ccode note edit Plan "- [ ] tests" "- [x] tests"   # replace a snippet that appears once
+ags notes                                   # the notes you reach
+ags note create "- [ ] tests" --name Plan  # next to you, already connected
+ags note create --file plan.md --name Plan  # multi-line content: write a file first
+ags note create "…" --name Detail --stack Plan  # born inside Plan's stack, sharing its spot
+ags note read Plan                          # with line numbers
+ags note read Plan 10 20                    # 20 lines starting at line 10
+ags note write Plan --file plan.md          # replace the whole content
+ags note edit Plan "- [ ] tests" "- [x] tests"   # replace a snippet that appears once
 ```
 
 - Notes can be **stacked**: the user (or `--stack`) piles several notes in one spot and only the
   front one is drawn. Every note in a stack still reads and writes like any other, front or not;
-  `ccode notes` shows a `stack` id on those that share one.
+  `ags notes` shows a `stack` id on those that share one.
 - Read before you write: the user may have edited the note since your last read.
 - Prefer `edit` for small changes; it fails if the snippet is missing or appears more than
   once, so you never change the wrong line.
@@ -539,15 +539,15 @@ A portal is a browser node on the canvas, visible to the user. You can drive the
 use the browser tools but pointed at that browser:
 
 ```bash
-ccode portals                                 # the portals you reach
-ccode portal create Docs https://example.com  # next to you, already connected
-ccode portal navigate Docs https://example.com/guide
-ccode portal snapshot Docs                    # page tree with refs (@e3)
-ccode portal click Docs @e3
-ccode portal type Docs @e2 "search term" --submit
-ccode portal press Docs Enter
-ccode portal screenshot Docs                  # returns the path of a PNG
-ccode portal console Docs --level errors
+ags portals                                 # the portals you reach
+ags portal create Docs https://example.com  # next to you, already connected
+ags portal navigate Docs https://example.com/guide
+ags portal snapshot Docs                    # page tree with refs (@e3)
+ags portal click Docs @e3
+ags portal type Docs @e2 "search term" --submit
+ags portal press Docs Enter
+ags portal screenshot Docs                  # returns the path of a PNG
+ags portal console Docs --level errors
 ```
 
 - Also available: `hover`, `select`, `scroll`, `wait`, `history` (back/forward/reload) and
@@ -565,9 +565,9 @@ A pool is a named group of the accounts of one TUI plus a rule for picking one e
 in Settings › Accounts, or:
 
 ```bash
-ccode pools
-ccode pool create Work --agent claude-code --accounts primary,work --strategy sticky   # "primary" = the system account
-ccode tab create --agent claude-code --account pool:Work   # the pool picks the account now
+ags pools
+ags pool create Work --agent claude-code --accounts primary,work --strategy sticky   # "primary" = the system account
+ags tab create --agent claude-code --account pool:Work   # the pool picks the account now
 ```
 
 Ask for a pool with `pool:<name>` wherever an account goes: `--account`, the `account` of a plan
@@ -582,16 +582,16 @@ driven over `adb`. Like portals, you drive the ones **connected to you** (an orc
 those of its team), by name:
 
 ```bash
-ccode devices                                  # yours, what adb sees, and the emulators (AVDs) you can start
-ccode device create Pixel --avd Pixel_8        # next to you, already connected
-ccode device start Pixel                       # boots its emulator and waits until it is ready
-ccode device launch Pixel com.android.settings # open an app by package name
-ccode device tree Pixel                        # one line per element: text, @(x,y) where to tap
-ccode device tap Pixel --text "Wi-Fi"          # finds the element by text/description/id, or --x 540 --y 1200
-ccode device swipe Pixel --dir up              # or --x1 --y1 --x2 --y2 [--ms 300]
-ccode device type Pixel "hello world"          # plain ASCII only (adb `input text`)
-ccode device key Pixel back                    # back, home, recents, enter, menu, power, delete…
-ccode device shot Pixel                        # returns the path of a PNG you can read
+ags devices                                  # yours, what adb sees, and the emulators (AVDs) you can start
+ags device create Pixel --avd Pixel_8        # next to you, already connected
+ags device start Pixel                       # boots its emulator and waits until it is ready
+ags device launch Pixel com.android.settings # open an app by package name
+ags device tree Pixel                        # one line per element: text, @(x,y) where to tap
+ags device tap Pixel --text "Wi-Fi"          # finds the element by text/description/id, or --x 540 --y 1200
+ags device swipe Pixel --dir up              # or --x1 --y1 --x2 --y2 [--ms 300]
+ags device type Pixel "hello world"          # plain ASCII only (adb `input text`)
+ags device key Pixel back                    # back, home, recents, enter, menu, power, delete…
+ags device shot Pixel                        # returns the path of a PNG you can read
 ```
 
 - Read `tree` (or take a `shot`) before tapping; `tap --text` is safer than guessing coordinates.
@@ -602,7 +602,7 @@ ccode device shot Pixel                        # returns the path of a PNG you c
 
 ### Telling the user
 
-`ccode notify "release is ready for review"` shows the user a notice (with your name on
+`ags notify "release is ready for review"` shows the user a notice (with your name on
 it) and, if the window is in the background, flashes the taskbar and sends a system
 notification (unless the user turned notifications off). Use it only when the user
 asked to be told, or when you are blocked and cannot continue without them; keep it to one
@@ -611,11 +611,11 @@ short sentence. For anything longer, write a note.
 ## Windows and workspaces
 
 ```bash
-ccode window list
-ccode window create
-ccode workspace list
-ccode workspace open --workspace "client-project"      # id or name
-ccode workspace open --workspace "client-project" --close-current
+ags window list
+ags window create
+ags workspace list
+ags workspace open --workspace "client-project"      # id or name
+ags workspace open --workspace "client-project" --close-current
 ```
 
 `--close-current` closes what's open now. Ask before using it — the user may have unsaved
@@ -624,18 +624,18 @@ work in those tabs.
 ## Installing skills
 
 ```bash
-ccode skills                       # see "What you can put in --agent and --skills"
-ccode skill search react testing   # search every repo, including the skills.sh directory
-ccode skill install git-helper     # the name exactly as it appears in either listing
+ags skills                       # see "What you can put in --agent and --skills"
+ags skill search react testing   # search every repo, including the skills.sh directory
+ags skill install git-helper     # the name exactly as it appears in either listing
 ```
 
-Names come from either array `ccode skills` returns. One from `installed` is already there
+Names come from either array `ags skills` returns. One from `installed` is already there
 (the app says so and there's nothing to do); one from `available` gets downloaded from the
 repository it names.
 
-**`ccode skills` does not list everything.** The skills.sh directory holds thousands of
+**`ags skills` does not list everything.** The skills.sh directory holds thousands of
 skills and can only be queried by searching — it never shows up under `available`. Use
-`ccode skill search <text>` to reach it; each result carries its `registry` and, for
+`ags skill search <text>` to reach it; each result carries its `registry` and, for
 skills.sh, its `installs` count.
 
 **`skill search` always queries skills.sh**, together with your own repositories — one
@@ -665,11 +665,11 @@ first — say so rather than guessing at a name.
 ### Reading and writing skills
 
 ```bash
-ccode skill show code-review                          # metadata + the whole SKILL.md
-ccode skill new release-notes --description "Write release notes from commits" \
+ags skill show code-review                          # metadata + the whole SKILL.md
+ags skill new release-notes --description "Write release notes from commits" \
   --agents claude-code,opencode --file ./release-notes.md
-ccode skill edit release-notes --file ./release-notes.md
-ccode skill edit code-review --content "..." --copy   # keep the original, save a copy
+ags skill edit release-notes --file ./release-notes.md
+ags skill edit code-review --content "..." --copy   # keep the original, save a copy
 ```
 
 `skill new` and `skill edit` take the body from `--file` (read relative to where you run
@@ -681,20 +681,20 @@ Don't create or edit skills unasked: they change how every agent the user runs b
 
 ## The fleet: background agents
 
-Besides tabs, Control Code runs **fleet tasks**: headless agents, each in its own git
-worktree, shown in the fleet console. If you're an agent inside Control Code you usually
+Besides tabs, ADE AGS runs **fleet tasks**: headless agents, each in its own git
+worktree, shown in the fleet console. If you're an agent inside ADE AGS you usually
 have the MCP tools for this (`agent_roster`, `run_plan`, `run_await`, `task_result`…) —
 prefer them. The CLI exposes the same thing:
 
 ```bash
-ccode run roster                          # which agents, models and accounts can run now
-ccode run status                          # the board of the last run launched from here
-ccode run await --timeout-s 300           # block until a task finishes
-ccode run result --task <key|id>          # everything a task delivered
-ccode run facts                           # what the agents of the run wrote for each other
-ccode run add-fact --kind decision --body "use pnpm, not npm"
-ccode run cancel-task --task <key|id>
-ccode run reroute-task --task <key|id> --agent opencode   # same branch and worktree
+ags run roster                          # which agents, models and accounts can run now
+ags run status                          # the board of the last run launched from here
+ags run await --timeout-s 300           # block until a task finishes
+ags run result --task <key|id>          # everything a task delivered
+ags run facts                           # what the agents of the run wrote for each other
+ags run add-fact --kind decision --body "use pnpm, not npm"
+ags run cancel-task --task <key|id>
+ags run reroute-task --task <key|id> --agent opencode   # same branch and worktree
 ```
 
 Without `--cwd` or `--run-id`, these act on the last run launched from the folder you're in.
@@ -705,13 +705,13 @@ MCP tool; use the CLI for it only if you don't have that tool.
 
 Each project has a browser inside the app, loaded through a local proxy, that the user sees
 too. Agents drive it through the `browser_*` MCP tools (navigate, snapshot, click, type,
-console, network…). `ccode browser run --json-args '{"cwd":"...","request":{"op":"snapshot"}}'`
+console, network…). `ags browser run --json-args '{"cwd":"...","request":{"op":"snapshot"}}'`
 is the same path, for when you don't have those tools.
 
 ## Working rules
 
-1. **Look before you build.** `workspace status` first, always. Then `ccode agents`,
-   `ccode accounts` and `ccode skills` before passing an `--agent`, `--account` or
+1. **Look before you build.** `workspace status` first, always. Then `ags agents`,
+   `ags accounts` and `ags skills` before passing an `--agent`, `--account` or
    `--skills` you haven't confirmed.
 2. **Report tab ids back to the user.** They're how anything gets referenced later.
 3. **Never poll.** `watch add` + `watch wait` is the way to wait. A loop of `tab output`
@@ -730,12 +730,12 @@ The user says: *"set up my monorepo — Claude on the API, Gemini on the web app
 shell at the root."*
 
 ```bash
-ccode workspace status                                # nothing open for this repo
-ccode agents                                          # confirm gemini-cli is installed
-ccode tab create --cwd /repo/api --agent claude-code
-ccode tab create --cwd /repo/web --agent gemini-cli
-ccode tab create --cwd /repo --agent bash
-ccode workspace status                                # confirm and collect ids
+ags workspace status                                # nothing open for this repo
+ags agents                                          # confirm gemini-cli is installed
+ags tab create --cwd /repo/api --agent claude-code
+ags tab create --cwd /repo/web --agent gemini-cli
+ags tab create --cwd /repo --agent bash
+ags workspace status                                # confirm and collect ids
 ```
 
 Then report back the three tab ids and what each one is running.
@@ -743,25 +743,25 @@ Then report back the three tab ids and what each one is running.
 Now the user says: *"have each one audit its own folder and tell me what they find."*
 
 ```bash
-ccode skills                                          # is there a review skill installed?
-ccode tab create --cwd /repo/api --agent claude-code --skills code-review \
+ags skills                                          # is there a review skill installed?
+ags tab create --cwd /repo/api --agent claude-code --skills code-review \
   --initprompt "audit this folder for security issues and summarise them"
-ccode tab create --cwd /repo/web --agent gemini-cli \
+ags tab create --cwd /repo/web --agent gemini-cli \
   --initprompt "audit this folder for dead code and summarise it"
 
-ccode watch add t1
-ccode watch add t2
-ccode watch wait --timeout 600                        # blocks until one has news
-ccode tab output t1                                   # only the tab the event named
+ags watch add t1
+ags watch add t2
+ags watch wait --timeout 600                        # blocks until one has news
+ags tab output t1                                   # only the tab the event named
 ```
 
 Then the user reads t1's findings and says *"tell it to fix the second one"*:
 
 ```bash
-ccode tab send t1 "fix the second issue you listed, then run the tests"
-ccode watch wait --timeout 600
-ccode tab output t1
-ccode watch remove t1                                 # done — frees a slot
+ags tab send t1 "fix the second issue you listed, then run the tests"
+ags watch wait --timeout 600
+ags tab output t1
+ags watch remove t1                                 # done — frees a slot
 ```
 
 Note what you did *not* do: create the tabs, then send prompts separately, then poll both
@@ -772,19 +772,19 @@ on a timer, then re-read tabs that hadn't changed.
 The user says: *"start the web app and tell me if it compiles."*
 
 ```bash
-ccode workspace status                                # is a server already running for /repo/web?
-ccode tab create /repo/web --agent bash --initprompt "bun dev"
-ccode watch add t3 --idle 5
-ccode watch wait --timeout 120
-ccode tab output t3                                   # the URL, or the compile error
+ags workspace status                                # is a server already running for /repo/web?
+ags tab create /repo/web --agent bash --initprompt "bun dev"
+ags watch add t3 --idle 5
+ags watch wait --timeout 120
+ags tab output t3                                   # the URL, or the compile error
 ```
 
 If it failed, fix the code in your own session. The server picks the change up by itself;
 read the tab again to confirm (`tab output` returns only what's new). When the user is done:
 
 ```bash
-ccode tab send t3 $'\x03' --no-enter                  # Ctrl-C stops the server
-ccode watch remove t3
+ags tab send t3 $'\x03' --no-enter                  # Ctrl-C stops the server
+ags watch remove t3
 ```
 
 Leave the tab open unless the user asks you to close it: they may want to restart it.

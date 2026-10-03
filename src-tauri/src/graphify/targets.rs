@@ -1,9 +1,9 @@
 //! Dónde deja graphify su skill, y qué relación tiene eso con las skills de la app.
 //!
-//! Graphify **no** gestiona las skills como Control Code, y esa es la parte que hay que
+//! Graphify **no** gestiona las skills como ADE AGS, y esa es la parte que hay que
 //! mirar antes de instalarlo:
 //!
-//! - Control Code tiene una carpeta global de skills y **enlaza** cada una dentro del
+//! - ADE AGS tiene una carpeta global de skills y **enlaza** cada una dentro del
 //!   proyecto: `.claude/skills/<slug>` para Claude Code y `.agents/skills/<slug>` —el
 //!   estándar abierto de Agent Skills— para las otras cuatro TUIs (ver `skills::links`).
 //! - Graphify **copia** su skill, y elige la carpeta por plataforma, no por estándar:
@@ -113,7 +113,7 @@ pub struct GraphifyTarget {
     pub path: String,
     /// La versión que dice el sello, si la skill está instalada ahí.
     pub installed_version: Option<String>,
-    /// Si es una carpeta donde Control Code también monta skills. No es un conflicto —la
+    /// Si es una carpeta donde ADE AGS también monta skills. No es un conflicto —la
     /// reconciliación solo saca sus propios symlinks— pero es lo que hay que saber para
     /// elegir: acá la skill va a convivir con las de la app, y en las otras no.
     pub shared_with_app: bool,

@@ -38,7 +38,7 @@ pub(super) const SYNCED_SETTINGS: &[&str] = &["graphify.steps", "runs.routing.ti
 pub const SYNCED_PREFS: &[&str] = &["language", "theme", "cc-terminal-zoom", "cc-terminal-input-marks", "cc-markdown-preview"];
 
 /// El id del "repositorio" de las skills que trae la app: no se sincronizan.
-const BUNDLED_REGISTRY: &str = "controlcode-builtin";
+const BUNDLED_REGISTRY: &str = "ags-builtin";
 
 /// Un archivo de una skill más grande que esto no se sube: un repo de configuración no es
 /// lugar para binarios pesados.
@@ -85,8 +85,8 @@ pub(super) fn market_key(registry: &str, entry: &str) -> String {
 }
 
 fn readme() -> Vec<u8> {
-    b"# Control Code sync\n\n\
-This private repository is written by Control Code: your skills, which skills to install from \
+    b"# ADE AGS sync\n\n\
+This private repository is written by ADE AGS: your skills, which skills to install from \
 which repositories, and your app preferences. Every machine where you connect it stays in sync.\n\n\
 - `skills/` - the skills you created or edited, one folder each.\n\
 - `marketplace.json` - skill repositories and the skills installed from them.\n\
@@ -122,7 +122,7 @@ fn read_dir_files(root: &Path) -> BTreeMap<String, Vec<u8>> {
 pub(super) fn export(conn: &Connection, prefs: &Map<String, Value>, base: &Tree, pending: &Pending) -> Result<Local, String> {
     let mut tree = Tree::new();
     tree.insert("README.md".into(), readme());
-    tree.insert(".controlcode-sync.json".into(), json_bytes(&json!({ "format": 1 })));
+    tree.insert(".ags-sync.json".into(), json_bytes(&json!({ "format": 1 })));
 
     // ── preferencias ──
     let mut settings = Map::new();

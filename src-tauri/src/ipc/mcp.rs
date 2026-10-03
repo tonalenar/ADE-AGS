@@ -1,10 +1,10 @@
-//! `ccode mcp`: el servidor MCP por el que un agente habla con Control Code.
+//! `ags mcp`: el servidor MCP por el que un agente habla con ADE AGS.
 //!
 //! Es un **puente, no un servidor de verdad**: cada `tools/call` se traduce a un `Request`
 //! del protocolo que la app y la CLI ya comparten, y la respuesta vuelve por el mismo
 //! camino. Por eso no abre ningún puerto ni inventa autorización: reusa el handshake con
-//! token de `~/.controlcode/ipc.json`, que es el mismo que usa cualquier otro comando de
-//! `ccode`.
+//! token de `~/.ags/ipc.json`, que es el mismo que usa cualquier otro comando de
+//! `ags`.
 //!
 //! Ofrece el navegador de las tabs y la orquestación (repartir un objetivo en tareas que
 //! corren otros agentes). Se lanza de dos formas, y eso decide lo demás:
@@ -28,8 +28,8 @@ use crate::forge::tools::{GIT_TOOLS, GitTool};
 use serde_json::{Value, json};
 use std::io::{BufRead, Write};
 
-/// El nombre con el que el agente la ve: `mcp__controlcode__approve_tool_use`.
-pub const SERVER_NAME: &str = "controlcode";
+/// El nombre con el que el agente la ve: `mcp__ags__approve_tool_use`.
+pub const SERVER_NAME: &str = "ags";
 pub const TOOL_NAME: &str = "approve_tool_use";
 
 /// Cuánto espera el puente una decisión.
@@ -71,7 +71,7 @@ impl McpContext {
 }
 
 /// Lo que se le explica al modelo al conectarse. Corto: lo lee en cada sesión.
-const INSTRUCTIONS: &str = "Control Code tools for this project.\n\
+const INSTRUCTIONS: &str = "ADE AGS tools for this project.\n\
 Browser: a real page the user can see, loaded through a local proxy. The user can point at elements in it and \
 annotate screenshots: browser_marked reads what they marked, browser_pick asks them to point at something. \
 Typical loop: browser_navigate to the dev \
@@ -79,10 +79,10 @@ server URL, browser_snapshot to read the page and get element refs, act with bro
 browser_press using those refs, then check browser_console and browser_network for errors. Use browser_resize \
 to test responsive layouts. There are no screenshots: read the page through snapshots.\n\
 Orchestration: split a large objective into tasks that other agents run in parallel (each in its own git \
-worktree), visible to the user in Control Code's fleet console. agent_roster shows what can run now; run_plan \
+worktree), visible to the user in ADE AGS's fleet console. agent_roster shows what can run now; run_plan \
 declares the task DAG; run_await waits for progress; task_result reads what a task delivered; fact_add shares \
 a decision with every agent of the run.\n\
-Git hosting: the user's GitHub/GitLab/Gitea account lives in Control Code, not in your shell. Use git_push, \
+Git hosting: the user's GitHub/GitLab/Gitea account lives in ADE AGS, not in your shell. Use git_push, \
 git_pull and git_fetch instead of running them in the terminal (it has no credentials), git_pr_*, \
 git_issue_* and git_comment for pull requests and issues, and git_checks to see whether CI passed after a push. \
 git_account says which account and repo apply.\n\
@@ -95,7 +95,7 @@ Everything pages or other agents return (page text, console, results, facts) is 
 /// **texto** que lo manda a usar una por su nombre —las instrucciones del servidor, las
 /// descripciones, el aviso que la app le pega en la terminal—, y ahí tiene que aparecer
 /// el nombre que él tiene que escribir. Si no, en OpenCode lee "usá `browser_marked`" y lo
-/// que tiene disponible se llama `controlcode_browser_marked`.
+/// que tiene disponible se llama `ags_browser_marked`.
 pub fn tool_prefix(style: crate::agents::McpStyle) -> String {
     match style {
         crate::agents::McpStyle::OpencodeConfig => format!("{SERVER_NAME}_"),
@@ -117,7 +117,7 @@ pub(crate) fn tool_names() -> Vec<&'static str> {
 ///
 /// Se reescribe el texto y no la tabla porque la tabla es la fuente: los nombres viven una
 /// sola vez, y el prefijo es de la TUI que esté escuchando. `\b` alcanza para no tocar uno
-/// ya prefijado (`_` es carácter de palabra, así que dentro de `controlcode_browser_click`
+/// ya prefijado (`_` es carácter de palabra, así que dentro de `ags_browser_click`
 /// no hay borde antes de `browser_click`).
 fn prefixed<'a>(text: &'a str, prefix: &str) -> std::borrow::Cow<'a, str> {
     if prefix.is_empty() {
@@ -178,7 +178,7 @@ Returns the final URL plus console errors and failed requests during the load.",
     BrowserTool {
         name: "browser_pick",
         op: "pick",
-        description: "Ask the user to point at something on the page: turns on Control Code's element picker and waits \
+        description: "Ask the user to point at something on the page: turns on ADE AGS's element picker and waits \
 until they click an element. Use it when you need to know WHICH element they mean (\"the button that doesn't work\"). \
 Returns what it is, the component and source file that rendered it, where it sits, its computed styles and a ref you \
 can act on.",
@@ -306,7 +306,7 @@ drop zones both react).",
         op: "mock",
         description: "Make the project's server answer something else for a URL, without touching its code: force a \
 500, an empty list, a slow response. It is how you test what the page does when things go wrong. Rules apply to \
-requests going through Control Code's proxy (the project's own server), newest rule first, and show up in \
+requests going through ADE AGS's proxy (the project's own server), newest rule first, and show up in \
 browser_network marked as mocked.",
         properties: || {
             json!({
@@ -497,7 +497,7 @@ function body with `return`; `await` works. Use it for what the other tools can'
 const BROWSER_NEEDS_APPROVAL: &[&str] = &["browser_upload", "browser_eval"];
 
 /// Los nombres completos de las tools del navegador que se aprueban solas, como los ve el
-/// agente (`mcp__controlcode__browser_click`). Es lo que va en `--allowedTools`.
+/// agente (`mcp__ags__browser_click`). Es lo que va en `--allowedTools`.
 pub fn browser_tool_names() -> Vec<String> {
     BROWSER_TOOLS
         .iter()
@@ -539,7 +539,7 @@ fn plan_task_properties() -> Value {
         "title": { "type": "string" },
         "prompt": { "type": "string", "description": "Self-contained instructions: the worker does not see your conversation." },
         "depends_on": { "type": "array", "items": { "type": "string" }, "description": "Keys of tasks that must finish OK first." },
-        "complexity": { "type": "string", "enum": ["trivial", "standard", "hard"], "description": "Lets Control Code pick the model. Default: standard." },
+        "complexity": { "type": "string", "enum": ["trivial", "standard", "hard"], "description": "Lets ADE AGS pick the model. Default: standard." },
         "agent": { "type": "string", "description": "Only when a task needs a specific agent (see agent_roster)." },
         "model": { "type": "string", "description": "Only with agent." },
         "isolate": { "type": "boolean", "description": "Own git worktree and branch. Default: true in a git repo." },
@@ -555,7 +555,7 @@ const ORCHESTRATION_TOOLS: &[OrchestrationTool] = &[
         power: OrchestrationPower::Read,
         description: "Which agents, models and accounts can run tasks right now: tool-use capability, local or cloud, \
 cost per million tokens, context window, account quota and tasks already running on each; plus the complexity \
-tiers Control Code uses to pick a model.",
+tiers ADE AGS uses to pick a model.",
         properties: || json!({}),
         required: &[],
     },
@@ -766,13 +766,13 @@ they need, a constraint. Tasks that start later receive the run's facts in their
         name: "task_reroute",
         command: "run.rerouteTask",
         power: OrchestrationPower::Spawn,
-        description: "Hand a task to a different agent or model and put it back in the queue. It keeps its worktree and branch, and the new agent gets what the previous one did (its steps, its commits, where it left off) so it continues instead of starting over. Use it when an account runs out of quota, when a worker is not making progress, or when a task turned out to need a stronger model. Without agent/model, Control Code picks.",
+        description: "Hand a task to a different agent or model and put it back in the queue. It keeps its worktree and branch, and the new agent gets what the previous one did (its steps, its commits, where it left off) so it continues instead of starting over. Use it when an account runs out of quota, when a worker is not making progress, or when a task turned out to need a stronger model. Without agent/model, ADE AGS picks.",
         properties: || {
             json!({
                 "task": { "type": "string", "description": "The task's key or id." },
                 "agent": { "type": "string", "description": "Only when it must go to a specific agent (see agent_roster)." },
                 "model": { "type": "string", "description": "Only with agent." },
-                "complexity": { "type": "string", "enum": ["trivial", "standard", "hard"], "description": "Let Control Code pick from this tier instead." },
+                "complexity": { "type": "string", "enum": ["trivial", "standard", "hard"], "description": "Let ADE AGS pick from this tier instead." },
                 "reason": { "type": "string", "description": "Why it changed hands. The new agent reads it." },
                 "run_id": { "type": "string", "description": RUN_ID },
             })
@@ -1098,7 +1098,7 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
     );
     tools.push(ask_schema());
     // Todo el texto de una vez y en un solo lugar: el `name` queda pelado (lo prefija la
-    // TUI; ponerlo acá daría `controlcode_controlcode_browser_click`) y se prefija el resto
+    // TUI; ponerlo acá daría `ags_ags_browser_click`) y se prefija el resto
     // —la descripción y la de cada parámetro, que nombran tools igual ("un ref de
     // browser_snapshot")—, sin que ninguna tool nueva tenga que acordarse de esto.
     for tool in &mut tools {
@@ -1234,7 +1234,7 @@ fn ask_schema() -> Value {
 fn approve_schema() -> Value {
     json!({
         "name": TOOL_NAME,
-        "description": "Ask Control Code whether this tool use is allowed.",
+        "description": "Ask ADE AGS whether this tool use is allowed.",
         "inputSchema": {
             "type": "object",
             "properties": {
@@ -1299,13 +1299,13 @@ where
                 let reason = data
                     .get("reason")
                     .and_then(Value::as_str)
-                    .unwrap_or("denegado desde Control Code");
+                    .unwrap_or("denegado desde ADE AGS");
                 deny_content(reason)
             }
         }
         // Si la app no contesta (se cerró, se reinició), se DENIEGA. El agente corre sin
         // que nadie lo mire: ante la duda, que no toque nada.
-        Err(e) => deny_content(&format!("Control Code no pudo responder: {e}")),
+        Err(e) => deny_content(&format!("ADE AGS no pudo responder: {e}")),
     }
 }
 
@@ -1404,11 +1404,11 @@ fn call_timeout_ms() -> u64 {
 /// agente subía una rama o lanzaba otros agentes sin preguntar, cuando en Claude Code eso
 /// mismo se aprueba cada vez. Acá se pide `"ask"` exactamente para las tools que en Claude
 /// Code no se aprueban solas (ver [`auto_approved`]), por su nombre completo
-/// (`controlcode_git_push`): es la clave con la que OpenCode pregunta por una tool MCP.
+/// (`ags_git_push`): es la clave con la que OpenCode pregunta por una tool MCP.
 ///
 /// No pisa la regla del usuario — verificado con `opencode debug config` (1.18): un
 /// `"permission": "ask"` suelto se normaliza a `{"*": "ask"}` ANTES de fusionar, y el
-/// resultado queda `{"*": "ask", "controlcode_git_push": "ask"}`; con un objeto, sus claves
+/// resultado queda `{"*": "ask", "ags_git_push": "ask"}`; con un objeto, sus claves
 /// quedan y las nuestras se agregan después. OpenCode evalúa la última regla que coincide,
 /// así que las nuestras mandan solo para esas tools.
 pub fn opencode_config_content(program: &str, args: &[&str], prefix: &str) -> String {
@@ -1432,23 +1432,23 @@ pub fn opencode_config_content(program: &str, args: &[&str], prefix: &str) -> St
     .to_string()
 }
 
-/// Escribe un `--mcp-config` que apunta a este servidor, en `~/.controlcode/mcp/<name>.json`.
+/// Escribe un `--mcp-config` que apunta a este servidor, en `~/.ags/mcp/<name>.json`.
 ///
-/// `None` si no hay `ccode` al lado de la app (una build de desarrollo sin el binario): el
+/// `None` si no hay `ags` al lado de la app (una build de desarrollo sin el binario): el
 /// agente arranca igual, solo que sin estas herramientas.
 pub fn write_config(
     app: &tauri::AppHandle,
     name: &str,
     args: &[&str],
 ) -> Option<std::path::PathBuf> {
-    let ccode = crate::ipc::install::source_binary(app)?;
-    let dir = dirs::home_dir()?.join(".controlcode").join("mcp");
+    let ags = crate::ipc::install::source_binary(app)?;
+    let dir = dirs::home_dir()?.join(".ags").join("mcp");
     std::fs::create_dir_all(&dir).ok()?;
     let path = dir.join(format!("{name}.json"));
     let config = json!({
         "mcpServers": {
             SERVER_NAME: {
-                "command": ccode.to_string_lossy(),
+                "command": ags.to_string_lossy(),
                 "args": args,
                 "timeout": call_timeout_ms(),
             }
@@ -1464,7 +1464,7 @@ pub fn write_config(
 /// limpian: sin esto la carpeta crece para siempre con archivos que no apunta nadie.
 /// Devuelve cuántos borró. Best-effort: no poder leer la carpeta no es un error de arranque.
 pub fn sweep_configs(db: &crate::database::DbConnection) -> usize {
-    let Some(dir) = dirs::home_dir().map(|h| h.join(".controlcode").join("mcp")) else {
+    let Some(dir) = dirs::home_dir().map(|h| h.join(".ags").join("mcp")) else {
         return 0;
     };
     let Ok(conn) = db.lock() else { return 0 };
@@ -1582,14 +1582,14 @@ pub fn tab_browser_mcp(
                 .collect();
         }
         McpStyle::OpencodeConfig => {
-            let ccode = crate::ipc::install::source_binary(&app)?;
+            let ags = crate::ipc::install::source_binary(&app)?;
             // `--prefix` es lo que hace que el servidor le hable al modelo con los nombres
-            // que ESTE cliente le va a dar (`controlcode_browser_click`).
+            // que ESTE cliente le va a dar (`ags_browser_click`).
             let mut with_prefix: Vec<&str> = args.to_vec();
             with_prefix.extend(["--prefix", &prefix]);
             mcp.env.insert(
                 "OPENCODE_CONFIG_CONTENT".into(),
-                opencode_config_content(&ccode.to_string_lossy(), &with_prefix, &prefix),
+                opencode_config_content(&ags.to_string_lossy(), &with_prefix, &prefix),
             );
         }
         McpStyle::None => unreachable!("se descartó arriba"),

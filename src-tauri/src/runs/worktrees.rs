@@ -111,7 +111,7 @@ pub fn create(base: &Path, project_cwd: &Path, title: &str) -> Result<Worktree, 
 /// rama o un commit). Una tarea que depende de otra aislada parte de la rama de esa: su
 /// trabajo tiene que empezar desde lo que la otra dejó, no desde el proyecto de antes.
 ///
-/// `base` es la carpeta donde viven los worktrees de la app (`~/.controlcode/worktrees`);
+/// `base` es la carpeta donde viven los worktrees de la app (`~/.ags/worktrees`);
 /// se recibe como parámetro para poder probarlo sin tocar el home.
 pub fn create_from(base: &Path, project_cwd: &Path, title: &str, start: &str) -> Result<Worktree, String> {
     let repo = repo_root(project_cwd)?;

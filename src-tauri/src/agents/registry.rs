@@ -92,7 +92,7 @@ pub struct ProfileDef {
 }
 
 /// Cómo recibe una TUI el servidor MCP que le enchufa la app (el navegador y la
-/// orquestación de Control Code).
+/// orquestación de ADE AGS).
 ///
 /// Verificado contra cada CLI, no asumido: el formato no se parece entre ellas, y darle a
 /// una el de la otra no falla al arrancar — arranca sin las tools, que es exactamente el
@@ -102,14 +102,14 @@ pub struct ProfileDef {
 pub enum McpStyle {
     /// `--mcp-config <archivo>` con `{"mcpServers": {…}}`, más `--allowedTools` para no
     /// tener que aprobar cada click. Las tools le llegan como
-    /// `mcp__controlcode__browser_click`. (Claude Code.)
+    /// `mcp__ags__browser_click`. (Claude Code.)
     ClaudeFlags,
     /// No tiene flag: el servidor va en su config, bajo `"mcp"`
     /// (opencode.ai/docs/mcp-servers). La app se la pasa por `OPENCODE_CONFIG_CONTENT`,
     /// que se **fusiona** con la del usuario en vez de reemplazarla —verificado con
     /// `opencode debug config`: sobreviven su modelo, sus proveedores y sus otros MCP—, y
     /// las tools le llegan con el nombre del servidor de prefijo:
-    /// `controlcode_browser_click`. (OpenCode.)
+    /// `ags_browser_click`. (OpenCode.)
     OpencodeConfig,
     /// Todavía no se verificó cómo enchufárselo. La tab arranca igual, sin las tools.
     None,

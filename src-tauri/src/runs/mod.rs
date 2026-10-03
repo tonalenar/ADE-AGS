@@ -732,7 +732,7 @@ pub(crate) fn worktree_count() -> usize {
 fn worktrees_base() -> Result<std::path::PathBuf, String> {
     Ok(dirs::home_dir()
         .ok_or_else(|| "no se pudo resolver el home".to_string())?
-        .join(".controlcode")
+        .join(".ags")
         .join("worktrees"))
 }
 
@@ -1080,7 +1080,7 @@ pub fn run_decide_approval(
     decide_approval(&app, &db, &approval_id, allow, remember)
 }
 
-/// Lo mismo, para quien no es un comando de Tauri (la CLI: `ccode approval decide`).
+/// Lo mismo, para quien no es un comando de Tauri (la CLI: `ags approval decide`).
 pub(crate) fn decide_approval(
     app: &AppHandle,
     db: &DbConnection,
@@ -1109,7 +1109,7 @@ pub(crate) fn decide_approval(
     Ok(decided)
 }
 
-/// Los pedidos de permiso que esperan a una persona. Para la CLI (`ccode approval list`).
+/// Los pedidos de permiso que esperan a una persona. Para la CLI (`ags approval list`).
 pub(crate) fn pending_approvals() -> Vec<broker::PendingApproval> {
     broker::pending()
 }

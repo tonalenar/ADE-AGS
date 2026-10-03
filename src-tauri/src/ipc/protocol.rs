@@ -1,4 +1,4 @@
-//! Protocolo compartido entre la app y la CLI `controlcode`.
+//! Protocolo compartido entre la app y la CLI `ade-ags`.
 //!
 //! Transporte: TCP sobre loopback, una línea JSON por request y una por response.
 //!
@@ -17,19 +17,19 @@ use std::path::PathBuf;
 pub fn handshake_path() -> PathBuf {
     dirs::home_dir()
         .unwrap_or_default()
-        .join(".controlcode")
+        .join(".ags")
         .join("ipc.json")
 }
 
 /// La variable con la que cada instancia les dice a sus hijos —las TUIs de sus tabs, las
-/// tareas de la flota y, a través de ellos, los puentes `ccode mcp`— cuál es SU handshake.
+/// tareas de la flota y, a través de ellos, los puentes `ags mcp`— cuál es SU handshake.
 ///
 /// Existe porque el archivo global es uno solo: con dos instancias abiertas (la app abierta
 /// dos veces, un `tauri dev` al lado de la instalada, el reinicio de una actualización) la
 /// última en arrancar lo pisaba, y la primera en cerrarse lo borraba. Desde ahí los agentes
-/// de la que seguía abierta recibían "Control Code no parece estar corriendo" hablando
+/// de la que seguía abierta recibían "ADE AGS no parece estar corriendo" hablando
 /// desde adentro de la app.
-pub const HANDSHAKE_ENV: &str = "CONTROLCODE_HANDSHAKE";
+pub const HANDSHAKE_ENV: &str = "AGS_HANDSHAKE";
 
 /// El handshake propio de la instancia con ese PID.
 pub fn instance_handshake_path(pid: u32) -> PathBuf {
@@ -39,7 +39,9 @@ pub fn instance_handshake_path(pid: u32) -> PathBuf {
 /// El handshake que tiene que usar la CLI: el de la instancia que la lanzó si existe, si no
 /// el global. Si esa instancia se cerró, el global lleva a la que esté abierta ahora.
 pub fn client_handshake_path() -> PathBuf {
+    // CONTROLCODE_HANDSHAKE es el nombre anterior: una app vieja que siga abierta lo exporta así.
     std::env::var_os(HANDSHAKE_ENV)
+        .or_else(|| std::env::var_os("CONTROLCODE_HANDSHAKE"))
         .map(PathBuf::from)
         .filter(|p| p.is_file())
         .unwrap_or_else(|| global_handshake_for_client(handshake_path()))
@@ -55,10 +57,12 @@ fn global_handshake_for_client(usual: PathBuf) -> PathBuf {
     if usual.is_file() {
         return usual;
     }
-    ["USERPROFILE", "HOME"]
+    let homes: Vec<PathBuf> = ["USERPROFILE", "HOME"].iter().filter_map(|var| std::env::var_os(var)).map(PathBuf::from).collect();
+    // Primero el nombre actual de la carpeta de datos y, si una app vieja sigue abierta, el anterior.
+    [".ags", ".controlcode"]
         .iter()
-        .filter_map(|var| std::env::var_os(var))
-        .map(|home| PathBuf::from(home).join(".controlcode").join("ipc.json"))
+        .flat_map(|dir| homes.iter().map(move |home| home.join(dir).join("ipc.json")))
+        .chain(dirs::home_dir().map(|h| h.join(".controlcode").join("ipc.json")))
         .find(|p| p.is_file())
         .unwrap_or(usual)
 }

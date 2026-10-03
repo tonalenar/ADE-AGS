@@ -1,4 +1,4 @@
-//! `ccode notify "mensagem"`: um agente avisando o usuário de algo.
+//! `ags notify "mensagem"`: um agente avisando o usuário de algo.
 //!
 //! Para quando o usuário pediu que o avisem ("me avise quando terminar", "me chame se os
 //! testes falharem"): o agente não tem outro jeito de chamar atenção que não seja

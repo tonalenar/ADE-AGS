@@ -1,10 +1,10 @@
-//! Fase 8 — La app expuesta a la CLI `ccode`.
+//! Fase 8 — La app expuesta a la CLI `ags`.
 //!
 //! - [`server`] — el socket que escucha y despacha.
 //! - [`protocol`] — el formato del mensaje y el handshake, compartido con la CLI.
 //! - [`commands`] — un handler por comando.
 //! - [`bridge`] — el puente al frontend, para lo que solo él sabe.
-//! - [`install`] — instalar/desinstalar el binario `ccode` en el PATH del usuario.
+//! - [`install`] — instalar/desinstalar el binario `ags` en el PATH del usuario.
 //! - [`mcp`] — el servidor MCP que les da a los agentes sus herramientas.
 //! - [`cancel`] — las llamadas de ese servidor que el agente canceló.
 

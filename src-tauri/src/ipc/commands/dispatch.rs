@@ -131,7 +131,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "skill.show" => skill_show(app, args),
         "skill.new" => skill_new(app, args),
         "skill.edit" => skill_edit(app, args),
-        // Los que manda un agente y no una persona, desde el `ccode mcp` que lanzó su TUI.
+        // Los que manda un agente y no una persona, desde el `ags mcp` que lanzó su TUI.
         // `run.approve` bloquea hasta que alguien decide; `browser.run` maneja el
         // navegador de las tabs del proyecto.
         "run.approve" => run_approve(app, args),

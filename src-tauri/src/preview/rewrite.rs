@@ -2,9 +2,9 @@
 
 /// Dónde se sirve el selector. Una ruta y no un `<script>` en línea: una página con CSP
 /// `script-src 'self'` bloquearía el inline, pero acepta un script de su propio origen.
-pub(crate) const PICKER_PATH: &str = "/__controlcode__/picker.js";
+pub(crate) const PICKER_PATH: &str = "/__ags__/picker.js";
 
-const PICKER_TAG: &str = r#"<script src="/__controlcode__/picker.js"></script>"#;
+const PICKER_TAG: &str = r#"<script src="/__ags__/picker.js"></script>"#;
 
 /// Encabezados de un solo salto: describen la conexión con el proxy, no el contenido.
 pub(crate) fn is_hop_by_hop(name: &str) -> bool {

@@ -16,7 +16,7 @@
 use std::collections::HashMap;
 use std::sync::Mutex;
 
-const SERVICE: &str = "ade-ags.agent-accounts";
+const SERVICE: &str = "controlcode.agent-accounts"; // el nombre del llavero NO cambia: renombrarlo dejaría huérfanas las keys guardadas
 
 lazy_static::lazy_static! {
     /// Una vez leída, queda en memoria: se lee en cada lanzamiento de una tab o tarea.

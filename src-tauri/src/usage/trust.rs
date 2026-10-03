@@ -23,12 +23,12 @@ use serde_json::{json, Value};
 
 /// La carpeta donde se abre el sondeo: vacía, de la app, la misma para todas las cuentas.
 ///
-/// Vive junto al resto de lo que la app guarda (`~/.controlcode`) y no en un temporal
+/// Vive junto al resto de lo que la app guarda (`~/.ags`) y no en un temporal
 /// porque tiene que ser ESTABLE: la ruta queda escrita como aceptada en la config de cada
 /// cuenta, y una carpeta distinta en cada arranque iría dejando entradas muertas ahí.
 pub(super) fn probe_dir() -> Result<PathBuf, String> {
     let home = dirs::home_dir().ok_or("No se pudo resolver la carpeta del usuario")?;
-    let dir = home.join(".controlcode").join("usage-probe");
+    let dir = home.join(".ags").join("usage-probe");
     std::fs::create_dir_all(&dir)
         .map_err(|e| format!("No se pudo crear {}: {e}", dir.display()))?;
 
@@ -135,7 +135,7 @@ pub(super) fn trust_dir(config_path: &Path, dir: &str) -> Result<(), String> {
 /// archivo nuevo saldría con los permisos por defecto y el `rename` dejaría el login de la
 /// cuenta legible para todo el sistema.
 fn write_atomic(path: &Path, body: &str) -> Result<(), String> {
-    let tmp = path.with_extension(format!("controlcode-{}.tmp", std::process::id()));
+    let tmp = path.with_extension(format!("ade-ags-{}.tmp", std::process::id()));
     std::fs::write(&tmp, body).map_err(|e| format!("No se pudo escribir {}: {e}", tmp.display()))?;
 
     #[cfg(unix)]

@@ -53,7 +53,7 @@ const clock = (unix: number) => new Date(unix * 1000).toLocaleTimeString(undefin
 /**
  * El chat con un agente: globos en vez del flujo mezclado de su terminal, y siete hilos de
  * color para no mezclar conversaciones. Lo que escribís le llega con su hilo; él contesta
- * con `ccode say` y aparece acá.
+ * con `ags say` y aparece acá.
  *
  * Solo agentes: a una terminal de shell lo escrito se ejecutaría como comando (el backend
  * también lo rechaza).

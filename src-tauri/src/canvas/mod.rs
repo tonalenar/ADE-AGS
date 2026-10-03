@@ -8,7 +8,7 @@
 //! ## Por qué un archivo y no una tabla
 //!
 //! Es un documento chico que se reescribe entero cada vez que alguien mueve un nodo, sin
-//! consultas por campo. Un JSON en `~/.controlcode/canvas.json` alcanza, y no le suma una
+//! consultas por campo. Un JSON en `~/.ags/canvas.json` alcanza, y no le suma una
 //! migración al schema de SQLite.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap};
@@ -72,7 +72,7 @@ pub struct Board {
 }
 
 /// Un portal: un navegador dentro del canvas que los agentes conectados manejan con
-/// `ccode portal …` (ver `ipc::commands::portals`).
+/// `ags portal …` (ver `ipc::commands::portals`).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct Portal {
     pub name: String,
@@ -99,7 +99,7 @@ pub fn is_portal(id: &str) -> bool {
 }
 
 /// Una nota del canvas. Los agentes conectados a ella la leen y la escriben
-/// (`ccode note …`, ver `ipc::commands::notes`).
+/// (`ags note …`, ver `ipc::commands::notes`).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
 pub struct Note {
     pub name: String,
@@ -139,7 +139,7 @@ lazy_static::lazy_static! {
 }
 
 fn file_path() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir().ok_or("No se encontró la carpeta del usuario")?.join(".controlcode");
+    let dir = dirs::home_dir().ok_or("No se encontró la carpeta del usuario")?.join(".ags");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("canvas.json"))
 }

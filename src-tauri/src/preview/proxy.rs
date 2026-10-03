@@ -137,7 +137,7 @@ fn error_page(status: u16, target: &str, detail: &str) -> Response<Body> {
 }
 
 /// Lo que marca una respuesta que salió de una regla y no del servidor.
-const MOCK_HEADER: &str = "x-controlcode-mock";
+const MOCK_HEADER: &str = "x-ags-mock";
 
 fn is_websocket<B>(req: &Request<B>) -> bool {
     req.headers()
@@ -161,7 +161,7 @@ async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Response<Body> {
         // Adelante, el origen REAL de la página: el runtime lo necesita para saber qué
         // pedidos van a su propio servidor y cuáles a otro (ver `cors.rs`).
         let prelude = format!(
-            "self.__controlcode_target={};\n",
+            "self.__ags_target={};\n",
             serde_json::to_string(&ctx.target_origin).unwrap_or_else(|_| "null".into())
         );
         let script = PICKER.read().map(|p| p.clone()).unwrap_or_default();

@@ -1,9 +1,9 @@
-//! Instalación de la CLI `ccode` en el PATH del usuario.
+//! Instalación de la CLI `ags` en el PATH del usuario.
 //!
 //! El binario viaja con la app (sale del mismo crate, así que `tauri build` ya lo
-//! produce), pero eso no alcanza para poder escribir `ccode` en una terminal:
+//! produce), pero eso no alcanza para poder escribir `ags` en una terminal:
 //!
-//! - En **macOS** todo vive dentro de `ControlCode.app/Contents/`, que nunca está en el
+//! - En **macOS** todo vive dentro de `ADE AGS.app/Contents/`, que nunca está en el
 //!   PATH, y un `.dmg` es arrastrar-y-soltar: no ejecuta ningún script de instalación.
 //! - En **Windows** el instalador podría tocar el PATH, pero no en el caso portable.
 //! - En **Linux** el `.deb`/`.rpm` sí puede dejarlo en `/usr/bin`, pero un AppImage no.
@@ -16,9 +16,9 @@ use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Manager};
 
 #[cfg(windows)]
-const CLI_FILE: &str = "ccode.exe";
+const CLI_FILE: &str = "ags.exe";
 #[cfg(not(windows))]
-const CLI_FILE: &str = "ccode";
+const CLI_FILE: &str = "ags";
 
 #[derive(Serialize, Debug, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -37,12 +37,12 @@ pub struct CliInstallStatus {
     pub method: &'static str,
 }
 
-/// El binario `ccode` que acompaña a este ejecutable.
+/// El binario `ags` que acompaña a este ejecutable.
 ///
 /// No se busca en el PATH a propósito: la ruta que sale de acá se escribe dentro de los
 /// `--mcp-config`, y tiene que apuntar al binario de ESTA versión de la app, no a una copia
 /// vieja que quedó instalada. Por eso también es lo que hace que el MCP funcione sin que
-/// nadie haya apretado "instalar la CLI": el botón es para poder tipear `ccode`, no un
+/// nadie haya apretado "instalar la CLI": el botón es para poder tipear `ags`, no un
 /// requisito del navegador ni de la orquestación.
 pub(crate) fn source_binary(app: &AppHandle) -> Option<PathBuf> {
     // Primero lo que dice Tauri: el directorio de recursos lo calcula él para cada
@@ -59,7 +59,7 @@ pub(crate) fn source_binary(app: &AppHandle) -> Option<PathBuf> {
     source_binary_in(exe.parent()?)
 }
 
-/// El respaldo: dónde puede estar `ccode` relativo al ejecutable.
+/// El respaldo: dónde puede estar `ags` relativo al ejecutable.
 ///
 /// Hace falta además del directorio de recursos porque `.deb`/`.rpm` copian el binario a
 /// `/usr/bin` —al lado de la app, FUERA de los recursos— y porque en desarrollo no hay
@@ -84,7 +84,7 @@ pub(crate) fn source_binary_in(dir: &Path) -> Option<PathBuf> {
 }
 
 /// El `productName` de `tauri.conf.json`: es el nombre de la carpeta de recursos en Linux.
-const PRODUCT: &str = "controlcode";
+const PRODUCT: &str = "ade-ags";
 
 /// Directorio donde se instala. Se elige uno del usuario a propósito: `/usr/local/bin`
 /// pediría sudo en macOS moderno, y un botón de la UI no debería tener que escalar
@@ -95,7 +95,7 @@ pub(super) fn target_dir() -> Option<PathBuf> {
     {
         // En Windows no hay una convención tipo `~/.local/bin`, así que se usa el
         // directorio de datos del usuario, que es donde va todo lo instalado sin admin.
-        Some(home.join("AppData").join("Local").join("ControlCode").join("bin"))
+        Some(home.join("AppData").join("Local").join("ADE AGS").join("bin"))
     }
     #[cfg(not(windows))]
     {
@@ -150,7 +150,7 @@ pub fn install_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
     let source = source_binary(&app).ok_or_else(|| {
         format!(
             "No se encontró el binario '{CLI_FILE}' junto a la app. \
-             Si estás corriendo en desarrollo, compilalo con: cargo build --bin ccode"
+             Si estás corriendo en desarrollo, compilalo con: cargo build --bin ags"
         )
     })?;
     let dir = target_dir().ok_or("No se pudo determinar el directorio del usuario")?;
@@ -176,7 +176,7 @@ pub fn install_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
 
     #[cfg(not(windows))]
     {
-        // Symlink: al actualizar la app, `ccode` sigue apuntando al binario nuevo sin
+        // Symlink: al actualizar la app, `ags` sigue apuntando al binario nuevo sin
         // tener que reinstalar nada.
         symlink::symlink_file(&source, &target)
             .map_err(|e| format!("No se pudo crear el symlink en {}: {e}", target.display()))?;
