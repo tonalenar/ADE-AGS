@@ -489,6 +489,22 @@ pub async fn pty_create(
     Ok(id)
 }
 
+/// El terminal vivo de una tab, si lo hay: el más nuevo con ese `ADE_TAB_ID`. Pura sobre las
+/// sesiones `(id del PTY, tab)`.
+pub(super) fn newest_for_tab<'a>(sessions: impl Iterator<Item = (u32, Option<&'a str>)>, tab_id: &str) -> Option<u32> {
+    sessions.filter(|(_, tab)| *tab == Some(tab_id)).map(|(id, _)| id).max()
+}
+
+/// ¿Esta tab ya tiene un terminal corriendo? Se pregunta al montar un terminal: si la ventana se
+/// recargó (el vigía de Vite lo hace con cada cambio que no puede aplicar en caliente) los
+/// procesos siguen vivos en Rust, y lo correcto es reconectarse a ellos —con el agente en
+/// medio de su trabajo— en vez de matarlos y lanzar otros con `--resume`.
+#[tauri::command]
+pub fn pty_for_tab(tab_id: String) -> Option<u32> {
+    let reg = registry();
+    newest_for_tab(reg.iter().map(|(id, s)| (*id, s.tab_id.as_deref())), &tab_id)
+}
+
 /// Se "conecta" a un PTY que ya existe (p. ej. al mover una tab a otra ventana sin
 /// matar el proceso) y devuelve el scrollback acumulado para reproducirlo en el xterm nuevo.
 #[tauri::command]

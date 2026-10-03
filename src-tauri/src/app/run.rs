@@ -33,6 +33,7 @@ pub fn run() {
             // Terminal embebida (PTY)
             crate::terminal::pty_create,
             crate::terminal::pty_attach,
+            crate::terminal::pty_for_tab,
             crate::terminal::pty_write,
             crate::terminal::pty_resize,
             crate::terminal::pty_kill,
