@@ -1,7 +1,8 @@
 import { create } from "zustand";
 
-import { accountEnv, codexAccountUsage } from "@/features/accounts/ipc";
+import { accountEnv, codexAccountUsage, discoverAntigravityAccount } from "@/features/accounts/ipc";
 import type { AgentAccount, CodexUsage } from "@/features/accounts/types";
+import { modelMeters, type ModelMeter } from "./antigravityQuota";
 import { agentAccountUsage, claudeLiveUsage, isUsageFresh, planLabel, type LiveUsage } from "@/features/accounts/usage";
 
 /** Cada cuánto se renuevan las cuotas mientras el canvas está abierto. */
@@ -14,15 +15,24 @@ export interface CodexEntry {
   failed: boolean;
 }
 
+export interface AntigravityEntry {
+  /** `null` = todavía no se supo. Los más gastados primero (ver `modelMeters`). */
+  meters: ModelMeter[] | null;
+  failed: boolean;
+  /** Epoch en segundos de la última consulta buena; 0 = ninguna. */
+  fetchedAt: number;
+}
+
 interface UsageState {
   claude: Record<string, LiveUsage>;
   codex: Record<string, CodexEntry>;
+  antigravity: Record<string, AntigravityEntry>;
   plan: Record<string, string | null>;
   busy: Record<string, boolean>;
   refresh: (account: AgentAccount, force: boolean) => Promise<void>;
 }
 
-const patch = <K extends "claude" | "codex" | "plan" | "busy">(key: K, id: string, value: UsageState[K][string]) =>
+const patch = <K extends "claude" | "codex" | "plan" | "busy" | "antigravity">(key: K, id: string, value: UsageState[K][string]) =>
   (s: UsageState) => ({ [key]: { ...s[key], [id]: value } }) as unknown as Pick<UsageState, K>;
 
 /**
@@ -33,6 +43,7 @@ const patch = <K extends "claude" | "codex" | "plan" | "busy">(key: K, id: strin
 export const useUsageStore = create<UsageState>((set, get) => ({
   claude: {},
   codex: {},
+  antigravity: {},
   plan: {},
   busy: {},
 
@@ -63,6 +74,16 @@ export const useUsageStore = create<UsageState>((set, get) => ({
         } catch {
           set(patch("codex", id, { usage: get().codex[id]?.usage ?? null, failed: true }));
         }
+      } else if (account.agentId === "antigravity") {
+        // Dos HTTP por cuenta (ver `antigravity_access.rs`): barato, va en paralelo con las demás.
+        try {
+          const discovery = await discoverAntigravityAccount(id);
+          set(patch("antigravity", id, { meters: modelMeters(discovery.models), failed: false, fetchedAt: Math.floor(Date.now() / 1000) }));
+        } catch {
+          // Se conserva el último valor bueno, como en Codex.
+          const prev = get().antigravity[id];
+          set(patch("antigravity", id, { meters: prev?.meters ?? null, failed: true, fetchedAt: prev?.fetchedAt ?? 0 }));
+        }
       }
     } catch (e) {
       if (account.agentId === "claude-code") {
@@ -88,7 +109,9 @@ export function startUsagePolling(accounts: AgentAccount[]): void {
   window.clearInterval(timer);
   const sweep = async () => {
     const { refresh } = useUsageStore.getState();
-    await Promise.all(accounts.filter((a) => a.agentId === "codex").map((a) => refresh(a, true)));
+    await Promise.all(
+      accounts.filter((a) => a.agentId === "codex" || a.agentId === "antigravity").map((a) => refresh(a, true)),
+    );
     for (const a of accounts.filter((x) => x.agentId === "claude-code")) await refresh(a, false);
   };
   void sweep();
