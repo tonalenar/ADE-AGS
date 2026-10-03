@@ -104,6 +104,20 @@ não há índice para manter em dia. O briefing do Orquestrador traz as 8 entrad
 prioridade (até 1,8 KB) marcadas como dados, não instruções. Só lê: propor continua passando
 pela aprovação do usuário.
 
+## Validade temporal
+
+A validade não é armazenada nem calculada por migração. Ela é derivada em leitura a partir das
+revisões aprovadas e imutáveis: cada `create` ou `update` abre um intervalo em `decided_at`, e a
+próxima revisão aprovada da mesma entrada o fecha. Um `delete` fecha o intervalo sem abrir outro;
+revisões pendentes e rejeitadas não participam. Os intervalos usam segundos Unix e são
+semiabertos: `valid_from <= T < valid_to`; `valid_to: null` significa que o intervalo segue
+vigente.
+
+`ags memory search "<assunto>" --mission <id> --at <data>` pesquisa o que valia naquele instante.
+`--at` aceita `YYYY-MM-DD`, `YYYY-MM-DDTHH:MM` (ambos interpretados em UTC) ou segundos Unix.
+Sem `--at`, a busca continua usando a memória aprovada atual. Para ver os intervalos de uma
+entrada, use `ags memory history --mission <id> --key <chave> --scope workspace|mission`.
+
 ## Sugerir memória ao terminar (missões em terminais)
 
 O ciclo fecha com `ags memory suggest --mission <id> --key <nome> --body "..."`: o agente
