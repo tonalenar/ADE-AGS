@@ -2773,6 +2773,79 @@ fn una_carpeta_se_resuelve_al_workspace_de_la_ventana_que_la_tiene_abierta() {
     assert_eq!(store::workspace_of_folder(&conn, "/otra"), None);
 }
 
+#[test]
+fn run_plan_de_tab_guarda_mission_id_y_sigue_siendo_opcional() {
+    let cwd_path = std::env::temp_dir().join(format!("ags-mission-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&cwd_path).unwrap();
+    let cwd = cwd_path.to_string_lossy().into_owned();
+    let db: crate::database::DbConnection =
+        std::sync::Arc::new(std::sync::Mutex::new(test_db()));
+    let mission_id = {
+        let conn = db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('w-mcp', 'MCP', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO windows (id, label, workspace_id, is_open, last_active) VALUES ('win-mcp', 'MCP', 'w-mcp', 1, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO tabs (id, window_id, agent_id, agent_label, command, cwd, opened_at, created_at, last_active)
+             VALUES ('tab-mcp', 'win-mcp', 'claude-code', 'Claude Code', 'claude', ?1, 0, 0, 0)",
+            [&cwd],
+        )
+        .unwrap();
+        crate::missions::create(
+            &conn,
+            "w-mcp",
+            &crate::missions::MissionInput {
+                title: "MCP scope".into(),
+                objective: "Keep this run in the mission".into(),
+                cwd: cwd.clone(),
+                auto_account: true,
+                ..Default::default()
+            },
+        )
+        .unwrap()
+        .id
+    };
+
+    for (key, mission) in [
+        ("with-mission", Some(mission_id.as_str())),
+        ("without-mission", None),
+    ] {
+        let mut payload = serde_json::json!({
+            "cwd": cwd,
+            "args": {
+                "objective": key,
+                "tasks": [{
+                    "key": key,
+                    "title": key,
+                    "prompt": "Implement the scoped run",
+                    "agent": "claude-code",
+                    "model": "haiku",
+                    "isolate": false
+                }]
+            }
+        });
+        if let Some(mission) = mission {
+            payload["missionId"] = serde_json::json!(mission);
+        }
+        let (run_id, _) = super::orchestration::plan_tasks(&db, &payload, true, |_| {
+            Ok(roster_de_prueba())
+        })
+        .unwrap();
+        let conn = db.lock().unwrap();
+        let run = store::run_by_id(&conn, &run_id).unwrap().unwrap();
+        assert_eq!(run.mission_id.as_deref(), mission, "{key}");
+    }
+
+    std::fs::remove_dir_all(cwd_path).ok();
+}
+
 /// El tablero es lo que el lead lee para decidir: cada tarea con su key, su estado, de qué
 /// depende (por key, no por id) y una línea de lo que dejó.
 #[test]

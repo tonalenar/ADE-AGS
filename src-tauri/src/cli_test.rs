@@ -2,6 +2,33 @@
 
 use super::*;
 
+#[test]
+fn ags_mcp_parseia_missao_e_papel_da_tab() {
+    let args = ["--cwd", "/repo", "--tab", "t1", "--mission", "m1", "--role", "QA"]
+        .map(str::to_string);
+    let (context, prefix) = parse_mcp_args(&args).unwrap();
+    assert_eq!(context, ade_ags_lib::ipc::mcp::McpContext::Cwd {
+        cwd: "/repo".into(),
+        tab: Some("t1".into()),
+        mission: Some("m1".into()),
+        role: Some("QA".into()),
+    });
+    assert_eq!(prefix, "");
+}
+
+#[test]
+fn ags_mcp_sem_missao_mantem_o_scope_atual_da_tab() {
+    let args = ["--cwd", "/repo", "--tab", "t1"].map(str::to_string);
+    let (context, prefix) = parse_mcp_args(&args).unwrap();
+    assert_eq!(context, ade_ags_lib::ipc::mcp::McpContext::Cwd {
+        cwd: "/repo".into(),
+        tab: Some("t1".into()),
+        mission: None,
+        role: None,
+    });
+    assert_eq!(prefix, "");
+}
+
 
 fn flags(args: &[&str]) -> Value {
     parse_flags(&args.iter().map(|s| s.to_string()).collect::<Vec<_>>(), &[]).unwrap()

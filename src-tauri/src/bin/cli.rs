@@ -755,7 +755,7 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
 /// que no hay un canal nuevo ni una autorización nueva — el token del handshake es el
 /// mismo. Los errores van a stderr: stdout es del JSON-RPC y meterle una línea suelta
 /// rompe al cliente.
-fn run_mcp(args: &[String]) -> ExitCode {
+fn parse_mcp_args(args: &[String]) -> Result<(ade_ags_lib::ipc::mcp::McpContext, String), String> {
     use ade_ags_lib::ipc::mcp::McpContext;
 
     // Por nombre y no por posición: OpenCode escribe el comando entero en un arreglo de su
@@ -765,32 +765,43 @@ fn run_mcp(args: &[String]) -> ExitCode {
     let mut rest = args.iter();
     while let Some(flag) = rest.next() {
         match flag.as_str() {
-            name @ ("--task" | "--cwd" | "--tab" | "--prefix") => {
+            name @ ("--task" | "--cwd" | "--tab" | "--mission" | "--role" | "--prefix") => {
                 let Some(value) = rest.next() else {
-                    eprintln!("Falta el valor de {name}");
-                    return ExitCode::from(EXIT_USAGE);
+                    return Err(format!("Falta el valor de {name}"));
                 };
                 flags.insert(name, value.clone());
             }
             other => {
-                eprintln!("Argumento inesperado para 'ags mcp': {other}");
-                return ExitCode::from(EXIT_USAGE);
+                return Err(format!("Argumento inesperado para 'ags mcp': {other}"));
             }
         }
     }
 
     let context = match (flags.remove("--task"), flags.remove("--cwd")) {
         (Some(task), _) => McpContext::Task(task),
-        (None, Some(cwd)) => McpContext::Cwd { cwd, tab: flags.remove("--tab") },
+        (None, Some(cwd)) => McpContext::Cwd {
+            cwd,
+            tab: flags.remove("--tab"),
+            mission: flags.remove("--mission"),
+            role: flags.remove("--role"),
+        },
         (None, None) => {
-            eprintln!(
-                "Uso: ags mcp --task <id-de-tarea> | --cwd <carpeta> [--tab <id-de-tab>] [--prefix <prefijo>]"
-            );
-            return ExitCode::from(EXIT_USAGE);
+            return Err("Uso: ags mcp --task <id-de-tarea> | --cwd <carpeta> [--tab <id-de-tab>] [--mission <id>] [--role <papel>] [--prefix <prefijo>]".into());
         }
     };
     // Lo que esta TUI le antepone al nombre de cada tool. Vacío = no antepone nada.
     let prefix = flags.remove("--prefix").unwrap_or_default();
+    Ok((context, prefix))
+}
+
+fn run_mcp(args: &[String]) -> ExitCode {
+    let (context, prefix) = match parse_mcp_args(args) {
+        Ok(parsed) => parsed,
+        Err(error) => {
+            eprintln!("{error}");
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
 
     let stdin = std::io::stdin();
     let result = ade_ags_lib::ipc::mcp::serve(
