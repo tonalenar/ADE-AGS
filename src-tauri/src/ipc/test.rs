@@ -414,7 +414,7 @@ fn call(id: u64, name: &str, arguments: serde_json::Value) -> serde_json::Value 
 #[test]
 fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
-    let (tab, _) = mcp_session(&McpContext::Cwd { cwd: "/p".into(), tab: None }, std::slice::from_ref(&list), |_, _| Ok(json!({})));
+    let (tab, _) = mcp_session(&McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None }, std::slice::from_ref(&list), |_, _| Ok(json!({})));
     let (task, _) = mcp_session(&McpContext::Task("t1".into()), &[list], |_, _| Ok(json!({})));
 
     let tab = tool_names(&tab[0]);
@@ -466,7 +466,7 @@ fn con_un_cliente_que_prefija_los_nombres_el_texto_los_prefija_igual() {
         json!({ "jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {} }),
         json!({ "jsonrpc": "2.0", "id": 2, "method": "tools/list" }),
     ];
-    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None };
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
     let (pelado, _) = mcp_session(&cwd, &lines, |_, _| Ok(json!({})));
     let (opencode, _) = mcp_session_as(&cwd, "ags_", &lines, |_, _| Ok(json!({})));
 
@@ -554,7 +554,7 @@ fn claude_y_opencode_aprueban_solas_las_mismas_tools() {
 #[test]
 fn cada_tool_declara_si_lee_escribe_o_destruye() {
     let list = json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" });
-    let (tab, _) = mcp_session(&McpContext::Cwd { cwd: "/p".into(), tab: None }, &[list], |_, _| Ok(json!({})));
+    let (tab, _) = mcp_session(&McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None }, &[list], |_, _| Ok(json!({})));
     let tools = tab[0]["result"]["tools"].as_array().unwrap();
     let find = |n: &str| tools.iter().find(|t| t["name"] == n).unwrap()["annotations"].clone();
     for t in tools {
@@ -616,7 +616,7 @@ fn task_handoff_uses_existing_mcp_task_scope_and_delivery_permission() {
 #[test]
 fn una_tool_del_navegador_viaja_como_browser_run_con_su_carpeta() {
     let (responses, sent) = mcp_session(
-        &McpContext::Cwd { cwd: "/home/u/proyecto".into(), tab: None },
+        &McpContext::Cwd { cwd: "/home/u/proyecto".into(), tab: None, mission: None, role: None },
         &[
             json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
             call(7, "browser_type", json!({ "target": "e3", "text": "ana@x.com", "submit": true })),
@@ -715,7 +715,7 @@ fn el_barrido_borra_los_configs_de_tabs_y_tareas_que_ya_no_estan() {
 #[test]
 fn el_pedido_dice_de_que_tab_viene() {
     let (_, sent) = mcp_session(
-        &McpContext::Cwd { cwd: "/p".into(), tab: Some("tab-7".into()) },
+        &McpContext::Cwd { cwd: "/p".into(), tab: Some("tab-7".into()), mission: None, role: None },
         &[call(1, "browser_snapshot", json!({}))],
         |_, _| Ok(json!({ "text": "page: …" })),
     );
@@ -739,7 +739,7 @@ fn desde_una_tarea_el_navegador_se_pide_por_la_tarea() {
 #[test]
 fn un_error_del_navegador_llega_al_agente_como_resultado_con_error() {
     let (responses, _) = mcp_session(
-        &McpContext::Cwd { cwd: "/p".into(), tab: None },
+        &McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None },
         &[call(2, "browser_click", json!({ "target": "e12" }))],
         |_, _| Err("No hay ningún elemento e12: tomá un snapshot nuevo".into()),
     );
@@ -751,7 +751,7 @@ fn un_error_del_navegador_llega_al_agente_como_resultado_con_error() {
 #[test]
 fn desde_una_tab_no_se_puede_llamar_al_broker() {
     let (responses, sent) = mcp_session(
-        &McpContext::Cwd { cwd: "/p".into(), tab: None },
+        &McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None },
         &[call(3, "approve_tool_use", json!({ "tool_name": "Bash", "input": {} }))],
         |_, _| Ok(json!({ "allow": true })),
     );
@@ -774,7 +774,7 @@ fn el_broker_deniega_si_la_app_no_contesta() {
 #[test]
 fn el_initialize_devuelve_la_version_pedida_y_explica_el_navegador() {
     let (responses, _) = mcp_session(
-        &McpContext::Cwd { cwd: "/p".into(), tab: None },
+        &McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None },
         &[json!({ "jsonrpc": "2.0", "id": 0, "method": "initialize", "params": { "protocolVersion": "2025-11-25" } })],
         |_, _| Ok(json!({})),
     );
@@ -828,7 +828,7 @@ fn raw_session(
 
 #[test]
 fn el_ping_se_contesta_con_un_resultado_vacio() {
-    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None };
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
     let out = raw_session(&cwd, &[json!({ "jsonrpc": "2.0", "id": 9, "method": "ping" })], |_, _| Ok(json!({})));
     assert_eq!(out, vec![json!({ "jsonrpc": "2.0", "id": 9, "result": {} })]);
 }
@@ -837,7 +837,7 @@ fn el_ping_se_contesta_con_un_resultado_vacio() {
 /// mismo `callId` con el que viajó la llamada, para cortar lo suyo.
 #[test]
 fn una_llamada_cancelada_no_se_contesta_y_la_app_se_entera() {
-    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None };
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
     let seen = std::sync::Mutex::new(Vec::new());
     let out = raw_session(
         &cwd,
@@ -867,7 +867,7 @@ fn una_llamada_cancelada_no_se_contesta_y_la_app_se_entera() {
 /// Con `progressToken`, una llamada larga avisa que sigue viva; sin él, no se manda nada.
 #[test]
 fn una_llamada_larga_avisa_su_progreso_si_se_lo_piden() {
-    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None };
+    let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None };
     let slow = |_: &str, _: serde_json::Value| {
         std::thread::sleep(std::time::Duration::from_millis(350));
         Ok(json!({ "text": "listo" }))

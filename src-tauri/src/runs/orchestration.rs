@@ -26,6 +26,7 @@ pub struct Caller {
     pub task: Option<Task>,
     pub workspace_id: String,
     pub cwd: String,
+    pub mission_id: Option<String>,
 }
 
 fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
@@ -48,6 +49,7 @@ fn caller(conn: &Connection, payload: &Value) -> Result<Caller, String> {
         return Ok(Caller {
             workspace_id: run.workspace_id,
             cwd: run.cwd,
+            mission_id: run.mission_id,
             task: Some(task),
         });
     }
@@ -62,6 +64,7 @@ fn caller(conn: &Connection, payload: &Value) -> Result<Caller, String> {
         task: None,
         workspace_id,
         cwd: cwd.to_string(),
+        mission_id: payload.get("missionId").and_then(Value::as_str).map(str::to_string),
     })
 }
 
@@ -556,9 +559,10 @@ pub(crate) fn plan_tasks(
                 store::update_run_limits(&tx, &run.id, max_parallel, budget)?;
                 run.clone()
             }
-            None => store::create_run_with(
+            None => store::create_run_with_memory_snapshot(
                 &tx,
                 &caller.workspace_id,
+                caller.mission_id.as_deref(),
                 objective.as_deref().unwrap_or_default(),
                 &caller.cwd,
                 max_parallel.unwrap_or(2),

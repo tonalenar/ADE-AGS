@@ -51,7 +51,7 @@ pub enum McpContext {
     Task(String),
     /// Una tab interactiva, en esta carpeta. `tab` es cuál, cuando la terminal lo supo al
     /// lanzarla: es lo que deja que cada agente tenga SU navegador, pintado de su color.
-    Cwd { cwd: String, tab: Option<String> },
+    Cwd { cwd: String, tab: Option<String>, mission: Option<String>, role: Option<String> },
 }
 
 impl McpContext {
@@ -59,13 +59,17 @@ impl McpContext {
     fn scope(&self) -> Value {
         match self {
             McpContext::Task(id) => json!({ "taskId": id }),
-            // Sin `tabId` cuando no se sabe cuál es, y no `null`: la app distingue "esta
-            // tab" de "el navegador que haya", y un null los confundiría.
-            McpContext::Cwd { cwd, tab: None } => json!({ "cwd": cwd }),
-            McpContext::Cwd {
-                cwd,
-                tab: Some(tab),
-            } => json!({ "cwd": cwd, "tabId": tab }),
+            McpContext::Cwd { cwd, tab, mission, .. } => {
+                // Omitimos los campos que no se conocen; null confundiría un scope opcional.
+                let mut scope = json!({ "cwd": cwd });
+                if let Some(tab) = tab {
+                    scope["tabId"] = json!(tab);
+                }
+                if let Some(mission) = mission {
+                    scope["missionId"] = json!(mission);
+                }
+                scope
+            }
         }
     }
 }
@@ -519,6 +523,19 @@ pub enum OrchestrationPower {
     Delivery,
     /// Lanza agentes o los para: gasta plata.
     Spawn,
+}
+
+/// Las tools de orquestación permitidas para un rol, si tiene una regla.
+/// QA y Tests pueden leer; los roles sin regla conservan el conjunto actual.
+pub fn powers_for_role(role: Option<&str>) -> Option<&'static [OrchestrationPower]> {
+    const READ_ONLY: &[OrchestrationPower] = &[OrchestrationPower::Read];
+    role.map(str::trim)
+        .filter(|role| {
+            ["qa", "tests", "qa/tests", "qa / tests", "qa-tests", "qa_tests"]
+                .iter()
+                .any(|known| role.eq_ignore_ascii_case(known))
+        })
+        .map(|_| READ_ONLY)
 }
 
 struct OrchestrationTool {
@@ -1071,6 +1088,10 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
     if matches!(context, McpContext::Task(_)) {
         tools.push(approve_schema());
     }
+    let allowed_powers = match context {
+        McpContext::Cwd { role, .. } => powers_for_role(role.as_deref()),
+        McpContext::Task(_) => None,
+    };
     let schema = |name: &str, description: &str, properties: Value, required: &[&str]| {
         json!({
             "name": name,
@@ -1087,7 +1108,8 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
         ORCHESTRATION_TOOLS
             .iter()
             .filter(|tool| {
-                !tool.name.starts_with("memory_") || matches!(context, McpContext::Task(_))
+                allowed_powers.map_or(true, |powers| powers.contains(&tool.power))
+                    && (!tool.name.starts_with("memory_") || matches!(context, McpContext::Task(_)))
             })
             .map(|t| schema(t.name, t.description, (t.properties)(), t.required)),
     );
@@ -1544,6 +1566,7 @@ pub fn tab_browser_mcp(
     app: tauri::AppHandle,
     cwd: String,
     tab_id: String,
+    mission_id: Option<String>,
     agent_id: String,
 ) -> Option<TabMcp> {
     use crate::agents::McpStyle;
@@ -1560,7 +1583,10 @@ pub fn tab_browser_mcp(
 
     // El id de la tab viaja adentro del lanzamiento del servidor: es con lo que la app sabe
     // de qué agente viene cada pedido, y por lo tanto a cuál contestarle con SU navegador.
-    let args = ["mcp", "--cwd", &cwd, "--tab", &tab_id];
+    let mut args = vec!["mcp", "--cwd", cwd.as_str(), "--tab", tab_id.as_str()];
+    if let Some(mission_id) = mission_id.as_deref() {
+        args.extend(["--mission", mission_id]);
+    }
     let prefix = tool_prefix(style);
     let mut mcp = TabMcp {
         tool_prefix: prefix.clone(),
@@ -1595,4 +1621,59 @@ pub fn tab_browser_mcp(
         McpStyle::None => unreachable!("se descartó arriba"),
     }
     Some(mcp)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn cwd_context(mission: Option<&str>, role: Option<&str>) -> McpContext {
+        McpContext::Cwd {
+            cwd: "/repo".into(),
+            tab: Some("tab-1".into()),
+            mission: mission.map(str::to_string),
+            role: role.map(str::to_string),
+        }
+    }
+
+    #[test]
+    fn scope_incluye_mission_id_cuando_se_conoce() {
+        assert_eq!(cwd_context(Some("mission-1"), None).scope(), json!({ "cwd": "/repo", "tabId": "tab-1", "missionId": "mission-1" }));
+    }
+
+    #[test]
+    fn scope_omite_mission_id_cuando_no_se_conoce() {
+        let scope = cwd_context(None, None).scope();
+        assert_eq!(scope, json!({ "cwd": "/repo", "tabId": "tab-1" }));
+        assert!(scope.get("missionId").is_none());
+    }
+
+    #[test]
+    fn powers_por_rol_solo_restringe_qa_y_tests() {
+        const READ_ONLY: &[OrchestrationPower] = &[OrchestrationPower::Read];
+        assert_eq!(powers_for_role(None), None);
+        assert_eq!(powers_for_role(Some("QA")), Some(READ_ONLY));
+        assert_eq!(powers_for_role(Some("Tests")), Some(READ_ONLY));
+        assert_eq!(powers_for_role(Some("QA / Tests")), Some(READ_ONLY));
+        assert_eq!(powers_for_role(Some("backend")), None);
+    }
+
+    #[test]
+    fn tools_qa_conserva_lectura_y_no_filtra_browser_ni_git() {
+        let names: Vec<String> = tools_for(&cwd_context(None, Some("QA")), "")
+            .into_iter()
+            .filter_map(|tool| tool.get("name")?.as_str().map(str::to_string))
+            .collect();
+        assert!(names.iter().any(|name| name == "agent_roster"));
+        assert!(names.iter().any(|name| name == "task_result"));
+        for denied in ["run_plan", "task_add", "fact_add", "memory_propose", TOOL_NAME] {
+            assert!(!names.iter().any(|name| name == denied), "{denied}");
+        }
+        for tool in BROWSER_TOOLS {
+            assert!(names.iter().any(|name| name == tool.name), "{}", tool.name);
+        }
+        for tool in GIT_TOOLS {
+            assert!(names.iter().any(|name| name == tool.name), "{}", tool.name);
+        }
+    }
 }

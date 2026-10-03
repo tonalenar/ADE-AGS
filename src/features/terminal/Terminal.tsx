@@ -27,6 +27,7 @@ import { accountEnv as accountEnvFor } from "@/features/accounts/ipc";
 import { resolvePrelaunch } from "@/features/prelaunch/ipc";
 import { reconcileTabSkills } from "@/features/skills/ipc";
 import { hasBrowserMcp, withBrowserMcp } from "@/features/browser/tabMcp";
+import { missionOfTab } from "@/features/canvas/store";
 import { homeDir } from "@/shared/ipc/window";
 import { ptyAttach, ptyCreate, ptyForTab, ptyKill, ptyResize, ptyWrite } from "./ipc";
 import { createFitter } from "./fit";
@@ -431,9 +432,14 @@ export function Terminal({
         // adentro: mientras estuvo escrito acá, OpenCode arrancaba sin las tools y sin
         // decir por qué. `withBrowserMcp` devuelve el comando y las variables porque
         // OpenCode no tiene flag — el servidor va en su config, que se le pasa por entorno.
+        //
+        // Si esta tab es de una misión en terminales, su id viaja también: así las tools
+        // de orquestación que el servidor MCP expone quedan ligadas a esa misión y no solo
+        // a la carpeta (ver `missionOfTab`). Una tab suelta manda `null`, igual que antes.
+        const missionId = tabId ? missionOfTab({ id: tabId, cwd: resolvedCwd }) : null;
         const browser =
           agentId && tabId && hasBrowserMcp(agentId)
-            ? await withBrowserMcp(command, resolvedCwd, tabId, agentId)
+            ? await withBrowserMcp(command, resolvedCwd, tabId, agentId, missionId)
             : { command, env: {} };
         if (cancelled) return;
 

@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.22.0
+version: 1.23.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -801,6 +801,18 @@ Missions started as terminals carry three read-only helpers:
   convening the team.
 - `ags mission timings --mission <id>` — where the time went: terminal startup, agent turns,
   `peer ask` waits.
+
+### MCP scoped to a mission
+
+A tab that belongs to a mission's terminal team gets `ags mcp --cwd <folder> --tab <id> --mission <id>`
+instead of the plain `--cwd`/`--tab` form: any `run_plan`/`task_add` that tab's agent calls creates its
+run already tied to that mission, the same way a fleet task is. A tab opened outside a mission (or an
+older build) keeps working exactly as before — `--mission` is optional and has no effect when absent.
+
+Some roles see fewer orchestration tools: a role that only reads (for example QA / Tests) gets the
+`Read`-power tools (`agent_roster`, `task_status`, `task_result`, `run_await`, `facts_read`…) and not
+the ones that spend or change things (`run_plan`, `task_add`, `task_reroute`, `task_cancel`). A role with
+no rule keeps every tool, same as before.
 
 ### Leaving memory for the next mission
 
