@@ -5,7 +5,21 @@ import { boardKey, boardKeyOfTab, missionBoardKey, missionOfKey, missionOfTab, u
 import type { FunctionalRole, Squad } from "@/features/squads/types";
 
 import { entryTab, missionIndex, tabsByMission } from "../groups";
-import { LEAD_NAME, briefingFor, leadBriefing, memberBriefing, teamOf, uniqueNames } from "../terminals";
+import { LEAD_NAME, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, teamOf, uniqueNames } from "../terminals";
+
+describe("accountsNeedingLogin", () => {
+  const accounts = [
+    { id: "a", name: "Principal", loggedIn: true, kind: "login" as const },
+    { id: "b", name: "Secundária", loggedIn: false, kind: "login" as const },
+    { id: "c", name: "Chave", loggedIn: false, kind: "api_key" as const },
+  ];
+  it("aponta só as contas de login sem sessão, sem repetir", () => {
+    expect(accountsNeedingLogin(["a", "b", "b", null, undefined], accounts)).toEqual(["Secundária"]);
+  });
+  it("conta de chave de API e conta do sistema não precisam de login", () => {
+    expect(accountsNeedingLogin(["c", null, "x"], accounts)).toEqual([]);
+  });
+});
 
 const roles: FunctionalRole[] = [
   { id: "backend", label: "Backend", description: "API e dados", instructions: "Implemente a API." },
