@@ -20,6 +20,7 @@ use super::missions;
 use super::notify::notify_send;
 use super::notes::{note_create, note_edit, note_list, note_read, note_write};
 use super::devices::{device_action, device_create, device_list};
+use super::pool::{pool_create, pool_delete, pool_list};
 use super::portals::{portal_action, portal_create, portal_list};
 use super::role::{role_create, role_edit, role_list, role_show};
 use super::floor::{floor_create, floor_list};
@@ -61,6 +62,10 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "note.edit" => note_edit(app, args),
         // Los navegadores del canvas conectados con quien pide (ver `portals`).
         // Las pantallas Android del canvas (emulador o teléfono) conectadas con quien pide (ver `devices`).
+        // Grupos de cuentas con una estrategia de reparto (ver `pool`).
+        "pool.list" => pool_list(app, args),
+        "pool.create" => pool_create(app, args),
+        "pool.delete" => pool_delete(app, args),
         "device.list" => device_list(app, args),
         "device.create" => device_create(app, args),
         "device.start" => device_action(app, args, "start"),

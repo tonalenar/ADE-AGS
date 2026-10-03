@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, FolderIcon, Progress } from "neogestify-ui-components";
+import { AlertaToast, Button, FolderIcon, Progress } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
+import { resolveAccountChoice } from "@/features/accounts/pools";
 import { useSkillsStore } from "@/features/skills/store";
 import { AgentPickerStep } from "@/features/tabs/wizard/AgentPickerStep";
 import { AccountPickerStep, useAgentAccounts } from "@/features/tabs/wizard/AccountPickerStep";
@@ -119,8 +120,16 @@ export function NewAgentDialog({
 
   const confirm = () => {
     if (!agent) return;
-    onConfirm({ agent, skillIds, accountId, prelaunch });
-    onClose();
+    // `pool:Nombre` se resuelve acá, al abrir: el pool elige la cuenta con lo que se sabe ahora.
+    void resolveAccountChoice(agent.id, accountId)
+      .catch((e) => {
+        AlertaToast(t("accounts.pools.title"), String(e), "error", 6000);
+        return accountId;
+      })
+      .then((resolved) => {
+        onConfirm({ agent, skillIds, accountId: resolved, prelaunch });
+        onClose();
+      });
   };
 
   return (

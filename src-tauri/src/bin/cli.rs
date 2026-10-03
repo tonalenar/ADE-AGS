@@ -62,6 +62,13 @@ AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
   peer connect <a> <b>                        Conecta dos agentes del equipo
   peer disconnect <a> <b>                     Los desconecta
 
+POOLS DE CUENTAS — repartir entre varias cuentas de una TUI con una estrategia
+  pools                                       Los pools creados, con sus cuentas y su estrategia
+  pool create <nombre> --agent <id> --accounts principal,trabajo [--strategy least-used|round-robin|sticky]
+  pool delete <nombre>
+  Se piden donde iría una cuenta: tab create --agent claude-code --account pool:Trabajo, o el
+  \"account\" de una tarea de un plan / de un miembro de un Squad (pool:Trabajo).
+
 DISPOSITIVOS ANDROID DEL CANVAS — un emulador o teléfono conectado con esta terminal (por adb)
   devices                                     Los que manejás, lo que adb ve y los emuladores (AVD)
   device create [<nombre>] [--avd <avd>]      Crea uno a tu lado, ya conectado
@@ -353,6 +360,7 @@ fn shortcut(word: &str) -> Option<&'static str> {
         "notes" => Some("note.list"),
         "portals" => Some("portal.list"),
         "devices" => Some("device.list"),
+        "pools" => Some("pool.list"),
         // `ccode notify "terminé"`: avisar es lo único que se hace con eso.
         "notify" => Some("notify.send"),
         "roles" => Some("role.list"),
@@ -418,6 +426,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "portal.press" => &["name", "key"],
         "portal.select" => &["name", "target", "value"],
         // `ccode device tap Pixel --text Entrar`: el dispositivo primero, y lo que cada acción pide.
+        "pool.create" | "pool.delete" => &["name"],
         "device.create" => &["name"],
         "device.start" | "device.shot" | "device.tree" => &["name"],
         "device.type" => &["name", "text"],

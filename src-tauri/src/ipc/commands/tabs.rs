@@ -107,7 +107,15 @@ pub(super) fn tab_create(app: &AppHandle, args: &Value) -> Result<Value, String>
     // tab con la cuenta equivocada, que es el peor resultado posible — parece que funcionó.
     if let Some(name) = arg_str_opt(args, "account") {
         let agent = arg_str_opt(args, "agent").unwrap_or_default();
-        forwarded["accountId"] = json!(resolve_account_id(app, &agent, &name)?);
+        match crate::accounts::pools::pool_ref(&name) {
+            // La del sistema (`None`) no lleva `accountId`: la tab se abre sin cuenta de la app.
+            Some(pool) => {
+                if let Some(id) = super::agents::resolve_pool_account(app, &agent, pool)? {
+                    forwarded["accountId"] = json!(id);
+                }
+            }
+            None => forwarded["accountId"] = json!(resolve_account_id(app, &agent, &name)?),
+        }
     }
     // `--pre "..."` / `--pre-preset nombre` → la cadena ya con ids. Mismo criterio que con
     // las cuentas: un preset inexistente falla acá y no lanza la tab, porque arrancar sin

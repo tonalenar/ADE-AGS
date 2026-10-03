@@ -490,7 +490,7 @@ pub(crate) fn plan_tasks(
             };
             (request, complexity, None)
         };
-        match routing::route(&roster, &tiers, &request, now) {
+        match routing::resolve_pool(db, &request).and_then(|r| routing::route(&roster, &tiers, &r, now)) {
             Ok(a) => {
                 if let Some(schema) = &t.result_schema
                     && let Err(error) = plan::validate_result_schema(&a.agent_id, schema)

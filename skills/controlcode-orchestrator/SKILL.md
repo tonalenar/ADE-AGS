@@ -1,7 +1,7 @@
 ---
 name: controlcode-orchestrator
 description: Drive the Control Code desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.17.0
+version: 1.18.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -556,6 +556,24 @@ ccode portal console Docs --level errors
 - Not available on a portal: running JavaScript, uploading files, cookies and storage. A
   portal may be on any site; those stay with the user and the project browser tools.
 - There is no delete command: closing a portal stays with the user.
+
+### Account pools
+
+A pool is a named group of the accounts of one TUI plus a rule for picking one each time
+(`least-used`: the one with the most free window; `round-robin`: one after another;
+`sticky`: the first on the list that can run, the next only as a fallback). The user makes them
+in Settings › Accounts, or:
+
+```bash
+ccode pools
+ccode pool create Work --agent claude-code --accounts primary,work --strategy sticky   # "primary" = the system account
+ccode tab create --agent claude-code --account pool:Work   # the pool picks the account now
+```
+
+Ask for a pool with `pool:<name>` wherever an account goes: `--account`, the `account` of a plan
+task or of a Squad member. The pick uses the last known quota, sessions and running tasks. A task
+routed through a pool is pinned to the account it got: if that one runs out mid-task it is not
+moved to an account outside the pool.
 
 ### Android devices on the canvas
 

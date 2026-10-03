@@ -4259,3 +4259,102 @@ fn el_sufijo_se_ancla_al_final_del_texto() {
     assert_eq!(decide(&reglas, "Edit", &entrada(serde_json::json!({ "file_path": "gen/a.rs.rs" }))), Decision::Allow);
     assert_eq!(decide(&reglas, "Edit", &entrada(serde_json::json!({ "file_path": "a.rs.bak" }))), Decision::Ask);
 }
+
+// ── Pools de cuentas ────────────────────────────────────────────
+
+use crate::accounts::pools::{PoolSpec, Strategy};
+
+fn pool_spec(strategy: Strategy, members: &[Option<&str>], start: usize) -> PoolSpec {
+    PoolSpec {
+        name: "Trabajo".into(),
+        agent_id: "claude-code".into(),
+        members: members.iter().map(|m| m.map(str::to_string)).collect(),
+        strategy,
+        start,
+    }
+}
+
+/// Claude Code con tres cuentas: la del sistema, "trabajo" y "extra".
+fn claude_con_tres() -> Roster {
+    let mut roster = roster_de_prueba();
+    agente(&mut roster, "claude-code").accounts.push(cuenta(Some("extra"), "extra", None));
+    roster
+}
+
+fn elegida(roster: &mut Roster, spec: &PoolSpec) -> Result<Option<String>, String> {
+    routing::pick_in_pool(agente(roster, "claude-code"), spec, AHORA).map(|(id, _)| id)
+}
+
+#[test]
+fn sticky_usa_la_primera_y_pasa_a_la_siguiente_solo_si_esa_no_puede() {
+    let mut roster = claude_con_tres();
+    let spec = pool_spec(Strategy::Sticky, &[Some("trabajo"), Some("extra")], 0);
+    assert_eq!(elegida(&mut roster, &spec).unwrap().as_deref(), Some("trabajo"));
+    // Aunque la otra esté mucho más libre, la principal manda.
+    agente(&mut roster, "claude-code").accounts[1] = cuenta(Some("trabajo"), "trabajo", Some(0.9));
+    assert_eq!(elegida(&mut roster, &spec).unwrap().as_deref(), Some("trabajo"));
+    // Sin sesión: respaldo.
+    agente(&mut roster, "claude-code").accounts[1].logged_in = false;
+    assert_eq!(elegida(&mut roster, &spec).unwrap().as_deref(), Some("extra"));
+    // La principal al máximo de simultáneas: la otra, mientras tenga lugar.
+    let mut roster = claude_con_tres();
+    agente(&mut roster, "claude-code").accounts[1].at_capacity = true;
+    assert_eq!(elegida(&mut roster, &spec).unwrap().as_deref(), Some("extra"));
+}
+
+#[test]
+fn least_used_elige_la_mas_libre_pero_solo_entre_las_del_pool() {
+    let mut roster = claude_con_tres();
+    {
+        let cc = agente(&mut roster, "claude-code");
+        cc.accounts[0] = cuenta(None, "Claude Code", Some(0.0)); // la más libre, pero fuera del pool
+        cc.accounts[1] = cuenta(Some("trabajo"), "trabajo", Some(0.70));
+        cc.accounts[2] = cuenta(Some("extra"), "extra", Some(0.20));
+    }
+    let spec = pool_spec(Strategy::LeastUsed, &[Some("trabajo"), Some("extra")], 0);
+    assert_eq!(elegida(&mut roster, &spec).unwrap().as_deref(), Some("extra"));
+}
+
+#[test]
+fn round_robin_arranca_donde_dice_el_turno_y_salta_las_que_no_se_pueden_usar() {
+    let mut roster = claude_con_tres();
+    let members = [None, Some("trabajo"), Some("extra")];
+    assert_eq!(elegida(&mut roster, &pool_spec(Strategy::RoundRobin, &members, 0)).unwrap(), None);
+    assert_eq!(elegida(&mut roster, &pool_spec(Strategy::RoundRobin, &members, 1)).unwrap().as_deref(), Some("trabajo"));
+    assert_eq!(elegida(&mut roster, &pool_spec(Strategy::RoundRobin, &members, 2)).unwrap().as_deref(), Some("extra"));
+    // El turno de "trabajo" pero sin sesión: sigue con la que viene.
+    agente(&mut roster, "claude-code").accounts[1].logged_in = false;
+    assert_eq!(elegida(&mut roster, &pool_spec(Strategy::RoundRobin, &members, 1)).unwrap().as_deref(), Some("extra"));
+}
+
+#[test]
+fn un_pool_sin_cuentas_usables_dice_por_que_y_uno_de_otra_tui_se_rechaza() {
+    let mut roster = claude_con_tres();
+    for a in &mut agente(&mut roster, "claude-code").accounts {
+        a.logged_in = false;
+    }
+    let err = elegida(&mut roster, &pool_spec(Strategy::Sticky, &[Some("trabajo"), Some("extra")], 0)).unwrap_err();
+    assert!(err.contains("ninguna cuenta del pool 'Trabajo'") && err.contains("sin sesión") || err.contains("no tiene sesión"), "{err}");
+
+    let mut roster = claude_con_tres();
+    let mut ajeno = pool_spec(Strategy::Sticky, &[Some("trabajo"), Some("extra")], 0);
+    ajeno.agent_id = "codex".into();
+    assert!(elegida(&mut roster, &ajeno).unwrap_err().contains("não de Claude Code"));
+
+    let fantasma = pool_spec(Strategy::Sticky, &[Some("borrada"), Some("tampoco")], 0);
+    assert!(elegida(&mut roster, &fantasma).unwrap_err().contains("ainda exista"));
+}
+
+#[test]
+fn un_pedido_con_pool_se_rutea_y_queda_fijado_a_la_cuenta_elegida() {
+    let roster = claude_con_tres();
+    let pedido = RouteRequest {
+        agent_id: Some("claude-code".into()),
+        model: None,
+        complexity: Some(Complexity::Standard),
+        account: AccountChoice::Pool(pool_spec(Strategy::Sticky, &[Some("extra"), Some("trabajo")], 0)),
+    };
+    let a = routing::route(&roster, &Tiers::default(), &pedido, AHORA).unwrap();
+    assert_eq!(a.account_id.as_deref(), Some("extra"));
+    assert!(!a.auto_account, "con un pool no se pasa a una cuenta de afuera");
+}
