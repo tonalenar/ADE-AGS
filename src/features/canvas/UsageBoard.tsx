@@ -1,9 +1,5 @@
-import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
-
-import { discoverAntigravityAccount } from "@/features/accounts/ipc";
-import { modelMeters, type ModelMeter } from "./antigravityQuota";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import { accountProblemKey } from "@/features/accounts/problem";
@@ -228,18 +224,13 @@ function OtherSection({ account }: { account: AgentAccount }) {
  */
 function AntigravitySection({ account }: { account: AgentAccount }) {
   const { t } = useTranslation();
-  const [meters, setMeters] = useState<ModelMeter[] | null>(null);
-  const [failed, setFailed] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const load = () => {
-    setBusy(true);
-    discoverAntigravityAccount(account.id)
-      .then((d) => { setMeters(modelMeters(d.models)); setFailed(false); })
-      .catch(() => setFailed(true))
-      .finally(() => setBusy(false));
-  };
-  // Una consulta al abrir; después, solo cuando el usuario actualiza.
-  useEffect(load, [account.id]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Los datos viven en `usageStore`: se renuevan solos (ver `startUsagePolling`) y sobreviven
+  // a abrir y cerrar el panel.
+  const entry = useUsageStore((st) => st.antigravity[account.id]);
+  const busy = useUsageStore((st) => !!st.busy[account.id]);
+  const load = () => void useUsageStore.getState().refresh(account, true);
+  const meters = entry?.meters ?? null;
+  const failed = !!entry?.failed && !meters;
 
   const now = Math.floor(Date.now() / 1000);
   const color = RING_COLORS.gemini;
@@ -249,13 +240,22 @@ function AntigravitySection({ account }: { account: AgentAccount }) {
       <Head account={account} plan={null} percent={top} color={color}>
         <RefreshButton busy={busy} onClick={load} label={t("canvas.usage.refresh")} />
       </Head>
-      {failed && !meters ? (
+      {failed ? (
         <Notice tone="warn" action={<RefreshButton busy={busy} onClick={load} label={t("canvas.usage.retry")} />}>{t("canvas.usage.failed")}</Notice>
       ) : meters === null ? <Skeleton /> : meters.length === 0 ? (
         <Notice>{t("canvas.usage.noModelQuota")}</Notice>
-      ) : meters.map((m) => (
-        <Meter key={m.id} label={m.name} percent={m.percent} resets={untilText(m.resetsAt, now, t)} color={color} />
-      ))}
+      ) : (
+        <>
+          {meters.map((m) => (
+            <Meter key={m.id} label={m.name} percent={m.percent} resets={untilText(m.resetsAt, now, t)} color={color} />
+          ))}
+          {entry && entry.fetchedAt > 0 && (
+            <div className="text-[10px] text-gray-400 dark:text-gray-500">
+              {t("canvas.usage.updated", { ago: ago(now - entry.fetchedAt, t) })}
+            </div>
+          )}
+        </>
+      )}
     </section>
   );
 }

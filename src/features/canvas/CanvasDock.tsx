@@ -19,11 +19,12 @@ export type DockPanel = "layers" | "map" | "chat" | "routines";
 
 /**
  * Cuánto llevan gastado de su plan las cuentas principales, para los anillos de la barra:
- * Claude (la sesión de cinco horas) y Codex (su ventana de cinco horas). `null` = no se
- * sabe (sin login, o la consulta falló): el anillo queda vacío y apagado, no en cero.
+ * Claude (la sesión de cinco horas), Codex (su ventana de cinco horas) y Antigravity (el
+ * modelo más gastado). `null` = no se sabe (sin login, o la consulta falló): el anillo queda
+ * vacío y apagado, no en cero. El de Antigravity solo se dibuja si hay una cuenta con datos.
  * Los datos los mantiene `usageStore`, siempre vivo mientras el canvas está abierto.
  */
-function useUsageRings(): { claude: number | null; codex: number | null } {
+function useUsageRings(): { claude: number | null; codex: number | null; antigravity: number | null } {
   const claude = useUsageStore((st) => {
     for (const live of Object.values(st.claude)) if (live.available && live.session) return live.session.percent;
     return null;
@@ -35,7 +36,11 @@ function useUsageRings(): { claude: number | null; codex: number | null } {
     }
     return null;
   });
-  return { claude, codex };
+  const antigravity = useUsageStore((st) => {
+    for (const e of Object.values(st.antigravity)) if (e.meters && e.meters.length > 0) return e.meters[0].percent;
+    return null;
+  });
+  return { claude, codex, antigravity };
 }
 
 // ── Iconos ──────────────────────────────────────────────────────────
@@ -151,6 +156,7 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
         <Pill label={t("canvas.dock.usage")} active={usageOpen} onClick={toggleUsage} className="gap-1.5 px-3">
           <Ring percent={rings.claude} color={RING_COLORS.claude} />
           <Ring percent={rings.codex} color={RING_COLORS.codex} />
+          {rings.antigravity !== null && <Ring percent={rings.antigravity} color={RING_COLORS.gemini} />}
           <Ring percent={petPercent} color={RING_COLORS.gemini} />
         </Pill>
         <Pill label={t("canvas.dock.map")} active={panel === "map"} onClick={() => onTogglePanel("map")}><MapIcon /></Pill>
