@@ -137,6 +137,43 @@ pub(super) fn mission_review(app: &AppHandle, args: &Value) -> Result<Value, Str
     Ok(json!(crate::missions::review::review(&conn, &id)?))
 }
 
+/// `ags memory suggest --mission <id> --scope workspace|mission --key <k> --body "..."`: el agente
+/// PROPONE una memoria para la próxima misión. Queda pendiente: solo el usuario la aprueba.
+pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    use crate::memory::agent::{author_of, propose_for_mission, AgentProposal};
+
+    let mission = arg_str(args, "mission")?;
+    let key = arg_str(args, "key")?;
+    let body = arg_str(args, "body")?;
+    let scope = arg_str_opt(args, "scope").unwrap_or_else(|| "mission".into());
+    let kind = arg_str_opt(args, "kind").unwrap_or_else(|| "note".into());
+    let priority = args.get("priority").and_then(Value::as_i64).unwrap_or(0);
+
+    // Quién propone: la terminal que llamó (`from`). El orquestador se distingue por su nombre.
+    let from = arg_str_opt(args, "from");
+    let name = from
+        .as_deref()
+        .and_then(|id| super::peers::open_tabs(app).ok()?.into_iter().find(|t| t.id == id).map(|t| t.name))
+        .unwrap_or_else(|| "agente".to_string());
+    let author = author_of(&name);
+
+    let db = db(app)?;
+    let result = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        propose_for_mission(
+            &conn,
+            &AgentProposal { mission_id: &mission, scope: &scope, key: &key, kind: &kind, body: &body, priority, author, author_name: &name },
+        )?
+    };
+    crate::memory::notify_changed(app);
+    Ok(json!({
+        "entryId": result.entry_id,
+        "revision": result.revision,
+        "status": "pending",
+        "message": "Proposta enviada. Fica pendente até o usuário aprovar na tela de Missões; você não precisa fazer mais nada.",
+    }))
+}
+
 /// `ags memory search "<assunto>" --mission <id>`: busca por relevância nas memórias aprovadas
 /// do workspace e da missão. Só lê; propor uma memória nova continua passando pelo usuário.
 pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, String> {

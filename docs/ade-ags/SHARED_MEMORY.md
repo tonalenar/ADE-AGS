@@ -103,3 +103,14 @@ missão. Não usa FTS5 nem embeddings: são no máximo 384 entradas pequenas por
 não há índice para manter em dia. O briefing do Orquestrador traz as 8 entradas de maior
 prioridade (até 1,8 KB) marcadas como dados, não instruções. Só lê: propor continua passando
 pela aprovação do usuário.
+
+## Sugerir memória ao terminar (missões em terminais)
+
+O ciclo fecha com `ags memory suggest --mission <id> --key <nome> --body "..."`: o agente
+**sugere**, a proposta fica pendente (revisão `proposed`, autor `lead` se vier do Orquestrador,
+`worker` nos demais) e só o usuário a aprova na tela de Missões. O motivo registra a terminal e
+a missão de origem. Travas além das de `propose` (tamanho, cota, 32 pendentes por dono):
+prioridade pedida limitada a 3, e qualquer texto que pareça credencial (chaves `sk-`/`ghp_`/
+`AKIA`…, `-----BEGIN`, `password=`, `token=`, `Authorization: Bearer`) é recusado. O nome é
+`suggest` e não `propose` porque `memory.propose` já é a ferramenta MCP das tarefas da frota.
+O briefing do Orquestrador pede até 3 sugestões ao terminar.

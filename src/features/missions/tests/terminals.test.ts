@@ -192,3 +192,17 @@ describe("memória nos briefings", () => {
     expect(memberBriefing({ title: "t", objective: "o" }, member)).not.toContain("ags memory search");
   });
 });
+
+describe("sugestão de memória ao terminar", () => {
+  it("o orquestrador sabe como sugerir, com o id da missão, e que só sugere", () => {
+    const text = leadBriefing({ id: "m-9", title: "T", objective: "O" }, []);
+    expect(text).toContain("ags memory suggest --mission m-9");
+    expect(text).toContain("SUGERE");
+    expect(text).toContain("Nunca segredos");
+    // Vem depois das instruções de coordenação.
+    expect(text.indexOf("AO TERMINAR")).toBeGreaterThan(text.indexOf("COMO COORDENAR"));
+  });
+  it("sem id da missão não há o que sugerir", () => {
+    expect(leadBriefing({ title: "T", objective: "O" }, [])).not.toContain("memory suggest");
+  });
+});
