@@ -1,8 +1,14 @@
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { setAgentRegistry, type AgentRegistryEntry } from "@/features/agents/registry";
+import { missionBoardKey, missionOfTab } from "@/features/canvas/store";
 
-import { appendBrowserMcp, browserToolPrefix, hasBrowserMcp, type TabMcp } from "../tabMcp";
+import { appendBrowserMcp, browserToolPrefix, hasBrowserMcp, withBrowserMcp, type TabMcp } from "../tabMcp";
+
+const mockInvoke = vi.fn();
+vi.mock("@tauri-apps/api/core", () => ({
+  invoke: (...args: unknown[]) => mockInvoke(...args),
+}));
 
 const entry = (id: string, mcp: AgentRegistryEntry["mcp"]): AgentRegistryEntry => ({
   id, label: id, command: id, skillsDir: null, resume: null, supportsAccounts: false, sessions: "", mcp,
@@ -83,5 +89,82 @@ describe("qué TUI recibe el navegador y cómo nombra sus tools", () => {
     expect(browserToolPrefix("claude-code")).toBe("");
     expect(browserToolPrefix("codex")).toBe("");
     expect(browserToolPrefix(null)).toBe("");
+  });
+});
+
+describe("withBrowserMcp", () => {
+  beforeEach(() => {
+    mockInvoke.mockReset();
+  });
+
+  it("pasa missionId como null por defecto cuando la tab no pertenece a una misión", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      configPath: "/home/u/.ags/mcp/tab-1.json",
+      allowedTools: ["mcp__ags__browser_click"],
+      env: { AGENT_FLAG: "1" },
+      toolPrefix: "",
+    });
+
+    const result = await withBrowserMcp("claude", "/repo", "tab-1", "claude-code");
+    expect(mockInvoke).toHaveBeenCalledWith("tab_browser_mcp", {
+      cwd: "/repo",
+      tabId: "tab-1",
+      agentId: "claude-code",
+      missionId: null,
+    });
+    expect(result.command).toContain("--mcp-config");
+    expect(result.command).toContain("/home/u/.ags/mcp/tab-1.json");
+    expect(result.env).toEqual({ AGENT_FLAG: "1" });
+  });
+
+  it("propaga missionId al invoke de tab_browser_mcp cuando la tab es de una misión", async () => {
+    mockInvoke.mockResolvedValueOnce({
+      configPath: "/home/u/.ags/mcp/tab-1.json",
+      allowedTools: ["mcp__ags__browser_click"],
+      env: {},
+      toolPrefix: "",
+    });
+
+    const result = await withBrowserMcp("claude", "/repo", "tab-1", "claude-code", "m-scope-456");
+    expect(mockInvoke).toHaveBeenCalledWith("tab_browser_mcp", {
+      cwd: "/repo",
+      tabId: "tab-1",
+      agentId: "claude-code",
+      missionId: "m-scope-456",
+    });
+    expect(result.command).toContain("--mcp-config");
+  });
+
+  it("devuelve comando sin cambios y env vacío cuando tab_browser_mcp devuelve null", async () => {
+    mockInvoke.mockResolvedValueOnce(null);
+    const result = await withBrowserMcp("claude", "/repo", "tab-1", "claude-code", "m-scope-456");
+    expect(result).toEqual({ command: "claude", env: {} });
+  });
+
+  it("tolera errores de invoke y arranca la tab como siempre", async () => {
+    mockInvoke.mockRejectedValueOnce(new Error("tauri error"));
+    const result = await withBrowserMcp("claude", "/repo", "tab-1", "claude-code", "m-scope-456");
+    expect(result).toEqual({ command: "claude", env: {} });
+  });
+});
+
+describe("missionOfTab resolution", () => {
+  it("extrae el id de misión de un canvas de misión en terminales", () => {
+    const key = missionBoardKey("/repo", "m-abc-789");
+    const boards = {
+      [key]: {
+        nodes: { "tab-1": {} },
+      } as any,
+    };
+    expect(missionOfTab({ id: "tab-1", cwd: "/repo" }, boards)).toBe("m-abc-789");
+  });
+
+  it("devuelve null para una tab suelta en una carpeta sin misión", () => {
+    const boards = {
+      "main|/repo": {
+        nodes: { "tab-1": {} },
+      } as any,
+    };
+    expect(missionOfTab({ id: "tab-1", cwd: "/repo" }, boards)).toBeNull();
   });
 });
