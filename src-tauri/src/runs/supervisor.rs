@@ -222,6 +222,11 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     } else {
         None
     };
+    // La foto de antes: el estado en que arranca, para poder volver acá (ver `checkpoints`).
+    // El líder no toca archivos: sin foto.
+    if !read_only {
+        super::checkpoints::auto(&db, &task, super::checkpoints::kind::BEFORE);
+    }
     let ctx = LaunchCtx {
         cwd: &task.cwd,
         reasoning_effort: task.reasoning_effort.as_deref(),
@@ -285,6 +290,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let stderr = child.stderr.take();
     let app = app.clone();
     let task_id = task.id.clone();
+    let task_snapshot = task.clone();
     let quota_key = super::quota::account_key(&task.agent_id, task.account_id.as_deref());
     // Codex no informa su cupo en el stream de `exec --json` (Claude sí, ver `quota`): al
     // terminar se le pregunta a su `app-server`, con el mismo entorno de la cuenta.
@@ -386,6 +392,11 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
             let _ = std::fs::remove_file(path);
         }
 
+        // La foto de después, con el proceso ya muerto y antes de que arranque lo que depende de esta.
+        if !read_only {
+            let (db, task) = (db.clone(), task_snapshot.clone());
+            let _ = tokio::task::spawn_blocking(move || super::checkpoints::auto(&db, &task, super::checkpoints::kind::AFTER)).await;
+        }
         if let Ok(conn) = db.lock() {
             let _ = store::finish_task(&conn, &task_id, &outcome);
         }

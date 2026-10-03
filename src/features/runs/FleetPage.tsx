@@ -17,6 +17,7 @@ import {
 import { NewTaskDialog } from "./NewTaskDialog";
 import { RunStrip } from "./RunStrip";
 import { RulesDialog } from "./RulesDialog";
+import { RollbackDialog } from "./RollbackDialog";
 import { useRunsStore } from "./store";
 import type { PendingApproval, Task } from "./types";
 
@@ -51,6 +52,7 @@ export function FleetPage() {
   const [newOpen, setNewOpen] = useState(false);
   const [rulesOpen, setRulesOpen] = useState(false);
   const [detail, setDetail] = useState<string | null>(null);
+  const [rollbackFor, setRollbackFor] = useState<Task | null>(null);
   /** El run al que se está mirando. `null` = toda la flota. */
   const [runFilter, setRunFilter] = useState<string | null>(null);
   const summaries = useMemo(() => orchestratedRuns(runs, allTasks), [runs, allTasks]);
@@ -274,6 +276,7 @@ export function FleetPage() {
                 onOpenPane={() => openInTerminal(task)}
                 onDiscardWorktree={() => discard(task)}
                 onReroute={() => rerouteTask(task.id).catch(console.error)}
+                onRollback={() => setRollbackFor(task)}
               />
             ))}
 
@@ -327,6 +330,7 @@ export function FleetPage() {
 
       {detailTask && <TaskDetail task={detailTask} onClose={() => setDetail(null)} />}
       {rulesOpen && cwd && <RulesDialog cwd={cwd} onClose={() => setRulesOpen(false)} />}
+      {rollbackFor && <RollbackDialog task={rollbackFor} onClose={() => setRollbackFor(null)} onDone={(text, error) => setNotice({ error, text })} />}
     </div>
   );
 }
