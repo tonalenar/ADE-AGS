@@ -1,5 +1,9 @@
+import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
+
+import { discoverAntigravityAccount } from "@/features/accounts/ipc";
+import { modelMeters, type ModelMeter } from "./antigravityQuota";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import { accountProblemKey } from "@/features/accounts/problem";
@@ -218,6 +222,44 @@ function OtherSection({ account }: { account: AgentAccount }) {
   );
 }
 
+/**
+ * Antigravity: el cupo de cada modelo, tal como lo informa el servicio al listar los modelos de
+ * la cuenta. Si no informa ninguno, se dice en vez de mostrar una barra falsa.
+ */
+function AntigravitySection({ account }: { account: AgentAccount }) {
+  const { t } = useTranslation();
+  const [meters, setMeters] = useState<ModelMeter[] | null>(null);
+  const [failed, setFailed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const load = () => {
+    setBusy(true);
+    discoverAntigravityAccount(account.id)
+      .then((d) => { setMeters(modelMeters(d.models)); setFailed(false); })
+      .catch(() => setFailed(true))
+      .finally(() => setBusy(false));
+  };
+  // Una consulta al abrir; después, solo cuando el usuario actualiza.
+  useEffect(load, [account.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const now = Math.floor(Date.now() / 1000);
+  const color = RING_COLORS.gemini;
+  const top = meters?.[0]?.percent ?? null;
+  return (
+    <section className="px-4 py-4 space-y-3.5">
+      <Head account={account} plan={null} percent={top} color={color}>
+        <RefreshButton busy={busy} onClick={load} label={t("canvas.usage.refresh")} />
+      </Head>
+      {failed && !meters ? (
+        <Notice tone="warn" action={<RefreshButton busy={busy} onClick={load} label={t("canvas.usage.retry")} />}>{t("canvas.usage.failed")}</Notice>
+      ) : meters === null ? <Skeleton /> : meters.length === 0 ? (
+        <Notice>{t("canvas.usage.noModelQuota")}</Notice>
+      ) : meters.map((m) => (
+        <Meter key={m.id} label={m.name} percent={m.percent} resets={untilText(m.resetsAt, now, t)} color={color} />
+      ))}
+    </section>
+  );
+}
+
 /** Todas las cuentas con sesión, una debajo de otra. Los datos viven en `usageStore`. */
 export function UsageBoard({ accounts }: { accounts: AgentAccount[] }) {
   const { t } = useTranslation();
@@ -226,7 +268,7 @@ export function UsageBoard({ accounts }: { accounts: AgentAccount[] }) {
     <div className="divide-y divide-gray-100 dark:divide-white/6">
       {accounts.map((a) => (
         <div key={a.id}>
-          {a.agentId === "claude-code" ? <ClaudeSection account={a} /> : a.agentId === "codex" ? <CodexSection account={a} /> : <OtherSection account={a} />}
+          {a.agentId === "claude-code" ? <ClaudeSection account={a} /> : a.agentId === "codex" ? <CodexSection account={a} /> : a.agentId === "antigravity" ? <AntigravitySection account={a} /> : <OtherSection account={a} />}
         </div>
       ))}
     </div>

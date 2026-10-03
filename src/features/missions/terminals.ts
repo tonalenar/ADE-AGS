@@ -7,6 +7,7 @@ import type { FunctionalRole, Squad } from "@/features/squads/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { sendWhenReady, type SendTimings } from "@/features/terminal/terminalRegistry";
 
+import { getAutonomy, withAutonomy } from "./autonomy";
 import { recordSpan } from "./timings";
 
 import type { Mission } from "./types";
@@ -164,7 +165,8 @@ export async function startMissionInTerminals(mission: Mission, squad: Squad | n
   const agentFor = (id: string) => {
     const found = detectedAgents.find((a) => a.id === id);
     if (!found || !found.available) throw new Error(`O agente '${id}' não está disponível nesta máquina.`);
-    return found;
+    // O nível de permissões da missão vai no comando (e portanto também ao retomar a sessão).
+    return { ...found, command: withAutonomy(found.id, found.command, getAutonomy()) };
   };
   const leadAgent = agentFor(leadAgentId);
   const memberAgents = team.map((m) => agentFor(m.agentId));

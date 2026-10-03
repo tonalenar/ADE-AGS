@@ -12,6 +12,27 @@ const MAX_RESPONSE: usize = 1024 * 1024;
 pub struct Model {
     id: String,
     name: String,
+    /// Fraction of the model's quota still available (0.0–1.0), when the service reports it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    remaining_fraction: Option<f64>,
+    /// RFC 3339 instant when that quota resets, when the service reports it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    reset_time: Option<String>,
+}
+
+/// `quotaInfo` of one catalogue entry. Tolerant on purpose: a missing or malformed field is
+/// "not reported", never an error, so a format change cannot break model discovery.
+fn quota(info: &Value) -> (Option<f64>, Option<String>) {
+    let quota = &info["quotaInfo"];
+    let remaining = quota["remainingFraction"]
+        .as_f64()
+        .filter(|f| f.is_finite())
+        .map(|f| f.clamp(0.0, 1.0));
+    let reset = quota["resetTime"]
+        .as_str()
+        .filter(|s| s.len() <= 64 && !s.chars().any(char::is_control))
+        .map(str::to_owned);
+    (remaining, reset)
 }
 
 #[derive(Serialize)]
@@ -51,9 +72,12 @@ fn models(data: &Value) -> Result<Vec<Model>, String> {
             .as_str()
             .filter(|s| s.len() <= 512 && !s.chars().any(char::is_control))
             .unwrap_or(id);
+        let (remaining_fraction, reset_time) = quota(info);
         rows.push(Model {
             id: id.clone(),
             name: name.to_owned(),
+            remaining_fraction,
+            reset_time,
         });
     }
     rows.sort_by(|a, b| a.id.cmp(&b.id));
@@ -160,6 +184,23 @@ mod tests {
         assert_eq!(b[0].id, "other");
         assert!(models(&json!({"models":["fake"]})).is_err());
     }
+    #[test]
+    fn quota_is_read_when_reported_and_ignored_when_not() {
+        let rows = models(&json!({"models":{
+            "a":{"quotaInfo":{"remainingFraction":0.25,"resetTime":"2026-10-04T10:00:00Z"}},
+            "b":{"quotaInfo":{"remainingFraction":7.0}},
+            "c":{"quotaInfo":{"remainingFraction":"x","resetTime":5}},
+            "d":{}
+        }}))
+        .unwrap();
+        assert_eq!(rows[0].remaining_fraction, Some(0.25));
+        assert_eq!(rows[0].reset_time.as_deref(), Some("2026-10-04T10:00:00Z"));
+        assert_eq!(rows[1].remaining_fraction, Some(1.0));
+        assert_eq!(rows[2].remaining_fraction, None);
+        assert_eq!(rows[2].reset_time, None);
+        assert_eq!(rows[3].remaining_fraction, None);
+    }
+
     #[test]
     fn discovery_contains_no_grant_and_does_not_claim_inference() {
         let value = serde_json::to_value(Discovery {
