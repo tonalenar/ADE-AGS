@@ -15,6 +15,9 @@ struct PtySession {
     /// Su `Drop` mata el grupo, así que cubre tanto el cierre explícito como la muerte
     /// natural del proceso — los dos caminos por los que una sesión sale del registry.
     group: ProcessGroup,
+    /// La tab de la app a la que pertenece (`ADE_TAB_ID`), para no dejar dos terminales vivos
+    /// de la misma tab. `None` en los PTYs que no son de una tab.
+    tab_id: Option<String>,
 }
 
 /// Scrollback de un PTY. `total_bytes` cuenta TODO lo que el proceso escribió alguna vez,
@@ -366,7 +369,8 @@ pub async fn pty_create(
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-    let command = with_codex_tab_id(&command, env.as_ref().and_then(|e| e.get("ADE_TAB_ID")).map(String::as_str));
+    let tab_id = env.as_ref().and_then(|e| e.get("ADE_TAB_ID")).cloned();
+    let command = with_codex_tab_id(&command, tab_id.as_deref());
     let mut cmd = build_launch(&command, &prelaunch.unwrap_or_default())?;
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
@@ -414,7 +418,26 @@ pub async fn pty_create(
         .try_clone_reader()
         .map_err(|e| format!("Failed to get PTY reader: {e}"))?;
 
-    registry().insert(id, PtySession { master: pair.master, writer, killer: child, group });
+    // Una tab tiene UN terminal vivo. Si la ventana se recargó (o se restauró la sesión), el
+    // frontend perdió los ids de los terminales de antes y lanza otros para las mismas tabs:
+    // los viejos seguían corriendo, con la misma sesión del agente abierta ("conversation is
+    // open in another app") y su memoria. Al llegar el nuevo, el anterior de esa tab se va.
+    let replaced = {
+        let mut reg = registry();
+        let old: Vec<u32> = match &tab_id {
+            Some(tab) => reg.iter().filter(|(_, s)| s.tab_id.as_deref() == Some(tab.as_str())).map(|(k, _)| *k).collect(),
+            None => Vec::new(),
+        };
+        let removed: Vec<PtySession> = old.iter().filter_map(|k| reg.remove(k)).collect();
+        reg.insert(id, PtySession { master: pair.master, writer, killer: child, group, tab_id: tab_id.clone() });
+        (old, removed)
+    };
+    for (k, mut session) in replaced.0.iter().copied().zip(replaced.1) {
+        session.group.kill_all();
+        let _ = session.killer.kill();
+        let _ = session.killer.wait();
+        buffers().remove(&k);
+    }
     buffers().insert(id, PtyBuffer::default());
 
     let app_clone = app.clone();
