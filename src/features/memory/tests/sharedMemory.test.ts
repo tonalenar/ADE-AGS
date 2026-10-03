@@ -2,27 +2,162 @@
 import { act, createElement } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { SharedMemoryPanel } from "../SharedMemoryPanel";
-import type { MemoryDetail, MemoryEntry, MemoryRevision } from "../types";
+import { SharedMemoryPanel, localeForLanguage } from "../SharedMemoryPanel";
+import type { MemoryDetail, MemoryEntry, MemoryRevision, MemoryValidityInterval } from "../types";
 import type { Run } from "@/features/runs/types";
+import ptBR from "@/i18n/locales/pt-BR.json";
 
-const mock=vi.hoisted(()=>({list:vi.fn(),get:vi.fn(),propose:vi.fn(),decide:vi.fn(),promote:vi.fn(),facts:vi.fn(),snapshot:vi.fn(),listen:vi.fn()}));
-vi.mock("../ipc",()=>({listMemory:mock.list,getMemory:mock.get,proposeMemory:mock.propose,decideMemory:mock.decide,promoteFact:mock.promote,listRunFacts:mock.facts,listMemorySnapshot:mock.snapshot}));
-vi.mock("@tauri-apps/api/event",()=>({listen:mock.listen}));
-vi.mock("neogestify-ui-components",()=>({Button:({children,onClick,disabled}: {children: React.ReactNode;onClick?:()=>void;disabled?:boolean})=>createElement("button",{onClick,disabled},children)}));
+const mock = vi.hoisted(() => ({
+  list: vi.fn(),
+  get: vi.fn(),
+  history: vi.fn(),
+  propose: vi.fn(),
+  decide: vi.fn(),
+  promote: vi.fn(),
+  facts: vi.fn(),
+  snapshot: vi.fn(),
+  listen: vi.fn(),
+}));
+vi.mock("../ipc", () => ({
+  listMemory: mock.list,
+  getMemory: mock.get,
+  getMemoryHistory: mock.history,
+  proposeMemory: mock.propose,
+  decideMemory: mock.decide,
+  promoteFact: mock.promote,
+  listRunFacts: mock.facts,
+  listMemorySnapshot: mock.snapshot,
+}));
+vi.mock("@tauri-apps/api/event", () => ({ listen: mock.listen }));
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string, options?: Record<string, string | number>) => {
+      let text = (ptBR as Record<string, string>)[key] ?? key;
+      if (options) {
+        for (const [k, v] of Object.entries(options)) {
+          text = text.replace(new RegExp(`{{${k}}}`, "g"), String(v));
+        }
+      }
+      return text;
+    },
+    i18n: { language: "pt-BR" },
+  }),
+}));
+vi.mock("neogestify-ui-components", () => ({
+  Button: ({ children, onClick, disabled }: { children: React.ReactNode; onClick?: () => void; disabled?: boolean }) =>
+    createElement("button", { onClick, disabled }, children),
+}));
 
-const entry: MemoryEntry={id:"e1",scope:"workspace",workspaceId:"w1",missionId:null,key:"architecture",kind:"note",status:"active",currentRevision:1,priority:0,body:"SQLite",authorKind:"user",sourceRunId:null,sourceTaskId:null,sourceFactId:null,createdAt:1,updatedAt:1,pendingRevision:null,pendingOperation:null,pendingKind:null,pendingPriority:null,pendingBody:null,pendingActorKind:null,pendingSourceRunId:null,pendingSourceTaskId:null,pendingSourceFactId:null,pendingReason:null,pendingCreatedAt:null};
-const pending: MemoryEntry={...entry,pendingRevision:2,pendingOperation:"update",pendingBody:"Postgres",pendingActorKind:"worker",pendingPriority:2,pendingKind:"decision"};
-const revision: MemoryRevision={entryId:"e1",revision:1,status:"approved",operation:"create",kind:"note",priority:0,body:"SQLite",contentHash:"hash",actorKind:"user",sourceRunId:"r1",sourceTaskId:"t1",sourceFactId:"f1",reason:"keep",expectedRevision:null,createdAt:1,decidedAt:2};
-const run={id:"r1",missionId:"m1",status:"done"} as Run;
-let root:Root,container:HTMLDivElement;
-const render=async(props:Partial<Parameters<typeof SharedMemoryPanel>[0]>={})=>{await act(async()=>{root.render(createElement(SharedMemoryPanel,{workspaceId:"w1",...props}));});};
-const click=async(text:string)=>{const button=[...container.querySelectorAll("button")].find(b=>b.textContent===text);expect(button,`button ${text}`).toBeTruthy();await act(async()=>{button!.click();});};
-const change=async(input:HTMLInputElement|HTMLTextAreaElement,value:string)=>{const prototype=input instanceof HTMLInputElement?HTMLInputElement.prototype:HTMLTextAreaElement.prototype;Object.getOwnPropertyDescriptor(prototype,"value")!.set!.call(input,value);await act(async()=>{input.dispatchEvent(new Event("input",{bubbles:true}));input.dispatchEvent(new Event("change",{bubbles:true}));});};
-beforeEach(()=>{vi.clearAllMocks();mock.list.mockResolvedValue({items:[entry],hasMore:false,nextCursor:null,truncated:false});mock.get.mockResolvedValue({entry,revisions:[revision]} satisfies MemoryDetail);mock.propose.mockResolvedValue({entryId:"e1",revision:2,status:"proposed",idempotent:false});mock.decide.mockResolvedValue(undefined);mock.promote.mockResolvedValue({entryId:"e1",revision:2});mock.facts.mockResolvedValue([{id:"f1",kind:"finding",body:"Run discovery",createdAt:1,author:"Worker"}]);mock.snapshot.mockResolvedValue({items:[],meta:{contextBytes:0,omittedEntries:0,truncatedEntries:0}});mock.listen.mockResolvedValue(()=>{});container=document.createElement("div");document.body.append(container);root=createRoot(container);
-// React test host flag.
-Object.assign(globalThis,{IS_REACT_ACT_ENVIRONMENT:true});});
-afterEach(async()=>{await act(async()=>root.unmount());container.remove();});
+const entry: MemoryEntry = {
+  id: "e1",
+  scope: "workspace",
+  workspaceId: "w1",
+  missionId: null,
+  key: "architecture",
+  kind: "note",
+  status: "active",
+  currentRevision: 1,
+  priority: 0,
+  body: "SQLite",
+  authorKind: "user",
+  sourceRunId: null,
+  sourceTaskId: null,
+  sourceFactId: null,
+  createdAt: 1,
+  updatedAt: 1,
+  pendingRevision: null,
+  pendingOperation: null,
+  pendingKind: null,
+  pendingPriority: null,
+  pendingBody: null,
+  pendingActorKind: null,
+  pendingSourceRunId: null,
+  pendingSourceTaskId: null,
+  pendingSourceFactId: null,
+  pendingReason: null,
+  pendingCreatedAt: null,
+};
+const pending: MemoryEntry = {
+  ...entry,
+  pendingRevision: 2,
+  pendingOperation: "update",
+  pendingBody: "Postgres",
+  pendingActorKind: "worker",
+  pendingPriority: 2,
+  pendingKind: "decision",
+};
+const revision: MemoryRevision = {
+  entryId: "e1",
+  revision: 1,
+  status: "approved",
+  operation: "create",
+  kind: "note",
+  priority: 0,
+  body: "SQLite",
+  contentHash: "hash",
+  actorKind: "user",
+  sourceRunId: "r1",
+  sourceTaskId: "t1",
+  sourceFactId: "f1",
+  reason: "keep",
+  expectedRevision: null,
+  createdAt: 1,
+  decidedAt: 2,
+};
+const interval: MemoryValidityInterval = {
+  revision: 1,
+  operation: "create",
+  kind: "note",
+  priority: 0,
+  body: "SQLite",
+  actorKind: "user",
+  reason: "Initial architecture",
+  validFrom: 1700000000,
+  validTo: null,
+};
+const run = { id: "r1", missionId: "m1", status: "done" } as Run;
+let root: Root, container: HTMLDivElement;
+const render = async (props: Partial<Parameters<typeof SharedMemoryPanel>[0]> = {}) => {
+  await act(async () => {
+    root.render(createElement(SharedMemoryPanel, { workspaceId: "w1", ...props }));
+  });
+};
+const click = async (text: string) => {
+  const button = [...container.querySelectorAll("button")].find((b) => b.textContent === text);
+  expect(button, `button ${text}`).toBeTruthy();
+  await act(async () => {
+    button!.click();
+  });
+};
+const change = async (input: HTMLInputElement | HTMLTextAreaElement, value: string) => {
+  const prototype = input instanceof HTMLInputElement ? HTMLInputElement.prototype : HTMLTextAreaElement.prototype;
+  Object.getOwnPropertyDescriptor(prototype, "value")!.set!.call(input, value);
+  await act(async () => {
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+    input.dispatchEvent(new Event("change", { bubbles: true }));
+  });
+};
+beforeEach(() => {
+  vi.clearAllMocks();
+  mock.list.mockResolvedValue({ items: [entry], hasMore: false, nextCursor: null, truncated: false });
+  mock.get.mockResolvedValue({ entry, revisions: [revision] } satisfies MemoryDetail);
+  mock.history.mockResolvedValue([interval]);
+  mock.propose.mockResolvedValue({ entryId: "e1", revision: 2, status: "proposed", idempotent: false });
+  mock.decide.mockResolvedValue(undefined);
+  mock.promote.mockResolvedValue({ entryId: "e1", revision: 2 });
+  mock.facts.mockResolvedValue([{ id: "f1", kind: "finding", body: "Run discovery", createdAt: 1, author: "Worker" }]);
+  mock.snapshot.mockResolvedValue({ items: [], meta: { contextBytes: 0, omittedEntries: 0, truncatedEntries: 0 } });
+  mock.listen.mockResolvedValue(() => {});
+  container = document.createElement("div");
+  document.body.append(container);
+  root = createRoot(container);
+  // React test host flag.
+  Object.assign(globalThis, { IS_REACT_ACT_ENVIRONMENT: true });
+});
+afterEach(async () => {
+  await act(async () => root.unmount());
+  container.remove();
+});
 
 describe("Shared Memory interface",()=>{
  it("loads the complete body before editing a truncated list preview",async()=>{mock.list.mockResolvedValue({items:[{...entry,body:"preview",bodyTruncated:true}],hasMore:false});await render();expect(container.textContent).toContain("Prévia limitada");await click("Propor edição");expect(mock.get).toHaveBeenCalledWith("e1","w1",null);expect(container.querySelector("textarea")!.value).toBe("SQLite");await click("Enviar proposta");expect(mock.propose).toHaveBeenCalledWith("w1",null,expect.objectContaining({body:"SQLite",operation:"update"}));});
@@ -36,7 +171,52 @@ describe("Shared Memory interface",()=>{
  it("does not offer mission scope without a mission",async()=>{await render();await click("Propor memória");expect(container.querySelector('option[value="mission"]')).toBeNull();});
  it("renders malicious memory as text",async()=>{mock.list.mockResolvedValue({items:[{...entry,key:'<img src=x onerror="alert(1)">',body:'<script>steal()</script>'}],hasMore:false});await render();expect(container.querySelector("script")).toBeNull();expect(container.querySelector("img")).toBeNull();expect(container.textContent).toContain("<script>steal()</script>");});
  it("reloads on memory events without polling",async()=>{await render();const listener=mock.listen.mock.calls.find(([event])=>event==="cc-memory-changed")![1];mock.list.mockResolvedValue({items:[{...entry,body:"New approved content"}],hasMore:false});await act(async()=>listener({payload:null}));expect(container.textContent).toContain("New approved content");});
- it("closes proposal dialog with Escape",async()=>{await render();await click("Propor memória");await act(async()=>document.dispatchEvent(new KeyboardEvent("keydown",{key:"Escape",bubbles:true})));expect(container.querySelector('[role="dialog"]')).toBeNull();});
+  it("loads validity history lazily only when expanding the toggle", async () => {
+    mock.history.mockResolvedValue([interval]);
+    await render();
+    expect(mock.history).not.toHaveBeenCalled();
+    await click("Histórico de validade");
+    expect(mock.history).toHaveBeenCalledWith("e1", "w1", null);
+    expect(container.textContent).toContain("Histórico de validade: architecture");
+    expect(container.textContent).toContain("Válida desde");
+    expect(container.textContent).toContain("até hoje");
+    expect(container.textContent).toContain("Initial architecture");
+    await click("Fechar");
+    expect(container.textContent).not.toContain("Histórico de validade: architecture");
+    await click("Histórico de validade");
+    expect(mock.history).toHaveBeenCalledTimes(1);
+  });
+  it("maps language codes to appropriate locale tags via localeForLanguage", () => {
+    expect(localeForLanguage("es")).toBe("es-ES");
+    expect(localeForLanguage("es-419")).toBe("es-ES");
+    expect(localeForLanguage("en")).toBe("en-US");
+    expect(localeForLanguage("en-GB")).toBe("en-US");
+    expect(localeForLanguage("pt-BR")).toBe("pt-BR");
+    expect(localeForLanguage("fr")).toBe("pt-BR");
+  });
+  it("shows closed interval with validUntil when validTo is set", async () => {
+    mock.history.mockResolvedValue([{ ...interval, validTo: 1700003600 }]);
+    await render();
+    await click("Histórico de validade");
+    expect(container.textContent).toContain("até ");
+  });
+  it("shows empty state when an entry has no approved validity intervals", async () => {
+    mock.history.mockResolvedValue([]);
+    await render();
+    await click("Histórico de validade");
+    expect(container.textContent).toContain("Nenhuma revisão aprovada ainda.");
+  });
+  it("scopes history lookup to mission when entry belongs to mission scope", async () => {
+    const missionEntry: MemoryEntry = { ...entry, id: "m-entry", scope: "mission", missionId: "m1" };
+    mock.list.mockImplementation(async (_w, m) =>
+      m === "m1"
+        ? { items: [missionEntry], hasMore: false, nextCursor: null, truncated: false }
+        : { items: [], hasMore: false, nextCursor: null, truncated: false }
+    );
+    await render({ missionId: "m1", initialTab: "mission" });
+    await click("Histórico de validade");
+    expect(mock.history).toHaveBeenCalledWith("m-entry", "w1", "m1");
+  });
 });
 
 it.each(["inactive", "active"] as const)("never labels an unapproved %s entry active", async (status) => {
