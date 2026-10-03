@@ -210,7 +210,6 @@ pub fn load_docs(conn: &Connection, workspace_id: &str, mission_id: Option<&str>
     rows.collect::<rusqlite::Result<_>>().map_err(|_| "não foi possível ler as memórias".to_string())
 }
 
-/// A busca completa. A pergunta é validada (vazia ou enorme não faz sentido).
 /// Load the memory versions that were valid at one Unix timestamp. Unlike `load_docs`, this
 /// includes entries that have since been deleted because their earlier intervals may apply.
 pub fn load_docs_at(
@@ -267,6 +266,7 @@ pub fn load_docs_at(
     Ok(docs)
 }
 
+/// A busca completa. A pergunta é validada (vazia ou enorme não faz sentido).
 pub fn search(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, query: &str, limit: usize) -> Result<Vec<Hit>, String> {
     let query = query.trim();
     if query.is_empty() {
@@ -278,9 +278,6 @@ pub fn search(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, q
     Ok(rank(&load_docs(conn, workspace_id, mission_id)?, query, limit))
 }
 
-/// O bloco de memória do briefing de uma missão em terminais: as entradas de maior prioridade
-/// (as da missão antes das do workspace), curtas, avisando que são dados e não instruções. Vazio
-/// se não há nenhuma. Pura sobre os documentos.
 /// Search only the memory versions valid at one Unix timestamp. `search` remains the
 /// unchanged current-state mode used when callers do not supply `--at`.
 pub fn search_at(
@@ -296,7 +293,7 @@ pub fn search_at(
         return Err("A busca precisa de um texto.".into());
     }
     if query.chars().count() > MAX_QUERY_CHARS {
-        return Err(format!("A busca tem atÃ© {MAX_QUERY_CHARS} caracteres."));
+        return Err(format!("A busca tem até {MAX_QUERY_CHARS} caracteres."));
     }
     Ok(rank(
         &load_docs_at(conn, workspace_id, mission_id, at)?,
@@ -305,6 +302,9 @@ pub fn search_at(
     ))
 }
 
+/// O bloco de memória do briefing de uma missão em terminais: as entradas de maior prioridade
+/// (as da missão antes das do workspace), curtas, avisando que são dados e não instruções. Vazio
+/// se não há nenhuma. Pura sobre os documentos.
 pub fn briefing_block(docs: &[Doc], mission_id: &str, max_entries: usize, max_chars: usize) -> String {
     if docs.is_empty() {
         return String::new();
