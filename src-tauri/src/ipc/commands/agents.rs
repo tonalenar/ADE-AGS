@@ -31,6 +31,20 @@ pub(super) fn resolve_account_id(app: &AppHandle, agent_id: &str, name: &str) ->
     match_account_id(&accounts_of(app)?, agent_id, name)
 }
 
+/// `--account pool:Trabajo`: la cuenta que elige ese pool ahora (`None` = la del sistema).
+/// Mira el roster guardado (cupos y sesiones conocidos), sin sondear nada.
+pub(super) fn resolve_pool_account(app: &AppHandle, agent_id: &str, pool: &str) -> Result<Option<String>, String> {
+    let db = db(app)?;
+    let spec = crate::accounts::pools::spec_for(&db, pool)?;
+    let roster = crate::runs::roster::snapshot(&db, false)?;
+    let agent = roster
+        .agents
+        .iter()
+        .find(|a| a.agent_id == agent_id)
+        .ok_or_else(|| format!("'{agent_id}' no existe: indique el agente con --agent para usar un pool"))?;
+    crate::runs::routing::pick_in_pool(agent, &spec, crate::util::now_ts()).map(|(id, _)| id).map_err(|e| format!("Pool '{pool}': {e}"))
+}
+
 /// El emparejamiento en sí, sobre las cuentas ya leídas. Separado para poder probarlo.
 pub(crate) fn match_account_id(
     accounts: &[(String, String, String)],

@@ -110,6 +110,23 @@ pub enum AccountChoice {
     Auto,
     /// Esa. `None` = la del sistema.
     Fixed(Option<String>),
+    /// Una de las de un pool (ver `accounts::pools`), por su estrategia. Queda fijada a la
+    /// elegida: pasar la tarea a otra cuenta cuando se agota es `Auto`, que no respeta el
+    /// pool.
+    Pool(crate::accounts::pools::PoolSpec),
+}
+
+/// El pedido con `pool:Nombre` (que llega como una cuenta fija con ese texto) resuelto a su
+/// pool. Sin pool, el mismo pedido. Va antes de rutear: leer el pool es de la base, y el ruteo
+/// es puro.
+pub fn resolve_pool(db: &DbConnection, request: &RouteRequest) -> Result<RouteRequest, String> {
+    if let AccountChoice::Fixed(Some(raw)) = &request.account {
+        if let Some(name) = crate::accounts::pools::pool_ref(raw) {
+            let spec = crate::accounts::pools::spec_for(db, name)?;
+            return Ok(RouteRequest { account: AccountChoice::Pool(spec), ..request.clone() });
+        }
+    }
+    Ok(request.clone())
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -299,6 +316,7 @@ fn pick_account(
     }
 
     match choice {
+        AccountChoice::Pool(spec) => pick_in_pool(agent, spec, now),
         AccountChoice::Fixed(id) => {
             let account = agent
                 .accounts
@@ -341,6 +359,62 @@ fn pick_account(
                 )),
             }
         }
+    }
+}
+
+/// Con qué cuenta de un pool. Devuelve la cuenta y lo que se descartó para llegar a ella.
+///
+/// Las que están al máximo de simultáneas se dejan para el final en las tres estrategias: una
+/// llena solo se elige si todas lo están (y la tarea espera su turno al lanzar).
+pub(crate) fn pick_in_pool(
+    agent: &RosterAgent,
+    spec: &crate::accounts::pools::PoolSpec,
+    now: i64,
+) -> Result<(Option<String>, Vec<String>), String> {
+    use crate::accounts::pools::Strategy;
+
+    if spec.agent_id != agent.agent_id {
+        return Err(format!("o pool '{}' é de '{}', não de {}", spec.name, spec.agent_id, agent.label));
+    }
+    // Las del pool que existen, en el orden del pool.
+    let members: Vec<&RosterAccount> = spec
+        .members
+        .iter()
+        .filter_map(|m| agent.accounts.iter().find(|a| &a.account_id == m))
+        .collect();
+    if members.is_empty() {
+        return Err(format!("o pool '{}' não tem nenhuma conta de {} que ainda exista", spec.name, agent.label));
+    }
+
+    let mut notes = Vec::new();
+    let mut usable: Vec<(usize, &RosterAccount)> = Vec::new();
+    for (order, account) in members.iter().enumerate() {
+        match account_problem(account, now) {
+            Some(problem) => notes.push(problem),
+            None => usable.push((order, account)),
+        }
+    }
+
+    match spec.strategy {
+        Strategy::Sticky => {}
+        Strategy::RoundRobin => {
+            // El turno empieza en `start` y da la vuelta: la primera usable desde ahí.
+            let len = members.len();
+            usable.sort_by_key(|(order, a)| (a.at_capacity, (order + len - spec.start % len) % len));
+        }
+        Strategy::LeastUsed => usable.sort_by_key(|(order, a)| {
+            let used = a.quota.as_ref().and_then(|q| q.five_hour_at(now)).unwrap_or(0.0);
+            (a.at_capacity, (used * 10.0).floor() as i64, a.running, *order)
+        }),
+    }
+    if spec.strategy == Strategy::Sticky {
+        // El orden de la lista, salvo las llenas al final.
+        usable.sort_by_key(|(order, a)| (a.at_capacity, *order));
+    }
+
+    match usable.first() {
+        Some((_, account)) => Ok((account.account_id.clone(), notes)),
+        None => Err(format!("ninguna cuenta del pool '{}' se puede usar — {}", spec.name, notes.join("; "))),
     }
 }
 

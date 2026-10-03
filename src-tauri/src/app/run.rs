@@ -45,6 +45,10 @@ pub fn run() {
             crate::floors::floor_delete,
             // El pet sube de nivel con los tokens de los agentes
             crate::pet::pet_status,
+            crate::ipc::commands::pool::pool_list_all,
+            crate::ipc::commands::pool::pool_save_new,
+            crate::ipc::commands::pool::pool_remove,
+            crate::ipc::commands::pool::pool_pick,
             crate::android::android_list,
             crate::android::android_start_avd,
             crate::android::android_frame,

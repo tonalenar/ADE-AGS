@@ -12,6 +12,7 @@ pub mod routine;
 mod role;
 mod portals;
 mod devices;
+pub mod pool;
 mod browser;
 mod dispatch;
 mod events;

@@ -12,6 +12,7 @@ import { accountLimitsGet, accountLimitsSet, accountUsageSummary } from "@/featu
 import { AddAccountDialog } from "@/features/accounts/AddAccountDialog";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
 import { AppDialog } from "@/shared/ui/AppDialog";
+import { PoolsSection } from "@/features/accounts/PoolsSection";
 
 /** Una cuenta: nombre simbólico, quién está logueado, y qué se puede hacer con ella. */
 const HEALTH_VARIANT = {
@@ -363,6 +364,7 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
             />
           ))
         )}
+        <PoolsSection agent={agent} />
       </div>
 
       {limitsFor && (

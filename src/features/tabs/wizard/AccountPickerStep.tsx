@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
+import { isPoolValue, poolValue, usePools } from "@/features/accounts/pools";
 
 interface AccountPickerStepProps {
   /** TUI elegida. Sin ella no hay cuentas que ofrecer. */
@@ -70,12 +71,15 @@ export function useAgentAccounts(agentId: string | null, preload = false): Agent
 export function AccountPickerStep({ agentId, value, onChange, showLabel = true, allowAuto = false, preserveUnavailableValue = false }: AccountPickerStepProps) {
   const { t } = useTranslation();
   const forAgent = useAgentAccounts(agentId);
+  const pools = usePools(agentId);
 
   // Una cuenta elegida antes puede haber desaparecido (se borró desde Cuentas mientras el
   // diálogo estaba abierto, o se cambió de agente) — se vuelve a la del sistema en vez de
   // dejar seleccionada una que ya no existe.
   useEffect(() => {
     if (value === AUTO_ACCOUNT && allowAuto) return;
+    // Un pool se resuelve a una cuenta recién al abrir la tab.
+    if (isPoolValue(value)) return;
     if (value && !forAgent.some((a) => a.id === value) && !preserveUnavailableValue) onChange(undefined);
   }, [value, forAgent, onChange, allowAuto, preserveUnavailableValue]);
 
@@ -95,6 +99,12 @@ export function AccountPickerStep({ agentId, value, onChange, showLabel = true, 
     ...(unavailableSavedId
       ? [{ id: unavailableSavedId as string | undefined, name: t("accounts.unavailable"), hint: unavailableSavedId, warn: true }]
       : []),
+    ...pools.map((p) => ({
+      id: poolValue(p.name) as string | undefined,
+      name: `⟳ ${p.name}`,
+      hint: t(`accounts.pools.strategy.${p.strategy}`),
+      warn: false,
+    })),
     ...forAgent.map((a) => ({
       id: a.id as string | undefined,
       name: a.name,

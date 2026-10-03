@@ -23,7 +23,7 @@ pub mod orchestration;
 mod plan;
 mod policy;
 pub(crate) mod quota;
-mod roster;
+pub(crate) mod roster;
 pub(crate) mod routing;
 mod rules;
 pub mod sandbox;
@@ -551,7 +551,7 @@ pub(crate) fn route_lead_now(
     routing::route(
         &roster,
         &routing::load_tiers(db),
-        request,
+        &routing::resolve_pool(db, request)?,
         crate::util::now_ts(),
     )
 }
@@ -594,7 +594,7 @@ pub(crate) fn route_now(
 ) -> Result<routing::Assignment, String> {
     let roster = roster::snapshot(db, false)?;
     let tiers = routing::load_tiers(db);
-    routing::route(&roster, &tiers, request, crate::util::now_ts())
+    routing::route(&roster, &tiers, &routing::resolve_pool(db, request)?, crate::util::now_ts())
 }
 
 /// Lo que usó cada cuenta en los últimos `days` días (intentos, tokens, costo reportado), con
