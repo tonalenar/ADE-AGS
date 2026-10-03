@@ -53,7 +53,7 @@ pub fn export_instance_env() {
 /// pero la app en sí sigue siendo perfectamente usable.
 pub fn start(app: AppHandle) {
     if let Err(e) = try_start(app) {
-        eprintln!("[controlcode] no se pudo iniciar el servidor IPC: {e}");
+        eprintln!("[ade-ags] no se pudo iniciar el servidor IPC: {e}");
     }
 }
 
@@ -241,7 +241,7 @@ fn handle_connection(stream: TcpStream, app: &AppHandle, expected_token: &str) {
     let response = match serde_json::from_str::<Request>(&line) {
         Err(e) => Response::err(format!("Request inválida: {e}")),
         Ok(req) if !token_matches(&req.token, expected_token) => {
-            Response::err("Token inválido — volvé a leer ~/.controlcode/ipc.json")
+            Response::err("Token inválido — volvé a leer ~/.ags/ipc.json")
         }
         Ok(req) => {
             command = req.command.clone();

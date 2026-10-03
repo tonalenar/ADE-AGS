@@ -148,7 +148,7 @@ pub async fn open_workspace(
     // juego de ventanas para el mismo layout guardado (sus labels colisionan con los vivos,
     // así que `restore_windows` renombra las filas y construye ventanas nuevas en paralelo
     // a las que ya estaban). El frontend evita eso llamando antes a `focusIfOpen`, pero esa
-    // guarda vivía SOLO en la UI: `ccode workspace open` entraba directo acá y duplicaba.
+    // guarda vivía SOLO en la UI: `ags workspace open` entraba directo acá y duplicaba.
     // Ahora la guarda es estructural — enfocar y salir es lo correcto para cualquier
     // llamador, y es idempotente para el flujo de la UI (que ya no llega hasta acá).
     // Se contrasta contra las ventanas NATIVAS, no contra `is_open` a secas: si la app se

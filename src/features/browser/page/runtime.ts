@@ -38,15 +38,15 @@ import {
 
 declare global {
   interface Window {
-    __controlcodePage?: boolean;
+    __agsPage?: boolean;
     /** Lo último que marcó la persona; lo deja el selector (`picker.ts`). */
-    __controlcodeLastPick?: Element;
+    __agsLastPick?: Element;
   }
 }
 
 (() => {
-  if (window.__controlcodePage || window.parent === window) return;
-  window.__controlcodePage = true;
+  if (window.__agsPage || window.parent === window) return;
+  window.__agsPage = true;
 
   // Lo primero: la página no puede leer una cookie ni su storage antes de que estén en su
   // lugar (ver `siteState.ts`).
@@ -64,7 +64,7 @@ declare global {
   const reportError = console.error.bind(console);
   /** El origen real de la página (`http://localhost:5173`): lo antepone el proxy al servir
    *  este script. Sin él (una versión vieja del proxy) no se reescribe nada. */
-  const targetOrigin: string | null = (self as { __controlcode_target?: string }).__controlcode_target ?? null;
+  const targetOrigin: string | null = (self as { __ags_target?: string }).__ags_target ?? null;
   const route = (raw: string): Routed | null => routeRequest(raw, location.href, targetOrigin);
 
   const doc = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -73,7 +73,7 @@ declare global {
   /** `false` si no se pudo mandar: todavía sin conectar, o algo que no se puede clonar. */
   function post(message: Omit<PageMessage, "source">, beforeConnect = false): boolean {
     if (!parentOrigin && !beforeConnect) return false;
-    const full = { source: "controlcode-preview", ...message } as PageMessage;
+    const full = { source: "ags-preview", ...message } as PageMessage;
     // El origen de la app se aprende del primer mensaje que manda; si el motor lo
     // serializa como "null" no hay a quién apuntar con precisión.
     const target = parentOrigin && parentOrigin !== "null" ? parentOrigin : "*";
@@ -789,7 +789,7 @@ declare global {
     // Lo último que la persona marcó con el selector: se resuelve por identidad y no por
     // su selector, que podría no volver a encontrarlo.
     if (target === "pick") {
-      const picked = window.__controlcodeLastPick;
+      const picked = window.__agsLastPick;
       if (!picked) throw new Error("La persona no marcó nada todavía.");
       if (!picked.isConnected) throw new Error("Lo que marcó la persona ya no está en la página.");
       return picked;
@@ -1346,7 +1346,7 @@ declare global {
     let viaProxy = false;
     if (nativeFetch) {
       try {
-        const response = await nativeFetch(`/__controlcode__/cookies/clear?name=${encodeURIComponent(command.name)}`, {
+        const response = await nativeFetch(`/__ags__/cookies/clear?name=${encodeURIComponent(command.name)}`, {
           credentials: "same-origin", cache: "no-store", headers: { [OWN_HEADER]: "1" },
         });
         cookieJar?.invalidate();
@@ -1422,7 +1422,7 @@ declare global {
 
     const attributes: Record<string, string> = {};
     for (const attr of Array.from(el.attributes)) {
-      if (attr.name.startsWith("data-controlcode")) continue;
+      if (attr.name.startsWith("data-ade-ags")) continue;
       // Las clases y el estilo en línea ya viajan aparte; el resto (aria, data, name,
       // href, type…) es justo lo que identifica al elemento en el código.
       if (attr.name === "class" || attr.name === "style") continue;
@@ -1540,7 +1540,7 @@ declare global {
   }
 
   window.addEventListener("message", (e: MessageEvent<AppMessage>) => {
-    if (e.source !== window.parent || e.data?.source !== "controlcode") return;
+    if (e.source !== window.parent || e.data?.source !== "ade-ags") return;
     parentOrigin = e.origin;
     const message = e.data;
     // Mientras nadie mira la tab, el puntero no se anima: serían 300 ms por acción

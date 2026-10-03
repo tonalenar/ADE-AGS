@@ -1,4 +1,4 @@
-//! Control Code — el backend de la app.
+//! ADE AGS — el backend de la app.
 //!
 //! Cada módulo cubre un dominio; `app` es el que los ensambla y arranca Tauri.
 

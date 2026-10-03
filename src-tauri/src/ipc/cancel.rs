@@ -1,6 +1,6 @@
 //! Las llamadas del MCP que el agente canceló (`notifications/cancelled`).
 //!
-//! El puente (`ccode mcp`) deja de esperar solo; esto es para que la app, además, corte lo
+//! El puente (`ags mcp`) deja de esperar solo; esto es para que la app, además, corte lo
 //! que puede cortar: `run_await` deja de esperar en vez de quedarse hasta una hora con una
 //! conexión que ya nadie lee. Cada llamada llega con un `callId` único (ver `mcp::serve`).
 

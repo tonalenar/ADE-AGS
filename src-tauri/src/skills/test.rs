@@ -686,7 +686,7 @@ fn skills_do_not_leak_between_workspaces_sharing_a_folder() {
 }
 
 /// Un symlink que el usuario puso a mano en `.claude/skills/` (o una carpeta real)
-/// no lo gestiona Control Code y la reconciliación no debe borrarlo.
+/// no lo gestiona ADE AGS y la reconciliación no debe borrarlo.
 #[test]
 fn reconcile_leaves_user_owned_entries_alone() {
     let (db, workspace_id, tab_id, tab_cwd, _skills_dir) = setup();
@@ -735,7 +735,7 @@ fn reconcile_leaves_user_owned_entries_alone() {
         "un symlink ajeno debe sobrevivir"
     );
 
-    // Detachear se lleva SOLO la gestionada por Control Code.
+    // Detachear se lleva SOLO la gestionada por ADE AGS.
     detach_skill(
         info.id.clone(),
         workspace_id,

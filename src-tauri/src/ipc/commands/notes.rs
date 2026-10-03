@@ -1,4 +1,4 @@
-//! Las notas del canvas, para los agentes: `ccode note list|create|read|write|edit`.
+//! Las notas del canvas, para los agentes: `ags note list|create|read|write|edit`.
 //!
 //! Una nota conectada a un agente es su memoria a la vista del usuario: el plan, una lista
 //! de pendientes, lo que descubrió. El agente la lee y la escribe por acá; el usuario la ve
@@ -52,7 +52,7 @@ pub(crate) fn resolve_note<'a>(notes: &'a [Reachable], wanted: &str) -> Result<&
     match matches.as_slice() {
         [one] => Ok(one),
         [] if notes.is_empty() => Err(format!(
-            "'{wanted}' não está conectada com você. Você não tem nenhuma nota conectada: crie uma com `ccode note create` ou peça ao usuário para ligar uma nota ao seu terminal."
+            "'{wanted}' não está conectada com você. Você não tem nenhuma nota conectada: crie uma com `ags note create` ou peça ao usuário para ligar uma nota ao seu terminal."
         )),
         [] => Err(format!(
             "'{wanted}' não está conectada com você. Notas conectadas: {}",
@@ -97,7 +97,7 @@ pub(crate) fn replace_once(content: &str, old: &str, new: &str) -> Result<String
         return Err("O texto a substituir não pode ser vazio.".into());
     }
     match content.matches(old).count() {
-        0 => Err("Esse texto não está na nota. Leia de novo com `ccode note read` e copie o trecho exato.".into()),
+        0 => Err("Esse texto não está na nota. Leia de novo com `ags note read` e copie o trecho exato.".into()),
         1 => Ok(content.replacen(old, new, 1)),
         n => Err(format!("Esse texto aparece {n} vezes na nota. Inclua mais contexto para que seja único.")),
     }
@@ -206,7 +206,7 @@ mod test {
     #[test]
     fn sin_notas_explica_como_crear_una() {
         let err = resolve_note(&[], "Plano").unwrap_err();
-        assert!(err.contains("ccode note create"), "{err}");
+        assert!(err.contains("ags note create"), "{err}");
     }
 
     #[test]

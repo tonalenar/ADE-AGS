@@ -27,7 +27,7 @@ export async function previewCapture(): Promise<ArrayBuffer> {
 export const previewSaveCapture = (png: Uint8Array, tag?: string) =>
   // `tag` va por cabecera y no en el cuerpo: el cuerpo es el PNG crudo. Termina en el
   // nombre del archivo, para que se vea de quién es la foto sin abrirla.
-  invoke<string>("preview_save_capture", png, tag ? { headers: { "x-controlcode-tag": tag } } : undefined);
+  invoke<string>("preview_save_capture", png, tag ? { headers: { "x-ags-tag": tag } } : undefined);
 
 /** Un archivo del disco, listo para ponerlo en un `<input type=file>` de la página. */
 export interface UploadFile {

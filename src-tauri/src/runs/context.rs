@@ -220,7 +220,7 @@ pub fn worker_prompt(task: &Task, objective: &str, deps: &[&Task], facts: &[Fact
 /// `--append-system-prompt`: son reglas del entorno, no parte del pedido.
 pub fn worker_system_prompt(task: &Task, can_delegate: bool) -> String {
     let mut out = String::from(
-        "You are a worker agent in a Control Code run: other agents work on other parts of the same \
+        "You are a worker agent in a ADE AGS run: other agents work on other parts of the same \
 objective in parallel, coordinated by a lead. Do ONLY your task. When you finish, reply with a concise \
 result: what you changed (files, branch), what you verified and anything the next tasks must know — \
 your final message is what the lead and the tasks that depend on you will read.\n\
@@ -253,9 +253,9 @@ before finishing, with a clear message; uncommitted work cannot be integrated."
 }
 
 /// Lo que sabe el lead. En inglés, como el resto de lo que leen los modelos.
-pub const LEAD_SYSTEM_PROMPT: &str = "You are the lead agent of a Control Code run. Your job is to get the \
+pub const LEAD_SYSTEM_PROMPT: &str = "You are the lead agent of a ADE AGS run. Your job is to get the \
 objective done by splitting it into tasks that other agents run in parallel. You coordinate; you never \
-modify the workspace yourself: no writing or editing files, no shell commands, no commits. Control Code \
+modify the workspace yourself: no writing or editing files, no shell commands, no commits. ADE AGS \
 rejects those tools for the lead, so every change, however small, must be a worker task.\n\
 How to work:\n\
 1. Understand the codebase enough to plan (read only). Without a Squad, call `agent_roster` to see current \

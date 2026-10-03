@@ -203,7 +203,7 @@ export function toTransferable(value: unknown, depth = 0, seen: WeakSet<object> 
  * La URL se muestra sin el origen del proxy ni el `?t=` que agregan los servidores de
  * desarrollo: `/src/App.tsx:12:5` es lo que alguien busca en el repo.
  */
-export function callerOf(stack: string | undefined, ownMarker = "/__controlcode__/"): string | undefined {
+export function callerOf(stack: string | undefined, ownMarker = "/__ags__/"): string | undefined {
   if (!stack) return undefined;
   for (const raw of stack.split("\n")) {
     const line = raw.trim();

@@ -1,6 +1,6 @@
 //! Rotinas: mensagens que a app manda sozinha, no horário.
 //!
-//! Uma rotina escreve um texto num agente aberto (o mesmo canal de `ccode peer tell`) ou
+//! Uma rotina escreve um texto num agente aberto (o mesmo canal de `ags peer tell`) ou
 //! avisa o usuário (um lembrete). Serve para "rode os testes todo dia às 9h", "me lembre
 //! daqui a uma hora" ou "revise o que mudou a cada duas horas".
 //!
@@ -249,7 +249,7 @@ pub fn find<'a>(routines: &'a [Routine], wanted: &str) -> Result<&'a Routine, St
         [] => Err(format!(
             "Não existe a rotina '{wanted}'. {}",
             if routines.is_empty() {
-                "Você não tem nenhuma: crie com `ccode routine create`.".to_string()
+                "Você não tem nenhuma: crie com `ags routine create`.".to_string()
             } else {
                 format!("Rotinas: {}.", routines.iter().map(|r| r.name.as_str()).collect::<Vec<_>>().join(", "))
             }
@@ -361,7 +361,7 @@ lazy_static::lazy_static! {
 }
 
 fn file_path() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir().ok_or("Não foi possível achar a pasta do usuário")?.join(".controlcode");
+    let dir = dirs::home_dir().ok_or("Não foi possível achar a pasta do usuário")?.join(".ags");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("routines.json"))
 }

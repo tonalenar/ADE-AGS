@@ -119,7 +119,7 @@ describe("countByGroup", () => {
 
 describe("filterFleet", () => {
   const flota = [
-    task({ id: "a", title: "arreglar el cgroup", cwd: "/home/u/ControlCode" }),
+    task({ id: "a", title: "arreglar el cgroup", cwd: "/home/u/ADE AGS" }),
     task({ id: "b", title: "auditar tokens", cwd: "/home/u/ui-lib", status: "done" }),
   ];
 

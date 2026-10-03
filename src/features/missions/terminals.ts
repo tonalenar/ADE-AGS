@@ -56,7 +56,7 @@ export const LEAD_NAME = "Orquestrador";
 /** Lo primero que lee el orquestador: la misión, su equipo y cómo coordinarlo. Pura. */
 export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team: TeamMember[]): string {
   const people = team.length === 0
-    ? "Você ainda não tem equipe: sume agentes com `ccode peer recruit <nome> --agent <id> --role <papel>`."
+    ? "Você ainda não tem equipe: sume agentes com `ags peer recruit <nome> --agent <id> --role <papel>`."
     : `SUA EQUIPE (já aberta e conectada a você no canvas):\n${team
         .map((m) => `- ${m.name} — ${m.roleLabel}${m.roleDescription ? `: ${m.roleDescription}` : ""}`)
         .join("\n")}`;
@@ -68,13 +68,13 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team
     "",
     people,
     "",
-    "COMO COORDENAR (use SOMENTE o `ccode`; não use `maestri` nem skills de outros apps)",
-    "- `ccode peers` — quem está conectado com você.",
-    '- `ccode peer ask "<nome>" "<pedido>"` — pergunta e ESPERA a resposta.',
-    "- `ccode peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'` — vários ao mesmo tempo.",
-    '- `ccode peer tell "<nome>" "<mensagem>"` — avisa sem esperar.',
-    '- `ccode peer check "<nome>"` — vê a tela dele agora.',
-    '- `ccode notify "<mensagem>"` — chama o usuário só quando precisar dele.',
+    "COMO COORDENAR (use SOMENTE o `ags`; não use `maestri` nem skills de outros apps)",
+    "- `ags peers` — quem está conectado com você.",
+    '- `ags peer ask "<nome>" "<pedido>"` — pergunta e ESPERA a resposta.',
+    "- `ags peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'` — vários ao mesmo tempo.",
+    '- `ags peer tell "<nome>" "<mensagem>"` — avisa sem esperar.',
+    '- `ags peer check "<nome>"` — vê a tela dele agora.',
+    '- `ags notify "<mensagem>"` — chama o usuário só quando precisar dele.',
     "",
     "Planeje, divida o trabalho conforme o papel de cada um, acompanhe e junte os resultados. Ao terminar, resuma o que foi feito.",
   ].join("\n");
@@ -91,7 +91,7 @@ export function memberBriefing(mission: Pick<Mission, "title" | "objective">, me
     `SEU PAPEL: ${member.roleLabel}${member.roleDescription ? ` — ${member.roleDescription}` : ""}`,
     member.roleInstructions,
     "",
-    `Aguarde as instruções do orquestrador. Responda ao que ele perguntar; para avisar algo por conta própria: \`ccode peer tell "${LEAD_NAME}" "<mensagem>"\`.`,
+    `Aguarde as instruções do orquestrador. Responda ao que ele perguntar; para avisar algo por conta própria: \`ags peer tell "${LEAD_NAME}" "<mensagem>"\`.`,
   ]
     .filter((line, i, all) => !(line === "" && all[i - 1] === ""))
     .join("\n");

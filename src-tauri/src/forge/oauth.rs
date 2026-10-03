@@ -10,7 +10,7 @@
 //!
 //! ## Los client IDs
 //!
-//! Son los de las aplicaciones OAuth registradas a nombre de ControlCode en cada host. No
+//! Son los de las aplicaciones OAuth registradas a nombre de ADE AGS en cada host. No
 //! son secretos (van en el binario), pero sin ellos no hay flujo: la UI esconde el botón y
 //! queda el token personal. Se pueden fijar al compilar con `CC_GITHUB_CLIENT_ID` y
 //! `CC_GITLAB_CLIENT_ID`. Solo cubren github.com y gitlab.com: un GitLab propio o un
@@ -27,7 +27,7 @@ use super::provider::ForgeKind;
 use super::secret::Secret;
 use crate::util::now_ts;
 
-/// La OAuth App "ControlCode" de GitHub (con Device Flow habilitado). Es una OAuth App y
+/// La OAuth App "ADE AGS" de GitHub (con Device Flow habilitado). Es una OAuth App y
 /// no una GitHub App a propósito: la segunda da tokens de 8 h cuya renovación exige el
 /// client secret —que en una app de escritorio no es secreto— y solo ve los repos donde
 /// alguien la instaló.
@@ -35,7 +35,7 @@ const GITHUB_CLIENT_ID: &str = match option_env!("CC_GITHUB_CLIENT_ID") {
     Some(id) => id,
     None => "Ov23liktZqGNLkFSEYsf",
 };
-/// La aplicación "ControlCode" de gitlab.com: no confidencial (sin secreto, que en una app
+/// La aplicación "ADE AGS" de gitlab.com: no confidencial (sin secreto, que en una app
 /// de escritorio no lo sería) y con "Device authorization grant" habilitado.
 const GITLAB_CLIENT_ID: &str = match option_env!("CC_GITLAB_CLIENT_ID") {
     Some(id) => id,
@@ -109,7 +109,7 @@ pub enum Poll {
 
 fn http() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .user_agent("ControlCode")
+        .user_agent("ADE AGS")
         .timeout(Duration::from_secs(30))
         .build()
         .map_err(|e| e.to_string())

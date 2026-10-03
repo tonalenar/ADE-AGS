@@ -227,8 +227,8 @@ fn un_symlink_que_apunta_a_otro_lado_no_cuenta_como_instalado() {
     let base = std::env::temp_dir().join(format!("cc-cli-test-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&base).unwrap();
 
-    let current = base.join("ccode-nuevo");
-    let old = base.join("ccode-viejo");
+    let current = base.join("ags-nuevo");
+    let old = base.join("ags-viejo");
     std::fs::write(&current, b"#!/bin/sh\n").unwrap();
     std::fs::write(&old, b"#!/bin/sh\n").unwrap();
 
@@ -282,9 +282,9 @@ fn un_nombre_sin_homonimas_se_resuelve_derecho() {
     assert_eq!(match_skill_ids(&una, &["TESTING".to_string()]).unwrap(), vec!["aaa"]);
 }
 
-// ── El contrato entre `ccode` y el despachador ──────────────────
+// ── El contrato entre `ags` y el despachador ──────────────────
 
-/// Los comandos que el binario `ccode` sabe nombrar, sacados de sus propias tablas.
+/// Los comandos que el binario `ags` sabe nombrar, sacados de sus propias tablas.
 fn cli_commands() -> Vec<String> {
     let src = include_str!("../bin/cli.rs");
     let mut out = Vec::new();
@@ -328,7 +328,7 @@ fn dispatched_commands() -> Vec<String> {
         .collect()
 }
 
-/// Que `ccode` nombre un comando que el backend ya no atiende no rompe nada en compilación
+/// Que `ags` nombre un comando que el backend ya no atiende no rompe nada en compilación
 /// —son dos tablas de strings, en archivos distintos— y solo se nota cuando alguien lo
 /// ejecuta y recibe "Comando desconocido". Este test es lo que ata las dos puntas.
 #[test]
@@ -341,7 +341,7 @@ fn todo_lo_que_la_cli_sabe_nombrar_lo_atiende_el_despachador() {
     assert!(huerfanos.is_empty(), "la CLI ofrece comandos que nadie atiende: {huerfanos:?}");
 }
 
-/// Y la contracara: un comando del backend que la ayuda de `ccode` no menciona es un
+/// Y la contracara: un comando del backend que la ayuda de `ags` no menciona es un
 /// comando que nadie va a encontrar.
 #[test]
 fn la_ayuda_de_la_cli_menciona_los_comandos_de_skills() {
@@ -351,7 +351,7 @@ fn la_ayuda_de_la_cli_menciona_los_comandos_de_skills() {
     }
 }
 
-// ── `ccode mcp`: el puente MCP ──────────────────────────────────
+// ── `ags mcp`: el puente MCP ──────────────────────────────────
 
 use super::mcp::{browser_tool_names, orchestration_tool_names, serve, McpContext, OrchestrationPower};
 
@@ -431,7 +431,7 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     // Lo que se permite de antemano en `--allowedTools` es exactamente lo que se ofrece,
     // menos lo que saca datos de la máquina (subir un archivo, correr código en la página):
     // un nombre de más no hace nada, uno de menos deja una tool pidiendo permiso por cada uso.
-    let offered: Vec<String> = tab.iter().map(|n| format!("mcp__controlcode__{n}")).collect();
+    let offered: Vec<String> = tab.iter().map(|n| format!("mcp__ags__{n}")).collect();
     let browser: Vec<String> = offered
         .iter()
         .filter(|n| n.contains("__browser_") && !n.ends_with("__browser_upload") && !n.ends_with("__browser_eval"))
@@ -456,8 +456,8 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
 }
 
 /// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo
-/// (`controlcode_browser_click`). El nombre que este servidor PUBLICA va pelado —el
-/// prefijo lo pone la TUI, y ponerlo también acá daría `controlcode_controlcode_…`—, pero
+/// (`ags_browser_click`). El nombre que este servidor PUBLICA va pelado —el
+/// prefijo lo pone la TUI, y ponerlo también acá daría `ags_ags_…`—, pero
 /// todo lo que el modelo LEE tiene que nombrarlas como él las va a poder escribir: si no,
 /// lee "usá browser_marked" y lo que tiene se llama de otra forma.
 #[test]
@@ -468,18 +468,18 @@ fn con_un_cliente_que_prefija_los_nombres_el_texto_los_prefija_igual() {
     ];
     let cwd = McpContext::Cwd { cwd: "/p".into(), tab: None };
     let (pelado, _) = mcp_session(&cwd, &lines, |_, _| Ok(json!({})));
-    let (opencode, _) = mcp_session_as(&cwd, "controlcode_", &lines, |_, _| Ok(json!({})));
+    let (opencode, _) = mcp_session_as(&cwd, "ags_", &lines, |_, _| Ok(json!({})));
 
     // Los nombres publicados no cambian: son los del servidor.
     assert_eq!(tool_names(&pelado[1]), tool_names(&opencode[1]));
 
     let instructions = opencode[0]["result"]["instructions"].as_str().unwrap();
-    assert!(instructions.contains("controlcode_browser_marked"), "{instructions}");
-    assert!(instructions.contains("controlcode_browser_click/controlcode_browser_type"), "{instructions}");
-    assert!(instructions.contains("controlcode_run_plan"), "{instructions}");
+    assert!(instructions.contains("ags_browser_marked"), "{instructions}");
+    assert!(instructions.contains("ags_browser_click/ags_browser_type"), "{instructions}");
+    assert!(instructions.contains("ags_run_plan"), "{instructions}");
     // Ni dos veces, ni sobre algo que no es una tool.
-    assert!(!instructions.contains("controlcode_controlcode_"), "{instructions}");
-    assert!(instructions.contains("Control Code"), "{instructions}");
+    assert!(!instructions.contains("ags_ags_"), "{instructions}");
+    assert!(instructions.contains("ADE AGS"), "{instructions}");
 
     // Las descripciones también: `browser_pick` se nombra adentro de la de `browser_marked`.
     let description = |list: &serde_json::Value, name: &str| -> String {
@@ -490,11 +490,11 @@ fn con_un_cliente_que_prefija_los_nombres_el_texto_los_prefija_igual() {
     let target = opencode[1]["result"]["tools"].as_array().unwrap().iter()
         .find(|t| t["name"] == "browser_click").unwrap()["inputSchema"]["properties"]["target"]["description"]
         .as_str().unwrap().to_string();
-    assert!(target.contains("controlcode_browser_snapshot"), "{target}");
+    assert!(target.contains("ags_browser_snapshot"), "{target}");
 
     // Y sin prefijo el texto queda EXACTAMENTE como está escrito en la tabla.
-    assert!(!pelado[0]["result"]["instructions"].as_str().unwrap().contains("controlcode_browser"));
-    assert!(!description(&pelado[1], "browser_marked").contains("controlcode_"));
+    assert!(!pelado[0]["result"]["instructions"].as_str().unwrap().contains("ags_browser"));
+    assert!(!description(&pelado[1], "browser_marked").contains("ags_"));
 }
 
 /// El servidor como lo escribe OpenCode: el comando ENTERO en un arreglo, bajo `"mcp"`, y
@@ -502,33 +502,33 @@ fn con_un_cliente_que_prefija_los_nombres_el_texto_los_prefija_igual() {
 #[test]
 fn la_config_de_opencode_lleva_el_servidor_y_pide_permiso_para_lo_que_escribe() {
     let raw = super::mcp::opencode_config_content(
-        "/opt/cc/ccode",
-        &["mcp", "--cwd", "/p", "--tab", "t1", "--prefix", "controlcode_"],
-        "controlcode_",
+        "/opt/cc/ags",
+        &["mcp", "--cwd", "/p", "--tab", "t1", "--prefix", "ags_"],
+        "ags_",
     );
     let config: serde_json::Value = serde_json::from_str(&raw).unwrap();
     let mut keys: Vec<_> = config.as_object().unwrap().keys().collect();
     keys.sort();
     assert_eq!(keys, vec!["mcp", "permission"]);
-    let server = &config["mcp"]["controlcode"];
+    let server = &config["mcp"]["ags"];
     assert_eq!(server["type"], "local");
     assert_eq!(server["enabled"], true);
     assert_eq!(
         server["command"],
-        json!(["/opt/cc/ccode", "mcp", "--cwd", "/p", "--tab", "t1", "--prefix", "controlcode_"])
+        json!(["/opt/cc/ags", "mcp", "--cwd", "/p", "--tab", "t1", "--prefix", "ags_"])
     );
     assert!(server["timeout"].as_u64().unwrap() > 60_000);
 
     let permission = config["permission"].as_object().unwrap();
-    for asks in ["controlcode_git_push", "controlcode_git_pr_create", "controlcode_task_add", "controlcode_run_plan"] {
+    for asks in ["ags_git_push", "ags_git_pr_create", "ags_task_add", "ags_run_plan"] {
         assert_eq!(permission.get(asks), Some(&json!("ask")), "{asks}");
     }
     // Lo que se aprueba solo en Claude Code tampoco pregunta acá; y nada fuera de nuestras
     // tools (la regla global del usuario no se toca).
-    for free in ["controlcode_browser_click", "controlcode_git_pr_list", "controlcode_ask_user", "controlcode_fact_add"] {
+    for free in ["ags_browser_click", "ags_git_pr_list", "ags_ask_user", "ags_fact_add"] {
         assert!(!permission.contains_key(free), "{free}");
     }
-    assert!(permission.keys().all(|k| k.starts_with("controlcode_")));
+    assert!(permission.keys().all(|k| k.starts_with("ags_")));
 }
 
 /// Una sola regla para las dos TUIs: lo que Claude Code aprueba solo es exactamente lo que
@@ -638,13 +638,13 @@ fn una_tool_del_navegador_viaja_como_browser_run_con_su_carpeta() {
     );
 }
 
-/// El `--mcp-config` de cada agente lleva la ruta de `ccode` sacada de al lado de la app.
+/// El `--mcp-config` de cada agente lleva la ruta de `ags` sacada de al lado de la app.
 /// Si no se encuentra, la tab arranca SIN navegador y sin orquestación, en silencio, y el
 /// botón de instalar la CLI falla — así que tiene que encontrarse en los cinco
 /// empaquetados, no solo en el que usa quien lo programó.
 #[test]
 fn se_encuentra_ccode_en_todos_los_empaquetados() {
-    let cli = if cfg!(windows) { "ccode.exe" } else { "ccode" };
+    let cli = if cfg!(windows) { "ags.exe" } else { "ags" };
     let base = std::env::temp_dir().join(format!("cc-pack-{}", uuid::Uuid::new_v4()));
 
     // Dónde queda el binario en cada uno, y desde qué carpeta corre el ejecutable.
@@ -653,7 +653,7 @@ fn se_encuentra_ccode_en_todos_los_empaquetados() {
         ("cargo build", "target/debug", "target/debug"),
         ("windows", "app/binaries", "app"),
         ("macos", "App.app/Contents/Resources/binaries", "App.app/Contents/MacOS"),
-        ("appimage", "usr/lib/controlcode/binaries", "usr/bin"),
+        ("appimage", "usr/lib/ade-ags/binaries", "usr/bin"),
     ];
 
     for (name, where_bin, where_exe) in layouts {
@@ -664,7 +664,7 @@ fn se_encuentra_ccode_en_todos_los_empaquetados() {
         std::fs::write(bin.join(cli), b"#!/bin/sh\n").unwrap();
 
         let found = super::install::source_binary_in(&root.join(where_exe));
-        let found = found.unwrap_or_else(|| panic!("no se encontró ccode empaquetado como {name}"));
+        let found = found.unwrap_or_else(|| panic!("no se encontró ags empaquetado como {name}"));
         assert_eq!(found.canonicalize().unwrap(), bin.join(cli).canonicalize().unwrap(), "{name}");
     }
 
@@ -678,7 +678,7 @@ fn se_encuentra_ccode_en_todos_los_empaquetados() {
 }
 
 /// Cada tab y cada tarea escribe su `--mcp-config`, y al cerrarse no lo limpian. Sin este
-/// barrido `~/.controlcode/mcp` crece para siempre con archivos que no apunta nadie.
+/// barrido `~/.ags/mcp` crece para siempre con archivos que no apunta nadie.
 #[test]
 fn el_barrido_borra_los_configs_de_tabs_y_tareas_que_ya_no_estan() {
     let conn = crate::database::test_db();

@@ -81,7 +81,7 @@ fn recordar_devuelve_los_ultimos_turnos_de_un_solo_hilo() {
 fn el_mensaje_al_agente_dice_el_hilo_y_como_contestar() {
     let text = framed("green", "¿cómo va?");
     assert!(text.starts_with("[Chat do usuário · thread: green] ¿cómo va?"), "{text}");
-    assert!(text.contains("ccode say") && text.contains("--progress"), "{text}");
+    assert!(text.contains("ags say") && text.contains("--progress"), "{text}");
 }
 
 #[test]

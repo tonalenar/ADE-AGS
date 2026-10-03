@@ -1,8 +1,8 @@
-# Control Code — Plan de Desarrollo por Fases
+# ADE AGS — Plan de Desarrollo por Fases
 
 ## Resumen del proyecto
 
-Control Code es una aplicación de escritorio (Tauri 2.0) que actúa como command center para herramientas de AI coding agents (Claude Code, Gemini CLI, Codex, OpenCode). Combina gestión de sesiones, skills globales con symlinks, workspaces jerárquicos con aislamiento de contexto, y una UI tipo browser con tabs que se pueden separar en ventanas independientes (tear-off, como Chrome). Expone además una CLI propia para que cualquier agente de IA pueda orquestar la app mediante una skill incluida.
+ADE AGS es una aplicación de escritorio (Tauri 2.0) que actúa como command center para herramientas de AI coding agents (Claude Code, Gemini CLI, Codex, OpenCode). Combina gestión de sesiones, skills globales con symlinks, workspaces jerárquicos con aislamiento de contexto, y una UI tipo browser con tabs que se pueden separar en ventanas independientes (tear-off, como Chrome). Expone además una CLI propia para que cualquier agente de IA pueda orquestar la app mediante una skill incluida.
 
 ## Stack
 
@@ -93,7 +93,7 @@ Entregable: arrastrar una tab fuera de la ventana crea una ventana nueva sin per
 
 Objetivo: gestión centralizada de skills sin duplicación de archivos.
 
-- Directorio global de skills configurable (default `~/.controlcode/skills/`)
+- Directorio global de skills configurable (default `~/.ags/skills/`)
 - Vista de skills instaladas: listar, ver qué proyectos las usan, editar SKILL.md, borrar (con advertencia de impacto)
 - Sistema de symlinks: al activar una skill para un proyecto/tab, crear symlink hacia la copia global
 - Herencia de skills: workspace-level (todas las tabs) vs tab-level (solo esa tab)
@@ -138,7 +138,7 @@ Entregable: vista de historial navegable y accionable de todas las sesiones pasa
 
 Objetivo: que cualquier agente externo pueda controlar la app.
 
-- Diseño y construcción de la CLI `controlcode` (Rust, comunicándose con la instancia corriendo de la app vía IPC local o socket)
+- Diseño y construcción de la CLI `ade-ags` (Rust, comunicándose con la instancia corriendo de la app vía IPC local o socket)
 - Comandos mínimos: `tab create/close/list/output/send`, `window create/list`, `workspace open/status`, `skill install/list`
 - Output en JSON parseable para consumo por agentes
 - Redacción del `SKILL.md` de orquestación incluido con la app, instalable en Claude Code / Gemini CLI / otros
@@ -193,12 +193,12 @@ Con la familia A se consigue aislamiento **por tab** (dos tabs en la misma carpe
 ### Tareas
 
 - Modelo de datos gemelo del de skills: `mcp_servers` (catálogo global) + `project_mcps` (intención de attach con scope `workspace`/`tab`). Reutiliza herencia, "qué proyectos lo usan" y borrado con aviso de impacto.
-- Copias globales en `~/.controlcode/mcp/<repo>/<servidor>/`, mismo layout por repositorio que las skills.
+- Copias globales en `~/.ags/mcp/<repo>/<servidor>/`, mismo layout por repositorio que las skills.
 - Resolución canónica: `project_mcps` → set de MCPs de la tab → adaptador por agente.
 - Adaptadores, en orden de preferencia:
-  1. **Flag por tab** (Claude Code): generar `~/.controlcode/mcp/<tab_id>.json` y lanzar con `--mcp-config <archivo> --strict-mcp-config`.
+  1. **Flag por tab** (Claude Code): generar `~/.ags/mcp/<tab_id>.json` y lanzar con `--mcp-config <archivo> --strict-mcp-config`.
   2. **Env por tab** (Codex): generar un `CODEX_HOME` por tab e inyectarlo (`pty_create` ya acepta `env`).
-  3. **Archivo por cwd** (Gemini, OpenCode): mergear en el archivo del proyecto tocando **solo las claves que creó Control Code**, con manifiesto de claves gestionadas y reconciliación. Nunca reescribir el archivo entero.
+  3. **Archivo por cwd** (Gemini, OpenCode): mergear en el archivo del proyecto tocando **solo las claves que creó ADE AGS**, con manifiesto de claves gestionadas y reconciliación. Nunca reescribir el archivo entero.
 - Importador de lo que el usuario ya tiene configurado (`~/.claude.json`, `~/.codex/config.toml`, `~/.gemini/settings.json`): puebla el catálogo sin red y sin adaptadores nuevos.
 - Marketplace de MCPs reutilizando la infraestructura de registries (columna `kind` en `registries`), con el registro oficial `registry.modelcontextprotocol.io` como fuente por defecto — API pública, sin auth, `GET /v0/servers?search=&limit=`.
 - Secretos por referencia (`"GITHUB_TOKEN": "${GITHUB_TOKEN}"`), expandidos al materializar y nunca almacenados. El registro oficial ya marca `isRequired`/`isSecret` por variable, así que el wizard puede generarlas solo. Keyring del SO queda para más adelante.

@@ -5,7 +5,7 @@
 /// `RunEvent::Exit` solo dispara en un cierre normal. Un `kill`, cerrar la sesión del
 /// escritorio o apagar el sistema mandan `SIGTERM`, y ahí Tauri no llega a correr nada
 /// nuestro: los agentes —y todo lo que hayan lanzado— quedaban vivos. Medido con
-/// `ccode` contra una app real antes de esto.
+/// `ags` contra una app real antes de esto.
 ///
 /// La limpieza NO puede correr dentro del handler: escribe archivos de cgroup y ejecuta
 /// `ps`, y nada de eso es async-signal-safe. Se usa el truco del self-pipe — el handler

@@ -71,16 +71,16 @@ pub(crate) fn open_sites() -> Vec<(String, Arc<Site>)> {
 }
 
 /// Lo que el runtime de la página le pide al proxy (ver `proxy::site_request`).
-pub(crate) const SITE_COOKIE_PATH: &str = "/__controlcode__/cookie";
-pub(crate) const SITE_STORAGE_PATH: &str = "/__controlcode__/storage";
+pub(crate) const SITE_COOKIE_PATH: &str = "/__ags__/cookie";
+pub(crate) const SITE_STORAGE_PATH: &str = "/__ags__/storage";
 
 /// Con qué se identifica el runtime en esos pedidos. Otro sitio no puede ponerla sin un
 /// preflight de CORS, y el proxy no aprueba ninguno.
-pub(crate) const OWN_HEADER: &str = "x-controlcode";
+pub(crate) const OWN_HEADER: &str = "x-ade-ags";
 
 /// Va en cada respuesta: la versión del frasco de cookies. La página la compara con la de
 /// su copia de `document.cookie` para saber si una respuesta le cambió alguna.
-pub(crate) const JAR_HEADER: &str = "x-controlcode-jar";
+pub(crate) const JAR_HEADER: &str = "x-ags-jar";
 
 /// Una asignación a `document.cookie` más grande que esto no es una cookie (un navegador
 /// no guarda más de 4 KB por cookie).

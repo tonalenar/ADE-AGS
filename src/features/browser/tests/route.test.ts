@@ -25,7 +25,7 @@ describe("adónde va un pedido de la página", () => {
   it("a otro origen va por el reenvío, sin el fragmento", () => {
     const routed = routeRequest("http://localhost:8080/me?x=1#frag", page, target)!;
     expect(routed.forwarded).toBe(true);
-    expect(routed.url).toBe(`http://localhost:47567/__controlcode__/fwd?url=${encodeURIComponent("http://localhost:8080/me?x=1")}`);
+    expect(routed.url).toBe(`http://localhost:47567/__ags__/fwd?url=${encodeURIComponent("http://localhost:8080/me?x=1")}`);
     expect(routed.original).toBe("http://localhost:8080/me?x=1#frag");
     expect(routeRequest("https://api.ejemplo.com/v1", page, target)?.forwarded).toBe(true);
   });

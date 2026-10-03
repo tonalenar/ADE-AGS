@@ -14,21 +14,21 @@ import type { AppMessage, PageMessage, PickedElement } from "./protocol";
 
 declare global {
   interface Window {
-    __controlcodePicker?: boolean;
+    __agsPicker?: boolean;
     /** Lo último que marcó la persona, para que el runtime lo describa sin depender de que
      *  su selector lo vuelva a encontrar. */
-    __controlcodeLastPick?: Element;
+    __agsLastPick?: Element;
   }
 }
 
 (() => {
   // Fuera de un iframe (alguien abrió la URL del proxy en su navegador) no hay app con
   // quien hablar.
-  if (window.__controlcodePicker || window.parent === window) return;
-  window.__controlcodePicker = true;
+  if (window.__agsPicker || window.parent === window) return;
+  window.__agsPicker = true;
 
   const ATTRIBUTES = ["role", "aria-label", "name", "type", "href", "src", "alt", "placeholder", "title", "data-testid"];
-  const MARK = "data-controlcode-picker";
+  const MARK = "data-ade-ags-picker";
 
   let parentOrigin: string | null = null;
   let active = false;
@@ -37,7 +37,7 @@ declare global {
   let label: HTMLDivElement | null = null;
 
   function post(message: Omit<PageMessage, "source">) {
-    const full = { source: "controlcode-preview", ...message } as PageMessage;
+    const full = { source: "ags-preview", ...message } as PageMessage;
     // El origen de la app se aprende del primer mensaje que manda. Hasta entonces (o si el
     // motor lo serializa como "null") no hay a quién apuntar con precisión.
     const target = parentOrigin && parentOrigin !== "null" ? parentOrigin : "*";
@@ -145,7 +145,7 @@ declare global {
     if (!el || isOurs(el)) return;
     // Con Shift se sigue eligiendo: es la forma de juntar varios antes de mandarlos.
     const keepPicking = e.shiftKey;
-    window.__controlcodeLastPick = el;
+    window.__agsLastPick = el;
     post({ type: "pick:selected", payload: { element: snapshot(el), keepPicking } });
     if (!keepPicking) setActive(false);
   }, true);
@@ -163,7 +163,7 @@ declare global {
   window.addEventListener("resize", reposition);
 
   window.addEventListener("message", (e: MessageEvent<AppMessage>) => {
-    if (e.source !== window.parent || e.data?.source !== "controlcode") return;
+    if (e.source !== window.parent || e.data?.source !== "ade-ags") return;
     parentOrigin = e.origin;
     switch (e.data.type) {
       case "pick:on": setActive(true); break;

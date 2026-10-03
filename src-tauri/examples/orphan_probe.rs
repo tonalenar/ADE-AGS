@@ -1,6 +1,6 @@
 //! Diagnóstico: ¿sobreviven los nietos cuando se cierra una tab?
 //!
-//! Reproduce la cadena real —ControlCode lanza el agente, el agente lanza un servidor de
+//! Reproduce la cadena real —ADE AGS lanza el agente, el agente lanza un servidor de
 //! desarrollo— y después mata exactamente como lo hace `pty_kill` (pty_manager.rs:252),
 //! para ver si el nieto queda huérfano.
 //!
@@ -9,7 +9,7 @@
 //!                                                 # insuficiente, queda como evidencia)
 //!   cargo run --example orphan_probe -- contained # el arreglo real: `ProcessGroup`
 //!
-//! El módulo de contención se incluye por `#[path]` en vez de por `controlcode_lib` a
+//! El módulo de contención se incluye por `#[path]` en vez de por `ade_ags_lib` a
 //! propósito: así este probe no enlaza la lib. En Windows el binario de tests de la lib no
 //! llega ni a cargar (STATUS_ENTRYPOINT_NOT_FOUND, por algo ajeno a esto), y sin este
 //! rodeo no habría forma de verificar el arreglo en esa plataforma.

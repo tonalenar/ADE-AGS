@@ -85,7 +85,7 @@ const originals = new WeakMap<CSSMediaRule, string>();
 /** Lo que decía el selector de cada regla con `:hover`. */
 const hoverOriginals = new WeakMap<CSSStyleRule, string>();
 /** Lo que decía cada `<link media>` / `<style media>`. */
-const ATTR = "data-controlcode-media";
+const ATTR = "data-ade-ags-media";
 
 let on = false;
 let observer: MutationObserver | null = null;
@@ -215,7 +215,7 @@ export function sendTouch(el: Element, type: string, x: number, y: number): void
  * página, y apretar manda además los eventos de toque.
  *
  * Va en captura y sobre `window`, así que corta antes que los oyentes de la página. El
- * selector de elementos de Control Code se registra antes (se inyecta primero) y por eso
+ * selector de elementos de ADE AGS se registra antes (se inyecta primero) y por eso
  * sigue viendo el mouse: sin eso, marcar algo dejaría de funcionar con el táctil prendido.
  */
 function watchRealInput(): () => void {

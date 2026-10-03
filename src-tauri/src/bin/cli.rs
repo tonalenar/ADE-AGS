@@ -1,4 +1,4 @@
-//! CLI `controlcode` — Fase 8.
+//! CLI `ade-ags` — Fase 8.
 //!
 //! Habla con la instancia de la app que esté corriendo (ver `ipc::protocol`). Toda la
 //! salida va a stdout como JSON en una línea, para que un agente la parsee sin heurísticas;
@@ -7,7 +7,7 @@
 //! El código de salida distingue los casos que a un agente le importan: 0 todo bien,
 //! 1 la app rechazó el comando, 2 error de uso, 3 la app no está corriendo.
 
-use controlcode_lib::ipc::protocol::{client_handshake_path, Handshake, Request, Response, PROTOCOL_VERSION};
+use ade_ags_lib::ipc::protocol::{client_handshake_path, Handshake, Request, Response, PROTOCOL_VERSION};
 use serde_json::{json, Map, Value};
 use std::io::{BufRead, BufReader, Write};
 use std::net::TcpStream;
@@ -20,14 +20,14 @@ const EXIT_USAGE: u8 = 2;
 const EXIT_NO_APP: u8 = 3;
 
 const USAGE: &str = "\
-ccode — controla la app Control Code desde la terminal
+ags — controla la app ADE AGS desde la terminal
 
 USO
-  ccode <grupo> <acción> [valor] [--flag valor ...]
+  ags <grupo> <acción> [valor] [--flag valor ...]
 
   El primer valor puede ir suelto, sin su flag:
-    ccode skill install git-helper       =  ccode skill install --skill git-helper
-    ccode tab send <id> \"corré los tests\" =  ccode tab send --tab <id> --text \"...\"
+    ags skill install git-helper       =  ags skill install --skill git-helper
+    ags tab send <id> \"corré los tests\" =  ags tab send --tab <id> --text \"...\"
 
 TABS
   tab list                                    Tabs abiertas ahora
@@ -136,7 +136,7 @@ EVENTOS (el bus de la flota y las misiones)
                                               Espera al próximo evento (sin polling)
   Filtros: --topics task.,mission. --run <id> --mission <id> --task <id> --limit 100
 
-MISIONES (también sin interfaz: `controlcode --headless`)
+MISIONES (también sin interfaz: `ade-ags --headless`)
   mission run --objective \"...\" --cwd . [--wait] [--timeout 3600]
               [--title ...] [--agent claude-code] [--model ...] [--account <id>]
               [--squad <id>] [--budget 5] [--max-parallel 2]
@@ -207,13 +207,13 @@ SERVIDOR MCP (no lo escribís vos: lo lanza la app)
   mcp --task <id-de-tarea>                    El de una tarea de la flota
 
   A diferencia del resto, esto NO devuelve una línea JSON: se queda tomado de stdin
-  y stdout hablando JSON-RPC con el agente que lo lanzó. Es el servidor `controlcode`
+  y stdout hablando JSON-RPC con el agente que lo lanzó. Es el servidor `ade-ags`
   que le da sus herramientas: el navegador del proyecto, la orquestación de la flota,
   la cuenta de git del usuario (PRs, issues, push/pull), preguntarle algo al usuario,
   y —solo con --task— el permiso de cada acción.
 
   La app se lo agrega sola al comando de cada tab de Claude Code, con un
-  `--mcp-config` escrito en ~/.controlcode/mcp/. No hace falta instalar la CLI para
+  `--mcp-config` escrito en ~/.ags/mcp/. No hace falta instalar la CLI para
   que funcione: el archivo apunta al binario que viene adentro de la app.
 
 OTROS
@@ -228,7 +228,7 @@ skill propia. `--file` se lee desde el directorio donde corrés el comando.
 Sin --account, la tab usa la cuenta principal (la de siempre).
 --pre se repite sin límite y sus valores corren EN EL ORDEN ESCRITO; si uno falla, el
 agente no arranca. Cada valor puede ser el nombre de un guardado o un comando literal:
-  ccode tab create --cwd . --agent claude-code --pre \"entorno conda\" --pre \"nvm use\"
+  ags tab create --cwd . --agent claude-code --pre \"entorno conda\" --pre \"nvm use\"
 
 La salida siempre es una línea JSON en stdout (salvo `mcp`, que habla JSON-RPC).
 Códigos de salida: 0 ok · 1 el comando falló · 2 uso incorrecto · 3 la app no corre
@@ -246,19 +246,19 @@ fn main() -> ExitCode {
         return ExitCode::from(EXIT_OK);
     }
 
-    // `ccode mcp` se atiende antes que nada: no devuelve una línea JSON como el resto,
+    // `ags mcp` se atiende antes que nada: no devuelve una línea JSON como el resto,
     // sino que se queda con stdin y stdout hablando JSON-RPC con el agente que lo lanzó.
     // Mezclarlo con el parseo de flags normal le ensuciaría el canal.
     if args[0] == "mcp" {
         return run_mcp(&args[1..]);
     }
 
-    // `ccode skills` / `ccode agents`: listar es lo único que se hace con ellos, y exigir
+    // `ags skills` / `ags agents`: listar es lo único que se hace con ellos, y exigir
     // `skill list` para eso era ceremonia sin ganancia.
     let (command, flag_args) = match shortcut(&args[0]) {
         Some(cmd) => {
-            // `ccode prelaunch` y `ccode prelaunch list` son lo mismo. Escribir la accion
-            // igual es lo natural para quien viene de `ccode account list`, y sin esto
+            // `ags prelaunch` y `ags prelaunch list` son lo mismo. Escribir la accion
+            // igual es lo natural para quien viene de `ags account list`, y sin esto
             // fallaba con "argumento inesperado 'list'" — un error sin sentido para algo
             // que es exactamente lo que el atajo hace.
             let action = cmd.split('.').nth(1).unwrap_or("");
@@ -270,7 +270,7 @@ fn main() -> ExitCode {
         }
         None => {
             if args.len() < 2 {
-                eprintln!("Falta la acción para '{}'. Probá: ccode --help", args[0]);
+                eprintln!("Falta la acción para '{}'. Probá: ags --help", args[0]);
                 return ExitCode::from(EXIT_USAGE);
             }
             (format!("{}.{}", args[0], args[1]), &args[2..])
@@ -361,12 +361,12 @@ fn shortcut(word: &str) -> Option<&'static str> {
         "portals" => Some("portal.list"),
         "devices" => Some("device.list"),
         "pools" => Some("pool.list"),
-        // `ccode notify "terminé"`: avisar es lo único que se hace con eso.
+        // `ags notify "terminé"`: avisar es lo único que se hace con eso.
         "notify" => Some("notify.send"),
         "roles" => Some("role.list"),
         "floors" => Some("floor.list"),
         "routines" => Some("routine.list"),
-        // `ccode say "pronto"`: hablarle al usuario es lo único que se hace con `say`.
+        // `ags say "pronto"`: hablarle al usuario es lo único que se hace con `say`.
         "say" => Some("say.send"),
         "recall" => Some("recall.get"),
         _ => None,
@@ -375,38 +375,38 @@ fn shortcut(word: &str) -> Option<&'static str> {
 
 /// Argumentos que se pueden escribir sueltos, en orden, sin su flag.
 ///
-/// `ccode skill install git-helper` en vez de `--skill git-helper`. Solo se declara acá lo
+/// `ags skill install git-helper` en vez de `--skill git-helper`. Solo se declara acá lo
 /// que tiene un argumento obvio y único: si hubiera dudas sobre a qué flag corresponde un
 /// valor suelto, es mejor exigir el flag que adivinar mal.
 fn positionals(command: &str) -> &'static [&'static str] {
     match command {
         "skill.install" => &["skill"],
         "skill.show" | "skill.edit" => &["skill"],
-        // `ccode skill new mi-skill` en vez de `--name mi-skill`.
+        // `ags skill new mi-skill` en vez de `--name mi-skill`.
         "skill.new" => &["name"],
-        // `ccode skill search react` en vez de `--query react`.
+        // `ags skill search react` en vez de `--query react`.
         "skill.search" => &["query"],
-        // El texto va segundo: `ccode tab send <id> "corré los tests"`.
+        // El texto va segundo: `ags tab send <id> "corré los tests"`.
         "tab.send" => &["tab", "text"],
         "tab.output" | "tab.close" | "watch.add" | "watch.remove" => &["tab"],
         "tab.create" => &["cwd"],
         "workspace.open" => &["workspace"],
-        // `ccode mission wait <id>`, `ccode mission accept <id> <tarea>`.
+        // `ags mission wait <id>`, `ags mission accept <id> <tarea>`.
         "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" => &["mission"],
         "mission.accept" => &["mission", "task"],
         "approval.decide" => &["approval"],
-        // `ccode peer ask Revisor "..."`: el nombre del agente y después el mensaje.
+        // `ags peer ask Revisor "..."`: el nombre del agente y después el mensaje.
         "peer.ask" | "peer.tell" => &["to", "text"],
         "peer.check" => &["to"],
         "peer.recruit" => &["name"],
         "peer.connect" | "peer.disconnect" => &["a", "b"],
-        // `ccode note read Plano 10 20`: desde la línea 10, 20 líneas.
+        // `ags note read Plano 10 20`: desde la línea 10, 20 líneas.
         "notify.send" => &["message"],
-        // `ccode role create "Revisor" "Procure falhas..."`; el texto también va con --file.
+        // `ags role create "Revisor" "Procure falhas..."`; el texto también va con --file.
         "floor.create" => &["name"],
         "say.send" => &["text"],
         "recall.get" => &["thread"],
-        // `ccode routine create Testes "rode os testes" --at 09:00`
+        // `ags routine create Testes "rode os testes" --at 09:00`
         "routine.create" => &["name", "text"],
         "routine.edit" => &["name", "text"],
         "routine.show" | "routine.enable" | "routine.disable" | "routine.run" | "routine.delete" => &["name"],
@@ -417,7 +417,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "note.read" => &["name", "start", "count"],
         "note.write" => &["name", "content"],
         "note.edit" => &["name", "old", "new"],
-        // `ccode portal click Web @e3`: el portal primero, después lo que cada acción pide.
+        // `ags portal click Web @e3`: el portal primero, después lo que cada acción pide.
         "portal.create" => &["name", "url"],
         "portal.navigate" => &["name", "url"],
         "portal.history" => &["name", "action"],
@@ -425,7 +425,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "portal.type" => &["name", "target", "text"],
         "portal.press" => &["name", "key"],
         "portal.select" => &["name", "target", "value"],
-        // `ccode device tap Pixel --text Entrar`: el dispositivo primero, y lo que cada acción pide.
+        // `ags device tap Pixel --text Entrar`: el dispositivo primero, y lo que cada acción pide.
         "pool.create" | "pool.delete" => &["name"],
         "device.create" => &["name"],
         "device.start" | "device.shot" | "device.tree" => &["name"],
@@ -446,7 +446,7 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
     let mut map = Map::new();
     let mut i = 0;
 
-    // Valores sueltos al principio: `ccode skill install git-helper`. Solo al principio —
+    // Valores sueltos al principio: `ags skill install git-helper`. Solo al principio —
     // después de que aparece el primer `--flag`, una palabra suelta es casi siempre un
     // error de tipeo, y tragársela en silencio sería peor que rechazarla.
     let mut next = 0;
@@ -611,7 +611,7 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             let asked = args.pointer("/request/timeout_s").and_then(Value::as_u64).unwrap_or(120).clamp(10, 600);
             Duration::from_secs(asked + 60)
         }
-        "browser.run" => Duration::from_secs(controlcode_lib::ipc::mcp::BROWSER_TIMEOUT_SECS + 15),
+        "browser.run" => Duration::from_secs(ade_ags_lib::ipc::mcp::BROWSER_TIMEOUT_SECS + 15),
         // Esperar a que terminen workers: lo que pidió el agente, más margen.
         "run.await" => {
             let requested = args.pointer("/args/timeout_s").and_then(Value::as_u64).unwrap_or(300).clamp(10, 1800);
@@ -639,7 +639,7 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             let requested = args
                 .get("timeout")
                 .and_then(Value::as_u64)
-                .unwrap_or(controlcode_lib::ipc::mcp::APPROVAL_TIMEOUT_SECS);
+                .unwrap_or(ade_ags_lib::ipc::mcp::APPROVAL_TIMEOUT_SECS);
             Duration::from_secs(requested + 30)
         }
         _ => Duration::from_secs(DEFAULT),
@@ -670,10 +670,10 @@ fn to_camel_case(flag: &str) -> String {
 ///
 /// Existe por el arranque: la app restaura sus ventanas —que lanzan a los agentes— y recién
 /// después abre el servidor de la CLI. Un agente que llama a una herramienta en ese hueco
-/// recibía "Control Code no parece estar corriendo", y Claude Code da por caído al servidor
+/// recibía "ADE AGS no parece estar corriendo", y Claude Code da por caído al servidor
 /// entero por esa respuesta. También cubre el reinicio de la app con tareas en curso.
 ///
-/// Solo para `ccode mcp`. Una persona que escribe `ccode tab list` con la app cerrada tiene
+/// Solo para `ags mcp`. Una persona que escribe `ags tab list` con la app cerrada tiene
 /// que enterarse en el momento, no diez segundos después.
 const MCP_WAIT_FOR_APP: Duration = Duration::from_secs(15);
 
@@ -698,7 +698,7 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
     let path = client_handshake_path();
     let raw = std::fs::read_to_string(&path).map_err(|_| {
         CliError::not_yet(format!(
-            "Control Code no parece estar corriendo (no se encontró {}). Abrí la app y volvé a intentar.",
+            "ADE AGS no parece estar corriendo (no se encontró {}). Abrí la app y volvé a intentar.",
             path.display()
         ))
     })?;
@@ -738,7 +738,7 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
     serde_json::from_str(&line).map_err(|e| CliError::new(format!("Respuesta ilegible de la app: {e}"), EXIT_NO_APP))
 }
 
-/// `ccode mcp`: el puente MCP de un agente. Con `--task` es el de una tarea de la flota
+/// `ags mcp`: el puente MCP de un agente. Con `--task` es el de una tarea de la flota
 /// (permisos y navegador); con `--cwd`, el de una tab de Claude Code (solo el navegador).
 ///
 /// Cada pedido se traduce a un comando del mismo protocolo que usa el resto de la CLI, así
@@ -746,7 +746,7 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
 /// mismo. Los errores van a stderr: stdout es del JSON-RPC y meterle una línea suelta
 /// rompe al cliente.
 fn run_mcp(args: &[String]) -> ExitCode {
-    use controlcode_lib::ipc::mcp::McpContext;
+    use ade_ags_lib::ipc::mcp::McpContext;
 
     // Por nombre y no por posición: OpenCode escribe el comando entero en un arreglo de su
     // config, y no hay razón para que el orden en que lo escriba alguien a mano tenga que
@@ -763,7 +763,7 @@ fn run_mcp(args: &[String]) -> ExitCode {
                 flags.insert(name, value.clone());
             }
             other => {
-                eprintln!("Argumento inesperado para 'ccode mcp': {other}");
+                eprintln!("Argumento inesperado para 'ags mcp': {other}");
                 return ExitCode::from(EXIT_USAGE);
             }
         }
@@ -774,7 +774,7 @@ fn run_mcp(args: &[String]) -> ExitCode {
         (None, Some(cwd)) => McpContext::Cwd { cwd, tab: flags.remove("--tab") },
         (None, None) => {
             eprintln!(
-                "Uso: ccode mcp --task <id-de-tarea> | --cwd <carpeta> [--tab <id-de-tab>] [--prefix <prefijo>]"
+                "Uso: ags mcp --task <id-de-tarea> | --cwd <carpeta> [--tab <id-de-tab>] [--prefix <prefijo>]"
             );
             return ExitCode::from(EXIT_USAGE);
         }
@@ -783,7 +783,7 @@ fn run_mcp(args: &[String]) -> ExitCode {
     let prefix = flags.remove("--prefix").unwrap_or_default();
 
     let stdin = std::io::stdin();
-    let result = controlcode_lib::ipc::mcp::serve(
+    let result = ade_ags_lib::ipc::mcp::serve(
         &context,
         &prefix,
         stdin.lock(),
@@ -801,7 +801,7 @@ fn run_mcp(args: &[String]) -> ExitCode {
     match result {
         Ok(()) => ExitCode::from(EXIT_OK),
         Err(e) => {
-            eprintln!("ccode mcp: {e}");
+            eprintln!("ags mcp: {e}");
             ExitCode::from(EXIT_COMMAND_FAILED)
         }
     }

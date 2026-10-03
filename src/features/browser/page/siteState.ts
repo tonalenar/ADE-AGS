@@ -18,10 +18,10 @@
  */
 
 /** Rutas y cabeceras que entiende el proxy (`site.rs`). */
-const COOKIE_PATH = "/__controlcode__/cookie";
-const STORAGE_PATH = "/__controlcode__/storage";
-export const OWN_HEADER = "x-controlcode";
-export const JAR_HEADER = "x-controlcode-jar";
+const COOKIE_PATH = "/__ags__/cookie";
+const STORAGE_PATH = "/__ags__/storage";
+export const OWN_HEADER = "x-ade-ags";
+export const JAR_HEADER = "x-ags-jar";
 
 /** Cuánto se espera después de un cambio del storage para mandar la copia. */
 const FLUSH_DELAY_MS = 400;
@@ -122,7 +122,7 @@ export function installCookieJar(natives: Natives): CookieJar | null {
 
   let copy: { path: string; cookie: string; v: number } | null = null;
   let stale = true;
-  const others = typeof BroadcastChannel === "function" ? new BroadcastChannel("controlcode:cookies") : null;
+  const others = typeof BroadcastChannel === "function" ? new BroadcastChannel("ade-ags:cookies") : null;
   if (others) others.onmessage = () => { stale = true; };
 
   const url = (path: string) => `${COOKIE_PATH}?path=${encodeURIComponent(path)}`;
@@ -360,7 +360,7 @@ export const SCROLLBAR_CSS = [
 export function installScrollbars(): void {
   try {
     const style = document.createElement("style");
-    style.setAttribute("data-controlcode-scrollbars", "");
+    style.setAttribute("data-ade-ags-scrollbars", "");
     style.textContent = SCROLLBAR_CSS;
     const parent = document.head ?? document.documentElement;
     parent.insertBefore(style, parent.firstChild);

@@ -1,6 +1,6 @@
 # Baseline Windows
 
-Resultado de provar o ControlCode 1.8.7, commit de upstream `632a57b`, neste clone. Os dois ajustes de código desta etapa estão descritos em [Correções](#correções). Não houve rebrand, nem mudança de provider, nem multi-conta do Gemini.
+Resultado de provar o ADE AGS 1.8.7, commit de upstream `632a57b`, neste clone. Os dois ajustes de código desta etapa estão descritos em [Correções](#correções). Não houve rebrand, nem mudança de provider, nem multi-conta do Gemini.
 
 A branch é `feat/ade-ags-bootstrap`. `master` local não recebeu commit.
 
@@ -43,14 +43,14 @@ Dependências: `bun install` (297 pacotes). O lockfile do bun não ficou sujo.
 | `cargo test --lib forge::test::git_manda_el_token` | passou em 0,11 s, depois da correção do config |
 | `cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- --no-deps` | saiu 0. 30 avisos na lib, 40 no alvo de teste (30 repetidos). Nenhum nos arquivos desta etapa |
 | `cargo clippy ... -- -D warnings` | sai 1. Os avisos do upstream viram erro. Não é o comando do README. Não se rodou `cargo clippy --fix` |
-| `bun run app:build` | saiu 0 em 4 min 42 s. Executável em `src-tauri/target/release/controlcode.exe` (29 853 696 bytes). A CLI foi omitida (`CC_CLI_SKIP=1`), que é o comportamento do script |
+| `bun run app:build` | saiu 0 em 4 min 42 s. Executável em `src-tauri/target/release/ade-ags.exe` (29 853 696 bytes). A CLI foi omitida (`CC_CLI_SKIP=1`), que é o comportamento do script |
 | `bun run app:build --release` | não rodou. Pede NSIS e WiX, que não estão instalados. Não se instalou |
 
 Três testes Rust estão `#[ignore]` de fábrica: o keyring real (`forge::test::el_llavero_del_sistema_guarda_y_devuelve_el_token`) e dois do marketplace que precisam de rede.
 
 ## O executável
 
-`controlcode.exe` foi iniciado, ficou vivo 5 segundos, com janela de título `controlcode`, e foi encerrado. Não se percorreu a UI. Não há suíte de browser para esta app Tauri.
+`ade-ags.exe` foi iniciado, ficou vivo 5 segundos, com janela de título `ade-ags`, e foi encerrado. Não se percorreu a UI. Não há suíte de browser para esta app Tauri.
 
 ## Problemas
 
@@ -107,8 +107,8 @@ Reprodução à parte, com o caminho em barra normal: o git manda o header `Auth
 
 - Fork `https://github.com/tonalenar/ADE-AGS`, `origin` nesse fork, `upstream` em `https://github.com/luis3132/ControlCode.git`.
 - Branch `feat/ade-ags-bootstrap`, sem merge em `master`.
-- App Windows sobe: `controlcode.exe`, janela `controlcode`.
+- App Windows sobe: `ade-ags.exe`, janela `ade-ags`.
 - Instalador NSIS/MSI não foi produzido.
-- CLI `ccode.exe` não sai do `app:build` diário. O script avisa: `bun run app:build --release` é que embala CLI e instaladores.
+- CLI `ags.exe` não sai do `app:build` diário. O script avisa: `bun run app:build --release` é que embala CLI e instaladores.
 - Skills por symlink e worktree da frota não funcionam nesta máquina até privilégio de symlink e o prefixo `\\?\` serem tratados. Isso fica para uma etapa posterior. Não é bloqueio de compilação.
 - `src-tauri/gen/schemas/windows-schema.json` é gerado pelo Tauri e não entra no commit. O upstream versiona os outros schemas, não este.

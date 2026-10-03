@@ -13,7 +13,7 @@ import { elapsed } from "@/features/workspaces/useRepoInfo";
 import { useSyncStore } from "./store";
 import type { SyncReport } from "./types";
 
-const DEFAULT_REPO = "controlcode-sync";
+const DEFAULT_REPO = "ade-ags-sync";
 
 function ReportList({ title, items, tone }: { title: string; items: string[]; tone: "ok" | "warn" | "bad" }) {
   if (items.length === 0) return null;

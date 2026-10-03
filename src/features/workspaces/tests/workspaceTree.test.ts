@@ -29,8 +29,8 @@ function repo(root: string, branch: string | null, isWorktree = false, changed =
 
 describe("baseName", () => {
   it("toma el último segmento", () => {
-    expect(baseName("/home/luis/ControlCode")).toBe("ControlCode");
-    expect(baseName("/home/luis/ControlCode/")).toBe("ControlCode");
+    expect(baseName("/home/luis/ADE AGS")).toBe("ADE AGS");
+    expect(baseName("/home/luis/ADE AGS/")).toBe("ADE AGS");
     expect(baseName("C:\\Users\\luis\\app")).toBe("app");
   });
 });

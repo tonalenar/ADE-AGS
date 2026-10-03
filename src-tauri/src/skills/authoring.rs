@@ -58,7 +58,7 @@ pub fn create_skill(draft: SkillDraft, db: tauri::State<DbConnection>) -> Result
     // cualquier otra instalación: así hereda la resolución de slug sin colisiones, la
     // carpeta `local`, el registro en la base y la normalización del frontmatter, en vez
     // de tener un segundo camino de alta que se desincronice del primero.
-    let staging = std::env::temp_dir().join(format!("controlcode-new-skill-{}", uuid::Uuid::new_v4()));
+    let staging = std::env::temp_dir().join(format!("ade-ags-new-skill-{}", uuid::Uuid::new_v4()));
     let folder = staging.join(super::files::slugify(&name));
     std::fs::create_dir_all(&folder).map_err(|e| e.to_string())?;
 

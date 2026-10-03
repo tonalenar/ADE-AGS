@@ -8,8 +8,8 @@
 //! - **Do catálogo** (`crate::roles`): os papéis funcionais que as missões já usam
 //!   (backend, frontend, qa, reviewer…). Não mudam. É o mesmo texto nos dois lugares: um
 //!   "reviewer" no canvas se comporta como o "reviewer" de uma missão.
-//! - **Do usuário**: criados com `ccode role create`, guardados em
-//!   `~/.controlcode/canvas-roles.json`. Só um orquestrador cria ou edita: um papel é uma
+//! - **Do usuário**: criados com `ags role create`, guardados em
+//!   `~/.ags/canvas-roles.json`. Só um orquestrador cria ou edita: um papel é uma
 //!   instrução que vai para todo agente futuro, não algo que qualquer um deva poder mudar.
 //!
 //! A lógica é pura (sobre uma lista) e o arquivo é uma casca fina por cima, para testar sem
@@ -46,7 +46,7 @@ lazy_static::lazy_static! {
 }
 
 fn file_path() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir().ok_or("Não foi possível achar a pasta do usuário")?.join(".controlcode");
+    let dir = dirs::home_dir().ok_or("Não foi possível achar a pasta do usuário")?.join(".ags");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("canvas-roles.json"))
 }
@@ -119,7 +119,7 @@ pub fn resolve<'a>(roles: &'a [Role], wanted: &str) -> Result<&'a Role, String> 
         .find(|r| r.id == needle || r.id == slugged || r.label.to_lowercase() == needle)
         .ok_or_else(|| {
             format!(
-                "Não existe o papel '{wanted}'. Papéis: {}. Veja `ccode roles`.",
+                "Não existe o papel '{wanted}'. Papéis: {}. Veja `ags roles`.",
                 roles.iter().map(|r| r.id.as_str()).collect::<Vec<_>>().join(", ")
             )
         })
@@ -150,7 +150,7 @@ pub fn with_created(roles: &[Role], label: &str, instructions: &str) -> Result<(
     check(label, instructions)?;
     let id = slug(label);
     if roles.iter().any(|r| r.id == id) {
-        return Err(format!("Já existe um papel '{id}'. Use `ccode role edit` ou escolha outro nome."));
+        return Err(format!("Já existe um papel '{id}'. Use `ags role edit` ou escolha outro nome."));
     }
     let role = Role { id, label: label.trim().to_string(), instructions: instructions.trim().to_string(), builtin: false };
     let mut next = roles.to_vec();
@@ -169,7 +169,7 @@ pub fn with_edited(
     let target = resolve(roles, wanted)?;
     if target.builtin {
         return Err(format!(
-            "'{}' é um papel do catálogo e não se edita. Crie um parecido com `ccode role create`.",
+            "'{}' é um papel do catálogo e não se edita. Crie um parecido com `ags role create`.",
             target.id
         ));
     }
@@ -229,7 +229,7 @@ mod test {
         assert_eq!(resolve(&r, "QA / Tests").unwrap().id, "qa");
         assert_eq!(resolve(&r, "BACKEND").unwrap().id, "backend");
         let err = resolve(&r, "chef").unwrap_err();
-        assert!(err.contains("reviewer") && err.contains("ccode roles"), "{err}");
+        assert!(err.contains("reviewer") && err.contains("ags roles"), "{err}");
     }
 
     #[test]

@@ -29,7 +29,7 @@ function scriptAsString(): Plugin {
   const SUFFIX = "?script";
   const root = fileURLToPath(new URL("./", import.meta.url));
   return {
-    name: "controlcode:script-as-string",
+    name: "ade-ags:script-as-string",
     async load(id) {
       if (!id.endsWith(SUFFIX)) return null;
       const file = id.slice(0, -SUFFIX.length);

@@ -136,7 +136,7 @@ function handlePtyId(args: Record<string, unknown>): unknown {
  * Quién hace el pedido, con el nombre que la interfaz ya le da: la tab del agente o la
  * tarjeta de la flota. El backend manda el id; el nombre vive acá, que es donde está.
  *
- * Sin dueño (un `ccode mcp` viejo, sin `--tab`) el agente comparte el navegador del
+ * Sin dueño (un `ags mcp` viejo, sin `--tab`) el agente comparte el navegador del
  * usuario, como hasta ahora: es peor, pero sigue andando.
  */
 function ownerOf(args: Record<string, unknown>): ViewOwner | null {
@@ -151,7 +151,7 @@ function ownerOf(args: Record<string, unknown>): ViewOwner | null {
   return { kind: "tab", id: owner.id, label: tab.title };
 }
 
-/** Un agente usando el navegador de su proyecto, desde el MCP (`ccode mcp`). */
+/** Un agente usando el navegador de su proyecto, desde el MCP (`ags mcp`). */
 async function handleBrowser(args: Record<string, unknown>): Promise<unknown> {
   const cwd = str(args, "cwd");
   if (!cwd) throw new Error("Falta la carpeta del proyecto");
@@ -210,7 +210,7 @@ function keyFor(tabId: string, cwd: string): string {
   return tab ? boardKeyOfTab(tab) : boardKey(cwd);
 }
 
-/** Cambios al canvas pedidos por una orquestadora (`ccode peer connect/disconnect`). El
+/** Cambios al canvas pedidos por una orquestadora (`ags peer connect/disconnect`). El
  *  permiso ya lo verificó el backend; acá solo se aplica, en el canvas de esa carpeta. */
 function handleCanvas(args: Record<string, unknown>, apply: (key: string, a: string, b: string) => void) {
   const cwd = str(args, "cwd");
@@ -230,7 +230,7 @@ function handleRecruited(args: Record<string, unknown>) {
   return { ok: true };
 }
 
-/** El texto dibujado de una terminal, para `ccode peer ask/check` (ver `screenOf`). */
+/** El texto dibujado de una terminal, para `ags peer ask/check` (ver `screenOf`). */
 function handleScreen(args: Record<string, unknown>) {
   const tabId = str(args, "tabId");
   if (!tabId) throw new Error("Falta tabId");
@@ -243,7 +243,7 @@ function handleScreen(args: Record<string, unknown>) {
 
 
 /**
- * Un agente creando o escribiendo una nota (`ccode note …`). El permiso ya lo verificó el
+ * Un agente creando o escribiendo una nota (`ags note …`). El permiso ya lo verificó el
  * backend. Se guarda al instante: el agente puede leerla en su comando siguiente, y el
  * backend lee del archivo.
  */
@@ -271,7 +271,7 @@ async function handleNote(args: Record<string, unknown>) {
   throw new Error(`Operación de nota desconocida: ${op}`);
 }
 /**
- * Un agente creando un portal o manejándolo (`ccode portal …`). El permiso ya lo verificó
+ * Un agente creando un portal o manejándolo (`ags portal …`). El permiso ya lo verificó
  * el backend. `create` se guarda al instante: el comando siguiente busca el portal en el
  * archivo.
  */
@@ -300,7 +300,7 @@ async function handlePortal(args: Record<string, unknown>) {
 }
 
 /**
- * Un agente avisándole algo al usuario (`ccode notify`). Un aviso en pantalla que dice de
+ * Un agente avisándole algo al usuario (`ags notify`). Un aviso en pantalla que dice de
  * quién es, y, si la ventana no tiene el foco, un pedido de atención al sistema (la barra
  * de tareas parpadea, el Dock salta).
  */

@@ -100,7 +100,7 @@ export function formatMarked(
   captures: AnnotatedCapture[],
   note: string,
   toDisplayUrl: (url: string) => string,
-  /** Lo que ESTA TUI le antepone al nombre de cada tool (OpenCode: `controlcode_`). Las
+  /** Lo que ESTA TUI le antepone al nombre de cada tool (OpenCode: `ags_`). Las
    *  tools que se nombran acá tiene que poder llamarlas con el nombre que lee. */
   prefix = ""
 ): string {
@@ -144,7 +144,7 @@ export function composePointer(
    *  uno cuál le toca. */
   batchId?: string,
   /** Lo que ESTA TUI le antepone al nombre de cada tool. Sin esto, a un agente de OpenCode
-   *  se le dice que use `browser_marked` y lo que tiene se llama `controlcode_browser_marked`. */
+   *  se le dice que use `browser_marked` y lo que tiene se llama `ags_browser_marked`. */
   prefix = ""
 ): string {
   const parts: string[] = [];

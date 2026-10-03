@@ -1,6 +1,6 @@
 //! `browser.run`: un agente usando el navegador de las tabs de su proyecto.
 //!
-//! Llega desde `ccode mcp` —el de una tab de Claude Code (`--cwd`) o el de una tarea de la
+//! Llega desde `ags mcp` —el de una tab de Claude Code (`--cwd`) o el de una tarea de la
 //! flota (`--task`)— y lo resuelve el frontend, que es donde viven la tab del navegador y
 //! la página. El backend solo decide a qué ventana preguntarle.
 

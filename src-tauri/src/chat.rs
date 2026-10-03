@@ -1,5 +1,5 @@
 //! Chat: el usuario conversa con un agente desde la pantalla, y el agente contesta con
-//! `ccode say`.
+//! `ags say`.
 //!
 //! Un terminal de agente mezcla todo en un solo flujo: lo que el usuario escribió, lo que
 //! el agente piensa, las llamadas a herramientas. Para una pregunta simple, o para dejar un
@@ -43,9 +43,9 @@ pub const MAX_TEXT: usize = 8000;
 pub enum Kind {
     /// Lo que escribió el usuario.
     User,
-    /// La respuesta del agente (`ccode say`).
+    /// La respuesta del agente (`ags say`).
     Say,
-    /// Un aviso intermedio del agente (`ccode say --progress`): su turno sigue.
+    /// Un aviso intermedio del agente (`ags say --progress`): su turno sigue.
     Progress,
 }
 
@@ -163,7 +163,7 @@ pub fn recall<'a>(conversation: &'a Conversation, thread: &str, turns: Option<us
 /// usuario.
 pub fn framed(thread: &str, text: &str) -> String {
     format!(
-        "[Chat do usuário · thread: {thread}] {text}\n(Responda SOMENTE com `ccode say \"...\"`: o texto do terminal não chega ao usuário no chat. Para uma tarefa longa, avise o andamento com `ccode say --progress \"...\"`.)"
+        "[Chat do usuário · thread: {thread}] {text}\n(Responda SOMENTE com `ags say \"...\"`: o texto do terminal não chega ao usuário no chat. Para uma tarefa longa, avise o andamento com `ags say --progress \"...\"`.)"
     )
 }
 
@@ -180,7 +180,7 @@ lazy_static::lazy_static! {
 }
 
 fn file_path() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir().ok_or("Não foi possível achar a pasta do usuário")?.join(".controlcode");
+    let dir = dirs::home_dir().ok_or("Não foi possível achar a pasta do usuário")?.join(".ags");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("chat.json"))
 }

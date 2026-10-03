@@ -19,7 +19,7 @@ import {
  * el de vistas): el explorador, la barra de estado, los atajos, la CLI. En vez de enseñarle
  * grupos a todos, esos dos valores pasan a ser la tab visible del GRUPO ENFOCADO. Cuando
  * cualquiera los cambia —abrir un archivo desde el árbol, elegir un agente en el panel
- * izquierdo, `ccode tab create`— el árbol se entera acá: la tab nueva entra al grupo
+ * izquierdo, `ags tab create`— el árbol se entera acá: la tab nueva entra al grupo
  * enfocado, y activar una que ya estaba en otro grupo enfoca ese grupo. Cuando el usuario
  * actúa sobre los grupos, `activateItem` mueve esos dos valores. Los demás grupos guardan
  * cuál muestran cada uno.

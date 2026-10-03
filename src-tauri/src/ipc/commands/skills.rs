@@ -57,7 +57,7 @@ fn blocking_runtime() -> Result<tokio::runtime::Runtime, String> {
 ///
 /// Existe porque skills.sh **no se puede listar**: su CLI solo responde a búsquedas, así
 /// que su cache está vacío hasta que alguien busca algo. Sin este comando, todo lo que hay
-/// ahí era inalcanzable desde `ccode` — `skill list` no lo mostraba y `skill install` no lo
+/// ahí era inalcanzable desde `ags` — `skill list` no lo mostraba y `skill install` no lo
 /// encontraba, salvo por lo que hubiera quedado cacheado de una búsqueda hecha en la UI
 /// (o sea, un resultado que dependía de otra pantalla).
 pub(super) fn skill_search(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -145,7 +145,7 @@ pub(super) fn skill_install(app: &AppHandle, args: &Value) -> Result<Value, Stri
 
     let entry = entry
         .ok_or_else(|| {
-            // El nombre puede venir de la lista `installed` de `ccode skills`, donde no
+            // El nombre puede venir de la lista `installed` de `ags skills`, donde no
             // hay nada que instalar. Decir "no se encontró en los repos" ahí sería
             // desconcertante: la skill existe, ya la tiene.
             let already = crate::skills::list_skills(db.clone())
@@ -154,7 +154,7 @@ pub(super) fn skill_install(app: &AppHandle, args: &Value) -> Result<Value, Stri
             if already {
                 format!("'{skill}' ya está instalada; podés usarla directo en --skills")
             } else {
-                format!("No se encontró '{skill}' en los repositorios habilitados (mirá 'ccode skills' o refrescá los repos)")
+                format!("No se encontró '{skill}' en los repositorios habilitados (mirá 'ags skills' o refrescá los repos)")
             }
         })?;
 

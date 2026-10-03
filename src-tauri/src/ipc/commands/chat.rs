@@ -1,4 +1,4 @@
-//! Chat con los agentes: `ccode say` (`say.send`) y `ccode recall` (`recall.get`), lado del agente y el envío del
+//! Chat con los agentes: `ags say` (`say.send`) y `ags recall` (`recall.get`), lado del agente y el envío del
 //! usuario desde la pantalla (ver `crate::chat` para el modelo y las decisiones).
 //!
 //! `say` no necesita permiso ni conexión: le habla al usuario, no a otro agente, y lo único
@@ -52,12 +52,12 @@ fn as_json(m: &Message) -> Value {
 
 // ── Lado del agente ─────────────────────────────────────────────────
 
-/// `ccode say "texto" [--progress] [--thread <color>]`: una respuesta al usuario, en su chat.
+/// `ags say "texto" [--progress] [--thread <color>]`: una respuesta al usuario, en su chat.
 pub(super) fn chat_say(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     // El texto llega suelto, con `--text`, o desde un archivo (`--file`, que la CLI deja
     // en `content`).
-    let raw = arg_str_opt(args, "text").or_else(|| arg_str_opt(args, "content")).ok_or("Falta a mensagem: ccode say \"...\"")?;
+    let raw = arg_str_opt(args, "text").or_else(|| arg_str_opt(args, "content")).ok_or("Falta a mensagem: ags say \"...\"")?;
     let text = chat::clean_text(&raw)?;
     let kind = if flag(args, "progress") { Kind::Progress } else { Kind::Say };
     let asked = arg_str_opt(args, "thread");
@@ -84,7 +84,7 @@ pub(super) fn chat_say(app: &AppHandle, args: &Value) -> Result<Value, String> {
     Ok(json!({ "delivered": true, "thread": thread, "progress": kind == Kind::Progress, "system": system }))
 }
 
-/// `ccode recall [thread|list] [--turns N | --all]`: lo que se habló, para quien llega sin
+/// `ags recall [thread|list] [--turns N | --all]`: lo que se habló, para quien llega sin
 /// memoria (un agente reiniciado, o con la conversación compactada).
 pub(super) fn chat_recall(_app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;

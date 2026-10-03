@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import { describeSchedule } from "../RoutinesPanel";
 
 // Tiene que decir lo mismo que `routines::describe` en Rust: es lo que ve quien usa la
-// pantalla y lo que lee el agente en `ccode routines`.
+// pantalla y lo que lee el agente en `ags routines`.
 describe("describeSchedule", () => {
   it("cada intervalo", () => {
     expect(describeSchedule({ kind: "every", secs: 1800 })).toBe("a cada 30 min");

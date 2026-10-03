@@ -236,7 +236,7 @@ fn the_project_slug_replaces_everything_that_is_not_alphanumeric() {
 /// eso el bug pasó desapercibido tanto tiempo.
 #[test]
 fn plain_paths_are_unaffected_by_the_slug_rule() {
-    let cwd = "/home/luis/Documents/XD/ControlCode";
+    let cwd = "/home/luis/Documents/XD/AdeAgs";
     assert_eq!(claude_project_slug(cwd), cwd.replace('/', "-"));
 }
 

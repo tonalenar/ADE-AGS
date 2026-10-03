@@ -141,7 +141,7 @@ fn con_broker_los_permisos_se_rutean_a_la_consola() {
 
     assert!(args.contains("--mcp-config /tmp/cc/t1.json"));
     assert!(args.contains("--strict-mcp-config"));
-    assert!(args.contains("--permission-prompt-tool mcp__controlcode__approve_tool_use"));
+    assert!(args.contains("--permission-prompt-tool mcp__ags__approve_tool_use"));
     assert!(args.contains("--permission-mode default"));
     assert!(args.contains("--permission-prompts host"));
 }
@@ -158,11 +158,11 @@ fn con_broker_el_navegador_ya_esta_permitido_y_nada_mas() {
         .position(|a| a == "--allowedTools")
         .expect("falta --allowedTools");
     let allowed: Vec<&str> = launch.args[at + 1].split(',').collect();
-    assert!(allowed.contains(&"mcp__controlcode__browser_click"));
+    assert!(allowed.contains(&"mcp__ags__browser_click"));
     assert!(
         allowed
             .iter()
-            .all(|t| t.starts_with("mcp__controlcode__browser_")),
+            .all(|t| t.starts_with("mcp__ags__browser_")),
         "{allowed:?}"
     );
 }
@@ -766,7 +766,7 @@ use super::broker;
 use std::time::Duration;
 
 lazy_static::lazy_static! {
-    /// La cola del broker es global —tiene que serlo: el `ccode mcp` de cualquier tarea
+    /// La cola del broker es global —tiene que serlo: el `ags mcp` de cualquier tarea
     /// entra por ahí— así que estos tests no pueden correr en paralelo entre sí. Sin esto
     /// pasan solos y fallan en la suite completa, que es la peor forma de fallar.
     static ref UNO_A_LA_VEZ: std::sync::Mutex<()> = std::sync::Mutex::new(());
@@ -1520,10 +1520,10 @@ fn descartar_un_worktree_que_ya_no_existe_limpia_el_registro_de_git() {
 /// para el agente siguiente, que corre en otro.
 #[test]
 fn las_rutas_del_worktree_se_traducen_a_las_del_proyecto_para_las_reglas() {
-    let wt = Path::new("/home/u/.controlcode/worktrees/ab12");
+    let wt = Path::new("/home/u/.ags/worktrees/ab12");
     let repo = Path::new("/home/u/proyecto");
 
-    let input = serde_json::json!({"file_path": "/home/u/.controlcode/worktrees/ab12/src/a.rs", "old_string": "x"});
+    let input = serde_json::json!({"file_path": "/home/u/.ags/worktrees/ab12/src/a.rs", "old_string": "x"});
     let out = worktrees::to_project_paths(&input, wt, repo);
     assert_eq!(
         Path::new(out["file_path"].as_str().unwrap()),
@@ -1532,7 +1532,7 @@ fn las_rutas_del_worktree_se_traducen_a_las_del_proyecto_para_las_reglas() {
     assert_eq!(out["old_string"], "x", "el resto del input no se toca");
 
     // Un comando se compara tal cual: reescribir adentro es cambiar lo que se aprobó.
-    let bash = serde_json::json!({"command": "cat /home/u/.controlcode/worktrees/ab12/x"});
+    let bash = serde_json::json!({"command": "cat /home/u/.ags/worktrees/ab12/x"});
     assert_eq!(worktrees::to_project_paths(&bash, wt, repo), bash);
 
     // Una ruta de afuera del worktree queda igual.
@@ -2840,30 +2840,30 @@ mod otras_tuis {
         let dir = std::env::temp_dir().join(format!("ade-codex-mcp-{}", uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("task.json");
-        let command = r#"C:\Program Files\José\ccode.exe"#;
+        let command = r#"C:\Program Files\José\ags.exe"#;
         let server_args = ["mcp", "--task", "task-1"];
-        std::fs::write(&path, serde_json::json!({"mcpServers": {"controlcode": {
+        std::fs::write(&path, serde_json::json!({"mcpServers": {"ags": {
             "command": command, "args": server_args
         }}}).to_string()).unwrap();
         let before = std::fs::read(&path).unwrap();
         let mut context = ctx(None);
         context.mcp_config = Some(path.clone());
         context.account_env.insert("CODEX_HOME".into(), "account-home".into());
-        context.allowed_tools = vec!["mcp__controlcode__task_handoff".into(), "mcp__controlcode__task_note".into()];
+        context.allowed_tools = vec!["mcp__ags__task_handoff".into(), "mcp__ags__task_note".into()];
         let agent = adapter_for("codex").unwrap();
         let launch = agent.launch("worker", None, None, &context);
         assert_eq!(launch.env, context.account_env);
         assert_eq!(std::fs::read(&path).unwrap(), before);
         let overrides: Vec<_> = launch.args.windows(2).filter(|pair| pair[0] == "-c").map(|pair| pair[1].as_str()).collect();
-        assert!(overrides.contains(&format!("mcp_servers.controlcode.command={}", serde_json::to_string(command).unwrap()).as_str()));
-        assert!(overrides.contains(&"mcp_servers.controlcode.args=[\"mcp\",\"--task\",\"task-1\"]"));
-        assert!(overrides.contains(&"mcp_servers.controlcode.enabled_tools=[\"task_handoff\",\"task_note\"]"));
-        assert!(overrides.contains(&"mcp_servers.controlcode.required=true"));
+        assert!(overrides.contains(&format!("mcp_servers.ags.command={}", serde_json::to_string(command).unwrap()).as_str()));
+        assert!(overrides.contains(&"mcp_servers.ags.args=[\"mcp\",\"--task\",\"task-1\"]"));
+        assert!(overrides.contains(&"mcp_servers.ags.enabled_tools=[\"task_handoff\",\"task_note\"]"));
+        assert!(overrides.contains(&"mcp_servers.ags.required=true"));
         context.read_only = true;
-        context.allowed_tools = vec!["mcp__controlcode__task_list".into()];
+        context.allowed_tools = vec!["mcp__ags__task_list".into()];
         let lead = agent.launch("lead", None, None, &context);
         assert!(lead.args.windows(2).any(|p| p == ["--sandbox", "read-only"]));
-        assert!(lead.args.contains(&"mcp_servers.controlcode.enabled_tools=[\"task_list\"]".into()));
+        assert!(lead.args.contains(&"mcp_servers.ags.enabled_tools=[\"task_list\"]".into()));
         assert!(!lead.args.iter().any(|arg| arg.contains("task_handoff")));
         std::fs::write(&path, "invalid").unwrap();
         assert_eq!(agent.launch("worker", None, None, &context).program, "ADE-invalid-task-MCP-config");
@@ -3276,7 +3276,7 @@ mod politica_del_lead {
             "fact_add",
             "facts_read",
         ] {
-            assert!(lead_may_use(&format!("mcp__controlcode__{tool}")), "{tool}");
+            assert!(lead_may_use(&format!("mcp__ags__{tool}")), "{tool}");
         }
     }
 
@@ -3296,7 +3296,7 @@ mod politica_del_lead {
         }
         // Lo que no está en la lista de lectura u orquestación queda afuera por defecto.
         assert!(!lead_may_use("mcp__otro__delete_everything"));
-        assert!(!lead_may_use("mcp__controlcode__browser_click"));
+        assert!(!lead_may_use("mcp__ags__browser_click"));
         assert!(!lead_may_use("KillShell"));
     }
 

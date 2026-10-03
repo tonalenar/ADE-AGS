@@ -28,7 +28,7 @@ fn local(dir: &Path, args: &[&str]) -> Result<String, String> {
 }
 
 /// Commitear sin depender de que el usuario tenga `user.name` configurado en esta máquina.
-const IDENTITY: [&str; 4] = ["-c", "user.name=Control Code", "-c", "user.email=sync@controlcode.local"];
+const IDENTITY: [&str; 4] = ["-c", "user.name=ADE AGS", "-c", "user.email=sync@ags.local"];
 
 pub(super) fn clone(parent: &Path, url: &str, env: &[(String, String)]) -> Result<(), String> {
     std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;

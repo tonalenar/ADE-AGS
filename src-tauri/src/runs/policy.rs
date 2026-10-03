@@ -39,7 +39,7 @@ pub const LEAD_BLOCKED_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "Noteboo
 
 /// Si un lead puede usar esta herramienta.
 ///
-/// Permitido: leer y buscar, y las del servidor de Control Code que orquestan o solo miran
+/// Permitido: leer y buscar, y las del servidor de ADE AGS que orquestan o solo miran
 /// (roster, plan, tareas, hechos, esperar resultados; navegador y git de solo lectura).
 /// Todo lo demás —escribir, editar, shell, git que escribe, subagentes, herramientas que
 /// no se conocen— no: ante la duda, no toca nada.

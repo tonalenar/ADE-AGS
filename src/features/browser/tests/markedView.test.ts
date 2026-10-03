@@ -72,18 +72,18 @@ describe("formatMarked", () => {
   it("los refs se accionan con el nombre de tool que tenga ESE agente", () => {
     const entry = { live: true as const, element: described() };
     expect(formatMarked([entry], [], "", display)).toContain("(browser_click u1, browser_type u2 …)");
-    expect(formatMarked([entry], [], "", display, "controlcode_"))
-      .toContain("(controlcode_browser_click u1, controlcode_browser_type u2 …)");
+    expect(formatMarked([entry], [], "", display, "ags_"))
+      .toContain("(ags_browser_click u1, ags_browser_type u2 …)");
   });
 
   /// Una captura es lo único que deja "ver" la página: va la ruta sola, para abrirla con
   /// las herramientas de archivos.
   it("las capturas van como archivo que el agente puede abrir", () => {
-    const text = formatMarked([], [{ id: "s-aaaa1111", path: "/home/u/.controlcode/captures/a.png", url: "http://127.0.0.1:40111/perfil" }], "", display);
+    const text = formatMarked([], [{ id: "s-aaaa1111", path: "/home/u/.ags/captures/a.png", url: "http://127.0.0.1:40111/perfil" }], "", display);
     expect(text).toContain("Screenshots the user annotated");
     // Con su id: es lo que el agente puede pasarle a browser_marked sin equivocarse.
     expect(text).toContain("[s-aaaa1111]");
-    expect(text).toContain("/home/u/.controlcode/captures/a.png");
+    expect(text).toContain("/home/u/.ags/captures/a.png");
     expect(text).toContain("http://localhost:5173/perfil");
   });
 });
@@ -106,10 +106,10 @@ describe("composePointer", () => {
   /// OpenCode registra las tools con el nombre del servidor de prefijo. Si el aviso lo
   /// manda a `browser_marked`, lo manda a una tool que en su lista no existe.
   it("nombra la tool como la tiene que escribir ESE agente", () => {
-    const opencode = composePointer({ picks: 1, captures: 0 }, "http://localhost:5173/", "", [], "m-3f9a71c4", "controlcode_");
-    expect(opencode).toContain("Read it with controlcode_browser_marked id=m-3f9a71c4");
-    const sinLote = composePointer({ picks: 1, captures: 0 }, "http://localhost:5173/", "", [], undefined, "controlcode_");
-    expect(sinLote).toContain("Read it with controlcode_browser_marked:");
+    const opencode = composePointer({ picks: 1, captures: 0 }, "http://localhost:5173/", "", [], "m-3f9a71c4", "ags_");
+    expect(opencode).toContain("Read it with ags_browser_marked id=m-3f9a71c4");
+    const sinLote = composePointer({ picks: 1, captures: 0 }, "http://localhost:5173/", "", [], undefined, "ags_");
+    expect(sinLote).toContain("Read it with ags_browser_marked:");
   });
 
   it("sin lote no promete un lote, y un solo elemento va en singular", () => {
@@ -126,7 +126,7 @@ describe("composePointer", () => {
       { picks: 0, captures: 2 },
       "http://localhost:5173/",
       "mirá esto",
-      ["/tmp/controlcode/capturas/a.png", "/tmp/controlcode/capturas/b.png"],
+      ["/tmp/ade-ags/capturas/a.png", "/tmp/ade-ags/capturas/b.png"],
       "m-0b12e4aa"
     );
     const lines = text.split("\n");
@@ -134,8 +134,8 @@ describe("composePointer", () => {
     expect(lines[0]).toContain("I left 2 annotated screenshots of http://localhost:5173/.");
     expect(lines.slice(1)).toEqual([
       "",
-      "/tmp/controlcode/capturas/a.png",
-      "/tmp/controlcode/capturas/b.png",
+      "/tmp/ade-ags/capturas/a.png",
+      "/tmp/ade-ags/capturas/b.png",
       "",
       "Note from the user: mirá esto",
     ]);

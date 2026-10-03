@@ -10,8 +10,8 @@ const entry = (id: string, mcp: AgentRegistryEntry["mcp"]): AgentRegistryEntry =
 
 describe("appendBrowserMcp", () => {
   const mcp: TabMcp = {
-    configPath: "/home/u/.controlcode/mcp/tab-abc.json",
-    allowedTools: ["mcp__controlcode__browser_click", "mcp__controlcode__browser_snapshot"],
+    configPath: "/home/u/.ags/mcp/tab-abc.json",
+    allowedTools: ["mcp__ags__browser_click", "mcp__ags__browser_snapshot"],
     env: {},
     toolPrefix: "",
   };
@@ -20,8 +20,8 @@ describe("appendBrowserMcp", () => {
   /// suelto después (un prompt, un id de sesión) terminaría adentro de la lista.
   it("agrega el config y las tools al final del comando", () => {
     expect(appendBrowserMcp("claude --resume abc", mcp)).toBe(
-      'claude --resume abc --mcp-config "/home/u/.controlcode/mcp/tab-abc.json" '
-      + '--allowedTools "mcp__controlcode__browser_click,mcp__controlcode__browser_snapshot"'
+      'claude --resume abc --mcp-config "/home/u/.ags/mcp/tab-abc.json" '
+      + '--allowedTools "mcp__ags__browser_click,mcp__ags__browser_snapshot"'
     );
   });
 
@@ -34,8 +34,8 @@ describe("appendBrowserMcp", () => {
   /// viejo, y compararlo con el de ahora no lo reconocía: el agente arrancaba con DOS
   /// servidores, uno apuntando a un archivo que el barrido del arranque ya borró.
   it("reemplaza el config de una versión anterior en vez de sumarle otro", () => {
-    const viejo = 'claude --resume abc --mcp-config "/home/u/.controlcode/mcp/tab-9f2c1aa0.json" '
-      + '--allowedTools "mcp__controlcode__browser_click"';
+    const viejo = 'claude --resume abc --mcp-config "/home/u/.ags/mcp/tab-9f2c1aa0.json" '
+      + '--allowedTools "mcp__ags__browser_click"';
     const nuevo = appendBrowserMcp(viejo, mcp);
     expect(nuevo.match(/--mcp-config/g)).toHaveLength(1);
     expect(nuevo.match(/--allowedTools/g)).toHaveLength(1);
@@ -76,10 +76,10 @@ describe("qué TUI recibe el navegador y cómo nombra sus tools", () => {
   });
 
   /// OpenCode registra las tools de un servidor MCP con el nombre del servidor de prefijo.
-  /// Decirle "usá browser_marked" cuando lo que tiene se llama `controlcode_browser_marked`
+  /// Decirle "usá browser_marked" cuando lo que tiene se llama `ags_browser_marked`
   /// es mandarlo a una tool que no existe.
   it("OpenCode las nombra con el servidor delante; Claude Code no", () => {
-    expect(browserToolPrefix("opencode")).toBe("controlcode_");
+    expect(browserToolPrefix("opencode")).toBe("ags_");
     expect(browserToolPrefix("claude-code")).toBe("");
     expect(browserToolPrefix("codex")).toBe("");
     expect(browserToolPrefix(null)).toBe("");

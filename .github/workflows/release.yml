@@ -166,7 +166,7 @@ jobs:
           CC_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
 
       # En macOS el actualizador usa el `.app` comprimido, que el bundler llama igual en las
-      # dos arquitecturas (`controlcode.app.tar.gz`): al juntarlos en el release chocarían.
+      # dos arquitecturas (`ade-ags.app.tar.gz`): al juntarlos en el release chocarían.
       # Se les pone la versión y la arquitectura, como a los demás instaladores.
       - name: Nombrar el paquete del actualizador de macOS
         if: runner.os == 'macOS'
@@ -184,7 +184,7 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: controlcode-${{ matrix.name }}
+          name: ade-ags-${{ matrix.name }}
           # Que una celda suba un artefacto vacío es peor que fallar: el release quedaría
           # incompleto sin que nada se ponga en rojo.
           if-no-files-found: error
@@ -250,8 +250,8 @@ jobs:
           fi
 
           # Última red, por si algún día vuelve a colarse algo. Los instaladores de Tauri
-          # llevan siempre la versión en el nombre (controlcode_1.6.0_amd64.deb,
-          # controlcode-1.6.0-1.x86_64.rpm…), así que uno que no la lleve es un resto de otra
+          # llevan siempre la versión en el nombre (ags_1.6.0_amd64.deb,
+          # ade-ags-1.6.0-1.x86_64.rpm…), así que uno que no la lleve es un resto de otra
           # versión — y es preferible un release en rojo a uno que ofrece la versión vieja
           # como si fuera la nueva. Se compara la parte numérica: el sufijo de una
           # prerelease (-beta.1) no todos los empaquetadores lo escriben igual.

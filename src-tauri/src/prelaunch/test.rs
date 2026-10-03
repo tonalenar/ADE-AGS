@@ -39,7 +39,7 @@ fn un_preset_borrado_hace_fallar_el_lanzamiento() {
     assert!(err.contains("ya no existe"), "mensaje poco claro: {err}");
 }
 
-/// El formato en disco es parte del contrato con el frontend y con `ccode`: si deja
+/// El formato en disco es parte del contrato con el frontend y con `ags`: si deja
 /// de ser plano, las cadenas ya guardadas dejan de leerse.
 #[test]
 fn el_json_guardado_es_plano() {

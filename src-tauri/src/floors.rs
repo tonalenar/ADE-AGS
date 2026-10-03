@@ -58,7 +58,7 @@ lazy_static::lazy_static! {
 const MAX_NAME: usize = 40;
 
 fn data_dir() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir().ok_or("No se encontró la carpeta del usuario")?.join(".controlcode");
+    let dir = dirs::home_dir().ok_or("No se encontró la carpeta del usuario")?.join(".ags");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -148,7 +148,7 @@ pub fn find<'a>(floors: &'a [Floor], ground: &str, wanted: &str) -> Result<&'a F
         .ok_or_else(|| {
             let names: Vec<_> = floors_of(floors, ground).into_iter().map(|f| f.name).collect();
             if names.is_empty() {
-                format!("Não existe o andar '{wanted}': este projeto ainda não tem andares. Crie um com `ccode floor create`.")
+                format!("Não existe o andar '{wanted}': este projeto ainda não tem andares. Crie um com `ags floor create`.")
             } else {
                 format!("Não existe o andar '{wanted}'. Andares: {}.", names.join(", "))
             }

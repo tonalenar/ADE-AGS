@@ -188,7 +188,7 @@ fn cada_tui_dice_como_recibe_el_mcp_y_como_nombra_sus_tools() {
     // Una salida a la terminal no es un agente: no hay a quién enchufarle nada.
     assert_eq!(style("bash"), McpStyle::None);
 
-    assert_eq!(tool_prefix(McpStyle::OpencodeConfig), "controlcode_");
+    assert_eq!(tool_prefix(McpStyle::OpencodeConfig), "ags_");
     assert_eq!(tool_prefix(McpStyle::ClaudeFlags), "");
     assert_eq!(tool_prefix(McpStyle::None), "");
 

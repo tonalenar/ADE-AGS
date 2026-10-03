@@ -75,7 +75,7 @@ pub fn preview_save_capture(request: Request<'_>) -> Result<String, String> {
 }
 
 /// La cabecera con la que viaja de quién es la captura.
-const TAG_HEADER: &str = "x-controlcode-tag";
+const TAG_HEADER: &str = "x-ags-tag";
 
 /// Lo que puede ir en un nombre de archivo, y nada más: lo manda el frontend, pero termina
 /// en una ruta del disco y no se confía en él.
@@ -92,7 +92,7 @@ fn slug(raw: &str) -> String {
 }
 
 fn capture_dir() -> PathBuf {
-    std::env::temp_dir().join("controlcode").join("capturas")
+    std::env::temp_dir().join("ade-ags").join("capturas")
 }
 
 fn save_capture(dir: &Path, png: &[u8], tag: Option<&str>, now: SystemTime) -> Result<PathBuf, String> {

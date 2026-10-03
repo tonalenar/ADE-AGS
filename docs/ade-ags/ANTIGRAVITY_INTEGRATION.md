@@ -15,7 +15,7 @@ Task workspace/worktree is added using `--add-dir` and identified in the prompt.
 The native OS keyring continues to supply the system login. ADE does not read,
 copy or store OAuth credentials.
 
-The MCP server has a unique name for each execution. Its `ccode mcp --task <id>`
+The MCP server has a unique name for each execution. Its `ags mcp --task <id>`
 arguments bind every request to the Task; Run authorization remains enforced by
 the ADE backend. `disabledTools` hides every ADE tool outside the Task's allowed
 list. Only the allowed tools receive native `mcp(server/tool)` permission grants.

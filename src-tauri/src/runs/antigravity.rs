@@ -38,7 +38,7 @@ impl TaskProfile {
             return Err("Antigravity task workspace must be an existing absolute directory".into());
         }
         let tools: Vec<&str> = allowed.iter().map(|name| {
-            let bare = name.strip_prefix("mcp__controlcode__")
+            let bare = name.strip_prefix("mcp__ags__")
                 .filter(|name| crate::ipc::mcp::tool_names().contains(name))
                 .ok_or_else(|| format!("Invalid ADE MCP tool: {name}"))?;
             if read_only && !super::policy::lead_may_use(name) {
@@ -51,7 +51,7 @@ impl TaskProfile {
         if let Some(path) = mcp_config {
             let raw = std::fs::read(path).map_err(|e| format!("Antigravity task MCP config: {e}"))?;
             let config: Value = serde_json::from_slice(&raw).map_err(|e| format!("Antigravity task MCP config: {e}"))?;
-            let server = config.pointer("/mcpServers/controlcode")
+            let server = config.pointer("/mcpServers/ags")
                 .ok_or("Antigravity task MCP server is missing")?;
             let command = server.get("command").and_then(Value::as_str)
                 .filter(|s| !s.is_empty()).ok_or("Antigravity task MCP command is missing")?;
@@ -246,8 +246,8 @@ mod tests {
             let root = std::env::temp_dir().join(format!("ade-antigravity-test-{}", uuid::Uuid::new_v4()));
             std::fs::create_dir(&root).unwrap();
             let config = root.join("task.json");
-            std::fs::write(&config, json!({"mcpServers": {"controlcode": {
-                "command": "C:\\Program Files\\ADE\\ccode.exe", "args": ["mcp", "--task", task],
+            std::fs::write(&config, json!({"mcpServers": {"ags": {
+                "command": "C:\\Program Files\\ADE\\ags.exe", "args": ["mcp", "--task", task],
             }}}).to_string()).unwrap();
             Self { root, config }
         }
@@ -257,7 +257,7 @@ mod tests {
         fn drop(&mut self) { let _ = std::fs::remove_dir_all(&self.root); }
     }
 
-    fn tool(name: &str) -> String { format!("mcp__controlcode__{name}") }
+    fn tool(name: &str) -> String { format!("mcp__ags__{name}") }
     fn read(path: impl AsRef<Path>) -> Value {
         serde_json::from_slice(&std::fs::read(path).unwrap()).unwrap()
     }
@@ -279,7 +279,7 @@ mod tests {
             let servers = config["mcpServers"].as_object().unwrap();
             assert_eq!(servers.len(), 1);
             let server = &servers[&profile.server_name];
-            assert_eq!(server["command"], "C:\\Program Files\\ADE\\ccode.exe");
+            assert_eq!(server["command"], "C:\\Program Files\\ADE\\ags.exe");
             assert_eq!(server["args"], json!(["mcp", "--task", task]));
             assert_eq!(server["cwd"], a.cwd());
             assert!(!server["disabledTools"].as_array().unwrap().contains(&json!(expected)));
@@ -315,7 +315,7 @@ mod tests {
         }
         std::fs::write(&f.config, "invalid json").unwrap();
         assert!(TaskProfile::prepare(Some(&f.config), &[], false, f.cwd()).is_err());
-        std::fs::write(&f.config, json!({"mcpServers":{"controlcode":{"command":"ccode", "args":["mcp"]}}}).to_string()).unwrap();
+        std::fs::write(&f.config, json!({"mcpServers":{"ags":{"command":"ags", "args":["mcp"]}}}).to_string()).unwrap();
         assert!(TaskProfile::prepare(Some(&f.config), &[], false, f.cwd()).is_err());
         assert!(TaskProfile::prepare(None, &[], false, "relative/path").is_err());
     }

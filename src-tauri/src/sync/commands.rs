@@ -134,7 +134,7 @@ pub async fn sync_setup(app: AppHandle, account_id: String, name: String) -> Res
         }
         Some(existing) => existing,
         None => api
-            .create_private_repo(&name, "Control Code sync: skills and settings")
+            .create_private_repo(&name, "ADE AGS sync: skills and settings")
             .await
             .map_err(|e| e.to_string())?,
     };

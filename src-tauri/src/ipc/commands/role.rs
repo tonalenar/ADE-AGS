@@ -1,4 +1,4 @@
-//! Papéis do canvas: `ccode roles | role show|create|edit`.
+//! Papéis do canvas: `ags roles | role show|create|edit`.
 //!
 //! Listar e ler está aberto a qualquer agente. Criar e editar é só do orquestrador: um
 //! papel é uma instrução que vai para todo agente recrutado depois, então não é algo que

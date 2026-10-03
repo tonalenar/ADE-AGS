@@ -1,7 +1,7 @@
-//! Pools de cuentas: `ccode pools | pool create|delete`. Ver `crate::accounts::pools`.
+//! Pools de cuentas: `ags pools | pool create|delete`. Ver `crate::accounts::pools`.
 //!
 //! Un pool agrupa cuentas de una misma TUI y reparte entre ellas por una estrategia; se pide
-//! con `pool:<nombre>` donde iría una cuenta (`ccode tab create --agent claude-code --account
+//! con `pool:<nombre>` donde iría una cuenta (`ags tab create --agent claude-code --account
 //! pool:Trabajo`, el `account` de una tarea de un plan o de un miembro de un Squad).
 //!
 //! No guarda ningún secreto: solo nombra cuentas que ya existen.

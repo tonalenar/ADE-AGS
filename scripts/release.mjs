@@ -12,7 +12,7 @@
  *
  * La versión vive en cuatro lugares (package.json, tauri.conf.json, Cargo.toml y el
  * Cargo.lock) y tienen que coincidir: el instalador saca su versión de tauri.conf.json y
- * `ccode --version` del Cargo.toml, así que un olvido produce una app que dice una cosa y
+ * `ags --version` del Cargo.toml, así que un olvido produce una app que dice una cosa y
  * una CLI que dice otra. Es exactamente el error que un guion no comete.
  */
 import { execFileSync } from "node:child_process";
@@ -86,8 +86,8 @@ console.log(`\n▶ ${tag}\n`);
 bump("package.json", /("version":\s*)"[^"]+"/, `$1"${version}"`);
 bump("src-tauri/tauri.conf.json", /("version":\s*)"[^"]+"/, `$1"${version}"`);
 // Solo el `[package]` de arriba de todo, no la versión de alguna dependencia: se ancla al
-// `name = "controlcode"` que lo precede.
-bump("src-tauri/Cargo.toml", /(name = "controlcode"\s*\nversion = )"[^"]+"/, `$1"${version}"`);
+// `name = "ade-ags"` que lo precede.
+bump("src-tauri/Cargo.toml", /(name = "ade-ags"\s*\nversion = )"[^"]+"/, `$1"${version}"`);
 
 // El lock se regenera solo: escribirlo a mano es donde se desincroniza.
 if (cambios) {

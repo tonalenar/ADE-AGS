@@ -295,7 +295,7 @@ pub async fn mission_start(app: AppHandle, mission_id: String) -> Result<Mission
 }
 
 /// Arranca (o reintenta) una misión en el hilo actual. Bloquea: el ruteo puede sondear el
-/// roster. Lo usan la pantalla y la CLI (`ccode mission start|run`).
+/// roster. Lo usan la pantalla y la CLI (`ags mission start|run`).
 pub(crate) fn start_now(app: &AppHandle, mission_id: &str) -> Result<Mission, String> {
     let db = db_of(app)?;
     let result = start(
@@ -354,7 +354,7 @@ pub async fn mission_task_diff(app: AppHandle, task_id: String) -> Result<String
 #[tauri::command]
 pub async fn mission_accept_task(app: AppHandle, mission_id: String, task_id: String) -> Result<review::MergeOutcome, String> {
     let db = db_of(&app)?;
-    let base = dirs::home_dir().ok_or("no se pudo resolver el home")?.join(".controlcode").join("worktrees");
+    let base = dirs::home_dir().ok_or("no se pudo resolver el home")?.join(".ags").join("worktrees");
     let id = mission_id.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || review::accept(&db, &base, &id, &task_id))
         .await

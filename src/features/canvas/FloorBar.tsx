@@ -54,7 +54,7 @@ export function FloorBar({ inline = false }: { inline?: boolean }) {
   }, [armed]);
 
   // La lista se vuelve a pedir al cambiar de carpeta y cuando algo crea un piso (un agente
-  // con `ccode floor create`, otra ventana).
+  // con `ags floor create`, otra ventana).
   useEffect(() => {
     if (!cwd) return;
     let alive = true;

@@ -13,8 +13,8 @@ pub type DbConnection = Arc<Mutex<Connection>>;
 
 fn db_path() -> PathBuf {
     let home = dirs::home_dir().expect("Cannot determine home directory");
-    let dir = home.join(".controlcode");
-    std::fs::create_dir_all(&dir).expect("Cannot create ~/.controlcode");
+    let dir = home.join(".ags");
+    std::fs::create_dir_all(&dir).expect("Cannot create ~/.ags");
     dir.join("data.db")
 }
 

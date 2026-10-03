@@ -113,7 +113,7 @@ O lead coordena; não modifica o workspace. A regra é **por `task.role == "lead
 
 Não há parser de shell: sem classificação confiável de "comando só leitura", o lead fica sem Bash.
 
-`policy::lead_may_use` permite as builtins de leitura e, do servidor `controlcode`, as tools de orquestração (`agent_roster`, `run_plan`, `task_add`, `task_status`, `task_result`, `run_await`, `fact_add`, `facts_read`, `task_reroute`, `task_cancel`) e as de leitura. Todo o resto, inclusive MCP desconhecido, é negado.
+`policy::lead_may_use` permite as builtins de leitura e, do servidor `ade-ags`, as tools de orquestração (`agent_roster`, `run_plan`, `task_add`, `task_status`, `task_result`, `run_await`, `fact_add`, `facts_read`, `task_reroute`, `task_cancel`) e as de leitura. Todo o resto, inclusive MCP desconhecido, é negado.
 
 ### Prompt do lead
 
@@ -130,7 +130,7 @@ Não há parser de shell: sem classificação confiável de "comando só leitura
 Uma fonte só: a fila do broker, a mesma da Fleet.
 
 ```text
-agente ─▶ ccode mcp ─▶ broker::resolve ─▶ fila em memória ──cc-task-approvals──▶ useRunsStore.approvals
+agente ─▶ ags mcp ─▶ broker::resolve ─▶ fila em memória ──cc-task-approvals──▶ useRunsStore.approvals
                                                                                   ├─▶ Fleet
                                                                                   └─▶ Missions (filtra pelas tasks do run ativo)
 decisão (Fleet ou Missions) ─▶ run_decide_approval ─▶ broker ─▶ cc-task-approvals ─▶ as duas telas

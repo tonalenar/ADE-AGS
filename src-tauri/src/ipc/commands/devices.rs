@@ -1,4 +1,4 @@
-//! Dispositivos Android del canvas, para los agentes: `ccode device list|create|start|tap|swipe|type|key|launch|shot|tree`.
+//! Dispositivos Android del canvas, para los agentes: `ags device list|create|start|tap|swipe|type|key|launch|shot|tree`.
 //!
 //! Un dispositivo es un portal del canvas de tipo `android` (ver `crate::canvas::Portal`): su
 //! nodo muestra la pantalla de un emulador o un teléfono, y los agentes conectados con él lo
@@ -53,7 +53,7 @@ fn resolve<'a>(list: &'a [Reachable], wanted: &str) -> Result<&'a Reachable, Str
     match matches.as_slice() {
         [one] => Ok(one),
         [] if list.is_empty() => Err(format!(
-            "'{wanted}' não está conectado com você. Você não tem nenhum dispositivo Android: crie um com `ccode device create` ou peça ao usuário para ligar um ao seu terminal."
+            "'{wanted}' não está conectado com você. Você não tem nenhum dispositivo Android: crie um com `ags device create` ou peça ao usuário para ligar um ao seu terminal."
         )),
         [] => Err(format!(
             "'{wanted}' não está conectado com você. Dispositivos conectados: {}",
@@ -86,7 +86,7 @@ pub(crate) fn int(args: &Value, key: &str) -> Result<Option<u32>, String> {
 }
 
 fn need_int(args: &Value, key: &str, action: &str) -> Result<u32, String> {
-    int(args, key)?.ok_or_else(|| format!("`ccode device {action}` precisa de --{key}."))
+    int(args, key)?.ok_or_else(|| format!("`ags device {action}` precisa de --{key}."))
 }
 
 /// Un deslizamiento por dirección: de un lado al otro de la pantalla, por el centro. `up`
@@ -105,7 +105,7 @@ pub(crate) fn swipe_by_direction(dir: &str, w: u32, h: u32) -> Result<(u32, u32,
 
 /// Dónde se guardan las capturas que se le piden a un dispositivo.
 fn shots_dir() -> Result<std::path::PathBuf, String> {
-    let dir = dirs::home_dir().ok_or("Não achei a pasta do usuário.")?.join(".controlcode").join("screens");
+    let dir = dirs::home_dir().ok_or("Não achei a pasta do usuário.")?.join(".ags").join("screens");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }
@@ -175,7 +175,7 @@ pub(super) fn device_action(_app: &AppHandle, args: &Value, action: &str) -> Res
             if let Some(text) = arg_str_opt(args, "text").filter(|t| !t.trim().is_empty()) {
                 let nodes = android::tree(&serial)?;
                 let node = android::find_node(&nodes, &text)
-                    .ok_or_else(|| format!("Não achei '{text}' na tela. Veja os elementos com `ccode device tree`."))?;
+                    .ok_or_else(|| format!("Não achei '{text}' na tela. Veja os elementos com `ags device tree`."))?;
                 let (x, y) = node.center();
                 android::tap(&serial, x.max(0) as u32, y.max(0) as u32)?;
                 return Ok(json!({ "device": who, "tapped": node.label(), "at": [x, y] }));
@@ -233,7 +233,7 @@ fn start(target: &Reachable, args: &Value) -> Result<Value, String> {
     let avd = arg_str_opt(args, "avd")
         .filter(|a| !a.trim().is_empty())
         .or_else(|| target.portal.avd.clone())
-        .ok_or("Esse dispositivo não tem um emulador escolhido: use `--avd <nome>` (veja `ccode devices`).")?;
+        .ok_or("Esse dispositivo não tem um emulador escolhido: use `--avd <nome>` (veja `ags devices`).")?;
     let before: Vec<String> = android::devices()?.into_iter().filter(|d| d.state == "device").map(|d| d.serial).collect();
     android::start_avd(&avd)?;
 
@@ -250,7 +250,7 @@ fn start(target: &Reachable, args: &Value) -> Result<Value, String> {
         "device": describe(target),
         "started": avd,
         "ready": false,
-        "note": "O emulador foi iniciado mas ainda não terminou de ligar; tente `ccode devices` de novo em instantes."
+        "note": "O emulador foi iniciado mas ainda não terminou de ligar; tente `ags devices` de novo em instantes."
     }))
 }
 
@@ -273,7 +273,7 @@ mod test {
     fn uno_que_no_esta_conectado_lista_los_que_si_y_sin_ninguno_explica_como_crear() {
         let err = resolve(&[dev("portal-1", "Pixel 8")], "Otro").unwrap_err();
         assert!(err.contains("Pixel 8"), "{err}");
-        assert!(resolve(&[], "x").unwrap_err().contains("ccode device create"));
+        assert!(resolve(&[], "x").unwrap_err().contains("ags device create"));
     }
 
     #[test]

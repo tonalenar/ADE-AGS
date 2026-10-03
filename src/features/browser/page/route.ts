@@ -13,14 +13,14 @@
  */
 
 /** Tiene que coincidir con `FWD_PATH` en `src-tauri/src/preview/cors.rs`. */
-export const FWD_PATH = "/__controlcode__/fwd";
+export const FWD_PATH = "/__ags__/fwd";
 /** El modo de credenciales del pedido original. Coincide con `CRED_HEADER`. */
-export const CRED_HEADER = "x-controlcode-cred";
+export const CRED_HEADER = "x-ags-cred";
 /** Los nombres de las cabeceras que puso la página. Coincide con `HEADERS_HEADER`: lo que
  *  el motor agregue por su cuenta (la caché desactivada) no pide preflight. */
-export const HEADERS_HEADER = "x-controlcode-headers";
+export const HEADERS_HEADER = "x-ags-headers";
 /** En una respuesta que CORS no dejó pasar, el motivo. Coincide con `CORS_HEADER`. */
-export const CORS_HEADER = "x-controlcode-cors";
+export const CORS_HEADER = "x-ags-cors";
 
 export interface Routed {
   /** Adónde se manda. */

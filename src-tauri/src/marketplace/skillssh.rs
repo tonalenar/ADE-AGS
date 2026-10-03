@@ -67,7 +67,7 @@ const HTTP_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// El identificador de Claude Code dentro de la CLI de skills — define en qué carpeta deja
 /// la skill instalada (`.claude/skills/`). No es el mismo string que el `agent_id` de
-/// ControlCode; se fija acá porque lo único que importa es dónde aterriza el archivo, y de
+/// ADE AGS; se fija acá porque lo único que importa es dónde aterriza el archivo, y de
 /// esa carpeta lo levantamos nosotros.
 const SKILLS_AGENT: &str = "claude-code";
 
@@ -183,7 +183,7 @@ pub(super) fn strip_ansi(raw: &str) -> String {
 
 fn api_client() -> Result<reqwest::Client, String> {
     reqwest::Client::builder()
-        .user_agent("ControlCode-App")
+        .user_agent("ADE-AGS-App")
         .timeout(HTTP_TIMEOUT)
         .build()
         .map_err(|e| e.to_string())
@@ -586,7 +586,7 @@ pub(super) async fn install_from_skillssh(
     let target = add_target(&entry.folder_path)
         .ok_or_else(|| format!("Identificador de skill inesperado: {}", entry.folder_path))?;
 
-    let staging = std::env::temp_dir().join(format!("controlcode-skillssh-{}", Uuid::new_v4()));
+    let staging = std::env::temp_dir().join(format!("ade-ags-skillssh-{}", Uuid::new_v4()));
     let staged = match download_into(&staging.join("api"), &entry.folder_path).await {
         Ok(dir) => Ok(dir),
         Err(api_error) => {

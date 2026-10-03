@@ -76,7 +76,7 @@ pub(crate) fn match_account_id(
     let names: Vec<&str> = of_agent.iter().map(|(_, _, n)| n.as_str()).collect();
     if names.is_empty() {
         Err(format!(
-            "'{agent_id}' no tiene ninguna cuenta creada. Se crean desde Configuración › Cuentas; 'ccode accounts' las lista"
+            "'{agent_id}' no tiene ninguna cuenta creada. Se crean desde Configuración › Cuentas; 'ags accounts' las lista"
         ))
     } else {
         Err(format!(

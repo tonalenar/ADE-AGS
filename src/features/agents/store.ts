@@ -3,7 +3,7 @@ import { create } from "zustand";
 import * as ipc from "./ipc";
 import type { CustomAgent, CustomAgentDraft } from "./types";
 
-const LEGACY_KEY = "controlcode-settings";
+const LEGACY_KEY = "ade-ags-settings";
 
 interface AgentsState {
   customAgents: CustomAgent[];

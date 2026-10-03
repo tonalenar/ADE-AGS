@@ -3,7 +3,7 @@ import { create } from "zustand";
 /**
  * ¿Hay un agente trabajando ahora? Se deduce de la terminal: una TUI de agente (Claude
  * Code, Codex…) anima un indicador y va escribiendo mientras piensa o ejecuta, y se calla
- * cuando termina su turno. Es la misma señal con la que `ccode peer ask` decide que el
+ * cuando termina su turno. Es la misma señal con la que `ags peer ask` decide que el
  * otro acabó de contestar.
  *
  * Lo que NO cuenta:

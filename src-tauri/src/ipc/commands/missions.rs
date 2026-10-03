@@ -1,6 +1,6 @@
-//! `ccode mission …` y `ccode approval …`: correr misiones sin la interfaz.
+//! `ags mission …` y `ags approval …`: correr misiones sin la interfaz.
 //!
-//! Es lo que hace posible el modo headless (`controlcode --headless`): un script o un
+//! Es lo que hace posible el modo headless (`ade-ags --headless`): un script o un
 //! pipeline de CI crea la misión, la arranca, espera a que termine y sale con código 1 si
 //! falló. Las aprobaciones que en la pantalla son una tarjeta se listan y se contestan
 //! acá; sin nadie que las conteste, un pedido vence y se deniega (ver `runs::broker`), así
@@ -140,7 +140,7 @@ pub(super) fn mission_review(app: &AppHandle, args: &Value) -> Result<Value, Str
 pub(super) fn mission_accept(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
     let task = arg_str(args, "task")?;
-    let base = dirs::home_dir().ok_or("no se pudo resolver el home")?.join(".controlcode").join("worktrees");
+    let base = dirs::home_dir().ok_or("no se pudo resolver el home")?.join(".ags").join("worktrees");
     let outcome = crate::missions::review::accept(&db(app)?, &base, &id, &task)?;
     crate::missions::notify(app, &id);
     Ok(json!(outcome))
@@ -157,7 +157,7 @@ pub(super) fn approval_list(_app: &AppHandle) -> Result<Value, String> {
     Ok(json!(crate::runs::pending_approvals()))
 }
 
-/// `ccode approval decide <id> --allow|--deny [--remember]`.
+/// `ags approval decide <id> --allow|--deny [--remember]`.
 pub(super) fn approval_decide(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "approval")?;
     let allow = match (args.get("allow").is_some(), args.get("deny").is_some()) {

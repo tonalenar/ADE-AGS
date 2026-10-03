@@ -3,7 +3,7 @@
  *
  * Va en inglés, como todo lo que lee el modelo. Lleva el issue entero —descripción e hilo—
  * y no solo el enlace: el agente puede no tener cómo abrirlo (un repo privado, sin las
- * herramientas de git de Control Code), y con el texto adelante no gasta un paso en ir a
+ * herramientas de git de ADE AGS), y con el texto adelante no gasta un paso en ir a
  * buscarlo.
  */
 import type { ForgeItemDetail } from "./types";
@@ -66,7 +66,7 @@ export function itemPrompt(item: ForgeItemDetail, pr: boolean): string {
         "- Read the relevant code first, and ask me if the issue is ambiguous before making large changes.",
         "- Implement the fix or feature, with tests where the project has them.",
       ]),
-    `- If you have Control Code's git tools (git_${pr ? "pr" : "issue"}_view${pr ? ", git_pr_files, git_checks" : ""}), use them to read the latest state of this ${kind}.`,
+    `- If you have ADE AGS's git tools (git_${pr ? "pr" : "issue"}_view${pr ? ", git_pr_files, git_checks" : ""}), use them to read the latest state of this ${kind}.`,
     "- Don't push, comment or open pull requests unless I ask you to.",
   );
 

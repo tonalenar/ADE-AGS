@@ -59,7 +59,7 @@ export function toDevicePoint(
 /**
  * La pantalla de un Android (emulador o teléfono por USB) como nodo del canvas. Un clic es un
  * toque, arrastrar es deslizar; abajo, los botones de sistema y un campo para escribir.
- * Los agentes conectados lo manejan con `ccode device …`.
+ * Los agentes conectados lo manejan con `ags device …`.
  *
  * Todo va por `adb` desde el backend (ver `android.rs`): acá solo se pide un cuadro cada tanto
  * y se mandan los gestos.

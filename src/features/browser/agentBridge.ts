@@ -1,5 +1,5 @@
 /**
- * Lo que un agente le pide al navegador de las tabs, por el MCP (`ccode mcp`) y el puente
+ * Lo que un agente le pide al navegador de las tabs, por el MCP (`ags mcp`) y el puente
  * de la CLI (`browser.run` en `cliBridge.ts`).
  *
  * Cada tab de navegador montada se registra acá con un `BrowserHost`: lo mínimo para que
@@ -395,7 +395,7 @@ async function execute(
       const loaded = await host.waitForLoad(mark, 20_000);
       const head = loaded
         ? `Loaded ${host.currentUrl()}`
-        : `The page did not report finishing the load within 20 s (${host.currentUrl()}). It may still be loading, or it may not be going through the Control Code proxy.`;
+        : `The page did not report finishing the load within 20 s (${host.currentUrl()}). It may still be loading, or it may not be going through the ADE AGS proxy.`;
       return head + await sideEffects(host, firstId, startedAt);
     }
     case "history": {
@@ -462,7 +462,7 @@ async function execute(
       // que nadie mira): si estaba cerrado no hay nada que leer, y se prende desde ahora.
       if (!host.debugOpen()) {
         host.openNetworkDebug();
-        return "Network recording was off: ControlCode only records network traffic while the browser's "
+        return "Network recording was off: ADE AGS only records network traffic while the browser's "
           + "debug panel is open, and it was closed. It is open now and recording from this point on. "
           + "Reload the page or repeat the action you care about, then call this tool again.";
       }
@@ -682,7 +682,7 @@ export async function runPortalRequest(
   // otra vista), se espera a que aparezca.
   const host = await waitForHost(portalId, 15_000);
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
-    throw new Error("El portal no tiene ninguna página cargada. Empiece con `ccode portal navigate <portal> <url>`.");
+    throw new Error("El portal no tiene ninguna página cargada. Empiece con `ags portal navigate <portal> <url>`.");
   }
   return execute(cwd, host, request, false, owner);
 }

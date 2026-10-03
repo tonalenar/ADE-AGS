@@ -50,7 +50,7 @@ fn number_prop() -> Value {
 pub(crate) const GIT_TOOLS: &[GitTool] = &[
     GitTool {
         name: "git_account",
-        description: "Which git host, repository and Control Code account this project uses (no token is ever shown). Call it first when a git_* tool fails, to see whether the user still has to sign in.",
+        description: "Which git host, repository and ADE AGS account this project uses (no token is ever shown). Call it first when a git_* tool fails, to see whether the user still has to sign in.",
         properties: none,
         required: &[],
         read_only: true,
@@ -113,21 +113,21 @@ pub(crate) const GIT_TOOLS: &[GitTool] = &[
     },
     GitTool {
         name: "git_fetch",
-        description: "git fetch --all --prune with the user's Control Code git account. Use it instead of running `git fetch` in the shell, which has no credentials for private repos.",
+        description: "git fetch --all --prune with the user's ADE AGS git account. Use it instead of running `git fetch` in the shell, which has no credentials for private repos.",
         properties: none,
         required: &[],
         read_only: true,
     },
     GitTool {
         name: "git_pull",
-        description: "git pull on the current branch, authenticated with the user's Control Code git account. Use it instead of `git pull` in the shell.",
+        description: "git pull on the current branch, authenticated with the user's ADE AGS git account. Use it instead of `git pull` in the shell.",
         properties: none,
         required: &[],
         read_only: false,
     },
     GitTool {
         name: "git_push",
-        description: "Push the current branch, authenticated with the user's Control Code git account (publishes it with upstream the first time). Use it instead of `git push` in the shell, which has no credentials. Commit first.",
+        description: "Push the current branch, authenticated with the user's ADE AGS git account (publishes it with upstream the first time). Use it instead of `git push` in the shell, which has no credentials. Commit first.",
         properties: none,
         required: &[],
         read_only: false,
@@ -158,7 +158,7 @@ pub(crate) const GIT_TOOLS: &[GitTool] = &[
     },
     GitTool {
         name: "git_tag",
-        description: "Create a git tag on a commit (default HEAD) and push it to the remote with the user's Control Code account. With `message` it is an annotated tag (what releases use). In repositories whose CI publishes a release when a tag is pushed, this is how a release is made.",
+        description: "Create a git tag on a commit (default HEAD) and push it to the remote with the user's ADE AGS account. With `message` it is an annotated tag (what releases use). In repositories whose CI publishes a release when a tag is pushed, this is how a release is made.",
         properties: || json!({
             "name": { "type": "string", "description": "e.g. v1.7.4" },
             "message": { "type": "string", "description": "Annotated tag message. Omit for a lightweight tag." },
@@ -289,7 +289,7 @@ async fn call(app: &AppHandle, cwd: &str, name: &str, args: &Value) -> Result<St
                     }
                 }
                 None => out.push_str(&format!(
-                    "\nNo Control Code account for {}: pull requests and issues are unavailable, and pushes use whatever git has configured. Ask the user to sign in under Accounts → Git.",
+                    "\nNo ADE AGS account for {}: pull requests and issues are unavailable, and pushes use whatever git has configured. Ask the user to sign in under Accounts → Git.",
                     t.host
                 )),
             }
@@ -539,7 +539,7 @@ async fn call(app: &AppHandle, cwd: &str, name: &str, args: &Value) -> Result<St
     }
 }
 
-/// Lo que recibe la app desde `ccode mcp`: `{cwd|taskId, tool, args}`. Corre en un hilo
+/// Lo que recibe la app desde `ags mcp`: `{cwd|taskId, tool, args}`. Corre en un hilo
 /// del servidor IPC (sin runtime), así que puede esperar la parte async con `block_on`.
 pub(crate) fn run(app: &AppHandle, payload: &Value) -> Result<Value, String> {
     let cwd = cwd_of(app, payload)?;

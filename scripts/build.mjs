@@ -1,12 +1,12 @@
 /**
  * Punto de entrada de los builds. Tres modos:
  *
- *   bun run app:build                     Control Code + CLI, para esta máquina, sin
+ *   bun run app:build                     ADE AGS + CLI, para esta máquina, sin
  *                                         empaquetar. Es el build de todos los días:
  *                                         compila y deja el ejecutable en
  *                                         src-tauri/target/release/.
  *
- *   bun run app:build --release           Todo: la app + la CLI `ccode`, empaquetada en
+ *   bun run app:build --release           Todo: la app + la CLI `ags`, empaquetada en
  *                                         instaladores para cada sistema Y arquitectura
  *                                         que esta máquina pueda producir.
  *
@@ -198,11 +198,11 @@ function planFor(target) {
 }
 
 function buildOnlyTheApp() {
-  console.log("\n▶ Compilando Control Code + CLI para esta máquina (sin empaquetar)\n");
+  console.log("\n▶ Compilando ADE AGS + CLI para esta máquina (sin empaquetar)\n");
   // Headless agents use the bundled CLI for MCP; a stale CLI hides new tools.
   run("bunx", ["tauri", "build", "--no-bundle"], { ...BASE_ENV, CC_CLI_SKIP: "0", CC_CLI_STRICT: "1" });
 
-  const exe = join(root, "src-tauri", "target", "release", process.platform === "win32" ? "controlcode.exe" : "controlcode");
+  const exe = join(root, "src-tauri", "target", "release", process.platform === "win32" ? "ade-ags.exe" : "ade-ags");
   console.log(`\n✔ Listo: ${exe}`);
   console.log("  Para instaladores: bun run app:build --release\n");
 }

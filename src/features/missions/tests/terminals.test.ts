@@ -71,13 +71,13 @@ describe("el equipo de una misión", () => {
     expect(text).toContain("Criar um login");
     expect(text).toContain("- Backend — Backend: API e dados");
     expect(text).toContain("- QA — QA: Testes");
-    expect(text).toContain("ccode peer ask");
-    expect(text).toContain("ccode notify");
+    expect(text).toContain("ags peer ask");
+    expect(text).toContain("ags notify");
   });
 
   it("sin equipo, el orquestador aprende a sumar agentes", () => {
     const text = leadBriefing({ title: "T", objective: "O" }, []);
-    expect(text).toContain("ccode peer recruit");
+    expect(text).toContain("ags peer recruit");
     expect(text).not.toContain("SUA EQUIPE");
   });
 
@@ -87,7 +87,7 @@ describe("el equipo de una misión", () => {
     expect(text).toContain(`dirigida pelo orquestrador "${LEAD_NAME}"`);
     expect(text).toContain("SEU PAPEL: Backend — API e dados");
     expect(text).toContain("Implemente a API.");
-    expect(text).toContain(`ccode peer tell "${LEAD_NAME}"`);
+    expect(text).toContain(`ags peer tell "${LEAD_NAME}"`);
     expect(text).not.toMatch(/\n\n\n/);
   });
 });

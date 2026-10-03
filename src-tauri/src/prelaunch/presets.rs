@@ -6,7 +6,7 @@ use super::steps::PrelaunchPreset;
 use crate::util::now_ts;
 
 /// Nombres vacíos o solo espacios harían un preset imposible de elegir en la UI y de
-/// nombrar desde `ccode --pre-preset`.
+/// nombrar desde `ags --pre-preset`.
 pub fn validate_preset(name: &str, command: &str) -> Result<(), String> {
     if name.trim().is_empty() {
         return Err("El nombre no puede estar vacío".into());

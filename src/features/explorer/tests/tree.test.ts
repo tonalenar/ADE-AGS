@@ -34,7 +34,7 @@ describe("relativeTo", () => {
   it("devuelve null si la ruta cae fuera del root", () => {
     // Un symlink de skill apunta afuera; marcarlo con el estado de un homónimo del
     // proyecto sería peor que no marcarlo.
-    expect(relativeTo("/p", "/home/luis/.controlcode/skills/x")).toBeNull();
+    expect(relativeTo("/p", "/home/luis/.ags/skills/x")).toBeNull();
   });
 
   it("no confunde un hermano con un prefijo", () => {

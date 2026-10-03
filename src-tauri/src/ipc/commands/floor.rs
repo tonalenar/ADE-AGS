@@ -1,4 +1,4 @@
-//! Pisos del canvas: `ccode floors | floor create`.
+//! Pisos del canvas: `ags floors | floor create`.
 //!
 //! Listar está abierto a cualquier agente. Crear es solo del orquestador: un piso hace un
 //! checkout completo del repo en el disco del usuario, y es lo bastante pesado y duradero

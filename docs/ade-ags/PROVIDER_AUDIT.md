@@ -46,7 +46,7 @@ A meta não era zerar `match`. Parser de formato continua com a estratégia dele
 | Onde | Por que não subiu para o trait |
 |---|---|
 | `session/title.rs` ramos `ClaudeProjects`, `GeminiTmp`, `CodexRollouts`, `KimiSessions`, `ProcessQuery` | São parsers. A fase B já os fez account-aware. Mover o algoritmo para o trait reescreve o módulo |
-| `ipc/mcp.rs` ramos `ClaudeFlags` e `OpencodeConfig` | São os dois jeitos reais de entregar o servidor `controlcode`. O nome do servidor não muda |
+| `ipc/mcp.rs` ramos `ClaudeFlags` e `OpencodeConfig` | São os dois jeitos reais de entregar o servidor `ade-ags`. O nome do servidor não muda |
 | `runs/roster.rs` `ModelSource` | Claude é lista fixa, OpenCode é `opencode models`, o resto é `Unknown`. Não há catálogo universal de preço |
 | `HeadlessAgent::parse_line` | O dialeto do stream é o comportamento, e já está isolado por tipo. Um método a mais no `AgentAdapter` só encaminharia |
 
@@ -79,6 +79,6 @@ Unificar os dois num trait só seria a fase E. Exigiria um `AgentDef` que não �
 
 ## O que não é capability
 
-O navegador da app não é uma capability separada. As tools de browser viajam no servidor MCP `controlcode`. Quem tem `mcp: false` (Codex, Gemini, Kimi, bash, custom) abre a tab sem essas tools. Quem tem `mcp: true` é Claude (`ClaudeFlags`) e OpenCode (`OpencodeConfig`).
+O navegador da app não é uma capability separada. As tools de browser viajam no servidor MCP `ade-ags`. Quem tem `mcp: false` (Codex, Gemini, Kimi, bash, custom) abre a tab sem essas tools. Quem tem `mcp: true` é Claude (`ClaudeFlags`) e OpenCode (`OpencodeConfig`).
 
 Presença do binário também não é capability. `headless` significa "a frota tem implementação". `gemini` pode não estar no PATH e o adapter continua registrado. A detecção é que reporta `available: false`.

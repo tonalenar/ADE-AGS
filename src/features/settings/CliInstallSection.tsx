@@ -6,7 +6,7 @@ import { cliInstallStatus, installCli, uninstallCli, type CliInstallStatus } fro
 import { SettingsSection } from "@/features/settings/SettingsSection";
 
 /**
- * Instala la CLI `ccode` en el PATH del usuario.
+ * Instala la CLI `ags` en el PATH del usuario.
  *
  * El binario ya viaja con la app, pero en macOS vive dentro del `.app` (que nunca está en
  * el PATH) y en Windows el caso portable tampoco lo agrega — de ahí este paso explícito,

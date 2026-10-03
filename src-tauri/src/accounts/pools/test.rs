@@ -60,7 +60,7 @@ fn se_encuentra_por_nombre_o_id_y_el_error_lista_los_que_hay() {
     assert_eq!(find(&pools, "id-Trabajo").unwrap().name, "Trabajo");
     let err = find(&pools, "nada").unwrap_err();
     assert!(err.contains("Trabajo") && err.contains("Casa"), "{err}");
-    assert!(find(&[], "x").unwrap_err().contains("ccode pool create"));
+    assert!(find(&[], "x").unwrap_err().contains("ags pool create"));
 }
 
 #[test]

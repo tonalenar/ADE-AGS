@@ -1,12 +1,12 @@
 [package]
-name = "controlcode"
+name = "ade-ags"
 version = "1.8.7"
-description = "Control Code — AI coding agent command center"
+description = "ADE AGS — AI coding agent command center"
 authors = ["luis3132"]
 edition = "2024"
-# El crate emite dos binarios (`controlcode` de la app y `ccode` de la CLI), así que
+# El crate emite dos binarios (`ade-ags` de la app y `ags` de la CLI), así que
 # cargo/tauri necesitan saber cuál es el principal para empaquetar.
-default-run = "controlcode"
+default-run = "ade-ags"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -14,16 +14,22 @@ default-run = "controlcode"
 # The `_lib` suffix may seem redundant but it is necessary
 # to make the lib name unique and wouldn't conflict with the bin name.
 # This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
-name = "controlcode_lib"
+name = "ade_ags_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 # La CLI sale del MISMO crate que la app para poder reusar `ipc::protocol` de la lib —
 # así el formato del mensaje no puede desincronizarse entre las dos puntas.
 #
-# Se llama `ccode` y no `controlcode` porque ese nombre ya lo ocupa el ejecutable de la
+# Se llama `ags` y no `ade-ags` porque ese nombre ya lo ocupa el ejecutable de la
 # app (`productName` en tauri.conf.json), y cargo no puede emitir dos binarios homónimos.
 # Renombrar el de la app tampoco es opción: esta versión de Tauri no expone
 # `mainBinaryName` en su schema de configuración.
+[[bin]]
+name = "ags"
+path = "src/bin/cli.rs"
+
+# Alias del nombre anterior de la CLI (`ccode`): sesiones de agentes abiertas antes del cambio
+# de nombre y scripts del usuario siguen funcionando. Mismo código, otro nombre.
 [[bin]]
 name = "ccode"
 path = "src/bin/cli.rs"

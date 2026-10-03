@@ -52,7 +52,7 @@ pub(super) fn watch_wait(args: &Value) -> Result<Value, String> {
 
     if crate::orchestrator::watch::count() == 0 {
         return Err(
-            "No hay ninguna tab observada. Agregá una con 'ccode watch add --tab <id>'".to_string(),
+            "No hay ninguna tab observada. Agregá una con 'ags watch add --tab <id>'".to_string(),
         );
     }
 

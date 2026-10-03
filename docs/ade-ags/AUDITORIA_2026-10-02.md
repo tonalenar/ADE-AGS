@@ -39,12 +39,12 @@ A base é sólida. Há muitos testes, SQL parametrizado, defesa contra BatBadBut
 
 ### 🔴 Alta
 
-> **Revisão de S1 (mesmo dia, ao implementar as correções):** o modelo **sem shell** não consegue se passar por outra task. A ponte MCP fixa `taskId`/`cwd` a partir do próprio argv, e os argumentos do modelo vão aninhados em `"args"` (`ipc/mcp.rs:821-822`). O vetor de S1 exige um agente com **shell arbitrário**, que, rodando como o mesmo usuário do SO, já consegue ler `~/.ssh`, o keyring do Windows e qualquer outro arquivo de token. Trocar o token por tokens por task não fecha nada contra esse atacante, porque eles também ficariam em arquivos ou linhas de comando legíveis pelo mesmo usuário. A correção real é **isolar os agentes no nível do SO** (usuário separado, AppContainer ou container). Além disso, o `ccode` com `tab.*` é usado de propósito pela skill `controlcode-orchestrator`. Severidade efetiva: **média**, limitada a agentes com shell restrito (por exemplo, regras `Bash(...)` permissivas, ver S6). Os ✔ de S2 e S3 continuam valendo e foram corrigidos na branch `fix/security-critical`.
+> **Revisão de S1 (mesmo dia, ao implementar as correções):** o modelo **sem shell** não consegue se passar por outra task. A ponte MCP fixa `taskId`/`cwd` a partir do próprio argv, e os argumentos do modelo vão aninhados em `"args"` (`ipc/mcp.rs:821-822`). O vetor de S1 exige um agente com **shell arbitrário**, que, rodando como o mesmo usuário do SO, já consegue ler `~/.ssh`, o keyring do Windows e qualquer outro arquivo de token. Trocar o token por tokens por task não fecha nada contra esse atacante, porque eles também ficariam em arquivos ou linhas de comando legíveis pelo mesmo usuário. A correção real é **isolar os agentes no nível do SO** (usuário separado, AppContainer ou container). Além disso, o `ags` com `tab.*` é usado de propósito pela skill `ags-orchestrator`. Severidade efetiva: **média**, limitada a agentes com shell restrito (por exemplo, regras `Bash(...)` permissivas, ver S6). Os ✔ de S2 e S3 continuam valendo e foram corrigidos na branch `fix/security-critical`.
 
 **S1. O token IPC é uma chave-mestra legível por qualquer agente ✔**
 
 Evidência:
-- `ipc/server.rs:25-28` exporta o caminho do handshake (`CONTROLCODE_HANDSHAKE`) para **todos** os processos filhos.
+- `ipc/server.rs:25-28` exporta o caminho do handshake (`AGS_HANDSHAKE`) para **todos** os processos filhos.
 - `server.rs:47` cria um único token por instância.
 - `ipc/commands/dispatch.rs:30-91` dá a quem tem o token todos os comandos:
   - `tab.send` digita em qualquer PTY, inclusive no shell do usuário.
@@ -52,12 +52,12 @@ Evidência:
   - `tab.create` aceita `prelaunch` arbitrário, que vira `cmd /C "a && b"`.
   - `forge.run` faz push, PR e release com o token do forge, **sem passar pelo broker**.
   - `run.approve` pode criar cards de aprovação falsos.
-- A identidade é declarada pelo próprio chamador: o `taskId` e o `cwd` vêm no JSON (`runs/orchestration.rs:43-66`, `memory.rs:1017`). Os IDs de task estão listáveis em `~/.controlcode/runs/` e `~/.controlcode/mcp/`.
+- A identidade é declarada pelo próprio chamador: o `taskId` e o `cwd` vêm no JSON (`runs/orchestration.rs:43-66`, `memory.rs:1017`). Os IDs de task estão listáveis em `~/.ags/runs/` e `~/.ags/mcp/`.
 
 Impacto: um agente com shell que sofra prompt injection lê `ipc.json` e escapa do sandbox do Codex, da política do lead e do broker do Claude. Workers Kimi sempre auto-aprovam (`runs/adapters.rs:618-650`). Com isso o agente executa comandos no host, faz push com o token do usuário e lê ou escreve na memória de outras missões.
 
 Correção:
-- Criar um token de capacidade por task ou tab, entregue só ao processo-ponte `ccode mcp` por pipe ou handle herdado, nunca por arquivo ou variável que o agente consiga ler.
+- Criar um token de capacidade por task ou tab, entregue só ao processo-ponte `ags mcp` por pipe ou handle herdado, nunca por arquivo ou variável que o agente consiga ler.
 - O servidor deriva a identidade do token e ignora `taskId` e `cwd` do payload.
 - Separar os escopos. O CLI humano mantém `tab.*`, `workspace.*` e `skill.*`. O token de agente só alcança as tools MCP permitidas pelo seu papel.
 - `forge.run` com escrita passa por `resolve_permission`.
@@ -140,10 +140,10 @@ Correção: validar `^[A-Za-z0-9_-]{1,128}$` no backend e no frontend, e passar 
 
 Evidência:
 - `updates.rs:18` tem `REPO = "luis3132/ControlCode"`, e o endpoint em `tauri.conf.json` também é do upstream.
-- O identifier `com.luis.controlcode` e a pasta `~/.controlcode` são os mesmos do upstream.
+- O identifier `com.luis.controlcode` e a pasta `~/.ags` são os mesmos do upstream.
 
 Impacto:
-- O usuário da ADE recebe convite para instalar o binário do ControlCode original.
+- O usuário da ADE recebe convite para instalar o binário do ADE AGS original.
 - Se os dois forem instalados, eles compartilham o `data.db`. O schema da ADE é v23 ou mais, então o upstream abriria um banco que não conhece.
 
 Correção: executar o [REBRAND.md](./REBRAND.md), com identifier, pasta de dados e repositório próprios. Até lá, desligar o check de update.
@@ -294,7 +294,7 @@ O modelo atual é um **diretório por conta + uma variável de ambiente**. O log
 | Cofre de credenciais de IA | Falta | Keyring só para git |
 | Provider plugável sem recompilar | Falta | Custom TUI não entra em frota nem em contas |
 | Notificações do SO | Falta | Só o toast interno |
-| Modo headless / CI (`ccode` sem GUI) | Falta | `bin/cli.rs` exige a app rodando |
+| Modo headless / CI (`ags` sem GUI) | Falta | `bin/cli.rs` exige a app rodando |
 | Evals / benchmark de agentes e modelos | Falta | — |
 | CI em PR | Falta | Só release por tag |
 | Rebrand (identifier, dados, updater) | Pendente | Ver S8 |
