@@ -5,7 +5,7 @@ import { boardKey, boardKeyOfTab, missionBoardKey, missionOfKey, missionOfTab, u
 import type { FunctionalRole, Squad } from "@/features/squads/types";
 
 import { entryTab, missionIndex, tabsByMission } from "../groups";
-import { LEAD_NAME, leadBriefing, memberBriefing, teamOf, uniqueNames } from "../terminals";
+import { LEAD_NAME, briefingFor, leadBriefing, memberBriefing, teamOf, uniqueNames } from "../terminals";
 
 const roles: FunctionalRole[] = [
   { id: "backend", label: "Backend", description: "API e dados", instructions: "Implemente a API." },
@@ -119,5 +119,17 @@ describe("a qué misión pertenece una pestaña", () => {
     expect(entryTab(["lead"], ["m1", "lead"])).toBe("lead");
     expect(entryTab(["cerrado"], ["m1", "m2"])).toBe("m1");
     expect(entryTab([], [])).toBeNull();
+  });
+});
+
+describe("briefingFor", () => {
+  const text = "Linha um\n\nOBJETIVO\n- primeiro\n- segundo";
+  it("Claude Code recebe o texto com seus saltos de linha", () => {
+    expect(briefingFor("claude-code", text)).toBe(text);
+  });
+  it("as outras TUIs recebem tudo em uma linha, sem vazias nem marcadores", () => {
+    const flat = briefingFor("codex", text);
+    expect(flat).toBe("Linha um | OBJETIVO | primeiro | segundo");
+    expect(flat).not.toContain("\n");
   });
 });

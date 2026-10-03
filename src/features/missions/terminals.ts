@@ -95,6 +95,23 @@ export function memberBriefing(mission: Pick<Mission, "title" | "objective">, me
     .join("\n");
 }
 
+/**
+ * El briefing tal como se manda a cada TUI. Claude Code recibe el texto con sus saltos de
+ * línea; Codex y otras TUIs descartan los Enter de un pegado y lo dejan todo pegado
+ * ("MISSÃOOBJETIVO…"), así que a esas se les manda en una sola línea con los apartados
+ * separados por " | ". Pura.
+ */
+export function briefingFor(agentId: string, text: string): string {
+  if (agentId === "claude-code") return text;
+  return text
+    .split("
+")
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => line.replace(/^- /, ""))
+    .join(" | ");
+}
+
 export interface StartedTeam {
   leadTabId: string;
   memberTabIds: string[];
@@ -143,8 +160,8 @@ export async function startMissionInTerminals(mission: Mission, squad: Squad | n
   setWorkMode(key, "canvas");
   activateTab(leadTabId);
 
-  sendWhenReady(leadTabId, leadBriefing(mission, team));
-  memberTabIds.forEach((tabId, i) => sendWhenReady(tabId, memberBriefing(mission, team[i])));
+  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team)));
+  memberTabIds.forEach((tabId, i) => sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i]))));
 
   return { leadTabId, memberTabIds };
 }
