@@ -56,7 +56,7 @@ export function teamOf(squad: Squad | null, roles: FunctionalRole[]): TeamMember
 export const LEAD_NAME = "Orquestrador";
 
 /** Lo primero que lee el orquestador: la misión, su equipo y cómo coordinarlo. Pura. */
-export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team: TeamMember[], findings = "", memory = ""): string {
+export function leadBriefing(mission: Pick<Mission, "title" | "objective"> & { id?: string }, team: TeamMember[], findings = "", memory = ""): string {
   const people = team.length === 0
     ? "Você ainda não tem equipe: sume agentes com `ags peer recruit <nome> --agent <id> --role <papel>`."
     : `SUA EQUIPE (já aberta e conectada a você no canvas):\n${team
@@ -81,7 +81,19 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team
     '- `ags notify "<mensagem>"` — chama o usuário só quando precisar dele.',
     "",
     "Planeje, divida o trabalho conforme o papel de cada um, acompanhe e junte os resultados. Ao terminar, resuma o que foi feito.",
+    ...(mission.id ? ["", ...memorySuggestion(mission.id)] : []),
   ].join("\n");
+}
+
+/** O que se pede ao orquestrador ao terminar: deixar até 3 memórias para a próxima missão. Pura. */
+export function memorySuggestion(missionId: string): string[] {
+  return [
+    "AO TERMINAR, deixe memória para a próxima missão (até 3):",
+    `- \`ags memory suggest --mission ${missionId} --scope workspace --kind decision --key <nome-curto> --body "..."\``,
+    "- Tipos: decision, constraint, finding, file, note. Escopo: workspace (vale para o projeto) ou mission.",
+    "- Só o que for útil depois e NÃO óbvio olhando o código. Nunca segredos, chaves, tokens ou dados pessoais.",
+    "- Você só SUGERE: fica pendente e o usuário aprova.",
+  ];
 }
 
 /** Lo primero que lee cada integrante: de qué misión es, quién lo dirige y qué papel cumple. Pura. */

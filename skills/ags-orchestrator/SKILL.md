@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.20.0
+version: 1.21.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -803,3 +803,13 @@ Missions started as terminals carry three read-only helpers:
   convening the team.
 - `ags mission timings --mission <id>` — where the time went: terminal startup, agent turns,
   `peer ask` waits.
+
+### Leaving memory for the next mission
+
+When a mission is done, the orchestrator can leave up to 3 durable notes:
+
+`ags memory suggest --mission <id> --scope workspace|mission --kind decision|constraint|finding|file|note --key <short-name> --body "..." [--priority 0-3]`
+
+It only **suggests**: the entry stays pending until the user approves it in the app, and the
+priority is capped at 3. Anything that looks like a credential (API keys, tokens, passwords,
+private keys) is refused. Suggest only what is useful next time and not obvious from the code.

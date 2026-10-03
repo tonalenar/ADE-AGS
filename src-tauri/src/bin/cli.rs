@@ -147,6 +147,9 @@ MISIONES (también sin interfaz: `ade-ags --headless`)
   mission precheck <id>                       Lo que el repositorio y las misiones anteriores ya dicen del objetivo
   memory search \"<tema>\" --mission <id> [--limit 5]
                                               Busca en la memoria aprobada del proyecto y de la misión (solo lee)
+  memory suggest --mission <id> --key <nombre> --body \"...\" [--scope workspace|mission]
+                 [--kind decision|constraint|finding|file|note] [--priority 0-3]
+                                              SUGIERE una memoria (queda pendiente; la aprueba el usuario)
   mission accept <id> <tarea>                 La junta en la integración de la misión
   mission apply <id>                          Lleva lo aceptado al proyecto
   approval list                               Pedidos de permiso esperando
@@ -343,7 +346,7 @@ impl CliError {
 
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    const GROUPS: [&str; 10] = ["peer.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall."];
+    const GROUPS: [&str; 11] = ["peer.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory."];
     if !GROUPS.iter().any(|g| command.starts_with(g)) || parsed.get("from").is_some() {
         return parsed;
     }
