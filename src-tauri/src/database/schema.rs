@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 24;
+const SCHEMA_VERSION: i32 = 25;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -850,6 +850,24 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         "CREATE INDEX IF NOT EXISTS idx_runs_workspace_created ON runs(workspace_id, created_at);
          CREATE INDEX IF NOT EXISTS idx_tasks_run_created ON tasks(run_id, created_at);
          CREATE INDEX IF NOT EXISTS idx_session_history_session ON session_history(session_id);",
+    )?;
+    // v25 — Checkpoints de un run: la foto del trabajo antes y después de cada tarea (ver
+    // `runs::checkpoints`). Solo aditiva. `task_id` queda en NULL si la tarea se borra: la foto
+    // sigue sirviendo para restaurar la carpeta. Se borran con su run.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS run_checkpoints (
+             id         TEXT PRIMARY KEY,
+             run_id     TEXT NOT NULL REFERENCES runs(id) ON DELETE CASCADE,
+             task_id    TEXT REFERENCES tasks(id) ON DELETE SET NULL,
+             -- before | after | manual | safety
+             kind       TEXT NOT NULL,
+             dir        TEXT NOT NULL,
+             commit_sha TEXT NOT NULL,
+             head_sha   TEXT,
+             label      TEXT NOT NULL DEFAULT '',
+             created_at INTEGER NOT NULL
+         );
+         CREATE INDEX IF NOT EXISTS idx_run_checkpoints_run ON run_checkpoints(run_id, created_at);",
     )?;
     // New databases are stamped at the latest version by legacy detection; create v24
     // tables whenever the baseline DDL did not create them itself.

@@ -44,6 +44,11 @@ pub fn run() {
             crate::floors::floor_create,
             crate::floors::floor_delete,
             // El pet sube de nivel con los tokens de los agentes
+            crate::runs::checkpoints::run_checkpoints,
+            crate::runs::checkpoints::run_rollback_preview,
+            crate::runs::checkpoints::run_rollback,
+            crate::runs::checkpoints::run_checkpoint_create,
+            crate::runs::checkpoints::run_restore_checkpoint,
             crate::pet::pet_status,
             crate::ipc::commands::pool::pool_list_all,
             crate::ipc::commands::pool::pool_save_new,
