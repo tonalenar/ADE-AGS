@@ -6,7 +6,7 @@ import { WindowLights } from "@/app/WindowLights";
 import { GlobeIcon, SplitRightIcon } from "@/app/icons";
 import { GroupTabStrip } from "@/features/tabs/GroupTabStrip";
 import { splitGroup, useWorkspaceLayout } from "@/features/tabs/layout/layoutStore";
-import { agentKey, allGroups, viewKey } from "@/features/tabs/layout/layoutTree";
+import { agentKey, allGroups, isAgentKey, keyId, viewKey } from "@/features/tabs/layout/layoutTree";
 import { useTabsStore } from "@/features/tabs/store";
 import { openNewAgentWizard, TabDialogs } from "@/features/tabs/tabActions";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -14,6 +14,8 @@ import { viewsOfWorkspace } from "@/features/tabs/viewTabs";
 import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
 import { ModeToggle } from "@/features/canvas/ModeToggle";
 import { useWorkMode } from "@/features/canvas/store";
+import { MissionChips } from "@/features/missions/MissionChips";
+import { useActiveGroup, useMissionIndex } from "@/features/missions/groups";
 
 const BAR_BUTTON = `flex items-center justify-center h-10 shrink-0
   text-gray-400 dark:text-white/30
@@ -46,16 +48,20 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
   const canvas = useWorkMode() === "canvas";
 
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  // El grupo que se mira: una misión (sus terminales) o lo suelto.
+  const missionOf = useMissionIndex();
+  const group = useActiveGroup();
+  const inGroup = (key: string) => (isAgentKey(key) ? (missionOf[keyId(key)] ?? null) === group : group === null);
   const groups = layout ? allGroups(layout.root) : [];
   const only = groups.length === 1 ? groups[0]! : null;
   const divided = groups.length > 1;
 
   // Sin árbol todavía (las tabs cargando) se muestran como siempre: agentes y después vistas.
   const fallbackViews = viewsOfWorkspace(views, activeTab?.cwd ?? null);
-  const items = only?.items ?? [
+  const items = (only?.items ?? [
     ...tabsOfWorkspace(tabs, activeTabId).map((tab) => agentKey(tab.id)),
     ...fallbackViews.map((v) => viewKey(v.id)),
-  ];
+  ]).filter(inGroup);
   const fallbackActive = fallbackViews.some((v) => v.id === activeViewId)
     ? viewKey(activeViewId!)
     : activeTab ? agentKey(activeTab.id) : null;
@@ -76,7 +82,10 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
           </div>
         )}
 
-        {!divided && (
+        <MissionChips />
+
+        {/* Con una misión en el canvas, las terminales ya se ven como nodos: la tira sobra. */}
+        {!divided && !(canvas && group !== null) && (
           <GroupTabStrip
             items={items}
             active={only ? only.active : fallbackActive}

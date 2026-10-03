@@ -36,7 +36,7 @@ import { useUiStore } from "@/app/uiStore";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ChatPanel } from "./ChatPanel";
 import { RoutinesPanel } from "./RoutinesPanel";
-import { boardKey, canvasActions, useActiveBoardKey, useCanvasStore } from "./store";
+import { boardKeyOfTab, canvasActions, useActiveBoardKey, useCanvasStore } from "./store";
 
 interface AgentNodeData extends Record<string, unknown> {
   tab: Tab;
@@ -146,7 +146,7 @@ function CanvasInner() {
   const activateTab = useTabsStore((s) => s.activateTab);
   const rf = useReactFlow();
 
-  const tabs = useMemo(() => (key ? allTabs.filter((t) => boardKey(t.cwd) === key) : []), [allTabs, key]);
+  const tabs = useMemo(() => (key ? allTabs.filter((t) => boardKeyOfTab(t) === key) : []), [allTabs, key]);
 
   const wrapRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 0, height: 0 });

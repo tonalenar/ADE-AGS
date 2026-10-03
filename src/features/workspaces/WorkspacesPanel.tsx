@@ -1,4 +1,6 @@
 import { useMemo, useState } from "react";
+import { MissionsSection } from "@/features/missions/MissionsSection";
+import { useMissionIndex } from "@/features/missions/groups";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
@@ -195,7 +197,14 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
 
   // El panel dibuja una lista plana: el repo sigue agrupando el orden, pero ya no se
   // muestra como sección. Ver `flattenWorkspaces`.
-  const workspaces = useMemo(() => flattenWorkspaces(groups), [groups]);
+  // Las terminales de una misión viven agrupadas en la misión (arriba), no sueltas acá.
+  const missionOf = useMissionIndex();
+  const workspaces = useMemo(
+    () => flattenWorkspaces(groups)
+      .map((ws) => ({ ...ws, agents: ws.agents.filter((a) => !missionOf[a.tabId]) }))
+      .filter((ws) => ws.closed || ws.agents.length > 0),
+    [groups, missionOf],
+  );
 
   const running = useMemo(
     () => groups.flatMap((g) => g.workspaces).flatMap((w) => w.agents).filter((a) => a.status === "running").length,
@@ -340,6 +349,8 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
           </Button>
         </Tooltip>
       </div>
+
+      <MissionsSection />
 
       <div className="flex-1 min-h-0 cc-scroll py-1">
         {workspaces.length === 0 ? (

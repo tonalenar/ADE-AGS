@@ -8,7 +8,7 @@ import {
   FOLDER_PREFIX, IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addFolder, addImage, addNote, addPortal,
   addStroke, addText, removeFolder, updateFolder,
   emptyBoard, placeBelow, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
-  removeStroke, removeText, toggleOrchestrator, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
+  buildMissionTeam, removeStroke, removeText, toggleOrchestrator, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
   type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
 } from "./board";
 import type { Box, Rect, Viewport } from "./geometry";
@@ -35,12 +35,42 @@ export function boardKey(cwd: string): string {
   return `${windowLabel}|${comparablePath(cwd)}`;
 }
 
-/** La clave del canvas de la carpeta del agente activo. */
+/** Lo que separa la carpeta de la misión en la clave de un canvas de misión. */
+const MISSION_SEP = "#m:";
+
+/** La clave del canvas de una misión en terminales: el de su carpeta, con la misión pegada. */
+export function missionBoardKey(cwd: string, missionId: string): string {
+  return `${boardKey(cwd)}${MISSION_SEP}${missionId}`;
+}
+
+/** La misión de la que es un canvas, si es de una. */
+export function missionOfKey(key: string | null): string | null {
+  const at = key?.indexOf(MISSION_SEP) ?? -1;
+  return key && at >= 0 ? key.slice(at + MISSION_SEP.length) : null;
+}
+
+/**
+ * La clave del canvas de una tab: el de su misión si algún canvas de misión de esta ventana
+ * la tiene como nodo, si no el de su carpeta. La pertenencia a una misión vive en su canvas
+ * (que ya se guarda), así que sobrevive a reiniciar sin tocar la tabla de tabs.
+ */
+export function boardKeyOfTab(tab: { id: string; cwd: string }, boards: Record<string, Board> = useCanvasStore.getState().boards): string {
+  const prefix = `${windowLabel}|`;
+  for (const [key, board] of Object.entries(boards)) {
+    if (key.startsWith(prefix) && key.includes(MISSION_SEP) && tab.id in board.nodes) return key;
+  }
+  return boardKey(tab.cwd);
+}
+
+/** La misión a la que pertenece una tab (la de su canvas), o `null` si es una tab suelta. */
+export function missionOfTab(tab: { id: string; cwd: string }, boards?: Record<string, Board>): string | null {
+  return missionOfKey(boardKeyOfTab(tab, boards));
+}
+
+/** La clave del canvas del agente activo: el de su misión o el de su carpeta. */
 export function useActiveBoardKey(): string | null {
-  return useTabsStore((s) => {
-    const active = s.tabs.find((t) => t.id === s.activeTabId);
-    return active ? boardKey(active.cwd) : null;
-  });
+  const active = useTabsStore((s) => s.tabs.find((t) => t.id === s.activeTabId));
+  return useCanvasStore((s) => (active ? boardKeyOfTab(active, s.boards) : null));
 }
 
 export function useWorkMode(): WorkMode {
@@ -162,6 +192,10 @@ export const canvasActions = {
     const placed = addEdge(placeBelow(withNode, tabId, near), near, tabId);
     return role ? { ...placed, roles: { ...placed.roles, [tabId]: role } } : placed;
   }),
+  /** El canvas de una misión en terminales: el orquestador y su equipo, ya conectados y con su papel.
+   *  `key` es `missionBoardKey`. Crea el canvas si no existe. */
+  buildMissionTeam: (key: string, leadId: string, members: { tabId: string; roleId?: string | null }[]) =>
+    updateBoard(key, (board) => buildMissionTeam(board, leadId, members)),
   setLiveRects: (liveRects: Record<string, Rect>) => {
     const prev = useCanvasStore.getState().liveRects;
     if (JSON.stringify(prev) !== JSON.stringify(liveRects)) useCanvasStore.setState({ liveRects });
@@ -208,11 +242,11 @@ function syncBoards(): void {
   // nodos y las conexiones guardadas.
   if (!hydrated) return;
   const byKey = new Map<string, string[]>();
+  const boards = useCanvasStore.getState().boards;
   for (const tab of tabs) {
-    const key = boardKey(tab.cwd);
+    const key = boardKeyOfTab(tab, boards);
     byKey.set(key, [...(byKey.get(key) ?? []), tab.id]);
   }
-  const boards = useCanvasStore.getState().boards;
   const keys = new Set([...byKey.keys(), ...Object.keys(boards).filter((k) => k.startsWith(`${windowLabel}|`))]);
   for (const key of keys) {
     const current = boards[key] ?? emptyBoard();

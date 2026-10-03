@@ -1529,3 +1529,54 @@ fn no_se_acepta_una_entrega_con_cambios_sin_commitear() {
     assert!(err.contains("olvidado.txt"), "{err}");
     let _ = std::fs::remove_dir_all(&tmp);
 }
+
+// ── En terminales: sin run ──────────────────────────────────────
+
+#[test]
+fn una_mision_en_terminales_corre_sin_run_y_se_cierra_a_mano() {
+    let db = db();
+    let id = borrador(&db);
+    let conn = db.lock().unwrap();
+
+    assert!(store::mark_started_terminals(&conn, &id).unwrap());
+    let m = store::get(&conn, &id).unwrap().unwrap();
+    assert_eq!((m.status.as_str(), m.active_run_id.clone()), ("running", None));
+    assert!(m.started_at.is_some() && m.ended_at.is_none());
+
+    // Ya corre: arrancarla de nuevo no hace nada.
+    assert!(!store::mark_started_terminals(&conn, &id).unwrap());
+    // Que se refresque su estado (lo hace la flota con cada tarea) no la mueve: no tiene run.
+    assert_eq!(store::refresh_status(&conn, &id).unwrap().as_deref(), Some("running"));
+
+    assert!(store::close_terminals(&conn, &id, "done").unwrap());
+    let m = store::get(&conn, &id).unwrap().unwrap();
+    assert_eq!(m.status, "done");
+    assert!(m.ended_at.is_some());
+    // Ya cerrada: no se cierra dos veces ni se cambia el desenlace.
+    assert!(!store::close_terminals(&conn, &id, "cancelled").unwrap());
+    assert!(store::close_terminals(&conn, &id, "failed").is_err(), "solo terminada o cancelada");
+}
+
+#[test]
+fn cancelar_una_mision_en_terminales_la_cierra_sin_tocar_ningun_run() {
+    let db = db();
+    let id = borrador(&db);
+    {
+        let conn = db.lock().unwrap();
+        store::mark_started_terminals(&conn, &id).unwrap();
+    }
+    let cancelled = cancel(&db, &id, |_| panic!("no hay run que cancelar")).unwrap();
+    assert_eq!(cancelled.status, "cancelled");
+    assert!(cancel(&db, &id, |_| Ok(())).is_err(), "ya terminó");
+}
+
+#[test]
+fn una_fallida_se_puede_reabrir_en_terminales_pero_una_terminada_no() {
+    let db = db();
+    let id = borrador(&db);
+    let conn = db.lock().unwrap();
+    conn.execute("UPDATE missions SET status = 'failed' WHERE id = ?1", [&id]).unwrap();
+    assert!(store::mark_started_terminals(&conn, &id).unwrap());
+    store::close_terminals(&conn, &id, "done").unwrap();
+    assert!(!store::mark_started_terminals(&conn, &id).unwrap());
+}

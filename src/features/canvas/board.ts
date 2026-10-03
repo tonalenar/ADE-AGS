@@ -159,6 +159,25 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
   return { ...board, nodes, edges, orchestrators, roles };
 }
 
+/**
+ * Arma el canvas de una misión en terminales: el orquestador arriba (con su corona) y su
+ * equipo debajo, cada uno conectado con él y con el papel que cumple. Los nodos que no
+ * tenían lugar lo reciben; un papel en blanco no se marca. Pura.
+ */
+export function buildMissionTeam(
+  board: Board,
+  leadId: string,
+  members: { tabId: string; roleId?: string | null }[],
+): Board {
+  let next = reconcile(board, [leadId, ...members.map((m) => m.tabId)], [leadId, ...members.map((m) => m.tabId)]);
+  next = { ...next, orchestrators: next.orchestrators.includes(leadId) ? next.orchestrators : [...next.orchestrators, leadId] };
+  for (const m of members) {
+    next = addEdge(placeBelow(next, m.tabId, leadId), leadId, m.tabId);
+    if (m.roleId) next = { ...next, roles: { ...next.roles, [m.tabId]: m.roleId } };
+  }
+  return next;
+}
+
 /** Conecta dos terminales. Una consigo misma o una conexión repetida no hacen nada. */
 export function addEdge(board: Board, a: string, b: string, id: string = crypto.randomUUID()): Board {
   if (a === b) return board;

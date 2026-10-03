@@ -217,6 +217,11 @@ pub(crate) fn cancel(
                 );
             }
         }
+        // En terminales no hay run: cancelarla es cerrarla (las tabs las cierra la pantalla).
+        status::RUNNING if mission.active_run_id.is_none() => {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            store::close_terminals(&conn, mission_id, status::CANCELLED)?;
+        }
         status::RUNNING => {
             let run_id = mission
                 .active_run_id
@@ -379,6 +384,40 @@ pub async fn mission_apply(app: AppHandle, mission_id: String) -> Result<review:
         .map_err(|e| e.to_string())?;
     notify(&app, &mission_id);
     outcome
+}
+
+/// Arranca la misión en terminales: solo la marca; abrir las tabs es de la pantalla.
+#[tauri::command]
+pub fn mission_start_terminals(app: AppHandle, mission_id: String) -> Result<Mission, String> {
+    let db = db_of(&app)?;
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mission = store::get(&conn, &mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+        if mission.status != status::DRAFT && mission.status != status::FAILED {
+            return Err(format!("la misión ya está en estado '{}'", mission.status));
+        }
+        if !store::mark_started_terminals(&conn, &mission_id)? {
+            return Err("la misión cambió de estado mientras tanto".into());
+        }
+    }
+    notify(&app, &mission_id);
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    store::get(&conn, &mission_id)?.ok_or_else(|| "la misión desapareció".to_string())
+}
+
+/// Da por terminada una misión en terminales.
+#[tauri::command]
+pub fn mission_finish_terminals(app: AppHandle, mission_id: String) -> Result<Mission, String> {
+    let db = db_of(&app)?;
+    {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        if !store::close_terminals(&conn, &mission_id, status::DONE)? {
+            return Err("Solo se termina a mano una misión en terminales que está corriendo.".into());
+        }
+    }
+    notify(&app, &mission_id);
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    store::get(&conn, &mission_id)?.ok_or_else(|| "la misión desapareció".to_string())
 }
 
 #[tauri::command]

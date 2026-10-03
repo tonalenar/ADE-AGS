@@ -12,7 +12,7 @@ import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
 import { respondToCli } from "./ipc";
 import { screenOf } from "@/features/terminal/terminalRegistry";
-import { boardKey, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
+import { boardKey, boardKeyOfTab, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
 
 /**
  * Lado frontend del puente de la CLI (ver `ipc/bridge.rs`).
@@ -204,6 +204,12 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
   return { text: answer };
 }
 
+/** El canvas donde vive la tab `tabId`: el de su misión o el de su carpeta. */
+function keyFor(tabId: string, cwd: string): string {
+  const tab = useTabsStore.getState().tabs.find((t) => t.id === tabId);
+  return tab ? boardKeyOfTab(tab) : boardKey(cwd);
+}
+
 /** Cambios al canvas pedidos por una orquestadora (`ccode peer connect/disconnect`). El
  *  permiso ya lo verificó el backend; acá solo se aplica, en el canvas de esa carpeta. */
 function handleCanvas(args: Record<string, unknown>, apply: (key: string, a: string, b: string) => void) {
@@ -211,7 +217,7 @@ function handleCanvas(args: Record<string, unknown>, apply: (key: string, a: str
   const a = str(args, "a");
   const b = str(args, "b");
   if (!cwd || !a || !b) throw new Error("Faltan cwd, a o b");
-  apply(boardKey(cwd), a, b);
+  apply(keyFor(a, cwd), a, b);
   return { ok: true };
 }
 
@@ -220,7 +226,7 @@ function handleRecruited(args: Record<string, unknown>) {
   const tabId = str(args, "tabId");
   const near = str(args, "near");
   if (!cwd || !tabId || !near) throw new Error("Faltan cwd, tabId o near");
-  canvasActions.recruited(boardKey(cwd), tabId, near, str(args, "role"));
+  canvasActions.recruited(keyFor(near, cwd), tabId, near, str(args, "role"));
   return { ok: true };
 }
 
@@ -247,7 +253,7 @@ async function handleNote(args: Record<string, unknown>) {
     const cwd = str(args, "cwd");
     const near = str(args, "near");
     if (!cwd || !near) throw new Error("Faltan cwd o near");
-    const key = boardKey(cwd);
+    const key = keyFor(near, cwd);
     const created = canvasActions.addNote(key, { name: str(args, "name"), content: str(args, "content") ?? "", near, stackWith: str(args, "stackWith") });
     await flushSave(key);
     return created;
@@ -275,7 +281,7 @@ async function handlePortal(args: Record<string, unknown>) {
     const cwd = str(args, "cwd");
     const near = str(args, "near");
     if (!cwd || !near) throw new Error("Faltan cwd o near");
-    const key = boardKey(cwd);
+    const key = keyFor(near, cwd);
     const android = str(args, "kind") === "android";
     const created = canvasActions.addPortal(key, {
       name: str(args, "name"), url: str(args, "url"), near, ...(android ? { kind: "android" as const, avd: str(args, "avd") } : {}),
