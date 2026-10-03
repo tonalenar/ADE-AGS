@@ -88,6 +88,10 @@ export interface BrowserLaunch {
  * El lanzamiento de una tab con el navegador de la app enchufado, en el dialecto que
  * acepte esa TUI: flags para Claude Code, una variable de entorno para OpenCode.
  *
+ * `missionId` viaja al servidor MCP (`ags mcp --mission <id>`) cuando esta tab es de una
+ * misión en terminales (ver `missionOfTab`): así las tools de orquestación que esa tab usa
+ * quedan ligadas a la misión en vez de solo a la carpeta. `null` en una tab suelta.
+ *
  * Si no se puede (una build sin `ags`, o una TUI a la que todavía no se le verificó el
  * formato), la tab arranca como siempre: el navegador es un agregado, no una condición.
  */
@@ -95,10 +99,11 @@ export async function withBrowserMcp(
   command: string,
   cwd: string,
   tabId: string,
-  agentId: string
+  agentId: string,
+  missionId: string | null = null
 ): Promise<BrowserLaunch> {
   try {
-    const mcp = await invoke<TabMcp | null>("tab_browser_mcp", { cwd, tabId, agentId });
+    const mcp = await invoke<TabMcp | null>("tab_browser_mcp", { cwd, tabId, agentId, missionId });
     if (!mcp) return { command, env: {} };
     return {
       command: mcp.configPath ? appendBrowserMcp(command, mcp) : command,
