@@ -137,6 +137,18 @@
 .ags-pet__busy { color: var(--mascot-glow); }
 .ags-pet__busy::after { content: ""; animation: ags-pet-dots 1.2s steps(1) infinite; }
 
+/* Fases de poder: cuantos más agentes, más grande el aura y más rápido todo. */
+.ags-pet--tier-2 .ags-pet__aura, .ags-pet--tier-3 .ags-pet__aura, .ags-pet--tier-4 .ags-pet__aura {
+  transform-box: fill-box; transform-origin: center; transform: scale(1.25);
+}
+.ags-pet--tier-3 .ags-pet__aura, .ags-pet--tier-4 .ags-pet__aura { transform: scale(1.5); animation-duration: 0.5s; }
+.ags-pet--tier-3 .ags-pet__orbit, .ags-pet--tier-4 .ags-pet__orbit { animation-duration: 0.9s; }
+.ags-pet--tier-4 .ags-pet__orbit { animation-duration: 0.6s; }
+.ags-pet--tier-4 .ags-mascot__bot { animation: ags-float 0.7s ease-in-out infinite, ags-pet-shake 0.1s steps(2) infinite; }
+.ags-pet--tier-2 .ags-pet__tongue, .ags-pet--tier-3 .ags-pet__tongue { animation-duration: 0.3s; }
+.ags-pet--tier-4 .ags-pet__tongue { animation-duration: 0.2s; }
+.ags-pet--tier-2 .ags-pet__zap, .ags-pet--tier-3 .ags-pet__zap, .ags-pet--tier-4 .ags-pet__zap { animation-duration: 0.5s; }
+
 /* El trazo veloz, más seguido. */
 .ags-mascot--working .ags-pet__dash { animation-duration: 1.2s; }
 

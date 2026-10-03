@@ -37,6 +37,21 @@ export function stageFor(level: number): 1 | 2 | 3 | 4 {
   return 1;
 }
 
+/**
+ * La fase de poder según cuántos agentes escriben a la vez, como las transformaciones de un
+ * super saiyajin: 1–2 = fase 1 (dorado), 3–4 = fase 2 (rayos), 5–6 = fase 3 (llamas altas,
+ * aura naranja), 7 o más = fase 4 (azul). Sin nadie trabajando, 0.
+ */
+export function powerTier(busy: number): 0 | 1 | 2 | 3 | 4 {
+  if (busy >= 7) return 4;
+  if (busy >= 5) return 3;
+  if (busy >= 3) return 2;
+  return busy >= 1 ? 1 : 0;
+}
+
+/** La etapa mínima que toma el pet en cada fase (si su nivel ya es mayor, manda el nivel). */
+const TIER_STAGE: Record<0 | 1 | 2 | 3 | 4, 1 | 2 | 3 | 4> = { 0: 1, 1: 2, 2: 2, 3: 3, 4: 4 };
+
 interface Look {
   aura: string | null;
   eyes: string;
@@ -52,6 +67,12 @@ const LOOKS: Record<1 | 2 | 3 | 4, Look> = {
   2: { aura: "#facc15", eyes: "#7dd3fc", flame: ["#f59e0b", "#fde047"], spark: "#fde047" },
   3: { aura: "#f97316", eyes: "#7dd3fc", flame: ["#ef4444", "#fb923c"], spark: "#fdba74" },
   4: { aura: "#ef4444", eyes: "#bae6fd", body: "#b91c1c", shade: "#7f1d1d", flame: ["#2563eb", "#7dd3fc"], spark: "#93c5fd" },
+};
+
+/** Fase 4: el pet se pone azul, cuerpo incluido. */
+const BLUE_LOOK: Look = {
+  aura: "#38bdf8", eyes: "#e0f2fe", body: "#1d4ed8", shade: "#1e3a8a",
+  flame: ["#2563eb", "#7dd3fc"], spark: "#bae6fd",
 };
 
 /** Las llamas de la corona: columna y alto, anclados a la antena (y = 1) y crecen hacia arriba. */
@@ -90,8 +111,10 @@ export function Pet({ level, state = "idle", size = 96, className = "", still = 
   still?: boolean;
 }) {
   const gid = useId().replace(/:/g, "");
-  const stage = stageFor(level);
-  const look = LOOKS[stage];
+  const busy = useAgentActivity((a) => a.count);
+  const tier = state === "working" && !still ? powerTier(busy) : 0;
+  const stage = tier > 0 ? (Math.max(stageFor(level), TIER_STAGE[tier]) as 1 | 2 | 3 | 4) : stageFor(level);
+  const look = tier === 4 ? BLUE_LOOK : LOOKS[stage];
 
   // El estallido de subir de nivel: solo si el nivel SUBE mientras el pet está a la vista.
   const previous = useRef(level);
@@ -119,7 +142,7 @@ export function Pet({ level, state = "idle", size = 96, className = "", still = 
       height={(size * 30) / 28}
       shapeRendering="crispEdges"
       style={style}
-      className={`ags-pet ${still ? "ags-pet--still" : `ags-mascot ags-mascot--${state}`} ${burst ? "ags-pet--levelup" : ""} ${className}`}
+      className={`ags-pet ags-pet--tier-${tier} ${still ? "ags-pet--still" : `ags-mascot ags-mascot--${state}`} ${burst ? "ags-pet--levelup" : ""} ${className}`}
       aria-hidden
     >
       <defs>
@@ -212,8 +235,8 @@ export function Pet({ level, state = "idle", size = 96, className = "", still = 
       </g>
 
       {/* Rayos alrededor: solo en la última etapa. */}
-      {stage === 4 && (
-        <g fill="none" stroke="#e0f2fe" strokeWidth="0.5" strokeLinejoin="miter">
+      {(stage === 4 || tier >= 2) && (
+        <g fill="none" stroke={tier === 4 ? "#7dd3fc" : tier >= 2 && stage < 4 ? "#fde047" : "#e0f2fe"} strokeWidth="0.5" strokeLinejoin="miter">
           <path className="ags-pet__zap" d="M-3 1 L-1 4 L-2 5 L1 9 L0 10" />
           <path className="ags-pet__zap" style={{ animationDelay: "0.9s" }} d="M19 2 L17 5 L18 6 L15 10 L16 11" />
         </g>

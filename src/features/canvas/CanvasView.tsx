@@ -37,6 +37,7 @@ import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ChatPanel } from "./ChatPanel";
 import { RoutinesPanel } from "./RoutinesPanel";
 import { boardKeyOfTab, canvasActions, useActiveBoardKey, useCanvasStore } from "./store";
+import { cleanPreviewLines } from "./previewText";
 
 interface AgentNodeData extends Record<string, unknown> {
   tab: Tab;
@@ -639,7 +640,7 @@ function Preview({ tabId, rows, onOpen }: { tabId: string; rows: number; onOpen:
       className="absolute inset-0 m-0 px-3 py-2 overflow-hidden whitespace-pre font-mono text-[12px] leading-[15px]
         text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-surface"
     >
-      {lines.join("\n")}
+      {cleanPreviewLines(lines).join("\n")}
     </pre>
   );
 }
