@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { Fact } from "@/features/runs/types";
-import type { MemoryDetail, MemoryPage, MemoryPendingCounts, MemoryProposal, MemoryProposalResult, MemoryScope, MemorySnapshot } from "./types";
+import type { MemoryDetail, MemoryPage, MemoryPendingCounts, MemoryProposal, MemoryProposalResult, MemoryScope, MemorySnapshot, MemoryValidityInterval } from "./types";
 
 export const listMemory = (workspaceId: string, missionId: string | null, cursor?: string | null) =>
   invoke<MemoryPage>("memory_list", { workspaceId, missionId, cursor: cursor ?? null, limit: 32 });
@@ -11,6 +11,9 @@ export const getPendingCounts = (workspaceId: string) =>
 
 export const getMemory = (entryId: string, workspaceId: string, missionId: string | null) =>
   invoke<MemoryDetail>("memory_get", { entryId, workspaceId, missionId });
+
+export const getMemoryHistory = (entryId: string, workspaceId: string, missionId: string | null) =>
+  invoke<MemoryValidityInterval[]>("memory_history", { entryId, workspaceId, missionId });
 
 export const proposeMemory = (workspaceId: string, missionId: string | null, input: MemoryProposal) =>
   invoke<MemoryProposalResult>("memory_propose_user", { workspaceId, missionId, input });

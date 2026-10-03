@@ -65,6 +65,18 @@ export interface MemoryDetail {
   revisions: MemoryRevision[];
 }
 
+export interface MemoryValidityInterval {
+  revision: number;
+  operation: "create" | "update";
+  kind: MemoryKind;
+  priority: number;
+  body: string;
+  actorKind: "user" | "lead" | "worker";
+  reason: string | null;
+  validFrom: number;
+  validTo: number | null;
+}
+
 export interface MemoryPage {
   items: MemoryEntry[];
   hasMore: boolean;
