@@ -181,12 +181,17 @@ fn git(dir: &Path, args: &[&str]) -> Vec<String> {
 
 const LOG_FORMAT: &str = "--format=%h %ad %s";
 
+/// Un commit por línea, sin pasar de lo que cabe: es una pista, no el historial.
+fn short(lines: Vec<String>) -> Vec<String> {
+    lines.into_iter().map(|l| if l.chars().count() > 100 { l.chars().take(100).collect::<String>() + "…" } else { l }).collect()
+}
+
 fn commits_for_path(dir: &Path, path: &str) -> Vec<String> {
-    git(dir, &["log", "-n", &MAX_COMMITS.to_string(), LOG_FORMAT, "--date=short", "--", path])
+    short(git(dir, &["log", "-n", &MAX_COMMITS.to_string(), LOG_FORMAT, "--date=short", "--", path]))
 }
 
 fn commits_for_term(dir: &Path, term: &str) -> Vec<String> {
-    git(dir, &["log", "-n", &MAX_COMMITS.to_string(), LOG_FORMAT, "--date=short", "-i", "-F", &format!("--grep={term}")])
+    short(git(dir, &["log", "-n", &MAX_COMMITS.to_string(), LOG_FORMAT, "--date=short", "-i", "-F", &format!("--grep={term}")]))
 }
 
 /// Un archivo de pruebas o de datos no dice si la funcionalidad existe en el producto.
