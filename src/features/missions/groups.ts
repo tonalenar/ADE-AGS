@@ -29,6 +29,20 @@ export function tabsByMission(index: Record<string, string>, tabs: Pick<Tab, "id
 }
 
 /**
+ * Las pestañas de misiones que ya terminaron (concluidas, canceladas o fallidas): cada una es
+ * un agente vivo gastando memoria (Claude Code ~170 MB, Codex ~100 MB) y, al reabrir la app,
+ * volvería a lanzarse con la sesión anterior. Pura.
+ */
+export function finishedMissionTabs(
+  missions: { id: string; status: string }[],
+  index: Record<string, string>,
+  tabs: Pick<Tab, "id">[],
+): string[] {
+  const finished = new Set(missions.filter((m) => m.status === "done" || m.status === "cancelled" || m.status === "failed").map((m) => m.id));
+  return tabs.filter((t) => finished.has(index[t.id])).map((t) => t.id);
+}
+
+/**
  * La pestaña a la que ir al abrir una misión: su orquestador (el de la corona) si está
  * abierto, si no la primera. `null` = no tiene ninguna pestaña abierta. Pura.
  */

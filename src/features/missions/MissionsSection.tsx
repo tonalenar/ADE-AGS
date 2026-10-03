@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
@@ -7,7 +7,7 @@ import { AddIcon, AlertaToast, Button, Tooltip } from "neogestify-ui-components"
 import { useSquadsStore } from "@/features/squads/store";
 import { useTabsStore } from "@/features/tabs/store";
 
-import { openMission, tabsByMission, useMissionIndex } from "./groups";
+import { finishedMissionTabs, openMission, tabsByMission, useMissionIndex } from "./groups";
 import { MissionDialog } from "./MissionDialog";
 import { emptyForm } from "./missionView";
 import { useMissionsStore } from "./store";
@@ -49,6 +49,12 @@ export function MissionsSection() {
   const [showArchived, setShowArchived] = useState(false);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirmFinishId, setConfirmFinishId] = useState<string | null>(null);
+  const confirmFinishTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (confirmFinishTimer.current) clearTimeout(confirmFinishTimer.current);
+  }, []);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -62,6 +68,14 @@ export function MissionsSection() {
     loadSquads().catch(() => undefined);
     loadRoles().catch(() => undefined);
   }, [loadSquads, loadRoles]);
+
+  // Una misión terminada no deja agentes abiertos: cierra sus pestañas (y con ellas los
+  // procesos) en cuanto se archiva, también las que quedaron de una sesión anterior.
+  useEffect(() => {
+    if (missions.length === 0) return;
+    const { closeTab } = useTabsStore.getState();
+    finishedMissionTabs(missions, index, tabs).forEach((id) => closeTab(id));
+  }, [missions, index, tabs]);
 
   const live = missions.filter((m) => !isArchived(m));
   const archived = missions.filter(isArchived);
@@ -93,6 +107,21 @@ export function MissionsSection() {
     }
   };
 
+  const confirmFinish = (m: MissionSummary) => {
+    if (confirmFinishTimer.current) clearTimeout(confirmFinishTimer.current);
+    confirmFinishTimer.current = null;
+    if (confirmFinishId === m.id) {
+      setConfirmFinishId(null);
+      void close(m, "finish");
+      return;
+    }
+    setConfirmFinishId(m.id);
+    confirmFinishTimer.current = setTimeout(() => {
+      setConfirmFinishId(null);
+      confirmFinishTimer.current = null;
+    }, 3000);
+  };
+
   const row = (m: MissionSummary) => {
     const mine = open[m.id]?.length ?? 0;
     const active = !!activeTabId && open[m.id]?.includes(activeTabId);
@@ -119,10 +148,10 @@ export function MissionsSection() {
         )}
         {runless && (
           <span className="hidden group-hover/mission:flex items-center gap-0.5">
-            <Button variant="custom" onClick={(e) => { e.stopPropagation(); void close(m, "finish"); }}
+            <Button variant="custom" onClick={(e) => { e.stopPropagation(); confirmFinish(m); }}
               title={t("missions.sidebar.finishHint")}
               className="cc-t h-5 px-1.5 rounded text-[10px] text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
-              {t("missions.sidebar.finish")}
+              {t(confirmFinishId === m.id ? "missions.sidebar.finishConfirm" : "missions.sidebar.finish")}
             </Button>
           </span>
         )}

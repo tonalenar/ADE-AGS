@@ -1495,6 +1495,7 @@
   "missions.sidebar.start": "start",
   "missions.sidebar.finish": "finish",
   "missions.sidebar.finishHint": "Mark the mission as finished (the terminals stay open)",
+  "missions.sidebar.finishConfirm": "Confirm?",
   "missions.pick": "Pick a mission to see its objective, run and tasks.",
   "missions.empty.title": "No missions yet",
   "missions.empty.desc": "A mission is what you want done in a project. Creating one only saves a draft: nothing runs until you press Start.",

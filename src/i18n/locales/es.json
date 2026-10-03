@@ -1495,6 +1495,7 @@
   "missions.sidebar.start": "iniciar",
   "missions.sidebar.finish": "terminar",
   "missions.sidebar.finishHint": "Dar la misión por terminada (las terminales siguen abiertas)",
+  "missions.sidebar.finishConfirm": "Confirmar?",
   "missions.pick": "Elegí una misión para ver su objetivo, su run y sus tareas.",
   "missions.empty.title": "Todavía no hay misiones",
   "missions.empty.desc": "Una misión es lo que querés lograr en un proyecto. Crearla solo guarda un borrador: nada corre hasta que apretás Iniciar.",

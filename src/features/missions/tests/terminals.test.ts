@@ -4,7 +4,21 @@ import { buildMissionTeam, emptyBoard } from "@/features/canvas/board";
 import { boardKey, boardKeyOfTab, missionBoardKey, missionOfKey, missionOfTab, useCanvasStore } from "@/features/canvas/store";
 import type { FunctionalRole, Squad } from "@/features/squads/types";
 
-import { entryTab, missionIndex, tabsByMission } from "../groups";
+import { entryTab, finishedMissionTabs, missionIndex, tabsByMission } from "../groups";
+
+describe("finishedMissionTabs", () => {
+  const missions = [
+    { id: "vivo", status: "running" },
+    { id: "feito", status: "done" },
+    { id: "cancelado", status: "cancelled" },
+    { id: "rascunho", status: "draft" },
+  ];
+  const index = { a: "vivo", b: "feito", c: "cancelado", d: "rascunho" };
+  it("só devolve as abas de missões terminadas, nunca as vivas nem as soltas", () => {
+    const tabs = [{ id: "a" }, { id: "b" }, { id: "c" }, { id: "d" }, { id: "solta" }];
+    expect(finishedMissionTabs(missions, index, tabs)).toEqual(["b", "c"]);
+  });
+});
 import { LEAD_NAME, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, teamOf, uniqueNames } from "../terminals";
 
 describe("accountsNeedingLogin", () => {
