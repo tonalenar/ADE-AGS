@@ -137,6 +137,14 @@ pub(super) fn mission_review(app: &AppHandle, args: &Value) -> Result<Value, Str
     Ok(json!(crate::missions::review::review(&conn, &id)?))
 }
 
+/// `ags mission precheck <id>`: lo que el repositorio y las misiones anteriores ya dicen del objetivo.
+pub(super) fn mission_precheck(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let id = arg_str(args, "mission")?;
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    Ok(json!({ "mission": id, "findings": crate::missions::precheck_text(&conn, &id)? }))
+}
+
 /// `ags mission timings <id>`: dónde se fue el tiempo de la misión.
 pub(super) fn mission_timings(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;

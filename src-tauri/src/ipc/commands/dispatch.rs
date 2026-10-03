@@ -174,6 +174,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "mission.run" => missions::mission_run(app, args),
         "mission.review" => missions::mission_review(app, args),
         "mission.timings" => missions::mission_timings(app, args),
+        "mission.precheck" => missions::mission_precheck(app, args),
         "mission.accept" => missions::mission_accept(app, args),
         "mission.apply" => missions::mission_apply(app, args),
         "approval.list" => missions::approval_list(app),

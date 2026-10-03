@@ -56,7 +56,7 @@ export function teamOf(squad: Squad | null, roles: FunctionalRole[]): TeamMember
 export const LEAD_NAME = "Orquestrador";
 
 /** Lo primero que lee el orquestador: la misión, su equipo y cómo coordinarlo. Pura. */
-export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team: TeamMember[]): string {
+export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team: TeamMember[], findings = ""): string {
   const people = team.length === 0
     ? "Você ainda não tem equipe: sume agentes com `ags peer recruit <nome> --agent <id> --role <papel>`."
     : `SUA EQUIPE (já aberta e conectada a você no canvas):\n${team
@@ -70,6 +70,7 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective">, team
     "",
     people,
     "",
+    ...(findings.trim() ? [findings.trim(), ""] : []),
     "COMO COORDENAR (use SOMENTE o `ags`; não use `maestri` nem skills de outros apps)",
     "- `ags peers` — quem está conectado com você.",
     '- `ags peer ask "<nome>" "<pedido>"` — pergunta e ESPERA a resposta.',
@@ -162,6 +163,10 @@ export async function startMissionInTerminals(mission: Mission, squad: Squad | n
     throw new Error(`Falta fazer login na conta: ${missing.join(", ")}. Entre nela uma vez em Contas (cada conta tem perfil isolado) e inicie a missão de novo.`);
   }
 
+  // O que o repositório e as missões anteriores já dizem do objetivo: se o pedido já existe, o
+  // Orquestrador sabe ANTES de convocar a equipe. Só leitura; se falhar, a missão segue sem isso.
+  const findings = await invoke<string>("mission_precheck", { missionId: mission.id }).catch(() => "");
+
   await invoke("mission_start_terminals", { missionId: mission.id });
 
   const leadTabId = addTab({
@@ -196,7 +201,7 @@ export async function startMissionInTerminals(mission: Mission, squad: Squad | n
       onTurnEnd: (at) => sentAt > 0 && recordSpan(mission.id, { kind: "turn", actor, startedMs: sentAt, endedMs: at, detail: "briefing" }),
     };
   };
-  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team)), timed(LEAD_NAME));
+  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings)), timed(LEAD_NAME));
   memberTabIds.forEach((tabId, i) =>
     sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i])), timed(team[i].name)),
   );

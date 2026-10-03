@@ -161,3 +161,17 @@ describe("briefingFor", () => {
     expect(flat).not.toContain("\n");
   });
 });
+
+describe("leadBriefing com a checagem do que já existe", () => {
+  const mission = { title: "Melhoria", objective: "Fazer X" };
+  it("inclui os achados antes das instruções de coordenação", () => {
+    const findings = ["O QUE JÁ EXISTE (checagem automática, só leitura)", "- src/a.tsx: existe"].join(String.fromCharCode(10));
+    const text = leadBriefing(mission, [], findings);
+    expect(text).toContain("O QUE JÁ EXISTE");
+    expect(text.indexOf("O QUE JÁ EXISTE")).toBeLessThan(text.indexOf("COMO COORDENAR"));
+  });
+  it("sem achados o briefing é o de sempre", () => {
+    expect(leadBriefing(mission, [])).toBe(leadBriefing(mission, [], "  "));
+    expect(leadBriefing(mission, [])).not.toContain("O QUE JÁ EXISTE");
+  });
+});

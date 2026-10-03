@@ -14,6 +14,7 @@
 //! `runs::start_orchestration` que usa la flota.
 
 pub(crate) mod review;
+pub(crate) mod precheck;
 pub(crate) mod store;
 pub(crate) mod timings;
 #[cfg(test)]
@@ -460,4 +461,25 @@ pub fn mission_timings(app: AppHandle, mission_id: String) -> Result<MissionTimi
     let db = db_of(&app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     timings_of(&conn, &mission_id)
+}
+
+// ── Checagem do que já existe ───────────────────────────────────────
+
+/// O texto do briefing com o que o repositório e as missões anteriores já dizem sobre o
+/// objetivo (ver `precheck`). Vazio se não há nada a dizer.
+pub(crate) fn precheck_text(conn: &Connection, mission_id: &str) -> Result<String, String> {
+    let mission = store::get(conn, mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+    Ok(precheck::render(&precheck::run(conn, &mission.id, &mission.cwd, &mission.objective)))
+}
+
+#[tauri::command]
+pub async fn mission_precheck(app: AppHandle, mission_id: String) -> Result<String, String> {
+    let db = db_of(&app)?;
+    // git corre fuera del hilo de la UI y sin mantener el candado de la base más de lo necesario.
+    tokio::task::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        precheck_text(&conn, &mission_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
