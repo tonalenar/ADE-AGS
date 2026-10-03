@@ -309,6 +309,32 @@ fn path_with_app_dir(current: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
     std::env::join_paths(dirs).ok()
 }
 
+/// Codex corre los comandos de su agente en un sandbox que descarta las variables de entorno
+/// que no conoce, `ADE_TAB_ID` incluida: sin ella `ccode peers` no sabe quién pregunta. La
+/// config de Codex tiene `shell_environment_policy.set`, que SÍ llega al shell del sandbox;
+/// se la pasa con `-c` al lanzar. Solo si el programa es `codex` y la tab tiene id. Pura.
+pub(super) fn with_codex_tab_id(command: &str, tab_id: Option<&str>) -> String {
+    let Some(tab) = tab_id.filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')) else {
+        return command.to_string();
+    };
+    let (head, tail) = command.split_once(char::is_whitespace).unwrap_or((command, ""));
+    let program = head.trim_matches(|c| c == '"' || c == '\'');
+    let stem = std::path::Path::new(program)
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .unwrap_or("")
+        .to_ascii_lowercase();
+    if stem != "codex" || command.contains("shell_environment_policy.set.ADE_TAB_ID") {
+        return command.to_string();
+    }
+    let flag = format!("'shell_environment_policy.set.ADE_TAB_ID=\"{tab}\"'");
+    if tail.is_empty() {
+        format!("{head} -c {flag}")
+    } else {
+        format!("{head} -c {flag} {tail}")
+    }
+}
+
 /// Crea un PTY, lanza el proceso dentro, y emite eventos `pty-data-{id}` al frontend.
 ///
 /// `cols`/`rows` los manda el frontend ya medidos contra el tamaño real del contenedor
@@ -340,6 +366,7 @@ pub async fn pty_create(
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
+    let command = with_codex_tab_id(&command, env.as_ref().and_then(|e| e.get("ADE_TAB_ID")).map(String::as_str));
     let mut cmd = build_launch(&command, &prelaunch.unwrap_or_default())?;
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
