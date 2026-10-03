@@ -5,6 +5,7 @@ import { Button, Tooltip } from "neogestify-ui-components";
 import { agentIcon } from "@/features/agents/agentIcons";
 import { accountProblemText } from "@/features/accounts/problem";
 
+import { canRollback } from "./checkpoints";
 import { isLive } from "./fleetOrder";
 import { PermissionCard } from "./PermissionCard";
 import type { PendingApproval, Task, TaskStatus } from "./types";
@@ -58,7 +59,7 @@ const BADGE: Record<TaskStatus, string> = {
  * que "qué archivo tocó" viene como dato: las líneas son ya la forma corta (`Bash(cargo
  * test)`), no un recorte de su salida. Quien quiera el detalle abre la tarea como pane.
  */
-export function AgentCard({ task, activity, waiting = [], approval, focused, onCancel, onOpenPane, onShowResult, onDecide, onDiscardWorktree, onReroute }: {
+export function AgentCard({ task, activity, waiting = [], approval, focused, onCancel, onOpenPane, onShowResult, onDecide, onDiscardWorktree, onReroute, onRollback }: {
   task: Task;
   activity: string[];
   /** Las dependencias que todavía no terminaron, por su key. */
@@ -72,6 +73,7 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
   onShowResult: () => void;
   onDiscardWorktree: () => void;
   onReroute: () => void;
+  onRollback: () => void;
   onDecide: (allow: boolean, remember: boolean) => void;
 }) {
   const { t } = useTranslation();
@@ -221,6 +223,13 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
         {live && (
           <Tooltip content={t("fleet.card.rerouteHint")} placement="top">
             <Button variant="custom" onClick={onReroute} className={ACTION}>{t("fleet.card.reroute")}</Button>
+          </Tooltip>
+        )}
+        {/* Volver a antes de esta tarea (y rehacerla): la carpeta vuelve a la foto de cuando
+            arrancó. Antes se guarda otra foto del estado actual, así que se puede deshacer. */}
+        {canRollback(task) && (
+          <Tooltip content={t("fleet.card.rollbackHint")} placement="top">
+            <Button variant="custom" onClick={onRollback} className={ACTION}>{t("fleet.card.rollback")}</Button>
           </Tooltip>
         )}
         {/* Solo con la tarea terminada, nunca sola: al terminar, el resultado ESTÁ en el

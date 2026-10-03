@@ -24,6 +24,7 @@ mod plan;
 mod policy;
 pub(crate) mod quota;
 pub(crate) mod roster;
+pub mod checkpoints;
 pub(crate) mod routing;
 mod rules;
 pub mod sandbox;
