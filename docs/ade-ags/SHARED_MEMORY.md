@@ -92,3 +92,14 @@ O novo E2E usou uma cópia sintética do banco, projeto descartável e inference
 6. A comparação integral dos registros anteriores de Runs, Tasks, Facts e entradas de snapshot não encontrou alterações. O banco sintético e os logs foram preservados fora do repositório; a ADE foi fechada e o banco original restaurado com SHA-256 idêntico ao backup.
 
 Evidências locais: `%TEMP%\ade-memory-e2e-final-20261001-194426\after-restart-evidence.json`, `historical-before.json`, `completed-after-restart.db` e `completed-run-logs\`. A revisão final cruzou novamente banco e logs, confirmando zero alterações nos registros históricos comparados. O E2E foi executado antes das correções finais de migration/reader; essas correções e os ajustes de delimitação foram validados pelos testes e pela build, sem nova inference. A edição de memória demonstrada ao vivo foi apenas de prioridade; edição de body, delete, concorrência, outros providers e os demais contratos listados na cobertura não são alegados como E2E e dependem dos testes automatizados aplicáveis.
+
+## Busca e missões em terminais
+
+As ferramentas MCP `memory_*` existem só para as tarefas da frota (headless). As missões em
+terminais usam a CLI: `ags memory search "<assunto>" --mission <id>` faz uma busca por
+relevância (BM25 em Rust puro, com o nome da entrada pesando 3×, prefixo de 4+ letras e a
+prioridade desempatando ±25 %) sobre as memórias **aprovadas** do workspace e da própria
+missão. Não usa FTS5 nem embeddings: são no máximo 384 entradas pequenas por missão, e assim
+não há índice para manter em dia. O briefing do Orquestrador traz as 8 entradas de maior
+prioridade (até 1,8 KB) marcadas como dados, não instruções. Só lê: propor continua passando
+pela aprovação do usuário.

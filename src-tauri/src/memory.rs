@@ -1358,5 +1358,7 @@ pub fn memory_promote_fact_user(
     result
 }
 
+pub mod search;
+
 #[cfg(test)]
 mod tests;

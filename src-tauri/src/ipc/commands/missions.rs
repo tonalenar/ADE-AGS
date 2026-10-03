@@ -137,6 +137,35 @@ pub(super) fn mission_review(app: &AppHandle, args: &Value) -> Result<Value, Str
     Ok(json!(crate::missions::review::review(&conn, &id)?))
 }
 
+/// `ags memory search "<assunto>" --mission <id>`: busca por relevância nas memórias aprovadas
+/// do workspace e da missão. Só lê; propor uma memória nova continua passando pelo usuário.
+pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let id = arg_str(args, "mission")?;
+    let query = arg_str(args, "query")?;
+    let limit = arg_u64_opt(args, "limit").unwrap_or(5) as usize;
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let mission = crate::missions::store::get(&conn, &id)?.ok_or_else(|| format!("no hay ninguna misión {id}"))?;
+    let hits = crate::memory::search::search(&conn, &mission.workspace_id, Some(&mission.id), &query, limit)?;
+    Ok(json!({ "query": query, "results": hits }))
+}
+
+/// `ags mission precheck <id>`: lo que el repositorio y las misiones anteriores ya dicen del objetivo.
+pub(super) fn mission_precheck(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let id = arg_str(args, "mission")?;
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    Ok(json!({ "mission": id, "findings": crate::missions::precheck_text(&conn, &id)? }))
+}
+
+/// `ags mission timings <id>`: dónde se fue el tiempo de la misión.
+pub(super) fn mission_timings(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let id = arg_str(args, "mission")?;
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    Ok(json!(crate::missions::timings_of(&conn, &id)?))
+}
+
 pub(super) fn mission_accept(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
     let task = arg_str(args, "task")?;

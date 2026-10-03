@@ -48,6 +48,10 @@ pub fn run() {
             // El pet sube de nivel con los tokens de los agentes
             crate::missions::mission_start_terminals,
             crate::missions::mission_finish_terminals,
+            crate::missions::mission_timing_add,
+            crate::missions::mission_timings,
+            crate::missions::mission_precheck,
+            crate::missions::mission_memory_context,
             crate::runs::checkpoints::run_checkpoints,
             crate::runs::checkpoints::run_rollback_preview,
             crate::runs::checkpoints::run_rollback,

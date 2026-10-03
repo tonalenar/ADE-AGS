@@ -161,3 +161,34 @@ describe("briefingFor", () => {
     expect(flat).not.toContain("\n");
   });
 });
+
+describe("leadBriefing com a checagem do que já existe", () => {
+  const mission = { title: "Melhoria", objective: "Fazer X" };
+  it("inclui os achados antes das instruções de coordenação", () => {
+    const findings = ["O QUE JÁ EXISTE (checagem automática, só leitura)", "- src/a.tsx: existe"].join(String.fromCharCode(10));
+    const text = leadBriefing(mission, [], findings);
+    expect(text).toContain("O QUE JÁ EXISTE");
+    expect(text.indexOf("O QUE JÁ EXISTE")).toBeLessThan(text.indexOf("COMO COORDENAR"));
+  });
+  it("sem achados o briefing é o de sempre", () => {
+    expect(leadBriefing(mission, [])).toBe(leadBriefing(mission, [], "  "));
+    expect(leadBriefing(mission, [])).not.toContain("O QUE JÁ EXISTE");
+  });
+});
+
+describe("memória nos briefings", () => {
+  const mission = { id: "m-9", title: "Melhoria", objective: "Fazer X" };
+  const member = { name: "Backend", agentId: "codex", accountId: null, roleId: "backend", roleLabel: "Backend", roleDescription: "", roleInstructions: "" };
+  it("o orquestrador recebe o bloco de memória depois dos achados e antes de coordenar", () => {
+    const nl = String.fromCharCode(10);
+    const text = leadBriefing(mission, [], ["O QUE JÁ EXISTE", "- x"].join(nl), ["MEMÓRIA DO PROJETO", "- [projeto] k: v"].join(nl));
+    expect(text.indexOf("O QUE JÁ EXISTE")).toBeLessThan(text.indexOf("MEMÓRIA DO PROJETO"));
+    expect(text.indexOf("MEMÓRIA DO PROJETO")).toBeLessThan(text.indexOf("COMO COORDENAR"));
+    expect(leadBriefing(mission, [])).not.toContain("MEMÓRIA DO PROJETO");
+  });
+  it("cada integrante sabe como buscar na memória da sua missão", () => {
+    expect(memberBriefing(mission, member)).toContain("ags memory search");
+    expect(memberBriefing(mission, member)).toContain("--mission m-9");
+    expect(memberBriefing({ title: "t", objective: "o" }, member)).not.toContain("ags memory search");
+  });
+});

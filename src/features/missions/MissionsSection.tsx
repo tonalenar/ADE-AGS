@@ -7,7 +7,7 @@ import { AddIcon, AlertaToast, Button, Tooltip } from "neogestify-ui-components"
 import { useSquadsStore } from "@/features/squads/store";
 import { useTabsStore } from "@/features/tabs/store";
 
-import { finishedMissionTabs, openMission, tabsByMission, useMissionIndex } from "./groups";
+import { openMission, tabsByMission, useMissionIndex } from "./groups";
 import { MissionDialog } from "./MissionDialog";
 import { emptyForm } from "./missionView";
 import { useMissionsStore } from "./store";
@@ -68,14 +68,6 @@ export function MissionsSection() {
     loadSquads().catch(() => undefined);
     loadRoles().catch(() => undefined);
   }, [loadSquads, loadRoles]);
-
-  // Una misión terminada no deja agentes abiertos: cierra sus pestañas (y con ellas los
-  // procesos) en cuanto se archiva, también las que quedaron de una sesión anterior.
-  useEffect(() => {
-    if (missions.length === 0) return;
-    const { closeTab } = useTabsStore.getState();
-    finishedMissionTabs(missions, index, tabs).forEach((id) => closeTab(id));
-  }, [missions, index, tabs]);
 
   const live = missions.filter((m) => !isArchived(m));
   const archived = missions.filter(isArchived);

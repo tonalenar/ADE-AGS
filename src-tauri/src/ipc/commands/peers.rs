@@ -16,7 +16,7 @@
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use super::tabs::{pty_id_for_tab, submit_prompt, tab_create, tab_list, wait_for_pty, wait_until_quiet, wait_until_ready};
 use crate::ipc::bridge::{ask_frontend, unwrap_frontend_result};
@@ -357,6 +357,7 @@ pub(crate) fn parse_batch(raw: &Value) -> Result<Vec<(String, String)>, String> 
 /// um destino e o que `peer ask --batch` faz com vários ao mesmo tempo.
 fn ask_one(app: &AppHandle, target: &OpenTab, from_name: &str, text: &str, timeout: Duration, raw: bool) -> Result<Value, String> {
     let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
+    let started_ms = crate::util::now_ts_ms();
 
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(60), false);
 
@@ -366,6 +367,11 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_name: &str, text: &str, timeo
 
     submit_prompt(pty, &outgoing(from_name, text, true, raw))?;
     let finished = wait_turn(pty, before, timeout);
+    // El frontend sabe de qué misión es cada pestaña; acá solo se avisa cuánto tardó.
+    let _ = app.emit(
+        "cc-peer-timing",
+        json!({ "from": from_name, "to": target.name, "toTabId": target.id, "startedMs": started_ms, "endedMs": crate::util::now_ts_ms(), "finished": finished }),
+    );
 
     let reply = screen(app, target, mark, 200)?;
     Ok(json!({

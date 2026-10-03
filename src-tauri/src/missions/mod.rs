@@ -14,7 +14,9 @@
 //! `runs::start_orchestration` que usa la flota.
 
 pub(crate) mod review;
+pub(crate) mod precheck;
 pub(crate) mod store;
+pub(crate) mod timings;
 #[cfg(test)]
 mod test;
 mod types;
@@ -428,4 +430,73 @@ pub fn mission_cancel(app: AppHandle, mission_id: String) -> Result<Mission, Str
     });
     notify(&app, &mission_id);
     result
+}
+
+// ── Cronómetro ──────────────────────────────────────────────────────
+
+/// Graba el tiempo de una etapa de la misión (ver `timings`).
+#[tauri::command]
+pub fn mission_timing_add(app: AppHandle, mission_id: String, span: timings::NewSpan) -> Result<(), String> {
+    let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    timings::add(&conn, &mission_id, &span)
+}
+
+/// Los tiempos de una misión y su resumen: dónde se fue el tiempo.
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MissionTimings {
+    pub spans: Vec<timings::Span>,
+    pub summary: timings::Summary,
+}
+
+pub(crate) fn timings_of(conn: &Connection, mission_id: &str) -> Result<MissionTimings, String> {
+    let spans = timings::list(conn, mission_id)?;
+    let summary = timings::summarize(&spans, 5);
+    Ok(MissionTimings { spans, summary })
+}
+
+#[tauri::command]
+pub fn mission_timings(app: AppHandle, mission_id: String) -> Result<MissionTimings, String> {
+    let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    timings_of(&conn, &mission_id)
+}
+
+// ── Checagem do que já existe ───────────────────────────────────────
+
+/// O texto do briefing com o que o repositório e as missões anteriores já dizem sobre o
+/// objetivo (ver `precheck`). Vazio se não há nada a dizer.
+pub(crate) fn precheck_text(conn: &Connection, mission_id: &str) -> Result<String, String> {
+    let mission = store::get(conn, mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+    Ok(precheck::render(&precheck::run(conn, &mission.id, &mission.cwd, &mission.objective)))
+}
+
+#[tauri::command]
+pub async fn mission_precheck(app: AppHandle, mission_id: String) -> Result<String, String> {
+    let db = db_of(&app)?;
+    // git corre fuera del hilo de la UI y sin mantener el candado de la base más de lo necesario.
+    tokio::task::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        precheck_text(&conn, &mission_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+// ── Memoria del proyecto en el briefing ─────────────────────────────
+
+/// El bloque de memoria aprobada (workspace + misión) para el briefing del Orquestador. Vacío si
+/// no hay nada. Solo lee.
+pub(crate) fn memory_context_text(conn: &Connection, mission_id: &str) -> Result<String, String> {
+    let mission = store::get(conn, mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+    let docs = crate::memory::search::load_docs(conn, &mission.workspace_id, Some(&mission.id))?;
+    Ok(crate::memory::search::briefing_block(&docs, &mission.id, 8, 1_800))
+}
+
+#[tauri::command]
+pub fn mission_memory_context(app: AppHandle, mission_id: String) -> Result<String, String> {
+    let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    memory_context_text(&conn, &mission_id)
 }

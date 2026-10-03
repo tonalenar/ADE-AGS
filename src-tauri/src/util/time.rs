@@ -10,3 +10,11 @@ pub fn now_ts() -> i64 {
         .map(|d| d.as_secs() as i64)
         .unwrap_or(0)
 }
+
+/// Milisegundos desde la época Unix. Para medir etapas cortas, donde `now_ts` (segundos) no alcanza.
+pub fn now_ts_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}

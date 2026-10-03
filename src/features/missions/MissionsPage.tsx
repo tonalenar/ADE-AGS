@@ -20,6 +20,7 @@ import type { Squad } from "@/features/squads/types";
 
 import { MissionDialog } from "./MissionDialog";
 import { MissionMap } from "./MissionMap";
+import { MissionTimingsPanel } from "./MissionTimingsPanel";
 import { startMissionInTerminals } from "./terminals";
 import { MissionReviewPanel } from "./MissionReviewPanel";
 import {
@@ -434,6 +435,12 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError 
       )}
 
       <MissionMap tasks={tasks} accountLabel={accountLabel} />
+
+      {mission.status !== "draft" && (
+        <Section title={t("missions.timings.title")}>
+          <MissionTimingsPanel missionId={mission.id} />
+        </Section>
+      )}
 
       {tasks.length > 0 && (
         <Section title={t("missions.detail.tasks")}>
