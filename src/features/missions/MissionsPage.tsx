@@ -18,6 +18,7 @@ import { useSquadsStore } from "@/features/squads/store";
 import { useSquadAccountLabel } from "@/features/squads/accountLabel";
 import type { Squad } from "@/features/squads/types";
 
+import { AutonomyPicker } from "./AutonomyPicker";
 import { MissionDialog } from "./MissionDialog";
 import { MissionMap } from "./MissionMap";
 import { MissionTimingsPanel } from "./MissionTimingsPanel";
@@ -456,6 +457,12 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
       )}
 
       <MissionMap tasks={tasks} accountLabel={accountLabel} />
+
+      {mission.status === "draft" && (
+        <Section title={t("missions.autonomy.title")}>
+          <AutonomyPicker />
+        </Section>
+      )}
 
       {mission.status !== "draft" && (
         <Section title={t("missions.timings.title")}>

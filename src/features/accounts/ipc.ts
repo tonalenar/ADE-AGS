@@ -54,7 +54,7 @@ export const verifyAntigravityOAuth = (accountId: string) => invoke<void>("antig
 export type AntigravityAccountDiscovery = {
   accountId: string;
   projectId: string;
-  models: Array<{ id: string; name: string }>;
+  models: Array<{ id: string; name: string; remainingFraction?: number; resetTime?: string }>;
   inferenceVerified: boolean;
 };
 export const discoverAntigravityAccount = (accountId: string) =>
