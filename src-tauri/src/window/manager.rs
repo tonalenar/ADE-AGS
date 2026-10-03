@@ -6,6 +6,27 @@ use tauri::{AppHandle, Emitter, Manager};
 const MIN_WINDOW_WIDTH: f64 = 900.0;
 const MIN_WINDOW_HEIGHT: f64 = 600.0;
 
+/// Windows "estaciona" una ventana minimizada en (-32000, -32000), con el tamaño de su barra
+/// de título. Si el cierre guarda esa geometría, la próxima apertura deja la ventana fuera de
+/// la pantalla ("no abre"). Una posición así, o un tamaño menor que el mínimo, no se restaura.
+const MINIMIZED_PARKING: i32 = -30_000;
+
+/// La posición guardada, si es de una ventana que estaba a la vista. Pura.
+pub(crate) fn usable_position(x: Option<i32>, y: Option<i32>) -> Option<(i32, i32)> {
+    match (x, y) {
+        (Some(x), Some(y)) if x > MINIMIZED_PARKING && y > MINIMIZED_PARKING => Some((x, y)),
+        _ => None,
+    }
+}
+
+/// El tamaño guardado, si no es el de una ventana minimizada o recién colapsada. Pura.
+pub(crate) fn usable_size(width: Option<i32>, height: Option<i32>) -> Option<(u32, u32)> {
+    match (width, height) {
+        (Some(w), Some(h)) if f64::from(w) >= MIN_WINDOW_WIDTH && f64::from(h) >= MIN_WINDOW_HEIGHT => Some((w as u32, h as u32)),
+        _ => None,
+    }
+}
+
 /// Recrea ventanas nativas a partir de filas guardadas en SQLite (posición, tamaño).
 /// Usada tanto al arrancar la app (restaura todo lo que estaba `is_open = 1`) como al
 /// abrir un workspace guardado en caliente desde la UI.
@@ -34,13 +55,10 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
     for w in rows.iter() {
         if reuse_main && w.label == "main" {
             if let Some(main_win) = app.get_webview_window("main") {
-                if let (Some(width), Some(height)) = (w.width, w.height) {
-                    let _ = main_win.set_size(tauri::Size::Physical(tauri::PhysicalSize {
-                        width: width as u32,
-                        height: height as u32,
-                    }));
+                if let Some((width, height)) = usable_size(w.width, w.height) {
+                    let _ = main_win.set_size(tauri::Size::Physical(tauri::PhysicalSize { width, height }));
                 }
-                if let (Some(x), Some(y)) = (w.pos_x, w.pos_y) {
+                if let Some((x, y)) = usable_position(w.pos_x, w.pos_y) {
                     let _ = main_win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
                 }
             }
@@ -66,15 +84,12 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
             .transparent(true)
             .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
 
-        if let (Some(width), Some(height)) = (w.width, w.height) {
-            builder = builder.inner_size(
-                (width as f64).max(MIN_WINDOW_WIDTH),
-                (height as f64).max(MIN_WINDOW_HEIGHT),
-            );
+        if let Some((width, height)) = usable_size(w.width, w.height) {
+            builder = builder.inner_size(width as f64, height as f64);
         } else {
             builder = builder.inner_size(900.0, 650.0);
         }
-        if let (Some(x), Some(y)) = (w.pos_x, w.pos_y) {
+        if let Some((x, y)) = usable_position(w.pos_x, w.pos_y) {
             builder = builder.position(x as f64, y as f64);
         }
 
@@ -324,4 +339,25 @@ pub fn get_home_dir() -> Result<String, String> {
     dirs::home_dir()
         .map(|p| p.to_string_lossy().to_string())
         .ok_or_else(|| "Cannot determine home directory".to_string())
+}
+
+#[cfg(test)]
+mod bounds_test {
+    use super::*;
+
+    #[test]
+    fn una_ventana_minimizada_no_se_restaura_fuera_de_la_pantalla() {
+        // Lo que Windows guarda de una ventana minimizada.
+        assert_eq!(usable_position(Some(-32000), Some(-32000)), None);
+        assert_eq!(usable_size(Some(176), Some(37)), None);
+    }
+
+    #[test]
+    fn la_geometria_normal_se_respeta_incluso_en_un_segundo_monitor() {
+        assert_eq!(usable_position(Some(80), Some(60)), Some((80, 60)));
+        // Un monitor a la izquierda tiene coordenadas negativas legítimas.
+        assert_eq!(usable_position(Some(-1920), Some(3)), Some((-1920, 3)));
+        assert_eq!(usable_size(Some(1400), Some(860)), Some((1400, 860)));
+        assert_eq!(usable_position(None, Some(5)), None);
+    }
 }
