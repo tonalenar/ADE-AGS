@@ -104,8 +104,7 @@ export function memberBriefing(mission: Pick<Mission, "title" | "objective">, me
 export function briefingFor(agentId: string, text: string): string {
   if (agentId === "claude-code") return text;
   return text
-    .split("
-")
+    .split("\n")
     .map((line) => line.trim())
     .filter(Boolean)
     .map((line) => line.replace(/^- /, ""))
