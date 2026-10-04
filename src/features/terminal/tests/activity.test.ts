@@ -17,3 +17,25 @@ describe("actividad de los agentes", () => {
     expect(isEcho(undefined, 1000)).toBe(false);
   });
 });
+
+import { sustainedAgents } from "../activity";
+
+describe("sustainedAgents (tiempo de misión)", () => {
+  it("un destello de salida al abrir la pestaña no cuenta como trabajo", () => {
+    const outputs = new Map([["t1", 10_000]]);
+    const streaks = new Map([["t1", 10_000]]);
+    expect(sustainedAgents(outputs, streaks, 10_500)).toEqual([]);
+  });
+
+  it("escribir de corrido 2 s o más sí cuenta", () => {
+    const outputs = new Map([["t1", 12_100]]);
+    const streaks = new Map([["t1", 10_000]]);
+    expect(sustainedAgents(outputs, streaks, 12_200)).toEqual(["t1"]);
+  });
+
+  it("si ya se calló (más de QUIET_MS) deja de contar aunque la racha fuera larga", () => {
+    const outputs = new Map([["t1", 10_000]]);
+    const streaks = new Map([["t1", 1_000]]);
+    expect(sustainedAgents(outputs, streaks, 14_000)).toEqual([]);
+  });
+});

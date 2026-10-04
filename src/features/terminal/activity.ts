@@ -27,7 +27,17 @@ interface ActivityState {
 
 export const useAgentActivity = create<ActivityState>(() => ({ working: false, count: 0 }));
 
+/**
+ * Para el TIEMPO de las misiones no basta un destello de salida: abrir una misión o una pestaña
+ * hace que la TUI se redibuje (un golpe corto) y eso no es trabajo. Un agente que piensa o
+ * ejecuta escribe sin parar (el indicador anima); por eso cuenta solo la salida SOSTENIDA.
+ */
+export const STREAK_GAP_MS = 1500;
+export const SUSTAIN_MS = 2000;
+
 const lastOutput = new Map<string, number>();
+/** Desde cuándo escribe de corrido cada pestaña (se reinicia tras un silencio de `STREAK_GAP_MS`). */
+const streakStart = new Map<string, number>();
 const lastInput = new Map<string, number>();
 let timer: ReturnType<typeof setInterval> | null = null;
 
@@ -46,9 +56,28 @@ export function activeTabIds(now = Date.now()): string[] {
   return activeAgents(lastOutput, now);
 }
 
+/** De las activas, las que escriben de corrido hace al menos `SUSTAIN_MS`. Pura. */
+export function sustainedAgents(
+  outputs: ReadonlyMap<string, number>,
+  streaks: ReadonlyMap<string, number>,
+  now: number,
+): string[] {
+  return activeAgents(outputs, now).filter((id) => now - (streaks.get(id) ?? now) >= SUSTAIN_MS);
+}
+
+/** Las pestañas que de verdad trabajan (salida sostenida): lo que cuenta para el tiempo de misión. */
+export function sustainedTabIds(now = Date.now()): string[] {
+  return sustainedAgents(lastOutput, streakStart, now);
+}
+
 function refresh(now = Date.now()): void {
   const count = activeAgents(lastOutput, now).length;
-  for (const [id, at] of lastOutput) if (now - at >= QUIET_MS) lastOutput.delete(id);
+  for (const [id, at] of lastOutput) {
+    if (now - at >= QUIET_MS) {
+      lastOutput.delete(id);
+      streakStart.delete(id);
+    }
+  }
   const next = { working: count > 0, count };
   const cur = useAgentActivity.getState();
   if (cur.working !== next.working || cur.count !== next.count) useAgentActivity.setState(next);
@@ -64,6 +93,8 @@ export function markOutput(tabId: string | undefined, agentId: string | undefine
   if (!tabId || !agentId || agentId === "bash") return;
   const now = Date.now();
   if (isEcho(lastInput.get(tabId), now)) return;
+  const prev = lastOutput.get(tabId);
+  if (prev === undefined || now - prev > STREAK_GAP_MS) streakStart.set(tabId, now);
   lastOutput.set(tabId, now);
   if (!useAgentActivity.getState().working) refresh(now);
   if (!timer) timer = setInterval(() => refresh(), 1000);
@@ -78,6 +109,7 @@ export function markInput(tabId: string | undefined): void {
 export function forgetTab(tabId: string | undefined): void {
   if (!tabId) return;
   lastOutput.delete(tabId);
+  streakStart.delete(tabId);
   lastInput.delete(tabId);
   refresh();
 }

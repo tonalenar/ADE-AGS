@@ -1,4 +1,4 @@
-import { activeTabIds } from "@/features/terminal/activity";
+import { sustainedTabIds } from "@/features/terminal/activity";
 
 /** Cada cuánto se mide y cada cuánto se manda lo acumulado al backend. */
 export const ACTIVE_TICK_MS = 1000;
@@ -29,5 +29,5 @@ export function accumulate(pending: ReadonlyMap<string, number>, working: readon
 }
 
 export function sampleWorking(tabToMission: Record<string, string>, running: ReadonlySet<string>, now = Date.now()): string[] {
-  return missionsWorking(activeTabIds(now), tabToMission, running);
+  return missionsWorking(sustainedTabIds(now), tabToMission, running);
 }
