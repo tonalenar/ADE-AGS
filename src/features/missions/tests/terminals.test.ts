@@ -19,7 +19,7 @@ describe("finishedMissionTabs", () => {
     expect(finishedMissionTabs(missions, index, tabs)).toEqual(["b", "c"]);
   });
 });
-import { LEAD_NAME, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, teamOf, uniqueNames } from "../terminals";
+import { LEAD_NAME, MAX_EXTRA_TERMINALS, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, teamOf, uniqueNames } from "../terminals";
 
 describe("accountsNeedingLogin", () => {
   const accounts = [
@@ -79,6 +79,14 @@ describe("el equipo de una misión", () => {
     const text = leadBriefing({ title: "T", objective: "O" }, []);
     expect(text).toContain("ags peer recruit");
     expect(text).not.toContain("SUA EQUIPE");
+  });
+
+  it("con o equipe aberto, o orquestador também sabe que pode abrir mais terminais, até um limite", () => {
+    const team = teamOf(squad([{ roleId: "backend" }]), roles);
+    const text = leadBriefing({ title: "T", objective: "O" }, team);
+    expect(text).toContain("MAIS TERMINAIS");
+    expect(text).toContain('ags peer recruit "<nome>"');
+    expect(text).toContain(`Máximo de ${MAX_EXTRA_TERMINALS} terminais extras`);
   });
 
   it("cada integrante lee su papel, quién lo dirige y cómo avisarle", () => {
