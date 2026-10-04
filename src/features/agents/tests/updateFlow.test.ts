@@ -10,7 +10,7 @@ const info = (patch: Partial<AgentUpdateInfo> = {}): AgentUpdateInfo => ({
 const ok: AgentUpdateResult = { agentId: "codex", ok: true, output: "", newVersion: "0.160.0", error: null };
 
 /** Un mundo falso: `ptys` = pestaña → pid; `kill` lo borra (o no, para probar el que no muere). */
-function world(options: { ptys?: Record<string, number>; infos?: AgentUpdateInfo[]; immortal?: string[]; update?: AgentUpdateResult } = {}) {
+function world(options: { running?: boolean; ptys?: Record<string, number>; infos?: AgentUpdateInfo[]; immortal?: string[]; update?: AgentUpdateResult } = {}) {
   const ptys = { ...(options.ptys ?? { t1: 11, t2: 12 }) };
   const calls: string[] = [];
   const deps: UpdateFlowDeps = {
@@ -28,19 +28,30 @@ function world(options: { ptys?: Record<string, number>; infos?: AgentUpdateInfo
       calls.push(`update:${released}`);
       return options.update ?? ok;
     }),
+    workRunning: async () => options.running ?? false,
+    restartApp: async () => { calls.push("restartApp"); },
     sleep: async () => {},
   };
   return { deps, calls };
 }
 
 describe("updateAgentRestarting", () => {
-  it("fecha las terminales del agente, actualiza liberando y las vuelve a abrir (solo las de ese agente)", async () => {
+  it("fecha las terminales del agente, actualiza liberando y reinicia la app entera", async () => {
     const { deps, calls } = world();
     const out = await updateAgentRestarting("codex", deps);
     expect(out.result.ok).toBe(true);
-    expect(out.reopened).toBe(2);
-    // Cierra, actualiza ya con los terminales liberados y recién después relanza; la de claude no se toca.
-    expect(calls).toEqual(["kill:11", "kill:12", "update:true", "restart:t1", "restart:t2"]);
+    expect(out.appRestarting).toBe(true);
+    expect(out.reopened).toBe(0);
+    // Cierra solo las de ese agente, actualiza con los terminales liberados y reinicia la app (no relanza pestañas sueltas).
+    expect(calls).toEqual(["kill:11", "kill:12", "update:true", "restartApp"]);
+  });
+
+  it("con una misión o run en curso de cualquier agente no cierra ni reinicia NADA", async () => {
+    const { deps, calls } = world({ running: true });
+    const out = await updateAgentRestarting("codex", deps);
+    expect(out.result).toMatchObject({ ok: false, error: "busy_mission" });
+    expect(out.appRestarting).toBe(false);
+    expect(calls).toEqual([]);
   });
 
   it("si el agente está en una misión en curso no cierra NADA", async () => {
@@ -65,6 +76,7 @@ describe("updateAgentRestarting", () => {
     const out = await updateAgentRestarting("codex", deps);
     expect(out.result).toMatchObject({ ok: false, error: "busy_terminal" });
     expect(calls).not.toContain("update:true");
+    expect(calls).not.toContain("restartApp");
     expect(calls).toEqual(expect.arrayContaining(["restart:t1", "restart:t2"]));
   });
 
@@ -73,6 +85,7 @@ describe("updateAgentRestarting", () => {
     const { deps, calls } = world({ update: failed });
     const out = await updateAgentRestarting("codex", deps);
     expect(out.result.ok).toBe(false);
+    expect(calls).not.toContain("restartApp");
     expect(calls.filter((c) => c.startsWith("restart:"))).toEqual(["restart:t1", "restart:t2"]);
   });
 
@@ -84,12 +97,12 @@ describe("updateAgentRestarting", () => {
     expect(calls.filter((c) => c.startsWith("restart:"))).toHaveLength(2);
   });
 
-  it("sin terminales abiertas del agente actualiza igual y no relanza nada", async () => {
+  it("sin terminales abiertas del agente actualiza y reinicia igual", async () => {
     const { deps, calls } = world({ ptys: {}, infos: [info({ reason: null, canAutoUpdate: true, busy: false })] });
     const out = await updateAgentRestarting("codex", deps);
     expect(out.result.ok).toBe(true);
     expect(out.reopened).toBe(0);
-    expect(calls).toEqual(["update:true"]);
+    expect(calls).toEqual(["update:true", "restartApp"]);
   });
 
   it("un agente desconocido no hace nada", async () => {

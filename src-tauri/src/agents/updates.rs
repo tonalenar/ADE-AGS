@@ -426,6 +426,26 @@ pub fn busy_reason_with(
     let mission: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM missions m WHERE m.status='running' AND (m.lead_agent_id=?1 OR (m.lead_agent_id IS NULL AND m.squad_id IS NULL) OR EXISTS(SELECT 1 FROM squads s WHERE s.id=m.squad_id AND s.lead_agent_id=?1) OR EXISTS(SELECT 1 FROM squad_members s WHERE s.squad_id=m.squad_id AND s.agent_id=?1))) OR EXISTS(SELECT 1 FROM runs r JOIN tasks t ON t.run_id=r.id WHERE r.status='running' AND t.agent_id=?1) OR EXISTS(SELECT 1 FROM runs r JOIN run_squad_members s ON s.run_id=r.id WHERE r.status='running' AND s.agent_id=?1)", [id], |r| r.get(0)).map_err(|e| e.to_string())?;
     Ok(policy_reason(false, mission, true, true))
 }
+/// Reiniciar la app entera mata los terminales de TODOS los agentes: si hay una misión o un
+/// run en curso (de cualquier agente) no se reinicia.
+pub fn work_running(conn: &rusqlite::Connection) -> Result<bool, String> {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM missions WHERE status='running') OR EXISTS(SELECT 1 FROM runs WHERE status='running')",
+        [],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+#[tauri::command]
+pub async fn agent_update_work_running(app: tauri::AppHandle) -> Result<bool, String> {
+    let db = app.state::<DbConnection>().inner().clone();
+    tokio::task::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        work_running(&conn)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
 fn elevated() -> bool {
     #[cfg(unix)]
     {
