@@ -24,6 +24,7 @@ import { SyncSection } from "@/features/sync/SyncSection";
 import { UpdatesSection } from "@/features/updates/UpdatesSection";
 import { SettingsRow, SettingsSection } from "@/features/settings/SettingsSection";
 import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
+import { AgentAutoUpdateSetting } from "@/features/settings/AgentAutoUpdateSetting";
 import { SandboxSetting } from "@/features/settings/SandboxSetting";
 import { RenderingSetting } from "@/features/settings/RenderingSetting";
 
@@ -187,6 +188,7 @@ export function SettingsPage() {
 
         {section === "tuis" && (
           <SettingsSection title={t("settings.tuis")} description={t("settings.tuis.desc")}>
+            <AgentAutoUpdateSetting />
             <DetectedAgents />
 
             <span className="mt-2 text-[11px] font-semibold uppercase tracking-wide

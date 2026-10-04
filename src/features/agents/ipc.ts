@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import type { AgentInfo } from "@/features/tabs/types";
 
 import type { CustomAgent, CustomAgentDraft } from "./types";
+import type { AgentUpdateInfo, AgentUpdateResult } from "./updatePolicy";
 
 /** Qué TUIs de las soportadas de fábrica están instaladas en esta máquina. */
 /** `refresh` vuelve a sondear; sin él puede venir de la detección de los últimos minutos. */
@@ -49,3 +50,7 @@ export const deleteCustomAgent = (id: string) => invoke<void>("delete_custom_age
 /** Sube las TUIs que hubieran quedado en `localStorage`. Ignora ids ya presentes. */
 export const importLegacyCustomAgents = (agents: unknown[]) =>
   invoke<void>("import_legacy_custom_agents", { agents });
+
+export const agentUpdatesCheck = () => invoke<AgentUpdateInfo[]>("agent_updates_check");
+
+export const agentUpdate = (agentId: string) => invoke<AgentUpdateResult>("agent_update", { agentId });

@@ -1997,5 +1997,22 @@
   "canvas.folder.delete": "Remover do canvas (não apaga nada do disco)",
   "canvas.folder.deleteConfirm": "Remover?",
   "canvas.folder.empty": "Pasta vazia",
-  "canvas.folder.truncated": "Mostrando as primeiras {{count}} linhas. Feche subpastas para ver o resto."
+  "canvas.folder.truncated": "Mostrando as primeiras {{count}} linhas. Feche subpastas para ver o resto.",
+  "settings.agentUpdates.label": "Atualizar agentes automaticamente",
+  "settings.agentUpdates.desc": "Verifica ao abrir o app e a cada 6 h, e atualiza só os agentes ociosos (sem terminal aberto nem missão em andamento). Desligado: a app apenas avisa.",
+  "agents.update.available": "{{label}} {{version}} disponível",
+  "agents.update.action": "Atualizar",
+  "agents.update.running": "Atualizando…",
+  "agents.update.latest": "nova: {{version}}",
+  "agents.update.done": "{{label}} atualizado para {{version}}",
+  "agents.update.doneNoVersion": "{{label}} atualizado",
+  "agents.update.failed": "Não foi possível atualizar {{label}}: {{error}}",
+  "agents.update.reason.not_npm": "Instalado fora do npm: atualize manualmente",
+  "agents.update.reason.no_updater": "Sem atualizador automático para este agente",
+  "agents.update.reason.check_failed": "Não foi possível verificar a versão mais nova",
+  "agents.update.reason.busy_terminal": "Feche os terminais abertos deste agente para atualizar",
+  "agents.update.reason.busy_mission": "Há uma missão em andamento com este agente",
+  "agents.update.reason.running": "Outra atualização em andamento",
+  "agents.update.reason.timeout": "Tempo esgotado (5 min)",
+  "agents.update.reason.failed": "Falha na atualização"
 }

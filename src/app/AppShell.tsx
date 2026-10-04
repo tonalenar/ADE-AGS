@@ -32,6 +32,7 @@ import { SyncRunner } from "@/features/sync/SyncRunner";
 import { UpdateNotifier } from "@/features/updates/UpdateNotifier";
 import { ApprovalToast } from "@/features/runs/ApprovalToast";
 import { PoolFailoverNotice } from "@/features/accounts/PoolFailoverNotice";
+import { AgentUpdateWatcher } from "@/features/agents/AgentUpdateWatcher";
 import { BotToastHost } from "@/shared/brand/BotToastHost";
 import { BotPanel } from "@/features/bot/BotPanel";
 import type { ShellOutletContext } from "@/app/shellContext";
@@ -213,6 +214,7 @@ export function AppShell() {
       <AppExitListener />
       <SyncRunner />
       <PoolFailoverNotice />
+      <AgentUpdateWatcher />
       <BotToastHost />
       <BotPanel />
       {/* Los avisos de la esquina, apilados: un permiso pendiente arriba de la versión
