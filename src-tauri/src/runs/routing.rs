@@ -110,9 +110,8 @@ pub enum AccountChoice {
     Auto,
     /// Esa. `None` = la del sistema.
     Fixed(Option<String>),
-    /// Una de las de un pool (ver `accounts::pools`), por su estrategia. Queda fijada a la
-    /// elegida: pasar la tarea a otra cuenta cuando se agota es `Auto`, que no respeta el
-    /// pool.
+    /// Una de las de un pool (ver `accounts::pools`), por su estrategia. Sigue fijada a esa
+    /// cuenta salvo que el pool tenga failover activado.
     Pool(crate::accounts::pools::PoolSpec),
 }
 
@@ -175,6 +174,9 @@ pub struct Assignment {
     /// La cuenta la eligió el ruteo (`AccountChoice::Auto`): la tarea se puede pasar a otra
     /// con cupo. Con una cuenta fijada, nunca (ver `runs::failure`).
     pub auto_account: bool,
+    /// Pool exacto que originó la asignación. Se persiste en `settings` por task id.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub pool_origin: Option<crate::accounts::pools::PoolOrigin>,
 }
 
 /// Asigna una tarea. `Err` trae el motivo en palabras: es lo que se le muestra a quien la
@@ -216,6 +218,7 @@ fn manual(roster: &Roster, req: &RouteRequest, now: i64) -> Result<Assignment, S
         routed_by: RoutedBy::Manual,
         notes,
         auto_account: matches!(req.account, AccountChoice::Auto),
+        pool_origin: pool_origin(&req.account),
     })
 }
 
@@ -270,6 +273,7 @@ fn by_tier(
                     },
                     notes,
                     auto_account: matches!(req.account, AccountChoice::Auto),
+                    pool_origin: pool_origin(&req.account),
                 });
             }
             Err(reason) => notes.push(format!("{what}: {reason}")),
@@ -391,6 +395,9 @@ pub(crate) fn pick_in_pool(
     for (order, account) in members.iter().enumerate() {
         match account_problem(account, now) {
             Some(problem) => notes.push(problem),
+            None if super::pool_failover::account_in_cooldown(&account.key, now) => {
+                notes.push(format!("la cuenta {} está en cooldown del pool", account.name));
+            }
             None => usable.push((order, account)),
         }
     }
@@ -415,6 +422,17 @@ pub(crate) fn pick_in_pool(
     match usable.first() {
         Some((_, account)) => Ok((account.account_id.clone(), notes)),
         None => Err(format!("ninguna cuenta del pool '{}' se puede usar — {}", spec.name, notes.join("; "))),
+    }
+}
+
+fn pool_origin(choice: &AccountChoice) -> Option<crate::accounts::pools::PoolOrigin> {
+    match choice {
+        AccountChoice::Pool(spec) => Some(crate::accounts::pools::PoolOrigin {
+            id: spec.id.clone(),
+            name: spec.name.clone(),
+            agent_id: spec.agent_id.clone(),
+        }),
+        AccountChoice::Auto | AccountChoice::Fixed(_) => None,
     }
 }
 

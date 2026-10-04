@@ -67,17 +67,33 @@ pub struct Pool {
     pub members: Vec<Option<String>>,
     #[serde(default)]
     pub strategy: Strategy,
+    /// Al fallar por límite de uso, permite reintentar una vez dentro de este pool.
+    /// Los pools guardados antes de esta opción siguen desactivados.
+    #[serde(default)]
+    pub failover: bool,
+}
+
+/// Identidad del pool que originó una tarea. Se guarda en `settings`, fuera de la tabla
+/// `tasks`, para que el scheduler respete el mismo pool aunque la tarea se ejecute después.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct PoolOrigin {
+    pub id: String,
+    pub name: String,
+    pub agent_id: String,
 }
 
 /// Un pool tal como lo ve el ruteo al elegir: sin más que lo necesario, y con dónde arranca
 /// el turno de `round_robin`.
 #[derive(Debug, Clone, PartialEq)]
 pub struct PoolSpec {
+    pub id: String,
     pub name: String,
     pub agent_id: String,
     pub members: Vec<Option<String>>,
     pub strategy: Strategy,
     pub start: usize,
+    pub failover: bool,
 }
 
 /// `pool:Trabajo` → `Trabajo`.
@@ -186,7 +202,15 @@ pub fn spec_for(db: &DbConnection, wanted: &str) -> Result<PoolSpec, String> {
             let _ = crate::database::set_setting(db, CURSORS_KEY, &raw);
         }
     }
-    Ok(PoolSpec { name: pool.name.clone(), agent_id: pool.agent_id.clone(), members: pool.members.clone(), strategy: pool.strategy, start })
+    Ok(PoolSpec {
+        id: pool.id.clone(),
+        name: pool.name.clone(),
+        agent_id: pool.agent_id.clone(),
+        members: pool.members.clone(),
+        strategy: pool.strategy,
+        start,
+        failover: pool.failover,
+    })
 }
 
 #[cfg(test)]

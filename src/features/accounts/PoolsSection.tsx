@@ -1,10 +1,10 @@
 import { useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertaToast, Button, Input, TrashIcon } from "neogestify-ui-components";
+import { AlertaToast, Button, Input, Switch, TrashIcon } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AccountCapableAgent } from "@/features/accounts/types";
-import { STRATEGIES, poolRemove, poolSaveNew, usePools, type PoolStrategy } from "./pools";
+import { STRATEGIES, poolRemove, poolSaveNew, poolSetFailover, usePools, type Pool, type PoolStrategy } from "./pools";
 
 /**
  * Los pools de una TUI: grupos con nombre de sus cuentas y la regla para repartir entre ellas
@@ -21,7 +21,9 @@ export function PoolsSection({ agent }: { agent: AccountCapableAgent }) {
   const [name, setName] = useState("");
   const [members, setMembers] = useState<(string | null)[]>([]);
   const [strategy, setStrategy] = useState<PoolStrategy>("least_used");
+  const [failover, setFailover] = useState(false);
   const [armed, setArmed] = useState<string | null>(null);
+  const [togglingFailover, setTogglingFailover] = useState<string | null>(null);
 
   const options: { id: string | null; label: string }[] = [
     { id: null, label: t("accounts.system") },
@@ -36,11 +38,12 @@ export function PoolsSection({ agent }: { agent: AccountCapableAgent }) {
     setName("");
     setMembers([]);
     setStrategy("least_used");
+    setFailover(false);
   };
 
   const save = async () => {
     try {
-      await poolSaveNew(name, agent.agentId, members, strategy);
+      await poolSaveNew(name, agent.agentId, members, strategy, failover);
       reset();
     } catch (e) {
       AlertaToast(t("accounts.pools.title"), String(e), "error", 6000);
@@ -51,6 +54,17 @@ export function PoolsSection({ agent }: { agent: AccountCapableAgent }) {
     if (armed !== id) return setArmed(id);
     setArmed(null);
     poolRemove(id).catch((e) => AlertaToast(t("accounts.pools.title"), String(e), "error", 6000));
+  };
+
+  const toggleFailover = async (pool: Pool) => {
+    setTogglingFailover(pool.id);
+    try {
+      await poolSetFailover(pool.id, !pool.failover);
+    } catch (e) {
+      AlertaToast(t("accounts.pools.title"), String(e), "error", 6000);
+    } finally {
+      setTogglingFailover(null);
+    }
   };
 
   // Con una sola cuenta (más la del sistema) ya hay dos para agrupar; sin ninguna creada, no.
@@ -78,6 +92,14 @@ export function PoolsSection({ agent }: { agent: AccountCapableAgent }) {
             <div className="truncate text-[10.5px] text-gray-500 dark:text-white/40">
               {t(`accounts.pools.strategy.${p.strategy}`)} · {p.members.map(labelOf).join(" → ")}
             </div>
+            <Switch
+              checked={p.failover}
+              disabled={togglingFailover === p.id}
+              onChange={() => void toggleFailover(p)}
+              label={t("accounts.pools.failover")}
+              description={t("accounts.pools.failover.hint")}
+              size="sm"
+            />
           </div>
           <Button variant="custom" onClick={() => remove(p.id)} aria-label={t("accounts.pools.delete")}
             className={`cc-t shrink-0 flex items-center justify-center h-6 rounded-md
@@ -120,6 +142,13 @@ export function PoolsSection({ agent }: { agent: AccountCapableAgent }) {
               </button>
             ))}
           </div>
+          <Switch
+            checked={failover}
+            onChange={setFailover}
+            label={t("accounts.pools.failover")}
+            description={t("accounts.pools.failover.hint")}
+            size="sm"
+          />
           <div className="flex justify-end gap-2">
             <Button variant="outline" size="sm" onClick={reset}>{t("btn.cancel")}</Button>
             <Button variant="primary" size="sm" disabled={!name.trim() || members.length < 2} onClick={() => void save()}>

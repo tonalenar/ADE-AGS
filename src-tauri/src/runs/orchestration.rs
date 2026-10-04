@@ -613,6 +613,7 @@ pub(crate) fn plan_tasks(
                     queued: true,
                 },
             )?;
+            super::pool_failover::record_task_pool(&tx, &created.id, assignment.pool_origin.as_ref())?;
             ids.insert(t.key.clone(), created.id);
         }
         for t in &order {

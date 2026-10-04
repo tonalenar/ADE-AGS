@@ -30,6 +30,7 @@ import { AppExitListener } from "@/app/AppExitListener";
 import { SyncRunner } from "@/features/sync/SyncRunner";
 import { UpdateNotifier } from "@/features/updates/UpdateNotifier";
 import { ApprovalToast } from "@/features/runs/ApprovalToast";
+import { PoolFailoverNotice } from "@/features/accounts/PoolFailoverNotice";
 import type { ShellOutletContext } from "@/app/shellContext";
 import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
@@ -207,6 +208,7 @@ export function AppShell() {
       <ResizeHandles />
       <AppExitListener />
       <SyncRunner />
+      <PoolFailoverNotice />
       {/* Los avisos de la esquina, apilados: un permiso pendiente arriba de la versión
           nueva, sin taparse entre ellos. */}
       <div className="fixed bottom-4 right-4 z-40 flex flex-col items-end gap-2 pointer-events-none

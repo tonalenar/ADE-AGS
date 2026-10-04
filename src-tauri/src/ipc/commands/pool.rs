@@ -60,7 +60,7 @@ fn describe(pool: &Pool, accounts: &[(String, String, String)]) -> Value {
             Some(id) => accounts.iter().find(|(aid, _, _)| aid == id).map(|(_, _, n)| n.clone()).unwrap_or_else(|| format!("{id} (apagada)")),
         })
         .collect();
-    json!({ "id": pool.id, "name": pool.name, "agent": pool.agent_id, "strategy": pool.strategy.as_str(), "accounts": names })
+    json!({ "id": pool.id, "name": pool.name, "agent": pool.agent_id, "strategy": pool.strategy.as_str(), "accounts": names, "failover": pool.failover })
 }
 
 pub(super) fn pool_list(app: &AppHandle, _args: &Value) -> Result<Value, String> {
@@ -76,11 +76,12 @@ pub(super) fn pool_create(app: &AppHandle, args: &Value) -> Result<Value, String
     let accounts = created_accounts(&db)?;
     let members = members_from_names(&accounts, &agent, &arg_str(args, "accounts")?)?;
     let strategy = arg_str_opt(args, "strategy").map(|s| Strategy::parse(&s)).transpose()?.unwrap_or_default();
+    let failover = args.get("failover").and_then(Value::as_bool).unwrap_or(false);
 
     let mut all = pools::load(&db);
     let pairs: Vec<(String, String)> = accounts.iter().map(|(id, a, _)| (id.clone(), a.clone())).collect();
     let name = pools::validate(&all, &name, &agent, &members, &pairs)?;
-    let pool = Pool { id: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(), name, agent_id: agent, members, strategy };
+    let pool = Pool { id: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(), name, agent_id: agent, members, strategy, failover };
     all.push(pool.clone());
     pools::save(&db, &all)?;
     let _ = app.emit(CHANGED_EVENT, &pool.id);
@@ -106,13 +107,13 @@ pub fn pool_list_all(app: AppHandle) -> Result<Vec<Pool>, String> {
 }
 
 #[tauri::command]
-pub fn pool_save_new(app: AppHandle, name: String, agent_id: String, members: Vec<Option<String>>, strategy: String) -> Result<Pool, String> {
+pub fn pool_save_new(app: AppHandle, name: String, agent_id: String, members: Vec<Option<String>>, strategy: String, failover: Option<bool>) -> Result<Pool, String> {
     let db = db(&app)?;
     let accounts = created_accounts(&db)?;
     let pairs: Vec<(String, String)> = accounts.iter().map(|(id, a, _)| (id.clone(), a.clone())).collect();
     let mut all = pools::load(&db);
     let name = pools::validate(&all, &name, &agent_id, &members, &pairs)?;
-    let pool = Pool { id: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(), name, agent_id, members, strategy: Strategy::parse(&strategy)? };
+    let pool = Pool { id: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(), name, agent_id, members, strategy: Strategy::parse(&strategy)?, failover: failover.unwrap_or(false) };
     all.push(pool.clone());
     pools::save(&db, &all)?;
     let _ = app.emit(CHANGED_EVENT, &pool.id);
@@ -134,6 +135,18 @@ pub fn pool_remove(app: AppHandle, id: String) -> Result<(), String> {
     pools::save(&db, &all)?;
     let _ = app.emit(CHANGED_EVENT, &id);
     Ok(())
+}
+
+#[tauri::command]
+pub fn pool_set_failover(app: AppHandle, id: String, enabled: bool) -> Result<Pool, String> {
+    let db = db(&app)?;
+    let mut all = pools::load(&db);
+    let pool = all.iter_mut().find(|pool| pool.id == id).ok_or("O pool não existe mais.")?;
+    pool.failover = enabled;
+    let updated = pool.clone();
+    pools::save(&db, &all)?;
+    let _ = app.emit(CHANGED_EVENT, &id);
+    Ok(updated)
 }
 
 #[cfg(test)]
@@ -163,7 +176,7 @@ mod test {
 
     #[test]
     fn la_descripcion_pone_nombres_y_marca_las_apagadas() {
-        let pool = Pool { id: "p".into(), name: "T".into(), agent_id: "claude-code".into(), members: vec![None, Some("id-a".into()), Some("zz".into())], strategy: Strategy::Sticky };
+        let pool = Pool { id: "p".into(), name: "T".into(), agent_id: "claude-code".into(), members: vec![None, Some("id-a".into()), Some("zz".into())], strategy: Strategy::Sticky, failover: false };
         let d = describe(&pool, &accounts());
         assert_eq!(d["accounts"], json!(["principal", "Trabajo", "zz (apagada)"]));
         assert_eq!(d["strategy"], "sticky");

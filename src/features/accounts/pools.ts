@@ -14,6 +14,8 @@ export interface Pool {
   agentId: string;
   members: (string | null)[];
   strategy: PoolStrategy;
+  /** Failover opt-in (solo tareas headless, con límites fijos; ver `accounts.pools.failover.hint`). Default: false. */
+  failover: boolean;
 }
 
 /** Donde iría una cuenta, un pool se pide así. */
@@ -52,10 +54,13 @@ export function usePools(agentId?: string | null): Pool[] {
   return agentId ? pools.filter((p) => p.agentId === agentId) : pools;
 }
 
-export const poolSaveNew = (name: string, agentId: string, members: (string | null)[], strategy: PoolStrategy) =>
-  invoke<Pool>("pool_save_new", { name, agentId, members, strategy });
+export const poolSaveNew = (name: string, agentId: string, members: (string | null)[], strategy: PoolStrategy, failover: boolean) =>
+  invoke<Pool>("pool_save_new", { name, agentId, members, strategy, failover });
 
 export const poolRemove = (id: string) => invoke<void>("pool_remove", { id });
+
+/** Liga/desliga failover num pool já existente, sem recriá-lo. */
+export const poolSetFailover = (id: string, enabled: boolean) => invoke<Pool>("pool_set_failover", { id, enabled });
 
 /** La cuenta que elige ese pool ahora (`null` = la del sistema). */
 export const poolPick = (agentId: string, pool: string) => invoke<string | null>("pool_pick", { agentId, pool });

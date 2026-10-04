@@ -3581,6 +3581,7 @@ mod politica_del_lead {
                     routed_by: RoutedBy::Policy,
                     notes: vec![],
                     auto_account: true,
+                    pool_origin: None,
                 })
             },
             |t| {
@@ -3735,6 +3736,7 @@ mod politica_del_lead {
                 routed_by: RoutedBy::Manual,
                 notes: Vec::new(),
                 auto_account: true,
+                pool_origin: None,
             };
             start_orchestration(
                 db,
@@ -4339,11 +4341,13 @@ use crate::accounts::pools::{PoolSpec, Strategy};
 
 fn pool_spec(strategy: Strategy, members: &[Option<&str>], start: usize) -> PoolSpec {
     PoolSpec {
+        id: "pool-test".into(),
         name: "Trabajo".into(),
         agent_id: "claude-code".into(),
         members: members.iter().map(|m| m.map(str::to_string)).collect(),
         strategy,
         start,
+        failover: false,
     }
 }
 
