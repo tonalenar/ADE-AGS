@@ -41,6 +41,11 @@ export function isEcho(inputAt: number | undefined, now: number): boolean {
   return inputAt !== undefined && now - inputAt < ECHO_MS;
 }
 
+/** Las pestañas de agente que escribieron hace menos de `QUIET_MS`: las que están trabajando ahora. */
+export function activeTabIds(now = Date.now()): string[] {
+  return activeAgents(lastOutput, now);
+}
+
 function refresh(now = Date.now()): void {
   const count = activeAgents(lastOutput, now).length;
   for (const [id, at] of lastOutput) if (now - at >= QUIET_MS) lastOutput.delete(id);

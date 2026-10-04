@@ -13,6 +13,7 @@ mod claude;
 mod live;
 mod mission;
 mod parse;
+mod pricing;
 mod screen;
 mod trust;
 mod types;

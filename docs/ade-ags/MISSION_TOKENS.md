@@ -40,15 +40,27 @@ gastou nada", que é diferente de "não dá pra saber".
 O custo do ledger (quando o agente reporta, como Claude Code e OpenCode) aparece mesmo sem
 tokens medidos — é um dado independente, já existente, que não depende do transcript.
 
-## Por que não existe um número de "tokens economizados"
+## Custo estimado e economia do cache
 
-Não há, em nenhum lugar, uma medida real de quanto o cache evitou gastar: isso dependeria de
-saber o que teria sido enviado SEM cache, e esse contrafactual não existe. Inventar um número
-aqui seria pior do que não mostrar nada.
+Os tokens são medidos; o dinheiro é **estimado** com o preço de lista da API
+(`usage/pricing.rs`, por família de modelo; o modelo vem do próprio transcript):
 
-O que É medido, e por isso aparece, é a fração do que foi lido de cache: `cacheRead / (input +
-cacheRead + cacheWrite)`, rotulada "lido do cache" — um fato sobre o tráfego que de fato
-aconteceu, não uma estimativa de economia.
+- **Custo estimado** = entrada + saída + escrita de cache (1,25× a entrada) + leitura de cache (0,1×).
+- **Economia do cache** = tokens lidos do cache × (preço de entrada − preço de leitura). É uma
+  definição fixa e reproduzível: "quanto custaria ler esses tokens como entrada normal".
+- Uma assinatura (Claude Max, etc.) não paga por token: os valores são uma estimativa de
+  quanto o uso valeria na API, e a UI diz isso.
+- Modelo que a tabela não conhece **não é valorado** (nunca se inventa um preço): fica fora do
+  custo e a UI lista "sem preço na tabela". Agentes sem leitor continuam "não medido".
+
+## Tempo ativo da missão
+
+O tempo mostrado nas missões é o **tempo ativo**: só corre enquanto algum agente da missão
+está trabalhando (saída recente do terminal, mesma detecção do bot). Com todos os agentes
+quietos, esperando você, o relógio para. O frontend manda os blocos a `mission_active_add`
+(tabela `mission_active`, só soma em missão `running`); `MissionSummary.activeSeconds` vem
+da lista. Missões anteriores a essa medição não têm o dado (`null`) e mostram o tempo de
+relógio de parede.
 
 ## UI
 

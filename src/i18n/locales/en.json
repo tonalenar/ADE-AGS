@@ -1760,7 +1760,7 @@
   "botPanel.card.running": "RUNNING",
   "botPanel.card.time": "MISSION TIME",
   "botPanel.card.longest": "LONGEST",
-  "botPanel.card.spent": "SPENT (LEDGER)",
+  "botPanel.card.spent": "SPENT (EST.)",
   "botPanel.card.success": "SUCCESS RATE",
   "botPanel.card.failed": "FAILED",
   "botPanel.card.total": "TOTAL",
@@ -2019,5 +2019,13 @@
   "agents.update.reason.busy_mission": "A mission is running with this agent",
   "agents.update.reason.running": "Another update is in progress",
   "agents.update.reason.timeout": "Timed out (5 min)",
-  "agents.update.reason.failed": "Update failed"
+  "agents.update.reason.failed": "Update failed",
+  "botPanel.card.saved": "CACHE SAVINGS",
+  "botPanel.card.estimate": "EST. COST",
+  "botPanel.estimateNote": "Measured tokens × API list price: an estimate, not a charge (a subscription does not pay per token).",
+  "botPanel.unpriced": "NOT IN PRICE TABLE: {{models}}",
+  "missions.tokens.estimate": "Estimated cost (list price)",
+  "missions.tokens.saved": "Cache savings",
+  "missions.tokens.estimateNote": "Measured tokens × API list price. An estimate: a subscription does not pay per token.",
+  "missions.tokens.unpriced": "Not in the price table, left out of the cost: {{models}}"
 }

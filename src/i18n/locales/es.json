@@ -1760,7 +1760,7 @@
   "botPanel.card.running": "EN CURSO",
   "botPanel.card.time": "TIEMPO EN MISIÓN",
   "botPanel.card.longest": "MÁS LARGA",
-  "botPanel.card.spent": "GASTO (LEDGER)",
+  "botPanel.card.spent": "GASTO (EST.)",
   "botPanel.card.success": "TASA DE ÉXITO",
   "botPanel.card.failed": "FALLIDAS",
   "botPanel.card.total": "TOTAL",
@@ -2019,5 +2019,13 @@
   "agents.update.reason.busy_mission": "Hay una misión en curso con este agente",
   "agents.update.reason.running": "Hay otra actualización en curso",
   "agents.update.reason.timeout": "Tiempo agotado (5 min)",
-  "agents.update.reason.failed": "Falló la actualización"
+  "agents.update.reason.failed": "Falló la actualización",
+  "botPanel.card.saved": "AHORRO CACHÉ",
+  "botPanel.card.estimate": "COSTO EST.",
+  "botPanel.estimateNote": "Tokens medidos × precio de lista de la API: una estimación, no un cobro (una suscripción no paga por token).",
+  "botPanel.unpriced": "SIN PRECIO EN LA TABLA: {{models}}",
+  "missions.tokens.estimate": "Costo estimado (precio de lista)",
+  "missions.tokens.saved": "Ahorro del caché",
+  "missions.tokens.estimateNote": "Tokens medidos × precio de lista de la API. Es una estimación: una suscripción no paga por token.",
+  "missions.tokens.unpriced": "Sin precio en la tabla, fuera del costo: {{models}}"
 }

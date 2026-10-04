@@ -17,6 +17,7 @@ use crate::database::DbConnection;
 use crate::util::now_ts;
 
 use super::claude::{UsageRecord, parse_ts};
+use super::pricing;
 
 const USAGE_MARK: &str = "\"output_tokens\"";
 
@@ -99,6 +100,7 @@ struct TranscriptLine {
 #[derive(Deserialize)]
 struct TranscriptMessage {
     usage: Option<TranscriptUsage>,
+    model: Option<String>,
 }
 
 #[derive(Deserialize, Default)]
@@ -116,6 +118,11 @@ struct TranscriptUsage {
 /// Lê um transcript sem falhar por linhas vazias, truncadas ou corrompidas.
 /// Quando a linha declara um cwd, ela precisa corresponder ao da missão.
 pub(crate) fn read_transcript_usage(path: &Path, cwd: &str) -> Vec<UsageRecord> {
+    read_transcript_priced(path, cwd).into_iter().map(|(record, _)| record).collect()
+}
+
+/// Igual que `read_transcript_usage`, pero cada registro trae el modelo que lo generó.
+pub(crate) fn read_transcript_priced(path: &Path, cwd: &str) -> Vec<(UsageRecord, Option<String>)> {
     let Ok(file) = File::open(path) else {
         return Vec::new();
     };
@@ -146,19 +153,61 @@ pub(crate) fn read_transcript_usage(path: &Path, cwd: &str) -> Vec<UsageRecord> 
         let Some(at) = parsed.timestamp.as_deref().and_then(parse_ts) else {
             continue;
         };
-        let Some(usage) = parsed.message.and_then(|message| message.usage) else {
+        let Some(message) = parsed.message else {
             continue;
         };
-        records.push(UsageRecord {
-            at,
-            input: usage.input_tokens,
-            output: usage.output_tokens,
-            cache_write: usage.cache_creation_input_tokens,
-            cache_read: usage.cache_read_input_tokens,
-            session: parsed.session_id.map(Arc::from),
-        });
+        let model = message.model;
+        let Some(usage) = message.usage else {
+            continue;
+        };
+        records.push((
+            UsageRecord {
+                at,
+                input: usage.input_tokens,
+                output: usage.output_tokens,
+                cache_write: usage.cache_creation_input_tokens,
+                cache_read: usage.cache_read_input_tokens,
+                session: parsed.session_id.map(Arc::from),
+            },
+            model,
+        ));
     }
     records
+}
+
+/// Costo ESTIMADO con precio de lista y ahorro del caché, de los tokens medidos. No es un cobro.
+#[derive(Serialize, Clone, Debug, Default, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct CostEstimate {
+    pub cost_usd: f64,
+    /// Lo que se ahorró leyendo del caché en vez de pagar esos tokens como entrada normal.
+    pub saved_usd: f64,
+    /// Modelos que la tabla de precios no conoce: sus tokens no entran en el costo.
+    pub unpriced_models: Vec<String>,
+}
+
+/// Valora los registros dentro del intervalo con la tabla de precios. Pura.
+pub(crate) fn estimate_in_range(records: &[(UsageRecord, Option<String>)], start: i64, end: i64) -> CostEstimate {
+    let mut out = CostEstimate::default();
+    let mut unpriced = BTreeSet::new();
+    for (record, model) in records {
+        if record.at < start || record.at > end {
+            continue;
+        }
+        match model.as_deref().and_then(pricing::price_for) {
+            Some(price) => {
+                out.cost_usd += pricing::cost_usd(price, record.input, record.output, record.cache_write, record.cache_read);
+                out.saved_usd += pricing::cache_saved_usd(price, record.cache_read);
+            }
+            None => {
+                if let Some(model) = model.as_deref().filter(|m| !m.contains("synthetic")) {
+                    unpriced.insert(model.to_string());
+                }
+            }
+        }
+    }
+    out.unpriced_models = unpriced.into_iter().collect();
+    out
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -174,6 +223,8 @@ pub struct MissionAgentTokens {
     pub cache_read: Option<u64>,
     /// Custo reportado pelo ledger; pode estar ausente mesmo para um agente conhecido.
     pub cost_usd: Option<f64>,
+    /// Estimación con precio de lista; solo donde hay tokens medidos.
+    pub estimate: Option<CostEstimate>,
 }
 
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
@@ -185,6 +236,7 @@ pub struct MissionTokenTotals {
     pub cache_write: Option<u64>,
     pub cache_read: Option<u64>,
     pub cost_usd: Option<f64>,
+    pub estimate: Option<CostEstimate>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -282,6 +334,21 @@ fn mission_costs(
     Ok(costs)
 }
 
+fn sum_estimates(agents: &[MissionAgentTokens]) -> Option<CostEstimate> {
+    let mut total: Option<CostEstimate> = None;
+    for estimate in agents.iter().filter_map(|a| a.estimate.as_ref()) {
+        let t = total.get_or_insert_with(CostEstimate::default);
+        t.cost_usd += estimate.cost_usd;
+        t.saved_usd += estimate.saved_usd;
+        for m in &estimate.unpriced_models {
+            if !t.unpriced_models.contains(m) {
+                t.unpriced_models.push(m.clone());
+            }
+        }
+    }
+    total
+}
+
 fn total_for_agents(agents: &[MissionAgentTokens]) -> MissionTokenTotals {
     let measured = agents.iter().any(|agent| agent.measured);
     let token_totals = agents.iter().filter(|agent| agent.measured).fold(
@@ -311,6 +378,7 @@ fn total_for_agents(agents: &[MissionAgentTokens]) -> MissionTokenTotals {
         cache_write: measured.then_some(token_totals.cache_write),
         cache_read: measured.then_some(token_totals.cache_read),
         cost_usd: (!known_costs.is_empty()).then(|| known_costs.into_iter().sum()),
+        estimate: sum_estimates(agents),
     }
 }
 
@@ -340,14 +408,16 @@ pub async fn mission_tokens(
     let cwd = mission.cwd;
 
     tauri::async_runtime::spawn_blocking(move || {
-        let mut records = Vec::new();
+        let mut priced = Vec::new();
         if start.is_some() {
             for config_dir in &config_dirs {
                 for transcript in mission_transcripts(config_dir, &cwd) {
-                    records.extend(read_transcript_usage(&transcript, &cwd));
+                    priced.extend(read_transcript_priced(&transcript, &cwd));
                 }
             }
         }
+        let records: Vec<UsageRecord> = priced.iter().map(|(record, _)| record.clone()).collect();
+        let estimate = start.map(|start| estimate_in_range(&priced, start, end));
 
         let totals = start
             .map(|start| sum_usage_in_range(&records, start, end))
@@ -373,6 +443,7 @@ pub async fn mission_tokens(
                     output: is_measured.then_some(totals.output),
                     cache_write: is_measured.then_some(totals.cache_write),
                     cache_read: is_measured.then_some(totals.cache_read),
+                    estimate: if is_measured { estimate.clone() } else { None },
                 }
             })
             .collect::<Vec<_>>();
@@ -600,5 +671,39 @@ mod test {
         assert_eq!(records.len(), 2, "deve ignorar a linha corrompida e continuar com as linhas validas");
         assert_eq!(records[0].input, 1);
         assert_eq!(records[1].input, 3);
+    }
+}
+
+#[cfg(test)]
+mod estimate_tests {
+    use super::*;
+
+    fn rec(at: i64, input: u64, output: u64, cache_write: u64, cache_read: u64, model: &str) -> (UsageRecord, Option<String>) {
+        (UsageRecord { at, input, output, cache_write, cache_read, session: None }, Some(model.to_string()))
+    }
+
+    #[test]
+    fn estima_costo_y_ahorro_solo_dentro_del_intervalo() {
+        let records = vec![
+            rec(10, 1_000_000, 0, 0, 1_000_000, "claude-sonnet-4-5"),
+            rec(500, 9_999_999, 9_999_999, 0, 9_999_999, "claude-sonnet-4-5"),
+        ];
+        let e = estimate_in_range(&records, 0, 100);
+        assert!((e.cost_usd - (3.0 + 0.30)).abs() < 1e-9);
+        assert!((e.saved_usd - 2.70).abs() < 1e-9);
+        assert!(e.unpriced_models.is_empty());
+    }
+
+    #[test]
+    fn un_modelo_desconocido_no_se_valora_pero_se_avisa() {
+        let records = vec![
+            rec(10, 1_000_000, 0, 0, 0, "claude-sonnet-4-5"),
+            rec(11, 5_000_000, 0, 0, 5_000_000, "claude-futuro-9"),
+            rec(12, 5, 5, 0, 0, "<synthetic>"),
+        ];
+        let e = estimate_in_range(&records, 0, 100);
+        assert!((e.cost_usd - 3.0).abs() < 1e-9);
+        assert_eq!(e.saved_usd, 0.0);
+        assert_eq!(e.unpriced_models, vec!["claude-futuro-9".to_string()]);
     }
 }

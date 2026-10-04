@@ -241,7 +241,8 @@ pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>
                     (SELECT COUNT(*) FROM tasks t
                      WHERE t.run_id = m.active_run_id AND COALESCE(t.role, '') <> 'lead' AND t.status = 'done'),
                     l.agent_id,
-                    l.status
+                    l.status,
+                    (SELECT a.active_ms / 1000 FROM mission_active a WHERE a.mission_id = m.id)
              FROM missions m LEFT JOIN runs r ON r.id = m.active_run_id
              LEFT JOIN tasks l ON l.id = (SELECT t.id FROM tasks t WHERE t.run_id = m.active_run_id AND t.role = 'lead'
                                           ORDER BY t.created_at, t.rowid LIMIT 1)
@@ -258,6 +259,7 @@ pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>
                 workers_done: row.get(22)?,
                 lead_agent: row.get(23)?,
                 lead_status: row.get(24)?,
+                active_seconds: row.get(25)?,
             })
         })
         .map_err(|e| e.to_string())?
