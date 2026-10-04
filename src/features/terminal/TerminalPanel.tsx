@@ -53,7 +53,11 @@ export function TerminalPanel() {
               // sigue "intersectando". Una oculta que recibe salida sin parar redibujaba
               // filas que nadie mira. Se mueve sin cambiar de tamaño, así su TUI no recibe
               // un resize; al volver, xterm la redibuja entera sola.
-              transform: shown ? undefined : "translateX(-300vw)",
+              //
+              // En el canvas alejado la terminal conserva su tamaño real y se ESCALA hasta su
+              // nodo (ver `canvas/geometry.ts`): así sigue viva y no cambia filas ni columnas.
+              transform: shown ? (placement?.rect?.scale ? `scale(${placement.rect.scale})` : undefined) : "translateX(-300vw)",
+              transformOrigin: "0 0",
               pointerEvents: shown ? "auto" : "none",
               zIndex: shown ? 1 : 0,
             }}

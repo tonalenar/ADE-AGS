@@ -26,7 +26,11 @@ export function createFitter(term: XTerm, addon: FitAddon, container: () => HTML
     const el = container();
     const canvas = term.dimensions?.css.canvas;
     if (!el || !canvas) return;
-    const box = el.getBoundingClientRect();
+    const rect = el.getBoundingClientRect();
+    // Con la terminal escalada por CSS (canvas alejado) el rectángulo sale ya achicado y se
+    // le sacarían columnas de más. Ahí se mide el tamaño de layout, que ignora la escala.
+    const scaled = el.offsetWidth > 0 && Math.abs(rect.width / el.offsetWidth - 1) > 0.01;
+    const box = scaled ? { width: el.clientWidth, height: el.clientHeight } : rect;
     // El carril de la barra de scroll está dentro del contenedor, a la derecha de la grilla.
     const scrollbar = term.options.scrollbar?.width ?? 14;
     let { cols, rows } = term;
