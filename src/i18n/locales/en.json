@@ -1963,6 +1963,8 @@
   "canvas.dock.usageTitle": "Agent usage",
   "canvas.dock.map": "Map",
   "canvas.dock.noAccounts": "No logged-in accounts. Sign in to an account under Agents to see plan usage.",
+  "canvas.preview.use": "Use terminal",
+  "canvas.preview.hint": "Preview: you cannot type here. Click \"Use terminal\" (or double-click) to open it at 100%.",
   "canvas.usage.session": "Session (5 h)",
   "canvas.usage.week": "Weekly",
   "canvas.usage.resetsAt": "Resets {{when}}",
