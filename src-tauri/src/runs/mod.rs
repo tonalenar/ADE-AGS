@@ -109,6 +109,7 @@ pub async fn run_start_task(
     let db = db_of(&app)?;
     let request = route_request(agent_id, model, complexity, account_id, auto_account);
     let assignment = assign(&db, request).await?;
+    let _update_guard = crate::agents::updates::activity_guard()?;
     let note = (!assignment.notes.is_empty()).then(|| assignment.notes.join("\n"));
 
     let mut task = {
@@ -260,6 +261,7 @@ pub(crate) fn start_orchestration(
     launch: impl FnOnce(&Task) -> Result<(), String>,
 ) -> Result<Task, String> {
     let objective = spec.objective.trim();
+    let _update_guard = crate::agents::updates::activity_guard()?;
     if objective.is_empty() {
         return Err("falta el objetivo".into());
     }

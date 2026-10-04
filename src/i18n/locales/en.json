@@ -1999,5 +1999,22 @@
   "canvas.folder.delete": "Remove from the canvas (deletes nothing on disk)",
   "canvas.folder.deleteConfirm": "Remove?",
   "canvas.folder.empty": "Empty folder",
-  "canvas.folder.truncated": "Showing the first {{count}} rows. Close subfolders to see the rest."
+  "canvas.folder.truncated": "Showing the first {{count}} rows. Close subfolders to see the rest.",
+  "settings.agentUpdates.label": "Update agents automatically",
+  "settings.agentUpdates.desc": "Checks when the app opens and every 6 h, and updates only idle agents (no open terminal or running mission). Off: the app only notifies you.",
+  "agents.update.available": "{{label}} {{version}} available",
+  "agents.update.action": "Update",
+  "agents.update.running": "Updating…",
+  "agents.update.latest": "new: {{version}}",
+  "agents.update.done": "{{label}} updated to {{version}}",
+  "agents.update.doneNoVersion": "{{label}} updated",
+  "agents.update.failed": "Could not update {{label}}: {{error}}",
+  "agents.update.reason.not_npm": "Installed outside npm: update it manually",
+  "agents.update.reason.no_updater": "No automatic updater for this agent",
+  "agents.update.reason.check_failed": "Could not check the latest version",
+  "agents.update.reason.busy_terminal": "Close this agent's open terminals to update",
+  "agents.update.reason.busy_mission": "A mission is running with this agent",
+  "agents.update.reason.running": "Another update is in progress",
+  "agents.update.reason.timeout": "Timed out (5 min)",
+  "agents.update.reason.failed": "Update failed"
 }

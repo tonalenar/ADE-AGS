@@ -5,7 +5,9 @@ import { AnimateSpin, Button, CheckCircleIcon } from "neogestify-ui-components";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 
-import { agentSearchPath, detectAgents, type SearchPath } from "./ipc";
+import { announceResult, reasonText } from "./AgentUpdateWatcher";
+import { agentSearchPath, agentUpdate, agentUpdatesCheck, detectAgents, type SearchPath } from "./ipc";
+import { updateButtonState, type AgentUpdateInfo } from "./updatePolicy";
 
 /**
  * Qué TUIs de fábrica encontró la app en esta máquina, dónde, y dónde buscó.
@@ -23,6 +25,31 @@ export function DetectedAgents() {
   const [searchPath, setSearchPath] = useState<SearchPath | null>(null);
   const [scanning, setScanning] = useState(false);
   const [showPath, setShowPath] = useState(false);
+  const [updates, setUpdates] = useState<Record<string, AgentUpdateInfo>>({});
+  const [updating, setUpdating] = useState<string | null>(null);
+
+  const refreshUpdates = () =>
+    agentUpdatesCheck()
+      .then((list) => setUpdates(Object.fromEntries(list.map((u) => [u.agentId, u]))))
+      .catch(() => setUpdates({}));
+
+  useEffect(() => {
+    refreshUpdates();
+  }, []);
+
+  const runUpdate = async (info: AgentUpdateInfo) => {
+    setUpdating(info.agentId);
+    try {
+      const result = await agentUpdate(info.agentId);
+      announceResult(t, info.label, result);
+      if (result.ok) setDetectedAgents(await detectAgents(true));
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setUpdating(null);
+      refreshUpdates();
+    }
+  };
 
   useEffect(() => {
     agentSearchPath().then(setSearchPath).catch(() => setSearchPath(null));
@@ -32,6 +59,7 @@ export function DetectedAgents() {
     setScanning(true);
     try {
       setDetectedAgents(await detectAgents(true));
+      refreshUpdates();
     } finally {
       setScanning(false);
     }
@@ -62,7 +90,11 @@ export function DetectedAgents() {
       </div>
 
       <div className="flex flex-col gap-1">
-        {agents.map((agent) => (
+        {agents.map((agent) => {
+          const info = updates[agent.id];
+          const btn = info ? updateButtonState(info, updating !== null) : null;
+          const why = btn?.disabledReason ? reasonText(t, btn.disabledReason) : undefined;
+          return (
           <div key={agent.id} className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg
             bg-gray-100/70 dark:bg-white/4">
             {agent.available ? (
@@ -84,8 +116,27 @@ export function DetectedAgents() {
                 {agent.version}
               </span>
             )}
+            {info && btn?.visible && (
+              <>
+                <span className="shrink-0 text-[10.5px] text-emerald-600 dark:text-emerald-400">
+                  {t("agents.update.latest", { version: info.latestVersion })}
+                </span>
+                <span title={why}>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    disabled={!btn.enabled}
+                    onClick={() => runUpdate(info)}
+                    leftIcon={updating === agent.id ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
+                  >
+                    {updating === agent.id ? t("agents.update.running") : t("agents.update.action")}
+                  </Button>
+                </span>
+              </>
+            )}
           </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* Cuando falta alguna, lo que sirve es saber dónde se buscó: la carpeta donde la
