@@ -145,7 +145,8 @@ fn test_semver_comparisons() {
 fn test_busy_reason_blocks_terminal_and_mission() {
     let conn = rusqlite::Connection::open_in_memory().unwrap();
     conn.execute_batch(
-        "CREATE TABLE tabs (id TEXT PRIMARY KEY, agent_id TEXT NOT NULL);
+        "CREATE TABLE windows (id TEXT PRIMARY KEY, is_open INTEGER NOT NULL);
+         CREATE TABLE tabs (id TEXT PRIMARY KEY, window_id TEXT, agent_id TEXT NOT NULL);
          CREATE TABLE missions (id TEXT PRIMARY KEY, status TEXT NOT NULL, lead_agent_id TEXT, squad_id TEXT);
          CREATE TABLE squads (id TEXT PRIMARY KEY, lead_agent_id TEXT);
          CREATE TABLE squad_members (squad_id TEXT NOT NULL, agent_id TEXT NOT NULL);
@@ -159,7 +160,13 @@ fn test_busy_reason_blocks_terminal_and_mission() {
     assert_eq!(busy_reason(&conn, "codex").unwrap(), None);
 
     // Terminal aberto com codex: bloqueia
-    conn.execute("INSERT INTO tabs (id, agent_id) VALUES ('t1', 'codex')", []).unwrap();
+    conn.execute("INSERT INTO windows (id, is_open) VALUES ('w1', 1)", []).unwrap();
+    conn.execute("INSERT INTO tabs (id, window_id, agent_id) VALUES ('t1', 'w1', 'codex')", []).unwrap();
+    assert_eq!(busy_reason(&conn, "codex").unwrap(), Some("busy_terminal"));
+    // Janela fechada: a aba salva nao bloqueia
+    conn.execute("UPDATE windows SET is_open = 0", []).unwrap();
+    assert_eq!(busy_reason(&conn, "codex").unwrap(), None);
+    conn.execute("UPDATE windows SET is_open = 1", []).unwrap();
     assert_eq!(busy_reason(&conn, "codex").unwrap(), Some("busy_terminal"));
     // Outro agente continua desimpedido
     assert_eq!(busy_reason(&conn, "claude-code").unwrap(), None);
