@@ -668,7 +668,7 @@
   "accounts.pools.strategy.sticky.hint": "Sempre a primeira da lista que puder; a seguinte só se ela não puder.",
   "accounts.pools.failover": "Failover",
   "accounts.pools.failover.hint": "Só para tarefas automáticas (headless), e só quando a conta esgota a cota ou leva rate limit: tenta 1 vez a próxima conta do pool. Limites fixos: no máximo 1 failover por tarefa, no máximo 3 por pool por hora, a conta que esgotou fica 30 min fora. Nunca troca para conta de outro pool/TUI nem para conta bloqueada. Terminais interativos nunca trocam de conta sozinhos — só avisam.",
-  "accounts.pools.failover.notice": "A conta {{from}} esgotou a cota. Considere trocar para {{to}} no pool \"{{pool}}\".",
+  "accounts.pools.failover.notice": "A tarefa \"{{task}}\" passou da conta {{from}} para {{to}} no pool \"{{pool}}\" (cota esgotada).",
   "accounts.auto.hint": "Aquele com mais cota restante",
   "settings.accounts.delete.action": "Remover conta",
   "settings.accounts.add.titleFor": "Nova conta {{agent}}",
