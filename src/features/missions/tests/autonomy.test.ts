@@ -7,9 +7,12 @@ describe("withAutonomy", () => {
     expect(withAutonomy("codex", "codex", "safe")).toBe("codex --approve-for-me");
   });
 
-  it("en seguro, Antigravity y Gemini solo aprueban ediciones", () => {
-    expect(withAutonomy("antigravity", "agy", "safe")).toBe("agy --mode accept-edits");
+  it("en seguro, Gemini solo aprueba ediciones", () => {
     expect(withAutonomy("gemini-cli", "gemini", "safe")).toBe("gemini --approval-mode auto_edit");
+  });
+
+  it("Antigravity no recibe flag de permisos acá: ya lo trae del catálogo y no se pisan", () => {
+    expect(withAutonomy("antigravity", "agy", "safe")).toBe("agy");
   });
 
   it("nunca agrega un modo peligroso", () => {

@@ -1742,7 +1742,7 @@
   "missions.autonomy.title": "Permisos de los agentes",
   "missions.autonomy.safe": "Automático con protección",
   "missions.autonomy.ask": "Preguntar siempre",
-  "missions.autonomy.safeHint": "Cada agente aprueba solo lo rutinario y mantiene su sandbox: Codex con revisión automática, Antigravity y Gemini aprobando solo ediciones. Lo demás sigue preguntando. Rige al iniciar la misión.",
+  "missions.autonomy.safeHint": "Cada agente aprueba solo lo rutinario y mantiene su sandbox: Codex con revisión automática y Gemini aprobando solo ediciones. Lo demás sigue preguntando. Antigravity no sigue esta regla: sus terminales ya abren con permisos automáticos. Rige al iniciar la misión.",
   "missions.autonomy.askHint": "Los agentes piden permiso como vienen de fábrica. Rige al iniciar la misión.",
   "missions.timings.title": "Tiempos",
   "missions.timings.empty": "Todavía no hay tiempos medidos en esta misión.",
