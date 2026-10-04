@@ -626,6 +626,7 @@ function CrownIcon({ className }: { className?: string }) {
 
 /** Las últimas líneas de la terminal, como texto: escalan con el zoom sin romper nada. */
 function Preview({ tabId, rows, onOpen }: { tabId: string; rows: number; onOpen: () => void }) {
+  const { t } = useTranslation();
   const [lines, setLines] = useState<string[]>(() => screenOf(tabId, null, rows)?.lines ?? []);
   useEffect(() => {
     const read = () => setLines(screenOf(tabId, null, rows)?.lines ?? []);
@@ -635,13 +636,27 @@ function Preview({ tabId, rows, onOpen }: { tabId: string; rows: number; onOpen:
   }, [tabId, rows]);
 
   return (
-    <pre
-      onDoubleClick={onOpen}
-      className="absolute inset-0 m-0 px-3 py-2 overflow-hidden whitespace-pre font-mono text-[12px] leading-[15px]
-        text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-surface"
-    >
-      {cleanPreviewLines(lines).join("\n")}
-    </pre>
+    <>
+      <pre
+        onDoubleClick={onOpen}
+        title={t("canvas.preview.hint")}
+        className="absolute inset-0 m-0 px-3 py-2 overflow-hidden whitespace-pre font-mono text-[12px] leading-[15px]
+          text-gray-700 dark:text-gray-300 bg-gray-100 dark:bg-surface"
+      >
+        {cleanPreviewLines(lines).join("\n")}
+      </pre>
+      {/* Alejado, esto es solo una vista previa: no se escribe acá. El botón lleva la vista a la
+          terminal al 100 %, donde sí está viva (antes solo se sabía con doble clic). */}
+      <button
+        type="button"
+        className="nodrag nopan absolute bottom-2 right-2 h-7 px-3 rounded-md text-[11.5px] font-medium shadow-md
+          bg-accent-500 text-white hover:bg-accent-600"
+        onPointerDown={(e) => e.stopPropagation()}
+        onClick={(e) => { e.stopPropagation(); onOpen(); }}
+      >
+        {t("canvas.preview.use")}
+      </button>
+    </>
   );
 }
 

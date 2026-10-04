@@ -1963,6 +1963,8 @@
   "canvas.dock.usageTitle": "Uso dos agentes",
   "canvas.dock.map": "Mapa",
   "canvas.dock.noAccounts": "Nenhuma conta com login. Entre numa conta em Agentes para ver o uso do plano.",
+  "canvas.preview.use": "Usar terminal",
+  "canvas.preview.hint": "Prévia: aqui não dá para digitar. Clique em \"Usar terminal\" (ou duplo clique) para abrir em 100%.",
   "canvas.usage.session": "Sessão (5 h)",
   "canvas.usage.week": "Semanal",
   "canvas.usage.resetsAt": "Redefine {{when}}",
