@@ -2,7 +2,8 @@ import { useEffect, useRef } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
-import { Alerta } from "neogestify-ui-components";
+
+import { showBotToast } from "@/shared/brand/botToastStore";
 
 import * as memoryIpc from "./ipc";
 import { grownOwners, newAgentProposals, pendingKeyOf, suggesterName } from "./pendingNotice";
@@ -68,16 +69,12 @@ export function useMemoryPendingNotice(workspaceId: string): void {
           const page = await memoryIpc.listMemory(workspaceId, owner);
           for (const entry of newAgentProposals(page.items, seen)) {
             seen.add(pendingKeyOf(entry));
-            Alerta({
+            showBotToast({
               title: t("missions.memoryNotice.title"),
               text: t("missions.memoryNotice.body", { name: suggesterName(entry), key: entry.key }),
-              icon: "info",
-              toast: true,
-              timer: 9000,
-              position: "bottom-end",
-              showConfirmButton: true,
-              confirmButtonText: t("missions.memoryNotice.open"),
-              onConfirm: () => navigate("/missions", {
+              ms: 9000,
+              actionLabel: t("missions.memoryNotice.open"),
+              onAction: () => navigate("/missions", {
                 state: { focusMission: owner, memoryTab: owner ? "mission" : "workspace" },
               }),
             });

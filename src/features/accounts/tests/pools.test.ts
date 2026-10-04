@@ -31,8 +31,8 @@ vi.mock("@tauri-apps/api/event", () => ({
   listen: (...args: unknown[]) => mock.listen(...args),
 }));
 
-vi.mock("neogestify-ui-components", () => ({
-  AlertaToast: (...args: unknown[]) => mock.toast(...args),
+vi.mock("@/shared/brand/botToastStore", () => ({
+  showBotToast: (...args: unknown[]) => mock.toast(...args),
 }));
 
 vi.mock("react-i18next", () => ({
@@ -226,10 +226,11 @@ describe("PoolFailoverNotice (aviso para terminais interativos)", () => {
 
     expect(mock.toast).toHaveBeenCalledTimes(1);
     expect(mock.toast).toHaveBeenCalledWith(
-      "Devs",
-      expect.stringContaining("accounts.pools.failover.notice"),
-      "info",
-      8000
+      expect.objectContaining({
+        title: "Devs",
+        text: expect.stringContaining("accounts.pools.failover.notice"),
+        ms: 8000,
+      }),
     );
 
     // Garante que NENHUMA troca de conta automatica e disparada para terminais interativos

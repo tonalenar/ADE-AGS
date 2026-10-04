@@ -1,10 +1,10 @@
 import { useEffect } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
-import { AlertaToast } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { useRunsStore } from "@/features/runs/store";
+import { showBotToast } from "@/shared/brand/botToastStore";
 import type { BusEvent } from "@/shared/bus";
 
 /**
@@ -45,17 +45,16 @@ export function PoolFailoverNotice() {
       const task = useRunsStore.getState().tasks.find((tk) => tk.id === data.taskId);
       const accounts = useAccountsStore.getState().accounts;
       const accountLabel = (id: string | null) => (id ? accounts.find((a) => a.id === id)?.name ?? id : t("accounts.system"));
-      AlertaToast(
-        data.poolName || t("accounts.pools.title"),
-        t("accounts.pools.failover.notice", {
+      showBotToast({
+        title: data.poolName || t("accounts.pools.title"),
+        text: t("accounts.pools.failover.notice", {
           task: task?.title ?? data.taskId,
           from: accountLabel(data.fromAccount),
           to: accountLabel(data.toAccount),
           pool: data.poolName,
         }),
-        "info",
-        8000,
-      );
+        ms: 8000,
+      });
     });
     return () => {
       off.then((fn) => fn());
