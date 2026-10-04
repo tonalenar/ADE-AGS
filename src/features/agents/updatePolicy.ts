@@ -60,9 +60,17 @@ export interface UpdateButtonState {
   disabledReason: string | null;
 }
 
+/** Hay terminales abiertas del agente y nada más lo impide: el clic las cierra, actualiza y reabre (ver `updateFlow.ts`). */
+export function needsRestart(info: AgentUpdateInfo): boolean {
+  return info.reason === "busy_terminal";
+}
+
 export function updateButtonState(info: AgentUpdateInfo, running: boolean): UpdateButtonState {
   if (!hasUpdate(info)) return { visible: false, enabled: false, disabledReason: null };
   if (running) return { visible: true, enabled: false, disabledReason: "running" };
+  // Con terminales abiertas se puede: el flujo las cierra y las vuelve a abrir. Una misión en
+  // curso, un agente que no se actualiza solo o una consulta fallida siguen bloqueando.
+  if (needsRestart(info)) return { visible: true, enabled: true, disabledReason: null };
   if (info.busy || !info.canAutoUpdate) {
     return { visible: true, enabled: false, disabledReason: info.reason ?? "no_updater" };
   }

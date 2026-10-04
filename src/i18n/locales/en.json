@@ -2002,6 +2002,8 @@
   "canvas.folder.truncated": "Showing the first {{count}} rows. Close subfolders to see the rest.",
   "settings.agentUpdates.label": "Update agents automatically",
   "settings.agentUpdates.desc": "Checks when the app opens and every 6 h, and updates only idle agents (no open terminal or running mission). Off: the app only notifies you.",
+  "agents.update.closing": "Updating {{label}}: closing {{count}} terminal(s), updating and reopening by itself…",
+  "agents.update.reopened": "{{label}}: {{count}} terminal(s) reopened, conversation resumed.",
   "agents.update.available": "{{label}} {{version}} available",
   "agents.update.action": "Update",
   "agents.update.running": "Updating…",

@@ -2002,6 +2002,8 @@
   "canvas.folder.truncated": "Se muestran las primeras {{count}} filas. Cerrá subcarpetas para ver el resto.",
   "settings.agentUpdates.label": "Actualizar agentes automáticamente",
   "settings.agentUpdates.desc": "Revisa al abrir la app y cada 6 h, y actualiza solo los agentes ociosos (sin terminal abierta ni misión en curso). Apagado: la app solo avisa.",
+  "agents.update.closing": "Actualizando {{label}}: cerrando {{count}} terminal(es), actualizando y reabriendo solo…",
+  "agents.update.reopened": "{{label}}: {{count}} terminal(es) reabierta(s), con la conversación retomada.",
   "agents.update.available": "{{label}} {{version}} disponible",
   "agents.update.action": "Actualizar",
   "agents.update.running": "Actualizando…",

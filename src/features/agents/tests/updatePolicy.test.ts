@@ -126,14 +126,20 @@ describe("updatePolicy", () => {
       expect(state).toEqual({ visible: true, enabled: false, disabledReason: "running" });
     });
 
-    it("is visible and disabled when agent is busy with terminal open", () => {
+    it("with only terminals open the button is ENABLED: the click closes, updates and reopens them", () => {
       const busyInfo: AgentUpdateInfo = {
         ...baseInfo,
         busy: true,
+        canAutoUpdate: false,
         reason: "busy_terminal",
       };
       const state = updateButtonState(busyInfo, false);
-      expect(state).toEqual({ visible: true, enabled: false, disabledReason: "busy_terminal" });
+      expect(state).toEqual({ visible: true, enabled: true, disabledReason: null });
+    });
+
+    it("stays disabled when the agent is in a running mission", () => {
+      const missionInfo: AgentUpdateInfo = { ...baseInfo, busy: true, canAutoUpdate: false, reason: "busy_mission" };
+      expect(updateButtonState(missionInfo, false)).toEqual({ visible: true, enabled: false, disabledReason: "busy_mission" });
     });
 
     it("is visible and disabled when agent cannot auto update (e.g. not_npm)", () => {

@@ -393,9 +393,24 @@ pub fn npm_install_matches(agent: &super::AgentInfo, def: &UpdateDef, root: &str
 }
 
 pub fn busy_reason(conn: &rusqlite::Connection, id: &str) -> Result<Option<&'static str>, String> {
-    let terminal: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM tabs t JOIN windows w ON w.id=t.window_id WHERE t.agent_id=?1 AND w.is_open=1)", [id], |r| r.get(0)).map_err(|e| e.to_string())?;
-    if terminal {
-        return Ok(Some("busy_terminal"));
+    busy_reason_with(conn, id, false)
+}
+
+/// `terminals_released`: quien llama (la pantalla, tras el clic del usuario en "Actualizar")
+/// ya cerró los procesos de este agente y va a volver a abrir sus pestañas con `--resume`.
+/// Entonces las pestañas guardadas no bloquean, pero NUNCA se confía en eso a ciegas: un
+/// proceso vivo del agente en el registro de PTYs sigue bloqueando, y una misión o un run en
+/// curso con ese agente también.
+pub fn busy_reason_with(
+    conn: &rusqlite::Connection,
+    id: &str,
+    terminals_released: bool,
+) -> Result<Option<&'static str>, String> {
+    if !terminals_released {
+        let terminal: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM tabs t JOIN windows w ON w.id=t.window_id WHERE t.agent_id=?1 AND w.is_open=1)", [id], |r| r.get(0)).map_err(|e| e.to_string())?;
+        if terminal {
+            return Ok(Some("busy_terminal"));
+        }
     }
     for tab in crate::terminal::live_update_tabs() {
         let Some(tab) = tab else {
@@ -563,7 +578,12 @@ pub fn update_with_executor(
     result
 }
 #[tauri::command]
-pub async fn agent_update(app: tauri::AppHandle, agent_id: String) -> AgentUpdateResult {
+pub async fn agent_update(
+    app: tauri::AppHandle,
+    agent_id: String,
+    terminals_released: Option<bool>,
+) -> AgentUpdateResult {
+    let terminals_released = terminals_released.unwrap_or(false);
     let agents = super::detect_agents(Some(true)).await.unwrap_or_default();
     let db = app.state::<DbConnection>().inner().clone();
     let fallback = agent_id.clone();
@@ -574,7 +594,7 @@ pub async fn agent_update(app: tauri::AppHandle, agent_id: String) -> AgentUpdat
             if elevated() {return failure("failed")}
             let Some(agent)=agents.iter().find(|a|a.id==agent_id && a.available && update_def(&a.id).is_some()) else {return failure("no_updater")};
             let Ok(conn)=db.lock() else {return failure("check_failed")};
-            let busy=busy_reason(&conn,&agent_id).unwrap_or(Some("check_failed")); drop(conn);
+            let busy=busy_reason_with(&conn,&agent_id,terminals_released).unwrap_or(Some("check_failed")); drop(conn);
             if let Some(reason)=busy {return failure(reason)}
             let info=check_one(agent,busy,&OfficialExecutor);
             let mut result=update_with_executor(&agent_id,&info,&OfficialExecutor);
