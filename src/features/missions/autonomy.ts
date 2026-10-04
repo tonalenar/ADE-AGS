@@ -4,11 +4,12 @@
  * - `ask`: como cada CLI viene de fábrica (pide casi todo).
  * - `safe`: **automático con protección**. Cada CLI aprueba por su cuenta lo rutinario SIN
  *   quitar su sandbox ni saltarse los permisos: Codex con revisión automática dentro del
- *   sandbox, Antigravity y Gemini aprobando solo las ediciones. Este nivel no agrega los
- *   modos "peligrosos" (`--dangerously-*`, `--yolo`).
- *   Los terminales interactivos de Antigravity reciben `--dangerously-skip-permissions`
- *   aparte, desde el catálogo (`AgentDef::launch_args`), porque hay alguien mirando la TUI.
- *   Los runs de Mission/Fleet no: ver `runs/antigravity.rs`.
+ *   sandbox y Gemini aprobando solo las ediciones. Este nivel no agrega los modos
+ *   "peligrosos" (`--dangerously-*`, `--yolo`).
+ *   Antigravity NO tiene flag acá a propósito: sus terminales interactivos ya reciben
+ *   `--dangerously-skip-permissions` desde el catálogo (`AgentDef::launch_args`), porque hay
+ *   alguien mirando la TUI, y sumarle `--mode accept-edits` los dejaba con dos flags de
+ *   permisos que se pisan. Los runs de Mission/Fleet no lo reciben: ver `runs/antigravity.rs`.
  */
 export type Autonomy = "ask" | "safe";
 
@@ -18,7 +19,6 @@ const STORAGE_KEY = "ags.agentAutonomy";
 /** Lo que cada agente recibe en el nivel `safe`. Verificado con `--help` de cada CLI. */
 const SAFE_FLAGS: Record<string, string> = {
   codex: "--approve-for-me",
-  antigravity: "--mode accept-edits",
   "gemini-cli": "--approval-mode auto_edit",
 };
 
