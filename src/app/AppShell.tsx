@@ -27,6 +27,7 @@ import { ResizeHandles } from "@/app/ResizeHandles";
 import { useGlobalShortcuts } from "@/app/useGlobalShortcuts";
 import { VIEW_OVERLAY_ID } from "@/shared/ui/ViewModal";
 import { AppExitListener } from "@/app/AppExitListener";
+import { useFileDropToTerminal } from "@/features/terminal/useFileDropToTerminal";
 import { SyncRunner } from "@/features/sync/SyncRunner";
 import { UpdateNotifier } from "@/features/updates/UpdateNotifier";
 import { ApprovalToast } from "@/features/runs/ApprovalToast";
@@ -63,6 +64,7 @@ function toFrontendTab(row: RestoredTabRow): Tab {
 }
 
 export function AppShell() {
+  useFileDropToTerminal();
   const tabs = useTabsStore((s) => s.tabs);
   const setDetectedAgents = useTabsStore((s) => s.setDetectedAgents);
   const activateTab = useTabsStore((s) => s.activateTab);
