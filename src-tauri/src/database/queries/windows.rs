@@ -74,8 +74,12 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     db: &DbConnection,
     app: &tauri::AppHandle<R>,
 ) -> Result<(), String> {
+    // Mientras se actualiza un agente (hasta 5 min) no se guarda el estado de la ventana: se
+    // omite este guardado en vez de fallar, porque el temporizador de 20 s lo repite enseguida.
+    let Ok(_update_guard) = crate::agents::updates::activity_guard() else {
+        return Ok(());
+    };
     // Un guardado de una ventana que ya no existe nativamente es un guardado zombi: el
-    let _update_guard = crate::agents::updates::activity_guard()?;
     // JS de una ventana en pleno teardown (o cuyo timer periódico de 20s disparó justo
     // durante el cierre) puede llegar acá después de que su fila se borró a propósito.
     // Como el INSERT de abajo recrea la fila con `is_open = 1`, eso resucitaba ventanas
