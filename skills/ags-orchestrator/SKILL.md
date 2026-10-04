@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.23.0
+version: 1.24.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -573,7 +573,18 @@ ags tab create --agent claude-code --account pool:Work   # the pool picks the ac
 Ask for a pool with `pool:<name>` wherever an account goes: `--account`, the `account` of a plan
 task or of a Squad member. The pick uses the last known quota, sessions and running tasks. A task
 routed through a pool is pinned to the account it got: if that one runs out mid-task it is not
-moved to an account outside the pool.
+moved to an account outside the pool — unless the pool opted into failover.
+
+**Failover (opt-in, off by default)**: a pool can turn on `failover` so a headless fleet task
+that hits a quota/rate-limit on its pool account gets ONE retry on the next eligible account of
+the **same** pool, instead of failing outright. It never fires for other failure kinds (a code
+error, a timeout, denied permissions, an expired login) and never crosses into another pool or
+TUI. Hard limits, all enforced server-side: 1 failover per task, 3 per pool per hour (sliding
+window), and the account that ran out gets a 30-minute cooldown before it can be picked again in
+that pool. If no other eligible account is left, the task just fails as it always did. Interactive
+terminal tabs never switch accounts on their own — only fleet tasks failover; a successful one
+publishes `account.pool_failover` (task, pool, from/to account) as an audit event and a system
+notification. See `docs/ade-ags/POOL_FAILOVER.md` for the full limits table.
 
 ### Android devices on the canvas
 
