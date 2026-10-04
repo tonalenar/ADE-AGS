@@ -7,6 +7,26 @@ and print-mode execution as a Squad Lead or worker in Mission/Fleet.
 Select **Antigravity**, not **Gemini CLI**, to use the models from this login.
 Gemini CLI is a separate executable and account integration.
 
+## Interactive terminals
+
+Interactive Antigravity terminals launch `agy` with
+`--dangerously-skip-permissions`. That covers the "+" wizard, duplicates, session
+reopen, workspace reopen, and windows restored from the last session. Someone is
+watching the TUI and can interrupt it with Ctrl+C. This is a deliberate choice for
+supervised terminals, not a hidden default.
+
+Detection, `--version`, and the agent list still use the bare `agy` command. The
+flag is added only when the terminal command is composed (`buildLaunchCommand`).
+It is not written to `~/.gemini/antigravity-cli/settings.json`, so `agy` outside
+ADE is unchanged. If the CLI renames the flag, the only place to change it is
+`AgentDef::launch_args` for `antigravity` in `src-tauri/src/agents/registry.rs`.
+
+Mission and Fleet runs are a different path. Lead and worker print mode keep the
+deny policy in [Execution isolation](#execution-isolation): neither role uses
+`--dangerously-skip-permissions`. Canvas terminals started for a mission are
+interactive and use the same composer as any other Antigravity terminal.
+Unattended processes in `src-tauri/src/runs/antigravity.rs` do not.
+
 ## Execution isolation
 
 Each process receives a newly created temporary home containing only its MCP

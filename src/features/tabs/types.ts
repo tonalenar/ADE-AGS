@@ -12,6 +12,8 @@ export interface AgentInfo {
   id: AgentId;
   label: string;
   command: string;
+  /** Flags que la app agrega al comando al abrir terminales de esta TUI. */
+  launchArgs?: string[];
   available: boolean;
   version?: string;
   /** Dónde se encontró el binario. Ausente = no está (o es una custom, que no se detecta). */

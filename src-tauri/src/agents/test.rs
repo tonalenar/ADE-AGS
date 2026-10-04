@@ -206,15 +206,30 @@ fn cada_tui_dice_como_recibe_el_mcp_y_como_nombra_sus_tools() {
 
 #[test]
 fn orchestration_capability_requires_implemented_ade_mcp() {
-    for (id, expected) in [("claude-code", true), ("opencode", true), ("codex", true), ("gemini-cli", false), ("kimi-code", false), ("antigravity", true), ("bash", false)] {
+    for (id, expected) in [
+        ("claude-code", true),
+        ("opencode", true),
+        ("codex", true),
+        ("gemini-cli", false),
+        ("kimi-code", false),
+        ("antigravity", true),
+        ("bash", false),
+    ] {
         let caps = super::adapter_for(id).unwrap().capabilities();
         assert_eq!(caps.orchestration, expected, "{id}");
-        if expected { assert!(caps.headless && caps.mcp); }
+        if expected {
+            assert!(caps.headless && caps.mcp);
+        }
     }
     let custom = super::custom::CustomAgent {
-        id: "custom".into(), label: "Custom".into(), command: "custom".into(),
-        resume_args: None, skills_dir: None, sessions_dir: None,
-        session_id_from: "filename".into(), env: Default::default(),
+        id: "custom".into(),
+        label: "Custom".into(),
+        command: "custom".into(),
+        resume_args: None,
+        skills_dir: None,
+        sessions_dir: None,
+        session_id_from: "filename".into(),
+        env: Default::default(),
     };
     assert!(!super::adapter::custom_capabilities(&custom).orchestration);
 }
@@ -243,6 +258,53 @@ fn una_cuenta_de_la_app_no_hereda_keys_que_le_ganarian() {
     command.env("ANTHROPIC_API_KEY", "heredada");
     apply_account_env(&mut command, &claude);
     let envs: Vec<_> = command.get_envs().collect();
-    assert!(envs.contains(&(std::ffi::OsStr::new("ANTHROPIC_API_KEY"), None)), "{envs:?}");
-    assert!(envs.contains(&(std::ffi::OsStr::new("CLAUDE_CONFIG_DIR"), Some(std::ffi::OsStr::new("/perfil")))));
+    assert!(
+        envs.contains(&(std::ffi::OsStr::new("ANTHROPIC_API_KEY"), None)),
+        "{envs:?}"
+    );
+    assert!(envs.contains(&(
+        std::ffi::OsStr::new("CLAUDE_CONFIG_DIR"),
+        Some(std::ffi::OsStr::new("/perfil"))
+    )));
+}
+
+/// Solo el terminal interactivo de Antigravity sale con permisos automáticos. El binario
+/// que se detecta y se muestra sigue pelado, y el resto de las TUIs de fábrica no heredan
+/// la flag. El catálogo estático la arrastra: es lo que ve una tab restaurada, antes de
+/// que `detect_agents` vuelva.
+#[test]
+fn solo_antigravity_agrega_flags_al_terminal_interactivo() {
+    let agy = agent_def("antigravity").expect("antigravity");
+    assert_eq!(agy.command, "agy");
+    assert_eq!(
+        agy.launch_args,
+        Some(&["--dangerously-skip-permissions"][..])
+    );
+    for def in AGENTS {
+        if def.id == "antigravity" {
+            continue;
+        }
+        assert!(
+            def.launch_args.is_none(),
+            "{} no debe lanzar con flags de catálogo",
+            def.id
+        );
+    }
+
+    let front = crate::agents::agent_registry();
+    let agy_front = front
+        .iter()
+        .find(|a| a.id == "antigravity")
+        .expect("antigravity");
+    assert_eq!(agy_front.command, "agy");
+    assert_eq!(
+        agy_front.launch_args,
+        vec!["--dangerously-skip-permissions".to_string()]
+    );
+    assert!(
+        front
+            .iter()
+            .filter(|a| a.id != "antigravity")
+            .all(|a| a.launch_args.is_empty())
+    );
 }

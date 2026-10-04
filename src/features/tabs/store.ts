@@ -2,6 +2,7 @@ import { create } from "zustand";
 
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 
+import { buildLaunchCommand } from "./launchCommand";
 import { DEFAULT_WORKSPACE_ID } from "./types";
 import type { AgentInfo, Tab } from "./types";
 
@@ -71,7 +72,7 @@ export const useTabsStore = create<TabsState>((set) => ({
           cwd,
           agentId: agent.id,
           agentLabel: agent.label,
-          command: agent.command,
+          command: buildLaunchCommand(agent),
           ptyId: ptyId ?? null,
           sessionId,
           historyId,
@@ -163,9 +164,15 @@ export const useTabsStore = create<TabsState>((set) => ({
   hydrateFromBackend: (tabs, workspaceId) =>
     set((state) => {
       const base = workspaceId ? { workspaceId } : {};
-      const incoming = new Set(tabs.map((tab) => tab.id));
+      // Restaurar no pasa por `addTab`. Sin esto, una tab de Antigravity guardada
+      // con el binario pelado volvería a abrir sin las flags del catálogo.
+      const restored = tabs.map((tab) => {
+        const command = buildLaunchCommand({ id: tab.agentId, command: tab.command });
+        return command === tab.command ? tab : { ...tab, command };
+      });
+      const incoming = new Set(restored.map((tab) => tab.id));
       const extras = state.tabs.filter((tab) => !incoming.has(tab.id));
-      const merged = [...tabs, ...extras];
+      const merged = [...restored, ...extras];
       const keepsActive = state.activeTabId !== null
         && merged.some((tab) => tab.id === state.activeTabId);
       return {

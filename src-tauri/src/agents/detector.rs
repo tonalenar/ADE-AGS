@@ -20,6 +20,9 @@ pub struct AgentInfo {
     pub id: String,
     pub label: String,
     pub command: String,
+    /// Flags que el frontend debe agregar al armar el comando de lanzamiento de
+    /// terminales interactivas. No afecta la detección ni `--version` (`command` sigue pelado).
+    pub launch_args: Option<Vec<String>>,
     pub available: bool,
     pub version: Option<String>,
     /// Dónde se encontró. `None` = no está en el PATH (ver `util::path_env::report` para
@@ -60,7 +63,11 @@ fn probe_agent(adapter: &'static dyn AgentAdapter) -> AgentInfo {
     // El shell de emergencia se reporta disponible sin sondear. En Windows el binario ni
     // siquiera está en el PATH con ese nombre, así que sondearlo lo daría por ausente.
     let assumed = adapter.assumes_installed();
-    let path = if assumed { None } else { crate::util::find_program(def.command) };
+    let path = if assumed {
+        None
+    } else {
+        crate::util::find_program(def.command)
+    };
 
     // Con la ruta que se encontró y no con el nombre: en Windows un `opencode.cmd` de npm
     // no se ejecuta por su nombre a secas. Con tope y sin stdin: una TUI que se pone a
@@ -78,6 +85,9 @@ fn probe_agent(adapter: &'static dyn AgentAdapter) -> AgentInfo {
         id: def.id.to_string(),
         label: def.label.to_string(),
         command: def.command.to_string(),
+        launch_args: def
+            .launch_args
+            .map(|a| a.iter().map(|s| s.to_string()).collect()),
         available: assumed || path.is_some(),
         version,
         path: path.map(|p| p.to_string_lossy().into_owned()),
@@ -122,7 +132,8 @@ pub async fn detect_agents(refresh: Option<bool>) -> Result<Vec<AgentInfo>, Stri
     })
     .await
     .map_err(|e| e.to_string())?;
-    *DETECTED.lock().unwrap_or_else(|e| e.into_inner()) = Some((std::time::Instant::now(), agents.clone()));
+    *DETECTED.lock().unwrap_or_else(|e| e.into_inner()) =
+        Some((std::time::Instant::now(), agents.clone()));
     Ok(agents)
 }
 

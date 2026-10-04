@@ -25,6 +25,12 @@ export interface AgentRegistryEntry {
   id: string;
   label: string;
   command: string;
+  /**
+   * Flags que se agregan al abrir terminales interactivas. Ausente o vacío = binario
+   * pelado. Viaja en este catálogo (y no solo en `detect_agents`) porque se carga
+   * antes del primer render: una tab restaurada se lanza antes de que vuelva la detección.
+   */
+  launchArgs?: string[];
   /** Carpeta de skills relativa al cwd. `null` = no gestiona skills. */
   skillsDir: string | null;
   /** Argumentos de reanudación con el placeholder `{session}`. `null` = no sabe. */
