@@ -137,3 +137,32 @@ describe("tecla muerta", () => {
     expect(handler(down("𝒂"))).toBe(false);
   });
 });
+
+describe("Ctrl+V lo pega el navegador (Claude Code)", () => {
+  it("con browserPaste, xterm no procesa Ctrl+V ni Ctrl+Shift+V (ni al soltar): pega el navegador", () => {
+    const handler = createTerminalKeyHandler(() => {}, { browserPaste: true });
+    expect(handler(down("v", { ctrlKey: true }))).toBe(false);
+    expect(handler(down("V", { ctrlKey: true, shiftKey: true }))).toBe(false);
+    expect(handler(event("keyup", "v", { ctrlKey: true }))).toBe(false);
+  });
+
+  it("no cancela el evento: el navegador tiene que disparar `paste`", () => {
+    const handler = createTerminalKeyHandler(() => {}, { browserPaste: true });
+    const ev = down("v", { ctrlKey: true });
+    handler(ev);
+    expect(ev.preventDefault).not.toHaveBeenCalled();
+  });
+
+  it("solo Ctrl+V: la v sola, Ctrl+Alt+V y Cmd+V siguen su camino", () => {
+    const handler = createTerminalKeyHandler(() => {}, { browserPaste: true });
+    expect(handler(down("v"))).toBe(true);
+    expect(handler(down("v", { ctrlKey: true, altKey: true }))).toBe(true);
+    expect(handler(down("v", { metaKey: true }))).toBe(true);
+  });
+
+  it("sin la opción (los demás agentes) nada cambia", () => {
+    const handler = createTerminalKeyHandler(() => {});
+    expect(handler(down("v", { ctrlKey: true }))).toBe(true);
+    expect(handler(event("keyup", "v", { ctrlKey: true }))).toBe(true);
+  });
+});
