@@ -330,3 +330,22 @@ fn test_summarize_truncation_and_boundaries() {
     assert!(sum_mb.len() <= 2048);
     assert!(sum_mb.is_char_boundary(sum_mb.len()));
 }
+
+#[test]
+fn work_running_only_with_running_mission_or_run() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE missions (id TEXT PRIMARY KEY, status TEXT NOT NULL);
+         CREATE TABLE runs (id TEXT PRIMARY KEY, status TEXT NOT NULL);",
+    )
+    .unwrap();
+    assert!(!work_running(&conn).unwrap());
+    conn.execute("INSERT INTO missions VALUES ('m1','done')", []).unwrap();
+    conn.execute("INSERT INTO runs VALUES ('r1','done')", []).unwrap();
+    assert!(!work_running(&conn).unwrap());
+    conn.execute("INSERT INTO runs VALUES ('r2','running')", []).unwrap();
+    assert!(work_running(&conn).unwrap());
+    conn.execute("DELETE FROM runs WHERE id='r2'", []).unwrap();
+    conn.execute("UPDATE missions SET status='running'", []).unwrap();
+    assert!(work_running(&conn).unwrap());
+}

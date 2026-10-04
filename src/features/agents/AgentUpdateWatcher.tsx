@@ -8,7 +8,9 @@ import { getSetting } from "@/shared/ipc/settings";
 
 import { ptyForTab, ptyKill } from "@/features/terminal/ipc";
 
-import { agentUpdate, agentUpdatesCheck, detectAgents } from "./ipc";
+import { exitAllWithSave } from "@/app/closeWithSave";
+
+import { agentUpdate, agentUpdatesCheck, agentUpdateWorkRunning, detectAgents } from "./ipc";
 import { updateAgentRestarting } from "./updateFlow";
 import {
   AUTO_CHECK_INTERVAL_MS,
@@ -45,9 +47,9 @@ export function announceResult(t: TFunction, label: string, result: AgentUpdateR
 }
 
 /**
- * El "Actualizar" de un clic (botón o aviso del bot): cierra las terminales de ese agente,
- * lo actualiza y las vuelve a abrir retomando la conversación, todo solo. Una misión en curso
- * con ese agente lo impide (y entonces no se cierra nada).
+ * El "Actualizar" de un clic (botón o aviso del bot): cierra las terminales de ese agente, lo
+ * actualiza y reinicia la app entera, que vuelve sola con las pestañas y las conversaciones
+ * retomadas. Una misión o un run en curso lo impide (y entonces no se cierra nada).
  */
 export async function runAgentUpdate(t: TFunction, info: AgentUpdateInfo): Promise<AgentUpdateResult> {
   const { setDetectedAgents } = useTabsStore.getState();
@@ -56,16 +58,21 @@ export async function runAgentUpdate(t: TFunction, info: AgentUpdateInfo): Promi
     ptyForTab,
     ptyKill,
     restartAgent: (tabId) => useTabsStore.getState().restartAgent(tabId),
+    workRunning: agentUpdateWorkRunning,
+    restartApp: () => exitAllWithSave("restart"),
     check: agentUpdatesCheck,
     update: agentUpdate,
     sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
     onStage: (stage, count) => {
       if (stage === "closing") {
         showBotToast({ title: info.label, text: t("agents.update.closing", { label: info.label, count }), ms: 6000 });
+      } else if (stage === "restarting") {
+        showBotToast({ title: info.label, text: t("agents.update.restarting", { label: info.label }), ms: 6000 });
       }
     },
   });
-  announceResult(t, info.label, outcome.result);
+  // Con reinicio de la app el aviso de "atualizado" ya no se vería: basta el de "reiniciando".
+  if (!outcome.appRestarting) announceResult(t, info.label, outcome.result);
   if (outcome.reopened > 0) {
     showBotToast({ title: info.label, text: t("agents.update.reopened", { label: info.label, count: outcome.reopened }), ms: 7000 });
   }

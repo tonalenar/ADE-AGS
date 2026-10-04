@@ -56,3 +56,6 @@ export const agentUpdatesCheck = () => invoke<AgentUpdateInfo[]>("agent_updates_
 /** `terminalsReleased`: la pantalla ya cerró los procesos del agente (ver `updateFlow.ts`). */
 export const agentUpdate = (agentId: string, terminalsReleased = false) =>
   invoke<AgentUpdateResult>("agent_update", { agentId, terminalsReleased });
+
+/** Hay una misión o un run en curso (de cualquier agente). */
+export const agentUpdateWorkRunning = () => invoke<boolean>("agent_update_work_running");

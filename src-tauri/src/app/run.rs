@@ -206,6 +206,7 @@ pub fn run() {
             crate::agents::detect_agents,
             crate::agents::agent_updates_check,
             crate::agents::agent_update,
+            crate::agents::agent_update_work_running,
             crate::agents::agent_search_path,
             // Agentes headless (consola de flota)
             crate::runs::run_list_tasks,

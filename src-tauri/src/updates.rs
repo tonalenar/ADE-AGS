@@ -174,6 +174,10 @@ pub async fn update_install(app: AppHandle) -> Result<(), String> {
 /// Reinicia con la versión recién instalada. Lo llama el frontend DESPUÉS de guardar todo.
 #[tauri::command]
 pub fn update_restart(app: AppHandle) {
+    // `restart()` no pasa por `RunEvent::Exit`: sin esto quedarían vivos los procesos de los
+    // terminales y el handshake de la CLI apuntando a la instancia vieja.
+    crate::ipc::cleanup();
+    crate::terminal::kill_all_sessions();
     app.restart();
 }
 
