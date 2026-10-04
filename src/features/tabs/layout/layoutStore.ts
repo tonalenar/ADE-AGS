@@ -30,6 +30,8 @@ export interface Rect {
   top: number;
   width: number;
   height: number;
+  /** Escala CSS con que se dibuja una terminal del canvas alejado. Ausente = 1. */
+  scale?: number;
 }
 
 export type DropTarget =
