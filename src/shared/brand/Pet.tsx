@@ -9,6 +9,7 @@ import { MASCOT_BODY, MASCOT_FILL, type MascotState } from "./Mascot";
 import "./pet.css";
 import { useMascotState } from "./useMascotState";
 import { useAgentActivity } from "@/features/terminal/activity";
+import { openBotPanel } from "@/features/bot/botPanelStore";
 
 /** Lo que el backend sabe del pet (ver `pet.rs`). */
 export interface PetStatus {
@@ -278,9 +279,13 @@ export function PetCard({ pet, className = "" }: { pet: PetStatus; className?: s
   const stage = stageFor(pet.level);
   const accent = LOOKS[stage].aura ?? "var(--mascot-glow)";
 
+  // Un clic abre el QG del bot (ver `features/bot/BotPanel.tsx`): todo lo que "hizo" por vos.
   return (
-    <div className={`flex items-center gap-2 pl-1 pr-3.5 py-1 rounded-2xl border border-gray-200 dark:border-white/10
-      bg-white/92 dark:bg-surface-raised/92 shadow-md backdrop-blur ${className}`}>
+    <div role="button" tabIndex={0} title={t("botPanel.open")} aria-label={t("botPanel.open")}
+      onClick={openBotPanel}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBotPanel(); } }}
+      className={`cursor-pointer flex items-center gap-2 pl-1 pr-3.5 py-1 rounded-2xl border border-gray-200 dark:border-white/10
+      bg-white/92 dark:bg-surface-raised/92 shadow-md backdrop-blur hover:border-accent-400/60 transition-colors ${className}`}>
       <Pet level={pet.level} state={state} size={96} />
       <div className="min-w-[88px]">
         <div className="flex items-baseline justify-between gap-3">
