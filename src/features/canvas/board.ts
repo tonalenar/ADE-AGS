@@ -160,10 +160,11 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
 }
 
 /**
- * Arma el canvas de una misión en terminales: el orquestador (con su corona) y su equipo,
- * todos EN UNA FILA, uno al lado del otro y en el orden en que se abren, cada integrante
- * conectado con el orquestador y con el papel que cumple. Los nodos que no tenían lugar lo
- * reciben; un papel en blanco no se marca. Pura.
+ * Arma el canvas de una misión en terminales: el orquestador (con su corona) y su equipo en
+ * una GRILLA DE DOS FILAS que se llena por columnas, en el orden en que se abren: el 1.º
+ * arriba, el 2.º debajo de él, el 3.º a la derecha del 1.º, el 4.º debajo del 3.º, y así.
+ * Cada integrante queda conectado con el orquestador y con el papel que cumple. Los nodos
+ * que no tenían lugar lo reciben; un papel en blanco no se marca. Pura.
  */
 export function buildMissionTeam(
   board: Board,
@@ -173,7 +174,7 @@ export function buildMissionTeam(
   const ids = [leadId, ...members.map((m) => m.tabId)];
   let next = reconcile(board, ids, ids);
   next = { ...next, orchestrators: next.orchestrators.includes(leadId) ? next.orchestrators : [...next.orchestrators, leadId] };
-  next = placeInRow(next, ids);
+  next = placeInGrid(next, ids);
   for (const m of members) {
     next = addEdge(next, leadId, m.tabId);
     if (m.roleId) next = { ...next, roles: { ...next.roles, [m.tabId]: m.roleId } };
@@ -181,12 +182,20 @@ export function buildMissionTeam(
   return next;
 }
 
+/** Cuántas filas tiene la grilla de una misión. */
+export const MISSION_GRID_ROWS = 2;
+
+/** La celda (columna, fila) del integrante `index` en la grilla de dos filas, por columnas. Pura. */
+export function gridCell(index: number, rows = MISSION_GRID_ROWS): { col: number; row: number } {
+  return { col: Math.floor(index / rows), row: index % rows };
+}
+
 /**
- * Pone las terminales `ids` en una sola fila, de izquierda a derecha en ese orden, empezando
- * donde está la primera. Si la fila tapa algo que no es del equipo, baja una fila entera
- * (nunca parte el equipo en dos). Pura.
+ * Pone las terminales `ids` en la grilla de la misión (ver `gridCell`), empezando donde está
+ * la primera. Las celdas miden lo que la terminal más grande, así nada se tapa. Si la grilla
+ * tapa algo que no es del equipo, baja entera (nunca parte el equipo). Pura.
  */
-export function placeInRow(board: Board, ids: string[]): Board {
+export function placeInGrid(board: Board, ids: string[]): Board {
   const first = board.nodes[ids[0]];
   if (!first || ids.some((id) => !board.nodes[id])) return board;
   const team = new Set(ids);
@@ -195,16 +204,16 @@ export function placeInRow(board: Board, ids: string[]): Board {
     ...Object.values(board.notes).map((n) => n.box),
     ...Object.values(board.portals).map((n) => n.box),
   ];
-  const rowHeight = Math.max(...ids.map((id) => board.nodes[id].h));
+  const cellW = Math.max(...ids.map((id) => board.nodes[id].w)) + GAP;
+  const cellH = Math.max(...ids.map((id) => board.nodes[id].h)) + GAP;
   for (let k = 0; k < 50; k++) {
-    const y = first.y + k * (rowHeight + GAP);
-    let x = first.x;
+    const top = first.y + k * cellH;
     const placed: Record<string, Box> = {};
-    for (const id of ids) {
+    ids.forEach((id, i) => {
+      const { col, row } = gridCell(i);
       const { w, h } = board.nodes[id];
-      placed[id] = { x, y, w, h };
-      x += w + GAP;
-    }
+      placed[id] = { x: first.x + col * cellW, y: top + row * cellH, w, h };
+    });
     const clear = Object.values(placed).every(
       (c) => !others.some((o) => c.x < o.x + o.w && o.x < c.x + c.w && c.y < o.y + o.h && o.y < c.y + c.h),
     );
