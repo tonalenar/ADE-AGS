@@ -11,6 +11,7 @@
 
 mod claude;
 mod live;
+mod mission;
 mod parse;
 mod screen;
 mod trust;
@@ -20,3 +21,4 @@ mod test;
 
 pub use claude::*;
 pub use live::*;
+pub use mission::*;

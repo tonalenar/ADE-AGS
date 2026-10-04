@@ -276,6 +276,7 @@ pub fn run() {
             crate::accounts::antigravity_access::antigravity_account_discovery,
             crate::usage::agent_account_usage,
             crate::usage::claude_live_usage,
+            crate::usage::mission_tokens,
             // Comandos previos al lanzamiento del agente (entornos aislados)
             crate::prelaunch::list_prelaunch_presets,
             crate::prelaunch::save_prelaunch_preset,
