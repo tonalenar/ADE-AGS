@@ -1,5 +1,6 @@
 import { useEffect } from "react";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
+import i18n from "@/i18n";
 import { useTabsStore } from "@/features/tabs/store";
 import { focusTab, pasteIntoTab } from "./terminalRegistry";
 import { formatPathsForAgent } from "./formatPathsForAgent";
@@ -29,7 +30,7 @@ export function useFileDropToTerminal(): void {
         const agentId = useTabsStore.getState().tabs.find((t) => t.id === tabId)?.agentId;
         if (pasteIntoTab(tabId, formatPathsForAgent(agentId, p.paths), false)) {
           focusTab(tabId);
-          showBotToast({ title: "Terminal", text: p.paths.length === 1 ? "Archivo adjuntado" : `${p.paths.length} archivos adjuntados`, ms: 2500 });
+          showBotToast({ title: i18n.t("terminal.attach.title"), text: i18n.t("terminal.attach.files", { count: p.paths.length }), ms: 2500 });
         }
       })
       .then((fn) => { if (disposed) fn(); else off = fn; })

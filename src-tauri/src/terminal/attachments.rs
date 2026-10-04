@@ -58,7 +58,8 @@ fn prepare_dir(dir: &Path) -> Result<(), String> {
 }
 
 pub(crate) fn save_pasted_image_in(dir: &Path, bytes: &[u8], mime: &str) -> Result<String, String> {
-    let ext = match mime {
+    // El MIME del navegador suele venir en minúsculas, pero no está garantizado.
+    let ext = match mime.trim().to_ascii_lowercase().as_str() {
         "image/png" => "png", "image/jpeg" => "jpg", "image/webp" => "webp", "image/gif" => "gif",
         _ => return Err("Tipo de imagem nao suportado".into()),
     };

@@ -10,14 +10,22 @@ function atPath(path: string): string {
   return NEEDS_QUOTES.test(path) || path.includes('"') ? `@"${path.replace(/"/g, '\\"')}"` : `@${path}`;
 }
 
-/** Ruta pura; con espacios, entre comillas simples. */
-function plainPath(path: string): string {
-  return NEEDS_QUOTES.test(path) || path.includes("'") ? `'${path.replace(/'/g, "\'")}'` : path;
+/**
+ * Entre comillas: simples, salvo que la ruta tenga un apóstrofo (`C:\Users\D'Ávila`), que
+ * cerraría la cita antes de tiempo; ahí van dobles. Una ruta de Windows no puede tener `"`.
+ */
+function quote(path: string): string {
+  return path.includes("'") ? `"${path}"` : `'${path}'`;
 }
 
-/** Siempre entre comillas simples, sin prefijo (agentes sin sintaxis verificada). */
+/** Ruta pura; con espacios o apóstrofo, entre comillas. */
+function plainPath(path: string): string {
+  return NEEDS_QUOTES.test(path) || path.includes("'") ? quote(path) : path;
+}
+
+/** Siempre entre comillas, sin prefijo (agentes sin sintaxis verificada). */
 function quotedPath(path: string): string {
-  return `'${path.replace(/'/g, "\'")}'`;
+  return quote(path);
 }
 
 /**

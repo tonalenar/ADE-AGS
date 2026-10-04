@@ -33,6 +33,7 @@ import { ptyAttach, ptyCreate, ptyForTab, ptyKill, ptyResize, ptyWrite, savePast
 import { decidePaste } from "./pasteDecision";
 import { formatPathsForAgent } from "./formatPathsForAgent";
 import { showBotToast } from "@/shared/brand/botToastStore";
+import i18n from "@/i18n";
 import { createFitter } from "./fit";
 import { forgetTab, markInput, markOutput } from "./activity";
 import { StatusBadge, type TerminalStatus } from "./StatusBadge";
@@ -502,7 +503,7 @@ export function Terminal({
       e.preventDefault();
       e.stopPropagation();
       if (decision.action === "reject") {
-        showBotToast({ title: "Terminal", text: decision.reason === "size" ? "Imagen demasiado grande (máx. 20 MB)" : "Tipo de imagen no soportado", tone: "warning", ms: 4000 });
+        showBotToast({ title: i18n.t("terminal.attach.title"), text: i18n.t(decision.reason === "size" ? "terminal.attach.tooBig" : "terminal.attach.badType"), tone: "warning", ms: 4000 });
         return;
       }
       const file = data.items[decision.index].getAsFile();
@@ -511,9 +512,9 @@ export function Terminal({
         .then((buf) => savePastedImage(new Uint8Array(buf), file.type))
         .then((path) => {
           term.paste(formatPathsForAgent(agentId, [path]));
-          showBotToast({ title: "Terminal", text: `Imagen anexada: ${path.split(/[\\/]/).pop()}`, ms: 3000 });
+          showBotToast({ title: i18n.t("terminal.attach.title"), text: i18n.t("terminal.attach.image", { name: path.split(/[\\/]/).pop() }), ms: 3000 });
         })
-        .catch((err) => showBotToast({ title: "Terminal", text: `No se pudo adjuntar la imagen: ${err}`, tone: "error", ms: 5000 }));
+        .catch((err) => showBotToast({ title: i18n.t("terminal.attach.title"), text: i18n.t("terminal.attach.failed", { error: String(err) }), tone: "error", ms: 5000 }));
     };
     container.addEventListener("paste", onPaste, true);
 

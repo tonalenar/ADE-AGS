@@ -55,6 +55,15 @@ fn extensao_pelo_tipo() {
 }
 
 #[test]
+fn mime_sem_diferenciar_maiusculas() {
+    let temp = TempDir::new("mime-case");
+    let path = save_pasted_image_in(temp.path(), b"fake", "IMAGE/PNG").expect("IMAGE/PNG deve salvar");
+    assert!(path.ends_with(".png"));
+    let path = save_pasted_image_in(temp.path(), b"fake", " image/Jpeg ").expect("com espacos e misto deve salvar");
+    assert!(path.ends_with(".jpg"));
+}
+
+#[test]
 fn limite_de_tamanho() {
     let temp = TempDir::new("size");
 

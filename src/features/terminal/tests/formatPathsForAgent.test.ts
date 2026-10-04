@@ -35,14 +35,14 @@ describe("formatPathsForAgent", () => {
       expect(result).toBe('@"path/with/\\"quotes\\"/file.txt" ');
     });
 
-    it("escapa aspas simples para agentes que usam aspas simples", () => {
+    it("com apóstrofo no caminho usa aspas duplas (as simples fechariam a citação antes)", () => {
       const result = formatPathsForAgent(undefined, ["path/with/'single'/file.txt"]);
-      expect(result).toBe("'path/with/\'single\'/file.txt' ");
+      expect(result).toBe(`"path/with/'single'/file.txt" `);
     });
 
-    it("escapa aspas simples para codex quando há aspas simples", () => {
-      const result = formatPathsForAgent("codex", ["d'un/fichier.txt"]);
-      expect(result).toBe("'d\'un/fichier.txt' ");
+    it("codex com apóstrofo também usa aspas duplas", () => {
+      const result = formatPathsForAgent("codex", ["C:\\Users\\D'Ávila\\foto.png"]);
+      expect(result).toBe(`"C:\\Users\\D'Ávila\\foto.png" `);
     });
   });
 
