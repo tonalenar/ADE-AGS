@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { buildMissionTeam, emptyBoard } from "@/features/canvas/board";
+import { buildMissionTeam, emptyBoard, gridCell } from "@/features/canvas/board";
 import { boardKey, boardKeyOfTab, missionBoardKey, missionOfKey, missionOfTab, useCanvasStore } from "@/features/canvas/store";
 import type { FunctionalRole, Squad } from "@/features/squads/types";
 
@@ -101,7 +101,7 @@ describe("el equipo de una misión", () => {
 });
 
 describe("el canvas de la misión", () => {
-  it("el orquestador con corona y el equipo en una fila, conectado y con su papel", () => {
+  it("el orquestador con corona y el equipo, conectado y con su papel", () => {
     const board = buildMissionTeam(emptyBoard(), "lead", [{ tabId: "m1", roleId: "Backend" }, { tabId: "m2", roleId: "QA" }]);
     expect(board.orchestrators).toEqual(["lead"]);
     expect(Object.keys(board.nodes).sort()).toEqual(["lead", "m1", "m2"]);
@@ -109,16 +109,35 @@ describe("el canvas de la misión", () => {
     expect(board.roles).toEqual({ m1: "Backend", m2: "QA" });
   });
 
-  it("todos van uno al lado del otro, en el orden en que se abren y sin taparse", () => {
-    const board = buildMissionTeam(emptyBoard(), "lead", [{ tabId: "m1" }, { tabId: "m2" }, { tabId: "m3" }]);
-    const row = ["lead", "m1", "m2", "m3"].map((id) => board.nodes[id]);
-    // Misma fila…
-    for (const box of row) expect(box.y).toBe(row[0].y);
-    // …de izquierda a derecha, cada uno a continuación del anterior.
-    for (let i = 1; i < row.length; i++) expect(row[i].x).toBeGreaterThanOrEqual(row[i - 1].x + row[i - 1].w);
+  it("grilla de dos filas por columnas: 1 arriba, 2 debajo, 3 a la derecha del 1, 4 debajo del 3, 5 a la derecha", () => {
+    const board = buildMissionTeam(emptyBoard(), "lead", [{ tabId: "m1" }, { tabId: "m2" }, { tabId: "m3" }, { tabId: "m4" }]);
+    const [p1, p2, p3, p4, p5] = ["lead", "m1", "m2", "m3", "m4"].map((id) => board.nodes[id]);
+    // Columna 1: el 2 debajo del 1, misma x.
+    expect(p2.x).toBe(p1.x);
+    expect(p2.y).toBeGreaterThanOrEqual(p1.y + p1.h);
+    // Columna 2: el 3 a la derecha del 1 (misma fila) y el 4 debajo del 3, a la derecha del 2.
+    expect(p3.y).toBe(p1.y);
+    expect(p3.x).toBeGreaterThanOrEqual(p1.x + p1.w);
+    expect(p4.x).toBe(p3.x);
+    expect(p4.y).toBe(p2.y);
+    // Columna 3 arranca arriba otra vez.
+    expect(p5.y).toBe(p1.y);
+    expect(p5.x).toBeGreaterThanOrEqual(p3.x + p3.w);
+    // Nadie se tapa.
+    const boxes = [p1, p2, p3, p4, p5];
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i], b = boxes[j];
+      expect(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h).toBe(false);
+    }
   });
 
-  it("armar el equipo dos veces deja la misma fila", () => {
+  it("gridCell recorre las columnas de dos en dos", () => {
+    expect([0, 1, 2, 3, 4].map((i) => gridCell(i))).toEqual([
+      { col: 0, row: 0 }, { col: 0, row: 1 }, { col: 1, row: 0 }, { col: 1, row: 1 }, { col: 2, row: 0 },
+    ]);
+  });
+
+  it("armar el equipo dos veces deja la misma grilla", () => {
     const once = buildMissionTeam(emptyBoard(), "lead", [{ tabId: "m1" }, { tabId: "m2" }]);
     const twice = buildMissionTeam(once, "lead", [{ tabId: "m1" }, { tabId: "m2" }]);
     expect(twice.nodes).toEqual(once.nodes);
