@@ -27,3 +27,7 @@ export const ptyResize = (id: number, cols: number, rows: number) =>
   invoke<void>("pty_resize", { id, cols, rows });
 
 export const ptyKill = (id: number) => invoke<void>("pty_kill", { id });
+
+/** Guarda una imagen pegada en la carpeta temporal de la app y devuelve su ruta. */
+export const savePastedImage = (bytes: Uint8Array, mime: string) =>
+  invoke<string>("save_pasted_image", bytes, { headers: { "x-mime": mime } });

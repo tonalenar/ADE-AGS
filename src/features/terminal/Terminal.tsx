@@ -29,7 +29,11 @@ import { reconcileTabSkills } from "@/features/skills/ipc";
 import { hasBrowserMcp, withBrowserMcp } from "@/features/browser/tabMcp";
 import { missionOfTab } from "@/features/canvas/store";
 import { homeDir } from "@/shared/ipc/window";
-import { ptyAttach, ptyCreate, ptyForTab, ptyKill, ptyResize, ptyWrite } from "./ipc";
+import { ptyAttach, ptyCreate, ptyForTab, ptyKill, ptyResize, ptyWrite, savePastedImage } from "./ipc";
+import { decidePaste } from "./pasteDecision";
+import { formatPathsForAgent } from "./formatPathsForAgent";
+import { showBotToast } from "@/shared/brand/botToastStore";
+import i18n from "@/i18n";
 import { createFitter } from "./fit";
 import { forgetTab, markInput, markOutput } from "./activity";
 import { StatusBadge, type TerminalStatus } from "./StatusBadge";
@@ -487,6 +491,33 @@ export function Terminal({
       }
     });
 
+    // Imagen en el portapapeles: se guarda en una carpeta temporal y se escribe su ruta en el
+    // prompt (sin Enter). El texto sigue el camino de siempre.
+    const container = containerRef.current;
+    const onPaste = (e: ClipboardEvent) => {
+      const data = e.clipboardData;
+      if (!data) return;
+      const items = Array.from(data.items).map((it) => ({ kind: it.kind, type: it.type, size: it.getAsFile()?.size }));
+      const decision = decidePaste(items, data.getData("text/plain"));
+      if (decision.action === "text") return;
+      e.preventDefault();
+      e.stopPropagation();
+      if (decision.action === "reject") {
+        showBotToast({ title: i18n.t("terminal.attach.title"), text: i18n.t(decision.reason === "size" ? "terminal.attach.tooBig" : "terminal.attach.badType"), tone: "warning", ms: 4000 });
+        return;
+      }
+      const file = data.items[decision.index].getAsFile();
+      if (!file) return;
+      file.arrayBuffer()
+        .then((buf) => savePastedImage(new Uint8Array(buf), file.type))
+        .then((path) => {
+          term.paste(formatPathsForAgent(agentId, [path]));
+          showBotToast({ title: i18n.t("terminal.attach.title"), text: i18n.t("terminal.attach.image", { name: path.split(/[\\/]/).pop() }), ms: 3000 });
+        })
+        .catch((err) => showBotToast({ title: i18n.t("terminal.attach.title"), text: i18n.t("terminal.attach.failed", { error: String(err) }), tone: "error", ms: 5000 }));
+    };
+    container.addEventListener("paste", onPaste, true);
+
     // ── 6. Resize automático ─────────────────────────────────
     // Dos ritmos distintos, a propósito.
     //
@@ -555,6 +586,7 @@ export function Terminal({
       disposeMarks();
       disposeScrollbar();
       disposeRail();
+      container.removeEventListener("paste", onPaste, true);
       unlistenData?.();
       forgetTab(tabId);
       unlistenExit?.();
@@ -621,6 +653,7 @@ export function Terminal({
             inferior se veía como filas cortadas o tapadas. */}
         <div
           ref={containerRef}
+          data-terminal-tab={tabId}
           // `relative`: el carril de scroll de las TUIs se posiciona contra este contenedor.
           style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}
         />
