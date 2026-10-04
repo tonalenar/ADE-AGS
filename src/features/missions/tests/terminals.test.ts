@@ -19,7 +19,7 @@ describe("finishedMissionTabs", () => {
     expect(finishedMissionTabs(missions, index, tabs)).toEqual(["b", "c"]);
   });
 });
-import { LEAD_NAME, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, teamOf, uniqueNames } from "../terminals";
+import { LEAD_NAME, MAX_EXTRA_TERMINALS, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, teamOf, uniqueNames } from "../terminals";
 
 describe("accountsNeedingLogin", () => {
   const accounts = [
@@ -81,6 +81,14 @@ describe("el equipo de una misión", () => {
     expect(text).not.toContain("SUA EQUIPE");
   });
 
+  it("con o equipe aberto, o orquestador também sabe que pode abrir mais terminais, até um limite", () => {
+    const team = teamOf(squad([{ roleId: "backend" }]), roles);
+    const text = leadBriefing({ title: "T", objective: "O" }, team);
+    expect(text).toContain("MAIS TERMINAIS");
+    expect(text).toContain('ags peer recruit "<nome>"');
+    expect(text).toContain(`Máximo de ${MAX_EXTRA_TERMINALS} terminais extras`);
+  });
+
   it("cada integrante lee su papel, quién lo dirige y cómo avisarle", () => {
     const [backend] = teamOf(squad([{ roleId: "backend" }]), roles);
     const text = memberBriefing({ title: "Meu app", objective: "Criar um login" }, backend);
@@ -93,16 +101,27 @@ describe("el equipo de una misión", () => {
 });
 
 describe("el canvas de la misión", () => {
-  it("el orquestador arriba con corona, el equipo debajo, conectado y con su papel", () => {
+  it("el orquestador con corona y el equipo en una fila, conectado y con su papel", () => {
     const board = buildMissionTeam(emptyBoard(), "lead", [{ tabId: "m1", roleId: "Backend" }, { tabId: "m2", roleId: "QA" }]);
     expect(board.orchestrators).toEqual(["lead"]);
     expect(Object.keys(board.nodes).sort()).toEqual(["lead", "m1", "m2"]);
     expect(board.edges.map((e) => [e.a, e.b]).sort()).toEqual([["lead", "m1"], ["lead", "m2"]]);
     expect(board.roles).toEqual({ m1: "Backend", m2: "QA" });
-    const lead = board.nodes.lead;
-    for (const id of ["m1", "m2"]) expect(board.nodes[id].y).toBeGreaterThan(lead.y + lead.h - 1);
-    // Los dos del equipo no se tapan entre sí.
-    expect(board.nodes.m1.x).not.toBe(board.nodes.m2.x);
+  });
+
+  it("todos van uno al lado del otro, en el orden en que se abren y sin taparse", () => {
+    const board = buildMissionTeam(emptyBoard(), "lead", [{ tabId: "m1" }, { tabId: "m2" }, { tabId: "m3" }]);
+    const row = ["lead", "m1", "m2", "m3"].map((id) => board.nodes[id]);
+    // Misma fila…
+    for (const box of row) expect(box.y).toBe(row[0].y);
+    // …de izquierda a derecha, cada uno a continuación del anterior.
+    for (let i = 1; i < row.length; i++) expect(row[i].x).toBeGreaterThanOrEqual(row[i - 1].x + row[i - 1].w);
+  });
+
+  it("armar el equipo dos veces deja la misma fila", () => {
+    const once = buildMissionTeam(emptyBoard(), "lead", [{ tabId: "m1" }, { tabId: "m2" }]);
+    const twice = buildMissionTeam(once, "lead", [{ tabId: "m1" }, { tabId: "m2" }]);
+    expect(twice.nodes).toEqual(once.nodes);
   });
 
   it("sin papel no se marca, y repetir no duplica ni conexiones ni la corona", () => {

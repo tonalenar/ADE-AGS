@@ -8,6 +8,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { sendWhenReady, type SendTimings } from "@/features/terminal/terminalRegistry";
 
 import { getAutonomy, withAutonomy } from "./autonomy";
+import { withModel } from "./modelFlags";
 import { recordSpan } from "./timings";
 
 import type { Mission } from "./types";
@@ -17,6 +18,9 @@ export interface TeamMember {
   /** Cómo se llama su pestaña (y cómo lo nombran los demás). Único en el equipo. */
   name: string;
   agentId: string;
+  /** Modelo y esfuerzo que el Squad eligió para este integrante; `null` = el de la TUI. */
+  model?: string | null;
+  effort?: string | null;
   accountId: string | null;
   roleId: string;
   roleLabel: string;
@@ -44,6 +48,8 @@ export function teamOf(squad: Squad | null, roles: FunctionalRole[]): TeamMember
     return {
       name: names[i],
       agentId: m.agentId,
+      model: m.model,
+      effort: m.reasoningEffort ?? null,
       // Con "automática" no se fija cuenta: la que la TUI use por defecto.
       accountId: m.autoAccount ? null : m.accountId,
       roleId: m.roleId,
@@ -55,6 +61,9 @@ export function teamOf(squad: Squad | null, roles: FunctionalRole[]): TeamMember
 }
 
 export const LEAD_NAME = "Orquestrador";
+
+/** Quantos terminais além da equipe o Orquestrador pode abrir sozinho (cada um gasta memória e tokens). */
+export const MAX_EXTRA_TERMINALS = 3;
 
 /** Lo primero que lee el orquestador: la misión, su equipo y cómo coordinarlo. Pura. */
 export function leadBriefing(mission: Pick<Mission, "title" | "objective"> & { id?: string }, team: TeamMember[], findings = "", memory = ""): string {
@@ -80,6 +89,11 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective"> & { i
     '- `ags peer tell "<nome>" "<mensagem>"` — avisa sem esperar.',
     '- `ags peer check "<nome>"` — vê a tela dele agora.',
     '- `ags notify "<mensagem>"` — chama o usuário só quando precisar dele.',
+    "",
+    "MAIS TERMINAIS (você tem autonomia):",
+    '- `ags peer recruit "<nome>" --agent <id> --role <papel>` — abre outro terminal já conectado a você quando a equipe não der conta (ex.: uma tarefa paralela, uma revisão independente).',
+    `- Máximo de ${MAX_EXTRA_TERMINALS} terminais extras por missão; cada um custa memória e tokens. Só abra quando houver trabalho real para ele, dê a ele um nome e papel claros e feche (ou deixe encerrar) quando acabar.`,
+    "- Use um agente que já esteja disponível (`ags peers` mostra a equipe) e não repita um papel que já está livre.",
     "",
     "Planeje, divida o trabalho conforme o papel de cada um, acompanhe e junte os resultados. Ao terminar, resuma o que foi feito.",
     ...(mission.id ? ["", ...memorySuggestion(mission.id)] : []),
@@ -162,14 +176,16 @@ export async function startMissionInTerminals(mission: Mission, squad: Squad | n
 
   // Todo se valida ANTES de marcar la misión o abrir nada: una TUI que no está instalada no
   // puede dejar la misión a medias.
-  const agentFor = (id: string) => {
+  const agentFor = (id: string, model?: string | null, effort?: string | null) => {
     const found = detectedAgents.find((a) => a.id === id);
     if (!found || !found.available) throw new Error(`O agente '${id}' não está disponível nesta máquina.`);
-    // O nível de permissões da missão vai no comando (e portanto também ao retomar a sessão).
-    return { ...found, command: withAutonomy(found.id, found.command, getAutonomy()) };
+    // O nível de permissões e o modelo/esforço do Squad vão no comando (e portanto também ao
+    // retomar a sessão). Sem isso o terminal abria com o modelo padrão da TUI.
+    const command = withModel(found.id, withAutonomy(found.id, found.command, getAutonomy()), model, effort);
+    return { ...found, command };
   };
-  const leadAgent = agentFor(leadAgentId);
-  const memberAgents = team.map((m) => agentFor(m.agentId));
+  const leadAgent = agentFor(leadAgentId, squad?.lead.model ?? mission.leadModel, squad?.lead.reasoningEffort);
+  const memberAgents = team.map((m) => agentFor(m.agentId, m.model, m.effort));
 
   // Una cuenta sin login abriría el selector de login de la TUI, y el briefing se pegaría ahí.
   // Cada cuenta tiene su perfil aislado: el login se hace una vez, a mano, en Cuentas.

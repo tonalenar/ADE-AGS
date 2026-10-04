@@ -160,22 +160,57 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
 }
 
 /**
- * Arma el canvas de una misión en terminales: el orquestador arriba (con su corona) y su
- * equipo debajo, cada uno conectado con él y con el papel que cumple. Los nodos que no
- * tenían lugar lo reciben; un papel en blanco no se marca. Pura.
+ * Arma el canvas de una misión en terminales: el orquestador (con su corona) y su equipo,
+ * todos EN UNA FILA, uno al lado del otro y en el orden en que se abren, cada integrante
+ * conectado con el orquestador y con el papel que cumple. Los nodos que no tenían lugar lo
+ * reciben; un papel en blanco no se marca. Pura.
  */
 export function buildMissionTeam(
   board: Board,
   leadId: string,
   members: { tabId: string; roleId?: string | null }[],
 ): Board {
-  let next = reconcile(board, [leadId, ...members.map((m) => m.tabId)], [leadId, ...members.map((m) => m.tabId)]);
+  const ids = [leadId, ...members.map((m) => m.tabId)];
+  let next = reconcile(board, ids, ids);
   next = { ...next, orchestrators: next.orchestrators.includes(leadId) ? next.orchestrators : [...next.orchestrators, leadId] };
+  next = placeInRow(next, ids);
   for (const m of members) {
-    next = addEdge(placeBelow(next, m.tabId, leadId), leadId, m.tabId);
+    next = addEdge(next, leadId, m.tabId);
     if (m.roleId) next = { ...next, roles: { ...next.roles, [m.tabId]: m.roleId } };
   }
   return next;
+}
+
+/**
+ * Pone las terminales `ids` en una sola fila, de izquierda a derecha en ese orden, empezando
+ * donde está la primera. Si la fila tapa algo que no es del equipo, baja una fila entera
+ * (nunca parte el equipo en dos). Pura.
+ */
+export function placeInRow(board: Board, ids: string[]): Board {
+  const first = board.nodes[ids[0]];
+  if (!first || ids.some((id) => !board.nodes[id])) return board;
+  const team = new Set(ids);
+  const others = [
+    ...Object.entries(board.nodes).filter(([id]) => !team.has(id)).map(([, b]) => b),
+    ...Object.values(board.notes).map((n) => n.box),
+    ...Object.values(board.portals).map((n) => n.box),
+  ];
+  const rowHeight = Math.max(...ids.map((id) => board.nodes[id].h));
+  for (let k = 0; k < 50; k++) {
+    const y = first.y + k * (rowHeight + GAP);
+    let x = first.x;
+    const placed: Record<string, Box> = {};
+    for (const id of ids) {
+      const { w, h } = board.nodes[id];
+      placed[id] = { x, y, w, h };
+      x += w + GAP;
+    }
+    const clear = Object.values(placed).every(
+      (c) => !others.some((o) => c.x < o.x + o.w && o.x < c.x + c.w && c.y < o.y + o.h && o.y < c.y + c.h),
+    );
+    if (clear) return { ...board, nodes: { ...board.nodes, ...placed } };
+  }
+  return board;
 }
 
 /** Conecta dos terminales. Una consigo misma o una conexión repetida no hacen nada. */
