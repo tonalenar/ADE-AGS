@@ -64,14 +64,37 @@ type KeyLike = Pick<
 /** Cómo entregarle a xterm un keydown corregido. */
 export type Redispatch = (init: KeyboardEventInit) => void;
 
+export interface TerminalKeyOptions {
+  /**
+   * Ctrl+V lo resuelve el navegador (el evento `paste`), no xterm.
+   *
+   * Con el protocolo de teclado de Kitty que pide Claude Code, xterm convierte Ctrl+V en una
+   * secuencia para la TUI y CANCELA el evento: el navegador no pega, no hay `paste` y la
+   * imagen del portapapeles nunca llega al código que la guarda y escribe su ruta en el
+   * prompt (`Terminal.tsx`, `onPaste`). Sin esto solo se podía arrastrar. El texto sigue
+   * pegándose igual: el `paste` normal lo maneja xterm.
+   */
+  browserPaste?: boolean;
+}
+
+function isCtrlV(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey">): boolean {
+  return event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === "v";
+}
+
 /**
  * Decide, evento por evento, si xterm procesa la tecla (`true`) o no (`false`). Es la
  * forma que espera `attachCustomKeyEventHandler`.
  */
-export function createTerminalKeyHandler(redispatch: Redispatch): (event: KeyLike) => boolean {
+export function createTerminalKeyHandler(
+  redispatch: Redispatch,
+  options: TerminalKeyOptions = {},
+): (event: KeyLike) => boolean {
   let deadPending = false;
 
   return (event) => {
+    // Ctrl+V (y Ctrl+Shift+V) lo pega el navegador (ver `TerminalKeyOptions.browserPaste`).
+    if (options.browserPaste && isCtrlV(event) && (event.type === "keydown" || event.type === "keyup")) return false;
+
     // El soltar de una tecla que xterm no vio apretarse tampoco le sirve.
     if (event.type === "keyup") return !COMPOSE_KEYS.has(event.key);
     if (event.type !== "keydown") return true;
@@ -105,11 +128,11 @@ export function createTerminalKeyHandler(redispatch: Redispatch): (event: KeyLik
   };
 }
 
-export function installTerminalKeyHandler(term: Terminal): void {
+export function installTerminalKeyHandler(term: Terminal, options: TerminalKeyOptions = {}): void {
   // xterm escucha el keydown en su textarea: el evento corregido entra por el mismo lugar
   // que uno de verdad. `keyCode` va porque sin protocolo de Kitty xterm reconoce Tab por él.
   const redispatch: Redispatch = (init) => {
     term.textarea?.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
   };
-  term.attachCustomKeyEventHandler(createTerminalKeyHandler(redispatch));
+  term.attachCustomKeyEventHandler(createTerminalKeyHandler(redispatch, options));
 }

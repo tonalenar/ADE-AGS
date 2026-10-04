@@ -248,7 +248,9 @@ export function Terminal({
     term.loadAddon(fitAddon);
     term.loadAddon(webLinksAddon);
     // Tab que no se escapa de la terminal, AltGr y los acentos (ver terminalKeys.ts).
-    installTerminalKeyHandler(term);
+    // En Claude Code (protocolo de Kitty) Ctrl+V lo pega el navegador: así llega la imagen del
+    // portapapeles al `onPaste` de más abajo.
+    installTerminalKeyHandler(term, { browserPaste: agentId === "claude-code" });
     term.open(containerRef.current);
     termRef.current = term;
     const unregister = tabId ? registerTerminal(tabId, term) : undefined;
