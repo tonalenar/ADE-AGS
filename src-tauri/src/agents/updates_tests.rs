@@ -190,6 +190,41 @@ fn test_busy_reason_blocks_terminal_and_mission() {
     assert_eq!(busy_reason(&conn, "claude-code").unwrap(), None);
 }
 
+/// Com o clique do usuário em "Atualizar" a tela fecha os processos do agente e libera as abas
+/// guardadas; mas uma missão em curso com esse agente continua bloqueando.
+#[test]
+fn test_busy_reason_with_terminals_released_ignores_saved_tabs_but_not_missions() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE windows (id TEXT PRIMARY KEY, is_open INTEGER NOT NULL);
+         CREATE TABLE tabs (id TEXT PRIMARY KEY, window_id TEXT, agent_id TEXT NOT NULL);
+         CREATE TABLE missions (id TEXT PRIMARY KEY, status TEXT NOT NULL, lead_agent_id TEXT, squad_id TEXT);
+         CREATE TABLE squads (id TEXT PRIMARY KEY, lead_agent_id TEXT);
+         CREATE TABLE squad_members (squad_id TEXT NOT NULL, agent_id TEXT NOT NULL);
+         CREATE TABLE runs (id TEXT PRIMARY KEY, status TEXT NOT NULL);
+         CREATE TABLE tasks (id TEXT PRIMARY KEY, run_id TEXT NOT NULL, agent_id TEXT NOT NULL);
+         CREATE TABLE run_squad_members (run_id TEXT NOT NULL, agent_id TEXT NOT NULL);",
+    )
+    .unwrap();
+    conn.execute("INSERT INTO windows (id, is_open) VALUES ('w1', 1)", []).unwrap();
+    conn.execute("INSERT INTO tabs (id, window_id, agent_id) VALUES ('t1', 'w1', 'codex')", []).unwrap();
+
+    // Sem liberar: a aba aberta bloqueia (como antes).
+    assert_eq!(busy_reason_with(&conn, "codex", false).unwrap(), Some("busy_terminal"));
+    // Liberadas pela tela: a aba guardada deixa de bloquear.
+    assert_eq!(busy_reason_with(&conn, "codex", true).unwrap(), None);
+    // O atalho antigo continua sem liberar.
+    assert_eq!(busy_reason(&conn, "codex").unwrap(), Some("busy_terminal"));
+
+    // Missão rodando com esse agente: bloqueia mesmo com os terminais liberados.
+    conn.execute(
+        "INSERT INTO missions (id, status, lead_agent_id, squad_id) VALUES ('m1', 'running', 'codex', NULL)",
+        [],
+    )
+    .unwrap();
+    assert_eq!(busy_reason_with(&conn, "codex", true).unwrap(), Some("busy_mission"));
+}
+
 /// (4) Teste de timeout e executor:
 /// NUNCA roda comandos reais nos testes. Usa executor mock injetado.
 struct MockExecutor {

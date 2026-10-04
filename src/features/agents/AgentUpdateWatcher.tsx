@@ -6,7 +6,10 @@ import { useTabsStore } from "@/features/tabs/store";
 import { showBotToast } from "@/shared/brand/botToastStore";
 import { getSetting } from "@/shared/ipc/settings";
 
+import { ptyForTab, ptyKill } from "@/features/terminal/ipc";
+
 import { agentUpdate, agentUpdatesCheck, detectAgents } from "./ipc";
+import { updateAgentRestarting } from "./updateFlow";
 import {
   AUTO_CHECK_INTERVAL_MS,
   AUTO_UPDATE_SETTING_KEY,
@@ -39,6 +42,35 @@ export function announceResult(t: TFunction, label: string, result: AgentUpdateR
       ms: 10000,
     });
   }
+}
+
+/**
+ * El "Actualizar" de un clic (botón o aviso del bot): cierra las terminales de ese agente,
+ * lo actualiza y las vuelve a abrir retomando la conversación, todo solo. Una misión en curso
+ * con ese agente lo impide (y entonces no se cierra nada).
+ */
+export async function runAgentUpdate(t: TFunction, info: AgentUpdateInfo): Promise<AgentUpdateResult> {
+  const { setDetectedAgents } = useTabsStore.getState();
+  const outcome = await updateAgentRestarting(info.agentId, {
+    tabs: () => useTabsStore.getState().tabs,
+    ptyForTab,
+    ptyKill,
+    restartAgent: (tabId) => useTabsStore.getState().restartAgent(tabId),
+    check: agentUpdatesCheck,
+    update: agentUpdate,
+    sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+    onStage: (stage, count) => {
+      if (stage === "closing") {
+        showBotToast({ title: info.label, text: t("agents.update.closing", { label: info.label, count }), ms: 6000 });
+      }
+    },
+  });
+  announceResult(t, info.label, outcome.result);
+  if (outcome.reopened > 0) {
+    showBotToast({ title: info.label, text: t("agents.update.reopened", { label: info.label, count: outcome.reopened }), ms: 7000 });
+  }
+  if (outcome.result.ok) detectAgents(true).then(setDetectedAgents).catch(() => {});
+  return outcome.result;
 }
 
 /**
@@ -85,12 +117,7 @@ export function AgentUpdateWatcher() {
             text: t("agents.update.available", { label: info.label, version: info.latestVersion }),
             actionLabel: t("agents.update.action"),
             onAction: () => {
-              agentUpdate(info.agentId)
-                .then((r) => {
-                  announceResult(t, info.label, r);
-                  if (r.ok) detectAgents(true).then(setDetectedAgents).catch(() => {});
-                })
-                .catch(console.error);
+              runAgentUpdate(t, info).catch(console.error);
             },
             ms: 15000,
           });

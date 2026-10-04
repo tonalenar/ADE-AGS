@@ -53,4 +53,6 @@ export const importLegacyCustomAgents = (agents: unknown[]) =>
 
 export const agentUpdatesCheck = () => invoke<AgentUpdateInfo[]>("agent_updates_check");
 
-export const agentUpdate = (agentId: string) => invoke<AgentUpdateResult>("agent_update", { agentId });
+/** `terminalsReleased`: la pantalla ya cerró los procesos del agente (ver `updateFlow.ts`). */
+export const agentUpdate = (agentId: string, terminalsReleased = false) =>
+  invoke<AgentUpdateResult>("agent_update", { agentId, terminalsReleased });

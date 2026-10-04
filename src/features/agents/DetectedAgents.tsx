@@ -5,8 +5,8 @@ import { AnimateSpin, Button, CheckCircleIcon } from "neogestify-ui-components";
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
 
-import { announceResult, reasonText } from "./AgentUpdateWatcher";
-import { agentSearchPath, agentUpdate, agentUpdatesCheck, detectAgents, type SearchPath } from "./ipc";
+import { reasonText, runAgentUpdate } from "./AgentUpdateWatcher";
+import { agentSearchPath, agentUpdatesCheck, detectAgents, type SearchPath } from "./ipc";
 import { updateButtonState, type AgentUpdateInfo } from "./updatePolicy";
 
 /**
@@ -40,9 +40,8 @@ export function DetectedAgents() {
   const runUpdate = async (info: AgentUpdateInfo) => {
     setUpdating(info.agentId);
     try {
-      const result = await agentUpdate(info.agentId);
-      announceResult(t, info.label, result);
-      if (result.ok) setDetectedAgents(await detectAgents(true));
+      // Un clic: cierra las terminales del agente, lo actualiza y las vuelve a abrir.
+      await runAgentUpdate(t, info);
     } catch (err) {
       console.error(err);
     } finally {
