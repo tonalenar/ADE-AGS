@@ -4,8 +4,11 @@
  * - `ask`: como cada CLI viene de fábrica (pide casi todo).
  * - `safe`: **automático con protección**. Cada CLI aprueba por su cuenta lo rutinario SIN
  *   quitar su sandbox ni saltarse los permisos: Codex con revisión automática dentro del
- *   sandbox, Antigravity y Gemini aprobando solo las ediciones. Nunca usa los modos
- *   "peligrosos" (`--dangerously-*`, `--yolo`): esos no existen en esta app.
+ *   sandbox, Antigravity y Gemini aprobando solo las ediciones. Este nivel no agrega los
+ *   modos "peligrosos" (`--dangerously-*`, `--yolo`).
+ *   Los terminales interactivos de Antigravity reciben `--dangerously-skip-permissions`
+ *   aparte, desde el catálogo (`AgentDef::launch_args`), porque hay alguien mirando la TUI.
+ *   Los runs de Mission/Fleet no: ver `runs/antigravity.rs`.
  */
 export type Autonomy = "ask" | "safe";
 

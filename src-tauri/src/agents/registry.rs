@@ -155,6 +155,13 @@ pub struct AgentDef {
     pub label: &'static str,
     /// El binario, tal cual se busca en el `PATH`.
     pub command: &'static str,
+    /// Flags que la app agrega al lanzar terminales interactivas de esta TUI.
+    /// `None` = se lanza el binario pelado.
+    ///
+    /// NUNCA usar esto para runs de Mission/Fleet (`runs/antigravity.rs`): ahí la
+    /// política es negar permisos, a propósito. El terminal interactivo tiene a alguien
+    /// mirando la TUI (puede cortar con Ctrl+C); el run autónomo no.
+    pub launch_args: Option<&'static [&'static str]>,
     pub version_flag: &'static str,
     /// Carpeta de skills relativa al cwd del proyecto. `None` = no gestiona skills.
     pub skills_dir: Option<&'static str>,
@@ -183,6 +190,7 @@ pub const AGENTS: &[AgentDef] = &[
         id: "claude-code",
         label: "Claude Code",
         command: "claude",
+        launch_args: None,
         version_flag: "--version",
         // docs.claude.com/en/docs/claude-code/skills
         skills_dir: Some(".claude/skills"),
@@ -218,6 +226,7 @@ pub const AGENTS: &[AgentDef] = &[
         id: "gemini-cli",
         label: "Gemini CLI",
         command: "gemini",
+        launch_args: None,
         version_flag: "--version",
         skills_dir: Some(".agents/skills"),
         profile: None,
@@ -230,6 +239,7 @@ pub const AGENTS: &[AgentDef] = &[
         id: "codex",
         label: "Codex",
         command: "codex",
+        launch_args: None,
         version_flag: "--version",
         skills_dir: Some(".agents/skills"),
         profile: Some(ProfileDef {
@@ -253,6 +263,7 @@ pub const AGENTS: &[AgentDef] = &[
         id: "opencode",
         label: "OpenCode",
         command: "opencode",
+        launch_args: None,
         version_flag: "--version",
         skills_dir: Some(".agents/skills"),
         profile: Some(ProfileDef {
@@ -281,6 +292,7 @@ pub const AGENTS: &[AgentDef] = &[
         id: "kimi-code",
         label: "Kimi Code",
         command: "kimi",
+        launch_args: None,
         version_flag: "--version",
         skills_dir: Some(".agents/skills"),
         profile: None,
@@ -293,6 +305,8 @@ pub const AGENTS: &[AgentDef] = &[
         id: "antigravity",
         label: "Antigravity",
         command: "agy",
+        // Terminal interactivo, con alguien mirando. Los runs autónomos no leen esto.
+        launch_args: Some(&["--dangerously-skip-permissions"]),
         version_flag: "--version",
         skills_dir: None,
         // Native OS keyring account. Task config isolation does not isolate OAuth accounts.
@@ -309,6 +323,7 @@ pub const AGENTS: &[AgentDef] = &[
         id: "bash",
         label: "Terminal (bash)",
         command: "bash",
+        launch_args: None,
         version_flag: "--version",
         skills_dir: None,
         profile: None,
@@ -349,6 +364,10 @@ pub struct AgentRegistryEntry {
     pub id: String,
     pub label: String,
     pub command: String,
+    /// Flags de terminales interactivas. Viajan en el catálogo estático porque se pide
+    /// antes del primer render: una tab restaurada se lanza antes de que vuelva
+    /// `detect_agents`. Vacío = binario pelado.
+    pub launch_args: Vec<String>,
     pub skills_dir: Option<String>,
     pub resume: Option<String>,
     pub supports_accounts: bool,
@@ -368,6 +387,12 @@ pub fn agent_registry() -> Vec<AgentRegistryEntry> {
             id: a.id.to_string(),
             label: a.label.to_string(),
             command: a.command.to_string(),
+            launch_args: a
+                .launch_args
+                .unwrap_or_default()
+                .iter()
+                .map(|s| s.to_string())
+                .collect(),
             skills_dir: a.skills_dir.map(str::to_string),
             resume: a.resume.map(str::to_string),
             supports_accounts: a.profile.is_some(),
