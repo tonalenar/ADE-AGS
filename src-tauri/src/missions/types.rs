@@ -88,6 +88,8 @@ pub struct MissionSummary {
     pub lead_agent: Option<String>,
     /// El estado de la tarea del lead, aparte del avance.
     pub lead_status: Option<String>,
+    /// Segundos con algún agente trabajando de verdad; `None` en misiones anteriores a la medición.
+    pub active_seconds: Option<i64>,
 }
 
 /// La misión con su run activo: sus intentos, sus tareas y sus hechos.

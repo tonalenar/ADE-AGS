@@ -1,10 +1,12 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { useCanvasStore } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 
 import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
+import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking } from "./activeTime";
 import { finishedMissionTabs, missionIndex, useMissionIndex } from "./groups";
 import { useMissionsStore } from "./store";
 import { recordSpan } from "./timings";
@@ -66,6 +68,32 @@ export function useMissionWatcher(): void {
     });
     return () => {
       off.then((fn) => fn());
+    };
+  }, []);
+
+  // Tiempo activo: solo avanza mientras algún agente de la misión trabaja de verdad.
+  const live = useRef({ index, missions });
+  live.current = { index, missions };
+  useEffect(() => {
+    let pending = new Map<string, number>();
+    let ticks = 0;
+    const flush = () => {
+      for (const [id, ms] of pending) invoke("mission_active_add", { missionId: id, ms }).catch(() => undefined);
+      pending = new Map();
+    };
+    const timer = setInterval(() => {
+      const { index: tabToMission, missions: all } = live.current;
+      const running = new Set(all.filter((m) => m.status === "running").map((m) => m.id));
+      pending = accumulate(pending, sampleWorking(tabToMission, running), ACTIVE_TICK_MS);
+      ticks += 1;
+      if (ticks * ACTIVE_TICK_MS >= ACTIVE_FLUSH_MS) {
+        ticks = 0;
+        flush();
+      }
+    }, ACTIVE_TICK_MS);
+    return () => {
+      clearInterval(timer);
+      flush();
     };
   }, []);
 

@@ -60,6 +60,8 @@ export interface MissionSummary extends Mission {
   leadAgent: string | null;
   /** El estado de la tarea del lead, aparte del avance. */
   leadStatus: TaskStatus | null;
+  /** Segundos con algún agente trabajando; `null` en misiones anteriores a esta medición. */
+  activeSeconds: number | null;
 }
 
 export interface MissionDetail {

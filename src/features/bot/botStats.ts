@@ -1,7 +1,9 @@
 import type { MissionSummary } from "@/features/missions/types";
 
 /** Lo mínimo de una misión que mira el panel del bot. */
-export type MissionLike = Pick<MissionSummary, "id" | "title" | "status" | "startedAt" | "endedAt" | "spentUsd">;
+export type MissionLike = Pick<MissionSummary, "id" | "title" | "status" | "startedAt" | "endedAt" | "spentUsd"> & {
+  activeSeconds?: number | null;
+};
 
 export interface BotStats {
   total: number;
@@ -18,8 +20,13 @@ export interface BotStats {
   successRate: number | null;
 }
 
-/** Cuánto duró una misión, en segundos: de que arrancó a que terminó (o a `now`). Pura. */
-export function missionSeconds(m: Pick<MissionLike, "startedAt" | "endedAt">, now: number): number {
+/**
+ * Cuánto trabajó una misión, en segundos: SOLO el tiempo con algún agente trabajando. Las
+ * misiones anteriores a esa medición (`activeSeconds` ausente) caen al reloj de pared, de que
+ * arrancó a que terminó (o a `now`). Pura.
+ */
+export function missionSeconds(m: Pick<MissionLike, "startedAt" | "endedAt" | "activeSeconds">, now: number): number {
+  if (m.activeSeconds !== undefined && m.activeSeconds !== null) return Math.max(0, m.activeSeconds);
   if (!m.startedAt) return 0;
   return Math.max(0, (m.endedAt ?? now) - m.startedAt);
 }

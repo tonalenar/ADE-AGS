@@ -886,6 +886,14 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
          );
          CREATE INDEX IF NOT EXISTS idx_mission_timings_mission ON mission_timings(mission_id, started_ms);",
     )?;
+    // Tiempo ACTIVO de cada misión: solo corre mientras algún agente trabaja (ver
+    // `missions::active`). Aditiva; se borra con su misión.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS mission_active (
+             mission_id TEXT PRIMARY KEY REFERENCES missions(id) ON DELETE CASCADE,
+             active_ms  INTEGER NOT NULL DEFAULT 0
+         );",
+    )?;
     // New databases are stamped at the latest version by legacy detection; create v24
     // tables whenever the baseline DDL did not create them itself.
     conn.execute_batch("SAVEPOINT migrate_memory_v24")?;

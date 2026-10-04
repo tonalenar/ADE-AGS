@@ -4,11 +4,11 @@ import { useTranslation } from "react-i18next";
 import { formatTokens } from "@/features/accounts/usage";
 import { useMissionsStore } from "@/features/missions/store";
 import { formatDuration, getTimings, type MissionTimings } from "@/features/missions/timings";
-import { formatCompactNumber, getTokens, type MissionTokens } from "@/features/missions/tokens";
+import { estimateOf, formatCompactNumber, formatUsd, getTokens, type CostEstimate, type MissionTokens } from "@/features/missions/tokens";
 import { useAgentActivity } from "@/features/terminal/activity";
 import { Pet, powerTier, usePetStatus } from "@/shared/brand/Pet";
 
-import { botStats, clock, rankKey, recentMissions, scoreDigits, trophies } from "./botStats";
+import { botStats, clock, missionSeconds, rankKey, recentMissions, scoreDigits, trophies } from "./botStats";
 import { useBotPanelStore } from "./botPanelStore";
 import "./bot-panel.css";
 
@@ -55,6 +55,8 @@ export function BotPanel() {
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const [timings, setTimings] = useState<MissionTimings | null>(null);
   const [tokens, setTokens] = useState<MissionTokens | null>(null);
+  // Costo estimado y ahorro de cada misión de la lista (se leen de a una, en segundo plano).
+  const [estimates, setEstimates] = useState<Record<string, CostEstimate | null>>({});
 
   const recent = useMemo(() => recentMissions(missions), [missions]);
   const stats = useMemo(() => botStats(missions, now), [missions, now]);
@@ -78,6 +80,24 @@ export function BotPanel() {
     getTokens(current.id).then((x) => alive && setTokens(x)).catch(() => undefined);
     return () => { alive = false; };
   }, [open, current?.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    (async () => {
+      for (const m of recent) {
+        if (!alive) return;
+        if (m.status === "draft" || !m.startedAt) continue;
+        try {
+          const est = estimateOf(await getTokens(m.id));
+          if (alive) setEstimates((prev) => ({ ...prev, [m.id]: est }));
+        } catch {
+          /* medir nunca rompe el panel */
+        }
+      }
+    })();
+    return () => { alive = false; };
+  }, [open, recent.map((m) => m.id).join(",")]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     if (!open) return;
@@ -106,6 +126,10 @@ export function BotPanel() {
   const measured = tokens?.agents.filter((a) => a.measured) ?? [];
   const sum = (key: "input" | "output" | "cacheRead" | "cacheWrite") => measured.reduce((acc, a) => acc + (a[key] ?? 0), 0);
   const wall = timings?.summary.wallMs ?? 0;
+  const estimated = Object.values(estimates).reduce((a, e) => a + (e?.costUsd ?? 0), 0);
+  const savedTotal = Object.values(estimates).reduce((a, e) => a + (e?.savedUsd ?? 0), 0);
+  const spentTotal = stats.spentUsd + estimated;
+  const currentEstimate = current ? estimates[current.id] ?? estimateOf(tokens) : null;
 
   return (
     <div className="ags-hq ags-hq__backdrop" role="dialog" aria-modal="true" aria-label={t("botPanel.title")} onClick={() => setOpen(false)}>
@@ -158,7 +182,8 @@ export function BotPanel() {
                   <Card label={t("botPanel.card.running")} value={scoreDigits(stats.running, 3)} color="var(--hq-green)" />
                   <Card label={t("botPanel.card.time")} value={clock(stats.missionSeconds)} color="var(--hq-yellow)" />
                   <Card label={t("botPanel.card.longest")} value={clock(stats.longestSeconds)} color="var(--hq-orange)" />
-                  <Card label={t("botPanel.card.spent")} value={`$${stats.spentUsd.toFixed(2)}`} color="var(--hq-pink)" />
+                  <Card label={t("botPanel.card.spent")} value={`$${spentTotal.toFixed(2)}`} color="var(--hq-pink)" />
+                  <Card label={t("botPanel.card.saved")} value={`$${savedTotal.toFixed(2)}`} color="var(--hq-green)" />
                   <Card label={t("botPanel.card.success")} value={stats.successRate === null ? "--" : `${stats.successRate}%`} color="var(--hq-green)" />
                   <Card label={t("botPanel.card.failed")} value={scoreDigits(stats.failed, 3)} color="var(--hq-pink)" />
                   <Card label={t("botPanel.card.total")} value={scoreDigits(stats.total, 3)} />
@@ -173,8 +198,8 @@ export function BotPanel() {
                         <button key={m.id} type="button" role="option" aria-selected={i === selected} className="ags-hq__item" onClick={() => setSelected(i)}>
                           <span style={{ color: STATUS_COLOR[m.status] }}>{STATUS_GLYPH[m.status] ?? "?"}</span>
                           <span className="ags-hq__item-title">{m.title}</span>
-                          <span className="ags-hq__dim">{clock(m.startedAt ? (m.endedAt ?? now) - m.startedAt : 0)}</span>
-                          <span className="ags-hq__dim">${(m.spentUsd ?? 0).toFixed(2)}</span>
+                          <span className="ags-hq__dim">{clock(missionSeconds(m, now))}</span>
+                          <span className="ags-hq__dim">${((m.spentUsd ?? 0) + (estimates[m.id]?.costUsd ?? 0)).toFixed(2)}</span>
                         </button>
                       ))}
                     </div>
@@ -203,10 +228,16 @@ export function BotPanel() {
                     <Card label={t("botPanel.card.input")} value={measured.length ? formatCompactNumber(sum("input")) : "--"} color="var(--hq-cyan)" />
                     <Card label={t("botPanel.card.output")} value={measured.length ? formatCompactNumber(sum("output")) : "--"} color="var(--hq-green)" />
                     <Card label={t("botPanel.card.cacheRead")} value={measured.length ? formatCompactNumber(sum("cacheRead")) : "--"} color="var(--hq-orange)" />
+                    <Card label={t("botPanel.card.estimate")} value={currentEstimate ? formatUsd(currentEstimate.costUsd) : "--"} color="var(--hq-pink)" />
+                    <Card label={t("botPanel.card.saved")} value={currentEstimate ? formatUsd(currentEstimate.savedUsd) : "--"} color="var(--hq-green)" />
                   </div>
                   <p className="ags-hq__dim" style={{ marginTop: 12 }}>
                     {current ? t("botPanel.tokensOf", { title: current.title }) : t("botPanel.empty")}
                   </p>
+                  {currentEstimate && <p className="ags-hq__dim">{t("botPanel.estimateNote")}</p>}
+                  {currentEstimate && currentEstimate.unpricedModels.length > 0 && (
+                    <p className="ags-hq__dim">{t("botPanel.unpriced", { models: currentEstimate.unpricedModels.join(", ") })}</p>
+                  )}
                   {tokens && tokens.agents.filter((a) => !a.measured).length > 0 && (
                     <p className="ags-hq__dim">{t("botPanel.unmeasured", { agents: tokens.agents.filter((a) => !a.measured).map((a) => a.agentId).join(", ") })}</p>
                   )}

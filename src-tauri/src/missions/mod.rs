@@ -20,6 +20,7 @@ pub(crate) mod timings;
 #[cfg(test)]
 mod test;
 mod types;
+pub mod active;
 
 pub use types::{Mission, MissionDetail, MissionInput, MissionSummary};
 
@@ -441,6 +442,14 @@ pub fn mission_timing_add(app: AppHandle, mission_id: String, span: timings::New
     let db = db_of(&app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     timings::add(&conn, &mission_id, &span)
+}
+
+/// Suma tiempo de trabajo real a una misión en curso (ver `active`).
+#[tauri::command]
+pub fn mission_active_add(app: AppHandle, mission_id: String, ms: i64) -> Result<(), String> {
+    let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    active::add(&conn, &mission_id, ms)
 }
 
 /// Los tiempos de una misión y su resumen: dónde se fue el tiempo.

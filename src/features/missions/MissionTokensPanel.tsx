@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { formatCompactNumber, getTokens, tokenRows, type MissionTokens, type TokenRow } from "./tokens";
+import { estimateOf, formatCompactNumber, formatUsd, getTokens, tokenRows, type MissionTokens, type TokenRow } from "./tokens";
 
 /** Cada quanto se relê enquanto a missão roda: os tokens medidos não geram evento próprio. */
 const REFRESH_MS = 60_000;
@@ -66,6 +66,7 @@ export function MissionTokensPanel({ missionId }: { missionId: string }) {
   }
 
   const rows = tokenRows(data);
+  const estimate = estimateOf(data);
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -85,6 +86,22 @@ export function MissionTokensPanel({ missionId }: { missionId: string }) {
           <TokenTableRow key={row.agentId} row={row} />
         ))}
       </div>
+      {estimate && (
+        <div className="mt-1 flex flex-col gap-0.5 text-[11.5px] text-gray-600 dark:text-gray-300">
+          <span>
+            {t("missions.tokens.estimate")}: <b className="tabular-nums">{formatUsd(estimate.costUsd)}</b>
+          </span>
+          <span>
+            {t("missions.tokens.saved")}: <b className="tabular-nums text-emerald-600 dark:text-emerald-400">{formatUsd(estimate.savedUsd)}</b>
+          </span>
+          <span className="text-[10.5px] text-gray-400 dark:text-white/35">{t("missions.tokens.estimateNote")}</span>
+          {estimate.unpricedModels.length > 0 && (
+            <span className="text-[10.5px] text-amber-600 dark:text-amber-400">
+              {t("missions.tokens.unpriced", { models: estimate.unpricedModels.join(", ") })}
+            </span>
+          )}
+        </div>
+      )}
     </div>
   );
 }

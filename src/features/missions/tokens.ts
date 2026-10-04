@@ -1,5 +1,13 @@
 import { invoke } from "@tauri-apps/api/core";
 
+/** Costo ESTIMADO con precio de lista (los tokens son medidos, el precio es de tabla) y ahorro del caché. */
+export interface CostEstimate {
+  costUsd: number;
+  savedUsd: number;
+  /** Modelos que la tabla de precios no conoce: sus tokens no entran en el costo. */
+  unpricedModels: string[];
+}
+
 export interface AgentTokens {
   agentId: string;
   measured: boolean;
@@ -8,6 +16,7 @@ export interface AgentTokens {
   cacheWrite: number | null;
   cacheRead: number | null;
   costUsd: number | null;
+  estimate?: CostEstimate | null;
 }
 
 export interface MissionTokens {
@@ -41,6 +50,24 @@ export function cacheReadShare(a: AgentTokens): number | null {
   const total = a.input + a.cacheRead + a.cacheWrite;
   if (total <= 0) return null;
   return Math.round((a.cacheRead / total) * 100);
+}
+
+/** La estimación de toda la misión: suma la de cada agente con tokens medidos; `null` si ninguno. Pura. */
+export function estimateOf(data: MissionTokens | null | undefined): CostEstimate | null {
+  let total: CostEstimate | null = null;
+  for (const a of data?.agents ?? []) {
+    if (!a.estimate) continue;
+    total ??= { costUsd: 0, savedUsd: 0, unpricedModels: [] };
+    total.costUsd += a.estimate.costUsd;
+    total.savedUsd += a.estimate.savedUsd;
+    for (const m of a.estimate.unpricedModels) if (!total.unpricedModels.includes(m)) total.unpricedModels.push(m);
+  }
+  return total;
+}
+
+/** "US$ 1,23": dos decimales, o "—" sin dato. Pura. */
+export function formatUsd(value: number | null | undefined): string {
+  return value === null || value === undefined || !Number.isFinite(value) ? "—" : `US$ ${value.toFixed(2).replace(".", ",")}`;
 }
 
 export interface TokenRow extends AgentTokens {

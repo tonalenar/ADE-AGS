@@ -1760,7 +1760,7 @@
   "botPanel.card.running": "EM ANDAMENTO",
   "botPanel.card.time": "TEMPO EM MISSÃO",
   "botPanel.card.longest": "MAIS LONGA",
-  "botPanel.card.spent": "GASTO (LEDGER)",
+  "botPanel.card.spent": "GASTO (EST.)",
   "botPanel.card.success": "TAXA DE SUCESSO",
   "botPanel.card.failed": "FALHAS",
   "botPanel.card.total": "TOTAL",
@@ -2019,5 +2019,13 @@
   "agents.update.reason.busy_mission": "Há uma missão em andamento com este agente",
   "agents.update.reason.running": "Outra atualização em andamento",
   "agents.update.reason.timeout": "Tempo esgotado (5 min)",
-  "agents.update.reason.failed": "Falha na atualização"
+  "agents.update.reason.failed": "Falha na atualização",
+  "botPanel.card.saved": "ECONOMIA CACHE",
+  "botPanel.card.estimate": "CUSTO EST.",
+  "botPanel.estimateNote": "Tokens medidos × preço de tabela da API: estimativa, não cobrança (assinatura não paga por token).",
+  "botPanel.unpriced": "SEM PREÇO NA TABELA: {{models}}",
+  "missions.tokens.estimate": "Custo estimado (preço de tabela)",
+  "missions.tokens.saved": "Economia do cache",
+  "missions.tokens.estimateNote": "Tokens medidos × preço de tabela da API. É uma estimativa: assinatura não paga por token.",
+  "missions.tokens.unpriced": "Sem preço na tabela, fora do custo: {{models}}"
 }
