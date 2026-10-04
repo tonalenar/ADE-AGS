@@ -35,6 +35,7 @@ pub fn run() {
             crate::terminal::pty_attach,
             crate::terminal::pty_for_tab,
             crate::terminal::pty_write,
+            crate::terminal::save_pasted_image,
             crate::terminal::pty_resize,
             crate::terminal::pty_kill,
             // Canvas de agentes: posiciones y conexiones
@@ -388,6 +389,9 @@ pub fn run() {
             _ => {}
         })
         .setup(|app| {
+            std::thread::spawn(|| {
+                crate::terminal::attachments::cleanup_pasted(std::time::Duration::from_secs(24 * 60 * 60));
+            });
             // Al arrancar, se restaura SOLO el workspace usado más recientemente (por
             // `last_active`, que se bumpea en cada autosave de ventana y al abrir un
             // workspace) — no todas las ventanas de todos los workspaces mezcladas.

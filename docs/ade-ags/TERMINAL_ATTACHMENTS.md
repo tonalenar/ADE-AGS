@@ -11,10 +11,10 @@ Dá para mandar arquivos e imagens a um agente pelo terminal da app. Só o **cam
 
 | Agente | Formato | Verificação |
 |---|---|---|
-| Claude Code | `@caminho` (`@"caminho com espaço"`) | sintaxe documentada de menção a arquivo |
-| Gemini CLI | `@caminho` | documentada; CLI não instalada aqui, não verificada localmente |
-| OpenCode | `@caminho` | referência a arquivo do TUI |
-| Codex | caminho puro | o TUI anexa imagem ao colar o caminho (`-i` existe só na CLI) |
+| Claude Code | `@caminho` (`@"caminho com espaço"`) | convenção conhecida; não verificada por `--help` local |
+| Gemini CLI | `@caminho` | CLI não instalada aqui; não verificada |
+| OpenCode | `@caminho` | `--help` não documenta; não verificada |
+| Codex | caminho puro | `--help` só confirma `-i` no lançamento; caminho puro no prompt não verificado |
 | Antigravity / desconhecido | caminho entre aspas simples, sem prefixo | não verificado: formato genérico |
 
 Vários caminhos vão separados por espaço, com um espaço no final.
