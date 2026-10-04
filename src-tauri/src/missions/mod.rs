@@ -391,6 +391,7 @@ pub async fn mission_apply(app: AppHandle, mission_id: String) -> Result<review:
 /// Arranca la misión en terminales: solo la marca; abrir las tabs es de la pantalla.
 #[tauri::command]
 pub fn mission_start_terminals(app: AppHandle, mission_id: String) -> Result<Mission, String> {
+    let _update_guard = crate::agents::updates::activity_guard()?;
     let db = db_of(&app)?;
     {
         let conn = db.lock().map_err(|e| e.to_string())?;

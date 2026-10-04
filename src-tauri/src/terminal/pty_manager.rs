@@ -110,6 +110,10 @@ fn registry() -> MutexGuard<'static, HashMap<u32, PtySession>> {
     PTY_REGISTRY.lock().unwrap_or_else(|e| e.into_inner())
 }
 
+pub fn live_update_tabs() -> Vec<Option<String>> {
+    registry().values().map(|s|s.tab_id.clone()).collect()
+}
+
 /// Cuántos PTYs vivos hay. Para probar que algo NO abrió una terminal.
 #[cfg(test)]
 pub(crate) fn live_pty_count() -> usize {
@@ -362,6 +366,7 @@ pub async fn pty_create(
     prelaunch: Option<Vec<String>>,
     app: AppHandle,
 ) -> Result<u32, String> {
+    let _update_guard = crate::agents::updates::activity_guard()?;
     let pty_system = native_pty_system();
     let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
 

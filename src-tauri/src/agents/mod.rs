@@ -8,6 +8,8 @@ mod adapter;
 mod custom;
 mod detector;
 mod registry;
+pub mod updates;
+pub use updates::*;
 #[cfg(test)]
 mod contract;
 #[cfg(test)]
