@@ -7,6 +7,7 @@ fn pool(name: &str, members: &[Option<&str>], strategy: Strategy) -> Pool {
         agent_id: "claude-code".into(),
         members: members.iter().map(|m| m.map(String::from)).collect(),
         strategy,
+        failover: false,
     }
 }
 

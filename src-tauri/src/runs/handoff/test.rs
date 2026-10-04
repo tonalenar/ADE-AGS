@@ -173,7 +173,7 @@ fn automatic_attempt_retry_drops_stale_delivery() {
 fn start_mission(db: &crate::database::DbConnection, mission: &str) -> String {
     crate::missions::start(db, mission, |_| Ok(crate::runs::routing::Assignment {
         agent_id: "claude-code".into(), model: None, account_id: None,
-        routed_by: crate::runs::routing::RoutedBy::Policy, notes: Vec::new(), auto_account: true,
+        routed_by: crate::runs::routing::RoutedBy::Policy, notes: Vec::new(), auto_account: true, pool_origin: None,
     }), |_| Ok(())).unwrap().active_run_id.unwrap()
 }
 

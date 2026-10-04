@@ -402,6 +402,31 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
             "reason": reason,
         })),
     );
+
+    // Una tarea con origen de pool conserva ese destino fijado. El opt-in permite cambiar
+    // solo la cuenta, dentro del mismo pool y agente, y únicamente tras un rate limit.
+    if kind == FailureKind::RateLimited
+        && let Some(origin) = super::pool_failover::task_pool(db, &task.id)
+    {
+        let pool = crate::accounts::pools::load(db)
+            .into_iter()
+            .find(|pool| pool.id == origin.id);
+        if let Some(pool) = pool
+            && pool.failover
+            && pool.agent_id == task.agent_id
+            && origin.agent_id == task.agent_id
+        {
+            super::pool_failover::cool_down_account(&key, now);
+            let already_failed_over = super::pool_failover::task_already_failed_over(db, &task.id);
+            if super::pool_failover::failure_eligible(kind, pool.failover, already_failed_over) {
+                match failover_in_pool(app, db, task, &origin, &pool.members, &reason, now) {
+                    Ok(()) => return,
+                    Err(error) => eprintln!("[runs] '{}' no pudo cambiar dentro del pool: {error}", task.title),
+                }
+            }
+        }
+    }
+
     let pinned = !task.auto_account;
     let lead = task.role.as_deref() == Some(role::LEAD);
     if pinned || lead {
@@ -419,6 +444,76 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
             let _ = store::tag_error(&conn, &task.id, "[sin otra cuenta disponible]");
         }
     }
+}
+
+/// Busca con el picker del pool y vuelve a lanzar la misma tarea con el mismo agente y modelo.
+fn failover_in_pool(
+    app: &AppHandle,
+    db: &DbConnection,
+    task: &Task,
+    origin: &crate::accounts::pools::PoolOrigin,
+    members: &[Option<String>],
+    reason: &str,
+    now: i64,
+) -> Result<(), String> {
+    use super::routing::AccountChoice;
+
+    // La definición pudo cambiar mientras corría la tarea. Si la cuenta de origen ya no
+    // integra ese pool, no intentamos reinterpretar la asignación.
+    if !members.contains(&task.account_id) {
+        return Err("la cuenta original ya no pertenece al pool".into());
+    }
+    let spec = crate::accounts::pools::spec_for(db, &origin.id)?;
+    if !spec.failover || spec.agent_id != task.agent_id {
+        return Err("el pool ya no permite failover para esta TUI".into());
+    }
+    let request = super::routing::RouteRequest {
+        agent_id: Some(task.agent_id.clone()),
+        // Mantiene el modelo asignado; el cambio es únicamente de cuenta.
+        model: task.model.clone(),
+        complexity: None,
+        account: AccountChoice::Pool(spec),
+    };
+    let roster = super::roster::snapshot(db, false)?;
+    let assignment = super::routing::route(
+        &roster,
+        &super::routing::load_tiers(db),
+        &request,
+        now,
+    )?;
+    if assignment.agent_id != task.agent_id
+        || assignment.account_id == task.account_id
+        || !members.contains(&assignment.account_id)
+    {
+        return Err("no quedó otra cuenta elegible dentro del pool".into());
+    }
+    if !super::pool_failover::reserve_failover(db, &task.id, &origin.id, now)? {
+        return Err("se alcanzó el límite de failover de la tarea o del pool".into());
+    }
+
+    let from_account = task.account_id.clone();
+    let to_account = assignment.account_id.clone();
+    let pool_name = crate::accounts::pools::find(&crate::accounts::pools::load(db), &origin.id)
+        .map(|pool| pool.name.clone())
+        .unwrap_or_else(|_| origin.name.clone());
+    super::reroute_to(app, &task.id, assignment, reason)?;
+    crate::bus::publish(
+        Some(app),
+        crate::bus::Publish::new("account.pool_failover")
+            .task(&task.id)
+            .run(&task.run_id)
+            .data(serde_json::json!({
+                "taskId": task.id,
+                "runId": task.run_id,
+                "poolId": origin.id,
+                "poolName": pool_name,
+                "fromAccount": from_account,
+                "toAccount": to_account,
+                "reason": reason,
+                "kind": "rate_limited",
+            })),
+    );
+    Ok(())
 }
 
 /// Anota la cuenta como sin cupo, sin pisar lo que ya se sabía de sus ventanas. El rechazo

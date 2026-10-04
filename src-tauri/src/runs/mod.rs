@@ -23,6 +23,7 @@ pub mod orchestration;
 mod plan;
 mod policy;
 pub(crate) mod quota;
+pub(crate) mod pool_failover;
 pub(crate) mod roster;
 pub mod checkpoints;
 pub(crate) mod routing;
@@ -133,6 +134,7 @@ pub async fn run_start_task(
                 ..Default::default()
             },
         )?;
+        pool_failover::record_task_pool(&tx, &task.id, assignment.pool_origin.as_ref())?;
         tx.commit().map_err(|e|e.to_string())?;
         task
     };
@@ -323,6 +325,7 @@ if let Some(squad) = spec.squad {
                 ..Default::default()
             },
         )?;
+        pool_failover::record_task_pool(&tx, &task.id, assignment.pool_origin.as_ref())?;
         on_created(&tx, &task)?;
         tx.commit().map_err(|e| e.to_string())?;
         task
@@ -901,7 +904,9 @@ pub fn reroute_to(
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::task_by_id(&conn, task_id)?.ok_or_else(|| "la tarea ya no existe".to_string())?
     };
-    if task.role.as_deref() == Some(types::role::LEAD) {
+    if task.role.as_deref() == Some(types::role::LEAD)
+        && (assignment.agent_id != task.agent_id || assignment.pool_origin.is_none())
+    {
         return Err("el lead no se pasa a otro agente: es quien reparte".into());
     }
 
@@ -930,8 +935,9 @@ pub fn reroute_to(
 
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
         let moved = store::reroute_task(
-            &conn,
+            &tx,
             task_id,
             &assignment.agent_id,
             assignment.model.as_deref(),
@@ -948,6 +954,8 @@ pub fn reroute_to(
                 "la tarea no está en un estado en el que se pueda pasar a otro agente".into(),
             );
         }
+        pool_failover::record_task_pool(&tx, task_id, assignment.pool_origin.as_ref())?;
+        tx.commit().map_err(|e| e.to_string())?;
     }
     // Un cambio de manos es lo que el Map Mode dibuja como arista de traspaso.
     crate::bus::publish(

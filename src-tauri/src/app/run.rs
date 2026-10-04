@@ -61,6 +61,7 @@ pub fn run() {
             crate::pet::pet_status,
             crate::ipc::commands::pool::pool_list_all,
             crate::ipc::commands::pool::pool_save_new,
+            crate::ipc::commands::pool::pool_set_failover,
             crate::ipc::commands::pool::pool_remove,
             crate::ipc::commands::pool::pool_pick,
             crate::android::android_list,

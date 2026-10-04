@@ -30,6 +30,7 @@ pub enum Notice {
     MissionFailed { title: String },
     ApprovalWaiting { pending: u64 },
     AccountProblem { reason: String },
+    PoolFailover { pool_name: String, from_account: String, to_account: String },
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -71,6 +72,18 @@ pub fn text(notice: &Notice, lang: Lang) -> (String, String) {
         (Notice::AccountProblem { reason }, Pt) => ("Problema numa conta".into(), reason.clone()),
         (Notice::AccountProblem { reason }, En) => ("Account problem".into(), reason.clone()),
         (Notice::AccountProblem { reason }, Es) => ("Problema con una cuenta".into(), reason.clone()),
+        (Notice::PoolFailover { pool_name, from_account, to_account }, Pt) => (
+            "Failover do pool".into(),
+            format!("A tarefa mudou da conta {from_account} para {to_account} no pool {pool_name}."),
+        ),
+        (Notice::PoolFailover { pool_name, from_account, to_account }, En) => (
+            "Pool failover".into(),
+            format!("The task moved from account {from_account} to {to_account} in pool {pool_name}."),
+        ),
+        (Notice::PoolFailover { pool_name, from_account, to_account }, Es) => (
+            "Cambio de cuenta del pool".into(),
+            format!("La tarea pasó de la cuenta {from_account} a {to_account} en el pool {pool_name}."),
+        ),
     }
 }
 
@@ -139,7 +152,12 @@ pub fn start(app: AppHandle) {
     std::thread::spawn(move || {
         let Some(db) = app.try_state::<DbConnection>().map(|s| s.inner().clone()) else { return };
         let filter = Filter {
-            topics: vec!["mission.changed".into(), "approvals.changed".into(), "account.failure".into()],
+            topics: vec![
+                "mission.changed".into(),
+                "approvals.changed".into(),
+                "account.failure".into(),
+                "account.pool_failover".into(),
+            ],
             ..Default::default()
         };
         let mut after = bus::since(0, &filter, 0).last_seq;
@@ -162,6 +180,14 @@ pub fn start(app: AppHandle) {
                         .get("reason")
                         .and_then(|r| r.as_str())
                         .map(|reason| Notice::AccountProblem { reason: reason.to_string() }),
+                    "account.pool_failover" => {
+                        let text = |key: &str| event.data.get(key).and_then(|value| value.as_str());
+                        Some(Notice::PoolFailover {
+                            pool_name: text("poolName").unwrap_or("pool").to_string(),
+                            from_account: text("fromAccount").unwrap_or("principal").to_string(),
+                            to_account: text("toAccount").unwrap_or("principal").to_string(),
+                        })
+                    }
                     _ => None,
                 };
                 let Some(notice) = notice else { continue };
