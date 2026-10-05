@@ -29,3 +29,11 @@ A quinta aba do BotPanel mostra uma missão por vez em um canvas pixel art. A mi
 - **Movimento**: vigas inclinadas e escadas alternando de lado. O herói anda até a escada, sobe um andar por vez até o andar da etapa (Abertura, Trabalho, Testes, Revisão, Entrega) e vai até a tarefa. Quem corre vai e vem perto da tarefa.
 - **Render**: `requestAnimationFrame` limitado a ~12 fps, pausa com a janela oculta; com `prefers-reduced-motion` as posições são estáticas e não há loop. Sem som.
 - Lógica pura em `liveArcadeModel.ts` (`deriveHeroes`, `taskOfTab`, `roleOf`) e `liveArcadeScene.ts` (`stepMotion`, `heroTargets`, `beamY`…); desenho em `liveArcadeDraw.ts`.
+
+## v3.1 — a torre
+
+- A fase vira **construir a torre**, no chão à direita: um bloco por tarefa **concluída de verdade** (`status = done`), na ordem de `endedAt`, colorido pelo papel. Tarefas que faltam aparecem como contorno tracejado; canceladas e puladas não entram no total.
+- Acima das tarefas: bloco de **integração** (cheio só com a branch de integração aplicada, `INTEGRADO`), e blocos **PR** e **CI** em **cinza com "?"** — o app não mede PR/CI, então nunca ficam verdes nem são inventados.
+- A torre fica **pronta** (`complete`) quando todas as tarefas planejadas foram entregues e a integração foi aplicada; PR/CI não medidos não contam como verde.
+- Quando uma tarefa passa de não concluída para `done` com o app aberto, o herói ligado a ela **carrega o bloco** (desce as escadas) até a torre e só então o bloco aparece. Sem herói ligado, com `prefers-reduced-motion` ou ao abrir a aba (o que já estava pronto), o bloco entra direto.
+- Lógica pura: `deriveTower` e `newlyDone` em `liveArcadeModel.ts`.

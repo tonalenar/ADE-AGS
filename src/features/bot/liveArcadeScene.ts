@@ -11,6 +11,10 @@ const TILT = 8;
 const LEVEL_OF_STAGE: Record<ArcadeStageId, number> = { opening: 1, work: 2, tests: 3, review: 4, delivery: 5 };
 export const levelOfStage = (stage: ArcadeStageId | null): number => (stage ? LEVEL_OF_STAGE[stage] : 0);
 /** Quadros por segundo do canvas: ~12 fps. */
+/** Onde o herói deixa o bloco: ao pé da torre, no chão. */
+export const TOWER_DROP_X = 826;
+export const TOWER_LEFT = 850;
+export const TOWER_WIDTH = 64;
 export const FRAME_MS = 1000 / 12;
 
 function floorY(level: number, x: number): number {

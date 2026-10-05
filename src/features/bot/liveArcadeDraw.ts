@@ -1,5 +1,5 @@
-import type { AgentKind, ArcadeBarrel, ArcadeHero, ArcadeScene, ArcadeStageId, ArcadeTrophy, HeroRole } from "./liveArcadeModel";
-import { ARCADE_H, ARCADE_W, BEAM_LEFT, BEAM_RIGHT, LEVEL_BASE_Y, beamY, ladderX, levelOfStage, taskSlots } from "./liveArcadeScene";
+import type { AgentKind, ArcadeBarrel, ArcadeHero, ArcadeScene, ArcadeStageId, ArcadeTower, ArcadeTrophy, HeroRole } from "./liveArcadeModel";
+import { ARCADE_H, ARCADE_W, BEAM_LEFT, BEAM_RIGHT, LEVEL_BASE_Y, TOWER_LEFT, TOWER_WIDTH, beamY, ladderX, levelOfStage, taskSlots } from "./liveArcadeScene";
 
 const DIM = "#77799b";
 const FONT = (px: number) => `${px}px "Press Start 2P", monospace`;
@@ -37,7 +37,7 @@ function sprite(ctx: CanvasRenderingContext2D, rows: string[], x: number, y: num
 }
 
 /** Um herói desenhado com os pés em (x, y). */
-export function drawHero(ctx: CanvasRenderingContext2D, hero: ArcadeHero, x: number, y: number, pose: Pose, label: string) {
+export function drawHero(ctx: CanvasRenderingContext2D, hero: ArcadeHero, x: number, y: number, pose: Pose, label: string, carrying?: HeroRole) {
   const scale = 2;
   const left = x - 8;
   const top = y - 18 - 2 * scale + 0;
@@ -49,6 +49,12 @@ export function drawHero(ctx: CanvasRenderingContext2D, hero: ArcadeHero, x: num
   ctx.fillStyle = "#f4efff";
   ctx.fillText(label.length > 10 ? label.slice(0, 9) + "…" : label, x, top - 8);
   ctx.textAlign = "left";
+  if (carrying) {
+    ctx.fillStyle = ROLE_COLOR[carrying];
+    ctx.fillRect(x - 6, top - 18, 12, 9);
+    ctx.fillStyle = "#161225";
+    ctx.fillRect(x - 6, top - 12, 12, 1);
+  }
   if (hero.state === "sleeping") {
     ctx.font = FONT(8);
     ctx.fillStyle = "#abb1d8";
@@ -75,7 +81,8 @@ function taskColor(status: string): string {
 }
 
 function drawBeam(ctx: CanvasRenderingContext2D, level: number) {
-  for (let x = BEAM_LEFT; x < BEAM_RIGHT; x += 14) {
+  // O chão segue até a torre, onde os heróis deixam os blocos.
+  for (let x = BEAM_LEFT; x < (level === 0 ? ARCADE_W - 20 : BEAM_RIGHT); x += 14) {
     const y = beamY(level, x + 7);
     ctx.fillStyle = level === 0 ? "#734b9d" : "#9a4fd0";
     ctx.fillRect(x, y, 14, 8);
@@ -109,15 +116,48 @@ function drawDependency(ctx: CanvasRenderingContext2D, from: { x: number; y: num
   ctx.restore();
 }
 
-export interface Placed { hero: ArcadeHero; x: number; level: number; pose: Pose; lift: number }
+export interface Placed { hero: ArcadeHero; x: number; level: number; pose: Pose; lift: number; carrying?: HeroRole }
+
+/** A torre cresce do chão para cima: um bloco por entrega real; cinza = não medido. */
+function drawTower(ctx: CanvasRenderingContext2D, tower: ArcadeTower, label: string) {
+  const bottom = LEVEL_BASE_Y[0] - 2;
+  const room = bottom - (LEVEL_BASE_Y[5] + 40);
+  const h = Math.max(6, Math.min(18, Math.floor(room / tower.blocks.length)));
+  tower.blocks.forEach((block, index) => {
+    const y = bottom - (index + 1) * h;
+    if (block.state === "filled") {
+      ctx.fillStyle = ROLE_COLOR[block.role];
+      ctx.fillRect(TOWER_LEFT, y, TOWER_WIDTH, h - 1);
+      ctx.fillStyle = "rgba(0,0,0,0.25)";
+      ctx.fillRect(TOWER_LEFT, y + h - 3, TOWER_WIDTH, 2);
+    } else if (block.state === "unmeasured") {
+      ctx.fillStyle = "#4b4b60";
+      ctx.fillRect(TOWER_LEFT, y, TOWER_WIDTH, h - 1);
+      ctx.fillStyle = "#9799b9";
+      ctx.font = FONT(Math.min(8, h - 2));
+      ctx.textAlign = "center";
+      ctx.fillText("?", TOWER_LEFT + TOWER_WIDTH / 2, y + h - 3);
+      ctx.textAlign = "left";
+    } else {
+      ctx.strokeStyle = "#4f4a73";
+      ctx.lineWidth = 1;
+      ctx.setLineDash([3, 3]);
+      ctx.strokeRect(TOWER_LEFT + 0.5, y + 0.5, TOWER_WIDTH - 1, h - 2);
+      ctx.setLineDash([]);
+    }
+  });
+  ctx.font = FONT(6);
+  ctx.fillStyle = tower.complete ? "#ffe15a" : "#9799b9";
+  ctx.fillText(label, TOWER_LEFT - 8, bottom - tower.blocks.length * h - 6);
+}
 export interface DrawLabels {
-  arcade: string; team: string; trophy: string;
+  arcade: string; team: string; trophy: string; tower: string;
   stage: (stage: ArcadeStageId) => string;
   status: (status: string) => string;
 }
 export interface DrawInput {
   scene: ArcadeScene; title: string; labels: DrawLabels;
-  heroes: Placed[]; barrels: ArcadeBarrel[]; trophy: ArcadeTrophy; frame: number;
+  heroes: Placed[]; barrels: ArcadeBarrel[]; trophy: ArcadeTrophy; tower: ArcadeTower; frame: number;
 }
 
 export function drawArcade(ctx: CanvasRenderingContext2D, input: DrawInput) {
@@ -207,12 +247,13 @@ export function drawArcade(ctx: CanvasRenderingContext2D, input: DrawInput) {
   ctx.fillRect(826, top - 10, 20, 4);
   ctx.font = FONT(6);
   ctx.fillText(labels.trophy, 812, top + 22);
+  drawTower(ctx, input.tower, labels.tower);
 
   ctx.fillStyle = "#9799b9";
   ctx.fillText(labels.team, 18, ARCADE_H - 10);
   // Mais ao fundo primeiro: quem sobe (nível alto) fica atrás de quem está no chão.
   for (const placed of [...input.heroes].sort((a, b) => b.level - a.level)) {
     const y = beamY(placed.level, placed.x) - placed.lift;
-    drawHero(ctx, placed.hero, placed.x, y, placed.pose, placed.hero.name);
+    drawHero(ctx, placed.hero, placed.x, y, placed.pose, placed.hero.name, placed.carrying);
   }
 }

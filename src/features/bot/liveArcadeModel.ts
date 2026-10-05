@@ -182,3 +182,42 @@ export function deriveHeroes(input: {
     return [{ tabId: tab.id, name: tab.title, kind, role: roleOf(tab.title, task?.role), stage: task ? task.stage : null, taskId: task?.id ?? null, state }];
   });
 }
+
+export type TowerBlockKind = "task" | "integration" | "pr" | "ci";
+/** `filled` = entrega real; `empty` = ainda falta; `unmeasured` = o app não mede (cinza, nunca inventado). */
+export type TowerBlockState = "filled" | "empty" | "unmeasured";
+export interface TowerBlock { id: string; kind: TowerBlockKind; role: HeroRole; state: TowerBlockState }
+export interface ArcadeTower {
+  /** De baixo para cima: tarefas concluídas (na ordem em que concluíram), tarefas faltantes, integração, PR, CI. */
+  blocks: TowerBlock[];
+  done: number;
+  planned: number;
+  /** Pronta quando todas as tarefas planejadas foram entregues e a integração foi aplicada. PR/CI não medidos não contam como verde. */
+  complete: boolean;
+}
+
+/** Torre da missão: um bloco por tarefa concluída DE VERDADE. `carrying` = tarefas já concluídas cujo bloco ainda está a caminho (o herói o carrega). */
+export function deriveTower(input: { scene: ArcadeScene; trophy: ArcadeTrophy; carrying?: ReadonlySet<string> }): ArcadeTower {
+  const planned = input.scene.tasks.filter((task) => task.status !== "cancelled" && task.status !== "skipped");
+  const isDone = (task: ArcadeTask) => task.status === "done" && !input.carrying?.has(task.id);
+  const done = planned.filter(isDone)
+    .sort((a, b) => (a.endedAt ?? Infinity) - (b.endedAt ?? Infinity));
+  const todo = planned.filter((task) => !isDone(task));
+  const block = (task: ArcadeTask, state: TowerBlockState): TowerBlock =>
+    ({ id: task.id, kind: "task", role: roleOf(task.role), state });
+  const integrated = input.trophy.step === "integrated";
+  const blocks: TowerBlock[] = [
+    ...done.map((task) => block(task, "filled")),
+    ...todo.map((task) => block(task, "empty")),
+    { id: "integration", kind: "integration", role: "lead", state: integrated ? "filled" : "empty" },
+    { id: "pr", kind: "pr", role: "other", state: input.trophy.pr === null ? "unmeasured" : "filled" },
+    { id: "ci", kind: "ci", role: "other", state: input.trophy.ci === null ? "unmeasured" : "filled" },
+  ];
+  return { blocks, done: done.length, planned: planned.length, complete: planned.length > 0 && todo.length === 0 && integrated };
+}
+
+/** Tarefas que acabaram de virar `done` (antes não eram). Sem leitura anterior não há transição: o que já estava pronto já está na torre. */
+export function newlyDone(previous: ReadonlyMap<string, ArcadeTaskStatus> | null, tasks: ArcadeTask[]): string[] {
+  if (!previous) return [];
+  return tasks.filter((task) => task.status === "done" && previous.has(task.id) && previous.get(task.id) !== "done").map((task) => task.id);
+}

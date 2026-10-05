@@ -1835,6 +1835,8 @@
   "botPanel.live.running": "CORRENDO",
   "botPanel.live.sleeping": "DORMINDO",
   "botPanel.live.waiting": "AGUARDANDO",
+  "botPanel.live.tower": "TORRE {{done}}/{{total}}",
+  "botPanel.live.towerUnmeasured": "PR e CI: não medidos.",
   "botPanel.live.noAgents": "Nenhum agente mapeado.",
   "botPanel.live.barrel.approval": "aprovação pendente",
   "botPanel.live.barrel.failing": "falha ou teste falhando",

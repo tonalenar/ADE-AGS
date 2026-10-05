@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { agentKind, deriveArcadeScene, deriveHeroes, roleOf, taskOfTab, type ArcadeTask } from "../liveArcadeModel";
+import { agentKind, deriveArcadeScene, deriveHeroes, deriveTower, newlyDone, roleOf, taskOfTab, type ArcadeTask } from "../liveArcadeModel";
 import { BEAM_RIGHT, beamY, heroTargets, jumpLift, ladderX, levelOfStage, patrolOffset, stepMotion, taskSlots, type Motion } from "../liveArcadeScene";
 
 const task = (id: string, patch: Partial<ArcadeTask> = {}): ArcadeTask => ({ id, title: id, status: "pending", dependsOn: [], ...patch });
@@ -105,5 +105,46 @@ describe("movimento na cena", () => {
     expect(jumpLift(0)).toBe(12);
     expect(jumpLift(18)).toBe(0);
     expect(jumpLift(-40)).toBe(0);
+  });
+});
+
+describe("torre", () => {
+  const scene = deriveArcadeScene({
+    missionStatus: "running", timings: null, reviews: null,
+    tasks: [
+      { id: "a", title: "a", status: "done", dependsOn: [], role: "backend", endedAt: 20 },
+      { id: "b", title: "b", status: "done", dependsOn: [], role: "qa", endedAt: 10 },
+      { id: "c", title: "c", status: "running", dependsOn: [] },
+      { id: "d", title: "d", status: "cancelled", dependsOn: [] },
+    ],
+  });
+  const none = { step: null, pr: null, ci: null } as const;
+  it("um bloco por tarefa concluída, na ordem de conclusão; cancelada não conta", () => {
+    const tower = deriveTower({ scene, trophy: none });
+    expect(tower.blocks.filter((b) => b.kind === "task").map((b) => [b.id, b.state])).toEqual([["b", "filled"], ["a", "filled"], ["c", "empty"]]);
+    expect(tower.done).toBe(2);
+    expect(tower.planned).toBe(3);
+    expect(tower.complete).toBe(false);
+  });
+  it("PR e CI sem medida ficam cinza e nunca contam como verde", () => {
+    const tower = deriveTower({ scene, trophy: { step: "integrated", pr: null, ci: null } });
+    expect(tower.blocks.slice(-3).map((b) => [b.kind, b.state])).toEqual([["integration", "filled"], ["pr", "unmeasured"], ["ci", "unmeasured"]]);
+  });
+  it("só fica pronta com tudo entregue e integração aplicada", () => {
+    const all = deriveArcadeScene({ missionStatus: "running", timings: null, reviews: null, tasks: [{ id: "a", title: "a", status: "done", dependsOn: [] }] });
+    expect(deriveTower({ scene: all, trophy: { step: "integration_ready", pr: null, ci: null } }).complete).toBe(false);
+    expect(deriveTower({ scene: all, trophy: { step: "integrated", pr: null, ci: null } }).complete).toBe(true);
+    expect(deriveTower({ scene: deriveArcadeScene({ missionStatus: "running", timings: null, reviews: null, tasks: [] }), trophy: { step: "integrated", pr: null, ci: null } }).complete).toBe(false);
+  });
+  it("bloco carregado ainda não está na torre", () => {
+    const tower = deriveTower({ scene, trophy: none, carrying: new Set(["a"]) });
+    expect(tower.done).toBe(1);
+    expect(tower.blocks.find((b) => b.id === "a")?.state).toBe("empty");
+  });
+  it("detecta só a transição para concluída", () => {
+    const tasks: ArcadeTask[] = [task("a", { status: "done" }), task("b", { status: "done" }), task("c", { status: "running" }), task("n", { status: "done" })];
+    const prev = new Map<string, ArcadeTask["status"]>([["a", "running"], ["b", "done"], ["c", "running"]]);
+    expect(newlyDone(prev, tasks)).toEqual(["a"]);
+    expect(newlyDone(null, tasks)).toEqual([]);
   });
 });
