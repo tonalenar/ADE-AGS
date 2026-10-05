@@ -123,8 +123,32 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean): bool
   term.paste(text);
   // El Enter va aparte y un momento después: algunas TUIs todavía están procesando el
   // pegado cuando llega, y lo toman como parte de él en vez de como "enviar".
-  if (submit) setTimeout(() => term.input("\r"), 80);
+  if (submit) {
+    setTimeout(() => term.input("\r"), 80);
+    // Un pegado grande (Codex: "[Pasted Content 3904 chars]") puede tragarse ese Enter y dejar el
+    // briefing escrito sin enviar: el agente nunca arranca. Se mira la pantalla y se reintenta.
+    SUBMIT_RETRY_MS.forEach((delay) =>
+      setTimeout(() => {
+        if (terminals.get(tabId) !== term) return;
+        const screen = screenOf(tabId, null, 12);
+        if (screen && pasteStillPending(screen.lines)) term.input("\r");
+      }, delay),
+    );
+  }
   return true;
+}
+
+/** Cuándo (ms tras pegar) se vuelve a mirar si el pegado quedó sin enviar. */
+export const SUBMIT_RETRY_MS = [900, 2200, 4500];
+
+/**
+ * ¿Sigue el texto pegado en la caja de entrada, sin enviar? Las TUIs reemplazan un pegado grande
+ * por un marcador ("[Pasted Content 3904 chars]", "[Pasted text #1 +30 lines]") que desaparece
+ * de la caja al enviar. Un Enter extra sobre una caja vacía no hace nada. Pura.
+ */
+export function pasteStillPending(lines: readonly string[]): boolean {
+  const input = lines.slice(-6);
+  return input.some((line) => /\[Pasted (?:Content|text)[^\]]*\]/i.test(line) && /^\s*[›>❯]/.test(line.trim() ? line : ""));
 }
 
 export interface ScreenText {

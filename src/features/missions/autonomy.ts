@@ -4,8 +4,9 @@
  * - `ask`: como cada CLI viene de fábrica (pide casi todo).
  * - `safe`: **automático con protección**. Cada CLI aprueba por su cuenta lo rutinario SIN
  *   quitar su sandbox ni saltarse los permisos: Codex con revisión automática dentro del
- *   sandbox, Gemini aprobando solo las ediciones y Claude Code aceptando solo las ediciones de
- *   archivos (`--permission-mode acceptEdits`; los comandos de shell siguen pidiendo). Este nivel no agrega los modos
+ *   sandbox, Gemini aprobando solo las ediciones y Claude Code en su modo automático
+ *   (`--permission-mode auto`: un clasificador del propio Claude revisa cada acción; no es
+ *   `bypassPermissions`). Este nivel no agrega los modos
  *   "peligrosos" (`--dangerously-*`, `--yolo`).
  *   Antigravity NO tiene flag acá a propósito: sus terminales interactivos ya reciben
  *   `--dangerously-skip-permissions` desde el catálogo (`AgentDef::launch_args`), porque hay
@@ -21,7 +22,7 @@ const STORAGE_KEY = "ags.agentAutonomy";
 const SAFE_FLAGS: Record<string, string> = {
   codex: "--approve-for-me",
   "gemini-cli": "--approval-mode auto_edit",
-  "claude-code": "--permission-mode acceptEdits",
+  "claude-code": "--permission-mode auto",
 };
 
 /** El comando con los flags del nivel pedido. No repite un flag que ya está. Pura. */
