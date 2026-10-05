@@ -67,10 +67,28 @@ fn con_pasos_el_comando_viaja_entero_como_argumento_del_shell() {
     let cmd = build_launch("claude --resume abc", &["nvm use".into()]).unwrap();
     let argv: Vec<String> =
         cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
-    let script = argv.last().expect("el script va último");
+    let last = argv.last().expect("el script va último");
+    // En Windows el script viaja en un .cmd (ver `shell_running`): se lee de ahí.
+    let script = if cfg!(windows) && last.ends_with(".cmd") { std::fs::read_to_string(last).unwrap() } else { last.clone() };
+    let script = script.trim_end();
     assert!(script.contains("nvm use"), "{script}");
     assert!(script.ends_with("claude --resume abc"), "{script}");
     assert!(argv.len() >= 2, "tendría que haber flags de shell antes del script: {argv:?}");
+}
+
+/// Las comillas del comando llegan intactas al agente: en Windows el script va en un .cmd y no
+/// como argumento de `cmd /C`, que las volvía literales (`--mcp-config "C:\x.json"` fallaba).
+#[cfg(windows)]
+#[test]
+fn con_pasos_las_comillas_del_comando_no_se_escapan() {
+    let command = r#"claude --mcp-config "C:\Users\x\mcp\tab.json" --allowedTools "a,b""#;
+    let cmd = build_launch(command, &["cd /d C:\\w".into()]).unwrap();
+    let argv: Vec<String> = cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    let last = argv.last().unwrap();
+    assert!(last.ends_with(".cmd"), "{argv:?}");
+    let body = std::fs::read_to_string(last).unwrap();
+    assert!(body.contains(command), "{body}");
+    assert!(!body.contains("\\\""), "{body}");
 }
 
 // ── Recorrido del árbol de procesos (unix) ──────────────────────

@@ -292,11 +292,36 @@ fn shell_running(script: String) -> CommandBuilder {
     cmd
 }
 
+/// Windows: el contenido del .cmd que ejecuta el script. Pura.
+#[cfg(windows)]
+pub(super) fn batch_launch_contents(script: &str) -> String {
+    format!("@echo off
+@chcp 65001 >nul
+{script}
+")
+}
+
+/// Windows: el script va a un .cmd y no como argumento de `cmd /C`. Al pasarlo como argumento,
+/// las comillas internas se escapan como `\\"` (la regla de la línea de comandos de Windows) y
+/// `cmd` las deja tal cual: `claude --mcp-config "C:\x.json"` recibía las comillas LITERALES
+/// y las leía como parte de una ruta relativa ("Invalid MCP configuration"). En un archivo, `cmd`
+/// ve las comillas como las escribió quien armó el comando. El nombre sale del hash del script:
+/// el mismo comando reutiliza el mismo archivo y la carpeta no crece sin fin.
 #[cfg(windows)]
 fn shell_running(script: String) -> CommandBuilder {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    script.hash(&mut hasher);
+    let dir = std::env::temp_dir().join("ags-launch");
+    let file = dir.join(format!("{:016x}.cmd", hasher.finish()));
+    let written = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, batch_launch_contents(&script)));
     let mut cmd = CommandBuilder::new("cmd");
     cmd.arg("/C");
-    cmd.arg(script);
+    match written {
+        Ok(()) => cmd.arg(file.as_os_str()),
+        // Sin poder escribir el archivo se vuelve al camino anterior (las comillas pueden fallar).
+        Err(_) => cmd.arg(script),
+    }
     cmd
 }
 
