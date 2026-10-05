@@ -25,4 +25,15 @@ Resultados e arquivos de uma Task não devem ser duplicados em memória durável
 | Integrante: “Vitest passou; sem bloqueios.” | 8 | — | — |
 | **Total** | **54 em 5 mensagens** | **Total** | **32 em 1 mensagem** |
 
-Nesse exemplo controlado, a conversa cai de 5 para 1 mensagem e de 54 para 32 tokens estimados (−41%). A mensagem individual fica maior para carregar os cinco campos, enquanto o total cai por eliminar pedidos de esclarecimento. O resultado real deve ser medido com usage reportado pelo provider; esta base ainda não registra tokens de mensagens peer.
+Nesse exemplo controlado, a conversa cai de 5 para 1 mensagem e de 54 para 32 tokens estimados (−41%). A mensagem individual fica maior para carregar os cinco campos, enquanto o total cai por eliminar pedidos de esclarecimento.
+
+### Custo adicional dos briefings
+
+Para separar o custo das instruções do ganho de conversa, comparei os briefings completos antes e depois das alterações com a mesma fixture: Mission `id=m-9`, título `T`, objetivo `O`, equipe vazia, sem achados nem memória recebida; para o integrante, papel `Backend` sem descrição ou instruções. O “antes” é o código imediatamente anterior ao commit P5 `e19887a^`; o “depois” inclui os novos blocos e a orientação de memória. A contagem é `ceil(bytes UTF-8 / 4)` sobre o texto produzido pelas funções, incluindo quebras de linha.
+
+| Briefing | Antes (bytes; tokens estimados) | Depois (bytes; tokens estimados) | Custo adicional estimado |
+| --- | ---: | ---: | ---: |
+| `leadBriefing` | 1.774; 444 | 2.735; 684 | +961 bytes; +240 tokens |
+| `memberBriefing` | 370; 93 | 767; 192 | +397 bytes; +99 tokens |
+
+Esses valores medem o overhead estático de contexto dos novos briefings; não medem o uso de uma conversa real. A economia efetiva depende de quantas perguntas e respostas redundantes a equipe realmente elimina. Compare-a com a baseline de QA `AGENT_EFFICIENCY_BASELINE.md` do worktree e11-p4 antes de afirmar ganho real. Essa baseline não estava presente em `ADE-AGS-e11-p4-metricas/docs/ade-ags/` quando esta medição foi feita, então a comparação de QA permanece pendente. O uso real deve ser medido com dados de usage do provider; esta base ainda não registra tokens de mensagens peer.

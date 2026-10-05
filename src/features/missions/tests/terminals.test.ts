@@ -290,7 +290,9 @@ describe("sugestão de memória ao terminar", () => {
     expect(text).toContain("ags memory suggest --mission m-9");
     expect(text).toContain("SUGERE");
     expect(text).toContain("Nunca sugira segredos");
-    expect(text).toContain("--scope mission");
+    expect(text).toContain("--scope workspace");
+    expect(text).toContain("Use mission para conhecimento duradouro desta missão");
+    expect(text).toContain("use workspace só para algo que vale no projeto todo");
     expect(text).toContain("só entra na busca após aprovação");
     expect(text).toContain("Handoff Structured");
     // Vem depois das instruções de coordenação.

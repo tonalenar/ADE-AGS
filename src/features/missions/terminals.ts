@@ -109,7 +109,7 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective"> & { i
 export function memorySuggestion(missionId: string): string[] {
   return [
     "AO TERMINAR, sugira até 3 memórias duradouras úteis para missões futuras:",
-    `- \`ags memory suggest --mission ${missionId} --scope mission --kind decision --key <nome-curto> --body "..."\``,
+    `- \`ags memory suggest --mission ${missionId} --scope workspace --kind decision --key <nome-curto> --body "..."\``,
     "- Tipos: decision, constraint, finding, file, note. Escopo: workspace (vale para o projeto) ou mission.",
     "- Use mission para conhecimento duradouro desta missão; use workspace só para algo que vale no projeto todo.",
     "- Resultado, arquivos e testes da task ficam no Handoff Structured (Mission Runtime) ou na entrega final do canvas. Memória guarda apenas o que será útil depois e não é óbvio no código.",
