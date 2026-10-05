@@ -15,7 +15,12 @@ export class TurnTracker {
   private turns = new Map<string, Turn>();
 
   start(tab: string, mission: string, actor: string, at: number, detail = ""): void {
-    if (!this.turns.has(tab)) this.turns.set(tab, { mission, actor, startedMs: at, lastOutputMs: at, detail });
+    const current = this.turns.get(tab);
+    if (!current || current.lastOutputMs === current.startedMs) {
+      // Duplicate submit notifications arrive within milliseconds; a later Enter replaces a lost submission.
+      const preservedDetail = current && at - current.startedMs < 500 ? current.detail : "";
+      this.turns.set(tab, { mission, actor, startedMs: at, lastOutputMs: at, detail: detail || preservedDetail });
+    }
     else if (detail) this.turns.get(tab)!.detail = detail;
   }
 

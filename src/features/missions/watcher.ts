@@ -3,11 +3,9 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { useCanvasStore } from "@/features/canvas/store";
-import { activeTabIds, lastInputAt, lastOutputAt } from "@/features/terminal/activity";
-import { pasteIntoTab, screenOf } from "@/features/terminal/terminalRegistry";
+import { activeTabIds, activitySnapshot, lastInputAt, lastOutputAt } from "@/features/terminal/activity";
+import { onPromptSubmitted, pasteIntoTab, screenOf } from "@/features/terminal/terminalRegistry";
 import { useTabsStore } from "@/features/tabs/store";
-import { activitySnapshot } from "@/features/terminal/activity";
-import { onPromptSubmitted } from "@/features/terminal/terminalRegistry";
 
 import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
 import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking } from "./activeTime";
@@ -56,7 +54,9 @@ export function useMissionWatcher(): void {
       if (mission && tab && tab.agentId !== "bash") missionTurns.start(tabId, mission, tab.title || tab.agentLabel, at);
     };
     const unsubscribe = onPromptSubmitted(start);
-    const off = listen<{ tabId: string; startedMs: number }>("cc-peer-turn-start", (e) => start(e.payload.tabId, e.payload.startedMs));
+    const off = listen<PeerMessage>("cc-peer-message", (e) => {
+      if (e.payload.toTabId) start(e.payload.toTabId, e.payload.atMs);
+    });
     return () => { unsubscribe(); off.then((fn) => fn()); };
   }, []);
 

@@ -163,3 +163,7 @@ Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--te
 ## Etapa 11 — eficiência entre agentes, ponto 1 (agente parado)
 
 **Implementado:** detector de "recebeu tarefa e ficou quieto". O backend emite `cc-peer-message` em cada `peer tell`/`peer ask`; o watcher abre uma tarefa pendente quando o orquestrador faz `tell` a um membro e a fecha quando o membro manda qualquer mensagem. Passado o plazo sem saída (120 s), o orquestrador recebe um aviso com nome, tempo parado e última linha da tela. Sem aviso se o agente escreve (pensando), se há diálogo de aprovação na tela ou se o usuário digitou na aba. Ver [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+
+## Etapa 11 — eficiência entre agentes, ponto 2 (peer ask)
+
+**Implementado:** prazo inclui preparação/envio; `peer check` consulta status e resposta parcial da última pergunta sem repetir o pedido. `mission timings` apresenta ranking de gargalos por agente a partir de `peer_ask` e `turn`. Turnos após o briefing também são registrados, com dono único e preservação de `detail: "briefing"`. Eventos de comunicação do ponto 1 são reutilizados por destino, inclusive em batch/recruit. Detalhes e limites de inferência em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
