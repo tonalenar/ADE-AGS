@@ -148,7 +148,7 @@ MISIONES (también sin interfaz: `ade-ags --headless`)
   mission create|start|status|wait <id>       Paso a paso (wait: --timeout)
   mission create|run|start ... --test          Marca explicitamente teste/E2E (fora da taxa de sucesso)
   mission review <id>                         Lo que entregó cada tarea aislada
-  mission timings <id>                        Tiempo activo unificado (mission_active > spans > reloj); detalle por turno y esperas
+  mission timings <id>                        Tiempo activo unificado; primera delegación (firstDelegationMs), turnos y esperas
   mission efficiency <id>                     Tiempo activo unificado (mission_active > spans > reloj), costo e histórico por agentes
   mission precheck <id>                       Lo que el repositorio y las misiones anteriores ya dicen del objetivo
   memory search \"<tema>\" --mission <id> [--limit 5] [--at <YYYY-MM-DD|YYYY-MM-DDTHH:MM|unix-seconds>]

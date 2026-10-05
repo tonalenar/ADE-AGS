@@ -39,6 +39,8 @@ pub struct MissionEfficiency {
     pub active_source: Option<String>,
     /// Detalhe por turno: união dos spans `turn` e `peer_ask`.
     pub turn_ms: Option<i64>,
+    pub first_delegation_ms: Option<i64>,
+    pub first_delegation_source: Option<&'static str>,
     pub wall_ms: Option<i64>,
     /// Soma do custo reportado nos Runs. Ausente quando nenhum Run reportou custo.
     pub cost_estimate: Option<f64>,
@@ -88,7 +90,10 @@ pub fn get(conn: &Connection, mission_id: &str) -> Result<MissionEfficiency, Str
     let bands = compare_bands(&history);
     let solo = bands.iter().find(|band| band.band == "1");
 
+    let (first_delegation_ms, first_delegation_source) = timings::first_delegation(&timings::list(conn, mission_id)?, mission.1);
     Ok(MissionEfficiency {
+        first_delegation_ms,
+        first_delegation_source,
         active_ms: current.active_ms,
         active_source: current.active_source.map(str::to_owned),
         turn_ms: current.turn_ms,

@@ -12,7 +12,7 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
 /// As etapas que se medem. Texto livre não: assim a tela e o resumo sempre sabem o que são.
-pub const KINDS: &[&str] = &["boot", "briefing", "turn", "peer_ask"];
+pub const KINDS: &[&str] = &["boot", "briefing", "turn", "peer_ask", "peer_message"];
 const MAX_TEXT: usize = 200;
 /// Um span mais comprido que isto é um erro de relógio, não uma etapa (24 h).
 const MAX_SPAN_MS: i64 = 24 * 60 * 60 * 1000;
@@ -194,3 +194,27 @@ pub fn summarize(spans: &[Span], top: usize) -> Summary {
 
 #[cfg(test)]
 mod test;
+
+/// Lead-to-member send evidence; missing evidence or baseline remains unmeasured.
+pub fn first_delegation(spans: &[Span], started_at: Option<i64>) -> (Option<i64>, Option<&'static str>) {
+    let baseline = spans.iter().filter(|s| s.kind == "boot").map(|s| s.started_ms).min()
+        .or_else(|| started_at.filter(|s| *s > 0).map(|s| s.saturating_mul(1000)));
+    let measured = spans.iter().filter(|s| s.kind == "peer_message" && s.detail == "delegation").map(|s| s.started_ms).min();
+    let legacy = spans.iter().filter(|s| s.kind == "peer_ask" && s.actor == "Orquestrador" && !s.target.is_empty()).map(|s| s.started_ms).min();
+    match (baseline, measured.or(legacy)) {
+        (Some(start), Some(end)) if end >= start => (Some(end - start), Some(if measured.is_some() { "peer_message" } else { "span" })),
+        _ => (None, None),
+    }
+}
+
+/// Only successful sends from the mission lead to another member are delegation evidence.
+pub(crate) fn record_delegation(conn: &Connection, boards: &crate::canvas::Boards, kind: &str, from: &str, target: &str, at: i64) -> Result<(), String> {
+    if !matches!(kind, "tell" | "ask") || from == target || !crate::canvas::is_orchestrator(boards, from) {
+        return Ok(());
+    }
+    let Some(mission) = crate::canvas::mission_of_tab(boards, from) else { return Ok(()); };
+    if crate::canvas::mission_of_tab(boards, target).as_deref() != Some(mission.as_str()) {
+        return Ok(());
+    }
+    add(conn, &mission, &NewSpan { kind: "peer_message".into(), actor: "Orquestrador".into(), target: target.into(), started_ms: at, ended_ms: at, detail: "delegation".into() })
+}

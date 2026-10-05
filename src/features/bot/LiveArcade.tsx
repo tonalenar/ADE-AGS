@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { activeSourceKey, formatActive } from "@/features/missions/timings";
 import { formatUsd, estimateOf, type MissionTokens } from "@/features/missions/tokens";
 import { useMissionIndex } from "@/features/missions/groups";
 import type { MissionTimings } from "@/features/missions/timings";
@@ -12,8 +13,10 @@ import { useTabsStore } from "@/features/tabs/store";
 
 import { getPendingCounts } from "@/features/memory/ipc";
 
+import { PlatformLogo } from "./PlatformLogo";
+import { useArcadeSignals } from "./arcadeSignals";
 import { drawArcade, type Placed, type Pose } from "./liveArcadeDraw";
-import { deriveArcadeScene, deriveBarrels, deriveHeroes, deriveTower, deriveTrophy, failureCount, newlyDone, retryCount, type ArcadeTask, type ArcadeTabInput, type ArcadeTaskStatus } from "./liveArcadeModel";
+import { deriveArcadeScene, deriveBarrels, deriveHeroes, deriveTower, deriveTrophy, failureCount, newlyDone, retryCount, roleOf, type ArcadeTask, type ArcadeTabInput, type ArcadeTaskStatus } from "./liveArcadeModel";
 import { ARCADE_H, ARCADE_W, FRAME_MS, TOWER_DROP_X, heroLift, heroTargets, placeBarrels, patrolOffset, stepMotion, taskSlots, type Motion } from "./liveArcadeScene";
 
 const WALK_SPEED = 50;
@@ -125,13 +128,33 @@ export function LiveArcade({
     timings: timings?.spans ?? null,
   }), [scene, approvalTaskIds, pendingMemories, timings]);
   const trophy = useMemo(() => deriveTrophy(review), [review]);
-  const towerNow = useMemo(() => deriveTower({ scene, trophy }), [scene, trophy]);
+  const worked = useArcadeSignals((state) => state.worked);
+  const deliveriesByTab = useArcadeSignals((state) => state.deliveries);
   const missionTabs = useMemo<ArcadeTabInput[]>(() => tabs
     .filter((tab) => missionIndex[tab.id] === mission.id)
     .map((tab) => ({ id: tab.id, title: tab.title, agentId: tab.agentId, sessionId: tab.sessionId ?? null })),
   [tabs, missionIndex, mission.id]);
-  const heroes = useMemo(() => deriveHeroes({ tabs: missionTabs, scene, sustainedTabIds: activeTabs, approvalTaskIds, barrels }),
-    [missionTabs, scene, activeTabs, approvalTaskIds, barrels]);
+  const signals = useMemo(() => ({
+    workedTabIds: Object.keys(worked),
+    deliveredTabIds: missionTabs.filter((tab) => (deliveriesByTab[tab.id]?.length ?? 0) > 0).map((tab) => tab.id),
+    missionStatus: mission.status,
+  }), [worked, deliveriesByTab, missionTabs, mission.status]);
+  const heroes = useMemo(() => deriveHeroes({ tabs: missionTabs, scene, sustainedTabIds: activeTabs, approvalTaskIds, barrels, signals }),
+    [missionTabs, scene, activeTabs, approvalTaskIds, barrels, signals]);
+  /** Uma entrega final real = um bloco na torre (quando a missão não tem tarefas). */
+  const deliveries = useMemo(() => missionTabs.flatMap((tab) =>
+    (deliveriesByTab[tab.id] ?? []).map((at) => ({ id: "d:" + tab.id + ":" + at, tabId: tab.id, role: roleOf(tab.title) }))),
+  [missionTabs, deliveriesByTab]);
+  const towerNow = useMemo(() => deriveTower({ scene, trophy, deliveries }), [scene, trophy, deliveries]);
+  const seenDeliveries = useRef<Set<string> | null>(null);
+  // Entrega nova: o herói leva o bloco até a torre. O que já existia ao abrir entra direto.
+  useEffect(() => {
+    const seen = seenDeliveries.current;
+    if (seen && !reducedMotion) {
+      for (const item of deliveries) if (!seen.has(item.id) && heroes.some((hero) => hero.tabId === item.tabId)) carryRef.current.set(item.id, item.tabId);
+    }
+    seenDeliveries.current = new Set(deliveries.map((item) => item.id));
+  }, [deliveries]); // eslint-disable-line react-hooks/exhaustive-deps
   // Entrega nova (running -> done): o herói da tarefa leva o bloco até a torre. Sem herói ou sem animação, o bloco entra direto.
   useEffect(() => {
     if (!reducedMotion) {
@@ -193,7 +216,7 @@ export function LiveArcade({
       });
       // Carregadores que sumiram (terminal fechado) não deixam o bloco preso no caminho.
       for (const [taskId, tabId] of carrying) if (!heroes.some((hero) => hero.tabId === tabId)) carrying.delete(taskId);
-      const tower = deriveTower({ scene, trophy, carrying: new Set(carrying.keys()) });
+      const tower = deriveTower({ scene, trophy, carrying: new Set(carrying.keys()), deliveries });
       drawArcade(context, {
         scene,
         title: mission.title,
@@ -241,7 +264,7 @@ export function LiveArcade({
       observer.disconnect();
       document.removeEventListener("visibilitychange", start);
     };
-  }, [scene, heroes, mission.title, reducedMotion, t, barrels, trophy]);
+  }, [scene, heroes, mission.title, reducedMotion, t, barrels, trophy, deliveries]);
 
   const measured = tokens?.agents.filter((agent) => agent.measured) ?? [];
   const tokenValues = measured.flatMap((agent) => [agent.input, agent.output]).filter((value): value is number => value !== null);
@@ -255,9 +278,15 @@ export function LiveArcade({
   const lives = sceneTasks.length
     ? t("botPanel.live.livesValue", { retries: retryCount(sceneTasks), failures: failureCount(sceneTasks) })
     : null;
+  // Fonte unificada (Etapa 14): a mesma da lista e de `ags mission efficiency`; sem dado, cinza.
+  const activeMs = timings?.active.ms ?? (mission.activeSeconds === null ? null : mission.activeSeconds * 1000);
+  const activeSource = timings?.active.source ?? mission.activeSource ?? null;
+  const activeValue = formatActive(activeMs);
+  const activeKey = activeSourceKey(activeSource);
+  const activeTitle = activeKey ? t(activeKey) : undefined;
   const metrics = [
     { key: "tokens", value: totalTokens === null ? null : tokenFormatter.format(totalTokens) },
-    { key: "activeTime", value: mission.activeSeconds === null ? null : mission.activeSeconds + "s" },
+    { key: "activeTime", value: activeValue, title: activeTitle },
     { key: "cost", value: estimate ? formatUsd(estimate.costUsd) : null },
     { key: "cache", value: estimate ? formatUsd(estimate.savedUsd) : null },
     { key: "budget", value: budget },
@@ -275,8 +304,8 @@ export function LiveArcade({
         aria-describedby={"ags-live-description-" + mission.id}
       />
       <div className="ags-live__hud">
-        {metrics.map(({ key, value }) => (
-          <div className={"ags-live__metric " + (value === null ? "ags-live__metric--unknown" : "")} key={key}>
+        {metrics.map(({ key, value, title }: { key: string; value: string | null; title?: string }) => (
+          <div className={"ags-live__metric " + (value === null ? "ags-live__metric--unknown" : "")} key={key} title={title}>
             <span>{t("botPanel.live.metric." + key)}</span>
             <b>{value ?? t("botPanel.live.notMeasured")}</b>
           </div>
@@ -285,7 +314,7 @@ export function LiveArcade({
       <div className="ags-live__agents" aria-label={t("botPanel.live.agents")}>
         {heroes.length === 0 ? <span className="ags-live__unknown">{t("botPanel.live.noAgents")}</span> : heroes.map((hero) => (
           <span className={"ags-live__agent ags-live__agent--" + hero.kind + " ags-live__agent--" + hero.role} key={hero.tabId}>
-            <i aria-hidden="true" />
+            <PlatformLogo kind={hero.kind} />
             {hero.name} · {t("botPanel.live.agent." + hero.kind)}
             <b>{stateLabel(hero.state)}</b>
           </span>

@@ -4,6 +4,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
+import { GRID_SLOT, useMissionGrid } from "@/features/canvas/gridMode";
 import { useCanvasStore, useWorkMode } from "@/features/canvas/store";
 import {
   activate, agentKey, allGroups, closeGroup, createLayout, findGroup, focusGroup as focusInTree, isAgentKey, keyId,
@@ -363,12 +364,21 @@ export function usePlacements(): Placements {
   });
   const mode = useWorkMode();
   const liveRects = useCanvasStore((s) => s.liveRects);
+  const grid = useMissionGrid();
 
   // En el canvas cada terminal va encima de su nodo, y se ven las que el canvas dice que
   // están vivas (al 100 % y dentro del área). El teclado va a la del agente activo.
   if (mode === "canvas") {
     const visible = new Map<string, Placement>();
     for (const [tabId, rect] of Object.entries(liveRects)) visible.set(agentKey(tabId), { groupId: CANVAS_GROUP, rect });
+    const focused = activeTabId ? agentKey(activeTabId) : null;
+    return { visible, focusedItem: focused && visible.has(focused) ? focused : null };
+  }
+
+  // La grade de una misión: todos sus panes a la vez, cada uno en su hueco. El teclado va al activo.
+  if (grid) {
+    const visible = new Map<string, Placement>();
+    for (const id of grid) visible.set(agentKey(id), { groupId: CANVAS_GROUP, rect: slots[GRID_SLOT + id] ?? null });
     const focused = activeTabId ? agentKey(activeTabId) : null;
     return { visible, focusedItem: focused && visible.has(focused) ? focused : null };
   }

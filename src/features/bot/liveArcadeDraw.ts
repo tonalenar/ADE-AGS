@@ -9,13 +9,16 @@ const STAGE_ORDER: ArcadeStageId[] = ["delivery", "review", "tests", "work", "op
 export const ROLE_COLOR: Record<HeroRole, string> = {
   lead: "#ffe15a", backend: "#ff9b55", frontend: "#62d8ff", qa: "#55e6b1", review: "#ff8bd0", other: "#c18aff",
 };
-export const KIND_ACCENT: Record<AgentKind, string> = { claude: "#ff7a3d", codex: "#ffffff", antigravity: "#7affd8" };
+export const KIND_ACCENT: Record<AgentKind, string> = { claude: "#ff7a3d", codex: "#ffffff", antigravity: "#7affd8", gemini: "#8ab4ff", opencode: "#cfd2dc", generic: "#c18aff" };
 
 /** Cabeça por plataforma: Claude = raios, Codex = viseira, Antigravity = antena. 8 colunas. */
 const HEAD: Record<AgentKind, string[]> = {
   claude: ["k.kkkk.k", ".hhhhhh.", ".hdhhdh.", ".hhhhhh."],
   codex: ["..cccc..", ".cccccc.", ".kkkkkk.", ".hhhhhh."],
   antigravity: ["...kk...", "..hhhh..", ".hdhhdh.", "..hhhh.."],
+  gemini: ["...kk...", ".kkhhkk.", ".hdhhdh.", "..hhhh.."],
+  opencode: ["kkkkkkkk", "k.hhhh.k", "khdhhdhk", "k.hhhh.k"],
+  generic: ["..k..k..", ".hhhhhh.", ".hdhhdh.", ".hhhhhh."],
 };
 const BODY = {
   stand: [".cccccc.", "hcccccch", ".cccccc.", ".dd..dd.", ".dd..dd."],

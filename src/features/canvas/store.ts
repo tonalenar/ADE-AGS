@@ -20,12 +20,14 @@ interface CanvasState {
   boards: Record<string, Board>;
   /** Qué vista usa cada carpeta. Preferencia de esta máquina: va a `localStorage`. */
   modes: Record<string, WorkMode>;
+  /** Misiones (por clave de canvas) cuya vista de abas muestra todos los panes lado a lado. Individual por misión; a `localStorage`. */
+  grids: Record<string, boolean>;
   /** Dónde dibujar cada terminal viva del canvas visible, por id de tab. Lo calcula
    *  `CanvasView` en cada movimiento y lo lee `TerminalPanel`. */
   liveRects: Record<string, Rect>;
 }
 
-export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}, liveRects: {} }));
+export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}, grids: {}, liveRects: {} }));
 
 let windowLabel = "main";
 
@@ -79,6 +81,30 @@ export function useWorkMode(): WorkMode {
 }
 
 const MODES_KEY = "ade-canvas-modes";
+const GRIDS_KEY = "ade-mission-grids";
+
+/** Enciende o apaga la grade de panes de una misión (solo esa: no hay opción global). */
+export function setMissionGrid(key: string, on: boolean): void {
+  const grids = { ...useCanvasStore.getState().grids, [key]: on };
+  if (!on) delete grids[key];
+  useCanvasStore.setState({ grids });
+  try {
+    localStorage.setItem(GRIDS_KEY, JSON.stringify(grids));
+  } catch {
+    /* no poder recordarlo no impide usarlo */
+  }
+}
+
+/** Lee lo guardado: solo booleanos `true`, cualquier otra cosa es basura y se ignora. Pura. */
+export function parseGrids(raw: string | null): Record<string, boolean> {
+  try {
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return {};
+    return Object.fromEntries(Object.entries(parsed).filter(([, v]) => v === true));
+  } catch {
+    return {};
+  }
+}
 
 export function setWorkMode(key: string, mode: WorkMode): void {
   const modes = { ...useCanvasStore.getState().modes, [key]: mode };
@@ -268,6 +294,12 @@ export function initCanvasSync(label: string): () => void {
     if (raw) useCanvasStore.setState({ modes: JSON.parse(raw) as Record<string, WorkMode> });
   } catch {
     /* basura en localStorage: todas las carpetas arrancan en abas */
+  }
+
+  try {
+    useCanvasStore.setState({ grids: parseGrids(localStorage.getItem(GRIDS_KEY)) });
+  } catch {
+    /* sin localStorage: ninguna misión en grade */
   }
 
   let disposed = false;

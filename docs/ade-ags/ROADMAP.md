@@ -1,5 +1,9 @@
 # Roadmap ADE AGS
 
+## Etapa 15 — início rápido (ponto 1)
+
+Implementado em `feat/etapa15-inicio-rapido`: preparação persistida e idempotente de um worktree/branch por integrante (inclusive Orquestrador e recruits de missão), a partir de origin/master; junction de dependências e target Cargo isolado; contexto de precheck/memória preenchido para toda a equipe; briefing exige delegação em ~2 min antes de explorar e membros aguardam a tarefa. QG e CLI mostram `firstDelegationMs` e sua fonte real/histórica, preservando ausência em cinza. Schema v32 aditivo e testes de migração, isolamento, retry e lançamento. Comparação posterior em missão real depende de executar o app atualizado; não foi inventado ganho. Contrato e evidências em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+
 Ordem técnica. Sem datas. Cada etapa assume a anterior pronta o bastante para não inventar um segundo mecanismo paralelo.
 
 A base é o ADE AGS 1.8.7 neste fork. O mapa do que já existe está em [ARCHITECTURE.md](./ARCHITECTURE.md).
@@ -233,3 +237,11 @@ Cinco pontos de melhoria estrutural focados na velocidade de inicialização das
 - **Implementado:** Na visualização de abas da missão (ao lado de Canvas), opção para dispor todos os panes lado a lado em grade.
 - Configuração individual por missão/aba, persistida localmente (não global), mantendo a visualização tradicional empilhada/tabulada como padrão.
 - i18n completo (pt-BR, en, es) e testes dedicados.
+
+## Etapa 15 — abas de missão, Ao vivo e grade (Frontend)
+
+- [x] X nas abas de missão do topo, com confirmação se a missão está em andamento.
+- [x] Ao vivo derivado dos sinais dos terminais (andar, escadas, patrulha, `!`, bloco por entrega final), HUD com a fonte unificada.
+- [x] Logos pixel-art 12x12 na legenda.
+- [x] Modo grade (todos os panes lado a lado), individual por missão e persistido.
+
