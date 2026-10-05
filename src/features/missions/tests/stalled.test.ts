@@ -1,7 +1,10 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  MIN_STALL_MS,
   STALL_MS,
+  isAck,
+  parseStallMs,
   applyMessage,
   findStalls,
   isWaitingForUser,
@@ -155,5 +158,44 @@ describe("lastScreenLine / stallMessage", () => {
     const text = stallMessage("X", { tabId: "a", fromTabId: "l", sinceTaskMs: 1, quietMs: 1, worked: true, lastLine: "" });
     expect(text).toContain("trabalhou e se calou");
     expect(text).toContain("A tela dele está vazia");
+  });
+});
+
+describe("tell sin pedido", () => {
+  const withText = (text: string) => applyMessage(new Map(), { ...tell("a"), text }, isLead);
+
+  it("un agradecimiento o confirmación corta no abre tarea", () => {
+    for (const t of ["Obrigado!", "ok", "Valeu, pode seguir.", "Thanks", "👍", "Entendido."]) {
+      expect(withText(t).size, t).toBe(0);
+    }
+  });
+
+  it("un pedido real sí, aunque empiece con cortesía o sea corto", () => {
+    for (const t of ["Faça o ponto 1 da etapa 11", "ok, agora rode os testes e me diga o resultado", "ok?", "Revise o PR"]) {
+      expect(withText(t).size, t).toBe(1);
+    }
+  });
+
+  it("sin texto (evento viejo) se trata como tarea", () => {
+    expect(isAck(undefined)).toBe(false);
+    expect(applyMessage(new Map(), tell("a"), isLead).size).toBe(1);
+  });
+});
+
+describe("plazo configurable", () => {
+  const pending = applyMessage(new Map(), tell("a"), isLead);
+
+  it("el parámetro del detector cambia cuándo avisa", () => {
+    const now = 1000 + 30_000;
+    expect(findStalls(pending, probe({ now }))).toEqual([]);
+    expect(findStalls(pending, probe({ now }), 20_000)).toHaveLength(1);
+  });
+
+  it("parseStallMs usa el valor válido o el default de 120 s", () => {
+    expect(STALL_MS).toBe(120_000);
+    expect(parseStallMs("60000")).toBe(60_000);
+    expect(parseStallMs(null)).toBe(STALL_MS);
+    expect(parseStallMs("abc")).toBe(STALL_MS);
+    expect(parseStallMs(String(MIN_STALL_MS - 1))).toBe(STALL_MS);
   });
 });

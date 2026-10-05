@@ -19,6 +19,10 @@
 | Usuário digitando na aba | `lastInputAt` reinicia o relógio |
 | Aba fechada | descartada da lista |
 
-**Limites conhecidos:** um `tell` que não pede nada (ex.: "obrigado") também fica pendente; o agente que trabalha e responde sem `ags peer tell` gera um aviso ("trabalhou e se calou") que o orquestrador ignora após `ags peer check`. O plazo ainda não é configurável. Reconhecimento de diálogo é por texto da tela (EN/PT/ES).
+**Prazo configurável:** `STALL_MS` (120 s) é o padrão; `findStalls(pending, probe, stallMs)` aceita outro valor e o watcher lê `localStorage["ags.stallMs"]` (mínimo `MIN_STALL_MS` = 15 s; inválido → padrão).
 
-**Testes:** `src/features/missions/tests/stalled.test.ts` (21 casos).
+**Tell sem pedido:** `isAck` reconhece mensagens curtas de cortesia/confirmação (≤ 40 caracteres, ≤ 5 palavras, sem "?", começando por "obrigado", "ok", "valeu", "thanks", "entendido"…) e elas não abrem tarefa pendente. O texto do tell vai no evento `cc-peer-message` (`text`); evento sem texto conta como tarefa.
+
+**Limites conhecidos:** o agente que trabalha e responde sem `ags peer tell` gera um aviso ("trabalhou e se calou") que o orquestrador ignora após `ags peer check`. Reconhecimento de diálogo e de ack é por texto (EN/PT/ES).
+
+**Testes:** `src/features/missions/tests/stalled.test.ts` (26 casos).

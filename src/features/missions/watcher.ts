@@ -10,7 +10,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
 import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking } from "./activeTime";
 import { finishedMissionTabs, missionIndex, useMissionIndex } from "./groups";
-import { STALL_CHECK_MS, applyMessage, findStalls, markAlerted, stallMessage, type PeerMessage, type PendingTasks } from "./stalled";
+import { STALL_CHECK_MS, applyMessage, parseStallMs, findStalls, markAlerted, stallMessage, type PeerMessage, type PendingTasks } from "./stalled";
 import { useMissionsStore } from "./store";
 import { LEAD_NAME } from "./terminals";
 import { recordSpan } from "./timings";
@@ -91,13 +91,19 @@ export function useMissionWatcher(): void {
       const live = new Map([...pending].filter(([id]) => open.has(id)));
       pending = live;
       const active = new Set(activeTabIds());
+      let stallMs = parseStallMs(null);
+      try {
+        stallMs = parseStallMs(localStorage.getItem("ags.stallMs"));
+      } catch {
+        // sin localStorage: queda el plazo por defecto
+      }
       const stalls = findStalls(live, {
         now: Date.now(),
         isActive: (id) => active.has(id),
         lastOutputAt,
         lastInputAt,
         screen: (id) => screenOf(id)?.lines ?? null,
-      });
+      }, stallMs);
       const sent = stalls.filter((s) => {
         // No se interrumpe al orquestador a mitad de un turno: se reintenta en el próximo tic.
         if (active.has(s.fromTabId)) return false;
