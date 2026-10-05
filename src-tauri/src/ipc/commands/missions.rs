@@ -273,6 +273,7 @@ pub(super) fn memory_history(app: &AppHandle, args: &Value) -> Result<Value, Str
 pub(super) fn mission_precheck(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
     let db = db(app)?;
+    crate::missions::check_launch_now(&db, &id, false)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     Ok(json!({ "mission": id, "findings": crate::missions::precheck_text(&conn, &id)? }))
 }

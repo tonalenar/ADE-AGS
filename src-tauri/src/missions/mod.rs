@@ -103,6 +103,26 @@ pub(crate) fn detail(conn: &Connection, mission_id: &str) -> Result<MissionDetai
 
 // ── Arrancar y cancelar ─────────────────────────────────────────
 
+fn launch_request(mission: &Mission, squad: Option<&crate::squads::Squad>) -> (RouteRequest, Option<Complexity>) {
+    if let Some(squad) = squad {
+        crate::runs::lead_request(
+            Some(squad.lead.agent_id.clone()),
+            squad.lead.model.clone(),
+            squad.lead.complexity.as_deref().and_then(Complexity::parse),
+            squad.lead.account_id.clone(),
+            squad.lead.auto_account,
+        )
+    } else {
+        crate::runs::lead_request(
+            mission.lead_agent_id.clone(),
+            mission.lead_model.clone(),
+            mission.complexity.as_deref().and_then(Complexity::parse),
+            mission.lead_account_id.clone(),
+            mission.auto_account,
+        )
+    }
+}
+
 /// Starts a draft or retries a failed mission with a new run and lead.
 ///
 /// `route` y `launch` son el ruteo y el supervisor de `runs/`; se reciben para poder
@@ -155,23 +175,7 @@ pub(crate) fn start(
         crate::runs::ensure_orchestration(agent)?;
     }
 
-    let (request, complexity) = if let Some(squad) = &squad {
-        crate::runs::lead_request(
-            Some(squad.lead.agent_id.clone()),
-            squad.lead.model.clone(),
-            squad.lead.complexity.as_deref().and_then(Complexity::parse),
-            squad.lead.account_id.clone(),
-            squad.lead.auto_account,
-        )
-    } else {
-        crate::runs::lead_request(
-            mission.lead_agent_id.clone(),
-            mission.lead_model.clone(),
-            mission.complexity.as_deref().and_then(Complexity::parse),
-            mission.lead_account_id.clone(),
-            mission.auto_account,
-        )
-    };
+    let (request, complexity) = launch_request(&mission, squad.as_ref());
     let assignment = route(&request)?;
 
     let spec = crate::runs::Orchestration {
@@ -389,11 +393,43 @@ pub async fn mission_apply(app: AppHandle, mission_id: String) -> Result<review:
     outcome
 }
 
+pub(crate) fn check_launch_now(db: &DbConnection, mission_id: &str, terminals: bool) -> Result<(), String> {
+    let (mission, squad) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mission = store::get(&conn, mission_id)?.ok_or("missions.error.changed")?;
+        let squad = mission.squad_id.as_deref().map(|id| crate::squads::store::get(&conn, id)).transpose()?.flatten();
+        (mission, squad)
+    };
+    let (request, _) = launch_request(&mission, squad.as_ref());
+    if terminals {
+        // Auto means system account in startMissionInTerminals, not headless routing.
+        let roster = crate::runs::roster::snapshot(db, false)?;
+        let lead_agent = squad.as_ref().map(|s| s.lead.agent_id.clone()).or(mission.lead_agent_id.clone()).unwrap_or_else(|| "claude-code".into());
+        let lead_model = squad.as_ref().and_then(|s| s.lead.model.clone()).or(mission.lead_model.clone());
+        let lead_account = match &squad {
+            Some(s) if !s.lead.auto_account => s.lead.account_id.clone(),
+            _ if !mission.auto_account => mission.lead_account_id.clone(),
+            _ => None,
+        };
+        let mut actors = vec![(lead_agent, lead_model, lead_account)];
+        if let Some(squad) = &squad {
+            actors.extend(squad.members.iter().map(|m| (m.agent_id.clone(), m.model.clone(), if m.auto_account { None } else { m.account_id.clone() })));
+        }
+        for (agent_id, model, account_id) in actors {
+            let assignment = crate::runs::routing::Assignment { agent_id, model, account_id,
+                routed_by: crate::runs::routing::RoutedBy::Manual, notes: vec![], auto_account: false, pool_origin: None };
+            precheck::validate_launch(&roster, &assignment, crate::util::now_ts())?;
+        }
+        Ok(())
+    } else { crate::runs::route_lead_now(db, &request).map(|_| ()) }
+}
+
 /// Arranca la misión en terminales: solo la marca; abrir las tabs es de la pantalla.
 #[tauri::command]
 pub fn mission_start_terminals(app: AppHandle, mission_id: String) -> Result<Mission, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
     let db = db_of(&app)?;
+    check_launch_now(&db, &mission_id, true)?;
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let mission = store::get(&conn, &mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
@@ -487,6 +523,7 @@ pub async fn mission_precheck(app: AppHandle, mission_id: String) -> Result<Stri
     let db = db_of(&app)?;
     // git corre fuera del hilo de la UI y sin mantener el candado de la base más de lo necesario.
     tokio::task::spawn_blocking(move || {
+        check_launch_now(&db, &mission_id, true)?;
         let conn = db.lock().map_err(|e| e.to_string())?;
         precheck_text(&conn, &mission_id)
     })
