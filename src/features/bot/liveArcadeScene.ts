@@ -52,6 +52,32 @@ export function stepMotion(m: Motion, target: Motion, dtMs: number, speed: numbe
 }
 
 export interface SceneSlot { x: number; level: number }
+
+const BARREL_SPEED = 42;
+/** O barril rola ladeira abaixo: nas vigas pares a esquerda é a parte baixa, nas ímpares a direita. */
+export const rollDir = (level: number): 1 | -1 => (level % 2 === 0 ? -1 : 1);
+export interface PlacedBarrel<B> { barrel: B; x: number; level: number }
+/** Posição de cada barril: rolando pela viga do andar (e recomeçando na ponta alta) ou, sem animação, parado na tarefa que trava. */
+export function placeBarrels<B extends { stage: ArcadeStageId; taskId?: string }>(
+  barrels: B[], slots: Map<string, SceneSlot>, nowMs: number, animated: boolean,
+): Array<PlacedBarrel<B>> {
+  const span = BEAM_RIGHT - BEAM_LEFT - 24;
+  const perStage = new Map<string, number>();
+  return barrels.map((barrel, index) => {
+    const level = levelOfStage(barrel.stage);
+    const n = perStage.get(barrel.stage) ?? 0;
+    perStage.set(barrel.stage, n + 1);
+    if (!animated) return { barrel, level, x: (barrel.taskId ? slots.get(barrel.taskId)?.x : undefined) ?? 760 - n * 26 };
+    const dir = rollDir(level);
+    const phase = (((index * 97) % span) + (nowMs / 1000) * BARREL_SPEED) % span;
+    return { barrel, level, x: (dir > 0 ? BEAM_LEFT + 12 : BEAM_RIGHT - 12) + dir * phase };
+  });
+}
+/** O herói pula quando um barril passa na mesma viga. */
+export function heroLift(level: number, x: number, barrels: Array<{ x: number; level: number }>): number {
+  if (Math.abs(level - Math.round(level)) > 0.001) return 0;
+  return barrels.reduce((best, b) => (b.level === Math.round(level) ? Math.max(best, jumpLift(x - b.x)) : best), 0);
+}
 /** Onde fica cada tarefa na viga do seu andar (mesma regra dos nós desenhados). */
 export function taskSlots(scene: ArcadeScene): Map<string, SceneSlot> {
   const out = new Map<string, SceneSlot>();

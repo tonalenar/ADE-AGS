@@ -311,7 +311,7 @@ export function BotPanel() {
               {unified && <LiveArcadeGrid running={runningMissions} onOpen={setLiveFilter} />}
               {view === "live" && !unified && (
                 current
-                  ? <LiveArcade mission={current} tasks={currentDetail?.tasks ?? EMPTY_ARCADE_TASKS} timings={timings} review={liveReview} tokens={tokens} />
+                  ? <LiveArcade key={current.id} mission={current} tasks={currentDetail?.tasks ?? EMPTY_ARCADE_TASKS} timings={timings} review={liveReview} tokens={tokens} />
                   : <p className="ags-hq__dim">{t("botPanel.live.empty")}</p>
               )}
             </div>

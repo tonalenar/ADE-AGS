@@ -14,7 +14,7 @@ import { getPendingCounts } from "@/features/memory/ipc";
 
 import { drawArcade, type Placed, type Pose } from "./liveArcadeDraw";
 import { deriveArcadeScene, deriveBarrels, deriveHeroes, deriveTower, deriveTrophy, failureCount, newlyDone, retryCount, type ArcadeTask, type ArcadeTabInput, type ArcadeTaskStatus } from "./liveArcadeModel";
-import { ARCADE_H, ARCADE_W, FRAME_MS, TOWER_DROP_X, heroTargets, patrolOffset, stepMotion, taskSlots, type Motion } from "./liveArcadeScene";
+import { ARCADE_H, ARCADE_W, FRAME_MS, TOWER_DROP_X, heroLift, heroTargets, placeBarrels, patrolOffset, stepMotion, taskSlots, type Motion } from "./liveArcadeScene";
 
 const WALK_SPEED = 50;
 const RUN_SPEED = 110;
@@ -130,8 +130,8 @@ export function LiveArcade({
     .filter((tab) => missionIndex[tab.id] === mission.id)
     .map((tab) => ({ id: tab.id, title: tab.title, agentId: tab.agentId, sessionId: tab.sessionId ?? null })),
   [tabs, missionIndex, mission.id]);
-  const heroes = useMemo(() => deriveHeroes({ tabs: missionTabs, scene, sustainedTabIds: activeTabs, approvalTaskIds }),
-    [missionTabs, scene, activeTabs, approvalTaskIds]);
+  const heroes = useMemo(() => deriveHeroes({ tabs: missionTabs, scene, sustainedTabIds: activeTabs, approvalTaskIds, barrels }),
+    [missionTabs, scene, activeTabs, approvalTaskIds, barrels]);
   // Entrega nova (running -> done): o herói da tarefa leva o bloco até a torre. Sem herói ou sem animação, o bloco entra direto.
   useEffect(() => {
     if (!reducedMotion) {
@@ -153,7 +153,8 @@ export function LiveArcade({
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
     if (!canvas || !context) return;
-    const targets = heroTargets(heroes, taskSlots(scene));
+    const slots = taskSlots(scene);
+    const targets = heroTargets(heroes, slots);
     const motions = motionRef.current;
     for (const id of [...motions.keys()]) if (!heroes.some((hero) => hero.tabId === id)) motions.delete(id);
     let raf: number | undefined;
@@ -168,6 +169,7 @@ export function LiveArcade({
       const scale = bounds.width / ARCADE_W;
       context.setTransform(scale * ratio, 0, 0, scale * ratio, 0, 0);
       const carrying = carryRef.current;
+      const rolling = placeBarrels(barrels, slots, now, !reducedMotion);
       const carrier = new Map([...carrying].map(([taskId, tabId]) => [tabId, taskId]));
       const placed: Placed[] = heroes.map((hero, index) => {
         const carried = carrier.get(hero.tabId);
@@ -186,7 +188,8 @@ export function LiveArcade({
         else if (moving) pose = frame % 2 === 0 ? "walkA" : "walkB";
         else if (hero.state === "sleeping") pose = "sleep";
         const carryRole = carried && !atTarget ? hero.role : undefined;
-        return { hero, x: next.x + (patrol ? patrolOffset(now, index) : 0), level: next.level, pose, lift: 0, carrying: carryRole };
+        const drawnX = next.x + (patrol ? patrolOffset(now, index) : 0);
+        return { hero, x: drawnX, level: next.level, pose, lift: reducedMotion ? 0 : heroLift(next.level, drawnX, rolling), carrying: carryRole };
       });
       // Carregadores que sumiram (terminal fechado) não deixam o bloco preso no caminho.
       for (const [taskId, tabId] of carrying) if (!heroes.some((hero) => hero.tabId === tabId)) carrying.delete(taskId);
@@ -203,7 +206,7 @@ export function LiveArcade({
           status: (status) => t("botPanel.live.status." + status),
         },
         heroes: placed,
-        barrels,
+        barrels: rolling,
         trophy,
         tower,
         frame,

@@ -128,6 +128,8 @@ Depende de: 9, 10, 12 e 13. É a última porque desenhar cedo fixa um modelo que
 
 **v2 implementado:** visão unificada (um fliperama por missão em execução) com seletor TODAS | missão. Pendente futuro: persistir `peer ask` em aberto para virar barril ao vivo.
 
+**v3 (Etapa 12) implementado em feat/etapa12-v3-*:** um herói por terminal (sprite por plataforma, cor por papel) que anda de verdade pelas vigas e sobe escadas até o andar da etapa; a fase vira construir a torre (um bloco por tarefa concluída, PR/CI em cinza "não medido"); barris rolam pelas vigas e travam o herói afetado. Detalhes em [LIVE_ARCADE.md](./LIVE_ARCADE.md).
+
 ## Etapa 10 — entrega em terminais (ponto 5)
 
 **Implementado:** finalizar uma missão em terminais registra o resultado dos testes informado pelo usuário e, se houver PR, consulta os checks com `gh` em modo somente leitura. Só testes aprovados com CI verde (ou sem PR) recebem `done`; os outros casos ficam separados como `done_without_delivery`. A migration v27 preserva todos os estados históricos. Detalhes em [MISSION_DELIVERY.md](./MISSION_DELIVERY.md).

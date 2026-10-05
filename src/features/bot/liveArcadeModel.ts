@@ -82,7 +82,11 @@ export function failureCount(tasks: ArcadeTask[]): number {
 }
 
 export type BarrelKind = "approval" | "failing" | "memory" | "ask_timeout";
-export interface ArcadeBarrel { kind: BarrelKind; stage: "work" | "tests" | "review"; taskId?: string; count: number; detail?: string }
+export interface ArcadeBarrel {
+  kind: BarrelKind; stage: "work" | "tests" | "review"; taskId?: string; count: number; detail?: string;
+  /** Nome do terminal que espera (quem perguntou, no `peer ask` expirado). */
+  heroName?: string;
+}
 export interface ArcadeBarrelInput {
   scene: ArcadeScene;
   /** Tarefas da missão com aprovação pendente (broker); `null` = não medido. */
@@ -108,7 +112,7 @@ export function deriveBarrels(input: ArcadeBarrelInput): ArcadeBarrel[] {
   if ((input.pendingMemories ?? 0) > 0) barrels.push({ kind: "memory", stage: "review", count: input.pendingMemories ?? 0 });
   const timeouts = (input.timings ?? []).filter((span) => span.kind === "peer_ask" && span.detail === "timeout");
   for (const span of timeouts) {
-    barrels.push({ kind: "ask_timeout", stage: "work", count: 1, detail: `${span.actor ?? "?"} → ${span.target ?? "?"}` });
+    barrels.push({ kind: "ask_timeout", stage: "work", count: 1, detail: `${span.actor ?? "?"} → ${span.target ?? "?"}`, heroName: span.actor });
   }
   return barrels;
 }
@@ -170,6 +174,8 @@ export function taskOfTab<T extends ArcadeTask>(tab: ArcadeTabInput, tasks: T[])
 /** UM herói por terminal da missão (shells ficam de fora). Correr só com saída sustentada; parado "!" com falha ou aprovação pendente; senão dorme. */
 export function deriveHeroes(input: {
   tabs: ArcadeTabInput[]; scene: ArcadeScene; sustainedTabIds: string[]; approvalTaskIds: string[] | null;
+  /** Barris reais: o herói que eles travam espera (`!`) até o bloqueio sair. */
+  barrels?: ArcadeBarrel[];
 }): ArcadeHero[] {
   const sustained = new Set(input.sustainedTabIds);
   const approvals = new Set(input.approvalTaskIds ?? []);
@@ -177,7 +183,10 @@ export function deriveHeroes(input: {
     const kind = agentKind(tab.agentId);
     if (!kind) return [];
     const task = taskOfTab(tab, input.scene.tasks);
-    const stopped = !!task && (task.status === "failed" || approvals.has(task.id));
+    const name = tab.title.trim().toLowerCase();
+    const blocked = (input.barrels ?? []).some((barrel) =>
+      (!!task && barrel.taskId === task.id) || (!!barrel.heroName && barrel.heroName.trim().toLowerCase() === name));
+    const stopped = blocked || (!!task && (task.status === "failed" || approvals.has(task.id)));
     const state: HeroState = stopped ? "stopped" : sustained.has(tab.id) ? "running" : "sleeping";
     return [{ tabId: tab.id, name: tab.title, kind, role: roleOf(tab.title, task?.role), stage: task ? task.stage : null, taskId: task?.id ?? null, state }];
   });
