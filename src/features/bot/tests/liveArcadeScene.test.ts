@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
-import { agentKind, deriveArcadeScene, deriveHeroes, deriveTower, newlyDone, roleOf, taskOfTab, type ArcadeTask } from "../liveArcadeModel";
-import { BEAM_RIGHT, beamY, heroTargets, jumpLift, ladderX, levelOfStage, patrolOffset, stepMotion, taskSlots, type Motion } from "../liveArcadeScene";
+import { agentKind, deriveArcadeScene, deriveBarrels, deriveHeroes, deriveTower, newlyDone, roleOf, taskOfTab, type ArcadeTask } from "../liveArcadeModel";
+import { BEAM_LEFT, BEAM_RIGHT, beamY, heroLift, heroTargets, jumpLift, ladderX, levelOfStage, patrolOffset, placeBarrels, rollDir, stepMotion, taskSlots, type Motion } from "../liveArcadeScene";
 
 const task = (id: string, patch: Partial<ArcadeTask> = {}): ArcadeTask => ({ id, title: id, status: "pending", dependsOn: [], ...patch });
 const sceneOf = (tasks: ArcadeTask[]) => deriveArcadeScene({ missionStatus: "running", tasks, timings: null, reviews: null });
@@ -146,5 +146,50 @@ describe("torre", () => {
     const prev = new Map<string, ArcadeTask["status"]>([["a", "running"], ["b", "done"], ["c", "running"]]);
     expect(newlyDone(prev, tasks)).toEqual(["a"]);
     expect(newlyDone(null, tasks)).toEqual([]);
+  });
+});
+
+describe("barris e obstáculos", () => {
+  const scene = sceneOf([
+    task("a", { aliases: ["Backend"], status: "running", role: "worker" }),
+    task("b", { aliases: ["QA"], status: "running", role: "qa", checks: ["failed"] }),
+  ]);
+  const tabs = [{ id: "ta", title: "Backend", agentId: "claude" }, { id: "tb", title: "QA", agentId: "codex" }, { id: "tc", title: "Front", agentId: "codex" }];
+  it("o barril trava só o herói afetado, que espera com '!' até o bloqueio sair", () => {
+    const barrels = deriveBarrels({ scene, approvalTaskIds: null, pendingMemories: null, timings: null });
+    const states = (b: typeof barrels) => deriveHeroes({ tabs, scene, sustainedTabIds: ["ta", "tb", "tc"], approvalTaskIds: null, barrels: b }).map((h) => h.state);
+    expect(states(barrels)).toEqual(["running", "stopped", "running"]);
+    expect(states([])).toEqual(["running", "running", "running"]);
+  });
+  it("peer ask expirado trava quem perguntou, pelo nome do terminal", () => {
+    const barrels = deriveBarrels({ scene, approvalTaskIds: null, pendingMemories: null, timings: [{ kind: "peer_ask", actor: "backend", target: "Front", detail: "timeout" }] });
+    const states = deriveHeroes({ tabs, scene, sustainedTabIds: [], approvalTaskIds: null, barrels: barrels.filter((b) => b.kind === "ask_timeout") }).map((h) => h.state);
+    expect(states).toEqual(["stopped", "sleeping", "sleeping"]);
+  });
+  it("barris rolam na ladeira da viga, sempre dentro dela e em ciclo", () => {
+    expect(rollDir(2)).toBe(-1);
+    expect(rollDir(3)).toBe(1);
+    const barrels = [{ stage: "work" as const, taskId: "a" }, { stage: "tests" as const }];
+    let prev = placeBarrels(barrels, new Map(), 0, true);
+    for (let ms = 100; ms < 20000; ms += 100) {
+      const next = placeBarrels(barrels, new Map(), ms, true);
+      next.forEach((b) => { expect(b.x).toBeGreaterThanOrEqual(BEAM_LEFT); expect(b.x).toBeLessThanOrEqual(BEAM_RIGHT); });
+      const wrapped = Math.abs(next[0].x - prev[0].x) > 300;
+      if (!wrapped) expect(next[0].x).toBeLessThan(prev[0].x); // andar 2: rola para a esquerda
+      prev = next;
+    }
+  });
+  it("sem animação o barril fica parado na tarefa que trava", () => {
+    const slots = taskSlots(scene);
+    const [p] = placeBarrels([{ stage: "work" as const, taskId: "a" }], slots, 123456, false);
+    expect(p.x).toBe(slots.get("a")?.x);
+    expect(placeBarrels([{ stage: "work" as const, taskId: "a" }], slots, 0, false)[0].x).toBe(p.x);
+  });
+  it("herói pula só com barril na mesma viga e perto", () => {
+    const barrels = [{ x: 400, level: 2 }];
+    expect(heroLift(2, 400, barrels)).toBe(12);
+    expect(heroLift(2, 430, barrels)).toBe(0);
+    expect(heroLift(3, 400, barrels)).toBe(0);
+    expect(heroLift(2.5, 400, barrels)).toBe(0);
   });
 });

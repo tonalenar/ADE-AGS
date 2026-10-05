@@ -1,4 +1,5 @@
 import type { AgentKind, ArcadeBarrel, ArcadeHero, ArcadeScene, ArcadeStageId, ArcadeTower, ArcadeTrophy, HeroRole } from "./liveArcadeModel";
+import type { PlacedBarrel } from "./liveArcadeScene";
 import { ARCADE_H, ARCADE_W, BEAM_LEFT, BEAM_RIGHT, LEVEL_BASE_Y, TOWER_LEFT, TOWER_WIDTH, beamY, ladderX, levelOfStage, taskSlots } from "./liveArcadeScene";
 
 const DIM = "#77799b";
@@ -157,7 +158,7 @@ export interface DrawLabels {
 }
 export interface DrawInput {
   scene: ArcadeScene; title: string; labels: DrawLabels;
-  heroes: Placed[]; barrels: ArcadeBarrel[]; trophy: ArcadeTrophy; tower: ArcadeTower; frame: number;
+  heroes: Placed[]; barrels: Array<PlacedBarrel<ArcadeBarrel>>; trophy: ArcadeTrophy; tower: ArcadeTower; frame: number;
 }
 
 export function drawArcade(ctx: CanvasRenderingContext2D, input: DrawInput) {
@@ -222,17 +223,13 @@ export function drawArcade(ctx: CanvasRenderingContext2D, input: DrawInput) {
     }
   }
 
-  const perStage = new Map<string, number>();
-  for (const barrel of input.barrels) {
-    const n = perStage.get(barrel.stage) ?? 0;
-    perStage.set(barrel.stage, n + 1);
-    const base = barrel.taskId ? slots.get(barrel.taskId)?.x : undefined;
-    const x = (base ?? 760 - n * 26) + (frame % 4 < 2 ? 0 : 2);
-    const y = beamY(levelOfStage(barrel.stage), x) - 8;
+  for (const { barrel, x, level } of input.barrels) {
+    const y = beamY(level, x) - 8;
     ctx.fillStyle = "#9b5b2e";
     ctx.fillRect(x - 8, y - 14, 16, 14);
     ctx.fillStyle = "#e0a15a";
-    ctx.fillRect(x - 8, y - 9, 16, 2);
+    // As cintas do barril giram a cada quadro: só rola quando há animação.
+    ctx.fillRect(x - 8, y - 12 + (frame % 4) * 2, 16, 2);
     if (barrel.count > 1) {
       ctx.font = FONT(6);
       ctx.fillStyle = "#fff0a0";

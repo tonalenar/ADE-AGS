@@ -37,3 +37,12 @@ A quinta aba do BotPanel mostra uma missão por vez em um canvas pixel art. A mi
 - A torre fica **pronta** (`complete`) quando todas as tarefas planejadas foram entregues e a integração foi aplicada; PR/CI não medidos não contam como verde.
 - Quando uma tarefa passa de não concluída para `done` com o app aberto, o herói ligado a ela **carrega o bloco** (desce as escadas) até a torre e só então o bloco aparece. Sem herói ligado, com `prefers-reduced-motion` ou ao abrir a aba (o que já estava pronto), o bloco entra direto.
 - Lógica pura: `deriveTower` e `newlyDone` em `liveArcadeModel.ts`.
+
+## v3.2 — barris que rolam e visão unificada
+
+- Os **barris** continuam vindo só de fontes medidas (aprovação pendente, falha ou teste falhando, memória sem resposta, `peer ask` expirado) e agora **rolam pela viga** do andar, ladeira abaixo (vigas pares para a esquerda, ímpares para a direita), recomeçando na ponta alta.
+- O herói que o barril **trava** (a tarefa do barril, ou o terminal que fez o `peer ask` expirado) fica **parado com `!`** até a fonte do bloqueio sair; os outros heróis da mesma viga **pulam** quando um barril passa. Barril de memória não tem dono: só rola.
+- Com `prefers-reduced-motion` os barris ficam parados na tarefa que travam e ninguém pula.
+- A **visão unificada** (seletor TODAS | missão) não muda: cada missão tem seu fliperama e, portanto, **sua própria torre**.
+- Limite mantido: o `peer ask` ainda pendente não é exposto pelo app, só o expirado.
+- Lógica pura: `placeBarrels`, `heroLift`, `rollDir` (`liveArcadeScene.ts`) e `deriveHeroes({ barrels })`.
