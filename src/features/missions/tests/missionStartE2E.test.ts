@@ -10,10 +10,12 @@ import {
   screenOf,
   sendWhenReady,
   START_CHECK_MS,
+  START_DEADLINE_MS,
   SUBMIT_RETRY_MS,
   type SendTimings,
 } from "@/features/terminal/terminalRegistry";
 
+import { useStallAlerts } from "../stallAlerts";
 import { startMissionInTerminals } from "../terminals";
 import { missionTurns } from "../turns";
 import type { Mission } from "../types";
@@ -160,10 +162,33 @@ const workspace = (name: string, path: string) => ({
 });
 
 describe("Teste ponta a ponta do início de missão com terminais simulados", () => {
+  const recordedSpans: Array<{ missionId: string; span: { kind: string; actor?: string; detail?: string; startedMs: number; endedMs: number } }> = [];
+
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
+    recordedSpans.length = 0;
     cleanups.splice(0, cleanups.length).forEach((fn) => fn());
+
+    mocks.invoke.mockImplementation(async (cmd: string, args: Record<string, unknown>) => {
+      if (cmd === "mission_prepare_team") {
+        return {
+          workspaces: [
+            workspace("Orquestrador", "C:/projects/app/wt/lead"),
+            workspace("Backend", "C:/projects/app/wt/backend"),
+            workspace("Frontend", "C:/projects/app/wt/frontend"),
+            workspace("QA", "C:/projects/app/wt/qa"),
+          ],
+          precheck: "ACHADOS ANTERIORES",
+          memory: "MEMORIA RECENTE",
+        };
+      }
+      if (cmd === "mission_timing_add") {
+        recordedSpans.push(args as unknown as { missionId: string; span: { kind: string; actor?: string; detail?: string; startedMs: number; endedMs: number } });
+        return {};
+      }
+      return {};
+    });
   });
 
   afterEach(() => {
@@ -242,22 +267,6 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       { id: "qa", label: "QA", description: "Testes automatizados", instructions: "Rode os testes" },
     ];
 
-    mocks.invoke.mockImplementation(async (cmd: string) => {
-      if (cmd === "mission_prepare_team") {
-        return {
-          workspaces: [
-            workspace("Orquestrador", "C:/projects/app/wt/lead"),
-            workspace("Backend", "C:/projects/app/wt/backend"),
-            workspace("Frontend", "C:/projects/app/wt/frontend"),
-            workspace("QA", "C:/projects/app/wt/qa"),
-          ],
-          precheck: "ACHADOS ANTERIORES",
-          memory: "MEMORIA RECENTE",
-        };
-      }
-      return {};
-    });
-
     const leadTabId = "tab-e2e-lead";
     const backendTabId = "tab-e2e-backend";
     const frontendTabId = "tab-e2e-frontend";
@@ -295,7 +304,6 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     qaTerm.emitOutput(["Codex v0.2 pronto.", "› "]);
 
     // 4. Aguarda o tempo de estabilização (SETTLE_MS = 2500ms)
-    // Antes dos 2500ms, nenhum briefing foi colado ainda
     expect(leadTerm.pastes).toHaveLength(0);
     expect(backendTerm.pastes).toHaveLength(0);
 
@@ -310,6 +318,10 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     expect(frontendTerm.pastes[0]).toContain("Frontend");
     expect(qaTerm.pastes).toHaveLength(1);
     expect(qaTerm.pastes[0]).toContain("QA");
+
+    // Spans de start_briefing registrados
+    const briefingSpans = recordedSpans.filter((s) => s.span.kind === "start_briefing");
+    expect(briefingSpans.map((s) => s.span.actor)).toEqual(["Orquestrador", "Backend", "Frontend", "QA"]);
 
     // 5. Após 80ms, o primeiro Enter (\r) é disparado pelo pasteIntoTab
     vi.advanceTimersByTime(80);
@@ -359,9 +371,21 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     expect(frontendTerm.inputs.length).toBe(frontendInputsBeforeRetry + 1);
     expect(frontendTerm.inputs[frontendTerm.inputs.length - 1]).toBe("\r");
 
+    // onRetry chamou recordSpan gravando start_retry para Backend e Frontend
+    const retrySpans = recordedSpans.filter((s) => s.span.kind === "start_retry");
+    expect(retrySpans.some((s) => s.span.actor === "Backend")).toBe(true);
+    expect(retrySpans.some((s) => s.span.actor === "Frontend")).toBe(true);
+
     // TUIs recebem o Enter reenviado e processam o comando
     backendTerm.setLines(["› Processando tarefa do backend...", "Criando schemas..."]);
     frontendTerm.setLines(["❯ Analisando briefing...", "Renderizando componentes..."], true);
+
+    const members = new Map([
+      [leadTabId, { mission: mission.id, actor: "Orquestrador" }],
+      [backendTabId, { mission: mission.id, actor: "Backend" }],
+      [frontendTabId, { mission: mission.id, actor: "Frontend" }],
+      [qaTabId, { mission: mission.id, actor: "QA" }],
+    ]);
 
     // 7. Agentes emitem saída após ECHO_MS (4000ms após envio = +3100ms agora)
     vi.advanceTimersByTime(4000);
@@ -371,12 +395,10 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     frontendTerm.emitOutput(["[frontend] Tela principal montada."]);
     markOutput(frontendTabId, "claude-code");
 
-    const members = new Map([
-      [leadTabId, { mission: mission.id, actor: "Orquestrador" }],
-      [backendTabId, { mission: mission.id, actor: "Backend" }],
-      [frontendTabId, { mission: mission.id, actor: "Frontend" }],
-      [qaTabId, { mission: mission.id, actor: "QA" }],
-    ]);
+    // onActivity disparado via watchStart -> start_activity registrado para Backend e Frontend
+    const activitySpans = recordedSpans.filter((s) => s.span.kind === "start_activity");
+    expect(activitySpans.some((s) => s.span.actor === "Backend")).toBe(true);
+    expect(activitySpans.some((s) => s.span.actor === "Frontend")).toBe(true);
 
     // Amostra atividade enquanto o agente trabalha (como o watcher faz a cada segundo)
     missionTurns.sample(activitySnapshot(), members, Date.now());
@@ -397,6 +419,10 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     // - Recebeu mais um Enter no seu próprio terminal (tentativa de despertar)
     expect(qaTerm.inputs.length).toBe(qaInputsBeforeCheck + 1);
     expect(qaTerm.inputs[qaTerm.inputs.length - 1]).toBe("\r");
+
+    // - Callback onRetry e onStalled disparados para QA
+    expect(recordedSpans.filter((s) => s.span.kind === "start_stalled" && s.span.actor === "QA")).toHaveLength(1);
+    expect(recordedSpans.filter((s) => s.span.kind === "start_retry" && s.span.actor === "QA")).toHaveLength(1);
 
     // - Orquestrador recebeu o aviso explícito colado no seu terminal!
     expect(leadTerm.pastes.length).toBe(leadPastesBeforeCheck + 1);
@@ -423,13 +449,13 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       },
     });
 
-    // 10. Tempo total decorrido está bem abaixo de 2 minutos (120s = 120000ms)
+    // 10. Tempo total decorrido está bem abaixo de 2 minutos (START_DEADLINE_MS = 120_000ms)
     // 2500ms + 25000ms + 6000ms = 33500ms (~33,5s)
     // Todos os agentes arrancaram ou tiveram diagnóstico em tempo hábil sem Enter manual!
   });
 
-  describe("Detecção e reenvio de Enter com marcadores de colagem de TUIs", () => {
-    it("reconhece marcadores '[Pasted Content N chars]' em tela normal e reenvia Enter", () => {
+  describe("Detecção e reenvio de Enter com marcadores de colagem de TUIs e callbacks", () => {
+    it("reconhece marcadores '[Pasted Content N chars]' em tela normal, reenvia Enter e invoca onRetry", () => {
       const tabId = "tab-paste-content";
       const term = new SimulatedTerminal([
         "linha 1",
@@ -439,27 +465,33 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       ]);
       registerSimulated(tabId, term);
 
-      // Cola com submit ativo
-      pasteIntoTab(tabId, "texto grande", true);
+      const retryTimes: number[] = [];
+      const onRetry = (at: number) => retryTimes.push(at);
+
+      // Cola com submit ativo e callback onRetry
+      pasteIntoTab(tabId, "texto grande", true, onRetry);
       expect(term.inputs).toHaveLength(0);
 
       // Enter inicial aos 80ms
       vi.advanceTimersByTime(80);
       expect(term.inputs).toEqual(["\r"]);
+      expect(retryTimes).toHaveLength(0);
 
-      // Aos 900ms (SUBMIT_RETRY_MS[0]), marcador ainda presente -> reenvia Enter
+      // Aos 900ms (SUBMIT_RETRY_MS[0]), marcador ainda presente -> reenvia Enter e chama onRetry
       vi.advanceTimersByTime(900 - 80);
       expect(term.inputs).toEqual(["\r", "\r"]);
+      expect(retryTimes).toHaveLength(1);
 
       // TUI processa e remove marcador
       term.setLines(["linha 1", "linha 2", "› Executando..."]);
 
-      // Aos 2200ms (SUBMIT_RETRY_MS[1]), marcador não está mais presente -> não reenvia
+      // Aos 2200ms (SUBMIT_RETRY_MS[1]), marcador não está mais presente -> não reenvia nem chama onRetry
       vi.advanceTimersByTime(2200 - 900);
       expect(term.inputs).toEqual(["\r", "\r"]);
+      expect(retryTimes).toHaveLength(1);
     });
 
-    it("reconhece marcadores '[Pasted text #1 +N lines]' em alt screen (Claude Code) e reenvia Enter", () => {
+    it("reconhece marcadores '[Pasted text #1 +N lines]' em alt screen (Claude Code), reenvia Enter e invoca onRetry", () => {
       const tabId = "tab-paste-alt";
       const term = new SimulatedTerminal(
         [
@@ -476,23 +508,26 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       expect(screen?.alt).toBe(true);
       expect(pasteStillPending(screen!.lines)).toBe(true);
 
-      pasteIntoTab(tabId, "texto longo", true);
+      const retryTimes: number[] = [];
+      pasteIntoTab(tabId, "texto longo", true, (at) => retryTimes.push(at));
       vi.advanceTimersByTime(80);
       expect(term.inputs).toEqual(["\r"]);
 
       // Aos 900ms: retry ativado pelo marcador pendente na tela alternativa
       vi.advanceTimersByTime(900 - 80);
       expect(term.inputs).toEqual(["\r", "\r"]);
+      expect(retryTimes).toHaveLength(1);
 
       // Remove marcador
       term.setLines(["────────────────────────────────────────────", "❯ Thinking...", "────────────────────────────────────────────"], true);
       vi.advanceTimersByTime(2200 - 900);
       expect(term.inputs).toEqual(["\r", "\r"]);
+      expect(retryTimes).toHaveLength(1);
     });
   });
 
   describe("Agente que nunca arranca", () => {
-    it("reenvia Enter ao agente e alerta a orquestradora aos 25s", () => {
+    it("reenvia Enter ao agente, invoca onRetry e onStalled e alerta a orquestradora aos 25s", () => {
       const leadTabId = "tab-stalled-lead";
       const memberTabId = "tab-stalled-member";
 
@@ -503,7 +538,9 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       registerSimulated(memberTabId, memberTerm);
 
       let stalledCalled = false;
+      const retryCalls: number[] = [];
       const timings: SendTimings = {
+        onRetry: (at) => retryCalls.push(at),
         onStalled: () => {
           stalledCalled = true;
           pasteIntoTab(
@@ -535,6 +572,8 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       expect(stalledCalled).toBe(true);
       // Member recebeu novo Enter
       expect(memberTerm.inputs).toEqual(["\r", "\r"]);
+      // onRetry chamado quando o Enter de stall foi enviado
+      expect(retryCalls).toHaveLength(1);
 
       // Lead recebeu o aviso com Enter
       expect(leadTerm.pastes[0]).toContain("[AGS] QA não mostrou atividade após o briefing");
@@ -542,7 +581,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       expect(leadTerm.inputs).toEqual(["\r"]);
     });
 
-    it("quando o agente mostra atividade após 4s, não dispara aviso de stall aos 25s", () => {
+    it("quando o agente mostra atividade após 4s, invoca onActivity e não dispara aviso de stall aos 25s", () => {
       const leadTabId = "tab-active-lead";
       const memberTabId = "tab-active-member";
 
@@ -553,7 +592,9 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       registerSimulated(memberTabId, memberTerm);
 
       let stalledCalled = false;
+      const activityTimes: number[] = [];
       const timings: SendTimings = {
+        onActivity: (at) => activityTimes.push(at),
         onStalled: () => {
           stalledCalled = true;
         },
@@ -568,6 +609,9 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       vi.advanceTimersByTime(5000 - 80);
       memberTerm.emitOutput(["Pensando na solução..."]);
 
+      // onActivity invocado imediatamente
+      expect(activityTimes).toHaveLength(1);
+
       // Avança até os 25000ms
       vi.advanceTimersByTime(20000);
 
@@ -576,19 +620,94 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     });
   });
 
+  describe("Todos os agentes arrancando em até 120s (START_DEADLINE_MS)", () => {
+    it("emite span start_all_working e atualiza stallAlerts quando toda a equipe mostra atividade", async () => {
+      const mission = {
+        id: "m-all-work",
+        title: "Todos Trabalhando",
+        objective: "Todos arrancam",
+        cwd: "C:/projects/app",
+        leadAgentId: "codex",
+        autoAccount: true,
+      } as Mission;
+
+      const squad: Squad = {
+        id: "sq-fast",
+        name: "Squad Rápido",
+        description: "",
+        createdAt: 0,
+        updatedAt: 0,
+        available: true,
+        unavailableReasons: [],
+        lead: { agentId: "codex", model: null, accountId: null, autoAccount: true, complexity: null, availability: "available", unavailableReason: null },
+        members: [
+          { roleId: "backend", agentId: "codex", model: null, accountId: null, autoAccount: true, complexity: null, isolateDefault: false, availability: "available", unavailableReason: null },
+        ],
+      };
+
+      const roles: FunctionalRole[] = [
+        { id: "backend", label: "Backend", description: "API", instructions: "API" },
+      ];
+
+      mocks.addTab.mockReturnValueOnce("tab-all-lead").mockReturnValueOnce("tab-all-backend");
+
+      const leadTerm = new SimulatedTerminal(["› "]);
+      const backendTerm = new SimulatedTerminal(["› "]);
+
+      await startMissionInTerminals(mission, squad, roles);
+      registerSimulated("tab-all-lead", leadTerm);
+      registerSimulated("tab-all-backend", backendTerm);
+
+      leadTerm.emitOutput(["Pronto"]);
+      backendTerm.emitOutput(["Pronto"]);
+      vi.advanceTimersByTime(2500); // settle
+
+      // Orquestrador mostra atividade aos 5s
+      vi.advanceTimersByTime(5000);
+      leadTerm.emitOutput(["Planejando tarefas..."]);
+
+      // Backend mostra atividade aos 12s
+      vi.advanceTimersByTime(7000);
+      backendTerm.emitOutput(["Iniciando backend..."]);
+
+      // Verifica que o span 'start_all_working' foi registrado para 'all'
+      const allWorking = recordedSpans.find((s) => s.span.kind === "start_all_working");
+      expect(allWorking).toBeDefined();
+      expect(allWorking?.span.actor).toBe("all");
+
+      // useStallAlerts foi atualizado sem pendências
+      const st = useStallAlerts.getState().startup[mission.id];
+      expect(st).toBeDefined();
+      expect(st.pendingNames).toEqual([]);
+      expect(st.allWorkingMs).toBeGreaterThan(0);
+
+      // Avança até START_DEADLINE_MS (120s) para garantir que watchers finalizam limpos
+      expect(START_DEADLINE_MS).toBe(120_000);
+      vi.advanceTimersByTime(START_DEADLINE_MS);
+    });
+  });
+
   describe("Orquestrador (lead)", () => {
-    it("não registra onStalled para si mesmo, mas tem retry de colagem via SUBMIT_RETRY_MS", () => {
-      const leadTabId = "tab-lead-self";
-      const leadTerm = new SimulatedTerminal(["› [Pasted Content 2000 chars]"]);
+    it("grava start_stalled se não houver atividade, mas não cola aviso a si mesmo", () => {
+      const leadTabId = "tab-lead-alone";
+      const leadTerm = new SimulatedTerminal(["› "]);
       registerSimulated(leadTabId, leadTerm);
 
-      pasteIntoTab(leadTabId, "Briefing do Orquestrador", true);
-      vi.advanceTimersByTime(80);
-      expect(leadTerm.inputs).toEqual(["\r"]);
+      let stalledCalled = false;
+      const timings: SendTimings = {
+        onStalled: () => {
+          stalledCalled = true;
+        },
+      };
 
-      // Retry aos 900ms
-      vi.advanceTimersByTime(900 - 80);
-      expect(leadTerm.inputs).toEqual(["\r", "\r"]);
+      sendWhenReady(leadTabId, "Briefing Líder", timings);
+      leadTerm.emitOutput(["Pronto"]);
+      vi.advanceTimersByTime(2500);
+      vi.advanceTimersByTime(80);
+
+      // Avança até 25s sem atividade
+      vi.advanceTimersByTime(START_CHECK_MS);
+      expect(stalledCalled).toBe(true);
     });
   });
 });
