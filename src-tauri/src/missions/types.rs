@@ -11,6 +11,9 @@ use crate::runs::{Complexity, Fact, Run, Task};
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Mission {
+    /// Explicit test/E2E marker; legacy and omitted values remain real missions.
+    #[serde(default)]
+    pub is_test: bool,
     pub id: String,
     pub workspace_id: String,
     pub title: String,
@@ -51,6 +54,9 @@ pub mod status {
 #[derive(Deserialize, Clone, Debug, Default, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MissionInput {
+    /// Omitted on update preserves the existing explicit marker.
+    #[serde(default)]
+    pub is_test: Option<bool>,
     pub title: String,
     pub objective: String,
     pub cwd: String,

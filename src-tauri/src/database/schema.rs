@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 26;
+const SCHEMA_VERSION: i32 = 27;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -779,6 +779,10 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
                 "ALTER TABLE {table} ADD COLUMN reasoning_effort TEXT;"
             ))?;
         }
+    }
+    // v27: explicit test/E2E marker. Never infer a classification from title/objective.
+    if !has_column(conn, "missions", "is_test") {
+        conn.execute("ALTER TABLE missions ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0 CHECK(is_test IN (0,1))", [])?;
     }
     // v22: versioned delivery, preserving the legacy reroute text.
     if !has_column(conn, "tasks", "structured_handoff") {

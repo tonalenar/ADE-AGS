@@ -12,7 +12,7 @@ use super::types::{Mission, MissionInput, MissionSummary, status};
 
 const COLUMNS: &str = "id, workspace_id, title, objective, cwd, status, max_parallel, budget_usd, \
                        lead_agent_id, lead_model, lead_account_id, auto_account, complexity, \
-                       active_run_id, created_at, updated_at, started_at, ended_at, squad_id, reasoning_effort";
+                       active_run_id, created_at, updated_at, started_at, ended_at, squad_id, reasoning_effort, is_test";
 
 /// Lo mismo que acepta `run_start_orchestration`: más de seis a la vez deja de ser
 /// paralelismo que alguien pueda seguir.
@@ -41,6 +41,7 @@ fn row_to_mission(row: &Row) -> rusqlite::Result<Mission> {
         ended_at: row.get(17)?,
         squad_id: row.get(18)?,
         reasoning_effort: row.get(19)?,
+        is_test: row.get::<_, i64>(20)? != 0,
     })
 }
 
@@ -49,6 +50,7 @@ fn row_to_mission(row: &Row) -> rusqlite::Result<Mission> {
 /// Un pedido ya revisado y normalizado: lo único que llega a la base.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Valid {
+    pub is_test: Option<bool>,
     pub title: String,
     pub objective: String,
     pub cwd: String,
@@ -140,6 +142,7 @@ pub fn validate(conn: &Connection, input: &MissionInput) -> Result<Valid, String
         return Err(errors.join("\n"));
     }
     Ok(Valid {
+        is_test: input.is_test,
         title,
         objective,
         cwd,
@@ -184,8 +187,8 @@ pub fn create(conn: &Connection, workspace_id: &str, valid: &Valid) -> Result<Mi
     conn.execute(
         "INSERT INTO missions (id, workspace_id, title, objective, cwd, status, max_parallel, budget_usd,
                                lead_agent_id, lead_model, lead_account_id, auto_account, complexity,
-                               created_at, updated_at, squad_id, reasoning_effort)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16)",
+                               created_at, updated_at, squad_id, reasoning_effort, is_test)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16, ?17)",
         rusqlite::params![
             id,
             workspace_id,
@@ -203,6 +206,7 @@ pub fn create(conn: &Connection, workspace_id: &str, valid: &Valid) -> Result<Mi
             now,
             valid.squad_id,
             valid.reasoning_effort,
+            valid.is_test.unwrap_or(false) as i64,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -254,12 +258,12 @@ pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>
         .query_map([workspace_id], |row| {
             Ok(MissionSummary {
                 mission: row_to_mission(row)?,
-                spent_usd: row.get(20)?,
-                workers_total: row.get(21)?,
-                workers_done: row.get(22)?,
-                lead_agent: row.get(23)?,
-                lead_status: row.get(24)?,
-                active_seconds: row.get(25)?,
+                spent_usd: row.get(21)?,
+                workers_total: row.get(22)?,
+                workers_done: row.get(23)?,
+                lead_agent: row.get(24)?,
+                lead_status: row.get(25)?,
+                active_seconds: row.get(26)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -287,7 +291,8 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
             && current.lead_account_id == valid.lead_account_id
             && current.auto_account == valid.auto_account
             && current.complexity == valid.complexity;
-        let same_config = same_config && current.squad_id == valid.squad_id;
+        let same_config = same_config && current.squad_id == valid.squad_id
+            && valid.is_test.is_none_or(|marked| marked == current.is_test);
         if !same_config {
             return Err("la misión ya arrancó: solo se le puede cambiar el título".into());
         }
@@ -304,7 +309,7 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
         .execute(
             "UPDATE missions SET title = ?1, objective = ?2, cwd = ?3, max_parallel = ?4, budget_usd = ?5,
                                  lead_agent_id = ?6, lead_model = ?7, lead_account_id = ?8,
-                                 auto_account = ?9, complexity = ?10, updated_at = ?11, squad_id = ?12, reasoning_effort = ?13
+                                 auto_account = ?9, complexity = ?10, updated_at = ?11, squad_id = ?12, reasoning_effort = ?13, is_test = COALESCE(?16, is_test)
              WHERE id = ?14 AND status = ?15",
             rusqlite::params![
                 valid.title,
@@ -322,6 +327,7 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
             valid.reasoning_effort,
                 id,
                 status::DRAFT,
+                valid.is_test.map(i64::from),
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -468,4 +474,12 @@ pub fn mission_of_run(conn: &Connection, run_id: &str) -> Result<Option<String>,
     )
     .optional()
     .map_err(|e| e.to_string())
+}
+
+/// Start payload may explicitly mark a draft/retry; no implicit or historical relabeling.
+pub(crate) fn mark_test_before_start(conn: &Connection, id: &str, is_test: bool) -> Result<(), String> {
+    let changed = conn.execute("UPDATE missions SET is_test = ?1, updated_at = ?2 WHERE id = ?3 AND status IN ('draft', 'failed')",
+        rusqlite::params![i64::from(is_test), now_ts(), id]).map_err(|e| e.to_string())?;
+    if changed == 0 { return Err("missions.error.notStartable".into()); }
+    Ok(())
 }

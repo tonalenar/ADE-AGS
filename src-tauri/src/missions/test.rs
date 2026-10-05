@@ -1581,3 +1581,25 @@ fn una_fallida_se_puede_reabrir_en_terminales_pero_una_terminada_no() {
     store::close_terminals(&conn, &id, "done").unwrap();
     assert!(!store::mark_started_terminals(&conn, &id).unwrap());
 }
+
+#[test]
+fn explicit_test_marker_persists_in_get_list_and_start_payload_without_guessing() {
+    let db = db();
+    let conn = db.lock().unwrap();
+    let real = create(&conn, "w1", &MissionInput { title: "E2E test development".into(), ..pedido() }).unwrap();
+    assert!(!real.is_test);
+    let marked = create(&conn, "w1", &MissionInput { is_test: Some(true), ..pedido() }).unwrap();
+    assert!(store::get(&conn, &marked.id).unwrap().unwrap().is_test);
+    let list = store::list(&conn, "w1").unwrap();
+    assert!(list.iter().find(|m| m.mission.id == marked.id).unwrap().mission.is_test);
+    assert!(!list.iter().find(|m| m.mission.id == real.id).unwrap().mission.is_test);
+    let encoded = serde_json::to_value(&list).unwrap();
+    assert!(encoded.as_array().unwrap().iter().any(|m| m["id"] == marked.id && m["isTest"] == true));
+    assert!(update(&conn, &marked.id, &pedido()).unwrap().is_test);
+    store::mark_test_before_start(&conn, &real.id, true).unwrap();
+    assert!(store::get(&conn, &real.id).unwrap().unwrap().is_test);
+    conn.execute("UPDATE missions SET status='done' WHERE id=?1", [&real.id]).unwrap();
+    assert!(store::mark_test_before_start(&conn, &real.id, false).is_err());
+    assert!(store::get(&conn, &real.id).unwrap().unwrap().is_test);
+    assert!(!update(&conn, &marked.id, &MissionInput { is_test: Some(false), ..pedido() }).unwrap().is_test);
+}

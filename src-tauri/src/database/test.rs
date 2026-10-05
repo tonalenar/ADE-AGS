@@ -897,7 +897,7 @@ fn v20_nuevo_crea_tablas_indices_y_referencias_de_squads() {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26);
+    assert_eq!(version, 27);
 
     for table in ["squads", "squad_members", "run_squad_members"] {
         assert!(
@@ -997,7 +997,7 @@ fn migrar_v19_a_v20_conserva_mission_runs_y_tasks_anteriores() {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26);
+    assert_eq!(version, 27);
     assert_eq!(
         conn.query_row(
             "SELECT title FROM missions WHERE id = 'mission-old'",
@@ -1266,7 +1266,7 @@ fn migrate_v20_to_v21_adds_nullable_effort_without_rewriting_history() {
     }
     conn.pragma_update(None, "user_version", 20).unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 26);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 27);
     let (model, effort): (String, Option<String>) = conn.query_row("SELECT model,reasoning_effort FROM tasks WHERE id='eff-t'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
     assert_eq!(model, "old-model");
     assert_eq!(effort, None);
@@ -1287,7 +1287,7 @@ fn migrate_v21_to_v22_preserves_legacy_and_is_idempotent() {
         ALTER TABLE tasks DROP COLUMN structured_handoff;
         PRAGMA user_version=21;").unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),26);
+    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),27);
     let (legacy, structured): (String,Option<String>) = conn.query_row("SELECT handoff,structured_handoff FROM tasks WHERE id='h-t'",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
     assert_eq!(legacy,"legacy");assert_eq!(structured,None);
     conn.execute("UPDATE tasks SET structured_handoff=?1 WHERE id='h-t'",[r#"{"version":1,"summary":"old delivery"}"#]).unwrap();
@@ -1307,7 +1307,7 @@ fn migrate_v22_to_v23_keeps_separate_oauth_metadata_without_tokens() {
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM antigravity_oauth_accounts", [], |r|r.get::<_,i64>(0)).unwrap(), 2);
     assert!(conn.execute("INSERT INTO antigravity_oauth_accounts VALUES('c','google-a','Duplicate','c@example.com',0)", []).is_err());
     assert!(conn.prepare("SELECT access_token,refresh_token FROM antigravity_oauth_accounts").is_err());
-    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),26);
+    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),27);
 }
 
 /// Un guardado de metadata (renombrar, mover la ventana) no reenvía el scrollback que la
@@ -1353,4 +1353,18 @@ fn v25_crea_los_checkpoints_y_se_van_con_su_run() {
     conn.execute("DELETE FROM runs WHERE id = ?1", [&run.id]).unwrap();
     let n: i64 = conn.query_row("SELECT COUNT(*) FROM run_checkpoints", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 0, "ON DELETE CASCADE");
+}
+
+#[test]
+fn migrating_v26_preserves_legacy_missions_as_real_and_is_idempotent() {
+    let conn = schema::in_memory();
+    conn.execute("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('marker-w','W',0,0)", []).unwrap();
+    conn.execute("INSERT INTO missions(id,workspace_id,title,objective,cwd,status,created_at,updated_at) VALUES('marker-m','marker-w','E2E test','development test','/repo','failed',0,0)", []).unwrap();
+    conn.execute_batch("ALTER TABLE missions DROP COLUMN is_test; PRAGMA user_version=26;").unwrap();
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.query_row("SELECT is_test FROM missions WHERE id='marker-m'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    assert_eq!(conn.query_row("SELECT status FROM missions WHERE id='marker-m'", [], |r| r.get::<_, String>(0)).unwrap(), "failed");
+    conn.execute("UPDATE missions SET is_test=1 WHERE id='marker-m'", []).unwrap();
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.query_row("SELECT is_test FROM missions WHERE id='marker-m'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
 }

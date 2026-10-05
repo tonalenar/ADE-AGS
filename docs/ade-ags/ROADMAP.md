@@ -139,3 +139,5 @@ A integração nativa oferece Lead e Worker, model discovery via `agy models` e 
 ## 17. Taxa de sucesso das missões (Etapa 10)
 
 **Ponto 6 (medição) implementado no front:** cartão com histórico, 7 e 30 dias, canceladas à parte e missões de teste/E2E por marcação explícita (`isTest`). Pendente: backend gravar `isTest`. Detalhes em [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
+
+Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--test`), persistida no schema v27 e exposta em lista/detalhe/status, sem inferência por título. Migração preserva status e classifica legadas como reais.

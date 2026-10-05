@@ -31,6 +31,7 @@ fn summary(detail: &MissionDetail) -> Value {
         "title": m.title,
         "status": m.status,
         "cwd": m.cwd,
+        "isTest": m.is_test,
         "activeRunId": m.active_run_id,
         "tasks": detail.tasks.iter().map(|t| json!({
             "id": t.id,
@@ -57,6 +58,7 @@ pub(super) fn mission_create(app: &AppHandle, args: &Value) -> Result<Value, Str
         None => crate::database::db_get_last_active_workspace_id(&db(app)?)?,
     };
     let input = MissionInput {
+        is_test: test_mark(args)?,
         title: arg_str_opt(args, "title").unwrap_or_else(|| objective.chars().take(60).collect()),
         objective,
         cwd,
@@ -71,11 +73,12 @@ pub(super) fn mission_create(app: &AppHandle, args: &Value) -> Result<Value, Str
         ..Default::default()
     };
     let mission = crate::missions::create_now(app, &workspace, &input)?;
-    Ok(json!({ "id": mission.id, "title": mission.title, "status": mission.status }))
+    Ok(json!({ "id": mission.id, "title": mission.title, "status": mission.status, "isTest": mission.is_test }))
 }
 
 pub(super) fn mission_start(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
+    crate::missions::mark_test_now(app, &id, test_mark(args)?)?;
     crate::missions::start_now(app, &id)?;
     Ok(summary(&crate::missions::detail_now(app, &id)?))
 }
@@ -331,5 +334,30 @@ mod memory_time_tests {
         assert_eq!(parse_memory_at("1970-01-02").unwrap(), 86_400);
         assert_eq!(parse_memory_at("1970-01-01T00:02").unwrap(), 120);
         assert!(parse_memory_at("1970-1-1").is_err());
+    }
+}
+
+/// --test (CLI) and isTest (structured payload) are explicit boolean markers only.
+fn test_mark(args: &Value) -> Result<Option<bool>, String> {
+    let Some(value) = args.get("isTest").or_else(|| args.get("test")) else { return Ok(None); };
+    match value {
+        Value::Bool(marked) => Ok(Some(*marked)),
+        Value::String(raw) if raw == "true" => Ok(Some(true)),
+        Value::String(raw) if raw == "false" => Ok(Some(false)),
+        _ => Err("--test/isTest deve ser true ou false".into()),
+    }
+}
+
+#[cfg(test)]
+mod test_marker_tests {
+    use super::*;
+    #[test]
+    fn test_marker_is_explicit_and_rejects_ambiguous_values() {
+        assert_eq!(test_mark(&json!({"title":"E2E test"})).unwrap(), None);
+        assert_eq!(test_mark(&json!({"test":true})).unwrap(), Some(true));
+        assert_eq!(test_mark(&json!({"test":"false"})).unwrap(), Some(false));
+        assert_eq!(test_mark(&json!({"isTest":true})).unwrap(), Some(true));
+        assert!(test_mark(&json!({"test":"maybe"})).is_err());
+        assert!(test_mark(&json!({"isTest":1})).is_err());
     }
 }

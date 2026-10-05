@@ -14,7 +14,7 @@ O cartão mostra três taxas lado a lado: **histórico**, **7 dias** e **30 dias
 
 Uma missão só sai da taxa se estiver **marcada explicitamente** (`isTest === true` em `Mission`). Ausente ou `null` = missão real. **Nunca se adivinha pelo título.** As marcadas aparecem em um cartão `TESTE/E2E` ("fora da taxa") e continuam contadas em `total`, `done`, `failed` etc.
 
-> Pendente (backend): nada grava `isTest` ainda. O campo existe no tipo e a métrica já o respeita; falta uma forma explícita de marcar (flag em `ags mission` / criação) e persistir. Até lá todas as missões contam como reais, inclusive as 10 falhas de teste de 29–30/09.
+A marcação está persistida em `missions.is_test` (schema v27) e exposta como `isTest` em mission_list/get e no status da CLI. Use `ags mission create|run ... --test` ou `ags mission start <id> --test`; a criação estruturada aceita `isTest: true` e os comandos de início aceitam `isTest` opcional. Ausência da marcação mantém a classificação existente no início/edição e cria missões reais por padrão. A migração mantém missões antigas como reais, sem alterar status ou inferir pelo título. Missões já encerradas não são reclassificadas pelo start.
 
 ## Código
 
