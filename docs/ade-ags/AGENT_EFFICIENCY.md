@@ -1,4 +1,22 @@
 
+## Etapa 15 — início rápido e isolamento
+
+`mission_prepare_team({ missionId, members: ["Orquestrador", ...nomes] })` prepara a equipe antes de marcar a missão em andamento ou abrir terminais. Retorna `{ workspaces, precheck, memory }`; cada workspace contém `name`, `cwd`, `root`, `branch`, `cargoTargetDir`, `prelaunch` (string de comando) e `environment` (bloco de briefing). A UI usa `cwd` e `prelaunch: [{ command: workspace.prelaunch }]`. O canvas continua vinculado ao diretório original e à missão, permitindo comunicação entre worktrees diferentes.
+
+Cada integrante, inclusive o orquestrador, recebe um worktree/branch a partir de `origin/master`, em `~/.ags/worktrees`. O repositório precisa ter essa referência local; não há fallback para editar o clone. A junction de `node_modules` usa o setup de `floors.rs`, preservando qualquer diretório/link existente; ausência de dependências aparece no ambiente. `CARGO_TARGET_DIR` é isolado em `<root>/src-tauri/target`, exportado antes da TUI. A tabela aditiva/idempotente `mission_team_workspaces` (schema v32) guarda a propriedade por missão/nome: retentar reutiliza o worktree sem descartar arquivos não commitados. Worktrees ausentes geram erro explícito. Git roda fora do lock do banco; uma trava de preparação serializa chamadas concorrentes. Não se removem worktrees automaticamente ao concluir.
+
+Recruits dentro de uma missão também recebem isolamento quando `--floor` não é informado. Um piso explícito ocupado é recusado. Fora de missões, o comportamento do recruit permanece o existente.
+
+O briefing começa com a regra: plano curto usando objetivo, precheck e memória já preenchidos; `ags peer tell` a cada integrante com tarefa/escopo/worktree/branch em até aproximadamente dois minutos; depois exploração. Membros recebem o mesmo contexto conhecido e aguardam sem explorar nem editar. O precheck não manda mais o orquestrador investigar código antes da delegação. Briefings de agentes seguem o idioma operacional PT-BR já usado pelo projeto; rótulos da métrica e erros de isolamento da UI têm pt-BR/en/es.
+
+`ags mission timings` e `ags mission efficiency` retornam `firstDelegationMs: number|null` e `firstDelegationSource: "peer_message"|"span"|null`. O QG e o painel de tempos usam o mesmo campo de eficiência, com ausência em cinza. O IPC persiste um span `peer_message` de duração zero, `detail: "delegation"`, após envio bem sucedido de tell/ask do orquestrador a outro integrante do mesmo canvas de missão. A métrica é o intervalo desde o primeiro boot observado até esse envio; sem boot, usa `started_at`. Ela mede o primeiro envio de coordenação, não interpreta semanticamente o texto da tarefa. Mensagens de membros e de outras missões não contam. Histórico sem evento novo pode usar o primeiro span `peer_ask` cujo actor é `Orquestrador`, identificando a fonte como `span`. Sem início/evidência, retorna null; não atribui zero. Eventos de mensagem não são tempo de trabalho ativo.
+
+### Comparação e validação
+
+A linha de base fornecida para a Etapa 14 é boot de 5–11 s; briefing Frontend 488 s, Orquestrador 421 s, QA 800 s; primeiro peer ask aos 701 s e expirado. A fotografia somente leitura de `ags mission timings 84b47fe5-bf1e-45ee-b544-ee676409bf04` durante esta implementação registrou boot de 4,258–5,807 s. O app então em execução ainda usa o contrato anterior e não registra os novos peer_message; portanto **não há medida real posterior de primeira delegação**, nem percentual de ganho demonstrado. Após iniciar uma missão no app atualizado, comparar `firstDelegationMs` com a linha de base, respeitando a diferença de fonte histórica. Meta de processo: até ~120 s, não garantia automática de execução pelo modelo.
+
+Testes cobrem comparação sintética de primeiro ask aos 701 s com tell aos 89 s (teste de cálculo, não benchmark real), ausência/inversão de relógio, fonte histórica, worktrees distintos, checkout da referência origin/master em vez de arquivos sujos do clone, junction preservada, retry com edição não commitada, migração repetida e propriedade persistida. A integração de lançamento verifica cwd/prelaunch por terminal e ausência de terminais abertos quando a preparação falha. Comandos obrigatórios: `node node_modules/typescript/bin/tsc --noEmit`, `node node_modules/vitest/vitest.mjs run`, `cargo test --lib --bin ags`.
+
 ## Ponto 1 — Agente parado
 
 **Problema:** o orquestrador manda uma tarefa com `ags peer tell` e, se o agente para por algum motivo, espera para sempre.
@@ -188,3 +206,4 @@ Zero gravado em `mission_active` não é tratado como coleta positiva e segue o 
 ## Etapa 15 — telas (Frontend)
 
 O QG ("Ao vivo") lê o tempo ativo da fonte unificada (`timings.active`) e deriva andar e entregas dos sinais reais dos terminais (ver `LIVE_ARCADE.md`, v4). A métrica de tempo até a primeira delegação (`firstDelegationMs`/`firstDelegationSource`) é do Backend; sem dado, a tela mostra cinza.
+

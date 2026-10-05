@@ -287,7 +287,7 @@ pub fn render(check: &Precheck) -> String {
         return String::new();
     }
     let rule = if check.has_leads() {
-        "Há indícios de que parte disto JÁ existe. ANTES de convocar a equipe, confira você mesmo esses pontos (leia os trechos, rode só o que for barato). Se o pedido já estiver atendido, conclua a missão com um resumo curto, sem acionar os integrantes."
+        "Há indícios de que parte disto JÁ existe. Use estes fatos para um plano curto e delegue primeiro, em até ~2 minutos. Só DEPOIS de delegar confira os trechos necessários; não repita buscas já preenchidas. Se o pedido já estiver atendido pelos fatos recebidos, avise a equipe explicitamente antes de concluir."
     } else {
         "Nada indica que isto já exista; siga com o plano normal."
     };

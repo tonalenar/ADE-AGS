@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 /** Ver `missions::timings` en Rust: las etapas de una misión que se miden. */
-export type TimingKind = "boot" | "briefing" | "turn" | "peer_ask";
+export type TimingKind = "boot" | "briefing" | "turn" | "peer_ask" | "peer_message";
 
 export interface TimingSpan {
   id: number;
@@ -33,6 +33,8 @@ export interface MissionTimings {
   active: ActiveTime;
   /** Detalle por turno: unión de los spans `turn` y `peer_ask`. */
   turnMs: number | null;
+  firstDelegationMs?: number | null;
+  firstDelegationSource?: "peer_message" | "span" | null;
   spans: TimingSpan[];
   summary: { wallMs: number; byKind: KindTotal[]; slowest: TimingSpan[]; bottlenecks: Bottleneck[] };
 }
@@ -58,6 +60,8 @@ export interface AgentBandComparison {
 }
 
 export interface MissionEfficiency {
+  firstDelegationMs?: number | null;
+  firstDelegationSource?: "peer_message" | "span" | null;
   /** Tiempo activo oficial (ver `ActiveSource`). */
   activeMs: number | null;
   activeSource: ActiveSource | null;

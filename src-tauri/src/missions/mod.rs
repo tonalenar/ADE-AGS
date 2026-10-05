@@ -21,6 +21,7 @@ pub mod efficiency;
 pub(crate) mod store;
 pub(crate) mod timings;
 mod delivery;
+pub(crate) mod team;
 #[cfg(test)]
 mod test;
 #[cfg(test)]
@@ -598,6 +599,8 @@ pub struct MissionTimings {
     pub active: active::Resolved,
     /// Detalhe por turno: união dos spans `turn` e `peer_ask`.
     pub turn_ms: Option<i64>,
+    pub first_delegation_ms: Option<i64>,
+    pub first_delegation_source: Option<&'static str>,
 }
 
 pub(crate) fn timings_of(conn: &Connection, mission_id: &str) -> Result<MissionTimings, String> {
@@ -608,7 +611,8 @@ pub(crate) fn timings_of(conn: &Connection, mission_id: &str) -> Result<MissionT
         .unwrap_or((None, None));
     let turn_ms = efficiency::turn_ms(&spans);
     let active = active::resolve(conn, mission_id, turn_ms, active::wall_ms(started_at, ended_at, crate::util::now_ts()))?;
-    Ok(MissionTimings { spans, summary, active, turn_ms })
+    let (first_delegation_ms, first_delegation_source) = timings::first_delegation(&spans, started_at);
+    Ok(MissionTimings { spans, summary, active, turn_ms, first_delegation_ms, first_delegation_source })
 }
 
 #[tauri::command]

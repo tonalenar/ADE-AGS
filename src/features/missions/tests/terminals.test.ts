@@ -20,7 +20,30 @@ describe("finishedMissionTabs", () => {
     expect(finishedMissionTabs(missions, index, tabs)).toEqual(["b", "c"]);
   });
 });
-import { LEAD_NAME, MAX_EXTRA_TERMINALS, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, subagentDefaultBriefing, teamOf, uniqueNames } from "../terminals";
+import { LEAD_NAME, MAX_EXTRA_TERMINALS, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, subagentDefaultBriefing, teamOf, uniqueNames, workspaceFor, type TeamWorkspace } from "../terminals";
+
+describe("isolamento e início rápido", () => {
+  const member = { name: "Backend", agentId: "codex", accountId: null, roleId: "backend", roleLabel: "Backend", roleDescription: "API", roleInstructions: "" };
+  const workspace: TeamWorkspace = { name: "Backend", cwd: "C:/wt/backend", root: "C:/wt/backend", branch: "cc/backend", cargoTargetDir: "C:/wt/backend/src-tauri/target", prelaunch: 'set "CARGO_TARGET_DIR=C:/wt/backend/src-tauri/target"', environment: "AMBIENTE ISOLADO" };
+  it("recusa preparação incompleta ou compartilhada, sem recorrer ao clone", () => {
+    const prepared = { workspaces: [workspace], precheck: "", memory: "" };
+    expect(workspaceFor(prepared, "Backend")).toBe(workspace);
+    expect(() => workspaceFor(prepared, "QA")).toThrow();
+    expect(() => workspaceFor({ ...prepared, workspaces: [workspace, { ...workspace, name: "QA" }] }, "Backend")).toThrow();
+  });
+  it("mostra o worktree na delegação e mantém membros aguardando com contexto preenchido", () => {
+    const mission = { title: "T", objective: "O" };
+    const lead = leadBriefing(mission, [member], "ACHADOS", "MEMÓRIA", undefined, [workspace]);
+    expect(lead).toContain("até ~2 minutos");
+    expect(lead.indexOf("Antes de explorar o código")).toBeLessThan(lead.indexOf("COMO COORDENAR"));
+    expect(lead).toContain("worktree: C:/wt/backend; branch: cc/backend");
+    const text = memberBriefing(mission, member, workspace, "ACHADOS", "MEMÓRIA");
+    expect(text).toContain("Não explore nem edite antes de receber a tarefa");
+    expect(text).toContain("C:/wt/backend");
+    expect(text).toContain("AMBIENTE ISOLADO");
+    expect(text).toContain("ACHADOS"); expect(text).toContain("MEMÓRIA");
+  });
+});
 
 describe("accountsNeedingLogin", () => {
   const accounts = [
