@@ -247,6 +247,12 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
     if let Some(account) = arg_str_opt(args, "account") {
         create["account"] = json!(account);
     }
+    // Modelo y esfuerzo del agente nuevo (los aplica la pantalla al armar el comando).
+    for key in ["model", "effort"] {
+        if let Some(value) = arg_str_opt(args, key).filter(|v| !v.trim().is_empty()) {
+            create[key] = json!(value);
+        }
+    }
     let created = tab_create(app, &create)?;
     let tab_id = created.get("tabId").and_then(Value::as_str).ok_or("A aba foi criada sem id")?.to_string();
 
