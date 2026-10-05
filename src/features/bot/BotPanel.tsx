@@ -218,7 +218,7 @@ export function BotPanel() {
                   <Card label={t("botPanel.card.failed")} value={scoreDigits(stats.failed, 3)} color="var(--hq-pink)" />
                   <Card label={t("botPanel.card.total")} value={scoreDigits(stats.total, 3)} />
                   {Object.entries(stats.failuresByClass).map(([k, n]) => (
-                    <Card key={k} label={t("botPanel.card.failCause", { cause: t(failureLabelKey(k as FailureKey)) })} value={scoreDigits(n ?? 0, 3)} color="var(--hq-pink)" />
+                    <Card key={k} label={t("botPanel.card.failCause", { cause: t(failureLabelKey(k as FailureKey)) })} value={scoreDigits(n ?? 0, 3)} color="var(--hq-pink)" sub={t(failureActionKey(k as FailureKey))} />
                   ))}
                 </div>
               )}
@@ -241,7 +241,7 @@ export function BotPanel() {
                         <div style={{ color: "var(--hq-yellow)", marginBottom: 8 }}>{t("botPanel.timeline")} · {current.title}</div>
                         {failureKey(current) && (
                           <p style={{ color: "var(--hq-pink)", marginBottom: 8 }}>
-                            {t(failureLabelKey(failureKey(current)!))} → {t(failureActionKey(current), { defaultValue: t("missions.failure.action.unknown") })}
+                            {t(failureLabelKey(failureKey(current)!))} → {t(failureActionKey(failureKey(current)!))}
                           </p>
                         )}
                         {!timings || timings.summary.byKind.length === 0 ? <p className="ags-hq__dim">{t("botPanel.noTimings")}</p> : (

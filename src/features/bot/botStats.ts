@@ -4,7 +4,7 @@ import type { MissionSummary } from "@/features/missions/types";
 /** Lo mínimo de una misión que mira el panel del bot. */
 export type MissionLike = Pick<MissionSummary, "id" | "title" | "status" | "startedAt" | "endedAt" | "spentUsd"> & {
   activeSeconds?: number | null;
-  failureClassification?: MissionSummary["failureClassification"];
+  failureClass?: MissionSummary["failureClass"];
 };
 
 export interface BotStats {
