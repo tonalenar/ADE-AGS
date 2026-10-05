@@ -6,7 +6,7 @@ import type { AgentAccount } from "@/features/accounts/types";
 import { canvasActions, missionBoardKey, setWorkMode } from "@/features/canvas/store";
 import type { FunctionalRole, Squad, SubagentDefault } from "@/features/squads/types";
 import { useTabsStore } from "@/features/tabs/store";
-import { sendWhenReady, type SendTimings } from "@/features/terminal/terminalRegistry";
+import { pasteIntoTab, sendWhenReady, type SendTimings } from "@/features/terminal/terminalRegistry";
 
 import { getAutonomy, withAutonomy } from "./autonomy";
 import { withModel } from "./modelFlags";
@@ -151,6 +151,7 @@ export function leadBriefing(
     "INÍCIO RÁPIDO — PRIMEIRA AÇÃO (meta: até ~2 minutos após o briefing):",
     "- Faça um plano curto a partir do objetivo e do contexto já preenchido abaixo. Antes de explorar o código, delegue a CADA integrante com `ags peer tell`, incluindo tarefa concreta, escopo, worktree e branch dele. Só depois explore o que faltar.",
     "- Os membros aguardam sua tarefa sem explorar nem editar. Se alguém não tiver tarefa agora, avise explicitamente para continuar aguardando.",
+    "- Depois de delegar, VERIFIQUE que todos estão trabalhando: use `ags peers` e leia a tela de cada um (`ags peer check "<nome>"`); quem estiver parado ou com texto colado sem enviar, reenvie a tarefa com `ags peer tell`. Uma linha `[AGS] <nome> não mostrou atividade` indica integrante que não arrancou.",
     ...workspaces.filter((w) => w.name === LEAD_NAME).map((w) => `SEU WORKTREE: ${w.cwd}; branch: ${w.branch}. Trabalhe somente nele.\n${w.environment}`),
     "- Nunca dois agentes no mesmo worktree; preserve a junction node_modules. Não abra PR nem faça merge sem pedido do usuário.",
     "",
@@ -331,15 +332,19 @@ export async function startMissionInTerminals(
 
   // Cronómetro: cuánto tardó cada terminal en estar lista, y cuánto en contestar el briefing.
   const openedAt = Date.now();
-  const timed = (actor: string, tabId: string): SendTimings => {
+  const timed = (actor: string, tabId: string, isLead = false): SendTimings => {
     return {
+      // Sin actividad tras el briefing: ya se le dio un Enter; se avisa a la orquestadora para que verifique.
+      onStalled: isLead
+        ? undefined
+        : () => pasteIntoTab(leadTabId, `[AGS] ${actor} não mostrou atividade após o briefing (recebeu um Enter). Confirme se ele está trabalhando; se não, reenvie a tarefa dele com ags peer tell.`, true),
       onSent: (at) => {
         missionTurns.start(tabId, mission.id, actor, at, "briefing");
         recordSpan(mission.id, { kind: "boot", actor, startedMs: openedAt, endedMs: at });
       },
     };
   };
-  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined, prepared.workspaces)), timed(LEAD_NAME, leadTabId));
+  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined, prepared.workspaces)), timed(LEAD_NAME, leadTabId, true));
   memberTabIds.forEach((tabId, i) =>
     sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i], memberWorkspaces[i], findings, memory)), timed(team[i].name, tabId)),
   );

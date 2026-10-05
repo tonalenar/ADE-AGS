@@ -31,6 +31,8 @@ export interface SendTimings {
   onSent?: (at: number) => void;
   /** El agente terminó de contestar: dejó de escribir. `at` es su última salida. */
   onTurnEnd?: (at: number) => void;
+  /** Pasaron `START_CHECK_MS` desde el envío y la terminal no mostró actividad: el agente no arrancó. */
+  onStalled?: () => void;
 }
 
 const queuedTimings = new Map<string, SendTimings>();
@@ -61,6 +63,29 @@ function watchTurn(term: Terminal, onEnd: (at: number) => void): void {
   }, TURN_GIVE_UP_MS);
 }
 
+/** Cuánto después de enviar el briefing se verifica que el agente arrancó. */
+export const START_CHECK_MS = 25_000;
+/** Salida dentro de esta ventana tras el envío es el eco del pegado, no trabajo del agente. */
+const ECHO_MS = 4000;
+
+/**
+ * Verifica que el agente arrancó tras el briefing: si en `START_CHECK_MS` la terminal no escribió
+ * nada más allá del eco, se le da un Enter (puede haber quedado sin enviar) y se avisa con `onStalled`.
+ */
+function watchStart(tabId: string, term: Terminal, onStalled: () => void): void {
+  const sentAt = Date.now();
+  let worked = false;
+  const sub = term.onWriteParsed(() => {
+    if (Date.now() - sentAt > ECHO_MS) worked = true;
+  });
+  window.setTimeout(() => {
+    sub.dispose();
+    if (worked || terminals.get(tabId) !== term) return;
+    term.input("\r");
+    onStalled();
+  }, START_CHECK_MS);
+}
+
 /** Espera a que la TUI termine de arrancar y le manda `text`. */
 function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
   let timer: number | undefined;
@@ -76,6 +101,7 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
     pasteIntoTab(tabId, text, true);
     timings?.onSent?.(Date.now());
     if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
+    if (timings?.onStalled) watchStart(tabId, term, timings.onStalled);
   };
   const sub = term.onWriteParsed(() => {
     sawOutput = true;
@@ -139,7 +165,7 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean): bool
 }
 
 /** Cuándo (ms tras pegar) se vuelve a mirar si el pegado quedó sin enviar. */
-export const SUBMIT_RETRY_MS = [900, 2200, 4500];
+export const SUBMIT_RETRY_MS = [900, 2200, 4500, 8000, 12_000, 18_000, 25_000, 35_000, 50_000];
 
 /**
  * ¿Sigue el texto pegado en la caja de entrada, sin enviar? Las TUIs reemplazan un pegado grande

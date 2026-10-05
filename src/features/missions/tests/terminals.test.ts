@@ -110,6 +110,7 @@ describe("el equipo de una misión", () => {
     const text = leadBriefing({ title: "T", objective: "O" }, team);
     expect(text).toContain("MAIS TERMINAIS");
     expect(text).toContain('ags peer recruit "<nome>"');
+    expect(text).toContain("VERIFIQUE que todos estão trabalhando");
     expect(text).toContain("DELEGUE LOGO");
     expect(text).toContain("mande a CADA integrante");
     expect(text).toContain("SÓ RECRUTE quando a tarefa for independente e paralelizável e a divisão for mais rápida que um agente só; o QG mostra o ganho por missão.");
