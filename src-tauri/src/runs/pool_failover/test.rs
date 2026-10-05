@@ -153,13 +153,12 @@ fn limite_3_cooldown_30_minutos_conta_nao_e_escolhida() {
     assert!(err.contains("ninguna cuenta del pool") && err.contains("cooldown"), "{err}");
 }
 
-/// 4. Só dispara para cupo esgotado / rate limit (FailureKind::RateLimited)
-/// NUNCA para erro de código, timeout, permissão negada, login expirado ou conta bloqueada (FailureKind::AuthExpired/Other).
+/// 4. Access/limit failures are eligible; code, timeout and filesystem errors are not.
 #[test]
-fn limite_4_so_rate_limit_dispara_failover() {
+fn limite_4_so_acesso_ou_limite_dispara_failover() {
     // 1. Elegibilidade direta:
     assert!(failure_eligible(FailureKind::RateLimited, true, false));
-    assert!(!failure_eligible(FailureKind::AuthExpired, true, false));
+    assert!(failure_eligible(FailureKind::AuthExpired, true, false));
     assert!(!failure_eligible(FailureKind::Other, true, false));
 
     // 2. Classificação de strings reais:
@@ -172,13 +171,13 @@ fn limite_4_so_rate_limit_dispara_failover() {
     assert!(failure_eligible(classify("429 Too Many Requests"), true, false));
     assert!(failure_eligible(classify("5-hour limit reached"), true, false));
 
-    // Login expirado / Auth / Credencial -> AuthExpired (NUNCA elegível)
+    // Login expirado / Auth / Credencial -> AuthExpired (com opt-in)
     assert_eq!(classify("Invalid API key · Please run /login"), FailureKind::AuthExpired);
     assert_eq!(classify("OAuth token has expired"), FailureKind::AuthExpired);
     assert_eq!(classify("401 Unauthorized"), FailureKind::AuthExpired);
     assert_eq!(classify("Not logged in"), FailureKind::AuthExpired);
-    assert!(!failure_eligible(classify("Invalid API key"), true, false));
-    assert!(!failure_eligible(classify("token has expired"), true, false));
+    assert!(failure_eligible(classify("Invalid API key"), true, false));
+    assert!(failure_eligible(classify("token has expired"), true, false));
 
     // Erro de código / Timeout / Permissão negada -> Other (NUNCA elegível)
     assert_eq!(classify("Command timed out after 300 seconds"), FailureKind::Other);
@@ -323,4 +322,73 @@ fn limite_8_pool_salvo_antigo_sem_campo_failover_continua_carregando() {
     assert_eq!(loaded.len(), 1);
     assert_eq!(loaded[0].name, "Trabalho");
     assert!(!loaded[0].failover);
+}
+
+#[test]
+fn access_model_and_billing_errors_are_classified_without_false_http_line_numbers() {
+    for (text, expected) in [
+        ("HTTP 403 Forbidden", FailureKind::AuthExpired),
+        ("Your model 'x5' is not supported when using Codex with a ChatGPT account", FailureKind::ModelUnavailable),
+        ("The requested model 'missing' does not exist", FailureKind::ModelUnavailable),
+        ("model_not_found: you do not have access", FailureKind::ModelUnavailable),
+        ("Your credit balance is too low", FailureKind::InsufficientBalance),
+        ("insufficient_quota", FailureKind::InsufficientBalance),
+        ("HTTP 402 Payment Required", FailureKind::InsufficientBalance),
+        ("subscription has expired", FailureKind::InsufficientBalance),
+        ("src/main.rs:403:5 permission denied", FailureKind::Other),
+        ("model parser at src/main.rs:402:5", FailureKind::Other),
+        ("503 service unavailable", FailureKind::Other),
+    ] {
+        assert_eq!(classify(text), expected, "{text}");
+        assert_eq!(failure_eligible(expected, true, false), expected != FailureKind::Other);
+        assert!(!failure_eligible(expected, false, false));
+        assert!(!failure_eligible(expected, true, true));
+    }
+}
+
+fn available_model(id: &str) -> crate::runs::roster::RosterModel {
+    crate::runs::roster::RosterModel { id: id.into(), label: id.into(), toolcall: Some(true), local: false,
+        cost_in: None, cost_out: None, context: None, source: Some("fixture".into()),
+        availability: crate::runs::roster::ModelAvailability::Available, reasoning_levels: None,
+        default_reasoning: None, unavailable: None }
+}
+
+#[test]
+fn replacement_preserves_pool_and_account_catalog_and_changes_model_only_for_model_errors() {
+    let _lock = TEST_LOCK.lock().unwrap();
+    let original = Some("replacement-a".into());
+    let a = mock_account(Some("replacement-a"), "A", "replacement-a");
+    let mut b = mock_account(Some("replacement-b"), "B", "replacement-b");
+    b.model_discovery = ModelDiscoveryState::Available;
+    b.models = vec![available_model("accessible")];
+    let mut outside = mock_account(Some("replacement-outside"), "outside", "replacement-outside");
+    outside.model_discovery = ModelDiscoveryState::Available;
+    outside.models = vec![available_model("requested")];
+    let mut roster = mock_roster_con_cuentas(vec![a, b, outside]);
+    let spec = PoolSpec { id: "replacement-pool".into(), name: "pool".into(), agent_id: "claude-code".into(),
+        members: vec![original.clone(), Some("replacement-b".into())], strategy: Strategy::Sticky, start: 0, failover: true };
+    let request = routing::RouteRequest { agent_id: Some("claude-code".into()), model: Some("requested".into()),
+        complexity: None, account: routing::AccountChoice::Pool(spec.clone()) };
+    let tiers = routing::Tiers::default();
+    let assign = replacement(&roster, &tiers, &request, &original, FailureKind::ModelUnavailable, 900_000).unwrap();
+    assert_eq!(assign.agent_id, "claude-code");
+    assert_eq!(assign.account_id.as_deref(), Some("replacement-b"));
+    assert_eq!(assign.model.as_deref(), Some("accessible"));
+    assert_eq!(assign.pool_origin.unwrap().id, spec.id);
+    // Neither auth nor billing silently changes an explicitly requested model.
+    assert!(replacement(&roster, &tiers, &request, &original, FailureKind::AuthExpired, 900_000).is_err());
+    assert!(replacement(&roster, &tiers, &request, &original, FailureKind::InsufficientBalance, 900_000).is_err());
+    roster.agents[0].accounts[1].models.push(available_model("requested"));
+    assert_eq!(replacement(&roster, &tiers, &request, &original, FailureKind::AuthExpired, 900_000).unwrap().model, request.model);
+    roster.agents[0].accounts[1].logged_in = false;
+    assert!(replacement(&roster, &tiers, &request, &original, FailureKind::ModelUnavailable, 900_000).is_err());
+    roster.agents[0].accounts[1].logged_in = true;
+    cool_down_account("replacement-b", 900_000);
+    assert!(replacement(&roster, &tiers, &request, &original, FailureKind::ModelUnavailable, 900_001).is_err());
+    assert!(replacement(&roster, &tiers, &request, &original, FailureKind::ModelUnavailable, 900_000 + COOLDOWN_SECS).is_ok());
+    let mut disabled = request.clone();
+    disabled.account = routing::AccountChoice::Pool(PoolSpec { failover: false, ..spec });
+    assert!(replacement(&roster, &tiers, &disabled, &original, FailureKind::ModelUnavailable, 1_000_000).is_err());
+    disabled.account = routing::AccountChoice::Fixed(original.clone());
+    assert!(replacement(&roster, &tiers, &disabled, &original, FailureKind::ModelUnavailable, 1_000_000).is_err());
 }

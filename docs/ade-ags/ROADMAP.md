@@ -135,3 +135,7 @@ Depende de: 9, 10, 12 e 13. É a última porque desenhar cedo fixa um modelo que
 ## Estado Antigravity
 
 A integração nativa oferece Lead e Worker, model discovery via `agy models` e uma conta do sistema. Multi-account permanece experimental/incompleto: `supports_accounts = false`, sem routing simultâneo por conta. OAuth experimental não isola as credenciais do `agy`. Veja [ANTIGRAVITY_INTEGRATION.md](./ANTIGRAVITY_INTEGRATION.md).
+
+## 10. Taxa de sucesso das missões
+
+Ponto 2: failover opcional por autenticação, modelo ou saldo no mesmo pool/TUI, com uma troca por task, cooldown e auditoria traduzida. Ver [MISSION_SUCCESS.md](./MISSION_SUCCESS.md) e [POOL_FAILOVER.md](./POOL_FAILOVER.md).

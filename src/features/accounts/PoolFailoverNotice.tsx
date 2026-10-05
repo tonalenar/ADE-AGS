@@ -27,6 +27,8 @@ export interface PoolFailoverEvent {
   toAccount: string | null;
   reason: string;
   kind: "rate_limited" | string;
+  fromModel?: string | null;
+  toModel?: string | null;
 }
 
 /**
@@ -52,6 +54,8 @@ export function PoolFailoverNotice() {
           from: accountLabel(data.fromAccount),
           to: accountLabel(data.toAccount),
           pool: data.poolName,
+          cause: t(`accounts.pools.failover.reason.${["rate_limited", "auth", "model", "balance"].includes(data.kind) ? data.kind : "other"}`),
+          model: data.toModel ?? task?.model ?? t("accounts.pools.failover.defaultModel"),
         }),
         ms: 8000,
       });

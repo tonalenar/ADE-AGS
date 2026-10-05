@@ -353,8 +353,8 @@ pub fn on_task_finished(app: &AppHandle, task_id: &str) {
         let kind = (task.status == status::FAILED)
             .then(|| super::failure::classify(task.error.as_deref().unwrap_or("")));
         let account_failure = match kind {
-            Some(kind @ (FailureKind::RateLimited | FailureKind::AuthExpired)) => {
-                let tag = if kind == FailureKind::RateLimited { "[límite de uso]" } else { "[credencial]" };
+            Some(kind @ (FailureKind::RateLimited | FailureKind::AuthExpired | FailureKind::ModelUnavailable | FailureKind::InsufficientBalance)) => {
+                let tag = match kind { FailureKind::RateLimited => "[limite de uso]", FailureKind::AuthExpired => "[acesso]", FailureKind::ModelUnavailable => "[modelo]", _ => "[saldo]" };
                 let _ = store::tag_error(&conn, task_id, tag);
                 Some((task.clone(), kind))
             }
@@ -389,24 +389,26 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
             mark_exhausted(db, &key, now);
             format!("la cuenta {account} llegó a su límite de uso")
         }
-        _ => {
+        FailureKind::AuthExpired => {
             super::failure::record_auth_failure(db, &key, now);
-            format!("la credencial de la cuenta {account} fue rechazada (hay que volver a loguearla)")
+            format!("a conta {account} precisa de um novo login")
         }
+        FailureKind::ModelUnavailable => format!("o modelo não está disponível na conta {account}"),
+        FailureKind::InsufficientBalance => format!("a conta {account} precisa renovar assinatura ou saldo"),
+        FailureKind::Other => return,
     };
     crate::bus::publish(
         Some(app),
         crate::bus::Publish::new("account.failure").task(&task.id).run(&task.run_id).data(serde_json::json!({
             "accountKey": key,
-            "kind": if kind == FailureKind::RateLimited { "rate_limited" } else { "auth" },
+            "kind": kind.code(),
             "reason": reason,
         })),
     );
 
     // Una tarea con origen de pool conserva ese destino fijado. El opt-in permite cambiar
-    // solo la cuenta, dentro del mismo pool y agente, y únicamente tras un rate limit.
-    if kind == FailureKind::RateLimited
-        && let Some(origin) = super::pool_failover::task_pool(db, &task.id)
+    // cuenta/modelo dentro del mismo pool y TUI, una vez, tras acceso o límite.
+    if let Some(origin) = super::pool_failover::task_pool(db, &task.id)
     {
         let pool = crate::accounts::pools::load(db)
             .into_iter()
@@ -419,7 +421,7 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
             super::pool_failover::cool_down_account(&key, now);
             let already_failed_over = super::pool_failover::task_already_failed_over(db, &task.id);
             if super::pool_failover::failure_eligible(kind, pool.failover, already_failed_over) {
-                match failover_in_pool(app, db, task, &origin, &pool.members, &reason, now) {
+                match failover_in_pool(app, db, task, &origin, &pool.members, &reason, kind, now) {
                     Ok(()) => return,
                     Err(error) => eprintln!("[runs] '{}' no pudo cambiar dentro del pool: {error}", task.title),
                 }
@@ -427,6 +429,8 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
         }
     }
 
+    // New model/billing failover is strictly pool-only; never general cross-agent routing.
+    if matches!(kind, FailureKind::ModelUnavailable | FailureKind::InsufficientBalance) { return; }
     let pinned = !task.auto_account;
     let lead = task.role.as_deref() == Some(role::LEAD);
     if pinned || lead {
@@ -446,7 +450,7 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
     }
 }
 
-/// Busca con el picker del pool y vuelve a lanzar la misma tarea con el mismo agente y modelo.
+/// Reuses the pool picker and retries once with the same TUI; model-access errors may change model.
 fn failover_in_pool(
     app: &AppHandle,
     db: &DbConnection,
@@ -454,6 +458,7 @@ fn failover_in_pool(
     origin: &crate::accounts::pools::PoolOrigin,
     members: &[Option<String>],
     reason: &str,
+    kind: super::failure::FailureKind,
     now: i64,
 ) -> Result<(), String> {
     use super::routing::AccountChoice;
@@ -469,18 +474,14 @@ fn failover_in_pool(
     }
     let request = super::routing::RouteRequest {
         agent_id: Some(task.agent_id.clone()),
-        // Mantiene el modelo asignado; el cambio es únicamente de cuenta.
+        // Try the current model first; confirmed model-access errors may choose another.
         model: task.model.clone(),
         complexity: None,
         account: AccountChoice::Pool(spec),
     };
     let roster = super::roster::snapshot(db, false)?;
-    let assignment = super::routing::route(
-        &roster,
-        &super::routing::load_tiers(db),
-        &request,
-        now,
-    )?;
+    let assignment = super::pool_failover::replacement(&roster, &super::routing::load_tiers(db),
+        &request, &task.account_id, kind, now)?;
     if assignment.agent_id != task.agent_id
         || assignment.account_id == task.account_id
         || !members.contains(&assignment.account_id)
@@ -491,6 +492,8 @@ fn failover_in_pool(
         return Err("se alcanzó el límite de failover de la tarea o del pool".into());
     }
 
+    let from_model = task.model.clone();
+    let to_model = assignment.model.clone();
     let from_account = task.account_id.clone();
     let to_account = assignment.account_id.clone();
     let pool_name = crate::accounts::pools::find(&crate::accounts::pools::load(db), &origin.id)
@@ -510,7 +513,9 @@ fn failover_in_pool(
                 "fromAccount": from_account,
                 "toAccount": to_account,
                 "reason": reason,
-                "kind": "rate_limited",
+                "kind": kind.code(),
+                "fromModel": from_model,
+                "toModel": to_model,
             })),
     );
     Ok(())
