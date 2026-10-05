@@ -19,6 +19,7 @@ pub(crate) mod failure;
 pub(crate) mod duplicate;
 pub(crate) mod store;
 pub(crate) mod timings;
+mod delivery;
 #[cfg(test)]
 mod test;
 mod types;
@@ -29,6 +30,7 @@ pub use types::{
     MissionInput, MissionSummary,
 };
 pub use duplicate::DuplicateMission;
+pub use delivery::{CiStatus, MissionDelivery, TerminalDeliveryInput, TestResult};
 
 use std::path::Path;
 
@@ -100,6 +102,7 @@ pub(crate) fn detail(conn: &Connection, mission_id: &str) -> Result<MissionDetai
         None => (Vec::new(), Vec::new()),
     };
     Ok(MissionDetail {
+        delivery: store::delivery_for_mission(conn, &mission.id)?,
         mission,
         runs,
         tasks,
@@ -516,13 +519,31 @@ pub fn mission_check_duplicate_input(
     )
 }
 
-/// Da por terminada una misión en terminales.
+/// Finaliza una misión en terminales y registra la evidencia de entrega.
 #[tauri::command]
-pub fn mission_finish_terminals(app: AppHandle, mission_id: String) -> Result<Mission, String> {
+pub async fn mission_finish_terminals(
+    app: AppHandle,
+    mission_id: String,
+    delivery: TerminalDeliveryInput,
+) -> Result<Mission, String> {
     let db = db_of(&app)?;
+    let cwd = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mission = store::get(&conn, &mission_id)?
+            .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+        if mission.status != status::RUNNING || mission.active_run_id.is_some() {
+            return Err("Solo se termina a mano una misión en terminales que está corriendo.".into());
+        }
+        mission.cwd
+    };
+    let evidence = tauri::async_runtime::spawn_blocking(move || {
+        delivery::assess(delivery, std::path::Path::new(&cwd))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        if !store::close_terminals(&conn, &mission_id, status::DONE)? {
+        if !store::finish_terminals(&conn, &mission_id, &evidence)? {
             return Err("Solo se termina a mano una misión en terminales que está corriendo.".into());
         }
     }

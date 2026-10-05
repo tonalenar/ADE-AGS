@@ -90,10 +90,14 @@ describe("missionAction / canEdit", () => {
   });
 
   it("una concluida o cancelada no ofrece ninguna acción", () => {
-    for (const s of ["done", "cancelled"] as MissionStatus[]) {
+    for (const s of ["done", "done_without_delivery", "cancelled"] as MissionStatus[]) {
       expect(missionAction(s)).toBeNull();
       expect(canEdit(s)).toBe(false);
     }
+  });
+
+  it("keeps a terminal completion without delivery in its own final phase", () => {
+    expect(missionPhase("done_without_delivery", true)).toBe("done_without_delivery");
   });
 });
 

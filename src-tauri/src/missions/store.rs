@@ -8,6 +8,7 @@ use uuid::Uuid;
 
 use crate::util::now_ts;
 
+use super::delivery::{MissionDelivery, mission_status};
 use super::types::{Mission, MissionInput, MissionSummary, status};
 use super::{FailureActionKey, FailureCategory, FailureClassification};
 
@@ -236,6 +237,27 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<Mission>, String> {
     .map_err(|e| e.to_string())
 }
 
+/// Evidência da conclusão manual, ausente em runs automáticos e em missões antigas.
+pub fn delivery_for_mission(conn: &Connection, id: &str) -> Result<Option<MissionDelivery>, String> {
+    conn.query_row(
+        "SELECT test_result, pull_request, ci_status, checked_at
+         FROM mission_terminal_deliveries WHERE mission_id = ?1",
+        [id],
+        |row| {
+            let test_result: String = row.get(0)?;
+            let ci_status: String = row.get(2)?;
+            Ok(MissionDelivery {
+                test_result: super::delivery::TestResult::parse(&test_result),
+                pull_request: row.get(1)?,
+                ci_status: super::delivery::CiStatus::parse(&ci_status),
+                checked_at: row.get(3)?,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
 /// Las misiones de un workspace, más recientes primero, con el avance de su run activo.
 ///
 /// El avance es de los workers: el lead no es trabajo repartido, es quien reparte, y
@@ -380,11 +402,11 @@ pub fn mark_started_terminals(conn: &Connection, id: &str) -> Result<bool, Strin
     Ok(n > 0)
 }
 
-/// Cierra una misión en terminales (sin run): `done` o `cancelled`. Solo si corre y no tiene
-/// run activo; una con run se cierra por su run (`refresh_status`).
+/// Cierra una misión en terminales (sin run) por cancelación. Una conclusión como `done`
+/// exige evidencia y usa `finish_terminals`; una misión con run la cierra `refresh_status`.
 pub fn close_terminals(conn: &Connection, id: &str, outcome: &str) -> Result<bool, String> {
-    if outcome != status::DONE && outcome != status::CANCELLED {
-        return Err("Una misión se cierra como terminada o cancelada.".into());
+    if outcome != status::CANCELLED {
+        return Err("Una misión en terminal solo se concluye con evidencia de entrega.".into());
     }
     let now = now_ts();
     let n = conn
@@ -395,6 +417,38 @@ pub fn close_terminals(conn: &Connection, id: &str, outcome: &str) -> Result<boo
         )
         .map_err(|e| e.to_string())?;
     Ok(n > 0)
+}
+
+/// Persiste la evidencia y cierra en una transacción para que el estado nunca diga `done`
+/// si no se pudo guardar por qué pasó el gate de entrega.
+pub fn finish_terminals(conn: &Connection, id: &str, evidence: &MissionDelivery) -> Result<bool, String> {
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let outcome = mission_status(evidence);
+    let now = now_ts();
+    let changed = tx
+        .execute(
+            "UPDATE missions SET status = ?1, ended_at = ?2, updated_at = ?2
+             WHERE id = ?3 AND status = ?4 AND active_run_id IS NULL",
+            rusqlite::params![outcome, now, id, status::RUNNING],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Ok(false);
+    }
+    tx.execute(
+        "INSERT INTO mission_terminal_deliveries (mission_id, test_result, pull_request, ci_status, checked_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![
+            id,
+            evidence.test_result.as_str(),
+            evidence.pull_request.as_deref(),
+            evidence.ci_status.as_str(),
+            evidence.checked_at,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 /// Cancela un borrador. No hay proceso que parar: nunca se lanzó nada.

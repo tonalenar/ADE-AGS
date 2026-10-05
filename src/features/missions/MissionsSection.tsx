@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
@@ -11,23 +11,25 @@ import { totalPending } from "../memory/pendingNotice";
 import { usePendingMemoryStore } from "../memory/pendingStore";
 import { openMission, tabsByMission, useMissionIndex } from "./groups";
 import { MissionDialog } from "./MissionDialog";
+import { MissionFinishDialog } from "./MissionFinishDialog";
 import { emptyForm } from "./missionView";
 import { useMissionsStore } from "./store";
 import { startMissionInTerminals } from "./terminals";
 import { DuplicateMissionDialog } from "./DuplicateMissionDialog";
 import { findDuplicateMission } from "./duplicates";
-import type { MissionStatus, MissionSummary } from "./types";
+import type { MissionStatus, MissionSummary, TerminalDeliveryInput } from "./types";
 import * as ipc from "./ipc";
 
 const DOT: Record<MissionStatus, string> = {
   draft: "bg-gray-400 dark:bg-white/30",
   running: "bg-emerald-500",
   done: "bg-sky-500",
+  done_without_delivery: "bg-amber-500",
   failed: "bg-red-500",
   cancelled: "bg-gray-400 dark:bg-white/25",
 };
 
-const isArchived = (m: MissionSummary) => m.status === "done" || m.status === "cancelled" || m.status === "failed";
+const isArchived = (m: MissionSummary) => m.status === "done" || m.status === "done_without_delivery" || m.status === "cancelled" || m.status === "failed";
 
 /**
  * Las misiones en la columna de la izquierda, agrupadas: las vivas (borradores y en curso) y,
@@ -56,12 +58,7 @@ export function MissionsSection() {
   const [showArchived, setShowArchived] = useState(false);
   const [creating, setCreating] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
-  const [confirmFinishId, setConfirmFinishId] = useState<string | null>(null);
-  const confirmFinishTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => () => {
-    if (confirmFinishTimer.current) clearTimeout(confirmFinishTimer.current);
-  }, []);
+  const [finishing, setFinishing] = useState<MissionSummary | null>(null);
 
   useEffect(() => {
     if (!workspaceId) return;
@@ -113,28 +110,14 @@ export function MissionsSection() {
     }
   };
 
-  const close = async (m: MissionSummary, how: "finish" | "cancel") => {
+  const finish = async (m: MissionSummary, delivery: TerminalDeliveryInput) => {
+    setBusy(m.id);
     try {
-      await (how === "finish" ? ipc.finishMissionTerminals(m.id) : ipc.cancelMission(m.id));
-      load(workspaceId).catch(() => undefined);
-    } catch (e) {
-      AlertaToast(t("missions.title"), String(e), "error", 6000);
+      await ipc.finishMissionTerminals(m.id, delivery);
+      if (workspaceId) await load(workspaceId).catch(() => undefined);
+    } finally {
+      setBusy(null);
     }
-  };
-
-  const confirmFinish = (m: MissionSummary) => {
-    if (confirmFinishTimer.current) clearTimeout(confirmFinishTimer.current);
-    confirmFinishTimer.current = null;
-    if (confirmFinishId === m.id) {
-      setConfirmFinishId(null);
-      void close(m, "finish");
-      return;
-    }
-    setConfirmFinishId(m.id);
-    confirmFinishTimer.current = setTimeout(() => {
-      setConfirmFinishId(null);
-      confirmFinishTimer.current = null;
-    }, 3000);
   };
 
   const row = (m: MissionSummary) => {
@@ -177,10 +160,10 @@ export function MissionsSection() {
         )}
         {runless && (
           <span className="hidden group-hover/mission:flex items-center gap-0.5">
-            <Button variant="custom" onClick={(e) => { e.stopPropagation(); confirmFinish(m); }}
+            <Button variant="custom" disabled={busy === m.id} onClick={(e) => { e.stopPropagation(); setFinishing(m); }}
               title={t("missions.sidebar.finishHint")}
               className="cc-t h-5 px-1.5 rounded text-[10px] text-gray-500 hover:text-gray-900 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
-              {t(confirmFinishId === m.id ? "missions.sidebar.finishConfirm" : "missions.sidebar.finish")}
+              {t("missions.sidebar.finish")}
             </Button>
           </span>
         )}
@@ -266,6 +249,12 @@ export function MissionsSection() {
             setDuplicatePrompt(null);
             void start(target, true);
           }}
+        />
+      )}
+      {finishing && (
+        <MissionFinishDialog
+          onClose={() => setFinishing(null)}
+          onFinish={(delivery) => finish(finishing, delivery)}
         />
       )}
     </div>
