@@ -51,6 +51,8 @@ export interface Mission {
   failureClassification?: { category: "access" | "limit" | "model" | "crash" | "timeout"; actionKey: string } | null;
   /** Detalle corto del error original, para mostrar bajo la acción sugerida. */
   failureDetail?: string | null;
+  /** Marcación explícita de misión de prueba/E2E; `null`/ausente = real. Las métricas de éxito la excluyen. */
+  isTest?: boolean | null;
 }
 
 /** Lo que se manda al crear o editar. */

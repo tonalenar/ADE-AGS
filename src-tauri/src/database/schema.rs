@@ -621,24 +621,10 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              created_at      INTEGER NOT NULL,
              updated_at      INTEGER NOT NULL,
              started_at      INTEGER,
-             ended_at        INTEGER,
-             failure_class   TEXT,
-             failure_action_key TEXT,
-             failure_detail  TEXT
+             ended_at        INTEGER
          );
          CREATE INDEX IF NOT EXISTS idx_missions_workspace ON missions(workspace_id);",
     )?;
-    if table_exists(conn, "missions") {
-        if !has_column(conn, "missions", "failure_class") {
-            conn.execute("ALTER TABLE missions ADD COLUMN failure_class TEXT", [])?;
-        }
-        if !has_column(conn, "missions", "failure_action_key") {
-            conn.execute("ALTER TABLE missions ADD COLUMN failure_action_key TEXT", [])?;
-        }
-        if !has_column(conn, "missions", "failure_detail") {
-            conn.execute("ALTER TABLE missions ADD COLUMN failure_detail TEXT", [])?;
-        }
-    }
     if !has_column(conn, "runs", "mission_id") {
         conn.execute(
             "ALTER TABLE runs ADD COLUMN mission_id TEXT REFERENCES missions(id) ON DELETE SET NULL",
@@ -908,17 +894,6 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              active_ms  INTEGER NOT NULL DEFAULT 0
          );",
     )?;
-    // v29 — evidencia de entrega para misiones cerradas manualmente en terminales. La
-    // tabla empieza vacía: los estados históricos nunca se reinterpretan.
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS mission_terminal_deliveries (
-             mission_id   TEXT PRIMARY KEY REFERENCES missions(id) ON DELETE CASCADE,
-             test_result  TEXT NOT NULL CHECK(test_result IN ('passed','failed','not_run')),
-             pull_request TEXT,
-             ci_status    TEXT NOT NULL CHECK(ci_status IN ('not_applicable','success','failure','pending','unavailable','not_checked')),
-             checked_at   INTEGER NOT NULL
-         );",
-    )?;
     // New databases are stamped at the latest version by legacy detection; create v24
     // tables whenever the baseline DDL did not create them itself.
     conn.execute_batch("SAVEPOINT migrate_memory_v24")?;
@@ -1008,7 +983,7 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         CREATE TRIGGER IF NOT EXISTS memory_snapshot_meta_immutable
         BEFORE UPDATE ON run_memory_snapshot_meta
         BEGIN SELECT RAISE(ABORT,'Run memory snapshot metadata is immutable'); END;")?;
-        set_user_version(conn, SCHEMA_VERSION)
+        migrate_mission_success(conn)
     })();
     match memory_migration {
         Ok(()) => conn.execute_batch("RELEASE migrate_memory_v24"),
@@ -1017,6 +992,40 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
             Err(error)
         }
     }
+}
+
+/// Etapa 10 additive migrations run in order inside the existing migration savepoint.
+fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
+    // v27: explicit test/E2E marker. Never infer a classification from title/objective.
+    if !has_column(conn, "missions", "is_test") {
+        conn.execute("ALTER TABLE missions ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0 CHECK(is_test IN (0,1))", [])?;
+    }
+    if user_version(conn)? < 27 { set_user_version(conn, 27)?; }
+    // v28: persist failure classification without rewriting historical statuses.
+    if table_exists(conn, "missions") {
+        if !has_column(conn, "missions", "failure_class") {
+            conn.execute("ALTER TABLE missions ADD COLUMN failure_class TEXT", [])?;
+        }
+        if !has_column(conn, "missions", "failure_action_key") {
+            conn.execute("ALTER TABLE missions ADD COLUMN failure_action_key TEXT", [])?;
+        }
+        if !has_column(conn, "missions", "failure_detail") {
+            conn.execute("ALTER TABLE missions ADD COLUMN failure_detail TEXT", [])?;
+        }
+    }
+    if user_version(conn)? < 28 { set_user_version(conn, 28)?; }
+    // v29 — evidencia de entrega para misiones cerradas manualmente en terminales. La
+    // tabla empieza vacía: los estados históricos nunca se reinterpretan.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS mission_terminal_deliveries (
+             mission_id   TEXT PRIMARY KEY REFERENCES missions(id) ON DELETE CASCADE,
+             test_result  TEXT NOT NULL CHECK(test_result IN ('passed','failed','not_run')),
+             pull_request TEXT,
+             ci_status    TEXT NOT NULL CHECK(ci_status IN ('not_applicable','success','failure','pending','unavailable','not_checked')),
+             checked_at   INTEGER NOT NULL
+         );",
+    )?;
+    set_user_version(conn, SCHEMA_VERSION)
 }
 
 /// Base en memoria con el schema REAL, para los tests. Vive en el código de producción a

@@ -324,9 +324,12 @@ pub fn mission_get(
 /// Fuera del hilo async: el ruteo puede sondear el roster, que lanza procesos para
 /// preguntarles versión y modelos.
 #[tauri::command]
-pub async fn mission_start(app: AppHandle, mission_id: String, force: Option<bool>) -> Result<Mission, String> {
+pub async fn mission_start(app: AppHandle, mission_id: String, force: Option<bool>, is_test: Option<bool>) -> Result<Mission, String> {
     let force_val = force.unwrap_or(false);
-    tauri::async_runtime::spawn_blocking(move || start_now_with_force(&app, &mission_id, force_val))
+    tauri::async_runtime::spawn_blocking(move || {
+        mark_test_now(&app, &mission_id, is_test)?;
+        start_now_with_force(&app, &mission_id, force_val)
+    })
         .await
         .map_err(|e| e.to_string())?
 }
@@ -461,7 +464,7 @@ pub(crate) fn check_launch_now(db: &DbConnection, mission_id: &str, terminals: b
 
 /// Arranca la misión en terminales: solo la marca; abrir las tabs es de la pantalla.
 #[tauri::command]
-pub fn mission_start_terminals(app: AppHandle, mission_id: String, force: Option<bool>) -> Result<Mission, String> {
+pub fn mission_start_terminals(app: AppHandle, mission_id: String, force: Option<bool>, is_test: Option<bool>) -> Result<Mission, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
     let db = db_of(&app)?;
     check_launch_now(&db, &mission_id, true)?;
@@ -475,6 +478,7 @@ pub fn mission_start_terminals(app: AppHandle, mission_id: String, force: Option
             });
         }
     }
+    mark_test_now(&app, &mission_id, is_test)?;
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let mission = store::get(&conn, &mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
@@ -638,4 +642,13 @@ pub fn mission_memory_context(app: AppHandle, mission_id: String) -> Result<Stri
     let db = db_of(&app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     memory_context_text(&conn, &mission_id)
+}
+
+pub(crate) fn mark_test_now(app: &AppHandle, mission_id: &str, is_test: Option<bool>) -> Result<(), String> {
+    if let Some(marked) = is_test {
+        let db = db_of(app)?;
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::mark_test_before_start(&conn, mission_id, marked)?;
+    }
+    Ok(())
 }

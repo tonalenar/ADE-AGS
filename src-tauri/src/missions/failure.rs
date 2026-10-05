@@ -37,11 +37,23 @@ pub(crate) fn classify(error: &str) -> Option<FailureClassification> {
                 FailureCategory::Access,
                 if is_balance_error(&text) {
                     FailureActionKey::CheckPlanOrBalance
-                } else if is_plan_access_error(&text) {
+                } else if is_plan_access_error(&text) || HTTP_403.is_match(&text) {
                     FailureActionKey::CheckPlanAccess
                 } else {
                     FailureActionKey::LoginAgain
                 },
+            ));
+        }
+        FailureKind::ModelUnavailable => {
+            return Some(classification(
+                if HTTP_403.is_match(&text) { FailureCategory::Access } else { FailureCategory::Model },
+                if HTTP_403.is_match(&text) { FailureActionKey::CheckPlanAccess } else { FailureActionKey::ChooseAvailableModel },
+            ));
+        }
+        FailureKind::InsufficientBalance => {
+            return Some(classification(
+                FailureCategory::Access,
+                if is_plan_access_error(&text) { FailureActionKey::CheckPlanAccess } else { FailureActionKey::CheckPlanOrBalance },
             ));
         }
         FailureKind::Other => {}
@@ -241,6 +253,14 @@ mod test {
             FailureCategory::Access,
             FailureActionKey::CheckPlanOrBalance,
         );
+    }
+
+    #[test]
+    fn integrates_model_and_balance_failover_categories() {
+        expected("HTTP 402 Payment Required", FailureCategory::Access, FailureActionKey::CheckPlanOrBalance);
+        expected("subscription has expired", FailureCategory::Access, FailureActionKey::CheckPlanOrBalance);
+        expected("model is not supported", FailureCategory::Model, FailureActionKey::ChooseAvailableModel);
+        expected("HTTP 403: free plan cannot access this model", FailureCategory::Access, FailureActionKey::CheckPlanAccess);
     }
 
     #[test]

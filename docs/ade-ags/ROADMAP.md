@@ -154,3 +154,8 @@ Ponto 2: failover opcional por autenticação, modelo ou saldo no mesmo pool/TUI
 ## 17. Classificação de falhas (Etapa 10, ponto 3)
 
 **Implementado:** classificação tipada e persistida no fechamento (`failureClassification` + `failureDetail`), exposta por `mission_list`, `mission_get` e pelos resumos da CLI. O Frontend mostra causa e ação no QG e no detalhe da missão. Ver [MISSION_FAILURES.md](./MISSION_FAILURES.md).
+## 17. Taxa de sucesso das missões (Etapa 10)
+
+**Ponto 6 (medição) implementado no front:** cartão com histórico, 7 e 30 dias, canceladas à parte e missões de teste/E2E por marcação explícita (`isTest`). Pendente: backend gravar `isTest`. Detalhes em [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
+
+Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--test`), persistida no schema v27 e exposta em lista/detalhe/status, sem inferência por título. Migração preserva status e classifica legadas como reais.

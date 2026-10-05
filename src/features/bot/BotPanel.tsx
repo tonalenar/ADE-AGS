@@ -11,7 +11,7 @@ import { useAgentActivity } from "@/features/terminal/activity";
 import { Pet, powerTier, usePetStatus } from "@/shared/brand/Pet";
 
 import { type FailureKey, failureActionKey, failureKey, failureLabelKey } from "@/features/missions/failureClass";
-import { botStats, clock, missionSeconds, rankKey, recentMissions, scoreDigits, trophies } from "./botStats";
+import { type RateWindow, botStats, clock, missionSeconds, rankKey, recentMissions, scoreDigits, trophies } from "./botStats";
 import { useBotPanelStore } from "./botPanelStore";
 import { LiveArcade } from "./LiveArcade";
 import { LiveArcadeGrid, LiveSelector } from "./LiveArcadeGrid";
@@ -35,6 +35,8 @@ function Meter({ value, color, busy = false, blocks = 16 }: { value: number; col
     </div>
   );
 }
+
+const rate = (r: number | null) => (r === null ? "--" : `${r}%`);
 
 function Card({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: string }) {
   return (
@@ -71,6 +73,7 @@ export function BotPanel() {
 
   const recent = useMemo(() => recentMissions(missions), [missions]);
   const stats = useMemo(() => botStats(missions, now), [missions, now]);
+  const windowSub = (w: RateWindow) => t("botPanel.card.windowSub", { done: w.done, failed: w.failed, cancelled: w.cancelled });
   const tier = powerTier(busy);
   const runningMissions = useMemo(() => missions.filter((m) => m.status === "running"), [missions]);
   const unified = view === "live" && runningMissions.length > 1 && liveFilter === "all";
@@ -214,7 +217,11 @@ export function BotPanel() {
                   <Card label={t("botPanel.card.longest")} value={clock(stats.longestSeconds)} color="var(--hq-orange)" />
                   <Card label={t("botPanel.card.spent")} value={`$${spentTotal.toFixed(2)}`} color="var(--hq-pink)" />
                   <Card label={t("botPanel.card.saved")} value={`$${savedTotal.toFixed(2)}`} color="var(--hq-green)" />
-                  <Card label={t("botPanel.card.success")} value={stats.successRate === null ? "--" : `${stats.successRate}%`} color="var(--hq-green)" />
+                  <Card label={t("botPanel.card.success")} value={rate(stats.successRate)} color="var(--hq-green)" sub={t("botPanel.card.successSub", { done: stats.done, failed: stats.failed })} />
+                  <Card label={t("botPanel.card.success7")} value={rate(stats.windows.d7.successRate)} color="var(--hq-green)" sub={windowSub(stats.windows.d7)} />
+                  <Card label={t("botPanel.card.success30")} value={rate(stats.windows.d30.successRate)} color="var(--hq-green)" sub={windowSub(stats.windows.d30)} />
+                  <Card label={t("botPanel.card.cancelled")} value={scoreDigits(stats.cancelled, 3)} color="var(--hq-yellow)" />
+                  {stats.testCount > 0 && <Card label={t("botPanel.card.tests")} value={scoreDigits(stats.testCount, 3)} sub={t("botPanel.card.testsSub")} />}
                   <Card label={t("botPanel.card.failed")} value={scoreDigits(stats.failed, 3)} color="var(--hq-pink)" />
                   <Card label={t("botPanel.card.total")} value={scoreDigits(stats.total, 3)} />
                   {Object.entries(stats.failuresByClass).map(([k, n]) => (

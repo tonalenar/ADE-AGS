@@ -330,3 +330,12 @@ fn memory_history_and_temporal_search_flags_are_parsed() {
     assert_eq!(history["key"], "active-limits");
     assert_eq!(history["scope"], "mission");
 }
+
+#[test]
+fn mission_test_flag_is_an_explicit_boolean() {
+    assert_eq!(flags(&["--test"])["test"], json!(true));
+    let parsed = parse_flags(&["mission-id".into(), "--test".into()], positionals("mission.start")).unwrap();
+    assert_eq!(parsed["mission"], "mission-id");
+    assert_eq!(parsed["test"], true);
+    assert!(flags(&["--title", "E2E test"]).get("test").is_none());
+}

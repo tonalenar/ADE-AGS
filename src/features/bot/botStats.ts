@@ -5,7 +5,21 @@ import type { MissionSummary } from "@/features/missions/types";
 export type MissionLike = Pick<MissionSummary, "id" | "title" | "status" | "startedAt" | "endedAt" | "spentUsd"> & {
   activeSeconds?: number | null;
   failureClassification?: MissionSummary["failureClassification"];
+  /** Marcación EXPLÍCITA de misión de prueba/E2E. Ausente o `null` = real: nunca se adivina por el título. */
+  isTest?: boolean | null;
 };
+
+/** Ventana de medición en días: lo reciente pesa más que todo el historial. */
+export const SUCCESS_WINDOWS = [7, 30] as const;
+
+/** Cierres de una ventana (o de todo el historial), sin las misiones de prueba. */
+export interface RateWindow {
+  done: number;
+  failed: number;
+  cancelled: number;
+  /** done / (done + failed) en 0–100, o `null` sin cerradas. Las canceladas no entran en la cuenta: se muestran aparte. */
+  successRate: number | null;
+}
 
 export interface BotStats {
   total: number;
@@ -22,6 +36,32 @@ export interface BotStats {
   successRate: number | null;
   /** Cuántas misiones fallidas hay por causa; sin clasificar van en `unknown`. Solo claves con al menos una. */
   failuresByClass: Partial<Record<FailureKey, number>>;
+  /** Misiones marcadas como prueba/E2E: quedan fuera de `successRate` y de `windows`. */
+  testCount: number;
+  /** Misma cuenta que `successRate`, solo las que cerraron dentro de los últimos 7 y 30 días. */
+  windows: { d7: RateWindow; d30: RateWindow };
+}
+
+function rateWindow(missions: MissionLike[]): RateWindow {
+  const count = (status: MissionLike["status"]) => missions.filter((m) => m.status === status).length;
+  const done = count("done");
+  const failed = count("failed");
+  const closed = done + failed;
+  return { done, failed, cancelled: count("cancelled"), successRate: closed > 0 ? Math.round((done / closed) * 100) : null };
+}
+
+/** Cuándo cerró una misión (segundos): su fin, o su inicio si no tiene fin. `null` si nunca arrancó. */
+function closedAt(m: MissionLike): number | null {
+  return m.endedAt ?? m.startedAt ?? null;
+}
+
+/** Las misiones reales (sin marcar como prueba) que cerraron en los últimos `days` días. `now` en segundos. Pura. */
+export function inWindow(missions: MissionLike[], now: number, days: number): MissionLike[] {
+  const from = now - days * 86_400;
+  return missions.filter((m) => {
+    const at = closedAt(m);
+    return !m.isTest && at !== null && at >= from;
+  });
 }
 
 /**
@@ -39,20 +79,23 @@ export function missionSeconds(m: Pick<MissionLike, "startedAt" | "endedAt" | "a
 export function botStats(missions: MissionLike[], now: number): BotStats {
   const count = (status: MissionLike["status"]) => missions.filter((m) => m.status === status).length;
   const durations = missions.map((m) => missionSeconds(m, now));
-  const done = count("done");
-  const failed = count("failed");
-  const cancelled = count("cancelled");
-  const closed = done + failed;
+  const real = missions.filter((m) => !m.isTest);
+  const all = rateWindow(real);
   return {
     total: missions.length,
-    done,
+    done: count("done"),
     running: count("running"),
-    failed,
-    cancelled,
+    failed: count("failed"),
+    cancelled: count("cancelled"),
     missionSeconds: durations.reduce((a, b) => a + b, 0),
     longestSeconds: durations.reduce((a, b) => Math.max(a, b), 0),
     spentUsd: missions.reduce((a, m) => a + (Number.isFinite(m.spentUsd) ? m.spentUsd : 0), 0),
-    successRate: closed > 0 ? Math.round((done / closed) * 100) : null,
+    successRate: all.successRate,
+    testCount: missions.length - real.length,
+    windows: {
+      d7: rateWindow(inWindow(missions, now, 7)),
+      d30: rateWindow(inWindow(missions, now, 30)),
+    },
     failuresByClass: failuresByClass(missions),
   };
 }
