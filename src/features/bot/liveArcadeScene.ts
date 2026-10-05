@@ -91,14 +91,22 @@ export function taskSlots(scene: ArcadeScene): Map<string, SceneSlot> {
 
 /** Destino de cada herói: a tarefa ligada, com leve afastamento se vários dividem a tarefa; sem tarefa, o chão. */
 export function heroTargets(
-  heroes: Array<{ tabId: string; taskId: string | null }>,
+  heroes: Array<{ tabId: string; taskId: string | null; stage?: ArcadeStageId | null }>,
   slots: Map<string, SceneSlot>,
 ): Map<string, SceneSlot> {
   const out = new Map<string, SceneSlot>();
   const crowd = new Map<string, number>();
   let ground = 0;
+  const perStage = new Map<ArcadeStageId, number>();
   for (const hero of heroes) {
     const slot = hero.taskId ? slots.get(hero.taskId) : undefined;
+    // Sem tarefa mas com andar (derivado dos sinais do terminal): fica na viga desse andar.
+    if (!slot && hero.stage) {
+      const n = perStage.get(hero.stage) ?? 0;
+      perStage.set(hero.stage, n + 1);
+      out.set(hero.tabId, { x: Math.min(BEAM_RIGHT - 24, 200 + n * 46), level: LEVEL_OF_STAGE[hero.stage] });
+      continue;
+    }
     if (!hero.taskId || !slot) {
       out.set(hero.tabId, { x: 190 + ground * 46, level: 0 });
       ground += 1;
