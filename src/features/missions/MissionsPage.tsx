@@ -43,6 +43,7 @@ const STATUS_TONE: Record<MissionPhase, string> = {
   running: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   waiting_approval: "bg-amber-500/20 text-amber-800 dark:text-amber-300",
   done: "bg-accent-500/15 text-accent-700 dark:text-accent-300",
+  done_without_delivery: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
   failed: "bg-red-500/15 text-red-700 dark:text-red-300",
   cancelled: "bg-gray-200 text-gray-500 dark:bg-white/8 dark:text-white/40",
 };
@@ -382,6 +383,18 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
 
       {mission.status === "draft" && <Alert variant="info">{t("missions.draftNotice")}</Alert>}
       {mission.status === "failed" && <Alert variant="info">{t("missions.retryNotice")}</Alert>}
+      {detail.delivery && (
+        <Section title={t("missions.delivery.title")}>
+          <div className="flex flex-col gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+            <span>{t("missions.delivery.tests", { result: t(`missions.delivery.test.${detail.delivery.testResult}`) })}</span>
+            <span>{t("missions.delivery.ci", { result: t(`missions.delivery.ci.${detail.delivery.ciStatus}`) })}</span>
+            <span>{t("missions.delivery.checkedAt", { date: new Date(detail.delivery.checkedAt * 1000).toLocaleString() })}</span>
+            {detail.delivery.pullRequest && (
+              <span className="break-all">{t("missions.delivery.pr")}: {detail.delivery.pullRequest}</span>
+            )}
+          </div>
+        </Section>
+      )}
       {action && action !== "cancel" && unsupportedLead && <Alert variant="warning">{t("squads.leadUnsupported")}</Alert>}
       {action && action !== "cancel" && mission.squadId && unavailableSquad && (
         <Alert variant="warning">

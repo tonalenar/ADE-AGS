@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 26;
+const SCHEMA_VERSION: i32 = 29;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -606,7 +606,7 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              title           TEXT NOT NULL,
              objective       TEXT NOT NULL,
              cwd             TEXT NOT NULL,
-             -- draft | running | done | failed | cancelled
+             -- draft | running | done | done_without_delivery | failed | cancelled
              status          TEXT NOT NULL DEFAULT 'draft',
              max_parallel    INTEGER NOT NULL DEFAULT 2,
              budget_usd      REAL,
@@ -892,6 +892,17 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         "CREATE TABLE IF NOT EXISTS mission_active (
              mission_id TEXT PRIMARY KEY REFERENCES missions(id) ON DELETE CASCADE,
              active_ms  INTEGER NOT NULL DEFAULT 0
+         );",
+    )?;
+    // v29 — evidencia de entrega para misiones cerradas manualmente en terminales. La
+    // tabla empieza vacía: los estados históricos nunca se reinterpretan.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS mission_terminal_deliveries (
+             mission_id   TEXT PRIMARY KEY REFERENCES missions(id) ON DELETE CASCADE,
+             test_result  TEXT NOT NULL CHECK(test_result IN ('passed','failed','not_run')),
+             pull_request TEXT,
+             ci_status    TEXT NOT NULL CHECK(ci_status IN ('not_applicable','success','failure','pending','unavailable','not_checked')),
+             checked_at   INTEGER NOT NULL
          );",
     )?;
     // New databases are stamped at the latest version by legacy detection; create v24

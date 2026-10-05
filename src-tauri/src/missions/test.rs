@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
+use super::delivery::{CiStatus, MissionDelivery, TestResult};
 use super::types::{MissionInput, status};
 use super::{cancel, create, detail, start, store, update};
 use crate::database::{DbConnection, test_db};
@@ -1549,13 +1550,20 @@ fn una_mision_en_terminales_corre_sin_run_y_se_cierra_a_mano() {
     // Que se refresque su estado (lo hace la flota con cada tarea) no la mueve: no tiene run.
     assert_eq!(store::refresh_status(&conn, &id).unwrap().as_deref(), Some("running"));
 
-    assert!(store::close_terminals(&conn, &id, "done").unwrap());
+    let evidence = MissionDelivery {
+        test_result: TestResult::Passed,
+        pull_request: None,
+        ci_status: CiStatus::NotApplicable,
+        checked_at: 10,
+    };
+    assert!(store::finish_terminals(&conn, &id, &evidence).unwrap());
     let m = store::get(&conn, &id).unwrap().unwrap();
     assert_eq!(m.status, "done");
     assert!(m.ended_at.is_some());
+    assert_eq!(store::delivery_for_mission(&conn, &id).unwrap(), Some(evidence));
     // Ya cerrada: no se cierra dos veces ni se cambia el desenlace.
     assert!(!store::close_terminals(&conn, &id, "cancelled").unwrap());
-    assert!(store::close_terminals(&conn, &id, "failed").is_err(), "solo terminada o cancelada");
+    assert!(store::close_terminals(&conn, &id, "done").is_err(), "la finalización requiere evidencia");
 }
 
 #[test]
@@ -1578,6 +1586,33 @@ fn una_fallida_se_puede_reabrir_en_terminales_pero_una_terminada_no() {
     let conn = db.lock().unwrap();
     conn.execute("UPDATE missions SET status = 'failed' WHERE id = ?1", [&id]).unwrap();
     assert!(store::mark_started_terminals(&conn, &id).unwrap());
-    store::close_terminals(&conn, &id, "done").unwrap();
+    let evidence = MissionDelivery {
+        test_result: TestResult::Passed,
+        pull_request: None,
+        ci_status: CiStatus::NotApplicable,
+        checked_at: 10,
+    };
+    store::finish_terminals(&conn, &id, &evidence).unwrap();
     assert!(!store::mark_started_terminals(&conn, &id).unwrap());
+}
+
+#[test]
+fn terminal_sem_evidencia_fica_separada_e_nao_reescreve_missoes_historicas() {
+    let db = db();
+    let antiga = borrador(&db);
+    let nova = borrador(&db);
+    let conn = db.lock().unwrap();
+    conn.execute("UPDATE missions SET status = 'done' WHERE id = ?1", [&antiga]).unwrap();
+    assert!(store::mark_started_terminals(&conn, &nova).unwrap());
+    let evidence = MissionDelivery {
+        test_result: TestResult::NotRun,
+        pull_request: Some("https://github.com/acme/app/pull/7".into()),
+        ci_status: CiStatus::NotChecked,
+        checked_at: 11,
+    };
+
+    assert!(store::finish_terminals(&conn, &nova, &evidence).unwrap());
+    assert_eq!(store::get(&conn, &nova).unwrap().unwrap().status, status::DONE_WITHOUT_DELIVERY);
+    assert_eq!(store::get(&conn, &antiga).unwrap().unwrap().status, status::DONE);
+    assert_eq!(store::delivery_for_mission(&conn, &antiga).unwrap(), None);
 }

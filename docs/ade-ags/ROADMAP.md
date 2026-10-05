@@ -128,6 +128,10 @@ Depende de: 9, 10, 12 e 13. É a última porque desenhar cedo fixa um modelo que
 
 **v2 implementado:** visão unificada (um fliperama por missão em execução) com seletor TODAS | missão. Pendente futuro: persistir `peer ask` em aberto para virar barril ao vivo.
 
+## Etapa 10 — entrega em terminais (ponto 5)
+
+**Implementado:** finalizar uma missão em terminais registra o resultado dos testes informado pelo usuário e, se houver PR, consulta os checks com `gh` em modo somente leitura. Só testes aprovados com CI verde (ou sem PR) recebem `done`; os outros casos ficam separados como `done_without_delivery`. A migration v27 preserva todos os estados históricos. Detalhes em [MISSION_DELIVERY.md](./MISSION_DELIVERY.md).
+
 ## 16. Grade de recruits no canvas
 
 **Ponto 1 concluído.** Recruits adicionados por `ags peer recruit` seguem as duas linhas da grade da missão e ocupam a próxima célula livre sem mover panes existentes. Detalhes em [RECRUIT_GRID.md](./RECRUIT_GRID.md).

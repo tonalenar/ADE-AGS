@@ -4,7 +4,22 @@ import type { Complexity, Fact, Run, Task, TaskStatus } from "@/features/runs/ty
  * Solo los estados que el ejecutor sostiene hoy. No hay `paused` (no existe pausa real) ni
  * `planning`: lo que está haciendo el lead se lee de sus tareas.
  */
-export type MissionStatus = "draft" | "running" | "done" | "failed" | "cancelled";
+export type MissionStatus = "draft" | "running" | "done" | "done_without_delivery" | "failed" | "cancelled";
+
+export type TerminalTestResult = "passed" | "failed" | "not_run";
+export type TerminalCiStatus = "not_applicable" | "success" | "failure" | "pending" | "unavailable" | "not_checked";
+
+export interface MissionDelivery {
+  testResult: TerminalTestResult;
+  pullRequest: string | null;
+  ciStatus: TerminalCiStatus;
+  checkedAt: number;
+}
+
+export interface TerminalDeliveryInput {
+  testResult: TerminalTestResult;
+  pullRequest: string | null;
+}
 
 /** Lo que el usuario quiere lograr, por encima de los intentos (runs) de lograrlo. */
 export interface Mission {
@@ -66,6 +81,8 @@ export interface MissionSummary extends Mission {
 
 export interface MissionDetail {
   mission: Mission;
+  /** Evidence exists only for manual terminal completion. */
+  delivery: MissionDelivery | null;
   /** Sus runs, el más reciente primero. */
   runs: Run[];
   /** Las tareas del run activo, en el orden del plan. */

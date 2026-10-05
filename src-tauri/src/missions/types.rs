@@ -2,6 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 
+use super::delivery::MissionDelivery;
 use crate::runs::{Complexity, Fact, Run, Task};
 
 /// Lo que el usuario quiere lograr, con la preferencia de cómo correrlo.
@@ -43,6 +44,7 @@ pub mod status {
     pub const DRAFT: &str = "draft";
     pub const RUNNING: &str = "running";
     pub const DONE: &str = "done";
+    pub const DONE_WITHOUT_DELIVERY: &str = "done_without_delivery";
     pub const FAILED: &str = "failed";
     pub const CANCELLED: &str = "cancelled";
 }
@@ -97,6 +99,8 @@ pub struct MissionSummary {
 #[serde(rename_all = "camelCase")]
 pub struct MissionDetail {
     pub mission: Mission,
+    /// Evidência da conclusão manual em terminais; ausente nos runs e nas missões antigas.
+    pub delivery: Option<MissionDelivery>,
     /// Todos sus runs, el más reciente primero.
     pub runs: Vec<Run>,
     /// Las tareas del run activo, en el orden del plan.

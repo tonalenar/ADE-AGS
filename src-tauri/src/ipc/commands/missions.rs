@@ -46,7 +46,7 @@ fn summary(detail: &MissionDetail) -> Value {
 }
 
 fn is_final(status: &str) -> bool {
-    matches!(status, "done" | "failed" | "cancelled")
+    matches!(status, "done" | "done_without_delivery" | "failed" | "cancelled")
 }
 
 pub(super) fn mission_create(app: &AppHandle, args: &Value) -> Result<Value, String> {
