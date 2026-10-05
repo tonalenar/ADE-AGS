@@ -2,18 +2,23 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { formatTokens } from "@/features/accounts/usage";
+import { missionReview } from "@/features/missions/ipc";
 import { useMissionsStore } from "@/features/missions/store";
 import { formatDuration, getTimings, type MissionTimings } from "@/features/missions/timings";
 import { estimateOf, formatCompactNumber, formatUsd, getTokens, type CostEstimate, type MissionTokens } from "@/features/missions/tokens";
+import type { MissionReview } from "@/features/missions/types";
 import { useAgentActivity } from "@/features/terminal/activity";
 import { Pet, powerTier, usePetStatus } from "@/shared/brand/Pet";
 
 import { botStats, clock, missionSeconds, rankKey, recentMissions, scoreDigits, trophies } from "./botStats";
 import { useBotPanelStore } from "./botPanelStore";
+import { LiveArcade } from "./LiveArcade";
+import { LiveArcadeGrid, LiveSelector } from "./LiveArcadeGrid";
 import "./bot-panel.css";
 
-type View = "status" | "missions" | "tokens" | "trophies";
-const VIEWS: View[] = ["status", "missions", "tokens", "trophies"];
+type View = "status" | "missions" | "tokens" | "trophies" | "live";
+const VIEWS: View[] = ["status", "missions", "tokens", "trophies", "live"];
+const EMPTY_ARCADE_TASKS: never[] = [];
 
 const STATUS_GLYPH: Record<string, string> = { running: "▶", done: "✔", failed: "✖", cancelled: "■", draft: "○" };
 const STATUS_COLOR: Record<string, string> = {
@@ -50,18 +55,41 @@ export function BotPanel() {
   const pet = usePetStatus();
   const busy = useAgentActivity((a) => a.count);
   const missions = useMissionsStore((s) => s.missions);
+  const missionDetails = useMissionsStore((s) => s.details);
+  const loadMissionDetail = useMissionsStore((s) => s.loadDetail);
   const [view, setView] = useState<View>("status");
   const [selected, setSelected] = useState(0);
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const [timings, setTimings] = useState<MissionTimings | null>(null);
   const [tokens, setTokens] = useState<MissionTokens | null>(null);
+  const [liveFilter, setLiveFilter] = useState("all");
+  const [liveReview, setLiveReview] = useState<MissionReview | null>(null);
   // Costo estimado y ahorro de cada misión de la lista (se leen de a una, en segundo plano).
   const [estimates, setEstimates] = useState<Record<string, CostEstimate | null>>({});
 
   const recent = useMemo(() => recentMissions(missions), [missions]);
   const stats = useMemo(() => botStats(missions, now), [missions, now]);
   const tier = powerTier(busy);
-  const current = recent[Math.min(selected, recent.length - 1)];
+  const runningMissions = useMemo(() => missions.filter((m) => m.status === "running"), [missions]);
+  const unified = view === "live" && runningMissions.length > 1 && liveFilter === "all";
+  const liveOne = view === "live" && liveFilter !== "all" ? recent.find((m) => m.id === liveFilter) : undefined;
+  const current = liveOne ?? recent[Math.min(selected, recent.length - 1)];
+  const currentDetail = current ? missionDetails[current.id] : undefined;
+  const currentId = current?.id;
+  const hasCurrentDetail = Boolean(currentDetail);
+
+  useEffect(() => {
+    if (!open || view !== "live" || !currentId || hasCurrentDetail) return;
+    loadMissionDetail(currentId).catch(() => undefined);
+  }, [open, view, currentId, hasCurrentDetail, loadMissionDetail]);
+
+  useEffect(() => {
+    if (!open || view !== "live" || !currentId) return;
+    let alive = true;
+    setLiveReview(null);
+    missionReview(currentId).then((data) => alive && setLiveReview(data)).catch(() => undefined);
+    return () => { alive = false; };
+  }, [open, view, currentId]);
 
   // El reloj corre mientras el panel está abierto: las misiones en curso suman tiempo en vivo.
   useEffect(() => {
@@ -111,7 +139,7 @@ export function BotPanel() {
         const step = e.key === "ArrowDown" ? 1 : -1;
         setSelected((i) => (i + step + recent.length) % recent.length);
         e.preventDefault();
-      } else if (["1", "2", "3", "4"].includes(e.key)) {
+      } else if (["1", "2", "3", "4", "5"].includes(e.key)) {
         setView(VIEWS[Number(e.key) - 1]);
       }
     };
@@ -257,6 +285,16 @@ export function BotPanel() {
                   ))}
                 </div>
               )}
+
+              {view === "live" && runningMissions.length > 1 && (
+                <LiveSelector running={runningMissions} value={liveFilter} onChange={setLiveFilter} />
+              )}
+              {unified && <LiveArcadeGrid running={runningMissions} onOpen={setLiveFilter} />}
+              {view === "live" && !unified && (
+                current
+                  ? <LiveArcade mission={current} tasks={currentDetail?.tasks ?? EMPTY_ARCADE_TASKS} timings={timings} review={liveReview} tokens={tokens} />
+                  : <p className="ags-hq__dim">{t("botPanel.live.empty")}</p>
+              )}
             </div>
           </section>
         </div>
@@ -264,7 +302,7 @@ export function BotPanel() {
         <div className="ags-hq__foot">
           <span><b>← →</b> {t("botPanel.keys.menu")}</span>
           <span><b>↑ ↓</b> {t("botPanel.keys.select")}</span>
-          <span><b>1-4</b> {t("botPanel.keys.jump")}</span>
+          <span><b>1-5</b> {t("botPanel.keys.jump")}</span>
           <span><b>ESC</b> {t("botPanel.keys.exit")}</span>
         </div>
       </div>
