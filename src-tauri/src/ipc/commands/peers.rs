@@ -14,6 +14,8 @@
 //! entorno): es el alcance de trabajo de cada agente, igual que la carpeta en la que corre.
 
 use std::time::{Duration, Instant};
+use std::sync::{Mutex, OnceLock};
+use std::collections::HashMap;
 
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
@@ -21,6 +23,31 @@ use tauri::{AppHandle, Emitter};
 use super::tabs::{pty_id_for_tab, submit_prompt, tab_create, tab_list, wait_for_pty, wait_until_quiet, wait_until_ready};
 use crate::ipc::bridge::{ask_frontend, unwrap_frontend_result};
 use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_opt};
+
+#[derive(Clone)]
+struct AskStatus { started_ms: i64, ended_ms: Option<i64>, mark: Option<u64>, finished: Option<bool> }
+
+fn asks() -> &'static Mutex<HashMap<(String, String), AskStatus>> {
+    static ASKS: OnceLock<Mutex<HashMap<(String, String), AskStatus>>> = OnceLock::new();
+    ASKS.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn remember_ask(from: &str, target: &str, status: AskStatus) {
+    if let Ok(mut all) = asks().lock() {
+        if all.len() >= 256 {
+            if let Some(oldest) = all.iter().min_by_key(|(_, s)| s.started_ms).map(|(k, _)| k.clone()) { all.remove(&oldest); }
+        }
+        all.insert((from.into(), target.into()), status);
+    }
+}
+
+fn ask_status_value(s: &AskStatus, now: i64) -> Value {
+    json!({
+        "state": match s.finished { None => "waiting", Some(true) => "finished", Some(false) => "timed_out" },
+        "finished": s.finished, "startedMs": s.started_ms,
+        "elapsedMs": (s.ended_ms.unwrap_or(now) - s.started_ms).max(0),
+    })
+}
 
 /// Una tab abierta, con lo necesario para nombrarla y alcanzarla.
 #[derive(Debug, Clone)]
@@ -266,6 +293,7 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         out["role"] = json!(role.as_ref().map(|r| r.id.clone()));
         let pty = wait_for_pty(app, &tab_id, Some(&me.window))?;
         let ready = wait_until_ready(pty);
+        let _ = app.emit("cc-peer-turn-start", json!({ "tabId": tab_id, "startedMs": crate::util::now_ts_ms() }));
         submit_prompt(pty, &framed(&me.name, &text, false))?;
         out["promptSent"] = json!(true);
         out["promptWaitedForReady"] = json!(ready);
@@ -306,11 +334,18 @@ fn screen(app: &AppHandle, tab: &OpenTab, from: Option<u64>, max: u64) -> Result
 pub(super) fn peer_check(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let to = arg_str(args, "to")?;
-    let (_, list) = peers(app, &from)?;
+    let (me, list) = peers(app, &from)?;
+    let from_name = me.map(|m| m.name).unwrap_or(from);
     let target = resolve_peer(&list, &to)?;
+    let status = asks().lock().ok().and_then(|all| all.get(&(from_name, target.id.clone())).cloned());
     let lines = arg_u64_opt(args, "lines").unwrap_or(60).clamp(1, 400);
     let shown = screen(app, target, None, lines)?;
-    Ok(json!({ "peer": describe(target), "screen": shown.get("lines").cloned().unwrap_or(json!([])) }))
+    let partial = match &status {
+        Some(s) => screen(app, target, s.mark, lines)?.get("lines").cloned().unwrap_or(json!([])),
+        None => json!([]),
+    };
+    Ok(json!({ "peer": describe(target), "screen": shown.get("lines").cloned().unwrap_or(json!([])),
+        "askStatus": status.as_ref().map(|s| ask_status_value(s, crate::util::now_ts_ms())), "reply": partial }))
 }
 
 pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -324,6 +359,7 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
 
     // No se interrumpe a quien está a mitad de un turno: se espera a que se calle un poco.
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(60), false);
+    let _ = app.emit("cc-peer-turn-start", json!({ "tabId": target.id, "startedMs": crate::util::now_ts_ms() }));
     submit_prompt(pty, &outgoing(&from_name, &text, false, is_raw(args)))?;
     emit_peer_message(app, "tell", &from, Some(&target.id));
     Ok(json!({ "peer": describe(target), "sent": true }))
@@ -375,15 +411,21 @@ pub(crate) fn parse_batch(raw: &Value) -> Result<Vec<(String, String)>, String> 
 fn ask_one(app: &AppHandle, target: &OpenTab, from_name: &str, text: &str, timeout: Duration, raw: bool) -> Result<Value, String> {
     let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
     let started_ms = crate::util::now_ts_ms();
-
-    wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(60), false);
+    let started = Instant::now();
+    wait_until_quiet(pty, Duration::from_millis(1500), timeout.min(Duration::from_secs(60)), false);
 
     // La marca: desde qué línea de la terminal empieza la respuesta.
     let mark = screen(app, target, None, 1)?.get("end").and_then(Value::as_u64);
     let before = crate::terminal::output_total(pty).unwrap_or(0);
 
+    if started.elapsed() >= timeout {
+        return Ok(json!({ "peer": describe(target), "finished": false, "sent": false, "reply": [], "status": "busy" }));
+    }
+    let _ = app.emit("cc-peer-turn-start", json!({ "tabId": target.id, "startedMs": crate::util::now_ts_ms() }));
     submit_prompt(pty, &outgoing(from_name, text, true, raw))?;
-    let finished = wait_turn(pty, before, timeout);
+    remember_ask(from_name, &target.id, AskStatus { started_ms, ended_ms: None, mark, finished: None });
+    let finished = wait_turn(pty, before, timeout.saturating_sub(started.elapsed()));
+    remember_ask(from_name, &target.id, AskStatus { started_ms, ended_ms: Some(crate::util::now_ts_ms()), mark, finished: Some(finished) });
     // El frontend sabe de qué misión es cada pestaña; acá solo se avisa cuánto tardó.
     let _ = app.emit(
         "cc-peer-timing",
@@ -396,6 +438,8 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_name: &str, text: &str, timeo
         // `false` = se agotó el tiempo: lo que hay es parcial y el otro sigue trabajando.
         // Conviene `peer check` más tarde en vez de volver a preguntar.
         "finished": finished,
+        "sent": true,
+        "status": if finished { "finished" } else { "timed_out" },
         "reply": reply.get("lines").cloned().unwrap_or(json!([])),
     }))
 }
@@ -490,6 +534,18 @@ fn wait_turn(pty: u32, before: u64, timeout: Duration) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn status_distinguishes_waiting_timeout_and_completion_and_freezes_elapsed() {
+        let mut s = AskStatus { started_ms: 100, ended_ms: None, mark: Some(4), finished: None };
+        assert_eq!(ask_status_value(&s, 350)["state"], "waiting");
+        assert_eq!(ask_status_value(&s, 350)["elapsedMs"], 250);
+        s.finished = Some(false); s.ended_ms = Some(400);
+        assert_eq!(ask_status_value(&s, 900)["state"], "timed_out");
+        assert_eq!(ask_status_value(&s, 900)["elapsedMs"], 300);
+        s.finished = Some(true);
+        assert_eq!(ask_status_value(&s, 900)["state"], "finished");
+    }
 
     fn tab(id: &str, name: &str) -> OpenTab {
         OpenTab { id: id.into(), name: name.into(), agent: "Claude Code".into(), agent_id: "claude".into(), cwd: "/p".into(), window: "main".into() }

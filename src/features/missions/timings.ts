@@ -22,7 +22,17 @@ export interface KindTotal {
 
 export interface MissionTimings {
   spans: TimingSpan[];
-  summary: { wallMs: number; byKind: KindTotal[]; slowest: TimingSpan[] };
+  summary: { wallMs: number; byKind: KindTotal[]; slowest: TimingSpan[]; bottlenecks: Bottleneck[] };
+}
+
+export interface Bottleneck {
+  agent: string;
+  asks: number;
+  blockedCallers: number;
+  waitingMs: number;
+  maxWaitMs: number;
+  timeouts: number;
+  turnMs: number;
 }
 
 export type NewSpan = Pick<TimingSpan, "kind" | "startedMs" | "endedMs"> & Partial<Pick<TimingSpan, "actor" | "target" | "detail">>;

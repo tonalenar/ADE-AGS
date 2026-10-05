@@ -129,6 +129,40 @@ pub struct Summary {
     pub by_kind: Vec<KindTotal>,
     /// As etapas mais demoradas, da maior para a menor.
     pub slowest: Vec<Span>,
+    pub bottlenecks: Vec<Bottleneck>,
+}
+
+/// Sum of caller wait time, including simultaneous waits by different callers.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct Bottleneck {
+    pub agent: String,
+    pub asks: usize,
+    pub blocked_callers: usize,
+    pub waiting_ms: i64,
+    pub max_wait_ms: i64,
+    pub timeouts: usize,
+    pub turn_ms: i64,
+}
+
+pub fn bottlenecks(spans: &[Span]) -> Vec<Bottleneck> {
+    let mut agents = std::collections::BTreeMap::<String, Vec<&Span>>::new();
+    for span in spans.iter().filter(|s| s.kind == "peer_ask" && !s.target.trim().is_empty()) {
+        agents.entry(span.target.clone()).or_default().push(span);
+    }
+    let mut report: Vec<_> = agents.into_iter().map(|(agent, asks)| {
+        let callers: std::collections::BTreeSet<_> = asks.iter().map(|s| &s.actor).collect();
+        Bottleneck {
+            asks: asks.len(), blocked_callers: callers.len(),
+            waiting_ms: asks.iter().map(|s| s.duration_ms()).sum(),
+            max_wait_ms: asks.iter().map(|s| s.duration_ms()).max().unwrap_or(0),
+            timeouts: asks.iter().filter(|s| s.detail == "timeout").count(),
+            turn_ms: spans.iter().filter(|s| s.kind == "turn" && s.actor == agent).map(|s| s.duration_ms()).sum(),
+            agent,
+        }
+    }).collect();
+    report.sort_by(|a, b| b.waiting_ms.cmp(&a.waiting_ms).then(a.agent.cmp(&b.agent)));
+    report
 }
 
 /// Quanto tempo foi, e para quê. Pura.
@@ -155,7 +189,7 @@ pub fn summarize(spans: &[Span], top: usize) -> Summary {
     let mut slowest: Vec<Span> = spans.to_vec();
     slowest.sort_by(|a, b| b.duration_ms().cmp(&a.duration_ms()).then(a.id.cmp(&b.id)));
     slowest.truncate(top);
-    Summary { wall_ms, by_kind, slowest }
+    Summary { wall_ms, by_kind, slowest, bottlenecks: bottlenecks(spans) }
 }
 
 #[cfg(test)]

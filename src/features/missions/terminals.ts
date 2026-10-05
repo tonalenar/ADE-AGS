@@ -10,6 +10,7 @@ import { sendWhenReady, type SendTimings } from "@/features/terminal/terminalReg
 import { getAutonomy, withAutonomy } from "./autonomy";
 import { withModel } from "./modelFlags";
 import { recordSpan } from "./timings";
+import { missionTurns } from "./turns";
 
 import type { Mission } from "./types";
 
@@ -230,19 +231,17 @@ export async function startMissionInTerminals(
 
   // Cronómetro: cuánto tardó cada terminal en estar lista, y cuánto en contestar el briefing.
   const openedAt = Date.now();
-  const timed = (actor: string): SendTimings => {
-    let sentAt = 0;
+  const timed = (actor: string, tabId: string): SendTimings => {
     return {
       onSent: (at) => {
-        sentAt = at;
+        missionTurns.start(tabId, mission.id, actor, at, "briefing");
         recordSpan(mission.id, { kind: "boot", actor, startedMs: openedAt, endedMs: at });
       },
-      onTurnEnd: (at) => sentAt > 0 && recordSpan(mission.id, { kind: "turn", actor, startedMs: sentAt, endedMs: at, detail: "briefing" }),
     };
   };
-  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory)), timed(LEAD_NAME));
+  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory)), timed(LEAD_NAME, leadTabId));
   memberTabIds.forEach((tabId, i) =>
-    sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i])), timed(team[i].name)),
+    sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i])), timed(team[i].name, tabId)),
   );
 
   return { leadTabId, memberTabIds };

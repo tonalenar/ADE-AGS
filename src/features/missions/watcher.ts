@@ -6,6 +6,8 @@ import { useCanvasStore } from "@/features/canvas/store";
 import { activeTabIds, lastInputAt, lastOutputAt } from "@/features/terminal/activity";
 import { pasteIntoTab, screenOf } from "@/features/terminal/terminalRegistry";
 import { useTabsStore } from "@/features/tabs/store";
+import { activitySnapshot } from "@/features/terminal/activity";
+import { onPromptSubmitted } from "@/features/terminal/terminalRegistry";
 
 import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
 import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking } from "./activeTime";
@@ -14,6 +16,7 @@ import { STALL_CHECK_MS, applyMessage, findStalls, markAlerted, stallMessage, ty
 import { useMissionsStore } from "./store";
 import { LEAD_NAME } from "./terminals";
 import { recordSpan } from "./timings";
+import { missionTurns } from "./turns";
 
 /** Lo que avisa el servidor al terminar un `peer ask` (ver `cc-peer-timing` en Rust). */
 export interface PeerTimingEvent {
@@ -44,6 +47,18 @@ export function useMissionWatcher(): void {
 
   // Aviso cuando un agente sugiere una memoria; también con la barra lateral recogida.
   useMemoryPendingNotice(workspaceId);
+
+  useEffect(() => {
+    const start = (tabId: string, at: number) => {
+      const openTabs = useTabsStore.getState().tabs;
+      const mission = missionIndex(useCanvasStore.getState().boards, openTabs)[tabId];
+      const tab = openTabs.find((t) => t.id === tabId);
+      if (mission && tab && tab.agentId !== "bash") missionTurns.start(tabId, mission, tab.title || tab.agentLabel, at);
+    };
+    const unsubscribe = onPromptSubmitted(start);
+    const off = listen<{ tabId: string; startedMs: number }>("cc-peer-turn-start", (e) => start(e.payload.tabId, e.payload.startedMs));
+    return () => { unsubscribe(); off.then((fn) => fn()); };
+  }, []);
 
   // Las misiones del workspace, al día.
   useEffect(() => {
@@ -117,12 +132,25 @@ export function useMissionWatcher(): void {
   live.current = { index, missions };
   useEffect(() => {
     let pending = new Map<string, number>();
+    const measureTurns = () => {
+      const { index: tabToMission, missions: all } = live.current;
+      const running = new Set(all.filter((m) => m.status === "running").map((m) => m.id));
+      const members = new Map(useTabsStore.getState().tabs.flatMap((tab) => {
+        const mission = tabToMission[tab.id];
+        return mission && running.has(mission) && tab.agentId !== "bash"
+          ? [[tab.id, { mission, actor: tab.title || tab.agentLabel }] as const] : [];
+      }));
+      for (const completed of missionTurns.sample(activitySnapshot(), members, Date.now())) {
+        recordSpan(completed.mission, completed.span);
+      }
+    };
     let ticks = 0;
     const flush = () => {
       for (const [id, ms] of pending) invoke("mission_active_add", { missionId: id, ms }).catch(() => undefined);
       pending = new Map();
     };
     const timer = setInterval(() => {
+      measureTurns();
       const { index: tabToMission, missions: all } = live.current;
       const running = new Set(all.filter((m) => m.status === "running").map((m) => m.id));
       pending = accumulate(pending, sampleWorking(tabToMission, running), ACTIVE_TICK_MS);
