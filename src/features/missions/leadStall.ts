@@ -1,4 +1,5 @@
-import { isAck, isWaitingForUser, lastScreenLine, type PeerMessage } from "./stalled";
+import type { StallAlert } from "./stallAlerts";
+import { isAck, isWaitingForUser, lastScreenLine, type PeerMessage, type PendingTasks } from "./stalled";
 import { formatDuration } from "./timings";
 
 /**
@@ -215,4 +216,28 @@ export function leadStallSpan(
   target: string,
 ): { kind: "orchestrator_stall"; actor: string; target: string; startedMs: number; endedMs: number; detail: string } {
   return { kind: "orchestrator_stall", actor, target, startedMs: ask.at, endedMs: Math.max(endedMs, ask.at), detail: `${outcome}:${ask.source}` };
+}
+
+/**
+ * Alertas visibles (QG y aba de la misión) a partir de lo ya avisado: pedidos sin responder al
+ * orquestador y tareas sin atender por un agente. Desaparecen solos al cerrarse el pedido o la tarea. Pura.
+ */
+export function deriveAlerts(
+  asks: PendingAsks,
+  tasks: PendingTasks,
+  nameOf: (tabId: string) => string,
+  missionOf: (tabId: string) => string | undefined,
+  now: number,
+): Map<string, StallAlert[]> {
+  const out = new Map<string, StallAlert[]>();
+  const push = (missionId: string | undefined, alert: StallAlert) => {
+    if (missionId) out.set(missionId, [...(out.get(missionId) ?? []), alert]);
+  };
+  for (const a of asks.values()) {
+    if (a.alerted) push(missionOf(a.memberTabId), { memberName: nameOf(a.memberTabId), kind: "orchestrator_silent", waitedMs: now - a.at, since: a.at });
+  }
+  for (const t of tasks.values()) {
+    if (t.alerted) push(missionOf(t.tabId), { memberName: nameOf(t.tabId), kind: "agent_idle", waitedMs: now - t.at, since: t.at });
+  }
+  return out;
 }

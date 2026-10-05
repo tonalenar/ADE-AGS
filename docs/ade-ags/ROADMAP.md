@@ -245,3 +245,9 @@ Cinco pontos de melhoria estrutural focados na velocidade de inicialização das
 - [x] Logos pixel-art 12x12 na legenda.
 - [x] Modo grade (todos os panes lado a lado), individual por missão e persistido.
 
+
+## Etapa 16 — orquestração confiável
+
+- [x] Detector de **orquestrador parado** (`missions/leadStall.ts`): integrante pediu algo (`peer ask`, `peer tell` com `?`, ou pergunta na tela) e o orquestrador não respondeu em 3 min (`LEAD_STALL_MS`, configurável em `localStorage["ags.leadStallMs"]`, mínimo 30 s). Aviso no terminal do orquestrador (`pasteIntoTab`), alerta no QG e na aba da missão, span `orchestrator_stall`.
+- [x] **Teste de início de missão**: eventos `start_briefing`, `start_activity`, `start_retry`, `start_stalled` e `start_all_working` (tempo até todos trabalhando, exibido no QG) gravados em timings; verificação de 2 min (`START_DEADLINE_MS`).
+- [x] `ags mission timings` e `ags mission startcheck <id>` (Backend).

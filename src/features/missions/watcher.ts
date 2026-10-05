@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { useCanvasStore } from "@/features/canvas/store";
-import { activeTabIds, activitySnapshot, lastInputAt, lastOutputAt } from "@/features/terminal/activity";
+import { activeTabIds, activitySnapshot, lastInputAt, lastOutputAt, sustainedTabIds as sustainedNow } from "@/features/terminal/activity";
 import { onPromptSubmitted, pasteIntoTab, screenOf } from "@/features/terminal/terminalRegistry";
 import { useTabsStore } from "@/features/tabs/store";
 
@@ -16,6 +16,8 @@ import { STALL_CHECK_MS, applyMessage, parseStallMs, findStalls, markAlerted, st
 import { useMissionsStore } from "./store";
 import { LEAD_NAME } from "./terminals";
 import { recordSpan } from "./timings";
+import { addAsks, applyLeadMessage, deriveAlerts, findLeadStalls, findScreenAsks, leadStallMessage, leadStallSpan, markLeadAlerted, parseLeadStallMs, type PendingAsks } from "./leadStall";
+import { useStallAlerts } from "./stallAlerts";
 import { missionTurns } from "./turns";
 
 /** Lo que avisa el servidor al terminar un `peer ask` (ver `cc-peer-timing` en Rust). */
@@ -105,12 +107,81 @@ export function useMissionWatcher(): void {
   // Agente parado: una tarea con `peer tell` que nadie atiende se le avisa al orquestador.
   useEffect(() => {
     let pending: PendingTasks = new Map();
+    let asks: PendingAsks = new Map();
+    const published = new Set<string>();
     const leadOf = (tabId: string) => useTabsStore.getState().tabs.find((t) => t.id === tabId);
     const isLead = (tabId: string) => leadOf(tabId)?.title === LEAD_NAME;
+    const missionOfTab = (tabId: string) => missionIndex(useCanvasStore.getState().boards, useTabsStore.getState().tabs)[tabId];
+    const titleOf = (tabId: string) => useTabsStore.getState().tabs.find((t) => t.id === tabId)?.title ?? tabId;
+    const leadTabOf = (tabId: string) => {
+      const mission = missionOfTab(tabId);
+      return mission ? useTabsStore.getState().tabs.find((t) => t.title === LEAD_NAME && missionOfTab(t.id) === mission)?.id ?? null : null;
+    };
+    const record = (tabId: string, span: ReturnType<typeof leadStallSpan>) => {
+      const mission = missionOfTab(tabId);
+      if (mission) recordSpan(mission, span);
+    };
+    // Los avisos visibles (QG y aba da missão) se derivan de lo ya avisado; solo se publica si cambian.
+    const publish = (now: number) => {
+      const next = deriveAlerts(asks, pending, titleOf, missionOfTab, now);
+      const store = useStallAlerts.getState();
+      for (const [mission, alerts] of next) store.setAlerts(mission, alerts);
+      for (const mission of published) if (!next.has(mission)) store.setAlerts(mission, []);
+      published.clear();
+      for (const mission of next.keys()) published.add(mission);
+    };
     const off = listen<PeerMessage>("cc-peer-message", (e) => {
       pending = applyMessage(pending, e.payload, isLead);
+      const applied = applyLeadMessage(asks, e.payload, isLead, leadTabOf(e.payload.fromTabId));
+      asks = applied.pending;
+      // Una espera que ya se avisó se cierra con su duración total: es la métrica de "tiempo sin respuesta".
+      for (const done of applied.answered) {
+        if (done.alerted) record(done.memberTabId, leadStallSpan(done, done.answeredAt, "answered", titleOf(done.memberTabId), titleOf(done.leadTabId)));
+      }
     });
+    const runLeadStall = (now: number) => {
+      const openTabs = useTabsStore.getState().tabs;
+      const open = new Set(openTabs.map((t) => t.id));
+      asks = new Map([...asks].filter(([id, a]) => open.has(id) && open.has(a.leadTabId)));
+      const members = new Map(openTabs.flatMap((t) => {
+        const lead = t.title === LEAD_NAME || t.agentId === "bash" ? null : leadTabOf(t.id);
+        return lead ? [[t.id, lead] as const] : [];
+      }));
+      let waitMs = parseLeadStallMs(null);
+      try {
+        waitMs = parseLeadStallMs(localStorage.getItem("ags.leadStallMs"));
+      } catch {
+        // sin localStorage: queda el plazo por defecto
+      }
+      const active = new Set(activeTabIds(now));
+      const working = new Set(sustainedNow(now));
+      const probe = {
+        now,
+        isActive: (id: string) => active.has(id),
+        isWorking: (id: string) => working.has(id),
+        lastOutputAt,
+        lastInputAt,
+        screen: (id: string) => screenOf(id)?.lines ?? null,
+      };
+      asks = addAsks(asks, findScreenAsks(members, asks, probe));
+      const stalls = findLeadStalls(asks, probe, waitMs);
+      const sent = stalls.filter((s) => {
+        // No se interrumpe al orquestador a mitad de un turno: se reintenta en el próximo tic.
+        if (active.has(s.leadTabId)) return false;
+        const ok = pasteIntoTab(s.leadTabId, leadStallMessage(titleOf(s.memberTabId), s), true);
+        const ask = asks.get(s.memberTabId);
+        if (ok && ask) record(s.memberTabId, leadStallSpan(ask, now, "alerted", titleOf(s.memberTabId), titleOf(s.leadTabId)));
+        return ok;
+      });
+      if (sent.length > 0) asks = markLeadAlerted(asks, sent);
+    };
     const timer = setInterval(() => {
+      const tickNow = Date.now();
+      try {
+        runLeadStall(tickNow);
+      } finally {
+        publish(tickNow);
+      }
       if (pending.size === 0) return;
       const { tabs: openTabs } = useTabsStore.getState();
       const open = new Set(openTabs.map((t) => t.id));

@@ -12,6 +12,7 @@ import {
   leadStallMessage,
   leadStallSpan,
   markLeadAlerted,
+  deriveAlerts,
   parseLeadStallMs,
   screenQuestion,
   type LeadStallProbe,
@@ -218,5 +219,26 @@ describe("leadStallMessage / leadStallSpan", () => {
       kind: "orchestrator_stall", actor: "Backend", target: "Orquestrador", startedMs: 1000, endedMs: 4000, detail: "alerted:peer_ask",
     });
     expect(leadStallSpan({ at: 5000, source: "screen" }, 1000, "answered", "a", "b").endedMs).toBe(5000);
+  });
+});
+
+describe("deriveAlerts", () => {
+  const nameOf = (id: string) => `n-${id}`;
+  const missionOf = (id: string) => (id === "x" ? undefined : "m1");
+  it("solo los pedidos y tareas ya avisados se muestran, agrupados por misión", () => {
+    const asks = markLeadAlerted(open("a", 1000), [{ memberTabId: "a", leadTabId: "lead", source: "peer_ask", waitedMs: 0, quietMs: 0, question: "" }]);
+    const tasks = new Map([
+      ["b", { tabId: "b", fromTabId: "lead", at: 2000, alerted: true }],
+      ["c", { tabId: "c", fromTabId: "lead", at: 2500, alerted: false }],
+    ]);
+    const out = deriveAlerts(asks, tasks, nameOf, missionOf, 10_000);
+    expect(out.get("m1")).toEqual([
+      { memberName: "n-a", kind: "orchestrator_silent", waitedMs: 9000, since: 1000 },
+      { memberName: "n-b", kind: "agent_idle", waitedMs: 8000, since: 2000 },
+    ]);
+  });
+  it("sin misión conocida o sin avisos no hay alertas", () => {
+    expect(deriveAlerts(open("x"), new Map(), nameOf, missionOf, 1).size).toBe(0);
+    expect(deriveAlerts(open("a"), new Map(), nameOf, missionOf, 1).size).toBe(0);
   });
 });

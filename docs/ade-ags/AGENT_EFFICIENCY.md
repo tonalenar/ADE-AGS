@@ -258,3 +258,18 @@ A análise comparativa entre os tempos de infraestrutura e execução cognitiva 
 
 O QG ("Ao vivo") lê o tempo ativo da fonte unificada (`timings.active`) e deriva andar e entregas dos sinais reais dos terminais (ver `LIVE_ARCADE.md`, v4). A métrica de tempo até a primeira delegação (`firstDelegationMs`/`firstDelegationSource`) é do Backend; sem dado, a tela mostra cinza.
 
+
+## Etapa 16 — Orquestração confiável
+
+### Ponto 1 — Orquestrador parado
+Espelho do "agente parado" (Etapa 14): `src/features/missions/leadStall.ts`, ligado em `watcher.ts`. Funções puras (`applyLeadMessage`, `findLeadStalls`, `findScreenAsks`, `screenQuestion`, `leadStallMessage`, `deriveAlerts`), testadas em `tests/leadStall.test.ts`.
+
+1. **Pedido aberto:** `ask` de um integrante, ou `tell` que contém `?` e não é cortesia (`isAck`). A entrega final (`tell` sem pergunta) não conta. Um integrante quieto ≥ 45 s com uma pergunta nas últimas linhas da tela também abre pedido (origem `screen`); diálogos de aprovação (esperam o usuário) são ignorados.
+2. **Fecha** quando o orquestrador manda mensagem ao integrante.
+3. **Sem falso positivo:** o orquestrador trabalhando (`activeTabIds` e `sustainedTabIds`) nunca é considerado parado; cada saída ou digitação dele reinicia o relógio; um diálogo de aprovação na tela dele suspende o aviso; o aviso só é colado quando ele não está no meio de um turno.
+4. **Ao detectar:** aviso PT-BR no terminal do orquestrador, alerta (`useStallAlerts`) no QG e na aba da missão, e span `orchestrator_stall` (`detail` = `alerted:<fonte>` ou `answered:<fonte>`) para `ags mission timings`: contagem de alertas e tempo de espera. O "agente ocioso com tarefa pendente" (`stalled.ts`) alimenta o mesmo painel.
+
+Limiar: `LEAD_STALL_MS` = 180 s (`ags.leadStallMs`, mínimo `MIN_LEAD_STALL_MS` = 30 s).
+
+### Ponto 2 — Teste de início
+Cada agente grava eventos pontuais (`startedMs == endedMs`, `actor` = nome): `start_briefing` (envio), `start_activity` (1ª saída além do eco, `watchStart`), `start_retry` (Enter reenviado, por `SUBMIT_RETRY_MS` ou pela verificação aos 25 s) e `start_stalled`. Quando o último agente arranca, grava-se `start_all_working` (do início da missão até ele) e o QG mostra "tempo até todos trabalharem" (`startup.ts`, `startupProgress`). O plazo é `START_DEADLINE_MS` = 120 s; `ags mission startcheck <id>` confere o roster e os eventos persistidos, inclusive o agente que nunca arrancou.
