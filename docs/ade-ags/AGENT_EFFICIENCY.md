@@ -273,6 +273,7 @@ Limiar: `LEAD_STALL_MS` = 180 s (`ags.leadStallMs`, mínimo `MIN_LEAD_STALL_MS` 
 
 ### Ponto 2 — Teste de início
 Cada agente grava eventos pontuais (`startedMs == endedMs`, `actor` = nome): `start_briefing` (envio), `start_activity` (1ª saída além do eco, `watchStart`), `start_retry` (Enter reenviado, por `SUBMIT_RETRY_MS` ou pela verificação aos 25 s) e `start_stalled`. Quando o último agente arranca, grava-se `start_all_working` (do início da missão até ele) e o QG mostra "tempo até todos trabalharem" (`startup.ts`, `startupProgress`). O plazo é `START_DEADLINE_MS` = 120 s; `ags mission startcheck <id>` confere o roster e os eventos persistidos, inclusive o agente que nunca arrancou.
+
 ## Etapa 16 — métricas e verificação do início (Backend)
 
 `ags mission startcheck <id>` consulta a equipe persistida e os spans por agente, incluindo integrantes sem nenhum evento. Retorna `briefingSentMs`, `activityMs`, `timeUntilStartMs`, `exceededDeadline`, `passed`, `submitRetries` e `stalledNotifications`; o resumo contém `allWorking`, `passed` e `timeUntilAllWorkingMs`. O limite testável `START_DEADLINE_MS` é 120.000 ms desde a abertura dos terminais (primeiro `boot`), com início persistido da missão como fallback. Exatamente 120 segundos passa; ausência de briefing, atividade ou referência temporal não passa. Um span `turn` não prova o instante de atividade. O comando consulta o estado, sem enviar Enter.

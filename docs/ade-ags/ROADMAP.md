@@ -251,6 +251,7 @@ Cinco pontos de melhoria estrutural focados na velocidade de inicialização das
 - [x] Detector de **orquestrador parado** (`missions/leadStall.ts`): integrante pediu algo (`peer ask`, `peer tell` com `?`, ou pergunta na tela) e o orquestrador não respondeu em 3 min (`LEAD_STALL_MS`, configurável em `localStorage["ags.leadStallMs"]`, mínimo 30 s). Aviso no terminal do orquestrador (`pasteIntoTab`), alerta no QG e na aba da missão, span `orchestrator_stall`.
 - [x] **Teste de início de missão**: eventos `start_briefing`, `start_activity`, `start_retry`, `start_stalled` e `start_all_working` (tempo até todos trabalhando, exibido no QG) gravados em timings; verificação de 2 min (`START_DEADLINE_MS`).
 - [x] `ags mission timings` e `ags mission startcheck <id>` (Backend).
+
 ## Etapa 16 — métricas e verificação do início (Backend)
 
 `ags mission startcheck <id>` consulta briefing, atividade, retries e avisos por integrante, incluindo quem nunca iniciou, e verifica o limite de 120 segundos desde a abertura dos terminais. `ags mission timings` expõe contagem de alertas, espera total/máxima do orquestrador e tempo até todos trabalhando. Reutiliza `mission_timings` e a equipe persistida; nenhuma migração necessária. A instrumentação de atividade, retry e alertas fica no frontend; o comando não envia Enter nem altera terminais. Contrato em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
