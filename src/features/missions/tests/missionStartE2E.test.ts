@@ -454,82 +454,199 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     // Todos os agentes arrancaram ou tiveram diagnóstico em tempo hábil sem Enter manual!
   });
 
-  describe("Detecção e reenvio de Enter com marcadores de colagem de TUIs e callbacks", () => {
-    it("reconhece marcadores '[Pasted Content N chars]' em tela normal, reenvia Enter e invoca onRetry", () => {
-      const tabId = "tab-paste-content";
+  describe("Cobertura detalhada dos novos callbacks (onActivity, onRetry, onStalled)", () => {
+    it("(1) onActivity é chamado exatamente uma vez na 1ª saída >4 s (e não com eco <=4 s)", () => {
+      const tabId = "tab-cb-activity";
+      const term = new SimulatedTerminal(["› "]);
+      registerSimulated(tabId, term);
+
+      const activityCalls: number[] = [];
+      const timings: SendTimings = {
+        onActivity: (at) => activityCalls.push(at),
+      };
+
+      sendWhenReady(tabId, "Briefing", timings);
+      term.emitOutput(["Prompt inicial"]);
+      vi.advanceTimersByTime(2500); // settle -> paste enviado
+      vi.advanceTimersByTime(80); // enter enviado
+
+      // Saída dentro de ECHO_MS (ex.: em 2s e em 3.9s após o envio) é tratada como eco
+      vi.advanceTimersByTime(2000 - 80);
+      term.emitOutput(["Eco 1 do terminal"]);
+      expect(activityCalls).toHaveLength(0);
+
+      vi.advanceTimersByTime(1900); // t = 3900ms após o envio (<= 4000ms)
+      term.emitOutput(["Eco 2 do terminal"]);
+      expect(activityCalls).toHaveLength(0);
+
+      // Primeira saída > 4s após o envio (ex.: t = 4500ms após o envio)
+      vi.advanceTimersByTime(600); // t = 4500ms (> 4000ms ECHO_MS)
+      const expectedAt = Date.now();
+      term.emitOutput(["Agente começou a raciocinar"]);
+
+      // onActivity deve ter sido chamado exatamente uma vez com o instante atual
+      expect(activityCalls).toHaveLength(1);
+      expect(activityCalls[0]).toBe(expectedAt);
+
+      // Saídas posteriores NÃO devem chamar onActivity novamente (apenas a 1ª saída conta)
+      vi.advanceTimersByTime(2000);
+      term.emitOutput(["Segunda linha de resposta"]);
+      vi.advanceTimersByTime(3000);
+      term.emitOutput(["Terceira linha de resposta"]);
+      expect(activityCalls).toHaveLength(1);
+    });
+
+    it("(1b) onActivity é chamado inclusive quando o agente arranca DEPOIS do aviso de 25 s (até 120 s)", () => {
+      const leadTabId = "tab-late-lead";
+      const memberTabId = "tab-late-member";
+      const leadTerm = new SimulatedTerminal(["› "]);
+      const memberTerm = new SimulatedTerminal(["› "]);
+      registerSimulated(leadTabId, leadTerm);
+      registerSimulated(memberTabId, memberTerm);
+
+      const activityCalls: number[] = [];
+      const retryCalls: number[] = [];
+      let stalledCalled = false;
+
+      const timings: SendTimings = {
+        onActivity: (at) => activityCalls.push(at),
+        onRetry: (at) => retryCalls.push(at),
+        onStalled: () => {
+          stalledCalled = true;
+          pasteIntoTab(leadTabId, "[AGS] Membro não mostrou atividade", true);
+        },
+      };
+
+      sendWhenReady(memberTabId, "Briefing", timings);
+      memberTerm.emitOutput(["Boot"]);
+      vi.advanceTimersByTime(2500); // settle
+      vi.advanceTimersByTime(80); // enter
+
+      // Membro fica mudo até os 25s
+      vi.advanceTimersByTime(START_CHECK_MS - 80);
+
+      // Aos 25s: onStalled e onRetry foram chamados
+      expect(stalledCalled).toBe(true);
+      expect(retryCalls).toHaveLength(1);
+      expect(activityCalls).toHaveLength(0);
+
+      // Membro acorda DEPOIS do aviso de 25s (ex.: aos 40s após o envio)
+      vi.advanceTimersByTime(15000); // agora t = 40000ms (< 120000ms START_DEADLINE_MS)
+      const wakeUpAt = Date.now();
+      memberTerm.emitOutput(["Membro finalmente acordou e começou a trabalhar!"]);
+
+      // onActivity DEVE ser chamado mesmo após o aviso de 25s!
+      expect(activityCalls).toHaveLength(1);
+      expect(activityCalls[0]).toBe(wakeUpAt);
+
+      // Saídas subsequentes não disparam novamente
+      vi.advanceTimersByTime(5000);
+      memberTerm.emitOutput(["Mais trabalho"]);
+      expect(activityCalls).toHaveLength(1);
+    });
+
+    it("(1c) saídas após 120 s (START_DEADLINE_MS) não chamam onActivity pois o watcher foi descartado", () => {
+      const tabId = "tab-deadline-expire";
+      const term = new SimulatedTerminal(["› "]);
+      registerSimulated(tabId, term);
+
+      const activityCalls: number[] = [];
+      const timings: SendTimings = {
+        onActivity: (at) => activityCalls.push(at),
+      };
+
+      sendWhenReady(tabId, "Briefing", timings);
+      term.emitOutput(["Boot"]);
+      vi.advanceTimersByTime(2500); // settle
+      vi.advanceTimersByTime(80); // enter
+
+      // Avança até ultrapassar START_DEADLINE_MS (120_000ms)
+      vi.advanceTimersByTime(START_DEADLINE_MS);
+      expect(activityCalls).toHaveLength(0);
+
+      // Emite saída aos 125s (após deadline)
+      term.emitOutput(["Saída muito tardia após deadline"]);
+      expect(activityCalls).toHaveLength(0);
+    });
+
+    it("(2) onRetry é invocado a cada Enter reenviado (pasteIntoTab com marcadores e verificação aos 25 s)", () => {
+      const tabId = "tab-retry-multi";
       const term = new SimulatedTerminal([
         "linha 1",
-        "linha 2",
-        "› [Pasted Content 500 chars]",
-        "",
+        "› [Pasted Content 3904 chars]",
       ]);
       registerSimulated(tabId, term);
 
       const retryTimes: number[] = [];
       const onRetry = (at: number) => retryTimes.push(at);
 
-      // Cola com submit ativo e callback onRetry
+      // 1. pasteIntoTab: Enter inicial aos 80ms NÃO é retry
       pasteIntoTab(tabId, "texto grande", true, onRetry);
       expect(term.inputs).toHaveLength(0);
-
-      // Enter inicial aos 80ms
-      vi.advanceTimersByTime(80);
-      expect(term.inputs).toEqual(["\r"]);
       expect(retryTimes).toHaveLength(0);
 
-      // Aos 900ms (SUBMIT_RETRY_MS[0]), marcador ainda presente -> reenvia Enter e chama onRetry
+      vi.advanceTimersByTime(80);
+      expect(term.inputs).toEqual(["\r"]);
+      expect(retryTimes).toHaveLength(0); // não foi retry, foi submit inicial
+
+      // 2. 1ª retentativa aos 900ms (SUBMIT_RETRY_MS[0]): marcador ainda na tela
       vi.advanceTimersByTime(900 - 80);
       expect(term.inputs).toEqual(["\r", "\r"]);
       expect(retryTimes).toHaveLength(1);
 
-      // TUI processa e remove marcador
-      term.setLines(["linha 1", "linha 2", "› Executando..."]);
-
-      // Aos 2200ms (SUBMIT_RETRY_MS[1]), marcador não está mais presente -> não reenvia nem chama onRetry
+      // 3. 2ª retentativa aos 2200ms (SUBMIT_RETRY_MS[1]): marcador AINDA na tela
       vi.advanceTimersByTime(2200 - 900);
-      expect(term.inputs).toEqual(["\r", "\r"]);
-      expect(retryTimes).toHaveLength(1);
+      expect(term.inputs).toEqual(["\r", "\r", "\r"]);
+      expect(retryTimes).toHaveLength(2);
+
+      // 4. Marcador desaparece (TUI processou)
+      term.setLines(["linha 1", "› Processando..."]);
+
+      // Aos 4500ms (SUBMIT_RETRY_MS[2]): sem marcador -> nenhum Enter extra e nenhum onRetry
+      vi.advanceTimersByTime(4500 - 2200);
+      expect(term.inputs).toEqual(["\r", "\r", "\r"]);
+      expect(retryTimes).toHaveLength(2);
     });
 
-    it("reconhece marcadores '[Pasted text #1 +N lines]' em alt screen (Claude Code), reenvia Enter e invoca onRetry", () => {
-      const tabId = "tab-paste-alt";
+    it("(2b) onRetry em alt screen com marcador '[Pasted text #1 +N lines]'", () => {
+      const tabId = "tab-alt-retry";
       const term = new SimulatedTerminal(
         [
           "────────────────────────────────────────────",
-          "❯ [Pasted text #1 +45 lines]",
+          "❯ [Pasted text #1 +50 lines]",
           "────────────────────────────────────────────",
         ],
-        true, // alternate buffer
+        true, // buffer alternate
       );
       registerSimulated(tabId, term);
 
       const screen = screenOf(tabId, null, 12);
-      expect(screen).not.toBeNull();
       expect(screen?.alt).toBe(true);
       expect(pasteStillPending(screen!.lines)).toBe(true);
 
       const retryTimes: number[] = [];
-      pasteIntoTab(tabId, "texto longo", true, (at) => retryTimes.push(at));
+      pasteIntoTab(tabId, "texto alt", true, (at) => retryTimes.push(at));
+
+      // 80ms inicial
       vi.advanceTimersByTime(80);
       expect(term.inputs).toEqual(["\r"]);
+      expect(retryTimes).toHaveLength(0);
 
-      // Aos 900ms: retry ativado pelo marcador pendente na tela alternativa
+      // 900ms: retry dispara na alt screen
       vi.advanceTimersByTime(900 - 80);
       expect(term.inputs).toEqual(["\r", "\r"]);
       expect(retryTimes).toHaveLength(1);
 
-      // Remove marcador
-      term.setLines(["────────────────────────────────────────────", "❯ Thinking...", "────────────────────────────────────────────"], true);
+      // Marcador sai da alt screen
+      term.setLines(["────────────────────────────────────────────", "❯ Running...", "────────────────────────────────────────────"], true);
       vi.advanceTimersByTime(2200 - 900);
       expect(term.inputs).toEqual(["\r", "\r"]);
       expect(retryTimes).toHaveLength(1);
     });
-  });
 
-  describe("Agente que nunca arranca", () => {
-    it("reenvia Enter ao agente, invoca onRetry e onStalled e alerta a orquestradora aos 25s", () => {
-      const leadTabId = "tab-stalled-lead";
-      const memberTabId = "tab-stalled-member";
+    it("(3) agente que nunca arranca: onActivity jamais é chamado, e onStalled + onRetry são chamados aos 25 s", () => {
+      const leadTabId = "tab-stalled-full-lead";
+      const memberTabId = "tab-stalled-full-member";
 
       const leadTerm = new SimulatedTerminal(["› "]);
       const memberTerm = new SimulatedTerminal(["› "]);
@@ -537,12 +654,15 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
       registerSimulated(leadTabId, leadTerm);
       registerSimulated(memberTabId, memberTerm);
 
-      let stalledCalled = false;
+      const activityCalls: number[] = [];
       const retryCalls: number[] = [];
+      let stalledCount = 0;
+
       const timings: SendTimings = {
+        onActivity: (at) => activityCalls.push(at),
         onRetry: (at) => retryCalls.push(at),
         onStalled: () => {
-          stalledCalled = true;
+          stalledCount++;
           pasteIntoTab(
             leadTabId,
             "[AGS] QA não mostrou atividade após o briefing (recebeu um Enter). Confirme se ele está trabalhando; se não, reenvie a tarefa dele com ags peer tell.",
@@ -551,72 +671,40 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
         },
       };
 
-      // Dispara envio
-      sendWhenReady(memberTabId, "Briefing do QA", timings);
-
-      // Boot e settle (2500ms)
+      sendWhenReady(memberTabId, "Briefing QA", timings);
       memberTerm.emitOutput(["Iniciando TUI..."]);
-      vi.advanceTimersByTime(2500);
+      vi.advanceTimersByTime(2500); // settle
+      vi.advanceTimersByTime(80); // enter inicial
 
-      expect(memberTerm.pastes).toHaveLength(1);
-      vi.advanceTimersByTime(80);
-      expect(memberTerm.inputs).toEqual(["\r"]);
-
-      // Emite eco dentro de ECHO_MS (<= 4000ms), que é ignorado como atividade
+      // Emite eco <= 4s (ECHO_MS), que NÃO conta como atividade
       vi.advanceTimersByTime(2000);
-      memberTerm.emitOutput(["eco da colagem..."]);
+      memberTerm.emitOutput(["Eco da tela"]);
+      expect(activityCalls).toHaveLength(0);
 
-      // Avança até 25000ms após o envio (START_CHECK_MS)
-      vi.advanceTimersByTime(23000);
+      // Avança até 25s (START_CHECK_MS)
+      vi.advanceTimersByTime(START_CHECK_MS - 2080);
 
-      expect(stalledCalled).toBe(true);
-      // Member recebeu novo Enter
-      expect(memberTerm.inputs).toEqual(["\r", "\r"]);
-      // onRetry chamado quando o Enter de stall foi enviado
+      // Aos 25s:
+      // - onStalled foi chamado exatamente 1 vez
+      expect(stalledCount).toBe(1);
+      // - onRetry foi chamado exatamente 1 vez com o Enter de stall
       expect(retryCalls).toHaveLength(1);
-
-      // Lead recebeu o aviso com Enter
+      // - Enter enviado ao terminal do membro
+      expect(memberTerm.inputs).toEqual(["\r", "\r"]);
+      // - Aviso enviado ao terminal da orquestradora
       expect(leadTerm.pastes[0]).toContain("[AGS] QA não mostrou atividade após o briefing");
+
+      // 80ms para submeter o aviso no orquestrador
       vi.advanceTimersByTime(80);
       expect(leadTerm.inputs).toEqual(["\r"]);
-    });
 
-    it("quando o agente mostra atividade após 4s, invoca onActivity e não dispara aviso de stall aos 25s", () => {
-      const leadTabId = "tab-active-lead";
-      const memberTabId = "tab-active-member";
+      // Avança todo o resto do ciclo até 120s (START_DEADLINE_MS) e além
+      vi.advanceTimersByTime(START_DEADLINE_MS);
 
-      const leadTerm = new SimulatedTerminal(["› "]);
-      const memberTerm = new SimulatedTerminal(["› "]);
-
-      registerSimulated(leadTabId, leadTerm);
-      registerSimulated(memberTabId, memberTerm);
-
-      let stalledCalled = false;
-      const activityTimes: number[] = [];
-      const timings: SendTimings = {
-        onActivity: (at) => activityTimes.push(at),
-        onStalled: () => {
-          stalledCalled = true;
-        },
-      };
-
-      sendWhenReady(memberTabId, "Briefing", timings);
-      memberTerm.emitOutput(["Iniciando..."]);
-      vi.advanceTimersByTime(2500); // settle
-      vi.advanceTimersByTime(80); // enter
-
-      // Aos 5000ms (> ECHO_MS = 4000ms), o agente produz saída real
-      vi.advanceTimersByTime(5000 - 80);
-      memberTerm.emitOutput(["Pensando na solução..."]);
-
-      // onActivity invocado imediatamente
-      expect(activityTimes).toHaveLength(1);
-
-      // Avança até os 25000ms
-      vi.advanceTimersByTime(20000);
-
-      expect(stalledCalled).toBe(false);
-      expect(leadTerm.pastes).toHaveLength(0);
+      // onActivity JAMAIS foi chamado em todo o ciclo de 120s
+      expect(activityCalls).toHaveLength(0);
+      // onStalled não repetiu
+      expect(stalledCount).toBe(1);
     });
   });
 
