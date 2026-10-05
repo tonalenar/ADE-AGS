@@ -191,6 +191,8 @@ pub struct MissionSummary {
     pub lead_status: Option<String>,
     /// Segundos con algún agente trabajando de verdad; `None` en misiones anteriores a la medición.
     pub active_seconds: Option<i64>,
+    /// De onde vem `active_seconds`: `mission_active`, `spans`, `wall` ou ausente.
+    pub active_source: Option<String>,
 }
 
 /// La misión con su run activo: sus intentos, sus tareas y sus hechos.

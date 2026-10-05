@@ -40,7 +40,7 @@ function mission(patch: Partial<Mission> = {}): Mission {
 }
 
 const summary = (patch: Partial<Mission> = {}, tasks = { workersDone: 0, workersTotal: 0 }): MissionSummary => ({
-  ...mission(patch), spentUsd: 0, leadAgent: null, leadStatus: null, activeSeconds: null, ...tasks,
+  ...mission(patch), spentUsd: 0, leadAgent: null, leadStatus: null, activeSeconds: null, activeSource: null, ...tasks,
 });
 
 const detail = (patch: Partial<Mission> = {}): MissionDetail => ({ mission: mission(patch), delivery: null, runs: [], tasks: [], facts: [] });

@@ -190,3 +190,9 @@ Implementado em `feat/etapa13-2-subagente` (empilhada em `feat/etapa13-1-fast`):
 ### Etapa 13 — ponto 3 (uso no recruit e no briefing)
 
 Implementado em `feat/etapa13-3-recruit-padrao` (empilhada nas anteriores): `ags peer recruit` sem `--model`/`--effort` usa o subagente padrão do Squad da missão em execução (explícitos vencem; Automático/sem Squad = comportamento atual), briefing do orquestrador mostra o padrão ativo ou manda justificar a escolha, skill `ags-orchestrator` 1.26.0 e help da CLI atualizados. Detalhes em [ROLES_SQUADS.md](./ROLES_SQUADS.md).
+
+## Etapa 14 — unificar o tempo ativo
+
+Fonte única em `missions/active.rs`: `mission_active` positivo → união de spans `turn`/`peer_ask` → relógio de parede com `started_at` → não medido. Lista, QG, painel de tempos, `ags mission efficiency`/`timings` e medianas históricas por faixa de agentes usam a mesma duração e identificam sua fonte. Spans permanecem como detalhe por turno (`turnMs`) e gargalos. Sem migração nem alteração de dados antigos.
+
+A fotografia somente leitura do banco real mostrou cobertura de 9/47 missões em `mission_active` e 20/47 em spans; na missão `f754b31f`, 4.322 s contra 28 s. Semântica, limitações, comparação e contratos em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md); integração com a seção Tempos em [MISSION_TOKENS.md](./MISSION_TOKENS.md#tempo-ativo-da-missão). A validação inclui escolha de fonte/fallback e consistência entre lista, eficiência e tempos nos três caminhos.

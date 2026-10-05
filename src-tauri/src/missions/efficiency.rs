@@ -9,6 +9,7 @@ use std::collections::{BTreeMap, HashSet};
 use rusqlite::{Connection, OptionalExtension};
 use serde::Serialize;
 
+use super::active;
 use super::timings::{self, Span};
 use crate::util::now_ts;
 
@@ -32,7 +33,12 @@ pub struct AgentBandComparison {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MissionEfficiency {
+    /// Tempo ativo oficial: `mission_active` e, sem ele, a união dos spans (ver `active::choose`).
     pub active_ms: Option<i64>,
+    /// De onde veio `active_ms`: `mission_active`, `spans`, `wall` ou ausente.
+    pub active_source: Option<String>,
+    /// Detalhe por turno: união dos spans `turn` e `peer_ask`.
+    pub turn_ms: Option<i64>,
     pub wall_ms: Option<i64>,
     /// Soma do custo reportado nos Runs. Ausente quando nenhum Run reportou custo.
     pub cost_estimate: Option<f64>,
@@ -50,6 +56,8 @@ pub struct MissionEfficiency {
 #[derive(Debug, Clone)]
 struct Measurement {
     active_ms: Option<i64>,
+    active_source: Option<&'static str>,
+    turn_ms: Option<i64>,
     wall_ms: Option<i64>,
     cost_estimate: Option<f64>,
     agents: usize,
@@ -82,6 +90,8 @@ pub fn get(conn: &Connection, mission_id: &str) -> Result<MissionEfficiency, Str
 
     Ok(MissionEfficiency {
         active_ms: current.active_ms,
+        active_source: current.active_source.map(str::to_owned),
+        turn_ms: current.turn_ms,
         wall_ms: current.wall_ms,
         cost_estimate: current.cost_estimate,
         agents: current.agents,
@@ -102,16 +112,26 @@ fn measure(
 ) -> Result<Measurement, String> {
     let spans = timings::list(conn, mission_id)?;
     let (cost_estimate, _) = run_cost(conn, mission_id)?;
+    let turn_ms = active_time(&spans);
+    let wall_ms = wall_time(started_at, ended_at, now);
+    let active = active::resolve(conn, mission_id, turn_ms, wall_ms)?;
     Ok(Measurement {
-        active_ms: active_time(&spans),
-        wall_ms: wall_time(started_at, ended_at, now),
+        active_ms: active.ms,
+        active_source: active.source,
+        turn_ms,
+        wall_ms,
         cost_estimate,
         agents: observed_agents(&spans),
     })
 }
 
 fn wall_time(started_at: Option<i64>, ended_at: Option<i64>, now: i64) -> Option<i64> {
-    started_at.map(|start| ended_at.unwrap_or(now).saturating_sub(start).max(0).saturating_mul(1000))
+    active::wall_ms(started_at, ended_at, now)
+}
+
+/// União dos spans `turn` e `peer_ask` (detalhe por turno, não o tempo ativo oficial).
+pub(crate) fn turn_ms(spans: &[Span]) -> Option<i64> {
+    active_time(spans)
 }
 
 fn active_time(spans: &[Span]) -> Option<i64> {

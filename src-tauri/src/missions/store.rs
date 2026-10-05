@@ -284,8 +284,7 @@ pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>
                     (SELECT COUNT(*) FROM tasks t
                      WHERE t.run_id = m.active_run_id AND COALESCE(t.role, '') <> 'lead' AND t.status = 'done'),
                     l.agent_id,
-                    l.status,
-                    (SELECT a.active_ms / 1000 FROM mission_active a WHERE a.mission_id = m.id)
+                    l.status
              FROM missions m LEFT JOIN runs r ON r.id = m.active_run_id
              LEFT JOIN tasks l ON l.id = (SELECT t.id FROM tasks t WHERE t.run_id = m.active_run_id AND t.role = 'lead'
                                           ORDER BY t.created_at, t.rowid LIMIT 1)
@@ -302,12 +301,21 @@ pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>
                 workers_done: row.get(26)?,
                 lead_agent: row.get(27)?,
                 lead_status: row.get(28)?,
-                active_seconds: row.get(29)?,
+                active_seconds: None,
+                active_source: None,
             })
         })
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
-        .collect();
+        .collect::<Vec<MissionSummary>>();
+    // Mesma cadeia de fontes de `efficiency` e `timings`: lista, QG e CLI mostram o mesmo valor.
+    let now = crate::util::now_ts();
+    let mut rows = rows;
+    for row in &mut rows {
+        let active = super::active::resolve_mission(conn, &row.mission.id, row.mission.started_at, row.mission.ended_at, now)?;
+        row.active_seconds = active.ms.map(|ms| ms / 1000);
+        row.active_source = active.source.map(str::to_owned);
+    }
     Ok(rows)
 }
 

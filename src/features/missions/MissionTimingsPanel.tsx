@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { formatDuration, getMissionEfficiency, getTimings, shareOf, type MissionEfficiency, type MissionTimings } from "./timings";
+import { activeSourceKey, formatActive, formatDuration, getMissionEfficiency, getTimings, shareOf, type MissionEfficiency, type MissionTimings } from "./timings";
 
 /** Cada quanto se relê o cronómetro mientras se mira: los spans se graban sin evento. */
 const REFRESH_MS = 15_000;
@@ -36,6 +36,7 @@ export function MissionTimingsPanel({ missionId }: { missionId: string }) {
       <div className="text-[12px] text-gray-600 dark:text-gray-300">
         {t("missions.timings.total", { time: formatDuration(summary.wallMs) })}
       </div>
+      <div className="text-[10.5px] text-gray-400 dark:text-white/35">{t("missions.timings.turnDetail")}</div>
 
       <div className="flex flex-col gap-1.5">
         {summary.byKind.map((k) => (
@@ -90,6 +91,8 @@ export function MissionEfficiencyCard({ missionId, compact = false }: { missionI
   if (!data) return null;
 
   const value = (ms: number | null) => ms === null ? t("missions.efficiency.unmeasured") : formatDuration(ms);
+  const activeText = formatActive(data.activeMs) ?? t("missions.efficiency.unmeasured");
+  const sourceKey = activeSourceKey(data.activeSource);
   const cost = (usd: number | null) => usd === null ? t("missions.efficiency.unmeasured") : `$${usd.toFixed(3)}`;
   const gain = (percent: number | null) => percent === null
     ? t("missions.efficiency.unmeasured")
@@ -106,11 +109,16 @@ export function MissionEfficiencyCard({ missionId, compact = false }: { missionI
         {t("missions.efficiency.title")}
       </h3>
       <div className="grid grid-cols-2 gap-x-3 gap-y-2 sm:grid-cols-4">
-        <Metric label={t("missions.efficiency.active")} value={value(data.activeMs)} labelClass={label} valueClass={metric} />
+        <Metric label={t("missions.efficiency.active")} value={activeText} labelClass={label} valueClass={metric} />
         <Metric label={t("missions.efficiency.wall")} value={value(data.wallMs)} labelClass={label} valueClass={metric} />
         <Metric label={t("missions.efficiency.cost")} value={cost(data.costEstimate)} labelClass={label} valueClass={metric} />
         <Metric label={t("missions.efficiency.agents")} value={String(data.agents)} labelClass={label} valueClass={metric} />
       </div>
+
+      <p className={compact ? "mt-2 text-[10px] text-gray-400" : "mt-2 text-[10.5px] text-gray-500 dark:text-gray-400"}>
+        {sourceKey ? t(sourceKey) : null}
+        {data.turnMs !== null ? `${sourceKey ? " · " : ""}${t("missions.efficiency.turnDetail", { time: value(data.turnMs) })}` : null}
+      </p>
 
       {data.historySize === 0 || data.byAgentBand.length === 0 ? (
         <p className={compact ? "mt-2 text-[10px] text-gray-400" : "mt-2 text-[10.5px] text-gray-500 dark:text-gray-400"}>

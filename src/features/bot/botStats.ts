@@ -67,7 +67,8 @@ export function inWindow(missions: MissionLike[], now: number, days: number): Mi
 /**
  * Cuánto trabajó una misión, en segundos: SOLO el tiempo con algún agente trabajando. Las
  * misiones anteriores a esa medición (`activeSeconds` ausente) caen al reloj de pared, de que
- * arrancó a que terminó (o a `now`). Pura.
+ * arrancó a que terminó (o a `now`). El backend ya resuelve la cadena (mission_active → spans →
+ * reloj), este respaldo solo cubre una respuesta sin el campo. Pura.
  */
 export function missionSeconds(m: Pick<MissionLike, "startedAt" | "endedAt" | "activeSeconds">, now: number): number {
   if (m.activeSeconds !== undefined && m.activeSeconds !== null) return Math.max(0, m.activeSeconds);
