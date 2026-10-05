@@ -13,8 +13,8 @@ import { useTabsStore } from "@/features/tabs/store";
 import { getPendingCounts } from "@/features/memory/ipc";
 
 import { drawArcade, type Placed, type Pose } from "./liveArcadeDraw";
-import { deriveArcadeScene, deriveBarrels, deriveHeroes, deriveTrophy, failureCount, retryCount, type ArcadeTask, type ArcadeTabInput } from "./liveArcadeModel";
-import { ARCADE_H, ARCADE_W, FRAME_MS, heroTargets, patrolOffset, stepMotion, taskSlots, type Motion } from "./liveArcadeScene";
+import { deriveArcadeScene, deriveBarrels, deriveHeroes, deriveTower, deriveTrophy, failureCount, newlyDone, retryCount, type ArcadeTask, type ArcadeTabInput, type ArcadeTaskStatus } from "./liveArcadeModel";
+import { ARCADE_H, ARCADE_W, FRAME_MS, TOWER_DROP_X, heroTargets, patrolOffset, stepMotion, taskSlots, type Motion } from "./liveArcadeScene";
 
 const WALK_SPEED = 50;
 const RUN_SPEED = 110;
@@ -79,6 +79,9 @@ export function LiveArcade({
   const { t, i18n } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const motionRef = useRef(new Map<string, Motion>());
+  /** tarefa concluída → terminal que carrega o bloco até a torre. */
+  const carryRef = useRef(new Map<string, string>());
+  const statusRef = useRef<Map<string, ArcadeTaskStatus> | null>(null);
   const [reducedMotion, setReducedMotion] = useState(() =>
     typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
@@ -122,12 +125,23 @@ export function LiveArcade({
     timings: timings?.spans ?? null,
   }), [scene, approvalTaskIds, pendingMemories, timings]);
   const trophy = useMemo(() => deriveTrophy(review), [review]);
+  const towerNow = useMemo(() => deriveTower({ scene, trophy }), [scene, trophy]);
   const missionTabs = useMemo<ArcadeTabInput[]>(() => tabs
     .filter((tab) => missionIndex[tab.id] === mission.id)
     .map((tab) => ({ id: tab.id, title: tab.title, agentId: tab.agentId, sessionId: tab.sessionId ?? null })),
   [tabs, missionIndex, mission.id]);
   const heroes = useMemo(() => deriveHeroes({ tabs: missionTabs, scene, sustainedTabIds: activeTabs, approvalTaskIds }),
     [missionTabs, scene, activeTabs, approvalTaskIds]);
+  // Entrega nova (running -> done): o herói da tarefa leva o bloco até a torre. Sem herói ou sem animação, o bloco entra direto.
+  useEffect(() => {
+    if (!reducedMotion) {
+      for (const id of newlyDone(statusRef.current, sceneTasks)) {
+        const hero = heroes.find((item) => item.taskId === id);
+        if (hero) carryRef.current.set(id, hero.tabId);
+      }
+    }
+    statusRef.current = new Map(sceneTasks.map((task) => [task.id, task.status]));
+  }, [sceneTasks]); // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const update = () => setReducedMotion(motion.matches);
@@ -153,13 +167,17 @@ export function LiveArcade({
       canvas.height = Math.round((bounds.width * ARCADE_H / ARCADE_W) * ratio);
       const scale = bounds.width / ARCADE_W;
       context.setTransform(scale * ratio, 0, 0, scale * ratio, 0, 0);
+      const carrying = carryRef.current;
+      const carrier = new Map([...carrying].map(([taskId, tabId]) => [tabId, taskId]));
       const placed: Placed[] = heroes.map((hero, index) => {
-        const target = targets.get(hero.tabId) ?? { x: 190, level: 0 };
+        const carried = carrier.get(hero.tabId);
+        const target = carried ? { x: TOWER_DROP_X, level: 0 } : targets.get(hero.tabId) ?? { x: 190, level: 0 };
         // Sem animação (prefers-reduced-motion) a posição já é a final.
         const from = motions.get(hero.tabId) ?? (reducedMotion ? target : { x: 190, level: 0 });
         const next = reducedMotion ? target : stepMotion(from, target, dt, hero.state === "running" ? RUN_SPEED : WALK_SPEED);
         motions.set(hero.tabId, next);
         const atTarget = next.level === target.level && next.x === target.x;
+        if (carried && atTarget) carrying.delete(carried);
         const climbing = next.level !== Math.round(next.level);
         const patrol = !reducedMotion && atTarget && hero.state === "running";
         const moving = !atTarget || patrol;
@@ -167,8 +185,12 @@ export function LiveArcade({
         if (climbing) pose = "climb";
         else if (moving) pose = frame % 2 === 0 ? "walkA" : "walkB";
         else if (hero.state === "sleeping") pose = "sleep";
-        return { hero, x: next.x + (patrol ? patrolOffset(now, index) : 0), level: next.level, pose, lift: 0 };
+        const carryRole = carried && !atTarget ? hero.role : undefined;
+        return { hero, x: next.x + (patrol ? patrolOffset(now, index) : 0), level: next.level, pose, lift: 0, carrying: carryRole };
       });
+      // Carregadores que sumiram (terminal fechado) não deixam o bloco preso no caminho.
+      for (const [taskId, tabId] of carrying) if (!heroes.some((hero) => hero.tabId === tabId)) carrying.delete(taskId);
+      const tower = deriveTower({ scene, trophy, carrying: new Set(carrying.keys()) });
       drawArcade(context, {
         scene,
         title: mission.title,
@@ -176,12 +198,14 @@ export function LiveArcade({
           arcade: t("botPanel.live.arcadeTitle"),
           team: t("botPanel.live.teamShort"),
           trophy: t("botPanel.live.trophy." + (trophy.step ?? "unknown")),
+          tower: t("botPanel.live.tower", { done: tower.done, total: tower.planned }),
           stage: (stage) => t("botPanel.live.stage." + stage),
           status: (status) => t("botPanel.live.status." + status),
         },
         heroes: placed,
         barrels,
         trophy,
+        tower,
         frame,
       });
       frame += 1;
@@ -273,6 +297,7 @@ export function LiveArcade({
         ).join(". ")}
         {" " + heroes.map((hero) => hero.name + ": " + stateLabel(hero.state)).join(". ")}
         {" " + barrels.map((barrel) => t("botPanel.live.barrel." + barrel.kind) + (barrel.detail ? " (" + barrel.detail + ")" : "")).join(". ")}
+        {" " + t("botPanel.live.tower", { done: towerNow.done, total: towerNow.planned }) + ". " + t("botPanel.live.towerUnmeasured")}
         {" " + t("botPanel.live.trophy." + (trophy.step ?? "unknown"))}
         {" " + t("botPanel.live.score", { retries: retryCount(sceneTasks), failures: failureCount(sceneTasks) })}
       </span>
