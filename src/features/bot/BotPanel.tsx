@@ -13,6 +13,7 @@ import { Pet, powerTier, usePetStatus } from "@/shared/brand/Pet";
 import { botStats, clock, missionSeconds, rankKey, recentMissions, scoreDigits, trophies } from "./botStats";
 import { useBotPanelStore } from "./botPanelStore";
 import { LiveArcade } from "./LiveArcade";
+import { LiveArcadeGrid, LiveSelector } from "./LiveArcadeGrid";
 import "./bot-panel.css";
 
 type View = "status" | "missions" | "tokens" | "trophies" | "live";
@@ -61,6 +62,7 @@ export function BotPanel() {
   const [now, setNow] = useState(() => Math.floor(Date.now() / 1000));
   const [timings, setTimings] = useState<MissionTimings | null>(null);
   const [tokens, setTokens] = useState<MissionTokens | null>(null);
+  const [liveFilter, setLiveFilter] = useState("all");
   const [liveReview, setLiveReview] = useState<MissionReview | null>(null);
   // Costo estimado y ahorro de cada misión de la lista (se leen de a una, en segundo plano).
   const [estimates, setEstimates] = useState<Record<string, CostEstimate | null>>({});
@@ -68,7 +70,10 @@ export function BotPanel() {
   const recent = useMemo(() => recentMissions(missions), [missions]);
   const stats = useMemo(() => botStats(missions, now), [missions, now]);
   const tier = powerTier(busy);
-  const current = recent[Math.min(selected, recent.length - 1)];
+  const runningMissions = useMemo(() => missions.filter((m) => m.status === "running"), [missions]);
+  const unified = view === "live" && runningMissions.length > 1 && liveFilter === "all";
+  const liveOne = view === "live" && liveFilter !== "all" ? recent.find((m) => m.id === liveFilter) : undefined;
+  const current = liveOne ?? recent[Math.min(selected, recent.length - 1)];
   const currentDetail = current ? missionDetails[current.id] : undefined;
   const currentId = current?.id;
   const hasCurrentDetail = Boolean(currentDetail);
@@ -281,7 +286,11 @@ export function BotPanel() {
                 </div>
               )}
 
-              {view === "live" && (
+              {view === "live" && runningMissions.length > 1 && (
+                <LiveSelector running={runningMissions} value={liveFilter} onChange={setLiveFilter} />
+              )}
+              {unified && <LiveArcadeGrid running={runningMissions} onOpen={setLiveFilter} />}
+              {view === "live" && !unified && (
                 current
                   ? <LiveArcade mission={current} tasks={currentDetail?.tasks ?? EMPTY_ARCADE_TASKS} timings={timings} review={liveReview} tokens={tokens} />
                   : <p className="ags-hq__dim">{t("botPanel.live.empty")}</p>

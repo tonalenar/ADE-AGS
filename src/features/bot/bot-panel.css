@@ -285,3 +285,13 @@
 @media (prefers-reduced-motion: reduce) {
   .ags-live__canvas { scroll-behavior: auto; }
 }
+
+.ags-live__selector { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 8px; }
+.ags-live__selector button {
+  font: inherit; font-size: 9px; padding: 4px 8px; cursor: pointer;
+  color: var(--hq-dim); background: transparent; border: 2px solid var(--hq-line);
+}
+.ags-live__selector button.on { color: var(--hq-yellow); border-color: var(--hq-yellow); }
+.ags-live__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 10px; }
+.ags-live__cell { cursor: pointer; outline-offset: 2px; }
+.ags-live__cell:hover, .ags-live__cell:focus-visible { outline: 2px solid var(--hq-yellow); }

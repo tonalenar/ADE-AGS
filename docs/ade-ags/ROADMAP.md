@@ -124,9 +124,9 @@ Depende de: 9, 10, 12 e 13. É a última porque desenhar cedo fixa um modelo que
 
 **v0 implementado em feat/etapa9-ao-vivo:** quinta aba com arcade de uma missão, andares derivados de tarefas, tempos e revisões, dependências reais, sprites ligados à atividade sustentada e placar que marca dados ausentes como não medidos. O canvas pausa quando oculto, respeita movimento reduzido e não emite áudio. Escopo e fontes em [LIVE_ARCADE.md](./LIVE_ARCADE.md).
 
-**v1 pendente:** obstáculos para bloqueios reais e troféu de entrega.
+**v1 implementado:** barris só com obstáculos medidos (aprovação pendente, falha/teste, memória sem resposta, peer ask expirado) e troféu de integração; PR/CI seguem "não medido".
 
-**v2 pendente:** visão unificada de missões lado a lado e seletor.
+**v2 implementado:** visão unificada (um fliperama por missão em execução) com seletor TODAS | missão. Pendente futuro: persistir `peer ask` em aberto para virar barril ao vivo.
 
 ## Estado Antigravity
 
