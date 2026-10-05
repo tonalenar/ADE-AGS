@@ -73,3 +73,38 @@ describe("formato de marcador", () => {
     expect(recentMissions(list).map((x) => x.id)).toEqual(["nuevo", "borrador", "viejo"]);
   });
 });
+
+describe("botStats: ventanas y pruebas", () => {
+  const DAY = 86_400;
+  const now = 100 * DAY;
+  const at = (daysAgo: number) => now - daysAgo * DAY;
+  const t = (id: string, status: MissionLike["status"], daysAgo: number, isTest?: boolean | null): MissionLike => ({
+    ...m(id, status, at(daysAgo) - 60, at(daysAgo)), isTest,
+  });
+
+  it("separa 7 y 30 días por la fecha de cierre", () => {
+    const s = botStats([
+      t("a", "done", 1), t("b", "failed", 3), t("c", "done", 20), t("d", "failed", 60), t("e", "cancelled", 2), t("f", "cancelled", 40),
+    ], now);
+    expect(s.windows.d7).toEqual({ done: 1, failed: 1, cancelled: 1, successRate: 50 });
+    expect(s.windows.d30).toEqual({ done: 2, failed: 1, cancelled: 1, successRate: 67 });
+    expect(s.successRate).toBe(50); // histórico: 2 de 4
+    expect(s.cancelled).toBe(2);
+  });
+
+  it("las marcadas como prueba salen de la tasa pero se cuentan; sin marca cuenta como real", () => {
+    const s = botStats([t("a", "done", 1), t("b", "failed", 1, true), t("c", "failed", 1, null), t("d", "failed", 1, false)], now);
+    expect(s.testCount).toBe(1);
+    expect(s.successRate).toBe(33);
+    expect(s.windows.d7).toMatchObject({ done: 1, failed: 2, successRate: 33 });
+    expect(s.total).toBe(4);
+  });
+
+  it("no adivina por el título y sin cierres en la ventana da null", () => {
+    const e2e: MissionLike = { ...m("x", "failed", 1, 2), title: "E2E test" };
+    expect(botStats([e2e], now).successRate).toBe(0);
+    const s = botStats([t("a", "done", 50), m("b", "draft", null, null)], now);
+    expect(s.windows.d7.successRate).toBeNull();
+    expect(s.windows.d30.successRate).toBeNull();
+  });
+});

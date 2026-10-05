@@ -32,6 +32,8 @@ export interface Mission {
   updatedAt: number;
   startedAt: number | null;
   endedAt: number | null;
+  /** Marcación explícita de misión de prueba/E2E; `null`/ausente = real. Las métricas de éxito la excluyen. */
+  isTest?: boolean | null;
 }
 
 /** Lo que se manda al crear o editar. */
