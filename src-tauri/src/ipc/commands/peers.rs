@@ -380,7 +380,7 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         let pty = wait_for_pty(app, &tab_id, Some(&me.window))?;
         let ready = wait_until_ready(pty);
         submit_prompt(pty, &framed(&me.name, &text, false))?;
-        emit_peer_message(app, "tell", &me.id, Some(&tab_id));
+        emit_peer_message(app, "tell", &me.id, Some(&tab_id), Some(&text));
         out["promptSent"] = json!(true);
         out["promptWaitedForReady"] = json!(ready);
     }
@@ -512,7 +512,7 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
         return Ok(json!({ "peer": describe(target), "finished": false, "sent": false, "reply": [], "status": "busy" }));
     }
     submit_prompt(pty, &outgoing(from_name, text, true, raw))?;
-    emit_peer_message(app, "ask", from_id, Some(&target.id));
+    emit_peer_message(app, "ask", from_id, Some(&target.id), None);
     remember_ask(&target.id, AskStatus { started_ms, ended_ms: None, mark, finished: None, from: from_id.into(), sent: true });
     let finished = wait_turn(pty, before, timeout.saturating_sub(started.elapsed()));
     finish_ask(from_id, &target.id, started_ms, finished);
