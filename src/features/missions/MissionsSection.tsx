@@ -89,7 +89,8 @@ export function MissionsSection() {
       load(workspaceId).catch(() => undefined);
       navigate("/workspace");
     } catch (e) {
-      AlertaToast(t("missions.title"), String(e), "error", 7000);
+      const message = e instanceof Error ? e.message : String(e);
+      AlertaToast(t("missions.title"), t(message), "error", 7000);
     } finally {
       setBusy(null);
     }

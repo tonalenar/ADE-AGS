@@ -4463,3 +4463,22 @@ fn mission_launch_precheck_uses_selected_account_catalog_and_state() {
     agente(&mut roster, "claude-code").installed = false;
     assert_eq!(check(&roster).unwrap_err(), "missions.error.agentMissing");
 }
+
+#[test]
+fn mission_terminal_system_account_requires_exposed_login_state() {
+    let mut roster = roster_de_prueba();
+    let assignment = routing::Assignment { agent_id: "claude-code".into(), model: None, account_id: None,
+        routed_by: routing::RoutedBy::Manual, notes: vec![], auto_account: false, pool_origin: None };
+    // Auto terminals use the system account, even when another named account is logged in.
+    agente(&mut roster, "claude-code").accounts.retain(|a| a.account_id.is_some());
+    assert_eq!(crate::missions::precheck::validate_launch(&roster, &assignment, 100).unwrap_err(), "missions.error.loginRequired");
+    // A missing default directory must not turn an account-capable TUI into an accountless one.
+    agente(&mut roster, "claude-code").accounts.clear();
+    assert_eq!(crate::missions::precheck::validate_launch(&roster, &assignment, 100).unwrap_err(), "missions.error.loginRequired");
+    let mut named = assignment.clone();
+    named.account_id = Some("deleted".into());
+    assert_eq!(crate::missions::precheck::validate_launch(&roster, &named, 100).unwrap_err(), "missions.error.accountMissing");
+    // Truly accountless providers keep their existing launch behavior.
+    agente(&mut roster, "claude-code").capabilities.accounts = false;
+    assert!(crate::missions::precheck::validate_launch(&roster, &assignment, 100).is_ok());
+}

@@ -306,8 +306,14 @@ pub(crate) fn validate_launch(roster: &crate::runs::roster::Roster, assignment: 
     use crate::runs::roster::{ModelAvailability, ModelDiscoveryState};
     let agent = roster.agent(&assignment.agent_id).ok_or("missions.error.agentMissing")?;
     if !agent.installed { return Err("missions.error.agentMissing".into()); }
-    let account = if agent.accounts.is_empty() { None } else {
-        Some(agent.accounts.iter().find(|a| a.account_id == assignment.account_id).ok_or("missions.error.accountMissing")?)
+    let account = if agent.capabilities.accounts || !agent.accounts.is_empty() {
+        // An absent system/default account is missing login state, not an accountless
+        // provider. Terminals with Auto open the system account and cannot substitute one.
+        let missing = if assignment.account_id.is_none() { "missions.error.loginRequired" } else { "missions.error.accountMissing" };
+        Some(agent.accounts.iter().find(|a| a.account_id == assignment.account_id).ok_or(missing)?)
+    } else {
+        if assignment.account_id.is_some() { return Err("missions.error.accountMissing".into()); }
+        None
     };
     if let Some(account) = account {
         if !account.logged_in { return Err("missions.error.loginRequired".into()); }

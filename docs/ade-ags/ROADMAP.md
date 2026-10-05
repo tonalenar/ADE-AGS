@@ -139,3 +139,5 @@ A integração nativa oferece Lead e Worker, model discovery via `agy models` e 
 ## 10. Taxa de sucesso das missões
 
 Ponto 1: precheck de instalação, sessão, catálogo por conta e limite antes do lançamento. Ver [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
+
+Ponto 1, revisão QA: aviso de erro traduzido na lista de missões e bloqueio preventivo quando a conta principal não está exposta no roster.
