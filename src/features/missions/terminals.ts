@@ -91,7 +91,15 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective"> & { i
     '- `ags peer check "<nome>"` — vê a tela dele agora.',
     '- `ags notify "<mensagem>"` — chama o usuário só quando precisar dele.',
     "",
+<<<<<<< HEAD
     "SÓ RECRUTE quando a tarefa for independente e paralelizável e a divisão for mais rápida que um agente só; o QG mostra o ganho por missão.",
+=======
+    "MENOS CONVERSA, MAIS REGISTRO:",
+    "- Antes de perguntar de novo, releia o objetivo, os achados e a memória aprovada já recebidos. Pergunte apenas a lacuna concreta que bloqueia uma decisão ou o avanço.",
+    "- Em tarefas do Mission Runtime, use o Handoff Structured v1 como entrega registrada; consulte `task_result` apenas quando precisar do payload completo. Não peça novamente resumo, arquivos, testes ou decisões que já constem no handoff.",
+    "- Neste canvas de terminais, combine uma única entrega final curta por integrante: resultado, decisões, arquivos tocados, testes e bloqueios. Atualizações intermediárias servem para bloqueios ou mudanças de decisão.",
+    "",
+>>>>>>> feat/etapa11-p5-memoria
     "MAIS TERMINAIS (você tem autonomia):",
     '- `ags peer recruit "<nome>" --agent <id> --role <papel> [--model <id>] [--effort <nível>]` — abre outro terminal já conectado a você quando a equipe não der conta (ex.: uma tarefa paralela, uma revisão independente).',
     `- Máximo de ${MAX_EXTRA_TERMINALS} terminais extras por missão; cada um custa memória e tokens. Só abra quando houver trabalho real para ele, dê a ele um nome e papel claros e feche (ou deixe encerrar) quando acabar.`,
@@ -105,11 +113,12 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective"> & { i
 /** O que se pede ao orquestrador ao terminar: deixar até 3 memórias para a próxima missão. Pura. */
 export function memorySuggestion(missionId: string): string[] {
   return [
-    "AO TERMINAR, deixe memória para a próxima missão (até 3):",
+    "AO TERMINAR, sugira até 3 memórias duradouras úteis para missões futuras:",
     `- \`ags memory suggest --mission ${missionId} --scope workspace --kind decision --key <nome-curto> --body "..."\``,
     "- Tipos: decision, constraint, finding, file, note. Escopo: workspace (vale para o projeto) ou mission.",
-    "- Só o que for útil depois e NÃO óbvio olhando o código. Nunca segredos, chaves, tokens ou dados pessoais.",
-    "- Você só SUGERE: fica pendente e o usuário aprova.",
+    "- Use mission para conhecimento duradouro desta missão; use workspace só para algo que vale no projeto todo.",
+    "- Resultado, arquivos e testes da task ficam no Handoff Structured (Mission Runtime) ou na entrega final do canvas. Memória guarda apenas o que será útil depois e não é óbvio no código.",
+    "- Você só SUGERE: a proposta fica pendente e só entra na busca após aprovação. Nunca sugira segredos, chaves, tokens ou dados pessoais.",
   ];
 }
 
@@ -124,8 +133,13 @@ export function memberBriefing(mission: Pick<Mission, "title" | "objective"> & {
     `SEU PAPEL: ${member.roleLabel}${member.roleDescription ? ` — ${member.roleDescription}` : ""}`,
     member.roleInstructions,
     "",
-    ...(mission.id ? [`Memória aprovada do projeto: \`ags memory search "<assunto>" --mission ${mission.id}\` (só lê).`, ""] : []),
-    `Aguarde as instruções do orquestrador. Responda ao que ele perguntar; para avisar algo por conta própria: \`ags peer tell "${LEAD_NAME}" "<mensagem>"\`.`,
+    ...(mission.id ? [
+      `Memória aprovada do projeto e da missão: \`ags memory search "<assunto>" --mission ${mission.id}\` (só lê). Consulte-a antes de perguntar algo que talvez já esteja registrado.`,
+      "",
+    ] : []),
+    `Ao concluir, envie UMA mensagem final curta ao orquestrador por \`ags peer tell "${LEAD_NAME}"\`, com resultado, decisões, arquivos tocados, testes e bloqueios. Use caminhos relativos e \`nenhum\` quando um campo estiver vazio.`,
+    "Atualizações intermediárias só são necessárias para sinalizar um bloqueio ou uma mudança de decisão; não repita dados do briefing ou de entregas já registradas.",
+    "Aguarde as instruções do orquestrador e responda ao que ele perguntar.",
   ]
     .filter((line, i, all) => !(line === "" && all[i - 1] === ""))
     .join("\n");

@@ -268,6 +268,21 @@ describe("memória nos briefings", () => {
     expect(memberBriefing(mission, member)).toContain("--mission m-9");
     expect(memberBriefing({ title: "t", objective: "o" }, member)).not.toContain("ags memory search");
   });
+  it("o orquestrador consulta entregas registradas antes de perguntar de novo", () => {
+    const text = leadBriefing(mission, []);
+    expect(text).toContain("Handoff Structured v1");
+    expect(text).toContain("task_result");
+    expect(text).toContain("Pergunte apenas a lacuna concreta");
+  });
+  it("a entrega do canvas é uma mensagem final compacta, com atualizações só quando necessárias", () => {
+    const text = memberBriefing(mission, member);
+    expect(text).toContain("UMA mensagem final curta");
+    for (const field of ["resultado", "decisões", "arquivos tocados", "testes", "bloqueios"]) {
+      expect(text).toContain(field);
+    }
+    expect(text).toContain("caminhos relativos");
+    expect(text).toContain("Atualizações intermediárias só");
+  });
 });
 
 describe("sugestão de memória ao terminar", () => {
@@ -275,7 +290,12 @@ describe("sugestão de memória ao terminar", () => {
     const text = leadBriefing({ id: "m-9", title: "T", objective: "O" }, []);
     expect(text).toContain("ags memory suggest --mission m-9");
     expect(text).toContain("SUGERE");
-    expect(text).toContain("Nunca segredos");
+    expect(text).toContain("Nunca sugira segredos");
+    expect(text).toContain("--scope workspace");
+    expect(text).toContain("Use mission para conhecimento duradouro desta missão");
+    expect(text).toContain("use workspace só para algo que vale no projeto todo");
+    expect(text).toContain("só entra na busca após aprovação");
+    expect(text).toContain("Handoff Structured");
     // Vem depois das instruções de coordenação.
     expect(text.indexOf("AO TERMINAR")).toBeGreaterThan(text.indexOf("COMO COORDENAR"));
   });
