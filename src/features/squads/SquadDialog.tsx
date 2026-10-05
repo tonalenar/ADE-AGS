@@ -7,8 +7,10 @@ import type { Roster } from "@/features/runs/types";
 import { AccountPickerStep, AUTO_ACCOUNT } from "@/features/tabs/wizard/AccountPickerStep";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
-import { addSquadRole, availableSquadRoles, EMPTY_SQUAD_INPUT, removeSquadRole } from "./squadForm";
-import { fastModeSupport, modelSelectionMode, modelsForAccount, withModelEffort } from "./modelSelection";
+import { addSquadRole, availableSquadRoles, EMPTY_SQUAD_INPUT, removeSquadRole, subagentDefaultIsReady } from "./squadForm";
+import { FastSwitch } from "./FastSwitch";
+import { SubagentDefaultSection } from "./SubagentDefaultSection";
+import { modelSelectionMode, modelsForAccount, withModelEffort } from "./modelSelection";
 import { ModelSelector } from "@/features/runs/ModelSelector";
 import { leadUnsupported, providerDisabled } from "@/features/runs/leadProviders";
 import type { FunctionalRole, Squad, SquadInput, SquadMemberInput } from "./types";
@@ -33,7 +35,8 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
   const remainingRoles = useMemo(() => availableSquadRoles(roles, form.members), [roles, form.members]);
   const canSaveAssignment = (assignment: { agentId: string; model: string | null; complexity: SquadMemberInput["complexity"] }) =>
     Boolean(assignment.agentId && (modelSelectionMode(assignment.model, assignment.complexity) !== "specific" || assignment.model?.trim()));
-  const ready = Boolean(form.name.trim() && canSaveAssignment(form.lead) && form.members.every(canSaveAssignment));
+  const ready = Boolean(form.name.trim() && canSaveAssignment(form.lead) && form.members.every(canSaveAssignment)
+    && subagentDefaultIsReady(form.defaultSubagent));
 
   const save = async () => {
     if (!ready || busy) return;
@@ -46,6 +49,9 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
         description: form.description.trim(),
         lead: { ...form.lead, model: form.lead.model?.trim() || null },
         members: form.members.map((member) => ({ ...member, model: member.model?.trim() || null })),
+        defaultSubagent: form.defaultSubagent
+          ? { ...form.defaultSubagent, model: form.defaultSubagent.model?.trim() || null }
+          : null,
       });
       onClose();
     } catch (cause) {
@@ -152,6 +158,8 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
             );
           })}
         </section>
+        <SubagentDefaultSection roster={roster} onRoster={setRoster} value={form.defaultSubagent}
+          onChange={(defaultSubagent) => setForm((current) => ({ ...current, defaultSubagent }))} />
         {error && <Alert variant="danger">{error}</Alert>}
       </div>
     </AppDialog>
@@ -201,16 +209,8 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, fastMo
       <ModelSelector roster={roster} agentId={agentId} accountId={accountId} autoAccount={autoAccount}
         model={model} reasoningEffort={reasoningEffort} complexity={complexity} onChange={onChange} onRoster={onRoster} />
       {agentId === "codex" && (
-        <div className="md:col-span-2 flex flex-col gap-1">
-          <label className="flex items-center gap-2 text-[10.5px] text-gray-600 dark:text-white/55">
-            <input type="checkbox" role="switch" checked={fastMode === true} onChange={(event) => onChange({ fastMode: event.target.checked })} />
-            <span className="font-semibold">{t("squads.form.fast")}</span>
-            <span className="text-gray-400 dark:text-white/35">{t("squads.form.fastHint")}</span>
-          </label>
-          {fastMode === true && fastModeSupport(model, modelsForAccount(selectedAgent, accountId, autoAccount)) === "unsupported" && (
-            <span role="alert" className="text-[10px] text-amber-700 dark:text-amber-300">{t("squads.form.fastUnsupported")}</span>
-          )}
-        </div>
+        <FastSwitch checked={fastMode === true} model={model} catalog={modelsForAccount(selectedAgent, accountId, autoAccount)}
+          onChange={(fast) => onChange({ fastMode: fast })} />
       )}
       <Field group label={t("squads.form.account")}>
         {agentId ? (

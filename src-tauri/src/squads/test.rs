@@ -39,6 +39,7 @@ fn input(name: &str) -> SquadInput {
             fast_mode: false,
         },
         members: vec![member("backend", "codex")],
+        default_subagent: None,
     }
 }
 
@@ -356,4 +357,51 @@ fn fast_mode_is_rejected_outside_codex() {
     member_fast.members[0].fast_mode = true;
     let error = store::validate(&conn, &member_fast).unwrap_err();
     assert!(error.contains("backend") && error.contains("Codex"), "{error}");
+}
+fn subagent(agent: &str, model: Option<&str>, effort: Option<&str>, fast: bool) -> super::SubagentDefault {
+    super::SubagentDefault {
+        agent_id: agent.into(),
+        model: model.map(str::to_string),
+        reasoning_effort: effort.map(str::to_string),
+        fast_mode: fast,
+    }
+}
+
+#[test]
+fn default_subagent_is_automatic_unless_chosen_and_roundtrips() {
+    let conn = test_db();
+    assert!(create(&conn, "Auto").default_subagent.is_none());
+
+    let mut raw = input("With default");
+    raw.default_subagent = Some(subagent(" codex ", Some("gpt-6-luna"), Some("max"), true));
+    let squad = store::create(&conn, &store::validate(&conn, &raw).unwrap()).unwrap();
+    let saved = store::get(&conn, &squad.id).unwrap().unwrap().default_subagent.unwrap();
+    assert_eq!(saved, subagent("codex", Some("gpt-6-luna"), Some("max"), true));
+
+    // Volver a Automático en la edición limpia todas las columnas.
+    raw.default_subagent = None;
+    let valid = store::validate(&conn, &raw).unwrap();
+    let updated = store::update(&conn, &squad.id, &valid).unwrap();
+    assert!(updated.default_subagent.is_none());
+    let (fast, model): (i64, Option<String>) = conn
+        .query_row("SELECT subagent_fast, subagent_model FROM squads WHERE id = ?1", [&squad.id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((fast, model), (0, None));
+}
+
+#[test]
+fn default_subagent_validation_rejects_bad_combinations() {
+    let conn = test_db();
+    let check = |sub: super::SubagentDefault| {
+        let mut raw = input("Invalid");
+        raw.default_subagent = Some(sub);
+        store::validate(&conn, &raw).unwrap_err()
+    };
+    assert!(check(subagent("", None, None, false)).contains("provider is required"));
+    assert!(check(subagent("no-such-agent", None, None, false)).contains("not registered"));
+    assert!(check(subagent("codex", None, Some("max"), false)).contains("requires a specific model"));
+    assert!(check(subagent("codex", Some("m"), Some("turbo"), false)).contains("Unknown reasoning effort"));
+    assert!(check(subagent("claude-code", None, None, true)).contains("Codex"));
+    // Modelo vacío cuenta como "sin modelo": el esfuerzo sigue requiriéndolo.
+    assert!(check(subagent("codex", Some("  "), Some("low"), false)).contains("requires a specific model"));
 }

@@ -182,3 +182,7 @@ Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--te
 ## Etapa 13 — Squad: subagente padrão e modo Fast (ponto 1: Fast)
 
 Implementado em `feat/etapa13-1-fast`: schema v30 (`fast_mode` em `squads`/`squad_members`), interruptor "Modo Fast" só para Codex na tela de Squad (pt-BR/en/es), `withModel`/`recruitCommand` com `-c service_tier=fast` e `ags peer recruit --fast`. Detalhes em [ROLES_SQUADS.md](./ROLES_SQUADS.md).
+
+### Etapa 13 — ponto 2 (subagente padrão do Squad)
+
+Implementado em `feat/etapa13-2-subagente` (empilhada em `feat/etapa13-1-fast`): schema v31 (`subagent_*` em `squads`), campo `defaultSubagent` no Squad (Automático ou agente + modelo + esforço + Fast), seção na tela de Squad (pt-BR/en/es), validação e testes. O uso no `ags peer recruit` e no briefing vem no ponto 3.

@@ -47,12 +47,21 @@ export interface SquadMember {
   unavailableReason: string | null;
 }
 
+/** O LLM padrão dos subagentes recrutados. Ausente/`null` = Automático (a orquestradora decide). */
+export interface SubagentDefault {
+  agentId: string;
+  model: string | null;
+  reasoningEffort?: string | null;
+  fastMode?: boolean;
+}
+
 export interface Squad {
   id: string;
   name: string;
   description: string;
   lead: SquadLead;
   members: SquadMember[];
+  defaultSubagent?: SubagentDefault | null;
   createdAt: number;
   updatedAt: number;
   available: boolean;
@@ -86,6 +95,7 @@ export interface SquadInput {
   description: string;
   lead: SquadLeadInput;
   members: SquadMemberInput[];
+  defaultSubagent?: SubagentDefault | null;
 }
 
 export interface RunSquadMember {

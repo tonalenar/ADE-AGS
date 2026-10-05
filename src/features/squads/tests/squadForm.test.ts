@@ -5,6 +5,7 @@ import {
   availableSquadRoles,
   EMPTY_SQUAD_INPUT,
   inputFromSquad,
+  subagentDefaultIsReady,
   removeSquadRole,
 } from "../squadForm";
 import { assignmentIsUnavailable } from "../types";
@@ -67,5 +68,25 @@ describe("Squad form", () => {
     const draft = inputFromSquad(squad);
     expect(draft.lead.fastMode).toBe(true);
     expect(draft.members[0].fastMode).toBe(false);
+  });
+
+  it("starts with Automatic subagent and round-trips a saved default (Fast off when absent)", () => {
+    expect(EMPTY_SQUAD_INPUT.defaultSubagent).toBeNull();
+    const base = {
+      id: "s", name: "S", description: "", createdAt: 0, updatedAt: 0, available: true, unavailableReasons: [], members: [],
+      lead: { agentId: "codex", model: null, accountId: null, autoAccount: true, complexity: null, availability: "available", unavailableReason: null },
+    };
+    expect(inputFromSquad(base as Squad).defaultSubagent).toBeNull();
+    const legacy = { ...base, defaultSubagent: { agentId: "codex", model: "gpt-6-luna" } } as Squad;
+    expect(inputFromSquad(legacy).defaultSubagent).toEqual({ agentId: "codex", model: "gpt-6-luna", reasoningEffort: null, fastMode: false });
+    const full = { ...base, defaultSubagent: { agentId: "codex", model: "gpt-6-luna", reasoningEffort: "max", fastMode: true } } as Squad;
+    expect(inputFromSquad(full).defaultSubagent).toEqual({ agentId: "codex", model: "gpt-6-luna", reasoningEffort: "max", fastMode: true });
+  });
+
+  it("only blocks saving a subagent default that has no provider", () => {
+    expect(subagentDefaultIsReady(null)).toBe(true);
+    expect(subagentDefaultIsReady(undefined)).toBe(true);
+    expect(subagentDefaultIsReady({ agentId: "codex", model: null })).toBe(true);
+    expect(subagentDefaultIsReady({ agentId: "  ", model: null })).toBe(false);
   });
 });

@@ -60,6 +60,14 @@ Schema v30 acrescenta `fast_mode` (0/1, padrão 0) a `squads` (Lead) e `squad_me
 - Se o catálogo do Codex informar que o modelo escolhido **não** oferece Fast, a UI mostra um aviso (não bloqueia nem falha); sem modelo explícito ou catálogo silencioso, não há aviso (`fastSupported = null`).
 - Runs headless não usam Fast: o snapshot `run_squad_members` não o guarda.
 
+Schema v31 acrescenta o **subagente padrão** em `squads`: `subagent_agent_id`, `subagent_model`, `subagent_effort` e `subagent_fast`. `subagent_agent_id` nulo = **Automático** (o orquestrador decide), que é o comportamento de todos os Squads anteriores; a migração é aditiva e idempotente.
+
+### Subagente padrão
+
+- Define o LLM (agente + modelo + esforço + Fast) dos agentes que o orquestrador recruta com `ags peer recruit`. A tela de Squad tem a seção "Subagente padrão": `Automático` ou um agente instalado, com o mesmo seletor de modelo/esforço da tela (catálogo da conta principal; sem roteamento por complexidade, que não existe em terminal recrutado) e, só para Codex, o modo Fast.
+- Validação no backend: agente registrado; esforço só com modelo explícito e dentro da lista conhecida; Fast só com `codex`. Voltar a Automático limpa todas as colunas.
+- Alterar o padrão afeta apenas recrutamentos futuros; o uso no recruit e no briefing do orquestrador está descrito na seção seguinte da Etapa 13.
+
 Squad é mutável; Run é histórico. Alterar um Squad afeta somente novos Runs. Uma Task criada já guarda `functional_role`, provider, modelo e account ID resolvidos. O snapshot no Run é necessário para planejar Tasks futuras daquele mesmo Run sem consultar a configuração mutável.
 
 Delete de Squad é permitido apenas sem referência por Mission ou Run. A exclusão não faz cascade em dados operacionais; referências históricas bloqueiam a operação.

@@ -5,6 +5,7 @@ export const EMPTY_SQUAD_INPUT: SquadInput = {
   description: "",
   lead: { agentId: "", model: null, accountId: null, autoAccount: true, complexity: null },
   members: [],
+  defaultSubagent: null,
 };
 
 export function inputFromSquad(squad: Squad): SquadInput {
@@ -20,6 +21,9 @@ export function inputFromSquad(squad: Squad): SquadInput {
       complexity: squad.lead.complexity,
       fastMode: squad.lead.fastMode === true,
     },
+    defaultSubagent: squad.defaultSubagent
+      ? { ...squad.defaultSubagent, reasoningEffort: squad.defaultSubagent.reasoningEffort ?? null, fastMode: squad.defaultSubagent.fastMode === true }
+      : null,
     members: squad.members.map((member) => ({
       roleId: member.roleId,
       agentId: member.agentId,
@@ -57,4 +61,9 @@ export function addSquadRole(input: SquadInput, roleId: string): SquadInput {
 
 export function removeSquadRole(input: SquadInput, roleId: string): SquadInput {
   return { ...input, members: input.members.filter((member) => member.roleId !== roleId) };
+}
+
+/** O subagente padrão está completo para salvar: Automático, ou um agente (com modelo quando o modo é específico). */
+export function subagentDefaultIsReady(value: SquadInput["defaultSubagent"]): boolean {
+  return !value || Boolean(value.agentId.trim());
 }
