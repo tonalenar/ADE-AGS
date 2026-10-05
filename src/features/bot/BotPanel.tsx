@@ -5,6 +5,7 @@ import { formatTokens } from "@/features/accounts/usage";
 import { missionReview } from "@/features/missions/ipc";
 import { useMissionsStore } from "@/features/missions/store";
 import { MissionEfficiencyCard } from "@/features/missions/MissionTimingsPanel";
+import { MissionStallAlerts, MissionStartupTime } from "@/features/missions/StallAlertsView";
 import { formatDuration, getTimings, type MissionTimings } from "@/features/missions/timings";
 import { estimateOf, formatCompactNumber, formatUsd, getTokens, type CostEstimate, type MissionTokens } from "@/features/missions/tokens";
 import type { MissionReview } from "@/features/missions/types";
@@ -261,6 +262,8 @@ export function BotPanel() {
                             </div>
                           ))
                         )}
+                        <MissionStallAlerts missionId={current.id} compact />
+                        <MissionStartupTime missionId={current.id} compact />
                         <MissionEfficiencyCard missionId={current.id} compact />
                       </div>
                     )}

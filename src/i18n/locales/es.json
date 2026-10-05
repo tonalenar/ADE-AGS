@@ -2186,5 +2186,11 @@
   "missions.tokens.estimate": "Costo estimado (precio de lista)",
   "missions.tokens.saved": "Ahorro del caché",
   "missions.tokens.estimateNote": "Tokens medidos × precio de lista de la API. Es una estimación: una suscripción no paga por token.",
-  "missions.tokens.unpriced": "Sin precio en la tabla, fuera del costo: {{models}}"
+  "missions.tokens.unpriced": "Sin precio en la tabla, fuera del costo: {{models}}",
+  "missions.stall.title": "Orquestación detenida",
+  "missions.stall.kind.orchestrator_silent": "{{name}} pidió algo al orquestador y lleva {{time}} sin respuesta.",
+  "missions.stall.kind.agent_idle": "{{name}} está ocioso con una tarea pendiente ({{time}}).",
+  "missions.startup.done": "Tiempo hasta que todos trabajan: {{time}}",
+  "missions.startup.waiting": "Esperando que arranquen los agentes: {{names}}",
+  "missions.startup.unknown": "Tiempo de inicio aún no medido."
 }

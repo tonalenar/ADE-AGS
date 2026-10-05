@@ -23,6 +23,7 @@ import { AutonomyPicker } from "./AutonomyPicker";
 import { MissionDialog } from "./MissionDialog";
 import { MissionMap } from "./MissionMap";
 import { MissionTimingsPanel } from "./MissionTimingsPanel";
+import { MissionStallAlerts, MissionStartupTime } from "./StallAlertsView";
 import { MissionTokensPanel } from "./MissionTokensPanel";
 import { startMissionInTerminals } from "./terminals";
 import { DuplicateMissionDialog } from "./DuplicateMissionDialog";
@@ -503,7 +504,11 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
 
       {mission.status !== "draft" && (
         <Section title={t("missions.timings.title")}>
-          <MissionTimingsPanel missionId={mission.id} />
+          <div className="flex flex-col gap-3">
+            <MissionStallAlerts missionId={mission.id} />
+            <MissionStartupTime missionId={mission.id} />
+            <MissionTimingsPanel missionId={mission.id} />
+          </div>
         </Section>
       )}
 
