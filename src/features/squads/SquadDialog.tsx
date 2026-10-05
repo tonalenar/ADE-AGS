@@ -7,7 +7,9 @@ import type { Roster } from "@/features/runs/types";
 import { AccountPickerStep, AUTO_ACCOUNT } from "@/features/tabs/wizard/AccountPickerStep";
 import { AppDialog } from "@/shared/ui/AppDialog";
 
-import { addSquadRole, availableSquadRoles, EMPTY_SQUAD_INPUT, removeSquadRole } from "./squadForm";
+import { addSquadRole, availableSquadRoles, EMPTY_SQUAD_INPUT, removeSquadRole, subagentDefaultIsReady } from "./squadForm";
+import { FastSwitch } from "./FastSwitch";
+import { SubagentDefaultSection } from "./SubagentDefaultSection";
 import { modelSelectionMode, modelsForAccount, withModelEffort } from "./modelSelection";
 import { ModelSelector } from "@/features/runs/ModelSelector";
 import { leadUnsupported, providerDisabled } from "@/features/runs/leadProviders";
@@ -33,7 +35,8 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
   const remainingRoles = useMemo(() => availableSquadRoles(roles, form.members), [roles, form.members]);
   const canSaveAssignment = (assignment: { agentId: string; model: string | null; complexity: SquadMemberInput["complexity"] }) =>
     Boolean(assignment.agentId && (modelSelectionMode(assignment.model, assignment.complexity) !== "specific" || assignment.model?.trim()));
-  const ready = Boolean(form.name.trim() && canSaveAssignment(form.lead) && form.members.every(canSaveAssignment));
+  const ready = Boolean(form.name.trim() && canSaveAssignment(form.lead) && form.members.every(canSaveAssignment)
+    && subagentDefaultIsReady(form.defaultSubagent));
 
   const save = async () => {
     if (!ready || busy) return;
@@ -46,6 +49,9 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
         description: form.description.trim(),
         lead: { ...form.lead, model: form.lead.model?.trim() || null },
         members: form.members.map((member) => ({ ...member, model: member.model?.trim() || null })),
+        defaultSubagent: form.defaultSubagent
+          ? { ...form.defaultSubagent, model: form.defaultSubagent.model?.trim() || null }
+          : null,
       });
       onClose();
     } catch (cause) {
@@ -91,6 +97,7 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
             agentId={form.lead.agentId}
             model={form.lead.model}
             reasoningEffort={form.lead.reasoningEffort}
+            fastMode={form.lead.fastMode}
             accountId={form.lead.accountId}
             autoAccount={form.lead.autoAccount}
             complexity={form.lead.complexity}
@@ -135,6 +142,7 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
                   agentId={member.agentId}
                   model={member.model}
                   reasoningEffort={member.reasoningEffort}
+                  fastMode={member.fastMode}
                   accountId={member.accountId}
                   autoAccount={member.autoAccount}
                   complexity={member.complexity}
@@ -150,6 +158,8 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
             );
           })}
         </section>
+        <SubagentDefaultSection roster={roster} onRoster={setRoster} value={form.defaultSubagent}
+          onChange={(defaultSubagent) => setForm((current) => ({ ...current, defaultSubagent }))} />
         {error && <Alert variant="danger">{error}</Alert>}
       </div>
     </AppDialog>
@@ -158,13 +168,14 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
 
 type AgentPatch = Partial<Omit<SquadMemberInput, "roleId">>;
 
-function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, accountId, autoAccount, complexity, isolateDefault, availability, unavailableReason, onChange, lead = false }: {
+function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, fastMode, accountId, autoAccount, complexity, isolateDefault, availability, unavailableReason, onChange, lead = false }: {
   lead?: boolean;
   roster: Roster | null;
   onRoster: (roster: Roster) => void;
   agentId: string;
   model: string | null;
   reasoningEffort?: string | null;
+  fastMode?: boolean;
   accountId: string | null;
   autoAccount: boolean;
   complexity: SquadMemberInput["complexity"];
@@ -179,7 +190,7 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, accoun
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
       <Field label={t("squads.form.provider")}>
-        <select className={SELECT} value={agentId} onChange={(event) => onChange({ agentId: event.target.value, model: null, reasoningEffort: null, accountId: null, autoAccount: true })}>
+        <select className={SELECT} value={agentId} onChange={(event) => onChange({ agentId: event.target.value, model: null, reasoningEffort: null, fastMode: false, accountId: null, autoAccount: true })}>
           <option value="">{t("squads.form.chooseProvider")}</option>
           {agentId && (!roster || !roster.agents.some((agent) => agent.agentId === agentId)) && (
             <option value={agentId}>{agentId} · {t("squads.unavailable")}</option>
@@ -197,6 +208,10 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, accoun
       </Field>
       <ModelSelector roster={roster} agentId={agentId} accountId={accountId} autoAccount={autoAccount}
         model={model} reasoningEffort={reasoningEffort} complexity={complexity} onChange={onChange} onRoster={onRoster} />
+      {agentId === "codex" && (
+        <FastSwitch checked={fastMode === true} model={model} catalog={modelsForAccount(selectedAgent, accountId, autoAccount)}
+          onChange={(fast) => onChange({ fastMode: fast })} />
+      )}
       <Field group label={t("squads.form.account")}>
         {agentId ? (
           <AccountPickerStep agentId={agentId} value={accountValue}

@@ -276,10 +276,53 @@ pub(super) fn peer_disconnect(app: &AppHandle, args: &Value) -> Result<Value, St
 ///
 /// La tarea va DESPUÉS de conectar: el agente nuevo tiene que poder contestar con
 /// `ags peer tell` desde su primer turno.
+/// `--fast` do recruit, só o flag (`on`/`off` também valem). Se vale para o agente, vê-se depois.
+fn recruit_fast_flag(args: &Value) -> Result<bool, String> {
+    match args.get("fast") {
+        None | Some(Value::Null) => Ok(false),
+        Some(Value::Bool(value)) => Ok(*value),
+        Some(Value::String(text)) => match text.trim().to_ascii_lowercase().as_str() {
+            "true" | "on" | "1" => Ok(true),
+            "false" | "off" | "0" => Ok(false),
+            _ => Err("--fast aceita apenas o flag sozinho (ou on/off).".into()),
+        },
+        Some(_) => Err("--fast aceita apenas o flag sozinho (ou on/off).".into()),
+    }
+}
+
+/// O modo Fast é um `service_tier` de Codex: em outro agente é um erro claro, antes de abrir
+/// qualquer aba, em vez de um flag que não faria nada.
+fn check_fast_agent(fast: bool, agent: &str) -> Result<(), String> {
+    if fast && agent != "codex" {
+        return Err("--fast só existe para o Codex (--agent codex); outros agentes não têm esse modo.".into());
+    }
+    Ok(())
+}
+
+/// O subagente padrão do Squad da missão em execução a que a orquestradora pertence. Qualquer
+/// falha (sem missão, sem banco, sem Squad) é `None`: o recruit se comporta como sempre.
+fn squad_subagent_default(app: &AppHandle, orchestrator: &str) -> Option<crate::squads::SubagentDefault> {
+    use tauri::Manager;
+    let mission = crate::canvas::mission_of_tab(&crate::canvas::load_boards(), orchestrator)?;
+    let db = app.try_state::<crate::database::DbConnection>()?.inner().clone();
+    let conn = db.lock().ok()?;
+    crate::squads::recruit::default_for_mission(&conn, &mission).ok().flatten()
+}
+
 pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let me = orchestrator(app, args)?;
     let name = arg_str(args, "name")?;
-    let agent = arg_str(args, "agent")?;
+    // Sem --model/--effort, o subagente padrão do Squad da missão decide (ver `squads::recruit`).
+    let subagent_default = squad_subagent_default(app, &me.id);
+    let llm = crate::squads::recruit::resolve_recruit_llm(
+        arg_str_opt(args, "agent").as_deref(),
+        arg_str_opt(args, "model").as_deref(),
+        arg_str_opt(args, "effort").as_deref(),
+        recruit_fast_flag(args)?,
+        subagent_default.as_ref(),
+    )?;
+    let agent = llm.agent.clone();
+    check_fast_agent(llm.fast, &agent)?;
     if name.trim().is_empty() {
         return Err("O agente novo precisa de um nome.".into());
     }
@@ -356,10 +399,13 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         create["account"] = json!(account);
     }
     // Modelo y esfuerzo del agente nuevo (los aplica la pantalla al armar el comando).
-    for key in ["model", "effort"] {
-        if let Some(value) = arg_str_opt(args, key).filter(|v| !v.trim().is_empty()) {
+    for (key, value) in [("model", &llm.model), ("effort", &llm.effort)] {
+        if let Some(value) = value {
             create[key] = json!(value);
         }
+    }
+    if llm.fast {
+        create["fast"] = json!(true);
     }
     let created = tab_create(app, &create)?;
     let tab_id = created.get("tabId").and_then(Value::as_str).ok_or("A aba foi criada sem id")?.to_string();
@@ -367,7 +413,10 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
     let label = role.as_ref().map(|r| r.label.clone());
     canvas_change(app, &me, "canvas.recruited", json!({ "cwd": cwd, "tabId": tab_id, "near": me.id, "role": label }))?;
 
-    let mut out = json!({ "recruited": { "id": tab_id, "name": name, "agent": agent, "cwd": cwd } });
+    let mut out = json!({ "recruited": {
+        "id": tab_id, "name": name, "agent": agent, "cwd": cwd,
+        "model": llm.model, "effort": llm.effort, "fast": llm.fast, "llmSource": llm.source.as_str(),
+    } });
     let prompt = arg_str_opt(args, "prompt").filter(|p| !p.trim().is_empty());
     // O bloco de ambiente sempre vai primeiro, mesmo sem tarefa: o recruit já sabe onde
     // está, qual shell usar e como validar antes de receber a tarefa seguinte.
@@ -623,6 +672,19 @@ fn wait_turn(pty: u32, before: u64, timeout: Duration) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn recruit_fast_flag_parses_and_only_codex_may_use_it() {
+        assert!(!recruit_fast_flag(&json!({})).unwrap());
+        assert!(recruit_fast_flag(&json!({ "fast": true })).unwrap());
+        assert!(recruit_fast_flag(&json!({ "fast": "on" })).unwrap());
+        assert!(!recruit_fast_flag(&json!({ "fast": "false" })).unwrap());
+        assert!(recruit_fast_flag(&json!({ "fast": "maybe" })).is_err());
+        assert!(recruit_fast_flag(&json!({ "fast": 3 })).is_err());
+        assert!(check_fast_agent(true, "codex").is_ok());
+        assert!(check_fast_agent(false, "claude-code").is_ok());
+        assert!(check_fast_agent(true, "claude-code").unwrap_err().contains("Codex"));
+    }
 
     #[test]
     fn status_distinguishes_waiting_timeout_and_completion_and_freezes_elapsed() {

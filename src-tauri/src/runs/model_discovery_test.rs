@@ -375,3 +375,22 @@ fn claude_native_catalog_separates_main_more_and_model_specific_effort() {
     assert!(super::parse_claude_native_catalog(&document, "unknown").is_empty());
     assert!(super::parse_claude_native_catalog(&serde_json::json!({}), "2.1.280").is_empty());
 }
+
+#[test]
+fn codex_model_reports_fast_support_only_from_catalog_tiers() {
+    let raw = page(
+        serde_json::json!([
+            codex_model("fast-model", serde_json::json!({ "additionalSpeedTiers": ["fast"] })),
+            codex_model("tier-model", serde_json::json!({ "serviceTiers": [{ "id": "priority", "name": "Fast" }] })),
+            codex_model("slow-model", serde_json::json!({ "additionalSpeedTiers": [] })),
+            codex_model("silent-model", serde_json::json!({})),
+        ]),
+        serde_json::Value::Null,
+    );
+    let models = parse_codex_model_page(&raw).unwrap().models;
+    let by_id = |id: &str| models.iter().find(|m| m.id == id).unwrap().fast_supported;
+    assert_eq!(by_id("fast-model"), Some(true));
+    assert_eq!(by_id("tier-model"), Some(true));
+    assert_eq!(by_id("slow-model"), Some(false));
+    assert_eq!(by_id("silent-model"), None);
+}

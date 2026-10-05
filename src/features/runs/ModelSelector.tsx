@@ -6,10 +6,12 @@ import { refreshRosterModels } from "./ipc";
 import type { Complexity, Roster } from "./types";
 
 /** One persisted contract across Lead, workers, and Mission provider selection. */
-export function ModelSelector({ roster, agentId, accountId, autoAccount, model, complexity, reasoningEffort = null, onChange, onRoster }: {
+export function ModelSelector({ roster, agentId, accountId, autoAccount, model, complexity, reasoningEffort = null, allowComplexity = true, onChange, onRoster }: {
   roster: Roster | null; agentId: string; accountId: string | null; autoAccount: boolean;
   model: string | null; complexity: Complexity | null;
   reasoningEffort?: string | null;
+  /** `false` esconde o roteamento por complexidade (um terminal recrutado não passa pelo roteador). */
+  allowComplexity?: boolean;
   onChange: (patch: { model: string | null; complexity: Complexity | null; reasoningEffort?: string | null }) => void;
   onRoster: (roster: Roster) => void;
 }) {
@@ -41,7 +43,7 @@ export function ModelSelector({ roster, agentId, accountId, autoAccount, model, 
     <select id={`${id}-mode`} className={SELECT} value={mode} disabled={!agentId}
       onChange={(event) => selectModel(modelSelectionPatch(event.target.value as ModelSelectionMode, model, complexity))}>
       <option value="provider-default">{t("squads.form.mode.providerDefault")}</option>
-      <option value="complexity">{t("squads.form.mode.complexity")}</option>
+      {allowComplexity && <option value="complexity">{t("squads.form.mode.complexity")}</option>}
       <option value="specific">{t("squads.form.mode.specific")}</option>
     </select>
     {mode === "complexity" && <select aria-label={t("squads.form.complexity")} className={SELECT} value={complexity ?? "standard"}

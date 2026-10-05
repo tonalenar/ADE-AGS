@@ -25,6 +25,24 @@ pub(super) struct CodexModelPage {
     pub next_cursor: Option<String>,
 }
 
+/// `Some(true)` si el modelo declara el nivel Fast (`additionalSpeedTiers` o `serviceTiers`);
+/// `Some(false)` si el catálogo informa niveles pero no ese; `None` si no informa nada.
+fn codex_fast_support(row: &Value) -> Option<bool> {
+    let speed = row.get("additionalSpeedTiers").and_then(Value::as_array);
+    let tiers = row.get("serviceTiers").and_then(Value::as_array);
+    if speed.is_none() && tiers.is_none() {
+        return None;
+    }
+    let is_fast = |value: &Value| value.as_str().is_some_and(|s| s.eq_ignore_ascii_case("fast"));
+    let in_speed = speed.is_some_and(|items| items.iter().any(is_fast));
+    let in_tiers = tiers.is_some_and(|items| {
+        items.iter().any(|item| {
+            item.get("name").is_some_and(is_fast) || item.get("id").is_some_and(is_fast)
+        })
+    });
+    Some(in_speed || in_tiers)
+}
+
 /// Parses only stable fields needed by the roster; fields added by Codex are ignored.
 pub(super) fn parse_codex_model_page(raw: &str) -> Result<CodexModelPage, String> {
     let value: Value = serde_json::from_str(raw)
@@ -80,6 +98,7 @@ pub(super) fn parse_codex_model_page(raw: &str) -> Result<CodexModelPage, String
                 .get("defaultReasoningEffort")
                 .and_then(Value::as_str)
                 .map(str::to_string),
+            fast_supported: codex_fast_support(row),
             unavailable: None,
         });
     }
@@ -493,6 +512,7 @@ pub(super) fn insert_claude_model(
         availability: ModelAvailability::Unknown,
         reasoning_levels: None,
         default_reasoning: None,
+        fast_supported: None,
         unavailable: None,
     };
     match models.get(&id) {
@@ -613,6 +633,7 @@ fn parse_gateway_models(body: &[u8]) -> Option<Vec<RosterModel>> {
                     availability: ModelAvailability::Unknown,
                     reasoning_levels: None,
                     default_reasoning: None,
+        fast_supported: None,
                     unavailable: None,
                 })
             })

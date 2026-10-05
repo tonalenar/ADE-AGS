@@ -20,6 +20,7 @@ fn member(role_id: &str, agent_id: &str) -> SquadMemberInput {
         account_id: None,
         auto_account: true,
         complexity: None,
+        fast_mode: false,
         isolate_default: true,
     }
 }
@@ -35,8 +36,10 @@ fn input(name: &str) -> SquadInput {
             account_id: None,
             auto_account: true,
             complexity: None,
+            fast_mode: false,
         },
         members: vec![member("backend", "codex")],
+        default_subagent: None,
     }
 }
 
@@ -319,4 +322,173 @@ fn reasoning_effort_survives_squad_edits_run_snapshots_and_task_history() {
     assert!(store::validate(&conn, &team).is_err());
     team.members[0].model = None;
     assert!(store::validate(&conn, &team).is_err());
+}
+
+#[test]
+fn fast_mode_roundtrips_for_codex_lead_and_member_and_defaults_off() {
+    let conn = test_db();
+    let mut raw = input("Fast squad");
+    raw.lead.agent_id = "codex".into();
+    raw.lead.model = Some("gpt-6-luna".into());
+    raw.lead.fast_mode = true;
+    raw.members[0].fast_mode = true;
+    let valid = store::validate(&conn, &raw).unwrap();
+    let squad = store::create(&conn, &valid).unwrap();
+    assert!(squad.lead.fast_mode);
+    assert!(squad.members[0].fast_mode);
+
+    let again = store::get(&conn, &squad.id).unwrap().unwrap();
+    assert!(again.lead.fast_mode && again.members[0].fast_mode);
+
+    // Una Squad guardada sin tocar Fast queda desactivada.
+    assert!(!create(&conn, "Plain squad").lead.fast_mode);
+}
+
+#[test]
+fn fast_mode_is_rejected_outside_codex() {
+    let conn = test_db();
+    let mut lead = input("Lead fast");
+    lead.lead.fast_mode = true; // claude-code
+    let error = store::validate(&conn, &lead).unwrap_err();
+    assert!(error.contains("lead") && error.contains("Codex"), "{error}");
+
+    let mut member_fast = input("Member fast");
+    member_fast.members = vec![member("backend", "claude-code")];
+    member_fast.members[0].fast_mode = true;
+    let error = store::validate(&conn, &member_fast).unwrap_err();
+    assert!(error.contains("backend") && error.contains("Codex"), "{error}");
+}
+fn subagent(agent: &str, model: Option<&str>, effort: Option<&str>, fast: bool) -> super::SubagentDefault {
+    super::SubagentDefault {
+        agent_id: agent.into(),
+        model: model.map(str::to_string),
+        reasoning_effort: effort.map(str::to_string),
+        fast_mode: fast,
+    }
+}
+
+#[test]
+fn default_subagent_is_automatic_unless_chosen_and_roundtrips() {
+    let conn = test_db();
+    assert!(create(&conn, "Auto").default_subagent.is_none());
+
+    let mut raw = input("With default");
+    raw.default_subagent = Some(subagent(" codex ", Some("gpt-6-luna"), Some("max"), true));
+    let squad = store::create(&conn, &store::validate(&conn, &raw).unwrap()).unwrap();
+    let saved = store::get(&conn, &squad.id).unwrap().unwrap().default_subagent.unwrap();
+    assert_eq!(saved, subagent("codex", Some("gpt-6-luna"), Some("max"), true));
+
+    // Volver a Automático en la edición limpia todas las columnas.
+    raw.default_subagent = None;
+    let valid = store::validate(&conn, &raw).unwrap();
+    let updated = store::update(&conn, &squad.id, &valid).unwrap();
+    assert!(updated.default_subagent.is_none());
+    let (fast, model): (i64, Option<String>) = conn
+        .query_row("SELECT subagent_fast, subagent_model FROM squads WHERE id = ?1", [&squad.id], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((fast, model), (0, None));
+}
+
+#[test]
+fn default_subagent_validation_rejects_bad_combinations() {
+    let conn = test_db();
+    let check = |sub: super::SubagentDefault| {
+        let mut raw = input("Invalid");
+        raw.default_subagent = Some(sub);
+        store::validate(&conn, &raw).unwrap_err()
+    };
+    assert!(check(subagent("", None, None, false)).contains("provider is required"));
+    assert!(check(subagent("no-such-agent", None, None, false)).contains("not registered"));
+    assert!(check(subagent("codex", None, Some("max"), false)).contains("requires a specific model"));
+    assert!(check(subagent("codex", Some("m"), Some("turbo"), false)).contains("Unknown reasoning effort"));
+    assert!(check(subagent("claude-code", None, None, true)).contains("Codex"));
+    // Modelo vacío cuenta como "sin modelo": el esfuerzo sigue requiriéndolo.
+    assert!(check(subagent("codex", Some("  "), Some("low"), false)).contains("requires a specific model"));
+}
+
+mod recruit_default {
+    use super::*;
+    use crate::squads::recruit::{default_for_mission, resolve_recruit_llm, RecruitSource};
+
+    fn luna() -> super::super::SubagentDefault {
+        subagent("codex", Some("gpt-6-luna"), Some("max"), true)
+    }
+
+    #[test]
+    fn without_flags_the_squad_default_is_used_whole() {
+        let llm = resolve_recruit_llm(Some("codex"), None, None, false, Some(&luna())).unwrap();
+        assert_eq!(llm.source, RecruitSource::SquadDefault);
+        assert_eq!((llm.model.as_deref(), llm.effort.as_deref(), llm.fast), (Some("gpt-6-luna"), Some("max"), true));
+    }
+
+    #[test]
+    fn omitting_agent_recruits_the_default_agent() {
+        let llm = resolve_recruit_llm(None, None, None, false, Some(&luna())).unwrap();
+        assert_eq!(llm.agent, "codex");
+        assert_eq!(llm.source, RecruitSource::SquadDefault);
+        let error = resolve_recruit_llm(None, None, None, false, None).unwrap_err();
+        assert!(error.contains("--agent"), "{error}");
+    }
+
+    #[test]
+    fn explicit_model_or_effort_always_win_and_do_not_mix_with_the_default() {
+        let model = resolve_recruit_llm(Some("codex"), Some("gpt-6-sol"), None, false, Some(&luna())).unwrap();
+        assert_eq!(model.source, RecruitSource::Explicit);
+        assert_eq!((model.model.as_deref(), model.effort.as_deref(), model.fast), (Some("gpt-6-sol"), None, false));
+        let effort = resolve_recruit_llm(Some("codex"), None, Some("low"), false, Some(&luna())).unwrap();
+        assert_eq!((effort.model, effort.effort.as_deref(), effort.fast), (None, Some("low"), false));
+        // El flag --fast explícito se respeta aunque se pida otro modelo.
+        assert!(resolve_recruit_llm(Some("codex"), Some("gpt-6-sol"), None, true, Some(&luna())).unwrap().fast);
+        // Espacios en blanco cuentan como "no pasado".
+        let blank = resolve_recruit_llm(Some("codex"), Some("  "), Some(""), false, Some(&luna())).unwrap();
+        assert_eq!(blank.source, RecruitSource::SquadDefault);
+    }
+
+    #[test]
+    fn a_different_agent_inherits_nothing_and_automatic_keeps_todays_behaviour() {
+        let other = resolve_recruit_llm(Some("claude-code"), None, None, false, Some(&luna())).unwrap();
+        assert_eq!((other.agent.as_str(), other.model, other.effort, other.fast, other.source), ("claude-code", None, None, false, RecruitSource::ProviderDefault));
+        let auto = resolve_recruit_llm(Some("codex"), Some("m"), Some("high"), false, None).unwrap();
+        assert_eq!((auto.model.as_deref(), auto.effort.as_deref(), auto.source), (Some("m"), Some("high"), RecruitSource::Explicit));
+    }
+
+    fn mission_with(conn: &Connection, squad_id: Option<String>) -> String {
+        let input = MissionInput {
+            title: "M".into(),
+            objective: "O".into(),
+            cwd: "/tmp/project".into(),
+            auto_account: true,
+            squad_id,
+            ..Default::default()
+        };
+        let valid = missions::store::validate(conn, &input).unwrap();
+        missions::store::create(conn, "w1", &valid).unwrap().id
+    }
+
+    #[test]
+    fn default_for_mission_needs_a_running_mission_with_a_squad_that_has_a_default() {
+        let conn = test_db();
+        workspace(&conn);
+        let mut raw = input("Squad with default");
+        raw.default_subagent = Some(luna());
+        let with_default = store::create(&conn, &store::validate(&conn, &raw).unwrap()).unwrap();
+        let automatic = create(&conn, "Automatic squad");
+
+        let mission = mission_with(&conn, Some(with_default.id.clone()));
+        // Rascunho (aún no corre) = comportamiento actual.
+        assert_eq!(default_for_mission(&conn, &mission).unwrap(), None);
+        conn.execute("UPDATE missions SET status = 'running' WHERE id = ?1", [&mission]).unwrap();
+        assert_eq!(default_for_mission(&conn, &mission).unwrap(), Some(luna()));
+        conn.execute("UPDATE missions SET status = 'done' WHERE id = ?1", [&mission]).unwrap();
+        assert_eq!(default_for_mission(&conn, &mission).unwrap(), None);
+
+        let auto_mission = mission_with(&conn, Some(automatic.id));
+        conn.execute("UPDATE missions SET status = 'running' WHERE id = ?1", [&auto_mission]).unwrap();
+        assert_eq!(default_for_mission(&conn, &auto_mission).unwrap(), None);
+
+        let no_squad = mission_with(&conn, None);
+        conn.execute("UPDATE missions SET status = 'running' WHERE id = ?1", [&no_squad]).unwrap();
+        assert_eq!(default_for_mission(&conn, &no_squad).unwrap(), None);
+        assert_eq!(default_for_mission(&conn, "missing").unwrap(), None);
+    }
 }

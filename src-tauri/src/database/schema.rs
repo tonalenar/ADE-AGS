@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 29;
+const SCHEMA_VERSION: i32 = 31;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1025,6 +1025,32 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
              checked_at   INTEGER NOT NULL
          );",
     )?;
+    if user_version(conn)? < 29 { set_user_version(conn, 29)?; }
+    // v30 — modo Fast de Codex por integrante del Squad (lead en `squads`, el resto en
+    // `squad_members`). Aditivo e idempotente: las filas viejas quedan en 0 = desactivado.
+    for table in ["squads", "squad_members"] {
+        if table_exists(conn, table) && !has_column(conn, table, "fast_mode") {
+            conn.execute_batch(&format!(
+                "ALTER TABLE {table} ADD COLUMN fast_mode INTEGER NOT NULL DEFAULT 0 CHECK(fast_mode IN (0,1));"
+            ))?;
+        }
+    }
+    if user_version(conn)? < 30 { set_user_version(conn, 30)?; }
+    // v31 — subagente padrão del Squad: qué LLM usan por defecto los agentes que la
+    // orquestadora suma con `ags peer recruit`. `subagent_agent_id` NULL = Automático (la
+    // orquestadora decide), que es lo que ya hacían todos los Squads anteriores.
+    if table_exists(conn, "squads") {
+        for (column, ddl) in [
+            ("subagent_agent_id", "TEXT"),
+            ("subagent_model", "TEXT"),
+            ("subagent_effort", "TEXT"),
+            ("subagent_fast", "INTEGER NOT NULL DEFAULT 0 CHECK(subagent_fast IN (0,1))"),
+        ] {
+            if !has_column(conn, "squads", column) {
+                conn.execute_batch(&format!("ALTER TABLE squads ADD COLUMN {column} {ddl};"))?;
+            }
+        }
+    }
     set_user_version(conn, SCHEMA_VERSION)
 }
 

@@ -181,6 +181,8 @@ export interface RosterModel {
   availability: "available" | "unavailable" | "unknown";
   reasoningLevels: string[] | null;
   defaultReasoning: string | null;
+  /** El modelo ofrece el modo Fast de Codex. `null` = el catálogo no lo informa. */
+  fastSupported?: boolean | null;
   unavailable: string | null;
 }
 

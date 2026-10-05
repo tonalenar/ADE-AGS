@@ -1,9 +1,10 @@
+pub(crate) mod recruit;
 pub(crate) mod store;
 #[cfg(test)]
 mod test;
 mod types;
 
-pub use types::{RunSquadMember, Squad, SquadInput};
+pub use types::{RunSquadMember, Squad, SquadInput, SubagentDefault};
 
 use tauri::{AppHandle, Emitter, Runtime};
 

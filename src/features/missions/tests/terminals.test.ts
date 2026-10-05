@@ -20,7 +20,7 @@ describe("finishedMissionTabs", () => {
     expect(finishedMissionTabs(missions, index, tabs)).toEqual(["b", "c"]);
   });
 });
-import { LEAD_NAME, MAX_EXTRA_TERMINALS, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, teamOf, uniqueNames } from "../terminals";
+import { LEAD_NAME, MAX_EXTRA_TERMINALS, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, subagentDefaultBriefing, teamOf, uniqueNames } from "../terminals";
 
 describe("accountsNeedingLogin", () => {
   const accounts = [
@@ -303,5 +303,36 @@ describe("sugestão de memória ao terminar", () => {
   });
   it("sem id da missão não há o que sugerir", () => {
     expect(leadBriefing({ title: "T", objective: "O" }, [])).not.toContain("memory suggest");
+  });
+});
+
+describe("briefing do subagente padrão do Squad", () => {
+  const mission = { title: "T", objective: "O" };
+
+  it("sem Squad (undefined) o briefing não fala de subagente padrão", () => {
+    expect(leadBriefing(mission, [])).not.toContain("SUBAGENTE PADRÃO");
+    expect(subagentDefaultBriefing(undefined)).toEqual([]);
+  });
+
+  it("Automático (null): o orquestrador escolhe e justifica", () => {
+    const text = leadBriefing(mission, [], "", "", null);
+    expect(text).toContain("SUBAGENTE PADRÃO DO SQUAD: Automático");
+    expect(text).toContain("JUSTIFIQUE");
+  });
+
+  it("padrão ativo: mostra agente, modelo, esforço e Fast, e diz que flags explícitas vencem", () => {
+    const text = leadBriefing(mission, [], "", "", { agentId: "codex", model: "gpt-6-luna", reasoningEffort: "max", fastMode: true });
+    expect(text).toContain("SUBAGENTE PADRÃO DO SQUAD (ativo): codex · modelo gpt-6-luna · esforço max · Fast");
+    expect(text).toContain("explícitos sempre vencem");
+    expect(text).not.toContain("JUSTIFIQUE");
+  });
+
+  it("padrão sem modelo/esforço descreve o que a TUI usa", () => {
+    const [headline] = subagentDefaultBriefing({ agentId: "claude-code", model: null });
+    expect(headline).toBe("SUBAGENTE PADRÃO DO SQUAD (ativo): claude-code · modelo padrão do agente · esforço automático.");
+  });
+
+  it("o recruit do briefing anuncia --fast", () => {
+    expect(leadBriefing(mission, [])).toContain("[--fast]");
   });
 });

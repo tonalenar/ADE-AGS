@@ -36,4 +36,28 @@ describe("withModel", () => {
     expect(withModel("codex", "codex", "x; rm -rf /", "high; ls")).toBe("codex");
     expect(withModel("codex", "codex", "a b", null)).toBe("codex");
   });
+
+  describe("modo Fast", () => {
+    it("Codex recibe service_tier=fast junto al modelo y al esfuerzo", () => {
+      expect(withModel("codex", "codex", "gpt-6-luna", "max", true)).toBe(
+        "codex -m gpt-6-luna -c model_reasoning_effort=max -c service_tier=fast",
+      );
+      expect(withModel("codex", "codex", null, null, true)).toBe("codex -c service_tier=fast");
+    });
+
+    it("sin Fast (false, null o ausente) el comando no cambia", () => {
+      expect(withModel("codex", "codex", "gpt-6-luna", null, false)).toBe("codex -m gpt-6-luna");
+      expect(withModel("codex", "codex", null, null, null)).toBe("codex");
+    });
+
+    it("solo Codex lo recibe: otros agentes ignoran Fast", () => {
+      for (const agent of ["claude-code", "antigravity", "gemini-cli", "opencode", "bash"]) {
+        expect(withModel(agent, "cmd", null, null, true)).toBe("cmd");
+      }
+    });
+
+    it("no repite un service_tier que el comando ya trae", () => {
+      expect(withModel("codex", "codex -c service_tier=default", null, null, true)).toBe("codex -c service_tier=default");
+    });
+  });
 });

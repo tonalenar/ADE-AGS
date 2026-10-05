@@ -28,6 +28,7 @@ export interface SquadLead {
   accountId: string | null;
   autoAccount: boolean;
   complexity: Complexity | null;
+  fastMode?: boolean;
   availability: AssignmentAvailability;
   unavailableReason: string | null;
 }
@@ -40,9 +41,18 @@ export interface SquadMember {
   accountId: string | null;
   autoAccount: boolean;
   complexity: Complexity | null;
+  fastMode?: boolean;
   isolateDefault: boolean;
   availability: AssignmentAvailability;
   unavailableReason: string | null;
+}
+
+/** O LLM padrão dos subagentes recrutados. Ausente/`null` = Automático (a orquestradora decide). */
+export interface SubagentDefault {
+  agentId: string;
+  model: string | null;
+  reasoningEffort?: string | null;
+  fastMode?: boolean;
 }
 
 export interface Squad {
@@ -51,6 +61,7 @@ export interface Squad {
   description: string;
   lead: SquadLead;
   members: SquadMember[];
+  defaultSubagent?: SubagentDefault | null;
   createdAt: number;
   updatedAt: number;
   available: boolean;
@@ -64,6 +75,7 @@ export interface SquadLeadInput {
   accountId: string | null;
   autoAccount: boolean;
   complexity: Complexity | null;
+  fastMode?: boolean;
 }
 
 export interface SquadMemberInput {
@@ -74,6 +86,7 @@ export interface SquadMemberInput {
   accountId: string | null;
   autoAccount: boolean;
   complexity: Complexity | null;
+  fastMode?: boolean;
   isolateDefault: boolean;
 }
 
@@ -82,6 +95,7 @@ export interface SquadInput {
   description: string;
   lead: SquadLeadInput;
   members: SquadMemberInput[];
+  defaultSubagent?: SubagentDefault | null;
 }
 
 export interface RunSquadMember {

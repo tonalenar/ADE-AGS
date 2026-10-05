@@ -39,6 +39,9 @@ pub struct SquadLeadInput {
     pub auto_account: bool,
     #[serde(default)]
     pub complexity: Option<Complexity>,
+    /// Modo Fast de Codex (`service_tier="fast"`). Solo vale con el agente `codex`.
+    #[serde(default)]
+    pub fast_mode: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -56,7 +59,24 @@ pub struct SquadMemberInput {
     #[serde(default)]
     pub complexity: Option<Complexity>,
     #[serde(default)]
+    pub fast_mode: bool,
+    #[serde(default)]
     pub isolate_default: bool,
+}
+
+/// Qué LLM usan por defecto los subagentes que la orquestadora suma con `ags peer recruit`.
+/// `None` en el Squad = Automático: la orquestadora decide y justifica la elección.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SubagentDefault {
+    pub agent_id: String,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    /// Modo Fast de Codex; solo vale con `agent_id = "codex"`.
+    #[serde(default)]
+    pub fast_mode: bool,
 }
 
 #[derive(Deserialize, Clone, Debug, PartialEq)]
@@ -68,6 +88,8 @@ pub struct SquadInput {
     pub lead: SquadLeadInput,
     #[serde(default)]
     pub members: Vec<SquadMemberInput>,
+    #[serde(default)]
+    pub default_subagent: Option<SubagentDefault>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -80,6 +102,7 @@ pub struct SquadLead {
     pub account_id: Option<String>,
     pub auto_account: bool,
     pub complexity: Option<String>,
+    pub fast_mode: bool,
     pub availability: AssignmentAvailability,
     pub unavailable_reason: Option<String>,
 }
@@ -96,6 +119,7 @@ pub struct SquadMember {
     pub account_id: Option<String>,
     pub auto_account: bool,
     pub complexity: Option<String>,
+    pub fast_mode: bool,
     pub isolate_default: bool,
     pub availability: AssignmentAvailability,
     pub unavailable_reason: Option<String>,
@@ -109,6 +133,7 @@ pub struct Squad {
     pub description: String,
     pub lead: SquadLead,
     pub members: Vec<SquadMember>,
+    pub default_subagent: Option<SubagentDefault>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Start availability follows the Lead. Optional worker roles are checked only if a
@@ -171,4 +196,5 @@ pub struct ValidSquad {
     pub description: String,
     pub lead: SquadLeadInput,
     pub members: Vec<SquadMemberInput>,
+    pub default_subagent: Option<SubagentDefault>,
 }

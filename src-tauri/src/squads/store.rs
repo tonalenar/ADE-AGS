@@ -5,11 +5,11 @@ use crate::{roles, runs::Complexity, util::now_ts};
 
 use super::types::{
     AssignmentAvailability, Squad, SquadInput, SquadLead, SquadLeadInput, SquadMember,
-    SquadMemberInput, ValidSquad,
+    SquadMemberInput, SubagentDefault, ValidSquad,
 };
 
 const SQUAD_COLUMNS: &str = "id, name, description, lead_agent_id, lead_model, lead_account_id, \
-                             lead_auto_account, lead_complexity, created_at, updated_at, reasoning_effort";
+                             lead_auto_account, lead_complexity, created_at, updated_at, reasoning_effort, fast_mode, \n                             subagent_agent_id, subagent_model, subagent_effort, subagent_fast";
 
 pub(crate) fn validate_effort_input(model: Option<&str>, complexity: Option<Complexity>, effort: Option<&str>) -> Result<(), String> {
     if let Some(effort) = effort {
@@ -19,6 +19,15 @@ pub(crate) fn validate_effort_input(model: Option<&str>, complexity: Option<Comp
         if !matches!(effort, "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra") {
             return Err("Unknown reasoning effort".into());
         }
+    }
+    Ok(())
+}
+
+/// El modo Fast es un `service_tier` de Codex: en otro agente no existe y se rechaza en vez
+/// de guardarlo y que quede sin efecto.
+pub(crate) fn validate_fast_input(agent_id: &str, fast: bool) -> Result<(), String> {
+    if fast && agent_id != "codex" {
+        return Err("Fast mode is only available for the Codex agent".into());
     }
     Ok(())
 }
@@ -79,6 +88,7 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
 
     let mut lead = input.lead.clone();
     lead.agent_id = lead.agent_id.trim().to_string();
+    validate_fast_input(&lead.agent_id, lead.fast_mode).map_err(|error| format!("lead: {error}"))?;
     lead.model = clean(&lead.model);
     validate_effort_input(lead.model.as_deref(), lead.complexity, lead.reasoning_effort.as_deref())?;
     if lead.model.is_some() && lead.complexity.is_some() {
@@ -95,12 +105,15 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
     validate_provider(conn, &lead.agent_id, &lead.account_id, true)
         .map_err(|error| format!("lead: {error}"))?;
 
+    let default_subagent = validate_subagent(input.default_subagent.as_ref())?;
+
     let mut seen = std::collections::HashSet::new();
     let mut members = Vec::with_capacity(input.members.len());
     for input_member in &input.members {
         let mut member = input_member.clone();
         member.role_id = member.role_id.trim().to_string();
         member.agent_id = member.agent_id.trim().to_string();
+        validate_fast_input(&member.agent_id, member.fast_mode).map_err(|error| format!("role '{}': {error}", member.role_id))?;
         member.model = clean(&member.model);
         validate_effort_input(member.model.as_deref(), member.complexity, member.reasoning_effort.as_deref())?;
         if member.model.is_some() && member.complexity.is_some() {
@@ -137,7 +150,27 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
         description: input.description.trim().to_string(),
         lead,
         members,
+        default_subagent,
     })
+}
+
+/// El subagente padrão: un agente registrado, modelo opcional, esfuerzo solo con modelo
+/// explícito y Fast solo en Codex. `None` (Automático) es válido y es el valor por defecto.
+fn validate_subagent(input: Option<&SubagentDefault>) -> Result<Option<SubagentDefault>, String> {
+    let Some(input) = input else { return Ok(None) };
+    let agent_id = input.agent_id.trim().to_string();
+    if agent_id.is_empty() {
+        return Err("default subagent: provider is required (use Automatic to let the orchestrator decide)".into());
+    }
+    if crate::agents::adapter_for(&agent_id).is_none() {
+        return Err(format!("default subagent: provider '{agent_id}' is not registered"));
+    }
+    let model = clean(&input.model);
+    let reasoning_effort = clean(&input.reasoning_effort);
+    validate_effort_input(model.as_deref(), None, reasoning_effort.as_deref())
+        .map_err(|error| format!("default subagent: {error}"))?;
+    validate_fast_input(&agent_id, input.fast_mode).map_err(|error| format!("default subagent: {error}"))?;
+    Ok(Some(SubagentDefault { agent_id, model, reasoning_effort, fast_mode: input.fast_mode }))
 }
 
 fn assignment_status(
@@ -224,6 +257,7 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
         agent_id: lead_agent_id,
         model: lead_model,
         reasoning_effort: row.get(10)?,
+        fast_mode: row.get::<_, i64>(11)? != 0,
         account_id: lead_account_id,
         auto_account: row.get::<_, i64>(6)? != 0,
         complexity: row.get(7)?,
@@ -231,7 +265,7 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
         unavailable_reason: lead_reason.clone(),
     };
     let mut stmt = conn
-        .prepare("SELECT role_id, agent_id, model, account_id, auto_account, complexity, isolate_default, reasoning_effort FROM squad_members WHERE squad_id = ?1 ORDER BY rowid")?;
+        .prepare("SELECT role_id, agent_id, model, account_id, auto_account, complexity, isolate_default, reasoning_effort, fast_mode FROM squad_members WHERE squad_id = ?1 ORDER BY rowid")?;
     let members = stmt
         .query_map([&id], |member| {
             let agent_id: String = member.get(1)?;
@@ -242,6 +276,7 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
             Ok(SquadMember {
                 role_id: member.get(0)?,
                 reasoning_effort: member.get(7)?,
+                fast_mode: member.get::<_, i64>(8)? != 0,
                 agent_id,
                 model,
                 account_id,
@@ -257,12 +292,21 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
         .into_iter()
         .map(|reason| format!("lead: {reason}"))
         .collect();
+    let default_subagent = row.get::<_, Option<String>>(12)?.map(|agent_id| -> rusqlite::Result<SubagentDefault> {
+        Ok(SubagentDefault {
+            agent_id,
+            model: row.get(13)?,
+            reasoning_effort: row.get(14)?,
+            fast_mode: row.get::<_, i64>(15)? != 0,
+        })
+    }).transpose()?;
     Ok(Squad {
         id,
         name: row.get(1)?,
         description: row.get(2)?,
         lead,
         members,
+        default_subagent,
         created_at: row.get(8)?,
         updated_at: row.get(9)?,
         available: lead_availability.can_attempt(),
@@ -277,8 +321,8 @@ fn insert_members(
 ) -> Result<(), String> {
     for member in members {
         conn.execute(
-            "INSERT INTO squad_members (squad_id, role_id, agent_id, model, account_id, auto_account, complexity, isolate_default, reasoning_effort)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO squad_members (squad_id, role_id, agent_id, model, account_id, auto_account, complexity, isolate_default, reasoning_effort, fast_mode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 squad_id,
                 member.role_id,
@@ -289,6 +333,7 @@ fn insert_members(
                 member.complexity.map(Complexity::as_str),
                 member.isolate_default as i64,
                 member.reasoning_effort,
+                member.fast_mode as i64,
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -299,7 +344,7 @@ fn insert_members(
 fn save_lead(conn: &Connection, squad_id: &str, lead: &SquadLeadInput) -> Result<(), String> {
     conn.execute(
         "UPDATE squads SET lead_agent_id = ?1, lead_model = ?2, lead_account_id = ?3,
-                            lead_auto_account = ?4, lead_complexity = ?5, reasoning_effort = ?7 WHERE id = ?6",
+                            lead_auto_account = ?4, lead_complexity = ?5, reasoning_effort = ?7, fast_mode = ?8 WHERE id = ?6",
         rusqlite::params![
             lead.agent_id,
             lead.model,
@@ -308,6 +353,22 @@ fn save_lead(conn: &Connection, squad_id: &str, lead: &SquadLeadInput) -> Result
             lead.complexity.map(Complexity::as_str),
             squad_id,
             lead.reasoning_effort,
+            lead.fast_mode as i64,
+        ],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn save_subagent(conn: &Connection, squad_id: &str, subagent: Option<&SubagentDefault>) -> Result<(), String> {
+    conn.execute(
+        "UPDATE squads SET subagent_agent_id = ?1, subagent_model = ?2, subagent_effort = ?3, subagent_fast = ?4 WHERE id = ?5",
+        rusqlite::params![
+            subagent.map(|value| value.agent_id.as_str()),
+            subagent.and_then(|value| value.model.as_deref()),
+            subagent.and_then(|value| value.reasoning_effort.as_deref()),
+            subagent.is_some_and(|value| value.fast_mode) as i64,
+            squad_id,
         ],
     )
     .map_err(|error| error.to_string())?;
@@ -338,6 +399,7 @@ pub fn create(conn: &Connection, valid: &ValidSquad) -> Result<Squad, String> {
     )
     .map_err(|error| error.to_string())?;
     save_lead(&tx, &id, &valid.lead)?;
+    save_subagent(&tx, &id, valid.default_subagent.as_ref())?;
     insert_members(&tx, &id, &valid.members)?;
     tx.commit().map_err(|error| error.to_string())?;
     get(conn, &id)?.ok_or_else(|| "squad was not saved".into())
@@ -380,6 +442,7 @@ pub fn update(conn: &Connection, id: &str, valid: &ValidSquad) -> Result<Squad, 
         return Err(format!("no squad '{id}' exists"));
     }
     save_lead(&tx, id, &valid.lead)?;
+    save_subagent(&tx, id, valid.default_subagent.as_ref())?;
     tx.execute("DELETE FROM squad_members WHERE squad_id = ?1", [id])
         .map_err(|error| error.to_string())?;
     insert_members(&tx, id, &valid.members)?;

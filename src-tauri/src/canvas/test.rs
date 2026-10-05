@@ -178,3 +178,19 @@ fn guardar_el_canvas_conserva_las_pilas_de_notas() {
     // Una suelta no gana campos nuevos.
     assert!(back["notes"]["note-c"].get("stack").is_none() && back["notes"]["note-c"].get("front").is_none());
 }
+
+#[test]
+fn la_mision_de_una_tab_sale_de_la_clave_del_canvas_de_misiones() {
+    let mut mission_board = Board::default();
+    mission_board.orchestrators = vec!["lead".into()];
+    mission_board.nodes = serde_json::json!({ "lead": {}, "worker": {} });
+    let folder_board = Board { nodes: serde_json::json!({ "solo": {} }), ..Default::default() };
+    let boards = Boards::from([
+        ("main|C:/p#m:m-42".to_string(), mission_board),
+        ("main|C:/p".to_string(), folder_board),
+    ]);
+    assert_eq!(mission_of_tab(&boards, "lead").as_deref(), Some("m-42"));
+    assert_eq!(mission_of_tab(&boards, "worker").as_deref(), Some("m-42"));
+    assert_eq!(mission_of_tab(&boards, "solo"), None, "el canvas de la carpeta no es una misión");
+    assert_eq!(mission_of_tab(&boards, "ghost"), None);
+}

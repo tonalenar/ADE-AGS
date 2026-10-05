@@ -12,6 +12,7 @@ export function recruitCommand(
   level: Autonomy,
   model?: string | null,
   effort?: string | null,
+  fast?: boolean | null,
 ): string {
-  return withModel(agentId, withAutonomy(agentId, command, level), model, effort);
+  return withModel(agentId, withAutonomy(agentId, command, level), model, effort, fast);
 }

@@ -50,6 +50,32 @@ Schema v20 é aditivo e idempotente:
 
 Schema v21 acrescenta reasoning effort nullable a Missions, Tasks, Squads, members e snapshots. Effort é separado de model e complexity, validado conforme provider/modelo e aplicado por Task, sem alterar a configuração global do usuário. Os modos Provider default (`model = null`, `complexity = null`), Complexity (`model = null`, `complexity` definida) e Specific model (`model` definido, `complexity = null`) são mutuamente exclusivos.
 
+Schema v30 acrescenta `fast_mode` (0/1, padrão 0) a `squads` (Lead) e `squad_members`: o **modo Fast do Codex**. A migração é aditiva e idempotente; Squads antigos ficam com Fast desligado.
+
+### Modo Fast (Codex)
+
+- O interruptor "Modo Fast" aparece na tela de Squad, ao lado de modelo e esforço, **somente quando o provedor é Codex** (Lead e funções). Trocar o provedor o desliga.
+- Validação no backend: Fast com qualquer agente diferente de `codex` é rejeitado ao salvar.
+- Aplicação: o comando do terminal (e o do `ags peer recruit ... --fast`) recebe `-c service_tier=fast`, somente para `codex`, valor fixo (nunca texto livre) e sem repetir um `service_tier` que o comando já traga. Chave confirmada no Codex 0.160: `service_tier` é chave de configuração (`codex -c`), a app do Codex grava `service_tier: "fast"` e o catálogo declara o suporte por modelo em `additional_speed_tiers`/`service_tiers`.
+- Se o catálogo do Codex informar que o modelo escolhido **não** oferece Fast, a UI mostra um aviso (não bloqueia nem falha); sem modelo explícito ou catálogo silencioso, não há aviso (`fastSupported = null`).
+- Runs headless não usam Fast: o snapshot `run_squad_members` não o guarda.
+
+Schema v31 acrescenta o **subagente padrão** em `squads`: `subagent_agent_id`, `subagent_model`, `subagent_effort` e `subagent_fast`. `subagent_agent_id` nulo = **Automático** (o orquestrador decide), que é o comportamento de todos os Squads anteriores; a migração é aditiva e idempotente.
+
+### Subagente padrão
+
+- Define o LLM (agente + modelo + esforço + Fast) dos agentes que o orquestrador recruta com `ags peer recruit`. A tela de Squad tem a seção "Subagente padrão": `Automático` ou um agente instalado, com o mesmo seletor de modelo/esforço da tela (catálogo da conta principal; sem roteamento por complexidade, que não existe em terminal recrutado) e, só para Codex, o modo Fast.
+- Validação no backend: agente registrado; esforço só com modelo explícito e dentro da lista conhecida; Fast só com `codex`. Voltar a Automático limpa todas as colunas.
+- Alterar o padrão afeta apenas recrutamentos futuros.
+
+### Uso no recruit e no briefing
+
+- **Resolução.** `ags peer recruit` descobre a missão em execução do orquestrador (canvas de missão → `missions.squad_id`, só com a missão `running`) e consulta o padrão do Squad. Sem Squad, sem missão em execução ou em Automático, o comportamento é o de sempre.
+- **Regras** (`squads/recruit.rs`): (1) `--model`/`--effort` explícitos sempre vencem e o padrão não é misturado; (2) sem eles, e com o mesmo agente do padrão, vale o padrão inteiro (modelo, esforço, Fast); (3) sem `--agent`, recruta-se o agente do padrão (em Automático `--agent` continua obrigatório); (4) um `--agent` diferente do padrão não herda nada. `--fast` explícito é sempre respeitado e só vale com `codex`.
+- **Transparência.** A resposta do recruit traz `model`, `effort`, `fast` e `llmSource` (`explicit`, `squad_default` ou `provider_default`).
+- **Briefing do orquestrador.** Com padrão ativo, mostra "SUBAGENTE PADRÃO DO SQUAD (ativo): agente · modelo · esforço [· Fast]" e as regras acima; em Automático, diz que o orquestrador escolhe e **justifica a escolha em uma linha**. Missão sem Squad não ganha o bloco.
+- A skill `ags-orchestrator` (1.26.0) e o help da CLI descrevem `--fast`, o padrão e a precedência.
+
 Squad é mutável; Run é histórico. Alterar um Squad afeta somente novos Runs. Uma Task criada já guarda `functional_role`, provider, modelo e account ID resolvidos. O snapshot no Run é necessário para planejar Tasks futuras daquele mesmo Run sem consultar a configuração mutável.
 
 Delete de Squad é permitido apenas sem referência por Mission ou Run. A exclusão não faz cascade em dados operacionais; referências históricas bloqueiam a operação.

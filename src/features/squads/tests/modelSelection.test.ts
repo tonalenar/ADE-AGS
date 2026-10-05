@@ -1,7 +1,18 @@
 import { describe, expect, it } from "vitest";
 
 import { modelIsUnverified, modelSelectionMode, modelSelectionPatch, modelsForAccount } from "../modelSelection";
-import { reasoningOptions, withModelEffort } from "../modelSelection";
+import { fastModeSupport, reasoningOptions, withModelEffort } from "../modelSelection";
+
+describe("Squad Fast mode support", () => {
+  const catalog = [{ id: "luna", fastSupported: true }, { id: "plain", fastSupported: false }, { id: "silent" }];
+  it("distinguishes supported, unsupported and unknown models", () => {
+    expect(fastModeSupport("luna", catalog)).toBe("supported");
+    expect(fastModeSupport("plain", catalog)).toBe("unsupported");
+    expect(fastModeSupport("silent", catalog)).toBe("unknown");
+    expect(fastModeSupport("not-listed", catalog)).toBe("unknown");
+    expect(fastModeSupport(null, catalog)).toBe("unknown");
+  });
+});
 
 describe("Squad model selection", () => {
   it("recalculates effort by model without modifying provider/account fields", () => {
