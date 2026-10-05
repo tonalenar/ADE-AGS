@@ -107,4 +107,76 @@ describe("botStats: ventanas y pruebas", () => {
     expect(s.windows.d7.successRate).toBeNull();
     expect(s.windows.d30.successRate).toBeNull();
   });
+
+  it("casos de borda de tiempo: límites exactos de 7 y 30 días", () => {
+    const exact7 = { ...m("e7", "done", now - 7 * DAY - 10, now - 7 * DAY) }; // exactamente en el límite de 7d
+    const justPast7 = { ...m("p7", "done", now - 7 * DAY - 20, now - 7 * DAY - 1) }; // 1s fuera de 7d, pero dentro de 30d
+    const exact30 = { ...m("e30", "failed", now - 30 * DAY - 10, now - 30 * DAY) }; // exactamente en el límite de 30d
+    const justPast30 = { ...m("p30", "failed", now - 30 * DAY - 20, now - 30 * DAY - 1) }; // 1s fuera de 30d
+
+    const s = botStats([exact7, justPast7, exact30, justPast30], now);
+    // d7: solo exact7
+    expect(s.windows.d7).toEqual({ done: 1, failed: 0, cancelled: 0, successRate: 100 });
+    // d30: exact7, justPast7 (2 done) y exact30 (1 failed) -> 2/3 = 67%
+    expect(s.windows.d30).toEqual({ done: 2, failed: 1, cancelled: 0, successRate: 67 });
+    // total histórico: 2 done, 2 failed -> 50%
+    expect(s.successRate).toBe(50);
+  });
+
+  it("misiones canceladas nunca afectan la tasa de éxito ni en ventanas ni en histórico", () => {
+    const s = botStats([
+      t("d1", "done", 1),
+      t("c1", "cancelled", 1),
+      t("c2", "cancelled", 2),
+      t("c3", "cancelled", 15),
+      t("c4", "cancelled", 45),
+    ], now);
+    // 1 done y 0 failed: tasa es 100%, las canceladas no devalúan la tasa
+    expect(s.windows.d7).toEqual({ done: 1, failed: 0, cancelled: 2, successRate: 100 });
+    expect(s.windows.d30).toEqual({ done: 1, failed: 0, cancelled: 3, successRate: 100 });
+    expect(s.cancelled).toBe(4);
+    expect(s.successRate).toBe(100);
+
+    // Si solo hay canceladas, successRate es null (no 0)
+    const onlyCancelled = botStats([t("c1", "cancelled", 1), t("c2", "cancelled", 10)], now);
+    expect(onlyCancelled.windows.d7.successRate).toBeNull();
+    expect(onlyCancelled.windows.d30.successRate).toBeNull();
+    expect(onlyCancelled.successRate).toBeNull();
+  });
+
+  it("isTest: solo true las excluye de ventanas y tasa; null, undefined o false son reales", () => {
+    const s = botStats([
+      t("real1", "done", 2, undefined),
+      t("real2", "done", 3, null),
+      t("real3", "failed", 4, false),
+      t("test1", "failed", 1, true),
+      t("test2", "done", 2, true),
+      { ...m("test_title", "failed", at(1) - 60, at(1)), title: "[TEST] E2E Integration Suite", isTest: null },
+    ], now);
+
+    // real1 (done), real2 (done), real3 (failed), test_title (failed) -> 4 reales en d7 (2 done, 2 failed -> 50%)
+    expect(s.testCount).toBe(2);
+    expect(s.total).toBe(6);
+    expect(s.windows.d7.done).toBe(2);
+    expect(s.windows.d7.failed).toBe(2);
+    expect(s.windows.d7.successRate).toBe(50);
+    expect(s.successRate).toBe(50);
+
+    // Si todas son de prueba, la tasa es null
+    const allTests = botStats([t("t1", "done", 1, true), t("t2", "failed", 1, true)], now);
+    expect(allTests.testCount).toBe(2);
+    expect(allTests.successRate).toBeNull();
+    expect(allTests.windows.d7.successRate).toBeNull();
+  });
+
+  it("misiones sin endedAt usan startedAt para fecha de cierre o caen fuera si no tienen fechas", () => {
+    const cancelledWithoutEnd: MissionLike = { ...m("c", "cancelled", at(3), null) };
+    const draftWithoutDates: MissionLike = { ...m("d", "draft", null, null) };
+
+    const s = botStats([cancelledWithoutEnd, draftWithoutDates], now);
+    expect(s.windows.d7.cancelled).toBe(1);
+    expect(s.windows.d7.successRate).toBeNull();
+    expect(s.windows.d30.cancelled).toBe(1);
+    expect(s.total).toBe(2);
+  });
 });
