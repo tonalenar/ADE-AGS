@@ -15,6 +15,7 @@
 
 pub(crate) mod review;
 pub(crate) mod precheck;
+pub(crate) mod failure;
 pub(crate) mod store;
 pub(crate) mod timings;
 #[cfg(test)]
@@ -22,7 +23,10 @@ mod test;
 mod types;
 pub mod active;
 
-pub use types::{Mission, MissionDetail, MissionInput, MissionSummary};
+pub use types::{
+    FailureActionKey, FailureCategory, FailureClassification, Mission, MissionDetail,
+    MissionInput, MissionSummary,
+};
 
 use std::path::Path;
 

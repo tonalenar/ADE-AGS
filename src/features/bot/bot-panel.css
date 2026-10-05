@@ -295,3 +295,4 @@
 .ags-live__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(380px, 1fr)); gap: 10px; }
 .ags-live__cell { cursor: pointer; outline-offset: 2px; }
 .ags-live__cell:hover, .ags-live__cell:focus-visible { outline: 2px solid var(--hq-yellow); }
+.ags-hq__card-sub { font-size: 10px; opacity: 0.7; margin-top: 4px; }

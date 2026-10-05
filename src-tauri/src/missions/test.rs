@@ -107,6 +107,44 @@ fn estado(db: &DbConnection, id: &str) -> String {
 // ── Crear, listar, cargar, editar ───────────────────────────────
 
 #[test]
+fn classifies_persists_and_exposes_the_failed_mission() {
+    use super::{FailureActionKey, FailureCategory, FailureClassification};
+
+    let db = db();
+    let id = borrador(&db);
+    let lead = arrancar(&db, &id);
+    let error = "HTTP 403: free plan cannot access this model";
+    correr_y_cerrar(&db, &lead.id, TaskOutcome::failed(error));
+
+    let conn = db.lock().unwrap();
+    let mission = store::get(&conn, &id).unwrap().unwrap();
+    assert_eq!(
+        mission.failure_classification,
+        Some(FailureClassification {
+            category: FailureCategory::Access,
+            action_key: FailureActionKey::CheckPlanAccess,
+        })
+    );
+    assert_eq!(mission.failure_detail.as_deref(), Some(error));
+
+    let json = serde_json::to_value(&mission).unwrap();
+    assert_eq!(json["failureClassification"]["category"], "access");
+    assert_eq!(
+        json["failureClassification"]["actionKey"],
+        "missions.failure.action.checkPlanAccess"
+    );
+    assert_eq!(json["failureDetail"].as_str(), Some(error));
+
+    let mut summaries = store::list(&conn, "w1").unwrap();
+    let summary = summaries.remove(0);
+    assert_eq!(summary.mission.failure_classification, mission.failure_classification);
+    assert_eq!(summary.mission.failure_detail.as_deref(), Some(error));
+
+    let detail = detail(&conn, &id).unwrap();
+    assert_eq!(detail.mission.failure_classification, mission.failure_classification);
+    assert_eq!(detail.mission.failure_detail.as_deref(), Some(error));
+}
+#[test]
 fn crear_una_mision_deja_un_borrador_sin_run() {
     let db = db();
     let conn = db.lock().unwrap();

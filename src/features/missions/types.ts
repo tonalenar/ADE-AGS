@@ -32,6 +32,10 @@ export interface Mission {
   updatedAt: number;
   startedAt: number | null;
   endedAt: number | null;
+  /** Por qué falló (solo `failed`); `null`/ausente = sin clasificar. Ver `failureClass.ts`. */
+  failureClassification?: { category: "access" | "limit" | "model" | "crash" | "timeout"; actionKey: string } | null;
+  /** Detalle corto del error original, para mostrar bajo la acción sugerida. */
+  failureDetail?: string | null;
 }
 
 /** Lo que se manda al crear o editar. */

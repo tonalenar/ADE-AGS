@@ -1,8 +1,10 @@
+import { type FailureKey, failureKey } from "@/features/missions/failureClass";
 import type { MissionSummary } from "@/features/missions/types";
 
 /** Lo mínimo de una misión que mira el panel del bot. */
 export type MissionLike = Pick<MissionSummary, "id" | "title" | "status" | "startedAt" | "endedAt" | "spentUsd"> & {
   activeSeconds?: number | null;
+  failureClassification?: MissionSummary["failureClassification"];
 };
 
 export interface BotStats {
@@ -18,6 +20,8 @@ export interface BotStats {
   spentUsd: number;
   /** Porcentaje de las misiones cerradas que terminaron bien (0–100), o `null` sin cerradas. */
   successRate: number | null;
+  /** Cuántas misiones fallidas hay por causa; sin clasificar van en `unknown`. Solo claves con al menos una. */
+  failuresByClass: Partial<Record<FailureKey, number>>;
 }
 
 /**
@@ -49,6 +53,7 @@ export function botStats(missions: MissionLike[], now: number): BotStats {
     longestSeconds: durations.reduce((a, b) => Math.max(a, b), 0),
     spentUsd: missions.reduce((a, m) => a + (Number.isFinite(m.spentUsd) ? m.spentUsd : 0), 0),
     successRate: closed > 0 ? Math.round((done / closed) * 100) : null,
+    failuresByClass: failuresByClass(missions),
   };
 }
 
@@ -106,4 +111,14 @@ export function recentMissions<T extends MissionLike & { createdAt?: number }>(m
   return [...missions]
     .sort((a, b) => (b.startedAt ?? b.createdAt ?? 0) - (a.startedAt ?? a.createdAt ?? 0))
     .slice(0, limit);
+}
+
+/** Las misiones fallidas contadas por causa (`access`, `limit`, `model`, `crash`, `timeout`, `unknown`). Pura. */
+export function failuresByClass(missions: MissionLike[]): Partial<Record<FailureKey, number>> {
+  const out: Partial<Record<FailureKey, number>> = {};
+  for (const m of missions) {
+    const k = failureKey(m);
+    if (k) out[k] = (out[k] ?? 0) + 1;
+  }
+  return out;
 }
