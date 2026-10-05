@@ -72,6 +72,11 @@ export function sustainedTabIds(now = Date.now()): string[] {
   return sustainedAgents(lastOutput, streakStart, now);
 }
 
+/** Read-only timestamps for mission turn instrumentation. */
+export function activitySnapshot(): ReadonlyMap<string, { startedMs: number; lastOutputMs: number }> {
+  return new Map([...lastOutput].map(([id, at]) => [id, { startedMs: streakStart.get(id) ?? at, lastOutputMs: at }]));
+}
+
 function refresh(now = Date.now()): void {
   const count = activeAgents(lastOutput, now).length;
   for (const [id, at] of lastOutput) {
