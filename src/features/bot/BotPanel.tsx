@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { formatTokens } from "@/features/accounts/usage";
 import { missionReview } from "@/features/missions/ipc";
 import { useMissionsStore } from "@/features/missions/store";
+import { MissionEfficiencyCard } from "@/features/missions/MissionTimingsPanel";
 import { formatDuration, getTimings, type MissionTimings } from "@/features/missions/timings";
 import { estimateOf, formatCompactNumber, formatUsd, getTokens, type CostEstimate, type MissionTokens } from "@/features/missions/tokens";
 import type { MissionReview } from "@/features/missions/types";
@@ -260,6 +261,7 @@ export function BotPanel() {
                             </div>
                           ))
                         )}
+                        <MissionEfficiencyCard missionId={current.id} compact />
                       </div>
                     )}
                   </>

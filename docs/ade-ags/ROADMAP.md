@@ -170,3 +170,6 @@ Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--te
 ## Etapa 11 — Eficiência entre agentes
 
 **Ponto 3 implementado:** ao criar o worktree, a app prepara a junction de `node_modules` no Windows ou symlink em Unix, sem substituir diretórios existentes; falhas geram aviso sem bloquear o recruit. O briefing inicial inclui caminho, shell e comandos de validação, com `cargo test --lib` filtrado. O target Cargo compartilhado é configurável como `per-worktree` para evitar disputa de lock entre agentes simultâneos, com o custo de recompilar dependências uma vez por worktree. O procedimento multiplataforma está em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+## Etapa 11 — eficiência entre agentes (P4)
+
+**Ponto 4 implementado:** o QG e o painel da missão mostram tempo ativo sem sobreposição, tempo de relógio, custo reportado pelos Runs, agentes observados e comparação com até 30 missões concluídas do workspace, agrupadas por faixa de agentes. O briefing só recomenda recrutar quando o trabalho é independente e paralelizável e há expectativa de terminar mais rápido do que com um agente só. Métricas, limites e API estão em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md); a linha de base anterior do QA está em [AGENT_EFFICIENCY_BASELINE.md](./AGENT_EFFICIENCY_BASELINE.md).

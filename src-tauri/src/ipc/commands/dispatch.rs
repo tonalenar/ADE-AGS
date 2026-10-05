@@ -174,6 +174,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "mission.run" => missions::mission_run(app, args),
         "mission.review" => missions::mission_review(app, args),
         "mission.timings" => missions::mission_timings(app, args),
+        "mission.efficiency" => missions::mission_efficiency(app, args),
         "mission.precheck" => missions::mission_precheck(app, args),
         "memory.search" => missions::memory_search(app, args),
         "memory.history" => missions::memory_history(app, args),
