@@ -135,3 +135,7 @@ Depende de: 9, 10, 12 e 13. É a última porque desenhar cedo fixa um modelo que
 ## Estado Antigravity
 
 A integração nativa oferece Lead e Worker, model discovery via `agy models` e uma conta do sistema. Multi-account permanece experimental/incompleto: `supports_accounts = false`, sem routing simultâneo por conta. OAuth experimental não isola as credenciais do `agy`. Veja [ANTIGRAVITY_INTEGRATION.md](./ANTIGRAVITY_INTEGRATION.md).
+
+## 17. Classificação de falhas (Etapa 10, ponto 3)
+
+**UI implementada:** causa + ação sugerida no QG e no detalhe da missão. Pendente: backend gravar `failureClass`. Ver [MISSION_FAILURES.md](./MISSION_FAILURES.md).

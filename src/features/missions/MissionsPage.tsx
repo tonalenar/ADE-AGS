@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
+import { FailureNotice } from "./FailureNotice";
 import { Alert, AnimateSpin, Button, EmptyState, LocationIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
@@ -381,6 +382,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
       </div>
 
       {mission.status === "draft" && <Alert variant="info">{t("missions.draftNotice")}</Alert>}
+      {mission.status === "failed" && <FailureNotice mission={mission} />}
       {mission.status === "failed" && <Alert variant="info">{t("missions.retryNotice")}</Alert>}
       {action && action !== "cancel" && unsupportedLead && <Alert variant="warning">{t("squads.leadUnsupported")}</Alert>}
       {action && action !== "cancel" && mission.squadId && unavailableSquad && (
