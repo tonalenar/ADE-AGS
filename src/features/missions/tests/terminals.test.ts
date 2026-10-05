@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 
-import { buildMissionTeam, emptyBoard, gridCell } from "@/features/canvas/board";
+import { buildMissionTeam, emptyBoard, gridCell, placeInNextGridCell, reconcile } from "@/features/canvas/board";
+import { GAP } from "@/features/canvas/geometry";
 import { boardKey, boardKeyOfTab, missionBoardKey, missionOfKey, missionOfTab, useCanvasStore } from "@/features/canvas/store";
 import type { FunctionalRole, Squad } from "@/features/squads/types";
 
@@ -137,6 +138,43 @@ describe("el canvas de la misión", () => {
     ]);
   });
 
+  it("recruit pula celulas ocupadas por panes abertos antes e depois do time inicial", () => {
+    let board = buildMissionTeam(emptyBoard(), "lead", [{ tabId: "m1" }]);
+    const lead = board.nodes.lead!;
+    const cellW = lead.w + GAP;
+    const cellH = lead.h + GAP;
+    board = {
+      ...board,
+      nodes: { ...board.nodes, openedBefore: { x: lead.x + cellW, y: lead.y, w: lead.w, h: lead.h } },
+    };
+    board = reconcile(board, [...Object.keys(board.nodes), "m2"]);
+    board = placeInNextGridCell(board, ["lead", "m1"], "m2");
+
+    const m2Cell = gridCell(3);
+    expect(board.nodes.m2).toMatchObject({
+      x: lead.x + m2Cell.col * cellW,
+      y: lead.y + m2Cell.row * cellH,
+    });
+
+    board = {
+      ...board,
+      nodes: { ...board.nodes, openedAfter: { x: lead.x + 2 * cellW, y: lead.y, w: lead.w, h: lead.h } },
+    };
+    board = reconcile(board, [...Object.keys(board.nodes), "m3"]);
+    board = placeInNextGridCell(board, ["lead", "m1", "m2"], "m3");
+
+    const m3Cell = gridCell(5);
+    expect(board.nodes.m3).toMatchObject({
+      x: lead.x + m3Cell.col * cellW,
+      y: lead.y + m3Cell.row * cellH,
+    });
+
+    const boxes = Object.values(board.nodes);
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]!, b = boxes[j]!;
+      expect(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h).toBe(false);
+    }
+  });
   it("armar el equipo dos veces deja la misma grilla", () => {
     const once = buildMissionTeam(emptyBoard(), "lead", [{ tabId: "m1" }, { tabId: "m2" }]);
     const twice = buildMissionTeam(once, "lead", [{ tabId: "m1" }, { tabId: "m2" }]);

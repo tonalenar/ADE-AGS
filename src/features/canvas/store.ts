@@ -7,7 +7,7 @@ import { comparablePath } from "@/features/tabs/viewTabs";
 import {
   FOLDER_PREFIX, IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addFolder, addImage, addNote, addPortal,
   addStroke, addText, removeFolder, updateFolder,
-  emptyBoard, placeBelow, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
+  emptyBoard, placeInNextGridCell, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
   buildMissionTeam, removeStroke, removeText, toggleOrchestrator, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
   type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
 } from "./board";
@@ -185,11 +185,16 @@ export const canvasActions = {
   disconnect: (key: string, edgeId: string) => updateBoard(key, (board) => removeEdge(board, edgeId)),
   disconnectPair: (key: string, a: string, b: string) => updateBoard(key, (board) => removeEdgeBetween(board, a, b)),
   toggleOrchestrator: (key: string, tabId: string) => updateBoard(key, (board) => toggleOrchestrator(board, tabId)),
-  /** Un agente que sumó una orquestadora: debajo de ella y conectado. Si la tab todavía no
-   *  tiene nodo (la sincronización corre después), se le da uno primero. */
+  /** Posiciona o recruit na proxima celula livre e o conecta a quem o recrutou. */
   recruited: (key: string, tabId: string, near: string, role?: string | null) => updateBoard(key, (board) => {
     const withNode = tabId in board.nodes ? board : reconcile(board, [...Object.keys(board.nodes), tabId]);
-    const placed = addEdge(placeBelow(withNode, tabId, near), near, tabId);
+    const leadId = withNode.orchestrators.includes(near) ? near : withNode.orchestrators[0] ?? near;
+    const linked = withNode.edges.flatMap((edge) =>
+      edge.a === leadId ? [edge.b] : edge.b === leadId ? [edge.a] : [],
+    );
+    const members = linked.filter((id) => id !== tabId && id in withNode.nodes);
+    const teamIds = [leadId, ...new Set(members)];
+    const placed = addEdge(placeInNextGridCell(withNode, teamIds, tabId), near, tabId);
     return role ? { ...placed, roles: { ...placed.roles, [tabId]: role } } : placed;
   }),
   /** El canvas de una misión en terminales: el orquestador y su equipo, ya conectados y con su papel.
