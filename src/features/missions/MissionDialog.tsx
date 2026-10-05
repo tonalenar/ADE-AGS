@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
 import { Alert, AnimateSpin, Button, FolderIcon, Input, SegmentedControl, TextArea } from "neogestify-ui-components";
 
+import { findDuplicateMission } from "./duplicates";
+import { useMissionsStore } from "./store";
 import { ModelSelector } from "@/features/runs/ModelSelector";
 import { modelsForAccount, withModelEffort } from "@/features/squads/modelSelection";
 import { getRoster } from "@/features/runs/ipc";
@@ -50,6 +52,12 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
   const missing = missingFields(form);
   const selectedSquad = squads.find((squad) => squad.id === form.squadId) ?? null;
   const canSave = !(form.executionMode === "specific" && leadUnsupported(agents.find((agent) => agent.agentId === form.agentId))) && missing.length === 0 && (form.executionMode !== "squad" || Boolean(form.squadId)) && !(form.executionMode === "specific" && form.mode === "fixed" && form.model === "") && !busy;
+
+  const missions = useMissionsStore((s) => s.missions);
+  const duplicate = useMemo(
+    () => findDuplicateMission(missions, { title: form.title, objective: form.objective }),
+    [missions, form.title, form.objective]
+  );
 
   const pickFolder = async () => {
     const dir = await open({ directory: true, defaultPath: form.cwd || undefined });
@@ -113,6 +121,14 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
               text-[12px] leading-relaxed text-gray-800 dark:text-gray-200"
           />
         </Field>
+
+        {duplicate && (
+          <Alert variant="warning">
+            {duplicate.isRunning
+              ? t("missions.duplicate.bannerRunning", { title: duplicate.mission.title })
+              : t("missions.duplicate.bannerRecent", { title: duplicate.mission.title })}
+          </Alert>
+        )}
 
         <Field group label={t("missions.form.project")}>
           <div className="flex items-center gap-1.5">

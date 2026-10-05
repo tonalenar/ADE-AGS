@@ -14,6 +14,8 @@ import { MissionDialog } from "./MissionDialog";
 import { emptyForm } from "./missionView";
 import { useMissionsStore } from "./store";
 import { startMissionInTerminals } from "./terminals";
+import { DuplicateMissionDialog } from "./DuplicateMissionDialog";
+import { findDuplicateMission } from "./duplicates";
 import type { MissionStatus, MissionSummary } from "./types";
 import * as ipc from "./ipc";
 
@@ -81,11 +83,26 @@ export function MissionsSection() {
     if (openMission(m.id)) navigate("/workspace");
   };
 
-  const start = async (m: MissionSummary) => {
+  const [duplicatePrompt, setDuplicatePrompt] = useState<{ id: string; title: string; status: string; isRunning: boolean; target: MissionSummary } | null>(null);
+
+  const start = async (m: MissionSummary, force = false) => {
+    if (!force) {
+      const dup = findDuplicateMission(missions, m);
+      if (dup) {
+        setDuplicatePrompt({
+          id: dup.mission.id,
+          title: dup.mission.title,
+          status: dup.mission.status,
+          isRunning: dup.isRunning,
+          target: m,
+        });
+        return;
+      }
+    }
     setBusy(m.id);
     try {
       const squad = squads.find((s) => s.id === m.squadId) ?? null;
-      await startMissionInTerminals(m, squad, roles);
+      await startMissionInTerminals(m, squad, roles, { force });
       load(workspaceId).catch(() => undefined);
       navigate("/workspace");
     } catch (e) {
@@ -235,6 +252,18 @@ export function MissionsSection() {
           onSave={async (input) => {
             await useMissionsStore.getState().create(workspaceId, input);
             setCreating(false);
+          }}
+        />
+      )}
+
+      {duplicatePrompt && (
+        <DuplicateMissionDialog
+          duplicate={duplicatePrompt}
+          onClose={() => setDuplicatePrompt(null)}
+          onConfirm={() => {
+            const target = duplicatePrompt.target;
+            setDuplicatePrompt(null);
+            void start(target, true);
           }}
         />
       )}

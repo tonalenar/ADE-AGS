@@ -76,7 +76,8 @@ pub(super) fn mission_create(app: &AppHandle, args: &Value) -> Result<Value, Str
 
 pub(super) fn mission_start(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
-    crate::missions::start_now(app, &id)?;
+    let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+    crate::missions::start_now_with_force(app, &id, force)?;
     Ok(summary(&crate::missions::detail_now(app, &id)?))
 }
 

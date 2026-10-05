@@ -132,6 +132,11 @@ Depende de: 9, 10, 12 e 13. É a última porque desenhar cedo fixa um modelo que
 
 **Ponto 1 concluído.** Recruits adicionados por `ags peer recruit` seguem as duas linhas da grade da missão e ocupam a próxima célula livre sem mover panes existentes. Detalhes em [RECRUIT_GRID.md](./RECRUIT_GRID.md).
 
+## 17. Taxa de sucesso das missões (Etapa 10)
+
+Etapa voltada a prevenir e classificar falhas de ambiente e duplicatas históricas:
+- **Ponto 4 (Evitar missão duplicada):** implementado em `feat/etapa10-p4-duplicada`. Detecção de duplicatas com mesmo título e objetivo normalizados, em andamento (`running`) ou recente (24h). Bloqueio preventivo no backend (`start_now` / `start` salvo com flag `--force`) e aviso na interface (`DuplicateMissionDialog` em `MissionsPage` e `MissionsSection`, alerta em `MissionDialog`). Detalhes em [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
+
 ## Estado Antigravity
 
 A integração nativa oferece Lead e Worker, model discovery via `agy models` e uma conta do sistema. Multi-account permanece experimental/incompleto: `supports_accounts = false`, sem routing simultâneo por conta. OAuth experimental não isola as credenciais do `agy`. Veja [ANTIGRAVITY_INTEGRATION.md](./ANTIGRAVITY_INTEGRATION.md).

@@ -1581,3 +1581,27 @@ fn una_fallida_se_puede_reabrir_en_terminales_pero_una_terminada_no() {
     store::close_terminals(&conn, &id, "done").unwrap();
     assert!(!store::mark_started_terminals(&conn, &id).unwrap());
 }
+
+#[test]
+fn start_prevents_duplicate_running_or_recent_unless_forced() {
+    let db = db();
+    let m1 = borrador(&db);
+    let assignment = asignacion("claude-code");
+    start(&db, &m1, |_| Ok(assignment.clone()), |_| Ok(())).unwrap();
+
+    let mut input = pedido();
+    input.title = "Hola".into();
+    input.objective = "Crear hello.txt con ADE AGS".into();
+    let m2 = {
+        let conn = db.lock().unwrap();
+        create(&conn, "w1", &input).unwrap().id
+    };
+
+    // Sem force: bloqueado
+    let err = start(&db, &m2, |_| Ok(assignment.clone()), |_| Ok(())).unwrap_err();
+    assert_eq!(err, "missions.error.duplicateRunning");
+
+    // Com force: permitido
+    let started = super::start_with_force(&db, &m2, true, |_| Ok(assignment.clone()), |_| Ok(())).unwrap();
+    assert_eq!(started.status, "running");
+}

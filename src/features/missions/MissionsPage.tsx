@@ -24,6 +24,8 @@ import { MissionMap } from "./MissionMap";
 import { MissionTimingsPanel } from "./MissionTimingsPanel";
 import { MissionTokensPanel } from "./MissionTokensPanel";
 import { startMissionInTerminals } from "./terminals";
+import { DuplicateMissionDialog } from "./DuplicateMissionDialog";
+import { findDuplicateMission } from "./duplicates";
 import { MissionReviewPanel } from "./MissionReviewPanel";
 import {
   AGENT_STATES, agentStateOf, approvalsFor, blockedRuns, canEdit, countAgentStates, dependencyLabels, emptyForm,
@@ -317,9 +319,21 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
   const counts = countAgentStates(workers, blockedTasks);
   const progress = progressOf(summary);
   const firstApproval = approvals[0]?.id ?? null;
+  const allMissions = useMissionsStore((s) => s.missions);
+  const duplicate = useMemo(() => findDuplicateMission(allMissions, mission), [allMissions, mission]);
+  const [duplicateTarget, setDuplicateTarget] = useState<{ id: string; title: string; status: string; isRunning: boolean } | null>(null);
 
-  const act = async (kind: "start" | "retry" | "cancel") => {
+  const act = async (kind: "start" | "retry" | "cancel", force = false) => {
     if (!workspaceId) return;
+    if (kind !== "cancel" && !force && duplicate) {
+      setDuplicateTarget({
+        id: duplicate.mission.id,
+        title: duplicate.mission.title,
+        status: duplicate.mission.status,
+        isRunning: duplicate.isRunning,
+      });
+      return;
+    }
     setBusy(true);
     onError("");
     try {
@@ -328,7 +342,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         await store.cancel(workspaceId, mission.id);
       } else {
         // Iniciar abre el equipo en terminales reales en el canvas de la misión.
-        await startMissionInTerminals(mission, squad ?? null, roles);
+        await startMissionInTerminals(mission, squad ?? null, roles, { force });
         await store.load(workspaceId).catch(() => undefined);
         navigate("/workspace");
       }
@@ -380,6 +394,13 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         )}
       </div>
 
+      {duplicate && (
+        <Alert variant="warning">
+          {duplicate.isRunning
+            ? t("missions.duplicate.bannerRunning", { title: duplicate.mission.title })
+            : t("missions.duplicate.bannerRecent", { title: duplicate.mission.title })}
+        </Alert>
+      )}
       {mission.status === "draft" && <Alert variant="info">{t("missions.draftNotice")}</Alert>}
       {mission.status === "failed" && <Alert variant="info">{t("missions.retryNotice")}</Alert>}
       {action && action !== "cancel" && unsupportedLead && <Alert variant="warning">{t("squads.leadUnsupported")}</Alert>}
@@ -504,6 +525,16 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
       <MissionReviewPanel missionId={mission.id} refreshKey={tasks.map((task) => `${task.id}:${task.status}`).join("|")} />
 
       {workspaceId && <SharedMemoryPanel key={`${workspaceId}-${mission.id}-${focusNonce}`} workspaceId={workspaceId} missionId={mission.id} runs={runs} activeRunId={mission.activeRunId} initialTab={focusTab} />}
+      {duplicateTarget && (
+        <DuplicateMissionDialog
+          duplicate={duplicateTarget}
+          onClose={() => setDuplicateTarget(null)}
+          onConfirm={() => {
+            setDuplicateTarget(null);
+            if (action) void act(action, true);
+          }}
+        />
+      )}
     </div>
   );
 }

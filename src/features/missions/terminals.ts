@@ -169,7 +169,12 @@ export interface StartedTeam {
  * orquestador y rotuladas con su papel— y les manda a cada uno su primer mensaje cuando su
  * TUI termina de arrancar.
  */
-export async function startMissionInTerminals(mission: Mission, squad: Squad | null, roles: FunctionalRole[]): Promise<StartedTeam> {
+export async function startMissionInTerminals(
+  mission: Mission,
+  squad: Squad | null,
+  roles: FunctionalRole[],
+  options?: { force?: boolean }
+): Promise<StartedTeam> {
   const { addTab, detectedAgents, activateTab } = useTabsStore.getState();
   const team = teamOf(squad, roles);
   const leadAgentId = squad?.lead.agentId ?? mission.leadAgentId ?? "claude-code";
@@ -201,7 +206,7 @@ export async function startMissionInTerminals(mission: Mission, squad: Squad | n
   // La memoria aprobada del proyecto y de la misión (solo lectura; vacío si no hay ninguna).
   const memory = await invoke<string>("mission_memory_context", { missionId: mission.id }).catch(() => "");
 
-  await invoke("mission_start_terminals", { missionId: mission.id });
+  await invoke("mission_start_terminals", { missionId: mission.id, force: Boolean(options?.force) });
 
   const leadTabId = addTab({
     cwd: mission.cwd,
