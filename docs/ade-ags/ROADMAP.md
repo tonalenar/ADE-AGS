@@ -186,3 +186,7 @@ Implementado em `feat/etapa13-1-fast`: schema v30 (`fast_mode` em `squads`/`squa
 ### Etapa 13 — ponto 2 (subagente padrão do Squad)
 
 Implementado em `feat/etapa13-2-subagente` (empilhada em `feat/etapa13-1-fast`): schema v31 (`subagent_*` em `squads`), campo `defaultSubagent` no Squad (Automático ou agente + modelo + esforço + Fast), seção na tela de Squad (pt-BR/en/es), validação e testes. O uso no `ags peer recruit` e no briefing vem no ponto 3.
+
+### Etapa 13 — ponto 3 (uso no recruit e no briefing)
+
+Implementado em `feat/etapa13-3-recruit-padrao` (empilhada nas anteriores): `ags peer recruit` sem `--model`/`--effort` usa o subagente padrão do Squad da missão em execução (explícitos vencem; Automático/sem Squad = comportamento atual), briefing do orquestrador mostra o padrão ativo ou manda justificar a escolha, skill `ags-orchestrator` 1.26.0 e help da CLI atualizados. Detalhes em [ROLES_SQUADS.md](./ROLES_SQUADS.md).

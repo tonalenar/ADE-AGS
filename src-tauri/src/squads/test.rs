@@ -405,3 +405,90 @@ fn default_subagent_validation_rejects_bad_combinations() {
     // Modelo vacío cuenta como "sin modelo": el esfuerzo sigue requiriéndolo.
     assert!(check(subagent("codex", Some("  "), Some("low"), false)).contains("requires a specific model"));
 }
+
+mod recruit_default {
+    use super::*;
+    use crate::squads::recruit::{default_for_mission, resolve_recruit_llm, RecruitSource};
+
+    fn luna() -> super::super::SubagentDefault {
+        subagent("codex", Some("gpt-6-luna"), Some("max"), true)
+    }
+
+    #[test]
+    fn without_flags_the_squad_default_is_used_whole() {
+        let llm = resolve_recruit_llm(Some("codex"), None, None, false, Some(&luna())).unwrap();
+        assert_eq!(llm.source, RecruitSource::SquadDefault);
+        assert_eq!((llm.model.as_deref(), llm.effort.as_deref(), llm.fast), (Some("gpt-6-luna"), Some("max"), true));
+    }
+
+    #[test]
+    fn omitting_agent_recruits_the_default_agent() {
+        let llm = resolve_recruit_llm(None, None, None, false, Some(&luna())).unwrap();
+        assert_eq!(llm.agent, "codex");
+        assert_eq!(llm.source, RecruitSource::SquadDefault);
+        let error = resolve_recruit_llm(None, None, None, false, None).unwrap_err();
+        assert!(error.contains("--agent"), "{error}");
+    }
+
+    #[test]
+    fn explicit_model_or_effort_always_win_and_do_not_mix_with_the_default() {
+        let model = resolve_recruit_llm(Some("codex"), Some("gpt-6-sol"), None, false, Some(&luna())).unwrap();
+        assert_eq!(model.source, RecruitSource::Explicit);
+        assert_eq!((model.model.as_deref(), model.effort.as_deref(), model.fast), (Some("gpt-6-sol"), None, false));
+        let effort = resolve_recruit_llm(Some("codex"), None, Some("low"), false, Some(&luna())).unwrap();
+        assert_eq!((effort.model, effort.effort.as_deref(), effort.fast), (None, Some("low"), false));
+        // El flag --fast explícito se respeta aunque se pida otro modelo.
+        assert!(resolve_recruit_llm(Some("codex"), Some("gpt-6-sol"), None, true, Some(&luna())).unwrap().fast);
+        // Espacios en blanco cuentan como "no pasado".
+        let blank = resolve_recruit_llm(Some("codex"), Some("  "), Some(""), false, Some(&luna())).unwrap();
+        assert_eq!(blank.source, RecruitSource::SquadDefault);
+    }
+
+    #[test]
+    fn a_different_agent_inherits_nothing_and_automatic_keeps_todays_behaviour() {
+        let other = resolve_recruit_llm(Some("claude-code"), None, None, false, Some(&luna())).unwrap();
+        assert_eq!((other.agent.as_str(), other.model, other.effort, other.fast, other.source), ("claude-code", None, None, false, RecruitSource::ProviderDefault));
+        let auto = resolve_recruit_llm(Some("codex"), Some("m"), Some("high"), false, None).unwrap();
+        assert_eq!((auto.model.as_deref(), auto.effort.as_deref(), auto.source), (Some("m"), Some("high"), RecruitSource::Explicit));
+    }
+
+    fn mission_with(conn: &Connection, squad_id: Option<String>) -> String {
+        let input = MissionInput {
+            title: "M".into(),
+            objective: "O".into(),
+            cwd: "/tmp/project".into(),
+            auto_account: true,
+            squad_id,
+            ..Default::default()
+        };
+        let valid = missions::store::validate(conn, &input).unwrap();
+        missions::store::create(conn, "w1", &valid).unwrap().id
+    }
+
+    #[test]
+    fn default_for_mission_needs_a_running_mission_with_a_squad_that_has_a_default() {
+        let conn = test_db();
+        workspace(&conn);
+        let mut raw = input("Squad with default");
+        raw.default_subagent = Some(luna());
+        let with_default = store::create(&conn, &store::validate(&conn, &raw).unwrap()).unwrap();
+        let automatic = create(&conn, "Automatic squad");
+
+        let mission = mission_with(&conn, Some(with_default.id.clone()));
+        // Rascunho (aún no corre) = comportamiento actual.
+        assert_eq!(default_for_mission(&conn, &mission).unwrap(), None);
+        conn.execute("UPDATE missions SET status = 'running' WHERE id = ?1", [&mission]).unwrap();
+        assert_eq!(default_for_mission(&conn, &mission).unwrap(), Some(luna()));
+        conn.execute("UPDATE missions SET status = 'done' WHERE id = ?1", [&mission]).unwrap();
+        assert_eq!(default_for_mission(&conn, &mission).unwrap(), None);
+
+        let auto_mission = mission_with(&conn, Some(automatic.id));
+        conn.execute("UPDATE missions SET status = 'running' WHERE id = ?1", [&auto_mission]).unwrap();
+        assert_eq!(default_for_mission(&conn, &auto_mission).unwrap(), None);
+
+        let no_squad = mission_with(&conn, None);
+        conn.execute("UPDATE missions SET status = 'running' WHERE id = ?1", [&no_squad]).unwrap();
+        assert_eq!(default_for_mission(&conn, &no_squad).unwrap(), None);
+        assert_eq!(default_for_mission(&conn, "missing").unwrap(), None);
+    }
+}

@@ -55,10 +55,12 @@ AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
   peer check <nombre> [--lines 60]            Lo que se ve ahora en su terminal
   notify \"mensaje\"                            Avisa al usuario (aviso en pantalla; barra de tareas)
   Solo orquestadores (corona en el canvas):
-  peer recruit <nombre> --agent <id>          Abre un agente nuevo, ya conectado
+  peer recruit <nombre> [--agent <id>]        Abre un agente nuevo, ya conectado
               [--prompt \"...\"] [--account <n>]  · con su primera tarea
               [--role <papel>]                  · con un papel (ver roles)
               [--model <id>] [--effort <nivel>] · con ese modelo y esfuerzo (ej.: --model gpt-6.1-luna --effort max)
+                                                Sin ellos, usa el subagente padrão del Squad de la misión (si lo hay);
+                                                --model/--effort explícitos siempre ganan. Sin --agent, el del padrão
               [--fast]                          · modo Fast del Codex (solo --agent codex)
               [--floor <piso>]                  · en ese piso (o `ground`, la planta baja)
   peer connect <a> <b>                        Conecta dos agentes del equipo

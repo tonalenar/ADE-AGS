@@ -1,3 +1,4 @@
+pub(crate) mod recruit;
 pub(crate) mod store;
 #[cfg(test)]
 mod test;

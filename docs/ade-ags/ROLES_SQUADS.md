@@ -66,7 +66,15 @@ Schema v31 acrescenta o **subagente padrão** em `squads`: `subagent_agent_id`, 
 
 - Define o LLM (agente + modelo + esforço + Fast) dos agentes que o orquestrador recruta com `ags peer recruit`. A tela de Squad tem a seção "Subagente padrão": `Automático` ou um agente instalado, com o mesmo seletor de modelo/esforço da tela (catálogo da conta principal; sem roteamento por complexidade, que não existe em terminal recrutado) e, só para Codex, o modo Fast.
 - Validação no backend: agente registrado; esforço só com modelo explícito e dentro da lista conhecida; Fast só com `codex`. Voltar a Automático limpa todas as colunas.
-- Alterar o padrão afeta apenas recrutamentos futuros; o uso no recruit e no briefing do orquestrador está descrito na seção seguinte da Etapa 13.
+- Alterar o padrão afeta apenas recrutamentos futuros.
+
+### Uso no recruit e no briefing
+
+- **Resolução.** `ags peer recruit` descobre a missão em execução do orquestrador (canvas de missão → `missions.squad_id`, só com a missão `running`) e consulta o padrão do Squad. Sem Squad, sem missão em execução ou em Automático, o comportamento é o de sempre.
+- **Regras** (`squads/recruit.rs`): (1) `--model`/`--effort` explícitos sempre vencem e o padrão não é misturado; (2) sem eles, e com o mesmo agente do padrão, vale o padrão inteiro (modelo, esforço, Fast); (3) sem `--agent`, recruta-se o agente do padrão (em Automático `--agent` continua obrigatório); (4) um `--agent` diferente do padrão não herda nada. `--fast` explícito é sempre respeitado e só vale com `codex`.
+- **Transparência.** A resposta do recruit traz `model`, `effort`, `fast` e `llmSource` (`explicit`, `squad_default` ou `provider_default`).
+- **Briefing do orquestrador.** Com padrão ativo, mostra "SUBAGENTE PADRÃO DO SQUAD (ativo): agente · modelo · esforço [· Fast]" e as regras acima; em Automático, diz que o orquestrador escolhe e **justifica a escolha em uma linha**. Missão sem Squad não ganha o bloco.
+- A skill `ags-orchestrator` (1.26.0) e o help da CLI descrevem `--fast`, o padrão e a precedência.
 
 Squad é mutável; Run é histórico. Alterar um Squad afeta somente novos Runs. Uma Task criada já guarda `functional_role`, provider, modelo e account ID resolvidos. O snapshot no Run é necessário para planejar Tasks futuras daquele mesmo Run sem consultar a configuração mutável.
 

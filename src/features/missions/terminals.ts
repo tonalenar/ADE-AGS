@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 import { canvasActions, missionBoardKey, setWorkMode } from "@/features/canvas/store";
-import type { FunctionalRole, Squad } from "@/features/squads/types";
+import type { FunctionalRole, Squad, SubagentDefault } from "@/features/squads/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { sendWhenReady, type SendTimings } from "@/features/terminal/terminalRegistry";
 
@@ -69,8 +69,39 @@ export const LEAD_NAME = "Orquestrador";
 /** Quantos terminais além da equipe o Orquestrador pode abrir sozinho (cada um gasta memória e tokens). */
 export const MAX_EXTRA_TERMINALS = 3;
 
+/**
+ * O que o briefing diz sobre o LLM dos subagentes recrutados. `undefined` = missão sem Squad
+ * (nada a dizer, comportamento de sempre); `null` = Squad em Automático (o orquestrador decide e
+ * justifica); um valor = o padrão ativo, que o `ags peer recruit` aplica sozinho. Pura.
+ */
+export function subagentDefaultBriefing(subagent: SubagentDefault | null | undefined): string[] {
+  if (subagent === undefined) return [];
+  if (subagent === null) {
+    return [
+      "SUBAGENTE PADRÃO DO SQUAD: Automático — você decide. Em cada `ags peer recruit` escolha o agente, o `--model` e o `--effort` e JUSTIFIQUE a escolha em uma linha (por que esse modelo e esforço servem a essa tarefa e custam o certo).",
+    ];
+  }
+  const parts = [
+    subagent.agentId,
+    subagent.model ? `modelo ${subagent.model}` : "modelo padrão do agente",
+    subagent.reasoningEffort ? `esforço ${subagent.reasoningEffort}` : "esforço automático",
+    ...(subagent.fastMode ? ["Fast"] : []),
+  ];
+  return [
+    `SUBAGENTE PADRÃO DO SQUAD (ativo): ${parts.join(" · ")}.`,
+    `- \`ags peer recruit "<nome>" --role <papel> --prompt "..."\` sem \`--agent\`, \`--model\` nem \`--effort\` já abre o subagente com essa configuração.`,
+    "- `--model`/`--effort` explícitos sempre vencem (e então o padrão não é misturado). Com outro `--agent`, o padrão não vale: escolha o modelo e o esforço.",
+  ];
+}
+
 /** Lo primero que lee el orquestador: la misión, su equipo y cómo coordinarlo. Pura. */
-export function leadBriefing(mission: Pick<Mission, "title" | "objective"> & { id?: string }, team: TeamMember[], findings = "", memory = ""): string {
+export function leadBriefing(
+  mission: Pick<Mission, "title" | "objective"> & { id?: string },
+  team: TeamMember[],
+  findings = "",
+  memory = "",
+  defaultSubagent?: SubagentDefault | null,
+): string {
   const people = team.length === 0
     ? "Você ainda não tem equipe: sume agentes com `ags peer recruit <nome> --agent <id> --role <papel>`."
     : `SUA EQUIPE (já aberta e conectada a você no canvas):\n${team
@@ -102,9 +133,11 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective"> & { i
     "SÓ RECRUTE quando a tarefa for independente e paralelizável e a divisão for mais rápida que um agente só; o QG mostra o ganho por missão.",    "",
     "",
     "MAIS TERMINAIS (você tem autonomia):",
-    '- `ags peer recruit "<nome>" --agent <id> --role <papel> [--model <id>] [--effort <nível>]` — abre outro terminal já conectado a você quando a equipe não der conta (ex.: uma tarefa paralela, uma revisão independente).',
+    '- `ags peer recruit "<nome>" --agent <id> --role <papel> [--model <id>] [--effort <nível>] [--fast]` — abre outro terminal já conectado a você quando a equipe não der conta (ex.: uma tarefa paralela, uma revisão independente).',
     `- Máximo de ${MAX_EXTRA_TERMINALS} terminais extras por missão; cada um custa memória e tokens. Só abra quando houver trabalho real para ele, dê a ele um nome e papel claros e feche (ou deixe encerrar) quando acabar.`,
     "- Use um agente que já esteja disponível (`ags peers` mostra a equipe) e não repita um papel que já está livre.",
+    "- `--fast` liga o modo Fast do Codex (só com `--agent codex`).",
+    ...(defaultSubagent === undefined ? [] : ["", ...subagentDefaultBriefing(defaultSubagent)]),
     "",
     "Planeje, divida o trabalho conforme o papel de cada um, acompanhe e junte os resultados. Ao terminar, resuma o que foi feito.",
     ...(mission.id ? ["", ...memorySuggestion(mission.id)] : []),
@@ -255,7 +288,7 @@ export async function startMissionInTerminals(
       },
     };
   };
-  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory)), timed(LEAD_NAME, leadTabId));
+  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined)), timed(LEAD_NAME, leadTabId));
   memberTabIds.forEach((tabId, i) =>
     sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i])), timed(team[i].name, tabId)),
   );

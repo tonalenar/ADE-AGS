@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.25.0
+version: 1.26.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -411,6 +411,17 @@ ags peer disconnect Backend Tests
 - **`--model` / `--effort`** pick the recruit's model and reasoning effort (e.g.
   `ags peer recruit Perf --agent codex --model gpt-6.1-luna --effort max`). Without them the agent
   opens with its TUI default. Do not ask the recruit to switch with `/model` afterwards.
+- **`--fast`** turns on Codex's Fast mode (`service_tier=fast`) for the recruit. Only with
+  `--agent codex`; any other agent is rejected. If the model does not offer Fast, the
+  Squad screen warns but the recruit still opens.
+- **The Squad's default subagent.** When your mission runs under a Squad, the Squad can pin the
+  LLM that recruits use (agent + model + effort + Fast), or be **Automatic**. Your briefing
+  says which ("SUBAGENTE PADRÃO DO SQUAD"). With a default, `ags peer recruit Name --prompt ...`
+  with no `--agent`/`--model`/`--effort` opens the recruit with that configuration (the reply
+  shows `llmSource: squad_default`). Explicit `--model` or `--effort` always win and the
+  default is then not mixed in; a different `--agent` inherits nothing. With **Automatic** (or
+  no Squad) nothing is applied: you choose agent, model and effort for each recruit and
+  **justify the choice in one line** (why that model/effort fits the task and cost).
 - **`--role`** gives the recruit a role: `ags peer recruit Sec --agent claude --role reviewer`.
   It reads the role's instructions before its first task (`--prompt`; with none, it waits
   for yours) and its node shows the role's name. `ags roles` lists them: the catalog

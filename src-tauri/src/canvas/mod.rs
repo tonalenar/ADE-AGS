@@ -239,6 +239,21 @@ fn linked(boards: &Boards, tab: &str) -> BTreeSet<String> {
         .collect()
 }
 
+/// Lo que separa la carpeta de la misión en la clave de un canvas de misión (ver
+/// `missionBoardKey` en el frontend).
+const MISSION_SEP: &str = "#m:";
+
+/// La misión en terminales a la que pertenece `tab`: la del canvas de misión que la tiene como
+/// nodo u orquestadora. `None` si solo está en el canvas de su carpeta.
+pub fn mission_of_tab(boards: &Boards, tab: &str) -> Option<String> {
+    boards.iter().find_map(|(key, board)| {
+        let member = board.orchestrators.iter().any(|o| o == tab)
+            || board.nodes.as_object().is_some_and(|nodes| nodes.contains_key(tab));
+        let (_, mission) = key.rsplit_once(MISSION_SEP)?;
+        (member && !mission.is_empty()).then(|| mission.to_string())
+    })
+}
+
 /// ¿Está `tab` marcada como orquestadora en algún canvas?
 pub fn is_orchestrator(boards: &Boards, tab: &str) -> bool {
     boards.values().any(|b| b.orchestrators.iter().any(|o| o == tab))
