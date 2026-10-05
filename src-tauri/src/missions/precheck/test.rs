@@ -74,7 +74,7 @@ fn o_briefing_diz_o_que_ja_existe_e_manda_conferir_antes_de_convocar() {
     assert!(text.contains("57a9cce"), "{text}");
     assert!(text.contains("aparece em src/a.tsx"), "{text}");
     assert!(text.contains("missão parecida (93%, done)"), "{text}");
-    assert!(text.contains("ANTES de convocar a equipe"), "{text}");
+    assert!(text.contains("DEPOIS de delegar"), "{text}");
 }
 
 #[test]

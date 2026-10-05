@@ -326,22 +326,31 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
     if name.trim().is_empty() {
         return Err("O agente novo precisa de um nome.".into());
     }
-    // Dónde corre el agente nuevo: aquí, o en el piso que se pida.
-    let cwd = match arg_str_opt(args, "floor").filter(|f| !f.trim().is_empty()) {
-        Some(wanted) => super::floor::recruit_cwd(&me.cwd, &wanted)?,
-        None => me.cwd.clone(),
-    };
-    let taken = open_tabs(app)?.into_iter().any(|t| t.cwd == cwd && t.name.eq_ignore_ascii_case(name.trim()));
-    if taken {
-        return Err(format!("Já existe um agente chamado '{name}' nesta pasta. Escolha outro nome."));
-    }
-
     // El papel se resuelve ANTES de abrir la tab: un papel mal escrito no puede dejar un
     // agente abierto sin su papel.
     let role = match arg_str_opt(args, "role").filter(|r| !r.trim().is_empty()) {
         Some(wanted) => Some(crate::canvas::roles::resolve(&crate::canvas::roles::all(), &wanted)?.clone()),
         None => None,
     };
+
+    let boards = crate::canvas::load_boards();
+    let mission_id = crate::canvas::mission_of_tab(&boards, &me.id);
+    let tabs = open_tabs(app)?;
+    if tabs.iter().any(|t| t.name.eq_ignore_ascii_case(name.trim()) && (t.cwd == me.cwd || mission_id.as_ref().is_some_and(|id| crate::canvas::mission_of_tab(&boards, &t.id).as_ref() == Some(id)))) {
+        return Err(format!("Já existe um agente chamado '{name}' nesta equipe. Escolha outro nome."));
+    }
+    let explicit_floor = arg_str_opt(args, "floor").filter(|f| !f.trim().is_empty());
+    let mission_workspace = match (&mission_id, &explicit_floor) {
+        (Some(id), None) => Some(crate::missions::team::prepare_recruit(&super::shared::db(app)?.inner().clone(), id, &name)?),
+        _ => None,
+    };
+    let cwd = match explicit_floor {
+        Some(wanted) => super::floor::recruit_cwd(&me.cwd, &wanted)?,
+        None => mission_workspace.as_ref().map(|w| w.cwd.clone()).unwrap_or_else(|| me.cwd.clone()),
+    };
+    if tabs.iter().any(|t| t.cwd == cwd && (mission_id.is_some() || t.name.eq_ignore_ascii_case(name.trim()))) {
+        return Err("O worktree solicitado já tem um agente aberto. Escolha um piso exclusivo.".into());
+    }
 
     // Um piso antigo também pode não ter o link (foi criado antes deste setup). Tente de
     // novo aqui, sem sobrescrever o que já existe e sem bloquear o recrutamento.
@@ -377,17 +386,17 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         "recruit no clone atual; nenhum link adicional necessário".into()
     };
 
-    let configured_target = std::env::var_os(crate::floors::CARGO_TARGET_DIR_SETTING);
+    let configured_target = if mission_workspace.is_some() { Some(std::ffi::OsString::from("per-worktree")) } else { std::env::var_os(crate::floors::CARGO_TARGET_DIR_SETTING) };
     let cargo_target = crate::floors::cargo_target_dir(&repo_root, &worktree_root, configured_target.as_deref());
     let (shell, shell_label) = crate::floors::worktree_shell();
-    let environment = crate::floors::worktree_environment_block(
+    let environment = mission_workspace.as_ref().map(|w| w.environment.clone()).unwrap_or_else(|| crate::floors::worktree_environment_block(
         &worktree_root.to_string_lossy(),
         &cargo_target.path.to_string_lossy(),
         &shell_label,
         shell,
         &node_modules,
         cargo_target.mode,
-    );
+    ));
 
     let mut create = json!({ "cwd": cwd, "agent": agent, "title": name, "window": me.window });
     // `prelaunch` exporta o target antes de iniciar a TUI; assim seus processos e shells
@@ -502,6 +511,13 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
 /// al destino; cualquier mensaje del remitente prueba que él sí está activo. Con eso el
 /// detector de "agente parado" (`missions/stalled.ts`) sabe quién debe una respuesta.
 fn emit_peer_message(app: &AppHandle, kind: &str, from_tab_id: &str, to_tab_id: Option<&str>, text: Option<&str>) {
+    // Persist successful lead-to-member sends independently of UI listeners.
+    let boards = crate::canvas::load_boards();
+    if let (Some(target), Ok(db)) = (to_tab_id, super::shared::db(app)) {
+        if let Ok(conn) = db.inner().lock() {
+            let _ = crate::missions::timings::record_delegation(&conn, &boards, kind, from_tab_id, target, crate::util::now_ts_ms());
+        }
+    }
     let _ = app.emit(
         "cc-peer-message",
         json!({ "kind": kind, "fromTabId": from_tab_id, "toTabId": to_tab_id, "text": text, "atMs": crate::util::now_ts_ms() }),
