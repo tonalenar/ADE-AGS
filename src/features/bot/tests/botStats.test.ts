@@ -80,4 +80,57 @@ describe("failuresByClass", () => {
     const s = botStats([f("a", "access"), f("b", "access"), f("c", "timeout"), f("d"), m("e", "done", 1, 2), { ...m("f", "done", 1, 2), failureClassification: { category: "crash", actionKey: "x" } }], 10);
     expect(s.failuresByClass).toEqual({ access: 2, timeout: 1, unknown: 1 });
   });
+
+  it("casos de borda: categoria desconocida, vacía, o corrupta cae en unknown", () => {
+    const f = (id: string, category: unknown): MissionLike => ({
+      ...m(id, "failed", 1, 2),
+      failureClassification: { category: category as any, actionKey: "missions.failure.action.unknown" },
+    });
+    const s = botStats([
+      f("u1", "network_error"),
+      f("u2", ""),
+      f("u3", "403_forbidden"),
+      f("u4", null),
+      f("u5", undefined),
+      f("u6", 12345),
+    ], 10);
+    expect(s.failuresByClass).toEqual({ unknown: 6 });
+  });
+
+  it("cubre todas las 5 categorías oficiales y no emite claves con 0", () => {
+    const f = (id: string, category: "access" | "limit" | "model" | "crash" | "timeout"): MissionLike => ({
+      ...m(id, "failed", 1, 2),
+      failureClassification: { category, actionKey: `missions.failure.action.${category}` },
+    });
+    const s = botStats([
+      f("a", "access"),
+      f("l1", "limit"),
+      f("l2", "limit"),
+      f("m1", "model"),
+      f("c1", "crash"),
+      f("t1", "timeout"),
+    ], 10);
+    expect(s.failuresByClass).toEqual({
+      access: 1,
+      limit: 2,
+      model: 1,
+      crash: 1,
+      timeout: 1,
+    });
+  });
+
+  it("ignora clasificaciones si el status no es failed (draft, running, done, cancelled)", () => {
+    const s = botStats([
+      { ...m("d", "draft", null, null), failureClassification: { category: "access" as any, actionKey: "a" } },
+      { ...m("r", "running", 10, null), failureClassification: { category: "limit" as any, actionKey: "l" } },
+      { ...m("c", "cancelled", 10, 20), failureClassification: { category: "model" as any, actionKey: "m" } },
+      { ...m("o", "done", 10, 20), failureClassification: { category: "crash" as any, actionKey: "k" } },
+    ], 50);
+    expect(s.failuresByClass).toEqual({});
+  });
+
+  it("lista vacía o sin misiones fallidas resulta en failuresByClass vacío", () => {
+    expect(botStats([], 10).failuresByClass).toEqual({});
+    expect(botStats([m("a", "done", 1, 2), m("b", "cancelled", 1, 2)], 10).failuresByClass).toEqual({});
+  });
 });
