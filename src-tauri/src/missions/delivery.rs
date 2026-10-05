@@ -158,9 +158,34 @@ fn normalize_pr_reference(value: &str) -> Result<String, String> {
     Ok(format!("https://github.com/{}/{}/pull/{number}", parts[0], parts[1]))
 }
 
+/// `owner/repo` del remoto `origin` de la carpeta (https o ssh). `gh` sin `--repo` usa el repositorio
+/// por defecto del usuario, que puede ser otro (p. ej. el upstream del fork) y hacía fallar el chequeo.
+pub(crate) fn repo_from_remote(url: &str) -> Option<String> {
+    let url = url.trim().trim_end_matches('/').trim_end_matches(".git");
+    let path = url
+        .strip_prefix("https://github.com/")
+        .or_else(|| url.strip_prefix("git@github.com:"))
+        .or_else(|| url.strip_prefix("ssh://git@github.com/"))?;
+    let mut parts = path.split('/');
+    let (owner, repo) = (parts.next()?, parts.next()?);
+    (parts.next().is_none() && !owner.is_empty() && !repo.is_empty()).then(|| format!("{owner}/{repo}"))
+}
+
+fn origin_repo(cwd: &Path) -> Option<String> {
+    let out = Command::new("git").args(["remote", "get-url", "origin"]).current_dir(cwd).output().ok()?;
+    out.status.success().then(|| repo_from_remote(&String::from_utf8_lossy(&out.stdout))).flatten()
+}
+
 fn check_pr_ci(cwd: &Path, reference: &str) -> CiStatus {
+    let mut args: Vec<String> = ["pr", "view", reference, "--json", "statusCheckRollup"].map(String::from).into();
+    // Un número solo no dice de qué repositorio es: se usa el del remoto de la misión.
+    if !reference.starts_with("https://") {
+        if let Some(repo) = origin_repo(cwd) {
+            args.extend(["--repo".to_string(), repo]);
+        }
+    }
     let mut child = match Command::new("gh")
-        .args(["pr", "view", reference, "--json", "statusCheckRollup"])
+        .args(&args)
         .current_dir(cwd)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
@@ -224,6 +249,17 @@ fn parse_ci_status(stdout: &[u8]) -> CiStatus {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn repo_from_remote_acepta_https_y_ssh() {
+        use super::repo_from_remote;
+        assert_eq!(repo_from_remote("https://github.com/tonalenar/ADE-AGS.git
+").as_deref(), Some("tonalenar/ADE-AGS"));
+        assert_eq!(repo_from_remote("git@github.com:tonalenar/ADE-AGS.git").as_deref(), Some("tonalenar/ADE-AGS"));
+        assert_eq!(repo_from_remote("https://github.com/a/b").as_deref(), Some("a/b"));
+        assert_eq!(repo_from_remote("https://gitlab.com/a/b.git"), None);
+        assert_eq!(repo_from_remote("https://github.com/solo"), None);
+    }
+
     use super::*;
 
     #[test]
