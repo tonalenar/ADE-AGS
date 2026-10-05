@@ -12,7 +12,8 @@ use rusqlite::{params, Connection};
 use serde::{Deserialize, Serialize};
 
 /// As etapas que se medem. Texto livre não: assim a tela e o resumo sempre sabem o que são.
-pub const KINDS: &[&str] = &["boot", "briefing", "turn", "peer_ask", "peer_message"];
+pub const KINDS: &[&str] = &["boot", "briefing", "turn", "peer_ask", "peer_message",
+    "orchestrator_stall", "start_all_working", "start_briefing", "start_activity", "start_retry", "start_stalled"];
 const MAX_TEXT: usize = 200;
 /// Um span mais comprido que isto é um erro de relógio, não uma etapa (24 h).
 const MAX_SPAN_MS: i64 = 24 * 60 * 60 * 1000;
@@ -190,6 +191,19 @@ pub fn summarize(spans: &[Span], top: usize) -> Summary {
     slowest.sort_by(|a, b| b.duration_ms().cmp(&a.duration_ms()).then(a.id.cmp(&b.id)));
     slowest.truncate(top);
     Summary { wall_ms, by_kind, slowest, bottlenecks: bottlenecks(spans) }
+}
+
+/// Alert and answer snapshots of the same wait count its elapsed time only once.
+pub fn orchestrator_waits(spans: &[Span]) -> (usize, i64, i64) {
+    let mut waits = std::collections::BTreeMap::new();
+    let mut alerts = std::collections::BTreeSet::new();
+    for span in spans.iter().filter(|s| s.kind == "orchestrator_stall") {
+        let key = (&span.actor, &span.target, span.started_ms);
+        let duration = waits.entry(key).or_insert(0_i64);
+        *duration = (*duration).max(span.duration_ms());
+        if span.detail.starts_with("alerted:") { alerts.insert(key); }
+    }
+    (alerts.len(), waits.values().sum(), waits.values().copied().max().unwrap_or(0))
 }
 
 #[cfg(test)]

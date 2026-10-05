@@ -20,6 +20,7 @@ pub(crate) mod duplicate;
 pub mod efficiency;
 pub(crate) mod store;
 pub(crate) mod timings;
+pub(crate) mod startcheck;
 mod delivery;
 pub(crate) mod team;
 #[cfg(test)]
@@ -601,6 +602,10 @@ pub struct MissionTimings {
     pub turn_ms: Option<i64>,
     pub first_delegation_ms: Option<i64>,
     pub first_delegation_source: Option<&'static str>,
+    pub orchestrator_stall_count: usize,
+    pub orchestrator_wait_ms: i64,
+    pub orchestrator_max_wait_ms: i64,
+    pub time_until_all_working_ms: Option<i64>,
 }
 
 pub(crate) fn timings_of(conn: &Connection, mission_id: &str) -> Result<MissionTimings, String> {
@@ -612,7 +617,10 @@ pub(crate) fn timings_of(conn: &Connection, mission_id: &str) -> Result<MissionT
     let turn_ms = efficiency::turn_ms(&spans);
     let active = active::resolve(conn, mission_id, turn_ms, active::wall_ms(started_at, ended_at, crate::util::now_ts()))?;
     let (first_delegation_ms, first_delegation_source) = timings::first_delegation(&spans, started_at);
-    Ok(MissionTimings { spans, summary, active, turn_ms, first_delegation_ms, first_delegation_source })
+    let (orchestrator_stall_count, orchestrator_wait_ms, orchestrator_max_wait_ms) = timings::orchestrator_waits(&spans);
+    let time_until_all_working_ms = spans.iter().find(|s| s.kind == "start_all_working").map(|s| s.duration_ms());
+    Ok(MissionTimings { spans, summary, active, turn_ms, first_delegation_ms, first_delegation_source,
+        orchestrator_stall_count, orchestrator_wait_ms, orchestrator_max_wait_ms, time_until_all_working_ms })
 }
 
 #[tauri::command]

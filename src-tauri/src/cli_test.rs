@@ -3,6 +3,12 @@
 use super::*;
 
 #[test]
+fn mission_startcheck_accepts_positional_id() {
+    assert_eq!(parse("mission.startcheck", &["mission-id"]).unwrap()["mission"], "mission-id");
+    assert!(parse("mission.startcheck", &["m", "extra"]).is_err());
+}
+
+#[test]
 fn ags_mcp_parseia_missao_e_papel_da_tab() {
     let args = ["--cwd", "/repo", "--tab", "t1", "--mission", "m1", "--role", "QA"]
         .map(str::to_string);
