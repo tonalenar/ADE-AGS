@@ -15,11 +15,8 @@
 
 pub(crate) mod review;
 pub(crate) mod precheck;
-<<<<<<< HEAD
 pub(crate) mod failure;
-=======
 pub(crate) mod duplicate;
->>>>>>> feat/etapa10-p4-duplicada
 pub(crate) mod store;
 pub(crate) mod timings;
 #[cfg(test)]
@@ -27,15 +24,11 @@ mod test;
 mod types;
 pub mod active;
 
-<<<<<<< HEAD
 pub use types::{
     FailureActionKey, FailureCategory, FailureClassification, Mission, MissionDetail,
     MissionInput, MissionSummary,
 };
-=======
 pub use duplicate::DuplicateMission;
-pub use types::{Mission, MissionDetail, MissionInput, MissionSummary};
->>>>>>> feat/etapa10-p4-duplicada
 
 use std::path::Path;
 
@@ -468,9 +461,7 @@ pub(crate) fn check_launch_now(db: &DbConnection, mission_id: &str, terminals: b
 pub fn mission_start_terminals(app: AppHandle, mission_id: String, force: Option<bool>) -> Result<Mission, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
     let db = db_of(&app)?;
-<<<<<<< HEAD
     check_launch_now(&db, &mission_id, true)?;
-=======
     if !force.unwrap_or(false) {
         let conn = db.lock().map_err(|e| e.to_string())?;
         if let Some(dup) = duplicate::check_mission_duplicate(&conn, &mission_id, crate::util::now_ts())? {
@@ -481,7 +472,6 @@ pub fn mission_start_terminals(app: AppHandle, mission_id: String, force: Option
             });
         }
     }
->>>>>>> feat/etapa10-p4-duplicada
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let mission = store::get(&conn, &mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
