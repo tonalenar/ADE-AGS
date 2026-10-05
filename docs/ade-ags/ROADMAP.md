@@ -159,3 +159,7 @@ Ponto 2: failover opcional por autenticação, modelo ou saldo no mesmo pool/TUI
 **Ponto 6 (medição) implementado no front:** cartão com histórico, 7 e 30 dias, canceladas à parte e missões de teste/E2E por marcação explícita (`isTest`). Pendente: backend gravar `isTest`. Detalhes em [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
 
 Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--test`), persistida no schema v27 e exposta em lista/detalhe/status, sem inferência por título. Migração preserva status e classifica legadas como reais.
+
+## Etapa 11 — Eficiência entre agentes
+
+**Ponto 3 documentado:** preparar o worktree antes de abrir missão ou recruit, incluindo shell, junction de `node_modules`, `CARGO_TARGET_DIR` e comandos exatos de validação. O briefing inicial recebe os caminhos já resolvidos. O procedimento diferencia Windows de Linux/CI em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
