@@ -28,6 +28,7 @@ function mockMission(overrides: Partial<MissionSummary> = {}): MissionSummary {
     leadAgent: null,
     leadStatus: null,
     activeSeconds: null,
+    activeSource: null,
     ...overrides,
   };
 }

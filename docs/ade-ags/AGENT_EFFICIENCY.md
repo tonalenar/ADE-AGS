@@ -82,14 +82,15 @@ O ponto 4 mede se dividir uma missão ajuda. O cartão aparece no QG e no painel
 
 ## Métricas por missão
 
-- **Tempo ativo (`activeMs`)**: união dos intervalos dos spans `turn` e `peer_ask`. Intervalos sobrepostos contam uma vez. Sem spans aplicáveis, o valor fica não medido (`null`).
+- **Tempo ativo (`activeMs`, `activeSource`)**: fonte unificada da Etapa 14: `mission_active`, depois união de spans `turn`/`peer_ask`, depois relógio com `started_at`. Sem fonte, fica não medido (`null`).
+- **Detalhe por turno (`turnMs`)**: união de spans `turn` e `peer_ask`, sem sobreposições. Disponível para analisar turnos e esperas; não substitui o tempo oficial quando há `mission_active`.
 - **Relógio (`wallMs`)**: diferença entre `started_at` e `ended_at`; enquanto a missão está em andamento, usa o horário atual.
 - **Custo estimado (`costEstimate`)**: soma de `spent_usd` dos Runs da missão, incluindo tentativas anteriores. Fica `null` quando nenhum Task reportou custo. A UI não apresenta custo ausente como zero.
 - **Agentes (`agents`)**: quantidade de nomes distintos observados nos spans; o destino de um `peer_ask` também conta como participante.
 
 ## Comparação histórica
 
-Para cada missão, a ADE considera até as 30 missões mais recentes concluídas no mesmo workspace, exclui missões de teste e agrupa as amostras por 1, 2, 3–4 ou 5+ agentes. A tabela mostra medianas de tempo ativo, relógio e custo, além do ganho percentual de cada faixa contra a mediana histórica de um agente. Também compara a missão atual com essa referência de um agente.
+Para cada missão, a ADE considera até as 30 missões mais recentes concluídas no mesmo workspace, exclui missões de teste e agrupa as amostras por 1, 2, 3–4 ou 5+ agentes. A tabela mostra medianas de tempo ativo pela mesma fonte unificada da missão atual (`median_active_ms`), relógio e custo, além do ganho percentual de cada faixa contra a mediana histórica de um agente. Também compara a missão atual com essa referência de um agente.
 
 Os ganhos são observações do histórico do workspace, não uma prova causal: missões diferentes podem ter objetivos e dificuldades diferentes. A quantidade de amostras fica visível. Se o histórico não tiver uma faixa de um agente ou se o provider não reportar custo, o ganho correspondente aparece como não medido.
 
@@ -97,7 +98,7 @@ O briefing do orquestrador orienta recrutar somente quando o trabalho for indepe
 
 ## Limites dos dados
 
-O tempo ativo depende da cobertura dos spans registrados. Agentes sem spans não entram na contagem observada. Providers que não reportam custo deixam `costEstimate` e o ganho de custo sem medição; não se infere custo zero. Para a fotografia anterior às mudanças da Etapa 11, consulte [AGENT_EFFICIENCY_BASELINE.md](./AGENT_EFFICIENCY_BASELINE.md), preparado pelo QA.
+O tempo ativo depende da cobertura de `mission_active` e das fontes de fallback, identificadas em `activeSource`. Spans dependem dos intervalos registrados; o relógio de parede inclui esperas. Agentes sem spans não entram na contagem observada. Providers que não reportam custo deixam `costEstimate` e o ganho de custo sem medição; não se infere custo zero. Para a fotografia anterior às mudanças da Etapa 11, consulte [AGENT_EFFICIENCY_BASELINE.md](./AGENT_EFFICIENCY_BASELINE.md), preparado pelo QA.
 # Eficiência entre agentes
 
 ## Etapa 11 — ponto 5: menos conversa, mais memória
@@ -137,3 +138,49 @@ Para separar o custo das instruções do ganho de conversa, comparei os briefing
 | `memberBriefing` | 370; 93 | 767; 192 | +397 bytes; +99 tokens |
 
 Esses valores medem o overhead estático de contexto dos novos briefings; não medem o uso de uma conversa real. A economia efetiva depende de quantas perguntas e respostas redundantes a equipe realmente elimina. Compare-a com a baseline de QA `AGENT_EFFICIENCY_BASELINE.md` do worktree e11-p4 antes de afirmar ganho real. Essa baseline não estava presente em `ADE-AGS-e11-p4-metricas/docs/ade-ags/` quando esta medição foi feita, então a comparação de QA permanece pendente. O uso real deve ser medido com dados de usage do provider; esta base ainda não registra tokens de mensagens peer.
+
+## Etapa 14 — fonte única de tempo ativo
+
+Antes desta etapa, a lista e o QG do bot usavam `mission_active`, enquanto o cartão de eficiência e `ags mission efficiency` chamavam a união de spans de tempo ativo. São medições diferentes:
+
+| Medida | Semântica e cobertura | Turnos longos e esperas |
+| --- | --- | --- |
+| `mission_active.active_ms` | O watcher amostra a cada 1 s e acumula uma vez por missão `running` quando algum terminal tem saída sustentada (sequência de pelo menos 2 s, saída há menos de 3 s). Envia blocos a cada 10 s para `mission_active_add`. Agentes simultâneos não multiplicam o tempo. | Com todos quietos, o acumulador para. Trabalho silencioso não é observado; depende da janela coletora. Não equivale a CPU nem à duração integral de um turno. |
+| União de spans `turn`/`peer_ask` | Intervalos persistidos em `mission_timings`; exclui `boot`/`briefing` e une sobreposições. Era o `activeMs` da eficiência; agora é `turnMs` (detalhe por turno). | Um intervalo pode incluir pausas; `peer_ask` inclui espera de resposta. O rastreador encerra turnos após 5 s de silêncio. Falta de spans pode subestimar missões longas. |
+
+### Comparação no banco real
+
+Fotografia obtida pelo Orquestrador em 05/10/2026, com leitura de `~/.ags/data.db`; nenhum dado foi alterado. Os totais de cobertura não representam a interseção entre as fontes.
+
+| Amostra | `mission_active` | Spans `turn`/`peer_ask` |
+| --- | ---: | ---: |
+| Cobertura entre 47 missões | 9/47 | 20/47 |
+| Missão com prefixo `f754b31f` | 4.322 s | 28 s |
+
+Recorte ampliado abaixo: as colunas de turno são **soma de spans `turn` e maior turno**, não a união `turn`/`peer_ask` usada por `turnMs`. Portanto, a soma pode contar paralelismo mais de uma vez.
+
+| Missão (prefixo) | Relógio (s) | `mission_active` (s) | Soma `turn` (s) | Maior `turn` (s) |
+| --- | ---: | ---: | ---: | ---: |
+| `67d396c0` | 12.646 | 1.403 | 1.758 | 1.371 |
+| `386661ff` | 2.464 | 1.284 | 319 | 291 |
+| `02b9294a` | 8.291 | 6.376 | 71 | 59 |
+| `5519704d` | 40.873 | 10.246 | 604 | 435 |
+| `e7f62d88` | 43.489 | 2.584 | 601 | 448 |
+| `36ee5832` | 4.268 | 24 | 133 | 123 |
+| `c643e561` | 7.230 | 29 | 929 | 579 |
+| `f754b31f` | 10.359 | 4.322 | 28 | 16 |
+| `8541b738` | 3.933 | não medido | 1.662 | não informado |
+| `a536f7e9` | 19.174 | não medido | 1.386 | não informado |
+| `e307973c` | 41.134 | não medido | 765 | não informado |
+
+A leitura do recorte indica subestimação pelos spans quando o trabalho não passa pelos caminhos rastreados e possível superestimação com turnos longos de espera. `c643e561`, por exemplo, tem 29 s de saída sustentada e 929 s somados em turnos; `02b9294a` tem 6.376 s de saída sustentada e apenas 71 s em turnos. A soma e a união respondem a perguntas diferentes.
+
+As medidas não são intercambiáveis: cobertura e limites de coleta variam. Esses dados não permitem atribuir toda a diferença a espera ou trabalho silencioso.
+
+### Regra e contratos
+
+`missions/active.rs` centraliza a escolha: `mission_active` positivo → união de spans `turn`/`peer_ask` → relógio de parede, somente quando existe `started_at` → não medido. O resultado é `{ms, source}`, com fonte `mission_active`, `spans` ou `wall`; sem fonte, ambos são `null`. O relógio usa `(ended_at ?? agora) - started_at`, em segundos convertidos para milissegundos, sem duração negativa.
+
+A lista (`MissionSummary.activeSeconds = ms / 1000`, `activeSource`), o QG, o painel de tempos e a CLI usam esse mesmo resultado. `mission_efficiency` expõe `activeMs`, `activeSource` e `turnMs`; `mission_timings` expõe `active: {ms, source}` além dos spans e gargalos. `ags mission efficiency` e `ags mission timings` recebem esses contratos. Comparações históricas por faixa de agentes resolvem cada missão pela mesma regra antes de calcular a mediana.
+
+Zero gravado em `mission_active` não é tratado como coleta positiva e segue o fallback. Não há migração, backfill ou reescrita de dados antigos. Missões sem coleta oficial usam uma duração disponível por fallback, com sua origem identificada; sem início nem spans, ficam não medidas. Totais por agente e gargalos continuam sendo detalhes por turno e podem superar o relógio da missão por paralelismo.

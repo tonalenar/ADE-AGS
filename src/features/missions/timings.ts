@@ -20,7 +20,19 @@ export interface KindTotal {
   maxMs: number;
 }
 
+/** De dónde sale el tiempo activo oficial (ver `missions::active::choose`), por prioridad. */
+export type ActiveSource = "mission_active" | "spans" | "wall";
+
+export interface ActiveTime {
+  ms: number | null;
+  source: ActiveSource | null;
+}
+
 export interface MissionTimings {
+  /** Tiempo activo oficial: el mismo de la lista, del QG y de `ags mission efficiency`. */
+  active: ActiveTime;
+  /** Detalle por turno: unión de los spans `turn` y `peer_ask`. */
+  turnMs: number | null;
   spans: TimingSpan[];
   summary: { wallMs: number; byKind: KindTotal[]; slowest: TimingSpan[]; bottlenecks: Bottleneck[] };
 }
@@ -46,7 +58,11 @@ export interface AgentBandComparison {
 }
 
 export interface MissionEfficiency {
+  /** Tiempo activo oficial (ver `ActiveSource`). */
   activeMs: number | null;
+  activeSource: ActiveSource | null;
+  /** Detalle por turno: unión de los spans `turn` y `peer_ask`. */
+  turnMs: number | null;
   wallMs: number | null;
   costEstimate: number | null;
   agents: number;
@@ -78,6 +94,19 @@ export function formatDuration(ms: number): string {
   const seconds = total % 60;
   if (minutes < 60) return `${minutes} min ${String(seconds).padStart(2, "0")} s`;
   return `${Math.floor(minutes / 60)} h ${String(minutes % 60).padStart(2, "0")} min`;
+}
+
+/**
+ * El tiempo activo tal como se muestra en TODAS las pantallas: la lista lo recibe en segundos
+ * y el resto en ms, así que se trunca a segundos para que un mismo valor se vea igual. Pura.
+ */
+export function formatActive(ms: number | null): string | null {
+  return ms === null ? null : formatDuration(Math.floor(ms / 1000) * 1000);
+}
+
+/** Clave i18n de la fuente del tiempo activo (para rotular que no es medición directa). */
+export function activeSourceKey(source: ActiveSource | null): string | null {
+  return source === null ? null : `missions.efficiency.source.${source}`;
 }
 
 /** Qué parte del total ocupa un tipo de etapa, en porcentaje entero. Pura. */

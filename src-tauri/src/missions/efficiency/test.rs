@@ -135,3 +135,71 @@ fn mission_without_runs_or_spans_marks_unmeasured_fields() {
     assert_eq!(result.agents, 0);
     assert!(result.by_agent_band.is_empty());
 }
+
+fn recorded(conn: &Connection, id: &str, ms: i64) {
+    conn.execute("INSERT INTO mission_active(mission_id, active_ms) VALUES(?1, ?2)", rusqlite::params![id, ms]).unwrap();
+}
+
+#[test]
+fn tempo_ativo_oficial_e_mission_active_com_spans_como_detalhe() {
+    let conn = test_db();
+    workspace(&conn);
+    mission(&conn, "medida", 10, 400, "done", false);
+    span(&conn, "medida", "turn", "A", "", 1_000, 3_000);
+    recorded(&conn, "medida", 120_000);
+
+    let result = get(&conn, "medida").unwrap();
+    assert_eq!(result.active_ms, Some(120_000));
+    assert_eq!(result.active_source.as_deref(), Some("mission_active"));
+    assert_eq!(result.turn_ms, Some(2_000), "spans seguem como detalhe por turno");
+}
+
+#[test]
+fn cadeia_mission_active_spans_relogio_e_nada() {
+    let conn = test_db();
+    workspace(&conn);
+    mission(&conn, "antiga", 10, 400, "done", false);
+    span(&conn, "antiga", "turn", "A", "", 1_000, 3_000);
+    mission(&conn, "vazia", 10, 400, "done", false);
+
+    let antiga = get(&conn, "antiga").unwrap();
+    assert_eq!((antiga.active_ms, antiga.active_source.as_deref()), (Some(2_000), Some("spans")));
+    let vazia = get(&conn, "vazia").unwrap();
+    assert_eq!((vazia.active_ms, vazia.active_source.as_deref()), (Some(390_000), Some("wall")));
+    conn.execute("UPDATE missions SET started_at = NULL, ended_at = NULL WHERE id = 'vazia'", []).unwrap();
+    let sem_inicio = get(&conn, "vazia").unwrap();
+    assert_eq!((sem_inicio.active_ms, sem_inicio.active_source), (None, None));
+}
+
+#[test]
+fn historico_por_faixa_usa_o_tempo_ativo_unificado() {
+    let conn = test_db();
+    workspace(&conn);
+    mission(&conn, "hist", 10, 60, "done", false);
+    span(&conn, "hist", "turn", "Solo", "", 1_000, 2_000);
+    recorded(&conn, "hist", 30_000);
+    mission(&conn, "atual", 70, 90, "done", false);
+
+    let result = get(&conn, "atual").unwrap();
+    let band = result.by_agent_band.iter().find(|band| band.band == "1").unwrap();
+    assert_eq!(band.median_active_ms, Some(30_000));
+}
+
+#[test]
+fn lista_efficiency_e_timings_mostram_o_mesmo_valor() {
+    let conn = test_db();
+    workspace(&conn);
+    mission(&conn, "mesma", 10, 400, "done", false);
+    span(&conn, "mesma", "turn", "A", "", 1_000, 3_000);
+    recorded(&conn, "mesma", 123_000);
+
+    let listed = crate::missions::store::list(&conn, "eff-w").unwrap();
+    let list_seconds = listed.iter().find(|m| m.mission.id == "mesma").unwrap().active_seconds;
+    let efficiency = get(&conn, "mesma").unwrap();
+    let timings = crate::missions::timings_of(&conn, "mesma").unwrap();
+
+    assert_eq!(list_seconds, Some(123));
+    assert_eq!(efficiency.active_ms.map(|ms| ms / 1000), list_seconds);
+    assert_eq!(timings.active.ms, efficiency.active_ms);
+    assert_eq!(timings.active.source.map(str::to_owned), efficiency.active_source);
+}

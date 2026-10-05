@@ -55,12 +55,13 @@ Os tokens são medidos; o dinheiro é **estimado** com o preço de lista da API
 
 ## Tempo ativo da missão
 
-O tempo mostrado nas missões é o **tempo ativo**: só corre enquanto algum agente da missão
-está trabalhando (saída recente do terminal, mesma detecção do bot). Com todos os agentes
-quietos, esperando você, o relógio para. O frontend manda os blocos a `mission_active_add`
-(tabela `mission_active`, só soma em missão `running`); `MissionSummary.activeSeconds` vem
-da lista. Missões anteriores a essa medição não têm o dado (`null`) e mostram o tempo de
-relógio de parede.
+A fonte oficial é `mission_active`: o watcher acumula uma vez por missão `running` quando há saída **sustentada** em algum terminal (pelo menos 2 s de sequência e saída recente, há menos de 3 s). Amostra a cada 1 s e envia blocos a `mission_active_add` a cada 10 s. Com todos quietos, o acumulador para; trabalho silencioso não é observado. Agentes em paralelo não multiplicam a duração.
+
+A escolha é única no Rust (`missions/active.rs`): `mission_active` positivo → união de spans `turn`/`peer_ask` → relógio de parede, somente com `started_at` → não medido. O relógio usa o fim registrado ou o horário atual. `source` identifica `mission_active`, `spans` ou `wall`; sem fonte, duração e origem ficam `null`. Não há migração nem alteração de dados antigos.
+
+Lista, QG, painel de tempos e CLI usam a mesma duração: `MissionSummary.activeSeconds` é `ms / 1000`, com `activeSource`; `mission_efficiency` retorna `activeMs`/`activeSource` e `mission_timings` retorna `active: {ms, source}`. A comparação histórica de eficiência também usa essa regra.
+
+A união de spans permanece em `turnMs`, rotulada **detalhe por turno**: inclui espera de `peer_ask` e possíveis pausas dentro dos intervalos. Não é uma segunda medida oficial quando há `mission_active`. Cobertura real e diferenças estão documentadas em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md#etapa-14--fonte-única-de-tempo-ativo).
 
 ## UI
 

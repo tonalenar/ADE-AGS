@@ -23,6 +23,8 @@ pub(crate) mod timings;
 mod delivery;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod active_consistency_test;
 mod types;
 pub mod active;
 
@@ -592,12 +594,21 @@ pub fn mission_active_add(app: AppHandle, mission_id: String, ms: i64) -> Result
 pub struct MissionTimings {
     pub spans: Vec<timings::Span>,
     pub summary: timings::Summary,
+    /// Tempo ativo oficial (o mesmo da lista, do QG e de `efficiency`); ver `active::choose`.
+    pub active: active::Resolved,
+    /// Detalhe por turno: união dos spans `turn` e `peer_ask`.
+    pub turn_ms: Option<i64>,
 }
 
 pub(crate) fn timings_of(conn: &Connection, mission_id: &str) -> Result<MissionTimings, String> {
     let spans = timings::list(conn, mission_id)?;
     let summary = timings::summarize(&spans, 5);
-    Ok(MissionTimings { spans, summary })
+    let (started_at, ended_at) = conn
+        .query_row("SELECT started_at, ended_at FROM missions WHERE id = ?1", [mission_id], |row| Ok((row.get(0)?, row.get(1)?)))
+        .unwrap_or((None, None));
+    let turn_ms = efficiency::turn_ms(&spans);
+    let active = active::resolve(conn, mission_id, turn_ms, active::wall_ms(started_at, ended_at, crate::util::now_ts()))?;
+    Ok(MissionTimings { spans, summary, active, turn_ms })
 }
 
 #[tauri::command]
