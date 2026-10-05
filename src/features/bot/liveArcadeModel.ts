@@ -5,6 +5,11 @@ export type ArcadeTaskStatus = "pending" | "ready" | "running" | "done" | "faile
 export interface ArcadeTask {
   id: string; title: string; status: ArcadeTaskStatus; role?: string | null; dependsOn: string[];
   checks?: Array<"passed" | "failed" | "not_run">; attempt?: number;
+  /** Elo real com um terminal: a sessão que a tarefa lançou. */
+  sessionId?: string | null;
+  /** Nomes com que o plano chama a tarefa (planKey, papel funcional): casam com o nome do terminal. */
+  aliases?: string[];
+  endedAt?: number | null;
 }
 export interface ArcadeScene {
   stages: Array<{ id: ArcadeStageId; status: ArcadeStageStatus }>;
@@ -118,4 +123,62 @@ export interface ArcadeTrophy {
 export function deriveTrophy(review: { integrationBranch: string | null; appliedAt: number | null } | null): ArcadeTrophy {
   const step = !review ? null : review.appliedAt !== null ? "integrated" : review.integrationBranch ? "integration_ready" : null;
   return { step, pr: null, ci: null };
+}
+
+export type AgentKind = "claude" | "codex" | "antigravity";
+export function agentKind(id: string): AgentKind | null {
+  const value = id.toLowerCase();
+  if (value.includes("claude")) return "claude";
+  if (value.includes("codex")) return "codex";
+  if (value.includes("antigravity") || value === "agy") return "antigravity";
+  return null;
+}
+
+export type HeroRole = "lead" | "backend" | "frontend" | "qa" | "review" | "other";
+/** Cor por papel: lê o nome do terminal e o papel da tarefa ligada. Sem pista = "other". */
+export function roleOf(...texts: Array<string | null | undefined>): HeroRole {
+  const text = texts.filter(Boolean).join(" ").toLowerCase();
+  if (/orquestrador|orchestrat|\blead\b/.test(text)) return "lead";
+  if (/\b(qa|test|tests|testing|tester|quality)\b|teste/.test(text)) return "qa";
+  if (/review|revis/.test(text)) return "review";
+  if (/backend|back-end|server|\bapi\b|rust|dados|\bdata\b/.test(text)) return "backend";
+  if (/frontend|front-end|client|\bui\b|interface|css/.test(text)) return "frontend";
+  return "other";
+}
+
+export interface ArcadeTabInput { id: string; title: string; agentId: string; sessionId?: string | null }
+export type HeroState = "running" | "sleeping" | "stopped";
+export interface ArcadeHero {
+  tabId: string; name: string; kind: AgentKind; role: HeroRole;
+  /** Andar onde trabalha: o da tarefa ligada; sem tarefa ligada não se sabe, então fica no chão (equipe). */
+  stage: ArcadeStageId | null; taskId: string | null; state: HeroState;
+}
+
+const ACTIVE_RANK: Record<string, number> = { running: 0, handed_off: 1, ready: 2, pending: 3 };
+/** Tarefa de um terminal: pela sessão que ela lançou ou, na falta, pelo nome do terminal = nome da tarefa no plano. Nada de adivinhar. */
+export function taskOfTab<T extends ArcadeTask>(tab: ArcadeTabInput, tasks: T[]): T | null {
+  const name = tab.title.trim().toLowerCase();
+  const linked = tasks.filter((task) =>
+    (!!tab.sessionId && task.sessionId === tab.sessionId)
+    || (!!name && (task.aliases ?? []).some((alias) => alias.trim().toLowerCase() === name)));
+  if (!linked.length) return null;
+  const active = linked.filter((task) => task.status in ACTIVE_RANK)
+    .sort((a, b) => ACTIVE_RANK[a.status] - ACTIVE_RANK[b.status]);
+  return active[0] ?? linked[linked.length - 1];
+}
+
+/** UM herói por terminal da missão (shells ficam de fora). Correr só com saída sustentada; parado "!" com falha ou aprovação pendente; senão dorme. */
+export function deriveHeroes(input: {
+  tabs: ArcadeTabInput[]; scene: ArcadeScene; sustainedTabIds: string[]; approvalTaskIds: string[] | null;
+}): ArcadeHero[] {
+  const sustained = new Set(input.sustainedTabIds);
+  const approvals = new Set(input.approvalTaskIds ?? []);
+  return input.tabs.flatMap((tab): ArcadeHero[] => {
+    const kind = agentKind(tab.agentId);
+    if (!kind) return [];
+    const task = taskOfTab(tab, input.scene.tasks);
+    const stopped = !!task && (task.status === "failed" || approvals.has(task.id));
+    const state: HeroState = stopped ? "stopped" : sustained.has(tab.id) ? "running" : "sleeping";
+    return [{ tabId: tab.id, name: tab.title, kind, role: roleOf(tab.title, task?.role), stage: task ? task.stage : null, taskId: task?.id ?? null, state }];
+  });
 }
