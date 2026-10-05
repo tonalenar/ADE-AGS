@@ -1924,7 +1924,7 @@
   "missions.autonomy.title": "Agent permissions",
   "missions.autonomy.safe": "Automatic, protected",
   "missions.autonomy.ask": "Always ask",
-  "missions.autonomy.safeHint": "Each agent approves routine work on its own and keeps its sandbox: Codex with automatic review, Gemini and Claude approving only file edits. Anything beyond that still asks. Antigravity does not follow this rule: its terminals already open with automatic permissions. Applies when the mission starts.",
+  "missions.autonomy.safeHint": "Each agent approves routine work on its own and keeps its sandbox: Codex with automatic review, Claude Code in auto mode (a Claude classifier reviews every action) and Gemini approving only edits. Anything beyond that still asks. Antigravity does not follow this rule: its terminals already open with automatic permissions. Applies when the mission starts.",
   "missions.autonomy.askHint": "Agents ask for permission as shipped. Applies when the mission starts.",
   "missions.timings.title": "Timings",
   "missions.timings.empty": "No timings measured for this mission yet.",

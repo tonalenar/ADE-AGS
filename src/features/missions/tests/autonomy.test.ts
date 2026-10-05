@@ -11,8 +11,8 @@ describe("withAutonomy", () => {
     expect(withAutonomy("gemini-cli", "gemini", "safe")).toBe("gemini --approval-mode auto_edit");
   });
 
-  it("en seguro, Claude Code solo acepta las ediciones de archivos (no es un bypass)", () => {
-    expect(withAutonomy("claude-code", "claude", "safe")).toBe("claude --permission-mode acceptEdits");
+  it("en seguro, Claude Code arranca en modo automático con su clasificador (no es un bypass)", () => {
+    expect(withAutonomy("claude-code", "claude", "safe")).toBe("claude --permission-mode auto");
     expect(withAutonomy("claude-code", "claude --permission-mode manual", "safe")).toBe("claude --permission-mode manual");
   });
 
