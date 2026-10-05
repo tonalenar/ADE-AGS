@@ -11,6 +11,11 @@ describe("withAutonomy", () => {
     expect(withAutonomy("gemini-cli", "gemini", "safe")).toBe("gemini --approval-mode auto_edit");
   });
 
+  it("en seguro, Claude Code solo acepta las ediciones de archivos (no es un bypass)", () => {
+    expect(withAutonomy("claude-code", "claude", "safe")).toBe("claude --permission-mode acceptEdits");
+    expect(withAutonomy("claude-code", "claude --permission-mode manual", "safe")).toBe("claude --permission-mode manual");
+  });
+
   it("Antigravity no recibe flag de permisos acá: ya lo trae del catálogo y no se pisan", () => {
     expect(withAutonomy("antigravity", "agy", "safe")).toBe("agy");
   });
@@ -24,7 +29,8 @@ describe("withAutonomy", () => {
 
   it("en preguntar y en agentes sin flag, el comando queda igual", () => {
     expect(withAutonomy("codex", "codex", "ask")).toBe("codex");
-    expect(withAutonomy("claude-code", "claude", "safe")).toBe("claude");
+    expect(withAutonomy("claude-code", "claude", "ask")).toBe("claude");
+    expect(withAutonomy("opencode", "opencode", "safe")).toBe("opencode");
   });
 
   it("no repite un flag que el comando ya trae", () => {
