@@ -58,6 +58,7 @@ pub fn run() {
             crate::missions::mission_efficiency,
             crate::missions::mission_precheck,
             crate::missions::mission_memory_context,
+            crate::missions::team::mission_prepare_team,
             crate::runs::checkpoints::run_checkpoints,
             crate::runs::checkpoints::run_rollback_preview,
             crate::runs::checkpoints::run_rollback,

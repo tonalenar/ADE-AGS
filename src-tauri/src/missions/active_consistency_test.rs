@@ -109,3 +109,21 @@ fn lista_qg_cli_usam_relogio_sem_mission_active_nem_spans() {
 fn lista_qg_cli_preservam_nao_medido_sem_inicio_nem_medicoes() {
     assert_consistent(None, false, None, None, None);
 }
+
+#[test]
+fn qg_and_cli_expose_the_same_persisted_delegation_contract() {
+    let conn = test_db();
+    conn.execute_batch("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('dw','W',0,0);
+        INSERT INTO missions(id,workspace_id,title,objective,cwd,started_at,created_at,updated_at) VALUES('dm','dw','T','O','/repo',1,1,1);").unwrap();
+    for (kind, start, end, detail) in [("boot", 1_000, 6_000, ""), ("peer_message", 90_000, 90_000, "delegation")] {
+        timings::add(&conn, "dm", &timings::NewSpan { kind: kind.into(), actor: "Orquestrador".into(), target: "Backend".into(), started_ms: start, ended_ms: end, detail: detail.into() }).unwrap();
+    }
+    let cli = timings_of(&conn, "dm").unwrap();
+    let qg = efficiency::get(&conn, "dm").unwrap();
+    assert_eq!(cli.first_delegation_ms, Some(89_000));
+    assert_eq!(cli.first_delegation_ms, qg.first_delegation_ms);
+    assert_eq!(cli.first_delegation_source, qg.first_delegation_source);
+    let json = serde_json::to_value(cli).unwrap();
+    assert_eq!(json["firstDelegationMs"], 89_000);
+    assert_eq!(json["firstDelegationSource"], "peer_message");
+}

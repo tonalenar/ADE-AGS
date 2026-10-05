@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import i18n from "i18next";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
@@ -45,7 +46,7 @@ export function uniqueNames(names: string[]): string[] {
 export function teamOf(squad: Squad | null, roles: FunctionalRole[]): TeamMember[] {
   if (!squad) return [];
   const labels = squad.members.map((m) => roles.find((r) => r.id === m.roleId)?.label ?? m.roleId);
-  const names = uniqueNames(labels);
+  const names = uniqueNames([LEAD_NAME, ...labels]).slice(1);
   return squad.members.map((m, i) => {
     const role = roles.find((r) => r.id === m.roleId);
     return {
@@ -65,6 +66,34 @@ export function teamOf(squad: Squad | null, roles: FunctionalRole[]): TeamMember
 }
 
 export const LEAD_NAME = "Orquestrador";
+
+export interface TeamWorkspace {
+  name: string;
+  cwd: string;
+  root: string;
+  branch: string;
+  cargoTargetDir: string;
+  prelaunch: string;
+  environment: string;
+}
+
+export interface PreparedTeam {
+  workspaces: TeamWorkspace[];
+  precheck: string;
+  memory: string;
+}
+
+/** Refuse incomplete isolation instead of opening any agent in the shared clone. */
+export function workspaceFor(prepared: PreparedTeam, name: string): TeamWorkspace {
+  const workspace = prepared.workspaces.find((w) => w.name === name);
+  if (!workspace?.cwd || !workspace.root || !workspace.branch || !workspace.prelaunch) {
+    throw new Error(i18n.t("missions.workspace.unavailable", { name }));
+  }
+  if (prepared.workspaces.some((w) => w.name !== name && (w.root === workspace.root || w.branch === workspace.branch))) {
+    throw new Error(i18n.t("missions.workspace.shared", { name }));
+  }
+  return workspace;
+}
 
 /** Quantos terminais além da equipe o Orquestrador pode abrir sozinho (cada um gasta memória e tokens). */
 export const MAX_EXTRA_TERMINALS = 3;
@@ -101,11 +130,15 @@ export function leadBriefing(
   findings = "",
   memory = "",
   defaultSubagent?: SubagentDefault | null,
+  workspaces: TeamWorkspace[] = [],
 ): string {
   const people = team.length === 0
     ? "Você ainda não tem equipe: sume agentes com `ags peer recruit <nome> --agent <id> --role <papel>`."
     : `SUA EQUIPE (já aberta e conectada a você no canvas):\n${team
-        .map((m) => `- ${m.name} — ${m.roleLabel}${m.roleDescription ? `: ${m.roleDescription}` : ""}`)
+        .map((m) => {
+          const workspace = workspaces.find((w) => w.name === m.name);
+          return `- ${m.name} — ${m.roleLabel}${m.roleDescription ? `: ${m.roleDescription}` : ""}${workspace ? `; worktree: ${workspace.cwd}; branch: ${workspace.branch}` : ""}`;
+        })
         .join("\n")}`;
   return [
     `Você é o ORQUESTRADOR da missão "${mission.title}".`,
@@ -114,6 +147,12 @@ export function leadBriefing(
     mission.objective,
     "",
     people,
+    "",
+    "INÍCIO RÁPIDO — PRIMEIRA AÇÃO (meta: até ~2 minutos após o briefing):",
+    "- Faça um plano curto a partir do objetivo e do contexto já preenchido abaixo. Antes de explorar o código, delegue a CADA integrante com `ags peer tell`, incluindo tarefa concreta, escopo, worktree e branch dele. Só depois explore o que faltar.",
+    "- Os membros aguardam sua tarefa sem explorar nem editar. Se alguém não tiver tarefa agora, avise explicitamente para continuar aguardando.",
+    ...workspaces.filter((w) => w.name === LEAD_NAME).map((w) => `SEU WORKTREE: ${w.cwd}; branch: ${w.branch}. Trabalhe somente nele.\n${w.environment}`),
+    "- Nunca dois agentes no mesmo worktree; preserve a junction node_modules. Não abra PR nem faça merge sem pedido do usuário.",
     "",
     ...(findings.trim() ? [findings.trim(), ""] : []),
     ...(memory.trim() ? [memory.trim(), ""] : []),
@@ -162,7 +201,7 @@ export function memorySuggestion(missionId: string): string[] {
 }
 
 /** Lo primero que lee cada integrante: de qué misión es, quién lo dirige y qué papel cumple. Pura. */
-export function memberBriefing(mission: Pick<Mission, "title" | "objective"> & { id?: string }, member: TeamMember): string {
+export function memberBriefing(mission: Pick<Mission, "title" | "objective"> & { id?: string }, member: TeamMember, workspace?: TeamWorkspace, findings = "", memory = ""): string {
   return [
     `Você faz parte da equipe da missão "${mission.title}", dirigida pelo orquestrador "${LEAD_NAME}".`,
     "",
@@ -171,6 +210,11 @@ export function memberBriefing(mission: Pick<Mission, "title" | "objective"> & {
     "",
     `SEU PAPEL: ${member.roleLabel}${member.roleDescription ? ` — ${member.roleDescription}` : ""}`,
     member.roleInstructions,
+    "",
+    ...(workspace ? [`SEU WORKTREE: ${workspace.cwd}; branch: ${workspace.branch}. Trabalhe somente nele.`, workspace.environment, ""] : []),
+    ...(findings.trim() ? [findings.trim(), ""] : []),
+    ...(memory.trim() ? [memory.trim(), ""] : []),
+    "Não explore nem edite antes de receber a tarefa do Orquestrador. Aguarde a delegação; use somente seu worktree e preserve a junction node_modules. Não abra PR nem faça merge sem pedido do usuário.",
     "",
     ...(mission.id ? [
       `Memória aprovada do projeto e da missão: \`ags memory search "<assunto>" --mission ${mission.id}\` (só lê). Consulte-a antes de perguntar algo que talvez já esteja registrado.`,
@@ -257,21 +301,23 @@ export async function startMissionInTerminals(
 
   // O que o repositório e as missões anteriores já dizem do objetivo: se o pedido já existe, o
   // Orquestrador sabe ANTES de convocar a equipe. Só leitura; se falhar, a missão segue sem isso.
-  const findings = await invoke<string>("mission_precheck", { missionId: mission.id }).catch(() => "");
-  // La memoria aprobada del proyecto y de la misión (solo lectura; vacío si no hay ninguna).
-  const memory = await invoke<string>("mission_memory_context", { missionId: mission.id }).catch(() => "");
+  const prepared = await invoke<PreparedTeam>("mission_prepare_team", { missionId: mission.id, members: [LEAD_NAME, ...team.map((m) => m.name)] });
+  const leadWorkspace = workspaceFor(prepared, LEAD_NAME);
+  const memberWorkspaces = team.map((m) => workspaceFor(prepared, m.name));
+  const { precheck: findings, memory } = prepared;
 
   await invoke("mission_start_terminals", { missionId: mission.id, force: Boolean(options?.force) });
 
   const leadTabId = addTab({
-    cwd: mission.cwd,
+    cwd: leadWorkspace.cwd,
+    prelaunch: [{ command: leadWorkspace.prelaunch }],
     agent: leadAgent,
     title: LEAD_NAME,
     titleIsCustom: true,
     accountId: squad && !squad.lead.autoAccount ? squad.lead.accountId ?? undefined : mission.autoAccount ? undefined : mission.leadAccountId ?? undefined,
   });
   const memberTabIds = team.map((m, i) =>
-    addTab({ cwd: mission.cwd, agent: memberAgents[i], title: m.name, titleIsCustom: true, accountId: m.accountId ?? undefined }),
+    addTab({ cwd: memberWorkspaces[i].cwd, prelaunch: [{ command: memberWorkspaces[i].prelaunch }], agent: memberAgents[i], title: m.name, titleIsCustom: true, accountId: m.accountId ?? undefined }),
   );
 
   const key = missionBoardKey(mission.cwd, mission.id);
@@ -293,9 +339,9 @@ export async function startMissionInTerminals(
       },
     };
   };
-  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined)), timed(LEAD_NAME, leadTabId));
+  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined, prepared.workspaces)), timed(LEAD_NAME, leadTabId));
   memberTabIds.forEach((tabId, i) =>
-    sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i])), timed(team[i].name, tabId)),
+    sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i], memberWorkspaces[i], findings, memory)), timed(team[i].name, tabId)),
   );
 
   return { leadTabId, memberTabIds };

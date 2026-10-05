@@ -1,5 +1,43 @@
 use super::*;
 
+#[test]
+fn delegation_uses_real_lead_send_and_preserves_missing_measurements() {
+    assert_eq!(first_delegation(&[], None), (None, None));
+    assert_eq!(first_delegation(&[], Some(1)), (None, None));
+    let boot = span(1, "boot", 1_000, 8_000);
+    let mut member_ask = span(2, "peer_ask", 9_000, 10_000);
+    member_ask.actor = "QA".into(); member_ask.target = "Orquestrador".into();
+    assert_eq!(first_delegation(&[boot.clone(), member_ask], None), (None, None));
+    let mut ask = span(3, "peer_ask", 702_000, 800_000);
+    ask.actor = "Orquestrador".into(); ask.target = "Backend".into();
+    assert_eq!(first_delegation(&[boot.clone(), ask.clone()], None), (Some(701_000), Some("span")));
+    let mut tell = span(4, "peer_message", 90_000, 90_000);
+    tell.detail = "delegation".into();
+    assert_eq!(first_delegation(&[ask, tell.clone(), boot], None), (Some(89_000), Some("peer_message")));
+    assert_eq!(first_delegation(&[tell.clone()], Some(1)), (Some(89_000), Some("peer_message")));
+    assert_eq!(first_delegation(&[tell], Some(100)), (None, None));
+}
+
+#[test]
+fn real_send_persists_only_lead_to_member_in_the_same_mission() {
+    let conn = crate::database::test_db();
+    conn.execute_batch("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w','W',0,0);
+        INSERT INTO missions(id,workspace_id,title,objective,cwd,created_at,updated_at) VALUES('m','w','T','O','/repo',1,1);").unwrap();
+    let boards = crate::canvas::Boards::from([
+        ("main|/repo#m:m".into(), crate::canvas::Board { orchestrators: vec!["lead".into()], nodes: serde_json::json!({"lead": {}, "member": {}}), ..Default::default() }),
+        ("main|/else#m:other".into(), crate::canvas::Board { nodes: serde_json::json!({"stranger": {}}), ..Default::default() }),
+    ]);
+    for (kind, from, to) in [("tell", "member", "lead"), ("tell", "lead", "stranger"), ("tell", "lead", "lead"), ("check", "lead", "member")] {
+        record_delegation(&conn, &boards, kind, from, to, 8_000).unwrap();
+    }
+    assert!(list(&conn, "m").unwrap().is_empty());
+    record_delegation(&conn, &boards, "tell", "lead", "member", 90_000).unwrap();
+    record_delegation(&conn, &boards, "ask", "lead", "member", 100_000).unwrap();
+    let events = list(&conn, "m").unwrap();
+    assert_eq!(events.len(), 2);
+    assert_eq!(first_delegation(&events, Some(1)), (Some(89_000), Some("peer_message")));
+}
+
 fn new_span(kind: &str, actor: &str, start: i64, end: i64) -> NewSpan {
     NewSpan { kind: kind.into(), actor: actor.into(), target: String::new(), started_ms: start, ended_ms: end, detail: String::new() }
 }
