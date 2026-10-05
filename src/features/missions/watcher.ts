@@ -3,12 +3,16 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { useCanvasStore } from "@/features/canvas/store";
+import { activeTabIds, lastInputAt, lastOutputAt } from "@/features/terminal/activity";
+import { pasteIntoTab, screenOf } from "@/features/terminal/terminalRegistry";
 import { useTabsStore } from "@/features/tabs/store";
 
 import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
 import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking } from "./activeTime";
 import { finishedMissionTabs, missionIndex, useMissionIndex } from "./groups";
+import { STALL_CHECK_MS, applyMessage, findStalls, markAlerted, stallMessage, type PeerMessage, type PendingTasks } from "./stalled";
 import { useMissionsStore } from "./store";
+import { LEAD_NAME } from "./terminals";
 import { recordSpan } from "./timings";
 
 /** Lo que avisa el servidor al terminar un `peer ask` (ver `cc-peer-timing` en Rust). */
@@ -67,6 +71,43 @@ export function useMissionWatcher(): void {
       });
     });
     return () => {
+      off.then((fn) => fn());
+    };
+  }, []);
+
+  // Agente parado: una tarea con `peer tell` que nadie atiende se le avisa al orquestador.
+  useEffect(() => {
+    let pending: PendingTasks = new Map();
+    const leadOf = (tabId: string) => useTabsStore.getState().tabs.find((t) => t.id === tabId);
+    const isLead = (tabId: string) => leadOf(tabId)?.title === LEAD_NAME;
+    const off = listen<PeerMessage>("cc-peer-message", (e) => {
+      pending = applyMessage(pending, e.payload, isLead);
+    });
+    const timer = setInterval(() => {
+      if (pending.size === 0) return;
+      const { tabs: openTabs } = useTabsStore.getState();
+      const open = new Set(openTabs.map((t) => t.id));
+      // Una pestaña cerrada ya no debe nada.
+      const live = new Map([...pending].filter(([id]) => open.has(id)));
+      pending = live;
+      const active = new Set(activeTabIds());
+      const stalls = findStalls(live, {
+        now: Date.now(),
+        isActive: (id) => active.has(id),
+        lastOutputAt,
+        lastInputAt,
+        screen: (id) => screenOf(id)?.lines ?? null,
+      });
+      const sent = stalls.filter((s) => {
+        // No se interrumpe al orquestador a mitad de un turno: se reintenta en el próximo tic.
+        if (active.has(s.fromTabId)) return false;
+        const name = openTabs.find((t) => t.id === s.tabId)?.title ?? s.tabId;
+        return pasteIntoTab(s.fromTabId, stallMessage(name, s), true);
+      });
+      if (sent.length > 0) pending = markAlerted(pending, sent);
+    }, STALL_CHECK_MS);
+    return () => {
+      clearInterval(timer);
       off.then((fn) => fn());
     };
   }, []);

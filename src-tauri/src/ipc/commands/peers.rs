@@ -325,7 +325,18 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     // No se interrumpe a quien está a mitad de un turno: se espera a que se calle un poco.
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(60), false);
     submit_prompt(pty, &outgoing(&from_name, &text, false, is_raw(args)))?;
+    emit_peer_message(app, "tell", &from, Some(&target.id));
     Ok(json!({ "peer": describe(target), "sent": true }))
+}
+
+/// Avisa al frontend de un mensaje entre agentes (`cc-peer-message`). Un `tell` le da una tarea
+/// al destino; cualquier mensaje del remitente prueba que él sí está activo. Con eso el
+/// detector de "agente parado" (`missions/stalled.ts`) sabe quién debe una respuesta.
+fn emit_peer_message(app: &AppHandle, kind: &str, from_tab_id: &str, to_tab_id: Option<&str>) {
+    let _ = app.emit(
+        "cc-peer-message",
+        json!({ "kind": kind, "fromTabId": from_tab_id, "toTabId": to_tab_id, "atMs": crate::util::now_ts_ms() }),
+    );
 }
 
 /// Cuánto silencio marca el fin del turno de un agente. Las TUIs animan un spinner
@@ -394,6 +405,8 @@ pub(super) fn peer_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let timeout = Duration::from_secs(arg_u64_opt(args, "timeout").unwrap_or(DEFAULT_TIMEOUT_S).clamp(10, 3600));
     let (me, list) = peers(app, &from)?;
     let from_name = me.map(|m| m.name).unwrap_or_else(|| from.clone());
+    // Quien pregunta está activo: si tenía una tarea pendiente, ya la está atendiendo.
+    emit_peer_message(app, "ask", &from, None);
 
     if let Some(batch) = args.get("batch") {
         return ask_batch(app, &list, &from_name, batch, timeout, is_raw(args));

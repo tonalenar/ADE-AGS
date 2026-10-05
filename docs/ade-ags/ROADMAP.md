@@ -159,3 +159,7 @@ Ponto 2: failover opcional por autenticação, modelo ou saldo no mesmo pool/TUI
 **Ponto 6 (medição) implementado no front:** cartão com histórico, 7 e 30 dias, canceladas à parte e missões de teste/E2E por marcação explícita (`isTest`). Pendente: backend gravar `isTest`. Detalhes em [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
 
 Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--test`), persistida no schema v27 e exposta em lista/detalhe/status, sem inferência por título. Migração preserva status e classifica legadas como reais.
+
+## Etapa 11 — eficiência entre agentes, ponto 1 (agente parado)
+
+**Implementado:** detector de "recebeu tarefa e ficou quieto". O backend emite `cc-peer-message` em cada `peer tell`/`peer ask`; o watcher abre uma tarefa pendente quando o orquestrador faz `tell` a um membro e a fecha quando o membro manda qualquer mensagem. Passado o plazo sem saída (120 s), o orquestrador recebe um aviso com nome, tempo parado e última linha da tela. Sem aviso se o agente escreve (pensando), se há diálogo de aprovação na tela ou se o usuário digitou na aba. Ver [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).

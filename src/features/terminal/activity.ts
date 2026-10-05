@@ -39,6 +39,8 @@ const lastOutput = new Map<string, number>();
 /** Desde cuándo escribe de corrido cada pestaña (se reinicia tras un silencio de `STREAK_GAP_MS`). */
 const streakStart = new Map<string, number>();
 const lastInput = new Map<string, number>();
+/** Última salida de cada pestaña, sin caducar (`lastOutput` se poda a los `QUIET_MS`). */
+const lastSeen = new Map<string, number>();
 let timer: ReturnType<typeof setInterval> | null = null;
 
 /** Quiénes están activos a la hora `now`. Pura, para probar sin reloj. */
@@ -96,6 +98,7 @@ export function markOutput(tabId: string | undefined, agentId: string | undefine
   const prev = lastOutput.get(tabId);
   if (prev === undefined || now - prev > STREAK_GAP_MS) streakStart.set(tabId, now);
   lastOutput.set(tabId, now);
+  lastSeen.set(tabId, now);
   if (!useAgentActivity.getState().working) refresh(now);
   if (!timer) timer = setInterval(() => refresh(), 1000);
 }
@@ -105,9 +108,20 @@ export function markInput(tabId: string | undefined): void {
   if (tabId) lastInput.set(tabId, Date.now());
 }
 
+/** Cuándo escribió por última vez el agente de la pestaña (sin contar el eco del usuario). */
+export function lastOutputAt(tabId: string): number | undefined {
+  return lastSeen.get(tabId);
+}
+
+/** Cuándo escribió por última vez el usuario en esa pestaña. */
+export function lastInputAt(tabId: string): number | undefined {
+  return lastInput.get(tabId);
+}
+
 /** Una tab que se cerró no puede quedar "trabajando". */
 export function forgetTab(tabId: string | undefined): void {
   if (!tabId) return;
+  lastSeen.delete(tabId);
   lastOutput.delete(tabId);
   streakStart.delete(tabId);
   lastInput.delete(tabId);
