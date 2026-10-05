@@ -1,6 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import { addEdge, emptyBoard, neighbors, placeBelow, reconcile, removeEdge, removeEdgeBetween, toggleOrchestrator } from "../board";
+import {
+  addEdge, buildMissionTeam, emptyBoard, gridCell, neighbors, placeBelow, reconcile, removeEdge, removeEdgeBetween, toggleOrchestrator,
+} from "../board";
 import { GAP } from "../geometry";
 
 describe("reconcile", () => {
@@ -93,6 +95,43 @@ describe("removeEdgeBetween", () => {
   });
 });
 
+describe("recruits", () => {
+  it("usa la proxima celda de la grilla y evita panes existentes", async () => {
+    const { canvasActions, useCanvasStore } = await import("../store");
+    const key = "main|/mission-grid";
+    const initial = buildMissionTeam(emptyBoard(), "lead", [{ tabId: "w1" }]);
+    const lead = initial.nodes.lead!;
+    const cellW = lead.w + GAP;
+    const cellH = lead.h + GAP;
+    const occupiedCell = gridCell(2);
+    const openedBefore = {
+      x: lead.x + occupiedCell.col * cellW,
+      y: lead.y + occupiedCell.row * cellH,
+      w: lead.w,
+      h: lead.h,
+    };
+    useCanvasStore.setState({
+      boards: { [key]: { ...initial, nodes: { ...initial.nodes, openedBefore } } },
+    });
+
+    canvasActions.recruited(key, "w2", "lead");
+
+    const board = useCanvasStore.getState().boards[key];
+    const nextCell = gridCell(3);
+    expect(board.nodes.w2).toMatchObject({
+      x: lead.x + nextCell.col * cellW,
+      y: lead.y + nextCell.row * cellH,
+    });
+    expect(board.nodes.openedBefore).toEqual(openedBefore);
+    expect(board.edges).toHaveLength(2);
+
+    const boxes = Object.values(board.nodes);
+    for (let i = 0; i < boxes.length; i++) for (let j = i + 1; j < boxes.length; j++) {
+      const a = boxes[i]!, b = boxes[j]!;
+      expect(a.x < b.x + b.w && b.x < a.x + a.w && a.y < b.y + b.h && b.y < a.y + a.h).toBe(false);
+    }
+  });
+});
 describe("papeles", () => {
   it("un agente recrutado con papel lo lleva en el canvas", async () => {
     const { canvasActions, useCanvasStore } = await import("../store");
