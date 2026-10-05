@@ -108,7 +108,7 @@
 
 .ags-hq__main { display: flex; flex-direction: column; min-height: 0; }
 
-.ags-hq__tabs { display: flex; gap: 6px; padding: 10px 12px; border-bottom: 4px solid var(--hq-line); }
+.ags-hq__tabs { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px 12px; border-bottom: 4px solid var(--hq-line); }
 .ags-hq__tab {
   font: inherit;
   font-size: 9px;
@@ -185,4 +185,103 @@
 
 @media (prefers-reduced-motion: reduce) {
   .ags-hq__screen, .ags-hq__screen::after, .ags-hq__blink, .ags-hq__meter--busy i.on { animation: none; }
+}
+
+.ags-live {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+}
+
+.ags-live__canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 2 / 1;
+  border: 3px solid #55427c;
+  background: #100d24;
+  image-rendering: pixelated;
+}
+
+.ags-live__hud {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 5px;
+}
+
+.ags-live__metric {
+  display: flex;
+  min-width: 0;
+  flex-direction: column;
+  gap: 5px;
+  padding: 7px 6px;
+  border: 2px solid #40305f;
+  background: #161126;
+}
+
+.ags-live__metric span {
+  overflow: hidden;
+  color: #a89bbf;
+  font-size: 7px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ags-live__metric b {
+  overflow: hidden;
+  color: #ffe15a;
+  font-size: 9px;
+  font-weight: normal;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ags-live__metric--unknown b,
+.ags-live__unknown {
+  color: #77799b;
+}
+
+.ags-live__agents {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  color: #c6bdd9;
+  font-size: 8px;
+}
+
+.ags-live__agent {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.ags-live__agent i {
+  width: 9px;
+  height: 9px;
+  border: 2px solid currentColor;
+  background: #171329;
+  image-rendering: pixelated;
+}
+
+.ags-live__agent--claude { color: #ff9b55; }
+.ags-live__agent--codex { color: #62d8ff; }
+.ags-live__agent--antigravity { color: #c18aff; }
+.ags-live__agent b { color: #a89bbf; font-size: 7px; font-weight: normal; }
+.ags-live__sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  clip-path: inset(50%);
+}
+
+@media (max-width: 820px) {
+  .ags-live__hud { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ags-live__canvas { scroll-behavior: auto; }
 }
