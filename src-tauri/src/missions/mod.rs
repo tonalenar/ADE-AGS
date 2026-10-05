@@ -17,6 +17,7 @@ pub(crate) mod review;
 pub(crate) mod precheck;
 pub(crate) mod failure;
 pub(crate) mod duplicate;
+pub mod efficiency;
 pub(crate) mod store;
 pub(crate) mod timings;
 mod delivery;
@@ -30,6 +31,7 @@ pub use types::{
     MissionInput, MissionSummary,
 };
 pub use duplicate::DuplicateMission;
+pub use efficiency::MissionEfficiency;
 pub use delivery::{CiStatus, MissionDelivery, TerminalDeliveryInput, TestResult};
 
 use std::path::Path;
@@ -603,6 +605,14 @@ pub fn mission_timings(app: AppHandle, mission_id: String) -> Result<MissionTimi
     let db = db_of(&app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     timings_of(&conn, &mission_id)
+}
+
+/// Eficiência de uma missão e medianas recentes, agrupadas pela quantidade de agentes.
+#[tauri::command]
+pub fn mission_efficiency(app: AppHandle, mission_id: String) -> Result<MissionEfficiency, String> {
+    let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    efficiency::get(&conn, &mission_id)
 }
 
 // ── Checagem do que já existe ───────────────────────────────────────

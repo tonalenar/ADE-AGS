@@ -90,6 +90,7 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective"> & { i
     '- `ags peer check "<nome>"` — vê a tela dele agora.',
     '- `ags notify "<mensagem>"` — chama o usuário só quando precisar dele.',
     "",
+    "SÓ RECRUTE quando a tarefa for independente e paralelizável e a divisão for mais rápida que um agente só; o QG mostra o ganho por missão.",
     "MAIS TERMINAIS (você tem autonomia):",
     '- `ags peer recruit "<nome>" --agent <id> --role <papel> [--model <id>] [--effort <nível>]` — abre outro terminal já conectado a você quando a equipe não der conta (ex.: uma tarefa paralela, uma revisão independente).',
     `- Máximo de ${MAX_EXTRA_TERMINALS} terminais extras por missão; cada um custa memória e tokens. Só abra quando houver trabalho real para ele, dê a ele um nome e papel claros e feche (ou deixe encerrar) quando acabar.`,
