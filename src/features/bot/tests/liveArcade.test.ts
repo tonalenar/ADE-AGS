@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   deriveArcadeScene,
+  deriveBarrels,
+  deriveTrophy,
   failureCount,
   retryCount,
   taskStage,
@@ -88,5 +90,31 @@ describe("live arcade stage derivation", () => {
     ];
     expect(retryCount(tasks)).toBe(2);
     expect(failureCount(tasks)).toBe(1);
+  });
+});
+
+describe("deriveBarrels / deriveTrophy", () => {
+  const scene = deriveArcadeScene({
+    missionStatus: "running", timings: null, reviews: null,
+    tasks: [
+      { id: "a", title: "A", status: "running", dependsOn: [] },
+      { id: "b", title: "B", status: "failed", role: "qa", dependsOn: ["a"] },
+    ],
+  });
+  it("só cria barris com fonte real", () => {
+    expect(deriveBarrels({ scene, approvalTaskIds: null, pendingMemories: null, timings: null }).map((b) => b.kind)).toEqual(["failing"]);
+  });
+  it("aprovação, memória e peer ask expirado viram barris", () => {
+    const barrels = deriveBarrels({
+      scene, approvalTaskIds: ["a", "zzz"], pendingMemories: 2,
+      timings: [{ kind: "peer_ask", actor: "X", target: "Y", detail: "timeout" }, { kind: "peer_ask", detail: "" }],
+    });
+    expect(barrels.map((b) => b.kind)).toEqual(["approval", "failing", "memory", "ask_timeout"]);
+    expect(barrels[3].detail).toBe("X → Y");
+  });
+  it("troféu só com integração real; PR e CI não são medidos", () => {
+    expect(deriveTrophy(null).step).toBeNull();
+    expect(deriveTrophy({ integrationBranch: "m/x", appliedAt: null }).step).toBe("integration_ready");
+    expect(deriveTrophy({ integrationBranch: "m/x", appliedAt: 5 })).toEqual({ step: "integrated", pr: null, ci: null });
   });
 });

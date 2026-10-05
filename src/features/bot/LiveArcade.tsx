@@ -10,7 +10,9 @@ import type { Task } from "@/features/runs/types";
 import { sustainedTabIds } from "@/features/terminal/activity";
 import { useTabsStore } from "@/features/tabs/store";
 
-import { deriveArcadeScene, failureCount, retryCount, type ArcadeStageId, type ArcadeTask } from "./liveArcadeModel";
+import { getPendingCounts } from "@/features/memory/ipc";
+
+import { deriveArcadeScene, deriveBarrels, deriveTrophy, failureCount, retryCount, type ArcadeBarrel, type ArcadeStageId, type ArcadeTask, type ArcadeTrophy } from "./liveArcadeModel";
 
 const WIDTH = 960;
 const HEIGHT = 480;
@@ -127,6 +129,9 @@ function drawArcade(
   stageLabel: (stage: ArcadeStageId) => string,
   statusLabel: (status: string) => string,
   frame: number,
+  barrels: ArcadeBarrel[],
+  trophy: ArcadeTrophy,
+  trophyLabel: string,
 ) {
   ctx.clearRect(0, 0, WIDTH, HEIGHT);
   ctx.fillStyle = "#100d24";
@@ -204,6 +209,34 @@ function drawArcade(
     });
   }
 
+
+  // Barris: um por obstáculo real, no andar onde ele trava a missão.
+  const perStage = new Map<string, number>();
+  for (const barrel of barrels) {
+    const n = perStage.get(barrel.stage) ?? 0;
+    perStage.set(barrel.stage, n + 1);
+    const base = barrel.taskId ? pointByTask.get(barrel.taskId)?.x : undefined;
+    const x = (base ?? 760 - n * 26) + (frame % 4 < 2 ? 0 : 2);
+    const y = FLOOR_Y[barrel.stage] - 8;
+    ctx.fillStyle = "#9b5b2e";
+    ctx.fillRect(x - 8, y - 14, 16, 14);
+    ctx.fillStyle = "#e0a15a";
+    ctx.fillRect(x - 8, y - 9, 16, 2);
+    if (barrel.count > 1) {
+      ctx.font = '6px "Press Start 2P", monospace';
+      ctx.fillStyle = "#fff0a0";
+      ctx.fillText(String(barrel.count), x - 3, y - 16);
+    }
+  }
+
+  // Topo: o troféu só acende com entrega real; sem medida fica cinza.
+  ctx.fillStyle = trophy.step !== null ? "#ffe15a" : DIM;
+  ctx.fillRect(826, FLOOR_Y.delivery - 30, 20, 8);
+  ctx.fillRect(832, FLOOR_Y.delivery - 22, 8, 12);
+  ctx.fillRect(826, FLOOR_Y.delivery - 10, 20, 4);
+  ctx.font = '6px "Press Start 2P", monospace';
+  ctx.fillText(trophyLabel, 812, FLOOR_Y.delivery + 22);
+
   ctx.fillStyle = "#734b9d";
   ctx.fillRect(158, HEIGHT - 28, 650, 8);
   for (let x = 158; x < 808; x += 28) {
@@ -268,6 +301,18 @@ export function LiveArcade({
   const runtimeTasks = useRunsStore((state) => state.tasks);
   const missionIndex = useMissionIndex();
   const activeTabs = useSustainedTabs();
+  const approvals = useRunsStore((state) => state.approvals);
+  const workspaceId = useTabsStore((state) => state.workspaceId);
+  const [pendingMemories, setPendingMemories] = useState<number | null>(null);
+  useEffect(() => {
+    if (!workspaceId) return;
+    let alive = true;
+    const read = () => getPendingCounts(workspaceId)
+      .then((counts) => alive && setPendingMemories(counts.byMission[mission.id] ?? 0)).catch(() => undefined);
+    read();
+    const timer = window.setInterval(() => { if (document.visibilityState === "visible") read(); }, 5000);
+    return () => { alive = false; window.clearInterval(timer); };
+  }, [workspaceId, mission.id]);
   const missionTasks = useMemo(() => {
     const activeRunTasks = mission.activeRunId
       ? runtimeTasks.filter((task) => task.runId === mission.activeRunId)
@@ -281,6 +326,13 @@ export function LiveArcade({
     timings: timings?.spans.map((span) => ({ kind: span.kind, detail: span.detail })) ?? null,
     reviews: review?.deliveries.map((delivery: Delivery) => ({ review: delivery.review })) ?? null,
   }), [mission.status, sceneTasks, timings, review]);
+  const barrels = useMemo(() => deriveBarrels({
+    scene,
+    approvalTaskIds: mission.activeRunId ? approvals.map((approval) => approval.taskId) : null,
+    pendingMemories,
+    timings: timings?.spans ?? null,
+  }), [scene, approvals, pendingMemories, timings, mission.activeRunId]);
+  const trophy = useMemo(() => deriveTrophy(review), [review]);
   const heroes = useMemo(() => {
     const kinds = new Set<AgentKind>();
     for (const task of missionTasks) {
@@ -325,6 +377,9 @@ export function LiveArcade({
         (stage) => t("botPanel.live.stage." + stage),
         (status) => t("botPanel.live.status." + status),
         reducedMotion ? 0 : frameRef.current,
+        barrels,
+        trophy,
+        t("botPanel.live.trophy." + (trophy.step ?? "unknown")),
       );
       frameRef.current += 1;
     };
@@ -344,7 +399,7 @@ export function LiveArcade({
       observer.disconnect();
       document.removeEventListener("visibilitychange", start);
     };
-  }, [scene, heroes, mission.title, reducedMotion, t]);
+  }, [scene, heroes, mission.title, reducedMotion, t, barrels, trophy]);
 
   const measured = tokens?.agents.filter((agent) => agent.measured) ?? [];
   const tokenValues = measured.flatMap((agent) => [agent.input, agent.output]).filter((value): value is number => value !== null);
@@ -400,6 +455,8 @@ export function LiveArcade({
         {" " + scene.tasks.map((task) =>
           task.title + ": " + t("botPanel.live.taskStatus." + task.status)
         ).join(". ")}
+        {" " + barrels.map((barrel) => t("botPanel.live.barrel." + barrel.kind) + (barrel.detail ? " (" + barrel.detail + ")" : "")).join(". ")}
+        {" " + t("botPanel.live.trophy." + (trophy.step ?? "unknown"))}
         {" " + t("botPanel.live.score", { retries: retryCount(sceneTasks), failures: failureCount(sceneTasks) })}
       </span>
     </div>

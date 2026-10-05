@@ -75,3 +75,47 @@ export function retryCount(tasks: ArcadeTask[]): number {
 export function failureCount(tasks: ArcadeTask[]): number {
   return tasks.filter((task) => task.status === "failed").length;
 }
+
+export type BarrelKind = "approval" | "failing" | "memory" | "ask_timeout";
+export interface ArcadeBarrel { kind: BarrelKind; stage: "work" | "tests" | "review"; taskId?: string; count: number; detail?: string }
+export interface ArcadeBarrelInput {
+  scene: ArcadeScene;
+  /** Tarefas da missão com aprovação pendente (broker); `null` = não medido. */
+  approvalTaskIds: string[] | null;
+  /** Memórias sugeridas sem resposta da missão; `null` = não medido. */
+  pendingMemories: number | null;
+  /** Spans de `peer_ask` já terminados: `detail === "timeout"` é uma pergunta que ninguém respondeu a tempo. */
+  timings: Array<{ kind: string; actor?: string; target?: string; detail?: string }> | null;
+}
+
+/** Barris = obstáculos REAIS. Sem fonte medida não se inventa barril: some e o HUD diz "não medido". */
+export function deriveBarrels(input: ArcadeBarrelInput): ArcadeBarrel[] {
+  const barrels: ArcadeBarrel[] = [];
+  for (const taskId of input.approvalTaskIds ?? []) {
+    const task = input.scene.tasks.find((item) => item.id === taskId);
+    if (task) barrels.push({ kind: "approval", stage: task.stage, taskId, count: 1 });
+  }
+  for (const task of input.scene.tasks) {
+    if (task.status === "failed" || task.checks?.includes("failed")) {
+      barrels.push({ kind: "failing", stage: task.checks?.includes("failed") ? "tests" : task.stage, taskId: task.id, count: 1 });
+    }
+  }
+  if ((input.pendingMemories ?? 0) > 0) barrels.push({ kind: "memory", stage: "review", count: input.pendingMemories ?? 0 });
+  const timeouts = (input.timings ?? []).filter((span) => span.kind === "peer_ask" && span.detail === "timeout");
+  for (const span of timeouts) {
+    barrels.push({ kind: "ask_timeout", stage: "work", count: 1, detail: `${span.actor ?? "?"} → ${span.target ?? "?"}` });
+  }
+  return barrels;
+}
+
+export type TrophyStep = "integration_ready" | "integrated";
+export interface ArcadeTrophy {
+  /** Entrega real da missão: branch de integração pronta e aplicada ao projeto. PR e CI não são medidos pelo app: ficam `null`. */
+  step: TrophyStep | null;
+  pr: null;
+  ci: null;
+}
+export function deriveTrophy(review: { integrationBranch: string | null; appliedAt: number | null } | null): ArcadeTrophy {
+  const step = !review ? null : review.appliedAt !== null ? "integrated" : review.integrationBranch ? "integration_ready" : null;
+  return { step, pr: null, ci: null };
+}
