@@ -264,9 +264,12 @@
   image-rendering: pixelated;
 }
 
-.ags-live__agent--claude { color: #ff9b55; }
-.ags-live__agent--codex { color: #62d8ff; }
-.ags-live__agent--antigravity { color: #c18aff; }
+.ags-live__agent--lead { color: #ffe15a; }
+.ags-live__agent--backend { color: #ff9b55; }
+.ags-live__agent--frontend { color: #62d8ff; }
+.ags-live__agent--qa { color: #55e6b1; }
+.ags-live__agent--review { color: #ff8bd0; }
+.ags-live__agent--other { color: #c18aff; }
 .ags-live__agent b { color: #a89bbf; font-size: 7px; font-weight: normal; }
 .ags-live__sr-only {
   position: absolute;

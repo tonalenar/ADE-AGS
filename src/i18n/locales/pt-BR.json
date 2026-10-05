@@ -1834,6 +1834,7 @@
   "botPanel.live.agent.antigravity": "Antigravity",
   "botPanel.live.running": "CORRENDO",
   "botPanel.live.sleeping": "DORMINDO",
+  "botPanel.live.waiting": "AGUARDANDO",
   "botPanel.live.noAgents": "Nenhum agente mapeado.",
   "botPanel.live.barrel.approval": "aprovação pendente",
   "botPanel.live.barrel.failing": "falha ou teste falhando",

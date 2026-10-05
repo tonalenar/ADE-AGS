@@ -12,31 +12,12 @@ import { useTabsStore } from "@/features/tabs/store";
 
 import { getPendingCounts } from "@/features/memory/ipc";
 
-import { deriveArcadeScene, deriveBarrels, deriveTrophy, failureCount, retryCount, type ArcadeBarrel, type ArcadeStageId, type ArcadeTask, type ArcadeTrophy } from "./liveArcadeModel";
+import { drawArcade, type Placed, type Pose } from "./liveArcadeDraw";
+import { deriveArcadeScene, deriveBarrels, deriveHeroes, deriveTrophy, failureCount, retryCount, type ArcadeTask, type ArcadeTabInput } from "./liveArcadeModel";
+import { ARCADE_H, ARCADE_W, FRAME_MS, heroTargets, patrolOffset, stepMotion, taskSlots, type Motion } from "./liveArcadeScene";
 
-const WIDTH = 960;
-const HEIGHT = 480;
-const FLOOR_Y: Record<ArcadeStageId, number> = {
-  delivery: 110,
-  review: 175,
-  tests: 240,
-  work: 305,
-  opening: 370,
-};
-const STAGE_ORDER: ArcadeStageId[] = ["delivery", "review", "tests", "work", "opening"];
-const DIM = "#77799b";
-
-type AgentKind = "claude" | "codex" | "antigravity";
-interface Hero { kind: AgentKind; working: boolean }
-interface Point { x: number; y: number }
-
-function agentKind(id: string): AgentKind | null {
-  const value = id.toLowerCase();
-  if (value.includes("claude")) return "claude";
-  if (value.includes("codex")) return "codex";
-  if (value.includes("antigravity") || value === "agy") return "antigravity";
-  return null;
-}
+const WALK_SPEED = 50;
+const RUN_SPEED = 110;
 
 function taskForArcade(task: Task): ArcadeTask {
   return {
@@ -47,206 +28,10 @@ function taskForArcade(task: Task): ArcadeTask {
     dependsOn: task.dependsOn,
     attempt: task.attempt,
     checks: task.structuredHandoff?.tests.map((test) => test.status),
+    sessionId: task.sessionId,
+    aliases: [task.planKey, task.functionalRole].filter((value): value is string => !!value),
+    endedAt: task.endedAt,
   };
-}
-
-function pixel(ctx: CanvasRenderingContext2D, x: number, y: number, color: string, size = 4) {
-  ctx.fillStyle = color;
-  ctx.fillRect(Math.round(x), Math.round(y), size, size);
-}
-
-function drawLadder(ctx: CanvasRenderingContext2D, from: Point, to: Point, color: string) {
-  const dx = to.x - from.x;
-  const dy = to.y - from.y;
-  const length = Math.hypot(dx, dy);
-  if (length < 3) return;
-  const nx = (-dy / length) * 4;
-  const ny = (dx / length) * 4;
-  ctx.strokeStyle = color;
-  ctx.lineWidth = 2;
-  ctx.beginPath();
-  ctx.moveTo(from.x + nx, from.y + ny);
-  ctx.lineTo(to.x + nx, to.y + ny);
-  ctx.moveTo(from.x - nx, from.y - ny);
-  ctx.lineTo(to.x - nx, to.y - ny);
-  const rungs = Math.max(1, Math.floor(length / 8));
-  for (let i = 1; i < rungs; i += 1) {
-    const at = i / rungs;
-    const x = from.x + dx * at;
-    const y = from.y + dy * at;
-    ctx.moveTo(x + nx, y + ny);
-    ctx.lineTo(x - nx, y - ny);
-  }
-  ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(to.x, to.y);
-  ctx.lineTo(to.x - dx / length * 7 - nx, to.y - dy / length * 7 - ny);
-  ctx.lineTo(to.x - dx / length * 7 + nx, to.y - dy / length * 7 + ny);
-  ctx.closePath();
-  ctx.fillStyle = color;
-  ctx.fill();
-}
-
-function drawHero(ctx: CanvasRenderingContext2D, x: number, floor: number, hero: Hero, frame: number) {
-  const colors: Record<AgentKind, string> = { claude: "#ff9b55", codex: "#62d8ff", antigravity: "#c18aff" };
-  const color = colors[hero.kind];
-  const y = floor - 31;
-  const step = hero.working && frame % 2 === 0 ? 4 : 0;
-  pixel(ctx, x + 5, y, "#ffe0b8", 8);
-  pixel(ctx, x + 3, y + 3, color, 12);
-  pixel(ctx, x + 1, y + 4, color, 4);
-  pixel(ctx, x + 13, y + 4, color, 4);
-  pixel(ctx, x + 5, y + 12, "#161225", 4);
-  pixel(ctx, x + 11, y + 12, "#161225", 4);
-  if (hero.working) {
-    pixel(ctx, x + 4 + step, y + 16, color, 4);
-    pixel(ctx, x + 12 - step, y + 16, color, 4);
-  } else {
-    pixel(ctx, x + 4, y + 16, color, 4);
-    pixel(ctx, x + 12, y + 16, color, 4);
-    ctx.fillStyle = "#abb1d8";
-    ctx.font = '10px "Press Start 2P", monospace';
-    ctx.fillText("Z", x + 15, y - 1);
-  }
-}
-
-function taskColor(status: string): string {
-  if (status === "done") return "#55e6b1";
-  if (status === "running") return "#b6ff58";
-  if (status === "failed") return "#ff6b8d";
-  if (status === "ready") return "#ffbc62";
-  if (status === "cancelled" || status === "skipped") return "#77799b";
-  return "#aab0d0";
-}
-
-function drawArcade(
-  ctx: CanvasRenderingContext2D,
-  scene: ReturnType<typeof deriveArcadeScene>,
-  heroes: Hero[],
-  title: string,
-  arcadeLabel: string,
-  teamLabel: string,
-  stageLabel: (stage: ArcadeStageId) => string,
-  statusLabel: (status: string) => string,
-  frame: number,
-  barrels: ArcadeBarrel[],
-  trophy: ArcadeTrophy,
-  trophyLabel: string,
-) {
-  ctx.clearRect(0, 0, WIDTH, HEIGHT);
-  ctx.fillStyle = "#100d24";
-  ctx.fillRect(0, 0, WIDTH, HEIGHT);
-  for (let i = 0; i < 38; i += 1) pixel(ctx, 18 + ((i * 71) % 910), 18 + ((i * 37) % 55), i % 3 ? "#343052" : "#66558a", 2);
-
-  ctx.font = '10px "Press Start 2P", monospace';
-  ctx.fillStyle = "#ffe15a";
-  ctx.fillText(arcadeLabel, 24, 28);
-  ctx.font = '8px "Press Start 2P", monospace';
-  ctx.fillStyle = "#f4efff";
-  const clippedTitle = title.length > 54 ? title.slice(0, 51) + "..." : title;
-  ctx.fillText(clippedTitle, 24, 52);
-  ctx.fillStyle = "#63dfff";
-  ctx.fillText(scene.currentStage ? stageLabel(scene.currentStage) : "—", WIDTH - 265, 30);
-
-  const pointByTask = new Map<string, Point>();
-  const tasksByStage = new Map<ArcadeStageId, typeof scene.tasks>();
-  for (const stage of ["work", "tests", "review"] as const) {
-    const stageTasks = scene.tasks.filter((task) => task.stage === stage);
-    tasksByStage.set(stage, stageTasks);
-    const slot = 600 / Math.max(1, stageTasks.length);
-    stageTasks.forEach((task, index) => pointByTask.set(task.id, {
-      x: 190 + slot * (index + 0.5),
-      y: FLOOR_Y[stage] - 10,
-    }));
-  }
-
-  for (const dependency of scene.dependencies) {
-    const from = pointByTask.get(dependency.from);
-    const to = pointByTask.get(dependency.to);
-    if (!from || !to) continue;
-    const parent = scene.tasks.find((task) => task.id === dependency.from);
-    drawLadder(ctx, from, to, parent?.status === "done" ? "#59d7ff" : "#77799b");
-  }
-
-  for (const stage of STAGE_ORDER) {
-    const stageData = scene.stages.find((item) => item.id === stage);
-    const y = FLOOR_Y[stage];
-    ctx.fillStyle = "#de5d72";
-    ctx.fillRect(158, y, 650, 8);
-    for (let x = 158; x < 808; x += 28) {
-      ctx.fillStyle = "#f5a25c";
-      ctx.fillRect(x, y + 2, 14, 3);
-    }
-    ctx.font = '7px "Press Start 2P", monospace';
-    ctx.fillStyle = stageData?.status === "unknown" ? DIM : "#fff0a0";
-    ctx.fillText(stageLabel(stage), 18, y + 5);
-    ctx.textAlign = "right";
-    ctx.fillStyle = stageData?.status === "unknown" ? DIM : taskColor(stageData?.status ?? "");
-    ctx.fillText(statusLabel(stageData?.status ?? "unknown"), WIDTH - 18, y + 5);
-    ctx.textAlign = "left";
-  }
-
-  for (const stage of ["work", "tests", "review"] as const) {
-    const tasks = tasksByStage.get(stage) ?? [];
-    const slot = 600 / Math.max(1, tasks.length);
-    const nodeWidth = Math.max(34, Math.min(92, slot - 8));
-    tasks.forEach((task) => {
-      const point = pointByTask.get(task.id);
-      if (!point) return;
-      const x = point.x - nodeWidth / 2;
-      const y = FLOOR_Y[stage] - 37;
-      ctx.fillStyle = "#211a39";
-      ctx.fillRect(x, y, nodeWidth, 25);
-      ctx.strokeStyle = taskColor(task.status);
-      ctx.lineWidth = 2;
-      ctx.strokeRect(x, y, nodeWidth, 25);
-      ctx.font = '6px "Press Start 2P", monospace';
-      ctx.fillStyle = "#f5efff";
-      const taskTitle = task.title.length > 14 ? task.title.slice(0, 11) + "..." : task.title;
-      ctx.textAlign = "center";
-      ctx.fillText(taskTitle, point.x, y + 16, nodeWidth - 6);
-      ctx.textAlign = "left";
-    });
-  }
-
-
-  // Barris: um por obstáculo real, no andar onde ele trava a missão.
-  const perStage = new Map<string, number>();
-  for (const barrel of barrels) {
-    const n = perStage.get(barrel.stage) ?? 0;
-    perStage.set(barrel.stage, n + 1);
-    const base = barrel.taskId ? pointByTask.get(barrel.taskId)?.x : undefined;
-    const x = (base ?? 760 - n * 26) + (frame % 4 < 2 ? 0 : 2);
-    const y = FLOOR_Y[barrel.stage] - 8;
-    ctx.fillStyle = "#9b5b2e";
-    ctx.fillRect(x - 8, y - 14, 16, 14);
-    ctx.fillStyle = "#e0a15a";
-    ctx.fillRect(x - 8, y - 9, 16, 2);
-    if (barrel.count > 1) {
-      ctx.font = '6px "Press Start 2P", monospace';
-      ctx.fillStyle = "#fff0a0";
-      ctx.fillText(String(barrel.count), x - 3, y - 16);
-    }
-  }
-
-  // Topo: o troféu só acende com entrega real; sem medida fica cinza.
-  ctx.fillStyle = trophy.step !== null ? "#ffe15a" : DIM;
-  ctx.fillRect(826, FLOOR_Y.delivery - 30, 20, 8);
-  ctx.fillRect(832, FLOOR_Y.delivery - 22, 8, 12);
-  ctx.fillRect(826, FLOOR_Y.delivery - 10, 20, 4);
-  ctx.font = '6px "Press Start 2P", monospace';
-  ctx.fillText(trophyLabel, 812, FLOOR_Y.delivery + 22);
-
-  ctx.fillStyle = "#734b9d";
-  ctx.fillRect(158, HEIGHT - 28, 650, 8);
-  for (let x = 158; x < 808; x += 28) {
-    ctx.fillStyle = "#b77ae3";
-    ctx.fillRect(x, HEIGHT - 26, 14, 3);
-  }
-  heroes.forEach((hero, index) => drawHero(ctx, 175 + index * 42 + (hero.working ? (frame % 4) * 3 : 0), HEIGHT - 20, hero, frame));
-  ctx.font = '6px "Press Start 2P", monospace';
-  ctx.fillStyle = "#9799b9";
-  ctx.fillText(teamLabel, 18, HEIGHT - 10);
 }
 
 function useSustainedTabs() {
@@ -293,7 +78,7 @@ export function LiveArcade({
 }) {
   const { t, i18n } = useTranslation();
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const frameRef = useRef(0);
+  const motionRef = useRef(new Map<string, Motion>());
   const [reducedMotion, setReducedMotion] = useState(() =>
     typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
@@ -326,26 +111,23 @@ export function LiveArcade({
     timings: timings?.spans.map((span) => ({ kind: span.kind, detail: span.detail })) ?? null,
     reviews: review?.deliveries.map((delivery: Delivery) => ({ review: delivery.review })) ?? null,
   }), [mission.status, sceneTasks, timings, review]);
+  const approvalTaskIds = useMemo(
+    () => (mission.activeRunId ? approvals.map((approval) => approval.taskId) : null),
+    [approvals, mission.activeRunId],
+  );
   const barrels = useMemo(() => deriveBarrels({
     scene,
-    approvalTaskIds: mission.activeRunId ? approvals.map((approval) => approval.taskId) : null,
+    approvalTaskIds,
     pendingMemories,
     timings: timings?.spans ?? null,
-  }), [scene, approvals, pendingMemories, timings, mission.activeRunId]);
+  }), [scene, approvalTaskIds, pendingMemories, timings]);
   const trophy = useMemo(() => deriveTrophy(review), [review]);
-  const heroes = useMemo(() => {
-    const kinds = new Set<AgentKind>();
-    for (const task of missionTasks) {
-      const kind = agentKind(task.agentId);
-      if (kind) kinds.add(kind);
-    }
-    const activeKinds = new Set(activeTabs
-      .filter((id) => missionIndex[id] === mission.id)
-      .map((id) => agentKind(tabs.find((tab) => tab.id === id)?.agentId ?? ""))
-      .filter((kind): kind is AgentKind => kind !== null));
-    for (const kind of activeKinds) kinds.add(kind);
-    return [...kinds].map((kind) => ({ kind, working: activeKinds.has(kind) }));
-  }, [missionTasks, activeTabs, missionIndex, mission.id, tabs]);
+  const missionTabs = useMemo<ArcadeTabInput[]>(() => tabs
+    .filter((tab) => missionIndex[tab.id] === mission.id)
+    .map((tab) => ({ id: tab.id, title: tab.title, agentId: tab.agentId, sessionId: tab.sessionId ?? null })),
+  [tabs, missionIndex, mission.id]);
+  const heroes = useMemo(() => deriveHeroes({ tabs: missionTabs, scene, sustainedTabIds: activeTabs, approvalTaskIds }),
+    [missionTabs, scene, activeTabs, approvalTaskIds]);
   useEffect(() => {
     const motion = window.matchMedia("(prefers-reduced-motion: reduce)");
     const update = () => setReducedMotion(motion.matches);
@@ -357,45 +139,78 @@ export function LiveArcade({
     const canvas = canvasRef.current;
     const context = canvas?.getContext("2d");
     if (!canvas || !context) return;
-    let timer: number | undefined;
-    const draw = () => {
-      if (document.visibilityState !== "visible") return;
+    const targets = heroTargets(heroes, taskSlots(scene));
+    const motions = motionRef.current;
+    for (const id of [...motions.keys()]) if (!heroes.some((hero) => hero.tabId === id)) motions.delete(id);
+    let raf: number | undefined;
+    let last: number | null = null;
+    let frame = 0;
+    const draw = (dt: number, now: number) => {
       const bounds = canvas.getBoundingClientRect();
       if (!bounds.width) return;
       const ratio = Math.min(window.devicePixelRatio || 1, 2);
       canvas.width = Math.round(bounds.width * ratio);
-      canvas.height = Math.round((bounds.width * HEIGHT / WIDTH) * ratio);
-      const scale = bounds.width / WIDTH;
+      canvas.height = Math.round((bounds.width * ARCADE_H / ARCADE_W) * ratio);
+      const scale = bounds.width / ARCADE_W;
       context.setTransform(scale * ratio, 0, 0, scale * ratio, 0, 0);
-      drawArcade(
-        context,
+      const placed: Placed[] = heroes.map((hero, index) => {
+        const target = targets.get(hero.tabId) ?? { x: 190, level: 0 };
+        // Sem animação (prefers-reduced-motion) a posição já é a final.
+        const from = motions.get(hero.tabId) ?? (reducedMotion ? target : { x: 190, level: 0 });
+        const next = reducedMotion ? target : stepMotion(from, target, dt, hero.state === "running" ? RUN_SPEED : WALK_SPEED);
+        motions.set(hero.tabId, next);
+        const atTarget = next.level === target.level && next.x === target.x;
+        const climbing = next.level !== Math.round(next.level);
+        const patrol = !reducedMotion && atTarget && hero.state === "running";
+        const moving = !atTarget || patrol;
+        let pose: Pose = "stand";
+        if (climbing) pose = "climb";
+        else if (moving) pose = frame % 2 === 0 ? "walkA" : "walkB";
+        else if (hero.state === "sleeping") pose = "sleep";
+        return { hero, x: next.x + (patrol ? patrolOffset(now, index) : 0), level: next.level, pose, lift: 0 };
+      });
+      drawArcade(context, {
         scene,
-        heroes,
-        mission.title,
-        t("botPanel.live.arcadeTitle"),
-        t("botPanel.live.teamShort"),
-        (stage) => t("botPanel.live.stage." + stage),
-        (status) => t("botPanel.live.status." + status),
-        reducedMotion ? 0 : frameRef.current,
+        title: mission.title,
+        labels: {
+          arcade: t("botPanel.live.arcadeTitle"),
+          team: t("botPanel.live.teamShort"),
+          trophy: t("botPanel.live.trophy." + (trophy.step ?? "unknown")),
+          stage: (stage) => t("botPanel.live.stage." + stage),
+          status: (status) => t("botPanel.live.status." + status),
+        },
+        heroes: placed,
         barrels,
         trophy,
-        t("botPanel.live.trophy." + (trophy.step ?? "unknown")),
-      );
-      frameRef.current += 1;
+        frame,
+      });
+      frame += 1;
+    };
+    const tick = (ts: number) => {
+      raf = requestAnimationFrame(tick);
+      if (last !== null && ts - last < FRAME_MS) return;
+      const dt = last === null ? 0 : Math.min(ts - last, 250);
+      last = ts;
+      draw(dt, ts);
+    };
+    const stop = () => {
+      if (raf !== undefined) cancelAnimationFrame(raf);
+      raf = undefined;
     };
     const start = () => {
-      if (timer !== undefined) window.clearInterval(timer);
-      timer = undefined;
+      stop();
       if (document.visibilityState !== "visible") return;
-      draw();
-      if (!reducedMotion && heroes.some((hero) => hero.working)) timer = window.setInterval(draw, 125);
+      last = null;
+      draw(0, performance.now());
+      // Parado para quem prefere menos movimento; sem heróis também não há o que animar.
+      if (!reducedMotion && heroes.length > 0) raf = requestAnimationFrame(tick);
     };
-    const observer = new ResizeObserver(draw);
+    const observer = new ResizeObserver(() => { if (document.visibilityState === "visible") draw(0, performance.now()); });
     observer.observe(canvas);
     document.addEventListener("visibilitychange", start);
     start();
     return () => {
-      if (timer !== undefined) window.clearInterval(timer);
+      stop();
       observer.disconnect();
       document.removeEventListener("visibilitychange", start);
     };
@@ -421,6 +236,7 @@ export function LiveArcade({
     { key: "budget", value: budget },
     { key: "lives", value: lives },
   ];
+  const stateLabel = (state: string) => t(state === "running" ? "botPanel.live.running" : state === "stopped" ? "botPanel.live.waiting" : "botPanel.live.sleeping");
 
   return (
     <div className="ags-live">
@@ -441,10 +257,10 @@ export function LiveArcade({
       </div>
       <div className="ags-live__agents" aria-label={t("botPanel.live.agents")}>
         {heroes.length === 0 ? <span className="ags-live__unknown">{t("botPanel.live.noAgents")}</span> : heroes.map((hero) => (
-          <span className={"ags-live__agent ags-live__agent--" + hero.kind} key={hero.kind}>
+          <span className={"ags-live__agent ags-live__agent--" + hero.kind + " ags-live__agent--" + hero.role} key={hero.tabId}>
             <i aria-hidden="true" />
-            {t("botPanel.live.agent." + hero.kind)}
-            <b>{hero.working ? t("botPanel.live.running") : t("botPanel.live.sleeping")}</b>
+            {hero.name} · {t("botPanel.live.agent." + hero.kind)}
+            <b>{stateLabel(hero.state)}</b>
           </span>
         ))}
       </div>
@@ -455,6 +271,7 @@ export function LiveArcade({
         {" " + scene.tasks.map((task) =>
           task.title + ": " + t("botPanel.live.taskStatus." + task.status)
         ).join(". ")}
+        {" " + heroes.map((hero) => hero.name + ": " + stateLabel(hero.state)).join(". ")}
         {" " + barrels.map((barrel) => t("botPanel.live.barrel." + barrel.kind) + (barrel.detail ? " (" + barrel.detail + ")" : "")).join(". ")}
         {" " + t("botPanel.live.trophy." + (trophy.step ?? "unknown"))}
         {" " + t("botPanel.live.score", { retries: retryCount(sceneTasks), failures: failureCount(sceneTasks) })}

@@ -20,3 +20,12 @@ A quinta aba do BotPanel mostra uma missão por vez em um canvas pixel art. A mi
 
 - Com mais de uma missão em execução aparece o seletor **TODAS | missão** e a visão unificada: um fliperama por missão lado a lado (cada um carrega os próprios dados). Clicar (ou Enter) em um fliperama abre a missão individual.
 - Com uma só missão em execução não há seletor; vale a missão selecionada na aba Missões.
+
+## v3.0 — um herói por terminal, movimento real
+
+- **Um herói por terminal** da missão (shells ficam de fora): nome = nome do terminal, sprite por plataforma (Claude = raios, Codex = viseira, Antigravity = antena), cor por papel (orquestrador, backend, frontend, QA, revisão, outro; lido do nome do terminal e do papel da tarefa ligada).
+- **Terminal → tarefa** só por elo real: a `sessionId` que a tarefa lançou, ou o nome do terminal igual ao nome da tarefa no plano (`planKey`/papel funcional). Sem elo, o herói fica no **chão** (andar desconhecido); nada é adivinhado. Tarefas headless (sem terminal) não geram herói.
+- **Estado**: corre só com saída sustentada (`sustainedTabIds`); fica parado com `!` quando a tarefa ligada falhou ou tem aprovação pendente; senão dorme (`Z`).
+- **Movimento**: vigas inclinadas e escadas alternando de lado. O herói anda até a escada, sobe um andar por vez até o andar da etapa (Abertura, Trabalho, Testes, Revisão, Entrega) e vai até a tarefa. Quem corre vai e vem perto da tarefa.
+- **Render**: `requestAnimationFrame` limitado a ~12 fps, pausa com a janela oculta; com `prefers-reduced-motion` as posições são estáticas e não há loop. Sem som.
+- Lógica pura em `liveArcadeModel.ts` (`deriveHeroes`, `taskOfTab`, `roleOf`) e `liveArcadeScene.ts` (`stepMotion`, `heroTargets`, `beamY`…); desenho em `liveArcadeDraw.ts`.
