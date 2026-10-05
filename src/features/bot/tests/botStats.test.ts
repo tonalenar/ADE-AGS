@@ -76,8 +76,8 @@ describe("formato de marcador", () => {
 
 describe("failuresByClass", () => {
   it("cuenta solo las fallidas, por causa, y lo no clasificado como unknown", () => {
-    const f = (id: string, failureClass?: MissionLike["failureClass"]): MissionLike => ({ ...m(id, "failed", 1, 2), failureClass });
-    const s = botStats([f("a", "access"), f("b", "access"), f("c", "timeout"), f("d"), m("e", "done", 1, 2), { ...m("f", "done", 1, 2), failureClass: "crash" }], 10);
+    const f = (id: string, category?: "access" | "timeout" | "crash"): MissionLike => ({ ...m(id, "failed", 1, 2), failureClassification: category ? { category, actionKey: "missions.failure.action.loginAgain" } : null });
+    const s = botStats([f("a", "access"), f("b", "access"), f("c", "timeout"), f("d"), m("e", "done", 1, 2), { ...m("f", "done", 1, 2), failureClassification: { category: "crash", actionKey: "x" } }], 10);
     expect(s.failuresByClass).toEqual({ access: 2, timeout: 1, unknown: 1 });
   });
 });
