@@ -445,17 +445,17 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     // No se interrumpe a quien está a mitad de un turno: se espera a que se calle un poco.
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(60), false);
     submit_prompt(pty, &outgoing(&from_name, &text, false, is_raw(args)))?;
-    emit_peer_message(app, "tell", &from, Some(&target.id));
+    emit_peer_message(app, "tell", &from, Some(&target.id), Some(&text));
     Ok(json!({ "peer": describe(target), "sent": true }))
 }
 
 /// Avisa al frontend de un mensaje entre agentes (`cc-peer-message`). Un `tell` le da una tarea
 /// al destino; cualquier mensaje del remitente prueba que él sí está activo. Con eso el
 /// detector de "agente parado" (`missions/stalled.ts`) sabe quién debe una respuesta.
-fn emit_peer_message(app: &AppHandle, kind: &str, from_tab_id: &str, to_tab_id: Option<&str>) {
+fn emit_peer_message(app: &AppHandle, kind: &str, from_tab_id: &str, to_tab_id: Option<&str>, text: Option<&str>) {
     let _ = app.emit(
         "cc-peer-message",
-        json!({ "kind": kind, "fromTabId": from_tab_id, "toTabId": to_tab_id, "atMs": crate::util::now_ts_ms() }),
+        json!({ "kind": kind, "fromTabId": from_tab_id, "toTabId": to_tab_id, "text": text, "atMs": crate::util::now_ts_ms() }),
     );
 }
 

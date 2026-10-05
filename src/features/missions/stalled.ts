@@ -14,6 +14,8 @@ import { formatDuration } from "./timings";
 
 /** Cuánto silencio, tras la tarea o tras la última salida, para dar al agente por parado. */
 export const STALL_MS = 120_000;
+/** El plazo configurable no baja de acá: menos que esto es ruido (un turno largo de pensar). */
+export const MIN_STALL_MS = 15_000;
 /** Cada cuánto se revisa. */
 export const STALL_CHECK_MS = 5000;
 /** Salida que llega justo tras el `tell` es el eco del prompt: no prueba que trabajó. */
@@ -40,7 +42,25 @@ export interface PeerMessage {
   kind: "tell" | "ask";
   fromTabId: string;
   toTabId: string | null;
+  /** El texto del `tell` (para distinguir una tarea de un simple "obrigado"). */
+  text?: string | null;
   atMs: number;
+}
+
+const ACK = /^(ok(ay)?|okey|obrigad[oa]|brigad[oa]|valeu|vlw|thanks?|thank you|thx|gracias|entendido|entendi|beleza|blz|perfeito|[óo]timo|show|certo|combinado|top|legal|fechado|received|got it|recebido|de nada|tmj)\b/i;
+
+/** ¿Es un mensaje corto de cortesía/confirmación, sin pedido? No hay nada que contestar. Pura. */
+export function isAck(text: string | null | undefined): boolean {
+  const t = (text ?? "").trim();
+  if (!t) return false;
+  const plain = t.replace(/^[^\p{L}\p{N}]+/u, "");
+  return t.length <= 40 && t.split(/\s+/).length <= 5 && !t.includes("?") && (plain === "" || ACK.test(plain));
+}
+
+/** Lee un plazo en ms de un texto (ajuste del usuario); vacío o inválido → `STALL_MS`. Pura. */
+export function parseStallMs(raw: string | null | undefined): number {
+  const n = Number(raw);
+  return Number.isFinite(n) && n >= MIN_STALL_MS ? n : STALL_MS;
 }
 
 /**
@@ -51,7 +71,7 @@ export interface PeerMessage {
 export function applyMessage(pending: PendingTasks, msg: PeerMessage, isLead: (tabId: string) => boolean): Map<string, PendingTask> {
   const next = new Map(pending);
   next.delete(msg.fromTabId);
-  if (msg.kind === "tell" && msg.toTabId && isLead(msg.fromTabId) && !isLead(msg.toTabId)) {
+  if (msg.kind === "tell" && msg.toTabId && isLead(msg.fromTabId) && !isLead(msg.toTabId) && !isAck(msg.text)) {
     next.set(msg.toTabId, { tabId: msg.toTabId, fromTabId: msg.fromTabId, at: msg.atMs, alerted: false });
   }
   return next;
