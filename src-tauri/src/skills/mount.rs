@@ -110,6 +110,15 @@ fn create_junction(target: &Path, link: &Path) -> io::Result<()> {
     Ok(())
 }
 
+/// Crea siempre un junction de directorio en Windows, sin intentar primero un symlink.
+///
+/// Los worktrees usan este montaje para `node_modules`: no debe depender de que el usuario
+/// tenga habilitado el privilegio de symlink.
+#[cfg(windows)]
+pub(crate) fn junction_dir(target: &Path, link: &Path) -> io::Result<()> {
+    create_junction(target, link)
+}
+
 /// `\??\C:\...` o `\??\UNC\server\share\...`, que es lo que el reparse point guarda.
 #[cfg(windows)]
 fn nt_prefix(path: &Path) -> PathBuf {

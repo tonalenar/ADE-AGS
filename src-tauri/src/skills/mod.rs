@@ -33,6 +33,8 @@ pub(crate) use frontmatter::{rename_in_content, scan_frontmatter_for_marketplace
 pub use install::*;
 pub use links::*;
 pub(crate) use mount::{is_mount, mount_dir, points_inside, remove_mount};
+#[cfg(windows)]
+pub(crate) use mount::junction_dir;
 // Los tests comparan el destino del montaje. El resto del crate importa `same_path`
 // directo de `mount`, así que este reexport solo existe cuando se compilan los tests.
 #[cfg(test)]

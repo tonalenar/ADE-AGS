@@ -13,6 +13,7 @@
 //! la CLI reenvía como `from`. No es una barrera de seguridad (un proceso puede mentir su
 //! entorno): es el alcance de trabajo de cada agente, igual que la carpeta en la que corre.
 
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 use serde_json::{json, Value};
@@ -243,7 +244,58 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         None => None,
     };
 
+    // Um piso antigo também pode não ter o link (foi criado antes deste setup). Tente de
+    // novo aqui, sem sobrescrever o que já existe e sem bloquear o recrutamento.
+    let floor = crate::floors::floor_for_path(&cwd);
+    let worktree_root = floor
+        .as_ref()
+        .map(|f| Path::new(&f.root).to_path_buf())
+        .or_else(|| crate::runs::worktrees::repo_root(Path::new(&cwd)).ok())
+        .unwrap_or_else(|| Path::new(&cwd).to_path_buf());
+    let repo_root = floor
+        .as_ref()
+        .and_then(|f| crate::runs::worktrees::repo_root(Path::new(&f.ground)).ok())
+        .unwrap_or_else(|| worktree_root.clone());
+    let node_modules = if floor.is_some() {
+        match crate::floors::prepare_node_modules_link(&repo_root, &worktree_root) {
+            Ok(status) => {
+                if status == crate::floors::NodeModulesLinkStatus::ExistingPreserved {
+                    eprintln!(
+                        "[ags] aviso: {} já existe e foi preservado; não foi substituído pelo link para {}",
+                        worktree_root.join("node_modules").display(),
+                        repo_root.join("node_modules").display(),
+                    );
+                }
+                status.description().to_string()
+            }
+            Err(error) => {
+                let warning = format!("aviso: não foi possível criar o link compartilhado ({error})");
+                eprintln!("[ags] {warning} em {}", worktree_root.display());
+                warning
+            }
+        }
+    } else {
+        "recruit no clone atual; nenhum link adicional necessário".into()
+    };
+
+    let configured_target = std::env::var_os(crate::floors::CARGO_TARGET_DIR_SETTING);
+    let cargo_target = crate::floors::cargo_target_dir(&repo_root, &worktree_root, configured_target.as_deref());
+    let (shell, shell_label) = crate::floors::worktree_shell();
+    let environment = crate::floors::worktree_environment_block(
+        &worktree_root.to_string_lossy(),
+        &cargo_target.path.to_string_lossy(),
+        &shell_label,
+        shell,
+        &node_modules,
+        cargo_target.mode,
+    );
+
     let mut create = json!({ "cwd": cwd, "agent": agent, "title": name, "window": me.window });
+    // `prelaunch` exporta o target antes de iniciar a TUI; assim seus processos e shells
+    // filhos herdam o mesmo cache. O passo é persistido junto com a tab para resumes.
+    create["prelaunch"] = json!([{
+        "command": crate::floors::cargo_target_prelaunch(&cargo_target.path)
+    }]);
     if let Some(account) = arg_str_opt(args, "account") {
         create["account"] = json!(account);
     }
@@ -261,9 +313,14 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
 
     let mut out = json!({ "recruited": { "id": tab_id, "name": name, "agent": agent, "cwd": cwd } });
     let prompt = arg_str_opt(args, "prompt").filter(|p| !p.trim().is_empty());
-    // Con papel, el agente siempre recibe un primer mensaje: sin tarea, espera la primera.
-    if let Some(text) = first_message(role.as_ref(), prompt.as_deref(), &me.name) {
-        out["role"] = json!(role.as_ref().map(|r| r.id.clone()));
+    // O bloco de ambiente sempre vai primeiro, mesmo sem tarefa: o recruit já sabe onde
+    // está, qual shell usar e como validar antes de receber a tarefa seguinte.
+    let first = first_message(role.as_ref(), prompt.as_deref(), &me.name).unwrap_or_default();
+    let text = if first.is_empty() { environment } else { format!("{first}\n\n{environment}") };
+    {
+        if let Some(role) = role.as_ref() {
+            out["role"] = json!(role.id);
+        }
         let pty = wait_for_pty(app, &tab_id, Some(&me.window))?;
         let ready = wait_until_ready(pty);
         submit_prompt(pty, &framed(&me.name, &text, false))?;

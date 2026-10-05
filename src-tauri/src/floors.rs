@@ -26,6 +26,8 @@
 //! commits propios queda, y se avisa. La pantalla además se niega si hay agentes abiertos
 //! en el piso.
 
+use std::ffi::OsStr;
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -56,6 +58,218 @@ lazy_static::lazy_static! {
 }
 
 const MAX_NAME: usize = 40;
+
+/// Override lido pelo processo da app. `per-worktree` separa o target de cada recruit;
+/// qualquer outro valor é um caminho (absoluto ou relativo à raiz do clone principal).
+pub(crate) const CARGO_TARGET_DIR_SETTING: &str = "ADE_AGS_CARGO_TARGET_DIR";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum CargoTargetMode {
+    Shared,
+    PerWorktree,
+    Custom,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct CargoTarget {
+    pub path: PathBuf,
+    pub mode: CargoTargetMode,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum NodeModulesLinkStatus {
+    Created,
+    AlreadyLinked,
+    ExistingPreserved,
+}
+
+impl NodeModulesLinkStatus {
+    pub(crate) fn description(self) -> &'static str {
+        match self {
+            Self::Created => "link compartilhado criado",
+            Self::AlreadyLinked => "link compartilhado já existe",
+            Self::ExistingPreserved => "node_modules já existia e foi preservado",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WorktreeShell {
+    PowerShell,
+    Posix,
+}
+
+/// Calcula o target Rust usado pelo recruit. Sem override, todos compartilham o cache do
+/// clone principal; `per-worktree` evita que dois Cargo concorrentes disputem o mesmo lock.
+pub(crate) fn cargo_target_dir(
+    repo_root: &Path,
+    worktree_root: &Path,
+    configured: Option<&OsStr>,
+) -> CargoTarget {
+    let Some(value) = configured
+        .map(OsStr::to_string_lossy)
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+    else {
+        return CargoTarget {
+            path: repo_root.join("src-tauri").join("target"),
+            mode: CargoTargetMode::Shared,
+        };
+    };
+
+    if value.eq_ignore_ascii_case("per-worktree") {
+        return CargoTarget {
+            path: worktree_root.join("src-tauri").join("target"),
+            mode: CargoTargetMode::PerWorktree,
+        };
+    }
+
+    let path = PathBuf::from(value);
+    CargoTarget {
+        path: if path.is_absolute() { path } else { repo_root.join(path) },
+        mode: CargoTargetMode::Custom,
+    }
+}
+
+/// Cria o link de dependências no worktree sem substituir nada que já esteja lá.
+pub(crate) fn prepare_node_modules_link(
+    repo_root: &Path,
+    worktree_root: &Path,
+) -> io::Result<NodeModulesLinkStatus> {
+    let target = repo_root.join("node_modules");
+    let link = worktree_root.join("node_modules");
+    match std::fs::symlink_metadata(&link) {
+        Ok(_) => {
+            let linked_to_target = match (std::fs::canonicalize(&link), std::fs::canonicalize(&target)) {
+                (Ok(link), Ok(target)) => link == target,
+                _ => false,
+            };
+            return Ok(if linked_to_target {
+                NodeModulesLinkStatus::AlreadyLinked
+            } else {
+                NodeModulesLinkStatus::ExistingPreserved
+            });
+        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
+    }
+    if !target.is_dir() {
+        return Err(io::Error::new(
+            io::ErrorKind::NotFound,
+            format!("a pasta compartilhada não existe: {}", target.display()),
+        ));
+    }
+
+    match create_node_modules_link(&target, &link) {
+        Ok(()) => Ok(NodeModulesLinkStatus::Created),
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let linked_to_target = match (std::fs::canonicalize(&link), std::fs::canonicalize(&target)) {
+                (Ok(link), Ok(target)) => link == target,
+                _ => false,
+            };
+            Ok(if linked_to_target {
+                NodeModulesLinkStatus::AlreadyLinked
+            } else {
+                NodeModulesLinkStatus::ExistingPreserved
+            })
+        }
+        Err(error) => Err(error),
+    }
+}
+
+#[cfg(windows)]
+fn create_node_modules_link(target: &Path, link: &Path) -> io::Result<()> {
+    crate::skills::junction_dir(target, link)
+}
+
+#[cfg(unix)]
+fn create_node_modules_link(target: &Path, link: &Path) -> io::Result<()> {
+    std::os::unix::fs::symlink(target, link)
+}
+
+#[cfg(not(any(windows, unix)))]
+fn create_node_modules_link(_target: &Path, _link: &Path) -> io::Result<()> {
+    Err(io::Error::new(io::ErrorKind::Unsupported, "links de diretório não suportados nesta plataforma"))
+}
+
+fn shell_quote_posix(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "'\\''"))
+}
+
+fn shell_quote_powershell(value: &str) -> String {
+    format!("'{}'", value.replace('\'', "''"))
+}
+
+/// Gera o briefing do ambiente sem consultar o processo, para que as duas plataformas e
+/// diferentes formas de escrever caminhos possam ser verificadas por teste.
+pub(crate) fn worktree_environment_block(
+    worktree_root: &str,
+    cargo_target_dir: &str,
+    shell_label: &str,
+    shell: WorktreeShell,
+    node_modules: &str,
+    cargo_mode: CargoTargetMode,
+) -> String {
+    let (root_command, cargo_command, code_fence) = match shell {
+        WorktreeShell::PowerShell => (
+            format!("Set-Location {}", shell_quote_powershell(worktree_root)),
+            "Push-Location src-tauri\ncargo test --lib floors::test\nPop-Location".to_string(),
+            "powershell",
+        ),
+        WorktreeShell::Posix => (
+            format!("cd {}", shell_quote_posix(worktree_root)),
+            "(cd src-tauri && cargo test --lib floors::test)".to_string(),
+            "bash",
+        ),
+    };
+    let cargo_note = match cargo_mode {
+        CargoTargetMode::Shared => "O target Cargo é compartilhado; compilações simultâneas podem disputar o lock. Configure ADE_AGS_CARGO_TARGET_DIR=per-worktree para isolar este worktree; as dependências serão recompiladas uma vez nele.",
+        CargoTargetMode::PerWorktree => "O target Cargo é isolado por worktree, evitando disputa pelo lock; as dependências serão recompiladas uma vez neste worktree.",
+        CargoTargetMode::Custom => "O target Cargo usa o caminho configurado. Se vários agentes o compartilharem, podem disputar o lock; ADE_AGS_CARGO_TARGET_DIR=per-worktree seleciona um target próprio por worktree, com recompilação única das dependências.",
+    };
+    format!(
+        "AMBIENTE DO WORKTREE\nShell: {shell_label}\nRaiz: {worktree_root}\nnode_modules: {node_modules}\nCARGO_TARGET_DIR: {cargo_target_dir}\n{cargo_note}\n\nValidação (troque `floors::test` pelo filtro do módulo alterado):\n```{code_fence}\n{root_command}\nnode node_modules/typescript/bin/tsc --noEmit\nnode node_modules/vitest/vitest.mjs run\n{cargo_command}\n```"
+    )
+}
+
+/// Comando de prelaunch que exporta a variável no shell pai da TUI recrutada.
+pub(crate) fn cargo_target_prelaunch(target: &Path) -> String {
+    let target = target.to_string_lossy();
+    #[cfg(windows)]
+    {
+        format!("set \"CARGO_TARGET_DIR={target}\"")
+    }
+    #[cfg(unix)]
+    {
+        let shell = std::env::var("SHELL").unwrap_or_default();
+        if Path::new(&shell).file_name().is_some_and(|name| name == "fish") {
+            format!("set -gx CARGO_TARGET_DIR {}", shell_quote_posix(&target))
+        } else {
+            format!("export CARGO_TARGET_DIR={}", shell_quote_posix(&target))
+        }
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        format!("CARGO_TARGET_DIR={target}")
+    }
+}
+
+pub(crate) fn worktree_shell() -> (WorktreeShell, String) {
+    #[cfg(windows)]
+    {
+        (WorktreeShell::PowerShell, "PowerShell".into())
+    }
+    #[cfg(unix)]
+    {
+        let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
+        let label = Path::new(&shell).file_name().and_then(OsStr::to_str).unwrap_or("bash");
+        (WorktreeShell::Posix, label.to_string())
+    }
+    #[cfg(not(any(windows, unix)))]
+    {
+        (WorktreeShell::Posix, "shell padrão".into())
+    }
+}
 
 fn data_dir() -> Result<PathBuf, String> {
     let dir = dirs::home_dir().ok_or("No se encontró la carpeta del usuario")?.join(".ags");
@@ -183,6 +397,25 @@ pub fn create(cwd: &str, name: &str, start: Option<&str>) -> Result<Floor, Strin
     let start = check_start(start)?;
     let wt = crate::runs::worktrees::create_from(&base, Path::new(&ground), &name, start)?;
 
+    // `node_modules` é ignorado pelo Git e não vem no checkout do worktree. O link é
+    // derivado: se não puder ser criado, o piso continua válido e o motivo fica avisado.
+    match crate::runs::worktrees::repo_root(Path::new(&ground)) {
+        Ok(repo_root) => match prepare_node_modules_link(&repo_root, &wt.root) {
+            Ok(NodeModulesLinkStatus::ExistingPreserved) => eprintln!(
+                "[ags] aviso: {} já existe em {}; não foi substituído pelo link para {}",
+                wt.root.join("node_modules").display(),
+                wt.root.display(),
+                repo_root.join("node_modules").display(),
+            ),
+            Ok(_) => {}
+            Err(error) => eprintln!(
+                "[ags] aviso: não foi possível ligar node_modules em {}: {error}",
+                wt.root.display(),
+            ),
+        },
+        Err(error) => eprintln!("[ags] aviso: não foi possível localizar o clone principal para node_modules: {error}"),
+    }
+
     let floor = Floor {
         id: uuid::Uuid::new_v4().simple().to_string()[..8].to_string(),
         name,
@@ -253,6 +486,15 @@ pub fn list_for(cwd: &str) -> FloorList {
     let floors = all();
     let ground = ground_for(&floors, cwd);
     FloorList { floors: floors_of(&floors, &ground), ground }
+}
+
+/// Piso que contém `cwd`, quando a pasta já é ou está dentro de um worktree gerido.
+pub(crate) fn floor_for_path(cwd: &str) -> Option<Floor> {
+    let here = norm(cwd);
+    all().into_iter().find(|floor| {
+        let root = norm(&floor.root);
+        here == root || here.starts_with(&format!("{root}/"))
+    })
 }
 
 /// El evento que avisa al frontend que cambió la lista de pisos (por ejemplo, porque un
@@ -368,5 +610,115 @@ mod test {
         assert_eq!(check_start(None).unwrap(), "HEAD");
         assert_eq!(check_start(Some("  main ")).unwrap(), "main");
         assert_eq!(check_start(Some("")).unwrap(), "HEAD");
+    }
+
+    #[test]
+    fn cargo_target_compartilhado_e_configuravel_por_worktree() {
+        let repo = std::env::temp_dir().join("ags-repo");
+        let worktree = repo.join(".ags").join("floor");
+
+        let shared = cargo_target_dir(&repo, &worktree, None);
+        assert_eq!(shared.mode, CargoTargetMode::Shared);
+        assert_eq!(shared.path, repo.join("src-tauri").join("target"));
+
+        let isolated = cargo_target_dir(&repo, &worktree, Some(OsStr::new("per-worktree")));
+        assert_eq!(isolated.mode, CargoTargetMode::PerWorktree);
+        assert_eq!(isolated.path, worktree.join("src-tauri").join("target"));
+
+        let custom = cargo_target_dir(&repo, &worktree, Some(OsStr::new("cache/cargo")));
+        assert_eq!(custom.mode, CargoTargetMode::Custom);
+        assert_eq!(custom.path, repo.join("cache").join("cargo"));
+    }
+
+    #[test]
+    fn briefing_powershell_preserva_caminhos_windows_com_as_duas_barras() {
+        for root in [r"C:\repo\worktree", "C:/repo/worktree"] {
+            let block = worktree_environment_block(
+                root,
+                r"C:\repo\src-tauri\target",
+                "PowerShell",
+                WorktreeShell::PowerShell,
+                "junction compartilhada criada",
+                CargoTargetMode::Shared,
+            );
+            assert!(block.contains("AMBIENTE DO WORKTREE"), "{block}");
+            assert!(block.contains("Shell: PowerShell"), "{block}");
+            assert!(block.contains(&format!("Raiz: {root}")), "{block}");
+            assert!(block.contains("node node_modules/typescript/bin/tsc --noEmit"), "{block}");
+            assert!(block.contains("node node_modules/vitest/vitest.mjs run"), "{block}");
+            assert!(block.contains("cargo test --lib floors::test"), "{block}");
+            assert!(block.contains("disputar o lock"), "{block}");
+        }
+    }
+
+    #[test]
+    fn briefing_posix_preserva_caminhos_com_as_duas_barras_e_explica_target_isolado() {
+        for root in ["/repo/worktree", r"\repo\worktree"] {
+            let block = worktree_environment_block(
+                root,
+                "/repo/worktree/src-tauri/target",
+                "bash",
+                WorktreeShell::Posix,
+                "symlink compartilhado criado",
+                CargoTargetMode::PerWorktree,
+            );
+            assert!(block.contains("Shell: bash"), "{block}");
+            assert!(block.contains(&format!("Raiz: {root}")), "{block}");
+            assert!(block.contains("cd '"), "{block}");
+            assert!(block.contains("cargo test --lib floors::test"), "{block}");
+            assert!(block.contains("isolado por worktree"), "{block}");
+        }
+    }
+
+    #[test]
+    fn node_modules_existente_nunca_e_substituido() {
+        let root = std::env::temp_dir().join(format!("ags-node-modules-existing-{}", uuid::Uuid::new_v4().simple()));
+        let repo = root.join("repo");
+        let worktree = root.join("worktree");
+        let target = repo.join("node_modules");
+        let existing = worktree.join("node_modules");
+        std::fs::create_dir_all(&target).unwrap();
+        std::fs::create_dir_all(&existing).unwrap();
+        std::fs::write(existing.join("keep.txt"), "preservar").unwrap();
+
+        assert_eq!(prepare_node_modules_link(&repo, &worktree).unwrap(), NodeModulesLinkStatus::ExistingPreserved);
+        assert_eq!(std::fs::read_to_string(existing.join("keep.txt")).unwrap(), "preservar");
+        let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn worktree_real_recebe_link_de_node_modules_da_raiz() {
+        use std::process::Command;
+
+        let scratch = std::env::temp_dir().join(format!("ags-floor-link-{}", uuid::Uuid::new_v4().simple()));
+        let repo = scratch.join("repo");
+        std::fs::create_dir_all(&repo).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git").arg("-C").arg(&repo).args(args).output().unwrap();
+            assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        };
+        git(&["init", "--quiet"]);
+        git(&["config", "user.name", "ADE AGS tests"]);
+        git(&["config", "user.email", "tests@ags.local"]);
+        std::fs::write(repo.join(".gitignore"), "node_modules/\n").unwrap();
+        std::fs::write(repo.join("README.md"), "fixture\n").unwrap();
+        std::fs::create_dir_all(repo.join("node_modules")).unwrap();
+        std::fs::write(repo.join("node_modules").join("marker.txt"), "shared\n").unwrap();
+        git(&["add", ".gitignore", "README.md"]);
+        git(&["commit", "--quiet", "-m", "fixture"]);
+
+        let wt = crate::runs::worktrees::create_from(&scratch.join("worktrees"), &repo, "junction fixture", "HEAD").unwrap();
+        let status = prepare_node_modules_link(&repo, &wt.root).unwrap();
+        assert_eq!(status, NodeModulesLinkStatus::Created);
+        let link = wt.root.join("node_modules");
+        assert_eq!(std::fs::read_to_string(link.join("marker.txt")).unwrap(), "shared\n");
+        #[cfg(windows)]
+        assert!(crate::skills::is_mount(&link), "Windows deve criar um junction de diretório válido");
+        #[cfg(unix)]
+        assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
+
+        crate::skills::remove_mount(&link).unwrap();
+        crate::runs::worktrees::remove(&repo, &wt, Path::new(""), Path::new("")).unwrap();
+        let _ = std::fs::remove_dir_all(scratch);
     }
 }

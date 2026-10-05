@@ -162,4 +162,4 @@ Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--te
 
 ## Etapa 11 — Eficiência entre agentes
 
-**Ponto 3 documentado:** preparar o worktree antes de abrir missão ou recruit, incluindo shell, junction de `node_modules`, `CARGO_TARGET_DIR` e comandos exatos de validação. O briefing inicial recebe os caminhos já resolvidos. O procedimento diferencia Windows de Linux/CI em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+**Ponto 3 implementado:** ao criar o worktree, a app prepara a junction de `node_modules` no Windows ou symlink em Unix, sem substituir diretórios existentes; falhas geram aviso sem bloquear o recruit. O briefing inicial inclui caminho, shell e comandos de validação, com `cargo test --lib` filtrado. O target Cargo compartilhado é configurável como `per-worktree` para evitar disputa de lock entre agentes simultâneos, com o custo de recompilar dependências uma vez por worktree. O procedimento multiplataforma está em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
