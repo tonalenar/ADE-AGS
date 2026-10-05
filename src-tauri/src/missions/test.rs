@@ -9,6 +9,7 @@ use std::sync::{Arc, Mutex};
 
 use rusqlite::Connection;
 
+use super::delivery::{CiStatus, MissionDelivery, TestResult};
 use super::types::{MissionInput, status};
 use super::{cancel, create, detail, start, store, update};
 use crate::database::{DbConnection, test_db};
@@ -106,6 +107,44 @@ fn estado(db: &DbConnection, id: &str) -> String {
 
 // ── Crear, listar, cargar, editar ───────────────────────────────
 
+#[test]
+fn classifies_persists_and_exposes_the_failed_mission() {
+    use super::{FailureActionKey, FailureCategory, FailureClassification};
+
+    let db = db();
+    let id = borrador(&db);
+    let lead = arrancar(&db, &id);
+    let error = "HTTP 403: free plan cannot access this model";
+    correr_y_cerrar(&db, &lead.id, TaskOutcome::failed(error));
+
+    let conn = db.lock().unwrap();
+    let mission = store::get(&conn, &id).unwrap().unwrap();
+    assert_eq!(
+        mission.failure_classification,
+        Some(FailureClassification {
+            category: FailureCategory::Access,
+            action_key: FailureActionKey::CheckPlanAccess,
+        })
+    );
+    assert_eq!(mission.failure_detail.as_deref(), Some(error));
+
+    let json = serde_json::to_value(&mission).unwrap();
+    assert_eq!(json["failureClassification"]["category"], "access");
+    assert_eq!(
+        json["failureClassification"]["actionKey"],
+        "missions.failure.action.checkPlanAccess"
+    );
+    assert_eq!(json["failureDetail"].as_str(), Some(error));
+
+    let mut summaries = store::list(&conn, "w1").unwrap();
+    let summary = summaries.remove(0);
+    assert_eq!(summary.mission.failure_classification, mission.failure_classification);
+    assert_eq!(summary.mission.failure_detail.as_deref(), Some(error));
+
+    let detail = detail(&conn, &id).unwrap();
+    assert_eq!(detail.mission.failure_classification, mission.failure_classification);
+    assert_eq!(detail.mission.failure_detail.as_deref(), Some(error));
+}
 #[test]
 fn crear_una_mision_deja_un_borrador_sin_run() {
     let db = db();
@@ -1549,13 +1588,20 @@ fn una_mision_en_terminales_corre_sin_run_y_se_cierra_a_mano() {
     // Que se refresque su estado (lo hace la flota con cada tarea) no la mueve: no tiene run.
     assert_eq!(store::refresh_status(&conn, &id).unwrap().as_deref(), Some("running"));
 
-    assert!(store::close_terminals(&conn, &id, "done").unwrap());
+    let evidence = MissionDelivery {
+        test_result: TestResult::Passed,
+        pull_request: None,
+        ci_status: CiStatus::NotApplicable,
+        checked_at: 10,
+    };
+    assert!(store::finish_terminals(&conn, &id, &evidence).unwrap());
     let m = store::get(&conn, &id).unwrap().unwrap();
     assert_eq!(m.status, "done");
     assert!(m.ended_at.is_some());
+    assert_eq!(store::delivery_for_mission(&conn, &id).unwrap(), Some(evidence));
     // Ya cerrada: no se cierra dos veces ni se cambia el desenlace.
     assert!(!store::close_terminals(&conn, &id, "cancelled").unwrap());
-    assert!(store::close_terminals(&conn, &id, "failed").is_err(), "solo terminada o cancelada");
+    assert!(store::close_terminals(&conn, &id, "done").is_err(), "la finalización requiere evidencia");
 }
 
 #[test]
@@ -1578,6 +1624,79 @@ fn una_fallida_se_puede_reabrir_en_terminales_pero_una_terminada_no() {
     let conn = db.lock().unwrap();
     conn.execute("UPDATE missions SET status = 'failed' WHERE id = ?1", [&id]).unwrap();
     assert!(store::mark_started_terminals(&conn, &id).unwrap());
-    store::close_terminals(&conn, &id, "done").unwrap();
+    let evidence = MissionDelivery {
+        test_result: TestResult::Passed,
+        pull_request: None,
+        ci_status: CiStatus::NotApplicable,
+        checked_at: 10,
+    };
+    store::finish_terminals(&conn, &id, &evidence).unwrap();
     assert!(!store::mark_started_terminals(&conn, &id).unwrap());
+}
+
+#[test]
+fn start_prevents_duplicate_running_or_recent_unless_forced() {
+    let db = db();
+    let m1 = borrador(&db);
+    let assignment = asignacion("claude-code");
+    start(&db, &m1, |_| Ok(assignment.clone()), |_| Ok(())).unwrap();
+
+    let mut input = pedido();
+    input.title = "Hola".into();
+    input.objective = "Crear hello.txt con ADE AGS".into();
+    let m2 = {
+        let conn = db.lock().unwrap();
+        create(&conn, "w1", &input).unwrap().id
+    };
+
+    // Sem force: bloqueado
+    let err = start(&db, &m2, |_| Ok(assignment.clone()), |_| Ok(())).unwrap_err();
+    assert_eq!(err, "missions.error.duplicateRunning");
+
+    // Com force: permitido
+    let started = super::start_with_force(&db, &m2, true, |_| Ok(assignment.clone()), |_| Ok(())).unwrap();
+    assert_eq!(started.status, "running");
+}
+
+#[test]
+fn terminal_sem_evidencia_fica_separada_e_nao_reescreve_missoes_historicas() {
+    let db = db();
+    let antiga = borrador(&db);
+    let nova = borrador(&db);
+    let conn = db.lock().unwrap();
+    conn.execute("UPDATE missions SET status = 'done' WHERE id = ?1", [&antiga]).unwrap();
+    assert!(store::mark_started_terminals(&conn, &nova).unwrap());
+    let evidence = MissionDelivery {
+        test_result: TestResult::NotRun,
+        pull_request: Some("https://github.com/acme/app/pull/7".into()),
+        ci_status: CiStatus::NotChecked,
+        checked_at: 11,
+    };
+
+    assert!(store::finish_terminals(&conn, &nova, &evidence).unwrap());
+    assert_eq!(store::get(&conn, &nova).unwrap().unwrap().status, status::DONE_WITHOUT_DELIVERY);
+    assert_eq!(store::get(&conn, &antiga).unwrap().unwrap().status, status::DONE);
+    assert_eq!(store::delivery_for_mission(&conn, &antiga).unwrap(), None);
+}
+
+#[test]
+fn explicit_test_marker_persists_in_get_list_and_start_payload_without_guessing() {
+    let db = db();
+    let conn = db.lock().unwrap();
+    let real = create(&conn, "w1", &MissionInput { title: "E2E test development".into(), ..pedido() }).unwrap();
+    assert!(!real.is_test);
+    let marked = create(&conn, "w1", &MissionInput { is_test: Some(true), ..pedido() }).unwrap();
+    assert!(store::get(&conn, &marked.id).unwrap().unwrap().is_test);
+    let list = store::list(&conn, "w1").unwrap();
+    assert!(list.iter().find(|m| m.mission.id == marked.id).unwrap().mission.is_test);
+    assert!(!list.iter().find(|m| m.mission.id == real.id).unwrap().mission.is_test);
+    let encoded = serde_json::to_value(&list).unwrap();
+    assert!(encoded.as_array().unwrap().iter().any(|m| m["id"] == marked.id && m["isTest"] == true));
+    assert!(update(&conn, &marked.id, &pedido()).unwrap().is_test);
+    store::mark_test_before_start(&conn, &real.id, true).unwrap();
+    assert!(store::get(&conn, &real.id).unwrap().unwrap().is_test);
+    conn.execute("UPDATE missions SET status='done' WHERE id=?1", [&real.id]).unwrap();
+    assert!(store::mark_test_before_start(&conn, &real.id, false).is_err());
+    assert!(store::get(&conn, &real.id).unwrap().unwrap().is_test);
+    assert!(!update(&conn, &marked.id, &MissionInput { is_test: Some(false), ..pedido() }).unwrap().is_test);
 }

@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 26;
+const SCHEMA_VERSION: i32 = 29;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -606,7 +606,7 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              title           TEXT NOT NULL,
              objective       TEXT NOT NULL,
              cwd             TEXT NOT NULL,
-             -- draft | running | done | failed | cancelled
+             -- draft | running | done | done_without_delivery | failed | cancelled
              status          TEXT NOT NULL DEFAULT 'draft',
              max_parallel    INTEGER NOT NULL DEFAULT 2,
              budget_usd      REAL,
@@ -983,7 +983,7 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
         CREATE TRIGGER IF NOT EXISTS memory_snapshot_meta_immutable
         BEFORE UPDATE ON run_memory_snapshot_meta
         BEGIN SELECT RAISE(ABORT,'Run memory snapshot metadata is immutable'); END;")?;
-        set_user_version(conn, SCHEMA_VERSION)
+        migrate_mission_success(conn)
     })();
     match memory_migration {
         Ok(()) => conn.execute_batch("RELEASE migrate_memory_v24"),
@@ -992,6 +992,40 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
             Err(error)
         }
     }
+}
+
+/// Etapa 10 additive migrations run in order inside the existing migration savepoint.
+fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
+    // v27: explicit test/E2E marker. Never infer a classification from title/objective.
+    if !has_column(conn, "missions", "is_test") {
+        conn.execute("ALTER TABLE missions ADD COLUMN is_test INTEGER NOT NULL DEFAULT 0 CHECK(is_test IN (0,1))", [])?;
+    }
+    if user_version(conn)? < 27 { set_user_version(conn, 27)?; }
+    // v28: persist failure classification without rewriting historical statuses.
+    if table_exists(conn, "missions") {
+        if !has_column(conn, "missions", "failure_class") {
+            conn.execute("ALTER TABLE missions ADD COLUMN failure_class TEXT", [])?;
+        }
+        if !has_column(conn, "missions", "failure_action_key") {
+            conn.execute("ALTER TABLE missions ADD COLUMN failure_action_key TEXT", [])?;
+        }
+        if !has_column(conn, "missions", "failure_detail") {
+            conn.execute("ALTER TABLE missions ADD COLUMN failure_detail TEXT", [])?;
+        }
+    }
+    if user_version(conn)? < 28 { set_user_version(conn, 28)?; }
+    // v29 — evidencia de entrega para misiones cerradas manualmente en terminales. La
+    // tabla empieza vacía: los estados históricos nunca se reinterpretan.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS mission_terminal_deliveries (
+             mission_id   TEXT PRIMARY KEY REFERENCES missions(id) ON DELETE CASCADE,
+             test_result  TEXT NOT NULL CHECK(test_result IN ('passed','failed','not_run')),
+             pull_request TEXT,
+             ci_status    TEXT NOT NULL CHECK(ci_status IN ('not_applicable','success','failure','pending','unavailable','not_checked')),
+             checked_at   INTEGER NOT NULL
+         );",
+    )?;
+    set_user_version(conn, SCHEMA_VERSION)
 }
 
 /// Base en memoria con el schema REAL, para los tests. Vive en el código de producción a

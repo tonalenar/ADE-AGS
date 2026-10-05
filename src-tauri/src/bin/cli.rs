@@ -138,11 +138,12 @@ EVENTOS (el bus de la flota y las misiones)
   Filtros: --topics task.,mission. --run <id> --mission <id> --task <id> --limit 100
 
 MISIONES (también sin interfaz: `ade-ags --headless`)
-  mission run --objective \"...\" --cwd . [--wait] [--timeout 3600]
+  mission run --objective \"...\" --cwd . [--test] [--wait] [--timeout 3600]
               [--title ...] [--agent claude-code] [--model ...] [--account <id>]
               [--squad <id>] [--budget 5] [--max-parallel 2]
                                               Crea, arranca y espera; sale con 1 si falla
   mission create|start|status|wait <id>       Paso a paso (wait: --timeout)
+  mission create|run|start ... --test          Marca explicitamente teste/E2E (fora da taxa de sucesso)
   mission review <id>                         Lo que entregó cada tarea aislada
   mission timings <id>                        Dónde se fue el tiempo: arranque, briefing, turnos, peer ask
   mission precheck <id>                       Lo que el repositorio y las misiones anteriores ya dicen del objetivo

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
+import { FailureNotice } from "./FailureNotice";
 import { Alert, AnimateSpin, Button, EmptyState, LocationIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
@@ -24,6 +25,8 @@ import { MissionMap } from "./MissionMap";
 import { MissionTimingsPanel } from "./MissionTimingsPanel";
 import { MissionTokensPanel } from "./MissionTokensPanel";
 import { startMissionInTerminals } from "./terminals";
+import { DuplicateMissionDialog } from "./DuplicateMissionDialog";
+import { findDuplicateMission } from "./duplicates";
 import { MissionReviewPanel } from "./MissionReviewPanel";
 import {
   AGENT_STATES, agentStateOf, approvalsFor, blockedRuns, canEdit, countAgentStates, dependencyLabels, emptyForm,
@@ -43,6 +46,7 @@ const STATUS_TONE: Record<MissionPhase, string> = {
   running: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
   waiting_approval: "bg-amber-500/20 text-amber-800 dark:text-amber-300",
   done: "bg-accent-500/15 text-accent-700 dark:text-accent-300",
+  done_without_delivery: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
   failed: "bg-red-500/15 text-red-700 dark:text-red-300",
   cancelled: "bg-gray-200 text-gray-500 dark:bg-white/8 dark:text-white/40",
 };
@@ -317,9 +321,21 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
   const counts = countAgentStates(workers, blockedTasks);
   const progress = progressOf(summary);
   const firstApproval = approvals[0]?.id ?? null;
+  const allMissions = useMissionsStore((s) => s.missions);
+  const duplicate = useMemo(() => findDuplicateMission(allMissions, mission), [allMissions, mission]);
+  const [duplicateTarget, setDuplicateTarget] = useState<{ id: string; title: string; status: string; isRunning: boolean } | null>(null);
 
-  const act = async (kind: "start" | "retry" | "cancel") => {
+  const act = async (kind: "start" | "retry" | "cancel", force = false) => {
     if (!workspaceId) return;
+    if (kind !== "cancel" && !force && duplicate) {
+      setDuplicateTarget({
+        id: duplicate.mission.id,
+        title: duplicate.mission.title,
+        status: duplicate.mission.status,
+        isRunning: duplicate.isRunning,
+      });
+      return;
+    }
     setBusy(true);
     onError("");
     try {
@@ -328,7 +344,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         await store.cancel(workspaceId, mission.id);
       } else {
         // Iniciar abre el equipo en terminales reales en el canvas de la misión.
-        await startMissionInTerminals(mission, squad ?? null, roles);
+        await startMissionInTerminals(mission, squad ?? null, roles, { force });
         await store.load(workspaceId).catch(() => undefined);
         navigate("/workspace");
       }
@@ -380,8 +396,28 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         )}
       </div>
 
+      {duplicate && (
+        <Alert variant="warning">
+          {duplicate.isRunning
+            ? t("missions.duplicate.bannerRunning", { title: duplicate.mission.title })
+            : t("missions.duplicate.bannerRecent", { title: duplicate.mission.title })}
+        </Alert>
+      )}
       {mission.status === "draft" && <Alert variant="info">{t("missions.draftNotice")}</Alert>}
+      {mission.status === "failed" && <FailureNotice mission={mission} />}
       {mission.status === "failed" && <Alert variant="info">{t("missions.retryNotice")}</Alert>}
+      {detail.delivery && (
+        <Section title={t("missions.delivery.title")}>
+          <div className="flex flex-col gap-1 text-[11px] text-gray-600 dark:text-gray-300">
+            <span>{t("missions.delivery.tests", { result: t(`missions.delivery.test.${detail.delivery.testResult}`) })}</span>
+            <span>{t("missions.delivery.ci", { result: t(`missions.delivery.ci.${detail.delivery.ciStatus}`) })}</span>
+            <span>{t("missions.delivery.checkedAt", { date: new Date(detail.delivery.checkedAt * 1000).toLocaleString() })}</span>
+            {detail.delivery.pullRequest && (
+              <span className="break-all">{t("missions.delivery.pr")}: {detail.delivery.pullRequest}</span>
+            )}
+          </div>
+        </Section>
+      )}
       {action && action !== "cancel" && unsupportedLead && <Alert variant="warning">{t("squads.leadUnsupported")}</Alert>}
       {action && action !== "cancel" && mission.squadId && unavailableSquad && (
         <Alert variant="warning">
@@ -504,6 +540,16 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
       <MissionReviewPanel missionId={mission.id} refreshKey={tasks.map((task) => `${task.id}:${task.status}`).join("|")} />
 
       {workspaceId && <SharedMemoryPanel key={`${workspaceId}-${mission.id}-${focusNonce}`} workspaceId={workspaceId} missionId={mission.id} runs={runs} activeRunId={mission.activeRunId} initialTab={focusTab} />}
+      {duplicateTarget && (
+        <DuplicateMissionDialog
+          duplicate={duplicateTarget}
+          onClose={() => setDuplicateTarget(null)}
+          onConfirm={() => {
+            setDuplicateTarget(null);
+            if (action) void act(action, true);
+          }}
+        />
+      )}
     </div>
   );
 }

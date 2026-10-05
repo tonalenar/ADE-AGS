@@ -8,11 +8,14 @@ use uuid::Uuid;
 
 use crate::util::now_ts;
 
+use super::delivery::{MissionDelivery, mission_status};
 use super::types::{Mission, MissionInput, MissionSummary, status};
+use super::{FailureActionKey, FailureCategory, FailureClassification};
 
 const COLUMNS: &str = "id, workspace_id, title, objective, cwd, status, max_parallel, budget_usd, \
                        lead_agent_id, lead_model, lead_account_id, auto_account, complexity, \
-                       active_run_id, created_at, updated_at, started_at, ended_at, squad_id, reasoning_effort";
+                       active_run_id, created_at, updated_at, started_at, ended_at, squad_id, reasoning_effort, \
+                       failure_class, failure_action_key, failure_detail, is_test";
 
 /// Lo mismo que acepta `run_start_orchestration`: más de seis a la vez deja de ser
 /// paralelismo que alguien pueda seguir.
@@ -41,6 +44,22 @@ fn row_to_mission(row: &Row) -> rusqlite::Result<Mission> {
         ended_at: row.get(17)?,
         squad_id: row.get(18)?,
         reasoning_effort: row.get(19)?,
+        failure_classification: {
+            let category = row.get::<_, Option<String>>(20)?;
+            let action_key = row.get::<_, Option<String>>(21)?;
+            match (
+                category.as_deref().and_then(FailureCategory::from_db),
+                action_key.as_deref().and_then(FailureActionKey::from_db),
+            ) {
+                (Some(category), Some(action_key)) => Some(FailureClassification {
+                    category,
+                    action_key,
+                }),
+                _ => None,
+            }
+        },
+        failure_detail: row.get(22)?,
+        is_test: row.get::<_, i64>(23)? != 0,
     })
 }
 
@@ -49,6 +68,7 @@ fn row_to_mission(row: &Row) -> rusqlite::Result<Mission> {
 /// Un pedido ya revisado y normalizado: lo único que llega a la base.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Valid {
+    pub is_test: Option<bool>,
     pub title: String,
     pub objective: String,
     pub cwd: String,
@@ -140,6 +160,7 @@ pub fn validate(conn: &Connection, input: &MissionInput) -> Result<Valid, String
         return Err(errors.join("\n"));
     }
     Ok(Valid {
+        is_test: input.is_test,
         title,
         objective,
         cwd,
@@ -184,8 +205,8 @@ pub fn create(conn: &Connection, workspace_id: &str, valid: &Valid) -> Result<Mi
     conn.execute(
         "INSERT INTO missions (id, workspace_id, title, objective, cwd, status, max_parallel, budget_usd,
                                lead_agent_id, lead_model, lead_account_id, auto_account, complexity,
-                               created_at, updated_at, squad_id, reasoning_effort)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16)",
+                               created_at, updated_at, squad_id, reasoning_effort, is_test)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?14, ?15, ?16, ?17)",
         rusqlite::params![
             id,
             workspace_id,
@@ -203,6 +224,7 @@ pub fn create(conn: &Connection, workspace_id: &str, valid: &Valid) -> Result<Mi
             now,
             valid.squad_id,
             valid.reasoning_effort,
+            valid.is_test.unwrap_or(false) as i64,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -214,6 +236,27 @@ pub fn get(conn: &Connection, id: &str) -> Result<Option<Mission>, String> {
         &format!("SELECT {COLUMNS} FROM missions WHERE id = ?1"),
         [id],
         row_to_mission,
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// Evidência da conclusão manual, ausente em runs automáticos e em missões antigas.
+pub fn delivery_for_mission(conn: &Connection, id: &str) -> Result<Option<MissionDelivery>, String> {
+    conn.query_row(
+        "SELECT test_result, pull_request, ci_status, checked_at
+         FROM mission_terminal_deliveries WHERE mission_id = ?1",
+        [id],
+        |row| {
+            let test_result: String = row.get(0)?;
+            let ci_status: String = row.get(2)?;
+            Ok(MissionDelivery {
+                test_result: super::delivery::TestResult::parse(&test_result),
+                pull_request: row.get(1)?,
+                ci_status: super::delivery::CiStatus::parse(&ci_status),
+                checked_at: row.get(3)?,
+            })
+        },
     )
     .optional()
     .map_err(|e| e.to_string())
@@ -254,12 +297,12 @@ pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>
         .query_map([workspace_id], |row| {
             Ok(MissionSummary {
                 mission: row_to_mission(row)?,
-                spent_usd: row.get(20)?,
-                workers_total: row.get(21)?,
-                workers_done: row.get(22)?,
-                lead_agent: row.get(23)?,
-                lead_status: row.get(24)?,
-                active_seconds: row.get(25)?,
+                spent_usd: row.get(24)?,
+                workers_total: row.get(25)?,
+                workers_done: row.get(26)?,
+                lead_agent: row.get(27)?,
+                lead_status: row.get(28)?,
+                active_seconds: row.get(29)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -287,7 +330,8 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
             && current.lead_account_id == valid.lead_account_id
             && current.auto_account == valid.auto_account
             && current.complexity == valid.complexity;
-        let same_config = same_config && current.squad_id == valid.squad_id;
+        let same_config = same_config && current.squad_id == valid.squad_id
+            && valid.is_test.is_none_or(|marked| marked == current.is_test);
         if !same_config {
             return Err("la misión ya arrancó: solo se le puede cambiar el título".into());
         }
@@ -304,7 +348,7 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
         .execute(
             "UPDATE missions SET title = ?1, objective = ?2, cwd = ?3, max_parallel = ?4, budget_usd = ?5,
                                  lead_agent_id = ?6, lead_model = ?7, lead_account_id = ?8,
-                                 auto_account = ?9, complexity = ?10, updated_at = ?11, squad_id = ?12, reasoning_effort = ?13
+                                 auto_account = ?9, complexity = ?10, updated_at = ?11, squad_id = ?12, reasoning_effort = ?13, is_test = COALESCE(?16, is_test)
              WHERE id = ?14 AND status = ?15",
             rusqlite::params![
                 valid.title,
@@ -322,6 +366,7 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
             valid.reasoning_effort,
                 id,
                 status::DRAFT,
+                valid.is_test.map(i64::from),
             ],
         )
         .map_err(|e| e.to_string())?;
@@ -340,7 +385,7 @@ pub fn mark_started(conn: &Connection, mission: &Mission, run_id: &str) -> Resul
     let n = conn
         .execute(
             "UPDATE missions SET status = ?1, active_run_id = ?2, started_at = ?3, updated_at = ?3,
-                                 ended_at = NULL
+                                 ended_at = NULL, failure_class = NULL, failure_action_key = NULL, failure_detail = NULL
              WHERE id = ?4 AND status = ?5 AND active_run_id IS ?6
                    AND status IN ('draft', 'failed')",
             rusqlite::params![status::RUNNING, run_id, now, mission.id, mission.status, mission.active_run_id],
@@ -355,7 +400,7 @@ pub fn mark_started_terminals(conn: &Connection, id: &str) -> Result<bool, Strin
     let now = now_ts();
     let n = conn
         .execute(
-            "UPDATE missions SET status = ?1, active_run_id = NULL, started_at = ?2, updated_at = ?2, ended_at = NULL
+            "UPDATE missions SET status = ?1, active_run_id = NULL, started_at = ?2, updated_at = ?2, ended_at = NULL, failure_class = NULL, failure_action_key = NULL, failure_detail = NULL
              WHERE id = ?3 AND status IN ('draft', 'failed')",
             rusqlite::params![status::RUNNING, now, id],
         )
@@ -363,11 +408,11 @@ pub fn mark_started_terminals(conn: &Connection, id: &str) -> Result<bool, Strin
     Ok(n > 0)
 }
 
-/// Cierra una misión en terminales (sin run): `done` o `cancelled`. Solo si corre y no tiene
-/// run activo; una con run se cierra por su run (`refresh_status`).
+/// Cierra una misión en terminales (sin run) por cancelación. Una conclusión como `done`
+/// exige evidencia y usa `finish_terminals`; una misión con run la cierra `refresh_status`.
 pub fn close_terminals(conn: &Connection, id: &str, outcome: &str) -> Result<bool, String> {
-    if outcome != status::DONE && outcome != status::CANCELLED {
-        return Err("Una misión se cierra como terminada o cancelada.".into());
+    if outcome != status::CANCELLED {
+        return Err("Una misión en terminal solo se concluye con evidencia de entrega.".into());
     }
     let now = now_ts();
     let n = conn
@@ -378,6 +423,38 @@ pub fn close_terminals(conn: &Connection, id: &str, outcome: &str) -> Result<boo
         )
         .map_err(|e| e.to_string())?;
     Ok(n > 0)
+}
+
+/// Persiste la evidencia y cierra en una transacción para que el estado nunca diga `done`
+/// si no se pudo guardar por qué pasó el gate de entrega.
+pub fn finish_terminals(conn: &Connection, id: &str, evidence: &MissionDelivery) -> Result<bool, String> {
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let outcome = mission_status(evidence);
+    let now = now_ts();
+    let changed = tx
+        .execute(
+            "UPDATE missions SET status = ?1, ended_at = ?2, updated_at = ?2
+             WHERE id = ?3 AND status = ?4 AND active_run_id IS NULL",
+            rusqlite::params![outcome, now, id, status::RUNNING],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Ok(false);
+    }
+    tx.execute(
+        "INSERT INTO mission_terminal_deliveries (mission_id, test_result, pull_request, ci_status, checked_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)",
+        rusqlite::params![
+            id,
+            evidence.test_result.as_str(),
+            evidence.pull_request.as_deref(),
+            evidence.ci_status.as_str(),
+            evidence.checked_at,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    tx.commit().map_err(|e| e.to_string())?;
+    Ok(true)
 }
 
 /// Cancela un borrador. No hay proceso que parar: nunca se lanzó nada.
@@ -406,16 +483,21 @@ pub fn status_for_run(run_status: &str) -> &'static str {
 ///
 /// Un borrador no tiene run y no se toca. Devuelve el estado resultante.
 pub fn refresh_status(conn: &Connection, id: &str) -> Result<Option<String>, String> {
-    let row: Option<(String, Option<String>)> = conn
+    let row: Option<(String, Option<String>, Option<String>)> = conn
         .query_row(
-            "SELECT m.status, r.status FROM missions m LEFT JOIN runs r ON r.id = m.active_run_id
+            "SELECT m.status, r.status,
+                    (SELECT t.error FROM tasks t
+                     WHERE t.run_id = m.active_run_id AND t.status = 'failed' AND t.error IS NOT NULL
+                     ORDER BY CASE WHEN t.role = 'lead' THEN 0 ELSE 1 END,
+                              t.created_at DESC, t.rowid DESC LIMIT 1)
+             FROM missions m LEFT JOIN runs r ON r.id = m.active_run_id
              WHERE m.id = ?1",
             [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    let Some((current, run_status)) = row else {
+    let Some((current, run_status, error)) = row else {
         return Ok(None);
     };
     let Some(run_status) = run_status else {
@@ -424,11 +506,30 @@ pub fn refresh_status(conn: &Connection, id: &str) -> Result<Option<String>, Str
     let next = status_for_run(&run_status);
     if next != current {
         let now = now_ts();
+        let error = error.filter(|error| !error.trim().is_empty());
+        let classification = if next == status::FAILED {
+            error.as_deref().and_then(super::failure::classify)
+        } else {
+            None
+        };
+        let detail = if next == status::FAILED {
+            error.as_deref().map(super::failure::detail)
+        } else {
+            None
+        };
         conn.execute(
             "UPDATE missions SET status = ?1, updated_at = ?2,
-                                 ended_at = CASE WHEN ?1 = 'running' THEN NULL ELSE COALESCE(ended_at, ?2) END
-             WHERE id = ?3",
-            rusqlite::params![next, now, id],
+                                 ended_at = CASE WHEN ?1 = 'running' THEN NULL ELSE COALESCE(ended_at, ?2) END,
+                                 failure_class = ?3, failure_action_key = ?4, failure_detail = ?5
+             WHERE id = ?6",
+            rusqlite::params![
+                next,
+                now,
+                classification.map(|value| value.category.as_str()),
+                classification.map(|value| value.action_key.as_str()),
+                detail,
+                id,
+            ],
         )
         .map_err(|e| e.to_string())?;
     }
@@ -468,4 +569,12 @@ pub fn mission_of_run(conn: &Connection, run_id: &str) -> Result<Option<String>,
     )
     .optional()
     .map_err(|e| e.to_string())
+}
+
+/// Start payload may explicitly mark a draft/retry; no implicit or historical relabeling.
+pub(crate) fn mark_test_before_start(conn: &Connection, id: &str, is_test: bool) -> Result<(), String> {
+    let changed = conn.execute("UPDATE missions SET is_test = ?1, updated_at = ?2 WHERE id = ?3 AND status IN ('draft', 'failed')",
+        rusqlite::params![i64::from(is_test), now_ts(), id]).map_err(|e| e.to_string())?;
+    if changed == 0 { return Err("missions.error.notStartable".into()); }
+    Ok(())
 }

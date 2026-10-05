@@ -73,3 +73,171 @@ describe("formato de marcador", () => {
     expect(recentMissions(list).map((x) => x.id)).toEqual(["nuevo", "borrador", "viejo"]);
   });
 });
+
+describe("failuresByClass", () => {
+  it("cuenta solo las fallidas, por causa, y lo no clasificado como unknown", () => {
+    const f = (id: string, category?: "access" | "timeout" | "crash"): MissionLike => ({ ...m(id, "failed", 1, 2), failureClassification: category ? { category, actionKey: "missions.failure.action.loginAgain" } : null });
+    const s = botStats([f("a", "access"), f("b", "access"), f("c", "timeout"), f("d"), m("e", "done", 1, 2), { ...m("f", "done", 1, 2), failureClassification: { category: "crash", actionKey: "x" } }], 10);
+    expect(s.failuresByClass).toEqual({ access: 2, timeout: 1, unknown: 1 });
+  });
+
+  it("casos de borda: categoria desconocida, vacía, o corrupta cae en unknown", () => {
+    const f = (id: string, category: unknown): MissionLike => ({
+      ...m(id, "failed", 1, 2),
+      failureClassification: { category: category as any, actionKey: "missions.failure.action.unknown" },
+    });
+    const s = botStats([
+      f("u1", "network_error"),
+      f("u2", ""),
+      f("u3", "403_forbidden"),
+      f("u4", null),
+      f("u5", undefined),
+      f("u6", 12345),
+    ], 10);
+    expect(s.failuresByClass).toEqual({ unknown: 6 });
+  });
+
+  it("cubre todas las 5 categorías oficiales y no emite claves con 0", () => {
+    const f = (id: string, category: "access" | "limit" | "model" | "crash" | "timeout"): MissionLike => ({
+      ...m(id, "failed", 1, 2),
+      failureClassification: { category, actionKey: `missions.failure.action.${category}` },
+    });
+    const s = botStats([
+      f("a", "access"),
+      f("l1", "limit"),
+      f("l2", "limit"),
+      f("m1", "model"),
+      f("c1", "crash"),
+      f("t1", "timeout"),
+    ], 10);
+    expect(s.failuresByClass).toEqual({
+      access: 1,
+      limit: 2,
+      model: 1,
+      crash: 1,
+      timeout: 1,
+    });
+  });
+
+  it("ignora clasificaciones si el status no es failed (draft, running, done, cancelled)", () => {
+    const s = botStats([
+      { ...m("d", "draft", null, null), failureClassification: { category: "access" as any, actionKey: "a" } },
+      { ...m("r", "running", 10, null), failureClassification: { category: "limit" as any, actionKey: "l" } },
+      { ...m("c", "cancelled", 10, 20), failureClassification: { category: "model" as any, actionKey: "m" } },
+      { ...m("o", "done", 10, 20), failureClassification: { category: "crash" as any, actionKey: "k" } },
+    ], 50);
+    expect(s.failuresByClass).toEqual({});
+  });
+
+  it("lista vacía o sin misiones fallidas resulta en failuresByClass vacío", () => {
+    expect(botStats([], 10).failuresByClass).toEqual({});
+    expect(botStats([m("a", "done", 1, 2), m("b", "cancelled", 1, 2)], 10).failuresByClass).toEqual({});
+  });
+});
+
+describe("botStats: ventanas y pruebas", () => {
+  const DAY = 86_400;
+  const now = 100 * DAY;
+  const at = (daysAgo: number) => now - daysAgo * DAY;
+  const t = (id: string, status: MissionLike["status"], daysAgo: number, isTest?: boolean | null): MissionLike => ({
+    ...m(id, status, at(daysAgo) - 60, at(daysAgo)), isTest,
+  });
+
+  it("separa 7 y 30 días por la fecha de cierre", () => {
+    const s = botStats([
+      t("a", "done", 1), t("b", "failed", 3), t("c", "done", 20), t("d", "failed", 60), t("e", "cancelled", 2), t("f", "cancelled", 40),
+    ], now);
+    expect(s.windows.d7).toEqual({ done: 1, failed: 1, cancelled: 1, successRate: 50 });
+    expect(s.windows.d30).toEqual({ done: 2, failed: 1, cancelled: 1, successRate: 67 });
+    expect(s.successRate).toBe(50); // histórico: 2 de 4
+    expect(s.cancelled).toBe(2);
+  });
+
+  it("las marcadas como prueba salen de la tasa pero se cuentan; sin marca cuenta como real", () => {
+    const s = botStats([t("a", "done", 1), t("b", "failed", 1, true), t("c", "failed", 1, null), t("d", "failed", 1, false)], now);
+    expect(s.testCount).toBe(1);
+    expect(s.successRate).toBe(33);
+    expect(s.windows.d7).toMatchObject({ done: 1, failed: 2, successRate: 33 });
+    expect(s.total).toBe(4);
+  });
+
+  it("no adivina por el título y sin cierres en la ventana da null", () => {
+    const e2e: MissionLike = { ...m("x", "failed", 1, 2), title: "E2E test" };
+    expect(botStats([e2e], now).successRate).toBe(0);
+    const s = botStats([t("a", "done", 50), m("b", "draft", null, null)], now);
+    expect(s.windows.d7.successRate).toBeNull();
+    expect(s.windows.d30.successRate).toBeNull();
+  });
+
+  it("casos de borda de tiempo: límites exactos de 7 y 30 días", () => {
+    const exact7 = { ...m("e7", "done", now - 7 * DAY - 10, now - 7 * DAY) }; // exactamente en el límite de 7d
+    const justPast7 = { ...m("p7", "done", now - 7 * DAY - 20, now - 7 * DAY - 1) }; // 1s fuera de 7d, pero dentro de 30d
+    const exact30 = { ...m("e30", "failed", now - 30 * DAY - 10, now - 30 * DAY) }; // exactamente en el límite de 30d
+    const justPast30 = { ...m("p30", "failed", now - 30 * DAY - 20, now - 30 * DAY - 1) }; // 1s fuera de 30d
+
+    const s = botStats([exact7, justPast7, exact30, justPast30], now);
+    // d7: solo exact7
+    expect(s.windows.d7).toEqual({ done: 1, failed: 0, cancelled: 0, successRate: 100 });
+    // d30: exact7, justPast7 (2 done) y exact30 (1 failed) -> 2/3 = 67%
+    expect(s.windows.d30).toEqual({ done: 2, failed: 1, cancelled: 0, successRate: 67 });
+    // total histórico: 2 done, 2 failed -> 50%
+    expect(s.successRate).toBe(50);
+  });
+
+  it("misiones canceladas nunca afectan la tasa de éxito ni en ventanas ni en histórico", () => {
+    const s = botStats([
+      t("d1", "done", 1),
+      t("c1", "cancelled", 1),
+      t("c2", "cancelled", 2),
+      t("c3", "cancelled", 15),
+      t("c4", "cancelled", 45),
+    ], now);
+    // 1 done y 0 failed: tasa es 100%, las canceladas no devalúan la tasa
+    expect(s.windows.d7).toEqual({ done: 1, failed: 0, cancelled: 2, successRate: 100 });
+    expect(s.windows.d30).toEqual({ done: 1, failed: 0, cancelled: 3, successRate: 100 });
+    expect(s.cancelled).toBe(4);
+    expect(s.successRate).toBe(100);
+
+    // Si solo hay canceladas, successRate es null (no 0)
+    const onlyCancelled = botStats([t("c1", "cancelled", 1), t("c2", "cancelled", 10)], now);
+    expect(onlyCancelled.windows.d7.successRate).toBeNull();
+    expect(onlyCancelled.windows.d30.successRate).toBeNull();
+    expect(onlyCancelled.successRate).toBeNull();
+  });
+
+  it("isTest: solo true las excluye de ventanas y tasa; null, undefined o false son reales", () => {
+    const s = botStats([
+      t("real1", "done", 2, undefined),
+      t("real2", "done", 3, null),
+      t("real3", "failed", 4, false),
+      t("test1", "failed", 1, true),
+      t("test2", "done", 2, true),
+      { ...m("test_title", "failed", at(1) - 60, at(1)), title: "[TEST] E2E Integration Suite", isTest: null },
+    ], now);
+
+    // real1 (done), real2 (done), real3 (failed), test_title (failed) -> 4 reales en d7 (2 done, 2 failed -> 50%)
+    expect(s.testCount).toBe(2);
+    expect(s.total).toBe(6);
+    expect(s.windows.d7.done).toBe(2);
+    expect(s.windows.d7.failed).toBe(2);
+    expect(s.windows.d7.successRate).toBe(50);
+    expect(s.successRate).toBe(50);
+
+    // Si todas son de prueba, la tasa es null
+    const allTests = botStats([t("t1", "done", 1, true), t("t2", "failed", 1, true)], now);
+    expect(allTests.testCount).toBe(2);
+    expect(allTests.successRate).toBeNull();
+    expect(allTests.windows.d7.successRate).toBeNull();
+  });
+
+  it("misiones sin endedAt usan startedAt para fecha de cierre o caen fuera si no tienen fechas", () => {
+    const cancelledWithoutEnd: MissionLike = { ...m("c", "cancelled", at(3), null) };
+    const draftWithoutDates: MissionLike = { ...m("d", "draft", null, null) };
+
+    const s = botStats([cancelledWithoutEnd, draftWithoutDates], now);
+    expect(s.windows.d7.cancelled).toBe(1);
+    expect(s.windows.d7.successRate).toBeNull();
+    expect(s.windows.d30.cancelled).toBe(1);
+    expect(s.total).toBe(2);
+  });
+});

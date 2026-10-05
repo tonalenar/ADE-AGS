@@ -43,7 +43,7 @@ const summary = (patch: Partial<Mission> = {}, tasks = { workersDone: 0, workers
   ...mission(patch), spentUsd: 0, leadAgent: null, leadStatus: null, activeSeconds: null, ...tasks,
 });
 
-const detail = (patch: Partial<Mission> = {}): MissionDetail => ({ mission: mission(patch), runs: [], tasks: [], facts: [] });
+const detail = (patch: Partial<Mission> = {}): MissionDetail => ({ mission: mission(patch), delivery: null, runs: [], tasks: [], facts: [] });
 
 const input: MissionInput = {
   title: "Hola", objective: "o", cwd: "/tmp/proy", maxParallel: 2, budgetUsd: null,

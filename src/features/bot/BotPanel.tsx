@@ -10,7 +10,8 @@ import type { MissionReview } from "@/features/missions/types";
 import { useAgentActivity } from "@/features/terminal/activity";
 import { Pet, powerTier, usePetStatus } from "@/shared/brand/Pet";
 
-import { botStats, clock, missionSeconds, rankKey, recentMissions, scoreDigits, trophies } from "./botStats";
+import { type FailureKey, failureActionKey, failureKey, failureLabelKey } from "@/features/missions/failureClass";
+import { type RateWindow, botStats, clock, missionSeconds, rankKey, recentMissions, scoreDigits, trophies } from "./botStats";
 import { useBotPanelStore } from "./botPanelStore";
 import { LiveArcade } from "./LiveArcade";
 import { LiveArcadeGrid, LiveSelector } from "./LiveArcadeGrid";
@@ -35,11 +36,14 @@ function Meter({ value, color, busy = false, blocks = 16 }: { value: number; col
   );
 }
 
-function Card({ label, value, color }: { label: string; value: string; color?: string }) {
+const rate = (r: number | null) => (r === null ? "--" : `${r}%`);
+
+function Card({ label, value, color, sub }: { label: string; value: string; color?: string; sub?: string }) {
   return (
     <div className="ags-hq__card">
       <div className="ags-hq__card-label">{label}</div>
       <div className="ags-hq__card-value" style={{ ["--c" as string]: color }}>{value}</div>
+      {sub ? <div className="ags-hq__card-sub">{sub}</div> : null}
     </div>
   );
 }
@@ -69,6 +73,7 @@ export function BotPanel() {
 
   const recent = useMemo(() => recentMissions(missions), [missions]);
   const stats = useMemo(() => botStats(missions, now), [missions, now]);
+  const windowSub = (w: RateWindow) => t("botPanel.card.windowSub", { done: w.done, failed: w.failed, cancelled: w.cancelled });
   const tier = powerTier(busy);
   const runningMissions = useMemo(() => missions.filter((m) => m.status === "running"), [missions]);
   const unified = view === "live" && runningMissions.length > 1 && liveFilter === "all";
@@ -212,9 +217,16 @@ export function BotPanel() {
                   <Card label={t("botPanel.card.longest")} value={clock(stats.longestSeconds)} color="var(--hq-orange)" />
                   <Card label={t("botPanel.card.spent")} value={`$${spentTotal.toFixed(2)}`} color="var(--hq-pink)" />
                   <Card label={t("botPanel.card.saved")} value={`$${savedTotal.toFixed(2)}`} color="var(--hq-green)" />
-                  <Card label={t("botPanel.card.success")} value={stats.successRate === null ? "--" : `${stats.successRate}%`} color="var(--hq-green)" />
+                  <Card label={t("botPanel.card.success")} value={rate(stats.successRate)} color="var(--hq-green)" sub={t("botPanel.card.successSub", { done: stats.done, failed: stats.failed })} />
+                  <Card label={t("botPanel.card.success7")} value={rate(stats.windows.d7.successRate)} color="var(--hq-green)" sub={windowSub(stats.windows.d7)} />
+                  <Card label={t("botPanel.card.success30")} value={rate(stats.windows.d30.successRate)} color="var(--hq-green)" sub={windowSub(stats.windows.d30)} />
+                  <Card label={t("botPanel.card.cancelled")} value={scoreDigits(stats.cancelled, 3)} color="var(--hq-yellow)" />
+                  {stats.testCount > 0 && <Card label={t("botPanel.card.tests")} value={scoreDigits(stats.testCount, 3)} sub={t("botPanel.card.testsSub")} />}
                   <Card label={t("botPanel.card.failed")} value={scoreDigits(stats.failed, 3)} color="var(--hq-pink)" />
                   <Card label={t("botPanel.card.total")} value={scoreDigits(stats.total, 3)} />
+                  {Object.entries(stats.failuresByClass).map(([k, n]) => (
+                    <Card key={k} label={t("botPanel.card.failCause", { cause: t(failureLabelKey(k as FailureKey)) })} value={scoreDigits(n ?? 0, 3)} color="var(--hq-pink)" />
+                  ))}
                 </div>
               )}
 
@@ -234,6 +246,11 @@ export function BotPanel() {
                     {current && (
                       <div className="ags-hq__detail">
                         <div style={{ color: "var(--hq-yellow)", marginBottom: 8 }}>{t("botPanel.timeline")} · {current.title}</div>
+                        {failureKey(current) && (
+                          <p style={{ color: "var(--hq-pink)", marginBottom: 8 }}>
+                            {t(failureLabelKey(failureKey(current)!))} → {t(failureActionKey(current), { defaultValue: t("missions.failure.action.unknown") })}
+                          </p>
+                        )}
                         {!timings || timings.summary.byKind.length === 0 ? <p className="ags-hq__dim">{t("botPanel.noTimings")}</p> : (
                           timings.summary.byKind.map((k) => (
                             <div key={k.kind} className="ags-hq__row">

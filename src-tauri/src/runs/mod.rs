@@ -554,12 +554,14 @@ pub(crate) fn route_lead_now(
     roster
         .agents
         .retain(|agent| agent.capabilities.orchestration);
-    routing::route(
+    let assignment = routing::route(
         &roster,
         &routing::load_tiers(db),
         &routing::resolve_pool(db, request)?,
         crate::util::now_ts(),
-    )
+    )?;
+    crate::missions::precheck::validate_launch(&roster, &assignment, crate::util::now_ts())?;
+    Ok(assignment)
 }
 
 fn route_request(

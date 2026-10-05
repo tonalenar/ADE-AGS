@@ -897,7 +897,7 @@ fn v20_nuevo_crea_tablas_indices_y_referencias_de_squads() {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26);
+    assert_eq!(version, 29);
 
     for table in ["squads", "squad_members", "run_squad_members"] {
         assert!(
@@ -997,7 +997,7 @@ fn migrar_v19_a_v20_conserva_mission_runs_y_tasks_anteriores() {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 26);
+    assert_eq!(version, 29);
     assert_eq!(
         conn.query_row(
             "SELECT title FROM missions WHERE id = 'mission-old'",
@@ -1266,7 +1266,7 @@ fn migrate_v20_to_v21_adds_nullable_effort_without_rewriting_history() {
     }
     conn.pragma_update(None, "user_version", 20).unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 26);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 29);
     let (model, effort): (String, Option<String>) = conn.query_row("SELECT model,reasoning_effort FROM tasks WHERE id='eff-t'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
     assert_eq!(model, "old-model");
     assert_eq!(effort, None);
@@ -1287,7 +1287,7 @@ fn migrate_v21_to_v22_preserves_legacy_and_is_idempotent() {
         ALTER TABLE tasks DROP COLUMN structured_handoff;
         PRAGMA user_version=21;").unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),26);
+    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),29);
     let (legacy, structured): (String,Option<String>) = conn.query_row("SELECT handoff,structured_handoff FROM tasks WHERE id='h-t'",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
     assert_eq!(legacy,"legacy");assert_eq!(structured,None);
     conn.execute("UPDATE tasks SET structured_handoff=?1 WHERE id='h-t'",[r#"{"version":1,"summary":"old delivery"}"#]).unwrap();
@@ -1307,7 +1307,29 @@ fn migrate_v22_to_v23_keeps_separate_oauth_metadata_without_tokens() {
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM antigravity_oauth_accounts", [], |r|r.get::<_,i64>(0)).unwrap(), 2);
     assert!(conn.execute("INSERT INTO antigravity_oauth_accounts VALUES('c','google-a','Duplicate','c@example.com',0)", []).is_err());
     assert!(conn.prepare("SELECT access_token,refresh_token FROM antigravity_oauth_accounts").is_err());
-    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),26);
+    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),29);
+}
+
+#[test]
+fn migrate_v26_to_v29_preserves_historical_mission_statuses() {
+    let conn = schema::in_memory();
+    conn.execute_batch(
+        "INSERT INTO workspaces(id,name,created_at,last_active) VALUES('delivery-w','W',0,0);
+         INSERT INTO missions(id,workspace_id,title,objective,cwd,status,max_parallel,auto_account,created_at,updated_at)
+             VALUES ('old-done','delivery-w','done','old','/p','done',2,1,1,1),
+                    ('old-failed','delivery-w','failed','old','/p','failed',2,1,1,1);
+         DROP TABLE mission_terminal_deliveries;
+         PRAGMA user_version=26;",
+    ).unwrap();
+
+    schema::migrate(&conn).unwrap();
+
+    let mut stmt = conn.prepare("SELECT id,status FROM missions ORDER BY id").unwrap();
+    let statuses = stmt.query_map([], |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)))
+        .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
+    assert_eq!(statuses, vec![("old-done".into(), "done".into()), ("old-failed".into(), "failed".into())]);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM mission_terminal_deliveries", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 29);
 }
 
 /// Un guardado de metadata (renombrar, mover la ventana) no reenvía el scrollback que la
@@ -1353,4 +1375,40 @@ fn v25_crea_los_checkpoints_y_se_van_con_su_run() {
     conn.execute("DELETE FROM runs WHERE id = ?1", [&run.id]).unwrap();
     let n: i64 = conn.query_row("SELECT COUNT(*) FROM run_checkpoints", [], |r| r.get(0)).unwrap();
     assert_eq!(n, 0, "ON DELETE CASCADE");
+}
+
+#[test]
+fn migrating_v26_preserves_legacy_missions_as_real_and_is_idempotent() {
+    let conn = schema::in_memory();
+    conn.execute("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('marker-w','W',0,0)", []).unwrap();
+    conn.execute("INSERT INTO missions(id,workspace_id,title,objective,cwd,status,created_at,updated_at) VALUES('marker-m','marker-w','E2E test','development test','/repo','failed',0,0)", []).unwrap();
+    conn.execute_batch("ALTER TABLE missions DROP COLUMN is_test; PRAGMA user_version=26;").unwrap();
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.query_row("SELECT is_test FROM missions WHERE id='marker-m'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    assert_eq!(conn.query_row("SELECT status FROM missions WHERE id='marker-m'", [], |r| r.get::<_, String>(0)).unwrap(), "failed");
+    conn.execute("UPDATE missions SET is_test=1 WHERE id='marker-m'", []).unwrap();
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.query_row("SELECT is_test FROM missions WHERE id='marker-m'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+}
+
+#[test]
+fn etapa10_migrations_v27_v28_v29_preserve_each_preceding_stage() {
+    for from in [26, 27, 28] {
+        let conn = schema::in_memory();
+        conn.execute_batch("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('stage-w','W',0,0);
+            INSERT INTO missions(id,workspace_id,title,objective,cwd,status,created_at,updated_at,is_test,failure_class,failure_action_key)
+            VALUES('stage-m','stage-w','E2E title','objective','/repo','done',0,0,1,'access','login');
+            DROP TABLE mission_terminal_deliveries;").unwrap();
+        if from < 28 { conn.execute_batch("ALTER TABLE missions DROP COLUMN failure_class; ALTER TABLE missions DROP COLUMN failure_action_key; ALTER TABLE missions DROP COLUMN failure_detail;").unwrap(); }
+        if from < 27 { conn.execute_batch("ALTER TABLE missions DROP COLUMN is_test;").unwrap(); }
+        conn.pragma_update(None, "user_version", from).unwrap();
+        schema::migrate(&conn).unwrap();
+        schema::migrate(&conn).unwrap();
+        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 29);
+        let (status, marked, class): (String, i64, Option<String>) = conn.query_row("SELECT status,is_test,failure_class FROM missions WHERE id='stage-m'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+        assert_eq!(status, "done");
+        assert_eq!(marked, i64::from(from >= 27));
+        assert_eq!(class, (from >= 28).then(|| "access".to_string()));
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM mission_terminal_deliveries", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+    }
 }

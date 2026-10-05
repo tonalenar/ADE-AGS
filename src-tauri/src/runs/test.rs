@@ -4076,10 +4076,10 @@ fn una_falla_se_clasifica_por_lo_que_dijo_la_cli() {
         "unexpected status 401 Unauthorized",
         "request failed: HTTP 401",
         "Not logged in",
-        "Your credit balance is too low to access the Anthropic API.",
     ] {
         assert_eq!(classify(text), AuthExpired, "{text}");
     }
+    assert_eq!(classify("Your credit balance is too low to access the Anthropic API."), InsufficientBalance);
     // Lo demás, incluidos números que solo se parecen a un código HTTP.
     for text in [
         "error[E0308]: mismatched types at src/main.rs:401:5",
@@ -4434,4 +4434,51 @@ fn un_pedido_con_pool_se_rutea_y_queda_fijado_a_la_cuenta_elegida() {
     let a = routing::route(&roster, &Tiers::default(), &pedido, AHORA).unwrap();
     assert_eq!(a.account_id.as_deref(), Some("extra"));
     assert!(!a.auto_account, "con un pool no se pasa a una cuenta de afuera");
+}
+
+#[test]
+fn mission_launch_precheck_uses_selected_account_catalog_and_state() {
+    let mut roster = roster_de_prueba();
+    let request = RouteRequest { agent_id: Some("claude-code".into()), model: Some("sonnet".into()), complexity: None, account: AccountChoice::Fixed(Some("trabajo".into())) };
+    let assignment = routing::route(&roster, &Tiers::default(), &request, 100).unwrap();
+    let check = |roster: &Roster| crate::missions::precheck::validate_launch(roster, &assignment, 100);
+    assert!(check(&roster).is_ok()); // discovery unsupported is explicitly unknown
+    let account = &mut agente(&mut roster, "claude-code").accounts[1];
+    account.model_discovery = ModelDiscoveryState::Available;
+    account.models = vec![modelo("haiku", true)];
+    assert_eq!(check(&roster).unwrap_err(), "missions.error.modelUnavailable");
+    agente(&mut roster, "claude-code").accounts[1].models.push(modelo("sonnet", true));
+    assert!(check(&roster).is_ok());
+    agente(&mut roster, "claude-code").accounts[1].logged_in = false;
+    assert_eq!(check(&roster).unwrap_err(), "missions.error.loginRequired");
+    agente(&mut roster, "claude-code").accounts[1].logged_in = true;
+    agente(&mut roster, "claude-code").accounts[1].limit = Some("budget".into());
+    assert_eq!(check(&roster).unwrap_err(), "missions.error.usageExhausted");
+    agente(&mut roster, "claude-code").accounts[1].limit = None;
+    agente(&mut roster, "claude-code").accounts[1].quota = Some(Quota { rejected: true, observed_at: 100, ..Quota::default() });
+    assert_eq!(check(&roster).unwrap_err(), "missions.error.usageExhausted");
+    agente(&mut roster, "claude-code").accounts[1].quota = None;
+    agente(&mut roster, "claude-code").accounts[1].models[1].availability = ModelAvailability::Unavailable;
+    assert_eq!(check(&roster).unwrap_err(), "missions.error.modelUnavailable");
+    agente(&mut roster, "claude-code").installed = false;
+    assert_eq!(check(&roster).unwrap_err(), "missions.error.agentMissing");
+}
+
+#[test]
+fn mission_terminal_system_account_requires_exposed_login_state() {
+    let mut roster = roster_de_prueba();
+    let assignment = routing::Assignment { agent_id: "claude-code".into(), model: None, account_id: None,
+        routed_by: routing::RoutedBy::Manual, notes: vec![], auto_account: false, pool_origin: None };
+    // Auto terminals use the system account, even when another named account is logged in.
+    agente(&mut roster, "claude-code").accounts.retain(|a| a.account_id.is_some());
+    assert_eq!(crate::missions::precheck::validate_launch(&roster, &assignment, 100).unwrap_err(), "missions.error.loginRequired");
+    // A missing default directory must not turn an account-capable TUI into an accountless one.
+    agente(&mut roster, "claude-code").accounts.clear();
+    assert_eq!(crate::missions::precheck::validate_launch(&roster, &assignment, 100).unwrap_err(), "missions.error.loginRequired");
+    let mut named = assignment.clone();
+    named.account_id = Some("deleted".into());
+    assert_eq!(crate::missions::precheck::validate_launch(&roster, &named, 100).unwrap_err(), "missions.error.accountMissing");
+    // Truly accountless providers keep their existing launch behavior.
+    agente(&mut roster, "claude-code").capabilities.accounts = false;
+    assert!(crate::missions::precheck::validate_launch(&roster, &assignment, 100).is_ok());
 }

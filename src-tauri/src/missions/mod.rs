@@ -15,14 +15,22 @@
 
 pub(crate) mod review;
 pub(crate) mod precheck;
+pub(crate) mod failure;
+pub(crate) mod duplicate;
 pub(crate) mod store;
 pub(crate) mod timings;
+mod delivery;
 #[cfg(test)]
 mod test;
 mod types;
 pub mod active;
 
-pub use types::{Mission, MissionDetail, MissionInput, MissionSummary};
+pub use types::{
+    FailureActionKey, FailureCategory, FailureClassification, Mission, MissionDetail,
+    MissionInput, MissionSummary,
+};
+pub use duplicate::DuplicateMission;
+pub use delivery::{CiStatus, MissionDelivery, TerminalDeliveryInput, TestResult};
 
 use std::path::Path;
 
@@ -94,6 +102,7 @@ pub(crate) fn detail(conn: &Connection, mission_id: &str) -> Result<MissionDetai
         None => (Vec::new(), Vec::new()),
     };
     Ok(MissionDetail {
+        delivery: store::delivery_for_mission(conn, &mission.id)?,
         mission,
         runs,
         tasks,
@@ -102,6 +111,26 @@ pub(crate) fn detail(conn: &Connection, mission_id: &str) -> Result<MissionDetai
 }
 
 // ── Arrancar y cancelar ─────────────────────────────────────────
+
+fn launch_request(mission: &Mission, squad: Option<&crate::squads::Squad>) -> (RouteRequest, Option<Complexity>) {
+    if let Some(squad) = squad {
+        crate::runs::lead_request(
+            Some(squad.lead.agent_id.clone()),
+            squad.lead.model.clone(),
+            squad.lead.complexity.as_deref().and_then(Complexity::parse),
+            squad.lead.account_id.clone(),
+            squad.lead.auto_account,
+        )
+    } else {
+        crate::runs::lead_request(
+            mission.lead_agent_id.clone(),
+            mission.lead_model.clone(),
+            mission.complexity.as_deref().and_then(Complexity::parse),
+            mission.lead_account_id.clone(),
+            mission.auto_account,
+        )
+    }
+}
 
 /// Starts a draft or retries a failed mission with a new run and lead.
 ///
@@ -112,14 +141,34 @@ pub(crate) fn detail(conn: &Connection, mission_id: &str) -> Result<MissionDetai
 /// el paso a `running` van en una sola transacción: una misión corriendo sin run no puede
 /// existir. Si lo que falla es el lanzamiento, el run y el lead quedan fallidos con el
 /// motivo, y la misión los sigue a `failed`.
+#[allow(dead_code)]
 pub(crate) fn start(
     db: &DbConnection,
     mission_id: &str,
     route: impl FnOnce(&RouteRequest) -> Result<Assignment, String>,
     launch: impl FnOnce(&Task) -> Result<(), String>,
 ) -> Result<Mission, String> {
+    start_with_force(db, mission_id, false, route, launch)
+}
+
+pub(crate) fn start_with_force(
+    db: &DbConnection,
+    mission_id: &str,
+    force: bool,
+    route: impl FnOnce(&RouteRequest) -> Result<Assignment, String>,
+    launch: impl FnOnce(&Task) -> Result<(), String>,
+) -> Result<Mission, String> {
     let (mission, squad) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
+        if !force {
+            if let Some(dup) = duplicate::check_mission_duplicate(&conn, mission_id, crate::util::now_ts())? {
+                return Err(if dup.is_running {
+                    "missions.error.duplicateRunning".into()
+                } else {
+                    "missions.error.duplicateRecent".into()
+                });
+            }
+        }
         let mission = store::get(&conn, mission_id)?
             .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
         let squad = mission
@@ -155,23 +204,7 @@ pub(crate) fn start(
         crate::runs::ensure_orchestration(agent)?;
     }
 
-    let (request, complexity) = if let Some(squad) = &squad {
-        crate::runs::lead_request(
-            Some(squad.lead.agent_id.clone()),
-            squad.lead.model.clone(),
-            squad.lead.complexity.as_deref().and_then(Complexity::parse),
-            squad.lead.account_id.clone(),
-            squad.lead.auto_account,
-        )
-    } else {
-        crate::runs::lead_request(
-            mission.lead_agent_id.clone(),
-            mission.lead_model.clone(),
-            mission.complexity.as_deref().and_then(Complexity::parse),
-            mission.lead_account_id.clone(),
-            mission.auto_account,
-        )
-    };
+    let (request, complexity) = launch_request(&mission, squad.as_ref());
     let assignment = route(&request)?;
 
     let spec = crate::runs::Orchestration {
@@ -291,8 +324,12 @@ pub fn mission_get(
 /// Fuera del hilo async: el ruteo puede sondear el roster, que lanza procesos para
 /// preguntarles versión y modelos.
 #[tauri::command]
-pub async fn mission_start(app: AppHandle, mission_id: String) -> Result<Mission, String> {
-    tauri::async_runtime::spawn_blocking(move || start_now(&app, &mission_id))
+pub async fn mission_start(app: AppHandle, mission_id: String, force: Option<bool>, is_test: Option<bool>) -> Result<Mission, String> {
+    let force_val = force.unwrap_or(false);
+    tauri::async_runtime::spawn_blocking(move || {
+        mark_test_now(&app, &mission_id, is_test)?;
+        start_now_with_force(&app, &mission_id, force_val)
+    })
         .await
         .map_err(|e| e.to_string())?
 }
@@ -300,10 +337,15 @@ pub async fn mission_start(app: AppHandle, mission_id: String) -> Result<Mission
 /// Arranca (o reintenta) una misión en el hilo actual. Bloquea: el ruteo puede sondear el
 /// roster. Lo usan la pantalla y la CLI (`ags mission start|run`).
 pub(crate) fn start_now(app: &AppHandle, mission_id: &str) -> Result<Mission, String> {
+    start_now_with_force(app, mission_id, false)
+}
+
+pub(crate) fn start_now_with_force(app: &AppHandle, mission_id: &str, force: bool) -> Result<Mission, String> {
     let db = db_of(app)?;
-    let result = start(
+    let result = start_with_force(
         &db,
         mission_id,
+        force,
         |request| crate::runs::route_lead_now(&db, request),
         |lead| crate::runs::launch_lead(app, lead),
     );
@@ -389,11 +431,54 @@ pub async fn mission_apply(app: AppHandle, mission_id: String) -> Result<review:
     outcome
 }
 
+pub(crate) fn check_launch_now(db: &DbConnection, mission_id: &str, terminals: bool) -> Result<(), String> {
+    let (mission, squad) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mission = store::get(&conn, mission_id)?.ok_or("missions.error.changed")?;
+        let squad = mission.squad_id.as_deref().map(|id| crate::squads::store::get(&conn, id)).transpose()?.flatten();
+        (mission, squad)
+    };
+    let (request, _) = launch_request(&mission, squad.as_ref());
+    if terminals {
+        // Auto means system account in startMissionInTerminals, not headless routing.
+        let roster = crate::runs::roster::snapshot(db, false)?;
+        let lead_agent = squad.as_ref().map(|s| s.lead.agent_id.clone()).or(mission.lead_agent_id.clone()).unwrap_or_else(|| "claude-code".into());
+        let lead_model = squad.as_ref().and_then(|s| s.lead.model.clone()).or(mission.lead_model.clone());
+        let lead_account = match &squad {
+            Some(s) if !s.lead.auto_account => s.lead.account_id.clone(),
+            _ if !mission.auto_account => mission.lead_account_id.clone(),
+            _ => None,
+        };
+        let mut actors = vec![(lead_agent, lead_model, lead_account)];
+        if let Some(squad) = &squad {
+            actors.extend(squad.members.iter().map(|m| (m.agent_id.clone(), m.model.clone(), if m.auto_account { None } else { m.account_id.clone() })));
+        }
+        for (agent_id, model, account_id) in actors {
+            let assignment = crate::runs::routing::Assignment { agent_id, model, account_id,
+                routed_by: crate::runs::routing::RoutedBy::Manual, notes: vec![], auto_account: false, pool_origin: None };
+            precheck::validate_launch(&roster, &assignment, crate::util::now_ts())?;
+        }
+        Ok(())
+    } else { crate::runs::route_lead_now(db, &request).map(|_| ()) }
+}
+
 /// Arranca la misión en terminales: solo la marca; abrir las tabs es de la pantalla.
 #[tauri::command]
-pub fn mission_start_terminals(app: AppHandle, mission_id: String) -> Result<Mission, String> {
+pub fn mission_start_terminals(app: AppHandle, mission_id: String, force: Option<bool>, is_test: Option<bool>) -> Result<Mission, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
     let db = db_of(&app)?;
+    check_launch_now(&db, &mission_id, true)?;
+    if !force.unwrap_or(false) {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        if let Some(dup) = duplicate::check_mission_duplicate(&conn, &mission_id, crate::util::now_ts())? {
+            return Err(if dup.is_running {
+                "missions.error.duplicateRunning".into()
+            } else {
+                "missions.error.duplicateRecent".into()
+            });
+        }
+    }
+    mark_test_now(&app, &mission_id, is_test)?;
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let mission = store::get(&conn, &mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
@@ -409,13 +494,60 @@ pub fn mission_start_terminals(app: AppHandle, mission_id: String) -> Result<Mis
     store::get(&conn, &mission_id)?.ok_or_else(|| "la misión desapareció".to_string())
 }
 
-/// Da por terminada una misión en terminales.
 #[tauri::command]
-pub fn mission_finish_terminals(app: AppHandle, mission_id: String) -> Result<Mission, String> {
+pub fn mission_check_duplicate(app: AppHandle, mission_id: String) -> Result<Option<DuplicateMission>, String> {
     let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    duplicate::check_mission_duplicate(&conn, &mission_id, crate::util::now_ts())
+}
+
+#[tauri::command]
+pub fn mission_check_duplicate_input(
+    app: AppHandle,
+    workspace_id: String,
+    cwd: String,
+    title: String,
+    objective: String,
+    current_id: Option<String>,
+) -> Result<Option<DuplicateMission>, String> {
+    let db = db_of(&app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    duplicate::check_duplicate(
+        &conn,
+        current_id.as_deref(),
+        Some(&workspace_id),
+        Some(&cwd),
+        &title,
+        Some(&objective),
+        crate::util::now_ts(),
+    )
+}
+
+/// Finaliza una misión en terminales y registra la evidencia de entrega.
+#[tauri::command]
+pub async fn mission_finish_terminals(
+    app: AppHandle,
+    mission_id: String,
+    delivery: TerminalDeliveryInput,
+) -> Result<Mission, String> {
+    let db = db_of(&app)?;
+    let cwd = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mission = store::get(&conn, &mission_id)?
+            .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+        if mission.status != status::RUNNING || mission.active_run_id.is_some() {
+            return Err("Solo se termina a mano una misión en terminales que está corriendo.".into());
+        }
+        mission.cwd
+    };
+    let evidence = tauri::async_runtime::spawn_blocking(move || {
+        delivery::assess(delivery, std::path::Path::new(&cwd))
+    })
+    .await
+    .map_err(|e| e.to_string())??;
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        if !store::close_terminals(&conn, &mission_id, status::DONE)? {
+        if !store::finish_terminals(&conn, &mission_id, &evidence)? {
             return Err("Solo se termina a mano una misión en terminales que está corriendo.".into());
         }
     }
@@ -487,6 +619,7 @@ pub async fn mission_precheck(app: AppHandle, mission_id: String) -> Result<Stri
     let db = db_of(&app)?;
     // git corre fuera del hilo de la UI y sin mantener el candado de la base más de lo necesario.
     tokio::task::spawn_blocking(move || {
+        check_launch_now(&db, &mission_id, true)?;
         let conn = db.lock().map_err(|e| e.to_string())?;
         precheck_text(&conn, &mission_id)
     })
@@ -509,4 +642,13 @@ pub fn mission_memory_context(app: AppHandle, mission_id: String) -> Result<Stri
     let db = db_of(&app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     memory_context_text(&conn, &mission_id)
+}
+
+pub(crate) fn mark_test_now(app: &AppHandle, mission_id: &str, is_test: Option<bool>) -> Result<(), String> {
+    if let Some(marked) = is_test {
+        let db = db_of(app)?;
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::mark_test_before_start(&conn, mission_id, marked)?;
+    }
+    Ok(())
 }

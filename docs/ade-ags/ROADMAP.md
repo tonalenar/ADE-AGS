@@ -128,10 +128,34 @@ Depende de: 9, 10, 12 e 13. É a última porque desenhar cedo fixa um modelo que
 
 **v2 implementado:** visão unificada (um fliperama por missão em execução) com seletor TODAS | missão. Pendente futuro: persistir `peer ask` em aberto para virar barril ao vivo.
 
+## Etapa 10 — entrega em terminais (ponto 5)
+
+**Implementado:** finalizar uma missão em terminais registra o resultado dos testes informado pelo usuário e, se houver PR, consulta os checks com `gh` em modo somente leitura. Só testes aprovados com CI verde (ou sem PR) recebem `done`; os outros casos ficam separados como `done_without_delivery`. A migration v27 preserva todos os estados históricos. Detalhes em [MISSION_DELIVERY.md](./MISSION_DELIVERY.md).
+
 ## 16. Grade de recruits no canvas
 
 **Ponto 1 concluído.** Recruits adicionados por `ags peer recruit` seguem as duas linhas da grade da missão e ocupam a próxima célula livre sem mover panes existentes. Detalhes em [RECRUIT_GRID.md](./RECRUIT_GRID.md).
 
+## 17. Taxa de sucesso das missões (Etapa 10)
+
+Etapa voltada a prevenir e classificar falhas de ambiente e duplicatas históricas:
+- **Ponto 4 (Evitar missão duplicada):** implementado em `feat/etapa10-p4-duplicada`. Detecção de duplicatas com mesmo título e objetivo normalizados, em andamento (`running`) ou recente (24h). Bloqueio preventivo no backend (`start_now` / `start` salvo com flag `--force`) e aviso na interface (`DuplicateMissionDialog` em `MissionsPage` e `MissionsSection`, alerta em `MissionDialog`). Detalhes em [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
+
 ## Estado Antigravity
 
 A integração nativa oferece Lead e Worker, model discovery via `agy models` e uma conta do sistema. Multi-account permanece experimental/incompleto: `supports_accounts = false`, sem routing simultâneo por conta. OAuth experimental não isola as credenciais do `agy`. Veja [ANTIGRAVITY_INTEGRATION.md](./ANTIGRAVITY_INTEGRATION.md).
+
+## 10. Taxa de sucesso das missões
+
+Ponto 1: precheck de instalação, sessão, catálogo por conta e limite antes do lançamento. Ver [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
+
+Ponto 1, revisão QA: aviso de erro traduzido na lista de missões e bloqueio preventivo quando a conta principal não está exposta no roster.
+Ponto 2: failover opcional por autenticação, modelo ou saldo no mesmo pool/TUI, com uma troca por task, cooldown e auditoria traduzida. Ver [MISSION_SUCCESS.md](./MISSION_SUCCESS.md) e [POOL_FAILOVER.md](./POOL_FAILOVER.md).
+## 17. Classificação de falhas (Etapa 10, ponto 3)
+
+**Implementado:** classificação tipada e persistida no fechamento (`failureClassification` + `failureDetail`), exposta por `mission_list`, `mission_get` e pelos resumos da CLI. O Frontend mostra causa e ação no QG e no detalhe da missão. Ver [MISSION_FAILURES.md](./MISSION_FAILURES.md).
+## 17. Taxa de sucesso das missões (Etapa 10)
+
+**Ponto 6 (medição) implementado no front:** cartão com histórico, 7 e 30 dias, canceladas à parte e missões de teste/E2E por marcação explícita (`isTest`). Pendente: backend gravar `isTest`. Detalhes em [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
+
+Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--test`), persistida no schema v27 e exposta em lista/detalhe/status, sem inferência por título. Migração preserva status e classifica legadas como reais.

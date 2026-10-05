@@ -4,7 +4,22 @@ import type { Complexity, Fact, Run, Task, TaskStatus } from "@/features/runs/ty
  * Solo los estados que el ejecutor sostiene hoy. No hay `paused` (no existe pausa real) ni
  * `planning`: lo que está haciendo el lead se lee de sus tareas.
  */
-export type MissionStatus = "draft" | "running" | "done" | "failed" | "cancelled";
+export type MissionStatus = "draft" | "running" | "done" | "done_without_delivery" | "failed" | "cancelled";
+
+export type TerminalTestResult = "passed" | "failed" | "not_run";
+export type TerminalCiStatus = "not_applicable" | "success" | "failure" | "pending" | "unavailable" | "not_checked";
+
+export interface MissionDelivery {
+  testResult: TerminalTestResult;
+  pullRequest: string | null;
+  ciStatus: TerminalCiStatus;
+  checkedAt: number;
+}
+
+export interface TerminalDeliveryInput {
+  testResult: TerminalTestResult;
+  pullRequest: string | null;
+}
 
 /** Lo que el usuario quiere lograr, por encima de los intentos (runs) de lograrlo. */
 export interface Mission {
@@ -32,6 +47,12 @@ export interface Mission {
   updatedAt: number;
   startedAt: number | null;
   endedAt: number | null;
+  /** Por qué falló (solo `failed`); `null`/ausente = sin clasificar. Ver `failureClass.ts`. */
+  failureClassification?: { category: "access" | "limit" | "model" | "crash" | "timeout"; actionKey: string } | null;
+  /** Detalle corto del error original, para mostrar bajo la acción sugerida. */
+  failureDetail?: string | null;
+  /** Marcación explícita de misión de prueba/E2E; `null`/ausente = real. Las métricas de éxito la excluyen. */
+  isTest?: boolean | null;
 }
 
 /** Lo que se manda al crear o editar. */
@@ -66,6 +87,8 @@ export interface MissionSummary extends Mission {
 
 export interface MissionDetail {
   mission: Mission;
+  /** Evidence exists only for manual terminal completion. */
+  delivery: MissionDelivery | null;
   /** Sus runs, el más reciente primero. */
   runs: Run[];
   /** Las tareas del run activo, en el orden del plan. */

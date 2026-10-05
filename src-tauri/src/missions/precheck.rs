@@ -300,3 +300,36 @@ pub fn render(check: &Precheck) -> String {
 
 #[cfg(test)]
 mod test;
+
+/// Uses the app roster only. Does not inspect credential files or secrets.
+pub(crate) fn validate_launch(roster: &crate::runs::roster::Roster, assignment: &crate::runs::routing::Assignment, now: i64) -> Result<(), String> {
+    use crate::runs::roster::{ModelAvailability, ModelDiscoveryState};
+    let agent = roster.agent(&assignment.agent_id).ok_or("missions.error.agentMissing")?;
+    if !agent.installed { return Err("missions.error.agentMissing".into()); }
+    let account = if agent.capabilities.accounts || !agent.accounts.is_empty() {
+        // An absent system/default account is missing login state, not an accountless
+        // provider. Terminals with Auto open the system account and cannot substitute one.
+        let missing = if assignment.account_id.is_none() { "missions.error.loginRequired" } else { "missions.error.accountMissing" };
+        Some(agent.accounts.iter().find(|a| a.account_id == assignment.account_id).ok_or(missing)?)
+    } else {
+        if assignment.account_id.is_some() { return Err("missions.error.accountMissing".into()); }
+        None
+    };
+    if let Some(account) = account {
+        if !account.logged_in { return Err("missions.error.loginRequired".into()); }
+        if account.limit.is_some() || account.quota.as_ref().is_some_and(|q| q.exhausted_at(now)) {
+            return Err("missions.error.usageExhausted".into());
+        }
+    }
+    if let Some(id) = assignment.model.as_deref() {
+        let (models, discovery) = match account {
+            Some(a) => (&a.models, a.model_discovery), None => (&agent.models, agent.model_discovery),
+        };
+        match models.iter().find(|m| m.id == id) {
+            Some(m) if m.availability == ModelAvailability::Unavailable || m.unavailable.is_some() => return Err("missions.error.modelUnavailable".into()),
+            None if discovery == ModelDiscoveryState::Available => return Err("missions.error.modelUnavailable".into()),
+            _ => {}
+        }
+    }
+    Ok(())
+}
