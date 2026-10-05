@@ -188,7 +188,8 @@ export function LiveArcade({
         else if (moving) pose = frame % 2 === 0 ? "walkA" : "walkB";
         else if (hero.state === "sleeping") pose = "sleep";
         const carryRole = carried && !atTarget ? hero.role : undefined;
-        return { hero, x: next.x + (patrol ? patrolOffset(now, index) : 0), level: next.level, pose, lift: reducedMotion ? 0 : heroLift(next.level, next.x, rolling), carrying: carryRole };
+        const drawnX = next.x + (patrol ? patrolOffset(now, index) : 0);
+        return { hero, x: drawnX, level: next.level, pose, lift: reducedMotion ? 0 : heroLift(next.level, drawnX, rolling), carrying: carryRole };
       });
       // Carregadores que sumiram (terminal fechado) não deixam o bloco preso no caminho.
       for (const [taskId, tabId] of carrying) if (!heroes.some((hero) => hero.tabId === tabId)) carrying.delete(taskId);
