@@ -25,14 +25,14 @@ fn pool_window_key(pool_id: &str) -> String {
     format!("runs.pool_failover.pool.{pool_id}")
 }
 
-/// Só falha classificada como rate limit pode acionar failover, e apenas no pool que
+/// Falhas de limite, autenticação, modelo ou saldo só acionam failover no pool que
 /// autorizou a opção, uma vez por tarefa.
 pub(crate) fn failure_eligible(
     kind: super::failure::FailureKind,
     opted_in: bool,
     already_failed_over: bool,
 ) -> bool {
-    kind == super::failure::FailureKind::RateLimited && opted_in && !already_failed_over
+    kind != super::failure::FailureKind::Other && opted_in && !already_failed_over
 }
 
 /// Remove do histórico os eventos que já saíram da janela deslizante. Timestamps futuros
@@ -57,7 +57,7 @@ lazy_static::lazy_static! {
     static ref ACCOUNT_COOLDOWNS: Mutex<HashMap<String, i64>> = Mutex::new(HashMap::new());
 }
 
-/// Marca a conta que recebeu rate limit. É uma regra própria de pools e não muda rotas
+/// Marca a conta que recebeu um erro de acesso ou limite. É uma regra própria de pools e não muda rotas
 /// `Auto` ou contas fixadas.
 pub(crate) fn cool_down_account(account_key: &str, now: i64) {
     let mut cooldowns = ACCOUNT_COOLDOWNS.lock().unwrap_or_else(|e| e.into_inner());
@@ -169,3 +169,58 @@ pub(crate) fn reserve_failover(
 
 #[cfg(test)]
 mod test;
+
+/// Pure choice for a headless pool retry. Keeps the pool picker/strategy and filters
+/// by account catalogue before choosing. Never returns the original account.
+pub(crate) fn replacement(
+    roster: &super::roster::Roster,
+    tiers: &super::routing::Tiers,
+    request: &super::routing::RouteRequest,
+    original: &Option<String>,
+    kind: super::failure::FailureKind,
+    now: i64,
+) -> Result<super::routing::Assignment, String> {
+    use super::roster::{ModelAvailability, ModelDiscoveryState};
+    use super::routing::AccountChoice;
+    let AccountChoice::Pool(spec) = &request.account else { return Err("failover requires a pool".into()); };
+    if !failure_eligible(kind, spec.failover, false) || request.agent_id.as_deref() != Some(spec.agent_id.as_str()) || !spec.members.contains(original) {
+        return Err("pool no longer authorizes this assignment".into());
+    }
+    let agent = roster.agent(&spec.agent_id).ok_or("agent missing")?;
+    let change_model = kind == super::failure::FailureKind::ModelUnavailable;
+    let mut candidates = vec![request.model.clone()];
+    if change_model {
+        for account in &agent.accounts {
+            if account.account_id == *original || !spec.members.contains(&account.account_id) { continue; }
+            for model in &account.models {
+                if model.availability == ModelAvailability::Available && model.unavailable.is_none() && model.toolcall != Some(false)
+                    && !candidates.contains(&Some(model.id.clone())) {
+                    candidates.push(Some(model.id.clone()));
+                }
+            }
+        }
+    }
+    for model in candidates {
+        let mut eligible = roster.clone();
+        let agent = eligible.agents.iter_mut().find(|a| a.agent_id == spec.agent_id).ok_or("agent missing")?;
+        agent.accounts.retain(|account| {
+            if account.account_id == *original || !spec.members.contains(&account.account_id) { return false; }
+            let Some(id) = &model else { return !change_model; };
+            match account.models.iter().find(|m| &m.id == id) {
+                Some(m) => m.availability != ModelAvailability::Unavailable && m.unavailable.is_none() && m.toolcall != Some(false)
+                    && (!change_model || m.availability == ModelAvailability::Available),
+                None => !change_model && account.model_discovery != ModelDiscoveryState::Available,
+            }
+        });
+        if agent.accounts.is_empty() { continue; }
+        // routing checks agent.models; this retry must use account metadata.
+        agent.models = agent.accounts.iter().flat_map(|a| a.models.clone()).collect();
+        let req = super::routing::RouteRequest { model, ..request.clone() };
+        if let Ok(assignment) = super::routing::route(&eligible, tiers, &req, now) {
+            if assignment.agent_id == spec.agent_id && assignment.account_id != *original && spec.members.contains(&assignment.account_id) {
+                return Ok(assignment);
+            }
+        }
+    }
+    Err("no eligible account/model in the original pool".into())
+}

@@ -22,6 +22,10 @@ pub enum FailureKind {
     RateLimited,
     /// La credencial venció, se revocó o nunca hubo login.
     AuthExpired,
+    /// The requested model is absent or forbidden for this account.
+    ModelUnavailable,
+    /// Billing/credits/subscription must be replenished.
+    InsufficientBalance,
     /// Cualquier otra cosa: un error del agente, de la red, del código.
     Other,
 }
@@ -39,7 +43,6 @@ const RATE_LIMIT: &[&str] = &[
     "weekly limit",
     "too many requests",
     "quota exceeded",
-    "insufficient_quota",
     "exceeded your current quota",
 ];
 
@@ -57,8 +60,6 @@ const AUTH: &[&str] = &[
     "token expired",
     "could not be refreshed",
     "unauthorized",
-    // Sin saldo en una cuenta de API: como una credencial, no se arregla reintentando.
-    "credit balance is too low",
 ];
 
 lazy_static::lazy_static! {
@@ -66,16 +67,42 @@ lazy_static::lazy_static! {
     /// "code: 429"): suelto, `401` aparece en `main.rs:401:5` y `429` en cualquier conteo.
     /// "401 Unauthorized" y "429 Too Many Requests" ya los cubren las frases.
     static ref HTTP_429: regex::Regex = regex::Regex::new(r"(status|http|code)[^a-z0-9]{0,3}429\b").unwrap();
+    static ref HTTP_402: regex::Regex = regex::Regex::new(r"(status|http|code)[^a-z0-9]{0,3}402\b").unwrap();
+    static ref HTTP_403: regex::Regex = regex::Regex::new(r"(status|http|code)[^a-z0-9]{0,3}403\b").unwrap();
     static ref HTTP_401: regex::Regex = regex::Regex::new(r"(status|http|code)[^a-z0-9]{0,3}401\b").unwrap();
+}
+
+const MODEL_ACCESS: &[&str] = &[
+    "model_not_found", "model not found", "unknown model", "invalid model", "unsupported model",
+    "model is not available", "model is not supported", "does not exist or you do not have access",
+    "do not have access to model", "do not have access to the model",
+];
+const BALANCE: &[&str] = &[
+    "credit balance is too low", "insufficient credits", "insufficient balance", "out of credits",
+    "insufficient_quota", "payment required", "subscription required", "subscription has expired",
+];
+
+impl FailureKind {
+    pub(crate) fn code(self) -> &'static str {
+        match self {
+            Self::RateLimited => "rate_limited", Self::AuthExpired => "auth",
+            Self::ModelUnavailable => "model", Self::InsufficientBalance => "balance", Self::Other => "other",
+        }
+    }
 }
 
 pub fn classify(error: &str) -> FailureKind {
     let text = error.to_lowercase();
     // Límite antes que credencial: un 429 que menciona el token ("rate limit for this
     // token") es un límite, no un login vencido.
-    if RATE_LIMIT.iter().any(|p| text.contains(p)) || HTTP_429.is_match(&text) {
+    if BALANCE.iter().any(|p| text.contains(p)) || HTTP_402.is_match(&text) {
+        FailureKind::InsufficientBalance
+    } else if MODEL_ACCESS.iter().any(|p| text.contains(p))
+        || (text.contains("model") && ["not supported when using", "does not exist", "not found", "access to this model"].iter().any(|p| text.contains(p))) {
+        FailureKind::ModelUnavailable
+    } else if RATE_LIMIT.iter().any(|p| text.contains(p)) || HTTP_429.is_match(&text) {
         FailureKind::RateLimited
-    } else if AUTH.iter().any(|p| text.contains(p)) || HTTP_401.is_match(&text) {
+    } else if AUTH.iter().any(|p| text.contains(p)) || HTTP_401.is_match(&text) || HTTP_403.is_match(&text) {
         FailureKind::AuthExpired
     } else {
         FailureKind::Other

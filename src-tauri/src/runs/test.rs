@@ -4076,10 +4076,10 @@ fn una_falla_se_clasifica_por_lo_que_dijo_la_cli() {
         "unexpected status 401 Unauthorized",
         "request failed: HTTP 401",
         "Not logged in",
-        "Your credit balance is too low to access the Anthropic API.",
     ] {
         assert_eq!(classify(text), AuthExpired, "{text}");
     }
+    assert_eq!(classify("Your credit balance is too low to access the Anthropic API."), InsufficientBalance);
     // Lo demás, incluidos números que solo se parecen a un código HTTP.
     for text in [
         "error[E0308]: mismatched types at src/main.rs:401:5",
