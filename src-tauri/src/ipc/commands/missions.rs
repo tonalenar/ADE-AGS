@@ -292,6 +292,14 @@ pub(super) fn mission_timings(app: &AppHandle, args: &Value) -> Result<Value, St
     Ok(json!(crate::missions::timings_of(&conn, &id)?))
 }
 
+/// `ags mission efficiency <id>`: métricas de tempo, custo e agentes com histórico por faixa.
+pub(super) fn mission_efficiency(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let id = arg_str(args, "mission")?;
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    Ok(json!(crate::missions::efficiency::get(&conn, &id)?))
+}
+
 pub(super) fn mission_accept(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
     let task = arg_str(args, "task")?;

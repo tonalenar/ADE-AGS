@@ -3,13 +3,18 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { useCanvasStore } from "@/features/canvas/store";
+import { activeTabIds, activitySnapshot, lastInputAt, lastOutputAt } from "@/features/terminal/activity";
+import { onPromptSubmitted, pasteIntoTab, screenOf } from "@/features/terminal/terminalRegistry";
 import { useTabsStore } from "@/features/tabs/store";
 
 import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
 import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking } from "./activeTime";
 import { finishedMissionTabs, missionIndex, useMissionIndex } from "./groups";
+import { STALL_CHECK_MS, applyMessage, parseStallMs, findStalls, markAlerted, stallMessage, type PeerMessage, type PendingTasks } from "./stalled";
 import { useMissionsStore } from "./store";
+import { LEAD_NAME } from "./terminals";
 import { recordSpan } from "./timings";
+import { missionTurns } from "./turns";
 
 /** Lo que avisa el servidor al terminar un `peer ask` (ver `cc-peer-timing` en Rust). */
 export interface PeerTimingEvent {
@@ -41,6 +46,20 @@ export function useMissionWatcher(): void {
   // Aviso cuando un agente sugiere una memoria; también con la barra lateral recogida.
   useMemoryPendingNotice(workspaceId);
 
+  useEffect(() => {
+    const start = (tabId: string, at: number) => {
+      const openTabs = useTabsStore.getState().tabs;
+      const mission = missionIndex(useCanvasStore.getState().boards, openTabs)[tabId];
+      const tab = openTabs.find((t) => t.id === tabId);
+      if (mission && tab && tab.agentId !== "bash") missionTurns.start(tabId, mission, tab.title || tab.agentLabel, at);
+    };
+    const unsubscribe = onPromptSubmitted(start);
+    const off = listen<PeerMessage>("cc-peer-message", (e) => {
+      if (e.payload.toTabId) start(e.payload.toTabId, e.payload.atMs);
+    });
+    return () => { unsubscribe(); off.then((fn) => fn()); };
+  }, []);
+
   // Las misiones del workspace, al día.
   useEffect(() => {
     if (!workspaceId) return;
@@ -71,17 +90,73 @@ export function useMissionWatcher(): void {
     };
   }, []);
 
+  // Agente parado: una tarea con `peer tell` que nadie atiende se le avisa al orquestador.
+  useEffect(() => {
+    let pending: PendingTasks = new Map();
+    const leadOf = (tabId: string) => useTabsStore.getState().tabs.find((t) => t.id === tabId);
+    const isLead = (tabId: string) => leadOf(tabId)?.title === LEAD_NAME;
+    const off = listen<PeerMessage>("cc-peer-message", (e) => {
+      pending = applyMessage(pending, e.payload, isLead);
+    });
+    const timer = setInterval(() => {
+      if (pending.size === 0) return;
+      const { tabs: openTabs } = useTabsStore.getState();
+      const open = new Set(openTabs.map((t) => t.id));
+      // Una pestaña cerrada ya no debe nada.
+      const live = new Map([...pending].filter(([id]) => open.has(id)));
+      pending = live;
+      const active = new Set(activeTabIds());
+      let stallMs = parseStallMs(null);
+      try {
+        stallMs = parseStallMs(localStorage.getItem("ags.stallMs"));
+      } catch {
+        // sin localStorage: queda el plazo por defecto
+      }
+      const stalls = findStalls(live, {
+        now: Date.now(),
+        isActive: (id) => active.has(id),
+        lastOutputAt,
+        lastInputAt,
+        screen: (id) => screenOf(id)?.lines ?? null,
+      }, stallMs);
+      const sent = stalls.filter((s) => {
+        // No se interrumpe al orquestador a mitad de un turno: se reintenta en el próximo tic.
+        if (active.has(s.fromTabId)) return false;
+        const name = openTabs.find((t) => t.id === s.tabId)?.title ?? s.tabId;
+        return pasteIntoTab(s.fromTabId, stallMessage(name, s), true);
+      });
+      if (sent.length > 0) pending = markAlerted(pending, sent);
+    }, STALL_CHECK_MS);
+    return () => {
+      clearInterval(timer);
+      off.then((fn) => fn());
+    };
+  }, []);
+
   // Tiempo activo: solo avanza mientras algún agente de la misión trabaja de verdad.
   const live = useRef({ index, missions });
   live.current = { index, missions };
   useEffect(() => {
     let pending = new Map<string, number>();
+    const measureTurns = () => {
+      const { index: tabToMission, missions: all } = live.current;
+      const running = new Set(all.filter((m) => m.status === "running").map((m) => m.id));
+      const members = new Map(useTabsStore.getState().tabs.flatMap((tab) => {
+        const mission = tabToMission[tab.id];
+        return mission && running.has(mission) && tab.agentId !== "bash"
+          ? [[tab.id, { mission, actor: tab.title || tab.agentLabel }] as const] : [];
+      }));
+      for (const completed of missionTurns.sample(activitySnapshot(), members, Date.now())) {
+        recordSpan(completed.mission, completed.span);
+      }
+    };
     let ticks = 0;
     const flush = () => {
       for (const [id, ms] of pending) invoke("mission_active_add", { missionId: id, ms }).catch(() => undefined);
       pending = new Map();
     };
     const timer = setInterval(() => {
+      measureTurns();
       const { index: tabToMission, missions: all } = live.current;
       const running = new Set(all.filter((m) => m.status === "running").map((m) => m.id));
       pending = accumulate(pending, sampleWorking(tabToMission, running), ACTIVE_TICK_MS);

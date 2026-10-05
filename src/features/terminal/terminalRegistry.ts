@@ -9,6 +9,12 @@ import type { Terminal } from "@xterm/xterm";
  * línea de un mensaje de varias líneas llegaría como un Enter y lo mandaría a medias.
  */
 const terminals = new Map<string, Terminal>();
+const submittedListeners = new Set<(tabId: string, at: number) => void>();
+
+export function onPromptSubmitted(listener: (tabId: string, at: number) => void): () => void {
+  submittedListeners.add(listener);
+  return () => { submittedListeners.delete(listener); };
+}
 
 /** Mensajes para agentes que todavía no terminaron de arrancar. */
 const queued = new Map<string, string>();
@@ -96,9 +102,15 @@ export function sendWhenReady(tabId: string, text: string, timings?: SendTimings
 
 export function registerTerminal(tabId: string, term: Terminal): () => void {
   terminals.set(tabId, term);
+  const input = term.onData((data) => {
+    if (data === "\r" || data === "\n") {
+      for (const listener of submittedListeners) listener(tabId, Date.now());
+    }
+  });
   const pending = queued.get(tabId);
   if (pending !== undefined) sendWhenSettled(tabId, term, pending);
   return () => {
+    input.dispose();
     if (terminals.get(tabId) === term) terminals.delete(tabId);
   };
 }

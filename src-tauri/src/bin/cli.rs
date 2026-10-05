@@ -146,6 +146,7 @@ MISIONES (también sin interfaz: `ade-ags --headless`)
   mission create|run|start ... --test          Marca explicitamente teste/E2E (fora da taxa de sucesso)
   mission review <id>                         Lo que entregó cada tarea aislada
   mission timings <id>                        Dónde se fue el tiempo: arranque, briefing, turnos, peer ask
+  mission efficiency <id>                     Tiempo activo, reloj, costo y comparación histórica por agentes
   mission precheck <id>                       Lo que el repositorio y las misiones anteriores ya dicen del objetivo
   memory search \"<tema>\" --mission <id> [--limit 5] [--at <YYYY-MM-DD|YYYY-MM-DDTHH:MM|unix-seconds>]
                                               Busca memoria vigente ahora o en ese instante (fechas en UTC)
@@ -403,7 +404,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "tab.create" => &["cwd"],
         "workspace.open" => &["workspace"],
         // `ags mission wait <id>`, `ags mission accept <id> <tarea>`.
-        "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" | "mission.timings" | "mission.precheck" => &["mission"],
+        "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" | "mission.timings" | "mission.efficiency" | "mission.precheck" => &["mission"],
         "mission.accept" => &["mission", "task"],
         "approval.decide" => &["approval"],
         // `ags peer ask Revisor "..."`: el nombre del agente y después el mensaje.

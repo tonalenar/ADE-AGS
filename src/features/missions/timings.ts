@@ -22,7 +22,39 @@ export interface KindTotal {
 
 export interface MissionTimings {
   spans: TimingSpan[];
-  summary: { wallMs: number; byKind: KindTotal[]; slowest: TimingSpan[] };
+  summary: { wallMs: number; byKind: KindTotal[]; slowest: TimingSpan[]; bottlenecks: Bottleneck[] };
+}
+
+export interface Bottleneck {
+  agent: string;
+  asks: number;
+  blockedCallers: number;
+  waitingMs: number;
+  maxWaitMs: number;
+  timeouts: number;
+  turnMs: number;
+}
+
+export interface AgentBandComparison {
+  band: string;
+  sampleSize: number;
+  medianActiveMs: number | null;
+  medianWallMs: number | null;
+  medianCostEstimate: number | null;
+  timeGainPercent: number | null;
+  costGainPercent: number | null;
+}
+
+export interface MissionEfficiency {
+  activeMs: number | null;
+  wallMs: number | null;
+  costEstimate: number | null;
+  agents: number;
+  historyLimit: number;
+  historySize: number;
+  timeGainPercent: number | null;
+  costGainPercent: number | null;
+  byAgentBand: AgentBandComparison[];
 }
 
 export type NewSpan = Pick<TimingSpan, "kind" | "startedMs" | "endedMs"> & Partial<Pick<TimingSpan, "actor" | "target" | "detail">>;
@@ -34,6 +66,7 @@ export function recordSpan(missionId: string, span: NewSpan): void {
 }
 
 export const getTimings = (missionId: string) => invoke<MissionTimings>("mission_timings", { missionId });
+export const getMissionEfficiency = (missionId: string) => invoke<MissionEfficiency>("mission_efficiency", { missionId });
 
 /** "1 min 05 s", "12 s", "0,8 s": para mostrar una duración sin ruido. Pura. */
 export function formatDuration(ms: number): string {

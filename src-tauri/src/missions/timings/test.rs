@@ -42,6 +42,24 @@ fn sem_tempos_o_resumo_e_vazio() {
 }
 
 #[test]
+fn ranks_blocked_callers_and_correlates_turns_without_double_counting() {
+    let mut a = span(1, "peer_ask", 1_000, 6_000);
+    a.actor = "Lead".into(); a.target = "Backend".into(); a.detail = "timeout".into();
+    let mut b = span(2, "peer_ask", 2_000, 5_000);
+    b.actor = "QA".into(); b.target = "Backend".into();
+    let mut c = span(3, "peer_ask", 7_000, 9_000);
+    c.actor = "Lead".into(); c.target = "Backend".into();
+    let mut turn = span(4, "turn", 1_000, 8_000); turn.actor = "Backend".into();
+    let mut other = span(5, "peer_ask", 1_000, 3_000); other.target = "Frontend".into();
+    let rows = summarize(&[a, b, c, turn, other, span(6, "peer_ask", 1_000, 90_000)], 3).bottlenecks;
+    assert_eq!(rows.len(), 2);
+    assert_eq!(rows[0], Bottleneck { agent: "Backend".into(), asks: 3, blocked_callers: 2,
+        waiting_ms: 10_000, max_wait_ms: 5_000, timeouts: 1, turn_ms: 7_000 });
+    assert_eq!(rows[1].agent, "Frontend");
+    assert!(summarize(&[], 0).bottlenecks.is_empty());
+}
+
+#[test]
 fn grava_e_lista_na_ordem_do_inicio_e_respeita_o_limite() {
     let conn = crate::database::test_db();
     conn.execute("INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('w', 'W', 0, 0)", []).unwrap();

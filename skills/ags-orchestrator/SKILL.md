@@ -506,6 +506,13 @@ ags peer recruit Qa --agent codex --floor ground   # back on the original projec
 - A floor starts from the last commit, not from uncommitted changes in the ground folder.
 - There is no delete command: the folder and branch stay until the user removes them.
 - A floor is heavy (a full checkout). Don't create one for a small task.
+- Before opening a coding mission or recruiting into a dedicated worktree, prepare and verify
+  that worktree first. A git worktree does not carry ignored dependencies such as
+  `node_modules`. Set up the platform-appropriate link, configure Rust's target directory in
+  the recruit's shell, and put the resolved worktree path, branch/base, shell, dependency
+  link, target directory and exact validation commands in the initial briefing. Follow
+  [the worktree setup procedure](../../docs/ade-ags/AGENT_EFFICIENCY.md);
+  use its Linux/CI commands there rather than copying Windows paths.
 
 ### Notes on the canvas
 

@@ -1,7 +1,7 @@
 //! Comandos de tabs: listarlas, crearlas, leer su salida y escribirles.
 
 use serde_json::{json, Value};
-use tauri::AppHandle;
+use tauri::{AppHandle, Emitter};
 
 use super::agents::{resolve_account_id, resolve_prelaunch_steps};
 use super::shared::{bridge_call, db};
@@ -421,6 +421,9 @@ pub(super) fn tab_send(app: &AppHandle, args: &Value) -> Result<Value, String> {
         crate::terminal::write_to_pty(pty_id, &text)?;
     } else {
         submit_prompt(pty_id, &text)?;
+        let _ = app.emit("cc-peer-message", json!({ "kind": "ask",
+            "fromTabId": arg_str_opt(args, "from").unwrap_or_default(), "toTabId": tab_id,
+            "atMs": crate::util::now_ts_ms() }));
     }
 
     Ok(json!({ "tabId": tab_id, "sent": true }))

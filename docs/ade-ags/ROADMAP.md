@@ -159,3 +159,20 @@ Ponto 2: failover opcional por autenticação, modelo ou saldo no mesmo pool/TUI
 **Ponto 6 (medição) implementado no front:** cartão com histórico, 7 e 30 dias, canceladas à parte e missões de teste/E2E por marcação explícita (`isTest`). Pendente: backend gravar `isTest`. Detalhes em [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
 
 Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--test`), persistida no schema v27 e exposta em lista/detalhe/status, sem inferência por título. Migração preserva status e classifica legadas como reais.
+
+## Etapa 11 — eficiência entre agentes, ponto 1 (agente parado)
+
+**Implementado:** detector de "recebeu tarefa e ficou quieto". O backend emite `cc-peer-message` em cada `peer tell`/`peer ask`; o watcher abre uma tarefa pendente quando o orquestrador faz `tell` a um membro e a fecha quando o membro manda qualquer mensagem. Passado o plazo sem saída (120 s), o orquestrador recebe um aviso com nome, tempo parado e última linha da tela. Sem aviso se o agente escreve (pensando), se há diálogo de aprovação na tela ou se o usuário digitou na aba. Ver [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+
+## Etapa 11 — eficiência entre agentes, ponto 2 (peer ask)
+
+**Implementado:** prazo inclui preparação/envio; `peer check` consulta status e resposta parcial da última pergunta sem repetir o pedido. `mission timings` apresenta ranking de gargalos por agente a partir de `peer_ask` e `turn`. Turnos após o briefing também são registrados, com dono único e preservação de `detail: "briefing"`. Eventos de comunicação do ponto 1 são reutilizados por destino, inclusive em batch/recruit. Detalhes e limites de inferência em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+## Etapa 11 — Eficiência entre agentes
+
+**Ponto 3 implementado:** ao criar o worktree, a app prepara a junction de `node_modules` no Windows ou symlink em Unix, sem substituir diretórios existentes; falhas geram aviso sem bloquear o recruit. O briefing inicial inclui caminho, shell e comandos de validação, com `cargo test --lib` filtrado. O target Cargo compartilhado é configurável como `per-worktree` para evitar disputa de lock entre agentes simultâneos, com o custo de recompilar dependências uma vez por worktree. O procedimento multiplataforma está em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+## Etapa 11 — eficiência entre agentes (P4)
+
+**Ponto 4 implementado:** o QG e o painel da missão mostram tempo ativo sem sobreposição, tempo de relógio, custo reportado pelos Runs, agentes observados e comparação com até 30 missões concluídas do workspace, agrupadas por faixa de agentes. O briefing só recomenda recrutar quando o trabalho é independente e paralelizável e há expectativa de terminar mais rápido do que com um agente só. Métricas, limites e API estão em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md); a linha de base anterior do QA está em [AGENT_EFFICIENCY_BASELINE.md](./AGENT_EFFICIENCY_BASELINE.md).
+## Etapa 11 — eficiência entre agentes (ponto 5)
+
+**Menos conversa, mais memória:** o briefing consulta os registros existentes antes de perguntar; integrantes enviam uma única entrega final com resultado, decisões, arquivos, testes e bloqueios. Handoff Structured permanece como registro de entrega entre Tasks do Mission Runtime; Shared Memory guarda somente conhecimento aprovado e duradouro. Detalhes e comparação estática de tokens em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
