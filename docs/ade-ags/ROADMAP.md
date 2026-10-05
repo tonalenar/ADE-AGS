@@ -159,3 +159,7 @@ Ponto 2: failover opcional por autenticação, modelo ou saldo no mesmo pool/TUI
 **Ponto 6 (medição) implementado no front:** cartão com histórico, 7 e 30 dias, canceladas à parte e missões de teste/E2E por marcação explícita (`isTest`). Pendente: backend gravar `isTest`. Detalhes em [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
 
 Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--test`), persistida no schema v27 e exposta em lista/detalhe/status, sem inferência por título. Migração preserva status e classifica legadas como reais.
+
+## Etapa 11 — eficiência entre agentes (ponto 5)
+
+**Menos conversa, mais memória:** o briefing consulta os registros existentes antes de perguntar; integrantes enviam uma única entrega final com resultado, decisões, arquivos, testes e bloqueios. Handoff Structured permanece como registro de entrega entre Tasks do Mission Runtime; Shared Memory guarda somente conhecimento aprovado e duradouro. Detalhes e comparação estática de tokens em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
