@@ -13,6 +13,7 @@ export function FailureNotice({ mission }: { mission: Mission }) {
     <Alert variant="warning">
       <div className="font-medium">{t(failureLabelKey(key))}</div>
       <div>{t(failureActionKey(mission), { defaultValue: t("missions.failure.action.unknown") })}</div>
+      {mission.failureDetail && <div className="mt-1 text-xs opacity-70">{mission.failureDetail}</div>}
     </Alert>
   );
 }
