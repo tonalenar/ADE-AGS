@@ -336,3 +336,12 @@ describe("briefing do subagente padrão do Squad", () => {
     expect(leadBriefing(mission, [])).toContain("[--fast]");
   });
 });
+
+import { closeMissionNeedsConfirm } from "../groups";
+
+describe("closeMissionNeedsConfirm", () => {
+  it("pide confirmación solo con la misión en marcha", () => {
+    expect(closeMissionNeedsConfirm("running")).toBe(true);
+    for (const s of ["done", "cancelled", "failed", "draft", undefined]) expect(closeMissionNeedsConfirm(s)).toBe(false);
+  });
+});

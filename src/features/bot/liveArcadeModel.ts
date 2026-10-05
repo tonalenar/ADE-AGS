@@ -129,13 +129,17 @@ export function deriveTrophy(review: { integrationBranch: string | null; applied
   return { step, pr: null, ci: null };
 }
 
-export type AgentKind = "claude" | "codex" | "antigravity";
+export type AgentKind = "claude" | "codex" | "antigravity" | "gemini" | "opencode" | "generic";
+const SHELLS = new Set(["bash", "sh", "zsh", "fish", "powershell", "pwsh", "cmd", "shell"]);
 export function agentKind(id: string): AgentKind | null {
   const value = id.toLowerCase();
   if (value.includes("claude")) return "claude";
   if (value.includes("codex")) return "codex";
   if (value.includes("antigravity") || value === "agy") return "antigravity";
-  return null;
+  if (value.includes("gemini")) return "gemini";
+  if (value.includes("opencode")) return "opencode";
+  // Outro agente (não um shell): aparece com o logo genérico em vez de sumir.
+  return !value || SHELLS.has(value) ? null : "generic";
 }
 
 export type HeroRole = "lead" | "backend" | "frontend" | "qa" | "review" | "other";
@@ -158,6 +162,28 @@ export interface ArcadeHero {
   stage: ArcadeStageId | null; taskId: string | null; state: HeroState;
 }
 
+/** Sinais reais por terminal (missões em terminais, sem tasks). */
+export interface HeroSignals {
+  /** Já escreveu de forma sustentada alguma vez: saiu do briefing/espera. */
+  workedTabIds: readonly string[];
+  /** Já mandou a entrega final ao orquestrador. */
+  deliveredTabIds: readonly string[];
+  missionStatus: string;
+}
+
+/**
+ * Andar de um terminal SEM tarefa ligada, só pelos sinais: sem saída sustentada ainda = Abertura
+ * (briefing/aguardando); depois pelo papel (QA = Testes, revisão = Revisão, o resto = Trabalho);
+ * entregou ou a missão concluiu = Entrega. Pura.
+ */
+export function terminalStage(role: HeroRole, worked: boolean, delivered: boolean, missionStatus: string): ArcadeStageId {
+  if (delivered || missionStatus === "done") return "delivery";
+  if (!worked) return "opening";
+  if (role === "qa") return "tests";
+  if (role === "review") return "review";
+  return "work";
+}
+
 const ACTIVE_RANK: Record<string, number> = { running: 0, handed_off: 1, ready: 2, pending: 3 };
 /** Tarefa de um terminal: pela sessão que ela lançou ou, na falta, pelo nome do terminal = nome da tarefa no plano. Nada de adivinhar. */
 export function taskOfTab<T extends ArcadeTask>(tab: ArcadeTabInput, tasks: T[]): T | null {
@@ -176,6 +202,8 @@ export function deriveHeroes(input: {
   tabs: ArcadeTabInput[]; scene: ArcadeScene; sustainedTabIds: string[]; approvalTaskIds: string[] | null;
   /** Barris reais: o herói que eles travam espera (`!`) até o bloqueio sair. */
   barrels?: ArcadeBarrel[];
+  /** Com sinais, o terminal sem tarefa ganha andar; sem eles fica no chão (equipe). */
+  signals?: HeroSignals;
 }): ArcadeHero[] {
   const sustained = new Set(input.sustainedTabIds);
   const approvals = new Set(input.approvalTaskIds ?? []);
@@ -188,7 +216,13 @@ export function deriveHeroes(input: {
       (!!task && barrel.taskId === task.id) || (!!barrel.heroName && barrel.heroName.trim().toLowerCase() === name));
     const stopped = blocked || (!!task && (task.status === "failed" || approvals.has(task.id)));
     const state: HeroState = stopped ? "stopped" : sustained.has(tab.id) ? "running" : "sleeping";
-    return [{ tabId: tab.id, name: tab.title, kind, role: roleOf(tab.title, task?.role), stage: task ? task.stage : null, taskId: task?.id ?? null, state }];
+    const role = roleOf(tab.title, task?.role);
+    const signals = input.signals;
+    const delivered = !!signals && signals.deliveredTabIds.includes(tab.id);
+    let stage: ArcadeStageId | null = task ? task.stage : null;
+    if (signals && delivered) stage = "delivery";
+    else if (signals && !task) stage = terminalStage(role, signals.workedTabIds.includes(tab.id) || sustained.has(tab.id), false, signals.missionStatus);
+    return [{ tabId: tab.id, name: tab.title, kind, role, stage, taskId: task?.id ?? null, state }];
   });
 }
 
@@ -206,23 +240,33 @@ export interface ArcadeTower {
 }
 
 /** Torre da missão: um bloco por tarefa concluída DE VERDADE. `carrying` = tarefas já concluídas cujo bloco ainda está a caminho (o herói o carrega). */
-export function deriveTower(input: { scene: ArcadeScene; trophy: ArcadeTrophy; carrying?: ReadonlySet<string> }): ArcadeTower {
+export function deriveTower(input: {
+  scene: ArcadeScene; trophy: ArcadeTrophy; carrying?: ReadonlySet<string>;
+  /** Entregas finais reais (peer tell de encerramento). Só viram bloco quando a missão não tem tarefas: com tarefas, o bloco já é da tarefa. */
+  deliveries?: Array<{ id: string; role: HeroRole }>;
+}): ArcadeTower {
   const planned = input.scene.tasks.filter((task) => task.status !== "cancelled" && task.status !== "skipped");
   const isDone = (task: ArcadeTask) => task.status === "done" && !input.carrying?.has(task.id);
   const done = planned.filter(isDone)
     .sort((a, b) => (a.endedAt ?? Infinity) - (b.endedAt ?? Infinity));
+  const delivered: TowerBlock[] = planned.length ? [] : (input.deliveries ?? [])
+    .filter((item) => !input.carrying?.has(item.id))
+    .map((item) => ({ id: item.id, kind: "task" as const, role: item.role, state: "filled" as const }));
   const todo = planned.filter((task) => !isDone(task));
   const block = (task: ArcadeTask, state: TowerBlockState): TowerBlock =>
     ({ id: task.id, kind: "task", role: roleOf(task.role), state });
   const integrated = input.trophy.step === "integrated";
   const blocks: TowerBlock[] = [
+    ...delivered,
     ...done.map((task) => block(task, "filled")),
     ...todo.map((task) => block(task, "empty")),
     { id: "integration", kind: "integration", role: "lead", state: integrated ? "filled" : "empty" },
     { id: "pr", kind: "pr", role: "other", state: input.trophy.pr === null ? "unmeasured" : "filled" },
     { id: "ci", kind: "ci", role: "other", state: input.trophy.ci === null ? "unmeasured" : "filled" },
   ];
-  return { blocks, done: done.length, planned: planned.length, complete: planned.length > 0 && todo.length === 0 && integrated };
+  const doneCount = done.length + delivered.length;
+  const plannedCount = planned.length + delivered.length;
+  return { blocks, done: doneCount, planned: plannedCount, complete: plannedCount > 0 && todo.length === 0 && integrated };
 }
 
 /** Tarefas que acabaram de virar `done` (antes não eram). Sem leitura anterior não há transição: o que já estava pronto já está na torre. */

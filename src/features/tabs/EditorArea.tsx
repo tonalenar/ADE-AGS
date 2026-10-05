@@ -19,6 +19,7 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
 import { CanvasView } from "@/features/canvas/CanvasView";
 import { useWorkMode } from "@/features/canvas/store";
+import { GRID_SLOT, gridColumns, useMissionGrid } from "@/features/canvas/gridMode";
 
 /**
  * El área de tabs, dividida en grupos como los editores de VS Code.
@@ -41,6 +42,7 @@ export function EditorArea() {
   useMissionWatcher();
   const layout = useWorkspaceLayout();
   const canvas = useWorkMode() === "canvas";
+  const grid = useMissionGrid();
   const containerRef = useRef<HTMLDivElement>(null);
   const groups = layout ? allGroups(layout.root) : [];
   const groupIds = groups.map((g) => g.id).join("|");
@@ -85,7 +87,8 @@ export function EditorArea() {
       <TerminalPanel />
       {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. */}
       <ViewTabsHost />
-      {!canvas && (
+      {!canvas && grid && <MissionGrid ids={grid} />}
+      {!canvas && !grid && (
         <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 10 }}>
           {layout ? (
             <NodeView node={layout.root} focused={layout.focused} divided={groups.length > 1} />
@@ -94,7 +97,34 @@ export function EditorArea() {
           )}
         </div>
       )}
-      {!canvas && <TabDragOverlay />}
+      {!canvas && !grid && <TabDragOverlay />}
+    </div>
+  );
+}
+
+/**
+ * Todos los panes de una misión lado a lado. Solo dibuja los huecos (con el nombre de cada
+ * agente arriba): las terminales siguen en `TerminalPanel` y se ubican encima de su hueco,
+ * así que activar o desactivar la grade no remonta ningún xterm.
+ */
+function MissionGrid({ ids }: { ids: string[] }) {
+  const tabs = useTabsStore((s) => s.tabs);
+  const activeTabId = useTabsStore((s) => s.activeTabId);
+  const activateTab = useTabsStore((s) => s.activateTab);
+  const cols = gridColumns(ids.length);
+  return (
+    <div className="absolute inset-0 pointer-events-none grid gap-px bg-gray-200 dark:bg-gray-800"
+      style={{ zIndex: 10, gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: "minmax(0, 1fr)" }}>
+      {ids.map((id) => (
+        <div key={id} className="flex flex-col min-w-0 min-h-0">
+          <div onClick={() => activateTab(id)}
+            className={`pointer-events-auto cursor-pointer shrink-0 h-6 px-2 flex items-center truncate text-[11px] font-medium
+              bg-gray-100 dark:bg-gray-900 ${id === activeTabId ? "text-gray-900 dark:text-white border-b-2 border-accent-500" : "text-gray-500 dark:text-gray-400"}`}>
+            {tabs.find((tab) => tab.id === id)?.title ?? ""}
+          </div>
+          <div data-slot={GRID_SLOT + id} className="relative flex-1 min-h-0" />
+        </div>
+      ))}
     </div>
   );
 }

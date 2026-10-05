@@ -88,3 +88,12 @@ export function openFree(): boolean {
   activateTab(target.id);
   return true;
 }
+
+/**
+ * Cerrar la pestaña de una misión con la "X" de arriba: pide confirmación mientras la misión
+ * sigue en marcha (cerrar sus terminales mata a los agentes). Las terminadas, borradores o
+ * sin estado se cierran directo. Pura.
+ */
+export function closeMissionNeedsConfirm(status: string | undefined): boolean {
+  return status === "running";
+}

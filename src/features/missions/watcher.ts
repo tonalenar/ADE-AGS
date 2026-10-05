@@ -7,6 +7,8 @@ import { activeTabIds, activitySnapshot, lastInputAt, lastOutputAt } from "@/fea
 import { onPromptSubmitted, pasteIntoTab, screenOf } from "@/features/terminal/terminalRegistry";
 import { useTabsStore } from "@/features/tabs/store";
 
+import { isFinalDelivery, noteDelivery, noteSustained } from "../bot/arcadeSignals";
+import { sustainedTabIds } from "@/features/terminal/activity";
 import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
 import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking } from "./activeTime";
 import { finishedMissionTabs, missionIndex, useMissionIndex } from "./groups";
@@ -88,6 +90,16 @@ export function useMissionWatcher(): void {
     return () => {
       off.then((fn) => fn());
     };
+  }, []);
+
+  // Ao vivo: sinais reais por terminal (quem já trabalhou, quem fez a entrega final).
+  useEffect(() => {
+    const isLead = (tabId: string) => useTabsStore.getState().tabs.find((tab) => tab.id === tabId)?.title === LEAD_NAME;
+    const off = listen<PeerMessage>("cc-peer-message", (e) => {
+      if (isFinalDelivery(e.payload, isLead)) noteDelivery(e.payload.fromTabId, e.payload.atMs);
+    });
+    const timer = setInterval(() => { if (document.visibilityState === "visible") noteSustained(sustainedTabIds()); }, 2000);
+    return () => { clearInterval(timer); off.then((fn) => fn()); };
   }, []);
 
   // Agente parado: una tarea con `peer tell` que nadie atiende se le avisa al orquestador.

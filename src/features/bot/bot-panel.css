@@ -256,11 +256,10 @@
   gap: 5px;
 }
 
-.ags-live__agent i {
-  width: 9px;
-  height: 9px;
-  border: 2px solid currentColor;
-  background: #171329;
+.ags-live__logo {
+  width: 12px;
+  height: 12px;
+  flex: none;
   image-rendering: pixelated;
 }
 

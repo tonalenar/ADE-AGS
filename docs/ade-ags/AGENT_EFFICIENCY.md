@@ -184,3 +184,7 @@ As medidas não são intercambiáveis: cobertura e limites de coleta variam. Ess
 A lista (`MissionSummary.activeSeconds = ms / 1000`, `activeSource`), o QG, o painel de tempos e a CLI usam esse mesmo resultado. `mission_efficiency` expõe `activeMs`, `activeSource` e `turnMs`; `mission_timings` expõe `active: {ms, source}` além dos spans e gargalos. `ags mission efficiency` e `ags mission timings` recebem esses contratos. Comparações históricas por faixa de agentes resolvem cada missão pela mesma regra antes de calcular a mediana.
 
 Zero gravado em `mission_active` não é tratado como coleta positiva e segue o fallback. Não há migração, backfill ou reescrita de dados antigos. Missões sem coleta oficial usam uma duração disponível por fallback, com sua origem identificada; sem início nem spans, ficam não medidas. Totais por agente e gargalos continuam sendo detalhes por turno e podem superar o relógio da missão por paralelismo.
+
+## Etapa 15 — telas (Frontend)
+
+O QG ("Ao vivo") lê o tempo ativo da fonte unificada (`timings.active`) e deriva andar e entregas dos sinais reais dos terminais (ver `LIVE_ARCADE.md`, v4). A métrica de tempo até a primeira delegação (`firstDelegationMs`/`firstDelegationSource`) é do Backend; sem dado, a tela mostra cinza.

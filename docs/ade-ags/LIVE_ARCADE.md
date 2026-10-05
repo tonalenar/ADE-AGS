@@ -46,3 +46,22 @@ A quinta aba do BotPanel mostra uma missão por vez em um canvas pixel art. A mi
 - A **visão unificada** (seletor TODAS | missão) não muda: cada missão tem seu fliperama e, portanto, **sua própria torre**.
 - Limite mantido: o `peer ask` ainda pendente não é exposto pelo app, só o expirado.
 - Lógica pura: `placeBarrels`, `heroLift`, `rollDir` (`liveArcadeScene.ts`) e `deriveHeroes({ barrels })`.
+
+
+## v4 — Ao vivo que funciona em terminais (Etapa 15)
+
+Missões em terminais não têm tasks, então os heróis ficavam parados na viga "equipe". Agora o andar sai dos **sinais reais de cada terminal** (`terminalStage`, `deriveHeroes({ signals })` em `liveArcadeModel.ts`):
+
+- **Abertura**: o terminal ainda não escreveu de forma sustentada (briefing/aguardando).
+- **Trabalho / Testes / Revisão**: depois da primeira saída sustentada, pelo papel (QA → Testes, revisão → Revisão, o resto → Trabalho).
+- **Entrega**: o terminal fez a entrega final, ou a missão está `done`.
+- Heróis **andam** pela viga e **sobem as escadas** ao mudar de andar (`heroTargets` agora também coloca quem não tem tarefa na viga do andar); patrulham com saída sustentada, dormem quietos e ficam com `!` com barril real. Sem sinais (sem tarefa e sem `signals`) continuam no chão.
+- **Entrega final** = `peer tell` de um integrante ao orquestrador no formato do briefing (resultado + testes) — `isFinalDelivery` em `arcadeSignals.ts`, alimentado pelo `useMissionWatcher` (sempre montado). Cada entrega coloca **um bloco na torre** e o herói o carrega até lá; com tarefas, o bloco continua sendo o da tarefa (sem contar duas vezes). Os sinais ficam só em memória da sessão.
+- **Barris** seguem vindo só de fontes reais. Sem dado = cinza, nada inventado.
+- **HUD "Tempo ativo"** usa a fonte unificada da Etapa 14 (`timings.active`, com `activeSeconds`/`activeSource` da missão como reserva) e mostra a fonte no tooltip.
+- **Legenda**: o quadradinho virou um **logo pixel-art 12x12** da plataforma (Claude, Codex, Antigravity, Gemini, OpenCode, genérico), desenhado em canvas sem imagens externas (`platformLogos.ts`, `PlatformLogo.tsx`). Shells não viram herói; qualquer outro agente usa o logo genérico.
+
+## Abas de missão (Etapa 15)
+
+- Cada aba de missão do topo tem um **X**: fecha os terminais da missão. Com a missão **em andamento** pede confirmação (`closeMissionNeedsConfirm`); terminada ou rascunho fecha direto.
+- Botão **Grade** ao lado de Abas/Canvas: mostra **todos os panes da missão lado a lado** (`canvas/gridMode.ts`). A opção é **individual por missão** e persistida (`ade-mission-grids` no `localStorage`); o padrão segue como antes. Os xterms não são remontados: a grade só desenha os huecos e o `TerminalPanel` os ubica.

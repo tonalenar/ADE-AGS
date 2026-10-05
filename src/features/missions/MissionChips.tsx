@@ -1,10 +1,12 @@
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { AppDialog } from "@/shared/ui/AppDialog";
+import { Button } from "neogestify-ui-components";
 
-import { openFree, openMission, tabsByMission, useActiveGroup, useMissionIndex } from "./groups";
+import { closeMissionNeedsConfirm, openFree, openMission, tabsByMission, useActiveGroup, useMissionIndex } from "./groups";
 import { useMissionsStore } from "./store";
 
 const CHIP = `cc-t shrink-0 flex items-center gap-1.5 h-6 px-2.5 rounded-md text-[11.5px] font-medium whitespace-nowrap`;
@@ -22,6 +24,15 @@ export function MissionChips() {
   const index = useMissionIndex();
   const group = useActiveGroup();
   const open = useMemo(() => tabsByMission(index, tabs), [index, tabs]);
+  const closeTab = useTabsStore((s) => s.closeTab);
+  const [closing, setClosing] = useState<string | null>(null);
+
+  const closeMission = (id: string) => (open[id] ?? []).forEach((tabId) => closeTab(tabId));
+  const requestClose = (id: string) => {
+    if (closeMissionNeedsConfirm(missions.find((m) => m.id === id)?.status)) setClosing(id);
+    else closeMission(id);
+  };
+  const closingMission = missions.find((m) => m.id === closing);
 
   // Solo las que tienen terminales abiertas: una misión sin pestañas no tiene qué mostrar acá.
   const shown = missions.filter((m) => (open[m.id]?.length ?? 0) > 0);
@@ -41,14 +52,36 @@ export function MissionChips() {
         {free > 0 && <span className="text-[10px] tabular-nums opacity-60">{free}</span>}
       </button>
       {shown.map((m) => (
-        <button key={m.id} type="button" className={`${CHIP} ${style(group === m.id)}`} title={m.objective}
-          onClick={() => { if (openMission(m.id)) navigate("/workspace"); }}>
-          <span className={`w-1.5 h-1.5 rounded-full ${m.status === "running" ? "bg-emerald-500" : "bg-gray-400"}`} />
-          <span className="max-w-40 truncate">{m.title}</span>
-          <span className="text-[10px] tabular-nums opacity-60">{open[m.id]?.length}</span>
-        </button>
+        <div key={m.id} className={`group/chip ${CHIP} ${style(group === m.id)} pr-1`}>
+          <button type="button" className="flex items-center gap-1.5 h-full" title={m.objective}
+            onClick={() => { if (openMission(m.id)) navigate("/workspace"); }}>
+            <span className={`w-1.5 h-1.5 rounded-full ${m.status === "running" ? "bg-emerald-500" : "bg-gray-400"}`} />
+            <span className="max-w-40 truncate">{m.title}</span>
+            <span className="text-[10px] tabular-nums opacity-60">{open[m.id]?.length}</span>
+          </button>
+          <Button variant="icon" title={t("missions.chips.close")} aria-label={t("missions.chips.close")}
+            onClick={(e) => { e.stopPropagation(); requestClose(m.id); }}
+            className="shrink-0 flex items-center justify-center w-4 h-4 rounded p-0 text-gray-400 hover:text-gray-700
+              dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/15">
+            <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
+              <line x1="1" y1="1" x2="7" y2="7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+              <line x1="7" y1="1" x2="1" y2="7" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
+            </svg>
+          </Button>
+        </div>
       ))}
       <span className="w-px h-5 mx-1 bg-gray-200 dark:bg-white/10" />
+      {closing && (
+        <AppDialog title={t("missions.chips.closeTitle")} size="sm" closeOnEsc onClose={() => setClosing(null)}
+          footer={<>
+            <Button variant="outline" onClick={() => setClosing(null)}>{t("btn.cancel")}</Button>
+            <Button variant="danger" onClick={() => { closeMission(closing); setClosing(null); }}>{t("missions.chips.closeConfirm")}</Button>
+          </>}>
+          <p className="text-sm text-gray-600 dark:text-gray-300">{t("missions.chips.closeBody", { name: closingMission?.title ?? "" })}</p>
+        </AppDialog>
+      )}
     </div>
   );
 }
+
+
