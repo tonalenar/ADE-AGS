@@ -9,10 +9,12 @@ use uuid::Uuid;
 use crate::util::now_ts;
 
 use super::types::{Mission, MissionInput, MissionSummary, status};
+use super::{FailureActionKey, FailureCategory, FailureClassification};
 
 const COLUMNS: &str = "id, workspace_id, title, objective, cwd, status, max_parallel, budget_usd, \
                        lead_agent_id, lead_model, lead_account_id, auto_account, complexity, \
-                       active_run_id, created_at, updated_at, started_at, ended_at, squad_id, reasoning_effort";
+                       active_run_id, created_at, updated_at, started_at, ended_at, squad_id, reasoning_effort, \
+                       failure_class, failure_action_key, failure_detail";
 
 /// Lo mismo que acepta `run_start_orchestration`: más de seis a la vez deja de ser
 /// paralelismo que alguien pueda seguir.
@@ -41,6 +43,21 @@ fn row_to_mission(row: &Row) -> rusqlite::Result<Mission> {
         ended_at: row.get(17)?,
         squad_id: row.get(18)?,
         reasoning_effort: row.get(19)?,
+        failure_classification: {
+            let category = row.get::<_, Option<String>>(20)?;
+            let action_key = row.get::<_, Option<String>>(21)?;
+            match (
+                category.as_deref().and_then(FailureCategory::from_db),
+                action_key.as_deref().and_then(FailureActionKey::from_db),
+            ) {
+                (Some(category), Some(action_key)) => Some(FailureClassification {
+                    category,
+                    action_key,
+                }),
+                _ => None,
+            }
+        },
+        failure_detail: row.get(22)?,
     })
 }
 
@@ -254,12 +271,12 @@ pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>
         .query_map([workspace_id], |row| {
             Ok(MissionSummary {
                 mission: row_to_mission(row)?,
-                spent_usd: row.get(20)?,
-                workers_total: row.get(21)?,
-                workers_done: row.get(22)?,
-                lead_agent: row.get(23)?,
-                lead_status: row.get(24)?,
-                active_seconds: row.get(25)?,
+                spent_usd: row.get(23)?,
+                workers_total: row.get(24)?,
+                workers_done: row.get(25)?,
+                lead_agent: row.get(26)?,
+                lead_status: row.get(27)?,
+                active_seconds: row.get(28)?,
             })
         })
         .map_err(|e| e.to_string())?
@@ -340,7 +357,7 @@ pub fn mark_started(conn: &Connection, mission: &Mission, run_id: &str) -> Resul
     let n = conn
         .execute(
             "UPDATE missions SET status = ?1, active_run_id = ?2, started_at = ?3, updated_at = ?3,
-                                 ended_at = NULL
+                                 ended_at = NULL, failure_class = NULL, failure_action_key = NULL, failure_detail = NULL
              WHERE id = ?4 AND status = ?5 AND active_run_id IS ?6
                    AND status IN ('draft', 'failed')",
             rusqlite::params![status::RUNNING, run_id, now, mission.id, mission.status, mission.active_run_id],
@@ -355,7 +372,7 @@ pub fn mark_started_terminals(conn: &Connection, id: &str) -> Result<bool, Strin
     let now = now_ts();
     let n = conn
         .execute(
-            "UPDATE missions SET status = ?1, active_run_id = NULL, started_at = ?2, updated_at = ?2, ended_at = NULL
+            "UPDATE missions SET status = ?1, active_run_id = NULL, started_at = ?2, updated_at = ?2, ended_at = NULL, failure_class = NULL, failure_action_key = NULL, failure_detail = NULL
              WHERE id = ?3 AND status IN ('draft', 'failed')",
             rusqlite::params![status::RUNNING, now, id],
         )
@@ -406,16 +423,21 @@ pub fn status_for_run(run_status: &str) -> &'static str {
 ///
 /// Un borrador no tiene run y no se toca. Devuelve el estado resultante.
 pub fn refresh_status(conn: &Connection, id: &str) -> Result<Option<String>, String> {
-    let row: Option<(String, Option<String>)> = conn
+    let row: Option<(String, Option<String>, Option<String>)> = conn
         .query_row(
-            "SELECT m.status, r.status FROM missions m LEFT JOIN runs r ON r.id = m.active_run_id
+            "SELECT m.status, r.status,
+                    (SELECT t.error FROM tasks t
+                     WHERE t.run_id = m.active_run_id AND t.status = 'failed' AND t.error IS NOT NULL
+                     ORDER BY CASE WHEN t.role = 'lead' THEN 0 ELSE 1 END,
+                              t.created_at DESC, t.rowid DESC LIMIT 1)
+             FROM missions m LEFT JOIN runs r ON r.id = m.active_run_id
              WHERE m.id = ?1",
             [id],
-            |r| Ok((r.get(0)?, r.get(1)?)),
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
         )
         .optional()
         .map_err(|e| e.to_string())?;
-    let Some((current, run_status)) = row else {
+    let Some((current, run_status, error)) = row else {
         return Ok(None);
     };
     let Some(run_status) = run_status else {
@@ -424,11 +446,30 @@ pub fn refresh_status(conn: &Connection, id: &str) -> Result<Option<String>, Str
     let next = status_for_run(&run_status);
     if next != current {
         let now = now_ts();
+        let error = error.filter(|error| !error.trim().is_empty());
+        let classification = if next == status::FAILED {
+            error.as_deref().and_then(super::failure::classify)
+        } else {
+            None
+        };
+        let detail = if next == status::FAILED {
+            error.as_deref().map(super::failure::detail)
+        } else {
+            None
+        };
         conn.execute(
             "UPDATE missions SET status = ?1, updated_at = ?2,
-                                 ended_at = CASE WHEN ?1 = 'running' THEN NULL ELSE COALESCE(ended_at, ?2) END
-             WHERE id = ?3",
-            rusqlite::params![next, now, id],
+                                 ended_at = CASE WHEN ?1 = 'running' THEN NULL ELSE COALESCE(ended_at, ?2) END,
+                                 failure_class = ?3, failure_action_key = ?4, failure_detail = ?5
+             WHERE id = ?6",
+            rusqlite::params![
+                next,
+                now,
+                classification.map(|value| value.category.as_str()),
+                classification.map(|value| value.action_key.as_str()),
+                detail,
+                id,
+            ],
         )
         .map_err(|e| e.to_string())?;
     }

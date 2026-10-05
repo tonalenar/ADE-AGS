@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 26;
+const SCHEMA_VERSION: i32 = 28;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -621,10 +621,24 @@ pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
              created_at      INTEGER NOT NULL,
              updated_at      INTEGER NOT NULL,
              started_at      INTEGER,
-             ended_at        INTEGER
+             ended_at        INTEGER,
+             failure_class   TEXT,
+             failure_action_key TEXT,
+             failure_detail  TEXT
          );
          CREATE INDEX IF NOT EXISTS idx_missions_workspace ON missions(workspace_id);",
     )?;
+    if table_exists(conn, "missions") {
+        if !has_column(conn, "missions", "failure_class") {
+            conn.execute("ALTER TABLE missions ADD COLUMN failure_class TEXT", [])?;
+        }
+        if !has_column(conn, "missions", "failure_action_key") {
+            conn.execute("ALTER TABLE missions ADD COLUMN failure_action_key TEXT", [])?;
+        }
+        if !has_column(conn, "missions", "failure_detail") {
+            conn.execute("ALTER TABLE missions ADD COLUMN failure_detail TEXT", [])?;
+        }
+    }
     if !has_column(conn, "runs", "mission_id") {
         conn.execute(
             "ALTER TABLE runs ADD COLUMN mission_id TEXT REFERENCES missions(id) ON DELETE SET NULL",

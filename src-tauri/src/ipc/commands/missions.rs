@@ -32,6 +32,8 @@ fn summary(detail: &MissionDetail) -> Value {
         "status": m.status,
         "cwd": m.cwd,
         "activeRunId": m.active_run_id,
+        "failureClassification": m.failure_classification,
+        "failureDetail": m.failure_detail,
         "tasks": detail.tasks.iter().map(|t| json!({
             "id": t.id,
             "title": t.title,

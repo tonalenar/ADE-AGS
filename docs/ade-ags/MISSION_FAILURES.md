@@ -1,14 +1,28 @@
-# Classificação de falhas de missão (Etapa 10, ponto 3 — UI)
+# Classificação de falhas de missão (Etapa 10, ponto 3)
 
-Contrato final com o backend (Classificador): `Mission.failureClassification: null | { category, actionKey }`, com `category` em `access | limit | model | crash | timeout` e `actionKey` uma chave i18n. Ausente/`null`/categoria desconhecida em missão `failed` = `unknown` ("Falha sem classificação"), sem inventar causa; missões antigas não são reescritas.
+Uma missão que termina como `failed` pode expor `failureClassification`, com `category` (`access`, `limit`, `model`, `crash` ou `timeout`) e `actionKey` (chave i18n `missions.failure.action.*`). `failureDetail` guarda o erro da tarefa Lead que falhou ou, na ausência dele, da tarefa com falha mais recente, limitado a 600 caracteres. Uma falha sem correspondência fica sem classificação; não inventamos a causa.
 
-## Chaves i18n (pt-BR/en/es)
-- Rótulo por categoria: `missions.failure.label.<access|limit|model|crash|timeout|unknown>`.
-- Ação: `missions.failure.action.<loginAgain|checkPlanOrBalance|waitForQuotaReset|checkPlanAccess|checkServiceStatus|chooseAvailableModel|restartAgent|retryAfterTimeout|unknown>`. Se o `actionKey` não for dessa família, usa `unknown`.
+## Heurísticas
+
+O classificador reutiliza `runs::failure::classify`: erros de quota permanecem `limit` e credenciais rejeitadas permanecem `access`, com a mesma prioridade usada pelo failover. Também reconhece erros de acesso HTTP 403 e indisponibilidade 503, erros de modelo inexistente ou inválido, falhas de inicialização/crash e timeout (inclusive HTTP 504).
+
+| Categoria | Ação sugerida |
+|---|---|
+| access | missions.failure.action.loginAgain, checkPlanOrBalance, checkPlanAccess ou checkServiceStatus |
+| limit | missions.failure.action.waitForQuotaReset |
+| model | missions.failure.action.chooseAvailableModel |
+| crash | missions.failure.action.restartAgent |
+| timeout | missions.failure.action.retryAfterTimeout |
+
+Os textos das ações ficam nas traduções pt-BR/en/es do Frontend.
+
+## API e persistência
+
+`mission_list` devolve os campos em cada `MissionSummary` (herdados de `Mission`). `mission_get` os devolve em `MissionDetail.mission`. A CLI `ags mission status|wait|run` também inclui os campos no resumo.
+
+A classificação e o detalhe são gravados ao fechar a missão como falha, junto do run ativo. Ao iniciar um retry, os campos da tentativa anterior são limpos; os erros anteriores continuam nos runs/tasks históricos. Missões antigas não recebem classificação retroativa. O detalhe original é limitado a 600 caracteres.
 
 ## Onde aparece
-- **Detalhe da missão:** `FailureNotice` (rótulo + ação) acima do aviso de "tentar novamente".
-- **QG do bot:** na aba STATUS, um cartão por causa (`failuresByClass` em `botStats.ts`); na aba MISSÕES, a causa e a ação da missão selecionada.
 
-## Pendente
-Backend gravar/expor `failureClassification` ao fechar a missão (Classificador). Até lá tudo aparece como `unknown`.
+- Detalhe da missão: `FailureNotice` mostra rótulo, ação e o detalhe opcional.
+- QG do bot: um cartão por causa na aba STATUS e a causa/ação da missão selecionada na aba MISSÕES.
