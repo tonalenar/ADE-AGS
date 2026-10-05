@@ -91,15 +91,13 @@ export function leadBriefing(mission: Pick<Mission, "title" | "objective"> & { i
     '- `ags peer check "<nome>"` — vê a tela dele agora.',
     '- `ags notify "<mensagem>"` — chama o usuário só quando precisar dele.',
     "",
-<<<<<<< HEAD
-    "SÓ RECRUTE quando a tarefa for independente e paralelizável e a divisão for mais rápida que um agente só; o QG mostra o ganho por missão.",
-=======
     "MENOS CONVERSA, MAIS REGISTRO:",
     "- Antes de perguntar de novo, releia o objetivo, os achados e a memória aprovada já recebidos. Pergunte apenas a lacuna concreta que bloqueia uma decisão ou o avanço.",
     "- Em tarefas do Mission Runtime, use o Handoff Structured v1 como entrega registrada; consulte `task_result` apenas quando precisar do payload completo. Não peça novamente resumo, arquivos, testes ou decisões que já constem no handoff.",
     "- Neste canvas de terminais, combine uma única entrega final curta por integrante: resultado, decisões, arquivos tocados, testes e bloqueios. Atualizações intermediárias servem para bloqueios ou mudanças de decisão.",
     "",
->>>>>>> feat/etapa11-p5-memoria
+    "SÓ RECRUTE quando a tarefa for independente e paralelizável e a divisão for mais rápida que um agente só; o QG mostra o ganho por missão.",    "",
+"",
     "MAIS TERMINAIS (você tem autonomia):",
     '- `ags peer recruit "<nome>" --agent <id> --role <papel> [--model <id>] [--effort <nível>]` — abre outro terminal já conectado a você quando a equipe não der conta (ex.: uma tarefa paralela, uma revisão independente).',
     `- Máximo de ${MAX_EXTRA_TERMINALS} terminais extras por missão; cada um custa memória e tokens. Só abra quando houver trabalho real para ele, dê a ele um nome e papel claros e feche (ou deixe encerrar) quando acabar.`,
