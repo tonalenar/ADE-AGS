@@ -138,4 +138,4 @@ A integração nativa oferece Lead e Worker, model discovery via `agy models` e 
 
 ## 17. Classificação de falhas (Etapa 10, ponto 3)
 
-**UI implementada:** causa + ação sugerida no QG e no detalhe da missão. Pendente: backend gravar `failureClass`. Ver [MISSION_FAILURES.md](./MISSION_FAILURES.md).
+**UI implementada:** causa + ação sugerida no QG e no detalhe da missão. Pendente: backend expor `failureClassification`. Ver [MISSION_FAILURES.md](./MISSION_FAILURES.md).
