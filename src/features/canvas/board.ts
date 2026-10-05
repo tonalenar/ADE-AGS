@@ -222,6 +222,37 @@ export function placeInGrid(board: Board, ids: string[]): Board {
   return board;
 }
 
+/** Posiciona um recruit na primeira célula livre depois do time atual, sem mover panes existentes. */
+export function placeInNextGridCell(board: Board, memberIds: string[], tabId: string): Board {
+  const ids = [...new Set(memberIds.filter((id) => id !== tabId))];
+  const first = board.nodes[ids[0]];
+  const recruit = board.nodes[tabId];
+  if (!first || !recruit || ids.some((id) => !board.nodes[id])) return board;
+
+  const gridIds = [...ids, tabId];
+  const cellW = Math.max(...gridIds.map((id) => board.nodes[id].w)) + GAP;
+  const cellH = Math.max(...gridIds.map((id) => board.nodes[id].h)) + GAP;
+  const others = [
+    ...Object.entries(board.nodes).filter(([id]) => id !== tabId).map(([, box]) => box),
+    ...Object.values(board.notes).map((note) => note.box),
+    ...Object.values(board.portals).map((portal) => portal.box),
+  ];
+
+  for (let index = ids.length; index < ids.length + 1000; index++) {
+    const { col, row } = gridCell(index);
+    const candidate = {
+      x: first.x + col * cellW,
+      y: first.y + row * cellH,
+      w: recruit.w,
+      h: recruit.h,
+    };
+    if (!others.some((other) => overlaps(candidate, other))) {
+      return { ...board, nodes: { ...board.nodes, [tabId]: candidate } };
+    }
+  }
+  return board;
+}
+
 /** Conecta dos terminales. Una consigo misma o una conexión repetida no hacen nada. */
 export function addEdge(board: Board, a: string, b: string, id: string = crypto.randomUUID()): Board {
   if (a === b) return board;
