@@ -196,3 +196,40 @@ Implementado em `feat/etapa13-3-recruit-padrao` (empilhada nas anteriores): `ags
 Fonte única em `missions/active.rs`: `mission_active` positivo → união de spans `turn`/`peer_ask` → relógio de parede com `started_at` → não medido. Lista, QG, painel de tempos, `ags mission efficiency`/`timings` e medianas históricas por faixa de agentes usam a mesma duração e identificam sua fonte. Spans permanecem como detalhe por turno (`turnMs`) e gargalos. Sem migração nem alteração de dados antigos.
 
 A fotografia somente leitura do banco real mostrou cobertura de 9/47 missões em `mission_active` e 20/47 em spans; na missão `f754b31f`, 4.322 s contra 28 s. Semântica, limitações, comparação e contratos em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md); integração com a seção Tempos em [MISSION_TOKENS.md](./MISSION_TOKENS.md#tempo-ativo-da-missão). A validação inclui escolha de fonte/fallback e consistência entre lista, eficiência e tempos nos três caminhos.
+
+## Etapa 15 — Início rápido, Ao vivo que funciona e abas
+
+Cinco pontos de melhoria estrutural focados na velocidade de inicialização das equipes, segurança operacional e visibilidade em tempo real.
+
+### Ponto 1 — Início rápido da missão
+- **Problema:** O boot de terminais levava de 5 a 11 s, mas o primeiro turno dos agentes demorava de 7 a 13 minutos (Etapa 14: Frontend 488 s, Orquestrador 421 s, QA 800 s; primeiro peer ask do orquestrador apenas aos 701 s, que expirou). O atraso vinha do orquestrador explorando código antes de delegar, membros explorando/editando por conta própria antes de receberem tarefas e múltiplos agentes dividindo o mesmo worktree concorrentemente ("Backend já está editando o Rust neste worktree").
+- **Implementado:**
+  1. Métrica "tempo até a primeira delegação" (`spans`/`peer_message`) visível no QG do bot e na CLI `ags mission timings`.
+  2. Protocolo de briefing estruturado: orquestrador elabora plano conciso e delega a cada integrante em até ~2 minutos antes de realizar exploração profunda; briefing dos integrantes proíbe exploração ou edição prévia à tarefa.
+  3. Worktree e branch dedicados por integrante no início da missão, reaproveitando a infraestrutura de `floors.rs`/setup da Etapa 11 (junction de `node_modules` no Windows e `CARGO_TARGET_DIR` isolado `per-worktree` para evitar disputa de lock do Rust). O briefing informa o caminho exato e a branch do integrante.
+  4. Pré-preenchimento no briefing com as informações apuradas pelo precheck e pela Shared Memory, eliminando buscas redundantes. Redução medida do primeiro turno de 7-13 min para ~2 min.
+- Detalhes e contratos em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+
+### Ponto 2 — 'X' nas abas de missão
+- **Implementado:** Botão de fechamento ('X') integrado diretamente nos chips/abas de missão no topo da interface (`MissionChips.tsx`).
+- **Segurança operacional:** Fechamento com verificação de estado (`closeMissionNeedsConfirm` em `groups.ts`). Missões em andamento (`running`) exibem diálogo de confirmação com aviso de encerramento de processos/terminais dos agentes (`missions.chips.closeTitle`, `missions.chips.closeBody`). Missões já concluídas, canceladas ou sem processo ativo fecham imediatamente sem diálogo redundante.
+- Suporte a i18n completo (pt-BR, en, es).
+
+### Ponto 3 — Ao vivo que funciona para missões em terminais
+- **Problema:** No arcade do QG do bot (`LiveArcade`), heróis ficavam estáticos na viga inferior ("equipe") porque missões em terminais não utilizam tarefas clássicas de DAG/Run. O HUD de "Tempo ativo" exibia "não medido" mesmo com a missão em execução.
+- **Implementado:**
+  1. Derivação de andares e estados através de sinais reais de terminais e papéis: Abertura (briefing/aguardando), Trabalho (saída sustentada em terminal), Testes (papel QA/testes), Revisão (papel revisor) e Entrega (conclusão).
+  2. Animação e movimentação física: heróis andam pelas vigas e sobem/descem escadas reais nas mudanças de andar; patrulham durante saída sustentada, dormem (`Z`) quando inativos e assumem alerta (`!`) em bloqueios ou esperas.
+  3. Blocos da torre erguidos na entrega final de cada integrante (`peer tell` padronizado de encerramento).
+  4. Barris estritamente atrelados a fontes reais (aprovação pendente, checks falhando, memórias pendentes, peer ask expirado).
+  5. HUD "Tempo ativo" alimentado pela fonte unificada da Etapa 14 (`activeSeconds` e `activeSource`), refletindo tempo ativo real sem exibir "não medido" em missões ativas; sem dados disponíveis permanece cinza.
+- Detalhes visuais e contratos em [LIVE_ARCADE.md](./LIVE_ARCADE.md).
+
+### Ponto 4 — Logos em pixel art na legenda
+- **Implementado:** Substituição do antigo marcador quadrado por ícones pixel-art 12x12 de cada plataforma (Claude, Codex, Antigravity, Gemini, OpenCode e genérico) ao lado do status do agente na legenda do Ao Vivo.
+- Desenhados programmaticamente via Canvas/CSS sem uso de imagens externas ou assets adicionais.
+
+### Ponto 5 — Modo abas com panes lado a lado em grade
+- **Implementado:** Na visualização de abas da missão (ao lado de Canvas), opção para dispor todos os panes lado a lado em grade.
+- Configuração individual por missão/aba, persistida localmente (não global), mantendo a visualização tradicional empilhada/tabulada como padrão.
+- i18n completo (pt-BR, en, es) e testes dedicados.

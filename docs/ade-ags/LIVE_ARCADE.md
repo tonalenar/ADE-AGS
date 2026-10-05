@@ -46,3 +46,46 @@ A quinta aba do BotPanel mostra uma missão por vez em um canvas pixel art. A mi
 - A **visão unificada** (seletor TODAS | missão) não muda: cada missão tem seu fliperama e, portanto, **sua própria torre**.
 - Limite mantido: o `peer ask` ainda pendente não é exposto pelo app, só o expirado.
 - Lógica pura: `placeBarrels`, `heroLift`, `rollDir` (`liveArcadeScene.ts`) e `deriveHeroes({ barrels })`.
+
+## v3.3 — Ao vivo para missões em terminais e logos pixel-art (Etapa 15)
+
+### O problema das missões em terminais
+Nas missões conduzidas inteiramente no canvas de terminais da ADE-AGS, não existem `Task`s do Mission Runtime (DAG). Com isso, as versões anteriores do fliperama mantinham todos os heróis parados na viga inferior (chão / equipe) sem qualquer evolução vertical pelos andares. O HUD de "Tempo ativo" frequentemente exibia "não medido" mesmo com a missão em execução.
+
+### Sinais reais e andares por papel/estado
+Para refletir o progresso real sem inventar tarefas fictícias, a versão 3.3 deriva o andar e a animação do herói diretamente dos sinais dos terminais e da comunicação entre agentes:
+
+1. **Andar 1 — Abertura (`opening`):**
+   - Agente em fase de boot, briefing ou em espera ativa antes do recebimento de tarefa.
+2. **Andar 2 — Trabalho (`work`):**
+   - Agentes de desenvolvimento (Backend, Frontend, etc.) com saída sustentada (`sustainedTabIds`).
+3. **Andar 3 — Testes (`tests`):**
+   - Agentes no papel de QA / validação ou executando suítes de testes (`cargo test`, `vitest`, `tsc`).
+4. **Andar 4 — Revisão (`review`):**
+   - Agentes de revisão de código (`code-reviewer`, `Revisor`) ou tarefas de auditoria/aprovação.
+5. **Andar 5 — Entrega (`delivery`):**
+   - Estado final da missão ou entrega concluída.
+
+### Animação, vigas e escadas
+- **Movimentação física:** Os heróis andam de verdade pelas vigas e utilizam escadas para subir ou descer entre os andares quando o papel ou estado é alterado.
+- **Patrulha (`running`):** Enquanto há saída sustentada no terminal, o herói patrulha a viga do andar correspondente.
+- **Dormência (`sleeping` / `Z`):** Quando o terminal fica quieto/inativo, o herói adormece.
+- **Alerta (`!`):** Quando parado esperando resposta, com aprovação pendente ou `peer ask` expirado.
+
+### Construção da torre por entregas finais
+- Cada entrega final enviada por um integrante via `ags peer tell "Orquestrador"` adiciona um novo bloco à torre da missão.
+- A torre passa a refletir fielmente o avanço e as conclusões dos membros em missões de terminais.
+
+### Barris e HUD de Tempo Ativo
+- **Barris:** Continuam restritos a fontes estritamente reais (aprovação pendente, checagens falhando, memórias sugeridas sem resposta, `peer ask` expirado).
+- **Tempo ativo unificado:** O HUD consome `activeSeconds` e `activeSource` (fonte unificada da Etapa 14). Durante a execução da missão, exibe o tempo ativo medido em vez de "não medido"; na ausência comprovada de fonte, permanece neutro/cinza.
+
+### Logos em pixel art 12x12 na legenda
+- O antigo quadrado genérico ao lado da identificação do agente ("Orquestrador · Claude CORRENDO") é substituído por um logotipo pixel-art 12x12 de cada plataforma:
+  - **Claude:** raios/centelha em tons característicos.
+  - **Codex:** viseira estilizada.
+  - **Antigravity:** antena e contorno cósmico.
+  - **Gemini:** diamante/estrela de quatro pontas.
+  - **OpenCode:** chaves de código estilizadas.
+  - **Genérico:** terminal neutro para plataformas não catalogadas.
+- Desenhados integralmente via Canvas / CSS puro, sem assets adicionais ou dependências externas.
