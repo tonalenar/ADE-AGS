@@ -167,3 +167,6 @@ Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--te
 ## Etapa 11 — eficiência entre agentes, ponto 2 (peer ask)
 
 **Implementado:** prazo inclui preparação/envio; `peer check` consulta status e resposta parcial da última pergunta sem repetir o pedido. `mission timings` apresenta ranking de gargalos por agente a partir de `peer_ask` e `turn`. Turnos após o briefing também são registrados, com dono único e preservação de `detail: "briefing"`. Eventos de comunicação do ponto 1 são reutilizados por destino, inclusive em batch/recruit. Detalhes e limites de inferência em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+## Etapa 11 — Eficiência entre agentes
+
+**Ponto 3 implementado:** ao criar o worktree, a app prepara a junction de `node_modules` no Windows ou symlink em Unix, sem substituir diretórios existentes; falhas geram aviso sem bloquear o recruit. O briefing inicial inclui caminho, shell e comandos de validação, com `cargo test --lib` filtrado. O target Cargo compartilhado é configurável como `per-worktree` para evitar disputa de lock entre agentes simultâneos, com o custo de recompilar dependências uma vez por worktree. O procedimento multiplataforma está em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
