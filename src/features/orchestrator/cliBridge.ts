@@ -10,6 +10,8 @@ import { runBrowserRequest, runPortalRequest, type BrowserRequest } from "@/feat
 import type { ViewOwner } from "@/features/tabs/viewTabs";
 import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
+import { getAutonomy } from "@/features/missions/autonomy";
+import { recruitCommand } from "./recruitCommand";
 import { respondToCli } from "./ipc";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 import { boardKey, boardKeyOfTab, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
@@ -93,7 +95,11 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
   // Un nombre propio (el que le da una orquestadora al sumar un agente) queda como título
   // fijo: es el nombre con el que los demás agentes lo van a llamar.
   const title = str(args, "title");
-  const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch, title, titleIsCustom: title ? true : undefined });
+  // Un agente sumado por una orquestadora arranca como los del equipo: con el nivel de permisos
+  // elegido (sin eso pedía confirmación en cada paso y el equipo esperaba) y con el modelo y el
+  // esfuerzo que se pidieron (sin eso abría con el predeterminado de la TUI).
+  const launchAgent = { ...agent, command: recruitCommand(agent.id, agent.command, getAutonomy(), str(args, "model"), str(args, "effort")) };
+  const tabId = useTabsStore.getState().addTab({ cwd, agent: launchAgent, accountId, prelaunch, title, titleIsCustom: title ? true : undefined });
 
   // Mismo gate que el wizard del "+": las skills tienen que estar en disco antes de que
   // el proceso arranque. Se espera acá (y no solo se registra) para que la CLI no
