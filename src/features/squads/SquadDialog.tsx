@@ -8,7 +8,7 @@ import { AccountPickerStep, AUTO_ACCOUNT } from "@/features/tabs/wizard/AccountP
 import { AppDialog } from "@/shared/ui/AppDialog";
 
 import { addSquadRole, availableSquadRoles, EMPTY_SQUAD_INPUT, removeSquadRole } from "./squadForm";
-import { modelSelectionMode, modelsForAccount, withModelEffort } from "./modelSelection";
+import { fastModeSupport, modelSelectionMode, modelsForAccount, withModelEffort } from "./modelSelection";
 import { ModelSelector } from "@/features/runs/ModelSelector";
 import { leadUnsupported, providerDisabled } from "@/features/runs/leadProviders";
 import type { FunctionalRole, Squad, SquadInput, SquadMemberInput } from "./types";
@@ -91,6 +91,7 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
             agentId={form.lead.agentId}
             model={form.lead.model}
             reasoningEffort={form.lead.reasoningEffort}
+            fastMode={form.lead.fastMode}
             accountId={form.lead.accountId}
             autoAccount={form.lead.autoAccount}
             complexity={form.lead.complexity}
@@ -135,6 +136,7 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
                   agentId={member.agentId}
                   model={member.model}
                   reasoningEffort={member.reasoningEffort}
+                  fastMode={member.fastMode}
                   accountId={member.accountId}
                   autoAccount={member.autoAccount}
                   complexity={member.complexity}
@@ -158,13 +160,14 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
 
 type AgentPatch = Partial<Omit<SquadMemberInput, "roleId">>;
 
-function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, accountId, autoAccount, complexity, isolateDefault, availability, unavailableReason, onChange, lead = false }: {
+function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, fastMode, accountId, autoAccount, complexity, isolateDefault, availability, unavailableReason, onChange, lead = false }: {
   lead?: boolean;
   roster: Roster | null;
   onRoster: (roster: Roster) => void;
   agentId: string;
   model: string | null;
   reasoningEffort?: string | null;
+  fastMode?: boolean;
   accountId: string | null;
   autoAccount: boolean;
   complexity: SquadMemberInput["complexity"];
@@ -179,7 +182,7 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, accoun
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
       <Field label={t("squads.form.provider")}>
-        <select className={SELECT} value={agentId} onChange={(event) => onChange({ agentId: event.target.value, model: null, reasoningEffort: null, accountId: null, autoAccount: true })}>
+        <select className={SELECT} value={agentId} onChange={(event) => onChange({ agentId: event.target.value, model: null, reasoningEffort: null, fastMode: false, accountId: null, autoAccount: true })}>
           <option value="">{t("squads.form.chooseProvider")}</option>
           {agentId && (!roster || !roster.agents.some((agent) => agent.agentId === agentId)) && (
             <option value={agentId}>{agentId} · {t("squads.unavailable")}</option>
@@ -197,6 +200,18 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, accoun
       </Field>
       <ModelSelector roster={roster} agentId={agentId} accountId={accountId} autoAccount={autoAccount}
         model={model} reasoningEffort={reasoningEffort} complexity={complexity} onChange={onChange} onRoster={onRoster} />
+      {agentId === "codex" && (
+        <div className="md:col-span-2 flex flex-col gap-1">
+          <label className="flex items-center gap-2 text-[10.5px] text-gray-600 dark:text-white/55">
+            <input type="checkbox" role="switch" checked={fastMode === true} onChange={(event) => onChange({ fastMode: event.target.checked })} />
+            <span className="font-semibold">{t("squads.form.fast")}</span>
+            <span className="text-gray-400 dark:text-white/35">{t("squads.form.fastHint")}</span>
+          </label>
+          {fastMode === true && fastModeSupport(model, modelsForAccount(selectedAgent, accountId, autoAccount)) === "unsupported" && (
+            <span role="alert" className="text-[10px] text-amber-700 dark:text-amber-300">{t("squads.form.fastUnsupported")}</span>
+          )}
+        </div>
+      )}
       <Field group label={t("squads.form.account")}>
         {agentId ? (
           <AccountPickerStep agentId={agentId} value={accountValue}

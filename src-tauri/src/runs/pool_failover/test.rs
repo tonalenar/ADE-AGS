@@ -350,7 +350,7 @@ fn available_model(id: &str) -> crate::runs::roster::RosterModel {
     crate::runs::roster::RosterModel { id: id.into(), label: id.into(), toolcall: Some(true), local: false,
         cost_in: None, cost_out: None, context: None, source: Some("fixture".into()),
         availability: crate::runs::roster::ModelAvailability::Available, reasoning_levels: None,
-        default_reasoning: None, unavailable: None }
+        default_reasoning: None, fast_supported: None, unavailable: None }
 }
 
 #[test]

@@ -57,4 +57,15 @@ describe("Squad form", () => {
       expect(assignmentIsUnavailable(status)).toBe(true);
     }
   });
+
+  it("round-trips Fast mode and defaults it to off for saved squads that predate it", () => {
+    const squad = {
+      id: "s", name: "S", description: "", createdAt: 0, updatedAt: 0, available: true, unavailableReasons: [],
+      lead: { agentId: "codex", model: null, accountId: null, autoAccount: true, complexity: null, fastMode: true, availability: "available", unavailableReason: null },
+      members: [{ roleId: "backend", agentId: "codex", model: null, accountId: null, autoAccount: true, complexity: null, isolateDefault: true, availability: "available", unavailableReason: null }],
+    } as Squad;
+    const draft = inputFromSquad(squad);
+    expect(draft.lead.fastMode).toBe(true);
+    expect(draft.members[0].fastMode).toBe(false);
+  });
 });

@@ -178,3 +178,7 @@ Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--te
 ## Etapa 11 — eficiência entre agentes (ponto 5)
 
 **Menos conversa, mais memória:** o briefing consulta os registros existentes antes de perguntar; integrantes enviam uma única entrega final com resultado, decisões, arquivos, testes e bloqueios. Handoff Structured permanece como registro de entrega entre Tasks do Mission Runtime; Shared Memory guarda somente conhecimento aprovado e duradouro. Detalhes e comparação estática de tokens em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+
+## Etapa 13 — Squad: subagente padrão e modo Fast (ponto 1: Fast)
+
+Implementado em `feat/etapa13-1-fast`: schema v30 (`fast_mode` em `squads`/`squad_members`), interruptor "Modo Fast" só para Codex na tela de Squad (pt-BR/en/es), `withModel`/`recruitCommand` com `-c service_tier=fast` e `ags peer recruit --fast`. Detalhes em [ROLES_SQUADS.md](./ROLES_SQUADS.md).

@@ -39,6 +39,9 @@ pub struct SquadLeadInput {
     pub auto_account: bool,
     #[serde(default)]
     pub complexity: Option<Complexity>,
+    /// Modo Fast de Codex (`service_tier="fast"`). Solo vale con el agente `codex`.
+    #[serde(default)]
+    pub fast_mode: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -55,6 +58,8 @@ pub struct SquadMemberInput {
     pub auto_account: bool,
     #[serde(default)]
     pub complexity: Option<Complexity>,
+    #[serde(default)]
+    pub fast_mode: bool,
     #[serde(default)]
     pub isolate_default: bool,
 }
@@ -80,6 +85,7 @@ pub struct SquadLead {
     pub account_id: Option<String>,
     pub auto_account: bool,
     pub complexity: Option<String>,
+    pub fast_mode: bool,
     pub availability: AssignmentAvailability,
     pub unavailable_reason: Option<String>,
 }
@@ -96,6 +102,7 @@ pub struct SquadMember {
     pub account_id: Option<String>,
     pub auto_account: bool,
     pub complexity: Option<String>,
+    pub fast_mode: bool,
     pub isolate_default: bool,
     pub availability: AssignmentAvailability,
     pub unavailable_reason: Option<String>,

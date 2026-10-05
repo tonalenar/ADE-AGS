@@ -18,8 +18,21 @@ const MODEL_FLAG: Record<string, string> = {
   "gemini-cli": "-m",
 };
 
-/** El comando con el modelo y el esfuerzo pedidos. No repite lo que ya trae. Pura. */
-export function withModel(agentId: string, command: string, model?: string | null, effort?: string | null): string {
+/**
+ * Modo Fast de Codex: `service_tier` es la clave de config de la CLI (`codex -c service_tier=…`;
+ * el valor "fast" es el que graba la propia app de Codex y el catálogo lo declara por modelo en
+ * `additional_speed_tiers`). Valor fijo: nunca sale de texto libre, así no hay forma de colar un flag.
+ */
+const CODEX_FAST_FLAGS = ["-c", "service_tier=fast"];
+
+/** El comando con el modelo, el esfuerzo y (solo Codex) el modo Fast pedidos. No repite lo que ya trae. Pura. */
+export function withModel(
+  agentId: string,
+  command: string,
+  model?: string | null,
+  effort?: string | null,
+  fast?: boolean | null,
+): string {
   const parts = [command];
   const modelFlag = MODEL_FLAG[agentId];
   const cleanModel = model?.trim();
@@ -33,6 +46,9 @@ export function withModel(agentId: string, command: string, model?: string | nul
     } else if ((agentId === "antigravity" || agentId === "claude-code") && !hasFlag(command, "--effort")) {
       parts.push("--effort", cleanEffort);
     }
+  }
+  if (fast === true && agentId === "codex" && !command.includes("service_tier")) {
+    parts.push(...CODEX_FAST_FLAGS);
   }
   return parts.join(" ");
 }

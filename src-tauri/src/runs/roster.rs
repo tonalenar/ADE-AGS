@@ -75,6 +75,8 @@ pub struct RosterModel {
     pub availability: ModelAvailability,
     pub reasoning_levels: Option<Vec<String>>,
     pub default_reasoning: Option<String>,
+    /// El modelo ofrece el modo Fast (`service_tier`): `None` = el catálogo no lo dice.
+    pub fast_supported: Option<bool>,
     /// Por qué no se puede usar aunque la TUI lo liste (un modelo de Ollama sin descargar).
     pub unavailable: Option<String>,
 }
@@ -246,6 +248,7 @@ pub fn opencode_roster_models(
                 },
                 reasoning_levels: None,
                 default_reasoning: None,
+        fast_supported: None,
                 unavailable,
             }
         })
@@ -375,6 +378,7 @@ fn discover_catalog(
                 availability: ModelAvailability::Unknown,
                 reasoning_levels: None,
                 default_reasoning: None,
+        fast_supported: None,
                 unavailable: None,
             })
             .collect()),
@@ -413,7 +417,7 @@ fn catalogue_model(id: &str, label: &str, source: &str, availability: ModelAvail
     RosterModel {
         id: id.into(), label: label.into(), toolcall: None, local: false,
         cost_in: None, cost_out: None, context: None, source: Some(source.into()),
-        availability, reasoning_levels: None, default_reasoning: None, unavailable: None,
+        availability, reasoning_levels: None, default_reasoning: None, fast_supported: None, unavailable: None,
     }
 }
 

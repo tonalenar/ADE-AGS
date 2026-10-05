@@ -276,6 +276,25 @@ pub(super) fn peer_disconnect(app: &AppHandle, args: &Value) -> Result<Value, St
 ///
 /// La tarea va DESPUÉS de conectar: el agente nuevo tiene que poder contestar con
 /// `ags peer tell` desde su primer turno.
+/// `--fast` do recruit: o modo Fast é um `service_tier` de Codex, então em outro agente é um
+/// erro claro (antes de abrir qualquer aba) em vez de um flag que não faria nada.
+fn recruit_fast(args: &Value, agent: &str) -> Result<bool, String> {
+    let fast = match args.get("fast") {
+        None | Some(Value::Null) => false,
+        Some(Value::Bool(value)) => *value,
+        Some(Value::String(text)) => match text.trim().to_ascii_lowercase().as_str() {
+            "true" | "on" | "1" => true,
+            "false" | "off" | "0" => false,
+            _ => return Err("--fast aceita apenas o flag sozinho (ou on/off).".into()),
+        },
+        Some(_) => return Err("--fast aceita apenas o flag sozinho (ou on/off).".into()),
+    };
+    if fast && agent != "codex" {
+        return Err("--fast só existe para o Codex (--agent codex); outros agentes não têm esse modo.".into());
+    }
+    Ok(fast)
+}
+
 pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let me = orchestrator(app, args)?;
     let name = arg_str(args, "name")?;
@@ -360,6 +379,9 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         if let Some(value) = arg_str_opt(args, key).filter(|v| !v.trim().is_empty()) {
             create[key] = json!(value);
         }
+    }
+    if recruit_fast(args, &agent)? {
+        create["fast"] = json!(true);
     }
     let created = tab_create(app, &create)?;
     let tab_id = created.get("tabId").and_then(Value::as_str).ok_or("A aba foi criada sem id")?.to_string();
@@ -623,6 +645,17 @@ fn wait_turn(pty: u32, before: u64, timeout: Duration) -> bool {
 #[cfg(test)]
 mod test {
     use super::*;
+
+    #[test]
+    fn recruit_fast_only_for_codex_and_rejects_garbage() {
+        assert!(!recruit_fast(&json!({}), "claude-code").unwrap());
+        assert!(recruit_fast(&json!({ "fast": true }), "codex").unwrap());
+        assert!(recruit_fast(&json!({ "fast": "on" }), "codex").unwrap());
+        assert!(!recruit_fast(&json!({ "fast": "false" }), "claude-code").unwrap());
+        assert!(recruit_fast(&json!({ "fast": true }), "claude-code").unwrap_err().contains("Codex"));
+        assert!(recruit_fast(&json!({ "fast": "maybe" }), "codex").is_err());
+        assert!(recruit_fast(&json!({ "fast": 3 }), "codex").is_err());
+    }
 
     #[test]
     fn status_distinguishes_waiting_timeout_and_completion_and_freezes_elapsed() {

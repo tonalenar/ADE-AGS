@@ -28,6 +28,7 @@ export interface SquadLead {
   accountId: string | null;
   autoAccount: boolean;
   complexity: Complexity | null;
+  fastMode?: boolean;
   availability: AssignmentAvailability;
   unavailableReason: string | null;
 }
@@ -40,6 +41,7 @@ export interface SquadMember {
   accountId: string | null;
   autoAccount: boolean;
   complexity: Complexity | null;
+  fastMode?: boolean;
   isolateDefault: boolean;
   availability: AssignmentAvailability;
   unavailableReason: string | null;
@@ -64,6 +66,7 @@ export interface SquadLeadInput {
   accountId: string | null;
   autoAccount: boolean;
   complexity: Complexity | null;
+  fastMode?: boolean;
 }
 
 export interface SquadMemberInput {
@@ -74,6 +77,7 @@ export interface SquadMemberInput {
   accountId: string | null;
   autoAccount: boolean;
   complexity: Complexity | null;
+  fastMode?: boolean;
   isolateDefault: boolean;
 }
 

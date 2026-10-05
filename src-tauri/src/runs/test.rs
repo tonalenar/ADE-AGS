@@ -1914,6 +1914,7 @@ fn modelo(id: &str, toolcall: bool) -> RosterModel {
         availability: ModelAvailability::Unknown,
         reasoning_levels: None,
         default_reasoning: None,
+        fast_supported: None,
         unavailable: None,
     }
 }

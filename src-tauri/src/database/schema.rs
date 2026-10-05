@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 29;
+const SCHEMA_VERSION: i32 = 30;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1025,6 +1025,16 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
              checked_at   INTEGER NOT NULL
          );",
     )?;
+    if user_version(conn)? < 29 { set_user_version(conn, 29)?; }
+    // v30 — modo Fast de Codex por integrante del Squad (lead en `squads`, el resto en
+    // `squad_members`). Aditivo e idempotente: las filas viejas quedan en 0 = desactivado.
+    for table in ["squads", "squad_members"] {
+        if table_exists(conn, table) && !has_column(conn, table, "fast_mode") {
+            conn.execute_batch(&format!(
+                "ALTER TABLE {table} ADD COLUMN fast_mode INTEGER NOT NULL DEFAULT 0 CHECK(fast_mode IN (0,1));"
+            ))?;
+        }
+    }
     set_user_version(conn, SCHEMA_VERSION)
 }
 

@@ -49,3 +49,16 @@ export function withModelEffort(
 ) {
   return { ...patch, reasoningEffort: effort && patch.complexity === null && reasoningOptions(patch.model, catalog).includes(effort) ? effort : null };
 }
+
+/**
+ * Si el modelo elegido ofrece el modo Fast de Codex según el catálogo. `unknown` = sin modelo
+ * explícito (el de la TUI) o catálogo que no lo informa: no se avisa nada, solo `unsupported` avisa.
+ */
+export function fastModeSupport(
+  model: string | null,
+  catalog: { id: string; fastSupported?: boolean | null }[],
+): "supported" | "unsupported" | "unknown" {
+  const supported = catalog.find((entry) => entry.id === model)?.fastSupported;
+  if (supported === true) return "supported";
+  return supported === false ? "unsupported" : "unknown";
+}

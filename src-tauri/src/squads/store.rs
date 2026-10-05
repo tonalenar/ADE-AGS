@@ -9,7 +9,7 @@ use super::types::{
 };
 
 const SQUAD_COLUMNS: &str = "id, name, description, lead_agent_id, lead_model, lead_account_id, \
-                             lead_auto_account, lead_complexity, created_at, updated_at, reasoning_effort";
+                             lead_auto_account, lead_complexity, created_at, updated_at, reasoning_effort, fast_mode";
 
 pub(crate) fn validate_effort_input(model: Option<&str>, complexity: Option<Complexity>, effort: Option<&str>) -> Result<(), String> {
     if let Some(effort) = effort {
@@ -19,6 +19,15 @@ pub(crate) fn validate_effort_input(model: Option<&str>, complexity: Option<Comp
         if !matches!(effort, "none" | "minimal" | "low" | "medium" | "high" | "xhigh" | "max" | "ultra") {
             return Err("Unknown reasoning effort".into());
         }
+    }
+    Ok(())
+}
+
+/// El modo Fast es un `service_tier` de Codex: en otro agente no existe y se rechaza en vez
+/// de guardarlo y que quede sin efecto.
+pub(crate) fn validate_fast_input(agent_id: &str, fast: bool) -> Result<(), String> {
+    if fast && agent_id != "codex" {
+        return Err("Fast mode is only available for the Codex agent".into());
     }
     Ok(())
 }
@@ -79,6 +88,7 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
 
     let mut lead = input.lead.clone();
     lead.agent_id = lead.agent_id.trim().to_string();
+    validate_fast_input(&lead.agent_id, lead.fast_mode).map_err(|error| format!("lead: {error}"))?;
     lead.model = clean(&lead.model);
     validate_effort_input(lead.model.as_deref(), lead.complexity, lead.reasoning_effort.as_deref())?;
     if lead.model.is_some() && lead.complexity.is_some() {
@@ -101,6 +111,7 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
         let mut member = input_member.clone();
         member.role_id = member.role_id.trim().to_string();
         member.agent_id = member.agent_id.trim().to_string();
+        validate_fast_input(&member.agent_id, member.fast_mode).map_err(|error| format!("role '{}': {error}", member.role_id))?;
         member.model = clean(&member.model);
         validate_effort_input(member.model.as_deref(), member.complexity, member.reasoning_effort.as_deref())?;
         if member.model.is_some() && member.complexity.is_some() {
@@ -224,6 +235,7 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
         agent_id: lead_agent_id,
         model: lead_model,
         reasoning_effort: row.get(10)?,
+        fast_mode: row.get::<_, i64>(11)? != 0,
         account_id: lead_account_id,
         auto_account: row.get::<_, i64>(6)? != 0,
         complexity: row.get(7)?,
@@ -231,7 +243,7 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
         unavailable_reason: lead_reason.clone(),
     };
     let mut stmt = conn
-        .prepare("SELECT role_id, agent_id, model, account_id, auto_account, complexity, isolate_default, reasoning_effort FROM squad_members WHERE squad_id = ?1 ORDER BY rowid")?;
+        .prepare("SELECT role_id, agent_id, model, account_id, auto_account, complexity, isolate_default, reasoning_effort, fast_mode FROM squad_members WHERE squad_id = ?1 ORDER BY rowid")?;
     let members = stmt
         .query_map([&id], |member| {
             let agent_id: String = member.get(1)?;
@@ -242,6 +254,7 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
             Ok(SquadMember {
                 role_id: member.get(0)?,
                 reasoning_effort: member.get(7)?,
+                fast_mode: member.get::<_, i64>(8)? != 0,
                 agent_id,
                 model,
                 account_id,
@@ -277,8 +290,8 @@ fn insert_members(
 ) -> Result<(), String> {
     for member in members {
         conn.execute(
-            "INSERT INTO squad_members (squad_id, role_id, agent_id, model, account_id, auto_account, complexity, isolate_default, reasoning_effort)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+            "INSERT INTO squad_members (squad_id, role_id, agent_id, model, account_id, auto_account, complexity, isolate_default, reasoning_effort, fast_mode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 squad_id,
                 member.role_id,
@@ -289,6 +302,7 @@ fn insert_members(
                 member.complexity.map(Complexity::as_str),
                 member.isolate_default as i64,
                 member.reasoning_effort,
+                member.fast_mode as i64,
             ],
         )
         .map_err(|error| error.to_string())?;
@@ -299,7 +313,7 @@ fn insert_members(
 fn save_lead(conn: &Connection, squad_id: &str, lead: &SquadLeadInput) -> Result<(), String> {
     conn.execute(
         "UPDATE squads SET lead_agent_id = ?1, lead_model = ?2, lead_account_id = ?3,
-                            lead_auto_account = ?4, lead_complexity = ?5, reasoning_effort = ?7 WHERE id = ?6",
+                            lead_auto_account = ?4, lead_complexity = ?5, reasoning_effort = ?7, fast_mode = ?8 WHERE id = ?6",
         rusqlite::params![
             lead.agent_id,
             lead.model,
@@ -308,6 +322,7 @@ fn save_lead(conn: &Connection, squad_id: &str, lead: &SquadLeadInput) -> Result
             lead.complexity.map(Complexity::as_str),
             squad_id,
             lead.reasoning_effort,
+            lead.fast_mode as i64,
         ],
     )
     .map_err(|error| error.to_string())?;

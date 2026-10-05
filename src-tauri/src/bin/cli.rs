@@ -59,6 +59,7 @@ AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
               [--prompt \"...\"] [--account <n>]  · con su primera tarea
               [--role <papel>]                  · con un papel (ver roles)
               [--model <id>] [--effort <nivel>] · con ese modelo y esfuerzo (ej.: --model gpt-6.1-luna --effort max)
+              [--fast]                          · modo Fast del Codex (solo --agent codex)
               [--floor <piso>]                  · en ese piso (o `ground`, la planta baja)
   peer connect <a> <b>                        Conecta dos agentes del equipo
   peer disconnect <a> <b>                     Los desconecta

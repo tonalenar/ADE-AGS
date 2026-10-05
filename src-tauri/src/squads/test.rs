@@ -20,6 +20,7 @@ fn member(role_id: &str, agent_id: &str) -> SquadMemberInput {
         account_id: None,
         auto_account: true,
         complexity: None,
+        fast_mode: false,
         isolate_default: true,
     }
 }
@@ -35,6 +36,7 @@ fn input(name: &str) -> SquadInput {
             account_id: None,
             auto_account: true,
             complexity: None,
+            fast_mode: false,
         },
         members: vec![member("backend", "codex")],
     }
@@ -319,4 +321,39 @@ fn reasoning_effort_survives_squad_edits_run_snapshots_and_task_history() {
     assert!(store::validate(&conn, &team).is_err());
     team.members[0].model = None;
     assert!(store::validate(&conn, &team).is_err());
+}
+
+#[test]
+fn fast_mode_roundtrips_for_codex_lead_and_member_and_defaults_off() {
+    let conn = test_db();
+    let mut raw = input("Fast squad");
+    raw.lead.agent_id = "codex".into();
+    raw.lead.model = Some("gpt-6-luna".into());
+    raw.lead.fast_mode = true;
+    raw.members[0].fast_mode = true;
+    let valid = store::validate(&conn, &raw).unwrap();
+    let squad = store::create(&conn, &valid).unwrap();
+    assert!(squad.lead.fast_mode);
+    assert!(squad.members[0].fast_mode);
+
+    let again = store::get(&conn, &squad.id).unwrap().unwrap();
+    assert!(again.lead.fast_mode && again.members[0].fast_mode);
+
+    // Una Squad guardada sin tocar Fast queda desactivada.
+    assert!(!create(&conn, "Plain squad").lead.fast_mode);
+}
+
+#[test]
+fn fast_mode_is_rejected_outside_codex() {
+    let conn = test_db();
+    let mut lead = input("Lead fast");
+    lead.lead.fast_mode = true; // claude-code
+    let error = store::validate(&conn, &lead).unwrap_err();
+    assert!(error.contains("lead") && error.contains("Codex"), "{error}");
+
+    let mut member_fast = input("Member fast");
+    member_fast.members = vec![member("backend", "claude-code")];
+    member_fast.members[0].fast_mode = true;
+    let error = store::validate(&conn, &member_fast).unwrap_err();
+    assert!(error.contains("backend") && error.contains("Codex"), "{error}");
 }

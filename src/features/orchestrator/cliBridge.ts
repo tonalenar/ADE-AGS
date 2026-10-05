@@ -98,7 +98,7 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
   // Un agente sumado por una orquestadora arranca como los del equipo: con el nivel de permisos
   // elegido (sin eso pedía confirmación en cada paso y el equipo esperaba) y con el modelo y el
   // esfuerzo que se pidieron (sin eso abría con el predeterminado de la TUI).
-  const launchAgent = { ...agent, command: recruitCommand(agent.id, agent.command, getAutonomy(), str(args, "model"), str(args, "effort")) };
+  const launchAgent = { ...agent, command: recruitCommand(agent.id, agent.command, getAutonomy(), str(args, "model"), str(args, "effort"), args.fast === true) };
   const tabId = useTabsStore.getState().addTab({ cwd, agent: launchAgent, accountId, prelaunch, title, titleIsCustom: title ? true : undefined });
 
   // Mismo gate que el wizard del "+": las skills tienen que estar en disco antes de que

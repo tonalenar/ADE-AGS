@@ -18,6 +18,7 @@ export function inputFromSquad(squad: Squad): SquadInput {
       accountId: squad.lead.accountId,
       autoAccount: squad.lead.autoAccount,
       complexity: squad.lead.complexity,
+      fastMode: squad.lead.fastMode === true,
     },
     members: squad.members.map((member) => ({
       roleId: member.roleId,
@@ -27,6 +28,7 @@ export function inputFromSquad(squad: Squad): SquadInput {
       accountId: member.accountId,
       autoAccount: member.autoAccount,
       complexity: member.complexity,
+      fastMode: member.fastMode === true,
       isolateDefault: member.isolateDefault,
     })),
   };

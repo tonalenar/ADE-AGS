@@ -50,6 +50,16 @@ Schema v20 é aditivo e idempotente:
 
 Schema v21 acrescenta reasoning effort nullable a Missions, Tasks, Squads, members e snapshots. Effort é separado de model e complexity, validado conforme provider/modelo e aplicado por Task, sem alterar a configuração global do usuário. Os modos Provider default (`model = null`, `complexity = null`), Complexity (`model = null`, `complexity` definida) e Specific model (`model` definido, `complexity = null`) são mutuamente exclusivos.
 
+Schema v30 acrescenta `fast_mode` (0/1, padrão 0) a `squads` (Lead) e `squad_members`: o **modo Fast do Codex**. A migração é aditiva e idempotente; Squads antigos ficam com Fast desligado.
+
+### Modo Fast (Codex)
+
+- O interruptor "Modo Fast" aparece na tela de Squad, ao lado de modelo e esforço, **somente quando o provedor é Codex** (Lead e funções). Trocar o provedor o desliga.
+- Validação no backend: Fast com qualquer agente diferente de `codex` é rejeitado ao salvar.
+- Aplicação: o comando do terminal (e o do `ags peer recruit ... --fast`) recebe `-c service_tier=fast`, somente para `codex`, valor fixo (nunca texto livre) e sem repetir um `service_tier` que o comando já traga. Chave confirmada no Codex 0.160: `service_tier` é chave de configuração (`codex -c`), a app do Codex grava `service_tier: "fast"` e o catálogo declara o suporte por modelo em `additional_speed_tiers`/`service_tiers`.
+- Se o catálogo do Codex informar que o modelo escolhido **não** oferece Fast, a UI mostra um aviso (não bloqueia nem falha); sem modelo explícito ou catálogo silencioso, não há aviso (`fastSupported = null`).
+- Runs headless não usam Fast: o snapshot `run_squad_members` não o guarda.
+
 Squad é mutável; Run é histórico. Alterar um Squad afeta somente novos Runs. Uma Task criada já guarda `functional_role`, provider, modelo e account ID resolvidos. O snapshot no Run é necessário para planejar Tasks futuras daquele mesmo Run sem consultar a configuração mutável.
 
 Delete de Squad é permitido apenas sem referência por Mission ou Run. A exclusão não faz cascade em dados operacionais; referências históricas bloqueiam a operação.
