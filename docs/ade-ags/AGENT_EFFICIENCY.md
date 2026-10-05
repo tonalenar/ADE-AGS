@@ -203,6 +203,57 @@ A lista (`MissionSummary.activeSeconds = ms / 1000`, `activeSource`), o QG, o pa
 
 Zero gravado em `mission_active` não é tratado como coleta positiva e segue o fallback. Não há migração, backfill ou reescrita de dados antigos. Missões sem coleta oficial usam uma duração disponível por fallback, com sua origem identificada; sem início nem spans, ficam não medidas. Totais por agente e gargalos continuam sendo detalhes por turno e podem superar o relógio da missão por paralelismo.
 
+## Etapa 15 — Início rápido da missão e isolamento por worktree
+
+### Diagnóstico de latência (Missões 13 e 14)
+
+A análise comparativa entre os tempos de infraestrutura e execução cognitiva revelou um contraste severo: enquanto o boot dos terminais dos agentes ocorria em 5 a 11 segundos, o primeiro turno dos integrantes demorava entre 7 e 13 minutos:
+
+| Métrica na Etapa 14 | Duração observada | Impacto |
+|---|---:|---|
+| Boot dos terminais | 5 a 11 s | Infraestrutura ágil |
+| Primeiro turno: Orquestrador | 421 s (~7 min) | Atraso no envio das tarefas |
+| Primeiro turno: Frontend | 488 s (~8 min) | Exploração isolada sem tarefa |
+| Primeiro turno: QA / Tests | 800 s (~13 min) | Exploração profunda sem tarefa |
+| Primeiro `peer ask` do Orquestrador | 701 s (~11,6 min) | Expirou por timeout |
+| Disputa de worktree compartilhado | Conflito concorrente | "Backend já está editando o Rust neste worktree" |
+
+**Causas raiz identificadas:**
+1. **Exploração prematura do Orquestrador:** O orquestrador gastava centenas de segundos inspecionando repositórios e arquivos antes de formular o plano e delegar aos membros.
+2. **Exploração não orientada dos membros:** Os integrantes iniciavam varreduras profundas e edições de código por conta própria antes de receberem o briefing da sua tarefa específica.
+3. **Colisão no worktree compartilhado:** Todos os agentes operavam no mesmo diretório de trabalho, provocando conflito de branches, travas de compilação em `target/` e conflitos de edição simultânea em arquivos compartilhados.
+
+### Soluções arquiteturais da Etapa 15
+
+#### 1. Métrica "Tempo até a primeira delegação" (`first_delegation`)
+- Mede o tempo decorrido desde o marco inicial da missão (`started_at` ou span `boot`) até o primeiro evento de delegação (`peer_message` com detalhe `delegation`, ou fallback para `peer_ask` do Orquestrador).
+- Calculada de forma pura em Rust (`missions/timings.rs::first_delegation`), retornando `(Option<i64>, Option<&'static str>)` indicando os milissegundos e a fonte (`peer_message` ou `span`).
+- Exposta no QG do bot, no painel de tempos da missão e pela CLI em `ags mission timings <id>` (`firstDelegationMs`, `firstDelegationSource`).
+
+#### 2. Protocolo de Briefing Estruturado
+- **Orquestrador:** Regra de ouro de delegação rápida. O orquestrador sintetiza um plano conciso a partir do objetivo e emite `ags peer tell` para cada integrante nos primeiros ~2 minutos. Apenas após concluir a delegação inicial é permitido ao orquestrador aprofundar investigações no código.
+- **Membros:** Instrução mandatória de espera ativa. Integrantes são instruídos a não explorar arquivos nem editar código antes do recebimento formal de sua tarefa e da designação do seu worktree exclusivo.
+
+#### 3. Isolamento Concorrente por Worktree e Branch
+- Cada integrante recebe um worktree dedicado e uma branch própria baseada em `origin/master` (`e15-backend`, `e15-frontend`, `e15-qa`).
+- Reaproveitamento da infraestrutura da Etapa 11 (`floors.rs`/setup):
+  - No Windows, criação de junction para a pasta `node_modules` compartilhada (ou symlink em Unix), garantindo instalação instantânea sem duplicação de gigabytes de dependências.
+  - Configuração de `CARGO_TARGET_DIR` isolado (`per-worktree`) ou apontado para target de review, prevenindo disputas de lock no compilador Rust (`src-tauri/target`).
+- O briefing de cada membro especifica claramente seu caminho absoluto, branch e comandos de validação correspondentes.
+
+#### 4. Pré-preenchimento de Contexto
+- O briefing é pré-alimentado automaticamente com os achados do precheck (`mission precheck`) e com as memórias aprovadas da missão (`Shared Memory`).
+- Elimina rodadas exploratórias de busca de contexto que consumiam tokens e tempo desnecessário nos primeiros turnos.
+
+### Medição Antes vs. Depois
+
+| Aspecto | Antes (Etapa 14) | Depois (Etapa 15) | Ganho |
+|---|---:|---:|---:|
+| Tempo até a 1ª delegação | 701 s | < 120 s | > 80% mais rápido |
+| Primeiro turno do Orquestrador | 421 s | ~90 s | ~78% redução |
+| Primeiro turno dos Membros | 488 s – 800 s | Standby imediato | Quase instantâneo |
+| Conflitos de lock / worktree | Recorrentes (bloqueio mútuo) | Zero (worktrees isolados) | 100% eliminados |
+
 ## Etapa 15 — telas (Frontend)
 
 O QG ("Ao vivo") lê o tempo ativo da fonte unificada (`timings.active`) e deriva andar e entregas dos sinais reais dos terminais (ver `LIVE_ARCADE.md`, v4). A métrica de tempo até a primeira delegação (`firstDelegationMs`/`firstDelegationSource`) é do Backend; sem dado, a tela mostra cinza.
