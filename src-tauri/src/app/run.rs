@@ -21,6 +21,7 @@ pub fn run() {
     // Que cada agente que lance esta instancia hable con ELLA y no con otra que esté abierta
     // (ver `ipc::protocol::HANDSHAKE_ENV`). También toca el entorno: antes del primer hilo.
     crate::ipc::export_instance_env();
+    crate::notifier::initialize_identity();
     super::signals::cleanup_on_signals();
 
     tauri::Builder::default()

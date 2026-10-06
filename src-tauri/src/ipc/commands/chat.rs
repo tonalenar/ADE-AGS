@@ -23,6 +23,7 @@ use crate::ipc::protocol::arg_str_opt;
 pub const CHANGED_EVENT: &str = "cc-chat-changed";
 
 /// Se mostró un aviso del sistema por una respuesta; lleva `{ tabId, thread }`.
+#[cfg(not(windows))]
 pub const NOTIFIED_EVENT: &str = "cc-chat-notified";
 
 fn changed(app: &AppHandle, tab_id: &str) {
@@ -73,8 +74,12 @@ pub(super) fn chat_say(app: &AppHandle, args: &Value) -> Result<Value, String> {
     // estás mirando la app).
     let mut system = false;
     if kind == Kind::Say {
-        let name = open_tabs(app).ok().and_then(|tabs| tabs.into_iter().find(|t| t.id == from)).map(|t| t.name);
-        system = crate::notifier::show_custom(app, name.as_deref().unwrap_or("ADE AGS"), &chat::preview(&text, 180));
+        let tab = open_tabs(app).ok().and_then(|tabs| tabs.into_iter().find(|t| t.id == from));
+        let target = tab.as_ref().map(|tab| crate::notifier::Target {
+            window: tab.window.clone(), tab_id: from.clone(), thread: thread.to_string(),
+        });
+        system = crate::notifier::show_targeted(app, tab.as_ref().map(|t| t.name.as_str()).unwrap_or("ADE AGS"), &chat::preview(&text, 180), target);
+        #[cfg(not(windows))]
         if system {
             // El plugin de avisos no devuelve el clic en escritorio: la pantalla guarda esto y,
             // si la app recupera el foco enseguida (lo que hace el clic en el aviso), abre el chat.

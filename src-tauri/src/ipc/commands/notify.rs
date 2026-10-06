@@ -61,7 +61,10 @@ pub(super) fn notify_send(app: &AppHandle, args: &Value) -> Result<Value, String
     unwrap_frontend_result(raw)?;
     // Con la ventana en segundo plano, además, un aviso del sistema (con las reglas del
     // notificador: se apaga en la configuración y no sale si estás mirando la app).
-    let system = crate::notifier::show_custom(app, &me.name, &message);
+    let system = crate::notifier::show_targeted(app, &me.name, &message, Some(crate::notifier::Target {
+        window: me.window.clone(), tab_id: from.clone(),
+        thread: crate::chat::conversation(&from).current_thread.to_string(),
+    }));
     Ok(json!({ "notified": true, "system": system, "message": message }))
 }
 
