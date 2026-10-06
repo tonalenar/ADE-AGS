@@ -161,6 +161,8 @@ MISIONES (también sin interfaz: `ade-ags --headless`)
                                               SUGIERE una memoria (queda pendiente; la aprueba el usuario)
   mission accept <id> <tarea>                 La junta en la integración de la misión
   mission apply <id>                          Lleva lo aceptado al proyecto
+  mission redeliver <id> [--pr <N>] [--test passed|failed|not_run]
+                                              Reavalia entrega no repo origin (só promove se PR mesclado e CI verde)
   approval list                               Pedidos de permiso esperando
   approval decide <id> --allow|--deny [--remember]
 
@@ -316,19 +318,87 @@ fn main() -> ExitCode {
     // "solo a los conectados" no tendría contra qué comparar.
     let parsed = with_caller(&command, parsed);
 
-    match send(&command, parsed) {
-        Ok(response) => {
-            let body = if response.ok {
-                response.data.unwrap_or(Value::Null)
-            } else {
-                json!({ "error": response.error.unwrap_or_default() })
-            };
+    match send(&command, parsed.clone()) {
+        Ok(response) if response.ok => {
+            let body = response.data.unwrap_or(Value::Null);
             println!("{body}");
-            ExitCode::from(if response.ok { EXIT_OK } else { EXIT_COMMAND_FAILED })
+            ExitCode::from(EXIT_OK)
+        }
+        Ok(response) => {
+            let err = response.error.unwrap_or_default();
+            if command == "mission.redeliver" && (err.contains("desconocido") || err.contains("desconhecido")) {
+                return execute_standalone_redeliver(&parsed);
+            }
+            println!("{}", json!({ "error": err }));
+            ExitCode::from(EXIT_COMMAND_FAILED)
         }
         Err(e) => {
+            if command == "mission.redeliver" {
+                return execute_standalone_redeliver(&parsed);
+            }
             println!("{}", json!({ "error": e.message }));
             ExitCode::from(e.code)
+        }
+    }
+}
+
+fn execute_standalone_redeliver(args: &Value) -> ExitCode {
+    let home = match dirs::home_dir() {
+        Some(h) => h,
+        None => {
+            println!("{}", json!({ "error": "não foi possível determinar o diretório home" }));
+            return ExitCode::from(EXIT_COMMAND_FAILED);
+        }
+    };
+    let db_path = home.join(".ags").join("data.db");
+    let conn = match rusqlite::Connection::open(&db_path) {
+        Ok(c) => c,
+        Err(e) => {
+            println!("{}", json!({ "error": format!("erro ao abrir banco de dados: {e}") }));
+            return ExitCode::from(EXIT_COMMAND_FAILED);
+        }
+    };
+    let _ = conn.execute_batch("PRAGMA busy_timeout = 5000;");
+    if let Err(e) = ade_ags_lib::database::migrate(&conn) {
+        println!("{}", json!({ "error": format!("erro ao migrar banco de dados: {e}") }));
+        return ExitCode::from(EXIT_COMMAND_FAILED);
+    }
+
+    let mission_id = match args.get("mission").and_then(Value::as_str) {
+        Some(id) => id,
+        None => {
+            println!("{}", json!({ "error": "informe o id da missão" }));
+            return ExitCode::from(EXIT_USAGE);
+        }
+    };
+    let pr = args.get("pr").or_else(|| args.get("pullRequest")).and_then(Value::as_str);
+    let test_override = match args.get("test") {
+        Some(Value::String(s)) => Some(ade_ags_lib::missions::TestResult::parse(s)),
+        Some(Value::Bool(true)) => Some(ade_ags_lib::missions::TestResult::Passed),
+        Some(Value::Bool(false)) => Some(ade_ags_lib::missions::TestResult::Failed),
+        _ => None,
+    };
+
+    let cwd = match ade_ags_lib::missions::store::get(&conn, mission_id) {
+        Ok(Some(m)) => m.cwd,
+        Ok(None) => {
+            println!("{}", json!({ "error": format!("missão não encontrada: {mission_id}") }));
+            return ExitCode::from(EXIT_COMMAND_FAILED);
+        }
+        Err(e) => {
+            println!("{}", json!({ "error": e }));
+            return ExitCode::from(EXIT_COMMAND_FAILED);
+        }
+    };
+
+    match ade_ags_lib::missions::store::redeliver(&conn, mission_id, &cwd, pr, test_override) {
+        Ok(outcome) => {
+            println!("{}", json!(outcome));
+            ExitCode::from(EXIT_OK)
+        }
+        Err(e) => {
+            println!("{}", json!({ "error": e }));
+            ExitCode::from(EXIT_COMMAND_FAILED)
         }
     }
 }
@@ -408,7 +478,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "tab.create" => &["cwd"],
         "workspace.open" => &["workspace"],
         // `ags mission wait <id>`, `ags mission accept <id> <tarea>`.
-        "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" | "mission.timings" | "mission.efficiency" | "mission.precheck" | "mission.startcheck" => &["mission"],
+        "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" | "mission.timings" | "mission.efficiency" | "mission.precheck" | "mission.startcheck" | "mission.redeliver" => &["mission"],
         "mission.accept" => &["mission", "task"],
         "approval.decide" => &["approval"],
         // `ags peer ask Revisor "..."`: el nombre del agente y después el mensaje.
@@ -620,7 +690,7 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             Duration::from_secs(requested + 180)
         }
         // Arrancar rutea el lead (puede sondear el roster); integrar y aplicar hacen merges.
-        "mission.start" | "mission.accept" | "mission.apply" | "mission.review" => Duration::from_secs(180),
+        "mission.start" | "mission.accept" | "mission.apply" | "mission.review" | "mission.redeliver" => Duration::from_secs(180),
         // Los topes del backend suman ~40s (15 para que aparezca el PTY + 25 de arranque).
         "tab.create" if has_init_prompt(args) => Duration::from_secs(75),
         // `pick` espera a una persona; el resto son segundos.

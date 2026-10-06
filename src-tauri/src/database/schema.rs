@@ -75,7 +75,7 @@ fn detect_legacy_version(conn: &Connection) -> i32 {
 /// **Ningún paso borra datos del usuario**: lo que no se puede migrar se aparta con un
 /// nombre `_legacy_*`, para que un error de detección cueste una tabla huérfana y no los
 /// workspaces de alguien.
-pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
+pub fn migrate(conn: &Connection) -> SqlResult<()> {
     let mut version = user_version(conn)?;
     if version == 0 {
         version = detect_legacy_version(conn);
@@ -1056,6 +1056,21 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
         name TEXT NOT NULL, cwd TEXT NOT NULL, root TEXT NOT NULL, branch TEXT NOT NULL,
         PRIMARY KEY (mission_id, name), UNIQUE(root), UNIQUE(branch)
+    );")?;
+    // Histórico / auditoria de evidências de entrega e reavaliações (redeliver)
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS mission_delivery_audit (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        mission_id      TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+        action          TEXT NOT NULL,
+        previous_status TEXT NOT NULL,
+        new_status      TEXT NOT NULL,
+        test_result     TEXT NOT NULL,
+        pull_request    TEXT,
+        pr_state        TEXT,
+        ci_status       TEXT NOT NULL,
+        promoted        INTEGER NOT NULL CHECK(promoted IN (0, 1)),
+        reason          TEXT,
+        checked_at      INTEGER NOT NULL
     );")?;
     set_user_version(conn, SCHEMA_VERSION)
 }
