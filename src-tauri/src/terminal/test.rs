@@ -474,6 +474,8 @@ fn las_marcas_de_sesion_padre_no_pasan_a_los_terminales() {
     // Sin esto el Claude de adentro se cree sesión hija y no guarda transcript.
     assert!(PARENT_SESSION_ENV.contains(&"CLAUDE_CODE_CHILD_SESSION"));
     assert!(PARENT_SESSION_ENV.contains(&"CLAUDE_CODE_SESSION_ID"));
+    // `NO_COLOR` heredado dejaba los terminales de las misiones en blanco y negro.
+    assert!(PARENT_SESSION_ENV.contains(&"NO_COLOR"));
     // La configuración del usuario NO es una marca de sesión: no se toca.
     for keep in ["ANTHROPIC_MODEL", "ANTHROPIC_API_KEY", "CLAUDE_CODE_USE_BEDROCK", "CLAUDE_CODE_USE_VERTEX"] {
         assert!(!PARENT_SESSION_ENV.contains(&keep), "{keep}");

@@ -25,7 +25,7 @@ beforeEach(() => {
 });
 
 it("prepares isolation before starting, launches each pane in its own cwd and includes known context", async () => {
-  mocks.invoke.mockResolvedValueOnce({ workspaces: [workspace("Orquestrador", "C:/wt/lead"), workspace("Backend", "C:/wt/backend")], precheck: "KNOWN PATHS", memory: "APPROVED MEMORY" }).mockResolvedValueOnce({});
+  mocks.invoke.mockResolvedValueOnce({ workspaces: [workspace("Orquestrador", "C:/wt/lead"), workspace("Backend", "C:/wt/backend")], precheck: "KNOWN PATHS", memory: "APPROVED MEMORY" }).mockResolvedValueOnce({}).mockResolvedValue(undefined);
   await startMissionInTerminals(mission, squad, [{ id: "backend", label: "Backend", description: "API", instructions: "Build API" }]);
   expect(mocks.invoke.mock.calls[0]).toEqual(["mission_prepare_team", { missionId: "m", members: ["Orquestrador", "Backend"] }]);
   expect(mocks.invoke.mock.calls[1][0]).toBe("mission_start_terminals");
