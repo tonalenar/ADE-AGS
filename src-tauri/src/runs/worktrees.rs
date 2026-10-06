@@ -130,7 +130,15 @@ pub fn create_from(base: &Path, project_cwd: &Path, title: &str, start: &str) ->
 
     std::fs::create_dir_all(base).map_err(|e| e.to_string())?;
     let root_arg = root.to_string_lossy();
-    git(&repo, &["worktree", "add", "-b", &branch, &root_arg, start], GIT_SLOW)?;
+    if let Err(e) = git(&repo, &["worktree", "add", "-b", &branch, &root_arg, start], GIT_SLOW) {
+        // Un fallo a medias (por ejemplo un lock de git con varios worktrees a la vez) puede dejar la
+        // rama recién creada sin worktree: se limpia para no acumular ramas huérfanas en cada reintento.
+        let _ = git(&repo, &["worktree", "prune"], GIT_SLOW);
+        if !root.exists() {
+            let _ = git(&repo, &["branch", "-D", &branch], GIT_SLOW);
+        }
+        return Err(e);
+    }
 
     let task_cwd = if rel.as_os_str().is_empty() { root.clone() } else { root.join(&rel) };
     Ok(Worktree { root, task_cwd, branch })
