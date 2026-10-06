@@ -40,3 +40,62 @@ por agente com entrada/saída/cache escrito/cache lido/custo, uma linha de total
 em cada célula sem dado. Atualiza ao abrir o detalhe e a cada 60 s enquanto a missão roda.
 Números grandes são compactados (`formatCompactNumber`, ex.: "12,3 mil", "4,5 mi") — o mesmo
 padrão de `formatDuration` em `timings.ts`, sem variar por idioma da interface.
+
+## Etapa 21 — teto de orçamento e limites de plano
+
+`mission_budget({missionId})` retorna o contrato camelCase de `budgetTypes.ts`: `level`,
+`budgetUsd`, `costUsd`, `pct`, `unpricedModels`, `unmeasuredAgents`, `continueAnyway` e
+`trendUsdPerHour`. A fonte de custo é a soma das estimativas por aba/tarefa com **tokens
+medidos**, não o valor monetário reportado pelo ledger. Modelos sem preço entram na lista
+de avisos e ficam fora do custo. Tarefas headless usam os tokens e o modelo do próprio
+ledger; sem cache discriminado, não se atribui economia de cache.
+
+O guarda puro (`usage/budget.rs`) retorna `ok`, `warning` a partir de 80%, e `exceeded`
+a partir de 100%. Teto `null` significa sem teto; teto zero/negativo exige confirmação.
+Uso ausente continua não medido. A tendência usa a diferença de custo entre observações
+reais e o tempo decorrido; não prevê tokens de uma tarefa futura. Sem duas observações
+válidas, a tendência é `null`.
+
+Ao estourar, `peer recruit`, início/reinício de missão e despacho de uma nova tarefa
+param antes de criar processos/worktrees novos. O recruit e o despacho headless usam
+a pergunta ao usuário já existente; a UI de missão recebe
+`missions.budget.confirmationRequired` e abre o diálogo de orçamento. Só a decisão do
+usuário libera o gasto: pode elevar o teto ou continuar. Não existe flag de CLI/MCP que
+autorize o agente a ignorar o teto. `mission_raise_budget` e `mission_budget_continue`
+são comandos Tauri da UI, ausentes do dispatch IPC/MCP. As decisões e os valores
+observados ficam registrados em `settings`, com timestamp/UUID, sem migração de schema.
+Continuar vale para a missão; elevar o teto pela UI limpa essa autorização.
+
+O aviso `[AGS] orçamento a 80%...` aparece como **saída** no terminal da orquestradora,
+sem inserir texto na entrada da TUI. É deduplicado por missão/teto/nível e sobrevive ao
+reinício. `ags mission efficiency` inclui `budget`. O evento `cc-budget-changed` informa
+`{missionId}`. Agentes já em andamento não são interrompidos pelo guarda.
+
+### Evidência dos formatos locais
+
+- Claude Code: `projects/<cwd-normalizado>/*.jsonl`, `message.usage`, como antes.
+- Codex: `sessions/**/*.jsonl`, eventos `token_count`; deltas cumulativos e sessões são
+  deduplicados. `payload.rate_limits.primary/secondary` observados nos arquivos reais
+  expõem `used_percent`, `window_minutes` e `resets_at` (300 minutos / 10080 minutos).
+- OpenCode: `<XDG_DATA_HOME>/opencode/opencode.db` (padrão `~/.local/share`), ou
+  `<perfil-isolado>/opencode/opencode.db` para contas da app.
+  Tabelas reais `message`/`session`: mensagem assistant concluída, `tokens.input`,
+  `tokens.output`, `tokens.cache.read/write`, `modelID`, `path.cwd`, `session_id` e
+  `time_created`. Leitura SQLite somente leitura, timeout zero; falha/schema diferente
+  devolve não medido. Placeholders com todos os tokens zero não comprovam medição.
+- Antigravity: conversas locais são SQLite, mas `steps`, `gen_metadata` e metadados de
+  trajetória armazenam blobs binários. Não foi identificado um campo de tokens com
+  contrato legível; fica **não medido**. Não se decodifica protobuf por adivinhação.
+- Gemini CLI: não havia executável/transcritos Gemini CLI com tokens observáveis neste
+  ambiente; fica **não medido** até existir evidência verificável do formato.
+
+`plan_limits()` lê somente arquivos estruturados do Codex, separando os perfis das
+contas, e retorna as janelas 5h/semanal, reset ISO e `observedAt` da última amostra.
+Janelas vencidas deixam de ser mostradas. Claude não expõe limite semanal em transcript
+local estruturado comprovado: `measured:false`; este caminho não chama `/usage`, não
+raspa telas nem faz pedidos de rede. Limites ≥80% de contas com terminais ativos de uma
+missão geram aviso deduplicado no terminal da orquestradora. A amostra é a última que a
+CLI gravou, não uma consulta em tempo real ao provedor.
+
+Testes Rust cobrem fronteiras 80/100%, teto ausente/zero, tendência, aviso deduplicado,
+bloqueio antes da autorização, leitor SQLite do OpenCode e expiração de janelas Codex.
