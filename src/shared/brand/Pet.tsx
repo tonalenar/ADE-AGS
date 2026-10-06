@@ -5,9 +5,13 @@ import { useTranslation } from "react-i18next";
 
 import { formatTokens } from "@/features/accounts/usage";
 
-import { MASCOT_BODY, MASCOT_FILL, type MascotState } from "./Mascot";
+import { eyeKindForState, MASCOT_BODY, MASCOT_FILL, MASCOT_LEGS, MascotEyes, MascotLimbs, type MascotState } from "./Mascot";
 import "./pet.css";
+import { confettiAt, useLevelUp } from "./levelUpFx";
+import { useCursorLook } from "./cursorLook";
+import { LevelNumber, useLevelBarClass } from "./LevelNumber";
 import { useMascotState } from "./useMascotState";
+import { useReducedMotion } from "./useReducedMotion";
 import { useAgentActivity } from "@/features/terminal/activity";
 import { openBotPanel } from "@/features/bot/botPanelStore";
 
@@ -99,6 +103,18 @@ export function sparkAt(i: number): { x: number; y: number; delay: number; durat
 }
 
 /**
+ * El contorno luminoso (aura "Super Sonic", propuesta C del Canvas de Diseño): un halo dorado que
+ * sigue la silueta y pulsa. Su ritmo e intensidad dependen del estado: ocioso calmo, trabajando
+ * rápido, esperando amarillo, y blanco-dorado intenso mientras sube de nivel.
+ */
+export type HaloMode = MascotState | "levelup";
+
+export function haloModeFor(state: MascotState, leveling: boolean): HaloMode {
+  if (leveling) return "levelup";
+  return state;
+}
+
+/**
  * El pet: el robot del ADE AGS que evoluciona con los tokens que gastan tus agentes.
  * Flota, parpadea, y según su nivel gana aura, llamas, energía y rayos; cuando la frota
  * trabaja, cruza el cuerpo con un trazo veloz; cuando sube de nivel, estalla en un anillo.
@@ -117,27 +133,32 @@ export function Pet({ level, state = "idle", size = 96, className = "", still = 
   const stage = tier > 0 ? (Math.max(stageFor(level), TIER_STAGE[tier]) as 1 | 2 | 3 | 4) : stageFor(level);
   const look = tier === 4 ? BLUE_LOOK : LOOKS[stage];
 
-  // El estallido de subir de nivel: solo si el nivel SUBE mientras el pet está a la vista.
-  const previous = useRef(level);
-  const [burst, setBurst] = useState(0);
-  useEffect(() => {
-    if (level > previous.current) {
-      setBurst((n) => n + 1);
-      const timer = window.setTimeout(() => setBurst(0), 1200);
-      previous.current = level;
-      return () => window.clearTimeout(timer);
-    }
-    previous.current = level;
-  }, [level]);
+  // Subir de nivel (Arcade): el pet se agacha, flash en escalones, confeti pixel. Solo si el nivel
+  // SUBE mientras el pet está a la vista.
+  const levelUp = useLevelUp(level);
+  const burst = levelUp.active ? levelUp.key : 0;
 
   const style = {
     ...(look.body ? { "--mascot-body": look.body, "--mascot-shade": look.shade } : null),
   } as React.CSSProperties;
   const tongues = stage >= 2 ? TONGUES[stage as 2 | 3 | 4] : [];
   const sparks = sparkCount(level);
+  const halo = haloModeFor(state, burst > 0);
+  // En reposo el pet mira el cursor (ojos) y levanta el bracito del lado: un solo oyente global.
+  const svgRef = useRef<SVGSVGElement>(null);
+  const reducedMotion = useReducedMotion();
+  useCursorLook(svgRef, state === "idle" && !still && !reducedMotion);
+
+  const haloShape = (
+    <>
+      {MASCOT_BODY.map((r, i) => <rect key={i} x={r.x} y={r.y} width={r.w} height={1} />)}
+      {MASCOT_LEGS.xs.map((x) => <rect key={x} x={x} y={MASCOT_LEGS.top} width={1} height={MASCOT_LEGS.height} />)}
+    </>
+  );
 
   return (
     <svg
+      ref={svgRef}
       viewBox="-6 -12 28 30"
       width={size}
       height={(size * 30) / 28}
@@ -154,6 +175,8 @@ export function Pet({ level, state = "idle", size = 96, className = "", still = 
             <stop offset="100%" stopColor={look.aura} stopOpacity="0" />
           </radialGradient>
         )}
+        <filter id={`halo-w-${gid}`} x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="1.1" /></filter>
+        <filter id={`halo-n-${gid}`} x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="0.35" /></filter>
         <linearGradient id={`dash-${gid}`} x1="1" x2="0">
           <stop offset="0%" stopColor="#fff" stopOpacity="0.95" />
           <stop offset="100%" stopColor="#fff" stopOpacity="0" />
@@ -162,7 +185,6 @@ export function Pet({ level, state = "idle", size = 96, className = "", still = 
 
       {look.aura && <circle className="ags-pet__aura" cx="8" cy="7" r="12" fill={`url(#aura-${gid})`} />}
 
-      {burst > 0 && <circle key={burst} className="ags-pet__burst" cx="8" cy="7" r="7" fill="none" stroke={look.aura ?? "var(--mascot-glow)"} strokeWidth="0.6" />}
 
       {/* Trabajando: anillos de energía que salen del cuerpo. */}
       {state === "working" && (
@@ -188,7 +210,7 @@ export function Pet({ level, state = "idle", size = 96, className = "", still = 
         </g>
       )}
 
-      <ellipse className="ags-mascot__shadow" cx="8" cy="15.2" rx="3.6" ry="0.55" fill="var(--mascot-shadow)" />
+      <ellipse className="ags-mascot__shadow" cx="8" cy="14.6" rx="3.6" ry="0.55" fill="var(--mascot-shadow)" />
 
       {Array.from({ length: sparks }, (_, i) => {
         const s = sparkAt(i);
@@ -199,6 +221,13 @@ export function Pet({ level, state = "idle", size = 96, className = "", still = 
       })}
 
       <g className="ags-mascot__bot">
+        {/* Contorno luminoso: la silueta (cabeza y piernas) borrosa detrás, en dos capas. Los brazos
+            no entran: solo existen mientras animan. Flota junto con el cuerpo. */}
+        <g className={`ags-pet__halo ags-pet__halo--${halo}`}>
+          <g className="ags-pet__halo-w" filter={`url(#halo-w-${gid})`}>{haloShape}</g>
+          <g className="ags-pet__halo-n" filter={`url(#halo-n-${gid})`}>{haloShape}</g>
+        </g>
+       <g className="ags-pet__hop">
         {/* La corona va detrás del cuerpo: nace de la antena. */}
         {look.flame && tongues.map((t, i) => (
           <g key={i}>
@@ -209,9 +238,9 @@ export function Pet({ level, state = "idle", size = 96, className = "", still = 
           </g>
         ))}
 
+        <MascotLimbs />
         {MASCOT_BODY.map((r, i) => (
-          <rect key={i} x={r.x} y={r.y} width={r.w} height={1} fill={MASCOT_FILL[r.c]}
-            className={r.c === "f" ? "ags-mascot__flame" : undefined} />
+          <rect key={i} x={r.x} y={r.y} width={r.w} height={1} fill={MASCOT_FILL[r.c]} />
         ))}
 
         {/* Grietas de energía: del nivel 5 en adelante. */}
@@ -222,18 +251,32 @@ export function Pet({ level, state = "idle", size = 96, className = "", still = 
           </g>
         )}
 
-        <g className="ags-mascot__eyes" fill={look.eyes}>
-          <rect x="5" y="6" width="2" height="2" />
-          <rect x="9" y="6" width="2" height="2" />
+        {/* Del nivel 3 el pet "cierra la cara": ojos en chevron, como el Clawd. Durmiendo cierra
+            los ojos y, si algo falló, hace una X. */}
+        <g className="ags-mascot__look">
+          <MascotEyes kind={eyeKindForState(state, stage)} fill={look.eyes} className="ags-mascot__eyes" />
         </g>
-        {/* Cejas enojadas desde la etapa 2: el pet "se pone serio". */}
-        {stage >= 2 && (
-          <g fill="var(--mascot-visor)">
-            <rect x="4.5" y="5.2" width="3" height="0.8" transform="rotate(14 6 5.6)" />
-            <rect x="8.5" y="5.2" width="3" height="0.8" transform="rotate(-14 10 5.6)" />
+        {state === "sleeping" && (
+          <g className="ags-pet__zzz" fill="#7dd3fc">
+            <rect x="12" y="1" width="2" height="0.6" /><rect x="13" y="1.6" width="0.6" height="0.6" /><rect x="12" y="2.2" width="2" height="0.6" />
+            <rect x="14.5" y="-0.6" width="1.4" height="0.45" /><rect x="15" y="-0.15" width="0.45" height="0.45" /><rect x="14.5" y="0.3" width="1.4" height="0.45" />
           </g>
         )}
+       </g>
       </g>
+
+      {burst > 0 && (
+        <g key={burst} aria-hidden>
+          <circle className="ags-pet__flash" cx="8" cy="7" r="11" fill="#fff" />
+          {Array.from({ length: 14 }, (_, i) => {
+            const c = confettiAt(i);
+            return (
+              <rect key={i} className="ags-pet__confetti" x="7.5" y="6.5" width="1" height="1" fill={c.color}
+                style={{ "--dx": `${c.dx}px`, "--dy": `${c.dy}px`, animationDelay: `${0.35 + c.delay}s` } as React.CSSProperties} />
+            );
+          })}
+        </g>
+      )}
 
       {/* Rayos alrededor: solo en la última etapa. */}
       {(stage === 4 || tier >= 2) && (
@@ -276,6 +319,7 @@ export function PetCard({ pet, className = "" }: { pet: PetStatus; className?: s
   const { t } = useTranslation();
   const busy = useAgentActivity((a) => a.count);
 
+  const barFlash = useLevelBarClass(pet.level);
   const stage = stageFor(pet.level);
   const accent = LOOKS[stage].aura ?? "var(--mascot-glow)";
 
@@ -289,10 +333,10 @@ export function PetCard({ pet, className = "" }: { pet: PetStatus; className?: s
       <Pet level={pet.level} state={state} size={96} />
       <div className="min-w-[88px]">
         <div className="flex items-baseline justify-between gap-3">
-          <span className="text-[12px] font-bold tracking-wider" style={{ color: accent }}>LV {pet.level}</span>
+          <span className="text-[12px] font-bold tracking-wider" style={{ color: accent }}>LV <LevelNumber level={pet.level} /></span>
           <span className="text-[13px] font-semibold tabular-nums text-gray-800 dark:text-gray-100">{formatTokens(pet.xp)}</span>
         </div>
-        <div className="mt-1 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden"
+        <div className={`mt-1 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden ${barFlash}`}
           role="progressbar" aria-valuenow={Math.round(pet.progress * 100)} aria-valuemin={0} aria-valuemax={100}>
           <div className={`h-full rounded-full transition-[width] duration-700 ${state === "working" ? "ags-pet__bar--busy" : ""}`} style={{ width: `${Math.round(pet.progress * 100)}%`, background: accent }} />
         </div>

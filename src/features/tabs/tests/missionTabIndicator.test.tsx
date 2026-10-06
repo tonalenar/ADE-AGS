@@ -75,14 +75,25 @@ describe("MissionTabIndicator", () => {
     expect(html).toContain('title="Missão concluída"');
   });
 
-  it("cada estado dibuja lo suyo: llama solo si trabaja/necesita/concluida, Z al esperar, chispas al concluir", () => {
-    expect(indicatorPixels("working").flame.length).toBeGreaterThan(0);
-    expect(indicatorPixels("waiting").flame).toHaveLength(0);
+  it("cada estado dibuja lo suyo: ojos propios, Z al esperar, X de !, chispas al concluir", () => {
+    expect(indicatorPixels("working").eyes).toBe("block");
+    expect(indicatorPixels("waiting").eyes).toBe("closed");
+    expect(indicatorPixels("failed").eyes).toBe("x");
+    expect(indicatorPixels("done").eyes).toBe("chevron");
+    expect(indicatorPixels("idle").eyes).toBe("block");
     expect(indicatorPixels("waiting").badge.length).toBeGreaterThan(0);
     expect(indicatorPixels("failed").badge).toHaveLength(0);
-    expect(indicatorPixels("idle").flame).toHaveLength(0);
+    expect(indicatorPixels("idle").badge).toHaveLength(0);
     expect(indicatorPixels("done").sparkle.length).toBeGreaterThan(0);
     expect(indicatorPixels("needsYou").badge.length).toBeGreaterThan(0);
+  });
+
+  it("usa el sprite compartido: la insignia queda a la derecha del robot de 16 columnas", () => {
+    withReducedMotion(false);
+    const html = renderToString(<MissionTabIndicator state="needsYou" workingCount={0} />);
+    expect(html).toContain("ags-leg");
+    expect(html).toContain("ags-arm");
+    expect(Math.min(...indicatorPixels("done").badge.map((p) => p.x))).toBeGreaterThanOrEqual(16);
   });
 
   describe("títulos acessíveis localizados em pt-BR, en e es", () => {

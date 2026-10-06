@@ -1,24 +1,21 @@
-/* Indicador de la pestaña de misión: el bot en miniatura. Solo transform/opacity, sin JS por cuadro. */
+/* Indicador de la pestaña de misión: el bot en miniatura (el mismo sprite del resto de la app;
+   ver `MissionTabIndicator.tsx`). Solo transform/opacity, sin JS por cuadro. A este tamaño no hay
+   aura: el estado se lee por la forma y el color de los ojos. */
 .mti {
-  --mti-body: #6b7280; --mti-dark: #374151; --mti-eye: #f9fafb; --mti-ant: #9ca3af;
-  --mti-flame: #f97316; --mti-z: #6366f1; --mti-bang: #dc2626; --mti-gold: #d4a017; --mti-spark: #f5c518;
+  --mti-eye: var(--mascot-glow);
+  --mti-z: #6366f1; --mti-bang: #dc2626; --mti-gold: #d4a017; --mti-spark: #f5c518;
   display: inline-flex; align-items: center; gap: 2px; flex: none; line-height: 0;
 }
-.dark .mti {
-  --mti-body: #9ca3af; --mti-dark: #d1d5db; --mti-eye: #111827; --mti-ant: #6b7280;
-  --mti-z: #a5b4fc; --mti-bang: #f87171; --mti-gold: #facc15; --mti-spark: #fde047;
-}
-.mti[data-state="working"] { --mti-body: #10b981; --mti-dark: #047857; --mti-eye: #ecfdf5; --mti-ant: #34d399; }
-.dark .mti[data-state="working"] { --mti-body: #34d399; --mti-dark: #a7f3d0; --mti-eye: #064e3b; }
-.mti[data-state="needsYou"] { --mti-body: #f59e0b; --mti-dark: #b45309; --mti-eye: #fffbeb; --mti-ant: #fbbf24; }
-.dark .mti[data-state="needsYou"] { --mti-body: #fbbf24; --mti-dark: #fde68a; --mti-eye: #451a03; }
-.mti[data-state="done"] { --mti-body: #d4a017; --mti-dark: #92710c; --mti-eye: #fffbeb; --mti-ant: #facc15; }
-.dark .mti[data-state="done"] { --mti-body: #facc15; --mti-dark: #fde68a; --mti-eye: #422006; }
+.dark .mti { --mti-z: #a5b4fc; --mti-bang: #f87171; --mti-gold: #facc15; --mti-spark: #fde047; }
+.mti[data-state="working"] { --mti-eye: #ff8a3d; }
+.mti[data-state="needsYou"] { --mti-eye: #ffd24a; }
+.mti[data-state="done"] { --mti-eye: #5fd68a; }
+.mti[data-state="waiting"] { --mti-eye: #3dd6e8; }
+.mti[data-state="failed"] { --mti-eye: #ff5d5d; }
 .mti[data-state="failed"], .mti[data-state="idle"] { opacity: .6; }
-.mti[data-state="waiting"] .mti-bot { opacity: .7; }
+.mti[data-state="waiting"] .mti-bot { opacity: .8; }
 
-.mti-b { fill: var(--mti-body); } .mti-d { fill: var(--mti-dark); } .mti-e { fill: var(--mti-eye); }
-.mti-a { fill: var(--mti-ant); } .mti-f { fill: var(--mti-flame); } .mti-z { fill: var(--mti-z); }
+.mti-z { fill: var(--mti-z); }
 .mti-x { fill: var(--mti-bang); } .mti-c { fill: var(--mti-gold); } .mti-s { fill: var(--mti-spark); }
 .mti-sparkle { opacity: 0; }
 .mti[data-state="done"][data-celebrate="0"] .mti-sparkle { opacity: 0; }
@@ -27,26 +24,42 @@
 .dark .mti-count { color: #34d399; }
 
 .mti svg { overflow: visible; }
-.mti-bot, .mti-flame, .mti-badge, .mti-sparkle { transform-box: fill-box; transform-origin: center bottom; }
+.mti-bot, .mti-badge, .mti-sparkle { transform-box: fill-box; transform-origin: center bottom; }
 
 @keyframes mti-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-0.6px); } }
-@keyframes mti-flicker { 0%, 100% { opacity: 1; transform: scaleY(1); } 50% { opacity: .55; transform: scaleY(.6); } }
 @keyframes mti-float { 0% { opacity: .3; transform: translateY(1px); } 60% { opacity: 1; } 100% { opacity: .3; transform: translateY(-1px); } }
-@keyframes mti-wave { 0%, 100% { transform: rotate(-8deg); } 50% { transform: rotate(8deg); } }
 @keyframes mti-blink { 0%, 55% { opacity: 1; } 70%, 100% { opacity: .25; } }
 @keyframes mti-jump { 0% { transform: translateY(0); } 30% { transform: translateY(-3px); } 55% { transform: translateY(0); } 70% { transform: translateY(-1.2px); } 100% { transform: translateY(0); } }
 @keyframes mti-spark { 0% { opacity: 0; transform: scale(.4); } 30% { opacity: 1; transform: scale(1.2); } 100% { opacity: 0; transform: scale(1.4); } }
 
+/* Trabajando: el robot rebota, los bracitos teclean y las piernas marcan el ritmo (keyframes de App.css). */
 .mti[data-motion="on"][data-state="working"] .mti-bot { animation: mti-bob .5s steps(2, end) infinite; }
-.mti[data-motion="on"][data-state="working"] .mti-flame { animation: mti-flicker .3s steps(2, end) infinite; }
+.mti[data-motion="on"][data-state="working"] .ags-arm { opacity: 1; }
+.mti[data-motion="on"][data-state="working"] .ags-arm--l { animation: ags-arm-type-l .24s steps(2) infinite alternate; }
+.mti[data-motion="on"][data-state="working"] .ags-arm--r { animation: ags-arm-type-r .24s steps(2) infinite alternate-reverse; }
+.mti[data-motion="on"][data-state="working"] .ags-leg--0, .mti[data-motion="on"][data-state="working"] .ags-leg--2 { animation: ags-leg-step .3s steps(2) infinite; }
+.mti[data-motion="on"][data-state="working"] .ags-leg--1, .mti[data-motion="on"][data-state="working"] .ags-leg--3 { animation: ags-leg-step .3s steps(2) .15s infinite; }
+/* Esperando (la misión corre pero nadie escribe): duerme, con las piernas encogidas y los Z flotando. */
+.mti[data-state="waiting"] .ags-leg { transform: scaleY(.5); }
 .mti[data-motion="on"][data-state="waiting"] .mti-badge { animation: mti-float 2s ease-in-out infinite; }
-.mti[data-motion="on"][data-state="needsYou"] .mti-bot { animation: mti-wave .6s ease-in-out infinite; }
+/* Te necesita: levanta un bracito y la insignia parpadea. */
+.mti[data-motion="on"][data-state="needsYou"] .ags-arm--r { opacity: 1; animation: ags-arm-ask .7s ease-in-out infinite; }
 .mti[data-motion="on"][data-state="needsYou"] .mti-badge { animation: mti-blink .9s steps(1, end) infinite; }
-.mti[data-motion="on"][data-state="needsYou"] .mti-flame { animation: mti-flicker .5s steps(2, end) infinite; }
+/* Falló: bracitos caídos y piernas abiertas (estático), solo con movimiento. */
+.mti[data-motion="on"][data-state="failed"] .ags-arm { opacity: 1; }
+.mti[data-motion="on"][data-state="failed"] .ags-arm--l { transform: rotate(-28deg); }
+.mti[data-motion="on"][data-state="failed"] .ags-arm--r { transform: rotate(28deg); }
+.mti[data-state="failed"] .ags-leg--0, .mti[data-state="failed"] .ags-leg--1 { transform: rotate(14deg); }
+.mti[data-state="failed"] .ags-leg--2, .mti[data-state="failed"] .ags-leg--3 { transform: rotate(-14deg); }
+/* Concluida: salta una vez con los bracitos en alto y salen chispas. */
 .mti[data-motion="on"][data-state="done"][data-celebrate="1"] .mti-bot { animation: mti-jump .9s ease-out 1; }
-.mti[data-motion="on"][data-state="done"][data-celebrate="1"] .mti-flame { animation: mti-flicker .3s steps(2, end) 3; }
+.mti[data-motion="on"][data-state="done"][data-celebrate="1"] .ags-arm { opacity: 1; }
+.mti[data-motion="on"][data-state="done"][data-celebrate="1"] .ags-arm--l { animation: ags-arm-cheer-l .45s ease-in-out 2; }
+.mti[data-motion="on"][data-state="done"][data-celebrate="1"] .ags-arm--r { animation: ags-arm-cheer-r .45s ease-in-out 2; }
 .mti[data-motion="on"][data-state="done"][data-celebrate="1"] .mti-sparkle { animation: mti-spark 1s ease-out 1 both; }
 
 /* Ventana oculta: se congela todo (el intervalo de señales también se detiene). */
 :root[data-ags-hidden="1"] .mti * { animation-play-state: paused !important; }
 @media (prefers-reduced-motion: reduce) { .mti * { animation: none !important; } }
+/* Sem movimento, sem bracinhos: só existem enquanto animam. */
+@media (prefers-reduced-motion: reduce) { .mti .ags-arm { opacity: 0 !important; } }
