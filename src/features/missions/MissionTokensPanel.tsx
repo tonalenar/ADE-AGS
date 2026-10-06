@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { TabCostList } from "./TabCostList";
-import { estimateOf, formatCompactNumber, formatUsd, getTokens, tokenRows, type MissionTokens, type TokenRow } from "./tokens";
+import { estimateOf, formatCompactNumber, formatUsd, getTokens, tabsOfAgent, tokenRows, type MissionTokens, type TabTokens, type TokenRow } from "./tokens";
 
 /** Cada quanto se relê enquanto a missão roda: os tokens medidos não geram evento próprio. */
 const REFRESH_MS = 60_000;
@@ -20,9 +20,9 @@ function TokenCell({ value }: { value: number | null }) {
   );
 }
 
-function TokenTableRow({ row }: { row: TokenRow }) {
+function TokenTableRow({ row, tabs }: { row: TokenRow; tabs: TabTokens[] }) {
   const { t } = useTranslation();
-  const hasTabs = !row.isTotal && (row.tabs?.length ?? 0) > 0;
+  const hasTabs = !row.isTotal && tabs.length > 0;
   return (
     <div>
     <div
@@ -45,7 +45,7 @@ function TokenTableRow({ row }: { row: TokenRow }) {
     {hasTabs && (
       <div className="mb-1 ml-3 border-l border-gray-100 pl-2 dark:border-white/10">
         <span className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-white/35">{t("missions.tokens.perTab")}</span>
-        <TabCostList agent={row} />
+        <TabCostList agentId={row.agentId} tabs={tabs} />
       </div>
     )}
     </div>
@@ -93,7 +93,7 @@ export function MissionTokensPanel({ missionId }: { missionId: string }) {
       </div>
       <div className="flex flex-col divide-y divide-gray-100 dark:divide-white/5">
         {rows.map((row) => (
-          <TokenTableRow key={row.agentId} row={row} />
+          <TokenTableRow key={row.agentId} row={row} tabs={tabsOfAgent(data, row.agentId)} />
         ))}
       </div>
       {estimate && (

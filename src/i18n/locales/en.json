@@ -2198,10 +2198,9 @@
   "botPanel.live.lore3": "The barrels are its attacks: failures, pending approvals and unanswered questions.",
   "botPanel.live.boss": "GLITCH {{done}}/{{total}}",
   "botPanel.live.bossDefeated": "GLITCH DEFEATED!",
-  "missions.tokens.tabKind.member": "member",
-  "missions.tokens.tabKind.recruit": "recruit",
-  "missions.tokens.tabKind.custom": "custom agent",
-  "missions.tokens.tabKind.loose": "loose tab",
   "missions.tokens.perTab": "Per tab",
-  "missions.tokens.perTabNote": "Tab totals add up to the agent total."
+  "missions.tokens.perTabNote": "Tab totals add up to the agent total.",
+  "missions.tokens.tabSource.session": "session",
+  "missions.tokens.tabSource.isolated_cwd": "isolated cwd",
+  "missions.tokens.tabSource.ledger": "ledger"
 }

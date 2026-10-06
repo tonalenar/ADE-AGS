@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cacheReadShare, formatCompactNumber, tokenRows, type AgentTokens, type MissionTokens } from "../tokens";
+import { cacheReadShare, tabCostUsd, tabTotalTokens, tabsOfAgent, tabsSum, type TabTokens, formatCompactNumber, tokenRows, type AgentTokens, type MissionTokens } from "../tokens";
 
 describe("formatCompactNumber", () => {
   it("mostra números abaixo de mil como estão", () => {
@@ -264,18 +264,17 @@ describe("tokenRows", () => {
   });
 });
 
-import { sortedTabs, tabCostUsd, tabTotalTokens, tabsSum, type TabTokens } from "../tokens";
-
 const tab = (over: Partial<TabTokens>): TabTokens => ({
-  tabId: "t", label: "a", kind: "member", measured: true,
+  tabId: "t", agentId: "claude", label: "a", cwd: null, sessionId: null, source: "session", measured: true,
   input: 10, output: 5, cacheWrite: 0, cacheRead: 5, costUsd: 1, estimate: null, ...over,
 });
+const unmeasured = (over: Partial<TabTokens> = {}) =>
+  tab({ measured: false, source: null, input: null, output: null, cacheWrite: null, cacheRead: null, costUsd: null, ...over });
 
 describe("custo por aba", () => {
   it("aba sem medição vira null, nunca zero", () => {
-    const t = tab({ measured: false, input: null, output: null, cacheWrite: null, cacheRead: null, costUsd: null });
-    expect(tabCostUsd(t)).toBeNull();
-    expect(tabTotalTokens(t)).toBeNull();
+    expect(tabCostUsd(unmeasured())).toBeNull();
+    expect(tabTotalTokens(unmeasured())).toBeNull();
   });
 
   it("prefere a estimativa de tabela ao custo medido", () => {
@@ -284,20 +283,23 @@ describe("custo por aba", () => {
     expect(tabTotalTokens(tab({}))).toBe(20);
   });
 
-  it("ordena medidas mais caras primeiro e não medidas no fim", () => {
-    const agent = {
-      agentId: "x", measured: true, input: 0, output: 0, cacheWrite: 0, cacheRead: 0, costUsd: 0,
-      tabs: [tab({ tabId: "n", label: "n", measured: false, costUsd: null }), tab({ tabId: "b", label: "b", costUsd: 1 }), tab({ tabId: "c", label: "c", costUsd: 3 })],
+  it("filtra por agente, medidas mais caras primeiro e não medidas no fim", () => {
+    const data: MissionTokens = {
+      agents: [],
+      tabs: [unmeasured({ tabId: "n", label: "n" }), tab({ tabId: "b", label: "b", costUsd: 1 }), tab({ tabId: "c", label: "c", costUsd: 3 }), tab({ tabId: "o", agentId: "codex" })],
     };
-    expect(sortedTabs(agent).map((x) => x.tabId)).toEqual(["c", "b", "n"]);
+    expect(tabsOfAgent(data, "claude").map((x) => x.tabId)).toEqual(["c", "b", "n"]);
+    expect(tabsOfAgent(data, "codex").map((x) => x.tabId)).toEqual(["o"]);
   });
 
-  it("soma das abas bate com o total e ignora não medidas; vazio = null", () => {
-    const agent = {
-      agentId: "x", measured: true, input: 20, output: 10, cacheWrite: 0, cacheRead: 10, costUsd: 3,
-      tabs: [tab({ costUsd: 1 }), tab({ costUsd: 2 }), tab({ measured: false, costUsd: null, input: null, output: null, cacheWrite: null, cacheRead: null })],
-    };
-    expect(tabsSum(agent)).toEqual({ tokens: 40, costUsd: 3 });
-    expect(tabsSum({ ...agent, tabs: undefined })).toEqual({ tokens: null, costUsd: null });
+  it("backend antigo sem tabs: lista vazia", () => {
+    expect(tabsOfAgent({ agents: [] }, "claude")).toEqual([]);
+    expect(tabsOfAgent(null, "claude")).toEqual([]);
+  });
+
+  it("soma ignora não medidas; nenhuma medida = null", () => {
+    expect(tabsSum([tab({ costUsd: 1 }), tab({ costUsd: 2 }), unmeasured()])).toEqual({ tokens: 40, costUsd: 3 });
+    expect(tabsSum([unmeasured()])).toEqual({ tokens: null, costUsd: null });
+    expect(tabsSum([])).toEqual({ tokens: null, costUsd: null });
   });
 });
