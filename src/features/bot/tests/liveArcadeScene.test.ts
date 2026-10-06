@@ -193,3 +193,40 @@ describe("barris e obstáculos", () => {
     expect(heroLift(2.5, 400, barrels)).toBe(0);
   });
 });
+
+describe("GLITCH (inimigo da fase)", () => {
+  it("a vida é o que falta entregar: tarefas planejadas ou, sem tarefas, integrantes da equipe", async () => {
+    const { deriveBoss } = await import("../liveArcadeModel");
+    expect(deriveBoss({ missionStatus: "running", plannedTasks: 4, tower: { done: 1 }, teamSize: 4 })).toMatchObject({ hp: 0.75, defeated: false, done: 1, total: 4 });
+    expect(deriveBoss({ missionStatus: "running", plannedTasks: 0, tower: { done: 2 }, teamSize: 4 })).toMatchObject({ hp: 0.5, total: 4 });
+    expect(deriveBoss({ missionStatus: "running", plannedTasks: 0, tower: { done: 0 }, teamSize: 0 })).toMatchObject({ hp: 1, total: 1 });
+  });
+
+  it("derrotado quando tudo foi entregue ou a missão concluiu; entregas além da equipe não passam de 100%", async () => {
+    const { deriveBoss } = await import("../liveArcadeModel");
+    expect(deriveBoss({ missionStatus: "running", plannedTasks: 0, tower: { done: 9 }, teamSize: 4 })).toMatchObject({ hp: 0, defeated: true, done: 4 });
+    expect(deriveBoss({ missionStatus: "done", plannedTasks: 5, tower: { done: 1 }, teamSize: 4 })).toMatchObject({ hp: 0, defeated: true });
+  });
+
+  it("patrulha a viga do topo e fica parado derrotado", async () => {
+    const { bossFoot, BOSS_X, BOSS_SWAY } = await import("../liveArcadeScene");
+    const xs = [0, 500, 1000, 1500, 2000].map((t) => bossFoot(t, false).x);
+    expect(Math.min(...xs)).toBeGreaterThanOrEqual(BOSS_X - BOSS_SWAY);
+    expect(Math.max(...xs)).toBeLessThanOrEqual(BOSS_X + BOSS_SWAY);
+    expect(new Set(xs).size).toBeGreaterThan(1);
+    expect(bossFoot(1234, true).x).toBe(BOSS_X);
+  });
+
+  it("cada herói atira a intervalos e o tiro voa do herói ao inimigo", async () => {
+    const { shotDue, boltAt, SHOT_EVERY_MS } = await import("../liveArcadeScene");
+    expect(shotDue(undefined, 0, 0)).toBe(true);
+    expect(shotDue(1000, 1000 + SHOT_EVERY_MS - 1, 0)).toBe(false);
+    expect(shotDue(1000, 1000 + SHOT_EVERY_MS, 0)).toBe(true);
+    expect(shotDue(1000, 1000 + SHOT_EVERY_MS, 4)).toBe(false);
+    const from = { x: 200, y: 300 };
+    const to = { x: 700, y: 100 };
+    expect(boltAt(from, to, 0)).toEqual(from);
+    expect(boltAt(from, to, 1)).toEqual(to);
+    expect(boltAt(from, to, 0.5).y).toBeLessThan(200);
+  });
+});

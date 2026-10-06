@@ -108,3 +108,11 @@ Missões em terminais não têm tasks, então os heróis ficavam parados na viga
 
 - Cada aba de missão do topo tem um **X**: fecha os terminais da missão. Com a missão **em andamento** pede confirmação (`closeMissionNeedsConfirm`); terminada ou rascunho fecha direto.
 - Botão **Grade** ao lado de Abas/Canvas: mostra **todos os panes da missão lado a lado** (`canvas/gridMode.ts`). A opção é **individual por missão** e persistida (`ade-mission-grids` no `localStorage`); o padrão segue como antes. Os xterms não são remontados: a grade só desenha os huecos e o `TerminalPanel` os ubica.
+
+## O GLITCH, a história e o tempo ao vivo
+
+- **Lore:** o GLITCH, um bug ancestral, roubou o troféu da entrega e se escondeu no topo da torre. Uma linha da história alterna a cada 7 s sob o título (pt-BR/en/es).
+- **Inimigo:** o GLITCH patrulha a viga de Entrega. A barra de vida é REAL: tarefas concluídas / planejadas (ou, em missões em terminais, entregas finais / integrantes). Missão concluída ou tudo entregue = derrotado, e a equipe comemora. Os barris continuam sendo os golpes dele (só fontes reais).
+- **Combate:** cada herói com saída sustentada (`running`) dispara tiros (cor do papel) que voam em arco até o GLITCH, que pisca ao ser atingido. Os tiros são cenário: não mudam a vida.
+- **Nunca parados:** quem espera (`!`) treme, quem dorme respira e os Z sobem; com `prefers-reduced-motion` tudo fica estático.
+- **Tempo ativo ao vivo:** o HUD avança 1 s por segundo enquanto a missão roda e algum herói trabalha, partindo da leitura unificada (`activeSeconds`); nunca volta atrás ao chegar uma leitura nova.

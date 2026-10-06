@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { beamY } from "./liveArcadeScene";
 import { activeSourceKey, formatActive } from "@/features/missions/timings";
 import { formatUsd, estimateOf, type MissionTokens } from "@/features/missions/tokens";
 import { useMissionIndex } from "@/features/missions/groups";
@@ -15,9 +16,9 @@ import { getPendingCounts } from "@/features/memory/ipc";
 
 import { PlatformLogo } from "./PlatformLogo";
 import { useArcadeSignals } from "./arcadeSignals";
-import { drawArcade, type Placed, type Pose } from "./liveArcadeDraw";
-import { deriveArcadeScene, deriveBarrels, deriveHeroes, deriveTower, deriveTrophy, failureCount, newlyDone, retryCount, roleOf, type ArcadeTask, type ArcadeTabInput, type ArcadeTaskStatus } from "./liveArcadeModel";
-import { ARCADE_H, ARCADE_W, FRAME_MS, TOWER_DROP_X, heroLift, heroTargets, placeBarrels, patrolOffset, stepMotion, taskSlots, type Motion } from "./liveArcadeScene";
+import { drawArcade, ROLE_COLOR, type Placed, type Pose } from "./liveArcadeDraw";
+import { deriveArcadeScene, deriveBarrels, deriveBoss, deriveHeroes, deriveTower, deriveTrophy, failureCount, newlyDone, retryCount, roleOf, type ArcadeTask, type ArcadeTabInput, type ArcadeTaskStatus } from "./liveArcadeModel";
+import { ARCADE_H, ARCADE_W, BOLT_MS, FRAME_MS, TOWER_DROP_X, bossFoot, boltAt, heroLift, shotDue, heroTargets, placeBarrels, patrolOffset, stepMotion, taskSlots, type Motion } from "./liveArcadeScene";
 
 const WALK_SPEED = 50;
 const RUN_SPEED = 110;
@@ -35,6 +36,30 @@ function taskForArcade(task: Task): ArcadeTask {
     aliases: [task.planKey, task.functionalRole].filter((value): value is string => !!value),
     endedAt: task.endedAt,
   };
+}
+
+/**
+ * Tempo ativo "ao vivo": a leitura do app chega a cada tanto; entre elas o relógio avança 1 s por
+ * segundo enquanto a missão roda e algum herói trabalha (o mesmo critério do contador real). Nunca
+ * volta atrás ao chegar uma leitura nova: o valor mostrado só sobe.
+ */
+function useLiveActiveMs(baseMs: number | null, running: boolean, working: boolean): number | null {
+  const [, setTick] = useState(0);
+  const extra = useRef(0);
+  const shown = useRef<number | null>(null);
+  useEffect(() => { extra.current = 0; }, [baseMs]);
+  useEffect(() => {
+    if (!running) return;
+    const timer = window.setInterval(() => {
+      if (working) extra.current += 1000;
+      setTick((n) => n + 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [running, working]);
+  if (baseMs === null && extra.current === 0) return null;
+  const value = (baseMs ?? 0) + extra.current;
+  shown.current = shown.current === null ? value : Math.max(shown.current, value);
+  return shown.current;
 }
 
 function useSustainedTabs() {
@@ -85,6 +110,10 @@ export function LiveArcade({
   /** tarefa concluída → terminal que carrega o bloco até a torre. */
   const carryRef = useRef(new Map<string, string>());
   const statusRef = useRef<Map<string, ArcadeTaskStatus> | null>(null);
+  /** Tiros em voo e quando cada herói atirou pela última vez; o GLITCH pisca quando um tiro chega. */
+  const boltsRef = useRef<Array<{ id: string; from: { x: number; y: number }; at: number; color: string }>>([]);
+  const lastShotRef = useRef(new Map<string, number>());
+  const hitUntilRef = useRef(0);
   const [reducedMotion, setReducedMotion] = useState(() =>
     typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches,
   );
@@ -146,6 +175,12 @@ export function LiveArcade({
     (deliveriesByTab[tab.id] ?? []).map((at) => ({ id: "d:" + tab.id + ":" + at, tabId: tab.id, role: roleOf(tab.title) }))),
   [missionTabs, deliveriesByTab]);
   const towerNow = useMemo(() => deriveTower({ scene, trophy, deliveries }), [scene, trophy, deliveries]);
+  const plannedTasks = useMemo(() => scene.tasks.filter((task) => task.status !== "cancelled" && task.status !== "skipped").length, [scene]);
+  const boss = useMemo(
+    () => deriveBoss({ missionStatus: mission.status, plannedTasks, tower: towerNow, teamSize: heroes.length }),
+    [mission.status, plannedTasks, towerNow, heroes.length],
+  );
+  const loreLines = useMemo(() => [t("botPanel.live.lore1"), t("botPanel.live.lore2"), t("botPanel.live.lore3")], [t]);
   const seenDeliveries = useRef<Set<string> | null>(null);
   // Entrega nova: o herói leva o bloco até a torre. O que já existia ao abrir entra direto.
   useEffect(() => {
@@ -211,9 +246,32 @@ export function LiveArcade({
         else if (moving) pose = frame % 2 === 0 ? "walkA" : "walkB";
         else if (hero.state === "sleeping") pose = "sleep";
         const carryRole = carried && !atTarget ? hero.role : undefined;
-        const drawnX = next.x + (patrol ? patrolOffset(now, index) : 0);
-        return { hero, x: drawnX, level: next.level, pose, lift: reducedMotion ? 0 : heroLift(next.level, drawnX, rolling), carrying: carryRole };
+        // Nunca congelado: quem espera ("!") treme, quem dorme respira e, com o GLITCH derrotado, todos comemoram.
+        const shake = !reducedMotion && hero.state === "stopped" && atTarget ? (frame % 2 === 0 ? -1 : 1) : 0;
+        const breath = !reducedMotion && hero.state === "sleeping" && atTarget ? (Math.sin(now / 500 + index) > 0 ? 1 : 0) : 0;
+        const cheer = !reducedMotion && boss.defeated && atTarget && !climbing ? Math.round(Math.abs(Math.sin(now / 220 + index)) * 10) : 0;
+        const drawnX = next.x + (patrol ? patrolOffset(now, index) : 0) + shake;
+        return { hero, x: drawnX, level: next.level, pose, lift: reducedMotion ? 0 : heroLift(next.level, drawnX, rolling) + cheer - breath, carrying: carryRole };
       });
+      // Quem corre atira no GLITCH: o tiro sai do herói, voa em arco e, ao chegar, o inimigo pisca.
+      const foot = bossFoot(now, boss.defeated);
+      const target = { x: foot.x, y: foot.y - 22 };
+      if (!reducedMotion && !boss.defeated) {
+        for (const [index, item] of placed.entries()) {
+          if (item.hero.state !== "running") continue;
+          if (!shotDue(lastShotRef.current.get(item.hero.tabId), now, index)) continue;
+          lastShotRef.current.set(item.hero.tabId, now);
+          boltsRef.current.push({ id: item.hero.tabId + ":" + Math.round(now), from: { x: item.x, y: beamY(item.level, item.x) - item.lift - 22 }, at: now, color: ROLE_COLOR[item.hero.role] });
+        }
+      }
+      const flying: Array<{ x: number; y: number; color: string }> = [];
+      boltsRef.current = boltsRef.current.filter((bolt) => {
+        const progress = (now - bolt.at) / BOLT_MS;
+        if (progress >= 1) { hitUntilRef.current = now + 160; return false; }
+        flying.push({ ...boltAt(bolt.from, target, progress), color: bolt.color });
+        return true;
+      });
+      const loreLine = loreLines[Math.floor(now / 7000) % loreLines.length];
       // Carregadores que sumiram (terminal fechado) não deixam o bloco preso no caminho.
       for (const [taskId, tabId] of carrying) if (!heroes.some((hero) => hero.tabId === tabId)) carrying.delete(taskId);
       const tower = deriveTower({ scene, trophy, carrying: new Set(carrying.keys()), deliveries });
@@ -229,6 +287,11 @@ export function LiveArcade({
           status: (status) => t("botPanel.live.status." + status),
         },
         heroes: placed,
+        boss: {
+          boss, x: foot.x, y: foot.y, hit: now < hitUntilRef.current, lore: loreLine,
+          label: boss.defeated ? t("botPanel.live.bossDefeated") : t("botPanel.live.boss", { done: boss.done, total: boss.total }),
+        },
+        bolts: flying,
         barrels: rolling,
         trophy,
         tower,
@@ -264,7 +327,7 @@ export function LiveArcade({
       observer.disconnect();
       document.removeEventListener("visibilitychange", start);
     };
-  }, [scene, heroes, mission.title, reducedMotion, t, barrels, trophy, deliveries]);
+  }, [scene, heroes, mission.title, reducedMotion, t, barrels, trophy, deliveries, boss, loreLines]);
 
   const measured = tokens?.agents.filter((agent) => agent.measured) ?? [];
   const tokenValues = measured.flatMap((agent) => [agent.input, agent.output]).filter((value): value is number => value !== null);
@@ -279,7 +342,8 @@ export function LiveArcade({
     ? t("botPanel.live.livesValue", { retries: retryCount(sceneTasks), failures: failureCount(sceneTasks) })
     : null;
   // Fonte unificada (Etapa 14): a mesma da lista e de `ags mission efficiency`; sem dado, cinza.
-  const activeMs = timings?.active.ms ?? (mission.activeSeconds === null ? null : mission.activeSeconds * 1000);
+  const baseActiveMs = timings?.active.ms ?? (mission.activeSeconds === null ? null : mission.activeSeconds * 1000);
+  const activeMs = useLiveActiveMs(baseActiveMs, mission.status === "running", heroes.some((hero) => hero.state === "running"));
   const activeSource = timings?.active.source ?? mission.activeSource ?? null;
   const activeValue = formatActive(activeMs);
   const activeKey = activeSourceKey(activeSource);
