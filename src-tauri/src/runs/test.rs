@@ -4649,3 +4649,13 @@ fn mission_terminal_system_account_requires_exposed_login_state() {
     agente(&mut roster, "claude-code").capabilities.accounts = false;
     assert!(crate::missions::precheck::validate_launch(&roster, &assignment, 100).is_ok());
 }
+
+#[test]
+fn un_worktree_que_falla_no_deja_ramas_huerfanas() {
+    let repo = repo();
+    let base = Tmp::new("base");
+
+    let err = worktrees::create_from(&base.0, &repo.0, "falla", "rama-que-no-existe");
+    assert!(err.is_err());
+    assert_eq!(sh_git(&repo.0, &["branch", "--list", "cc/*"]), "", "no queda ninguna rama cc/");
+}
