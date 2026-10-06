@@ -19,15 +19,20 @@ Todas as medições foram executadas no ambiente Windows com o repositório ADE 
 | **Cargo Test (Primeiro Aquecimento)** | `cargo test --lib --no-run` (após copiar target) | **64,7s** | Primeiro aquecimento após importação/cópia da base do target |
 | **Cargo Test (Incremental CLI)** | `cargo test --lib --no-run` (pequena mudança no CLI) | **14,6s** (14,55s) | Re-linkagem/build incremental (`build.rs` acompanha src inteiro) |
 | **Cargo Test (Warm Inalterado)** | `cargo test --lib` (alvo compartilhado aquecido, no-op) | **1,076s** | No-op incremental com alvo compartilhado sem modificações |
-| **Cargo Lock Contention (4 simultâneos - no-op)** | 4 processos concorrentes com alvo compartilhado aquecido | **15,91s / 16,25s / 16,33s / 16,41s** *(provisório)* | Todos exit 0; disputa restrita ao lock de package cache/artifact directory |
-| **Cargo Lock Contention (4 simultâneos - recompilação dev)** | 4 processos com build dev recompilando CLI (`build.rs`) | **170,14s / 185,06s / 185,13s / 185,11s** | Todos exit 0; pior caso de disputa: builds longos da crate serializam no lock |
+| **Cargo Lock Contention (4 simultâneos sob build CLI + mudança Git)** | 4 processos concorrentes sob build do CLI e alteração de refs | **Amostra 1:** 170,1s / 185,1s / 185,1s / 185,1s<br>**Amostra 2:** 121,1s / 134,9s / 135,0s / 135,0s<br>**Amostra 3:** 99,7s / 99,9s / 100,0s / 100,1s | Todos exit 0. O primeiro processo recompilou `ring`/`rustls`/`reqwest`/`ade-ags`, enquanto os demais aguardaram locks. O alvo sofre invalidação e concorrência reais (NÃO rotular como no-op puramente quente). |
+| **Cargo Lock Contention (4 simultâneos - no-op inicial)** | 4 processos com alvo compartilhado sem alterações | **15,91s / 16,25s / 16,33s / 16,41s** *(provisório)* | Todos exit 0; disputa restrita ao lock de package cache/artifact directory. |
 
-### Caveat do Backend: Invalidação do Target Compartilhado por Commits Concorrentes
-O target compartilhado reduz o tempo de compilação eliminando a recompilação fria de 519 crates de dependências. Contudo, há uma sutileza importante no comportamento de invalidação:
-- O script [`build.rs`](file:///C:/Users/tonz1n/.ags/worktrees/fe40e32d/src-tauri/build.rs) (`build_identity`) monitora `--git-path refs` (diretório compartilhado com todas as referências e branches no repositório comum).
-- Consequentemente, novos commits criados por outros worktrees invalidam o cache da crate principal do app (`ade-ags`).
-- **Impacto Prático:** O estado "aquecido" não é garantidamente ~1s quando outros integrantes da equipe estão commitando ativamente em paralelo.
+### Caveat do Backend: Invalidação do Target Compartilhado por Commits Concorrentes e Disputa Real de Lock
+O target compartilhado reduz drasticamente o tempo de compilação eliminando a recompilação fria de 519 crates de dependências. Contudo, **o alvo compartilhado sofre invalidação e concorrência reais e NÃO deve ser rotulado como um simples no-op quente**:
+- **Invalidação por Refs:** O script [`build.rs`](file:///C:/Users/tonz1n/.ags/worktrees/fe40e32d/src-tauri/build.rs) (`build_identity`) monitora `--git-path refs` (diretório compartilhado com todas as referências e branches no repositório comum).
+- **Impacto em Equipe:** Novos commits criados por outros worktrees invalidam o cache da crate principal do app (`ade-ags`). Por isso, o estado "aquecido" não é garantidamente ~1s quando outros integrantes da equipe estão commitando ativamente em paralelo.
+- **Disputa de Lock sob Compilação Concorrente:** Quando 4 processos foram disparados concorrentemente sob rebuild do CLI e mudanças no Git:
+  - **Amostra 1:** 170,1s / 185,1s / 185,1s / 185,1s (todos exit 0)
+  - **Amostra 2:** 121,1s / 134,9s / 135,0s / 135,0s (todos exit 0)
+  - **Amostra 3:** 99,7s / 99,9s / 100,0s / 100,1s (todos exit 0)
+  Nesses cenários, o primeiro processo que obtém o lock recompila crates afetadas (como `ring`, `rustls`, `reqwest` e `ade-ags`), enquanto os outros 3 processos serializam e aguardam a liberação do lock do diretório de artefatos.
 - **Refinamento Futuro:** Ajustar o `build.rs` para rastrear apenas `HEAD` ou a ref específica da branch do worktree ativo, mantendo compatibilidade com `packed-refs`.
+- **Documentação de Cache:** Para detalhes sobre o funcionamento da tabela `test_results`, validação de `HEAD^{tree}` e configuração de `ADE_AGS_CARGO_TARGET_DIR`, consulte [docs/ade-ags/TEST_CACHE.md](file:///C:/Users/tonz1n/.ags/worktrees/fe40e32d/docs/ade-ags/TEST_CACHE.md) ([TEST_CACHE.md](TEST_CACHE.md)).
 
 ### Nota sobre Sccache
 Foi avaliada a utilização do `sccache` como camada adicional de cache de compilação:
@@ -47,7 +52,7 @@ Foi avaliada a utilização do `sccache` como camada adicional de cache de compi
 ### Regime Novo (Testes Afetados, Target Compartilhado e Cache)
 - **Target Compartilhado:** Worktrees de missão herdam `ADE_AGS_CARGO_TARGET_DIR` apontando para `~/.ags/cargo-target-agents`. Novos worktrees não recompilam as 519 dependências, caindo de 204s para 14s (ou 1s para alvos inalterados).
 - **Mapeamento de Afetados (`ags test affected`):** O planner identifica arquivos tocados desde `origin/master` mais alterações não commitadas e aciona apenas os passos relevantes.
-- **Cache de Resultados (`test_results` em SQLite):** Resultados de árvores limpas (`HEAD^{tree}`) são persistidos. Re-execuções sem modificação retornam imediatamente com *cache hit* em 0ms.
+- **Cache de Resultados (`test_results` em SQLite):** Resultados de árvores limpas (`HEAD^{tree}`) são persistidos. Re-execuções sem modificação retornam imediatamente com *cache hit* em 0ms (veja especificação técnica em [docs/ade-ags/TEST_CACHE.md](file:///C:/Users/tonz1n/.ags/worktrees/fe40e32d/docs/ade-ags/TEST_CACHE.md)).
 - **QA em Fluxo:** O QA valida de forma contínua cada entrega assim que ela chega via `ags peer tell`. O orquestrador notifica o QA a cada entrega recebida.
 - **Validação Final:** Apenas **UMA** execução completa ao final da integração (ou delegação ao CI via `gh pr checks <n> --watch`, sem scripts com *sleep polling*).
 
