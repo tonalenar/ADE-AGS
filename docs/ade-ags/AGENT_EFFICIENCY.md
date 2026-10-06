@@ -1,4 +1,14 @@
 
+## Modo grade
+
+A opção **Grade**, ao lado de **Abas** e **Canvas**, apresenta os terminais da missão em quadros simultâneos. Missões com somente um terminal continuam na visualização normal. Cada quadro oferece um slot `data-slot="grid:<tabId>"`: o terminal já existente deve acompanhar a posição e as dimensões desse slot, preservando o PTY e o histórico ao mudar de modo.
+
+Ao entrar ou sair da grade, redimensionar a janela ou trocar de missão/aba, o terminal deve aguardar um slot com dimensões positivas antes de ajustar as células com o fit do xterm e enviar o resize ao PTY. Medições transitórias com largura ou altura zero não devem ocultar permanentemente o terminal nem substituir seu último tamanho válido. No backend, `pty_resize` ignora `cols == 0` ou `rows == 0` e limita cada dimensão a 1.000 células, evitando tamanhos absurdos e conversões incompatíveis com o ConPTY.
+
+O quadro ativo recebe uma borda de destaque. Clicar no título ou no terminal seleciona o quadro e direciona o foco de teclado ao seu terminal. A troca de quadro e a saída da grade reutilizam a mesma sessão, sem reiniciar o agente nem limpar o histórico. O contrato de posicionamento e foco é implementado pelo frontend; a guarda do PTY protege os períodos em que o layout ainda está sendo calculado.
+
+Validação do backend: `cargo test --manifest-path src-tauri/Cargo.toml --lib terminal`. Os testes cobrem dimensões válidas e extremas, conservação do tamanho de um PTY real durante medições zero e o resize válido seguinte.
+
 ## Etapa 15 — início rápido e isolamento
 
 `mission_prepare_team({ missionId, members: ["Orquestrador", ...nomes] })` prepara a equipe antes de marcar a missão em andamento ou abrir terminais. Retorna `{ workspaces, precheck, memory }`; cada workspace contém `name`, `cwd`, `root`, `branch`, `cargoTargetDir`, `prelaunch` (string de comando) e `environment` (bloco de briefing). A UI usa `cwd` e `prelaunch: [{ command: workspace.prelaunch }]`. O canvas continua vinculado ao diretório original e à missão, permitindo comunicação entre worktrees diferentes.
@@ -281,3 +291,13 @@ Cada agente grava eventos pontuais (`startedMs == endedMs`, `actor` = nome): `st
 Contrato da instrumentação: `start_briefing`, `start_activity`, `start_retry` e `start_stalled` são eventos pontuais (`startedMs == endedMs`, `actor` = nome do integrante). `boot` continua evidência legada do envio do briefing. `start_all_working` usa `actor = all`, início na abertura da equipe e fim na primeira atividade sustentada do último agente. O frontend é responsável por detectar atividade e persistir esses eventos.
 
 `ags mission timings` aceita os novos kinds e expõe `orchestratorStallCount`, `orchestratorWaitMs`, `orchestratorMaxWaitMs` e `timeUntilAllWorkingMs`. Em `orchestrator_stall`, `startedMs` identifica o início da espera, `endedMs` o alerta/resposta e `detail` é `alerted:<fonte>` ou `answered:<fonte>` (`peer_ask`, `peer_tell`, `screen`). A contagem considera alertas únicos; espera total/máxima agrupa ator, alvo e início e usa a maior duração, evitando duplicar alerta seguido de resposta. Sem `start_all_working`, o tempo permanece ausente. Reutiliza schema existente, sem migração.
+
+## Etapa 17 - uso por aba (Backend)
+
+Implementado em `feat/etapa17-tab-usage`: `mission_tokens` inclui `agents[].tabs`, e `ags mission efficiency` inclui `tokens`. Soma das abas = total do agente; soma dos agentes = total da missao. Identidade persistida, sessao antes de cwd exclusivo, deltas Codex e nenhuma medicao inventada. Contrato e limitacoes: [TAB_USAGE.md](./TAB_USAGE.md).
+
+## Etapa 17 - Fast headless (Backend)
+
+Implementado em `feat/etapa17-headless-fast`: snapshot Fast do lead e dos integrantes persistido em runs/run_squad_members (v34); supervisor passa `LaunchCtx.fast_mode` e Codex usa `-c service_tier="fast"`. Providers sem equivalente nao recebem flags. Formatos CLI verificados, limites e testes: [FAST_HEADLESS.md](./FAST_HEADLESS.md).
+
+Codex 0.160.1 aceita o override `service_tier` por execução. O help do Claude Code 2.1.289 não oferece flag Fast headless; nenhum argumento ou configuração Fast foi acrescentado ao Claude. A suíte Rust completa passou em paralelo: 1.088 testes da biblioteca e 27 da CLI; 9 testes ficaram ignorados conforme os marcadores existentes.

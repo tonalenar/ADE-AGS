@@ -199,15 +199,15 @@ pub fn set_run_squad_snapshot(
     squad: &Squad,
 ) -> Result<(), String> {
     conn.execute(
-        "UPDATE runs SET squad_id = ?1, squad_name = ?2 WHERE id = ?3",
-        rusqlite::params![squad.id, squad.name, run_id],
+        "UPDATE runs SET squad_id = ?1, squad_name = ?2, fast_mode = ?4 WHERE id = ?3",
+        rusqlite::params![squad.id, squad.name, run_id, squad.lead.fast_mode as i64],
     )
     .map_err(|error| error.to_string())?;
     for member in &squad.members {
         conn.execute(
             "INSERT INTO run_squad_members (run_id, role_id, agent_id, model, account_id,
-                                            auto_account, complexity, isolate_default, reasoning_effort)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                                            auto_account, complexity, isolate_default, reasoning_effort, fast_mode)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             rusqlite::params![
                 run_id,
                 member.role_id,
@@ -218,6 +218,7 @@ pub fn set_run_squad_snapshot(
                 member.complexity,
                 member.isolate_default as i64,
                 member.reasoning_effort,
+                member.fast_mode as i64,
             ],
         )
         .map_err(|error| error.to_string())?;
