@@ -18,6 +18,7 @@ pub(crate) mod precheck;
 pub(crate) mod failure;
 pub(crate) mod duplicate;
 pub mod efficiency;
+pub mod cleanup;
 pub mod store;
 pub(crate) mod timings;
 pub(crate) mod startcheck;
