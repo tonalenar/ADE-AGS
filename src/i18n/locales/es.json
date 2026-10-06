@@ -2296,5 +2296,20 @@
   "canvas.design.choosing": "Clic en la propuesta…",
   "canvas.design.chosen": "Elegida: {{what}}",
   "canvas.design.chosenComment": "ELEGIDA: {{what}}",
-  "canvas.design.noOwnerTag": "sin agente"
+  "canvas.design.noOwnerTag": "sin agente",
+  "canvas.chat.copy": "Copiar",
+  "canvas.chat.copied": "Copiado",
+  "canvas.chat.copyCode": "Copiar bloque de código",
+  "canvas.chat.resize.handle": "Cambiar tamaño del chat (arrastra; las flechas ajustan)",
+  "canvas.chat.resize.reset": "Restaurar tamaño",
+  "canvas.chat.resize.maximize": "Maximizar (Ctrl+Shift+M)",
+  "canvas.chat.resize.unmaximize": "Salir de maximizado (Ctrl+Shift+M)",
+  "canvas.chat.pick.open": "Traer de la terminal",
+  "canvas.chat.pick.title": "Elegir qué traer de la terminal",
+  "canvas.chat.pick.hint": "Elige una respuesta del agente o usa lo que seleccionaste en la terminal. ↑/↓ y Enter.",
+  "canvas.chat.pick.selection": "Selección libre de la terminal",
+  "canvas.chat.pick.noPrompt": "(prompt fuera del historial)",
+  "canvas.chat.pick.empty": "No hay respuestas en la terminal. Selecciona un texto en ella y actualiza.",
+  "canvas.chat.pick.send": "Enviar esta respuesta",
+  "canvas.chat.pick.sendSelection": "Enviar la selección"
 }

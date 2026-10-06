@@ -8,6 +8,9 @@ import { useTabsStore } from "@/features/tabs/store";
 import { AIChatCard } from "./AIChatCard";
 import { unreadOf, useUnreadStore } from "./chatUnread";
 import { useActiveBoardKey, boardKeyOfTab } from "./store";
+import { ChatMarkdown } from "./ChatMarkdown";
+import { ResponsePicker } from "./ResponsePicker";
+import { CHAT_MARGIN, clampSize, isDefaultSize, loadChatSize, resizeBy, saveChatSize, DEFAULT_CHAT_SIZE, type ChatSize, type ChatSizeState } from "./chatSize";
 
 /** Los siete hilos, en el orden en que los conoce el backend (`chat::THREADS`). */
 export const THREADS = ["blue", "purple", "pink", "red", "orange", "yellow", "green"] as const;
@@ -58,8 +61,8 @@ const clock = (unix: number) => new Date(unix * 1000).toLocaleTimeString(undefin
  * Solo agentes: a una terminal de shell lo escrito se ejecutaría como comando (el backend
  * también lo rechaza).
  *
- * El texto de los globos se muestra como texto plano: lo escribió un agente y no se
- * interpreta.
+ * Las respuestas del agente se muestran como Markdown seguro (`ChatMarkdown`: sin HTML crudo,
+ * enlaces solo http/https). Lo que escribe el usuario queda como texto plano.
  */
 export function ChatPanel({ onClose }: { onClose: () => void }) {
   const { t } = useTranslation();
@@ -77,6 +80,52 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
+  const [picking, setPicking] = useState(false);
+  const [view, setView] = useState<ChatSizeState>(loadChatSize);
+  // Marca dentro de la tarjeta: de ahí se llega a ella y al área que la contiene.
+  const sentinel = useRef<HTMLSpanElement>(null);
+  const area = () => {
+    const box = sentinel.current?.parentElement?.parentElement;
+    return { width: box?.clientWidth ?? 1200, height: box?.clientHeight ?? 800 };
+  };
+  const commit = (next: ChatSizeState) => { setView(next); saveChatSize(next); };
+  const startResize = (edge: { left: boolean; top: boolean }) => (e: React.PointerEvent<HTMLElement>) => {
+    if (view.maximized || e.button !== 0) return;
+    e.preventDefault();
+    const target = e.currentTarget;
+    target.setPointerCapture(e.pointerId);
+    const rect = sentinel.current?.parentElement?.getBoundingClientRect();
+    const start: ChatSize = rect ? { width: rect.width, height: rect.height } : view.size;
+    const x0 = e.clientX, y0 = e.clientY;
+    let last = start;
+    const move = (ev: PointerEvent) => {
+      last = resizeBy(start, ev.clientX - x0, ev.clientY - y0, edge, area());
+      setView({ size: last, maximized: false });
+    };
+    const up = () => {
+      target.removeEventListener("pointermove", move);
+      target.removeEventListener("pointerup", up);
+      target.removeEventListener("pointercancel", up);
+      commit({ size: last, maximized: false });
+    };
+    target.addEventListener("pointermove", move);
+    target.addEventListener("pointerup", up);
+    target.addEventListener("pointercancel", up);
+  };
+  const nudge = (e: React.KeyboardEvent) => {
+    const step = e.shiftKey ? 48 : 16;
+    const d = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] }[e.key];
+    if (!d || view.maximized) return;
+    e.preventDefault();
+    // Izquierda/arriba agrandan: el panel está pegado abajo a la derecha.
+    commit({ size: resizeBy(view.size, d[0], d[1], { left: true, top: true }, area()), maximized: false });
+  };
+  const toggleMax = () => commit({ ...view, maximized: !view.maximized });
+  const clamped = clampSize(view.size, { width: 4000, height: 4000 });
+  const sizeStyle: React.CSSProperties = view.maximized
+    ? { width: `calc(100% - ${CHAT_MARGIN.x}px)`, height: `calc(100% - ${CHAT_MARGIN.y}px)` }
+    : { width: clamped.width, height: clamped.height, maxWidth: `calc(100% - ${CHAT_MARGIN.x}px)`, maxHeight: `calc(100% - ${CHAT_MARGIN.y}px)` };
+  const handleCls = "absolute z-20 bg-transparent hover:bg-accent-400/30 focus-visible:bg-accent-400/40 focus-visible:outline-none";
   const unread = useUnreadStore((s) => s.unread);
   const sound = useUnreadStore((s) => s.sound);
   const jump = useUnreadStore((s) => s.jump);
@@ -154,7 +203,29 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
 
   return (
     <AIChatCard
-      className="pointer-events-auto absolute right-3 bottom-16 w-[26rem] max-w-[calc(100%-1.5rem)] h-[min(34rem,70%)]"
+      className="pointer-events-auto absolute right-3 bottom-16"
+      style={sizeStyle}
+      onKeyDown={(e) => {
+        if (e.key === "Escape" && !picking) { e.stopPropagation(); onClose(); }
+        else if (e.ctrlKey && e.shiftKey && e.key.toLowerCase() === "m") { e.preventDefault(); toggleMax(); }
+      }}
+      chrome={<>
+        <span ref={sentinel} hidden />
+        {!view.maximized && <>
+          <div role="separator" aria-orientation="vertical" tabIndex={0} aria-label={t("canvas.chat.resize.handle")} title={t("canvas.chat.resize.handle")}
+            onPointerDown={startResize({ left: true, top: false })} onKeyDown={nudge}
+            className={`${handleCls} left-0 top-4 bottom-4 w-1.5 cursor-ew-resize`} />
+          <div role="separator" aria-orientation="horizontal" tabIndex={0} aria-label={t("canvas.chat.resize.handle")} title={t("canvas.chat.resize.handle")}
+            onPointerDown={startResize({ left: false, top: true })} onKeyDown={nudge}
+            className={`${handleCls} top-0 left-4 right-4 h-1.5 cursor-ns-resize`} />
+          <div aria-hidden onPointerDown={startResize({ left: true, top: true })}
+            className={`${handleCls} left-0 top-0 h-4 w-4 cursor-nwse-resize`} />
+        </>}
+        {picking && current && <ResponsePicker tabId={current.id} onClose={() => setPicking(false)}
+          onPick={(text) => { setDraft((d) => (d.trim() ? `${d.trimEnd()}
+
+${text}` : text)); setPicking(false); }} />}
+      </>}
       title={t("canvas.chat.title")}
       subtitle={current?.title ?? t("canvas.chat.subtitle")}
       greeting={t("canvas.chat.greeting")}
@@ -172,6 +243,25 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
         {t(`canvas.chat.thread.${thread}`)}
       </span>}
       actions={<>
+        <button type="button" onClick={() => setPicking(true)} disabled={!current} title={t("canvas.chat.pick.open")} aria-label={t("canvas.chat.pick.open")}
+          className="cc-t flex h-[30px] items-center justify-center rounded-full border border-gray-200 px-2.5 text-[11px] font-medium text-gray-500 hover:text-gray-900 disabled:opacity-40 dark:border-white/12 dark:text-gray-400 dark:hover:text-white">
+          {t("canvas.chat.pick.open")}
+        </button>
+        <button type="button" onClick={toggleMax} aria-pressed={view.maximized}
+          title={view.maximized ? t("canvas.chat.resize.unmaximize") : t("canvas.chat.resize.maximize")}
+          aria-label={view.maximized ? t("canvas.chat.resize.unmaximize") : t("canvas.chat.resize.maximize")}
+          className="cc-t flex h-[30px] w-[30px] items-center justify-center rounded-full text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden>
+            {view.maximized ? <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /> : <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />}
+          </svg>
+        </button>
+        {(!isDefaultSize(view.size) || view.maximized) && (
+          <button type="button" onClick={() => commit({ size: DEFAULT_CHAT_SIZE, maximized: false })}
+            title={t("canvas.chat.resize.reset")} aria-label={t("canvas.chat.resize.reset")}
+            className="cc-t flex h-[30px] items-center justify-center rounded-full px-2 text-[11px] text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white">
+            {t("canvas.chat.resize.reset")}
+          </button>
+        )}
         <button type="button" onClick={load} disabled={!current} title={t("canvas.chat.refresh")} aria-label={t("canvas.chat.refresh")}
           className="cc-t flex h-[30px] w-[30px] items-center justify-center rounded-full border border-gray-200 text-gray-500 hover:text-gray-900 active:rotate-180 disabled:opacity-40 dark:border-white/12 dark:text-gray-400 dark:hover:text-white">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden>
@@ -228,7 +318,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
               {messages.map((m) => (
                 <div key={m.id} className={`flex flex-col ${m.kind === "user" ? "items-end" : "items-start"}`}>
                   <div
-                    className={`max-w-[85%] px-3 py-2 rounded-[16px] text-[12.5px] leading-relaxed whitespace-pre-wrap break-words
+                    className={`max-w-[85%] px-3 py-2 rounded-[16px] text-[12.5px] leading-relaxed break-words ${m.kind === "user" ? "whitespace-pre-wrap" : ""}
                       ${m.kind === "user"
                         ? "text-white"
                         : m.kind === "progress"
@@ -236,7 +326,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
                           : "text-gray-800 dark:text-gray-100 bg-gray-100 dark:bg-white/8"}`}
                     style={m.kind === "user" ? { background: THREAD_COLOR[thread] } : undefined}
                   >
-                    {m.text}
+                    {m.kind === "user" ? m.text : <ChatMarkdown text={m.text} />}
                   </div>
                   <span className="mt-0.5 text-[10px] text-gray-400 dark:text-gray-500">{clock(m.at)}</span>
                 </div>

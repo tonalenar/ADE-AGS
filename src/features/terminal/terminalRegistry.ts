@@ -228,3 +228,8 @@ export function screenOf(tabId: string, from?: number | null, max = 200): Screen
 export function focusTab(tabId: string): void {
   terminals.get(tabId)?.focus();
 }
+
+/** Lo que el usuario tiene seleccionado en la terminal de la tab (vacío si nada). */
+export function selectionOf(tabId: string): string {
+  return terminals.get(tabId)?.getSelection() ?? "";
+}

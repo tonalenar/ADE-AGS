@@ -2296,5 +2296,20 @@
   "canvas.design.choosing": "Click the proposal…",
   "canvas.design.chosen": "Chosen: {{what}}",
   "canvas.design.chosenComment": "CHOSEN: {{what}}",
-  "canvas.design.noOwnerTag": "no agent"
+  "canvas.design.noOwnerTag": "no agent",
+  "canvas.chat.copy": "Copy",
+  "canvas.chat.copied": "Copied",
+  "canvas.chat.copyCode": "Copy code block",
+  "canvas.chat.resize.handle": "Resize chat (drag; arrow keys adjust)",
+  "canvas.chat.resize.reset": "Restore size",
+  "canvas.chat.resize.maximize": "Maximize (Ctrl+Shift+M)",
+  "canvas.chat.resize.unmaximize": "Exit maximized (Ctrl+Shift+M)",
+  "canvas.chat.pick.open": "Bring from terminal",
+  "canvas.chat.pick.title": "Choose what to bring from the terminal",
+  "canvas.chat.pick.hint": "Pick one agent reply or use what you selected in the terminal. ↑/↓ and Enter.",
+  "canvas.chat.pick.selection": "Free selection from the terminal",
+  "canvas.chat.pick.noPrompt": "(prompt outside the scrollback)",
+  "canvas.chat.pick.empty": "No replies found in the terminal. Select some text in it and refresh.",
+  "canvas.chat.pick.send": "Send this reply",
+  "canvas.chat.pick.sendSelection": "Send the selection"
 }
