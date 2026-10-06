@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 32;
+const SCHEMA_VERSION: i32 = 35;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1057,7 +1057,8 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         name TEXT NOT NULL, cwd TEXT NOT NULL, root TEXT NOT NULL, branch TEXT NOT NULL,
         PRIMARY KEY (mission_id, name), UNIQUE(root), UNIQUE(branch)
     );")?;
-    // Histórico / auditoria de evidências de entrega e reavaliações (redeliver)
+    if user_version(conn)? < 32 { set_user_version(conn, 32)?; }
+    // v35 — Histórico / auditoria de evidências de entrega e reavaliações (redeliver)
     conn.execute_batch("CREATE TABLE IF NOT EXISTS mission_delivery_audit (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,
         mission_id      TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
@@ -1072,6 +1073,7 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         reason          TEXT,
         checked_at      INTEGER NOT NULL
     );")?;
+    if user_version(conn)? < 35 { set_user_version(conn, 35)?; }
     set_user_version(conn, SCHEMA_VERSION)
 }
 
