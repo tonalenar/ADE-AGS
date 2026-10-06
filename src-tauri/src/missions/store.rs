@@ -8,7 +8,7 @@ use uuid::Uuid;
 
 use crate::util::now_ts;
 
-use super::delivery::{MissionDelivery, mission_status};
+use super::delivery::{CiStatus, MissionDelivery, PrState, TestResult, mission_status, normalize_pr_reference};
 use super::types::{Mission, MissionInput, MissionSummary, status};
 use super::{FailureActionKey, FailureCategory, FailureClassification};
 
@@ -451,7 +451,12 @@ pub fn finish_terminals(conn: &Connection, id: &str, evidence: &MissionDelivery)
     }
     tx.execute(
         "INSERT INTO mission_terminal_deliveries (mission_id, test_result, pull_request, ci_status, checked_at)
-         VALUES (?1, ?2, ?3, ?4, ?5)",
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(mission_id) DO UPDATE SET
+             test_result = excluded.test_result,
+             pull_request = excluded.pull_request,
+             ci_status = excluded.ci_status,
+             checked_at = excluded.checked_at",
         rusqlite::params![
             id,
             evidence.test_result.as_str(),
@@ -461,8 +466,282 @@ pub fn finish_terminals(conn: &Connection, id: &str, evidence: &MissionDelivery)
         ],
     )
     .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO mission_delivery_audit (
+             mission_id, action, previous_status, new_status,
+             test_result, pull_request, pr_state, ci_status,
+             promoted, reason, checked_at
+         ) VALUES (?1, 'finish_terminals', 'running', ?2, ?3, ?4, NULL, ?5, ?6, ?7, ?8)",
+        rusqlite::params![
+            id,
+            outcome,
+            evidence.test_result.as_str(),
+            evidence.pull_request.as_deref(),
+            evidence.ci_status.as_str(),
+            if outcome == status::DONE { 1 } else { 0 },
+            format!("Conclusão manual em terminais com status {outcome}"),
+            evidence.checked_at,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
     tx.commit().map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RedeliverOutcome {
+    pub mission_id: String,
+    pub previous_status: String,
+    pub new_status: String,
+    pub promoted: bool,
+    pub pull_request: Option<String>,
+    pub pr_state: PrState,
+    pub ci_status: CiStatus,
+    pub test_result: TestResult,
+    pub reason: String,
+    pub checked_at: i64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct MissionDeliveryAuditEntry {
+    pub id: i64,
+    pub mission_id: String,
+    pub action: String,
+    pub previous_status: String,
+    pub new_status: String,
+    pub test_result: String,
+    pub pull_request: Option<String>,
+    pub pr_state: Option<String>,
+    pub ci_status: String,
+    pub promoted: bool,
+    pub reason: Option<String>,
+    pub checked_at: i64,
+}
+
+pub fn delivery_audit_for_mission(conn: &Connection, mission_id: &str) -> Result<Vec<MissionDeliveryAuditEntry>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, mission_id, action, previous_status, new_status, test_result,
+                    pull_request, pr_state, ci_status, promoted, reason, checked_at
+             FROM mission_delivery_audit
+             WHERE mission_id = ?1
+             ORDER BY id ASC",
+        )
+        .map_err(|e| e.to_string())?;
+
+    let rows = stmt
+        .query_map([mission_id], |row| {
+            let promoted_int: i64 = row.get(9)?;
+            Ok(MissionDeliveryAuditEntry {
+                id: row.get(0)?,
+                mission_id: row.get(1)?,
+                action: row.get(2)?,
+                previous_status: row.get(3)?,
+                new_status: row.get(4)?,
+                test_result: row.get(5)?,
+                pull_request: row.get(6)?,
+                pr_state: row.get(7)?,
+                ci_status: row.get(8)?,
+                promoted: promoted_int != 0,
+                reason: row.get(10)?,
+                checked_at: row.get(11)?,
+            })
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut result = Vec::new();
+    for row in rows {
+        result.push(row.map_err(|e| e.to_string())?);
+    }
+    Ok(result)
+}
+
+pub fn redeliver_with_checker<F>(
+    conn: &Connection,
+    mission_id: &str,
+    cwd: &str,
+    pr_override: Option<&str>,
+    test_override: Option<TestResult>,
+    pr_checker: F,
+) -> Result<RedeliverOutcome, String>
+where
+    F: Fn(&std::path::Path, &str) -> (PrState, CiStatus),
+{
+    let mission = get(conn, mission_id)?
+        .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+
+    // Nunca mexe em missão failed ou cancelled
+    if mission.status == status::FAILED || mission.status == status::CANCELLED {
+        return Err(format!(
+            "Não é permitido reavaliar missão com status '{}'.",
+            mission.status
+        ));
+    }
+
+    if mission.status != status::DONE && mission.status != status::DONE_WITHOUT_DELIVERY {
+        return Err(format!(
+            "Apenas missões finalizadas podem ser reavaliadas (status atual: '{}').",
+            mission.status
+        ));
+    }
+
+    let existing_delivery = delivery_for_mission(conn, mission_id)?;
+
+    // Determina o PR a ser verificado
+    let target_pr = match pr_override {
+        Some(pr) if !pr.trim().is_empty() => Some(normalize_pr_reference(pr)?),
+        _ => existing_delivery.as_ref().and_then(|d| d.pull_request.clone()),
+    };
+
+    // Determina o resultado dos testes
+    let target_test_result = match test_override {
+        Some(tr) => tr,
+        None => existing_delivery
+            .as_ref()
+            .map(|d| d.test_result)
+            .unwrap_or(TestResult::NotRun),
+    };
+
+    let checked_at = now_ts();
+
+    // Consulta estado do PR e CI
+    let (pr_state, ci_status) = match target_pr.as_deref() {
+        Some(pr_ref) => pr_checker(std::path::Path::new(cwd), pr_ref),
+        None => (PrState::Unknown, CiStatus::NotApplicable),
+    };
+
+    // Só promove para done se PR mesclado e CI verde e testes aprovados
+    let has_pr = target_pr.is_some();
+    let is_merged = pr_state == PrState::Merged;
+    let is_ci_green = ci_status == CiStatus::Success;
+    let is_test_passed = target_test_result == TestResult::Passed;
+
+    let can_promote = has_pr && is_merged && is_ci_green && is_test_passed;
+
+    let previous_status = mission.status.clone();
+    let (new_status, promoted, reason) = if can_promote {
+        if previous_status == status::DONE_WITHOUT_DELIVERY {
+            (
+                status::DONE.to_string(),
+                true,
+                format!(
+                    "PR {} mesclado e CI verde com testes aprovados; missão promovida com sucesso para done.",
+                    target_pr.as_deref().unwrap_or("")
+                ),
+            )
+        } else {
+            (
+                status::DONE.to_string(),
+                false,
+                format!(
+                    "PR {} mesclado e CI verde com testes aprovados; já estava em done (idempotente).",
+                    target_pr.as_deref().unwrap_or("")
+                ),
+            )
+        }
+    } else {
+        let reason = if !has_pr {
+            "Nenhum pull request informado ou associado à missão. Nunca promove sem evidência.".to_string()
+        } else if !is_test_passed {
+            format!(
+                "Testes não aprovados (resultado: {}). Só promove se testes aprovados, PR mesclado e CI verde.",
+                target_test_result.as_str()
+            )
+        } else if !is_merged {
+            format!(
+                "PR {} não está mesclado (estado: {}). Só promove se PR mesclado e CI verde.",
+                target_pr.as_deref().unwrap_or(""),
+                pr_state.as_str()
+            )
+        } else {
+            format!(
+                "CI do PR {} não está verde (estado do CI: {}). Só promove se CI verde.",
+                target_pr.as_deref().unwrap_or(""),
+                ci_status.as_str()
+            )
+        };
+
+        (previous_status.clone(), false, reason)
+    };
+
+    // Executa persistência no banco em transação atômica
+    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+
+    if new_status != previous_status {
+        tx.execute(
+            "UPDATE missions SET status = ?1, updated_at = ?2 WHERE id = ?3",
+            rusqlite::params![new_status, checked_at, mission_id],
+        )
+        .map_err(|e| e.to_string())?;
+    }
+
+    tx.execute(
+        "INSERT INTO mission_terminal_deliveries (mission_id, test_result, pull_request, ci_status, checked_at)
+         VALUES (?1, ?2, ?3, ?4, ?5)
+         ON CONFLICT(mission_id) DO UPDATE SET
+             test_result = excluded.test_result,
+             pull_request = excluded.pull_request,
+             ci_status = excluded.ci_status,
+             checked_at = excluded.checked_at",
+        rusqlite::params![
+            mission_id,
+            target_test_result.as_str(),
+            target_pr.as_deref(),
+            ci_status.as_str(),
+            checked_at,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.execute(
+        "INSERT INTO mission_delivery_audit (
+             mission_id, action, previous_status, new_status,
+             test_result, pull_request, pr_state, ci_status,
+             promoted, reason, checked_at
+         ) VALUES (?1, 'redeliver', ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+        rusqlite::params![
+            mission_id,
+            previous_status,
+            new_status,
+            target_test_result.as_str(),
+            target_pr.as_deref(),
+            pr_state.as_str(),
+            ci_status.as_str(),
+            if promoted { 1 } else { 0 },
+            reason,
+            checked_at,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+
+    tx.commit().map_err(|e| e.to_string())?;
+
+    Ok(RedeliverOutcome {
+        mission_id: mission_id.to_string(),
+        previous_status,
+        new_status,
+        promoted,
+        pull_request: target_pr,
+        pr_state,
+        ci_status,
+        test_result: target_test_result,
+        reason,
+        checked_at,
+    })
+}
+
+pub fn redeliver(
+    conn: &Connection,
+    mission_id: &str,
+    cwd: &str,
+    pr_override: Option<&str>,
+    test_override: Option<TestResult>,
+) -> Result<RedeliverOutcome, String> {
+    redeliver_with_checker(conn, mission_id, cwd, pr_override, test_override, super::delivery::check_pr_status)
 }
 
 /// Cancela un borrador. No hay proceso que parar: nunca se lanzó nada.

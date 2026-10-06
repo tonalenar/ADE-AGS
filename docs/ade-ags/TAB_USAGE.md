@@ -1,0 +1,13 @@
+# Uso por aba — Etapa 17
+
+`mission_tokens(missionId)` mantém `agents` e `totals`. Cada agente contém `tabs`: `tabId`, `agentId`, `label`, `kind`, `cwd`, `sessionId`, `source`, `measured`, `input`, `output`, `cacheWrite`, `cacheRead`, `costUsd` e `estimate`. O CLI `ags mission efficiency <id>` expõe o mesmo objeto em `tokens`. Todas as propriedades usam camelCase.
+
+Os totais de cada agente são a soma das suas abas; os totais da missão são a soma dos agentes. Abas sem evidência têm `measured:false` e tokens/custo/estimativa `null`. A UI deve mostrar “não medido” / “not measured” / “no medido”, em cinza. `costUsd` é o custo reportado; `estimate` usa a tabela existente de preços e não é uma cobrança. Modelos sem preço conhecido preservam tokens medidos, com estimativa ausente.
+
+`mission_usage_tabs` registra a identidade observada no canvas da missão ou no cwd de um worktree cadastrado em `mission_team_workspaces`. A migração é aditiva e idempotente. A captura ocorre durante a persistência das abas e a consulta de uso; os registros sobrevivem ao fechamento. Terminais recrutados/customizados e abas avulsas ligadas ao canvas são incluídos. Uma aba solta fora da missão não entra apenas por compartilhar o cwd do projeto.
+
+A sessão/transcript identifica o uso primeiro (`source:session`). Sem sessão confiável, a atribuição por cwd só ocorre para um worktree registrado, com um único terminal observado e nenhuma outra aba concorrente (`source:isolated_cwd`). A leitura respeita início/fim da missão e abertura/fechamento da aba. Cada registro pertence a uma única aba; quando uma sessão é reaberta mais tarde, a aba nova recebe apenas os registros de seu intervalo. Em intervalos sobrepostos, a primeira identidade persistida recebe o registro. Reiniciar um terminal preserva o histórico dos IDs de sessão. Não há distribuição proporcional ou inferência de tokens pelo custo.
+
+Claude lê `message.usage` no perfil da conta, descartando IDs de mensagem repetidos. Codex lê `session_meta`, `turn_context` e deltas positivos de `event_msg/token_count/info/total_token_usage`; eventos cumulativos repetidos não contam novamente. Entrada cacheada fica separada da entrada normal. Um agente customizado pode ser medido se seu diretório de sessões fornecer os dialectos Claude/Codex reconhecidos; formatos desconhecidos ficam sem medição. Headless usa o ledger por tarefa (`tabId:task:<id>`, `source:ledger`); uma sessão reaberta como terminal recebe o mesmo custo, sem duplicá-lo. Cache não separado no ledger permanece ausente.
+
+Limite histórico: abas fechadas antes da instalação desta captura só podem ser atribuídas quando existe identidade persistida. Não se inventa retrospectivamente uma associação entre transcript e terminal.

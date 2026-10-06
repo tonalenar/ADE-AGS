@@ -63,3 +63,25 @@ A marcação está persistida em `missions.is_test` (schema v27) e exposta como 
 - `src/features/bot/BotPanel.tsx`: cartões da aba STATUS.
 - Testes: `src/features/bot/tests/botStats.test.ts`.
 - i18n: chaves `botPanel.card.success*`, `cancelled`, `tests*`, `windowSub` em pt-BR/en/es.
+
+## Reavaliação e entrega segura de missões (Etapa 17, Ponto C)
+
+Para missões que foram concluídas em terminais com `done_without_delivery` (por exemplo, quando o PR ainda estava aberto ou o CI ainda rodava no momento da conclusão), o ADE AGS oferece o comando seguro e idempotente:
+
+```bash
+ags mission redeliver <id> [--pr <N>] [--test passed|failed|not_run]
+```
+
+### Regras de segurança e promoção honesta
+1. **Consulta no repositório correto (`origin`):** O comando resolve o repositório remoto a partir do `origin` do repositório da missão (`git remote get-url origin`) ou da URL completa do PR, passando explicitamente `--repo` ao GitHub CLI (`gh`). Isso evita falsos negativos causados pelo repositório padrão do usuário ou forks.
+2. **Critérios estritos de promoção:** A missão só é promovida para `done` se:
+   - Houver um PR identificado e verificado;
+   - O estado do PR for comprovadamente mesclado (`MERGED`);
+   - O rollup de status do CI estiver verde (`SUCCESS` ou `NEUTRAL`);
+   - O resultado dos testes for `passed` (mantendo o existente ou atualizado explicitamente com `--test passed`).
+3. **Nunca promove sem evidência:** Sem PR, sem testes aprovados, com PR aberto/fechado sem merge, ou com CI pendente/falho, a missão permanece em `done_without_delivery`.
+4. **Proteção de estados imutáveis:** Nunca altera missões com status `failed` ou `cancelled` (nem rascunhos `draft`). Qualquer tentativa é rejeitada imediatamente com erro explicativo.
+5. **Idempotência total:** Se a missão já estiver em `done`, o comando reavalia e confirma o estado sem re-promover (`promoted: false`), registrando a conferência de forma segura.
+6. **Auditoria e rastreabilidade:** Todas as avaliações e reavaliações registram evidência na tabela `mission_delivery_audit` (com `previous_status`, `new_status`, `test_result`, `pull_request`, `pr_state`, `ci_status`, `promoted`, `reason` e `checked_at`) e atualizam a tabela `mission_terminal_deliveries`.
+7. **Modo online e standalone:** Funciona via IPC quando o app ADE AGS está aberto e possui fallback standalone automático para executar diretamente contra `~/.ags/data.db` quando o app está fechado.
+

@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 32;
+const SCHEMA_VERSION: i32 = 35;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -75,7 +75,7 @@ fn detect_legacy_version(conn: &Connection) -> i32 {
 /// **Ningún paso borra datos del usuario**: lo que no se puede migrar se aparta con un
 /// nombre `_legacy_*`, para que un error de detección cueste una tabla huérfana y no los
 /// workspaces de alguien.
-pub(crate) fn migrate(conn: &Connection) -> SqlResult<()> {
+pub fn migrate(conn: &Connection) -> SqlResult<()> {
     let mut version = user_version(conn)?;
     if version == 0 {
         version = detect_legacy_version(conn);
@@ -1057,6 +1057,41 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         name TEXT NOT NULL, cwd TEXT NOT NULL, root TEXT NOT NULL, branch TEXT NOT NULL,
         PRIMARY KEY (mission_id, name), UNIQUE(root), UNIQUE(branch)
     );")?;
+    if user_version(conn)? < 32 { set_user_version(conn, 32)?; }
+    // v33: Durable ownership survives closing a terminal; no FK to disposable tabs.
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS mission_usage_tabs (
+        mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+        tab_id TEXT NOT NULL, agent_id TEXT NOT NULL, label TEXT NOT NULL,
+        kind TEXT NOT NULL, cwd TEXT NOT NULL, session_id TEXT, account_id TEXT,
+        session_ids TEXT NOT NULL DEFAULT '[]',
+        opened_at INTEGER NOT NULL, closed_at INTEGER,
+        PRIMARY KEY(mission_id, tab_id)
+    );")?;
+    if user_version(conn)? < 33 { set_user_version(conn, 33)?; }
+    // v34: execution-local Fast policy copied from Squad. Old runs remain off;
+    // never reconstruct settings from a Squad that may have been edited later.
+    for table in ["runs", "run_squad_members"] {
+        if !has_column(conn, table, "fast_mode") {
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN fast_mode INTEGER NOT NULL DEFAULT 0"))?;
+        }
+    }
+    if user_version(conn)? < 34 { set_user_version(conn, 34)?; }
+    // v35 — Histórico / auditoria de evidências de entrega e reavaliações (redeliver)
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS mission_delivery_audit (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        mission_id      TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+        action          TEXT NOT NULL,
+        previous_status TEXT NOT NULL,
+        new_status      TEXT NOT NULL,
+        test_result     TEXT NOT NULL,
+        pull_request    TEXT,
+        pr_state        TEXT,
+        ci_status       TEXT NOT NULL,
+        promoted        INTEGER NOT NULL CHECK(promoted IN (0, 1)),
+        reason          TEXT,
+        checked_at      INTEGER NOT NULL
+    );")?;
+    if user_version(conn)? < 35 { set_user_version(conn, 35)?; }
     set_user_version(conn, SCHEMA_VERSION)
 }
 

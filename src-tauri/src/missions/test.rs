@@ -1700,3 +1700,304 @@ fn explicit_test_marker_persists_in_get_list_and_start_payload_without_guessing(
     assert!(store::get(&conn, &real.id).unwrap().unwrap().is_test);
     assert!(!update(&conn, &marked.id, &MissionInput { is_test: Some(false), ..pedido() }).unwrap().is_test);
 }
+
+#[test]
+fn redeliver_promotes_done_without_delivery_when_merged_and_ci_green_and_test_passed() {
+    let db = db();
+    let id = borrador(&db);
+    let conn = db.lock().unwrap();
+    assert!(store::mark_started_terminals(&conn, &id).unwrap());
+
+    let initial_delivery = MissionDelivery {
+        test_result: TestResult::Passed,
+        pull_request: Some("68".into()),
+        ci_status: CiStatus::Pending,
+        checked_at: 100,
+    };
+    assert!(store::finish_terminals(&conn, &id, &initial_delivery).unwrap());
+    assert_eq!(store::get(&conn, &id).unwrap().unwrap().status, status::DONE_WITHOUT_DELIVERY);
+
+    let outcome = store::redeliver_with_checker(
+        &conn,
+        &id,
+        "C:\\repo",
+        Some("68"),
+        Some(TestResult::Passed),
+        |_cwd, pr| {
+            assert_eq!(pr, "68");
+            (super::delivery::PrState::Merged, CiStatus::Success)
+        },
+    )
+    .unwrap();
+
+    assert!(outcome.promoted);
+    assert_eq!(outcome.previous_status, status::DONE_WITHOUT_DELIVERY);
+    assert_eq!(outcome.new_status, status::DONE);
+    assert_eq!(store::get(&conn, &id).unwrap().unwrap().status, status::DONE);
+
+    let delivery = store::delivery_for_mission(&conn, &id).unwrap().unwrap();
+    assert_eq!(delivery.ci_status, CiStatus::Success);
+    assert_eq!(delivery.pull_request.as_deref(), Some("68"));
+    assert_eq!(delivery.test_result, TestResult::Passed);
+
+    let audit = store::delivery_audit_for_mission(&conn, &id).unwrap();
+    assert_eq!(audit.len(), 2);
+    assert_eq!(audit[0].action, "finish_terminals");
+    assert_eq!(audit[1].action, "redeliver");
+    assert!(audit[1].promoted);
+    assert_eq!(audit[1].new_status, status::DONE);
+}
+
+#[test]
+fn redeliver_is_idempotent_when_already_done() {
+    let db = db();
+    let id = borrador(&db);
+    let conn = db.lock().unwrap();
+    assert!(store::mark_started_terminals(&conn, &id).unwrap());
+
+    let initial_delivery = MissionDelivery {
+        test_result: TestResult::Passed,
+        pull_request: Some("68".into()),
+        ci_status: CiStatus::Success,
+        checked_at: 100,
+    };
+    assert!(store::finish_terminals(&conn, &id, &initial_delivery).unwrap());
+    assert_eq!(store::get(&conn, &id).unwrap().unwrap().status, status::DONE);
+
+    let outcome = store::redeliver_with_checker(
+        &conn,
+        &id,
+        "C:\\repo",
+        None,
+        None,
+        |_cwd, _pr| (super::delivery::PrState::Merged, CiStatus::Success),
+    )
+    .unwrap();
+
+    assert!(!outcome.promoted, "já estava done, não deve promover de novo");
+    assert_eq!(outcome.previous_status, status::DONE);
+    assert_eq!(outcome.new_status, status::DONE);
+    assert_eq!(store::get(&conn, &id).unwrap().unwrap().status, status::DONE);
+}
+
+#[test]
+fn redeliver_rejects_promotion_if_pr_is_not_merged() {
+    let db = db();
+    let id = borrador(&db);
+    let conn = db.lock().unwrap();
+    assert!(store::mark_started_terminals(&conn, &id).unwrap());
+
+    let initial_delivery = MissionDelivery {
+        test_result: TestResult::Passed,
+        pull_request: Some("10".into()),
+        ci_status: CiStatus::Pending,
+        checked_at: 100,
+    };
+    assert!(store::finish_terminals(&conn, &id, &initial_delivery).unwrap());
+
+    // PR Open
+    let open_outcome = store::redeliver_with_checker(
+        &conn,
+        &id,
+        "C:\\repo",
+        Some("10"),
+        Some(TestResult::Passed),
+        |_cwd, _pr| (super::delivery::PrState::Open, CiStatus::Success),
+    )
+    .unwrap();
+    assert!(!open_outcome.promoted);
+    assert_eq!(open_outcome.new_status, status::DONE_WITHOUT_DELIVERY);
+    assert_eq!(store::get(&conn, &id).unwrap().unwrap().status, status::DONE_WITHOUT_DELIVERY);
+
+    // PR Closed sem merge
+    let closed_outcome = store::redeliver_with_checker(
+        &conn,
+        &id,
+        "C:\\repo",
+        Some("10"),
+        Some(TestResult::Passed),
+        |_cwd, _pr| (super::delivery::PrState::Closed, CiStatus::Success),
+    )
+    .unwrap();
+    assert!(!closed_outcome.promoted);
+    assert_eq!(closed_outcome.new_status, status::DONE_WITHOUT_DELIVERY);
+    assert_eq!(store::get(&conn, &id).unwrap().unwrap().status, status::DONE_WITHOUT_DELIVERY);
+}
+
+#[test]
+fn redeliver_rejects_promotion_if_ci_fails_or_pending_or_tests_failed() {
+    let db = db();
+    let id = borrador(&db);
+    let conn = db.lock().unwrap();
+    assert!(store::mark_started_terminals(&conn, &id).unwrap());
+
+    let initial = MissionDelivery {
+        test_result: TestResult::Passed,
+        pull_request: Some("10".into()),
+        ci_status: CiStatus::Pending,
+        checked_at: 100,
+    };
+    assert!(store::finish_terminals(&conn, &id, &initial).unwrap());
+
+    // CI Failure
+    let ci_fail = store::redeliver_with_checker(
+        &conn,
+        &id,
+        "C:\\repo",
+        Some("10"),
+        Some(TestResult::Passed),
+        |_cwd, _pr| (super::delivery::PrState::Merged, CiStatus::Failure),
+    )
+    .unwrap();
+    assert!(!ci_fail.promoted);
+    assert_eq!(ci_fail.new_status, status::DONE_WITHOUT_DELIVERY);
+
+    // CI Pending
+    let ci_pend = store::redeliver_with_checker(
+        &conn,
+        &id,
+        "C:\\repo",
+        Some("10"),
+        Some(TestResult::Passed),
+        |_cwd, _pr| (super::delivery::PrState::Merged, CiStatus::Pending),
+    )
+    .unwrap();
+    assert!(!ci_pend.promoted);
+    assert_eq!(ci_pend.new_status, status::DONE_WITHOUT_DELIVERY);
+
+    // Testes falharam
+    let test_fail = store::redeliver_with_checker(
+        &conn,
+        &id,
+        "C:\\repo",
+        Some("10"),
+        Some(TestResult::Failed),
+        |_cwd, _pr| (super::delivery::PrState::Merged, CiStatus::Success),
+    )
+    .unwrap();
+    assert!(!test_fail.promoted);
+    assert_eq!(test_fail.new_status, status::DONE_WITHOUT_DELIVERY);
+
+    // Testes não executados
+    let test_not_run = store::redeliver_with_checker(
+        &conn,
+        &id,
+        "C:\\repo",
+        Some("10"),
+        Some(TestResult::NotRun),
+        |_cwd, _pr| (super::delivery::PrState::Merged, CiStatus::Success),
+    )
+    .unwrap();
+    assert!(!test_not_run.promoted);
+    assert_eq!(test_not_run.new_status, status::DONE_WITHOUT_DELIVERY);
+}
+
+#[test]
+fn redeliver_never_touches_failed_or_cancelled_missions() {
+    let db = db();
+    let id_failed = borrador(&db);
+    let id_cancelled = borrador(&db);
+    let id_draft = borrador(&db);
+    let conn = db.lock().unwrap();
+    conn.execute("UPDATE missions SET status='failed' WHERE id=?1", [&id_failed]).unwrap();
+
+    let err_failed = store::redeliver_with_checker(
+        &conn,
+        &id_failed,
+        "C:\\repo",
+        Some("10"),
+        Some(TestResult::Passed),
+        |_cwd, _pr| (super::delivery::PrState::Merged, CiStatus::Success),
+    )
+    .unwrap_err();
+    assert!(err_failed.contains("failed"));
+
+    let id_cancelled_clone = id_cancelled.clone();
+    conn.execute("UPDATE missions SET status='cancelled' WHERE id=?1", [&id_cancelled_clone]).unwrap();
+
+    let err_cancelled = store::redeliver_with_checker(
+        &conn,
+        &id_cancelled,
+        "C:\\repo",
+        Some("10"),
+        Some(TestResult::Passed),
+        |_cwd, _pr| (super::delivery::PrState::Merged, CiStatus::Success),
+    )
+    .unwrap_err();
+    assert!(err_cancelled.contains("cancelled"));
+
+    let err_draft = store::redeliver_with_checker(
+        &conn,
+        &id_draft,
+        "C:\\repo",
+        Some("10"),
+        Some(TestResult::Passed),
+        |_cwd, _pr| (super::delivery::PrState::Merged, CiStatus::Success),
+    )
+    .unwrap_err();
+    assert!(err_draft.contains("draft"));
+}
+
+#[test]
+fn redeliver_without_pr_never_promotes_without_evidence() {
+    let db = db();
+    let id = borrador(&db);
+    let conn = db.lock().unwrap();
+    assert!(store::mark_started_terminals(&conn, &id).unwrap());
+
+    let initial = MissionDelivery {
+        test_result: TestResult::NotRun,
+        pull_request: None,
+        ci_status: CiStatus::NotApplicable,
+        checked_at: 100,
+    };
+    assert!(store::finish_terminals(&conn, &id, &initial).unwrap());
+
+    let outcome = store::redeliver_with_checker(
+        &conn,
+        &id,
+        "C:\\repo",
+        None,
+        Some(TestResult::Passed),
+        |_cwd, _pr| panic!("não deveria chamar checker sem PR"),
+    )
+    .unwrap();
+
+    assert!(!outcome.promoted);
+    assert_eq!(outcome.new_status, status::DONE_WITHOUT_DELIVERY);
+    assert!(outcome.reason.contains("Nunca promove sem evidência"));
+}
+
+#[test]
+fn redeliver_reuses_existing_pr_and_test_result_when_overrides_are_none() {
+    let db = db();
+    let id = borrador(&db);
+    let conn = db.lock().unwrap();
+    assert!(store::mark_started_terminals(&conn, &id).unwrap());
+
+    let initial = MissionDelivery {
+        test_result: TestResult::Passed,
+        pull_request: Some("99".into()),
+        ci_status: CiStatus::Unavailable,
+        checked_at: 100,
+    };
+    assert!(store::finish_terminals(&conn, &id, &initial).unwrap());
+
+    let outcome = store::redeliver_with_checker(
+        &conn,
+        &id,
+        "C:\\repo",
+        None,
+        None,
+        |_cwd, pr| {
+            assert_eq!(pr, "99");
+            (super::delivery::PrState::Merged, CiStatus::Success)
+        },
+    )
+    .unwrap();
+
+    assert!(outcome.promoted);
+    assert_eq!(outcome.pull_request.as_deref(), Some("99"));
+    assert_eq!(outcome.test_result, TestResult::Passed);
+    assert_eq!(outcome.new_status, status::DONE);
+}

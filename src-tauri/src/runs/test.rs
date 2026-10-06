@@ -53,6 +53,7 @@ fn tarea(conn: &Connection, run_id: &str) -> String {
 
 fn ctx_sin_broker() -> LaunchCtx<'static> {
     LaunchCtx {
+        fast_mode: false,
         cwd: "/tmp/proy",
         reasoning_effort: None,
         session_id: "s-1",
@@ -67,6 +68,7 @@ fn ctx_sin_broker() -> LaunchCtx<'static> {
 
 fn ctx_con_broker() -> LaunchCtx<'static> {
     LaunchCtx {
+        fast_mode: false,
         cwd: "/tmp/proy",
         reasoning_effort: None,
         session_id: "s-1",
@@ -94,6 +96,168 @@ fn reasoning_effort_is_per_execution_for_claude_and_codex() {
     ctx.reasoning_effort = None;
     assert!(!claude().launch("fixture", None, None, &ctx).env.contains_key("CLAUDE_CODE_EFFORT_LEVEL"));
     assert!(!adapter_for("codex").unwrap().launch("fixture", None, None, &ctx).args.iter().any(|a| a.contains("model_reasoning_effort")));
+}
+
+#[test]
+fn fast_is_execution_local_and_only_codex_receives_a_service_tier() {
+    let mut ctx = ctx_sin_broker();
+    let original = ctx.account_env.clone();
+    ctx.fast_mode = true;
+    ctx.reasoning_effort = Some("high");
+    for read_only in [false, true] {
+        ctx.read_only = read_only;
+        let launch = adapter_for("codex")
+            .unwrap()
+            .launch("fixture", Some("gpt-test"), None, &ctx);
+        assert_eq!(
+            launch
+                .args
+                .iter()
+                .filter(|a| a.as_str() == "service_tier=\"fast\"")
+                .count(),
+            1
+        );
+        assert!(launch
+            .args
+            .windows(2)
+            .any(|p| p[0] == "-c" && p[1] == "service_tier=\"fast\""));
+        assert!(launch.args.windows(2).any(|p| p[0] == "--sandbox"
+            && p[1]
+                == if read_only {
+                    "read-only"
+                } else {
+                    "workspace-write"
+                }));
+        assert!(launch
+            .args
+            .windows(2)
+            .any(|p| p[0] == "-c" && p[1] == "model_reasoning_effort=\"high\""));
+    }
+    for agent in [
+        "claude-code",
+        "opencode",
+        "gemini-cli",
+        "kimi-code",
+        "antigravity",
+    ] {
+        ctx.fast_mode = true;
+        let fast = adapter_for(agent)
+            .unwrap()
+            .launch("fixture", None, None, &ctx);
+        ctx.fast_mode = false;
+        let normal = adapter_for(agent)
+            .unwrap()
+            .launch("fixture", None, None, &ctx);
+        assert_eq!(
+            fast.args, normal.args,
+            "unsupported {agent} must ignore Fast"
+        );
+        assert_eq!(fast.env, normal.env);
+        assert!(!fast
+            .args
+            .iter()
+            .any(|a| a.contains("service_tier") || a == "--fast"));
+    }
+    ctx.fast_mode = false;
+    let normal = adapter_for("codex")
+        .unwrap()
+        .launch("fixture", None, None, &ctx);
+    assert!(!normal.args.iter().any(|a| a.contains("service_tier")));
+    assert_eq!(ctx.account_env, original);
+}
+
+#[test]
+fn fast_snapshot_is_copied_for_lead_and_member_and_survives_squad_edits() {
+    let conn = test_db();
+    let run = run_en(&conn);
+    let input:crate::squads::SquadInput=serde_json::from_value(serde_json::json!({"name":"Fast test","description":"","lead":{"agentId":"codex","fastMode":true},"members":[{"roleId":"backend","agentId":"codex","fastMode":true}]})).unwrap();
+    let valid = crate::squads::store::validate(&conn, &input).unwrap();
+    let squad = crate::squads::store::create(&conn, &valid).unwrap();
+    store::set_run_squad_snapshot(&conn, &run, &squad).unwrap();
+    for (role, functional) in [
+        (super::types::role::LEAD, None),
+        (super::types::role::WORKER, Some("backend")),
+    ] {
+        let task = store::create_task(
+            &conn,
+            &NewTask {
+                run_id: &run,
+                title: "T",
+                prompt: "P",
+                agent_id: "codex",
+                cwd: "/tmp/proy",
+                role: Some(role),
+                functional_role: functional,
+                ..Default::default()
+            },
+        )
+        .unwrap();
+        assert!(super::supervisor::fast_for_task(&conn, &task).unwrap());
+        conn.execute("UPDATE squads SET fast_mode=0 WHERE id=?1", [&squad.id])
+            .unwrap();
+        conn.execute(
+            "UPDATE squad_members SET fast_mode=0 WHERE squad_id=?1",
+            [&squad.id],
+        )
+        .unwrap();
+        assert!(super::supervisor::fast_for_task(&conn, &task).unwrap());
+        let mut unsupported = task.clone();
+        unsupported.agent_id = "claude-code".into();
+        assert!(!super::supervisor::fast_for_task(&conn, &unsupported).unwrap());
+        if functional.is_some() {
+            let mut other = task.clone();
+            other.functional_role = Some("qa".into());
+            assert!(!super::supervisor::fast_for_task(&conn, &other).unwrap());
+        }
+    }
+    let mut plain = store::task_by_id(&conn, &tarea(&conn, &run))
+        .unwrap()
+        .unwrap();
+    plain.agent_id = "codex".into();
+    assert!(!super::supervisor::fast_for_task(&conn, &plain).unwrap());
+}
+
+#[test]
+fn fast_snapshot_migration_is_additive_idempotent_and_defaults_old_runs_off() {
+    let conn = test_db();
+    let run = run_en(&conn);
+    conn.execute(
+        "INSERT INTO run_squad_members(run_id,role_id,agent_id) VALUES(?1,'backend','codex')",
+        [&run],
+    )
+    .unwrap();
+    conn.execute_batch("ALTER TABLE runs DROP COLUMN fast_mode; ALTER TABLE run_squad_members DROP COLUMN fast_mode; PRAGMA user_version=32;").unwrap();
+    crate::database::migrate_for_tests(&conn).unwrap();
+    assert_eq!(
+        conn.query_row("SELECT fast_mode FROM runs WHERE id=?1", [&run], |r| r
+            .get::<_, i64>(0))
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        conn.query_row(
+            "SELECT fast_mode FROM run_squad_members WHERE run_id=?1",
+            [&run],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        0
+    );
+    conn.execute(
+        "UPDATE run_squad_members SET fast_mode=1 WHERE run_id=?1",
+        [&run],
+    )
+    .unwrap();
+    crate::database::migrate_for_tests(&conn).unwrap();
+    assert_eq!(
+        conn.query_row(
+            "SELECT fast_mode FROM run_squad_members WHERE run_id=?1",
+            [&run],
+            |r| r.get::<_, i64>(0)
+        )
+        .unwrap(),
+        1
+    );
 }
 
 #[test]
@@ -2893,6 +3057,7 @@ mod otras_tuis {
 
     fn ctx(schema: Option<&str>) -> LaunchCtx<'static> {
         LaunchCtx {
+            fast_mode: false,
             cwd: "/tmp/proy",
             reasoning_effort: None,
             session_id: "sess-1",
@@ -3229,6 +3394,7 @@ mod lanzamiento_real {
         std::fs::create_dir_all(&dir).unwrap();
         let agent = adapter_for(agent_id).unwrap();
         let ctx = LaunchCtx {
+     fast_mode: false,
             cwd: "/tmp/proy",
             reasoning_effort: None,
             session_id: &uuid::Uuid::new_v4().to_string(),
@@ -4482,4 +4648,14 @@ fn mission_terminal_system_account_requires_exposed_login_state() {
     // Truly accountless providers keep their existing launch behavior.
     agente(&mut roster, "claude-code").capabilities.accounts = false;
     assert!(crate::missions::precheck::validate_launch(&roster, &assignment, 100).is_ok());
+}
+
+#[test]
+fn un_worktree_que_falla_no_deja_ramas_huerfanas() {
+    let repo = repo();
+    let base = Tmp::new("base");
+
+    let err = worktrees::create_from(&base.0, &repo.0, "falla", "rama-que-no-existe");
+    assert!(err.is_err());
+    assert_eq!(sh_git(&repo.0, &["branch", "--list", "cc/*"]), "", "no queda ninguna rama cc/");
 }
