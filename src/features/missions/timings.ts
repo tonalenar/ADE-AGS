@@ -39,7 +39,7 @@ export interface MissionTimings {
   firstDelegationMs?: number | null;
   firstDelegationSource?: "peer_message" | "span" | null;
   spans: TimingSpan[];
-  summary: { wallMs: number; byKind: KindTotal[]; slowest: TimingSpan[]; bottlenecks: Bottleneck[] };
+  summary: { wallMs: number; byKind: KindTotal[]; slowest: TimingSpan[]; bottlenecks: Bottleneck[]; testMetrics?: TestStats | null };
 }
 
 export interface Bottleneck {
@@ -79,30 +79,30 @@ export interface MissionEfficiency {
   costGainPercent: number | null;
   byAgentBand: AgentBandComparison[];
   /** Ausente em missões sem `ags test`. */
-  tests?: TestStats | null;
+  testMetrics?: TestStats | null;
 }
 
 /** Testes rodados por `ags test ...` na missão (ver `missions::timings`, kind `test`). */
 export interface TestStats {
-  /** Execuções reais + reaproveitadas do cache. */
-  runs: number;
   /** Tempo gasto de fato rodando testes. */
-  totalMs: number;
-  /** Suites puladas porque o hash da árvore já estava verde. */
-  cacheHits: number;
-  /** Execuções de `ags test affected` (só o afetado, não a suite completa). */
-  affectedRuns: number;
+  timeMs: number;
+  /** Comandos de teste registrados (rodados ou reaproveitados). */
+  commands: number;
+  /** Pulados porque o hash da árvore já estava verde. */
+  skippedCache: number;
+  /** Pulados porque `ags test affected` só rodou o afetado. */
+  skippedAffected: number;
 }
 
 /** Valores prontos para exibir "tempo em testes". Pura; `null` se não houve teste. */
 export function testStatsView(tests: TestStats | null | undefined, wallMs: number | null): { time: string; share: number | null; skipped: number; affected: number; runs: number } | null {
-  if (!tests || tests.runs <= 0) return null;
+  if (!tests || tests.commands <= 0) return null;
   return {
-    time: formatDuration(tests.totalMs),
-    share: wallMs && wallMs > 0 ? shareOf(tests.totalMs, wallMs) : null,
-    skipped: Math.max(0, tests.cacheHits),
-    affected: Math.max(0, tests.affectedRuns),
-    runs: tests.runs,
+    time: formatDuration(tests.timeMs),
+    share: wallMs && wallMs > 0 ? shareOf(tests.timeMs, wallMs) : null,
+    skipped: Math.max(0, tests.skippedCache),
+    affected: Math.max(0, tests.skippedAffected),
+    runs: tests.commands,
   };
 }
 
