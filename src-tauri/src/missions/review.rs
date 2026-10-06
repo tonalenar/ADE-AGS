@@ -10,9 +10,9 @@
 //!    usuario no se toca. **Rechazar** solo la marca.
 //! 3. **Aplicar** la misión: un merge de la rama de integración en el proyecto.
 //!
-//! Un merge que choca se ABORTA siempre, en la integración y en el proyecto, y se devuelven
-//! los archivos en conflicto: ningún paso deja un repo a mitad de un merge. Resolverlo es
-//! decisión de quien revisa (a mano, o pasándole la tarea a un agente).
+//! Los merges de entregas y del proyecto abortan los conflictos. Al actualizar la rama
+//! de integración con origin/master, el merge queda abierto para resolverlo en la app
+//! (`conflicts.rs`) o abortarlo explícitamente, sin tocar el checkout del usuario.
 //!
 //! No usa `git merge-tree --write-tree` (2.38+): se prueba el merge de verdad en la
 //! integración, que es descartable, y funciona con cualquier git.
@@ -90,13 +90,13 @@ fn conflicted(dir: &Path) -> Vec<String> {
 #[serde(rename_all = "camelCase", tag = "result")]
 pub enum MergeOutcome {
     Merged { commit: String },
-    /// Chocó: se abortó, y estos son los archivos en conflicto.
+    /// Conflictos: quedan abiertos solo al actualizar la integración con origin/master.
     Conflict { files: Vec<String> },
 }
 
 /// `-c user.*` solo si el repo no tiene identidad: sin ella git se niega a crear el commit
 /// de merge, y el usuario no tiene por qué haberla configurado para usar la app.
-fn identity_args(dir: &Path) -> Vec<String> {
+pub(crate) fn identity_args(dir: &Path) -> Vec<String> {
     let has = |key: &str| git(dir, &["config", "--get", key], GIT_FAST).is_ok_and(|v| !v.is_empty());
     let mut args = Vec::new();
     if !has("user.name") {
@@ -110,6 +110,37 @@ fn identity_args(dir: &Path) -> Vec<String> {
 
 /// `git merge --no-ff` de `branch` en `dir`. Si choca, lo aborta y devuelve los conflictos.
 pub fn merge(dir: &Path, branch: &str, message: &str) -> Result<MergeOutcome, String> {
+    merge_with_policy(dir,branch,message,false)
+}
+
+#[cfg(test)]
+mod integration_conflict_test {
+    use super::*;
+    #[test]
+    fn master_conflict_stays_only_in_integration_until_resolved_or_aborted() {
+        let dir=std::env::temp_dir().join(format!("ags-integration-conflict-{}",uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        git(&dir,&["init","-b","master"],GIT_FAST).unwrap();
+        git(&dir,&["config","user.name","Test"],GIT_FAST).unwrap();git(&dir,&["config","user.email","test@example.invalid"],GIT_FAST).unwrap();
+        std::fs::write(dir.join("roadmap.md"),"base\n").unwrap();git(&dir,&["add","."],GIT_FAST).unwrap();git(&dir,&["commit","-m","base"],GIT_FAST).unwrap();
+        git(&dir,&["checkout","-b","cc/integration"],GIT_FAST).unwrap();std::fs::write(dir.join("roadmap.md"),"mission\n").unwrap();git(&dir,&["commit","-am","mission"],GIT_FAST).unwrap();
+        git(&dir,&["checkout","master"],GIT_FAST).unwrap();std::fs::write(dir.join("roadmap.md"),"master\n").unwrap();git(&dir,&["commit","-am","master"],GIT_FAST).unwrap();git(&dir,&["update-ref","refs/remotes/origin/master","HEAD"],GIT_FAST).unwrap();
+        git(&dir,&["checkout","cc/integration"],GIT_FAST).unwrap();
+        assert!(matches!(merge_with_policy(&dir,"origin/master","sync",true).unwrap(),MergeOutcome::Conflict {..}));
+        assert!(git(&dir,&["rev-parse","--verify","MERGE_HEAD"],GIT_FAST).is_ok());
+        assert_eq!(conflicted(&dir),vec!["roadmap.md"]);
+        git(&dir,&["merge","--abort"],GIT_FAST).unwrap();
+        assert_eq!(std::fs::read_to_string(dir.join("roadmap.md")).unwrap().replace("\r\n","\n"),"mission\n");
+        assert!(matches!(merge(&dir,"origin/master","sync").unwrap(),MergeOutcome::Conflict {..}));
+        assert!(git(&dir,&["rev-parse","--verify","MERGE_HEAD"],GIT_FAST).is_err());
+        merge_with_policy(&dir,"origin/master","sync",true).unwrap();
+        std::fs::write(dir.join("roadmap.md"),"mission\nmaster\n").unwrap();git(&dir,&["add","roadmap.md"],GIT_FAST).unwrap();git(&dir,&["commit","--no-edit"],GIT_FAST).unwrap();
+        assert!(conflicted(&dir).is_empty());assert!(git(&dir,&["rev-parse","--verify","MERGE_HEAD"],GIT_FAST).is_err());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+}
+
+fn merge_with_policy(dir: &Path, branch: &str, message: &str, keep_conflicts:bool) -> Result<MergeOutcome, String> {
     if branch.starts_with('-') {
         return Err(format!("rama inválida: {branch}"));
     }
@@ -121,7 +152,7 @@ pub fn merge(dir: &Path, branch: &str, message: &str) -> Result<MergeOutcome, St
         Err(error) => {
             let files = conflicted(dir);
             // Si no llegó a empezar (rama inexistente, árbol sucio) no hay nada que abortar.
-            let _ = git(dir, &["merge", "--abort"], GIT_FAST);
+            if !keep_conflicts || files.is_empty() {let _ = git(dir, &["merge", "--abort"], GIT_FAST);}
             if files.is_empty() { Err(error) } else { Ok(MergeOutcome::Conflict { files }) }
         }
     }
@@ -376,6 +407,15 @@ pub fn apply(db: &crate::database::DbConnection, mission_id: &str) -> Result<Mer
             "el proyecto tiene cambios sin commitear ({}): commitealos o guardalos antes de aplicar la misión",
             pending.join(", ")
         ));
+    }
+    // Resolve master conflicts in the isolated integration worktree first.
+    let integration_dir=Path::new(&integration.1);
+    if git(integration_dir,&["rev-parse","--verify","MERGE_HEAD"],GIT_FAST).is_ok() {
+        return Ok(MergeOutcome::Conflict {files:conflicted(integration_dir)});
+    }
+    if git(integration_dir,&["rev-parse","--verify","refs/remotes/origin/master"],GIT_FAST).is_ok() {
+        let refresh=merge_with_policy(integration_dir,"origin/master","ADE: atualizar integração com origin/master",true)?;
+        if matches!(refresh,MergeOutcome::Conflict {..}) {return Ok(refresh)}
     }
     let outcome = merge(&root, &integration.0, &format!("ADE: misión {}", mission.title))?;
     if matches!(outcome, MergeOutcome::Merged { .. }) {
