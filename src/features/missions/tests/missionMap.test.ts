@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { Task } from "@/features/runs/types";
-import { layoutRows } from "../MissionMap";
+import { fitMap, layoutMap, layoutRows } from "../MissionMap";
 
 const task = (id: string, role: "lead" | "worker", dependsOn: string[] = []) =>
   ({ id, role, dependsOn } as unknown as Task);
@@ -30,5 +30,26 @@ describe("layoutRows", () => {
   it("un ciclo no cuelga el layout", () => {
     const rows = layoutRows([task("a", "worker", ["b"]), task("b", "worker", ["a"])]);
     expect(rows.size).toBe(2);
+  });
+});
+
+describe("layoutMap / fitMap", () => {
+  it("coloca cada tarea una vez y el lienzo cubre todas", () => {
+    const { placed, width, height } = layoutMap([task("lead", "lead"), task("a", "worker"), task("b", "worker"), task("c", "worker", ["a"])]);
+    expect(placed).toHaveLength(4);
+    for (const p of placed) {
+      expect(p.x).toBeGreaterThanOrEqual(0);
+      expect(p.x + 196).toBeLessThanOrEqual(width);
+      expect(p.y + 74).toBeLessThanOrEqual(height);
+    }
+  });
+
+  it("un mapa grande se reduce para caber; uno chico no se amplía más de 1:1 y queda centrado", () => {
+    const big = fitMap(4000, 2000, 800, 288);
+    expect(big.zoom).toBeLessThan(1);
+    expect(4000 * big.zoom).toBeLessThanOrEqual(800);
+    expect(2000 * big.zoom).toBeLessThanOrEqual(288);
+    const small = fitMap(200, 100, 800, 288);
+    expect(small).toEqual({ zoom: 1, x: 300, y: 94 });
   });
 });

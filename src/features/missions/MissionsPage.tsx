@@ -22,6 +22,7 @@ import { useSquadAccountLabel } from "@/features/squads/accountLabel";
 import type { Squad } from "@/features/squads/types";
 
 import { AutonomyPicker } from "./AutonomyPicker";
+import { FleetView } from "./FleetView";
 import { MissionDialog } from "./MissionDialog";
 import { MissionMap } from "./MissionMap";
 import { MissionTimingsPanel } from "./MissionTimingsPanel";
@@ -78,6 +79,7 @@ export function MissionsPage() {
   const loadSquads = useSquadsStore((s) => s.load);
 
   const [selected, setSelected] = useState<string | null>(null);
+  const [fleet, setFleet] = useState(false);
   const [focusTab, setFocusTab] = useState<MemoryTab>("workspace");
   const [focusNonce, setFocusNonce] = useState(0);
   const [dialog, setDialog] = useState<"new" | "edit" | null>(null);
@@ -148,6 +150,10 @@ export function MissionsPage() {
         <LocationIcon className="w-[15px] h-[15px] shrink-0 text-violet-500 dark:text-violet-400" />
         <span className="text-[13.5px] font-bold text-gray-900 dark:text-white">{t("missions.title")}</span>
         <div className="flex-1" />
+        <Button variant="custom" size="sm" aria-pressed={fleet} onClick={() => setFleet((v) => !v)}
+          className={`px-2.5 h-7 rounded-md text-[11.5px] font-medium ${fleet ? "bg-violet-500/15 text-violet-700 dark:text-violet-300" : "text-gray-500 dark:text-white/50"}`}>
+          {t("missions.fleet.title")}
+        </Button>
         {workspaceId && <MemoryInboxButton workspaceId={workspaceId} />}
         <Button variant="primary" size="sm" disabled={!workspaceId} onClick={() => setDialog("new")}>
           {t("missions.new")}
@@ -184,7 +190,9 @@ export function MissionsPage() {
         </div>
 
         <div className="flex-1 min-w-0 cc-scroll">
-          {summary && detail ? (
+          {fleet ? (
+            <FleetView onOpenMission={(id) => { setSelected(id); setFleet(false); }} />
+          ) : summary && detail ? (
             <MissionDetailView
               summary={summary}
               detail={detail}
