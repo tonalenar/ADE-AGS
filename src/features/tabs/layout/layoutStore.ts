@@ -348,6 +348,24 @@ export interface Placements {
   focusedItem: string | null;
 }
 
+/**
+ * Modo canvas. Sin vista activa: cada terminal va encima de su nodo (las que el canvas dice que
+ * están vivas, al 100 % y dentro del área) y el teclado va a la del agente activo. Con un navegador,
+ * archivo o diff activo, la vista ocupa toda el área (como en el modo Abas) y las terminales se
+ * esconden — siguen montadas, así que volver al canvas no pierde nada.
+ */
+export function canvasPlacements(liveRects: Record<string, Rect>, activeTabId: string | null, activeViewId: string | null): Placements {
+  const visible = new Map<string, Placement>();
+  if (activeViewId) {
+    const key = viewKey(activeViewId);
+    visible.set(key, { groupId: CANVAS_GROUP, rect: null });
+    return { visible, focusedItem: key };
+  }
+  for (const [tabId, rect] of Object.entries(liveRects)) visible.set(agentKey(tabId), { groupId: CANVAS_GROUP, rect });
+  const focused = activeTabId ? agentKey(activeTabId) : null;
+  return { visible, focusedItem: focused && visible.has(focused) ? focused : null };
+}
+
 /** Dónde se dibuja cada tab visible y cuál tiene el foco. Sin árbol (las tabs todavía no
  *  cargaron) se comporta como antes de que existieran los grupos. */
 export function usePlacements(): Placements {
@@ -368,12 +386,7 @@ export function usePlacements(): Placements {
 
   // En el canvas cada terminal va encima de su nodo, y se ven las que el canvas dice que
   // están vivas (al 100 % y dentro del área). El teclado va a la del agente activo.
-  if (mode === "canvas") {
-    const visible = new Map<string, Placement>();
-    for (const [tabId, rect] of Object.entries(liveRects)) visible.set(agentKey(tabId), { groupId: CANVAS_GROUP, rect });
-    const focused = activeTabId ? agentKey(activeTabId) : null;
-    return { visible, focusedItem: focused && visible.has(focused) ? focused : null };
-  }
+  if (mode === "canvas") return canvasPlacements(liveRects, activeTabId, activeViewId);
 
   // La grade de una misión: todos sus panes a la vez, cada uno en su hueco. El teclado va al activo.
   if (grid) {

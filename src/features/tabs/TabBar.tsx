@@ -43,6 +43,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
   const views = useViewTabsStore((s) => s.views);
   const activeViewId = useViewTabsStore((s) => s.activeViewId);
   const openBrowser = useViewTabsStore((s) => s.openBrowser);
+  const showTerminal = useViewTabsStore((s) => s.showTerminal);
   const layout = useWorkspaceLayout();
   // En el canvas no hay grupos: dividir no aplica.
   const canvas = useWorkMode() === "canvas";
@@ -84,7 +85,31 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
 
         <MissionChips />
 
-        {/* Con una misión en el canvas, las terminales ya se ven como nodos: la tira sobra. */}
+        {/* Con una misión en el canvas, las terminales ya se ven como nodos y no van en la tira:
+            quedan «Canvas» (volver) y las vistas del workspace (navegador, archivos, diffs). */}
+        {canvas && group !== null && (
+          <>
+            <button
+              type="button"
+              data-tauri-drag-region="false"
+              aria-pressed={activeViewId === null}
+              aria-label={t("canvas.mode.canvas")}
+              onClick={() => { showTerminal(); navigate("/workspace"); }}
+              className={`${BAR_BUTTON} shrink-0 px-3 text-xs font-medium rounded-none ${activeViewId === null ? "text-gray-900 dark:text-white" : ""}`}
+            >
+              {t("canvas.mode.canvas")}
+            </button>
+            {fallbackViews.length > 0 && (
+              <GroupTabStrip
+                items={fallbackViews.map((v) => viewKey(v.id))}
+                active={fallbackViews.some((v) => v.id === activeViewId) ? viewKey(activeViewId!) : null}
+                groupFocused
+                draggable={false}
+              />
+            )}
+          </>
+        )}
+
         {!divided && !(canvas && group !== null) && (
           <GroupTabStrip
             items={items}
