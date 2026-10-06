@@ -2229,6 +2229,8 @@
   "cli.outdatedHint": "O ags ao lado do app é de outra versão ({{cli}} ≠ {{app}}). Recompile o CLI para os agentes usarem os comandos novos.",
   "canvas.design.archive": "Arquivar",
   "canvas.design.archiveHint": "Tira o design do canvas sem apagá-lo",
+  "canvas.design.ownerClosed": "A aba do dono foi fechada: comentários e mensagens não chegam a ninguém.",
+  "canvas.design.ownerClosedBadge": "Dono fechado",
   "canvas.design.empty": "Nenhum design ainda. Peça a um agente para desenhar (ags design create) e as pranchetas aparecem aqui.",
   "canvas.design.emptyPage": "Esta página não tem pranchetas.",
   "canvas.design.edit": "EDITAR",

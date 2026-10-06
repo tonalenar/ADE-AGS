@@ -10,6 +10,7 @@ import { designApi, type Artboard, type ArtboardVersion, type DesignDetail } fro
 import { useMissionIndex } from "@/features/missions/groups";
 import { useTabsStore } from "@/features/tabs/store";
 import { spreadOverlapping } from "./layout";
+import { ownerProblem } from "./ownerLabel";
 import { defaultDesignId, resolveOwner } from "./owner";
 import { DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
 import { INITIAL_VIEWPORT, fitViewport, viewportReducer, zoomPercent } from "./viewport";
@@ -134,7 +135,7 @@ export function DesignPanel({ details, reload, initial, onClose }: {
         <span className="flex-1" />
         {detail && (
           <>
-            <OwnerChip owner={ownerTabs.find((o) => o.id === ownerOf(detail.design))?.title ?? null} />
+            <OwnerChip owner={ownerTabs.find((o) => o.id === ownerOf(detail.design))?.title ?? null} problem={ownerProblem(detail.design, ownerOf(detail.design) !== null)} />
             <span className="text-[11px] text-gray-500 dark:text-gray-400">{t("canvas.design.approvedOf", { a: approvedCount, n: detail.artboards.length })}</span>
             <Button variant="custom" className={btn} disabled={queue.length === 0} onClick={sendQueue} title={t("canvas.design.sendHint")}>
               {t("canvas.design.sendQueue", { count: queue.length })}
@@ -328,9 +329,9 @@ function EditPane({ board, versions, comments, onClose, onChanged, fail }: {
 type DesignDetailComments = DesignDetail["comments"];
 
 /** Quem é o dono do design (recebe os comentários); sem dono, avisa que eles não chegam a ninguém. */
-function OwnerChip({ owner }: { owner: string | null }) {
+function OwnerChip({ owner, problem }: { owner: string | null; problem: "missing" | "closed" | null }) {
   const { t } = useTranslation();
   return owner
     ? <span className="max-w-[10rem] truncate text-[11px] text-gray-500 dark:text-gray-400" title={t("canvas.design.ownerHint")}>{t("canvas.design.owner", { name: owner })}</span>
-    : <span className="px-1.5 h-[18px] leading-[18px] rounded-full bg-red-500/15 text-red-700 dark:text-red-300 text-[10px] font-semibold" title={t("canvas.design.noOwner")}>{t("canvas.design.noOwnerBadge")}</span>;
+    : <span className="px-1.5 h-[18px] leading-[18px] rounded-full bg-red-500/15 text-red-700 dark:text-red-300 text-[10px] font-semibold" title={t(problem === "closed" ? "canvas.design.ownerClosed" : "canvas.design.noOwner")}>{t(problem === "closed" ? "canvas.design.ownerClosedBadge" : "canvas.design.noOwnerBadge")}</span>;
 }

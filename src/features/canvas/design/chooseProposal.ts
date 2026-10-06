@@ -29,8 +29,10 @@ export async function chooseOnBoard(args: {
   const what = pick.text || pick.selector;
   const key = `${board.id}|${pick.selector}`;
   if (!claimChoice(key)) return;
+  let repeated = false;
   try {
-    await designApi.addComment(board.id, t("canvas.design.chosenComment", { what }), pick.selector);
+    const added = await designApi.addComment(board.id, t("canvas.design.chosenComment", { what }), pick.selector);
+    repeated = added.commentAdded === false;
     await designApi.approve(board.id);
     await reload();
   } catch (e) {
@@ -38,6 +40,7 @@ export async function chooseOnBoard(args: {
     AlertaToast(t("canvas.design.title"), String(e), "error", 6000);
     return;
   }
+  if (repeated) return; // a mesma escolha já foi registrada (e enviada) antes: não reenvia ao dono
   if (!owner) {
     AlertaToast(t("canvas.design.title"), t("canvas.design.noOwner"), "warning", 6000);
     return;
