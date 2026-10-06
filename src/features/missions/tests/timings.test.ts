@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { formatDuration, shareOf } from "../timings";
+import { formatDuration, shareOf, testStatsView } from "../timings";
 
 describe("formatDuration", () => {
   it("mostra décimos abaixo de 10 s, segundos até 1 min e depois minutos e horas", () => {
@@ -23,5 +23,21 @@ describe("shareOf", () => {
     expect(shareOf(30_000, 120_000)).toBe(25);
     expect(shareOf(200_000, 120_000)).toBe(100);
     expect(shareOf(1, 0)).toBe(0);
+  });
+});
+
+describe("testStatsView", () => {
+  it("sem testes na missão não mostra nada", () => {
+    expect(testStatsView(undefined, 60_000)).toBeNull();
+    expect(testStatsView(null, 60_000)).toBeNull();
+    expect(testStatsView({ runs: 0, totalMs: 0, cacheHits: 0, affectedRuns: 0 }, 60_000)).toBeNull();
+  });
+  it("resume tempo, parcela da missão, pulados por cache e só-afetados", () => {
+    expect(testStatsView({ runs: 5, totalMs: 30_000, cacheHits: 2, affectedRuns: 3 }, 120_000)).toEqual({
+      time: "30 s", share: 25, skipped: 2, affected: 3, runs: 5,
+    });
+  });
+  it("sem tempo total da missão não inventa a parcela", () => {
+    expect(testStatsView({ runs: 1, totalMs: 4_000, cacheHits: 0, affectedRuns: 0 }, null)?.share).toBeNull();
   });
 });

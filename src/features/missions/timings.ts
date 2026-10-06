@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 /** Ver `missions::timings` en Rust: las etapas de una misión que se miden. */
 export type TimingKind =
   | "boot" | "briefing" | "turn" | "peer_ask" | "peer_message"
-  | "orchestrator_stall"
+  | "orchestrator_stall" | "test"
   | "start_briefing" | "start_activity" | "start_retry" | "start_stalled" | "start_all_working";
 
 export interface TimingSpan {
@@ -78,6 +78,32 @@ export interface MissionEfficiency {
   timeGainPercent: number | null;
   costGainPercent: number | null;
   byAgentBand: AgentBandComparison[];
+  /** Ausente em missões sem `ags test`. */
+  tests?: TestStats | null;
+}
+
+/** Testes rodados por `ags test ...` na missão (ver `missions::timings`, kind `test`). */
+export interface TestStats {
+  /** Execuções reais + reaproveitadas do cache. */
+  runs: number;
+  /** Tempo gasto de fato rodando testes. */
+  totalMs: number;
+  /** Suites puladas porque o hash da árvore já estava verde. */
+  cacheHits: number;
+  /** Execuções de `ags test affected` (só o afetado, não a suite completa). */
+  affectedRuns: number;
+}
+
+/** Valores prontos para exibir "tempo em testes". Pura; `null` se não houve teste. */
+export function testStatsView(tests: TestStats | null | undefined, wallMs: number | null): { time: string; share: number | null; skipped: number; affected: number; runs: number } | null {
+  if (!tests || tests.runs <= 0) return null;
+  return {
+    time: formatDuration(tests.totalMs),
+    share: wallMs && wallMs > 0 ? shareOf(tests.totalMs, wallMs) : null,
+    skipped: Math.max(0, tests.cacheHits),
+    affected: Math.max(0, tests.affectedRuns),
+    runs: tests.runs,
+  };
 }
 
 export type NewSpan = Pick<TimingSpan, "kind" | "startedMs" | "endedMs"> & Partial<Pick<TimingSpan, "actor" | "target" | "detail">>;
