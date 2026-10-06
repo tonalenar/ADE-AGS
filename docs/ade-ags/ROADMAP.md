@@ -307,3 +307,13 @@ Implementado em `feat/etapa17-tab-usage`: `mission_tokens` inclui `agents[].tabs
 Implementado em `feat/etapa17-headless-fast`: snapshot Fast do lead e dos integrantes persistido em runs/run_squad_members (v34); supervisor passa `LaunchCtx.fast_mode` e Codex usa `-c service_tier="fast"`. Providers sem equivalente nao recebem flags. Formatos CLI verificados, limites e testes: [FAST_HEADLESS.md](./FAST_HEADLESS.md).
 
 - Etapa 20 (UI): ver [ETAPA_20_POLIMENTO_UI.md](ETAPA_20_POLIMENTO_UI.md) — chat (Markdown, tamanho, trazer do terminal), navegador no Canvas, scrollbars, modal único de memória.
+
+## Etapa 22 — velocidade de teste
+
+Redução drástica do tempo de feedback de testes para agentes e humanos através de execução seletiva de testes afetados, compartilhamento de cache de compilação Cargo entre worktrees, cache persistente de resultados em banco de dados SQLite e fluxo de validação contínua pelo QA.
+
+- **Ponto 1 (Medições e Baseline):** Levantamento empírico documentado em [TEST_SPEED.md](./TEST_SPEED.md) (tsc 15s, vitest 14s, vitest --changed 4s, babel 1s, CI 3-4min, cargo cold 204,63s, cargo warm 14,55s, warm unchanged 1,08s).
+- **Ponto 2 (Cargo Target Compartilhado):** Worktrees de missão configurados com `ADE_AGS_CARGO_TARGET_DIR` apontando para `~/.ags/cargo-target-agents`, eliminando compilações frias redundantes de 519 crates e reduzindo rebuilds para 1s–14s; contenção concorrente segura (15,9s–16,4s em 4 jobs simultâneos).
+- **Ponto 3 (Regras de Execução e CI):** Agentes proibidos de executar suíte completa local de forma recorrente; acompanhamento de PR exclusivamente via `gh pr checks <n> --watch` (sem polling com sleep); suíte completa local restrita a operações de alto risco (migrações de banco, `unsafe`/COM e alterações de schema).
+- **Ponto 4 (Testes Afetados e Cache de Resultados):** Comandos `ags test affected` e `ags test run <suite>`, mapeando arquivos modificados desde `origin/master` e gravando execuções verdes limpas na tabela `test_results` para retorno instantâneo (0ms em cache hit).
+- **Ponto 5 (QA em Fluxo):** Briefing atualizado para validação contínua a cada entrega de integrante (`ags peer tell`) com `ags test affected`; orquestrador notifica o QA a cada entrega; validação final consolidada em UMA única execução completa antes da entrega (ou delegação ao CI); métrica "tempo de espera do QA" (`qaWaitMs`) exposta em `ags mission timings`.

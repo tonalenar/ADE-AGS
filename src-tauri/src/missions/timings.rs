@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// As etapas que se medem. Texto livre não: assim a tela e o resumo sempre sabem o que são.
 pub const KINDS: &[&str] = &["boot", "briefing", "turn", "peer_ask", "peer_message",
-    "orchestrator_stall", "start_all_working", "start_briefing", "start_activity", "start_retry", "start_stalled"];
+    "orchestrator_stall", "start_all_working", "start_briefing", "start_activity", "start_retry", "start_stalled", "qa_wait"];
 const MAX_TEXT: usize = 200;
 /// Um span mais comprido que isto é um erro de relógio, não uma etapa (24 h).
 const MAX_SPAN_MS: i64 = 24 * 60 * 60 * 1000;
@@ -204,6 +204,19 @@ pub fn orchestrator_waits(spans: &[Span]) -> (usize, i64, i64) {
         if span.detail.starts_with("alerted:") { alerts.insert(key); }
     }
     (alerts.len(), waits.values().sum(), waits.values().copied().max().unwrap_or(0))
+}
+
+/// QA wait time: sum of explicit qa_wait spans and peer_ask waits initiated by QA.
+pub fn qa_waits(spans: &[Span]) -> i64 {
+    let mut total = 0_i64;
+    for span in spans.iter() {
+        if span.kind == "qa_wait" {
+            total += span.duration_ms();
+        } else if span.kind == "peer_ask" && (span.actor.eq_ignore_ascii_case("qa") || span.actor.starts_with("QA")) {
+            total += span.duration_ms();
+        }
+    }
+    total
 }
 
 #[cfg(test)]

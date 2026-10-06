@@ -40,6 +40,7 @@ export interface MissionTimings {
   firstDelegationSource?: "peer_message" | "span" | null;
   spans: TimingSpan[];
   summary: { wallMs: number; byKind: KindTotal[]; slowest: TimingSpan[]; bottlenecks: Bottleneck[] };
+  qaWaitMs?: number | null;
 }
 
 export interface Bottleneck {

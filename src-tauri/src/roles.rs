@@ -30,7 +30,7 @@ pub const BUILTIN_ROLES: &[FunctionalRole] = &[
         id: "qa",
         label: "QA / Tests",
         description: "Test coverage, verification, and reproducible defect reports.",
-        instructions: "Add and run relevant tests, verify the requested behavior, and report reproducible defects. Keep implementation changes limited to what is needed for tests unless the task explicitly asks for fixes.",
+        instructions: "QA em fluxo: validar cada entrega de integrante assim que chega ('ags peer tell') com 'ags test affected'. Validação final = UMA execução completa da integração (ou aguardar CI via 'gh pr checks <n> --watch', sem polling com sleep). Agentes não repetem suíte completa local; suíte completa local somente sob risco (migração de banco, unsafe/COM, schema). Manter alterações focadas em testes.",
     },
     FunctionalRole {
         id: "reviewer",

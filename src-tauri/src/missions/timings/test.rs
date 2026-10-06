@@ -18,6 +18,7 @@ fn reliability_spans_persist_and_wait_snapshots_do_not_double_count() {
     assert_eq!(report.orchestrator_wait_ms, 90000);
     assert_eq!(report.orchestrator_max_wait_ms, 90000);
     assert_eq!(report.time_until_all_working_ms, Some(9000));
+    assert_eq!(report.qa_wait_ms, 0);
     assert!(summarize(&spans, 5).by_kind.iter().any(|k| k.kind == "start_all_working"));
 }
 
@@ -134,4 +135,14 @@ fn grava_e_lista_na_ordem_do_inicio_e_respeita_o_limite() {
     assert_eq!(all[0].duration_ms(), 3_000);
     // Uma missão que não existe não deixa tempos órfãos: a FK recusa.
     assert!(add(&conn, "nao-existe", &new_span("boot", "A", 1_000, 2_000)).is_err());
+}
+
+#[test]
+fn qa_waits_measures_explicit_and_peer_ask_wait() {
+    let mut qa_ask = span(1, "peer_ask", 10_000, 25_000);
+    qa_ask.actor = "QA".into();
+    let mut other_ask = span(2, "peer_ask", 5_000, 15_000);
+    other_ask.actor = "Backend".into();
+    let qa_wait = span(3, "qa_wait", 30_000, 45_000);
+    assert_eq!(qa_waits(&[qa_ask, other_ask, qa_wait]), 30_000);
 }
