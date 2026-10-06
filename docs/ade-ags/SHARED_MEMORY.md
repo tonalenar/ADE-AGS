@@ -128,3 +128,14 @@ prioridade pedida limitada a 3, e qualquer texto que pareça credencial (chaves 
 `AKIA`…, `-----BEGIN`, `password=`, `token=`, `Authorization: Bearer`) é recusado. O nome é
 `suggest` e não `propose` porque `memory.propose` já é a ferramenta MCP das tarefas da frota.
 O briefing do Orquestrador pede até 3 sugestões ao terminar.
+
+## Revisão automática das sugestões (Etapa 17)
+
+Ao concluir uma missão, o comando `memory_review_summary(missionId)` (`src-tauri/src/memory/review.rs`) devolve um resumo das propostas pendentes da missão (escopo missão, ou escopo workspace vindas de runs da missão):
+
+- `evidence`: run, task, fato e motivo de origem da proposta.
+- `duplicateOf`: mesma informação de uma memória já aprovada (corpo igual após normalizar espaços/caixa, ou similaridade de palavras >= 0,85).
+- `contradicts`: mesma chave de uma memória aprovada, com corpo diferente.
+- `score` (0-100) e `highValue` (score >= 70, sem duplicata nem contradição): tipo (constraint > decision > finding > file > note), prioridade e evidência.
+
+O resumo só classifica e ordena. Aprovar ou rejeitar (todas ou uma a uma) continua sendo clique do usuário via `memory_decide_user`; nada é aprovado automaticamente.

@@ -255,3 +255,9 @@ Cinco pontos de melhoria estrutural focados na velocidade de inicialização das
 ## Etapa 16 — métricas e verificação do início (Backend)
 
 `ags mission startcheck <id>` consulta briefing, atividade, retries e avisos por integrante, incluindo quem nunca iniciou, e verifica o limite de 120 segundos desde a abertura dos terminais. `ags mission timings` expõe contagem de alertas, espera total/máxima do orquestrador e tempo até todos trabalhando. Reutiliza `mission_timings` e a equipe persistida; nenhuma migração necessária. A instrumentação de atividade, retry e alertas fica no frontend; o comando não envia Enter nem altera terminais. Contrato em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+
+## Etapa 17 — custo, Fast headless, entregas e memória
+- Custo por aba (tokens/custo por terminal da missão): ver MISSION_TOKENS.md.
+- Fast nas execuções headless: ver AGENT_EFFICIENCY.md.
+- Reavaliação de missões `done_without_delivery` (`ags mission redeliver`): ver MISSION_SUCCESS.md.
+- Revisão das memórias sugeridas ao concluir a missão (duplicadas, contradições, alto valor): ver SHARED_MEMORY.md.
