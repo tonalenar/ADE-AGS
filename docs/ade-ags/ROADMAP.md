@@ -262,3 +262,11 @@ Cinco pontos de melhoria estrutural focados na velocidade de inicialização das
 - [x] **Frontend**: painel Design no canvas (zoom/pan, páginas, iframe em sandbox, modo EDIT, comentários por elemento, versões, aprovar/rejeitar/aprovar tudo, atualização ao vivo).
 - [x] **Fluxo de construção**: só pranchetas aprovadas viram tarefas (`buildTasks.ts`); briefing do orquestrador e skill `ags-orchestrator` 1.27.0 com "desenhe primeiro, aprove, construa".
 - [ ] Fora do escopo (etapa seguinte): preview real do app em dev server por worktree; compartilhar link.
+
+## Etapa 17 - uso por aba (Backend)
+
+Implementado em `feat/etapa17-tab-usage`: `mission_tokens` inclui `agents[].tabs`, e `ags mission efficiency` inclui `tokens`. Soma das abas = total do agente; soma dos agentes = total da missao. Identidade persistida, sessao antes de cwd exclusivo, deltas Codex e nenhuma medicao inventada. Contrato e limitacoes: [TAB_USAGE.md](./TAB_USAGE.md).
+
+## Etapa 17 - Fast headless (Backend)
+
+Implementado em `feat/etapa17-headless-fast`: snapshot Fast do lead e dos integrantes persistido em runs/run_squad_members (v34); supervisor passa `LaunchCtx.fast_mode` e Codex usa `-c service_tier="fast"`. Providers sem equivalente nao recebem flags. Formatos CLI verificados, limites e testes: [FAST_HEADLESS.md](./FAST_HEADLESS.md).

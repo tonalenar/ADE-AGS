@@ -27,7 +27,7 @@ pub enum TestResult {
 }
 
 impl TestResult {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::Passed => "passed",
             Self::Failed => "failed",
@@ -35,7 +35,7 @@ impl TestResult {
         }
     }
 
-    pub(crate) fn parse(value: &str) -> Self {
+    pub fn parse(value: &str) -> Self {
         match value {
             "passed" => Self::Passed,
             "failed" => Self::Failed,
@@ -44,7 +44,7 @@ impl TestResult {
     }
 }
 
-#[derive(Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum CiStatus {
     NotApplicable,
@@ -56,7 +56,7 @@ pub enum CiStatus {
 }
 
 impl CiStatus {
-    pub(crate) fn as_str(self) -> &'static str {
+    pub fn as_str(self) -> &'static str {
         match self {
             Self::NotApplicable => "not_applicable",
             Self::Success => "success",
@@ -67,7 +67,7 @@ impl CiStatus {
         }
     }
 
-    pub(crate) fn parse(value: &str) -> Self {
+    pub fn parse(value: &str) -> Self {
         match value {
             "not_applicable" => Self::NotApplicable,
             "success" => Self::Success,
@@ -128,14 +128,44 @@ pub(crate) fn mission_status(delivery: &MissionDelivery) -> &'static str {
     }
 }
 
-fn normalize_pr_reference(value: &str) -> Result<String, String> {
-    if let Ok(number) = value.parse::<u64>() {
+#[derive(Deserialize, Serialize, Clone, Copy, Debug, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PrState {
+    Merged,
+    Open,
+    Closed,
+    Unknown,
+}
+
+impl PrState {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Merged => "merged",
+            Self::Open => "open",
+            Self::Closed => "closed",
+            Self::Unknown => "unknown",
+        }
+    }
+
+    pub fn parse(value: &str) -> Self {
+        match value.trim().to_ascii_uppercase().as_str() {
+            "MERGED" => Self::Merged,
+            "OPEN" => Self::Open,
+            "CLOSED" => Self::Closed,
+            _ => Self::Unknown,
+        }
+    }
+}
+
+pub(crate) fn normalize_pr_reference(value: &str) -> Result<String, String> {
+    let clean = value.trim().trim_start_matches('#');
+    if let Ok(number) = clean.parse::<u64>() {
         if number > 0 {
             return Ok(number.to_string());
         }
     }
 
-    let without_query = value.split(['?', '#']).next().unwrap_or(value).trim_end_matches('/');
+    let without_query = clean.split(['?', '#']).next().unwrap_or(clean).trim_end_matches('/');
     let Some(path) = without_query.strip_prefix("https://github.com/") else {
         return Err("Informe o número do PR ou uma URL https://github.com/<owner>/<repo>/pull/<número>.".into());
     };
@@ -158,6 +188,17 @@ fn normalize_pr_reference(value: &str) -> Result<String, String> {
     Ok(format!("https://github.com/{}/{}/pull/{number}", parts[0], parts[1]))
 }
 
+pub(crate) fn repo_from_reference(reference: &str) -> Option<String> {
+    let without_query = reference.split(['?', '#']).next().unwrap_or(reference).trim_end_matches('/');
+    let path = without_query.strip_prefix("https://github.com/")?;
+    let parts = path.split('/').collect::<Vec<_>>();
+    if parts.len() >= 2 && !parts[0].is_empty() && !parts[1].is_empty() {
+        Some(format!("{}/{}", parts[0], parts[1]))
+    } else {
+        None
+    }
+}
+
 /// `owner/repo` del remoto `origin` de la carpeta (https o ssh). `gh` sin `--repo` usa el repositorio
 /// por defecto del usuario, que puede ser otro (p. ej. el upstream del fork) y hacía fallar el chequeo.
 pub(crate) fn repo_from_remote(url: &str) -> Option<String> {
@@ -171,18 +212,45 @@ pub(crate) fn repo_from_remote(url: &str) -> Option<String> {
     (parts.next().is_none() && !owner.is_empty() && !repo.is_empty()).then(|| format!("{owner}/{repo}"))
 }
 
-fn origin_repo(cwd: &Path) -> Option<String> {
-    let out = Command::new("git").args(["remote", "get-url", "origin"]).current_dir(cwd).output().ok()?;
-    out.status.success().then(|| repo_from_remote(&String::from_utf8_lossy(&out.stdout))).flatten()
+pub(crate) fn origin_repo(cwd: &Path) -> Option<String> {
+    if let Ok(out) = Command::new("git").args(["remote", "get-url", "origin"]).current_dir(cwd).output() {
+        if out.status.success() {
+            if let Some(repo) = repo_from_remote(&String::from_utf8_lossy(&out.stdout)) {
+                return Some(repo);
+            }
+        }
+    }
+    if let Ok(current_dir) = std::env::current_dir() {
+        if current_dir != cwd {
+            if let Ok(out) = Command::new("git").args(["remote", "get-url", "origin"]).current_dir(&current_dir).output() {
+                if out.status.success() {
+                    if let Some(repo) = repo_from_remote(&String::from_utf8_lossy(&out.stdout)) {
+                        return Some(repo);
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
-fn check_pr_ci(cwd: &Path, reference: &str) -> CiStatus {
-    let mut args: Vec<String> = ["pr", "view", reference, "--json", "statusCheckRollup"].map(String::from).into();
-    // Un número solo no dice de qué repositorio es: se usa el del remoto de la misión.
-    if !reference.starts_with("https://") {
-        if let Some(repo) = origin_repo(cwd) {
-            args.extend(["--repo".to_string(), repo]);
-        }
+pub(crate) fn parse_pr_status(stdout: &[u8]) -> (PrState, CiStatus) {
+    let Ok(json) = serde_json::from_slice::<Value>(stdout) else {
+        return (PrState::Unknown, CiStatus::Unavailable);
+    };
+    let pr_state = match json.get("state").and_then(Value::as_str) {
+        Some(s) => PrState::parse(s),
+        None => PrState::Unknown,
+    };
+    let ci_status = parse_ci_status(stdout);
+    (pr_state, ci_status)
+}
+
+pub(crate) fn check_pr_status(cwd: &Path, reference: &str) -> (PrState, CiStatus) {
+    let mut args: Vec<String> = ["pr", "view", reference, "--json", "state,statusCheckRollup"].map(String::from).into();
+    let repo = origin_repo(cwd).or_else(|| repo_from_reference(reference));
+    if let Some(repo) = repo {
+        args.extend(["--repo".to_string(), repo]);
     }
     let mut child = match Command::new("gh")
         .args(&args)
@@ -192,7 +260,7 @@ fn check_pr_ci(cwd: &Path, reference: &str) -> CiStatus {
         .spawn()
     {
         Ok(child) => child,
-        Err(_) => return CiStatus::Unavailable,
+        Err(_) => return (PrState::Unknown, CiStatus::Unavailable),
     };
 
     let started = Instant::now();
@@ -200,22 +268,26 @@ fn check_pr_ci(cwd: &Path, reference: &str) -> CiStatus {
         match child.try_wait() {
             Ok(Some(status)) => {
                 if !status.success() {
-                    return CiStatus::Unavailable;
+                    return (PrState::Unknown, CiStatus::Unavailable);
                 }
                 let Ok(output) = child.wait_with_output() else {
-                    return CiStatus::Unavailable;
+                    return (PrState::Unknown, CiStatus::Unavailable);
                 };
-                return parse_ci_status(&output.stdout);
+                return parse_pr_status(&output.stdout);
             }
             Ok(None) if started.elapsed() < GH_CHECK_TIMEOUT => thread::sleep(Duration::from_millis(100)),
             Ok(None) => {
                 let _ = child.kill();
                 let _ = child.wait();
-                return CiStatus::Unavailable;
+                return (PrState::Unknown, CiStatus::Unavailable);
             }
-            Err(_) => return CiStatus::Unavailable,
+            Err(_) => return (PrState::Unknown, CiStatus::Unavailable),
         }
     }
+}
+
+fn check_pr_ci(cwd: &Path, reference: &str) -> CiStatus {
+    check_pr_status(cwd, reference).1
 }
 
 fn parse_ci_status(stdout: &[u8]) -> CiStatus {
@@ -303,5 +375,27 @@ mod tests {
         assert_eq!(parse_ci_status(br#"{"statusCheckRollup":[{"conclusion":"SUCCESS"},{"status":"IN_PROGRESS"}]}"#), CiStatus::Pending);
         assert_eq!(parse_ci_status(br#"{"statusCheckRollup":[{"conclusion":"SUCCESS"},{"conclusion":"FAILURE"}]}"#), CiStatus::Failure);
         assert_eq!(parse_ci_status(br#"{"statusCheckRollup":[]}"#), CiStatus::Pending);
+    }
+
+    #[test]
+    fn parse_pr_status_extracts_state_and_ci() {
+        let merged_green = br#"{"state":"MERGED","statusCheckRollup":[{"conclusion":"SUCCESS"}]}"#;
+        assert_eq!(parse_pr_status(merged_green), (PrState::Merged, CiStatus::Success));
+
+        let open_green = br#"{"state":"OPEN","statusCheckRollup":[{"conclusion":"SUCCESS"}]}"#;
+        assert_eq!(parse_pr_status(open_green), (PrState::Open, CiStatus::Success));
+
+        let closed_failed = br#"{"state":"CLOSED","statusCheckRollup":[{"conclusion":"FAILURE"}]}"#;
+        assert_eq!(parse_pr_status(closed_failed), (PrState::Closed, CiStatus::Failure));
+
+        let unknown_invalid = b"not json";
+        assert_eq!(parse_pr_status(unknown_invalid), (PrState::Unknown, CiStatus::Unavailable));
+    }
+
+    #[test]
+    fn repo_from_reference_extracts_owner_and_repo() {
+        assert_eq!(repo_from_reference("https://github.com/tonalenar/ADE-AGS/pull/68").as_deref(), Some("tonalenar/ADE-AGS"));
+        assert_eq!(repo_from_reference("68"), None);
+        assert_eq!(repo_from_reference("https://github.com/a/b/pull/123?diff=unified#issuecomment-1"), Some("a/b".into()));
     }
 }

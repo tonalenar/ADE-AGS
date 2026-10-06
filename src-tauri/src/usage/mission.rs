@@ -4,7 +4,7 @@
 //! dentro del intervalo real de la misión. Para los demás agentes no hay lector de
 //! transcripts: sus tokens no se deducen del ledger.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet};
+use std::collections::{BTreeSet, HashSet};
 use std::fs::File;
 use std::io::{BufRead, BufReader};
 use std::path::{Path, PathBuf};
@@ -14,10 +14,10 @@ use rusqlite::{Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
 
 use crate::database::DbConnection;
-use crate::util::now_ts;
 
-use super::claude::{UsageRecord, parse_ts};
+use super::claude::{parse_ts, UsageRecord};
 use super::pricing;
+use super::terminal::{mission_tokens_for_conn, MissionTabTokens};
 
 const USAGE_MARK: &str = "\"output_tokens\"";
 
@@ -99,6 +99,7 @@ struct TranscriptLine {
 
 #[derive(Deserialize)]
 struct TranscriptMessage {
+    id: Option<String>,
     usage: Option<TranscriptUsage>,
     model: Option<String>,
 }
@@ -118,7 +119,10 @@ struct TranscriptUsage {
 /// Lê um transcript sem falhar por linhas vazias, truncadas ou corrompidas.
 /// Quando a linha declara um cwd, ela precisa corresponder ao da missão.
 pub(crate) fn read_transcript_usage(path: &Path, cwd: &str) -> Vec<UsageRecord> {
-    read_transcript_priced(path, cwd).into_iter().map(|(record, _)| record).collect()
+    read_transcript_priced(path, cwd)
+        .into_iter()
+        .map(|(record, _)| record)
+        .collect()
 }
 
 /// Igual que `read_transcript_usage`, pero cada registro trae el modelo que lo generó.
@@ -129,6 +133,7 @@ pub(crate) fn read_transcript_priced(path: &Path, cwd: &str) -> Vec<(UsageRecord
     let mut reader = BufReader::new(file);
     let mut bytes = Vec::new();
     let mut records = Vec::new();
+    let mut seen = HashSet::new();
 
     loop {
         bytes.clear();
@@ -143,11 +148,9 @@ pub(crate) fn read_transcript_priced(path: &Path, cwd: &str) -> Vec<(UsageRecord
         let Ok(parsed) = serde_json::from_str::<TranscriptLine>(&line) else {
             continue;
         };
-        if parsed
-            .cwd
-            .as_deref()
-            .is_some_and(|line_cwd| Path::new(line_cwd) != Path::new(cwd))
-        {
+        if parsed.cwd.as_deref().is_some_and(|line_cwd| {
+            super::terminal::path_key(line_cwd) != super::terminal::path_key(cwd)
+        }) {
             continue;
         }
         let Some(at) = parsed.timestamp.as_deref().and_then(parse_ts) else {
@@ -156,6 +159,12 @@ pub(crate) fn read_transcript_priced(path: &Path, cwd: &str) -> Vec<(UsageRecord
         let Some(message) = parsed.message else {
             continue;
         };
+        // Replayed transcript entries must not produce a second charge.
+        if let Some(id) = message.id.as_ref() {
+            if !seen.insert((parsed.session_id.clone(), id.clone())) {
+                continue;
+            }
+        }
         let model = message.model;
         let Some(usage) = message.usage else {
             continue;
@@ -187,7 +196,11 @@ pub struct CostEstimate {
 }
 
 /// Valora los registros dentro del intervalo con la tabla de precios. Pura.
-pub(crate) fn estimate_in_range(records: &[(UsageRecord, Option<String>)], start: i64, end: i64) -> CostEstimate {
+pub(crate) fn estimate_in_range(
+    records: &[(UsageRecord, Option<String>)],
+    start: i64,
+    end: i64,
+) -> CostEstimate {
     let mut out = CostEstimate::default();
     let mut unpriced = BTreeSet::new();
     for (record, model) in records {
@@ -196,7 +209,13 @@ pub(crate) fn estimate_in_range(records: &[(UsageRecord, Option<String>)], start
         }
         match model.as_deref().and_then(pricing::price_for) {
             Some(price) => {
-                out.cost_usd += pricing::cost_usd(price, record.input, record.output, record.cache_write, record.cache_read);
+                out.cost_usd += pricing::cost_usd(
+                    price,
+                    record.input,
+                    record.output,
+                    record.cache_write,
+                    record.cache_read,
+                );
                 out.saved_usd += pricing::cache_saved_usd(price, record.cache_read);
             }
             None => {
@@ -225,6 +244,7 @@ pub struct MissionAgentTokens {
     pub cost_usd: Option<f64>,
     /// Estimación con precio de lista; solo donde hay tokens medidos.
     pub estimate: Option<CostEstimate>,
+    pub tabs: Vec<MissionTabTokens>,
 }
 
 #[derive(Serialize, Clone, Debug, Default, PartialEq)]
@@ -247,91 +267,28 @@ pub struct MissionTokens {
     pub totals: MissionTokenTotals,
 }
 
-struct MissionSnapshot {
-    cwd: String,
-    started_at: Option<i64>,
-    ended_at: Option<i64>,
-    lead_agent_id: Option<String>,
+pub(super) struct MissionSnapshot {
+    pub(super) started_at: Option<i64>,
+    pub(super) ended_at: Option<i64>,
 }
 
-fn mission_snapshot(conn: &Connection, mission_id: &str) -> Result<MissionSnapshot, String> {
+pub(super) fn mission_snapshot(
+    conn: &Connection,
+    mission_id: &str,
+) -> Result<MissionSnapshot, String> {
     conn.query_row(
-        "SELECT cwd, started_at, ended_at, lead_agent_id FROM missions WHERE id = ?1",
+        "SELECT started_at, ended_at FROM missions WHERE id = ?1",
         [mission_id],
         |row| {
             Ok(MissionSnapshot {
-                cwd: row.get(0)?,
-                started_at: row.get(1)?,
-                ended_at: row.get(2)?,
-                lead_agent_id: row.get(3)?,
+                started_at: row.get(0)?,
+                ended_at: row.get(1)?,
             })
         },
     )
     .optional()
     .map_err(|error| error.to_string())?
     .ok_or_else(|| format!("mission not found: {mission_id}"))
-}
-
-fn mission_agents(conn: &Connection, mission_id: &str) -> Result<BTreeSet<String>, String> {
-    let mut agents = BTreeSet::new();
-    let mut tasks = conn
-        .prepare(
-            "SELECT DISTINCT tasks.agent_id
-             FROM tasks JOIN runs ON runs.id = tasks.run_id
-             WHERE runs.mission_id = ?1",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = tasks
-        .query_map([mission_id], |row| row.get::<_, String>(0))
-        .map_err(|error| error.to_string())?;
-    for row in rows {
-        agents.insert(row.map_err(|error| error.to_string())?);
-    }
-    Ok(agents)
-}
-
-fn claude_config_dirs(conn: &Connection) -> Result<Vec<PathBuf>, String> {
-    let mut dirs = dirs::home_dir()
-        .map(|home| vec![home.join(".claude")])
-        .unwrap_or_default();
-    let mut stmt = conn
-        .prepare("SELECT dir FROM agent_accounts WHERE agent_id = 'claude-code'")
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map([], |row| row.get::<_, String>(0))
-        .map_err(|error| error.to_string())?;
-    for row in rows {
-        dirs.push(PathBuf::from(row.map_err(|error| error.to_string())?));
-    }
-
-    let mut seen = HashSet::new();
-    dirs.retain(|dir| seen.insert(dir.clone()));
-    Ok(dirs)
-}
-
-fn mission_costs(
-    conn: &Connection,
-    mission_id: &str,
-) -> Result<BTreeMap<String, Option<f64>>, String> {
-    let mut stmt = conn
-        .prepare(
-            "SELECT agent_id, SUM(cost_usd)
-             FROM usage_events
-             WHERE run_id IN (SELECT id FROM runs WHERE mission_id = ?1)
-             GROUP BY agent_id",
-        )
-        .map_err(|error| error.to_string())?;
-    let rows = stmt
-        .query_map([mission_id], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, Option<f64>>(1)?))
-        })
-        .map_err(|error| error.to_string())?;
-    let mut costs = BTreeMap::new();
-    for row in rows {
-        let (agent_id, cost) = row.map_err(|error| error.to_string())?;
-        costs.insert(agent_id, cost);
-    }
-    Ok(costs)
 }
 
 fn sum_estimates(agents: &[MissionAgentTokens]) -> Option<CostEstimate> {
@@ -349,7 +306,7 @@ fn sum_estimates(agents: &[MissionAgentTokens]) -> Option<CostEstimate> {
     total
 }
 
-fn total_for_agents(agents: &[MissionAgentTokens]) -> MissionTokenTotals {
+pub(super) fn total_for_agents(agents: &[MissionAgentTokens]) -> MissionTokenTotals {
     let measured = agents.iter().any(|agent| agent.measured);
     let token_totals = agents.iter().filter(|agent| agent.measured).fold(
         UsageTotals::default(),
@@ -375,8 +332,14 @@ fn total_for_agents(agents: &[MissionAgentTokens]) -> MissionTokenTotals {
         measured,
         input: measured.then_some(token_totals.input),
         output: measured.then_some(token_totals.output),
-        cache_write: measured.then_some(token_totals.cache_write),
-        cache_read: measured.then_some(token_totals.cache_read),
+        cache_write: agents
+            .iter()
+            .any(|a| a.cache_write.is_some())
+            .then_some(token_totals.cache_write),
+        cache_read: agents
+            .iter()
+            .any(|a| a.cache_read.is_some())
+            .then_some(token_totals.cache_read),
         cost_usd: (!known_costs.is_empty()).then(|| known_costs.into_iter().sum()),
         estimate: sum_estimates(agents),
     }
@@ -388,74 +351,13 @@ pub async fn mission_tokens(
     mission_id: String,
     db: tauri::State<'_, DbConnection>,
 ) -> Result<MissionTokens, String> {
-    let (mission, mut agent_ids, config_dirs, costs) = {
-        let conn = db.lock().map_err(|error| error.to_string())?;
-        let mission = mission_snapshot(&conn, &mission_id)?;
-        let mut agent_ids = mission_agents(&conn, &mission_id)?;
-        if let Some(lead) = mission.lead_agent_id.as_ref() {
-            agent_ids.insert(lead.clone());
-        }
-        let config_dirs = claude_config_dirs(&conn)?;
-        let costs = mission_costs(&conn, &mission_id)?;
-        for agent_id in costs.keys() {
-            agent_ids.insert(agent_id.clone());
-        }
-        (mission, agent_ids, config_dirs, costs)
-    };
-
-    let end = mission.ended_at.unwrap_or_else(now_ts);
-    let start = mission.started_at;
-    let cwd = mission.cwd;
-
+    let db = db.inner().clone();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut priced = Vec::new();
-        if start.is_some() {
-            for config_dir in &config_dirs {
-                for transcript in mission_transcripts(config_dir, &cwd) {
-                    priced.extend(read_transcript_priced(&transcript, &cwd));
-                }
-            }
-        }
-        let records: Vec<UsageRecord> = priced.iter().map(|(record, _)| record.clone()).collect();
-        let estimate = start.map(|start| estimate_in_range(&priced, start, end));
-
-        let totals = start
-            .map(|start| sum_usage_in_range(&records, start, end))
-            .unwrap_or_default();
-        let measured = start.is_some_and(|start| {
-            records
-                .iter()
-                .any(|record| record.at >= start && record.at <= end)
-        });
-        if measured {
-            agent_ids.insert("claude-code".to_string());
-        }
-
-        let agents = agent_ids
-            .into_iter()
-            .map(|agent_id| {
-                let is_measured = agent_id == "claude-code" && measured;
-                MissionAgentTokens {
-                    cost_usd: costs.get(&agent_id).copied().flatten(),
-                    agent_id,
-                    measured: is_measured,
-                    input: is_measured.then_some(totals.input),
-                    output: is_measured.then_some(totals.output),
-                    cache_write: is_measured.then_some(totals.cache_write),
-                    cache_read: is_measured.then_some(totals.cache_read),
-                    estimate: if is_measured { estimate.clone() } else { None },
-                }
-            })
-            .collect::<Vec<_>>();
-        let totals = total_for_agents(&agents);
-        Ok(MissionTokens {
-            mission_id,
-            agents,
-            totals,
-        })
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        mission_tokens_for_conn(&conn, &mission_id)
     })
     .await
-    .map_err(|error| error.to_string())?
+    .map_err(|e| e.to_string())?
 }
 
 #[cfg(test)]
@@ -467,7 +369,8 @@ mod test {
     struct TempDir(PathBuf);
     impl TempDir {
         fn new(name: &str) -> Self {
-            let path = std::env::temp_dir().join(format!("ags-test-{name}-{}", uuid::Uuid::new_v4()));
+            let path =
+                std::env::temp_dir().join(format!("ags-test-{name}-{}", uuid::Uuid::new_v4()));
             fs::create_dir_all(&path).expect("failed to create temp dir");
             Self(path)
         }
@@ -568,7 +471,10 @@ mod test {
         // Caminho Linux
         assert_eq!(project_slug("/home/x/proj"), "-home-x-proj");
         // Caminho com espaços, underline e hífens já existentes (não colapsa)
-        assert_eq!(project_slug("/home/user/my project_v1"), "-home-user-my-project-v1");
+        assert_eq!(
+            project_slug("/home/user/my project_v1"),
+            "-home-user-my-project-v1"
+        );
         assert_eq!(project_slug("/a--b"), "-a--b");
     }
 
@@ -625,7 +531,11 @@ mod test {
         fs::write(&file_path, content).expect("write file");
 
         let records = read_transcript_usage(&file_path, target_cwd);
-        assert_eq!(records.len(), 2, "deve ler apenas a linha do target_cwd e a linha sem cwd");
+        assert_eq!(
+            records.len(),
+            2,
+            "deve ler apenas a linha do target_cwd e a linha sem cwd"
+        );
 
         assert_eq!(records[0].at, parse_ts("2026-08-21T20:29:09.363Z").unwrap());
         assert_eq!(records[0].input, 10);
@@ -648,11 +558,17 @@ mod test {
         fs::write(&empty_path, "").expect("write empty file");
 
         let records = read_transcript_usage(&empty_path, "/some/cwd");
-        assert!(records.is_empty(), "transcript vazio deve devolver Vec vazio");
+        assert!(
+            records.is_empty(),
+            "transcript vazio deve devolver Vec vazio"
+        );
 
         let nonexistent = temp.path().join("does_not_exist.jsonl");
         let records_nonexistent = read_transcript_usage(&nonexistent, "/some/cwd");
-        assert!(records_nonexistent.is_empty(), "arquivo inexistente deve devolver Vec vazio");
+        assert!(
+            records_nonexistent.is_empty(),
+            "arquivo inexistente deve devolver Vec vazio"
+        );
     }
 
     #[test]
@@ -661,14 +577,19 @@ mod test {
         let file_path = temp.path().join("corrupted.jsonl");
 
         let line_before = r#"{"timestamp":"2026-08-21T20:20:00.000Z","cwd":"/cwd","sessionId":"s1","message":{"usage":{"input_tokens":1,"output_tokens":2,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#;
-        let line_corrupted = r#"{"timestamp":"2026-08-21T20:21:00.000Z","output_tokens":MALFORMED_JSON"#;
+        let line_corrupted =
+            r#"{"timestamp":"2026-08-21T20:21:00.000Z","output_tokens":MALFORMED_JSON"#;
         let line_after = r#"{"timestamp":"2026-08-21T20:22:00.000Z","cwd":"/cwd","sessionId":"s1","message":{"usage":{"input_tokens":3,"output_tokens":4,"cache_creation_input_tokens":0,"cache_read_input_tokens":0}}}"#;
 
         let content = format!("{line_before}\n{line_corrupted}\n{line_after}\n");
         fs::write(&file_path, content).expect("write corrupted file");
 
         let records = read_transcript_usage(&file_path, "/cwd");
-        assert_eq!(records.len(), 2, "deve ignorar a linha corrompida e continuar com as linhas validas");
+        assert_eq!(
+            records.len(),
+            2,
+            "deve ignorar a linha corrompida e continuar com as linhas validas"
+        );
         assert_eq!(records[0].input, 1);
         assert_eq!(records[1].input, 3);
     }
@@ -678,8 +599,25 @@ mod test {
 mod estimate_tests {
     use super::*;
 
-    fn rec(at: i64, input: u64, output: u64, cache_write: u64, cache_read: u64, model: &str) -> (UsageRecord, Option<String>) {
-        (UsageRecord { at, input, output, cache_write, cache_read, session: None }, Some(model.to_string()))
+    fn rec(
+        at: i64,
+        input: u64,
+        output: u64,
+        cache_write: u64,
+        cache_read: u64,
+        model: &str,
+    ) -> (UsageRecord, Option<String>) {
+        (
+            UsageRecord {
+                at,
+                input,
+                output,
+                cache_write,
+                cache_read,
+                session: None,
+            },
+            Some(model.to_string()),
+        )
     }
 
     #[test]
