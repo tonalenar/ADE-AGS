@@ -88,3 +88,46 @@ fn dry_run_shows_cwd_and_commands() {
     let text = p(&["src-tauri/src/floors.rs"]).render_dry_run();
     assert!(text.contains("[rust] (src-tauri) cargo test --lib -- floors::"));
 }
+
+#[test]
+fn database_changes_demand_full_rust_with_reason() {
+    let plan = p(&["src-tauri/src/database/schema.rs"]);
+    assert!(plan.full);
+    assert_eq!(suites(&plan), ["rust"]);
+    assert_eq!(plan.steps[0].args, ["test", "--lib", "--bin", "ags"]);
+    assert!(plan.risk[0].contains("banco/schema"));
+    assert!(plan.render_dry_run().contains("Mudança de risco"));
+    assert!(plan.unmapped.is_empty());
+}
+
+#[test]
+fn windows_com_paths_demand_full_rust() {
+    let plan = p(&["src-tauri/src/notifier/identity.rs", "src/App.tsx"]);
+    assert!(plan.full);
+    assert_eq!(suites(&plan), ["babel", "tsc", "frontend", "rust"]);
+    assert_eq!(plan.steps[2].args[1], "related");
+    assert!(plan.risk[0].contains("unsafe/COM"));
+    assert!(p(&["src-tauri/src/window/mod.rs"]).full);
+}
+
+#[test]
+fn schema_files_demand_full_rust() {
+    assert!(p(&["src-tauri/migrations/001.sql"]).full);
+}
+
+#[test]
+fn ordinary_rust_module_is_not_risky() {
+    let plan = p(&["src-tauri/src/floors.rs"]);
+    assert!(!plan.full && plan.risk.is_empty());
+}
+
+#[test]
+fn unsafe_added_in_diff_marks_the_file_risky() {
+    let diff = "diff --git a/src-tauri/src/floors.rs b/src-tauri/src/floors.rs\n--- a/src-tauri/src/floors.rs\n+++ b/src-tauri/src/floors.rs\n@@ -1 +1,2 @@\n+    unsafe { call() }\n+// unsafe em comentário\n+++ b/src-tauri/src/missions/a.rs\n+let unsafely = 1;\n";
+    let files = files_adding_unsafe(diff);
+    assert_eq!(files, ["src-tauri/src/floors.rs"]);
+    let plan = plan_with_unsafe(&["src-tauri/src/floors.rs".to_string()], &files);
+    assert!(plan.full);
+    assert!(plan.risk[0].contains("adiciona unsafe"));
+    assert!(files_adding_unsafe("").is_empty());
+}
