@@ -1,4 +1,4 @@
-import type { AgentKind, ArcadeBarrel, ArcadeHero, ArcadeScene, ArcadeStageId, ArcadeTower, ArcadeTrophy, HeroRole } from "./liveArcadeModel";
+import type { AgentKind, ArcadeBarrel, ArcadeBoss, ArcadeHero, ArcadeScene, ArcadeStageId, ArcadeTower, ArcadeTrophy, HeroRole } from "./liveArcadeModel";
 import type { PlacedBarrel } from "./liveArcadeScene";
 import { ARCADE_H, ARCADE_W, BEAM_LEFT, BEAM_RIGHT, LEVEL_BASE_Y, TOWER_LEFT, TOWER_WIDTH, beamY, ladderX, levelOfStage, taskSlots } from "./liveArcadeScene";
 
@@ -40,8 +40,63 @@ function sprite(ctx: CanvasRenderingContext2D, rows: string[], x: number, y: num
   });
 }
 
+/** O GLITCH: um bug pixelado de olhos amarelos. 14 colunas. */
+const BOSS_SPRITE = [
+  "..k........k..",
+  "...k......k...",
+  "..gggggggggg..",
+  ".gggggggggggg.",
+  ".ggyyggggyygg.",
+  ".ggykggggkygg.",
+  ".gggggggggggg.",
+  ".ggkwkwkwkwgg.",
+  "..gggggggggg..",
+  ".g.gg.gg.gg.g.",
+  "g..g......g..g",
+];
+
+/** Desenha o GLITCH com os pés em (x, y), com barra de vida; pisca branco ao ser atingido e some em pixels ao ser derrotado. */
+export function drawBoss(ctx: CanvasRenderingContext2D, boss: ArcadeBoss, x: number, y: number, hit: boolean, frame: number, label: string) {
+  const scale = 4;
+  const left = x - (BOSS_SPRITE[0].length * scale) / 2;
+  const top = y - BOSS_SPRITE.length * scale;
+  const body = boss.defeated ? "#6b6b86" : hit ? "#ffffff" : "#ff4d6d";
+  const palette: Record<string, string> = { g: body, y: boss.defeated ? "#44445c" : "#ffe15a", k: "#161225", w: "#ffffff" };
+  BOSS_SPRITE.forEach((row, r) => {
+    // Defeito de imagem: de vez em quando uma fileira treme de lado (é um glitch).
+    const glitch = !boss.defeated && (frame + r * 3) % 17 === 0 ? 4 : 0;
+    for (let c = 0; c < row.length; c += 1) {
+      const color = palette[row[c]];
+      if (!color) continue;
+      ctx.fillStyle = color;
+      ctx.fillRect(Math.round(left + c * scale + glitch), Math.round(top + r * scale), scale, scale);
+    }
+  });
+  const barW = 64;
+  ctx.fillStyle = "#161225";
+  ctx.fillRect(x - barW / 2 - 1, top - 15, barW + 2, 9);
+  ctx.fillStyle = boss.hp > 0.5 ? "#ff4d6d" : boss.hp > 0.2 ? "#ffbc62" : "#b6ff58";
+  ctx.fillRect(x - barW / 2, top - 14, Math.round(barW * boss.hp), 7);
+  ctx.font = FONT(6);
+  ctx.textAlign = "center";
+  ctx.fillStyle = "#f4efff";
+  ctx.fillText(label, x, top - 19);
+  ctx.textAlign = "left";
+}
+
+/** Tiros dos heróis: pequenos blocos na cor do papel, com rastro. */
+export function drawBolts(ctx: CanvasRenderingContext2D, bolts: Array<{ x: number; y: number; color: string }>) {
+  for (const bolt of bolts) {
+    ctx.fillStyle = bolt.color;
+    ctx.fillRect(Math.round(bolt.x) - 2, Math.round(bolt.y) - 2, 5, 5);
+    ctx.globalAlpha = 0.4;
+    ctx.fillRect(Math.round(bolt.x) - 6, Math.round(bolt.y) - 1, 4, 3);
+    ctx.globalAlpha = 1;
+  }
+}
+
 /** Um herói desenhado com os pés em (x, y). */
-export function drawHero(ctx: CanvasRenderingContext2D, hero: ArcadeHero, x: number, y: number, pose: Pose, label: string, carrying?: HeroRole) {
+export function drawHero(ctx: CanvasRenderingContext2D, hero: ArcadeHero, x: number, y: number, pose: Pose, label: string, carrying?: HeroRole, frame = 0) {
   const scale = 2;
   const left = x - 8;
   const top = y - 18 - 2 * scale + 0;
@@ -60,9 +115,13 @@ export function drawHero(ctx: CanvasRenderingContext2D, hero: ArcadeHero, x: num
     ctx.fillRect(x - 6, top - 12, 12, 1);
   }
   if (hero.state === "sleeping") {
+    // Os Z sobem e se apagam: quem dorme não fica "congelado", respira.
+    const rise = (frame % 12) / 12;
     ctx.font = FONT(8);
+    ctx.globalAlpha = 1 - rise * 0.8;
     ctx.fillStyle = "#abb1d8";
-    ctx.fillText("Z", x + 10, top + 2);
+    ctx.fillText("Z", x + 10 + Math.round(rise * 4), top + 2 - Math.round(rise * 10));
+    ctx.globalAlpha = 1;
   } else if (hero.state === "stopped") {
     ctx.font = FONT(10);
     ctx.fillStyle = "#ffe15a";
@@ -121,6 +180,7 @@ function drawDependency(ctx: CanvasRenderingContext2D, from: { x: number; y: num
 }
 
 export interface Placed { hero: ArcadeHero; x: number; level: number; pose: Pose; lift: number; carrying?: HeroRole }
+export interface DrawBoss { boss: ArcadeBoss; x: number; y: number; hit: boolean; label: string; lore: string }
 
 /** A torre cresce do chão para cima: um bloco por entrega real; cinza = não medido. */
 function drawTower(ctx: CanvasRenderingContext2D, tower: ArcadeTower, label: string) {
@@ -161,6 +221,7 @@ export interface DrawLabels {
 }
 export interface DrawInput {
   scene: ArcadeScene; title: string; labels: DrawLabels;
+  boss: DrawBoss; bolts: Array<{ x: number; y: number; color: string }>;
   heroes: Placed[]; barrels: Array<PlacedBarrel<ArcadeBarrel>>; trophy: ArcadeTrophy; tower: ArcadeTower; frame: number;
 }
 
@@ -179,6 +240,10 @@ export function drawArcade(ctx: CanvasRenderingContext2D, input: DrawInput) {
   ctx.fillText(input.title.length > 54 ? input.title.slice(0, 51) + "..." : input.title, 24, 52);
   ctx.fillStyle = "#63dfff";
   ctx.fillText(scene.currentStage ? labels.stage(scene.currentStage) : "—", ARCADE_W - 265, 30);
+  // A história da fase: uma linha por vez.
+  ctx.font = FONT(7);
+  ctx.fillStyle = "#ffbc62";
+  ctx.fillText(input.boss.lore, 24, 72, 640);
 
   const slots = taskSlots(scene);
   for (let lower = 0; lower < 5; lower += 1) drawLadder(ctx, ladderX(lower), lower, lower === 0 ? "#6c5a8c" : "#8a77ad");
@@ -248,12 +313,14 @@ export function drawArcade(ctx: CanvasRenderingContext2D, input: DrawInput) {
   ctx.font = FONT(6);
   ctx.fillText(labels.trophy, 812, top + 22);
   drawTower(ctx, input.tower, labels.tower);
+  drawBoss(ctx, input.boss.boss, input.boss.x, input.boss.y, input.boss.hit, frame, input.boss.label);
 
   ctx.fillStyle = "#9799b9";
   ctx.fillText(labels.team, 18, ARCADE_H - 10);
   // Mais ao fundo primeiro: quem sobe (nível alto) fica atrás de quem está no chão.
   for (const placed of [...input.heroes].sort((a, b) => b.level - a.level)) {
     const y = beamY(placed.level, placed.x) - placed.lift;
-    drawHero(ctx, placed.hero, placed.x, y, placed.pose, placed.hero.name, placed.carrying);
+    drawHero(ctx, placed.hero, placed.x, y, placed.pose, placed.hero.name, placed.carrying, frame);
   }
+  drawBolts(ctx, input.bolts);
 }

@@ -2192,5 +2192,10 @@
   "missions.stall.kind.agent_idle": "{{name}} está ocioso con una tarea pendiente ({{time}}).",
   "missions.startup.done": "Tiempo hasta que todos trabajan: {{time}}",
   "missions.startup.waiting": "Esperando que arranquen los agentes: {{names}}",
-  "missions.startup.unknown": "Tiempo de inicio aún no medido."
+  "missions.startup.unknown": "Tiempo de inicio aún no medido.",
+  "botPanel.live.lore1": "El GLITCH, un bug ancestral, robó el trofeo de la entrega y se escondió en lo alto de la torre.",
+  "botPanel.live.lore2": "El equipo sube los pisos y le dispara código: cada entrega real le quita vida al GLITCH.",
+  "botPanel.live.lore3": "Los barriles son sus golpes: fallas, aprobaciones pendientes y preguntas sin respuesta.",
+  "botPanel.live.boss": "GLITCH {{done}}/{{total}}",
+  "botPanel.live.bossDefeated": "¡GLITCH DERROTADO!"
 }

@@ -119,6 +119,26 @@ export function heroTargets(
   return out;
 }
 
+/** O GLITCH vive na viga do topo (Entrega), perto do troféu que roubou. */
+export const BOSS_X = 700;
+export const BOSS_SWAY = 20;
+export const BOLT_MS = 650;
+export const SHOT_EVERY_MS = 1100;
+/** Onde o GLITCH está agora (patrulha curta na viga do topo); parado quando derrotado. */
+export function bossFoot(nowMs: number, defeated: boolean): { x: number; y: number } {
+  const x = BOSS_X + (defeated ? 0 : Math.round(Math.sin(nowMs / 900) * BOSS_SWAY));
+  return { x, y: beamY(5, x) };
+}
+/** Hora de um herói que corre atirar de novo? Cada herói tem um ritmo ligeiramente diferente. */
+export function shotDue(lastMs: number | undefined, nowMs: number, seed: number): boolean {
+  return lastMs === undefined || nowMs - lastMs >= SHOT_EVERY_MS + (Math.abs(seed) % 5) * 120;
+}
+/** Posição do tiro em t (0..1): voa em arco do herói ao inimigo. */
+export function boltAt(from: { x: number; y: number }, to: { x: number; y: number }, t: number): { x: number; y: number } {
+  const k = Math.min(1, Math.max(0, t));
+  return { x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k - Math.sin(Math.PI * k) * 18 };
+}
+
 /** Quem corre (saída sustentada) vai e vem perto do destino; só depende do relógio, nunca inventa deslocamento. */
 export function patrolOffset(nowMs: number, seed: number): number {
   return Math.round(Math.sin(nowMs / 450 + seed) * 16);

@@ -226,6 +226,25 @@ export function deriveHeroes(input: {
   });
 }
 
+/** O GLITCH, inimigo da fase. A vida dele é REAL: o que ainda falta entregar. Os tiros dos heróis são só cenário. */
+export interface ArcadeBoss {
+  /** 0..1: fração que ainda falta entregar. */
+  hp: number;
+  defeated: boolean;
+  done: number;
+  total: number;
+}
+/**
+ * Vida do GLITCH: tarefas concluídas / planejadas; sem tarefas (missão em terminais), entregas finais
+ * recebidas / integrantes da equipe. Missão concluída ou tudo entregue = derrotado. Pura.
+ */
+export function deriveBoss(input: { missionStatus: string; plannedTasks: number; tower: { done: number }; teamSize: number }): ArcadeBoss {
+  const total = input.plannedTasks > 0 ? input.plannedTasks : Math.max(1, input.teamSize);
+  const done = Math.min(total, Math.max(0, input.tower.done));
+  const defeated = input.missionStatus === "done" || done >= total;
+  return { hp: defeated ? 0 : 1 - done / total, defeated, done, total };
+}
+
 export type TowerBlockKind = "task" | "integration" | "pr" | "ci";
 /** `filled` = entrega real; `empty` = ainda falta; `unmeasured` = o app não mede (cinza, nunca inventado). */
 export type TowerBlockState = "filled" | "empty" | "unmeasured";

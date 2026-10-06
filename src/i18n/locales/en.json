@@ -2192,5 +2192,10 @@
   "missions.stall.kind.agent_idle": "{{name}} is idle with a pending task ({{time}}).",
   "missions.startup.done": "Time until all agents working: {{time}}",
   "missions.startup.waiting": "Waiting for agents to start: {{names}}",
-  "missions.startup.unknown": "Startup time not measured yet."
+  "missions.startup.unknown": "Startup time not measured yet.",
+  "botPanel.live.lore1": "The GLITCH, an ancient bug, stole the delivery trophy and hid at the top of the tower.",
+  "botPanel.live.lore2": "The crew climbs the floors and fires code at it: every real delivery drains the GLITCH.",
+  "botPanel.live.lore3": "The barrels are its attacks: failures, pending approvals and unanswered questions.",
+  "botPanel.live.boss": "GLITCH {{done}}/{{total}}",
+  "botPanel.live.bossDefeated": "GLITCH DEFEATED!"
 }
