@@ -281,3 +281,7 @@ Cada agente grava eventos pontuais (`startedMs == endedMs`, `actor` = nome): `st
 Contrato da instrumentação: `start_briefing`, `start_activity`, `start_retry` e `start_stalled` são eventos pontuais (`startedMs == endedMs`, `actor` = nome do integrante). `boot` continua evidência legada do envio do briefing. `start_all_working` usa `actor = all`, início na abertura da equipe e fim na primeira atividade sustentada do último agente. O frontend é responsável por detectar atividade e persistir esses eventos.
 
 `ags mission timings` aceita os novos kinds e expõe `orchestratorStallCount`, `orchestratorWaitMs`, `orchestratorMaxWaitMs` e `timeUntilAllWorkingMs`. Em `orchestrator_stall`, `startedMs` identifica o início da espera, `endedMs` o alerta/resposta e `detail` é `alerted:<fonte>` ou `answered:<fonte>` (`peer_ask`, `peer_tell`, `screen`). A contagem considera alertas únicos; espera total/máxima agrupa ator, alvo e início e usa a maior duração, evitando duplicar alerta seguido de resposta. Sem `start_all_working`, o tempo permanece ausente. Reutiliza schema existente, sem migração.
+
+## Etapa 17 - uso por aba (Backend)
+
+Implementado em `feat/etapa17-tab-usage`: `mission_tokens` inclui `agents[].tabs`, e `ags mission efficiency` inclui `tokens`. Soma das abas = total do agente; soma dos agentes = total da missao. Identidade persistida, sessao antes de cwd exclusivo, deltas Codex e nenhuma medicao inventada. Contrato e limitacoes: [TAB_USAGE.md](./TAB_USAGE.md).
