@@ -15,7 +15,7 @@ export function PlanLimitsView({ limits }: { limits: PlanLimits[] }) {
         <div key={`${l.provider}-${l.accountId ?? ""}`} className="flex flex-col gap-0.5">
           <span className="text-[11px] font-medium text-gray-700 dark:text-gray-200">
             {t(`missions.plan.provider.${l.provider}`)}
-            {l.observedAt !== null && (
+            {l.observedAt != null && (
               <span className="ml-2 font-normal text-[10px] text-gray-400 dark:text-white/35" title={t("missions.plan.observedHint")}>
                 {t("missions.plan.observed", { at: new Date(l.observedAt * 1000).toLocaleString() })}
               </span>
