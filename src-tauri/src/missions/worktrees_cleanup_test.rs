@@ -64,6 +64,8 @@ fn inspect_worktree(repo: &TempRepo, wt_path: &Path, master: &str) -> (CleanupAc
         .split('\0')
         .filter(|s| s.len() > 3)
         .map(|s| s[3..].to_string())
+        // O link node_modules do worktree (junction/symlink) não conta como alteração: o projeto o ignora.
+        .filter(|file| file != "node_modules")
         .collect();
 
     if !dirty_files.is_empty() {
