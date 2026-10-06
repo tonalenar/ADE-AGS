@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { cacheReadShare, formatCompactNumber, tokenRows, type AgentTokens, type MissionTokens } from "../tokens";
+import { cacheReadShare, tabCostUsd, tabTotalTokens, tabsOfAgent, tabsSum, type TabTokens, formatCompactNumber, tokenRows, type AgentTokens, type MissionTokens } from "../tokens";
 
 describe("formatCompactNumber", () => {
   it("mostra números abaixo de mil como estão", () => {
@@ -261,5 +261,45 @@ describe("tokenRows", () => {
     expect(totalRow.cacheRead).toBe(600);
     expect(totalRow.costUsd).toBeCloseTo(0.35); // 0.10 + 0.25
     expect(totalRow.cacheReadSharePct).toBe(20); // 600 / (2000 + 600 + 400) * 100 = 20%
+  });
+});
+
+const tab = (over: Partial<TabTokens>): TabTokens => ({
+  tabId: "t", agentId: "claude", label: "a", cwd: null, sessionId: null, source: "session", measured: true,
+  input: 10, output: 5, cacheWrite: 0, cacheRead: 5, costUsd: 1, estimate: null, ...over,
+});
+const unmeasured = (over: Partial<TabTokens> = {}) =>
+  tab({ measured: false, source: null, input: null, output: null, cacheWrite: null, cacheRead: null, costUsd: null, ...over });
+
+describe("custo por aba", () => {
+  it("aba sem medição vira null, nunca zero", () => {
+    expect(tabCostUsd(unmeasured())).toBeNull();
+    expect(tabTotalTokens(unmeasured())).toBeNull();
+  });
+
+  it("prefere a estimativa de tabela ao custo medido", () => {
+    expect(tabCostUsd(tab({ costUsd: 1, estimate: { costUsd: 2, savedUsd: 0, unpricedModels: [] } }))).toBe(2);
+    expect(tabCostUsd(tab({ costUsd: 1 }))).toBe(1);
+    expect(tabTotalTokens(tab({}))).toBe(20);
+  });
+
+  it("filtra por agente, medidas mais caras primeiro e não medidas no fim", () => {
+    const data: MissionTokens = {
+      agents: [],
+      tabs: [unmeasured({ tabId: "n", label: "n" }), tab({ tabId: "b", label: "b", costUsd: 1 }), tab({ tabId: "c", label: "c", costUsd: 3 }), tab({ tabId: "o", agentId: "codex" })],
+    };
+    expect(tabsOfAgent(data, "claude").map((x) => x.tabId)).toEqual(["c", "b", "n"]);
+    expect(tabsOfAgent(data, "codex").map((x) => x.tabId)).toEqual(["o"]);
+  });
+
+  it("backend antigo sem tabs: lista vazia", () => {
+    expect(tabsOfAgent({ agents: [] }, "claude")).toEqual([]);
+    expect(tabsOfAgent(null, "claude")).toEqual([]);
+  });
+
+  it("soma ignora não medidas; nenhuma medida = null", () => {
+    expect(tabsSum([tab({ costUsd: 1 }), tab({ costUsd: 2 }), unmeasured()])).toEqual({ tokens: 40, costUsd: 3 });
+    expect(tabsSum([unmeasured()])).toEqual({ tokens: null, costUsd: null });
+    expect(tabsSum([])).toEqual({ tokens: null, costUsd: null });
   });
 });

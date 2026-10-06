@@ -2002,6 +2002,7 @@
   "canvas.mode.tabs": "Abas",
   "canvas.mode.canvas": "Canvas",
   "canvas.mode.grid": "Grade",
+  "canvas.grid.focus": "Focar terminal: {{name}}",
   "canvas.mode.gridHint": "Mostrar todos os panes desta missão lado a lado (só esta missão)",
   "canvas.zoomIn": "Aproximar",
   "canvas.zoomOut": "Afastar",
@@ -2236,5 +2237,14 @@
   "canvas.design.status.draft": "Rascunho",
   "canvas.design.status.approved": "Aprovada",
   "canvas.design.status.rejected": "Rejeitada",
-  "canvas.design.noOwner": "Este design não tem agente dono aberto para receber a mensagem."
+  "canvas.design.noOwner": "Este design não tem agente dono aberto para receber a mensagem.",
+  "missions.tokens.perTab": "Por aba",
+  "missions.tokens.perTabNote": "A soma das abas é o total do agente.",
+  "missions.tokens.tabSource.session": "sessão",
+  "missions.tokens.tabSource.isolated_cwd": "cwd isolado",
+  "missions.tokens.tabSource.ledger": "ledger",
+  "missions.tokens.tabKind.member": "integrante",
+  "missions.tokens.tabKind.recruit": "recruta",
+  "missions.tokens.tabKind.custom": "agente próprio",
+  "missions.tokens.tabKind.loose": "aba solta"
 }

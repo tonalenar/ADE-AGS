@@ -8,6 +8,7 @@ import { Button, AddIcon, CloseIcon } from "neogestify-ui-components";
 
 import { GlobeIcon, SplitDownIcon, SplitRightIcon } from "@/app/icons";
 import { TerminalPanel } from "@/features/terminal/TerminalPanel";
+import { focusTab } from "@/features/terminal/terminalRegistry";
 import { GroupTabStrip } from "@/features/tabs/GroupTabStrip";
 import {
   closeGroupAt, focusGroup, resizeSplit, splitGroup, useLayoutStore, useWorkspaceLayout, type Rect,
@@ -46,6 +47,8 @@ export function EditorArea() {
   const containerRef = useRef<HTMLDivElement>(null);
   const groups = layout ? allGroups(layout.root) : [];
   const groupIds = groups.map((g) => g.id).join("|");
+  // Los huecos de la grade aparecen y desaparecen sin que cambie el árbol: hay que reobservarlos.
+  const gridIds = grid ? grid.join("|") : "";
 
   const measure = useCallback(() => {
     const container = containerRef.current;
@@ -77,7 +80,7 @@ export function EditorArea() {
     observer.observe(container);
     container.querySelectorAll("[data-slot]").forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, [groupIds, measure]);
+  }, [groupIds, gridIds, measure]);
 
   return (
     <div ref={containerRef} data-editor-area className="absolute inset-0">
@@ -111,20 +114,32 @@ function MissionGrid({ ids }: { ids: string[] }) {
   const tabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const activateTab = useTabsStore((s) => s.activateTab);
+  const { t } = useTranslation();
   const cols = gridColumns(ids.length);
+  const focusPane = (id: string) => {
+    activateTab(id);
+    // Tras activar, la terminal ya está ubicada en su hueco: foco en el siguiente cuadro.
+    requestAnimationFrame(() => focusTab(id));
+  };
   return (
-    <div className="absolute inset-0 pointer-events-none grid gap-px bg-gray-200 dark:bg-gray-800"
+    <div className="absolute inset-0 pointer-events-none grid"
       style={{ zIndex: 10, gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))`, gridAutoRows: "minmax(0, 1fr)" }}>
-      {ids.map((id) => (
-        <div key={id} className="flex flex-col min-w-0 min-h-0">
-          <div onClick={() => activateTab(id)}
-            className={`pointer-events-auto cursor-pointer shrink-0 h-6 px-2 flex items-center truncate text-[11px] font-medium
-              bg-gray-100 dark:bg-gray-900 ${id === activeTabId ? "text-gray-900 dark:text-white border-b-2 border-accent-500" : "text-gray-500 dark:text-gray-400"}`}>
-            {tabs.find((tab) => tab.id === id)?.title ?? ""}
+      {ids.map((id) => {
+        const active = id === activeTabId;
+        const title = tabs.find((tab) => tab.id === id)?.title ?? "";
+        return (
+          <div key={id} data-grid-pane={id} data-active={active || undefined}
+            className={`flex flex-col min-w-0 min-h-0 border ${active ? "border-accent-500" : "border-gray-200 dark:border-gray-800"}`}>
+            <button type="button" onClick={() => focusPane(id)}
+              title={t("canvas.grid.focus", { name: title })} aria-label={t("canvas.grid.focus", { name: title })}
+              className={`pointer-events-auto cursor-pointer shrink-0 h-6 px-2 flex items-center truncate text-left text-[11px] font-medium
+                bg-gray-100 dark:bg-gray-900 ${active ? "text-gray-900 dark:text-white" : "text-gray-500 dark:text-gray-400"}`}>
+              {title}
+            </button>
+            <div data-slot={GRID_SLOT + id} className="relative flex-1 min-h-0" />
           </div>
-          <div data-slot={GRID_SLOT + id} className="relative flex-1 min-h-0" />
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

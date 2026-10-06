@@ -2002,6 +2002,7 @@
   "canvas.mode.tabs": "Tabs",
   "canvas.mode.canvas": "Canvas",
   "canvas.mode.grid": "Cuadrícula",
+  "canvas.grid.focus": "Enfocar terminal: {{name}}",
   "canvas.mode.gridHint": "Mostrar todos los paneles de esta misión lado a lado (solo esta misión)",
   "canvas.zoomIn": "Acercar",
   "canvas.zoomOut": "Alejar",
@@ -2236,5 +2237,14 @@
   "canvas.design.status.draft": "Borrador",
   "canvas.design.status.approved": "Aprobada",
   "canvas.design.status.rejected": "Rechazada",
-  "canvas.design.noOwner": "Este diseño no tiene un agente dueño abierto para recibir el mensaje."
+  "canvas.design.noOwner": "Este diseño no tiene un agente dueño abierto para recibir el mensaje.",
+  "missions.tokens.perTab": "Por pestaña",
+  "missions.tokens.perTabNote": "La suma de las pestañas es el total del agente.",
+  "missions.tokens.tabSource.session": "sesión",
+  "missions.tokens.tabSource.isolated_cwd": "cwd aislado",
+  "missions.tokens.tabSource.ledger": "ledger",
+  "missions.tokens.tabKind.member": "integrante",
+  "missions.tokens.tabKind.recruit": "recluta",
+  "missions.tokens.tabKind.custom": "agente propio",
+  "missions.tokens.tabKind.loose": "pestaña suelta"
 }

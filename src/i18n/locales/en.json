@@ -2002,6 +2002,7 @@
   "canvas.mode.tabs": "Tabs",
   "canvas.mode.canvas": "Canvas",
   "canvas.mode.grid": "Grid",
+  "canvas.grid.focus": "Focus terminal: {{name}}",
   "canvas.mode.gridHint": "Show every pane of this mission side by side (this mission only)",
   "canvas.zoomIn": "Zoom in",
   "canvas.zoomOut": "Zoom out",
@@ -2236,5 +2237,14 @@
   "canvas.design.status.draft": "Draft",
   "canvas.design.status.approved": "Approved",
   "canvas.design.status.rejected": "Rejected",
-  "canvas.design.noOwner": "This design has no owner agent open to receive the message."
+  "canvas.design.noOwner": "This design has no owner agent open to receive the message.",
+  "missions.tokens.perTab": "Per tab",
+  "missions.tokens.perTabNote": "Tab totals add up to the agent total.",
+  "missions.tokens.tabSource.session": "session",
+  "missions.tokens.tabSource.isolated_cwd": "isolated cwd",
+  "missions.tokens.tabSource.ledger": "ledger",
+  "missions.tokens.tabKind.member": "member",
+  "missions.tokens.tabKind.recruit": "recruit",
+  "missions.tokens.tabKind.custom": "custom agent",
+  "missions.tokens.tabKind.loose": "loose tab"
 }
