@@ -2002,6 +2002,7 @@
   "canvas.mode.tabs": "Tabs",
   "canvas.mode.canvas": "Canvas",
   "canvas.mode.grid": "Cuadrícula",
+  "canvas.grid.focus": "Enfocar terminal: {{name}}",
   "canvas.mode.gridHint": "Mostrar todos los paneles de esta misión lado a lado (solo esta misión)",
   "canvas.zoomIn": "Acercar",
   "canvas.zoomOut": "Alejar",

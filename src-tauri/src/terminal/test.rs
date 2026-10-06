@@ -3,6 +3,43 @@
 
 use super::pty_manager::{build_launch, launch_script, PARENT_SESSION_ENV};
 
+#[test]
+fn resize_measurements_preserve_valid_sizes_and_bound_extremes() {
+    use super::pty_manager::{measured_pty_size, MAX_PTY_DIMENSION};
+    for (cols, rows) in [(1, 1), (80, 24), (240, 80), (MAX_PTY_DIMENSION, MAX_PTY_DIMENSION)] {
+        let size = measured_pty_size(cols, rows).unwrap();
+        assert_eq!((size.cols, size.rows), (cols, rows));
+        assert_eq!((size.pixel_width, size.pixel_height), (0, 0));
+    }
+    for (cols, rows, expected) in [
+        (u16::MAX, 24, (MAX_PTY_DIMENSION, 24)),
+        (80, u16::MAX, (80, MAX_PTY_DIMENSION)),
+        (u16::MAX, u16::MAX, (MAX_PTY_DIMENSION, MAX_PTY_DIMENSION)),
+    ] {
+        let size = measured_pty_size(cols, rows).unwrap();
+        assert_eq!((size.cols, size.rows), expected);
+    }
+}
+
+#[test]
+fn zero_slot_measurement_keeps_live_pty_size_until_next_fit() {
+    use super::pty_manager::{measured_pty_size, resize_measured_pty};
+    use portable_pty::{native_pty_system, PtySize};
+
+    let pair = native_pty_system().openpty(PtySize {
+        cols: 80, rows: 24, pixel_width: 0, pixel_height: 0,
+    }).unwrap();
+    for (cols, rows) in [(0, 0), (0, 24), (80, 0), (0, u16::MAX)] {
+        assert!(measured_pty_size(cols, rows).is_none());
+        resize_measured_pty(pair.master.as_ref(), cols, rows).unwrap();
+        let size = pair.master.get_size().unwrap();
+        assert_eq!((size.cols, size.rows), (80, 24));
+    }
+    resize_measured_pty(pair.master.as_ref(), 120, 40).unwrap();
+    let size = pair.master.get_size().unwrap();
+    assert_eq!((size.cols, size.rows), (120, 40));
+}
+
 // ── Lanzamiento del agente ──────────────────────────────────────
 
 

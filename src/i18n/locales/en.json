@@ -2002,6 +2002,7 @@
   "canvas.mode.tabs": "Tabs",
   "canvas.mode.canvas": "Canvas",
   "canvas.mode.grid": "Grid",
+  "canvas.grid.focus": "Focus terminal: {{name}}",
   "canvas.mode.gridHint": "Show every pane of this mission side by side (this mission only)",
   "canvas.zoomIn": "Zoom in",
   "canvas.zoomOut": "Zoom out",

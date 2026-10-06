@@ -590,15 +590,37 @@ pub async fn pty_write(id: u32, data: String) -> Result<(), String> {
     write_to_pty(id, &data)
 }
 
+// A hidden/unlaid-out slot can briefly measure zero during a mode change. Keep the
+// last usable PTY size instead of forwarding that transient measurement to the OS.
+// Bound pathological measurements too: ConPTY uses signed dimensions and TUIs may
+// allocate a screen buffer proportional to rows * cols.
+pub(super) const MAX_PTY_DIMENSION: u16 = 1000;
+
+pub(super) fn measured_pty_size(cols: u16, rows: u16) -> Option<PtySize> {
+    if cols == 0 || rows == 0 {
+        return None;
+    }
+    Some(PtySize {
+        cols: cols.min(MAX_PTY_DIMENSION),
+        rows: rows.min(MAX_PTY_DIMENSION),
+        pixel_width: 0,
+        pixel_height: 0,
+    })
+}
+
+pub(super) fn resize_measured_pty(master: &dyn MasterPty, cols: u16, rows: u16) -> Result<(), String> {
+    if let Some(size) = measured_pty_size(cols, rows) {
+        master.resize(size).map_err(|e| format!("Resize error: {e}"))?;
+    }
+    Ok(())
+}
+
 /// Redimensiona el PTY cuando cambia el tamaño de xterm.js.
 #[tauri::command]
 pub async fn pty_resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
     let registry = registry();
     if let Some(session) = registry.get(&id) {
-        session
-            .master
-            .resize(PtySize { rows, cols, pixel_width: 0, pixel_height: 0 })
-            .map_err(|e| format!("Resize error: {e}"))
+        resize_measured_pty(session.master.as_ref(), cols, rows)
     } else {
         Err(format!("PTY session {id} not found"))
     }
