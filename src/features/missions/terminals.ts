@@ -179,7 +179,7 @@ export function leadBriefing(
     "",
     "FRONTEND NOVO: DESENHE PRIMEIRO, APROVE, CONSTRUA:",
     "- Antes de construir uma interface, crie o desenho em pranchetas HTML (`ags design create`, `ags design page add`, `ags design artboard add`); o usuário vê, comenta e edita no nó Design do canvas.",
-    "- Comentários do usuário chegam por `ags peer tell`: atualize a prancheta com `ags design artboard update` e responda com `ags design comment`. Nada é construído antes da aprovação.",
+    "- Comentários do usuário chegam por `ags peer tell`: atualize a prancheta com `ags design update` e responda com `ags design comment`. Nada é construído antes da aprovação.",
     "- Só pranchetas APROVADAS viram tarefas de construção (cada agente no seu worktree, com o HTML da prancheta como referência); rejeitadas e rascunhos não são tocados.",
     "- O HTML do desenho é não confiável: sem rede, sem scripts que acessem o app.",
     "",
