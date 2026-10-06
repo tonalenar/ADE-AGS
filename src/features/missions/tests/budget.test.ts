@@ -11,9 +11,9 @@ describe("levelOf", () => {
     expect(levelOf(10, 10)).toBe("exceeded");
     expect(levelOf(25, 10)).toBe("exceeded");
   });
-  it("sem teto, sempre ok", () => {
+  it("sem teto (null) é ok; teto <= 0 é dado anômalo e conta como estourado", () => {
     expect(levelOf(999, null)).toBe("ok");
-    expect(levelOf(5, 0)).toBe("ok");
+    expect(levelOf(5, 0)).toBe("exceeded");
   });
 });
 

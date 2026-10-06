@@ -18,7 +18,7 @@ export type BudgetGatedAction = "recruit" | "startTask";
 export interface BudgetStatus {
   missionId: string;
   level: BudgetLevel;
-  /** `null` si la misión no tiene techo (`budgetUsd` vacío): el nivel es siempre `ok`. */
+  /** `null` = sin techo (nivel `ok`, barra oculta); `<= 0` es dato anómalo y cuenta como `exceeded`. */
   budgetUsd: number | null;
   /** Costo estimado: suma por pestaña, solo tokens medidos. */
   costUsd: number;
@@ -63,7 +63,8 @@ export const nearLimit = (w: PlanWindow): boolean => w.usedPct !== null && w.use
 
 /** Nivel a partir de los números, con los mismos umbrales del Backend (80 % / 100 %). Pura. */
 export function levelOf(costUsd: number, budgetUsd: number | null): BudgetLevel {
-  if (budgetUsd === null || budgetUsd <= 0) return "ok";
+  if (budgetUsd === null) return "ok";
+  if (budgetUsd <= 0) return "exceeded";
   const pct = (costUsd / budgetUsd) * 100;
   return pct >= 100 ? "exceeded" : pct >= 80 ? "warning" : "ok";
 }
