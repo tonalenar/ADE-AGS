@@ -16,7 +16,60 @@ use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Manager};
+#[cfg(not(windows))]
 use tauri_plugin_notification::NotificationExt;
+
+#[cfg(any(windows, test))]
+mod identity;
+
+/// Register before Tauri creates windows; failures are visible and never abort startup.
+pub fn initialize_identity() {
+    #[cfg(windows)]
+    if let Err(error) = identity::initialize() {
+        eprintln!("[ade-ags] notification identity: {error}");
+    }
+}
+
+#[derive(Clone)]
+pub struct Target {
+    pub window: String,
+    pub tab_id: String,
+    pub thread: String,
+}
+
+fn show(app: &AppHandle, title: &str, body: &str, target: Option<Target>) -> bool {
+    #[cfg(windows)]
+    {
+        use tauri::Emitter;
+        let app = app.clone();
+        let toast = tauri_winrt_notification::Toast::new(identity::APP_ID)
+            .title(title).text1(body)
+            .on_activated(move |_| {
+                let label = target.as_ref().map(|t| t.window.as_str()).unwrap_or("main");
+                if let Some(window) = app.get_webview_window(label) {
+                    // Deliver the exact clicked reply before focusing the owning window.
+                    if let Some(ref target) = target {
+                        let _ = window.emit("cc-chat-notification-clicked", serde_json::json!({
+                            "tabId": target.tab_id, "thread": target.thread,
+                        }));
+                    }
+                    let _ = window.show();
+                    let _ = window.unminimize();
+                    let _ = window.set_focus();
+                }
+                Ok(())
+            });
+        match toast.show() {
+            Ok(()) => true,
+            Err(error) => { eprintln!("[ade-ags] notification: {error}"); false }
+        }
+    }
+    #[cfg(not(windows))]
+    {
+        let _ = target;
+        app.notification().builder().title(title).body(body).show().is_ok()
+    }
+}
 
 use crate::bus::{self, Filter};
 use crate::database::DbConnection;
@@ -139,11 +192,15 @@ fn mission_status(db: &DbConnection, id: &str) -> Option<(String, String)> {
 /// aviso del sistema que usan las misiones, con las mismas reglas — solo si ninguna ventana
 /// tiene el foco y no se apagó en la configuración. Devuelve si se mostró.
 pub fn show_custom(app: &AppHandle, title: &str, body: &str) -> bool {
+    show_targeted(app, title, body, None)
+}
+
+pub fn show_targeted(app: &AppHandle, title: &str, body: &str, target: Option<Target>) -> bool {
     let Some(db) = app.try_state::<DbConnection>() else { return false };
     if !enabled(&db) || app_focused(app) {
         return false;
     }
-    app.notification().builder().title(title).body(body).show().is_ok()
+    show(app, title, body, target)
 }
 
 /// Arranca el notificador en su propio hilo. Empieza desde lo que se publique de acá en
@@ -196,7 +253,7 @@ pub fn start(app: AppHandle) {
                 }
                 let lang = Lang::parse(crate::database::get_setting(&db, "ui.language").ok().flatten().as_deref());
                 let (title, body) = text(&notice, lang);
-                let _ = app.notification().builder().title(title).body(body).show();
+                show(&app, &title, &body, None);
             }
         }
     });

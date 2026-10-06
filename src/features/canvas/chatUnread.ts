@@ -6,7 +6,7 @@ import { create } from "zustand";
 
 import { useTabsStore } from "@/features/tabs/store";
 
-import { setWorkMode, useActiveBoardKey } from "./store";
+import { boardKeyOfTab, setWorkMode, useActiveBoardKey } from "./store";
 
 /** Lo mínimo de un mensaje para contar: el chat entero vive en `ChatPanel`. */
 interface Msg {
@@ -204,6 +204,15 @@ export function useChatUnreadWatcher() {
     // Clic en el aviso del sistema: el plugin no avisa del clic, pero la app recupera el
     // foco. Si eso pasa enseguida después de un aviso, se abre el chat en esa respuesta.
     let pending: { tabId: string; thread: string; at: number } | null = null;
+    const offClicked = listen<{ tabId: string; thread: string }>("cc-chat-notification-clicked", (e) => {
+      pending = null;
+      const tabs = useTabsStore.getState();
+      const tab = tabs.tabs.find((tab) => tab.id === e.payload.tabId);
+      if (!tab) return;
+      setWorkMode(boardKeyOfTab(tab), "canvas");
+      tabs.activateTab(tab.id);
+      useUnreadStore.getState().setJump(e.payload);
+    });
     const offNotified = listen<{ tabId: string; thread: string }>("cc-chat-notified", (e) => {
       pending = { ...e.payload, at: Date.now() };
     });
@@ -217,6 +226,7 @@ export function useChatUnreadWatcher() {
     return () => {
       off.then((fn) => fn());
       offNotified.then((fn) => fn());
+      offClicked.then((fn) => fn());
       window.removeEventListener("focus", onFocus);
       offWindow.then((fn) => fn());
     };

@@ -1,5 +1,12 @@
 # Roadmap ADE AGS
 
+## Etapa 20 — ponto 1: notificações com identidade ADE AGS
+
+AUMID explícito antes das janelas, atalho por usuário com o bot e reparo idempotente,
+toast Windows com identidade estável em dev/instalado e clique no destino exato.
+O identifier Tauri foi preservado. Contrato, testes e roteiro manual em
+[NOTIFICATIONS_WINDOWS.md](./NOTIFICATIONS_WINDOWS.md).
+
 ## Etapa 15 — início rápido (ponto 1)
 
 Implementado em `feat/etapa15-inicio-rapido`: preparação persistida e idempotente de um worktree/branch por integrante (inclusive Orquestrador e recruits de missão), a partir de origin/master; junction de dependências e target Cargo isolado; contexto de precheck/memória preenchido para toda a equipe; briefing exige delegação em ~2 min antes de explorar e membros aguardam a tarefa. QG e CLI mostram `firstDelegationMs` e sua fonte real/histórica, preservando ausência em cinza. Schema v32 aditivo e testes de migração, isolamento, retry e lançamento. Comparação posterior em missão real depende de executar o app atualizado; não foi inventado ganho. Contrato e evidências em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
