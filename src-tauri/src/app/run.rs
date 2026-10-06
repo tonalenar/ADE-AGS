@@ -30,6 +30,18 @@ pub fn run() {
         .plugin(crate::updates::plugin())
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
+            crate::design::design_create,
+            crate::design::design_list,
+            crate::design::design_get,
+            crate::design::design_page_add,
+            crate::design::design_artboard_add,
+            crate::design::design_artboard_update,
+            crate::design::design_artboard_revert,
+            crate::design::design_artboard_approve,
+            crate::design::design_artboard_reject,
+            crate::design::design_approve_all,
+            crate::design::design_comment_add,
+            crate::design::design_comment_resolve,
             // Terminal embebida (PTY)
             crate::terminal::pty_create,
             crate::terminal::pty_attach,

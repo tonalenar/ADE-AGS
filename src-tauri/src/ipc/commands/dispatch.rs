@@ -41,6 +41,21 @@ use crate::ipc::protocol::Response;
 
 pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
     let result = match command {
+        c if c.starts_with("design.") => {
+            let op = match c {
+                "design.page.add" => "page_add", "design.artboard.add" => "artboard_add",
+                "design.update" | "design.artboard.update" => "artboard_update",
+                "design.revert" | "design.artboard.revert" => "artboard_revert",
+                "design.approve" | "design.artboard.approve" => "artboard_approve",
+                "design.reject" | "design.artboard.reject" => "artboard_reject",
+                "design.comment" | "design.comment.add" => "comment_add",
+                "design.comment.resolve" => "comment_resolve", "design.approve.all" => "approve_all",
+                other => &other[7..],
+            };
+            let mut args = args.clone();
+            if args.get("html").is_none() { if let Some(content) = args.get("content").cloned() { args["html"] = content; } }
+            crate::design::dispatch(app, op, &args)
+        },
         "tab.list" => tab_list(app),
         "tab.output" => tab_output(app, args),
         "tab.send" => tab_send(app, args),
