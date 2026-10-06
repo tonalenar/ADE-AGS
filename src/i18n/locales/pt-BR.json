@@ -2275,5 +2275,6 @@
   "canvas.design.choose": "Escolher",
   "canvas.design.choosing": "Clique na proposta…",
   "canvas.design.chosen": "Escolhida: {{what}}",
-  "canvas.design.chosenComment": "ESCOLHIDA: {{what}}"
+  "canvas.design.chosenComment": "ESCOLHIDA: {{what}}",
+  "canvas.design.noOwnerTag": "sem agente"
 }

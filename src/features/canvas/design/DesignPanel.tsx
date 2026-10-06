@@ -8,7 +8,10 @@ import {
   designApi, onDesignChanged,
   type Artboard, type ArtboardStatus, type ArtboardVersion, type Design, type DesignDetail,
 } from "./designApi";
+import { useMissionIndex } from "@/features/missions/groups";
+import { useTabsStore } from "@/features/tabs/store";
 import { spreadOverlapping } from "./layout";
+import { defaultDesignId, resolveOwner } from "./owner";
 import { DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
 import { INITIAL_VIEWPORT, fitViewport, viewportReducer, zoomPercent } from "./viewport";
 
@@ -35,6 +38,13 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
   const [designs, setDesigns] = useState<Design[]>([]);
   const [designId, setDesignId] = useState<string | null>(null);
   const [detail, setDetail] = useState<DesignDetail | null>(null);
+  // As abas abertas e a missão de cada uma: sem dono gravado (ou com a aba fechada) as mensagens vão à orquestradora da missão.
+  const allTabs = useTabsStore((s) => s.tabs);
+  const missionIndex = useMissionIndex();
+  const ownerTabs = useMemo(() => allTabs.map((tab) => ({ id: tab.id, title: tab.title })), [allTabs]);
+  const ctx = useRef({ ownerTabs, missionIndex });
+  ctx.current = { ownerTabs, missionIndex };
+  const ownerOf = (design: { ownerTabId: string | null; missionId: string | null }) => resolveOwner(design, ownerTabs, missionIndex);
   const [pageId, setPageId] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [vp, dispatch] = useReducer(viewportReducer, INITIAL_VIEWPORT);
@@ -44,7 +54,7 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
   const loadDesigns = useCallback(() => {
     designApi.list().then((list) => {
       setDesigns(list);
-      setDesignId((cur) => (cur && list.some((d) => d.id === cur) ? cur : list[0]?.id ?? null));
+      setDesignId((cur) => (cur && list.some((d) => d.id === cur) ? cur : defaultDesignId(list, ctx.current.ownerTabs, ctx.current.missionIndex)));
     }).catch(() => setDesigns([]));
   }, []);
   const loadDetail = useCallback(() => {
@@ -92,7 +102,7 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
       await designApi.addComment(board.id, t("canvas.design.chosenComment", { what }), pick.selector);
       await designApi.approve(board.id);
       await loadDetail();
-      const owner = detail?.design.ownerTabId;
+      const owner = detail ? ownerOf(detail.design) : null;
       if (owner) {
         await designApi.tellOwner(owner, `Design "${detail?.design.title}": o usuário ESCOLHEU na prancheta "${board.title}" (id ${board.id}) a proposta "${what}" [${pick.selector}]. A prancheta foi APROVADA com essa escolha: construa SOMENTE essa proposta (as outras estão descartadas).`);
         AlertaToast(t("canvas.design.title"), t("canvas.design.chosen", { what }), "success", 4000);
@@ -105,7 +115,7 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
   };
   const sendQueue = async () => {
     if (!detail || queue.length === 0) return;
-    const owner = detail.design.ownerTabId;
+    const owner = ownerOf(detail.design);
     if (!owner) return fail(t("canvas.design.noOwner"));
     try {
       await designApi.tellOwner(owner, formatQueueForAgent(detail.design.title, detail.artboards, queue));
@@ -116,7 +126,7 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
   };
   const build = async () => {
     if (!detail) return;
-    const owner = detail.design.ownerTabId;
+    const owner = ownerOf(detail.design);
     if (!owner) return fail(t("canvas.design.noOwner"));
     try {
       // Só as aprovadas viram tarefa; cada uma segue ao dono, que a constrói no seu worktree.
@@ -137,7 +147,7 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
           <select value={designId ?? ""} onChange={(e) => { setDesignId(e.target.value); setPageId(null); setEditing(null); }}
             aria-label={t("canvas.design.pick")}
             className="h-7 max-w-[14rem] rounded-md border border-gray-200 dark:border-white/10 bg-transparent px-1.5 text-[12px]">
-            {designs.map((d) => <option key={d.id} value={d.id}>{d.title}</option>)}
+            {designs.map((d) => <option key={d.id} value={d.id}>{ownerOf(d) ? d.title : `${d.title} (${t("canvas.design.noOwnerTag")})`}</option>)}
           </select>
         )}
         {pages.length > 0 && (
