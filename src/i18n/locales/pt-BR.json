@@ -2227,6 +2227,8 @@
   "canvas.design.deleteHint": "Exclui o design inteiro (pranchetas, versões e comentários)",
   "cli.outdated": "CLI desatualizado - recompile",
   "cli.outdatedHint": "O ags ao lado do app é de outra versão ({{cli}} ≠ {{app}}). Recompile o CLI para os agentes usarem os comandos novos.",
+  "canvas.design.archive": "Arquivar",
+  "canvas.design.archiveHint": "Tira o design do canvas sem apagá-lo",
   "canvas.design.empty": "Nenhum design ainda. Peça a um agente para desenhar (ags design create) e as pranchetas aparecem aqui.",
   "canvas.design.emptyPage": "Esta página não tem pranchetas.",
   "canvas.design.edit": "EDITAR",

@@ -2227,6 +2227,8 @@
   "canvas.design.deleteHint": "Elimina el diseño entero (pizarras, versiones y comentarios)",
   "cli.outdated": "CLI desactualizado - recompila",
   "cli.outdatedHint": "El ags junto a la app es de otra versión ({{cli}} ≠ {{app}}). Recompila el CLI para que los agentes usen los comandos nuevos.",
+  "canvas.design.archive": "Archivar",
+  "canvas.design.archiveHint": "Quita el diseño del canvas sin eliminarlo",
   "canvas.design.empty": "Aún no hay diseños. Pide a un agente que dibuje uno (ags design create) y las pizarras aparecen aquí.",
   "canvas.design.emptyPage": "Esta página no tiene pizarras.",
   "canvas.design.edit": "EDITAR",

@@ -73,6 +73,10 @@ export function DesignPanel({ details, reload, initial, onClose }: {
   };
 
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const archive = (id: string) => {
+    setEditing(null);
+    designApi.archive(id).then(() => { setDesignId(null); setPageId(null); loadDetail(); }).catch(fail);
+  };
   const remove = (id: string) => {
     setConfirmDelete(false);
     setEditing(null);
@@ -140,6 +144,9 @@ export function DesignPanel({ details, reload, initial, onClose }: {
             <Button variant="custom" className={`${btn} bg-accent-500/15 text-accent-600 dark:text-accent-300`} disabled={approvedCount === 0}
               onClick={build} title={t("canvas.design.buildHint")}>{t("canvas.design.build")}</Button>
           </>
+        )}
+        {detail && (
+          <Button variant="custom" className={btn} onClick={() => archive(detail.design.id)} title={t("canvas.design.archiveHint")}>{t("canvas.design.archive")}</Button>
         )}
         {detail && (
           <Button variant="custom" className={`${btn} ${confirmDelete ? "bg-red-500/15 text-red-600 dark:text-red-300" : ""}`}

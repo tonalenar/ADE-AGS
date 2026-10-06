@@ -2227,6 +2227,8 @@
   "canvas.design.deleteHint": "Deletes the whole design (artboards, versions and comments)",
   "cli.outdated": "CLI out of date - rebuild",
   "cli.outdatedHint": "The ags next to the app is a different build ({{cli}} ≠ {{app}}). Rebuild the CLI so agents get the new commands.",
+  "canvas.design.archive": "Archive",
+  "canvas.design.archiveHint": "Removes the design from the canvas without deleting it",
   "canvas.design.empty": "No designs yet. Ask an agent to draw one (ags design create) and the artboards show up here.",
   "canvas.design.emptyPage": "This page has no artboards.",
   "canvas.design.edit": "EDIT",
