@@ -50,6 +50,7 @@ jobs:
       - name: Tests del frontend
         run: |
           bunx tsc --noEmit
+          node scripts/babel-parse-check.mjs src
           bun run test
 
       - name: Tests de Rust
