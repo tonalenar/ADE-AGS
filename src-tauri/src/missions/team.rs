@@ -27,6 +27,20 @@ pub struct PreparedTeam {
     pub memory: String,
 }
 
+/// Esperas entre reintentos de un git que falló por un acceso momentáneo.
+const RETRY_BACKOFF_MS: [u64; 4] = [150, 400, 900, 1800];
+
+/// ¿El error de git es momentáneo? En Windows, otro proceso git (los agentes de otra misión, un
+/// antivirus, otro worktree creándose a la vez) puede tener un archivo tomado un instante y git
+/// lo informa como "Permission denied" / "unable to access .git/config" / "unknown error occurred
+/// while reading the configuration files", además de los "lock" de siempre. Pura.
+pub(crate) fn is_transient_git_error(error: &str) -> bool {
+    let e = error.to_lowercase();
+    ["lock", "permission denied", "unable to access", "reading the configuration", "another git process", "resource temporarily unavailable"]
+        .iter()
+        .any(|needle| e.contains(needle))
+}
+
 fn validate_members(members: &[String]) -> Result<(), String> {
     let mut seen = std::collections::HashSet::new();
     if members.is_empty() || members.len() > 32 {
@@ -106,10 +120,12 @@ pub async fn mission_prepare_team(app: AppHandle, mission_id: String, members: V
                 let (db, mission, base) = (&db, &mission, &base);
                 scope.spawn(move || {
                     let mut last = Err(String::new());
-                    for attempt in 0..3 {
+                    for attempt in 0..RETRY_BACKOFF_MS.len() + 1 {
                         last = prepare_one(db, mission, name, base);
                         match &last {
-                            Err(e) if attempt < 2 && e.to_lowercase().contains("lock") => std::thread::sleep(std::time::Duration::from_millis(150)),
+                            Err(e) if is_transient_git_error(e) && attempt < RETRY_BACKOFF_MS.len() => {
+                                std::thread::sleep(std::time::Duration::from_millis(RETRY_BACKOFF_MS[attempt]));
+                            }
                             _ => break,
                         }
                     }
