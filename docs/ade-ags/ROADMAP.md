@@ -269,6 +269,15 @@ Cinco pontos de melhoria estrutural focados na velocidade de inicialização das
 - [x] Dedupe de designs por missão/título, consolidação sem perder propostas existentes (v37), aliases dos IDs antigos, arquivar e excluir via Tauri/CLI.
 - [x] Dono pela aba criadora (`from`/`ADE_TAB_ID`); evento distingue design novo de reuso.
 - [x] Identidade do build em `ags --version` e comparação do CLI adjacente com a app, com limite de tempo e testes.
+## Etapa 19 — Design no canvas principal e acabamento
+
+- [x] **Design no canvas principal (Frontend)**: pranchetas dispostas diretamente como nós do canvas com molduras agrupadas por página/design (`layoutGroups`), origem livre à direita (`freeOrigin`), foco automático e enquadramento (`fitViewport`).
+- [x] **Aviso de novo design e foco (Frontend)**: detecção de designs recentes não vistos (`freshDesigns`), exibindo toast interativo com ação rápida de "Abrir" para focar imediatamente o nó criado pelo agente.
+- [x] **Dedupe, Delete e Archive (Backend/Frontend)**: migração v37 consolidando designs duplicados e adicionando índices únicos (`mission_id, title` e `workspace, title`) com preservação de páginas, comentários, versões e mapeamento de aliases legados; comandos e UI para exclusão total (`design_delete`) e arquivamento (`design_archive`).
+- [x] **Posicionamento e arraste (Backend/Frontend)**: pranchetas em (0,0) espalhadas automaticamente (`spreadOverlapping`); arraste de prancheta separa movimento (x, y) de edição de conteúdo, preservando aprovação e versão sem inflar histórico de snapshots (`positionsToSave`).
+- [x] **Resolução de dono e resiliência (Backend/Frontend)**: criador identificado por `from`/`ADE_TAB_ID`, fallback para orquestrador da missão quando a aba for fechada, e badge informativo com tratamento gracioso de ações quando sem dono ativo.
+- [x] **Detecção de CLI desatualizado (Backend/Frontend)**: checagem de build/hash entre app e binário adjacente (`cli_build_status`) e alerta proativo único por sessão (`useCliOutdatedNotice`).
+- [x] **Auditoria e Regressão (QA)**: auditoria com dados reais do SQLite (`~/.ags/data.db`: design "Polir o bot - aura e acabamento" duplicado e 5 pranchetas sobrepostas em x=0, y=0), relato de defeitos reprodutíveis aos pares via `ags peer tell`, revisão analítica dos recursos de edição/comentários/desfazer/aprovação, testes de integração/regressão (`designCanvasIntegration.test.ts`) e documentação em [DESIGN_CANVAS.md](./DESIGN_CANVAS.md).
 
 ## Etapa 17 — custo, Fast headless, entregas e memória
 - Custo por aba (tokens/custo por terminal da missão): ver MISSION_TOKENS.md.
