@@ -304,7 +304,9 @@ pub(super) fn mission_efficiency(app: &AppHandle, args: &Value) -> Result<Value,
     let id = arg_str(args, "mission")?;
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    Ok(json!(crate::missions::efficiency::get(&conn, &id)?))
+    let mut efficiency = json!(crate::missions::efficiency::get(&conn, &id)?);
+    efficiency["tokens"] = json!(crate::usage::mission_tokens_for_conn(&conn, &id)?);
+    Ok(efficiency)
 }
 
 pub(super) fn mission_accept(app: &AppHandle, args: &Value) -> Result<Value, String> {

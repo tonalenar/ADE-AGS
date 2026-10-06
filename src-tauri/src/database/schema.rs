@@ -1058,6 +1058,24 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         PRIMARY KEY (mission_id, name), UNIQUE(root), UNIQUE(branch)
     );")?;
     if user_version(conn)? < 32 { set_user_version(conn, 32)?; }
+    // v33: Durable ownership survives closing a terminal; no FK to disposable tabs.
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS mission_usage_tabs (
+        mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+        tab_id TEXT NOT NULL, agent_id TEXT NOT NULL, label TEXT NOT NULL,
+        kind TEXT NOT NULL, cwd TEXT NOT NULL, session_id TEXT, account_id TEXT,
+        session_ids TEXT NOT NULL DEFAULT '[]',
+        opened_at INTEGER NOT NULL, closed_at INTEGER,
+        PRIMARY KEY(mission_id, tab_id)
+    );")?;
+    if user_version(conn)? < 33 { set_user_version(conn, 33)?; }
+    // v34: execution-local Fast policy copied from Squad. Old runs remain off;
+    // never reconstruct settings from a Squad that may have been edited later.
+    for table in ["runs", "run_squad_members"] {
+        if !has_column(conn, table, "fast_mode") {
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN fast_mode INTEGER NOT NULL DEFAULT 0"))?;
+        }
+    }
+    if user_version(conn)? < 34 { set_user_version(conn, 34)?; }
     // v35 — Histórico / auditoria de evidências de entrega e reavaliações (redeliver)
     conn.execute_batch("CREATE TABLE IF NOT EXISTS mission_delivery_audit (
         id              INTEGER PRIMARY KEY AUTOINCREMENT,

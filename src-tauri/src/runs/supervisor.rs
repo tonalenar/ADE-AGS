@@ -33,6 +33,36 @@ use super::types::{AgentEvent, Task, TaskOutcome, status};
 pub const TASK_EVENT: &str = "cc-task-event";
 /// Evento de "esta tarjeta cambió de estado"; la consola recarga esa fila.
 pub const TASK_CHANGED: &str = "cc-task-changed";
+
+/// Use the immutable execution snapshot, never the mutable Squad. Retries/handoffs
+/// keep the role policy; a change to an unsupported provider must not add Codex flags.
+pub(crate) fn fast_for_task(conn: &rusqlite::Connection, task: &Task) -> Result<bool, String> {
+    use rusqlite::OptionalExtension;
+    if task.agent_id != "codex" {
+        return Ok(false);
+    }
+    let value = if task.role.as_deref() == Some(super::types::role::LEAD) {
+        conn.query_row(
+            "SELECT fast_mode FROM runs WHERE id=?1",
+            [&task.run_id],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()
+    } else if let Some(role) = task.functional_role.as_deref() {
+        conn.query_row(
+            "SELECT fast_mode FROM run_squad_members WHERE run_id=?1 AND role_id=?2",
+            rusqlite::params![task.run_id, role],
+            |r| r.get::<_, i64>(0),
+        )
+        .optional()
+    } else {
+        return Ok(false);
+    };
+    value
+        .map(|v| v.is_some_and(|v| v != 0))
+        .map_err(|e| e.to_string())
+}
+
 /// Evento de "cambió la cola de permisos"; la consola vuelve a pedirla.
 pub const APPROVALS_CHANGED: &str = "cc-task-approvals";
 
@@ -228,6 +258,10 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         super::checkpoints::auto(&db, &task, super::checkpoints::kind::BEFORE);
     }
     let ctx = LaunchCtx {
+        fast_mode: {
+            let conn=db.lock().map_err(|e|e.to_string())?;
+            fast_for_task(&conn, &task)?
+        },
         cwd: &task.cwd,
         reasoning_effort: task.reasoning_effort.as_deref(),
         session_id: &session_id,

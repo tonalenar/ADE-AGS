@@ -359,7 +359,7 @@ fn execute_standalone_redeliver(args: &Value) -> ExitCode {
         }
     };
     let _ = conn.execute_batch("PRAGMA busy_timeout = 5000;");
-    if let Err(e) = ade_ags_lib::database::migrate(&conn) {
+    if let Err(e) = ade_ags_lib::migrate(&conn) {
         println!("{}", json!({ "error": format!("erro ao migrar banco de dados: {e}") }));
         return ExitCode::from(EXIT_COMMAND_FAILED);
     }

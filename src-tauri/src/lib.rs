@@ -8,7 +8,7 @@ mod canvas;
 mod chat;
 mod app;
 mod bus;
-pub mod database;
+mod database;
 mod explorer;
 mod floors;
 mod forge;
@@ -38,6 +38,7 @@ mod util;
 mod window;
 
 pub use app::run;
+pub use database::migrate;
 
 // Sin este manifiesto el harness de `cargo test` no arranca en Windows:
 // importa TaskDialogIndirect y el loader, sin Common Controls 6, cae en
