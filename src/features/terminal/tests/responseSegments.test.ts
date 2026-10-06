@@ -46,6 +46,19 @@ describe("segmentResponses", () => {
     expect(r[0].text).toBe("Claro.\nAqui.");
   });
 
+  it("Gemini: prompt dentro de caixa fechada com bordas (╭, ╰) e barra final", () => {
+    const r = segmentResponses([
+      "╭──────────────────────────╮",
+      "│ > explique detalhadamente │",
+      "╰──────────────────────────╯",
+      "✦ Claro.",
+      "  Aqui esta.",
+    ]);
+    expect(r).toHaveLength(1);
+    expect(r[0].prompt).toBe("explique detalhadamente");
+    expect(r[0].text).toBe("Claro.\nAqui esta.");
+  });
+
   it("la caja de entrada y sus rayas no son parte de la respuesta", () => {
     const r = segmentResponses(["> a", "● b", "────────────", "> c", "──────"]);
     expect(r).toHaveLength(1);
