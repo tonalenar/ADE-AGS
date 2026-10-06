@@ -19,12 +19,13 @@ export function ConflictsSection({ missionId, onDone }: { missionId: string; onD
     try { await run(); } catch (e) { setError(String(e)); }
   };
 
-  if (error) return <p className="text-[11px] text-red-500 dark:text-red-400">{t("missions.conflicts.loadError", { error })}</p>;
+  if (error) return <p className="text-[11px] text-red-500 dark:text-red-400">{t("missions.conflicts.loadError", { error: t(error, { defaultValue: error }) })}</p>;
   if (!conflicts) return null;
   return (
     <ConflictsPanel
       conflicts={conflicts}
       onResolve={(path, content) => guard(async () => setConflicts(await resolveMissionConflict(missionId, path, content)))}
+      onAbort={() => guard(async () => { await concludeMissionMerge(missionId, true); onDone(); })}
       onConclude={() => guard(async () => { await concludeMissionMerge(missionId); onDone(); })}
     />
   );

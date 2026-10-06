@@ -13,7 +13,14 @@ export function PlanLimitsView({ limits }: { limits: PlanLimits[] }) {
       <span className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-white/30">{t("missions.plan.title")}</span>
       {limits.map((l) => (
         <div key={`${l.provider}-${l.accountId ?? ""}`} className="flex flex-col gap-0.5">
-          <span className="text-[11px] font-medium text-gray-700 dark:text-gray-200">{t(`missions.plan.provider.${l.provider}`)}</span>
+          <span className="text-[11px] font-medium text-gray-700 dark:text-gray-200">
+            {t(`missions.plan.provider.${l.provider}`)}
+            {l.observedAt !== null && (
+              <span className="ml-2 font-normal text-[10px] text-gray-400 dark:text-white/35" title={t("missions.plan.observedHint")}>
+                {t("missions.plan.observed", { at: new Date(l.observedAt * 1000).toLocaleString() })}
+              </span>
+            )}
+          </span>
           {!l.measured || l.windows.length === 0 ? (
             <span className="text-[10.5px] text-gray-400 dark:text-white/35">{t("missions.plan.unmeasured")}</span>
           ) : (

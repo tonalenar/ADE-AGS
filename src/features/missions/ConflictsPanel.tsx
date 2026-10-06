@@ -80,10 +80,12 @@ function FileCard({ file, onResolve }: { file: ConflictFile; onResolve: (content
 }
 
 /** Los archivos en conflicto del merge de integración, por props (el contenedor llama a los comandos). */
-export function ConflictsPanel({ conflicts, onResolve, onConclude }: {
+export function ConflictsPanel({ conflicts, onResolve, onConclude, onAbort }: {
   conflicts: IntegrationConflicts;
   onResolve: (path: string, content: string) => void | Promise<void>;
   onConclude: () => void | Promise<void>;
+  /** Cancela el merge y deja la integración como estaba. */
+  onAbort?: () => void | Promise<void>;
 }) {
   const { t } = useTranslation();
   return (
@@ -91,6 +93,9 @@ export function ConflictsPanel({ conflicts, onResolve, onConclude }: {
       <p className="text-[11.5px] text-gray-600 dark:text-white/55">
         {t("missions.conflicts.intro", { branch: conflicts.branch, against: conflicts.against, count: conflicts.files.length })}
       </p>
+      {onAbort && (
+        <Button variant="ghost" size="sm" className="self-start" onClick={() => onAbort()}>{t("missions.conflicts.abort")}</Button>
+      )}
       {conflicts.files.map((f) => <FileCard key={f.path} file={f} onResolve={(c) => onResolve(f.path, c)} />)}
       {conflicts.files.length === 0 && (
         <div className="flex items-center gap-3">

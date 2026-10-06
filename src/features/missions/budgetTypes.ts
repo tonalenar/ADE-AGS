@@ -55,6 +55,8 @@ export interface PlanLimits {
   /** `false` = la CLI/archivos no exponen límites: se muestra «no medido». */
   measured: boolean;
   windows: PlanWindow[];
+  /** Epoch en segundos de la última muestra local: el límite NO es una consulta en vivo. */
+  observedAt: number | null;
 }
 
 /** Cerca del límite = 80 % o más, igual que el guarda de presupuesto. */
