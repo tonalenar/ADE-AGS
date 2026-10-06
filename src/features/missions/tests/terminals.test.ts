@@ -114,6 +114,8 @@ describe("el equipo de una misión", () => {
     expect(text).toContain("DELEGUE LOGO");
     expect(text).toContain("mande a CADA integrante");
     expect(text).toContain("SÓ RECRUTE quando a tarefa for independente e paralelizável e a divisão for mais rápida que um agente só; o QG mostra o ganho por missão.");
+    expect(text).toContain("DESENHE PRIMEIRO, APROVE, CONSTRUA");
+    expect(text).toContain("Só pranchetas APROVADAS viram tarefas de construção");
     expect(text).toContain(`Máximo de ${MAX_EXTRA_TERMINALS} terminais extras`);
   });
 

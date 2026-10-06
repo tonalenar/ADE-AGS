@@ -13,7 +13,7 @@ import { UsageBoard } from "./UsageBoard";
 import { startUsagePolling, useUsageStore } from "./usageStore";
 
 /** Qué panel está abierto sobre la barra. Uno a la vez: todos nacen en el mismo lugar. */
-export type DockPanel = "layers" | "map" | "chat" | "routines";
+export type DockPanel = "layers" | "map" | "chat" | "routines" | "design";
 
 // ── Anillos de uso ──────────────────────────────────────────────────
 
@@ -55,6 +55,7 @@ const LayersIcon = () => <Svg><path d="M12 3l9 5-9 5-9-5 9-5Z" /><path d="M3 13l
 const MapIcon = () => <Svg><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z" /><path d="M9 4v14M15 6v14" /></Svg>;
 const ChatIcon = () => <Svg><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.5A8 8 0 1 1 21 12Z" /></Svg>;
 const ClockIcon = () => <Svg><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>;
+const DesignIcon = () => <Svg><rect x="3" y="4" width="8" height="16" rx="1.5" /><rect x="13" y="4" width="8" height="9" rx="1.5" /></Svg>;
 const FitIcon = () => <Svg><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" /></Svg>;
 
 /** Un botón redondo de la barra. */
@@ -151,6 +152,7 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
               leading-[17px] text-center shadow">{unreadTotal > 9 ? "9+" : unreadTotal}</span>
           )}
         </Pill>
+        <Pill label={t("canvas.design.hint")} active={panel === "design"} onClick={() => onTogglePanel("design")}><DesignIcon /></Pill>
         <Pill label={t("canvas.routines.hint")} active={panel === "routines"} onClick={() => onTogglePanel("routines")}><ClockIcon /></Pill>
         <Pill label={t("canvas.dock.layers")} active={panel === "layers"} onClick={() => onTogglePanel("layers")}><LayersIcon /></Pill>
         <Pill label={t("canvas.dock.usage")} active={usageOpen} onClick={toggleUsage} className="gap-1.5 px-3">

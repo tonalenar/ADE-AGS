@@ -35,6 +35,7 @@ import { CanvasDock, type DockPanel } from "./CanvasDock";
 import { useUiStore } from "@/app/uiStore";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ChatPanel } from "./ChatPanel";
+import { DesignPanel } from "./design/DesignPanel";
 import { RoutinesPanel } from "./RoutinesPanel";
 import { boardKeyOfTab, canvasActions, useActiveBoardKey, useCanvasStore } from "./store";
 import { cleanPreviewLines } from "./previewText";
@@ -512,6 +513,7 @@ function CanvasInner() {
           onImage={() => fileInput.current?.click()} onFolder={() => void addFolderHere()}
           onUndo={() => key && canvasActions.undoStroke(key)} canUndo={board.drawings.length > 0} />
         {panel === "routines" && <RoutinesPanel onClose={() => setPanel(null)} />}
+        {panel === "design" && <DesignPanel onClose={() => setPanel(null)} />}
         {panel === "chat" && <ChatPanel onClose={() => setPanel(null)} />}
         {/* Con la columna de workspaces abierta, el pet vive ahí; plegada, viene al canvas. */}
         {workspacesCollapsed && <PetCard pet={pet} className="pointer-events-auto absolute left-3 bottom-3" />}
