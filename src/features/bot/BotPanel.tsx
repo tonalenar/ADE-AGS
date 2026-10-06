@@ -7,6 +7,7 @@ import { useMissionsStore } from "@/features/missions/store";
 import { MissionEfficiencyCard } from "@/features/missions/MissionTimingsPanel";
 import { MissionStallAlerts, MissionStartupTime } from "@/features/missions/StallAlertsView";
 import { formatDuration, getTimings, type MissionTimings } from "@/features/missions/timings";
+import { MemoryInboxButton } from "@/features/memory/MemoryInbox";
 import { MemoryReviewPanel } from "@/features/memory/MemoryReviewPanel";
 import { TabCostList } from "@/features/missions/TabCostList";
 import { estimateOf, formatCompactNumber, formatUsd, getTokens, tabsOfAgent, type CostEstimate, type MissionTokens } from "@/features/missions/tokens";
@@ -250,6 +251,7 @@ export function BotPanel() {
                     </div>
                     {current && (
                       <div className="ags-hq__detail">
+                        <div style={{ marginBottom: 8 }}><MemoryInboxButton workspaceId={current.workspaceId} /></div>
                         <div style={{ color: "var(--hq-yellow)", marginBottom: 8 }}>{t("botPanel.timeline")} · {current.title}</div>
                         {failureKey(current) && (
                           <p style={{ color: "var(--hq-pink)", marginBottom: 8 }}>

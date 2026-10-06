@@ -21,6 +21,7 @@ pub fn run() {
     // Que cada agente que lance esta instancia hable con ELLA y no con otra que esté abierta
     // (ver `ipc::protocol::HANDSHAKE_ENV`). También toca el entorno: antes del primer hilo.
     crate::ipc::export_instance_env();
+    crate::notifier::initialize_identity();
     super::signals::cleanup_on_signals();
 
     tauri::Builder::default()
@@ -272,6 +273,7 @@ pub fn run() {
             crate::memory::memory_propose_user,
             crate::memory::memory_decide_user,
             crate::memory::review::memory_review_summary,
+            crate::memory::review::memory_review_summary_workspace,
             crate::memory::memory_promote_fact_user,
             crate::memory::run_list_memory_snapshot,
             // Functional roles and reusable Squad routing policies

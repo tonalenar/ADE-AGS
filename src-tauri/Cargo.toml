@@ -139,7 +139,9 @@ windows-sys = { version = "0.61", features = [
 # Capturas del navegador (ver preview::snapshot): WebView2 entrega el PNG en un IStream.
 # Misma regla que arriba: las versiones que ya trae wry.
 webview2-com = "0.39"
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_System_Com", "Win32_UI_Shell"] }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Registry", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem"] }
+# Explicit identity and activation callbacks in dev as well as installed builds.
+tauri-winrt-notification = "0.8.1"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }

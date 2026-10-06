@@ -1,4 +1,5 @@
 import { HandoffView } from "@/features/runs/HandoffView";
+import { MemoryInboxButton } from "@/features/memory/MemoryInbox";
 import { MemoryReviewPanel } from "@/features/memory/MemoryReviewPanel";
 import { SharedMemoryPanel, type MemoryTab } from "@/features/memory/SharedMemoryPanel";
 import { useEffect, useMemo, useState } from "react";
@@ -147,6 +148,7 @@ export function MissionsPage() {
         <LocationIcon className="w-[15px] h-[15px] shrink-0 text-violet-500 dark:text-violet-400" />
         <span className="text-[13.5px] font-bold text-gray-900 dark:text-white">{t("missions.title")}</span>
         <div className="flex-1" />
+        {workspaceId && <MemoryInboxButton workspaceId={workspaceId} />}
         <Button variant="primary" size="sm" disabled={!workspaceId} onClick={() => setDialog("new")}>
           {t("missions.new")}
         </Button>

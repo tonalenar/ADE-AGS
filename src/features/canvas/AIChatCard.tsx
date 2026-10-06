@@ -1,4 +1,4 @@
-import type { CSSProperties, ReactNode } from "react";
+import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 
 /** The 21st.dev AI chat card layout, with controlled input and live conversation content. */
 export interface AIChatCardProps {
@@ -19,15 +19,19 @@ export interface AIChatCardProps {
   composerHint?: ReactNode;
   children?: ReactNode;
   className?: string;
+  style?: CSSProperties;
+  /** Capa sobre la tarjeta (los puxadores de tamaño). */
+  chrome?: ReactNode;
+  onKeyDown?: (event: KeyboardEvent<HTMLElement>) => void;
 }
 
 export function AIChatCard({
   title, subtitle, greeting, prompt, placeholder, inputLabel, sendLabel, message,
   onMessageChange, onSend, busy = false, disabled = false, actions, toolbar,
-  composerHint, children, className = "",
+  composerHint, children, className = "", style, chrome, onKeyDown,
 }: AIChatCardProps) {
   return (
-    <section aria-label={title} className={`ai-chat-card flex min-h-0 flex-col overflow-hidden rounded-[24px]
+    <section aria-label={title} style={style} onKeyDown={onKeyDown} className={`ai-chat-card flex min-h-0 flex-col overflow-hidden rounded-[24px]
       border border-gray-200 bg-white text-gray-900 dark:border-white/12 dark:bg-surface-deep dark:text-gray-50
       shadow-[0_0_16.4px_1px_rgba(10,10,10,0.05),0_8px_32px_rgba(0,0,0,0.12)]
       dark:shadow-[0_8px_32px_rgba(0,0,0,0.4)] ${className}`}>
@@ -39,6 +43,7 @@ export function AIChatCard({
         {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
       </header>
 
+      {chrome}
       {toolbar}
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-4">

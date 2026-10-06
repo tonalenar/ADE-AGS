@@ -203,47 +203,67 @@ html.dark #root {
   overflow-y: auto;
   overflow-x: hidden;
   scrollbar-gutter: stable;
-  scrollbar-width: thin;
-  scrollbar-color: rgba(0, 0, 0, 0.2) transparent;
   /* La rueda no se propaga al contenedor de atrás al llegar al final del scroll. */
   overscroll-behavior: contain;
 }
 
-html.dark .cc-scroll {
-  scrollbar-color: rgba(255, 255, 255, 0.16) transparent;
+/* Color de las barras: el acento del tema, translúcido. Un solo lugar para todo el app
+   (paneles, chat, modales, listas, terminal). El iframe de las pizarras de diseño no
+   hereda estas variables: `canvas/design/srcdoc.ts` lleva su propia copia. */
+:root {
+  --cc-sb-thumb: color-mix(in oklab, var(--color-accent-600) 38%, transparent);
+  --cc-sb-thumb-hover: color-mix(in oklab, var(--color-accent-600) 60%, transparent);
+  --cc-sb-thumb-active: color-mix(in oklab, var(--color-accent-600) 78%, transparent);
+}
+
+html.dark {
+  --cc-sb-thumb: color-mix(in oklab, var(--color-accent-300) 30%, transparent);
+  --cc-sb-thumb-hover: color-mix(in oklab, var(--color-accent-300) 50%, transparent);
+  --cc-sb-thumb-active: color-mix(in oklab, var(--color-accent-300) 68%, transparent);
+}
+
+/* Si el motor no entiende `::-webkit-scrollbar` (WebKitGTK), va la sintaxis estándar.
+   No se declara donde sí existe el pseudo-elemento: Chromium la prioriza y se perdería
+   el hover/activo del pulgar. */
+@supports not selector(::-webkit-scrollbar) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: var(--cc-sb-thumb) transparent;
+  }
 }
 
 ::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+  width: 10px;
+  height: 10px;
+  background: transparent;
 }
 
 ::-webkit-scrollbar-track {
   background: transparent;
+  border: 0;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.18);
-  border-radius: 8px;
+  background: var(--cc-sb-thumb);
+  border-radius: 999px;
   /* El borde transparente adelgaza el pulgar visualmente sin achicar el área
      que se puede agarrar con el mouse. */
-  border: 2px solid transparent;
-  background-clip: content-box;
-}
-
-html.dark ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.14);
+  border: 3px solid transparent;
   background-clip: content-box;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.32);
+  background: var(--cc-sb-thumb-hover);
   background-clip: content-box;
 }
 
-html.dark ::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.26);
+::-webkit-scrollbar-thumb:active {
+  background: var(--cc-sb-thumb-active);
   background-clip: content-box;
+}
+
+::-webkit-scrollbar-button {
+  display: none;
 }
 
 ::-webkit-scrollbar-corner {

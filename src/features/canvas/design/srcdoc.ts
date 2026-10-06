@@ -74,6 +74,20 @@ document.addEventListener("click",function(e){
 },true);
 })();`;
 
+/**
+ * Barras de rolagem do iframe: o app nao as alcanca (documento isolado), entao o CSS vai no
+ * proprio srcdoc. Cor de aco translucida (o acento do tema) que le bem em fundo claro e escuro;
+ * finas, arredondadas e sem trilho. Fica ANTES do HTML do agente: se ele definir as suas, vencem.
+ */
+export const SCROLLBAR_CSS =
+  "*{scrollbar-width:thin;scrollbar-color:rgba(98,122,152,.5) transparent}" +
+  "::-webkit-scrollbar{width:10px;height:10px;background:transparent}" +
+  "::-webkit-scrollbar-track{background:transparent}" +
+  "::-webkit-scrollbar-thumb{background:rgba(98,122,152,.5);border:3px solid transparent;border-radius:999px;background-clip:content-box}" +
+  "::-webkit-scrollbar-thumb:hover{background:rgba(98,122,152,.75);background-clip:content-box}" +
+  "::-webkit-scrollbar-thumb:active{background:rgba(98,122,152,.9);background-clip:content-box}" +
+  "::-webkit-scrollbar-button{display:none}::-webkit-scrollbar-corner{background:transparent}";
+
 /** Remove `<meta http-equiv>` e `<base>` do conteúdo: não podem afrouxar a CSP nem redirecionar. */
 function stripUnsafeHead(html: string): string {
   return html.replace(/<meta\b[^>]*http-equiv[^>]*>/gi, "").replace(/<base\b[^>]*>/gi, "");
@@ -85,7 +99,7 @@ export interface SrcdocOptions { picker?: boolean; chooser?: boolean }
 export function buildSrcdoc(html: string, opts: SrcdocOptions = {}): string {
   const meta = `<meta http-equiv="Content-Security-Policy" content="${DESIGN_CSP}">`;
   const picker = opts.picker ? `<script>${PICKER_SCRIPT}</script>` : opts.chooser ? `<script>${CHOOSER_SCRIPT}</script>` : "";
-  return `<!doctype html><html><head><meta charset="utf-8">${meta}<style>html,body{margin:0}</style></head><body>${stripUnsafeHead(html)}${picker}</body></html>`;
+  return `<!doctype html><html><head><meta charset="utf-8">${meta}<style>html,body{margin:0}${SCROLLBAR_CSS}</style></head><body>${stripUnsafeHead(html)}${picker}</body></html>`;
 }
 
 export interface PickMessage { selector: string; text: string }
