@@ -47,6 +47,8 @@ export function EditorArea() {
   const containerRef = useRef<HTMLDivElement>(null);
   const groups = layout ? allGroups(layout.root) : [];
   const groupIds = groups.map((g) => g.id).join("|");
+  // Los huecos de la grade aparecen y desaparecen sin que cambie el árbol: hay que reobservarlos.
+  const gridIds = grid ? grid.join("|") : "";
 
   const measure = useCallback(() => {
     const container = containerRef.current;
@@ -78,7 +80,7 @@ export function EditorArea() {
     observer.observe(container);
     container.querySelectorAll("[data-slot]").forEach((el) => observer.observe(el));
     return () => observer.disconnect();
-  }, [groupIds, measure]);
+  }, [groupIds, gridIds, measure]);
 
   return (
     <div ref={containerRef} data-editor-area className="absolute inset-0">
