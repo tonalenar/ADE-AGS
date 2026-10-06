@@ -30,14 +30,16 @@ export interface ResponseSegment {
   text: string;
 }
 
-const PROMPT = /^(?:│\s*)?[>›❯]\s+(\S.*)$/;
+const PROMPT = /^(?:│\s*)?[>›❯]\s+(.*?)(?:\s*│)?$/;
 const MARKER = /^([●⏺•✦◆◇])\s+/;
 const BORDER = /^\s*[╭╰┌└├]|^\s*[─━═]{3,}\s*$/;
 
 /** ¿La línea abre un prompt del usuario? Devuelve su texto. */
 export function promptText(line: string): string | null {
   const m = PROMPT.exec(line.trimEnd());
-  return m ? m[1].trim() : null;
+  if (!m) return null;
+  const text = m[1].trim();
+  return text.length > 0 ? text : null;
 }
 
 /** Quita la sangría común de las líneas de continuación (la TUI las pone con 2 espacios). */
@@ -76,8 +78,10 @@ export function segmentResponses(lines: readonly string[]): ResponseSegment[] {
       return;
     }
     if (BORDER.test(line)) {
-      close();
-      sealed = true;
+      if (cur) {
+        close();
+        sealed = true;
+      }
       return;
     }
     if (sealed) return;
