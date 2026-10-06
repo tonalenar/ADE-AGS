@@ -34,6 +34,7 @@ mod skills;
 mod squads;
 mod sync;
 mod terminal;
+mod testspeed;
 mod updates;
 mod usage;
 mod util;
