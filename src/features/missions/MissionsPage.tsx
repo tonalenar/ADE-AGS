@@ -1,4 +1,5 @@
 import { HandoffView } from "@/features/runs/HandoffView";
+import { MemoryReviewPanel } from "@/features/memory/MemoryReviewPanel";
 import { SharedMemoryPanel, type MemoryTab } from "@/features/memory/SharedMemoryPanel";
 import { useEffect, useMemo, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
@@ -544,6 +545,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
 
       <MissionReviewPanel missionId={mission.id} refreshKey={tasks.map((task) => `${task.id}:${task.status}`).join("|")} />
 
+      {workspaceId && <MemoryReviewPanel missionId={mission.id} workspaceId={workspaceId} refreshKey={mission.status} />}
       {workspaceId && <SharedMemoryPanel key={`${workspaceId}-${mission.id}-${focusNonce}`} workspaceId={workspaceId} missionId={mission.id} runs={runs} activeRunId={mission.activeRunId} initialTab={focusTab} />}
       {duplicateTarget && (
         <DuplicateMissionDialog

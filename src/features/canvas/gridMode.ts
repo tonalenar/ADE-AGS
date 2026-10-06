@@ -22,6 +22,28 @@ export function gridTabs(opts: { on: boolean; mission: string | null; mode: stri
   return opts.tabIds;
 }
 
+/** Un hueco medido de la grade (relativo al área del editor). */
+export interface GridRect { left: number; top: number; width: number; height: number }
+
+/** Un hueco sirve para ubicar una terminal solo si ya se midió y tiene tamaño real. Pura. */
+export function usableSlot(rect: GridRect | null | undefined): rect is GridRect {
+  return !!rect && rect.width > 0 && rect.height > 0;
+}
+
+/**
+ * Dónde va cada terminal de la grade: `Map<tabId, rect>` solo con las que tienen hueco medido y
+ * no vacío. Una sin hueco queda FUERA (oculta) en vez de ocupar toda el área —lo que taparía a
+ * las demás— o de montarse en 0x0 (xterm sin `fit`). Pura.
+ */
+export function gridPlacements(ids: string[], slots: Record<string, GridRect>): Map<string, GridRect> {
+  const out = new Map<string, GridRect>();
+  for (const id of ids) {
+    const rect = slots[GRID_SLOT + id];
+    if (usableSlot(rect)) out.set(id, rect);
+  }
+  return out;
+}
+
 /** Los ids de las tabs a mostrar en grade en la misión activa, o `null` = vista de abas normal. */
 export function useMissionGrid(): string[] | null {
   const key = useActiveBoardKey();

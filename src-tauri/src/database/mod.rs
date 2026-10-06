@@ -15,6 +15,7 @@ mod seeds;
 mod test;
 
 pub use connection::{init_db, DbConnection};
+pub use schema::migrate;
 
 /// Base en memoria con el schema real, para los tests de cualquier módulo.
 #[cfg(test)]

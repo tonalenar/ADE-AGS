@@ -326,6 +326,7 @@ mod tests {
         let tools = [tool("task_status")];
         let profile = TaskProfile::prepare(Some(&f.config), &tools, true, f.cwd()).unwrap();
         let ctx = LaunchCtx {
+            fast_mode: false,
             cwd: f.cwd(), session_id: "session", account_env: profile.env(),
             mcp_config: Some(f.config.clone()), system_prompt: Some("Lead delegates implementation".into()),
             allowed_tools: tools.to_vec(), json_schema: Some("{\"type\":\"object\"}".into()),

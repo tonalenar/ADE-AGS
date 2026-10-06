@@ -50,6 +50,7 @@ pub fn run() {
             // El pet sube de nivel con los tokens de los agentes
             crate::missions::mission_start_terminals,
             crate::missions::mission_finish_terminals,
+            crate::missions::mission_redeliver,
             crate::missions::mission_check_duplicate,
             crate::missions::mission_check_duplicate_input,
             crate::missions::mission_timing_add,
@@ -255,6 +256,7 @@ pub fn run() {
             crate::memory::memory_pending_counts,
             crate::memory::memory_propose_user,
             crate::memory::memory_decide_user,
+            crate::memory::review::memory_review_summary,
             crate::memory::memory_promote_fact_user,
             crate::memory::run_list_memory_snapshot,
             // Functional roles and reusable Squad routing policies
