@@ -23,6 +23,7 @@ import type { Squad } from "@/features/squads/types";
 
 import { AutonomyPicker } from "./AutonomyPicker";
 import { BudgetBar } from "./BudgetBar";
+import { CleanupPanel } from "./CleanupPanel";
 import { BudgetConfirmDialog } from "./BudgetConfirmDialog";
 import { continueOverBudget, missionBudget, raiseMissionBudget } from "./budgetIpc";
 import { isBudgetConfirmation, type BudgetStatus } from "./budgetTypes";
@@ -564,6 +565,12 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
       {mission.status !== "draft" && (
         <Section title={t("missions.tokens.title")}>
           <MissionTokensPanel missionId={mission.id} />
+        </Section>
+      )}
+
+      {(mission.status === "done" || mission.status === "cancelled" || mission.status === "failed") && (
+        <Section title={t("missions.cleanup.title")}>
+          <CleanupPanel missionId={mission.id} />
         </Section>
       )}
 
