@@ -39,23 +39,48 @@ use super::windows::{window_create, window_list};
 use super::workspaces::{workspace_list, workspace_open, workspace_status};
 use crate::ipc::protocol::Response;
 
+/// Traduz o nome de CLI `design.*` para a operação do módulo `design` e a executa.
+fn design_command(app: &AppHandle, command: &str, args: &Value) -> Result<Value, String> {
+    let op = match command {
+        "design.page.add" => "page_add",
+        "design.artboard.add" => "artboard_add",
+        "design.update" | "design.artboard.update" => "artboard_update",
+        "design.revert" | "design.artboard.revert" => "artboard_revert",
+        "design.approve" | "design.artboard.approve" => "artboard_approve",
+        "design.reject" | "design.artboard.reject" => "artboard_reject",
+        "design.comment" | "design.comment.add" => "comment_add",
+        "design.comment.resolve" => "comment_resolve",
+        "design.approve.all" => "approve_all",
+        other => &other[7..],
+    };
+    let mut args = args.clone();
+    if args.get("html").is_none() {
+        if let Some(content) = args.get("content").cloned() {
+            args["html"] = content;
+        }
+    }
+    crate::design::dispatch(app, op, &args)
+}
+
 pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
     let result = match command {
-        c if c.starts_with("design.") => {
-            let op = match c {
-                "design.page.add" => "page_add", "design.artboard.add" => "artboard_add",
-                "design.update" | "design.artboard.update" => "artboard_update",
-                "design.revert" | "design.artboard.revert" => "artboard_revert",
-                "design.approve" | "design.artboard.approve" => "artboard_approve",
-                "design.reject" | "design.artboard.reject" => "artboard_reject",
-                "design.comment" | "design.comment.add" => "comment_add",
-                "design.comment.resolve" => "comment_resolve", "design.approve.all" => "approve_all",
-                other => &other[7..],
-            };
-            let mut args = args.clone();
-            if args.get("html").is_none() { if let Some(content) = args.get("content").cloned() { args["html"] = content; } }
-            crate::design::dispatch(app, op, &args)
-        },
+        "design.create" => design_command(app, command, args),
+        "design.list" => design_command(app, command, args),
+        "design.get" => design_command(app, command, args),
+        "design.page.add" => design_command(app, command, args),
+        "design.artboard.add" => design_command(app, command, args),
+        "design.update" => design_command(app, command, args),
+        "design.artboard.update" => design_command(app, command, args),
+        "design.revert" => design_command(app, command, args),
+        "design.artboard.revert" => design_command(app, command, args),
+        "design.approve" => design_command(app, command, args),
+        "design.artboard.approve" => design_command(app, command, args),
+        "design.reject" => design_command(app, command, args),
+        "design.artboard.reject" => design_command(app, command, args),
+        "design.comment" => design_command(app, command, args),
+        "design.comment.add" => design_command(app, command, args),
+        "design.comment.resolve" => design_command(app, command, args),
+        "design.approve.all" => design_command(app, command, args),
         "tab.list" => tab_list(app),
         "tab.output" => tab_output(app, args),
         "tab.send" => tab_send(app, args),
