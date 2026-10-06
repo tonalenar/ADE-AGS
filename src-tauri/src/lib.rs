@@ -10,6 +10,7 @@ mod app;
 mod bus;
 mod database;
 mod design;
+pub mod build_info;
 mod explorer;
 mod floors;
 mod forge;

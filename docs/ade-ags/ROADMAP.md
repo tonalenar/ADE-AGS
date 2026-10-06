@@ -263,6 +263,13 @@ Cinco pontos de melhoria estrutural focados na velocidade de inicialização das
 - [x] **Fluxo de construção**: só pranchetas aprovadas viram tarefas (`buildTasks.ts`); briefing do orquestrador e skill `ags-orchestrator` 1.27.0 com "desenhe primeiro, aprove, construa".
 - [ ] Fora do escopo (etapa seguinte): preview real do app em dev server por worktree; compartilhar link.
 
+## Etapa 19 — Design no canvas principal e acabamento (Backend)
+
+- [x] Posicionamento automático de pranchetas novas; arraste preserva aprovação/versão e desfazer preserva posição.
+- [x] Dedupe de designs por missão/título, consolidação sem perder propostas existentes (v37), aliases dos IDs antigos, arquivar e excluir via Tauri/CLI.
+- [x] Dono pela aba criadora (`from`/`ADE_TAB_ID`); evento distingue design novo de reuso.
+- [x] Identidade do build em `ags --version` e comparação do CLI adjacente com a app, com limite de tempo e testes.
+
 ## Etapa 17 — custo, Fast headless, entregas e memória
 - Custo por aba (tokens/custo por terminal da missão): ver MISSION_TOKENS.md.
 - Fast nas execuções headless: ver AGENT_EFFICIENCY.md.
