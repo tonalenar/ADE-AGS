@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { Fact } from "@/features/runs/types";
-import type { MemoryDetail, MemoryPage, MemoryPendingCounts, MemoryProposal, MemoryProposalResult, MemoryScope, MemorySnapshot, MemoryValidityInterval } from "./types";
+import type { MemoryDetail, MemoryPage, MemoryReviewSummary, MemoryPendingCounts, MemoryProposal, MemoryProposalResult, MemoryScope, MemorySnapshot, MemoryValidityInterval } from "./types";
 
 export const listMemory = (workspaceId: string, missionId: string | null, cursor?: string | null) =>
   invoke<MemoryPage>("memory_list", { workspaceId, missionId, cursor: cursor ?? null, limit: 32 });
@@ -28,3 +28,6 @@ export const listMemorySnapshot = (runId: string) =>
   invoke<MemorySnapshot>("run_list_memory_snapshot", { runId });
 
 export const listRunFacts = (runId: string) => invoke<Fact[]>("run_list_facts", { runId });
+
+export const getMemoryReviewSummary = (missionId: string) =>
+  invoke<MemoryReviewSummary>("memory_review_summary", { missionId });
