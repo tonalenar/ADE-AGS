@@ -41,7 +41,7 @@ describe("bulkReview", () => {
     const out = await approveBulk([item("a"), contra("c")], decide, { acknowledgeContradictions: false });
     expect(decide).toHaveBeenCalledTimes(1);
     expect(decide).toHaveBeenCalledWith("e-a", 1, true);
-    expect(out).toEqual({ done: 1, failed: [], skippedContradictions: ["c"] });
+    expect(out).toEqual({ done: 1, failed: [], skippedContradictions: ["c"], skippedDeletions: [] });
   });
 
   it("con el aviso confirmado acepta todo", async () => {
@@ -68,5 +68,25 @@ describe("bulkReview", () => {
     const decide = vi.fn();
     expect((await approveBulk([], decide, { acknowledgeContradictions: true })).done).toBe(0);
     expect(decide).not.toHaveBeenCalled();
+  });
+});
+
+describe("exclusoes (operation=delete)", () => {
+  const del = (key: string) => item(key, { operation: "delete" });
+  it("planBulk as lista e exige aviso", () => {
+    const p = planBulk([item("a"), del("x")]);
+    expect(p.deletions.map((i) => i.key)).toEqual(["x"]);
+    expect(p.needsWarning).toBe(true);
+  });
+  it("sem confirmar o aviso NAO exclui", async () => {
+    const decide = vi.fn().mockResolvedValue(undefined);
+    const out = await approveBulk([item("a"), del("x")], decide, { acknowledgeContradictions: false });
+    expect(decide).toHaveBeenCalledTimes(1);
+    expect(out.skippedDeletions).toEqual(["x"]);
+  });
+  it("confirmado, aceita", async () => {
+    const decide = vi.fn().mockResolvedValue(undefined);
+    await approveBulk([del("x")], decide, { acknowledgeContradictions: true });
+    expect(decide).toHaveBeenCalledWith("e-x", 1, true);
   });
 });

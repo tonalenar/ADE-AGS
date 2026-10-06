@@ -8,6 +8,7 @@ import {
 } from "./bulkReview";
 import * as memoryIpc from "./ipc";
 import { usePendingMemoryStore } from "./pendingStore";
+import { isDeletion } from "./bulkReview";
 import { evidenceParts, reviewFlag } from "./review";
 import type { MemoryReviewItem } from "./types";
 
@@ -43,6 +44,8 @@ const FLAG_STYLE = {
   normal: "",
 } as const;
 
+const WORKSPACE_GROUP = "__workspace__";
+
 type Confirm = { items: MemoryReviewItem[] } | null;
 
 /**
@@ -66,11 +69,12 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
 
   const load = useCallback(async () => {
     try {
-      const counts = await memoryIpc.getPendingCounts(workspaceId);
-      const ids = Object.entries(counts.byMission).filter(([, n]) => n > 0).map(([id]) => id);
-      const found = await Promise.all(ids.map(async (id) => {
-        const summary = await memoryIpc.getMemoryReviewSummary(id).catch(() => null);
-        return { missionId: id, title: titles.get(id) ?? id.slice(0, 8), items: summary?.items ?? [] };
+      const review = await memoryIpc.getWorkspaceReviewSummary(workspaceId);
+      const found = review.groups.map((g) => ({
+        // Sin misión: las propuestas del workspace; se muestran igual para no omitir ninguna.
+        missionId: g.missionId ?? WORKSPACE_GROUP,
+        title: g.missionId === null ? t("memoryInbox.workspaceGroup") : g.missionTitle ?? titles.get(g.missionId) ?? g.missionId.slice(0, 8),
+        items: g.items,
       }));
       const next = normalizeGroups(found);
       setGroups(next);
@@ -80,7 +84,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     } finally {
       setLoaded(true);
     }
-  }, [workspaceId, titles]);
+  }, [workspaceId, titles, t]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { root.current?.focus(); }, []);
@@ -92,6 +96,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     const parts: string[] = [];
     if (o.failed.length) parts.push(t("memoryReview.failed", { keys: o.failed.join(", ") }));
     if (o.skippedContradictions.length) parts.push(t("memoryInbox.skipped", { keys: o.skippedContradictions.join(", ") }));
+    if (o.skippedDeletions.length) parts.push(t("memoryInbox.skippedDeletions", { keys: o.skippedDeletions.join(", ") }));
     setMessage(parts.join(" "));
     await load();
     await loadPending(workspaceId).catch(() => undefined);
@@ -180,6 +185,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                       <div className="flex items-center gap-2">
                         <input type="checkbox" checked={selected.has(id)} onChange={() => toggle(id)} aria-label={t("memoryInbox.selectItem", { key: item.key })} />
                         <span className="min-w-0 flex-1 truncate text-[12px] font-medium" title={item.key}>{item.key}</span>
+                        {isDeletion(item) && <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{t("memoryInbox.deletion")}</span>}
                         {flag !== "normal" && <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>}
                         <button type="button" disabled={busy} onClick={() => void approveOne(item)} aria-label={`${t("memoryReview.approve")}: ${item.key}`}
                           className="rounded bg-emerald-600/90 px-2 py-0.5 text-[11px] text-white disabled:opacity-50">{t("memoryReview.approve")}</button>
@@ -218,6 +224,12 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                 <div role="alert" className="mt-2 rounded border border-red-500/40 bg-red-500/10 p-2 text-[11.5px] text-red-700 dark:text-red-300">
                   {t("memoryInbox.confirmContradictions", { count: plan.contradictions.length })}
                   <ul className="mt-1 list-disc pl-4">{plan.contradictions.map((c) => <li key={itemId(c)}>{c.key}</li>)}</ul>
+                </div>
+              )}
+              {plan.deletions.length > 0 && (
+                <div role="alert" className="mt-2 rounded border border-red-500/40 bg-red-500/10 p-2 text-[11.5px] text-red-700 dark:text-red-300">
+                  {t("memoryInbox.confirmDeletions", { count: plan.deletions.length })}
+                  <ul className="mt-1 list-disc pl-4">{plan.deletions.map((d) => <li key={itemId(d)}>{d.key}</li>)}</ul>
                 </div>
               )}
               <div className="mt-3 flex justify-end gap-2">

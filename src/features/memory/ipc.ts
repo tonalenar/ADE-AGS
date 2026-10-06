@@ -31,3 +31,6 @@ export const listRunFacts = (runId: string) => invoke<Fact[]>("run_list_facts", 
 
 export const getMemoryReviewSummary = (missionId: string) =>
   invoke<MemoryReviewSummary>("memory_review_summary", { missionId });
+
+export const getWorkspaceReviewSummary = (workspaceId: string) =>
+  invoke<import("./types").MemoryWorkspaceReview>("memory_review_summary_workspace", { workspaceId });

@@ -2332,5 +2332,9 @@
   "memoryInbox.confirmSkip": "Accept without contradictions",
   "memoryInbox.confirmAnyway": "Accept anyway",
   "memoryInbox.confirm": "Accept",
-  "memoryInbox.cancel": "Cancel"
+  "memoryInbox.cancel": "Cancel",
+  "memoryInbox.workspaceGroup": "No mission (workspace)",
+  "memoryInbox.deletion": "DELETION",
+  "memoryInbox.skippedDeletions": "Deletions not accepted (confirmation required): {{keys}}.",
+  "memoryInbox.confirmDeletions": "Warning: {{count}} are DELETIONS and will remove already-approved memories:"
 }
