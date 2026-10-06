@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { approveBulk, itemId, normalizeGroups, planBulk, rejectBulk, selectedItems, totalPending, type MissionReviewGroup } from "../bulkReview";
+import { approveBulk, groupsFromWorkspaceReview, itemId, normalizeGroups, planBulk, rejectBulk, selectedItems, totalPending, type MissionReviewGroup } from "../bulkReview";
 import type { MemoryReviewItem } from "../types";
 
 const item = (key: string, over: Partial<MemoryReviewItem> = {}): MemoryReviewItem => ({
@@ -88,5 +88,21 @@ describe("exclusoes (operation=delete)", () => {
     const decide = vi.fn().mockResolvedValue(undefined);
     await approveBulk([del("x")], decide, { acknowledgeContradictions: true });
     expect(decide).toHaveBeenCalledWith("e-x", 1, true);
+  });
+});
+
+describe("groupsFromWorkspaceReview", () => {
+  const fb = (id: string | null) => (id === null ? "WS" : `m-${id}`);
+  it("acepta array", () => {
+    const g = groupsFromWorkspaceReview([{ missionId: "1", title: "A", items: [item("a")] }], fb);
+    expect(g).toMatchObject([{ missionId: "1", title: "A" }]);
+  });
+  it("acepta {groups} con grupo sin mision", () => {
+    const g = groupsFromWorkspaceReview({ groups: [{ missionId: null, missionTitle: null, items: [item("a")] }, { missionId: "2", missionTitle: null, items: [item("b")] }] }, fb);
+    expect(g.map((x) => x.title)).toEqual(["WS", "m-2"]);
+  });
+  it("descarta basura", () => {
+    expect(groupsFromWorkspaceReview(null, fb)).toEqual([]);
+    expect(groupsFromWorkspaceReview([null, { missionId: "1" }], fb)).toEqual([]);
   });
 });

@@ -90,3 +90,19 @@ export async function rejectBulk(
 ): Promise<BulkOutcome> {
   return { ...(await decideAll(items, false, decide)), skippedContradictions: [], skippedDeletions: [] };
 }
+
+/**
+ * El comando del workspace puede devolver un array `[{missionId, title, items}]` o un objeto
+ * `{groups: [{missionId, missionTitle, items}]}` (con `missionId: null` para propuestas sin
+ * misión). Se aceptan las dos formas; lo inválido se descarta. Pura.
+ */
+export function groupsFromWorkspaceReview(raw: unknown, fallbackTitle: (missionId: string | null) => string): MissionReviewGroup[] {
+  const list = Array.isArray(raw) ? raw : Array.isArray((raw as { groups?: unknown } | null)?.groups) ? (raw as { groups: unknown[] }).groups : [];
+  const out: MissionReviewGroup[] = [];
+  for (const g of list as { missionId?: string | null; title?: string | null; missionTitle?: string | null; items?: MemoryReviewItem[] }[]) {
+    if (!g || !Array.isArray(g.items)) continue;
+    const id = g.missionId ?? null;
+    out.push({ missionId: id ?? "__workspace__", title: (id === null ? null : g.title ?? g.missionTitle) || fallbackTitle(id), items: g.items });
+  }
+  return out;
+}

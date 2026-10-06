@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { useMissionsStore } from "@/features/missions/store";
 import {
-  approveBulk, flatten, itemId, normalizeGroups, planBulk, rejectBulk, selectedItems, totalPending,
+  approveBulk, flatten, groupsFromWorkspaceReview, itemId, normalizeGroups, planBulk, rejectBulk, selectedItems, totalPending,
   type BulkOutcome, type MissionReviewGroup,
 } from "./bulkReview";
 import * as memoryIpc from "./ipc";
@@ -44,8 +44,6 @@ const FLAG_STYLE = {
   normal: "",
 } as const;
 
-const WORKSPACE_GROUP = "__workspace__";
-
 type Confirm = { items: MemoryReviewItem[] } | null;
 
 /**
@@ -70,12 +68,8 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
   const load = useCallback(async () => {
     try {
       const review = await memoryIpc.getWorkspaceReviewSummary(workspaceId);
-      const found = review.groups.map((g) => ({
-        // Sin misión: las propuestas del workspace; se muestran igual para no omitir ninguna.
-        missionId: g.missionId ?? WORKSPACE_GROUP,
-        title: g.missionId === null ? t("memoryInbox.workspaceGroup") : g.missionTitle ?? titles.get(g.missionId) ?? g.missionId.slice(0, 8),
-        items: g.items,
-      }));
+      const found = groupsFromWorkspaceReview(review, (id) =>
+        id === null ? t("memoryInbox.workspaceGroup") : titles.get(id) ?? id.slice(0, 8));
       const next = normalizeGroups(found);
       setGroups(next);
       // Lo elegido que ya no existe (se decidió en otro lado) se descarta.
