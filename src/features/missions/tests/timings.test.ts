@@ -30,14 +30,14 @@ describe("testStatsView", () => {
   it("sem testes na missão não mostra nada", () => {
     expect(testStatsView(undefined, 60_000)).toBeNull();
     expect(testStatsView(null, 60_000)).toBeNull();
-    expect(testStatsView({ runs: 0, totalMs: 0, cacheHits: 0, affectedRuns: 0 }, 60_000)).toBeNull();
+    expect(testStatsView({ commands: 0, timeMs: 0, skippedCache: 0, skippedAffected: 0 }, 60_000)).toBeNull();
   });
   it("resume tempo, parcela da missão, pulados por cache e só-afetados", () => {
-    expect(testStatsView({ runs: 5, totalMs: 30_000, cacheHits: 2, affectedRuns: 3 }, 120_000)).toEqual({
+    expect(testStatsView({ commands: 5, timeMs: 30_000, skippedCache: 2, skippedAffected: 3 }, 120_000)).toEqual({
       time: "30 s", share: 25, skipped: 2, affected: 3, runs: 5,
     });
   });
   it("sem tempo total da missão não inventa a parcela", () => {
-    expect(testStatsView({ runs: 1, totalMs: 4_000, cacheHits: 0, affectedRuns: 0 }, null)?.share).toBeNull();
+    expect(testStatsView({ commands: 1, timeMs: 4_000, skippedCache: 0, skippedAffected: 0 }, null)?.share).toBeNull();
   });
 });

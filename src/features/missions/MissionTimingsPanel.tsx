@@ -93,7 +93,7 @@ export function MissionEfficiencyCard({ missionId, compact = false }: { missionI
   const value = (ms: number | null) => ms === null ? t("missions.efficiency.unmeasured") : formatDuration(ms);
   const activeText = formatActive(data.activeMs) ?? t("missions.efficiency.unmeasured");
   const sourceKey = activeSourceKey(data.activeSource);
-  const testView = testStatsView(data.tests, data.wallMs);
+  const testView = testStatsView(data.testMetrics, data.wallMs);
   const cost = (usd: number | null) => usd === null ? t("missions.efficiency.unmeasured") : `$${usd.toFixed(3)}`;
   const gain = (percent: number | null) => percent === null
     ? t("missions.efficiency.unmeasured")
