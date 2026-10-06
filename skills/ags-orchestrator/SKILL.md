@@ -532,14 +532,15 @@ For a new interface, draw it before building it. A **design** is a set of pages 
 comments on element by element, and edits.
 
 ```bash
-ags design create "Onboarding" --mission <id>          # returns the design id
-ags design page add <design> "Page 1"
-ags design artboard add <design> --page "Page 1" --title "Invite and steps (clickable)" \
-  --width 390 --height 780 --file invite.html
-ags design get <design>                                # artboards, statuses, open comments
-ags design artboard update <artboard> --file invite.html   # saves a new version (undo-able)
-ags design comment <artboard> "Done: removed the X tab" --resolve
-ags design approve <artboard>   /   ags design reject <artboard>
+ags design create "Onboarding" [--mission-id <id>] [--owner-tab-id <tab>]   # workspace = cwd; returns the design id
+ags design page add <designId> "Page 1"
+ags design artboard add <designId> "Invite and steps (clickable)" --page "Page 1" --file invite.html [--width 390 --height 780 --x 0 --y 0]   # creates/reuses the page
+ags design get <designId>                              # artboards, statuses, open comments
+ags design update <artboardId> --file invite.html [--expected-version <n>]   # new version (undo-able)
+ags design comment <artboardId> "Done: removed the X tab" [--selector <css>]
+ags design comment resolve <commentId>
+ags design approve <artboardId>  /  ags design reject <artboardId>  /  ags design approve all <designId>
+ags design revert <artboardId> --version <n>
 ```
 
 1. **Draw first.** One artboard per screen or state, each with a clear title. Self-contained
