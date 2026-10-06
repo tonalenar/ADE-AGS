@@ -334,6 +334,8 @@ pub fn mission_get(
 pub async fn mission_start(app: AppHandle, mission_id: String, force: Option<bool>, is_test: Option<bool>) -> Result<Mission, String> {
     let force_val = force.unwrap_or(false);
     tauri::async_runtime::spawn_blocking(move || {
+        let db=db_of(&app)?;
+        {let c=db.lock().map_err(|e|e.to_string())?;crate::usage::require_budget(&c,&mission_id)?;}
         mark_test_now(&app, &mission_id, is_test)?;
         start_now_with_force(&app, &mission_id, force_val)
     })
@@ -349,6 +351,7 @@ pub(crate) fn start_now(app: &AppHandle, mission_id: &str) -> Result<Mission, St
 
 pub(crate) fn start_now_with_force(app: &AppHandle, mission_id: &str, force: bool) -> Result<Mission, String> {
     let db = db_of(app)?;
+    crate::usage::confirm_spend(app, &db, mission_id, "mission start")?;
     let result = start_with_force(
         &db,
         mission_id,
@@ -474,6 +477,7 @@ pub(crate) fn check_launch_now(db: &DbConnection, mission_id: &str, terminals: b
 pub fn mission_start_terminals(app: AppHandle, mission_id: String, force: Option<bool>, is_test: Option<bool>) -> Result<Mission, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
     let db = db_of(&app)?;
+    {let c=db.lock().map_err(|e|e.to_string())?;crate::usage::require_budget(&c,&mission_id)?;}
     check_launch_now(&db, &mission_id, true)?;
     if !force.unwrap_or(false) {
         let conn = db.lock().map_err(|e| e.to_string())?;

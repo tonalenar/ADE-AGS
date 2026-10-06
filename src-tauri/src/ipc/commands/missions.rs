@@ -306,6 +306,9 @@ pub(super) fn mission_efficiency(app: &AppHandle, args: &Value) -> Result<Value,
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut efficiency = json!(crate::missions::efficiency::get(&conn, &id)?);
     efficiency["tokens"] = json!(crate::usage::mission_tokens_for_conn(&conn, &id)?);
+    let status=crate::usage::budget_for_conn(&conn, &id)?;
+    if let Some(message)=crate::usage::claim_warning(&conn,&id,&status)? {crate::usage::warn_lead(app,&id,&message);}
+    efficiency["budget"] = json!(status);
     Ok(efficiency)
 }
 

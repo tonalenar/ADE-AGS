@@ -33,7 +33,7 @@ pub struct MissionTabTokens {
     pub estimate: Option<CostEstimate>,
 }
 
-pub(super) fn path_key(path: &str) -> String {
+pub(crate) fn path_key(path: &str) -> String {
     // Windows paths must compare identically even in Linux CI; Unix remains case sensitive.
     let normalized = path.replace('\\', "/").trim_end_matches('/').to_string();
     if normalized.as_bytes().get(1) == Some(&b':') {
@@ -287,6 +287,13 @@ pub fn mission_tokens_for_conn(
                 vec![profile
                     .unwrap_or_else(|| home.join(".codex"))
                     .join("sessions")]
+            } else if agent == "opencode" {
+                let data = profile.unwrap_or_else(|| {
+                    std::env::var_os("XDG_DATA_HOME")
+                        .map(PathBuf::from)
+                        .unwrap_or_else(|| home.join(".local/share"))
+                });
+                vec![data.join("opencode/opencode.db")]
             } else {
                 custom
                     .as_ref()
@@ -297,7 +304,9 @@ pub fn mission_tokens_for_conn(
             let mut priced = vec![];
             let mut files = vec![];
             for root in roots {
-                if agent == "claude-code" {
+                if agent == "opencode" {
+                    files.push(root);
+                } else if agent == "claude-code" {
                     files.extend(mission_transcripts(&root, cwd))
                 } else {
                     jsonls(&root, &mut files)
@@ -306,7 +315,9 @@ pub fn mission_tokens_for_conn(
             files.sort();
             files.dedup();
             for file in files {
-                let records = if agent == "codex" {
+                let records = if agent == "opencode" {
+                    super::opencode::records(&file, cwd)
+                } else if agent == "codex" {
                     codex_records(&file, cwd)
                 } else {
                     let records = read_transcript_priced(&file, cwd);
@@ -361,20 +372,13 @@ pub fn mission_tokens_for_conn(
                     .into(),
                 );
                 // No known Codex prices: preserve measured tokens without inventing a charge.
-                tab.estimate = priced
-                    .iter()
-                    .any(|(r, m)| {
-                        r.at >= start
-                            && r.at <= end
-                            && m.as_deref().and_then(super::pricing::price_for).is_some()
-                    })
-                    .then(|| estimate_in_range(&priced, start, end));
+                tab.estimate = Some(estimate_in_range(&priced, start, end));
             }
         }
         groups.entry(agent.clone()).or_default().push(tab);
     }
     // Headless ledger rows are already task/session scoped. Never also read their transcripts.
-    let mut stmt=conn.prepare("SELECT t.id,t.agent_id,t.title,t.cwd,t.session_id,t.tokens_in,t.tokens_out,t.cost_usd FROM tasks t JOIN runs r ON r.id=t.run_id WHERE r.mission_id=?1 ORDER BY t.id").map_err(|e|e.to_string())?;
+    let mut stmt=conn.prepare("SELECT t.id,t.agent_id,t.title,t.cwd,t.session_id,t.tokens_in,t.tokens_out,t.cost_usd,t.model FROM tasks t JOIN runs r ON r.id=t.run_id WHERE r.mission_id=?1 ORDER BY t.id").map_err(|e|e.to_string())?;
     let ledger = stmt
         .query_map([mission_id], |r| {
             Ok((
@@ -386,11 +390,12 @@ pub fn mission_tokens_for_conn(
                 r.get::<_, Option<i64>>(5)?,
                 r.get::<_, Option<i64>>(6)?,
                 r.get::<_, Option<f64>>(7)?,
+                r.get::<_, Option<String>>(8)?,
             ))
         })
         .map_err(|e| e.to_string())?;
     for row in ledger {
-        let (id, agent, label, cwd, session, input, output, cost) =
+        let (id, agent, label, cwd, session, input, output, cost, model) =
             row.map_err(|e| e.to_string())?;
         // A task reopened as a terminal is a single session, not a second bill.
         if let Some(tab) = groups.get_mut(&agent).and_then(|tabs| {
@@ -403,6 +408,7 @@ pub fn mission_tokens_for_conn(
                 tab.input = input.and_then(|v| u64::try_from(v).ok());
                 tab.output = output.and_then(|v| u64::try_from(v).ok());
                 tab.source = Some("ledger".into());
+                tab.estimate = ledger_estimate(input, output, model.as_deref());
             }
             continue;
         }
@@ -424,10 +430,32 @@ pub fn mission_tokens_for_conn(
                 cache_write: None,
                 cache_read: None,
                 cost_usd: cost,
-                estimate: None,
+                estimate: ledger_estimate(input, output, model.as_deref()),
             });
     }
     Ok(aggregate_tabs(mission_id, groups))
+}
+
+fn ledger_estimate(
+    input: Option<i64>,
+    output: Option<i64>,
+    model: Option<&str>,
+) -> Option<CostEstimate> {
+    let input = u64::try_from(input?).ok()?;
+    let output = u64::try_from(output?).ok()?;
+    let model = model.unwrap_or("unknown");
+    Some(match super::pricing::price_for(model) {
+        Some(p) => CostEstimate {
+            cost_usd: super::pricing::cost_usd(p, input, output, 0, 0),
+            saved_usd: 0.0,
+            unpriced_models: vec![],
+        },
+        None => CostEstimate {
+            cost_usd: 0.0,
+            saved_usd: 0.0,
+            unpriced_models: vec![model.into()],
+        },
+    })
 }
 
 fn aggregate_tabs(
@@ -667,7 +695,11 @@ mod tests {
         let t = &r.agents[0].tabs[0];
         assert_eq!(t.source.as_deref(), Some("isolated_cwd"));
         assert_eq!(t.input, Some(10));
-        assert_eq!(t.estimate, None);
+        assert_eq!(t.estimate.as_ref().unwrap().cost_usd, 0.0);
+        assert_eq!(
+            t.estimate.as_ref().unwrap().unpriced_models,
+            vec!["unknown-model"]
+        );
         assert_eq!(r.agents.len(), 1);
         assert_eq!(r.totals.input, Some(10));
     }
