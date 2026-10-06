@@ -15,6 +15,9 @@ export interface Design {
   ownerTabId: string | null;
   title: string;
   status: DesignStatus;
+  /** O backend diz se há aba do dono para receber as mensagens, e por que não (sem dono / aba fechada). */
+  ownerAvailable?: boolean;
+  ownerWarning?: null | "missing" | "closed";
 }
 export interface DesignPage { id: string; designId: string; name: string; order: number }
 export interface Artboard {
@@ -84,11 +87,16 @@ export const designApi = {
   /** Volta ao conteúdo de uma versão anterior (gera uma versão nova, em rascunho). */
   revert: (artboardId: string, version: number, expectedVersion?: number) =>
     call<RawDesign>("design_artboard_revert", { artboardId, version, expectedVersion }),
+  /** Arquiva o design: sai do canvas, mas pode ser recuperado. */
+  archive: (designId: string) => call<unknown>("design_archive", { designId }),
+  /** Exclui o design inteiro (páginas, pranchetas, versões e comentários). */
+  remove: (designId: string) => call<unknown>("design_delete", { designId }),
   approve: (artboardId: string) => call<RawDesign>("design_artboard_approve", { artboardId }),
   reject: (artboardId: string) => call<RawDesign>("design_artboard_reject", { artboardId }),
   approveAll: (designId: string) => call<RawDesign>("design_approve_all", { designId }),
+  /** `commentAdded: false` = o comentário já existia aberto (repetido): não reenvie ao dono. */
   addComment: (artboardId: string, text: string, selector: string | null) =>
-    call<RawDesign>("design_comment_add", { artboardId, text, selector, author: "user" }),
+    call<RawDesign & { commentAdded?: boolean }>("design_comment_add", { artboardId, text, selector, author: "user" }),
   resolveComment: (commentId: string, resolved: boolean) => call<RawDesign>("design_comment_resolve", { commentId, resolved }),
   /**
    * Entrega um texto ao agente dono do design pelo mesmo caminho do chat do canvas (a

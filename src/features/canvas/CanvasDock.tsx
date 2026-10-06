@@ -83,7 +83,7 @@ const popover = `pointer-events-auto absolute right-3 bottom-16 rounded-2xl over
  *
  * Va en su propia capa, por encima de las terminales: abajo, una terminal viva la taparía.
  */
-export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onReset, petPercent }: {
+export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onReset, petPercent, hasDesign, designUnseen }: {
   zoom: number;
   panel: DockPanel | null;
   onTogglePanel: (p: DockPanel) => void;
@@ -93,6 +93,10 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
   onReset: () => void;
   /** Cuánto del nivel del pet está hecho (0–100): el tercer anillo. */
   petPercent: number;
+  /** Hay al menos un diseño en este canvas: sin diseño no hay botón (ni espacio muerto). */
+  hasDesign: boolean;
+  /** Apareció un diseño nuevo que el usuario aún no abrió: el botón lleva un indicador. */
+  designUnseen: boolean;
 }) {
   const { t } = useTranslation();
   const rf = useReactFlow();
@@ -152,7 +156,12 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
               leading-[17px] text-center shadow">{unreadTotal > 9 ? "9+" : unreadTotal}</span>
           )}
         </Pill>
-        <Pill label={t("canvas.design.hint")} active={panel === "design"} onClick={() => onTogglePanel("design")}><DesignIcon /></Pill>
+        {hasDesign && (
+          <Pill label={t("canvas.design.hint")} active={panel === "design"} onClick={() => onTogglePanel("design")} className="relative">
+            <DesignIcon />
+            {designUnseen && <span aria-label={t("canvas.design.unseen")} className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-accent-500 ring-2 ring-white dark:ring-surface-raised animate-pulse" />}
+          </Pill>
+        )}
         <Pill label={t("canvas.routines.hint")} active={panel === "routines"} onClick={() => onTogglePanel("routines")}><ClockIcon /></Pill>
         <Pill label={t("canvas.dock.layers")} active={panel === "layers"} onClick={() => onTogglePanel("layers")}><LayersIcon /></Pill>
         <Pill label={t("canvas.dock.usage")} active={usageOpen} onClick={toggleUsage} className="gap-1.5 px-3">
