@@ -5,6 +5,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { create } from "zustand";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { useViewTabsStore } from "@/features/tabs/viewStore";
 
 import { boardKeyOfTab, setWorkMode, useActiveBoardKey } from "./store";
 
@@ -211,6 +212,7 @@ export function useChatUnreadWatcher() {
       if (!tab) return;
       setWorkMode(boardKeyOfTab(tab), "canvas");
       tabs.activateTab(tab.id);
+      useViewTabsStore.getState().showTerminal();
       useUnreadStore.getState().setJump(e.payload);
     });
     const offNotified = listen<{ tabId: string; thread: string }>("cc-chat-notified", (e) => {
