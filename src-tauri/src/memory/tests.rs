@@ -98,7 +98,7 @@ fn migration_v23_to_v24_adds_memory_tables_and_immutable_triggers() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 37);
+    assert_eq!(version, 38);
     for table in [
         "memory_entries",
         "memory_revisions",
@@ -891,7 +891,7 @@ fn additive_upgrades_from_v19_through_v23_preserve_data_and_are_idempotent() {
         conn.pragma_update(None,"user_version",version).unwrap();
         crate::database::migrate_for_tests(&conn).unwrap();
         crate::database::migrate_for_tests(&conn).unwrap();
-        assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(), 37);
+        assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(), 38);
         assert_eq!(conn.query_row("SELECT model,handoff FROM tasks WHERE id='old-task'",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).unwrap(),("old-model".into(),"legacy delivery".into()));
         assert_eq!(conn.query_row("SELECT body FROM run_facts WHERE id='old-fact'",[],|r|r.get::<_,String>(0)).unwrap(),"historical fact");
         activate(&conn,"mission",Some("m1"),"upgrade","memory works");
@@ -1077,7 +1077,7 @@ fn migration_v24_failure_rolls_back_ddl_and_schema_version() {
     assert_eq!(conn.query_row("SELECT legacy FROM memory_revisions", [], |r| r.get::<_, String>(0)).unwrap(), "preserved");
     conn.execute("DROP TABLE memory_revisions", []).unwrap();
     crate::database::migrate_for_tests(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),  37);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),  38);
 }
 
 #[test]

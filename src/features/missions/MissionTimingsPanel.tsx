@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { activeSourceKey, formatActive, formatDuration, getMissionEfficiency, getTimings, shareOf, type MissionEfficiency, type MissionTimings } from "./timings";
+import { activeSourceKey, formatActive, formatDuration, getMissionEfficiency, getTimings, shareOf, testStatsView, type MissionEfficiency, type MissionTimings } from "./timings";
 
 /** Cada quanto se relê o cronómetro mientras se mira: los spans se graban sin evento. */
 const REFRESH_MS = 15_000;
@@ -93,6 +93,7 @@ export function MissionEfficiencyCard({ missionId, compact = false }: { missionI
   const value = (ms: number | null) => ms === null ? t("missions.efficiency.unmeasured") : formatDuration(ms);
   const activeText = formatActive(data.activeMs) ?? t("missions.efficiency.unmeasured");
   const sourceKey = activeSourceKey(data.activeSource);
+  const testView = testStatsView(data.testMetrics, data.wallMs);
   const cost = (usd: number | null) => usd === null ? t("missions.efficiency.unmeasured") : `$${usd.toFixed(3)}`;
   const gain = (percent: number | null) => percent === null
     ? t("missions.efficiency.unmeasured")
@@ -115,6 +116,14 @@ export function MissionEfficiencyCard({ missionId, compact = false }: { missionI
         <Metric label={t("missions.efficiency.agents")} value={String(data.agents)} labelClass={label} valueClass={metric} />
         <Metric label={t("missions.timings.firstDelegation")} value={value(data.firstDelegationMs ?? null)} labelClass={label} valueClass={data.firstDelegationMs == null ? (compact ? "text-gray-500" : "text-gray-400") : metric} />
       </div>
+
+      {testView ? (
+        <p className={compact ? "mt-2 text-[10px] text-gray-300" : "mt-2 text-[10.5px] text-gray-600 dark:text-gray-300"}>
+          {t("missions.efficiency.tests", { time: testView.time, share: testView.share ?? 0, runs: testView.runs })}
+          {" · "}
+          {t("missions.efficiency.testsSkipped", { cache: testView.skipped, affected: testView.affected })}
+        </p>
+      ) : null}
 
       {data.firstDelegationSource ? <p className={compact ? "mt-2 text-[10px] text-gray-400" : "mt-2 text-[10.5px] text-gray-500 dark:text-gray-400"}>{t(`missions.timings.delegationSource.${data.firstDelegationSource}`)}</p> : null}
 

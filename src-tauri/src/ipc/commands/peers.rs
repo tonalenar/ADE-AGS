@@ -389,7 +389,7 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         "recruit no clone atual; nenhum link adicional necessário".into()
     };
 
-    let configured_target = if mission_workspace.is_some() { Some(std::ffi::OsString::from("per-worktree")) } else { std::env::var_os(crate::floors::CARGO_TARGET_DIR_SETTING) };
+    let configured_target = std::env::var_os(crate::floors::CARGO_TARGET_DIR_SETTING);
     let cargo_target = crate::floors::cargo_target_dir(&repo_root, &worktree_root, configured_target.as_deref());
     let (shell, shell_label) = crate::floors::worktree_shell();
     let environment = mission_workspace.as_ref().map(|w| w.environment.clone()).unwrap_or_else(|| crate::floors::worktree_environment_block(

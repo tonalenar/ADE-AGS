@@ -556,7 +556,7 @@ mod tests {
         assert_eq!(
             c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            37
+            38
         );
         eprintln!(
             "Real snapshot migration preserved {} boards, {} versions and {} comments",
@@ -878,7 +878,7 @@ mod tests {
         assert_eq!(
             c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            37
+            38
         );
     }
     #[test]

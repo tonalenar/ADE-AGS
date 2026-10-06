@@ -33,6 +33,7 @@ pub struct AgentBandComparison {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct MissionEfficiency {
+    pub test_metrics: timings::TestMetrics,
     /// Tempo ativo oficial: `mission_active` e, sem ele, a união dos spans (ver `active::choose`).
     pub active_ms: Option<i64>,
     /// De onde veio `active_ms`: `mission_active`, `spans`, `wall` ou ausente.
@@ -92,6 +93,7 @@ pub fn get(conn: &Connection, mission_id: &str) -> Result<MissionEfficiency, Str
 
     let (first_delegation_ms, first_delegation_source) = timings::first_delegation(&timings::list(conn, mission_id)?, mission.1);
     Ok(MissionEfficiency {
+        test_metrics: timings::test_metrics(&timings::list(conn, mission_id)?),
         first_delegation_ms,
         first_delegation_source,
         active_ms: current.active_ms,

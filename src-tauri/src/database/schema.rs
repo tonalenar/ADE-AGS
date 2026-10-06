@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 37;
+const SCHEMA_VERSION: i32 = 38;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1096,6 +1096,8 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     crate::design::migrate(conn)?;
     // v37: consolidate duplicate designs without losing their contents or old IDs.
     crate::design::migrate_v37(conn)?;
+    // v38: additive, idempotent test result cache (no writes to Git or targets).
+    crate::testspeed::run::migrate(conn)?;
     set_user_version(conn, SCHEMA_VERSION)
 }
 

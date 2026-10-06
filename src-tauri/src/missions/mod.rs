@@ -651,6 +651,7 @@ pub struct MissionTimings {
     pub orchestrator_wait_ms: i64,
     pub orchestrator_max_wait_ms: i64,
     pub time_until_all_working_ms: Option<i64>,
+    pub qa_wait_ms: i64,
 }
 
 pub(crate) fn timings_of(conn: &Connection, mission_id: &str) -> Result<MissionTimings, String> {
@@ -664,8 +665,9 @@ pub(crate) fn timings_of(conn: &Connection, mission_id: &str) -> Result<MissionT
     let (first_delegation_ms, first_delegation_source) = timings::first_delegation(&spans, started_at);
     let (orchestrator_stall_count, orchestrator_wait_ms, orchestrator_max_wait_ms) = timings::orchestrator_waits(&spans);
     let time_until_all_working_ms = spans.iter().find(|s| s.kind == "start_all_working").map(|s| s.duration_ms());
+    let qa_wait_ms = timings::qa_waits(&spans);
     Ok(MissionTimings { spans, summary, active, turn_ms, first_delegation_ms, first_delegation_source,
-        orchestrator_stall_count, orchestrator_wait_ms, orchestrator_max_wait_ms, time_until_all_working_ms })
+        orchestrator_stall_count, orchestrator_wait_ms, orchestrator_max_wait_ms, time_until_all_working_ms, qa_wait_ms })
 }
 
 #[tauri::command]

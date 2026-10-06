@@ -3,6 +3,15 @@
 use super::*;
 
 #[test]
+fn local_tests_accept_suite_force_and_dry_run() {
+    let args = parse("test.run", &["rust", "--force"]).unwrap();
+    assert_eq!(args["suite"], "rust");
+    assert_eq!(args["force"], true);
+    assert_eq!(parse("test.affected", &["--dry-run"]).unwrap()["dryRun"], true);
+    assert!(parse("test.status", &["extra"]).is_err());
+}
+
+#[test]
 fn cleanup_and_worktree_sweep_flags_are_routed() {
     let c=parse("mission.cleanup", &["mission-id","--dry-run"]).unwrap();assert_eq!(c["mission"],"mission-id");assert!(c.get("dryRun").is_some());
     assert!(parse("mission.cleanup", &["m","extra"]).is_err());

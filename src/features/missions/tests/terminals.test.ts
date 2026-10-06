@@ -128,6 +128,26 @@ describe("el equipo de una misión", () => {
     expect(text).toContain(`ags peer tell "${LEAD_NAME}"`);
     expect(text).not.toMatch(/\n\n\n/);
   });
+
+  it("o briefing do orquestrador inclui QA em fluxo e regras de teste/CI", () => {
+    const team = teamOf(squad([{ roleId: "backend" }, { roleId: "qa" }]), roles);
+    const text = leadBriefing({ title: "T", objective: "O" }, team);
+    expect(text).toContain("QA EM FLUXO E VALIDAÇÃO CONTÍNUA:");
+    expect(text).toContain('ags peer tell "QA / Tests"');
+    expect(text).toContain("ags test affected");
+    expect(text).toContain("UMA única execução completa");
+    expect(text).toContain("VELOCIDADE DE TESTE E CI (PONTO 3):");
+    expect(text).toContain("gh pr checks <n> --watch");
+  });
+
+  it("o briefing do integrante inclui regras de velocidade de teste e espera do CI", () => {
+    const [backend] = teamOf(squad([{ roleId: "backend" }]), roles);
+    const text = memberBriefing({ title: "T", objective: "O" }, backend);
+    expect(text).toContain("VELOCIDADE DE TESTE E CI (PONTO 3):");
+    expect(text).toContain("ags test affected");
+    expect(text).toContain("gh pr checks <n> --watch");
+    expect(text).toContain("Suíte completa local apenas em cenários de risco elevado");
+  });
 });
 
 describe("el canvas de la misión", () => {
