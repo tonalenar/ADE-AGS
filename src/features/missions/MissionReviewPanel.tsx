@@ -6,6 +6,7 @@ import { AppDialog } from "@/shared/ui/AppDialog";
 import {
   acceptMissionTask, applyMission, missionReview, missionTaskDiff, rejectMissionTask,
 } from "./ipc";
+import { ConflictsSection } from "./ConflictsSection";
 import type { Delivery, MergeOutcome, MissionReview } from "./types";
 
 const REVIEW_VARIANT = { accepted: "success", rejected: "neutral", conflict: "danger" } as const;
@@ -21,8 +22,9 @@ export function MissionReviewPanel({ missionId, refreshKey }: { missionId: strin
   const { t } = useTranslation();
   const [review, setReview] = useState<MissionReview | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string } | null>(null);
+  const [message, setMessage] = useState<{ tone: "ok" | "error"; text: string; conflict?: boolean } | null>(null);
   const [diffFor, setDiffFor] = useState<Delivery | null>(null);
+  const [resolving, setResolving] = useState(false);
 
   const load = useCallback(() => {
     missionReview(missionId).then(setReview).catch((e) => setMessage({ tone: "error", text: String(e) }));
@@ -32,9 +34,9 @@ export function MissionReviewPanel({ missionId, refreshKey }: { missionId: strin
   const describe = (outcome: MergeOutcome, ok: string) =>
     outcome.result === "Merged"
       ? { tone: "ok" as const, text: `${ok} (${outcome.commit})` }
-      : { tone: "error" as const, text: t("missions.review.conflict", { files: outcome.files.join(", ") }) };
+      : { tone: "error" as const, text: t("missions.review.conflict", { files: outcome.files.join(", ") }), conflict: true };
 
-  const act = async (key: string, run: () => Promise<{ tone: "ok" | "error"; text: string } | null>) => {
+  const act = async (key: string, run: () => Promise<{ tone: "ok" | "error"; text: string; conflict?: boolean } | null>) => {
     setBusy(key);
     setMessage(null);
     try {
@@ -74,6 +76,13 @@ export function MissionReviewPanel({ missionId, refreshKey }: { missionId: strin
           {message.text}
         </p>
       )}
+
+      {message?.conflict && !resolving && (
+        <Button size="sm" variant="secondary" className="self-start" onClick={() => setResolving(true)}>
+          {t("missions.conflicts.resolve")}
+        </Button>
+      )}
+      {resolving && <ConflictsSection missionId={missionId} onDone={() => { setResolving(false); setMessage(null); load(); }} />}
 
       <ul className="flex flex-col divide-y divide-gray-100 dark:divide-white/5 rounded-lg border border-gray-200 dark:border-white/8">
         {review.deliveries.map((d) => {
