@@ -1,6 +1,6 @@
 //! Untrusted design documents. HTML is opaque data: never interpreted or executed here.
 use crate::database::DbConnection;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use serde_json::{Value, json};
 use tauri::{Emitter, Manager};
 
@@ -32,6 +32,53 @@ pub(crate) fn migrate(c: &Connection) -> rusqlite::Result<()> {
     CREATE INDEX IF NOT EXISTS design_artboard_idx ON design_artboard(page_id);
     CREATE INDEX IF NOT EXISTS design_comment_idx ON design_comment(artboard_id);")
 }
+/// v37: preserve every page, board, comment and version while consolidating documents.
+/// Retain the old document as an archived alias so existing agent IDs still resolve.
+pub(crate) fn migrate_v37(c: &Connection) -> rusqlite::Result<()> {
+    // The main schema migration already owns a savepoint; nest instead of BEGIN.
+    c.execute_batch("SAVEPOINT migrate_design_v37")?;
+    let result = (|| -> rusqlite::Result<()> {
+        let tx = c;
+        for (column, ddl) in [
+            ("archived", "INTEGER NOT NULL DEFAULT 0"),
+            ("merged_into", "TEXT"),
+        ] {
+            if tx
+                .prepare(&format!("SELECT {column} FROM design LIMIT 0"))
+                .is_err()
+            {
+                tx.execute_batch(&format!("ALTER TABLE design ADD COLUMN {column} {ddl}"))?;
+            }
+        }
+        let pairs = {
+            let mut s = tx.prepare("SELECT d.id, (SELECT k.id FROM design k WHERE k.archived=0 AND trim(k.title)=trim(d.title) AND ((d.mission_id IS NOT NULL AND k.mission_id=d.mission_id) OR (d.mission_id IS NULL AND k.mission_id IS NULL AND k.workspace=d.workspace)) ORDER BY k.rowid LIMIT 1) FROM design d WHERE d.archived=0 ORDER BY d.rowid")?;
+            s.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?)))?
+                .collect::<rusqlite::Result<Vec<_>>>()?
+        };
+        for (duplicate, canonical) in pairs {
+            if duplicate == canonical {
+                continue;
+            }
+            tx.execute("UPDATE design SET owner_tab_id=COALESCE(NULLIF(owner_tab_id,''),(SELECT NULLIF(owner_tab_id,'') FROM design WHERE id=?2)) WHERE id=?1", params![canonical, duplicate])?;
+            tx.execute("UPDATE design_page SET sort_order=sort_order+(SELECT COALESCE(MAX(sort_order)+1,0) FROM design_page WHERE design_id=?1),design_id=?1 WHERE design_id=?2", params![canonical, duplicate])?;
+            tx.execute(
+                "UPDATE design SET archived=1,merged_into=?1 WHERE id=?2",
+                params![canonical, duplicate],
+            )?;
+            aggregate(&tx, &canonical).map_err(|e| rusqlite::Error::InvalidParameterName(e))?;
+        }
+        tx.execute_batch("CREATE UNIQUE INDEX IF NOT EXISTS design_mission_title_unique ON design(mission_id,trim(title)) WHERE mission_id IS NOT NULL AND archived=0;
+        CREATE UNIQUE INDEX IF NOT EXISTS design_workspace_title_unique ON design(workspace,trim(title)) WHERE mission_id IS NULL AND archived=0;")?;
+        Ok(())
+    })();
+    match result {
+        Ok(()) => c.execute_batch("RELEASE migrate_design_v37"),
+        Err(e) => {
+            c.execute_batch("ROLLBACK TO migrate_design_v37; RELEASE migrate_design_v37")?;
+            Err(e)
+        }
+    }
+}
 fn err(e: rusqlite::Error) -> String {
     e.to_string()
 }
@@ -51,7 +98,9 @@ fn bounded(a: &Value, key: &str, max: usize) -> Result<String> {
 fn optional(a: &Value, key: &str) -> Result<Option<String>> {
     match a.get(key) {
         None | Some(Value::Null) => Ok(None),
-        Some(Value::String(s)) if s.len() <= 512 => Ok(Some(s.clone())),
+        Some(Value::String(s)) if s.len() <= 512 => {
+            Ok((!s.trim().is_empty()).then(|| s.trim().to_string()))
+        }
         _ => Err(format!("Invalid {key}")),
     }
 }
@@ -78,7 +127,27 @@ fn ids(c: &Connection, sql: &str, id: &str) -> Result<Vec<String>> {
     rows.collect::<rusqlite::Result<Vec<_>>>().map_err(err)
 }
 fn get(c: &Connection, id: &str) -> Result<Value> {
-    let mut d=c.query_row("SELECT id,workspace,mission_id,owner_tab_id,title,status FROM design WHERE id=?1",[id],|r|Ok(json!({"id":r.get::<_,String>(0)?,"workspace":r.get::<_,String>(1)?,"missionId":r.get::<_,Option<String>>(2)?,"ownerTabId":r.get::<_,Option<String>>(3)?,"title":r.get::<_,String>(4)?,"status":r.get::<_,String>(5)?}))).map_err(err)?;
+    let canonical = canonical_id(c, id)?;
+    let id = canonical.as_str();
+    let mut d=c.query_row("SELECT id,workspace,mission_id,owner_tab_id,title,status,archived FROM design WHERE id=?1",[id],|r|Ok(json!({"id":r.get::<_,String>(0)?,"workspace":r.get::<_,String>(1)?,"missionId":r.get::<_,Option<String>>(2)?,"ownerTabId":r.get::<_,Option<String>>(3)?,"title":r.get::<_,String>(4)?,"status":r.get::<_,String>(5)?,"archived":r.get::<_,bool>(6)?}))).map_err(err)?;
+    let available = match d["ownerTabId"].as_str() {
+        Some(owner) => c
+            .query_row(
+                "SELECT EXISTS(SELECT 1 FROM tabs WHERE id=?1)",
+                [owner],
+                |r| r.get::<_, bool>(0),
+            )
+            .map_err(err)?,
+        None => false,
+    };
+    d["ownerAvailable"] = json!(available);
+    d["ownerWarning"] = if available {
+        Value::Null
+    } else if d["ownerTabId"].is_null() {
+        json!("missing")
+    } else {
+        json!("closed")
+    };
     let mut pages = Vec::new();
     for pid in ids(
         c,
@@ -115,6 +184,14 @@ fn get(c: &Connection, id: &str) -> Result<Value> {
     d["pages"] = json!(pages);
     Ok(d)
 }
+fn canonical_id(c: &Connection, id: &str) -> Result<String> {
+    c.query_row(
+        "SELECT COALESCE(merged_into,id) FROM design WHERE id=?1",
+        [id],
+        |r| r.get(0),
+    )
+    .map_err(err)
+}
 fn save_snapshot(c: &Connection, id: &str) -> Result<()> {
     let b = artboard(c, id)?;
     c.execute(
@@ -125,8 +202,8 @@ fn save_snapshot(c: &Connection, id: &str) -> Result<()> {
     Ok(())
 }
 fn design_for(c: &Connection, op: &str, a: &Value) -> Result<String> {
-    if matches!(op, "page_add" | "approve_all") {
-        return Ok(text(a, "designId")?.into());
+    if matches!(op, "page_add" | "approve_all" | "delete" | "archive") {
+        return canonical_id(c, text(a, "designId")?);
     }
     if op == "artboard_add" {
         if a.get("page").is_some() {
@@ -135,7 +212,7 @@ fn design_for(c: &Connection, op: &str, a: &Value) -> Result<String> {
                 r.get::<_, String>(0)
             })
             .map_err(err)?;
-            return Ok(id.into());
+            return canonical_id(c, id);
         }
         return c
             .query_row(
@@ -172,7 +249,7 @@ pub(crate) fn execute(c: &mut Connection, op: &str, a: &Value) -> Result<Value> 
         return Ok(json!(
             ids(
                 c,
-                "SELECT id FROM design WHERE (?1='' OR workspace=?1) ORDER BY rowid",
+                "SELECT id FROM design WHERE archived=0 AND (?1='' OR workspace=?1) ORDER BY rowid",
                 workspace.as_deref().unwrap_or("")
             )?
             .iter()
@@ -184,14 +261,44 @@ pub(crate) fn execute(c: &mut Connection, op: &str, a: &Value) -> Result<Value> 
         return get(c, text(a, "designId")?);
     }
     let tx = c.transaction().map_err(err)?;
+    let mut is_new = false;
+    let mut comment_added = None;
     let id = if op == "create" {
-        uuid::Uuid::new_v4().to_string()
+        let workspace = bounded(a, "workspace", 4096)?;
+        let title = bounded(a, "title", 512)?.trim().to_string();
+        let mission = optional(a, "missionId")?;
+        let existing = tx.query_row("SELECT id FROM design WHERE archived=0 AND trim(title)=?1 AND ((?2 IS NOT NULL AND mission_id=?2) OR (?2 IS NULL AND mission_id IS NULL AND workspace=?3))", params![title, mission, workspace], |r| r.get::<_, String>(0)).optional().map_err(err)?;
+        match existing {
+            Some(id) => id,
+            None => {
+                is_new = true;
+                uuid::Uuid::new_v4().to_string()
+            }
+        }
     } else {
         design_for(&tx, op, a)?
     };
     match op {
         "create" => {
-            tx.execute("INSERT INTO design(id,workspace,mission_id,owner_tab_id,title) VALUES(?1,?2,?3,?4,?5)",params![id,bounded(a,"workspace",4096)?,optional(a,"missionId")?,optional(a,"ownerTabId")?.or(optional(a,"from")?),bounded(a,"title",512)?]).map_err(err)?;
+            let owner = optional(a, "from")?.or(optional(a, "ownerTabId")?);
+            if is_new {
+                tx.execute("INSERT INTO design(id,workspace,mission_id,owner_tab_id,title) VALUES(?1,?2,?3,?4,?5)",params![id,bounded(a,"workspace",4096)?,optional(a,"missionId")?,owner,bounded(a,"title",512)?.trim()]).map_err(err)?;
+            } else {
+                // A retry retains the original creator; only fill an owner that was missing.
+                tx.execute("UPDATE design SET owner_tab_id=COALESCE(NULLIF(owner_tab_id,''),?2) WHERE id=?1",params![id,owner]).map_err(err)?;
+            }
+        }
+        "delete" => {
+            let mut result = get(&tx, &id)?;
+            tx.execute("DELETE FROM design WHERE merged_into=?1 OR id=?1", [&id])
+                .map_err(err)?;
+            result["deleted"] = json!(true);
+            tx.commit().map_err(err)?;
+            return Ok(result);
+        }
+        "archive" => {
+            tx.execute("UPDATE design SET archived=1 WHERE id=?1", [&id])
+                .map_err(err)?;
         }
         "page_add" => {
             get(&tx, &id)?;
@@ -242,6 +349,9 @@ pub(crate) fn execute(c: &mut Connection, op: &str, a: &Value) -> Result<Value> 
                 text(a, "pageId")?.to_string()
             };
             let bid = uuid::Uuid::new_v4().to_string();
+            // Default to the right of all existing boards, at the last board's y.
+            // Explicit coordinates (including zero) always win independently.
+            let (next_x, next_y): (f64, f64) = tx.query_row("SELECT COALESCE(MAX(x+width)+48,0),COALESCE((SELECT y FROM design_artboard WHERE page_id=?1 ORDER BY rowid DESC LIMIT 1),0) FROM design_artboard WHERE page_id=?1", [&page_id], |r| Ok((r.get(0)?,r.get(1)?))).map_err(err)?;
             tx.execute(
                 "INSERT INTO design_artboard VALUES(?1,?2,?3,?4,?5,?6,?7,?8,1,'draft')",
                 params![
@@ -251,8 +361,8 @@ pub(crate) fn execute(c: &mut Connection, op: &str, a: &Value) -> Result<Value> 
                     bounded(a, "html", MAX_HTML)?,
                     number(a, "width", 1024.0)?,
                     number(a, "height", 768.0)?,
-                    number(a, "x", 0.0)?,
-                    number(a, "y", 0.0)?
+                    number(a, "x", next_x)?,
+                    number(a, "y", next_y)?
                 ],
             )
             .map_err(err)?;
@@ -277,6 +387,11 @@ pub(crate) fn execute(c: &mut Connection, op: &str, a: &Value) -> Result<Value> 
             } else {
                 current.clone()
             };
+            if op == "artboard_revert" {
+                // Undo edits without moving a node back to an old canvas position.
+                b["x"] = current["x"].clone();
+                b["y"] = current["y"].clone();
+            }
             if op == "artboard_update" {
                 for k in ["title", "html", "width", "height", "x", "y"] {
                     if let Some(v) = a.get(k) {
@@ -284,8 +399,14 @@ pub(crate) fn execute(c: &mut Connection, op: &str, a: &Value) -> Result<Value> 
                     }
                 }
             }
-            tx.execute("UPDATE design_artboard SET title=?2,html=?3,width=?4,height=?5,x=?6,y=?7,version=?8,status='draft' WHERE id=?1",params![bid,bounded(&b,"title",512)?,bounded(&b,"html",MAX_HTML)?,number(&b,"width",1024.0)?,number(&b,"height",768.0)?,number(&b,"x",0.0)?,number(&b,"y",0.0)?,current["version"].as_i64().unwrap()+1]).map_err(err)?;
-            save_snapshot(&tx, bid)?;
+            let changed = op == "artboard_revert"
+                || ["title", "html", "width", "height"]
+                    .iter()
+                    .any(|k| b[k] != current[k]);
+            tx.execute("UPDATE design_artboard SET title=?2,html=?3,width=?4,height=?5,x=?6,y=?7,version=?8,status=?9 WHERE id=?1",params![bid,bounded(&b,"title",512)?,bounded(&b,"html",MAX_HTML)?,number(&b,"width",1024.0)?,number(&b,"height",768.0)?,number(&b,"x",0.0)?,number(&b,"y",0.0)?,current["version"].as_i64().unwrap()+i64::from(changed),if changed { "draft" } else { current["status"].as_str().unwrap() }]).map_err(err)?;
+            if changed {
+                save_snapshot(&tx, bid)?;
+            }
         }
         "artboard_approve" | "artboard_reject" => {
             tx.execute(
@@ -306,7 +427,12 @@ pub(crate) fn execute(c: &mut Connection, op: &str, a: &Value) -> Result<Value> 
             tx.execute("UPDATE design_artboard SET status='approved' WHERE status='draft' AND page_id IN (SELECT id FROM design_page WHERE design_id=?1)",[&id]).map_err(err)?;
         }
         "comment_add" => {
-            tx.execute("INSERT INTO design_comment(id,artboard_id,author,text,selector) VALUES(?1,?2,?3,?4,?5)",params![uuid::Uuid::new_v4().to_string(),text(a,"artboardId")?,text(a,"author")?,bounded(a,"text",16384)?,optional(a,"selector")?]).map_err(err)?;
+            let author = text(a, "author")?;
+            if !matches!(author, "user" | "agent") {
+                return Err("Invalid author".into());
+            }
+            let inserted=tx.execute("INSERT INTO design_comment(id,artboard_id,author,text,selector) SELECT ?1,?2,?3,?4,?5 WHERE NOT EXISTS(SELECT 1 FROM design_comment WHERE artboard_id=?2 AND author=?3 AND trim(text)=?4 AND selector IS ?5 AND resolved=0)",params![uuid::Uuid::new_v4().to_string(),text(a,"artboardId")?,author,bounded(a,"text",16384)?.trim(),optional(a,"selector")?]).map_err(err)?;
+            comment_added = Some(inserted > 0);
         }
         "comment_resolve" => {
             let resolved = match a.get("resolved") {
@@ -323,7 +449,13 @@ pub(crate) fn execute(c: &mut Connection, op: &str, a: &Value) -> Result<Value> 
         _ => return Err(format!("Unknown design operation: {op}")),
     }
     aggregate(&tx, &id)?;
-    let result = get(&tx, &id)?;
+    let mut result = get(&tx, &id)?;
+    if op == "create" {
+        result["isNew"] = json!(is_new);
+    }
+    if let Some(added) = comment_added {
+        result["commentAdded"] = json!(added);
+    }
     tx.commit().map_err(err)?;
     Ok(result)
 }
@@ -334,7 +466,7 @@ pub(crate) fn dispatch(app: &tauri::AppHandle, op: &str, args: &Value) -> Result
         execute(&mut connection, op, args)?
     };
     if !matches!(op, "get" | "list") {
-        app.emit("design-changed", json!({"designId":result["id"]}))
+        app.emit("design-changed", json!({"designId":result["id"],"isNew":result["isNew"].as_bool().unwrap_or(false),"deleted":op=="delete","archived":result["archived"],"title":result["title"],"workspace":result["workspace"],"missionId":result["missionId"]}))
             .map_err(|e| e.to_string())?;
     }
     Ok(result)
@@ -348,6 +480,8 @@ macro_rules! command {
     };
 }
 command!(design_create, "create");
+command!(design_delete, "delete");
+command!(design_archive, "archive");
 command!(design_list, "list");
 command!(design_get, "get");
 command!(design_page_add, "page_add");
@@ -362,6 +496,327 @@ command!(design_comment_resolve, "comment_resolve");
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    #[ignore = "Run explicitly after a read-only SQLite backup to target/design-audit/data.db"]
+    fn audit_real_database_copy() {
+        // Fixed workspace-local path: this test can never open ~/.ags/data.db.
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("target/design-audit/data.db");
+        let mut c = Connection::open_with_flags(&path, rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE)
+            .unwrap();
+        c.execute_batch("PRAGMA foreign_keys=ON").unwrap();
+        let counts = |c: &Connection| {
+            [
+                "design_page",
+                "design_artboard",
+                "design_artboard_version",
+                "design_comment",
+            ]
+            .map(|table| {
+                c.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| {
+                    r.get::<_, i64>(0)
+                })
+                .unwrap()
+            })
+        };
+        let before = counts(&c);
+        let snapshots = ids(&c,"SELECT artboard_id || ':' || version || ':' || snapshot FROM design_artboard_version WHERE ?1='' ORDER BY artboard_id,version","").unwrap();
+        crate::database::migrate_for_tests(&c).unwrap();
+        crate::database::migrate_for_tests(&c).unwrap();
+        assert_eq!(counts(&c), before);
+        assert_eq!(ids(&c,"SELECT artboard_id || ':' || version || ':' || snapshot FROM design_artboard_version WHERE ?1='' ORDER BY artboard_id,version","").unwrap(),snapshots);
+        let documents = execute(&mut c, "list", &json!({})).unwrap();
+        let designs = documents
+            .as_array()
+            .unwrap()
+            .iter()
+            .filter(|d| d["title"] == "Polir o bot - aura e acabamento")
+            .collect::<Vec<_>>();
+        assert_eq!(designs.len(), 1);
+        let boards = designs[0]["pages"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .flat_map(|p| p["artboards"].as_array().unwrap())
+            .collect::<Vec<_>>();
+        assert!(boards.len() >= 10);
+        assert!(boards.iter().any(|b| b["status"] == "rejected"));
+        assert!(boards.iter().any(|b| b["version"].as_i64().unwrap() > 1));
+        assert!(designs[0]["ownerTabId"].as_str().is_some());
+        let aliases = ids(
+            &c,
+            "SELECT id FROM design WHERE merged_into=?1",
+            designs[0]["id"].as_str().unwrap(),
+        )
+        .unwrap();
+        assert!(!aliases.is_empty());
+        for alias in aliases {
+            assert_eq!(get(&c, &alias).unwrap()["id"], designs[0]["id"]);
+        }
+        assert_eq!(
+            c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            37
+        );
+        eprintln!(
+            "Real snapshot migration preserved {} boards, {} versions and {} comments",
+            before[1], before[2], before[3]
+        );
+    }
+    #[test]
+    fn automatic_positions_are_spaced_and_explicit_zero_is_preserved() {
+        let (mut c, _, pid, _) = setup();
+        for n in 1..5 {
+            let d = execute(
+                &mut c,
+                "artboard_add",
+                &json!({"pageId":pid,"title":format!("Board {n}"),"html":"x"}),
+            )
+            .unwrap();
+            assert_eq!(d["pages"][0]["artboards"][n]["x"], 1072.0 * n as f64);
+        }
+        let d = execute(
+            &mut c,
+            "artboard_add",
+            &json!({"pageId":pid,"title":"Explicit","html":"x","x":0,"y":800}),
+        )
+        .unwrap();
+        assert_eq!(d["pages"][0]["artboards"][5]["x"], 0.0);
+        let d = execute(
+            &mut c,
+            "artboard_add",
+            &json!({"pageId":pid,"title":"Next","html":"x"}),
+        )
+        .unwrap();
+        assert_eq!(d["pages"][0]["artboards"][6]["x"], 5360.0);
+        assert_eq!(d["pages"][0]["artboards"][6]["y"], 800.0);
+        let d = execute(
+            &mut c,
+            "artboard_add",
+            &json!({"designId":d["id"],"page":"Another","title":"First","html":"x"}),
+        )
+        .unwrap();
+        assert_eq!(d["pages"][1]["artboards"][0]["x"], 0.0);
+    }
+    #[test]
+    fn create_deduplicates_by_mission_or_workspace_and_keeps_creator() {
+        let mut c = crate::database::test_db();
+        let args = json!({"workspace":"one","missionId":"mission","title":"Design","from":"creator","ownerTabId":"wrong"});
+        let d = execute(&mut c, "create", &args).unwrap();
+        assert_eq!(d["ownerTabId"], "creator");
+        assert_eq!(d["isNew"], true);
+        let retry=execute(&mut c,"create",&json!({"workspace":"different-worktree","missionId":"mission","title":" Design ","from":"other"})).unwrap();
+        assert_eq!(retry["id"], d["id"]);
+        assert_eq!(retry["isNew"], false);
+        assert_eq!(retry["ownerTabId"], "creator");
+        let other = execute(
+            &mut c,
+            "create",
+            &json!({"workspace":"one","missionId":"other","title":"Design"}),
+        )
+        .unwrap();
+        assert_ne!(other["id"], d["id"]);
+        let args = json!({"workspace":"one","title":"Without mission"});
+        let first = execute(&mut c, "create", &args).unwrap();
+        assert_eq!(execute(&mut c, "create", &args).unwrap()["id"], first["id"]);
+        assert_ne!(
+            execute(
+                &mut c,
+                "create",
+                &json!({"workspace":"two","title":"Without mission"})
+            )
+            .unwrap()["id"],
+            first["id"]
+        );
+    }
+    #[test]
+    fn duplicate_migration_preserves_boards_versions_comments_and_aliases() {
+        let (mut c, did, pid, bid) = setup();
+        c.execute_batch(
+            "DROP INDEX design_workspace_title_unique; DROP INDEX design_mission_title_unique;",
+        )
+        .unwrap();
+        c.execute("UPDATE design SET owner_tab_id=NULL WHERE id=?1", [&did])
+            .unwrap();
+        c.execute("INSERT INTO design(id,workspace,title,owner_tab_id) VALUES('duplicate','project','Design','creator')",[]).unwrap();
+        c.execute("INSERT INTO design_page(id,design_id,name,sort_order) VALUES('duplicate-page','duplicate','Page 1',0)",[]).unwrap();
+        // Actual user's five artboard titles, sizes and stacked positions.
+        for (i, title) in [
+            "Aura - 3 propostas",
+            "Estados do bot",
+            "Tamanhos",
+            "Pixel-art detalhada",
+            "Microinteracoes",
+        ]
+        .iter()
+        .enumerate()
+        {
+            c.execute("INSERT INTO design_artboard VALUES(?1,'duplicate-page',?2,'<p>real design</p>',720,560,0,0,1,'approved')",params![format!("copy-{i}"),title]).unwrap();
+            save_snapshot(&c, &format!("copy-{i}")).unwrap();
+        }
+        c.execute("INSERT INTO design_comment(id,artboard_id,author,text,selector) VALUES('comment','copy-0','user','Change aura','#aura')",[]).unwrap();
+        migrate_v37(&c).unwrap();
+        migrate_v37(&c).unwrap();
+        let d = get(&c, "duplicate").unwrap();
+        assert_eq!(d["id"], did);
+        assert_eq!(d["ownerTabId"], "creator");
+        assert_eq!(d["pages"].as_array().unwrap().len(), 2);
+        assert_eq!(d["pages"][1]["artboards"].as_array().unwrap().len(), 5);
+        assert_eq!(
+            d["pages"][1]["artboards"][0]["versions"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert_eq!(
+            d["pages"][1]["artboards"][0]["comments"][0]["selector"],
+            "#aura"
+        );
+        assert_eq!(d["pages"][0]["id"], pid);
+        assert_eq!(d["pages"][0]["artboards"][0]["id"], bid);
+        assert_eq!(
+            execute(&mut c, "list", &json!({}))
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            c.execute(
+                "INSERT INTO design(id,workspace,title) VALUES('again','project','Design')",
+                []
+            )
+            .is_err()
+        );
+        let d = execute(
+            &mut c,
+            "page_add",
+            &json!({"designId":"duplicate","name":"Via alias"}),
+        )
+        .unwrap();
+        assert_eq!(d["id"], did);
+        let d = execute(&mut c, "delete", &json!({"designId":"duplicate"})).unwrap();
+        assert_eq!(d["deleted"], true);
+        for table in [
+            "design",
+            "design_page",
+            "design_artboard",
+            "design_artboard_version",
+            "design_comment",
+        ] {
+            assert_eq!(
+                c.query_row(&format!("SELECT count(*) FROM {table}"), [], |r| r
+                    .get::<_, i64>(0))
+                    .unwrap(),
+                0
+            );
+        }
+    }
+    #[test]
+    fn movement_preserves_approval_and_undo_preserves_position() {
+        let (mut c, _, _, bid) = setup();
+        execute(&mut c, "artboard_approve", &json!({"artboardId":bid})).unwrap();
+        execute(
+            &mut c,
+            "artboard_update",
+            &json!({"artboardId":bid,"x":800,"y":250}),
+        )
+        .unwrap();
+        let b = artboard(&c, &bid).unwrap();
+        assert_eq!(b["status"], "approved");
+        assert_eq!(b["version"], 1);
+        execute(
+            &mut c,
+            "artboard_update",
+            &json!({"artboardId":bid,"html":"<p>edited</p>"}),
+        )
+        .unwrap();
+        let d = execute(
+            &mut c,
+            "artboard_revert",
+            &json!({"artboardId":bid,"version":1,"expectedVersion":2}),
+        )
+        .unwrap();
+        let b = &d["pages"][0]["artboards"][0];
+        assert_eq!(b["x"], 800.0);
+        assert_eq!(b["y"], 250.0);
+        assert_eq!(b["version"], 3);
+        assert_eq!(b["status"], "draft");
+    }
+    #[test]
+    fn archive_hides_document_without_deleting_history() {
+        let (mut c, did, _, bid) = setup();
+        assert_eq!(
+            execute(&mut c, "archive", &json!({"designId":did})).unwrap()["archived"],
+            true
+        );
+        assert!(
+            execute(&mut c, "list", &json!({}))
+                .unwrap()
+                .as_array()
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(artboard(&c, &bid).unwrap()["version"], 1);
+        assert_ne!(
+            execute(
+                &mut c,
+                "create",
+                &json!({"workspace":"project","title":"Design"})
+            )
+            .unwrap()["id"],
+            did
+        );
+    }
+    #[test]
+    fn repeated_element_comments_are_idempotent_and_orphan_owner_is_reported() {
+        let (mut c, _, _, bid) = setup();
+        let args = json!({"artboardId":bid,"author":"user","text":"ESCOLHIDA: B","selector":"#proposal-b"});
+        let first = execute(&mut c, "comment_add", &args).unwrap();
+        assert_eq!(first["commentAdded"], true);
+        assert_eq!(first["ownerAvailable"], false);
+        assert_eq!(first["ownerWarning"], "closed");
+        for _ in 0..3 {
+            let d = execute(&mut c, "comment_add", &args).unwrap();
+            assert_eq!(d["commentAdded"], false);
+            assert_eq!(
+                d["pages"][0]["artboards"][0]["comments"]
+                    .as_array()
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+        let mut different = args.clone();
+        different["selector"] = json!("#proposal-c");
+        assert_eq!(
+            execute(&mut c, "comment_add", &different).unwrap()["commentAdded"],
+            true
+        );
+        let cid = &first["pages"][0]["artboards"][0]["comments"][0]["id"];
+        execute(&mut c, "comment_resolve", &json!({"commentId":cid})).unwrap();
+        assert_eq!(
+            execute(&mut c, "comment_add", &args).unwrap()["commentAdded"],
+            true
+        );
+        let missing = execute(
+            &mut c,
+            "create",
+            &json!({"workspace":"other","title":"No owner"}),
+        )
+        .unwrap();
+        assert_eq!(missing["ownerWarning"], "missing");
+        // A persisted live tab clears the warning. No chat/PTY side effect is needed to comment.
+        c.execute("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('owner-workspace','Owner',0,0)",[]).unwrap();
+        c.execute("INSERT INTO windows(id,workspace_id,label,last_active) VALUES('owner-window','owner-workspace','Owner',0)",[]).unwrap();
+        c.execute("INSERT INTO tabs(id,window_id,agent_id,agent_label,command,cwd,opened_at,created_at,last_active) VALUES('owner','owner-window','codex','Codex','codex','/owner',0,0,0)",[]).unwrap();
+        assert_eq!(
+            get(&c, first["id"].as_str().unwrap()).unwrap()["ownerWarning"],
+            Value::Null
+        );
+    }
     #[test]
     fn design_named_page_is_created_once_and_rolls_back_on_invalid_board() {
         let (mut c, did, _, _) = setup();
@@ -423,7 +878,7 @@ mod tests {
         assert_eq!(
             c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
                 .unwrap(),
-            36
+            37
         );
     }
     #[test]

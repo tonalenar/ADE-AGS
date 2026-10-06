@@ -65,6 +65,8 @@ fn design_command(app: &AppHandle, command: &str, args: &Value) -> Result<Value,
 pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
     let result = match command {
         "design.create" => design_command(app, command, args),
+        "design.delete" => design_command(app, command, args),
+        "design.archive" => design_command(app, command, args),
         "design.list" => design_command(app, command, args),
         "design.get" => design_command(app, command, args),
         "design.page.add" => design_command(app, command, args),

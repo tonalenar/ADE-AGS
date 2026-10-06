@@ -31,6 +31,9 @@ pub fn run() {
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
             crate::design::design_create,
+            crate::design::design_delete,
+            crate::design::design_archive,
+            crate::build_info::cli_build_status,
             crate::design::design_list,
             crate::design::design_get,
             crate::design::design_page_add,

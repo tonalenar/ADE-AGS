@@ -3,6 +3,16 @@
 use super::*;
 
 #[test]
+fn design_caller_is_the_creating_terminal() {
+    let mut args=json!({"from":"other","ownerTabId":"other"});
+    caller_from("design.create",&mut args,Some("actual-tab".into()));
+    assert_eq!(args["from"],"actual-tab");
+    let mut args=json!({"from":"explicit"});
+    caller_from("peer.tell",&mut args,Some("actual-tab".into()));
+    assert_eq!(args["from"],"explicit");
+}
+
+#[test]
 fn mission_startcheck_accepts_positional_id() {
     assert_eq!(parse("mission.startcheck", &["mission-id"]).unwrap()["mission"], "mission-id");
     assert!(parse("mission.startcheck", &["m", "extra"]).is_err());
@@ -355,6 +365,8 @@ fn design_nested_commands_keep_ids_and_html_flags() {
         (vec!["design","comment","b1","change","--author","user"],"design.comment","artboardId","b1"),
         (vec!["design","comment","resolve","c1"],"design.comment.resolve","commentId","c1"),
         (vec!["design","approve","all","d1"],"design.approve.all","designId","d1"),
+        (vec!["design","delete","d1"],"design.delete","designId","d1"),
+        (vec!["design","archive","d1"],"design.archive","designId","d1"),
     ] {
         let args=words.iter().map(|v|v.to_string()).collect::<Vec<_>>();
         let (command,rest)=design_command(&args).unwrap();
