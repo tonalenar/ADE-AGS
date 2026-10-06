@@ -109,6 +109,64 @@ Missões em terminais não têm tasks, então os heróis ficavam parados na viga
 - Cada aba de missão do topo tem um **X**: fecha os terminais da missão. Com a missão **em andamento** pede confirmação (`closeMissionNeedsConfirm`); terminada ou rascunho fecha direto.
 - Botão **Grade** ao lado de Abas/Canvas: mostra **todos os panes da missão lado a lado** (`canvas/gridMode.ts`). A opção é **individual por missão** e persistida (`ade-mission-grids` no `localStorage`); o padrão segue como antes. Os xterms não são remontados: a grade só desenha os huecos e o `TerminalPanel` os ubica.
 
+## Indicador nas abas
+
+O indicador de missão nas abas (`MissionTabIndicator`) traz o robô em pixel art 13×10 representando o estado vivo da missão diretamente no topo da interface.
+
+### Estados e prioridades
+Os estados derivam de uma função pura (`deriveMissionIndicator` em `missionIndicator.ts`), sem React, seguindo a ordem estrita de prioridade sobre os sinais reais da missão:
+1. **`done` / `failed` (status final):**
+   - `status === "done"` → `state = "done"`, `workingCount = 0`. Selo estático dourado com chispas e comemoração única (salto) apenas na transição de término com a aba aberta.
+   - `status === "failed" | "cancelled"` → `state = "failed"`, `workingCount = 0`. Robô estático translúcido (sem animação).
+2. **`needsYou` (atenção humana prioritária):**
+   - `needsAttention: true` (aprovação pendente, pergunta detectada na tela com inatividade ou alerta de agente parado) → `state = "needsYou"`. Bot oscilando em onda com badge `!` piscante e chamas acesas. Mantém o `workingCount` de eventuais outros agentes trabalhando em paralelo.
+3. **`working` (trabalho ativo):**
+   - `workingAgents > 0` (terminais da missão com saída sustentada medidos por `sustainedTabIds`) → `state = "working"`. Animação de propulsão/bobbing do bot, chamas acesas e contador numérico ao lado com o total de agentes ativos.
+4. **`waiting` (em curso sem atividade):**
+   - `status === "running"` sem nenhum terminal com saída sustentada → `state = "waiting"`. Olhos fechados (dormindo) e badge flutuante `zzz` sem chamas. Não inventa atividade.
+5. **`idle` (sem atividade / rascunho):**
+   - Qualquer outro status sem atividade → `state = "idle"`. Bot estático translúcido sem insígnia e sem chamas.
+
+### Sinais estritamente reais
+- **Zero adivinhação:** O status `running` da missão por si só nunca conta como trabalho — sem saída sustentada comprovada nos terminais (`sustainedTabIds`), a missão fica em `waiting`.
+- **Atenção real:** Só acende `needsYou` quando há aprovação pendente no broker (`useRunsStore.approvals`), pergunta real com silêncio prolongado na tela (`screenQuestion` com `SCREEN_QUESTION_QUIET_MS`) ou alerta ativo do detector de stall (`useStallAlerts`).
+- **Amostrador compartilhado:** Um único sampler compartilhado via `useSyncExternalStore` (`useMissionIndicatorSignals`) faz a amostragem estável das fontes de estado a cada 1 s, reutilizando instâncias inalteradas (`stableMissionIndicatorSignals`) para evitar qualquer re-render desnecessário da barra de abas.
+
+### Regras de animação, reduced-motion e visibilidade
+- **Sem timer por aba:** Proibido `setInterval`, `setTimeout` ou `requestAnimationFrame` por aba montada. Toda movimentação contínua ocorre exclusivamente via CSS keyframes (`mti-bob`, `mti-flicker`, `mti-wave`, `mti-blink`, `mti-float`, `mti-jump`, `mti-spark`).
+- **Pausa em aba/janela oculta:** Quando `document.visibilityState === "hidden"`, um listener compartilhado de `visibilitychange` aplica `data-ags-hidden="1"` no elemento raiz (`:root`), congelando instantaneamente todas as animações (`animation-play-state: paused !important`). Ao mesmo tempo, o timer do amostrador é cancelado e a amostragem suspensa.
+- **Acessibilidade (`prefers-reduced-motion`):** Respeita o media query do sistema `(prefers-reduced-motion: reduce)` tanto via CSS (`animation: none !important`) quanto via hook reativo `useReducedMotion()`. Com o modo reduzido ativo (`data-motion="still"`), as animações são desativadas e o estado é comunicado unicamente pela troca de ícones pixel art, cores e contador.
+- **Não captura clique ou arraste:** O componente renderiza com `role="img"` acessível, sem capturar eventos de ponteiro com `stopPropagation()` ou `preventDefault()`. Cliques para alternar aba e gestos de ponteiro para arrastar ou organizar abas borbulham livremente para o container da aba.
+
+### Localização (i18n)
+Todos os títulos (`title`) e textos acessíveis (`aria-label`) são localizados nos idiomas oficiais da plataforma:
+- **`pt-BR`:**
+  - `missions.indicator.working_one`: "{{count}} agente trabalhando"
+  - `missions.indicator.working_other`: "{{count}} agentes trabalhando"
+  - `missions.indicator.waiting`: "Esperando: nenhum agente com atividade agora"
+  - `missions.indicator.needsYou`: "Precisa de você: há um agente parado esperando resposta"
+  - `missions.indicator.done`: "Missão concluída"
+  - `missions.indicator.failed`: "Missão encerrada sem sucesso"
+  - `missions.indicator.idle`: "Missão sem atividade"
+- **`en`:**
+  - `missions.indicator.working_one`: "{{count}} agent working"
+  - `missions.indicator.working_other`: "{{count}} agents working"
+  - `missions.indicator.waiting`: "Waiting: no agent active right now"
+  - `missions.indicator.needsYou`: "Needs you: an agent is stopped waiting for a reply"
+  - `missions.indicator.done`: "Mission completed"
+  - `missions.indicator.failed`: "Mission ended unsuccessfully"
+  - `missions.indicator.idle`: "Mission idle"
+- **`es`:**
+  - `missions.indicator.working_one`: "{{count}} agente trabajando"
+  - `missions.indicator.working_other`: "{{count}} agentes trabajando"
+  - `missions.indicator.waiting`: "Esperando: ningún agente con actividad ahora"
+  - `missions.indicator.needsYou`: "Te necesita: hay un agente detenido esperando respuesta"
+  - `missions.indicator.done`: "Misión concluida"
+  - `missions.indicator.failed`: "Misión terminada sin éxito"
+  - `missions.indicator.idle`: "Misión sin actividad"
+
+
+
 ## O GLITCH, a história e o tempo ao vivo
 
 - **Lore:** o GLITCH, um bug ancestral, roubou o troféu da entrega e se escondeu no topo da torre. Uma linha da história alterna a cada 7 s sob o título (pt-BR/en/es).
