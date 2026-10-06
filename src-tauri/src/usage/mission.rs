@@ -221,6 +221,8 @@ pub(crate) fn estimate_in_range(
             None => {
                 if let Some(model) = model.as_deref().filter(|m| !m.contains("synthetic")) {
                     unpriced.insert(model.to_string());
+                } else if model.is_none() {
+                    unpriced.insert("unknown".to_string());
                 }
             }
         }

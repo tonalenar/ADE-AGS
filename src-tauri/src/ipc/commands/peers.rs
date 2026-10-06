@@ -335,6 +335,9 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
 
     let boards = crate::canvas::load_boards();
     let mission_id = crate::canvas::mission_of_tab(&boards, &me.id);
+    if let Some(id) = &mission_id {
+        crate::usage::confirm_spend(app, super::shared::db(app)?.inner(), id, "peer recruit")?;
+    }
     let tabs = open_tabs(app)?;
     if tabs.iter().any(|t| t.name.eq_ignore_ascii_case(name.trim()) && (t.cwd == me.cwd || mission_id.as_ref().is_some_and(|id| crate::canvas::mission_of_tab(&boards, &t.id).as_ref() == Some(id)))) {
         return Err(format!("Já existe um agente chamado '{name}' nesta equipe. Escolha outro nome."));

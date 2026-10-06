@@ -160,6 +160,9 @@ MISIONES (también sin interfaz: `ade-ags --headless`)
   mission review <id>                         Lo que entregó cada tarea aislada
   mission timings <id>                        Tiempo activo, delegación, alertas/esperas del orquestador y tiempo hasta todos trabajando
   mission efficiency <id>                     Tiempo activo unificado (mission_active > spans > reloj), costo e histórico por agentes
+  mission cleanup <id> [--dry-run]             Limpia worktrees y ramas integradas de una misión cerrada
+  worktrees list [--cwd <ruta>]                Worktrees gestionados, tamaño y bloqueos de limpieza
+  worktrees prune [--cwd <ruta>] [--dry-run]    Limpia misiones cerradas integradas; conserva huérfanos para revisión
   mission precheck <id>                       Lo que el repositorio y las misiones anteriores ya dicen del objetivo
   mission startcheck <id>                     Evidencia de briefing y actividad por agente; límite de 2 minutos
   memory search \"<tema>\" --mission <id> [--limit 5] [--at <YYYY-MM-DD|YYYY-MM-DDTHH:MM|unix-seconds>]
@@ -340,6 +343,14 @@ fn main() -> ExitCode {
         };
         design_defaults(&command, parsed, &cwd)
     } else { parsed };
+    let mut parsed=parsed;
+    if command.starts_with("worktrees.") {
+        let requested=parsed.get("cwd").and_then(Value::as_str).unwrap_or(".");
+        match std::path::absolute(requested) {
+            Ok(path)=>{parsed["cwd"]=Value::String(path.to_string_lossy().into_owned());},
+            Err(e)=>{eprintln!("{e}");return ExitCode::from(EXIT_USAGE);}
+        }
+    }
     let parsed = with_caller(&command, parsed);
 
     match send(&command, parsed.clone()) {
@@ -544,6 +555,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "workspace.open" => &["workspace"],
         // `ags mission wait <id>`, `ags mission accept <id> <tarea>`.
         "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" | "mission.timings" | "mission.efficiency" | "mission.precheck" | "mission.startcheck" | "mission.redeliver" => &["mission"],
+        "mission.cleanup" => &["mission"],
         "mission.accept" => &["mission", "task"],
         "approval.decide" => &["approval"],
         // `ags peer ask Revisor "..."`: el nombre del agente y después el mensaje.

@@ -394,6 +394,10 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
             (run, deps, facts)
         };
 
+        if let Some(id) = run.mission_id.as_deref() {
+            crate::usage::confirm_spend(app, db, id, "task start")?;
+        }
+
         // De qué rama parte: la de su única dependencia aislada, para empezar desde lo que
         // esa dejó. Con varias, desde HEAD, y el prompt le pide integrarlas primero.
         let dep_branches: Vec<String> = deps

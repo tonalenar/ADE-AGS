@@ -10,6 +10,11 @@
 //! no el porcentaje restante — inventarlo sería peor que no mostrarlo.
 
 mod claude;
+mod budget;
+mod opencode;
+pub(crate) mod limits;
+pub use limits::*;
+pub use budget::*;
 mod live;
 mod mission;
 mod terminal;

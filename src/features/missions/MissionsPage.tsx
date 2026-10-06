@@ -22,6 +22,12 @@ import { useSquadAccountLabel } from "@/features/squads/accountLabel";
 import type { Squad } from "@/features/squads/types";
 
 import { AutonomyPicker } from "./AutonomyPicker";
+import { BudgetBar } from "./BudgetBar";
+import { CleanupPanel } from "./CleanupPanel";
+import { BudgetConfirmDialog } from "./BudgetConfirmDialog";
+import { continueOverBudget, missionBudget, raiseMissionBudget } from "./budgetIpc";
+import { isBudgetConfirmation, type BudgetStatus } from "./budgetTypes";
+import { FleetView } from "./FleetView";
 import { MissionDialog } from "./MissionDialog";
 import { MissionMap } from "./MissionMap";
 import { MissionTimingsPanel } from "./MissionTimingsPanel";
@@ -78,6 +84,7 @@ export function MissionsPage() {
   const loadSquads = useSquadsStore((s) => s.load);
 
   const [selected, setSelected] = useState<string | null>(null);
+  const [fleet, setFleet] = useState(false);
   const [focusTab, setFocusTab] = useState<MemoryTab>("workspace");
   const [focusNonce, setFocusNonce] = useState(0);
   const [dialog, setDialog] = useState<"new" | "edit" | null>(null);
@@ -148,6 +155,10 @@ export function MissionsPage() {
         <LocationIcon className="w-[15px] h-[15px] shrink-0 text-violet-500 dark:text-violet-400" />
         <span className="text-[13.5px] font-bold text-gray-900 dark:text-white">{t("missions.title")}</span>
         <div className="flex-1" />
+        <Button variant="custom" size="sm" aria-pressed={fleet} onClick={() => setFleet((v) => !v)}
+          className={`px-2.5 h-7 rounded-md text-[11.5px] font-medium ${fleet ? "bg-violet-500/15 text-violet-700 dark:text-violet-300" : "text-gray-500 dark:text-white/50"}`}>
+          {t("missions.fleet.title")}
+        </Button>
         {workspaceId && <MemoryInboxButton workspaceId={workspaceId} />}
         <Button variant="primary" size="sm" disabled={!workspaceId} onClick={() => setDialog("new")}>
           {t("missions.new")}
@@ -184,7 +195,9 @@ export function MissionsPage() {
         </div>
 
         <div className="flex-1 min-w-0 cc-scroll">
-          {summary && detail ? (
+          {fleet ? (
+            <FleetView onOpenMission={(id) => { setSelected(id); setFleet(false); }} />
+          ) : summary && detail ? (
             <MissionDetailView
               summary={summary}
               detail={detail}
@@ -329,6 +342,8 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
   const duplicate = useMemo(() => findDuplicateMission(allMissions, mission), [allMissions, mission]);
   const [duplicateTarget, setDuplicateTarget] = useState<{ id: string; title: string; status: string; isRunning: boolean } | null>(null);
 
+  const [budgetPrompt, setBudgetPrompt] = useState<{ status: BudgetStatus; kind: "start" | "retry"; force: boolean } | null>(null);
+
   const act = async (kind: "start" | "retry" | "cancel", force = false) => {
     if (!workspaceId) return;
     if (kind !== "cancel" && !force && duplicate) {
@@ -353,10 +368,30 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         navigate("/workspace");
       }
     } catch (e) {
+      if (kind !== "cancel" && isBudgetConfirmation(e)) {
+        // Presupuesto excedido: se pide confirmación (nunca se frena a los agentes en marcha).
+        try {
+          setBudgetPrompt({ status: await missionBudget(mission.id), kind, force });
+          return;
+        } catch { /* sin estado no se puede confirmar: cae al mensaje de abajo */ }
+      }
       const problem = String(e);
       onError(t(problem, { defaultValue: problem }));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const confirmBudget = async (apply: () => Promise<unknown>) => {
+    const prompt = budgetPrompt;
+    if (!prompt) return;
+    try {
+      await apply();
+      setBudgetPrompt(null);
+      await act(prompt.kind, prompt.force);
+    } catch (e) {
+      setBudgetPrompt(null);
+      onError(String(e));
     }
   };
 
@@ -399,6 +434,16 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
           </Button>
         )}
       </div>
+
+      {budgetPrompt && (
+        <BudgetConfirmDialog
+          status={budgetPrompt.status}
+          action="startTask"
+          onClose={() => setBudgetPrompt(null)}
+          onRaise={(usd) => confirmBudget(() => raiseMissionBudget(mission.id, usd))}
+          onContinue={() => confirmBudget(() => continueOverBudget(mission.id, "startTask"))}
+        />
+      )}
 
       {duplicate && (
         <Alert variant="warning">
@@ -497,6 +542,8 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         </Section>
       )}
 
+      {mission.status !== "draft" && <BudgetBar missionId={mission.id} />}
+
       <MissionMap tasks={tasks} accountLabel={accountLabel} />
 
       {mission.status === "draft" && (
@@ -518,6 +565,12 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
       {mission.status !== "draft" && (
         <Section title={t("missions.tokens.title")}>
           <MissionTokensPanel missionId={mission.id} />
+        </Section>
+      )}
+
+      {(mission.status === "done" || mission.status === "cancelled" || mission.status === "failed") && (
+        <Section title={t("missions.cleanup.title")}>
+          <CleanupPanel missionId={mission.id} />
         </Section>
       )}
 

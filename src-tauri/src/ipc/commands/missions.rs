@@ -306,7 +306,27 @@ pub(super) fn mission_efficiency(app: &AppHandle, args: &Value) -> Result<Value,
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut efficiency = json!(crate::missions::efficiency::get(&conn, &id)?);
     efficiency["tokens"] = json!(crate::usage::mission_tokens_for_conn(&conn, &id)?);
+    let status=crate::usage::budget_for_conn(&conn, &id)?;
+    if let Some(message)=crate::usage::claim_warning(&conn,&id,&status)? {crate::usage::warn_lead(app,&id,&message);}
+    efficiency["budget"] = json!(status);
     Ok(efficiency)
+}
+
+pub(super) fn mission_cleanup(app: &AppHandle,args:&Value)->Result<Value,String> {
+    let id=arg_str(args,"mission")?;
+    let db=db(app)?; let conn=db.lock().map_err(|e|e.to_string())?;
+    let base=dirs::home_dir().ok_or("Home indisponível")?.join(".ags/worktrees");
+    let dry=args.get("dryRun").is_some_and(|v|v!=&Value::Bool(false));
+    Ok(json!(crate::missions::cleanup::cleanup(&conn,&id,&base,dry)?))
+}
+
+pub(super) fn worktrees(app:&AppHandle,args:&Value,prune:bool)->Result<Value,String> {
+    let db=db(app)?; let conn=db.lock().map_err(|e|e.to_string())?;
+    let cwd=arg_str_opt(args,"cwd").unwrap_or_else(|| ".".into());
+    let base=dirs::home_dir().ok_or("Home indisponível")?.join(".ags/worktrees");
+    if !prune { return Ok(json!(crate::missions::cleanup::list(&conn,std::path::Path::new(&cwd),&base)?)) }
+    let dry=args.get("dryRun").is_some_and(|v|v!=&Value::Bool(false));
+    Ok(json!(crate::missions::cleanup::prune(&conn,std::path::Path::new(&cwd),&base,dry)?))
 }
 
 pub(super) fn mission_accept(app: &AppHandle, args: &Value) -> Result<Value, String> {
