@@ -9,6 +9,8 @@ import { useMissionIndicatorSignals } from "@/features/tabs/useMissionIndicatorS
 import { sustainedTabIds } from "@/features/terminal/activity";
 import { useTaskActivity } from "@/shared/bus";
 
+import { BudgetBar } from "./BudgetBar";
+import { PlanLimitsPanel } from "./PlanLimitsPanel";
 import { fleetGroups, type FleetGroup } from "./fleet";
 import { missionIndex } from "./groups";
 import { useMissionsStore } from "./store";
@@ -52,6 +54,7 @@ export function FleetView({ onOpenMission }: { onOpenMission: (missionId: string
   return (
     <div className="flex flex-col gap-4 p-5">
       <p className="text-[11px] text-gray-500 dark:text-white/45">{t("missions.fleet.hint")}</p>
+      <PlanLimitsPanel />
       {groups.map((g) => <FleetGroupCard key={g.missionId} group={g} onOpen={() => onOpenMission(g.missionId)} />)}
     </div>
   );
@@ -72,6 +75,7 @@ function FleetGroupCard({ group, onOpen }: { group: FleetGroup; onOpen: () => vo
           {t(`missions.indicator.${state}`, { count: workingCount })}
         </span>
       </button>
+      <BudgetBar missionId={group.missionId} />
       {empty && <p className="text-[11px] text-gray-400 dark:text-white/35">{t("missions.fleet.nothingActive")}</p>}
       <ul className="flex flex-col gap-1">
         {group.tasks.map((task) => {
