@@ -23,6 +23,9 @@ import type { Squad } from "@/features/squads/types";
 
 import { AutonomyPicker } from "./AutonomyPicker";
 import { BudgetBar } from "./BudgetBar";
+import { BudgetConfirmDialog } from "./BudgetConfirmDialog";
+import { continueOverBudget, missionBudget, raiseMissionBudget } from "./budgetIpc";
+import { isBudgetConfirmation, type BudgetStatus } from "./budgetTypes";
 import { FleetView } from "./FleetView";
 import { MissionDialog } from "./MissionDialog";
 import { MissionMap } from "./MissionMap";
@@ -338,6 +341,8 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
   const duplicate = useMemo(() => findDuplicateMission(allMissions, mission), [allMissions, mission]);
   const [duplicateTarget, setDuplicateTarget] = useState<{ id: string; title: string; status: string; isRunning: boolean } | null>(null);
 
+  const [budgetPrompt, setBudgetPrompt] = useState<{ status: BudgetStatus; kind: "start" | "retry"; force: boolean } | null>(null);
+
   const act = async (kind: "start" | "retry" | "cancel", force = false) => {
     if (!workspaceId) return;
     if (kind !== "cancel" && !force && duplicate) {
@@ -362,10 +367,30 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         navigate("/workspace");
       }
     } catch (e) {
+      if (kind !== "cancel" && isBudgetConfirmation(e)) {
+        // Presupuesto excedido: se pide confirmación (nunca se frena a los agentes en marcha).
+        try {
+          setBudgetPrompt({ status: await missionBudget(mission.id), kind, force });
+          return;
+        } catch { /* sin estado no se puede confirmar: cae al mensaje de abajo */ }
+      }
       const problem = String(e);
       onError(t(problem, { defaultValue: problem }));
     } finally {
       setBusy(false);
+    }
+  };
+
+  const confirmBudget = async (apply: () => Promise<unknown>) => {
+    const prompt = budgetPrompt;
+    if (!prompt) return;
+    try {
+      await apply();
+      setBudgetPrompt(null);
+      await act(prompt.kind, prompt.force);
+    } catch (e) {
+      setBudgetPrompt(null);
+      onError(String(e));
     }
   };
 
@@ -408,6 +433,16 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
           </Button>
         )}
       </div>
+
+      {budgetPrompt && (
+        <BudgetConfirmDialog
+          status={budgetPrompt.status}
+          action="startTask"
+          onClose={() => setBudgetPrompt(null)}
+          onRaise={(usd) => confirmBudget(() => raiseMissionBudget(mission.id, usd))}
+          onContinue={() => confirmBudget(() => continueOverBudget(mission.id, "startTask"))}
+        />
+      )}
 
       {duplicate && (
         <Alert variant="warning">

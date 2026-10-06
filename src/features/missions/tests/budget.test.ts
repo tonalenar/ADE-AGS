@@ -39,3 +39,13 @@ describe("barWidth / nearLimit", () => {
     expect(nearLimit({ label: "5h", usedPct: null, resetsAt: null })).toBe(false);
   });
 });
+
+import { isBudgetConfirmation } from "../budgetTypes";
+
+describe("isBudgetConfirmation", () => {
+  it("reconhece a chave de erro do Tauri como string ou Error", () => {
+    expect(isBudgetConfirmation("missions.budget.confirmationRequired")).toBe(true);
+    expect(isBudgetConfirmation(new Error("missions.budget.confirmationRequired"))).toBe(true);
+    expect(isBudgetConfirmation("outro erro")).toBe(false);
+  });
+});

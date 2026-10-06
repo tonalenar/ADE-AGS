@@ -68,3 +68,8 @@ export function levelOf(costUsd: number, budgetUsd: number | null): BudgetLevel 
   const pct = (costUsd / budgetUsd) * 100;
   return pct >= 100 ? "exceeded" : pct >= 80 ? "warning" : "ok";
 }
+
+/** Clave de error que `mission_start` devuelve cuando el presupuesto está excedido y falta confirmar. */
+export const BUDGET_CONFIRMATION_ERROR = "missions.budget.confirmationRequired";
+export const isBudgetConfirmation = (e: unknown): boolean =>
+  String(e instanceof Error ? e.message : e).includes(BUDGET_CONFIRMATION_ERROR);
