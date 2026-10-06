@@ -8,6 +8,7 @@ import {
   designApi, onDesignChanged,
   type Artboard, type ArtboardStatus, type ArtboardVersion, type Design, type DesignDetail,
 } from "./designApi";
+import { spreadOverlapping } from "./layout";
 import { DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
 import { INITIAL_VIEWPORT, fitViewport, viewportReducer, zoomPercent } from "./viewport";
 
@@ -58,7 +59,7 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
 
   const pages = detail?.pages ?? [];
   const page = pages.find((p) => p.id === pageId) ?? pages[0] ?? null;
-  const boards = useMemo(() => (detail?.artboards ?? []).filter((a) => a.pageId === page?.id), [detail, page]);
+  const boards = useMemo(() => spreadOverlapping((detail?.artboards ?? []).filter((a) => a.pageId === page?.id)), [detail, page]);
   const editBoard = boards.find((b) => b.id === editing) ?? null;
   const approvedCount = buildable(detail?.artboards ?? []).length;
   const queue = useMemo(() => pendingComments(detail?.comments ?? []), [detail]);
