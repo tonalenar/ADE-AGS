@@ -13,11 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// As etapas que se medem. Texto livre não: assim a tela e o resumo sempre sabem o que são.
 pub const KINDS: &[&str] = &["boot", "briefing", "turn", "peer_ask", "peer_message",
-<<<<<<< HEAD
-    "orchestrator_stall", "start_all_working", "start_briefing", "start_activity", "start_retry", "start_stalled", "test"];
-=======
-    "orchestrator_stall", "start_all_working", "start_briefing", "start_activity", "start_retry", "start_stalled", "qa_wait"];
->>>>>>> cc/mission-43e18913-c07c-4fcf-8925-fe40e32d
+    "orchestrator_stall", "start_all_working", "start_briefing", "start_activity", "start_retry", "start_stalled", "test", "qa_wait"];
 const MAX_TEXT: usize = 200;
 /// Um span mais comprido que isto é um erro de relógio, não uma etapa (24 h).
 const MAX_SPAN_MS: i64 = 24 * 60 * 60 * 1000;

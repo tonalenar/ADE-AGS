@@ -39,12 +39,8 @@ export interface MissionTimings {
   firstDelegationMs?: number | null;
   firstDelegationSource?: "peer_message" | "span" | null;
   spans: TimingSpan[];
-<<<<<<< HEAD
   summary: { wallMs: number; byKind: KindTotal[]; slowest: TimingSpan[]; bottlenecks: Bottleneck[]; testMetrics?: TestStats | null };
-=======
-  summary: { wallMs: number; byKind: KindTotal[]; slowest: TimingSpan[]; bottlenecks: Bottleneck[] };
   qaWaitMs?: number | null;
->>>>>>> cc/mission-43e18913-c07c-4fcf-8925-fe40e32d
 }
 
 export interface Bottleneck {
