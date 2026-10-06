@@ -55,3 +55,12 @@ fn each_member_gets_origin_master_workspace_retry_preserves_work_and_junction() 
     }
     std::fs::remove_dir_all(&scratch).unwrap();
 }
+
+#[test]
+fn los_errores_momentaneos_de_git_se_reintentan_y_los_reales_no() {
+    assert!(is_transient_git_error("Preparing worktree (new branch x) warning: unable to access .git/config: Permission denied fatal: unknown error occurred while reading the configuration files"));
+    assert!(is_transient_git_error("fatal: Unable to create /r/.git/index.lock: File exists."));
+    assert!(is_transient_git_error("error: cannot lock ref"));
+    assert!(!is_transient_git_error("fatal: invalid reference: origin/mastre"));
+    assert!(!is_transient_git_error("fatal: not a git repository"));
+}
