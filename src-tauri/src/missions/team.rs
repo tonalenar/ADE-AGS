@@ -98,7 +98,26 @@ pub async fn mission_prepare_team(app: AppHandle, mission_id: String, members: V
             super::store::get(&conn, &mission_id)?.ok_or("Missão não encontrada.")?
         };
         let base = dirs::home_dir().ok_or("Home indisponível.")?.join(".ags").join("worktrees");
-        let workspaces = members.iter().map(|name| prepare_one(&db, &mission, name, &base)).collect::<Result<_, _>>()?;
+        // Los worktrees se crean en paralelo (cada `git worktree add` hace un checkout completo y en
+        // serie eran ~1 s por integrante antes de que se abriera el canvas). Si git no logra un lock
+        // compartido, se reintenta ese integrante.
+        let workspaces = std::thread::scope(|scope| {
+            let handles: Vec<_> = members.iter().map(|name| {
+                let (db, mission, base) = (&db, &mission, &base);
+                scope.spawn(move || {
+                    let mut last = Err(String::new());
+                    for attempt in 0..3 {
+                        last = prepare_one(db, mission, name, base);
+                        match &last {
+                            Err(e) if attempt < 2 && e.to_lowercase().contains("lock") => std::thread::sleep(std::time::Duration::from_millis(150)),
+                            _ => break,
+                        }
+                    }
+                    last
+                })
+            }).collect();
+            handles.into_iter().map(|h| h.join().unwrap_or_else(|_| Err("Falha ao preparar o worktree.".into()))).collect::<Result<Vec<_>, _>>()
+        })?;
         let conn = db.lock().map_err(|e| e.to_string())?;
         Ok(PreparedTeam { workspaces, precheck: super::precheck_text(&conn, &mission_id)?, memory: super::memory_context_text(&conn, &mission_id)? })
     }).await.map_err(|e| e.to_string())?

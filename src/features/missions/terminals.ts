@@ -278,6 +278,7 @@ export async function startMissionInTerminals(
   options?: { force?: boolean }
 ): Promise<StartedTeam> {
   const { addTab, detectedAgents, activateTab } = useTabsStore.getState();
+  const startedAt = Date.now();
   const team = teamOf(squad, roles);
   const leadAgentId = squad?.lead.agentId ?? mission.leadAgentId ?? "claude-code";
 
@@ -310,6 +311,9 @@ export async function startMissionInTerminals(
   const { precheck: findings, memory } = prepared;
 
   await invoke("mission_start_terminals", { missionId: mission.id, force: Boolean(options?.force) });
+  // Cuánto tardó armar la misión antes de abrir el canvas (worktrees, precheck, memoria): aparece en
+  // `ags mission timings` como el span "boot" de "Preparar equipe".
+  recordSpan(mission.id, { kind: "boot", actor: "Preparar equipe", startedMs: startedAt, endedMs: Date.now() });
 
   const leadTabId = addTab({
     cwd: leadWorkspace.cwd,

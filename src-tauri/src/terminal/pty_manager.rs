@@ -218,6 +218,10 @@ pub(super) fn split_command(command: &str) -> Vec<String> {
 /// Se sacan de todo terminal; no se tocan las de configuración del usuario (`ANTHROPIC_*`,
 /// `CLAUDE_CODE_USE_*`...) ni las de una cuenta de la app, que se aplican después.
 pub(super) const PARENT_SESSION_ENV: &[&str] = &[
+    // Una sesión de agente que abrió la app deja `NO_COLOR=1` en el entorno y todos los terminales
+    // heredaban TUIs en blanco y negro. El color de un terminal de la app lo decide la app
+    // (`TERM`/`COLORTERM` de abajo), no el entorno de quien la lanzó.
+    "NO_COLOR",
     "CLAUDE_CODE_CHILD_SESSION",
     "CLAUDE_CODE_SESSION_ID",
     "CLAUDE_CODE_HOST_SESSION_ID",
