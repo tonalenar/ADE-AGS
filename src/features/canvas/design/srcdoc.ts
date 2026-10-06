@@ -4,7 +4,7 @@
  * sem acesso ao app) e com uma CSP que corta a rede.
  */
 export const DESIGN_SANDBOX = "allow-scripts";
-export const DESIGN_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'unsafe-inline'";
+export const DESIGN_CSP = "default-src 'none'; style-src 'unsafe-inline'; img-src data:; script-src 'unsafe-inline'; form-action 'none'; base-uri 'none'";
 /** Mensagem que o iframe manda ao app quando se escolhe um elemento. */
 export const PICK_MESSAGE = "ags-design-pick";
 

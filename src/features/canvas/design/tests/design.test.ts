@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { allApproved, buildable, formatBuildRequest, formatQueueForAgent, pendingComments } from "../commentQueue";
+import { allApproved, buildable, formatQueueForAgent, pendingComments } from "../commentQueue";
 import { normalizeDesign, type Artboard, type DesignComment } from "../designApi";
 import { DESIGN_CSP, DESIGN_SANDBOX, PICK_MESSAGE, buildSrcdoc, parsePick } from "../srcdoc";
 import { INITIAL_VIEWPORT, MAX_ZOOM, MIN_ZOOM, fitViewport, viewportReducer, zoomPercent } from "../viewport";
@@ -20,6 +20,11 @@ describe("srcdoc", () => {
     expect(DESIGN_CSP).toContain("default-src 'none'");
     expect(DESIGN_CSP).toContain("img-src data:");
     expect(DESIGN_CSP).not.toMatch(/https?:|connect-src/);
+  });
+  it("a CSP bloqueia formulários e base", () => {
+    expect(DESIGN_CSP).toContain("form-action 'none'");
+    expect(DESIGN_CSP).toContain("base-uri 'none'");
+    expect(buildSrcdoc("<p/>")).toContain("form-action 'none'");
   });
   it("a CSP vem antes do HTML do agente", () => {
     const doc = buildSrcdoc("<h1>oi</h1>");
@@ -119,10 +124,5 @@ describe("normalizeDesign", () => {
   });
   it("aceita design sem páginas", () => {
     expect(normalizeDesign({ id: "d", workspace: "w", missionId: null, ownerTabId: null, title: "t", status: "draft" }).artboards).toEqual([]);
-  });
-  it("monta o pedido de construção só com as aprovadas", () => {
-    const text = formatBuildRequest("App", "d1", [board({ id: "1", title: "Ok", status: "approved" }), board({ id: "2", title: "Nao" })]);
-    expect(text).toContain('"Ok"');
-    expect(text).not.toContain('"Nao"');
   });
 });

@@ -2,7 +2,8 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { useTranslation } from "react-i18next";
 import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
 
-import { allApproved, buildable, formatBuildRequest, formatQueueForAgent, pendingComments } from "./commentQueue";
+import { buildTasks } from "./buildTasks";
+import { allApproved, buildable, formatQueueForAgent, pendingComments } from "./commentQueue";
 import {
   designApi, onDesignChanged,
   type Artboard, type ArtboardStatus, type ArtboardVersion, type Design, type DesignDetail,
@@ -99,8 +100,10 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
     const owner = detail.design.ownerTabId;
     if (!owner) return fail(t("canvas.design.noOwner"));
     try {
-      await designApi.tellOwner(owner, formatBuildRequest(detail.design.title, detail.design.id, detail.artboards));
-      AlertaToast(t("canvas.design.title"), t("canvas.design.built", { count: approvedCount }), "success", 4000);
+      // Só as aprovadas viram tarefa; cada uma segue ao dono, que a constrói no seu worktree.
+      const tasks = buildTasks({ ...detail.design, pages: detail.pages.map((pg) => ({ ...pg, artboards: detail.artboards.filter((a) => a.pageId === pg.id) })) });
+      for (const task of tasks) await designApi.tellOwner(owner, task.prompt);
+      AlertaToast(t("canvas.design.title"), t("canvas.design.built", { count: tasks.length }), "success", 4000);
     } catch (e) {
       fail(e);
     }

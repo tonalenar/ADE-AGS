@@ -18,14 +18,6 @@ export function formatQueueForAgent(designTitle: string, artboards: Artboard[], 
   return lines.join("\n");
 }
 
-/** Pedido de construção ao agente dono: só as aprovadas, com o id para ele ler o HTML de referência. */
-export function formatBuildRequest(designTitle: string, designId: string, artboards: Artboard[]): string {
-  const lines = [`Design "${designTitle}" (id ${designId}): o usuário aprovou estas pranchetas. Construa SOMENTE elas, cada uma no seu worktree, usando o HTML da prancheta como referência (ags design get ${designId}).`];
-  for (const b of buildable(artboards)) lines.push(`- "${b.title}" (id ${b.id}, v${b.version}, ${b.width}x${b.height})`);
-  lines.push("Não toque nas pranchetas rascunho ou rejeitadas.");
-  return lines.join("\n");
-}
-
 /** Só pranchetas aprovadas viram construção; rascunho e rejeitada não são tocadas. */
 export const buildable = (artboards: Artboard[]) => artboards.filter((a) => a.status === "approved");
 export const allApproved = (artboards: Artboard[]) => artboards.length > 0 && artboards.every((a) => a.status === "approved");
