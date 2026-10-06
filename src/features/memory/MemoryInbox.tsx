@@ -23,14 +23,24 @@ export function MemoryInboxButton({ workspaceId, className = "" }: { workspaceId
   const [open, setOpen] = useState(false);
   const counts = usePendingMemoryStore((s) => s.counts);
   const load = usePendingMemoryStore((s) => s.load);
-  useEffect(() => { void load(workspaceId).catch(() => undefined); }, [load, workspaceId, open]);
-  const total = pendingTotal(counts.byMission);
+  // El contador sale de la MISMA fuente que el modal (el resumen del workspace) para que coincidan;
+  // si falla, cae a los conteos del store.
+  const [total, setTotal] = useState<number | null>(null);
+  useEffect(() => {
+    let alive = true;
+    void load(workspaceId).catch(() => undefined);
+    memoryIpc.getWorkspaceReviewSummary(workspaceId)
+      .then((r) => { if (alive) setTotal(totalPending(normalizeGroups(groupsFromWorkspaceReview(r, () => "")))); })
+      .catch(() => { if (alive) setTotal(null); });
+    return () => { alive = false; };
+  }, [load, workspaceId, open]);
+  const shown = total ?? pendingTotal(counts.byMission);
   return (
     <>
-      <button type="button" onClick={() => setOpen(true)} aria-label={t("memoryInbox.open", { count: total })}
+      <button type="button" onClick={() => setOpen(true)} aria-label={t("memoryInbox.open", { count: shown })}
         className={`flex items-center gap-1.5 rounded-md border border-gray-300 px-2 py-1 text-[11px] font-medium text-gray-700 hover:bg-gray-100 dark:border-white/20 dark:text-gray-200 dark:hover:bg-white/8 ${className}`}>
         {t("memoryInbox.button")}
-        {total > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-bold leading-4 text-white">{total}</span>}
+        {shown > 0 && <span className="rounded-full bg-amber-500 px-1.5 text-[10px] font-bold leading-4 text-white">{shown}</span>}
       </button>
       {open && <MemoryInbox workspaceId={workspaceId} onClose={() => setOpen(false)} />}
     </>
