@@ -29,6 +29,8 @@ pub(crate) mod team;
 mod test;
 #[cfg(test)]
 mod active_consistency_test;
+#[cfg(test)]
+mod worktrees_cleanup_test;
 mod types;
 pub mod active;
 
