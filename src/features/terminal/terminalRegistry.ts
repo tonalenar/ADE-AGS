@@ -33,6 +33,10 @@ export interface SendTimings {
   onTurnEnd?: (at: number) => void;
   /** Pasaron `START_CHECK_MS` desde el envío y la terminal no mostró actividad: el agente no arrancó. */
   onStalled?: () => void;
+  /** Primera salida del agente más allá del eco del pegado: arrancó. `at` es el instante. */
+  onActivity?: (at: number) => void;
+  /** Se reenvió un Enter porque el briefing seguía pegado sin enviar (o no hubo actividad). */
+  onRetry?: (at: number) => void;
 }
 
 const queuedTimings = new Map<string, SendTimings>();
@@ -65,25 +69,33 @@ function watchTurn(term: Terminal, onEnd: (at: number) => void): void {
 
 /** Cuánto después de enviar el briefing se verifica que el agente arrancó. */
 export const START_CHECK_MS = 25_000;
+/** Plazo para que TODOS los agentes arranquen sin Enter manual (lo mide `ags mission startcheck`). */
+export const START_DEADLINE_MS = 120_000;
 /** Salida dentro de esta ventana tras el envío es el eco del pegado, no trabajo del agente. */
 const ECHO_MS = 4000;
 
 /**
  * Verifica que el agente arrancó tras el briefing: si en `START_CHECK_MS` la terminal no escribió
  * nada más allá del eco, se le da un Enter (puede haber quedado sin enviar) y se avisa con `onStalled`.
+ * Si arranca después del aviso (hasta `START_DEADLINE_MS`), `onActivity` lo sigue registrando.
  */
-function watchStart(tabId: string, term: Terminal, onStalled: () => void): void {
+function watchStart(tabId: string, term: Terminal, timings: SendTimings): void {
   const sentAt = Date.now();
   let worked = false;
   const sub = term.onWriteParsed(() => {
-    if (Date.now() - sentAt > ECHO_MS) worked = true;
+    const now = Date.now();
+    if (worked || now - sentAt <= ECHO_MS) return;
+    worked = true;
+    timings.onActivity?.(now);
+    sub.dispose();
   });
   window.setTimeout(() => {
-    sub.dispose();
     if (worked || terminals.get(tabId) !== term) return;
     term.input("\r");
-    onStalled();
+    timings.onRetry?.(Date.now());
+    timings.onStalled?.();
   }, START_CHECK_MS);
+  window.setTimeout(() => sub.dispose(), START_DEADLINE_MS);
 }
 
 /** Espera a que la TUI termine de arrancar y le manda `text`. */
@@ -98,10 +110,10 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
     if (terminals.get(tabId) !== term) return;
     queued.delete(tabId);
     queuedTimings.delete(tabId);
-    pasteIntoTab(tabId, text, true);
+    pasteIntoTab(tabId, text, true, timings?.onRetry);
     timings?.onSent?.(Date.now());
     if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
-    if (timings?.onStalled) watchStart(tabId, term, timings.onStalled);
+    if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);
   };
   const sub = term.onWriteParsed(() => {
     sawOutput = true;
@@ -143,7 +155,7 @@ export function registerTerminal(tabId: string, term: Terminal): () => void {
 
 /** Pega `text` en la terminal de la tab y, con `submit`, lo manda. `false` si la tab no
  *  tiene una terminal viva. */
-export function pasteIntoTab(tabId: string, text: string, submit: boolean): boolean {
+export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRetry?: (at: number) => void): boolean {
   const term = terminals.get(tabId);
   if (!term) return false;
   term.paste(text);
@@ -157,7 +169,10 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean): bool
       setTimeout(() => {
         if (terminals.get(tabId) !== term) return;
         const screen = screenOf(tabId, null, 12);
-        if (screen && pasteStillPending(screen.lines)) term.input("\r");
+        if (screen && pasteStillPending(screen.lines)) {
+          term.input("\r");
+          onRetry?.(Date.now());
+        }
       }, delay),
     );
   }

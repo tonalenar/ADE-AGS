@@ -148,9 +148,10 @@ MISIONES (también sin interfaz: `ade-ags --headless`)
   mission create|start|status|wait <id>       Paso a paso (wait: --timeout)
   mission create|run|start ... --test          Marca explicitamente teste/E2E (fora da taxa de sucesso)
   mission review <id>                         Lo que entregó cada tarea aislada
-  mission timings <id>                        Tiempo activo unificado; primera delegación (firstDelegationMs), turnos y esperas
+  mission timings <id>                        Tiempo activo, delegación, alertas/esperas del orquestador y tiempo hasta todos trabajando
   mission efficiency <id>                     Tiempo activo unificado (mission_active > spans > reloj), costo e histórico por agentes
   mission precheck <id>                       Lo que el repositorio y las misiones anteriores ya dicen del objetivo
+  mission startcheck <id>                     Evidencia de briefing y actividad por agente; límite de 2 minutos
   memory search \"<tema>\" --mission <id> [--limit 5] [--at <YYYY-MM-DD|YYYY-MM-DDTHH:MM|unix-seconds>]
                                               Busca memoria vigente ahora o en ese instante (fechas en UTC)
   memory history --mission <id> --key <nombre> --scope workspace|mission
@@ -407,7 +408,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "tab.create" => &["cwd"],
         "workspace.open" => &["workspace"],
         // `ags mission wait <id>`, `ags mission accept <id> <tarea>`.
-        "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" | "mission.timings" | "mission.efficiency" | "mission.precheck" => &["mission"],
+        "mission.start" | "mission.status" | "mission.wait" | "mission.review" | "mission.apply" | "mission.timings" | "mission.efficiency" | "mission.precheck" | "mission.startcheck" => &["mission"],
         "mission.accept" => &["mission", "task"],
         "approval.decide" => &["approval"],
         // `ags peer ask Revisor "..."`: el nombre del agente y después el mensaje.

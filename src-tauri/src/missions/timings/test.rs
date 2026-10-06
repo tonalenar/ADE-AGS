@@ -1,6 +1,27 @@
 use super::*;
 
 #[test]
+fn reliability_spans_persist_and_wait_snapshots_do_not_double_count() {
+    let conn = crate::database::test_db();
+    conn.execute_batch("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w','W',0,0);
+        INSERT INTO missions(id,workspace_id,title,objective,cwd,created_at,updated_at) VALUES('m','w','T','O','/repo',1,1);").unwrap();
+    for (kind, end, detail) in [("orchestrator_stall", 61000, "alerted:peer_ask"),
+        ("orchestrator_stall", 91000, "answered:peer_ask"), ("start_all_working", 10000, "")] {
+        let mut span = new_span(kind, "A", 1000, end);
+        span.target = "Orquestrador".into(); span.detail = detail.into();
+        add(&conn, "m", &span).unwrap();
+    }
+    let spans = list(&conn, "m").unwrap();
+    assert_eq!(orchestrator_waits(&spans), (1, 90000, 90000));
+    let report = crate::missions::timings_of(&conn, "m").unwrap();
+    assert_eq!(report.orchestrator_stall_count, 1);
+    assert_eq!(report.orchestrator_wait_ms, 90000);
+    assert_eq!(report.orchestrator_max_wait_ms, 90000);
+    assert_eq!(report.time_until_all_working_ms, Some(9000));
+    assert!(summarize(&spans, 5).by_kind.iter().any(|k| k.kind == "start_all_working"));
+}
+
+#[test]
 fn delegation_uses_real_lead_send_and_preserves_missing_measurements() {
     assert_eq!(first_delegation(&[], None), (None, None));
     assert_eq!(first_delegation(&[], Some(1)), (None, None));

@@ -10,6 +10,8 @@ import { pasteIntoTab, sendWhenReady, type SendTimings } from "@/features/termin
 
 import { getAutonomy, withAutonomy } from "./autonomy";
 import { withModel } from "./modelFlags";
+import { startEventSpan, startupProgress, withActivity, allWorkingSpan, type StartupState } from "./startup";
+import { useStallAlerts } from "./stallAlerts";
 import { recordSpan } from "./timings";
 import { missionTurns } from "./turns";
 
@@ -332,14 +334,33 @@ export async function startMissionInTerminals(
 
   // Cronómetro: cuánto tardó cada terminal en estar lista, y cuánto en contestar el briefing.
   const openedAt = Date.now();
+  // Tiempo hasta que TODOS arrancan: cada agente avisa su primera actividad; al último se graba el span.
+  let startup: StartupState = { openedAt, names: [LEAD_NAME, ...team.map((m) => m.name)], activityAt: new Map() };
+  const publishStartup = () => {
+    const progress = startupProgress(startup);
+    useStallAlerts.getState().setStartup(mission.id, { allWorkingMs: progress.allWorkingMs, pendingNames: progress.pendingNames });
+  };
+  publishStartup();
   const timed = (actor: string, tabId: string, isLead = false): SendTimings => {
     return {
+      onActivity: (at) => {
+        recordSpan(mission.id, startEventSpan("start_activity", actor, at));
+        startup = withActivity(startup, actor, at);
+        const done = allWorkingSpan(startup);
+        if (done) recordSpan(mission.id, done);
+        publishStartup();
+      },
+      onRetry: (at) => recordSpan(mission.id, startEventSpan("start_retry", actor, at)),
       // Sin actividad tras el briefing: ya se le dio un Enter; se avisa a la orquestadora para que verifique.
       onStalled: isLead
-        ? undefined
-        : () => pasteIntoTab(leadTabId, `[AGS] ${actor} não mostrou atividade após o briefing (recebeu um Enter). Confirme se ele está trabalhando; se não, reenvie a tarefa dele com ags peer tell.`, true),
+        ? () => recordSpan(mission.id, startEventSpan("start_stalled", actor, Date.now()))
+        : () => {
+          recordSpan(mission.id, startEventSpan("start_stalled", actor, Date.now()));
+          pasteIntoTab(leadTabId, `[AGS] ${actor} não mostrou atividade após o briefing (recebeu um Enter). Confirme se ele está trabalhando; se não, reenvie a tarefa dele com ags peer tell.`, true);
+        },
       onSent: (at) => {
         missionTurns.start(tabId, mission.id, actor, at, "briefing");
+        recordSpan(mission.id, startEventSpan("start_briefing", actor, at));
         recordSpan(mission.id, { kind: "boot", actor, startedMs: openedAt, endedMs: at });
       },
     };

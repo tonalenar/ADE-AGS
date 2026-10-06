@@ -2186,5 +2186,11 @@
   "missions.tokens.estimate": "Estimated cost (list price)",
   "missions.tokens.saved": "Cache savings",
   "missions.tokens.estimateNote": "Measured tokens × API list price. An estimate: a subscription does not pay per token.",
-  "missions.tokens.unpriced": "Not in the price table, left out of the cost: {{models}}"
+  "missions.tokens.unpriced": "Not in the price table, left out of the cost: {{models}}",
+  "missions.stall.title": "Orchestration stalled",
+  "missions.stall.kind.orchestrator_silent": "{{name}} asked the orchestrator and has had no reply for {{time}}.",
+  "missions.stall.kind.agent_idle": "{{name}} is idle with a pending task ({{time}}).",
+  "missions.startup.done": "Time until all agents working: {{time}}",
+  "missions.startup.waiting": "Waiting for agents to start: {{names}}",
+  "missions.startup.unknown": "Startup time not measured yet."
 }
