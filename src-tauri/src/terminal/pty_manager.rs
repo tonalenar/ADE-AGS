@@ -584,6 +584,14 @@ pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {
     session.writer.flush().map_err(|e| format!("PTY flush error: {e}"))
 }
 
+/// Display an app notice as output. Never inject it as input into an agent's TUI.
+pub fn display_notice(app:&tauri::AppHandle,tab_id:&str,message:&str) {
+    let id={let reg=registry(); newest_for_tab(reg.iter().map(|(id,s)|(*id,s.tab_id.as_deref())),tab_id)};
+    if let Some(id)=id {
+        let _=app.emit(&format!("pty-data-{id}"),PtyDataPayload {data:format!("\r\n{message}\r\n")});
+    }
+}
+
 /// Escribe datos (input del usuario desde xterm.js) al PTY.
 #[tauri::command]
 pub async fn pty_write(id: u32, data: String) -> Result<(), String> {

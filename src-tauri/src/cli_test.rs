@@ -12,6 +12,15 @@ fn local_tests_accept_suite_force_and_dry_run() {
 }
 
 #[test]
+fn cleanup_and_worktree_sweep_flags_are_routed() {
+    let c=parse("mission.cleanup", &["mission-id","--dry-run"]).unwrap();assert_eq!(c["mission"],"mission-id");assert!(c.get("dryRun").is_some());
+    assert!(parse("mission.cleanup", &["m","extra"]).is_err());
+    for command in ["worktrees.list","worktrees.prune"] {
+        let args=parse(command,&["--cwd","/repo","--dry-run"]).unwrap();assert_eq!(args["cwd"],"/repo");assert!(args.get("dryRun").is_some());
+    }
+}
+
+#[test]
 fn design_caller_is_the_creating_terminal() {
     let mut args=json!({"from":"other","ownerTabId":"other"});
     caller_from("design.create",&mut args,Some("actual-tab".into()));

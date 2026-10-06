@@ -65,7 +65,7 @@ Depende de: 5.
 
 **v1 concluído** em `feat/mission-review` (PR #11). Continua havendo um worktree por task isolada. A Mission ganhou um **worktree de integração**, criado na primeira entrega aceita na tela "Revisão das entregas", onde as branches aceitas são unidas sem tocar na cópia de trabalho do usuário. "Aplicar no projeto" faz um único merge da integração. Conflitos são sempre abortados e listados. Detalhes em [MISSION_ENGINE.md](./MISSION_ENGINE.md).
 
-Pendente: resolver conflitos dentro da app e limpar a integração depois de aplicada.
+**Etapa 21 concluída:** (a) "Limpar worktrees" no detalhe da missão encerrada (dry-run primeiro; recusa alterações não commitadas ou commits fora do master e mostra o bloqueio; junction de `node_modules` removida antes, pela API do SO); (b) `ags mission cleanup <id> [--dry-run]` e `ags worktrees list|prune` (órfãos, tamanho e o que impede a limpeza); (c) conflitos de integração resolvidos na app, com as duas versões lado a lado e "manter o meu / o do master / os dois" (fusão pura testada; ROADMAP e locales JSON mantêm os dois lados). Código não trivial segue para o agente/usuário. Detalhes em [MISSION_CLEANUP.md](./MISSION_CLEANUP.md).
 
 ## 8. MCP interno da ADE
 
@@ -117,7 +117,9 @@ O E2E confirmou retry com snapshot atualizado, histórico antigo preservado, Lea
 
 ## 14. Usage, custos e limites (parcial)
 
-Claude já expõe plano e tokens. A frota já tem `budget_usd` e soma tokens quando o stream traz. Falta o mesmo contrato para os outros providers e um teto que a missão consulte antes de escalar.
+Claude já expõe plano e tokens. A frota já tem `budget_usd` e soma tokens quando o stream traz. **Etapa 21 implementada:** guarda de orçamento puro (ok / aviso ≥80% / estourado ≥100%, só tokens medidos, modelos sem preço sinalizados) com barra no QG e na aba da missão, aviso `[AGS] orçamento a 80%...` na orquestradora e em `ags mission efficiency`; ao estourar, `ags peer recruit` e novas tarefas pedem confirmação (elevar o teto ou continuar, registrado), sem derrubar agentes em andamento. Uso uniforme: Codex e OpenCode (SQLite somente leitura) medidos; Gemini, Antigravity e limite de plano do Claude aparecem como "não medido" por falta de fonte legível. Detalhes em [MISSION_TOKENS.md](./MISSION_TOKENS.md).
+
+Pendente: tokens de Gemini/Antigravity e janela de limite do Claude quando as CLIs expuserem arquivos legíveis.
 
 Depende de: 2 e 6. Usage e custo dependem dos dados reportados pelo adapter: tokens já aparecem para Codex, mas custo por worker não tem cobertura uniforme. Não bloqueia 4.
 
@@ -133,7 +135,7 @@ Depende de: 2 e 6. Usage e custo dependem dos dados reportados pelo adapter: tok
 
 A ferramenta que cada agente está usando agora vem ao vivo de `task.activity` no bus. Não é um runtime novo: lê as tasks do detalhe e o bus.
 
-Pendente: zoom e pan para missões grandes, e uma visão da frota inteira fora de uma Mission.
+**Etapa 21 concluída:** zoom (roda e botões), pan por arrastar e "ajustar a tela" no mapa (reaproveita `viewport.ts`), e a visão **Frota** com tasks/terminais ativos de todas as missões em andamento, agrupados por missão, com os mesmos sinais do indicador das abas e do Ao vivo.
 
 Depende de: 9, 10, 12 e 13. É a última porque desenhar cedo fixa um modelo que essas etapas ainda vão mover.
 
