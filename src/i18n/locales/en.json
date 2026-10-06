@@ -2197,5 +2197,11 @@
   "botPanel.live.lore2": "The crew climbs the floors and fires code at it: every real delivery drains the GLITCH.",
   "botPanel.live.lore3": "The barrels are its attacks: failures, pending approvals and unanswered questions.",
   "botPanel.live.boss": "GLITCH {{done}}/{{total}}",
-  "botPanel.live.bossDefeated": "GLITCH DEFEATED!"
+  "botPanel.live.bossDefeated": "GLITCH DEFEATED!",
+  "missions.tokens.tabKind.member": "member",
+  "missions.tokens.tabKind.recruit": "recruit",
+  "missions.tokens.tabKind.custom": "custom agent",
+  "missions.tokens.tabKind.loose": "loose tab",
+  "missions.tokens.perTab": "Per tab",
+  "missions.tokens.perTabNote": "Tab totals add up to the agent total."
 }

@@ -7,6 +7,7 @@ import { useMissionsStore } from "@/features/missions/store";
 import { MissionEfficiencyCard } from "@/features/missions/MissionTimingsPanel";
 import { MissionStallAlerts, MissionStartupTime } from "@/features/missions/StallAlertsView";
 import { formatDuration, getTimings, type MissionTimings } from "@/features/missions/timings";
+import { TabCostList } from "@/features/missions/TabCostList";
 import { estimateOf, formatCompactNumber, formatUsd, getTokens, type CostEstimate, type MissionTokens } from "@/features/missions/tokens";
 import type { MissionReview } from "@/features/missions/types";
 import { useAgentActivity } from "@/features/terminal/activity";
@@ -288,6 +289,12 @@ export function BotPanel() {
                   {currentEstimate && currentEstimate.unpricedModels.length > 0 && (
                     <p className="ags-hq__dim">{t("botPanel.unpriced", { models: currentEstimate.unpricedModels.join(", ") })}</p>
                   )}
+                  {tokens?.agents.filter((a) => (a.tabs?.length ?? 0) > 0).map((a) => (
+                    <div key={a.agentId} style={{ marginTop: 10 }}>
+                      <p className="ags-hq__dim">{a.agentId} · {t("missions.tokens.perTab")}</p>
+                      <TabCostList agent={a} />
+                    </div>
+                  ))}
                   {tokens && tokens.agents.filter((a) => !a.measured).length > 0 && (
                     <p className="ags-hq__dim">{t("botPanel.unmeasured", { agents: tokens.agents.filter((a) => !a.measured).map((a) => a.agentId).join(", ") })}</p>
                   )}

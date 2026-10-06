@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { TabCostList } from "./TabCostList";
 import { estimateOf, formatCompactNumber, formatUsd, getTokens, tokenRows, type MissionTokens, type TokenRow } from "./tokens";
 
 /** Cada quanto se relê enquanto a missão roda: os tokens medidos não geram evento próprio. */
@@ -21,7 +22,9 @@ function TokenCell({ value }: { value: number | null }) {
 
 function TokenTableRow({ row }: { row: TokenRow }) {
   const { t } = useTranslation();
+  const hasTabs = !row.isTotal && (row.tabs?.length ?? 0) > 0;
   return (
+    <div>
     <div
       className={`flex items-center gap-2 py-1 text-[11.5px] ${row.isTotal ? "font-semibold text-gray-700 dark:text-gray-200" : ""}`}
     >
@@ -38,6 +41,13 @@ function TokenTableRow({ row }: { row: TokenRow }) {
       <span className="w-24 shrink-0 text-right text-[10.5px] text-gray-400 dark:text-white/35">
         {row.cacheReadSharePct !== null ? t("missions.tokens.cacheReadShare", { pct: row.cacheReadSharePct }) : ""}
       </span>
+    </div>
+    {hasTabs && (
+      <div className="mb-1 ml-3 border-l border-gray-100 pl-2 dark:border-white/10">
+        <span className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-white/35">{t("missions.tokens.perTab")}</span>
+        <TabCostList agent={row} />
+      </div>
+    )}
     </div>
   );
 }

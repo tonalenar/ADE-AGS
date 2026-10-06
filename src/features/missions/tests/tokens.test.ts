@@ -263,3 +263,41 @@ describe("tokenRows", () => {
     expect(totalRow.cacheReadSharePct).toBe(20); // 600 / (2000 + 600 + 400) * 100 = 20%
   });
 });
+
+import { sortedTabs, tabCostUsd, tabTotalTokens, tabsSum, type TabTokens } from "../tokens";
+
+const tab = (over: Partial<TabTokens>): TabTokens => ({
+  tabId: "t", label: "a", kind: "member", measured: true,
+  input: 10, output: 5, cacheWrite: 0, cacheRead: 5, costUsd: 1, estimate: null, ...over,
+});
+
+describe("custo por aba", () => {
+  it("aba sem medição vira null, nunca zero", () => {
+    const t = tab({ measured: false, input: null, output: null, cacheWrite: null, cacheRead: null, costUsd: null });
+    expect(tabCostUsd(t)).toBeNull();
+    expect(tabTotalTokens(t)).toBeNull();
+  });
+
+  it("prefere a estimativa de tabela ao custo medido", () => {
+    expect(tabCostUsd(tab({ costUsd: 1, estimate: { costUsd: 2, savedUsd: 0, unpricedModels: [] } }))).toBe(2);
+    expect(tabCostUsd(tab({ costUsd: 1 }))).toBe(1);
+    expect(tabTotalTokens(tab({}))).toBe(20);
+  });
+
+  it("ordena medidas mais caras primeiro e não medidas no fim", () => {
+    const agent = {
+      agentId: "x", measured: true, input: 0, output: 0, cacheWrite: 0, cacheRead: 0, costUsd: 0,
+      tabs: [tab({ tabId: "n", label: "n", measured: false, costUsd: null }), tab({ tabId: "b", label: "b", costUsd: 1 }), tab({ tabId: "c", label: "c", costUsd: 3 })],
+    };
+    expect(sortedTabs(agent).map((x) => x.tabId)).toEqual(["c", "b", "n"]);
+  });
+
+  it("soma das abas bate com o total e ignora não medidas; vazio = null", () => {
+    const agent = {
+      agentId: "x", measured: true, input: 20, output: 10, cacheWrite: 0, cacheRead: 10, costUsd: 3,
+      tabs: [tab({ costUsd: 1 }), tab({ costUsd: 2 }), tab({ measured: false, costUsd: null, input: null, output: null, cacheWrite: null, cacheRead: null })],
+    };
+    expect(tabsSum(agent)).toEqual({ tokens: 40, costUsd: 3 });
+    expect(tabsSum({ ...agent, tabs: undefined })).toEqual({ tokens: null, costUsd: null });
+  });
+});

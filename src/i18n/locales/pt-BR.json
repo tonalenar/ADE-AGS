@@ -2197,5 +2197,11 @@
   "botPanel.live.lore2": "A equipe sobe os andares e dispara código nele: cada entrega real tira vida do GLITCH.",
   "botPanel.live.lore3": "Os barris são os golpes dele: falhas, aprovações pendentes e perguntas sem resposta.",
   "botPanel.live.boss": "GLITCH {{done}}/{{total}}",
-  "botPanel.live.bossDefeated": "GLITCH DERROTADO!"
+  "botPanel.live.bossDefeated": "GLITCH DERROTADO!",
+  "missions.tokens.tabKind.member": "integrante",
+  "missions.tokens.tabKind.recruit": "recruta",
+  "missions.tokens.tabKind.custom": "agente próprio",
+  "missions.tokens.tabKind.loose": "aba solta",
+  "missions.tokens.perTab": "Por aba",
+  "missions.tokens.perTabNote": "A soma das abas é o total do agente."
 }
