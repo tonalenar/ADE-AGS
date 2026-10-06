@@ -122,6 +122,7 @@ PAPELES (para recrutar con --role)
 NOTAS DEL CANVAS — las conectadas con esta terminal (orquestador: las del equipo)
   design create <title> [--workspace <path>] [--mission-id <id>] [--owner-tab-id <id>]
   design list [--workspace <path>] | get <designId>
+  design delete <designId> | archive <designId>
   design page add <designId> <name> [--order <n>]
   design artboard add <pageId> <title> --file <html> [--width <n> --height <n>]
   design artboard add <designId> <title> --page <name> --file <html>
@@ -269,7 +270,9 @@ fn main() -> ExitCode {
         return ExitCode::from(if args.is_empty() { EXIT_USAGE } else { EXIT_OK });
     }
     if args[0] == "--version" || args[0] == "-V" {
-        println!("{}", json!({ "version": env!("CARGO_PKG_VERSION"), "protocol": PROTOCOL_VERSION }));
+        let mut version = ade_ags_lib::build_info::current();
+        version["protocol"] = json!(PROTOCOL_VERSION);
+        println!("{version}");
         return ExitCode::from(EXIT_OK);
     }
 
@@ -447,13 +450,19 @@ impl CliError {
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
     const GROUPS: [&str; 12] = ["peer.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design."];
-    if !GROUPS.iter().any(|g| command.starts_with(g)) || parsed.get("from").is_some() {
+    if !GROUPS.iter().any(|g| command.starts_with(g)) {
         return parsed;
     }
-    if let (Ok(tab), Some(map)) = (std::env::var("ADE_TAB_ID"), parsed.as_object_mut()) {
+    caller_from(command, &mut parsed, std::env::var("ADE_TAB_ID").ok());
+    parsed
+}
+
+fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>) {
+    // The design creator is always the actual terminal, even if an agent passed --from.
+    if parsed.get("from").is_some() && !command.starts_with("design.") { return; }
+    if let (Some(tab), Some(map)) = (tab, parsed.as_object_mut()) {
         map.insert("from".into(), Value::String(tab));
     }
-    parsed
 }
 
 /// Grupos que se escriben solos porque tienen una sola acción útil.
@@ -516,7 +525,7 @@ fn design_command(args: &[String]) -> Result<(String, &[String]), String> {
 fn positionals(command: &str) -> &'static [&'static str] {
     match command {
         "design.create" => &["title"],
-        "design.get" | "design.approve.all" => &["designId"],
+        "design.get" | "design.delete" | "design.archive" | "design.approve.all" => &["designId"],
         "design.page.add" => &["designId", "name"],
         "design.artboard.add" => &["pageId", "title"],
         "design.update" | "design.artboard.update" | "design.revert" | "design.artboard.revert" | "design.approve" | "design.artboard.approve" | "design.reject" | "design.artboard.reject" => &["artboardId"],

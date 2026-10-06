@@ -1,4 +1,5 @@
 fn main() {
+    build_identity();
     tauri_build::build();
 
     // `cargo:rustc-link-arg-tests` no llega al harness de los unit tests de la lib
@@ -8,6 +9,37 @@ fn main() {
     if std::env::var("CARGO_CFG_TARGET_OS").ok().as_deref() == Some("windows") {
         embed_test_manifest();
     }
+}
+
+fn build_identity() {
+    use std::process::Command;
+    fn git(args: &[&str]) -> Option<String> {
+        let output = Command::new("git").args(args).output().ok()?;
+        output
+            .status
+            .success()
+            .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
+    }
+    let hash = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".into());
+    let date = std::env::var("SOURCE_DATE_EPOCH").unwrap_or_else(|_| {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("build time")
+            .as_secs()
+            .to_string()
+    });
+    println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
+    // Cargo tracks the source tree and git pointer, including linked worktrees.
+    println!("cargo:rerun-if-changed=src");
+    println!("cargo:rerun-if-changed=../.git");
+    if let Some(path) = git(&["rev-parse", "--git-path", "HEAD"]) {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    if let Some(path) = git(&["rev-parse", "--git-path", "refs"]) {
+        println!("cargo:rerun-if-changed={path}");
+    }
+    println!("cargo:rustc-env=ADE_BUILD_HASH={hash}");
+    println!("cargo:rustc-env=ADE_BUILD_DATE={date}");
 }
 
 fn embed_test_manifest() {

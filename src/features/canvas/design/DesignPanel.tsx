@@ -2,70 +2,49 @@ import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "r
 import { useTranslation } from "react-i18next";
 import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
 
+import { chooseOnBoard } from "./chooseProposal";
+import { BoardCard, designBtn as btn } from "./BoardCard";
 import { buildTasks } from "./buildTasks";
 import { allApproved, buildable, formatQueueForAgent, pendingComments } from "./commentQueue";
-import {
-  designApi, onDesignChanged,
-  type Artboard, type ArtboardStatus, type ArtboardVersion, type Design, type DesignDetail,
-} from "./designApi";
+import { designApi, type Artboard, type ArtboardVersion, type DesignDetail } from "./designApi";
 import { useMissionIndex } from "@/features/missions/groups";
 import { useTabsStore } from "@/features/tabs/store";
 import { spreadOverlapping } from "./layout";
+import { ownerProblem } from "./ownerLabel";
 import { defaultDesignId, resolveOwner } from "./owner";
 import { DESIGN_SANDBOX, buildSrcdoc, parsePick } from "./srcdoc";
 import { INITIAL_VIEWPORT, fitViewport, viewportReducer, zoomPercent } from "./viewport";
-
-const CHIP: Record<ArtboardStatus, string> = {
-  draft: "bg-amber-500/15 text-amber-700 dark:text-amber-300",
-  approved: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300",
-  rejected: "bg-red-500/15 text-red-700 dark:text-red-300",
-};
-
-const btn = `cc-t h-7 px-2.5 rounded-md text-[11.5px] font-medium text-gray-600 dark:text-gray-300
-  hover:bg-gray-100 dark:hover:bg-white/8 disabled:opacity-40`;
-
-function StatusChip({ status }: { status: ArtboardStatus }) {
-  const { t } = useTranslation();
-  return <span className={`px-1.5 h-[18px] leading-[18px] rounded-full text-[10px] font-semibold ${CHIP[status]}`}>{t(`canvas.design.status.${status}`)}</span>;
-}
 
 /**
  * O canvas de Design: as pranchetas que o agente desenhou, para ver, comentar, editar e
  * aprovar ANTES de construir. O HTML é hostil: só roda em iframe sandbox (ver `srcdoc.ts`).
  */
-export function DesignPanel({ onClose }: { onClose: () => void }) {
+export function DesignPanel({ details, reload, initial, onClose }: {
+  /** Os designs deste canvas (já filtrados por missão/pasta) e como recarregá-los. */
+  details: DesignDetail[];
+  reload: () => void | Promise<void>;
+  /** O design a abrir (e a prancheta a editar), quando se chega por um aviso ou pelo botão EDITAR de um nó. */
+  initial?: { designId?: string; editBoardId?: string } | null;
+  onClose: () => void;
+}) {
   const { t } = useTranslation();
-  const [designs, setDesigns] = useState<Design[]>([]);
-  const [designId, setDesignId] = useState<string | null>(null);
-  const [detail, setDetail] = useState<DesignDetail | null>(null);
+  const designs = useMemo(() => details.map((d) => d.design), [details]);
+  const [designId, setDesignId] = useState<string | null>(initial?.designId ?? null);
   // As abas abertas e a missão de cada uma: sem dono gravado (ou com a aba fechada) as mensagens vão à orquestradora da missão.
   const allTabs = useTabsStore((s) => s.tabs);
   const missionIndex = useMissionIndex();
   const ownerTabs = useMemo(() => allTabs.map((tab) => ({ id: tab.id, title: tab.title })), [allTabs]);
-  const ctx = useRef({ ownerTabs, missionIndex });
-  ctx.current = { ownerTabs, missionIndex };
   const ownerOf = (design: { ownerTabId: string | null; missionId: string | null }) => resolveOwner(design, ownerTabs, missionIndex);
   const [pageId, setPageId] = useState<string | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<string | null>(initial?.editBoardId ?? null);
   const [vp, dispatch] = useReducer(viewportReducer, INITIAL_VIEWPORT);
   const surface = useRef<HTMLDivElement>(null);
   const fail = useCallback((e: unknown) => AlertaToast(t("canvas.design.title"), String(e), "error", 6000), [t]);
 
-  const loadDesigns = useCallback(() => {
-    designApi.list().then((list) => {
-      setDesigns(list);
-      setDesignId((cur) => (cur && list.some((d) => d.id === cur) ? cur : defaultDesignId(list, ctx.current.ownerTabs, ctx.current.missionIndex)));
-    }).catch(() => setDesigns([]));
-  }, []);
-  const loadDetail = useCallback(() => {
-    if (!designId) return setDetail(null);
-    designApi.get(designId).then(setDetail).catch(() => setDetail(null));
-  }, [designId]);
-
-  useEffect(() => { loadDesigns(); }, [loadDesigns]);
-  useEffect(() => { loadDetail(); }, [loadDetail]);
-  // O agente (ou o CLI) mudou algo: recarrega sem perder zoom, página nem edição.
-  useEffect(() => onDesignChanged(() => { loadDesigns(); loadDetail(); }), [loadDesigns, loadDetail]);
+  // O design em foco: o escolhido; se sumiu (excluído) ou ainda não há escolha, o mais recente com dono.
+  const currentId = designId && designs.some((d) => d.id === designId) ? designId : defaultDesignId(designs, ownerTabs, missionIndex);
+  const detail = details.find((d) => d.design.id === currentId) ?? null;
+  const loadDetail = useCallback(() => { void reload(); }, [reload]);
 
   const pages = detail?.pages ?? [];
   const page = pages.find((p) => p.id === pageId) ?? pages[0] ?? null;
@@ -80,7 +59,7 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
     dispatch({ type: "set", viewport: fitViewport(boards.map((b) => ({ x: b.x, y: b.y, w: b.width, h: b.height + 28 })), el.clientWidth, el.clientHeight) });
   }, [boards]);
   // Ao trocar de design ou página, enquadra tudo.
-  useEffect(() => { fit(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [designId, page?.id]);
+  useEffect(() => { fit(); /* eslint-disable-next-line react-hooks/exhaustive-deps */ }, [currentId, page?.id]);
 
   // Pan: arrastar o fundo. Zoom: roda do mouse em torno do cursor.
   const drag = useRef<{ x: number; y: number } | null>(null);
@@ -94,24 +73,20 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
     if (el) dispatch({ type: "zoomBy", factor, cx: el.clientWidth / 2, cy: el.clientHeight / 2 });
   };
 
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const archive = (id: string) => {
+    setEditing(null);
+    designApi.archive(id).then(() => { setDesignId(null); setPageId(null); loadDetail(); }).catch(fail);
+  };
+  const remove = (id: string) => {
+    setConfirmDelete(false);
+    setEditing(null);
+    designApi.remove(id).then(() => { setDesignId(null); setPageId(null); loadDetail(); }).catch(fail);
+  };
   const run = (p: Promise<unknown>) => p.then(loadDetail).catch(fail);
-  /** O usuario clicou na proposta que escolhe numa prancheta com varias: registra, aprova e avisa o dono. */
-  const choose = async (board: Artboard, pick: { selector: string; text: string }) => {
-    const what = pick.text || pick.selector;
-    try {
-      await designApi.addComment(board.id, t("canvas.design.chosenComment", { what }), pick.selector);
-      await designApi.approve(board.id);
-      await loadDetail();
-      const owner = detail ? ownerOf(detail.design) : null;
-      if (owner) {
-        await designApi.tellOwner(owner, `Design "${detail?.design.title}": o usuário ESCOLHEU na prancheta "${board.title}" (id ${board.id}) a proposta "${what}" [${pick.selector}]. A prancheta foi APROVADA com essa escolha: construa SOMENTE essa proposta (as outras estão descartadas).`);
-        AlertaToast(t("canvas.design.title"), t("canvas.design.chosen", { what }), "success", 4000);
-      } else {
-        AlertaToast(t("canvas.design.title"), t("canvas.design.noOwner"), "error", 6000);
-      }
-    } catch (e) {
-      fail(e);
-    }
+  const choose = (board: Artboard, pick: { selector: string; text: string }) => {
+    if (!detail) return;
+    return chooseOnBoard({ t, board, design: detail.design, owner: ownerOf(detail.design), pick, reload });
   };
   const sendQueue = async () => {
     if (!detail || queue.length === 0) return;
@@ -144,7 +119,7 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
       <div className="flex items-center gap-2 px-3 h-10 shrink-0 border-b border-gray-200 dark:border-white/10">
         <span className="text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">{t("canvas.design.title")}</span>
         {designs.length > 0 && (
-          <select value={designId ?? ""} onChange={(e) => { setDesignId(e.target.value); setPageId(null); setEditing(null); }}
+          <select value={currentId ?? ""} onChange={(e) => { setDesignId(e.target.value); setPageId(null); setEditing(null); }}
             aria-label={t("canvas.design.pick")}
             className="h-7 max-w-[14rem] rounded-md border border-gray-200 dark:border-white/10 bg-transparent px-1.5 text-[12px]">
             {designs.map((d) => <option key={d.id} value={d.id}>{ownerOf(d) ? d.title : `${d.title} (${t("canvas.design.noOwnerTag")})`}</option>)}
@@ -160,6 +135,7 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
         <span className="flex-1" />
         {detail && (
           <>
+            <OwnerChip owner={ownerTabs.find((o) => o.id === ownerOf(detail.design))?.title ?? null} problem={ownerProblem(detail.design, ownerOf(detail.design) !== null)} />
             <span className="text-[11px] text-gray-500 dark:text-gray-400">{t("canvas.design.approvedOf", { a: approvedCount, n: detail.artboards.length })}</span>
             <Button variant="custom" className={btn} disabled={queue.length === 0} onClick={sendQueue} title={t("canvas.design.sendHint")}>
               {t("canvas.design.sendQueue", { count: queue.length })}
@@ -169,6 +145,16 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
             <Button variant="custom" className={`${btn} bg-accent-500/15 text-accent-600 dark:text-accent-300`} disabled={approvedCount === 0}
               onClick={build} title={t("canvas.design.buildHint")}>{t("canvas.design.build")}</Button>
           </>
+        )}
+        {detail && (
+          <Button variant="custom" className={btn} onClick={() => archive(detail.design.id)} title={t("canvas.design.archiveHint")}>{t("canvas.design.archive")}</Button>
+        )}
+        {detail && (
+          <Button variant="custom" className={`${btn} ${confirmDelete ? "bg-red-500/15 text-red-600 dark:text-red-300" : ""}`}
+            onClick={() => (confirmDelete ? remove(detail.design.id) : setConfirmDelete(true))} onBlur={() => setConfirmDelete(false)}
+            title={t("canvas.design.deleteHint")}>
+            {confirmDelete ? t("canvas.design.deleteConfirm") : t("canvas.design.delete")}
+          </Button>
         )}
         <Button variant="custom" onClick={onClose} aria-label={t("canvas.design.close")}
           className="cc-t w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
@@ -194,11 +180,13 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
           <div data-world="1" className="absolute left-0 top-0 origin-top-left"
             style={{ transform: `translate(${vp.x}px, ${vp.y}px) scale(${vp.zoom})` }}>
             {boards.map((b) => (
-              <BoardView key={b.id} board={b} active={editing === b.id}
-                comments={(detail?.comments ?? []).filter((c) => c.artboardId === b.id && !c.resolved).length}
-                onEdit={() => setEditing(editing === b.id ? null : b.id)}
-                onApprove={() => run(designApi.approve(b.id))} onReject={() => run(designApi.reject(b.id))}
-                onChoose={(pick) => choose(b, pick)} />
+              <div key={b.id} className="absolute" style={{ left: b.x, top: b.y }}>
+                <BoardCard board={b} active={editing === b.id}
+                  comments={(detail?.comments ?? []).filter((c) => c.artboardId === b.id && !c.resolved).length}
+                  onEdit={() => setEditing(editing === b.id ? null : b.id)}
+                  onApprove={() => run(designApi.approve(b.id))} onReject={() => run(designApi.reject(b.id))}
+                  onChoose={(pick) => choose(b, pick)} />
+              </div>
             ))}
           </div>
 
@@ -216,49 +204,6 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
             comments={detail.comments.filter((c) => c.artboardId === editBoard.id)} />
         )}
       </div>
-    </div>
-  );
-}
-
-function BoardView({ board, active, comments, onEdit, onApprove, onReject, onChoose }: {
-  board: Artboard; active: boolean; comments: number; onEdit: () => void; onApprove: () => void; onReject: () => void;
-  onChoose: (pick: { selector: string; text: string }) => void;
-}) {
-  const { t } = useTranslation();
-  const [choosing, setChoosing] = useState(false);
-  const frame = useRef<HTMLIFrameElement>(null);
-  const srcDoc = useMemo(() => buildSrcdoc(board.html, { chooser: choosing }), [board.html, choosing]);
-  // Só se aceita a escolha vinda do iframe desta prancheta (o conteúdo é hostil).
-  useEffect(() => {
-    if (!choosing) return;
-    const onMsg = (e: MessageEvent) => {
-      if (e.source !== frame.current?.contentWindow) return;
-      const pick = parsePick(e.data);
-      if (!pick) return;
-      setChoosing(false);
-      onChoose(pick);
-    };
-    window.addEventListener("message", onMsg);
-    return () => window.removeEventListener("message", onMsg);
-  }, [choosing, onChoose]);
-  return (
-    <div className="absolute" style={{ left: board.x, top: board.y, width: board.width }}>
-      <div className="flex items-center gap-1.5 h-7 text-[12px]">
-        <span className="truncate font-medium text-gray-700 dark:text-gray-200">{board.title}</span>
-        <StatusChip status={board.status} />
-        <span className="text-[10px] text-gray-400">v{board.version}</span>
-        {comments > 0 && <span className="text-[10px] text-accent-600 dark:text-accent-300">💬 {comments}</span>}
-        <span className="flex-1" />
-        <Button variant="custom" className={`${btn} ${choosing ? "bg-orange-500/20 text-orange-600 dark:text-orange-300" : ""}`} onClick={() => setChoosing((v) => !v)}>
-          {choosing ? t("canvas.design.choosing") : t("canvas.design.choose")}
-        </Button>
-        <Button variant="custom" className={`${btn} ${active ? "bg-accent-500/15 text-accent-600 dark:text-accent-300" : ""}`} onClick={onEdit}>{t("canvas.design.edit")}</Button>
-        <Button variant="custom" className={btn} disabled={board.status === "approved"} onClick={onApprove}>{t("canvas.design.approve")}</Button>
-        <Button variant="custom" className={btn} disabled={board.status === "rejected"} onClick={onReject}>{t("canvas.design.reject")}</Button>
-      </div>
-      <iframe ref={frame} title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc} referrerPolicy="no-referrer"
-        className={`block bg-white rounded-sm shadow-md border-0 ${board.status === "rejected" ? "opacity-50" : ""}`}
-        style={{ width: board.width, height: board.height }} />
     </div>
   );
 }
@@ -382,3 +327,11 @@ function EditPane({ board, versions, comments, onClose, onChanged, fail }: {
 }
 
 type DesignDetailComments = DesignDetail["comments"];
+
+/** Quem é o dono do design (recebe os comentários); sem dono, avisa que eles não chegam a ninguém. */
+function OwnerChip({ owner, problem }: { owner: string | null; problem: "missing" | "closed" | null }) {
+  const { t } = useTranslation();
+  return owner
+    ? <span className="max-w-[10rem] truncate text-[11px] text-gray-500 dark:text-gray-400" title={t("canvas.design.ownerHint")}>{t("canvas.design.owner", { name: owner })}</span>
+    : <span className="px-1.5 h-[18px] leading-[18px] rounded-full bg-red-500/15 text-red-700 dark:text-red-300 text-[10px] font-semibold" title={t(problem === "closed" ? "canvas.design.ownerClosed" : "canvas.design.noOwner")}>{t(problem === "closed" ? "canvas.design.ownerClosedBadge" : "canvas.design.noOwnerBadge")}</span>;
+}
