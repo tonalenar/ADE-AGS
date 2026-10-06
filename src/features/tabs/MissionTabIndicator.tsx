@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from "react";
 
-export { useReducedMotion };
 import { useTranslation } from "react-i18next";
 
 import { MASCOT_BODY, MASCOT_FILL, MascotEyes, MascotLimbs, type EyeKind } from "@/shared/brand/Mascot";
