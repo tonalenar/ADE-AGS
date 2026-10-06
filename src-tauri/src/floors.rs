@@ -99,8 +99,13 @@ pub(crate) enum WorktreeShell {
     Posix,
 }
 
-/// Calcula o target Rust usado pelo recruit. Sem override, todos compartilham o cache do
-/// clone principal; `per-worktree` evita que dois Cargo concorrentes disputem o mesmo lock.
+/// Dedicated agent cache, separate from the target used by `tauri dev`.
+pub(crate) fn agents_cargo_target_dir() -> PathBuf {
+    dirs::home_dir().unwrap_or_else(std::env::temp_dir).join(".ags").join("cargo-target-agents")
+}
+
+/// Sem override, todos compartilham o cache exclusivo dos agentes.
+/// `per-worktree` permanece disponível para evitar disputa de lock.
 pub(crate) fn cargo_target_dir(
     repo_root: &Path,
     worktree_root: &Path,
@@ -112,11 +117,14 @@ pub(crate) fn cargo_target_dir(
         .filter(|s| !s.is_empty())
     else {
         return CargoTarget {
-            path: repo_root.join("src-tauri").join("target"),
+            path: agents_cargo_target_dir(),
             mode: CargoTargetMode::Shared,
         };
     };
 
+    if value.eq_ignore_ascii_case("shared") {
+        return CargoTarget { path: agents_cargo_target_dir(), mode: CargoTargetMode::Shared };
+    }
     if value.eq_ignore_ascii_case("per-worktree") {
         return CargoTarget {
             path: worktree_root.join("src-tauri").join("target"),
@@ -210,25 +218,23 @@ pub(crate) fn worktree_environment_block(
     node_modules: &str,
     cargo_mode: CargoTargetMode,
 ) -> String {
-    let (root_command, cargo_command, code_fence) = match shell {
+    let (root_command, code_fence) = match shell {
         WorktreeShell::PowerShell => (
             format!("Set-Location {}", shell_quote_powershell(worktree_root)),
-            "Push-Location src-tauri\ncargo test --lib floors::test\nPop-Location".to_string(),
             "powershell",
         ),
         WorktreeShell::Posix => (
             format!("cd {}", shell_quote_posix(worktree_root)),
-            "(cd src-tauri && cargo test --lib floors::test)".to_string(),
             "bash",
         ),
     };
     let cargo_note = match cargo_mode {
-        CargoTargetMode::Shared => "O target Cargo é compartilhado; compilações simultâneas podem disputar o lock. Configure ADE_AGS_CARGO_TARGET_DIR=per-worktree para isolar este worktree; as dependências serão recompiladas uma vez nele.",
+        CargoTargetMode::Shared => "O target Cargo é compartilhado exclusivamente pelos agentes, separado do tauri dev; compilações simultâneas podem disputar o lock. Aqueça-o uma vez com cargo test --lib --no-run. ADE_AGS_CARGO_TARGET_DIR=per-worktree mantém isolamento opcional.",
         CargoTargetMode::PerWorktree => "O target Cargo é isolado por worktree, evitando disputa pelo lock; as dependências serão recompiladas uma vez neste worktree.",
         CargoTargetMode::Custom => "O target Cargo usa o caminho configurado. Se vários agentes o compartilharem, podem disputar o lock; ADE_AGS_CARGO_TARGET_DIR=per-worktree seleciona um target próprio por worktree, com recompilação única das dependências.",
     };
     format!(
-        "AMBIENTE DO WORKTREE\nShell: {shell_label}\nRaiz: {worktree_root}\nnode_modules: {node_modules}\nCARGO_TARGET_DIR: {cargo_target_dir}\n{cargo_note}\n\nValidação (troque `floors::test` pelo filtro do módulo alterado):\n```{code_fence}\n{root_command}\nnode node_modules/typescript/bin/tsc --noEmit\nnode node_modules/vitest/vitest.mjs run\n{cargo_command}\n```"
+        "AMBIENTE DO WORKTREE\nShell: {shell_label}\nRaiz: {worktree_root}\nnode_modules: {node_modules}\nCARGO_TARGET_DIR: {cargo_target_dir}\n{cargo_note}\n\nValidação de cada entrega:\n```{code_fence}\n{root_command}\nags test affected --dry-run\nags test affected\n```\nNão repita a suite completa localmente: ao abrir PR, espere o CI com gh pr checks <n> --watch. Suite completa local obrigatória em migrações de banco, schema, código unsafe ou COM. Use ags test run <frontend|rust|tsc|babel> nessas exceções; --force ignora cache. QA valida cada entrega ao receber ags peer tell; a integração tem uma validação completa final (ou CI)."
     )
 }
 
@@ -619,7 +625,9 @@ mod test {
 
         let shared = cargo_target_dir(&repo, &worktree, None);
         assert_eq!(shared.mode, CargoTargetMode::Shared);
-        assert_eq!(shared.path, repo.join("src-tauri").join("target"));
+        assert_eq!(shared.path, agents_cargo_target_dir());
+        assert_ne!(shared.path, repo.join("src-tauri").join("target"));
+        assert_eq!(cargo_target_dir(&repo, &worktree, Some(OsStr::new("shared"))), shared);
 
         let isolated = cargo_target_dir(&repo, &worktree, Some(OsStr::new("per-worktree")));
         assert_eq!(isolated.mode, CargoTargetMode::PerWorktree);
@@ -644,9 +652,9 @@ mod test {
             assert!(block.contains("AMBIENTE DO WORKTREE"), "{block}");
             assert!(block.contains("Shell: PowerShell"), "{block}");
             assert!(block.contains(&format!("Raiz: {root}")), "{block}");
-            assert!(block.contains("node node_modules/typescript/bin/tsc --noEmit"), "{block}");
-            assert!(block.contains("node node_modules/vitest/vitest.mjs run"), "{block}");
-            assert!(block.contains("cargo test --lib floors::test"), "{block}");
+            assert!(block.contains("ags test affected --dry-run"), "{block}");
+            assert!(block.contains("gh pr checks <n> --watch"), "{block}");
+            assert!(block.contains("migrações de banco, schema, código unsafe ou COM"), "{block}");
             assert!(block.contains("disputar o lock"), "{block}");
         }
     }
@@ -665,7 +673,7 @@ mod test {
             assert!(block.contains("Shell: bash"), "{block}");
             assert!(block.contains(&format!("Raiz: {root}")), "{block}");
             assert!(block.contains("cd '"), "{block}");
-            assert!(block.contains("cargo test --lib floors::test"), "{block}");
+            assert!(block.contains("ags test affected"), "{block}");
             assert!(block.contains("isolado por worktree"), "{block}");
         }
     }

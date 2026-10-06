@@ -37,14 +37,15 @@ fn each_member_gets_origin_master_workspace_retry_preserves_work_and_junction() 
     let a = prepare_one(&db, &mission, "Orquestrador", &base).unwrap();
     let b = prepare_one(&db, &mission, "Backend", &base).unwrap();
     assert_ne!(a.root, b.root); assert_ne!(a.branch, b.branch);
-    assert_ne!(a.cargo_target_dir, b.cargo_target_dir);
+    assert_eq!(a.cargo_target_dir, b.cargo_target_dir);
+    assert_ne!(b.cargo_target_dir, Path::new(&b.root).join("src-tauri/target").to_string_lossy());
     assert_eq!(std::fs::read_to_string(Path::new(&b.root).join("source.txt")).unwrap(), "baseline");
     assert_eq!(std::fs::canonicalize(Path::new(&b.root).join("node_modules")).unwrap(), std::fs::canonicalize(repo.join("node_modules")).unwrap());
     std::fs::write(Path::new(&b.root).join("source.txt"), "member work").unwrap();
     let retry = prepare_one(&db, &mission, "Backend", &base).unwrap();
     assert_eq!(retry.root, b.root); assert_eq!(retry.branch, b.branch);
     assert_eq!(std::fs::read_to_string(Path::new(&retry.root).join("source.txt")).unwrap(), "member work");
-    assert!(retry.environment.contains("isolado por worktree"));
+    assert!(retry.environment.contains("ags test affected"));
     assert!(retry.prelaunch.contains(&retry.cargo_target_dir));
     // Test-only cleanup, unlink junctions explicitly before removing owned fixture roots.
     for workspace in [&a, &b] {

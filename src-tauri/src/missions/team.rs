@@ -79,7 +79,8 @@ fn prepare_one(db: &crate::database::DbConnection, mission: &super::Mission, nam
     let repo = crate::runs::worktrees::repo_root(Path::new(&mission.cwd))?;
     let node_modules = crate::floors::prepare_node_modules_link(&repo, Path::new(&root))
         .map(|s| s.description().to_string()).unwrap_or_else(|e| format!("indisponível: {e}"));
-    let target = crate::floors::cargo_target_dir(&repo, Path::new(&root), Some(std::ffi::OsStr::new("per-worktree")));
+    let configured = std::env::var_os(crate::floors::CARGO_TARGET_DIR_SETTING);
+    let target = crate::floors::cargo_target_dir(&repo, Path::new(&root), configured.as_deref());
     let cargo_target_dir = target.path.to_string_lossy().into_owned();
     let (shell, label) = crate::floors::worktree_shell();
     let environment = crate::floors::worktree_environment_block(&root, &cargo_target_dir, &label, shell, &node_modules, target.mode);

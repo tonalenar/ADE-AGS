@@ -3,6 +3,15 @@
 use super::*;
 
 #[test]
+fn local_tests_accept_suite_force_and_dry_run() {
+    let args = parse("test.run", &["rust", "--force"]).unwrap();
+    assert_eq!(args["suite"], "rust");
+    assert_eq!(args["force"], true);
+    assert_eq!(parse("test.affected", &["--dry-run"]).unwrap()["dryRun"], true);
+    assert!(parse("test.status", &["extra"]).is_err());
+}
+
+#[test]
 fn design_caller_is_the_creating_terminal() {
     let mut args=json!({"from":"other","ownerTabId":"other"});
     caller_from("design.create",&mut args,Some("actual-tab".into()));

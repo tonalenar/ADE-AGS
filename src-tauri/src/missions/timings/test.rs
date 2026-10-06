@@ -1,6 +1,29 @@
 use super::*;
 
 #[test]
+fn test_spans_measure_executed_cached_and_affected_commands() {
+    let make = |id: i64, elapsed: i64, detail: &str| Span {id,kind:"test".into(),actor:"Backend".into(),target:"rust".into(),started_ms:1000,ended_ms:1000+elapsed,detail:detail.into()};
+    let spans = vec![make(1,200,r#"{"command":"cargo test","cacheHit":false}"#),
+        make(2,0,r#"{"command":"cargo test","cacheHit":true}"#),
+        make(3,0,r#"{"command":"","skippedAffected":3}"#)];
+    let report = summarize(&spans,5);
+    assert_eq!(report.test_metrics,TestMetrics {time_ms:200,commands:2,skipped_cache:1,skipped_affected:3});
+    assert_eq!(report.by_kind[0].kind,"test");
+}
+
+#[test]
+fn long_test_command_detail_remains_valid_json_after_persisting() {
+    let conn = crate::database::test_db();
+    conn.execute("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('test-w','W',0,0)",[]).unwrap();
+    conn.execute("INSERT INTO missions(id,workspace_id,title,objective,cwd,created_at,updated_at) VALUES('test-m','test-w','T','O','/tmp',0,0)",[]).unwrap();
+    let detail=serde_json::json!({"command":"x".repeat(500),"cacheHit":true}).to_string();
+    add(&conn,"test-m",&NewSpan {kind:"test".into(),actor:"Backend".into(),target:"frontend".into(),started_ms:1000,ended_ms:1000,detail:detail.clone()}).unwrap();
+    let spans=list(&conn,"test-m").unwrap();
+    assert_eq!(spans[0].detail,detail);
+    assert_eq!(test_metrics(&spans).skipped_cache,1);
+}
+
+#[test]
 fn reliability_spans_persist_and_wait_snapshots_do_not_double_count() {
     let conn = crate::database::test_db();
     conn.execute_batch("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w','W',0,0);

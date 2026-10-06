@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 
 /// As etapas que se medem. Texto livre não: assim a tela e o resumo sempre sabem o que são.
 pub const KINDS: &[&str] = &["boot", "briefing", "turn", "peer_ask", "peer_message",
-    "orchestrator_stall", "start_all_working", "start_briefing", "start_activity", "start_retry", "start_stalled"];
+    "orchestrator_stall", "start_all_working", "start_briefing", "start_activity", "start_retry", "start_stalled", "test"];
 const MAX_TEXT: usize = 200;
 /// Um span mais comprido que isto é um erro de relógio, não uma etapa (24 h).
 const MAX_SPAN_MS: i64 = 24 * 60 * 60 * 1000;
@@ -84,7 +84,8 @@ pub fn add(conn: &Connection, mission_id: &str, span: &NewSpan) -> Result<(), St
     conn.execute(
         "INSERT INTO mission_timings (mission_id, kind, actor, target, started_ms, ended_ms, detail)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-        params![mission_id, span.kind, clip(&span.actor), clip(&span.target), span.started_ms, span.ended_ms, clip(&span.detail)],
+        params![mission_id, span.kind, clip(&span.actor), clip(&span.target), span.started_ms, span.ended_ms,
+            if span.kind == "test" { span.detail.chars().take(16_384).collect::<String>() } else { clip(&span.detail) }],
     )
     .map_err(|e| e.to_string())?;
     Ok(())
@@ -125,12 +126,38 @@ pub struct KindTotal {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct Summary {
+    pub test_metrics: TestMetrics,
     /// Do primeiro início ao último fim medido.
     pub wall_ms: i64,
     pub by_kind: Vec<KindTotal>,
     /// As etapas mais demoradas, da maior para a menor.
     pub slowest: Vec<Span>,
     pub bottlenecks: Vec<Bottleneck>,
+}
+
+#[derive(Debug, Default, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct TestMetrics {
+    /// Sum of command execution time, excluding cache hits and selection spans.
+    pub time_ms: i64,
+    pub commands: usize,
+    pub skipped_cache: usize,
+    /// Number of suite commands omitted by affected selection, not test case count.
+    pub skipped_affected: usize,
+}
+
+pub fn test_metrics(spans: &[Span]) -> TestMetrics {
+    let mut out = TestMetrics::default();
+    for span in spans.iter().filter(|s|s.kind == "test") {
+        let detail: serde_json::Value = serde_json::from_str(&span.detail).unwrap_or_default();
+        out.skipped_affected += detail.get("skippedAffected").and_then(|v|v.as_u64()).unwrap_or(0) as usize;
+        if detail.get("command").and_then(|v|v.as_str()).is_some_and(|s| !s.is_empty()) {
+            out.commands += 1;
+            if detail.get("cacheHit").and_then(|v|v.as_bool()).unwrap_or(false) { out.skipped_cache += 1; }
+            else { out.time_ms += span.duration_ms(); }
+        }
+    }
+    out
 }
 
 /// Sum of caller wait time, including simultaneous waits by different callers.
@@ -190,7 +217,7 @@ pub fn summarize(spans: &[Span], top: usize) -> Summary {
     let mut slowest: Vec<Span> = spans.to_vec();
     slowest.sort_by(|a, b| b.duration_ms().cmp(&a.duration_ms()).then(a.id.cmp(&b.id)));
     slowest.truncate(top);
-    Summary { wall_ms, by_kind, slowest, bottlenecks: bottlenecks(spans) }
+    Summary { test_metrics: test_metrics(spans), wall_ms, by_kind, slowest, bottlenecks: bottlenecks(spans) }
 }
 
 /// Alert and answer snapshots of the same wait count its elapsed time only once.

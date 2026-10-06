@@ -25,6 +25,12 @@ ags — controla la app ADE AGS desde la terminal
 USO
   ags <grupo> <acción> [valor] [--flag valor ...]
 
+TESTES LOCAIS (no worktree atual, sem precisar da app)
+  test affected [--dry-run] [--force]          Testes afetados desde origin/master + alterações locais
+  test run <frontend|rust|tsc|babel> [--force]  Suite completa; reutiliza verde apenas com árvore limpa
+  test status                                Últimos resultados deste repositório
+             [--mission <id>] [--cwd <raiz>]  Contexto opcional para spans de testes
+
   El primer valor puede ir suelto, sin su flag:
     ags skill install git-helper       =  ags skill install --skill git-helper
     ags tab send <id> \"corré los tests\" =  ags tab send --tab <id> --text \"...\"
@@ -331,6 +337,12 @@ fn main() -> ExitCode {
         }
     };
 
+    // Tests belong to the caller's worktree, not to the running app's cwd or
+    // Cargo target. They also work when the app is offline.
+    if command.starts_with("test.") {
+        return execute_tests(&command, &parsed);
+    }
+
     // Quién pregunta: la app le pone `ADE_TAB_ID` a cada terminal. Sin eso, la regla de
     // "solo a los conectados" no tendría contra qué comparar.
     let parsed = if command.starts_with("design.") {
@@ -364,6 +376,74 @@ fn main() -> ExitCode {
             ExitCode::from(e.code)
         }
     }
+}
+
+fn execute_tests(command: &str, args: &Value) -> ExitCode {
+    match execute_tests_inner(command, args) {
+        Ok((body, passed)) => { println!("{body}"); ExitCode::from(if passed { EXIT_OK } else { EXIT_COMMAND_FAILED }) }
+        Err(error) => { println!("{}", json!({"error":error})); ExitCode::from(EXIT_COMMAND_FAILED) }
+    }
+}
+
+fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), String> {
+    use ade_ags_lib::testspeed::run as test_runner;
+    use rusqlite::OptionalExtension;
+    let cwd = args.get("cwd").and_then(Value::as_str).map(std::path::PathBuf::from)
+        .map(Ok).unwrap_or_else(std::env::current_dir).map_err(|e| e.to_string())?;
+    let output = std::process::Command::new("git").args(["rev-parse", "--show-toplevel"]).current_dir(&cwd).output().map_err(|e| e.to_string())?;
+    if !output.status.success() { return Err("Execute ags test dentro de um repositório Git.".into()); }
+    let root = dunce::canonicalize(std::path::Path::new(String::from_utf8_lossy(&output.stdout).trim())).map_err(|e|e.to_string())?;
+    let suite = args.get("suite").and_then(Value::as_str).unwrap_or("");
+    let mut selection = None;
+    let commands = if command == "test.run" { test_runner::suite_commands(suite)? } else if command == "test.status" { vec![] } else if command == "test.affected" {
+        let changed = test_runner::changed_files(&root)?;
+        let unsafe_files = test_runner::unsafe_files(&root,&changed)?;
+        let plan = ade_ags_lib::testspeed::affected::plan_with_unsafe(&changed,&unsafe_files);
+        eprint!("{}", plan.render_dry_run());
+        let commands = plan.steps.iter().map(|step| test_runner::TestCommand {
+            suite:step.suite.into(),program:step.program.clone(),args:step.args.clone(),cwd:step.cwd.unwrap_or(".").into()
+        }).collect();
+        selection = Some((changed, plan));
+        commands
+    } else {
+        return Err(format!("Comando desconhecido '{command}'. Use test run <suite> ou test status."));
+    };
+    if args.get("dryRun").and_then(Value::as_bool).unwrap_or(false) {
+        return Ok((json!({"commands":commands,"full":selection.as_ref().is_some_and(|(_,p)|p.full),"risk":selection.as_ref().map(|(_,p)|&p.risk),"unmapped":selection.as_ref().map(|(_,p)|&p.unmapped),"ignored":selection.as_ref().map(|(_,p)|&p.ignored)}), true));
+    }
+    let home = dirs::home_dir().ok_or("Não foi possível localizar a pasta do usuário.")?;
+    std::fs::create_dir_all(home.join(".ags")).map_err(|e| e.to_string())?;
+    let conn = rusqlite::Connection::open(home.join(".ags/data.db")).map_err(|e| e.to_string())?;
+    conn.execute_batch("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
+    // Additive DDL only: the standalone CLI never migrates or downgrades the app DB.
+    test_runner::migrate(&conn).map_err(|e| e.to_string())?;
+    if command == "test.status" { return Ok((test_runner::status(&conn,&root)?,true)); }
+    let explicit_mission = args.get("mission").and_then(Value::as_str).map(str::to_owned)
+        .or_else(||std::env::var("ADE_MISSION_ID").ok());
+    let inferred: Option<(String,String)> = conn.query_row(
+        "SELECT w.mission_id,w.name FROM mission_team_workspaces w JOIN missions m ON m.id=w.mission_id WHERE w.root=?1 AND m.status='running' LIMIT 1",
+        [root.to_string_lossy().as_ref()], |r|Ok((r.get(0)?,r.get(1)?))).optional().unwrap_or(None);
+    let mission = explicit_mission.or_else(||inferred.as_ref().map(|r|r.0.clone()));
+    let actor = inferred.map(|r|r.1).or_else(||std::env::var("ADE_TAB_ID").ok()).unwrap_or_default();
+    let force = args.get("force").and_then(Value::as_bool).unwrap_or(false);
+    if command == "test.affected" {
+        let (_,plan) = selection.as_ref().expect("affected selection");
+        let suites: std::collections::BTreeSet<_> = commands.iter().map(|c|c.suite.as_str()).collect();
+        let skipped = ["frontend","rust","tsc","babel"].iter().filter(|s| !suites.contains(**s)).count();
+        let now = chrono::Utc::now().timestamp_millis();
+        test_runner::record_span(&conn,mission.as_deref(),&actor,"affected","",now,now,false,skipped)?;
+        let mut results = Vec::new();
+        let mut passed = true;
+        for step in &commands {
+            let result = test_runner::run(&conn,&root,&step.suite,std::slice::from_ref(step),force,mission.as_deref(),&actor)?;
+            passed &= result.passed;
+            results.push(result);
+            if !passed { break; }
+        }
+        return Ok((json!({"results":results,"passed":passed,"full":plan.full,"risk":plan.risk,"unmapped":plan.unmapped,"ignored":plan.ignored,"skippedAffected":skipped}),passed));
+    }
+    let result = test_runner::run(&conn,&root,suite,&commands,force,mission.as_deref(),&actor)?;
+    Ok((json!(result),result.passed))
 }
 
 fn execute_standalone_redeliver(args: &Value) -> ExitCode {
@@ -524,6 +604,7 @@ fn design_command(args: &[String]) -> Result<(String, &[String]), String> {
 /// valor suelto, es mejor exigir el flag que adivinar mal.
 fn positionals(command: &str) -> &'static [&'static str] {
     match command {
+        "test.run" => &["suite"],
         "design.create" => &["title"],
         "design.get" | "design.delete" | "design.archive" | "design.approve.all" => &["designId"],
         "design.page.add" => &["designId", "name"],
