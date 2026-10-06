@@ -292,3 +292,5 @@ Implementado em `feat/etapa17-tab-usage`: `mission_tokens` inclui `agents[].tabs
 ## Etapa 17 - Fast headless (Backend)
 
 Implementado em `feat/etapa17-headless-fast`: snapshot Fast do lead e dos integrantes persistido em runs/run_squad_members (v34); supervisor passa `LaunchCtx.fast_mode` e Codex usa `-c service_tier="fast"`. Providers sem equivalente nao recebem flags. Formatos CLI verificados, limites e testes: [FAST_HEADLESS.md](./FAST_HEADLESS.md).
+
+- Etapa 20 (UI): ver [ETAPA_20_POLIMENTO_UI.md](ETAPA_20_POLIMENTO_UI.md) — chat (Markdown, tamanho, trazer do terminal), navegador no Canvas, scrollbars, modal único de memória.
