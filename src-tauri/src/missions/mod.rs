@@ -18,10 +18,10 @@ pub(crate) mod precheck;
 pub(crate) mod failure;
 pub(crate) mod duplicate;
 pub mod efficiency;
-pub(crate) mod store;
+pub mod store;
 pub(crate) mod timings;
 pub(crate) mod startcheck;
-mod delivery;
+pub mod delivery;
 pub(crate) mod team;
 #[cfg(test)]
 mod test;
@@ -36,7 +36,8 @@ pub use types::{
 };
 pub use duplicate::DuplicateMission;
 pub use efficiency::MissionEfficiency;
-pub use delivery::{CiStatus, MissionDelivery, TerminalDeliveryInput, TestResult};
+pub use delivery::{CiStatus, MissionDelivery, PrState, TerminalDeliveryInput, TestResult};
+pub use store::{MissionDeliveryAuditEntry, RedeliverOutcome};
 
 use std::path::Path;
 
@@ -560,6 +561,42 @@ pub async fn mission_finish_terminals(
     notify(&app, &mission_id);
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::get(&conn, &mission_id)?.ok_or_else(|| "la misión desapareció".to_string())
+}
+
+/// Reavalia de forma segura e idempotente a entrega de uma missão concluída.
+#[tauri::command]
+pub async fn mission_redeliver(
+    app: AppHandle,
+    mission_id: String,
+    pull_request: Option<String>,
+    test_result: Option<TestResult>,
+) -> Result<RedeliverOutcome, String> {
+    let outcome = tauri::async_runtime::spawn_blocking({
+        let app = app.clone();
+        let mission_id = mission_id.clone();
+        move || redeliver_now(&app, &mission_id, pull_request.as_deref(), test_result)
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    notify(&app, &mission_id);
+    Ok(outcome)
+}
+
+pub fn redeliver_now(
+    app: &AppHandle,
+    mission_id: &str,
+    pr_override: Option<&str>,
+    test_override: Option<TestResult>,
+) -> Result<RedeliverOutcome, String> {
+    let db = db_of(app)?;
+    let cwd = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mission = store::get(&conn, mission_id)?
+            .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+        mission.cwd
+    };
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    store::redeliver(&conn, mission_id, &cwd, pr_override, test_override)
 }
 
 #[tauri::command]

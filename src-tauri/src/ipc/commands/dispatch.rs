@@ -182,6 +182,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "memory.suggest" => missions::memory_suggest(app, args),
         "mission.accept" => missions::mission_accept(app, args),
         "mission.apply" => missions::mission_apply(app, args),
+        "mission.redeliver" => missions::mission_redeliver(app, args),
         "approval.list" => missions::approval_list(app),
         "approval.decide" => missions::approval_decide(app, args),
         other => Err(format!("Comando desconocido: {other}")),

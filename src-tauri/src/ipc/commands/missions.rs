@@ -325,6 +325,22 @@ pub(super) fn mission_apply(app: &AppHandle, args: &Value) -> Result<Value, Stri
     Ok(json!(outcome))
 }
 
+/// `ags mission redeliver <id> [--pr <N>] [--test passed|failed|not_run]`.
+pub(super) fn mission_redeliver(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let id = arg_str(args, "mission")?;
+    let pr = arg_str_opt(args, "pr").or_else(|| arg_str_opt(args, "pullRequest"));
+    let test_override = match args.get("test") {
+        Some(Value::String(s)) => Some(crate::missions::TestResult::parse(s)),
+        Some(Value::Bool(true)) => Some(crate::missions::TestResult::Passed),
+        Some(Value::Bool(false)) => Some(crate::missions::TestResult::Failed),
+        Some(Value::Null) | None => None,
+        _ => return Err("--test deve ser 'passed', 'failed' ou 'not_run'".into()),
+    };
+    let outcome = crate::missions::redeliver_now(app, &id, pr.as_deref(), test_override)?;
+    crate::missions::notify(app, &id);
+    Ok(json!(outcome))
+}
+
 pub(super) fn approval_list(_app: &AppHandle) -> Result<Value, String> {
     Ok(json!(crate::runs::pending_approvals()))
 }
