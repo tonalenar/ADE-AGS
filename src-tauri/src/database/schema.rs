@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 32;
+const SCHEMA_VERSION: i32 = 34;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1057,6 +1057,13 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         name TEXT NOT NULL, cwd TEXT NOT NULL, root TEXT NOT NULL, branch TEXT NOT NULL,
         PRIMARY KEY (mission_id, name), UNIQUE(root), UNIQUE(branch)
     );")?;
+    // v34: execution-local Fast policy copied from Squad. Old runs remain off;
+    // never reconstruct settings from a Squad that may have been edited later.
+    for table in ["runs", "run_squad_members"] {
+        if !has_column(conn, table, "fast_mode") {
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN fast_mode INTEGER NOT NULL DEFAULT 0"))?;
+        }
+    }
     set_user_version(conn, SCHEMA_VERSION)
 }
 

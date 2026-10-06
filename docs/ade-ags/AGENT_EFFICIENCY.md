@@ -281,3 +281,9 @@ Cada agente grava eventos pontuais (`startedMs == endedMs`, `actor` = nome): `st
 Contrato da instrumentação: `start_briefing`, `start_activity`, `start_retry` e `start_stalled` são eventos pontuais (`startedMs == endedMs`, `actor` = nome do integrante). `boot` continua evidência legada do envio do briefing. `start_all_working` usa `actor = all`, início na abertura da equipe e fim na primeira atividade sustentada do último agente. O frontend é responsável por detectar atividade e persistir esses eventos.
 
 `ags mission timings` aceita os novos kinds e expõe `orchestratorStallCount`, `orchestratorWaitMs`, `orchestratorMaxWaitMs` e `timeUntilAllWorkingMs`. Em `orchestrator_stall`, `startedMs` identifica o início da espera, `endedMs` o alerta/resposta e `detail` é `alerted:<fonte>` ou `answered:<fonte>` (`peer_ask`, `peer_tell`, `screen`). A contagem considera alertas únicos; espera total/máxima agrupa ator, alvo e início e usa a maior duração, evitando duplicar alerta seguido de resposta. Sem `start_all_working`, o tempo permanece ausente. Reutiliza schema existente, sem migração.
+
+## Etapa 17 - Fast headless (Backend)
+
+Implementado em `feat/etapa17-headless-fast`: snapshot Fast do lead e dos integrantes persistido em runs/run_squad_members (v34); supervisor passa `LaunchCtx.fast_mode` e Codex usa `-c service_tier="fast"`. Providers sem equivalente nao recebem flags. Formatos CLI verificados, limites e testes: [FAST_HEADLESS.md](./FAST_HEADLESS.md).
+
+Codex 0.160.1 aceita o override `service_tier` por execução. O help do Claude Code 2.1.289 não oferece flag Fast headless; nenhum argumento ou configuração Fast foi acrescentado ao Claude. A suíte Rust completa passou em paralelo: 1.088 testes da biblioteca e 27 da CLI; 9 testes ficaram ignorados conforme os marcadores existentes.
