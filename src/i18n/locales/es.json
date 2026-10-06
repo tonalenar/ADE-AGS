@@ -2332,5 +2332,9 @@
   "memoryInbox.confirmSkip": "Aceptar sin las contradicciones",
   "memoryInbox.confirmAnyway": "Aceptar de todos modos",
   "memoryInbox.confirm": "Aceptar",
-  "memoryInbox.cancel": "Cancelar"
+  "memoryInbox.cancel": "Cancelar",
+  "memoryInbox.workspaceGroup": "Workspace / sin misión",
+  "memoryInbox.deletion": "EXCLUSIÓN",
+  "memoryInbox.skippedDeletions": "Exclusiones no aceptadas (requieren confirmación): {{keys}}.",
+  "memoryInbox.confirmDeletions": "Atención: {{count}} son EXCLUSIONES y borrarán memorias ya aprobadas:"
 }

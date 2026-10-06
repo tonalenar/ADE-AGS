@@ -148,6 +148,8 @@ export interface MemoryReviewItem {
   evidence: MemoryReviewEvidence;
   duplicateOf?: MemoryReviewRef | null;
   contradicts?: MemoryReviewRef | null;
+  /** Solo lo manda `memory_review_summary_workspace`; ausente = create/update. */
+  operation?: MemoryOperation;
   highValue: boolean;
   /** 0-100; highValue = score >= 70. */
   score: number;
@@ -157,4 +159,13 @@ export interface MemoryReviewSummary {
   missionId: string;
   items: MemoryReviewItem[];
   counts: { total: number; duplicates: number; contradictions: number; highValue: number };
+}
+
+export interface MemoryReviewCounts { total: number; duplicates: number; contradictions: number; highValue: number }
+
+/** Todas las pendientes del workspace por misión; `missionId: null` = propuestas del workspace sin misión. */
+export interface MemoryWorkspaceReview {
+  workspaceId: string;
+  groups: { missionId: string | null; missionTitle: string | null; items: MemoryReviewItem[]; counts: MemoryReviewCounts }[];
+  counts: MemoryReviewCounts;
 }
