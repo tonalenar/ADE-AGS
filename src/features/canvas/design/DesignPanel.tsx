@@ -260,7 +260,7 @@ function EditPane({ board, versions, comments, onClose, onChanged, fail }: {
       <div className="flex items-center gap-1 px-3 h-9 shrink-0 border-b border-gray-200 dark:border-white/10">
         <span className="truncate text-[12px] font-semibold">{t("canvas.design.editing", { title: board.title })}</span>
         <span className="flex-1" />
-        <Button variant="custom" className={btn} disabled={!previous} onClick={() => previous && act(designApi.revert(board.id, previous.version))}
+        <Button variant="custom" className={btn} disabled={!previous} onClick={() => previous && act(designApi.revert(board.id, previous.version, board.version))}
           title={t("canvas.design.undoHint")}>{t("canvas.design.undo")}</Button>
         <Button variant="custom" className={`${btn} bg-accent-500/15 text-accent-600 dark:text-accent-300`} disabled={!dirty}
           onClick={() => act(designApi.updateArtboard(board.id, { html: draft, expectedVersion: board.version }))}>{t("canvas.design.save")}</Button>
@@ -315,7 +315,7 @@ function EditPane({ board, versions, comments, onClose, onChanged, fail }: {
                   <span>v{v.version}{v.version === board.version ? ` · ${t("canvas.design.current")}` : ""}</span>
                   <span className="flex-1" />
                   {v.version !== board.version && (
-                    <Button variant="custom" className="cc-t text-[10.5px] hover:underline" onClick={() => act(designApi.revert(board.id, v.version))}>
+                    <Button variant="custom" className="cc-t text-[10.5px] hover:underline" onClick={() => act(designApi.revert(board.id, v.version, board.version))}>
                       {t("canvas.design.restore")}
                     </Button>
                   )}

@@ -82,7 +82,8 @@ export const designApi = {
   updateArtboard: (artboardId: string, patch: { html?: string; title?: string; x?: number; y?: number; expectedVersion?: number }) =>
     call<RawDesign>("design_artboard_update", { artboardId, ...patch }),
   /** Volta ao conteúdo de uma versão anterior (gera uma versão nova, em rascunho). */
-  revert: (artboardId: string, version: number) => call<RawDesign>("design_artboard_revert", { artboardId, version }),
+  revert: (artboardId: string, version: number, expectedVersion?: number) =>
+    call<RawDesign>("design_artboard_revert", { artboardId, version, expectedVersion }),
   approve: (artboardId: string) => call<RawDesign>("design_artboard_approve", { artboardId }),
   reject: (artboardId: string) => call<RawDesign>("design_artboard_reject", { artboardId }),
   approveAll: (designId: string) => call<RawDesign>("design_approve_all", { designId }),
