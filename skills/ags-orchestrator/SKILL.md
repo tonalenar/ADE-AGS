@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.27.0
+version: 1.28.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -21,6 +21,7 @@ of asking the user to click through the UI.
 | Know when a tab finished, without polling | [Waiting for a tab](#waiting-for-a-tab-instead-of-polling) |
 | Keep talking to an agent that's already open | [Holding a conversation](#holding-a-conversation-with-an-open-tab) |
 | Work with the agents connected to you on the canvas | [Connected agents](#connected-agents-the-canvas) |
+| QA in the flow and test speed rules | [QA in the flow & test speed](#qa-in-the-flow-and-test-speed-rules-point-3--point-5) |
 | Find, read or write skills | [Skills](#installing-skills) |
 | Check on background fleet tasks | [The fleet](#the-fleet-background-agents) |
 
@@ -439,6 +440,30 @@ ags peer disconnect Backend Tests
 - Coordinate, don't micromanage: give each recruit one clear task, use `peer ask` when you
   need the answer to continue and `peer tell` when you don't, and check on long work with
   `peer check` instead of asking again.
+
+### QA in the flow and test speed rules (Point 3 & Point 5)
+
+When orchestrating a team with a QA agent, follow the continuous validation model ("QA em fluxo") to avoid end-of-mission test bottlenecks and unnecessary test execution overhead:
+
+1. **Notify QA on Every Delivery (QA em fluxo):**
+   - As soon as a team member delivers a task (via `ags peer tell`), the orchestrator **immediately informs QA** via `ags peer tell`:
+     ```bash
+     ags peer tell "QA / Tests" "Entrega de <membro>: branch <branch>, arquivos alterados: <arquivos>"
+     ```
+   - QA validates each delivery incrementally with `ags test affected` without waiting for the entire mission to wrap up.
+   - Final validation before mission delivery is **ONE single full run** of the integrated suite (or delegated to the CI via `gh pr checks <n> --watch`).
+
+2. **No Recurrent Local Full Suite (Point 3):**
+   - Agents **DO NOT** repeat the full test suite locally on routine iterations. Use `ags test affected` (which selectively runs only changed vitest/babel/rust components).
+   - When opening a Pull Request, agents wait for CI to validate using GitHub CLI watch mode:
+     ```bash
+     gh pr checks <n> --watch
+     ```
+     **Never** perform manual polling loops with `sleep` or `Start-Sleep`.
+   - Running the full suite locally is reserved strictly for high-risk architectural changes:
+     - Database schema migrations (`PRAGMA user_version`, DDL);
+     - Low-level unsafe code or Windows COM bindings;
+     - IPC/message schema modifications across frontend and backend boundaries.
 
 ### Chat with the user
 
