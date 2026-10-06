@@ -12,6 +12,7 @@ import { agentIcon } from "@/features/agents/agentIcons";
 import { useRunsStore } from "@/features/runs/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { Pet, usePetStatus } from "@/shared/brand/Pet";
+import { LevelNumber, useLevelBarClass } from "@/shared/brand/LevelNumber";
 import { useMascotState } from "@/shared/brand/useMascotState";
 
 /** O nome da pasta, que é como as pessoas reconhecem um projeto. */
@@ -69,6 +70,7 @@ export function HomeHeader() {
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
   const { state, summary } = useMascotState();
   const pet = usePetStatus();
+  const barFlash = useLevelBarClass(pet.level);
 
   return (
     <div className="flex items-center gap-5">
@@ -80,14 +82,14 @@ export function HomeHeader() {
           <span className="text-gray-400 dark:text-gray-500">AGS</span>
           <span className="ml-3 align-middle text-[12px] font-bold tracking-wider text-gray-500 dark:text-gray-400"
             title={`${formatTokens(pet.xp)} tokens`}>
-            LV {pet.level}
+            LV <LevelNumber level={pet.level} />
           </span>
         </h1>
         <p className="text-sm text-gray-500 dark:text-gray-400">
           {t(`home.status.${state}`, { running: summary.running, count: summary.needsYou })}
         </p>
         <div className="mt-1.5 flex items-center gap-2 max-w-64">
-          <div className="flex-1 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden"
+          <div className={`flex-1 h-1 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden ${barFlash}`}
             role="progressbar" aria-valuenow={Math.round(pet.progress * 100)} aria-valuemin={0} aria-valuemax={100}>
             <div className="h-full rounded-full bg-accent-500 transition-[width] duration-700" style={{ width: `${Math.round(pet.progress * 100)}%` }} />
           </div>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { powerTier, sparkAt, sparkCount, stageFor } from "../Pet";
+import { haloModeFor, powerTier, sparkAt, sparkCount, stageFor } from "../Pet";
 
 describe("fases de poder", () => {
   it("sobe com a quantidade de agentes trabalhando ao mesmo tempo", () => {
@@ -48,5 +48,18 @@ describe("pet", () => {
     }
     // No se apilan todas en el mismo punto.
     expect(new Set(Array.from({ length: 10 }, (_, i) => sparkAt(i).x)).size).toBeGreaterThan(5);
+  });
+});
+
+describe("contorno luminoso (aura)", () => {
+  it("segue o estado do mascote", () => {
+    expect(haloModeFor("idle", false)).toBe("idle");
+    expect(haloModeFor("working", false)).toBe("working");
+    expect(haloModeFor("waiting", false)).toBe("waiting");
+  });
+
+  it("subir de nível vence qualquer estado enquanto o efeito dura", () => {
+    expect(haloModeFor("idle", true)).toBe("levelup");
+    expect(haloModeFor("working", true)).toBe("levelup");
   });
 });

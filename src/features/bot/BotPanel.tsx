@@ -12,6 +12,7 @@ import { TabCostList } from "@/features/missions/TabCostList";
 import { estimateOf, formatCompactNumber, formatUsd, getTokens, tabsOfAgent, type CostEstimate, type MissionTokens } from "@/features/missions/tokens";
 import type { MissionReview } from "@/features/missions/types";
 import { useAgentActivity } from "@/features/terminal/activity";
+import { LevelNumber } from "@/shared/brand/LevelNumber";
 import { Pet, powerTier, usePetStatus } from "@/shared/brand/Pet";
 
 import { type FailureKey, failureActionKey, failureKey, failureLabelKey } from "@/features/missions/failureClass";
@@ -181,7 +182,7 @@ export function BotPanel() {
         <div className="ags-hq__body">
           <aside className="ags-hq__hero">
             <Pet level={pet.level} state={busy > 0 ? "working" : "idle"} size={150} />
-            <div className="ags-hq__level">LV {pet.level}</div>
+            <div className="ags-hq__level">LV <LevelNumber level={pet.level} /></div>
             <div className="ags-hq__rank">{t(rankKey(pet.level))}</div>
             <div className="ags-hq__stat">
               <div className="ags-hq__stat-row"><span>EXP</span><b>{formatTokens(pet.xp)}</b></div>

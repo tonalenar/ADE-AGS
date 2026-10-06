@@ -68,21 +68,78 @@
 }
 .ags-pet__dash--2 { animation-delay: 0.18s; }
 
-/* Al subir de nivel: un anillo que se expande y un destello del cuerpo. */
-@keyframes ags-pet-burst {
-  0%   { transform: scale(0.4); opacity: 0.95; }
-  100% { transform: scale(2.1); opacity: 0; }
+/* Contorno luminoso (aura C, estilo Super Sonic): halo dorado que sigue la silueta. Dos capas:
+   una ancha naranja-dorada y una angosta casi blanca. Solo cambia la opacidad (barato) y el
+   ritmo según el estado: ocioso calmo, trabajando rápido, esperando amarillo, subir de nivel
+   blanco-dorado intenso. Sin movimiento, queda fijo. */
+.ags-pet__halo { opacity: 0.7; animation: ags-halo var(--halo-s, 3s) ease-in-out infinite; }
+.ags-pet__halo-w { fill: #ff8a3d; }
+.ags-pet__halo-n { fill: #fff6c0; }
+@keyframes ags-halo {
+  0%, 100% { opacity: var(--halo-lo, 0.4); }
+  50%      { opacity: var(--halo-hi, 0.85); }
 }
-.ags-pet__burst {
-  transform-box: fill-box;
-  transform-origin: center;
-  animation: ags-pet-burst 1.1s ease-out 1;
+.ags-pet__halo--idle    { --halo-s: 3s;   --halo-lo: 0.35; --halo-hi: 0.7; }
+.ags-pet__halo--working { --halo-s: 0.7s; --halo-lo: 0.6;  --halo-hi: 1; }
+.ags-pet__halo--waiting { --halo-s: 1.1s; --halo-lo: 0.5;  --halo-hi: 0.9; }
+.ags-pet__halo--waiting .ags-pet__halo-w { fill: #ffd24a; }
+.ags-pet__halo--waiting .ags-pet__halo-n { fill: #fff176; }
+.ags-pet__halo--sleeping { --halo-s: 5.5s; --halo-lo: 0.1; --halo-hi: 0.3; }
+.ags-pet__halo--failed  { --halo-s: 1.4s; --halo-lo: 0.4; --halo-hi: 0.8; }
+.ags-pet__halo--failed .ags-pet__halo-w { fill: #ff5d5d; }
+.ags-pet__halo--failed .ags-pet__halo-n { fill: #ffb4b4; }
+.ags-pet__halo--levelup { --halo-s: 0.9s; --halo-lo: 0.8;  --halo-hi: 1; }
+.ags-pet__halo--levelup .ags-pet__halo-w { fill: #ffe27a; }
+.ags-pet__halo--levelup .ags-pet__halo-n { fill: #fff; }
+
+/* Al subir de nivel (Arcade): el pet se agacha y salta, un flash en escalones, confeti pixel
+   y el número del LV gira como un slot. Todo es de una sola pasada y se reinicia por `key`. */
+@keyframes ags-pet-hop {
+  0%   { transform: none; }
+  20%  { transform: scale(1.1, 0.82); }
+  38%  { transform: scale(0.92, 1.15) translateY(-1.6px); }
+  60%  { transform: translateY(-0.4px); }
+  100% { transform: none; }
 }
-@keyframes ags-pet-flash {
-  0%, 100% { filter: none; }
-  25%      { filter: brightness(2.2) saturate(1.4); }
+.ags-pet__hop { transform-box: fill-box; transform-origin: 50% 90%; }
+.ags-pet--levelup .ags-pet__hop { animation: ags-pet-hop 0.9s steps(9) 1; }
+
+@keyframes ags-pet-flash-steps {
+  0%, 100% { opacity: 0; }
+  30%      { opacity: 0.8; }
+  60%      { opacity: 0.35; }
 }
-.ags-pet--levelup .ags-mascot__bot { animation: ags-float 2.8s ease-in-out infinite, ags-pet-flash 0.9s ease-out 1; }
+.ags-pet__flash {
+  opacity: 0;
+  pointer-events: none;
+  animation: ags-pet-flash-steps 0.5s steps(3) 0.35s 1 both;
+}
+
+@keyframes ags-pet-confetti {
+  0%   { opacity: 1; transform: translate(0, 0); }
+  40%  { transform: translate(calc(var(--dx) * 0.6), var(--dy)); }
+  100% { opacity: 0; transform: translate(var(--dx), calc(var(--dy) + 6px)); }
+}
+.ags-pet__confetti {
+  opacity: 0;
+  animation: ags-pet-confetti 1.1s steps(8) 1 both;
+}
+
+/* El número del LV: el viejo sale hacia arriba y el nuevo entra con un golpe. */
+.ags-lvnum { display: inline-grid; overflow: hidden; vertical-align: bottom; }
+.ags-lvnum > b { grid-area: 1 / 1; font-weight: inherit; text-align: center; }
+@keyframes ags-lvnum-out { to { transform: translateY(-120%); } }
+@keyframes ags-lvnum-in {
+  0%   { transform: translateY(120%) scale(1); }
+  70%  { transform: translateY(0) scale(1.25); }
+  100% { transform: none; }
+}
+.ags-lvnum__old { animation: ags-lvnum-out 0.45s steps(5) 0.35s 1 both; }
+.ags-lvnum__new { animation: ags-lvnum-in 0.55s steps(6) 0.35s 1 both; }
+
+/* La barra de EXP parpadea al llenarse. */
+@keyframes ags-lvbar-flash { 50% { filter: brightness(2.4); } }
+.ags-lvbar--flash { animation: ags-lvbar-flash 0.3s steps(3) 3; }
 
 /* ── Trabajando ──────────────────────────────────────────────────────────
    Cuando los agentes escriben, el pet se concentra: vibra, los ojos se achican, el aura late
@@ -155,9 +212,14 @@
 @media (prefers-reduced-motion: reduce) {
   .ags-pet__pulse { animation: none; opacity: 0; }
   .ags-pet__orbit, .ags-pet__typing rect, .ags-pet__bar--busy, .ags-pet__busy::after { animation: none; }
-  .ags-pet__aura, .ags-pet__tongue, .ags-pet__crack, .ags-pet__zap, .ags-pet__spark, .ags-pet__dash,
-  .ags-pet__burst { animation: none; }
-  .ags-pet__zap, .ags-pet__dash, .ags-pet__burst { opacity: 0; }
+  .ags-pet__aura, .ags-pet__tongue, .ags-pet__crack, .ags-pet__zap, .ags-pet__spark, .ags-pet__dash {
+    animation: none;
+  }
+  .ags-pet__hop, .ags-pet__flash, .ags-pet__confetti, .ags-lvbar--flash, .ags-pet__halo { animation: none; }
+  .ags-pet__zap, .ags-pet__dash, .ags-pet__flash, .ags-pet__confetti { opacity: 0; }
+  /* Sin movimiento: el número nuevo aparece directo, sin slot. */
+  .ags-lvnum__old { display: none; }
+  .ags-lvnum__new { animation: none; }
 }
 
 /* Quieto: todo lo que se mueve, parado (el pet de la franja de abajo en reposo). */

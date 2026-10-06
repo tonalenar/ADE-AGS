@@ -80,12 +80,12 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
         count: mascot.summary.needsYou,
       })}`} placement="top" delay={300}>
         <Button variant="custom"
-          onClick={() => navigate(mascot.state === "idle" ? "/" : "/fleet")}
+          onClick={() => navigate(mascot.state === "idle" || mascot.state === "sleeping" ? "/" : "/fleet")}
           aria-label={t("sidebar.home")}
           className="cc-t flex items-center gap-1.5 h-5 pl-0.5 pr-1.5 -ml-1 rounded hover:bg-gray-200 dark:hover:bg-white/8"
         >
           {/* Crece con los tokens; trabajando o llamándote se mueve, en reposo queda quieto. */}
-          <Pet level={pet.level} state={mascot.state} size={18} still={mascot.state === "idle"} className="shrink-0 -my-1" />
+          <Pet level={pet.level} state={mascot.state} size={18} still={mascot.state === "idle" || mascot.state === "sleeping"} className="shrink-0 -my-1" />
           <span className="text-[10px] font-bold tracking-wider text-gray-600 dark:text-gray-300">LV {pet.level}</span>
           <span className="w-8 h-[3px] rounded-full bg-gray-300 dark:bg-white/10 overflow-hidden" aria-hidden>
             <span className="block h-full rounded-full bg-accent-500" style={{ width: `${Math.round(pet.progress * 100)}%` }} />

@@ -1,27 +1,22 @@
 import { useEffect, useRef, useState } from "react";
+
+export { useReducedMotion };
 import { useTranslation } from "react-i18next";
 
+import { MASCOT_BODY, MASCOT_FILL, MascotEyes, MascotLimbs, type EyeKind } from "@/shared/brand/Mascot";
+import { useReducedMotion } from "@/shared/brand/useReducedMotion";
 import type { MissionIndicatorState } from "./missionIndicator";
 import "./mission-tab-indicator.css";
 
 /**
- * El bot (pixel-art, como el del QG) en miniatura. Cuadrícula de 13×10: el robot ocupa las
- * columnas 0-9 y las 10-12 son para la insignia (Z, !, check, chispas). `b` cuerpo, `d` borde,
- * `e` ojo, `a` antena, `f` llama.
+ * El bot en miniatura: el MISMO sprite del resto de la app (`MASCOT_BODY`, `MascotLimbs`,
+ * `MascotEyes`), a 1px por celda; no hay un dibujo aparte. Cuadrícula de 19×13: el robot ocupa
+ * las columnas 0-15 y las 16-18 son para la insignia (Z, !, check, chispas). A este tamaño no hay
+ * aura: el estado se lee por la forma y el color de los ojos, y las piernas/bracitos se mueven
+ * solo cuando hay una animación.
  */
-const BOT = [
-  "....a.....",
-  "....d.....",
-  "..bbbbbb..",
-  ".bbbbbbbb.",
-  ".bebbbbeb.",
-  ".bbbbbbbb.",
-  "..bbbbbb..",
-  "...d..d...",
-];
-const FLAME = ["...f..f...", "....ff...."];
-const SLEEP_EYES = ".bddbbddb.";
-/** Insignias de 3×3 en las columnas 10-12. */
+const BADGE_X = 16;
+/** Insignias de 3×3 en las columnas 16-18. */
 const BADGE: Partial<Record<MissionIndicatorState, string[]>> = {
   waiting: ["zzz", ".z.", "zzz"],
   needsYou: [".x.", ".x.", "..."],
@@ -38,36 +33,25 @@ function pixels(rows: string[], x0: number, y0: number): Px[] {
   return out;
 }
 
-/** Los píxeles de cada estado: pura, para poder probarla sin DOM. */
-export function indicatorPixels(state: MissionIndicatorState): { bot: Px[]; flame: Px[]; badge: Px[]; sparkle: Px[] } {
-  const rows = state === "waiting" ? BOT.map((r, i) => (i === 4 ? SLEEP_EYES : r)) : BOT;
+/** La forma de los ojos de cada estado: «esperando» (la misión corre pero nadie escribe) duerme,
+ *  «falló» hace una X, «concluida» sonríe en chevron, el resto mira de frente. */
+export function indicatorEyes(state: MissionIndicatorState): EyeKind {
+  switch (state) {
+    case "waiting": return "closed";
+    case "failed": return "x";
+    case "done": return "chevron";
+    default: return "block";
+  }
+}
+
+/** Los píxeles de las insignias de cada estado y la forma de los ojos: pura, para probarla sin DOM. */
+export function indicatorPixels(state: MissionIndicatorState): { eyes: EyeKind; badge: Px[]; sparkle: Px[] } {
   const badge = BADGE[state];
-  const lit = state === "working" || state === "needsYou" || state === "done";
   return {
-    bot: pixels(rows, 0, 0),
-    flame: lit ? pixels(FLAME, 0, 8) : [],
-    badge: badge ? pixels(badge, 10, 0) : [],
-    sparkle: state === "done" ? pixels(SPARKLE, 10, 4) : [],
+    eyes: indicatorEyes(state),
+    badge: badge ? pixels(badge, BADGE_X, 0) : [],
+    sparkle: state === "done" ? pixels(SPARKLE, BADGE_X, 4) : [],
   };
-}
-
-function motionQuery(): MediaQueryList | null {
-  return typeof window !== "undefined" && typeof window.matchMedia === "function"
-    ? window.matchMedia("(prefers-reduced-motion: reduce)") : null;
-}
-
-/** `true` cuando el sistema pide menos movimiento. */
-export function useReducedMotion(): boolean {
-  const [reduced, setReduced] = useState(() => motionQuery()?.matches ?? false);
-  useEffect(() => {
-    const mq = motionQuery();
-    if (!mq) return;
-    const on = () => setReduced(mq.matches);
-    on();
-    mq.addEventListener?.("change", on);
-    return () => mq.removeEventListener?.("change", on);
-  }, []);
-  return reduced;
 }
 
 let pauseInstalled = false;
@@ -100,9 +84,12 @@ export function MissionTabIndicator({ state, workingCount }: { state: MissionInd
   return (
     <span className="mti" data-state={state} data-motion={moving ? "on" : "still"} data-celebrate={celebrate && moving ? "1" : "0"}
       role="img" aria-label={label} title={label}>
-      <svg viewBox="0 0 13 10" width="18" height="14" shapeRendering="crispEdges" aria-hidden="true">
-        <g className="mti-bot">{px.bot.map(rect)}</g>
-        <g className="mti-flame">{px.flame.map(rect)}</g>
+      <svg viewBox="0 0 19 13" width="19" height="13" shapeRendering="crispEdges" aria-hidden="true">
+        <g className="mti-bot">
+          <MascotLimbs />
+          {MASCOT_BODY.map((r, i) => <rect key={i} x={r.x} y={r.y} width={r.w} height={1} fill={MASCOT_FILL[r.c]} />)}
+          <MascotEyes kind={px.eyes} fill="var(--mti-eye)" />
+        </g>
         <g className="mti-badge">{px.badge.map(rect)}</g>
         <g className="mti-sparkle">{px.sparkle.map(rect)}</g>
       </svg>
