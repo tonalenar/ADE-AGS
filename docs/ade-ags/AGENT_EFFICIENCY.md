@@ -282,6 +282,10 @@ Contrato da instrumentação: `start_briefing`, `start_activity`, `start_retry` 
 
 `ags mission timings` aceita os novos kinds e expõe `orchestratorStallCount`, `orchestratorWaitMs`, `orchestratorMaxWaitMs` e `timeUntilAllWorkingMs`. Em `orchestrator_stall`, `startedMs` identifica o início da espera, `endedMs` o alerta/resposta e `detail` é `alerted:<fonte>` ou `answered:<fonte>` (`peer_ask`, `peer_tell`, `screen`). A contagem considera alertas únicos; espera total/máxima agrupa ator, alvo e início e usa a maior duração, evitando duplicar alerta seguido de resposta. Sem `start_all_working`, o tempo permanece ausente. Reutiliza schema existente, sem migração.
 
+## Etapa 17 - uso por aba (Backend)
+
+Implementado em `feat/etapa17-tab-usage`: `mission_tokens` inclui `agents[].tabs`, e `ags mission efficiency` inclui `tokens`. Soma das abas = total do agente; soma dos agentes = total da missao. Identidade persistida, sessao antes de cwd exclusivo, deltas Codex e nenhuma medicao inventada. Contrato e limitacoes: [TAB_USAGE.md](./TAB_USAGE.md).
+
 ## Etapa 17 - Fast headless (Backend)
 
 Implementado em `feat/etapa17-headless-fast`: snapshot Fast do lead e dos integrantes persistido em runs/run_squad_members (v34); supervisor passa `LaunchCtx.fast_mode` e Codex usa `-c service_tier="fast"`. Providers sem equivalente nao recebem flags. Formatos CLI verificados, limites e testes: [FAST_HEADLESS.md](./FAST_HEADLESS.md).

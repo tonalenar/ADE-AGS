@@ -256,6 +256,10 @@ Cinco pontos de melhoria estrutural focados na velocidade de inicialização das
 
 `ags mission startcheck <id>` consulta briefing, atividade, retries e avisos por integrante, incluindo quem nunca iniciou, e verifica o limite de 120 segundos desde a abertura dos terminais. `ags mission timings` expõe contagem de alertas, espera total/máxima do orquestrador e tempo até todos trabalhando. Reutiliza `mission_timings` e a equipe persistida; nenhuma migração necessária. A instrumentação de atividade, retry e alertas fica no frontend; o comando não envia Enter nem altera terminais. Contrato em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
 
+## Etapa 17 - uso por aba (Backend)
+
+Implementado em `feat/etapa17-tab-usage`: `mission_tokens` inclui `agents[].tabs`, e `ags mission efficiency` inclui `tokens`. Soma das abas = total do agente; soma dos agentes = total da missao. Identidade persistida, sessao antes de cwd exclusivo, deltas Codex e nenhuma medicao inventada. Contrato e limitacoes: [TAB_USAGE.md](./TAB_USAGE.md).
+
 ## Etapa 17 - Fast headless (Backend)
 
 Implementado em `feat/etapa17-headless-fast`: snapshot Fast do lead e dos integrantes persistido em runs/run_squad_members (v34); supervisor passa `LaunchCtx.fast_mode` e Codex usa `-c service_tier="fast"`. Providers sem equivalente nao recebem flags. Formatos CLI verificados, limites e testes: [FAST_HEADLESS.md](./FAST_HEADLESS.md).

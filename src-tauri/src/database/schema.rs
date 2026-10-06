@@ -1057,6 +1057,15 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         name TEXT NOT NULL, cwd TEXT NOT NULL, root TEXT NOT NULL, branch TEXT NOT NULL,
         PRIMARY KEY (mission_id, name), UNIQUE(root), UNIQUE(branch)
     );")?;
+    // v33: Durable ownership survives closing a terminal; no FK to disposable tabs.
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS mission_usage_tabs (
+        mission_id TEXT NOT NULL REFERENCES missions(id) ON DELETE CASCADE,
+        tab_id TEXT NOT NULL, agent_id TEXT NOT NULL, label TEXT NOT NULL,
+        kind TEXT NOT NULL, cwd TEXT NOT NULL, session_id TEXT, account_id TEXT,
+        session_ids TEXT NOT NULL DEFAULT '[]',
+        opened_at INTEGER NOT NULL, closed_at INTEGER,
+        PRIMARY KEY(mission_id, tab_id)
+    );")?;
     // v34: execution-local Fast policy copied from Squad. Old runs remain off;
     // never reconstruct settings from a Squad that may have been edited later.
     for table in ["runs", "run_squad_members"] {

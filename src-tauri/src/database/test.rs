@@ -24,6 +24,37 @@ fn setup() -> Connection {
     conn
 }
 
+#[test]
+fn etapa17_v32_v33_upgrades_preserve_tab_usage_and_fast_snapshots() {
+    for version in [32, 33] {
+        let conn = setup();
+        conn.execute_batch("INSERT INTO missions(id,workspace_id,title,objective,cwd,created_at,updated_at) VALUES('m17','ws','M','O','/repo',0,0);
+            INSERT INTO runs(id,workspace_id,objective,cwd,created_at,mission_id) VALUES('r17','ws','O','/repo',0,'m17');
+            INSERT INTO run_squad_members(run_id,role_id,agent_id) VALUES('r17','backend','codex');
+            INSERT INTO mission_usage_tabs(mission_id,tab_id,agent_id,label,kind,cwd,session_id,opened_at) VALUES('m17','tab17','codex','Backend','member','/wt','session17',10);
+            ALTER TABLE runs DROP COLUMN fast_mode;
+            ALTER TABLE run_squad_members DROP COLUMN fast_mode;").unwrap();
+        if version == 32 {
+            conn.execute("DROP TABLE mission_usage_tabs", []).unwrap();
+        }
+        conn.pragma_update(None, "user_version", version).unwrap();
+        schema::migrate(&conn).unwrap();
+        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 34);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM missions WHERE id='m17'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM mission_usage_tabs", [], |r| r.get::<_, i64>(0)).unwrap(), if version == 33 { 1 } else { 0 });
+        if version == 33 {
+            assert_eq!(conn.query_row("SELECT session_id FROM mission_usage_tabs WHERE tab_id='tab17'", [], |r| r.get::<_, String>(0)).unwrap(), "session17");
+        }
+        assert_eq!(conn.query_row("SELECT fast_mode FROM runs WHERE id='r17'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(conn.query_row("SELECT fast_mode FROM run_squad_members WHERE run_id='r17'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        conn.execute("UPDATE runs SET fast_mode=1 WHERE id='r17'", []).unwrap();
+        conn.execute("UPDATE run_squad_members SET fast_mode=1 WHERE run_id='r17'", []).unwrap();
+        schema::migrate(&conn).unwrap();
+        assert_eq!(conn.query_row("SELECT fast_mode FROM runs WHERE id='r17'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(conn.query_row("SELECT fast_mode FROM run_squad_members WHERE run_id='r17'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+    }
+}
+
 fn count(conn: &Connection, sql: &str) -> i64 {
     conn.query_row(sql, [], |r| r.get(0)).unwrap()
 }
