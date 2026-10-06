@@ -263,6 +263,12 @@ Cinco pontos de melhoria estrutural focados na velocidade de inicialização das
 - [x] **Fluxo de construção**: só pranchetas aprovadas viram tarefas (`buildTasks.ts`); briefing do orquestrador e skill `ags-orchestrator` 1.27.0 com "desenhe primeiro, aprove, construa".
 - [ ] Fora do escopo (etapa seguinte): preview real do app em dev server por worktree; compartilhar link.
 
+## Etapa 17 — custo, Fast headless, entregas e memória
+- Custo por aba (tokens/custo por terminal da missão): ver MISSION_TOKENS.md.
+- Fast nas execuções headless: ver AGENT_EFFICIENCY.md.
+- Reavaliação de missões `done_without_delivery` (`ags mission redeliver`): ver MISSION_SUCCESS.md.
+- Revisão das memórias sugeridas ao concluir a missão (duplicadas, contradições, alto valor): ver SHARED_MEMORY.md.
+
 ## Etapa 17 - uso por aba (Backend)
 
 Implementado em `feat/etapa17-tab-usage`: `mission_tokens` inclui `agents[].tabs`, e `ags mission efficiency` inclui `tokens`. Soma das abas = total do agente; soma dos agentes = total da missao. Identidade persistida, sessao antes de cwd exclusivo, deltas Codex e nenhuma medicao inventada. Contrato e limitacoes: [TAB_USAGE.md](./TAB_USAGE.md).

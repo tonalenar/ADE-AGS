@@ -1423,6 +1423,7 @@ pub fn memory_promote_fact_user(
 
 pub mod agent;
 pub mod history;
+pub mod review;
 pub mod search;
 
 #[cfg(test)]

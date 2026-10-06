@@ -7,6 +7,7 @@ import { useMissionsStore } from "@/features/missions/store";
 import { MissionEfficiencyCard } from "@/features/missions/MissionTimingsPanel";
 import { MissionStallAlerts, MissionStartupTime } from "@/features/missions/StallAlertsView";
 import { formatDuration, getTimings, type MissionTimings } from "@/features/missions/timings";
+import { MemoryReviewPanel } from "@/features/memory/MemoryReviewPanel";
 import { TabCostList } from "@/features/missions/TabCostList";
 import { estimateOf, formatCompactNumber, formatUsd, getTokens, tabsOfAgent, type CostEstimate, type MissionTokens } from "@/features/missions/tokens";
 import type { MissionReview } from "@/features/missions/types";
@@ -253,6 +254,11 @@ export function BotPanel() {
                           <p style={{ color: "var(--hq-pink)", marginBottom: 8 }}>
                             {t(failureLabelKey(failureKey(current)!))} → {t(failureActionKey(current), { defaultValue: t("missions.failure.action.unknown") })}
                           </p>
+                        )}
+                        {current.status !== "draft" && (
+                          <div style={{ marginBottom: 8 }}>
+                            <MemoryReviewPanel missionId={current.id} workspaceId={current.workspaceId} refreshKey={current.status} />
+                          </div>
                         )}
                         {!timings || timings.summary.byKind.length === 0 ? <p className="ags-hq__dim">{t("botPanel.noTimings")}</p> : (
                           timings.summary.byKind.map((k) => (
