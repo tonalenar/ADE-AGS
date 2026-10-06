@@ -11,7 +11,7 @@ O agente desenha a interface como **pranchetas** (artboards) HTML antes de const
 
 ## Modelo de dados
 
-`design` (workspace, missão e dono opcionais, título, status) → `page` (nome, ordem) → `artboard` (título, html, largura, altura, x, y, versão, status `draft|approved|rejected`) com histórico de versões e `comment` (autor `user|agent`, texto, seletor opcional, resolvido). Migração aditiva e idempotente (schema v34; a v33 é de outra missão).
+`design` (workspace, missão e dono opcionais, título, status) → `page` (nome, ordem) → `artboard` (título, html, largura, altura, x, y, versão, status `draft|approved|rejected`) com histórico de versões e `comment` (autor `user|agent`, texto, seletor opcional, resolvido). Migração aditiva e idempotente (schema v35; v33 e v34 já são de outras missões).
 
 Regras: editar ou reverter volta a prancheta para `draft`; `approve_all` preserva as rejeitadas; `expectedVersion` opcional em update/revert rejeita escrita sobre versão que mudou (não sobrescreve o agente).
 
