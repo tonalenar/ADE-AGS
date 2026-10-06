@@ -202,6 +202,11 @@ pub(crate) fn archive_tab_row(
     workspace_id: &str,
     resolved: &ResolvedSession,
 ) -> Result<(), String> {
+    // All closure paths converge here, including window/workspace deletion. Preserve
+    // the resolved session before the disposable tabs row is removed.
+    conn.execute("UPDATE tabs SET session_id=COALESCE(?1,session_id) WHERE id=?2",rusqlite::params![resolved.session_id,tab_id]).map_err(|e|e.to_string())?;
+    crate::usage::capture_mission_tabs(conn, &crate::canvas::load_boards())?;
+    conn.execute("UPDATE mission_usage_tabs SET closed_at=?1 WHERE tab_id=?2 AND closed_at IS NULL",rusqlite::params![now_ts(),tab_id]).map_err(|e|e.to_string())?;
     #[allow(clippy::type_complexity)]
     let row: Option<(String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, String, i64)> = conn
         .query_row(

@@ -24,6 +24,37 @@ fn setup() -> Connection {
     conn
 }
 
+#[test]
+fn etapa17_v32_v33_upgrades_preserve_tab_usage_and_fast_snapshots() {
+    for version in [32, 33] {
+        let conn = setup();
+        conn.execute_batch("INSERT INTO missions(id,workspace_id,title,objective,cwd,created_at,updated_at) VALUES('m17','ws','M','O','/repo',0,0);
+            INSERT INTO runs(id,workspace_id,objective,cwd,created_at,mission_id) VALUES('r17','ws','O','/repo',0,'m17');
+            INSERT INTO run_squad_members(run_id,role_id,agent_id) VALUES('r17','backend','codex');
+            INSERT INTO mission_usage_tabs(mission_id,tab_id,agent_id,label,kind,cwd,session_id,opened_at) VALUES('m17','tab17','codex','Backend','member','/wt','session17',10);
+            ALTER TABLE runs DROP COLUMN fast_mode;
+            ALTER TABLE run_squad_members DROP COLUMN fast_mode;").unwrap();
+        if version == 32 {
+            conn.execute("DROP TABLE mission_usage_tabs", []).unwrap();
+        }
+        conn.pragma_update(None, "user_version", version).unwrap();
+        schema::migrate(&conn).unwrap();
+        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 34);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM missions WHERE id='m17'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(conn.query_row("SELECT COUNT(*) FROM mission_usage_tabs", [], |r| r.get::<_, i64>(0)).unwrap(), if version == 33 { 1 } else { 0 });
+        if version == 33 {
+            assert_eq!(conn.query_row("SELECT session_id FROM mission_usage_tabs WHERE tab_id='tab17'", [], |r| r.get::<_, String>(0)).unwrap(), "session17");
+        }
+        assert_eq!(conn.query_row("SELECT fast_mode FROM runs WHERE id='r17'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        assert_eq!(conn.query_row("SELECT fast_mode FROM run_squad_members WHERE run_id='r17'", [], |r| r.get::<_, i64>(0)).unwrap(), 0);
+        conn.execute("UPDATE runs SET fast_mode=1 WHERE id='r17'", []).unwrap();
+        conn.execute("UPDATE run_squad_members SET fast_mode=1 WHERE run_id='r17'", []).unwrap();
+        schema::migrate(&conn).unwrap();
+        assert_eq!(conn.query_row("SELECT fast_mode FROM runs WHERE id='r17'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+        assert_eq!(conn.query_row("SELECT fast_mode FROM run_squad_members WHERE run_id='r17'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
+    }
+}
+
 fn count(conn: &Connection, sql: &str) -> i64 {
     conn.query_row(sql, [], |r| r.get(0)).unwrap()
 }
@@ -903,7 +934,7 @@ fn v32_terminal_workspaces_migrate_additively_and_keep_ownership() {
     let root: String = conn.query_row("SELECT root FROM mission_team_workspaces WHERE mission_id='team-m'", [], |r| r.get(0)).unwrap();
     assert_eq!(root, "/wt");
     assert!(conn.execute("INSERT INTO mission_team_workspaces(mission_id,name,cwd,root,branch) VALUES ('team-m','QA','/wt','/wt','cc/qa')", []).is_err());
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 32);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 34);
 }
 
 #[test]
@@ -912,7 +943,7 @@ fn v20_nuevo_crea_tablas_indices_y_referencias_de_squads() {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 32);
+    assert_eq!(version, 34);
 
     for table in ["squads", "squad_members", "run_squad_members"] {
         assert!(
@@ -1012,7 +1043,7 @@ fn migrar_v19_a_v20_conserva_mission_runs_y_tasks_anteriores() {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 32);
+    assert_eq!(version, 34);
     assert_eq!(
         conn.query_row(
             "SELECT title FROM missions WHERE id = 'mission-old'",
@@ -1281,7 +1312,7 @@ fn migrate_v20_to_v21_adds_nullable_effort_without_rewriting_history() {
     }
     conn.pragma_update(None, "user_version", 20).unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 32);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 34);
     let (model, effort): (String, Option<String>) = conn.query_row("SELECT model,reasoning_effort FROM tasks WHERE id='eff-t'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
     assert_eq!(model, "old-model");
     assert_eq!(effort, None);
@@ -1302,7 +1333,7 @@ fn migrate_v21_to_v22_preserves_legacy_and_is_idempotent() {
         ALTER TABLE tasks DROP COLUMN structured_handoff;
         PRAGMA user_version=21;").unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),32);
+    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),34);
     let (legacy, structured): (String,Option<String>) = conn.query_row("SELECT handoff,structured_handoff FROM tasks WHERE id='h-t'",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
     assert_eq!(legacy,"legacy");assert_eq!(structured,None);
     conn.execute("UPDATE tasks SET structured_handoff=?1 WHERE id='h-t'",[r#"{"version":1,"summary":"old delivery"}"#]).unwrap();
@@ -1322,7 +1353,7 @@ fn migrate_v22_to_v23_keeps_separate_oauth_metadata_without_tokens() {
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM antigravity_oauth_accounts", [], |r|r.get::<_,i64>(0)).unwrap(), 2);
     assert!(conn.execute("INSERT INTO antigravity_oauth_accounts VALUES('c','google-a','Duplicate','c@example.com',0)", []).is_err());
     assert!(conn.prepare("SELECT access_token,refresh_token FROM antigravity_oauth_accounts").is_err());
-    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),32);
+    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),34);
 }
 
 #[test]
@@ -1344,7 +1375,7 @@ fn migrate_v26_to_v29_preserves_historical_mission_statuses() {
         .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
     assert_eq!(statuses, vec![("old-done".into(), "done".into()), ("old-failed".into(), "failed".into())]);
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM mission_terminal_deliveries", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 32);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(), 34);
 }
 
 /// Un guardado de metadata (renombrar, mover la ventana) no reenvía el scrollback que la
@@ -1419,7 +1450,7 @@ fn etapa10_migrations_v27_v28_v29_preserve_each_preceding_stage() {
         conn.pragma_update(None, "user_version", from).unwrap();
         schema::migrate(&conn).unwrap();
         schema::migrate(&conn).unwrap();
-        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 32);
+        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 34);
         let (status, marked, class): (String, i64, Option<String>) = conn.query_row("SELECT status,is_test,failure_class FROM missions WHERE id='stage-m'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
         assert_eq!(status, "done");
         assert_eq!(marked, i64::from(from >= 27));
@@ -1436,7 +1467,7 @@ fn v30_adds_fast_mode_columns_idempotently_and_keeps_existing_squads_off() {
     conn.pragma_update(None, "user_version", 29).unwrap();
     schema::migrate(&conn).unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 32);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 34);
     let fast: i64 = conn.query_row("SELECT fast_mode FROM squads WHERE id='s1'", [], |r| r.get(0)).unwrap();
     assert_eq!(fast, 0);
     conn.execute("SELECT fast_mode FROM squad_members LIMIT 1", []).ok();
@@ -1452,7 +1483,7 @@ fn v31_adds_subagent_default_columns_idempotently_and_keeps_old_squads_automatic
     conn.pragma_update(None, "user_version", 30).unwrap();
     schema::migrate(&conn).unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 32);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 34);
     let (agent, fast): (Option<String>, i64) = conn
         .query_row("SELECT subagent_agent_id, subagent_fast FROM squads WHERE id='s1'", [], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap();
