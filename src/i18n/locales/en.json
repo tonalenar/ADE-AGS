@@ -2202,5 +2202,9 @@
   "missions.tokens.perTabNote": "Tab totals add up to the agent total.",
   "missions.tokens.tabSource.session": "session",
   "missions.tokens.tabSource.isolated_cwd": "isolated cwd",
-  "missions.tokens.tabSource.ledger": "ledger"
+  "missions.tokens.tabSource.ledger": "ledger",
+  "missions.tokens.tabKind.member": "member",
+  "missions.tokens.tabKind.recruit": "recruit",
+  "missions.tokens.tabKind.custom": "custom agent",
+  "missions.tokens.tabKind.loose": "loose tab"
 }

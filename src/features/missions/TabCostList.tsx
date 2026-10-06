@@ -14,7 +14,7 @@ export function TabCostList({ agentId, tabs, className = "" }: { agentId: string
         return (
           <li key={tab.tabId} className="flex items-center gap-2 text-[11px]" data-measured={tab.measured}>
             <span className="min-w-0 flex-1 truncate text-gray-500 dark:text-gray-400" title={tab.label}>
-              {tab.label} {tab.source && <span className="text-[10px] text-gray-400 dark:text-white/35">· {t(`missions.tokens.tabSource.${tab.source}`)}</span>}
+              {tab.label} {(tab.kind || tab.source) && <span className="text-[10px] text-gray-400 dark:text-white/35">· {[tab.kind && t(`missions.tokens.tabKind.${tab.kind}`), tab.source && t(`missions.tokens.tabSource.${tab.source}`)].filter(Boolean).join(" · ")}</span>}
             </span>
             {tab.measured ? (
               <>

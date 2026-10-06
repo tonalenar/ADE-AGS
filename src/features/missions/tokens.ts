@@ -8,6 +8,7 @@ export interface CostEstimate {
   unpricedModels: string[];
 }
 
+export type TabKind = "member" | "recruit" | "custom" | "loose";
 export type TabSource = "session" | "isolated_cwd" | "ledger";
 
 /** Gasto de UMA aba/terminal. Os totais são a soma das abas (a aba detalha, nunca soma de novo). */
@@ -15,6 +16,8 @@ export interface TabTokens {
   tabId: string;
   agentId: string;
   label: string;
+  /** Papel da aba; o backend pode omitir. */
+  kind?: TabKind | null;
   cwd: string | null;
   sessionId: string | null;
   /** De onde veio a medição; `null` quando não medido. */
