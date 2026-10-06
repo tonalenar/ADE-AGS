@@ -70,7 +70,7 @@ export default defineConfig(async () => ({
   // DOM y no es lo que estos tests cubren.
   test: {
     environment: "node",
-    include: ["src/**/tests/*.test.ts"],
+    include: ["src/**/tests/*.test.{ts,tsx}"],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
