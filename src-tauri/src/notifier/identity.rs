@@ -99,14 +99,10 @@ fn register_shortcut() -> Result<(), String> {
         Win32::{
             Foundation::PROPERTYKEY,
             System::{
-                Com::StructuredStorage::{
-                    PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0,
-                },
                 Com::{
                     CLSCTX_INPROC_SERVER, COINIT_APARTMENTTHREADED, CoCreateInstance,
                     CoInitializeEx, CoTaskMemFree, CoUninitialize, IPersistFile,
                 },
-                Variant::VT_LPWSTR,
             },
             UI::Shell::{
                 FOLDERID_Programs, IShellLinkW, KF_FLAG_DEFAULT, PropertiesSystem::IPropertyStore,
@@ -150,22 +146,12 @@ fn register_shortcut() -> Result<(), String> {
         let store: IPropertyStore = link.cast().map_err(|e| e.to_string())?;
         // PKEY_AppUserModel_ID. This PROPVARIANT borrows the buffer; do not PropVariantClear it.
         let id: Vec<u16> = spec.app_id.encode_utf16().chain(Some(0)).collect();
-        let value = PROPVARIANT {
-            Anonymous: PROPVARIANT_0 {
-                Anonymous: std::mem::ManuallyDrop::new(PROPVARIANT_0_0 {
-                    vt: VT_LPWSTR,
-                    Anonymous: PROPVARIANT_0_0_0 {
-                        pwszVal: windows::core::PWSTR(id.as_ptr() as *mut u16),
-                    },
-                    ..Default::default()
-                }),
-            },
-        };
+        let value = borrowed_lpwstr(&id);
         let key = PROPERTYKEY {
             fmtid: GUID::from_u128(0x9f4c2855_9f79_4b39_a8d0_e1d42de1d5f3),
             pid: 5,
         };
-        store.SetValue(&key, &value).map_err(|e| e.to_string())?;
+        store.SetValue(&key, &*value).map_err(|e| e.to_string())?;
         store.Commit().map_err(|e| e.to_string())?;
         let persist: IPersistFile = link.cast().map_err(|e| e.to_string())?;
         let temporary = spec
@@ -181,6 +167,31 @@ fn register_shortcut() -> Result<(), String> {
         let _ = std::fs::remove_file(&temporary);
         result
     }
+}
+
+/// Un PROPVARIANT `VT_LPWSTR` que PRESTA el buffer `id` (terminado en 0).
+///
+/// `PROPVARIANT` implementa `Drop` con `PropVariantClear`, que libera la cadena con
+/// `CoTaskMemFree`; si el buffer es de Rust (un `Vec`), eso corrompe el heap y la app moría al
+/// arrancar con `STATUS_HEAP_CORRUPTION` (0xc0000374). Por eso se devuelve en `ManuallyDrop`: nunca
+/// se limpia, y el `Vec` lo libera quien lo creó. `id` tiene que vivir más que el valor.
+#[cfg(windows)]
+fn borrowed_lpwstr(id: &[u16]) -> std::mem::ManuallyDrop<windows::Win32::System::Com::StructuredStorage::PROPVARIANT> {
+    use windows::Win32::System::{
+        Com::StructuredStorage::{PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0},
+        Variant::VT_LPWSTR,
+    };
+    std::mem::ManuallyDrop::new(PROPVARIANT {
+        Anonymous: PROPVARIANT_0 {
+            Anonymous: std::mem::ManuallyDrop::new(PROPVARIANT_0_0 {
+                vt: VT_LPWSTR,
+                Anonymous: PROPVARIANT_0_0_0 {
+                    pwszVal: windows::core::PWSTR(id.as_ptr() as *mut u16),
+                },
+                ..Default::default()
+            }),
+        },
+    })
 }
 
 #[cfg(windows)]
@@ -243,5 +254,17 @@ mod tests {
             spec.icon,
             Path::new("Dados locais").join("ADE AGS/notifications/bot.ico")
         );
+    }
+    /// Regresión: el PROPVARIANT que presta un buffer de Rust no debe liberarlo al soltarse (antes
+    /// `PropVariantClear` lo pasaba a CoTaskMemFree y el heap se corrompía al arrancar la app).
+    #[cfg(windows)]
+    #[test]
+    fn borrowed_propvariant_never_frees_the_rust_buffer() {
+        let id: Vec<u16> = "com.luis.controlcode.ADEAGS".encode_utf16().chain(Some(0)).collect();
+        for _ in 0..1000 {
+            let value = borrowed_lpwstr(&id);
+            assert_eq!(value.vt().0, 31, "VT_LPWSTR");
+        }
+        assert_eq!(id.last(), Some(&0));
     }
 }
