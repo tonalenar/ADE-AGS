@@ -255,3 +255,10 @@ Cinco pontos de melhoria estrutural focados na velocidade de inicialização das
 ## Etapa 16 — métricas e verificação do início (Backend)
 
 `ags mission startcheck <id>` consulta briefing, atividade, retries e avisos por integrante, incluindo quem nunca iniciou, e verifica o limite de 120 segundos desde a abertura dos terminais. `ags mission timings` expõe contagem de alertas, espera total/máxima do orquestrador e tempo até todos trabalhando. Reutiliza `mission_timings` e a equipe persistida; nenhuma migração necessária. A instrumentação de atividade, retry e alertas fica no frontend; o comando não envia Enter nem altera terminais. Contrato em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+
+## Etapa 18 — Canvas de Design: pranchetas, comentários e aprovação
+
+- [x] **Backend**: designs, páginas, pranchetas (HTML, tamanho, posição, versão, status), histórico de versões e comentários, em tabelas aditivas e idempotentes; comandos IPC `design_*`, evento `design-changed` e CLI `ags design`. Detalhes em [DESIGN_CANVAS.md](./DESIGN_CANVAS.md).
+- [x] **Frontend**: painel Design no canvas (zoom/pan, páginas, iframe em sandbox, modo EDIT, comentários por elemento, versões, aprovar/rejeitar/aprovar tudo, atualização ao vivo).
+- [x] **Fluxo de construção**: só pranchetas aprovadas viram tarefas (`buildTasks.ts`); briefing do orquestrador e skill `ags-orchestrator` 1.27.0 com "desenhe primeiro, aprove, construa".
+- [ ] Fora do escopo (etapa seguinte): preview real do app em dev server por worktree; compartilhar link.
