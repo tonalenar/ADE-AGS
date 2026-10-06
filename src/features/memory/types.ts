@@ -123,3 +123,38 @@ export interface MemoryProposalResult {
 
 export type MemoryRun = Run;
 export type MemoryFact = Fact;
+
+export interface MemoryReviewEvidence {
+  runId: string | null;
+  taskId: string | null;
+  factId: string | null;
+  actorKind: "user" | "lead" | "worker";
+  reason: string | null;
+}
+
+export interface MemoryReviewRef {
+  entryId: string;
+  key: string;
+}
+
+/** Sugestão pendente + classificação feita no backend (duplicada/contraditória com as aprovadas, valor). */
+export interface MemoryReviewItem {
+  entryId: string;
+  revision: number;
+  key: string;
+  kind: MemoryKind;
+  body: string;
+  priority: number;
+  evidence: MemoryReviewEvidence;
+  duplicateOf?: MemoryReviewRef | null;
+  contradicts?: MemoryReviewRef | null;
+  highValue: boolean;
+  /** 0-100; highValue = score >= 70. */
+  score: number;
+}
+
+export interface MemoryReviewSummary {
+  missionId: string;
+  items: MemoryReviewItem[];
+  counts: { total: number; duplicates: number; contradictions: number; highValue: number };
+}
