@@ -15,18 +15,16 @@ Todas as medições foram executadas no ambiente Windows com o repositório ADE 
 | **Vitest (--changed)** | `node node_modules/vitest/vitest.mjs run --changed` | **4s** | Execução apenas dos testes de arquivos modificados |
 | **Babel Parse Check** | `node scripts/babel-parse-check.mjs src` | **1s** | Validação sintática rápida de componentes e módulos |
 | **CI (GitHub Actions)** | `gh pr checks <n> --watch` | **3m – 4min** | Pipeline completo em esteira remota (tsc, vitest, cargo test, lint) |
-| **Cargo Test (Cold Build)** | `cargo test --lib --no-run` (target limpo) | **204,63s** (~3m 25s) | Compilação inicial de 519 crates dependentes do zero |
-| **Cargo Test (Warm Re-link)** | `cargo test --lib --no-run` (target compartilhado) | **14,55s** | Re-linkagem e re-verificação incremental com alvo aquecido |
-| **Cargo Test (Warm Crate Recompile)** | `cargo test --lib` (alteração em arquivo da crate) | **64,7s** | Recompilação apenas da crate `ade-ags`, mantendo dependências prontas |
-| **Cargo Test (Warm Unchanged)** | `cargo test --lib` (sem alterações no código) | **1,08s** | No-op incremental com alvo compartilhado aquecido |
-| **Cargo Lock Contention (4 jobs)** | 4 execuções concorrentes com target compartilhado | **15,9s – 16,4s** | Bloqueio serializado ordenadamente via lockfile do Cargo sem corrupção |
+| **Cargo Test (Cold Build)** | `cargo test --lib --no-run` (target vazio) | **204,63s** (~3m 25s) | Compilação inicial fria de 519 crates dependentes do zero |
+| **Cargo Test (Primeiro Aquecimento)** | `cargo test --lib --no-run` (após copiar target) | **64,7s** | Primeiro aquecimento após importação/cópia da base do target |
+| **Cargo Test (Incremental CLI)** | `cargo test --lib --no-run` (pequena mudança no CLI) | **14,6s** (14,55s) | Re-linkagem/build incremental (`build.rs` acompanha src inteiro) |
+| **Cargo Test (Warm Inalterado)** | `cargo test --lib` (alvo compartilhado aquecido, no-op) | **1,076s** | No-op incremental com alvo compartilhado sem modificações |
+| **Cargo Lock Contention (4 simultâneos)** | 4 processos concorrentes com alvo compartilhado aquecido | **15,91s / 16,25s / 16,33s / 16,41s** *(provisório)* | Todos exit 0; disputa restrita ao lock de package cache/artifact directory |
 
 ### Nota sobre Sccache
-Foi avaliada a utilização do `sccache` como camada adicional de cache de compilação. No ambiente local:
-- O binário `sccache` não se encontra no `PATH`/`bin`.
-- A invocação de `cargo install --list` é restrita por permissões/ACL em `.cargo/.crates.toml`.
-- Conforme as diretrizes de governança, o agente não deve forçar instalações globais no ambiente do usuário.
-- O uso do diretório compartilhado `~/.ags/cargo-target-agents` (via variável `ADE_AGS_CARGO_TARGET_DIR`) atendeu plenamente à meta de redução de tempo, eliminando a penalidade de 204s para 1s–14s.
+Foi avaliada a utilização do `sccache` como camada adicional de cache de compilação:
+- O binário `sccache` **não está instalado** no ambiente e **não é instalável sem privilégios de administrador** (bloqueio por ACL em `.cargo/.crates.toml`).
+- O uso do diretório compartilhado `~/.ags/cargo-target-agents` (via variável `ADE_AGS_CARGO_TARGET_DIR`) atendeu plenamente à meta de redução de tempo, eliminando a penalidade fria de 204,63s e alcançando de 1,076s a 14,6s sem necessidade de binários extras.
 
 ---
 
