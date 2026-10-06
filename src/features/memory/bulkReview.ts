@@ -102,7 +102,7 @@ export function groupsFromWorkspaceReview(raw: unknown, fallbackTitle: (missionI
   for (const g of list as { missionId?: string | null; title?: string | null; missionTitle?: string | null; items?: MemoryReviewItem[] }[]) {
     if (!g || !Array.isArray(g.items)) continue;
     const id = g.missionId ?? null;
-    out.push({ missionId: id ?? "__workspace__", title: (id === null ? null : g.title ?? g.missionTitle) || fallbackTitle(id), items: g.items });
+    out.push({ missionId: id ?? "__workspace__", title: (id === null ? null : g.title || g.missionTitle) || fallbackTitle(id), items: g.items });
   }
   return out;
 }
