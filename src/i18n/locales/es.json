@@ -2197,5 +2197,14 @@
   "botPanel.live.lore2": "El equipo sube los pisos y le dispara código: cada entrega real le quita vida al GLITCH.",
   "botPanel.live.lore3": "Los barriles son sus golpes: fallas, aprobaciones pendientes y preguntas sin respuesta.",
   "botPanel.live.boss": "GLITCH {{done}}/{{total}}",
-  "botPanel.live.bossDefeated": "¡GLITCH DERROTADO!"
+  "botPanel.live.bossDefeated": "¡GLITCH DERROTADO!",
+  "missions.tokens.perTab": "Por pestaña",
+  "missions.tokens.perTabNote": "La suma de las pestañas es el total del agente.",
+  "missions.tokens.tabSource.session": "sesión",
+  "missions.tokens.tabSource.isolated_cwd": "cwd aislado",
+  "missions.tokens.tabSource.ledger": "ledger",
+  "missions.tokens.tabKind.member": "integrante",
+  "missions.tokens.tabKind.recruit": "recluta",
+  "missions.tokens.tabKind.custom": "agente propio",
+  "missions.tokens.tabKind.loose": "pestaña suelta"
 }

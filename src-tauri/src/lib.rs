@@ -16,7 +16,7 @@ mod graphify;
 pub mod ipc;
 mod marketplace;
 mod memory;
-mod missions;
+pub mod missions;
 mod notifier;
 mod orchestrator;
 mod android;
@@ -38,6 +38,7 @@ mod util;
 mod window;
 
 pub use app::run;
+pub use database::migrate;
 
 // Sin este manifiesto el harness de `cargo test` no arranca en Windows:
 // importa TaskDialogIndirect y el loader, sin Common Controls 6, cae en

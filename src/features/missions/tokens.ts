@@ -8,6 +8,29 @@ export interface CostEstimate {
   unpricedModels: string[];
 }
 
+export type TabKind = "member" | "recruit" | "custom" | "loose";
+export type TabSource = "session" | "isolated_cwd" | "ledger";
+
+/** Gasto de UMA aba/terminal. Os totais são a soma das abas (a aba detalha, nunca soma de novo). */
+export interface TabTokens {
+  tabId: string;
+  agentId: string;
+  label: string;
+  /** Papel da aba; o backend pode omitir. */
+  kind?: TabKind | null;
+  cwd: string | null;
+  sessionId: string | null;
+  /** De onde veio a medição; `null` quando não medido. */
+  source: TabSource | null;
+  measured: boolean;
+  input: number | null;
+  output: number | null;
+  cacheWrite: number | null;
+  cacheRead: number | null;
+  costUsd: number | null;
+  estimate?: CostEstimate | null;
+}
+
 export interface AgentTokens {
   agentId: string;
   measured: boolean;
@@ -21,6 +44,8 @@ export interface AgentTokens {
 
 export interface MissionTokens {
   agents: AgentTokens[];
+  /** Detalhe por aba/terminal; ausente em backends antigos. */
+  tabs?: TabTokens[];
 }
 
 export const getTokens = (missionId: string) => invoke<MissionTokens>("mission_tokens", { missionId });
@@ -96,4 +121,31 @@ export function tokenRows(data: MissionTokens): TokenRow[] {
   };
   rows.push({ ...total, cacheReadSharePct: cacheReadShare(total), isTotal: true });
   return rows;
+}
+
+/** Custo de uma aba pra exibir: estimativa de tabela se houver, senão o custo medido; `null` = "não medido". Pura. */
+export function tabCostUsd(tab: Pick<TabTokens, "measured" | "costUsd" | "estimate">): number | null {
+  if (!tab.measured) return null;
+  return tab.estimate?.costUsd ?? tab.costUsd ?? null;
+}
+
+/** Total de tokens (input+output+cache) de uma aba; `null` sem medição. Pura. */
+export function tabTotalTokens(tab: Pick<TabTokens, "measured" | "input" | "output" | "cacheWrite" | "cacheRead">): number | null {
+  if (!tab.measured) return null;
+  return sumOrNull([tab.input, tab.output, tab.cacheWrite, tab.cacheRead]);
+}
+
+/** Abas de um agente em ordem estável: medidas primeiro (mais caras antes), "não medido" no fim. Pura. */
+export function tabsOfAgent(data: MissionTokens | null | undefined, agentId: string): TabTokens[] {
+  return (data?.tabs ?? [])
+    .filter((tab) => tab.agentId === agentId)
+    .sort((a, b) => {
+      if (a.measured !== b.measured) return a.measured ? -1 : 1;
+      return (tabCostUsd(b) ?? 0) - (tabCostUsd(a) ?? 0) || a.label.localeCompare(b.label);
+    });
+}
+
+/** Soma das abas medidas (tokens e custo); `null` se nenhuma foi medida. Serve pra conferir contra o total. Pura. */
+export function tabsSum(tabs: TabTokens[]): { tokens: number | null; costUsd: number | null } {
+  return { tokens: sumOrNull(tabs.map(tabTotalTokens)), costUsd: sumOrNull(tabs.map(tabCostUsd)) };
 }

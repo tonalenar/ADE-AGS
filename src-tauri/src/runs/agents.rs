@@ -40,6 +40,8 @@ pub struct LaunchCtx<'a> {
     /// traduce a lo que su CLI hace cumplir; el broker lo vuelve a comprobar por pedido.
     pub read_only: bool,
     pub reasoning_effort: Option<&'a str>,
+    /// Execution-local Codex service tier; unsupported adapters deliberately ignore it.
+    pub fast_mode: bool,
 }
 
 pub trait HeadlessAgent {

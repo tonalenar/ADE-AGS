@@ -261,3 +261,11 @@ Cinco pontos de melhoria estrutural focados na velocidade de inicialização das
 - Fast nas execuções headless: ver AGENT_EFFICIENCY.md.
 - Reavaliação de missões `done_without_delivery` (`ags mission redeliver`): ver MISSION_SUCCESS.md.
 - Revisão das memórias sugeridas ao concluir a missão (duplicadas, contradições, alto valor): ver SHARED_MEMORY.md.
+
+## Etapa 17 - uso por aba (Backend)
+
+Implementado em `feat/etapa17-tab-usage`: `mission_tokens` inclui `agents[].tabs`, e `ags mission efficiency` inclui `tokens`. Soma das abas = total do agente; soma dos agentes = total da missao. Identidade persistida, sessao antes de cwd exclusivo, deltas Codex e nenhuma medicao inventada. Contrato e limitacoes: [TAB_USAGE.md](./TAB_USAGE.md).
+
+## Etapa 17 - Fast headless (Backend)
+
+Implementado em `feat/etapa17-headless-fast`: snapshot Fast do lead e dos integrantes persistido em runs/run_squad_members (v34); supervisor passa `LaunchCtx.fast_mode` e Codex usa `-c service_tier="fast"`. Providers sem equivalente nao recebem flags. Formatos CLI verificados, limites e testes: [FAST_HEADLESS.md](./FAST_HEADLESS.md).

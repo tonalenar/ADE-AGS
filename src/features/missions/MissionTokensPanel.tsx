@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { estimateOf, formatCompactNumber, formatUsd, getTokens, tokenRows, type MissionTokens, type TokenRow } from "./tokens";
+import { TabCostList } from "./TabCostList";
+import { estimateOf, formatCompactNumber, formatUsd, getTokens, tabsOfAgent, tokenRows, type MissionTokens, type TabTokens, type TokenRow } from "./tokens";
 
 /** Cada quanto se relê enquanto a missão roda: os tokens medidos não geram evento próprio. */
 const REFRESH_MS = 60_000;
@@ -19,9 +20,11 @@ function TokenCell({ value }: { value: number | null }) {
   );
 }
 
-function TokenTableRow({ row }: { row: TokenRow }) {
+function TokenTableRow({ row, tabs }: { row: TokenRow; tabs: TabTokens[] }) {
   const { t } = useTranslation();
+  const hasTabs = !row.isTotal && tabs.length > 0;
   return (
+    <div>
     <div
       className={`flex items-center gap-2 py-1 text-[11.5px] ${row.isTotal ? "font-semibold text-gray-700 dark:text-gray-200" : ""}`}
     >
@@ -38,6 +41,13 @@ function TokenTableRow({ row }: { row: TokenRow }) {
       <span className="w-24 shrink-0 text-right text-[10.5px] text-gray-400 dark:text-white/35">
         {row.cacheReadSharePct !== null ? t("missions.tokens.cacheReadShare", { pct: row.cacheReadSharePct }) : ""}
       </span>
+    </div>
+    {hasTabs && (
+      <div className="mb-1 ml-3 border-l border-gray-100 pl-2 dark:border-white/10">
+        <span className="text-[10px] uppercase tracking-widest text-gray-400 dark:text-white/35">{t("missions.tokens.perTab")}</span>
+        <TabCostList agentId={row.agentId} tabs={tabs} />
+      </div>
+    )}
     </div>
   );
 }
@@ -83,7 +93,7 @@ export function MissionTokensPanel({ missionId }: { missionId: string }) {
       </div>
       <div className="flex flex-col divide-y divide-gray-100 dark:divide-white/5">
         {rows.map((row) => (
-          <TokenTableRow key={row.agentId} row={row} />
+          <TokenTableRow key={row.agentId} row={row} tabs={tabsOfAgent(data, row.agentId)} />
         ))}
       </div>
       {estimate && (

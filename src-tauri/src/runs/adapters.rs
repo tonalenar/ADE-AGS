@@ -359,6 +359,11 @@ impl HeadlessAgent for Codex {
         if let Some(effort) = ctx.reasoning_effort {
             args.extend(["-c".into(), format!("model_reasoning_effort=\"{effort}\"")]);
         }
+        if ctx.fast_mode {
+            // codex-cli 0.160.1: -c accepts TOML overrides; the generated real
+            // protocol schema includes config.service_tier. No account file is edited.
+            args.extend(["-c".into(), "service_tier=\"fast\"".into()]);
+        }
         if let Some(path) = &ctx.mcp_config {
             // Override only this execution; never rewrite the account's config.toml.
             let config = std::fs::read(path)

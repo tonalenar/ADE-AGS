@@ -12,6 +12,7 @@
 mod claude;
 mod live;
 mod mission;
+mod terminal;
 mod parse;
 mod pricing;
 mod screen;
@@ -23,3 +24,4 @@ mod test;
 pub use claude::*;
 pub use live::*;
 pub use mission::*;
+pub use terminal::*;
