@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 34;
+const SCHEMA_VERSION: i32 = 35;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1073,6 +1073,8 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
             conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN fast_mode INTEGER NOT NULL DEFAULT 0"))?;
         }
     }
+    // v35: untrusted design artboards, immutable versions and element comments.
+    crate::design::migrate(conn)?;
     set_user_version(conn, SCHEMA_VERSION)
 }
 

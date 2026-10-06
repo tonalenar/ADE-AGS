@@ -9,6 +9,7 @@ mod chat;
 mod app;
 mod bus;
 mod database;
+mod design;
 mod explorer;
 mod floors;
 mod forge;

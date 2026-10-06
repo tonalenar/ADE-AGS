@@ -120,6 +120,15 @@ PAPELES (para recrutar con --role)
   role edit <papel> \"instrucciones\" [--name]  Solo orquestadores; el catálogo no se edita
 
 NOTAS DEL CANVAS — las conectadas con esta terminal (orquestador: las del equipo)
+  design create <title> [--workspace <path>] [--mission-id <id>] [--owner-tab-id <id>]
+  design list [--workspace <path>] | get <designId>
+  design page add <designId> <name> [--order <n>]
+  design artboard add <pageId> <title> --file <html> [--width <n> --height <n>]
+  design artboard add <designId> <title> --page <name> --file <html>
+  design update <artboardId> --file <html> [--expected-version <n>]
+  design comment <artboardId> <text> [--author user|agent] [--selector <css>]
+  design approve|reject <artboardId> | approve all <designId>
+  design revert <artboardId> --version <n>
   notes                                       Las notas que alcanzás
   note create [\"texto\"] [--name <n>]          Crea una nota a tu lado, ya conectada
               [--stack <nota>]                · en vez de al lado: dentro de la pila de esa nota (comparten lugar)
@@ -271,7 +280,11 @@ fn main() -> ExitCode {
 
     // `ags skills` / `ags agents`: listar es lo único que se hace con ellos, y exigir
     // `skill list` para eso era ceremonia sin ganancia.
-    let (command, flag_args) = match shortcut(&args[0]) {
+    let (command, flag_args) = if args[0] == "design" {
+        match design_command(&args) {
+            Ok(v) => v,
+            Err(e) => { eprintln!("{e}"); return ExitCode::from(EXIT_USAGE); }
+        }    } else { match shortcut(&args[0]) {
         Some(cmd) => {
             // `ags prelaunch` y `ags prelaunch list` son lo mismo. Escribir la accion
             // igual es lo natural para quien viene de `ags account list`, y sin esto
@@ -291,6 +304,7 @@ fn main() -> ExitCode {
             }
             (format!("{}.{}", args[0], args[1]), &args[2..])
         }
+    }
     };
 
     let parsed = match parse_flags(flag_args, positionals(&command)) {
@@ -314,6 +328,13 @@ fn main() -> ExitCode {
 
     // Quién pregunta: la app le pone `ADE_TAB_ID` a cada terminal. Sin eso, la regla de
     // "solo a los conectados" no tendría contra qué comparar.
+    let parsed = if command.starts_with("design.") {
+        let cwd = match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(e) => { eprintln!("{e}"); return ExitCode::from(EXIT_USAGE); }
+        };
+        design_defaults(&command, parsed, &cwd)
+    } else { parsed };
     let parsed = with_caller(&command, parsed);
 
     match send(&command, parsed) {
@@ -355,7 +376,7 @@ impl CliError {
 
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    const GROUPS: [&str; 11] = ["peer.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory."];
+    const GROUPS: [&str; 12] = ["peer.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design."];
     if !GROUPS.iter().any(|g| command.starts_with(g)) || parsed.get("from").is_some() {
         return parsed;
     }
@@ -389,6 +410,34 @@ fn shortcut(word: &str) -> Option<&'static str> {
     }
 }
 
+/// Design has nested page/artboard commands as well as direct actions.
+fn design_defaults(command: &str, mut args: Value, cwd: &std::path::Path) -> Value {
+    if command == "design.create" && args.get("workspace").is_none() {
+        args["workspace"] = json!(cwd.to_string_lossy());
+    }
+    if matches!(command, "design.comment" | "design.comment.add") && args.get("author").is_none() {
+        args["author"] = json!("agent");
+    }
+    if command == "design.artboard.add" && args.get("page").is_some() && args.get("designId").is_none() {
+        if let Some(id) = args.as_object_mut().and_then(|a| a.remove("pageId")) {
+            args["designId"] = id;
+        }
+    }
+    args
+}
+
+fn design_command(args: &[String]) -> Result<(String, &[String]), String> {
+    let action = args.get(1).ok_or("Missing design action")?;
+    let nested = matches!(action.as_str(), "page" | "artboard")
+        || (action == "comment" && args.get(2).is_some_and(|v| matches!(v.as_str(), "add" | "resolve")))
+        || (action == "approve" && args.get(2).is_some_and(|v| v == "all"));
+    if nested {
+        let sub = args.get(2).ok_or("Missing design subcommand")?;
+        Ok((format!("design.{action}.{sub}"), &args[3..]))
+    } else {
+        Ok((format!("design.{action}"), &args[2..]))
+    }
+}
 /// Argumentos que se pueden escribir sueltos, en orden, sin su flag.
 ///
 /// `ags skill install git-helper` en vez de `--skill git-helper`. Solo se declara acá lo
@@ -396,6 +445,13 @@ fn shortcut(word: &str) -> Option<&'static str> {
 /// valor suelto, es mejor exigir el flag que adivinar mal.
 fn positionals(command: &str) -> &'static [&'static str] {
     match command {
+        "design.create" => &["title"],
+        "design.get" | "design.approve.all" => &["designId"],
+        "design.page.add" => &["designId", "name"],
+        "design.artboard.add" => &["pageId", "title"],
+        "design.update" | "design.artboard.update" | "design.revert" | "design.artboard.revert" | "design.approve" | "design.artboard.approve" | "design.reject" | "design.artboard.reject" => &["artboardId"],
+        "design.comment" | "design.comment.add" => &["artboardId", "text"],
+        "design.comment.resolve" => &["commentId"],
         "skill.install" => &["skill"],
         "skill.show" | "skill.edit" => &["skill"],
         // `ags skill new mi-skill` en vez de `--name mi-skill`.

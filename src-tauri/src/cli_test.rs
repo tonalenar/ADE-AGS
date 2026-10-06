@@ -345,3 +345,39 @@ fn mission_test_flag_is_an_explicit_boolean() {
     assert_eq!(parsed["test"], true);
     assert!(flags(&["--title", "E2E test"]).get("test").is_none());
 }
+
+#[test]
+fn design_nested_commands_keep_ids_and_html_flags() {
+    for (words, expected, key, id) in [
+        (vec!["design","page","add","d1","Page 1"],"design.page.add","designId","d1"),
+        (vec!["design","artboard","add","p1","Home","--html","<h1>Home</h1>"],"design.artboard.add","pageId","p1"),
+        (vec!["design","update","b1","--expected-version","2","--html","new"],"design.update","artboardId","b1"),
+        (vec!["design","comment","b1","change","--author","user"],"design.comment","artboardId","b1"),
+        (vec!["design","comment","resolve","c1"],"design.comment.resolve","commentId","c1"),
+        (vec!["design","approve","all","d1"],"design.approve.all","designId","d1"),
+    ] {
+        let args=words.iter().map(|v|v.to_string()).collect::<Vec<_>>();
+        let (command,rest)=design_command(&args).unwrap();
+        assert_eq!(command,expected);
+        assert_eq!(parse_flags(rest,positionals(&command)).unwrap()[key],id);
+    }
+    assert!(design_command(&["design".into()]).is_err());
+    assert!(design_command(&["design".into(),"page".into()]).is_err());
+}
+
+#[test]
+fn design_cli_defaults_use_callers_cwd_and_agent_author() {
+    let cwd=std::path::Path::new("/caller/project");
+    let a=design_defaults("design.create",json!({"title":"Home"}),cwd);
+    assert_eq!(a["workspace"],"/caller/project");
+    let a=design_defaults("design.create",json!({"title":"Home","workspace":"explicit"}),cwd);
+    assert_eq!(a["workspace"],"explicit");
+    let a=design_defaults("design.comment",json!({"artboardId":"b1","text":"Change"}),cwd);
+    assert_eq!(a["author"],"agent");
+    let a=design_defaults("design.comment.add",json!({"author":"user"}),cwd);
+    assert_eq!(a["author"],"user");
+    let a=design_defaults("design.artboard.add",parse("design.artboard.add",&["d1","Home","--page","Page 1"]).unwrap(),cwd);
+    assert_eq!(a["designId"],"d1");assert_eq!(a["page"],"Page 1");assert!(a.get("pageId").is_none());
+    let a=design_defaults("design.artboard.add",parse("design.artboard.add",&["p1","Home"]).unwrap(),cwd);
+    assert_eq!(a["pageId"],"p1");assert!(a.get("designId").is_none());
+}
