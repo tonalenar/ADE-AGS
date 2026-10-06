@@ -72,13 +72,18 @@ export function useReducedMotion(): boolean {
 
 let pauseInstalled = false;
 /** Un solo oyente para todas las pestañas: con la ventana oculta se pausan las animaciones. */
-function installPauseOnHidden(): void {
+export function installPauseOnHidden(): void {
   if (pauseInstalled || typeof document === "undefined") return;
   pauseInstalled = true;
   const apply = () => { document.documentElement.dataset.agsHidden = document.visibilityState === "hidden" ? "1" : "0"; };
   document.addEventListener("visibilitychange", apply);
   apply();
 }
+
+export function resetPauseInstalledForTesting(): void {
+  pauseInstalled = false;
+}
+
 
 export function MissionTabIndicator({ state, workingCount }: { state: MissionIndicatorState; workingCount: number }) {
   const { t } = useTranslation();
