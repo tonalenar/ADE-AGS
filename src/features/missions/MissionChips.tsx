@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 
 import { deriveMissionIndicator } from "@/features/tabs/missionIndicator";
 import { MissionTabIndicator } from "@/features/tabs/MissionTabIndicator";
-import { useMissionSignals } from "@/features/tabs/useMissionSignals";
+import { useMissionIndicatorSignals } from "@/features/tabs/useMissionIndicatorSignals";
 import { useTabsStore } from "@/features/tabs/store";
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { Button } from "neogestify-ui-components";
@@ -13,6 +13,11 @@ import { closeMissionNeedsConfirm, openFree, openMission, tabsByMission, useActi
 import { useMissionsStore } from "./store";
 
 const CHIP = `cc-t shrink-0 flex items-center gap-1.5 h-6 px-2.5 rounded-md text-[11.5px] font-medium whitespace-nowrap`;
+
+function ChipIndicator({ missionId }: { missionId: string }) {
+  const signals = useMissionIndicatorSignals(missionId);
+  return <MissionTabIndicator {...deriveMissionIndicator(signals)} />;
+}
 
 /**
  * La parte de arriba de la barra: una pestaña por misión con terminales abiertas, y "todas"
@@ -35,7 +40,6 @@ export function MissionChips() {
     if (closeMissionNeedsConfirm(missions.find((m) => m.id === id)?.status)) setClosing(id);
     else closeMission(id);
   };
-  const signals = useMissionSignals(index, useMemo(() => missions.map((m) => m.id), [missions]));
   const closingMission = missions.find((m) => m.id === closing);
 
   // Solo las que tienen terminales abiertas: una misión sin pestañas no tiene qué mostrar acá.
@@ -59,7 +63,7 @@ export function MissionChips() {
         <div key={m.id} className={`group/chip ${CHIP} ${style(group === m.id)} pr-1`}>
           <button type="button" className="flex items-center gap-1.5 h-full" title={m.objective}
             onClick={() => { if (openMission(m.id)) navigate("/workspace"); }}>
-            <MissionTabIndicator {...deriveMissionIndicator({ status: m.status, ...(signals[m.id] ?? { workingAgents: 0, needsAttention: false }) })} />
+            <ChipIndicator missionId={m.id} />
             <span className="max-w-40 truncate">{m.title}</span>
             <span className="text-[10px] tabular-nums opacity-60">{open[m.id]?.length}</span>
           </button>
