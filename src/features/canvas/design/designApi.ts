@@ -84,6 +84,8 @@ export const designApi = {
   /** Volta ao conteúdo de uma versão anterior (gera uma versão nova, em rascunho). */
   revert: (artboardId: string, version: number, expectedVersion?: number) =>
     call<RawDesign>("design_artboard_revert", { artboardId, version, expectedVersion }),
+  /** Exclui o design inteiro (páginas, pranchetas, versões e comentários). */
+  remove: (designId: string) => call<unknown>("design_delete", { designId }),
   approve: (artboardId: string) => call<RawDesign>("design_artboard_approve", { artboardId }),
   reject: (artboardId: string) => call<RawDesign>("design_artboard_reject", { artboardId }),
   approveAll: (designId: string) => call<RawDesign>("design_approve_all", { designId }),

@@ -36,8 +36,19 @@ import { useUiStore } from "@/app/uiStore";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ChatPanel } from "./ChatPanel";
 import { DesignPanel } from "./design/DesignPanel";
+import { chooseOnBoard } from "./design/chooseProposal";
+import { designApi, type Artboard } from "./design/designApi";
+import {
+  BOARD_NODE_PREFIX, DesignBoardNode, DesignFrameNode, DesignActionsContext, FRAME_NODE_PREFIX, isDesignNodeId,
+  type DesignActions, type DesignBoardFlowNode, type DesignFrameFlowNode,
+} from "./design/DesignNodes";
+import { resolveOwner } from "./design/owner";
+import { freeOrigin, layoutGroups, positionsToSave } from "./design/scope";
+import { useScopedDesigns } from "./design/useScopedDesigns";
+import { useCliOutdatedNotice } from "./cliStatus";
+import { useMissionIndex } from "@/features/missions/groups";
 import { RoutinesPanel } from "./RoutinesPanel";
-import { boardKeyOfTab, canvasActions, useActiveBoardKey, useCanvasStore } from "./store";
+import { boardKeyOfTab, canvasActions, missionOfKey, useActiveBoardKey, useCanvasStore } from "./store";
 import { cleanPreviewLines } from "./previewText";
 
 interface AgentNodeData extends Record<string, unknown> {
@@ -73,7 +84,7 @@ interface PortalNodeData extends Record<string, unknown> {
 }
 
 type PortalFlowNode = Node<PortalNodeData, "portal">;
-type FlowNode = AgentFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode | FolderFlowNode;
+type FlowNode = AgentFlowNode | NoteFlowNode | PortalFlowNode | TextFlowNode | ImageFlowNode | FolderFlowNode | DesignBoardFlowNode | DesignFrameFlowNode;
 
 // El navegador pesa más de un megabyte: se baja con el primer portal, no con el canvas.
 const BrowserTab = lazy(() => import("@/features/browser/BrowserTab").then((m) => ({ default: m.BrowserTab })));
@@ -328,10 +339,75 @@ function CanvasInner() {
   const noteNodes = useStable(rawNoteNodes, noteSig);
   const portalNodes = useStable(rawPortalNodes, portalSig);
 
+  // Las pranchetas de diseño de este canvas: nodos en una zona libre, a la derecha de lo que ya hay.
+  const ownerTabs = useMemo(() => allTabs.map((tab) => ({ id: tab.id, title: tab.title })), [allTabs]);
+  const missionIndex = useMissionIndex();
+  useCliOutdatedNotice();
+  const design = useScopedDesigns({ cwd: portalCwd || null, missionId: missionOfKey(key) });
+  const boardRef = useRef(board);
+  boardRef.current = board;
+  // El origen se fija al aparecer los diseños: si siguiera a las terminales, la zona saltaría al arrastrar una.
+  const designOrigin = useMemo(() => freeOrigin(boardRef.current),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [key, design.details.length]);
+  const groups = useMemo(() => layoutGroups(design.details, designOrigin), [design.details, designOrigin]);
+  // Posición mientras se arrastra una prancheta (se graba al soltar).
+  const [dragPos, setDragPos] = useState<Record<string, { x: number; y: number }>>({});
+  const designNodes = useMemo<FlowNode[]>(() => groups.flatMap((g) => {
+    const detail = design.details.find((d) => d.design.id === g.designId);
+    const frame: DesignFrameFlowNode = {
+      id: FRAME_NODE_PREFIX + g.key, type: "designFrame", position: { x: g.frame.x, y: g.frame.y }, zIndex: -1,
+      draggable: false, selectable: false, focusable: false, deletable: false,
+      data: { title: t("canvas.design.frame", { name: g.title }), w: g.frame.w, h: g.frame.h },
+    };
+    const boards = g.boards.map((p): DesignBoardFlowNode => ({
+      id: BOARD_NODE_PREFIX + p.board.id, type: "designBoard", position: dragPos[p.board.id] ?? { x: p.x, y: p.y },
+      dragHandle: ".ade-node-drag", deletable: false, selectable: false, connectable: false,
+      data: { board: p.board, comments: detail?.comments.filter((c) => c.artboardId === p.board.id && !c.resolved).length ?? 0, groupKey: g.key },
+    }));
+    return [frame, ...boards];
+  }), [groups, dragPos, design.details, t]);
+
   const nodes: FlowNode[] = useMemo(
-    () => [...imageNodes, ...folderNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...textNodes],
-    [imageNodes, folderNodes, noteNodes, portalNodes, agentNodes, textNodes],
+    () => [...designNodes, ...imageNodes, ...folderNodes, ...noteNodes, ...portalNodes, ...agentNodes, ...textNodes],
+    [designNodes, imageNodes, folderNodes, noteNodes, portalNodes, agentNodes, textNodes],
   );
+
+  // El modo de foco (solo el diseño) y a qué abre: el aviso, el botón EDITAR de un nodo o el último diseño.
+  const [designFocus, setDesignFocus] = useState<{ designId?: string; editBoardId?: string } | null>(null);
+  const openFocus = (initial: { designId?: string; editBoardId?: string } | null) => {
+    design.markSeen();
+    setDesignFocus(initial ?? {});
+    setPanel("design");
+  };
+  const designActions = useMemo<DesignActions>(() => {
+    const fail = (e: unknown) => AlertaToast(t("canvas.design.title"), String(e), "error", 6000);
+    const run = (p: Promise<unknown>) => p.then(() => design.reload()).catch(fail);
+    const designOf = (b: Artboard) => design.details.find((d) => d.artboards.some((a) => a.id === b.id));
+    return {
+      editing: null,
+      onEdit: (b) => openFocus({ designId: designOf(b)?.design.id, editBoardId: b.id }),
+      onApprove: (b) => void run(designApi.approve(b.id)),
+      onReject: (b) => void run(designApi.reject(b.id)),
+      onChoose: (b, pick) => {
+        const d = designOf(b);
+        if (d) void chooseOnBoard({ t, board: b, design: d.design, owner: resolveOwner(d.design, ownerTabs, missionIndex), pick, reload: design.reload });
+      },
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [design.details, design.reload, ownerTabs, missionIndex, t]);
+  /** Al soltar una prancheta: graba x/y (relativos a su página) y las hermanas que estaban apiladas. */
+  const onDesignDragStop = (_: unknown, node: Node) => {
+    if (!node.id.startsWith(BOARD_NODE_PREFIX)) return;
+    const id = node.id.slice(BOARD_NODE_PREFIX.length);
+    const group = groups.find((g) => g.boards.some((b) => b.board.id === id));
+    if (!group) return;
+    const saves = positionsToSave(group, id, node.position.x, node.position.y);
+    Promise.all(saves.map((p) => designApi.updateArtboard(p.id, { x: p.x, y: p.y })))
+      .then(() => design.reload())
+      .catch((e) => AlertaToast(t("canvas.design.title"), String(e), "error", 6000))
+      .finally(() => setDragPos({}));
+  };
 
   // Una conexión con un agente de otro piso no tiene punta en este canvas: no se dibuja.
   // La punta en una nota tapada se dibuja en la del frente de su pila.
@@ -354,6 +430,13 @@ function CanvasInner() {
   const onNodesChange = (changes: NodeChange<FlowNode>[]) => {
     if (!key) return;
     for (const c of changes) {
+      if ("id" in c && isDesignNodeId(c.id)) {
+        if (c.type === "position" && c.position && c.id.startsWith(BOARD_NODE_PREFIX)) {
+          const pos = c.position;
+          setDragPos((cur) => ({ ...cur, [c.id.slice(BOARD_NODE_PREFIX.length)]: pos }));
+        }
+        continue;
+      }
       if (c.type === "position" && c.position) {
         canvasActions.moveNode(key, c.id, { x: Math.round(c.position.x), y: Math.round(c.position.y) });
       } else if (c.type === "dimensions" && c.resizing && c.dimensions) {
@@ -477,12 +560,14 @@ function CanvasInner() {
       style={{ cursor: tool === "draw" ? "crosshair" : undefined }}
       onPointerDownCapture={onDrawDown} onPointerMoveCapture={onDrawMove} onPointerUpCapture={onDrawUp}
       onPointerCancelCapture={onDrawUp}>
+      <DesignActionsContext.Provider value={designActions}>
       <ReactFlow<FlowNode, Edge>
         nodes={nodes}
         edges={edges}
         nodeTypes={NODE_TYPES}
         edgeTypes={EDGE_TYPES}
         onNodesChange={onNodesChange}
+        onNodeDragStop={onDesignDragStop}
         onEdgesChange={onEdgesChange}
         onConnect={onConnect}
         connectionMode={ConnectionMode.Loose}
@@ -505,6 +590,7 @@ function CanvasInner() {
         <DrawingLayer strokes={board.drawings} live={liveStroke} erasing={tool === "erase"}
           onErase={(id) => key && canvasActions.removeStroke(key, id)} />
       </ReactFlow>
+      </DesignActionsContext.Provider>
       <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
         <CanvasToolbar
           tool={tool} onTool={setTool} style={drawStyle} onStyle={setDrawStyle}
@@ -513,7 +599,20 @@ function CanvasInner() {
           onImage={() => fileInput.current?.click()} onFolder={() => void addFolderHere()}
           onUndo={() => key && canvasActions.undoStroke(key)} canUndo={board.drawings.length > 0} />
         {panel === "routines" && <RoutinesPanel onClose={() => setPanel(null)} />}
-        {panel === "design" && <DesignPanel onClose={() => setPanel(null)} />}
+        {panel === "design" && design.details.length > 0 && (
+          <DesignPanel details={design.details} reload={design.reload} initial={designFocus} onClose={() => { setPanel(null); setDesignFocus(null); }} />
+        )}
+        {design.notice && (
+          <div role="status" className="pointer-events-auto absolute right-3 bottom-16 flex items-center gap-2 rounded-lg border border-accent-500/40
+            bg-white/95 dark:bg-surface-raised/95 shadow-lg px-3 py-2 text-[12.5px] text-gray-800 dark:text-gray-100">
+            <span>{t("canvas.design.newDesign", { title: design.notice.title })}</span>
+            <Button variant="custom" className="cc-t h-7 px-2.5 rounded-md bg-accent-500/15 text-accent-600 dark:text-accent-300 text-[11.5px] font-medium"
+              onClick={() => openFocus({ designId: design.notice?.id })}>{t("canvas.design.open")}</Button>
+            <Button variant="custom" onClick={design.dismissNotice} aria-label={t("canvas.design.close")} className="cc-t w-6 h-6 flex items-center justify-center text-gray-400">
+              <CloseIcon className="w-3 h-3" />
+            </Button>
+          </div>
+        )}
         {panel === "chat" && <ChatPanel onClose={() => setPanel(null)} />}
         {/* Con la columna de workspaces abierta, el pet vive ahí; plegada, viene al canvas. */}
         {workspacesCollapsed && <PetCard pet={pet} className="pointer-events-auto absolute left-3 bottom-3" />}
@@ -524,7 +623,8 @@ function CanvasInner() {
           e.target.value = "";
           if (file) void addImageFrom(file);
         }} />
-      <CanvasDock zoom={vp.zoom} panel={panel} onTogglePanel={(p) => setPanel((cur) => (cur === p ? null : p))} onOpenChat={() => setPanel("chat")}
+      <CanvasDock zoom={vp.zoom} panel={panel} onTogglePanel={(p) => (p === "design" ? (panel === "design" ? (setPanel(null), setDesignFocus(null)) : openFocus(null)) : setPanel((cur) => (cur === p ? null : p)))}
+        hasDesign={design.details.length > 0} designUnseen={design.unseen} onOpenChat={() => setPanel("chat")}
         petPercent={Math.round(pet.progress * 100)}
         onFit={() => rf.fitView({ padding: 0.12, maxZoom: 1, duration: 220 })}
         onReset={() => {
@@ -963,5 +1063,5 @@ const PortalOrDevice = memo(function PortalOrDevice(props: NodeProps<PortalFlowN
     : <PortalNode {...props} />;
 });
 
-const NODE_TYPES = { agent: AgentNode, note: NoteNode, portal: PortalOrDevice, text: TextNode, image: ImageNode, folder: FolderNode };
+const NODE_TYPES = { designBoard: DesignBoardNode, designFrame: DesignFrameNode, agent: AgentNode, note: NoteNode, portal: PortalOrDevice, text: TextNode, image: ImageNode, folder: FolderNode };
 const EDGE_TYPES = { link: LinkEdge };
