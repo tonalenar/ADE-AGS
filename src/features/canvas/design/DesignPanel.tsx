@@ -85,6 +85,24 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
   };
 
   const run = (p: Promise<unknown>) => p.then(loadDetail).catch(fail);
+  /** O usuario clicou na proposta que escolhe numa prancheta com varias: registra, aprova e avisa o dono. */
+  const choose = async (board: Artboard, pick: { selector: string; text: string }) => {
+    const what = pick.text || pick.selector;
+    try {
+      await designApi.addComment(board.id, t("canvas.design.chosenComment", { what }), pick.selector);
+      await designApi.approve(board.id);
+      await loadDetail();
+      const owner = detail?.design.ownerTabId;
+      if (owner) {
+        await designApi.tellOwner(owner, `Design "${detail?.design.title}": o usuário ESCOLHEU na prancheta "${board.title}" (id ${board.id}) a proposta "${what}" [${pick.selector}]. A prancheta foi APROVADA com essa escolha: construa SOMENTE essa proposta (as outras estão descartadas).`);
+        AlertaToast(t("canvas.design.title"), t("canvas.design.chosen", { what }), "success", 4000);
+      } else {
+        AlertaToast(t("canvas.design.title"), t("canvas.design.noOwner"), "error", 6000);
+      }
+    } catch (e) {
+      fail(e);
+    }
+  };
   const sendQueue = async () => {
     if (!detail || queue.length === 0) return;
     const owner = detail.design.ownerTabId;
@@ -169,7 +187,8 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
               <BoardView key={b.id} board={b} active={editing === b.id}
                 comments={(detail?.comments ?? []).filter((c) => c.artboardId === b.id && !c.resolved).length}
                 onEdit={() => setEditing(editing === b.id ? null : b.id)}
-                onApprove={() => run(designApi.approve(b.id))} onReject={() => run(designApi.reject(b.id))} />
+                onApprove={() => run(designApi.approve(b.id))} onReject={() => run(designApi.reject(b.id))}
+                onChoose={(pick) => choose(b, pick)} />
             ))}
           </div>
 
@@ -191,11 +210,27 @@ export function DesignPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-function BoardView({ board, active, comments, onEdit, onApprove, onReject }: {
+function BoardView({ board, active, comments, onEdit, onApprove, onReject, onChoose }: {
   board: Artboard; active: boolean; comments: number; onEdit: () => void; onApprove: () => void; onReject: () => void;
+  onChoose: (pick: { selector: string; text: string }) => void;
 }) {
   const { t } = useTranslation();
-  const srcDoc = useMemo(() => buildSrcdoc(board.html), [board.html]);
+  const [choosing, setChoosing] = useState(false);
+  const frame = useRef<HTMLIFrameElement>(null);
+  const srcDoc = useMemo(() => buildSrcdoc(board.html, { chooser: choosing }), [board.html, choosing]);
+  // Só se aceita a escolha vinda do iframe desta prancheta (o conteúdo é hostil).
+  useEffect(() => {
+    if (!choosing) return;
+    const onMsg = (e: MessageEvent) => {
+      if (e.source !== frame.current?.contentWindow) return;
+      const pick = parsePick(e.data);
+      if (!pick) return;
+      setChoosing(false);
+      onChoose(pick);
+    };
+    window.addEventListener("message", onMsg);
+    return () => window.removeEventListener("message", onMsg);
+  }, [choosing, onChoose]);
   return (
     <div className="absolute" style={{ left: board.x, top: board.y, width: board.width }}>
       <div className="flex items-center gap-1.5 h-7 text-[12px]">
@@ -204,11 +239,14 @@ function BoardView({ board, active, comments, onEdit, onApprove, onReject }: {
         <span className="text-[10px] text-gray-400">v{board.version}</span>
         {comments > 0 && <span className="text-[10px] text-accent-600 dark:text-accent-300">💬 {comments}</span>}
         <span className="flex-1" />
+        <Button variant="custom" className={`${btn} ${choosing ? "bg-orange-500/20 text-orange-600 dark:text-orange-300" : ""}`} onClick={() => setChoosing((v) => !v)}>
+          {choosing ? t("canvas.design.choosing") : t("canvas.design.choose")}
+        </Button>
         <Button variant="custom" className={`${btn} ${active ? "bg-accent-500/15 text-accent-600 dark:text-accent-300" : ""}`} onClick={onEdit}>{t("canvas.design.edit")}</Button>
         <Button variant="custom" className={btn} disabled={board.status === "approved"} onClick={onApprove}>{t("canvas.design.approve")}</Button>
         <Button variant="custom" className={btn} disabled={board.status === "rejected"} onClick={onReject}>{t("canvas.design.reject")}</Button>
       </div>
-      <iframe title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc} referrerPolicy="no-referrer"
+      <iframe ref={frame} title={board.title} sandbox={DESIGN_SANDBOX} srcDoc={srcDoc} referrerPolicy="no-referrer"
         className={`block bg-white rounded-sm shadow-md border-0 ${board.status === "rejected" ? "opacity-50" : ""}`}
         style={{ width: board.width, height: board.height }} />
     </div>

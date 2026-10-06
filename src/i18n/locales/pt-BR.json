@@ -2271,5 +2271,9 @@
   "memoryReview.flag.highValue": "alto valor",
   "memoryReview.actor.user": "você",
   "memoryReview.actor.lead": "líder",
-  "memoryReview.actor.worker": "agente"
+  "memoryReview.actor.worker": "agente",
+  "canvas.design.choose": "Escolher",
+  "canvas.design.choosing": "Clique na proposta…",
+  "canvas.design.chosen": "Escolhida: {{what}}",
+  "canvas.design.chosenComment": "ESCOLHIDA: {{what}}"
 }

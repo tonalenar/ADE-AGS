@@ -33,17 +33,58 @@ document.addEventListener("click",function(e){
 },true);
 })();`;
 
+/**
+ * Script do modo ESCOLHER: o usuario clica numa proposta (um cartao dentro de uma prancheta com varias).
+ * Sobe do elemento clicado ate o primeiro bloco "repetido" (irmaos da mesma tag, tamanho de cartao) e
+ * manda o seletor e o texto dele.
+ */
+export const CHOOSER_SCRIPT = `(function(){
+var last=null;
+function unit(el){
+  var n=el;
+  while(n&&n.parentElement&&n.tagName!=="BODY"&&n.tagName!=="HTML"){
+    var p=n.parentElement,same=0;
+    for(var i=0;i<p.children.length;i++){if(p.children[i].tagName===n.tagName)same++;}
+    var r=n.getBoundingClientRect();
+    if(same>=2&&p.children.length<=12&&r.width>=120&&r.height>=80)return n;
+    n=p;
+  }
+  return el;
+}
+function sel(el){
+  var parts=[];
+  while(el&&el.nodeType===1&&el.tagName!=="HTML"){
+    var p=el.tagName.toLowerCase();
+    if(el.id){parts.unshift(p+"#"+el.id);break;}
+    var i=1,s=el;while((s=s.previousElementSibling)){if(s.tagName===el.tagName)i++;}
+    parts.unshift(p+":nth-of-type("+i+")");
+    el=el.parentElement;
+  }
+  return parts.join(" > ");
+}
+document.addEventListener("mouseover",function(e){
+  if(last)last.style.outline="";
+  last=unit(e.target);last.style.outline="3px solid #ff8a3d";last.style.cursor="pointer";
+},true);
+document.addEventListener("click",function(e){
+  e.preventDefault();e.stopPropagation();
+  var t=unit(e.target);
+  var first=((t.innerText||t.textContent||"").split(/\\n/).map(function(l){return l.trim();}).filter(Boolean)[0]||"").slice(0,80);
+  parent.postMessage({type:"${PICK_MESSAGE}",selector:sel(t),text:first},"*");
+},true);
+})();`;
+
 /** Remove `<meta http-equiv>` e `<base>` do conteúdo: não podem afrouxar a CSP nem redirecionar. */
 function stripUnsafeHead(html: string): string {
   return html.replace(/<meta\b[^>]*http-equiv[^>]*>/gi, "").replace(/<base\b[^>]*>/gi, "");
 }
 
-export interface SrcdocOptions { picker?: boolean }
+export interface SrcdocOptions { picker?: boolean; chooser?: boolean }
 
 /** Monta o `srcdoc` do iframe: CSP primeiro, depois o HTML do agente, e o seletor se for modo EDIT. */
 export function buildSrcdoc(html: string, opts: SrcdocOptions = {}): string {
   const meta = `<meta http-equiv="Content-Security-Policy" content="${DESIGN_CSP}">`;
-  const picker = opts.picker ? `<script>${PICKER_SCRIPT}</script>` : "";
+  const picker = opts.picker ? `<script>${PICKER_SCRIPT}</script>` : opts.chooser ? `<script>${CHOOSER_SCRIPT}</script>` : "";
   return `<!doctype html><html><head><meta charset="utf-8">${meta}<style>html,body{margin:0}</style></head><body>${stripUnsafeHead(html)}${picker}</body></html>`;
 }
 

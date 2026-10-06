@@ -24,3 +24,25 @@ describe("spreadOverlapping", () => {
     expect(spreadOverlapping(one)).toBe(one);
   });
 });
+
+import { CHOOSER_SCRIPT, PICKER_SCRIPT, PICK_MESSAGE, buildSrcdoc, parsePick } from "../srcdoc";
+
+describe("modo ESCOLHER (proposta dentro de uma prancheta)", () => {
+  it("só injeta o script de escolha quando pedido, e nunca junto do seletor do EDIT", () => {
+    expect(buildSrcdoc("<p>x</p>")).not.toContain(CHOOSER_SCRIPT);
+    const chooser = buildSrcdoc("<p>x</p>", { chooser: true });
+    expect(chooser).toContain(CHOOSER_SCRIPT);
+    expect(chooser).not.toContain(PICKER_SCRIPT);
+    expect(buildSrcdoc("<p>x</p>", { picker: true })).not.toContain(CHOOSER_SCRIPT);
+  });
+
+  it("a CSP continua cortando a rede no modo escolher", () => {
+    expect(buildSrcdoc("<p>x</p>", { chooser: true })).toContain("default-src 'none'");
+  });
+
+  it("o script manda a escolha pela mesma mensagem validada pelo app", () => {
+    expect(CHOOSER_SCRIPT).toContain(PICK_MESSAGE);
+    expect(parsePick({ type: PICK_MESSAGE, selector: "body > div:nth-of-type(1)", text: "C · Arcade" })).toEqual({ selector: "body > div:nth-of-type(1)", text: "C · Arcade" });
+    expect(parsePick({ type: "outra", selector: "x" })).toBeNull();
+  });
+});
