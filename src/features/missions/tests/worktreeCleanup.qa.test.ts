@@ -63,7 +63,9 @@ export function inspectWorktree(repoRoot: string, worktreePath: string, masterBr
   const uncommittedFiles = statusOut
     .split("\0")
     .filter((entry) => entry.length > 3)
-    .map((entry) => entry.slice(3));
+    .map((entry) => entry.slice(3))
+    // O link node_modules do worktree (junction/symlink) não conta como alteração: o projeto o ignora.
+    .filter((file) => file !== "node_modules");
 
   let commitsAheadOfMaster = 0;
   try {
