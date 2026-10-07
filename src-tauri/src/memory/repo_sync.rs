@@ -1446,6 +1446,8 @@ mod tests {
         assert!(archive.contains("neighbor stays in the race"), "{archive}");
     }
 
+    // Usa symlink Unix para forçar a falha da reescrita; no Windows criar symlink exige privilégio.
+    #[cfg(unix)]
     #[test]
     fn purge_resumes_the_worker_when_the_rewrite_fails() {
         let db = fixture();

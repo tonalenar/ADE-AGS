@@ -117,8 +117,9 @@ fn exchange_credential(endpoint: &str, payload: &str, timeout: Duration) -> Resu
     // `File` não tem timeout de leitura. A thread só existe para não deixar
     // a CLI presa se a app aceitar o pipe e não responder.
     let (tx, rx) = std::sync::mpsc::channel();
+    let payload = payload.to_owned();
     std::thread::spawn(move || {
-        let _ = tx.send(write_and_read(file, payload));
+        let _ = tx.send(write_and_read(file, &payload));
     });
     match rx.recv_timeout(timeout) {
         Ok(result) => result,
@@ -149,8 +150,11 @@ pub(super) fn start_credential_server(
     }
     #[cfg(windows)]
     {
-        let first = create_pipe(&endpoint)?;
-        std::thread::spawn(move || accept_windows(first, endpoint, app, token, open));
+        // HANDLE é `*mut c_void` (não é Send): atravessa a thread como inteiro e volta lá dentro.
+        let first = create_pipe(&endpoint)? as usize;
+        std::thread::spawn(move || {
+            accept_windows(first as windows_sys::Win32::Foundation::HANDLE, endpoint, app, token, open)
+        });
         Ok(())
     }
     #[cfg(not(any(unix, windows)))]
@@ -217,8 +221,9 @@ fn accept_unix(listener: std::os::unix::net::UnixListener, app: AppHandle, token
 #[cfg(windows)]
 fn create_pipe(endpoint: &str) -> Result<windows_sys::Win32::Foundation::HANDLE, String> {
     use windows_sys::Win32::Foundation::INVALID_HANDLE_VALUE;
+    use windows_sys::Win32::Storage::FileSystem::PIPE_ACCESS_DUPLEX;
     use windows_sys::Win32::System::Pipes::{
-        CreateNamedPipeW, PIPE_ACCESS_DUPLEX, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE,
+        CreateNamedPipeW, PIPE_READMODE_BYTE, PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_BYTE,
         PIPE_UNLIMITED_INSTANCES, PIPE_WAIT,
     };
     let wide: Vec<u16> = endpoint.encode_utf16().chain(std::iter::once(0)).collect();
