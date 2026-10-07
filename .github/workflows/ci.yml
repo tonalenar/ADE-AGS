@@ -5,10 +5,8 @@
 # - `test` (Linux): corre los tests de verdad (tsc, babel, vitest y `cargo test`).
 # - `check-windows`: solo `cargo check`, que compila también el código con gate
 #   `#[cfg(windows)]` y los tests (sin correrlos). No se corren los tests en Windows porque
-#   suman unos 4 min al job y hoy fallan 2 tests solo en Windows, que dejarían el job rojo:
-#   `ipc::test::un_symlink_que_apunta_a_otro_lado_no_cuenta_como_instalado` y
-#   `missions::cleanup::tests::listing_and_prune_preserve_orphans_and_active_then_clean_closed`.
-#   Los tests con gate `#[cfg(windows)]` se siguen corriendo a mano en Windows.
+#   suman unos 4 min al job (el check con cache tarda ~1m40s). Los tests con gate
+#   `#[cfg(windows)]` se siguen corriendo a mano en Windows.
 
 name: ci
 

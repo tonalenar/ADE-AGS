@@ -246,7 +246,11 @@ fn un_symlink_que_apunta_a_otro_lado_no_cuenta_como_instalado() {
     match symlink::symlink_file(&old, &link) {
         Ok(()) => {
             assert!(!is_installed(&link, Some(&current)));
-            let _ = symlink::remove_symlink_auto(&link);
+            // No `remove_symlink_auto`: en Windows el crate `symlink` abre el link sin
+            // FILE_FLAG_OPEN_REPARSE_POINT, ve el archivo destino (no un reparse point) y
+            // devuelve InvalidInput "path is not a symlink". Este link es de archivo, así
+            // que `remove_file` lo quita en todas las plataformas.
+            std::fs::remove_file(&link).unwrap();
             symlink::symlink_file(&current, &link).unwrap();
             assert!(is_installed(&link, Some(&current)));
         }

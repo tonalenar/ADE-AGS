@@ -126,12 +126,12 @@ jobs:
       # de dependencias otra vez para el host (los tests no pueden correr en la arquitectura
       # de destino), y lo que se testea es exactamente el mismo código.
       #
-      # Windows queda afuera, y no por comodidad: el binario de test de la lib no llega a
-      # arrancar (`STATUS_ENTRYPOINT_NOT_FOUND`, 0xc0000139). Es que linkea WebView2 y el
-      # ejecutable corre desde `target/debug/deps/`, donde el loader no está — un problema
-      # del arnés de tests en Windows, no del código: el BUILD de Windows sí pasa. Los tests
-      # con gate `#[cfg(windows)]` (los Job Objects de contención) quedan sin cubrir en CI y
-      # hay que correrlos a mano en Windows hasta que esto se resuelva.
+      # Windows queda afuera por tiempo, no porque no se pueda: el binario de test ya arranca
+      # en el runner (antes no, por `STATUS_ENTRYPOINT_NOT_FOUND`; lo resolvió el manifiesto
+      # que embute `build.rs`). Lo que rompe solo en Windows lo ataja antes, en cada PR, el
+      # job `check (windows)` de `ci.yml`, que compila el código `#[cfg(windows)]` y los
+      # tests sin correrlos. Los tests con gate `#[cfg(windows)]` (los Job Objects de
+      # contención) se siguen corriendo a mano en Windows.
       - name: Tests de Rust
         if: matrix.native && !startsWith(matrix.name, 'windows')
         run: cd src-tauri && cargo test
