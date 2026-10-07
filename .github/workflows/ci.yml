@@ -92,3 +92,10 @@ jobs:
       - name: cargo check
         working-directory: src-tauri
         run: cargo check --lib --bins --tests
+
+      # TEMPORARIO (descartavel/valida-cleanup): reproduzir/validar listing_and_prune no runner.
+      - name: TEMP teste cleanup
+        working-directory: src-tauri
+        run: |
+          echo "TEMP=$env:TEMP"
+          cargo test --lib --bin ags listing_and_prune_preserve
