@@ -92,7 +92,7 @@ fn cursor_survives_removing_an_earlier_item_and_filters_used_memory() {
     conn.execute("UPDATE memory_entries SET status='deleted',current_revision=NULL WHERE key='aa'",[]).unwrap();
     let next=list_for_owner(&conn,"w1",None,first.next_cursor.as_deref(),1).unwrap();assert_eq!(next.items[0].key,"decision");
     snapshot_run(&conn,"r1","w1",None).unwrap();
-    let filtered=list_filtered(&conn,"w1",None,None,32,&MemoryFilter{query:Some("second".into()),used:Some(true),kind:Some("note".into()),status:Some("active".into())}).unwrap();
+    let filtered=list_filtered(&conn,"w1",None,None,32,&MemoryFilter{query:Some("second".into()),used:Some(true),kind:Some("note".into()),status:Some("active".into()),..MemoryFilter::default()}).unwrap();
     assert_eq!(filtered.items.len(),1);assert_eq!(filtered.items[0].times_used,1);
 }
 
@@ -105,6 +105,59 @@ fn swarm_notes_are_bounded_untrusted_session_data_and_never_approved() {
     assert!(search::load_docs(&conn,"w1",Some("m1")).unwrap().is_empty());
     let secret=format!("{}{}", "password", "=do-not-share");assert!(lifecycle::swarm_write(&conn,"w1","m1","note",&secret).is_err());
     assert!(lifecycle::swarm_write(&conn,"w1","m1","note",&"x".repeat(4097)).is_err());
+}
+
+#[test]
+fn extended_filters_preserve_cursor_and_classification_without_writing() {
+    let conn=db(); seed_workspace(&conn,"w1"); seed_workspace(&conn,"w2"); seed_mission(&conn,"m1","w1");
+    activate(&conn,"workspace",None,"sqlite limite conexoes","sqlite usa 20 conexoes");
+    activate(&conn,"workspace",None,"sqlite limite conexao","sqlite nao usa 10 conexoes");
+    let a=propose(&conn,"workspace",None,"a sqlite limite conexoes","SQLITE USA 20 CONEXOES!","create",None);
+    let b=propose(&conn,"workspace",None,"b sqlite limite conexoes","SQLITE USA 20 CONEXOES!","create",None);
+    let rejected=propose(&conn,"workspace",None,"rejected","rejected body","create",None);
+    decide(&conn,&rejected.entry_id,rejected.revision,false).unwrap();
+    let mission=propose(&conn,"mission",Some("m1"),"sqlite limite conexoes","sqlite usa 20 conexoes","create",None);
+    let filter=MemoryFilter{status:Some("pending".into()),duplicate_of:Some(true),contradicts:Some(true),..MemoryFilter::default()};
+    let first=list_filtered(&conn,"w1",None,None,1,&filter).unwrap();
+    assert_eq!(first.items[0].id,a.entry_id); assert!(first.has_more);
+    let second=list_filtered(&conn,"w1",None,first.next_cursor.as_deref(),1,&filter).unwrap();
+    assert_eq!(second.items[0].id,b.entry_id); assert!(!second.has_more);
+    assert!(list_filtered(&conn,"w2",None,first.next_cursor.as_deref(),1,&filter).is_err());
+    let scoped=list_filtered(&conn,"w1",Some("m1"),None,32,&filter).unwrap();
+    assert_eq!(scoped.items.len(),1); assert_eq!(scoped.items[0].id,mission.entry_id);
+    let rejected_page=list_filtered(&conn,"w1",None,None,32,&MemoryFilter{status:Some("rejected".into()),..MemoryFilter::default()}).unwrap();
+    assert_eq!(rejected_page.items[0].id,rejected.entry_id);
+    let approved=list_filtered(&conn,"w1",None,None,32,&MemoryFilter{status:Some("approved".into()),..MemoryFilter::default()}).unwrap();
+    assert_eq!(approved.items.len(),2);
+    let searched=list_filtered(&conn,"w1",None,None,32,&MemoryFilter{status:Some("pending".into()),query:Some("SQLITE USA 20".into()),..MemoryFilter::default()}).unwrap();
+    assert_eq!(searched.items.len(),2);
+    let no_marks=list_filtered(&conn,"w1",None,None,32,&MemoryFilter{status:Some("pending".into()),duplicate_of:Some(false),..MemoryFilter::default()}).unwrap();
+    assert!(no_marks.items.is_empty());
+    assert_eq!(detail_for_owner(&conn,&a.entry_id,"w1",None).unwrap().revisions[0].status,"proposed");
+    assert!(list_filtered(&conn,"w1",None,None,32,&MemoryFilter{status:Some("unknown".into()),..MemoryFilter::default()}).is_err());
+}
+
+#[test]
+fn verification_expiry_and_deleted_list_are_read_only_and_use_real_deadlines() {
+    let conn=db(); seed_workspace(&conn,"w1"); seed_workspace(&conn,"w2");
+    let expired=activate(&conn,"workspace",None,"expired","old");
+    let fresh=activate(&conn,"workspace",None,"fresh","new");
+    let unknown=activate(&conn,"workspace",None,"unknown","unverified");
+    conn.execute("UPDATE memory_entries SET ttl_days=1,last_verified=0 WHERE id=?1",[&expired.entry_id]).unwrap();
+    conn.execute("UPDATE memory_entries SET ttl_days=1,last_verified=?2 WHERE id=?1",params![fresh.entry_id,now()]).unwrap();
+    conn.execute("UPDATE memory_entries SET ttl_days=1 WHERE id=?1",[&unknown.entry_id]).unwrap();
+    let page=list_filtered(&conn,"w1",None,None,32,&MemoryFilter{verification_expired:Some(true),..MemoryFilter::default()}).unwrap();
+    assert_eq!(page.items.len(),2); assert!(page.items.iter().any(|e|e.id==expired.entry_id));
+    let current=list_filtered(&conn,"w1",None,None,32,&MemoryFilter{verification_expired:Some(false),..MemoryFilter::default()}).unwrap();
+    assert_eq!(current.items.len(),1); assert_eq!(current.items[0].id,fresh.entry_id);
+    assert!(lifecycle::deleted_workspaces(&conn).unwrap().is_empty());
+    crate::database::soft_delete_workspace(&conn,"w1").unwrap();
+    let rows=lifecycle::deleted_workspaces(&conn).unwrap(); assert_eq!(rows.len(),1);
+    assert_eq!(rows[0]["id"],"w1"); assert_eq!(rows[0]["deleteAfter"].as_i64().unwrap()-rows[0]["deletedAt"].as_i64().unwrap(),30*86400);
+    assert!((30*86400-5..=30*86400).contains(&rows[0]["remainingSeconds"].as_i64().unwrap()));
+    conn.execute("UPDATE workspaces SET delete_after=0 WHERE id='w1'",[]).unwrap();
+    assert_eq!(lifecycle::deleted_workspaces(&conn).unwrap()[0]["remainingSeconds"],0);
+    assert_eq!(conn.query_row("SELECT last_verified FROM memory_entries WHERE id=?1",[&expired.entry_id],|r|r.get::<_,i64>(0)).unwrap(),0);
 }
 
 #[test]

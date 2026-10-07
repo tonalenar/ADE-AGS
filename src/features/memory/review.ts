@@ -54,3 +54,16 @@ export function evidenceParts(item: MemoryReviewItem): { runId?: string; taskId?
   if (e.reason) out.reason = e.reason;
   return out;
 }
+
+export interface ReviewMark {
+  kind: "duplicate" | "contradiction";
+  key: string;
+}
+
+/** TODAS as marcas do item, não só a principal: uma entrada pode ser duplicata e contradição. Pura. */
+export function reviewMarks(item: MemoryReviewItem): ReviewMark[] {
+  const marks: ReviewMark[] = [];
+  if (item.duplicateOf) marks.push({ kind: "duplicate", key: item.duplicateOf.key });
+  if (item.contradicts) marks.push({ kind: "contradiction", key: item.contradicts.key });
+  return marks;
+}

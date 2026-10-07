@@ -7,6 +7,7 @@ import { useMissionsStore } from "@/features/missions/store";
 import { MissionEfficiencyCard } from "@/features/missions/MissionTimingsPanel";
 import { MissionStallAlerts, MissionStartupTime } from "@/features/missions/StallAlertsView";
 import { formatDuration, getTimings, type MissionTimings } from "@/features/missions/timings";
+import { MemoryContextMetricsCard } from "@/features/memory/MemoryContextMetricsCard";
 import { MemoryInboxButton } from "@/features/memory/MemoryInbox";
 import { MemoryReviewPanel } from "@/features/memory/MemoryReviewPanel";
 import { TabCostList } from "@/features/missions/TabCostList";
@@ -275,6 +276,7 @@ export function BotPanel() {
                         <MissionStallAlerts missionId={current.id} compact />
                         <MissionStartupTime missionId={current.id} compact />
                         <MissionEfficiencyCard missionId={current.id} compact />
+                        <MemoryContextMetricsCard missionId={current.id} compact />
                       </div>
                     )}
                   </>

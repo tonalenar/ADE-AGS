@@ -6,12 +6,15 @@ import {
   approveBulk, asksHighPriority, flatten, inboxKeyAction, groupsFromWorkspaceReview, itemId, normalizeGroups, planBulk, rejectBulk, selectedItems, totalPending,
   type BulkOutcome, type MissionReviewGroup,
 } from "./bulkReview";
+import { maxPendingPerOwner } from "./agentDrafts";
+import { DraftsSection, type DraftsState } from "./DraftsSection";
 import { DreamSection } from "./DreamSection";
 import * as memoryIpc from "./ipc";
+import { ReviewMarks } from "./ReviewMarks";
 import { usePendingMemoryStore } from "./pendingStore";
 import { isDeletion } from "./bulkReview";
 import { evidenceParts, reviewFlag } from "./review";
-import type { MemoryReviewItem } from "./types";
+import type { MemoryPendingCounts, MemoryReviewItem } from "./types";
 
 /** Cuántas sugerencias pendientes hay en todas las misiones (lo que muestra el contador). */
 export function pendingTotal(byMission: Record<string, number>): number {
@@ -73,6 +76,9 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [confirm, setConfirm] = useState<Confirm>(null);
+  const [drafts, setDrafts] = useState<DraftsState>({ status: "loading" });
+  // Contagens por dono (workspace e cada missão) para o aviso de caixa cheia; `null` = sem dado.
+  const [ownerCounts, setOwnerCounts] = useState<MemoryPendingCounts | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const titles = useMemo(() => new Map(missions.map((m) => [m.id, m.title])), [missions]);
 
@@ -91,7 +97,19 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     }
   }, [workspaceId, titles, t]);
 
+  const loadCounts = useCallback(() => {
+    memoryIpc.getPendingCounts(workspaceId).then(setOwnerCounts).catch(() => setOwnerCounts(null));
+  }, [workspaceId]);
+
+  const loadDrafts = useCallback(() => {
+    loadCounts();
+    memoryIpc.listMemoryAgentDrafts(workspaceId)
+      .then((d) => setDrafts({ status: "ready", drafts: Array.isArray(d) ? d : [] }))
+      .catch(() => setDrafts({ status: "error" }));
+  }, [workspaceId, loadCounts]);
+
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { loadDrafts(); }, [loadDrafts]);
   useEffect(() => { root.current?.focus(); }, []);
 
   const all = useMemo(() => flatten(groups), [groups]);
@@ -105,6 +123,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     if (o.skippedDeletions.length) parts.push(t("memoryInbox.skippedDeletions", { keys: o.skippedDeletions.join(", ") }));
     setMessage(parts.join(" "));
     await load();
+    loadCounts();
     await loadPending(workspaceId).catch(() => undefined);
     setBusy(false);
   };
@@ -148,6 +167,11 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
         <header className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-5 py-3 dark:border-white/10">
           <h2 className="text-[14px] font-semibold">{t("memoryInbox.title")}</h2>
           <span className="rounded-full bg-amber-500 px-2 text-[11px] font-bold leading-5 text-white" aria-label={t("memoryInbox.count", { count: totalPending(groups) })}>{totalPending(groups)}</span>
+          {drafts.status === "ready" && drafts.drafts.length > 0 && (
+            <span className="rounded-full border border-amber-500/60 px-2 text-[11px] leading-5 text-amber-700 dark:text-amber-400" aria-label={t("memoryDrafts.headerLabel", { count: drafts.drafts.length })}>
+              {t("memoryDrafts.headerCount", { count: drafts.drafts.length })}
+            </span>
+          )}
           <span className="flex-1" />
           <button type="button" onClick={onClose} aria-label={t("memoryInbox.close")} className="rounded border border-gray-300 px-2 py-1 text-[11px] dark:border-white/20">Esc</button>
         </header>
@@ -169,6 +193,8 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
         {message && <p role="alert" className="px-5 pt-2 text-[11px] text-red-600 dark:text-red-400">{message}</p>}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+          <DraftsSection workspaceId={workspaceId} state={drafts} pending={maxPendingPerOwner(ownerCounts)} onReload={loadDrafts}
+            onChanged={() => { loadDrafts(); void load(); void loadPending(workspaceId).catch(() => undefined); }} />
           {loaded && groups.length === 0 && <p className="py-10 text-center text-[12.5px] text-gray-500">{t("memoryInbox.empty")}</p>}
           {!loaded && <p className="py-10 text-center text-[12.5px] text-gray-500">{t("memoryInbox.loading")}</p>}
           {groups.map((g) => (
@@ -188,7 +214,6 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                 {g.items.map((item) => {
                   const flag = reviewFlag(item);
                   const ev = evidenceParts(item);
-                  const related = item.contradicts ?? item.duplicateOf;
                   const id = itemId(item);
                   return (
                     <li key={id} className="flex flex-col gap-1 p-2.5" data-flag={flag}>
@@ -197,7 +222,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                         <span className="min-w-0 flex-1 truncate text-[12px] font-medium" title={item.key}>{item.key}</span>
                         {isDeletion(item) && <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{t("memoryInbox.deletion")}</span>}
                         {asksHighPriority(item) && <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300" title={t("memoryInbox.highPriorityHint")}>{t("memoryInbox.highPriority", { priority: item.priority })}</span>}
-                        {flag !== "normal" && <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>}
+                        {flag === "highValue" && <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>}
                         <button type="button" disabled={busy} onClick={() => void approveOne(item)} aria-label={`${t("memoryReview.approve")}: ${item.key}`}
                           className="rounded bg-emerald-600/90 px-2 py-0.5 text-[11px] text-white disabled:opacity-50">{t("memoryReview.approve")}</button>
                         <button type="button" disabled={busy} onClick={() => void reject([item])} aria-label={`${t("memoryReview.reject")}: ${item.key}`}
@@ -212,11 +237,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                         {ev.reason ? ` · ${ev.reason}` : ""}
                         {!ev.runId && !ev.taskId && !ev.factId && !ev.reason ? ` · ${t("memoryReview.noEvidence")}` : ""}
                       </p>
-                      {related && (
-                        <p className="text-[10.5px] text-amber-600 dark:text-amber-400">
-                          {t(flag === "contradiction" ? "memoryReview.contradicts" : "memoryReview.duplicateOf", { key: related.key })}
-                        </p>
-                      )}
+                      <ReviewMarks item={item} />
                     </li>
                   );
                 })}

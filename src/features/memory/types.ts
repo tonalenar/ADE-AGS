@@ -41,6 +41,64 @@ export interface MemoryEntry {
   pendingSourceFactId: string | null;
   pendingReason: string | null;
   pendingCreatedAt: number | null;
+  lastVerified?: number | null;
+  ttlDays?: number | null;
+  timesUsed?: number;
+}
+
+/** Optional filters; omit/null keeps the existing query behavior. */
+export interface MemoryFilter {
+  query?: string | null;
+  kind?: MemoryKind | null;
+  status?: "active" | "inactive" | "deleted" | "pending" | "approved" | "rejected" | null;
+  used?: boolean | null;
+  duplicateOf?: boolean | null;
+  contradicts?: boolean | null;
+  verificationExpired?: boolean | null;
+}
+
+export interface MemoryUsage {
+  timesUsed: number;
+  entriesUsed: number;
+  runsUsingMemory: number;
+  method: "selected_in_run_snapshot";
+}
+
+export interface MemoryWorkspaceStats {
+  entries: number;
+  revisions: number;
+  deletedAt: number | null;
+  deleteAfter: number | null;
+  memoryUsage: MemoryUsage;
+}
+
+export interface MemoryExportResult extends MemoryWorkspaceStats { path: string }
+
+export interface MemoryAgentDraft {
+  id: string;
+  scope: MemoryScope;
+  missionId: string | null;
+  /** Serialized JSON proposal; render parsed values as untrusted text. */
+  proposal: string;
+  actorKind: MemoryActorKind;
+  createdAt: number;
+  status: "agent_draft";
+}
+
+export interface MemorySourceVerification {
+  runExists: boolean | null;
+  taskExists: boolean | null;
+  fileExists: boolean | null;
+  commitExists: boolean | null;
+  lastVerifiedChanged: false;
+}
+
+export interface DeletedMemoryWorkspace {
+  id: string;
+  name: string;
+  deletedAt: number;
+  deleteAfter: number | null;
+  remainingSeconds: number | null;
 }
 
 export interface MemoryRevision {
