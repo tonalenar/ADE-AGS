@@ -7,6 +7,7 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { FailureNotice } from "./FailureNotice";
+import { MissionObjective } from "./MissionObjective";
 import { Alert, AnimateSpin, Button, EmptyState, LocationIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
@@ -478,7 +479,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
       )}
 
       <Section title={t("missions.detail.objective")}>
-        <p className="whitespace-pre-wrap text-[12px] leading-relaxed text-gray-700 dark:text-gray-300">{mission.objective}</p>
+        <MissionObjective key={mission.id} objective={mission.objective} />
       </Section>
 
       <dl className="grid grid-cols-2 lg:grid-cols-4 gap-3">
