@@ -110,7 +110,9 @@ mod banco {
             expected_revision: None,
             source_fact_id: None,
             reason: None,
-        };
+        
+            acknowledge_secret: false,
+};
         let r = propose(conn, scope, "w", mission, &input, ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None }).unwrap();
         decide(conn, &r.entry_id, r.revision, approve).unwrap();
     }
@@ -169,7 +171,9 @@ mod banco {
             expected_revision: Some(current_revision),
             source_fact_id: None,
             reason: None,
-        };
+        
+            acknowledge_secret: false,
+};
         propose(
             &conn,
             "workspace",

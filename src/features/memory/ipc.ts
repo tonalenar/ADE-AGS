@@ -53,8 +53,8 @@ export const getMemoryHistory = (entryId: string, workspaceId: string, missionId
 export const proposeMemory = (workspaceId: string, missionId: string | null, input: MemoryProposal) =>
   invoke<MemoryProposalResult>("memory_propose_user", { workspaceId, missionId, input });
 
-export const decideMemory = (entryId: string, revision: number, approve: boolean) =>
-  invoke<void>("memory_decide_user", { entryId, revision, approve });
+export const decideMemory = (entryId: string, revision: number, approve: boolean, acknowledgeSecret = false) =>
+  invoke<void>("memory_decide_user", { entryId, revision, approve, acknowledgeSecret });
 
 export const getRepoSyncStatus = (workspaceId: string) =>
   invoke<RepoSyncStatus>("memory_repo_sync_status", { workspaceId });

@@ -53,7 +53,9 @@ fn write(c: &Connection, key: String) {
         expected_revision: None,
         source_fact_id: None,
         reason: None,
-    };
+    
+        acknowledge_secret: false,
+};
     let result = propose(
         c,
         "workspace",

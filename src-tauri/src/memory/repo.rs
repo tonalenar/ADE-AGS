@@ -6,6 +6,36 @@ use sha2::{Digest, Sha256};
 
 pub type Files = BTreeMap<String, String>;
 
+/// Projeção aprovada, avisos e arquivos em que o usuário confirmou a credencial.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Projection {
+    pub files: Files,
+    pub warnings: Vec<String>,
+    pub acknowledged_paths: BTreeSet<String>,
+}
+
+impl std::ops::Deref for Projection {
+    type Target = Files;
+    fn deref(&self) -> &Files { &self.files }
+}
+
+impl std::ops::Index<&str> for Projection {
+    type Output = String;
+    fn index(&self, index: &str) -> &String { &self.files[index] }
+}
+
+impl IntoIterator for Projection {
+    type Item = (String, String);
+    type IntoIter = std::collections::btree_map::IntoIter<String, String>;
+    fn into_iter(self) -> Self::IntoIter { self.files.into_iter() }
+}
+
+impl<'a> IntoIterator for &'a Projection {
+    type Item = (&'a String, &'a String);
+    type IntoIter = std::collections::btree_map::Iter<'a, String, String>;
+    fn into_iter(self) -> Self::IntoIter { self.files.iter() }
+}
+
 /// Approved-only virtual view of the projection. Reading never imports manual edits,
 /// follows symlinks or opens arbitrary files in the user's repository.
 pub fn approved_open(conn: &Connection, workspace: &str, mission: Option<&str>, path: &str) -> Result<String, String> {
@@ -38,6 +68,8 @@ pub struct ExportResult {
     pub path: String,
     pub commit: Option<String>,
     pub files: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 pub fn slug(name: &str, id: &str) -> String {
@@ -61,22 +93,36 @@ fn line(body: &str, run: Option<&str>, task: Option<&str>, timestamp: i64, id: &
         one_line(body), run.unwrap_or("manual"), task.unwrap_or("user"), date(timestamp), id, revision, kind)
 }
 
-/// Critério único que decide se um texto pode entrar no repositório Markdown.
+/// Critério único de segredo do `render` e do `publish`.
 ///
-/// `render` e `publish` (no `git show` do que foi para o stage) chamam só esta
-/// função. O #116 troca o miolo — omitir ou confirmar em vez de abortar — sem
-/// mudar o nome nem a assinatura (`&str` → `Result<(), String>`).
+/// Usa o detector do painel: frase de política passa; credencial real devolve erro.
+/// Quem chama omite o texto (ou mantém, se o usuário confirmou). Não aborta a exportação.
 pub fn ensure_exportable_text(text: &str) -> Result<(), String> {
-    if super::agent::looks_like_secret(text) {
-        Err("A projeção contém uma credencial; expurgue a revisão antes de exportar.".into())
+    if super::agent::looks_like_user_secret(text) {
+        Err("texto parece uma credencial".into())
     } else {
         Ok(())
     }
 }
 
+fn omission(label: &str) -> String {
+    format!("[omitido: possível credencial; {label} não entrou na projeção]")
+}
+
+fn scrub_unacknowledged(files: &mut Files, allow: &BTreeSet<String>, warnings: &mut Vec<String>) {
+    let paths: Vec<String> = files.keys().cloned().collect();
+    for path in paths {
+        let body = files.get(&path).cloned().unwrap_or_default();
+        if ensure_exportable_text(&body).is_err() && !allow.contains(&path) {
+            warnings.push(format!("{path}: a projeção foi redigida para a exportação continuar."));
+            files.insert(path, format!("# Redigido\n\n{}\n", omission("o arquivo")));
+        }
+    }
+}
+
 /// Pure rendering also underpins the Dream preview. Overrides are selected revisions;
 /// they are never persisted or exported by this function.
-pub fn render(conn: &Connection, workspace: &str, overrides: &[(String, i64)]) -> Result<Files, String> {
+pub fn render(conn: &Connection, workspace: &str, overrides: &[(String, i64)]) -> Result<Projection, String> {
     let name: String = conn.query_row("SELECT name FROM workspaces WHERE id=?1", [workspace], |r| r.get(0)).map_err(|_| "workspace not found")?;
     let mut files = Files::new();
     for (file, title) in [("decisions.md", "Decisions"), ("constraints.md", "Constraints"), ("findings.md", "Findings"), ("files.md", "Files"), ("notes.md", "Notes"), ("questions.md", "Questions for the user")] {
@@ -85,6 +131,8 @@ pub fn render(conn: &Connection, workspace: &str, overrides: &[(String, i64)]) -
     let mut stmt = conn.prepare("SELECT e.id,e.scope,e.mission_id,e.key,r.revision,r.kind,r.body,r.priority,r.source_run_id,r.source_task_id,r.created_at,r.operation,m.title FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id LEFT JOIN missions m ON m.id=e.mission_id WHERE e.workspace_id=?1 AND ((e.status='active' AND r.revision=e.current_revision AND r.status='approved') OR r.status='proposed') ORDER BY r.priority DESC,e.key COLLATE BINARY,e.id,r.revision").map_err(|e| e.to_string())?;
     let rows = stmt.query_map([workspace], |r| Ok((r.get::<_,String>(0)?, r.get::<_,String>(1)?, r.get::<_,Option<String>>(2)?,r.get::<_,String>(3)?,r.get::<_,i64>(4)?,r.get::<_,String>(5)?,r.get::<_,String>(6)?,r.get::<_,i64>(7)?,r.get::<_,Option<String>>(8)?,r.get::<_,Option<String>>(9)?,r.get::<_,i64>(10)?,r.get::<_,String>(11)?,r.get::<_,Option<String>>(12)?))).map_err(|e|e.to_string())?;
     let mut top = Vec::new();
+    let mut warnings = Vec::new();
+    let mut acknowledged_paths = BTreeSet::new();
     for row in rows {
         let (id,scope,mission,key,revision,kind,body,_priority,run,task,created,operation,title)=row.map_err(|e|e.to_string())?;
         let selected = overrides.iter().find(|(entry,_)| entry==&id).map(|(_,rev)|*rev);
@@ -93,32 +141,52 @@ pub fn render(conn: &Connection, workspace: &str, overrides: &[(String, i64)]) -
             let current: Option<i64>=conn.query_row("SELECT current_revision FROM memory_entries WHERE id=?1", [&id], |r|r.get(0)).map_err(|e|e.to_string())?;
             if current!=Some(revision) { continue; }
         }
-        ensure_exportable_text(&key)?; ensure_exportable_text(&body)?;
-        let row=line(&body,run.as_deref(),task.as_deref(),created,&id,revision,&kind);
+        let acknowledged = super::secret_acknowledged(conn, &id, revision);
+        let key_secret = ensure_exportable_text(&key).is_err();
+        let body_secret = ensure_exportable_text(&body).is_err();
+        if (key_secret || body_secret) && !acknowledged {
+            warnings.push(format!("Entrada {id}@r{revision} foi omitida da projeção porque parece uma credencial."));
+        }
+        let shown_key = if key_secret && !acknowledged { "[chave omitida]".into() } else { key.clone() };
+        let shown_body = if body_secret && !acknowledged { omission(&format!("entrada {id}@r{revision}")) } else { body };
+        let row=line(&shown_body,run.as_deref(),task.as_deref(),created,&id,revision,&kind);
         let file=match kind.as_str() {"decision"=>"decisions.md","constraint"=>"constraints.md","finding"=>"findings.md","file"=>"files.md",_=>"notes.md"};
+        if acknowledged && (key_secret || body_secret) {
+            acknowledged_paths.insert(file.into());
+            if kind=="note" && shown_key.starts_with("question:") { acknowledged_paths.insert("questions.md".into()); }
+        }
         files.get_mut(file).unwrap().push_str(&row);
-        if kind=="note" && key.starts_with("question:") { files.get_mut("questions.md").unwrap().push_str(&row); }
+        if kind=="note" && shown_key.starts_with("question:") { files.get_mut("questions.md").unwrap().push_str(&row); }
         if scope=="workspace" && matches!(kind.as_str(),"constraint"|"decision") && top.len()<24 {
-            top.push(format!("- [{}]({file}): {}@r{} ({kind})\n",one_line(&key),id,revision));
+            top.push(format!("- [{}]({file}): {}@r{} ({kind})\n",one_line(&shown_key),id,revision));
+            if acknowledged && key_secret { acknowledged_paths.insert("MEMORY.md".into()); }
         }
         if let Some(mission)=mission {
             let path=format!("missions/{}.md",slug(title.as_deref().unwrap_or("mission"),&mission));
+            if acknowledged && (key_secret || body_secret) { acknowledged_paths.insert(path.clone()); }
             files.entry(path).or_insert_with(||"# Mission memory\n\n".into()).push_str(&row);
         }
     }
     let mut facts=conn.prepare("SELECT f.id,f.body,f.run_id,f.task_id,f.created_at,f.kind,r.mission_id,m.title FROM run_facts f JOIN runs r ON r.id=f.run_id LEFT JOIN missions m ON m.id=r.mission_id WHERE r.workspace_id=?1 ORDER BY r.mission_id,r.id,f.created_at,f.id").map_err(|e|e.to_string())?;
     for fact in facts.query_map([workspace],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,i64>(4)?,r.get::<_,String>(5)?,r.get::<_,Option<String>>(6)?,r.get::<_,Option<String>>(7)?))).map_err(|e|e.to_string())? {
-        let (id,body,run,task,created,kind,mission,title)=fact.map_err(|e|e.to_string())?; ensure_exportable_text(&body)?;
+        let (id,body,run,task,created,kind,mission,title)=fact.map_err(|e|e.to_string())?;
+        let shown = if ensure_exportable_text(&body).is_err() {
+            warnings.push(format!("Fato {id} foi omitido da projeção porque parece uma credencial."));
+            omission(&format!("fato {id}"))
+        } else { body };
         let owner=mission.as_deref().unwrap_or(&run);
         let path=format!("swarms/{}/findings.md",slug(title.as_deref().unwrap_or("run"),owner));
-        files.entry(path).or_insert_with(||"# Run Facts (read-only)\n\n".into()).push_str(&line(&body,Some(&run),task.as_deref(),created,&format!("fact-{id}"),0,&kind));
+        files.entry(path).or_insert_with(||"# Run Facts (read-only)\n\n".into()).push_str(&line(&shown,Some(&run),task.as_deref(),created,&format!("fact-{id}"),0,&kind));
     }
     let mut notes=conn.prepare("SELECT n.id,n.body,n.kind,n.created_at,n.mission_id,m.title FROM memory_swarm_notes n JOIN missions m ON m.id=n.mission_id WHERE n.workspace_id=?1 ORDER BY n.created_at,n.id").map_err(|e|e.to_string())?;
     for note in notes.query_map([workspace],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?))).map_err(|e|e.to_string())? {
         let (id,body,kind,created,mission,title)=note.map_err(|e|e.to_string())?;
-        ensure_exportable_text(&body)?;
+        let shown = if ensure_exportable_text(&body).is_err() {
+            warnings.push(format!("Nota {id} foi omitida da projeção porque parece uma credencial."));
+            omission(&format!("nota {id}"))
+        } else { body };
         let path=format!("swarms/{}/{}.md",slug(&title,&mission),if kind=="question" {"questions"} else {"findings"});
-        let data=serde_json::json!({"id":id,"kind":kind,"body":body,"createdAt":created}).to_string();
+        let data=serde_json::json!({"id":id,"kind":kind,"body":shown,"createdAt":created}).to_string();
         files.entry(path).or_insert_with(||"# Swarm session data (not durable memory)\n\n".into()).push_str(&super::untrusted_memory_response(&data));
     }
     let mut memory=format!("# Memory: {}\n\n",one_line(&name));
@@ -128,10 +196,12 @@ pub fn render(conn: &Connection, workspace: &str, overrides: &[(String, i64)]) -
     // Keep the briefing compact; detailed pages remain available in the repository.
     let mut lines=memory.lines().take(39).collect::<Vec<_>>().join("\n"); lines.push('\n');
     files.insert("MEMORY.md".into(),lines);
+    scrub_unacknowledged(&mut files, &acknowledged_paths, &mut warnings);
     let generated = super::untrusted_memory_response(&serde_json::json!({"index":files["MEMORY.md"]}).to_string());
     files.insert("AGENTS.generated.md".into(), format!("# ADE AGS approved memory (generated, read-only)\n\nReference this separate file explicitly from your TUI configuration.\n{generated}\n"));
-    for body in files.values() { ensure_exportable_text(body)?; }
-    Ok(files)
+    if acknowledged_paths.contains("MEMORY.md") { acknowledged_paths.insert("AGENTS.generated.md".into()); }
+    scrub_unacknowledged(&mut files, &acknowledged_paths, &mut warnings);
+    Ok(Projection { files, warnings, acknowledged_paths })
 }
 
 pub fn default_root() -> Result<PathBuf,String> {
@@ -211,10 +281,12 @@ fn repo_gate(path: &Path) -> Arc<Mutex<()>> {
 /// Produção não usa isto — o git tem de correr depois de soltar o mutex do banco.
 #[cfg(test)]
 pub(crate) fn export_at(conn: &Connection, workspace: &str, root: &Path, approval: Option<(&str, i64)>) -> Result<ExportResult, String> {
-    let files = render(conn, workspace, &[])?;
+    let projection = render(conn, workspace, &[])?;
     let name: String = conn.query_row("SELECT name FROM workspaces WHERE id=?1", [workspace], |r| r.get(0)).map_err(|e| e.to_string())?;
     let count = if approval.is_some() { 1 } else { 0 };
-    publish(root, &name, workspace, &files, approval, count, &real_git_runner())
+    let mut exported = publish(root, &name, workspace, &projection.files, &projection.acknowledged_paths, approval, count, &real_git_runner())?;
+    exported.warnings.splice(0..0, projection.warnings);
+    Ok(exported)
 }
 
 /// Writes an already-rendered projection and commits it. Does not touch SQLite.
@@ -224,6 +296,7 @@ pub fn publish(
     workspace_name: &str,
     workspace_id: &str,
     files: &Files,
+    acknowledged: &BTreeSet<String>,
     approval: Option<(&str, i64)>,
     approval_count: u32,
     run: &GitRunner,
@@ -274,10 +347,19 @@ pub fn publish(
         for file in &spec { args.push(file); }
         git(&args)?;
     }
-    let changed = !git(&["diff", "--cached", "--name-only"])?.is_empty();
-    for file in git(&["diff", "--cached", "--diff-filter=ACMR", "--name-only"])?.lines() {
-        ensure_exportable_text(&git(&["show", &format!(":{file}")])?)?;
+    let mut warnings = Vec::new();
+    let staged_names: Vec<String> = git(&["diff", "--cached", "--diff-filter=ACMR", "--name-only"])?.lines().map(str::to_string).collect();
+    for file in staged_names {
+        let staged = git(&["show", &format!(":{file}")])?;
+        // Único critério de segredo do publish. Confirmado pelo usuário permanece; o resto é omitido.
+        if ensure_exportable_text(&staged).is_err() && !acknowledged.contains(&file) {
+            let replacement = format!("# Redigido\n\n{}\n", omission(&file));
+            std::fs::write(path.join(&file), &replacement).map_err(|e| e.to_string())?;
+            git(&["add", "--all", "--", &file])?;
+            warnings.push(format!("{file}: conteúdo staged redigido para o commit continuar."));
+        }
     }
+    let changed = !git(&["diff", "--cached", "--name-only"])?.is_empty();
     let mut commit = None;
     if changed || approval_count > 0 {
         let message = if approval_count > 1 {
@@ -300,7 +382,7 @@ pub fn publish(
         ])?;
         commit = Some(git(&["rev-parse", "HEAD"])?);
     }
-    Ok(ExportResult { path: path.to_string_lossy().into_owned(), commit, files: files.keys().cloned().collect() })
+    Ok(ExportResult { path: path.to_string_lossy().into_owned(), commit, files: files.keys().cloned().collect(), warnings })
 }
 
 fn managed_path(path: &str) -> bool {

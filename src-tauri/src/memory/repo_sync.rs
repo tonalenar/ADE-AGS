@@ -49,6 +49,8 @@ pub struct RepoSyncStatus {
     pub error: Option<String>,
     pub commit: Option<String>,
     pub pending: u32,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub warnings: Vec<String>,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -80,6 +82,7 @@ struct Slot {
     publishing: bool,
     /// Gerações até aqui foram descartadas (não contam como exportadas).
     skip_until: u64,
+    warnings: Vec<String>,
 }
 
 impl Default for Slot {
@@ -101,6 +104,7 @@ impl Default for Slot {
             paused: false,
             publishing: false,
             skip_until: 0,
+            warnings: Vec::new(),
         }
     }
 }
@@ -414,6 +418,7 @@ fn export_now_result(state: &SyncState, workspace: &str, generation: u64) -> Opt
             path: slot.path.clone().unwrap_or_default(),
             commit: slot.commit.clone(),
             files: slot.files.clone(),
+            warnings: slot.warnings.clone(),
         }));
     }
     if slot.paused || slot.skip_until >= generation {
@@ -433,6 +438,7 @@ fn snapshot(state: &SyncState, workspace: &str) -> RepoSyncStatus {
             error: None,
             commit: None,
             pending: 0,
+            warnings: Vec::new(),
         };
     };
     RepoSyncStatus {
@@ -441,6 +447,7 @@ fn snapshot(state: &SyncState, workspace: &str) -> RepoSyncStatus {
         error: slot.error.clone(),
         commit: slot.commit.clone(),
         pending: slot.generation.saturating_sub(slot.synced.max(slot.skip_until)) as u32,
+        warnings: slot.warnings.clone(),
     }
 }
 
@@ -563,7 +570,7 @@ fn emit_inner(inner: &Inner, status: &RepoSyncStatus) {
 enum Attempt {
     Exported { result: ExportResult, sql_generation: i64 },
     Discarded,
-    Failed(String),
+    Failed { error: String, warnings: Vec<String> },
 }
 
 fn apply_result(inner: &Inner, state: &mut SyncState, job: &Job, result: Attempt) -> Option<i64> {
@@ -574,6 +581,7 @@ fn apply_result(inner: &Inner, state: &mut SyncState, job: &Job, result: Attempt
             slot.commit = result.commit;
             slot.path = Some(result.path);
             slot.files = result.files;
+            slot.warnings = result.warnings;
             slot.error = None;
             slot.attempts = 0;
             slot.retry_at = None;
@@ -598,9 +606,10 @@ fn apply_result(inner: &Inner, state: &mut SyncState, job: &Job, result: Attempt
             }
             None
         }
-        Attempt::Failed(error) => {
+        Attempt::Failed { error, warnings } => {
             eprintln!("[memory] exportação do workspace {} falhou: {error}", job.workspace);
             slot.error = Some(error);
+            slot.warnings = warnings;
             slot.attempts = slot.attempts.saturating_add(1);
             slot.last_ok = false;
             if slot.paused {
@@ -630,18 +639,18 @@ fn do_export(
         let _hold = repo::DbHoldGuard::enter();
         let conn = match inner.db.lock() {
             Ok(conn) => conn,
-            Err(_) => return Attempt::Failed("database unavailable".into()),
+            Err(_) => return Attempt::Failed { error: "database unavailable".into(), warnings: Vec::new() },
         };
         let name = match conn.query_row("SELECT name FROM workspaces WHERE id=?1", [workspace], |row| row.get::<_, String>(0)) {
             Ok(name) => name,
-            Err(_) => return Attempt::Failed("workspace not found".into()),
+            Err(_) => return Attempt::Failed { error: "workspace not found".into(), warnings: Vec::new() },
         };
-        let files = match repo::render(&conn, workspace, &[]) {
-            Ok(files) => files,
-            Err(error) => return Attempt::Failed(error),
+        let projection = match repo::render(&conn, workspace, &[]) {
+            Ok(projection) => projection,
+            Err(error) => return Attempt::Failed { error, warnings: Vec::new() },
         };
         let sql_generation = pending_generation(&conn, workspace);
-        (name, files, sql_generation)
+        (name, projection, sql_generation)
     };
     {
         let mut state = inner.state.lock().unwrap_or_else(|err| err.into_inner());
@@ -653,7 +662,7 @@ fn do_export(
             slot.publishing = true;
         }
     }
-    let published = repo::publish(&inner.root, &rendered.0, workspace, &rendered.1, approval, approval_count, &inner.git);
+    let published = repo::publish(&inner.root, &rendered.0, workspace, &rendered.1.files, &rendered.1.acknowledged_paths, approval, approval_count, &inner.git);
     {
         let mut state = inner.state.lock().unwrap_or_else(|err| err.into_inner());
         if let Some(slot) = state.slots.get_mut(workspace) {
@@ -662,8 +671,13 @@ fn do_export(
         inner.wake.notify_all();
     }
     match published {
-        Ok(result) => Attempt::Exported { result, sql_generation: rendered.2 },
-        Err(error) => Attempt::Failed(error),
+        Ok(mut result) => {
+            let mut warnings = rendered.1.warnings;
+            warnings.append(&mut result.warnings);
+            result.warnings = warnings;
+            Attempt::Exported { result, sql_generation: rendered.2 }
+        }
+        Err(error) => Attempt::Failed { error, warnings: rendered.1.warnings },
     }
 }
 
@@ -805,6 +819,7 @@ mod tests {
                 expected_revision: None,
                 source_fact_id: None,
                 reason: None,
+                acknowledge_secret: false,
             },
             ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None },
         )
@@ -1105,7 +1120,7 @@ mod tests {
         files.insert("MEMORY.md".into(), "# Memory\n".into());
         files.insert("notes.md".into(), "# Notes\n\n- one\n".into());
         files.insert("missions/demo.md".into(), "# Mission\n".into());
-        repo::publish(root.path(), "Test workspace", "w", &files, Some(("entry", 1)), 1, &runner).unwrap();
+        repo::publish(root.path(), "Test workspace", "w", &files, &std::collections::BTreeSet::new(), Some(("entry", 1)), 1, &runner).unwrap();
         let adds: Vec<_> = log.lock().unwrap().iter().filter(|args| args.iter().any(|arg| arg == "add")).cloned().collect();
         assert_eq!(adds.len(), 1, "{adds:?}");
         assert!(adds[0].contains(&"--all".into()));
@@ -1143,7 +1158,7 @@ mod tests {
                 let mut files = BTreeMap::new();
                 files.insert("MEMORY.md".into(), "# Memory\n".into());
                 files.insert("notes.md".into(), "# Notes\n".into());
-                repo::publish(&root, "Test workspace", "w", &files, Some(("entry", 1)), 1, &runner).unwrap();
+                repo::publish(&root, "Test workspace", "w", &files, &std::collections::BTreeSet::new(), Some(("entry", 1)), 1, &runner).unwrap();
             }));
         }
         for thread in threads {

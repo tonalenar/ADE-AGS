@@ -313,6 +313,7 @@ fn proposal(
         expected_revision,
         source_fact_id: None,
         reason: None,
+        acknowledge_secret: false,
     }
 }
 
@@ -1530,6 +1531,27 @@ fn secrets_are_rejected_by_core_task_suggest_promotion_and_run_facts() {
 }
 
 #[test]
+fn user_secret_requires_confirmation_and_agents_cannot_override_it() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    let policy = proposal("workspace", "politica", "senha: mínimo 12 caracteres", "create", None);
+    let saved = super::propose(&conn, "workspace", "w1", None, &policy, ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None }).unwrap();
+    assert_eq!(saved.status, "proposed");
+    let secret = proposal("workspace", "segredo", "password: hunter2", "create", None);
+    let err = super::propose(&conn, "workspace", "w1", None, &secret, ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None }).unwrap_err();
+    assert!(err.contains(agent::SECRET_CONFIRMATION_CODE), "{err}");
+    let mut confirmed = secret.clone();
+    confirmed.key = "confirmado".into();
+    confirmed.acknowledge_secret = true;
+    let stored = super::propose(&conn, "workspace", "w1", None, &confirmed, ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None }).unwrap();
+    assert!(secret_acknowledged(&conn, &stored.entry_id, stored.revision));
+    let mut forced = confirmed.clone();
+    forced.key = "forcado".into();
+    let agent_err = super::propose(&conn, "workspace", "w1", None, &forced, ProposalActor { kind: "worker", run_id: None, task_id: None, fact_id: None }).unwrap_err();
+    assert_eq!(agent_err, "memory cannot contain credentials");
+}
+
+#[test]
 fn agent_priority_is_capped_in_core_and_task_paths() {
     let conn = db(); seed_workspace(&conn, "w1"); seed_run(&conn, "r1", "w1", None); seed_task(&conn,"worker","r1",Some("worker"));
     let response=task_tool(&conn,"worker","memory.propose",json!({"scope":"workspace","key":"priority","kind":"constraint","body":"Safe evidence","priority":10})).unwrap();
@@ -1541,7 +1563,11 @@ fn agent_priority_is_capped_in_core_and_task_paths() {
 #[test]
 fn purge_requires_user_path_audits_without_body_and_clears_copies() {
     let conn = db(); seed_workspace(&conn,"w1"); seed_run(&conn,"r1","w1",None); seed_task(&conn,"worker","r1",Some("worker"));
-    let entry=activate(&conn,"workspace",None,"credential","token: stored-before-guard");
+    let mut credential = proposal("workspace", "credential", "token: stored-before-guard", "create", None);
+    credential.acknowledge_secret = true;
+    let created = super::propose(&conn, "workspace", "w1", None, &credential, ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None }).unwrap();
+    decide(&conn, &created.entry_id, created.revision, true).unwrap();
+    let entry = created;
     snapshot_run(&conn,"r1","w1",None).unwrap();
     assert!(conn.execute("DELETE FROM memory_revisions WHERE entry_id=?1",[&entry.entry_id]).is_err());
     assert!(task_tool(&conn,"worker","memory.purge",json!({"entry_id":entry.entry_id,"revision":1})).is_err());
