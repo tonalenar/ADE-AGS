@@ -26,6 +26,19 @@ export interface Viewport {
   zoom: number;
 }
 
+const DEFAULT_VIEWPORT: Viewport = { x: 40, y: 40, zoom: 1 };
+
+/** Una vista válida: x, y y zoom finitos y zoom > 0. Un NaN guardado vuelve como `null` y deja el canvas muerto. */
+export function isValidViewport(v: unknown): v is Viewport {
+  const o = v as Partial<Viewport> | null | undefined;
+  return !!o && Number.isFinite(o.x) && Number.isFinite(o.y) && Number.isFinite(o.zoom) && (o.zoom as number) > 0;
+}
+
+/** `v` si es válida; si no, `fallback` (la vista inicial por defecto). */
+export function safeViewport(v: unknown, fallback: Viewport = DEFAULT_VIEWPORT): Viewport {
+  return isValidViewport(v) ? v : fallback;
+}
+
 export interface Rect {
   left: number;
   top: number;
