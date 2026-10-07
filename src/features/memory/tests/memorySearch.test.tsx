@@ -10,12 +10,15 @@ import ptBR from "@/i18n/locales/pt-BR.json";
 
 const mock = vi.hoisted(() => ({
   list: vi.fn(), query: vi.fn(), stats: vi.fn(), verify: vi.fn(), listen: vi.fn(),
+  sync: vi.fn(), retrySync: vi.fn(),
 }));
 vi.mock("../ipc", () => ({
   listMemory: mock.list,
   queryMemory: mock.query,
   getMemoryWorkspaceStats: mock.stats,
   verifyMemorySource: mock.verify,
+  getRepoSyncStatus: mock.sync,
+  retryRepoSync: mock.retrySync,
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mock.listen }));
 vi.mock("react-i18next", () => ({
@@ -80,6 +83,7 @@ describe("SharedMemoryPanel: busca e filtros", () => {
     mock.query.mockResolvedValue(page([entry({ key: "found" })]));
     mock.stats.mockResolvedValue({ entries: 41, revisions: 50, deletedAt: null, deleteAfter: null, memoryUsage: { timesUsed: 9, entriesUsed: 6, runsUsingMemory: 3, method: "selected_in_run_snapshot" } });
     mock.listen.mockResolvedValue(() => undefined);
+    mock.sync.mockResolvedValue({ workspaceId: "w1", phase: "idle", error: null, commit: null, pending: 0 });
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);
