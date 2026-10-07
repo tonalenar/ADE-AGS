@@ -14,7 +14,7 @@ import { ReviewMarks } from "./ReviewMarks";
 import { usePendingMemoryStore } from "./pendingStore";
 import { isDeletion } from "./bulkReview";
 import { evidenceParts, reviewFlag } from "./review";
-import type { MemoryReviewItem } from "./types";
+import type { MemoryPendingCounts, MemoryReviewItem } from "./types";
 
 /** Cuántas sugerencias pendientes hay en todas las misiones (lo que muestra el contador). */
 export function pendingTotal(byMission: Record<string, number>): number {
@@ -77,6 +77,8 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
   const [message, setMessage] = useState("");
   const [confirm, setConfirm] = useState<Confirm>(null);
   const [drafts, setDrafts] = useState<DraftsState>({ status: "loading" });
+  // Contagens por dono (workspace e cada missão) para o aviso de caixa cheia; `null` = sem dado.
+  const [ownerCounts, setOwnerCounts] = useState<MemoryPendingCounts | null>(null);
   const root = useRef<HTMLDivElement>(null);
   const titles = useMemo(() => new Map(missions.map((m) => [m.id, m.title])), [missions]);
 
@@ -95,11 +97,16 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     }
   }, [workspaceId, titles, t]);
 
+  const loadCounts = useCallback(() => {
+    memoryIpc.getPendingCounts(workspaceId).then(setOwnerCounts).catch(() => setOwnerCounts(null));
+  }, [workspaceId]);
+
   const loadDrafts = useCallback(() => {
+    loadCounts();
     memoryIpc.listMemoryAgentDrafts(workspaceId)
       .then((d) => setDrafts({ status: "ready", drafts: Array.isArray(d) ? d : [] }))
       .catch(() => setDrafts({ status: "error" }));
-  }, [workspaceId]);
+  }, [workspaceId, loadCounts]);
 
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { loadDrafts(); }, [loadDrafts]);
@@ -116,6 +123,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     if (o.skippedDeletions.length) parts.push(t("memoryInbox.skippedDeletions", { keys: o.skippedDeletions.join(", ") }));
     setMessage(parts.join(" "));
     await load();
+    loadCounts();
     await loadPending(workspaceId).catch(() => undefined);
     setBusy(false);
   };
@@ -185,7 +193,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
         {message && <p role="alert" className="px-5 pt-2 text-[11px] text-red-600 dark:text-red-400">{message}</p>}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
-          <DraftsSection workspaceId={workspaceId} state={drafts} pending={maxPendingPerOwner(groups)} onReload={loadDrafts}
+          <DraftsSection workspaceId={workspaceId} state={drafts} pending={maxPendingPerOwner(ownerCounts)} onReload={loadDrafts}
             onChanged={() => { loadDrafts(); void load(); void loadPending(workspaceId).catch(() => undefined); }} />
           {loaded && groups.length === 0 && <p className="py-10 text-center text-[12.5px] text-gray-500">{t("memoryInbox.empty")}</p>}
           {!loaded && <p className="py-10 text-center text-[12.5px] text-gray-500">{t("memoryInbox.loading")}</p>}

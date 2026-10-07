@@ -33,6 +33,8 @@ vi.mock("../pendingStore", () => ({
 }));
 
 const decideMemoryMock = vi.fn().mockResolvedValue(undefined);
+const pendingCountsMock = vi.fn(() => Promise.reject(new Error("sem contagem")));
+const draftsMock = vi.fn(() => Promise.resolve([] as unknown[]));
 let mockReviewSummary: MemoryWorkspaceReview;
 
 vi.mock("../ipc", async (importOriginal) => {
@@ -42,6 +44,8 @@ vi.mock("../ipc", async (importOriginal) => {
     getWorkspaceReviewSummary: vi.fn(() => Promise.resolve(mockReviewSummary)),
     listDreams: vi.fn().mockResolvedValue([]),
     decideMemory: (...args: unknown[]) => decideMemoryMock(...args),
+    getPendingCounts: () => pendingCountsMock(),
+    listMemoryAgentDrafts: () => draftsMock(),
   };
 });
 
@@ -245,5 +249,29 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
     });
 
     expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  it("aviso de caixa cheia vem das contagens POR DONO do backend (P3)", async () => {
+    const notice = () => container.querySelector('[role="status"]')?.textContent ?? "";
+    const mount = async () => {
+      await act(async () => { root.render(<MemoryInbox workspaceId="w1" onClose={vi.fn()} />); });
+      await act(async () => {});
+    };
+    // 16 do workspace de M1 + 16 do workspace de M2 = 32 no dono workspace: cheio.
+    pendingCountsMock.mockImplementation(() => Promise.resolve({ workspace: 32, byMission: { m1: 0, m2: 0 } }) as never);
+    await mount();
+    expect(notice()).toContain("memoryDrafts.notice.inboxFull.title");
+    // 16 workspace + 16 mission de M1: donos diferentes, nenhum cheio.
+    act(() => root.unmount());
+    root = createRoot(container);
+    pendingCountsMock.mockImplementation(() => Promise.resolve({ workspace: 16, byMission: { m1: 16 } }) as never);
+    await mount();
+    expect(notice()).not.toContain("inboxFull");
+    // sem contagem (erro): sem aviso, nunca inventado.
+    act(() => root.unmount());
+    root = createRoot(container);
+    pendingCountsMock.mockImplementation(() => Promise.reject(new Error("x")));
+    await mount();
+    expect(notice()).not.toContain("inboxFull");
   });
 });

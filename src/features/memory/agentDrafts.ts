@@ -1,4 +1,4 @@
-import type { MemoryAgentDraft } from "./types";
+import type { MemoryAgentDraft, MemoryPendingCounts } from "./types";
 
 /** Limite de pendentes por dono (espelha `PENDING_MAX` do backend): cheio, propostas de agente viram rascunhos. */
 export const PENDING_LIMIT = 32;
@@ -44,16 +44,21 @@ export function toDraftView(d: MemoryAgentDraft): DraftView {
   };
 }
 
-/** O limite de 32 vale POR DONO (workspace ou cada missão), não somado: o maior grupo é o que enche. */
-export function maxPendingPerOwner(groups: { items: unknown[] }[]): number {
-  return groups.reduce((max, g) => Math.max(max, g.items.length), 0);
+/**
+ * O limite de 32 vale POR DONO (workspace ou cada missão), não somado. A fonte são as contagens
+ * do backend (`memory_pending_counts`), que contam todas as propostas de cada dono; os grupos de
+ * revisão NÃO servem (misturam e dividem donos). Sem dado (`null`) devolve `null`: sem aviso.
+ */
+export function maxPendingPerOwner(counts: MemoryPendingCounts | null | undefined): number | null {
+  if (!counts) return null;
+  return Math.max(counts.workspace, 0, ...Object.values(counts.byMission ?? {}));
 }
 
 export type DraftNotice = "queueFull" | "inboxFull" | null;
 
 /** Aviso mais grave primeiro: fila de rascunhos cheia, depois caixa de pendentes cheia. */
-export function draftNotice(drafts: number, pendingInFullestOwner: number): DraftNotice {
+export function draftNotice(drafts: number, pendingInFullestOwner: number | null): DraftNotice {
   if (drafts >= DRAFT_QUEUE_LIMIT) return "queueFull";
-  if (pendingInFullestOwner >= PENDING_LIMIT) return "inboxFull";
+  if (pendingInFullestOwner !== null && pendingInFullestOwner >= PENDING_LIMIT) return "inboxFull";
   return null;
 }

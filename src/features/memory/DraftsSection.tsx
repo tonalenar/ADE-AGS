@@ -14,7 +14,7 @@ export type DraftsState = { status: "loading" } | { status: "error" } | { status
  */
 export function DraftsSection({
   workspaceId, state, pending, onReload, onChanged,
-}: { workspaceId: string; state: DraftsState; pending: number; onReload: () => void; onChanged: () => void }) {
+}: { workspaceId: string; state: DraftsState; pending: number | null; onReload: () => void; onChanged: () => void }) {
   const { t } = useTranslation();
   const [busyId, setBusyId] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);

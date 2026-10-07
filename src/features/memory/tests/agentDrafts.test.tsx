@@ -36,13 +36,24 @@ describe("toDraftView / draftNotice", () => {
   it("trunca texto enorme", () => {
     expect(toDraftView(draft({}, { key: "k", body: "x".repeat(5000) })).body!.length).toBeLessThan(700);
   });
-  it("P3: o limite é por dono — 16+16 em duas missões não enche a caixa", () => {
-    const g = (n: number) => ({ items: Array.from({ length: n }) });
-    expect(maxPendingPerOwner([g(16), g(16)])).toBe(16);
-    expect(draftNotice(2, maxPendingPerOwner([g(16), g(16)]))).toBeNull();
-    expect(maxPendingPerOwner([g(5), g(32)])).toBe(32);
-    expect(draftNotice(2, maxPendingPerOwner([g(5), g(32)]))).toBe("inboxFull");
-    expect(maxPendingPerOwner([])).toBe(0);
+  it("P3: contagem por dono vinda do backend (memory_pending_counts)", () => {
+    // 16 do workspace de M1 + 16 do workspace de M2 = dono workspace com 32: cheio.
+    const full = { workspace: 32, byMission: { m1: 0, m2: 0 } };
+    expect(maxPendingPerOwner(full)).toBe(32);
+    expect(draftNotice(2, maxPendingPerOwner(full))).toBe("inboxFull");
+    // 16 workspace + 16 mission de M1 são donos diferentes: nenhum está cheio.
+    const split = { workspace: 16, byMission: { m1: 16 } };
+    expect(maxPendingPerOwner(split)).toBe(16);
+    expect(draftNotice(2, maxPendingPerOwner(split))).toBeNull();
+    // uma missão cheia sozinha enche.
+    expect(maxPendingPerOwner({ workspace: 3, byMission: { a: 5, b: 32 } })).toBe(32);
+    expect(maxPendingPerOwner({ workspace: 0, byMission: {} })).toBe(0);
+  });
+  it("sem dado (carregando ou erro): sem aviso, nunca inventa", () => {
+    expect(maxPendingPerOwner(null)).toBeNull();
+    expect(maxPendingPerOwner(undefined)).toBeNull();
+    expect(draftNotice(2, null)).toBeNull();
+    expect(draftNotice(DRAFT_QUEUE_LIMIT, null)).toBe("queueFull");
   });
   it("avisos: fila cheia pesa mais que caixa cheia", () => {
     expect(draftNotice(0, 0)).toBeNull();
