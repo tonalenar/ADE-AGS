@@ -1,9 +1,14 @@
 # Chequeos de cada PR y de cada push a master: los mismos tests que corre el release,
 # pero antes de mergear y no recién al sacar un tag.
 #
-# Linux y no Windows por la misma razón que en `release.yml`: el binario de test de la lib
-# no arranca en el runner de Windows (STATUS_ENTRYPOINT_NOT_FOUND). Los tests con gate
-# `#[cfg(windows)]` se siguen corriendo a mano en Windows.
+# Dos jobs:
+# - `test` (Linux): corre los tests de verdad (tsc, babel, vitest y `cargo test`).
+# - `check-windows`: solo `cargo check`, que compila también el código con gate
+#   `#[cfg(windows)]` y los tests (sin correrlos). No se corren los tests en Windows porque
+#   suman unos 4 min al job y hoy fallan 2 tests solo en Windows, que dejarían el job rojo:
+#   `ipc::test::un_symlink_que_apunta_a_otro_lado_no_cuenta_como_instalado` y
+#   `missions::cleanup::tests::listing_and_prune_preserve_orphans_and_active_then_clean_closed`.
+#   Los tests con gate `#[cfg(windows)]` se siguen corriendo a mano en Windows.
 
 name: ci
 
@@ -55,3 +60,35 @@ jobs:
 
       - name: Tests de Rust
         run: cd src-tauri && cargo test --lib --bin ags
+
+  # Atrapa lo que solo rompe en Windows (código `#[cfg(windows)]`, imports que solo usa
+  # Windows) y que el job de Linux no compila. Sin bun ni dependencias de sistema: en debug
+  # Tauri usa `devUrl`, así que no hace falta el `dist` del frontend.
+  check-windows:
+    name: check (windows)
+    runs-on: windows-latest
+    # Un cargo check frío tarda ~4 min; si pasa de 30 el job está colgado, no lento.
+    timeout-minutes: 30
+    env:
+      # El incremental no sirve en CI y engorda el `target/` que va al cache.
+      CARGO_INCREMENTAL: 0
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      # Clave aparte de la de Linux (`ci-cargo-`): los artefactos no se comparten entre SOs.
+      - name: Cache de cargo
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            src-tauri/target
+          key: ci-windows-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
+          restore-keys: ci-windows-cargo-
+
+      # `--bins` (no `--bin ags`) también compila `src/main.rs` (`windows_subsystem`) y `ccode`.
+      - name: cargo check
+        working-directory: src-tauri
+        run: cargo check --lib --bins --tests
