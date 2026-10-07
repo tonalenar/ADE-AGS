@@ -166,6 +166,21 @@ pub fn workspace_restore(
     crate::database::db_restore_workspace(workspace_id, db)
 }
 
+pub fn deleted_workspaces(conn: &Connection) -> Result<Vec<Value>, String> {
+    let mut stmt = conn.prepare("SELECT id,name,deleted_at,delete_after FROM workspaces WHERE deleted_at IS NOT NULL ORDER BY deleted_at DESC,id").map_err(|e| e.to_string())?;
+    let timestamp = super::now();
+    stmt.query_map([], |r| {
+        let deadline: Option<i64> = r.get(3)?;
+        Ok(json!({"id":r.get::<_,String>(0)?,"name":r.get::<_,String>(1)?,"deletedAt":r.get::<_,i64>(2)?,"deleteAfter":deadline,"remainingSeconds":deadline.map(|v| v.saturating_sub(timestamp).max(0))}))
+    }).map_err(|e| e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn workspace_deleted_list(db: tauri::State<crate::database::DbConnection>) -> Result<Vec<Value>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    deleted_workspaces(&conn)
+}
+
 #[tauri::command]
 pub fn memory_export(
     workspace_id: String,

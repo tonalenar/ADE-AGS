@@ -636,7 +636,10 @@ fn memory_cursor(entry: &MemoryEntry) -> String {
 
 #[derive(Clone, Default, Serialize, Deserialize)]
 #[serde(rename_all="camelCase",deny_unknown_fields)]
-pub struct MemoryFilter { pub query: Option<String>, pub kind: Option<String>, pub status: Option<String>, pub used: Option<bool> }
+pub struct MemoryFilter {
+    pub query: Option<String>, pub kind: Option<String>, pub status: Option<String>, pub used: Option<bool>,
+    pub duplicate_of: Option<bool>, pub contradicts: Option<bool>, pub verification_expired: Option<bool>,
+}
 
 pub fn list_for_owner(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, cursor: Option<&str>, limit: usize) -> Result<MemoryPage,String> {
     list_filtered(conn,workspace_id,mission_id,cursor,limit,&MemoryFilter::default())
@@ -660,7 +663,25 @@ pub fn list_filtered(
         workspace_id,
         mission_id,
     )?;
-    if filter.kind.as_ref().is_some_and(|v| !KINDS.contains(&v.as_str())) || filter.status.as_ref().is_some_and(|v| !["active","inactive","deleted"].contains(&v.as_str())) { return Err("invalid memory filter".into()); }
+    if filter.kind.as_ref().is_some_and(|v| !KINDS.contains(&v.as_str())) || filter.status.as_ref().is_some_and(|v| !["active","inactive","deleted","pending","approved","rejected"].contains(&v.as_str())) { return Err("invalid memory filter".into()); }
+    // Reuse the review heuristics, before LIMIT, so filtered pages retain keyset semantics.
+    let mut duplicates = Vec::new();
+    let mut contradictions = Vec::new();
+    if filter.duplicate_of.is_some() || filter.contradicts.is_some() {
+        for group in review::review_summary_workspace_including_dreams(conn, workspace_id)?.groups {
+            for row in group.items {
+                if row.item.duplicate_of.is_some() { duplicates.push(row.item.entry_id.clone()); }
+                if row.item.contradicts.is_some() { contradictions.push(row.item.entry_id); }
+            }
+        }
+    }
+    let decision_predicate = match filter.status.as_deref() {
+        Some("pending") => "EXISTS(SELECT 1 FROM memory_revisions WHERE entry_id=e.id AND status='proposed')",
+        Some("approved") => "e.current_revision IS NOT NULL",
+        Some("rejected") => "EXISTS(SELECT 1 FROM memory_revisions WHERE entry_id=e.id AND status='rejected')",
+        _ => "1",
+    };
+    let entry_status = filter.status.as_deref().filter(|s| matches!(*s,"active"|"inactive"|"deleted"));
     let position = cursor.map(|value| serde_json::from_str::<(String, Option<String>, String, i64, String, String)>(value).map_err(|_| "invalid memory cursor")).transpose()?;
     if position.as_ref().is_some_and(|p| p.0 != workspace_id || p.1.as_deref() != mission_id) { return Err("memory cursor belongs to another owner".into()); }
     let limit = limit.clamp(1, LIST_LIMIT);
@@ -670,14 +691,15 @@ pub fn list_filtered(
         "workspace"
     };
     let sql = format!(
-        "{ENTRY_SELECT} WHERE e.scope=?1 AND e.workspace_id=?2 AND (?3 IS NULL OR e.mission_id=?3) AND (?9 IS NULL OR e.kind=?9) AND (?10 IS NULL OR CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END=?10) AND (?11 IS NULL OR instr(lower(e.key||' '||COALESCE((SELECT body FROM memory_revisions WHERE entry_id=e.id AND revision=e.current_revision),'')),lower(?11))>0) AND (?12 IS NULL OR EXISTS(SELECT 1 FROM run_memory_snapshot WHERE entry_id=e.id)=?12) AND (?5 IS NULL OR (CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,-e.priority,e.key COLLATE BINARY,e.id)>(?5,?6,?7,?8)) ORDER BY CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,e.priority DESC,e.key COLLATE BINARY,e.id LIMIT ?4"
+        "{ENTRY_SELECT} WHERE e.scope=?1 AND e.workspace_id=?2 AND (?3 IS NULL OR e.mission_id=?3) AND (?9 IS NULL OR COALESCE(p.kind,e.kind)=?9) AND (?10 IS NULL OR CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END=?10) AND (?11 IS NULL OR instr(lower(e.key||' '||COALESCE(p.body,a.body,(SELECT body FROM memory_revisions WHERE entry_id=e.id AND status='rejected' ORDER BY revision DESC LIMIT 1),'')),lower(?11))>0) AND (?12 IS NULL OR EXISTS(SELECT 1 FROM run_memory_snapshot WHERE entry_id=e.id)=?12) AND (?5 IS NULL OR (CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,-e.priority,e.key COLLATE BINARY,e.id)>(?5,?6,?7,?8)) ORDER BY CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,e.priority DESC,e.key COLLATE BINARY,e.id LIMIT ?4"
     );
+    let sql = sql.replace(" ORDER BY CASE", &format!(" AND ({decision_predicate}) AND (?15 IS NULL OR (e.id IN (SELECT value FROM json_each(?13)))=?15) AND (?16 IS NULL OR (e.id IN (SELECT value FROM json_each(?14)))=?16) AND (?17 IS NULL OR (e.ttl_days IS NOT NULL AND (e.last_verified IS NULL OR e.last_verified<=?18-e.ttl_days*86400))=?17) ORDER BY CASE"));
     let mut stmt = conn
         .prepare(&sql)
         .map_err(|_| "could not list memories".to_string())?;
     let rows = stmt
         .query_map(
-            params![scope, workspace_id, mission_id, limit + 1, position.as_ref().map(|p| &p.2),position.as_ref().map(|p| -p.3),position.as_ref().map(|p| &p.4),position.as_ref().map(|p| &p.5),filter.kind,filter.status,filter.query,filter.used],
+            params![scope, workspace_id, mission_id, limit + 1, position.as_ref().map(|p| &p.2),position.as_ref().map(|p| -p.3),position.as_ref().map(|p| &p.4),position.as_ref().map(|p| &p.5),filter.kind,entry_status,filter.query,filter.used,serde_json::to_string(&duplicates).map_err(|e|e.to_string())?,serde_json::to_string(&contradictions).map_err(|e|e.to_string())?,filter.duplicate_of,filter.contradicts,filter.verification_expired,now()],
             entry_from_row,
         )
         .map_err(|_| "could not list memories".to_string())?;

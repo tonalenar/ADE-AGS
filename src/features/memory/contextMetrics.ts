@@ -4,6 +4,7 @@
  * ficam o tipo e o formato de exibição, puros. Os nomes podem mudar quando o Backend entregar.
  */
 export interface MemoryContextMetrics {
+  runId: string;
   beforeBytes: number;
   afterBytes: number;
   tokensBefore: number;
@@ -11,7 +12,12 @@ export interface MemoryContextMetrics {
   /** Hash do commit do repositório de memória selado no Run. */
   commit: string | null;
   entriesUsed: number;
-  entriesTotal: number;
+  tokenMethod: "project-estimate-chars-div-4";
+  legacyContext?: boolean;
+}
+
+export interface MemoryMissionContextMetrics {
+  runs: MemoryContextMetrics[];
 }
 
 /** Redução percentual (0-100, inteira); 0 se não havia nada antes ou se cresceu. */

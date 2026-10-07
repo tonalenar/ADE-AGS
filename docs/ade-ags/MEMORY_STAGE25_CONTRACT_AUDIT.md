@@ -24,4 +24,15 @@ Auditoria do código atual, sem alteração de schema ou migração. Os argument
 
 Confirmado: nenhuma ocorrência de `dangerouslySetInnerHTML` ou `innerHTML` em `src/features/memory` no momento da auditoria. O backend serializa dados, não os transforma em HTML seguro; renderizar por texto React, inclusive `proposal` após JSON.parse. Marcas são heurísticas e nunca autorização para aprovar. Os testes existentes de memória usam `database::test_db`, sem abrir o banco real. `memory_verify_source` limita caminhos ao repositório e executa apenas `git cat-file -e` com hash validado.
 
-A revisão das novas telas depende do código aprovado pelo canvas. As lacunas de filtros e listagem de apagados exigem lógica nova, além de um comando sobre função existente; foram encaminhadas ao Orquestrador para decisão de escopo.
+A revisão das novas telas depende do código aprovado pelo canvas.
+
+## Complemento autorizado pelo Orquestrador
+
+As lacunas acima descrevem o código anterior à entrega. Após autorização explícita, ficam **confirmados**:
+
+- `workspace_deleted_list()` -> `DeletedMemoryWorkspace[]`, somente leitura, com `{id,name,deletedAt,deleteAfter,remainingSeconds}`. Prazo expirado retorna zero segundos reais restantes; não exclui dados automaticamente.
+- `workspace_restore({workspaceId})` -> void, alias da operação existente.
+- `memory_query` mantém assinatura e filtros antigos. `filter.status` também aceita `pending|approved|rejected`: pendente = existe proposta, aprovada = revisão atual aprovada, rejeitada = existe revisão rejeitada (histórico). Uma entrada pode corresponder a mais de uma decisão. `duplicateOf?: boolean`, `contradicts?: boolean` usam classificação das propostas existentes, incluindo rascunhos do Dreamer já propostos; as duas opções combinam por AND. `verificationExpired?: boolean`: TTL definido e data ausente ou prazo vencido. Sem TTL, a entrada não está vencida. Os filtros são aplicados antes de LIMIT, preservando o cursor. Nenhuma coluna ou índice novo.
+- Busca de texto passa a considerar o corpo pendente, depois aprovado, depois a última revisão rejeitada; filtro de tipo prioriza o tipo pendente.
+- `contextMetrics.ts` alinhado ao JSON real, sem `entriesTotal`; novos tipos de filtro/lifecycle/TTL em `types.ts`; wrappers em `ipc.ts`. Campos novos de `MemoryEntry` são opcionais para compatibilidade com os consumidores existentes.
+- Testes Rust adicionados para paginação filtrada, escopo, ambas as marcas, decisões, busca pendente, TTL, listagem vazia, prazo e ausência de escrita.
