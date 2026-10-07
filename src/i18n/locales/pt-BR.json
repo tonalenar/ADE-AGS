@@ -2465,5 +2465,9 @@
   "workspaceDelete.remaining_other": "apagado · restam {{count}} dias",
   "workspaceDelete.restore": "Restaurar",
   "workspaceDelete.restoreAria": "Restaurar o workspace {{name}}",
-  "workspaceDelete.restoreFailed": "Não foi possível restaurar. {{detail}}"
+  "workspaceDelete.restoreFailed": "Não foi possível restaurar. {{detail}}",
+  "memoryReview.marksLabel": "Possíveis coincidências",
+  "memoryReview.markDuplicate": "Possível duplicata de “{{key}}”",
+  "memoryReview.markContradiction": "Possível contradição com “{{key}}”",
+  "memoryReview.markNote": "A marca é só uma suspeita da checagem automática. A decisão é sua."
 }

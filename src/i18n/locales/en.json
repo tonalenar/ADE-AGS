@@ -2465,5 +2465,9 @@
   "workspaceDelete.remaining_other": "deleted · {{count}} days left",
   "workspaceDelete.restore": "Restore",
   "workspaceDelete.restoreAria": "Restore workspace {{name}}",
-  "workspaceDelete.restoreFailed": "Could not restore. {{detail}}"
+  "workspaceDelete.restoreFailed": "Could not restore. {{detail}}",
+  "memoryReview.marksLabel": "Possible matches",
+  "memoryReview.markDuplicate": "Possible duplicate of “{{key}}”",
+  "memoryReview.markContradiction": "Possible contradiction with “{{key}}”",
+  "memoryReview.markNote": "The mark is only a suspicion from the automatic check. The decision is yours."
 }

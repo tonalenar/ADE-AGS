@@ -8,6 +8,7 @@ import {
 } from "./bulkReview";
 import { DreamSection } from "./DreamSection";
 import * as memoryIpc from "./ipc";
+import { ReviewMarks } from "./ReviewMarks";
 import { usePendingMemoryStore } from "./pendingStore";
 import { isDeletion } from "./bulkReview";
 import { evidenceParts, reviewFlag } from "./review";
@@ -188,7 +189,6 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                 {g.items.map((item) => {
                   const flag = reviewFlag(item);
                   const ev = evidenceParts(item);
-                  const related = item.contradicts ?? item.duplicateOf;
                   const id = itemId(item);
                   return (
                     <li key={id} className="flex flex-col gap-1 p-2.5" data-flag={flag}>
@@ -197,7 +197,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                         <span className="min-w-0 flex-1 truncate text-[12px] font-medium" title={item.key}>{item.key}</span>
                         {isDeletion(item) && <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{t("memoryInbox.deletion")}</span>}
                         {asksHighPriority(item) && <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300" title={t("memoryInbox.highPriorityHint")}>{t("memoryInbox.highPriority", { priority: item.priority })}</span>}
-                        {flag !== "normal" && <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>}
+                        {flag === "highValue" && <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>}
                         <button type="button" disabled={busy} onClick={() => void approveOne(item)} aria-label={`${t("memoryReview.approve")}: ${item.key}`}
                           className="rounded bg-emerald-600/90 px-2 py-0.5 text-[11px] text-white disabled:opacity-50">{t("memoryReview.approve")}</button>
                         <button type="button" disabled={busy} onClick={() => void reject([item])} aria-label={`${t("memoryReview.reject")}: ${item.key}`}
@@ -212,11 +212,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                         {ev.reason ? ` · ${ev.reason}` : ""}
                         {!ev.runId && !ev.taskId && !ev.factId && !ev.reason ? ` · ${t("memoryReview.noEvidence")}` : ""}
                       </p>
-                      {related && (
-                        <p className="text-[10.5px] text-amber-600 dark:text-amber-400">
-                          {t(flag === "contradiction" ? "memoryReview.contradicts" : "memoryReview.duplicateOf", { key: related.key })}
-                        </p>
-                      )}
+                      <ReviewMarks item={item} />
                     </li>
                   );
                 })}

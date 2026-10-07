@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import * as memoryIpc from "./ipc";
+import { ReviewMarks } from "./ReviewMarks";
 import { usePendingMemoryStore } from "./pendingStore";
 import { decideAll, evidenceParts, reviewFlag, sortReviewItems, type ReviewFlag } from "./review";
 import type { MemoryReviewItem, MemoryReviewSummary } from "./types";
@@ -73,12 +74,11 @@ export function MemoryReviewPanel({ missionId, workspaceId, refreshKey = "" }: {
         {items.map((item) => {
           const flag = reviewFlag(item);
           const ev = evidenceParts(item);
-          const related = item.contradicts ?? item.duplicateOf;
           return (
             <li key={`${item.entryId}:${item.revision}`} className="flex flex-col gap-1 py-2" data-flag={flag}>
               <div className="flex items-center gap-2">
                 <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-gray-700 dark:text-gray-200" title={item.key}>{item.key}</span>
-                {flag !== "normal" && (
+                {flag === "highValue" && (
                   <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>
                 )}
                 <button type="button" disabled={busy} onClick={() => run([item], true)}
@@ -95,11 +95,7 @@ export function MemoryReviewPanel({ missionId, workspaceId, refreshKey = "" }: {
                 {ev.reason ? ` · ${ev.reason}` : ""}
                 {!ev.runId && !ev.taskId && !ev.factId && !ev.reason ? ` · ${t("memoryReview.noEvidence")}` : ""}
               </p>
-              {related && (
-                <p className="text-[10.5px] text-amber-600 dark:text-amber-400">
-                  {t(flag === "contradiction" ? "memoryReview.contradicts" : "memoryReview.duplicateOf", { key: related.key })}
-                </p>
-              )}
+              <ReviewMarks item={item} />
             </li>
           );
         })}
