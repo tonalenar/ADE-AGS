@@ -67,6 +67,8 @@ jobs:
   check-windows:
     name: check (windows)
     runs-on: windows-latest
+    # Un cargo check frío tarda ~4 min; si pasa de 30 el job está colgado, no lento.
+    timeout-minutes: 30
     env:
       # El incremental no sirve en CI y engorda el `target/` que va al cache.
       CARGO_INCREMENTAL: 0
