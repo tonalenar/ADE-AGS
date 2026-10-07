@@ -21,7 +21,7 @@ pub(crate) mod ledger;
 pub(crate) mod model_discovery;
 pub mod orchestration;
 mod plan;
-mod policy;
+pub(crate) mod policy;
 pub(crate) mod quota;
 pub(crate) mod pool_failover;
 pub(crate) mod roster;
@@ -381,6 +381,7 @@ pub(crate) fn launch_lead(app: &AppHandle, task: &Task) -> Result<(), String> {
 pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> bool {
     let task_id = task.id.clone();
     let launched = (|| -> Result<(), String> {
+        if task.role.as_deref()==Some(types::role::DREAMER) {return launch_memory_dream(app,&task);}
         let (run, deps, facts) = {
             let conn = db.lock().map_err(|e| e.to_string())?;
             let run = store::run_by_id(&conn, &task.run_id)?.ok_or("el run ya no existe")?;
@@ -1200,4 +1201,101 @@ pub fn sweep_orphan_approvals(db: &DbConnection) -> Result<usize, String> {
 pub fn sandbox_status(app: AppHandle) -> Result<sandbox::Status, String> {
     let db = db_of(&app)?;
     Ok(sandbox::status(sandbox::Mode::from_db(&db)))
+}
+
+/// Dreamer is launched only with an adapter enforcing explicit tool denial on Windows.
+pub async fn start_memory_dream(
+    app: &AppHandle,
+    db: &DbConnection,
+    workspace: &str,
+) -> Result<crate::memory::dream::DreamStart, String> {
+    let assignment = assign(
+        db,
+        route_request(
+            Some("claude-code".into()),
+            None,
+            Some(routing::Complexity::Standard),
+            None,
+            true,
+        ),
+    )
+    .await?;
+    if assignment.agent_id != "claude-code" {
+        return Err("Sonhar requer Claude Code com ferramentas de escrita bloqueadas.".into());
+    }
+    let _guard = crate::agents::updates::activity_guard()?;
+    let (task, dream_id) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let input = crate::memory::dream::validate_start(&tx, workspace)?;
+        let cwd:String=tx.query_row("SELECT cwd FROM runs WHERE workspace_id=?1 AND cwd<>'' ORDER BY created_at DESC LIMIT 1",[workspace],|r|r.get(0)).map_err(|_|"Workspace sem pasta no histórico.".to_string())?;
+        let run = store::create_run_with_memory_snapshot(
+            &tx,
+            workspace,
+            None,
+            "Revisar memória e propor melhorias com fontes",
+            &cwd,
+            1,
+            None,
+        )?;
+        let prompt=format!("Leia os dados e proponha somente melhorias justificadas.\nUNTRUSTED DATA BEGIN\n{}\nUNTRUSTED DATA END",input);
+        let task = store::create_task(
+            &tx,
+            &store::NewTask {
+                run_id: &run.id,
+                title: "Sonhar agora",
+                prompt: &prompt,
+                agent_id: &assignment.agent_id,
+                account_id: assignment.account_id.as_deref(),
+                auto_account: assignment.auto_account,
+                model: assignment.model.as_deref(),
+                cwd: &cwd,
+                role: Some(types::role::DREAMER),
+                functional_role: Some("dreamer"),
+                isolate: false,
+                ..Default::default()
+            },
+        )?;
+        let id = uuid::Uuid::new_v4().to_string();
+        let created = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_err(|e| e.to_string())?
+            .as_millis() as i64;
+        tx.execute("INSERT INTO memory_dreams(id,workspace_id,run_id,task_id,created_at,sources) VALUES(?1,?2,?3,?4,?5,?6)",rusqlite::params![id,workspace,run.id,task.id,created,input["sources"].to_string()]).map_err(|e|e.to_string())?;
+        pool_failover::record_task_pool(&tx, &task.id, assignment.pool_origin.as_ref())?;
+        tx.commit().map_err(|e| e.to_string())?;
+        (task, id)
+    };
+    if let Err(e) = launch_memory_dream(app, &task) {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        store::finish_task(&conn, &task.id, &types::TaskOutcome::failed(e.clone()))?;
+        store::refresh_run_status(&conn, &task.run_id)?;
+        crate::memory::notify_changed(app);
+        return Err(e);
+    }
+    crate::memory::notify_changed(app);
+    Ok(crate::memory::dream::DreamStart {
+        dream_id,
+        run_id: task.run_id,
+    })
+}
+
+fn launch_memory_dream(app:&AppHandle,task:&Task)->Result<(),String> {
+ if task.agent_id!="claude-code" {return Err("Sonhar requer Claude Code com ferramentas de escrita bloqueadas.".into());}
+    let extras = supervisor::LaunchExtras {
+        prompt: Some(task.prompt.clone()),
+        system_prompt: Some(crate::memory::dream::SYSTEM_PROMPT.into()),
+        allowed_tools: [
+            "memory_list",
+            "memory_get",
+            "memory_workspace_history",
+            "memory_propose",
+            "memory_update",
+            "memory_delete",
+        ]
+        .iter()
+        .map(|n| crate::ipc::mcp::orchestration_tool_name(n))
+        .collect(),
+    };
+    supervisor::start(app,task.clone(),extras)
 }

@@ -1,7 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 
 import type { Fact } from "@/features/runs/types";
-import type { MemoryDetail, MemoryPage, MemoryReviewSummary, MemoryPendingCounts, MemoryProposal, MemoryProposalResult, MemoryScope, MemorySnapshot, MemoryValidityInterval } from "./types";
+import type { MemoryDream, MemoryDetail, MemoryPage, MemoryReviewSummary, MemoryPendingCounts, MemoryProposal, MemoryProposalResult, MemoryScope, MemorySnapshot, MemoryValidityInterval } from "./types";
 
 export const listMemory = (workspaceId: string, missionId: string | null, cursor?: string | null) =>
   invoke<MemoryPage>("memory_list", { workspaceId, missionId, cursor: cursor ?? null, limit: 32 });
@@ -34,3 +34,13 @@ export const getMemoryReviewSummary = (missionId: string) =>
 
 export const getWorkspaceReviewSummary = (workspaceId: string) =>
   invoke<unknown>("memory_review_summary_workspace", { workspaceId });
+
+// PROVISÓRIO: contratos da Etapa 23 ainda sendo fechados com o Backend.
+export const purgeMemoryUser = (entryId: string, revision: number | null) =>
+  invoke<void>("memory_purge_user", { entryId, revision });
+
+export const startDream = (workspaceId: string) =>
+  invoke<{ dreamId: string; runId: string }>("memory_dream_start", { workspaceId });
+
+export const listDreams = (workspaceId: string) =>
+  invoke<MemoryDream[]>("memory_dreams_workspace", { workspaceId });

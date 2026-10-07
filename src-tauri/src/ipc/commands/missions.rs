@@ -146,10 +146,20 @@ pub(super) fn mission_review(app: &AppHandle, args: &Value) -> Result<Value, Str
 
 /// `ags memory suggest --mission <id> --scope workspace|mission --key <k> --body "..."`: el agente
 /// PROPONE una memoria para la próxima misión. Queda pendiente: solo el usuario la aprueba.
+fn memory_caller_mission(args: &Value) -> Result<String, String> {
+    memory_mission_in_boards(args, &crate::canvas::load_boards())
+}
+
+fn memory_mission_in_boards(args: &Value, boards: &crate::canvas::Boards) -> Result<String, String> {
+    let tab = arg_str(args, "from")?;
+    crate::canvas::mission_of_tab(boards, &tab)
+        .ok_or_else(|| "memory commands require a caller tab attached to a mission".into())
+}
+
 pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, String> {
     use crate::memory::agent::{author_of, propose_for_mission, AgentProposal};
 
-    let mission = arg_str(args, "mission")?;
+    let mission = memory_caller_mission(args)?;
     let key = arg_str(args, "key")?;
     let body = arg_str(args, "body")?;
     let scope = arg_str_opt(args, "scope").unwrap_or_else(|| "mission".into());
@@ -184,7 +194,7 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
 /// `ags memory search "<assunto>" --mission <id>`: busca por relevância nas memórias aprovadas
 /// do workspace e da missão. Só lê; propor uma memória nova continua passando pelo usuário.
 pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    let id = arg_str(args, "mission")?;
+    let id = memory_caller_mission(args)?;
     let query = arg_str(args, "query")?;
     let limit = arg_u64_opt(args, "limit").unwrap_or(5) as usize;
     let at = match args.get("at") {
@@ -241,7 +251,7 @@ fn parse_memory_at(value: &str) -> Result<i64, String> {
 
 /// `ags memory history --mission <id> --key <key> --scope workspace|mission`.
 pub(super) fn memory_history(app: &AppHandle, args: &Value) -> Result<Value, String> {
-    let mission_id = arg_str(args, "mission")?;
+    let mission_id = memory_caller_mission(args)?;
     let key = crate::memory::normalize_key(&arg_str(args, "key")?)?;
     let scope = arg_str(args, "scope")?;
     if !matches!(scope.as_str(), "workspace" | "mission") {
@@ -384,6 +394,15 @@ pub(super) fn approval_decide(app: &AppHandle, args: &Value) -> Result<Value, St
 #[cfg(test)]
 mod memory_time_tests {
     use super::parse_memory_at;
+
+    #[test]
+    fn memory_mission_comes_only_from_caller_canvas() {
+        let board = crate::canvas::Board { nodes: serde_json::json!({"caller":{}}), ..Default::default() };
+        let boards = crate::canvas::Boards::from([("main|C:/repo#m:actual".into(), board)]);
+        assert_eq!(super::memory_mission_in_boards(&serde_json::json!({"from":"caller","mission":"foreign"}), &boards).unwrap(), "actual");
+        assert!(super::memory_mission_in_boards(&serde_json::json!({"mission":"actual"}), &boards).is_err());
+        assert!(super::memory_mission_in_boards(&serde_json::json!({"from":"missing","mission":"actual"}), &boards).is_err());
+    }
 
     #[test]
     fn parses_unix_seconds_and_utc_date_forms() {

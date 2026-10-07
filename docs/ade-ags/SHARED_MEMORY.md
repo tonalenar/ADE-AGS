@@ -1,6 +1,6 @@
 # Shared Memory v0
 
-**Estado: implementação commitada e publicada na PR #4 (`feat/shared-memory-v0`), aguardando merge.** Gates e E2E real concluídos em 01/10/2026; commits e push realizados; PR #4 aberta, ainda não mergeada.
+**Estado: implementação mergeada no master (PR #4, `feat/shared-memory-v0`).** Gates e E2E real concluídos em 01/10/2026. A Etapa 23 acrescentou higiene de segurança (envelope UNTRUSTED DATA, filtro de segredo no núcleo, purge do usuário), a projeção em Markdown e o Dreaming v0; ver `MEMORY_REPO.md`.
 
 Shared Memory mantém contexto local e aprovado entre Runs. A implementação reutiliza SQLite, Mission Runtime e o servidor MCP `ade-ags`; não usa serviço cloud nem inferência para consolidar conteúdo.
 

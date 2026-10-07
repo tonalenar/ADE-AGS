@@ -98,7 +98,7 @@ fn migration_v23_to_v24_adds_memory_tables_and_immutable_triggers() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 38);
+    assert_eq!(version, 40);
     for table in [
         "memory_entries",
         "memory_revisions",
@@ -876,7 +876,7 @@ fn mcp_lists_both_authorized_scopes_but_never_accepts_owner_ids() {
     .unwrap_err();
     assert!(page.contains("invalid memory.list arguments"));
     let result = task_tool(&conn, "lead", "memory.list", json!({"scope":"mission"})).unwrap();
-    let decoded: MemoryPage = serde_json::from_str(result["text"].as_str().unwrap()).unwrap();
+    let decoded: MemoryPage = serde_json::from_str(agent_json(&result)).unwrap();
     assert_eq!(decoded.items.len(), 1);
     assert_eq!(decoded.items[0].key, "m-key");
 }
@@ -891,7 +891,7 @@ fn additive_upgrades_from_v19_through_v23_preserve_data_and_are_idempotent() {
         conn.pragma_update(None,"user_version",version).unwrap();
         crate::database::migrate_for_tests(&conn).unwrap();
         crate::database::migrate_for_tests(&conn).unwrap();
-        assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(), 38);
+        assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),40);
         assert_eq!(conn.query_row("SELECT model,handoff FROM tasks WHERE id='old-task'",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).unwrap(),("old-model".into(),"legacy delivery".into()));
         assert_eq!(conn.query_row("SELECT body FROM run_facts WHERE id='old-fact'",[],|r|r.get::<_,String>(0)).unwrap(),"historical fact");
         activate(&conn,"mission",Some("m1"),"upgrade","memory works");
@@ -1053,13 +1053,14 @@ fn escaped_active_and_pending_bodies_do_not_stall_memory_pagination() {
     let read = task_tool(&conn, "reader", "memory.get", json!({"entry_id":active.entry_id})).unwrap();
     let text = read["text"].as_str().unwrap();
     assert!(text.len() <= LIST_BYTES);
-    let preview: serde_json::Value = serde_json::from_str(text).unwrap();
-    assert_eq!(preview["bodyTruncated"], true);
-    assert_eq!(preview["pendingBodyTruncated"], true);
-    for (revision, expected) in [(1, &body), (2, &pending)] {
+    let preview: serde_json::Value = serde_json::from_str(agent_json(&read)).unwrap();
+    assert_eq!(preview["bodyTruncated"], false);
+    assert_eq!(preview["pendingBodyTruncated"], false);
+    assert!(preview["pendingBody"].is_null());
+    for (revision, expected) in [(1, &body)] {
         let read = task_tool(&conn, "reader", "memory.get", json!({"entry_id":active.entry_id,"revision":revision})).unwrap();
         assert!(read["text"].as_str().unwrap().len() <= LIST_BYTES);
-        let value: serde_json::Value = serde_json::from_str(read["text"].as_str().unwrap()).unwrap();
+        let value: serde_json::Value = serde_json::from_str(agent_json(&read)).unwrap();
         assert_eq!(value["body"].as_str(), Some(expected.as_str()));
     }
     assert!(task_tool(&conn, "reader", "memory.get", json!({"entry_id":active.entry_id,"revision":99})).is_err());
@@ -1077,7 +1078,7 @@ fn migration_v24_failure_rolls_back_ddl_and_schema_version() {
     assert_eq!(conn.query_row("SELECT legacy FROM memory_revisions", [], |r| r.get::<_, String>(0)).unwrap(), "preserved");
     conn.execute("DROP TABLE memory_revisions", []).unwrap();
     crate::database::migrate_for_tests(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),  38);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),40);
 }
 
 #[test]
@@ -1154,10 +1155,10 @@ fn initial_create_rejection_is_inactive_preserves_history_and_can_be_reproposed(
     assert!(snapshot_for_run(&conn, "rejected-run").unwrap().items.is_empty());
     seed_task(&conn, "lead-rejected", "rejected-run", Some("lead"));
     let response = task_tool(&conn, "lead-rejected", "memory.list", json!({"scope":"workspace"})).unwrap();
-    let page: MemoryPage = serde_json::from_str(response["text"].as_str().unwrap()).unwrap();
+    let page: MemoryPage = serde_json::from_str(agent_json(&response)).unwrap();
     assert_eq!(page.items[0].status, "inactive");
     let response = task_tool(&conn, "lead-rejected", "memory.get", json!({"entry_id":first.entry_id})).unwrap();
-    let detail: serde_json::Value = serde_json::from_str(response["text"].as_str().unwrap()).unwrap();
+    let detail: serde_json::Value = serde_json::from_str(agent_json(&response)).unwrap();
     assert_eq!(detail["status"], "inactive");
 
     let second = propose(&conn, "workspace", None, "rejected-key", "second", "create", None);
@@ -1217,4 +1218,111 @@ fn pending_counts_cover_workspace_missions_and_approval() {
     assert_eq!(after_approval.by_mission.get("m1").copied().unwrap_or(0), 0);
     assert_eq!(after_approval.by_mission.get("m2"), Some(&1));
     assert_eq!(workspace_proposal.status, "proposed");
+}
+
+fn agent_json(response: &serde_json::Value) -> &str {
+    response["text"].as_str().unwrap().split("```json\n").nth(1).unwrap().split("\n```").next().unwrap()
+}
+
+#[test]
+fn task_reads_never_expose_pending_or_rejected_content() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_run(&conn, "r1", "w1", None);
+    for role in ["lead", "worker"] { seed_task(&conn, role, "r1", Some(role)); }
+    let active = activate(&conn, "workspace", None, "safe", "approved value");
+    let rejected = propose(&conn, "workspace", None, "safe", "rejected payload", "update", Some(1));
+    decide(&conn, &rejected.entry_id, rejected.revision, false).unwrap();
+    let pending = propose(&conn, "workspace", None, "safe", "pending payload", "update", Some(1));
+    for role in ["lead", "worker"] {
+        for (command, args) in [("memory.list", json!({"scope":"workspace"})), ("memory.get", json!({"entry_id":active.entry_id}))] {
+            let response = task_tool(&conn, role, command, args).unwrap();
+            let text = response["text"].as_str().unwrap();
+            assert!(text.contains("UNTRUSTED DATA") && text.contains("approved value"));
+            assert!(!text.contains("pending payload") && !text.contains("rejected payload"));
+        }
+        for revision in [rejected.revision, pending.revision] {
+            assert!(task_tool(&conn, role, "memory.get", json!({"entry_id":active.entry_id,"revision":revision})).is_err());
+        }
+    }
+}
+
+#[test]
+fn secrets_are_rejected_by_core_task_suggest_promotion_and_run_facts() {
+    let conn = db(); seed_workspace(&conn, "w1"); seed_mission(&conn, "m1", "w1");
+    seed_run(&conn, "r1", "w1", Some("m1")); seed_task(&conn, "worker", "r1", Some("worker"));
+    let active = activate(&conn, "workspace", None, "safe", "safe body");
+    for (i, secret) in [concat!("sk_", "live_abcdefghijklmnopqrstuvwxyz"), concat!("sk_", "test_abcdefghijklmnopqrstuvwxyz"), "glpat-abcdefghijklmnopqrstuvwxyz", "npm_abcdefghijklmnopqrstuvwxyz", "xoxa-abcdefghijklmnopqrstuvwxyz", "xoxr-abcdefghijklmnopqrstuvwxyz", "xoxs-abcdefghijklmnopqrstuvwxyz", "gho_abcdefghijklmnopqrstuvwxyz", "github_pat_abcdefghijklmnopqrstuvwxyz", "ASIAIOSFODNN7EXAMPLE1", "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiJ1c2VyIn0.signature", "https://admin:abc@example.com", "password : hunter2", "senha=valor", "secret: value", "token = value", "-----BEGIN RSA PRIVATE KEY-----", "Ab1Cd2Ef3Gh4Ij5Kl6Mn7Op8Qr9St0Uv"].into_iter().enumerate() {
+        let key = format!("secret-{i}");
+        for actor in ["lead", "worker"] {
+            let input = proposal("workspace", &key, secret, "create", None);
+            assert!(super::propose(&conn, "workspace", "w1", None, &input, ProposalActor {kind:actor,run_id:None,task_id:None,fact_id:None}).is_err(), "{secret}");
+        }
+        assert!(task_tool(&conn, "worker", "memory.propose", json!({"scope":"workspace","key":key,"kind":"note","body":secret})).is_err());
+        assert!(task_tool(&conn, "worker", "memory.update", json!({"entry_id":active.entry_id,"expected_revision":1,"kind":"note","body":secret})).is_err());
+        assert!(agent::propose_for_mission(&conn, &agent::AgentProposal { mission_id:"m1",scope:"workspace",key:&key,kind:"note",body:secret,priority:0,author:agent::Author::Worker,author_name:"Backend" }).is_err());
+        assert!(crate::runs::store::add_fact(&conn, "r1", Some("worker"), "finding", secret).is_err());
+        let fact_id = format!("fact-{i}"); seed_fact(&conn, &fact_id, "r1", Some("worker"), secret);
+        for actor in ["user", "worker"] { assert!(promote_fact(&conn,"r1",&fact_id,"workspace",&key,0,None,actor,None).is_err()); }
+        assert!(task_tool(&conn, "worker", "memory.promoteFact", json!({"fact_id":fact_id,"scope":"workspace","key":key})).is_err());
+    }
+    assert_eq!(pending_counts_for_workspace(&conn,"w1").unwrap().workspace,0);
+}
+
+#[test]
+fn agent_priority_is_capped_in_core_and_task_paths() {
+    let conn = db(); seed_workspace(&conn, "w1"); seed_run(&conn, "r1", "w1", None); seed_task(&conn,"worker","r1",Some("worker"));
+    let response=task_tool(&conn,"worker","memory.propose",json!({"scope":"workspace","key":"priority","kind":"constraint","body":"Safe evidence","priority":10})).unwrap();
+    let result: serde_json::Value=serde_json::from_str(response["text"].as_str().unwrap()).unwrap();
+    let detail=detail_for_owner(&conn,result["entryId"].as_str().unwrap(),"w1",None).unwrap();
+    assert_eq!(detail.revisions[0].priority,3);
+}
+
+#[test]
+fn purge_requires_user_path_audits_without_body_and_clears_copies() {
+    let conn = db(); seed_workspace(&conn,"w1"); seed_run(&conn,"r1","w1",None); seed_task(&conn,"worker","r1",Some("worker"));
+    let entry=activate(&conn,"workspace",None,"credential","token: stored-before-guard");
+    snapshot_run(&conn,"r1","w1",None).unwrap();
+    assert!(conn.execute("DELETE FROM memory_revisions WHERE entry_id=?1",[&entry.entry_id]).is_err());
+    assert!(task_tool(&conn,"worker","memory.purge",json!({"entry_id":entry.entry_id,"revision":1})).is_err());
+    purge_user(&conn,&entry.entry_id,1).unwrap();
+    assert!(purge_user(&conn,&entry.entry_id,1).is_err());
+    assert!(snapshot_for_run(&conn,"r1").unwrap().items.is_empty());
+    let audit: (String,i64,String)=conn.query_row("SELECT entry_id,revision,actor_kind FROM memory_purge_audit",[],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
+    assert_eq!(audit,(entry.entry_id,1,"user".into()));
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM memory_purge_guard",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+    crate::database::migrate_for_tests(&conn).unwrap();
+}
+
+#[test]
+fn purge_all_is_atomic_and_never_reuses_revision_ids() {
+    let conn=db(); seed_workspace(&conn,"w1");
+    let active=activate(&conn,"workspace",None,"purged","safe body");
+    propose(&conn,"workspace",None,"purged","pending body","update",Some(1));
+    purge_revisions_user(&conn,&active.entry_id,None).unwrap();
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM memory_revisions",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM memory_purge_audit",[],|r|r.get::<_,i64>(0)).unwrap(),2);
+    let replacement=propose(&conn,"workspace",None,"purged","new body","create",None);
+    assert_eq!(replacement.revision,3);
+    let another=activate(&conn,"workspace",None,"blocked","safe body");
+    conn.execute_batch("CREATE TRIGGER fail_purge BEFORE INSERT ON memory_purge_audit BEGIN SELECT RAISE(ABORT,'test'); END;").unwrap();
+    assert!(purge_user(&conn,&another.entry_id,1).is_err());
+    assert_eq!(detail_for_owner(&conn,&another.entry_id,"w1",None).unwrap().entry.body.as_deref(),Some("safe body"));
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM memory_purge_guard",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+}
+
+#[test]
+fn agent_envelope_escaping_preserves_pagination_and_byte_limit() {
+    let conn=db(); seed_workspace(&conn,"w1"); seed_run(&conn,"r1","w1",None); seed_task(&conn,"worker","r1",Some("worker"));
+    for i in 0..12 { activate(&conn,"workspace",None,&format!("entry-{i:02}"), &"`<>".repeat(1300)); }
+    let mut cursor: Option<String>=None; let mut seen=0;
+    loop {
+        let response=task_tool(&conn,"worker","memory.list",json!({"scope":"workspace","cursor":cursor,"limit":32})).unwrap();
+        let text=response["text"].as_str().unwrap(); assert!(text.len()<=LIST_BYTES);
+        let page: MemoryPage=serde_json::from_str(agent_json(&response)).unwrap();
+        assert!(!page.items.is_empty()); seen+=page.items.len();
+        if !page.has_more { break; }
+        assert_ne!(page.next_cursor,cursor); cursor=page.next_cursor;
+    }
+    assert_eq!(seen,12);
 }

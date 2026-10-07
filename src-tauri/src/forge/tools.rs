@@ -542,6 +542,7 @@ async fn call(app: &AppHandle, cwd: &str, name: &str, args: &Value) -> Result<St
 /// Lo que recibe la app desde `ags mcp`: `{cwd|taskId, tool, args}`. Corre en un hilo
 /// del servidor IPC (sin runtime), así que puede esperar la parte async con `block_on`.
 pub(crate) fn run(app: &AppHandle, payload: &Value) -> Result<Value, String> {
+    {use tauri::Manager;let db=app.try_state::<crate::database::DbConnection>().ok_or("database unavailable")?;let conn=db.lock().map_err(|e|e.to_string())?;crate::runs::policy::guard_task(&conn,payload.get("taskId").and_then(Value::as_str),"forge.run")?;}
     let cwd = cwd_of(app, payload)?;
     let tool = payload.get("tool").and_then(Value::as_str).ok_or("missing tool")?.to_string();
     let args = payload.get("args").cloned().unwrap_or(Value::Null);

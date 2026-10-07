@@ -115,6 +115,7 @@ pub mod status {
 }
 
 pub mod role {
+    pub const DREAMER: &str = "dreamer";
     /// El agente que planifica y reparte.
     pub const LEAD: &str = "lead";
     /// Una tarea de un plan.

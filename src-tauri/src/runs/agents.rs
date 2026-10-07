@@ -143,7 +143,7 @@ impl HeadlessAgent for ClaudeCode {
                 // haría imposible que una tarea pruebe una página. Subir archivos y correr
                 // código sí pasan (ver `BROWSER_NEEDS_APPROVAL`). Las de orquestación
                 // van según el rol: las decide quien arma el lanzamiento.
-                let mut allowed = crate::ipc::mcp::browser_tool_names();
+                let mut allowed = if ctx.read_only { Vec::new() } else { crate::ipc::mcp::browser_tool_names() };
                 allowed.extend(ctx.allowed_tools.iter().cloned());
                 args.push("--allowedTools".into());
                 args.push(allowed.join(","));

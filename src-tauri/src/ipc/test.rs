@@ -423,7 +423,8 @@ fn una_tab_ve_el_navegador_y_una_tarea_ademas_el_broker() {
     assert!(tab.contains(&"browser_click".to_string()));
     assert_eq!(task[0], "approve_tool_use");
     let memory: Vec<_> = task.iter().filter(|name| name.starts_with("memory_")).collect();
-    assert_eq!(memory.len(), 6);
+    assert_eq!(memory.len(), 7);
+    assert!(task.iter().any(|name| name == "memory_workspace_history"));
     assert!(!tab.iter().any(|name| name.starts_with("memory_")));
     let task_without_memory: Vec<_> = task[1..].iter().filter(|name| !name.starts_with("memory_")).cloned().collect();
     assert_eq!(task_without_memory, tab);

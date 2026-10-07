@@ -234,6 +234,9 @@ pub fn resolve(
 ) -> Verdict {
     // Antes que las reglas y sin encolar: lo que un lead no puede hacer no se le pregunta a
     // nadie, así que ni un "Allow" ni una regla recordada pueden cambiar su papel.
+    if let Ok(conn)=db.lock() {if let Ok(Some(task))=super::store::task_by_id(&conn,task_id) {
+ if task.role.as_deref()==Some(super::types::role::DREAMER)&&!super::policy::dreamer_may_use(tool_name) {
+ return Verdict{allow:false,reason:Some(super::policy::DREAMER_DENIED.into()),by:DecidedBy::Policy};}}}
     if is_coordinator(db, task_id) && !super::policy::lead_may_use(tool_name) {
         return Verdict { allow: false, reason: Some(super::policy::LEAD_DENIED.into()), by: DecidedBy::Policy };
     }

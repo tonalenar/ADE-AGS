@@ -14,6 +14,7 @@ pub struct FunctionalRole {
 }
 
 pub const BUILTIN_ROLES: &[FunctionalRole] = &[
+ FunctionalRole{id:"dreamer",label:"Dreamer",description:"Read historical evidence and propose memory maintenance.",instructions:crate::memory::dream::SYSTEM_PROMPT},
     FunctionalRole {
         id: "backend",
         label: "Backend",
@@ -88,10 +89,11 @@ mod tests {
     #[test]
     fn built_in_catalog_has_unique_complete_roles_and_lookup() {
         let ids: HashSet<_> = BUILTIN_ROLES.iter().map(|role| role.id).collect();
-        assert_eq!(ids.len(), 8);
+        assert_eq!(ids.len(), 9);
         assert_eq!(
             ids,
             [
+                "dreamer",
                 "backend",
                 "frontend",
                 "qa",

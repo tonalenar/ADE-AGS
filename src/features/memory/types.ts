@@ -1,5 +1,7 @@
 import type { Fact, Run } from "@/features/runs/types";
 
+export type MemoryActorKind = "user" | "lead" | "worker" | "dreamer";
+
 export type MemoryScope = "workspace" | "mission";
 export type MemoryKind = "decision" | "finding" | "file" | "constraint" | "note";
 export type MemoryOperation = "create" | "update" | "delete";
@@ -22,7 +24,7 @@ export interface MemoryEntry {
   body: string | null;
   bodyTruncated?: boolean;
   pendingBodyTruncated?: boolean;
-  authorKind: "user" | "lead" | "worker" | null;
+  authorKind: MemoryActorKind | null;
   sourceRunId: string | null;
   sourceTaskId: string | null;
   sourceFactId: string | null;
@@ -33,7 +35,7 @@ export interface MemoryEntry {
   pendingKind: MemoryKind | null;
   pendingPriority: number | null;
   pendingBody: string | null;
-  pendingActorKind: "user" | "lead" | "worker" | null;
+  pendingActorKind: MemoryActorKind | null;
   pendingSourceRunId: string | null;
   pendingSourceTaskId: string | null;
   pendingSourceFactId: string | null;
@@ -50,7 +52,7 @@ export interface MemoryRevision {
   priority: number;
   body: string;
   contentHash: string;
-  actorKind: "user" | "lead" | "worker";
+  actorKind: MemoryActorKind;
   sourceRunId: string | null;
   sourceTaskId: string | null;
   sourceFactId: string | null;
@@ -71,7 +73,7 @@ export interface MemoryValidityInterval {
   kind: MemoryKind;
   priority: number;
   body: string;
-  actorKind: "user" | "lead" | "worker";
+  actorKind: MemoryActorKind;
   reason: string | null;
   validFrom: number;
   validTo: number | null;
@@ -128,7 +130,7 @@ export interface MemoryReviewEvidence {
   runId: string | null;
   taskId: string | null;
   factId: string | null;
-  actorKind: "user" | "lead" | "worker";
+  actorKind: MemoryActorKind;
   reason: string | null;
 }
 
@@ -168,4 +170,16 @@ export interface MemoryWorkspaceReview {
   workspaceId: string;
   groups: { missionId: string | null; missionTitle: string | null; items: MemoryReviewItem[]; counts: MemoryReviewCounts }[];
   counts: MemoryReviewCounts;
+}
+
+/** PROVISÓRIO (contrato proposto ao Backend, Etapa 23): um "sonho" do Dreamer com suas propostas e o diff Markdown. */
+export interface MemoryDream {
+  dreamId: string;
+  runId: string;
+  createdAt: number;
+  status: "running" | "done" | "failed";
+  proposals: MemoryReviewItem[];
+  /** Diff unificado da projeção Markdown, calculado pelo ADE (nunca pelo agente). */
+  markdownDiff: string;
+  questions: string[];
 }

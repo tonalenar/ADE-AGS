@@ -63,6 +63,16 @@ fn design_command(app: &AppHandle, command: &str, args: &Value) -> Result<Value,
 }
 
 pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
+    if command != "run.approve" && args.get("taskId").and_then(Value::as_str).is_some() {
+        use tauri::Manager;
+        let Some(db) = app.try_state::<crate::database::DbConnection>() else {
+            return Response::err("database unavailable");
+        };
+        let Ok(conn) = db.lock() else { return Response::err("database unavailable"); };
+        if let Err(error) = crate::runs::policy::guard_task(&conn, args.get("taskId").and_then(Value::as_str), command) {
+            return Response::err(error);
+        }
+    }
     let result = match command {
         "design.create" => design_command(app, command, args),
         "design.delete" => design_command(app, command, args),
@@ -196,6 +206,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "run.addFact" => run_orchestrate(app, "run.addFact", args),
         "run.facts" => run_orchestrate(app, "run.facts", args),
         "run.factBody" => run_orchestrate(app, "run.factBody", args),
+        "memory.workspaceHistory" => run_orchestrate(app,"memory.workspaceHistory",args),
         "memory.list" => run_orchestrate(app, "memory.list", args),
         "memory.get" => run_orchestrate(app, "memory.get", args),
         "memory.propose" => run_orchestrate(app, "memory.propose", args),
