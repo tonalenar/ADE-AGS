@@ -133,12 +133,14 @@ O workflow [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) roda em 
 
 Referência local: `cargo check --lib --bin ags --tests` no Windows, com o alvo compartilhado (`~/.ags/cargo-target-agents`) já aquecido, levou **40,7s** (`Measure-Command`, exit 0). Esse número é anterior à troca para `--bins`. O job do Windows não precisa de bun nem da pasta `dist` do frontend: em build de debug o Tauri usa `devUrl`, e o check passou localmente sem `dist`.
 
-Qualquer job que falhe já deixa o PR vermelho. Hoje a `master` **não tem branch protection nem rulesets** (`gh api repos/tonalenar/ADE-AGS/branches/master/protection` → 404 "Branch not protected"), então nenhum check é formalmente obrigatório para o merge.
+Os dois checks são **obrigatórios para o merge** na `master`: o ruleset [`master: CI obrigatorio`](https://github.com/tonalenar/ADE-AGS/rules/24685661) exige `test` e `check (windows)` verdes, sem bypass e sem exigir branch atualizada. Renomear um job (o `name:` no `ci.yml`) muda o nome do check, e o ruleset precisa ser atualizado junto, ou nenhum PR fica mesclável.
 
 ### Por que `cargo check` e não `cargo test` no Windows
 - **Medido:** `cargo test --lib --bin ags` no runner Windows (PR descartável 120, já fechado) **roda**: o binário sobe (o `build.rs` embute o manifesto de teste, então não há mais `STATUS_ENTRYPOINT_NOT_FOUND`). Resultado: **1266 passed, 2 failed, 10 ignored** em 71,6s; o passo levou **4m12s**.
-- **As 2 falhas só aparecem no Windows:** `ipc::test::un_symlink_que_apunta_a_otro_lado_no_cuenta_como_instalado` (os error 183) e `missions::cleanup::tests::listing_and_prune_preserve_orphans_and_active_then_clean_closed`.
-- **Decisão:** no CI do Windows fica só o `check`. Motivo: rodar os testes soma ~4 min ao job e as 2 falhas deixariam o job vermelho sem ser regressão de PR. Os testes com gate `#[cfg(windows)]` continuam sendo rodados à mão no Windows.
+- **As 2 falhas só-Windows já foram corrigidas** (validadas no runner):
+  - `ipc::test::un_symlink_que_apunta_a_otro_lado_no_cuenta_como_instalado` (os error 183): era do teste. O crate `symlink` 0.1, no Windows, abre o caminho sem `FILE_FLAG_OPEN_REPARSE_POINT`, segue o link e `remove_symlink_auto` falha; o `let _` engolia o erro. O teste agora usa `std::fs::remove_file`. Na produção, o `install.rs` já tem fallback para `remove_file`.
+  - `missions::cleanup::tests::listing_and_prune_preserve_orphans_and_active_then_clean_closed`: era bug de produção. O `list()` comparava como texto o caminho do worktree gravado no banco e o do `git worktree list`. No runner o TEMP é `C:\Users\RUNNER~1\...` (nome 8.3), o worktree de uma missão ativa virava "órfão" e perdia o bloqueio. Agora os dois lados são canonicalizados (`same_worktree`). Junções e symlinks no caminho provocavam o mesmo erro.
+- **Decisão:** no CI do Windows fica só o `check`. Motivo: rodar os testes soma ~4 min ao job (o check com cache leva ~1m40s). Contraponto: o bug do `cleanup` acima só aparecia rodando os testes; se surgirem outros assim, vale ligar o `cargo test` no job Windows (as duas falhas conhecidas foram corrigidas). Os testes com gate `#[cfg(windows)]` continuam sendo rodados à mão no Windows.
 - O `cargo check` pega erros de compilação sem gerar código nem linkar.
 
 ### Prova: o job pega quebra só-Windows
