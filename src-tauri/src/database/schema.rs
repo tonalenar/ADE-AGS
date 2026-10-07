@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-pub(crate) const SCHEMA_VERSION: i32 = 42;
+pub(crate) const SCHEMA_VERSION: i32 = 41;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1152,8 +1152,9 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     if !has_column(conn,"memory_agent_drafts","source_fact_id") {
         conn.execute_batch("ALTER TABLE memory_agent_drafts ADD COLUMN source_fact_id TEXT;")?;
     }
-    // v42: workspaces com exportação Markdown pendente ou falha. A abertura do app
-    // reenfileira estas linhas se o processo fechou antes do git terminar.
+    // Fila da exportação Markdown. Sem subir user_version: o migrate inteiro roda
+    // em toda abertura, e CREATE IF NOT EXISTS pega bases que já estão na v41.
+    // Subir a versão quebraria os testes que cravam 41 e forçaria um backup VACUUM.
     conn.execute_batch(
         "CREATE TABLE IF NOT EXISTS memory_repo_sync_pending (
             workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
