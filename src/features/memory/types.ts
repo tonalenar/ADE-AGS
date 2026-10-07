@@ -41,7 +41,6 @@ export interface MemoryEntry {
   pendingSourceFactId: string | null;
   pendingReason: string | null;
   pendingCreatedAt: number | null;
-  sourceFactId?: string | null;
   lastVerified?: number | null;
   ttlDays?: number | null;
   timesUsed?: number;
