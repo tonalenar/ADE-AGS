@@ -92,3 +92,8 @@ jobs:
       - name: cargo check
         working-directory: src-tauri
         run: cargo check --lib --bins --tests
+
+      # TEMPORAL, solo para validar el fix del symlink. No mergear.
+      - name: cargo test symlink (temporal)
+        working-directory: src-tauri
+        run: cargo test --lib --bin ags un_symlink_que_apunta_a_otro_lado
