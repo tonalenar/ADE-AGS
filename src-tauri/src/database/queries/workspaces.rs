@@ -32,7 +32,7 @@ pub fn touch_workspace_now(db: &DbConnection, workspace_id: &str) -> Result<(), 
 pub fn db_get_last_active_workspace_id(db: &DbConnection) -> Result<String, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.query_row(
-        "SELECT id FROM workspaces ORDER BY last_active DESC LIMIT 1",
+        "SELECT id FROM workspaces WHERE deleted_at IS NULL ORDER BY last_active DESC LIMIT 1",
         [],
         |row| row.get(0),
     )
@@ -69,7 +69,7 @@ pub fn db_list_workspaces(db: tauri::State<DbConnection>) -> Result<Vec<Workspac
              FROM workspaces w
              LEFT JOIN windows win ON win.workspace_id = w.id
              LEFT JOIN tabs t ON t.window_id = win.id
-             WHERE w.id != ?1
+             WHERE w.id != ?1 AND w.deleted_at IS NULL
              GROUP BY w.id
              ORDER BY w.last_active DESC",
         )
@@ -333,11 +333,15 @@ pub fn db_delete_workspace(
     workspace_id: String,
     db: tauri::State<DbConnection>,
 ) -> Result<(), String> {
+    let conn=db.lock().map_err(|e|e.to_string())?;
+    soft_delete_workspace(&conn,&workspace_id)
+}
+
+pub fn soft_delete_workspace(conn:&Connection,workspace_id:&str)->Result<(),String> {
     if workspace_id == DEFAULT_WORKSPACE_ID {
         return Err("No se puede eliminar el workspace por defecto".to_string());
     }
 
-    let conn = db.lock().map_err(|e| e.to_string())?;
     let open_count: i64 = conn
         .query_row(
             "SELECT COUNT(*) FROM windows WHERE workspace_id = ?1 AND is_open = 1",
@@ -349,7 +353,16 @@ pub fn db_delete_workspace(
         return Err("Cierra las ventanas de este workspace antes de eliminarlo".to_string());
     }
 
-    conn.execute("DELETE FROM workspaces WHERE id = ?1", [&workspace_id])
+    // Retain memory, revisions and sessions for recovery. Expiry is metadata for
+    // a future explicit purge, never permission to cascade-delete automatically.
+    conn.execute("UPDATE workspaces SET deleted_at=?2,delete_after=?3 WHERE id=?1", rusqlite::params![workspace_id,now_ts(),now_ts()+30*86400])
         .map_err(|e| e.to_string())?;
     Ok(())
+}
+
+#[tauri::command]
+pub fn db_restore_workspace(workspace_id:String,db:tauri::State<DbConnection>)->Result<(),String>{
+    let conn=db.lock().map_err(|e|e.to_string())?;
+    let changed=conn.execute("UPDATE workspaces SET deleted_at=NULL,delete_after=NULL WHERE id=?1 AND deleted_at IS NOT NULL",[workspace_id]).map_err(|e|e.to_string())?;
+    if changed==0 {return Err("workspace is not in recovery".into());} Ok(())
 }

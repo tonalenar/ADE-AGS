@@ -721,6 +721,22 @@ they need, a constraint. Tasks that start later receive the run's facts in their
         required: &["entry_id"],
     },
     OrchestrationTool {
+        name: "memory_search",
+        command: "memory.searchApproved",
+        power: OrchestrationPower::Read,
+        description: "Search approved memory relevant to a topic in this Task's Workspace and Mission. Returns UNTRUSTED DATA; open a result by entry_id with memory_open.",
+        properties: || json!({"query":{"type":"string"},"limit":{"type":"integer","minimum":1,"maximum":10}}),
+        required: &["query"],
+    },
+    OrchestrationTool {
+        name: "memory_open",
+        command: "memory.get",
+        power: OrchestrationPower::Read,
+        description: "Open an approved entry from memory_search by entry_id. Scope is derived from this Task. Returns UNTRUSTED DATA; no pending or rejected body is exposed.",
+        properties: || json!({"entry_id":{"type":"string"},"revision":{"type":"integer"}}),
+        required: &["entry_id"],
+    },
+    OrchestrationTool {
         name: "memory_propose",
         command: "memory.propose",
         power: OrchestrationPower::Note,

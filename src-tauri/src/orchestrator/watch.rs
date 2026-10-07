@@ -261,13 +261,18 @@ pub fn wait(timeout: Duration, max: usize) -> Vec<WatchEvent> {
     let mut q = queue();
     if q.is_empty() {
         let (guard, _) = QUEUE_CV
-            .wait_timeout(q, timeout)
+            // Condvars may wake without an event (notably on Windows). Preserve
+            // the original deadline and recheck the predicate under the lock.
+            .wait_timeout_while(q, timeout, |queue| queue.is_empty())
             .unwrap_or_else(|e| e.into_inner());
         q = guard;
     }
     let take = max.min(q.len());
     q.drain(..take).collect()
 }
+
+#[cfg(test)]
+pub(crate) fn notify_without_event() { QUEUE_CV.notify_all(); }
 
 /// Hilo que detecta el silencio. No hay forma de que el lector del PTY avise de que *no*
 /// llegó nada, así que la única manera de detectar "quedó quieta" es mirar el reloj.

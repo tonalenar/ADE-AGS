@@ -27,6 +27,7 @@ pub const LIST_LIMIT: usize = 32;
 pub const LIST_BYTES: usize = 32 * 1024;
 pub const SNAPSHOT_LIMIT: usize = 16;
 pub const SNAPSHOT_BYTES: usize = 16 * 1024;
+pub const RELEVANT_LIMIT: usize = 5;
 
 const KINDS: &[&str] = &["decision", "finding", "file", "constraint", "note"];
 
@@ -122,6 +123,9 @@ pub struct MemoryEntry {
     pub pending_reason: Option<String>,
     pub pending_created_at: Option<i64>,
     pub source_fact_id: Option<String>,
+    pub last_verified: Option<i64>,
+    pub ttl_days: Option<i64>,
+    pub times_used: i64,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -174,6 +178,16 @@ pub struct SnapshotMeta {
     pub omitted_entries: i64,
     pub truncated_entries: i64,
     pub context_bytes: i64,
+    #[serde(default)]
+    pub context_tokens: i64,
+    #[serde(default)]
+    pub baseline_bytes: i64,
+    #[serde(default)]
+    pub baseline_tokens: i64,
+    #[serde(default)]
+    pub memory_index: String,
+    #[serde(default)]
+    pub repository_commit: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize, PartialEq)]
@@ -199,7 +213,7 @@ pub struct MemoryPendingCounts {
     pub by_mission: std::collections::HashMap<String, i64>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct ProposalInput {
     pub scope: String,
@@ -227,6 +241,8 @@ pub struct ProposalResult {
     pub revision: i64,
     pub status: String,
     pub idempotent: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -286,14 +302,16 @@ fn owner_quota(
         conn.query_row("SELECT
             (SELECT COUNT(*) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.scope='mission' AND e.mission_id=?1 AND r.status='proposed'),
             (SELECT COUNT(*) FROM memory_entries WHERE scope='mission' AND mission_id=?1 AND status='active' AND current_revision IS NOT NULL),
-            (SELECT COALESCE(SUM(length(CAST(r.body AS BLOB))+length(CAST(e.key AS BLOB))+COALESCE(length(CAST(r.reason AS BLOB)),0)),0) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.scope='mission' AND e.mission_id=?1)", [mid], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_| "could not check memory quota".to_string())?
+            (SELECT COALESCE(SUM(length(CAST(r.body AS BLOB))+64+COALESCE(length(CAST(r.reason AS BLOB)),0)+COALESCE(length(r.source_run_id),0)+COALESCE(length(r.source_task_id),0)+COALESCE(length(r.source_fact_id),0)),0) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.scope='mission' AND e.mission_id=?1)", [mid], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_| "could not check memory quota".to_string())?
     } else {
         conn.query_row("SELECT
             (SELECT COUNT(*) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.scope='workspace' AND e.workspace_id=?1 AND r.status='proposed'),
             (SELECT COUNT(*) FROM memory_entries WHERE scope='workspace' AND workspace_id=?1 AND status='active' AND current_revision IS NOT NULL),
-            (SELECT COALESCE(SUM(length(CAST(r.body AS BLOB))+length(CAST(e.key AS BLOB))+COALESCE(length(CAST(r.reason AS BLOB)),0)),0) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.scope='workspace' AND e.workspace_id=?1)", [workspace_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_| "could not check memory quota".to_string())?
+            (SELECT COALESCE(SUM(length(CAST(r.body AS BLOB))+64+COALESCE(length(CAST(r.reason AS BLOB)),0)+COALESCE(length(r.source_run_id),0)+COALESCE(length(r.source_task_id),0)+COALESCE(length(r.source_fact_id),0)),0) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.scope='workspace' AND e.workspace_id=?1)", [workspace_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_| "could not check memory quota".to_string())?
     };
-    Ok((pending, active, bytes))
+    let metadata: i64 = conn.query_row("SELECT COALESCE(SUM(length(CAST(e.key AS BLOB))),0) FROM memory_entries e WHERE e.workspace_id=?1 AND ((?2 IS NULL AND e.scope='workspace') OR (?2 IS NOT NULL AND e.mission_id=?2 AND e.scope='mission'))", params![workspace_id,mission_id], |r|r.get(0)).map_err(|e|e.to_string())?;
+    let archived: i64 = conn.query_row("SELECT COALESCE(SUM(length(CAST(c.metadata_json AS BLOB))+length(c.content_hash)),0) FROM memory_compacted_revisions c JOIN memory_entries e ON e.id=c.entry_id WHERE e.workspace_id=?1 AND ((?2 IS NULL AND e.scope='workspace') OR (?2 IS NOT NULL AND e.mission_id=?2 AND e.scope='mission'))",params![workspace_id,mission_id],|r|r.get(0)).map_err(|e|e.to_string())?;
+    Ok((pending, active, bytes + metadata + archived))
 }
 
 /// Create an immutable proposal. The caller supplies owners only after deriving and
@@ -321,6 +339,9 @@ pub fn propose(
         }
     }
     let input = &ProposalInput {
+        key: key.clone(),
+        body: body.clone(),
+        reason: reason.clone(),
         priority: if actor.kind == "user" { input.priority } else { input.priority.min(agent::MAX_AGENT_PRIORITY) },
         ..input.clone()
     };
@@ -336,8 +357,7 @@ pub fn propose(
         ));
     }
     let content_hash = hash(&input.kind, &body);
-    let tx = conn
-        .unchecked_transaction()
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
         .map_err(|_| "could not begin memory proposal".to_string())?;
     let dream_id = if actor.kind == "dreamer" {
         dream::check_input(&key)?;
@@ -359,6 +379,7 @@ pub fn propose(
                     revision: current.unwrap(),
                     status: "approved".into(),
                     idempotent: true,
+                    warning: None,
                 });
             }
             return Err(
@@ -394,7 +415,7 @@ pub fn propose(
         let approved_content: (String,i64) = tx.query_row("SELECT content_hash,priority FROM memory_revisions WHERE entry_id=?1 AND revision=?2 AND status='approved'", params![entry_id,current_revision], |r| Ok((r.get(0)?,r.get(1)?))).map_err(|_| "approved revision unavailable".to_string())?;
         if approved_content == (content_hash.clone(), input.priority) {
             tx.commit().map_err(|e| e.to_string())?;
-            return Ok(ProposalResult { entry_id, revision: current_revision.unwrap(), status: "approved".into(), idempotent: true });
+            return Ok(ProposalResult { entry_id, revision: current_revision.unwrap(), status: "approved".into(), idempotent: true, warning: None });
         }
     }
     let pending: Option<(i64,String,String,i64)> = tx.query_row("SELECT revision,content_hash,operation,priority FROM memory_revisions WHERE entry_id=?1 AND status='proposed'",[&entry_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|_| "could not inspect pending memory revision".to_string())?;
@@ -407,6 +428,7 @@ pub fn propose(
                 revision: rev,
                 status: "proposed".into(),
                 idempotent: true,
+                warning: None,
             });
         }
         return Err("this memory entry already has a pending proposal".into());
@@ -417,6 +439,16 @@ pub fn propose(
         if scope == "mission" { mission_id } else { None },
     )?;
     if pending_count >= PENDING_MAX {
+        if actor.kind != "user" {
+            let count: i64 = tx.query_row("SELECT COUNT(*) FROM memory_agent_drafts WHERE workspace_id=?1", [workspace_id], |r|r.get(0)).map_err(|e|e.to_string())?;
+            if count >= 256 { return Err("agent draft queue is full; notify the orchestrator".into()); }
+            let id = Uuid::new_v4().to_string();
+            tx.execute("INSERT INTO memory_agent_drafts(id,workspace_id,mission_id,scope,input_json,actor_kind,source_run_id,source_task_id,created_at,source_fact_id) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)", params![id,workspace_id,mission_id,scope,serde_json::to_string(input).map_err(|e|e.to_string())?,actor.kind,actor.run_id,actor.task_id,now(),input.source_fact_id.as_deref().or(actor.fact_id)]).map_err(|e|e.to_string())?;
+            // A newly allocated empty entry has no durable history to preserve.
+            tx.execute("DELETE FROM memory_entries WHERE id=?1 AND current_revision IS NULL AND NOT EXISTS(SELECT 1 FROM memory_revisions WHERE entry_id=?1)", [&entry_id]).map_err(|e|e.to_string())?;
+            tx.commit().map_err(|e|e.to_string())?;
+            return Ok(ProposalResult { entry_id: id, revision: 0, status: "agent_draft".into(), idempotent: false, warning: Some(format!("{} agent drafts await user review; notify the orchestrator",count+1)) });
+        }
         return Err("memory owner has reached the pending proposal limit".into());
     }
     let active_max = if scope == "mission" {
@@ -436,7 +468,7 @@ pub fn propose(
     }
     let revision: i64 = tx
         .query_row(
-            "SELECT COALESCE(MAX(revision),0)+1 FROM (SELECT revision FROM memory_revisions WHERE entry_id=?1 UNION ALL SELECT revision FROM memory_purge_audit WHERE entry_id=?1)",
+            "SELECT COALESCE(MAX(revision),0)+1 FROM (SELECT revision FROM memory_revisions WHERE entry_id=?1 UNION ALL SELECT revision FROM memory_purge_audit WHERE entry_id=?1 UNION ALL SELECT revision FROM memory_compacted_revisions WHERE entry_id=?1)",
             [&entry_id],
             |r| r.get(0),
         )
@@ -458,6 +490,7 @@ pub fn propose(
         revision,
         status: "proposed".into(),
         idempotent: false,
+        warning: None,
     })
 }
 
@@ -467,8 +500,7 @@ pub fn decide(
     revision: i64,
     approve: bool,
 ) -> Result<(), String> {
-    let tx = conn
-        .unchecked_transaction()
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
         .map_err(|_| "could not begin memory decision".to_string())?;
     let row:Option<(String,String,String,String,i64,Option<i64>,String,String,Option<String>)>=tx.query_row("SELECT e.status,r.status,r.operation,r.kind,r.priority,r.expected_revision,e.scope,e.workspace_id,e.mission_id FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id WHERE e.id=?1 AND r.revision=?2",params![entry_id,revision],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?,r.get(4)?,r.get(5)?,r.get(6)?,r.get(7)?,r.get(8)?))).optional().map_err(|_| "could not inspect memory decision".to_string())?;
     let Some((
@@ -570,11 +602,15 @@ fn entry_from_row(r: &rusqlite::Row<'_>) -> rusqlite::Result<MemoryEntry> {
         pending_reason: r.get(24)?,
         pending_created_at: r.get(25)?,
         source_fact_id: r.get(26)?,
+        last_verified: r.get(27)?,
+        ttl_days: r.get(28)?,
+        times_used: r.get(29)?,
     })
 }
 // v24 stores active as the initial placeholder. Public state is inactive until an
 // approved revision exists; deleted remains a distinct historical tombstone.
-const ENTRY_SELECT:&str="SELECT e.id,e.scope,e.workspace_id,e.mission_id,e.key,e.kind,CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,e.current_revision,e.priority,
+#[cfg(test)]
+const LEGACY_ENTRY_SELECT:&str="SELECT e.id,e.scope,e.workspace_id,e.mission_id,e.key,e.kind,CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,e.current_revision,e.priority,
 COALESCE((SELECT body FROM memory_revisions WHERE entry_id=e.id AND revision=e.current_revision AND status='approved' LIMIT 1),NULL),
 (SELECT actor_kind FROM memory_revisions WHERE entry_id=e.id AND revision=e.current_revision AND status='approved' LIMIT 1),
 (SELECT source_run_id FROM memory_revisions WHERE entry_id=e.id AND revision=e.current_revision AND status='approved' LIMIT 1),
@@ -590,14 +626,29 @@ COALESCE((SELECT body FROM memory_revisions WHERE entry_id=e.id AND revision=e.c
 (SELECT source_fact_id FROM memory_revisions WHERE entry_id=e.id AND status='proposed' LIMIT 1),
 (SELECT reason FROM memory_revisions WHERE entry_id=e.id AND status='proposed' LIMIT 1),
 (SELECT created_at FROM memory_revisions WHERE entry_id=e.id AND status='proposed' LIMIT 1),
-(SELECT source_fact_id FROM memory_revisions WHERE entry_id=e.id AND revision=e.current_revision) FROM memory_entries e";
+(SELECT source_fact_id FROM memory_revisions WHERE entry_id=e.id AND revision=e.current_revision),e.last_verified,e.ttl_days,(SELECT COUNT(DISTINCT run_id) FROM run_memory_snapshot WHERE entry_id=e.id) FROM memory_entries e";
 
-pub fn list_for_owner(
+const ENTRY_SELECT:&str="SELECT e.id,e.scope,e.workspace_id,e.mission_id,e.key,e.kind,CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,e.current_revision,e.priority,a.body,a.actor_kind,a.source_run_id,a.source_task_id,e.created_at,e.updated_at,p.revision,p.operation,p.kind,p.priority,p.body,p.actor_kind,p.source_run_id,p.source_task_id,p.source_fact_id,p.reason,p.created_at,a.source_fact_id,e.last_verified,e.ttl_days,(SELECT COUNT(DISTINCT run_id) FROM run_memory_snapshot WHERE entry_id=e.id) FROM memory_entries e LEFT JOIN memory_revisions a ON a.entry_id=e.id AND a.revision=e.current_revision AND a.status='approved' LEFT JOIN memory_revisions p ON p.entry_id=e.id AND p.status='proposed'";
+
+fn memory_cursor(entry: &MemoryEntry) -> String {
+    serde_json::to_string(&(entry.workspace_id.clone(),entry.mission_id.clone(),entry.status.clone(),entry.priority,entry.key.clone(),entry.id.clone())).expect("memory cursor JSON")
+}
+
+#[derive(Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all="camelCase",deny_unknown_fields)]
+pub struct MemoryFilter { pub query: Option<String>, pub kind: Option<String>, pub status: Option<String>, pub used: Option<bool> }
+
+pub fn list_for_owner(conn: &Connection, workspace_id: &str, mission_id: Option<&str>, cursor: Option<&str>, limit: usize) -> Result<MemoryPage,String> {
+    list_filtered(conn,workspace_id,mission_id,cursor,limit,&MemoryFilter::default())
+}
+
+pub fn list_filtered(
     conn: &Connection,
     workspace_id: &str,
     mission_id: Option<&str>,
     cursor: Option<&str>,
     limit: usize,
+    filter: &MemoryFilter,
 ) -> Result<MemoryPage, String> {
     validate_owner(
         conn,
@@ -609,10 +660,9 @@ pub fn list_for_owner(
         workspace_id,
         mission_id,
     )?;
-    let offset = cursor
-        .unwrap_or("0")
-        .parse::<usize>()
-        .map_err(|_| "invalid memory cursor".to_string())?;
+    if filter.kind.as_ref().is_some_and(|v| !KINDS.contains(&v.as_str())) || filter.status.as_ref().is_some_and(|v| !["active","inactive","deleted"].contains(&v.as_str())) { return Err("invalid memory filter".into()); }
+    let position = cursor.map(|value| serde_json::from_str::<(String, Option<String>, String, i64, String, String)>(value).map_err(|_| "invalid memory cursor")).transpose()?;
+    if position.as_ref().is_some_and(|p| p.0 != workspace_id || p.1.as_deref() != mission_id) { return Err("memory cursor belongs to another owner".into()); }
     let limit = limit.clamp(1, LIST_LIMIT);
     let scope = if mission_id.is_some() {
         "mission"
@@ -620,14 +670,14 @@ pub fn list_for_owner(
         "workspace"
     };
     let sql = format!(
-        "{ENTRY_SELECT} WHERE e.scope=?1 AND e.workspace_id=?2 AND (?3 IS NULL OR e.mission_id=?3) ORDER BY e.status,e.priority DESC,e.key COLLATE BINARY,e.id LIMIT ?4 OFFSET ?5"
+        "{ENTRY_SELECT} WHERE e.scope=?1 AND e.workspace_id=?2 AND (?3 IS NULL OR e.mission_id=?3) AND (?9 IS NULL OR e.kind=?9) AND (?10 IS NULL OR CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END=?10) AND (?11 IS NULL OR instr(lower(e.key||' '||COALESCE((SELECT body FROM memory_revisions WHERE entry_id=e.id AND revision=e.current_revision),'')),lower(?11))>0) AND (?12 IS NULL OR EXISTS(SELECT 1 FROM run_memory_snapshot WHERE entry_id=e.id)=?12) AND (?5 IS NULL OR (CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,-e.priority,e.key COLLATE BINARY,e.id)>(?5,?6,?7,?8)) ORDER BY CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,e.priority DESC,e.key COLLATE BINARY,e.id LIMIT ?4"
     );
     let mut stmt = conn
         .prepare(&sql)
         .map_err(|_| "could not list memories".to_string())?;
     let rows = stmt
         .query_map(
-            params![scope, workspace_id, mission_id, limit + 1, offset],
+            params![scope, workspace_id, mission_id, limit + 1, position.as_ref().map(|p| &p.2),position.as_ref().map(|p| -p.3),position.as_ref().map(|p| &p.4),position.as_ref().map(|p| &p.5),filter.kind,filter.status,filter.query,filter.used],
             entry_from_row,
         )
         .map_err(|_| "could not list memories".to_string())?;
@@ -657,7 +707,7 @@ pub fn list_for_owner(
         let candidate = MemoryPage {
             items: trial.clone(),
             has_more: true,
-            next_cursor: Some((offset + trial.len()).to_string()),
+            next_cursor: trial.last().map(memory_cursor),
             truncated: false,
         };
         let encoded = serde_json::to_vec(&candidate)
@@ -672,7 +722,7 @@ pub fn list_for_owner(
         entries.push(entry);
     }
     let has_more = source_has_more || byte_truncated;
-    let next_cursor = has_more.then(|| (offset + entries.len()).to_string());
+    let next_cursor = has_more.then(|| memory_cursor(entries.last().unwrap()));
     Ok(MemoryPage {
         items: entries,
         has_more,
@@ -775,10 +825,39 @@ pub fn snapshot_run(
         .map_err(|_| "could not select run memory".to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|_| "could not select run memory".to_string())?;
+    let baseline = select_snapshot(run_id, candidates.clone(), SNAPSHOT_LIMIT, SnapshotMeta::default());
+    let objective: String = conn.query_row("SELECT objective FROM runs WHERE id=?1", [run_id], |r| r.get(0)).map_err(|_| "could not read Run objective")?;
+    let docs = search::load_docs(conn, workspace_id, mission_id)?;
+    let ranked = search::rank(&docs, &objective, RELEVANT_LIMIT);
+    let mut index = if candidates.is_empty() { String::new() } else { "# MEMORY.md\nApproved project data; open entries with memory_open.\n".to_string() };
+    for row in candidates.iter().take(36) {
+        index.push_str(&format!("- {} [{}] {}\n", row.0, row.2, row.3.split_whitespace().collect::<Vec<_>>().join(" ")));
+    }
+    if candidates.len() > 36 { index.push_str("- More entries: use memory_search.\n"); }
+    let relevant = ranked.iter().filter_map(|hit| candidates.iter().find(|row| row.0 == hit.entry_id).cloned()).collect::<Vec<_>>();
+    let mut selected = select_snapshot(run_id, relevant, RELEVANT_LIMIT, SnapshotMeta {
+        memory_index: index, repository_commit: repo::current_commit(conn, workspace_id),
+        baseline_bytes: baseline.meta.context_bytes, baseline_tokens: baseline.meta.context_tokens,
+        ..SnapshotMeta::default()
+    });
+    selected.meta.omitted_entries = (candidates.len() - selected.items.len()) as i64;
+    let block = snapshot_block(&selected);
+    selected.meta.context_bytes = block.len() as i64;
+    selected.meta.context_tokens = crate::orchestrator::digest::estimate_tokens(&block) as i64;
+    for item in &selected.items {
+        conn.execute("INSERT INTO run_memory_snapshot(run_id,entry_id,revision,scope,key,kind,body,priority,content_hash,selection_order,truncated) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![run_id,item.entry_id,item.revision,item.scope,item.key,item.kind,item.body,item.priority,item.content_hash,item.selection_order,item.truncated as i64]).map_err(|e|e.to_string())?;
+    }
+    let meta = &selected.meta;
+    conn.execute("INSERT INTO run_memory_snapshot_meta(run_id,omitted_entries,truncated_entries,context_bytes,context_tokens,baseline_bytes,baseline_tokens,memory_index,repository_commit) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",params![run_id,meta.omitted_entries,meta.truncated_entries,meta.context_bytes,meta.context_tokens,meta.baseline_bytes,meta.baseline_tokens,meta.memory_index,meta.repository_commit]).map_err(|e|e.to_string())?;
+    Ok(())
+}
+
+fn select_snapshot(run_id: &str, candidates: Vec<(String, i64, String, String, String, String, i64, String)>, limit: usize, meta: SnapshotMeta) -> MemorySnapshot {
     let total = candidates.len();
-    let mut selected = MemorySnapshot { items: Vec::new(), meta: SnapshotMeta::default() };
+    let budget=if meta.memory_index.is_empty() {SNAPSHOT_BYTES} else {SNAPSHOT_BYTES-64};
+    let mut selected = MemorySnapshot { items: Vec::new(), meta };
     for (id, revision, scope, key, kind, full_body, priority, content_hash) in candidates {
-        if selected.items.len() >= SNAPSHOT_LIMIT { continue; }
+        if selected.items.len() >= limit { continue; }
         let mut item = MemorySnapshotItem { run_id: run_id.into(), entry_id: id, revision, scope, key, kind,
             body: full_body.clone(), priority, content_hash, selection_order: selected.items.len() as i64, truncated: false };
         // Account for JSON escaping and framing, including the eventual omitted count.
@@ -789,20 +868,19 @@ pub fn snapshot_run(
             item.truncated = item.body.len() < full_body.len();
             let mut trial = selected.clone(); trial.items.push(item.clone());
             trial.meta.omitted_entries = (total-trial.items.len()) as i64;
-            if snapshot_block(&trial).len() <= SNAPSHOT_BYTES { low=mid; } else { high=mid-1; }
+            if snapshot_block(&trial).len() <= budget { low=mid; } else { high=mid-1; }
         }
         item.body=truncate_utf8(&full_body,low);
         item.truncated=item.body.len()<full_body.len();
         if !item.body.is_empty() {selected.items.push(item);}
     }
+
     selected.meta.omitted_entries=(total-selected.items.len()) as i64;
     selected.meta.truncated_entries=selected.items.iter().filter(|i|i.truncated).count() as i64;
-    selected.meta.context_bytes=snapshot_block(&selected).len() as i64;
-    for item in &selected.items {
-        conn.execute("INSERT INTO run_memory_snapshot(run_id,entry_id,revision,scope,key,kind,body,priority,content_hash,selection_order,truncated) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",params![run_id,item.entry_id,item.revision,item.scope,item.key,item.kind,item.body,item.priority,item.content_hash,item.selection_order,item.truncated as i64]).map_err(|e|e.to_string())?;
-    }
-    conn.execute("INSERT INTO run_memory_snapshot_meta(run_id,omitted_entries,truncated_entries,context_bytes) VALUES(?1,?2,?3,?4)",params![run_id,selected.meta.omitted_entries,selected.meta.truncated_entries,selected.meta.context_bytes]).map_err(|e|e.to_string())?;
-    Ok(())
+    let block = snapshot_block(&selected);
+    selected.meta.context_bytes=block.len() as i64;
+    selected.meta.context_tokens=crate::orchestrator::digest::estimate_tokens(&block) as i64;
+    selected
 }
 
 fn truncate_utf8(text: &str, max: usize) -> String {
@@ -847,16 +925,17 @@ pub fn snapshot_for_run(conn: &Connection, run_id: &str) -> Result<MemorySnapsho
         .map_err(|_| "could not read Run memory snapshot".to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|_| "could not read Run memory snapshot".to_string())?;
-    let meta=conn.query_row("SELECT omitted_entries,truncated_entries,context_bytes FROM run_memory_snapshot_meta WHERE run_id=?1",[run_id],|r|Ok(SnapshotMeta{omitted_entries:r.get(0)?,truncated_entries:r.get(1)?,context_bytes:r.get(2)?})).optional().map_err(|_|"could not read Run memory summary".to_string())?.unwrap_or_default();
+    let meta=conn.query_row("SELECT omitted_entries,truncated_entries,context_bytes,context_tokens,baseline_bytes,baseline_tokens,memory_index,repository_commit FROM run_memory_snapshot_meta WHERE run_id=?1",[run_id],|r|Ok(SnapshotMeta{omitted_entries:r.get(0)?,truncated_entries:r.get(1)?,context_bytes:r.get(2)?,context_tokens:r.get(3)?,baseline_bytes:r.get(4)?,baseline_tokens:r.get(5)?,memory_index:r.get(6)?,repository_commit:r.get(7)?})).optional().map_err(|_|"could not read Run memory summary".to_string())?.unwrap_or_default();
     Ok(MemorySnapshot { items, meta })
 }
 
 /// Bounded data block for an agent prompt. Content is JSON escaped and remains untrusted.
 pub fn snapshot_block(snapshot: &MemorySnapshot) -> String {
-    if snapshot.items.is_empty() {
+    if snapshot.items.is_empty() && snapshot.meta.memory_index.is_empty() {
         return String::new();
     }
-    let payload = serde_json::json!({"items":snapshot.items.iter().map(|i|serde_json::json!({"scope":i.scope,"key":i.key,"kind":i.kind,"body":i.body,"priority":i.priority,"revision":i.revision,"truncated":i.truncated})).collect::<Vec<_>>()});
+    let mut payload = serde_json::json!({"items":snapshot.items.iter().map(|i|serde_json::json!({"scope":i.scope,"key":i.key,"kind":i.kind,"body":i.body,"priority":i.priority,"revision":i.revision,"truncated":i.truncated})).collect::<Vec<_>>()});
+    if !snapshot.meta.memory_index.is_empty() {payload["index"]=serde_json::json!(snapshot.meta.memory_index);}
     let safe = payload
         .to_string()
         .replace('`', "\\u0060")
@@ -877,6 +956,46 @@ pub fn snapshot_block(snapshot: &MemorySnapshot) -> String {
 
 pub fn snapshot_context_for_run(conn: &Connection, run_id: &str) -> Result<String, String> {
     Ok(snapshot_block(&snapshot_for_run(conn, run_id)?))
+}
+
+pub fn context_metrics(conn: &Connection, run_id: Option<&str>, mission_id: Option<&str>) -> Result<serde_json::Value, String> {
+    if run_id.is_some() == mission_id.is_some() { return Err("provide exactly one Run or Mission".into()); }
+    let mut stmt = conn.prepare("SELECT s.run_id,s.baseline_bytes,s.context_bytes,s.baseline_tokens,s.context_tokens,s.repository_commit,(SELECT COUNT(*) FROM run_memory_snapshot i WHERE i.run_id=s.run_id) FROM run_memory_snapshot_meta s JOIN runs r ON r.id=s.run_id WHERE (?1 IS NOT NULL AND r.id=?1) OR (?2 IS NOT NULL AND r.mission_id=?2) ORDER BY r.created_at,r.id").map_err(|e|e.to_string())?;
+    let mut rows = stmt.query_map(params![run_id,mission_id], |r| Ok(serde_json::json!({
+        "runId":r.get::<_,String>(0)?,"beforeBytes":r.get::<_,i64>(1)?,"afterBytes":r.get::<_,i64>(2)?,
+        "tokensBefore":r.get::<_,i64>(3)?,"tokensAfter":r.get::<_,i64>(4)?,"commit":r.get::<_,Option<String>>(5)?,
+        "entriesUsed":r.get::<_,i64>(6)?,"tokenMethod":"project-estimate-chars-div-4"
+    }))).map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;
+    // v40 snapshots have real context bytes but no token/baseline columns. Recover
+    // their estimate from the sealed text; never report a fictitious zero cost.
+    for row in &mut rows {
+        if row["afterBytes"].as_i64().unwrap_or(0)>0 && row["tokensAfter"]==0 {
+            let text=snapshot_context_for_run(conn,row["runId"].as_str().ok_or("invalid snapshot Run")?)?;
+            let tokens=crate::orchestrator::digest::estimate_tokens(&text);
+            row["beforeBytes"]=row["afterBytes"].clone();row["tokensBefore"]=serde_json::json!(tokens);row["tokensAfter"]=serde_json::json!(tokens);row["legacyContext"]=serde_json::json!(true);
+        }
+    }
+    if run_id.is_some() { return rows.into_iter().next().ok_or("Run snapshot unavailable".into()); }
+    Ok(serde_json::json!({"runs":rows}))
+}
+
+#[tauri::command]
+pub fn memory_context_metrics(run_id: Option<String>, mission_id: Option<String>, db: tauri::State<DbConnection>) -> Result<serde_json::Value, String> {
+    let conn = db.lock().map_err(|_| "database unavailable")?;
+    context_metrics(&conn, run_id.as_deref(), mission_id.as_deref())
+}
+
+#[tauri::command]
+pub fn memory_query(workspace_id:String,mission_id:Option<String>,cursor:Option<String>,limit:Option<usize>,filter:MemoryFilter,db:tauri::State<DbConnection>) -> Result<MemoryPage,String> {
+    let conn=db.lock().map_err(|e|e.to_string())?;
+    list_filtered(&conn,&workspace_id,mission_id.as_deref(),cursor.as_deref(),limit.unwrap_or(LIST_LIMIT),&filter)
+}
+
+#[tauri::command]
+pub fn memory_index(workspace_id: String, mission_id: Option<String>, db: tauri::State<DbConnection>) -> Result<String, String> {
+    let conn = db.lock().map_err(|_| "database unavailable")?;
+    validate_owner(&conn, if mission_id.is_some() { "mission" } else { "workspace" }, &workspace_id, mission_id.as_deref())?;
+    repo::approved_open(&conn, &workspace_id, mission_id.as_deref(), "MEMORY.md")
 }
 
 pub fn promote_fact(
@@ -1077,6 +1196,13 @@ pub fn task_tool(
         Ok(body)
     };
     let text = match command {
+        "memory.searchApproved" => {
+            #[derive(Deserialize)]
+            #[serde(deny_unknown_fields)]
+            struct Input { query: String, limit: Option<usize> }
+            let input: Input = serde_json::from_value(args).map_err(|_| "invalid memory.search arguments")?;
+            encode(&serde_json::to_value(search::search(conn, &workspace_id, mission_id.as_deref(), &input.query, input.limit.unwrap_or(5))?).map_err(|_| "could not encode memory search")?)?
+        }
         "memory.workspaceHistory" => {
             #[derive(Deserialize)]
             #[serde(deny_unknown_fields)]
@@ -1118,8 +1244,7 @@ pub fn task_tool(
                 page.items.pop().ok_or("memory metadata exceeds the response limit")?;
                 page.has_more = true;
                 page.truncated = true;
-                let offset = input.cursor.as_deref().unwrap_or("0").parse::<usize>().map_err(|_| "invalid memory cursor")?;
-                page.next_cursor = Some((offset + page.items.len()).to_string());
+                page.next_cursor = page.items.last().map(memory_cursor);
             }
             encode(
                 &serde_json::to_value(page)
@@ -1322,8 +1447,8 @@ pub fn task_tool(
         }
         _ => return Err("unknown Shared Memory tool".into()),
     };
-    if actor=="dreamer" && matches!(command,"memory.list"|"memory.get") {dream::check_input(&text)?;}
-    let text = if matches!(command, "memory.list" | "memory.get") { untrusted_memory_response(&text) } else { text };
+    if actor=="dreamer" && matches!(command,"memory.list"|"memory.get"|"memory.searchApproved") {dream::check_input(&text)?;}
+    let text = if matches!(command, "memory.list" | "memory.get" | "memory.searchApproved") { untrusted_memory_response(&text) } else { text };
     if text.len() > LIST_BYTES { return Err("memory response exceeded the 32 KiB limit".into()); }
     Ok(serde_json::json!({"text":text}))
 }
@@ -1466,7 +1591,7 @@ pub fn purge_user(conn: &Connection, entry_id: &str, revision: i64) -> Result<()
 }
 
 pub fn purge_revisions_user(conn: &Connection, entry_id: &str, revision: Option<i64>) -> Result<(), String> {
-    let tx = conn.unchecked_transaction().map_err(|_| "could not begin purge")?;
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate).map_err(|_| "could not begin purge")?;
     let revisions = {
         let mut stmt = tx.prepare("SELECT revision FROM memory_revisions WHERE entry_id=?1 AND (?2 IS NULL OR revision=?2) ORDER BY revision").map_err(|_| "could not verify purge revision")?;
         let rows = stmt.query_map(params![entry_id,revision], |r| r.get::<_,i64>(0)).map_err(|_| "could not verify purge revision")?;
@@ -1536,6 +1661,9 @@ pub mod review;
 pub mod search;
 pub mod repo;
 pub mod dream;
+pub mod lifecycle;
 
 #[cfg(test)]
 mod tests;
+#[cfg(test)]
+mod concurrency;

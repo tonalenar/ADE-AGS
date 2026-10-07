@@ -378,8 +378,7 @@ fn save_subagent(conn: &Connection, squad_id: &str, subagent: Option<&SubagentDe
 pub fn create(conn: &Connection, valid: &ValidSquad) -> Result<Squad, String> {
     let id = Uuid::new_v4().to_string();
     let now = now_ts();
-    let tx = conn
-        .unchecked_transaction()
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
     tx.execute(
         "INSERT INTO squads (id, name, description, lead_agent_id, lead_model, lead_account_id,
@@ -429,8 +428,7 @@ pub fn list(conn: &Connection) -> Result<Vec<Squad>, String> {
 }
 
 pub fn update(conn: &Connection, id: &str, valid: &ValidSquad) -> Result<Squad, String> {
-    let tx = conn
-        .unchecked_transaction()
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate)
         .map_err(|error| error.to_string())?;
     let changed = tx
         .execute(

@@ -260,7 +260,7 @@ pub(crate) fn execute(c: &mut Connection, op: &str, a: &Value) -> Result<Value> 
     if op == "get" {
         return get(c, text(a, "designId")?);
     }
-    let tx = c.transaction().map_err(err)?;
+    let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(err)?;
     let mut is_new = false;
     let mut comment_added = None;
     let id = if op == "create" {
@@ -555,7 +555,7 @@ mod tests {
         }
         assert_eq!(
             c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
-                .unwrap(),40
+                .unwrap(),41
         );
         eprintln!(
             "Real snapshot migration preserved {} boards, {} versions and {} comments",
@@ -876,7 +876,7 @@ mod tests {
         assert_eq!(artboard(&c, &bid).unwrap()["version"], 1);
         assert_eq!(
             c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
-                .unwrap(),40
+                .unwrap(),41
         );
     }
     #[test]

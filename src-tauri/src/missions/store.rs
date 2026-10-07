@@ -436,7 +436,7 @@ pub fn close_terminals(conn: &Connection, id: &str, outcome: &str) -> Result<boo
 /// Persiste la evidencia y cierra en una transacción para que el estado nunca diga `done`
 /// si no se pudo guardar por qué pasó el gate de entrega.
 pub fn finish_terminals(conn: &Connection, id: &str, evidence: &MissionDelivery) -> Result<bool, String> {
-    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
     let outcome = mission_status(evidence);
     let now = now_ts();
     let changed = tx
@@ -669,7 +669,7 @@ where
     };
 
     // Executa persistência no banco em transação atômica
-    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
 
     if new_status != previous_status {
         tx.execute(

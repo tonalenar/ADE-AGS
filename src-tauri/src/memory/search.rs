@@ -40,7 +40,7 @@ pub struct Hit {
 }
 
 /// Uma entrada ativa, como a busca a vê.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Doc {
     pub entry_id: String,
     pub scope: String,
@@ -49,6 +49,14 @@ pub struct Doc {
     pub priority: i64,
     pub body: String,
 }
+
+pub(crate) const DOCS_AT_SQL:&str="WITH valid AS (
+ SELECT e.id,e.scope,e.key,r.kind,r.priority,r.body,r.operation,
+ ROW_NUMBER() OVER (PARTITION BY e.id ORDER BY r.decided_at DESC,r.revision DESC) AS n
+ FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id
+ WHERE e.workspace_id=?1 AND (e.scope='workspace' OR (e.scope='mission' AND e.mission_id=?2))
+ AND r.status='approved' AND r.decided_at IS NOT NULL AND r.decided_at<=?3)
+ SELECT id,scope,key,kind,priority,body FROM valid WHERE n=1 AND operation IN ('create','update') ORDER BY scope,key COLLATE BINARY,id";
 
 // ── Texto ───────────────────────────────────────────────────────────
 
@@ -84,7 +92,8 @@ pub fn tokenize(text: &str) -> Vec<String> {
             current.clear();
         }
     };
-    for ch in text.chars() {
+    use unicode_normalization::{UnicodeNormalization,char::is_combining_mark};
+    for ch in text.nfd().filter(|c|!is_combining_mark(*c)) {
         if ch.is_alphanumeric() {
             // fooBar → foo, bar
             if ch.is_uppercase() && prev_lower {
@@ -198,7 +207,7 @@ pub fn load_docs(conn: &Connection, workspace_id: &str, mission_id: Option<&str>
             "SELECT e.id, e.scope, e.key, r.kind, e.priority, r.body
                FROM memory_entries e
                JOIN memory_revisions r ON r.entry_id = e.id AND r.revision = e.current_revision
-              WHERE e.status = 'active' AND e.workspace_id = ?1
+              WHERE e.status = 'active' AND r.status='approved' AND e.workspace_id = ?1
                 AND (e.scope = 'workspace' OR (e.scope = 'mission' AND e.mission_id = ?2))",
         )
         .map_err(|_| "não foi possível ler as memórias".to_string())?;
@@ -212,7 +221,13 @@ pub fn load_docs(conn: &Connection, workspace_id: &str, mission_id: Option<&str>
 
 /// Load the memory versions that were valid at one Unix timestamp. Unlike `load_docs`, this
 /// includes entries that have since been deleted because their earlier intervals may apply.
-pub fn load_docs_at(
+pub fn load_docs_at(conn:&Connection,workspace_id:&str,mission_id:Option<&str>,at:i64)->Result<Vec<Doc>,String> {
+    let mut stmt=conn.prepare(DOCS_AT_SQL).map_err(|_|"could not read historical memory")?;
+    stmt.query_map(params![workspace_id,mission_id,at],|r|Ok(Doc{entry_id:r.get(0)?,scope:r.get(1)?,key:r.get(2)?,kind:r.get(3)?,priority:r.get(4)?,body:r.get(5)?})).map_err(|_|"could not read historical memory")?.collect::<rusqlite::Result<Vec<_>>>().map_err(|_|"could not read historical memory".into())
+}
+
+#[cfg(test)]
+pub(crate) fn legacy_load_docs_at(
     conn: &Connection,
     workspace_id: &str,
     mission_id: Option<&str>,

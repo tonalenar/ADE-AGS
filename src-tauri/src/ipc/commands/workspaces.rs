@@ -16,6 +16,15 @@ pub(super) fn workspace_list(app: &AppHandle) -> Result<Value, String> {
     Ok(json!({ "workspaces": rows }))
 }
 
+pub(super) fn workspace_restore(app:&AppHandle,args:&Value)->Result<Value,String>{
+    let requested=arg_str(args,"workspace")?;
+    let db=db(app)?;
+    let conn=db.lock().map_err(|e|e.to_string())?;
+    let id:String=conn.query_row("SELECT id FROM workspaces WHERE (id=?1 OR name=?1) AND deleted_at IS NOT NULL",[requested],|r|r.get(0)).map_err(|_|"workspace is not in recovery")?;
+    conn.execute("UPDATE workspaces SET deleted_at=NULL,delete_after=NULL WHERE id=?1",[&id]).map_err(|e|e.to_string())?;
+    Ok(json!({"workspaceId":id,"restored":true}))
+}
+
 pub(super) fn workspace_open(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let requested = arg_str(args, "workspace")?;
     let close_current = args.get("closeCurrent").and_then(|v| v.as_bool()).unwrap_or(false);
@@ -25,7 +34,7 @@ pub(super) fn workspace_open(app: &AppHandle, args: &Value) -> Result<Value, Str
         let db = db(app)?;
         let conn = db.lock().map_err(|e| e.to_string())?;
         conn.query_row(
-            "SELECT id FROM workspaces WHERE id = ?1 OR name = ?1",
+            "SELECT id FROM workspaces WHERE (id = ?1 OR name = ?1) AND deleted_at IS NULL",
             [&requested],
             |r| r.get::<_, String>(0),
         )
@@ -58,4 +67,3 @@ pub(super) fn workspace_status(app: &AppHandle) -> Result<Value, String> {
         "tabs": tabs.get("tabs").cloned().unwrap_or(Value::Null),
     }))
 }
-

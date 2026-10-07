@@ -217,6 +217,13 @@ MEMORIA COMPARTIDA (la usan los agentes por MCP; ver docs/ade-ags/SHARED_MEMORY.
   memory list|get|propose|update|delete|promote-fact --json-args '{...}'
                                               Lo aprobado del workspace y de la misión;
                                               lo que se propone espera aprobación.
+  memory index                              Índice aprobado de la tab o misión actual
+  memory open <camino>                       Proyección aprobada, solo lectura y UNTRUSTED DATA
+  swarm note|question <texto>                Datos de sesión de la misión, no memoria durable
+  swarm promote <note-id> <key>              Propone la nota; aprobación exclusiva del usuario
+  memory export                             Exporta Markdown y revisiones JSON del workspace de la tab
+  memory compact [retentionDays]             Compacta rechazadas antiguas (mínimo 30 días)
+  workspace restore <id|nombre>              Recupera un workspace eliminado suavemente
 
 NAVEGADOR
   browser run --json-args '{\"cwd\":\"...\",     Una orden al navegador de un proyecto:
@@ -540,7 +547,7 @@ impl CliError {
 
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
-    const GROUPS: [&str; 12] = ["peer.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design."];
+    const GROUPS: [&str; 13] = ["peer.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm."];
     if !GROUPS.iter().any(|g| command.starts_with(g)) {
         return parsed;
     }
@@ -549,7 +556,7 @@ fn with_caller(command: &str, mut parsed: Value) -> Value {
 }
 
 fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>) {
-    if command.starts_with("memory.") {
+    if command.starts_with("memory.") || command.starts_with("swarm.") {
         if let Some(map) = parsed.as_object_mut() {
             map.remove("from");
             map.remove("mission");
@@ -661,6 +668,11 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "say.send" => &["text"],
         "recall.get" => &["thread"],
         "memory.search" => &["query"],
+        "memory.open" => &["path"],
+        "swarm.note" | "swarm.question" => &["body"],
+        "swarm.promote" => &["note", "key"],
+        "memory.compact" => &["retentionDays"],
+        "workspace.restore" => &["workspace"],
         // `ags routine create Testes "rode os testes" --at 09:00`
         "routine.create" => &["name", "text"],
         "routine.edit" => &["name", "text"],

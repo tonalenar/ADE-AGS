@@ -312,6 +312,18 @@ fn esperar_sin_nada_que_reportar_vence_vacio() {
     assert!(started.elapsed() >= Duration::from_millis(45));
 }
 
+#[test]
+fn despertar_sin_evento_no_acorta_el_plazo_de_espera() {
+    let _g=fresh();
+    let notifier=std::thread::spawn(||{
+        for _ in 0..5 {std::thread::sleep(Duration::from_millis(5));super::watch::notify_without_event();}
+    });
+    let started=std::time::Instant::now();
+    assert!(wait(Duration::from_millis(50),10).is_empty());
+    assert!(started.elapsed()>=Duration::from_millis(45));
+    notifier.join().unwrap();
+}
+
 /// Los eventos se consumen: dos llamadas seguidas no devuelven lo mismo dos veces
 /// (que es exactamente el desperdicio de contexto que produce el polling).
 #[test]

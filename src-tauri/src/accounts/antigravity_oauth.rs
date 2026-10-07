@@ -313,7 +313,7 @@ async fn exchange(
     }
     tokio::task::spawn_blocking(move || {
         let mut conn = db.lock().map_err(|e|e.to_string())?;
-        let tx = conn.transaction().map_err(|e|e.to_string())?;
+        let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
         let id = tx.query_row("SELECT id FROM antigravity_oauth_accounts WHERE subject=?1", [&subject], |r|r.get::<_,String>(0))
             .optional().map_err(|e|e.to_string())?.unwrap_or_else(||uuid::Uuid::new_v4().to_string());
         let previous = load::<Grant>(&id).ok();

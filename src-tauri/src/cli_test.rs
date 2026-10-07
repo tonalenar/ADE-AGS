@@ -3,11 +3,83 @@
 use super::*;
 
 #[test]
+fn lifecycle_and_swarm_promotion_use_production_parser() {
+    assert_eq!(parse("swarm.promote", &["note-id","finding"]).unwrap()["note"],"note-id");
+    assert_eq!(parse("swarm.promote", &["note-id","finding"]).unwrap()["key"],"finding");
+    assert_eq!(parse("workspace.restore", &["workspace-id"]).unwrap()["workspace"],"workspace-id");
+    assert_eq!(parse("memory.compact", &["45"]).unwrap()["retentionDays"],"45");
+    assert!(parse("memory.export", &[]).is_ok());
+}
+
+#[test]
+fn memory_repository_and_swarm_commands_use_production_flag_parser() {
+    let open=parse("memory.open",&["notes.md","--mission","spoofed"]).unwrap();assert_eq!(open["path"],"notes.md");
+    assert!(parse("memory.index",&["unexpected"]).is_err());
+    let mut note=parse("swarm.note",&["session fact","--from","spoofed","--mission","spoofed"]).unwrap();
+    caller_from("swarm.note",&mut note,Some("real-tab".into()));
+    assert_eq!(note["body"],"session fact");assert_eq!(note["from"],"real-tab");assert!(note.get("mission").is_none());
+    assert_eq!(parse("swarm.question",&["which source?"]).unwrap()["body"],"which source?");
+}
+
+#[test]
 fn memory_numeric_flags_are_numbers() {
     let args = parse_flags(&["--priority".into(), "-2".into(), "--limit".into(), "7".into()], &[]).unwrap();
     assert_eq!(args["priority"], -2);
     assert_eq!(args["limit"], 7);
     assert_eq!(parse_flags(&["--priority".into(), "bad".into()], &[]).unwrap()["priority"], "bad");
+}
+
+#[test]
+fn memory_cli_commands_parse_flags_and_sanitize_scope() {
+    // 1. memory suggest aceita flags numéricas e strings
+    let args_suggest = parse_flags(
+        &[
+            "--mission".into(), "m-1".into(),
+            "--scope".into(), "workspace".into(),
+            "--kind".into(), "decision".into(),
+            "--key".into(), "db_pool".into(),
+            "--body".into(), "Usar sqlite pool".into(),
+            "--priority".into(), "3".into(),
+        ],
+        &[],
+    ).unwrap();
+    assert_eq!(args_suggest["priority"], 3);
+    assert_eq!(args_suggest["key"], "db_pool");
+    assert_eq!(args_suggest["body"], "Usar sqlite pool");
+    assert_eq!(args_suggest["scope"], "workspace");
+
+    // 2. Prioridade negativa na CLI é parseada como i64
+    let args_neg = parse_flags(&["--priority".into(), "-5".into()], &[]).unwrap();
+    assert_eq!(args_neg["priority"], -5);
+
+    // 3. memory search aceita argumento posicional de busca e --limit como número
+    let args_search = parse_flags(
+        &["query de busca".into(), "--limit".into(), "10".into()],
+        positionals("memory.search"),
+    ).unwrap();
+    assert_eq!(args_search["query"], "query de busca");
+    assert_eq!(args_search["limit"], 10);
+
+    // 4. Se --limit ou --priority receberem string não numérica, permanecem string para erro explícito no backend
+    let args_bad_limit = parse_flags(&["--limit".into(), "abc".into()], &[]).unwrap();
+    assert_eq!(args_bad_limit["limit"], "abc");
+    let args_bad_prio = parse_flags(&["--priority".into(), "xyz".into()], &[]).unwrap();
+    assert_eq!(args_bad_prio["priority"], "xyz");
+
+    // 5. with_caller / caller_from remove tentativa de spoofing de --from, --mission, --missionId, --taskId
+    let mut spoofed = json!({
+        "from": "malicious_tab",
+        "mission": "other_mission",
+        "missionId": "other_mission_id",
+        "taskId": "other_task_id",
+        "key": "safe_key"
+    });
+    caller_from("memory.suggest", &mut spoofed, Some("real_tab_id".into()));
+    assert_eq!(spoofed["from"], "real_tab_id");
+    assert!(spoofed.get("mission").is_none());
+    assert!(spoofed.get("missionId").is_none());
+    assert!(spoofed.get("taskId").is_none());
+    assert_eq!(spoofed["key"], "safe_key");
 }
 
 #[test]
