@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 
 use rusqlite::params;
 use serde_json::{json, Value};
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 
 use crate::bus::{self, Filter};
 use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_opt};
@@ -291,11 +291,19 @@ pub(super) fn swarm_write(app: &AppHandle, args: &Value, question: bool) -> Resu
     let id = memory_caller_mission(args)?;
     let body = arg_str(args,"body")?;
     let db=db(app)?;
-    let conn=db.lock().map_err(|e|e.to_string())?;
-    let mission=crate::missions::store::get(&conn,&id)?.ok_or("mission not found")?;
-    let note=crate::memory::lifecycle::swarm_write(&conn,&mission.workspace_id,&id,if question {"question"} else {"note"},&body)?;
-    let projection=crate::memory::repo::export_at(&conn,&mission.workspace_id,&crate::memory::repo::default_root()?,None);
-    Ok(json!({"id":note,"status":"run_data","projectionError":projection.err()}))
+    let (note, workspace) = {
+        let conn=db.lock().map_err(|e|e.to_string())?;
+        let mission=crate::missions::store::get(&conn,&id)?.ok_or("mission not found")?;
+        let note=crate::memory::lifecycle::swarm_write(&conn,&mission.workspace_id,&id,if question {"question"} else {"note"},&body)?;
+        (note, mission.workspace_id)
+    };
+    // The note is already committed. Git must not run while this call still holds the database mutex.
+    if let Some(sync)=app.try_state::<crate::memory::repo_sync::RepoSync>() {
+        sync.enqueue(&workspace, None);
+        Ok(json!({"id":note,"status":"run_data","projection":"queued","projectionError":Value::Null}))
+    } else {
+        Ok(json!({"id":note,"status":"run_data","projection":"skipped","projectionError":"memory sync unavailable"}))
+    }
 }
 
 pub(super) fn swarm_promote(app:&AppHandle,args:&Value)->Result<Value,String>{
@@ -321,12 +329,11 @@ pub(super) fn memory_maintenance(app: &AppHandle, args: &Value, compact: bool) -
         drop(conn);
         workspace
     };
-    // Mutex do app já solto. O #115 troca as três linhas seguintes por
-    // `lifecycle::export_detached` (worker fora do lock). Não voltar a chamar
-    // `lifecycle::export` com o `db.lock()` ainda preso: o rebase fica nesta chamada.
-    let conn = rusqlite::Connection::open(crate::database::user_db_path()).map_err(|e| e.to_string())?;
-    conn.busy_timeout(Duration::from_secs(5)).map_err(|e| e.to_string())?;
-    crate::memory::lifecycle::export(&conn, &workspace, &crate::memory::repo::default_root()?)
+    // Mutex já solto. O git corre no worker. Não chamar lifecycle::export com o lock preso.
+    let sync = app
+        .try_state::<crate::memory::repo_sync::RepoSync>()
+        .ok_or_else(|| "memory sync unavailable".to_string())?;
+    crate::memory::lifecycle::export_detached(&db, &sync, &workspace)
 }
 
 fn parse_memory_at(value: &str) -> Result<i64, String> {

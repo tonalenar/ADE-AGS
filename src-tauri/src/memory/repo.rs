@@ -1,5 +1,5 @@
 //! One-way, local Markdown projection. SQLite remains authoritative.
-use std::{collections::BTreeMap, path::{Path, PathBuf}, time::Duration};
+use std::{collections::{BTreeMap, BTreeSet, HashMap}, path::{Path, PathBuf}, sync::{Arc, Mutex}, time::Duration};
 use rusqlite::Connection;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -137,60 +137,128 @@ pub fn current_commit(conn: &Connection, workspace: &str) -> Option<String> {
     git(&path, &["rev-parse", "HEAD"]).ok()
 }
 
-fn git(path: &Path, args: &[&str]) -> Result<String,String> {
-    let mut cmd=crate::util::program("git"); cmd.current_dir(path).args(["-c","core.autocrlf=false"]).args(args)
-        .env("GIT_CONFIG_NOSYSTEM","1").env("GIT_TERMINAL_PROMPT","0");
-    let output=crate::util::output_with_timeout(&mut cmd,Duration::from_secs(30)).map_err(|e|e.to_string())?;
-    if !output.status.success() { return Err(format!("memory git failed: {}",String::from_utf8_lossy(&output.stderr))); }
+/// Injected by tests so a slow or failing git does not require a real binary.
+pub type GitRunner = Arc<dyn Fn(&Path, &[String]) -> Result<String, String> + Send + Sync>;
+
+fn git(path: &Path, args: &[&str]) -> Result<String, String> {
+    let owned: Vec<String> = args.iter().copied().map(str::to_string).collect();
+    run_git(path, &owned)
+}
+
+pub fn real_git_runner() -> GitRunner {
+    Arc::new(|path, args| run_git(path, args))
+}
+
+pub fn run_git(path: &Path, args: &[String]) -> Result<String, String> {
+    let mut cmd = crate::util::program("git");
+    cmd.current_dir(path).args(["-c", "core.autocrlf=false"]).args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_TERMINAL_PROMPT", "0");
+    let output = crate::util::output_with_timeout(&mut cmd, Duration::from_secs(30)).map_err(|e| e.to_string())?;
+    if !output.status.success() {
+        return Err(format!("memory git failed: {}", String::from_utf8_lossy(&output.stderr)));
+    }
     Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
 }
 
-pub fn export_at(conn: &Connection, workspace: &str, root: &Path, approval: Option<(&str,i64)>) -> Result<ExportResult,String> {
-    // Complete secret preflight precedes even directory creation.
-    let files=render(conn,workspace,&[])?;
-    let name:String=conn.query_row("SELECT name FROM workspaces WHERE id=?1",[workspace],|r|r.get(0)).map_err(|e|e.to_string())?;
-    let path=root.join(slug(&name,workspace));
+fn repo_gate(path: &Path) -> Arc<Mutex<()>> {
+    static GATES: std::sync::LazyLock<Mutex<HashMap<PathBuf, Arc<Mutex<()>>>>> =
+        std::sync::LazyLock::new(|| Mutex::new(HashMap::new()));
+    let mut gates = GATES.lock().unwrap_or_else(|err| err.into_inner());
+    gates.entry(path.to_path_buf()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
+}
+
+pub fn export_at(conn: &Connection, workspace: &str, root: &Path, approval: Option<(&str, i64)>) -> Result<ExportResult, String> {
+    // Secret preflight still runs before any directory is created. Callers that hold the
+    // process-wide database mutex must not use this: git below takes the repo gate, and the
+    // background sync worker needs that mutex only to render. Production approval goes through
+    // `repo_sync`, which drops the database lock before `publish`.
+    let files = render(conn, workspace, &[])?;
+    let name: String = conn.query_row("SELECT name FROM workspaces WHERE id=?1", [workspace], |r| r.get(0)).map_err(|e| e.to_string())?;
+    let count = if approval.is_some() { 1 } else { 0 };
+    publish(root, &name, workspace, &files, approval, count, &real_git_runner())
+}
+
+/// Writes an already-rendered projection and commits it. Does not touch SQLite.
+/// One gate per repository serializes concurrent publishers so git commands cannot interleave.
+pub fn publish(
+    root: &Path,
+    workspace_name: &str,
+    workspace_id: &str,
+    files: &Files,
+    approval: Option<(&str, i64)>,
+    approval_count: u32,
+    run: &GitRunner,
+) -> Result<ExportResult, String> {
+    let path = root.join(slug(workspace_name, workspace_id));
+    let gate = repo_gate(&path);
+    let _held = gate.lock().unwrap_or_else(|err| err.into_inner());
     if root.is_symlink() || path.is_symlink() { return Err("memory repository cannot be a symlink".into()); }
-    std::fs::create_dir_all(&path).map_err(|e|e.to_string())?;
+    std::fs::create_dir_all(&path).map_err(|e| e.to_string())?;
     if path.join(".git").is_symlink() { return Err("memory git directory cannot be a symlink".into()); }
-    if !path.join(".git").exists() { git(&path,&["init","--quiet"])?; }
-    if !git(&path,&["remote"])?.is_empty() { return Err("memory repository must have no remote".into()); }
-    for staged in git(&path,&["diff","--cached","--name-only"])?.lines() {
+    let git = |args: &[&str]| -> Result<String, String> {
+        let owned: Vec<String> = args.iter().copied().map(str::to_string).collect();
+        run(&path, &owned)
+    };
+    if !path.join(".git").exists() { git(&["init", "--quiet"])?; }
+    if !git(&["remote"])?.is_empty() { return Err("memory repository must have no remote".into()); }
+    for staged in git(&["diff", "--cached", "--name-only"])?.lines() {
         if !managed_path(staged) { return Err("memory repository has unrelated staged files".into()); }
     }
     for file in files.keys() {
-        let mut candidate=path.clone();
+        let mut candidate = path.clone();
         for component in Path::new(file).components() {
             candidate.push(component);
             if candidate.is_symlink() { return Err("memory projection cannot follow symlinks".into()); }
         }
     }
-    let tracked=git(&path,&["ls-files","--","*.md"])?;
+    let tracked = git(&["ls-files", "--", "*.md"])?;
     for old in tracked.lines() {
-        if !files.contains_key(old) && managed_path(old) { std::fs::remove_file(path.join(old)).map_err(|e|e.to_string())?; }
+        if !files.contains_key(old) && managed_path(old) { std::fs::remove_file(path.join(old)).map_err(|e| e.to_string())?; }
     }
-    for (file,body) in &files {
-        let target=path.join(file);
-        if target.is_symlink() || target.parent().is_some_and(|p|p.is_symlink()) { return Err("memory projection cannot follow symlinks".into()); }
-        std::fs::create_dir_all(target.parent().unwrap()).map_err(|e|e.to_string())?;
-        std::fs::write(target,body).map_err(|e|e.to_string())?;
+    for (file, body) in files {
+        let target = path.join(file);
+        if target.is_symlink() || target.parent().is_some_and(|p| p.is_symlink()) { return Err("memory projection cannot follow symlinks".into()); }
+        std::fs::create_dir_all(target.parent().unwrap()).map_err(|e| e.to_string())?;
+        std::fs::write(target, body).map_err(|e| e.to_string())?;
     }
-    for file in files.keys().map(String::as_str).chain(tracked.lines().filter(|p| managed_path(p))) {
-        git(&path,&["add","--all","--",file])?;
+    // One add for every managed path (including deletions), instead of a process per file.
+    let mut spec = Vec::new();
+    let mut seen = BTreeSet::new();
+    for file in files.keys().map(String::as_str).chain(tracked.lines().filter(|entry| managed_path(entry))) {
+        if seen.insert(file.to_string()) { spec.push(file.to_string()); }
     }
-    let changed=!git(&path,&["diff","--cached","--name-only"])?.is_empty();
-    for file in git(&path,&["diff","--cached","--diff-filter=ACMR","--name-only"])?.lines() {
-        checked(&git(&path,&["show",&format!(":{file}")])?)?;
+    if !spec.is_empty() {
+        let mut args = vec!["add", "--all", "--"];
+        for file in &spec { args.push(file); }
+        git(&args)?;
     }
-    let mut commit=None;
-    if changed || approval.is_some() {
-        let message=approval.map(|(entry,revision)|format!("Approve memory {entry}@r{revision}")).unwrap_or_else(||"Export approved memory".into());
-        let hooks=path.join(".git").join("ade-disabled-hooks");
-        std::fs::create_dir_all(&hooks).map_err(|e|e.to_string())?;
-        git(&path,&["-c","user.name=ADE AGS","-c","user.email=memory@ade-ags.local","-c",&format!("core.hooksPath={}",hooks.display()),"-c","commit.gpgSign=false","commit","--quiet","--allow-empty","-m",&message])?;
-        commit=Some(git(&path,&["rev-parse","HEAD"])?);
+    let changed = !git(&["diff", "--cached", "--name-only"])?.is_empty();
+    for file in git(&["diff", "--cached", "--diff-filter=ACMR", "--name-only"])?.lines() {
+        checked(&git(&["show", &format!(":{file}")])?)?;
     }
-    Ok(ExportResult{path:path.to_string_lossy().into_owned(),commit,files:files.keys().cloned().collect()})
+    let mut commit = None;
+    if changed || approval_count > 0 {
+        let message = if approval_count > 1 {
+            format!("Export approved memory ({approval_count} approvals)")
+        } else if let Some((entry, revision)) = approval {
+            format!("Approve memory {entry}@r{revision}")
+        } else {
+            "Export approved memory".to_string()
+        };
+        let hooks = path.join(".git").join("ade-disabled-hooks");
+        std::fs::create_dir_all(&hooks).map_err(|e| e.to_string())?;
+        let hooks_arg = format!("core.hooksPath={}", hooks.display());
+        git(&[
+            "-c", "user.name=ADE AGS",
+            "-c", "user.email=memory@ade-ags.local",
+            "-c", &hooks_arg,
+            "-c", "commit.gpgSign=false",
+            "commit", "--quiet", "--allow-empty",
+            "-m", &message,
+        ])?;
+        commit = Some(git(&["rev-parse", "HEAD"])?);
+    }
+    Ok(ExportResult { path: path.to_string_lossy().into_owned(), commit, files: files.keys().cloned().collect() })
 }
 
 fn managed_path(path: &str) -> bool {
@@ -199,9 +267,9 @@ fn managed_path(path: &str) -> bool {
 }
 
 #[tauri::command]
-pub fn memory_export_repo(workspace_id:String,db:tauri::State<crate::database::DbConnection>) -> Result<ExportResult,String> {
-    let conn=db.lock().map_err(|_|"database unavailable")?;
-    export_at(&conn,&workspace_id,&default_root()?,None)
+pub fn memory_export_repo(workspace_id: String, sync: tauri::State<super::repo_sync::RepoSync>) -> Result<ExportResult, String> {
+    // The worker renders under the database lock and runs git only after releasing it.
+    sync.export_now(&workspace_id)
 }
 
 #[cfg(test)]

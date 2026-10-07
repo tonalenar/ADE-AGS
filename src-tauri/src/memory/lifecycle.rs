@@ -16,8 +16,12 @@ pub fn swarm_promote(conn:&Connection,workspace:&str,mission:&str,id:&str,key:&s
     super::propose(conn,"mission",workspace,Some(mission),&ProposalInput{scope:"mission".into(),key:key.into(),kind:"note".into(),body,priority:0,operation:"create".into(),expected_revision:None,source_fact_id:None,reason:Some(format!("Swarm note {id}"))},ProposalActor{kind:"worker",run_id:None,task_id:None,fact_id:None})
 }
 
-pub fn export(conn: &Connection, workspace: &str, root: &std::path::Path) -> Result<Value, String> {
-    let projection = super::repo::export_at(conn, workspace, root, None)?;
+struct ArchivePrep {
+    stats: Value,
+    body: Value,
+}
+
+fn prepare_archive(conn: &Connection, workspace: &str) -> Result<ArchivePrep, String> {
     let mut stmt = conn
         .prepare("SELECT id,mission_id FROM memory_entries WHERE workspace_id=?1 ORDER BY id")
         .map_err(|e| e.to_string())?;
@@ -34,17 +38,35 @@ pub fn export(conn: &Connection, workspace: &str, root: &std::path::Path) -> Res
         .collect::<Result<Vec<_>, _>>()?;
     let mut archive=conn.prepare("SELECT metadata_json,content_hash,compacted_at FROM memory_compacted_revisions c JOIN memory_entries e ON e.id=c.entry_id WHERE e.workspace_id=?1 ORDER BY c.entry_id,c.revision").map_err(|e|e.to_string())?;
     let archived=archive.query_map([workspace],|r|Ok(json!({"metadata":r.get::<_,String>(0)?,"contentHash":r.get::<_,String>(1)?,"compactedAt":r.get::<_,i64>(2)?}))).map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;
-    let path = std::path::Path::new(&projection.path).join("revisions.json");
+    Ok(ArchivePrep { stats: stats(conn, workspace)?, body: json!({"entries": details, "compactedRevisions": archived}) })
+}
+
+fn write_archive(repo_path: &std::path::Path, body: &Value) -> Result<(), String> {
+    let path = repo_path.join("revisions.json");
     if path.is_symlink() {
         return Err("export cannot follow a symlink".into());
     }
-    std::fs::write(
-        &path,
-        serde_json::to_vec_pretty(&json!({"entries":details,"compactedRevisions":archived}))
-            .map_err(|e| e.to_string())?,
-    )
-    .map_err(|e| e.to_string())?;
-    let mut result = stats(conn, workspace)?;
+    std::fs::write(&path, serde_json::to_vec_pretty(body).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
+pub fn export(conn: &Connection, workspace: &str, root: &std::path::Path) -> Result<Value, String> {
+    let projection = super::repo::export_at(conn, workspace, root, None)?;
+    let prepared = prepare_archive(conn, workspace)?;
+    write_archive(std::path::Path::new(&projection.path), &prepared.body)?;
+    let mut result = prepared.stats;
+    result["path"] = json!(projection.path);
+    Ok(result)
+}
+
+/// Same archive as [`export`], but git runs on the sync worker after the database lock is released.
+pub fn export_detached(db: &crate::database::DbConnection, sync: &super::repo_sync::RepoSync, workspace: &str) -> Result<Value, String> {
+    let prepared = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        prepare_archive(&conn, workspace)?
+    };
+    let projection = sync.export_now(workspace)?;
+    write_archive(std::path::Path::new(&projection.path), &prepared.body)?;
+    let mut result = prepared.stats;
     result["path"] = json!(projection.path);
     Ok(result)
 }
@@ -185,9 +207,9 @@ pub fn workspace_deleted_list(db: tauri::State<crate::database::DbConnection>) -
 pub fn memory_export(
     workspace_id: String,
     db: tauri::State<crate::database::DbConnection>,
+    sync: tauri::State<super::repo_sync::RepoSync>,
 ) -> Result<Value, String> {
-    let c = db.lock().map_err(|e| e.to_string())?;
-    export(&c, &workspace_id, &super::repo::default_root()?)
+    export_detached(&db, &sync, &workspace_id)
 }
 #[tauri::command]
 pub fn memory_workspace_stats(

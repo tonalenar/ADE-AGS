@@ -230,6 +230,17 @@ export interface MemoryWorkspaceReview {
   counts: MemoryReviewCounts;
 }
 
+/** Estado da fila que projeta a memória aprovada no repositório Markdown. A aprovação no banco não espera o git. */
+export type RepoSyncPhase = "idle" | "queued" | "syncing" | "synced" | "failed";
+
+export interface RepoSyncStatus {
+  workspaceId: string;
+  phase: RepoSyncPhase;
+  error: string | null;
+  commit: string | null;
+  pending: number;
+}
+
 /** PROVISÓRIO (contrato proposto ao Backend, Etapa 23): um "sonho" do Dreamer com suas propostas e o diff Markdown. */
 export interface MemoryDream {
   dreamId: string;

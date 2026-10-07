@@ -17,6 +17,8 @@ const mock = vi.hoisted(() => ({
   facts: vi.fn(),
   snapshot: vi.fn(),
   listen: vi.fn(),
+  sync: vi.fn(),
+  retrySync: vi.fn(),
 }));
 vi.mock("../ipc", () => ({
   listMemory: mock.list,
@@ -27,6 +29,8 @@ vi.mock("../ipc", () => ({
   promoteFact: mock.promote,
   listRunFacts: mock.facts,
   listMemorySnapshot: mock.snapshot,
+  getRepoSyncStatus: mock.sync,
+  retryRepoSync: mock.retrySync,
 }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: mock.listen }));
 vi.mock("react-i18next", () => ({
@@ -148,6 +152,8 @@ beforeEach(() => {
   mock.facts.mockResolvedValue([{ id: "f1", kind: "finding", body: "Run discovery", createdAt: 1, author: "Worker" }]);
   mock.snapshot.mockResolvedValue({ items: [], meta: { contextBytes: 0, omittedEntries: 0, truncatedEntries: 0 } });
   mock.listen.mockResolvedValue(() => {});
+  mock.sync.mockResolvedValue({ workspaceId: "w1", phase: "synced", error: null, commit: "abc", pending: 0 });
+  mock.retrySync.mockResolvedValue({ workspaceId: "w1", phase: "queued", error: null, commit: null, pending: 1 });
   container = document.createElement("div");
   document.body.append(container);
   root = createRoot(container);

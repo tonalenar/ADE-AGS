@@ -8,6 +8,7 @@ import { MemorySearchBar } from "./MemorySearchBar";
 import { EMPTY_SEARCH, isEmptySearch, toFilter, verificationOf, type SearchState } from "./memorySearch";
 import { PurgeButton } from "./PurgeButton";
 import { SourceCheck } from "./SourceCheck";
+import { RepoSyncNotice } from "./RepoSyncNotice";
 import * as memoryIpc from "./ipc";
 import type { MemoryDetail, MemoryEntry, MemoryKind, MemoryPage, MemoryProposal, MemoryScope, MemorySnapshot, MemoryValidityInterval, MemoryWorkspaceStats } from "./types";
 
@@ -280,6 +281,7 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
             onClick={() => openCreate(tab === "mission" ? "mission" : "workspace")}>Propor memória</Button>
         )}
       </div>
+      <RepoSyncNotice workspaceId={workspaceId} />
 
       <div role="tablist" aria-label="Seções de memória" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-white/8">
         {tabs.map((item) => (
