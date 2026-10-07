@@ -72,11 +72,25 @@ pub struct ExportResult {
     pub warnings: Vec<String>,
 }
 
+fn id_suffix(id: &str) -> String {
+    Sha256::digest(id.as_bytes()).iter().take(6).map(|b| format!("{b:02x}")).collect()
+}
+
+/// Nome de página (`missions/`, `swarms/`). Continua misturando o título com o hash do id.
 pub fn slug(name: &str, id: &str) -> String {
     let stem = name.chars().map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '-' })
         .collect::<String>().split('-').filter(|s| !s.is_empty()).take(8).collect::<Vec<_>>().join("-");
-    let suffix = Sha256::digest(id.as_bytes()).iter().take(6).map(|b| format!("{b:02x}")).collect::<String>();
-    format!("{}-{suffix}", if stem.is_empty() { "workspace" } else { &stem })
+    format!("{}-{}", if stem.is_empty() { "workspace" } else { &stem }, id_suffix(id))
+}
+
+/// Diretório do repositório do workspace. Só o id: renomear o workspace não deixa órfão.
+pub fn workspace_repo_name(id: &str) -> String {
+    format!("ws-{}", id_suffix(id))
+}
+
+fn repo_dir_matches(name: &str, suffix: &str) -> bool {
+    let tail = format!("-{suffix}");
+    name.len() > tail.len() && name.ends_with(&tail)
 }
 
 fn one_line(text: &str) -> String {
@@ -210,8 +224,20 @@ pub fn default_root() -> Result<PathBuf,String> {
 
 /// Read provenance only; launching a Run must not export or mutate user files.
 pub fn current_commit(conn: &Connection, workspace: &str) -> Option<String> {
-    let name: String = conn.query_row("SELECT name FROM workspaces WHERE id=?1", [workspace], |r| r.get(0)).ok()?;
-    let path = default_root().ok()?.join(slug(&name, workspace));
+    let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)", [workspace], |row| row.get(0)).ok()?;
+    if !exists {
+        return None;
+    }
+    let root = default_root().ok()?;
+    let dirs = workspace_repo_dirs(&root, workspace).ok()?;
+    let stable = workspace_repo_name(workspace);
+    let path = if let Some(dir) = dirs.iter().find(|dir| dir.file_name().and_then(|name| name.to_str()) == Some(stable.as_str())) {
+        dir.clone()
+    } else if dirs.len() == 1 {
+        dirs.into_iter().next()?
+    } else {
+        return None;
+    };
     if path.is_symlink() || path.join(".git").is_symlink() || !path.join(".git").exists() { return None; }
     git(&path, &["rev-parse", "HEAD"]).ok()
 }
@@ -277,6 +303,13 @@ fn repo_gate(path: &Path) -> Arc<Mutex<()>> {
     gates.entry(path.to_path_buf()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
 }
 
+/// Serializa publish e a reescrita do purge no mesmo diretório.
+pub(crate) fn with_repo_gate<T>(path: &Path, body: impl FnOnce() -> T) -> T {
+    let gate = repo_gate(path);
+    let _held = gate.lock().unwrap_or_else(|err| err.into_inner());
+    body()
+}
+
 /// Só para teste: renderiza e publica na thread de quem chama.
 /// Produção não usa isto — o git tem de correr depois de soltar o mutex do banco.
 #[cfg(test)]
@@ -304,7 +337,8 @@ pub fn publish(
     if export_db_held() {
         return Err(DB_HELD_ERROR.into());
     }
-    let path = root.join(slug(workspace_name, workspace_id));
+    let path = ensure_workspace_repo(root, workspace_id)?;
+    let _ = workspace_name;
     let gate = repo_gate(&path);
     let _held = gate.lock().unwrap_or_else(|err| err.into_inner());
     if root.is_symlink() || path.is_symlink() { return Err("memory repository cannot be a symlink".into()); }
@@ -388,6 +422,329 @@ pub fn publish(
 fn managed_path(path: &str) -> bool {
     !path.contains("..") && !path.contains('\\') && !Path::new(path).is_absolute()
         && (matches!(path,"AGENTS.generated.md"|"MEMORY.md"|"decisions.md"|"constraints.md"|"findings.md"|"files.md"|"notes.md"|"questions.md") || path.starts_with("missions/") || path.starts_with("swarms/"))
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct HistoryRewrite {
+    pub rewritten: bool,
+    pub remote_detached: bool,
+}
+
+/// Diretórios deste workspace sob a raiz: o nome estável `ws-{hash}` e qualquer slug antigo
+/// `*-{hash}` deixado por um rename. O hash é o mesmo sufixo de [`slug`].
+pub(crate) fn workspace_repo_dirs(root: &Path, workspace_id: &str) -> Result<Vec<PathBuf>, String> {
+    let suffix = id_suffix(workspace_id);
+    let mut found = Vec::new();
+    let entries = match std::fs::read_dir(root) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(found),
+        Err(error) => return Err(error.to_string()),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if !repo_dir_matches(&name, &suffix) {
+            continue;
+        }
+        let path = entry.path();
+        if path.is_symlink() {
+            return Err("memory repository cannot be a symlink".into());
+        }
+        if path.is_dir() {
+            found.push(path);
+        }
+    }
+    found.sort();
+    Ok(found)
+}
+
+/// Cria o caminho estável. Se só existe o diretório do nome antigo, renomeia.
+fn ensure_workspace_repo(root: &Path, workspace_id: &str) -> Result<PathBuf, String> {
+    if root.is_symlink() {
+        return Err("memory repository cannot be a symlink".into());
+    }
+    let stable = root.join(workspace_repo_name(workspace_id));
+    if stable.symlink_metadata().is_ok() {
+        return Ok(stable);
+    }
+    let legacy = workspace_repo_dirs(root, workspace_id)?;
+    if legacy.len() == 1 {
+        if let Some(parent) = stable.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::rename(&legacy[0], &stable).map_err(|e| format!("could not migrate memory repository: {e}"))?;
+    }
+    Ok(stable)
+}
+
+/// Replaces the local commit chain with one snapshot of the current approved projection.
+/// The memory repository is not allowed to have a remote; if one was configured anyway,
+/// it is dropped with the old `.git` and nothing is pushed. Objects that already left
+/// this machine are outside ADE's control. Every directory of this workspace is rewritten,
+/// including orphans left behind when the workspace was renamed.
+pub fn replace_local_history(conn: &Connection, workspace: &str, root: &Path, purged_bodies: &[String]) -> Result<HistoryRewrite, String> {
+    let projection = render(conn, workspace, &[]).ok();
+    rewrite_workspace_repos(root, workspace, projection.as_ref(), purged_bodies)
+}
+
+pub(crate) fn rewrite_workspace_repos(root: &Path, workspace: &str, projection: Option<&Projection>, purged_bodies: &[String]) -> Result<HistoryRewrite, String> {
+    if root.is_symlink() {
+        return Err("memory repository cannot be a symlink".into());
+    }
+    let dirs = workspace_repo_dirs(root, workspace)?;
+    if dirs.is_empty() {
+        return Ok(HistoryRewrite { rewritten: false, remote_detached: false });
+    }
+    let mut remote_detached = false;
+    for path in &dirs {
+        let rewrite = with_repo_gate(path, || rewrite_one_repo(path, projection, purged_bodies))?;
+        remote_detached |= rewrite;
+    }
+    if remote_detached {
+        eprintln!("memory purge: histórico git local reescrito; um remoto configurado foi descartado e não foi atualizado. Cópias já enviadas continuam fora do alcance do ADE.");
+    }
+    Ok(HistoryRewrite { rewritten: true, remote_detached })
+}
+
+fn rewrite_one_repo(path: &Path, projection: Option<&Projection>, purged_bodies: &[String]) -> Result<bool, String> {
+    if path.is_symlink() || path.join(".git").is_symlink() {
+        return Err("memory repository cannot be a symlink".into());
+    }
+    let remote_detached = path.join(".git").is_dir() && !git(path, &["remote"]).unwrap_or_default().trim().is_empty();
+    if let Some(projection) = projection {
+        // O renderer já passou por `ensure_exportable_text`. Não há um segundo critério.
+        write_managed(path, &projection.files)?;
+        discard_git(path)?;
+        commit_managed(path, &projection.files.keys().cloned().collect::<Vec<_>>())?;
+    } else {
+        redact_working_tree(path, purged_bodies)?;
+        discard_git(path)?;
+        let remaining = list_managed(path)?;
+        commit_managed(path, &remaining)?;
+    }
+    Ok(remote_detached)
+}
+
+fn discard_git(path: &Path) -> Result<(), String> {
+    remove_dir_resilient(&path.join(".git"))
+}
+
+/// Apaga uma árvore que no Windows costuma ter arquivo somente leitura ou aberto pelo git.
+/// Não segue symlink. O retry é o caminho testável; no Linux o primeiro `remove_dir_all` basta.
+pub(crate) fn remove_dir_resilient(path: &Path) -> Result<(), String> {
+    match std::fs::symlink_metadata(path) {
+        Ok(meta) if meta.file_type().is_symlink() => return Err("memory git directory cannot be a symlink".into()),
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(format!("could not discard memory git history: {error}")),
+    }
+    clear_readonly_tree(path)?;
+    retry_io(
+        5,
+        || {
+            let _ = clear_readonly_tree(path);
+            std::fs::remove_dir_all(path)
+        },
+        |delay| std::thread::sleep(delay),
+    )
+    .map_err(|error| format!("could not discard memory git history: {error}"))
+}
+
+pub(crate) fn clear_readonly_tree(path: &Path) -> Result<(), String> {
+    let meta = match std::fs::symlink_metadata(path) {
+        Ok(meta) => meta,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    if meta.file_type().is_symlink() {
+        return Ok(());
+    }
+    let mut permissions = meta.permissions();
+    if permissions.readonly() {
+        permissions.set_readonly(false);
+        std::fs::set_permissions(path, permissions).map_err(|e| e.to_string())?;
+    }
+    if meta.is_dir() {
+        for entry in std::fs::read_dir(path).map_err(|e| e.to_string())? {
+            let entry = entry.map_err(|e| e.to_string())?;
+            clear_readonly_tree(&entry.path())?;
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn retry_io(attempts: u32, mut op: impl FnMut() -> std::io::Result<()>, mut wait: impl FnMut(Duration)) -> std::io::Result<()> {
+    let mut delay = Duration::from_millis(20);
+    let mut last = Ok(());
+    let attempts = attempts.max(1);
+    for attempt in 0..attempts {
+        match op() {
+            Ok(()) => return Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(error) => {
+                last = Err(error);
+                if attempt + 1 == attempts {
+                    break;
+                }
+                wait(delay);
+                delay = (delay * 2).min(Duration::from_millis(400));
+            }
+        }
+    }
+    last
+}
+
+fn write_managed(path: &Path, files: &Files) -> Result<(), String> {
+    for old in list_managed(path)? {
+        if !files.contains_key(&old) {
+            let target = path.join(&old);
+            if target.is_symlink() {
+                return Err("memory projection cannot follow symlinks".into());
+            }
+            if target.is_file() {
+                std::fs::remove_file(&target).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    for (file, body) in files {
+        let target = path.join(file);
+        if target.is_symlink() || target.parent().is_some_and(|parent| parent.is_symlink()) {
+            return Err("memory projection cannot follow symlinks".into());
+        }
+        if let Some(parent) = target.parent() {
+            std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+        }
+        std::fs::write(&target, body).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+fn list_managed(path: &Path) -> Result<Vec<String>, String> {
+    let mut found = Vec::new();
+    collect_managed(path, "", &mut found)?;
+    found.sort();
+    Ok(found)
+}
+
+fn collect_managed(dir: &Path, prefix: &str, out: &mut Vec<String>) -> Result<(), String> {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error.to_string()),
+    };
+    for entry in entries {
+        let entry = entry.map_err(|e| e.to_string())?;
+        let name = entry.file_name();
+        let name = name.to_string_lossy();
+        if name == ".git" || name.starts_with('.') {
+            continue;
+        }
+        let child = entry.path();
+        if child.is_symlink() {
+            return Err("memory projection cannot follow symlinks".into());
+        }
+        let rel = if prefix.is_empty() { name.into_owned() } else { format!("{prefix}/{name}") };
+        if child.is_dir() {
+            collect_managed(&child, &rel, out)?;
+        } else if managed_path(&rel) {
+            out.push(rel);
+        }
+    }
+    Ok(())
+}
+
+fn commit_managed(path: &Path, files: &[String]) -> Result<(), String> {
+    if !path.join(".git").exists() {
+        git(path, &["init", "--quiet"])?;
+    }
+    for file in files {
+        if !managed_path(file) {
+            continue;
+        }
+        git(path, &["add", "--", file])?;
+    }
+    let hooks = path.join(".git").join("ade-disabled-hooks");
+    std::fs::create_dir_all(&hooks).map_err(|e| e.to_string())?;
+    let hooks_path = hooks.display().to_string();
+    git(path, &[
+        "-c", "user.name=ADE AGS",
+        "-c", "user.email=memory@ade-ags.local",
+        "-c", &format!("core.hooksPath={hooks_path}"),
+        "-c", "commit.gpgSign=false",
+        "commit", "--quiet", "--allow-empty",
+        "-m", "Rewrite local memory history after purge",
+    ])?;
+    Ok(())
+}
+
+fn redact_working_tree(path: &Path, bodies: &[String]) -> Result<(), String> {
+    let needles = redaction_needles(bodies);
+    if needles.is_empty() {
+        return Ok(());
+    }
+    let mut stack = vec![path.to_path_buf()];
+    while let Some(dir) = stack.pop() {
+        let entries = std::fs::read_dir(&dir).map_err(|e| e.to_string())?;
+        for entry in entries {
+            let entry = entry.map_err(|e| e.to_string())?;
+            let child = entry.path();
+            if child.file_name().is_some_and(|name| name == ".git") {
+                continue;
+            }
+            if child.is_symlink() {
+                return Err("memory projection cannot follow symlinks".into());
+            }
+            if child.is_dir() {
+                stack.push(child);
+                continue;
+            }
+            let Ok(text) = std::fs::read_to_string(&child) else { continue };
+            let mut redacted = text.clone();
+            for needle in &needles {
+                if redacted.contains(needle.as_str()) {
+                    redacted = redacted.replace(needle.as_str(), "[expurgado]");
+                }
+            }
+            if redacted != text {
+                std::fs::write(&child, redacted).map_err(|e| e.to_string())?;
+            }
+        }
+    }
+    Ok(())
+}
+
+pub(crate) fn redact_text(text: &str, needles: &[String]) -> String {
+    let mut redacted = text.to_string();
+    for needle in needles {
+        if !needle.is_empty() && redacted.contains(needle.as_str()) {
+            redacted = redacted.replace(needle.as_str(), "[expurgado]");
+        }
+    }
+    redacted
+}
+
+pub(crate) fn redaction_needles(bodies: &[String]) -> Vec<String> {
+    let mut needles = Vec::new();
+    for body in bodies {
+        if body.is_empty() {
+            continue;
+        }
+        needles.push(body.clone());
+        let line = one_line(body);
+        if line != *body {
+            needles.push(line);
+        }
+        if let Ok(json) = serde_json::to_string(body) {
+            if json.len() >= 2 {
+                needles.push(json[1..json.len() - 1].to_string());
+            }
+        }
+    }
+    needles.sort();
+    needles.dedup();
+    needles.retain(|needle| !needle.is_empty());
+    needles
 }
 
 #[tauri::command]

@@ -2417,7 +2417,7 @@
   "memoryInbox.syncRetry": "Tentar de novo",
   "memoryPurge.button": "Apagar",
   "memoryPurge.title": "Apagar memória definitivamente",
-  "memoryPurge.body": "“{{key}}” e TODAS as revisões serão apagadas para sempre. Não dá para desfazer; fica só um evento de auditoria (sem o conteúdo).",
+  "memoryPurge.body": "“{{key}}” e TODAS as revisões serão apagadas do banco, do histórico git local, do arquivo de revisões, dos backups automáticos e do prompt dos sonhos do ADE. Não dá para desfazer; fica só um evento de auditoria (sem o conteúdo). Cópias fora do ADE não são apagadas.",
   "memoryPurge.typeKey": "Digite {{key}} para confirmar:",
   "memoryPurge.confirm": "Apagar definitivamente",
   "memoryDream.start": "Sonhar agora",

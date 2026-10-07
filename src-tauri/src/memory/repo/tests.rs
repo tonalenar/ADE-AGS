@@ -94,7 +94,7 @@ fn one_secret_does_not_block_export_of_the_other_entries() {
     let stripe = format!("{}{}", "sk_", "live_abcdefghijklmnopqrstuvwxyz");
     c.execute("INSERT INTO run_facts(id,run_id,kind,body,created_at) VALUES('fact-secret','run','finding',?1,1)", [&stripe]).unwrap();
     let exported=export_at(&c,"w",&root,None).unwrap();
-    assert!(root.join(slug("Test workspace","w")).exists());
+    assert!(root.join(workspace_repo_name("w")).exists());
     let files=render(&c,"w",&[]).unwrap();
     let joined=files.values().cloned().collect::<Vec<_>>().join("\n");
     assert!(joined.contains("senha: mínimo 12 caracteres"), "{joined}");
@@ -116,11 +116,59 @@ fn one_secret_does_not_block_export_of_the_other_entries() {
 fn preview_overrides_are_pure_and_match_export_after_approval() {
     let c=fixture();let root=TempDir::new();let p=propose(&c,"new","New evidence");
     let before=render(&c,"w",&[]).unwrap();let preview=render(&c,"w",&[(p.entry_id.clone(),p.revision)]).unwrap();
-    assert_ne!(before,preview);assert!(!root.path().join(slug("Test workspace","w")).exists());
+    assert_ne!(before,preview);assert!(!root.path().join(workspace_repo_name("w")).exists());
     crate::memory::decide(&c,&p.entry_id,p.revision,true).unwrap();
     assert_eq!(preview,render(&c,"w",&[]).unwrap());
     let exported=export_at(&c,"w",root.path(),Some((&p.entry_id,p.revision))).unwrap();
     for (file,body) in preview {assert_eq!(git(Path::new(&exported.path),&["show",&format!("HEAD:{file}")]).unwrap(),body.trim_end());}
+}
+
+#[test]
+fn renamed_workspace_repo_moves_to_the_id_directory() {
+    let c = fixture();
+    let temp = TempDir::new();
+    let legacy = temp.path().join(slug("Test workspace", "w"));
+    std::fs::create_dir_all(&legacy).unwrap();
+    std::fs::write(legacy.join("notes.md"), "legacy marker before rename\n").unwrap();
+    let created = propose(&c, "kept", "kept after rename");
+    crate::memory::decide(&c, &created.entry_id, created.revision, true).unwrap();
+    let exported = export_at(&c, "w", temp.path(), Some((&created.entry_id, created.revision))).unwrap();
+    let stable = temp.path().join(workspace_repo_name("w"));
+    assert_eq!(std::path::PathBuf::from(&exported.path), stable);
+    assert!(!legacy.exists());
+    assert!(std::fs::read_to_string(stable.join("constraints.md")).unwrap().contains("kept after rename"));
+}
+
+#[test]
+fn git_dir_removal_clears_readonly_files() {
+    let temp = TempDir::new();
+    let git_dir = temp.path().join(".git");
+    let pack = git_dir.join("objects").join("pack");
+    std::fs::create_dir_all(&pack).unwrap();
+    let file = pack.join("pack-test.idx");
+    std::fs::write(&file, "readonly-pack").unwrap();
+    let mut permissions = std::fs::metadata(&file).unwrap().permissions();
+    permissions.set_readonly(true);
+    std::fs::set_permissions(&file, permissions).unwrap();
+    assert!(std::fs::metadata(&file).unwrap().permissions().readonly());
+    remove_dir_resilient(&git_dir).unwrap();
+    assert!(!git_dir.exists());
+}
+
+#[test]
+fn removal_retries_with_backoff_until_it_succeeds() {
+    let mut hits = 0;
+    let mut delays = Vec::new();
+    retry_io(5, || {
+        hits += 1;
+        if hits < 3 {
+            Err(std::io::Error::new(std::io::ErrorKind::PermissionDenied, "busy"))
+        } else {
+            Ok(())
+        }
+    }, |delay| delays.push(delay)).unwrap();
+    assert_eq!(hits, 3);
+    assert_eq!(delays, vec![Duration::from_millis(20), Duration::from_millis(40)]);
 }
 
 #[test]

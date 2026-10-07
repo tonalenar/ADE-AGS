@@ -1803,3 +1803,266 @@ fn mcp_and_promote_fact_secret_detection_covers_key_body_reason_and_all_operatio
         assert_eq!(err_promote_fn.unwrap_err(), "memory promotion cannot contain credentials");
     }
 }
+
+#[test]
+fn revision_archive_omits_pending_and_rejected_bodies() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    activate(&conn, "workspace", None, "visible", "visible-approved-body");
+    propose(&conn, "workspace", None, "visible", "hidden-pending-body", "update", Some(1));
+    let rejected = propose(&conn, "workspace", None, "hidden", "hidden-rejected-body", "create", None);
+    decide(&conn, &rejected.entry_id, rejected.revision, false).unwrap();
+    let root = std::env::temp_dir().join(format!("ade-memory-archive-{}", uuid::Uuid::new_v4()));
+    let result = lifecycle::export(&conn, "w1", &root).unwrap();
+    let dump = std::fs::read_to_string(std::path::Path::new(result["path"].as_str().unwrap()).join("revisions.json")).unwrap();
+    assert!(dump.contains("visible-approved-body"));
+    assert!(!dump.contains("hidden-pending-body"), "{dump}");
+    assert!(!dump.contains("hidden-rejected-body"), "{dump}");
+    assert!(dump.contains("\"status\": \"proposed\""));
+    assert!(dump.contains("\"status\": \"rejected\""));
+    assert!(dump.contains("contentHash"));
+    let _ = std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn purge_removes_text_from_git_history_revision_archive_and_backups() {
+    let sentinel = "PURGED_SENTINEL_7c1e9a_body";
+    let neighbor = "neighbor approved text stays";
+    let replacement = "replacement after purge stays";
+    let temp = std::env::temp_dir().join(format!("ade-memory-purge-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp).unwrap();
+    let db_path = temp.join("data.db");
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+    crate::database::migrate_for_tests(&conn).unwrap();
+    conn.execute_batch("PRAGMA journal_mode=WAL;").unwrap();
+    seed_workspace(&conn, "w1");
+    seed_run(&conn, "r1", "w1", None);
+    activate(&conn, "workspace", None, "neighbor", neighbor);
+    let target = activate(&conn, "workspace", None, "target", sentinel);
+    snapshot_run(&conn, "r1", "w1", None).unwrap();
+    let memory_root = temp.join("memory");
+    let first = repo::export_at(&conn, "w1", &memory_root, Some((&target.entry_id, 1))).unwrap();
+    let repo = std::path::PathBuf::from(&first.path);
+    let updated = propose(&conn, "workspace", None, "target", replacement, "update", Some(1));
+    decide(&conn, &updated.entry_id, updated.revision, true).unwrap();
+    repo::export_at(&conn, "w1", &memory_root, Some((&target.entry_id, updated.revision))).unwrap();
+    lifecycle::export(&conn, "w1", &memory_root).unwrap();
+    let backup = temp.join("data.v41-11111111-1111-4111-8111-111111111111.backup");
+    conn.execute("VACUUM INTO ?1", [backup.to_string_lossy().as_ref()]).unwrap();
+    let unrelated = temp.join("notes.backup");
+    let loose = temp.join("data.vacuum.backup");
+    std::fs::write(&unrelated, sentinel).unwrap();
+    std::fs::write(&loose, sentinel).unwrap();
+    let bare = temp.join("remote.git");
+    let bare_arg = bare.to_string_lossy().into_owned();
+    git_ok(&temp, &["init", "--bare", &bare_arg]);
+    git_ok(&repo, &["remote", "add", "origin", &bare_arg]);
+    git_ok(&repo, &["push", "origin", "HEAD:refs/heads/exported"]);
+    assert!(git_history(&repo).contains(sentinel));
+    assert!(std::fs::read_to_string(repo.join("revisions.json")).unwrap().contains(sentinel));
+    assert!(file_has(&backup, sentinel));
+
+    let scope = purge::Scope { memory_root: memory_root.clone(), database_file: Some(db_path.clone()), events_root: None };
+    purge::revisions(&conn, &target.entry_id, Some(1), Some(&scope)).unwrap();
+
+    let history = git_history(&repo);
+    assert!(!history.contains(sentinel), "{history}");
+    assert!(history.contains(neighbor), "{history}");
+    assert!(history.contains(replacement), "{history}");
+    assert_eq!(git_ok(&repo, &["rev-list", "--count", "--all"]).trim(), "1");
+    assert!(git_ok(&repo, &["log", "--format=%s"]).contains("Rewrite local memory history after purge"));
+    assert!(git_ok(&repo, &["remote"]).trim().is_empty());
+    let archive = std::fs::read_to_string(repo.join("revisions.json")).unwrap();
+    assert!(!archive.contains(sentinel), "{archive}");
+    assert!(archive.contains(neighbor) && archive.contains(replacement));
+    assert!(!file_has(&backup, sentinel));
+    assert!(file_has(&db_path, neighbor) && !file_has(&db_path, sentinel));
+    for suffix in ["-wal", "-shm", "-journal"] {
+        let sidecar = std::path::PathBuf::from(format!("{}{suffix}", db_path.display()));
+        if sidecar.exists() {
+            assert!(!file_has(&sidecar, sentinel), "{}", sidecar.display());
+        }
+    }
+    let backup_db = rusqlite::Connection::open(&backup).unwrap();
+    let left: i64 = backup_db.query_row("SELECT COUNT(*) FROM memory_revisions WHERE instr(body,?1)>0", [sentinel], |row| row.get(0)).unwrap();
+    let snaps: i64 = backup_db.query_row("SELECT COUNT(*) FROM run_memory_snapshot WHERE instr(body,?1)>0", [sentinel], |row| row.get(0)).unwrap();
+    assert_eq!((left, snaps), (0, 0));
+    assert!(file_has(&backup, neighbor));
+    assert!(file_has(&unrelated, sentinel));
+    assert!(file_has(&loose, sentinel));
+    let remote_log = git_ok(&bare, &["log", "-p", "--all"]);
+    assert!(remote_log.contains(sentinel), "remoto já enviado fica fora do alcance do purge");
+    let detail = detail_for_owner(&conn, &target.entry_id, "w1", None).unwrap();
+    assert_eq!(detail.entry.body.as_deref(), Some(replacement));
+    assert!(detail.revisions.iter().all(|revision| revision.body != sentinel));
+    let audit_sql: String = conn.query_row("SELECT sql FROM sqlite_master WHERE name='memory_purge_audit'", [], |row| row.get(0)).unwrap();
+    assert!(!audit_sql.to_lowercase().contains("body"));
+    let audit: String = conn.query_row("SELECT entry_id||':'||revision||':'||actor_kind FROM memory_purge_audit", [], |row| row.get(0)).unwrap();
+    assert_eq!(audit, format!("{}:1:user", target.entry_id));
+    assert!(!audit.contains(sentinel));
+    purge::revisions(&conn, &target.entry_id, Some(1), Some(&scope)).unwrap();
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM memory_purge_audit", [], |row| row.get::<_, i64>(0)).unwrap(), 1);
+    drop(backup_db);
+    drop(conn);
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn purge_regenerates_with_the_export_filter_and_drops_the_override() {
+    let purged = "VISIBLE_OLD_BODY_should_leave_git";
+    let blocking = "password: do-not-export-this";
+    let temp = std::env::temp_dir().join(format!("ade-memory-purge-fallback-{}", uuid::Uuid::new_v4()));
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    let target = activate(&conn, "workspace", None, "old", purged);
+    let exported = repo::export_at(&conn, "w1", &temp, Some((&target.entry_id, 1))).unwrap();
+    let repo = std::path::PathBuf::from(&exported.path);
+    let mut secret_input = proposal("workspace", "blocked", blocking, "create", None);
+    secret_input.acknowledge_secret = true;
+    let secret = super::propose(&conn, "workspace", "w1", None, &secret_input, ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None }).unwrap();
+    decide(&conn, &secret.entry_id, secret.revision, true).unwrap();
+    conn.execute("DELETE FROM memory_secret_overrides WHERE entry_id=?1", [&secret.entry_id]).unwrap();
+    let exported = repo::export_at(&conn, "w1", &temp, None).unwrap();
+    assert!(exported.warnings.iter().any(|warning| warning.contains(&secret.entry_id)));
+    assert!(!git_history(&repo).contains(blocking));
+    let scope = purge::Scope { memory_root: temp.clone(), database_file: None, events_root: None };
+    purge::revisions(&conn, &target.entry_id, Some(1), Some(&scope)).unwrap();
+    let history = git_history(&repo);
+    assert!(!history.contains(purged), "{history}");
+    assert!(!history.contains(blocking), "{history}");
+    assert_eq!(git_ok(&repo, &["rev-list", "--count", "--all"]).trim(), "1");
+    conn.execute(
+        "INSERT INTO memory_secret_overrides(entry_id,revision,created_at) VALUES(?1,?2,0)",
+        params![secret.entry_id, secret.revision],
+    )
+    .unwrap();
+    purge::revisions(&conn, &secret.entry_id, Some(secret.revision), Some(&scope)).unwrap();
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM memory_secret_overrides", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    assert!(!git_history(&repo).contains(blocking));
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+#[test]
+fn purge_scrubs_dreamer_prompt_event_log_and_orphan_repo() {
+    let sentinel = "DREAMER_PURGE_SENTINEL_91aa";
+    let temp = std::env::temp_dir().join(format!("ade-memory-purge-copies-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp).unwrap();
+    let db_path = temp.join("data.db");
+    let conn = rusqlite::Connection::open(&db_path).unwrap();
+    conn.execute_batch("PRAGMA foreign_keys=ON;").unwrap();
+    crate::database::migrate_for_tests(&conn).unwrap();
+    seed_workspace(&conn, "w1");
+    seed_run(&conn, "r1", "w1", None);
+    let target = activate(&conn, "workspace", None, "dreamed", sentinel);
+    let prompt = format!("UNTRUSTED DATA BEGIN\n{}\nUNTRUSTED DATA END", serde_json::json!({"body": sentinel, "markdown": sentinel}));
+    seed_task(&conn, "dream", "r1", Some("dreamer"));
+    seed_task(&conn, "worker", "r1", Some("worker"));
+    let events_root = temp.join("runs");
+    let event = events_root.join("r1").join("dream.jsonl");
+    std::fs::create_dir_all(event.parent().unwrap()).unwrap();
+    std::fs::write(&event, format!("{{\"text\":\"{sentinel}\"}}\n")).unwrap();
+    let outside = temp.join("claude-transcript.jsonl");
+    std::fs::write(&outside, sentinel).unwrap();
+    conn.execute(
+        "UPDATE tasks SET prompt=?2, functional_role='dreamer', events_path=?3 WHERE id=?1",
+        params!["dream", prompt, event.to_string_lossy().as_ref()],
+    )
+    .unwrap();
+    conn.execute("UPDATE tasks SET prompt=?2 WHERE id=?1", params!["worker", format!("worker keeps {sentinel}")]).unwrap();
+    conn.execute(
+        "INSERT INTO memory_agent_drafts(id,workspace_id,scope,input_json,actor_kind,created_at) VALUES('d1','w1','workspace',?1,'dreamer',0)",
+        [format!(r#"{{"body":"{sentinel}"}}"#)],
+    )
+    .unwrap();
+    conn.execute(
+        "INSERT INTO memory_secret_overrides(entry_id,revision,created_at) VALUES(?1,1,0)",
+        [&target.entry_id],
+    )
+    .unwrap();
+    let memory_root = temp.join("memory");
+    let exported = repo::export_at(&conn, "w1", &memory_root, Some((&target.entry_id, 1))).unwrap();
+    let stable = std::path::PathBuf::from(&exported.path);
+    lifecycle::export(&conn, "w1", &memory_root).unwrap();
+    let orphan = memory_root.join(repo::slug("Workspace w1", "w1"));
+    std::fs::create_dir_all(&orphan).unwrap();
+    git_ok(&orphan, &["init", "--quiet"]);
+    std::fs::write(orphan.join("notes.md"), format!("# Notes\n\n{sentinel}\n")).unwrap();
+    git_ok(&orphan, &["add", "--", "notes.md"]);
+    git_ok(&orphan, &["-c", "user.name=ADE AGS", "-c", "user.email=memory@ade-ags.local", "commit", "--quiet", "-m", "orphan"]);
+    assert!(git_history(&orphan).contains(sentinel));
+    let backup = temp.join("data.v41-22222222-2222-4222-8222-222222222222.backup");
+    conn.execute("VACUUM INTO ?1", [backup.to_string_lossy().as_ref()]).unwrap();
+    let scope = purge::Scope { memory_root, database_file: Some(db_path), events_root: Some(events_root) };
+    purge::revisions(&conn, &target.entry_id, Some(1), Some(&scope)).unwrap();
+    let dream_prompt: String = conn.query_row("SELECT prompt FROM tasks WHERE id='dream'", [], |row| row.get(0)).unwrap();
+    assert!(!dream_prompt.contains(sentinel), "{dream_prompt}");
+    assert!(dream_prompt.contains("[expurgado]"));
+    let worker_prompt: String = conn.query_row("SELECT prompt FROM tasks WHERE id='worker'", [], |row| row.get(0)).unwrap();
+    assert!(worker_prompt.contains(sentinel), "prompt de tarefa comum não é cópia do purge");
+    let draft: String = conn.query_row("SELECT input_json FROM memory_agent_drafts WHERE id='d1'", [], |row| row.get(0)).unwrap();
+    assert!(!draft.contains(sentinel), "{draft}");
+    assert!(!std::fs::read_to_string(&event).unwrap().contains(sentinel));
+    assert!(std::fs::read_to_string(&outside).unwrap().contains(sentinel));
+    assert_eq!(conn.query_row("SELECT COUNT(*) FROM memory_secret_overrides", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
+    assert!(!git_history(&stable).contains(sentinel));
+    assert!(!git_history(&orphan).contains(sentinel), "repositório do nome antigo");
+    let backup_db = rusqlite::Connection::open(&backup).unwrap();
+    let backup_prompt: String = backup_db.query_row("SELECT prompt FROM tasks WHERE id='dream'", [], |row| row.get(0)).unwrap();
+    assert!(!backup_prompt.contains(sentinel), "{backup_prompt}");
+    drop(backup_db);
+    drop(conn);
+    let _ = std::fs::remove_dir_all(temp);
+}
+
+fn file_has(path: &std::path::Path, needle: &str) -> bool {
+    std::fs::read(path).map(|bytes| String::from_utf8_lossy(&bytes).contains(needle)).unwrap_or(false)
+}
+
+fn git_ok(dir: &std::path::Path, args: &[&str]) -> String {
+    let output = std::process::Command::new("git")
+        .current_dir(dir)
+        .args(args)
+        .env("GIT_CONFIG_NOSYSTEM", "1")
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .output()
+        .unwrap_or_else(|error| panic!("git {args:?}: {error}"));
+    assert!(output.status.success(), "git {args:?} em {} falhou: {}", dir.display(), String::from_utf8_lossy(&output.stderr));
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn git_history(repo: &std::path::Path) -> String {
+    let mut out = git_ok(repo, &["log", "--all", "-p", "--full-history"]);
+    let objects = git_ok(repo, &["rev-list", "--all", "--objects"]);
+    for line in objects.lines() {
+        let Some(id) = line.split_whitespace().next() else { continue };
+        out.push_str(&git_ok(repo, &["cat-file", "-p", id]));
+    }
+    if let Ok(reflog) = std::process::Command::new("git").current_dir(repo).args(["reflog", "--all"]).env("GIT_CONFIG_NOSYSTEM", "1").output() {
+        out.push_str(&String::from_utf8_lossy(&reflog.stdout));
+    }
+    let fsck = std::process::Command::new("git").current_dir(repo).args(["fsck", "--unreachable", "--no-reflogs"]).env("GIT_CONFIG_NOSYSTEM", "1").output().unwrap();
+    let report = String::from_utf8_lossy(&fsck.stdout);
+    out.push_str(&report);
+    for token in report.split_whitespace() {
+        if token.len() == 40 && token.chars().all(|c| c.is_ascii_hexdigit()) {
+            if let Ok(object) = std::process::Command::new("git").current_dir(repo).args(["cat-file", "-p", token]).env("GIT_CONFIG_NOSYSTEM", "1").output() {
+                out.push_str(&String::from_utf8_lossy(&object.stdout));
+            }
+        }
+    }
+    fn walk(path: &std::path::Path, out: &mut String) {
+        if path.is_symlink() || !path.exists() { return; }
+        if path.is_dir() {
+            for entry in std::fs::read_dir(path).unwrap() {
+                walk(&entry.unwrap().path(), out);
+            }
+            return;
+        }
+        if let Ok(bytes) = std::fs::read(path) {
+            out.push_str(&String::from_utf8_lossy(&bytes));
+        }
+    }
+    walk(repo, &mut out);
+    out
+}

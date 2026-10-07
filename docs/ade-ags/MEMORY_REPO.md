@@ -6,12 +6,22 @@ SQLite continua sendo a fonte da verdade. Markdown é uma projeção local de id
 
 ## 1. Visão Geral e Modelo de Projeção
 
-`memory_export_repo({workspaceId})` retorna `{path, commit, files}`. A raiz é `~/.ags/memory/<workspace-slug>/`, fora do projeto. O slug inclui o hash do ID.
+`memory_export_repo({workspaceId})` retorna `{path, commit, files}`. A raiz é `~/.ags/memory/ws-<hash-do-id>/`, fora do projeto. O diretório segue o id do workspace: renomear não cria outro repositório. Um diretório antigo `*-<mesmo hash>` (o slug do nome) é renomeado para o caminho estável na exportação seguinte. Páginas `missions/` e `swarms/` continuam com o slug do título.
 O ADE gera `MEMORY.md` (até 39 linhas), `decisions.md`, `constraints.md`, `findings.md`, `files.md`, `notes.md`, `questions.md`, `missions/<slug>.md` e `swarms/<slug>/findings.md`. Este último projeta Run Facts como leitura.
 
 Cada linha contém corpo em uma linha, fonte `ags://run/.../task/...`, data, ID, revisão e tipo; fatos usam fonte `ags://run/.../fact/...`. Só revisões atuais aprovadas entram na projeção. O renderer é determinístico e não escreve arquivos.
 
-Cada `memory_decide_user` aprovado exporta e faz um commit local. Uma aprovação sem mudança de conteúdo ainda deixa um commit de auditoria. Exportação manual sem mudança é idempotente. Há varredura de segredos antes de criar o diretório e novamente no conteúdo staged antes do commit. Remotos, symlinks e arquivos staged alheios impedem a exportação. Hooks Git e assinatura estão desativados. Uma falha de exportação informa que a decisão SQLite já foi salva e requer reexportação; não reverte a aprovação do usuário.
+Cada `memory_decide_user` aprovado grava no SQLite e enfileira a exportação. O git corre num worker, depois de soltar o mutex do banco. Uma aprovação sem mudança de conteúdo ainda deixa um commit de auditoria. Exportação manual sem mudança é idempotente. Há varredura de segredos antes de criar o diretório e novamente no conteúdo staged antes do commit. Remotos, symlinks e arquivos staged alheios impedem a exportação. Hooks Git e assinatura estão desativados. Uma falha de exportação informa que a decisão SQLite já foi salva e requer reexportação; não reverte a aprovação do usuário.
+
+`memory_purge_user` apaga a revisão no SQLite e registra `memory_purge_audit` só com entrada, revisão, ator `user` e data — sem o corpo. Também apaga `memory_secret_overrides` daquela revisão. Em seguida reescreve o que o ADE controla. A exportação assíncrona é pausada antes do git, sem segurar o mutex do banco: o que ainda não entrou no git daquele workspace é descartado, o publish em voo termina, a reescrita corre com o gate do repositório e `resume_workspace` roda mesmo se a limpeza falhar. A projeção nova sai do mesmo `render`/`ensure_exportable_text` da exportação.
+
+- Cada diretório `~/.ags/memory/ws-<hash>/` e cada órfão `*-<mesmo hash>` perde o `.git` anterior (objetos, reflog e remoto local) e ganha um único commit com a projeção aprovada atual. No Windows a remoção do `.git` tira o atributo somente leitura e tenta de novo com espera. O texto expurgado deixa de ser recuperável por `git log -p` ou pelos objetos locais.
+- `revisions.json`, se já existir, é regenerado depois do gate, lendo o banco de novo. Revisões rejeitadas e pendentes saem só com metadados e `content_hash`; o corpo não é exportado. Revisões aprovadas que não foram expurgadas continuam com o texto.
+- Os backups de upgrade `data.v<versão>-<uuid>.backup` ao lado de `~/.ags/data.db` são reescritos (`VACUUM INTO`) sem a revisão, sem a cópia em `run_memory_snapshot` e sem o texto no prompt do Dreamer. O arquivo do banco vivo também passa por `VACUUM`.
+- O prompt gravado em `tasks.prompt` das tarefas `dreamer` do workspace, o `input_json` dos rascunhos do agente e o NDJSON em `~/.ags/runs` (o `events_path` que o supervisor escreve) perdem o texto. Transcripts da TUI ficam no perfil do Claude/Codex (`~/.claude` ou o diretório da conta), não no ADE, e não são alterados. Fatos e handoffs são a fonte da memória, não uma cópia feita pelo purge, e permanecem.
+- Um segundo purge da mesma revisão, depois que o banco já foi limpo, termina a limpeza dos arquivos se a primeira tentativa falhou no meio.
+
+Trade-offs: o histórico local deixa de ser um commit por aprovação; a fonte da verdade continua o SQLite. Remoto é proibido na exportação. Se mesmo assim havia um remoto configurado, o purge descarta essa configuração e não faz push: objetos que já saíram da máquina (remoto, clone, cópia manual fora de `~/.ags`) não são apagados. Um remoto futuro teria de nascer desse histórico novo; não há como reescrever o que já foi copiado para fora. O hash SHA-256 guardado nos metadados não reconstitui o texto.
 
 ---
 
