@@ -110,6 +110,7 @@ pub fn run() {
             crate::database::db_rename_workspace,
             crate::database::db_delete_workspace,
             crate::database::db_restore_workspace,
+            crate::memory::lifecycle::workspace_restore,
             crate::database::default_workspace_has_content,
             crate::database::db_list_session_history,
             // Workspaces cerrados a mano (v10)
