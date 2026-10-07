@@ -2417,7 +2417,7 @@
   "memoryInbox.syncRetry": "Try again",
   "memoryPurge.button": "Purge",
   "memoryPurge.title": "Permanently erase memory",
-  "memoryPurge.body": "“{{key}}” and ALL its revisions will be erased for good. This cannot be undone; only an audit event (without the content) stays.",
+  "memoryPurge.body": "“{{key}}” and ALL its revisions will be erased from the database, the local git history, the revisions file, ADE’s automatic backups, and dream prompts. This cannot be undone; only an audit event (without the content) stays. Copies outside ADE are not erased.",
   "memoryPurge.typeKey": "Type {{key}} to confirm:",
   "memoryPurge.confirm": "Erase permanently",
   "memoryDream.start": "Dream now",

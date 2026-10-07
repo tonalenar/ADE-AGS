@@ -1657,37 +1657,36 @@ pub fn memory_decide_user(
 }
 
 /// Only the native user command invokes this; deliberately absent from agent IPC/MCP.
+/// SQLite-only: tests and internal callers pass no artifact scope, so this never touches `~/.ags`.
 pub fn purge_user(conn: &Connection, entry_id: &str, revision: i64) -> Result<(), String> {
-    purge_revisions_user(conn, entry_id, Some(revision))
+    purge::revisions(conn, entry_id, Some(revision), None)
 }
 
 pub fn purge_revisions_user(conn: &Connection, entry_id: &str, revision: Option<i64>) -> Result<(), String> {
-    let tx = rusqlite::Transaction::new_unchecked(conn, rusqlite::TransactionBehavior::Immediate).map_err(|_| "could not begin purge")?;
-    let revisions = {
-        let mut stmt = tx.prepare("SELECT revision FROM memory_revisions WHERE entry_id=?1 AND (?2 IS NULL OR revision=?2) ORDER BY revision").map_err(|_| "could not verify purge revision")?;
-        let rows = stmt.query_map(params![entry_id,revision], |r| r.get::<_,i64>(0)).map_err(|_| "could not verify purge revision")?;
-        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(|_| "could not verify purge revision")?
-    };
-    if revisions.is_empty() { return Err("memory revision is unavailable".into()); }
-    for revision in revisions {
-        tx.execute("INSERT INTO memory_purge_guard(entry_id,revision) VALUES(?1,?2)", params![entry_id,revision]).map_err(|_| "could not authorize purge")?;
-        tx.execute("INSERT INTO memory_purge_audit(entry_id,revision,actor_kind,created_at) VALUES(?1,?2,'user',?3)", params![entry_id,revision,now()]).map_err(|_| "could not audit purge")?;
-        tx.execute("DELETE FROM run_memory_snapshot WHERE entry_id=?1 AND revision=?2", params![entry_id,revision]).map_err(|_| "could not purge snapshot copies")?;
-        tx.execute("UPDATE memory_entries SET current_revision=NULL,status='deleted',updated_at=?3 WHERE id=?1 AND current_revision=?2", params![entry_id,revision,now()]).map_err(|_| "could not clear purged memory")?;
-        tx.execute("DELETE FROM memory_revisions WHERE entry_id=?1 AND revision=?2", params![entry_id,revision]).map_err(|_| "could not purge memory")?;
-        tx.execute("DELETE FROM memory_purge_guard WHERE entry_id=?1 AND revision=?2", params![entry_id,revision]).map_err(|_| "could not close purge authorization")?;
-    }
-    tx.commit().map_err(|_| "could not finish purge".into())
+    purge::revisions(conn, entry_id, revision, None)
 }
 
 #[tauri::command]
-pub fn memory_purge_user(entry_id: String, revision: Option<i64>, app: tauri::AppHandle, db: tauri::State<DbConnection>) -> Result<(), String> {
-    let conn = db.lock().map_err(|_| "database unavailable")?;
-    purge_revisions_user(&conn, &entry_id, revision)?;
-    drop(conn);
+pub fn memory_purge_user(
+    entry_id: String,
+    revision: Option<i64>,
+    app: tauri::AppHandle,
+    db: tauri::State<DbConnection>,
+    sync: tauri::State<repo_sync::RepoSync>,
+) -> Result<(), String> {
+    let scope = {
+        let conn = db.lock().map_err(|_| "database unavailable")?;
+        purge::Scope {
+            memory_root: repo::default_root()?,
+            database_file: purge::main_database_file(&conn),
+            events_root: dirs::home_dir().map(|home| home.join(".ags").join("runs")),
+        }
+    };
+    let result = purge::revisions_coordinated(&db, &sync, &entry_id, revision, &scope);
     notify_changed(&app);
-    Ok(())
+    result
 }
+
 #[tauri::command]
 pub fn run_list_memory_snapshot(
     run_id: String,
@@ -1734,6 +1733,7 @@ pub mod repo;
 pub mod repo_sync;
 pub mod dream;
 pub mod lifecycle;
+pub mod purge;
 
 #[cfg(test)]
 mod tests;

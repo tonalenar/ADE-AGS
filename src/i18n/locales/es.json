@@ -2417,7 +2417,7 @@
   "memoryInbox.syncRetry": "Reintentar",
   "memoryPurge.button": "Purgar",
   "memoryPurge.title": "Borrar memoria definitivamente",
-  "memoryPurge.body": "“{{key}}” y TODAS sus revisiones se borrarán para siempre. No se puede deshacer; solo queda un evento de auditoría (sin el contenido).",
+  "memoryPurge.body": "“{{key}}” y TODAS sus revisiones se borrarán de la base, del historial git local, del archivo de revisiones, de las copias automáticas y del prompt de los sueños del ADE. No se puede deshacer; solo queda un evento de auditoría (sin el contenido). Las copias fuera del ADE no se borran.",
   "memoryPurge.typeKey": "Escribe {{key}} para confirmar:",
   "memoryPurge.confirm": "Borrar definitivamente",
   "memoryDream.start": "Soñar ahora",

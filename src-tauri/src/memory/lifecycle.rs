@@ -21,14 +21,15 @@ struct ArchivePrep {
     body: Value,
 }
 
+/// Corpos aprovados entram no arquivo. Rejeitadas e pendentes ficam só com metadados e
+/// `content_hash`. O snapshot é lido na hora da escrita, nunca de um prepare anterior ao git:
+/// um purge no meio não pode regravar o texto que acabou de sair.
 fn prepare_archive(conn: &Connection, workspace: &str) -> Result<ArchivePrep, String> {
     let mut stmt = conn
         .prepare("SELECT id,mission_id FROM memory_entries WHERE workspace_id=?1 ORDER BY id")
         .map_err(|e| e.to_string())?;
     let ids = stmt
-        .query_map([workspace], |r| {
-            Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?))
-        })
+        .query_map([workspace], |r| Ok((r.get::<_, String>(0)?, r.get::<_, Option<String>>(1)?)))
         .map_err(|e| e.to_string())?
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(|e| e.to_string())?;
@@ -36,9 +37,29 @@ fn prepare_archive(conn: &Connection, workspace: &str) -> Result<ArchivePrep, St
         .iter()
         .map(|(id, mission)| super::detail_for_owner(conn, id, workspace, mission.as_deref()))
         .collect::<Result<Vec<_>, _>>()?;
-    let mut archive=conn.prepare("SELECT metadata_json,content_hash,compacted_at FROM memory_compacted_revisions c JOIN memory_entries e ON e.id=c.entry_id WHERE e.workspace_id=?1 ORDER BY c.entry_id,c.revision").map_err(|e|e.to_string())?;
-    let archived=archive.query_map([workspace],|r|Ok(json!({"metadata":r.get::<_,String>(0)?,"contentHash":r.get::<_,String>(1)?,"compactedAt":r.get::<_,i64>(2)?}))).map_err(|e|e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e|e.to_string())?;
-    Ok(ArchivePrep { stats: stats(conn, workspace)?, body: json!({"entries": details, "compactedRevisions": archived}) })
+    let mut archive = conn.prepare("SELECT metadata_json,content_hash,compacted_at FROM memory_compacted_revisions c JOIN memory_entries e ON e.id=c.entry_id WHERE e.workspace_id=?1 ORDER BY c.entry_id,c.revision").map_err(|e| e.to_string())?;
+    let archived = archive.query_map([workspace], |r| Ok(json!({"metadata":r.get::<_,String>(0)?,"contentHash":r.get::<_,String>(1)?,"compactedAt":r.get::<_,i64>(2)?}))).map_err(|e| e.to_string())?.collect::<rusqlite::Result<Vec<_>>>().map_err(|e| e.to_string())?;
+    let entries = details.iter().map(archive_detail).collect::<Result<Vec<_>, _>>()?;
+    Ok(ArchivePrep { stats: stats(conn, workspace)?, body: json!({"entries": entries, "compactedRevisions": archived}) })
+}
+
+fn archive_detail(detail: &super::MemoryDetail) -> Result<Value, String> {
+    let mut entry = detail.entry.clone();
+    entry.pending_body = None;
+    let revisions = detail
+        .revisions
+        .iter()
+        .map(|revision| {
+            let mut value = serde_json::to_value(revision).map_err(|e| e.to_string())?;
+            if revision.status != "approved" {
+                if let Some(object) = value.as_object_mut() {
+                    object.remove("body");
+                }
+            }
+            Ok(value)
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+    Ok(json!({"entry": entry, "revisions": revisions}))
 }
 
 fn write_archive(repo_path: &std::path::Path, body: &Value) -> Result<(), String> {
@@ -61,18 +82,31 @@ pub fn export(conn: &Connection, workspace: &str, root: &std::path::Path) -> Res
     Ok(result)
 }
 
-/// Lê o snapshot com o mutex e só então pede o git ao worker. É o caminho de
-/// `memory_export` e de `ags memory export` (`memory.export`).
+/// Pede o git ao worker e só então relê o arquivo. O `revisions.json` sai com o banco
+/// de depois do export, sob o mesmo gate do repositório que o purge segura na reescrita.
 pub fn export_detached(db: &crate::database::DbConnection, sync: &super::repo_sync::RepoSync, workspace: &str) -> Result<Value, String> {
-    let prepared = {
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        prepare_archive(&conn, workspace)?
-    };
     let projection = sync.export_now(workspace)?;
-    write_archive(std::path::Path::new(&projection.path), &prepared.body)?;
+    let path = std::path::PathBuf::from(&projection.path);
+    let prepared: Result<ArchivePrep, String> = super::repo::with_repo_gate(&path, || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let prepared = prepare_archive(&conn, workspace)?;
+        drop(conn);
+        write_archive(&path, &prepared.body)?;
+        Ok(prepared)
+    });
+    let prepared = prepared?;
     let mut result = prepared.stats;
     result["path"] = json!(projection.path);
     Ok(result)
+}
+
+/// Rewrites an archive that already exists. Purge does not create one that the user never exported.
+pub(crate) fn refresh_revision_archive(conn: &Connection, workspace: &str, dir: &std::path::Path) -> Result<(), String> {
+    if !dir.join("revisions.json").exists() {
+        return Ok(());
+    }
+    let prepared = prepare_archive(conn, workspace)?;
+    write_archive(dir, &prepared.body)
 }
 
 /// Rejected bodies only. Approved revisions, tombstones and provenance never disappear.

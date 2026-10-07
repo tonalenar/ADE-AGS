@@ -7,7 +7,8 @@ import * as memoryIpc from "./ipc";
 /**
  * Apagado definitivo (purge) de uma entrada, só pelo usuário. Confirmação forte: é preciso digitar a
  * chave da entrada; Enter NÃO confirma (só o clique no botão, habilitado após digitar certo).
- * O Backend registra um evento de auditoria sem o corpo.
+ * O backend apaga as revisões no SQLite, reescreve o histórico git local, o revisions.json
+ * e os backups automáticos do ADE, e registra auditoria sem o corpo.
  */
 export function PurgeButton({ entryId, entryKey, disabled, onDone }: { entryId: string; entryKey: string; disabled?: boolean; onDone: () => void }) {
   const { t } = useTranslation();

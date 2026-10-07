@@ -283,6 +283,20 @@ impl RepoSync {
         self.lock_state().slots.get(workspace).is_some_and(|slot| slot.paused)
     }
 
+    /// Apaga o marcador SQL das gerações que a pausa descartou.
+    /// Aprovação nova durante a pausa mantém o marcador para o resume publicar.
+    pub fn forget_discarded_pending(&self, workspace: &str) {
+        let keep = {
+            let state = self.lock_state();
+            state.slots.get(workspace).is_some_and(|slot| slot.generation > covered(slot))
+        };
+        if keep {
+            return;
+        }
+        let Ok(conn) = self.inner.db.lock() else { return };
+        let _ = conn.execute("DELETE FROM memory_repo_sync_pending WHERE workspace_id=?1", [workspace]);
+    }
+
     /// Solta a pausa. Exportações que chegaram durante ela passam a poder publicar.
     pub fn resume_workspace(&self, workspace: &str) {
         let status = {
@@ -915,7 +929,7 @@ mod tests {
     }
 
     fn notes(root: &std::path::Path) -> String {
-        let path = root.join(repo::slug("Test workspace", "w")).join("notes.md");
+        let path = root.join(repo::workspace_repo_name("w")).join("notes.md");
         std::fs::read_to_string(path).unwrap_or_default()
     }
 
@@ -1127,7 +1141,7 @@ mod tests {
         assert!(adds[0].contains(&"MEMORY.md".into()));
         assert!(adds[0].contains(&"notes.md".into()));
         assert!(adds[0].contains(&"missions/demo.md".into()));
-        assert!(std::fs::read_to_string(root.path().join(repo::slug("Test workspace", "w")).join("notes.md")).unwrap().contains("one"));
+        assert!(std::fs::read_to_string(root.path().join(repo::workspace_repo_name("w")).join("notes.md")).unwrap().contains("one"));
     }
 
     #[test]
@@ -1293,5 +1307,179 @@ mod tests {
         });
         assert!(export.is_ok(), "{export:?}");
         assert!(notes(root.path()).contains("cli body"));
+    }
+
+    #[test]
+    fn purge_discards_a_queued_export_before_it_commits() {
+        let sentinel = "PURGE_QUEUE_SENTINEL_22ab";
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        let entry = {
+            let conn = db.lock().unwrap();
+            let proposal = propose(&conn, "queued", sentinel);
+            decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
+            let exported = repo::export_at(&conn, "w", root.path(), Some((&proposal.entry_id, proposal.revision))).unwrap();
+            let repo = std::path::PathBuf::from(&exported.path);
+            std::fs::write(repo.join("revisions.json"), format!("{{\n  \"body\": \"{sentinel}\"\n}}\n")).unwrap();
+            proposal
+        };
+        let scope = crate::memory::purge::Scope {
+            memory_root: root.path().to_path_buf(),
+            database_file: None,
+            events_root: None,
+        };
+        crate::memory::purge::revisions_coordinated(&db, &sync, &entry.entry_id, Some(entry.revision), &scope).unwrap();
+        sync.spawn();
+        std::thread::sleep(Duration::from_millis(400));
+        assert_eq!(probe.commits.load(Ordering::SeqCst), 0, "a fila descartada não pode commitar depois do purge");
+        let repo = root.path().join(repo::workspace_repo_name("w"));
+        let history = std::fs::read_to_string(repo.join("notes.md")).unwrap_or_default();
+        assert!(!history.contains(sentinel), "{history}");
+        let archive = std::fs::read_to_string(repo.join("revisions.json")).unwrap_or_default();
+        assert!(!archive.contains(sentinel), "{archive}");
+        assert!(!sync.is_paused("w"));
+    }
+
+    #[test]
+    fn purge_does_not_let_an_inflight_export_restore_the_body() {
+        let sentinel = "PURGE_RACE_SENTINEL_b4e91c";
+        let db = fixture();
+        let root = TempDir::new();
+        let block = Arc::new(AtomicBool::new(false));
+        let entered = Arc::new((Mutex::new(false), Condvar::new()));
+        let release = Arc::new((Mutex::new(false), Condvar::new()));
+        let real = repo::real_git_runner();
+        let block_git = Arc::clone(&block);
+        let entered_git = Arc::clone(&entered);
+        let release_git = Arc::clone(&release);
+        let runner: GitRunner = Arc::new(move |path, args: &[String]| {
+            if block_git.load(Ordering::SeqCst) && args.iter().any(|arg| arg == "commit") {
+                {
+                    let (lock, cv) = &*entered_git;
+                    *lock.lock().unwrap() = true;
+                    cv.notify_all();
+                }
+                let (lock, cv) = &*release_git;
+                let mut guard = lock.lock().unwrap();
+                let start = Instant::now();
+                while !*guard {
+                    if start.elapsed() > Duration::from_secs(8) {
+                        return Err("memory git failed: test gate timed out".into());
+                    }
+                    let (next, _) = cv.wait_timeout(guard, Duration::from_millis(50)).unwrap();
+                    guard = next;
+                }
+            }
+            real(path, args)
+        });
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), runner, hour());
+        sync.spawn();
+        let entry = {
+            let conn = db.lock().unwrap();
+            let proposal = propose(&conn, "target", sentinel);
+            decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
+            proposal
+        };
+        sync.wait_until("w", |item| item.phase == "synced", Duration::from_secs(5)).unwrap();
+        crate::memory::lifecycle::export_detached(&db, &sync, "w").unwrap();
+        let repo = root.path().join(repo::workspace_repo_name("w"));
+        assert!(std::fs::read_to_string(repo.join("revisions.json")).unwrap().contains(sentinel));
+        block.store(true, Ordering::SeqCst);
+        {
+            let conn = db.lock().unwrap();
+            let proposal = propose(&conn, "neighbor", "neighbor stays in the race");
+            decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
+        }
+        {
+            let (lock, cv) = &*entered;
+            let mut guard = lock.lock().unwrap();
+            let start = Instant::now();
+            while !*guard {
+                assert!(start.elapsed() < Duration::from_secs(5), "o commit em voo não começou");
+                let (next, _) = cv.wait_timeout(guard, Duration::from_millis(50)).unwrap();
+                guard = next;
+            }
+        }
+        let entry_id = entry.entry_id.clone();
+        let revision = entry.revision;
+        std::thread::scope(|scope| {
+            let handle = scope.spawn(|| {
+                let purge_scope = crate::memory::purge::Scope {
+                    memory_root: root.path().to_path_buf(),
+                    database_file: None,
+                    events_root: None,
+                };
+                crate::memory::purge::revisions_coordinated(&db, &sync, &entry_id, Some(revision), &purge_scope)
+            });
+            let start = Instant::now();
+            while !sync.is_paused("w") {
+                assert!(start.elapsed() < Duration::from_secs(3), "a pausa não armou com o git em voo");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(!handle.is_finished(), "o purge reescreveu com o git ainda preso");
+            {
+                let (lock, cv) = &*release;
+                *lock.lock().unwrap() = true;
+                cv.notify_all();
+            }
+            handle.join().unwrap().unwrap();
+        });
+        assert!(!sync.is_paused("w"));
+        let _ = sync.wait_until("w", |item| item.phase != "syncing", Duration::from_secs(3));
+        std::thread::sleep(Duration::from_millis(200));
+        let history = {
+            let output = std::process::Command::new("git")
+                .current_dir(&repo)
+                .args(["log", "--all", "-p"])
+                .env("GIT_CONFIG_NOSYSTEM", "1")
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&output.stdout).into_owned()
+        };
+        let notes = std::fs::read_to_string(repo.join("notes.md")).unwrap_or_default();
+        let archive = std::fs::read_to_string(repo.join("revisions.json")).unwrap_or_default();
+        assert!(!history.contains(sentinel) && !notes.contains(sentinel), "{notes}\n{history}");
+        assert!(notes.contains("neighbor stays in the race"), "{notes}");
+        assert!(!archive.contains(sentinel), "{archive}");
+        assert!(archive.contains("neighbor stays in the race"), "{archive}");
+    }
+
+    #[test]
+    fn purge_resumes_the_worker_when_the_rewrite_fails() {
+        let db = fixture();
+        let root = TempDir::new();
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), repo::real_git_runner(), hour());
+        sync.spawn();
+        let entry = {
+            let conn = db.lock().unwrap();
+            let proposal = propose(&conn, "kept", "body before the failed rewrite");
+            decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
+            proposal
+        };
+        sync.wait_until("w", |item| item.phase == "synced", Duration::from_secs(5)).unwrap();
+        let repo = root.path().join(repo::workspace_repo_name("w"));
+        let elsewhere = root.path().join("elsewhere");
+        std::fs::create_dir_all(&elsewhere).unwrap();
+        std::fs::remove_dir_all(&repo).unwrap();
+        std::os::unix::fs::symlink(&elsewhere, &repo).unwrap();
+        let scope = crate::memory::purge::Scope {
+            memory_root: root.path().to_path_buf(),
+            database_file: None,
+            events_root: None,
+        };
+        let error = crate::memory::purge::revisions_coordinated(&db, &sync, &entry.entry_id, Some(entry.revision), &scope).unwrap_err();
+        assert!(error.contains("Repita"), "{error}");
+        assert!(!sync.is_paused("w"), "o resume tem de correr mesmo quando a reescrita falha");
+        std::fs::remove_file(&repo).unwrap();
+        {
+            let conn = db.lock().unwrap();
+            let proposal = propose(&conn, "after", "after the failed purge");
+            decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
+        }
+        let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(5)).unwrap();
+        assert!(status.error.is_none(), "{:?}", status.error);
+        assert!(notes(root.path()).contains("after the failed purge"));
     }
 }

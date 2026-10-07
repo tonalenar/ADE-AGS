@@ -611,8 +611,8 @@ mod tests {
 
         let temp_root = TempDir::new();
         let ws_name: String = conn.query_row("SELECT name FROM workspaces WHERE id=?1", [WS_HISTORY_ID], |r| r.get(0)).unwrap();
-        let slug = crate::memory::repo::slug(&ws_name, WS_HISTORY_ID);
-        let repo_dir = temp_root.path().join(&slug);
+        let _ = ws_name;
+        let repo_dir = temp_root.path().join(crate::memory::repo::workspace_repo_name(WS_HISTORY_ID));
 
         // --- STEP 1: One historical credential must not abort the repository ---
         // Historical workspace fixture contains `fact-secret-1` with Stripe secret `sk_live_...`.
@@ -760,7 +760,7 @@ mod tests {
 
         // --- STEP 6: Invariant: Real ~/.ags/memory is NEVER touched ---
         if let Ok(real_root) = crate::memory::repo::default_root() {
-            let real_target = real_root.join(&slug);
+            let real_target = real_root.join(crate::memory::repo::workspace_repo_name(WS_HISTORY_ID));
             assert!(!real_target.exists(), "Real ~/.ags/memory must never be touched during test execution");
         }
     }
@@ -956,8 +956,8 @@ mod tests {
         // --- 7. Diff exibido == Commit gerado ---
         let temp_root = TempDir::new();
         let ws_name: String = conn.query_row("SELECT name FROM workspaces WHERE id=?1", [WS_HISTORY_ID], |r| r.get(0)).unwrap();
-        let slug = crate::memory::repo::slug(&ws_name, WS_HISTORY_ID);
-        let repo_dir = temp_root.path().join(&slug);
+        let _ = ws_name;
+        let repo_dir = temp_root.path().join(crate::memory::repo::workspace_repo_name(WS_HISTORY_ID));
 
         // Initial export before dream approval
         crate::memory::repo::export_at(&conn, WS_HISTORY_ID, temp_root.path(), None).expect("initial export failed");
@@ -991,7 +991,7 @@ mod tests {
 
         // --- 9. Isolamento estrito de ~/.ags/memory ---
         if let Ok(real_root) = crate::memory::repo::default_root() {
-            let real_target = real_root.join(&slug);
+            let real_target = real_root.join(crate::memory::repo::workspace_repo_name(WS_HISTORY_ID));
             assert!(!real_target.exists(), "Real ~/.ags/memory must never be touched during test execution");
         }
     }
