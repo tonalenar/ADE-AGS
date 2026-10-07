@@ -11,7 +11,7 @@ import {
   buildMissionTeam, removeStroke, removeText, toggleOrchestrator, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
   type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
 } from "./board";
-import type { Box, Rect, Viewport } from "./geometry";
+import { safeViewport, type Box, type Rect, type Viewport } from "./geometry";
 
 export type WorkMode = "tabs" | "canvas";
 
@@ -206,7 +206,7 @@ export const canvasActions = {
     updateBoard(key, (b) => addStroke(b, { ...stroke, id: crypto.randomUUID() })),
   removeStroke: (key: string, id: string) => updateBoard(key, (b) => removeStroke(b, id)),
   undoStroke: (key: string) => updateBoard(key, (b) => undoStroke(b)),
-  setViewport: (key: string, viewport: Viewport) => updateBoard(key, (b) => ({ ...b, viewport })),
+  setViewport: (key: string, viewport: Viewport) => updateBoard(key, (b) => ({ ...b, viewport: safeViewport(viewport, b.viewport) })),
   connect: (key: string, a: string, b: string) => updateBoard(key, (board) => addEdge(board, a, b)),
   disconnect: (key: string, edgeId: string) => updateBoard(key, (board) => removeEdge(board, edgeId)),
   disconnectPair: (key: string, a: string, b: string) => updateBoard(key, (board) => removeEdgeBetween(board, a, b)),
@@ -313,7 +313,7 @@ export function initCanvasSync(label: string): () => void {
       const mine = Object.fromEntries(
         Object.entries(saved ?? {})
           .filter(([k]) => k.startsWith(`${label}|`))
-          .map(([k, b]) => [k, { ...emptyBoard(), ...b, nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], roles: b?.roles ?? {} }]),
+          .map(([k, b]) => [k, { ...emptyBoard(), ...b, viewport: safeViewport(b?.viewport), nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], roles: b?.roles ?? {} }]),
       );
       useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards } });
       unsub = useTabsStore.subscribe(syncBoards);

@@ -1,6 +1,6 @@
 import "@xyflow/react/dist/style.css";
 
-import { lazy, memo, Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   Background, BackgroundVariant, BaseEdge, ConnectionMode, EdgeLabelRenderer, Handle, NodeResizer,
@@ -28,7 +28,7 @@ import { DeviceNode } from "./DeviceNode";
 import { FolderNode, baseName, type FolderFlowNode } from "./FolderNode";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
-  HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, terminalRect,
+  HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, safeViewport, terminalRect,
   type Box, type Rect, type Viewport,
 } from "./geometry";
 import { CanvasDock, type DockPanel } from "./CanvasDock";
@@ -172,8 +172,10 @@ function CanvasInner() {
   }, []);
 
   // La vista se lleva en estado local (cambia en cada cuadro del paneo) y se guarda al soltar.
-  const [vp, setVp] = useState<Viewport>(board.viewport);
-  useEffect(() => { setVp(useCanvasStore.getState().boards[key ?? ""]?.viewport ?? emptyBoard().viewport); }, [key]);
+  const [vp, setVpRaw] = useState<Viewport>(() => safeViewport(board.viewport));
+  // Un NaN en la vista (guardada como `null`) dejaba el zoom en "NaN%" y el canvas sin moverse: se descarta.
+  const setVp = useCallback((next: Viewport) => setVpRaw((prev) => safeViewport(next, prev)), []);
+  useEffect(() => { setVp(safeViewport(useCanvasStore.getState().boards[key ?? ""]?.viewport, emptyBoard().viewport)); }, [key, setVp]);
   const live = isLive(vp.zoom);
 
   // Dónde va cada terminal viva. Fuera del área no se dibuja: una terminal que nadie ve no

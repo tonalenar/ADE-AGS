@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { BORDER, GAP, HEADER_H, LIVE_MIN_ZOOM, NODE_DEFAULT, facingSides, focusViewport, intersects, isLive, nextFreeBox, terminalRect } from "../geometry";
+import { BORDER, GAP, HEADER_H, LIVE_MIN_ZOOM, NODE_DEFAULT, facingSides, focusViewport, intersects, isLive, isValidViewport, nextFreeBox, safeViewport, terminalRect } from "../geometry";
 
 describe("isLive", () => {
   it("viva desde LIVE_MIN_ZOOM hasta el 100 %; más alejado, vista previa", () => {
@@ -96,5 +96,20 @@ describe("facingSides", () => {
   it("uno debajo del otro, por abajo y por arriba", () => {
     expect(facingSides(box(0, 0), box(100, 500))).toEqual(["b", "t"]);
     expect(facingSides(box(0, 500), box(100, 0))).toEqual(["t", "b"]);
+  });
+});
+
+describe("safeViewport", () => {
+  it("descarta vista con NaN o null (guardada como null en el disco)", () => {
+    const fallback = { x: 1, y: 2, zoom: 0.5 };
+    expect(safeViewport({ x: null, y: null, zoom: null }, fallback)).toEqual(fallback);
+    expect(safeViewport({ x: 0, y: 0, zoom: Number.NaN }, fallback)).toEqual(fallback);
+    expect(safeViewport({ x: 0, y: 0, zoom: 0 }, fallback)).toEqual(fallback);
+    expect(safeViewport(undefined)).toEqual({ x: 40, y: 40, zoom: 1 });
+  });
+  it("mantiene una vista válida", () => {
+    const v = { x: -285, y: 266, zoom: 0.75 };
+    expect(safeViewport(v)).toBe(v);
+    expect(isValidViewport(v)).toBe(true);
   });
 });
