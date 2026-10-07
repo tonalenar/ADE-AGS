@@ -549,8 +549,7 @@ pub(crate) fn plan_tasks(
 
     let run_id = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let tx = conn
-            .unchecked_transaction()
+        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate)
             .map_err(|error| error.to_string())?;
         let run = match &existing_run {
             Some(run) => {

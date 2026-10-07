@@ -4,7 +4,16 @@ use rusqlite::{params, Connection, OptionalExtension, Transaction, TransactionBe
 use serde_json::{json, Value};
 
 pub fn stats(conn: &Connection, workspace: &str) -> Result<Value, String> {
-    conn.query_row("SELECT (SELECT COUNT(*) FROM memory_entries WHERE workspace_id=w.id),(SELECT COUNT(*) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.workspace_id=w.id),w.deleted_at,w.delete_after FROM workspaces w WHERE w.id=?1",[workspace],|r|Ok(json!({"entries":r.get::<_,i64>(0)?,"revisions":r.get::<_,i64>(1)?,"deletedAt":r.get::<_,Option<i64>>(2)?,"deleteAfter":r.get::<_,Option<i64>>(3)?}))).map_err(|e|e.to_string())
+    let mut result=conn.query_row("SELECT (SELECT COUNT(*) FROM memory_entries WHERE workspace_id=w.id),(SELECT COUNT(*) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.workspace_id=w.id),w.deleted_at,w.delete_after FROM workspaces w WHERE w.id=?1",[workspace],|r|Ok(json!({"entries":r.get::<_,i64>(0)?,"revisions":r.get::<_,i64>(1)?,"deletedAt":r.get::<_,Option<i64>>(2)?,"deleteAfter":r.get::<_,Option<i64>>(3)?}))).map_err(|e|e.to_string())?;
+    let usage=conn.query_row("SELECT COUNT(*),COUNT(DISTINCT s.entry_id),COUNT(DISTINCT s.run_id) FROM run_memory_snapshot s JOIN memory_entries e ON e.id=s.entry_id WHERE e.workspace_id=?1",[workspace],|r|Ok(json!({"timesUsed":r.get::<_,i64>(0)?,"entriesUsed":r.get::<_,i64>(1)?,"runsUsingMemory":r.get::<_,i64>(2)?,"method":"selected_in_run_snapshot"}))).map_err(|e|e.to_string())?;
+    result["memoryUsage"]=usage;
+    Ok(result)
+}
+
+/// Session data becomes only a proposal; approval remains a user action.
+pub fn swarm_promote(conn:&Connection,workspace:&str,mission:&str,id:&str,key:&str)->Result<ProposalResult,String>{
+    let body:String=conn.query_row("SELECT body FROM memory_swarm_notes WHERE id=?1 AND workspace_id=?2 AND mission_id=?3",params![id,workspace,mission],|r|r.get(0)).map_err(|_|"swarm note unavailable")?;
+    super::propose(conn,"mission",workspace,Some(mission),&ProposalInput{scope:"mission".into(),key:key.into(),kind:"note".into(),body,priority:0,operation:"create".into(),expected_revision:None,source_fact_id:None,reason:Some(format!("Swarm note {id}"))},ProposalActor{kind:"worker",run_id:None,task_id:None,fact_id:None})
 }
 
 pub fn export(conn: &Connection, workspace: &str, root: &std::path::Path) -> Result<Value, String> {
@@ -42,15 +51,19 @@ pub fn export(conn: &Connection, workspace: &str, root: &std::path::Path) -> Res
 
 /// Rejected bodies only. Approved revisions, tombstones and provenance never disappear.
 pub fn compact(conn: &Connection, days: i64) -> Result<usize, String> {
+    compact_workspace(conn, days, None)
+}
+
+pub fn compact_workspace(conn: &Connection, days: i64, workspace: Option<&str>) -> Result<usize, String> {
     if days < 30 {
         return Err("minimum retention is 30 days".into());
     }
     let cutoff = super::now().saturating_sub(days.saturating_mul(86400));
     let tx = Transaction::new_unchecked(conn, TransactionBehavior::Immediate)
         .map_err(|e| e.to_string())?;
-    let mut stmt=tx.prepare("SELECT entry_id,revision FROM memory_revisions WHERE status='rejected' AND decided_at<?1").map_err(|e|e.to_string())?;
+    let mut stmt=tx.prepare("SELECT r.entry_id,r.revision FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE r.status='rejected' AND r.decided_at<?1 AND (?2 IS NULL OR e.workspace_id=?2)").map_err(|e|e.to_string())?;
     let rows = stmt
-        .query_map([cutoff], |r| {
+        .query_map(params![cutoff,workspace], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)?))
         })
         .map_err(|e| e.to_string())?

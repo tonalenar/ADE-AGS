@@ -150,12 +150,56 @@ fn draft_queue_preserves_overflow_until_a_user_moves_it_into_pending() {
     for i in 0..32 {let p=propose(&conn,"workspace",None,&format!("queue-{i}"),"body","create",None);if first.is_none(){first=Some(p);}}
     let result=super::propose(&conn,"workspace","w1",None,&proposal("workspace","overflow","keep this knowledge","create",None),ProposalActor{kind:"worker",run_id:None,task_id:None,fact_id:None}).unwrap();
     assert_eq!(result.status,"agent_draft");assert_eq!(owner_quota(&conn,"w1",None).unwrap().0,32);
+    assert!(result.warning.as_deref().unwrap().contains("notify the orchestrator"));
     assert_eq!(lifecycle::drafts(&conn,"w1").unwrap().len(),1);
     assert!(lifecycle::promote_draft(&conn,"w1",&result.entry_id).is_err());
     let first=first.unwrap();decide(&conn,&first.entry_id,first.revision,false).unwrap();
     let promoted=lifecycle::promote_draft(&conn,"w1",&result.entry_id).unwrap();assert_eq!(promoted.status,"proposed");
     assert!(lifecycle::drafts(&conn,"w1").unwrap().is_empty());
     assert!(detail_for_owner(&conn,&promoted.entry_id,"w1",None).unwrap().entry.current_revision.is_none());
+}
+
+#[test]
+fn swarm_promotion_is_scoped_and_requires_user_approval() {
+    let conn=db();seed_workspace(&conn,"w1");seed_mission(&conn,"m1","w1");seed_mission(&conn,"m2","w1");
+    let id=lifecycle::swarm_write(&conn,"w1","m1","note","preserved finding").unwrap();
+    assert!(lifecycle::swarm_promote(&conn,"w1","m2",&id,"finding").is_err());
+    let p=lifecycle::swarm_promote(&conn,"w1","m1",&id,"finding").unwrap();
+    assert_eq!(p.status,"proposed");
+    let detail=detail_for_owner(&conn,&p.entry_id,"w1",Some("m1")).unwrap();
+    assert!(detail.entry.current_revision.is_none());
+    decide(&conn,&p.entry_id,p.revision,true).unwrap();
+    assert_eq!(detail_for_owner(&conn,&p.entry_id,"w1",Some("m1")).unwrap().entry.body.as_deref(),Some("preserved finding"));
+}
+
+#[test]
+fn workspace_usage_counts_snapshot_selections_and_separates_owners() {
+    let conn=db();seed_workspace(&conn,"w1");seed_workspace(&conn,"w2");
+    activate(&conn,"workspace",None,"used","lock");seed_run(&conn,"r1","w1",None);
+    snapshot_run(&conn,"r1","w1",None).unwrap();
+    let stats=lifecycle::stats(&conn,"w1").unwrap();
+    assert_eq!(stats["memoryUsage"]["timesUsed"],1);
+    assert_eq!(stats["memoryUsage"]["entriesUsed"],1);
+    assert_eq!(stats["memoryUsage"]["runsUsingMemory"],1);
+    assert_eq!(lifecycle::stats(&conn,"w2").unwrap()["memoryUsage"]["timesUsed"],0);
+}
+
+#[test]
+fn quota_growth_retains_inactive_and_tombstone_audit_without_active_slots() {
+    let conn=db();seed_workspace(&conn,"w1");
+    let initial=owner_quota(&conn,"w1",None).unwrap().2;
+    for i in 0..20 {
+        let key=format!("growth-{i}");
+        let active=activate(&conn,"workspace",None,&key,"durable payload");
+        let deletion=propose(&conn,"workspace",None,&key,"deleted","delete",Some(active.revision));
+        decide(&conn,&deletion.entry_id,deletion.revision,true).unwrap();
+        let rejected=propose(&conn,"workspace",None,&format!("inactive-{i}"),"discarded payload","create",None);
+        decide(&conn,&rejected.entry_id,rejected.revision,false).unwrap();
+    }
+    let quota=owner_quota(&conn,"w1",None).unwrap();
+    assert_eq!((quota.0,quota.1),(0,0));assert!(quota.2>initial);
+    let revisions:i64=conn.query_row("SELECT COUNT(*) FROM memory_revisions",[],|r|r.get(0)).unwrap();
+    assert_eq!(revisions,60);
 }
 
 #[test]
@@ -1680,4 +1724,3 @@ fn mcp_and_promote_fact_secret_detection_covers_key_body_reason_and_all_operatio
         assert_eq!(err_promote_fn.unwrap_err(), "memory promotion cannot contain credentials");
     }
 }
-

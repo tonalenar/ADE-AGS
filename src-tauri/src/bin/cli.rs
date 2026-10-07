@@ -220,6 +220,10 @@ MEMORIA COMPARTIDA (la usan los agentes por MCP; ver docs/ade-ags/SHARED_MEMORY.
   memory index                              Índice aprobado de la tab o misión actual
   memory open <camino>                       Proyección aprobada, solo lectura y UNTRUSTED DATA
   swarm note|question <texto>                Datos de sesión de la misión, no memoria durable
+  swarm promote <note-id> <key>              Propone la nota; aprobación exclusiva del usuario
+  memory export                             Exporta Markdown y revisiones JSON del workspace de la tab
+  memory compact [retentionDays]             Compacta rechazadas antiguas (mínimo 30 días)
+  workspace restore <id|nombre>              Recupera un workspace eliminado suavemente
 
 NAVEGADOR
   browser run --json-args '{\"cwd\":\"...\",     Una orden al navegador de un proyecto:
@@ -666,6 +670,9 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "memory.search" => &["query"],
         "memory.open" => &["path"],
         "swarm.note" | "swarm.question" => &["body"],
+        "swarm.promote" => &["note", "key"],
+        "memory.compact" => &["retentionDays"],
+        "workspace.restore" => &["workspace"],
         // `ags routine create Testes "rode os testes" --at 09:00`
         "routine.create" => &["name", "text"],
         "routine.edit" => &["name", "text"],

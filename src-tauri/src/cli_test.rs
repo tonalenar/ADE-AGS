@@ -3,6 +3,15 @@
 use super::*;
 
 #[test]
+fn lifecycle_and_swarm_promotion_use_production_parser() {
+    assert_eq!(parse("swarm.promote", &["note-id","finding"]).unwrap()["note"],"note-id");
+    assert_eq!(parse("swarm.promote", &["note-id","finding"]).unwrap()["key"],"finding");
+    assert_eq!(parse("workspace.restore", &["workspace-id"]).unwrap()["workspace"],"workspace-id");
+    assert_eq!(parse("memory.compact", &["45"]).unwrap()["retentionDays"],"45");
+    assert!(parse("memory.export", &[]).is_ok());
+}
+
+#[test]
 fn memory_repository_and_swarm_commands_use_production_flag_parser() {
     let open=parse("memory.open",&["notes.md","--mission","spoofed"]).unwrap();assert_eq!(open["path"],"notes.md");
     assert!(parse("memory.index",&["unexpected"]).is_err());

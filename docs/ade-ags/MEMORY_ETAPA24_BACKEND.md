@@ -98,3 +98,37 @@ grande, verificando que o JSON persistido continua pequeno e canônico.
 O dry-run continua selecionando a suíte completa por causa da migração v41.
 Conforme a orientação da retomada, a suíte completa não foi repetida; a alteração
 final tem validação pontual por `cargo test --lib draft_queue` no mesmo target.
+
+## Auditoria complementar da branch integrada
+
+1. **Já existe**: `ags mission efficiency` retorna `memoryContext.runs`, com
+   `beforeBytes`, `afterBytes`, `tokensBefore`, `tokensAfter`, commit e entradas.
+   São estimativas de contexto selado por Run, não tokens faturados.
+2. **Confirmado / implementei**: faltava promoção específica de swarm.
+   `ags swarm promote <note-id> <key>` lê somente a nota da missão da tab e cria
+   uma proposta pendente (ou rascunho quando a caixa está cheia). Nunca aprova.
+3. **Confirmado / implementei**: export/compact/restore só existiam na API nativa.
+   `ags memory export` e `ags memory compact [retentionDays]` usam o workspace
+   derivado da tab; compactação exige pelo menos 30 dias e é limitada ao workspace.
+   `ags workspace restore <id|nome>` recupera soft-delete, preservando histórico.
+4. **Confirmado / implementei**: `memory_workspace_stats` e export agora incluem
+   `memoryUsage:{timesUsed,entriesUsed,runsUsingMemory,method}`. A soma inclui
+   workspace e missões, contando seleções em snapshots, não uso no raciocínio.
+5. **Já existe / correção adicional**: tombstones e inativas consomem bytes de
+   auditoria, mas não vagas ativas. Corrigida assimetria da quota workspace: chave
+   contada uma vez; hash e fontes contados como na quota mission. Teste de
+   crescimento preserva 60 revisões em 20 ciclos de criação/delete/rejeição.
+6. **Confirmado / implementei**: retorno `ProposalResult.warning` informa fila
+   acumulada e pede aviso à orquestradora, inclusive Fleet. `memory suggest` retorna
+   o estado real `agent_draft` e tenta avisar o peer Orquestrador em background,
+   após liberar o banco. Ausência de peer conectado não desfaz o rascunho.
+7. **Confirmado / implementei**: os restantes construtores DEFERRED de produção
+   (Run/orquestração/failover, missions, squads, windows, design e OAuth) escrevem;
+   foram trocados por IMMEDIATE. Nenhuma ocorrência de `unchecked_transaction()`,
+   `.transaction()` ou `TransactionBehavior::Deferred` resta fora dos testes.
+   Escritas SQL únicas continuam usando a transação implícita do SQLite.
+
+Sem nova migração. Regressões exercitam promoção/isolamento/aprovação, agregação
+de uso por workspace, crescimento da auditoria, aviso de overflow e parser real
+dos novos comandos. A validação desta rodada usa `ags test affected` no alvo
+compartilhado oficial; o seletor inclui Rust completo por causa da v41 da branch.

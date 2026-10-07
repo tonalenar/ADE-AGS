@@ -114,7 +114,7 @@ pub async fn run_start_task(
 
     let mut task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let tx = conn.unchecked_transaction().map_err(|e|e.to_string())?;
+        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?;
         let run = store::create_run(&tx, &workspace_id, &title, &cwd)?;
         let task = store::create_task(
             &tx,
@@ -281,7 +281,7 @@ pub(crate) fn start_orchestration(
 
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
         let run = store::create_run_with_memory_snapshot(
             &tx,
             spec.workspace_id,
@@ -944,7 +944,7 @@ pub fn reroute_to(
 
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
         let moved = store::reroute_task(
             &tx,
             task_id,
@@ -1226,7 +1226,7 @@ pub async fn start_memory_dream(
     let _guard = crate::agents::updates::activity_guard()?;
     let (task, dream_id) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+        let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
         let input = crate::memory::dream::validate_start(&tx, workspace)?;
         let cwd:String=tx.query_row("SELECT cwd FROM runs WHERE workspace_id=?1 AND cwd<>'' ORDER BY created_at DESC LIMIT 1",[workspace],|r|r.get(0)).map_err(|_|"Workspace sem pasta no histórico.".to_string())?;
         let run = store::create_run_with_memory_snapshot(

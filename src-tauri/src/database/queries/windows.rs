@@ -98,7 +98,7 @@ pub(crate) fn db_save_window_state_sync<R: tauri::Runtime>(
     let conn = db.lock().map_err(|e| e.to_string())?;
     // Una sola transacción: un commit (un fsync) por guardado y no uno por fila, y un
     // guardado que falla a la mitad no deja la ventana con la mitad de sus tabs.
-    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
     let now = now_ts();
 
     conn.execute(

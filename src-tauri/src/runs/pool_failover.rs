@@ -126,7 +126,7 @@ pub(crate) fn reserve_failover(
     now: i64,
 ) -> Result<bool, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let tx = conn.unchecked_transaction().map_err(|e| e.to_string())?;
+    let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
     let task_key = task_failover_key(task_id);
     let already: Option<String> = tx
         .query_row("SELECT value FROM settings WHERE key = ?1", [&task_key], |row| row.get(0))

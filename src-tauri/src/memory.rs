@@ -241,6 +241,8 @@ pub struct ProposalResult {
     pub revision: i64,
     pub status: String,
     pub idempotent: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub warning: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -305,7 +307,7 @@ fn owner_quota(
         conn.query_row("SELECT
             (SELECT COUNT(*) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.scope='workspace' AND e.workspace_id=?1 AND r.status='proposed'),
             (SELECT COUNT(*) FROM memory_entries WHERE scope='workspace' AND workspace_id=?1 AND status='active' AND current_revision IS NOT NULL),
-            (SELECT COALESCE(SUM(length(CAST(r.body AS BLOB))+length(CAST(e.key AS BLOB))+COALESCE(length(CAST(r.reason AS BLOB)),0)),0) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.scope='workspace' AND e.workspace_id=?1)", [workspace_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_| "could not check memory quota".to_string())?
+            (SELECT COALESCE(SUM(length(CAST(r.body AS BLOB))+64+COALESCE(length(CAST(r.reason AS BLOB)),0)+COALESCE(length(r.source_run_id),0)+COALESCE(length(r.source_task_id),0)+COALESCE(length(r.source_fact_id),0)),0) FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id WHERE e.scope='workspace' AND e.workspace_id=?1)", [workspace_id], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).map_err(|_| "could not check memory quota".to_string())?
     };
     let metadata: i64 = conn.query_row("SELECT COALESCE(SUM(length(CAST(e.key AS BLOB))),0) FROM memory_entries e WHERE e.workspace_id=?1 AND ((?2 IS NULL AND e.scope='workspace') OR (?2 IS NOT NULL AND e.mission_id=?2 AND e.scope='mission'))", params![workspace_id,mission_id], |r|r.get(0)).map_err(|e|e.to_string())?;
     let archived: i64 = conn.query_row("SELECT COALESCE(SUM(length(CAST(c.metadata_json AS BLOB))+length(c.content_hash)),0) FROM memory_compacted_revisions c JOIN memory_entries e ON e.id=c.entry_id WHERE e.workspace_id=?1 AND ((?2 IS NULL AND e.scope='workspace') OR (?2 IS NOT NULL AND e.mission_id=?2 AND e.scope='mission'))",params![workspace_id,mission_id],|r|r.get(0)).map_err(|e|e.to_string())?;
@@ -377,6 +379,7 @@ pub fn propose(
                     revision: current.unwrap(),
                     status: "approved".into(),
                     idempotent: true,
+                    warning: None,
                 });
             }
             return Err(
@@ -412,7 +415,7 @@ pub fn propose(
         let approved_content: (String,i64) = tx.query_row("SELECT content_hash,priority FROM memory_revisions WHERE entry_id=?1 AND revision=?2 AND status='approved'", params![entry_id,current_revision], |r| Ok((r.get(0)?,r.get(1)?))).map_err(|_| "approved revision unavailable".to_string())?;
         if approved_content == (content_hash.clone(), input.priority) {
             tx.commit().map_err(|e| e.to_string())?;
-            return Ok(ProposalResult { entry_id, revision: current_revision.unwrap(), status: "approved".into(), idempotent: true });
+            return Ok(ProposalResult { entry_id, revision: current_revision.unwrap(), status: "approved".into(), idempotent: true, warning: None });
         }
     }
     let pending: Option<(i64,String,String,i64)> = tx.query_row("SELECT revision,content_hash,operation,priority FROM memory_revisions WHERE entry_id=?1 AND status='proposed'",[&entry_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|_| "could not inspect pending memory revision".to_string())?;
@@ -425,6 +428,7 @@ pub fn propose(
                 revision: rev,
                 status: "proposed".into(),
                 idempotent: true,
+                warning: None,
             });
         }
         return Err("this memory entry already has a pending proposal".into());
@@ -443,7 +447,7 @@ pub fn propose(
             // A newly allocated empty entry has no durable history to preserve.
             tx.execute("DELETE FROM memory_entries WHERE id=?1 AND current_revision IS NULL AND NOT EXISTS(SELECT 1 FROM memory_revisions WHERE entry_id=?1)", [&entry_id]).map_err(|e|e.to_string())?;
             tx.commit().map_err(|e|e.to_string())?;
-            return Ok(ProposalResult { entry_id: id, revision: 0, status: "agent_draft".into(), idempotent: false });
+            return Ok(ProposalResult { entry_id: id, revision: 0, status: "agent_draft".into(), idempotent: false, warning: Some(format!("{} agent drafts await user review; notify the orchestrator",count+1)) });
         }
         return Err("memory owner has reached the pending proposal limit".into());
     }
@@ -486,6 +490,7 @@ pub fn propose(
         revision,
         status: "proposed".into(),
         idempotent: false,
+        warning: None,
     })
 }
 

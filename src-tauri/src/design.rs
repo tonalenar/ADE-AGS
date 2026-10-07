@@ -260,7 +260,7 @@ pub(crate) fn execute(c: &mut Connection, op: &str, a: &Value) -> Result<Value> 
     if op == "get" {
         return get(c, text(a, "designId")?);
     }
-    let tx = c.transaction().map_err(err)?;
+    let tx = c.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate).map_err(err)?;
     let mut is_new = false;
     let mut comment_added = None;
     let id = if op == "create" {

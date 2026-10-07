@@ -183,10 +183,21 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
         )?
     };
     crate::memory::notify_changed(app);
+    let draft_warning = if result.status == "agent_draft" {
+        let conn=db.lock().map_err(|e|e.to_string())?;
+        let count:i64=conn.query_row("SELECT COUNT(*) FROM memory_agent_drafts WHERE workspace_id=(SELECT workspace_id FROM missions WHERE id=?1)",[&mission],|r|r.get(0)).map_err(|e|e.to_string())?;
+        let warning=format!("Memória: {count} rascunhos de agente aguardam revisão do usuário; a caixa de 32 pendências está cheia.");
+        let app=app.clone();let from=from.clone();let notice=warning.clone();
+        tauri::async_runtime::spawn_blocking(move || {
+            if let Some(from)=from { let _=super::peers::peer_tell(&app,&json!({"from":from,"to":"Orquestrador","text":notice})); }
+        });
+        Some(warning)
+    }else{None};
     Ok(json!({
         "entryId": result.entry_id,
         "revision": result.revision,
-        "status": "pending",
+        "status": if result.status == "agent_draft" { "agent_draft" } else { "pending" },
+        "warning": draft_warning,
         "message": "Proposta enviada. Fica pendente até o usuário aprovar na tela de Missões; você não precisa fazer mais nada.",
     }))
 }
@@ -254,6 +265,34 @@ pub(super) fn swarm_write(app: &AppHandle, args: &Value, question: bool) -> Resu
     let note=crate::memory::lifecycle::swarm_write(&conn,&mission.workspace_id,&id,if question {"question"} else {"note"},&body)?;
     let projection=crate::memory::repo::export_at(&conn,&mission.workspace_id,&crate::memory::repo::default_root()?,None);
     Ok(json!({"id":note,"status":"run_data","projectionError":projection.err()}))
+}
+
+pub(super) fn swarm_promote(app:&AppHandle,args:&Value)->Result<Value,String>{
+    let mission=memory_caller_mission(args)?;
+    let db=db(app)?;
+    let conn=db.lock().map_err(|e|e.to_string())?;
+    let row=crate::missions::store::get(&conn,&mission)?.ok_or("mission not found")?;
+    let result=crate::memory::lifecycle::swarm_promote(&conn,&row.workspace_id,&mission,&arg_str(args,"note")?,&arg_str(args,"key")?)?;
+    drop(conn);
+    crate::memory::notify_changed(app);
+    Ok(json!(result))
+}
+
+pub(super) fn memory_maintenance(app:&AppHandle,args:&Value,compact:bool)->Result<Value,String>{
+    let db=db(app)?;
+    let conn=db.lock().map_err(|e|e.to_string())?;
+    let tab=arg_str(args,"from")?;
+    let workspace:String=if let Some(mission)=crate::canvas::mission_of_tab(&crate::canvas::load_boards(),&tab){
+        crate::missions::store::get(&conn,&mission)?.ok_or("mission not found")?.workspace_id
+    }else{conn.query_row("SELECT w.workspace_id FROM tabs t JOIN windows w ON w.id=t.window_id WHERE t.id=?1 AND w.is_open=1",[tab],|r|r.get(0)).map_err(|_|"caller tab unavailable")?};
+    if compact {
+        let days=match args.get("retentionDays") {
+            None=>30,
+            Some(v)=>v.as_i64().or_else(||v.as_str()?.parse().ok()).ok_or("retentionDays must be an integer")?,
+        };
+        let count=crate::memory::lifecycle::compact_workspace(&conn,days,Some(&workspace))?;
+        Ok(json!({"workspaceId":workspace,"compacted":count}))
+    }else{crate::memory::lifecycle::export(&conn,&workspace,&crate::memory::repo::default_root()?)}
 }
 
 fn parse_memory_at(value: &str) -> Result<i64, String> {
