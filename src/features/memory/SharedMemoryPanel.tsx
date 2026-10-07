@@ -4,9 +4,12 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
 import type { Fact, Run } from "@/features/runs/types";
+import { MemorySearchBar } from "./MemorySearchBar";
+import { EMPTY_SEARCH, isEmptySearch, toFilter, verificationOf, type SearchState } from "./memorySearch";
 import { PurgeButton } from "./PurgeButton";
+import { SourceCheck } from "./SourceCheck";
 import * as memoryIpc from "./ipc";
-import type { MemoryDetail, MemoryEntry, MemoryKind, MemoryPage, MemoryProposal, MemoryScope, MemorySnapshot, MemoryValidityInterval } from "./types";
+import type { MemoryDetail, MemoryEntry, MemoryKind, MemoryPage, MemoryProposal, MemoryScope, MemorySnapshot, MemoryValidityInterval, MemoryWorkspaceStats } from "./types";
 
 export type MemoryTab = "workspace" | "mission" | "facts" | "snapshot";
 type ProposalForm = {
@@ -51,6 +54,27 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
   const [runSelection, setRunSelection] = useState<string | null>(null);
+  const { t } = useTranslation();
+  const [search, setSearch] = useState<SearchState>(EMPTY_SEARCH);
+  const [applied, setApplied] = useState<SearchState>(EMPTY_SEARCH);
+  const [loadFailed, setLoadFailed] = useState(false);
+  const [stats, setStats] = useState<MemoryWorkspaceStats | null>(null);
+  const appliedKey = JSON.stringify(applied);
+  const lastKey = useRef(appliedKey);
+  const fetchPage = useCallback((mission: string | null, cursor?: string | null) =>
+    isEmptySearch(applied)
+      ? (cursor ? memoryIpc.listMemory(workspaceId, mission, cursor) : memoryIpc.listMemory(workspaceId, mission))
+      : memoryIpc.queryMemory(workspaceId, mission, toFilter(applied), cursor),
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  [workspaceId, appliedKey]);
+
+  // A digitação só vira consulta depois de uma pausa (debounce), para não disparar um IPC por tecla.
+  useEffect(() => {
+    if (JSON.stringify(search) === appliedKey) return;
+    const timer = window.setTimeout(() => setApplied(search), search.query === applied.query ? 0 : 300);
+    return () => window.clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [search]);
   const selectedRunId = runs.some((run) => run.id === runSelection)
     ? runSelection
     : activeRunId ?? runs[0]?.id ?? null;
@@ -61,9 +85,15 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
     let current = true;
     setBusy(true);
     setError("");
+    setLoadFailed(false);
+    if (lastKey.current !== appliedKey) {
+      lastKey.current = appliedKey;
+      setWorkspacePage(null);
+      setMissionPage(null);
+    }
     const memoryRequests = Promise.all([
-      memoryIpc.listMemory(workspaceId, null),
-      missionId ? memoryIpc.listMemory(workspaceId, missionId) : Promise.resolve(null),
+      fetchPage(null),
+      missionId ? fetchPage(missionId) : Promise.resolve(null),
     ]);
     const runRequest = selectedRunId
       ? Promise.all([memoryIpc.listRunFacts(selectedRunId), memoryIpc.listMemorySnapshot(selectedRunId)])
@@ -75,12 +105,21 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
       setFacts(runData?.[0] ?? []);
       setSnapshot(runData?.[1] ?? null);
     }).catch((cause: unknown) => {
-      if (current) setError(String(cause));
+      if (current) { setError(String(cause)); setLoadFailed(true); setWorkspacePage((p) => p ?? { items: [], hasMore: false, nextCursor: null, truncated: false }); }
     }).finally(() => {
       if (current) setBusy(false);
     });
     return () => { current = false; };
-  }, [workspaceId, missionId, selectedRunId, refreshKey]);
+  }, [workspaceId, missionId, selectedRunId, refreshKey, fetchPage, appliedKey]);
+
+  // "Memória usada": leitura só de contagem; falha não atrapalha a lista.
+  useEffect(() => {
+    let current = true;
+    try {
+      memoryIpc.getMemoryWorkspaceStats(workspaceId).then((s) => { if (current) setStats(s); }).catch(() => { if (current) setStats(null); });
+    } catch { setStats(null); }
+    return () => { current = false; };
+  }, [workspaceId, refreshKey]);
 
   useEffect(() => {
     const offMemory = listen("cc-memory-changed", () => setRefreshKey((value) => value + 1));
@@ -95,7 +134,7 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
     if (!page?.nextCursor || !missionId && scope === "mission") return;
     setBusy(true);
     try {
-      const next = await memoryIpc.listMemory(workspaceId, scope === "mission" ? missionId : null, page.nextCursor);
+      const next = await fetchPage(scope === "mission" ? missionId : null, page.nextCursor);
       const merge = (previous: MemoryPage | null): MemoryPage => ({
         items: [...(previous?.items ?? []), ...next.items],
         hasMore: next.hasMore,
@@ -193,10 +232,10 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
 
   const renderList = (scope: MemoryScope) => {
     const page = scope === "workspace" ? workspacePage : missionPage;
-    if (!page) return <p className="text-xs text-gray-400">Carregando memórias…</p>;
+    if (!page) return <p role="status" className="text-xs text-gray-400">{t("memorySearch.loading")}</p>;
     return (
       <div className="flex flex-col gap-2">
-        {page.items.length === 0 && <p className="text-xs text-gray-400">Nenhuma memória registrada.</p>}
+        {page.items.length === 0 && !loadFailed && <p className="text-xs text-gray-400">{isEmptySearch(applied) ? "Nenhuma memória registrada." : t("memorySearch.noResults")}</p>}
         {page.items.map((entry) => (
           <MemoryEntryCard key={entry.id} onPurged={reload} entry={entry} busy={busy} workspaceId={workspaceId} missionId={missionId}
             onInspect={() => inspect(entry)}
@@ -252,7 +291,17 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
         ))}
       </div>
 
-      {error && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{error}</p>}
+      {(tab === "workspace" || tab === "mission") && (
+        <MemorySearchBar value={search} onChange={setSearch} scope={tab} onScope={(s) => { setTab(s); setDetail(null); }} canMission={missionId !== null} />
+      )}
+      {stats && (tab === "workspace" || tab === "mission") && (
+        <p className="text-[10.5px] text-gray-500 dark:text-white/45">{t("memorySearch.usage", { entries: stats.entries, used: stats.memoryUsage.entriesUsed, runs: stats.memoryUsage.runsUsingMemory })}</p>
+      )}
+      {error && (
+        <p role="alert" className="text-xs text-red-600 dark:text-red-400">
+          {error}{loadFailed && <> <button type="button" onClick={reload} className="underline">{t("memorySearch.retry")}</button></>}
+        </p>
+      )}
       {tab === "workspace" && renderList("workspace")}
       {tab === "mission" && missionId && renderList("mission")}
       {tab === "facts" && (
@@ -305,6 +354,7 @@ function MemoryEntryCard({ entry, busy, workspaceId, missionId, onInspect, onApp
           {entry.pendingSourceFactId && <p className="text-[10px] text-gray-500 dark:text-white/45">Promovido do Run Fact {entry.pendingSourceFactId.slice(0, 8)}</p>}
         </div>
       )}
+      <VerificationLine entry={entry} busy={busy} />
       <div className="flex flex-wrap gap-1.5">
         <Button variant="ghost" size="sm" disabled={busy} onClick={onInspect}>Ver revisões</Button>
         <MemoryValidityHistory entry={entry} workspaceId={workspaceId} missionId={missionId} />
@@ -322,6 +372,24 @@ function MemoryEntryCard({ entry, busy, workspaceId, missionId, onInspect, onApp
         <PurgeButton entryId={entry.id} entryKey={entry.key} disabled={busy} onDone={onPurged} />
       </div>
     </article>
+  );
+}
+
+function VerificationLine({ entry, busy }: { entry: MemoryEntry; busy: boolean }) {
+  const { t } = useTranslation();
+  const v = verificationOf(entry, Math.floor(Date.now() / 1000));
+  const canCheck = entry.currentRevision !== null;
+  if (v.state === "none" && !canCheck) return null;
+  const tone = v.state === "expired" || v.state === "never" ? "border-amber-500/60 text-amber-700 dark:text-amber-400" : "border-emerald-500/50 text-emerald-700 dark:text-emerald-400";
+  return (
+    <div className="flex flex-wrap items-start gap-2">
+      {v.state === "none" ? <span className="text-[10.5px] text-gray-400">{t("memorySearch.verify.none")}</span> : (
+        <span data-verification={v.state} className={`rounded-full border px-2 py-px text-[10.5px] ${tone}`}>
+          {v.state === "never" ? t("memorySearch.verify.never", { ttl: v.ttlDays }) : t(v.ttlDays === null ? "memorySearch.verify.noTtl" : v.state === "expired" ? "memorySearch.verify.expired" : "memorySearch.verify.ok", { days: v.daysAgo, ttl: v.ttlDays })}
+        </span>
+      )}
+      {canCheck && <SourceCheck entryId={entry.id} disabled={busy} />}
+    </div>
   );
 }
 
