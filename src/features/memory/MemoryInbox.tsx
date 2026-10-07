@@ -6,6 +6,7 @@ import {
   approveBulk, asksHighPriority, flatten, inboxKeyAction, groupsFromWorkspaceReview, itemId, normalizeGroups, planBulk, rejectBulk, selectedItems, totalPending,
   type BulkOutcome, type MissionReviewGroup,
 } from "./bulkReview";
+import { DraftsSection, type DraftsState } from "./DraftsSection";
 import { DreamSection } from "./DreamSection";
 import * as memoryIpc from "./ipc";
 import { ReviewMarks } from "./ReviewMarks";
@@ -74,6 +75,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
   const [confirm, setConfirm] = useState<Confirm>(null);
+  const [drafts, setDrafts] = useState<DraftsState>({ status: "loading" });
   const root = useRef<HTMLDivElement>(null);
   const titles = useMemo(() => new Map(missions.map((m) => [m.id, m.title])), [missions]);
 
@@ -92,7 +94,14 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     }
   }, [workspaceId, titles, t]);
 
+  const loadDrafts = useCallback(() => {
+    memoryIpc.listMemoryAgentDrafts(workspaceId)
+      .then((d) => setDrafts({ status: "ready", drafts: Array.isArray(d) ? d : [] }))
+      .catch(() => setDrafts({ status: "error" }));
+  }, [workspaceId]);
+
   useEffect(() => { void load(); }, [load]);
+  useEffect(() => { loadDrafts(); }, [loadDrafts]);
   useEffect(() => { root.current?.focus(); }, []);
 
   const all = useMemo(() => flatten(groups), [groups]);
@@ -149,6 +158,11 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
         <header className="flex flex-wrap items-center gap-2 border-b border-gray-200 px-5 py-3 dark:border-white/10">
           <h2 className="text-[14px] font-semibold">{t("memoryInbox.title")}</h2>
           <span className="rounded-full bg-amber-500 px-2 text-[11px] font-bold leading-5 text-white" aria-label={t("memoryInbox.count", { count: totalPending(groups) })}>{totalPending(groups)}</span>
+          {drafts.status === "ready" && drafts.drafts.length > 0 && (
+            <span className="rounded-full border border-amber-500/60 px-2 text-[11px] leading-5 text-amber-700 dark:text-amber-400" aria-label={t("memoryDrafts.headerLabel", { count: drafts.drafts.length })}>
+              {t("memoryDrafts.headerCount", { count: drafts.drafts.length })}
+            </span>
+          )}
           <span className="flex-1" />
           <button type="button" onClick={onClose} aria-label={t("memoryInbox.close")} className="rounded border border-gray-300 px-2 py-1 text-[11px] dark:border-white/20">Esc</button>
         </header>
@@ -170,6 +184,8 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
         {message && <p role="alert" className="px-5 pt-2 text-[11px] text-red-600 dark:text-red-400">{message}</p>}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
+          <DraftsSection workspaceId={workspaceId} state={drafts} pending={totalPending(groups)} onReload={loadDrafts}
+            onChanged={() => { loadDrafts(); void load(); void loadPending(workspaceId).catch(() => undefined); }} />
           {loaded && groups.length === 0 && <p className="py-10 text-center text-[12.5px] text-gray-500">{t("memoryInbox.empty")}</p>}
           {!loaded && <p className="py-10 text-center text-[12.5px] text-gray-500">{t("memoryInbox.loading")}</p>}
           {groups.map((g) => (
