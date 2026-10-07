@@ -295,6 +295,10 @@ pub(super) fn swarm_write(app: &AppHandle, args: &Value, question: bool) -> Resu
         let conn=db.lock().map_err(|e|e.to_string())?;
         let mission=crate::missions::store::get(&conn,&id)?.ok_or("mission not found")?;
         let note=crate::memory::lifecycle::swarm_write(&conn,&mission.workspace_id,&id,if question {"question"} else {"note"},&body)?;
+        // A nota já está no banco. O marcador sobrevive se o processo fechar antes do git.
+        if let Err(error) = crate::memory::repo_sync::note_dirty(&conn, &mission.workspace_id) {
+            eprintln!("[memory] não foi possível marcar a exportação pendente: {error}");
+        }
         (note, mission.workspace_id)
     };
     // The note is already committed. Git must not run while this call still holds the database mutex.
@@ -329,7 +333,7 @@ pub(super) fn memory_maintenance(app: &AppHandle, args: &Value, compact: bool) -
         drop(conn);
         workspace
     };
-    // Mutex já solto. O git corre no worker. Não chamar lifecycle::export com o lock preso.
+    // Mutex já solto. `ags memory export` chega aqui; o git corre no worker.
     let sync = app
         .try_state::<crate::memory::repo_sync::RepoSync>()
         .ok_or_else(|| "memory sync unavailable".to_string())?;

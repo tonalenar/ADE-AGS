@@ -86,3 +86,22 @@ fn preview_overrides_are_pure_and_match_export_after_approval() {
     let exported=export_at(&c,"w",root.path(),Some((&p.entry_id,p.revision))).unwrap();
     for (file,body) in preview {assert_eq!(git(Path::new(&exported.path),&["show",&format!("HEAD:{file}")]).unwrap(),body.trim_end());}
 }
+
+#[test]
+fn git_recusa_rodar_com_o_mutex_do_banco_preso_nesta_thread() {
+    let _hold = DbHoldGuard::enter();
+    let err = run_git(Path::new("."), &["status".to_string()]).unwrap_err();
+    assert!(err.contains("mutex do banco"), "{err}");
+    let called = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = std::sync::Arc::clone(&called);
+    let runner: GitRunner = std::sync::Arc::new(move |_path, _args| {
+        flag.store(true, std::sync::atomic::Ordering::SeqCst);
+        Ok(String::new())
+    });
+    let err = match publish(Path::new("."), "Nome", "w", &Files::new(), None, 0, &runner) {
+        Err(error) => error,
+        Ok(_) => panic!("publish deveria recusar git com o banco preso"),
+    };
+    assert!(err.contains("mutex do banco"), "{err}");
+    assert!(!called.load(std::sync::atomic::Ordering::SeqCst), "publish chamou git com o banco preso");
+}

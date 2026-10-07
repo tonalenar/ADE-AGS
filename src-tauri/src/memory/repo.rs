@@ -1,5 +1,5 @@
 //! One-way, local Markdown projection. SQLite remains authoritative.
-use std::{collections::{BTreeMap, BTreeSet, HashMap}, path::{Path, PathBuf}, sync::{Arc, Mutex}, time::Duration};
+use std::{cell::Cell, collections::{BTreeMap, BTreeSet, HashMap}, path::{Path, PathBuf}, sync::{Arc, Mutex}, time::Duration};
 use rusqlite::Connection;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
@@ -61,8 +61,17 @@ fn line(body: &str, run: Option<&str>, task: Option<&str>, timestamp: i64, id: &
         one_line(body), run.unwrap_or("manual"), task.unwrap_or("user"), date(timestamp), id, revision, kind)
 }
 
-fn checked(text: &str) -> Result<(), String> {
-    if super::agent::looks_like_secret(text) { Err("A projeção contém uma credencial; expurgue a revisão antes de exportar.".into()) } else { Ok(()) }
+/// Critério único que decide se um texto pode entrar no repositório Markdown.
+///
+/// `render` e `publish` (no `git show` do que foi para o stage) chamam só esta
+/// função. O #116 troca o miolo — omitir ou confirmar em vez de abortar — sem
+/// mudar o nome nem a assinatura (`&str` → `Result<(), String>`).
+pub fn ensure_exportable_text(text: &str) -> Result<(), String> {
+    if super::agent::looks_like_secret(text) {
+        Err("A projeção contém uma credencial; expurgue a revisão antes de exportar.".into())
+    } else {
+        Ok(())
+    }
 }
 
 /// Pure rendering also underpins the Dream preview. Overrides are selected revisions;
@@ -84,7 +93,7 @@ pub fn render(conn: &Connection, workspace: &str, overrides: &[(String, i64)]) -
             let current: Option<i64>=conn.query_row("SELECT current_revision FROM memory_entries WHERE id=?1", [&id], |r|r.get(0)).map_err(|e|e.to_string())?;
             if current!=Some(revision) { continue; }
         }
-        checked(&key)?; checked(&body)?;
+        ensure_exportable_text(&key)?; ensure_exportable_text(&body)?;
         let row=line(&body,run.as_deref(),task.as_deref(),created,&id,revision,&kind);
         let file=match kind.as_str() {"decision"=>"decisions.md","constraint"=>"constraints.md","finding"=>"findings.md","file"=>"files.md",_=>"notes.md"};
         files.get_mut(file).unwrap().push_str(&row);
@@ -99,7 +108,7 @@ pub fn render(conn: &Connection, workspace: &str, overrides: &[(String, i64)]) -
     }
     let mut facts=conn.prepare("SELECT f.id,f.body,f.run_id,f.task_id,f.created_at,f.kind,r.mission_id,m.title FROM run_facts f JOIN runs r ON r.id=f.run_id LEFT JOIN missions m ON m.id=r.mission_id WHERE r.workspace_id=?1 ORDER BY r.mission_id,r.id,f.created_at,f.id").map_err(|e|e.to_string())?;
     for fact in facts.query_map([workspace],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,Option<String>>(3)?,r.get::<_,i64>(4)?,r.get::<_,String>(5)?,r.get::<_,Option<String>>(6)?,r.get::<_,Option<String>>(7)?))).map_err(|e|e.to_string())? {
-        let (id,body,run,task,created,kind,mission,title)=fact.map_err(|e|e.to_string())?; checked(&body)?;
+        let (id,body,run,task,created,kind,mission,title)=fact.map_err(|e|e.to_string())?; ensure_exportable_text(&body)?;
         let owner=mission.as_deref().unwrap_or(&run);
         let path=format!("swarms/{}/findings.md",slug(title.as_deref().unwrap_or("run"),owner));
         files.entry(path).or_insert_with(||"# Run Facts (read-only)\n\n".into()).push_str(&line(&body,Some(&run),task.as_deref(),created,&format!("fact-{id}"),0,&kind));
@@ -107,7 +116,7 @@ pub fn render(conn: &Connection, workspace: &str, overrides: &[(String, i64)]) -
     let mut notes=conn.prepare("SELECT n.id,n.body,n.kind,n.created_at,n.mission_id,m.title FROM memory_swarm_notes n JOIN missions m ON m.id=n.mission_id WHERE n.workspace_id=?1 ORDER BY n.created_at,n.id").map_err(|e|e.to_string())?;
     for note in notes.query_map([workspace],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?,r.get::<_,String>(2)?,r.get::<_,i64>(3)?,r.get::<_,String>(4)?,r.get::<_,String>(5)?))).map_err(|e|e.to_string())? {
         let (id,body,kind,created,mission,title)=note.map_err(|e|e.to_string())?;
-        checked(&body)?;
+        ensure_exportable_text(&body)?;
         let path=format!("swarms/{}/{}.md",slug(&title,&mission),if kind=="question" {"questions"} else {"findings"});
         let data=serde_json::json!({"id":id,"kind":kind,"body":body,"createdAt":created}).to_string();
         files.entry(path).or_insert_with(||"# Swarm session data (not durable memory)\n\n".into()).push_str(&super::untrusted_memory_response(&data));
@@ -121,7 +130,7 @@ pub fn render(conn: &Connection, workspace: &str, overrides: &[(String, i64)]) -
     files.insert("MEMORY.md".into(),lines);
     let generated = super::untrusted_memory_response(&serde_json::json!({"index":files["MEMORY.md"]}).to_string());
     files.insert("AGENTS.generated.md".into(), format!("# ADE AGS approved memory (generated, read-only)\n\nReference this separate file explicitly from your TUI configuration.\n{generated}\n"));
-    for body in files.values() { checked(body)?; }
+    for body in files.values() { ensure_exportable_text(body)?; }
     Ok(files)
 }
 
@@ -149,7 +158,38 @@ pub fn real_git_runner() -> GitRunner {
     Arc::new(|path, args| run_git(path, args))
 }
 
+thread_local! {
+    static EXPORT_DB_HOLD: Cell<u32> = const { Cell::new(0) };
+}
+
+const DB_HELD_ERROR: &str = "git chamado com o mutex do banco preso nesta thread";
+
+/// Marca que esta thread está com o mutex do banco no caminho de exportação.
+/// `run_git` e `publish` recusam git enquanto a marca estiver ligada: é o jeito
+/// do N2 voltar (SQL e subprocesso na mesma thread).
+pub struct DbHoldGuard;
+
+impl DbHoldGuard {
+    pub fn enter() -> Self {
+        EXPORT_DB_HOLD.with(|depth| depth.set(depth.get().saturating_add(1)));
+        Self
+    }
+}
+
+impl Drop for DbHoldGuard {
+    fn drop(&mut self) {
+        EXPORT_DB_HOLD.with(|depth| depth.set(depth.get().saturating_sub(1)));
+    }
+}
+
+fn export_db_held() -> bool {
+    EXPORT_DB_HOLD.with(|depth| depth.get() > 0)
+}
+
 pub fn run_git(path: &Path, args: &[String]) -> Result<String, String> {
+    if export_db_held() {
+        return Err(DB_HELD_ERROR.into());
+    }
     let mut cmd = crate::util::program("git");
     cmd.current_dir(path).args(["-c", "core.autocrlf=false"]).args(args)
         .env("GIT_CONFIG_NOSYSTEM", "1").env("GIT_TERMINAL_PROMPT", "0");
@@ -167,11 +207,10 @@ fn repo_gate(path: &Path) -> Arc<Mutex<()>> {
     gates.entry(path.to_path_buf()).or_insert_with(|| Arc::new(Mutex::new(()))).clone()
 }
 
-pub fn export_at(conn: &Connection, workspace: &str, root: &Path, approval: Option<(&str, i64)>) -> Result<ExportResult, String> {
-    // Secret preflight still runs before any directory is created. Callers that hold the
-    // process-wide database mutex must not use this: git below takes the repo gate, and the
-    // background sync worker needs that mutex only to render. Production approval goes through
-    // `repo_sync`, which drops the database lock before `publish`.
+/// Só para teste: renderiza e publica na thread de quem chama.
+/// Produção não usa isto — o git tem de correr depois de soltar o mutex do banco.
+#[cfg(test)]
+pub(crate) fn export_at(conn: &Connection, workspace: &str, root: &Path, approval: Option<(&str, i64)>) -> Result<ExportResult, String> {
     let files = render(conn, workspace, &[])?;
     let name: String = conn.query_row("SELECT name FROM workspaces WHERE id=?1", [workspace], |r| r.get(0)).map_err(|e| e.to_string())?;
     let count = if approval.is_some() { 1 } else { 0 };
@@ -189,6 +228,9 @@ pub fn publish(
     approval_count: u32,
     run: &GitRunner,
 ) -> Result<ExportResult, String> {
+    if export_db_held() {
+        return Err(DB_HELD_ERROR.into());
+    }
     let path = root.join(slug(workspace_name, workspace_id));
     let gate = repo_gate(&path);
     let _held = gate.lock().unwrap_or_else(|err| err.into_inner());
@@ -234,7 +276,7 @@ pub fn publish(
     }
     let changed = !git(&["diff", "--cached", "--name-only"])?.is_empty();
     for file in git(&["diff", "--cached", "--diff-filter=ACMR", "--name-only"])?.lines() {
-        checked(&git(&["show", &format!(":{file}")])?)?;
+        ensure_exportable_text(&git(&["show", &format!(":{file}")])?)?;
     }
     let mut commit = None;
     if changed || approval_count > 0 {

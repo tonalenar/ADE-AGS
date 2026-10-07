@@ -49,6 +49,9 @@ fn write_archive(repo_path: &std::path::Path, body: &Value) -> Result<(), String
     std::fs::write(&path, serde_json::to_vec_pretty(body).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
 }
 
+/// Atalho de teste. Produção (`memory_export`, `ags memory export`) usa [`export_detached`],
+/// que solta o mutex antes do git.
+#[cfg(test)]
 pub fn export(conn: &Connection, workspace: &str, root: &std::path::Path) -> Result<Value, String> {
     let projection = super::repo::export_at(conn, workspace, root, None)?;
     let prepared = prepare_archive(conn, workspace)?;
@@ -58,7 +61,8 @@ pub fn export(conn: &Connection, workspace: &str, root: &std::path::Path) -> Res
     Ok(result)
 }
 
-/// Same archive as [`export`], but git runs on the sync worker after the database lock is released.
+/// Lê o snapshot com o mutex e só então pede o git ao worker. É o caminho de
+/// `memory_export` e de `ags memory export` (`memory.export`).
 pub fn export_detached(db: &crate::database::DbConnection, sync: &super::repo_sync::RepoSync, workspace: &str) -> Result<Value, String> {
     let prepared = {
         let conn = db.lock().map_err(|e| e.to_string())?;

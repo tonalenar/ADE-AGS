@@ -1,8 +1,29 @@
-//! Background export of the approved-memory Markdown repository.
+//! Exportação em segundo plano do repositório Markdown da memória aprovada.
 //!
-//! SQLite is committed first. Git runs afterwards, on one worker, without the database
-//! mutex. Approvals of the same workspace that arrive during an export collapse into a
-//! single follow-up, so a batch does not start one git process per item.
+//! O SQLite commita primeiro. O git corre depois, num único worker, sem o mutex do
+//! banco. Aprovações do mesmo workspace que chegam no meio viram um único follow-up.
+//!
+//! A pendência fica em `memory_repo_sync_pending`. Se o app fechar com a fila
+//! não vazia, [`RepoSync::reconcile_pending`] reenfileira na abertura.
+//!
+//! # Contrato para o purge (#114)
+//!
+//! O purge chama [`RepoSync::pause_workspace`] **antes** de reescrever o repositório
+//! daquele workspace e **sem** estar com o mutex do banco preso. Quando a função
+//! retorna:
+//!
+//! - não há `publish` daquele workspace em andamento;
+//! - um render que já tinha saído do lock, mas ainda não tinha entrado no git, foi
+//!   descartado e não commita;
+//! - a fila daquele workspace não publica de novo até [`RepoSync::resume_workspace`].
+//!
+//! `enqueue` durante a pausa fica retido (a aprovação no SQLite continua valendo) e
+//! só vira export depois do `resume`. O purge dá `resume` somente depois de soltar
+//! o gate do repositório e terminar de reescrever o `.git`. Um `publish` que já
+//! tinha entrado no git termina antes da pausa retornar: o purge precisa reescrever
+//! por cima desse commit.
+//!
+//! A pausa não reexporta e não apaga o Markdown. Não desfaz aprovação já commitada.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
@@ -53,6 +74,12 @@ struct Slot {
     pending_approvals: u32,
     last_attempt_gen: u64,
     last_ok: bool,
+    /// Impede publish novo. O purge liga isto antes de reescrever o repo.
+    paused: bool,
+    /// Verdade enquanto esta thread está dentro de `publish` (git).
+    publishing: bool,
+    /// Gerações até aqui foram descartadas (não contam como exportadas).
+    skip_until: u64,
 }
 
 impl Default for Slot {
@@ -71,6 +98,9 @@ impl Default for Slot {
             pending_approvals: 0,
             last_attempt_gen: 0,
             last_ok: true,
+            paused: false,
+            publishing: false,
+            skip_until: 0,
         }
     }
 }
@@ -149,8 +179,10 @@ impl RepoSync {
         );
     }
 
-    /// Records that `workspace` needs an export. Returns the generation the caller is waiting on.
-    /// Never runs git and never needs the database lock.
+    /// Anota que `workspace` precisa de exportação. Devolve a geração que o chamador espera.
+    /// Não corre git e não precisa do mutex do banco. Quem segura o banco marca a pendência
+    /// com [`note_dirty`] antes; este método só mexe na fila em memória.
+    /// Durante [`RepoSync::pause_workspace`] o item fica retido até o resume.
     pub fn enqueue(&self, workspace: &str, approval: Option<(String, i64)>) -> u64 {
         let (generation, status) = {
             let mut state = self.lock_state();
@@ -160,8 +192,10 @@ impl RepoSync {
                 slot.latest_approval = Some(approval);
                 slot.pending_approvals = slot.pending_approvals.saturating_add(1);
             }
-            if slot.phase == Phase::Failed {
-                // Keep the error on screen, but don't make a new approval wait out the full backoff.
+            if slot.paused {
+                // O purge está reescrevendo este repo. Não publica agora.
+            } else if slot.phase == Phase::Failed {
+                // Mantém o erro na tela, mas uma aprovação nova não espera o backoff inteiro.
                 let soon = Instant::now() + Duration::from_millis(200);
                 slot.retry_at = Some(slot.retry_at.map_or(soon, |at| at.min(soon)));
             } else if slot.phase != Phase::Syncing {
@@ -195,11 +229,103 @@ impl RepoSync {
         snapshot(&self.lock_state(), workspace)
     }
 
-    /// Explicit export. Waits for the worker, but the caller must not be holding the database lock:
-    /// the worker needs it to render.
+    /// Pausa o workspace para o purge reescrever o repositório. Ver o contrato no módulo.
+    /// Não chamar com o mutex do banco preso: o worker pode precisar dele para terminar
+    /// o render e perceber a pausa. Espera no máximo 180 s pelo git que já entrou.
+    pub fn pause_workspace(&self, workspace: &str) -> Result<(), String> {
+        let deadline = Instant::now() + Duration::from_secs(180);
+        let mut state = self.lock_state();
+        let slot = state.slots.entry(workspace.to_string()).or_default();
+        slot.paused = true;
+        let cutoff = slot.generation;
+        self.inner.wake.notify_all();
+        loop {
+            let slot = state.slots.get(workspace).expect("slot criado acima");
+            let busy = slot.publishing || slot.phase == Phase::Syncing;
+            if !busy {
+                break;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                return Err("A pausa da exportação excedeu o tempo; o git ainda está em andamento.".into());
+            }
+            let (guard, wait) = self.inner.wake.wait_timeout(state, deadline - now).unwrap_or_else(|err| err.into_inner());
+            state = guard;
+            if wait.timed_out() && Instant::now() >= deadline {
+                let slot = state.slots.get(workspace);
+                let busy = slot.is_some_and(|slot| slot.publishing || slot.phase == Phase::Syncing);
+                if busy {
+                    return Err("A pausa da exportação excedeu o tempo; o git ainda está em andamento.".into());
+                }
+                break;
+            }
+        }
+        let slot = state.slots.get_mut(workspace).expect("slot criado acima");
+        slot.skip_until = slot.skip_until.max(cutoff);
+        slot.retry_at = None;
+        slot.error = None;
+        let covered = slot.synced.max(slot.skip_until);
+        if slot.generation <= covered && slot.phase != Phase::Syncing {
+            slot.phase = Phase::Idle;
+        }
+        let status = snapshot(&state, workspace);
+        self.inner.wake.notify_all();
+        drop(state);
+        self.emit(&status);
+        Ok(())
+    }
+
+    fn is_paused(&self, workspace: &str) -> bool {
+        self.lock_state().slots.get(workspace).is_some_and(|slot| slot.paused)
+    }
+
+    /// Solta a pausa. Exportações que chegaram durante ela passam a poder publicar.
+    pub fn resume_workspace(&self, workspace: &str) {
+        let status = {
+            let mut state = self.lock_state();
+            if let Some(slot) = state.slots.get_mut(workspace) {
+                slot.paused = false;
+                let covered = slot.synced.max(slot.skip_until);
+                if slot.generation > covered && slot.phase != Phase::Syncing {
+                    slot.phase = Phase::Queued;
+                    slot.retry_at = None;
+                }
+            }
+            self.inner.wake.notify_all();
+            snapshot(&state, workspace)
+        };
+        self.emit(&status);
+    }
+
+    /// Reenfileira workspaces que ficaram pendentes ou falhos na última execução.
+    pub fn reconcile_pending(&self) {
+        let ids = {
+            let Ok(conn) = self.inner.db.lock() else {
+                eprintln!("[memory] banco indisponível ao reconciliar a exportação");
+                return;
+            };
+            match dirty_workspaces(&conn) {
+                Ok(ids) => ids,
+                Err(error) => {
+                    eprintln!("[memory] não foi possível ler a fila de exportação: {error}");
+                    return;
+                }
+            }
+        };
+        for id in ids {
+            self.enqueue(&id, None);
+        }
+    }
+
+    /// Export explícito. Espera o worker. O chamador não pode estar com o mutex do banco:
+    /// o worker precisa dele para renderizar. O git corre só depois de soltar.
     pub fn export_now(&self, workspace: &str) -> Result<ExportResult, String> {
         if !self.inner.running.load(Ordering::SeqCst) {
             return Err("O sincronizador do repositório de memória não está ativo.".into());
+        }
+        {
+            let conn = self.inner.db.lock().map_err(|_| "database unavailable".to_string())?;
+            note_dirty(&conn, workspace)?;
         }
         let generation = self.enqueue(workspace, None);
         let deadline = Instant::now() + Duration::from_secs(180);
@@ -290,6 +416,9 @@ fn export_now_result(state: &SyncState, workspace: &str, generation: u64) -> Opt
             files: slot.files.clone(),
         }));
     }
+    if slot.paused || slot.skip_until >= generation {
+        return Some(Err("A exportação deste workspace está pausada para reescrita do repositório.".into()));
+    }
     if !slot.last_ok && slot.last_attempt_gen >= generation && slot.phase == Phase::Failed {
         return Some(Err(slot.error.clone().unwrap_or_else(|| "export failed".into())));
     }
@@ -311,7 +440,7 @@ fn snapshot(state: &SyncState, workspace: &str) -> RepoSyncStatus {
         phase: phase_name(slot.phase).into(),
         error: slot.error.clone(),
         commit: slot.commit.clone(),
-        pending: slot.generation.saturating_sub(slot.synced) as u32,
+        pending: slot.generation.saturating_sub(slot.synced.max(slot.skip_until)) as u32,
     }
 }
 
@@ -325,9 +454,13 @@ fn phase_name(phase: Phase) -> &'static str {
     }
 }
 
+fn covered(slot: &Slot) -> u64 {
+    slot.synced.max(slot.skip_until)
+}
+
 fn next_job(state: &SyncState, now: Instant) -> Option<Job> {
     for (id, slot) in &state.slots {
-        if slot.generation <= slot.synced {
+        if slot.paused || slot.generation <= covered(slot) {
             continue;
         }
         if slot.retry_at.is_some_and(|at| at > now) {
@@ -346,7 +479,7 @@ fn next_job(state: &SyncState, now: Instant) -> Option<Job> {
 fn next_delay(state: &SyncState, now: Instant) -> Option<Duration> {
     let mut soonest: Option<Duration> = None;
     for slot in state.slots.values() {
-        if slot.generation <= slot.synced {
+        if slot.paused || slot.generation <= covered(slot) {
             continue;
         }
         if let Some(at) = slot.retry_at {
@@ -379,16 +512,29 @@ fn worker_loop(inner: Arc<Inner>) {
             emit_inner(&inner, &status);
 
             let approval = job.approval.clone();
-            let result = do_export(&inner, &job.workspace, approval.as_ref().map(|(entry, revision)| (entry.as_str(), *revision)), job.pending_approvals);
+            let result = do_export(
+                &inner,
+                &job.workspace,
+                job.generation,
+                approval.as_ref().map(|(entry, revision)| (entry.as_str(), *revision)),
+                job.pending_approvals,
+            );
 
             state = inner.state.lock().unwrap_or_else(|err| err.into_inner());
             if inner.stop.load(Ordering::SeqCst) {
                 break;
             }
-            apply_result(&inner, &mut state, &job, result);
+            let clear_sql = apply_result(&inner, &mut state, &job, result);
             let status = snapshot(&state, &job.workspace);
             inner.wake.notify_all();
             drop(state);
+            if let Some(sql_generation) = clear_sql {
+                if let Ok(conn) = inner.db.lock() {
+                    if let Err(error) = clear_dirty(&conn, &job.workspace, sql_generation) {
+                        eprintln!("[memory] não foi possível limpar a exportação pendente: {error}");
+                    }
+                }
+            }
             emit_inner(&inner, &status);
             state = inner.state.lock().unwrap_or_else(|err| err.into_inner());
             continue;
@@ -414,14 +560,20 @@ fn emit_inner(inner: &Inner, status: &RepoSyncStatus) {
     }
 }
 
-fn apply_result(inner: &Inner, state: &mut SyncState, job: &Job, result: Result<ExportResult, String>) {
-    let Some(slot) = state.slots.get_mut(&job.workspace) else { return };
+enum Attempt {
+    Exported { result: ExportResult, sql_generation: i64 },
+    Discarded,
+    Failed(String),
+}
+
+fn apply_result(inner: &Inner, state: &mut SyncState, job: &Job, result: Attempt) -> Option<i64> {
+    let Some(slot) = state.slots.get_mut(&job.workspace) else { return None };
     slot.last_attempt_gen = job.generation;
     match result {
-        Ok(exported) => {
-            slot.commit = exported.commit;
-            slot.path = Some(exported.path);
-            slot.files = exported.files;
+        Attempt::Exported { result, sql_generation } => {
+            slot.commit = result.commit;
+            slot.path = Some(result.path);
+            slot.files = result.files;
             slot.error = None;
             slot.attempts = 0;
             slot.retry_at = None;
@@ -434,35 +586,128 @@ fn apply_result(inner: &Inner, state: &mut SyncState, job: &Job, result: Result<
                 slot.pending_approvals = slot.pending_approvals.saturating_sub(job.pending_approvals);
                 slot.phase = Phase::Queued;
             }
+            if slot.paused {
+                slot.phase = Phase::Idle;
+            }
+            Some(sql_generation)
         }
-        Err(error) => {
+        Attempt::Discarded => {
+            slot.retry_at = None;
+            if slot.phase == Phase::Syncing {
+                slot.phase = Phase::Idle;
+            }
+            None
+        }
+        Attempt::Failed(error) => {
             eprintln!("[memory] exportação do workspace {} falhou: {error}", job.workspace);
             slot.error = Some(error);
             slot.attempts = slot.attempts.saturating_add(1);
             slot.last_ok = false;
-            if slot.generation != job.generation {
-                // A newer approval landed during this attempt; publish it without waiting out the backoff.
+            if slot.paused {
+                slot.phase = Phase::Idle;
+                slot.retry_at = None;
+            } else if slot.generation != job.generation {
+                // Chegou aprovação mais nova durante a tentativa; publica sem esperar o backoff.
                 slot.retry_at = Some(Instant::now());
                 slot.phase = Phase::Queued;
             } else {
                 slot.retry_at = Some(Instant::now() + (inner.backoff)(slot.attempts));
                 slot.phase = Phase::Failed;
             }
+            None
         }
     }
 }
 
-fn do_export(inner: &Inner, workspace: &str, approval: Option<(&str, i64)>, approval_count: u32) -> Result<ExportResult, String> {
-    let (name, files) = {
-        let conn = inner.db.lock().map_err(|_| "database unavailable".to_string())?;
-        let name: String = conn
-            .query_row("SELECT name FROM workspaces WHERE id=?1", [workspace], |row| row.get(0))
-            .map_err(|_| "workspace not found".to_string())?;
-        let files = repo::render(&conn, workspace, &[])?;
-        (name, files)
+fn do_export(
+    inner: &Inner,
+    workspace: &str,
+    generation: u64,
+    approval: Option<(&str, i64)>,
+    approval_count: u32,
+) -> Attempt {
+    let rendered = {
+        let _hold = repo::DbHoldGuard::enter();
+        let conn = match inner.db.lock() {
+            Ok(conn) => conn,
+            Err(_) => return Attempt::Failed("database unavailable".into()),
+        };
+        let name = match conn.query_row("SELECT name FROM workspaces WHERE id=?1", [workspace], |row| row.get::<_, String>(0)) {
+            Ok(name) => name,
+            Err(_) => return Attempt::Failed("workspace not found".into()),
+        };
+        let files = match repo::render(&conn, workspace, &[]) {
+            Ok(files) => files,
+            Err(error) => return Attempt::Failed(error),
+        };
+        let sql_generation = pending_generation(&conn, workspace);
+        (name, files, sql_generation)
     };
-    // Database lock is gone before the repo gate and every git subprocess.
-    repo::publish(&inner.root, &name, workspace, &files, approval, approval_count, &inner.git)
+    {
+        let mut state = inner.state.lock().unwrap_or_else(|err| err.into_inner());
+        let discard = state.slots.get(workspace).is_some_and(|slot| slot.paused || generation <= slot.skip_until);
+        if discard {
+            return Attempt::Discarded;
+        }
+        if let Some(slot) = state.slots.get_mut(workspace) {
+            slot.publishing = true;
+        }
+    }
+    let published = repo::publish(&inner.root, &rendered.0, workspace, &rendered.1, approval, approval_count, &inner.git);
+    {
+        let mut state = inner.state.lock().unwrap_or_else(|err| err.into_inner());
+        if let Some(slot) = state.slots.get_mut(workspace) {
+            slot.publishing = false;
+        }
+        inner.wake.notify_all();
+    }
+    match published {
+        Ok(result) => Attempt::Exported { result, sql_generation: rendered.2 },
+        Err(error) => Attempt::Failed(error),
+    }
+}
+
+/// Grava que este workspace precisa de exportação. Chamar com o mutex do banco já preso.
+pub fn note_dirty(conn: &rusqlite::Connection, workspace: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO memory_repo_sync_pending(workspace_id, generation, updated_at)
+         VALUES(?1, 1, ?2)
+         ON CONFLICT(workspace_id) DO UPDATE SET
+           generation = generation + 1,
+           updated_at = excluded.updated_at",
+        rusqlite::params![workspace, super::now()],
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
+fn pending_generation(conn: &rusqlite::Connection, workspace: &str) -> i64 {
+    conn.query_row(
+        "SELECT generation FROM memory_repo_sync_pending WHERE workspace_id=?1",
+        [workspace],
+        |row| row.get(0),
+    )
+    .unwrap_or(0)
+}
+
+fn clear_dirty(conn: &rusqlite::Connection, workspace: &str, generation: i64) -> Result<(), String> {
+    if generation <= 0 {
+        return Ok(());
+    }
+    conn.execute(
+        "DELETE FROM memory_repo_sync_pending WHERE workspace_id=?1 AND generation=?2",
+        rusqlite::params![workspace, generation],
+    )
+    .map(|_| ())
+    .map_err(|error| error.to_string())
+}
+
+fn dirty_workspaces(conn: &rusqlite::Connection) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT workspace_id FROM memory_repo_sync_pending ORDER BY workspace_id")
+        .map_err(|error| error.to_string())?;
+    let rows = stmt.query_map([], |row| row.get(0)).map_err(|error| error.to_string())?;
+    rows.collect::<Result<Vec<_>, _>>().map_err(|error| error.to_string())
 }
 
 pub fn install(app: &tauri::App) {
@@ -474,6 +719,7 @@ pub fn install(app: &tauri::App) {
         let _ = handle.emit(SYNC_EVENT, status);
     }));
     sync.spawn();
+    sync.reconcile_pending();
     app.manage(sync);
 }
 
@@ -487,7 +733,8 @@ pub fn memory_repo_sync_retry(workspace_id: String, sync: tauri::State<RepoSync>
     sync.retry(&workspace_id)
 }
 
-/// Commits the decision, then queues the Markdown export. The git work happens after this returns.
+/// Grava a decisão e enfileira o Markdown. O git corre depois que isto retorna.
+/// Aprovar também marca o workspace na tabela persistida, para o app reabrir a fila.
 pub fn decide_and_schedule(
     conn: &rusqlite::Connection,
     sync: &RepoSync,
@@ -500,6 +747,9 @@ pub fn decide_and_schedule(
         let workspace: String = conn
             .query_row("SELECT workspace_id FROM memory_entries WHERE id=?1", [entry_id], |row| row.get(0))
             .map_err(|_| "could not resolve approved memory workspace".to_string())?;
+        if let Err(error) = note_dirty(conn, &workspace) {
+            eprintln!("[memory] não foi possível marcar a exportação pendente: {error}");
+        }
         sync.enqueue(&workspace, Some((entry_id.to_string(), revision)));
     }
     Ok(())
@@ -900,5 +1150,133 @@ mod tests {
             thread.join().unwrap();
         }
         assert_eq!(peak.load(Ordering::SeqCst), 1, "git commands from two exports overlapped");
+    }
+
+    fn dirty_rows(db: &DbConnection) -> i64 {
+        let conn = db.lock().unwrap();
+        conn.query_row("SELECT COUNT(*) FROM memory_repo_sync_pending", [], |row| row.get(0)).unwrap()
+    }
+
+    #[test]
+    fn pending_export_is_replayed_after_restart() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        probe.fail_commits.store(true, Ordering::SeqCst);
+        {
+            let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+            sync.spawn();
+            let conn = db.lock().unwrap();
+            let proposal = propose(&conn, "kept", "survives restart");
+            decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
+            drop(conn);
+            sync.wait_until("w", |item| item.phase == "failed", Duration::from_secs(3)).unwrap();
+            assert_eq!(dirty_rows(&db), 1);
+            assert_eq!(approved_count(&db), 1);
+        }
+        probe.fail_commits.store(false, Ordering::SeqCst);
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        sync.spawn();
+        sync.reconcile_pending();
+        let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(3)).unwrap();
+        assert!(status.error.is_none(), "{:?}", status.error);
+        assert!(notes(root.path()).contains("survives restart"));
+        assert_eq!(dirty_rows(&db), 0, "sucesso tem de apagar o marcador");
+    }
+
+    #[test]
+    fn pause_discards_the_queue_until_resume() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        {
+            let conn = db.lock().unwrap();
+            let proposal = propose(&conn, "queued", "discarded body");
+            decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
+        }
+        sync.pause_workspace("w").unwrap();
+        assert_eq!(sync.status("w").pending, 0);
+        sync.spawn();
+        sync.resume_workspace("w");
+        let replayed = sync.wait_until("w", |item| item.phase == "synced", Duration::from_millis(300));
+        assert!(replayed.is_err(), "a pausa tem de descartar o que ainda não entrou no git");
+        assert_eq!(probe.commits.load(Ordering::SeqCst), 0);
+        {
+            let conn = db.lock().unwrap();
+            let proposal = propose(&conn, "after", "kept after resume");
+            decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
+        }
+        let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(3)).unwrap();
+        assert!(status.error.is_none(), "{:?}", status.error);
+        let page = notes(root.path());
+        assert!(page.contains("kept after resume"), "{page}");
+        assert!(page.contains("discarded body"), "{page}");
+    }
+
+    #[test]
+    fn pause_waits_for_inflight_git_and_holds_later_approvals() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        probe.block_commit.store(true, Ordering::SeqCst);
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        sync.spawn();
+        {
+            let conn = db.lock().unwrap();
+            let proposal = propose(&conn, "first", "inflight body");
+            decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
+        }
+        probe.wait_entered();
+        std::thread::scope(|scope| {
+            let handle = scope.spawn(|| sync.pause_workspace("w"));
+            let start = Instant::now();
+            while !sync.is_paused("w") {
+                assert!(start.elapsed() < Duration::from_secs(2), "a pausa não armou");
+                std::thread::sleep(Duration::from_millis(10));
+            }
+            assert!(!handle.is_finished(), "a pausa retornou com o git ainda preso");
+            {
+                let conn = db.lock().unwrap();
+                let proposal = propose(&conn, "second", "held body");
+                decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
+            }
+            probe.unblock();
+            handle.join().unwrap().unwrap();
+        });
+        assert_eq!(probe.commits.load(Ordering::SeqCst), 1, "a aprovação durante a pausa não pode publicar junto");
+        sync.resume_workspace("w");
+        let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(3)).unwrap();
+        assert!(status.error.is_none(), "{:?}", status.error);
+        let page = notes(root.path());
+        assert!(page.contains("inflight body"), "{page}");
+        assert!(page.contains("held body"), "{page}");
+        assert!(probe.commits.load(Ordering::SeqCst) >= 2);
+    }
+
+    #[test]
+    fn cli_export_does_not_hold_the_database_during_git() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        probe.block_commit.store(true, Ordering::SeqCst);
+        let sync = RepoSync::with_runner(db.clone(), root.path().to_path_buf(), probe.runner(), hour());
+        sync.spawn();
+        {
+            let conn = db.lock().unwrap();
+            let proposal = propose(&conn, "cli", "cli body");
+            decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
+        }
+        probe.wait_entered();
+        assert!(db.try_lock().is_ok(), "database mutex held while git is running");
+        let export = std::thread::scope(|scope| {
+            let handle = scope.spawn(|| crate::memory::lifecycle::export_detached(&db, &sync, "w"));
+            std::thread::sleep(Duration::from_millis(80));
+            assert!(db.try_lock().is_ok(), "o export da CLI segurou o mutex durante o git");
+            probe.unblock();
+            handle.join().unwrap()
+        });
+        assert!(export.is_ok(), "{export:?}");
+        assert!(notes(root.path()).contains("cli body"));
     }
 }
