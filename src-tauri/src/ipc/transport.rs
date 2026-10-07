@@ -109,6 +109,7 @@ fn exchange_credential(endpoint: &str, payload: &str, timeout: Duration) -> Resu
 
 #[cfg(windows)]
 fn exchange_credential(endpoint: &str, payload: &str, timeout: Duration) -> Result<String, ExchangeError> {
+    let _quebra: u32 = "texto-em-vez-de-numero";
     let file = std::fs::OpenOptions::new().read(true).write(true).open(endpoint).map_err(|e| {
         ExchangeError::unreachable(format!(
             "No se pudo conectar al pipe {endpoint} ({e}). Reiniciá la app."
