@@ -18,6 +18,8 @@ struct PtySession {
     /// La tab de la app a la que pertenece (`ADE_TAB_ID`), para no dejar dos terminales vivos
     /// de la misma tab. `None` en los PTYs que no son de una tab.
     tab_id: Option<String>,
+    /// Token que este processo herda em `ADE_SESSION`. Sai do registro junto com o PTY.
+    session_token: Option<String>,
 }
 
 /// Scrollback de un PTY. `total_bytes` cuenta TODO lo que el proceso escribió alguna vez,
@@ -345,14 +347,29 @@ fn path_with_app_dir(current: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
     std::env::join_paths(dirs).ok()
 }
 
+fn shell_safe_id(value: &str) -> bool {
+    !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// Codex corre los comandos de su agente en un sandbox que descarta las variables de entorno
 /// que no conoce, `ADE_TAB_ID` incluida: sin ella `ags peers` no sabe quién pregunta. La
 /// config de Codex tiene `shell_environment_policy.set`, que SÍ llega al shell del sandbox;
 /// se la pasa con `-c` al lanzar. Solo si el programa es `codex` y la tab tiene id. Pura.
 pub(super) fn with_codex_tab_id(command: &str, tab_id: Option<&str>) -> String {
-    let Some(tab) = tab_id.filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')) else {
+    with_codex_identity(command, tab_id, None)
+}
+
+/// Como [`with_codex_tab_id`], e também entrega `ADE_SESSION` ao sandbox do Codex.
+///
+/// O token só entra na linha de comando se for um id seguro. Um valor com aspas
+/// não é interpolado: no Windows a linha do Codex é visível para o mesmo usuário,
+/// e um token malformado não pode quebrar o quoting.
+pub(super) fn with_codex_identity(command: &str, tab_id: Option<&str>, session: Option<&str>) -> String {
+    let tab = tab_id.filter(|value| shell_safe_id(value));
+    let session = session.filter(|value| shell_safe_id(value));
+    if tab.is_none() && session.is_none() {
         return command.to_string();
-    };
+    }
     let trimmed = command.trim_start();
     // El programa es la primera palabra, o lo entrecomillado si la ruta tiene espacios.
     let head_len = match trimmed.chars().next() {
@@ -364,11 +381,30 @@ pub(super) fn with_codex_tab_id(command: &str, tab_id: Option<&str>) -> String {
     // Las dos barras: una ruta de Windows también se lee bien en un sistema que usa `/`.
     let file = program.rsplit(['/', '\\']).next().unwrap_or("").to_ascii_lowercase();
     let stem = file.strip_suffix(".exe").or_else(|| file.strip_suffix(".cmd")).unwrap_or(&file);
-    if stem != "codex" || command.contains("shell_environment_policy.set.ADE_TAB_ID") {
+    if stem != "codex" {
         return command.to_string();
     }
-    let flag = format!("'shell_environment_policy.set.ADE_TAB_ID=\"{tab}\"'");
-    format!("{head} -c {flag}{tail}")
+    let mut flags = String::new();
+    if let Some(tab) = tab {
+        if !command.contains("shell_environment_policy.set.ADE_TAB_ID") {
+            flags.push_str(&format!(" -c 'shell_environment_policy.set.ADE_TAB_ID=\"{tab}\"'"));
+        }
+    }
+    if let Some(session) = session {
+        if !command.contains("shell_environment_policy.set.ADE_SESSION") {
+            flags.push_str(&format!(" -c 'shell_environment_policy.set.ADE_SESSION=\"{session}\"'"));
+        }
+    }
+    if flags.is_empty() {
+        return command.to_string();
+    }
+    format!("{head}{flags}{tail}")
+}
+
+fn forget_session(session: &PtySession) {
+    if let Some(token) = &session.session_token {
+        super::release_token(token);
+    }
 }
 
 /// Crea un PTY, lanza el proceso dentro, y emite eventos `pty-data-{id}` al frontend.
@@ -403,8 +439,12 @@ pub async fn pty_create(
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-    let tab_id = env.as_ref().and_then(|e| e.get("ADE_TAB_ID")).cloned();
-    let command = with_codex_tab_id(&command, tab_id.as_deref());
+    let tab_id = env.as_ref().and_then(|e| e.get("ADE_TAB_ID")).cloned().filter(|tab| !tab.is_empty());
+    // O token nasce aqui, não no ambiente que o frontend (ou um agente) mandou.
+    // Só entra no registro depois que o processo existe. Um terminal restaurado
+    // não passa por aqui: reanexa o PTY vivo e o processo conserva o token.
+    let session_token = tab_id.as_ref().map(|_| uuid::Uuid::new_v4().to_string());
+    let command = with_codex_identity(&command, tab_id.as_deref(), session_token.as_deref());
     let mut cmd = build_launch(&command, &prelaunch.unwrap_or_default())?;
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
@@ -424,8 +464,19 @@ pub async fn pty_create(
         cmd.env_remove(var);
     }
     for (k, v) in env {
+        // `ADE_SESSION` só o app emite. Um env de TUI custom não escolhe a sessão.
+        if k == super::SESSION_ENV {
+            continue;
+        }
         cmd.env(k, v);
     }
+    if let Some(tab) = &tab_id {
+        cmd.env("ADE_TAB_ID", tab);
+    }
+    match &session_token {
+        Some(token) => cmd.env(super::SESSION_ENV, token),
+        None => cmd.env_remove(super::SESSION_ENV),
+    };
 
     let id = {
         let mut counter = PTY_COUNTER.lock().unwrap_or_else(|e| e.into_inner());
@@ -463,7 +514,20 @@ pub async fn pty_create(
             None => Vec::new(),
         };
         let removed: Vec<PtySession> = old.iter().filter_map(|k| reg.remove(k)).collect();
-        reg.insert(id, PtySession { master: pair.master, writer, killer: child, group, tab_id: tab_id.clone() });
+        for session in &removed {
+            forget_session(session);
+        }
+        if let (Some(tab), Some(token)) = (tab_id.as_deref(), session_token.as_deref()) {
+            super::publish_token(tab, token);
+        }
+        reg.insert(id, PtySession {
+            master: pair.master,
+            writer,
+            killer: child,
+            group,
+            tab_id: tab_id.clone(),
+            session_token: session_token.clone(),
+        });
         (old, removed)
     };
     for (k, mut session) in replaced.0.iter().copied().zip(replaced.1) {
@@ -513,7 +577,10 @@ pub async fn pty_create(
         // reclama su status en el sistema.
         let code = registry()
             .remove(&id)
-            .and_then(|mut session| session.killer.wait().ok())
+            .and_then(|mut session| {
+                forget_session(&session);
+                session.killer.wait().ok()
+            })
             .map_or(0, |status| status.exit_code() as i32);
         crate::orchestrator::watch::note_exit(id, code);
         app_clone.emit(&exit_event, PtyExitPayload { code }).ok();
@@ -638,6 +705,7 @@ pub async fn pty_resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
 #[tauri::command]
 pub async fn pty_kill(id: u32) -> Result<(), String> {
     if let Some(mut session) = registry().remove(&id) {
+        forget_session(&session);
         // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
         // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los
         // hijos y se pierde el vínculo). Con cgroups o Job Objects el orden da igual.
@@ -663,6 +731,7 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
 pub fn kill_all_sessions() {
     let sessions: Vec<PtySession> = registry().drain().map(|(_, s)| s).collect();
     for mut session in sessions {
+        forget_session(&session);
         session.group.kill_all();
         let _ = session.killer.kill();
         let _ = session.killer.wait();

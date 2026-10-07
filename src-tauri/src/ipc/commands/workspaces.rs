@@ -16,13 +16,9 @@ pub(super) fn workspace_list(app: &AppHandle) -> Result<Value, String> {
     Ok(json!({ "workspaces": rows }))
 }
 
-pub(super) fn workspace_restore(app:&AppHandle,args:&Value)->Result<Value,String>{
-    let requested=arg_str(args,"workspace")?;
-    let db=db(app)?;
-    let conn=db.lock().map_err(|e|e.to_string())?;
-    let id:String=conn.query_row("SELECT id FROM workspaces WHERE (id=?1 OR name=?1) AND deleted_at IS NOT NULL",[requested],|r|r.get(0)).map_err(|_|"workspace is not in recovery")?;
-    conn.execute("UPDATE workspaces SET deleted_at=NULL,delete_after=NULL WHERE id=?1",[&id]).map_err(|e|e.to_string())?;
-    Ok(json!({"workspaceId":id,"restored":true}))
+pub(super) fn workspace_restore(_app: &AppHandle, _args: &Value) -> Result<Value, String> {
+    // A interface usa `db_restore_workspace` (comando Tauri). Daqui, de um terminal, não.
+    Err(crate::ipc::AGENT_MAINTENANCE_DENIED.into())
 }
 
 pub(super) fn workspace_open(app: &AppHandle, args: &Value) -> Result<Value, String> {

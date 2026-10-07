@@ -914,7 +914,10 @@ The memory is hardened: everything a task reads through `memory_list`/`memory_ge
 agent (pending shows only its metadata, never its body). The secret filter now runs in the core, for
 every actor but the user (MCP, `ags memory suggest`, `promote_fact`, Run Facts), and a proposal from an
 agent gets priority 3 at most. `memory.*` from the CLI always uses the mission of the calling tab:
-`--from` and `--mission` overrides are ignored. Only the user can purge an entry.
+`--from` and `--mission` overrides are ignored, and the server checks the terminal session the app
+issued (`ADE_SESSION`). A forged `ADE_TAB_ID` is rejected. `ags memory compact` and
+`ags workspace restore` do not run from a terminal; only the user can run them in the app.
+Only the user can purge an entry.
 
 ### Dreaming and the Markdown repository
 

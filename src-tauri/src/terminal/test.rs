@@ -477,6 +477,37 @@ fn codex_recibe_el_id_de_la_tab_por_su_config() {
     assert_eq!(with_codex_tab_id(&launched, Some("tab-1")), launched);
 }
 
+/// No Windows o Codex também é `codex.exe` / `codex.cmd`, e o sandbox descarta
+/// `ADE_SESSION`. O token vai na mesma policy, sem interpolar um valor inseguro.
+#[test]
+fn codex_no_windows_recebe_a_sessao_sem_quebrar_aspas() {
+    use super::pty_manager::{split_command, with_codex_identity};
+
+    let launched = with_codex_identity(
+        "\"C:\\Program Files\\codex.exe\" resume x",
+        Some("tab-1"),
+        Some("sess-1"),
+    );
+    assert_eq!(
+        split_command(&launched),
+        vec![
+            "C:\\Program Files\\codex.exe",
+            "-c",
+            "shell_environment_policy.set.ADE_TAB_ID=\"tab-1\"",
+            "-c",
+            "shell_environment_policy.set.ADE_SESSION=\"sess-1\"",
+            "resume",
+            "x",
+        ]
+    );
+    let cmd = with_codex_identity("C:\\Windows\\System32\\codex.cmd", Some("t"), Some("s"));
+    assert!(cmd.contains("ADE_SESSION=\\\"s\\\"") || cmd.contains("ADE_SESSION=\"s\""));
+    let unsafe_session = with_codex_identity("codex", Some("tab-1"), Some("a\"b;calc"));
+    assert!(!unsafe_session.contains("calc"));
+    assert!(!unsafe_session.contains("ADE_SESSION"));
+    assert_eq!(with_codex_identity("claude", Some("t"), Some("s")), "claude");
+}
+
 /// Un carácter partido entre dos lecturas del PTY sale entero, no como dos `�`.
 #[test]
 fn un_caracter_partido_entre_lecturas_sale_entero() {

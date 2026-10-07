@@ -328,6 +328,17 @@ fn dispatched_commands() -> Vec<String> {
         .collect()
 }
 
+#[test]
+fn comandos_de_manutencao_nao_rodam_no_terminal_do_agente() {
+    let compact = super::agent_maintenance_error("memory.compact").unwrap();
+    let restore = super::agent_maintenance_error("workspace.restore").unwrap();
+    assert!(compact.contains("interface"));
+    assert_eq!(compact, restore);
+    assert!(super::agent_maintenance_error("memory.export").is_none());
+    assert!(super::agent_maintenance_error("memory.suggest").is_none());
+    assert!(super::agent_maintenance_error("memory.search").is_none());
+}
+
 /// Que `ags` nombre un comando que el backend ya no atiende no rompe nada en compilación
 /// —son dos tablas de strings, en archivos distintos— y solo se nota cuando alguien lo
 /// ejecuta y recibe "Comando desconocido". Este test es lo que ata las dos puntas.

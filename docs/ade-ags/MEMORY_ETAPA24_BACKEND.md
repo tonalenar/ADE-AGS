@@ -108,9 +108,10 @@ final tem validação pontual por `cargo test --lib draft_queue` no mesmo target
    `ags swarm promote <note-id> <key>` lê somente a nota da missão da tab e cria
    uma proposta pendente (ou rascunho quando a caixa está cheia). Nunca aprova.
 3. **Confirmado / implementei**: export/compact/restore só existiam na API nativa.
-   `ags memory export` e `ags memory compact [retentionDays]` usam o workspace
-   derivado da tab; compactação exige pelo menos 30 dias e é limitada ao workspace.
-   `ags workspace restore <id|nome>` recupera soft-delete, preservando histórico.
+   `ags memory export` continua na CLI, só leitura, no workspace da aba autenticada
+   pela sessão do terminal. `ags memory compact` e `ags workspace restore` não rodam
+   a partir de um terminal de agente: compactar e restaurar ficam na interface
+   (`memory_compact`, `db_restore_workspace`).
 4. **Confirmado / implementei**: `memory_workspace_stats` e export agora incluem
    `memoryUsage:{timesUsed,entriesUsed,runsUsingMemory,method}`. A soma inclui
    workspace e missões, contando seleções em snapshots, não uso no raciocínio.

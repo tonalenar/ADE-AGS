@@ -221,9 +221,9 @@ MEMORIA COMPARTIDA (la usan los agentes por MCP; ver docs/ade-ags/SHARED_MEMORY.
   memory open <camino>                       Proyección aprobada, solo lectura y UNTRUSTED DATA
   swarm note|question <texto>                Datos de sesión de la misión, no memoria durable
   swarm promote <note-id> <key>              Propone la nota; aprobación exclusiva del usuario
-  memory export                             Exporta Markdown y revisiones JSON del workspace de la tab
-  memory compact [retentionDays]             Compacta rechazadas antiguas (mínimo 30 días)
-  workspace restore <id|nombre>              Recupera un workspace eliminado suavemente
+  memory export                             Exporta Markdown y revisiones JSON del workspace de la tab (solo lectura)
+  memory compact [retentionDays]             Solo en la interfaz de la app; un terminal de agente no puede
+  workspace restore <id|nombre>              Solo en la interfaz de la app; un terminal de agente no puede
 
 NAVEGADOR
   browser run --json-args '{\"cwd\":\"...\",     Una orden al navegador de un proyecto:
@@ -327,6 +327,13 @@ fn main() -> ExitCode {
         }
     }
     };
+
+    // Compactar e restaurar só rodam na interface. Recusar aqui também: um `ags`
+    // antigo não é a barreira, o servidor é, mas a mensagem chega sem depender dele.
+    if let Some(error) = ade_ags_lib::ipc::agent_maintenance_error(&command) {
+        println!("{}", json!({ "error": error }));
+        return ExitCode::from(EXIT_COMMAND_FAILED);
+    }
 
     let parsed = match parse_flags(flag_args, positionals(&command)) {
         Ok(v) => v,
@@ -546,23 +553,35 @@ impl CliError {
 }
 
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
+/// Em `memory.*` e `swarm.*` o `from` e a `session` vêm só do ambiente que o app injetou no PTY.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
     const GROUPS: [&str; 13] = ["peer.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm."];
     if !GROUPS.iter().any(|g| command.starts_with(g)) {
         return parsed;
     }
-    caller_from(command, &mut parsed, std::env::var("ADE_TAB_ID").ok());
+    caller_from(
+        command,
+        &mut parsed,
+        std::env::var("ADE_TAB_ID").ok(),
+        std::env::var(ade_ags_lib::SESSION_ENV).ok(),
+    );
     parsed
 }
 
-fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>) {
+fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>, session: Option<String>) {
     if command.starts_with("memory.") || command.starts_with("swarm.") {
         if let Some(map) = parsed.as_object_mut() {
             map.remove("from");
             map.remove("mission");
             map.remove("missionId");
             map.remove("taskId");
-            if let Some(tab) = tab { map.insert("from".into(), Value::String(tab)); }
+            map.remove("session");
+            if let Some(tab) = tab.filter(|value| !value.is_empty()) {
+                map.insert("from".into(), Value::String(tab));
+            }
+            if let Some(session) = session.filter(|value| !value.is_empty()) {
+                map.insert("session".into(), Value::String(session));
+            }
         }
         return;
     }

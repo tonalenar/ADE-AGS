@@ -16,7 +16,7 @@ fn memory_repository_and_swarm_commands_use_production_flag_parser() {
     let open=parse("memory.open",&["notes.md","--mission","spoofed"]).unwrap();assert_eq!(open["path"],"notes.md");
     assert!(parse("memory.index",&["unexpected"]).is_err());
     let mut note=parse("swarm.note",&["session fact","--from","spoofed","--mission","spoofed"]).unwrap();
-    caller_from("swarm.note",&mut note,Some("real-tab".into()));
+    caller_from("swarm.note",&mut note,Some("real-tab".into()),None);
     assert_eq!(note["body"],"session fact");assert_eq!(note["from"],"real-tab");assert!(note.get("mission").is_none());
     assert_eq!(parse("swarm.question",&["which source?"]).unwrap()["body"],"which source?");
 }
@@ -74,7 +74,7 @@ fn memory_cli_commands_parse_flags_and_sanitize_scope() {
         "taskId": "other_task_id",
         "key": "safe_key"
     });
-    caller_from("memory.suggest", &mut spoofed, Some("real_tab_id".into()));
+    caller_from("memory.suggest", &mut spoofed, Some("real_tab_id".into()), None);
     assert_eq!(spoofed["from"], "real_tab_id");
     assert!(spoofed.get("mission").is_none());
     assert!(spoofed.get("missionId").is_none());
@@ -103,10 +103,10 @@ fn cleanup_and_worktree_sweep_flags_are_routed() {
 #[test]
 fn design_caller_is_the_creating_terminal() {
     let mut args=json!({"from":"other","ownerTabId":"other"});
-    caller_from("design.create",&mut args,Some("actual-tab".into()));
+    caller_from("design.create",&mut args,Some("actual-tab".into()),None);
     assert_eq!(args["from"],"actual-tab");
     let mut args=json!({"from":"explicit"});
-    caller_from("peer.tell",&mut args,Some("actual-tab".into()));
+    caller_from("peer.tell",&mut args,Some("actual-tab".into()),None);
     assert_eq!(args["from"],"explicit");
 }
 
@@ -495,11 +495,25 @@ fn design_cli_defaults_use_callers_cwd_and_agent_author() {
 #[test]
 fn memory_context_ignores_requested_caller_and_mission() {
     let mut args = json!({"from":"spoofed","mission":"foreign","missionId":"foreign","taskId":"victim"});
-    caller_from("memory.suggest", &mut args, Some("actual-tab".into()));
+    caller_from("memory.suggest", &mut args, Some("actual-tab".into()), Some("issued-session".into()));
     assert_eq!(args["from"], "actual-tab");
+    assert_eq!(args["session"], "issued-session");
     assert!(args.get("mission").is_none());
     assert!(args.get("missionId").is_none());
     assert!(args.get("taskId").is_none());
-    caller_from("memory.search", &mut args, None);
+    caller_from("memory.search", &mut args, None, None);
     assert!(args.get("from").is_none());
+    assert!(args.get("session").is_none());
+}
+
+#[test]
+fn memory_caller_drops_a_forged_session_and_keeps_the_pty_token() {
+    let mut args = json!({"from":"other-tab","session":"stolen","mission":"foreign","key":"k"});
+    caller_from("memory.search", &mut args, Some("real-tab".into()), Some("pty-token".into()));
+    assert_eq!(args["from"], "real-tab");
+    assert_eq!(args["session"], "pty-token");
+    assert!(args.get("mission").is_none());
+    caller_from("swarm.note", &mut args, Some("real-tab".into()), Some("".into()));
+    assert_eq!(args["from"], "real-tab");
+    assert!(args.get("session").is_none());
 }

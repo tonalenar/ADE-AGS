@@ -35,6 +35,7 @@ mod squads;
 mod sync;
 mod terminal;
 pub mod testspeed;
+pub use terminal::SESSION_ENV;
 mod updates;
 mod usage;
 mod util;

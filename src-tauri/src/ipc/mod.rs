@@ -19,4 +19,12 @@ mod server;
 mod test;
 
 pub use commands::routine::start_scheduler as start_routine_scheduler;
+
+/// Compactar e restaurar apagam ou recuperam dados. Só a interface (comando Tauri)
+/// pode executá-los. Um terminal de agente, mesmo com o token IPC, não.
+pub const AGENT_MAINTENANCE_DENIED: &str = "Este comando altera dados de forma irreversível e só pode ser executado pelo usuário na interface do ADE AGS.";
+
+pub fn agent_maintenance_error(command: &str) -> Option<&'static str> {
+    matches!(command, "memory.compact" | "workspace.restore").then_some(AGENT_MAINTENANCE_DENIED)
+}
 pub use server::{cleanup, export_instance_env, other_instance_alive, start};
