@@ -337,6 +337,9 @@ pub fn propose(
         }
     }
     let input = &ProposalInput {
+        key: key.clone(),
+        body: body.clone(),
+        reason: reason.clone(),
         priority: if actor.kind == "user" { input.priority } else { input.priority.min(agent::MAX_AGENT_PRIORITY) },
         ..input.clone()
     };

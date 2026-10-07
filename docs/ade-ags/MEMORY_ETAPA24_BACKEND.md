@@ -82,3 +82,19 @@ Medição prévia das consultas com equivalência dos resultados:
 
 Os testes não impõem limites de tempo dessas medições. A equivalência, os limites
 de contexto, o isolamento, a retenção de dados e a concorrência são as asserções.
+
+## Validação e retomada
+
+`ags test affected` no target oficial `C:\Users\tonz1n\.ags\cargo-target-agents`
+passou antes do reinício: 1.228 testes lib e 35 CLI, com 10 ignorados preexistentes.
+A fixture de contexto mediu 16.384 bytes/4.096 tokens estimados antes e
+1.659 bytes/415 depois (~89,9% de redução).
+
+Na retomada, **confirmado**: o rascunho serializava o input original, embora os
+limites fossem validados após normalização. Agora serializa chave, corpo e motivo
+normalizados. A regressão enche as 32 pendências e propõe um corpo com padding
+grande, verificando que o JSON persistido continua pequeno e canônico.
+
+O dry-run continua selecionando a suíte completa por causa da migração v41.
+Conforme a orientação da retomada, a suíte completa não foi repetida; a alteração
+final tem validação pontual por `cargo test --lib draft_queue` no mesmo target.

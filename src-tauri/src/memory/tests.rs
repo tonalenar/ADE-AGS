@@ -159,6 +159,30 @@ fn draft_queue_preserves_overflow_until_a_user_moves_it_into_pending() {
 }
 
 #[test]
+fn draft_queue_stores_normalized_payload_instead_of_unbounded_padding() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    for i in 0..32 {
+        propose(&conn, "workspace", None, &format!("queue-{i}"), "body", "create", None);
+    }
+    let padding = " \r\n".repeat(32768);
+    let mut input = proposal("workspace", "  overflow  ", &format!("{padding}kept{padding}"), "create", None);
+    input.reason = Some(padding);
+    let result = super::propose(&conn, "workspace", "w1", None, &input, ProposalActor {
+        kind: "worker", run_id: None, task_id: None, fact_id: None,
+    }).unwrap();
+    assert_eq!(result.status, "agent_draft");
+    let drafts = lifecycle::drafts(&conn, "w1").unwrap();
+    let stored = drafts[0]["proposal"].as_str().unwrap();
+    assert!(stored.len() < 1024);
+    let canonical: serde_json::Value = serde_json::from_str(stored).unwrap();
+    assert_eq!(canonical["key"], "overflow");
+    assert_eq!(canonical["body"], "kept");
+    assert!(canonical["reason"].is_null());
+    assert_eq!(owner_quota(&conn, "w1", None).unwrap().0, 32);
+}
+
+#[test]
 fn rejected_compaction_keeps_hash_audit_and_never_removes_approved_history() {
     let conn=db();seed_workspace(&conn,"w1");
     let approved=activate(&conn,"workspace",None,"approved","keep forever");
