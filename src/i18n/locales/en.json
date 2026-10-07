@@ -2428,5 +2428,20 @@
   "missions.objective.points": "Objective points",
   "missions.objective.expand": "Show full objective",
   "missions.objective.collapse": "Collapse",
-  "missions.objective.copy": "Copy"
+  "missions.objective.copy": "Copy",
+  "memoryContext.title": "Memory context",
+  "memoryContext.loading": "Loading memory context…",
+  "memoryContext.error": "Could not load the measurement",
+  "memoryContext.noData": "no data",
+  "memoryContext.noRuns": "No Run recorded a memory snapshot yet.",
+  "memoryContext.mission": "Mission",
+  "memoryContext.reduction": "−{{pct}}% context",
+  "memoryContext.total": "Total ({{n}})",
+  "memoryContext.run": "Run {{id}}",
+  "memoryContext.legacy": "older Run, no baseline",
+  "memoryContext.note": "“No data” means the Run recorded no measurement (it is not zero). Tokens are an estimate (characters ÷ 4).",
+  "memoryContext.col.run": "Run",
+  "memoryContext.col.bytes": "Bytes (before → after)",
+  "memoryContext.col.tokens": "Est. tokens",
+  "memoryContext.col.entries": "Entries"
 }

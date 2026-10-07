@@ -2428,5 +2428,20 @@
   "missions.objective.points": "Pontos do objetivo",
   "missions.objective.expand": "Ver objetivo completo",
   "missions.objective.collapse": "Recolher",
-  "missions.objective.copy": "Copiar"
+  "missions.objective.copy": "Copiar",
+  "memoryContext.title": "Contexto de memória",
+  "memoryContext.loading": "Carregando contexto de memória…",
+  "memoryContext.error": "Não foi possível carregar a medição",
+  "memoryContext.noData": "sem dados",
+  "memoryContext.noRuns": "Nenhum Run gravou um snapshot de memória ainda.",
+  "memoryContext.mission": "Missão",
+  "memoryContext.reduction": "−{{pct}}% de contexto",
+  "memoryContext.total": "Total ({{n}})",
+  "memoryContext.run": "Run {{id}}",
+  "memoryContext.legacy": "Run antigo, sem referência",
+  "memoryContext.note": "“Sem dados” = o Run não gravou medição (não é zero). Os tokens são uma estimativa (caracteres ÷ 4).",
+  "memoryContext.col.run": "Run",
+  "memoryContext.col.bytes": "Bytes (antes → depois)",
+  "memoryContext.col.tokens": "Tokens est.",
+  "memoryContext.col.entries": "Entradas"
 }

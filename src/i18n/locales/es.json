@@ -2428,5 +2428,20 @@
   "missions.objective.points": "Puntos del objetivo",
   "missions.objective.expand": "Ver objetivo completo",
   "missions.objective.collapse": "Contraer",
-  "missions.objective.copy": "Copiar"
+  "missions.objective.copy": "Copiar",
+  "memoryContext.title": "Contexto de memoria",
+  "memoryContext.loading": "Cargando contexto de memoria…",
+  "memoryContext.error": "No se pudo cargar la medición",
+  "memoryContext.noData": "sin datos",
+  "memoryContext.noRuns": "Ningún Run grabó aún un snapshot de memoria.",
+  "memoryContext.mission": "Misión",
+  "memoryContext.reduction": "−{{pct}}% de contexto",
+  "memoryContext.total": "Total ({{n}})",
+  "memoryContext.run": "Run {{id}}",
+  "memoryContext.legacy": "Run antiguo, sin referencia",
+  "memoryContext.note": "“Sin datos” significa que el Run no grabó medición (no es cero). Los tokens son una estimación (caracteres ÷ 4).",
+  "memoryContext.col.run": "Run",
+  "memoryContext.col.bytes": "Bytes (antes → después)",
+  "memoryContext.col.tokens": "Tokens est.",
+  "memoryContext.col.entries": "Entradas"
 }

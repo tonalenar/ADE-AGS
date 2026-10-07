@@ -31,6 +31,7 @@ import { isBudgetConfirmation, type BudgetStatus } from "./budgetTypes";
 import { FleetView } from "./FleetView";
 import { MissionDialog } from "./MissionDialog";
 import { MissionMap } from "./MissionMap";
+import { MemoryContextMetricsCard } from "@/features/memory/MemoryContextMetricsCard";
 import { MissionTimingsPanel } from "./MissionTimingsPanel";
 import { MissionStallAlerts, MissionStartupTime } from "./StallAlertsView";
 import { MissionTokensPanel } from "./MissionTokensPanel";
@@ -559,6 +560,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
             <MissionStallAlerts missionId={mission.id} />
             <MissionStartupTime missionId={mission.id} />
             <MissionTimingsPanel missionId={mission.id} />
+            <MemoryContextMetricsCard missionId={mission.id} />
           </div>
         </Section>
       )}
