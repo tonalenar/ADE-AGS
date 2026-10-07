@@ -2424,5 +2424,9 @@
   "memoryDream.rejectGroup": "Reject dream",
   "memoryDream.diff": "Markdown diff the repository would get",
   "memoryDream.questions": "Questions for you:",
-  "memoryPurge.buttonLabel": "Purge {{key}} permanently"
+  "memoryPurge.buttonLabel": "Purge {{key}} permanently",
+  "missions.objective.points": "Objective points",
+  "missions.objective.expand": "Show full objective",
+  "missions.objective.collapse": "Collapse",
+  "missions.objective.copy": "Copy"
 }

@@ -2424,5 +2424,9 @@
   "memoryDream.rejectGroup": "Rechazar sueño",
   "memoryDream.diff": "Diff Markdown que recibiría el repositorio",
   "memoryDream.questions": "Preguntas para ti:",
-  "memoryPurge.buttonLabel": "Purgar {{key}} definitivamente"
+  "memoryPurge.buttonLabel": "Purgar {{key}} definitivamente",
+  "missions.objective.points": "Puntos del objetivo",
+  "missions.objective.expand": "Ver objetivo completo",
+  "missions.objective.collapse": "Contraer",
+  "missions.objective.copy": "Copiar"
 }
