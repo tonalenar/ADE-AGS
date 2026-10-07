@@ -1,22 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+import { formatBytes, reductionPercent, type MemoryContextMetrics } from "./contextMetrics";
 
-import { formatBytes, reductionPercent } from "./contextMetrics";
-
-/** Linha de `memory_context_metrics` (um Run com snapshot de memória selado). */
-export interface RunContextMetric {
-  runId: string;
-  beforeBytes: number;
-  afterBytes: number;
-  tokensBefore: number;
-  tokensAfter: number;
-  commit: string | null;
-  entriesUsed: number;
-  /** Runs antigos só guardaram o texto final: não há "antes" real para comparar. */
-  legacyContext?: boolean;
-}
-
-export const getMissionContextMetrics = (missionId: string) =>
-  invoke<{ runs: RunContextMetric[] }>("memory_context_metrics", { runId: null, missionId });
+export type RunContextMetric = Pick<MemoryContextMetrics, "runId" | "beforeBytes" | "afterBytes" | "tokensBefore" | "tokensAfter" | "entriesUsed" | "legacyContext">;
 
 /** Medida de cada lado (antes/depois). `null` = sem medição, nunca zero inventado. */
 export interface ContextRow {

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 
-import { bytesOrNull, getMissionContextMetrics, summarize, tokensOrNull, type ContextRow, type RunContextMetric } from "./contextMetricsView";
+import { getMissionMemoryContextMetrics } from "./ipc";
+import { bytesOrNull, summarize, tokensOrNull, type ContextRow, type RunContextMetric } from "./contextMetricsView";
 
 type State = { status: "loading" } | { status: "error" } | { status: "ready"; runs: RunContextMetric[] };
 
@@ -16,7 +17,7 @@ export function MemoryContextMetricsCard({ missionId, compact = false }: { missi
   useEffect(() => {
     let alive = true;
     setState({ status: "loading" });
-    getMissionContextMetrics(missionId)
+    getMissionMemoryContextMetrics(missionId)
       .then((d) => alive && setState({ status: "ready", runs: Array.isArray(d?.runs) ? d.runs : [] }))
       .catch(() => alive && setState({ status: "error" }));
     return () => {

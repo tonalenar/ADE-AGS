@@ -20,8 +20,7 @@ const run = (over: Partial<RunContextMetric> = {}): RunContextMetric => ({
   afterBytes: 4096,
   tokensBefore: 2560,
   tokensAfter: 1024,
-  commit: null,
-  entriesUsed: 6,
+    entriesUsed: 6,
   ...over,
 });
 

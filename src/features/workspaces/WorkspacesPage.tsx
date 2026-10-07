@@ -6,6 +6,8 @@ import { EditIcon, TrashIcon, CheckIcon, CancelIcon, BoxIcon } from "neogestify-
 import { useWorkspacesStore } from "@/features/workspaces/store";
 import type { WorkspaceSummary } from "@/features/workspaces/types";
 import { OpenWorkspaceDialog } from "@/features/workspaces/OpenWorkspaceDialog";
+import { DeleteWorkspaceDialog } from "@/features/workspaces/DeleteWorkspaceDialog";
+import { DeletedWorkspacesList } from "@/features/workspaces/DeletedWorkspacesList";
 import { PageHeader } from "@/shared/ui/PageHeader";
 
 function formatRelative(unixSeconds: number, t: (key: string, opts?: Record<string, unknown>) => string): string {
@@ -34,6 +36,8 @@ export function WorkspacesPage() {
   const [editingName, setEditingName] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [openTarget, setOpenTarget] = useState<WorkspaceSummary | null>(null);
+  const [deleteTarget, setDeleteTarget] = useState<WorkspaceSummary | null>(null);
+  const [trashKey, setTrashKey] = useState(0);
 
   useEffect(() => {
     loadWorkspaces();
@@ -70,13 +74,9 @@ export function WorkspacesPage() {
     if (!focused) setOpenTarget(ws);
   };
 
-  const handleDelete = async (ws: WorkspaceSummary) => {
-    try {
-      await deleteWorkspace(ws.id);
-      setError(null);
-    } catch (e) {
-      setError(String(e));
-    }
+  const handleDelete = (ws: WorkspaceSummary) => {
+    setError(null);
+    setDeleteTarget(ws);
   };
 
   return (
@@ -158,7 +158,19 @@ export function WorkspacesPage() {
           </div>
         )}
 
+        <DeletedWorkspacesList key={trashKey} onRestored={loadWorkspaces} />
+
       </div>
+
+      {deleteTarget && (
+        <DeleteWorkspaceDialog
+          workspaceId={deleteTarget.id}
+          workspaceName={deleteTarget.name}
+          remove={deleteWorkspace}
+          onClose={() => setDeleteTarget(null)}
+          onDeleted={() => setTrashKey((k) => k + 1)}
+        />
+      )}
 
       {openTarget && (
         <OpenWorkspaceDialog workspace={openTarget} onClose={() => setOpenTarget(null)} />
