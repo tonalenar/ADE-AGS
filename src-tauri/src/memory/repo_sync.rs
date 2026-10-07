@@ -798,7 +798,6 @@ mod tests {
         let current = Arc::new(AtomicUsize::new(0));
         let peak = Arc::new(AtomicUsize::new(0));
         let commits = Arc::new(AtomicUsize::new(0));
-        let git_db = db.clone();
         let current_git = Arc::clone(&current);
         let peak_git = Arc::clone(&peak);
         let commits_git = Arc::clone(&commits);
@@ -807,7 +806,8 @@ mod tests {
             peak_git.fetch_max(now, Ordering::SeqCst);
             if args.iter().any(|arg| arg == "commit") {
                 commits_git.fetch_add(1, Ordering::SeqCst);
-                assert!(git_db.try_lock().is_ok(), "database mutex held while git is running");
+                // Sibling approvals may still hold the database lock. The worker
+                // releasing it is covered by slow_git_does_not_hold_the_database.
                 std::thread::sleep(Duration::from_millis(30));
             }
             let hash = if args.iter().any(|arg| arg == "rev-parse") {
