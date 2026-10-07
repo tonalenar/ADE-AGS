@@ -6,6 +6,7 @@ import {
   approveBulk, asksHighPriority, flatten, inboxKeyAction, groupsFromWorkspaceReview, itemId, normalizeGroups, planBulk, rejectBulk, selectedItems, totalPending,
   type BulkOutcome, type MissionReviewGroup,
 } from "./bulkReview";
+import { maxPendingPerOwner } from "./agentDrafts";
 import { DraftsSection, type DraftsState } from "./DraftsSection";
 import { DreamSection } from "./DreamSection";
 import * as memoryIpc from "./ipc";
@@ -184,7 +185,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
         {message && <p role="alert" className="px-5 pt-2 text-[11px] text-red-600 dark:text-red-400">{message}</p>}
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-3">
-          <DraftsSection workspaceId={workspaceId} state={drafts} pending={totalPending(groups)} onReload={loadDrafts}
+          <DraftsSection workspaceId={workspaceId} state={drafts} pending={maxPendingPerOwner(groups)} onReload={loadDrafts}
             onChanged={() => { loadDrafts(); void load(); void loadPending(workspaceId).catch(() => undefined); }} />
           {loaded && groups.length === 0 && <p className="py-10 text-center text-[12.5px] text-gray-500">{t("memoryInbox.empty")}</p>}
           {!loaded && <p className="py-10 text-center text-[12.5px] text-gray-500">{t("memoryInbox.loading")}</p>}

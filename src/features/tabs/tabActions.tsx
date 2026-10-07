@@ -16,7 +16,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo, type Tab } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
-import { injectTabMemory } from "@/features/memory/tabMemory";
+import { memoryBlockFor, startupText, tabMemoryMessage } from "@/features/memory/tabMemory";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import i18n from "@/i18n";
 import { AppDialog } from "@/shared/ui/AppDialog";
@@ -221,9 +221,15 @@ export function TabDialogs() {
           // el agente arranque (varias TUIs solo escanean su carpeta al boot) —
           // Terminal.tsx espera esta promesa antes de invocar pty_create.
           registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, skillIds));
-          if (prompt) sendWhenReady(tabId, prompt);
-          // Só leitura e uma vez: se falhar ou vier vazio, a tab abre normal.
-          if (memoryBlock) void injectTabMemory({ id: tabId, agentId: agent.id, memoryBlock }, workspaceId);
+          // Prompt e memória saem em UM só envio: `sendWhenReady` guarda um texto por tab e uma
+          // segunda chamada pisaria o prompt. Memória só para TUI (nunca shell), só leitura; se
+          // falhar ou vier vazia, a tab abre normal.
+          if (memoryBlockFor(agent.id, memoryBlock)) {
+            void tabMemoryMessage({ id: tabId, agentId: agent.id, memoryBlock }, workspaceId).then((memory) => {
+              const text = startupText(memory, prompt);
+              if (text) sendWhenReady(tabId, text);
+            });
+          } else if (prompt) sendWhenReady(tabId, prompt);
         }}
       />
     </>

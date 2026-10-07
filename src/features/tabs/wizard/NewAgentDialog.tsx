@@ -8,6 +8,7 @@ import { useSkillsStore } from "@/features/skills/store";
 import { AgentPickerStep } from "@/features/tabs/wizard/AgentPickerStep";
 import { AccountPickerStep, useAgentAccounts } from "@/features/tabs/wizard/AccountPickerStep";
 import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
+import { memoryBlockFor } from "@/features/memory/tabMemory";
 import { MemoryBlockSwitch } from "@/features/memory/MemoryBlockSwitch";
 import { PrelaunchChain } from "@/features/prelaunch/PrelaunchChain";
 import { SkillPickerStep } from "@/features/tabs/wizard/SkillPickerStep";
@@ -96,6 +97,8 @@ export function NewAgentDialog({
   }, [isOpen]);
 
   const isShell = agent?.id === SHELL_AGENT_ID;
+  // O interruptor some no shell: a opção não pode sobreviver escondida e mandar memória a um bash.
+  useEffect(() => { if (isShell) setMemoryBlock(false); }, [isShell]);
   const steps = useMemo<StepId[]>(() => {
     const last: StepId = isShell ? "prelaunch" : "skills";
     return accounts.length > 0 ? ["agent", "account", last] : ["agent", last];
@@ -132,7 +135,7 @@ export function NewAgentDialog({
         return accountId;
       })
       .then((resolved) => {
-        onConfirm({ agent, skillIds, accountId: resolved, prelaunch, memoryBlock });
+        onConfirm({ agent, skillIds, accountId: resolved, prelaunch, memoryBlock: memoryBlockFor(agent.id, memoryBlock) });
         onClose();
       });
   };

@@ -14,7 +14,7 @@ vi.mock("../ipc", () => ({
   discardMemoryAgentDraft: (...a: unknown[]) => discard(...a),
 }));
 
-import { DRAFT_QUEUE_LIMIT, PENDING_LIMIT, draftNotice, toDraftView } from "../agentDrafts";
+import { DRAFT_QUEUE_LIMIT, PENDING_LIMIT, draftNotice, maxPendingPerOwner, toDraftView } from "../agentDrafts";
 import { DraftsSection, type DraftsState } from "../DraftsSection";
 import type { MemoryAgentDraft } from "../types";
 
@@ -35,6 +35,14 @@ describe("toDraftView / draftNotice", () => {
   });
   it("trunca texto enorme", () => {
     expect(toDraftView(draft({}, { key: "k", body: "x".repeat(5000) })).body!.length).toBeLessThan(700);
+  });
+  it("P3: o limite é por dono — 16+16 em duas missões não enche a caixa", () => {
+    const g = (n: number) => ({ items: Array.from({ length: n }) });
+    expect(maxPendingPerOwner([g(16), g(16)])).toBe(16);
+    expect(draftNotice(2, maxPendingPerOwner([g(16), g(16)]))).toBeNull();
+    expect(maxPendingPerOwner([g(5), g(32)])).toBe(32);
+    expect(draftNotice(2, maxPendingPerOwner([g(5), g(32)]))).toBe("inboxFull");
+    expect(maxPendingPerOwner([])).toBe(0);
   });
   it("avisos: fila cheia pesa mais que caixa cheia", () => {
     expect(draftNotice(0, 0)).toBeNull();

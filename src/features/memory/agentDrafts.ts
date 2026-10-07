@@ -44,11 +44,16 @@ export function toDraftView(d: MemoryAgentDraft): DraftView {
   };
 }
 
+/** O limite de 32 vale POR DONO (workspace ou cada missão), não somado: o maior grupo é o que enche. */
+export function maxPendingPerOwner(groups: { items: unknown[] }[]): number {
+  return groups.reduce((max, g) => Math.max(max, g.items.length), 0);
+}
+
 export type DraftNotice = "queueFull" | "inboxFull" | null;
 
 /** Aviso mais grave primeiro: fila de rascunhos cheia, depois caixa de pendentes cheia. */
-export function draftNotice(drafts: number, pending: number): DraftNotice {
+export function draftNotice(drafts: number, pendingInFullestOwner: number): DraftNotice {
   if (drafts >= DRAFT_QUEUE_LIMIT) return "queueFull";
-  if (pending >= PENDING_LIMIT) return "inboxFull";
+  if (pendingInFullestOwner >= PENDING_LIMIT) return "inboxFull";
   return null;
 }
