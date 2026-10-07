@@ -86,6 +86,7 @@ jobs:
           key: ci-windows-cargo-${{ hashFiles('src-tauri/Cargo.lock') }}
           restore-keys: ci-windows-cargo-
 
+      # `--bins` (no `--bin ags`) también compila `src/main.rs` (`windows_subsystem`) y `ccode`.
       - name: cargo check
         working-directory: src-tauri
-        run: cargo check --lib --bin ags --tests
+        run: cargo check --lib --bins --tests
