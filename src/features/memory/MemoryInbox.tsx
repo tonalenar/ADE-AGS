@@ -9,6 +9,7 @@ import {
 import { maxPendingPerOwner } from "./agentDrafts";
 import { DraftsSection, type DraftsState } from "./DraftsSection";
 import { DreamSection } from "./DreamSection";
+import { RepoSyncNotice } from "./RepoSyncNotice";
 import * as memoryIpc from "./ipc";
 import { ReviewMarks } from "./ReviewMarks";
 import { usePendingMemoryStore } from "./pendingStore";
@@ -188,6 +189,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
           <span className="ml-auto text-[10.5px] text-gray-400 dark:text-white/35">{t("memoryReview.note")}</span>
         </div>
 
+        <div className="px-5 pt-2 empty:hidden"><RepoSyncNotice workspaceId={workspaceId} /></div>
         <div className="px-5 pt-2"><DreamSection workspaceId={workspaceId} onChanged={(o) => { if (o) void finish(o); else void load(); }} /></div>
 
         {message && <p role="alert" className="px-5 pt-2 text-[11px] text-red-600 dark:text-red-400">{message}</p>}

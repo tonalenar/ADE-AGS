@@ -1152,6 +1152,16 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     if !has_column(conn,"memory_agent_drafts","source_fact_id") {
         conn.execute_batch("ALTER TABLE memory_agent_drafts ADD COLUMN source_fact_id TEXT;")?;
     }
+    // Fila da exportação Markdown. Sem subir user_version: o migrate inteiro roda
+    // em toda abertura, e CREATE IF NOT EXISTS pega bases que já estão na v41.
+    // Subir a versão quebraria os testes que cravam 41 e forçaria um backup VACUUM.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS memory_repo_sync_pending (
+            workspace_id TEXT PRIMARY KEY REFERENCES workspaces(id) ON DELETE CASCADE,
+            generation INTEGER NOT NULL,
+            updated_at INTEGER NOT NULL
+        );",
+    )?;
     set_user_version(conn, SCHEMA_VERSION)
 }
 

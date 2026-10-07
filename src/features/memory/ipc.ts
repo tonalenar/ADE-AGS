@@ -3,7 +3,7 @@ import type { MemoryContextMetrics, MemoryMissionContextMetrics } from "./contex
 import type { DeletedMemoryWorkspace, MemoryAgentDraft, MemoryExportResult, MemoryFilter, MemorySourceVerification, MemoryWorkspaceStats } from "./types";
 
 import type { Fact } from "@/features/runs/types";
-import type { MemoryDream, MemoryDetail, MemoryPage, MemoryReviewSummary, MemoryPendingCounts, MemoryProposal, MemoryProposalResult, MemoryScope, MemorySnapshot, MemoryValidityInterval } from "./types";
+import type { MemoryDream, MemoryDetail, MemoryPage, MemoryReviewSummary, MemoryPendingCounts, MemoryProposal, MemoryProposalResult, MemoryScope, MemorySnapshot, MemoryValidityInterval, RepoSyncStatus } from "./types";
 
 export const listMemory = (workspaceId: string, missionId: string | null, cursor?: string | null) =>
   invoke<MemoryPage>("memory_list", { workspaceId, missionId, cursor: cursor ?? null, limit: 32 });
@@ -55,6 +55,12 @@ export const proposeMemory = (workspaceId: string, missionId: string | null, inp
 
 export const decideMemory = (entryId: string, revision: number, approve: boolean) =>
   invoke<void>("memory_decide_user", { entryId, revision, approve });
+
+export const getRepoSyncStatus = (workspaceId: string) =>
+  invoke<RepoSyncStatus>("memory_repo_sync_status", { workspaceId });
+
+export const retryRepoSync = (workspaceId: string) =>
+  invoke<RepoSyncStatus>("memory_repo_sync_retry", { workspaceId });
 
 export const promoteFact = (runId: string, factId: string, scope: MemoryScope, key: string, priority: number, reason?: string) =>
   invoke<MemoryProposalResult>("memory_promote_fact_user", { runId, factId, scope, key, priority, reason: reason ?? null });

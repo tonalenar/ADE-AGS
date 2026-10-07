@@ -275,6 +275,8 @@ pub fn run() {
             crate::memory::memory_pending_counts,
             crate::memory::memory_propose_user,
             crate::memory::memory_decide_user,
+            crate::memory::repo_sync::memory_repo_sync_status,
+            crate::memory::repo_sync::memory_repo_sync_retry,
             crate::memory::memory_purge_user,
             crate::memory::repo::memory_export_repo,
             crate::memory::dream::memory_dream_start,
@@ -442,6 +444,7 @@ pub fn run() {
             _ => {}
         })
         .setup(|app| {
+            crate::memory::repo_sync::install(app);
             std::thread::spawn(|| {
                 crate::terminal::attachments::cleanup_pasted(std::time::Duration::from_secs(24 * 60 * 60));
             });

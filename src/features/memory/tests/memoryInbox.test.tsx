@@ -35,7 +35,15 @@ vi.mock("../pendingStore", () => ({
 const decideMemoryMock = vi.fn().mockResolvedValue(undefined);
 const pendingCountsMock = vi.fn(() => Promise.reject(new Error("sem contagem")));
 const draftsMock = vi.fn(() => Promise.resolve([] as unknown[]));
+const repoSyncMock = vi.hoisted(() => ({
+  getRepoSyncStatus: vi.fn(),
+  retryRepoSync: vi.fn(),
+}));
 let mockReviewSummary: MemoryWorkspaceReview;
+
+vi.mock("@tauri-apps/api/event", () => ({
+  listen: vi.fn(() => Promise.resolve(() => {})),
+}));
 
 vi.mock("../ipc", async (importOriginal) => {
   const actual = await importOriginal<Record<string, unknown>>();
@@ -46,6 +54,8 @@ vi.mock("../ipc", async (importOriginal) => {
     decideMemory: (...args: unknown[]) => decideMemoryMock(...args),
     getPendingCounts: () => pendingCountsMock(),
     listMemoryAgentDrafts: () => draftsMock(),
+    getRepoSyncStatus: repoSyncMock.getRepoSyncStatus,
+    retryRepoSync: repoSyncMock.retryRepoSync,
   };
 });
 
@@ -117,6 +127,8 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    repoSyncMock.getRepoSyncStatus.mockResolvedValue({ workspaceId: "w1", phase: "idle", error: null, commit: null, pending: 0 });
+    repoSyncMock.retryRepoSync.mockResolvedValue({ workspaceId: "w1", phase: "queued", error: null, commit: null, pending: 1 });
     container = document.createElement("div");
     document.body.appendChild(container);
     root = createRoot(container);

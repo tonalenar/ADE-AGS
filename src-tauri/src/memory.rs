@@ -1591,17 +1591,12 @@ pub fn memory_decide_user(
     approve: bool,
     app: tauri::AppHandle,
     db: tauri::State<DbConnection>,
+    sync: tauri::State<repo_sync::RepoSync>,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    let result = decide(&conn, &entry_id, revision, approve);
-    let result = result.and_then(|()| {
-        if approve {
-            let workspace: String = conn.query_row("SELECT workspace_id FROM memory_entries WHERE id=?1", [&entry_id], |r| r.get(0)).map_err(|_| "could not resolve approved memory workspace")?;
-            repo::export_at(&conn, &workspace, &repo::default_root()?, Some((&entry_id, revision)))
-                .map_err(|error| format!("Memória aprovada; a projeção local precisa ser exportada novamente: {error}"))?;
-        }
-        Ok(())
-    });
+    // The decision is committed here. Export/git is queued and must not keep this lock:
+    // a batch would otherwise freeze every other database caller for the git timeouts.
+    let result = repo_sync::decide_and_schedule(&conn, &sync, &entry_id, revision, approve);
     drop(conn);
     notify_changed(&app);
     result
@@ -1682,6 +1677,7 @@ pub mod history;
 pub mod review;
 pub mod search;
 pub mod repo;
+pub mod repo_sync;
 pub mod dream;
 pub mod lifecycle;
 
