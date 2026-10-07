@@ -1489,3 +1489,195 @@ fn agent_envelope_escaping_preserves_pagination_and_byte_limit() {
     }
     assert_eq!(seen,12);
 }
+
+#[test]
+fn trigger_immutable_delete_blocks_all_direct_deletes_and_permits_only_guarded_purge() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    let active = activate(&conn, "workspace", None, "active-key", "active body");
+    let proposed = propose(&conn, "workspace", None, "active-key", "proposed body", "update", Some(1));
+    let another = propose(&conn, "workspace", None, "reject-key", "will reject", "create", None);
+    decide(&conn, &another.entry_id, another.revision, false).unwrap();
+
+    // 1. DELETE direto de revisão aprovada é barrado pelo trigger
+    let err_approved = conn.execute("DELETE FROM memory_revisions WHERE entry_id=?1 AND revision=?2", params![active.entry_id, 1]);
+    assert!(err_approved.is_err(), "DELETE direto de revisão aprovada deve falhar");
+    assert!(err_approved.unwrap_err().to_string().contains("memory revisions are immutable"));
+
+    // 2. DELETE direto de revisão proposta é barrado pelo trigger
+    let err_proposed = conn.execute("DELETE FROM memory_revisions WHERE entry_id=?1 AND revision=?2", params![active.entry_id, proposed.revision]);
+    assert!(err_proposed.is_err(), "DELETE direto de revisão proposta deve falhar");
+    assert!(err_proposed.unwrap_err().to_string().contains("memory revisions are immutable"));
+
+    // 3. DELETE direto de revisão rejeitada é barrado pelo trigger
+    let err_rejected = conn.execute("DELETE FROM memory_revisions WHERE entry_id=?1 AND revision=?2", params![another.entry_id, another.revision]);
+    assert!(err_rejected.is_err(), "DELETE direto de revisão rejeitada deve falhar");
+    assert!(err_rejected.unwrap_err().to_string().contains("memory revisions are immutable"));
+
+    // 4. DELETE em massa sem guarda também é abortado
+    let err_bulk = conn.execute("DELETE FROM memory_revisions", []);
+    assert!(err_bulk.is_err(), "DELETE em massa em memory_revisions deve falhar");
+    assert!(err_bulk.unwrap_err().to_string().contains("memory revisions are immutable"));
+
+    // 5. Com a linha correspondente em memory_purge_guard, o DELETE passa pelo trigger
+    conn.execute(
+        "INSERT INTO memory_purge_guard(entry_id, revision) VALUES(?1, ?2)",
+        params![another.entry_id, another.revision],
+    ).unwrap();
+    let deleted = conn.execute(
+        "DELETE FROM memory_revisions WHERE entry_id=?1 AND revision=?2",
+        params![another.entry_id, another.revision],
+    ).unwrap();
+    assert_eq!(deleted, 1, "DELETE com purge_guard deve ser permitido");
+    conn.execute(
+        "DELETE FROM memory_purge_guard WHERE entry_id=?1 AND revision=?2",
+        params![another.entry_id, another.revision],
+    ).unwrap();
+
+    // 6. Tentar deletar novamente agora que a guarda sumiu volta a ser bloqueado
+    let err_again = conn.execute("DELETE FROM memory_revisions WHERE entry_id=?1", params![another.entry_id]);
+    assert!(err_again.is_err() || err_again.unwrap() == 0);
+
+    // 7. memory_purge_audit restringe actor_kind via CHECK constraint
+    let err_actor_worker = conn.execute(
+        "INSERT INTO memory_purge_audit(entry_id, revision, actor_kind, created_at) VALUES('e', 1, 'worker', 0)",
+        [],
+    );
+    assert!(err_actor_worker.is_err(), "actor_kind 'worker' não deve ser aceito na auditoria de purge");
+    let err_actor_lead = conn.execute(
+        "INSERT INTO memory_purge_audit(entry_id, revision, actor_kind, created_at) VALUES('e', 1, 'lead', 0)",
+        [],
+    );
+    assert!(err_actor_lead.is_err(), "actor_kind 'lead' não deve ser aceito na auditoria de purge");
+    let ok_user = conn.execute(
+        "INSERT INTO memory_purge_audit(entry_id, revision, actor_kind, created_at) VALUES('e', 1, 'user', 0)",
+        [],
+    );
+    assert!(ok_user.is_ok(), "actor_kind 'user' deve ser aceito na auditoria de purge");
+}
+
+#[test]
+fn mcp_and_promote_fact_secret_detection_covers_key_body_reason_and_all_operations() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_mission(&conn, "m1", "w1");
+    seed_run(&conn, "r1", "w1", Some("m1"));
+    seed_task(&conn, "worker", "r1", Some("worker"));
+
+    let active = activate(&conn, "workspace", None, "safe-active", "safe active body");
+
+    // Segredos construídos dinamicamente sem literais reais diretos
+    let secret_tokens = [
+        concat!("sk_", "live_", "999999999999999999999999"),
+        concat!("sk_", "test_", "999999999999999999999999"),
+        concat!("gh", "p_", "999999999999999999999999999999"),
+        concat!("AK", "IA", "IOSFODNN7EXAMPLE"),
+        concat!("xo", "xa-", "999999999999999999999999"),
+        concat!("gl", "pat-", "99999999999999999999"),
+    ];
+
+    let safe_fact_id = "fact-safe-1";
+    seed_fact(&conn, safe_fact_id, "r1", Some("worker"), "Fato limpo sem credenciais");
+
+    for (i, secret) in secret_tokens.iter().enumerate() {
+        // (a) Segredo na chave via memory.propose
+        let err_key_prop = task_tool(&conn, "worker", "memory.propose", json!({
+            "scope": "workspace",
+            "key": secret,
+            "kind": "note",
+            "body": "Conteúdo seguro"
+        }));
+        assert!(err_key_prop.is_err(), "segredo na chave via memory.propose deve ser recusado");
+        assert_eq!(err_key_prop.unwrap_err(), "memory cannot contain credentials");
+
+        // (b) Segredo no corpo via memory.propose
+        let err_body_prop = task_tool(&conn, "worker", "memory.propose", json!({
+            "scope": "workspace",
+            "key": format!("key-prop-{i}"),
+            "kind": "note",
+            "body": secret
+        }));
+        assert!(err_body_prop.is_err(), "segredo no corpo via memory.propose deve ser recusado");
+        assert_eq!(err_body_prop.unwrap_err(), "memory cannot contain credentials");
+
+        // (c) Segredo no motivo (reason) via memory.propose
+        let err_reason_prop = task_tool(&conn, "worker", "memory.propose", json!({
+            "scope": "workspace",
+            "key": format!("key-prop-reason-{i}"),
+            "kind": "note",
+            "body": "Conteúdo seguro",
+            "reason": secret
+        }));
+        assert!(err_reason_prop.is_err(), "segredo no motivo via memory.propose deve ser recusado");
+        assert_eq!(err_reason_prop.unwrap_err(), "memory cannot contain credentials");
+
+        // (d) Segredo no corpo via memory.update
+        let err_body_upd = task_tool(&conn, "worker", "memory.update", json!({
+            "entry_id": active.entry_id,
+            "expected_revision": 1,
+            "kind": "note",
+            "body": secret,
+            "priority": 0
+        }));
+        assert!(err_body_upd.is_err(), "segredo no corpo via memory.update deve ser recusado");
+        assert_eq!(err_body_upd.unwrap_err(), "memory cannot contain credentials");
+
+        // (e) Segredo no motivo via memory.update
+        let err_reason_upd = task_tool(&conn, "worker", "memory.update", json!({
+            "entry_id": active.entry_id,
+            "expected_revision": 1,
+            "kind": "note",
+            "body": "Atualização segura",
+            "priority": 0,
+            "reason": secret
+        }));
+        assert!(err_reason_upd.is_err(), "segredo no motivo via memory.update deve ser recusado");
+        assert_eq!(err_reason_upd.unwrap_err(), "memory cannot contain credentials");
+
+        // (f) Segredo no corpo do Run Fact promovido
+        let secret_fact_id = format!("fact-secret-{i}");
+        seed_fact(&conn, &secret_fact_id, "r1", Some("worker"), secret);
+        let err_prom_fact = task_tool(&conn, "worker", "memory.promoteFact", json!({
+            "fact_id": secret_fact_id,
+            "scope": "workspace",
+            "key": format!("promoted-fact-{i}")
+        }));
+        assert!(err_prom_fact.is_err(), "promover fato com segredo deve ser recusado via MCP");
+        assert_eq!(err_prom_fact.unwrap_err(), "memory promotion cannot contain credentials");
+
+        // (g) Segredo na chave na promoção de fato
+        let err_prom_key = task_tool(&conn, "worker", "memory.promoteFact", json!({
+            "fact_id": safe_fact_id,
+            "scope": "workspace",
+            "key": secret
+        }));
+        assert!(err_prom_key.is_err(), "promover fato com segredo na chave deve ser recusado");
+        assert_eq!(err_prom_key.unwrap_err(), "memory promotion cannot contain credentials");
+
+        // (h) Segredo no motivo na promoção de fato
+        let err_prom_reason = task_tool(&conn, "worker", "memory.promoteFact", json!({
+            "fact_id": safe_fact_id,
+            "scope": "workspace",
+            "key": format!("safe-key-{i}"),
+            "reason": secret
+        }));
+        assert!(err_prom_reason.is_err(), "promover fato com segredo no motivo deve ser recusado");
+        assert_eq!(err_prom_reason.unwrap_err(), "memory promotion cannot contain credentials");
+
+        // (i) Função Rust promote_fact direta com segredo no motivo
+        let err_promote_fn = promote_fact(
+            &conn,
+            "r1",
+            safe_fact_id,
+            "workspace",
+            &format!("safe-fn-key-{i}"),
+            0,
+            Some(secret),
+            "worker",
+            Some("worker"),
+        );
+        assert!(err_promote_fn.is_err(), "promote_fact com segredo no motivo deve falhar");
+        assert_eq!(err_promote_fn.unwrap_err(), "memory promotion cannot contain credentials");
+    }
+}
+

@@ -21,6 +21,59 @@ fn memory_numeric_flags_are_numbers() {
 }
 
 #[test]
+fn memory_cli_commands_parse_flags_and_sanitize_scope() {
+    // 1. memory suggest aceita flags numéricas e strings
+    let args_suggest = parse_flags(
+        &[
+            "--mission".into(), "m-1".into(),
+            "--scope".into(), "workspace".into(),
+            "--kind".into(), "decision".into(),
+            "--key".into(), "db_pool".into(),
+            "--body".into(), "Usar sqlite pool".into(),
+            "--priority".into(), "3".into(),
+        ],
+        &[],
+    ).unwrap();
+    assert_eq!(args_suggest["priority"], 3);
+    assert_eq!(args_suggest["key"], "db_pool");
+    assert_eq!(args_suggest["body"], "Usar sqlite pool");
+    assert_eq!(args_suggest["scope"], "workspace");
+
+    // 2. Prioridade negativa na CLI é parseada como i64
+    let args_neg = parse_flags(&["--priority".into(), "-5".into()], &[]).unwrap();
+    assert_eq!(args_neg["priority"], -5);
+
+    // 3. memory search aceita argumento posicional de busca e --limit como número
+    let args_search = parse_flags(
+        &["query de busca".into(), "--limit".into(), "10".into()],
+        positionals("memory.search"),
+    ).unwrap();
+    assert_eq!(args_search["query"], "query de busca");
+    assert_eq!(args_search["limit"], 10);
+
+    // 4. Se --limit ou --priority receberem string não numérica, permanecem string para erro explícito no backend
+    let args_bad_limit = parse_flags(&["--limit".into(), "abc".into()], &[]).unwrap();
+    assert_eq!(args_bad_limit["limit"], "abc");
+    let args_bad_prio = parse_flags(&["--priority".into(), "xyz".into()], &[]).unwrap();
+    assert_eq!(args_bad_prio["priority"], "xyz");
+
+    // 5. with_caller / caller_from remove tentativa de spoofing de --from, --mission, --missionId, --taskId
+    let mut spoofed = json!({
+        "from": "malicious_tab",
+        "mission": "other_mission",
+        "missionId": "other_mission_id",
+        "taskId": "other_task_id",
+        "key": "safe_key"
+    });
+    caller_from("memory.suggest", &mut spoofed, Some("real_tab_id".into()));
+    assert_eq!(spoofed["from"], "real_tab_id");
+    assert!(spoofed.get("mission").is_none());
+    assert!(spoofed.get("missionId").is_none());
+    assert!(spoofed.get("taskId").is_none());
+    assert_eq!(spoofed["key"], "safe_key");
+}
+
+#[test]
 fn local_tests_accept_suite_force_and_dry_run() {
     let args = parse("test.run", &["rust", "--force"]).unwrap();
     assert_eq!(args["suite"], "rust");
