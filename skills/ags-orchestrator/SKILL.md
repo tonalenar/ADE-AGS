@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.29.0
+version: 1.30.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -455,6 +455,7 @@ When orchestrating a team with a QA agent, follow the continuous validation mode
 
 2. **No Recurrent Local Full Suite (Point 3):**
    - Agents **DO NOT** repeat the full test suite locally on routine iterations. Use `ags test affected` (which selectively runs only changed vitest/babel/rust components).
+   - **Commit before testing.** Run `ags test affected` with a clean Git tree (a local commit is enough, even a provisional one). A result obtained with modified or untracked files is never cached, so the Orchestrator and QA have to repeat the run. Always use the same command, without varying flags or file lists, so that the same tree reuses the green result (`já verde neste hash`).
    - When opening a Pull Request, agents wait for CI to validate using GitHub CLI watch mode:
      ```bash
      gh pr checks <n> --watch
