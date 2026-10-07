@@ -16,6 +16,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo, type Tab } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
+import { injectTabMemory } from "@/features/memory/tabMemory";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import i18n from "@/i18n";
 import { AppDialog } from "@/shared/ui/AppDialog";
@@ -209,7 +210,7 @@ export function TabDialogs() {
         initialSkillIds={wizardFor?.skillIds}
         initialPrelaunch={wizardFor?.prelaunch}
         onClose={() => close({ wizardOpen: false, wizardFor: null })}
-        onConfirm={({ agent, skillIds, accountId, prelaunch }) => {
+        onConfirm={({ agent, skillIds, accountId, prelaunch, memoryBlock }) => {
           const cwd = wizardFor?.cwd ?? activeTab?.cwd;
           const prompt = wizardFor?.prompt;
           if (!cwd) return;
@@ -221,6 +222,8 @@ export function TabDialogs() {
           // Terminal.tsx espera esta promesa antes de invocar pty_create.
           registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, skillIds));
           if (prompt) sendWhenReady(tabId, prompt);
+          // Só leitura e uma vez: se falhar ou vier vazio, a tab abre normal.
+          if (memoryBlock) void injectTabMemory({ id: tabId, agentId: agent.id, memoryBlock }, workspaceId);
         }}
       />
     </>

@@ -8,6 +8,7 @@ import { useSkillsStore } from "@/features/skills/store";
 import { AgentPickerStep } from "@/features/tabs/wizard/AgentPickerStep";
 import { AccountPickerStep, useAgentAccounts } from "@/features/tabs/wizard/AccountPickerStep";
 import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
+import { MemoryBlockSwitch } from "@/features/memory/MemoryBlockSwitch";
 import { PrelaunchChain } from "@/features/prelaunch/PrelaunchChain";
 import { SkillPickerStep } from "@/features/tabs/wizard/SkillPickerStep";
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
@@ -26,6 +27,8 @@ interface NewAgentDialogProps {
     /** `undefined` = la cuenta del sistema. */
     accountId?: string;
     prelaunch: PrelaunchStep[];
+    /** Bloque de memoria de solo lectura al inicio de la sesión. Desactivado por defecto. */
+    memoryBlock: boolean;
   }) => void;
   /** Al duplicar una tab: sus skills vienen marcadas en cualquier TUI que se elija (las
    *  que esa TUI soporta), y sus comandos previos también. */
@@ -68,6 +71,7 @@ export function NewAgentDialog({
   const [skillIds, setSkillIds] = useState<string[]>([]);
   const [accountId, setAccountId] = useState<string | undefined>();
   const [prelaunch, setPrelaunch] = useState<PrelaunchStep[]>([]);
+  const [memoryBlock, setMemoryBlock] = useState(false);
   const [step, setStep] = useState<StepId>("agent");
 
   // Las cuentas de la TUI elegida se miran desde acá —y no solo adentro del paso— porque
@@ -87,6 +91,7 @@ export function NewAgentDialog({
     setSkillIds([]);
     setAccountId(undefined);
     setPrelaunch([]);
+    setMemoryBlock(false);
     setStep("agent");
   }, [isOpen]);
 
@@ -127,7 +132,7 @@ export function NewAgentDialog({
         return accountId;
       })
       .then((resolved) => {
-        onConfirm({ agent, skillIds, accountId: resolved, prelaunch });
+        onConfirm({ agent, skillIds, accountId: resolved, prelaunch, memoryBlock });
         onClose();
       });
   };
@@ -246,6 +251,7 @@ export function NewAgentDialog({
           {step === "skills" && agent && (
             <div className="flex flex-col gap-5">
               <SkillPickerStep agentId={agent.id} selected={skillIds} onChange={setSkillIds} />
+              <MemoryBlockSwitch checked={memoryBlock} onChange={setMemoryBlock} />
               {/* Los comandos previos van acá, plegados: son de este lanzamiento y hay que
                   decidirlos antes de arrancar, pero la mayoría de las tabs no los usa y no
                   merecen un paso propio en el que casi siempre se apretaría "Siguiente". */}

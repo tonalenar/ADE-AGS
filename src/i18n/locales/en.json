@@ -2531,5 +2531,8 @@
   "memorySearch.verify.never": "never verified · TTL {{ttl}} d · expired",
   "memorySearch.verify.noTtl": "verified {{days}} days ago · no TTL",
   "memorySearch.verify.expired": "verified {{days}} days ago · TTL {{ttl}} d · expired",
-  "memorySearch.verify.ok": "verified {{days}} days ago · TTL {{ttl}} d"
+  "memorySearch.verify.ok": "verified {{days}} days ago · TTL {{ttl}} d",
+  "memoryBlock.label": "Include read-only memory at session start",
+  "memoryBlock.hintOff": "Off (default). When on, a memory block is only read at the start of the session. Nothing is written to CLAUDE.md or AGENTS.md.",
+  "memoryBlock.hintOn": "On: the memory content enters as text, never as instructions, and applies only to this tab. Nothing is written to CLAUDE.md or AGENTS.md."
 }

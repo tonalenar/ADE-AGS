@@ -2531,5 +2531,8 @@
   "memorySearch.verify.never": "nunca verificada · TTL {{ttl}} d · vencida",
   "memorySearch.verify.noTtl": "verificada hace {{days}} días · sin TTL",
   "memorySearch.verify.expired": "verificada hace {{days}} días · TTL {{ttl}} d · vencida",
-  "memorySearch.verify.ok": "verificada hace {{days}} días · TTL {{ttl}} d"
+  "memorySearch.verify.ok": "verificada hace {{days}} días · TTL {{ttl}} d",
+  "memoryBlock.label": "Incluir memoria de solo lectura al inicio de la sesión",
+  "memoryBlock.hintOff": "Desactivado (por defecto). Al activarlo, un bloque de memoria solo se lee al inicio de la sesión. No se escribe nada en CLAUDE.md ni en AGENTS.md.",
+  "memoryBlock.hintOn": "Activado: el contenido de la memoria entra como texto, nunca como instrucción, y solo vale para esta tab. No se escribe nada en CLAUDE.md ni en AGENTS.md."
 }
