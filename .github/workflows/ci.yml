@@ -88,3 +88,8 @@ jobs:
       - name: cargo check
         working-directory: src-tauri
         run: cargo check --lib --bin ags --tests
+
+      # MEDIÇÃO DESCARTÁVEL (não mesclar): quanto tempo leva e se o binário de teste arranca.
+      - name: cargo test (medição)
+        working-directory: src-tauri
+        run: cargo test --lib --bin ags
