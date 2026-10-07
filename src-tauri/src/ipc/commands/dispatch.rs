@@ -63,6 +63,9 @@ fn design_command(app: &AppHandle, command: &str, args: &Value) -> Result<Value,
 }
 
 pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
+    if let Some(error) = crate::ipc::agent_maintenance_error(command) {
+        return Response::err(error);
+    }
     if command != "run.approve" && args.get("taskId").and_then(Value::as_str).is_some() {
         use tauri::Manager;
         let Some(db) = app.try_state::<crate::database::DbConnection>() else {

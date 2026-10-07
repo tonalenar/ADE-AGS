@@ -9,8 +9,6 @@
 
 use ade_ags_lib::ipc::protocol::{client_handshake_path, Handshake, Request, Response, PROTOCOL_VERSION};
 use serde_json::{json, Map, Value};
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
@@ -221,9 +219,9 @@ MEMORIA COMPARTIDA (la usan los agentes por MCP; ver docs/ade-ags/SHARED_MEMORY.
   memory open <camino>                       Proyección aprobada, solo lectura y UNTRUSTED DATA
   swarm note|question <texto>                Datos de sesión de la misión, no memoria durable
   swarm promote <note-id> <key>              Propone la nota; aprobación exclusiva del usuario
-  memory export                             Exporta Markdown y revisiones JSON del workspace de la tab
-  memory compact [retentionDays]             Compacta rechazadas antiguas (mínimo 30 días)
-  workspace restore <id|nombre>              Recupera un workspace eliminado suavemente
+  memory export                             Exporta Markdown y revisiones JSON del workspace de la tab (solo lectura)
+  memory compact [retentionDays]             Solo en la interfaz de la app; un terminal de agente no puede
+  workspace restore <id|nombre>              Solo en la interfaz de la app; un terminal de agente no puede
 
 NAVEGADOR
   browser run --json-args '{\"cwd\":\"...\",     Una orden al navegador de un proyecto:
@@ -327,6 +325,13 @@ fn main() -> ExitCode {
         }
     }
     };
+
+    // Compactar e restaurar só rodam na interface. Recusar aqui também: um `ags`
+    // antigo não é a barreira, o servidor é, mas a mensagem chega sem depender dele.
+    if let Some(error) = ade_ags_lib::ipc::agent_maintenance_error(&command) {
+        println!("{}", json!({ "error": error }));
+        return ExitCode::from(EXIT_COMMAND_FAILED);
+    }
 
     let parsed = match parse_flags(flag_args, positionals(&command)) {
         Ok(v) => v,
@@ -546,23 +551,35 @@ impl CliError {
 }
 
 /// Agrega `from` a los comandos `peer.*`, `note.*`, `portal.*`, `notify.*`, `role.*`, `floor.*`, `routine.*`, `say.*` y `recall.*` a partir de `ADE_TAB_ID`, salvo que ya venga.
+/// Em `memory.*` e `swarm.*` o `from` e a `session` vêm só do ambiente que o app injetou no PTY.
 fn with_caller(command: &str, mut parsed: Value) -> Value {
     const GROUPS: [&str; 13] = ["peer.", "note.", "portal.", "device.", "notify.", "role.", "floor.", "routine.", "say.", "recall.", "memory.", "design.", "swarm."];
     if !GROUPS.iter().any(|g| command.starts_with(g)) {
         return parsed;
     }
-    caller_from(command, &mut parsed, std::env::var("ADE_TAB_ID").ok());
+    caller_from(
+        command,
+        &mut parsed,
+        std::env::var("ADE_TAB_ID").ok(),
+        std::env::var(ade_ags_lib::SESSION_ENV).ok(),
+    );
     parsed
 }
 
-fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>) {
+fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>, session: Option<String>) {
     if command.starts_with("memory.") || command.starts_with("swarm.") {
         if let Some(map) = parsed.as_object_mut() {
             map.remove("from");
             map.remove("mission");
             map.remove("missionId");
             map.remove("taskId");
-            if let Some(tab) = tab { map.insert("from".into(), Value::String(tab)); }
+            map.remove("session");
+            if let Some(tab) = tab.filter(|value| !value.is_empty()) {
+                map.insert("from".into(), Value::String(tab));
+            }
+            if let Some(session) = session.filter(|value| !value.is_empty()) {
+                map.insert("session".into(), Value::String(session));
+            }
         }
         return;
     }
@@ -986,22 +1003,12 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
         ));
     }
 
-    let stream = TcpStream::connect(("127.0.0.1", handshake.port)).map_err(|_| {
-        CliError::not_yet(format!(
-            "No se pudo conectar al puerto {} (la app con PID {} pudo haber cerrado). Reiniciá la app.",
-            handshake.port, handshake.pid
-        ))
-    })?;
-    let _ = stream.set_read_timeout(Some(read_timeout_for(command, &args)));
-
-    let request = Request { token: handshake.token, command: command.to_string(), args };
+    let timeout = read_timeout_for(command, &args);
+    let request = Request { token: handshake.token.clone(), command: command.to_string(), args };
     let payload = serde_json::to_string(&request).map_err(|e| CliError::new(e.to_string(), EXIT_USAGE))?;
-
-    let mut writer = stream.try_clone().map_err(|e| CliError::new(e.to_string(), EXIT_NO_APP))?;
-    writeln!(writer, "{payload}").and_then(|_| writer.flush()).map_err(|e| CliError::new(format!("No se pudo enviar el comando: {e}"), EXIT_NO_APP))?;
-
-    let mut line = String::new();
-    BufReader::new(stream).read_line(&mut line).map_err(|e| CliError::new(format!("No llegó respuesta: {e}"), EXIT_NO_APP))?;
+    let line = ade_ags_lib::ipc::exchange(&handshake, &payload, timeout).map_err(|e| {
+        if e.retryable { CliError::not_yet(e.message) } else { CliError::new(e.message, EXIT_NO_APP) }
+    })?;
 
     serde_json::from_str(&line).map_err(|e| CliError::new(format!("Respuesta ilegible de la app: {e}"), EXIT_NO_APP))
 }

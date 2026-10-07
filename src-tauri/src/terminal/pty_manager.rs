@@ -18,6 +18,10 @@ struct PtySession {
     /// La tab de la app a la que pertenece (`ADE_TAB_ID`), para no dejar dos terminales vivos
     /// de la misma tab. `None` en los PTYs que no son de una tab.
     tab_id: Option<String>,
+    /// Token que este processo herda em `ADE_SESSION`. Sai do registro junto com o PTY.
+    session_token: Option<String>,
+    /// Perfil do Codex com o token, fora do argv. Some só quando o arquivo existe.
+    codex_profile: Option<std::path::PathBuf>,
 }
 
 /// Scrollback de un PTY. `total_bytes` cuenta TODO lo que el proceso escribió alguna vez,
@@ -345,30 +349,150 @@ fn path_with_app_dir(current: &std::ffi::OsStr) -> Option<std::ffi::OsString> {
     std::env::join_paths(dirs).ok()
 }
 
+fn shell_safe_id(value: &str) -> bool {
+    !value.is_empty() && value.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
 /// Codex corre los comandos de su agente en un sandbox que descarta las variables de entorno
 /// que no conoce, `ADE_TAB_ID` incluida: sin ella `ags peers` no sabe quién pregunta. La
 /// config de Codex tiene `shell_environment_policy.set`, que SÍ llega al shell del sandbox;
 /// se la pasa con `-c` al lanzar. Solo si el programa es `codex` y la tab tiene id. Pura.
 pub(super) fn with_codex_tab_id(command: &str, tab_id: Option<&str>) -> String {
-    let Some(tab) = tab_id.filter(|t| !t.is_empty() && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')) else {
-        return command.to_string();
-    };
+    with_codex_identity(command, tab_id, None)
+}
+
+fn codex_stem(command: &str) -> bool {
     let trimmed = command.trim_start();
-    // El programa es la primera palabra, o lo entrecomillado si la ruta tiene espacios.
+    let head_len = match trimmed.chars().next() {
+        Some(q @ ('"' | '\'')) => trimmed[1..].find(q).map_or(trimmed.len(), |i| i + 2),
+        _ => trimmed.find(char::is_whitespace).unwrap_or(trimmed.len()),
+    };
+    let program = trimmed[..head_len].trim_matches(|c| c == '"' || c == '\'');
+    let file = program.rsplit(['/', '\\']).next().unwrap_or("").to_ascii_lowercase();
+    let stem = file.strip_suffix(".exe").or_else(|| file.strip_suffix(".cmd")).unwrap_or(&file);
+    stem == "codex"
+}
+
+/// Como [`with_codex_tab_id`], e aponta um perfil do Codex cujo arquivo (0600)
+/// contém `ADE_SESSION`. O valor do token não entra no argv: `ps` e o
+/// Gerenciador de Tarefas mostram o nome do perfil, não o segredo.
+///
+/// `profile` é só o nome (`ags-…`), já filtrado por [`shell_safe_id`].
+pub(super) fn with_codex_identity(command: &str, tab_id: Option<&str>, profile: Option<&str>) -> String {
+    let tab = tab_id.filter(|value| shell_safe_id(value));
+    let profile = profile.filter(|value| shell_safe_id(value));
+    if tab.is_none() && profile.is_none() {
+        return command.to_string();
+    }
+    if !codex_stem(command) {
+        return command.to_string();
+    }
+    let trimmed = command.trim_start();
     let head_len = match trimmed.chars().next() {
         Some(q @ ('"' | '\'')) => trimmed[1..].find(q).map_or(trimmed.len(), |i| i + 2),
         _ => trimmed.find(char::is_whitespace).unwrap_or(trimmed.len()),
     };
     let (head, tail) = trimmed.split_at(head_len);
-    let program = head.trim_matches(|c| c == '"' || c == '\'');
-    // Las dos barras: una ruta de Windows también se lee bien en un sistema que usa `/`.
-    let file = program.rsplit(['/', '\\']).next().unwrap_or("").to_ascii_lowercase();
-    let stem = file.strip_suffix(".exe").or_else(|| file.strip_suffix(".cmd")).unwrap_or(&file);
-    if stem != "codex" || command.contains("shell_environment_policy.set.ADE_TAB_ID") {
+    let mut flags = String::new();
+    if let Some(tab) = tab {
+        if !command.contains("shell_environment_policy.set.ADE_TAB_ID") {
+            flags.push_str(&format!(" -c 'shell_environment_policy.set.ADE_TAB_ID=\"{tab}\"'"));
+        }
+    }
+    if let Some(profile) = profile {
+        if !command.contains(&format!("--profile {profile}")) {
+            flags.push_str(&format!(" --profile {profile}"));
+        }
+    }
+    if flags.is_empty() {
         return command.to_string();
     }
-    let flag = format!("'shell_environment_policy.set.ADE_TAB_ID=\"{tab}\"'");
-    format!("{head} -c {flag}{tail}")
+    format!("{head}{flags}{tail}")
+}
+
+fn codex_home() -> std::path::PathBuf {
+    std::env::var_os("CODEX_HOME")
+        .map(std::path::PathBuf::from)
+        .filter(|path| !path.as_os_str().is_empty())
+        .unwrap_or_else(|| dirs::home_dir().unwrap_or_default().join(".codex"))
+}
+
+/// Grava `~/.codex/<nome>.config.toml` com o token, modo 0600 no Unix.
+/// O argv do Codex só leva `--profile <nome>`. O sandbox lê o `set` daqui,
+/// então o valor não aparece em `ps` nem no Gerenciador de Tarefas.
+pub(super) fn write_codex_session_profile(name: &str, token: &str) -> Result<std::path::PathBuf, String> {
+    write_codex_session_profile_at(&codex_home(), name, token)
+}
+
+pub(super) fn write_codex_session_profile_at(
+    home: &std::path::Path,
+    name: &str,
+    token: &str,
+) -> Result<std::path::PathBuf, String> {
+    if !shell_safe_id(name) || !shell_safe_id(token) {
+        return Err("perfil do Codex recusou um valor inseguro".into());
+    }
+    std::fs::create_dir_all(home).map_err(|e| e.to_string())?;
+    let dest = home.join(format!("{name}.config.toml"));
+    let tmp = home.join(format!("{name}.config.toml.tmp"));
+    let body = format!("[shell_environment_policy.set]\nADE_SESSION = \"{token}\"\n");
+    std::fs::write(&tmp, body).map_err(|e| e.to_string())?;
+    if let Err(error) = restrict_to_user(&tmp) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error);
+    }
+    if let Err(error) = std::fs::rename(&tmp, &dest) {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(error.to_string());
+    }
+    #[cfg(windows)]
+    if let Err(error) = restrict_to_user(&dest) {
+        let _ = std::fs::remove_file(&dest);
+        return Err(error);
+    }
+    Ok(dest)
+}
+
+#[cfg(unix)]
+fn restrict_to_user(path: &std::path::Path) -> Result<(), String> {
+    use std::os::unix::fs::PermissionsExt;
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())
+}
+
+/// No Windows o arquivo nasce no perfil do usuário. `icacls` tira a herança
+/// e deixa só essa conta. Se o comando não existir, o arquivo continua no
+/// diretório do usuário — a checagem manual está no PR.
+#[cfg(windows)]
+fn restrict_to_user(path: &std::path::Path) -> Result<(), String> {
+    let Some(user) = std::env::var_os("USERNAME") else {
+        return Ok(());
+    };
+    let grant = format!("{}:(R,W)", user.to_string_lossy());
+    let path = path.as_os_str();
+    let status = std::process::Command::new("icacls")
+        .arg(path)
+        .args(["/inheritance:r", "/grant:r"])
+        .arg(&grant)
+        .status();
+    match status {
+        Ok(code) if code.success() => Ok(()),
+        Ok(code) => Err(format!("icacls saiu com {code}")),
+        Err(error) => Err(error.to_string()),
+    }
+}
+
+#[cfg(not(any(unix, windows)))]
+fn restrict_to_user(_path: &std::path::Path) -> Result<(), String> {
+    Ok(())
+}
+
+fn forget_session(session: &PtySession) {
+    if let Some(token) = &session.session_token {
+        super::release_token(token);
+    }
+    if let Some(path) = &session.codex_profile {
+        let _ = std::fs::remove_file(path);
+    }
 }
 
 /// Crea un PTY, lanza el proceso dentro, y emite eventos `pty-data-{id}` al frontend.
@@ -403,8 +527,23 @@ pub async fn pty_create(
         .openpty(size)
         .map_err(|e| format!("Failed to open PTY: {e}"))?;
 
-    let tab_id = env.as_ref().and_then(|e| e.get("ADE_TAB_ID")).cloned();
-    let command = with_codex_tab_id(&command, tab_id.as_deref());
+    let tab_id = env.as_ref().and_then(|e| e.get("ADE_TAB_ID")).cloned().filter(|tab| !tab.is_empty());
+    // O token nasce aqui, não no ambiente que o frontend (ou um agente) mandou.
+    // Só entra no registro depois que o processo existe. Um terminal restaurado
+    // não passa por aqui: reanexa o PTY vivo e o processo conserva o token.
+    let session_token = tab_id.as_ref().map(|_| uuid::Uuid::new_v4().to_string());
+    let codex_profile_name = session_token.as_ref().map(|_| format!("ags-{}", uuid::Uuid::new_v4().simple()));
+    let codex_profile = match (codex_profile_name.as_deref(), session_token.as_deref()) {
+        (Some(name), Some(token)) if codex_stem(&command) => match write_codex_session_profile(name, token) {
+            Ok(path) => Some(path),
+            Err(error) => {
+                eprintln!("[ade-ags] não gravei o perfil do Codex; a sessão não vai na linha de comando: {error}");
+                None
+            }
+        },
+        _ => None,
+    };
+    let command = with_codex_identity(&command, tab_id.as_deref(), codex_profile.as_ref().and(codex_profile_name.as_deref()));
     let mut cmd = build_launch(&command, &prelaunch.unwrap_or_default())?;
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
@@ -424,8 +563,19 @@ pub async fn pty_create(
         cmd.env_remove(var);
     }
     for (k, v) in env {
+        // `ADE_SESSION` só o app emite. Um env de TUI custom não escolhe a sessão.
+        if k == super::SESSION_ENV {
+            continue;
+        }
         cmd.env(k, v);
     }
+    if let Some(tab) = &tab_id {
+        cmd.env("ADE_TAB_ID", tab);
+    }
+    match &session_token {
+        Some(token) => cmd.env(super::SESSION_ENV, token),
+        None => cmd.env_remove(super::SESSION_ENV),
+    };
 
     let id = {
         let mut counter = PTY_COUNTER.lock().unwrap_or_else(|e| e.into_inner());
@@ -436,11 +586,17 @@ pub async fn pty_create(
     // El grupo se crea ANTES del spawn para que ya exista cuando el proceso empiece a
     // tener descendencia propia.
     let mut group = ProcessGroup::new(id);
-    let child = pair
-        .slave
-        .spawn_command(cmd)
-        .map_err(|e| format!("Failed to spawn '{command}': {e}"))?;
+    let child = match pair.slave.spawn_command(cmd) {
+        Ok(child) => child,
+        Err(e) => {
+            if let Some(path) = &codex_profile {
+                let _ = std::fs::remove_file(path);
+            }
+            return Err(format!("Failed to spawn '{command}': {e}"));
+        }
+    };
     group.adopt(&*child);
+    let root_pid = child.process_id();
 
     let writer = pair
         .master
@@ -463,7 +619,21 @@ pub async fn pty_create(
             None => Vec::new(),
         };
         let removed: Vec<PtySession> = old.iter().filter_map(|k| reg.remove(k)).collect();
-        reg.insert(id, PtySession { master: pair.master, writer, killer: child, group, tab_id: tab_id.clone() });
+        for session in &removed {
+            forget_session(session);
+        }
+        if let (Some(tab), Some(token), Some(pid)) = (tab_id.as_deref(), session_token.as_deref(), root_pid) {
+            super::publish_token(tab, token, pid);
+        }
+        reg.insert(id, PtySession {
+            master: pair.master,
+            writer,
+            killer: child,
+            group,
+            tab_id: tab_id.clone(),
+            session_token: session_token.clone(),
+            codex_profile,
+        });
         (old, removed)
     };
     for (k, mut session) in replaced.0.iter().copied().zip(replaced.1) {
@@ -513,7 +683,10 @@ pub async fn pty_create(
         // reclama su status en el sistema.
         let code = registry()
             .remove(&id)
-            .and_then(|mut session| session.killer.wait().ok())
+            .and_then(|mut session| {
+                forget_session(&session);
+                session.killer.wait().ok()
+            })
             .map_or(0, |status| status.exit_code() as i32);
         crate::orchestrator::watch::note_exit(id, code);
         app_clone.emit(&exit_event, PtyExitPayload { code }).ok();
@@ -638,6 +811,7 @@ pub async fn pty_resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
 #[tauri::command]
 pub async fn pty_kill(id: u32) -> Result<(), String> {
     if let Some(mut session) = registry().remove(&id) {
+        forget_session(&session);
         // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
         // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los
         // hijos y se pierde el vínculo). Con cgroups o Job Objects el orden da igual.
@@ -663,6 +837,7 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
 pub fn kill_all_sessions() {
     let sessions: Vec<PtySession> = registry().drain().map(|(_, s)| s).collect();
     for mut session in sessions {
+        forget_session(&session);
         session.group.kill_all();
         let _ = session.killer.kill();
         let _ = session.killer.wait();

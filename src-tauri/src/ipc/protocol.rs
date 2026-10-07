@@ -1,13 +1,16 @@
 //! Protocolo compartido entre la app y la CLI `ade-ags`.
 //!
-//! Transporte: TCP sobre loopback, una línea JSON por request y una por response.
+//! Transporte: una línea JSON por request y una por response.
 //!
-//! Se eligió TCP-en-loopback y no un socket Unix porque el mismo código tiene que
-//! funcionar en Windows sin traer un crate de named pipes. El costo es que cualquier
-//! proceso local puede *conectarse*, así que la autorización va aparte: la app escribe
-//! puerto y token en un archivo de handshake que solo el usuario puede leer, y toda
-//! request sin ese token se rechaza. Es el mismo modelo que usan los servidores de
-//! desarrollo locales (Jupyter, etc.).
+//! Hay dos canales. El TCP en loopback sigue siendo el que anuncia que la app está
+//! viva y el que entiende una CLI vieja: cualquier proceso local puede *conectarse*,
+//! así que la autorización de siempre es el token del handshake, legible solo por el
+//! usuario. Ese canal no dice quién es el proceso del otro lado.
+//!
+//! Memoria y swarm necesitan ese proceso. Cuando el handshake trae `socket`, la CLI
+//! usa un socket Unix (Linux `SO_PEERCRED`, macOS `LOCAL_PEERPID`) o un named pipe
+//! de Windows (`GetNamedPipeClientProcessId`). Sin ese campo, la CLI queda en el TCP
+//! y esos comandos se rechazan: no hay PID que comprobar.
 
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
@@ -34,6 +37,26 @@ pub const HANDSHAKE_ENV: &str = "AGS_HANDSHAKE";
 /// El handshake propio de la instancia con ese PID.
 pub fn instance_handshake_path(pid: u32) -> PathBuf {
     handshake_path().with_file_name("ipc").join(format!("{pid}.json"))
+}
+
+/// Onde a CLI conecta para que o servidor leia o PID dela.
+///
+/// No Unix é um arquivo de socket ao lado do handshake. No Windows é o nome
+/// de um pipe local (`\\.\pipe\ags-ipc-<pid>`), que não é caminho de disco.
+pub fn credential_endpoint(pid: u32) -> String {
+    #[cfg(unix)]
+    {
+        instance_handshake_path(pid).with_extension("sock").to_string_lossy().into_owned()
+    }
+    #[cfg(windows)]
+    {
+        format!(r"\\.\pipe\ags-ipc-{pid}")
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        let _ = pid;
+        String::new()
+    }
 }
 
 /// El handshake que tiene que usar la CLI: el de la instancia que la lanzó si existe, si no
@@ -101,6 +124,10 @@ pub struct Handshake {
     /// actualizar la app sin reinstalar la CLI), conviene decirlo con claridad en vez de
     /// fallar de formas raras al deserializar.
     pub protocol: u32,
+    /// Canal com PID do cliente. Ausente numa app antiga: a CLI usa o TCP e os
+    /// comandos que exigem ancestralidade são recusados.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub socket: Option<String>,
 }
 
 pub const PROTOCOL_VERSION: u32 = 1;

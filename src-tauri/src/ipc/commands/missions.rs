@@ -146,8 +146,41 @@ pub(super) fn mission_review(app: &AppHandle, args: &Value) -> Result<Value, Str
 
 /// `ags memory suggest --mission <id> --scope workspace|mission --key <k> --body "..."`: el agente
 /// PROPONE una memoria para la próxima misión. Queda pendiente: solo el usuario la aprueba.
+fn authenticated_tab(args: &Value) -> Result<String, String> {
+    crate::terminal::authorize(
+        arg_str_opt(args, "session").as_deref(),
+        arg_str_opt(args, "from").as_deref(),
+        crate::ipc::current_client_pid(),
+    )
+}
+
 fn memory_caller_mission(args: &Value) -> Result<String, String> {
-    memory_mission_in_boards(args, &crate::canvas::load_boards())
+    let tab = authenticated_tab(args)?;
+    let mut bound = args.clone();
+    bound["from"] = json!(tab);
+    memory_mission_in_boards(&bound, &crate::canvas::load_boards())
+}
+
+/// Workspace da aba autenticada. Missão ou aba solta, e recusa workspace em soft-delete.
+fn workspace_for_caller(conn: &rusqlite::Connection, tab: &str) -> Result<(String, Option<String>), String> {
+    let mission = crate::canvas::mission_of_tab(&crate::canvas::load_boards(), tab);
+    let workspace = if let Some(id) = &mission {
+        crate::missions::store::get(conn, id)?.ok_or_else(|| "mission not found".to_string())?.workspace_id
+    } else {
+        conn.query_row(
+            "SELECT w.workspace_id FROM tabs t JOIN windows w ON w.id=t.window_id JOIN workspaces s ON s.id=w.workspace_id WHERE t.id=?1 AND w.is_open=1 AND s.deleted_at IS NULL",
+            [tab],
+            |r| r.get(0),
+        )
+        .map_err(|_| "caller tab is unavailable".to_string())?
+    };
+    let deleted: Option<i64> = conn
+        .query_row("SELECT deleted_at FROM workspaces WHERE id=?1", [&workspace], |r| r.get(0))
+        .map_err(|_| "workspace unavailable".to_string())?;
+    if deleted.is_some() {
+        return Err("workspace is unavailable".into());
+    }
+    Ok((workspace, mission))
 }
 
 fn memory_mission_in_boards(args: &Value, boards: &crate::canvas::Boards) -> Result<String, String> {
@@ -166,8 +199,8 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
     let kind = arg_str_opt(args, "kind").unwrap_or_else(|| "note".into());
     let priority = args.get("priority").and_then(Value::as_i64).unwrap_or(0);
 
-    // Quién propone: la terminal que llamó (`from`). El orquestador se distingue por su nombre.
-    let from = arg_str_opt(args, "from");
+    // Quién propone: a aba que a sessão autenticou, não o `from` que o agente mandou.
+    let from = Some(authenticated_tab(args)?);
     let name = from
         .as_deref()
         .and_then(|id| super::peers::open_tabs(app).ok()?.into_iter().find(|t| t.id == id).map(|t| t.name))
@@ -246,12 +279,10 @@ pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, Stri
 
 pub(super) fn memory_repo_read(app: &AppHandle, args: &Value, index: bool) -> Result<Value, String> {
     let path = if index { "MEMORY.md".to_string() } else { arg_str(args, "path")? };
+    let tab = authenticated_tab(args)?;
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let tab=arg_str(args,"from")?;
-    let mission=crate::canvas::mission_of_tab(&crate::canvas::load_boards(),&tab);
-    let workspace=if let Some(id)=&mission {crate::missions::store::get(&conn,id)?.ok_or("mission not found")?.workspace_id}
-    else {conn.query_row("SELECT w.workspace_id FROM tabs t JOIN windows w ON w.id=t.window_id JOIN workspaces s ON s.id=w.workspace_id WHERE t.id=?1 AND w.is_open=1 AND s.deleted_at IS NULL",[tab],|r|r.get::<_,String>(0)).map_err(|_|"caller tab is unavailable")?};
+    let (workspace, mission) = workspace_for_caller(&conn, &tab)?;
     let text = crate::memory::repo::approved_open(&conn, &workspace, mission.as_deref(), &path)?;
     Ok(json!({"path": path, "text": text}))
 }
@@ -278,21 +309,24 @@ pub(super) fn swarm_promote(app:&AppHandle,args:&Value)->Result<Value,String>{
     Ok(json!(result))
 }
 
-pub(super) fn memory_maintenance(app:&AppHandle,args:&Value,compact:bool)->Result<Value,String>{
-    let db=db(app)?;
-    let conn=db.lock().map_err(|e|e.to_string())?;
-    let tab=arg_str(args,"from")?;
-    let workspace:String=if let Some(mission)=crate::canvas::mission_of_tab(&crate::canvas::load_boards(),&tab){
-        crate::missions::store::get(&conn,&mission)?.ok_or("mission not found")?.workspace_id
-    }else{conn.query_row("SELECT w.workspace_id FROM tabs t JOIN windows w ON w.id=t.window_id WHERE t.id=?1 AND w.is_open=1",[tab],|r|r.get(0)).map_err(|_|"caller tab unavailable")?};
+pub(super) fn memory_maintenance(app: &AppHandle, args: &Value, compact: bool) -> Result<Value, String> {
     if compact {
-        let days=match args.get("retentionDays") {
-            None=>30,
-            Some(v)=>v.as_i64().or_else(||v.as_str()?.parse().ok()).ok_or("retentionDays must be an integer")?,
-        };
-        let count=crate::memory::lifecycle::compact_workspace(&conn,days,Some(&workspace))?;
-        Ok(json!({"workspaceId":workspace,"compacted":count}))
-    }else{crate::memory::lifecycle::export(&conn,&workspace,&crate::memory::repo::default_root()?)}
+        return Err(crate::ipc::AGENT_MAINTENANCE_DENIED.into());
+    }
+    let tab = authenticated_tab(args)?;
+    let db = db(app)?;
+    let workspace = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let (workspace, _) = workspace_for_caller(&conn, &tab)?;
+        drop(conn);
+        workspace
+    };
+    // Mutex do app já solto. O #115 troca as três linhas seguintes por
+    // `lifecycle::export_detached` (worker fora do lock). Não voltar a chamar
+    // `lifecycle::export` com o `db.lock()` ainda preso: o rebase fica nesta chamada.
+    let conn = rusqlite::Connection::open(crate::database::user_db_path()).map_err(|e| e.to_string())?;
+    conn.busy_timeout(Duration::from_secs(5)).map_err(|e| e.to_string())?;
+    crate::memory::lifecycle::export(&conn, &workspace, &crate::memory::repo::default_root()?)
 }
 
 fn parse_memory_at(value: &str) -> Result<i64, String> {
@@ -465,6 +499,33 @@ mod memory_time_tests {
         assert_eq!(super::memory_mission_in_boards(&serde_json::json!({"from":"caller","mission":"foreign"}), &boards).unwrap(), "actual");
         assert!(super::memory_mission_in_boards(&serde_json::json!({"mission":"actual"}), &boards).is_err());
         assert!(super::memory_mission_in_boards(&serde_json::json!({"from":"missing","mission":"actual"}), &boards).is_err());
+    }
+
+    #[test]
+    fn forged_ade_tab_id_is_refused_before_the_mission_lookup() {
+        let tab = format!("real-{}", uuid::Uuid::new_v4());
+        let token = uuid::Uuid::new_v4().to_string();
+        crate::terminal::publish_token(&tab, &token, std::process::id());
+        let forged = crate::ipc::with_client_pid(Some(std::process::id()), || {
+            super::authenticated_tab(&serde_json::json!({"from":"other-tab","session":&token,"mission":"foreign"}))
+        });
+        assert!(forged.unwrap_err().contains("ADE_TAB_ID"));
+        let same = crate::ipc::with_client_pid(Some(std::process::id()), || {
+            super::authenticated_tab(&serde_json::json!({"from":&tab,"session":&token}))
+        });
+        assert_eq!(same.unwrap(), tab);
+        let stranger = crate::ipc::with_client_pid(Some(1), || {
+            super::authenticated_tab(&serde_json::json!({"from":&tab,"session":&token}))
+        });
+        if crate::terminal::ancestry_required() {
+            let err = stranger.unwrap_err();
+            assert!(err.contains("não pertence"), "{err}");
+        }
+        crate::terminal::release_token(&token);
+        let gone = crate::ipc::with_client_pid(Some(std::process::id()), || {
+            super::authenticated_tab(&serde_json::json!({"from":&tab,"session":&token}))
+        });
+        assert!(gone.is_err());
     }
 
     #[test]

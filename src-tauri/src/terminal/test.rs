@@ -477,6 +477,55 @@ fn codex_recibe_el_id_de_la_tab_por_su_config() {
     assert_eq!(with_codex_tab_id(&launched, Some("tab-1")), launched);
 }
 
+/// O valor de `ADE_SESSION` não entra no argv do Codex (nem no Windows, onde
+/// a linha aparece no Gerenciador de Tarefas). O sandbox lê um perfil 0600.
+#[test]
+fn codex_argv_nao_contem_o_token_da_sessao() {
+    use super::pty_manager::{split_command, with_codex_identity, write_codex_session_profile_at};
+
+    let token = "sess-1-token-secreto";
+    let launched = with_codex_identity(
+        "\"C:\\Program Files\\codex.exe\" resume x",
+        Some("tab-1"),
+        Some("ags-perfil"),
+    );
+    let argv = split_command(&launched);
+    assert!(argv.iter().all(|arg| !arg.contains(token)), "{argv:?}");
+    assert!(!launched.contains("ADE_SESSION"), "{launched}");
+    assert_eq!(
+        argv,
+        vec![
+            "C:\\Program Files\\codex.exe",
+            "-c",
+            "shell_environment_policy.set.ADE_TAB_ID=\"tab-1\"",
+            "--profile",
+            "ags-perfil",
+            "resume",
+            "x",
+        ]
+    );
+    let cmd = with_codex_identity("C:\\Windows\\System32\\codex.cmd", Some("t"), Some("ags-s"));
+    assert!(cmd.contains("--profile ags-s"));
+    assert!(!cmd.contains(token));
+    let unsafe_profile = with_codex_identity("codex", Some("tab-1"), Some("a\"b;calc"));
+    assert!(!unsafe_profile.contains("calc"));
+    assert!(!unsafe_profile.contains("--profile"));
+    assert_eq!(with_codex_identity("claude", Some("t"), Some("ags-s")), "claude");
+
+    let home = std::env::temp_dir().join(format!("ags-codex-profile-{}", uuid::Uuid::new_v4()));
+    let path = write_codex_session_profile_at(&home, "ags-perfil", token).unwrap();
+    let body = std::fs::read_to_string(&path).unwrap();
+    assert!(body.contains(token), "{body}");
+    assert!(body.contains("ADE_SESSION"));
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&path).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600, "o arquivo do token tem de ser só do usuário");
+    }
+    let _ = std::fs::remove_dir_all(&home);
+}
+
 /// Un carácter partido entre dos lecturas del PTY sale entero, no como dos `�`.
 #[test]
 fn un_caracter_partido_entre_lecturas_sale_entero() {
