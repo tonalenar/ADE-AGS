@@ -128,16 +128,23 @@ O workflow [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) roda em 
 | SO | Job | O que roda | Tempo |
 |---|---|---|---|
 | **Linux** (`ubuntu-22.04`) | `test` | `tsc --noEmit`, `babel-parse-check`, `vitest` (`bun run test`), `cargo test --lib --bin ags` | **~4 min** |
-| **Windows** (`windows-latest`) | `check (windows)` | `cargo check --lib --bin ags --tests` (compila o código `#[cfg(windows)]` e os testes, sem executá-los) | **TBD** (a medir no CI) |
+| **Windows** (`windows-latest`) | `check (windows)` | `cargo check --lib --bins --tests` (compila o código `#[cfg(windows)]`, todos os binários e os testes, sem executá-los) | **3m44s** frio · **~1m40s** com cache quente (o passo do `cargo check` leva ~27s) |
 | **macOS** | — | Nada no CI; só no release (`release.yml`) | — |
 
-Referência local: `cargo check --lib --bin ags --tests` no Windows, com o alvo compartilhado (`~/.ags/cargo-target-agents`) já aquecido, levou **40,7s** (`Measure-Command`, exit 0). O job do Windows não precisa de bun nem da pasta `dist` do frontend: em build de debug o Tauri usa `devUrl`, e o check passou localmente sem `dist`.
+Referência local: `cargo check --lib --bin ags --tests` no Windows, com o alvo compartilhado (`~/.ags/cargo-target-agents`) já aquecido, levou **40,7s** (`Measure-Command`, exit 0). Esse número é anterior à troca para `--bins`. O job do Windows não precisa de bun nem da pasta `dist` do frontend: em build de debug o Tauri usa `devUrl`, e o check passou localmente sem `dist`.
 
 Qualquer job que falhe já deixa o PR vermelho. Hoje a `master` **não tem branch protection nem rulesets** (`gh api repos/tonalenar/ADE-AGS/branches/master/protection` → 404 "Branch not protected"), então nenhum check é formalmente obrigatório para o merge.
 
 ### Por que `cargo check` e não `cargo test` no Windows
-- **O binário de teste da lib não arranca no runner Windows** (`STATUS_ENTRYPOINT_NOT_FOUND`, 0xc0000139): ele linka WebView2 e roda a partir de `target/debug/deps/`, onde o loader não está. É um problema do arnês de testes, não do código (ver o comentário em `release.yml`, no passo "Tests de Rust"). Os testes com gate `#[cfg(windows)]` continuam sendo rodados à mão no Windows.
-- **Custo de tempo:** compilar e rodar a suíte Rust no runner Windows é caro; o PR 117 levou **18 min** de CI. O `cargo check` pega erros de compilação sem gerar código nem linkar.
+- **Medido:** `cargo test --lib --bin ags` no runner Windows (PR descartável 120, já fechado) **roda**: o binário sobe (o `build.rs` embute o manifesto de teste, então não há mais `STATUS_ENTRYPOINT_NOT_FOUND`). Resultado: **1266 passed, 2 failed, 10 ignored** em 71,6s; o passo levou **4m12s**.
+- **As 2 falhas só aparecem no Windows:** `ipc::test::un_symlink_que_apunta_a_otro_lado_no_cuenta_como_instalado` (os error 183) e `missions::cleanup::tests::listing_and_prune_preserve_orphans_and_active_then_clean_closed`.
+- **Decisão:** no CI do Windows fica só o `check`. Motivo: rodar os testes soma ~4 min ao job e as 2 falhas deixariam o job vermelho sem ser regressão de PR. Os testes com gate `#[cfg(windows)]` continuam sendo rodados à mão no Windows.
+- O `cargo check` pega erros de compilação sem gerar código nem linkar.
+
+### Prova: o job pega quebra só-Windows
+- Branch descartável a partir do commit da doc de CI (`9380b6f`, reescrito depois como `8518e74`), com a linha `let _quebra: u32 = "texto-em-vez-de-numero";` dentro de `#[cfg(windows)]` em `src-tauri/src/ipc/transport.rs`.
+- Local (Windows): `cargo check --lib --bin ags --tests` falhou com `error[E0308]: mismatched types` em `src-tauri/src/ipc/transport.rs:112`.
+- CI: PR descartável [#118](https://github.com/tonalenar/ADE-AGS/pull/118) (fechado, branch apagada). Run [37695392738](https://github.com/tonalenar/ADE-AGS/actions/runs/37695392738): `check (windows)` **falhou** com `error[E0308]: mismatched types --> src\ipc\transport.rs:112:24`; `test` (Linux) ainda estava em execução (no passo de `cargo test`) quando o PR foi fechado, então não há resultado dele registrado aqui; a prova vale pelo `check (windows)`.
 
 ### Histórico
-Os PRs **113** e **114** quebraram o build **só no Windows** com o CI verde, porque o único job de CI rodava em Linux e não compilava o código `#[cfg(windows)]` (o conserto veio no PR 117, "Windows: corrige o build do named pipe de credencial"). O job `check (windows)` existe para pegar esse tipo de quebra antes do merge.
+O PR **117** ("Windows: corrige o build do named pipe de credencial") corrigiu uma quebra só-Windows do named pipe de credencial que o CI de Linux não compilava; o run de CI desse PR levou ~18 min. O commit de correção (`a6e803e`) cita "(#113)" no assunto, mas o PR #113 mergeado é outro (M8, `50b21b1`), então a doc cita o 117. Não verificamos qual PR introduziu a quebra. O job `check (windows)` existe para pegar esse tipo de quebra antes do merge.
