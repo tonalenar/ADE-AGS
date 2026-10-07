@@ -26,17 +26,71 @@ pub const MAX_AGENT_PRIORITY: i64 = 3;
 
 const SECRET_PREFIXES: &[&str] = &["sk-", "sk_live_", "sk_test_", "glpat-", "npm_", "ghp_", "gho_", "github_pat_", "xoxa-", "xoxb-", "xoxp-", "xoxr-", "xoxs-", "AKIA", "ASIA", "AIza", "ya29.", "eyJ"];
 
-/// Shared guard for durable proposals, run facts and Markdown exports.
-pub fn looks_like_secret(text: &str) -> bool {
+/// Prefixo estável para a interface pedir confirmação consciente, sem interpretar a frase.
+pub const SECRET_CONFIRMATION_CODE: &str = "CONFIRMACAO_DE_CREDENCIAL";
+
+pub fn secret_confirmation_error() -> String {
+    format!("{SECRET_CONFIRMATION_CODE}: Esta proposta parece conter uma credencial (chave, token ou senha). Reescreva sem o valor ou confirme conscientemente para guardar mesmo assim.")
+}
+
+/// `password: hunter2` é credencial. `senha: mínimo 12 caracteres` é política de senha.
+/// Só o painel do usuário usa este critério. Worker, lead e swarm usam a atribuição inteira.
+fn assignment_value_is_secret(raw: &str, rest: &str) -> bool {
+    let value = raw.trim_matches(|c: char| matches!(c, '"' | '\'' | '`' | ',' | ';' | '{' | '}' | '[' | ']' | '(' | ')' | '.'));
+    if value.is_empty() || !value.is_ascii() {
+        return false;
+    }
+    let followed_by_prose = rest.split_whitespace().next().is_some_and(|word| {
+        let word = word.trim_matches(|c: char| !c.is_alphanumeric());
+        !word.is_empty()
+    });
+    if !followed_by_prose {
+        return true;
+    }
+    if value.len() >= 20 && SECRET_PREFIXES.iter().any(|prefix| value.starts_with(prefix)) {
+        return true;
+    }
+    let has_digit = value.bytes().any(|b| b.is_ascii_digit());
+    let has_symbol = value.bytes().any(|b| matches!(b, b'-' | b'_' | b'+' | b'/' | b'=' | b'$' | b'#' | b'@' | b'%' | b'!' | b'&' | b'*'));
+    (has_digit && value.len() >= 6) || (has_symbol && value.len() >= 8) || value.len() >= 24
+}
+
+fn assignment_is_secret(text: &str, relaxed: bool) -> bool {
     use std::sync::OnceLock;
     static ASSIGNMENT: OnceLock<regex::Regex> = OnceLock::new();
+    let pattern = ASSIGNMENT.get_or_init(|| {
+        regex::Regex::new(r#"(?i)\b(password|passwd|senha|secret|token|api_key|apikey)["']?\s*[:=]\s*(\S+)"#).unwrap()
+    });
+    pattern.captures_iter(text).any(|caps| {
+        if !relaxed {
+            return true;
+        }
+        let value = caps.get(2).map(|m| m.as_str()).unwrap_or("");
+        let end = caps.get(2).map(|m| m.end()).unwrap_or(0);
+        assignment_value_is_secret(value, text.get(end..).unwrap_or(""))
+    })
+}
+
+/// Detector rígido para worker, lead, swarm, fatos e o Dreamer.
+/// Qualquer `senha: valor` conta, mesmo com texto depois ou com acento.
+pub fn looks_like_secret(text: &str) -> bool {
+    looks_like_secret_inner(text, false)
+}
+
+/// Detector do painel do usuário. Frase de política de senha não pede confirmação.
+pub fn looks_like_user_secret(text: &str) -> bool {
+    looks_like_secret_inner(text, true)
+}
+
+fn looks_like_secret_inner(text: &str, relaxed_assignment: bool) -> bool {
+    use std::sync::OnceLock;
     static CREDENTIAL_URL: OnceLock<regex::Regex> = OnceLock::new();
     let lower = text.to_lowercase();
     if lower.contains("-----begin") && lower.contains("private key-----")
         || lower.contains("authorization: bearer") {
         return true;
     }
-    if ASSIGNMENT.get_or_init(|| regex::Regex::new(r#"(?i)\b(password|passwd|senha|secret|token|api_key|apikey)["']?\s*[:=]\s*\S+"#).unwrap()).is_match(text)
+    if assignment_is_secret(text, relaxed_assignment)
         || CREDENTIAL_URL.get_or_init(|| regex::Regex::new(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s/@:]+:[^\s/@]+@[^\s/]+").unwrap()).is_match(text) {
         return true;
     }
@@ -128,6 +182,7 @@ pub fn propose_for_mission(conn: &Connection, p: &AgentProposal<'_>) -> Result<P
         expected_revision: None,
         source_fact_id: None,
         reason: Some(format!("Proposta de {} na missão {short}", p.author_name)),
+        acknowledge_secret: false,
     };
     propose(
         conn,

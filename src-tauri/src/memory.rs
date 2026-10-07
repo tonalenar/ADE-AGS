@@ -229,6 +229,9 @@ pub struct ProposalInput {
     #[serde(skip)]
     pub source_fact_id: Option<String>,
     pub reason: Option<String>,
+    /// User-only. Agents cannot bypass the secret guard by setting this.
+    #[serde(default)]
+    pub acknowledge_secret: bool,
 }
 fn default_operation() -> String {
     "create".into()
@@ -316,6 +319,24 @@ fn owner_quota(
 
 /// Create an immutable proposal. The caller supplies owners only after deriving and
 /// validating them from the current UI workspace or the caller's own Run.
+pub(crate) fn secret_acknowledged(conn: &Connection, entry_id: &str, revision: i64) -> bool {
+    conn.query_row(
+        "SELECT EXISTS(SELECT 1 FROM memory_secret_overrides WHERE entry_id=?1 AND revision=?2)",
+        params![entry_id, revision],
+        |r| r.get(0),
+    )
+    .unwrap_or(false)
+}
+
+fn remember_secret_override(conn: &Connection, entry_id: &str, revision: i64) -> Result<(), String> {
+    conn.execute(
+        "INSERT OR IGNORE INTO memory_secret_overrides(entry_id,revision,created_at) VALUES(?1,?2,?3)",
+        params![entry_id, revision, now()],
+    )
+    .map(|_| ())
+    .map_err(|e| e.to_string())
+}
+
 pub fn propose(
     conn: &Connection,
     scope: &str,
@@ -331,13 +352,18 @@ pub fn propose(
     let key = normalize_key(&input.key)?;
     let body = normalize_body(&input.body)?;
     let reason = normalize_reason(input.reason.as_deref())?;
+    let fields = [key.as_str(), body.as_str(), reason.as_deref().unwrap_or("")];
+    // Agente continua no detector rígido. O afrouxamento é só o texto do usuário no painel.
     if actor.kind != "user" {
-        for text in [key.as_str(), body.as_str(), reason.as_deref().unwrap_or("")] {
-            if agent::looks_like_secret(text) {
-                return Err("memory cannot contain credentials".into());
-            }
+        if fields.iter().any(|text| agent::looks_like_secret(text)) {
+            return Err("memory cannot contain credentials".into());
         }
     }
+    let has_secret = actor.kind == "user" && fields.iter().any(|text| agent::looks_like_user_secret(text));
+    if has_secret && !input.acknowledge_secret {
+        return Err(agent::secret_confirmation_error());
+    }
+    let user_confirmed_secret = has_secret && input.acknowledge_secret;
     let input = &ProposalInput {
         key: key.clone(),
         body: body.clone(),
@@ -372,6 +398,7 @@ pub fn propose(
         (Some((id, status, current)), "create") if current.is_some() && status == "active" => {
             let current_content: Option<(String,i64)>=tx.query_row("SELECT content_hash,priority FROM memory_revisions WHERE entry_id=?1 AND revision=?2 AND status='approved'",params![id,current],|r|Ok((r.get(0)?,r.get(1)?))).optional().map_err(|_| "could not inspect current memory revision".to_string())?;
             if current_content.as_ref() == Some(&(content_hash.clone(), input.priority)) {
+                if user_confirmed_secret { remember_secret_override(&tx, &id, current.unwrap())?; }
                 tx.commit()
                     .map_err(|_| "could not finish memory proposal".to_string())?;
                 return Ok(ProposalResult {
@@ -414,6 +441,7 @@ pub fn propose(
     if input.operation == "update" {
         let approved_content: (String,i64) = tx.query_row("SELECT content_hash,priority FROM memory_revisions WHERE entry_id=?1 AND revision=?2 AND status='approved'", params![entry_id,current_revision], |r| Ok((r.get(0)?,r.get(1)?))).map_err(|_| "approved revision unavailable".to_string())?;
         if approved_content == (content_hash.clone(), input.priority) {
+            if user_confirmed_secret { remember_secret_override(&tx, &entry_id, current_revision.unwrap())?; }
             tx.commit().map_err(|e| e.to_string())?;
             return Ok(ProposalResult { entry_id, revision: current_revision.unwrap(), status: "approved".into(), idempotent: true, warning: None });
         }
@@ -421,6 +449,7 @@ pub fn propose(
     let pending: Option<(i64,String,String,i64)> = tx.query_row("SELECT revision,content_hash,operation,priority FROM memory_revisions WHERE entry_id=?1 AND status='proposed'",[&entry_id],|r|Ok((r.get(0)?,r.get(1)?,r.get(2)?,r.get(3)?))).optional().map_err(|_| "could not inspect pending memory revision".to_string())?;
     if let Some((rev, old_hash, operation, priority)) = pending {
         if old_hash == content_hash && operation == input.operation && priority == input.priority {
+            if user_confirmed_secret { remember_secret_override(&tx, &entry_id, rev)?; }
             tx.commit()
                 .map_err(|_| "could not finish memory proposal".to_string())?;
             return Ok(ProposalResult {
@@ -483,6 +512,7 @@ pub fn propose(
         params![t, entry_id],
     )
     .map_err(|_| "could not update memory timestamp".to_string())?;
+    if user_confirmed_secret { remember_secret_override(&tx, &entry_id, revision)?; }
     tx.commit()
         .map_err(|_| "could not commit memory proposal".to_string())?;
     Ok(ProposalResult {
@@ -1086,6 +1116,7 @@ pub fn promote_fact(
         expected_revision: None,
         source_fact_id: Some(fact_id.into()),
         reason: reason.map(str::to_string),
+        acknowledge_secret: false,
     };
     propose(
         conn,
@@ -1336,6 +1367,7 @@ pub fn task_tool(
                 expected_revision: None,
                 source_fact_id: None,
                 reason: input.reason,
+                acknowledge_secret: false,
             };
             encode(
                 &serde_json::to_value(propose(
@@ -1379,6 +1411,7 @@ pub fn task_tool(
                 expected_revision: Some(input.expected_revision),
                 source_fact_id: None,
                 reason: input.reason,
+                acknowledge_secret: false,
             };
             encode(
                 &serde_json::to_value(propose(
@@ -1427,6 +1460,7 @@ pub fn task_tool(
                 expected_revision: Some(input.expected_revision),
                 source_fact_id: None,
                 reason: input.reason,
+                acknowledge_secret: false,
             };
             encode(
                 &serde_json::to_value(propose(
@@ -1589,13 +1623,33 @@ pub fn memory_decide_user(
     entry_id: String,
     revision: i64,
     approve: bool,
+    acknowledge_secret: Option<bool>,
     app: tauri::AppHandle,
     db: tauri::State<DbConnection>,
     sync: tauri::State<repo_sync::RepoSync>,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    // The decision is committed here. Export/git is queued and must not keep this lock:
-    // a batch would otherwise freeze every other database caller for the git timeouts.
+    if approve {
+        let (key, body, reason): (String, String, Option<String>) = conn
+            .query_row(
+                "SELECT e.key, r.body, r.reason FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id WHERE e.id=?1 AND r.revision=?2",
+                params![entry_id, revision],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .map_err(|_| "memory proposal not found".to_string())?;
+        // Mesmo critério relaxado da proposta no painel. O git fica na fila do #115.
+        let secret = agent::looks_like_user_secret(&key)
+            || agent::looks_like_user_secret(&body)
+            || reason.as_deref().is_some_and(agent::looks_like_user_secret);
+        let acknowledged = secret_acknowledged(&conn, &entry_id, revision);
+        if secret && !acknowledged && !acknowledge_secret.unwrap_or(false) {
+            return Err(agent::secret_confirmation_error());
+        }
+        if secret && acknowledge_secret.unwrap_or(false) {
+            remember_secret_override(&conn, &entry_id, revision)?;
+        }
+    }
+    // A decisão grava no banco. A exportação entra na fila e solta o lock antes do git.
     let result = repo_sync::decide_and_schedule(&conn, &sync, &entry_id, revision, approve);
     drop(conn);
     notify_changed(&app);

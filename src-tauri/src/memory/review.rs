@@ -384,7 +384,9 @@ mod tests {
             expected_revision: None,
             source_fact_id: None,
             reason: None,
-        };
+        
+            acknowledge_secret: false,
+};
         let r = propose(
             conn,
             scope,
@@ -498,7 +500,9 @@ mod tests {
             body: "A workspace finding from a mission run".into(), priority: 0,
             operation: "create".into(), expected_revision: None, source_fact_id: None,
             reason: Some("Terminal evidence".into()),
-        };
+        
+            acknowledge_secret: false,
+};
         propose(&conn, "workspace", "w", None, &input,
             ProposalActor { kind: "worker", run_id: Some("run"), task_id: None, fact_id: None }).unwrap();
         let mission = review_summary(&conn, "m").unwrap();
@@ -541,7 +545,9 @@ mod tests {
         let input = ProposalInput {
             scope: "workspace".into(), key: "obsolete".into(), kind: "note".into(), body: "Old workspace evidence".into(),
             priority: 0, operation: "delete".into(), expected_revision: Some(revision), source_fact_id: None, reason: Some("No longer applicable".into()),
-        };
+        
+            acknowledge_secret: false,
+};
         propose(&conn, "workspace", "w", None, &input, ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None }).unwrap();
         let summary = review_summary_workspace(&conn, "w").unwrap();
         assert_eq!(summary.groups.len(), 2);
@@ -571,7 +577,9 @@ mod tests {
         let input = ProposalInput {
             scope: "mission".into(), key: "obsolete".into(), kind: "note".into(), body: "Old mission evidence".into(),
             priority: 0, operation: "delete".into(), expected_revision: Some(revision), source_fact_id: None, reason: None,
-        };
+        
+            acknowledge_secret: false,
+};
         propose(&conn, "mission", "w", Some("m"), &input, ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None }).unwrap();
         let summary = review_summary_workspace(&conn, "w").unwrap();
         assert_eq!(summary.counts.total, 1);

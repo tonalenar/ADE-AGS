@@ -89,7 +89,7 @@ export function inboxKeyAction(key: string, confirmOpen: boolean): InboxKeyActio
  */
 export async function approveBulk(
   items: MemoryReviewItem[],
-  decide: (entryId: string, revision: number, approve: boolean) => Promise<void>,
+  decide: (entryId: string, revision: number, approve: boolean, acknowledgeSecret?: boolean) => Promise<unknown>,
   opts: { acknowledgeContradictions: boolean; /** Decisión puntual sobre UN item: permite duplicados. */ explicit?: boolean },
 ): Promise<BulkOutcome> {
   const dupes = opts.explicit ? [] : items.filter((i) => reviewFlag(i) === "duplicate");
@@ -109,7 +109,7 @@ export async function approveBulk(
 /** Rechaza en masa (no hay riesgo de contradicción: no se agrega nada a la memoria). */
 export async function rejectBulk(
   items: MemoryReviewItem[],
-  decide: (entryId: string, revision: number, approve: boolean) => Promise<void>,
+  decide: (entryId: string, revision: number, approve: boolean, acknowledgeSecret?: boolean) => Promise<unknown>,
 ): Promise<BulkOutcome> {
   return { ...(await decideAll(items, false, decide)), skippedContradictions: [], skippedDeletions: [], skippedDuplicates: [] };
 }

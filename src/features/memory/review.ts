@@ -30,7 +30,7 @@ export interface BatchResult {
 export async function decideAll(
   items: MemoryReviewItem[],
   approve: boolean,
-  decide: (entryId: string, revision: number, approve: boolean) => Promise<void>,
+  decide: (entryId: string, revision: number, approve: boolean, acknowledgeSecret?: boolean) => Promise<unknown>,
 ): Promise<BatchResult> {
   const result: BatchResult = { done: 0, failed: [] };
   for (const item of items) {

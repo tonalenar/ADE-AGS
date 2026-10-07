@@ -175,6 +175,36 @@ describe("Shared Memory interface",()=>{
  it("shows the immutable snapshot separately from Run Facts",async()=>{await render({missionId:"m1",runs:[run],activeRunId:"r1"});await click("Snapshot do Run");expect(container.textContent).toContain("Snapshot usado neste Run");expect(container.textContent).toContain("Snapshot vazio");await click("Run Facts");expect(container.textContent).toContain("Run discovery");expect(container.textContent).not.toContain("Snapshot vazio");});
  it("promotes a fact as a pending mission proposal",async()=>{await render({missionId:"m1",runs:[run],activeRunId:"r1"});await click("Run Facts");await click("Propor promoção");await change(container.querySelector('input:not([type="range"])')!,"discovery");await click("Enviar proposta");expect(mock.promote).toHaveBeenCalledWith("r1","f1","mission","discovery",0,undefined);expect(mock.decide).not.toHaveBeenCalled();});
  it("does not offer mission scope without a mission",async()=>{await render();await click("Propor memória");expect(container.querySelector('option[value="mission"]')).toBeNull();});
+ it("asks for a conscious confirmation and resubmits the proposal", async () => {
+  mock.propose.mockRejectedValueOnce("CONFIRMACAO_DE_CREDENCIAL: parece uma credencial");
+  await render();
+  await click("Propor memória");
+  const dialog = container.querySelector("[role='dialog']")!;
+  await change(dialog.querySelector("input:not([type='range'])")!, "segredo");
+  await change(dialog.querySelector("textarea")!, "password: hunter2");
+  await click("Enviar proposta");
+  expect(container.textContent).toContain("confirme conscientemente");
+  expect(mock.propose).toHaveBeenCalledWith("w1", null, expect.not.objectContaining({ acknowledgeSecret: true }));
+  await click("Guardar mesmo assim");
+  expect(mock.propose).toHaveBeenLastCalledWith("w1", null, expect.objectContaining({ acknowledgeSecret: true, body: "password: hunter2", key: "segredo" }));
+ });
+ it("asks before approving a credential and shows export warnings", async () => {
+  mock.list.mockResolvedValue({ items: [pending], hasMore: false, nextCursor: null, truncated: false });
+  mock.decide.mockRejectedValueOnce("CONFIRMACAO_DE_CREDENCIAL: parece uma credencial");
+  await render();
+  await click("Aprovar");
+  expect(mock.decide).toHaveBeenCalledWith("e1", 2, true);
+  expect(container.textContent).toContain("Confirmar e aprovar");
+  mock.decide.mockResolvedValueOnce(undefined);
+  await click("Confirmar e aprovar");
+  expect(mock.decide).toHaveBeenLastCalledWith("e1", 2, true, true);
+  const listener = mock.listen.mock.calls.find(([event]) => event === "cc-memory-repo-sync")?.[1] as (event: { payload: { workspaceId: string; phase: string; error: string | null; commit: null; pending: number; warnings: string[] } }) => void;
+  await act(async () => {
+    listener({ payload: { workspaceId: "w1", phase: "failed", error: "memory git failed: simulated outage", commit: null, pending: 1, warnings: ["Entrada e1@r2 foi omitida da projeção porque parece uma credencial."] } });
+  });
+  expect(container.textContent).toContain("omitida da projeção");
+  expect(container.textContent).toContain("Tentar de novo");
+ });
  it("renders malicious memory as text",async()=>{mock.list.mockResolvedValue({items:[{...entry,key:'<img src=x onerror="alert(1)">',body:'<script>steal()</script>'}],hasMore:false});await render();expect(container.querySelector("script")).toBeNull();expect(container.querySelector("img")).toBeNull();expect(container.textContent).toContain("<script>steal()</script>");});
  it("reloads on memory events without polling",async()=>{await render();const listener=mock.listen.mock.calls.find(([event])=>event==="cc-memory-changed")![1];mock.list.mockResolvedValue({items:[{...entry,body:"New approved content"}],hasMore:false});await act(async()=>listener({payload:null}));expect(container.textContent).toContain("New approved content");});
   it("loads validity history lazily only when expanding the toggle", async () => {

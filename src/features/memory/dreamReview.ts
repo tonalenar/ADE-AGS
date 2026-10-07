@@ -20,5 +20,5 @@ export function diffLines(diff: string): { kind: "add" | "del" | "ctx"; text: st
 /** Aprovar o grupo = decidir uma a uma pelas MESMAS regras da A3 (sem avisos aceitos, sem duplicatas). */
 export const approveDream = (
   dream: MemoryDream,
-  decide: (entryId: string, revision: number, approve: boolean) => Promise<void>,
+  decide: (entryId: string, revision: number, approve: boolean, acknowledgeSecret?: boolean) => Promise<unknown>,
 ): Promise<BulkOutcome> => approveBulk(dream.proposals, decide, { acknowledgeContradictions: false });

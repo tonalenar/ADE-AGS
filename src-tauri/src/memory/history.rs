@@ -203,7 +203,9 @@ mod tests {
             expected_revision: None,
             source_fact_id: None,
             reason: None,
-        };
+        
+            acknowledge_secret: false,
+};
         let proposal = propose(
             conn,
             scope,

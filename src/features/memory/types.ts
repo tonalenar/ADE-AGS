@@ -172,6 +172,8 @@ export interface MemoryProposal {
   operation: MemoryOperation;
   expectedRevision: number | null;
   reason?: string | null;
+  /** Confirmação consciente quando o texto parece uma credencial. */
+  acknowledgeSecret?: boolean;
 }
 
 export interface MemoryProposalResult {
@@ -239,6 +241,8 @@ export interface RepoSyncStatus {
   error: string | null;
   commit: string | null;
   pending: number;
+  /** Omissões de credencial. Chegam também quando a exportação falha e o usuário tenta de novo. */
+  warnings?: string[];
 }
 
 /** PROVISÓRIO (contrato proposto ao Backend, Etapa 23): um "sonho" do Dreamer com suas propostas e o diff Markdown. */

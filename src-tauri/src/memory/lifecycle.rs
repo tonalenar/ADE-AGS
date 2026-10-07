@@ -13,7 +13,7 @@ pub fn stats(conn: &Connection, workspace: &str) -> Result<Value, String> {
 /// Session data becomes only a proposal; approval remains a user action.
 pub fn swarm_promote(conn:&Connection,workspace:&str,mission:&str,id:&str,key:&str)->Result<ProposalResult,String>{
     let body:String=conn.query_row("SELECT body FROM memory_swarm_notes WHERE id=?1 AND workspace_id=?2 AND mission_id=?3",params![id,workspace,mission],|r|r.get(0)).map_err(|_|"swarm note unavailable")?;
-    super::propose(conn,"mission",workspace,Some(mission),&ProposalInput{scope:"mission".into(),key:key.into(),kind:"note".into(),body,priority:0,operation:"create".into(),expected_revision:None,source_fact_id:None,reason:Some(format!("Swarm note {id}"))},ProposalActor{kind:"worker",run_id:None,task_id:None,fact_id:None})
+    super::propose(conn,"mission",workspace,Some(mission),&ProposalInput{scope:"mission".into(),key:key.into(),kind:"note".into(),body,priority:0,operation:"create".into(),expected_revision:None,source_fact_id:None,reason:Some(format!("Swarm note {id}")),acknowledge_secret:false},ProposalActor{kind:"worker",run_id:None,task_id:None,fact_id:None})
 }
 
 struct ArchivePrep {

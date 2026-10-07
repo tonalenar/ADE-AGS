@@ -13,6 +13,35 @@ fn reconhece_credenciais_sem_confundir_texto_normal() {
     assert!(!looks_like_secret("Cada conta tem perfil isolado; nunca copiar credenciais entre contas."));
     assert!(!looks_like_secret("O prefixo sk- aparece nas chaves da Anthropic, mas aqui não há valor."));
     assert!(!looks_like_secret("rodar tauri dev --no-watch para não reiniciar o app"));
+    // Frase de política só passa no detector do usuário. Agente continua rígido.
+    for phrase in [
+        "senha: mínimo 12 caracteres",
+        "senha: minimo 12 caracteres",
+        "política de senha: mínimo 12 caracteres, com letra e número",
+        "password: use uma senha forte",
+        "token: não compartilhe com terceiros",
+        "secret: nunca grave segredos na memória do projeto",
+    ] {
+        assert!(!looks_like_user_secret(phrase), "{phrase}");
+        assert!(looks_like_secret(phrase), "{phrase}");
+    }
+    assert!(!looks_like_secret("A senha deve ter no mínimo 12 caracteres"));
+    assert!(!looks_like_user_secret("A senha deve ter no mínimo 12 caracteres"));
+    assert!(!looks_like_secret("O token de acesso expira em 12 horas"));
+    assert!(!looks_like_user_secret("O token de acesso expira em 12 horas"));
+    // Valor seguido de prosa continua credencial para o agente.
+    assert!(looks_like_secret("senha: primavera do servidor"));
+    assert!(looks_like_secret("senha: Açaí2024! do servidor"));
+    assert!(!looks_like_user_secret("senha: primavera do servidor"));
+    assert!(!looks_like_user_secret("senha: Açaí2024! do servidor"));
+    assert!(looks_like_secret("password: hunter2"));
+    assert!(looks_like_secret(&format!("{}{}", "sk_", "live_abcdefghijklmnopqrstuvwxyz")));
+    assert!(looks_like_secret("glpat-abcdefghijklmnopqrstuvwxyz"));
+    assert!(looks_like_secret("npm_abcdefghijklmnopqrstuvwxyz"));
+    assert!(looks_like_secret("xoxb-abcdefghijklmnopqrstuvwxyz"));
+    assert!(looks_like_secret("xoxp-abcdefghijklmnopqrstuvwxyz"));
+    assert!(looks_like_secret("https://admin:s3cret@example.com/db"));
+    assert!(looks_like_secret("AKIAIOSFODNN7EXAMPLE"));
 }
 
 fn setup() -> Connection {
@@ -102,6 +131,83 @@ fn o_orquestrador_se_reconhece_pelo_nome_da_aba() {
     assert_eq!(author_of("Backend"), Author::Worker);
     assert_eq!(author_of("agente"), Author::Worker);
     assert_eq!(author_of(""), Author::Worker);
+}
+
+#[test]
+fn worker_lead_e_swarm_recusam_senha_seguida_de_prosa_e_o_usuario_guarda_politica() {
+    let conn = setup();
+    let secrets = ["senha: primavera do servidor", "senha: Açaí2024! do servidor"];
+    for (i, secret) in secrets.iter().enumerate() {
+        let worker_key = format!("worker-{i}");
+        let err = propose_for_mission(&conn, &proposal("workspace", &worker_key, secret, 1)).unwrap_err();
+        assert!(err.contains("credencial"), "{err}");
+        let lead_key = format!("lead-{i}");
+        let mut lead = proposal("workspace", &lead_key, secret, 1);
+        lead.author = Author::Lead;
+        lead.author_name = "Orquestrador";
+        let err = propose_for_mission(&conn, &lead).unwrap_err();
+        assert!(err.contains("credencial"), "{err}");
+        let forced = crate::memory::ProposalInput {
+            scope: "workspace".into(),
+            key: format!("forcado-{i}"),
+            kind: "note".into(),
+            body: (*secret).into(),
+            priority: 0,
+            operation: "create".into(),
+            expected_revision: None,
+            source_fact_id: None,
+            reason: None,
+            acknowledge_secret: true,
+        };
+        for kind in ["worker", "lead"] {
+            let err = crate::memory::propose(
+                &conn,
+                "workspace",
+                "w",
+                None,
+                &forced,
+                crate::memory::ProposalActor { kind, run_id: None, task_id: None, fact_id: None },
+            )
+            .unwrap_err();
+            assert_eq!(err, "memory cannot contain credentials", "{kind} {secret}");
+        }
+        let err = crate::memory::lifecycle::swarm_write(&conn, "w", "m", "note", secret).unwrap_err();
+        assert!(err.contains("credentials"), "{err}");
+    }
+    for (i, phrase) in [
+        "senha: mínimo 12 caracteres",
+        "senha: minimo 12 caracteres",
+        "password: use uma senha forte",
+        "token: não compartilhe com terceiros",
+    ]
+    .iter()
+    .enumerate()
+    {
+        let input = crate::memory::ProposalInput {
+            scope: "workspace".into(),
+            key: format!("politica-{i}"),
+            kind: "note".into(),
+            body: (*phrase).into(),
+            priority: 0,
+            operation: "create".into(),
+            expected_revision: None,
+            source_fact_id: None,
+            reason: None,
+            acknowledge_secret: false,
+        };
+        let saved = crate::memory::propose(
+            &conn,
+            "workspace",
+            "w",
+            None,
+            &input,
+            crate::memory::ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None },
+        )
+        .unwrap();
+        assert_eq!(saved.status, "proposed", "{phrase}");
+    }
+    let n: i64 = conn.query_row("SELECT COUNT(*) FROM memory_entries", [], |r| r.get(0)).unwrap();
+    assert_eq!(n, 4, "só as frases de política do usuário foram gravadas");
 }
 
 #[test]

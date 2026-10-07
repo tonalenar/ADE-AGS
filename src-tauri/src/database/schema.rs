@@ -1162,6 +1162,14 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
             updated_at INTEGER NOT NULL
         );",
     )?;
+    // Confirmação consciente de uma proposta que parece credencial. O que não foi
+    // confirmado sai da projeção com aviso. Também sem subir user_version.
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS memory_secret_overrides (
+        entry_id TEXT NOT NULL,
+        revision INTEGER NOT NULL,
+        created_at INTEGER NOT NULL,
+        PRIMARY KEY(entry_id, revision)
+    );")?;
     set_user_version(conn, SCHEMA_VERSION)
 }
 

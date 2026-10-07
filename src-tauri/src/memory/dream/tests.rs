@@ -173,7 +173,9 @@ fn global_pending_limit_and_secret_proposal() {
                 expected_revision: None,
                 source_fact_id: None,
                 reason: None,
-            },
+            
+                acknowledge_secret: false,
+},
             super::super::ProposalActor {
                 kind: "user",
                 run_id: None,
@@ -204,7 +206,9 @@ fn v39_upgrade_preserves_data_indexes_and_delete_guard() {
             expected_revision: None,
             source_fact_id: None,
             reason: None,
-        },
+        
+            acknowledge_secret: false,
+},
         super::super::ProposalActor {
             kind: "user",
             run_id: None,
@@ -257,7 +261,9 @@ fn v39_upgrade_preserves_data_indexes_and_delete_guard() {
         expected_revision: None,
         source_fact_id: None,
         reason: None,
-    };
+    
+        acknowledge_secret: false,
+};
     let p = super::super::propose(
         &c,
         "workspace",

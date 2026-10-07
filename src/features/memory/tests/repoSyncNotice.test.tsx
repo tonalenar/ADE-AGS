@@ -60,6 +60,17 @@ describe("RepoSyncNotice", () => {
     await act(async () => { root.render(<RepoSyncNotice workspaceId="w1" />); });
   }
 
+  it("mostra a omissão junto da falha e do botão de tentar de novo", async () => {
+    sync.getRepoSyncStatus.mockResolvedValue({
+      ...failed,
+      warnings: ["Entrada e1@r2 foi omitida da projeção porque parece uma credencial."],
+    });
+    await render();
+    expect(container.textContent).toContain("omitida da projeção");
+    expect(container.textContent).toContain("memoryInbox.syncRetry");
+    expect(container.textContent).toContain("simulated outage");
+  });
+
   it("esconde quando o repositório já está sincronizado", async () => {
     await render();
     expect(container.textContent).toBe("");

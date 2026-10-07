@@ -33,18 +33,24 @@ export function RepoSyncNotice({ workspaceId }: { workspaceId: string }) {
     return () => { subscription.then((unlisten) => unlisten()).catch(() => undefined); };
   }, [workspaceId, apply]);
 
-  if (!status || status.phase === "idle" || status.phase === "synced") return null;
+  const warnings = status?.warnings ?? [];
+  if (!status || status.phase === "idle" || (status.phase === "synced" && warnings.length === 0)) return null;
 
   const failed = status.phase === "failed";
   return (
     <div role={failed ? "alert" : "status"} className={`flex flex-wrap items-center gap-2 rounded border px-2 py-1.5 text-[11.5px] ${failed ? "border-red-500/40 bg-red-500/10 text-red-700 dark:text-red-300" : "border-amber-500/40 bg-amber-500/10 text-amber-800 dark:text-amber-200"}`}>
-      <p className="min-w-0 flex-1">
-        {failed
-          ? t("memoryInbox.syncFailed", { error: status.error ?? "" })
-          : status.phase === "syncing"
-            ? t("memoryInbox.syncing")
-            : t("memoryInbox.syncQueued")}
-      </p>
+      <div className="min-w-0 flex-1">
+        {status.phase !== "synced" && (
+          <p>
+            {failed
+              ? t("memoryInbox.syncFailed", { error: status.error ?? "" })
+              : status.phase === "syncing"
+                ? t("memoryInbox.syncing")
+                : t("memoryInbox.syncQueued")}
+          </p>
+        )}
+        {warnings.map((warning) => <p key={warning}>{warning}</p>)}
+      </div>
       {failed && (
         <button type="button" onClick={() => { void memoryIpc.retryRepoSync(workspaceId).then(apply).catch(() => undefined); }}
           className="rounded border border-red-600 px-2 py-0.5 text-[11px] font-medium">

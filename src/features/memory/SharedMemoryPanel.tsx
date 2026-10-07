@@ -10,6 +10,7 @@ import { PurgeButton } from "./PurgeButton";
 import { SourceCheck } from "./SourceCheck";
 import { RepoSyncNotice } from "./RepoSyncNotice";
 import * as memoryIpc from "./ipc";
+import { errorText, needsSecretConfirmation } from "./secretConfirm";
 import type { MemoryDetail, MemoryEntry, MemoryKind, MemoryPage, MemoryProposal, MemoryScope, MemorySnapshot, MemoryValidityInterval, MemoryWorkspaceStats } from "./types";
 
 export type MemoryTab = "workspace" | "mission" | "facts" | "snapshot";
@@ -53,6 +54,9 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
   const [form, setForm] = useState<ProposalForm | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [secretPrompt, setSecretPrompt] = useState(false);
+  const [pendingSecret, setPendingSecret] = useState<MemoryEntry | null>(null);
   const [refreshKey, setRefreshKey] = useState(0);
   const [runSelection, setRunSelection] = useState<string | null>(null);
   const { t } = useTranslation();
@@ -128,7 +132,7 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
     return () => { for (const off of [offMemory, offFacts]) off.then((unlisten) => unlisten()).catch(() => {}); };
   }, [selectedRunId]);
 
-  const closeForm = useCallback(() => setForm(null), []);
+  const closeForm = useCallback(() => { setForm(null); setSecretPrompt(false); }, []);
   const reload = () => setRefreshKey((value) => value + 1);
   const loadMore = async (scope: MemoryScope) => {
     const page = scope === "workspace" ? workspacePage : missionPage;
@@ -170,38 +174,53 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
           expectedRevision: form.expectedRevision ?? null,
           reason: form.reason || null,
         };
+        if (secretPrompt) proposal.acknowledgeSecret = true;
         await memoryIpc.proposeMemory(workspaceId, form.scope === "mission" ? missionId : null, proposal);
       }
       setForm(null);
+      setSecretPrompt(false);
       setDetail(null);
       reload();
     } catch (cause) {
-      setError(String(cause));
+      if (needsSecretConfirmation(cause)) {
+        setSecretPrompt(true);
+        return;
+      }
+      setError(errorText(cause));
     } finally {
       setBusy(false);
     }
   };
 
-  const decide = async (entry: MemoryEntry, approve: boolean) => {
+  const decide = async (entry: MemoryEntry, approve: boolean, acknowledgeSecret = false) => {
     if (entry.pendingRevision === null) return;
     setBusy(true);
     setError("");
     try {
-      await memoryIpc.decideMemory(entry.id, entry.pendingRevision, approve);
+      if (acknowledgeSecret) await memoryIpc.decideMemory(entry.id, entry.pendingRevision, approve, true);
+      else await memoryIpc.decideMemory(entry.id, entry.pendingRevision, approve);
+      setNotice("");
+      setPendingSecret(null);
       setDetail(null);
       reload();
     } catch (cause) {
-      setError(String(cause));
+      if (approve && needsSecretConfirmation(cause)) {
+        setPendingSecret(entry);
+        return;
+      }
+      setError(errorText(cause));
     } finally {
       setBusy(false);
     }
   };
 
-  const openCreate = (scope: MemoryScope) => setForm({
-    mode: "create", scope, key: "", kind: "note", body: "", priority: 0, reason: "",
-  });
+  const openCreate = (scope: MemoryScope) => {
+    setSecretPrompt(false);
+    setForm({ mode: "create", scope, key: "", kind: "note", body: "", priority: 0, reason: "" });
+  };
   const openEdit = (entry: MemoryEntry) => {
     if (entry.currentRevision === null || entry.body === null) return;
+    setSecretPrompt(false);
     setForm({
       mode: "update", scope: entry.scope, key: entry.key, kind: entry.kind, body: entry.body,
       priority: entry.priority, reason: "", entryId: entry.id, expectedRevision: entry.currentRevision,
@@ -209,15 +228,19 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
   };
   const openDelete = (entry: MemoryEntry) => {
     if (entry.currentRevision === null || entry.body === null) return;
+    setSecretPrompt(false);
     setForm({
       mode: "delete", scope: entry.scope, key: entry.key, kind: entry.kind, body: entry.body,
       priority: entry.priority, reason: "", entryId: entry.id, expectedRevision: entry.currentRevision,
     });
   };
-  const openPromote = (fact: Fact) => setForm({
-    mode: "promote", scope: selectedRun?.missionId ? "mission" : "workspace", key: "",
-    kind: fact.kind, body: fact.body, priority: 0, reason: "", factId: fact.id,
-  });
+  const openPromote = (fact: Fact) => {
+    setSecretPrompt(false);
+    setForm({
+      mode: "promote", scope: selectedRun?.missionId ? "mission" : "workspace", key: "",
+      kind: fact.kind, body: fact.body, priority: 0, reason: "", factId: fact.id,
+    });
+  };
   const inspect = async (entry: MemoryEntry) => {
     setBusy(true);
     setError("");
@@ -304,6 +327,16 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
           {error}{loadFailed && <> <button type="button" onClick={reload} className="underline">{t("memorySearch.retry")}</button></>}
         </p>
       )}
+      {notice && <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{notice}</p>}
+      {pendingSecret && (
+        <div role="alert" className="flex flex-col gap-2 rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-200">
+          <p>A aprovação de <span className="font-mono">{pendingSecret.key}</span> parece conter uma credencial. Confirme conscientemente para guardá-la. Sem a confirmação, essa entrada não é aprovada; se já estiver no banco, a exportação omite só ela e segue com as outras.</p>
+          <div className="flex gap-2">
+            <Button variant="primary" size="sm" disabled={busy} onClick={() => decide(pendingSecret, true, true)}>Confirmar e aprovar</Button>
+            <Button variant="ghost" size="sm" disabled={busy} onClick={() => setPendingSecret(null)}>Cancelar</Button>
+          </div>
+        </div>
+      )}
       {tab === "workspace" && renderList("workspace")}
       {tab === "mission" && missionId && renderList("mission")}
       {tab === "facts" && (
@@ -311,8 +344,8 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
       )}
       {tab === "snapshot" && <RunSnapshot snapshot={snapshot} />}
       {detail && <MemoryHistory detail={detail} onClose={() => setDetail(null)} />}
-      {form && <MemoryProposalForm form={form} busy={busy} fact={form.factId ? factById.get(form.factId) : undefined}
-        allowMission={missionId !== null} onChange={setForm} onClose={closeForm} onSubmit={submit} />}
+      {form && <MemoryProposalForm form={form} busy={busy} secretPrompt={secretPrompt} fact={form.factId ? factById.get(form.factId) : undefined}
+        allowMission={missionId !== null} onChange={(next) => { setSecretPrompt(false); setForm(next); }} onClose={closeForm} onSubmit={submit} />}
     </section>
   );
 }
@@ -395,9 +428,10 @@ function VerificationLine({ entry, busy }: { entry: MemoryEntry; busy: boolean }
   );
 }
 
-function MemoryProposalForm({ form, busy, fact, allowMission, onChange, onClose, onSubmit }: {
+function MemoryProposalForm({ form, busy, secretPrompt, fact, allowMission, onChange, onClose, onSubmit }: {
   form: ProposalForm;
   busy: boolean;
+  secretPrompt: boolean;
   fact?: Fact;
   allowMission: boolean;
   onChange: (form: ProposalForm) => void;
@@ -427,6 +461,7 @@ function MemoryProposalForm({ form, busy, fact, allowMission, onChange, onClose,
     <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
       <section ref={ref} role="dialog" aria-modal="true" aria-labelledby="memory-proposal-title" className="flex max-h-[90vh] w-full max-w-lg flex-col gap-3 overflow-y-auto rounded-xl border border-gray-200 bg-white p-4 shadow-xl dark:border-white/10 dark:bg-neutral-900">
         <h4 id="memory-proposal-title" className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h4>
+        {secretPrompt && <p role="alert" className="rounded-md border border-amber-300/60 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-200">Este texto parece uma credencial (chave, token ou senha). Reescreva sem o valor ou confirme conscientemente para guardar mesmo assim.</p>}
         {deleting && <p className="text-xs text-gray-600 dark:text-white/55">A exclusão será registrada como proposta. A memória continuará ativa até a aprovação do usuário.</p>}
         {promoting && <p className="text-xs text-gray-600 dark:text-white/55">A promoção cria uma proposta pendente; o Run Fact original permanece separado e inalterado.</p>}
         {!deleting && (
@@ -458,7 +493,7 @@ function MemoryProposalForm({ form, busy, fact, allowMission, onChange, onClose,
         </label>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" size="sm" disabled={busy || !form.key.trim() || !deleting && !form.body.trim()} onClick={onSubmit}>Enviar proposta</Button>
+          <Button variant="primary" size="sm" disabled={busy || !form.key.trim() || !deleting && !form.body.trim()} onClick={onSubmit}>{secretPrompt ? "Guardar mesmo assim" : "Enviar proposta"}</Button>
         </div>
       </section>
     </div>

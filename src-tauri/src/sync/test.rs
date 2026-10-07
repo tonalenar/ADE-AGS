@@ -148,6 +148,11 @@ impl Machine {
 
 #[test]
 fn dos_maquinas_se_pasan_skills_y_configuracion_por_el_repo() {
+    // A suíte em paralelo disputa o git. 60s só nesta thread; um hang continua falhando.
+    crate::scm::with_longer_local_git(std::time::Duration::from_secs(60), || dos_maquinas_body());
+}
+
+fn dos_maquinas_body() {
     let root = std::env::temp_dir().join(format!("cc-sync-{}", std::process::id()));
     let _ = std::fs::remove_dir_all(&root);
     std::fs::create_dir_all(&root).unwrap();

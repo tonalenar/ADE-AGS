@@ -599,7 +599,7 @@ mod tests {
     }
 
     /// First real test for Backend Item 7 (Markdown repo projection):
-    /// 1. Preflight blocks secrets BEFORE commit and BEFORE directory creation.
+    /// 1. One credential is redacted with a warning; the repository is still created.
     /// 2. Deterministic rendering: byte-for-byte identical across runs.
     /// 3. Diff == Commit: Rendered preview with proposal matches exact git show commit after approval.
     /// 4. Isolation guarantee: strictly runs in TempDir, NEVER touches `~/.ags/memory`.
@@ -614,14 +614,17 @@ mod tests {
         let slug = crate::memory::repo::slug(&ws_name, WS_HISTORY_ID);
         let repo_dir = temp_root.path().join(&slug);
 
-        // --- STEP 1: Secret Preflight ---
+        // --- STEP 1: One historical credential must not abort the repository ---
         // Historical workspace fixture contains `fact-secret-1` with Stripe secret `sk_live_...`.
-        // Export MUST fail and MUST NOT create repo_dir.
-        let secret_err = crate::memory::repo::export_at(&conn, WS_HISTORY_ID, temp_root.path(), None);
-        assert!(secret_err.is_err(), "Export must fail when historical facts contain active credentials");
-        let err_msg = secret_err.err().unwrap();
-        assert!(err_msg.contains("credencial"), "Expected credential preflight error, got: {err_msg}");
-        assert!(!repo_dir.exists(), "Target directory must not even be created on secret preflight failure");
+        // Export continues, omits that fact, and still creates the directory.
+        let secret_export = crate::memory::repo::export_at(&conn, WS_HISTORY_ID, temp_root.path(), None)
+            .expect("a single credential must not abort the export");
+        assert!(repo_dir.exists(), "Target directory is created even when one fact is redacted");
+        assert!(secret_export.warnings.iter().any(|warning| warning.contains("fact-secret-1")));
+        let redacted = crate::memory::repo::render(&conn, WS_HISTORY_ID, &[]).expect("render with secret fact");
+        for (filename, content) in &redacted {
+            assert!(!content.contains("sk_live_"), "File {filename} leaked an API key before the fact was removed");
+        }
 
         // --- STEP 2: Determinism on Clean Facts ---
         // Purge the unapproved secret fact from run_facts to enable clean export
@@ -679,6 +682,7 @@ mod tests {
                 expected_revision: None,
                 source_fact_id: None,
                 reason: Some("Limite de seguranca operacional".into()),
+                acknowledge_secret: false,
             },
             crate::memory::ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None },
         ).expect("propose failed");
@@ -705,8 +709,28 @@ mod tests {
             assert_eq!(git_content, expected_body.trim_end(), "Commit content for {file} must match exact preview");
         }
 
-        // --- STEP 5: Secret Barred Before Commit on New Proposal ---
-        // A proposal with a secret must fail preview and fail export
+        // --- STEP 5: User secret needs conscious confirmation; export still ships the rest ---
+        let leaked = format!("Leaked key: {}", fake_stripe_key("999888777666555444333222111"));
+        let refused = crate::memory::propose(
+            &conn,
+            "workspace",
+            WS_HISTORY_ID,
+            None,
+            &crate::memory::ProposalInput {
+                scope: "workspace".into(),
+                key: "secret_leak_attempt".into(),
+                kind: "note".into(),
+                body: leaked.clone(),
+                priority: 0,
+                operation: "create".into(),
+                expected_revision: None,
+                source_fact_id: None,
+                reason: None,
+                acknowledge_secret: false,
+            },
+            crate::memory::ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None },
+        );
+        assert!(refused.unwrap_err().contains("CONFIRMACAO_DE_CREDENCIAL"));
         let bad_proposal = crate::memory::propose(
             &conn,
             "workspace",
@@ -716,24 +740,23 @@ mod tests {
                 scope: "workspace".into(),
                 key: "secret_leak_attempt".into(),
                 kind: "note".into(),
-                body: format!("Leaked key: {}", fake_stripe_key("999888777666555444333222111")),
+                body: leaked,
                 priority: 0,
                 operation: "create".into(),
                 expected_revision: None,
                 source_fact_id: None,
                 reason: None,
+                acknowledge_secret: true,
             },
             crate::memory::ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None },
-        ).expect("bad propose failed");
-
-        // Preview rendering with this secret must error out
-        let bad_preview = crate::memory::repo::render(&conn, WS_HISTORY_ID, &[(bad_proposal.entry_id.clone(), bad_proposal.revision)]);
-        assert!(bad_preview.is_err(), "Preview must reject secrets");
-
-        // Even if an entry was approved in DB, export preflight blocks before commit
+        ).expect("conscious confirmation should store the proposal");
+        let bad_preview = crate::memory::repo::render(&conn, WS_HISTORY_ID, &[(bad_proposal.entry_id.clone(), bad_proposal.revision)]).expect("preview continues");
+        assert!(bad_preview.values().any(|body| body.contains("999888777666555444333222111")));
         crate::memory::decide(&conn, &bad_proposal.entry_id, bad_proposal.revision, true).unwrap();
-        let bad_export = crate::memory::repo::export_at(&conn, WS_HISTORY_ID, temp_root.path(), Some((&bad_proposal.entry_id, bad_proposal.revision)));
-        assert!(bad_export.is_err(), "Export must be blocked before commit when credentials are present");
+        let bad_export = crate::memory::repo::export_at(&conn, WS_HISTORY_ID, temp_root.path(), Some((&bad_proposal.entry_id, bad_proposal.revision))).expect("confirmed entry must not abort export");
+        assert!(bad_export.commit.is_some());
+        assert!(std::fs::read_to_string(repo_dir.join("notes.md")).unwrap().contains("999888777666555444333222111"));
+        assert!(std::fs::read_to_string(repo_dir.join("constraints.md")).unwrap().contains("Timeout de conexao"));
 
         // --- STEP 6: Invariant: Real ~/.ags/memory is NEVER touched ---
         if let Ok(real_root) = crate::memory::repo::default_root() {
