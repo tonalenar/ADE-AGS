@@ -131,7 +131,7 @@ O workflow [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) roda em 
 | **Windows** (`windows-latest`) | `check (windows)` | `cargo check --lib --bin ags --tests` (compila o código `#[cfg(windows)]` e os testes, sem executá-los) | **TBD** (a medir no CI) |
 | **macOS** | — | Nada no CI; só no release (`release.yml`) | — |
 
-Referência local: `cargo check --lib --bin ags --tests` no Windows, com o alvo compartilhado (`~/.ags/cargo-target-agents`) já aquecido, levou **56,4s** (exit 0). O job do Windows não precisa de bun nem da pasta `dist` do frontend: em build de debug o Tauri usa `devUrl`, e o check passou localmente sem `dist`.
+Referência local: `cargo check --lib --bin ags --tests` no Windows, com o alvo compartilhado (`~/.ags/cargo-target-agents`) já aquecido, levou **40,7s** (`Measure-Command`, exit 0). O job do Windows não precisa de bun nem da pasta `dist` do frontend: em build de debug o Tauri usa `devUrl`, e o check passou localmente sem `dist`.
 
 Qualquer job que falhe já deixa o PR vermelho. Hoje a `master` **não tem branch protection nem rulesets** (`gh api repos/tonalenar/ADE-AGS/branches/master/protection` → 404 "Branch not protected"), então nenhum check é formalmente obrigatório para o merge.
 
