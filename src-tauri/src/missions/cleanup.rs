@@ -308,6 +308,18 @@ pub async fn mission_cleanup(
     .map_err(|e| e.to_string())?
 }
 
+/// Mesmo worktree? Compara a identidade real, não o texto: o banco guarda o caminho como foi
+/// criado (pode ser nome 8.3 tipo `RUNNER~1`, junção ou symlink) e o `git worktree list`
+/// devolve o caminho resolvido. `canonicalize` leva os dois à mesma forma.
+fn same_worktree(a: &str, b: &str) -> bool {
+    let key = |p: &str| {
+        let path = Path::new(p);
+        let real = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+        crate::usage::path_key(&crate::util::external_path(&real).to_string_lossy())
+    };
+    key(a) == key(b)
+}
+
 pub fn list(conn: &Connection, cwd: &Path, base: &Path) -> Result<Vec<CleanupEntry>, String> {
     let repo = crate::runs::worktrees::repo_root(cwd)?;
     let listing = git(&repo, &["worktree", "list", "--porcelain"])?;
@@ -337,7 +349,7 @@ pub fn list(conn: &Connection, cwd: &Path, base: &Path) -> Result<Vec<CleanupEnt
             .map_err(|e| e.to_string())?;
         let mut matches = owners
             .into_iter()
-            .filter(|(_, _, path)| crate::usage::path_key(path) == crate::usage::path_key(root));
+            .filter(|(_, _, path)| same_worktree(path, root));
         let ownership = matches.next().map(|(id, status, _)| (id, status));
         let ambiguous =
             matches.any(|(id, _, _)| ownership.as_ref().is_some_and(|(owner, _)| owner != &id));
