@@ -135,6 +135,8 @@ describe("el equipo de una misión", () => {
     expect(text).toContain("QA EM FLUXO E VALIDAÇÃO CONTÍNUA:");
     expect(text).toContain('ags peer tell "QA / Tests"');
     expect(text).toContain("ags test affected");
+    expect(text).toContain("já verde neste hash");
+    expect(text).toContain("NÃO reexecute");
     expect(text).toContain("UMA única execução completa");
     expect(text).toContain("VELOCIDADE DE TESTE E CI (PONTO 3):");
     expect(text).toContain("gh pr checks <n> --watch");

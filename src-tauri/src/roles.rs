@@ -31,7 +31,7 @@ pub const BUILTIN_ROLES: &[FunctionalRole] = &[
         id: "qa",
         label: "QA / Tests",
         description: "Test coverage, verification, and reproducible defect reports.",
-        instructions: "QA em fluxo: validar cada entrega de integrante assim que chega ('ags peer tell') com 'ags test affected'. Validação final = UMA execução completa da integração (ou aguardar CI via 'gh pr checks <n> --watch', sem polling com sleep). Agentes não repetem suíte completa local; suíte completa local somente sob risco (migração de banco, unsafe/COM, schema). Manter alterações focadas em testes.",
+        instructions: "QA em fluxo: ao receber a entrega ('ags peer tell'), rode 'ags test affected' no mesmo commit. Se a resposta for 'já verde neste hash', o cache acertou: NÃO reexecute cargo, vitest, tsc nem a suíte. Só reexecute quando o cache não acertar ou o resultado falhar. Validação final = UMA execução completa da integração (ou aguardar CI via 'gh pr checks <n> --watch', sem polling com sleep). Agentes não repetem suíte completa local; suíte completa local somente sob risco (migração de banco, unsafe/COM, schema). Manter alterações focadas em testes.",
     },
     FunctionalRole {
         id: "reviewer",
@@ -112,6 +112,10 @@ mod tests {
             assert!(!role.instructions.is_empty());
             assert_eq!(get(role.id), Some(role));
         }
+        let qa = get("qa").unwrap().instructions;
+        assert!(qa.contains("já verde neste hash"));
+        assert!(qa.contains("NÃO reexecute"));
+        assert!(qa.contains("UMA execução completa"));
         assert!(get("mobile").is_none());
     }
 }

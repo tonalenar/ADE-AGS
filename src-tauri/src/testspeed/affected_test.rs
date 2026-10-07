@@ -122,6 +122,31 @@ fn ordinary_rust_module_is_not_risky() {
 }
 
 #[test]
+fn agent_metadata_is_ignored_and_does_not_force_the_full_suite() {
+    let plan = p(&[
+        ".agents/skills/demo/SKILL.md",
+        ".claude/skills/demo/SKILL.md",
+        ".gemini/skills/demo/SKILL.md",
+        ".kimi/skills/demo/SKILL.md",
+        ".opencode/skills/demo/SKILL.md",
+        ".cursor/skills/demo/SKILL.md",
+        "src-tauri/src/floors.rs",
+    ]);
+    assert!(!plan.full, "{}", plan.render_dry_run());
+    assert!(plan.unmapped.is_empty(), "{:?}", plan.unmapped);
+    assert!(plan.risk.is_empty(), "{:?}", plan.risk);
+    assert_eq!(suites(&plan), ["rust"]);
+    assert!(plan.ignored.iter().any(|file| file.starts_with(".agents/")));
+}
+
+#[test]
+fn unsafe_already_in_the_file_is_not_risk_without_an_added_line() {
+    let plan = plan_with_unsafe(&["src-tauri/src/floors.rs".into()], &[]);
+    assert!(!plan.full);
+    assert!(plan.risk.is_empty());
+}
+
+#[test]
 fn unsafe_added_in_diff_marks_the_file_risky() {
     let diff = "diff --git a/src-tauri/src/floors.rs b/src-tauri/src/floors.rs\n--- a/src-tauri/src/floors.rs\n+++ b/src-tauri/src/floors.rs\n@@ -1 +1,2 @@\n+    unsafe { call() }\n+// unsafe em comentário\n+++ b/src-tauri/src/missions/a.rs\n+let unsafely = 1;\n";
     let files = files_adding_unsafe(diff);

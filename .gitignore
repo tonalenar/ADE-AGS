@@ -8,6 +8,11 @@ pnpm-debug.log*
 lerna-debug.log*
 
 .claude
+.agents
+.gemini
+.codex
+.kimi
+.opencode
 node_modules
 dist
 dist-ssr

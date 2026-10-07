@@ -11,6 +11,8 @@ mod bus;
 mod database;
 mod design;
 pub mod build_info;
+#[cfg_attr(not(test), allow(dead_code))]
+mod build_fingerprint;
 mod explorer;
 mod floors;
 mod forge;
