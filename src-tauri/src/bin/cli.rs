@@ -9,8 +9,6 @@
 
 use ade_ags_lib::ipc::protocol::{client_handshake_path, Handshake, Request, Response, PROTOCOL_VERSION};
 use serde_json::{json, Map, Value};
-use std::io::{BufRead, BufReader, Write};
-use std::net::TcpStream;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
@@ -1005,22 +1003,12 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
         ));
     }
 
-    let stream = TcpStream::connect(("127.0.0.1", handshake.port)).map_err(|_| {
-        CliError::not_yet(format!(
-            "No se pudo conectar al puerto {} (la app con PID {} pudo haber cerrado). Reiniciá la app.",
-            handshake.port, handshake.pid
-        ))
-    })?;
-    let _ = stream.set_read_timeout(Some(read_timeout_for(command, &args)));
-
-    let request = Request { token: handshake.token, command: command.to_string(), args };
+    let timeout = read_timeout_for(command, &args);
+    let request = Request { token: handshake.token.clone(), command: command.to_string(), args };
     let payload = serde_json::to_string(&request).map_err(|e| CliError::new(e.to_string(), EXIT_USAGE))?;
-
-    let mut writer = stream.try_clone().map_err(|e| CliError::new(e.to_string(), EXIT_NO_APP))?;
-    writeln!(writer, "{payload}").and_then(|_| writer.flush()).map_err(|e| CliError::new(format!("No se pudo enviar el comando: {e}"), EXIT_NO_APP))?;
-
-    let mut line = String::new();
-    BufReader::new(stream).read_line(&mut line).map_err(|e| CliError::new(format!("No llegó respuesta: {e}"), EXIT_NO_APP))?;
+    let line = ade_ags_lib::ipc::exchange(&handshake, &payload, timeout).map_err(|e| {
+        if e.retryable { CliError::not_yet(e.message) } else { CliError::new(e.message, EXIT_NO_APP) }
+    })?;
 
     serde_json::from_str(&line).map_err(|e| CliError::new(format!("Respuesta ilegible de la app: {e}"), EXIT_NO_APP))
 }

@@ -131,9 +131,11 @@ windows-sys = { version = "0.61", features = [
     # los símbolos existen pero quedan compilados fuera.
     "Win32_Security",
     "Win32_Storage_FileSystem",
+    "Win32_System_Diagnostics_ToolHelp",
     "Win32_System_IO",
     "Win32_System_Ioctl",
     "Win32_System_JobObjects",
+    "Win32_System_Pipes",
     "Win32_System_Threading",
 ] }
 # Capturas del navegador (ver preview::snapshot): WebView2 entrega el PNG en un IStream.

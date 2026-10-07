@@ -147,7 +147,11 @@ pub(super) fn mission_review(app: &AppHandle, args: &Value) -> Result<Value, Str
 /// `ags memory suggest --mission <id> --scope workspace|mission --key <k> --body "..."`: el agente
 /// PROPONE una memoria para la próxima misión. Queda pendiente: solo el usuario la aprueba.
 fn authenticated_tab(args: &Value) -> Result<String, String> {
-    crate::terminal::verified_tab(arg_str_opt(args, "session").as_deref(), arg_str_opt(args, "from").as_deref())
+    crate::terminal::authorize(
+        arg_str_opt(args, "session").as_deref(),
+        arg_str_opt(args, "from").as_deref(),
+        crate::ipc::current_client_pid(),
+    )
 }
 
 fn memory_caller_mission(args: &Value) -> Result<String, String> {
@@ -311,8 +315,17 @@ pub(super) fn memory_maintenance(app: &AppHandle, args: &Value, compact: bool) -
     }
     let tab = authenticated_tab(args)?;
     let db = db(app)?;
-    let conn = db.lock().map_err(|e| e.to_string())?;
-    let (workspace, _) = workspace_for_caller(&conn, &tab)?;
+    let workspace = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let (workspace, _) = workspace_for_caller(&conn, &tab)?;
+        drop(conn);
+        workspace
+    };
+    // Mutex do app já solto. O #115 troca as três linhas seguintes por
+    // `lifecycle::export_detached` (worker fora do lock). Não voltar a chamar
+    // `lifecycle::export` com o `db.lock()` ainda preso: o rebase fica nesta chamada.
+    let conn = rusqlite::Connection::open(crate::database::user_db_path()).map_err(|e| e.to_string())?;
+    conn.busy_timeout(Duration::from_secs(5)).map_err(|e| e.to_string())?;
     crate::memory::lifecycle::export(&conn, &workspace, &crate::memory::repo::default_root()?)
 }
 
@@ -492,12 +505,27 @@ mod memory_time_tests {
     fn forged_ade_tab_id_is_refused_before_the_mission_lookup() {
         let tab = format!("real-{}", uuid::Uuid::new_v4());
         let token = uuid::Uuid::new_v4().to_string();
-        crate::terminal::publish_token(&tab, &token);
-        let forged = super::authenticated_tab(&serde_json::json!({"from":"other-tab","session":&token,"mission":"foreign"}));
+        crate::terminal::publish_token(&tab, &token, std::process::id());
+        let forged = crate::ipc::with_client_pid(Some(std::process::id()), || {
+            super::authenticated_tab(&serde_json::json!({"from":"other-tab","session":&token,"mission":"foreign"}))
+        });
         assert!(forged.unwrap_err().contains("ADE_TAB_ID"));
-        assert_eq!(super::authenticated_tab(&serde_json::json!({"from":&tab,"session":&token})).unwrap(), tab);
+        let same = crate::ipc::with_client_pid(Some(std::process::id()), || {
+            super::authenticated_tab(&serde_json::json!({"from":&tab,"session":&token}))
+        });
+        assert_eq!(same.unwrap(), tab);
+        let stranger = crate::ipc::with_client_pid(Some(1), || {
+            super::authenticated_tab(&serde_json::json!({"from":&tab,"session":&token}))
+        });
+        if crate::terminal::ancestry_required() {
+            let err = stranger.unwrap_err();
+            assert!(err.contains("não pertence"), "{err}");
+        }
         crate::terminal::release_token(&token);
-        assert!(super::authenticated_tab(&serde_json::json!({"from":&tab,"session":&token})).is_err());
+        let gone = crate::ipc::with_client_pid(Some(std::process::id()), || {
+            super::authenticated_tab(&serde_json::json!({"from":&tab,"session":&token}))
+        });
+        assert!(gone.is_err());
     }
 
     #[test]

@@ -915,7 +915,10 @@ agent (pending shows only its metadata, never its body). The secret filter now r
 every actor but the user (MCP, `ags memory suggest`, `promote_fact`, Run Facts), and a proposal from an
 agent gets priority 3 at most. `memory.*` from the CLI always uses the mission of the calling tab:
 `--from` and `--mission` overrides are ignored, and the server checks the terminal session the app
-issued (`ADE_SESSION`). A forged `ADE_TAB_ID` is rejected. `ags memory compact` and
+issued (`ADE_SESSION`) together with the calling process: it must be the tab PTY or a descendant.
+A forged `ADE_TAB_ID`, a stolen token, or a connection without that process is rejected. The token
+value is not placed on the Codex command line. Fleet and Dreaming do not call this CLI; their memory
+tools run inside the app. `ags memory compact` and
 `ags workspace restore` do not run from a terminal; only the user can run them in the app.
 Only the user can purge an entry.
 

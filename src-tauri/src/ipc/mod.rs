@@ -15,6 +15,7 @@ pub mod install;
 pub mod mcp;
 pub mod protocol;
 mod server;
+mod transport;
 #[cfg(test)]
 mod test;
 
@@ -28,3 +29,7 @@ pub fn agent_maintenance_error(command: &str) -> Option<&'static str> {
     matches!(command, "memory.compact" | "workspace.restore").then_some(AGENT_MAINTENANCE_DENIED)
 }
 pub use server::{cleanup, export_instance_env, other_instance_alive, start};
+pub use transport::{exchange, ExchangeError};
+pub(crate) use transport::current_client_pid;
+#[cfg(test)]
+pub(crate) use transport::with_client_pid;

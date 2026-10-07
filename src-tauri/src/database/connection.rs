@@ -11,6 +11,10 @@ use std::sync::{Arc, Mutex};
 /// admite escrituras concurrentes, así que el `Mutex` es el que serializa el acceso.
 pub type DbConnection = Arc<Mutex<Connection>>;
 
+pub(crate) fn user_db_path() -> PathBuf {
+    db_path()
+}
+
 fn db_path() -> PathBuf {
     let home = dirs::home_dir().expect("Cannot determine home directory");
     let dir = home.join(".ags");

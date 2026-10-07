@@ -16,7 +16,7 @@ use super::protocol::{arg_str, Handshake, Request, Response, PROTOCOL_VERSION};
 #[test]
 fn el_handshake_global_solo_se_recupera_si_quedo_huerfano() {
     use super::server::global_needs_rewrite;
-    let hs = |pid| Handshake { port: 1, token: "t".into(), pid, protocol: PROTOCOL_VERSION };
+    let hs = |pid| Handshake { port: 1, token: "t".into(), pid, protocol: PROTOCOL_VERSION, socket: None };
     assert!(global_needs_rewrite(None, 7, |_| true), "borrado por otra instancia al cerrarse");
     assert!(!global_needs_rewrite(Some(&hs(7)), 7, |_| false), "es el propio");
     assert!(!global_needs_rewrite(Some(&hs(8)), 7, |_| true), "otra instancia viva");
@@ -40,11 +40,19 @@ fn cada_instancia_tiene_su_propio_handshake() {
 /// un comando sin flags no debería tener que mandar un objeto vacío explícito.
 #[test]
 fn el_formato_del_cable_sobrevive_el_ida_y_vuelta() {
-    let hs = Handshake { port: 45123, token: "tok".into(), pid: 42, protocol: PROTOCOL_VERSION };
+    let hs = Handshake { port: 45123, token: "tok".into(), pid: 42, protocol: PROTOCOL_VERSION, socket: None };
     let back: Handshake = serde_json::from_str(&serde_json::to_string(&hs).unwrap()).unwrap();
     assert_eq!(back.port, 45123);
     assert_eq!(back.token, "tok");
     assert_eq!(back.protocol, PROTOCOL_VERSION);
+    assert_eq!(back.socket, None);
+    let with_socket = Handshake { socket: Some("/tmp/ags.sock".into()), ..hs };
+    let encoded = serde_json::to_string(&with_socket).unwrap();
+    assert!(encoded.contains("/tmp/ags.sock"));
+    let decoded: Handshake = serde_json::from_str(&encoded).unwrap();
+    assert_eq!(decoded.socket.as_deref(), Some("/tmp/ags.sock"));
+    let legacy: Handshake = serde_json::from_str(r#"{"port":1,"token":"t","pid":2,"protocol":1}"#).unwrap();
+    assert_eq!(legacy.socket, None);
 
     let req = Request {
         token: "tok".into(),

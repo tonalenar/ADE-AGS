@@ -20,7 +20,7 @@ const WATCH_EVERY: Duration = Duration::from_secs(3);
 
 /// Conexiones atendidas a la vez. Holgado: cada agente con un `run_await` o un permiso
 /// pendiente ocupa una mientras espera, y una flota grande tiene decenas.
-const MAX_CONNECTIONS: usize = 256;
+pub(super) const MAX_CONNECTIONS: usize = 256;
 
 /// El tamaño máximo de una request. La más grande legítima es un handoff o una memoria,
 /// que ya tienen sus propios topes muy por debajo de esto.
@@ -65,11 +65,22 @@ fn try_start(app: AppHandle) -> Result<(), String> {
     let port = listener.local_addr().map_err(|e| e.to_string())?.port();
     let token = Uuid::new_v4().to_string();
 
+    let pid = std::process::id();
+    let endpoint = super::protocol::credential_endpoint(pid);
+    let open = std::sync::Arc::new(AtomicUsize::new(0));
+    let socket = match super::transport::start_credential_server(app.clone(), token.clone(), endpoint.clone(), open.clone()) {
+        Ok(()) => Some(endpoint),
+        Err(error) => {
+            eprintln!("[ade-ags] socket de credencial indisponível: {error}");
+            None
+        }
+    };
     let handshake = Handshake {
         port,
         token: token.clone(),
-        pid: std::process::id(),
+        pid,
         protocol: PROTOCOL_VERSION,
+        socket,
     };
     sweep_dead_instances();
     write_handshake(&instance_handshake_path(handshake.pid), &handshake)?;
@@ -77,7 +88,6 @@ fn try_start(app: AppHandle) -> Result<(), String> {
     std::thread::spawn(move || watch_handshakes(&handshake));
 
     std::thread::spawn(move || {
-        let open = std::sync::Arc::new(AtomicUsize::new(0));
         for stream in listener.incoming() {
             let Ok(stream) = stream else { continue };
             // Cualquier proceso local puede conectarse, con token o sin él: sin tope, abrir
@@ -93,7 +103,13 @@ fn try_start(app: AppHandle) -> Result<(), String> {
             // Un cliente lento (o que abre la conexión y no manda nada) no debe bloquear
             // a los demás, así que cada conexión se atiende en su propio thread.
             std::thread::spawn(move || {
-                handle_connection(stream, &app, &token);
+                let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(30)));
+                let Ok(writer) = stream.try_clone() else {
+                    open.fetch_sub(1, Ordering::SeqCst);
+                    return;
+                };
+                // TCP não entrega PID. Memória e swarm fecham sem ele.
+                handle_connection(stream, writer, &app, &token, None);
                 open.fetch_sub(1, Ordering::SeqCst);
             });
         }
@@ -198,6 +214,9 @@ fn sweep_dead_instances() {
             None => path.extension().is_some_and(|e| e == "json"),
         };
         if dead {
+            if let Some(socket) = read_handshake(&path).and_then(|h| h.socket) {
+                let _ = std::fs::remove_file(socket);
+            }
             let _ = std::fs::remove_file(&path);
         }
     }
@@ -208,6 +227,7 @@ fn sweep_dead_instances() {
 /// borrarlo dejaba a los agentes de ESA sin forma de alcanzarla.
 pub fn cleanup() {
     let pid = std::process::id();
+    super::transport::remove_credential_endpoint(pid);
     let _ = std::fs::remove_file(instance_handshake_path(pid));
     let global = handshake_path();
     if read_handshake(&global).is_some_and(|h| h.pid == pid) {
@@ -215,14 +235,14 @@ pub fn cleanup() {
     }
 }
 
-fn handle_connection(stream: TcpStream, app: &AppHandle, expected_token: &str) {
-    // Sin timeout, una conexión que nunca manda una línea completa deja el thread colgado
-    // para siempre.
-    let _ = stream.set_read_timeout(Some(std::time::Duration::from_secs(30)));
-
-    let Ok(write_half) = stream.try_clone() else { return };
-    let mut reader = BufReader::new(stream);
-    let mut writer = write_half;
+pub(super) fn handle_connection(
+    reader: impl Read,
+    mut writer: impl Write,
+    app: &AppHandle,
+    expected_token: &str,
+    client_pid: Option<u32>,
+) {
+    let mut reader = BufReader::new(reader);
 
     let mut line = String::new();
     // Con tope: sin él, una "línea" que nunca termina se acumula en memoria entera.
@@ -245,7 +265,7 @@ fn handle_connection(stream: TcpStream, app: &AppHandle, expected_token: &str) {
         }
         Ok(req) => {
             command = req.command.clone();
-            commands::dispatch(app, &req.command, &req.args)
+            super::transport::with_client_pid(client_pid, || commands::dispatch(app, &req.command, &req.args))
         }
     };
 

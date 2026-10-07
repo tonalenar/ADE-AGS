@@ -109,9 +109,13 @@ final tem validação pontual por `cargo test --lib draft_queue` no mesmo target
    uma proposta pendente (ou rascunho quando a caixa está cheia). Nunca aprova.
 3. **Confirmado / implementei**: export/compact/restore só existiam na API nativa.
    `ags memory export` continua na CLI, só leitura, no workspace da aba autenticada
-   pela sessão do terminal. `ags memory compact` e `ags workspace restore` não rodam
-   a partir de um terminal de agente: compactar e restaurar ficam na interface
-   (`memory_compact`, `db_restore_workspace`).
+   pela sessão do terminal. O servidor exige o token (`ADE_SESSION`) e que o PID
+   do cliente — lido no socket Unix ou no named pipe, não no TCP — descenda do
+   processo do PTY daquela aba. O valor do token não vai na linha de comando do
+   Codex. `ags memory compact` e `ags workspace restore` não rodam a partir de um
+   terminal de agente: compactar e restaurar ficam na interface
+   (`memory_compact`, `db_restore_workspace`). Fleet, Dreaming e o MCP da missão
+   não usam essa CLI; chamam a memória dentro do processo.
 4. **Confirmado / implementei**: `memory_workspace_stats` e export agora incluem
    `memoryUsage:{timesUsed,entriesUsed,runsUsingMemory,method}`. A soma inclui
    workspace e missões, contando seleções em snapshots, não uso no raciocínio.
