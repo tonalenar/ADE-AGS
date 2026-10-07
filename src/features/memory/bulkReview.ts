@@ -62,6 +62,25 @@ export interface BulkOutcome {
   skippedContradictions: string[];
   /** Exclusiones que NO se aceptaron por la misma razón. */
   skippedDeletions: string[];
+  /** Duplicatas que NO entran en una aprobación en masa (solo se aceptan una a una). */
+  skippedDuplicates: string[];
+}
+
+/** Prioridad a partir de la cual una sugerencia de agente se marca como "pide prioridad alta". */
+export const AGENT_HIGH_PRIORITY = 3;
+
+export const asksHighPriority = (item: Pick<MemoryReviewItem, "priority" | "evidence">): boolean =>
+  item.evidence.actorKind !== "user" && item.priority >= AGENT_HIGH_PRIORITY;
+
+/**
+ * Qué hace una tecla en el modal. Enter confirma SIEMPRE sin aceptar avisos (contradicciones y
+ * exclusiones quedan fuera): aceptarlos exige el clic explícito en "Aceptar igual". Pura.
+ */
+export type InboxKeyAction = { type: "close" } | { type: "cancel-confirm" } | { type: "approve"; acknowledge: false } | { type: "none" };
+export function inboxKeyAction(key: string, confirmOpen: boolean): InboxKeyAction {
+  if (key === "Escape") return confirmOpen ? { type: "cancel-confirm" } : { type: "close" };
+  if (key === "Enter" && confirmOpen) return { type: "approve", acknowledge: false };
+  return { type: "none" };
 }
 
 /**
@@ -71,8 +90,11 @@ export interface BulkOutcome {
 export async function approveBulk(
   items: MemoryReviewItem[],
   decide: (entryId: string, revision: number, approve: boolean) => Promise<void>,
-  opts: { acknowledgeContradictions: boolean },
+  opts: { acknowledgeContradictions: boolean; /** Decisión puntual sobre UN item: permite duplicados. */ explicit?: boolean },
 ): Promise<BulkOutcome> {
+  const dupes = opts.explicit ? [] : items.filter((i) => reviewFlag(i) === "duplicate");
+  const dupeSet = new Set(dupes.map(itemId));
+  items = items.filter((i) => !dupeSet.has(itemId(i)));
   const skipped = opts.acknowledgeContradictions ? [] : items.filter((i) => reviewFlag(i) === "contradiction" || isDeletion(i));
   const skipSet = new Set(skipped.map(itemId));
   const result = await decideAll(items.filter((i) => !skipSet.has(itemId(i))), true, decide);
@@ -80,6 +102,7 @@ export async function approveBulk(
     ...result,
     skippedContradictions: skipped.filter((i) => !isDeletion(i)).map((i) => i.key),
     skippedDeletions: skipped.filter(isDeletion).map((i) => i.key),
+    skippedDuplicates: dupes.map((i) => i.key),
   };
 }
 
@@ -88,7 +111,7 @@ export async function rejectBulk(
   items: MemoryReviewItem[],
   decide: (entryId: string, revision: number, approve: boolean) => Promise<void>,
 ): Promise<BulkOutcome> {
-  return { ...(await decideAll(items, false, decide)), skippedContradictions: [], skippedDeletions: [] };
+  return { ...(await decideAll(items, false, decide)), skippedContradictions: [], skippedDeletions: [], skippedDuplicates: [] };
 }
 
 /**

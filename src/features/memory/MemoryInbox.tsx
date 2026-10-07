@@ -3,9 +3,10 @@ import { useTranslation } from "react-i18next";
 
 import { useMissionsStore } from "@/features/missions/store";
 import {
-  approveBulk, flatten, groupsFromWorkspaceReview, itemId, normalizeGroups, planBulk, rejectBulk, selectedItems, totalPending,
+  approveBulk, asksHighPriority, flatten, inboxKeyAction, groupsFromWorkspaceReview, itemId, normalizeGroups, planBulk, rejectBulk, selectedItems, totalPending,
   type BulkOutcome, type MissionReviewGroup,
 } from "./bulkReview";
+import { DreamSection } from "./DreamSection";
 import * as memoryIpc from "./ipc";
 import { usePendingMemoryStore } from "./pendingStore";
 import { isDeletion } from "./bulkReview";
@@ -60,7 +61,7 @@ type Confirm = { items: MemoryReviewItem[] } | null;
  * Modal único con TODAS las sugerencias pendientes del workspace, agrupadas por misión. Aceptar o
  * rechazar es siempre un clic del usuario; aceptar en masa pide confirmación con la cuenta y, si hay
  * contradicciones, un aviso explícito (sin confirmarlo no se aceptan).
- * Teclado: Esc cierra (o cancela la confirmación), Enter confirma.
+ * Teclado: Esc cierra (o cancela la confirmación), Enter confirma SIN aceptar avisos.
  */
 export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
   const { t } = useTranslation();
@@ -100,6 +101,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     const parts: string[] = [];
     if (o.failed.length) parts.push(t("memoryReview.failed", { keys: o.failed.join(", ") }));
     if (o.skippedContradictions.length) parts.push(t("memoryInbox.skipped", { keys: o.skippedContradictions.join(", ") }));
+    if (o.skippedDuplicates.length) parts.push(t("memoryInbox.skippedDuplicates", { keys: o.skippedDuplicates.join(", ") }));
     if (o.skippedDeletions.length) parts.push(t("memoryInbox.skippedDeletions", { keys: o.skippedDeletions.join(", ") }));
     setMessage(parts.join(" "));
     await load();
@@ -107,11 +109,11 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     setBusy(false);
   };
 
-  const approve = async (items: MemoryReviewItem[], acknowledge: boolean) => {
+  const approve = async (items: MemoryReviewItem[], acknowledge: boolean, explicit = false) => {
     if (busy || items.length === 0) return;
     setBusy(true);
     setConfirm(null);
-    await finish(await approveBulk(items, memoryIpc.decideMemory, { acknowledgeContradictions: acknowledge }));
+    await finish(await approveBulk(items, memoryIpc.decideMemory, { acknowledgeContradictions: acknowledge, explicit }));
   };
   const reject = async (items: MemoryReviewItem[]) => {
     if (busy || items.length === 0) return;
@@ -119,7 +121,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     await finish(await rejectBulk(items, memoryIpc.decideMemory));
   };
   /** Una sola: es una decisión puntual y explícita sobre ese item (también si contradice). */
-  const approveOne = (item: MemoryReviewItem) => approve([item], true);
+  const approveOne = (item: MemoryReviewItem) => approve([item], true, true);
 
   const toggle = (id: string) => setSelected((cur) => {
     const next = new Set(cur);
@@ -128,10 +130,12 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
   });
 
   const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") { e.stopPropagation(); if (confirm) setConfirm(null); else onClose(); }
-    else if (e.key === "Enter" && confirm) {
+    const action = inboxKeyAction(e.key, !!confirm);
+    if (action.type === "close") { e.stopPropagation(); onClose(); }
+    else if (action.type === "cancel-confirm") { e.stopPropagation(); setConfirm(null); }
+    else if (action.type === "approve" && confirm) {
       e.preventDefault();
-      void approve(confirm.items, planBulk(confirm.items).needsWarning);
+      void approve(confirm.items, action.acknowledge);
     }
   };
 
@@ -159,6 +163,8 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
             className="rounded border border-gray-300 px-2.5 py-1 text-[11px] text-gray-700 disabled:opacity-50 dark:border-white/20 dark:text-gray-200">{t("memoryInbox.rejectSelected", { count: chosen.length })}</button>
           <span className="ml-auto text-[10.5px] text-gray-400 dark:text-white/35">{t("memoryReview.note")}</span>
         </div>
+
+        <div className="px-5 pt-2"><DreamSection workspaceId={workspaceId} onChanged={(o) => { if (o) void finish(o); else void load(); }} /></div>
 
         {message && <p role="alert" className="px-5 pt-2 text-[11px] text-red-600 dark:text-red-400">{message}</p>}
 
@@ -190,13 +196,14 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                         <input type="checkbox" checked={selected.has(id)} onChange={() => toggle(id)} aria-label={t("memoryInbox.selectItem", { key: item.key })} />
                         <span className="min-w-0 flex-1 truncate text-[12px] font-medium" title={item.key}>{item.key}</span>
                         {isDeletion(item) && <span className="rounded bg-red-600 px-1.5 py-0.5 text-[10px] font-bold text-white">{t("memoryInbox.deletion")}</span>}
+                        {asksHighPriority(item) && <span className="rounded bg-amber-500/20 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:text-amber-300" title={t("memoryInbox.highPriorityHint")}>{t("memoryInbox.highPriority", { priority: item.priority })}</span>}
                         {flag !== "normal" && <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>}
                         <button type="button" disabled={busy} onClick={() => void approveOne(item)} aria-label={`${t("memoryReview.approve")}: ${item.key}`}
                           className="rounded bg-emerald-600/90 px-2 py-0.5 text-[11px] text-white disabled:opacity-50">{t("memoryReview.approve")}</button>
                         <button type="button" disabled={busy} onClick={() => void reject([item])} aria-label={`${t("memoryReview.reject")}: ${item.key}`}
                           className="rounded border border-gray-300 px-2 py-0.5 text-[11px] disabled:opacity-50 dark:border-white/20">{t("memoryReview.reject")}</button>
                       </div>
-                      <p className="line-clamp-3 whitespace-pre-wrap text-[11.5px] text-gray-600 dark:text-gray-300">{item.body}</p>
+                      <p className="whitespace-pre-wrap break-words text-[11.5px] text-gray-600 dark:text-gray-300">{item.body}</p>
                       <p className="text-[10.5px] text-gray-400 dark:text-white/35">
                         {t("memoryReview.evidence")}: {t(`memoryReview.actor.${item.evidence.actorKind}`)}
                         {ev.runId ? ` · run ${ev.runId.slice(0, 8)}` : ""}
@@ -230,6 +237,9 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                   <ul className="mt-1 list-disc pl-4">{plan.contradictions.map((c) => <li key={itemId(c)}>{c.key}</li>)}</ul>
                 </div>
               )}
+              {plan.duplicates > 0 && (
+                <p className="mt-2 text-[11.5px] text-gray-600 dark:text-gray-300">{t("memoryInbox.confirmDuplicates", { count: plan.duplicates })}</p>
+              )}
               {plan.deletions.length > 0 && (
                 <div role="alert" className="mt-2 rounded border border-red-500/40 bg-red-500/10 p-2 text-[11.5px] text-red-700 dark:text-red-300">
                   {t("memoryInbox.confirmDeletions", { count: plan.deletions.length })}
@@ -239,12 +249,12 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
               <div className="mt-3 flex justify-end gap-2">
                 <button type="button" onClick={() => setConfirm(null)} className="rounded border border-gray-300 px-3 py-1 text-[11.5px] dark:border-white/20">{t("memoryInbox.cancel")}</button>
                 {plan.needsWarning && (
-                  <button type="button" onClick={() => void approve(confirm.items, false)} className="rounded border border-emerald-600 px-3 py-1 text-[11.5px] text-emerald-700 dark:text-emerald-300">
-                    {t("memoryInbox.confirmSkip")}
+                  <button type="button" onClick={() => void approve(confirm.items, true)} className="rounded border border-red-600 px-3 py-1 text-[11.5px] text-red-700 dark:text-red-300">
+                    {t("memoryInbox.confirmAnyway")}
                   </button>
                 )}
-                <button type="button" autoFocus onClick={() => void approve(confirm.items, plan.needsWarning)} className="rounded bg-emerald-600 px-3 py-1 text-[11.5px] font-medium text-white">
-                  {plan.needsWarning ? t("memoryInbox.confirmAnyway") : t("memoryInbox.confirm")} (Enter)
+                <button type="button" autoFocus onClick={() => void approve(confirm.items, false)} className="rounded bg-emerald-600 px-3 py-1 text-[11.5px] font-medium text-white">
+                  {(plan.needsWarning ? t("memoryInbox.confirmSkip") : t("memoryInbox.confirm")) + " (Enter)"}
                 </button>
               </div>
             </div>

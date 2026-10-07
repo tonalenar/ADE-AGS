@@ -3,6 +3,14 @@
 use super::*;
 
 #[test]
+fn memory_numeric_flags_are_numbers() {
+    let args = parse_flags(&["--priority".into(), "-2".into(), "--limit".into(), "7".into()], &[]).unwrap();
+    assert_eq!(args["priority"], -2);
+    assert_eq!(args["limit"], 7);
+    assert_eq!(parse_flags(&["--priority".into(), "bad".into()], &[]).unwrap()["priority"], "bad");
+}
+
+#[test]
 fn local_tests_accept_suite_force_and_dry_run() {
     let args = parse("test.run", &["rust", "--force"]).unwrap();
     assert_eq!(args["suite"], "rust");
@@ -410,4 +418,16 @@ fn design_cli_defaults_use_callers_cwd_and_agent_author() {
     assert_eq!(a["designId"],"d1");assert_eq!(a["page"],"Page 1");assert!(a.get("pageId").is_none());
     let a=design_defaults("design.artboard.add",parse("design.artboard.add",&["p1","Home"]).unwrap(),cwd);
     assert_eq!(a["pageId"],"p1");assert!(a.get("designId").is_none());
+}
+
+#[test]
+fn memory_context_ignores_requested_caller_and_mission() {
+    let mut args = json!({"from":"spoofed","mission":"foreign","missionId":"foreign","taskId":"victim"});
+    caller_from("memory.suggest", &mut args, Some("actual-tab".into()));
+    assert_eq!(args["from"], "actual-tab");
+    assert!(args.get("mission").is_none());
+    assert!(args.get("missionId").is_none());
+    assert!(args.get("taskId").is_none());
+    caller_from("memory.search", &mut args, None);
+    assert!(args.get("from").is_none());
 }

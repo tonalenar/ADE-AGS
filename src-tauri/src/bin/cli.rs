@@ -549,6 +549,16 @@ fn with_caller(command: &str, mut parsed: Value) -> Value {
 }
 
 fn caller_from(command: &str, parsed: &mut Value, tab: Option<String>) {
+    if command.starts_with("memory.") {
+        if let Some(map) = parsed.as_object_mut() {
+            map.remove("from");
+            map.remove("mission");
+            map.remove("missionId");
+            map.remove("taskId");
+            if let Some(tab) = tab { map.insert("from".into(), Value::String(tab)); }
+        }
+        return;
+    }
     // The design creator is always the actual terminal, even if an agent passed --from.
     if parsed.get("from").is_some() && !command.starts_with("design.") { return; }
     if let (Some(tab), Some(map)) = (tab, parsed.as_object_mut()) {
@@ -803,6 +813,7 @@ fn inline_file(args: Value) -> Result<Value, String> {
 
 fn value_for(key: &str, raw: &str) -> Value {
     match key {
+        "priority" => raw.parse::<i64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.into())),
         // Mismo trato que `--skills`: listas cortas separadas por coma.
         "skills" | "categories" | "agents" => Value::Array(
             raw.split(',')
@@ -813,7 +824,7 @@ fn value_for(key: &str, raw: &str) -> Value {
         ),
         // Un número mal escrito se manda tal cual como string: el backend lo rechaza con
         // un mensaje que nombra el flag, mejor que un "0" silencioso acá.
-        "lines" | "timeout" | "max" | "idle" | "start" | "count" | "turns" => {
+        "lines" | "timeout" | "max" | "idle" | "start" | "count" | "turns" | "limit" => {
             raw.parse::<u64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.into()))
         }
         _ => Value::String(raw.to_string()),

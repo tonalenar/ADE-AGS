@@ -434,6 +434,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         if let Ok(conn) = db.lock() {
             let _ = store::finish_task(&conn, &task_id, &outcome);
         }
+        if task_snapshot.role.as_deref()==Some(super::types::role::DREAMER) {crate::memory::notify_changed(&app);}
         emit_event(&app, &task_id, AgentEvent::Finished { outcome });
         emit_changed(&app, &task_id);
 

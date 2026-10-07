@@ -9,7 +9,7 @@ use serde::Serialize;
 use crate::database::DbConnection;
 
 pub const HIGH_VALUE_SCORE: i64 = 70;
-const NEAR_DUPLICATE_SIMILARITY: f64 = 0.85;
+pub const NEAR_DUPLICATE_SIMILARITY: f64 = 0.85;
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -82,7 +82,7 @@ fn words(body: &str) -> HashSet<String> {
         .collect()
 }
 
-fn similarity(a: &str, b: &str) -> f64 {
+pub fn similarity(a: &str, b: &str) -> f64 {
     let (wa, wb) = (words(a), words(b));
     let union = wa.union(&wb).count();
     if union == 0 {
@@ -102,7 +102,8 @@ fn kind_weight(kind: &str) -> i64 {
 }
 
 fn score(item: &ReviewItem) -> i64 {
-    let mut s = 40 + kind_weight(&item.kind) + item.priority.clamp(-10, 10) * 2;
+    let user_priority = if item.evidence.actor_kind == "user" { item.priority.clamp(-10, 10) * 2 } else { 0 };
+    let mut s = 40 + kind_weight(&item.kind) + user_priority;
     if item.evidence.run_id.is_some() || item.evidence.task_id.is_some() {
         s += 10;
     }
@@ -256,6 +257,14 @@ pub struct WorkspaceReviewSummary {
 /// Read-only aggregation of ALL pending proposals. Unassigned workspace proposals
 /// have mission_id=None. Deletions are explicit operations, never suggestions to add.
 pub fn review_summary_workspace(conn: &Connection, workspace_id: &str) -> Result<WorkspaceReviewSummary, String> {
+    review_workspace(conn,workspace_id,false)
+}
+
+pub(crate) fn review_summary_workspace_including_dreams(conn:&Connection,workspace_id:&str)->Result<WorkspaceReviewSummary,String> {
+    review_workspace(conn,workspace_id,true)
+}
+
+fn review_workspace(conn:&Connection,workspace_id:&str,include_dreams:bool)->Result<WorkspaceReviewSummary,String> {
     let exists: bool = conn.query_row("SELECT EXISTS(SELECT 1 FROM workspaces WHERE id=?1)", [workspace_id], |r| r.get(0))
         .map_err(|_| "could not read workspace".to_string())?;
     if !exists { return Err("workspace not found".into()); }
@@ -264,10 +273,10 @@ pub fn review_summary_workspace(conn: &Connection, workspace_id: &str) -> Result
          FROM memory_revisions r JOIN memory_entries e ON e.id=r.entry_id
          LEFT JOIN runs run ON run.id=r.source_run_id
          LEFT JOIN missions m ON m.workspace_id=e.workspace_id AND m.id=CASE WHEN e.scope='mission' THEN e.mission_id ELSE run.mission_id END
-         WHERE r.status='proposed' AND e.workspace_id=?1
+         WHERE r.status='proposed' AND e.workspace_id=?1 AND (?2 OR r.actor_kind<>'dreamer')
          ORDER BY m.title COLLATE NOCASE,m.id,e.key,r.revision"
     ).map_err(|_| "could not read pending workspace memories".to_string())?;
-    let rows = stmt.query_map([workspace_id], |r| Ok((
+    let rows = stmt.query_map(params![workspace_id,include_dreams], |r| Ok((
         r.get::<_, Option<String>>(12)?, r.get::<_, Option<String>>(13)?,
         WorkspaceReviewItem {
             item: ReviewItem {
@@ -321,6 +330,22 @@ pub fn memory_review_summary_workspace(workspace_id: String, db: tauri::State<Db
 mod tests {
     use super::*;
     use crate::memory::{ProposalActor, ProposalInput, decide, propose};
+
+    #[test]
+    fn agent_priority_cannot_inflate_review_score() {
+        let mut item = ReviewItem {
+            entry_id: "entry".into(), revision: 1, key: "key".into(), kind: "constraint".into(), body: "evidence".into(), priority: 0,
+            evidence: ReviewEvidence { run_id: Some("run".into()), task_id: None, fact_id: None, actor_kind: "worker".into(), reason: None },
+            duplicate_of: None, contradicts: None, high_value: false, score: 0,
+        };
+        let base = score(&item);
+        item.priority = 10;
+        assert_eq!(score(&item), base);
+        item.evidence.actor_kind = "lead".into();
+        assert_eq!(score(&item), base);
+        item.evidence.actor_kind = "user".into();
+        assert!(score(&item) > base);
+    }
 
     fn setup() -> Connection {
         let conn = crate::database::test_db();

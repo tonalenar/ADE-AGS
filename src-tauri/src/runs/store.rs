@@ -702,6 +702,9 @@ pub fn add_fact(
     kind: &str,
     body: &str,
 ) -> Result<Fact, String> {
+    if crate::memory::agent::looks_like_secret(body) {
+        return Err("run facts cannot contain credentials".into());
+    }
     let id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO run_facts (id, run_id, task_id, kind, body, created_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",

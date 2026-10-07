@@ -1,7 +1,7 @@
 ---
 name: ags-orchestrator
 description: Drive the ADE AGS desktop app from the terminal — open tabs with coding agents or plain shells in specific folders, run commands and dev servers in terminal tabs, read what they printed, type into them, and manage windows, workspaces, skills and background fleet tasks. Use when the user asks to set up a workspace, spin up agents across a monorepo, start or watch a dev server, run something in a terminal tab, check on what a tab is doing, or send input to a running agent.
-version: 1.28.0
+version: 1.29.0
 categories: [orchestration, tooling]
 compatible_agents: [claude-code, gemini-cli, codex, opencode, kimi-code]
 license: MIT
@@ -907,3 +907,21 @@ When a mission is done, the orchestrator can leave up to 3 durable notes:
 It only **suggests**: the entry stays pending until the user approves it in the app, and the
 priority is capped at 3. Anything that looks like a credential (API keys, tokens, passwords,
 private keys) is refused. Suggest only what is useful next time and not obvious from the code.
+
+The memory is hardened: everything a task reads through `memory_list`/`memory_get` is the
+**approved** revision only, wrapped as UNTRUSTED DATA. A pending or rejected revision never reaches an
+agent (pending shows only its metadata, never its body). The secret filter now runs in the core, for
+every actor but the user (MCP, `ags memory suggest`, `promote_fact`, Run Facts), and a proposal from an
+agent gets priority 3 at most. `memory.*` from the CLI always uses the mission of the calling tab:
+`--from` and `--mission` overrides are ignored. Only the user can purge an entry.
+
+### Dreaming and the Markdown repository
+
+Approved memory is projected one-way into a local git repository at `~/.ags/memory/<workspace>/`
+(never inside the project): `MEMORY.md`, `decisions.md`, `constraints.md`, `findings.md`, `files.md`,
+`notes.md`, `missions/`, `swarms/`. SQLite stays the source of truth; each approval makes a local commit
+after a secret scan. "Dream now" in the memory panel starts a Fleet run with a `dreamer` task: read-only,
+it can only `memory_propose/update/delete` with a `reason` that cites sources, at most 8 proposals per dream
+and not while there are more than 32 pending. It never writes to disk: the ADE computes the Markdown diff
+and the user approves the dream group, which then makes the commit. Do not plan or assign dreamer work
+yourself; it is started by the user.

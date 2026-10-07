@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 38;
+const SCHEMA_VERSION: i32 = 40;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1098,6 +1098,20 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     crate::design::migrate_v37(conn)?;
     // v38: additive, idempotent test result cache (no writes to Git or targets).
     crate::testspeed::run::migrate(conn)?;
+    // v39: revision deletion is privileged, audited and transactional.
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS memory_purge_audit (
+        id INTEGER PRIMARY KEY, entry_id TEXT NOT NULL, revision INTEGER NOT NULL,
+        actor_kind TEXT NOT NULL CHECK(actor_kind='user'), created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS memory_purge_guard (
+        entry_id TEXT NOT NULL, revision INTEGER NOT NULL, PRIMARY KEY(entry_id,revision)
+    );
+    CREATE TRIGGER IF NOT EXISTS memory_revision_immutable_delete
+    BEFORE DELETE ON memory_revisions
+    WHEN NOT EXISTS(SELECT 1 FROM memory_purge_guard WHERE entry_id=OLD.entry_id AND revision=OLD.revision)
+    BEGIN SELECT RAISE(ABORT,'memory revisions are immutable'); END;")?;
+    // v40: read-only Dreamer Runs and evidence-bound pending proposals.
+    crate::memory::dream::migrate(conn)?;
     set_user_version(conn, SCHEMA_VERSION)
 }
 

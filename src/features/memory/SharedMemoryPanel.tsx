@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
 import type { Fact, Run } from "@/features/runs/types";
+import { PurgeButton } from "./PurgeButton";
 import * as memoryIpc from "./ipc";
 import type { MemoryDetail, MemoryEntry, MemoryKind, MemoryPage, MemoryProposal, MemoryScope, MemorySnapshot, MemoryValidityInterval } from "./types";
 
@@ -197,7 +198,7 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
       <div className="flex flex-col gap-2">
         {page.items.length === 0 && <p className="text-xs text-gray-400">Nenhuma memória registrada.</p>}
         {page.items.map((entry) => (
-          <MemoryEntryCard key={entry.id} entry={entry} busy={busy} workspaceId={workspaceId} missionId={missionId}
+          <MemoryEntryCard key={entry.id} onPurged={reload} entry={entry} busy={busy} workspaceId={workspaceId} missionId={missionId}
             onInspect={() => inspect(entry)}
             onApprove={() => decide(entry, true)} onReject={() => decide(entry, false)}
             onEdit={() => {
@@ -265,8 +266,9 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
   );
 }
 
-function MemoryEntryCard({ entry, busy, workspaceId, missionId, onInspect, onApprove, onReject, onEdit, onDelete }: {
+function MemoryEntryCard({ entry, busy, workspaceId, missionId, onInspect, onApprove, onReject, onEdit, onDelete, onPurged }: {
   entry: MemoryEntry;
+  onPurged: () => void;
   busy: boolean;
   workspaceId: string;
   missionId: string | null;
@@ -317,6 +319,7 @@ function MemoryEntryCard({ entry, busy, workspaceId, missionId, onInspect, onApp
             <Button variant="ghost" size="sm" disabled={busy} onClick={onDelete}>Propor exclusão</Button>
           </>
         ) : null}
+        <PurgeButton entryId={entry.id} entryKey={entry.key} disabled={busy} onDone={onPurged} />
       </div>
     </article>
   );
@@ -508,6 +511,7 @@ function actorLabel(actor: string): string {
   if (actor === "user") return "Usuário";
   if (actor === "lead") return "Lead";
   if (actor === "worker") return "Worker";
+  if (actor === "dreamer") return "Dreamer";
   return actor;
 }
 

@@ -24,25 +24,53 @@ pub const LEAD_TAB_NAME: &str = "Orquestrador";
 /// A maior prioridade que um agente pode pedir. O usuário a muda ao aprovar.
 pub const MAX_AGENT_PRIORITY: i64 = 3;
 
-const SECRET_PREFIXES: &[&str] = &["sk-", "ghp_", "gho_", "github_pat_", "xoxb-", "xoxp-", "AKIA", "AIza", "ya29.", "eyJ"];
-const SECRET_MARKERS: &[&str] = &["-----BEGIN", "password=", "passwd=", "secret=", "token=", "api_key=", "apikey=", "authorization: bearer"];
+const SECRET_PREFIXES: &[&str] = &["sk-", "sk_live_", "sk_test_", "glpat-", "npm_", "ghp_", "gho_", "github_pat_", "xoxa-", "xoxb-", "xoxp-", "xoxr-", "xoxs-", "AKIA", "ASIA", "AIza", "ya29.", "eyJ"];
 
-/// Parece uma credencial? Heurística conservadora: prefere recusar a deixar passar. Pura.
+/// Shared guard for durable proposals, run facts and Markdown exports.
 pub fn looks_like_secret(text: &str) -> bool {
+    use std::sync::OnceLock;
+    static ASSIGNMENT: OnceLock<regex::Regex> = OnceLock::new();
+    static CREDENTIAL_URL: OnceLock<regex::Regex> = OnceLock::new();
     let lower = text.to_lowercase();
-    if SECRET_MARKERS.iter().any(|m| lower.contains(&m.to_lowercase())) {
+    if lower.contains("-----begin") && lower.contains("private key-----")
+        || lower.contains("authorization: bearer") {
+        return true;
+    }
+    if ASSIGNMENT.get_or_init(|| regex::Regex::new(r#"(?i)\b(password|passwd|senha|secret|token|api_key|apikey)["']?\s*[:=]\s*\S+"#).unwrap()).is_match(text)
+        || CREDENTIAL_URL.get_or_init(|| regex::Regex::new(r"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s/@:]+:[^\s/@]+@[^\s/]+").unwrap()).is_match(text) {
         return true;
     }
     text.split(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '`' | ',' | ';' | '(' | ')' | '=' | ':'))
         .any(|word| {
             let word = word.trim_matches(|c: char| matches!(c, '.' | '[' | ']'));
-            // Um prefixo conhecido seguido de um bom pedaço de caracteres de chave.
-            let keyish = word.len() >= 20 && word.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.'));
-            keyish && SECRET_PREFIXES.iter().any(|p| word.starts_with(p))
+            let keyish = word.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '.' | '+' | '/'));
+            if !keyish { return false; }
+            if word.len() >= 20 && SECRET_PREFIXES.iter().any(|p| word.starts_with(p)) { return true; }
+            // Canonical ADE evidence URIs contain UUIDs, not credential entropy.
+            // Only short fixture identifiers or canonical hexadecimal UUIDs qualify;
+            // long credential-like URI components still pass through the guard.
+            if let Some(path)=word.strip_prefix("//run/") {
+                let parts=path.split('/').collect::<Vec<_>>();
+                let evidence_id=|id:&str| {
+                    (id.len()<=16 && !id.is_empty() && id.bytes().all(|b|b.is_ascii_lowercase()||b.is_ascii_digit()||matches!(b,b'-'|b'_')))
+                    || (id.len()==36 && id.bytes().enumerate().all(|(i,b)|if matches!(i,8|13|18|23){b==b'-'}else{b.is_ascii_hexdigit()}))
+                };
+                if parts.len()==3 && matches!(parts[1],"task"|"fact") && evidence_id(parts[0]) && evidence_id(parts[2]) {return false;}
+            }
+            // Hashes and UUIDs are routine evidence IDs, not credential entropy.
+            if word.len() < 32 || word.bytes().all(|b| b.is_ascii_hexdigit() || b == b'-') { return false; }
+            let classes = [word.bytes().any(|b| b.is_ascii_lowercase()), word.bytes().any(|b| b.is_ascii_uppercase()), word.bytes().any(|b| b.is_ascii_digit())];
+            if classes.into_iter().filter(|present| *present).count() < 2 { return false; }
+            let mut counts = [0usize; 256];
+            for byte in word.bytes() { counts[byte as usize] += 1; }
+            let entropy: f64 = counts.iter().filter(|&&n| n > 0).map(|&n| {
+                let p = n as f64 / word.len() as f64; -p * p.log2()
+            }).sum();
+            entropy >= 4.5
         })
 }
 
-/// Quem propõe: o orquestrador ou um integrante.
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Author {
     Lead,

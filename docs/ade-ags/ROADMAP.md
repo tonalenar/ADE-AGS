@@ -109,11 +109,11 @@ Não inclui fallback silencioso, troca automática de modelo, scoring ou marketp
 
 ## 13. Shared Memory
 
-**Shared Memory v0: implementação commitada e publicada na PR #4 (`feat/shared-memory-v0`), aguardando merge, com gates e E2E real concluídos em 01/10/2026.**
+**Shared Memory v0: mergeada no master (PR #4), com gates e E2E real concluídos em 01/10/2026. Etapa 23: higiene de memória, repositório Markdown local e Dreaming v0 (só propõe), documentados em `MEMORY_REPO.md`.**
 
 `run_facts` continua sendo colaboração append-only de um Run. Shared Memory v0 adiciona Workspace Memory e Mission Memory em SQLite local, com propostas e aprovação explícita do usuário. Cada Run congela um snapshot das memórias aprovadas no início; workers e Lead recebem esse snapshot como dado não confiável. Detalhes e limites em [SHARED_MEMORY.md](./SHARED_MEMORY.md).
 
-O E2E confirmou retry com snapshot atualizado, histórico antigo preservado, Lead e worker Codex, publicação de Fact e handoff, proposta de memória aprovada pelo usuário e persistência após restart. Banco original restaurado e evidências preservadas fora do repositório. Commits e push realizados; PR #4 aberta, ainda não mergeada. O Event Bus unificado e Map Mode continuam etapas separadas.
+O E2E confirmou retry com snapshot atualizado, histórico antigo preservado, Lead e worker Codex, publicação de Fact e handoff, proposta de memória aprovada pelo usuário e persistência após restart. Banco original restaurado e evidências preservadas fora do repositório. O Event Bus unificado e Map Mode continuam etapas separadas.
 
 ## 14. Usage, custos e limites (parcial)
 

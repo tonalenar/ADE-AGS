@@ -23,19 +23,32 @@ Delegate implementation to a worker using run_plan/task_add.";
 
 /// Si la tarea coordina y no puede modificar el workspace.
 pub fn is_coordinator(task: &Task) -> bool {
-    task.role.as_deref() == Some(role::LEAD)
+    matches!(task.role.as_deref(), Some(role::LEAD | role::DREAMER))
 }
 
 /// Herramientas de las TUIs que solo miran. Nada de shell: sin una clasificación confiable
 /// de comandos de solo lectura, un lead sin `Bash` es mejor que una garantía falsa.
 const READ_ONLY_BUILTINS: &[&str] = &[
-    "Read", "Grep", "Glob", "LS", "NotebookRead", "WebFetch", "WebSearch",
+    "Read",
+    "Grep",
+    "Glob",
+    "LS",
+    "NotebookRead",
+    "WebFetch",
+    "WebSearch",
     // La lista de pendientes interna del agente: no toca el workspace.
     "TodoWrite",
 ];
 
 /// Lo que se le prohíbe al lead en el lanzamiento, en las TUIs que aceptan una lista.
-pub const LEAD_BLOCKED_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "NotebookEdit", "Bash", "PowerShell"];
+pub const LEAD_BLOCKED_TOOLS: &[&str] = &[
+    "Write",
+    "Edit",
+    "MultiEdit",
+    "NotebookEdit",
+    "Bash",
+    "PowerShell",
+];
 
 /// Si un lead puede usar esta herramienta.
 ///
@@ -44,13 +57,60 @@ pub const LEAD_BLOCKED_TOOLS: &[&str] = &["Write", "Edit", "MultiEdit", "Noteboo
 /// Todo lo demás —escribir, editar, shell, git que escribe, subagentes, herramientas que
 /// no se conocen— no: ante la duda, no toca nada.
 pub fn lead_may_use(tool_name: &str) -> bool {
-    if READ_ONLY_BUILTINS.iter().any(|t| t.eq_ignore_ascii_case(tool_name)) {
+    if READ_ONLY_BUILTINS
+        .iter()
+        .any(|t| t.eq_ignore_ascii_case(tool_name))
+    {
         return true;
     }
-    if tool_name == crate::ipc::mcp::orchestration_tool_name("task_handoff") { return false; }
+    if tool_name == crate::ipc::mcp::orchestration_tool_name("task_handoff") {
+        return false;
+    }
     let ours = format!("mcp__{}__", crate::ipc::mcp::SERVER_NAME);
     match tool_name.strip_prefix(&ours) {
-        Some(name) => crate::ipc::mcp::is_orchestration_tool(name) || crate::ipc::mcp::is_read_only(name),
+        Some(name) => {
+            crate::ipc::mcp::is_orchestration_tool(name) || crate::ipc::mcp::is_read_only(name)
+        }
         None => false,
     }
+}
+
+pub const DREAMER_DENIED: &str = "Dreamer only reads workspace history and proposes memory; writing and delegation are forbidden.";
+pub fn dreamer_command_allowed(command: &str) -> bool {
+    matches!(
+        command,
+        "memory.list"
+            | "memory.get"
+            | "memory.workspaceHistory"
+            | "memory.propose"
+            | "memory.update"
+            | "memory.delete"
+    )
+}
+pub fn dreamer_may_use(tool: &str) -> bool {
+    let prefix = format!("mcp__{}__", crate::ipc::mcp::SERVER_NAME);
+    matches!(
+        tool.strip_prefix(&prefix),
+        Some(
+            "memory_list"
+                | "memory_get"
+                | "memory_workspace_history"
+                | "memory_propose"
+                | "memory_update"
+                | "memory_delete"
+        )
+    )
+}
+pub fn guard_task(
+    conn: &rusqlite::Connection,
+    task_id: Option<&str>,
+    command: &str,
+) -> Result<(), String> {
+    if let Some(id) = task_id {
+        let task = super::store::task_by_id(conn, id)?.ok_or("Task not found")?;
+        if task.role.as_deref() == Some(role::DREAMER) && !dreamer_command_allowed(command) {
+            return Err(DREAMER_DENIED.into());
+        }
+    }
+    Ok(())
 }

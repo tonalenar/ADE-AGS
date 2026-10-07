@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { approveBulk, groupsFromWorkspaceReview, itemId, normalizeGroups, planBulk, rejectBulk, selectedItems, totalPending, type MissionReviewGroup } from "../bulkReview";
+import { approveBulk, asksHighPriority, inboxKeyAction, groupsFromWorkspaceReview, itemId, normalizeGroups, planBulk, rejectBulk, selectedItems, totalPending, type MissionReviewGroup } from "../bulkReview";
 import type { MemoryReviewItem } from "../types";
 
 const item = (key: string, over: Partial<MemoryReviewItem> = {}): MemoryReviewItem => ({
@@ -41,7 +41,7 @@ describe("bulkReview", () => {
     const out = await approveBulk([item("a"), contra("c")], decide, { acknowledgeContradictions: false });
     expect(decide).toHaveBeenCalledTimes(1);
     expect(decide).toHaveBeenCalledWith("e-a", 1, true);
-    expect(out).toEqual({ done: 1, failed: [], skippedContradictions: ["c"], skippedDeletions: [] });
+    expect(out).toEqual({ done: 1, failed: [], skippedContradictions: ["c"], skippedDeletions: [], skippedDuplicates: [] });
   });
 
   it("con el aviso confirmado acepta todo", async () => {
@@ -104,5 +104,42 @@ describe("groupsFromWorkspaceReview", () => {
   it("descarta basura", () => {
     expect(groupsFromWorkspaceReview(null, fb)).toEqual([]);
     expect(groupsFromWorkspaceReview([null, { missionId: "1" }], fb)).toEqual([]);
+  });
+});
+
+describe("A3: higiene da aprovacao", () => {
+  it("duplicatas ficam fora da aprovacao em massa", async () => {
+    const decide = vi.fn().mockResolvedValue(undefined);
+    const out = await approveBulk([item("a"), dup("d")], decide, { acknowledgeContradictions: true });
+    expect(decide.mock.calls.map((c) => c[0])).toEqual(["e-a"]);
+    expect(out.skippedDuplicates).toEqual(["d"]);
+  });
+  it("aprovar UMA duplicata de forma explicita continua possivel", async () => {
+    const decide = vi.fn().mockResolvedValue(undefined);
+    await approveBulk([dup("d")], decide, { acknowledgeContradictions: true, explicit: true });
+    expect(decide).toHaveBeenCalledTimes(1);
+  });
+  it("Enter NUNCA confirma aviso: approve com acknowledge=false", () => {
+    expect(inboxKeyAction("Enter", true)).toEqual({ type: "approve", acknowledge: false });
+    expect(inboxKeyAction("Enter", false)).toEqual({ type: "none" });
+  });
+  it("Enter em lote com contradicao/exclusao nao decide a contradicao", async () => {
+    const decide = vi.fn().mockResolvedValue(undefined);
+    const items = [item("a"), contra("c"), item("x", { operation: "delete" })];
+    const act = inboxKeyAction("Enter", true);
+    if (act.type !== "approve") throw new Error("esperava approve");
+    const out = await approveBulk(items, decide, { acknowledgeContradictions: act.acknowledge });
+    expect(decide.mock.calls.map((c) => c[0])).toEqual(["e-a"]);
+    expect(out.skippedContradictions).toEqual(["c"]);
+    expect(out.skippedDeletions).toEqual(["x"]);
+  });
+  it("Esc fecha ou cancela a confirmacao", () => {
+    expect(inboxKeyAction("Escape", false).type).toBe("close");
+    expect(inboxKeyAction("Escape", true).type).toBe("cancel-confirm");
+  });
+  it("prioridade alta pedida por agente e sinalizada; a do usuario nao", () => {
+    expect(asksHighPriority(item("a", { priority: 3 }))).toBe(true);
+    expect(asksHighPriority(item("a", { priority: 2 }))).toBe(false);
+    expect(asksHighPriority(item("a", { priority: 9, evidence: { runId: null, taskId: null, factId: null, actorKind: "user", reason: null } }))).toBe(false);
   });
 });

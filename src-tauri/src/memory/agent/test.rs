@@ -103,3 +103,11 @@ fn o_orquestrador_se_reconhece_pelo_nome_da_aba() {
     assert_eq!(author_of("agente"), Author::Worker);
     assert_eq!(author_of(""), Author::Worker);
 }
+
+#[test]
+fn quoted_credentials_and_entropy_are_detected_but_evidence_ids_are_safe() {
+    assert!(looks_like_secret(r#"{"password": "hunter2"}"#));
+    assert!(looks_like_secret("aBcDeFgHiJkLmNoPqRsTuVwXyZaBcDeFgH"));
+    assert!(!looks_like_secret("aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"));
+    assert!(!looks_like_secret("43529552-1fb2-4994-8f51-473f6546eac4"));
+}

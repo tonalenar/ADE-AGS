@@ -102,6 +102,7 @@ fn run_for(conn: &Connection, caller: &Caller, args: &Value) -> Result<Run, Stri
 
 pub fn handle(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, String> {
     let db = db_of(app)?;
+    {let conn=db.lock().map_err(|e|e.to_string())?;super::policy::guard_task(&conn,payload.get("taskId").and_then(Value::as_str),command)?;}
     match command {
         "run.roster" => roster_text(&db).map(text),
         "run.plan" => add_tasks(app, &db, payload, true).map(text),
@@ -172,7 +173,7 @@ pub fn handle(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
             ))
         }
         "memory.list" | "memory.get" | "memory.propose" | "memory.update" | "memory.delete"
-        | "memory.promoteFact" => {
+        | "memory.promoteFact" | "memory.workspaceHistory" => {
             let conn = db.lock().map_err(|e| e.to_string())?;
             let task_id = payload
                 .get("taskId")
