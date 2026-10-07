@@ -47,6 +47,9 @@ export interface Tab {
   /** Comandos que corren antes del agente (ver el store `prelaunch`). Se guardan las
    *  referencias a los presets y no su texto, así editar uno alcanza a las tabs guardadas. */
   prelaunch?: PrelaunchStep[];
+  /** Bloque de memoria aprobada (solo lectura) al inicio de la sesión. Desactivado por defecto;
+   *  solo de esta corrida, no se persiste. */
+  memoryBlock?: boolean;
   /** Unix seconds — cuándo se abrió esta tab por primera vez (no se toca en autosaves). */
   openedAt: number;
 }
