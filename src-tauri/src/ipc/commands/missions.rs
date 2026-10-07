@@ -233,6 +233,29 @@ pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, Stri
     })
 }
 
+pub(super) fn memory_repo_read(app: &AppHandle, args: &Value, index: bool) -> Result<Value, String> {
+    let path = if index { "MEMORY.md".to_string() } else { arg_str(args, "path")? };
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let tab=arg_str(args,"from")?;
+    let mission=crate::canvas::mission_of_tab(&crate::canvas::load_boards(),&tab);
+    let workspace=if let Some(id)=&mission {crate::missions::store::get(&conn,id)?.ok_or("mission not found")?.workspace_id}
+    else {conn.query_row("SELECT w.workspace_id FROM tabs t JOIN windows w ON w.id=t.window_id JOIN workspaces s ON s.id=w.workspace_id WHERE t.id=?1 AND w.is_open=1 AND s.deleted_at IS NULL",[tab],|r|r.get::<_,String>(0)).map_err(|_|"caller tab is unavailable")?};
+    let text = crate::memory::repo::approved_open(&conn, &workspace, mission.as_deref(), &path)?;
+    Ok(json!({"path": path, "text": text}))
+}
+
+pub(super) fn swarm_write(app: &AppHandle, args: &Value, question: bool) -> Result<Value,String> {
+    let id = memory_caller_mission(args)?;
+    let body = arg_str(args,"body")?;
+    let db=db(app)?;
+    let conn=db.lock().map_err(|e|e.to_string())?;
+    let mission=crate::missions::store::get(&conn,&id)?.ok_or("mission not found")?;
+    let note=crate::memory::lifecycle::swarm_write(&conn,&mission.workspace_id,&id,if question {"question"} else {"note"},&body)?;
+    let projection=crate::memory::repo::export_at(&conn,&mission.workspace_id,&crate::memory::repo::default_root()?,None);
+    Ok(json!({"id":note,"status":"run_data","projectionError":projection.err()}))
+}
+
 fn parse_memory_at(value: &str) -> Result<i64, String> {
     if let Ok(timestamp) = value.parse::<i64>() {
         return Ok(timestamp);
@@ -316,6 +339,7 @@ pub(super) fn mission_efficiency(app: &AppHandle, args: &Value) -> Result<Value,
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut efficiency = json!(crate::missions::efficiency::get(&conn, &id)?);
     efficiency["tokens"] = json!(crate::usage::mission_tokens_for_conn(&conn, &id)?);
+    efficiency["memoryContext"] = crate::memory::context_metrics(&conn, None, Some(&id))?;
     let status=crate::usage::budget_for_conn(&conn, &id)?;
     if let Some(message)=crate::usage::claim_warning(&conn,&id,&status)? {crate::usage::warn_lead(app,&id,&message);}
     efficiency["budget"] = json!(status);

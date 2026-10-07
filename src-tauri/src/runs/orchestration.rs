@@ -172,7 +172,7 @@ pub fn handle(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
                 serde_json::to_string(&chunk).map_err(|e| e.to_string())?,
             ))
         }
-        "memory.list" | "memory.get" | "memory.propose" | "memory.update" | "memory.delete"
+        "memory.list" | "memory.get" | "memory.searchApproved" | "memory.propose" | "memory.update" | "memory.delete"
         | "memory.promoteFact" | "memory.workspaceHistory" => {
             let conn = db.lock().map_err(|e| e.to_string())?;
             let task_id = payload
@@ -181,7 +181,7 @@ pub fn handle(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
                 .ok_or("Shared Memory MCP tools require a Lead or Worker Task")?;
             let result=crate::memory::task_tool(&conn, task_id, command, args(payload).clone());
             drop(conn);
-            if result.is_ok() && !matches!(command,"memory.list"|"memory.get") {crate::memory::notify_changed(app);}
+            if result.is_ok() && !matches!(command,"memory.list"|"memory.get"|"memory.searchApproved"|"memory.workspaceHistory") {crate::memory::notify_changed(app);}
             result
         }
         "run.cancelTask" => cancel_task(app, &db, payload).map(text),

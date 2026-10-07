@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-const SCHEMA_VERSION: i32 = 40;
+pub(crate) const SCHEMA_VERSION: i32 = 41;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1112,6 +1112,46 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     BEGIN SELECT RAISE(ABORT,'memory revisions are immutable'); END;")?;
     // v40: read-only Dreamer Runs and evidence-bound pending proposals.
     crate::memory::dream::migrate(conn)?;
+    // v41: sealed relevance context, its provenance and comparable estimated cost.
+    for (column, definition) in [
+        ("context_tokens", "INTEGER NOT NULL DEFAULT 0"),
+        ("baseline_bytes", "INTEGER NOT NULL DEFAULT 0"),
+        ("baseline_tokens", "INTEGER NOT NULL DEFAULT 0"),
+        ("memory_index", "TEXT NOT NULL DEFAULT ''"),
+        ("repository_commit", "TEXT"),
+    ] {
+        if !has_column(conn, "run_memory_snapshot_meta", column) {
+            conn.execute_batch(&format!("ALTER TABLE run_memory_snapshot_meta ADD COLUMN {column} {definition};"))?;
+        }
+    }
+    for (table, column, definition) in [
+        ("memory_entries", "last_verified", "INTEGER"),
+        ("memory_entries", "ttl_days", "INTEGER CHECK(ttl_days IS NULL OR ttl_days>0)"),
+        ("workspaces", "deleted_at", "INTEGER"),
+        ("workspaces", "delete_after", "INTEGER"),
+    ] {
+        if !has_column(conn, table, column) {
+            conn.execute_batch(&format!("ALTER TABLE {table} ADD COLUMN {column} {definition};"))?;
+        }
+    }
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS memory_agent_drafts (
+        id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+        mission_id TEXT, scope TEXT NOT NULL, input_json TEXT NOT NULL,
+        actor_kind TEXT NOT NULL, source_run_id TEXT, source_task_id TEXT, created_at INTEGER NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS memory_compacted_revisions (
+        entry_id TEXT NOT NULL, revision INTEGER NOT NULL, content_hash TEXT NOT NULL,
+        metadata_json TEXT NOT NULL, compacted_at INTEGER NOT NULL, PRIMARY KEY(entry_id,revision)
+    );
+    CREATE TABLE IF NOT EXISTS memory_swarm_notes (
+        id TEXT PRIMARY KEY, workspace_id TEXT NOT NULL REFERENCES workspaces(id),
+        mission_id TEXT NOT NULL REFERENCES missions(id), kind TEXT NOT NULL CHECK(kind IN ('note','question')),
+        body TEXT NOT NULL, created_at INTEGER NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_snapshot_entry ON run_memory_snapshot(entry_id,run_id);")?;
+    if !has_column(conn,"memory_agent_drafts","source_fact_id") {
+        conn.execute_batch("ALTER TABLE memory_agent_drafts ADD COLUMN source_fact_id TEXT;")?;
+    }
     set_user_version(conn, SCHEMA_VERSION)
 }
 

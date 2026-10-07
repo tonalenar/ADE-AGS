@@ -68,11 +68,14 @@ struct Approved {
 }
 
 fn norm_key(key: &str) -> String {
-    key.trim().to_lowercase()
+    norm_body(key)
 }
 
 fn norm_body(body: &str) -> String {
-    body.split_whitespace().collect::<Vec<_>>().join(" ").to_lowercase()
+    use unicode_normalization::{UnicodeNormalization, char::is_combining_mark};
+    body.nfd().filter(|c| !is_combining_mark(*c)).flat_map(char::to_lowercase)
+        .map(|c| if c.is_alphanumeric() { c } else { ' ' }).collect::<String>()
+        .split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 fn words(body: &str) -> HashSet<String> {
@@ -83,7 +86,7 @@ fn words(body: &str) -> HashSet<String> {
 }
 
 pub fn similarity(a: &str, b: &str) -> f64 {
-    let (wa, wb) = (words(a), words(b));
+    let (wa, wb) = (words(&norm_body(a)), words(&norm_body(b)));
     let union = wa.union(&wb).count();
     if union == 0 {
         return 0.0;
@@ -189,10 +192,16 @@ fn classify(items: &mut Vec<ReviewItem>, approved: &[Approved]) {
             let a_body = norm_body(&a.body);
             let r = || ReviewRef { entry_id: a.entry_id.clone(), key: a.key.clone() };
             if a_body == body || similarity(&a_body, &body) >= NEAR_DUPLICATE_SIMILARITY {
-                item.duplicate_of = Some(r());
-                break;
+                if item.duplicate_of.is_none() { item.duplicate_of = Some(r()); }
             }
-            if same_key && item.contradicts.is_none() {
+            let related_key = same_key || similarity(&norm_key(&a.key), &key) >= 0.5;
+            let negated = |text: &str| text.split_whitespace().any(|w| matches!(w, "nao"|"not"|"never"|"nunca"|"no"|"disabled"|"false"));
+            let different_values = {
+                let values = |text: &str| text.split_whitespace().filter(|w| w.chars().any(|c|c.is_ascii_digit()) || matches!(*w,"true"|"false"|"enabled"|"disabled")).map(str::to_string).collect::<HashSet<_>>();
+                let (left,right) = (values(&a_body),values(&body));
+                !left.is_empty() && !right.is_empty() && left != right
+            };
+            if a_body != body && (same_key || (related_key && (negated(&a_body) != negated(&body) || different_values))) && item.contradicts.is_none() {
                 item.contradicts = Some(r());
             }
         }
@@ -345,6 +354,16 @@ mod tests {
         assert_eq!(score(&item), base);
         item.evidence.actor_kind = "user".into();
         assert!(score(&item) > base);
+    }
+
+    #[test]
+    fn accents_punctuation_and_case_fold_but_negation_and_values_still_warn() {
+        assert_eq!(norm_body("AÇÃO, rápida!"),norm_body("ac\u{327}a\u{303}o RAPIDA"));
+        assert_eq!(similarity("AÇÃO, rápida!", "acao RAPIDA"),1.0);
+        let mut items=vec![ReviewItem{entry_id:"new".into(),revision:1,key:"sqlite limite conexoes".into(),kind:"constraint".into(),body:"sqlite usa 20 conexoes".into(),priority:0,evidence:ReviewEvidence{run_id:None,task_id:None,fact_id:None,actor_kind:"worker".into(),reason:None},duplicate_of:None,contradicts:None,high_value:false,score:0}];
+        let approved=vec![Approved{entry_id:"dup".into(),key:"sqlite limite conexoes".into(),body:"SQLITE USA 20 CONEXÕES!".into()},Approved{entry_id:"conflict".into(),key:"sqlite limite conexao".into(),body:"sqlite nao usa 10 conexoes".into()}];
+        classify(&mut items,&approved);
+        assert!(items[0].duplicate_of.is_some());assert!(items[0].contradicts.is_some());assert!(!items[0].high_value);
     }
 
     fn setup() -> Connection {

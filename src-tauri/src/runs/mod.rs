@@ -1288,6 +1288,8 @@ fn launch_memory_dream(app:&AppHandle,task:&Task)->Result<(),String> {
         allowed_tools: [
             "memory_list",
             "memory_get",
+            "memory_search",
+            "memory_open",
             "memory_workspace_history",
             "memory_propose",
             "memory_update",

@@ -20,7 +20,7 @@ fn seed_mission(conn: &Connection, id: &str, workspace_id: &str) {
 }
 
 fn seed_run(conn: &Connection, id: &str, workspace_id: &str, mission_id: Option<&str>) {
-    conn.execute("INSERT INTO runs(id,workspace_id,objective,cwd,status,max_parallel,created_at,mission_id) VALUES(?1,?2,'objective','/repo','running',2,0,?3)",params![id,workspace_id,mission_id]).unwrap();
+    conn.execute("INSERT INTO runs(id,workspace_id,objective,cwd,status,max_parallel,created_at,mission_id) VALUES(?1,?2,'decision choice prompt key high persist lock','/repo','running',2,0,?3)",params![id,workspace_id,mission_id]).unwrap();
 }
 
 fn seed_task(conn: &Connection, id: &str, run_id: &str, role: Option<&str>) {
@@ -29,6 +29,150 @@ fn seed_task(conn: &Connection, id: &str, run_id: &str, role: Option<&str>) {
 
 fn seed_fact(conn: &Connection, id: &str, run_id: &str, task_id: Option<&str>, body: &str) {
     conn.execute("INSERT INTO run_facts(id,run_id,task_id,kind,body,created_at) VALUES(?1,?2,?3,'finding',?4,0)",params![id,run_id,task_id,body]).unwrap();
+}
+
+#[test]
+fn fleet_search_is_approved_scoped_and_wrapped_as_untrusted_data() {
+    let conn=db();seed_workspace(&conn,"w1");seed_mission(&conn,"m1","w1");seed_mission(&conn,"m2","w1");seed_run(&conn,"r1","w1",Some("m1"));seed_task(&conn,"reader","r1",Some("worker"));
+    activate(&conn,"mission",Some("m1"),"sqlite","sqlite ``` <script>visible</script>");
+    activate(&conn,"mission",Some("m2"),"private","sqlite other mission private");
+    propose(&conn,"workspace",None,"pending","sqlite hidden pending","create",None);
+    let result=task_tool(&conn,"reader","memory.searchApproved",json!({"query":"sqlite"})).unwrap();let text=result["text"].as_str().unwrap();
+    assert!(text.contains("UNTRUSTED"));assert!(text.contains("visible"));assert!(!text.contains("<script>"));assert!(!text.contains("other mission private"));assert!(!text.contains("hidden pending"));
+    assert!(task_tool(&conn,"reader","memory.searchApproved",json!({"query":"sqlite","workspace_id":"w2"})).is_err());
+}
+
+#[test]
+fn context_metrics_recovers_legacy_token_cost_without_changing_sealed_metadata() {
+    let conn=db();seed_workspace(&conn,"w1");seed_run(&conn,"r1","w1",None);
+    conn.execute("INSERT INTO run_memory_snapshot(run_id,entry_id,revision,scope,key,kind,body,priority,content_hash,selection_order,truncated) VALUES('r1','legacy',1,'workspace','old','note','ação aprovada',0,?1,0,0)",[hash("note","ação aprovada")]).unwrap();
+    let text=snapshot_context_for_run(&conn,"r1").unwrap();
+    conn.execute("INSERT INTO run_memory_snapshot_meta(run_id,omitted_entries,truncated_entries,context_bytes) VALUES('r1',0,0,?1)",[text.len() as i64]).unwrap();
+    let metrics=context_metrics(&conn,Some("r1"),None).unwrap();assert_eq!(metrics["legacyContext"],true);
+    assert_eq!(metrics["tokensBefore"],crate::orchestrator::digest::estimate_tokens(&text));assert_eq!(metrics["tokensAfter"],metrics["tokensBefore"]);assert_eq!(metrics["beforeBytes"],metrics["afterBytes"]);
+    assert_eq!(conn.query_row("SELECT context_tokens FROM run_memory_snapshot_meta WHERE run_id='r1'",[],|r|r.get::<_,i64>(0)).unwrap(),0);
+}
+
+#[test]
+fn v40_to_v41_is_additive_idempotent_and_preserves_the_delete_guard() {
+    let conn=db();seed_workspace(&conn,"w1");let approved=activate(&conn,"workspace",None,"upgrade","preserved revision");
+    for (table,column) in [("memory_entries","last_verified"),("memory_entries","ttl_days"),("workspaces","deleted_at"),("workspaces","delete_after"),("run_memory_snapshot_meta","context_tokens"),("run_memory_snapshot_meta","baseline_bytes"),("run_memory_snapshot_meta","baseline_tokens"),("run_memory_snapshot_meta","memory_index"),("run_memory_snapshot_meta","repository_commit")] {
+        conn.execute_batch(&format!("ALTER TABLE {table} DROP COLUMN {column};")).unwrap();
+    }
+    conn.execute_batch("DROP TABLE memory_agent_drafts;DROP TABLE memory_compacted_revisions;DROP TABLE memory_swarm_notes;PRAGMA user_version=40;").unwrap();
+    crate::database::migrate_for_tests(&conn).unwrap();crate::database::migrate_for_tests(&conn).unwrap();
+    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),41);
+    let entry=detail_for_owner(&conn,&approved.entry_id,"w1",None).unwrap();assert_eq!(entry.revisions[0].body,"preserved revision");assert_eq!(entry.entry.last_verified,None);assert_eq!(entry.entry.ttl_days,None);
+    assert!(conn.execute("DELETE FROM memory_revisions WHERE entry_id=?1",[&approved.entry_id]).is_err());
+    // The existing guard makes raw cascading deletion fail rather than losing
+    // approved history. Production soft-delete additionally protects sessions.
+    assert!(conn.execute("DELETE FROM workspaces WHERE id='w1'",[]).is_err());
+    crate::database::soft_delete_workspace(&conn,"w1").unwrap();assert_eq!(lifecycle::stats(&conn,"w1").unwrap()["revisions"],1);
+}
+
+#[test]
+fn soft_delete_preserves_memory_revisions_and_export_includes_history() {
+    let conn=db();seed_workspace(&conn,"w1");activate(&conn,"workspace",None,"preserve","historical value");
+    crate::database::soft_delete_workspace(&conn,"w1").unwrap();
+    let stats=lifecycle::stats(&conn,"w1").unwrap();assert_eq!(stats["entries"],1);assert_eq!(stats["revisions"],1);
+    assert_eq!(stats["deleteAfter"].as_i64().unwrap()-stats["deletedAt"].as_i64().unwrap(),30*86400);
+    let root=std::env::temp_dir().join(format!("ade-memory-export-{}",Uuid::new_v4()));
+    let result=lifecycle::export(&conn,"w1",&root).unwrap();
+    let path=std::path::Path::new(result["path"].as_str().unwrap());
+    let dump=std::fs::read_to_string(path.join("revisions.json")).unwrap();assert!(dump.contains("historical value"));
+    assert!(path.join("AGENTS.generated.md").exists());
+    let _=std::fs::remove_dir_all(root);
+}
+
+#[test]
+fn cursor_survives_removing_an_earlier_item_and_filters_used_memory() {
+    let conn=db();seed_workspace(&conn,"w1");seed_run(&conn,"r1","w1",None);
+    activate(&conn,"workspace",None,"aa","first");activate(&conn,"workspace",None,"decision","second");
+    let first=list_for_owner(&conn,"w1",None,None,1).unwrap();assert_eq!(first.items[0].key,"aa");
+    conn.execute("UPDATE memory_entries SET status='deleted',current_revision=NULL WHERE key='aa'",[]).unwrap();
+    let next=list_for_owner(&conn,"w1",None,first.next_cursor.as_deref(),1).unwrap();assert_eq!(next.items[0].key,"decision");
+    snapshot_run(&conn,"r1","w1",None).unwrap();
+    let filtered=list_filtered(&conn,"w1",None,None,32,&MemoryFilter{query:Some("second".into()),used:Some(true),kind:Some("note".into()),status:Some("active".into())}).unwrap();
+    assert_eq!(filtered.items.len(),1);assert_eq!(filtered.items[0].times_used,1);
+}
+
+#[test]
+fn swarm_notes_are_bounded_untrusted_session_data_and_never_approved() {
+    let conn=db();seed_workspace(&conn,"w1");seed_mission(&conn,"m1","w1");
+    lifecycle::swarm_write(&conn,"w1","m1","question","Check source ``` <bad>").unwrap();
+    let files=repo::render(&conn,"w1",&[]).unwrap();let text=files.iter().find(|(p,_)|p.starts_with("swarms/")&&p.ends_with("questions.md")).unwrap().1;
+    assert!(text.contains("UNTRUSTED"));assert!(!text.contains("<bad>"));
+    assert!(search::load_docs(&conn,"w1",Some("m1")).unwrap().is_empty());
+    let secret=format!("{}{}", "password", "=do-not-share");assert!(lifecycle::swarm_write(&conn,"w1","m1","note",&secret).is_err());
+    assert!(lifecycle::swarm_write(&conn,"w1","m1","note",&"x".repeat(4097)).is_err());
+}
+
+#[test]
+fn measure_entry_select_before_optimizing_it() {
+    let conn=db();seed_workspace(&conn,"w1");
+    for i in 0..128 {activate(&conn,"workspace",None,&format!("benchmark-{i}"),&"approved fact ".repeat(80));}
+    let baseline=format!("{LEGACY_ENTRY_SELECT} WHERE e.workspace_id='w1' ORDER BY e.id");
+    let joined="SELECT e.id,e.scope,e.workspace_id,e.mission_id,e.key,e.kind,CASE WHEN e.status='active' AND e.current_revision IS NULL THEN 'inactive' ELSE e.status END,e.current_revision,e.priority,a.body,a.actor_kind,a.source_run_id,a.source_task_id,e.created_at,e.updated_at,p.revision,p.operation,p.kind,p.priority,p.body,p.actor_kind,p.source_run_id,p.source_task_id,p.source_fact_id,p.reason,p.created_at,a.source_fact_id,e.last_verified,e.ttl_days,(SELECT COUNT(DISTINCT run_id) FROM run_memory_snapshot WHERE entry_id=e.id) FROM memory_entries e LEFT JOIN memory_revisions a ON a.entry_id=e.id AND a.revision=e.current_revision AND a.status='approved' LEFT JOIN memory_revisions p ON p.entry_id=e.id AND p.status='proposed' WHERE e.workspace_id='w1' ORDER BY e.id";
+    let measure=|sql:&str|{let start=std::time::Instant::now();let mut out=Vec::new();for _ in 0..40 {let mut stmt=conn.prepare(sql).unwrap();out=stmt.query_map([],entry_from_row).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();}(start.elapsed(),out)};
+    let (before,old)=measure(&baseline);let (after,new)=measure(joined);assert_eq!(old,new);
+    println!("ENTRY_SELECT scalar baseline {before:?}; equivalent joins {after:?} (128 entries x40)");
+    let start=std::time::Instant::now();let mut old=Vec::new();
+    for _ in 0..20 {old=search::legacy_load_docs_at(&conn,"w1",None,now()).unwrap();}
+    let before=start.elapsed();let start=std::time::Instant::now();let mut new=Vec::new();
+    for _ in 0..20 {let mut stmt=conn.prepare(search::DOCS_AT_SQL).unwrap();new=stmt.query_map(params!["w1",Option::<String>::None,now()],|r|Ok(search::Doc{entry_id:r.get(0)?,scope:r.get(1)?,key:r.get(2)?,kind:r.get(3)?,priority:r.get(4)?,body:r.get(5)?})).unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();}
+    let after=start.elapsed();assert_eq!(old,new);
+    println!("load_docs_at N+1 baseline {before:?}; batched window query {after:?} (128 entries x20)");
+}
+
+#[test]
+fn relevance_avoids_unrelated_priority_dump_and_measures_sealed_cost() {
+    let conn=db(); seed_workspace(&conn,"w1");seed_run(&conn,"r1","w1",None);
+    conn.execute("UPDATE runs SET objective='sqlite busy database' WHERE id='r1'",[]).unwrap();
+    for n in 0..16 {activate(&conn,"workspace",None,&format!("unrelated-{n}"),&"flowers garden ".repeat(200));}
+    activate(&conn,"workspace",None,"sqlite","sqlite database uses immediate transactions");
+    snapshot_run(&conn,"r1","w1",None).unwrap();
+    let snapshot=snapshot_for_run(&conn,"r1").unwrap();
+    assert_eq!(snapshot.items.len(),1);assert_eq!(snapshot.items[0].key,"sqlite");
+    assert!(snapshot.meta.context_bytes<snapshot.meta.baseline_bytes);
+    assert!(snapshot.meta.context_tokens<snapshot.meta.baseline_tokens);
+    let block=snapshot_block(&snapshot);assert_eq!(snapshot.meta.context_bytes,block.len() as i64);
+    assert_eq!(snapshot.meta.context_tokens,crate::orchestrator::digest::estimate_tokens(&block) as i64);
+    assert!(snapshot.meta.memory_index.lines().count()<=40);
+    println!("memory context: {} bytes/{} estimated tokens -> {} bytes/{} estimated tokens",snapshot.meta.baseline_bytes,snapshot.meta.baseline_tokens,snapshot.meta.context_bytes,snapshot.meta.context_tokens);
+    let sealed=snapshot.meta.clone();activate(&conn,"workspace",None,"later","sqlite more data");
+    assert_eq!(snapshot_for_run(&conn,"r1").unwrap().meta,sealed);
+}
+
+#[test]
+fn draft_queue_preserves_overflow_until_a_user_moves_it_into_pending() {
+    let conn=db();seed_workspace(&conn,"w1");
+    let mut first=None;
+    for i in 0..32 {let p=propose(&conn,"workspace",None,&format!("queue-{i}"),"body","create",None);if first.is_none(){first=Some(p);}}
+    let result=super::propose(&conn,"workspace","w1",None,&proposal("workspace","overflow","keep this knowledge","create",None),ProposalActor{kind:"worker",run_id:None,task_id:None,fact_id:None}).unwrap();
+    assert_eq!(result.status,"agent_draft");assert_eq!(owner_quota(&conn,"w1",None).unwrap().0,32);
+    assert_eq!(lifecycle::drafts(&conn,"w1").unwrap().len(),1);
+    assert!(lifecycle::promote_draft(&conn,"w1",&result.entry_id).is_err());
+    let first=first.unwrap();decide(&conn,&first.entry_id,first.revision,false).unwrap();
+    let promoted=lifecycle::promote_draft(&conn,"w1",&result.entry_id).unwrap();assert_eq!(promoted.status,"proposed");
+    assert!(lifecycle::drafts(&conn,"w1").unwrap().is_empty());
+    assert!(detail_for_owner(&conn,&promoted.entry_id,"w1",None).unwrap().entry.current_revision.is_none());
+}
+
+#[test]
+fn rejected_compaction_keeps_hash_audit_and_never_removes_approved_history() {
+    let conn=db();seed_workspace(&conn,"w1");
+    let approved=activate(&conn,"workspace",None,"approved","keep forever");
+    let p=propose(&conn,"workspace",None,"rejected",&"x".repeat(4096),"create",None);
+    // Set an old timestamp only during the proposed->rejected transition allowed by
+    // the production trigger; immutable rejected revisions cannot be edited later.
+    conn.execute("UPDATE memory_revisions SET status='rejected',decided_at=1 WHERE entry_id=?1",[&p.entry_id]).unwrap();
+    let before=owner_quota(&conn,"w1",None).unwrap().2;
+    assert_eq!(lifecycle::compact(&conn,30).unwrap(),1);
+    assert!(owner_quota(&conn,"w1",None).unwrap().2<before);
+    assert_eq!(lifecycle::compact(&conn,30).unwrap(),0);
+    assert_eq!(detail_for_owner(&conn,&approved.entry_id,"w1",None).unwrap().revisions.len(),1);
+    let audit:(String,String)=conn.query_row("SELECT content_hash,metadata_json FROM memory_compacted_revisions WHERE entry_id=?1",[&p.entry_id],|r|Ok((r.get(0)?,r.get(1)?))).unwrap();assert_eq!(audit.0.len(),64);assert!(audit.1.contains("rejected"));assert!(!audit.1.contains(&"x".repeat(100)));
+    let next=propose(&conn,"workspace",None,"rejected","new proposal","create",None);assert_eq!(next.revision,2);
 }
 
 fn proposal(
@@ -98,7 +242,7 @@ fn migration_v23_to_v24_adds_memory_tables_and_immutable_triggers() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 40);
+    assert_eq!(version, 41);
     for table in [
         "memory_entries",
         "memory_revisions",
@@ -414,7 +558,7 @@ fn utf8_byte_limits_accept_boundaries_and_reject_overflow() {
 }
 
 #[test]
-fn snapshot_orders_by_priority_scope_key_and_id() {
+fn snapshot_selects_by_relevance_and_keeps_a_short_index() {
     let conn = db();
     seed_workspace(&conn, "w1");
     seed_mission(&conn, "m1", "w1");
@@ -441,15 +585,10 @@ fn snapshot_orders_by_priority_scope_key_and_id() {
     decide(&conn, &high.entry_id, high.revision, true).unwrap();
     crate::memory::snapshot_run(&conn, "r1", "w1", Some("m1")).unwrap();
     let snapshot = snapshot_for_run(&conn, "r1").unwrap();
-    assert_eq!(
-        snapshot
-            .items
-            .iter()
-            .map(|x| x.key.as_str())
-            .collect::<Vec<_>>(),
-        ["high", "a", "a", "z"]
-    );
-    assert_eq!(snapshot.items[1].scope, "mission");
+    assert_eq!(snapshot.items.iter().map(|x|x.key.as_str()).collect::<Vec<_>>(), ["high"]);
+    assert!(snapshot.meta.memory_index.contains("[mission] a"));
+    assert!(snapshot.meta.memory_index.lines().count() <= 40);
+
 }
 
 #[test]
@@ -891,7 +1030,7 @@ fn additive_upgrades_from_v19_through_v23_preserve_data_and_are_idempotent() {
         conn.pragma_update(None,"user_version",version).unwrap();
         crate::database::migrate_for_tests(&conn).unwrap();
         crate::database::migrate_for_tests(&conn).unwrap();
-        assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),40);
+        assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),41);
         assert_eq!(conn.query_row("SELECT model,handoff FROM tasks WHERE id='old-task'",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).unwrap(),("old-model".into(),"legacy delivery".into()));
         assert_eq!(conn.query_row("SELECT body FROM run_facts WHERE id='old-fact'",[],|r|r.get::<_,String>(0)).unwrap(),"historical fact");
         activate(&conn,"mission",Some("m1"),"upgrade","memory works");
@@ -916,13 +1055,13 @@ fn normalized_identical_update_and_pending_repetition_are_noops() {
 fn all_run_store_entrypoints_capture_empty_and_owner_scoped_snapshots_atomically() {
     let conn=db(); seed_workspace(&conn,"w1"); seed_workspace(&conn,"w2"); seed_mission(&conn,"m1","w1");
     activate(&conn,"workspace",None,"w","workspace"); activate(&conn,"mission",Some("m1"),"m","mission");
-    let manual=crate::runs::store::create_run(&conn,"w1","manual","/p").unwrap();
+    let manual=crate::runs::store::create_run(&conn,"w1","workspace","/p").unwrap();
     assert_eq!(snapshot_for_run(&conn,&manual.id).unwrap().items.len(),1);
-    let planned=crate::runs::store::create_run_with(&conn,"w1","plan","/p",2,None).unwrap();
+    let planned=crate::runs::store::create_run_with(&conn,"w1","workspace","/p",2,None).unwrap();
     assert_eq!(snapshot_for_run(&conn,&planned.id).unwrap().items.len(),1);
-    let mission=crate::runs::store::create_run_with_memory_snapshot(&conn,"w1",Some("m1"),"mission","/p",2,None).unwrap();
+    let mission=crate::runs::store::create_run_with_memory_snapshot(&conn,"w1",Some("m1"),"workspace mission","/p",2,None).unwrap();
     assert_eq!(snapshot_for_run(&conn,&mission.id).unwrap().items.len(),2);
-    let retry=crate::runs::store::create_run_with_memory_snapshot(&conn,"w1",Some("m1"),"retry","/p",2,None).unwrap();
+    let retry=crate::runs::store::create_run_with_memory_snapshot(&conn,"w1",Some("m1"),"workspace mission","/p",2,None).unwrap();
     assert_ne!(mission.id,retry.id);
     let empty=crate::runs::store::create_run(&conn,"w2","empty","/p").unwrap();
     assert!(snapshot_for_run(&conn,&empty.id).unwrap().items.is_empty());
@@ -1041,7 +1180,7 @@ fn escaped_active_and_pending_bodies_do_not_stall_memory_pagination() {
     let page = list_for_owner(&conn, "w1", None, None, 1).unwrap();
     assert_eq!(page.items.len(), 1);
     assert!(page.items[0].body_truncated && page.items[0].pending_body_truncated);
-    assert_eq!(page.next_cursor.as_deref(), Some("1"));
+    assert!(page.next_cursor.is_some());
     assert!(serde_json::to_vec(&page).unwrap().len() <= LIST_BYTES);
     let next = list_for_owner(&conn, "w1", None, page.next_cursor.as_deref(), 1).unwrap();
     assert_eq!(next.items[0].key, "z-next");
@@ -1078,7 +1217,7 @@ fn migration_v24_failure_rolls_back_ddl_and_schema_version() {
     assert_eq!(conn.query_row("SELECT legacy FROM memory_revisions", [], |r| r.get::<_, String>(0)).unwrap(), "preserved");
     conn.execute("DROP TABLE memory_revisions", []).unwrap();
     crate::database::migrate_for_tests(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),40);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),41);
 }
 
 #[test]

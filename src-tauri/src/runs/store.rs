@@ -166,6 +166,11 @@ pub fn create_run_with_memory_snapshot(
     conn: &Connection, workspace_id: &str, mission_id: Option<&str>, objective: &str,
     cwd: &str, max_parallel: i64, budget_usd: Option<f64>,
 ) -> Result<Run, String> {
+    // A standalone SAVEPOINT starts a deferred transaction. Reserve the writer
+    // before reading memory; caller-owned transactions retain their own lifetime.
+    let transaction = if conn.is_autocommit() {
+        Some(rusqlite::Transaction::new_unchecked(conn,rusqlite::TransactionBehavior::Immediate).map_err(|e|e.to_string())?)
+    } else { None };
     conn.execute_batch("SAVEPOINT create_run_memory").map_err(|e| e.to_string())?;
     let result = (|| {
         let id = Uuid::new_v4().to_string();
@@ -176,7 +181,7 @@ pub fn create_run_with_memory_snapshot(
         run_by_id(conn, &id)?.ok_or_else(|| "Run was not saved".to_string())
     })();
     match result {
-        Ok(run) => {conn.execute_batch("RELEASE create_run_memory").map_err(|e| e.to_string())?; Ok(run)}
+        Ok(run) => {conn.execute_batch("RELEASE create_run_memory").map_err(|e| e.to_string())?; if let Some(transaction)=transaction {transaction.commit().map_err(|e|e.to_string())?;} Ok(run)}
         Err(error) => {conn.execute_batch("ROLLBACK TO create_run_memory; RELEASE create_run_memory").map_err(|e| e.to_string())?; Err(error)}
     }
 }

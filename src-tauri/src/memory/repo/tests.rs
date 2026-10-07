@@ -21,6 +21,25 @@ fn fixture() -> Connection {
     c
 }
 
+#[test]
+fn approved_reader_rejects_traversal_and_keeps_pending_and_other_missions_out() {
+    let c=fixture();
+    c.execute("INSERT INTO missions(id,workspace_id,title,objective,cwd,created_at,updated_at) VALUES('other','w','Other','x','/test',0,0)",[]).unwrap();
+    let input=|scope:&str,key:&str,body:&str| ProposalInput{scope:scope.into(),key:key.into(),kind:"note".into(),body:body.into(),priority:0,operation:"create".into(),expected_revision:None,source_fact_id:None,reason:None};
+    let actor=||ProposalActor{kind:"user",run_id:None,task_id:None,fact_id:None};
+    super::super::propose(&c,"workspace","w",None,&input("workspace","pending","hidden pending"),actor()).unwrap();
+    let other=super::super::propose(&c,"mission","w",Some("other"),&input("mission","private","other mission data"),actor()).unwrap();
+    super::super::decide(&c,&other.entry_id,other.revision,true).unwrap();
+    let approved=super::super::propose(&c,"workspace","w",None,&input("workspace","safe","visible ``` <tag>"),actor()).unwrap();
+    super::super::decide(&c,&approved.entry_id,approved.revision,true).unwrap();
+    let text=approved_open(&c,"w",Some("m"),"notes.md").unwrap();
+    assert!(text.contains("visible")); assert!(text.contains("UNTRUSTED"));
+    let json=text.split("```json\n").nth(1).unwrap().split("\n```").next().unwrap();
+    let value:serde_json::Value=serde_json::from_str(json).unwrap();assert!(value["content"].as_str().unwrap().contains("visible"));
+    assert!(!text.contains("hidden pending"));assert!(!text.contains("other mission data"));assert!(!text.contains("<tag>"));
+    for path in ["../notes.md","/notes.md","C:/notes.md","notes\\file.md",".git/config","missions/other.md"] {assert!(approved_open(&c,"w",Some("m"),path).is_err(),"{path}");}
+}
+
 fn propose(c:&Connection,key:&str,body:&str)->crate::memory::ProposalResult {
     crate::memory::propose(c,"workspace","w",None,&ProposalInput {
         scope:"workspace".into(),key:key.into(),kind:"constraint".into(),body:body.into(),priority:3,

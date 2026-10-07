@@ -25,7 +25,7 @@ pub(super) fn workspace_open(app: &AppHandle, args: &Value) -> Result<Value, Str
         let db = db(app)?;
         let conn = db.lock().map_err(|e| e.to_string())?;
         conn.query_row(
-            "SELECT id FROM workspaces WHERE id = ?1 OR name = ?1",
+            "SELECT id FROM workspaces WHERE (id = ?1 OR name = ?1) AND deleted_at IS NULL",
             [&requested],
             |r| r.get::<_, String>(0),
         )
@@ -58,4 +58,3 @@ pub(super) fn workspace_status(app: &AppHandle) -> Result<Value, String> {
         "tabs": tabs.get("tabs").cloned().unwrap_or(Value::Null),
     }))
 }
-

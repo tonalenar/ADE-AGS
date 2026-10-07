@@ -81,6 +81,7 @@ pub fn dreamer_command_allowed(command: &str) -> bool {
         command,
         "memory.list"
             | "memory.get"
+            | "memory.searchApproved"
             | "memory.workspaceHistory"
             | "memory.propose"
             | "memory.update"
@@ -94,6 +95,8 @@ pub fn dreamer_may_use(tool: &str) -> bool {
         Some(
             "memory_list"
                 | "memory_get"
+                | "memory_search"
+                | "memory_open"
                 | "memory_workspace_history"
                 | "memory_propose"
                 | "memory_update"

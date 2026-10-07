@@ -3,6 +3,16 @@
 use super::*;
 
 #[test]
+fn memory_repository_and_swarm_commands_use_production_flag_parser() {
+    let open=parse("memory.open",&["notes.md","--mission","spoofed"]).unwrap();assert_eq!(open["path"],"notes.md");
+    assert!(parse("memory.index",&["unexpected"]).is_err());
+    let mut note=parse("swarm.note",&["session fact","--from","spoofed","--mission","spoofed"]).unwrap();
+    caller_from("swarm.note",&mut note,Some("real-tab".into()));
+    assert_eq!(note["body"],"session fact");assert_eq!(note["from"],"real-tab");assert!(note.get("mission").is_none());
+    assert_eq!(parse("swarm.question",&["which source?"]).unwrap()["body"],"which source?");
+}
+
+#[test]
 fn memory_numeric_flags_are_numbers() {
     let args = parse_flags(&["--priority".into(), "-2".into(), "--limit".into(), "7".into()], &[]).unwrap();
     assert_eq!(args["priority"], -2);
