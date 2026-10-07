@@ -51,3 +51,7 @@ Os contadores representam comandos/suites, não um número estimado de casos de
 teste: `skippedAffected` conta suites ausentes do plano, e `skippedCache` conta
 comandos já verdes. Os tempos reais de referência são consolidados em
 [TEST_SPEED.md](TEST_SPEED.md).
+
+## Por que o cache não acertava nas missões
+
+Na Etapa 24 o contador skippedCache ficou em 0: os agentes rodavam gs test affected com a árvore suja (resultado com clean: false, sem 	reeHash, nunca reaproveitável), cada worktree tinha uma árvore diferente e o mesmo teste aparecia com argv diferente (--bin ags, --lib --bin ags, filtros de módulo). Regra nos briefings e na skill gs-orchestrator 1.30.0: commitar antes de testar (mesmo provisório) e repetir sempre o mesmo comando, para o Orquestrador e o QA reaproveitarem o verde na mesma árvore.
