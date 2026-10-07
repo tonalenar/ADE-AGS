@@ -118,3 +118,26 @@ No modelo "QA em fluxo", a métrica `tempo de espera do QA` (`qaWaitMs`) passa a
 - **Objetivo:** Quantificar o tempo em que o papel de QA permaneceu ocioso aguardando entregas dos integrantes ou aguardando respostas a perguntas bloqueantes.
 - **Cálculo:** União dos períodos de ociosidade/bloqueio antes de validações e o tempo despendido em spans de espera (`peer_ask` ou `qa_wait`).
 - **Meta:** Manter o QA alimentado continuamente através do protocolo onde o **Orquestrador notifica o QA a cada entrega recebida**, eliminando esperas acumuladas ao final da missão.
+
+---
+
+## 6. O que Roda em Cada SO no CI
+
+O workflow [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml) roda em todo PR e em todo push para `master`, com dois jobs independentes:
+
+| SO | Job | O que roda | Tempo |
+|---|---|---|---|
+| **Linux** (`ubuntu-22.04`) | `test` | `tsc --noEmit`, `babel-parse-check`, `vitest` (`bun run test`), `cargo test --lib --bin ags` | **~4 min** |
+| **Windows** (`windows-latest`) | `check (windows)` | `cargo check --lib --bin ags --tests` (compila o código `#[cfg(windows)]` e os testes, sem executá-los) | **TBD** (a medir no CI) |
+| **macOS** | — | Nada no CI; só no release (`release.yml`) | — |
+
+Referência local: `cargo check --lib --bin ags --tests` no Windows, com o alvo compartilhado (`~/.ags/cargo-target-agents`) já aquecido, levou **56,4s** (exit 0). O job do Windows não precisa de bun nem da pasta `dist` do frontend: em build de debug o Tauri usa `devUrl`, e o check passou localmente sem `dist`.
+
+Qualquer job que falhe já deixa o PR vermelho. Hoje a `master` **não tem branch protection nem rulesets** (`gh api repos/tonalenar/ADE-AGS/branches/master/protection` → 404 "Branch not protected"), então nenhum check é formalmente obrigatório para o merge.
+
+### Por que `cargo check` e não `cargo test` no Windows
+- **O binário de teste da lib não arranca no runner Windows** (`STATUS_ENTRYPOINT_NOT_FOUND`, 0xc0000139): ele linka WebView2 e roda a partir de `target/debug/deps/`, onde o loader não está. É um problema do arnês de testes, não do código (ver o comentário em `release.yml`, no passo "Tests de Rust"). Os testes com gate `#[cfg(windows)]` continuam sendo rodados à mão no Windows.
+- **Custo de tempo:** compilar e rodar a suíte Rust no runner Windows é caro; o PR 117 levou **18 min** de CI. O `cargo check` pega erros de compilação sem gerar código nem linkar.
+
+### Histórico
+Os PRs **113** e **114** quebraram o build **só no Windows** com o CI verde, porque o único job de CI rodava em Linux e não compilava o código `#[cfg(windows)]` (o conserto veio no PR 117, "Windows: corrige o build do named pipe de credencial"). O job `check (windows)` existe para pegar esse tipo de quebra antes do merge.
