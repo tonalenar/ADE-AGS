@@ -217,7 +217,7 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, fastMo
   const selectedAgent = roster?.agents.find((agent) => agent.agentId === agentId);
   const accountValue = autoAccount ? AUTO_ACCOUNT : (accountId ?? undefined);
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 gap-x-4 gap-y-3 pt-1">
+    <div className="grid grid-cols-1 gap-y-3.5 pt-1">
       <Field label={t("squads.form.provider")}>
         <PopupSelect className={SELECT} value={agentId} onChange={(event) => onChange({ agentId: event.target.value, model: null, reasoningEffort: null, fastMode: false, accountId: null, autoAccount: true })}>
           <option value="">{t("squads.form.chooseProvider")}</option>
@@ -255,13 +255,13 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, fastMo
         ) : <span className="text-[10px] text-gray-400 dark:text-white/35">{t("squads.form.chooseProvider")}</span>}
       </Field>
       {isolateDefault !== undefined && (
-        <label className="md:col-span-2 flex items-center gap-2 text-[12px] text-gray-600 dark:text-gray-300">
+        <label className="flex items-center gap-2 text-[12px] text-gray-600 dark:text-gray-300">
           <input type="checkbox" className="h-4 w-4 rounded accent-[var(--color-accent-500)]" checked={isolateDefault} onChange={(event) => onChange({ isolateDefault: event.target.checked })} />
           {t("squads.form.isolateDefault")}
         </label>
       )}
       {availability && availability !== "available" && (
-        <p className={`md:col-span-2 text-[10px] ${availability === "unknown" ? "text-gray-400 dark:text-white/35" : "text-amber-700 dark:text-amber-300"}`}>
+        <p className={`text-[10px] ${availability === "unknown" ? "text-gray-400 dark:text-white/35" : "text-amber-700 dark:text-amber-300"}`}>
           {t(`squads.availability.${availability}`)}{unavailableReason ? ` · ${unavailableReason}` : ""}
         </p>
       )}
