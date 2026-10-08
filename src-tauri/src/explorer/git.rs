@@ -133,8 +133,8 @@ pub(crate) fn parse_status_z(raw: &str) -> HashMap<String, String> {
 
 /// Une las dos salidas de git en lo que ve el panel.
 ///
-/// `rev` es `rev-parse --show-toplevel --absolute-git-dir --git-common-dir` (una línea
-/// por dato, absoluto). `None` significa que no hay repo. `status` es
+/// `rev` es `rev-parse --path-format=absolute --show-toplevel --git-dir --git-common-dir`
+/// (una línea por dato). `None` significa que no hay repo. `status` es
 /// `git status --porcelain=v2 -b -z`: trae la rama y los cambios en el mismo proceso.
 pub(crate) fn repo_info_from_probes(rev: Option<&str>, status: Option<&str>) -> RepoInfo {
     let Some(rev) = rev else {
@@ -157,6 +157,9 @@ pub(crate) fn repo_info_from_probes(rev: Option<&str>, status: Option<&str>) -> 
 
 /// Tres rutas, en el orden en que se pidieron. La segunda y la tercera difieren en un
 /// worktree enlazado; mirar si `.git` es archivo o carpeta falla con submódulos.
+///
+/// En Windows git puede devolver el mismo directorio con `\` o `/`, barra final y la
+/// letra del disco en otro caso (`C:\repo\.git` y `c:/repo/.git`). Eso no es un worktree.
 pub(crate) fn parse_rev_parse_locations(raw: &str) -> Option<(String, bool)> {
     let lines: Vec<&str> = raw
         .lines()
@@ -166,7 +169,27 @@ pub(crate) fn parse_rev_parse_locations(raw: &str) -> Option<(String, bool)> {
     if lines.len() < 3 {
         return None;
     }
-    Some((lines[0].to_string(), lines[1] != lines[2]))
+    Some((lines[0].to_string(), !same_git_dir(lines[1], lines[2])))
+}
+
+/// El mismo directorio de git, aunque el texto no coincida.
+///
+/// `\` pasa a `/`, se quita la barra final y la letra de unidad se compara en minúscula.
+/// El resto del camino se deja como vino: en Windows el disco es lo que git cambia de caso.
+fn same_git_dir(a: &str, b: &str) -> bool {
+    normalize_git_dir(a) == normalize_git_dir(b)
+}
+
+fn normalize_git_dir(raw: &str) -> String {
+    let slashed = raw.replace('\\', "/");
+    let trimmed = slashed.trim_end_matches('/');
+    let mut chars = trimmed.chars();
+    match (chars.next(), chars.next()) {
+        (Some(drive), Some(':')) if drive.is_ascii_alphabetic() => {
+            format!("{}:{}", drive.to_ascii_lowercase(), chars.as_str())
+        }
+        _ => trimmed.to_string(),
+    }
 }
 
 /// `git status --porcelain=v2 -b -z`: la rama en `# branch.head` y los cambios.
@@ -249,15 +272,16 @@ pub async fn explorer_repo_info(path: String) -> Result<RepoInfo, String> {
 }
 
 fn repo_info_sync(path: &str) -> Result<RepoInfo, String> {
-    // Un solo `rev-parse` responde toplevel y los dos directorios de git. Si falla, no
-    // es un repo (o no hay `git`): no se lanza el `status`.
+    // Un solo `rev-parse` responde toplevel y los dos directorios de git, los dos en
+    // absoluto (`--path-format` aplica a `--git-dir` y a `--git-common-dir`). Si falla,
+    // no es un repo (o no hay `git`): no se lanza el `status`.
     let rev = git(
         path,
         &[
             "rev-parse",
             "--path-format=absolute",
             "--show-toplevel",
-            "--absolute-git-dir",
+            "--git-dir",
             "--git-common-dir",
         ],
     );

@@ -138,6 +138,25 @@ fn un_worktree_se_reconoce_por_los_directorios_de_git_y_sin_repo_no_hay_nada() {
     assert!(none.changes.is_empty());
 }
 
+#[test]
+fn barras_y_unidad_de_windows_no_son_un_worktree() {
+    // El mismo checkout: git puede mezclar `\` y `/`, barra final y `C:` / `c:`.
+    let same = repo_info_from_probes(
+        Some("C:\\repo\nC:\\repo\\.git\nc:/repo/.git/\n"),
+        Some("# branch.head master\0"),
+    );
+    assert_eq!(same.root.as_deref(), Some("C:\\repo"));
+    assert!(!same.is_worktree, "un repo normal de Windows no es worktree");
+    assert_eq!(same.branch.as_deref(), Some("master"));
+
+    let linked = repo_info_from_probes(
+        Some("C:/repo-wt\nC:/repo/.git/worktrees/x\nC:/repo/.git\n"),
+        Some("# branch.head feature\0"),
+    );
+    assert!(linked.is_worktree, "el git dir de un worktree no es el común");
+    assert_eq!(linked.branch.as_deref(), Some("feature"));
+}
+
 // ── Buscador ─────────────────────────────────────────────────────
 
 use super::search::{build_regex, preview_of, search, SearchQuery};
