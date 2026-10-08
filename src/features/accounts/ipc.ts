@@ -56,12 +56,17 @@ export type AntigravityAccountDiscovery = {
   projectId: string;
   models: Array<{ id: string; name: string; remainingFraction?: number; resetTime?: string }>;
   inferenceVerified: boolean;
+  /** Epoch segundos. 0 = no hay snapshot. Ausente en respuestas viejas. */
+  fetchedAt?: number;
+  cached?: boolean;
 };
-export const discoverAntigravityAccount = (accountId: string) =>
-  invoke<AntigravityAccountDiscovery>("antigravity_account_discovery", { accountId });
+/** `force` ausente o `true` consulta en vivo. El barrido del canvas manda `false`. */
+export const discoverAntigravityAccount = (accountId: string, force = true) =>
+  invoke<AntigravityAccountDiscovery>("antigravity_account_discovery", { accountId, force });
 
-/** Cupo, mail y plan de una cuenta de Codex, preguntados a su `app-server` en el momento. */
-export const codexAccountUsage = (accountId: string) => invoke<CodexUsage>("codex_account_usage", { accountId });
+/** Cupo, mail y plan de una cuenta de Codex. `force` ausente va en vivo, como el popover. */
+export const codexAccountUsage = (accountId: string, force = true) =>
+  invoke<CodexUsage>("codex_account_usage", { accountId, force });
 
 /** Uso de cada cuenta en los últimos `days` días, con sus límites (ver `runs::ledger`). */
 export const accountUsageSummary = (days: number) => invoke<AccountUsageSummary[]>("account_usage_summary", { days });

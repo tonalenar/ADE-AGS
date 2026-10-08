@@ -5,7 +5,8 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath } from "@/features/tabs/viewTabs";
 
 import { gridPlacements, useMissionGrid } from "@/features/canvas/gridMode";
-import { useCanvasStore, useWorkMode } from "@/features/canvas/store";
+import { gridTabs } from "@/features/canvas/gridMode";
+import { boardKeyOfTab, missionOfKey, useCanvasStore, useWorkMode, type WorkMode } from "@/features/canvas/store";
 import {
   activate, agentKey, allGroups, closeGroup, createLayout, findGroup, focusGroup as focusInTree, isAgentKey, keyId,
   moveItem, parseLayout, reconcile, resize, split, viewKey, type SplitSide, type WorkspaceLayout,
@@ -366,6 +367,40 @@ export function canvasPlacements(liveRects: Record<string, Rect>, activeTabId: s
   return { visible, focusedItem: focused && visible.has(focused) ? focused : null };
 }
 
+interface PlacementInput {
+  layout: WorkspaceLayout | null;
+  slots: Record<string, Rect>;
+  activeTabId: string | null;
+  activeViewId: string | null;
+  mode: WorkMode;
+  liveRects: Record<string, Rect>;
+  grid: string[] | null;
+}
+
+/** La misma cuenta que `usePlacements`, sin hooks: el guardado periódico la lee del store. */
+export function placementsFrom(input: PlacementInput): Placements {
+  const { layout, slots, activeTabId, activeViewId, mode, liveRects, grid } = input;
+  if (mode === "canvas") return canvasPlacements(liveRects, activeTabId, activeViewId);
+  if (grid) {
+    const visible = new Map<string, Placement>();
+    for (const [id, rect] of gridPlacements(grid, slots)) visible.set(agentKey(id), { groupId: CANVAS_GROUP, rect });
+    const focused = activeTabId ? agentKey(activeTabId) : null;
+    return { visible, focusedItem: focused && visible.has(focused) ? focused : null };
+  }
+  if (!layout) {
+    const focusedItem = activeViewId ? viewKey(activeViewId) : activeTabId ? agentKey(activeTabId) : null;
+    const visible = new Map<string, Placement>();
+    if (focusedItem) visible.set(focusedItem, { groupId: "", rect: null });
+    return { visible, focusedItem };
+  }
+  const groups = allGroups(layout.root);
+  const visible = new Map<string, Placement>();
+  for (const group of groups) {
+    if (group.active) visible.set(group.active, { groupId: group.id, rect: groups.length > 1 ? slots[group.id] ?? null : null });
+  }
+  return { visible, focusedItem: focusedActive(layout) };
+}
+
 /** Dónde se dibuja cada tab visible y cuál tiene el foco. Sin árbol (las tabs todavía no
  *  cargaron) se comporta como antes de que existieran los grupos. */
 export function usePlacements(): Placements {
@@ -383,29 +418,33 @@ export function usePlacements(): Placements {
   const mode = useWorkMode();
   const liveRects = useCanvasStore((s) => s.liveRects);
   const grid = useMissionGrid();
+  return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects, grid });
+}
 
-  // En el canvas cada terminal va encima de su nodo, y se ven las que el canvas dice que
-  // están vivas (al 100 % y dentro del área). El teclado va a la del agente activo.
-  if (mode === "canvas") return canvasPlacements(liveRects, activeTabId, activeViewId);
+/** Lo que está en pantalla ahora, leído de los stores (sin suscribir un componente). */
+export function currentPlacements(): Placements {
+  const { tabs, activeTabId: rawActive } = useTabsStore.getState();
+  const activeTabId = tabs.some((t) => t.id === rawActive) ? rawActive : null;
+  const active = tabs.find((t) => t.id === rawActive);
+  const activeCwd = active ? comparablePath(active.cwd) : null;
+  const layout = activeCwd ? useLayoutStore.getState().layouts[activeCwd] ?? null : null;
+  const slots = useLayoutStore.getState().slots;
+  const { views, activeViewId: rawView } = useViewTabsStore.getState();
+  const view = views.find((v) => v.id === rawView);
+  const activeViewId = view && comparablePath(view.cwd) === activeCwd ? view.id : null;
+  const canvas = useCanvasStore.getState();
+  const key = active ? boardKeyOfTab(active, canvas.boards) : null;
+  const mode: WorkMode = key ? canvas.modes[key] ?? "tabs" : "tabs";
+  const tabIds = key ? tabs.filter((t) => boardKeyOfTab(t, canvas.boards) === key).map((t) => t.id) : [];
+  const grid = activeViewId != null ? null : gridTabs({ on: key ? !!canvas.grids[key] : false, mission: missionOfKey(key), mode, tabIds });
+  return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects: canvas.liveRects, grid });
+}
 
-  // La grade de una misión: todos sus panes a la vez, cada uno en su hueco. El teclado va al activo.
-  if (grid) {
-    const visible = new Map<string, Placement>();
-    for (const [id, rect] of gridPlacements(grid, slots)) visible.set(agentKey(id), { groupId: CANVAS_GROUP, rect });
-    const focused = activeTabId ? agentKey(activeTabId) : null;
-    return { visible, focusedItem: focused && visible.has(focused) ? focused : null };
+/** Ids de tabs de agente que se están viendo. Una oculta no entra. */
+export function currentVisibleAgentTabIds(): Set<string> {
+  const ids = new Set<string>();
+  for (const key of currentPlacements().visible.keys()) {
+    if (isAgentKey(key)) ids.add(keyId(key));
   }
-
-  if (!layout) {
-    const focusedItem = activeViewId ? viewKey(activeViewId) : activeTabId ? agentKey(activeTabId) : null;
-    const visible = new Map<string, Placement>();
-    if (focusedItem) visible.set(focusedItem, { groupId: "", rect: null });
-    return { visible, focusedItem };
-  }
-  const groups = allGroups(layout.root);
-  const visible = new Map<string, Placement>();
-  for (const group of groups) {
-    if (group.active) visible.set(group.active, { groupId: group.id, rect: groups.length > 1 ? slots[group.id] ?? null : null });
-  }
-  return { visible, focusedItem: focusedActive(layout) };
+  return ids;
 }

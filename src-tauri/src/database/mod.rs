@@ -8,12 +8,14 @@
 
 mod connection;
 mod models;
+mod wal;
 mod queries;
 mod schema;
 mod seeds;
 #[cfg(test)]
 mod test;
 
+pub use wal::spawn_wal_maintenance;
 pub(crate) use connection::user_db_path;
 pub use connection::{
     __cmd__db_boot_status, __tauri_command_name_db_boot_status, DbConnection, db_boot_status,
