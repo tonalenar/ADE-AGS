@@ -719,3 +719,14 @@ html.dark {
   --nui-info: var(--color-accent-500); --nui-info-dark: var(--color-accent-500);
   --nui-info-text: var(--color-accent-600); --nui-info-text-dark: var(--color-accent-400);
 }
+
+/* Botões da biblioteca na escala da Apple: o "md" padrão (14px, ~36px de altura) ficava grande
+   demais ao lado dos controles de 28–30px. Os seletores pegam só os botões da lib (as classes
+   dela carregam var(--nui-…)), nas três medidas dela. */
+button[class*="--nui-"].px-3.py-2.text-sm { padding: 5px 12px; font-size: 13px; line-height: 18px; border-radius: 7px; }
+button[class*="--nui-"].px-2\.5.py-1\.5.text-xs { padding: 4px 10px; font-size: 12px; line-height: 16px; border-radius: 6px; }
+button[class*="--nui-"].px-4.py-2\.5.text-base { padding: 7px 16px; font-size: 14px; line-height: 20px; border-radius: 8px; }
+
+/* Anel de foco só quando vem do teclado: ao abrir um diálogo o foco vai para o "X" por código,
+   e o anel aceso parecia um botão selecionado. */
+button[class*="--nui-"]:focus:not(:focus-visible) { box-shadow: none !important; outline: none !important; }

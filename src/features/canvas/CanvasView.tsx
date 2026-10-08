@@ -729,8 +729,11 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
           title={t("canvas.focusHint")}
         >
           <Icon className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
-          <span className="truncate text-[13px] font-semibold tracking-[-0.01em] text-gray-900 dark:text-gray-50">{tab.title}</span>
-          <span className="truncate text-[11.5px] text-gray-400 dark:text-gray-500">{tab.agentLabel}</span>
+          {/* "Codex — C:\…\ADE-AGS": o nome em destaque, o caminho em mono e apagado (como na prancheta). */}
+          <span className="shrink-0 max-w-[45%] truncate text-[13px] font-semibold tracking-[-0.01em] text-gray-900 dark:text-gray-50">{tab.title.split(" — ")[0]}</span>
+          {tab.title.includes(" — ")
+            ? <span className="min-w-0 truncate font-mono text-[11px] text-gray-400 dark:text-gray-500" title={tab.title}>{tab.title.split(" — ").slice(1).join(" — ")}</span>
+            : <span className="truncate text-[11.5px] text-gray-400 dark:text-gray-500">{tab.agentLabel}</span>}
           {role && (
             <span className="shrink-0 max-w-28 truncate text-[10px] font-semibold uppercase tracking-[0.05em] px-2 py-0.5 rounded-full
               text-violet-700 dark:text-violet-300 bg-violet-500/15" title={t("canvas.role", { role })}>
