@@ -179,7 +179,7 @@ describe("grafo estático do entry (onda 4)", () => {
     expect(main).not.toMatch(/fontsReady\s*\)\s*\.then\(/);
     expect(renderAt).toBeGreaterThan(main.indexOf("whenHomeCanPaint"));
 
-    const boot = readFileSync(path.join(SRC, "app/boot.ts"), "utf8");
+    const boot = readFileSync(path.join(SRC, "app/bootGate.ts"), "utf8");
     expect(boot).toContain("void deps.fontsReady");
     expect(boot).toContain("Promise.all([deps.loadAgentRegistry(), deps.applyRendering()])");
     expect(boot).not.toMatch(/Promise\.all\(\[[^\]]*fontsReady/);
