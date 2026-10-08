@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { whenHomeCanPaint } from "@/app/boot";
+import { whenHomeCanPaint } from "@/app/bootGate";
 import { createFitter } from "@/features/terminal/fit";
 
 afterEach(() => {

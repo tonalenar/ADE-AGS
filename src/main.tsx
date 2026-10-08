@@ -3,7 +3,7 @@ import "@fontsource-variable/jetbrains-mono";
 import ReactDOM from "react-dom/client";
 import { ThemeProvider } from "neogestify-ui-components";
 import { Boot } from "@/app/Boot";
-import { whenHomeCanPaint } from "@/app/boot";
+import { whenHomeCanPaint } from "@/app/bootGate";
 import { loadAgentRegistry } from "@/features/agents/registry";
 import { fontsReady } from "@/features/terminal/fontsReady";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
