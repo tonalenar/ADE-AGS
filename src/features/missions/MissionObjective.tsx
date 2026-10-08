@@ -36,7 +36,7 @@ export function MissionObjective({ objective, title }: { objective: string; titl
   return (
     <div className={CARD} data-testid="mission-objective">
       {heading}
-      {intro && <p className={`mt-1.5 mb-3.5 whitespace-pre-wrap text-gray-600 dark:text-white/60 ${TEXT}`}>{intro}</p>}
+      {intro && <p className={`mt-1.5 ${points.length > 0 && !open ? "mb-3.5" : "mb-1"} whitespace-pre-wrap text-gray-600 dark:text-white/60 ${TEXT}`}>{intro}</p>}
       {!open && points.length > 0 && (
         <ol className="flex flex-col" aria-label={t("missions.objective.points")}>
           {points.map((point) => (

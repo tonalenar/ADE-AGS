@@ -250,10 +250,12 @@ export function MissionMetricsCard({ summary, mission, delivery }: {
           value={test ? capitalize(t(`missions.delivery.test.${test}`)) : "—"}
           sub={delivery ? t("missions.delivery.ci", { result: t(`missions.delivery.ci.${delivery.ciStatus}`) }) : t("missions.metrics.testsLater")} />
         <Metric className={`border-r ${line}`} label={t("missions.metrics.cost")}
-          value={formatUsd(summary.spentUsd, locale)}
-          sub={mission.budgetUsd !== null
-            ? t("missions.metrics.costBudget", { budget: formatUsd(mission.budgetUsd, locale) })
-            : t("missions.metrics.costSub")} />
+          value={summary.spentUsd > 0 ? formatUsd(summary.spentUsd, locale) : "—"}
+          sub={summary.spentUsd <= 0
+            ? t("missions.metrics.costNone")
+            : mission.budgetUsd !== null
+              ? t("missions.metrics.costBudget", { budget: formatUsd(mission.budgetUsd, locale) })
+              : t("missions.metrics.costSub")} />
         <Metric label={t("missions.metrics.context")}
           value={context ? <>{num(context.before)}<span className="mx-1.5 font-normal text-gray-400 dark:text-white/35">→</span>{num(context.after)}</> : "—"}
           sub={context ? t("missions.metrics.contextSub") : t("memoryContext.noData")}
@@ -269,4 +271,37 @@ export function MissionMetricsCard({ summary, mission, delivery }: {
 
 export function capitalize(s: string): string {
   return s ? s[0].toLocaleUpperCase() + s.slice(1) : s;
+}
+
+/** A evidência da entrega (testes, CI, PR), em linhas como as listas agrupadas dos Ajustes. */
+export function DeliveryCard({ delivery }: { delivery: MissionDelivery }) {
+  const { t, i18n } = useTranslation();
+  const test: Tone = delivery.testResult === "passed" ? "ok" : delivery.testResult === "failed" ? "bad" : "idle";
+  const ci: Tone = delivery.ciStatus === "success" ? "ok" : delivery.ciStatus === "failure" ? "bad" : delivery.ciStatus === "pending" ? "warn" : "idle";
+  const pr = delivery.pullRequest;
+  const when = new Date(delivery.checkedAt * 1000).toLocaleString(i18n.language || "pt-BR", { dateStyle: "medium", timeStyle: "short" });
+  const rows: { key: string; label: string; value: React.ReactNode }[] = [
+    { key: "tests", label: t("missions.delivery.l.tests"), value: (
+      <span className={`flex items-center gap-1.5 ${TONE[test].text}`}><span className={`h-[7px] w-[7px] rounded-full ${TONE[test].dot}`} />{capitalize(t(`missions.delivery.test.${delivery.testResult}`))}</span>) },
+    { key: "ci", label: t("missions.delivery.l.ci"), value: (
+      <span className={`flex items-center gap-1.5 ${TONE[ci].text}`}><span className={`h-[7px] w-[7px] rounded-full ${TONE[ci].dot}`} />{capitalize(t(`missions.delivery.ci.${delivery.ciStatus}`))}</span>) },
+    ...(pr ? [{ key: "pr", label: t("missions.delivery.l.pr"), value: prUrl(pr)
+      ? <a href={prUrl(pr)!} target="_blank" rel="noreferrer" className="font-medium text-accent-600 hover:underline dark:text-accent-400">{prLabel(pr)}</a>
+      : <span className="font-medium text-accent-600 dark:text-accent-400">{prLabel(pr)}</span> }] : []),
+    { key: "when", label: t("missions.delivery.l.when"), value: <span className="font-mono tabular-nums text-gray-500 dark:text-white/60">{when}</span> },
+  ];
+  return (
+    <section aria-label={t("missions.delivery.title")}>
+      <h3 className={CAP}>{t("missions.delivery.title")}</h3>
+      <div className={CARD}>
+        {rows.map((r, i) => (
+          <div key={r.key} className="relative flex h-11 items-center justify-between gap-4 px-4 text-[13px]">
+            {i > 0 && <span aria-hidden className="absolute inset-x-4 top-0 h-px bg-black/[0.08] dark:bg-[rgba(84,84,88,0.55)]" />}
+            <span className="text-gray-500 dark:text-white/60">{r.label}</span>
+            {r.value}
+          </div>
+        ))}
+      </div>
+    </section>
+  );
 }

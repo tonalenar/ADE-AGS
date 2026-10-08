@@ -225,3 +225,26 @@ export function toInput(form: MissionForm): MissionInput {
     squadId: squad ? form.squadId : null,
   };
 }
+
+/** Siglas que continuam em caixa alta quando um título em CAIXA ALTA é suavizado. */
+const KEEP_UPPER = new Set(["CI", "PR", "IPC", "API", "UI", "UX", "QG", "TUI", "MCP", "CLI", "E2E", "SQL", "PTY", "ADE", "AGS", "XP", "OK", "IA", "QA", "CSS", "HTML", "JSON", "TTL"]);
+
+/**
+ * Vários títulos de missão vieram de briefings escritos em CAIXA ALTA ("CI: CARGO CHECK NO WINDOWS…"):
+ * na lista, gritavam e ficavam ilegíveis. Isto só muda a EXIBIÇÃO — "Ci: cargo check no windows…" —
+ * e deixa em paz o título que já está em caixa mista. O título guardado nunca é alterado.
+ */
+export function readableTitle(title: string): string {
+  const letters = title.replace(/[^A-Za-zÀ-ÿ]/g, "");
+  if (letters.length < 6) return title;
+  const upper = letters.replace(/[^A-ZÀ-Ý]/g, "").length;
+  if (upper / letters.length < 0.8) return title;
+  const lowered = title.toLowerCase().replace(/[\p{L}\d]+/gu, (word) => (KEEP_UPPER.has(word.toUpperCase()) ? word.toUpperCase() : word));
+  return lowered.replace(/^(\P{L}*)(\p{L})/u, (_, lead: string, first: string) => lead + first.toUpperCase());
+}
+
+/** Os dois últimos trechos de um caminho ("…/ADE-AGS" cabe onde "C:\Users\fulano\.x\ADE-AGS" não cabe). */
+export function tailPath(path: string): string {
+  const parts = path.split(/[\\/]/).filter(Boolean);
+  return parts.length <= 2 ? parts.join("/") : `…/${parts.slice(-2).join("/")}`;
+}
