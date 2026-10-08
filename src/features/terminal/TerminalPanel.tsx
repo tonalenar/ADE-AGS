@@ -1,7 +1,7 @@
 import { useRef } from "react";
 import { useTranslation } from "react-i18next";
 import { useLocation } from "react-router-dom";
-import { Terminal } from "@/features/terminal/Terminal";
+import { Terminal } from "@/features/terminal/LazyTerminal";
 import { useTabsStore } from "@/features/tabs/store";
 import { CANVAS_GROUP, focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { useWorkMode } from "@/features/canvas/store";

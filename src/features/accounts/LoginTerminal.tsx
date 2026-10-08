@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Loading } from "neogestify-ui-components";
-import { Terminal } from "@/features/terminal/Terminal";
+import { Terminal } from "@/features/terminal/LazyTerminal";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 import { accountLoginCommand, accountLoginEnv } from "./login";
