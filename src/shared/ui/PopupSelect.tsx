@@ -102,7 +102,13 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
       if (menuRef.current?.contains(t) || buttonRef.current?.contains(t)) return;
       setOpen(false);
     };
-    const onScroll = (e: Event) => { if (!menuRef.current?.contains(e.target as Node)) setOpen(false); };
+    const openedAt = performance.now();
+    const onScroll = (e: Event) => {
+      if (performance.now() - openedAt < 200) return;
+      const t = e.target as Node;
+      if (t === menuRef.current || menuRef.current?.contains(t)) return;
+      setOpen(false);
+    };
     document.addEventListener("mousedown", close, true);
     window.addEventListener("scroll", onScroll, true);
     window.addEventListener("resize", () => setOpen(false), { once: true });
@@ -120,7 +126,11 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
 
   useEffect(() => {
     if (!open || active < 0) return;
-    menuRef.current?.querySelector<HTMLElement>(`[data-index="${active}"]`)?.scrollIntoView({ block: "nearest" });
+    const menu = menuRef.current;
+    const item = menu?.querySelector<HTMLElement>(`[data-index="${active}"]`);
+    if (!menu || !item) return;
+    if (item.offsetTop < menu.scrollTop) menu.scrollTop = item.offsetTop - 4;
+    else if (item.offsetTop + item.offsetHeight > menu.scrollTop + menu.clientHeight) menu.scrollTop = item.offsetTop + item.offsetHeight - menu.clientHeight + 4;
   }, [open, active]);
 
   const move = (dir: 1 | -1) => {
