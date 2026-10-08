@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { BaseEdge, EdgeLabelRenderer, getBezierPath, type ConnectionLineComponentProps, type EdgeProps } from "@xyflow/react";
+import {
+  BaseEdge, EdgeLabelRenderer, getBezierPath, Handle, useNodeId, useStore,
+  type ConnectionLineComponentProps, type EdgeProps, type HandleProps,
+} from "@xyflow/react";
 import { Button, CloseIcon } from "neogestify-ui-components";
 
 import { canvasActions, useActiveBoardKey } from "./store";
@@ -57,6 +60,12 @@ export function lightningPoints(
   return pts.join(" ");
 }
 
+/** Um ponto em pixels do painel → coordenadas do canvas, dado o viewport `[tx, ty, zoom]`. */
+export function paneToFlow(p: { x: number; y: number }, tx: number, ty: number, zoom: number): { x: number; y: number } {
+  const z = zoom || 1;
+  return { x: (p.x - tx) / z, y: (p.y - ty) / z };
+}
+
 const reducedMotion = () =>
   typeof window !== "undefined" && window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
@@ -85,10 +94,53 @@ export function flashNode(nodeId: string, color: string) {
   window.setTimeout(() => el.classList.remove("ade-cord-flash"), 1200);
 }
 
+/**
+ * Uma alça de corda. Sem corda, puxá-la puxa uma corda nova. COM uma corda presa, puxá-la puxa a
+ * PONTA dessa corda (soltar no vazio desconecta, em outra alça reconecta); com Shift sai uma nova.
+ *
+ * O React Flow só reconecta pelo seu círculo invisível (`.react-flow__edgeupdater`), que fica
+ * deslocado ~20px para FORA da alça e por baixo do nó: quem clicava na bolinha começava outra
+ * corda e a original continuava presa. Aqui o clique na alça é repassado para esse círculo.
+ */
+export function CordPort({ id, className, ...rest }: HandleProps & { className?: string; style?: React.CSSProperties }) {
+  const { t } = useTranslation();
+  const nodeId = useNodeId();
+  // "edgeId end" da corda presa nesta alça (string: o seletor não re-renderiza à toa).
+  const attached = useStore((s) => {
+    for (const e of s.edges) {
+      if (e.source === nodeId && e.sourceHandle === id) return `${e.id} source`;
+      if (e.target === nodeId && e.targetHandle === id) return `${e.id} target`;
+    }
+    return null;
+  });
+  const onMouseDownCapture = (ev: React.MouseEvent) => {
+    if (!attached || ev.button !== 0 || ev.shiftKey) return;
+    const cut = attached.lastIndexOf(" ");
+    const edgeId = attached.slice(0, cut);
+    const end = attached.slice(cut + 1);
+    const anchor = document.querySelector(`.react-flow__edge[data-id="${CSS.escape(edgeId)}"] .react-flow__edgeupdater-${end}`);
+    if (!anchor) return; // corda não reconectável agora (ex.: ferramenta de desenho): segue o normal
+    ev.stopPropagation();
+    ev.preventDefault();
+    anchor.dispatchEvent(new MouseEvent("mousedown", {
+      bubbles: true, cancelable: true, clientX: ev.clientX, clientY: ev.clientY, screenX: ev.screenX, screenY: ev.screenY, button: 0, buttons: 1,
+    }));
+  };
+  return (
+    <Handle id={id} {...rest} onMouseDownCapture={onMouseDownCapture}
+      className={`${className ?? ""}${attached ? " ade-port--linked" : ""}`}
+      title={attached ? t("canvas.portPull") : undefined} />
+  );
+}
+
 interface Spark { x: number; y: number; dx: number; dy: number; t0: number }
 
 /** A corda sendo arrastada (nova ou reconectando): branca, com o raio do ímã. */
-export function CordConnectionLine({ fromX, fromY, toX, toY, toHandle, pointer, fromPosition, toPosition }: ConnectionLineComponentProps) {
+export function CordConnectionLine({ fromX, fromY, toX, toY, toHandle, pointer: screen, fromPosition, toPosition }: ConnectionLineComponentProps) {
+  // O `pointer` do React Flow vem em pixels do painel, não em coordenadas do canvas (onde estão
+  // `fromX`/`toX`): sem converter, a ponta e o raio iam parar longe do cursor com zoom ou pan.
+  const [tx, ty, zoom] = useStore((s) => s.transform);
+  const pointer = paneToFlow(screen, tx, ty, zoom);
   const near = !!toHandle;
   const dist = near ? Math.hypot(toX - pointer.x, toY - pointer.y) : Infinity;
   const snapped = near && dist < CORD_SNAP;

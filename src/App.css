@@ -669,6 +669,10 @@ html.dark {
 .react-flow__handle.ade-port:hover,
 .react-flow__handle.ade-port.connectingto { transform: translate(-50%, -50%) scale(1.35); }
 .react-flow__handle-left.ade-port:hover, .react-flow__handle-right.ade-port:hover { transform: translate(-50%, -50%) scale(1.35); }
+/* A de baixo fica para fora (translate +50%): sem isto, ao passar o mouse ela pulava para dentro. */
+.react-flow__handle-bottom.ade-port:hover, .react-flow__handle-bottom.ade-port.connectingto { transform: translate(-50%, 50%) scale(1.35); }
+/* Com uma corda presa, a alça é a ponta da corda: pega-se com a mão. */
+.react-flow__handle.ade-port.ade-port--linked { cursor: grab; }
 
 /* A bolinha é pequena; a área que o mouse pega não: 32px em volta (invisível). */
 .react-flow__handle.ade-port::before { content: ""; position: absolute; inset: -10px; border-radius: 999px; }

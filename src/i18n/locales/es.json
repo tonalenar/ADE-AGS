@@ -2103,6 +2103,7 @@
   "canvas.links_one": "{{count}} conexión",
   "canvas.links_other": "{{count}} conexiones",
   "canvas.disconnect": "Quitar conexión",
+  "canvas.portPull": "Arrastrá para soltar la cuerda · Shift+arrastrar: cuerda nueva",
   "palette.cmd.canvas": "Cambiar al canvas",
   "palette.cmd.tabsMode": "Cambiar a tabs",
   "canvas.orchestrator": "Orquestador",

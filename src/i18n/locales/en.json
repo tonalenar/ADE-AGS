@@ -2103,6 +2103,7 @@
   "canvas.links_one": "{{count}} connection",
   "canvas.links_other": "{{count}} connections",
   "canvas.disconnect": "Remove connection",
+  "canvas.portPull": "Drag to pull the cord off · Shift+drag: new cord",
   "palette.cmd.canvas": "Switch to canvas",
   "palette.cmd.tabsMode": "Switch to tabs",
   "canvas.orchestrator": "Orchestrator",
