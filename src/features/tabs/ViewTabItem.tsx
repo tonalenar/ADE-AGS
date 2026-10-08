@@ -50,24 +50,21 @@ export function ViewTabItem({
       // Click del medio cierra, como en cualquier navegador o editor.
       onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(); } }}
       title={paintHint ?? (view.kind === "browser" ? view.url || title : view.kind === "file" ? view.path : `${view.root}/${view.path}`)}
-      className={`group relative flex items-center gap-2 h-10 pl-3 pr-1.5 shrink-0
-        max-w-52 min-w-24 rounded-t-[9px] cursor-pointer select-none transition-colors duration-150 ${className}
+      className={`group relative flex items-center gap-2 h-7 pl-2.5 pr-1 shrink-0
+        max-w-52 min-w-24 rounded-md cursor-pointer select-none text-[12.5px] transition-colors duration-150 ${className}
         ${paint && !isActive ? paint.tint : ""}
         ${isActive
-          ? "bg-gray-50 dark:bg-surface text-gray-900 dark:text-white"
-          : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-white/5 hover:text-gray-800 dark:hover:text-gray-200"}`}
+          ? `${groupFocused ? "bg-white dark:bg-surface-raised" : "bg-black/[0.06] dark:bg-white/[0.1]"} text-gray-900 dark:text-white shadow-sm font-medium`
+          : "text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/[0.06] hover:text-gray-800 dark:hover:text-gray-200"}`}
     >
-      {/* La barrita del agente: en el borde de adentro, donde no compite con la línea de
-          "tab activa" de abajo. Es lo único que hay que mirar para saber de quién es. */}
-      {paint && <span className={`absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-r ${paint.strip}`} />}
-      {isActive && (
-        <span className={`absolute bottom-0 left-0 right-0 h-[2px] ${groupFocused ? "bg-accent-500" : "bg-gray-300 dark:bg-white/20"}`} />
-      )}
+      {/* La barrita del agente: en el borde de adentro, donde no compite con la pastilla de
+          "tab activa". Es lo único que hay que mirar para saber de quién es. */}
+      {paint && <span className={`absolute top-1 bottom-1 left-0 w-[3px] rounded-r ${paint.strip}`} />}
 
       <Icon className={`w-3.5 h-3.5 shrink-0 opacity-70 ${paint ? paint.ink : view.kind === "diff" ? "text-amber-500" : ""}`} />
-      <span className="flex-1 min-w-0 truncate text-xs italic">
+      <span className="flex-1 min-w-0 truncate italic">
         {title}
-        {hint && <span className="not-italic text-[10px] text-gray-400 dark:text-white/30"> · {hint}</span>}
+        {hint && <span className="not-italic font-mono text-[10px] text-gray-400 dark:text-white/30"> · {hint}</span>}
       </span>
 
       {/* Sin guardar: el punto ocupa el lugar de la cruz hasta que se pasa el mouse, igual que
@@ -79,9 +76,9 @@ export function ViewTabItem({
         onClick={(e) => { e.stopPropagation(); onClose(); }}
         onMouseDown={(e) => e.stopPropagation()}
         title={t("btn.close")}
-        className={`shrink-0 flex items-center justify-center w-4 h-4 rounded
+        className={`shrink-0 flex items-center justify-center w-[18px] h-[18px] rounded-md
           text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-white
-          hover:bg-gray-200 dark:hover:bg-white/15 transition-opacity duration-100
+          hover:bg-black/10 dark:hover:bg-white/15 transition-opacity duration-100
           ${isActive ? "opacity-100" : "opacity-0 group-hover:opacity-100"} ${dirty ? "opacity-0 group-hover:opacity-100" : ""} p-0`}
       >
         <svg width="8" height="8" viewBox="0 0 8 8" fill="none">

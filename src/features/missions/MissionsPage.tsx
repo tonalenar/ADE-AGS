@@ -62,6 +62,21 @@ const STATUS_TONE: Record<MissionPhase, string> = {
   cancelled: "bg-gray-200 text-gray-500 dark:bg-white/8 dark:text-white/40",
 };
 
+/** Grupos da lista (só apresentação): cada um com o rótulo de status que já existe no i18n. */
+type GroupKey = "running" | "draft" | "done" | "archived";
+const MISSION_GROUPS: { key: GroupKey; labelKey: string }[] = [
+  { key: "running", labelKey: "missions.status.running" },
+  { key: "draft", labelKey: "missions.status.draft" },
+  { key: "done", labelKey: "missions.status.done" },
+  { key: "archived", labelKey: "missions.sidebar.archived" },
+];
+function groupOf(phase: MissionPhase): GroupKey {
+  if (phase === "running" || phase === "waiting_approval") return "running";
+  if (phase === "draft") return "draft";
+  if (phase === "done" || phase === "done_without_delivery") return "done";
+  return "archived";
+}
+
 /**
  * Las misiones del workspace: lo que se quiere lograr, con su estado y su run activo.
  *
@@ -153,12 +168,12 @@ export function MissionsPage() {
 
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex items-center gap-2 h-[54px] shrink-0 pl-4 pr-14 border-b border-gray-200 dark:border-white/8">
-        <LocationIcon className="w-[15px] h-[15px] shrink-0 text-violet-500 dark:text-violet-400" />
-        <span className="text-[13.5px] font-bold text-gray-900 dark:text-white">{t("missions.title")}</span>
+      <div className="flex items-center gap-2 h-[52px] shrink-0 pl-4 pr-14 border-b border-black/[0.08] dark:border-white/[0.08] bg-white/80 dark:bg-surface/80 backdrop-blur-xl">
+        <LocationIcon className="w-[15px] h-[15px] shrink-0 text-accent-600 dark:text-accent-400" />
+        <span className="text-[13px] font-semibold tracking-[-0.01em] text-gray-900 dark:text-gray-50">{t("missions.title")}</span>
         <div className="flex-1" />
         <Button variant="custom" size="sm" aria-pressed={fleet} onClick={() => setFleet((v) => !v)}
-          className={`px-2.5 h-7 rounded-md text-[11.5px] font-medium ${fleet ? "bg-violet-500/15 text-violet-700 dark:text-violet-300" : "text-gray-500 dark:text-white/50"}`}>
+          className={`px-2.5 h-7 rounded-md text-[12px] font-medium ${fleet ? "bg-accent-500/15 text-accent-700 dark:text-accent-300" : "text-gray-500 dark:text-white/55 hover:text-gray-900 dark:hover:text-white"}`}>
           {t("missions.fleet.title")}
         </Button>
         {workspaceId && <MemoryInboxButton workspaceId={workspaceId} />}
@@ -175,7 +190,7 @@ export function MissionsPage() {
       )}
 
       <div className="flex flex-1 min-h-0">
-        <div className="w-80 shrink-0 cc-scroll border-r border-gray-200 dark:border-white/8">
+        <div className="w-80 shrink-0 cc-scroll border-r border-black/[0.08] dark:border-white/[0.08] bg-gray-50/60 dark:bg-surface px-2 pt-3 pb-2">
           {loaded && missions.length === 0 ? (
             <EmptyState
               className="py-16 px-4"
@@ -184,15 +199,29 @@ export function MissionsPage() {
               description={t("missions.empty.desc")}
             />
           ) : (
-            missions.map((m) => (
-              <MissionRow
-                key={m.id}
-                mission={m}
-                phase={missionPhase(m.status, waiting(m))}
-                active={m.id === selected}
-                onSelect={() => setSelected(m.id)}
-              />
-            ))
+            MISSION_GROUPS.map((group) => {
+              const rows = missions
+                .map((m) => ({ m, phase: missionPhase(m.status, waiting(m)) }))
+                .filter(({ phase }) => groupOf(phase) === group.key);
+              if (rows.length === 0) return null;
+              return (
+                <div key={group.key} className="mt-4 first:mt-1 flex flex-col gap-0.5">
+                  <div className="flex items-center justify-between px-2.5 pb-1 text-[11px] uppercase tracking-[0.06em] text-gray-500 dark:text-white/45">
+                    <span>{t(group.labelKey)}</span>
+                    <span className="font-mono tabular-nums text-gray-400 dark:text-white/35">{rows.length}</span>
+                  </div>
+                  {rows.map(({ m, phase }) => (
+                    <MissionRow
+                      key={m.id}
+                      mission={m}
+                      phase={phase}
+                      active={m.id === selected}
+                      onSelect={() => setSelected(m.id)}
+                    />
+                  ))}
+                </div>
+              );
+            })
           )}
         </div>
 
@@ -248,7 +277,7 @@ export function MissionsPage() {
 function StatusBadge({ phase }: { phase: MissionPhase }) {
   const { t } = useTranslation();
   return (
-    <span className={`shrink-0 px-1.5 h-[18px] inline-flex items-center rounded text-[10px] font-medium ${STATUS_TONE[phase]}`}>
+    <span className={`shrink-0 px-2 h-[18px] inline-flex items-center rounded-full text-[10.5px] font-semibold whitespace-nowrap ${STATUS_TONE[phase]}`}>
       {t(`missions.status.${phase}`)}
     </span>
   );
@@ -271,23 +300,24 @@ function MissionRow({ mission, phase, active, onSelect }: {
     <Button variant="custom"
       onClick={onSelect}
       aria-pressed={active}
-      className={`cc-t w-full flex flex-col items-stretch gap-1 px-3 py-2.5 text-left rounded-none
-        border-b border-gray-100 dark:border-white/5
-        ${active ? "bg-accent-500/10" : "hover:bg-gray-100 dark:hover:bg-white/4"}`}
+      className={`cc-t w-full flex flex-col items-stretch gap-1 px-2.5 py-2 text-left rounded-lg
+        ${active
+          ? "bg-accent-500/15 ring-1 ring-inset ring-accent-500/35"
+          : "hover:bg-gray-200/60 dark:hover:bg-white/5"}`}
     >
       <span className="flex items-center gap-2 min-w-0">
-        <span className="flex-1 truncate text-[12px] font-medium text-gray-900 dark:text-gray-100">{mission.title}</span>
+        <span className="flex-1 truncate text-[13px] font-semibold tracking-[-0.01em] text-gray-900 dark:text-gray-50">{mission.title}</span>
         <StatusBadge phase={phase} />
       </span>
-      <span className="flex items-center gap-2 min-w-0 text-[10.5px] text-gray-400 dark:text-white/35">
+      <span className="flex items-center gap-2 min-w-0 text-[11px] text-gray-500 dark:text-white/50">
         <span className="truncate font-mono" title={mission.cwd}>{folderName(mission.cwd)}</span>
-        <span>·</span>
+        <span className="text-gray-300 dark:text-white/20">·</span>
         <span className="shrink-0">{lead ?? t("missions.autoLead")}</span>
         <span className="flex-1" />
-        <span className="shrink-0 tabular-nums">{new Date(mission.createdAt * 1000).toLocaleDateString()}</span>
+        <span className="shrink-0 font-mono tabular-nums text-gray-400 dark:text-white/35">{new Date(mission.createdAt * 1000).toLocaleDateString()}</span>
       </span>
       {(progress || mission.spentUsd > 0) && (
-        <span className="flex items-center gap-2 text-[10.5px] tabular-nums text-gray-500 dark:text-white/45">
+        <span className="flex items-center gap-2 font-mono text-[10.5px] tabular-nums text-gray-500 dark:text-white/45">
           {progress && <ProgressLabel progress={progress} />}
           {mission.spentUsd > 0 && <span>${mission.spentUsd.toFixed(3)}</span>}
         </span>
@@ -412,14 +442,14 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
   const unavailableSquad = Boolean(mission.squadId && (!squad || !squad.available));
 
   return (
-    <div className="flex flex-col gap-4 p-5">
-      <div className="flex items-start gap-3">
-        <div className="flex-1 min-w-0 flex flex-col gap-1">
-          <span className="flex items-center gap-2">
-            <h2 className="truncate text-[15px] font-semibold text-gray-900 dark:text-white">{mission.title}</h2>
+    <div className="flex flex-col gap-5 p-6">
+      <div className="flex items-start gap-4">
+        <div className="flex-1 min-w-0 flex flex-col gap-1.5">
+          <span className="flex items-center gap-3 min-w-0">
+            <h2 className="truncate text-[26px] leading-8 font-semibold tracking-[-0.01em] text-gray-900 dark:text-gray-50">{mission.title}</h2>
             <StatusBadge phase={phase} />
           </span>
-          <span className="truncate font-mono text-[10.5px] text-gray-400 dark:text-white/35">{mission.cwd}</span>
+          <span className="truncate font-mono text-[12px] text-gray-500 dark:text-white/45">{mission.cwd}</span>
         </div>
         {canEdit(mission.status) && (
           <Button variant="ghost" size="sm" onClick={onEdit} disabled={busy}>{t("missions.edit")}</Button>
@@ -483,7 +513,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         <MissionObjective key={mission.id} objective={mission.objective} />
       </Section>
 
-      <dl className="grid grid-cols-2 lg:grid-cols-4 gap-3">
+      <dl className="grid grid-cols-2 lg:grid-cols-4 gap-px overflow-hidden rounded-xl bg-black/[0.06] dark:bg-white/[0.07] ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.07]">
         <Stat label={t("missions.detail.provider")} value={provider} />
         <Stat label={t("missions.detail.account")} value={account} />
         <Stat
@@ -579,7 +609,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
 
       {tasks.length > 0 && (
         <Section title={t("missions.detail.tasks")}>
-          <ul className="flex flex-col divide-y divide-gray-100 dark:divide-white/5 rounded-lg border border-gray-200 dark:border-white/8">
+          <ul className="flex flex-col divide-y divide-black/[0.06] dark:divide-white/[0.07] overflow-hidden rounded-xl bg-gray-50 dark:bg-surface ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.07]">
             {tasks.map((task) => {
               const approval = approvals.find((a) => a.taskId === task.id);
               return (
@@ -633,7 +663,7 @@ function TaskRow({ task, tasks, accountLabel, blocked, approval, focused, onDeci
   const state = agentStateOf(task, tasks, blocked);
   const outcome = task.error ? accountProblemText(task.error, t) : task.result;
   return (
-    <li className="flex flex-col gap-1 px-3 py-2">
+    <li className="flex flex-col gap-1 px-4 py-2.5">
       <span className="flex items-center gap-2 min-w-0 text-[11.5px]">
         <span className={`w-1.5 h-1.5 shrink-0 rounded-full ${STATE_DOT[state]}`} />
         {task.role === "lead" && (
@@ -706,8 +736,8 @@ const STATE_DOT = {
 
 function Section({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <section className="flex flex-col gap-1.5">
-      <h3 className="text-[10px] font-bold uppercase tracking-wider text-gray-400 dark:text-white/30">{title}</h3>
+    <section className="flex flex-col gap-2">
+      <h3 className="px-1 text-[11px] font-medium uppercase tracking-[0.06em] text-gray-500 dark:text-white/45">{title}</h3>
       {children}
     </section>
   );
@@ -715,9 +745,9 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 function Stat({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex flex-col gap-0.5 min-w-0 px-3 py-2 rounded-lg bg-gray-100/70 dark:bg-white/4">
-      <dt className="text-[10px] text-gray-400 dark:text-white/35">{label}</dt>
-      <dd className="truncate text-[12px] font-medium text-gray-800 dark:text-gray-200" title={value}>{value}</dd>
+    <div className="flex flex-col gap-1 min-w-0 px-4 py-3 bg-gray-50 dark:bg-surface">
+      <dt className="text-[11px] text-gray-500 dark:text-white/45">{label}</dt>
+      <dd className="truncate font-mono text-[17px] leading-6 font-semibold tabular-nums tracking-[-0.01em] text-gray-900 dark:text-gray-50" title={value}>{value}</dd>
     </div>
   );
 }

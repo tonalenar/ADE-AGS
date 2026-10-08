@@ -75,21 +75,17 @@ export function TabItem({
       }}
       title={paintHint}
       className={`
-        group relative flex items-center gap-2 h-10 pl-3 pr-1.5 shrink-0
-        max-w-48 min-w-27 rounded-t-[9px] cursor-pointer select-none
+        group relative flex items-center gap-2 h-7 pl-2.5 pr-1 shrink-0
+        max-w-48 min-w-27 rounded-md cursor-pointer select-none text-[12.5px]
         transition-colors duration-150 ${className}
         ${paint && !isActive ? paint.tint : ""}
         ${isActive
-          ? "bg-gray-50 dark:bg-surface text-gray-900 dark:text-white"
-          : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-white/5 hover:text-gray-800 dark:hover:text-gray-200"}
+          ? `${groupFocused ? "bg-white dark:bg-surface-raised" : "bg-black/[0.06] dark:bg-white/[0.1]"} text-gray-900 dark:text-white shadow-sm font-medium`
+          : "text-gray-500 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/[0.06] hover:text-gray-800 dark:hover:text-gray-200"}
       `}
     >
       {/* El mismo color que el navegador que está manejando: las dos tabs se leen como una. */}
-      {paint && <span className={`absolute top-1.5 bottom-1.5 left-0 w-[3px] rounded-r ${paint.strip}`} />}
-      {/* La tab activa se funde con el área de abajo; la línea la remata. */}
-      {isActive && (
-        <span className={`absolute bottom-0 left-0 right-0 h-[2px] ${groupFocused ? "bg-accent-500" : "bg-gray-300 dark:bg-white/20"}`} />
-      )}
+      {paint && <span className={`absolute top-1 bottom-1 left-0 w-[3px] rounded-r ${paint.strip}`} />}
 
       <AgentIcon className={`w-3.5 h-3.5 shrink-0 opacity-70 ${paint ? paint.ink : ""}`} />
 
@@ -110,10 +106,10 @@ export function TabItem({
         />
       ) : (
         <span className="flex flex-col flex-1 min-w-0 leading-tight">
-          <span className="text-xs truncate">{tab.title}</span>
+          <span className="text-[12.5px] leading-[15px] truncate">{tab.title}</span>
           {account && (
             <span title={account.hint ?? undefined}
-              className="text-[9.5px] truncate text-gray-400 dark:text-white/35">
+              className="text-[9.5px] leading-[11px] truncate font-mono text-gray-400 dark:text-white/35">
               {account.name ?? t("accounts.system")}
             </span>
           )}
@@ -136,12 +132,12 @@ export function TabItem({
         onMouseDown={(e) => e.stopPropagation()}
         title="Cerrar"
         className="
-          absolute right-1.5 shrink-0 flex items-center justify-center
-          w-4 h-4 rounded
-          text-gray-400 dark:text-gray-600
+          absolute right-1 shrink-0 flex items-center justify-center
+          w-[18px] h-[18px] rounded-md
+          text-gray-400 dark:text-gray-500
           opacity-0 group-hover:opacity-100
           hover:text-gray-700 dark:hover:text-white
-          hover:bg-gray-200 dark:hover:bg-white/15
+          hover:bg-black/10 dark:hover:bg-white/15
           transition-opacity duration-100
          p-0"
       >

@@ -3,12 +3,12 @@ import { useTranslation } from "react-i18next";
 
 import { getSetting, setSetting } from "@/shared/ipc/settings";
 
-/** A mesma chave que `runs/fixrounds.rs` lê. Sem valor, o teto é 2. */
+/** A mesma chave que `runs/fixrounds.rs` lee. Sin valor, el teto es 2. */
 const KEY = "fix_rounds.max";
 
 /**
- * Teto de correções da mesma entrega, no canvas e na frota. A variável
- * ADE_AGS_MAX_FIX_ROUNDS, se existir, ganha desta chave.
+ * Teto de correcciones de la misma entrega, en el canvas y en la flota. La variable
+ * ADE_AGS_MAX_FIX_ROUNDS, si existe, gana a esta clave.
  */
 export function FixRoundsSetting() {
   const { t } = useTranslation();
@@ -31,10 +31,10 @@ export function FixRoundsSetting() {
   };
 
   return (
-    <div className="flex items-center justify-between gap-3 px-3 py-2.5 rounded-lg bg-gray-100/70 dark:bg-white/4">
-      <div className="flex flex-col">
-        <span className="text-sm">{t("settings.fixRounds.label")}</span>
-        <span className="text-xs text-gray-500 dark:text-gray-400">{t("settings.fixRounds.desc")}</span>
+    <div className="flex items-center justify-between gap-4 min-h-10 px-3 py-2">
+      <div className="flex flex-col gap-px min-w-0">
+        <span className="text-[13px] leading-[18px] text-gray-900 dark:text-gray-100">{t("settings.fixRounds.label")}</span>
+        <span className="text-[11.5px] leading-4 text-gray-500 dark:text-white/40">{t("settings.fixRounds.desc")}</span>
       </div>
       <input
         type="number"
@@ -42,7 +42,9 @@ export function FixRoundsSetting() {
         max={20}
         value={value}
         onChange={(e) => change(e.target.value)}
-        className="w-16 text-xs rounded-md px-2 py-1 bg-white dark:bg-white/10 border border-gray-200 dark:border-white/10"
+        className="h-7 w-14 rounded-md bg-gray-200/70 dark:bg-surface-overlay px-2 text-center
+          font-mono text-[13px] tabular-nums text-gray-900 dark:text-gray-100
+          focus:outline-none focus-visible:ring-[3px] focus-visible:ring-accent-500/25"
       />
     </div>
   );

@@ -49,20 +49,22 @@ export function ShellModal({ title, icon, width = "max-w-4xl", onClose, children
       <Button variant="custom"
         onClick={onClose}
         aria-label={t("btn.close")}
-        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/65 block"
+        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/45 backdrop-blur-sm block"
         children={null}
       />
 
       <div ref={frameRef} tabIndex={-1} className={`outline-none cc-rise relative flex flex-col w-full ${width} h-full max-h-[42rem]
-        rounded-2xl overflow-hidden
+        rounded-xl overflow-hidden
         bg-gray-50 dark:bg-surface
-        border border-gray-200 dark:border-white/12
-        shadow-2xl`}>
+        border border-gray-200 dark:border-white/[0.08]
+        shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]`}>
 
-        <div className="flex items-center gap-3 h-[54px] shrink-0 pl-4 pr-3 shadow-none
-          border-b border-gray-200 dark:border-white/8">
+        {/* Título centrado, como un sheet de macOS: la X va flotando a la derecha y el
+            `px-10` reserva su hueco de los dos lados para que el centro quede exacto. */}
+        <div className="relative flex items-center justify-center gap-2 h-12 shrink-0 px-10
+          border-b border-gray-200 dark:border-white/[0.08]">
           {icon}
-          <h2 className="flex-1 min-w-0 truncate text-[13.5px] font-bold
+          <h2 className="flex-1 min-w-0 truncate text-center text-[13.5px] font-semibold tracking-[-0.01em]
             text-gray-900 dark:text-white">
             {title}
           </h2>
@@ -70,7 +72,7 @@ export function ShellModal({ title, icon, width = "max-w-4xl", onClose, children
             onClick={onClose}
             title={t("btn.close")}
             aria-label={t("btn.close")}
-            className="cc-t flex items-center justify-center w-7 h-7 rounded-lg shrink-0
+            className="cc-t absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center justify-center w-7 h-7 rounded-md shrink-0
               text-gray-400 dark:text-white/35
               hover:text-gray-700 dark:hover:text-white
               hover:bg-gray-200 dark:hover:bg-white/10 p-0"

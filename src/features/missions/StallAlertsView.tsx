@@ -26,10 +26,10 @@ export function StallAlertsBanner({ alerts, compact = false, now: fixedNow }: { 
   if (alerts.length === 0) return null;
   const shell = compact
     ? "ags-hq__detail"
-    : "rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-400/30 dark:bg-amber-400/10";
+    : "rounded-xl bg-amber-50 dark:bg-amber-400/10 p-4 ring-1 ring-inset ring-amber-500/30 dark:ring-amber-400/25";
   return (
     <section className={shell} role="alert" aria-label={t("missions.stall.title")}>
-      <h3 className={compact ? "mb-1 text-[11px] font-semibold text-amber-300" : "mb-1 text-[11px] font-semibold text-amber-800 dark:text-amber-200"}>
+      <h3 className={compact ? "mb-1 text-[11px] font-semibold text-amber-300" : "mb-1 text-[12px] font-semibold text-amber-800 dark:text-amber-200"}>
         {t("missions.stall.title")}
       </h3>
       <ul className="flex flex-col gap-0.5">
@@ -47,7 +47,7 @@ export function StallAlertsBanner({ alerts, compact = false, now: fixedNow }: { 
 export function StartupTimeLine({ startup, compact = false }: { startup: StartupTime | null | undefined; compact?: boolean }) {
   const { t } = useTranslation();
   const s = startupSummary(startup);
-  const cls = compact ? "ags-hq__dim" : "text-[11.5px] text-gray-500 dark:text-gray-400";
+  const cls = compact ? "ags-hq__dim" : "text-[12px] tabular-nums text-gray-500 dark:text-white/50";
   const text = s.state === "done"
     ? t("missions.startup.done", { time: formatDuration(s.ms ?? 0) })
     : s.state === "waiting"

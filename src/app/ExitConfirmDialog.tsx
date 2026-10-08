@@ -36,7 +36,7 @@ export function ExitConfirmDialog({ title, body, onCloseAll, onCloseCurrent, onC
         </>
       }
     >
-      <p className="text-sm text-gray-600 dark:text-gray-300">
+      <p className="text-center text-[13px] leading-[19px] text-gray-600 dark:text-white/60">
         {body}
       </p>
     </AppDialog>

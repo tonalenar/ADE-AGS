@@ -51,43 +51,43 @@ export function MemoryReviewPanel({ missionId, workspaceId, refreshKey = "" }: {
   const { counts } = summary;
 
   return (
-    <section className="flex flex-col gap-2 rounded-lg border border-gray-200 p-3 dark:border-white/10" data-testid="memory-review">
+    <section className="flex flex-col gap-2 rounded-xl bg-gray-100/70 p-3 dark:bg-surface-raised/60" data-testid="memory-review">
       <header className="flex flex-wrap items-center gap-2">
-        <h3 className="text-[12px] font-semibold text-gray-700 dark:text-gray-200">{t("memoryReview.title", { count: counts.total })}</h3>
-        <span className="text-[11px] text-gray-400 dark:text-white/35">
+        <h3 className="text-[12.5px] font-semibold text-gray-900 dark:text-gray-100">{t("memoryReview.title", { count: counts.total })}</h3>
+        <span className="font-mono text-[10.5px] tabular-nums text-gray-500 dark:text-white/40">
           {t("memoryReview.counts", { highValue: counts.highValue, duplicates: counts.duplicates, contradictions: counts.contradictions })}
         </span>
         <span className="ml-auto flex gap-1.5">
           <button type="button" disabled={busy} onClick={() => run(items, true)}
-            className="rounded bg-emerald-600 px-2 py-1 text-[11px] font-medium text-white disabled:opacity-50">
+            className="h-7 rounded-md bg-emerald-600 px-2.5 text-[12px] font-medium text-white hover:bg-emerald-500 disabled:opacity-50">
             {t("memoryReview.approveAll")}
           </button>
           <button type="button" disabled={busy} onClick={() => run(items, false)}
-            className="rounded border border-gray-300 px-2 py-1 text-[11px] text-gray-600 disabled:opacity-50 dark:border-white/20 dark:text-gray-300">
+            className="h-7 rounded-md bg-gray-200/80 px-2.5 text-[12px] font-medium text-gray-800 hover:bg-gray-300/70 disabled:opacity-50 dark:bg-surface-overlay dark:text-gray-100 dark:hover:bg-white/[0.14]">
             {t("memoryReview.rejectAll")}
           </button>
         </span>
       </header>
-      <p className="text-[10.5px] text-gray-400 dark:text-white/35">{t("memoryReview.note")}</p>
+      <p className="text-[10.5px] leading-[14px] text-gray-500 dark:text-white/40">{t("memoryReview.note")}</p>
       {message && <p className="text-[11px] text-red-600 dark:text-red-400">{message}</p>}
-      <ul className="flex flex-col divide-y divide-gray-100 dark:divide-white/5">
+      <ul className="flex flex-col divide-y divide-gray-200 dark:divide-white/[0.08]">
         {items.map((item) => {
           const flag = reviewFlag(item);
           const ev = evidenceParts(item);
           return (
-            <li key={`${item.entryId}:${item.revision}`} className="flex flex-col gap-1 py-2" data-flag={flag}>
+            <li key={`${item.entryId}:${item.revision}`} className="flex flex-col gap-1.5 py-2.5" data-flag={flag}>
               <div className="flex items-center gap-2">
-                <span className="min-w-0 flex-1 truncate text-[12px] font-medium text-gray-700 dark:text-gray-200" title={item.key}>{item.key}</span>
+                <span className="min-w-0 flex-1 truncate font-mono text-[12px] font-medium text-gray-900 dark:text-gray-100" title={item.key}>{item.key}</span>
                 {flag === "highValue" && (
-                  <span className={`rounded px-1.5 py-0.5 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>
+                  <span className={`inline-flex h-[18px] items-center rounded-full px-2 text-[10.5px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>
                 )}
                 <button type="button" disabled={busy} onClick={() => run([item], true)}
-                  className="rounded bg-emerald-600/90 px-2 py-0.5 text-[11px] text-white disabled:opacity-50">{t("memoryReview.approve")}</button>
+                  className="h-6 rounded-md bg-emerald-600 px-2.5 text-[11px] font-medium text-white hover:bg-emerald-500 disabled:opacity-50">{t("memoryReview.approve")}</button>
                 <button type="button" disabled={busy} onClick={() => run([item], false)}
-                  className="rounded border border-gray-300 px-2 py-0.5 text-[11px] text-gray-600 disabled:opacity-50 dark:border-white/20 dark:text-gray-300">{t("memoryReview.reject")}</button>
+                  className="h-6 rounded-md bg-gray-200/80 px-2.5 text-[11px] font-medium text-gray-800 hover:bg-gray-300/70 disabled:opacity-50 dark:bg-surface-overlay dark:text-gray-100 dark:hover:bg-white/[0.14]">{t("memoryReview.reject")}</button>
               </div>
-              <p className="line-clamp-3 whitespace-pre-wrap text-[11.5px] text-gray-600 dark:text-gray-300">{item.body}</p>
-              <p className="text-[10.5px] text-gray-400 dark:text-white/35">
+              <p className="line-clamp-3 whitespace-pre-wrap text-[11.5px] leading-4 text-gray-600 dark:text-gray-300">{item.body}</p>
+              <p className="font-mono text-[10.5px] leading-[14px] text-gray-500 dark:text-white/40">
                 {t("memoryReview.evidence")}: {t(`memoryReview.actor.${item.evidence.actorKind}`)}
                 {ev.runId ? ` · run ${ev.runId.slice(0, 8)}` : ""}
                 {ev.taskId ? ` · task ${ev.taskId.slice(0, 8)}` : ""}

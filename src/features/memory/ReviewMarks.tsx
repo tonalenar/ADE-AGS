@@ -3,9 +3,10 @@ import { useTranslation } from "react-i18next";
 import { reviewMarks } from "./review";
 import type { MemoryReviewItem } from "./types";
 
+/** Selos "possível …": pílula de 18px, fundo da cor a 15% e texto na cor. */
 const STYLE = {
-  duplicate: "border-amber-500/60 text-amber-700 dark:text-amber-400",
-  contradiction: "border-red-500/60 text-red-600 dark:text-red-400",
+  duplicate: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-300",
+  contradiction: "bg-orange-500/15 text-orange-700 dark:text-orange-300",
 } as const;
 
 /**
@@ -20,12 +21,13 @@ export function ReviewMarks({ item }: { item: MemoryReviewItem }) {
     <div className="flex flex-col gap-1">
       <ul className="flex flex-wrap gap-1.5" aria-label={t("memoryReview.marksLabel")}>
         {marks.map((m) => (
-          <li key={m.kind} data-mark={m.kind} className={`rounded-full border px-2 py-px text-[10.5px] ${STYLE[m.kind]}`}>
+          <li key={m.kind} data-mark={m.kind}
+            className={`inline-flex h-[18px] items-center rounded-full px-2 text-[10.5px] font-semibold whitespace-nowrap ${STYLE[m.kind]}`}>
             {t(m.kind === "duplicate" ? "memoryReview.markDuplicate" : "memoryReview.markContradiction", { key: m.key })}
           </li>
         ))}
       </ul>
-      <p className="text-[10.5px] text-gray-400 dark:text-white/35">{t("memoryReview.markNote")}</p>
+      <p className="text-[10.5px] leading-[14px] text-gray-500 dark:text-white/40">{t("memoryReview.markNote")}</p>
     </div>
   );
 }

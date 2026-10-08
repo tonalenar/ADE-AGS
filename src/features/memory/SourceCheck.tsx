@@ -26,18 +26,18 @@ export function SourceCheck({ entryId, disabled }: { entryId: string; disabled?:
   return (
     <span className="inline-flex flex-col gap-1">
       <button type="button" disabled={disabled || state.status === "loading"} onClick={() => void run()}
-        className="rounded border border-gray-300 px-2 py-0.5 text-[11px] disabled:opacity-50 dark:border-white/20">
+        className="inline-flex h-7 items-center rounded-md px-2 text-[12px] font-medium text-accent-500 hover:bg-accent-500/10 disabled:opacity-50 dark:text-accent-400">
         {state.status === "loading" ? t("memorySearch.checking") : t("memorySearch.checkSource")}
       </button>
       {state.status === "error" && <span role="alert" className="text-[10.5px] text-red-600 dark:text-red-400">{t("memorySearch.checkFailed", { detail: state.detail })}</span>}
       {state.status === "done" && (
-        <span role="status" className="text-[10.5px] text-gray-600 dark:text-gray-300">
+        <span role="status" className="font-mono text-[10.5px] leading-[16px] tabular-nums text-gray-600 dark:text-gray-300">
           {FIELDS.map((f) => (
             <span key={f} data-check={f} className={`mr-2 ${state.result[f] === false ? "text-red-600 dark:text-red-400" : ""}`}>
               {t(`memorySearch.source.${f}`)}: {state.result[f] === null ? t("memorySearch.source.na") : state.result[f] ? t("memorySearch.source.yes") : t("memorySearch.source.no")}
             </span>
           ))}
-          <span className="text-gray-400">{t("memorySearch.readOnlyNote")}</span>
+          <span className="text-gray-400 dark:text-white/35">{t("memorySearch.readOnlyNote")}</span>
         </span>
       )}
     </span>

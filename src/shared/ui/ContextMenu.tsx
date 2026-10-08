@@ -111,28 +111,32 @@ export function ContextMenu({ x, y, items, onClose }: {
         margin: 0,
         zIndex: 10000,
       }}
-      className="cc-pop min-w-52 py-1 rounded-lg border shadow-xl overflow-hidden
-        bg-white dark:bg-gray-800
-        border-gray-200 dark:border-white/10
-        text-gray-800 dark:text-gray-100
-        text-xs select-none"
+      className="cc-pop min-w-52 p-1 rounded-lg border overflow-hidden
+        bg-white/80 dark:bg-surface-raised/80 backdrop-blur-xl
+        border-gray-200 dark:border-white/[0.08]
+        shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]
+        text-gray-800 dark:text-white
+        text-[13px] select-none"
     >
       {items.map((item) => (
         <div key={item.key}>
-          {item.separator && <div className="my-1 h-px bg-gray-200 dark:bg-white/10" />}
+          {item.separator && <div className="my-1 mx-1.5 h-px bg-gray-200 dark:bg-white/[0.08]" />}
+          {/* 26px de alto, como los menús de macOS. El destacado es el fondo accent con texto
+              blanco, y el atalho en mono se aclara igual para seguir leyéndose sobre él. */}
           <Button variant="custom"
             disabled={item.disabled}
             onClick={() => { item.onSelect(); onClose(); }}
-            className={`cc-t w-full flex items-center gap-2.5 px-3 py-2 text-left
+            className={`group cc-t w-full h-[26px] flex items-center gap-2 px-2 rounded-[5px] text-left
               disabled:opacity-40 disabled:pointer-events-none
               ${item.danger
-                ? "text-red-500 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/10"
-                : "hover:bg-gray-100 dark:hover:bg-white/10"}`}
+                ? "text-red-500 dark:text-red-400 hover:bg-red-500 hover:text-white"
+                : "hover:bg-accent-500 hover:text-white"}`}
           >
-            {item.icon && <span className="shrink-0 flex w-4 h-4">{item.icon}</span>}
+            {item.icon && <span className="shrink-0 flex w-3.5 h-3.5">{item.icon}</span>}
             <span className="flex-1 truncate">{item.label}</span>
             {item.hint && (
-              <span className="shrink-0 pl-4 text-[10.5px] text-gray-400 dark:text-white/35">{item.hint}</span>
+              <span className="shrink-0 pl-4 font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35
+                group-hover:text-white/75">{item.hint}</span>
             )}
           </Button>
         </div>

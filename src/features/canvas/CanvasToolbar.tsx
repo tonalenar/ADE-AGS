@@ -42,16 +42,19 @@ function ToolButton({ label, active, onClick, children, disabled }: {
 }) {
   return (
     <Button variant="custom" onClick={onClick} title={label} aria-label={label} aria-pressed={active} disabled={disabled}
-      className={`cc-t w-8 h-8 flex items-center justify-center rounded-lg disabled:opacity-35
+      className={`cc-t w-8 h-8 flex items-center justify-center rounded-md disabled:opacity-35
         ${active
-          ? "bg-accent-500/15 text-accent-600 dark:text-accent-300"
-          : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/8 hover:text-gray-800 dark:hover:text-gray-100"}`}>
+          ? "bg-accent-500/15 text-accent-600 dark:bg-accent-500/20 dark:text-accent-300"
+          : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.06] hover:text-gray-800 dark:hover:text-gray-100"}`}>
       {children}
     </Button>
   );
 }
 
-const Divider = () => <span className="w-px h-5 mx-0.5 bg-gray-200 dark:bg-white/10" />;
+/** Material translúcido de las dos cápsulas de la barra (estilo macOS). */
+const material = "border-black/[0.08] dark:border-white/[0.08] bg-white/85 dark:bg-surface-raised/75 backdrop-blur-[30px] backdrop-saturate-[180%] shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]";
+
+const Divider = () => <span aria-hidden className="w-px h-5 mx-0.5 bg-black/10 dark:bg-white/[0.08]" />;
 
 /**
  * La barra de herramientas del canvas: seleccionar, abrir un terminal, y poner una nota, una
@@ -83,8 +86,7 @@ export function CanvasToolbar({
 
   return (
     <div className="pointer-events-auto absolute left-1/2 top-3 -translate-x-1/2 flex flex-col items-center gap-1.5">
-      <div className="flex items-center gap-0.5 p-1 rounded-xl border border-gray-200 dark:border-white/10
-        bg-white/95 dark:bg-surface-raised/95 shadow-md">
+      <div className={`flex items-center gap-0.5 p-1 rounded-xl border ${material}`}>
         <ToolButton label={t("canvas.tool.select")} active={tool === "select"} onClick={() => onTool("select")}>{ICONS.select}</ToolButton>
         <Divider />
         <ToolButton label={t("canvas.tool.terminal")} onClick={onTerminal}>{ICONS.terminal}</ToolButton>
@@ -99,8 +101,7 @@ export function CanvasToolbar({
       </div>
 
       {drawing && (
-        <div className="flex items-center gap-1 px-2 py-1 rounded-xl border border-gray-200 dark:border-white/10
-          bg-white/95 dark:bg-surface-raised/95 shadow-md">
+        <div className={`flex items-center gap-1 px-2 py-1 rounded-xl border ${material}`}>
           {DRAW_COLORS.map((color) => (
             <button key={color} type="button" aria-label={color} aria-pressed={tool === "draw" && style.color === color}
               onClick={() => { onStyle({ ...style, color }); onTool("draw"); }}
@@ -115,7 +116,7 @@ export function CanvasToolbar({
             <button key={width} type="button" aria-label={t("canvas.tool.width", { width })} aria-pressed={style.width === width}
               onClick={() => { onStyle({ ...style, width }); onTool("draw"); }}
               className={`cc-t w-6 h-6 flex items-center justify-center rounded-md
-                ${style.width === width ? "bg-gray-100 dark:bg-white/12" : "hover:bg-gray-100 dark:hover:bg-white/8"}`}>
+                ${style.width === width ? "bg-gray-100 dark:bg-white/[0.12]" : "hover:bg-gray-100 dark:hover:bg-white/[0.06]"}`}>
               <span className="rounded-full bg-gray-600 dark:bg-gray-300" style={{ width: width + 3, height: width + 3 }} />
             </button>
           ))}

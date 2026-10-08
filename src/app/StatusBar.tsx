@@ -68,10 +68,10 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
   };
 
   return (
-    <footer className="relative flex items-center gap-2.5 h-[26px] shrink-0 px-3
-      bg-gray-100 dark:bg-surface-sunken
-      border-t border-gray-200 dark:border-white/7
-      text-[10.5px] tabular-nums text-gray-500 dark:text-gray-400 select-none">
+    <footer className="relative flex items-center gap-2.5 h-6 shrink-0 px-3
+      bg-gray-100/80 dark:bg-surface-sunken/75 backdrop-blur-xl
+      border-t border-gray-200 dark:border-white/[0.08]
+      text-[11px] tabular-nums text-gray-500 dark:text-white/50 select-none">
 
       {/* O mascote é o indicador de humor da janela: repousa, trabalha ou chama você.
           Fica parado em repouso — algo se mexendo o tempo todo no canto do olho cansa. */}
@@ -86,7 +86,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
         >
           {/* Crece con los tokens; trabajando o llamándote se mueve, en reposo queda quieto. */}
           <Pet level={pet.level} state={mascot.state} size={18} still={mascot.state === "idle" || mascot.state === "sleeping"} className="shrink-0 -my-1" />
-          <span className="text-[10px] font-bold tracking-wider text-gray-600 dark:text-gray-300">LV {pet.level}</span>
+          <span className="font-mono text-[10px] font-semibold tracking-wider text-gray-600 dark:text-white/70">LV {pet.level}</span>
           <span className="w-8 h-[3px] rounded-full bg-gray-300 dark:bg-white/10 overflow-hidden" aria-hidden>
             <span className="block h-full rounded-full bg-accent-500" style={{ width: `${Math.round(pet.progress * 100)}%` }} />
           </span>
@@ -119,11 +119,11 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
       {open && (
         <div
           ref={popRef}
-          className="cc-rise absolute bottom-[30px] left-3 z-50
-            rounded-xl overflow-hidden
-            bg-white dark:bg-surface
-            border border-gray-200 dark:border-white/12
-            shadow-2xl"
+          className="cc-rise absolute bottom-[28px] left-3 z-50
+            rounded-lg overflow-hidden
+            bg-white/80 dark:bg-surface-raised/80 backdrop-blur-xl
+            border border-gray-200 dark:border-white/[0.08]
+            shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]"
         >
           <AccountUsagePopover
             account={shown.find((a) => a.id === open)!}
@@ -151,7 +151,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
         </>
       )}
 
-      <span>{t("status.agents", { n: tabs.length })}</span>
+      <span className="font-mono">{t("status.agents", { n: tabs.length })}</span>
       <FleetIndicator />
       <OrchestratorIndicator />
       {loginFor && (

@@ -128,15 +128,15 @@ export function MissionsSection() {
     return (
       <div key={m.id}>
       <div
-        className={`group/mission flex items-center gap-2 pl-3 pr-1.5 h-7 cursor-pointer
-          ${active ? "bg-accent-500/10" : "hover:bg-gray-100 dark:hover:bg-white/5"}`}
+        className={`group/mission mx-1 flex items-center gap-2 pl-2.5 pr-1.5 h-7 rounded-md cursor-pointer
+          ${active ? "bg-accent-500/15 ring-1 ring-inset ring-accent-500/30" : "hover:bg-gray-200/60 dark:hover:bg-white/5"}`}
         onClick={() => (m.status === "draft" ? undefined : go(m))}
         title={m.objective}>
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT[m.status]}`} />
         <span className={`flex-1 min-w-0 truncate text-[12px] ${active ? "font-semibold text-gray-900 dark:text-white" : "text-gray-700 dark:text-gray-300"}`}>
           {m.title}
         </span>
-        {mine > 0 && <span className="text-[10px] tabular-nums text-gray-400 dark:text-white/35">{mine}</span>}
+        {mine > 0 && <span className="font-mono text-[10px] tabular-nums text-gray-400 dark:text-white/35">{mine}</span>}
         {(pending.byMission[m.id] ?? 0) > 0 && (
           <Button
             variant="custom"
@@ -172,9 +172,9 @@ export function MissionsSection() {
       {terminals.map((tab) => (
         <button key={tab!.id} type="button"
           onClick={() => { activateTab(tab!.id); navigate("/workspace"); }}
-          className={`flex items-center gap-2 w-full h-6 pl-7 pr-2 text-left text-[11.5px] ${tab!.id === activeTabId
-            ? "text-gray-900 dark:text-white bg-accent-500/10"
-            : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/5"}`}>
+          className={`flex items-center gap-2 w-full h-6 pl-7 pr-2 mx-1 rounded-md text-left text-[11.5px] ${tab!.id === activeTabId
+            ? "text-gray-900 dark:text-white bg-accent-500/15"
+            : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-white/5"}`}>
           <span className="w-1 h-1 rounded-full bg-gray-400 dark:bg-white/30 shrink-0" />
           <span className="truncate">{tab!.title}</span>
         </button>
@@ -184,9 +184,9 @@ export function MissionsSection() {
   };
 
   return (
-    <div className="shrink-0 border-b border-gray-200 dark:border-white/7">
+    <div className="shrink-0 border-b border-black/[0.08] dark:border-white/[0.08] pb-1">
       <div className="flex items-center gap-2 h-7 pl-3 pr-1.5">
-        <span className="flex-1 text-[10.5px] font-bold uppercase tracking-[0.09em] text-gray-500 dark:text-gray-400">
+        <span className="flex-1 text-[11px] font-medium uppercase tracking-[0.06em] text-gray-500 dark:text-white/45">
           {t("missions.title")}
         </span>
         {pendingTotal > 0 && (
@@ -219,10 +219,10 @@ export function MissionsSection() {
       {archived.length > 0 && (
         <>
           <button type="button" onClick={() => setShowArchived((v) => !v)}
-            className="flex items-center gap-1.5 w-full h-6 pl-3 text-[10px] font-bold uppercase tracking-[0.09em] text-gray-400 dark:text-white/30 hover:text-gray-600 dark:hover:text-white/60">
+            className="flex items-center gap-1.5 w-full h-6 pl-3 text-[11px] font-medium uppercase tracking-[0.06em] text-gray-500 dark:text-white/45 hover:text-gray-700 dark:hover:text-white/70">
             <span>{showArchived ? "▾" : "▸"}</span>
             {t("missions.sidebar.archived")}
-            <span className="tabular-nums font-normal">{archived.length}</span>
+            <span className="font-mono tabular-nums font-normal">{archived.length}</span>
           </button>
           {showArchived && archived.map(row)}
         </>

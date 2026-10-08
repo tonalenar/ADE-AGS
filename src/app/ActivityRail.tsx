@@ -39,16 +39,13 @@ function RailButton({
     <Button variant="custom"
       onClick={onClick}
       aria-label={label}
-      className={`cc-t relative flex items-center h-9 rounded-[9px] shrink-0 p-0
+      className={`cc-t relative flex items-center h-9 rounded-[10px] shrink-0 p-0
         ${expanded ? "w-full gap-2.5 px-2.5 justify-start" : "w-9 justify-center"}
         ${active
-          ? "text-gray-900 dark:text-white bg-gray-200/70 dark:bg-white/7"
-          : "text-gray-400 dark:text-white/40 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200/60 dark:hover:bg-white/6"}`}
+          // Ativo: el ícono se pinta de accent sobre un fondo accent suave (como el riel de Xcode).
+          ? "text-accent-600 dark:text-accent-400 bg-accent-500/15"
+          : "text-gray-400 dark:text-white/40 hover:text-gray-700 dark:hover:text-white hover:bg-gray-200/60 dark:hover:bg-white/[0.06]"}`}
     >
-      {/* O acento vai contra a borda externa da janela, como em qualquer riel. */}
-      {active && (
-        <span className="absolute -left-1.5 top-2 w-0.5 h-5 rounded-sm bg-gray-900 dark:bg-white" />
-      )}
       <span className="shrink-0 flex">{children}</span>
       {expanded && (
         <span className={`truncate text-[12.5px] ${active ? "font-medium" : ""}`}>{label}</span>
@@ -87,10 +84,10 @@ function RailButton({
 /** Separa os grupos. Expandido mostra o nome do grupo; compacto, só um traço. */
 function RailGroup({ label, expanded }: { label: string; expanded: boolean }) {
   if (!expanded) {
-    return <span className="my-1.5 w-5 h-px shrink-0 bg-gray-300 dark:bg-white/10" aria-hidden />;
+    return <span className="my-1.5 w-5 h-px shrink-0 bg-gray-300 dark:bg-white/[0.08]" aria-hidden />;
   }
   return (
-    <span className="w-full px-2.5 pt-3 pb-1 text-[10px] font-semibold uppercase tracking-widest
+    <span className="w-full px-2.5 pt-3 pb-1 text-[11px] font-semibold uppercase tracking-[0.06em]
       text-gray-400 dark:text-white/30 select-none">
       {label}
     </span>
@@ -133,8 +130,8 @@ export function ActivityRail({ agentCount, width }: { agentCount: number; width:
       className={`flex flex-col gap-0.5 shrink-0 py-1.5 overflow-y-auto overflow-x-hidden
         transition-[width] duration-150
         ${expanded ? "items-stretch px-2" : "items-center"}
-        bg-gray-100 dark:bg-surface-deep
-        border-r border-gray-200 dark:border-white/7`}
+        bg-gray-100/80 dark:bg-surface-deep/75 backdrop-blur-xl
+        border-r border-gray-200 dark:border-white/[0.08]`}
     >
       <RailButton
         label={expanded ? t("palette.short") : t("palette.open")}
