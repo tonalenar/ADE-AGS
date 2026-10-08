@@ -1,8 +1,8 @@
-//! ConPTY com `CREATE_NO_WINDOW`.
+//! ConPTY próprio, no lugar do de `portable-pty`.
 //!
-//! `portable-pty` 0.8 (e o 0.9 / main do wezterm) chama `CreateProcessW` só com
-//! `EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT`. Não há API para
-//! acrescentar `CREATE_NO_WINDOW`, então o pseudoconsole nasce aqui.
+//! NÃO passar `CREATE_NO_WINDOW` ao `CreateProcessW`: com a flag o filho nasce sem console e o
+//! pseudoconsole fica mudo (terminal em branco, agente que nunca inicia). O app é GUI, então o
+//! ConPTY não abre janela de qualquer jeito. O teste ao fim do arquivo guarda isso.
 
 #![cfg(windows)]
 
@@ -24,7 +24,7 @@ use windows_sys::Win32::System::Pipes::CreatePipe;
 use windows_sys::Win32::System::Threading::{
     CreateProcessW, DeleteProcThreadAttributeList, GetCurrentProcess, GetExitCodeProcess,
     InitializeProcThreadAttributeList, TerminateProcess, UpdateProcThreadAttribute,
-    WaitForSingleObject, CREATE_NO_WINDOW, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
+    WaitForSingleObject, CREATE_UNICODE_ENVIRONMENT, EXTENDED_STARTUPINFO_PRESENT,
     PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOEXW, STARTUPINFOW,
 };
 
@@ -195,7 +195,6 @@ impl SlavePty for WinSlave {
         if args.is_empty() {
             return Err(io::Error::other("comando vazio").into());
         }
-        let mut exe: Vec<u16> = OsStr::new(&args[0]).encode_wide().chain(Some(0)).collect();
         let cmdline = crate::util::win_quote::quote_cmdline(&args);
         let mut cmdline: Vec<u16> = OsStr::new(&cmdline).encode_wide().chain(Some(0)).collect();
         let cwd: Option<Vec<u16>> = cmd.get_cwd().map(|dir| OsStr::new(dir).encode_wide().chain(Some(0)).collect());
@@ -210,10 +209,12 @@ impl SlavePty for WinSlave {
         si.lpAttributeList = attrs.data.as_mut_ptr().cast();
 
         let mut pi: PROCESS_INFORMATION = unsafe { std::mem::zeroed() };
-        let flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT | CREATE_NO_WINDOW;
+        let flags = EXTENDED_STARTUPINFO_PRESENT | CREATE_UNICODE_ENVIRONMENT;
         let ok = unsafe {
             CreateProcessW(
-                exe.as_mut_ptr(),
+                // Sem `lpApplicationName`: só assim o Windows procura `cmd` (e qualquer .exe sem
+                // caminho) no PATH, como fazia o `portable-pty`. Com o nome ali, `cmd` não abria.
+                std::ptr::null(),
                 cmdline.as_mut_ptr(),
                 std::ptr::null(),
                 std::ptr::null(),
@@ -328,5 +329,34 @@ impl Drop for WinChild {
         if !handle.is_null() {
             unsafe { CloseHandle(handle) };
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Regressão: o agente não abria no app instalado porque `cmd` (sem caminho) não era achado no PATH.
+    #[test]
+    fn abre_cmd_sem_caminho_e_le_a_saida() {
+        let pair = open(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 }).expect("conpty");
+        let mut cmd = CommandBuilder::new("cmd");
+        cmd.arg("/C");
+        cmd.arg("echo ags-conpty-ok");
+        let mut child = pair.slave.spawn_command(cmd).expect("spawn de cmd sem caminho");
+        let mut reader = pair.master.try_clone_reader().unwrap();
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 4096];
+            let mut all = Vec::new();
+            while let Ok(n) = reader.read(&mut buf) {
+                if n == 0 { break; }
+                all.extend_from_slice(&buf[..n]);
+                if String::from_utf8_lossy(&all).contains("ags-conpty-ok") { let _ = tx.send(all); return; }
+            }
+        });
+        let out = rx.recv_timeout(std::time::Duration::from_secs(10)).expect("saída do cmd");
+        assert!(String::from_utf8_lossy(&out).contains("ags-conpty-ok"));
+        let _ = child.wait();
     }
 }
