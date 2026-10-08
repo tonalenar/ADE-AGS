@@ -13,8 +13,6 @@ import { StatusBar } from "@/app/StatusBar";
 import { TabBar } from "@/features/tabs/TabBar";
 import { WorkspacesPanel } from "@/features/workspaces/WorkspacesPanel";
 import { ExplorerPanel } from "@/features/explorer/ExplorerPanel";
-import { SettingsModal } from "@/features/settings/SettingsModal";
-import { AccountsModal } from "@/features/accounts/AccountsModal";
 import { RouteModal } from "@/app/RouteModal";
 import { PAGE_HOST_ID } from "@/shared/ui/pageHost";
 import { EditorArea } from "@/features/tabs/EditorArea";
@@ -45,7 +43,7 @@ import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
 
 /** Las rutas cuyas terminales siguen visibles (y vivas) por debajo de la pantalla. */
-const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/missions", "/squads", "/forge"];
+const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/missions", "/squads", "/forge", "/settings"];
 
 function toFrontendTab(row: RestoredTabRow): Tab {
   return {
@@ -92,6 +90,17 @@ export function AppShell() {
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const accountsOpen = useUiStore((s) => s.accountsOpen);
   const setAccountsOpen = useUiStore((s) => s.setAccountsOpen);
+  const setSettingsSection = useUiStore((s) => s.setSettingsSection);
+
+  // Configurações e Contas são a rota `/settings`. Os pedidos de abrir (atalho, paleta, botões)
+  // chegam como flags no store; aqui viram navegação e se apagam.
+  useEffect(() => {
+    if (!settingsOpen && !accountsOpen) return;
+    if (accountsOpen) setSettingsSection("accounts");
+    setSettingsOpen(false);
+    setAccountsOpen(false);
+    navigate("/settings");
+  }, [settingsOpen, accountsOpen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // El árbol del panel izquierdo se DERIVA de las tabs abiertas más lo que git diga de
   // cada `cwd`. No hay tabla nueva: un workspace es una carpeta con agentes adentro.
@@ -287,7 +296,7 @@ export function AppShell() {
               resuelva contra este contenedor en vez de contra la ventana. */}
           <div
             id={VIEW_OVERLAY_ID}
-            className="absolute inset-0 z-20 pointer-events-none"
+            className="absolute inset-0 z-[35] pointer-events-none"
             style={{ transform: "translateZ(0)" }}
           />
         </div>
@@ -308,8 +317,6 @@ export function AppShell() {
 
       <StatusBar repo={activeRepo} />
 
-      {settingsOpen && <SettingsModal onClose={() => setSettingsOpen(false)} />}
-      {accountsOpen && <AccountsModal onClose={() => setAccountsOpen(false)} />}
       <CommandPalette />
     </div>
   );

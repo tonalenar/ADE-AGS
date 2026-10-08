@@ -162,7 +162,7 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
     });
 
     // 1. Clica em 'Aprovar todas' para abrir o diálogo de confirmação
-    const buttons = Array.from(container.querySelectorAll("button"));
+    const buttons = Array.from(document.body.querySelectorAll("button"));
     const approveAll = buttons.find((b) => b.textContent?.includes("memoryInbox.approveAll"));
     expect(approveAll).toBeDefined();
 
@@ -171,11 +171,11 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
     });
 
     // Confirmação aberta
-    const alertDialog = container.querySelector('[role="alertdialog"]');
+    const alertDialog = document.body.querySelector('[role="alertdialog"]');
     expect(alertDialog).not.toBeNull();
 
     // 2. Dispara evento Enter no modal
-    const dialogRoot = container.querySelector('[role="dialog"]');
+    const dialogRoot = document.body.querySelector('[role="dialog"]');
     expect(dialogRoot).not.toBeNull();
 
     await act(async () => {
@@ -203,7 +203,7 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
       root.render(<MemoryInbox workspaceId="w1" onClose={onClose} />);
     });
 
-    const dialogRoot = container.querySelector('[role="dialog"]');
+    const dialogRoot = document.body.querySelector('[role="dialog"]');
     expect(dialogRoot).not.toBeNull();
 
     await act(async () => {
@@ -223,16 +223,16 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
       root.render(<MemoryInbox workspaceId="w1" onClose={onClose} />);
     });
 
-    const buttons = Array.from(container.querySelectorAll("button"));
+    const buttons = Array.from(document.body.querySelectorAll("button"));
     const approveAll = buttons.find((b) => b.textContent?.includes("memoryInbox.approveAll"));
 
     await act(async () => {
       approveAll?.click();
     });
 
-    expect(container.querySelector('[role="alertdialog"]')).not.toBeNull();
+    expect(document.body.querySelector('[role="alertdialog"]')).not.toBeNull();
 
-    const dialogRoot = container.querySelector('[role="dialog"]');
+    const dialogRoot = document.body.querySelector('[role="dialog"]');
     await act(async () => {
       dialogRoot?.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
@@ -240,9 +240,9 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
     });
 
     // Alert dialog foi cancelado/fechado
-    expect(container.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(document.body.querySelector('[role="alertdialog"]')).toBeNull();
     // Inbox principal continua aberto
-    expect(container.querySelector('[role="dialog"]')).not.toBeNull();
+    expect(document.body.querySelector('[role="dialog"]')).not.toBeNull();
     expect(onClose).not.toHaveBeenCalled();
   });
 
@@ -253,7 +253,7 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
       root.render(<MemoryInbox workspaceId="w1" onClose={onClose} />);
     });
 
-    const dialogRoot = container.querySelector('[role="dialog"]');
+    const dialogRoot = document.body.querySelector('[role="dialog"]');
     await act(async () => {
       dialogRoot?.dispatchEvent(
         new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }),
@@ -264,7 +264,7 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
   });
 
   it("aviso de caixa cheia vem das contagens POR DONO do backend (P3)", async () => {
-    const notice = () => container.querySelector('[role="status"]')?.textContent ?? "";
+    const notice = () => document.body.querySelector('[role="status"]')?.textContent ?? "";
     const mount = async () => {
       await act(async () => { root.render(<MemoryInbox workspaceId="w1" onClose={vi.fn()} />); });
       await act(async () => {});
