@@ -14,6 +14,7 @@ import { getAutonomy } from "@/features/missions/autonomy";
 import { recruitCommand } from "./recruitCommand";
 import { respondToCli } from "./ipc";
 import { screenOf } from "@/features/terminal/terminalRegistry";
+import { requestPtyLaunch } from "@/features/terminal/ptyLaunch";
 import { boardKey, boardKeyOfTab, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
 
 /**
@@ -130,12 +131,22 @@ function handleCloseTab(args: Record<string, unknown>): unknown {
   return { tabId, closed: true };
 }
 
-function handlePtyId(args: Record<string, unknown>): unknown {
+const PTY_LAUNCH_WAIT_MS = 8_000;
+
+async function handlePtyId(args: Record<string, unknown>): Promise<unknown> {
   const tabId = str(args, "tabId");
+  if (!tabId) throw new Error("Falta --tab");
   const tab = useTabsStore.getState().tabs.find((t) => t.id === tabId);
   if (!tab) throw new Error(`Esta ventana no tiene ninguna tab con id ${tabId}`);
-  if (tab.ptyId == null) throw new Error(`La tab ${tabId} todavía no tiene un proceso corriendo`);
-  return { ptyId: tab.ptyId };
+  if (tab.ptyId != null) return { ptyId: tab.ptyId };
+  requestPtyLaunch(tabId);
+  const deadline = Date.now() + PTY_LAUNCH_WAIT_MS;
+  while (Date.now() < deadline) {
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const live = useTabsStore.getState().tabs.find((t) => t.id === tabId);
+    if (live?.ptyId != null) return { ptyId: live.ptyId };
+  }
+  throw new Error("aba ainda não lançada");
 }
 
 /**

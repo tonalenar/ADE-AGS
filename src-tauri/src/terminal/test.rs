@@ -106,11 +106,54 @@ fn con_pasos_el_comando_viaja_entero_como_argumento_del_shell() {
         cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
     let last = argv.last().expect("el script va último");
     // En Windows el script viaja en un .cmd (ver `shell_running`): se lee de ahí.
-    let script = if cfg!(windows) && last.ends_with(".cmd") { std::fs::read_to_string(last).unwrap() } else { last.clone() };
+    let script = if cfg!(windows) && last.ends_with(".cmd") {
+        std::fs::read_to_string(last).unwrap()
+    } else {
+        last.clone()
+    };
     let script = script.trim_end();
     assert!(script.contains("nvm use"), "{script}");
     assert!(script.ends_with("claude --resume abc"), "{script}");
     assert!(argv.len() >= 2, "tendría que haber flags de shell antes del script: {argv:?}");
+}
+
+/// `conda activate`, `nvm use`, `set` y `cd` tienen que quedar en el MISMO shell que el
+/// agente. Un proceso por paso perdería el entorno. En Windows eso es un solo `cmd /C`
+/// de un `.cmd`; en Unix, un solo `-c` con `&& exec`.
+#[test]
+fn prelaunch_e_agente_no_mesmo_processo_de_shell() {
+    let steps = [
+        "conda activate base".to_string(),
+        "nvm use".to_string(),
+        "set VAR=1".to_string(),
+        r"cd /d C:\w".to_string(),
+    ];
+    let script = launch_script("claude --resume abc", &steps);
+    for step in &steps {
+        assert!(script.contains(step), "{script}");
+    }
+    assert!(script.contains("claude --resume abc"), "{script}");
+    assert!(!script.contains(';'), "un `;` seguiría aunque un paso fallara: {script}");
+    assert_eq!(script.matches("&&").count(), steps.len(), "un solo script, no un proceso por paso: {script}");
+
+    let cmd = build_launch("claude --resume abc", &steps).unwrap();
+    let argv: Vec<String> = cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    if cfg!(windows) {
+        assert_eq!(argv.len(), 3, "un único cmd /C, no un proceso por paso: {argv:?}");
+        assert!(argv[0].eq_ignore_ascii_case("cmd"), "{argv:?}");
+        assert_eq!(argv[1], "/C");
+        assert!(argv[2].ends_with(".cmd"), "{argv:?}");
+        let body = std::fs::read_to_string(&argv[2]).unwrap();
+        for step in &steps {
+            assert!(body.contains(step), "{body}");
+        }
+        assert!(body.contains("claude --resume abc"), "{body}");
+        assert!(!body.contains("\\\""), "{body}");
+    } else {
+        let last = argv.last().unwrap();
+        assert!(last.contains("conda activate base") && last.contains("claude --resume abc"), "{argv:?}");
+        assert!(argv.iter().any(|arg| arg == "-c"), "el shell recibe el script en un solo -c: {argv:?}");
+    }
 }
 
 /// Las comillas del comando llegan intactas al agente: en Windows el script va en un .cmd y no
@@ -126,6 +169,18 @@ fn con_pasos_las_comillas_del_comando_no_se_escapan() {
     let body = std::fs::read_to_string(last).unwrap();
     assert!(body.contains(command), "{body}");
     assert!(!body.contains("\\\""), "{body}");
+}
+
+#[test]
+fn conpty_windows_pede_create_no_window() {
+    let src = include_str!("win_conpty.rs");
+    assert!(src.contains("CREATE_NO_WINDOW"), "o wrapper tem que passar a flag");
+    assert!(src.contains("EXTENDED_STARTUPINFO_PRESENT"));
+    assert!(src.contains("PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE") || src.contains("0x0002_0016"));
+    let manager = include_str!("pty_manager.rs");
+    assert!(manager.contains("ags-launch"), "o prelaunch do Windows volta a gravar um .cmd");
+    assert!(manager.contains("CommandBuilder::new(\"cmd\")"), "o .cmd sobe num único cmd");
+    assert!(!manager.contains("run_prelaunch_steps"), "passos separados perdem conda/nvm/set/cd");
 }
 
 // ── Recorrido del árbol de procesos (unix) ──────────────────────

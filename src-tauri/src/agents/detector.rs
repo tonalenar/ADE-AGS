@@ -73,7 +73,7 @@ fn probe_agent(adapter: &'static dyn AgentAdapter) -> AgentInfo {
     // no se ejecuta por su nombre a secas. Con tope y sin stdin: una TUI que se pone a
     // esperar algo no puede dejar colgada la lista entera.
     let version = path.as_ref().and_then(|p| {
-        let mut cmd = std::process::Command::new(p);
+        let mut cmd = crate::util::spawn::hidden_command(p);
         cmd.arg(def.version_flag);
         crate::util::output_with_timeout(&mut cmd, VERSION_TIMEOUT)
             .ok()

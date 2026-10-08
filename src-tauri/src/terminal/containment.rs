@@ -288,7 +288,7 @@ pub(crate) mod unix_tree {
     /// `(pid, ppid)` de todos los procesos del sistema. Se usa `ps` y no `/proc` porque
     /// este camino existe sobre todo para macOS, que no tiene `/proc`.
     fn snapshot() -> Vec<(u32, u32)> {
-        let out = match std::process::Command::new("ps").args(["-eo", "pid=,ppid="]).output() {
+        let out = match crate::util::spawn::hidden_command("ps").args(["-eo", "pid=,ppid="]).output() {
             Ok(o) => o,
             Err(_) => return Vec::new(),
         };

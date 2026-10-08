@@ -11,7 +11,6 @@
 //! projeto.
 
 use std::path::Path;
-use std::process::Command;
 use std::time::Duration;
 
 use rusqlite::Connection;
@@ -167,7 +166,7 @@ impl Precheck {
 }
 
 fn git(dir: &Path, args: &[&str]) -> Vec<String> {
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(dir).args(args);
     match crate::util::output_with_timeout(&mut cmd, GIT_TIMEOUT) {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout)

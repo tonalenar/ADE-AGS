@@ -5,9 +5,34 @@ use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
     path::Path,
-    process::{Command, Stdio},
-    time::{Instant, SystemTime, UNIX_EPOCH},
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+
+const GIT_LIMIT: Duration = Duration::from_secs(20);
+
+fn git_raw(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    let mut cmd = crate::util::spawn::hidden_command("git");
+    // O git global desta máquina (e o de quem assina commits) não pode travar o
+    // `ags test`: sem GPG/SSH, sem fsmonitor e sem editor. Os `-c` valem só
+    // para este processo.
+    cmd.args(["-c", "commit.gpgsign=false", "-c", "tag.gpgsign=false", "-c", "core.fsmonitor="])
+        .args(args)
+        .current_dir(root)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never")
+        .env("GIT_EDITOR", "true");
+    crate::util::spawn::output(&mut cmd, GIT_LIMIT).map_err(|e| e.to_string())
+}
+
+/// `AGS_TEST_TIMEOUT_MIN` (minutos). Sem a variável, 30. No estouro o grupo morre.
+fn test_timeout() -> Duration {
+    let minutes = std::env::var("AGS_TEST_TIMEOUT_MIN")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .filter(|minutes| *minutes > 0)
+        .unwrap_or(30);
+    Duration::from_secs(minutes.saturating_mul(60))
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TestCommand {
@@ -54,11 +79,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
-        .args(args)
-        .current_dir(root)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let out = git_raw(root, args)?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().into());
     }
@@ -86,11 +107,7 @@ pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
         vec!["diff", "--name-only", "-z", "--no-renames", "HEAD"],
         vec!["ls-files", "--others", "--exclude-standard", "-z"],
     ] {
-        let out = Command::new("git")
-            .args(&args)
-            .current_dir(root)
-            .output()
-            .map_err(|e| e.to_string())?;
+        let out = git_raw(root, &args)?;
         if !out.status.success() {
             return Err(format!(
                 "Não foi possível obter arquivos afetados (git {}): {}. Confira origin/master; nenhum teste foi pulado.",
@@ -147,11 +164,7 @@ pub fn unsafe_files(root: &Path, changed: &[String]) -> Result<Vec<String>, Stri
 }
 
 fn tracked(root: &Path, file: &str) -> Result<bool, String> {
-    let out = Command::new("git")
-        .args(["ls-files", "--error-unmatch", "--", file])
-        .current_dir(root)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let out = git_raw(root, &["ls-files", "--error-unmatch", "--", file])?;
     Ok(out.status.success())
 }
 
@@ -170,11 +183,7 @@ pub fn clean_tree(root: &Path) -> Result<Option<String>, String> {
 }
 
 fn porcelain_entries(root: &Path) -> Result<Vec<(String, String)>, String> {
-    let out = Command::new("git")
-        .args(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"])
-        .current_dir(root)
-        .output()
-        .map_err(|e| e.to_string())?;
+    let out = git_raw(root, &["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"])?;
     if !out.status.success() {
         return Err(String::from_utf8_lossy(&out.stderr).trim().into());
     }
@@ -202,10 +211,7 @@ fn relevant_dirty(entries: &[(String, String)]) -> bool {
 /// Identity of the repository, shared by linked worktrees. The path is canonical
 /// and uses `/`, so two worktrees do not miss the cache over spelling.
 pub fn repository_key(root: &Path) -> Result<String, String> {
-    let absolute = Command::new("git")
-        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
-        .current_dir(root)
-        .output();
+    let absolute = git_raw(root, &["rev-parse", "--path-format=absolute", "--git-common-dir"]);
     let raw = match absolute {
         Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
         _ => git(root, &["rev-parse", "--git-common-dir"])?,
@@ -377,7 +383,7 @@ pub fn run(
             "{} {:?} (em {})",
             command.program, command.args, command.cwd
         );
-        let mut child = Command::new(&command.program);
+        let mut child = crate::util::spawn::hidden_command(&command.program);
         child
             .args(&command.args)
             .current_dir(root.join(&command.cwd));
@@ -389,16 +395,8 @@ pub fn run(
             child.env("CARGO_TARGET_DIR", target.path);
         }
         // Keep the CLI's JSON stdout usable by tools. Stream test output to stderr
-        // without buffering an entire suite in memory.
-        let outcome = child.stdout(Stdio::piped()).spawn().and_then(|mut child| {
-            let copied = if let Some(mut out) = child.stdout.take() {
-                std::io::copy(&mut out, &mut std::io::stderr()).map(|_| ())
-            } else {
-                Ok(())
-            };
-            let status = child.wait();
-            copied.and(status)
-        });
+        // without buffering an entire suite in memory. O grupo morre se passar do prazo.
+        let outcome = crate::util::spawn::wait_copying_stdout(&mut child, test_timeout());
         record_span(
             conn,
             mission,

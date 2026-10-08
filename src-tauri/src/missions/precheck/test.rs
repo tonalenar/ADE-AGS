@@ -1,3 +1,5 @@
+use std::process::Command;
+
 use super::*;
 
 const OBJECTIVE: &str = "Melhoria pequena no próprio ADE AGS (só frontend): em src/features/missions/MissionsSection.tsx, \

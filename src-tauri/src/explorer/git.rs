@@ -6,7 +6,6 @@
 //! `.gitignore` y su configuración.
 
 use std::collections::HashMap;
-use std::process::Command;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -68,7 +67,7 @@ impl RepoInfo {
 }
 
 fn git(cwd: &str, args: &[&str]) -> Option<String> {
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(cwd).args(args);
     let out = output_with_timeout(&mut cmd, GIT_TIMEOUT).ok()?;
     if !out.status.success() {

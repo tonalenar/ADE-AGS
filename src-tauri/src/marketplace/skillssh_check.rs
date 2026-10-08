@@ -76,7 +76,7 @@ pub(super) fn cli_path() -> OsString {
 pub(super) fn tool(name: &str) -> (Command, Option<PathBuf>) {
     let path = cli_path();
     let found = find_program_in(name, &path);
-    let mut cmd = Command::new(found.clone().map(OsString::from).unwrap_or_else(|| name.into()));
+    let mut cmd = crate::util::spawn::hidden_command(found.clone().map(OsString::from).unwrap_or_else(|| name.into()));
     cmd.env("PATH", &path);
     (cmd, found)
 }

@@ -3,7 +3,7 @@ use serde_json::{Value, json};
 use std::{
     io::Read,
     path::Path,
-    process::{Command, Stdio},
+    process::Stdio,
     time::{Duration, Instant},
 };
 
@@ -34,7 +34,7 @@ fn compare(app: &Value, cli: Option<&Value>) -> bool {
 }
 
 fn read_cli(path: &Path) -> Result<Value, String> {
-    let mut command = Command::new(path);
+    let mut command = crate::util::spawn::hidden_command(path);
     command
         .arg("--version")
         .stdin(Stdio::null())

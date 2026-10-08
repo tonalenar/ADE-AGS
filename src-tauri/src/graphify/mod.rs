@@ -159,14 +159,14 @@ fn shell_command(command: &str) -> std::process::Command {
     // PATH con `~/.local/bin`, que es donde `uv tool install` deja el ejecutable. Mismo
     // criterio que `terminal::pty_manager::shell_running`.
     let shell = std::env::var("SHELL").unwrap_or_else(|_| "/bin/bash".into());
-    let mut cmd = std::process::Command::new(shell);
+    let mut cmd = crate::util::spawn::hidden_command(shell);
     cmd.arg("-l").arg("-c").arg(command);
     cmd
 }
 
 #[cfg(windows)]
 fn shell_command(command: &str) -> std::process::Command {
-    let mut cmd = std::process::Command::new("cmd");
+    let mut cmd = crate::util::spawn::hidden_command("cmd");
     cmd.arg("/C").arg(command);
     cmd
 }
