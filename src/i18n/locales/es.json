@@ -1535,6 +1535,7 @@
   "missions.group.running": "En ejecución",
   "missions.group.draft": "Borradores",
   "missions.group.done": "Concluidas",
+  "missions.group.archived": "Fallidas y canceladas",
   "missions.memoryPending.tooltip": "Memorias pendientes de aprobación",
   "missions.memoryPending.aria": "{{count}} pendiente(s)",
   "missions.memoryNotice.title": "Nueva memoria sugerida",

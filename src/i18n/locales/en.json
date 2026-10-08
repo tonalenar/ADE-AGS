@@ -1535,6 +1535,7 @@
   "missions.group.running": "Running",
   "missions.group.draft": "Drafts",
   "missions.group.done": "Done",
+  "missions.group.archived": "Failed and cancelled",
   "missions.memoryPending.tooltip": "Pending memory approvals",
   "missions.memoryPending.aria": "{{count}} pending",
   "missions.memoryNotice.title": "New memory suggested",

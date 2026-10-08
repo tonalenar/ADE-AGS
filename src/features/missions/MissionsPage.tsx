@@ -72,7 +72,7 @@ const MISSION_GROUPS: { key: GroupKey; labelKey: string }[] = [
   { key: "running", labelKey: "missions.group.running" },
   { key: "draft", labelKey: "missions.group.draft" },
   { key: "done", labelKey: "missions.group.done" },
-  { key: "archived", labelKey: "missions.sidebar.archived" },
+  { key: "archived", labelKey: "missions.group.archived" },
 ];
 function groupOf(phase: MissionPhase): GroupKey {
   if (phase === "running" || phase === "waiting_approval") return "running";
