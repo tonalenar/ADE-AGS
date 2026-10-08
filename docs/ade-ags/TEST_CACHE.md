@@ -54,4 +54,14 @@ comandos já verdes. Os tempos reais de referência são consolidados em
 
 ## Por que o cache não acertava nas missões
 
-Na Etapa 24 o contador skippedCache ficou em 0: os agentes rodavam gs test affected com a árvore suja (resultado com clean: false, sem 	reeHash, nunca reaproveitável), cada worktree tinha uma árvore diferente e o mesmo teste aparecia com argv diferente (--bin ags, --lib --bin ags, filtros de módulo). Regra nos briefings e na skill gs-orchestrator 1.30.0: commitar antes de testar (mesmo provisório) e repetir sempre o mesmo comando, para o Orquestrador e o QA reaproveitarem o verde na mesma árvore.
+Na Etapa 24 o contador skippedCache ficou em 0: os agentes rodavam `ags test affected` com a árvore suja (resultado com clean: false, sem treeHash, nunca reaproveitável), cada worktree tinha uma árvore diferente e o mesmo teste aparecia com argv diferente (`--bin ags`, `--lib --bin ags`, filtros de módulo).
+
+A onda 1 faz o verde da mesma árvore e do mesmo comando valer em outro worktree:
+
+- arquivo não rastreado de skill (`.agents/`, `.claude/`, `.gemini/`, `.codex/`, `.kimi/`, `.opencode/`, `.cursor/skills/`) não suja o cache e não dispara a suíte completa; esses diretórios também estão no `.gitignore` (`.cursor/skills` não, porque `.cursor/` pode ter regras do projeto);
+- barras, grafia do `cwd` e a ordem dos filtros do Cargo ou dos arquivos do `vitest related` compartilham a mesma chave;
+- a chave do repositório é o git comum, não o caminho do worktree.
+
+O QA roda `ags test affected` no mesmo commit. `já verde neste hash` significa que a suíte não rodou de novo. A suíte completa (ou o CI) continua uma vez na integração. Arquivo de produto sem mapa, schema, COM e `unsafe` adicionado no diff continuam pedindo a suíte Rust completa. `unsafe` que já estava no arquivo e não entrou numa linha nova não pede.
+
+A base do diff afetado continua `origin/master`, não a última árvore verificada. Uma base deslizante pode pular um arquivo que só ficou verde em outro worktree ou que mudou de novo depois do registro. Isso fica para a próxima onda.

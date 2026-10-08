@@ -111,6 +111,26 @@ fn normalize(path: &str) -> String {
     p.strip_prefix("./").unwrap_or(&p).to_string()
 }
 
+/// Skill mounts and other agent metadata. They are not product code. An untracked
+/// file here must not dirty the test cache and must not flip the plan to the full suite.
+pub fn is_agent_metadata(path: &str) -> bool {
+    let path = normalize(path);
+    let path = path.strip_suffix('/').unwrap_or(&path);
+    const ROOTS: &[&str] = &[".agents", ".claude", ".gemini", ".codex", ".kimi", ".opencode"];
+    ROOTS.iter().any(|root| path == *root || path.starts_with(&format!("{root}/")))
+        || path == ".cursor/skills"
+        || path.starts_with(".cursor/skills/")
+}
+
+/// A source line that introduces `unsafe` (comments do not count).
+pub fn line_adds_unsafe(added: &str) -> bool {
+    let code = added.trim_start();
+    if code.starts_with("//") {
+        return false;
+    }
+    code.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|word| word == "unsafe")
+}
+
 /// Motivo de risco de um caminho, se houver. Pura.
 fn risk_reason(path: &str) -> Option<String> {
     if path.starts_with("src-tauri/src/database/") {
@@ -137,9 +157,7 @@ pub fn files_adding_unsafe(diff: &str) -> Vec<String> {
         } else if line.starts_with("+++ ") {
             current = None;
         } else if let (Some(file), Some(added)) = (&current, line.strip_prefix('+')) {
-            let code = added.trim_start();
-            let has_unsafe = code.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|w| w == "unsafe");
-            if !code.starts_with("//") && has_unsafe && file.ends_with(".rs") {
+            if line_adds_unsafe(added) && file.ends_with(".rs") && !is_agent_metadata(file) {
                 found.insert(file.clone());
             }
         }
@@ -148,6 +166,9 @@ pub fn files_adding_unsafe(diff: &str) -> Vec<String> {
 }
 
 fn classify(path: &str) -> Kind {
+    if is_agent_metadata(path) {
+        return Kind::Ignored;
+    }
     let ext = path.rsplit('.').next().unwrap_or("");
     if let Some(rest) = path.strip_prefix("src-tauri/src/") {
         if rest.starts_with("bin/") || rest == "cli_test.rs" {

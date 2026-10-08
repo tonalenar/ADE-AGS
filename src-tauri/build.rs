@@ -11,6 +11,9 @@ fn main() {
     }
 }
 
+#[path = "src/build_fingerprint.rs"]
+mod build_fingerprint;
+
 fn build_identity() {
     use std::process::Command;
     fn git(args: &[&str]) -> Option<String> {
@@ -20,6 +23,8 @@ fn build_identity() {
             .success()
             .then(|| String::from_utf8_lossy(&output.stdout).trim().to_string())
     }
+    // Captured only when the fingerprint paths change. Not wired to git refs:
+    // those are shared by every worktree and would cold-rebuild the agent target.
     let hash = git(&["rev-parse", "HEAD"]).unwrap_or_else(|| "unknown".into());
     let date = std::env::var("SOURCE_DATE_EPOCH").unwrap_or_else(|_| {
         std::time::SystemTime::now()
@@ -29,13 +34,7 @@ fn build_identity() {
             .to_string()
     });
     println!("cargo:rerun-if-env-changed=SOURCE_DATE_EPOCH");
-    // Cargo tracks the source tree and git pointer, including linked worktrees.
-    println!("cargo:rerun-if-changed=src");
-    println!("cargo:rerun-if-changed=../.git");
-    if let Some(path) = git(&["rev-parse", "--git-path", "HEAD"]) {
-        println!("cargo:rerun-if-changed={path}");
-    }
-    if let Some(path) = git(&["rev-parse", "--git-path", "refs"]) {
+    for path in build_fingerprint::RERUN_PATHS {
         println!("cargo:rerun-if-changed={path}");
     }
     println!("cargo:rustc-env=ADE_BUILD_HASH={hash}");

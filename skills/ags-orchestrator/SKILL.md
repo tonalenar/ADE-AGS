@@ -450,12 +450,13 @@ When orchestrating a team with a QA agent, follow the continuous validation mode
      ```bash
      ags peer tell "QA / Tests" "Entrega de <membro>: branch <branch>, arquivos alterados: <arquivos>"
      ```
-   - QA validates each delivery incrementally with `ags test affected` without waiting for the entire mission to wrap up.
+   - QA checks each delivery with `ags test affected` on the same commit, without waiting for the mission to wrap up.
+   - If the command answers `já verde neste hash`, the cache hit and QA does **not** re-run cargo, vitest, tsc, or the suite. QA re-runs only when the cache misses or the result fails.
    - Final validation before mission delivery is **ONE single full run** of the integrated suite (or delegated to the CI via `gh pr checks <n> --watch`).
 
 2. **No Recurrent Local Full Suite (Point 3):**
    - Agents **DO NOT** repeat the full test suite locally on routine iterations. Use `ags test affected` (which selectively runs only changed vitest/babel/rust components).
-   - **Commit before testing.** Run `ags test affected` with a clean Git tree (a local commit is enough, even a provisional one). A result obtained with modified or untracked files is never cached, so the Orchestrator and QA have to repeat the run. Always use the same command, without varying flags or file lists, so that the same tree reuses the green result (`já verde neste hash`).
+   - **Commit product code before testing.** Run `ags test affected` on a clean product tree (a local commit is enough, even a provisional one). The green result is reused for the same `HEAD^{tree}` and the same command, including from another worktree (`já verde neste hash`). Untracked skill files under `.agents/`, `.claude/`, and the other agent metadata directories do not dirty that cache. Modified or untracked product files still do. Do not vary flags in a way that selects a different suite; equivalent spellings of the same command share a key.
    - When opening a Pull Request, agents wait for CI to validate using GitHub CLI watch mode:
      ```bash
      gh pr checks <n> --watch

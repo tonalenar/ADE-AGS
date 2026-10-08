@@ -68,6 +68,11 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
 /// Committed changes since the merge base plus tracked and untracked local edits.
 /// NUL delimiters preserve paths containing spaces/newlines; deleted paths remain
 /// in the plan, so deleting a module cannot silently remove its validation.
+///
+/// The base stays `origin/master`, not the last green tree. A sliding base can
+/// skip a file that was verified only in another worktree, or that changed again
+/// after that green result. Reuse in this wave is the same `HEAD^{tree}` and the
+/// same normalized command, from any worktree of the repository.
 pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
     let mut files = std::collections::BTreeSet::new();
     for args in [
@@ -100,7 +105,7 @@ pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
                 )?);
         }
     }
-    Ok(files.into_iter().collect())
+    Ok(files.into_iter().filter(|path| !super::affected::is_agent_metadata(path)).collect())
 }
 
 pub fn unsafe_files(root: &Path, changed: &[String]) -> Result<Vec<String>, String> {
@@ -120,67 +125,146 @@ pub fn unsafe_files(root: &Path, changed: &[String]) -> Result<Vec<String>, Stri
         )?;
         files.extend(super::affected::files_adding_unsafe(&diff));
     }
-    // Untracked files are absent from diff. Conservatively require the full Rust
-    // suite for any changed Rust file containing unsafe, including existing code.
-    // This also covers Git's quoted patch paths and removals of unsafe code.
-    let token = regex::Regex::new(r"\bunsafe\b").expect("constant regex");
-    for file in changed.iter().filter(|f| f.ends_with(".rs")) {
+    // Tracked files are judged only by added diff lines. Untracked files have no
+    // hunk, so every line is new. A file we cannot read stays risky: the full
+    // suite still runs.
+    for file in changed.iter().filter(|file| file.ends_with(".rs") && !super::affected::is_agent_metadata(file)) {
+        if files.contains(file) || tracked(root, file)? {
+            continue;
+        }
         match std::fs::read_to_string(root.join(file)) {
-            Ok(source) if token.is_match(&source) => {
+            Ok(source) if source.lines().any(super::affected::line_adds_unsafe) => {
                 files.insert(file.clone());
             }
             Ok(_) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            Err(_) => {
                 files.insert(file.clone());
-            }
-            Err(error) => {
-                return Err(format!(
-                    "Não foi possível verificar risco em {file}: {error}"
-                ));
             }
         }
     }
+    files.retain(|file| !super::affected::is_agent_metadata(file));
     Ok(files.into_iter().collect())
 }
 
-/// Untracked and staged changes count as dirty. No index writes, so another agent's
-/// staging area is never changed by a test command.
+fn tracked(root: &Path, file: &str) -> Result<bool, String> {
+    let out = Command::new("git")
+        .args(["ls-files", "--error-unmatch", "--", file])
+        .current_dir(root)
+        .output()
+        .map_err(|e| e.to_string())?;
+    Ok(out.status.success())
+}
+
+/// Product changes count as dirty. Untracked skill mounts do not: they are not
+/// in `HEAD^{tree}` and must not force every worktree to miss the cache.
+/// No index writes, so another agent's staging area is never changed.
 pub fn clean_tree(root: &Path) -> Result<Option<String>, String> {
-    if !git(
-        root,
-        &[
-            "status",
-            "--porcelain",
-            "--untracked-files=all",
-            "--ignore-submodules=none",
-        ],
-    )?
-    .is_empty()
-    {
+    if relevant_dirty(&porcelain_entries(root)?) {
         return Ok(None);
     }
     let tree = git(root, &["rev-parse", "HEAD^{tree}"])?;
-    if !git(
-        root,
-        &[
-            "status",
-            "--porcelain",
-            "--untracked-files=all",
-            "--ignore-submodules=none",
-        ],
-    )?
-    .is_empty()
-        || git(root, &["rev-parse", "HEAD^{tree}"])? != tree
-    {
+    if relevant_dirty(&porcelain_entries(root)?) || git(root, &["rev-parse", "HEAD^{tree}"])? != tree {
         return Ok(None);
     }
     Ok(Some(tree))
 }
 
+fn porcelain_entries(root: &Path) -> Result<Vec<(String, String)>, String> {
+    let out = Command::new("git")
+        .args(["status", "--porcelain=v1", "-z", "--untracked-files=all", "--ignore-submodules=none"])
+        .current_dir(root)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(String::from_utf8_lossy(&out.stderr).trim().into());
+    }
+    let mut parts = out.stdout.split(|byte| *byte == 0).filter(|part| !part.is_empty());
+    let mut entries = Vec::new();
+    while let Some(entry) = parts.next() {
+        if entry.len() < 4 {
+            entries.push(("XX".into(), String::new()));
+            continue;
+        }
+        let xy = String::from_utf8_lossy(&entry[..2]).into_owned();
+        let path = String::from_utf8_lossy(&entry[3..]).into_owned();
+        if xy.starts_with('R') || xy.starts_with('C') {
+            parts.next();
+        }
+        entries.push((xy, path));
+    }
+    Ok(entries)
+}
+
+fn relevant_dirty(entries: &[(String, String)]) -> bool {
+    entries.iter().any(|(xy, path)| !(xy == "??" && super::affected::is_agent_metadata(path)))
+}
+
+/// Identity of the repository, shared by linked worktrees. The path is canonical
+/// and uses `/`, so two worktrees do not miss the cache over spelling.
+pub fn repository_key(root: &Path) -> Result<String, String> {
+    let absolute = Command::new("git")
+        .args(["rev-parse", "--path-format=absolute", "--git-common-dir"])
+        .current_dir(root)
+        .output();
+    let raw = match absolute {
+        Ok(out) if out.status.success() => String::from_utf8_lossy(&out.stdout).trim().to_string(),
+        _ => git(root, &["rev-parse", "--git-common-dir"])?,
+    };
+    let path = Path::new(&raw);
+    let joined = if path.is_absolute() { path.to_path_buf() } else { root.join(path) };
+    let canon = dunce::canonicalize(&joined).map_err(|e| e.to_string())?;
+    Ok(canon.to_string_lossy().replace('\\', "/"))
+}
+
+fn normalize_rel(path: &str) -> String {
+    let mut path = path.trim().replace('\\', "/");
+    while let Some(rest) = path.strip_prefix("./") {
+        path = rest.to_string();
+    }
+    while path.ends_with('/') {
+        path.pop();
+    }
+    if path.is_empty() { ".".into() } else { path }
+}
+
+/// Same argv, same key: slash spelling, `cwd` spelling, and the order of cargo
+/// filters or vitest `related` files do not change what runs.
+pub fn normalize_command(command: &TestCommand) -> TestCommand {
+    let mut args: Vec<String> = command
+        .args
+        .iter()
+        .map(|arg| {
+            let slash = arg.trim().replace('\\', "/");
+            if slash.starts_with('-') { slash } else { normalize_rel(&slash) }
+        })
+        .collect();
+    if command.program.trim() == "cargo"
+        && let Some(split) = args.iter().position(|arg| arg == "--")
+    {
+        let mut filters = args.split_off(split + 1);
+        filters.sort();
+        args.append(&mut filters);
+    }
+    if args.iter().any(|arg| arg == "related")
+        && let Some(split) = args.iter().position(|arg| arg == "--run")
+    {
+        let mut files = args.split_off(split + 1);
+        files.sort();
+        args.append(&mut files);
+    }
+    TestCommand {
+        suite: command.suite.trim().to_string(),
+        program: command.program.trim().to_string(),
+        args,
+        cwd: normalize_rel(&command.cwd),
+    }
+}
+
 pub fn command_key(commands: &[TestCommand]) -> String {
+    let normalized: Vec<TestCommand> = commands.iter().map(normalize_command).collect();
     format!(
         "{:x}",
-        Sha256::digest(serde_json::to_vec(commands).expect("serializable commands"))
+        Sha256::digest(serde_json::to_vec(&normalized).expect("serializable commands"))
     )
 }
 
@@ -253,11 +337,7 @@ pub fn run(
     if commands.is_empty() {
         return Err("Plano de testes vazio; nenhum resultado verde foi registrado.".into());
     }
-    let repo = git(root, &["rev-parse", "--git-common-dir"])?;
-    let repo = dunce::canonicalize(root.join(repo))
-        .map_err(|e| e.to_string())?
-        .to_string_lossy()
-        .into_owned();
+    let repo = repository_key(root)?;
     let tree = clean_tree(root)?;
     let key = command_key(commands);
     if !force {
@@ -362,11 +442,7 @@ pub fn run(
 }
 
 pub fn status(conn: &Connection, root: &Path) -> Result<serde_json::Value, String> {
-    let repo = git(root, &["rev-parse", "--git-common-dir"])?;
-    let repo = dunce::canonicalize(root.join(repo))
-        .map_err(|e| e.to_string())?
-        .to_string_lossy()
-        .into_owned();
+    let repo = repository_key(root)?;
     let mut stmt = conn.prepare("SELECT tree_hash,suite,commands,duration_ms,passed,clean,finished_at FROM test_results WHERE repository=?1 ORDER BY id DESC LIMIT 50").map_err(|e| e.to_string())?;
     let rows = stmt.query_map([repo], |r| Ok(serde_json::json!({"treeHash":r.get::<_,Option<String>>(0)?,"suite":r.get::<_,String>(1)?,"commands":r.get::<_,String>(2)?,"durationMs":r.get::<_,i64>(3)?,"passed":r.get::<_,bool>(4)?,"clean":r.get::<_,bool>(5)?,"finishedAt":r.get::<_,i64>(6)?}))).map_err(|e| e.to_string())?;
     Ok(serde_json::json!(
@@ -384,6 +460,7 @@ mod tests {
         git(&root, &["init"]).unwrap();
         git(&root, &["config", "user.name", "Test"]).unwrap();
         git(&root, &["config", "user.email", "test@example.invalid"]).unwrap();
+        git(&root, &["config", "core.autocrlf", "false"]).unwrap();
         std::fs::write(root.join("tracked"), "one").unwrap();
         git(&root, &["add", "tracked"]).unwrap();
         git(&root, &["commit", "-m", "initial"]).unwrap();
@@ -494,5 +571,100 @@ mod tests {
             cached_green(&conn, "r", Some("t"), "rust", "k").unwrap(),
             None
         );
+    }
+    #[test]
+    fn normalized_command_key_ignores_spelling_and_filter_order() {
+        let rust_a = TestCommand {
+            suite: "rust".into(),
+            program: "cargo".into(),
+            args: vec!["test".into(), "--lib".into(), "--".into(), "missions::".into(), "floors::".into()],
+            cwd: "src-tauri/".into(),
+        };
+        let rust_b = TestCommand {
+            suite: "rust".into(),
+            program: " cargo ".into(),
+            args: vec!["test".into(), "--lib".into(), "--".into(), "floors::".into(), "missions::".into()],
+            cwd: "./src-tauri".into(),
+        };
+        assert_eq!(command_key(std::slice::from_ref(&rust_a)), command_key(std::slice::from_ref(&rust_b)));
+        let front_a = TestCommand {
+            suite: "frontend".into(),
+            program: "node".into(),
+            args: vec!["node_modules/vitest/vitest.mjs".into(), "related".into(), "--run".into(), r"src\b.ts".into(), "src/a.ts".into()],
+            cwd: "./".into(),
+        };
+        let front_b = TestCommand {
+            suite: "frontend".into(),
+            program: "node".into(),
+            args: vec!["node_modules/vitest/vitest.mjs".into(), "related".into(), "--run".into(), "src/a.ts".into(), "src/b.ts".into()],
+            cwd: ".".into(),
+        };
+        assert_eq!(command_key(std::slice::from_ref(&front_a)), command_key(std::slice::from_ref(&front_b)));
+        let mut different = rust_a.clone();
+        different.args.push("other::".into());
+        assert_ne!(command_key(std::slice::from_ref(&rust_a)), command_key(std::slice::from_ref(&different)));
+    }
+    #[test]
+    fn agent_metadata_does_not_dirty_the_tree_or_enter_the_plan() {
+        let root = repository();
+        git(&root, &["update-ref", "refs/remotes/origin/master", "HEAD"]).unwrap();
+        let clean = clean_tree(&root).unwrap().unwrap();
+        std::fs::create_dir_all(root.join(".agents/skills/demo")).unwrap();
+        std::fs::write(root.join(".agents/skills/demo/SKILL.md"), "# skill\n").unwrap();
+        std::fs::create_dir_all(root.join(".claude/skills/demo")).unwrap();
+        std::fs::write(root.join(".claude/skills/demo/SKILL.md"), "# skill\n").unwrap();
+        assert_eq!(clean_tree(&root).unwrap().as_deref(), Some(clean.as_str()));
+        assert!(changed_files(&root).unwrap().is_empty());
+        std::fs::write(root.join("product.ts"), "export {}\n").unwrap();
+        let changed = changed_files(&root).unwrap();
+        assert_eq!(changed, vec!["product.ts"]);
+        assert!(clean_tree(&root).unwrap().is_none());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn existing_unsafe_outside_the_diff_does_not_force_the_full_suite() {
+        let root = repository();
+        std::fs::create_dir_all(root.join("src-tauri/src")).unwrap();
+        std::fs::write(root.join("src-tauri/src/floors.rs"), "fn a() {}\nunsafe { 1 }\n").unwrap();
+        git(&root, &["add", "src-tauri/src/floors.rs"]).unwrap();
+        git(&root, &["commit", "-m", "base"]).unwrap();
+        git(&root, &["update-ref", "refs/remotes/origin/master", "HEAD"]).unwrap();
+        std::fs::write(root.join("src-tauri/src/floors.rs"), "fn a() { let _ = 1; }\nunsafe { 1 }\n").unwrap();
+        let changed = changed_files(&root).unwrap();
+        assert!(unsafe_files(&root, &changed).unwrap().is_empty(), "unsafe já presente não é linha nova");
+        std::fs::write(root.join("src-tauri/src/floors.rs"), "fn a() { let _ = 1; }\nunsafe { 1 }\nunsafe { 2 }\n").unwrap();
+        let flagged = unsafe_files(&root, &changed_files(&root).unwrap()).unwrap();
+        assert!(flagged.iter().any(|file| file.ends_with("floors.rs")), "{flagged:?}");
+        std::fs::write(root.join("src-tauri/src/plain.rs"), "fn ok() {}\n").unwrap();
+        std::fs::write(root.join("src-tauri/src/fresh.rs"), "unsafe { 3 }\n").unwrap();
+        let flagged = unsafe_files(&root, &changed_files(&root).unwrap()).unwrap();
+        assert!(flagged.iter().any(|file| file.ends_with("fresh.rs")), "{flagged:?}");
+        assert!(!flagged.iter().any(|file| file.ends_with("plain.rs")), "{flagged:?}");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+    #[test]
+    fn same_tree_hits_across_worktrees_when_only_skills_differ() {
+        let root = repository();
+        let wt = std::env::temp_dir().join(format!("ags-test-wt-{}", uuid::Uuid::new_v4()));
+        let wt_arg = wt.to_string_lossy().into_owned();
+        git(&root, &["worktree", "add", "--detach", &wt_arg, "HEAD"]).unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let commands = vec![TestCommand {
+            suite: "probe".into(),
+            program: "git".into(),
+            args: vec!["--version".into()],
+            cwd: ".".into(),
+        }];
+        assert_eq!(repository_key(&root).unwrap(), repository_key(&wt).unwrap());
+        assert!(!run(&conn, &root, "probe", &commands, false, None, "").unwrap().cache_hit);
+        std::fs::create_dir_all(wt.join(".agents/skills/demo")).unwrap();
+        std::fs::write(wt.join(".agents/skills/demo/SKILL.md"), "# skill\n").unwrap();
+        let again = run(&conn, &wt, "probe", &commands, false, None, "").unwrap();
+        assert!(again.cache_hit, "{}", again.message);
+        assert!(again.message.contains("já verde neste hash"));
+        let _ = git(&root, &["worktree", "remove", "--force", &wt_arg]);
+        let _ = std::fs::remove_dir_all(&wt);
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
