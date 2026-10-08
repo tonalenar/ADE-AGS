@@ -242,7 +242,8 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
             );
           })}
         </div>,
-        document.body,
+        // Dentro de um <dialog> modal tudo o que está fora dele fica inerte: o menu vai para dentro dele.
+        buttonRef.current?.closest("dialog") ?? document.body,
       )}
     </span>
   );

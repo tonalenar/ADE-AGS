@@ -10,10 +10,10 @@
 
 name: ci
 
+# Só em PR: o merge já passou pelos mesmos testes, rodar de novo no push para master era tempo perdido.
 on:
   pull_request:
-  push:
-    branches: [master]
+    paths-ignore: ['**.md', 'docs/**']
 
 concurrency:
   group: ci-${{ github.ref }}
@@ -22,6 +22,8 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-22.04
+    # Um run normal leva ~4 min; passar de 15 é job travado, não lento.
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
