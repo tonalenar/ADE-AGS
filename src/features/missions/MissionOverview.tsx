@@ -129,21 +129,27 @@ function useMembers(mission: Mission, tasks: Task[], squad: Squad | null, blocke
       });
     }
     if (squad) {
+      const [status, tone]: [string, Tone] =
+        mission.status === "done" || mission.status === "done_without_delivery" ? [t("missions.state.done"), "done"]
+        : mission.status === "failed" ? [t("missions.state.failed"), "bad"]
+        : mission.status === "cancelled" ? [t("missions.state.stopped"), "idle"]
+        : mission.status === "running" ? [t("missions.team.idle"), "idle"]
+        : [t("missions.team.notStarted"), "idle"];
       return [
-        { key: "lead", name: t("missions.team.orchestrator"), sub: [agentName(squad.lead.agentId), squad.lead.model].filter(Boolean).join(" · "), agentId: squad.lead.agentId, status: t("missions.team.notStarted"), tone: "idle" as Tone, lead: true },
+        { key: "lead", name: t("missions.team.orchestrator"), sub: [agentName(squad.lead.agentId), squad.lead.model].filter(Boolean).join(" · "), agentId: squad.lead.agentId, status, tone, lead: true },
         ...squad.members.map((m): Member => ({
           key: m.roleId,
           name: t(`squads.roleNames.${m.roleId}`, { defaultValue: m.roleId }),
           sub: [agentName(m.agentId), m.model].filter(Boolean).join(" · "),
           agentId: m.agentId,
-          status: t("missions.team.notStarted"),
-          tone: "idle",
+          status,
+          tone,
           lead: false,
         })),
       ];
     }
     return [];
-  }, [mine, board, tasks, squad, blocked, tick, t]);
+  }, [mine, board, tasks, squad, blocked, tick, t, mission.status]);
 }
 
 export function MissionTeamCard({ mission, tasks, squad, blocked }: {
@@ -194,11 +200,11 @@ function Metric({ label, value, small, sub, extra, className = "" }: {
   return (
     <div className={`min-w-0 px-[18px] py-4 ${className}`}>
       <div className="text-[11.5px] leading-[14px] text-gray-500 dark:text-white/60">{label}</div>
-      <div className="mt-2 truncate font-mono text-[26px] leading-[30px] font-semibold tracking-[-0.4px] tabular-nums text-gray-900 dark:text-[#f5f5f7]">
+      <div className={`mt-2 font-mono font-semibold tracking-[-0.4px] tabular-nums text-gray-900 dark:text-[#f5f5f7] whitespace-nowrap ${typeof value === "string" && value.length > 9 ? "text-[20px] leading-[30px]" : "text-[26px] leading-[30px]"}`}>
         {value}
         {small && <small className="ml-1 font-sans text-[13px] font-medium tracking-normal text-gray-500 dark:text-white/60">{small}</small>}
       </div>
-      <div className="mt-1.5 flex items-center truncate text-[11.5px] leading-[14px] tabular-nums text-gray-400 dark:text-white/35">
+      <div className="mt-1.5 flex items-center text-[11.5px] leading-[14px] tabular-nums text-gray-400 dark:text-white/35">
         {sub}{extra}
       </div>
     </div>

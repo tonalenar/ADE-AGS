@@ -69,9 +69,9 @@ const STATUS_TONE: Record<MissionPhase, string> = {
 /** Grupos da lista (só apresentação): cada um com o rótulo de status que já existe no i18n. */
 type GroupKey = "running" | "draft" | "done" | "archived";
 const MISSION_GROUPS: { key: GroupKey; labelKey: string }[] = [
-  { key: "running", labelKey: "missions.status.running" },
-  { key: "draft", labelKey: "missions.status.draft" },
-  { key: "done", labelKey: "missions.status.done" },
+  { key: "running", labelKey: "missions.group.running" },
+  { key: "draft", labelKey: "missions.group.draft" },
+  { key: "done", labelKey: "missions.group.done" },
   { key: "archived", labelKey: "missions.sidebar.archived" },
 ];
 function groupOf(phase: MissionPhase): GroupKey {
@@ -516,7 +516,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
   ] as ({ key: string; node: React.ReactNode } | null)[]).filter((item): item is { key: string; node: React.ReactNode } => item !== null);
 
   return (
-    <div className="flex flex-col gap-5 px-8 py-6">
+    <div className="@container flex flex-col gap-5 px-8 py-6">
       <div className="flex items-start gap-6">
         <div className="flex-1 min-w-0">
           <div className="text-[11px] leading-[14px] uppercase tracking-[0.06em] text-gray-500 dark:text-white/60">
@@ -591,7 +591,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
 
       <MissionObjective key={mission.id} objective={mission.objective} title={t("missions.detail.objective")} />
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-2">
+      <div className="grid grid-cols-1 gap-5 @4xl:grid-cols-2">
         <MissionTeamCard mission={mission} tasks={tasks} squad={squad} blocked={blockedTasks} />
         <MissionMetricsCard summary={summary} mission={mission} delivery={detail.delivery} />
       </div>

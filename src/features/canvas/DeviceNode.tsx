@@ -7,7 +7,7 @@ import { CordPort } from "./cords";
 import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
 
 import { PHONE_MIN, type CanvasPortal } from "./board";
-import { HEADER_H } from "./geometry";
+import { NOTE_HEADER_H } from "./geometry";
 import { canvasActions, useActiveBoardKey } from "./store";
 
 interface AndroidDevice {
@@ -214,7 +214,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
       <div
         className="ade-node-drag flex items-center gap-2 pl-3 pr-1.5 shrink-0 cursor-grab active:cursor-grabbing
           border-b border-emerald-200 dark:border-emerald-100/10 bg-emerald-50 dark:bg-emerald-100/5"
-        style={{ height: HEADER_H }}
+        style={{ height: NOTE_HEADER_H }}
       >
         <PhoneIcon className="w-3.5 h-3.5 shrink-0 text-emerald-600 dark:text-emerald-300/80" />
         <input

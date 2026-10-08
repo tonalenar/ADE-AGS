@@ -10,7 +10,6 @@ import {
 import { invoke } from "@tauri-apps/api/core";
 import { AlertaToast, Button, CloseIcon, useTheme } from "neogestify-ui-components";
 
-import { agentIcon } from "@/features/agents/agentIcons";
 import { useTabsStore } from "@/features/tabs/store";
 import { openNewAgentWizard } from "@/features/tabs/tabActions";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -28,13 +27,15 @@ import { DeviceNode } from "./DeviceNode";
 import { FolderNode, baseName, type FolderFlowNode } from "./FolderNode";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
-  HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, safeViewport, terminalRect,
+  HEADER_H, NOTE_HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, safeViewport, terminalRect,
   type Box, type Rect, type Viewport,
 } from "./geometry";
 import { CanvasDock, type DockPanel } from "./CanvasDock";
 import { useUiStore } from "@/app/uiStore";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ChatPanel } from "./ChatPanel";
+import { agentTile } from "@/features/agents/agentTile";
+import { activeTabIds } from "@/features/terminal/activity";
 import { CORD_MAGNET, CordConnectionLine, CordEdge, CordPort, cordColor, flashNode } from "./cords";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { DesignPanel } from "./design/DesignPanel";
@@ -693,7 +694,6 @@ function CanvasInner() {
 const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const { t } = useTranslation();
   const { tab, box, live, links, orchestrator, role, onFocus, onToggleOrchestrator } = data;
-  const Icon = agentIcon(tab.agentId, tab.agentId);
   const handle = "ade-port z-10! w-3.5! h-3.5! border-[3px]! border-white! dark:border-surface! bg-gray-400! dark:bg-gray-200!";
 
   return (
@@ -713,40 +713,37 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
 
       <div
-        className={`group h-full w-full flex flex-col rounded-xl overflow-hidden
+        className={`group h-full w-full flex flex-col rounded-[14px] overflow-hidden
           bg-white dark:bg-surface
           ${selected
-            ? "shadow-[0_0_0_1.5px_var(--color-accent-500),0_12px_32px_rgba(0,0,0,0.35)]"
+            ? "shadow-[0_0_0_1.5px_var(--color-accent-500),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]"
             : orchestrator
-              ? "shadow-[0_0_0_1px_color-mix(in_oklab,var(--color-glow)_55%,transparent),0_12px_32px_rgba(0,0,0,0.35)]"
-              : "shadow-[0_0_0_0.5px_rgba(0,0,0,0.14),0_8px_24px_rgba(0,0,0,0.12)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.07),0_12px_32px_rgba(0,0,0,0.45)]"}`}
+              ? "shadow-[0_0_0_1px_color-mix(in_oklab,var(--color-glow)_55%,transparent),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]"
+              : "shadow-[0_0_0_0.5px_rgba(0,0,0,0.14),0_8px_24px_rgba(0,0,0,0.12)] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]"}`}
       >
         <div
-          className="ade-node-drag flex items-center gap-2 px-3.5 shrink-0 cursor-grab active:cursor-grabbing select-none
-            border-b border-black/[0.06] dark:border-white/[0.07] bg-gray-50/80 dark:bg-surface"
+          className="ade-node-drag flex items-center gap-2.5 pl-4 pr-3 shrink-0 cursor-grab active:cursor-grabbing select-none
+            border-b border-black/[0.06] dark:border-[rgba(84,84,88,0.55)] bg-white dark:bg-surface"
           style={{ height: HEADER_H }}
           onDoubleClick={() => onFocus(tab.id)}
           title={t("canvas.focusHint")}
         >
-          <Icon className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
-          {/* "Codex — C:\…\ADE-AGS": o nome em destaque, o caminho em mono e apagado (como na prancheta). */}
-          <span className="shrink-0 max-w-[45%] truncate text-[13px] font-semibold tracking-[-0.01em] text-gray-900 dark:text-gray-50">{tab.title.split(" — ")[0]}</span>
-          {tab.title.includes(" — ")
-            ? <span className="min-w-0 truncate font-mono text-[11px] text-gray-400 dark:text-gray-500" title={tab.title}>{tab.title.split(" — ").slice(1).join(" — ")}</span>
-            : <span className="truncate text-[11.5px] text-gray-400 dark:text-gray-500">{tab.agentLabel}</span>}
-          {role && (
-            <span className="shrink-0 max-w-28 truncate text-[10px] font-semibold uppercase tracking-[0.05em] px-2 py-0.5 rounded-full
-              text-violet-700 dark:text-violet-300 bg-violet-500/15" title={t("canvas.role", { role })}>
-              {role}
+          <NodeStatus tabId={tab.id} />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <span className="truncate text-[15px] leading-5 font-semibold tracking-[-0.1px] text-gray-900 dark:text-[#f5f5f7]">{tab.title.split(" — ")[0]}</span>
+            <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-[14px] text-gray-500 dark:text-white/60" title={tab.title}>
+              <span aria-hidden className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: agentTile(tab.agentId) }} />
+              <span className="shrink-0">{tab.agentLabel}</span>
+              {tab.title.includes(" — ") && (
+                <span className="min-w-0 truncate font-mono text-[10.5px] text-gray-400 dark:text-white/30">{tab.title.split(" — ").slice(1).join(" — ")}</span>
+              )}
             </span>
-          )}
-          {orchestrator && (
-            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.05em] px-2 py-0.5 rounded-full
-              text-amber-700 dark:text-glow bg-glow/15">
-              {t("canvas.orchestrator")}
-            </span>
-          )}
-          <span className="flex-1" />
+          </span>
+          {orchestrator ? (
+            <span className={`${PILL} ${rolePill("orquestrador")}`}>{t("canvas.orchestrator")}</span>
+          ) : role ? (
+            <span className={`${PILL} max-w-32 truncate ${rolePill(role)}`} title={t("canvas.role", { role })}>{role}</span>
+          ) : null}
           {/* `nodrag`: sin esto el clic arrastraría el nodo en vez de apretar el botón. */}
           <Button variant="custom"
             onClick={() => onToggleOrchestrator(tab.id)}
@@ -777,6 +774,34 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
   );
 });
 
+const PILL = "shrink-0 inline-flex h-[18px] items-center rounded-full px-[7px] text-[10px] font-semibold uppercase tracking-[0.06em]";
+
+/** A cor do selo da função (prancheta 1): orquestrador argila, backend azul-claro, frontend roxo, QA laranja. */
+function rolePill(role: string): string {
+  const r = role.toLowerCase();
+  if (/orq|orch|lead|l[ií]der/.test(r)) return "bg-[rgba(217,119,87,0.16)] text-[#c96442] dark:text-[#d97757]";
+  if (/back|api|server/.test(r)) return "bg-[rgba(100,210,255,0.16)] text-sky-600 dark:text-[#64d2ff]";
+  if (/front|ui|design/.test(r)) return "bg-[rgba(191,90,242,0.16)] text-purple-600 dark:text-[#bf5af2]";
+  if (/qa|test/.test(r)) return "bg-[rgba(255,159,10,0.16)] text-amber-600 dark:text-[#ff9f0a]";
+  return "bg-accent-500/15 text-accent-600 dark:text-accent-400";
+}
+
+/** A bolinha de status do terminal: verde enquanto o agente escreve, cinza parado. */
+function NodeStatus({ tabId }: { tabId: string }) {
+  const [on, setOn] = useState(false);
+  useEffect(() => {
+    const read = () => setOn(activeTabIds(Date.now()).includes(tabId));
+    read();
+    const timer = window.setInterval(read, 1500);
+    return () => window.clearInterval(timer);
+  }, [tabId]);
+  return (
+    <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${on
+      ? "bg-[#30d158] shadow-[0_0_0_3px_rgba(48,209,88,0.18)]"
+      : "bg-gray-300 dark:bg-white/25 shadow-[0_0_0_3px_rgba(142,142,147,0.12)]"}`} />
+  );
+}
+
 function CrownIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 24 24" fill="currentColor" className={className} aria-hidden>
@@ -802,8 +827,8 @@ function Preview({ tabId, rows, onOpen }: { tabId: string; rows: number; onOpen:
       <pre
         onDoubleClick={onOpen}
         title={t("canvas.preview.hint")}
-        className="absolute inset-0 m-0 px-3.5 py-2.5 overflow-hidden whitespace-pre font-mono text-[12px] leading-[15px]
-          text-gray-700 dark:text-gray-300 bg-gray-50 dark:bg-surface"
+        className="absolute inset-0 m-0 px-4 py-3 overflow-hidden whitespace-pre font-mono text-[12px] leading-4 tabular-nums
+          text-gray-700 dark:text-white/60 bg-white dark:bg-surface"
       >
         {cleanPreviewLines(lines).join("\n")}
       </pre>
@@ -861,7 +886,7 @@ const NoteNode = memo(function NoteNode({ data, selected }: NodeProps<NoteFlowNo
       <div
         className="ade-node-drag flex items-center gap-2 pl-3 pr-1.5 shrink-0 cursor-grab active:cursor-grabbing
           border-b border-amber-200 dark:border-amber-100/10 bg-amber-100/70 dark:bg-amber-100/5"
-        style={{ height: HEADER_H }}
+        style={{ height: NOTE_HEADER_H }}
       >
         <NoteIcon className="w-3.5 h-3.5 shrink-0 text-amber-600 dark:text-amber-300/80" />
         <input
@@ -1014,7 +1039,7 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
       <div
         className="ade-node-drag flex items-center gap-2 pl-3 pr-1.5 shrink-0 cursor-grab active:cursor-grabbing
           border-b border-sky-200 dark:border-sky-100/10 bg-sky-50 dark:bg-sky-100/5"
-        style={{ height: HEADER_H }}
+        style={{ height: NOTE_HEADER_H }}
       >
         <GlobeIcon className="w-3.5 h-3.5 shrink-0 text-sky-600 dark:text-sky-300/80" />
         <input

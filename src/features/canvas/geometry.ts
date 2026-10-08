@@ -49,7 +49,10 @@ export interface Rect {
 }
 
 /** Alto de la cabecera de un nodo (nombre, agente, botones). La terminal va debajo. */
-export const HEADER_H = 34;
+/** Cabeçalho de um terminal no canvas (prancheta 1: nome, agente e função em duas linhas). */
+export const HEADER_H = 56;
+/** Cabeçalho das notas, portais e aparelhos: uma linha só. */
+export const NOTE_HEADER_H = 34;
 /** El borde del nodo, que la terminal no tapa. */
 export const BORDER = 1;
 export const NODE_DEFAULT = { w: 760, h: 460 };
