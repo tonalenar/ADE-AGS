@@ -101,6 +101,8 @@ export function MissionsPage() {
   const loadSquads = useSquadsStore((s) => s.load);
 
   const [selected, setSelected] = useState<string | null>(null);
+  // Busca da lista (prancheta 2): filtra só o que aparece, por título e objetivo.
+  const [query, setQuery] = useState("");
   const [fleet, setFleet] = useState(false);
   const [focusTab, setFocusTab] = useState<MemoryTab>("workspace");
   const [focusNonce, setFocusNonce] = useState(0);
@@ -198,9 +200,21 @@ export function MissionsPage() {
               title={t("missions.empty.title")}
               description={t("missions.empty.desc")}
             />
-          ) : (
-            MISSION_GROUPS.map((group) => {
+          ) : (<>
+            <label className="sticky top-0 z-10 mx-0.5 mb-1 flex items-center gap-2 h-[30px] px-2.5 rounded-lg
+              bg-black/[0.05] dark:bg-white/[0.07] text-gray-500 dark:text-gray-400
+              focus-within:ring-[3px] focus-within:ring-accent-500/25">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" className="h-3.5 w-3.5 shrink-0" aria-hidden><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></svg>
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("search.placeholder")}
+                aria-label={t("search.placeholder")}
+                className="min-w-0 flex-1 bg-transparent text-[13px] text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 outline-none" />
+              {query && <button type="button" onClick={() => setQuery("")} aria-label={t("btn.clear", { defaultValue: "Limpar" })}
+                className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-400/60 text-[10px] text-white">×</button>}
+            </label>
+            {MISSION_GROUPS.map((group) => {
+              const q = query.trim().toLowerCase();
               const rows = missions
+                .filter((m) => !q || m.title.toLowerCase().includes(q) || (m.objective ?? "").toLowerCase().includes(q))
                 .map((m) => ({ m, phase: missionPhase(m.status, waiting(m)) }))
                 .filter(({ phase }) => groupOf(phase) === group.key);
               if (rows.length === 0) return null;
@@ -221,8 +235,8 @@ export function MissionsPage() {
                   ))}
                 </div>
               );
-            })
-          )}
+            })}
+          </>)}
         </div>
 
         <div className="flex-1 min-w-0 cc-scroll">

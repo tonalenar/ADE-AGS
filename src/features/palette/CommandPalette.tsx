@@ -92,9 +92,10 @@ function PaletteDialog() {
       list.push({
         id: `tab:${tab.id}`,
         group: "agents",
-        title: tab.title,
+        // "Codex — C:\…": o caminho já vai no subtítulo; no título fica só o nome.
+        title: tab.title.split(" — ")[0],
         subtitle: tab.cwd,
-        keywords: [tab.agentLabel, tab.cwd],
+        keywords: [tab.title, tab.agentLabel, tab.cwd],
         icon: <Icon className={icon} />,
         run: () => { activateTab(tab.id); navigate("/workspace"); },
       });
