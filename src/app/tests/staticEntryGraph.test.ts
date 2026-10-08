@@ -151,19 +151,37 @@ describe("grafo estático do entry (onda 4)", () => {
     expect(hits).toEqual([]);
   });
 
-  it("a primeira tab ainda aplica tema e fit antes do processo, e a fonte carrega antes do render", () => {
+  it("tema no construtor, fitOnce espera fontsReady antes do pty, e a home não espera a fonte", () => {
     const terminal = readFileSync(TERMINAL, "utf8");
+    const ctorAt = terminal.indexOf("new XTerm(");
     const themeAt = terminal.indexOf("theme: TERMINAL_THEMES");
     const fitAt = terminal.indexOf("await fitOnce()");
     const ptyAt = terminal.indexOf("ptyCreate(");
-    expect(themeAt).toBeGreaterThan(0);
+    expect(ctorAt).toBeGreaterThan(0);
+    expect(themeAt).toBeGreaterThan(ctorAt);
     expect(fitAt).toBeGreaterThan(themeAt);
     expect(ptyAt).toBeGreaterThan(fitAt);
 
+    const fit = readFileSync(path.join(SRC, "features/terminal/fit.ts"), "utf8");
+    const fitOnceAt = fit.indexOf("const fitOnce = async () => {");
+    const awaitFonts = fit.indexOf("await fonts", fitOnceAt);
+    const measure = fit.indexOf("fit();", awaitFonts);
+    expect(fit).toContain('import { fontsReady } from "./fontsReady"');
+    expect(fitOnceAt).toBeGreaterThan(0);
+    expect(awaitFonts).toBeGreaterThan(fitOnceAt);
+    expect(measure).toBeGreaterThan(awaitFonts);
+
     const main = readFileSync(ENTRY, "utf8");
-    const fontAt = main.indexOf('document.fonts.load(');
     const renderAt = main.indexOf("ReactDOM.createRoot");
-    expect(fontAt).toBeGreaterThan(0);
-    expect(renderAt).toBeGreaterThan(fontAt);
+    expect(main).toContain("fontsReady");
+    expect(main).not.toContain("document.fonts.load(");
+    expect(main).not.toContain("await fontsReady");
+    expect(main).not.toMatch(/fontsReady\s*\)\s*\.then\(/);
+    expect(renderAt).toBeGreaterThan(main.indexOf("whenHomeCanPaint"));
+
+    const boot = readFileSync(path.join(SRC, "app/boot.ts"), "utf8");
+    expect(boot).toContain("void deps.fontsReady");
+    expect(boot).toContain("Promise.all([deps.loadAgentRegistry(), deps.applyRendering()])");
+    expect(boot).not.toMatch(/Promise\.all\(\[[^\]]*fontsReady/);
   });
 });

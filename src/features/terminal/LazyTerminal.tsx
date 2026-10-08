@@ -6,9 +6,10 @@ import { lazy, Suspense, type ComponentProps } from "react";
  * descarga.
  *
  * Tema y fit no se mueven de `Terminal`: el constructor aplica el tema y `fitOnce`
- * corre antes de `ptyCreate`. La fuente sigue precargada en `main.tsx`, antes de
- * montar la app, así que medir la celda con la de respaldo (columnas equivocadas)
- * no reaparece por diferir el módulo.
+ * corre antes de `ptyCreate`. La home no espera la fuente: `fontsReady` arranca al
+ * importarse y `whenHomeCanPaint` la ignora. La espera (tope de 1,5 s) vive dentro
+ * de `fitOnce`, antes de medir y de crear el proceso. Diferir el módulo no vuelve
+ * a medir la celda con la fuente de reserva.
  */
 const TerminalView = lazy(() =>
   import("@/features/terminal/Terminal").then((m) => ({ default: m.Terminal })),
