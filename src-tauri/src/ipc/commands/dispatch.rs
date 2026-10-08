@@ -219,6 +219,8 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "memory.promoteFact" => run_orchestrate(app, "memory.promoteFact", args),
         "run.cancelTask" => run_orchestrate(app, "run.cancelTask", args),
         "run.rerouteTask" => run_orchestrate(app, "run.rerouteTask", args),
+        "fix.list" => crate::runs::fixrounds::cli(app, "fix.list", args),
+        "fix.decide" => crate::runs::fixrounds::cli(app, "fix.decide", args),
         "app.status" => app_status(app),
         // El bus de eventos (ver `crate::bus`): ponerse al día y esperar lo siguiente.
         "events.since" => events_since(args),

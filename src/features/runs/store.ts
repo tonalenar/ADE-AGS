@@ -31,6 +31,7 @@ interface RunsState {
   /** Para la tarea si hace falta y devuelve la fila con lo necesario para reabrirla. */
   handOffTask: (taskId: string) => Promise<Task>;
   rerouteTask: (taskId: string) => Promise<Task>;
+  decideFix: (task: Task, action: "accept_pending" | "extra" | "abort") => Promise<void>;
   discardWorktree: (taskId: string) => Promise<ipc.DiscardedWorktree>;
   /** Un evento en vivo del backend. */
   applyEvent: (payload: TaskEventPayload) => void;
@@ -108,6 +109,11 @@ export const useRunsStore = create<RunsState>((set) => ({
     const task = await ipc.rerouteTask(taskId);
     set((s) => ({ tasks: s.tasks.map((t) => (t.id === task.id ? task : t)) }));
     return task;
+  },
+
+  decideFix: async (task, action) => {
+    if (!task.workKey) return;
+    await ipc.decideFix({ scope: `run:${task.runId}`, workKey: task.workKey, action, taskId: task.id });
   },
 
   applyEvent: (payload) => {

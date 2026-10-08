@@ -78,14 +78,11 @@ pub fn decide(run: &Run, tasks: &[Task]) -> Decision {
     decision
 }
 
-/// Un fallo que vale la pena reintentar: el agente llegó a correr y no fue por plata. Un
-/// binario que no está o un presupuesto agotado fallan igual la segunda vez, y cobran dos.
-pub fn should_retry(task: &Task) -> bool {
-    task.role.as_deref() == Some(role::WORKER)
-        && task.status == status::FAILED
-        && task.attempt < 2
-        && task.session_id.is_some()
-        && !task.error.as_deref().is_some_and(|e| e.contains("budget"))
+/// Un fallo que vale la pena reintentar: el agente llegó a correr, no fue por plata, y la
+/// entrega todavía tiene rodada de correção dentro do teto. `attempt` não decide: o reroute
+/// zera esse número e o teto mora em `fix_round`.
+pub fn should_retry(task: &Task, max_rounds: i64) -> bool {
+    super::fixrounds::can_retry(task, max_rounds)
 }
 
 // ── La parte con efectos ────────────────────────────────────────
@@ -359,9 +356,8 @@ pub fn on_task_finished(app: &AppHandle, task_id: &str) {
                 Some((task.clone(), kind))
             }
             _ => {
-                if should_retry(&task) {
-                    let error = task.error.clone().unwrap_or_default();
-                    let _ = store::requeue_for_retry(&conn, task_id, &error);
+                if let Err(error) = super::fixrounds::on_worker_failure(&conn, &task) {
+                    eprintln!("[runs] teto de correção: {error}");
                 }
                 None
             }

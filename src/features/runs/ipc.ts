@@ -107,6 +107,9 @@ export const handOffTask = (taskId: string) => invoke<Task>("run_hand_off_task",
 export const rerouteTask = (taskId: string, opts: { agentId?: string; model?: string; reason?: string } = {}) =>
   invoke<Task>("run_reroute_task", { taskId, ...opts });
 
+export const decideFix = (input: { scope: string; workKey: string; action: string; taskId?: string }) =>
+  invoke<{ status: string; message: string; requeued: boolean }>("run_fix_decide", input);
+
 export interface DiscardedWorktree {
   branch: string;
   /** La rama quedó porque tiene commits que no están en ningún otro lado. */

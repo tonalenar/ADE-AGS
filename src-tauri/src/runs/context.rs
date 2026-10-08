@@ -167,7 +167,13 @@ pub fn dependency_handoffs(task: &Task, candidates: &[&Task]) -> String {
 /// que integrar en la suya antes de empezar (cuando son varias no se puede partir de una).
 pub fn worker_prompt(task: &Task, objective: &str, deps: &[&Task], facts: &[Fact], to_merge: &[String]) -> String {
     let mut out = String::new();
-    if let Some(error) = task.last_error.as_deref() {
+    if task.fix_round > 0 {
+        out.push_str(&super::fixrounds::prompt_addon(
+            task.fix_round,
+            task.full_gate,
+            task.last_error.as_deref().unwrap_or(""),
+        ));
+    } else if let Some(error) = task.last_error.as_deref() {
         out.push_str("\n\n## Intento anterior\n");
         out.push_str("Esta tarea ya se intentó una vez y falló. No repitas lo mismo: el error fue\n```\n");
         out.push_str(&clip(&neutralize(error), 1200));
@@ -270,8 +276,13 @@ tasks or for tasks that must work on the project folder itself. Integrating is p
 are separate and the Squad offers `integrator`, add a final task with `role: integrator` to merge branches, \
 resolve conflicts, and validate the combined result. If no integrator role is available, assign integration to an \
 appropriate worker. The lead never integrates or modifies files.\n\
-4. Wait with `run_await`; read results with `task_result`. Failed tasks are retried once automatically with \
-their error; if one still fails, decide: add a corrected task with `task_add`, or finish without it.\n\
+4. Wait with `run_await`; read results with `task_result`. A failed worker is corrected automatically up to \
+the configured ceiling (default 2 rounds). The counter is per delivery: reroute, reassignment and a new \
+`task_add` for the same objective share it. When you add a correction, set `corrects` to the failed task's \
+key. The last round must run the full suite (`cargo test --lib --bin ags`, `npx tsc --noEmit`, `npx vitest run`, \
+or `gh pr checks <n> --watch`), not only affected tests. When the ceiling is hit the task escalates and stays \
+failed: do not add another correction and do not treat it as done. Report the failures and the options: accept \
+with pending issues (not integrated as green), one manual extra round, or abort.\n\
 5. Share decisions every worker must follow with `fact_add` before or while they run.\n\
 6. Finish with a short report: what was done, where (branches/files), what was verified, what is left.\n\
 Use task_status for handoff summaries and task_result for each structured or legacy handoff; no filesystem inspection is needed.\n\

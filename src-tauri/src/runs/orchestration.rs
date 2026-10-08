@@ -611,6 +611,7 @@ pub(crate) fn plan_tasks(
                     }),
                     result_schema: schema.as_deref(),
                     queued: true,
+                    corrects: t.corrects.as_deref(),
                 },
             )?;
             super::pool_failover::record_task_pool(&tx, &created.id, assignment.pool_origin.as_ref())?;
@@ -692,6 +693,9 @@ pub fn board(conn: &Connection, run: &Run) -> Result<String, String> {
         }
         if t.attempt > 1 {
             line.push_str(&format!(" · intento {}", t.attempt));
+        }
+        if t.fix_round > 0 {
+            line.push_str(&format!(" · correção {}{}", t.fix_round, if t.full_gate { " (gate completo)" } else { "" }));
         }
         if let Some(e) = &t.error {
             line.push_str(&format!("\n    error: {}", first_line(e, 160)));

@@ -341,6 +341,14 @@ pub fn accept(
         if matches!(task.status.as_str(), "pending" | "ready" | "running") {
             return Err("la tarea todavía no terminó".into());
         }
+        if matches!(task.fix_status.as_str(), "escalated" | "accepted_pending" | "aborted")
+            || (task.status != "done" && task.fix_round > 0)
+        {
+            return Err(
+                "esta entrega não passou no gate e não pode ser integrada como verde. Aceite com pendências, peça uma rodada manual ou aborte a tarefa."
+                    .into(),
+            );
+        }
         if let (Some(root), false) = (&task.worktree_path, task.worktree_removed) {
             let pending = dirty(Path::new(root), &managed_links(&conn, &task))?;
             if !pending.is_empty() {

@@ -562,6 +562,7 @@ fn plan_task_properties() -> Value {
         "isolate": { "type": "boolean", "description": "Own git worktree and branch. Default: true in a git repo." },
         "budget_usd": { "type": "number" },
         "result_schema": { "type": "object", "description": "JSON Schema the task's final result must satisfy." },
+        "corrects": { "type": "string", "description": "Key of the failed task this one corrects. The correction budget is shared with that delivery, including after reroute." },
     })
 }
 

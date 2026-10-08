@@ -140,6 +140,9 @@ describe("el equipo de una misión", () => {
     expect(text).toContain("UMA única execução completa");
     expect(text).toContain("VELOCIDADE DE TESTE E CI (PONTO 3):");
     expect(text).toContain("gh pr checks <n> --watch");
+    expect(text).toContain("TETO DE CORREÇÃO:");
+    expect(text).toContain("AGS-CORRECTION member=<nome> branch=<branch> subject=<assunto>");
+    expect(text).toContain("fix_rounds.max");
   });
 
   it("o briefing do integrante inclui regras de velocidade de teste e espera do CI", () => {
@@ -149,6 +152,8 @@ describe("el equipo de una misión", () => {
     expect(text).toContain("ags test affected");
     expect(text).toContain("gh pr checks <n> --watch");
     expect(text).toContain("Suíte completa local apenas em cenários de risco elevado");
+    expect(text).toContain("já verde neste hash");
+    expect(text).toContain("ÚLTIMA rodada");
   });
 });
 

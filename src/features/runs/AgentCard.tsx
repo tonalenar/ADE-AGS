@@ -59,7 +59,7 @@ const BADGE: Record<TaskStatus, string> = {
  * que "qué archivo tocó" viene como dato: las líneas son ya la forma corta (`Bash(cargo
  * test)`), no un recorte de su salida. Quien quiera el detalle abre la tarea como pane.
  */
-export function AgentCard({ task, activity, waiting = [], approval, focused, onCancel, onOpenPane, onShowResult, onDecide, onDiscardWorktree, onReroute, onRollback }: {
+export function AgentCard({ task, activity, waiting = [], approval, focused, onCancel, onOpenPane, onShowResult, onDecide, onDiscardWorktree, onReroute, onRollback, onFixDecide }: {
   task: Task;
   activity: string[];
   /** Las dependencias que todavía no terminaron, por su key. */
@@ -75,6 +75,7 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
   onReroute: () => void;
   onRollback: () => void;
   onDecide: (allow: boolean, remember: boolean) => void;
+  onFixDecide: (action: "accept_pending" | "extra" | "abort") => void;
 }) {
   const { t } = useTranslation();
   const Icon = agentIcon(task.agentId);
@@ -153,6 +154,13 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
               : live ? t("fleet.card.starting") : t("fleet.card.noActivity")}
           </span>
         )}
+        {(task.fixRound ?? 0) > 0 && (
+          <span className="truncate text-[10.5px] text-amber-700 dark:text-amber-400/90">
+            {t("fleet.card.fixRound", { n: task.fixRound })}
+            {task.fullGate ? ` · ${t("fleet.card.fullGate")}` : ""}
+            {task.fixStatus === "escalated" ? ` · ${t("fleet.card.fixEscalated")}` : ""}
+          </span>
+        )}
         {task.lastError && task.status !== "failed" && (
           <span className="truncate text-[10.5px] text-amber-700 dark:text-amber-400/90" title={task.lastError}>
             {t("fleet.card.retrying", { error: task.lastError })}
@@ -177,6 +185,14 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
 
       {approval && (
         <PermissionCard approval={approval} focused={focused} onDecide={onDecide} />
+      )}
+
+      {task.fixStatus === "escalated" && task.workKey && (
+        <div className="flex flex-wrap gap-1 px-3 pb-2">
+          <Button variant="custom" onClick={() => onFixDecide("accept_pending")} className={ACTION}>{t("fleet.card.fix.accept")}</Button>
+          <Button variant="custom" onClick={() => onFixDecide("extra")} className={ACTION}>{t("fleet.card.fix.extra")}</Button>
+          <Button variant="custom" onClick={() => onFixDecide("abort")} className={ACTION}>{t("fleet.card.fix.abort")}</Button>
+        </div>
       )}
 
       {/* ── qué costó y qué se puede hacer ── */}

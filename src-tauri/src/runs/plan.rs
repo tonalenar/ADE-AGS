@@ -46,6 +46,9 @@ pub struct PlanTask {
     /// JSON Schema que tiene que cumplir el resultado.
     #[serde(default)]
     pub result_schema: Option<serde_json::Value>,
+    /// Key, id ou work_key da entrega que esta tarefa corrige. O teto é o dela.
+    #[serde(default, alias = "fixes")]
+    pub corrects: Option<String>,
 }
 
 fn valid_key(key: &str) -> bool {

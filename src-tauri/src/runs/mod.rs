@@ -16,6 +16,7 @@ mod antigravity;
 mod broker;
 mod context;
 pub(crate) mod failure;
+pub(crate) mod fixrounds;
 pub(crate) mod handoff;
 pub(crate) mod ledger;
 pub(crate) mod model_discovery;
@@ -944,6 +945,10 @@ pub fn reroute_to(
 
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
+        let current = store::task_by_id(&conn, task_id)?.unwrap_or_else(|| task.clone());
+        if let Some(blocked) = fixrounds::block_reroute(&conn, &current)? {
+            return Err(blocked);
+        }
         let tx = rusqlite::Transaction::new_unchecked(&conn, rusqlite::TransactionBehavior::Immediate).map_err(|e| e.to_string())?;
         let moved = store::reroute_task(
             &tx,

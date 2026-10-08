@@ -45,6 +45,8 @@ export function FleetPage() {
   const decideApproval = useRunsStore((s) => s.decideApproval);
   const handOffTask = useRunsStore((s) => s.handOffTask);
   const rerouteTask = useRunsStore((s) => s.rerouteTask);
+  const decideFix = useRunsStore((s) => s.decideFix);
+  const refreshTask = useRunsStore((s) => s.refreshTask);
   const discardWorktree = useRunsStore((s) => s.discardWorktree);
 
   const [group, setGroup] = useState<FleetGroup | null>(null);
@@ -276,6 +278,11 @@ export function FleetPage() {
                 onOpenPane={() => openInTerminal(task)}
                 onDiscardWorktree={() => discard(task)}
                 onReroute={() => rerouteTask(task.id).catch(console.error)}
+                onFixDecide={(action) => {
+                  decideFix(task, action)
+                    .then(() => { if (workspaceId) return refreshTask(workspaceId, task.id); })
+                    .catch(console.error);
+                }}
                 onRollback={() => setRollbackFor(task)}
               />
             ))}

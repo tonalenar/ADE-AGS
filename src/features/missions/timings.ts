@@ -3,7 +3,7 @@ import { invoke } from "@tauri-apps/api/core";
 /** Ver `missions::timings` en Rust: las etapas de una misión que se miden. */
 export type TimingKind =
   | "boot" | "briefing" | "turn" | "peer_ask" | "peer_message"
-  | "orchestrator_stall" | "test"
+  | "orchestrator_stall" | "test" | "fix_round"
   | "start_briefing" | "start_activity" | "start_retry" | "start_stalled" | "start_all_working";
 
 export interface TimingSpan {
