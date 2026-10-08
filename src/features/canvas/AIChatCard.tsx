@@ -19,6 +19,8 @@ export interface AIChatCardProps {
   actions?: ReactNode;
   toolbar?: ReactNode;
   composerHint?: ReactNode;
+  /** Ferramentas à direita do compositor, antes do enviar (ex.: Chat | Plano). */
+  composerRight?: ReactNode;
   children?: ReactNode;
   className?: string;
   style?: CSSProperties;
@@ -30,7 +32,7 @@ export interface AIChatCardProps {
 export function AIChatCard({
   title, subtitle, greeting, prompt, placeholder, inputLabel, sendLabel, message,
   onMessageChange, onSend, busy = false, disabled = false, actions, toolbar,
-  composerHint, children, className = "", style, chrome, onKeyDown, heading,
+  composerHint, composerRight, children, className = "", style, chrome, onKeyDown, heading,
 }: AIChatCardProps) {
   return (
     <section aria-label={title} style={style} onKeyDown={onKeyDown} className={`ai-chat-card flex min-h-0 flex-col overflow-hidden rounded-xl
@@ -89,7 +91,8 @@ export function AIChatCard({
             className="block max-h-32 w-full resize-none bg-transparent text-[13.5px] leading-[19px] outline-none placeholder:text-gray-500 dark:placeholder:text-white/[0.32] disabled:opacity-50"
           />
           <div className="mt-1.5 flex items-center justify-between gap-2">
-            <div className="min-w-0 text-[11px] text-gray-500 dark:text-gray-400">{composerHint}</div>
+            <div className="min-w-0 flex-1 text-[11px] text-gray-500 dark:text-gray-400">{composerHint}</div>
+            {composerRight}
             <button type="submit" disabled={disabled || busy || !message.trim()} aria-label={sendLabel} title={sendLabel}
               className="group flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-accent-500 text-white transition-transform hover:scale-105 active:scale-95 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent-400 disabled:opacity-35 disabled:hover:scale-100">
               {busy ? <span aria-hidden>…</span> : <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-[15px] w-[15px] transition-transform group-hover:-translate-y-px" aria-hidden>

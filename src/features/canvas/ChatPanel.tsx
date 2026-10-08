@@ -6,6 +6,10 @@ import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { AIChatCard } from "./AIChatCard";
+import { agentTile } from "@/features/agents/agentTile";
+import { open as pickFile } from "@tauri-apps/plugin-dialog";
+
+const TOOL = "cc-t flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white";
 import { unreadOf, useUnreadStore } from "./chatUnread";
 import { useActiveBoardKey, boardKeyOfTab } from "./store";
 import { ChatMarkdown } from "./ChatMarkdown";
@@ -184,8 +188,20 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
     bottom.current?.scrollIntoView({ block: "end" });
   }, [messages.length, thread, currentId]);
 
+  // Chat | Plano (prancheta 6): no Plano a mensagem vai com o pedido de planejar antes de mexer.
+  const [mode, setMode] = useState<"chat" | "plan">("chat");
+  const attach = async () => {
+    try {
+      const picked = await pickFile({ multiple: false, directory: false });
+      if (typeof picked === "string" && picked) setDraft((d) => `${d}${d && !d.endsWith(" ") ? " " : ""}${picked} `);
+    } catch (e) {
+      AlertaToast(t("canvas.chat.title"), String(e), "error", 6000);
+    }
+  };
+
   const send = async () => {
-    const text = draft.trim();
+    const typed = draft.trim();
+    const text = typed && mode === "plan" ? `${t("canvas.chat.planPrefix")}\n\n${typed}` : typed;
     if (!text || !currentId || sending) return;
     setSending(true);
     setDraft("");
@@ -193,7 +209,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
       await invoke("chat_send", { tabId: currentId, thread, text });
     } catch (e) {
       // No llegó: se devuelve lo escrito para no perderlo.
-      setDraft(text);
+      setDraft(typed);
       AlertaToast(t("canvas.chat.title"), String(e), "error", 6000);
     } finally {
       setSending(false);
@@ -256,10 +272,34 @@ ${text}` : text)); setPicking(false); }} />}
       onSend={() => void send()}
       busy={sending}
       disabled={!current}
-      composerHint={current && <span className="flex items-center gap-1.5 font-mono text-[11px] text-gray-500 dark:text-gray-400">
-        <span className="h-1.5 w-1.5 rounded-full" style={{ background: THREAD_COLOR[thread] }} />
-        {t(`canvas.chat.thread.${thread}`)}
+      composerHint={current && <span className="flex min-w-0 items-center gap-1">
+        <button type="button" onClick={() => void attach()} title={t("canvas.chat.attach")} aria-label={t("canvas.chat.attach")} className={TOOL}>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden><path d="m20 11.5-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" /></svg>
+        </button>
+        <button type="button" onClick={() => setDraft((d) => `${d}${d && !d.endsWith(" ") ? " " : ""}@`)} title={t("canvas.chat.mention")} aria-label={t("canvas.chat.mention")} className={TOOL}>
+          <span className="text-[14px] font-medium leading-none">@</span>
+        </button>
+        <span title={current.title} className="ml-1 flex h-[26px] min-w-0 items-center gap-1.5 rounded-md bg-black/[0.05] px-2 text-[12px] font-medium text-gray-700 dark:bg-white/[0.07] dark:text-white/80">
+          <span aria-hidden className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: agentTile(current.agentId) }} />
+          <span className="truncate">{current.agentLabel}</span>
+        </span>
+        <span className="ml-1.5 flex shrink-0 items-center gap-1 font-mono text-[10.5px] text-gray-500 dark:text-gray-400" title={t(`canvas.chat.thread.${thread}`)}>
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: THREAD_COLOR[thread] }} />
+        </span>
       </span>}
+      composerRight={current && (
+        <span role="radiogroup" aria-label={t("canvas.chat.mode")} className="flex shrink-0 rounded-md bg-black/[0.05] p-0.5 dark:bg-white/[0.07]">
+          {(["chat", "plan"] as const).map((m) => (
+            <button key={m} type="button" role="radio" aria-checked={mode === m} onClick={() => setMode(m)}
+              title={m === "plan" ? t("canvas.chat.planHint") : undefined}
+              className={`h-[22px] rounded-[5px] px-2 text-[11.5px] font-medium ${mode === m
+                ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-white"
+                : "text-gray-500 hover:text-gray-900 dark:text-white/50 dark:hover:text-white"}`}>
+              {t(`canvas.chat.mode.${m}`)}
+            </button>
+          ))}
+        </span>
+      )}
       actions={<>
         <button type="button" onClick={() => setPicking(true)} disabled={!current} title={t("canvas.chat.pick.open")} aria-label={t("canvas.chat.pick.open")}
           className="cc-t flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 disabled:opacity-40 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white">

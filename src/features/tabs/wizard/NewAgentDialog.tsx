@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertaToast, Button, FolderIcon, Progress } from "neogestify-ui-components";
+import { AlertaToast, Button, FolderIcon } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { resolveAccountChoice } from "@/features/accounts/pools";
@@ -149,20 +149,11 @@ export function NewAgentDialog({
       footer={
         // El footer de la librería es una fila alineada a la derecha: con `flex-1` este
         // bloque se queda con todo el ancho y la barra puede cruzarlo entera.
-        <div className="flex-1 flex flex-col gap-2.5 min-w-0">
-          <Progress
-            value={index + 1}
-            max={steps.length}
-            size="xs"
-            variant="accent"
-            // Por defecto el lector de pantalla canta el porcentaje, que acá no significa
-            // nada: lo que importa es en qué paso estás y cuántos quedan.
-            valueText={t("newAgent.progress", { n: index + 1, total: steps.length })}
-          />
-          <div className="flex items-center gap-3">
+        <div className="flex-1 flex flex-col min-w-0">
+          <div className="flex items-center gap-2">
             {/* Cuál es el paso ya lo dice el título de arriba; acá va cuántos son, que es
                 lo que la barra sola no puede decir. */}
-            <span className="min-w-0 truncate text-[11px] text-gray-400 dark:text-white/35">
+            <span className="min-w-0 truncate text-[11.5px] text-gray-400 dark:text-white/35" aria-live="polite">
               {t("newAgent.progress", { n: index + 1, total: steps.length })}
             </span>
             <div className="flex-1" />
@@ -176,7 +167,7 @@ export function NewAgentDialog({
               onClick={isLast ? confirm : () => go(1)}
               disabled={!agent}
             >
-              {isLast ? t("btn.open") : t("btn.next")}
+              {isLast ? t("newAgent.openAgent") : t("btn.next")}
             </Button>
           </div>
         </div>
@@ -184,19 +175,18 @@ export function NewAgentDialog({
     >
       <div className="flex flex-col gap-4">
         {/* La carpeta es contexto, no una decisión: por eso se muestra y no se edita. */}
-        <div className="flex items-center gap-2 px-3 py-2 rounded-lg
-          bg-gray-100 dark:bg-white/4
-          border border-gray-200 dark:border-white/8">
-          <FolderIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/35" />
-          <span className="truncate font-mono text-[11px] text-gray-500 dark:text-gray-400"
-            dir="rtl" title={cwd}>
-            {cwd}
-          </span>
+        <div className="flex flex-col gap-1.5">
+          <span className="text-[11.5px] text-gray-500 dark:text-white/60">{t("newAgent.folder")}</span>
+          <div className="flex items-center gap-2 h-[30px] px-2.5 rounded-[7px] bg-black/[0.05] dark:bg-surface-raised">
+            <FolderIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/30" />
+            <span className="truncate font-mono text-[12px] text-gray-900 dark:text-[#f5f5f7]" dir="rtl" title={cwd}>
+              {cwd}
+            </span>
+          </div>
         </div>
 
-        <span className="text-[11px] font-semibold uppercase tracking-widest
-          text-gray-400 dark:text-white/35">
-          {index + 1} · {LABELS[step]}
+        <span className="-mb-2 text-[11.5px] text-gray-500 dark:text-white/60">
+          {LABELS[step]}
         </span>
 
         {/* Alto mínimo para que el diálogo no cambie de tamaño entre un paso de dos
