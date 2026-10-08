@@ -243,13 +243,7 @@ export function Pet({ level, state = "idle", size = 96, className = "", still = 
           <rect key={i} x={r.x} y={r.y} width={r.w} height={1} fill={MASCOT_FILL[r.c]} />
         ))}
 
-        {/* Grietas de energía: del nivel 5 en adelante. */}
-        {stage >= 3 && (
-          <g fill="none" stroke={stage === 4 ? "#93c5fd" : "#fde047"} strokeWidth="0.45" strokeLinecap="square">
-            <path className="ags-pet__crack" d="M4 4 L5 6 L4 7 L5 9" />
-            <path className="ags-pet__crack" style={{ animationDelay: "0.6s" }} d="M12 4 L11 6 L12 7 L11 9" />
-          </g>
-        )}
+        {/* Sin grietas en la cara: el usuario prefirió el rostro limpio (la evolución queda en la llama, el aura y los ojos). */}
 
         {/* Del nivel 3 el pet "cierra la cara": ojos en chevron, como el Clawd. Durmiendo cierra
             los ojos y, si algo falló, hace una X. */}

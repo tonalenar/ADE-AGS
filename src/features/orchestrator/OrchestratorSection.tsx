@@ -1,6 +1,6 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Select } from "neogestify-ui-components";
 import { getSetting, setSetting } from "@/shared/ipc/settings";
 import { FixRoundsSetting } from "@/features/settings/FixRoundsSetting";
 import { SettingsSection } from "@/features/settings/SettingsSection";
@@ -49,16 +49,11 @@ export function OrchestratorSection() {
             {t("settings.orchestrator.watchLimitHint")}
           </p>
         </div>
-        <Select
+        <PopupSelect
           value={String(limit)}
-          onChange={(e) => handleChange(e.target.value)}
-          variant="outline"
-          size="sm"
-          options={[1, 2, 3, 4, 5, 8, 10].map((n) => ({
-            value: String(n),
-            label: n === DEFAULT_WATCH_LIMIT ? `${n} ${t("settings.orchestrator.default")}` : String(n),
-          }))}
-        />
+          onChange={(e) => handleChange(e.target.value)}>
+          {[1, 2, 3, 4, 5, 8, 10].map((n) => <option key={String(n)} value={String(n)}>{n === DEFAULT_WATCH_LIMIT ? `${n} ${t("settings.orchestrator.default")}` : String(n)}</option>)}
+        </PopupSelect>
       </div>
 
       {limit > 5 && (

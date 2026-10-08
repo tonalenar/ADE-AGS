@@ -1,7 +1,8 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
-import { AnimateSpin, Badge, Button, FolderIcon, Input, SearchIcon, Select, Skeleton } from "neogestify-ui-components";
+import { AnimateSpin, Badge, Button, FolderIcon, Input, SearchIcon, Skeleton } from "neogestify-ui-components";
 
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { homeDir } from "@/shared/ipc/window";
@@ -127,17 +128,17 @@ export function CloneRepoDialog({ onClose, onCloned }: {
       <div className="flex flex-col gap-3">
         <div className="flex items-end gap-2">
           <div className="flex-1">
-            <Select
-              label={t("forge.clone.from")}
-              value={source}
-              onChange={(e) => setSource(e.target.value)}
-              options={[
-                ...apiAccounts.map((a) => ({ value: a.id, label: `@${a.login} · ${a.host}` })),
-                { value: URL_SOURCE, label: t("forge.clone.byUrl") },
-              ]}
-              variant="outline"
-              disabled={busy}
-            />
+            <div className="flex flex-col gap-1.5">
+              <label htmlFor="CloneRepoDialog-select-1" className="text-[12px] font-medium text-gray-600 dark:text-gray-300">{t("forge.clone.from")}</label>
+              <PopupSelect
+                value={source}
+                onChange={(e) => setSource(e.target.value)}
+                disabled={busy}
+                id="CloneRepoDialog-select-1">
+                {apiAccounts.map((a) => <option key={a.id} value={a.id}>{`@${a.login} · ${a.host}`}</option>)}
+                <option value={URL_SOURCE}>{t("forge.clone.byUrl")}</option>
+              </PopupSelect>
+            </div>
           </div>
           <Button variant="outline" disabled={busy} onClick={() => setAdding(true)}>{t("forge.add.action")}</Button>
         </div>

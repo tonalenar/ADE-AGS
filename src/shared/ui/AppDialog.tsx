@@ -3,15 +3,21 @@ import { Button, CloseIcon, Modal } from "neogestify-ui-components";
 
 type DialogSize = "sm" | "md" | "lg" | "xl";
 
-/** El panel. Solo el radio: los colores salen de las variables `--nui-*` de `App.css`. */
-export const DIALOG_PANEL_CLASS = "rounded-2xl";
+/**
+ * El panel. Radio de sheet de macOS y la sombra de `--shadow-pop` (el anillo de 0.5px es
+ * el borde que se ve en Apple; el resto da la elevación). Los colores salen de las
+ * variables `--nui-*` de `App.css`.
+ */
+export const DIALOG_PANEL_CLASS =
+  "rounded-xl shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]";
 
 /** El cuerpo, con el respiro de esta UI en vez del `p-6` de la librería. */
 export const DIALOG_BODY_CLASS = "px-4 py-3.5 cc-scroll";
 
 /**
- * La cabecera de un diálogo: el mismo lenguaje que las franjas de los paneles del shell,
- * más baja que la de la librería porque un diálogo no necesita tanto aire arriba.
+ * La cabecera de un diálogo: título centrado, como en los sheets de macOS, con la X
+ * flotando a la derecha. El `px-10` reserva el hueco de la X de los dos lados para que el
+ * título quede centrado de verdad y no corrido.
  *
  * Se exporta suelta para que la use también `ViewModal`, que monta el `Modal` de la
  * librería por su cuenta para poder portalearlo dentro de la vista.
@@ -23,10 +29,10 @@ export function DialogHeader({ title, icon, onClose }: {
 }) {
   const { t } = useTranslation();
   return (
-    <div className="flex items-center gap-2.5 h-11 shrink-0 pl-4 pr-2.5
-      border-b border-gray-200 dark:border-white/8">
+    <div className="relative flex items-center justify-center gap-2 h-11 shrink-0 px-10
+      border-b border-gray-200 dark:border-white/[0.08]">
       {icon}
-      <h2 className="flex-1 min-w-0 truncate text-[13px] font-bold
+      <h2 className="flex-1 min-w-0 truncate text-center text-[13.5px] font-semibold tracking-[-0.01em]
         text-gray-900 dark:text-white">
         {title}
       </h2>
@@ -36,7 +42,7 @@ export function DialogHeader({ title, icon, onClose }: {
         onClick={onClose}
         title={t("btn.close")}
         aria-label={t("btn.close")}
-        className="cc-t flex items-center justify-center w-7 h-7 rounded-lg shrink-0
+        className="cc-t absolute right-2.5 top-1/2 -translate-y-1/2 flex items-center justify-center w-7 h-7 rounded-md shrink-0
           text-gray-400 dark:text-white/35
           hover:text-gray-700 dark:hover:text-white
           hover:bg-gray-200 dark:hover:bg-white/10 p-0"

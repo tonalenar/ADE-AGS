@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 import { AnimateSpin, CheckCircleIcon, InfoIcon } from "neogestify-ui-components";
 import { cliInstallStatus, installCli, uninstallCli, type CliInstallStatus } from "./ipc";
-import { SettingsSection } from "@/features/settings/SettingsSection";
+import { SettingsGroup, SettingsSection } from "@/features/settings/SettingsSection";
 
 /**
  * Instala la CLI `ags` en el PATH del usuario.
@@ -45,43 +45,45 @@ export function CliInstallSection() {
 
       {status && (
         <div className="flex flex-col gap-3">
-          <div className="flex items-center gap-2">
-            {status.installed ? (
-              <>
-                <CheckCircleIcon className="w-4 h-4 shrink-0 text-emerald-500" />
-                <span className="text-sm text-gray-700 dark:text-gray-200">
-                  {t("settings.cli.installed")}
+          <SettingsGroup>
+            <div className="flex items-center gap-2 min-h-10 px-3 py-2">
+              {status.installed ? (
+                <>
+                  <CheckCircleIcon className="w-4 h-4 shrink-0 text-emerald-500" />
+                  <span className="text-[13px] text-gray-900 dark:text-gray-100">
+                    {t("settings.cli.installed")}
+                  </span>
+                </>
+              ) : (
+                <span className="text-[13px] text-gray-500 dark:text-gray-400">
+                  {t("settings.cli.notInstalled")}
                 </span>
-              </>
-            ) : (
-              <span className="text-sm text-gray-500 dark:text-gray-400">
-                {t("settings.cli.notInstalled")}
-              </span>
-            )}
-          </div>
+              )}
+            </div>
 
-          <div className="flex flex-col gap-1 text-xs">
-            <span className="text-gray-400 dark:text-gray-500">
-              {t("settings.cli.location")}
-            </span>
-            <code className="font-mono text-gray-600 dark:text-gray-300 break-all">
-              {status.targetPath}
-            </code>
-          </div>
+            <div className="flex flex-col gap-1.5 px-3 py-2.5">
+              <span className="text-[11px] leading-[14px] uppercase tracking-[0.06em] font-semibold text-gray-500 dark:text-white/45">
+                {t("settings.cli.location")}
+              </span>
+              <code className="font-mono text-[11.5px] leading-4 tabular-nums break-all text-gray-700 dark:text-gray-300">
+                {status.targetPath}
+              </code>
+            </div>
+          </SettingsGroup>
 
           {/* En macOS una app lanzada desde Finder hereda un PATH mínimo, no el de tu
               shell, así que esto puede ser un falso negativo. Por eso es un aviso con la
               línea a copiar, y no un error que bloquee. */}
           {status.installed && !status.dirInPath && (
-            <div className="flex items-start gap-2 p-3 rounded-lg
-              bg-amber-50 dark:bg-amber-500/10
-              border border-amber-200 dark:border-amber-500/20">
+            <div className="flex items-start gap-2.5 p-3 rounded-xl
+              bg-amber-50 dark:bg-amber-500/10">
               <InfoIcon className="w-4 h-4 mt-0.5 shrink-0 text-amber-500" />
               <div className="flex flex-col gap-1.5 min-w-0">
-                <span className="text-xs text-amber-700 dark:text-amber-300">
+                <span className="text-[12px] leading-4 text-amber-700 dark:text-amber-300">
                   {t("settings.cli.notInPath")}
                 </span>
-                <code className="text-[11px] font-mono break-all
+                <code className="font-mono text-[11px] leading-4 break-all rounded-md px-2 py-1
+                  bg-amber-100/70 dark:bg-surface-sunken
                   text-amber-800 dark:text-amber-200">
                   export PATH="{status.targetDir}:$PATH"
                 </code>
@@ -90,13 +92,13 @@ export function CliInstallSection() {
           )}
 
           {status.method === "copy" && status.installed && (
-            <p className="text-[11px] text-gray-400 dark:text-white/40">
+            <p className="text-[11.5px] leading-4 text-gray-500 dark:text-white/40">
               {t("settings.cli.copyNote")}
             </p>
           )}
 
           {!status.sourcePath && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
+            <p className="text-[12px] leading-4 text-amber-600 dark:text-amber-400">
               {t("settings.cli.noBinary")}
             </p>
           )}
@@ -123,13 +125,13 @@ export function CliInstallSection() {
             )}
           </div>
 
-          <p className="text-[11px] text-gray-400 dark:text-white/40">
+          <p className="text-[11.5px] leading-4 text-gray-500 dark:text-white/40">
             {t("settings.cli.usage")}
           </p>
         </div>
       )}
 
-      {error && <p className="text-xs text-red-500 dark:text-red-400 mt-3">{error}</p>}
+      {error && <p className="text-[12px] leading-4 text-red-500 dark:text-red-400">{error}</p>}
     </SettingsSection>
   );
 }

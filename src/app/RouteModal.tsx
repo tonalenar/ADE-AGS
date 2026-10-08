@@ -41,22 +41,22 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
       <Button variant="custom"
         onClick={onClose}
         aria-label={t("btn.close")}
-        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/65 block"
+        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/45 backdrop-blur-sm block"
         children={null}
       />
 
       <div ref={frameRef} tabIndex={-1} className="outline-none cc-rise relative flex flex-col w-full max-w-5xl h-full
-        rounded-2xl overflow-hidden
+        rounded-xl overflow-hidden
         bg-gray-50 dark:bg-surface
-        border border-gray-200 dark:border-white/12
-        shadow-2xl">
+        border border-gray-200 dark:border-white/[0.08]
+        shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]">
 
         <Button variant="icon"
           onClick={onClose}
           title={t("btn.close")}
-          className="absolute top-3 right-3 z-10 flex items-center justify-center w-8 h-8 rounded-lg
+          className="absolute top-3 right-3 z-10 flex items-center justify-center w-7 h-7 rounded-md
             text-gray-400 dark:text-white/35
-            bg-white/80 dark:bg-white/8
+            bg-white/80 dark:bg-surface-raised/80 backdrop-blur-xl
             hover:text-gray-700 dark:hover:text-white
             hover:bg-gray-100 dark:hover:bg-white/10 transition-colors p-0"
         >

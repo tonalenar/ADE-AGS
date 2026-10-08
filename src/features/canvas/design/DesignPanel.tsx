@@ -1,3 +1,4 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useCallback, useEffect, useMemo, useReducer, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
@@ -119,18 +120,17 @@ export function DesignPanel({ details, reload, initial, onClose }: {
       <div className="flex items-center gap-2 px-3 h-10 shrink-0 border-b border-gray-200 dark:border-white/10">
         <span className="text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">{t("canvas.design.title")}</span>
         {designs.length > 0 && (
-          <select value={currentId ?? ""} onChange={(e) => { setDesignId(e.target.value); setPageId(null); setEditing(null); }}
+          <PopupSelect value={currentId ?? ""} onChange={(e) => { setDesignId(e.target.value); setPageId(null); setEditing(null); }}
             aria-label={t("canvas.design.pick")}
-            className="h-7 max-w-[14rem] rounded-md border border-gray-200 dark:border-white/10 bg-transparent px-1.5 text-[12px]">
+            className="max-w-[14rem]">
             {designs.map((d) => <option key={d.id} value={d.id}>{ownerOf(d) ? d.title : `${d.title} (${t("canvas.design.noOwnerTag")})`}</option>)}
-          </select>
+          </PopupSelect>
         )}
         {pages.length > 0 && (
-          <select value={page?.id ?? ""} onChange={(e) => { setPageId(e.target.value); setEditing(null); }}
-            aria-label={t("canvas.design.page")}
-            className="h-7 rounded-md border border-gray-200 dark:border-white/10 bg-transparent px-1.5 text-[12px]">
+          <PopupSelect value={page?.id ?? ""} onChange={(e) => { setPageId(e.target.value); setEditing(null); }}
+            aria-label={t("canvas.design.page")}>
             {pages.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
+          </PopupSelect>
         )}
         <span className="flex-1" />
         {detail && (

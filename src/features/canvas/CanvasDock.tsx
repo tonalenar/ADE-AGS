@@ -58,24 +58,30 @@ const ClockIcon = () => <Svg><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 
 const DesignIcon = () => <Svg><rect x="3" y="4" width="8" height="16" rx="1.5" /><rect x="13" y="4" width="8" height="9" rx="1.5" /></Svg>;
 const FitIcon = () => <Svg><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" /></Svg>;
 
-/** Un botón redondo de la barra. */
+/** Material translúcido de la barra y los paneles (estilo macOS). */
+const material = "bg-white/85 dark:bg-surface-raised/75 backdrop-blur-[30px] backdrop-saturate-[180%] shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]";
+const hairline = "border-black/[0.08] dark:border-white/[0.08]";
+
+/** Un botón de la barra: pastilla de 34px; la activa queda en gris elevado. */
 function Pill({ label, active, onClick, children, className = "" }: {
   label: string; active?: boolean; onClick: () => void; children: React.ReactNode; className?: string;
 }) {
   return (
     <Button variant="custom" onClick={onClick} title={label} aria-label={label} aria-pressed={active}
-      className={`cc-t h-10 min-w-10 px-2.5 flex items-center justify-center gap-1.5 rounded-full border shadow-md backdrop-blur
+      className={`cc-t h-[34px] min-w-[34px] px-2 flex items-center justify-center gap-1.5 rounded-[9px]
         ${active
-          ? "bg-accent-500/15 border-accent-400/60 text-accent-600 dark:text-accent-300"
-          : "bg-white/92 dark:bg-surface-raised/92 border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white"}
+          ? "bg-gray-200 text-gray-900 dark:bg-surface-overlay dark:text-white"
+          : "text-gray-500 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.06] hover:text-gray-900 dark:hover:text-white"}
         ${className}`}>
       {children}
     </Button>
   );
 }
 
-const popover = `pointer-events-auto absolute right-3 bottom-16 rounded-2xl overflow-hidden border border-gray-200
-  dark:border-white/10 bg-white/97 dark:bg-surface-raised/97 shadow-xl`;
+/** Separador hairline entre grupos de la barra. */
+const Sep = () => <span aria-hidden className="w-px h-[22px] mx-1.5 bg-black/10 dark:bg-white/[0.08]" />;
+
+const popover = `pointer-events-auto absolute right-3 bottom-16 rounded-xl overflow-hidden border ${hairline} ${material}`;
 
 /**
  * La barra de abajo del canvas: andares, uso de los agentes (anillos), mapa y zoom, más el
@@ -148,7 +154,7 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
         </div>
       )}
 
-      <div className="pointer-events-auto absolute right-3 bottom-3 flex items-center gap-2">
+      <div className={`pointer-events-auto absolute right-3 bottom-3 flex items-center gap-1 h-[52px] px-2.5 rounded-2xl ${material}`}>
         <Pill label={t("canvas.chat.hint")} active={panel === "chat"} onClick={() => onTogglePanel("chat")} className="relative">
           <ChatIcon />
           {unreadTotal > 0 && (
@@ -162,29 +168,31 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
             {designUnseen && <span aria-label={t("canvas.design.unseen")} className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 rounded-full bg-accent-500 ring-2 ring-white dark:ring-surface-raised animate-pulse" />}
           </Pill>
         )}
+        <Sep />
         <Pill label={t("canvas.routines.hint")} active={panel === "routines"} onClick={() => onTogglePanel("routines")}><ClockIcon /></Pill>
         <Pill label={t("canvas.dock.layers")} active={panel === "layers"} onClick={() => onTogglePanel("layers")}><LayersIcon /></Pill>
-        <Pill label={t("canvas.dock.usage")} active={usageOpen} onClick={toggleUsage} className="gap-1.5 px-3">
+        <Sep />
+        <Pill label={t("canvas.dock.usage")} active={usageOpen} onClick={toggleUsage} className="gap-1 px-2">
           <Ring percent={rings.claude} color={RING_COLORS.claude} />
           <Ring percent={rings.codex} color={RING_COLORS.codex} />
           {rings.antigravity !== null && <Ring percent={rings.antigravity} color={RING_COLORS.gemini} />}
           <Ring percent={petPercent} color={RING_COLORS.gemini} />
         </Pill>
+        <Sep />
         <Pill label={t("canvas.dock.map")} active={panel === "map"} onClick={() => onTogglePanel("map")}><MapIcon /></Pill>
 
-        <div className="h-10 flex items-center rounded-full border shadow-md backdrop-blur bg-white/92 dark:bg-surface-raised/92
-          border-gray-200 dark:border-white/10 text-gray-600 dark:text-gray-300">
+        <div className="flex items-center gap-0.5 h-[34px] ml-0.5 p-0.5 rounded-[9px] bg-gray-100 dark:bg-surface-raised text-gray-600 dark:text-gray-300">
           <Button variant="custom" onClick={() => rf.zoomOut({ duration: 160 })} aria-label={t("canvas.zoomOut")}
-            className="cc-t w-9 h-10 flex items-center justify-center rounded-l-full text-[16px] hover:text-gray-900 dark:hover:text-white">−</Button>
+            className="cc-t w-[30px] h-[30px] flex items-center justify-center rounded-[7px] text-[16px] leading-none hover:bg-white dark:hover:bg-white/[0.06] hover:text-gray-900 dark:hover:text-white">−</Button>
           <Button variant="custom" onClick={onReset} title={t("canvas.liveHint")}
-            className="cc-t w-12 h-10 text-[12px] font-semibold tabular-nums hover:text-gray-900 dark:hover:text-white">
+            className="cc-t min-w-[50px] h-[30px] px-1 rounded-[7px] font-mono text-[12px] tabular-nums text-gray-900 dark:text-gray-50 hover:bg-white dark:hover:bg-white/[0.06]">
             {Math.round(zoom * 100)}%
           </Button>
           <Button variant="custom" onClick={() => rf.zoomIn({ duration: 160 })} aria-label={t("canvas.zoomIn")}
-            className="cc-t w-9 h-10 flex items-center justify-center text-[16px] hover:text-gray-900 dark:hover:text-white">+</Button>
-          <span className="w-px h-5 bg-gray-200 dark:bg-white/10" />
+            className="cc-t w-[30px] h-[30px] flex items-center justify-center rounded-[7px] text-[16px] leading-none hover:bg-white dark:hover:bg-white/[0.06] hover:text-gray-900 dark:hover:text-white">+</Button>
+          <span aria-hidden className="w-px h-4 mx-0.5 bg-black/10 dark:bg-white/[0.08]" />
           <Button variant="custom" onClick={onFit} aria-label={t("canvas.fit")} title={t("canvas.fit")}
-            className="cc-t w-10 h-10 flex items-center justify-center rounded-r-full hover:text-gray-900 dark:hover:text-white"><FitIcon /></Button>
+            className="cc-t w-[30px] h-[30px] flex items-center justify-center rounded-[7px] hover:bg-white dark:hover:bg-white/[0.06] hover:text-gray-900 dark:hover:text-white"><FitIcon /></Button>
         </div>
       </div>
     </div>
@@ -201,11 +209,11 @@ function UsagePanel({ accounts, onClose }: { accounts: AgentAccount[]; onClose: 
   const { t } = useTranslation();
   return (
     <div className={`${popover} w-[22rem] max-h-[calc(100%-5rem)] flex flex-col`}>
-      <div className="flex items-center gap-1 pl-4 pr-2 h-11 shrink-0 border-b border-gray-200 dark:border-white/10">
-        <span className="text-[13px] font-semibold text-gray-800 dark:text-gray-100">{t("canvas.dock.usageTitle")}</span>
+      <div className={`flex items-center gap-1 pl-4 pr-2 h-11 shrink-0 border-b ${hairline}`}>
+        <span className="text-[13px] font-semibold tracking-[-0.01em] text-gray-800 dark:text-gray-100">{t("canvas.dock.usageTitle")}</span>
         <span className="flex-1" />
         <Button variant="custom" onClick={onClose} aria-label={t("canvas.dock.close")}
-          className="cc-t w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:text-gray-700 dark:hover:text-gray-200">
+          className="cc-t w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.06] hover:text-gray-700 dark:hover:text-gray-200">
           <CloseIcon className="w-3 h-3" />
         </Button>
       </div>

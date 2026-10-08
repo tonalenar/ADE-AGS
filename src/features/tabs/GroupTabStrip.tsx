@@ -118,7 +118,7 @@ export function GroupTabStrip({ items, active, groupFocused, draggable }: {
         const title = view.title || (view.kind === "browser" ? t("browser.newTab") : "");
         return (
           <Fragment key={key}>
-            {separator && <span className="shrink-0 self-center w-px h-4 mx-1 bg-gray-300 dark:bg-white/10" />}
+            {separator && <span className="shrink-0 self-center w-px h-4 mx-1 bg-gray-300 dark:bg-white/[0.12]" />}
             <ViewTabItem
               tabKey={key}
               className={faded}

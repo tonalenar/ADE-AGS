@@ -50,10 +50,10 @@ export function MissionTimingsPanel({ missionId }: { missionId: string }) {
         {summary.byKind.map((k) => (
           <div key={k.kind} className="flex items-center gap-2 text-[11.5px]">
             <span className="w-28 shrink-0 text-gray-600 dark:text-gray-300">{t(`missions.timings.kind.${k.kind}`)}</span>
-            <div className="flex-1 h-1.5 rounded-full bg-gray-200 dark:bg-white/10 overflow-hidden">
+            <div className="flex-1 h-1.5 rounded-full bg-gray-200 dark:bg-surface-overlay overflow-hidden">
               <div className="h-full rounded-full bg-accent-500" style={{ width: `${shareOf(k.totalMs, summary.wallMs)}%` }} />
             </div>
-            <span className="w-32 shrink-0 text-right tabular-nums text-gray-500 dark:text-gray-400">
+            <span className="w-32 shrink-0 text-right font-mono tabular-nums text-gray-500 dark:text-gray-400">
               {k.count}× · {formatDuration(k.totalMs)}
             </span>
           </div>
@@ -61,7 +61,7 @@ export function MissionTimingsPanel({ missionId }: { missionId: string }) {
       </div>
 
       <div>
-        <div className="mb-1 text-[10.5px] font-semibold uppercase tracking-widest text-gray-400 dark:text-white/35">
+        <div className="mb-1 text-[11px] font-medium uppercase tracking-[0.06em] text-gray-500 dark:text-white/45">
           {t("missions.timings.slowest")}
         </div>
         {summary.slowest.map((s) => (
@@ -72,7 +72,7 @@ export function MissionTimingsPanel({ missionId }: { missionId: string }) {
               {s.target ? ` → ${s.target}` : ""}
               {s.detail ? ` · ${s.detail}` : ""}
             </span>
-            <span className="shrink-0 tabular-nums text-gray-600 dark:text-gray-300">{formatDuration(s.endedMs - s.startedMs)}</span>
+            <span className="shrink-0 font-mono tabular-nums text-gray-600 dark:text-gray-300">{formatDuration(s.endedMs - s.startedMs)}</span>
           </div>
         ))}
       </div>
@@ -108,7 +108,7 @@ export function MissionEfficiencyCard({ missionId, compact = false }: { missionI
     : `${percent > 0 ? "+" : ""}${percent.toFixed(1)}%`;
   const shell = compact
     ? "ags-hq__detail"
-    : "rounded-lg border border-gray-200 bg-gray-50 p-3 dark:border-white/10 dark:bg-white/[0.03]";
+    : "rounded-xl bg-gray-50 dark:bg-surface p-4 ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.07]";
   const label = compact ? "ags-hq__dim" : "text-[10px] font-semibold uppercase tracking-wider text-gray-400 dark:text-white/40";
   const metric = compact ? "text-gray-100" : "text-gray-800 dark:text-gray-100";
 

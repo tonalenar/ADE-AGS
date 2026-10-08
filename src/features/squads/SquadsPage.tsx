@@ -68,7 +68,7 @@ export function SquadsPage() {
 
   return (
     <div className="flex flex-col h-full min-h-0 bg-white dark:bg-surface-sunken">
-      <div className="flex items-center gap-3 px-4 h-11 shrink-0 border-b border-gray-200 dark:border-white/8">
+      <div className="flex items-center gap-3 pl-4 pr-14 h-[52px] shrink-0 border-b border-black/[0.08] dark:border-white/[0.08]">
         <span className="flex-1 text-[13.5px] font-bold text-gray-900 dark:text-white">{t("squads.title")}</span>
         <span className="text-[10.5px] text-gray-400 dark:text-white/35">{t("squads.roleIsWork")}</span>
         <Button variant="primary" size="sm" onClick={() => setDialog("create")}>{t("squads.new")}</Button>

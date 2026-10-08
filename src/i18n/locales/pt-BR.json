@@ -2548,5 +2548,6 @@
   "memorySearch.verify.ok": "verificada há {{days}} dias · TTL {{ttl}} d",
   "memoryBlock.label": "Incluir memória somente-leitura no início da sessão",
   "memoryBlock.hintOff": "Desligado (padrão). Quando ligado, um bloco de memória é só lido no início da sessão. Nada é escrito em CLAUDE.md nem em AGENTS.md.",
-  "memoryBlock.hintOn": "Ligado: o conteúdo da memória entra como texto, nunca como instrução, e só vale para esta tab. Nada é escrito em CLAUDE.md nem em AGENTS.md."
+  "memoryBlock.hintOn": "Ligado: o conteúdo da memória entra como texto, nunca como instrução, e só vale para esta tab. Nada é escrito em CLAUDE.md nem em AGENTS.md.",
+  "missions.search": "Buscar missão"
 }

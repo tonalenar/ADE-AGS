@@ -34,10 +34,10 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 /** Una barra de bloques, como la vida de un personaje: `value` de 0 a 1. */
-function Meter({ value, color, busy = false, blocks = 16 }: { value: number; color?: string; busy?: boolean; blocks?: number }) {
+function Meter({ value, color, glow, busy = false, blocks = 16 }: { value: number; color?: string; glow?: string; busy?: boolean; blocks?: number }) {
   const lit = Math.round(Math.max(0, Math.min(1, value)) * blocks);
   return (
-    <div className={`ags-hq__meter ${busy ? "ags-hq__meter--busy" : ""}`} style={{ ["--meter" as string]: color }} aria-hidden>
+    <div className={`ags-hq__meter ${busy ? "ags-hq__meter--busy" : ""}`} style={{ ["--meter" as string]: color, ["--meter-glow" as string]: glow }} aria-hidden>
       {Array.from({ length: blocks }, (_, i) => <i key={i} className={i < lit ? "on" : ""} />)}
     </div>
   );
@@ -175,34 +175,36 @@ export function BotPanel() {
     <div className="ags-hq ags-hq__backdrop" role="dialog" aria-modal="true" aria-label={t("botPanel.title")} onClick={() => setOpen(false)}>
       <div className="ags-hq__screen" onClick={(e) => e.stopPropagation()}>
         <div className="ags-hq__bar">
-          <span className="ags-hq__title">AGS·BOT // {t("botPanel.title")}</span>
+          <span className="ags-hq__title">AGS·BOT <span className="ags-hq__sl">//</span> {t("botPanel.title")}</span>
           <span className="ags-hq__blink">_</span>
-          <span className="ags-hq__score">HI-SCORE {scoreDigits(pet.xp, 9)}</span>
+          <span className="ags-hq__score"><span>HI-SCORE</span><b>{scoreDigits(pet.xp, 9)}</b></span>
           <button type="button" className="ags-hq__close" onClick={() => setOpen(false)}>ESC</button>
         </div>
 
         <div className="ags-hq__body">
           <aside className="ags-hq__hero">
-            <Pet level={pet.level} state={busy > 0 ? "working" : "idle"} size={150} />
+            <div className="ags-hq__stage">
+              <Pet level={pet.level} state={busy > 0 ? "working" : "idle"} size={150} />
+            </div>
             <div className="ags-hq__level">LV <LevelNumber level={pet.level} /></div>
             <div className="ags-hq__rank">{t(rankKey(pet.level))}</div>
-            <div className="ags-hq__stat">
+            <div className="ags-hq__stat ags-hq__stat--exp">
               <div className="ags-hq__stat-row"><span>EXP</span><b>{formatTokens(pet.xp)}</b></div>
-              <Meter value={pet.progress} color="var(--hq-yellow)" />
-              <div className="ags-hq__stat-row" style={{ marginTop: 4 }}>
+              <Meter value={pet.progress} color="linear-gradient(var(--hq-yellow), var(--hq-orange))" glow="rgba(255, 180, 70, 0.45)" blocks={20} />
+              <div className="ags-hq__stat-row">
                 <span>{t("botPanel.next")}</span><b>{pet.toNext > 0 ? formatTokens(pet.toNext) : "MAX"}</b>
               </div>
             </div>
-            <div className="ags-hq__stat">
+            <div className="ags-hq__stat ags-hq__stat--pwr">
               <div className="ags-hq__stat-row"><span>PWR</span><b>{tier > 0 ? t("botPanel.phase", { n: tier }) : t("botPanel.resting")}</b></div>
-              <Meter value={tier / 4} color={tier >= 4 ? "var(--hq-cyan)" : "var(--hq-orange)"} busy={busy > 0} />
-              <div className="ags-hq__stat-row" style={{ marginTop: 4 }}>
+              <Meter value={tier / 4} color="var(--hq-cyan)" glow="rgba(62, 230, 255, 0.45)" busy={busy > 0} blocks={20} />
+              <div className="ags-hq__stat-row">
                 <span>{t("botPanel.agentsNow")}</span><b>{busy}</b>
               </div>
             </div>
-            <div className="ags-hq__stat">
+            <div className="ags-hq__stat ags-hq__stat--tro">
               <div className="ags-hq__stat-row"><span>{t("botPanel.trophiesShort")}</span><b>{unlocked}/{trophyList.length}</b></div>
-              <Meter value={unlocked / trophyList.length} color="var(--hq-pink)" />
+              <Meter value={unlocked / trophyList.length} color="var(--hq-pink)" glow="rgba(255, 79, 154, 0.45)" blocks={trophyList.length} />
             </div>
           </aside>
 
@@ -210,11 +212,18 @@ export function BotPanel() {
             <div className="ags-hq__tabs" role="tablist">
               {VIEWS.map((v, i) => (
                 <button key={v} type="button" role="tab" aria-selected={view === v} className="ags-hq__tab" onClick={() => setView(v)}>
-                  {i + 1}·{t(`botPanel.tab.${v}`)}
+                  <i>{i + 1}</i>{t(`botPanel.tab.${v}`)}
                 </button>
               ))}
             </div>
 
+            <div className={"ags-hq__crt" + (view === "live" ? " ags-hq__crt--on" : "")}>
+            {view === "live" && (
+              <div className="ags-hq__hud">
+                <span><b>AGS // {t("botPanel.tab.live")}</b>{current && <span className="ags-hq__hud-name"> {current.title}</span>}</span>
+                {runningMissions.length > 0 && <span className="ags-hq__live">LIVE</span>}
+              </div>
+            )}
             <div className="ags-hq__view">
               {view === "status" && (
                 <div className="ags-hq__grid">
@@ -336,14 +345,15 @@ export function BotPanel() {
                   : <p className="ags-hq__dim">{t("botPanel.live.empty")}</p>
               )}
             </div>
+            </div>
           </section>
         </div>
 
         <div className="ags-hq__foot">
-          <span><b>← →</b> {t("botPanel.keys.menu")}</span>
-          <span><b>↑ ↓</b> {t("botPanel.keys.select")}</span>
-          <span><b>1-5</b> {t("botPanel.keys.jump")}</span>
-          <span><b>ESC</b> {t("botPanel.keys.exit")}</span>
+          <span><kbd>←</kbd><kbd>→</kbd>{t("botPanel.keys.menu")}</span>
+          <span><kbd>↑</kbd><kbd>↓</kbd>{t("botPanel.keys.select")}</span>
+          <span><kbd>1-5</kbd>{t("botPanel.keys.jump")}</span>
+          <span><kbd className="ags-hq__kbd--pink">ESC</kbd>{t("botPanel.keys.exit")}</span>
         </div>
       </div>
     </div>

@@ -3,10 +3,11 @@ import { useTranslation } from "react-i18next";
 import { Alert, AnimateSpin, Button, Input } from "neogestify-ui-components";
 
 import { AppDialog } from "@/shared/ui/AppDialog";
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 
 import type { TerminalDeliveryInput, TerminalTestResult } from "./types";
 
-const SELECT = "w-full rounded-lg px-2.5 py-2 outline-none bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10 focus:border-accent-400 dark:focus:border-accent-500 text-[12px] text-gray-800 dark:text-gray-200";
+const SELECT = "w-full";
 
 export function MissionFinishDialog({ onClose, onFinish }: {
   onClose: () => void;
@@ -49,11 +50,11 @@ export function MissionFinishDialog({ onClose, onFinish }: {
       <div className="flex flex-col gap-3.5">
         <label className="flex flex-col gap-1.5">
           <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">{t("missions.delivery.form.testLabel")}</span>
-          <select className={SELECT} value={testResult} onChange={(event) => setTestResult(event.target.value as TerminalTestResult)}>
+          <PopupSelect className={SELECT} value={testResult} onChange={(event) => setTestResult(event.target.value as TerminalTestResult)}>
             {(["passed", "failed", "not_run"] as const).map((result) => (
               <option key={result} value={result}>{t(`missions.delivery.test.${result}`)}</option>
             ))}
-          </select>
+          </PopupSelect>
         </label>
 
         <label className="flex flex-col gap-1.5">

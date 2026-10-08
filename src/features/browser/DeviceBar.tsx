@@ -1,6 +1,7 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, CloseIcon, Select, Tooltip } from "neogestify-ui-components";
+import { Button, CloseIcon, Tooltip } from "neogestify-ui-components";
 
 import { RotateIcon } from "@/app/icons";
 
@@ -57,22 +58,15 @@ export function DeviceBar({ viewport, touch, onChange, onTouch, onClose }: {
     <div className="flex items-center gap-2 h-10 shrink-0 px-2.5 overflow-x-auto
       border-b border-gray-200 dark:border-white/7 bg-white/60 dark:bg-white/2">
       <div className="w-52 shrink-0">
-        <Select
-          size="sm"
-          variant="outline"
+        <PopupSelect
           value={match?.preset.id ?? "custom"}
           onChange={(e) => {
             const preset = VIEWPORT_PRESETS.find((p) => p.id === e.target.value);
             if (preset) set(match?.rotated ? rotate(preset) : preset);
-          }}
-          options={[
-            { value: "custom", label: t("browser.viewport.custom") },
-            ...VIEWPORT_PRESETS.map((p) => ({
-              value: p.id,
-              label: `${t(`browser.viewport.preset.${p.id}`)} · ${p.width}×${p.height}`,
-            })),
-          ]}
-        />
+          }}>
+          <option value="custom">{t("browser.viewport.custom")}</option>
+          {VIEWPORT_PRESETS.map((p) => <option key={p.id} value={p.id}>{`${t(`browser.viewport.preset.${p.id}`)} · ${p.width}×${p.height}`}</option>)}
+        </PopupSelect>
       </div>
 
       <div className="flex items-center gap-1 shrink-0">

@@ -1,3 +1,4 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
@@ -36,6 +37,16 @@ const KIND_LABEL: Record<MemoryKind, string> = {
   note: "Nota",
 };
 const OPERATION_LABEL = { create: "criação", update: "atualização", delete: "exclusão" } as const;
+
+/** Campo de formulário: superfície de campo, anel de foco de 3px. */
+const FIELD = "rounded-md bg-gray-200/70 px-2.5 text-[12px] text-gray-900 focus:outline-none focus-visible:ring-[3px] focus-visible:ring-accent-500/25 dark:bg-surface-raised dark:text-gray-100";
+const LABEL = "flex flex-col gap-1.5 text-[11px] font-medium text-gray-600 dark:text-white/55";
+/** Metadado: número, id e data sempre em mono tabular (o "toque nerd"). */
+const META = "font-mono text-[10.5px] leading-[14px] tabular-nums text-gray-500 dark:text-white/40";
+/** Caixa de conteúdo de memória (prévia, revisão, snapshot). */
+const BODY = "whitespace-pre-wrap break-words rounded-lg bg-gray-200/50 p-2.5 text-[11.5px] leading-4 text-gray-800 dark:bg-surface-sunken dark:text-white/70";
+const CARD = "rounded-xl bg-gray-100/70 p-3 dark:bg-surface-raised/60";
+const SUBPANEL = "rounded-xl bg-violet-500/8 p-3 dark:bg-violet-300/5";
 
 export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], activeRunId = null, initialTab }: {
   workspaceId: string;
@@ -256,10 +267,10 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
 
   const renderList = (scope: MemoryScope) => {
     const page = scope === "workspace" ? workspacePage : missionPage;
-    if (!page) return <p role="status" className="text-xs text-gray-400">{t("memorySearch.loading")}</p>;
+    if (!page) return <p role="status" className="text-xs text-gray-400 dark:text-white/40">{t("memorySearch.loading")}</p>;
     return (
-      <div className="flex flex-col gap-2">
-        {page.items.length === 0 && !loadFailed && <p className="text-xs text-gray-400">{isEmptySearch(applied) ? "Nenhuma memória registrada." : t("memorySearch.noResults")}</p>}
+      <div className="flex flex-col gap-2.5">
+        {page.items.length === 0 && !loadFailed && <p className="text-xs text-gray-400 dark:text-white/40">{isEmptySearch(applied) ? "Nenhuma memória registrada." : t("memorySearch.noResults")}</p>}
         {page.items.map((entry) => (
           <MemoryEntryCard key={entry.id} onPurged={reload} entry={entry} busy={busy} workspaceId={workspaceId} missionId={missionId}
             onInspect={() => inspect(entry)}
@@ -274,7 +285,7 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
                 .then((full) => openDelete(full.entry)).catch((cause) => setError(String(cause)));
             }} />
         ))}
-        {page.truncated && <p className="text-[10px] text-amber-700 dark:text-amber-300">A lista foi limitada pelo tamanho da resposta. Use “Carregar mais” para continuar.</p>}
+        {page.truncated && <p className="text-[10.5px] text-amber-700 dark:text-amber-300">A lista foi limitada pelo tamanho da resposta. Use “Carregar mais” para continuar.</p>}
         {page.hasMore && <Button variant="ghost" size="sm" disabled={busy} onClick={() => loadMore(scope)}>Carregar mais</Button>}
       </div>
     );
@@ -287,16 +298,18 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
   ];
 
   return (
-    <section className="flex flex-col gap-3 rounded-xl border border-gray-200 p-4 dark:border-white/10">
+    <section className="flex flex-col gap-3 rounded-xl border border-gray-200 p-4 dark:border-white/[0.08]">
       <div className="flex flex-wrap items-center gap-2">
-        <h3 className="mr-auto text-[11px] font-bold uppercase tracking-wider text-gray-500 dark:text-white/45">Memória compartilhada</h3>
+        <h3 className="mr-auto text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-500 dark:text-white/45">Memória compartilhada</h3>
         {selectedRunId && runs.length > 1 && (
-          <label className="flex items-center gap-2 text-[10px] text-gray-500 dark:text-white/45">
+          <label className="flex items-center gap-2 text-[10.5px] text-gray-500 dark:text-white/45">
             Run
-            <select aria-label="Selecionar Run" value={selectedRunId} onChange={(event) => setRunSelection(event.target.value)}
-              className="rounded border border-gray-200 bg-white px-2 py-1 text-xs dark:border-white/10 dark:bg-neutral-900">
-              {runs.map((run, index) => <option key={run.id} value={run.id}>#{runs.length - index} · {run.status} · {run.id.slice(0, 8)}</option>)}
-            </select>
+            <span className="relative inline-flex">
+              <PopupSelect aria-label="Selecionar Run" value={selectedRunId} onChange={(event) => setRunSelection(event.target.value)}
+                className="font-mono tabular-nums">
+                {runs.map((run, index) => <option key={run.id} value={run.id}>#{runs.length - index} · {run.status} · {run.id.slice(0, 8)}</option>)}
+              </PopupSelect>
+            </span>
           </label>
         )}
         {(tab === "workspace" || tab === "mission") && (
@@ -306,11 +319,11 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
       </div>
       <RepoSyncNotice workspaceId={workspaceId} />
 
-      <div role="tablist" aria-label="Seções de memória" className="flex flex-wrap gap-1 border-b border-gray-200 dark:border-white/8">
+      <div role="tablist" aria-label="Seções de memória" className="flex flex-wrap gap-0.5 rounded-lg bg-gray-200/70 p-0.5 dark:bg-surface-raised">
         {tabs.map((item) => (
           <button key={item.id} type="button" role="tab" aria-selected={tab === item.id}
             onClick={() => { setTab(item.id); setDetail(null); }}
-            className={`px-2.5 py-2 text-[11px] border-b-2 ${tab === item.id ? "border-violet-500 text-violet-700 dark:text-violet-300" : "border-transparent text-gray-500 hover:text-gray-800 dark:text-white/45 dark:hover:text-white"}`}>
+            className={`h-6 rounded-md px-2.5 text-[12px] transition-colors ${tab === item.id ? "bg-white font-medium text-gray-900 shadow-sm dark:bg-surface-overlay dark:text-white" : "text-gray-600 hover:text-gray-900 dark:text-white/55 dark:hover:text-white"}`}>
             {item.label}
           </button>
         ))}
@@ -320,7 +333,7 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
         <MemorySearchBar value={search} onChange={setSearch} scope={tab} onScope={(s) => { setTab(s); setDetail(null); }} canMission={missionId !== null} />
       )}
       {stats && (tab === "workspace" || tab === "mission") && (
-        <p className="text-[10.5px] text-gray-500 dark:text-white/45">{t("memorySearch.usage", { entries: stats.entries, used: stats.memoryUsage.entriesUsed, runs: stats.memoryUsage.runsUsingMemory })}</p>
+        <p className="font-mono text-[10.5px] tabular-nums text-gray-500 dark:text-white/40">{t("memorySearch.usage", { entries: stats.entries, used: stats.memoryUsage.entriesUsed, runs: stats.memoryUsage.runsUsingMemory })}</p>
       )}
       {error && (
         <p role="alert" className="text-xs text-red-600 dark:text-red-400">
@@ -329,7 +342,7 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
       )}
       {notice && <p role="status" className="text-xs text-amber-700 dark:text-amber-300">{notice}</p>}
       {pendingSecret && (
-        <div role="alert" className="flex flex-col gap-2 rounded-lg border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-200">
+        <div role="alert" className="flex flex-col gap-2 rounded-xl bg-amber-500/10 p-3 text-xs leading-4 text-amber-900 dark:text-amber-200">
           <p>A aprovação de <span className="font-mono">{pendingSecret.key}</span> parece conter uma credencial. Confirme conscientemente para guardá-la. Sem a confirmação, essa entrada não é aprovada; se já estiver no banco, a exportação omite só ela e segue com as outras.</p>
           <div className="flex gap-2">
             <Button variant="primary" size="sm" disabled={busy} onClick={() => decide(pendingSecret, true, true)}>Confirmar e aprovar</Button>
@@ -365,37 +378,37 @@ function MemoryEntryCard({ entry, busy, workspaceId, missionId, onInspect, onApp
   const isActive = entry.status === "active" && entry.currentRevision !== null;
   const status = entry.pendingRevision !== null ? "Proposta pendente" : entry.status === "deleted" ? "Excluída" : isActive ? "Ativa" : "Sem revisão aprovada";
   return (
-    <article className="flex flex-col gap-2 rounded-lg border border-gray-200 px-3 py-2.5 dark:border-white/10">
+    <article className="flex flex-col gap-2 rounded-xl bg-gray-100/70 p-3 dark:bg-surface-raised/60 dark:shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.05)]">
       <div className="flex flex-wrap items-center gap-2 text-[11px]">
-        <span className="font-mono font-semibold text-gray-800 dark:text-gray-100">{entry.key}</span>
-        <span className="rounded bg-gray-100 px-1.5 py-0.5 dark:bg-white/8">{KIND_LABEL[entry.kind]}</span>
-        <span className="text-gray-500 dark:text-white/45">Prioridade {entry.priority}</span>
-        <span className={`ml-auto ${entry.pendingRevision !== null ? "text-amber-700 dark:text-amber-300" : isActive ? "text-emerald-700 dark:text-emerald-300" : "text-gray-400"}`}>{status}</span>
+        <span className="font-mono text-[12px] font-semibold text-gray-900 dark:text-gray-100">{entry.key}</span>
+        <span className="inline-flex h-[18px] items-center rounded-full bg-gray-200/80 px-2 text-[10.5px] text-gray-700 dark:bg-white/[0.08] dark:text-gray-300">{KIND_LABEL[entry.kind]}</span>
+        <span className={`${META}`}>Prioridade {entry.priority}</span>
+        <span className={`ml-auto text-[11px] font-medium ${entry.pendingRevision !== null ? "text-amber-700 dark:text-amber-300" : isActive ? "text-emerald-700 dark:text-emerald-300" : "text-gray-500 dark:text-white/40"}`}>{status}</span>
       </div>
-      <p className="text-[10px] text-gray-400 dark:text-white/35">
+      <p className={META}>
         Revisão {entry.currentRevision ?? "—"} · {entry.authorKind ? actorLabel(entry.authorKind) : "Sem revisão aprovada"} · {dateLabel(entry.updatedAt)}
       </p>
-      {(entry.sourceRunId || entry.sourceTaskId || entry.sourceFactId) && <p className="text-[10px] text-gray-500">Origem: Run {entry.sourceRunId ?? "—"} · Task {entry.sourceTaskId ?? "—"} · Fact {entry.sourceFactId ?? "—"}</p>}
-      {entry.body !== null && <pre className="whitespace-pre-wrap break-words rounded bg-gray-50 p-2 text-[11px] text-gray-700 dark:bg-white/4 dark:text-white/65">{entry.body}</pre>}
-      {(entry.bodyTruncated || entry.pendingBodyTruncated) && <p className="text-[10px] text-amber-700 dark:text-amber-300">Prévia limitada. Use “Ver revisões” para ler o conteúdo completo.</p>}
+      {(entry.sourceRunId || entry.sourceTaskId || entry.sourceFactId) && <p className="font-mono text-[10.5px] leading-[14px] text-gray-500 dark:text-white/40">Origem: Run {entry.sourceRunId ?? "—"} · Task {entry.sourceTaskId ?? "—"} · Fact {entry.sourceFactId ?? "—"}</p>}
+      {entry.body !== null && <pre className={BODY}>{entry.body}</pre>}
+      {(entry.bodyTruncated || entry.pendingBodyTruncated) && <p className="text-[10.5px] text-amber-700 dark:text-amber-300">Prévia limitada. Use “Ver revisões” para ler o conteúdo completo.</p>}
       {entry.pendingRevision !== null && (
-        <div className="flex flex-col gap-1 rounded-md border border-amber-300/50 bg-amber-50/70 p-2 dark:border-amber-300/15 dark:bg-amber-300/5">
-          <p className="text-[10px] font-semibold text-amber-800 dark:text-amber-300">
+        <div className="flex flex-col gap-1.5 rounded-lg bg-amber-500/10 p-2.5">
+          <p className="font-mono text-[10.5px] font-semibold leading-[14px] tabular-nums text-amber-800 dark:text-amber-300">
             Proposta de {OPERATION_LABEL[entry.pendingOperation ?? "update"]} · revisão {entry.pendingRevision} · {entry.pendingActorKind ? actorLabel(entry.pendingActorKind) : "Agente"} · {entry.pendingCreatedAt ? dateLabel(entry.pendingCreatedAt) : ""}
           </p>
-          <p className="text-[10px]">{KIND_LABEL[entry.pendingKind ?? entry.kind]} · prioridade {entry.pendingPriority ?? entry.priority} · Run {entry.pendingSourceRunId ?? "—"} · Task {entry.pendingSourceTaskId ?? "—"}</p>
-          {entry.pendingBody !== null && <pre className="whitespace-pre-wrap break-words text-[11px] text-gray-700 dark:text-white/65">{entry.pendingBody}</pre>}
-          {entry.pendingReason && <p className="text-[10px] text-gray-500 dark:text-white/45">Motivo: {entry.pendingReason}</p>}
-          {entry.pendingSourceFactId && <p className="text-[10px] text-gray-500 dark:text-white/45">Promovido do Run Fact {entry.pendingSourceFactId.slice(0, 8)}</p>}
+          <p className={META}>{KIND_LABEL[entry.pendingKind ?? entry.kind]} · prioridade {entry.pendingPriority ?? entry.priority} · Run {entry.pendingSourceRunId ?? "—"} · Task {entry.pendingSourceTaskId ?? "—"}</p>
+          {entry.pendingBody !== null && <pre className="whitespace-pre-wrap break-words text-[11.5px] leading-4 text-gray-800 dark:text-white/70">{entry.pendingBody}</pre>}
+          {entry.pendingReason && <p className={META}>Motivo: {entry.pendingReason}</p>}
+          {entry.pendingSourceFactId && <p className={META}>Promovido do Run Fact {entry.pendingSourceFactId.slice(0, 8)}</p>}
         </div>
       )}
       <VerificationLine entry={entry} busy={busy} />
-      <div className="flex flex-wrap gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
         <Button variant="ghost" size="sm" disabled={busy} onClick={onInspect}>Ver revisões</Button>
         <MemoryValidityHistory entry={entry} workspaceId={workspaceId} missionId={missionId} />
         {entry.pendingRevision !== null ? (
           <>
-            <Button variant="primary" size="sm" disabled={busy} onClick={onApprove}>Aprovar</Button>
+            <Button variant="primary" size="sm" disabled={busy} onClick={onApprove} className="!bg-emerald-600 hover:!bg-emerald-500">Aprovar</Button>
             <Button variant="danger" size="sm" disabled={busy} onClick={onReject}>Rejeitar</Button>
           </>
         ) : entry.status === "active" && entry.currentRevision !== null ? (
@@ -415,11 +428,11 @@ function VerificationLine({ entry, busy }: { entry: MemoryEntry; busy: boolean }
   const v = verificationOf(entry, Math.floor(Date.now() / 1000));
   const canCheck = entry.currentRevision !== null;
   if (v.state === "none" && !canCheck) return null;
-  const tone = v.state === "expired" || v.state === "never" ? "border-amber-500/60 text-amber-700 dark:text-amber-400" : "border-emerald-500/50 text-emerald-700 dark:text-emerald-400";
+  const tone = v.state === "expired" || v.state === "never" ? "bg-amber-500/15 text-amber-700 dark:text-amber-300" : "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300";
   return (
-    <div className="flex flex-wrap items-start gap-2">
-      {v.state === "none" ? <span className="text-[10.5px] text-gray-400">{t("memorySearch.verify.none")}</span> : (
-        <span data-verification={v.state} className={`rounded-full border px-2 py-px text-[10.5px] ${tone}`}>
+    <div className="flex flex-wrap items-center gap-2">
+      {v.state === "none" ? <span className="text-[10.5px] text-gray-500 dark:text-white/40">{t("memorySearch.verify.none")}</span> : (
+        <span data-verification={v.state} className={`inline-flex h-[18px] items-center rounded-full px-2 text-[10.5px] font-semibold ${tone}`}>
           {v.state === "never" ? t("memorySearch.verify.never", { ttl: v.ttlDays }) : t(v.ttlDays === null ? "memorySearch.verify.noTtl" : v.state === "expired" ? "memorySearch.verify.expired" : "memorySearch.verify.ok", { days: v.daysAgo, ttl: v.ttlDays })}
         </span>
       )}
@@ -458,38 +471,43 @@ function MemoryProposalForm({ form, busy, secretPrompt, fact, allowMission, onCh
   const promoting = form.mode === "promote";
   const title = promoting ? "Promover Run Fact" : deleting ? "Propor exclusão" : form.mode === "update" ? "Propor edição" : "Propor memória";
   return (
-    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section ref={ref} role="dialog" aria-modal="true" aria-labelledby="memory-proposal-title" className="flex max-h-[90vh] w-full max-w-lg flex-col gap-3 overflow-y-auto rounded-xl border border-gray-200 bg-white p-4 shadow-xl dark:border-white/10 dark:bg-neutral-900">
-        <h4 id="memory-proposal-title" className="text-sm font-semibold text-gray-900 dark:text-white">{title}</h4>
-        {secretPrompt && <p role="alert" className="rounded-md border border-amber-300/60 bg-amber-50 p-2 text-xs text-amber-900 dark:border-amber-300/20 dark:bg-amber-300/10 dark:text-amber-200">Este texto parece uma credencial (chave, token ou senha). Reescreva sem o valor ou confirme conscientemente para guardar mesmo assim.</p>}
-        {deleting && <p className="text-xs text-gray-600 dark:text-white/55">A exclusão será registrada como proposta. A memória continuará ativa até a aprovação do usuário.</p>}
-        {promoting && <p className="text-xs text-gray-600 dark:text-white/55">A promoção cria uma proposta pendente; o Run Fact original permanece separado e inalterado.</p>}
+    <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[4px]" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section ref={ref} role="dialog" aria-modal="true" aria-labelledby="memory-proposal-title"
+        className="flex max-h-[90vh] w-full max-w-lg flex-col gap-3.5 overflow-y-auto rounded-2xl bg-gray-50 p-5 text-gray-900 shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)] dark:bg-surface dark:text-white">
+        <h4 id="memory-proposal-title" className="text-[15px] font-semibold tracking-[-0.01em]">{title}</h4>
+        {secretPrompt && <p role="alert" className="rounded-lg bg-amber-500/10 p-2.5 text-xs leading-4 text-amber-900 dark:text-amber-200">Este texto parece uma credencial (chave, token ou senha). Reescreva sem o valor ou confirme conscientemente para guardar mesmo assim.</p>}
+        {deleting && <p className="text-xs leading-4 text-gray-600 dark:text-white/55">A exclusão será registrada como proposta. A memória continuará ativa até a aprovação do usuário.</p>}
+        {promoting && <p className="text-xs leading-4 text-gray-600 dark:text-white/55">A promoção cria uma proposta pendente; o Run Fact original permanece separado e inalterado.</p>}
         {!deleting && (
           <>
-            <label className="flex flex-col gap-1 text-[11px] text-gray-600 dark:text-white/55">Escopo
-              <select value={form.scope} disabled={form.mode === "update"} onChange={(event) => set("scope", event.target.value as MemoryScope)} className="rounded border border-gray-200 bg-white px-2 py-1.5 text-xs dark:border-white/10 dark:bg-neutral-950">
-                <option value="workspace">Memória do Workspace</option>
-                {allowMission && <option value="mission">Memória da Mission</option>}
-              </select>
+            <label className={LABEL}>Escopo
+              <span className="relative inline-flex">
+                <PopupSelect value={form.scope} disabled={form.mode === "update"} onChange={(event) => set("scope", event.target.value as MemoryScope)} className="w-full">
+                  <option value="workspace">Memória do Workspace</option>
+                  {allowMission && <option value="mission">Memória da Mission</option>}
+                </PopupSelect>
+              </span>
             </label>
-            <label className="flex flex-col gap-1 text-[11px] text-gray-600 dark:text-white/55">Chave
-              <input value={form.key} readOnly={form.mode === "update"} maxLength={128} onChange={(event) => set("key", event.target.value)} className="rounded border border-gray-200 bg-white px-2 py-1.5 text-xs dark:border-white/10 dark:bg-neutral-950" />
+            <label className={LABEL}>Chave
+              <input value={form.key} readOnly={form.mode === "update"} maxLength={128} onChange={(event) => set("key", event.target.value)} className={`h-7 font-mono ${FIELD}`} />
             </label>
-            {!promoting && <label className="flex flex-col gap-1 text-[11px] text-gray-600 dark:text-white/55">Tipo
-              <select value={form.kind} onChange={(event) => set("kind", event.target.value as MemoryKind)} className="rounded border border-gray-200 bg-white px-2 py-1.5 text-xs dark:border-white/10 dark:bg-neutral-950">
-                {KINDS.map((kind) => <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>)}
-              </select>
+            {!promoting && <label className={LABEL}>Tipo
+              <span className="relative inline-flex">
+                <PopupSelect value={form.kind} onChange={(event) => set("kind", event.target.value as MemoryKind)} className="w-full">
+                  {KINDS.map((kind) => <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>)}
+                </PopupSelect>
+              </span>
             </label>}
-            <label className="flex flex-col gap-1 text-[11px] text-gray-600 dark:text-white/55">Conteúdo
-              <textarea value={promoting ? fact?.body ?? form.body : form.body} readOnly={promoting} maxLength={4096} rows={5} onChange={(event) => set("body", event.target.value)} className="resize-y rounded border border-gray-200 bg-white px-2 py-1.5 text-xs dark:border-white/10 dark:bg-neutral-950" />
+            <label className={LABEL}>Conteúdo
+              <textarea value={promoting ? fact?.body ?? form.body : form.body} readOnly={promoting} maxLength={4096} rows={5} onChange={(event) => set("body", event.target.value)} className={`resize-y py-2 leading-4 ${FIELD}`} />
             </label>
-            <label className="flex flex-col gap-1 text-[11px] text-gray-600 dark:text-white/55">Prioridade ({form.priority})
-              <input type="range" min={-10} max={10} value={form.priority} onChange={(event) => set("priority", Number(event.target.value))} />
+            <label className={LABEL}>Prioridade ({form.priority})
+              <input type="range" className="w-full accent-accent-500" min={-10} max={10} value={form.priority} onChange={(event) => set("priority", Number(event.target.value))} />
             </label>
           </>
         )}
-        <label className="flex flex-col gap-1 text-[11px] text-gray-600 dark:text-white/55">Motivo (opcional)
-          <textarea value={form.reason} maxLength={512} rows={2} onChange={(event) => set("reason", event.target.value)} className="resize-y rounded border border-gray-200 bg-white px-2 py-1.5 text-xs dark:border-white/10 dark:bg-neutral-950" />
+        <label className={LABEL}>Motivo (opcional)
+          <textarea value={form.reason} maxLength={512} rows={2} onChange={(event) => set("reason", event.target.value)} className={`resize-y py-2 leading-4 ${FIELD}`} />
         </label>
         <div className="flex justify-end gap-2">
           <Button variant="ghost" size="sm" disabled={busy} onClick={onClose}>Cancelar</Button>
@@ -502,15 +520,15 @@ function MemoryProposalForm({ form, busy, secretPrompt, fact, allowMission, onCh
 
 function MemoryHistory({ detail, onClose }: { detail: MemoryDetail; onClose: () => void }) {
   return (
-    <section className="flex flex-col gap-2 rounded-lg border border-violet-300/40 bg-violet-50/50 p-3 dark:border-violet-300/15 dark:bg-violet-300/5">
-      <div className="flex items-center gap-2"><h4 className="mr-auto text-xs font-semibold">Histórico: {detail.entry.key}</h4><Button variant="ghost" size="sm" onClick={onClose}>Fechar</Button></div>
+    <section className={`flex flex-col gap-2 ${SUBPANEL}`}>
+      <div className="flex items-center gap-2"><h4 className="mr-auto text-xs font-semibold text-gray-900 dark:text-gray-100">Histórico: {detail.entry.key}</h4><Button variant="ghost" size="sm" onClick={onClose}>Fechar</Button></div>
       {detail.revisions.map((revision) => (
-        <article key={revision.revision} className="flex flex-col gap-1 border-t border-gray-200 pt-2 dark:border-white/8">
-          <p className="text-[10px] font-semibold">Revisão {revision.revision} · {revision.status === "proposed" ? "Pendente" : revision.status === "approved" ? "Aprovada" : "Rejeitada"} · {OPERATION_LABEL[revision.operation]} · {actorLabel(revision.actorKind)} · {dateLabel(revision.createdAt)}</p>
-          <p className="text-[10px] text-gray-500 dark:text-white/45">{KIND_LABEL[revision.kind]} · prioridade {revision.priority}{revision.expectedRevision !== null ? ` · baseada na revisão ${revision.expectedRevision}` : ""}</p>
-          <pre className="whitespace-pre-wrap break-words rounded bg-white/70 p-2 text-[11px] dark:bg-black/15">{revision.body}</pre>
-          {revision.reason && <p className="text-[10px] text-gray-500 dark:text-white/45">Motivo: {revision.reason}</p>}
-          {(revision.sourceRunId || revision.sourceTaskId || revision.sourceFactId) && <p className="text-[10px] text-gray-500 dark:text-white/45">Origem: {revision.sourceFactId ? `Run Fact ${revision.sourceFactId.slice(0, 8)}` : "Run"}{revision.sourceTaskId ? ` · Task ${revision.sourceTaskId.slice(0, 8)}` : ""}</p>}
+        <article key={revision.revision} className="flex flex-col gap-1 border-t border-gray-200 pt-2 dark:border-white/[0.08]">
+          <p className={`${META} font-semibold`}>Revisão {revision.revision} · {revision.status === "proposed" ? "Pendente" : revision.status === "approved" ? "Aprovada" : "Rejeitada"} · {OPERATION_LABEL[revision.operation]} · {actorLabel(revision.actorKind)} · {dateLabel(revision.createdAt)}</p>
+          <p className={META}>{KIND_LABEL[revision.kind]} · prioridade {revision.priority}{revision.expectedRevision !== null ? ` · baseada na revisão ${revision.expectedRevision}` : ""}</p>
+          <pre className={BODY}>{revision.body}</pre>
+          {revision.reason && <p className={META}>Motivo: {revision.reason}</p>}
+          {(revision.sourceRunId || revision.sourceTaskId || revision.sourceFactId) && <p className={META}>Origem: {revision.sourceFactId ? `Run Fact ${revision.sourceFactId.slice(0, 8)}` : "Run"}{revision.sourceTaskId ? ` · Task ${revision.sourceTaskId.slice(0, 8)}` : ""}</p>}
         </article>
       ))}
     </section>
@@ -554,21 +572,21 @@ function MemoryValidityHistory({ entry, workspaceId, missionId }: {
     <>
       <Button variant="ghost" size="sm" disabled={busy} onClick={toggle}>{t("memory.history.toggle")}</Button>
       {open && (
-        <section className="basis-full flex flex-col gap-2 rounded-lg border border-violet-300/40 bg-violet-50/50 p-3 dark:border-violet-300/15 dark:bg-violet-300/5">
+        <section className={`basis-full flex flex-col gap-2 ${SUBPANEL}`}>
           <div className="flex items-center gap-2">
-            <h4 className="mr-auto text-xs font-semibold">{t("memory.history.title", { key: entry.key })}</h4>
+            <h4 className="mr-auto text-xs font-semibold text-gray-900 dark:text-gray-100">{t("memory.history.title", { key: entry.key })}</h4>
             <Button variant="ghost" size="sm" onClick={() => setOpen(false)}>{t("memory.history.close")}</Button>
           </div>
           {error && <p role="alert" className="text-xs text-red-600 dark:text-red-400">{error}</p>}
-          {busy && intervals === null && <p className="text-xs text-gray-400">Carregando…</p>}
-          {intervals !== null && intervals.length === 0 && <p className="text-xs text-gray-400">{t("memory.history.empty")}</p>}
+          {busy && intervals === null && <p className="text-xs text-gray-400 dark:text-white/40">Carregando…</p>}
+          {intervals !== null && intervals.length === 0 && <p className="text-xs text-gray-400 dark:text-white/40">{t("memory.history.empty")}</p>}
           {intervals?.slice().reverse().map((interval) => (
-            <article key={interval.revision} className="flex flex-col gap-1 border-t border-gray-200 pt-2 dark:border-white/8">
-              <p className="text-[10px] font-semibold">Revisão {interval.revision} · {OPERATION_LABEL[interval.operation]} · {actorLabel(interval.actorKind)}</p>
-              <p className="text-[10px] text-gray-500 dark:text-white/45">{KIND_LABEL[interval.kind]} · prioridade {interval.priority}</p>
-              <pre className="whitespace-pre-wrap break-words rounded bg-white/70 p-2 text-[11px] dark:bg-black/15">{interval.body}</pre>
-              {interval.reason && <p className="text-[10px] text-gray-500 dark:text-white/45">Motivo: {interval.reason}</p>}
-              <p className="text-[10px] text-gray-500 dark:text-white/45">
+            <article key={interval.revision} className="flex flex-col gap-1 border-t border-gray-200 pt-2 dark:border-white/[0.08]">
+              <p className={`${META} font-semibold`}>Revisão {interval.revision} · {OPERATION_LABEL[interval.operation]} · {actorLabel(interval.actorKind)}</p>
+              <p className={META}>{KIND_LABEL[interval.kind]} · prioridade {interval.priority}</p>
+              <pre className={BODY}>{interval.body}</pre>
+              {interval.reason && <p className={META}>Motivo: {interval.reason}</p>}
+              <p className={META}>
                 {t("memory.history.validFrom", { date: formatDate(interval.validFrom) })}{" "}
                 {interval.validTo !== null ? t("memory.history.validUntil", { date: formatDate(interval.validTo) }) : t("memory.history.ongoing")}
               </p>
@@ -581,15 +599,15 @@ function MemoryValidityHistory({ entry, workspaceId, missionId }: {
 }
 
 function RunFacts({ facts, run, onPromote }: { facts: Fact[]; run: Run | null; onPromote: (fact: Fact) => void }) {
-  if (!run) return <p className="text-xs text-gray-400">Esta Mission ainda não possui Run.</p>;
+  if (!run) return <p className="text-xs text-gray-400 dark:text-white/40">Esta Mission ainda não possui Run.</p>;
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-[10px] text-gray-500 dark:text-white/45">Run Facts são dados de colaboração de um único Run. Não são Mission Memory nem Workspace Memory.</p>
-      {facts.length === 0 && <p className="text-xs text-gray-400">Este Run ainda não tem fatos compartilhados.</p>}
+    <div className="flex flex-col gap-2.5">
+      <p className="text-[10.5px] leading-[14px] text-gray-500 dark:text-white/40">Run Facts são dados de colaboração de um único Run. Não são Mission Memory nem Workspace Memory.</p>
+      {facts.length === 0 && <p className="text-xs text-gray-400 dark:text-white/40">Este Run ainda não tem fatos compartilhados.</p>}
       {facts.map((fact) => (
-        <article key={fact.id} className="flex flex-col gap-1 rounded-lg border border-gray-200 p-3 dark:border-white/10">
-          <div className="flex flex-wrap items-center gap-2 text-[10px]"><span className="font-semibold">{KIND_LABEL[fact.kind]}</span><span className="text-gray-500 dark:text-white/45">{fact.author ?? "Usuário"} · {dateLabel(fact.createdAt)}</span><span className="ml-auto" /><Button variant="ghost" size="sm" onClick={() => onPromote(fact)}>Propor promoção</Button></div>
-          <pre className="whitespace-pre-wrap break-words text-[11px] text-gray-700 dark:text-white/65">{fact.body}</pre>
+        <article key={fact.id} className={`flex flex-col gap-2 ${CARD}`}>
+          <div className="flex flex-wrap items-center gap-2 text-[10.5px]"><span className="font-semibold text-gray-900 dark:text-gray-100">{KIND_LABEL[fact.kind]}</span><span className={META}>{fact.author ?? "Usuário"} · {dateLabel(fact.createdAt)}</span><span className="ml-auto" /><Button variant="ghost" size="sm" onClick={() => onPromote(fact)}>Propor promoção</Button></div>
+          <pre className="whitespace-pre-wrap break-words text-[11.5px] leading-4 text-gray-800 dark:text-white/70">{fact.body}</pre>
         </article>
       ))}
     </div>
@@ -597,15 +615,15 @@ function RunFacts({ facts, run, onPromote }: { facts: Fact[]; run: Run | null; o
 }
 
 function RunSnapshot({ snapshot }: { snapshot: MemorySnapshot | null }) {
-  if (!snapshot) return <p className="text-xs text-gray-400">Carregando snapshot…</p>;
+  if (!snapshot) return <p className="text-xs text-gray-400 dark:text-white/40">Carregando snapshot…</p>;
   return (
-    <div className="flex flex-col gap-2">
-      <p className="text-[10px] text-gray-500 dark:text-white/45">Snapshot usado neste Run: cópia imutável das memórias aprovadas quando o Run começou · {snapshot.meta.contextBytes} bytes de contexto · {snapshot.meta.omittedEntries} omitidas · {snapshot.meta.truncatedEntries} truncadas.</p>
-      {snapshot.items.length === 0 && <p className="text-xs text-gray-400">Snapshot vazio: nenhuma memória aprovada foi selecionada para este Run.</p>}
+    <div className="flex flex-col gap-2.5">
+      <p className="text-[10.5px] leading-[14px] text-gray-500 dark:text-white/40">Snapshot usado neste Run: cópia imutável das memórias aprovadas quando o Run começou · {snapshot.meta.contextBytes} bytes de contexto · {snapshot.meta.omittedEntries} omitidas · {snapshot.meta.truncatedEntries} truncadas.</p>
+      {snapshot.items.length === 0 && <p className="text-xs text-gray-400 dark:text-white/40">Snapshot vazio: nenhuma memória aprovada foi selecionada para este Run.</p>}
       {snapshot.items.map((item) => (
-        <article key={`${item.selectionOrder}-${item.entryId}`} className="flex flex-col gap-1 rounded-lg border border-gray-200 p-3 dark:border-white/10">
-          <p className="text-[10px] font-semibold">{item.selectionOrder + 1}. [{item.scope === "mission" ? "Mission" : "Workspace"}] {item.key} · {KIND_LABEL[item.kind]} · prioridade {item.priority} · revisão {item.revision}{item.truncated ? " · truncada" : ""}</p>
-          <pre className="whitespace-pre-wrap break-words text-[11px] text-gray-700 dark:text-white/65">{item.body}</pre>
+        <article key={`${item.selectionOrder}-${item.entryId}`} className={`flex flex-col gap-1.5 ${CARD}`}>
+          <p className={`${META} font-semibold text-gray-700 dark:text-gray-200`}>{item.selectionOrder + 1}. [{item.scope === "mission" ? "Mission" : "Workspace"}] {item.key} · {KIND_LABEL[item.kind]} · prioridade {item.priority} · revisão {item.revision}{item.truncated ? " · truncada" : ""}</p>
+          <pre className="whitespace-pre-wrap break-words text-[11.5px] leading-4 text-gray-800 dark:text-white/70">{item.body}</pre>
         </article>
       ))}
     </div>

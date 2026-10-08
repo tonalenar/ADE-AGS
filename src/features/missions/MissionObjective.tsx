@@ -18,19 +18,20 @@ export function MissionObjective({ objective }: { objective: string }) {
   const points = useMemo(() => numberedPoints(parts), [parts]);
   const structured = parts.sections.length > 0;
   const long = objective.length > COLLAPSE_OVER;
-  const text = "text-[12px] leading-relaxed text-gray-700 dark:text-gray-300";
+  const text = "text-[13px] leading-[19px] text-gray-700 dark:text-gray-300";
+  const card = "rounded-xl bg-gray-50 dark:bg-surface p-4 ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.07]";
 
-  if (!long && !structured) return <p className={`whitespace-pre-wrap ${text}`}>{objective}</p>;
+  if (!long && !structured) return <div className={card}><p className={`whitespace-pre-wrap ${text}`}>{objective}</p></div>;
 
   const intro = parts.intro.length > 360 && !open ? parts.intro.slice(0, 357).trimEnd() + "…" : parts.intro;
   return (
-    <div className="flex flex-col gap-2.5" data-testid="mission-objective">
+    <div className={`flex flex-col gap-3 ${card}`} data-testid="mission-objective">
       {intro && <p className={`whitespace-pre-wrap ${text}`}>{intro}</p>}
       {!open && points.length > 0 && (
-        <ol className="flex flex-col gap-1" aria-label={t("missions.objective.points")}>
+        <ol className="flex flex-col divide-y divide-black/[0.06] dark:divide-white/[0.07]" aria-label={t("missions.objective.points")}>
           {points.map((point) => (
-            <li key={point.n} className="flex items-baseline gap-2 text-[12px] text-gray-700 dark:text-gray-300">
-              <span className="w-5 shrink-0 text-right tabular-nums text-[11px] font-semibold text-accent-600 dark:text-accent-300">{point.n}</span>
+            <li key={point.n} className="flex items-baseline gap-3 py-1.5 text-[13px] leading-[19px] text-gray-800 dark:text-gray-200">
+              <span className="w-5 shrink-0 text-right font-mono tabular-nums text-[13px] font-semibold text-accent-600 dark:text-accent-400">{point.n}</span>
               <span>{point.label}</span>
             </li>
           ))}
@@ -39,9 +40,9 @@ export function MissionObjective({ objective }: { objective: string }) {
       {open && (
         <div className="flex flex-col gap-3">
           {parts.sections.map((section, i) => (
-            <div key={i} className="flex flex-col gap-1 border-l-2 border-gray-200 pl-3 dark:border-white/10">
-              <h4 className="text-[11px] font-semibold text-gray-800 dark:text-gray-100">
-                {section.n !== null && <span className="mr-1.5 tabular-nums text-accent-600 dark:text-accent-300">{section.n}.</span>}
+            <div key={i} className="flex flex-col gap-1 border-l-2 border-accent-500/30 pl-3">
+              <h4 className="text-[12px] font-semibold text-gray-800 dark:text-gray-100">
+                {section.n !== null && <span className="mr-1.5 font-mono tabular-nums text-accent-600 dark:text-accent-400">{section.n}.</span>}
                 {section.label}
               </h4>
               <p className={`whitespace-pre-wrap ${text}`}>{section.body}</p>
@@ -52,11 +53,11 @@ export function MissionObjective({ objective }: { objective: string }) {
       )}
       <div className="flex items-center gap-3">
         <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open}
-          className="self-start text-[11.5px] font-medium text-accent-600 hover:underline dark:text-accent-300">
+          className="self-start text-[12px] font-medium text-accent-600 hover:underline dark:text-accent-400">
           {open ? t("missions.objective.collapse") : t("missions.objective.expand")}
         </button>
         <button type="button" onClick={() => void navigator.clipboard?.writeText(objective)}
-          className="self-start text-[11.5px] text-gray-500 hover:underline dark:text-gray-400">
+          className="self-start text-[12px] text-gray-500 hover:underline dark:text-white/50">
           {t("missions.objective.copy")}
         </button>
       </div>

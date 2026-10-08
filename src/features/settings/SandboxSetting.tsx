@@ -1,3 +1,4 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
@@ -40,25 +41,27 @@ export function SandboxSetting() {
   };
 
   return (
-    <div className="flex flex-col gap-1.5 px-3 py-2.5 rounded-lg bg-gray-100/70 dark:bg-white/4">
-      <div className="flex items-center justify-between gap-3">
-        <div className="flex flex-col">
-          <span className="text-sm">{t("settings.sandbox.label")}</span>
-          <span className="text-xs text-gray-500 dark:text-gray-400">{t("settings.sandbox.desc")}</span>
+    <div className="flex flex-col gap-1.5 px-3 py-2.5">
+      <div className="flex items-center justify-between gap-4">
+        <div className="flex flex-col gap-px min-w-0">
+          <span className="text-[13px] leading-[18px] text-gray-900 dark:text-gray-100">{t("settings.sandbox.label")}</span>
+          <span className="text-[11.5px] leading-4 text-gray-500 dark:text-white/40">{t("settings.sandbox.desc")}</span>
         </div>
-        <select
-          value={mode}
-          onChange={(e) => change(e.target.value as Mode)}
-          className="text-xs rounded-md px-2 py-1 bg-white dark:bg-white/10 border border-gray-200 dark:border-white/10"
-        >
-          <option value="off">{t("settings.sandbox.mode.off")}</option>
-          <option value="auto">{t("settings.sandbox.mode.auto")}</option>
-          <option value="strict">{t("settings.sandbox.mode.strict")}</option>
-        </select>
+        {/* Pop-up estilo macOS: el valor y los chevrons apilados a la derecha. */}
+        <span className="relative inline-flex shrink-0">
+          <PopupSelect
+            value={mode}
+            onChange={(e) => change(e.target.value as Mode)}
+          >
+            <option value="off">{t("settings.sandbox.mode.off")}</option>
+            <option value="auto">{t("settings.sandbox.mode.auto")}</option>
+            <option value="strict">{t("settings.sandbox.mode.strict")}</option>
+          </PopupSelect>
+        </span>
       </div>
       {status && (
         <span
-          className={`text-xs ${status.fsIsolation ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}
+          className={`text-[11.5px] leading-4 ${status.fsIsolation ? "text-emerald-600 dark:text-emerald-400" : "text-amber-600 dark:text-amber-400"}`}
         >
           {status.fsIsolation
             ? t("settings.sandbox.active", { backend: status.backend })

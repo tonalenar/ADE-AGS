@@ -30,7 +30,7 @@ export function BudgetBarView({ status }: { status: BudgetStatus }) {
     <div className="flex flex-col gap-1" data-testid="budget-bar" data-level={status.level}>
       <div className="flex items-center justify-between gap-2 text-[11px] tabular-nums">
         <span className={`font-semibold ${TEXT[status.level]}`}>{t(`missions.budget.level.${status.level}`)}</span>
-        <span className="text-gray-500 dark:text-white/45">
+        <span className="font-mono text-gray-500 dark:text-white/45">
           {`US$ ${status.costUsd.toFixed(2)} / US$ ${status.budgetUsd.toFixed(2)}`}
           {status.pct !== null && ` · ${Math.round(status.pct)}%`}
         </span>
@@ -40,7 +40,7 @@ export function BudgetBarView({ status }: { status: BudgetStatus }) {
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(barWidth(status))}
-        className="h-1.5 rounded-full overflow-hidden bg-gray-200 dark:bg-white/10"
+        className="h-1.5 rounded-full overflow-hidden bg-gray-200 dark:bg-surface-overlay"
       >
         <div className={`h-full ${FILL[status.level]}`} style={{ width: `${barWidth(status)}%` }} />
       </div>

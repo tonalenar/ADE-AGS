@@ -1,7 +1,8 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AnimateSpin, Button, CopyIcon, Input, SegmentedControl, Select } from "neogestify-ui-components";
+import { AnimateSpin, Button, CopyIcon, Input, SegmentedControl } from "neogestify-ui-components";
 
 import { ExternalIcon } from "@/app/icons";
 import { AppDialog } from "@/shared/ui/AppDialog";
@@ -152,14 +153,16 @@ export function AddGitAccountDialog({ kind: initialKind, host: fixedHost, onClos
     >
       <div className="flex flex-col gap-3">
         {initialKind === null && (
-          <Select
-            label={t("forge.add.kind")}
-            value={kind}
-            onChange={(e) => { setKind(e.target.value as ForgeKind); setError(""); }}
-            options={FORGE_KINDS.map((k) => ({ value: k, label: forgeLabel(k, t) }))}
-            variant="outline"
-            disabled={busy || !!device}
-          />
+          <div className="flex flex-col gap-1.5">
+            <label htmlFor="AddGitAccountDialog-select-1" className="text-[12px] font-medium text-gray-600 dark:text-gray-300">{t("forge.add.kind")}</label>
+            <PopupSelect
+              value={kind}
+              onChange={(e) => { setKind(e.target.value as ForgeKind); setError(""); }}
+              disabled={busy || !!device}
+              id="AddGitAccountDialog-select-1">
+              {FORGE_KINDS.map((k) => <option key={k} value={k}>{forgeLabel(k, t)}</option>)}
+            </PopupSelect>
+          </div>
         )}
         <Input
           label={t("forge.add.host")}

@@ -10,10 +10,11 @@ function Chord({ display }: { display: string }) {
       {display.split("+").map((key) => (
         <kbd
           key={key}
-          className="px-1.5 py-0.5 rounded border text-[11px] font-mono leading-none
-            border-gray-300 dark:border-gray-600
-            bg-gray-100 dark:bg-white/10
-            text-gray-700 dark:text-gray-200"
+          className="min-w-5 h-5 px-1.5 rounded-[5px] inline-flex items-center justify-center
+            font-mono text-[11px] leading-none tabular-nums
+            bg-white dark:bg-surface-overlay
+            text-gray-700 dark:text-gray-200
+            shadow-[inset_0_-1px_0_rgba(0,0,0,0.2)] dark:shadow-[inset_0_-1px_0_rgba(0,0,0,0.45),0_0_0_0.5px_rgba(255,255,255,0.08)]"
         >
           {key}
         </kbd>
@@ -35,10 +36,12 @@ export function ShortcutsSection() {
   return (
     <SettingsSection title={t("settings.shortcuts")} description={t("settings.shortcuts.desc")}>
 
-      <ul className="flex flex-col divide-y divide-gray-200 dark:divide-gray-700">
+      <ul className="flex flex-col overflow-hidden rounded-xl
+        bg-gray-100/70 dark:bg-surface-raised/60
+        divide-y divide-gray-200 dark:divide-white/[0.08]">
         {SHORTCUTS.map((s) => (
-          <li key={s.display} className="flex items-center justify-between gap-4 py-2.5">
-            <span className="text-sm text-gray-700 dark:text-gray-300 min-w-0 truncate">
+          <li key={s.display} className="flex items-center justify-between gap-4 min-h-10 px-3 py-2">
+            <span className="text-[13px] text-gray-900 dark:text-gray-100 min-w-0 truncate">
               {t(s.labelKey)}
             </span>
             <Chord display={s.display} />
@@ -48,7 +51,7 @@ export function ShortcutsSection() {
 
       {/* Lo que un atajo global le saca a la terminal se dice acá y no se descubre a los
           tres días: son teclas que las TUIs ya usaban. */}
-      <p className="mt-5 px-3 py-2 rounded-lg text-xs
+      <p className="px-3 py-2.5 rounded-xl text-[12px] leading-4
         bg-amber-50 dark:bg-amber-500/10 text-amber-700 dark:text-amber-300">
         {t("settings.shortcuts.terminalNote")}
       </p>

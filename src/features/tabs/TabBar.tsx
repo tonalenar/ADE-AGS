@@ -17,10 +17,12 @@ import { useWorkMode } from "@/features/canvas/store";
 import { MissionChips } from "@/features/missions/MissionChips";
 import { useActiveGroup, useMissionIndex } from "@/features/missions/groups";
 
-const BAR_BUTTON = `flex items-center justify-center h-10 shrink-0
-  text-gray-400 dark:text-white/30
-  hover:text-gray-600 dark:hover:text-white/70
-  hover:bg-gray-200/60 dark:hover:bg-white/6
+// Botones de la franja: pastillas de 28px centradas en la barra, como los controles de la
+// barra de herramientas de macOS.
+const BAR_BUTTON = `flex items-center justify-center h-7 self-center shrink-0 rounded-md
+  text-gray-400 dark:text-white/35
+  hover:text-gray-600 dark:hover:text-white/80
+  hover:bg-gray-200/60 dark:hover:bg-white/[0.08]
   transition-colors duration-150`;
 
 /**
@@ -72,9 +74,11 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
       <div
         data-tauri-drag-region
         data-tab-strip={only?.id}
-        className="cc-scroll-x flex items-stretch flex-1 min-w-0 h-10
-          bg-gray-100 dark:bg-gray-900
-          border-b border-gray-200 dark:border-gray-800"
+        // Las pestañas van como pastillas dentro de la franja: un poco de aire arriba, abajo y
+        // entre ellas (gap-1), y se estiran a la altura interior.
+        className="cc-scroll-x flex items-stretch gap-1 px-1.5 py-1.5 flex-1 min-w-0 h-10
+          bg-gray-100/80 dark:bg-surface-deep/75 backdrop-blur-xl
+          border-b border-gray-200 dark:border-white/[0.08]"
         style={{ position: "relative", zIndex: 0 }}
       >
         {showLights && (
@@ -95,7 +99,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
               aria-pressed={activeViewId === null}
               aria-label={t("canvas.mode.canvas")}
               onClick={() => { showTerminal(); navigate("/workspace"); }}
-              className={`${BAR_BUTTON} shrink-0 px-3 text-xs font-medium rounded-none ${activeViewId === null ? "text-gray-900 dark:text-white" : ""}`}
+              className={`${BAR_BUTTON} shrink-0 px-3 text-xs font-medium ${activeViewId === null ? "text-gray-900 dark:text-white bg-gray-200/70 dark:bg-white/[0.08]" : ""}`}
             >
               {t("canvas.mode.canvas")}
             </button>
@@ -125,7 +129,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
           onClick={() => (activeTab ? openNewAgentWizard() : navigate("/"))}
           title={t("tabs.new")}
           data-tauri-drag-region="false"
-          className={`${BAR_BUTTON} w-9 p-0 rounded-none`}
+          className={`${BAR_BUTTON} w-7 p-0`}
         >
           <AddIcon className="w-5 h-5" />
         </Button>
@@ -139,7 +143,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
             }}
             title={t("tabs.newBrowser")}
             data-tauri-drag-region="false"
-            className={`${BAR_BUTTON} w-8 p-0 rounded-none`}
+            className={`${BAR_BUTTON} w-7 p-0`}
           >
             <GlobeIcon className="w-4 h-4" />
           </Button>
@@ -152,7 +156,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
             }}
             title={t("tabs.split.button")}
             data-tauri-drag-region="false"
-            className={`${BAR_BUTTON} w-8 p-0 rounded-none`}
+            className={`${BAR_BUTTON} w-7 p-0`}
           >
             <SplitRightIcon className="w-4 h-4" />
           </Button>

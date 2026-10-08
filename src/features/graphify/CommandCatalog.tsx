@@ -1,6 +1,7 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AnimateSpin, Button, Input, Select } from "neogestify-ui-components";
+import { AnimateSpin, Button, Input } from "neogestify-ui-components";
 
 import {
   graphifyCommands, graphifyRender, type GraphifyChoice, type GraphifyCommand, type GraphifyRun,
@@ -188,13 +189,11 @@ export function CommandCatalog({ cwd, onRun }: {
                             {t(`settings.graphify.arg.${name}`, name)}
                           </span>
                           {arg.options.length > 0 ? (
-                            <Select
+                            <PopupSelect
                               value={value}
-                              onChange={(e) => setArg(command, name, e.target.value)}
-                              variant="minimal"
-                              size="sm"
-                              options={arg.options.map((o) => ({ value: o, label: o }))}
-                            />
+                              onChange={(e) => setArg(command, name, e.target.value)}>
+                              {arg.options.map((o) => <option key={o} value={o}>{o}</option>)}
+                            </PopupSelect>
                           ) : (
                             <Input
                               value={value}
@@ -229,13 +228,11 @@ export function CommandCatalog({ cwd, onRun }: {
                     <div className="flex flex-wrap items-center gap-2">
                       {command.kind === "skill" ? (
                         <>
-                          <Select
+                          <PopupSelect
                             value={agentId}
-                            onChange={(e) => setAgentId(e.target.value)}
-                            variant="minimal"
-                            size="sm"
-                            options={agents.map((a) => ({ value: a.id, label: a.title }))}
-                          />
+                            onChange={(e) => setAgentId(e.target.value)}>
+                            {agents.map((a) => <option key={a.id} value={a.id}>{a.title}</option>)}
+                          </PopupSelect>
                           <Button
                             variant="outline"
                             size="sm"

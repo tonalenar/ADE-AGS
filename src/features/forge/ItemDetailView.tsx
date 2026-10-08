@@ -1,8 +1,9 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { useNavigate } from "react-router-dom";
 import { openUrl } from "@tauri-apps/plugin-opener";
-import { AddIcon, ArrowLeftIcon, Badge, Button, Select, Skeleton, TextArea } from "neogestify-ui-components";
+import { AddIcon, ArrowLeftIcon, Badge, Button, Skeleton, TextArea } from "neogestify-ui-components";
 
 import { BranchIcon, ExternalIcon, IssueIcon, PullRequestIcon, SendIcon } from "@/app/icons";
 import { agentIcon } from "@/features/agents/agentIcons";
@@ -203,17 +204,17 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
             <div className="flex items-end gap-2 p-3 rounded-lg bg-violet-50 dark:bg-violet-500/10
               border border-violet-200 dark:border-violet-500/25">
               <div className="flex-1">
-                <Select
-                  label={t("forge.pr.mergeMethod")}
-                  value={method}
-                  onChange={(e) => setMethod(e.target.value as MergeMethod)}
-                  options={[
-                    { value: "merge", label: t("forge.pr.method.merge") },
-                    { value: "squash", label: t("forge.pr.method.squash") },
-                    { value: "rebase", label: t("forge.pr.method.rebase") },
-                  ]}
-                  variant="outline"
-                />
+                <div className="flex flex-col gap-1.5">
+                  <label htmlFor="ItemDetailView-select-1" className="text-[12px] font-medium text-gray-600 dark:text-gray-300">{t("forge.pr.mergeMethod")}</label>
+                  <PopupSelect
+                    value={method}
+                    onChange={(e) => setMethod(e.target.value as MergeMethod)}
+                    id="ItemDetailView-select-1">
+                    <option value="merge">{t("forge.pr.method.merge")}</option>
+                    <option value="squash">{t("forge.pr.method.squash")}</option>
+                    <option value="rebase">{t("forge.pr.method.rebase")}</option>
+                  </PopupSelect>
+                </div>
               </div>
               <Button variant="outline" onClick={() => setMerging(false)}>{t("btn.cancel")}</Button>
               <Button variant="primary" disabled={!!busy}

@@ -1,5 +1,6 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useTranslation } from "react-i18next";
-import { Button, CloseIcon, Select } from "neogestify-ui-components";
+import { Button, CloseIcon } from "neogestify-ui-components";
 
 import type { SessionHistoryEntry } from "@/features/sessions/types";
 
@@ -48,58 +49,42 @@ export function SessionFilters({ entries, value, onChange, resultCount }: Sessio
       border-b border-gray-200 dark:border-white/8
       bg-gray-100/40 dark:bg-white/2">
 
-      <Select
+      <PopupSelect
         value={value.agentId}
         onChange={(e) => patch({ agentId: e.target.value })}
-        options={[
-          { value: "", label: t("sessions.filters.allAgents") },
-          ...agents.map(([id, label]) => ({ value: id, label })),
-        ]}
-        variant="minimal"
-        size="sm"
-        className="min-w-0"
-      />
+        className="min-w-0">
+        <option value="">{t("sessions.filters.allAgents")}</option>
+        {agents.map(([id, label]) => <option key={id} value={id}>{label}</option>)}
+      </PopupSelect>
 
       {cwds.length > 1 && (
-        <Select
+        <PopupSelect
           value={value.cwd}
           onChange={(e) => patch({ cwd: e.target.value })}
-          options={[
-            { value: "", label: t("sessions.filters.allFolders") },
-            ...cwds.map((c) => ({ value: c, label: shortenPath(c) })),
-          ]}
-          variant="minimal"
-          size="sm"
-          className="min-w-0"
-        />
+          className="min-w-0">
+          <option value="">{t("sessions.filters.allFolders")}</option>
+          {cwds.map((c) => <option key={c} value={c}>{shortenPath(c)}</option>)}
+        </PopupSelect>
       )}
 
-      <Select
+      <PopupSelect
         value={value.dateRange}
         onChange={(e) => patch({ dateRange: e.target.value as DateRange })}
-        options={[
-          { value: "all", label: t("sessions.filters.anyDate") },
-          { value: "today", label: t("sessions.filters.today") },
-          { value: "week", label: t("sessions.filters.week") },
-          { value: "month", label: t("sessions.filters.month") },
-        ]}
-        variant="minimal"
-        size="sm"
-        className="min-w-0"
-      />
+        className="min-w-0">
+        <option value="all">{t("sessions.filters.anyDate")}</option>
+        <option value="today">{t("sessions.filters.today")}</option>
+        <option value="week">{t("sessions.filters.week")}</option>
+        <option value="month">{t("sessions.filters.month")}</option>
+      </PopupSelect>
 
       {skills.length > 0 && (
-        <Select
+        <PopupSelect
           value={value.skill}
           onChange={(e) => patch({ skill: e.target.value })}
-          options={[
-            { value: "", label: t("sessions.filters.anySkill") },
-            ...skills.map((s) => ({ value: s, label: s })),
-          ]}
-          variant="minimal"
-          size="sm"
-          className="min-w-0"
-        />
+          className="min-w-0">
+          <option value="">{t("sessions.filters.anySkill")}</option>
+          {skills.map((s) => <option key={s} value={s}>{s}</option>)}
+        </PopupSelect>
       )}
 
       <div className="flex-1" />

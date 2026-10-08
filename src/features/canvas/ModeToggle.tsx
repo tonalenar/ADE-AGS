@@ -21,7 +21,7 @@ export function ModeToggle() {
       aria-pressed={mode === value}
       className={`cc-t h-6 px-2.5 rounded-md text-[11.5px] font-medium
         ${mode === value
-          ? "bg-white dark:bg-white/12 text-gray-900 dark:text-white shadow-sm"
+          ? "bg-white dark:bg-surface-overlay text-gray-900 dark:text-white shadow-sm"
           : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"}`}
     >
       {label}
@@ -29,8 +29,8 @@ export function ModeToggle() {
   );
 
   return (
-    <div data-tauri-drag-region="false" className="flex items-center gap-0.5 p-0.5 mx-2 my-auto shrink-0 rounded-lg
-      bg-gray-200/70 dark:bg-white/5">
+    <div data-tauri-drag-region="false" className="flex items-center gap-0.5 p-0.5 mx-2 my-auto shrink-0 h-7 rounded-lg
+      bg-black/5 dark:bg-white/[0.07]">
       {option("tabs", t("canvas.mode.tabs"))}
       {option("canvas", t("canvas.mode.canvas"))}
       {gridable && (
@@ -40,7 +40,7 @@ export function ModeToggle() {
           title={t("canvas.mode.gridHint")}
           className={`cc-t h-6 px-2 rounded-md text-[11.5px] font-medium
             ${grid
-              ? "bg-white dark:bg-white/12 text-gray-900 dark:text-white shadow-sm"
+              ? "bg-white dark:bg-surface-overlay text-gray-900 dark:text-white shadow-sm"
               : "text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"}`}
         >
           {t("canvas.mode.grid")}

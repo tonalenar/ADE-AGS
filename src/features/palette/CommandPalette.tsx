@@ -31,6 +31,9 @@ interface Command extends Searchable {
 
 const GROUP_ORDER: Group[] = ["agents", "navigate", "workspaces", "actions"];
 
+/** Tecla de atalho (kbd): mono, pastilha discreta. */
+const KBD = "font-mono text-[11px] leading-4 px-1.5 py-px rounded-[5px] bg-gray-100 dark:bg-white/[0.08] text-gray-500 dark:text-white/[0.55] whitespace-nowrap";
+
 /** O atalho que leva a uma rota, para mostrar ao lado do comando. */
 function shortcutOf(path: string): string | undefined {
   return SHORTCUTS.find((s) => s.action.kind === "goto" && s.action.path === path)?.display;
@@ -89,9 +92,10 @@ function PaletteDialog() {
       list.push({
         id: `tab:${tab.id}`,
         group: "agents",
-        title: tab.title,
+        // "Codex — C:\…": o caminho já vai no subtítulo; no título fica só o nome.
+        title: tab.title.split(" — ")[0],
         subtitle: tab.cwd,
-        keywords: [tab.agentLabel, tab.cwd],
+        keywords: [tab.title, tab.agentLabel, tab.cwd],
         icon: <Icon className={icon} />,
         run: () => { activateTab(tab.id); navigate("/workspace"); },
       });
@@ -258,26 +262,26 @@ function PaletteDialog() {
         aria-modal="true"
         aria-label={t("palette.open")}
         onKeyDown={onKeyDown}
-        className="cc-pop relative w-full max-w-xl flex flex-col max-h-[60vh] overflow-hidden
-          rounded-xl border border-gray-200 dark:border-white/10
-          bg-white dark:bg-surface-raised shadow-2xl"
+        className="cc-pop relative w-full max-w-[560px] flex flex-col max-h-[60vh] overflow-hidden
+          rounded-xl border border-black/[0.08] dark:border-white/[0.08]
+          bg-white/90 dark:bg-surface-raised/75 backdrop-blur-[30px] backdrop-saturate-[180%]
+          shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]"
       >
-        <div className="flex items-center gap-2.5 h-12 px-4 shrink-0 border-b border-gray-200 dark:border-white/8">
-          <SearchIcon className="w-4 h-4 shrink-0 text-gray-400 dark:text-white/40" />
+        <div className="flex items-center gap-3 h-14 px-[18px] shrink-0 border-b border-black/[0.08] dark:border-white/[0.08]">
+          <SearchIcon className="w-[18px] h-[18px] shrink-0 text-gray-500 dark:text-white/55" />
           <input
             autoFocus
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             placeholder={t("palette.placeholder")}
             spellCheck={false}
-            className="flex-1 min-w-0 bg-transparent outline-none text-sm
+            className="flex-1 min-w-0 bg-transparent outline-none text-[18px] leading-6
               text-gray-900 dark:text-gray-50 placeholder:text-gray-400 dark:placeholder:text-white/30"
           />
-          <kbd className="text-[10px] font-mono px-1.5 py-0.5 rounded border
-            border-gray-200 dark:border-white/10 text-gray-400 dark:text-white/35">Esc</kbd>
+          <kbd className={KBD}>Esc</kbd>
         </div>
 
-        <div ref={listRef} className="cc-scroll flex-1 min-h-0 py-1.5" role="listbox">
+        <div ref={listRef} className="cc-scroll flex-1 min-h-0 py-2" role="listbox">
           {results.length === 0 && (
             <p className="px-4 py-8 text-center text-sm text-gray-400 dark:text-white/35">
               {t("palette.empty")}
@@ -290,8 +294,8 @@ function PaletteDialog() {
             return (
               <div key={cmd.id}>
                 {header && (
-                  <div className="px-4 pt-2.5 pb-1 text-[10px] font-semibold uppercase tracking-widest
-                    text-gray-400 dark:text-white/30">
+                  <div className="px-[18px] pt-2.5 pb-1 text-[11px] leading-[14px] uppercase tracking-[0.06em]
+                    text-gray-500 dark:text-white/[0.32]">
                     {t(`palette.group.${cmd.group}`)}
                   </div>
                 )}
@@ -301,21 +305,21 @@ function PaletteDialog() {
                   data-index={index}
                   onMouseMove={() => { if (!selected) setCursor(index); }}
                   onClick={() => runAt(index)}
-                  className={`mx-1.5 flex items-center gap-3 h-9 px-2.5 rounded-lg cursor-pointer
+                  className={`mx-1.5 flex items-center gap-2.5 h-9 px-3 rounded-md cursor-pointer
                     ${selected
-                      ? "bg-gray-100 dark:bg-white/8 text-gray-900 dark:text-white"
+                      ? "bg-accent-500/15 text-gray-900 dark:bg-accent-500/20 dark:text-white"
                       : "text-gray-700 dark:text-gray-300"}`}
                 >
-                  <span className="shrink-0 flex text-gray-500 dark:text-white/50">{cmd.icon}</span>
+                  <span className={`shrink-0 flex ${selected ? "text-accent-600 dark:text-accent-400" : "text-gray-500 dark:text-white/50"}`}>{cmd.icon}</span>
                   <span className="truncate text-[13px]">{cmd.title}</span>
                   {cmd.id === `tab:${activeTab?.id}` && (
-                    <span className="shrink-0 text-[10px] text-gray-400 dark:text-white/30">{t("palette.current")}</span>
+                    <span className="shrink-0 text-[11px] text-gray-400 dark:text-white/30">{t("palette.current")}</span>
                   )}
                   {cmd.subtitle && (
                     <span className="truncate text-[11px] font-mono text-gray-400 dark:text-white/30">{cmd.subtitle}</span>
                   )}
                   {cmd.shortcut && (
-                    <span className="ml-auto shrink-0 text-[10px] font-mono text-gray-400 dark:text-white/30">
+                    <span className="ml-auto shrink-0 font-mono text-[12px] tabular-nums text-gray-400 dark:text-white/[0.45]">
                       {cmd.shortcut}
                     </span>
                   )}
@@ -325,10 +329,10 @@ function PaletteDialog() {
           })}
         </div>
 
-        <div className="flex items-center gap-4 h-8 px-4 shrink-0 border-t border-gray-200 dark:border-white/8
-          text-[10.5px] text-gray-400 dark:text-white/30">
-          <span>↑↓ {t("palette.hint.move")}</span>
-          <span>↵ {t("palette.hint.run")}</span>
+        <div className="flex items-center gap-4 h-9 px-4 shrink-0 border-t border-black/[0.08] dark:border-white/[0.08]
+          text-[12px] leading-4 text-gray-500 dark:text-white/[0.45]">
+          <span className="flex items-center gap-1.5"><kbd className={KBD}>↑↓</kbd>{t("palette.hint.move")}</span>
+          <span className="flex items-center gap-1.5"><kbd className={KBD}>↵</kbd>{t("palette.hint.run")}</span>
         </div>
       </div>
     </div>
