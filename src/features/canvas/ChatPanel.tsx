@@ -2,11 +2,13 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
+import { AlertaToast } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { AIChatCard } from "./AIChatCard";
 import { agentTile } from "@/features/agents/agentTile";
+import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
+import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
 
 const TOOL = "cc-t flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white";
@@ -68,7 +70,7 @@ const clock = (unix: number) => new Date(unix * 1000).toLocaleTimeString(undefin
  * Las respuestas del agente se muestran como Markdown seguro (`ChatMarkdown`: sin HTML crudo,
  * enlaces solo http/https). Lo que escribe el usuario queda como texto plano.
  */
-export function ChatPanel({ onClose }: { onClose: () => void }) {
+export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewAgent: () => void }) {
   const { t } = useTranslation();
   const key = useActiveBoardKey();
   const allTabs = useTabsStore((s) => s.tabs);
@@ -85,6 +87,7 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   const [sending, setSending] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const [picking, setPicking] = useState(false);
+  const [menu, setMenu] = useState<{ kind: "more" | "agent"; x: number; y: number } | null>(null);
   const [view, setView] = useState<ChatSizeState>(loadChatSize);
   // Marca dentro de la tarjeta: de ahí se llega a ella y al área que la contiene.
   const sentinel = useRef<HTMLSpanElement>(null);
@@ -145,6 +148,8 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
   // Con quién se habla: el agente activo si sirve, si no el primero.
   const current = agents.find((a) => a.id === tabId) ?? agents.find((a) => a.id === activeTabId) ?? agents[0];
   const currentId = current?.id ?? null;
+  const repos = useRepoInfo(current ? [current.cwd] : []);
+  const branch = current ? repos.get(current.cwd)?.branch ?? null : null;
 
   const load = useCallback(() => {
     if (!currentId) return setConversation(null);
@@ -217,6 +222,22 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
     }
   };
 
+  const moreItems: ContextMenuItem[] = [
+    { key: "pick", label: t("canvas.chat.pick.open"), disabled: !current, onSelect: () => setPicking(true) },
+    { key: "max", label: view.maximized ? t("canvas.chat.resize.unmaximize") : t("canvas.chat.resize.maximize"), hint: "Ctrl+Shift+M", onSelect: toggleMax },
+    ...((!isDefaultSize(view.size) || view.maximized)
+      ? [{ key: "reset", label: t("canvas.chat.resize.reset"), onSelect: () => commit({ size: DEFAULT_CHAT_SIZE, maximized: false }) }]
+      : []),
+    { key: "refresh", label: t("canvas.chat.refresh"), disabled: !current, onSelect: load },
+    { key: "sound", label: sound ? t("canvas.chat.soundOn") : t("canvas.chat.soundOff"), onSelect: () => useUnreadStore.getState().setSound(!sound) },
+    { key: "close", label: t("canvas.chat.close"), separator: true, hint: "Esc", onSelect: onClose },
+  ];
+  const agentItems: ContextMenuItem[] = agents.map((a) => ({
+    key: a.id,
+    label: `${a.id === currentId ? "✓ " : ""}${a.title.split(" — ")[0]}`,
+    onSelect: () => setTabId(a.id),
+  }));
+
   return (
     <AIChatCard
       className="pointer-events-auto absolute right-3 bottom-16"
@@ -237,6 +258,9 @@ export function ChatPanel({ onClose }: { onClose: () => void }) {
           <div aria-hidden onPointerDown={startResize({ left: true, top: true })}
             className={`${handleCls} left-0 top-0 h-4 w-4 cursor-nwse-resize`} />
         </>}
+        {menu && (
+          <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={menu.kind === "more" ? moreItems : agentItems} />
+        )}
         {picking && current && <ResponsePicker tabId={current.id} onClose={() => setPicking(false)}
           onPick={(text) => { setDraft((d) => (d.trim() ? `${d.trimEnd()}
 
@@ -244,14 +268,14 @@ ${text}` : text)); setPicking(false); }} />}
       </>}
       title={t("canvas.chat.title")}
       subtitle={current?.title ?? t("canvas.chat.subtitle")}
-      heading={agents.length > 1 ? (
-        <div className="flex gap-0.5 overflow-x-auto rounded-lg bg-black/[0.05] p-0.5 dark:bg-white/[0.07]" role="tablist" aria-label={t("canvas.chat.title")}>
+      heading={agents.length > 0 ? (
+        <div className="flex min-w-0 gap-0.5 overflow-x-auto rounded-[9px] bg-black/[0.05] p-0.5 dark:bg-surface-raised" role="tablist" aria-label={t("canvas.chat.title")}>
           {agents.map((a) => (
-            <button key={a.id} type="button" onClick={() => setTabId(a.id)} title={a.title} aria-pressed={a.id === currentId}
-              className={`cc-t flex h-[26px] min-w-0 max-w-44 flex-1 items-center justify-center rounded-md px-2.5 text-[12px] font-medium
+            <button key={a.id} type="button" role="tab" onClick={() => setTabId(a.id)} title={a.title} aria-selected={a.id === currentId}
+              className={`cc-t flex h-[26px] min-w-0 max-w-44 flex-1 items-center justify-center rounded-[7px] px-3 text-[12.5px] font-medium
                 ${a.id === currentId
-                  ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-white dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
-                  : "text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"}`}>
+                  ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-[#f5f5f7] dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+                  : "text-gray-500 hover:text-gray-900 dark:text-white/55 dark:hover:text-white"}`}>
               <span className="truncate">{a.title.split(" — ")[0]}</span>
               {a.id !== currentId && unreadOf(unread[a.id]) > 0 && <Badge n={unreadOf(unread[a.id])} />}
             </button>
@@ -279,13 +303,13 @@ ${text}` : text)); setPicking(false); }} />}
         <button type="button" onClick={() => setDraft((d) => `${d}${d && !d.endsWith(" ") ? " " : ""}@`)} title={t("canvas.chat.mention")} aria-label={t("canvas.chat.mention")} className={TOOL}>
           <span className="text-[14px] font-medium leading-none">@</span>
         </button>
-        <span title={current.title} className="ml-1 flex h-[26px] min-w-0 items-center gap-1.5 rounded-md bg-black/[0.05] px-2 text-[12px] font-medium text-gray-700 dark:bg-white/[0.07] dark:text-white/80">
+        <button type="button" title={current.title} aria-haspopup="menu"
+          onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ kind: "agent", x: r.left, y: r.top - 8 - 30 * Math.max(1, agents.length) }); }}
+          className="ml-1 flex h-[26px] min-w-0 items-center gap-1.5 rounded-md bg-black/[0.05] pl-2 pr-1.5 text-[12.5px] text-gray-800 hover:bg-black/[0.08] dark:bg-surface-raised dark:text-[#f5f5f7] dark:hover:brightness-110">
           <span aria-hidden className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: agentTile(current.agentId) }} />
           <span className="truncate">{current.agentLabel}</span>
-        </span>
-        <span className="ml-1.5 flex shrink-0 items-center gap-1 font-mono text-[10.5px] text-gray-500 dark:text-gray-400" title={t(`canvas.chat.thread.${thread}`)}>
-          <span className="h-1.5 w-1.5 rounded-full" style={{ background: THREAD_COLOR[thread] }} />
-        </span>
+          <svg viewBox="0 0 18 18" aria-hidden className="h-3 w-3 shrink-0 text-gray-400 dark:text-white/40" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m5.5 7.5 3.5-3.5 3.5 3.5M5.5 10.5 9 14l3.5-3.5" /></svg>
+        </button>
       </span>}
       composerRight={current && (
         <span role="radiogroup" aria-label={t("canvas.chat.mode")} className="flex shrink-0 rounded-md bg-black/[0.05] p-0.5 dark:bg-white/[0.07]">
@@ -301,84 +325,58 @@ ${text}` : text)); setPicking(false); }} />}
         </span>
       )}
       actions={<>
-        <button type="button" onClick={() => setPicking(true)} disabled={!current} title={t("canvas.chat.pick.open")} aria-label={t("canvas.chat.pick.open")}
-          className="cc-t flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 disabled:opacity-40 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden>
-            <rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="m7 9 3 3-3 3M13 15h4" />
-          </svg>
+        <button type="button" onClick={onNewAgent} title={t("canvas.chat.newAgent")} aria-label={t("canvas.chat.newAgent")}
+          className="cc-t flex h-[26px] w-[26px] items-center justify-center rounded-md bg-black/[0.05] text-gray-600 hover:text-gray-900 dark:bg-surface-raised dark:text-white/70 dark:hover:text-white">
+          <svg viewBox="0 0 18 18" aria-hidden className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round"><path d="M9 3.5v11M3.5 9h11" /></svg>
         </button>
-        <button type="button" onClick={toggleMax} aria-pressed={view.maximized}
-          title={view.maximized ? t("canvas.chat.resize.unmaximize") : t("canvas.chat.resize.maximize")}
-          aria-label={view.maximized ? t("canvas.chat.resize.unmaximize") : t("canvas.chat.resize.maximize")}
-          className="cc-t flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden>
-            {view.maximized ? <path d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5" /> : <path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5" />}
-          </svg>
+        <button type="button" aria-label={t("settings.accounts.more")} title={t("settings.accounts.more")}
+          onClick={(e) => { const r = e.currentTarget.getBoundingClientRect(); setMenu({ kind: "more", x: r.right - 210, y: r.bottom + 4 }); }}
+          className="cc-t flex h-[26px] w-[26px] items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 dark:text-white/55 dark:hover:bg-white/[0.07] dark:hover:text-white">
+          <svg viewBox="0 0 18 18" aria-hidden className="h-4 w-4" fill="currentColor"><circle cx="4" cy="9" r="1.3" /><circle cx="9" cy="9" r="1.3" /><circle cx="14" cy="9" r="1.3" /></svg>
         </button>
-        {(!isDefaultSize(view.size) || view.maximized) && (
-          <button type="button" onClick={() => commit({ size: DEFAULT_CHAT_SIZE, maximized: false })}
-            title={t("canvas.chat.resize.reset")} aria-label={t("canvas.chat.resize.reset")}
-            className="cc-t flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 disabled:opacity-40 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden>
-              <path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" />
-            </svg>
-          </button>
-        )}
-        <button type="button" onClick={load} disabled={!current} title={t("canvas.chat.refresh")} aria-label={t("canvas.chat.refresh")}
-          className="cc-t flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900 active:rotate-180 disabled:opacity-40 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden>
-            <path d="M20 11a8 8 0 1 0-2.4 6.4M20 4v7h-7" />
-          </svg>
-        </button>
-        <Button variant="custom" onClick={() => useUnreadStore.getState().setSound(!sound)} aria-pressed={sound}
-          title={sound ? t("canvas.chat.soundOn") : t("canvas.chat.soundOff")} aria-label={sound ? t("canvas.chat.soundOn") : t("canvas.chat.soundOff")}
-          className="cc-t w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" className="w-3.5 h-3.5" aria-hidden>
-            <path d="M11 5 6 9H3v6h3l5 4V5Z" />
-            {sound ? <path d="M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13" /> : <path d="m16 9 5 6M21 9l-5 6" />}
-          </svg>
-        </Button>
-        <Button variant="custom" onClick={onClose} aria-label={t("canvas.chat.close")}
-          className="cc-t w-7 h-7 shrink-0 flex items-center justify-center rounded-md text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white">
-          <CloseIcon className="w-3.5 h-3.5" />
-        </Button>
       </>}
-      toolbar={current && <div className="shrink-0 border-b border-black/[0.08] dark:border-white/[0.08]">
-          <div className="flex items-center gap-2 px-4 h-8">
-            <span title={current.title} className="min-w-0 flex-1 truncate font-mono text-[11px] text-gray-500 dark:text-gray-400">{current.title}</span>
-            {THREADS.map((th) => (
-              <button key={th} type="button" onClick={() => setThread(th)}
-                title={`${t(`canvas.chat.thread.${th}`)}${counts[th] ? ` · ${counts[th]}` : ""}`}
-                aria-label={t(`canvas.chat.thread.${th}`)} aria-pressed={thread === th}
-                className="cc-t relative w-3 h-3 shrink-0 rounded-full hover:scale-110"
-                style={{
-                  background: THREAD_COLOR[th],
-                  opacity: thread === th ? 1 : counts[th] ? 0.7 : 0.3,
-                  boxShadow: thread === th ? `0 0 0 1.5px var(--color-surface, white), 0 0 0 3px ${THREAD_COLOR[th]}` : undefined,
-                }}>
-                {th !== thread && (unread[current.id]?.[th] ?? 0) > 0 && (
-                  <span className="absolute -top-1.5 -right-1.5 min-w-[13px] h-[13px] px-[3px] rounded-full bg-red-500 text-white
-                    text-[8.5px] font-bold leading-[13px] text-center">{unread[current.id][th]}</span>
-                )}
-              </button>
-            ))}
-          </div>
+      toolbar={current && <div className="flex h-7 shrink-0 items-center gap-2 px-4 pb-1">
+          <svg viewBox="0 0 18 18" aria-hidden className="h-3 w-3 shrink-0 text-gray-400 dark:text-white/35" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="5" cy="4" r="1.7" /><circle cx="5" cy="14" r="1.7" /><circle cx="13" cy="6" r="1.7" /><path d="M5 5.7v6.6" /><path d="M13 7.7c0 2.9-8 1.9-8 4.6" /></svg>
+          <span title={current.cwd} className="min-w-0 flex-1 truncate font-mono text-[11px] text-gray-500 dark:text-white/45">{branch ?? current.cwd}</span>
+          {THREADS.map((th) => (
+            <button key={th} type="button" onClick={() => setThread(th)}
+              title={`${t(`canvas.chat.thread.${th}`)}${counts[th] ? ` · ${counts[th]}` : ""}`}
+              aria-label={t(`canvas.chat.thread.${th}`)} aria-pressed={thread === th}
+              className="cc-t relative h-2.5 w-2.5 shrink-0 rounded-full hover:scale-110"
+              style={{
+                background: THREAD_COLOR[th],
+                opacity: thread === th ? 1 : counts[th] ? 0.7 : 0.3,
+                boxShadow: thread === th ? `0 0 0 1.5px var(--color-surface, white), 0 0 0 3px ${THREAD_COLOR[th]}` : undefined,
+              }}>
+              {th !== thread && (unread[current.id]?.[th] ?? 0) > 0 && (
+                <span className="absolute -top-1.5 -right-1.5 min-w-[13px] h-[13px] px-[3px] rounded-full bg-red-500 text-white
+                  text-[8.5px] font-bold leading-[13px] text-center">{unread[current.id][th]}</span>
+              )}
+            </button>
+          ))}
       </div>}
     >
       {current && messages.length > 0 ? <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.chat.title")}>
               {messages.map((m) => (
-                <div key={m.id} className={`flex flex-col ${m.kind === "user" ? "items-end" : "items-start"}`}>
+                <div key={m.id} className={`flex flex-col ${m.kind === "user" ? "items-end" : "items-stretch"}`}>
+                  {m.kind !== "user" && current && (
+                    <div className="mb-1 flex items-center gap-1.5 text-[11.5px] leading-4">
+                      <span aria-hidden className="h-[7px] w-[7px] shrink-0 rounded-full" style={{ background: agentTile(current.agentId) }} />
+                      <span className="font-semibold text-gray-900 dark:text-[#f5f5f7]">{current.title.split(" — ")[0]}</span>
+                      <span className="text-gray-500 dark:text-white/50">{current.agentLabel}</span>
+                      <span className="ml-auto font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35">{clock(m.at)}</span>
+                    </div>
+                  )}
                   <div
-                    className={`max-w-[85%] px-3.5 py-2 text-[13px] leading-[19px] break-words ${m.kind === "user" ? "whitespace-pre-wrap rounded-2xl rounded-br-[4px]" : "rounded-2xl rounded-bl-[4px]"}
-                      ${m.kind === "user"
-                        ? "bg-accent-500 text-white"
-                        : m.kind === "progress"
-                          ? "italic text-gray-500 dark:text-gray-400 bg-gray-50 dark:bg-white/[0.04]"
-                          : "text-gray-900 dark:text-gray-100 bg-gray-100 dark:bg-surface-raised"}`}
+                    className={`px-3.5 py-2 text-[13px] leading-[19px] break-words ${m.kind === "user"
+                      ? "max-w-[85%] whitespace-pre-wrap rounded-2xl bg-accent-500 text-white"
+                      : m.kind === "progress"
+                        ? "rounded-xl border border-black/[0.1] text-[12px] text-gray-600 dark:border-[rgba(84,84,88,0.55)] dark:text-white/60"
+                        : "rounded-[14px] bg-gray-100 text-gray-900 dark:bg-surface-raised dark:text-[#f5f5f7]"}`}
                   >
                     {m.kind === "user" ? m.text : <ChatMarkdown text={m.text} />}
                   </div>
-                  <span className="mt-1 font-mono text-[11px] tabular-nums text-gray-400 dark:text-gray-500">{clock(m.at)}</span>
+                  {m.kind === "user" && <span className="mt-1 font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35">{clock(m.at)}</span>}
                 </div>
               ))}
             <div ref={bottom} />

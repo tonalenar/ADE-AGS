@@ -667,7 +667,7 @@ function CanvasInner() {
             </Button>
           </div>
         )}
-        {panel === "chat" && <ChatPanel onClose={() => setPanel(null)} />}
+        {panel === "chat" && <ChatPanel onClose={() => setPanel(null)} onNewAgent={() => openNewAgentWizard()} />}
         {/* Con la columna de workspaces abierta, el pet vive ahí; plegada, viene al canvas. */}
         {workspacesCollapsed && <PetCard pet={pet} className="pointer-events-auto absolute left-3 bottom-3" />}
       </div>
