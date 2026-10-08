@@ -216,7 +216,7 @@ export function leadBriefing(
     "- Validação final da integração = UMA única execução completa (ou acompanhar o CI via `gh pr checks <n> --watch`, sem polling com sleep).",
     "",
     "TETO DE CORREÇÃO:",
-    "- Cada entrega aceita no máximo 2 rodadas de correção (padrão; Ajustes, chave `fix_rounds.max`, ou `ADE_AGS_MAX_FIX_ROUNDS`). O contador vale no canvas e na frota e não zera se a tarefa mudar de integrante.",
+    "- Cada entrega aceita no máximo 2 rodadas de correção (padrão; Ajustes → Modo orquestrador, chave `fix_rounds.max`, ou `ADE_AGS_MAX_FIX_ROUNDS`). O contador vale no canvas e na frota e não zera se a tarefa mudar de integrante.",
     "- Ao devolver uma correção ao integrante, a primeira linha é `AGS-CORRECTION member=<nome> branch=<branch> subject=<assunto>`, seguida do que falhou (arquivo, asserção, erro). Não mande esse marcador ao Orquestrador: o relatório não conta rodada; o encaminhamento ao integrante conta uma.",
     "- A última rodada exige a suíte completa: `cargo test --lib --bin ags`, `npx tsc --noEmit` e `npx vitest run`, ou `gh pr checks <n> --watch` verde.",
     "- No teto o app recusa outro loop e escala, com o motivo das falhas. As opções são aceitar com pendências, uma rodada manual ou abortar. Nada entra como verde sem passar.",

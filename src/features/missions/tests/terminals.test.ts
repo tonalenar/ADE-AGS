@@ -142,6 +142,7 @@ describe("el equipo de una misión", () => {
     expect(text).toContain("gh pr checks <n> --watch");
     expect(text).toContain("TETO DE CORREÇÃO:");
     expect(text).toContain("AGS-CORRECTION member=<nome> branch=<branch> subject=<assunto>");
+    expect(text).toContain("Ajustes → Modo orquestrador");
     expect(text).toContain("fix_rounds.max");
   });
 

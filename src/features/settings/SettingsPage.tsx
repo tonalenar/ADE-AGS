@@ -26,7 +26,6 @@ import { SettingsRow, SettingsSection } from "@/features/settings/SettingsSectio
 import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
 import { AgentAutoUpdateSetting } from "@/features/settings/AgentAutoUpdateSetting";
 import { SandboxSetting } from "@/features/settings/SandboxSetting";
-import { FixRoundsSetting } from "@/features/settings/FixRoundsSetting";
 import { RenderingSetting } from "@/features/settings/RenderingSetting";
 
 /** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
@@ -159,7 +158,6 @@ export function SettingsPage() {
               <RenderingSetting />
               <NotificationsSetting />
               <SandboxSetting />
-              <FixRoundsSetting />
             </div>
           </SettingsSection>
         )}

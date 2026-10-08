@@ -180,7 +180,7 @@
   "settings.tuis.envHint": "Injetado ao iniciar o processo",
   "settings.tuis.envAdd": "+ Adicionar variável",
   "settings.orchestrator": "Modo orquestrador",
-  "settings.orchestrator.desc": "Quando um agente externo conduz o aplicativo por meio da CLI, cada guia que ele observa envia eventos e gasta seu contexto. Essa tampa é o que impede que ela encha.",
+  "settings.orchestrator.desc": "Quando um agente externo conduz o aplicativo por meio da CLI, cada guia que ele observa envia eventos e gasta seu contexto. Essa tampa é o que impede que ela encha. Aqui também fica o teto de rodadas de correção da mesma entrega, no canvas e na frota.",
   "settings.orchestrator.watchLimit": "Guias assistidas de uma só vez",
   "settings.orchestrator.watchLimitHint": "A maioria das guias que um orquestrador pode seguir com «ags watch add» simultaneamente.",
   "settings.orchestrator.watchLimitWarning": "Após 5 guias monitoradas, apenas os eventos podem preencher o contexto do modelo antes que ele termine a tarefa.",

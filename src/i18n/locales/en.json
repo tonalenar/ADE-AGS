@@ -180,7 +180,7 @@
   "settings.tuis.envHint": "Injected when launching the process",
   "settings.tuis.envAdd": "+ Add variable",
   "settings.orchestrator": "Orchestrator mode",
-  "settings.orchestrator.desc": "When an external agent drives the app through the CLI, every tab it watches sends it events and spends its context. This cap is what keeps it from filling up.",
+  "settings.orchestrator.desc": "When an external agent drives the app through the CLI, every tab it watches sends it events and spends its context. This cap is what keeps it from filling up. The correction-round ceiling for the same delivery, on the canvas and in the fleet, is here too.",
   "settings.orchestrator.watchLimit": "Tabs watched at once",
   "settings.orchestrator.watchLimitHint": "Most tabs an orchestrator can follow with «ags watch add» simultaneously.",
   "settings.orchestrator.watchLimitWarning": "Past 5 watched tabs, the events alone can fill the model's context before it finishes the task.",

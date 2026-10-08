@@ -277,7 +277,8 @@ are separate and the Squad offers `integrator`, add a final task with `role: int
 resolve conflicts, and validate the combined result. If no integrator role is available, assign integration to an \
 appropriate worker. The lead never integrates or modifies files.\n\
 4. Wait with `run_await`; read results with `task_result`. A failed worker is corrected automatically up to \
-the configured ceiling (default 2 rounds). The counter is per delivery: reroute, reassignment and a new \
+the configured ceiling (default 2 rounds; Settings → Orchestrator mode, key `fix_rounds.max`; \
+`ADE_AGS_MAX_FIX_ROUNDS` overrides it). The counter is per delivery: reroute, reassignment and a new \
 `task_add` for the same objective share it. When you add a correction, set `corrects` to the failed task's \
 key. The last round must run the full suite (`cargo test --lib --bin ags`, `npx tsc --noEmit`, `npx vitest run`, \
 or `gh pr checks <n> --watch`), not only affected tests. When the ceiling is hit the task escalates and stays \

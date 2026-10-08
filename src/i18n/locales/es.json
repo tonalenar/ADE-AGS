@@ -180,7 +180,7 @@
   "settings.tuis.envHint": "Se inyectan al lanzar el proceso",
   "settings.tuis.envAdd": "+ Agregar variable",
   "settings.orchestrator": "Modo orquestador",
-  "settings.orchestrator.desc": "Cuando un agente externo maneja la app con la CLI, cada tab que observa le manda eventos y le consume contexto. Este tope es lo que evita que se le llene.",
+  "settings.orchestrator.desc": "Cuando un agente externo maneja la app con la CLI, cada tab que observa le manda eventos y le consume contexto. Este tope es lo que evita que se le llene. Aquí también está el tope de rondas de corrección de la misma entrega, en el canvas y en la flota.",
   "settings.orchestrator.watchLimit": "Tabs observadas a la vez",
   "settings.orchestrator.watchLimitHint": "Máximo de tabs que un orquestador puede seguir con «ags watch add» al mismo tiempo.",
   "settings.orchestrator.watchLimitWarning": "Con más de 5 tabs observadas, los eventos por sí solos pueden llenar el contexto del modelo antes de que termine la tarea.",
