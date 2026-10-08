@@ -19,7 +19,7 @@ export function SettingsSection({ title, description, action, children }: {
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex max-w-3xl flex-col gap-3">
       <div className="flex items-start gap-3">
         <div className="flex flex-col gap-1 min-w-0 flex-1">
           <h3 className="text-[20px] leading-[26px] font-semibold tracking-[-0.01em] text-gray-900 dark:text-white">
