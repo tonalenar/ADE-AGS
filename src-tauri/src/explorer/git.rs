@@ -6,7 +6,6 @@
 //! `.gitignore` y su configuración.
 
 use std::collections::HashMap;
-use std::process::Command;
 use std::time::Duration;
 
 use serde::Serialize;
@@ -68,7 +67,7 @@ impl RepoInfo {
 }
 
 fn git(cwd: &str, args: &[&str]) -> Option<String> {
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(cwd).args(args);
     let out = output_with_timeout(&mut cmd, GIT_TIMEOUT).ok()?;
     if !out.status.success() {
@@ -102,11 +101,13 @@ pub(crate) fn mark_from_xy(xy: &str) -> Option<FileMark> {
     }
 }
 
-/// Parsea la salida `-z` de `git status --porcelain`.
+/// Parsea la salida `-z` de `git status --porcelain` (v1).
 ///
 /// El formato es `XY<espacio>ruta\0`, y en un rename vienen DOS rutas: primero la nueva,
 /// después la vieja, cada una con su `\0`. Sin consumir esa segunda, la ruta original se
 /// leería como si fuera otra entrada y se perdería la sincronización de todo el resto.
+/// El panel ahora lee porcelain v2; este parser queda para los tests del formato viejo.
+#[cfg(test)]
 pub(crate) fn parse_status_z(raw: &str) -> HashMap<String, String> {
     let mut out = HashMap::new();
     let mut parts = raw.split('\0').filter(|s| !s.is_empty()).peekable();
@@ -129,11 +130,139 @@ pub(crate) fn parse_status_z(raw: &str) -> HashMap<String, String> {
     out
 }
 
+/// Une las dos salidas de git en lo que ve el panel.
+///
+/// `rev` es `rev-parse --path-format=absolute --show-toplevel --git-dir --git-common-dir`
+/// (una línea por dato). `None` significa que no hay repo. `status` es
+/// `git status --porcelain=v2 -b -z`: trae la rama y los cambios en el mismo proceso.
+pub(crate) fn repo_info_from_probes(rev: Option<&str>, status: Option<&str>) -> RepoInfo {
+    let Some(rev) = rev else {
+        return RepoInfo::none();
+    };
+    let Some((root, is_worktree)) = parse_rev_parse_locations(rev) else {
+        return RepoInfo::none();
+    };
+    let (branch, changes) = status
+        .map(parse_porcelain_v2)
+        .unwrap_or_else(|| (None, HashMap::new()));
+    RepoInfo {
+        root: Some(root),
+        branch,
+        is_worktree,
+        changed_count: changes.len(),
+        changes,
+    }
+}
+
+/// Tres rutas, en el orden en que se pidieron. La segunda y la tercera difieren en un
+/// worktree enlazado; mirar si `.git` es archivo o carpeta falla con submódulos.
+///
+/// En Windows git puede devolver el mismo directorio con `\` o `/`, barra final y la
+/// letra del disco en otro caso (`C:\repo\.git` y `c:/repo/.git`). Eso no es un worktree.
+pub(crate) fn parse_rev_parse_locations(raw: &str) -> Option<(String, bool)> {
+    let lines: Vec<&str> = raw
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    if lines.len() < 3 {
+        return None;
+    }
+    Some((lines[0].to_string(), !same_git_dir(lines[1], lines[2])))
+}
+
+/// El mismo directorio de git, aunque el texto no coincida.
+///
+/// `\` pasa a `/`, se quita la barra final y la letra de unidad se compara en minúscula.
+/// El resto del camino se deja como vino: en Windows el disco es lo que git cambia de caso.
+fn same_git_dir(a: &str, b: &str) -> bool {
+    normalize_git_dir(a) == normalize_git_dir(b)
+}
+
+fn normalize_git_dir(raw: &str) -> String {
+    let slashed = raw.replace('\\', "/");
+    let trimmed = slashed.trim_end_matches('/');
+    let mut chars = trimmed.chars();
+    match (chars.next(), chars.next()) {
+        (Some(drive), Some(':')) if drive.is_ascii_alphabetic() => {
+            format!("{}:{}", drive.to_ascii_lowercase(), chars.as_str())
+        }
+        _ => trimmed.to_string(),
+    }
+}
+
+/// `git status --porcelain=v2 -b -z`: la rama en `# branch.head` y los cambios.
+///
+/// En v2 el punto ocupa el lugar del espacio de v1 (`M.` es "modificado en el índice").
+/// Un rename (`2`) trae la ruta nueva y, en el registro siguiente, la vieja: hay que
+/// consumirla o el resto del parseo se corre.
+pub(crate) fn parse_porcelain_v2(raw: &str) -> (Option<String>, HashMap<String, String>) {
+    let mut branch = None;
+    let mut changes = HashMap::new();
+    let mut parts = raw.split('\0').filter(|part| !part.is_empty());
+
+    while let Some(record) = parts.next() {
+        if let Some(head) = record.strip_prefix("# branch.head ") {
+            // `(detached)` no es un nombre de rama. Lo mismo que se descartaba `HEAD`.
+            if head != "(detached)" && head != "HEAD" && !head.is_empty() {
+                branch = Some(head.to_string());
+            }
+            continue;
+        }
+        if record.starts_with('#') {
+            continue;
+        }
+        if let Some(path) = record.strip_prefix("? ") {
+            changes.insert(path.to_string(), FileMark::Untracked.letter().to_string());
+            continue;
+        }
+        let (path_at, renamed) = match record.as_bytes().first() {
+            Some(b'1') => (8, false),
+            Some(b'2') => (9, true),
+            Some(b'u') => (10, false),
+            _ => continue,
+        };
+        let Some((xy, path)) = field_and_rest(record, path_at) else {
+            continue;
+        };
+        if renamed {
+            parts.next();
+        }
+        let xy_v1: String = xy
+            .chars()
+            .map(|ch| if ch == '.' { ' ' } else { ch })
+            .collect();
+        if let Some(mark) = mark_from_xy(&xy_v1) {
+            changes.insert(path.to_string(), mark.letter().to_string());
+        }
+    }
+    (branch, changes)
+}
+
+/// `path_at` campos separados por espacio, y el resto es la ruta (puede tener espacios).
+/// Devuelve el segundo campo (XY) y esa ruta.
+fn field_and_rest(record: &str, path_at: usize) -> Option<(&str, &str)> {
+    let mut rest = record;
+    let mut xy = "";
+    for index in 0..path_at {
+        let (field, tail) = rest.split_once(' ')?;
+        if index == 1 {
+            xy = field;
+        }
+        rest = tail;
+    }
+    if xy.len() < 2 {
+        return None;
+    }
+    Some((xy, rest))
+}
+
 /// Todo lo que el panel necesita saber de la carpeta: repo, rama y cambios.
 ///
-/// `async` y en un hilo de bloqueo: son cinco procesos de git (un `status` entero entre
-/// ellos), y como comando síncrono Tauri los corría en el hilo principal, congelando la
-/// ventana mientras tanto en un repo grande.
+/// `async` y en un hilo de bloqueo: son a lo sumo dos procesos de git (un `rev-parse`
+/// con varias preguntas y un `status` v2). Como comando síncrono Tauri los corría en
+/// el hilo principal, congelando la ventana en un repo grande. El frontend además
+/// espera al primer cuadro antes de pedir esto.
 #[tauri::command]
 pub async fn explorer_repo_info(path: String) -> Result<RepoInfo, String> {
     tauri::async_runtime::spawn_blocking(move || repo_info_sync(&path))
@@ -142,33 +271,32 @@ pub async fn explorer_repo_info(path: String) -> Result<RepoInfo, String> {
 }
 
 fn repo_info_sync(path: &str) -> Result<RepoInfo, String> {
-    let path = path.to_string();
-    let Some(root) = git(&path, &["rev-parse", "--show-toplevel"]) else {
-        // No es un repo (o no hay `git`). No es un error: se muestra el árbol pelado.
-        return Ok(RepoInfo::none());
+    // Un solo `rev-parse` responde toplevel y los dos directorios de git, los dos en
+    // absoluto (`--path-format` aplica a `--git-dir` y a `--git-common-dir`). Si falla,
+    // no es un repo (o no hay `git`): no se lanza el `status`.
+    let rev = git(
+        path,
+        &[
+            "rev-parse",
+            "--path-format=absolute",
+            "--show-toplevel",
+            "--git-dir",
+            "--git-common-dir",
+        ],
+    );
+    let status = if rev.is_some() {
+        git(
+            path,
+            &[
+                "status",
+                "--porcelain=v2",
+                "-b",
+                "-z",
+                "--untracked-files=normal",
+            ],
+        )
+    } else {
+        None
     };
-
-    // En un worktree enlazado, el directorio de git propio y el común difieren. Es la
-    // señal fiable: mirar si `.git` es archivo o carpeta falla con submódulos.
-    let is_worktree = match (git(&path, &["rev-parse", "--absolute-git-dir"]),
-                             git(&path, &["rev-parse", "--path-format=absolute", "--git-common-dir"])) {
-        (Some(own), Some(common)) => own != common,
-        _ => false,
-    };
-
-    // En un repo recién inicializado, o con HEAD desprendido, `--abbrev-ref` da "HEAD".
-    // Eso no es un nombre de rama y mostrarlo confunde, así que se descarta.
-    let branch = git(&path, &["rev-parse", "--abbrev-ref", "HEAD"]).filter(|b| b != "HEAD");
-
-    let changes = git(&path, &["status", "--porcelain", "-z", "--untracked-files=normal"])
-        .map(|raw| parse_status_z(&raw))
-        .unwrap_or_default();
-
-    Ok(RepoInfo {
-        root: Some(root),
-        branch,
-        is_worktree,
-        changed_count: changes.len(),
-        changes,
-    })
+    Ok(repo_info_from_probes(rev.as_deref(), status.as_deref()))
 }

@@ -232,7 +232,7 @@ impl UpdateExecutor for OfficialExecutor {
                 .into_iter()
                 .find(|p| p.is_file())
                 .ok_or("failed")?;
-            let mut c = Command::new(crate::util::find_program("node").ok_or("failed")?);
+            let mut c = crate::util::spawn::hidden_command(crate::util::find_program("node").ok_or("failed")?);
             c.arg(cli);
             c
         } else if spec.program == "claude" {
@@ -240,7 +240,7 @@ impl UpdateExecutor for OfficialExecutor {
             if !native_claude_path(&path) {
                 return Err("not_npm".into());
             }
-            Command::new(path)
+            crate::util::spawn::hidden_command(path)
         } else {
             return Err("no_updater".into());
         };
@@ -525,6 +525,7 @@ fn check_one(
     AgentUpdateInfo {
         agent_id: agent.id.clone(),
         label: agent.label.clone(),
+        // A versão já veio do `detect_agents` (cache de 5 min). Não se relança `claude --version` aqui.
         current_version: agent.version.clone(),
         update_available: agent
             .version

@@ -61,29 +61,37 @@ export function DeleteWorkspaceDialog({
       closeOnEsc={!disabled}
       variant="danger"
       footer={
-        <>
-          <Button variant="outline" disabled={disabled} onClick={onClose}>
+        // Alerta do macOS (prancheta 3): os botões empilhados na largura toda — o principal em
+        // cima, apagar sem exportar em vermelho, Cancelar embaixo. A ordem no DOM fica
+        // Cancelar → Apagar → Exportar (a de leitura/tab de antes); o col-reverse só a desenha.
+        <div className="flex w-full flex-col-reverse gap-2">
+          <p className="pt-1 text-center text-[11px] text-gray-400 dark:text-white/35">{t("workspaceDelete.retention")}</p>
+          <Button variant="outline" className="w-full justify-center h-[30px]" disabled={disabled} onClick={onClose}>
             {t("workspaceDelete.cancel")}
           </Button>
-          <Button variant="danger" disabled={disabled} onClick={() => void run("skip")}>
+          <Button variant="danger" className="w-full justify-center h-[30px]" disabled={disabled} onClick={() => void run("skip")}>
             {t("workspaceDelete.skip")}
           </Button>
-          <Button autoFocus variant="primary" disabled={disabled} onClick={() => void run("export")}>
+          <Button autoFocus variant="primary" className="w-full justify-center h-[30px]" disabled={disabled} onClick={() => void run("export")}>
             {busy === "export" ? t("workspaceDelete.exporting") : t("workspaceDelete.export")}
           </Button>
-        </>
+        </div>
       }
     >
-      <div role="alertdialog" aria-label={t("workspaceDelete.title")} className="flex flex-col gap-2 text-sm text-gray-600 dark:text-gray-300">
-        <p>
+      <div role="alertdialog" aria-label={t("workspaceDelete.title")} className="flex flex-col items-center gap-3 pt-2 text-center">
+        <span aria-hidden className="flex h-16 w-16 items-center justify-center rounded-full bg-[rgba(255,159,10,0.16)] text-[#ff9f0a]">
+          <svg viewBox="0 0 24 24" className="h-8 w-8" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 3.5 2.8 19.5h18.4L12 3.5Z" /><path d="M12 10v4.2" /><circle cx="12" cy="17" r="0.6" fill="currentColor" />
+          </svg>
+        </span>
+        <p className="text-[13.5px] leading-[19px] text-gray-600 dark:text-white/60">
           {entries === null
             ? t("workspaceDelete.bodyUnknown", { name: workspaceName })
             : t("workspaceDelete.body", { name: workspaceName, count: entries })}
         </p>
-        <p className="text-xs text-gray-500 dark:text-gray-400">{t("workspaceDelete.retention")}</p>
-        <p className="text-xs text-gray-500 dark:text-gray-400">{t("workspaceDelete.keys")}</p>
+        <p className="text-[11.5px] text-gray-400 dark:text-white/35">{t("workspaceDelete.keys")}</p>
         {error && (
-          <p role="alert" className="rounded-md border border-red-400/60 px-2 py-1 text-xs text-red-600 dark:text-red-400">
+          <p role="alert" className="w-full rounded-md border border-red-400/60 px-2 py-1 text-xs text-red-600 dark:text-red-400">
             {error}
           </p>
         )}

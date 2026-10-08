@@ -30,6 +30,7 @@ import { hasBrowserMcp, withBrowserMcp } from "@/features/browser/tabMcp";
 import { missionOfTab } from "@/features/canvas/store";
 import { homeDir } from "@/shared/ipc/window";
 import { ptyAttach, ptyCreate, ptyForTab, ptyKill, ptyResize, ptyWrite, savePastedImage } from "./ipc";
+import { clearPtyLaunch, ptyLaunchRequested, subscribePtyLaunch } from "./ptyLaunch";
 import { decidePaste } from "./pasteDecision";
 import { formatPathsForAgent } from "./formatPathsForAgent";
 import { showBotToast } from "@/shared/brand/botToastStore";
@@ -110,6 +111,9 @@ export function Terminal({
 }: TerminalProps) {
   const containerRef = useRef<HTMLDivElement>(null);
   const ptyIdRef = useRef<number | null>(null);
+  const launchRef = useRef<(() => void) | null>(null);
+  const startedRef = useRef(false);
+  const scrollbackShown = useRef(false);
   const termRef = useRef<XTerm | null>(null);
   const { t } = useTranslation();
   const [status, setStatus] = useState<TerminalStatus>("connecting");
@@ -253,6 +257,10 @@ export function Terminal({
     installTerminalKeyHandler(term, { browserPaste: agentId === "claude-code" });
     term.open(containerRef.current);
     termRef.current = term;
+    if (initialScrollback) {
+      term.write(initialScrollback);
+      scrollbackShown.current = true;
+    }
     const unregister = tabId ? registerTerminal(tabId, term) : undefined;
 
     // Las TUIs modernas preguntan qué sabe hacer la terminal y ESPERAN respuesta antes de
@@ -345,6 +353,7 @@ export function Terminal({
           const buffered = await ptyAttach(reattachId);
           ptyIdRef.current = reattachId;
           await fitOnce();
+          if (scrollbackShown.current) term.reset();
           if (buffered) term.write(buffered);
           setStatus("running");
           onReady?.(reattachId);
@@ -368,7 +377,10 @@ export function Terminal({
           return;
         }
 
-        if (initialScrollback) term.write(initialScrollback);
+        if (initialScrollback && !scrollbackShown.current) {
+          term.write(initialScrollback);
+          scrollbackShown.current = true;
+        }
 
         // Si el wizard dejó un setup de skills pendiente para esta tab (symlinks
         // todavía escribiéndose en su cwd), esperarlo antes de lanzar el proceso — si
@@ -483,7 +495,9 @@ export function Terminal({
       }
     };
 
-    initPty();
+    launchRef.current = () => {
+      void initPty();
+    };
 
     // ── 5. Input del usuario → PTY ───────────────────────────
     term.onData((data) => {
@@ -604,6 +618,21 @@ export function Terminal({
       term.dispose();
     };
   }, []); // Solo montar/desmontar una vez
+
+  // Aba restaurada e oculta fica no scrollback. O PTY nasce no primeiro foco, ou quando
+  // o watcher / peer tell pedem o lançamento. Fechar continua no cleanup (`pty_kill`).
+  useEffect(() => {
+    const launch = () => {
+      if (startedRef.current) return;
+      const asked = tabId != null && ptyLaunchRequested(tabId);
+      if (!isVisible && !asked) return;
+      startedRef.current = true;
+      if (tabId) clearPtyLaunch(tabId);
+      launchRef.current?.();
+    };
+    launch();
+    return subscribePtyLaunch(launch);
+  }, [isVisible, tabId]);
 
   // Cambiar de tema repinta la terminal en caliente. `options.theme` es reasignable, así
   // que no hace falta recrear nada: el proceso y todo el scrollback siguen intactos, solo

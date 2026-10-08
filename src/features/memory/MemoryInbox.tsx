@@ -64,8 +64,8 @@ type Confirm = { items: MemoryReviewItem[] } | null;
 /** Botones del modal: primario verde para aprobar, secundario gris para rechazar. */
 const BTN_OK = "h-7 rounded-md bg-emerald-600 px-3 text-[12px] font-medium text-white hover:bg-emerald-500 disabled:opacity-50";
 const BTN_SEC = "h-7 rounded-md bg-gray-200/80 px-3 text-[12px] font-medium text-gray-800 hover:bg-gray-300/70 disabled:opacity-50 dark:bg-surface-overlay dark:text-gray-100 dark:hover:bg-white/[0.14]";
-const BTN_ITEM_OK = "h-6 rounded-md bg-emerald-600 px-2.5 text-[11px] font-medium text-white hover:bg-emerald-500 disabled:opacity-50";
-const BTN_ITEM_SEC = "h-6 rounded-md bg-gray-200/80 px-2.5 text-[11px] font-medium text-gray-800 hover:bg-gray-300/70 disabled:opacity-50 dark:bg-surface-overlay dark:text-gray-100 dark:hover:bg-white/[0.14]";
+const BTN_ITEM_OK = "h-7 rounded-[7px] bg-[#34c759] px-3 text-[13px] font-medium text-white shadow-[0_1px_2px_rgba(0,0,0,0.3)] hover:brightness-110 disabled:opacity-50 dark:bg-[#30d158]";
+const BTN_ITEM_SEC = "h-7 rounded-[7px] bg-gray-200/80 px-3 text-[13px] font-medium text-gray-800 hover:bg-gray-300/70 disabled:opacity-50 dark:bg-surface-overlay dark:text-gray-100 dark:hover:brightness-110";
 
 /**
  * Modal único con TODAS las sugerencias pendientes del workspace, agrupadas por misión. Aceptar o
@@ -218,25 +218,24 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                 {g.title}
                 <span className="font-mono text-[10.5px] font-normal tabular-nums text-gray-500 dark:text-white/40">{t("memoryInbox.count", { count: g.items.length })}</span>
               </h3>
-              <ul className="divide-y divide-gray-200 overflow-hidden rounded-xl bg-gray-100/70 dark:divide-white/[0.08] dark:bg-surface-raised/60">
+              <ul className="flex flex-col gap-2">
                 {g.items.map((item) => {
                   const flag = reviewFlag(item);
                   const ev = evidenceParts(item);
                   const id = itemId(item);
                   return (
-                    <li key={id} className="flex flex-col gap-1.5 p-3" data-flag={flag}>
+                    <li key={id} data-flag={flag}
+                      className={`flex flex-col gap-1.5 rounded-[10px] p-3 transition-colors ${selected.has(id)
+                        ? "bg-accent-500/[0.06] shadow-[inset_0_0_0_1px_var(--color-accent-500)]"
+                        : "bg-white shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.1)] dark:bg-surface-raised/60 dark:shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06)]"}`}>
                       <div className="flex items-center gap-2">
                         <input type="checkbox" className="size-3.5 accent-accent-500" checked={selected.has(id)} onChange={() => toggle(id)} aria-label={t("memoryInbox.selectItem", { key: item.key })} />
-                        <span className="min-w-0 flex-1 truncate font-mono text-[12px] font-medium text-gray-900 dark:text-gray-100" title={item.key}>{item.key}</span>
+                        <span className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-[#f5f5f7]" title={item.key}>{item.key}</span>
                         {isDeletion(item) && <span className="inline-flex h-[18px] items-center rounded-full bg-red-600 px-2 text-[10px] font-bold text-white">{t("memoryInbox.deletion")}</span>}
                         {asksHighPriority(item) && <span className="inline-flex h-[18px] items-center rounded-full bg-amber-500/15 px-2 text-[10px] font-semibold text-amber-700 dark:text-amber-300" title={t("memoryInbox.highPriorityHint")}>{t("memoryInbox.highPriority", { priority: item.priority })}</span>}
                         {flag === "highValue" && <span className={`inline-flex h-[18px] items-center rounded-full px-2 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>}
-                        <button type="button" disabled={busy} onClick={() => void approveOne(item)} aria-label={`${t("memoryReview.approve")}: ${item.key}`}
-                          className={BTN_ITEM_OK}>{t("memoryReview.approve")}</button>
-                        <button type="button" disabled={busy} onClick={() => void reject([item])} aria-label={`${t("memoryReview.reject")}: ${item.key}`}
-                          className={BTN_ITEM_SEC}>{t("memoryReview.reject")}</button>
                       </div>
-                      <p className="whitespace-pre-wrap break-words text-[11.5px] leading-4 text-gray-600 dark:text-gray-300">{item.body}</p>
+                      <p className="whitespace-pre-wrap break-words text-[12.5px] leading-[17px] text-gray-600 dark:text-white/60">{item.body}</p>
                       <p className="font-mono text-[10.5px] leading-[14px] text-gray-500 dark:text-white/40">
                         {t("memoryReview.evidence")}: {t(`memoryReview.actor.${item.evidence.actorKind}`)}
                         {ev.runId ? ` · run ${ev.runId.slice(0, 8)}` : ""}
@@ -246,6 +245,12 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                         {!ev.runId && !ev.taskId && !ev.factId && !ev.reason ? ` · ${t("memoryReview.noEvidence")}` : ""}
                       </p>
                       <ReviewMarks item={item} />
+                      <div className="mt-1 flex items-center gap-2">
+                        <button type="button" disabled={busy} onClick={() => void approveOne(item)} aria-label={`${t("memoryReview.approve")}: ${item.key}`}
+                          className={BTN_ITEM_OK}>{t("memoryReview.approve")}</button>
+                        <button type="button" disabled={busy} onClick={() => void reject([item])} aria-label={`${t("memoryReview.reject")}: ${item.key}`}
+                          className={BTN_ITEM_SEC}>{t("memoryReview.reject")}</button>
+                      </div>
                     </li>
                   );
                 })}

@@ -51,6 +51,8 @@ pub fn external_command<S: AsRef<OsStr>>(program: &Path, args: &[S]) -> std::io:
     };
     let mut command = Command::new(&resolved.program);
     command.args(&resolved.prefix).args(args);
+    // Construção, sem spawn: quem for lançar herda a janela escondida.
+    crate::util::spawn::apply_window(&mut command, crate::util::spawn::WindowMode::Hidden);
     Ok(command)
 }
 

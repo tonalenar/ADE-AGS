@@ -49,13 +49,8 @@ pub fn migrate_home(home: &Path) -> Migrated {
 
 #[cfg(windows)]
 fn link_dir(target: &Path, link: &Path) -> std::io::Result<()> {
-    // Una junction no pide permisos de administrador (un symlink de directorio sí).
-    let out = std::process::Command::new("cmd")
-        .args(["/C", "mklink", "/J"])
-        .arg(link)
-        .arg(target)
-        .output()?;
-    if out.status.success() { Ok(()) } else { Err(std::io::Error::other(String::from_utf8_lossy(&out.stderr).trim().to_string())) }
+    // Junction direto (FSCTL_SET_REPARSE_POINT), sem `cmd /C mklink` e sem privilégio de symlink.
+    crate::skills::junction_dir(target, link)
 }
 
 #[cfg(not(windows))]

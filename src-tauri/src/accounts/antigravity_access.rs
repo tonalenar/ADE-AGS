@@ -1,5 +1,5 @@
 //! Account-scoped Cloud Code discovery. This is not an inference executor.
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use std::time::Duration;
 use tauri::AppHandle;
@@ -7,16 +7,16 @@ use tauri::AppHandle;
 const BASE: &str = "https://cloudcode-pa.googleapis.com/v1internal:";
 const MAX_RESPONSE: usize = 1024 * 1024;
 
-#[derive(Serialize, Debug, PartialEq)]
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct Model {
     id: String,
     name: String,
     /// Fraction of the model's quota still available (0.0–1.0), when the service reports it.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     remaining_fraction: Option<f64>,
     /// RFC 3339 instant when that quota resets, when the service reports it.
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     reset_time: Option<String>,
 }
 
@@ -35,13 +35,19 @@ fn quota(info: &Value) -> (Option<f64>, Option<String>) {
     (remaining, reset)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Discovery {
     account_id: String,
     project_id: String,
     models: Vec<Model>,
     inference_verified: bool,
+    /// Epoch segundos da última consulta boa. 0 = ainda não há snapshot.
+    #[serde(default)]
+    fetched_at: i64,
+    /// O barrido devolveu o que já estava no SQLite, sem HTTP.
+    #[serde(default)]
+    cached: bool,
 }
 
 fn project(data: &Value) -> Result<String, String> {
@@ -125,11 +131,40 @@ async fn post(
     serde_json::from_slice(&bytes).map_err(|_| "Resposta Antigravity inválida".into())
 }
 
+fn antigravity_usage_key(account_id: &str) -> String {
+    format!("usage.antigravity.v1.{account_id}")
+}
+
+fn empty_discovery(account_id: String) -> Discovery {
+    Discovery {
+        account_id,
+        project_id: String::new(),
+        models: Vec::new(),
+        inference_verified: false,
+        fetched_at: 0,
+        cached: false,
+    }
+}
+
 #[tauri::command]
 pub async fn antigravity_account_discovery(
     account_id: String,
+    // Ausente = ao vivo, como o popover. O canvas manda `false` para reusar o snapshot fresco.
+    force: Option<bool>,
     app: AppHandle,
+    db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Discovery, String> {
+    let force = force.unwrap_or(true);
+    let db = (*db).clone();
+    let key = antigravity_usage_key(&account_id);
+    if !force {
+        let stored = crate::database::get_setting(&db, &key).ok().flatten().and_then(|raw| {
+            let mut stored = serde_json::from_str::<Discovery>(&raw).ok()?;
+            stored.cached = true;
+            Some(stored)
+        });
+        return Ok(stored.unwrap_or_else(|| empty_discovery(account_id)));
+    }
     // Verify identity for this exact account before using its grant. Never use agy login.
     super::antigravity_oauth::antigravity_oauth_verify(account_id.clone(), app).await?;
     let grant = super::antigravity_oauth::refreshed_grant(&account_id).await?;
@@ -149,12 +184,18 @@ pub async fn antigravity_account_discovery(
         json!({"project": project_id}),
     )
     .await?;
-    Ok(Discovery {
+    let found = Discovery {
         account_id,
         project_id,
         models: models(&catalogue)?,
         inference_verified: false,
-    })
+        fetched_at: crate::util::now_ts(),
+        cached: false,
+    };
+    if let Ok(raw) = serde_json::to_string(&found) {
+        let _ = crate::database::set_setting(&db, &key, &raw);
+    }
+    Ok(found)
 }
 
 #[cfg(test)]
@@ -208,6 +249,8 @@ mod tests {
             project_id: "p".into(),
             models: vec![],
             inference_verified: false,
+            fetched_at: 10,
+            cached: false,
         })
         .unwrap();
         assert_eq!(value["inferenceVerified"], false);
@@ -215,5 +258,8 @@ mod tests {
             assert!(value.get(field).is_none());
         }
         assert!(http_error(403).contains("recusou"));
+        let back: Discovery = serde_json::from_value(value).unwrap();
+        assert_eq!(back.fetched_at, 10);
+        assert!(!back.cached);
     }
 }

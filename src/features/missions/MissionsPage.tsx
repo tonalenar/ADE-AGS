@@ -2,7 +2,7 @@ import { HandoffView } from "@/features/runs/HandoffView";
 import { MemoryInboxButton } from "@/features/memory/MemoryInbox";
 import { MemoryReviewPanel } from "@/features/memory/MemoryReviewPanel";
 import { SharedMemoryPanel, type MemoryTab } from "@/features/memory/SharedMemoryPanel";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
@@ -39,12 +39,16 @@ import { startMissionInTerminals } from "./terminals";
 import { DuplicateMissionDialog } from "./DuplicateMissionDialog";
 import { findDuplicateMission } from "./duplicates";
 import { MissionReviewPanel } from "./MissionReviewPanel";
+import { MissionFinishDialog } from "./MissionFinishDialog";
+import { DeliveryCard, MissionMetricsCard, MissionTeamCard, capitalize, formatActive, prLabel, prUrl } from "./MissionOverview";
+import { agentTile } from "@/features/agents/agentTile";
+import * as missionIpc from "./ipc";
 import {
   AGENT_STATES, agentStateOf, approvalsFor, blockedRuns, canEdit, countAgentStates, dependencyLabels, emptyForm,
-  formFromMission, missionAction, missionPhase, progressOf, workersOf, type MissionPhase, type Progress,
+  formFromMission, missionAction, missionPhase, progressOf, readableTitle, tailPath, workersOf, type MissionPhase, type Progress,
 } from "./missionView";
 import { useMissionsStore } from "./store";
-import type { MissionDetail, MissionSummary } from "./types";
+import type { MissionDetail, MissionSummary, TerminalDeliveryInput } from "./types";
 
 /** El evento del supervisor cuando cambia una tarea. Debe coincidir con `runs/supervisor.rs`. */
 const TASK_CHANGED = "cc-task-changed";
@@ -65,10 +69,10 @@ const STATUS_TONE: Record<MissionPhase, string> = {
 /** Grupos da lista (só apresentação): cada um com o rótulo de status que já existe no i18n. */
 type GroupKey = "running" | "draft" | "done" | "archived";
 const MISSION_GROUPS: { key: GroupKey; labelKey: string }[] = [
-  { key: "running", labelKey: "missions.status.running" },
-  { key: "draft", labelKey: "missions.status.draft" },
-  { key: "done", labelKey: "missions.status.done" },
-  { key: "archived", labelKey: "missions.sidebar.archived" },
+  { key: "running", labelKey: "missions.group.running" },
+  { key: "draft", labelKey: "missions.group.draft" },
+  { key: "done", labelKey: "missions.group.done" },
+  { key: "archived", labelKey: "missions.group.archived" },
 ];
 function groupOf(phase: MissionPhase): GroupKey {
   if (phase === "running" || phase === "waiting_approval") return "running";
@@ -103,16 +107,36 @@ export function MissionsPage() {
   const [selected, setSelected] = useState<string | null>(null);
   // Busca da lista (prancheta 2): filtra só o que aparece, por título e objetivo.
   const [query, setQuery] = useState("");
+  // Filtro por grupo (os chips sob a busca), grupos recolhidos e grupos abertos por inteiro.
+  const [filter, setFilter] = useState<"all" | GroupKey>("all");
+  const [collapsed, setCollapsed] = useState<Partial<Record<GroupKey, boolean>>>({});
+  const [showAll, setShowAll] = useState<Partial<Record<GroupKey, boolean>>>({});
   const [fleet, setFleet] = useState(false);
   const [focusTab, setFocusTab] = useState<MemoryTab>("workspace");
   const [focusNonce, setFocusNonce] = useState(0);
   const [dialog, setDialog] = useState<"new" | "edit" | null>(null);
   const [error, setError] = useState("");
+  const searchRef = useRef<HTMLInputElement>(null);
+  const memoryFocus = useRef(false);
+
+  // Ctrl/⌘+F leva à busca da lista (a dica fica dentro do campo, como na prancheta).
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "f") {
+        e.preventDefault();
+        searchRef.current?.focus();
+        searchRef.current?.select();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   useEffect(() => {
     const state = location.state as { focusMission?: string | null; memoryTab?: MemoryTab } | null;
     if (!state) return;
     setSelected(state.focusMission ?? null);
+    memoryFocus.current = !state.focusMission && !!state.memoryTab;
     setFocusTab(state.memoryTab ?? "workspace");
     setFocusNonce((n) => n + 1);
     navigate(location.pathname, { replace: true, state: null });
@@ -152,6 +176,14 @@ export function MissionsPage() {
     return () => { off.then((f) => f()).catch(() => {}); };
   }, [workspaceId, selected, onMissionChanged]);
 
+  // Sem nada escolhido, abre a primeira em execução (ou a primeira da lista), como na prancheta.
+  // Vindo de "ver memória do workspace", fica no painel de memória.
+  useEffect(() => {
+    if (selected || memoryFocus.current || !loaded || missions.length === 0) return;
+    const first = missions.find((m) => m.status === "running") ?? missions.find((m) => m.status === "draft") ?? missions[0];
+    setSelected(first.id);
+  }, [selected, loaded, missions]);
+
   const summary = missions.find((m) => m.id === selected) ?? null;
   const detail = selected ? details[selected] ?? null : null;
   const selectedSquad = (detail?.mission.squadId ?? summary?.squadId)
@@ -168,11 +200,44 @@ export function MissionsPage() {
   );
   const waiting = (m: { activeRunId: string | null }) => m.activeRunId !== null && blocked.has(m.activeRunId);
 
+  // A lista: busca → grupos → o que cada grupo mostra. As concluídas são dezenas; por padrão
+  // aparecem as mais recentes e o resto fica a um clique (ou à busca).
+  const q = query.trim().toLowerCase();
+  const grouped = useMemo(() => {
+    const out: Record<GroupKey, { m: MissionSummary; phase: MissionPhase }[]> = { running: [], draft: [], done: [], archived: [] };
+    for (const m of missions) {
+      if (q && !m.title.toLowerCase().includes(q) && !(m.objective ?? "").toLowerCase().includes(q)) continue;
+      const phase = missionPhase(m.status, waiting(m));
+      out[groupOf(phase)].push({ m, phase });
+    }
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [missions, q, blocked]);
+  const shownGroups = MISSION_GROUPS.filter((g) => (filter === "all" || filter === g.key) && grouped[g.key].length > 0).map((g) => {
+    const rows = grouped[g.key];
+    const open = !collapsed[g.key];
+    // Abrir uma missão que está além do limite abre o grupo inteiro: ela não pode sumir da lista.
+    const whole = !!showAll[g.key] || filter === g.key || !!q || rows.findIndex(({ m }) => m.id === selected) >= LIST_LIMIT;
+    return { ...g, rows, open, whole, visible: !open ? [] : whole ? rows : rows.slice(0, LIST_LIMIT) };
+  });
+  const order = shownGroups.flatMap((g) => g.visible.map(({ m }) => m.id));
+  // ↑ ↓ passam de uma missão a outra (também de dentro da busca).
+  const onListKey = (e: React.KeyboardEvent) => {
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp") return;
+    if (order.length === 0) return;
+    e.preventDefault();
+    const at = selected ? order.indexOf(selected) : -1;
+    const next = e.key === "ArrowDown" ? Math.min(order.length - 1, at + 1) : Math.max(0, at <= 0 ? 0 : at - 1);
+    setSelected(order[next]);
+    requestAnimationFrame(() => document.querySelector(`[data-mission-row="${order[next]}"]`)?.scrollIntoView({ block: "nearest" }));
+  };
+
   return (
     <div className="flex flex-col h-full min-h-0">
-      <div className="flex items-center gap-2 h-[52px] shrink-0 pl-4 pr-14 border-b border-black/[0.08] dark:border-white/[0.08] bg-white/80 dark:bg-surface/80 backdrop-blur-xl">
-        <LocationIcon className="w-[15px] h-[15px] shrink-0 text-accent-600 dark:text-accent-400" />
-        <span className="text-[13px] font-semibold tracking-[-0.01em] text-gray-900 dark:text-gray-50">{t("missions.title")}</span>
+      <div className="relative flex items-center gap-2 h-[52px] shrink-0 pl-4 pr-14 border-b border-black/[0.08] dark:border-[rgba(84,84,88,0.55)] bg-white/80 dark:bg-[rgba(30,30,32,0.72)] backdrop-blur-xl">
+        <span className="pointer-events-none absolute inset-x-0 text-center text-[13px] font-semibold text-gray-900 dark:text-[#f5f5f7]">
+          {t("missions.title")} <span className="font-medium text-gray-400 dark:text-white/30">· {missions.length}</span>
+        </span>
         <div className="flex-1" />
         <Button variant="custom" size="sm" aria-pressed={fleet} onClick={() => setFleet((v) => !v)}
           className={`px-2.5 h-7 rounded-md text-[12px] font-medium ${fleet ? "bg-accent-500/15 text-accent-700 dark:text-accent-300" : "text-gray-500 dark:text-white/55 hover:text-gray-900 dark:hover:text-white"}`}>
@@ -192,7 +257,8 @@ export function MissionsPage() {
       )}
 
       <div className="flex flex-1 min-h-0">
-        <div className="w-80 shrink-0 cc-scroll border-r border-black/[0.08] dark:border-white/[0.08] bg-gray-50/60 dark:bg-surface px-2 pt-3 pb-2">
+        <div onKeyDown={onListKey} className="w-80 shrink-0 cc-scroll border-r border-black/[0.08] dark:border-[rgba(84,84,88,0.55)] bg-gray-50/60 dark:bg-surface px-3 pt-4 pb-3">
+          <h1 className="mx-1 mb-3 text-[26px] leading-8 font-semibold tracking-[-0.4px] text-gray-900 dark:text-[#f5f5f7]">{t("missions.title")}</h1>
           {loaded && missions.length === 0 ? (
             <EmptyState
               className="py-16 px-4"
@@ -201,41 +267,65 @@ export function MissionsPage() {
               description={t("missions.empty.desc")}
             />
           ) : (<>
-            <label className="sticky top-0 z-10 mx-0.5 mb-1 flex items-center gap-2 h-[30px] px-2.5 rounded-lg
-              bg-black/[0.05] dark:bg-white/[0.07] text-gray-500 dark:text-gray-400
+            <label className="sticky top-0 z-10 flex items-center gap-2 h-8 pl-2.5 pr-2 rounded-[10px]
+              bg-black/[0.05] dark:bg-surface-raised text-gray-400 dark:text-white/30
               focus-within:ring-[3px] focus-within:ring-accent-500/25">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" className="h-3.5 w-3.5 shrink-0" aria-hidden><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></svg>
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("missions.search")}
+              <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" className="h-[15px] w-[15px] shrink-0" aria-hidden><circle cx="8" cy="8" r="5.5" /><path d="M12.2 12.2 16 16" /></svg>
+              <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("missions.search")}
                 aria-label={t("missions.search")}
                 className="min-w-0 flex-1 bg-transparent text-[13px] text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 outline-none" />
               {query && <button type="button" onClick={() => setQuery("")} aria-label={t("btn.clear", { defaultValue: "Limpar" })}
                 className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-400/60 text-[10px] text-white">×</button>}
+              {!query && <kbd className="shrink-0 rounded-[5px] bg-black/[0.06] dark:bg-surface-overlay px-1.5 py-0.5 font-mono text-[11px] leading-[14px] text-gray-500 dark:text-white/60 shadow-[0_1px_0_rgba(0,0,0,0.4)]">{SEARCH_KEY}</kbd>}
             </label>
-            {MISSION_GROUPS.map((group) => {
-              const q = query.trim().toLowerCase();
-              const rows = missions
-                .filter((m) => !q || m.title.toLowerCase().includes(q) || (m.objective ?? "").toLowerCase().includes(q))
-                .map((m) => ({ m, phase: missionPhase(m.status, waiting(m)) }))
-                .filter(({ phase }) => groupOf(phase) === group.key);
-              if (rows.length === 0) return null;
-              return (
-                <div key={group.key} className="mt-4 first:mt-1 flex flex-col gap-0.5">
-                  <div className="flex items-center justify-between px-2.5 pb-1 text-[11px] uppercase tracking-[0.06em] text-gray-500 dark:text-white/45">
-                    <span>{t(group.labelKey)}</span>
-                    <span className="font-mono tabular-nums text-gray-400 dark:text-white/35">{rows.length}</span>
-                  </div>
-                  {rows.map(({ m, phase }) => (
-                    <MissionRow
-                      key={m.id}
-                      mission={m}
-                      phase={phase}
-                      active={m.id === selected}
-                      onSelect={() => setSelected(m.id)}
-                    />
-                  ))}
-                </div>
-              );
-            })}
+            {/* Chips por grupo: um clique isola Em execução / Rascunhos / Concluídas. */}
+            <div role="tablist" aria-label={t("missions.title")} className="mt-2.5 flex flex-wrap gap-1">
+              {[{ key: "all" as const, label: t("missions.filter.all"), n: missions.length > 0 ? Object.values(grouped).reduce((s, r) => s + r.length, 0) : 0 },
+                ...MISSION_GROUPS.map((g) => ({ key: g.key, label: t(g.labelKey), n: grouped[g.key].length }))]
+                .filter((c) => c.key === "all" || c.n > 0).map((c) => (
+                <button key={c.key} type="button" role="tab" aria-selected={filter === c.key} onClick={() => setFilter(c.key)}
+                  className={`inline-flex h-6 items-center gap-1.5 rounded-full px-2.5 text-[11.5px] font-medium transition-colors
+                    ${filter === c.key
+                      ? "bg-accent-500 text-white"
+                      : "bg-black/[0.05] text-gray-600 hover:bg-black/[0.08] dark:bg-white/[0.07] dark:text-white/70 dark:hover:bg-white/[0.11]"}`}>
+                  {c.label}
+                  <span className={`font-mono tabular-nums text-[10.5px] ${filter === c.key ? "text-white/80" : "text-gray-400 dark:text-white/35"}`}>{c.n}</span>
+                </button>
+              ))}
+            </div>
+            {shownGroups.length === 0 && <p className="mt-6 px-2 text-center text-[12.5px] text-gray-400 dark:text-white/35">{t("missions.noResults")}</p>}
+            {shownGroups.map((group) => (
+              <div key={group.key} className="mt-[14px] flex flex-col gap-0.5">
+                <button type="button" onClick={() => setCollapsed((c) => ({ ...c, [group.key]: !c[group.key] }))} aria-expanded={group.open}
+                  className="group/h flex items-center gap-1.5 rounded-md px-2 pb-1.5 pt-0.5 text-left text-[11px] leading-[14px] uppercase tracking-[0.06em] text-gray-500 hover:text-gray-800 dark:text-white/60 dark:hover:text-white">
+                  <svg viewBox="0 0 18 18" aria-hidden className={`h-3 w-3 shrink-0 transition-transform ${group.open ? "rotate-90" : ""}`} fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="M7 4.5 11 9l-4 4.5" /></svg>
+                  <span className="flex-1">{t(group.labelKey)}</span>
+                  <span className="font-mono tabular-nums text-gray-400 dark:text-white/30">{group.rows.length}</span>
+                </button>
+                {group.visible.map(({ m, phase }) => (
+                  <MissionRow
+                    key={m.id}
+                    mission={m}
+                    squad={squads.find((sq) => sq.id === m.squadId) ?? null}
+                    phase={phase}
+                    active={m.id === selected}
+                    onSelect={() => setSelected(m.id)}
+                  />
+                ))}
+                {group.open && group.rows.length > LIST_LIMIT && !group.whole && (
+                  <button type="button" onClick={() => setShowAll((s) => ({ ...s, [group.key]: true }))}
+                    className="mx-1 mt-0.5 h-7 rounded-md text-left px-2 text-[12px] font-medium text-accent-600 hover:bg-accent-500/10 dark:text-accent-400">
+                    {t("missions.list.showAll", { count: group.rows.length })}
+                  </button>
+                )}
+                {group.open && group.whole && !!showAll[group.key] && group.rows.length > LIST_LIMIT && filter !== group.key && !q && (
+                  <button type="button" onClick={() => setShowAll((s) => ({ ...s, [group.key]: false }))}
+                    className="mx-1 mt-0.5 h-7 rounded-md text-left px-2 text-[12px] text-gray-500 hover:bg-black/[0.04] dark:text-white/50 dark:hover:bg-white/[0.06]">
+                    {t("missions.list.showLess")}
+                  </button>
+                )}
+              </div>
+            ))}
           </>)}
         </div>
 
@@ -292,50 +382,47 @@ function StatusBadge({ phase }: { phase: MissionPhase }) {
   const { t } = useTranslation();
   return (
     <span className={`shrink-0 px-2 h-[18px] inline-flex items-center rounded-full text-[10.5px] font-semibold whitespace-nowrap ${STATUS_TONE[phase]}`}>
-      {t(`missions.status.${phase}`)}
+      {capitalize(t(`missions.status.${phase}`))}
     </span>
   );
 }
 
-function folderName(path: string): string {
-  return path.split(/[\\/]/).filter(Boolean).pop() ?? path;
-}
 
-function MissionRow({ mission, phase, active, onSelect }: {
+/** Quantas missões cada grupo mostra antes do "Mostrar todas". */
+const LIST_LIMIT = 8;
+
+const SEARCH_KEY = typeof navigator !== "undefined" && /Mac|iPhone|iPad/.test(navigator.platform) ? "⌘F" : "Ctrl F";
+
+function MissionRow({ mission, squad, phase, active, onSelect }: {
   mission: MissionSummary;
+  squad: Squad | null;
   phase: MissionPhase;
   active: boolean;
   onSelect: () => void;
 }) {
   const { t } = useTranslation();
-  const progress = progressOf(mission);
-  const lead = mission.leadAgent ?? mission.leadAgentId;
+  const lead = squad?.lead.agentId ?? mission.leadAgent ?? mission.leadAgentId;
+  const who = squad?.name ?? (lead ? lead : t("missions.autoLead"));
   return (
     <Button variant="custom"
       onClick={onSelect}
       aria-pressed={active}
-      className={`cc-t w-full flex flex-col items-stretch gap-1 px-2.5 py-2 text-left rounded-lg
+      data-mission-row={mission.id}
+      title={mission.title === readableTitle(mission.title) ? mission.objective : mission.title}
+      className={`cc-t w-full flex flex-col items-stretch px-2.5 py-[9px] text-left rounded-[10px]
         ${active
-          ? "bg-accent-500/15 ring-1 ring-inset ring-accent-500/35"
-          : "hover:bg-gray-200/60 dark:hover:bg-white/5"}`}
+          ? "bg-accent-500/15 shadow-[inset_0_0_0_0.5px_rgba(10,132,255,0.35)]"
+          : "hover:bg-black/[0.04] dark:hover:bg-white/[0.04]"}`}
     >
-      <span className="flex items-center gap-2 min-w-0">
-        <span className="flex-1 truncate text-[13px] font-semibold tracking-[-0.01em] text-gray-900 dark:text-gray-50">{mission.title}</span>
+      <span className="truncate text-[13px] leading-[17px] font-semibold text-gray-900 dark:text-[#f5f5f7]">{readableTitle(mission.title)}</span>
+      <span className="mt-1 flex items-center gap-2 min-w-0 text-[11px] leading-[14px] text-gray-500 dark:text-white/60">
         <StatusBadge phase={phase} />
-      </span>
-      <span className="flex items-center gap-2 min-w-0 text-[11px] text-gray-500 dark:text-white/50">
-        <span className="truncate font-mono" title={mission.cwd}>{folderName(mission.cwd)}</span>
-        <span className="text-gray-300 dark:text-white/20">·</span>
-        <span className="shrink-0">{lead ?? t("missions.autoLead")}</span>
-        <span className="flex-1" />
-        <span className="shrink-0 font-mono tabular-nums text-gray-400 dark:text-white/35">{new Date(mission.createdAt * 1000).toLocaleDateString()}</span>
-      </span>
-      {(progress || mission.spentUsd > 0) && (
-        <span className="flex items-center gap-2 font-mono text-[10.5px] tabular-nums text-gray-500 dark:text-white/45">
-          {progress && <ProgressLabel progress={progress} />}
-          {mission.spentUsd > 0 && <span>${mission.spentUsd.toFixed(3)}</span>}
+        <span className="flex min-w-0 items-center gap-[5px]">
+          <i aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-[2px]" style={{ background: lead ? agentTile(lead) : "#8e8e93" }} />
+          <span className="truncate">{who}</span>
         </span>
-      )}
+        <span className="ml-auto shrink-0 font-mono tabular-nums text-gray-400 dark:text-white/30">{formatActive(mission.activeSeconds) ?? "—"}</span>
+      </span>
     </Button>
   );
 }
@@ -371,6 +458,9 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
   const loadRoles = useSquadsStore((s) => s.loadRoles);
   useEffect(() => { loadRoles().catch(() => undefined); }, [loadRoles]);
   const [busy, setBusy] = useState(false);
+  const [tab, setTab] = useState<"overview" | "execution" | "review" | "memory">("overview");
+  // "Ver memória da missão" (vem do aviso do riel) cai direto na aba da memória.
+  useEffect(() => { if (focusNonce > 0) setTab("memory"); }, [focusNonce]);
   const { mission, tasks, runs } = detail;
   const [roster, setRoster] = useState<Roster | null>(null);
   useEffect(() => { getRoster().then(setRoster).catch(() => setRoster(null)); }, []);
@@ -454,31 +544,83 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
       ? accountLabel(squad.lead.accountId, squad.lead.autoAccount)
     : mission.autoAccount ? t("missions.autoAccount") : (mission.leadAccountId ?? t("accounts.system"));
   const unavailableSquad = Boolean(mission.squadId && (!squad || !squad.available));
+  // Missão em terminais (sem run): conclui-se informando testes e PR.
+  const runless = mission.status === "running" && mission.activeRunId === null;
+  const [finishing, setFinishing] = useState(false);
+  const finish = async (delivery: TerminalDeliveryInput) => {
+    if (!workspaceId) return;
+    await missionIpc.finishMissionTerminals(mission.id, delivery);
+    await useMissionsStore.getState().load(workspaceId).catch(() => undefined);
+    await useMissionsStore.getState().loadDetail(mission.id).catch(() => undefined);
+  };
+  const squadName = run?.squadName ?? squad?.name ?? null;
+  const leadAgentId = lead?.agentId ?? squad?.lead.agentId ?? mission.leadAgentId;
+  const branch = lead?.branch ?? tasks.find((task) => task.branch)?.branch ?? null;
+  const pr = detail.delivery?.pullRequest ?? null;
+  const activeText = formatActive(summary.activeSeconds);
+  const metaIcon = "h-[15px] w-[15px] shrink-0 text-gray-400 dark:text-white/30";
+  const metaItems = ([
+    squadName ? { key: "squad", node: <>
+      <span aria-hidden className="h-4 w-4 shrink-0 rounded" style={{ background: leadAgentId ? agentTile(leadAgentId) : "#8e8e93" }} />
+      <span className="truncate">{t("missions.squadLabel", { name: squadName })}</span>
+    </> } : null,
+    branch ? { key: "branch", node: <>
+      <svg viewBox="0 0 18 18" aria-hidden className={metaIcon} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="5" cy="4" r="1.7" /><circle cx="5" cy="14" r="1.7" /><circle cx="13" cy="6" r="1.7" /><path d="M5 5.7v6.6" /><path d="M13 7.7c0 2.9-8 1.9-8 4.6" /></svg>
+      <span className="truncate font-mono text-gray-900 dark:text-[#f5f5f7]">{branch}</span>
+    </> } : { key: "cwd", node: <span className="truncate font-mono text-gray-900 dark:text-[#f5f5f7]" title={mission.cwd}>{tailPath(mission.cwd)}</span> },
+    pr ? { key: "pr", node: <>
+      <svg viewBox="0 0 18 18" aria-hidden className={metaIcon} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="5" cy="4" r="1.7" /><circle cx="5" cy="14" r="1.7" /><circle cx="13" cy="14" r="1.7" /><path d="M5 5.7v6.6" /><path d="M13 12.3V7a2.5 2.5 0 0 0-2.5-2.5H9" /><path d="M10.4 3.2 9 4.5l1.4 1.3" /></svg>
+      {prUrl(pr)
+        ? <a href={prUrl(pr)!} target="_blank" rel="noreferrer" className="font-medium text-accent-600 hover:underline dark:text-accent-400">{prLabel(pr)}</a>
+        : <span className="font-medium text-accent-600 dark:text-accent-400">{prLabel(pr)}</span>}
+    </> } : null,
+    activeText ? { key: "time", node: <>
+      <svg viewBox="0 0 18 18" aria-hidden className={metaIcon} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="9" cy="9" r="6.5" /><path d="M9 5.4V9l2.4 1.6" /></svg>
+      <span className="font-mono tabular-nums text-gray-900 dark:text-[#f5f5f7]">{activeText}</span>
+    </> } : null,
+  ] as ({ key: string; node: React.ReactNode } | null)[]).filter((item): item is { key: string; node: React.ReactNode } => item !== null);
 
   return (
-    <div className="flex flex-col gap-5 p-6">
-      <div className="flex items-start gap-4">
-        <div className="flex-1 min-w-0 flex flex-col gap-1.5">
-          <span className="flex items-center gap-3 min-w-0">
-            <h2 className="truncate text-[26px] leading-8 font-semibold tracking-[-0.01em] text-gray-900 dark:text-gray-50">{mission.title}</h2>
-            <StatusBadge phase={phase} />
-          </span>
-          <span className="truncate font-mono text-[12px] text-gray-500 dark:text-white/45">{mission.cwd}</span>
+    <div className="@container flex flex-col gap-5 px-8 py-6">
+      <div className="flex items-start gap-6">
+        <div className="flex-1 min-w-0">
+          <div className="text-[11px] leading-[14px] uppercase tracking-[0.06em] text-gray-500 dark:text-white/60">
+            {t("missions.eyebrow", { status: t(`missions.status.${phase}`) })}
+          </div>
+          <h2 className="mt-1.5 text-[26px] leading-8 font-semibold tracking-[-0.4px] text-gray-900 dark:text-[#f5f5f7] [overflow-wrap:anywhere]" title={mission.title}>{readableTitle(mission.title)}</h2>
+          <div className="mt-2.5 flex flex-wrap items-center gap-x-4 gap-y-1.5 text-[12.5px] leading-[17px] text-gray-500 dark:text-white/60">
+            {metaItems.map((item, i) => (
+              <span key={item.key} className="flex min-w-0 items-center gap-4">
+                {i > 0 && <span aria-hidden className="h-3 w-px bg-black/[0.12] dark:bg-[rgba(84,84,88,0.55)]" />}
+                <span className="flex min-w-0 items-center gap-1.5">{item.node}</span>
+              </span>
+            ))}
+          </div>
         </div>
-        {canEdit(mission.status) && (
-          <Button variant="ghost" size="sm" onClick={onEdit} disabled={busy}>{t("missions.edit")}</Button>
-        )}
-        {action && (
-          <Button
-            variant={action === "cancel" ? "danger" : "primary"}
-            size="sm"
-            disabled={busy || (action !== "cancel" && (unavailableSquad || unsupportedLead))}
-            onClick={() => act(action)}
-            leftIcon={busy ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
-          >
-            {t(`missions.action.${action}`)}
-          </Button>
-        )}
+        <div className="mt-0.5 flex shrink-0 items-center gap-2">
+          {canEdit(mission.status) && (
+            <Button variant="custom" onClick={onEdit} disabled={busy} className="h-7 inline-flex items-center gap-1.5 rounded-[7px] px-3.5 text-[13px] font-medium whitespace-nowrap bg-white dark:bg-surface-raised text-gray-900 dark:text-[#f5f5f7] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.12)] dark:shadow-[inset_0_0_0_0.5px_rgba(84,84,88,0.55),0_1px_2px_rgba(0,0,0,0.3)] disabled:opacity-50">{t("missions.edit")}</Button>
+          )}
+          {action === "cancel" && (
+            <Button variant="custom" onClick={() => act("cancel")} disabled={busy} className="h-7 inline-flex items-center gap-1.5 rounded-[7px] px-3.5 text-[13px] font-medium whitespace-nowrap bg-white dark:bg-surface-raised text-gray-900 dark:text-[#f5f5f7] shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.12),0_1px_2px_rgba(0,0,0,0.12)] dark:shadow-[inset_0_0_0_0.5px_rgba(84,84,88,0.55),0_1px_2px_rgba(0,0,0,0.3)] disabled:opacity-50">
+              {busy && <AnimateSpin className="w-3.5 h-3.5" />}
+              {t("missions.action.cancel")}
+            </Button>
+          )}
+          {runless && (
+            <Button variant="custom" onClick={() => setFinishing(true)} disabled={busy} className="h-7 inline-flex items-center gap-1.5 rounded-[7px] px-3.5 text-[13px] font-medium whitespace-nowrap bg-accent-500 hover:bg-accent-600 text-white shadow-[0_1px_2px_rgba(0,0,0,0.35),inset_0_0.5px_0_rgba(255,255,255,0.2)] disabled:opacity-50">
+              <svg viewBox="0 0 18 18" aria-hidden className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M4 9.5l3.2 3.2L14 5.8" /></svg>
+              {t("missions.finishAction")}
+            </Button>
+          )}
+          {action && action !== "cancel" && (
+            <Button variant="custom" onClick={() => act(action)}
+              disabled={busy || unavailableSquad || unsupportedLead} className="h-7 inline-flex items-center gap-1.5 rounded-[7px] px-3.5 text-[13px] font-medium whitespace-nowrap bg-accent-500 hover:bg-accent-600 text-white shadow-[0_1px_2px_rgba(0,0,0,0.35),inset_0_0.5px_0_rgba(255,255,255,0.2)] disabled:opacity-50">
+              {busy && <AnimateSpin className="w-3.5 h-3.5" />}
+              {t(`missions.action.${action}`)}
+            </Button>
+          )}
+        </div>
       </div>
 
       {budgetPrompt && (
@@ -501,18 +643,6 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
       {mission.status === "draft" && <Alert variant="info">{t("missions.draftNotice")}</Alert>}
       {mission.status === "failed" && <FailureNotice mission={mission} />}
       {mission.status === "failed" && <Alert variant="info">{t("missions.retryNotice")}</Alert>}
-      {detail.delivery && (
-        <Section title={t("missions.delivery.title")}>
-          <div className="flex flex-col gap-1 text-[11px] text-gray-600 dark:text-gray-300">
-            <span>{t("missions.delivery.tests", { result: t(`missions.delivery.test.${detail.delivery.testResult}`) })}</span>
-            <span>{t("missions.delivery.ci", { result: t(`missions.delivery.ci.${detail.delivery.ciStatus}`) })}</span>
-            <span>{t("missions.delivery.checkedAt", { date: new Date(detail.delivery.checkedAt * 1000).toLocaleString() })}</span>
-            {detail.delivery.pullRequest && (
-              <span className="break-all">{t("missions.delivery.pr")}: {detail.delivery.pullRequest}</span>
-            )}
-          </div>
-        </Section>
-      )}
       {action && action !== "cancel" && unsupportedLead && <Alert variant="warning">{t("squads.leadUnsupported")}</Alert>}
       {action && action !== "cancel" && mission.squadId && unavailableSquad && (
         <Alert variant="warning">
@@ -523,10 +653,36 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         <Alert variant="warning">{t("missions.waitingNotice", { count: approvals.length })}</Alert>
       )}
 
-      <Section title={t("missions.detail.objective")}>
-        <MissionObjective key={mission.id} objective={mission.objective} />
-      </Section>
 
+      {/* Abas: o detalhe era uma rolagem única de ~12 seções. Agora cada assunto tem a sua. */}
+      <div role="tablist" aria-label={mission.title}
+        className="sticky top-0 z-10 -mx-8 -mt-2 flex gap-1 border-b border-black/[0.08] bg-gray-50/90 px-8 backdrop-blur-xl dark:border-[rgba(84,84,88,0.55)] dark:bg-surface-deep/90">
+        {([
+          { id: "overview", label: t("missions.tab.overview"), n: 0 },
+          { id: "execution", label: t("missions.tab.execution"), n: tasks.length },
+          { id: "review", label: t("missions.tab.review"), n: 0 },
+          { id: "memory", label: t("missions.tab.memory"), n: 0 },
+        ] as const).map((x) => (
+          <button key={x.id} type="button" role="tab" aria-selected={tab === x.id} onClick={() => setTab(x.id)}
+            className={`relative inline-flex h-10 items-center gap-1.5 px-3 text-[13px] font-medium transition-colors
+              ${tab === x.id ? "text-gray-900 dark:text-[#f5f5f7]" : "text-gray-500 hover:text-gray-800 dark:text-white/55 dark:hover:text-white"}`}>
+            {x.label}
+            {x.n > 0 && <span className="rounded-full bg-black/[0.06] px-1.5 font-mono text-[10.5px] tabular-nums text-gray-500 dark:bg-white/[0.08] dark:text-white/55">{x.n}</span>}
+            {tab === x.id && <span aria-hidden className="absolute inset-x-2 -bottom-px h-0.5 rounded-full bg-accent-500" />}
+          </button>
+        ))}
+      </div>
+
+      {tab === "overview" && (<>
+      <MissionObjective key={mission.id} objective={mission.objective} title={t("missions.detail.objective")} />
+
+      <div className="grid grid-cols-1 gap-5 @4xl:grid-cols-2">
+        <MissionTeamCard mission={mission} tasks={tasks} squad={squad} blocked={blockedTasks} />
+        <MissionMetricsCard summary={summary} mission={mission} delivery={detail.delivery} />
+      </div>
+
+
+      {detail.delivery && <DeliveryCard delivery={detail.delivery} />}
       <dl className="grid grid-cols-2 lg:grid-cols-4 gap-px overflow-hidden rounded-xl bg-black/[0.06] dark:bg-white/[0.07] ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.07]">
         <Stat label={t("missions.detail.provider")} value={provider} />
         <Stat label={t("missions.detail.account")} value={account} />
@@ -588,6 +744,9 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         </Section>
       )}
 
+      </>)}
+
+      {tab === "execution" && (<>
       {mission.status !== "draft" && <BudgetBar missionId={mission.id} />}
 
       <MissionMap tasks={tasks} accountLabel={accountLabel} />
@@ -615,12 +774,6 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         </Section>
       )}
 
-      {(mission.status === "done" || mission.status === "cancelled" || mission.status === "failed") && (
-        <Section title={t("missions.cleanup.title")}>
-          <CleanupPanel missionId={mission.id} />
-        </Section>
-      )}
-
       {tasks.length > 0 && (
         <Section title={t("missions.detail.tasks")}>
           <ul className="flex flex-col divide-y divide-black/[0.06] dark:divide-white/[0.07] overflow-hidden rounded-xl bg-gray-50 dark:bg-surface ring-1 ring-inset ring-black/[0.06] dark:ring-white/[0.07]">
@@ -645,10 +798,24 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
         </Section>
       )}
 
+      </>)}
+
+      {tab === "review" && (<>
       <MissionReviewPanel missionId={mission.id} refreshKey={tasks.map((task) => `${task.id}:${task.status}`).join("|")} />
 
+      {(mission.status === "done" || mission.status === "cancelled" || mission.status === "failed") && (
+        <Section title={t("missions.cleanup.title")}>
+          <CleanupPanel missionId={mission.id} />
+        </Section>
+      )}
+
+      </>)}
+
+      {tab === "memory" && (<>
       {workspaceId && <MemoryReviewPanel missionId={mission.id} workspaceId={workspaceId} refreshKey={mission.status} />}
       {workspaceId && <SharedMemoryPanel key={`${workspaceId}-${mission.id}-${focusNonce}`} workspaceId={workspaceId} missionId={mission.id} runs={runs} activeRunId={mission.activeRunId} initialTab={focusTab} />}
+      </>)}
+      {finishing && <MissionFinishDialog onClose={() => setFinishing(false)} onFinish={finish} />}
       {duplicateTarget && (
         <DuplicateMissionDialog
           duplicate={duplicateTarget}

@@ -15,9 +15,10 @@ use std::io::Read;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{CommandBuilder, PtySize};
 
 use crate::database::DbConnection;
+use crate::terminal::containment::ProcessGroup;
 use serde::{Deserialize, Serialize};
 
 use super::parse::parse_usage_screen;
@@ -124,14 +125,12 @@ pub(super) fn capture(
     cwd: &str,
     env: &[(String, String)],
 ) -> Result<String, String> {
-    let pty = native_pty_system()
-        .openpty(PtySize {
-            rows: super::screen::ROWS as u16,
-            cols: super::screen::COLS as u16,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| e.to_string())?;
+    let pty = crate::terminal::open_pty(PtySize {
+        rows: super::screen::ROWS as u16,
+        cols: super::screen::COLS as u16,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
 
     let mut cmd = CommandBuilder::new(command);
     cmd.cwd(cwd);
@@ -144,8 +143,12 @@ pub(super) fn capture(
         cmd.env(k, v);
     }
 
-    let mut child = pty.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+    let child = pty.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
     drop(pty.slave);
+    // `open_pty` en Windows es el ConPTY con `CREATE_NO_WINDOW` (`win_conpty`).
+    // El grupo es el de las tabs: al cortar el sondeo mueren el `claude` y los nietos.
+    // El `Drop` cubre los `?` de acá abajo.
+    let mut probe = UsageProbe::new(child);
 
     let mut reader = pty.master.try_clone_reader().map_err(|e| e.to_string())?;
     let mut writer = pty.master.take_writer().map_err(|e| e.to_string())?;
@@ -223,9 +226,47 @@ pub(super) fn capture(
         let _ = std::fs::write(path, &raw);
     }
 
+    probe.release();
+    result
+}
+
+/// El hijo de `/usage` y todo lo que haya alcanzado a lanzar.
+struct UsageProbe {
+    group: ProcessGroup,
+    child: Box<dyn portable_pty::Child + Send + Sync>,
+    released: bool,
+}
+
+impl UsageProbe {
+    fn new(child: Box<dyn portable_pty::Child + Send + Sync>) -> Self {
+        let mut group = ProcessGroup::new(0);
+        group.adopt(&*child);
+        Self { group, child, released: false }
+    }
+
+    fn release(&mut self) {
+        if self.released {
+            return;
+        }
+        self.released = true;
+        release_usage_process(&mut self.group, &mut *self.child);
+    }
+}
+
+impl Drop for UsageProbe {
+    fn drop(&mut self) {
+        self.release();
+    }
+}
+
+/// Mata el grupo entero y recién después al hijo directo. Es el cierre de `capture`.
+pub(super) fn release_usage_process(
+    group: &mut ProcessGroup,
+    child: &mut (dyn portable_pty::Child + Send + Sync),
+) {
+    group.kill_all();
     let _ = child.kill();
     let _ = child.wait();
-    result
 }
 
 /// ¿Ya está todo lo que interesa?
@@ -338,4 +379,145 @@ pub async fn claude_live_usage(
         }
     }
     Ok(fresh)
+}
+
+/// El sondeo de cupo cierra como `examples/orphan_probe.rs -- contained`: el nieto que se
+/// fue a su propia sesión muere con el grupo, no solo el hijo directo.
+#[cfg(all(test, target_os = "linux"))]
+mod capture_kills_group {
+    use super::release_usage_process;
+    use crate::terminal::containment::ProcessGroup;
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+
+    fn vivo(pid: u32) -> bool {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+
+    #[test]
+    fn el_sondeo_de_cupo_mata_al_nieto_que_se_fue_a_su_propia_sesion() {
+        let pty = native_pty_system()
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .expect("openpty");
+
+        let mut cmd = CommandBuilder::new("sh");
+        cmd.arg("-c");
+        cmd.arg("setsid sleep 30 & sleep 0.3; pgrep -n -x sleep; sleep 30");
+
+        let mut group = ProcessGroup::new(0);
+        let mut child = pty.slave.spawn_command(cmd).expect("spawn");
+        group.adopt(&*child);
+        if !group.is_escape_proof() {
+            eprintln!(
+                "omitido: sin cgroups delegados, el sondeo cae al recorrido por ppid, que \
+                 por diseño no alcanza a un proceso en otra sesión."
+            );
+            release_usage_process(&mut group, &mut *child);
+            return;
+        }
+
+        let mut reader = pty.master.try_clone_reader().expect("reader");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 1024];
+            let mut acc = String::new();
+            while let Ok(n) = reader.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                acc.push_str(&String::from_utf8_lossy(&buf[..n]));
+                if let Some(pid) = acc.split_whitespace().find_map(|w| w.parse::<u32>().ok()) {
+                    let _ = tx.send(pid);
+                    break;
+                }
+            }
+        });
+        let nieto = rx.recv_timeout(Duration::from_secs(10)).expect("pid del nieto");
+        assert!(vivo(nieto), "el nieto tendría que estar vivo antes de cortar el sondeo");
+
+        release_usage_process(&mut group, &mut *child);
+        drop(pty);
+
+        let limite = Instant::now() + Duration::from_secs(5);
+        while vivo(nieto) && Instant::now() < limite {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        let sobrevivio = vivo(nieto);
+        if sobrevivio {
+            unsafe { libc::kill(nieto as i32, libc::SIGKILL) };
+        }
+        assert!(!sobrevivio, "el nieto {nieto} quedó huérfano tras cortar el sondeo de cupo");
+    }
+}
+
+#[cfg(all(test, windows))]
+mod capture_kills_group {
+    use super::release_usage_process;
+    use crate::terminal::containment::{imp, ProcessGroup};
+    use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+    use std::io::Read;
+    use std::time::{Duration, Instant};
+
+    fn vivo(pid: u32) -> bool {
+        std::process::Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
+            .output()
+            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
+            .unwrap_or(false)
+    }
+
+    #[test]
+    fn el_sondeo_de_cupo_mata_al_proceso_que_lanzo() {
+        let pty = native_pty_system()
+            .openpty(PtySize { rows: 24, cols: 80, pixel_width: 0, pixel_height: 0 })
+            .expect("openpty");
+
+        let mut cmd = CommandBuilder::new("powershell");
+        cmd.arg("-NoProfile");
+        cmd.arg("-Command");
+        cmd.arg(
+            "$p = Start-Process -PassThru -WindowStyle Hidden ping \
+             -ArgumentList '-n','60','127.0.0.1'; \
+             Write-Output \"NIETO=$($p.Id)\"; Start-Sleep 60",
+        );
+
+        let mut group = ProcessGroup::new(0);
+        let mut child = pty.slave.spawn_command(cmd).expect("spawn");
+        group.adopt(&*child);
+        assert!(imp::usa_job(&group.imp), "no se pudo crear el Job Object del sondeo");
+
+        let mut reader = pty.master.try_clone_reader().expect("reader");
+        let (tx, rx) = std::sync::mpsc::channel();
+        std::thread::spawn(move || {
+            let mut buf = [0u8; 1024];
+            let mut acc = String::new();
+            while let Ok(n) = reader.read(&mut buf) {
+                if n == 0 {
+                    break;
+                }
+                acc.push_str(&String::from_utf8_lossy(&buf[..n]));
+                if let Some(rest) = acc.split("NIETO=").nth(1) {
+                    let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+                    if digits.len() < rest.len() {
+                        if let Ok(pid) = digits.parse::<u32>() {
+                            let _ = tx.send(pid);
+                            break;
+                        }
+                    }
+                }
+            }
+        });
+        let nieto = rx.recv_timeout(Duration::from_secs(30)).expect("pid del nieto");
+        assert!(vivo(nieto), "el nieto tendría que estar vivo antes de cortar el sondeo");
+
+        release_usage_process(&mut group, &mut *child);
+        drop(pty);
+
+        let limite = Instant::now() + Duration::from_secs(5);
+        while vivo(nieto) && Instant::now() < limite {
+            std::thread::sleep(Duration::from_millis(50));
+        }
+        assert!(!vivo(nieto), "el nieto {nieto} quedó huérfano tras cortar el sondeo de cupo");
+    }
 }

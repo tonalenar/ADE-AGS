@@ -3,6 +3,7 @@ import { listen } from "@tauri-apps/api/event";
 
 import { useTabsStore } from "@/features/tabs/store";
 
+import { whenSweepDone } from "./sweepGate";
 import { useRunsStore } from "./store";
 import type { PendingApproval, TaskEventPayload } from "./types";
 
@@ -35,9 +36,18 @@ export function useFleetEvents() {
   const setApprovals = useRunsStore((s) => s.setApprovals);
 
   useEffect(() => {
-    if (workspaceId) loadTasks(workspaceId).catch(console.error);
-    // La cola no es por workspace, y puede haber pedidos de antes de montar esta ventana.
-    loadApprovals().catch(console.error);
+    let cancel = false;
+    // El sweep de arranque cierra las tareas que quedaron `running` del proceso anterior.
+    // Listar antes las mostraría trabajando. `whenSweepDone` espera ese aviso.
+    whenSweepDone().then(() => {
+      if (cancel) return;
+      if (workspaceId) loadTasks(workspaceId).catch(console.error);
+      // La cola no es por workspace, y puede haber pedidos de antes de montar esta ventana.
+      loadApprovals().catch(console.error);
+    });
+    return () => {
+      cancel = true;
+    };
   }, [workspaceId, loadTasks, loadApprovals]);
 
   useEffect(() => {

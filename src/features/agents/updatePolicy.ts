@@ -28,6 +28,8 @@ export interface AgentUpdateResult {
 
 export const AUTO_UPDATE_SETTING_KEY = "agents.autoUpdate";
 export const AUTO_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
+/** Igual ao primeiro check do app (`UpdateNotifier`): deixa o `detect_agents` esquentar o cache. */
+export const FIRST_AGENT_CHECK_MS = 20_000;
 
 /** Opt-in: solo el texto exacto "true" lo prende. */
 export function isAutoUpdateEnabled(raw: string | null | undefined): boolean {

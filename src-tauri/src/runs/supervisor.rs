@@ -293,7 +293,10 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     }
     // Con una cuenta de la app, una API key heredada no le gana a su login.
     crate::agents::apply_account_env(&mut command, &launch.env);
-    let mut command = tokio::process::Command::from(command);
+    let started_at = std::time::Instant::now();
+    let (program_log, argv_log) = crate::util::spawn::argv_of(command.get_program(), &command.get_args().map(|arg| arg.to_owned()).collect::<Vec<_>>());
+    // A flag entra no std::Command antes do from. O Job Object e o kill_on_drop ficam.
+    let mut command = crate::util::spawn::into_tokio(command);
     command
         .current_dir(&workspace)
         .stdin(Stdio::null())
@@ -410,7 +413,9 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         }
         let stderr_text = stderr_reader.await.unwrap_or_default();
 
-        let code = child.wait().await.ok().and_then(|s| s.code()).unwrap_or(-1);
+        let status = child.wait().await.ok();
+        let code = status.as_ref().and_then(|s| s.code()).unwrap_or(-1);
+        crate::util::spawn::log_finish(&program_log, &argv_log, started_at.elapsed(), status.as_ref().and_then(|s| s.code()));
         let mut outcome = adapter.finish(emitted, code);
         if !outcome.ok && outcome.error.is_none() && !stderr_text.is_empty() {
             outcome.error = Some(tail(&stderr_text, 400));
