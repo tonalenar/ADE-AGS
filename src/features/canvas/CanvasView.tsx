@@ -3,7 +3,7 @@ import "@xyflow/react/dist/style.css";
 import { lazy, memo, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
-  Background, BackgroundVariant, ConnectionMode, Handle, NodeResizer,
+  Background, BackgroundVariant, ConnectionMode, NodeResizer,
   Position, ReactFlow, ReactFlowProvider, useReactFlow,
   type Edge, type EdgeChange, type Node, type NodeChange, type NodeProps, type Connection,
 } from "@xyflow/react";
@@ -35,7 +35,7 @@ import { CanvasDock, type DockPanel } from "./CanvasDock";
 import { useUiStore } from "@/app/uiStore";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ChatPanel } from "./ChatPanel";
-import { CORD_MAGNET, CordConnectionLine, CordEdge, cordColor, flashNode } from "./cords";
+import { CORD_MAGNET, CordConnectionLine, CordEdge, CordPort, cordColor, flashNode } from "./cords";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { DesignPanel } from "./design/DesignPanel";
 import { chooseOnBoard } from "./design/chooseProposal";
@@ -705,12 +705,12 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
 
       {/* Los puntos de conexión van a la altura de la cabecera: más abajo quedarían
           debajo de la terminal viva, que se dibuja encima del nodo. */}
-      <Handle id="l" type="source" position={Position.Left} style={{ top: HEADER_H / 2 }} className={handle} />
-      <Handle id="r" type="source" position={Position.Right} style={{ top: HEADER_H / 2 }} className={handle} />
+      <CordPort id="l" type="source" position={Position.Left} style={{ top: HEADER_H / 2 }} className={handle} />
+      <CordPort id="r" type="source" position={Position.Right} style={{ top: HEADER_H / 2 }} className={handle} />
       {/* Arriba y abajo, para los equipos apilados. El de abajo queda medio tapado por la
           terminal viva al 100 %: se usa sobre todo para dibujar, y ahí el canvas está alejado. */}
-      <Handle id="t" type="source" position={Position.Top} className={handle} />
-      <Handle id="b" type="source" position={Position.Bottom} className={handle} />
+      <CordPort id="t" type="source" position={Position.Top} className={handle} />
+      <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
 
       <div
         className={`group h-full w-full flex flex-col rounded-xl overflow-hidden
@@ -853,10 +853,10 @@ const NoteNode = memo(function NoteNode({ data, selected }: NodeProps<NoteFlowNo
     >
       <NodeResizer isVisible={selected} minWidth={NOTE_MIN.w} minHeight={NOTE_MIN.h}
         lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
-      <Handle id="l" type="source" position={Position.Left} className={handle} />
-      <Handle id="r" type="source" position={Position.Right} className={handle} />
-      <Handle id="t" type="source" position={Position.Top} className={handle} />
-      <Handle id="b" type="source" position={Position.Bottom} className={handle} />
+      <CordPort id="l" type="source" position={Position.Left} className={handle} />
+      <CordPort id="r" type="source" position={Position.Right} className={handle} />
+      <CordPort id="t" type="source" position={Position.Top} className={handle} />
+      <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
 
       <div
         className="ade-node-drag flex items-center gap-2 pl-3 pr-1.5 shrink-0 cursor-grab active:cursor-grabbing
@@ -1006,10 +1006,10 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
     >
       <NodeResizer isVisible={selected} minWidth={PORTAL_MIN.w} minHeight={PORTAL_MIN.h}
         lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
-      <Handle id="l" type="source" position={Position.Left} className={handle} />
-      <Handle id="r" type="source" position={Position.Right} className={handle} />
-      <Handle id="t" type="source" position={Position.Top} className={handle} />
-      <Handle id="b" type="source" position={Position.Bottom} className={handle} />
+      <CordPort id="l" type="source" position={Position.Left} className={handle} />
+      <CordPort id="r" type="source" position={Position.Right} className={handle} />
+      <CordPort id="t" type="source" position={Position.Top} className={handle} />
+      <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
 
       <div
         className="ade-node-drag flex items-center gap-2 pl-3 pr-1.5 shrink-0 cursor-grab active:cursor-grabbing
