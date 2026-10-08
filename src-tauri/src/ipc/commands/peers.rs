@@ -494,6 +494,49 @@ pub(super) fn peer_check(app: &AppHandle, args: &Value) -> Result<Value, String>
         "askStatus": status.as_ref().map(|s| ask_status_value(s, crate::util::now_ts_ms())), "reply": partial }))
 }
 
+enum TellBody {
+    Send(String),
+    Escalated { message: String, rounds: i64, work_key: String },
+}
+
+/// Conta uma devolução de correção no canvas. Sem missão, ou sem ser correção, o texto segue
+/// como chegou. No teto, a correção não é enviada ao integrante.
+fn prepare_canvas_tell(app: &AppHandle, from: &str, from_name: &str, target: &OpenTab, text: &str) -> Result<TellBody, String> {
+    let boards = crate::canvas::load_boards();
+    let Some(mission_id) = crate::canvas::mission_of_tab(&boards, from)
+        .or_else(|| crate::canvas::mission_of_tab(&boards, &target.id))
+    else {
+        return Ok(TellBody::Send(text.to_string()));
+    };
+    let from_role = boards.values().find_map(|board| board.roles.get(from).cloned()).unwrap_or_default();
+    let to_orchestrator = crate::canvas::is_orchestrator(&boards, &target.id);
+    let Some(hit) = crate::runs::fixrounds::classify_canvas(&from_role, from_name, to_orchestrator, text) else {
+        return Ok(TellBody::Send(text.to_string()));
+    };
+    let db = super::shared::db(app)?;
+    let conn = db.inner().lock().map_err(|e| e.to_string())?;
+    match crate::runs::fixrounds::apply_canvas(&conn, &mission_id, &hit, text)? {
+        crate::runs::fixrounds::CanvasOutcome::Deliver { text, .. } => Ok(TellBody::Send(text)),
+        crate::runs::fixrounds::CanvasOutcome::Escalated { message, rounds, work_key } => {
+            Ok(TellBody::Escalated { message, rounds, work_key })
+        }
+    }
+}
+
+/// Cola a escalação no terminal do Orquestrador, quando ele está entre os pares. Se quem
+/// mandou já é o Orquestrador, a resposta do comando é o que aparece na tela dele.
+fn notify_orchestrator(app: &AppHandle, from: &str, from_name: &str, peers: &[OpenTab], message: &str) {
+    let boards = crate::canvas::load_boards();
+    let Some(lead) = peers.iter().find(|peer| peer.id != from && crate::canvas::is_orchestrator(&boards, &peer.id)) else {
+        return;
+    };
+    let Ok(pty) = pty_id_for_tab(app, &lead.id, Some(&lead.window)) else { return };
+    wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(20), false);
+    if submit_prompt(pty, &outgoing(from_name, message, false, false)).is_ok() {
+        emit_peer_message(app, "tell", from, Some(&lead.id), Some(message));
+    }
+}
+
 pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let to = arg_str(args, "to")?;
@@ -502,6 +545,21 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     let target = resolve_peer(&list, &to)?;
     let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
     let from_name = me.map(|m| m.name).unwrap_or_else(|| from.clone());
+    let prepared = prepare_canvas_tell(app, &from, &from_name, target, &text)?;
+    let text = match prepared {
+        TellBody::Escalated { message, rounds, work_key } => {
+            notify_orchestrator(app, &from, &from_name, &list, &message);
+            return Ok(json!({
+                "peer": describe(target),
+                "sent": false,
+                "escalated": true,
+                "message": message,
+                "workKey": work_key,
+                "rounds": rounds,
+            }));
+        }
+        TellBody::Send(body) => body,
+    };
 
     // No se interrumpe a quien está a mitad de un turno: se espera a que se calle un poco.
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(60), false);

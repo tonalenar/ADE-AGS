@@ -23,7 +23,7 @@ const TASK_COLUMNS: &str = "id, run_id, title, prompt, agent_id, account_id, mod
                             worktree_path, branch, worktree_removed, complexity, routed_by, \
                             route_note, role, plan_key, parent_id, depth, isolate, result_schema, \
                             last_error, handoff, functional_role, reasoning_effort, structured_handoff, \
-                            auto_account";
+                            auto_account, work_key, fix_round, full_gate, fix_status";
 
 fn row_to_run(row: &Row) -> rusqlite::Result<Run> {
     Ok(Run {
@@ -103,6 +103,10 @@ fn row_to_task(row: &Row) -> rusqlite::Result<Task> {
             })
             .transpose()?,
         auto_account: row.get::<_, i64>(38)? != 0,
+        work_key: row.get(39)?,
+        fix_round: row.get(40)?,
+        full_gate: row.get::<_, i64>(41)? != 0,
+        fix_status: row.get(42)?,
         // Lo llena `with_deps`: vive en otra tabla.
         depends_on: Vec::new(),
     })
@@ -286,6 +290,8 @@ pub struct NewTask<'a> {
     pub queued: bool,
     /// La cuenta la eligió el ruteo: se puede cambiar por otra con cupo (ver `Task::auto_account`).
     pub auto_account: bool,
+    /// Plan key, id ou work_key da entrega que esta task corrige. Vazio = trabalho novo.
+    pub corrects: Option<&'a str>,
 }
 
 pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
@@ -323,6 +329,7 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
         ],
     )
     .map_err(|e| e.to_string())?;
+    super::fixrounds::bind_new_task(conn, &id, new.run_id, new.title, new.prompt, new.corrects)?;
     task_by_id(conn, &id)?.ok_or_else(|| "la tarea no quedó guardada".to_string())
 }
 
@@ -613,9 +620,8 @@ pub fn requeue_for_retry(conn: &Connection, task_id: &str, error: &str) -> Resul
 /// Le pasa la tarea a otro agente: nueva asignación, el traspaso escrito, y de vuelta a la
 /// cola con los intentos en cero.
 ///
-/// `attempt` se reinicia a propósito: el agente nuevo merece sus propios reintentos, y los
-/// que gastó el anterior eran con otro modelo. `last_error` se limpia porque lo que había
-/// que contar del intento anterior ya está, mejor contado, adentro del traspaso.
+/// `attempt` volta a zero para o processo novo poder arrancar. O orçamento de correção
+/// (`fix_round` / `fix_rounds`) não é tocado: reroute e troca de worker continuam no mesmo teto.
 #[allow(clippy::too_many_arguments)]
 pub fn reroute_task(
     conn: &Connection,
@@ -988,6 +994,14 @@ pub fn save_handoff(
 pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> Result<(), String> {
     // Central finalization also covers IPC/runtime callers; no model-text heuristics.
     let mut outcome = outcome.clone();
+    if outcome.ok {
+        if let Some(task) = task_by_id(conn, task_id)? {
+            if task.full_gate && !super::fixrounds::full_gate_satisfied(outcome.result.as_deref().unwrap_or(""), task.structured_handoff.as_ref()) {
+                outcome.ok = false;
+                outcome.error = Some(super::fixrounds::MISSING_GATE.into());
+            }
+        }
+    }
     if outcome.ok {
         let no_workers: bool = conn.query_row(
             "SELECT role = 'lead' AND NOT EXISTS (

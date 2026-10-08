@@ -1170,6 +1170,36 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         created_at INTEGER NOT NULL,
         PRIMARY KEY(entry_id, revision)
     );")?;
+    // Teto de correção. Sem subir user_version: o migrate inteiro roda em toda abertura
+    // e os testes cravam a versão 41. Colunas novas têm default para as tasks já gravadas.
+    if table_exists(conn, "tasks") {
+        if !has_column(conn, "tasks", "work_key") {
+            conn.execute("ALTER TABLE tasks ADD COLUMN work_key TEXT NOT NULL DEFAULT ''", [])?;
+        }
+        if !has_column(conn, "tasks", "fix_round") {
+            conn.execute("ALTER TABLE tasks ADD COLUMN fix_round INTEGER NOT NULL DEFAULT 0", [])?;
+        }
+        if !has_column(conn, "tasks", "full_gate") {
+            conn.execute("ALTER TABLE tasks ADD COLUMN full_gate INTEGER NOT NULL DEFAULT 0", [])?;
+        }
+        if !has_column(conn, "tasks", "fix_status") {
+            conn.execute("ALTER TABLE tasks ADD COLUMN fix_status TEXT NOT NULL DEFAULT ''", [])?;
+        }
+    }
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS fix_rounds (
+            scope TEXT NOT NULL,
+            work_key TEXT NOT NULL,
+            rounds INTEGER NOT NULL DEFAULT 0,
+            failures_json TEXT NOT NULL DEFAULT '[]',
+            status TEXT NOT NULL DEFAULT 'open',
+            extra_granted INTEGER NOT NULL DEFAULT 0,
+            extras_used INTEGER NOT NULL DEFAULT 0,
+            label TEXT NOT NULL DEFAULT '',
+            updated_at INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (scope, work_key)
+        );",
+    )?;
     set_user_version(conn, SCHEMA_VERSION)
 }
 

@@ -2411,6 +2411,7 @@ fn pt(key: &str, deps: &[&str]) -> PlanTask {
         isolate: None,
         budget_usd: None,
         result_schema: None,
+        corrects: None,
     }
 }
 
@@ -2558,6 +2559,10 @@ fn nodo(id: &str, estado: &str, deps: &[&str]) -> Task {
         structured_handoff: None,
         depends_on: deps.iter().map(|d| d.to_string()).collect(),
         auto_account: true,
+        work_key: String::new(),
+        fix_round: 0,
+        full_gate: false,
+        fix_status: String::new(),
         started_at: None,
         ended_at: None,
         created_at: 0,
@@ -2647,31 +2652,38 @@ fn sin_presupuesto_no_arranca_nada_nuevo() {
     );
 }
 
-/// Reintentar solo lo que tiene sentido reintentar: un worker que llegó a correr y falló
-/// una vez. No el lead, no un segundo fallo, no uno que nunca arrancó, no uno sin plata.
+/// Reintentar enquanto a entrega ainda tem rodada de correção. O `attempt` não corta:
+/// o reroute zera esse número e o teto mora em `fix_round`. Não o lead, não quem nunca
+/// arrancou, não um erro de orçamento, não quem já gastou as duas rodadas.
 #[test]
-fn se_reintenta_una_sola_vez_y_solo_lo_que_puede_salir_distinto() {
+fn se_reintenta_dentro_del_techo_de_correccion() {
     let mut fallo = nodo("a", status::FAILED, &[]);
     fallo.attempt = 1;
+    fallo.fix_round = 0;
     fallo.session_id = Some("s".into());
     fallo.error = Some("los tests no pasan".into());
-    assert!(should_retry(&fallo));
+    assert!(should_retry(&fallo, 2));
 
-    let mut segundo = fallo.clone();
-    segundo.attempt = 2;
-    assert!(!should_retry(&segundo));
+    let mut segunda = fallo.clone();
+    segunda.attempt = 2;
+    segunda.fix_round = 1;
+    assert!(should_retry(&segunda, 2));
+
+    let mut teto = fallo.clone();
+    teto.fix_round = 2;
+    assert!(!should_retry(&teto, 2));
 
     let mut sin_arrancar = fallo.clone();
     sin_arrancar.session_id = None;
-    assert!(!should_retry(&sin_arrancar));
+    assert!(!should_retry(&sin_arrancar, 2));
 
     let mut sin_plata = fallo.clone();
     sin_plata.error = Some("error_max_budget_usd".into());
-    assert!(!should_retry(&sin_plata));
+    assert!(!should_retry(&sin_plata, 2));
 
     let mut lead = fallo.clone();
     lead.role = Some(role::LEAD.into());
-    assert!(!should_retry(&lead));
+    assert!(!should_retry(&lead, 2));
 }
 
 // ── Runs orquestados: el contexto ───────────────────────────────

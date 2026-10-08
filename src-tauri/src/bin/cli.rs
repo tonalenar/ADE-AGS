@@ -70,6 +70,11 @@ AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
   peer connect <a> <b>                        Conecta dos agentes del equipo
   peer disconnect <a> <b>                     Los desconecta
 
+CORREÇÕES — teto de rodadas da mesma entrega (canvas e frota)
+  fix list <escopo>                           Entregas e quantas rodadas cada uma usou
+  fix decide <escopo> <trabalho> <ação>       accept | extra | abort
+              [--task <id>]                   escopo: run:<id> ou mission:<id>
+
 POOLS DE CUENTAS — repartir entre varias cuentas de una TUI con una estrategia
   pools                                       Los pools creados, con sus cuentas y su estrategia
   pool create <nombre> --agent <id> --accounts principal,trabajo [--strategy least-used|round-robin|sticky]
@@ -675,6 +680,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "approval.decide" => &["approval"],
         // `ags peer ask Revisor "..."`: el nombre del agente y después el mensaje.
         "peer.ask" | "peer.tell" => &["to", "text"],
+        "fix.list" => &["scope"],
+        "fix.decide" => &["scope", "work", "action"],
         "peer.check" => &["to"],
         "peer.recruit" => &["name"],
         "peer.connect" | "peer.disconnect" => &["a", "b"],
@@ -909,6 +916,7 @@ fn read_timeout_for(command: &str, args: &Value) -> Duration {
             Duration::from_secs(requested + 90)
         }
         "peer.tell" => Duration::from_secs(90),
+        "fix.list" | "fix.decide" => Duration::from_secs(60),
         // Cargar una página o esperar un texto puede tardar; el backend corta a los 90 s.
         c if c.starts_with("portal.") => Duration::from_secs(120),
         // Arrancar un emulador y esperar a que termine de iniciar (el backend corta a los 120 s).

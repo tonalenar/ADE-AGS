@@ -53,6 +53,14 @@ export interface Task {
   dependsOn: string[];
   /** La cuenta la eligió el ruteo y se puede cambiar por otra con cupo. `false` = fijada. */
   autoAccount?: boolean;
+  /** Identidade da entrega. Sobrevive a reroute e a uma task nova do mesmo objetivo. */
+  workKey?: string;
+  /** Rodadas de correção já abertas. 0 = implementação original. */
+  fixRound?: number;
+  /** Esta rodada só fecha no gate completo. */
+  fullGate?: boolean;
+  /** `escalated` | `accepted_pending` | `aborted` | vazio. */
+  fixStatus?: string;
   startedAt: number | null;
   endedAt: number | null;
   createdAt: number;

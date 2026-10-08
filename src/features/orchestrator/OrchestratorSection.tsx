@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Select } from "neogestify-ui-components";
 import { getSetting, setSetting } from "@/shared/ipc/settings";
+import { FixRoundsSetting } from "@/features/settings/FixRoundsSetting";
 import { SettingsSection } from "@/features/settings/SettingsSection";
 
 /** Misma clave que lee el backend (`orchestrator::WATCH_LIMIT_KEY`). */
@@ -65,6 +66,10 @@ export function OrchestratorSection() {
           {t("settings.orchestrator.watchLimitWarning")}
         </p>
       )}
+
+      <div className="mt-4">
+        <FixRoundsSetting />
+      </div>
     </SettingsSection>
   );
 }

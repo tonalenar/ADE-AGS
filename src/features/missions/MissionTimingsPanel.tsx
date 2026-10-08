@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { maxFixRound } from "@/features/runs/fixRounds";
+
 import { activeSourceKey, formatActive, formatDuration, getMissionEfficiency, getTimings, shareOf, testStatsView, type MissionEfficiency, type MissionTimings } from "./timings";
 
 /** Cada quanto se relê o cronómetro mientras se mira: los spans se graban sin evento. */
@@ -29,6 +31,7 @@ export function MissionTimingsPanel({ missionId }: { missionId: string }) {
     return <div className="flex flex-col gap-3"><MissionEfficiencyCard missionId={missionId} /><p className="text-[11.5px] text-gray-400 dark:text-white/35">{t("missions.timings.empty")}</p></div>;
   }
   const { summary } = data;
+  const corrections = maxFixRound(data.spans);
 
   return (
     <div className="flex flex-col gap-3">
@@ -36,6 +39,11 @@ export function MissionTimingsPanel({ missionId }: { missionId: string }) {
       <div className="text-[12px] text-gray-600 dark:text-gray-300">
         {t("missions.timings.total", { time: formatDuration(summary.wallMs) })}
       </div>
+      {corrections != null && (
+        <div className="text-[12px] text-amber-700 dark:text-amber-300">
+          {t("missions.timings.fixRounds", { n: corrections })}
+        </div>
+      )}
       <div className="text-[10.5px] text-gray-400 dark:text-white/35">{t("missions.timings.turnDetail")}</div>
 
       <div className="flex flex-col gap-1.5">

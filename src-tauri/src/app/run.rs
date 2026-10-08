@@ -239,6 +239,8 @@ pub fn run() {
             crate::runs::run_start_task,
             crate::runs::run_cancel_task,
             crate::runs::run_reroute_task,
+            crate::runs::fixrounds::run_fix_decide,
+            crate::runs::fixrounds::run_fix_list,
             crate::runs::run_hand_off_task,
             crate::runs::run_discard_worktree,
             crate::runs::run_pending_approvals,

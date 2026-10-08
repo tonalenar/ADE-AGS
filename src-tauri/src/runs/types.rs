@@ -85,6 +85,18 @@ pub struct Task {
     /// cupo. `false` = la fijó alguien (el usuario, el Squad, la misión): nunca se cambia sola.
     #[serde(default = "default_true")]
     pub auto_account: bool,
+    /// Identidade estável da entrega. Sobrevive a reroute e a uma task nova do mesmo objetivo.
+    #[serde(default)]
+    pub work_key: String,
+    /// Rodadas de correção já abertas para este trabalho. 0 = implementação original.
+    #[serde(default)]
+    pub fix_round: i64,
+    /// A rodada atual só fecha no gate completo.
+    #[serde(default)]
+    pub full_gate: bool,
+    /// `escalated` | `accepted_pending` | `aborted` | vazio.
+    #[serde(default)]
+    pub fix_status: String,
     /// Las tareas que tienen que terminar bien antes de que esta arranque.
     pub depends_on: Vec<String>,
     pub started_at: Option<i64>,

@@ -234,7 +234,7 @@ pub(crate) fn worktree_environment_block(
         CargoTargetMode::Custom => "O target Cargo usa o caminho configurado. Se vários agentes o compartilharem, podem disputar o lock; ADE_AGS_CARGO_TARGET_DIR=per-worktree seleciona um target próprio por worktree, com recompilação única das dependências.",
     };
     format!(
-        "AMBIENTE DO WORKTREE\nShell: {shell_label}\nRaiz: {worktree_root}\nnode_modules: {node_modules}\nCARGO_TARGET_DIR: {cargo_target_dir}\n{cargo_note}\n\nValidação de cada entrega:\n```{code_fence}\n{root_command}\nags test affected --dry-run\nags test affected\n```\nNão repita a suite completa localmente: ao abrir PR, espere o CI com gh pr checks <n> --watch. Suite completa local obrigatória em migrações de banco, schema, código unsafe ou COM. Use ags test run <frontend|rust|tsc|babel> nessas exceções; --force ignora cache. QA roda ags test affected no mesmo commit; se responder `já verde neste hash`, não reexecuta a suíte. Só reexecuta quando o cache não acerta. A integração tem uma validação completa final (ou CI)."
+        "AMBIENTE DO WORKTREE\nShell: {shell_label}\nRaiz: {worktree_root}\nnode_modules: {node_modules}\nCARGO_TARGET_DIR: {cargo_target_dir}\n{cargo_note}\n\nValidação de cada entrega:\n```{code_fence}\n{root_command}\nags test affected --dry-run\nags test affected\n```\nNão repita a suite completa localmente: ao abrir PR, espere o CI com gh pr checks <n> --watch. Suite completa local obrigatória em migrações de banco, schema, código unsafe ou COM, e também na última rodada de correção. Use ags test run <frontend|rust|tsc|babel> nessas exceções; --force ignora cache. QA roda ags test affected no mesmo commit; se responder `já verde neste hash`, não reexecuta a suíte. Só reexecuta quando o cache não acerta. Essa reutilização não vale na última rodada de correção nem na validação única da integração. Correções da mesma entrega têm teto (padrão 2; chave fix_rounds.max ou ADE_AGS_MAX_FIX_ROUNDS). A última rodada exige a suíte completa. Ao atingir o teto a entrega escala, em vez de repetir o loop. A integração tem uma validação completa final (ou CI)."
     )
 }
 
@@ -655,6 +655,9 @@ mod test {
             assert!(block.contains("ags test affected --dry-run"), "{block}");
             assert!(block.contains("gh pr checks <n> --watch"), "{block}");
             assert!(block.contains("migrações de banco, schema, código unsafe ou COM"), "{block}");
+            assert!(block.contains("já verde neste hash"), "{block}");
+            assert!(block.contains("fix_rounds.max"), "{block}");
+            assert!(block.contains("última rodada"), "{block}");
             assert!(block.contains("disputar o lock"), "{block}");
         }
     }
