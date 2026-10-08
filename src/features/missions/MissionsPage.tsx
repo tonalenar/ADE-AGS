@@ -205,8 +205,8 @@ export function MissionsPage() {
               bg-black/[0.05] dark:bg-white/[0.07] text-gray-500 dark:text-gray-400
               focus-within:ring-[3px] focus-within:ring-accent-500/25">
               <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" className="h-3.5 w-3.5 shrink-0" aria-hidden><circle cx="11" cy="11" r="6.5" /><path d="m20 20-4.2-4.2" /></svg>
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("search.placeholder")}
-                aria-label={t("search.placeholder")}
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("missions.search")}
+                aria-label={t("missions.search")}
                 className="min-w-0 flex-1 bg-transparent text-[13px] text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 outline-none" />
               {query && <button type="button" onClick={() => setQuery("")} aria-label={t("btn.clear", { defaultValue: "Limpar" })}
                 className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-400/60 text-[10px] text-white">×</button>}
