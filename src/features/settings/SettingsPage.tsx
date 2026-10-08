@@ -134,6 +134,13 @@ export function SettingsPage() {
     [t]
   );
 
+  // Busca da barra lateral (prancheta 5): filtra as seções pelo nome; Enter abre a primeira.
+  const [filter, setFilter] = useState("");
+  const shown = useMemo(() => {
+    const q = filter.trim().toLocaleLowerCase();
+    return q ? sections.filter((s) => s.label.toLocaleLowerCase().includes(q)) : sections;
+  }, [sections, filter]);
+
   const handleChangeSkillsDir = async () => {
     const selected = await open({ directory: true, multiple: false, title: t("settings.skillsDir") });
     if (typeof selected === "string" && selected) {
@@ -151,8 +158,18 @@ export function SettingsPage() {
       <nav className="flex flex-col w-52 shrink-0 min-h-0
         border-r border-gray-200 dark:border-white/[0.08]
         bg-gray-100/60 dark:bg-surface-sunken">
-        <div className="flex-1 min-h-0 cc-scroll p-2 flex flex-col gap-0.5">
-          {sections.map((s) => (
+        <label className="mx-2 mt-2 mb-1 flex items-center gap-2 h-7 pl-2 pr-1.5 rounded-[7px] shrink-0
+          bg-black/[0.05] dark:bg-surface-raised text-gray-400 dark:text-white/30
+          focus-within:ring-[3px] focus-within:ring-accent-500/25">
+          <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" className="h-3.5 w-3.5 shrink-0" aria-hidden><circle cx="8" cy="8" r="5.5" /><path d="M12.2 12.2 16 16" /></svg>
+          <input value={filter} onChange={(e) => setFilter(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter" && shown[0]) setSection(shown[0].id); if (e.key === "Escape" && filter) { e.stopPropagation(); setFilter(""); } }}
+            placeholder={t("settings.search")} aria-label={t("settings.search")}
+            className="min-w-0 flex-1 bg-transparent text-[13px] text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/30 outline-none" />
+        </label>
+        <div className="flex-1 min-h-0 cc-scroll p-2 pt-1 flex flex-col gap-0.5">
+          {shown.length === 0 && <p className="px-2 py-3 text-[12px] text-gray-400 dark:text-white/35">{t("settings.searchEmpty")}</p>}
+          {shown.map((s) => (
             <Button variant="custom"
               key={s.id}
               onClick={() => setSection(s.id)}

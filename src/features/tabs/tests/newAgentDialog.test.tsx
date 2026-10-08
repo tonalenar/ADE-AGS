@@ -172,7 +172,7 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
     expect(memorySwitch()).toBeNull();
 
     // 6. Clica em Abrir
-    const openBtn = byText("btn.open");
+    const openBtn = byText("newAgent.openAgent");
     expect(openBtn).toBeDefined();
     await act(async () => {
       openBtn?.click();
@@ -210,7 +210,7 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
 
     expect(memorySwitch()).toBeNull();
 
-    const openBtn = byText("btn.open");
+    const openBtn = byText("newAgent.openAgent");
     await act(async () => {
       openBtn?.click();
     });
@@ -250,7 +250,7 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
     });
     expect(sw?.getAttribute("aria-checked")).toBe("true");
 
-    const openBtn = byText("btn.open");
+    const openBtn = byText("newAgent.openAgent");
     await act(async () => {
       openBtn?.click();
     });
@@ -298,7 +298,7 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
       });
 
       // Clica em Abrir
-      const openBtn = byText("btn.open");
+      const openBtn = byText("newAgent.openAgent");
       await act(async () => {
         openBtn?.click();
       });
@@ -371,7 +371,7 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
       });
 
       // Abre a tab
-      const openBtn = byText("btn.open");
+      const openBtn = byText("newAgent.openAgent");
       await act(async () => {
         openBtn?.click();
       });
@@ -418,7 +418,7 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
 
       // Abre
       await act(async () => {
-        byText("btn.open")?.click();
+        byText("newAgent.openAgent")?.click();
       });
 
       await act(async () => {

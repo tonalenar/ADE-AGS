@@ -355,3 +355,44 @@ export function FilePlusIcon({ className }: IconProps) {
     </svg>
   );
 }
+
+/* ── Ícones da barra lateral no traço da prancheta 1 (grade de 18, traço 1.6) ── */
+const RAIL = { ...BASE, viewBox: "0 0 18 18", strokeWidth: 1.6 };
+
+/** Canvas: a grade 2×2. */
+export function CanvasGridIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL} className={className}>
+      <rect x="2.5" y="2.5" width="5.5" height="5.5" rx="1.4" /><rect x="10" y="2.5" width="5.5" height="5.5" rx="1.4" />
+      <rect x="2.5" y="10" width="5.5" height="5.5" rx="1.4" /><rect x="10" y="10" width="5.5" height="5.5" rx="1.4" />
+    </svg>
+  );
+}
+
+/** Missões: a caixinha marcada. */
+export function MissionCheckIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL} className={className}>
+      <rect x="2.5" y="2.5" width="13" height="13" rx="3.2" /><path d="M5.6 9.2 7.9 11.4 12.6 6.6" />
+    </svg>
+  );
+}
+
+/** Squads: duas pessoas. */
+export function SquadPeopleIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL} className={className}>
+      <circle cx="6.4" cy="6" r="2.4" /><path d="M2.4 14.6c.4-2.3 1.9-3.5 4-3.5s3.6 1.2 4 3.5" />
+      <circle cx="12.4" cy="6.6" r="2" /><path d="M12.2 11.2c1.9.1 3 1.2 3.4 3.3" />
+    </svg>
+  );
+}
+
+/** Contas: a pessoa no círculo. */
+export function AccountCircleIcon({ className }: IconProps) {
+  return (
+    <svg {...RAIL} className={className}>
+      <circle cx="9" cy="9" r="6.5" /><circle cx="9" cy="7.4" r="2.3" /><path d="M4.9 13.8c1-1.7 2.5-2.5 4.1-2.5s3.2.8 4.1 2.5" />
+    </svg>
+  );
+}

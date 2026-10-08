@@ -2,12 +2,12 @@ import { useLocation, useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import {
   Button, Badge, BoxIcon, ChevronLeftIcon, ChevronRightIcon, ClockIcon, CloudIcon, GearIcon,
-  LocationIcon, NetworkIcon, SearchIcon, StackIcon, Tooltip, UserIcon, UsersIcon,
+  NetworkIcon, SearchIcon, Tooltip,
 } from "neogestify-ui-components";
 
 import { useUiStore } from "@/app/uiStore";
 import { PALETTE_SHORTCUT, shortcutForPath } from "@/app/shortcuts";
-import { PullRequestIcon } from "@/app/icons";
+import { AccountCircleIcon, CanvasGridIcon, MissionCheckIcon, PullRequestIcon, SquadPeopleIcon } from "@/app/icons";
 import { useRunsStore } from "@/features/runs/store";
 
 /** Larguras do riel. O `AppShell` usa as mesmas para medir o cabeçalho lateral. */
@@ -154,7 +154,7 @@ export function ActivityRail({ agentCount, width }: { agentCount: number; width:
         badge={agentCount}
         onClick={toggleWorkspaces}
       >
-        <StackIcon className={icon} />
+        <CanvasGridIcon className={icon} />
       </RailButton>
 
       <RailButton label={t("sidebar.sessions")} path="/sessions" active={on("/sessions")} expanded={expanded}
@@ -178,12 +178,12 @@ export function ActivityRail({ agentCount, width }: { agentCount: number; width:
 
       <RailButton label={t("sidebar.missions")} path="/missions" active={on("/missions")} expanded={expanded}
         onClick={() => navigate("/missions")}>
-        <LocationIcon className={icon} />
+        <MissionCheckIcon className={icon} />
       </RailButton>
 
       <RailButton label={t("sidebar.squads")} path="/squads" active={on("/squads")} expanded={expanded}
         onClick={() => navigate("/squads")}>
-        <UsersIcon className={icon} />
+        <SquadPeopleIcon className={icon} />
       </RailButton>
 
       <RailGroup label={t("rail.group.resources")} expanded={expanded} />
@@ -214,7 +214,7 @@ export function ActivityRail({ agentCount, width }: { agentCount: number; width:
         expanded={expanded}
         onClick={() => setAccountsOpen(true)}
       >
-        <UserIcon className={icon} />
+        <AccountCircleIcon className={icon} />
       </RailButton>
 
       <RailButton label={t("sidebar.settings")} path="/settings" active={settingsOpen} expanded={expanded}

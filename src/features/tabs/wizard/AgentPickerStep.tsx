@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
-import { agentTile } from "@/features/agents/agentTile";
+import { agentTile, agentVendor } from "@/features/agents/agentTile";
 import type { AgentInfo } from "@/features/tabs/types";
 
 interface AgentPickerStepProps {
@@ -47,16 +47,16 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
             onClick={() => onSelect(agent)}
             aria-pressed={isSelected}
             className={`
-              group relative flex items-center gap-3 px-3 py-2.5 rounded-xl border text-left
+              group relative flex items-center gap-3 h-16 px-3.5 rounded-[10px] border text-left
               transition-colors duration-200
               ${isSelected
-                ? "border-accent-500 bg-accent-50 dark:bg-accent-500/10 shadow-[0_0_0_3px_color-mix(in_oklab,var(--color-accent-500)_20%,transparent)]"
-                : "border-black/[0.08] dark:border-white/[0.08] bg-white dark:bg-surface-raised/60 hover:border-black/15 dark:hover:border-white/15"}
+                ? "border-accent-500 bg-accent-500/10 dark:bg-[rgba(10,132,255,0.16)]"
+                : "border-transparent bg-black/[0.04] dark:bg-surface-raised hover:bg-black/[0.06] dark:hover:bg-surface-overlay"}
             `}
           >
-            <span className="shrink-0 flex items-center justify-center w-9 h-9 rounded-[9px] text-white shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.18)]"
+            <span className="shrink-0 flex items-center justify-center w-[30px] h-[30px] rounded-lg text-white shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.18)]"
               style={{ background: agentTile(agent.id) }}>
-              <AgentIcon className="w-5 h-5" />
+              <AgentIcon className="w-4 h-4" />
             </span>
             {isSelected && (
               <span aria-hidden className="absolute top-2 right-2 flex h-4 w-4 items-center justify-center rounded-full bg-accent-500 text-white">
@@ -64,12 +64,9 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
               </span>
             )}
 
-            <span className="flex flex-col gap-0.5 min-w-0">
+            <span className="flex flex-col min-w-0" title={agent.version ?? undefined}>
               <span className="flex items-center gap-1.5 min-w-0">
-                <span className={`truncate text-[12.5px] font-semibold transition-colors
-                  ${isSelected
-                    ? "text-accent-700 dark:text-accent-300"
-                    : "text-gray-800 dark:text-gray-100 group-hover:text-gray-900 dark:group-hover:text-white"}`}>
+                <span className="truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-[#f5f5f7]">
                   {agent.label}
                 </span>
                 {agent.isCustom && (
@@ -79,17 +76,9 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
                   </span>
                 )}
               </span>
-              <span className={`truncate font-mono text-[10.5px] transition-colors
-                ${isSelected
-                  ? "text-accent-500/70 dark:text-accent-400/70"
-                  : "text-gray-400 dark:text-white/35"}`}>
-                {agent.command}
+              <span className="truncate text-[11px] leading-[14px] text-gray-500 dark:text-white/60">
+                {agentVendor(agent.id, agent.command, t)}
               </span>
-              {agent.version && (
-                <span className="truncate font-mono text-[10.5px] text-gray-400 dark:text-gray-500">
-                  {agent.version}
-                </span>
-              )}
             </span>
           </Button>
         );
