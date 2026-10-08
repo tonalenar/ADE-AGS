@@ -1,5 +1,9 @@
 import type { Terminal } from "@xterm/xterm";
 
+import { useTabsStore } from "@/features/tabs/store";
+
+import { requestPtyLaunch } from "./ptyLaunch";
+
 /**
  * Las terminales vivas, por tab. Es la puerta para escribirle a un agente desde otra parte
  * de la app (hoy, el navegador que le manda elementos marcados).
@@ -24,6 +28,16 @@ const queued = new Map<string, string>();
 const SETTLE_MS = 2500;
 /** Si nunca llega a quedarse quieta (una TUI con reloj en pantalla), se manda igual. */
 const GIVE_UP_MS = 45_000;
+/** Aba restaurada sem PTY: espera o lançamento e desiste com `onStalled`, sem o timer de 45 s. */
+const LAUNCH_WAIT_MS = 8_000;
+
+/** `missing` = o teste (ou um caller) não tem a aba no store: cola se o xterm existe.
+ *  `idle` = a aba existe e ainda não lançou o processo. `live` = já tem PTY. */
+function tabPtyState(tabId: string): "missing" | "idle" | "live" {
+  const tab = useTabsStore.getState().tabs.find((tab) => tab.id === tabId);
+  if (!tab) return "missing";
+  return tab.ptyId != null ? "live" : "idle";
+}
 
 /** Avisos de tiempo de un mensaje con `sendWhenReady`, para el cronómetro de la misión. */
 export interface SendTimings {
@@ -131,11 +145,38 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
  * Ninguna de las TUIs tiene un flag común para "arrancá con este mensaje", así que se
  * espera a que la terminal se quede quieta, que es cuando la persona empezaría a escribir.
  */
+function waitUntilLive(tabId: string, term: Terminal, text: string): void {
+  requestPtyLaunch(tabId);
+  const started = Date.now();
+  const timer = window.setInterval(() => {
+    if (terminals.get(tabId) !== term) {
+      window.clearInterval(timer);
+      return;
+    }
+    if (tabPtyState(tabId) === "live") {
+      window.clearInterval(timer);
+      sendWhenSettled(tabId, term, text);
+      return;
+    }
+    if (Date.now() - started >= LAUNCH_WAIT_MS) {
+      window.clearInterval(timer);
+      queued.delete(tabId);
+      queuedTimings.get(tabId)?.onStalled?.();
+      queuedTimings.delete(tabId);
+    }
+  }, 100);
+}
+
 export function sendWhenReady(tabId: string, text: string, timings?: SendTimings): void {
   queued.set(tabId, text);
   if (timings) queuedTimings.set(tabId, timings);
   const term = terminals.get(tabId);
-  if (term) sendWhenSettled(tabId, term, text);
+  if (!term) return;
+  if (tabPtyState(tabId) === "idle") {
+    waitUntilLive(tabId, term, text);
+    return;
+  }
+  sendWhenSettled(tabId, term, text);
 }
 
 export function registerTerminal(tabId: string, term: Terminal): () => void {
@@ -146,7 +187,10 @@ export function registerTerminal(tabId: string, term: Terminal): () => void {
     }
   });
   const pending = queued.get(tabId);
-  if (pending !== undefined) sendWhenSettled(tabId, term, pending);
+  if (pending !== undefined) {
+    if (tabPtyState(tabId) === "idle") waitUntilLive(tabId, term, pending);
+    else sendWhenSettled(tabId, term, pending);
+  }
   return () => {
     input.dispose();
     if (terminals.get(tabId) === term) terminals.delete(tabId);
@@ -158,6 +202,10 @@ export function registerTerminal(tabId: string, term: Terminal): () => void {
 export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRetry?: (at: number) => void): boolean {
   const term = terminals.get(tabId);
   if (!term) return false;
+  if (tabPtyState(tabId) === "idle") {
+    requestPtyLaunch(tabId);
+    return false;
+  }
   term.paste(text);
   // El Enter va aparte y un momento después: algunas TUIs todavía están procesando el
   // pegado cuando llega, y lo toman como parte de él en vez de como "enviar".

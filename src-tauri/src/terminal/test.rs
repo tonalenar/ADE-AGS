@@ -97,35 +97,46 @@ fn sin_pasos_se_lanza_el_binario_directo_sin_shell() {
     assert_eq!(argv, vec!["ade-test-missing-agent", "--resume", "abc"]);
 }
 
-/// Con pre-comandos, el comando entero viaja como UN argumento del shell. Eso también
-/// hace que el `split_whitespace` de arriba no llegue a partirlo.
+/// Con pre-comandos, en Unix el comando entero viaja como UN argumento del shell.
+/// En Windows el agente sobe direto: os passos rodam à parte, sem `cmd /C`.
 #[test]
 fn con_pasos_el_comando_viaja_entero_como_argumento_del_shell() {
     let cmd = build_launch("claude --resume abc", &["nvm use".into()]).unwrap();
     let argv: Vec<String> =
         cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
+    if cfg!(windows) {
+        assert!(argv.iter().all(|arg| !arg.eq_ignore_ascii_case("cmd") && !arg.ends_with(".cmd")), "{argv:?}");
+        assert!(argv.iter().any(|arg| arg.contains("claude")), "{argv:?}");
+        assert!(argv.iter().any(|arg| arg == "--resume"), "{argv:?}");
+        return;
+    }
     let last = argv.last().expect("el script va último");
-    // En Windows el script viaja en un .cmd (ver `shell_running`): se lee de ahí.
-    let script = if cfg!(windows) && last.ends_with(".cmd") { std::fs::read_to_string(last).unwrap() } else { last.clone() };
-    let script = script.trim_end();
+    let script = last.trim_end();
     assert!(script.contains("nvm use"), "{script}");
     assert!(script.ends_with("claude --resume abc"), "{script}");
     assert!(argv.len() >= 2, "tendría que haber flags de shell antes del script: {argv:?}");
 }
 
-/// Las comillas del comando llegan intactas al agente: en Windows el script va en un .cmd y no
-/// como argumento de `cmd /C`, que las volvía literales (`--mcp-config "C:\x.json"` fallaba).
+/// Las comillas del comando llegan como argumentos del agente, sin `cmd /C arquivo.cmd`.
 #[cfg(windows)]
 #[test]
 fn con_pasos_las_comillas_del_comando_no_se_escapan() {
     let command = r#"claude --mcp-config "C:\Users\x\mcp\tab.json" --allowedTools "a,b""#;
     let cmd = build_launch(command, &["cd /d C:\\w".into()]).unwrap();
     let argv: Vec<String> = cmd.get_argv().iter().map(|a| a.to_string_lossy().into_owned()).collect();
-    let last = argv.last().unwrap();
-    assert!(last.ends_with(".cmd"), "{argv:?}");
-    let body = std::fs::read_to_string(last).unwrap();
-    assert!(body.contains(command), "{body}");
-    assert!(!body.contains("\\\""), "{body}");
+    assert!(argv.iter().any(|arg| arg.contains(r"C:\Users\x\mcp\tab.json")), "{argv:?}");
+    assert!(argv.iter().any(|arg| arg == "a,b"), "{argv:?}");
+    assert!(argv.iter().all(|arg| !arg.eq_ignore_ascii_case("cmd") && !arg.ends_with(".cmd")), "{argv:?}");
+}
+
+#[test]
+fn conpty_windows_pede_create_no_window() {
+    let src = include_str!("win_conpty.rs");
+    assert!(src.contains("CREATE_NO_WINDOW"), "o wrapper tem que passar a flag");
+    assert!(src.contains("EXTENDED_STARTUPINFO_PRESENT"));
+    assert!(src.contains("PROC_THREAD_ATTRIBUTE_PSEUDOCONSOLE") || src.contains("0x0002_0016"));
+    let manager = include_str!("pty_manager.rs");
+    assert!(!manager.contains("ags-launch"), "prelaunch não grava mais um .cmd");
 }
 
 // ── Recorrido del árbol de procesos (unix) ──────────────────────

@@ -34,7 +34,6 @@
 
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 use rusqlite::{params, Connection};
@@ -79,7 +78,7 @@ pub struct Checkpoint {
 // ── git ─────────────────────────────────────────────────────────────
 
 fn git(dir: &Path, args: &[&str], envs: &[(&str, &str)], limit: Duration) -> Result<String, String> {
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(external_path(dir)).args(args);
     // Identidad propia: un commit "por fuera" no puede fallar porque la máquina no tenga `user.name`.
     cmd.env("GIT_AUTHOR_NAME", "ADE AGS")

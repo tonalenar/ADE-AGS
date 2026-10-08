@@ -17,7 +17,10 @@ pub fn save_pasted_image(request: tauri::ipc::Request<'_>) -> Result<String, Str
 mod test;
 mod pty_manager;
 mod session;
+#[cfg(windows)]
+mod win_conpty;
 pub use pty_manager::*;
+pub(crate) use pty_manager::open_pty;
 pub use session::SESSION_ENV;
 pub(crate) use session::{authorize, publish_token, release_token};
 #[cfg(test)]

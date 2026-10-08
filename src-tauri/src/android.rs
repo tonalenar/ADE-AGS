@@ -9,7 +9,6 @@
 //! Las partes que leen la salida de `adb` son funciones puras para probarlas sin dispositivo.
 
 use std::path::PathBuf;
-use std::process::Command;
 use std::sync::OnceLock;
 use std::time::Duration;
 
@@ -65,7 +64,7 @@ fn emulator_path() -> Result<PathBuf, String> {
 
 /// Corre `adb [-s serial] args…` y devuelve su salida cruda (binaria: sirve para `screencap`).
 fn adb(serial: Option<&str>, args: &[&str], limit: Duration) -> Result<Vec<u8>, String> {
-    let mut cmd = Command::new(adb_path()?);
+    let mut cmd = crate::util::spawn::hidden_command(adb_path()?);
     if let Some(s) = serial {
         cmd.args(["-s", s]);
     }
@@ -118,7 +117,7 @@ pub fn devices() -> Result<Vec<Device>, String> {
 /// Los AVD (emuladores) creados en esta máquina.
 pub fn avds() -> Vec<String> {
     let Ok(emulator) = emulator_path() else { return Vec::new() };
-    let mut cmd = Command::new(emulator);
+    let mut cmd = crate::util::spawn::hidden_command(emulator);
     cmd.arg("-list-avds");
     output_with_timeout(&mut cmd, FAST)
         .map(|o| String::from_utf8_lossy(&o.stdout).lines().map(str::trim).filter(|l| !l.is_empty() && !l.starts_with("INFO")).map(String::from).collect())
@@ -134,14 +133,10 @@ pub fn start_avd(name: &str) -> Result<(), String> {
     if !avds().iter().any(|a| a == name) {
         return Err(format!("Não existe o AVD '{name}'. Disponíveis: {}.", avds().join(", ")));
     }
-    let mut cmd = Command::new(emulator_path()?);
+    // OwnWindow: CREATE_NO_WINDOW | DETACHED_PROCESS. O emulador não pode herdar o
+    // console da app e tem que sobreviver quando a app fecha. Não passa por `output()`.
+    let mut cmd = crate::util::spawn::command(emulator_path()?, crate::util::spawn::WindowMode::OwnWindow);
     cmd.args(["-avd", name, "-no-snapshot-save"]);
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        // CREATE_NO_WINDOW | DETACHED_PROCESS: que no abra consola y sobreviva a la app.
-        cmd.creation_flags(0x0800_0000 | 0x0000_0008);
-    }
     cmd.stdin(std::process::Stdio::null()).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null());
     cmd.spawn().map(|_| ()).map_err(|e| format!("emulator: {e}"))
 }

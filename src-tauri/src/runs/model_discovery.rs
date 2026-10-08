@@ -147,6 +147,7 @@ pub(super) fn discover_codex(
     program: &str,
     env: &HashMap<String, String>,
 ) -> Result<Vec<RosterModel>, String> {
+    // `account_command` sai de `program()`, que já nasce com CREATE_NO_WINDOW.
     let mut command = account_command(program, &["app-server", "--listen", "stdio://"], env);
     command
         .stdin(Stdio::piped())
@@ -176,11 +177,6 @@ pub(crate) struct CodexAccount {
 pub(crate) fn codex_account(program: &str, env: &HashMap<String, String>) -> Result<CodexAccount, String> {
     let mut command = account_command(program, &["app-server", "--listen", "stdio://"], env);
     command.stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
     let child = command.spawn().map_err(|_| "Codex app-server could not be started".to_string())?;
     let mut server = CodexServer::new(child)?;
     server.initialize()?;

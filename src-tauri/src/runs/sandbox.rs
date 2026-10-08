@@ -177,7 +177,7 @@ const AGENT_HOME_PATHS: &[&str] = &[
 /// El directorio git común de un worktree (`<repo>/.git`): un commit escribe ahí objetos y
 /// refs, no en la carpeta del worktree.
 fn git_common_dir(cwd: &Path) -> Option<PathBuf> {
-    let mut cmd = std::process::Command::new("git");
+    let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.args(["rev-parse", "--path-format=absolute", "--git-common-dir"]).current_dir(cwd);
     let out = crate::util::output_with_timeout(&mut cmd, std::time::Duration::from_secs(5)).ok()?;
     if !out.status.success() {

@@ -55,7 +55,7 @@ pub fn prune(
 }
 
 fn git(repo: &Path, args: &[&str]) -> Result<String, String> {
-    let mut command = std::process::Command::new("git");
+    let mut command = crate::util::spawn::hidden_command("git");
     command
         .arg("-C")
         .arg(crate::util::external_path(repo))

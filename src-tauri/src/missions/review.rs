@@ -18,7 +18,6 @@
 //! integración, que es descartable, y funciona con cualquier git.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 use rusqlite::Connection;
@@ -32,7 +31,7 @@ const GIT_SLOW: Duration = Duration::from_secs(180);
 const MAX_DIFF_BYTES: usize = 400 * 1024;
 
 fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(external_path(dir)).args(args);
     // Sin terminal que conteste: un editor o un prompt colgarían el comando.
     cmd.env("GIT_TERMINAL_PROMPT", "0").env("GIT_EDITOR", "true").env("GIT_MERGE_AUTOEDIT", "no");
