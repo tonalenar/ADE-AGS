@@ -30,6 +30,17 @@ const click = (el: Element) => act(() => { el.dispatchEvent(new MouseEvent("clic
 const key = (el: Element, k: string) => act(() => { el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true })); });
 
 describe("PopupSelect", () => {
+  it("dentro de um <dialog> modal o menu abre dentro dele (fora dele tudo fica inerte)", () => {
+    const dialog = document.createElement("dialog");
+    document.body.appendChild(dialog);
+    const inner = createRoot(dialog);
+    act(() => inner.render(<Controlled onPick={() => {}} />));
+    click(dialog.querySelector<HTMLButtonElement>("button[aria-haspopup=listbox]")!);
+    expect(dialog.querySelector("[role=listbox]")).toBeTruthy();
+    act(() => inner.unmount());
+    dialog.remove();
+  });
+
   it("mostra o selecionado e abre um menu próprio (não o nativo)", () => {
     act(() => root.render(<Controlled onPick={() => {}} />));
     expect(button().getAttribute("aria-label")).toBe("Provedor");
