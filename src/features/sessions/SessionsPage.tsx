@@ -116,7 +116,7 @@ export function SessionsPage() {
     <div className="flex flex-col h-full min-h-0">
 
       {/* ══ el buscador ═══════════════════════════════════════════════════ */}
-      <div className="flex items-center gap-3 h-[54px] shrink-0 px-4
+      <div className="flex items-center gap-3 h-[54px] shrink-0 pl-4 pr-14
         border-b border-gray-200 dark:border-white/8">
         <ClockIcon className="w-[15px] h-[15px] shrink-0 text-accent-500 dark:text-accent-400" />
         <input
