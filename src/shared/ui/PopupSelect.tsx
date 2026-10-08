@@ -95,6 +95,12 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
     setActive(Math.max(0, options.findIndex((o) => o.value === current)));
   }, [open, options, current]);
 
+  useLayoutEffect(() => {
+    const el = menuRef.current as (HTMLDivElement & { showPopover?: () => void }) | null;
+    if (!open || !pos || !el?.showPopover) return;
+    try { el.showPopover(); } catch { /* sem suporte: fica o portal com z-index */ }
+  }, [open, pos]);
+
   useEffect(() => {
     if (!open) return;
     const close = (e: MouseEvent) => {
@@ -203,8 +209,9 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
           id={listId}
           role="listbox"
           tabIndex={-1}
+          {...{ popover: "manual" }}
           onKeyDown={onKeyDown}
-          style={{ position: "fixed", left: pos.left, top: pos.top, minWidth: pos.minWidth, maxHeight: pos.maxHeight, zIndex: 10050 }}
+          style={{ position: "fixed", inset: "auto", margin: 0, border: 0, left: pos.left, top: pos.top, minWidth: pos.minWidth, maxHeight: pos.maxHeight, zIndex: 10050, color: "inherit" }}
           className="cc-scroll overflow-y-auto p-1 rounded-lg text-[13px]
             bg-white/90 dark:bg-[#2a2a2d]/90 backdrop-blur-xl
             shadow-[0_0_0_0.5px_rgba(0,0,0,0.14),0_10px_30px_rgba(0,0,0,0.18)] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.12),0_10px_30px_rgba(0,0,0,0.55)]"
