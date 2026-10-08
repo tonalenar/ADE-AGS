@@ -7,6 +7,10 @@
 //!
 //! `output` e `wait_copying_stdout` têm timeout obrigatório. No estouro o grupo morre
 //! (sessão nova no Unix, Job Object no Windows) e o erro é `TimedOut`.
+//!
+//! Este helper não embrulha argv em `cmd /C`. A exceção é o prelaunch do PTY: um `.cmd`
+//! no mesmo `cmd` do agente, lançado pelo `CommandBuilder` dentro do ConPTY
+//! (`CREATE_NO_WINDOW`), não por aqui.
 
 use std::ffi::{OsStr, OsString};
 use std::io::{self, Read};

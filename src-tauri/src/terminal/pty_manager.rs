@@ -251,16 +251,13 @@ pub(super) const PARENT_SESSION_ENV: &[&str] = &[
 ];
 
 pub(super) fn build_launch(command: &str, prelaunch: &[String]) -> Result<CommandBuilder, String> {
-    // No Windows os passos não compartilham processo com o agente: `cmd /C arquivo.cmd`
-    // abria conhost e reescapava aspas. Cada passo roda pelo helper antes do PTY
-    // (`run_prelaunch_steps`); o agente sobe direto, com CREATE_NO_WINDOW.
-    #[cfg(windows)]
-    let _ = prelaunch;
-    #[cfg(not(windows))]
-    if !prelaunch.is_empty() {
-        return Ok(shell_running(launch_script(command, prelaunch)));
+    if prelaunch.is_empty() {
+        return direct_launch(command);
     }
-    direct_launch(command)
+    // Um shell só: `conda activate`, `nvm use`, `set VAR=` e `cd` têm que valer para
+    // o agente. No Windows isso é um `.cmd` e um `cmd /C` dentro do ConPTY. A janela
+    // não abre porque `win_conpty` já passou `CREATE_NO_WINDOW`: o console é o PTY.
+    Ok(shell_running(launch_script(command, prelaunch)))
 }
 
 fn direct_launch(command: &str) -> Result<CommandBuilder, String> {
@@ -289,30 +286,6 @@ fn direct_launch(command: &str) -> Result<CommandBuilder, String> {
     }
 }
 
-/// Cada passo de prelaunch, num processo próprio, sem `cmd /C`.
-///
-/// `conda activate` e `nvm use` deixam de valer para o agente: o efeito morre com o
-/// processo. No Unix o shell com `&& exec` continua igual.
-#[cfg(windows)]
-fn run_prelaunch_steps(cwd: &str, steps: &[String]) -> Result<(), String> {
-    for step in steps {
-        let parts = split_command(step);
-        let Some(program) = parts.first().filter(|program| !program.is_empty()) else { continue };
-        let mut cmd = crate::util::spawn::hidden_command(program);
-        if parts.len() > 1 {
-            cmd.args(&parts[1..]);
-        }
-        cmd.current_dir(cwd);
-        let out = crate::util::spawn::output(&mut cmd, std::time::Duration::from_secs(120))
-            .map_err(|e| format!("prelaunch '{step}': {e}"))?;
-        if !out.status.success() {
-            let err = String::from_utf8_lossy(&out.stderr);
-            return Err(format!("prelaunch '{step}' saiu com {}: {}", out.status, err.trim()));
-        }
-    }
-    Ok(())
-}
-
 /// El shell que ejecuta el script.
 ///
 /// `$SHELL` y no `bash` fijo: quien usa zsh o fish tiene su configuración ahí, y es de
@@ -331,6 +304,38 @@ fn shell_running(script: String) -> CommandBuilder {
     cmd
 }
 
+/// Windows: el contenido del .cmd que ejecuta el script. Pura.
+#[cfg(windows)]
+pub(super) fn batch_launch_contents(script: &str) -> String {
+    format!("@echo off\n@chcp 65001 >nul\n{script}\n")
+}
+
+/// Windows: el script va a un .cmd y no como argumento de `cmd /C`. Al pasarlo como argumento,
+/// las comillas internas se escapan como `\\"` (la regla de la línea de comandos de Windows) y
+/// `cmd` las deja tal cual: `claude --mcp-config "C:\x.json"` recibía las comillas LITERALES
+/// y las leía como parte de una ruta relativa ("Invalid MCP configuration"). En un archivo, `cmd`
+/// ve las comillas como las escribió quien armó el comando. El nombre sale del hash del script:
+/// el mismo comando reutiliza el mismo archivo y la carpeta no crece sin fin.
+///
+/// Este `cmd` nace dentro del pseudoconsole (`open_pty` → `win_conpty`), que ya leva
+/// `CREATE_NO_WINDOW`. Não é um `Command` do helper e não abre conhost.
+#[cfg(windows)]
+fn shell_running(script: String) -> CommandBuilder {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    script.hash(&mut hasher);
+    let dir = std::env::temp_dir().join("ags-launch");
+    let file = dir.join(format!("{:016x}.cmd", hasher.finish()));
+    let written = std::fs::create_dir_all(&dir).and_then(|_| std::fs::write(&file, batch_launch_contents(&script)));
+    let mut cmd = CommandBuilder::new("cmd");
+    cmd.arg("/C");
+    match written {
+        Ok(()) => cmd.arg(file.as_os_str()),
+        // Sin poder escribir el archivo se vuelve al camino anterior (las comillas pueden fallar).
+        Err(_) => cmd.arg(script),
+    }
+    cmd
+}
 
 /// El PATH de la app con la carpeta de su propio ejecutable al final, para que `ags` (que
 /// viaja al lado) se encuentre en cualquier terminal de agente aunque no se haya instalado el CLI.
@@ -530,12 +535,7 @@ pub async fn pty_create(
 ) -> Result<u32, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
     let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
-    let steps = prelaunch.clone().unwrap_or_default();
-    #[cfg(windows)]
-    if !steps.is_empty() {
-        run_prelaunch_steps(&cwd, &steps)?;
-    }
-
+    let steps = prelaunch.unwrap_or_default();
     let pair = open_pty(size)?;
 
     let tab_id = env.as_ref().and_then(|e| e.get("ADE_TAB_ID")).cloned().filter(|tab| !tab.is_empty());
@@ -555,8 +555,7 @@ pub async fn pty_create(
         _ => None,
     };
     let command = with_codex_identity(&command, tab_id.as_deref(), codex_profile.as_ref().and(codex_profile_name.as_deref()));
-    let shell_steps: &[String] = if cfg!(windows) { &[] } else { &steps };
-    let mut cmd = build_launch(&command, shell_steps)?;
+    let mut cmd = build_launch(&command, &steps)?;
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");

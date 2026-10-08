@@ -4,6 +4,11 @@
 //! `bin/cli.rs`, `build.rs`, `examples/`, arquivos de teste e blocos `#[cfg(test)]`.
 //! `android.rs` pode usar `Command::new` só ao lado de `WindowMode::OwnWindow`.
 //! `launch.rs` não pode chamar `.spawn()`, `.output()` nem `.status()`.
+//!
+//! `cmd /C` de um script que o app monta só existe em dois lugares: o Graphify, com a
+//! linha que o usuário escreveu (`hidden_command("cmd")`, já sem janela), e o prelaunch
+//! do PTY (`CommandBuilder::new("cmd")` em `pty_manager.rs`), que roda dentro do
+//! ConPTY. Qualquer outro `cmd` é violação.
 
 use std::path::Path;
 
@@ -176,6 +181,20 @@ pub(crate) fn violations(path: &str, src: &str) -> Vec<String> {
         } else if bytes[i] == b';' && pending_test_only && skip_until.is_none() {
             pending_test_only = false;
         }
+        if skip_until.is_none() && src[i..].starts_with("CommandBuilder::new(\"cmd\")") {
+            if !cmd_pty_allowed(path) {
+                found.push(format!("{path}:{line}: CommandBuilder::new(\"cmd\") fora do ConPTY"));
+            }
+            i += "CommandBuilder::new(\"cmd\")".len();
+            continue;
+        }
+        if skip_until.is_none() && src[i..].starts_with("hidden_command(\"cmd\")") {
+            if !cmd_user_line_allowed(path) {
+                found.push(format!("{path}:{line}: hidden_command(\"cmd\") fora do Graphify"));
+            }
+            i += "hidden_command(\"cmd\")".len();
+            continue;
+        }
         if skip_until.is_none() && src[i..].starts_with("Command::new") {
             let tokio = i >= "tokio::process::".len() && src[..i].ends_with("tokio::process::");
             let kind = if tokio { "tokio::process::Command::new" } else { "Command::new" };
@@ -217,6 +236,16 @@ fn raw_string_end(src: &str, index: usize) -> Option<usize> {
     i += 1;
     let closer = format!("\"{}", "#".repeat(hashes));
     src[i..].find(&closer).map(|at| i + at + closer.len())
+}
+
+/// `cmd /C arquivo.cmd` do prelaunch: só dentro do pseudoconsole.
+fn cmd_pty_allowed(path: &str) -> bool {
+    path.replace('\\', "/").ends_with("src/terminal/pty_manager.rs")
+}
+
+/// `cmd /C` com a linha que o usuário digitou no Graphify. O helper esconde a janela.
+fn cmd_user_line_allowed(path: &str) -> bool {
+    path.replace('\\', "/").ends_with("src/graphify/mod.rs")
 }
 
 fn own_window_nearby(src: &str, index: usize) -> bool {
@@ -301,6 +330,21 @@ mod tests {
             found.iter().any(|item| item.contains("tokio::process::Command::new")),
             "o fixture tokio tem que falhar: {found:?}"
         );
+    }
+
+    #[test]
+    fn cmd_so_no_pty_e_na_linha_do_graphify() {
+        let builder = "fn x() { let _ = CommandBuilder::new(\"cmd\"); }\n";
+        let fora = violations("src/foo.rs", builder);
+        assert!(fora.iter().any(|item| item.contains("CommandBuilder::new(\"cmd\")")), "{fora:?}");
+        let pty = violations("src/terminal/pty_manager.rs", builder);
+        assert!(pty.iter().all(|item| !item.contains("CommandBuilder")), "{pty:?}");
+
+        let hidden = "fn x() { let _ = hidden_command(\"cmd\"); }\n";
+        let outro = violations("src/foo.rs", hidden);
+        assert!(outro.iter().any(|item| item.contains("hidden_command(\"cmd\")")), "{outro:?}");
+        let graphify = violations("src/graphify/mod.rs", hidden);
+        assert!(graphify.is_empty(), "{graphify:?}");
     }
 
     #[test]
