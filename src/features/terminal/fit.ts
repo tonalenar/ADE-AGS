@@ -1,6 +1,8 @@
 import type { FitAddon } from "@xterm/addon-fit";
 import type { Terminal as XTerm } from "@xterm/xterm";
 
+import { fontsReady } from "./fontsReady";
+
 /**
  * Ajustar la grilla de la terminal al tamaño real del contenedor.
  *
@@ -21,7 +23,12 @@ import type { Terminal as XTerm } from "@xterm/xterm";
  * acumula. En vez de predecirlo, se compara lo que xterm dice que ocupa (`dimensions`, API
  * pública desde 6.1) con el espacio real y, si se pasa, se saca una fila o una columna.
  */
-export function createFitter(term: XTerm, addon: FitAddon, container: () => HTMLElement | null) {
+export function createFitter(
+  term: XTerm,
+  addon: FitAddon,
+  container: () => HTMLElement | null,
+  fonts: Promise<void> = fontsReady,
+) {
   const trimOverflow = () => {
     const el = container();
     const canvas = term.dimensions?.css.canvas;
@@ -52,16 +59,16 @@ export function createFitter(term: XTerm, addon: FitAddon, container: () => HTML
 
   /**
    * Primer ajuste, antes de spawnear el proceso (el PTY nace con este tamaño, no con uno
-   * fijo que se corrige después).
+   * fijo que se corrige después). `Terminal.tsx` llama a `fitOnce` y recién entonces a
+   * `pty_create`, así que esta espera cubre la medición y el nacimiento del PTY.
    *
-   * - `document.fonts.ready`: si se mide con la fuente de fallback, se calculan cols/rows
-   *   para celdas de un tamaño que no es el real. (La fuente de la terminal además se
-   *   precarga al arrancar la app, ver `main.tsx`.)
+   * - `fontsReady`: la home no la espera, pero si se mide con la fuente de reserva se
+   *   calculan cols/rows para celdas de un tamaño que no es el real. Tope de 1,5 s.
    * - Doble rAF: el primero solo garantiza que el layout se pintó una vez; medir antes de
    *   eso puede dar un contenedor todavía en 0×0 (tab recién creada).
    */
   const fitOnce = async () => {
-    await document.fonts.ready.catch(() => {});
+    await fonts.catch(() => {});
     await new Promise(requestAnimationFrame);
     await new Promise(requestAnimationFrame);
     fit();

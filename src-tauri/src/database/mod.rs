@@ -14,15 +14,18 @@ mod seeds;
 #[cfg(test)]
 mod test;
 
-pub use connection::{init_db, DbConnection};
 pub(crate) use connection::user_db_path;
+pub use connection::{
+    __cmd__db_boot_status, __tauri_command_name_db_boot_status, DbConnection, db_boot_status,
+    db_upgrade_pending, finish_db, mark_db_ready, prepare_db, wait_until_db_ready,
+};
 pub use schema::migrate;
 
+pub use models::*;
+pub use queries::*;
 /// Base en memoria con el schema real, para los tests de cualquier módulo.
 #[cfg(test)]
 pub(crate) use schema::in_memory as test_db;
 /// La migración real, para probar saltos de versión desde otros módulos.
 #[cfg(test)]
 pub(crate) use schema::migrate as migrate_for_tests;
-pub use models::*;
-pub use queries::*;
