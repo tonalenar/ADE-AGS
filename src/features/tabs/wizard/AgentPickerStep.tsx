@@ -2,6 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
+import { agentTile } from "@/features/agents/agentTile";
 import type { AgentInfo } from "@/features/tabs/types";
 
 interface AgentPickerStepProps {
@@ -97,12 +98,3 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
   );
 }
 
-/** O fundo do ícone de cada agente (estilo app do iOS). */
-function agentTile(id: string): string {
-  if (id.startsWith("claude")) return "linear-gradient(180deg,#e08a6c,#c96442)";
-  if (id.startsWith("codex")) return "linear-gradient(180deg,#3a3a3c,#1c1c1e)";
-  if (id.startsWith("antigravity") || id.startsWith("gemini")) return "linear-gradient(135deg,#4285f4,#9b72cb)";
-  if (id.startsWith("opencode")) return "linear-gradient(180deg,#5e5ce6,#3634a3)";
-  if (id.startsWith("kimi")) return "linear-gradient(180deg,#30b0c7,#0a7d93)";
-  return "linear-gradient(180deg,#636366,#48484a)";
-}
