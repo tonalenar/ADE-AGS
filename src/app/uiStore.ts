@@ -1,5 +1,8 @@
 import { create } from "zustand";
 
+/** As seções da tela de Configurações (a barra lateral da prancheta 5). */
+export type SettingsSectionId = "general" | "appearance" | "accounts" | "agents" | "memory" | "terminal" | "shortcuts" | "advanced";
+
 /** Las secciones del panel derecho. */
 export type ExplorerView = "files" | "search" | "scm";
 
@@ -17,9 +20,17 @@ interface UiState {
   marketplaceReposCollapsed: boolean;
   /** Riel con los nombres de cada sección al lado del ícono, en vez de solo íconos. */
   railExpanded: boolean;
+  /**
+   * PEDIDOS de abrir Configurações / Contas (vêm do atalho, da paleta e de vários botões). Quem os
+   * atende é o AppShell: navega para `/settings` e os apaga. Configurações é uma ROTA — antes era um
+   * modal solto por cima de tudo e, aberto, ficava preso por cima das outras telas.
+   */
   settingsOpen: boolean;
-  /** Las cuentas son su propia pantalla, no una sección de Configuración. */
+  /** Pedido de abrir Contas: agora é uma seção das Configurações. */
   accountsOpen: boolean;
+  /** Qual seção das Configurações está aberta. */
+  settingsSection: SettingsSectionId;
+  setSettingsSection: (section: SettingsSectionId) => void;
   /** La paleta de comandos (Ctrl+K). */
   paletteOpen: boolean;
 
@@ -81,6 +92,7 @@ export const useUiStore = create<UiState>((set, get) => ({
   ...load(),
   settingsOpen: false,
   accountsOpen: false,
+  settingsSection: "general",
   paletteOpen: false,
 
   toggleWorkspaces: () => {
@@ -99,6 +111,7 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ marketplaceReposCollapsed: !get().marketplaceReposCollapsed });
     persist(get());
   },
+  setSettingsSection: (settingsSection) => set({ settingsSection }),
   setSettingsOpen: (settingsOpen) => set({ settingsOpen }),
   setAccountsOpen: (accountsOpen) => set({ accountsOpen }),
   toggleRail: () => {

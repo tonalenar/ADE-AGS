@@ -2,12 +2,13 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Alert, AnimateSpin, Button, FolderIcon, Input, SegmentedControl, TextArea } from "neogestify-ui-components";
+import { Alert, AnimateSpin, Button, FolderIcon } from "neogestify-ui-components";
 
 import { findDuplicateMission } from "./duplicates";
 import { useMissionsStore } from "./store";
 import { ModelSelector } from "@/features/runs/ModelSelector";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
+import { Segmented } from "@/shared/ui/Segmented";
 import { modelsForAccount, withModelEffort } from "@/features/squads/modelSelection";
 import { getRoster } from "@/features/runs/ipc";
 import { COMPLEXITIES } from "@/features/runs/routingView";
@@ -82,44 +83,36 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
   return (
     <AppDialog
       title={editing ? t("missions.form.editTitle") : t("missions.form.title")}
-      size="md"
+      size="lg"
       closeOnEsc
       onClose={onClose}
       footer={
-        <div className="flex items-center gap-2 px-4 h-12">
-          <span className="flex-1 min-w-0 truncate text-[10.5px] text-gray-400 dark:text-white/35">
-            {t("missions.form.draftHint")}
-          </span>
-          <Button variant="ghost" size="sm" onClick={onClose}>{t("btn.cancel")}</Button>
+        <>
+          <Button variant="outline" onClick={onClose}>{t("btn.cancel")}</Button>
           <Button
             variant="primary"
-            size="sm"
             disabled={!canSave}
             onClick={save}
             leftIcon={busy ? <AnimateSpin className="w-3.5 h-3.5" /> : undefined}
           >
             {editing ? t("missions.form.save") : t("missions.form.create")}
           </Button>
-        </div>
+        </>
       }
     >
-      <div className="flex flex-col gap-3.5">
+      <div className="flex flex-col gap-4">
         <Field label={t("missions.form.name")}>
-          <Input size="sm" value={form.title} onChange={(e) => set("title", e.target.value)} autoFocus className={INPUT} />
+          <input value={form.title} onChange={(e) => set("title", e.target.value)} autoFocus className={FIELD} />
         </Field>
 
         <Field label={t("missions.form.objective")} hint={t("missions.form.objectiveHint")}>
-          <TextArea
-            size="sm"
-            resize="none"
-            rows={5}
+          <textarea
+            rows={4}
             value={form.objective}
             onChange={(e) => set("objective", e.target.value)}
             placeholder={t("fleet.orchestrate.objectivePlaceholder")}
-            className="w-full resize-none rounded-lg px-2.5 py-2 outline-none
-              bg-gray-100 dark:bg-white/5 border border-gray-200 dark:border-white/10
-              focus:border-accent-400 dark:focus:border-accent-500
-              text-[12px] leading-relaxed text-gray-800 dark:text-gray-200"
+            className="block w-full resize-none rounded-[10px] bg-black/[0.05] px-3 py-2.5 text-[13px] leading-[19px] text-gray-900 outline-none
+              placeholder:text-gray-400 focus:ring-[3px] focus:ring-accent-500/30 dark:bg-surface-raised dark:text-[#f5f5f7] dark:placeholder:text-white/30"
           />
         </Field>
 
@@ -131,133 +124,132 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
           </Alert>
         )}
 
-        <Field group label={t("missions.form.project")}>
-          <div className="flex items-center gap-1.5">
-            <Input
-              size="sm"
-              value={form.cwd}
-              onChange={(e) => set("cwd", e.target.value)}
-              aria-label={t("missions.form.project")}
-              className={`${INPUT} font-mono`}
-            />
-            <Button variant="icon" onClick={pickFolder} aria-label={t("missions.form.pickFolder")} className="w-8 h-8 p-0 shrink-0">
-              <FolderIcon className="w-3.5 h-3.5" />
-            </Button>
+        <Field label={t("missions.form.project")}>
+          <div className="flex items-center gap-2">
+            <label className="flex h-[30px] min-w-0 flex-1 items-center gap-2 rounded-[7px] bg-black/[0.05] px-2.5 focus-within:ring-[3px] focus-within:ring-accent-500/30 dark:bg-surface-raised">
+              <FolderIcon className="h-3.5 w-3.5 shrink-0 text-gray-400 dark:text-white/35" />
+              <input
+                value={form.cwd}
+                onChange={(e) => set("cwd", e.target.value)}
+                aria-label={t("missions.form.project")}
+                className="min-w-0 flex-1 bg-transparent font-mono text-[12px] text-gray-900 outline-none dark:text-[#f5f5f7]"
+              />
+            </label>
+            <Button variant="outline" onClick={pickFolder} aria-label={t("missions.form.pickFolder")}>{t("missions.form.pick")}</Button>
           </div>
         </Field>
 
-        <Field group label={t("missions.form.executionMode")}>
-          <SegmentedControl
-            size="sm"
-            aria-label={t("missions.form.executionMode")}
-            value={form.executionMode}
-            onChange={(value) => {
-              const executionMode = value as MissionForm["executionMode"];
-              setForm((current) => switchExecutionMode(current, executionMode));
-            }}
-            options={[
-              { value: "automatic", label: t("missions.form.automatic") },
-              { value: "specific", label: t("missions.form.specific") },
-              { value: "squad", label: t("missions.form.squad") },
-            ]}
-          />
-        </Field>
+        <div>
+          <div className={LABEL}>{t("missions.form.config")}</div>
+          <div className="overflow-hidden rounded-xl border border-black/[0.1] bg-gray-50 dark:border-[rgba(84,84,88,0.55)] dark:bg-surface-deep">
+            <Row stacked label={t("missions.form.executionMode")}>
+              <Segmented
+                className="w-full"
+                label={t("missions.form.executionMode")}
+                value={form.executionMode}
+                onChange={(value) => setForm((current) => switchExecutionMode(current, value))}
+                options={[
+                  { value: "automatic", label: t("missions.form.automatic") },
+                  { value: "specific", label: t("missions.form.specific") },
+                  { value: "squad", label: t("missions.form.squad") },
+                ]}
+              />
+            </Row>
 
-        {form.executionMode === "automatic" && (
-          <Field group label={t("fleet.orchestrate.leadModel")} hint={t("fleet.new.modelHint")}>
-            <SegmentedControl
-              size="sm"
-              aria-label={t("fleet.orchestrate.leadModel")}
-              value={form.mode === "fixed" ? "hard" : form.mode}
-              onChange={(value) => set("mode", value as ModelMode)}
-              options={COMPLEXITIES.map((complexity) => ({ value: complexity, label: t(`fleet.complexity.${complexity}`) }))}
-            />
-          </Field>
-        )}
-
-        {form.executionMode === "specific" && (
-          <Field group label={t("missions.form.leadProviderModel")}>
-            <PopupSelect className={SELECT} aria-label={t("squads.form.provider")} value={form.agentId}
-              onChange={(event) => setForm((current) => ({ ...current, agentId: event.target.value, model: null, reasoningEffort: null, mode: "fixed", accountId: null, autoAccount: true }))}>
-              {!agents.some((agent) => agent.agentId === form.agentId) && <option value={form.agentId}>{form.agentId} ? {t("squads.unavailable")}</option>}
-              {agents.map((agent) => <option key={agent.agentId} value={agent.agentId} disabled={providerDisabled(agent, true)}>{agent.label}{leadUnsupported(agent) ? " · " + t("squads.leadUnsupported") : ""}</option>)}
-            </PopupSelect>
-            {leadUnsupported(agents.find((agent) => agent.agentId === form.agentId)) && <Alert variant="warning">{t("squads.leadUnsupported")}</Alert>}
-            <ModelSelector roster={roster} onRoster={setRoster} agentId={form.agentId} accountId={form.accountId} autoAccount={form.autoAccount}
-              reasoningEffort={form.reasoningEffort}
-              model={form.mode === "fixed" ? form.model : null} complexity={form.mode === "fixed" ? null : form.mode}
-              onChange={(patch) => setForm((current) => ({ ...current, model: patch.model, reasoningEffort: patch.reasoningEffort ?? null, mode: patch.complexity ?? "fixed" }))} />
-          </Field>
-        )}
-
-        {form.executionMode === "squad" && (
-          <Field label={t("missions.form.squad")} hint={t("missions.form.squadHint")}>
-            <PopupSelect
-              value={form.squadId ?? ""}
-              onChange={(event) => set("squadId", event.target.value || null)}
-              className={SELECT}
-            >
-              <option value="">{t("missions.form.chooseSquad")}</option>
-              {squads.map((squad) => (
-                <option key={squad.id} value={squad.id}>
-                  {squad.name}{squad.available ? "" : ` · ${t("squads.unavailable")}`}
-                </option>
-              ))}
-            </PopupSelect>
-            {selectedSquad && <SquadExecutionSummary squad={selectedSquad} />}
-            {selectedSquad && !selectedSquad.available && (
-              <Alert variant="warning">{selectedSquad.unavailableReasons.join("; ")}</Alert>
+            {form.executionMode === "automatic" && (
+              <Row label={t("fleet.orchestrate.leadModel")} hint={t("fleet.new.modelHint")}>
+                <Segmented
+                  label={t("fleet.orchestrate.leadModel")}
+                  value={(form.mode === "fixed" ? "hard" : form.mode) as ModelMode}
+                  onChange={(value) => set("mode", value)}
+                  options={COMPLEXITIES.map((complexity) => ({ value: complexity as ModelMode, label: t(`fleet.complexity.${complexity}`) }))}
+                />
+              </Row>
             )}
-            {squads.length === 0 && (
-              <div className="flex items-center justify-between gap-2 text-[10.5px] text-gray-500 dark:text-white/40">
-                <span>{t("missions.form.noSquads")}</span>
-                <Button variant="ghost" size="sm" onClick={() => navigate("/squads")}>{t("squads.manage")}</Button>
-              </div>
+
+            {form.executionMode === "specific" && (
+              <Row stacked label={t("missions.form.leadProviderModel")}>
+                <PopupSelect className={SELECT} aria-label={t("squads.form.provider")} value={form.agentId}
+                  onChange={(event) => setForm((current) => ({ ...current, agentId: event.target.value, model: null, reasoningEffort: null, mode: "fixed", accountId: null, autoAccount: true }))}>
+                  {!agents.some((agent) => agent.agentId === form.agentId) && <option value={form.agentId}>{form.agentId} ? {t("squads.unavailable")}</option>}
+                  {agents.map((agent) => <option key={agent.agentId} value={agent.agentId} disabled={providerDisabled(agent, true)}>{agent.label}{leadUnsupported(agent) ? " · " + t("squads.leadUnsupported") : ""}</option>)}
+                </PopupSelect>
+                {leadUnsupported(agents.find((agent) => agent.agentId === form.agentId)) && <Alert variant="warning">{t("squads.leadUnsupported")}</Alert>}
+                <ModelSelector roster={roster} onRoster={setRoster} agentId={form.agentId} accountId={form.accountId} autoAccount={form.autoAccount}
+                  reasoningEffort={form.reasoningEffort}
+                  model={form.mode === "fixed" ? form.model : null} complexity={form.mode === "fixed" ? null : form.mode}
+                  onChange={(patch) => setForm((current) => ({ ...current, model: patch.model, reasoningEffort: patch.reasoningEffort ?? null, mode: patch.complexity ?? "fixed" }))} />
+              </Row>
             )}
-          </Field>
-        )}
 
-        {form.executionMode === "specific" && (
-          <Field group label={t("fleet.new.account")}>
-            <AccountPickerStep
-              agentId={form.agentId}
-              value={accountValue}
-                onChange={(value) => setForm((current) => ({
-                  ...current,
-                  autoAccount: value === AUTO_ACCOUNT,
-                  accountId: value === AUTO_ACCOUNT ? null : (value ?? null),
-                  reasoningEffort: withModelEffort({ model: current.model || null, complexity: null }, current.reasoningEffort ?? null,
-                    modelsForAccount(roster?.agents.find((agent) => agent.agentId === current.agentId),
-                      value === AUTO_ACCOUNT ? null : (value ?? null), value === AUTO_ACCOUNT)).reasoningEffort,
-              }))}
-              showLabel={false}
-              allowAuto
-            />
-          </Field>
-        )}
+            {form.executionMode === "specific" && (
+              <Row stacked label={t("fleet.new.account")}>
+                <AccountPickerStep
+                  agentId={form.agentId}
+                  value={accountValue}
+                  onChange={(value) => setForm((current) => ({
+                    ...current,
+                    autoAccount: value === AUTO_ACCOUNT,
+                    accountId: value === AUTO_ACCOUNT ? null : (value ?? null),
+                    reasoningEffort: withModelEffort({ model: current.model || null, complexity: null }, current.reasoningEffort ?? null,
+                      modelsForAccount(roster?.agents.find((agent) => agent.agentId === current.agentId),
+                        value === AUTO_ACCOUNT ? null : (value ?? null), value === AUTO_ACCOUNT)).reasoningEffort,
+                  }))}
+                  showLabel={false}
+                  allowAuto
+                />
+              </Row>
+            )}
 
-        <div className="flex items-start gap-4">
-          <Field group label={t("fleet.orchestrate.parallel")} hint={t("fleet.orchestrate.parallelHint")}>
-            <SegmentedControl
-              size="sm"
-              aria-label={t("fleet.orchestrate.parallel")}
-              value={String(form.maxParallel)}
-              onChange={(v) => set("maxParallel", Number(v))}
-              options={PARALLEL.map((n) => ({ value: String(n), label: String(n) }))}
-            />
-          </Field>
-          <div className="w-32">
-            <Field label={t("fleet.orchestrate.budget")} hint={t("fleet.new.budgetHint")}>
-              <Input
-                size="sm"
+            {form.executionMode === "squad" && (
+              <Row stacked label={t("missions.form.squad")} hint={t("missions.form.squadHint")}>
+                <PopupSelect
+                  value={form.squadId ?? ""}
+                  onChange={(event) => set("squadId", event.target.value || null)}
+                  className={SELECT}
+                >
+                  <option value="">{t("missions.form.chooseSquad")}</option>
+                  {squads.map((squad) => (
+                    <option key={squad.id} value={squad.id}>
+                      {squad.name}{squad.available ? "" : ` · ${t("squads.unavailable")}`}
+                    </option>
+                  ))}
+                </PopupSelect>
+                {selectedSquad && <SquadExecutionSummary squad={selectedSquad} />}
+                {selectedSquad && !selectedSquad.available && (
+                  <Alert variant="warning">{selectedSquad.unavailableReasons.join("; ")}</Alert>
+                )}
+                {squads.length === 0 && (
+                  <div className="flex items-center justify-between gap-2 text-[11.5px] text-gray-500 dark:text-white/45">
+                    <span>{t("missions.form.noSquads")}</span>
+                    <Button variant="ghost" size="sm" onClick={() => navigate("/squads")}>{t("squads.manage")}</Button>
+                  </div>
+                )}
+              </Row>
+            )}
+
+            <Row label={t("fleet.orchestrate.parallel")} hint={t("fleet.orchestrate.parallelHint")}>
+              <Segmented
+                label={t("fleet.orchestrate.parallel")}
+                value={String(form.maxParallel)}
+                onChange={(v) => set("maxParallel", Number(v))}
+                options={PARALLEL.map((n) => ({ value: String(n), label: String(n) }))}
+                className="w-40"
+              />
+            </Row>
+
+            <Row label={t("fleet.orchestrate.budget")} hint={t("fleet.new.budgetHint")}>
+              <input
                 value={form.budget}
                 onChange={(e) => set("budget", e.target.value)}
                 inputMode="decimal"
                 placeholder="1.00"
-                className={INPUT}
+                aria-label={t("fleet.orchestrate.budget")}
+                className={`${FIELD} !w-28 shrink-0 text-right font-mono`}
               />
-            </Field>
+            </Row>
           </div>
+          <p className="mt-2 px-1 text-[11.5px] leading-4 text-gray-400 dark:text-white/35">{t("missions.form.draftHint")}</p>
         </div>
 
         {error && <Alert variant="danger">{error}</Alert>}
@@ -309,30 +301,47 @@ function useRosterForLabels() {
   return { agents };
 }
 
-function Field({ label, hint, group = false, children }: {
-  label: string;
-  hint?: string;
-  /** Un grupo de botones y no un campo: dentro de un `<label>`, un click en el título se
-   *  reenviaría al primer botón. */
-  group?: boolean;
-  children: React.ReactNode;
-}) {
-  const Tag = group ? "div" : "label";
+const LABEL = "mb-1.5 text-[12px] leading-4 text-gray-500 dark:text-white/60";
+
+/** Rótulo pequeno (12px, cinza) e o controle embaixo, como nos sheets das pranchetas. */
+function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
-    <Tag className="flex flex-col gap-1.5" {...(group ? { role: "group", "aria-label": label } : {})}>
-      <span className="flex items-baseline gap-2">
-        <span className="text-[11px] font-semibold text-gray-700 dark:text-gray-300">{label}</span>
-        {hint && <span className="text-[10px] text-gray-400 dark:text-white/30">{hint}</span>}
+    <label className="flex flex-col">
+      <span className={`${LABEL} flex items-baseline gap-2`}>
+        <span>{label}</span>
+        {hint && <span className="text-[11px] text-gray-400 dark:text-white/30">{hint}</span>}
       </span>
       {children}
-    </Tag>
+    </label>
   );
 }
 
-const INPUT = `w-full rounded-lg px-2.5 h-8 outline-none text-[12px]
-  bg-gray-100 dark:bg-white/5
-  border border-gray-200 dark:border-white/10
-  focus:border-accent-400 dark:focus:border-accent-500
-  text-gray-800 dark:text-gray-200`;
+/**
+ * Uma linha da lista agrupada "Configuração": o rótulo (e a dica por baixo) à esquerda e o controle
+ * à direita, separadas por um fio que começa depois da margem. `stacked` põe o controle embaixo, na
+ * largura toda, para os que são largos demais para ficar ao lado (provedor, modelo, conta, squad).
+ */
+function Row({ label, hint, stacked = false, children }: { label: string; hint?: string; stacked?: boolean; children: React.ReactNode }) {
+  const title = (
+    <span className="flex min-w-0 flex-col gap-0.5 [&>span:first-child]:whitespace-nowrap">
+      <span className="text-[13.5px] leading-[19px] text-gray-900 dark:text-[#f5f5f7]">{label}</span>
+      {hint && <span className="text-[11.5px] leading-4 text-gray-500 dark:text-white/50">{hint}</span>}
+    </span>
+  );
+  return (
+    <div role="group" aria-label={label}
+      className="relative min-h-11 px-3.5 py-2 before:absolute before:left-3.5 before:right-0 before:top-0 before:h-px before:bg-black/[0.08] first:before:hidden dark:before:bg-[rgba(84,84,88,0.55)]">
+      {stacked ? (
+        <div className="flex flex-col gap-2 py-1">{title}{children}</div>
+      ) : (
+        <div className="flex items-center justify-between gap-3">{title}{children}</div>
+      )}
+    </div>
+  );
+}
+
+/** O campo de texto das pranchetas: 30px, fundo cinza, raio 7, anel de acento ao focar. */
+const FIELD = `block h-[30px] w-full rounded-[7px] bg-black/[0.05] px-2.5 text-[13px] text-gray-900 outline-none
+  placeholder:text-gray-400 focus:ring-[3px] focus:ring-accent-500/30 dark:bg-surface-raised dark:text-[#f5f5f7] dark:placeholder:text-white/30`;
 
 const SELECT = "w-full";

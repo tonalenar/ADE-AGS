@@ -61,6 +61,8 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
                 if let Some((x, y)) = usable_position(w.pos_x, w.pos_y) {
                     let _ = main_win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
                 }
+                // O app sempre abre em tela cheia; o tamanho guardado fica para quando se restaura a janela.
+                let _ = main_win.maximize();
             }
             database::mark_window_open(&db, &w.id)?;
             continue;
@@ -82,6 +84,7 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
             .title(&label)
             .decorations(false)
             .transparent(true)
+            .maximized(true)
             .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT);
 
         if let Some((width, height)) = usable_size(w.width, w.height) {
@@ -135,6 +138,7 @@ fn spawn_blank_window(app: &AppHandle, db: &DbConnection, workspace_id: &str) ->
         .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         .decorations(false)
         .transparent(true)
+        .maximized(true)
         .build()
         .map_err(|e| e.to_string())?;
     let _ = app.emit("cc-workspace-changed", ());
@@ -240,6 +244,7 @@ pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String
         .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         .decorations(false)
         .transparent(true)
+        .maximized(true)
         .build()
         .map_err(|e| e.to_string())?;
 
@@ -329,6 +334,7 @@ pub async fn open_new_window(app: tauri::AppHandle, label: String) -> Result<(),
         .min_inner_size(MIN_WINDOW_WIDTH, MIN_WINDOW_HEIGHT)
         .decorations(false)
         .transparent(true)
+        .maximized(true)
         .build()
         .map_err(|e| e.to_string())?;
     // Las ventanas que ya estaban abiertas tienen que enterarse de que el workspace pasó a

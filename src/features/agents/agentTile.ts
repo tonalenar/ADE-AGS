@@ -8,16 +8,20 @@ export function agentTile(id: string): string {
   return "linear-gradient(180deg,#636366,#48484a)";
 }
 
+/** Quem faz o agente ("Anthropic"), ou `null` se não se sabe. */
+export function vendorOf(id: string): string | null {
+  if (id.startsWith("claude")) return "Anthropic";
+  if (id.startsWith("codex")) return "OpenAI";
+  if (id.startsWith("antigravity") || id.startsWith("gemini")) return "Google";
+  if (id.startsWith("opencode")) return "SST";
+  if (id.startsWith("kimi")) return "Moonshot";
+  return null;
+}
+
 /** "Anthropic · CLI": quem faz o agente (o subtítulo do cartão no "Novo agente"). */
 export function agentVendor(id: string, command: string, t: (key: string) => string): string {
   if (id === "bash" || id === "shell") return t("newAgent.vendor.shell");
-  const vendor = id.startsWith("claude") ? "Anthropic"
-    : id.startsWith("codex") ? "OpenAI"
-    : id.startsWith("antigravity") || id.startsWith("gemini") ? "Google"
-    : id.startsWith("opencode") ? "SST"
-    : id.startsWith("kimi") ? "Moonshot"
-    : command;
-  return `${vendor} · CLI`;
+  return `${vendorOf(id) ?? command} · CLI`;
 }
 
 /** O nome de exibição de um agente pelo id (quando não há o rótulo da tab à mão). */

@@ -49,7 +49,7 @@ export function MissionTimingsPanel({ missionId }: { missionId: string }) {
       <div className="flex flex-col gap-1.5">
         {summary.byKind.map((k) => (
           <div key={k.kind} className="flex items-center gap-2 text-[11.5px]">
-            <span className="w-28 shrink-0 text-gray-600 dark:text-gray-300">{t(`missions.timings.kind.${k.kind}`)}</span>
+            <span className="w-44 shrink-0 truncate text-gray-600 dark:text-gray-300" title={kindLabel(t, k.kind)}>{kindLabel(t, k.kind)}</span>
             <div className="flex-1 h-1.5 rounded-full bg-gray-200 dark:bg-surface-overlay overflow-hidden">
               <div className="h-full rounded-full bg-accent-500" style={{ width: `${shareOf(k.totalMs, summary.wallMs)}%` }} />
             </div>
@@ -66,7 +66,7 @@ export function MissionTimingsPanel({ missionId }: { missionId: string }) {
         </div>
         {summary.slowest.map((s) => (
           <div key={s.id} className="flex items-center gap-2 py-0.5 text-[11.5px]">
-            <span className="w-28 shrink-0 text-gray-500 dark:text-gray-400">{t(`missions.timings.kind.${s.kind}`)}</span>
+            <span className="w-44 shrink-0 truncate text-gray-500 dark:text-gray-400" title={kindLabel(t, s.kind)}>{kindLabel(t, s.kind)}</span>
             <span className="flex-1 min-w-0 truncate text-gray-700 dark:text-gray-200">
               {s.actor}
               {s.target ? ` → ${s.target}` : ""}
@@ -178,4 +178,10 @@ export function MissionEfficiencyCard({ missionId, compact = false }: { missionI
 
 function Metric({ label, value, labelClass, valueClass }: { label: string; value: string; labelClass: string; valueClass: string }) {
   return <div className="min-w-0"><div className={labelClass}>{label}</div><div className={`truncate text-[11px] font-semibold tabular-nums ${valueClass}`}>{value}</div></div>;
+}
+
+/** O nome de um tipo de medição. Um tipo novo sem tradução aparece legível ("Start all working"), nunca como a chave crua. */
+function kindLabel(t: (key: string, opts?: Record<string, unknown>) => string, kind: string): string {
+  const human = kind.replace(/_/g, " ").replace(/^./, (c) => c.toUpperCase());
+  return t(`missions.timings.kind.${kind}`, { defaultValue: human });
 }

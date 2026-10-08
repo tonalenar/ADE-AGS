@@ -109,10 +109,8 @@ export function ActivityRail({ agentCount, width }: { agentCount: number; width:
   const { pathname } = useLocation();
   const collapsed = useUiStore((s) => s.workspacesCollapsed);
   const toggleWorkspaces = useUiStore((s) => s.toggleWorkspaces);
-  const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
-  const settingsOpen = useUiStore((s) => s.settingsOpen);
-  const setAccountsOpen = useUiStore((s) => s.setAccountsOpen);
-  const accountsOpen = useUiStore((s) => s.accountsOpen);
+  const setSettingsSection = useUiStore((s) => s.setSettingsSection);
+  const settingsSection = useUiStore((s) => s.settingsSection);
   const setPaletteOpen = useUiStore((s) => s.setPaletteOpen);
   const paletteOpen = useUiStore((s) => s.paletteOpen);
   const expanded = useUiStore((s) => s.railExpanded);
@@ -205,20 +203,19 @@ export function ActivityRail({ agentCount, width }: { agentCount: number; width:
 
       <div className="flex-1 min-h-2" />
 
-      {/* Contas é sua própria tela, não um atalho para uma seção de Configurações: é o
-          que vai crescer conforme entrarem serviços que pedem login. */}
+      {/* Contas é uma seção das Configurações (a mesma tela): o botão leva direto a ela. */}
       <RailButton
         label={t("settings.accounts")}
         path={null}
-        active={accountsOpen}
+        active={on("/settings") && settingsSection === "accounts"}
         expanded={expanded}
-        onClick={() => setAccountsOpen(true)}
+        onClick={() => { setSettingsSection("accounts"); navigate("/settings"); }}
       >
         <AccountCircleIcon className={icon} />
       </RailButton>
 
-      <RailButton label={t("sidebar.settings")} path="/settings" active={settingsOpen} expanded={expanded}
-        onClick={() => setSettingsOpen(true)}>
+      <RailButton label={t("sidebar.settings")} path="/settings" active={on("/settings") && settingsSection !== "accounts"} expanded={expanded}
+        onClick={() => { if (settingsSection === "accounts") setSettingsSection("general"); navigate("/settings"); }}>
         <GearIcon className={icon} />
       </RailButton>
 

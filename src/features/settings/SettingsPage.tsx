@@ -6,6 +6,8 @@ import { Button, EditIcon, FolderIcon, ThemeToggle, Tooltip, TrashIcon } from "n
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n/index";
+import { useUiStore, type SettingsSectionId } from "@/app/uiStore";
+import { ContasSection } from "@/features/accounts/ContasSection";
 import { useAgentsStore } from "@/features/agents/store";
 import type { CustomAgent } from "@/features/agents/types";
 import { useSkillsStore } from "@/features/skills/store";
@@ -13,6 +15,8 @@ import { CustomAgentForm } from "@/features/agents/CustomAgentForm";
 import { DetectedAgents } from "@/features/agents/DetectedAgents";
 import { CliInstallSection } from "@/features/settings/CliInstallSection";
 import { GraphifySection } from "@/features/graphify/GraphifySection";
+import { MemoryPanel } from "@/features/memory/MemoryPanel";
+import { SharedMemoryPanel } from "@/features/memory/SharedMemoryPanel";
 import { SkillsShSection } from "@/features/marketplace/SkillsShSection";
 import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection";
 import { RoutingSection } from "@/features/runs/RoutingSection";
@@ -26,6 +30,7 @@ import { NotificationsSetting } from "@/features/settings/NotificationsSetting";
 import { AgentAutoUpdateSetting } from "@/features/settings/AgentAutoUpdateSetting";
 import { SandboxSetting } from "@/features/settings/SandboxSetting";
 import { RenderingSetting } from "@/features/settings/RenderingSetting";
+import { useTabsStore } from "@/features/tabs/store";
 
 /** Chips de "qué integración tiene configurada esta TUI", para no tener que abrir el
  *  formulario solo para saber si reanuda sesiones o si le gestionamos skills. */
@@ -52,29 +57,26 @@ function AgentCapabilities({ agent }: { agent: CustomAgent }) {
   );
 }
 
-type SectionId =
-  | "appearance" | "shortcuts" | "terminal" | "skillsDir" | "skillssh"
-  | "tuis" | "prelaunch" | "cli" | "graphify" | "orchestrator" | "routing" | "sync" | "updates";
-
-/** Cada sección del riel tiene su cuadradito de color con un glifo, como Ajustes del macOS. */
-const SECTION_GLYPH: Record<SectionId, { tone: string; icon: React.ReactNode }> = {
+/** Cada item da barra lateral tem o seu quadradinho de cor com um glifo, como os Ajustes do macOS. */
+const GLYPH: Record<SettingsSectionId, { tone: string; icon: React.ReactNode }> = {
+  general: { tone: "bg-gray-500", icon: <><circle cx="8" cy="8" r="2.2" /><circle cx="8" cy="8" r="5.6" strokeDasharray="2.4 1.8" /></> },
   appearance: { tone: "bg-accent-500", icon: <><circle cx="8" cy="8" r="5.6" /><path d="M8 2.4a5.6 5.6 0 0 1 0 11.2z" fill="currentColor" /></> },
+  accounts: { tone: "bg-green-500", icon: <><circle cx="8" cy="5.6" r="2.4" /><path d="M3 13.2c.7-2.2 2.5-3.4 5-3.4s4.3 1.2 5 3.4" /></> },
+  agents: { tone: "bg-orange-500", icon: <><rect x="4.2" y="4.2" width="7.6" height="7.6" rx="1.6" /><path d="M6.4 1.8v2.4M9.6 1.8v2.4M6.4 11.8v2.4M9.6 11.8v2.4M1.8 6.4h2.4M1.8 9.6h2.4M11.8 6.4h2.4M11.8 9.6h2.4" /></> },
+  memory: { tone: "bg-purple-500", icon: <><path d="M8 2.2 13.6 5 8 7.8 2.4 5 8 2.2Z" /><path d="m2.4 8 5.6 2.8L13.6 8M2.4 11l5.6 2.8L13.6 11" /></> },
+  terminal: { tone: "bg-sky-400", icon: <><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2.2" /><path d="M4.6 6.4 6.6 8l-2 1.6M8.8 10.2h2.6" /></> },
   shortcuts: { tone: "bg-red-500", icon: <><rect x="1.4" y="4" width="13.2" height="8" rx="2" /><path d="M4 6.8h.01M6.8 6.8h.01M9.6 6.8h.01M12 6.8h.01M4.4 9.4h7.2" /></> },
-  terminal: { tone: "bg-teal-500", icon: <><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2.2" /><path d="M4.6 6.4 6.6 8l-2 1.6M8.8 10.2h2.6" /></> },
-  skillsDir: { tone: "bg-orange-500", icon: <path d="M2 4.5A1.5 1.5 0 0 1 3.5 3h2.6l1.4 1.6h5A1.5 1.5 0 0 1 14 6.1v5.4a1.5 1.5 0 0 1-1.5 1.5h-9A1.5 1.5 0 0 1 2 11.5z" /> },
-  skillssh: { tone: "bg-violet-500", icon: <path d="M8 2.2 9.4 6.6 13.8 8 9.4 9.4 8 13.8 6.6 9.4 2.2 8 6.6 6.6z" /> },
-  tuis: { tone: "bg-emerald-500", icon: <><rect x="4.2" y="4.2" width="7.6" height="7.6" rx="1.6" /><path d="M6.4 1.8v2.4M9.6 1.8v2.4M6.4 11.8v2.4M9.6 11.8v2.4M1.8 6.4h2.4M1.8 9.6h2.4M11.8 6.4h2.4M11.8 9.6h2.4" /></> },
-  prelaunch: { tone: "bg-amber-500", icon: <path d="M5 3.5v9l7-4.5z" /> },
-  cli: { tone: "bg-gray-500", icon: <><path d="M8 2 13.5 5v6L8 14 2.5 11V5z" /><path d="M2.5 5 8 8l5.5-3M8 8v6" /></> },
-  graphify: { tone: "bg-sky-500", icon: <><circle cx="4" cy="4.2" r="1.6" /><circle cx="12" cy="4.2" r="1.6" /><circle cx="8" cy="12" r="1.6" /><path d="M5.3 5 7 10.6M10.7 5 9 10.6M5.6 4.2h4.8" /></> },
-  orchestrator: { tone: "bg-indigo-500", icon: <><path d="M2 4.6h12M2 11.4h12" /><circle cx="5.6" cy="4.6" r="1.5" /><circle cx="10.4" cy="11.4" r="1.5" /></> },
-  routing: { tone: "bg-pink-500", icon: <><circle cx="4.5" cy="3.5" r="1.5" /><circle cx="4.5" cy="12.5" r="1.5" /><circle cx="11.5" cy="5" r="1.5" /><path d="M4.5 5v6M11.5 6.5c0 2.5-3 2.5-7 4.5" /></> },
-  sync: { tone: "bg-cyan-500", icon: <path d="M13 8a5 5 0 1 1-1.5-3.5M13 2.8v3h-3" /> },
-  updates: { tone: "bg-blue-500", icon: <><circle cx="8" cy="8" r="5.8" /><path d="M8 4.8v5M5.9 7.9 8 10l2.1-2.1" /></> },
+  advanced: { tone: "bg-gray-600", icon: <><path d="M2 4.6h12M2 11.4h12" /><circle cx="5.6" cy="4.6" r="1.5" /><circle cx="10.4" cy="11.4" r="1.5" /></> },
 };
 
-function SectionIcon({ id }: { id: SectionId }) {
-  const glyph = SECTION_GLYPH[id];
+/** Os dois grupos da barra lateral (a linha entre eles é a da prancheta). */
+const NAV: SettingsSectionId[][] = [
+  ["general", "appearance", "accounts", "agents"],
+  ["memory", "terminal", "shortcuts", "advanced"],
+];
+
+function Glyph({ id }: { id: SettingsSectionId }) {
+  const glyph = GLYPH[id];
   return (
     <span className={`flex size-[22px] shrink-0 items-center justify-center rounded-md text-white ${glyph.tone}`}>
       <svg viewBox="0 0 16 16" width="13" height="13" aria-hidden="true" fill="none"
@@ -85,19 +87,44 @@ function SectionIcon({ id }: { id: SectionId }) {
   );
 }
 
+/** Abas dentro de uma seção que reúne várias coisas (Agentes, Avançado, Geral): um segmentado. */
+function SubTabs<T extends string>({ items, value, onChange }: {
+  items: { id: T; label: string }[];
+  value: T;
+  onChange: (id: T) => void;
+}) {
+  return (
+    <div role="tablist" className="mb-4 inline-flex max-w-full flex-wrap gap-0.5 rounded-[9px] bg-black/[0.05] p-0.5 dark:bg-surface-raised">
+      {items.map((it) => (
+        <button key={it.id} type="button" role="tab" aria-selected={value === it.id} onClick={() => onChange(it.id)}
+          className={`h-[26px] rounded-[7px] px-3 text-[12.5px] font-medium transition-colors ${value === it.id
+            ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-white dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+            : "text-gray-500 hover:text-gray-900 dark:text-white/55 dark:hover:text-white"}`}>
+          {it.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+type GeneralTab = "prefs" | "sync" | "updates";
+type AgentsTab = "tuis" | "orchestrator" | "routing" | "prelaunch" | "skillsDir" | "skillssh";
+type AdvancedTab = "cli" | "graphify";
+
 /**
- * El contenido de Configuración.
+ * A tela de Configurações, TUDO numa tela só (prancheta 5): a barra lateral com a busca, a seção
+ * aberta no meio e o painel de memória à direita.
  *
- * Muestra UNA sección por vez en vez de apilarlas todas en un scroll con índice al
- * costado. En una ventana de alto fijo, el scroll largo obligaba a recorrer ajustes que no
- * se estaban buscando para llegar al que sí — y el índice existía justamente para
- * compensar eso. Eligiendo, la navegación deja de ser un parche sobre el scroll.
- *
- * Las cuentas ya no están acá: son algo que se administra y crece, no un ajuste, así que
- * tienen su propia pantalla (`AccountsModal`) y su propio botón en el riel.
+ * Contas, que era um modal à parte, é a seção "Contas". As seções que juntam várias coisas
+ * (Agentes, Avançado, Geral) as separam em abas, para o meio mostrar UMA coisa por vez em vez de
+ * uma rolagem sem fim.
  */
 export function SettingsPage() {
   const { t } = useTranslation();
+  const section = useUiStore((s) => s.settingsSection);
+  const setSection = useUiStore((s) => s.setSettingsSection);
+  const workspaceId = useTabsStore((s) => s.workspaceId);
+  const activeCwd = useTabsStore((s) => s.tabs.find((tab) => tab.id === s.activeTabId)?.cwd ?? s.tabs[0]?.cwd ?? "");
   const customAgents = useAgentsStore((s) => s.customAgents);
   const loadCustomAgents = useAgentsStore((s) => s.loadCustomAgents);
   const saveCustomAgent = useAgentsStore((s) => s.saveCustomAgent);
@@ -107,39 +134,58 @@ export function SettingsPage() {
   const setSkillsDir = useSkillsStore((s) => s.setSkillsDir);
   /** Id de la TUI que se está editando en línea; `null` = solo el formulario de alta. */
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [section, setSection] = useState<SectionId>("appearance");
+  const [generalTab, setGeneralTab] = useState<GeneralTab>("prefs");
+  const [agentsTab, setAgentsTab] = useState<AgentsTab>("tuis");
+  const [advancedTab, setAdvancedTab] = useState<AdvancedTab>("cli");
 
   useEffect(() => {
     loadSkillsDir();
     loadCustomAgents().catch(console.error);
   }, [loadSkillsDir, loadCustomAgents]);
 
-  // El orden de la navegación. Agregar una sección es una línea acá más su caso abajo.
-  const sections: { id: SectionId; label: string }[] = useMemo(
-    () => [
-      { id: "appearance", label: t("settings.appearance") },
-      { id: "shortcuts", label: t("settings.shortcuts") },
-      { id: "terminal", label: t("settings.terminal") },
-      { id: "skillsDir", label: t("settings.skillsDir") },
-      { id: "skillssh", label: t("settings.skillssh") },
-      { id: "tuis", label: t("settings.tuis") },
-      { id: "prelaunch", label: t("settings.prelaunch") },
-      { id: "cli", label: t("settings.cli") },
-      { id: "graphify", label: t("settings.graphify") },
-      { id: "orchestrator", label: t("settings.orchestrator") },
-      { id: "routing", label: t("settings.routing") },
-      { id: "sync", label: t("settings.sync") },
-      { id: "updates", label: t("settings.updates") },
-    ],
-    [t]
-  );
+  const labels: Record<SettingsSectionId, string> = {
+    general: t("settings.general"),
+    appearance: t("settings.appearance"),
+    accounts: t("settings.accounts"),
+    agents: t("settings.agents"),
+    memory: t("settings.memory"),
+    terminal: t("settings.terminal"),
+    shortcuts: t("settings.shortcuts"),
+    advanced: t("settings.advanced"),
+  };
+  const generalTabs = [
+    { id: "prefs" as const, label: t("settings.general.prefs") },
+    { id: "sync" as const, label: t("settings.sync") },
+    { id: "updates" as const, label: t("settings.updates") },
+  ];
+  const agentsTabs = [
+    { id: "tuis" as const, label: t("settings.tuis") },
+    { id: "orchestrator" as const, label: t("settings.orchestrator") },
+    { id: "routing" as const, label: t("settings.routing") },
+    { id: "prelaunch" as const, label: t("settings.prelaunch") },
+    { id: "skillsDir" as const, label: t("settings.skillsDir") },
+    { id: "skillssh" as const, label: t("settings.skillssh") },
+  ];
+  const advancedTabs = [
+    { id: "cli" as const, label: t("settings.cli") },
+    { id: "graphify" as const, label: t("settings.graphify") },
+  ];
 
-  // Busca da barra lateral (prancheta 5): filtra as seções pelo nome; Enter abre a primeira.
+  // Busca da barra lateral: acha a seção pelo nome dela ou pelo de qualquer aba que ela tenha.
   const [filter, setFilter] = useState("");
-  const shown = useMemo(() => {
-    const q = filter.trim().toLocaleLowerCase();
-    return q ? sections.filter((s) => s.label.toLocaleLowerCase().includes(q)) : sections;
-  }, [sections, filter]);
+  const terms = useMemo<Record<SettingsSectionId, string>>(() => ({
+    general: [labels.general, ...generalTabs.map((x) => x.label), t("settings.language")].join(" "),
+    appearance: [labels.appearance, t("settings.theme")].join(" "),
+    accounts: [labels.accounts].join(" "),
+    agents: [labels.agents, ...agentsTabs.map((x) => x.label)].join(" "),
+    memory: labels.memory,
+    terminal: labels.terminal,
+    shortcuts: labels.shortcuts,
+    advanced: [labels.advanced, ...advancedTabs.map((x) => x.label)].join(" "),
+  }), [t]); // eslint-disable-line react-hooks/exhaustive-deps
+  const q = filter.trim().toLocaleLowerCase();
+  const matches = (id: SettingsSectionId) => !q || terms[id].toLocaleLowerCase().includes(q);
+  const firstMatch = NAV.flat().find(matches);
 
   const handleChangeSkillsDir = async () => {
     const selected = await open({ directory: true, multiple: false, title: t("settings.skillsDir") });
@@ -153,178 +199,222 @@ export function SettingsPage() {
     persistLocale(localStorage, lang);
   };
 
+  const workspaceName = activeCwd.split(/[\\/]/).filter(Boolean).pop() ?? t("settings.workspace");
+
   return (
-    <>
-      <nav className="flex flex-col w-52 shrink-0 min-h-0
-        border-r border-gray-200 dark:border-white/[0.08]
-        bg-gray-100/60 dark:bg-surface-sunken">
-        <label className="mx-2 mt-2 mb-1 flex items-center gap-2 h-7 pl-2 pr-1.5 rounded-[7px] shrink-0
+    <div className="@container flex h-full min-h-0 w-full bg-gray-50 dark:bg-surface-deep">
+      {/* ══ a barra lateral ═══════════════════════════════════════════════ */}
+      <nav aria-label={t("settings.title")} className="flex w-[208px] shrink-0 flex-col min-h-0
+        border-r border-black/[0.08] dark:border-[rgba(84,84,88,0.55)] bg-gray-100/60 dark:bg-surface">
+        <label className="mx-3 mt-3 mb-2 flex h-8 shrink-0 items-center gap-2 rounded-[9px] pl-2.5 pr-2
           bg-black/[0.05] dark:bg-surface-raised text-gray-400 dark:text-white/30
           focus-within:ring-[3px] focus-within:ring-accent-500/25">
           <svg viewBox="0 0 18 18" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" className="h-3.5 w-3.5 shrink-0" aria-hidden><circle cx="8" cy="8" r="5.5" /><path d="M12.2 12.2 16 16" /></svg>
           <input value={filter} onChange={(e) => setFilter(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter" && shown[0]) setSection(shown[0].id); if (e.key === "Escape" && filter) { e.stopPropagation(); setFilter(""); } }}
+            onKeyDown={(e) => { if (e.key === "Enter" && firstMatch) setSection(firstMatch); if (e.key === "Escape" && filter) { e.stopPropagation(); setFilter(""); } }}
             placeholder={t("settings.search")} aria-label={t("settings.search")}
             className="min-w-0 flex-1 bg-transparent text-[13px] text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-white/30 outline-none" />
         </label>
-        <div className="flex-1 min-h-0 cc-scroll p-2 pt-1 flex flex-col gap-0.5">
-          {shown.length === 0 && <p className="px-2 py-3 text-[12px] text-gray-400 dark:text-white/35">{t("settings.searchEmpty")}</p>}
-          {shown.map((s) => (
-            <Button variant="custom"
-              key={s.id}
-              onClick={() => setSection(s.id)}
-              className={`cc-t flex items-center gap-2.5 w-full h-8 px-1.5 rounded-md text-left
-                text-[13px] leading-[18px]
-                ${s.id === section
-                  ? "bg-accent-500 text-white font-medium"
-                  : "text-gray-800 dark:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-white/[0.06]"}`}
-            >
-              <SectionIcon id={s.id} />
-              <span className="truncate">{s.label}</span>
-            </Button>
-          ))}
+        <div className="cc-scroll flex min-h-0 flex-1 flex-col gap-0.5 px-2 pb-3">
+          {!firstMatch && <p className="px-2 py-3 text-[12px] text-gray-400 dark:text-white/35">{t("settings.searchEmpty")}</p>}
+          {NAV.map((group, gi) => {
+            const visible = group.filter(matches);
+            if (visible.length === 0) return null;
+            return (
+              <div key={gi} className={`flex flex-col gap-0.5 ${gi > 0 && NAV.slice(0, gi).some((g) => g.some(matches)) ? "mt-1 border-t border-black/[0.08] pt-2 dark:border-[rgba(84,84,88,0.55)]" : ""}`}>
+                {visible.map((id) => (
+                  <Button variant="custom" key={id} onClick={() => setSection(id)} aria-current={section === id ? "page" : undefined}
+                    className={`cc-t flex h-8 w-full items-center gap-2.5 rounded-md px-1.5 text-left text-[13px] leading-[18px]
+                      ${section === id
+                        ? "bg-accent-500 text-white font-medium"
+                        : "text-gray-800 dark:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-white/[0.06]"}`}>
+                    <Glyph id={id} />
+                    <span className="truncate">{labels[id]}</span>
+                  </Button>
+                ))}
+              </div>
+            );
+          })}
         </div>
       </nav>
 
-      <div className="flex-1 min-w-0 min-h-0 cc-scroll px-6 py-5">
-        {section === "appearance" && (
-          <SettingsSection title={t("settings.appearance")} description={t("settings.appearance.desc")}>
-            <SettingsGroup>
-              <SettingsRow label={t("settings.theme")}>
-                <ThemeToggle />
-              </SettingsRow>
-              <SettingsRow label={t("settings.language")}>
-                <PopupSelect
-                  value={i18n.language}
-                  onChange={(e) => handleLanguage(e.target.value)}>
-                  {LANGUAGE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-                </PopupSelect>
-              </SettingsRow>
-              <RenderingSetting />
-              <NotificationsSetting />
-              <SandboxSetting />
-            </SettingsGroup>
-          </SettingsSection>
-        )}
+      {/* ══ a seção aberta ════════════════════════════════════════════════ */}
+      <main className="cc-scroll min-w-0 flex-1 px-8 py-6">
+        <div className="max-w-[760px]">
+          {section === "general" && (
+            <>
+              <SubTabs items={generalTabs} value={generalTab} onChange={setGeneralTab} />
+              {generalTab === "prefs" && (
+                <SettingsSection title={t("settings.general")} description={t("settings.general.desc")}>
+                  <SettingsGroup>
+                    <SettingsRow label={t("settings.language")}>
+                      <PopupSelect value={i18n.language} onChange={(e) => handleLanguage(e.target.value)}>
+                        {LANGUAGE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                      </PopupSelect>
+                    </SettingsRow>
+                    <NotificationsSetting />
+                    <SandboxSetting />
+                  </SettingsGroup>
+                </SettingsSection>
+              )}
+              {generalTab === "sync" && <SyncSection />}
+              {generalTab === "updates" && <UpdatesSection />}
+            </>
+          )}
 
-        {section === "shortcuts" && <ShortcutsSection />}
-        {section === "terminal" && <TerminalSection />}
+          {section === "appearance" && (
+            <SettingsSection title={t("settings.appearance")} description={t("settings.appearance.desc")}>
+              <SettingsGroup>
+                <SettingsRow label={t("settings.theme")}>
+                  <ThemeToggle />
+                </SettingsRow>
+                <RenderingSetting />
+              </SettingsGroup>
+            </SettingsSection>
+          )}
 
-        {section === "skillsDir" && (
-          <SettingsSection
-            title={t("settings.skillsDir")}
-            description={t("settings.skillsDir.desc")}
-            action={
-              <Button variant="outline" size="sm" onClick={handleChangeSkillsDir}>
-                {t("settings.skillsDir.change")}
-              </Button>
-            }
-          >
-            <SettingsGroup>
-              <div className="flex items-center gap-2 min-h-10 px-3 py-2">
-                <FolderIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/35" />
-                <span className="flex-1 min-w-0 truncate font-mono text-[11.5px] tabular-nums
-                  text-gray-700 dark:text-gray-300">
-                  {skillsDir || "…"}
-                </span>
-              </div>
-            </SettingsGroup>
-          </SettingsSection>
-        )}
+          {section === "accounts" && <ContasSection />}
 
-        {section === "tuis" && (
-          <SettingsSection title={t("settings.tuis")} description={t("settings.tuis.desc")}>
-            <SettingsGroup>
-              <AgentAutoUpdateSetting />
-            </SettingsGroup>
-            <DetectedAgents />
+          {section === "agents" && (
+            <>
+              <SubTabs items={agentsTabs} value={agentsTab} onChange={setAgentsTab} />
+              {agentsTab === "tuis" && (
+                <SettingsSection title={t("settings.tuis")} description={t("settings.tuis.desc")}>
+                  <SettingsGroup>
+                    <AgentAutoUpdateSetting />
+                  </SettingsGroup>
+                  <DetectedAgents />
 
-            <span className="mt-2 text-[11px] leading-[14px] font-semibold uppercase tracking-[0.06em]
-              text-gray-500 dark:text-white/45">
-              {t("settings.tuis.custom")}
-            </span>
-            {customAgents.length === 0 ? (
-              <p className="text-[12px] leading-4 text-gray-500 dark:text-white/40">
-                {t("settings.tuis.empty")}
-              </p>
-            ) : (
-              <div className="flex flex-col gap-2">
-                {customAgents.map((agent) => (
-                  editingId === agent.id ? (
-                    <CustomAgentForm
-                      key={agent.id}
-                      initial={agent}
-                      onSubmit={async (draft) => {
-                        await saveCustomAgent(draft);
-                        setEditingId(null);
-                      }}
-                      onCancel={() => setEditingId(null)}
-                    />
+                  <span className="mt-2 text-[11px] leading-[14px] font-semibold uppercase tracking-[0.06em]
+                    text-gray-500 dark:text-white/45">
+                    {t("settings.tuis.custom")}
+                  </span>
+                  {customAgents.length === 0 ? (
+                    <p className="text-[12px] leading-4 text-gray-500 dark:text-white/40">
+                      {t("settings.tuis.empty")}
+                    </p>
                   ) : (
-                    <div
-                      key={agent.id}
-                      className="cc-t flex items-center gap-3 px-3 py-2.5 rounded-xl
-                        bg-gray-100/70 dark:bg-surface-raised/60
-                        hover:bg-gray-200/60 dark:hover:bg-surface-raised"
-                    >
-                      <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0
-                        shadow-[0_0_0_3px_rgba(48,209,88,0.18)]" />
-                      <div className="flex flex-col gap-px min-w-0 flex-1">
-                        <span className="truncate text-[13px] font-semibold
-                          text-gray-900 dark:text-gray-100">
-                          {agent.label}
-                        </span>
-                        <span className="truncate font-mono text-[11px] tabular-nums
-                          text-gray-500 dark:text-white/40">
-                          {agent.command}
-                        </span>
-                        <AgentCapabilities agent={agent} />
-                      </div>
-                      <div className="flex items-center gap-1 shrink-0">
-                        <Tooltip content={t("btn.edit")} placement="left">
-                          <Button variant="icon"
-                            onClick={() => setEditingId(agent.id)}
-                            aria-label={t("btn.edit")}
-                            className="cc-t flex items-center justify-center w-7 h-7 rounded-md
-                              text-gray-500 dark:text-white/40
-                              hover:text-gray-900 dark:hover:text-white
-                              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
+                    <div className="flex flex-col gap-2">
+                      {customAgents.map((agent) => (
+                        editingId === agent.id ? (
+                          <CustomAgentForm
+                            key={agent.id}
+                            initial={agent}
+                            onSubmit={async (draft) => {
+                              await saveCustomAgent(draft);
+                              setEditingId(null);
+                            }}
+                            onCancel={() => setEditingId(null)}
+                          />
+                        ) : (
+                          <div
+                            key={agent.id}
+                            className="cc-t flex items-center gap-3 px-3 py-2.5 rounded-xl
+                              bg-gray-100/70 dark:bg-surface-raised/60
+                              hover:bg-gray-200/60 dark:hover:bg-surface-raised"
                           >
-                            <EditIcon className="w-3.5 h-3.5" />
-                          </Button>
-                        </Tooltip>
-                        <Tooltip content={t("btn.delete")} placement="left">
-                          <Button variant="icon"
-                            onClick={() => removeCustomAgent(agent.id)}
-                            aria-label={t("btn.delete")}
-                            className="cc-t flex items-center justify-center w-7 h-7 rounded-md
-                              text-gray-500 dark:text-white/40
-                              hover:text-red-500 dark:hover:text-red-400
-                              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
-                          >
-                            <TrashIcon className="w-3.5 h-3.5" />
-                          </Button>
-                        </Tooltip>
-                      </div>
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0
+                              shadow-[0_0_0_3px_rgba(48,209,88,0.18)]" />
+                            <div className="flex flex-col gap-px min-w-0 flex-1">
+                              <span className="truncate text-[13px] font-semibold
+                                text-gray-900 dark:text-gray-100">
+                                {agent.label}
+                              </span>
+                              <span className="truncate font-mono text-[11px] tabular-nums
+                                text-gray-500 dark:text-white/40">
+                                {agent.command}
+                              </span>
+                              <AgentCapabilities agent={agent} />
+                            </div>
+                            <div className="flex items-center gap-1 shrink-0">
+                              <Tooltip content={t("btn.edit")} placement="left">
+                                <Button variant="icon"
+                                  onClick={() => setEditingId(agent.id)}
+                                  aria-label={t("btn.edit")}
+                                  className="cc-t flex items-center justify-center w-7 h-7 rounded-md
+                                    text-gray-500 dark:text-white/40
+                                    hover:text-gray-900 dark:hover:text-white
+                                    hover:bg-gray-200 dark:hover:bg-white/10 p-0"
+                                >
+                                  <EditIcon className="w-3.5 h-3.5" />
+                                </Button>
+                              </Tooltip>
+                              <Tooltip content={t("btn.delete")} placement="left">
+                                <Button variant="icon"
+                                  onClick={() => removeCustomAgent(agent.id)}
+                                  aria-label={t("btn.delete")}
+                                  className="cc-t flex items-center justify-center w-7 h-7 rounded-md
+                                    text-gray-500 dark:text-white/40
+                                    hover:text-red-500 dark:hover:text-red-400
+                                    hover:bg-gray-200 dark:hover:bg-white/10 p-0"
+                                >
+                                  <TrashIcon className="w-3.5 h-3.5" />
+                                </Button>
+                              </Tooltip>
+                            </div>
+                          </div>
+                        )
+                      ))}
                     </div>
-                  )
-                ))}
-              </div>
-            )}
+                  )}
 
-            <CustomAgentForm onSubmit={saveCustomAgent} />
-          </SettingsSection>
-        )}
+                  <CustomAgentForm onSubmit={saveCustomAgent} />
+                </SettingsSection>
+              )}
+              {agentsTab === "orchestrator" && <OrchestratorSection />}
+              {agentsTab === "routing" && <RoutingSection />}
+              {agentsTab === "prelaunch" && <PrelaunchSection />}
+              {agentsTab === "skillsDir" && (
+                <SettingsSection
+                  title={t("settings.skillsDir")}
+                  description={t("settings.skillsDir.desc")}
+                  action={
+                    <Button variant="outline" size="sm" onClick={handleChangeSkillsDir}>
+                      {t("settings.skillsDir.change")}
+                    </Button>
+                  }
+                >
+                  <SettingsGroup>
+                    <div className="flex items-center gap-2 min-h-10 px-3 py-2">
+                      <FolderIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/35" />
+                      <span className="flex-1 min-w-0 truncate font-mono text-[11.5px] tabular-nums
+                        text-gray-700 dark:text-gray-300">
+                        {skillsDir || "…"}
+                      </span>
+                    </div>
+                  </SettingsGroup>
+                </SettingsSection>
+              )}
+              {agentsTab === "skillssh" && <SkillsShSection />}
+            </>
+          )}
 
-        {section === "skillssh" && <SkillsShSection />}
-        {section === "prelaunch" && <PrelaunchSection />}
-        {section === "cli" && <CliInstallSection />}
-        {section === "graphify" && <GraphifySection />}
-        {section === "orchestrator" && <OrchestratorSection />}
-        {section === "routing" && <RoutingSection />}
-        {section === "sync" && <SyncSection />}
-        {section === "updates" && <UpdatesSection />}
-      </div>
-    </>
+          {section === "memory" && (
+            workspaceId
+              ? <SharedMemoryPanel key={workspaceId} workspaceId={workspaceId} initialTab="workspace" />
+              : <p className="text-[12.5px] text-gray-400 dark:text-white/35">{t("settings.memory.noWorkspace")}</p>
+          )}
+
+          {section === "terminal" && <TerminalSection />}
+          {section === "shortcuts" && <ShortcutsSection />}
+
+          {section === "advanced" && (
+            <>
+              <SubTabs items={advancedTabs} value={advancedTab} onChange={setAdvancedTab} />
+              {advancedTab === "cli" && <CliInstallSection />}
+              {advancedTab === "graphify" && <GraphifySection />}
+            </>
+          )}
+        </div>
+      </main>
+
+      {/* ══ o painel de memória ═══════════════════════════════════════════ */}
+      {workspaceId && (
+        <aside className="hidden w-[392px] shrink-0 p-3 pl-0 @5xl:block">
+          <MemoryPanel workspaceId={workspaceId} workspaceName={workspaceName}
+            onOpenMemory={section === "memory" ? undefined : () => setSection("memory")} />
+        </aside>
+      )}
+    </div>
   );
 }

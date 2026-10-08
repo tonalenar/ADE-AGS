@@ -10,7 +10,6 @@ import { GitAccountsPane } from "@/features/forge/GitAccountsPane";
 import { FORGE_KINDS, ForgeIcon, forgeLabel } from "@/features/forge/forgeMeta";
 import { useForgeStore } from "@/features/forge/store";
 import type { ForgeKind } from "@/features/forge/types";
-import { ShellModal } from "@/shared/ui/ShellModal";
 
 /** Qué servicio se está mirando: una TUI o un tipo de host git. */
 export type AccountsSection = { kind: "agent"; id: string } | { kind: "git"; id: ForgeKind };
@@ -50,27 +49,25 @@ function NavItem({ active, onClick, icon, label, count, title }: {
 }
 
 /**
- * Las cuentas de la app, en su propia pantalla.
+ * Onde se gerenciam as contas: a coluna da esquerda são os SERVIÇOS, em dois grupos.
  *
- * La columna de la izquierda son los SERVICIOS, en dos grupos:
+ * - **TUIs**: perfis das TUIs que suportam várias contas. Aqui o app não guarda credenciais:
+ *   cada conta é uma pasta e o login quem faz é a TUI.
+ * - **Git**: GitHub, GitLab, Gitea/Forgejo ou qualquer host. Estas SIM têm um token, no chaveiro
+ *   do sistema, e são as que usam o controle de versão, o clonar do início e as tools de git do MCP.
  *
- * - **TUIs**: perfiles de las TUIs que soportan varias cuentas. Acá la app no guarda
- *   credenciales: cada cuenta es una carpeta y el login lo hace la TUI.
- * - **Git**: GitHub, GitLab, Gitea/Forgejo o cualquier host. Estas sí tienen un token, en
- *   el llavero del sistema, y son las que usan el control de versiones, el clonar del
- *   inicio y las tools de git del MCP.
- *
- * Agregar otro tipo de servicio es agregar un grupo a la lista y su panel, no rehacer la
- * pantalla.
+ * Vive dentro da seção Contas das Configurações (antes era um modal à parte). `focus` deixa quem
+ * está em volta escolher o serviço (o "⋯ → Gerenciar" de uma conta).
  */
-export function AccountsModal({ onClose, initial }: { onClose: () => void; initial?: AccountsSection }) {
+export function AccountsManager({ focus }: { focus?: AccountsSection | null }) {
   const { t } = useTranslation();
   const accounts = useAccountsStore((s) => s.accounts);
   const capable = useAccountsStore((s) => s.capable);
   const loadAgents = useAccountsStore((s) => s.load);
   const gitAccounts = useForgeStore((s) => s.accounts);
   const loadGit = useForgeStore((s) => s.load);
-  const [section, setSection] = useState<AccountsSection | null>(initial ?? null);
+  const [section, setSection] = useState<AccountsSection | null>(focus ?? null);
+  useEffect(() => { if (focus) setSection(focus); }, [focus]);
   const [error, setError] = useState("");
 
   useEffect(() => {
@@ -94,12 +91,7 @@ export function AccountsModal({ onClose, initial }: { onClose: () => void; initi
   const agent = section?.kind === "agent" ? shown.find((c) => c.agentId === section.id) : undefined;
 
   return (
-    <ShellModal
-      title={t("settings.accounts")}
-      icon={<UserIcon className="w-[15px] h-[15px] shrink-0 text-accent-500 dark:text-accent-400" />}
-      width="max-w-3xl"
-      onClose={onClose}
-    >
+    <div className="flex h-[560px] min-h-0 overflow-hidden rounded-xl bg-white shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.1)] dark:bg-surface dark:shadow-[inset_0_0_0_0.5px_rgba(84,84,88,0.55)]">
       {/* ══ los servicios ═════════════════════════════════════════════════ */}
       <nav className="flex flex-col w-48 shrink-0 min-h-0
         border-r border-gray-200 dark:border-white/8 bg-gray-100/50 dark:bg-black/20">
@@ -165,6 +157,6 @@ export function AccountsModal({ onClose, initial }: { onClose: () => void; initi
         )}
         {error && <p className="shrink-0 px-4 pb-2 text-[11px] text-red-500 dark:text-red-400">{error}</p>}
       </div>
-    </ShellModal>
+    </div>
   );
 }

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 
 import { useMissionsStore } from "@/features/missions/store";
@@ -167,7 +168,9 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
 
   const plan = confirm ? planBulk(confirm.items) : null;
 
-  return (
+  // No body: dentro da tela cheia (uma camada com z-index próprio) o `fixed` ficava por baixo da barra de
+  // título e do riel, e a caixa aparecia cortada em cima.
+  return createPortal(
     <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/45 p-4 backdrop-blur-[4px]" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div ref={root} tabIndex={-1} role="dialog" aria-modal="true" aria-label={t("memoryInbox.title")} onKeyDown={onKeyDown}
         className="relative flex max-h-[85vh] w-full max-w-3xl flex-col rounded-2xl bg-gray-50 text-gray-900 shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)] outline-none dark:bg-surface dark:text-gray-50">
@@ -295,6 +298,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
           </div>
         )}
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

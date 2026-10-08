@@ -44,8 +44,11 @@ export function useGlobalShortcuts() {
 
       if (shortcut.action.kind === "openSettings") {
         // Interruptor, igual que los de sección: si ya está abierto, se cierra.
-        const { settingsOpen, setSettingsOpen } = useUiStore.getState();
-        setSettingsOpen(!settingsOpen);
+        if (location.pathname.startsWith("/settings")) {
+          navigate(tabs.length > 0 ? "/workspace" : "/");
+          return;
+        }
+        useUiStore.getState().setSettingsOpen(true);
         return;
       }
 
