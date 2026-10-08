@@ -9,6 +9,8 @@
   "accounts.antigravity.docs": "Instalação e autenticação oficial",
   "app.title": "ADE AGS",
   "app.subtitle": "Centro de comando para agentes de codificação de IA",
+  "boot.updating.title": "Atualizando dados",
+  "boot.updating.body": "A base está sendo copiada e migrada. Até terminar, esta tela é somente leitura e as ações que gravam ficam bloqueadas.",
   "btn.browse": "Navegar",
   "btn.add": "Adicionar",
   "btn.edit": "Editar",

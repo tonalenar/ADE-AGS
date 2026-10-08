@@ -5,11 +5,58 @@ use tauri::{Emitter, Manager};
 
 use crate::database::DbConnection;
 
+/// Restaura la ventana que el usuario va a ver y deja el resto para después del
+/// primer cuadro. Skills, barrido y adjuntos van a un hilo: no bloquean ese cuadro.
+fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
+    // `--headless`: para CI y scripts. No se restaura el workspace ni se muestra nada;
+    // la ventana principal queda creada pero oculta (algunos comandos de la CLI la
+    // necesitan para existir) y todo lo demás —IPC, scheduler, bus— corre igual. Las
+    // misiones se manejan con `ags mission …` (ver `ipc/commands/missions.rs`).
+    if std::env::args().any(|arg| arg == "--headless") {
+        for window in app.webview_windows().values() {
+            let _ = window.hide();
+        }
+        eprintln!("[ade-ags] modo headless: sin ventanas, usá `ags mission run`");
+        super::housekeeping::spawn_housekeeping(app.clone());
+    } else {
+        // Al arrancar, se restaura SOLO el workspace usado más recientemente (por
+        // `last_active`, que se bumpea en cada autosave de ventana y al abrir un
+        // workspace) — no todas las ventanas de todos los workspaces mezcladas.
+        // Si nunca se creó/abrió un workspace nombrado, ese "más reciente" es
+        // simplemente `default`, así que el comportamiento típico es el mismo.
+        //
+        // De ese workspace, solo la ventana principal (o la más reciente, si no hay
+        // fila `main`) se crea ahora. Las otras esperan a que esta pinte un cuadro.
+        let db = app.state::<DbConnection>();
+        let active_id = crate::database::db_get_last_active_workspace_id(&db)?;
+        let windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;
+        let (primary, later) = crate::window::plan_startup_restore(windows);
+        if let Some(deferred) = app.try_state::<crate::window::DeferredRestore>() {
+            deferred.stage(later);
+        }
+        crate::window::restore_windows(app, primary, true)?;
+        super::housekeeping::spawn_housekeeping(app.clone());
+        // Las rotinas se disparan solas, con la app abierta (ver `routines`). En modo
+        // headless no hay ventanas: no habría a quién avisar ni terminal donde escribir.
+        crate::ipc::start_routine_scheduler(app.clone());
+        // El pet es de la pantalla: sin ventanas (headless) no hay a quién mostrárselo.
+        crate::pet::start(app.clone());
+    }
+
+    // Servidor IPC de la CLI `ade-ags` (Fase 8). Va después de restaurar las
+    // ventanas: varios comandos necesitan que exista al menos una para responder.
+    crate::ipc::start(app.clone());
+    Ok(())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Antes que nada abra la base: ~/.controlcode (nombre anterior) pasa a ~/.ags sin perder datos.
     crate::util::legacy::migrate_on_startup();
-    let db_conn = crate::database::init_db().expect("Failed to initialize SQLite database");
+    // Si hay que subir el schema, acá solo se abre el archivo. La copia y la migración
+    // corren después de que la ventana puede pintarse (ver `setup`).
+    let (db_conn, _upgrade_pending) =
+        crate::database::prepare_db().expect("Failed to initialize SQLite database");
     // Antes de construir Tauri, porque WebKitGTK decide cómo componer al inicializarse; y
     // antes del hilo de señales, porque toca el entorno del proceso (ver `configure`).
     super::rendering::configure(&db_conn);
@@ -128,6 +175,7 @@ pub fn run() {
             crate::session::discover_session_id,
             crate::session::get_session_title,
             // Gestión de ventanas
+            crate::window::restore_deferred_windows,
             crate::window::open_new_window,
             crate::window::broadcast_event,
             crate::window::get_home_dir,
@@ -234,6 +282,7 @@ pub fn run() {
             crate::agents::agent_update_work_running,
             crate::agents::agent_search_path,
             // Agentes headless (consola de flota)
+            super::housekeeping::runs_sweep_done,
             crate::runs::run_list_tasks,
             crate::runs::run_list_runs,
             crate::runs::run_start_task,
@@ -343,6 +392,7 @@ pub fn run() {
             // Settings genéricos (key-value)
             crate::database::db_get_setting,
             crate::database::db_set_setting,
+            crate::database::db_boot_status,
             // Gestión de skills (symlinks globales)
             crate::skills::get_skills_dir,
             crate::skills::set_skills_dir,
@@ -447,77 +497,42 @@ pub fn run() {
         })
         .setup(|app| {
             crate::memory::repo_sync::install(app);
-            std::thread::spawn(|| {
-                crate::terminal::attachments::cleanup_pasted(std::time::Duration::from_secs(24 * 60 * 60));
-            });
-            // Al arrancar, se restaura SOLO el workspace usado más recientemente (por
-            // `last_active`, que se bumpea en cada autosave de ventana y al abrir un
-            // workspace) — no todas las ventanas de todos los workspaces mezcladas.
-            // Si nunca se creó/abrió un workspace nombrado, ese "más reciente" es
-            // simplemente `default`, así que el comportamiento típico es el mismo.
-            let db = app.state::<DbConnection>();
-
             // Las cookies y el storage de cada sitio que se abre en el navegador de las tabs
             // se guardan acá (ver `preview/site.rs`): el motor del webview no los conserva.
             if let Ok(dir) = app.path().app_data_dir() {
                 crate::preview::set_state_dir(dir.join("browser-state"));
             }
 
-            // La skill de orquestación viaja con la app: se instala (o se actualiza) sola
-            // antes de que haya ventanas, así la lista de skills ya la muestra al abrir.
-            // Nunca falla el arranque — ver `crate::skills::bundled`.
-            crate::skills::migrate_legacy_skill(&db);
-            crate::skills::ensure_bundled_skills(app.handle(), &db);
-
             // Avisos del sistema para lo que pasa con la app en segundo plano (ver `notifier`).
             crate::notifier::start(app.handle().clone());
+            app.manage(crate::window::DeferredRestore::empty());
 
-            // Con otra instancia viva (la app abierta dos veces, `tauri dev` al lado de la
-            // instalada, una `--headless`), lo que figura "corriendo" es SUYO y sigue vivo:
-            // las limpiezas de abajo lo darían por muerto. Se saltean; las hará la última
-            // instancia que arranque sola.
-            if crate::ipc::other_instance_alive() {
-                eprintln!("[ade-ags] hay otra instancia abierta: no se limpian sus tareas");
-            } else {
-                // Las tareas headless que quedaron `running` son de una ejecución anterior:
-                // sus procesos eran hijos de la app y murieron con ella. Si no se cierran acá,
-                // la consola las muestra trabajando para siempre.
-                if let Ok(n) = crate::runs::sweep_orphans(&db) {
-                    if n > 0 {
-                        eprintln!("[runs] {n} tarea(s) headless quedaron colgadas del cierre anterior");
+            // Upgrade de schema: la ventana ya puede pintarse (el frontend muestra
+            // "actualizando datos" y no monta la home). La copia y la migración siguen
+            // en ese orden, fuera de este hilo, y recién después se restauran ventanas.
+            if crate::database::db_upgrade_pending() {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    let db = handle.state::<DbConnection>().inner().clone();
+                    if let Err(error) = crate::database::finish_db(&db) {
+                        // Igual que el `expect` del camino sin upgrade: una base a medias
+                        // no puede abrir la home. El splash se queda y el proceso sale.
+                        eprintln!("[ade-ags] no se pudo actualizar la base: {error}");
+                        std::process::exit(1);
                     }
-                }
-                // Y sus pedidos de permiso: el agente que esperaba murió con la app, así que
-                // no los va a contestar nadie.
-                let _ = crate::runs::sweep_orphan_approvals(&db);
-                // Los `--mcp-config` de tabs cerradas y tareas borradas: nadie los apunta ya.
-                crate::ipc::mcp::sweep_configs(&db);
+                    if let Some(sync) = handle.try_state::<crate::memory::repo_sync::RepoSync>() {
+                        sync.reconcile_pending();
+                    }
+                    if let Err(error) = start_ui(&handle) {
+                        eprintln!("[ade-ags] no se pudo abrir la interfaz: {error}");
+                    }
+                    crate::database::mark_db_ready();
+                    let _ = handle.emit("cc-db-ready", ());
+                });
+                return Ok(());
             }
 
-            // `--headless`: para CI y scripts. No se restaura el workspace ni se muestra nada;
-            // la ventana principal queda creada pero oculta (algunos comandos de la CLI la
-            // necesitan para existir) y todo lo demás —IPC, scheduler, bus— corre igual. Las
-            // misiones se manejan con `ags mission …` (ver `ipc/commands/missions.rs`).
-            if std::env::args().any(|a| a == "--headless") {
-                use tauri::Manager;
-                for window in app.webview_windows().values() {
-                    let _ = window.hide();
-                }
-                eprintln!("[ade-ags] modo headless: sin ventanas, usá `ags mission run`");
-            } else {
-                let active_id = crate::database::db_get_last_active_workspace_id(&db)?;
-                let windows = crate::database::db_get_all_workspace_windows(&active_id, &db)?;
-                crate::window::restore_windows(app.handle(), windows, true)?;
-                // Las rotinas se disparan solas, con la app abierta (ver `routines`). En modo
-                // headless no hay ventanas: no habría a quién avisar ni terminal donde escribir.
-                crate::ipc::start_routine_scheduler(app.handle().clone());
-                // El pet es de la pantalla: sin ventanas (headless) no hay a quién mostrárselo.
-                crate::pet::start(app.handle().clone());
-            }
-
-            // Servidor IPC de la CLI `ade-ags` (Fase 8). Va después de restaurar las
-            // ventanas: varios comandos necesitan que exista al menos una para responder.
-            crate::ipc::start(app.handle().clone());
+            start_ui(app.handle())?;
             Ok(())
         })
         .build(tauri::generate_context!())

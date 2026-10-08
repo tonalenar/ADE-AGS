@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use super::git::{mark_from_xy, parse_status_z, FileMark};
+use super::git::{mark_from_xy, parse_porcelain_v2, parse_status_z, repo_info_from_probes, FileMark};
 use super::tree::{is_noisy, sort_entries, DirEntry};
 
 fn entry(name: &str, is_dir: bool) -> DirEntry {
@@ -81,6 +81,61 @@ fn las_rutas_con_espacios_sobreviven() {
 #[test]
 fn una_salida_vacia_no_es_un_error() {
     assert!(parse_status_z("").is_empty());
+}
+
+#[test]
+fn porcelain_v2_trae_la_rama_y_los_cambios() {
+    let raw = "\
+# branch.oid abcdef\0\
+# branch.head feature\0\
+# branch.ab +0 -0\0\
+1 M. N... 100644 100644 100644 aaaa bbbb src/app.ts\0\
+1 .M N... 100644 100644 100644 aaaa bbbb src/mi carpeta/App.tsx\0\
+2 R. N... 100644 100644 100644 aaaa bbbb R100 nuevo.rs\0viejo.rs\0\
+? nota.md\0";
+    let (branch, changes) = parse_porcelain_v2(raw);
+    assert_eq!(branch.as_deref(), Some("feature"));
+    assert_eq!(changes.get("src/app.ts").map(String::as_str), Some("M"));
+    assert_eq!(changes.get("src/mi carpeta/App.tsx").map(String::as_str), Some("M"));
+    assert_eq!(changes.get("nuevo.rs").map(String::as_str), Some("A"));
+    assert!(!changes.contains_key("viejo.rs"), "la ruta vieja del rename no es otro cambio");
+    assert_eq!(changes.get("nota.md").map(String::as_str), Some("?"));
+}
+
+#[test]
+fn porcelain_v2_descarta_el_head_desprendido() {
+    let raw = concat!(
+        "# branch.oid abc\0",
+        "# branch.head (detached)\0",
+        "1 M. N... 100644 100644 100644 aaaa bbbb solo.rs\0",
+    );
+    let (branch, changes) = parse_porcelain_v2(raw);
+    assert_eq!(branch, None);
+    assert_eq!(changes.get("solo.rs").map(String::as_str), Some("M"));
+}
+
+#[test]
+fn un_worktree_se_reconoce_por_los_directorios_de_git_y_sin_repo_no_hay_nada() {
+    let linked = repo_info_from_probes(
+        Some("/repo/wt\n/repo/.git/worktrees/wt\n/repo/.git\n"),
+        Some("# branch.head feature\0"),
+    );
+    assert_eq!(linked.root.as_deref(), Some("/repo/wt"));
+    assert!(linked.is_worktree);
+    assert_eq!(linked.branch.as_deref(), Some("feature"));
+
+    let primary = repo_info_from_probes(
+        Some("/repo\n/repo/.git\n/repo/.git\n"),
+        Some("# branch.head master\0"),
+    );
+    assert!(!primary.is_worktree);
+    assert_eq!(primary.branch.as_deref(), Some("master"));
+
+    let none = repo_info_from_probes(None, None);
+    assert!(none.root.is_none());
+    assert!(none.branch.is_none());
+    assert!(!none.is_worktree);
+    assert!(none.changes.is_empty());
 }
 
 // ── Buscador ─────────────────────────────────────────────────────

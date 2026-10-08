@@ -19,6 +19,9 @@ pub fn get_setting(db: &DbConnection, key: &str) -> Result<Option<String>, Strin
 /// Escribe/actualiza una key de `settings`. Ver `get_setting` sobre por qué no es
 /// directamente un `#[tauri::command]`.
 pub fn set_setting(db: &DbConnection, key: &str, value: &str) -> Result<(), String> {
+    // Durante un upgrade la UI está en el splash, pero el idioma se escribe igual al
+    // arrancar. Esperar evita grabar contra el schema viejo o en medio del VACUUM.
+    crate::database::wait_until_db_ready();
     let conn = db.lock().map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO settings (key, value) VALUES (?1, ?2)

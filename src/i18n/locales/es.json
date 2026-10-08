@@ -8,6 +8,8 @@
   "accounts.antigravity.close": "Cerrar terminal",
   "accounts.antigravity.docs": "Instalación y autenticación oficial",
   "app.title": "ADE AGS",
+  "boot.updating.title": "Actualizando datos",
+  "boot.updating.body": "Se está copiando la base y aplicando la migración. Hasta que termine, esta pantalla es de solo lectura y las acciones que escriben quedan bloqueadas.",
   "app.subtitle": "Command center para AI coding agents",
   "btn.browse": "Explorar",
   "btn.add": "Agregar",
