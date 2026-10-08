@@ -118,10 +118,20 @@ export default defineConfig(async () => ({
         // Sin esto todo cae en un único chunk de ~900kB que hay que parsear entero antes
         // de pintar el primer frame. Separando las dependencias pesadas y estables, el
         // chunk propio de la app queda chico y solo él se reconstruye al iterar.
-        manualChunks: {
-          react: ["react", "react-dom", "react-dom/client", "react-router-dom"],
-          xterm: ["@xterm/xterm", "@xterm/addon-fit", "@xterm/addon-web-links", "@xterm/addon-webgl", "@xterm/addon-unicode11"],
-          i18n: ["i18next", "react-i18next"],
+        // Función y no un mapa de paquetes: el mapa no agarra `react/jsx-runtime`
+        // (ni las copias `?commonjs-module`). Al crear el chunk de xyflow, Rollup
+        // metía ese runtime ahí y el entry lo importaba estático — la home bajaba
+        // `@xyflow/react` entero solo para poder hacer `jsx()`.
+        manualChunks(id) {
+          if (id.includes("/node_modules/@xyflow/")) return "xyflow";
+          if (id.includes("/node_modules/@xterm/")) return "xterm";
+          if (id.includes("/node_modules/i18next/") || id.includes("/node_modules/react-i18next/")) return "i18n";
+          if (
+            id.includes("/node_modules/react/")
+            || id.includes("/node_modules/react-dom/")
+            || id.includes("/node_modules/react-router/")
+            || id.includes("/node_modules/react-router-dom/")
+          ) return "react";
         },
       },
     },

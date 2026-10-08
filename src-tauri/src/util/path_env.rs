@@ -269,7 +269,7 @@ fn run_shell(
         .open(&file)
         .map_err(|e| ShellError::Failed(format!("no se pudo crear {}: {e}", file.display())))?;
 
-    let mut cmd = std::process::Command::new(shell);
+    let mut cmd = crate::util::spawn::hidden_command(shell);
     cmd.args(flags)
         .arg(script)
         .env(RESOLVING_ENV, "1")
@@ -446,8 +446,8 @@ pub fn fresh_path() -> OsString {
 /// nombre tal cual, y el error de lanzarlo es el de siempre.
 pub fn program(name: &str) -> std::process::Command {
     match find_program(name) {
-        Some(path) => std::process::Command::new(path),
-        None => std::process::Command::new(name),
+        Some(path) => crate::util::spawn::hidden_command(path),
+        None => crate::util::spawn::hidden_command(name),
     }
 }
 

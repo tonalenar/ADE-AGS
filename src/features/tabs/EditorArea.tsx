@@ -1,4 +1,4 @@
-import { Fragment, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Fragment, lazy, Suspense, useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { useChatUnreadWatcher } from "@/features/canvas/chatUnread";
 import { useMissionWatcher } from "@/features/missions/watcher";
 import { createPortal } from "react-dom";
@@ -18,9 +18,15 @@ import { useTabsStore } from "@/features/tabs/store";
 import { openNewAgentWizard } from "@/features/tabs/tabActions";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { ViewTabsHost } from "@/features/tabs/ViewTabsHost";
-import { CanvasView } from "@/features/canvas/CanvasView";
 import { useWorkMode } from "@/features/canvas/store";
 import { GRID_SLOT, gridColumns, useMissionGrid } from "@/features/canvas/gridMode";
+
+// @xyflow/react pesa y solo hace falta en la vista canvas. Un import estático lo metía en
+// el arranque aunque `{canvas && …}` no lo montara. El tablero ya está en el store
+// (`initCanvasSync`): al cargar el módulo se pinta el board que había, no uno vacío.
+const CanvasView = lazy(() =>
+  import("@/features/canvas/CanvasView").then((m) => ({ default: m.CanvasView })),
+);
 
 /**
  * El área de tabs, dividida en grupos como los editores de VS Code.
@@ -85,7 +91,11 @@ export function EditorArea() {
   return (
     <div ref={containerRef} data-editor-area className="absolute inset-0">
       {/* El canvas va ABAJO: TerminalPanel ubica cada terminal viva encima de su nodo. */}
-      {canvas && <CanvasView />}
+      {canvas && (
+        <Suspense fallback={<div className="absolute inset-0" aria-busy="true" />}>
+          <CanvasView />
+        </Suspense>
+      )}
       {/* TerminalPanel siempre montado para preservar PTYs */}
       <TerminalPanel />
       {/* Archivos, diffs y navegadores: tabs que se dibujan encima de las terminales. */}

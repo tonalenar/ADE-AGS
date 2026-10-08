@@ -38,6 +38,7 @@ import type { ShellOutletContext } from "@/app/shellContext";
 import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
+import { restoreDeferredWindowsAfterFirstFrame } from "@/app/afterFirstFrame";
 import { useFleetEvents } from "@/features/runs/useFleetEvents";
 import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
@@ -131,6 +132,10 @@ export function AppShell() {
   // La flota se escucha desde acá y no desde su pantalla: un agente que pide permiso con
   // la consola cerrada tiene que verse igual (ver `useFleetEvents`).
   useFleetEvents();
+  // La ventana principal ya pintó: recién ahí el backend crea las otras del workspace.
+  useEffect(() => {
+    restoreDeferredWindowsAfterFirstFrame();
+  }, []);
 
   useEffect(() => {
     detectAgents().then(setDetectedAgents);

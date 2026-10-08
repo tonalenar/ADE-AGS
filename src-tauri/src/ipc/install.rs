@@ -220,9 +220,9 @@ fn add_to_user_path(dir: &Path) -> Result<(), String> {
         dir_str.replace('\'', "''")
     );
 
-    let output = std::process::Command::new("powershell")
-        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
-        .output()
+    let mut cmd = crate::util::spawn::hidden_command("powershell");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
+    let output = crate::util::spawn::output(&mut cmd, std::time::Duration::from_secs(30))
         .map_err(|e| format!("No se pudo actualizar el PATH: {e}"))?;
 
     if !output.status.success() {

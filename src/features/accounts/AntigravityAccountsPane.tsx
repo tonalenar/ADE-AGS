@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
-import { Terminal } from "@/features/terminal/Terminal";
+import { Terminal } from "@/features/terminal/LazyTerminal";
 import { detectAgents } from "@/features/agents/ipc";
 
 /** Uses the CLI's native login and OS keyring, without copying credentials. */

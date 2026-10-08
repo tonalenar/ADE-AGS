@@ -309,6 +309,22 @@ pub fn focus_window(app: tauri::AppHandle, label: String) -> Result<(), String> 
     Ok(())
 }
 
+/// Crea las ventanas que el arranque dejó esperando el primer cuadro de la principal.
+///
+/// Idempotente: la primera llamada se las lleva, y las ventanas que ella misma abre
+/// vuelven a pedir esto al montar. Sin filas pendientes no hace nada.
+#[tauri::command]
+pub fn restore_deferred_windows(app: tauri::AppHandle) -> Result<(), String> {
+    let Some(deferred) = app.try_state::<super::startup::DeferredRestore>() else {
+        return Ok(());
+    };
+    let rows = deferred.on_primary_frame();
+    if rows.is_empty() {
+        return Ok(());
+    }
+    restore_windows(&app, rows, true)
+}
+
 /// Abre una nueva ventana nativa de Tauri.
 #[tauri::command]
 pub async fn open_new_window(app: tauri::AppHandle, label: String) -> Result<(), String> {

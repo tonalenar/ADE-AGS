@@ -14,6 +14,7 @@ import { agentUpdate, agentUpdatesCheck, agentUpdateWorkRunning, detectAgents } 
 import { updateAgentRestarting } from "./updateFlow";
 import {
   AUTO_CHECK_INTERVAL_MS,
+  FIRST_AGENT_CHECK_MS,
   AUTO_UPDATE_SETTING_KEY,
   isAutoUpdateEnabled,
   notifyKey,
@@ -136,10 +137,11 @@ export function AgentUpdateWatcher() {
       }
     };
 
-    check();
+    const first = setTimeout(check, FIRST_AGENT_CHECK_MS);
     const timer = setInterval(check, AUTO_CHECK_INTERVAL_MS);
     return () => {
       cancelled = true;
+      clearTimeout(first);
       clearInterval(timer);
     };
   }, [t, setDetectedAgents]);

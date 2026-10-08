@@ -2,8 +2,10 @@ import "@/i18n/index";
 import "@fontsource-variable/jetbrains-mono";
 import ReactDOM from "react-dom/client";
 import { ThemeProvider } from "neogestify-ui-components";
-import App from "@/app/App";
+import { Boot } from "@/app/Boot";
+import { whenHomeCanPaint } from "@/app/bootGate";
 import { loadAgentRegistry } from "@/features/agents/registry";
+import { fontsReady } from "@/features/terminal/fontsReady";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { renderingInfo } from "@/shared/ipc/settings";
 
@@ -28,24 +30,21 @@ document.addEventListener("contextmenu", (e) => {
 // reanudación. Si llegara tarde, una terminal restaurada ya se habría lanzado con el
 // comando pelado: sesión nueva en vez de la del usuario, y sin ningún error a la vista.
 // `loadAgentRegistry` nunca rechaza, así que esto no puede dejar la app sin pintar.
-// La fuente de la terminal se pide ANTES de montar: un @font-face no descarga nada hasta
-// que algo lo usa, y xterm mide la celda en el momento de abrirse. Midiendo con la de
-// respaldo, la grilla sale con otro ancho y la TUI arranca con columnas que no son las
-// reales. Con tope de espera: sin la fuente la app abre igual, con la de respaldo.
-const terminalFont = Promise.race([
-  document.fonts.load('13px "JetBrains Mono Variable"').catch(() => {}),
-  new Promise((resolve) => setTimeout(resolve, 1500)),
-]);
+// La fuente de la terminal se PIDE ya (importar `fontsReady` arranca la descarga) pero
+// no se espera para pintar: un @font-face no baja hasta que algo lo usa, y medir la
+// celda del xterm con la de reserva deja la TUI con un ancho que no es el real. Esa
+// espera vive en el primer `fit` (`fit.ts`), que corre antes de `pty_create`. Tope de
+// 1,5 s: sin la fuente la terminal abre igual, con la de reserva. La home no.
 
 // Si la ventana arrancó sin composición por GPU, la terminal no tiene que intentar WebGL.
 const rendering = renderingInfo()
   .then((info) => useTerminalPrefsStore.getState().setCompositing(info.activeNow))
   .catch(() => {});
 
-Promise.all([loadAgentRegistry(), terminalFont, rendering]).then(() => {
-  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-    <ThemeProvider>
-      <App />
-    </ThemeProvider>
-  );
-});
+const appReady = whenHomeCanPaint({ loadAgentRegistry, applyRendering: () => rendering, fontsReady });
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <ThemeProvider>
+    <Boot appReady={appReady} />
+  </ThemeProvider>
+);
