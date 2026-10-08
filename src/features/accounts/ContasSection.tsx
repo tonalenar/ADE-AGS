@@ -10,7 +10,7 @@ import { AccountsManager, type AccountsSection } from "./AccountsManager";
 import { accountEnv, codexAccountUsage } from "./ipc";
 import { useAccountsStore } from "./store";
 import type { AgentAccount } from "./types";
-import { agentAccountUsage, claudeLiveUsage, formatRemaining, planLabel } from "./usage";
+import { agentAccountUsage, claudeLiveUsage, formatRemaining, humanPlan } from "./usage";
 
 /**
  * A seção Contas das Configurações (prancheta 5): as contas conectadas, o uso de cada plano e as
@@ -33,7 +33,7 @@ async function fetchInfo(account: AgentAccount, force: boolean, t: Translate): P
   let plan: string | null = null;
   if (account.agentId === "claude-code") {
     const usage = await agentAccountUsage(account.agentId, realId(account)).catch(() => null);
-    if (usage) plan = planLabel(usage.plan.tier);
+    if (usage) plan = humanPlan(usage.plan.tier);
     const env = realId(account) ? await accountEnv(account.id) : {};
     const live = await claudeLiveUsage(account.id, env, force);
     if (live.available && live.session) meters.push({ key: "session", label: `${name} · ${t("accounts.plan.session")}`, percent: live.session.percent, resets: live.session.resets });

@@ -81,6 +81,18 @@ export function planLabel(tier: string | null): string | null {
   return known[tier] ?? tier;
 }
 
+/** O plano com nome legível: os conhecidos pelo `planLabel`; um id novo ("default_claude_ai") vira "Claude AI", nunca o id cru. */
+export function humanPlan(tier: string | null): string | null {
+  const known = planLabel(tier);
+  if (!known || known !== tier) return known;
+  return known
+    .replace(/^default_/, "")
+    .split("_")
+    .filter(Boolean)
+    .map((w) => (w.toLowerCase() === "ai" ? "AI" : w[0].toUpperCase() + w.slice(1)))
+    .join(" ");
+}
+
 /** `2 h 14 min`, `18 min`, `ahora`. Lo que falta para que se reabra la ventana. */
 export function formatRemaining(seconds: number): string {
   if (seconds <= 0) return "0 min";
