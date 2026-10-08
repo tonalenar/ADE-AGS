@@ -230,8 +230,10 @@ fn create_pipe(endpoint: &str) -> Result<windows_sys::Win32::Foundation::HANDLE,
     let pipe = unsafe {
         CreateNamedPipeW(
             wide.as_ptr(),
-            PIPE_ACCESS_DUPLEX | PIPE_REJECT_REMOTE_CLIENTS,
-            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT,
+            PIPE_ACCESS_DUPLEX,
+            // PIPE_REJECT_REMOTE_CLIENTS é modo do pipe, não de abertura: no 2º argumento
+            // o Windows recusa com "parâmetro incorreto" (87) e o canal nunca abre.
+            PIPE_TYPE_BYTE | PIPE_READMODE_BYTE | PIPE_WAIT | PIPE_REJECT_REMOTE_CLIENTS,
             PIPE_UNLIMITED_INSTANCES,
             65_536,
             65_536,
@@ -372,6 +374,25 @@ mod tests {
         let (server, _) = listener.accept().unwrap();
         let pid = super::peer_pid(&server).unwrap();
         let _ = std::fs::remove_file(&path);
+        assert_eq!(pid, std::process::id());
+    }
+
+    /// O pipe abre de verdade e um cliente local conecta e é identificado pelo PID.
+    #[cfg(windows)]
+    #[test]
+    fn the_credential_pipe_opens_and_reports_this_process() {
+        use windows_sys::Win32::Foundation::{CloseHandle, GetLastError, ERROR_PIPE_CONNECTED};
+        use windows_sys::Win32::System::Pipes::{ConnectNamedPipe, GetNamedPipeClientProcessId};
+        let endpoint = format!(r"\\.\pipe\ags-ipc-test-{}-{}", std::process::id(), uuid::Uuid::new_v4());
+        let pipe = super::create_pipe(&endpoint).expect("CreateNamedPipeW deve aceitar os parâmetros");
+        let client = std::fs::OpenOptions::new().read(true).write(true).open(&endpoint).unwrap();
+        let connected = unsafe { ConnectNamedPipe(pipe, std::ptr::null_mut()) };
+        assert!(connected != 0 || unsafe { GetLastError() } == ERROR_PIPE_CONNECTED);
+        let mut pid = 0u32;
+        let ok = unsafe { GetNamedPipeClientProcessId(pipe, &mut pid) };
+        drop(client);
+        unsafe { CloseHandle(pipe) };
+        assert_ne!(ok, 0);
         assert_eq!(pid, std::process::id());
     }
 }
