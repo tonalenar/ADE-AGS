@@ -673,3 +673,49 @@ html.dark {
 /* A bolinha é pequena; a área que o mouse pega não: 32px em volta (invisível). */
 .react-flow__handle.ade-port::before { content: ""; position: absolute; inset: -10px; border-radius: 999px; }
 .react-flow__handle.ade-port { cursor: crosshair; }
+
+/* ── Biblioteca: o resto das variáveis --nui-* (cores de sistema da Apple) ──────────────────
+   Sem estas, a biblioteca caía nos padrões dela (índigo e Tailwind): era daí que vinha o
+   contorno roxo dos botões "Cancelar/Editar/Excluir" e o vermelho/verde fora do tom. */
+:root {
+  --nui-accent-subtle: rgba(0, 0, 0, 0.1);
+  --nui-accent-subtle-dark: rgba(255, 255, 255, 0.1);
+  --nui-accent-fg: #fff;
+  --nui-accent-fg-dark: #fff;
+  --nui-border: rgba(0, 0, 0, 0.12);
+  --nui-border-subtle: rgba(0, 0, 0, 0.08);
+  --nui-surface: #ffffff;
+  --nui-surface-muted: #f5f5f7;
+  --nui-surface-sunken: #ececee;
+  --nui-surface-hover: rgba(0, 0, 0, 0.05);
+  --nui-skeleton: rgba(0, 0, 0, 0.06);
+  --nui-text: #1d1d1f;
+  --nui-text-muted: #3a3a3c;
+  --nui-text-subtle: rgba(60, 60, 67, 0.6);
+  --nui-text-faint: rgba(60, 60, 67, 0.3);
+  --nui-ring-offset: #ffffff;
+  --nui-ring-offset-dark: var(--color-surface);
+  --nui-over: rgba(0, 0, 0, 0.04);
+  --nui-over-dark: rgba(255, 255, 255, 0.06);
+  --nui-surface-inverted: #1d1d1f;
+  --nui-surface-inverted-dark: #f5f5f7;
+  --nui-text-on-inverted: #f5f5f7;
+  --nui-text-on-inverted-dark: #1d1d1f;
+  --nui-blur-sheet: 30px;
+  --nui-slider-fill: var(--color-accent-500);
+  --nui-slider-fill-dark: var(--color-accent-500);
+
+  --nui-danger: #ff3b30;          --nui-danger-dark: #ff453a;
+  --nui-danger-hover: #e0352b;    --nui-danger-hover-dark: #ff6961;
+  --nui-danger-subtle: rgba(255, 59, 48, 0.12); --nui-danger-subtle-dark: rgba(255, 69, 58, 0.16);
+  --nui-danger-text: #d70015;     --nui-danger-text-dark: #ff6961;
+  --nui-danger-text-hover: #b50012; --nui-danger-text-hover-dark: #ff8a84;
+  --nui-success: #34c759;         --nui-success-dark: #30d158;
+  --nui-success-hover: #2fb350;   --nui-success-hover-dark: #4cd964;
+  --nui-success-text: #248a3d;    --nui-success-text-dark: #30d158;
+  --nui-warning: #ff9500;         --nui-warning-dark: #ff9f0a;
+  --nui-warning-hover: #e68600;   --nui-warning-hover-dark: #ffb340;
+  --nui-warning-text: #c93400;    --nui-warning-text-dark: #ffb340;
+  --nui-info: var(--color-accent-500); --nui-info-dark: var(--color-accent-500);
+  --nui-info-text: var(--color-accent-600); --nui-info-text-dark: var(--color-accent-400);
+}
