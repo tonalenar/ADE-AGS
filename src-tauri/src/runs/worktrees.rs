@@ -21,7 +21,6 @@
 //!   cambios los descuenta a ELLOS, uno por uno, y a nada más.
 
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::time::Duration;
 
 use uuid::Uuid;
@@ -54,7 +53,7 @@ fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
     // `-C` también: el directorio canónico llega como `\\?\C:\...` y git lo rechaza
     // igual que al argumento de `worktree add`.
     let dir = external_path(dir);
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(&dir).args(args);
     let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("no se pudo correr git: {e}"))?;
     if out.status.success() {

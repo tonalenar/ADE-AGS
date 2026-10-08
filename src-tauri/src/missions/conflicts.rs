@@ -19,7 +19,7 @@ pub struct IntegrationConflicts {
     pub files: Vec<ConflictFile>,
 }
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
-    let mut c = std::process::Command::new("git");
+    let mut c = crate::util::spawn::hidden_command("git");
     c.arg("-C").arg(crate::util::external_path(root)).args(args);
     let o = crate::util::output_with_timeout(&mut c, std::time::Duration::from_secs(30))
         .map_err(|e| e.to_string())?;

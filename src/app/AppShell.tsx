@@ -16,6 +16,7 @@ import { ExplorerPanel } from "@/features/explorer/ExplorerPanel";
 import { SettingsModal } from "@/features/settings/SettingsModal";
 import { AccountsModal } from "@/features/accounts/AccountsModal";
 import { RouteModal } from "@/app/RouteModal";
+import { PAGE_HOST_ID } from "@/shared/ui/pageHost";
 import { EditorArea } from "@/features/tabs/EditorArea";
 import { initLayoutSync } from "@/features/tabs/layout/layoutStore";
 import { initViewTabsPersistence } from "@/features/tabs/viewStore";
@@ -44,7 +45,7 @@ import { useFleetEvents } from "@/features/runs/useFleetEvents";
 import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
 
-/** Las rutas que se muestran como modal encima de las terminales en vez de reemplazarlas. */
+/** Las rutas cuyas terminales siguen visibles (y vivas) por debajo de la pantalla. */
 const MODAL_ROUTES = ["/skills", "/marketplace", "/fleet", "/missions", "/squads", "/forge"];
 
 function toFrontendTab(row: RestoredTabRow): Tab {
@@ -81,6 +82,9 @@ export function AppShell() {
   // entorno es que nada tape el trabajo. Las rutas no cambian — adentro se sigue
   // navegando igual (el detalle de una skill, los repos del marketplace).
   const asModal = MODAL_ROUTES.some((p) => location.pathname.startsWith(p));
+  // Todas as telas (Missões, Histórico, Squads, Skills…) são TELA CHEIA: cobrem tudo à
+  // direita do riel (prancheta 2). Ficam de fora a inicial e o workspace, que são o fundo.
+  const fullPage = !isWorkspace && location.pathname !== "/";
   const [isMaximized, setIsMaximized] = useState(false);
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const workspacesCollapsed = useUiStore((s) => s.workspacesCollapsed);
@@ -241,7 +245,7 @@ export function AppShell() {
         <TabBar showLights={workspacesCollapsed && !railExpanded} />
       </div>
 
-      <div className="flex flex-1 min-h-0">
+      <div className="relative flex flex-1 min-h-0">
         {/* Izquierda: los AGENTES. Es lo primero que se ve porque en un entorno de
             desarrollo para agentes lo primero es qué está corriendo; el árbol de
             archivos es el panel secundario y va del otro lado. */}
@@ -267,13 +271,13 @@ export function AppShell() {
               scrollea por dentro (encabezado fijo arriba, atajos fijos abajo, la lista en
               el medio). Un scroll acá afuera además reservaría su carril a la derecha de
               TODAS las páginas, incluidas las que no lo necesitan. */}
-          {!isWorkspace && !asModal && (
+          {!isWorkspace && !fullPage && (
             <div className="absolute inset-0 z-10 overflow-hidden">
               <Outlet context={{ groups } satisfies ShellOutletContext} />
             </div>
           )}
 
-          {asModal && (
+          {fullPage && (
             <RouteModal onClose={() => navigate(tabs.length > 0 ? "/workspace" : "/")}>
               <Outlet context={{ groups } satisfies ShellOutletContext} />
             </RouteModal>
@@ -299,6 +303,12 @@ export function AppShell() {
           repo={activeRepo}
           title={activeRepo?.branch ?? activeTab?.cwd.split(/[\\/]/).filter(Boolean).pop() ?? ""}
         />
+
+        {/* Onde as telas cheias se montam (ver `pageHost`): tudo à direita do riel, por cima
+            dos painéis e da área de trabalho. Sempre montado e vazio, sem pegar cliques; as
+            terminais por baixo não mudam de tamanho, então os agentes nem percebem. */}
+        <div id={PAGE_HOST_ID} className="absolute top-0 bottom-0 right-0 z-30 pointer-events-none"
+          style={{ left: RAIL_W }} />
       </div>
 
       <StatusBar repo={activeRepo} />

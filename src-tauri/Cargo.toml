@@ -48,6 +48,7 @@ serde_json = "1"
 
 # Fase 0 — Terminal embebido (PTY)
 portable-pty = "0.8"
+anyhow = "1"
 tokio = { version = "1", features = ["full"] }
 
 # Fase 0 — Persistencia SQLite
@@ -135,6 +136,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_IO",
     "Win32_System_Ioctl",
     "Win32_System_JobObjects",
+    "Win32_System_Console",
     "Win32_System_Pipes",
     "Win32_System_Threading",
 ] }

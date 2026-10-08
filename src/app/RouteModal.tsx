@@ -1,33 +1,37 @@
 import { useEffect, useRef } from "react";
+import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
 import { Button, CloseIcon } from "neogestify-ui-components";
 
+import { usePageHost } from "@/shared/ui/pageHost";
 import { hasOpenDialog } from "@/shared/ui/openDialog";
 import { useFocusInside } from "@/shared/ui/useFocusInside";
 
 /**
- * El marco que convierte una ruta en un modal.
+ * O marco que transforma uma rota em TELA CHEIA.
  *
- * Skills y Marketplace eran páginas: navegar a ellas tapaba las terminales enteras y
- * había que volver para ver qué estaba haciendo un agente. Como modal, los agentes
- * siguen ahí atrás y se cierra con Escape.
+ * Missões, Squads, Skills e as demais eram um modal centrado por cima das terminais. Nas
+ * pranchetas aprovadas são telas: ocupam tudo à direita do riel, sem véu nem cantos
+ * arredondados, e as terminais continuam vivas por baixo (se volta com Escape ou no X).
  *
- * Lo importante es que las rutas NO cambian: adentro se sigue navegando igual (el detalle
- * de una skill, los repositorios del marketplace), y lo único distinto es dónde se pinta.
+ * As rotas NÃO mudam: por dentro se segue navegando igual (o detalhe de uma skill, os
+ * repositórios do marketplace); o que muda é só onde se pinta. O contêiner é o `PAGE_HOST_ID`
+ * do AppShell (ver `pageHost`).
  */
 export function RouteModal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   const { t } = useTranslation();
   const frameRef = useRef<HTMLDivElement>(null);
-  // Ver `useFocusInside`: sin esto el teclado seguía en la terminal de atrás.
+  const host = usePageHost();
+  // Ver `useFocusInside`: sem isto o teclado seguia na terminal de trás.
   useFocusInside(frameRef);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key !== "Escape") return;
-      // Un diálogo abierto encima es el dueño de este Escape (ver `hasOpenDialog`).
+      // Um diálogo aberto por cima é o dono deste Escape (ver `hasOpenDialog`).
       if (hasOpenDialog()) return;
-      // Se corta acá: si no, el Escape sigue viaje hasta la terminal de atrás y el agente
-      // lo recibe como si lo hubieras tecleado vos.
+      // Corta aqui: senão o Escape segue até a terminal de trás e o agente o recebe como
+      // se você o tivesse digitado.
       e.preventDefault();
       e.stopPropagation();
       onClose();
@@ -36,37 +40,29 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
     return () => window.removeEventListener("keydown", onKey, { capture: true });
   }, [onClose]);
 
-  return (
-    <div className="absolute inset-0 z-30 flex items-center justify-center p-6">
-      <Button variant="custom"
+  const frame = (
+    <div ref={frameRef} tabIndex={-1}
+      className="outline-none cc-fade pointer-events-auto absolute inset-0 flex flex-col overflow-hidden
+        bg-gray-50 dark:bg-surface-deep">
+      <Button variant="icon"
         onClick={onClose}
+        title={t("btn.close")}
         aria-label={t("btn.close")}
-        className="cc-fade absolute inset-0 bg-gray-900/45 dark:bg-black/45 backdrop-blur-sm block"
-        children={null}
-      />
+        className="absolute top-3 right-3 z-10 flex items-center justify-center w-7 h-7 rounded-md
+          text-gray-400 dark:text-white/35
+          bg-black/[0.04] dark:bg-white/[0.06]
+          hover:text-gray-700 dark:hover:text-white
+          hover:bg-black/[0.08] dark:hover:bg-white/10 transition-colors p-0"
+      >
+        <CloseIcon className="w-4 h-4" />
+      </Button>
 
-      <div ref={frameRef} tabIndex={-1} className="outline-none cc-rise relative flex flex-col w-full max-w-5xl h-full
-        rounded-xl overflow-hidden
-        bg-gray-50 dark:bg-surface
-        border border-gray-200 dark:border-white/[0.08]
-        shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]">
-
-        <Button variant="icon"
-          onClick={onClose}
-          title={t("btn.close")}
-          className="absolute top-3 right-3 z-10 flex items-center justify-center w-7 h-7 rounded-md
-            text-gray-400 dark:text-white/35
-            bg-white/80 dark:bg-surface-raised/80 backdrop-blur-xl
-            hover:text-gray-700 dark:hover:text-white
-            hover:bg-gray-100 dark:hover:bg-white/10 transition-colors p-0"
-        >
-          <CloseIcon className="w-4 h-4" />
-        </Button>
-
-        {/* Sin scroll propio: las rutas que se pintan acá son de alto completo y
-            scrollean por dentro. Ver la nota equivalente en `AppShell`. */}
-        <div className="flex-1 min-h-0 overflow-hidden">{children}</div>
-      </div>
+      {/* Sem scroll próprio: as rotas pintadas aqui são de altura completa e rolam por
+          dentro. Ver a nota equivalente no `AppShell`. */}
+      <div className="flex-1 min-h-0 overflow-hidden">{children}</div>
     </div>
   );
+
+  // Sem contêiner (um teste, uma vista fora do shell) fica como um painel que cobre o pai.
+  return host ? createPortal(frame, host) : frame;
 }

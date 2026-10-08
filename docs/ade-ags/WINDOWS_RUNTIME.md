@@ -2,6 +2,8 @@
 
 Decisões desta etapa. Não muda identificador, banco, updater nem o nome do servidor MCP.
 
+Uma janela cujo título começa com `npm list` ou `bun run dev` durante o `tauri dev` vem do CLI do Tauri ou de um agente externo, não é filho do `ade-ags.exe`.
+
 ## Paths entregues ao Git
 
 `Path::canonicalize` no Windows devolve `\\?\C:\...`. O Git 2.55 rejeita esse prefixo em `worktree add` e `worktree remove` (`Invalid argument` ao criar o `.git` do worktree).

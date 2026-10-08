@@ -1,5 +1,5 @@
 use super::containment::ProcessGroup;
-use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
+use portable_pty::{CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
@@ -252,34 +252,38 @@ pub(super) const PARENT_SESSION_ENV: &[&str] = &[
 
 pub(super) fn build_launch(command: &str, prelaunch: &[String]) -> Result<CommandBuilder, String> {
     if prelaunch.is_empty() {
-        let parts = split_command(command);
-        let mut parts = parts.iter().map(String::as_str);
-        let program = parts.next().unwrap_or(command);
-        #[cfg(windows)]
-        let resolved = {
-            let path = crate::util::find_program(program).unwrap_or_else(|| std::path::PathBuf::from(program));
-            let args: Vec<_> = parts.collect();
-            let native = crate::util::launch::external_command(&path, &args).map_err(|e| e.to_string())?;
-            if crate::util::launch::is_batch(std::path::Path::new(native.get_program())) {
-                return Err("Este script .cmd/.bat não é um shim npm reconhecido. Configure o executável ou intérprete diretamente.".into());
-            }
-            let mut cmd = CommandBuilder::new(native.get_program());
-            cmd.args(native.get_args());
-            cmd
-        };
-        #[cfg(windows)]
-        return Ok(resolved);
-        #[cfg(not(windows))]
-        {
+        return direct_launch(command);
+    }
+    // Um shell só: `conda activate`, `nvm use`, `set VAR=` e `cd` têm que valer para
+    // o agente. No Windows isso é um `.cmd` e um `cmd /C` dentro do ConPTY. A janela
+    // não abre porque `win_conpty` já passou `CREATE_NO_WINDOW`: o console é o PTY.
+    Ok(shell_running(launch_script(command, prelaunch)))
+}
+
+fn direct_launch(command: &str) -> Result<CommandBuilder, String> {
+    let parts = split_command(command);
+    let mut parts = parts.iter().map(String::as_str);
+    let program = parts.next().unwrap_or(command);
+    #[cfg(windows)]
+    {
+        let path = crate::util::find_program(program).unwrap_or_else(|| std::path::PathBuf::from(program));
+        let args: Vec<_> = parts.collect();
+        let native = crate::util::launch::external_command(&path, &args).map_err(|e| e.to_string())?;
+        if crate::util::launch::is_batch(std::path::Path::new(native.get_program())) {
+            return Err("Este script .cmd/.bat não é um shim npm reconhecido. Configure o executável ou intérprete diretamente.".into());
+        }
+        let mut cmd = CommandBuilder::new(native.get_program());
+        cmd.args(native.get_args());
+        return Ok(cmd);
+    }
+    #[cfg(not(windows))]
+    {
         let mut cmd = CommandBuilder::new(program);
         for arg in parts {
             cmd.arg(arg);
         }
-        return Ok(cmd);
-        }
+        Ok(cmd)
     }
-
-    Ok(shell_running(launch_script(command, prelaunch)))
 }
 
 /// El shell que ejecuta el script.
@@ -303,10 +307,7 @@ fn shell_running(script: String) -> CommandBuilder {
 /// Windows: el contenido del .cmd que ejecuta el script. Pura.
 #[cfg(windows)]
 pub(super) fn batch_launch_contents(script: &str) -> String {
-    format!("@echo off
-@chcp 65001 >nul
-{script}
-")
+    format!("@echo off\n@chcp 65001 >nul\n{script}\n")
 }
 
 /// Windows: el script va a un .cmd y no como argumento de `cmd /C`. Al pasarlo como argumento,
@@ -315,6 +316,9 @@ pub(super) fn batch_launch_contents(script: &str) -> String {
 /// y las leía como parte de una ruta relativa ("Invalid MCP configuration"). En un archivo, `cmd`
 /// ve las comillas como las escribió quien armó el comando. El nombre sale del hash del script:
 /// el mismo comando reutiliza el mismo archivo y la carpeta no crece sin fin.
+///
+/// Este `cmd` nace dentro del pseudoconsole (`open_pty` → `win_conpty`), que ya leva
+/// `CREATE_NO_WINDOW`. Não é um `Command` do helper e não abre conhost.
 #[cfg(windows)]
 fn shell_running(script: String) -> CommandBuilder {
     use std::hash::{Hash, Hasher};
@@ -469,14 +473,11 @@ fn restrict_to_user(path: &std::path::Path) -> Result<(), String> {
     };
     let grant = format!("{}:(R,W)", user.to_string_lossy());
     let path = path.as_os_str();
-    let status = std::process::Command::new("icacls")
-        .arg(path)
-        .args(["/inheritance:r", "/grant:r"])
-        .arg(&grant)
-        .status();
-    match status {
-        Ok(code) if code.success() => Ok(()),
-        Ok(code) => Err(format!("icacls saiu com {code}")),
+    let mut cmd = crate::util::spawn::hidden_command("icacls");
+    cmd.arg(path).args(["/inheritance:r", "/grant:r"]).arg(&grant);
+    match crate::util::spawn::output(&mut cmd, std::time::Duration::from_secs(15)) {
+        Ok(out) if out.status.success() => Ok(()),
+        Ok(out) => Err(format!("icacls saiu com {}", out.status)),
         Err(error) => Err(error.to_string()),
     }
 }
@@ -492,6 +493,19 @@ fn forget_session(session: &PtySession) {
     }
     if let Some(path) = &session.codex_profile {
         let _ = std::fs::remove_file(path);
+    }
+}
+
+/// PTY nativo. No Windows o pseudoconsole nasce com `CREATE_NO_WINDOW`
+/// (`terminal::win_conpty`); no resto, o `portable-pty` do sistema.
+pub(crate) fn open_pty(size: PtySize) -> Result<portable_pty::PtyPair, String> {
+    #[cfg(windows)]
+    {
+        super::win_conpty::open(size)
+    }
+    #[cfg(not(windows))]
+    {
+        portable_pty::native_pty_system().openpty(size).map_err(|e| e.to_string())
     }
 }
 
@@ -520,12 +534,9 @@ pub async fn pty_create(
     app: AppHandle,
 ) -> Result<u32, String> {
     let _update_guard = crate::agents::updates::activity_guard()?;
-    let pty_system = native_pty_system();
     let size = PtySize { rows, cols, pixel_width: 0, pixel_height: 0 };
-
-    let pair = pty_system
-        .openpty(size)
-        .map_err(|e| format!("Failed to open PTY: {e}"))?;
+    let steps = prelaunch.unwrap_or_default();
+    let pair = open_pty(size)?;
 
     let tab_id = env.as_ref().and_then(|e| e.get("ADE_TAB_ID")).cloned().filter(|tab| !tab.is_empty());
     // O token nasce aqui, não no ambiente que o frontend (ou um agente) mandou.
@@ -544,7 +555,7 @@ pub async fn pty_create(
         _ => None,
     };
     let command = with_codex_identity(&command, tab_id.as_deref(), codex_profile.as_ref().and(codex_profile_name.as_deref()));
-    let mut cmd = build_launch(&command, &prelaunch.unwrap_or_default())?;
+    let mut cmd = build_launch(&command, &steps)?;
     cmd.cwd(&cwd);
     cmd.env("TERM", "xterm-256color");
     cmd.env("COLORTERM", "truecolor");

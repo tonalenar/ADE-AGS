@@ -6,7 +6,7 @@
 
 use std::{
     path::Path,
-    process::{Command, Stdio},
+    process::Stdio,
     thread,
     time::{Duration, Instant},
 };
@@ -212,21 +212,38 @@ pub(crate) fn repo_from_remote(url: &str) -> Option<String> {
     (parts.next().is_none() && !owner.is_empty() && !repo.is_empty()).then(|| format!("{owner}/{repo}"))
 }
 
+fn git_origin_url(cwd: &Path) -> Option<String> {
+    let mut cmd = crate::util::spawn::hidden_command("git");
+    cmd.args(["remote", "get-url", "origin"])
+        .current_dir(cwd)
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never");
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        // SAFETY: setsid é async-signal-safe. Sem tty, o git não pergunta passphrase.
+        unsafe {
+            cmd.pre_exec(|| {
+                libc::setsid();
+                Ok(())
+            });
+        }
+    }
+    let out = crate::util::spawn::output(&mut cmd, std::time::Duration::from_secs(20)).ok()?;
+    out.status.success().then(|| String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
 pub(crate) fn origin_repo(cwd: &Path) -> Option<String> {
-    if let Ok(out) = Command::new("git").args(["remote", "get-url", "origin"]).current_dir(cwd).output() {
-        if out.status.success() {
-            if let Some(repo) = repo_from_remote(&String::from_utf8_lossy(&out.stdout)) {
-                return Some(repo);
-            }
+    if let Some(url) = git_origin_url(cwd) {
+        if let Some(repo) = repo_from_remote(&url) {
+            return Some(repo);
         }
     }
     if let Ok(current_dir) = std::env::current_dir() {
         if current_dir != cwd {
-            if let Ok(out) = Command::new("git").args(["remote", "get-url", "origin"]).current_dir(&current_dir).output() {
-                if out.status.success() {
-                    if let Some(repo) = repo_from_remote(&String::from_utf8_lossy(&out.stdout)) {
-                        return Some(repo);
-                    }
+            if let Some(url) = git_origin_url(&current_dir) {
+                if let Some(repo) = repo_from_remote(&url) {
+                    return Some(repo);
                 }
             }
         }
@@ -252,7 +269,7 @@ pub(crate) fn check_pr_status(cwd: &Path, reference: &str) -> (PrState, CiStatus
     if let Some(repo) = repo {
         args.extend(["--repo".to_string(), repo]);
     }
-    let mut child = match Command::new("gh")
+    let mut child = match crate::util::spawn::hidden_command("gh")
         .args(&args)
         .current_dir(cwd)
         .stdout(Stdio::piped())

@@ -15,7 +15,7 @@ use std::io::Read;
 use std::sync::{LazyLock, Mutex};
 use std::time::{Duration, Instant};
 
-use portable_pty::{CommandBuilder, PtySize, native_pty_system};
+use portable_pty::{CommandBuilder, PtySize};
 
 use crate::database::DbConnection;
 use serde::{Deserialize, Serialize};
@@ -124,14 +124,12 @@ pub(super) fn capture(
     cwd: &str,
     env: &[(String, String)],
 ) -> Result<String, String> {
-    let pty = native_pty_system()
-        .openpty(PtySize {
-            rows: super::screen::ROWS as u16,
-            cols: super::screen::COLS as u16,
-            pixel_width: 0,
-            pixel_height: 0,
-        })
-        .map_err(|e| e.to_string())?;
+    let pty = crate::terminal::open_pty(PtySize {
+        rows: super::screen::ROWS as u16,
+        cols: super::screen::COLS as u16,
+        pixel_width: 0,
+        pixel_height: 0,
+    })?;
 
     let mut cmd = CommandBuilder::new(command);
     cmd.cwd(cwd);
