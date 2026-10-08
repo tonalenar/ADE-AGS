@@ -70,15 +70,32 @@ export const useUsageStore = create<UsageState>((set, get) => ({
         }
       } else if (account.agentId === "codex") {
         try {
-          set(patch("codex", id, { usage: await codexAccountUsage(id), failed: false }));
+          const now = Math.floor(Date.now() / 1000);
+          let usage = await codexAccountUsage(id, force);
+          // Igual que Claude: lo fresco se queda; lo viejo se muestra y se vuelve a pedir.
+          // Un miss (`fetchedAt` 0) no es un fallo, es la señal de ir en vivo.
+          if (!force && !(usage.fetchedAt > 0 && isUsageFresh(usage.fetchedAt, now))) {
+            if (usage.fetchedAt > 0) set(patch("codex", id, { usage, failed: false }));
+            usage = await codexAccountUsage(id, true);
+          }
+          set(patch("codex", id, { usage, failed: false }));
         } catch {
           set(patch("codex", id, { usage: get().codex[id]?.usage ?? null, failed: true }));
         }
       } else if (account.agentId === "antigravity") {
         // Dos HTTP por cuenta (ver `antigravity_access.rs`): barato, va en paralelo con las demás.
         try {
-          const discovery = await discoverAntigravityAccount(id);
-          set(patch("antigravity", id, { meters: modelMeters(discovery.models), failed: false, fetchedAt: Math.floor(Date.now() / 1000) }));
+          const now = Math.floor(Date.now() / 1000);
+          let discovery = await discoverAntigravityAccount(id, force);
+          const stamp = discovery.fetchedAt ?? 0;
+          if (!force && !(stamp > 0 && isUsageFresh(stamp, now))) {
+            if (stamp > 0) {
+              set(patch("antigravity", id, { meters: modelMeters(discovery.models), failed: false, fetchedAt: stamp }));
+            }
+            discovery = await discoverAntigravityAccount(id, true);
+          }
+          const fetchedAt = discovery.fetchedAt && discovery.fetchedAt > 0 ? discovery.fetchedAt : now;
+          set(patch("antigravity", id, { meters: modelMeters(discovery.models), failed: false, fetchedAt }));
         } catch {
           // Se conserva el último valor bueno, como en Codex.
           const prev = get().antigravity[id];
@@ -97,23 +114,42 @@ export const useUsageStore = create<UsageState>((set, get) => ({
 
 let timer: number | undefined;
 let running = "";
+let onVisible: (() => void) | undefined;
+
+function stopUsagePolling(): void {
+  window.clearInterval(timer);
+  timer = undefined;
+  running = "";
+  if (onVisible) document.removeEventListener("visibilitychange", onVisible);
+  onVisible = undefined;
+}
 
 /**
  * Arranca (o rearma, si cambian las cuentas) la renovación periódica. Las de Claude van de
  * una en una —cada consulta levanta una TUI— y las demás en paralelo.
+ *
+ * Devuelve el corte: el canvas lo usa al desmontarse, así que con el canvas fuera de la
+ * pantalla el barrido no sigue. Tampoco corre con la página oculta. El primer pase no
+ * fuerza Codex ni Antigravity: si SQLite todavía es fresco, no nace un proceso.
  */
-export function startUsagePolling(accounts: AgentAccount[]): void {
+export function startUsagePolling(accounts: AgentAccount[]): () => void {
   const sig = accounts.map((a) => a.id).join("|");
-  if (sig === running && timer !== undefined) return;
+  if (sig === running && timer !== undefined) return stopUsagePolling;
+  stopUsagePolling();
   running = sig;
-  window.clearInterval(timer);
   const sweep = async () => {
+    if (document.visibilityState === "hidden") return;
     const { refresh } = useUsageStore.getState();
     await Promise.all(
-      accounts.filter((a) => a.agentId === "codex" || a.agentId === "antigravity").map((a) => refresh(a, true)),
+      accounts.filter((a) => a.agentId === "codex" || a.agentId === "antigravity").map((a) => refresh(a, false)),
     );
     for (const a of accounts.filter((x) => x.agentId === "claude-code")) await refresh(a, false);
   };
+  onVisible = () => {
+    if (document.visibilityState === "visible") void sweep();
+  };
+  document.addEventListener("visibilitychange", onVisible);
   void sweep();
   timer = window.setInterval(() => void sweep(), EVERY);
+  return stopUsagePolling;
 }

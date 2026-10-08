@@ -1,8 +1,10 @@
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabsStore } from "@/features/tabs/store";
-import { ptyAttach } from "@/features/terminal/ipc";
+import { ptyAttach, ptyOutputTotal } from "@/features/terminal/ipc";
+import { currentVisibleAgentTabIds } from "./layout/layoutStore";
 import { saveWindowState } from "./ipc";
+import type { Tab } from "./types";
 
 const SAVE_DEBOUNCE_MS = 400;
 const SCROLLBACK_REFRESH_MS = 20_000;
@@ -14,8 +16,9 @@ let initialized = false;
 // activar una tab) volvía a pedir por IPC el scrollback completo de TODAS las tabs y
 // reescribía la fila entera en SQLite — con varias tabs de agentes activos eso significa
 // megabytes de tráfico IPC + disco en cada click. El scrollback solo hace falta fresco
-// para sobrevivir a un crash, no en cada cambio de metadata, así que se cachea por ptyId
-// y solo se refresca en el ciclo periódico de 20s (o si todavía no hay nada cacheado).
+// para sobrevivir a un crash, no en cada cambio de metadata, así que se cachea por ptyId.
+// El ciclo de 20s pide el buffer solo de las pestañas visibles cuyo contador de bytes
+// creció. Cerrar o salir de una pestaña sigue leyendo la que se va.
 const scrollbackCache = new Map<number, string>();
 
 // El último scrollback que la base ya tiene de cada tab (por id de tab). Con el cache de
@@ -24,6 +27,42 @@ const scrollbackCache = new Map<number, string>();
 // `scrollbackUnchanged` y el backend conserva el suyo, en vez de que viajen y se
 // reescriban megabytes por tab al mover la ventana o renombrar una tab.
 const savedScrollback = new Map<string, string>();
+
+/** Último `output_total` ya persistido, por PTY. Si no cambió, el ciclo de 20 s no copia. */
+const outputTotals = new Map<number, number>();
+/** PTYs que acaban de salir de la pantalla y hay que leer en el próximo guardado. */
+const pendingRefresh = new Set<number>();
+/** Pestañas que se veían en el pase anterior. Sirve para volcar la que acaba de ocultarse. */
+let lastVisible = new Set<string>();
+
+/**
+ * PTYs cuyo scrollback pide el ciclo periódico: solo pestañas visibles, y solo si el
+ * contador de bytes cambió o todavía no se miró. Una pestaña oculta no entra.
+ */
+export function periodicScrollbackTargets(
+  tabs: { id: string; ptyId: number | null }[],
+  visibleIds: ReadonlySet<string>,
+  totals: ReadonlyMap<number, number | null>,
+  savedTotals: ReadonlyMap<number, number>,
+): number[] {
+  const out: number[] = [];
+  for (const tab of tabs) {
+    if (tab.ptyId == null || !visibleIds.has(tab.id)) continue;
+    const total = totals.get(tab.ptyId);
+    const prev = savedTotals.get(tab.ptyId);
+    if (total == null || prev === undefined || total !== prev) out.push(tab.ptyId);
+  }
+  return out;
+}
+
+/** Vacía el estado del ciclo. Lo usan los tests para no arrastrar un pase anterior. */
+export function resetScrollbackScheduleForTests(): void {
+  outputTotals.clear();
+  pendingRefresh.clear();
+  lastVisible = new Set();
+  scrollbackCache.clear();
+  savedScrollback.clear();
+}
 
 // `saveNow` es async (espera bounds + scrollback de cada PTY vía IPC) y se dispara desde
 // dos fuentes independientes (debounce de 400ms y el refresco periódico de 20s) — sin
@@ -40,9 +79,26 @@ let saveChain: Promise<void> = Promise.resolve();
  *  existe y pisaría con `null` el que se acaba de guardar. */
 let frozen = false;
 
-function enqueueSave(opts?: { refreshScrollback: boolean }) {
+interface SaveOpts {
+  refreshScrollback?: boolean;
+  /** Solo estos PTY se leen. El resto conserva lo que ya tiene la base. */
+  onlyPtyIds?: ReadonlySet<number>;
+  tabs?: Tab[];
+  workspaceId?: string;
+  authoritative?: boolean;
+}
+
+function enqueueSave(opts?: SaveOpts) {
   if (frozen) return;
   const run = () => saveNow(opts);
+  saveChain = saveChain.then(run, run);
+}
+
+/** Escribe el scrollback de pestañas que están por desaparecer del store, antes de que
+ *  el guardado siguiente las archive leyendo la fila vieja. */
+function enqueueSnapshot(tabs: Tab[], workspaceId: string, ptyIds: ReadonlySet<number>) {
+  if (frozen) return;
+  const run = () => saveNow({ tabs, workspaceId, onlyPtyIds: ptyIds, authoritative: false });
   saveChain = saveChain.then(run, run);
 }
 
@@ -77,13 +133,35 @@ export type SaveStep =
   | { kind: "terminal"; title: string }
   | { kind: "write" };
 
-async function saveNow(
-  opts: { refreshScrollback: boolean } = { refreshScrollback: false },
-  progress?: SaveProgress,
-) {
+async function scrollbackFor(
+  ptyId: number | null,
+  opts: SaveOpts,
+  extra: ReadonlySet<number>,
+): Promise<{ text: string | null; keep: boolean }> {
+  if (ptyId == null) return { text: null, keep: false };
+  if (opts.refreshScrollback || extra.has(ptyId) || opts.onlyPtyIds?.has(ptyId)) {
+    return { text: await fetchScrollback(ptyId), keep: false };
+  }
+  if (opts.onlyPtyIds) {
+    const cached = scrollbackCache.get(ptyId);
+    if (cached !== undefined) return { text: cached, keep: false };
+    return { text: null, keep: true };
+  }
+  return { text: await cachedOrFetchScrollback(ptyId), keep: false };
+}
+
+async function saveNow(opts: SaveOpts = {}, progress?: SaveProgress) {
   const win = getCurrentWindow();
-  const { tabs, workspaceId, hydrated } = useTabsStore.getState();
-  const resolveScrollback = opts.refreshScrollback ? fetchScrollback : cachedOrFetchScrollback;
+  const store = useTabsStore.getState();
+  const tabs = opts.tabs ?? store.tabs;
+  const workspaceId = opts.workspaceId ?? store.workspaceId;
+  const authoritative = opts.authoritative ?? store.hydrated;
+  const extra = new Set<number>();
+  // El ciclo periódico no se come el refresco de la pestaña que acaba de salir de pantalla.
+  if (!opts.onlyPtyIds && !opts.refreshScrollback) {
+    for (const id of pendingRefresh) extra.add(id);
+    pendingRefresh.clear();
+  }
   // Posición + una lectura de scrollback por tab + la escritura en la base. Los pasos son
   // los reales: cada uno avisa cuando TERMINA, no cuando empieza.
   const total = tabs.length + 2;
@@ -106,8 +184,9 @@ async function saveNow(
   const fresh = new Map<string, string>();
   const tabsPayload = await Promise.all(
     tabs.map(async (t, i) => {
-      const scrollback = await resolveScrollback(t.ptyId).finally(() => step({ kind: "terminal", title: t.title }));
-      const unchanged = scrollback !== null && savedScrollback.get(t.id) === scrollback;
+      const read = await scrollbackFor(t.ptyId, opts, extra).finally(() => step({ kind: "terminal", title: t.title }));
+      const unchanged = read.keep || (read.text !== null && savedScrollback.get(t.id) === read.text);
+      const scrollback = read.text;
       if (scrollback !== null && !unchanged) fresh.set(t.id, scrollback);
       return {
         id: t.id,
@@ -148,7 +227,7 @@ async function saveNow(
     // Solo una ventana ya hidratada puede afirmar "estas son TODAS mis tabs", que es lo
     // único que autoriza al backend a dar por cerradas las que falten. Ver
     // `WindowStatePayload::authoritative`.
-    authoritative: hydrated,
+    authoritative,
   }).then(
     () => {
       // Solo después de que la base lo tiene: si el guardado falló, el próximo lo reintenta.
@@ -242,6 +321,40 @@ function waitForHydration(): Promise<void> {
   });
 }
 
+/**
+ * El ciclo de 20 s. Con la página oculta no pide nada. De las pestañas visibles, solo
+ * copia el scrollback si el contador de bytes creció. La que acaba de dejar de verse se
+ * vuelca una vez y después queda fuera.
+ */
+export async function runPeriodicScrollbackSave(): Promise<void> {
+  if (typeof document !== "undefined" && document.visibilityState === "hidden") return;
+  const state = useTabsStore.getState();
+  if (!state.hydrated) return;
+  const visible = currentVisibleAgentTabIds();
+  const totals = new Map<number, number | null>();
+  for (const tab of state.tabs) {
+    if (tab.ptyId == null || !visible.has(tab.id)) continue;
+    try {
+      totals.set(tab.ptyId, await ptyOutputTotal(tab.ptyId));
+    } catch {
+      totals.set(tab.ptyId, null);
+    }
+  }
+  const targets = new Set(periodicScrollbackTargets(state.tabs, visible, totals, outputTotals));
+  for (const tab of state.tabs) {
+    if (tab.ptyId != null && lastVisible.has(tab.id) && !visible.has(tab.id)) targets.add(tab.ptyId);
+  }
+  lastVisible = visible;
+  for (const [id, total] of totals) if (total != null) outputTotals.set(id, total);
+  if (targets.size === 0) return;
+  enqueueSave({ onlyPtyIds: targets });
+}
+
+/** La cola de guardados. Los tests esperan a que el ciclo periódico termine de escribir. */
+export function waitForSaves(): Promise<void> {
+  return saveChain;
+}
+
 /** Centraliza el guardado automático del estado de tabs/ventana hacia SQLite. */
 export function initTabsPersistence() {
   if (initialized) return;
@@ -249,7 +362,28 @@ export function initTabsPersistence() {
 
   useTabsStore.subscribe((state, prevState) => {
     if (!state.hydrated) return;
-    if (state.tabs === prevState.tabs && state.workspaceId === prevState.workspaceId) return;
+    const visible = currentVisibleAgentTabIds();
+    for (const tab of prevState.tabs) {
+      if (
+        tab.ptyId != null
+        && lastVisible.has(tab.id)
+        && !visible.has(tab.id)
+        && state.tabs.some((next) => next.id === tab.id)
+      ) {
+        pendingRefresh.add(tab.ptyId);
+      }
+    }
+    const removed = prevState.tabs.filter((tab) => !state.tabs.some((next) => next.id === tab.id));
+    if (removed.length > 0) {
+      const ids = new Set(removed.flatMap((tab) => (tab.ptyId == null ? [] : [tab.ptyId])));
+      enqueueSnapshot(prevState.tabs, prevState.workspaceId, ids);
+    }
+    lastVisible = visible;
+    if (
+      state.tabs === prevState.tabs
+      && state.workspaceId === prevState.workspaceId
+      && state.activeTabId === prevState.activeTabId
+    ) return;
     scheduleSave();
   });
 
@@ -270,11 +404,9 @@ export function initTabsPersistence() {
     }
   });
 
-  // Refresco periódico del scrollback (aunque no cambie nada en el array de tabs,
-  // el contenido de la terminal sí cambia) para no perder mucho si la app se cae.
-  setInterval(() => {
-    if (useTabsStore.getState().hydrated) enqueueSave({ refreshScrollback: true });
-  }, SCROLLBACK_REFRESH_MS);
+  // Refresco periódico del scrollback de lo que se está viendo. Una pestaña oculta no
+  // entra: se vuelca al salir de pantalla, al cerrarla o al cerrar la ventana.
+  setInterval(() => void runPeriodicScrollbackSave(), SCROLLBACK_REFRESH_MS);
 
   // Sin listener de onCloseRequested a propósito: en Tauri 2, registrar uno
   // intercepta el cierre nativo de la ventana hasta que el JS responda, y eso

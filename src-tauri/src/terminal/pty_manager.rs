@@ -463,22 +463,88 @@ fn restrict_to_user(path: &std::path::Path) -> Result<(), String> {
     std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).map_err(|e| e.to_string())
 }
 
-/// No Windows o arquivo nasce no perfil do usuário. `icacls` tira a herança
-/// e deixa só essa conta. Se o comando não existir, o arquivo continua no
-/// diretório do usuário — a checagem manual está no PR.
+/// No Windows o arquivo nasce no perfil do usuário. A DACL fica protegida
+/// (sem herança) e só esta conta lê e escreve. Se a API falhar, quem chama
+/// apaga o arquivo.
 #[cfg(windows)]
 fn restrict_to_user(path: &std::path::Path) -> Result<(), String> {
-    let Some(user) = std::env::var_os("USERNAME") else {
-        return Ok(());
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Foundation::{CloseHandle, LocalFree};
+    use windows_sys::Win32::Security::Authorization::{
+        SetEntriesInAclW, SetNamedSecurityInfoW, EXPLICIT_ACCESS_W, GRANT_ACCESS, NO_MULTIPLE_TRUSTEE,
+        SE_FILE_OBJECT, TRUSTEE_IS_SID, TRUSTEE_IS_USER, TRUSTEE_W,
     };
-    let grant = format!("{}:(R,W)", user.to_string_lossy());
-    let path = path.as_os_str();
-    let mut cmd = crate::util::spawn::hidden_command("icacls");
-    cmd.arg(path).args(["/inheritance:r", "/grant:r"]).arg(&grant);
-    match crate::util::spawn::output(&mut cmd, std::time::Duration::from_secs(15)) {
-        Ok(out) if out.status.success() => Ok(()),
-        Ok(out) => Err(format!("icacls saiu com {}", out.status)),
-        Err(error) => Err(error.to_string()),
+    use windows_sys::Win32::Security::{
+        GetTokenInformation, TokenUser, DACL_SECURITY_INFORMATION, NO_INHERITANCE,
+        PROTECTED_DACL_SECURITY_INFORMATION, TOKEN_QUERY, TOKEN_USER,
+    };
+    use windows_sys::Win32::Storage::FileSystem::{FILE_GENERIC_READ, FILE_GENERIC_WRITE};
+    use windows_sys::Win32::System::Threading::{GetCurrentProcess, OpenProcessToken};
+
+    let mut wide: Vec<u16> = path.as_os_str().encode_wide().collect();
+    wide.push(0);
+
+    unsafe {
+        let mut token = std::ptr::null_mut();
+        if OpenProcessToken(GetCurrentProcess(), TOKEN_QUERY, &mut token) == 0 {
+            return Err("não foi possível ler o token desta conta".into());
+        }
+        let mut needed = 0u32;
+        GetTokenInformation(token, TokenUser, std::ptr::null_mut(), 0, &mut needed);
+        if needed == 0 {
+            CloseHandle(token);
+            return Err("não foi possível ler o SID desta conta".into());
+        }
+        let words = (needed as usize).div_ceil(std::mem::size_of::<usize>()).max(1);
+        let mut sid_buf = vec![0usize; words];
+        if GetTokenInformation(
+            token,
+            TokenUser,
+            sid_buf.as_mut_ptr().cast(),
+            needed,
+            &mut needed,
+        ) == 0
+        {
+            CloseHandle(token);
+            return Err("não foi possível ler o SID desta conta".into());
+        }
+        CloseHandle(token);
+        let sid = (*sid_buf.as_ptr().cast::<TOKEN_USER>()).User.Sid;
+        if sid.is_null() {
+            return Err("esta conta não tem SID".into());
+        }
+
+        let entry = EXPLICIT_ACCESS_W {
+            grfAccessPermissions: FILE_GENERIC_READ | FILE_GENERIC_WRITE,
+            grfAccessMode: GRANT_ACCESS,
+            grfInheritance: NO_INHERITANCE,
+            Trustee: TRUSTEE_W {
+                pMultipleTrustee: std::ptr::null_mut(),
+                MultipleTrusteeOperation: NO_MULTIPLE_TRUSTEE,
+                TrusteeForm: TRUSTEE_IS_SID,
+                TrusteeType: TRUSTEE_IS_USER,
+                ptstrName: sid.cast(),
+            },
+        };
+        let mut acl = std::ptr::null_mut();
+        let built = SetEntriesInAclW(1, &entry, std::ptr::null(), &mut acl);
+        if built != 0 || acl.is_null() {
+            return Err(format!("não foi possível montar a ACL ({built})"));
+        }
+        let applied = SetNamedSecurityInfoW(
+            wide.as_ptr(),
+            SE_FILE_OBJECT,
+            DACL_SECURITY_INFORMATION | PROTECTED_DACL_SECURITY_INFORMATION,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+            acl,
+            std::ptr::null(),
+        );
+        LocalFree(acl.cast());
+        if applied != 0 {
+            return Err(format!("não foi possível restringir o perfil ({applied})"));
+        }
+        Ok(())
     }
 }
 
@@ -730,10 +796,8 @@ pub fn pty_attach(id: u32) -> Result<String, String> {
     if !registry().contains_key(&id) {
         return Err(format!("PTY session {id} not found"));
     }
-    let buffers = buffers();
-    Ok(buffers
-        .get(&id)
-        .map(|b| String::from_utf8_lossy(&b.data).into_owned())
+    Ok(copy_scrollback_bytes(id)
+        .map(|(data, _)| String::from_utf8_lossy(&data).into_owned())
         .unwrap_or_default())
 }
 
@@ -753,10 +817,23 @@ pub fn output_total(id: u32) -> Option<u64> {
     buffers().get(&id).map(|b| b.total_bytes)
 }
 
+/// Bytes escritos desde que el PTY arrancó, sin copiar el scrollback. El guardado
+/// periódico lo usa para no pedir 3 MB de una tab cuyo buffer no creció.
+#[tauri::command]
+pub fn pty_output_total(id: u32) -> Option<u64> {
+    output_total(id)
+}
+
+/// Clona el buffer y suelta el mutex del PTY antes de decodificar UTF-8. Quien después
+/// escribe en SQLite ya no tiene este lock, y este lock nunca se toma con el de SQLite.
+fn copy_scrollback_bytes(id: u32) -> Option<(Vec<u8>, u64)> {
+    let buffers = buffers();
+    let buffer = buffers.get(&id)?;
+    Some((buffer.data.clone(), buffer.total_bytes))
+}
+
 pub fn scrollback_of(id: u32) -> Option<(String, u64)> {
-    buffers()
-        .get(&id)
-        .map(|b| (String::from_utf8_lossy(&b.data).into_owned(), b.total_bytes))
+    copy_scrollback_bytes(id).map(|(data, total)| (String::from_utf8_lossy(&data).into_owned(), total))
 }
 
 /// Escribe al PTY desde código Rust (servidor IPC). `pty_write` es la versión `async`
@@ -854,4 +931,28 @@ pub fn kill_all_sessions() {
         let _ = session.killer.wait();
     }
     buffers().clear();
+}
+
+#[cfg(test)]
+mod source_tests {
+    #[test]
+    fn perfil_do_codex_nao_chama_processo_externo_de_acl() {
+        let needle = ["ica", "cls"].concat();
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
+        let mut pending = vec![root];
+        while let Some(dir) = pending.pop() {
+            for entry in std::fs::read_dir(&dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    pending.push(path);
+                    continue;
+                }
+                if path.extension().and_then(|ext| ext.to_str()) != Some("rs") {
+                    continue;
+                }
+                let text = std::fs::read_to_string(&path).unwrap().to_ascii_lowercase();
+                assert!(!text.contains(&needle), "{} ainda menciona o processo de ACL", path.display());
+            }
+        }
+    }
 }

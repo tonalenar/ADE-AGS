@@ -19,7 +19,7 @@ use std::path::Path;
 use std::process::Stdio;
 use std::time::Duration;
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 use super::store::AccountKind;
 use crate::database::DbConnection;
@@ -108,7 +108,7 @@ pub fn refresh_codex_account(
 }
 
 /// Lo que el panel de consumo muestra de una cuenta de Codex.
-#[derive(Serialize, Debug, Clone)]
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
 #[serde(rename_all = "camelCase")]
 pub struct CodexUsage {
     pub email: Option<String>,
@@ -119,24 +119,57 @@ pub struct CodexUsage {
     pub fetched_at: i64,
 }
 
+fn codex_usage_key(account_key: &str) -> String {
+    format!("usage.codex.v1.{account_key}")
+}
+
+fn load_codex_usage(db: &DbConnection, account_key: &str) -> Option<CodexUsage> {
+    let raw = crate::database::get_setting(db, &codex_usage_key(account_key)).ok()??;
+    serde_json::from_str(&raw).ok()
+}
+
+fn store_codex_usage(db: &DbConnection, account_key: &str, usage: &CodexUsage) {
+    if let Ok(raw) = serde_json::to_string(usage) {
+        let _ = crate::database::set_setting(db, &codex_usage_key(account_key), &raw);
+    }
+}
+
+fn empty_codex_usage() -> CodexUsage {
+    CodexUsage { email: None, plan: None, auth: None, quota: None, fetched_at: 0 }
+}
+
 /// El cupo de una cuenta de Codex, preguntado en el momento (y guardado para el ruteo).
+///
+/// `force` ausente vale como `true`: el panel de cuentas sigue yendo en vivo. El barrido
+/// del canvas manda `false` y, si el snapshot de SQLite todavía es fresco, no levanta
+/// `codex app-server`.
 #[tauri::command]
-pub async fn codex_account_usage(account_id: String, db: tauri::State<'_, DbConnection>) -> Result<CodexUsage, String> {
+pub async fn codex_account_usage(
+    account_id: String,
+    force: Option<bool>,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<CodexUsage, String> {
+    let force = force.unwrap_or(true);
     let db = (*db).clone();
     tokio::task::spawn_blocking(move || {
+        if !force {
+            return Ok(load_codex_usage(&db, &account_id).unwrap_or_else(empty_codex_usage));
+        }
         let env = if account_id.starts_with("system:") {
             HashMap::new()
         } else {
             super::env_for_account(&db, &account_id).ok_or("Cuenta no encontrada")?
         };
         let account = refresh_codex_account(&db, &account_id, &env).ok_or("No se pudo consultar a Codex")?;
-        Ok(CodexUsage {
+        let usage = CodexUsage {
             email: account.email,
             plan: account.plan,
             auth: account.auth,
             quota: account.quota,
             fetched_at: crate::util::now_ts(),
-        })
+        };
+        store_codex_usage(&db, &account_id, &usage);
+        Ok(usage)
     })
     .await
     .map_err(|e| e.to_string())?
@@ -383,5 +416,27 @@ pub(super) fn codex_login_with_api_key(dir: &Path, key: &str) -> Result<(), Stri
             }
             Err(e) => return Err(e.to_string()),
         }
+    }
+}
+
+#[cfg(test)]
+mod usage_cache_tests {
+    use super::{load_codex_usage, store_codex_usage, CodexUsage};
+    use std::sync::{Arc, Mutex};
+
+    #[test]
+    fn el_snapshot_de_codex_sobrevive_en_sqlite() {
+        let conn = crate::database::test_db();
+        let db = Arc::new(Mutex::new(conn));
+        let usage = CodexUsage {
+            email: Some("a@b.c".into()),
+            plan: Some("pro".into()),
+            auth: Some("chatgpt".into()),
+            quota: None,
+            fetched_at: 123,
+        };
+        store_codex_usage(&db, "acc", &usage);
+        assert_eq!(load_codex_usage(&db, "acc"), Some(usage));
+        assert!(load_codex_usage(&db, "otra").is_none());
     }
 }

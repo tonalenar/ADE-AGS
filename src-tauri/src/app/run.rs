@@ -57,6 +57,9 @@ pub fn run() {
     // corren después de que la ventana puede pintarse (ver `setup`).
     let (db_conn, _upgrade_pending) =
         crate::database::prepare_db().expect("Failed to initialize SQLite database");
+    // El hilo espera `db_is_ready`: no checkpointa mientras el splash corre el
+    // `VACUUM INTO` y la migración. Después mira el `-wal` cada 30 s, fuera del purge.
+    crate::database::spawn_wal_maintenance(db_conn.clone());
     // Antes de construir Tauri, porque WebKitGTK decide cómo componer al inicializarse; y
     // antes del hilo de señales, porque toca el entorno del proceso (ver `configure`).
     super::rendering::configure(&db_conn);
@@ -96,6 +99,7 @@ pub fn run() {
             // Terminal embebida (PTY)
             crate::terminal::pty_create,
             crate::terminal::pty_attach,
+            crate::terminal::pty_output_total,
             crate::terminal::pty_for_tab,
             crate::terminal::pty_write,
             crate::terminal::save_pasted_image,
