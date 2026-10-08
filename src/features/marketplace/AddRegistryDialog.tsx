@@ -1,10 +1,9 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useEffect, useRef, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
-import {
-  Button, Input, Select,
-} from "neogestify-ui-components";
+import { Button, Input } from "neogestify-ui-components";
 import { FolderIcon, AnimateSpin } from "neogestify-ui-components";
 import { useMarketplaceStore } from "@/features/marketplace/store";
 import type { RegistrySourceType, RegistryProgress } from "@/features/marketplace/types";
@@ -104,18 +103,18 @@ export function AddRegistryDialog({ onClose }: AddRegistryDialogProps) {
       }
     >
       <div className="flex flex-col gap-3">
-        <Select
-          label={t("marketplace.add.sourceType")}
-          value={sourceType}
-          onChange={(e) => { setSourceType(e.target.value as RegistrySourceType); setLocation(""); }}
-          options={[
-            { value: "github", label: t("marketplace.add.sourceGithub") },
-            { value: "skillssh", label: t("marketplace.add.sourceSkillsSh") },
-            { value: "local", label: t("marketplace.add.sourceLocal") },
-          ]}
-          variant="outline"
-          disabled={busy}
-        />
+        <div className="flex flex-col gap-1.5">
+          <label htmlFor="AddRegistryDialog-select-1" className="text-[12px] font-medium text-gray-600 dark:text-gray-300">{t("marketplace.add.sourceType")}</label>
+          <PopupSelect
+            value={sourceType}
+            onChange={(e) => { setSourceType(e.target.value as RegistrySourceType); setLocation(""); }}
+            disabled={busy}
+            id="AddRegistryDialog-select-1">
+            <option value="github">{t("marketplace.add.sourceGithub")}</option>
+            <option value="skillssh">{t("marketplace.add.sourceSkillsSh")}</option>
+            <option value="local">{t("marketplace.add.sourceLocal")}</option>
+          </PopupSelect>
+        </div>
 
         <Input
           label={t("marketplace.add.name")}

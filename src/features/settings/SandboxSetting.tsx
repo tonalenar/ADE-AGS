@@ -1,3 +1,4 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
@@ -48,22 +49,14 @@ export function SandboxSetting() {
         </div>
         {/* Pop-up estilo macOS: el valor y los chevrons apilados a la derecha. */}
         <span className="relative inline-flex shrink-0">
-          <select
+          <PopupSelect
             value={mode}
             onChange={(e) => change(e.target.value as Mode)}
-            className="h-7 appearance-none rounded-md pl-2.5 pr-7 text-[13px] text-gray-900 dark:text-gray-100
-              bg-gray-200/70 dark:bg-surface-overlay
-              focus:outline-none focus-visible:ring-[3px] focus-visible:ring-accent-500/25"
           >
             <option value="off">{t("settings.sandbox.mode.off")}</option>
             <option value="auto">{t("settings.sandbox.mode.auto")}</option>
             <option value="strict">{t("settings.sandbox.mode.strict")}</option>
-          </select>
-          <svg aria-hidden="true" viewBox="0 0 16 16"
-            className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2
-              fill-none stroke-current stroke-[1.8] text-gray-500 dark:text-white/50">
-            <path d="M5 6.2 8 3.4l3 2.8M5 9.8l3 2.8 3-2.8" />
-          </svg>
+          </PopupSelect>
         </span>
       </div>
       {status && (

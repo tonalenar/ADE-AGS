@@ -1,3 +1,4 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { memo, useCallback, useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
@@ -248,29 +249,27 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
 
       {/* Qué dispositivo, y cómo arrancar un emulador. */}
       <div className="nodrag flex items-center gap-1.5 px-2 py-1 shrink-0 border-b border-gray-100 dark:border-white/6">
-        <select
+        <PopupSelect
           value={chosen ?? ""}
           onChange={(e) => key && canvasActions.updatePortal(key, id, { serial: e.target.value || undefined })}
           aria-label={t("canvas.device.pick")}
-          className="min-w-0 flex-1 h-6 rounded-md px-1.5 text-[11px] outline-none bg-gray-50 dark:bg-white/5
-            border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-200"
+          className="min-w-0 flex-1"
         >
           <option value="">{ready.length === 0 ? t("canvas.device.none") : t("canvas.device.choose")}</option>
           {ready.map((d) => <option key={d.serial} value={d.serial}>{d.model || d.serial} · {d.serial}</option>)}
-        </select>
+        </PopupSelect>
         {(list?.avds.length ?? 0) > 0 && (
-          <select
+          <PopupSelect
             value=""
             disabled={starting}
             onChange={(e) => e.target.value && void startAvd(e.target.value)}
             aria-label={t("canvas.device.start")}
             title={t("canvas.device.start")}
-            className="shrink-0 w-20 h-6 rounded-md px-1.5 text-[11px] outline-none bg-gray-50 dark:bg-white/5
-              border border-gray-200 dark:border-white/10 text-gray-700 dark:text-gray-200 disabled:opacity-50"
+            className="shrink-0 w-20"
           >
             <option value="">{starting ? "…" : `▶ ${t("canvas.device.emulator")}`}</option>
             {list?.avds.map((a) => <option key={a} value={a}>{a}</option>)}
-          </select>
+          </PopupSelect>
         )}
       </div>
 

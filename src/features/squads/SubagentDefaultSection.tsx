@@ -2,12 +2,11 @@ import { useTranslation } from "react-i18next";
 
 import { ModelSelector } from "@/features/runs/ModelSelector";
 import type { Roster } from "@/features/runs/types";
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 
 import { FastSwitch } from "./FastSwitch";
 import { modelsForAccount } from "./modelSelection";
 import type { SubagentDefault } from "./types";
-
-const SELECT = "rounded-lg px-2.5 h-8 text-[11.5px] bg-gray-100 dark:bg-surface-raised border border-gray-200 dark:border-white/10 text-gray-800 dark:text-gray-200";
 
 /**
  * O LLM que os subagentes recrutados usam por padrão. "Automático" (valor `null`) deixa a
@@ -31,14 +30,14 @@ export function SubagentDefaultSection({ roster, onRoster, value, onChange }: {
       <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
         <label className="flex flex-col gap-1.5">
           <span className="text-[10.5px] font-semibold text-gray-600 dark:text-gray-300">{t("squads.form.provider")}</span>
-          <select className={SELECT} aria-label={t("squads.subagent.provider")} value={agentId}
+          <PopupSelect aria-label={t("squads.subagent.provider")} value={agentId}
             onChange={(event) => onChange(event.target.value ? { agentId: event.target.value, model: null, reasoningEffort: null, fastMode: false } : null)}>
             <option value="">{t("squads.subagent.auto")}</option>
             {agentId && !agent && <option value={agentId}>{agentId} · {t("squads.unavailable")}</option>}
             {roster?.agents.filter((entry) => entry.launchable).map((entry) => (
               <option key={entry.agentId} value={entry.agentId}>{entry.label}</option>
             ))}
-          </select>
+          </PopupSelect>
         </label>
         {value && (
           <>

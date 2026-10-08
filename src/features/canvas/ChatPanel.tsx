@@ -228,6 +228,24 @@ ${text}` : text)); setPicking(false); }} />}
       </>}
       title={t("canvas.chat.title")}
       subtitle={current?.title ?? t("canvas.chat.subtitle")}
+      heading={agents.length > 1 ? (
+        <div className="flex gap-0.5 overflow-x-auto rounded-lg bg-black/[0.05] p-0.5 dark:bg-white/[0.07]" role="tablist" aria-label={t("canvas.chat.title")}>
+          {agents.map((a) => (
+            <button key={a.id} type="button" onClick={() => setTabId(a.id)} title={a.title} aria-pressed={a.id === currentId}
+              className={`cc-t flex h-[26px] min-w-0 max-w-44 flex-1 items-center justify-center rounded-md px-2.5 text-[12px] font-medium
+                ${a.id === currentId
+                  ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-white dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+                  : "text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"}`}>
+              <span className="truncate">{a.title.split(" — ")[0]}</span>
+              {a.id !== currentId && unreadOf(unread[a.id]) > 0 && <Badge n={unreadOf(unread[a.id])} />}
+            </button>
+          ))}
+        </div>
+      ) : (
+        <div className="px-1">
+          <h3 className="text-[15px] font-semibold leading-5 tracking-[-0.01em]">{t("canvas.chat.title")}</h3>
+        </div>
+      )}
       greeting={t("canvas.chat.greeting")}
       prompt={t(current ? "canvas.chat.empty" : "canvas.chat.noAgents")}
       placeholder={t("canvas.chat.composerPlaceholder")}
@@ -244,8 +262,10 @@ ${text}` : text)); setPicking(false); }} />}
       </span>}
       actions={<>
         <button type="button" onClick={() => setPicking(true)} disabled={!current} title={t("canvas.chat.pick.open")} aria-label={t("canvas.chat.pick.open")}
-          className="cc-t flex h-7 items-center justify-center rounded-md bg-gray-100 px-2.5 text-[12px] font-medium text-gray-600 hover:text-gray-900 disabled:opacity-40 dark:bg-surface-raised dark:text-gray-300 dark:hover:text-white">
-          {t("canvas.chat.pick.open")}
+          className="cc-t flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 disabled:opacity-40 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden>
+            <rect x="3" y="4" width="18" height="16" rx="2.5" /><path d="m7 9 3 3-3 3M13 15h4" />
+          </svg>
         </button>
         <button type="button" onClick={toggleMax} aria-pressed={view.maximized}
           title={view.maximized ? t("canvas.chat.resize.unmaximize") : t("canvas.chat.resize.maximize")}
@@ -258,8 +278,10 @@ ${text}` : text)); setPicking(false); }} />}
         {(!isDefaultSize(view.size) || view.maximized) && (
           <button type="button" onClick={() => commit({ size: DEFAULT_CHAT_SIZE, maximized: false })}
             title={t("canvas.chat.resize.reset")} aria-label={t("canvas.chat.resize.reset")}
-            className="cc-t flex h-7 items-center justify-center rounded-md px-2 text-[12px] text-gray-500 hover:bg-gray-100 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.06] dark:hover:text-white">
-            {t("canvas.chat.resize.reset")}
+            className="cc-t flex h-7 w-7 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 disabled:opacity-40 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-3.5 w-3.5" aria-hidden>
+              <path d="M3 12a9 9 0 1 0 3-6.7M3 4v5h5" />
+            </svg>
           </button>
         )}
         <button type="button" onClick={load} disabled={!current} title={t("canvas.chat.refresh")} aria-label={t("canvas.chat.refresh")}
@@ -282,30 +304,17 @@ ${text}` : text)); setPicking(false); }} />}
         </Button>
       </>}
       toolbar={current && <div className="shrink-0 border-b border-black/[0.08] dark:border-white/[0.08]">
-        {agents.length > 1 && <div className="px-4 pt-3 pb-1">
-          <div className="flex gap-0.5 overflow-x-auto rounded-lg bg-gray-100 p-0.5 dark:bg-surface-raised">
-          {agents.map((a) => (
-            <button key={a.id} type="button" onClick={() => setTabId(a.id)} title={a.title} aria-pressed={a.id === currentId}
-              className={`cc-t flex h-[26px] max-w-40 shrink-0 items-center rounded-md px-2.5 text-[12px] font-medium
-                ${a.id === currentId
-                  ? "bg-white text-gray-900 shadow-sm dark:bg-surface-overlay dark:text-white dark:shadow-[0_1px_2px_rgba(0,0,0,0.35)]"
-                  : "text-gray-500 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white"}`}>
-              <span className="truncate">{a.title}</span>
-              {a.id !== currentId && unreadOf(unread[a.id]) > 0 && <Badge n={unreadOf(unread[a.id])} />}
-            </button>
-          ))}
-          </div>
-        </div>}
-          <div className="flex items-center gap-2.5 px-5 h-10">
+          <div className="flex items-center gap-2 px-4 h-8">
+            <span title={current.title} className="min-w-0 flex-1 truncate font-mono text-[11px] text-gray-500 dark:text-gray-400">{current.title}</span>
             {THREADS.map((th) => (
               <button key={th} type="button" onClick={() => setThread(th)}
                 title={`${t(`canvas.chat.thread.${th}`)}${counts[th] ? ` · ${counts[th]}` : ""}`}
                 aria-label={t(`canvas.chat.thread.${th}`)} aria-pressed={thread === th}
-                className="cc-t relative w-4 h-4 rounded-full hover:scale-110"
+                className="cc-t relative w-3 h-3 shrink-0 rounded-full hover:scale-110"
                 style={{
                   background: THREAD_COLOR[th],
                   opacity: thread === th ? 1 : counts[th] ? 0.7 : 0.3,
-                  boxShadow: thread === th ? `0 0 0 2px var(--color-surface-raised, white), 0 0 0 4px ${THREAD_COLOR[th]}` : undefined,
+                  boxShadow: thread === th ? `0 0 0 1.5px var(--color-surface, white), 0 0 0 3px ${THREAD_COLOR[th]}` : undefined,
                 }}>
                 {th !== thread && (unread[current.id]?.[th] ?? 0) > 0 && (
                   <span className="absolute -top-1.5 -right-1.5 min-w-[13px] h-[13px] px-[3px] rounded-full bg-red-500 text-white

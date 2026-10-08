@@ -7,6 +7,7 @@ import { Alert, AnimateSpin, Button, FolderIcon, Input, SegmentedControl, TextAr
 import { findDuplicateMission } from "./duplicates";
 import { useMissionsStore } from "./store";
 import { ModelSelector } from "@/features/runs/ModelSelector";
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { modelsForAccount, withModelEffort } from "@/features/squads/modelSelection";
 import { getRoster } from "@/features/runs/ipc";
 import { COMPLEXITIES } from "@/features/runs/routingView";
@@ -176,11 +177,11 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
 
         {form.executionMode === "specific" && (
           <Field group label={t("missions.form.leadProviderModel")}>
-            <select className={SELECT} aria-label={t("squads.form.provider")} value={form.agentId}
+            <PopupSelect className={SELECT} aria-label={t("squads.form.provider")} value={form.agentId}
               onChange={(event) => setForm((current) => ({ ...current, agentId: event.target.value, model: null, reasoningEffort: null, mode: "fixed", accountId: null, autoAccount: true }))}>
               {!agents.some((agent) => agent.agentId === form.agentId) && <option value={form.agentId}>{form.agentId} ? {t("squads.unavailable")}</option>}
               {agents.map((agent) => <option key={agent.agentId} value={agent.agentId} disabled={providerDisabled(agent, true)}>{agent.label}{leadUnsupported(agent) ? " · " + t("squads.leadUnsupported") : ""}</option>)}
-            </select>
+            </PopupSelect>
             {leadUnsupported(agents.find((agent) => agent.agentId === form.agentId)) && <Alert variant="warning">{t("squads.leadUnsupported")}</Alert>}
             <ModelSelector roster={roster} onRoster={setRoster} agentId={form.agentId} accountId={form.accountId} autoAccount={form.autoAccount}
               reasoningEffort={form.reasoningEffort}
@@ -191,7 +192,7 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
 
         {form.executionMode === "squad" && (
           <Field label={t("missions.form.squad")} hint={t("missions.form.squadHint")}>
-            <select
+            <PopupSelect
               value={form.squadId ?? ""}
               onChange={(event) => set("squadId", event.target.value || null)}
               className={SELECT}
@@ -202,7 +203,7 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
                   {squad.name}{squad.available ? "" : ` · ${t("squads.unavailable")}`}
                 </option>
               ))}
-            </select>
+            </PopupSelect>
             {selectedSquad && <SquadExecutionSummary squad={selectedSquad} />}
             {selectedSquad && !selectedSquad.available && (
               <Alert variant="warning">{selectedSquad.unavailableReasons.join("; ")}</Alert>
@@ -334,6 +335,4 @@ const INPUT = `w-full rounded-lg px-2.5 h-8 outline-none text-[12px]
   focus:border-accent-400 dark:focus:border-accent-500
   text-gray-800 dark:text-gray-200`;
 
-const SELECT = `w-full rounded-lg px-2.5 h-8 outline-none text-[12px]
-  bg-gray-100 dark:bg-surface-raised border border-gray-200 dark:border-white/10
-  focus:border-accent-400 dark:focus:border-accent-500 text-gray-800 dark:text-gray-200`;
+const SELECT = "w-full";

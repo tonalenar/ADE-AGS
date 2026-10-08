@@ -1,3 +1,4 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
@@ -46,16 +47,6 @@ const META = "font-mono text-[10.5px] leading-[14px] tabular-nums text-gray-500 
 const BODY = "whitespace-pre-wrap break-words rounded-lg bg-gray-200/50 p-2.5 text-[11.5px] leading-4 text-gray-800 dark:bg-surface-sunken dark:text-white/70";
 const CARD = "rounded-xl bg-gray-100/70 p-3 dark:bg-surface-raised/60";
 const SUBPANEL = "rounded-xl bg-violet-500/8 p-3 dark:bg-violet-300/5";
-
-/** Chevrons empilhados de pop-up estilo macOS. */
-function Chevrons() {
-  return (
-    <svg aria-hidden="true" viewBox="0 0 16 16"
-      className="pointer-events-none absolute right-2 top-1/2 h-3 w-3 -translate-y-1/2 fill-none stroke-current stroke-[1.8] text-gray-500 dark:text-white/50">
-      <path d="M5 6.2 8 3.4l3 2.8M5 9.8l3 2.8 3-2.8" />
-    </svg>
-  );
-}
 
 export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], activeRunId = null, initialTab }: {
   workspaceId: string;
@@ -314,11 +305,10 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
           <label className="flex items-center gap-2 text-[10.5px] text-gray-500 dark:text-white/45">
             Run
             <span className="relative inline-flex">
-              <select aria-label="Selecionar Run" value={selectedRunId} onChange={(event) => setRunSelection(event.target.value)}
-                className={`h-7 appearance-none pr-7 font-mono text-[11.5px] tabular-nums ${FIELD}`}>
+              <PopupSelect aria-label="Selecionar Run" value={selectedRunId} onChange={(event) => setRunSelection(event.target.value)}
+                className="font-mono tabular-nums">
                 {runs.map((run, index) => <option key={run.id} value={run.id}>#{runs.length - index} · {run.status} · {run.id.slice(0, 8)}</option>)}
-              </select>
-              <Chevrons />
+              </PopupSelect>
             </span>
           </label>
         )}
@@ -492,11 +482,10 @@ function MemoryProposalForm({ form, busy, secretPrompt, fact, allowMission, onCh
           <>
             <label className={LABEL}>Escopo
               <span className="relative inline-flex">
-                <select value={form.scope} disabled={form.mode === "update"} onChange={(event) => set("scope", event.target.value as MemoryScope)} className={`h-7 w-full appearance-none pr-7 ${FIELD}`}>
+                <PopupSelect value={form.scope} disabled={form.mode === "update"} onChange={(event) => set("scope", event.target.value as MemoryScope)} className="w-full">
                   <option value="workspace">Memória do Workspace</option>
                   {allowMission && <option value="mission">Memória da Mission</option>}
-                </select>
-                <Chevrons />
+                </PopupSelect>
               </span>
             </label>
             <label className={LABEL}>Chave
@@ -504,10 +493,9 @@ function MemoryProposalForm({ form, busy, secretPrompt, fact, allowMission, onCh
             </label>
             {!promoting && <label className={LABEL}>Tipo
               <span className="relative inline-flex">
-                <select value={form.kind} onChange={(event) => set("kind", event.target.value as MemoryKind)} className={`h-7 w-full appearance-none pr-7 ${FIELD}`}>
+                <PopupSelect value={form.kind} onChange={(event) => set("kind", event.target.value as MemoryKind)} className="w-full">
                   {KINDS.map((kind) => <option key={kind} value={kind}>{KIND_LABEL[kind]}</option>)}
-                </select>
-                <Chevrons />
+                </PopupSelect>
               </span>
             </label>}
             <label className={LABEL}>Conteúdo

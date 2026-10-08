@@ -1,9 +1,8 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { LANGUAGE_OPTIONS, persistLocale } from "@/i18n/locale";
 import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import {
-  Button, EditIcon, FolderIcon, Select, ThemeToggle, Tooltip, TrashIcon,
-} from "neogestify-ui-components";
+import { Button, EditIcon, FolderIcon, ThemeToggle, Tooltip, TrashIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n/index";
@@ -178,13 +177,11 @@ export function SettingsPage() {
                 <ThemeToggle />
               </SettingsRow>
               <SettingsRow label={t("settings.language")}>
-                <Select
+                <PopupSelect
                   value={i18n.language}
-                  onChange={(e) => handleLanguage(e.target.value)}
-                  variant="minimal"
-                  size="sm"
-                  options={[...LANGUAGE_OPTIONS]}
-                />
+                  onChange={(e) => handleLanguage(e.target.value)}>
+                  {LANGUAGE_OPTIONS.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
+                </PopupSelect>
               </SettingsRow>
               <RenderingSetting />
               <NotificationsSetting />

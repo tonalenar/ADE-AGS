@@ -1,3 +1,4 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, EmptyState, Skeleton } from "neogestify-ui-components";
@@ -206,7 +207,7 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
         </div>
         <div className="flex-1" />
         {target.account && target.accounts.length > 1 ? (
-          <select
+          <PopupSelect
             value={target.account.id}
             onChange={async (e) => {
               await forgeSetRepoAccount(target.root, e.target.value).catch(console.error);
@@ -214,11 +215,9 @@ function RepoPane({ repo }: { repo: OpenRepo }) {
               reload();
             }}
             title={t("forge.pickAccount")}
-            className="h-7 px-2 rounded-lg cursor-pointer text-[12px] outline-none bg-transparent
-              text-gray-600 dark:text-gray-300 border border-gray-200 dark:border-white/10"
           >
             {target.accounts.map((a) => <option key={a.id} value={a.id}>@{a.login}</option>)}
-          </select>
+          </PopupSelect>
         ) : target.account ? (
           <span className="text-[12px] text-gray-500 dark:text-white/45">@{target.account.login}</span>
         ) : (

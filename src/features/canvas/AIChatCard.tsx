@@ -2,6 +2,8 @@ import type { CSSProperties, KeyboardEvent, ReactNode } from "react";
 
 /** The 21st.dev AI chat card layout, with controlled input and live conversation content. */
 export interface AIChatCardProps {
+  /** Substitui título/subtítulo por um cabeçalho próprio (ex.: o seletor de conversas). */
+  heading?: ReactNode;
   title: string;
   subtitle?: string;
   greeting: string;
@@ -28,7 +30,7 @@ export interface AIChatCardProps {
 export function AIChatCard({
   title, subtitle, greeting, prompt, placeholder, inputLabel, sendLabel, message,
   onMessageChange, onSend, busy = false, disabled = false, actions, toolbar,
-  composerHint, children, className = "", style, chrome, onKeyDown,
+  composerHint, children, className = "", style, chrome, onKeyDown, heading,
 }: AIChatCardProps) {
   return (
     <section aria-label={title} style={style} onKeyDown={onKeyDown} className={`ai-chat-card flex min-h-0 flex-col overflow-hidden rounded-xl
@@ -36,13 +38,20 @@ export function AIChatCard({
       dark:border-white/[0.08] dark:bg-surface/90 dark:text-gray-50
       shadow-[0_0_0_0.5px_rgba(10,10,10,0.06),0_10px_30px_rgba(0,0,0,0.12)]
       dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)] ${className}`}>
-      <header className="flex shrink-0 items-start justify-between gap-3 border-b border-black/[0.08] px-4 pb-3 pt-4 dark:border-white/[0.08]">
-        <div className="min-w-0">
-          <h3 className="text-[15px] font-semibold leading-5 tracking-[-0.01em]">{title}</h3>
-          {subtitle && <p title={subtitle} className="mt-0.5 truncate font-mono text-[11.5px] leading-[15px] tabular-nums text-gray-500 dark:text-gray-400">{subtitle}</p>}
-        </div>
-        {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
-      </header>
+      {heading ? (
+        <header className="flex shrink-0 items-center gap-2 px-3 pt-3 pb-2">
+          <div className="min-w-0 flex-1">{heading}</div>
+          {actions && <div className="flex shrink-0 items-center gap-0.5">{actions}</div>}
+        </header>
+      ) : (
+        <header className="flex shrink-0 items-start justify-between gap-3 border-b border-black/[0.08] px-4 pb-3 pt-4 dark:border-white/[0.08]">
+          <div className="min-w-0">
+            <h3 className="text-[15px] font-semibold leading-5 tracking-[-0.01em]">{title}</h3>
+            {subtitle && <p title={subtitle} className="mt-0.5 truncate font-mono text-[11.5px] leading-[15px] tabular-nums text-gray-500 dark:text-gray-400">{subtitle}</p>}
+          </div>
+          {actions && <div className="flex shrink-0 items-center gap-1">{actions}</div>}
+        </header>
+      )}
 
       {chrome}
       {toolbar}

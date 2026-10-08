@@ -1,6 +1,7 @@
+import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
-import { Button, Input, Select } from "neogestify-ui-components";
+import { Button, Input } from "neogestify-ui-components";
 import { AddIcon, TrashIcon, ChevronDownIcon } from "neogestify-ui-components";
 import type { CustomAgentDraft } from "@/features/agents/types";
 import { emptyCustomAgent } from "@/features/agents/types";
@@ -153,17 +154,14 @@ export function CustomAgentForm({ initial, onSubmit, onCancel }: CustomAgentForm
               {/* `filename` no necesita más datos; `field:` sí, así que el select elige la
                   estrategia y el input de al lado aparece solo para la que la necesita. */}
               <div className="flex flex-col gap-1">
-                <Select
+                <PopupSelect
                   value={draft.sessionIdFrom.startsWith("field:") ? "field" : "filename"}
                   onChange={(e) =>
                     patch({ sessionIdFrom: e.target.value === "field" ? "field:session_id" : "filename" })
-                  }
-                  options={[
-                    { value: "filename", label: t("settings.tuis.sessionIdFrom.filename") },
-                    { value: "field", label: t("settings.tuis.sessionIdFrom.field") },
-                  ]}
-                  variant="outline"
-                />
+                  }>
+                  <option value="filename">{t("settings.tuis.sessionIdFrom.filename")}</option>
+                  <option value="field">{t("settings.tuis.sessionIdFrom.field")}</option>
+                </PopupSelect>
                 {draft.sessionIdFrom.startsWith("field:") && (
                   <Input
                     value={draft.sessionIdFrom.slice("field:".length)}

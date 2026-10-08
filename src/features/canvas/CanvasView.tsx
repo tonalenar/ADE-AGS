@@ -626,7 +626,7 @@ function CanvasInner() {
         connectionLineComponent={CordConnectionLine}
         connectionRadius={CORD_MAGNET}
         edgesReconnectable={tool === "select"}
-        reconnectRadius={16}
+        reconnectRadius={26}
         onReconnectStart={onReconnectStart}
         onReconnect={onReconnect}
         onReconnectEnd={onReconnectEnd}
@@ -694,18 +694,12 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
   const { t } = useTranslation();
   const { tab, box, live, links, orchestrator, role, onFocus, onToggleOrchestrator } = data;
   const Icon = agentIcon(tab.agentId, tab.agentId);
-  const handle = "ade-port w-3! h-3! border-[3px]! border-white! dark:border-surface! bg-gray-400! dark:bg-gray-200!";
+  const handle = "ade-port z-10! w-3.5! h-3.5! border-[3px]! border-white! dark:border-surface! bg-gray-400! dark:bg-gray-200!";
 
   return (
-    <div
-      className={`group h-full w-full flex flex-col rounded-xl overflow-hidden
-        bg-white dark:bg-surface
-        ${selected
-          ? "shadow-[0_0_0_1.5px_var(--color-accent-500),0_12px_32px_rgba(0,0,0,0.35)]"
-          : orchestrator
-            ? "shadow-[0_0_0_1px_color-mix(in_oklab,var(--color-glow)_55%,transparent),0_12px_32px_rgba(0,0,0,0.35)]"
-            : "shadow-[0_0_0_0.5px_rgba(0,0,0,0.14),0_8px_24px_rgba(0,0,0,0.12)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.07),0_12px_32px_rgba(0,0,0,0.45)]"}`}
-    >
+    // As alças ficam FORA do cartão: dentro do `overflow-hidden` saíam cortadas pela metade e a de
+    // baixo ficava por baixo do corpo do terminal — por isso era tão difícil puxar uma corda.
+    <div className="relative h-full w-full">
       <NodeResizer isVisible={selected} minWidth={NODE_MIN.w} minHeight={NODE_MIN.h}
         lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
 
@@ -719,52 +713,62 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
       <Handle id="b" type="source" position={Position.Bottom} className={handle} />
 
       <div
-        className="ade-node-drag flex items-center gap-2 px-3.5 shrink-0 cursor-grab active:cursor-grabbing select-none
-          border-b border-black/[0.06] dark:border-white/[0.07] bg-gray-50/80 dark:bg-surface"
-        style={{ height: HEADER_H }}
-        onDoubleClick={() => onFocus(tab.id)}
-        title={t("canvas.focusHint")}
+        className={`group h-full w-full flex flex-col rounded-xl overflow-hidden
+          bg-white dark:bg-surface
+          ${selected
+            ? "shadow-[0_0_0_1.5px_var(--color-accent-500),0_12px_32px_rgba(0,0,0,0.35)]"
+            : orchestrator
+              ? "shadow-[0_0_0_1px_color-mix(in_oklab,var(--color-glow)_55%,transparent),0_12px_32px_rgba(0,0,0,0.35)]"
+              : "shadow-[0_0_0_0.5px_rgba(0,0,0,0.14),0_8px_24px_rgba(0,0,0,0.12)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.07),0_12px_32px_rgba(0,0,0,0.45)]"}`}
       >
-        <Icon className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
-        <span className="truncate text-[13px] font-semibold tracking-[-0.01em] text-gray-900 dark:text-gray-50">{tab.title}</span>
-        <span className="truncate text-[11.5px] text-gray-400 dark:text-gray-500">{tab.agentLabel}</span>
-        {role && (
-          <span className="shrink-0 max-w-28 truncate text-[10px] font-semibold uppercase tracking-[0.05em] px-2 py-0.5 rounded-full
-            text-violet-700 dark:text-violet-300 bg-violet-500/15" title={t("canvas.role", { role })}>
-            {role}
-          </span>
-        )}
-        {orchestrator && (
-          <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.05em] px-2 py-0.5 rounded-full
-            text-amber-700 dark:text-glow bg-glow/15">
-            {t("canvas.orchestrator")}
-          </span>
-        )}
-        <span className="flex-1" />
-        {/* `nodrag`: sin esto el clic arrastraría el nodo en vez de apretar el botón. */}
-        <Button variant="custom"
-          onClick={() => onToggleOrchestrator(tab.id)}
-          aria-pressed={orchestrator}
-          title={orchestrator ? t("canvas.orchestratorOff") : t("canvas.orchestratorOn")}
-          className={`nodrag cc-t shrink-0 flex items-center justify-center w-6 h-6 rounded-md
-            ${orchestrator
-              ? "text-amber-600 dark:text-glow"
-              : "text-gray-300 dark:text-white/20 hover:text-gray-600 dark:hover:text-white/60"}
-            hover:bg-gray-200/70 dark:hover:bg-white/8`}
+        <div
+          className="ade-node-drag flex items-center gap-2 px-3.5 shrink-0 cursor-grab active:cursor-grabbing select-none
+            border-b border-black/[0.06] dark:border-white/[0.07] bg-gray-50/80 dark:bg-surface"
+          style={{ height: HEADER_H }}
+          onDoubleClick={() => onFocus(tab.id)}
+          title={t("canvas.focusHint")}
         >
-          <CrownIcon className="w-3.5 h-3.5" />
-        </Button>
-        {links > 0 && (
-          <span className="shrink-0 font-mono text-[10.5px] tabular-nums px-1.5 py-0.5 rounded-full
-            bg-gray-200/70 dark:bg-white/[0.07] text-gray-500 dark:text-gray-400" title={t("canvas.links", { count: links })}>
-            ⇄ {links}
-          </span>
-        )}
-      </div>
+          <Icon className="w-3.5 h-3.5 shrink-0 text-gray-500 dark:text-gray-400" />
+          <span className="truncate text-[13px] font-semibold tracking-[-0.01em] text-gray-900 dark:text-gray-50">{tab.title}</span>
+          <span className="truncate text-[11.5px] text-gray-400 dark:text-gray-500">{tab.agentLabel}</span>
+          {role && (
+            <span className="shrink-0 max-w-28 truncate text-[10px] font-semibold uppercase tracking-[0.05em] px-2 py-0.5 rounded-full
+              text-violet-700 dark:text-violet-300 bg-violet-500/15" title={t("canvas.role", { role })}>
+              {role}
+            </span>
+          )}
+          {orchestrator && (
+            <span className="shrink-0 text-[10px] font-semibold uppercase tracking-[0.05em] px-2 py-0.5 rounded-full
+              text-amber-700 dark:text-glow bg-glow/15">
+              {t("canvas.orchestrator")}
+            </span>
+          )}
+          <span className="flex-1" />
+          {/* `nodrag`: sin esto el clic arrastraría el nodo en vez de apretar el botón. */}
+          <Button variant="custom"
+            onClick={() => onToggleOrchestrator(tab.id)}
+            aria-pressed={orchestrator}
+            title={orchestrator ? t("canvas.orchestratorOff") : t("canvas.orchestratorOn")}
+            className={`nodrag cc-t shrink-0 flex items-center justify-center w-6 h-6 rounded-md
+              ${orchestrator
+                ? "text-amber-600 dark:text-glow"
+                : "text-gray-300 dark:text-white/20 hover:text-gray-600 dark:hover:text-white/60"}
+              hover:bg-gray-200/70 dark:hover:bg-white/8`}
+          >
+            <CrownIcon className="w-3.5 h-3.5" />
+          </Button>
+          {links > 0 && (
+            <span className="shrink-0 font-mono text-[10.5px] tabular-nums px-1.5 py-0.5 rounded-full
+              bg-gray-200/70 dark:bg-white/[0.07] text-gray-500 dark:text-gray-400" title={t("canvas.links", { count: links })}>
+              ⇄ {links}
+            </span>
+          )}
+        </div>
 
-      {/* Al 100 % la terminal viva está encima de este hueco. Alejado, una vista previa. */}
-      <div className="relative flex-1 min-h-0">
-        {!live && <Preview tabId={tab.id} rows={Math.max(4, Math.floor((box.h - HEADER_H) / 15))} onOpen={() => onFocus(tab.id)} />}
+        {/* Al 100 % la terminal viva está encima de este hueco. Alejado, una vista previa. */}
+        <div className="relative flex-1 min-h-0">
+          {!live && <Preview tabId={tab.id} rows={Math.max(4, Math.floor((box.h - HEADER_H) / 15))} onOpen={() => onFocus(tab.id)} />}
+        </div>
       </div>
     </div>
   );

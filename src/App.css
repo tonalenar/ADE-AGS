@@ -669,3 +669,7 @@ html.dark {
 .react-flow__handle.ade-port:hover,
 .react-flow__handle.ade-port.connectingto { transform: translate(-50%, -50%) scale(1.35); }
 .react-flow__handle-left.ade-port:hover, .react-flow__handle-right.ade-port:hover { transform: translate(-50%, -50%) scale(1.35); }
+
+/* A bolinha é pequena; a área que o mouse pega não: 32px em volta (invisível). */
+.react-flow__handle.ade-port::before { content: ""; position: absolute; inset: -10px; border-radius: 999px; }
+.react-flow__handle.ade-port { cursor: crosshair; }
