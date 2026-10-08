@@ -83,7 +83,7 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
   return (
     <AppDialog
       title={editing ? t("missions.form.editTitle") : t("missions.form.title")}
-      size="md"
+      size="lg"
       closeOnEsc
       onClose={onClose}
       footer={
@@ -142,8 +142,9 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
         <div>
           <div className={LABEL}>{t("missions.form.config")}</div>
           <div className="overflow-hidden rounded-xl border border-black/[0.1] bg-gray-50 dark:border-[rgba(84,84,88,0.55)] dark:bg-surface-deep">
-            <Row label={t("missions.form.executionMode")}>
+            <Row stacked label={t("missions.form.executionMode")}>
               <Segmented
+                className="w-full"
                 label={t("missions.form.executionMode")}
                 value={form.executionMode}
                 onChange={(value) => setForm((current) => switchExecutionMode(current, value))}
@@ -244,7 +245,7 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
                 inputMode="decimal"
                 placeholder="1.00"
                 aria-label={t("fleet.orchestrate.budget")}
-                className={`${FIELD} w-28 text-right font-mono`}
+                className={`${FIELD} !w-28 shrink-0 text-right font-mono`}
               />
             </Row>
           </div>
@@ -322,7 +323,7 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
  */
 function Row({ label, hint, stacked = false, children }: { label: string; hint?: string; stacked?: boolean; children: React.ReactNode }) {
   const title = (
-    <span className="flex min-w-0 flex-col gap-0.5">
+    <span className="flex min-w-0 flex-col gap-0.5 [&>span:first-child]:whitespace-nowrap">
       <span className="text-[13.5px] leading-[19px] text-gray-900 dark:text-[#f5f5f7]">{label}</span>
       {hint && <span className="text-[11.5px] leading-4 text-gray-500 dark:text-white/50">{hint}</span>}
     </span>
