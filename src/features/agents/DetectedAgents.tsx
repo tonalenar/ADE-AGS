@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AnimateSpin, Button, CheckCircleIcon } from "neogestify-ui-components";
+import { AlertaToast, AnimateSpin, Button, CheckCircleIcon } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";
@@ -59,6 +59,8 @@ export function DetectedAgents() {
     try {
       setDetectedAgents(await detectAgents(true));
       refreshUpdates();
+    } catch (e) {
+      AlertaToast(t("settings.tuis.detected"), String(e), "error", 6000);
     } finally {
       setScanning(false);
     }

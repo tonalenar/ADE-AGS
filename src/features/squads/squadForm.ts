@@ -65,5 +65,6 @@ export function removeSquadRole(input: SquadInput, roleId: string): SquadInput {
 
 /** O subagente padrão está completo para salvar: Automático, ou um agente (com modelo quando o modo é específico). */
 export function subagentDefaultIsReady(value: SquadInput["defaultSubagent"]): boolean {
-  return !value || Boolean(value.agentId.trim());
+  // `model: ""` é "modelo específico" escolhido e deixado em branco; `null` é o padrão do provedor.
+  return !value || (Boolean(value.agentId.trim()) && value.model !== "");
 }

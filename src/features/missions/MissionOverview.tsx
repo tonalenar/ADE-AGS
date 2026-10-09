@@ -27,17 +27,18 @@ export function formatActive(seconds: number | null | undefined): string | null 
 }
 
 /** Dinheiro na moeda e no formato do idioma ("US$ 2,41"). */
-export function formatUsd(value: number, locale: string): string {
+export function formatUsd(value: number, locale: string, digits = 2): string {
   try {
-    return new Intl.NumberFormat(locale, { style: "currency", currency: "USD", minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+    return new Intl.NumberFormat(locale, { style: "currency", currency: "USD", minimumFractionDigits: digits, maximumFractionDigits: digits }).format(value);
   } catch {
-    return `$${value.toFixed(2)}`;
+    return `$${value.toFixed(digits)}`;
   }
 }
 
 /** "PR #112" a partir de um número ou de uma URL do GitHub. */
 export function prLabel(pr: string): string {
-  const n = pr.match(/(\d+)\s*$/)?.[1] ?? pr.match(/pull\/(\d+)/)?.[1];
+  // Numa URL o número é o do /pull/N; o do fim pode ser de um #issuecomment-987.
+  const n = pr.match(/pull\/(\d+)/)?.[1] ?? pr.match(/(\d+)\s*$/)?.[1];
   return n ? `PR #${n}` : pr;
 }
 

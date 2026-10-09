@@ -610,6 +610,8 @@
   "panel.collapse": "Recolher o painel",
   "panel.expand": "Expanda o painel",
   "btn.close": "Fechar",
+  "missions.form.missing": "Falta preencher: {{fields}}",
+  "settings.accounts.limits.budgetHelper": "O orçamento diário precisa ser um número maior ou igual a zero.",
   "app.routeError.title": "Esta tela encontrou um erro",
   "app.routeError.body": "O resto do app continua funcionando. Volte ao início ou recarregue a tela.",
   "app.routeError.home": "Ir para o início",

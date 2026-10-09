@@ -610,6 +610,8 @@
   "panel.collapse": "Plegar el panel",
   "panel.expand": "Desplegar el panel",
   "btn.close": "Cerrar",
+  "missions.form.missing": "Falta completar: {{fields}}",
+  "settings.accounts.limits.budgetHelper": "El presupuesto diario debe ser un número mayor o igual a cero.",
   "app.routeError.title": "Esta pantalla encontró un error",
   "app.routeError.body": "El resto de la app sigue funcionando. Vuelve al inicio o recarga la pantalla.",
   "app.routeError.home": "Ir al inicio",

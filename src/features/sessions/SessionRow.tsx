@@ -64,6 +64,8 @@ function RowAction({ label, onClick, danger, disabled, children }: {
     <Tooltip content={label} placement="bottom">
       <Button variant="icon"
         onClick={(e) => { e.stopPropagation(); onClick(); }}
+        // O segundo clique de um duplo clique não pode chegar à linha (que retoma a sessão).
+        onDoubleClick={(e) => e.stopPropagation()}
         disabled={disabled}
         aria-label={label}
         className={`cc-t flex items-center justify-center w-6 h-6 rounded-md shrink-0
@@ -138,6 +140,8 @@ export function SessionRow({
     setBusy(true);
     try {
       await deleteSession(entry.id, workspaceId);
+    } catch (e) {
+      AlertaToast(t("sessions.delete.action"), String(e), "error", 6000);
     } finally {
       setBusy(false);
     }

@@ -40,7 +40,8 @@ import { DuplicateMissionDialog } from "./DuplicateMissionDialog";
 import { findDuplicateMission } from "./duplicates";
 import { MissionReviewPanel } from "./MissionReviewPanel";
 import { MissionFinishDialog } from "./MissionFinishDialog";
-import { DeliveryCard, MissionMetricsCard, MissionTeamCard, capitalize, formatActive, prLabel, prUrl } from "./MissionOverview";
+import { DeliveryCard, MissionMetricsCard, MissionTeamCard, capitalize, formatActive, formatUsd, prLabel, prUrl } from "./MissionOverview";
+import i18n from "@/i18n";
 import { agentTile } from "@/features/agents/agentTile";
 import * as missionIpc from "./ipc";
 import {
@@ -692,7 +693,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
           label={t("missions.detail.budget")}
           value={mission.budgetUsd !== null ? `$${mission.budgetUsd.toFixed(2)}` : t("missions.detail.noBudget")}
         />
-        <Stat label={t("missions.detail.spent")} value={`$${summary.spentUsd.toFixed(3)}`} />
+        <Stat label={t("missions.detail.spent")} value={formatUsd(summary.spentUsd, i18n.language, 3)} />
       </dl>
 
       {run?.squadName ? (
@@ -862,7 +863,7 @@ function TaskRow({ task, tasks, accountLabel, blocked, approval, focused, onDeci
           {task.agentId}{task.model ? ` · ${task.model}` : ""}{task.accountId ? ` · ${accountLabel(task.accountId, false)}` : ""}
         </span>
         <span className="shrink-0 text-[10.5px] text-gray-500 dark:text-white/45">{t(`missions.state.${state}`)}</span>
-        {task.costUsd !== null && <span className="shrink-0 tabular-nums text-[10.5px] text-gray-400">${task.costUsd.toFixed(3)}</span>}
+        {task.costUsd !== null && <span className="shrink-0 tabular-nums text-[10.5px] text-gray-400">{formatUsd(task.costUsd, i18n.language, 3)}</span>}
       </span>
       {deps.length > 0 && (
         <span className="pl-3.5 text-[10.5px] text-gray-400 dark:text-white/35">{t("missions.detail.dependsOn", { deps: deps.join(", ") })}</span>

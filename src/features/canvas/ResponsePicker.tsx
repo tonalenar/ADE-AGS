@@ -25,6 +25,8 @@ export function ResponsePicker({ tabId, onPick, onClose }: { tabId: string; onPi
     ...segments.map((s) => ({ key: `r${s.index}`, label: s.prompt ?? t("canvas.chat.pick.noPrompt"), text: s.text }))];
 
   useEffect(() => { root.current?.focus(); }, []);
+  // Com o teclado a opção ativa pode sair da área visível: rola até ela.
+  useEffect(() => { root.current?.querySelector<HTMLElement>(`[data-idx="${active}"]`)?.scrollIntoView?.({ block: "nearest" }); }, [active]);
   useEffect(() => { if (active >= options.length) setActive(Math.max(0, options.length - 1)); }, [options.length, active]);
 
   const onKeyDown = (e: React.KeyboardEvent) => {
@@ -50,7 +52,7 @@ export function ResponsePicker({ tabId, onPick, onClose }: { tabId: string; onPi
       <ul className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3" role="listbox" aria-label={t("canvas.chat.pick.title")}>
         {options.length === 0 && <li className="p-4 text-center text-[12px] text-gray-500">{t("canvas.chat.pick.empty")}</li>}
         {options.map((o, i) => (
-          <li key={o.key} role="option" aria-selected={i === active} onMouseEnter={() => setActive(i)}
+          <li key={o.key} role="option" aria-selected={i === active} data-idx={i} onMouseEnter={() => setActive(i)}
             className={`rounded-xl border p-2.5 transition-colors ${i === active
               ? "border-accent-400 bg-accent-50 dark:border-accent-400/60 dark:bg-accent-400/10"
               : "border-gray-200 dark:border-white/10"}`}>
