@@ -61,6 +61,8 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
   const [isolate, setIsolate] = useState(false);
   const [assignment, setAssignment] = useState<Assignment | null>(null);
   const [routeError, setRouteError] = useState("");
+  // O erro do roster é separado do da previsão: o seguinte não pode apagar o primeiro.
+  const [rosterError, setRosterError] = useState("");
 
   useEffect(() => {
     repoInfo(cwd)
@@ -76,7 +78,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
   }, [cwd, busyInFolder]);
 
   useEffect(() => {
-    getRoster().then(setRoster).catch((e) => setRouteError(String(e)));
+    getRoster().then(setRoster).catch((e) => setRosterError(String(e)));
   }, []);
 
   // Las TUIs que se ofrecen salen del roster: "se sabe correr sin terminal" es algo que
@@ -114,7 +116,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
     // `roster` también: el primer sondeo puede cambiar lo que había disponible.
   }, [route, roster]);
 
-  const canStart = prompt.trim().length > 0 && !busy && !routeError;
+  const canStart = prompt.trim().length > 0 && !busy && !routeError && !rosterError;
 
   const changeKind = (next: LaunchKind) => {
     setKind(next);
@@ -292,7 +294,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
           </Field>
         </div>
 
-        <RoutePreview roster={roster} assignment={assignment} error={routeError} />
+        <RoutePreview roster={roster} assignment={assignment} error={routeError || rosterError} />
 
         {kind === "task" && <div className="flex flex-col gap-1.5">
           <Checkbox

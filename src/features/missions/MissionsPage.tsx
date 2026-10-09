@@ -42,6 +42,7 @@ import { MissionReviewPanel } from "./MissionReviewPanel";
 import { MissionFinishDialog } from "./MissionFinishDialog";
 import { DeliveryCard, MissionMetricsCard, MissionTeamCard, capitalize, formatActive, formatUsd, prLabel, prUrl } from "./MissionOverview";
 import i18n from "@/i18n";
+import { useUiStore } from "@/app/uiStore";
 import { agentTile } from "@/features/agents/agentTile";
 import * as missionIpc from "./ipc";
 import {
@@ -106,6 +107,14 @@ export function MissionsPage() {
   const loadSquads = useSquadsStore((s) => s.load);
 
   const [selected, setSelected] = useState<string | null>(null);
+  // Pedido de fora (um rascunho clicado na lateral): escolhe a missão e limpa o pedido.
+  const missionRequest = useUiStore((s) => s.missionRequest);
+  useEffect(() => {
+    if (!missionRequest) return;
+    setSelected(missionRequest);
+    setFleet(false);
+    useUiStore.getState().requestMission(null);
+  }, [missionRequest]);
   // Busca da lista (prancheta 2): filtra só o que aparece, por título e objetivo.
   const [query, setQuery] = useState("");
   // Filtro por grupo (os chips sob a busca), grupos recolhidos e grupos abertos por inteiro.
