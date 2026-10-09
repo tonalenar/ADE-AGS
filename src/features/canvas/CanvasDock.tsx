@@ -84,7 +84,7 @@ function Pill({ label, active, onClick, children, className = "" }: {
 /** Separador hairline entre grupos de la barra. */
 const Sep = () => <span aria-hidden className="w-px h-[22px] mx-1.5 bg-black/10 dark:bg-white/[0.08]" />;
 
-const popover = `pointer-events-auto absolute right-3 bottom-16 rounded-xl overflow-hidden border ${hairline} ${material}`;
+const popover = `pointer-events-auto absolute right-3 bottom-[4.75rem] rounded-xl overflow-hidden border ${hairline} ${material}`;
 
 /**
  * La barra de abajo del canvas: andares, uso de los agentes (anillos), mapa y zoom, más el
@@ -216,7 +216,7 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
 function UsagePanel({ accounts, onClose }: { accounts: AgentAccount[]; onClose: () => void }) {
   const { t } = useTranslation();
   return (
-    <div className={`${popover} w-[22rem] max-h-[calc(100%-5rem)] flex flex-col`}>
+    <div className={`${popover} w-[22rem] max-h-[calc(100%-6.5rem)] flex flex-col`}>
       <div className={`flex items-center gap-1 pl-4 pr-2 h-11 shrink-0 border-b ${hairline}`}>
         <span className="text-[13px] font-semibold tracking-[-0.01em] text-gray-800 dark:text-gray-100">{t("canvas.dock.usageTitle")}</span>
         <span className="flex-1" />

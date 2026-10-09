@@ -9,7 +9,7 @@ export interface ChatSizeState { size: ChatSize; maximized: boolean }
 export const DEFAULT_CHAT_SIZE: ChatSize = { width: 416, height: 544 };
 export const MIN_CHAT_SIZE: ChatSize = { width: 300, height: 320 };
 /** Margen que el panel deja libre alrededor dentro del área (el botón de abajo, el borde). */
-export const CHAT_MARGIN = { x: 24, y: 76 };
+export const CHAT_MARGIN = { x: 24, y: 88 };
 const KEY = "ags.chat.size.v1";
 
 const finite = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);

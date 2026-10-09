@@ -246,7 +246,7 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
 
   return (
     <AIChatCard
-      className="pointer-events-auto absolute right-3 bottom-16"
+      className="pointer-events-auto absolute right-3 bottom-[4.75rem]"
       style={sizeStyle}
       onKeyDown={(e) => {
         if (e.key === "Escape" && !picking) { e.stopPropagation(); onClose(); }
