@@ -19,6 +19,12 @@ import { buildResumeCommand, isResumable } from "../agentResume";
  * truco que usa `ipc/test.rs` para atar la CLI con su despachador: dos tablas en archivos
  * distintos no rompen la compilación cuando divergen, así que se las ata leyendo el fuente.
  */
+/** O literal de um campo, ou o valor de não-Windows de `if cfg!(windows) { "a" } else { "b" }` (o do shell). */
+function rustString(block: string, field: string): string | undefined {
+  const match = new RegExp(String.raw`\b${field}:\s*(?:if cfg!\(windows\) \{ "[^"]+" \} else \{ "([^"]+)" \}|"([^"]+)")`).exec(block);
+  return match?.[1] ?? match?.[2];
+}
+
 function registryFromRust(): AgentRegistryEntry[] {
   // Solo el cuerpo de la tabla: la struct de arriba también tiene campos `id`/`resume`
   // en sus doc-comments y confundiría al parseo.
@@ -29,7 +35,7 @@ function registryFromRust(): AgentRegistryEntry[] {
     .slice(1)
     .map((block) => {
       const id = /\bid:\s*"([^"]+)"/.exec(block)?.[1];
-      const command = /\bcommand:\s*"([^"]+)"/.exec(block)?.[1];
+      const command = rustString(block, "command");
       const resume = /\bresume:\s*Some\("([^"]+)"\)/.exec(block)?.[1] ?? null;
       const skillsDir = /\bskills_dir:\s*Some\("([^"]+)"\)/.exec(block)?.[1] ?? null;
       if (!id || !command) throw new Error(`fila ilegible en registry.rs: ${block.slice(0, 80)}`);
@@ -37,7 +43,7 @@ function registryFromRust(): AgentRegistryEntry[] {
       if (!mcp) throw new Error(`la fila '${id}' de registry.rs no declara su McpStyle`);
       return {
         id,
-        label: /\blabel:\s*"([^"]+)"/.exec(block)?.[1] ?? id,
+        label: rustString(block, "label") ?? id,
         command,
         skillsDir,
         resume,
