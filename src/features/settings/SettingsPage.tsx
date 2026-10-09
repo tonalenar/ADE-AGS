@@ -2,7 +2,7 @@ import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { LANGUAGE_OPTIONS, persistLocale } from "@/i18n/locale";
 import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { Button, EditIcon, FolderIcon, ThemeToggle, Tooltip, TrashIcon } from "neogestify-ui-components";
+import { AlertaToast, Button, EditIcon, FolderIcon, ThemeToggle, Tooltip, TrashIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 
 import i18n from "@/i18n/index";
@@ -129,6 +129,18 @@ export function SettingsPage() {
   const loadCustomAgents = useAgentsStore((s) => s.loadCustomAgents);
   const saveCustomAgent = useAgentsStore((s) => s.saveCustomAgent);
   const removeCustomAgent = useAgentsStore((s) => s.removeCustomAgent);
+  // Excluir uma TUI pede um segundo clique (3 s) e mostra o erro se o backend recusar.
+  const [armedAgent, setArmedAgent] = useState<string | null>(null);
+  useEffect(() => {
+    if (!armedAgent) return;
+    const timer = window.setTimeout(() => setArmedAgent(null), 3000);
+    return () => window.clearTimeout(timer);
+  }, [armedAgent]);
+  const deleteCustomAgent = (id: string) => {
+    if (armedAgent !== id) { setArmedAgent(id); return; }
+    setArmedAgent(null);
+    removeCustomAgent(id).catch((e) => AlertaToast(t("btn.delete"), String(e), "error", 6000));
+  };
   const skillsDir = useSkillsStore((s) => s.skillsDir);
   const loadSkillsDir = useSkillsStore((s) => s.loadSkillsDir);
   const setSkillsDir = useSkillsStore((s) => s.setSkillsDir);
@@ -341,7 +353,7 @@ export function SettingsPage() {
                               </Tooltip>
                               <Tooltip content={t("btn.delete")} placement="left">
                                 <Button variant="icon"
-                                  onClick={() => removeCustomAgent(agent.id)}
+                                  onClick={() => deleteCustomAgent(agent.id)}
                                   aria-label={t("btn.delete")}
                                   className="cc-t flex items-center justify-center w-7 h-7 rounded-md
                                     text-gray-500 dark:text-white/40

@@ -88,6 +88,9 @@ export function PermissionCard({ approval, onDecide, focused }: {
     [approval.toolName, approval.input]
   );
 
+  // Outro pedido ocupa a mesma tarjeta (a fila anda): o estado do anterior não vale para ele.
+  useEffect(() => { setBusy(false); setRemember(false); }, [approval.id]);
+
   const decide = (allow: boolean) => {
     if (busy) return;
     setBusy(true);
@@ -97,6 +100,8 @@ export function PermissionCard({ approval, onDecide, focused }: {
   useEffect(() => {
     if (!focused || busy) return;
     const onKey = (e: KeyboardEvent) => {
+      // Ctrl/Cmd/Alt+Y|N|R são atalhos de outras coisas (refazer, copiar…): nunca decidem um pedido.
+      if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
       // Con un campo de texto enfocado, `y` es una letra que alguien está escribiendo.
       const el = document.activeElement;
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;

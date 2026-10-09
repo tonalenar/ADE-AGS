@@ -860,7 +860,7 @@ fn value_for(key: &str, raw: &str) -> Value {
         ),
         // Un número mal escrito se manda tal cual como string: el backend lo rechaza con
         // un mensaje que nombra el flag, mejor que un "0" silencioso acá.
-        "lines" | "timeout" | "max" | "idle" | "start" | "count" | "turns" | "limit" => {
+        "lines" | "timeout" | "max" | "idle" | "start" | "count" | "turns" | "limit" | "maxParallel" => {
             raw.parse::<u64>().map(Value::from).unwrap_or_else(|_| Value::String(raw.into()))
         }
         _ => Value::String(raw.to_string()),

@@ -334,6 +334,7 @@ export function MissionsPage() {
             <FleetView onOpenMission={(id) => { setSelected(id); setFleet(false); }} />
           ) : summary && detail ? (
             <MissionDetailView
+              key={summary.id}
               summary={summary}
               detail={detail}
               squad={selectedSquad}
@@ -361,6 +362,7 @@ export function MissionsPage() {
       {dialog && workspaceId && (
         <MissionDialog
           editing={dialog === "edit"}
+          editingId={dialog === "edit" ? selected ?? undefined : undefined}
           initial={dialog === "edit" && detail ? formFromMission(detail.mission) : emptyForm(cwd)}
           onClose={() => setDialog(null)}
           onSave={async (input) => {

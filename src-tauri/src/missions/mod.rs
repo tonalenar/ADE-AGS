@@ -657,9 +657,14 @@ pub struct MissionTimings {
 pub(crate) fn timings_of(conn: &Connection, mission_id: &str) -> Result<MissionTimings, String> {
     let spans = timings::list(conn, mission_id)?;
     let summary = timings::summarize(&spans, 5);
-    let (started_at, ended_at) = conn
+    // Um id que não existe é erro (como em `mission status`), não uma missão vazia e "saudável".
+    let (started_at, ended_at) = match conn
         .query_row("SELECT started_at, ended_at FROM missions WHERE id = ?1", [mission_id], |row| Ok((row.get(0)?, row.get(1)?)))
-        .unwrap_or((None, None));
+    {
+        Ok(times) => times,
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Err(format!("no hay ninguna misión con id {mission_id}")),
+        Err(e) => return Err(e.to_string()),
+    };
     let turn_ms = efficiency::turn_ms(&spans);
     let active = active::resolve(conn, mission_id, turn_ms, active::wall_ms(started_at, ended_at, crate::util::now_ts()))?;
     let (first_delegation_ms, first_delegation_source) = timings::first_delegation(&spans, started_at);

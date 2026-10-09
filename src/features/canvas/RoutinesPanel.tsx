@@ -27,16 +27,21 @@ export interface Routine {
 
 const DAYS = ["seg", "ter", "qua", "qui", "sex", "sáb", "dom"];
 
-/** El horario en palabras, como lo dice `ags routines`. */
-export function describeSchedule(s: Schedule): string {
-  if (s.kind === "once") return "uma vez";
+type Translate = (key: string, vars?: Record<string, string | number>) => string;
+
+/** El horario en palabras, como lo dice `ags routines`. Sin `t` sale em português (o texto do CLI). */
+export function describeSchedule(s: Schedule, t?: Translate): string {
+  const say = (key: string, fallback: string, vars: Record<string, string | number> = {}) => (t ? t(`canvas.routines.sched.${key}`, vars) : fallback);
+  if (s.kind === "once") return say("once", "uma vez");
   if (s.kind === "every") {
-    if (s.secs % 3600 === 0) return `a cada ${s.secs / 3600} h`;
-    if (s.secs % 60 === 0) return `a cada ${s.secs / 60} min`;
-    return `a cada ${s.secs} s`;
+    if (s.secs % 3600 === 0) return say("everyHours", `a cada ${s.secs / 3600} h`, { n: s.secs / 3600 });
+    if (s.secs % 60 === 0) return say("everyMinutes", `a cada ${s.secs / 60} min`, { n: s.secs / 60 });
+    return say("everySeconds", `a cada ${s.secs} s`, { n: s.secs });
   }
-  const at = `às ${String(s.hour).padStart(2, "0")}:${String(s.minute).padStart(2, "0")}`;
-  return s.days.length === 0 ? `todo dia ${at}` : `${at} (${s.days.map((d) => DAYS[d]).join(", ")})`;
+  const time = `${String(s.hour).padStart(2, "0")}:${String(s.minute).padStart(2, "0")}`;
+  if (s.days.length === 0) return say("daily", `todo dia às ${time}`, { time });
+  const days = s.days.map((d) => (t ? t(`canvas.routines.sched.day${d}`) : DAYS[d])).join(", ");
+  return say("onDays", `às ${time} (${days})`, { time, days });
 }
 
 function when(unix: number | null): string {
@@ -54,9 +59,12 @@ export function RoutinesPanel({ onClose }: { onClose: () => void }) {
   const [routines, setRoutines] = useState<Routine[] | null>(null);
   const [armed, setArmed] = useState<string | null>(null);
   const [running, setRunning] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(() => {
-    invoke<Routine[]>("routine_list_all").then(setRoutines).catch(() => setRoutines([]));
+    invoke<Routine[]>("routine_list_all")
+      .then((list) => { setRoutines(list); setLoadError(null); })
+      .catch((e) => { setRoutines((current) => current ?? []); setLoadError(String(e)); });
   }, []);
 
   useEffect(() => {
@@ -110,7 +118,8 @@ export function RoutinesPanel({ onClose }: { onClose: () => void }) {
       </div>
 
       <div className="overflow-y-auto">
-        {routines === null ? null : routines.length === 0 ? (
+        {loadError && <p role="alert" className="px-3 py-2 text-[12px] text-red-600 dark:text-red-400">{loadError}</p>}
+        {routines === null ? null : routines.length === 0 && !loadError ? (
           <p className="px-3 py-4 text-[12px] leading-relaxed text-gray-500 dark:text-gray-400">{t("canvas.routines.empty")}</p>
         ) : (
           routines.map((r) => (
@@ -140,7 +149,7 @@ export function RoutinesPanel({ onClose }: { onClose: () => void }) {
                 </Button>
               </div>
               <div className="mt-0.5 text-[11px] text-gray-500 dark:text-gray-400">
-                {describeSchedule(r.schedule)} · {r.targetTab ? `→ ${r.targetName}` : t("canvas.routines.reminder")}
+                {describeSchedule(r.schedule, t)} · {r.targetTab ? `→ ${r.targetName}` : t("canvas.routines.reminder")}
                 {r.enabled && r.nextRun ? ` · ${t("canvas.routines.next")} ${when(r.nextRun)}` : ""}
               </div>
               <div className="mt-0.5 truncate text-[11px] text-gray-400 dark:text-gray-500" title={r.text}>“{r.text}”</div>

@@ -193,7 +193,13 @@ export function switchExecutionMode(form: MissionForm, executionMode: MissionFor
 
 /** Un presupuesto vacío o ilegible es "sin tope", no cero: cero no dejaría hacer nada. */
 export function parseBudget(raw: string): number | null {
-  const n = Number.parseFloat(raw.replace(",", "."));
+  // "1.000,50" (pt) e "1,000.50" (en): o último separador é o decimal, o outro agrupa milhares.
+  let text = raw.trim();
+  const comma = text.lastIndexOf(",");
+  const dot = text.lastIndexOf(".");
+  if (comma > -1 && dot > -1) text = comma > dot ? text.replace(/\./g, "").replace(",", ".") : text.replace(/,/g, "");
+  else text = text.replace(",", ".");
+  const n = Number(text);
   return Number.isFinite(n) && n > 0 ? n : null;
 }
 

@@ -245,6 +245,9 @@ describe("formulario", () => {
     expect(parseBudget("0")).toBeNull();
     expect(parseBudget("abc")).toBeNull();
     expect(parseBudget("1,5")).toBe(1.5);
+    expect(parseBudget("1.000,50")).toBe(1000.5);
+    expect(parseBudget("1,000.50")).toBe(1000.5);
+    expect(parseBudget("5 dólares")).toBeNull();
   });
 
   it("vuelve a armar el formulario desde una misión guardada", () => {

@@ -130,10 +130,14 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     if (o.skippedDuplicates.length) parts.push(t("memoryInbox.skippedDuplicates", { keys: o.skippedDuplicates.join(", ") }));
     if (o.skippedDeletions.length) parts.push(t("memoryInbox.skippedDeletions", { keys: o.skippedDeletions.join(", ") }));
     setMessage(parts.join(" "));
-    await load();
-    loadCounts();
-    await loadPending(workspaceId).catch(() => undefined);
-    setBusy(false);
+    try {
+      await load();
+      loadCounts();
+      await loadPending(workspaceId).catch(() => undefined);
+    } finally {
+      // Se recarregar falhar, os botões não podem ficar travados para sempre.
+      setBusy(false);
+    }
   };
 
   const approve = async (items: MemoryReviewItem[], acknowledge: boolean, explicit = false) => {

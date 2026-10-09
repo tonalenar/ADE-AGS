@@ -5,6 +5,8 @@ import type { SessionHistoryEntry, SessionSkillStatus } from "./types";
 interface SessionsState {
   history: SessionHistoryEntry[];
   loading: boolean;
+  /** Por que a última carga falhou, ou `null`. */
+  error: string | null;
   loadHistory: (workspaceId: string) => Promise<void>;
   /** Para cada skill archivada: si sigue instalada y, si no, de dónde bajarla. */
   checkSessionSkills: (historyId: string) => Promise<SessionSkillStatus[]>;
@@ -20,12 +22,16 @@ interface SessionsState {
 export const useSessionsStore = create<SessionsState>((set, get) => ({
   history: [],
   loading: false,
+  error: null,
 
   loadHistory: async (workspaceId) => {
-    set({ loading: true });
+    set({ loading: true, error: null });
     try {
       const rows = await ipc.listHistory(workspaceId);
       set({ history: rows });
+    } catch (e) {
+      // Sem isto a rejeição ficava sem tratar e o Histórico parecia simplesmente vazio.
+      set({ error: String(e) });
     } finally {
       set({ loading: false });
     }

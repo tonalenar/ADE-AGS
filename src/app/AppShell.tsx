@@ -72,6 +72,7 @@ export function AppShell() {
   const activateTab = useTabsStore((s) => s.activateTab);
   const hydrateFromBackend = useTabsStore((s) => s.hydrateFromBackend);
   const setHydrated = useTabsStore((s) => s.setHydrated);
+  const hydrated = useTabsStore((s) => s.hydrated);
   const setWorkspaceId = useTabsStore((s) => s.setWorkspaceId);
   const location = useLocation();
   const navigate = useNavigate();
@@ -217,10 +218,12 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
-    if (tabs.length === 0 && isWorkspace) {
+    // Só depois de carregar as abas do banco: antes disso a lista está vazia por não ter chegado,
+    // e voltar ao Home ali fazia a tela piscar (Home → workspace) a cada abertura.
+    if (hydrated && tabs.length === 0 && isWorkspace) {
       navigate("/");
     }
-  }, [tabs.length, isWorkspace, navigate]);
+  }, [hydrated, tabs.length, isWorkspace, navigate]);
 
   return (
     <div className={`flex flex-col h-screen overflow-hidden

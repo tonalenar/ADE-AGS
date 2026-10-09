@@ -3,6 +3,7 @@ import { act, useState } from "react";
 import { createRoot, type Root } from "react-dom/client";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { PopupSelect } from "../ui/PopupSelect";
+import { hasOpenDialog } from "../ui/openDialog";
 
 // @ts-expect-error Flag global do React para act em happy-dom
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -30,6 +31,28 @@ const click = (el: Element) => act(() => { el.dispatchEvent(new MouseEvent("clic
 const key = (el: Element, k: string) => act(() => { el.dispatchEvent(new KeyboardEvent("keydown", { key: k, bubbles: true })); });
 
 describe("PopupSelect", () => {
+  it("Escape fecha só o menu: é cancelado (não vira cancel do dialog) e o menu aberto conta como dono do Escape", () => {
+    act(() => root.render(<Controlled onPick={() => {}} />));
+    click(button());
+    expect(hasOpenDialog()).toBe(true);
+    const ev = new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true });
+    act(() => { button().dispatchEvent(ev); });
+    expect(ev.defaultPrevented).toBe(true);
+    expect(listbox()).toBeNull();
+    expect(hasOpenDialog()).toBe(false);
+  });
+
+  it("não deixa listener de resize para trás a cada abertura", () => {
+    const add = vi.spyOn(window, "addEventListener");
+    const remove = vi.spyOn(window, "removeEventListener");
+    act(() => root.render(<Controlled onPick={() => {}} />));
+    for (let i = 0; i < 3; i++) { click(button()); click(button()); }
+    const added = add.mock.calls.filter((c) => c[0] === "resize").length;
+    const removed = remove.mock.calls.filter((c) => c[0] === "resize").length;
+    expect(added).toBe(removed);
+    add.mockRestore(); remove.mockRestore();
+  });
+
   it("dentro de um <dialog> modal o menu abre dentro dele (fora dele tudo fica inerte)", () => {
     const dialog = document.createElement("dialog");
     document.body.appendChild(dialog);

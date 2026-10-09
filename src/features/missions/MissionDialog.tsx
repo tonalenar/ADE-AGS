@@ -29,9 +29,11 @@ const PARALLEL = [1, 2, 3, 4] as const;
  * Crear o editar un borrador. Guardar NO lanza nada: la misión queda en borrador hasta que
  * se aprieta "Iniciar" en su detalle.
  */
-export function MissionDialog({ initial, editing, onClose, onSave }: {
+export function MissionDialog({ initial, editing, editingId, onClose, onSave }: {
   initial: MissionForm;
   editing: boolean;
+  /** A missão que se edita: ela não conta como duplicata de si mesma. */
+  editingId?: string;
   onClose: () => void;
   onSave: (input: MissionInput) => Promise<void>;
 }) {
@@ -57,8 +59,8 @@ export function MissionDialog({ initial, editing, onClose, onSave }: {
 
   const missions = useMissionsStore((s) => s.missions);
   const duplicate = useMemo(
-    () => findDuplicateMission(missions, { title: form.title, objective: form.objective }),
-    [missions, form.title, form.objective]
+    () => findDuplicateMission(missions, { id: editingId, title: form.title, objective: form.objective }),
+    [missions, editingId, form.title, form.objective]
   );
 
   const pickFolder = async () => {

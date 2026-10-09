@@ -169,7 +169,7 @@ export function FleetPage() {
             <Button variant="custom"
               key={g}
               onClick={() => setGroup(group === g ? null : g)}
-              disabled={counts[g] === 0}
+              disabled={counts[g] === 0 && group !== g}
               className={`cc-t flex items-center gap-1.5 px-2 h-6 rounded-full text-[10.5px]
                 disabled:opacity-30
                 ${group === g
