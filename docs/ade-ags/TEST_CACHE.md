@@ -65,3 +65,13 @@ A onda 1 faz o verde da mesma árvore e do mesmo comando valer em outro worktree
 O QA roda `ags test affected` no mesmo commit. `já verde neste hash` significa que a suíte não rodou de novo. A suíte completa (ou o CI) continua uma vez na integração. Arquivo de produto sem mapa, schema, COM e `unsafe` adicionado no diff continuam pedindo a suíte Rust completa. `unsafe` que já estava no arquivo e não entrou numa linha nova não pede.
 
 A base do diff afetado continua `origin/master`, não a última árvore verificada. Uma base deslizante pode pular um arquivo que só ficou verde em outro worktree ou que mudou de novo depois do registro. Isso fica para a próxima onda.
+
+## Chave por suíte
+
+O verde de cada suíte vale para os arquivos que ELA lê, não para a árvore inteira (`src-tauri/src/testspeed/scope.rs`). Uma mudança só no frontend não refaz o `cargo test` (~160 s), e uma só no Rust não refaz o vitest/tsc. `docs/` e `*.md` nunca entram.
+
+Os cruzamentos entre as duas linguagens estão listados em `suite_reads`: o Rust lê `skills/`, `package.json`, `src/features/orchestrator/cliBridge.ts` e as fixtures de `src/features/runs/tests/fixtures/`; o frontend lê `src-tauri/src/agents/registry.rs` e `src-tauri/src/graphify/catalog.rs`. **Teste novo que leia outro arquivo de fora da sua pasta tem que entrar nessa lista**, senão o verde pode ficar velho. `AGS_TEST_SCOPE=off` volta à árvore inteira.
+
+## Perfil de compilação
+
+`[profile.dev]` usa `debug = "line-tables-only"` e as dependências sem informação de debug: recompilação incremental dos testes de ~26 s para ~15 s e a pasta `target/debug/deps` de 5,2 GB para 2,1 GB. Backtraces mantêm as linhas; um depurador perde as variáveis locais.

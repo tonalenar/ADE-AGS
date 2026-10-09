@@ -6,13 +6,16 @@ import { useTabsStore } from "@/features/tabs/store";
 import { CANVAS_GROUP, focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { useWorkMode } from "@/features/canvas/store";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
-import { buildResumeCommand, isResumable } from "@/features/sessions/agentResume";
+import { buildResumeCommand, isResumable, resumeFailed } from "@/features/sessions/agentResume";
 
 export function TerminalPanel() {
   const { t } = useTranslation();
   const tabs = useTabsStore((s) => s.tabs);
   const setPtyId = useTabsStore((s) => s.setPtyId);
   const setSessionId = useTabsStore((s) => s.setSessionId);
+  const restartAgent = useTabsStore((s) => s.restartAgent);
+  // Cuándo arrancó cada instancia de terminal: una retomada que muere enseguida es un `--resume` fallido.
+  const startedAt = useRef(new Map<string, number>());
   const activateTab = useTabsStore((s) => s.activateTab);
   // En el canvas el panel es transparente y no atrapa el puntero: abajo está el canvas, y
   // solo las terminales vivas (encima de sus nodos) reciben clicks.
@@ -37,6 +40,8 @@ export function TerminalPanel() {
         // también el scrollback crudo aquí duplicaría/ensuciaría la salida.
         const isResuming = !!tab.sessionId && isResumable(tab.agentId);
         const key = agentKey(tab.id);
+        const instance = `${tab.id}:${tab.restartNonce ?? 0}`;
+        if (!startedAt.current.has(instance)) startedAt.current.set(instance, Date.now());
         const placement = visible.get(key);
         if (placement) lastRect.current.set(key, placement.rect);
         const shown = placement !== undefined;
@@ -83,6 +88,14 @@ export function TerminalPanel() {
               openedAt={tab.openedAt}
               knownSessionId={tab.sessionId}
               onReady={(ptyId) => setPtyId(tab.id, ptyId)}
+              onExit={(code) => {
+                // O `--resume` falhó (sesión borrada o id inválido): sin esto la pestaña quedaba
+                // muerta. Se descarta el id y se relanza de cero, con el scrollback guardado.
+                if (resumeFailed(isResuming, code, Date.now() - (startedAt.current.get(instance) ?? 0))) {
+                  setSessionId(tab.id, "");
+                  restartAgent(tab.id);
+                }
+              }}
               onSessionDiscovered={(sessionId) => setSessionId(tab.id, sessionId)}
             />
           </div>

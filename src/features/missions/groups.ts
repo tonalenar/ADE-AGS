@@ -64,6 +64,19 @@ export function useActiveGroup(): string | null {
   return activeTabId ? index[activeTabId] ?? null : null;
 }
 
+/** Uma missão `failed` fica visível na lateral por este tempo: dá para iniciá-la de novo (segundos). */
+export const RECENT_FAILED_S = 24 * 3600;
+
+/**
+ * ¿La misión va a "archivadas" en la lista lateral? Terminadas y canceladas, siempre. Una FALLIDA
+ * reciente no: se puede retomar con un clic (antes un cierre de la app la mandaba a archivadas
+ * junto con 60 antiguas y parecía haber desaparecido). Pura.
+ */
+export function isArchivedMission(m: { status: string; updatedAt: number }, nowSec = Date.now() / 1000): boolean {
+  if (m.status === "done" || m.status === "done_without_delivery" || m.status === "cancelled") return true;
+  return m.status === "failed" && nowSec - m.updatedAt >= RECENT_FAILED_S;
+}
+
 /** Va a una misión: activa su orquestador. `false` si no tiene pestañas abiertas. */
 export function openMission(missionId: string): boolean {
   const { tabs, activateTab } = useTabsStore.getState();

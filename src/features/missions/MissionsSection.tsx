@@ -10,7 +10,7 @@ import { useTabsStore } from "@/features/tabs/store";
 
 import { totalPending } from "../memory/pendingNotice";
 import { usePendingMemoryStore } from "../memory/pendingStore";
-import { openMission, tabsByMission, useMissionIndex } from "./groups";
+import { isArchivedMission, openMission, tabsByMission, useMissionIndex } from "./groups";
 import { MissionDialog } from "./MissionDialog";
 import { MissionFinishDialog } from "./MissionFinishDialog";
 import { emptyForm } from "./missionView";
@@ -30,7 +30,7 @@ const DOT: Record<MissionStatus, string> = {
   cancelled: "bg-gray-400 dark:bg-white/25",
 };
 
-const isArchived = (m: MissionSummary) => m.status === "done" || m.status === "done_without_delivery" || m.status === "cancelled" || m.status === "failed";
+const isArchived = (m: MissionSummary) => isArchivedMission(m);
 
 /**
  * Las misiones en la columna de la izquierda, agrupadas: las vivas (borradores y en curso) y,
@@ -164,7 +164,7 @@ export function MissionsSection() {
             {pending.byMission[m.id]}
           </Button>
         )}
-        {m.status === "draft" && (
+        {(m.status === "draft" || (m.status === "failed" && !isArchived(m))) && (
           <Button variant="custom" disabled={busy === m.id}
             onClick={(e) => { e.stopPropagation(); void start(m); }}
             className="cc-t h-5 px-1.5 rounded text-[10px] font-medium text-accent-600 dark:text-accent-300 hover:bg-accent-500/15">

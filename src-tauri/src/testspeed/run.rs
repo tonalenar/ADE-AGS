@@ -10,7 +10,7 @@ use std::{
 
 const GIT_LIMIT: Duration = Duration::from_secs(20);
 
-fn git_raw(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+pub(super) fn git_raw(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
     git_raw_with_index(root, args, None)
 }
 
@@ -471,12 +471,15 @@ pub fn run(
     let repo = repository_key(root)?;
     let tree = clean_tree(root)?;
     let key = command_key(commands);
+    // A chave de cache é a da SUÍTE: só os arquivos que ela lê (ver `scope`). Uma mudança só no
+    // frontend não refaz os ~160 s do Rust.
+    let scope = tree.as_deref().map(|t| super::scope::scoped_identity(root, t, suite));
     // Quem já tem o verde deste hash, ou um integrante rodando a mesma suíte nele, não repete:
     // espera o resultado (ver `take_turn`). Sem árvore identificável não há o que compartilhar.
     let mut _claim = None;
     if !force {
-        let turn = match tree.as_deref() {
-            Some(tree_hash) => take_turn(conn, &repo, tree_hash, suite, &key)?,
+        let turn = match scope.as_deref() {
+            Some(scope_id) => take_turn(conn, &repo, scope_id, suite, &key)?,
             None => Turn::Mine(None),
         };
         match turn {
@@ -560,7 +563,7 @@ pub fn run(
     let after = clean_tree(root)?;
     let clean = tree.is_some() && tree == after;
     conn.execute("INSERT INTO test_results(repository,tree_hash,suite,command_key,commands,duration_ms,passed,clean,finished_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
-        params![repo, tree, suite, key, serde_json::to_string(commands).map_err(|e| e.to_string())?, duration_ms, passed, clean, now_ms()]).map_err(|e| e.to_string())?;
+        params![repo, scope, suite, key, serde_json::to_string(commands).map_err(|e| e.to_string())?, duration_ms, passed, clean, now_ms()]).map_err(|e| e.to_string())?;
     Ok(RunResult {
         suite: suite.into(),
         passed,
@@ -602,6 +605,35 @@ mod tests {
         root
     }
     #[test]
+    fn a_frontend_only_change_keeps_the_rust_green_and_vice_versa() {
+        let root = repository();
+        std::fs::create_dir_all(root.join("src-tauri").join("src")).unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src-tauri").join("src").join("lib.rs"), "v1").unwrap();
+        std::fs::write(root.join("src").join("App.tsx"), "v1").unwrap();
+        git(&root, &["add", "-A"]).unwrap();
+        git(&root, &["commit", "-m", "app"]).unwrap();
+        let conn = Connection::open_in_memory().unwrap();
+        migrate(&conn).unwrap();
+        let commands = |suite: &str| {
+            vec![TestCommand { suite: suite.into(), program: "git".into(), args: vec!["--version".into()], cwd: ".".into() }]
+        };
+        let hit = |suite: &str| run(&conn, &root, suite, &commands(suite), false, None, "").unwrap().cache_hit;
+        assert!(!hit("rust"));
+        assert!(!hit("frontend"));
+        // Muda só uma tela (já commitada): o Rust segue verde, o frontend refaz.
+        std::fs::write(root.join("src").join("App.tsx"), "v2").unwrap();
+        git(&root, &["commit", "-am", "tela"]).unwrap();
+        assert!(hit("rust"), "mudança só no frontend não pode refazer o Rust");
+        assert!(!hit("frontend"));
+        // Muda só o Rust (sem commitar): o frontend segue verde, o Rust refaz.
+        std::fs::write(root.join("src-tauri").join("src").join("lib.rs"), "v2").unwrap();
+        assert!(hit("frontend"), "mudança só no Rust não pode refazer o frontend");
+        assert!(!hit("rust"));
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn docs_and_markdown_do_not_change_the_test_identity() {
         let root = repository();
         let initial = clean_tree(&root).unwrap().unwrap();
@@ -634,13 +666,18 @@ mod tests {
         let key = command_key(&commands);
         // Outro integrante (outra conexão, como outro processo `ags`) roda "probe" neste hash e,
         // depois de um tempo, registra o verde e solta a posse.
-        let ids = [repo.clone(), tree.clone(), "probe".to_string(), key.clone()];
+        // A execução usa a chave da suíte (ver `scope`), não a árvore inteira.
+        let scope = crate::testspeed::scope::scoped_identity(&root, &tree, "probe");
+        let ids = [repo.clone(), scope, "probe".to_string(), key.clone()];
         let worker_db = db.clone();
         let worker_ids = ids.clone();
+        // O outro integrante avisa quando já tem a posse: dormir um tempo fixo não garante isso com a máquina carregada.
+        let (claimed, claimed_signal) = std::sync::mpsc::channel::<()>();
         let other = std::thread::spawn(move || {
             let other = Connection::open(&worker_db).unwrap();
             other.busy_timeout(Duration::from_secs(5)).unwrap();
             let claim = Claim::try_new(&other, worker_ids.clone(), "outro".into(), now_ms()).unwrap().unwrap();
+            claimed.send(()).unwrap();
             std::thread::sleep(Duration::from_millis(1500));
             other
                 .execute(
@@ -650,7 +687,7 @@ mod tests {
                 .unwrap();
             drop(claim);
         });
-        std::thread::sleep(Duration::from_millis(300));
+        claimed_signal.recv().unwrap();
         let result = run(&conn, &root, "probe", &commands, false, None, "").unwrap();
         other.join().unwrap();
         assert!(result.cache_hit && result.passed, "{}", result.message);

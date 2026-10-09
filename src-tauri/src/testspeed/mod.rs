@@ -2,3 +2,4 @@
 
 pub mod affected;
 pub mod run;
+pub mod scope;

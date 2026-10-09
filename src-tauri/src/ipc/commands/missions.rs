@@ -149,8 +149,17 @@ pub(super) fn mission_run(app: &AppHandle, args: &Value) -> Result<Value, String
         let timeout = Duration::from_secs(arg_u64_opt(args, "timeout").unwrap_or(3600).clamp(1, MAX_WAIT_SECS));
         return wait_for(app, &id, timeout);
     }
-    Ok(summary(&crate::missions::detail_now(app, &id)?))
+    let mut started = summary(&crate::missions::detail_now(app, &id)?);
+    if let Some(object) = started.as_object_mut() {
+        object.insert("note".into(), json!(HEADLESS_NOTE));
+    }
+    Ok(started)
 }
+
+/// `mission run` roda a missão em segundo plano (runs, sem terminais): a lateral do app não tem
+/// canvas para abrir. Quem quer o time nos terminais cria o rascunho e inicia pela lateral.
+const HEADLESS_NOTE: &str = "Missão iniciada em modo headless: os agentes rodam em segundo plano, sem terminais nem canvas. \
+Acompanhe na página de Missões. Para abrir o time nos terminais, use `ags mission create` e clique em \"iniciar\" na lateral do app.";
 
 pub(super) fn mission_review(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
