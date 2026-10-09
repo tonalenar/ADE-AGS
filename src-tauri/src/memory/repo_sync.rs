@@ -1210,6 +1210,13 @@ mod tests {
         let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(3)).unwrap();
         assert!(status.error.is_none(), "{:?}", status.error);
         assert!(notes(root.path()).contains("survives restart"));
+        // O estado vira "synced" e sai a notificação ANTES de o marcador SQL ser apagado (a
+        // conclusão do export faz o apagamento depois de soltar o estado). Espera o apagamento
+        // com limite, em vez de conferir no instante em que o status já mostra sucesso.
+        let deadline = std::time::Instant::now() + Duration::from_secs(3);
+        while dirty_rows(&db) != 0 && std::time::Instant::now() < deadline {
+            std::thread::sleep(Duration::from_millis(10));
+        }
         assert_eq!(dirty_rows(&db), 0, "sucesso tem de apagar o marcador");
     }
 
