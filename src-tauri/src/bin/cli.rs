@@ -53,6 +53,8 @@ AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
   peers                                       Quién está conectado con vos
   peer ask <nombre> \"...\" [--timeout 600]    Le pregunta y ESPERA su respuesta
   peer tell <nombre> \"...\"                    Le avisa algo, sin esperar
+  peer tell <nombre> --file <ruta>            Lo mismo, con el texto en un archivo (sin líos de comillas en Windows)
+  peer ask <nombre> --file <ruta>             Lo mismo que ask, con la pregunta en un archivo
              (ask/tell --raw: el texto tal cual, sin el encabezado \"[Mensagem de ...]\"; para
               mandarle a una TUI un comando suyo, p. ej. /compact o /clear)
   peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'  Le pregunta a varios A LA VEZ y espera a todos
@@ -355,7 +357,7 @@ fn main() -> ExitCode {
     // `--file` se resuelve ACÁ y viaja como `--content`: el archivo es relativo al cwd de
     // quien escribió el comando, no al de la app, y la app puede estar corriendo desde
     // cualquier otro lado. Además evita que el backend tenga que abrir rutas arbitrarias.
-    let parsed = match inline_file(parsed) {
+    let parsed = match inline_file(parsed, &command) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("{e}");
@@ -866,23 +868,41 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
     Ok(Value::Object(map))
 }
 
-/// Reemplaza `--file <ruta>` por el contenido del archivo, en `content`.
+/// Reemplaza `--file <ruta>` por el contenido del archivo, en el campo que el comando usa para
+/// su texto principal (ver `text_field`).
 ///
 /// Los dos no se pueden combinar: si vinieran juntos habría que elegir cuál gana, y
 /// cualquier elección sería una sorpresa para quien mandó el otro.
-fn inline_file(args: Value) -> Result<Value, String> {
+fn inline_file(args: Value, command: &str) -> Result<Value, String> {
     let Value::Object(mut map) = args else { return Ok(args) };
     let Some(file) = map.remove("file") else { return Ok(Value::Object(map)) };
     let Some(path) = file.as_str() else {
         return Err("--file necesita una ruta".to_string());
     };
-    if map.contains_key("content") {
-        return Err("Usá --file o --content, no los dos".to_string());
+    let field = text_field(command);
+    if map.contains_key(field) {
+        return Err(format!("Usá --file o --{field}, no los dos"));
     }
     let content = std::fs::read_to_string(path)
         .map_err(|e| format!("No se pudo leer {path}: {e}"))?;
-    map.insert("content".to_string(), Value::String(content));
+    map.insert(field.to_string(), Value::String(content));
     Ok(Value::Object(map))
+}
+
+/// El campo que `--file` llena: el texto del comando (`text`, como `peer tell`, `tab send` o
+/// `say`), el `body` de swarm, o `content` (notas, roles, diseños). Pura.
+///
+/// `peer tell` antes mandaba el archivo como `content` y el backend lo rechazaba: por eso el
+/// nombre sale de los argumentos sueltos del comando y no de una lista fija.
+fn text_field(command: &str) -> &'static str {
+    let positional = positionals(command);
+    if positional.contains(&"text") {
+        "text"
+    } else if positional.contains(&"body") {
+        "body"
+    } else {
+        "content"
+    }
 }
 
 fn value_for(key: &str, raw: &str) -> Value {
