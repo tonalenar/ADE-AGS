@@ -150,3 +150,9 @@ tauri-winrt-notification = "0.8.1"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
