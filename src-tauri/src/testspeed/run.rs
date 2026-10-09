@@ -671,10 +671,13 @@ mod tests {
         let ids = [repo.clone(), scope, "probe".to_string(), key.clone()];
         let worker_db = db.clone();
         let worker_ids = ids.clone();
+        // O outro integrante avisa quando já tem a posse: dormir um tempo fixo não garante isso com a máquina carregada.
+        let (claimed, claimed_signal) = std::sync::mpsc::channel::<()>();
         let other = std::thread::spawn(move || {
             let other = Connection::open(&worker_db).unwrap();
             other.busy_timeout(Duration::from_secs(5)).unwrap();
             let claim = Claim::try_new(&other, worker_ids.clone(), "outro".into(), now_ms()).unwrap().unwrap();
+            claimed.send(()).unwrap();
             std::thread::sleep(Duration::from_millis(1500));
             other
                 .execute(
@@ -684,7 +687,7 @@ mod tests {
                 .unwrap();
             drop(claim);
         });
-        std::thread::sleep(Duration::from_millis(300));
+        claimed_signal.recv().unwrap();
         let result = run(&conn, &root, "probe", &commands, false, None, "").unwrap();
         other.join().unwrap();
         assert!(result.cache_hit && result.passed, "{}", result.message);

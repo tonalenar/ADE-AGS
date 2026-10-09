@@ -38,6 +38,17 @@ export function isSafeSessionId(id: string): boolean {
   return id.length > 0 && id.length <= 128 && !id.startsWith("-") && /^[A-Za-z0-9._:-]+$/.test(id);
 }
 
+/** Una sesión retomada que sale con erro dentro deste prazo é um `--resume` que não deu certo. */
+export const RESUME_FAIL_MS = 10_000;
+
+/**
+ * ¿La TUI retomada murió porque el `--resume` falló (sesión borrada o id inválido)? Se distingue de
+ * un cierre normal por el código de salida y por haber pasado muy poco desde que arrancó. Pura.
+ */
+export function resumeFailed(resuming: boolean, exitCode: number, sinceStartMs: number): boolean {
+  return resuming && exitCode !== 0 && sinceStartMs >= 0 && sinceStartMs < RESUME_FAIL_MS;
+}
+
 /** Construye el comando efectivo a lanzar en el PTY: relanza la sesión real si se conoce su id. */
 export function buildResumeCommand(agentId: string, command: string, sessionId?: string): string {
   if (!sessionId || !isSafeSessionId(sessionId)) return command;
