@@ -6,6 +6,8 @@ import { Button, CloseIcon } from "neogestify-ui-components";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 
+import { useVigiaSwitch } from "@/features/missions/vigiaSwitch";
+
 import { unreadOf, useUnreadStore } from "./chatUnread";
 import { FloorBar } from "./FloorBar";
 import { RING_COLORS, Ring } from "./Ring";
@@ -54,6 +56,7 @@ function Svg({ children }: { children: React.ReactNode }) {
 const LayersIcon = () => <Svg><path d="M12 3l9 5-9 5-9-5 9-5Z" /><path d="M3 13l9 5 9-5" /></Svg>;
 const MapIcon = () => <Svg><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z" /><path d="M9 4v14M15 6v14" /></Svg>;
 const ChatIcon = () => <Svg><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.5A8 8 0 1 1 21 12Z" /></Svg>;
+const EyeIcon = () => <Svg><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></Svg>;
 const ClockIcon = () => <Svg><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>;
 const DesignIcon = () => <Svg><rect x="3" y="4" width="8" height="16" rx="1.5" /><rect x="13" y="4" width="8" height="9" rx="1.5" /></Svg>;
 const FitIcon = () => <Svg><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" /></Svg>;
@@ -128,6 +131,8 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump]);
   const unreadTotal = useUnreadStore((s) => Object.values(s.unread).reduce((n, by) => n + unreadOf(by), 0));
+  const vigiaOn = useVigiaSwitch((s) => s.enabled);
+  const toggleVigia = useVigiaSwitch((s) => s.toggle);
   useEffect(() => startUsagePolling(accounts), [accounts]);
   const [usageOpen, setUsageOpen] = useState(readUsageOpen);
   useEffect(() => writeUsageOpen(usageOpen), [usageOpen]);
@@ -162,6 +167,7 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
               leading-[17px] text-center shadow">{unreadTotal > 9 ? "9+" : unreadTotal}</span>
           )}
         </Pill>
+        <Pill label={t(vigiaOn ? "canvas.vigia.on" : "canvas.vigia.off")} active={vigiaOn} onClick={toggleVigia}><EyeIcon /></Pill>
         {hasDesign && (
           <Pill label={t("canvas.design.hint")} active={panel === "design"} onClick={() => onTogglePanel("design")} className="relative">
             <DesignIcon />

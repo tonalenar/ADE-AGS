@@ -2337,6 +2337,8 @@
   "canvas.routines.waiting": "esperando o agente abrir para recuperar a de",
   "canvas.chat.title": "Chat",
   "canvas.chat.hint": "Converse com um agente em balões, por threads de cor. Ele responde com ags say.",
+  "canvas.vigia.off": "Vigia desligado: clique para ligar",
+  "canvas.vigia.on": "Vigia ligado: clique para desligar",
   "canvas.chat.close": "Fechar",
   "canvas.chat.noAgents": "Não há agentes abertos nesta pasta. O chat é só para agentes: num terminal de shell a mensagem seria executada como comando.",
   "canvas.chat.soundOn": "Som de nova resposta: ligado (clique para silenciar)",
