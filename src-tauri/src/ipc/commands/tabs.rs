@@ -52,6 +52,13 @@ pub(super) fn tab_list(app: &AppHandle) -> Result<Value, String> {
 /// `window` importa: cada ventana solo conoce SUS tabs. Sin pasarlo, una tab creada con
 /// `--window` se buscaba siempre en la primera ventana y "no existía".
 pub(super) fn pty_id_for_tab(app: &AppHandle, tab_id: &str, window: Option<&str>) -> Result<u32, String> {
+    // Primeiro o próprio registro de PTYs do backend: ele já sabe a qual aba pertence cada processo
+    // e não depende de a janela responder. Só se não estiver lá pergunta-se ao frontend (que é o
+    // que vê as abas que o backend ainda não conhece). Antes TODO `peer tell` esperava a janela,
+    // e uma janela ocupada derrubava a mensagem com timeout de 15 s.
+    if let Some(pty) = crate::terminal::pty_for_tab(tab_id.to_string()) {
+        return Ok(pty);
+    }
     let raw = ask_frontend(app, "tab.ptyId", &json!({ "tabId": tab_id }), window)?;
     let value = unwrap_frontend_result(raw)?;
     value
