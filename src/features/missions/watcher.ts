@@ -18,6 +18,7 @@ import { LEAD_NAME } from "./terminals";
 import { recordSpan } from "./timings";
 import { addAsks, applyLeadMessage, deriveAlerts, findLeadStalls, findScreenAsks, leadStallMessage, leadStallSpan, markLeadAlerted, parseLeadStallMs, type PendingAsks } from "./leadStall";
 import { useStallAlerts } from "./stallAlerts";
+import { useVigiaDriver } from "./vigia";
 import { missionTurns } from "./turns";
 
 /** Lo que avisa el servidor al terminar un `peer ask` (ver `cc-peer-timing` en Rust). */
@@ -41,6 +42,8 @@ export interface PeerTimingEvent {
  * barra está expandida, y con la barra recogida nadie escuchaba ni barría.
  */
 export function useMissionWatcher(): void {
+  // O Vigia de cada missão é acordado pelo app quando alguém fica sem saída (ver `vigia.ts`).
+  useVigiaDriver();
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const tabs = useTabsStore((s) => s.tabs);
   const missions = useMissionsStore((s) => s.missions);

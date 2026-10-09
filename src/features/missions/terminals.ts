@@ -14,6 +14,7 @@ import { startEventSpan, startupProgress, withActivity, allWorkingSpan, type Sta
 import { useStallAlerts } from "./stallAlerts";
 import { recordSpan } from "./timings";
 import { missionTurns } from "./turns";
+import { VIGIA_NAME, vigiaAgentFor, vigiaBriefing } from "./vigia";
 
 import type { Mission } from "./types";
 
@@ -171,6 +172,8 @@ export function leadBriefing(
   memory = "",
   defaultSubagent?: SubagentDefault | null,
   workspaces: TeamWorkspace[] = [],
+  /** Há um Vigia (agente barato) observando a equipe. */
+  hasVigia = false,
 ): string {
   // O aviso "entrega → QA" só faz sentido com um QA na equipe (senão o tell falha).
   const qa = team.find((m) => m.roleId === "qa" || /\bQA\b/.test(m.roleLabel));
@@ -206,6 +209,7 @@ export function leadBriefing(
     '- `ags peer tell "<nome>" "<mensagem>"` — avisa sem esperar.',
     '- `ags peer check <nome>` — vê a tela dele agora.',
     '- `ags notify "<mensagem>"` — chama o usuário só quando precisar dele.',
+    ...(hasVigia ? [`- O "${VIGIA_NAME}" (um agente barato, que não implementa nada) observa a equipe e te avisa com \`[Vigia] ...\` quando alguém fica ocioso. Aja sobre os avisos dele na hora: ninguém pode ficar parado.`] : []),
     "",
     "MENOS CONVERSA, MAIS REGISTRO:",
     "- Antes de perguntar de novo, releia o objetivo, os achados e a memória aprovada já recebidos. Pergunte apenas a lacuna concreta que bloqueia uma decisão ou o avanço.",
@@ -351,6 +355,10 @@ export async function startMissionInTerminals(
   };
   const leadAgent = agentFor(leadAgentId, squad?.lead.model ?? mission.leadModel, squad?.lead.reasoningEffort, squad?.lead.fastMode);
   const memberAgents = team.map((m) => agentFor(m.agentId, m.model, m.effort, m.fast));
+  // O Vigia: modelo barato do mesmo provedor do Orquestrador (ver `vigia.ts`). Sem nenhum dos
+  // dois instalados, a missão segue sem ele.
+  const vigiaPick = vigiaAgentFor(leadAgentId, detectedAgents.filter((a) => a.available).map((a) => a.id));
+  const vigiaAgent = vigiaPick ? agentFor(vigiaPick.agentId, vigiaPick.model, vigiaPick.effort) : null;
 
   // Una cuenta sin login abriría el selector de login de la TUI, y el briefing se pegaría ahí.
   // Cada cuenta tiene su perfil aislado: el login se hace una vez, a mano, en Cuentas.
@@ -384,11 +392,19 @@ export async function startMissionInTerminals(
     addTab({ cwd: memberWorkspaces[i].cwd, prelaunch: [{ command: memberWorkspaces[i].prelaunch }], agent: memberAgents[i], title: m.name, titleIsCustom: true, accountId: m.accountId ?? undefined }),
   );
 
+  // Lê a pasta do Orquestrador, mas não edita nada nela.
+  const vigiaTabId = vigiaAgent
+    ? addTab({ cwd: leadWorkspace.cwd, agent: vigiaAgent, title: VIGIA_NAME, titleIsCustom: true })
+    : null;
+
   const key = missionBoardKey(mission.cwd, mission.id);
   canvasActions.buildMissionTeam(
     key,
     leadTabId,
-    memberTabIds.map((tabId, i) => ({ tabId, roleId: team[i].roleLabel })),
+    [
+      ...memberTabIds.map((tabId, i) => ({ tabId, roleId: team[i].roleLabel })),
+      ...(vigiaTabId ? [{ tabId: vigiaTabId, roleId: VIGIA_NAME }] : []),
+    ],
   );
   setWorkMode(key, "canvas");
   activateTab(leadTabId);
@@ -426,10 +442,14 @@ export async function startMissionInTerminals(
       },
     };
   };
-  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined, prepared.workspaces)), timed(LEAD_NAME, leadTabId, true));
+  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined, prepared.workspaces, vigiaTabId !== null)), timed(LEAD_NAME, leadTabId, true));
   memberTabIds.forEach((tabId, i) =>
     sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i], memberWorkspaces[i], findings, memory)), timed(team[i].name, tabId)),
   );
+
+  if (vigiaTabId && vigiaPick) {
+    sendWhenReady(vigiaTabId, briefingFor(vigiaPick.agentId, vigiaBriefing(mission.title, LEAD_NAME, team.map((m) => m.name))));
+  }
 
   return { leadTabId, memberTabIds };
 }
