@@ -28,7 +28,7 @@ O flake conhecido `orchestrator::test::esperar_sin_nada_que_reportar_vence_vacio
 | Bloqueante | 0 | |
 | Alto | 4 | A1 Vigia (unidade de tempo), A2 sessionId errado, A3 Limites de conta apagados, A4 Enter no Histórico |
 | Médio | 21 | M1–M21 (Vigia e terminais M1–M6, telas M7–M16, CLI M17–M19, coordenação M20–M21) |
-| Baixo | 13 | B1–B13 |
+| Baixo | 15 | B1–B15 |
 
 O ponto mais visível: **o Vigia dispara desde o primeiro ciclo de toda missão** (A1). Somado a M3, depois de cerca de 12 min ele esgota os lembretes e para de checar. Ou seja, nesta versão ele avisa à toa no começo e se cala quando um travamento real poderia acontecer.
 
@@ -196,6 +196,37 @@ O ponto mais visível: **o Vigia dispara desde o primeiro ciclo de toda missão*
 - **B12. `--file` apontando para uma pasta** dá "Acesso negado (os error 5)" em vez de "é um diretório".
 - **B13. Não existe comando para listar missões.** `ags mission list` dá "Comando desconocido" (conferido pelo Orquestrador); o help só tem `run|start|status|wait`.
 
+
+- **B14. A chave `settings.accounts.limits.budgetHelper` está duplicada nos 3 locales** (en.json ~325 e ~711).
+  - O JSON fica com a segunda, que é a mensagem de validação.
+  - Por isso o texto de ajuda longo do campo Orçamento diário (custo informado pela CLI, janela de 24 h) nunca aparece.
+  - Achado pelo Frontend durante a correção do A3.
+- **B15. `claude_session_file` monta `dir.join(format!("{id}.jsonl"))` com o `session_id` sem validar** (`session/title.rs`).
+  - O id vem de fora; falta conferir se `is_safe_session_id` cobre esse caminho.
+  - Observação do Generalist, não investigada.
+
+---
+
+## Correções dos achados altos
+
+A pedido do usuário, os 4 altos foram corrigidos na mesma missão, cada um na branch do integrante. Não houve PR nem merge.
+
+| Achado | Commit | Branch | Validação |
+|---|---|---|---|
+| A1 Vigia (segundos × ms) | `4ae51fb` | `cc/mission-5eb4e0f3-f332-467a-8b05-1092a83e` (QA) | `ags test affected`: babel, tsc e vitest relacionados (88 testes) verdes; novo teste com `startedAt` em segundos |
+| A2 sessionId `opencode_stream` | `69ee16f` | `cc/mission-5eb4e0f3-f332-467a-8b05-9e26cd5d` (Generalist) | `ags test affected` (`session::`, 43 testes) verde; 3 testes novos; QA reproduziu antes/depois num programa à parte |
+| A3 Limites de conta | `1ff2d11` | `cc/mission-5eb4e0f3-f332-467a-8b05-e4faf559` (Frontend) | `ags test affected`: babel, tsc e frontend verdes |
+| A4 Enter no Histórico | `1ff2d11` | idem | idem; testes novos em `listKeys.test.ts` |
+
+- **A1:** `missionStartMs` converte `mission.startedAt` para ms na borda (`vigia.ts`). M1–M3 continuam abertos.
+- **A2:** `claude_legacy_project_dir` só aceita um único componente normal dentro de `projects`; barra invertida, prefixo, raiz, `.` e `..` são rejeitados.
+  - Pendência: linhas já gravadas com `opencode_stream` só se corrigem quando a aba é arquivada (`resolve_for_archive`). Uma correção de dados fica para outra rodada.
+- **A3:** o diálogo lê os limites da própria conta ao abrir, com loading. Salvar fica desabilitado sem leitura ou com erro, e a lista usa `allSettled`.
+  - Pendências não bloqueantes: falta um botão de "tentar de novo" após erro, e o teste cobre a lógica pura, não o render.
+- **A4:** `listHandlesKey` deixa o Enter com o controle interativo de origem. Enter na linha (uma `div`) e na busca continua retomando.
+- **Revisão:** o Orquestrador revisou os 3 diffs, e o QA validou A2 e A3/A4 no mesmo commit (`já verde neste hash`).
+- **Falta:** a validação completa da integração (suíte inteira ou CI do PR), quando as branches forem integradas.
+- **Atribuição:** os commits `4ae51fb` e `69ee16f` levam o trailer do modelo que de fato rodou (Haiku 5.5).
 
 ---
 
