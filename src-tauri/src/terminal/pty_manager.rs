@@ -8,7 +8,9 @@ use tauri::{AppHandle, Emitter};
 
 struct PtySession {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    /// Próprio cadeado: escrever num PTY cuja TUI parou de ler pode bloquear, e isso não pode
+    /// segurar o registro inteiro (todas as outras terminais esperavam junto).
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Box<dyn portable_pty::Child + Send>,
     /// Contenedor de ciclo de vida de la tab. Matar `killer` alcanza solo al proceso que
     /// lanzamos; esto se lleva además a toda su descendencia (ver `containment`).
@@ -699,10 +701,10 @@ pub async fn pty_create(
     group.adopt(&*child);
     let root_pid = child.process_id();
 
-    let writer = pair
+    let writer = Arc::new(Mutex::new(pair
         .master
         .take_writer()
-        .map_err(|e| format!("Failed to get PTY writer: {e}"))?;
+        .map_err(|e| format!("Failed to get PTY writer: {e}"))?));
 
     let mut reader = pair
         .master
@@ -865,10 +867,12 @@ pub fn scrollback_of(id: u32) -> Option<(String, u64)> {
 /// Escribe al PTY desde código Rust (servidor IPC). `pty_write` es la versión `async`
 /// que expone el mismo comportamiento al frontend vía invoke.
 pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {
-    let mut registry = registry();
-    let session = registry.get_mut(&id).ok_or_else(|| format!("PTY session {id} not found"))?;
-    session.writer.write_all(data.as_bytes()).map_err(|e| format!("PTY write error: {e}"))?;
-    session.writer.flush().map_err(|e| format!("PTY flush error: {e}"))
+    // Pega o escritor e SOLTA o registro antes de escrever: um write bloqueado (TUI travada,
+    // colagem grande) só espera ele mesmo.
+    let writer = registry().get(&id).map(|session| session.writer.clone()).ok_or_else(|| format!("PTY session {id} not found"))?;
+    let mut writer = writer.lock().unwrap_or_else(|e| e.into_inner());
+    writer.write_all(data.as_bytes()).map_err(|e| format!("PTY write error: {e}"))?;
+    writer.flush().map_err(|e| format!("PTY flush error: {e}"))
 }
 
 /// Display an app notice as output. Never inject it as input into an agent's TUI.
@@ -924,7 +928,10 @@ pub async fn pty_resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
 /// Termina el proceso del PTY y limpia la sesión.
 #[tauri::command]
 pub async fn pty_kill(id: u32) -> Result<(), String> {
-    if let Some(mut session) = registry().remove(&id) {
+    // Em duas linhas de propósito: o `if let` segurava o registro durante o kill e o wait
+    // (até ~300 ms), travando todas as outras terminais a cada agente fechado.
+    let removed = registry().remove(&id);
+    if let Some(mut session) = removed {
         forget_session(&session);
         // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
         // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los

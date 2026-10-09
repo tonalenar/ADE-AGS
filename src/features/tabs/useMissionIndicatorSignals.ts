@@ -52,8 +52,15 @@ function refresh(): void {
 
 /** One shared signal sampler, regardless of the number of mounted mission tabs. */
 function start(): () => void {
+  // Uma rajada de mudanças (arrastar no canvas, eventos de atividade) vira UM recálculo a cada
+  // 250 ms, não um por mudança.
+  let pending: ReturnType<typeof setTimeout> | undefined;
+  const scheduleRefresh = () => {
+    if (pending !== undefined) return;
+    pending = setTimeout(() => { pending = undefined; refresh(); }, 250);
+  };
   const unsubscribers = [useTabsStore, useCanvasStore, useMissionsStore, useRunsStore, useStallAlerts]
-    .map((store) => store.subscribe(refresh));
+    .map((store) => store.subscribe(scheduleRefresh));
   let timer: ReturnType<typeof setInterval> | undefined;
   const resume = () => {
     if (timer !== undefined) clearInterval(timer);
@@ -66,6 +73,7 @@ function start(): () => void {
   resume();
   return () => {
     if (timer !== undefined) clearInterval(timer);
+    if (pending !== undefined) clearTimeout(pending);
     if (typeof document !== "undefined") document.removeEventListener("visibilitychange", resume);
     unsubscribers.forEach((unsubscribe) => unsubscribe());
     snapshots = {};
