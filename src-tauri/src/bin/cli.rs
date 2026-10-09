@@ -452,7 +452,9 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
     let home = dirs::home_dir().ok_or("Não foi possível localizar a pasta do usuário.")?;
     std::fs::create_dir_all(home.join(".ags")).map_err(|e| e.to_string())?;
     let conn = rusqlite::Connection::open(home.join(".ags/data.db")).map_err(|e| e.to_string())?;
-    conn.execute_batch("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
+    // 30 s e não 5: o app grava em WAL ao mesmo tempo, e um "database is locked" aqui jogava
+    // fora um verde já obtido (a próxima chamada rodava a suíte de novo).
+    conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
     // Additive DDL only: the standalone CLI never migrates or downgrades the app DB.
     test_runner::migrate(&conn).map_err(|e| e.to_string())?;
     if command == "test.status" { return Ok((test_runner::status(&conn,&root)?,true)); }
@@ -470,13 +472,37 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
         let skipped = ["frontend","rust","tsc","babel"].iter().filter(|s| !suites.contains(**s)).count();
         let now = chrono::Utc::now().timestamp_millis();
         test_runner::record_span(&conn,mission.as_deref(),&actor,"affected","",now,now,false,skipped)?;
+        // O cargo (o passo lento) corre numa thread própria, com a sua conexão, enquanto babel,
+        // tsc e vitest correm aqui em série. Antes era tudo em fila: o tempo do cargo somava ao
+        // dos outros. Cada thread para no primeiro passo que falha dela.
+        let (rust_steps, quick_steps): (Vec<_>, Vec<_>) = commands.iter().cloned().partition(|step| step.suite == "rust");
+        let rust_thread = (!rust_steps.is_empty()).then(|| {
+            let (db, root, mission, actor) = (home.join(".ags/data.db"), root.clone(), mission.clone(), actor.clone());
+            std::thread::spawn(move || -> Result<Vec<test_runner::RunResult>, String> {
+                let conn = rusqlite::Connection::open(db).map_err(|e| e.to_string())?;
+                conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
+                let mut out = Vec::new();
+                for step in &rust_steps {
+                    let result = test_runner::run(&conn,&root,&step.suite,std::slice::from_ref(step),force,mission.as_deref(),&actor)?;
+                    let ok = result.passed;
+                    out.push(result);
+                    if !ok { break; }
+                }
+                Ok(out)
+            })
+        });
         let mut results = Vec::new();
         let mut passed = true;
-        for step in &commands {
+        for step in &quick_steps {
             let result = test_runner::run(&conn,&root,&step.suite,std::slice::from_ref(step),force,mission.as_deref(),&actor)?;
             passed &= result.passed;
             results.push(result);
             if !passed { break; }
+        }
+        if let Some(thread) = rust_thread {
+            let rust = thread.join().map_err(|_| "o passo de Rust terminou com pânico".to_string())??;
+            passed &= rust.iter().all(|result| result.passed);
+            results.extend(rust);
         }
         return Ok((json!({"results":results,"passed":passed,"full":plan.full,"risk":plan.risk,"unmapped":plan.unmapped,"ignored":plan.ignored,"skippedAffected":skipped}),passed));
     }

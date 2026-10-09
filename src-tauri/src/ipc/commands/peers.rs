@@ -184,11 +184,49 @@ pub(crate) fn outgoing(from_name: &str, text: &str, expects_reply: bool, raw: bo
 /// El encabezado con el que llega un mensaje: quién lo manda y cómo contestar.
 pub(crate) fn framed(from_name: &str, text: &str, expects_reply: bool) -> String {
     let how = if expects_reply {
-        "Responda normalmente; sua resposta volta para quem perguntou quando você terminar.".to_string()
+        format!("Responda normalmente: quem perguntou lê a resposta na sua tela. Se demorar, mande-a também com: ags peer tell \"{from_name}\" \"<resposta>\"")
     } else {
         format!("Para responder, use: ags peer tell \"{from_name}\" \"<mensagem>\"")
     };
     format!("[Mensagem de {from_name} via ADE AGS] {text}\n({how})")
+}
+
+/// Um cadeado por terminal de destino: duas mensagens para o mesmo agente (dois remetentes,
+/// ou um tell e um ask) nunca são coladas ao mesmo tempo na mesma caixa de entrada.
+fn delivery_lock(target: &str) -> std::sync::Arc<Mutex<()>> {
+    static LOCKS: OnceLock<Mutex<HashMap<String, std::sync::Arc<Mutex<()>>>>> = OnceLock::new();
+    let mut map = LOCKS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap_or_else(|e| e.into_inner());
+    map.entry(target.to_string()).or_default().clone()
+}
+
+/// Quanto o comando de quem envia espera o destino ficar quieto. Passou disso, a mensagem vai
+/// para a fila e o remetente segue trabalhando (antes ele ficava preso até 60 s pelo trabalho
+/// do outro).
+const SENDER_WAIT: Duration = Duration::from_secs(3);
+/// Até quando a fila espera o destino terminar o turno antes de entregar mesmo assim.
+const QUEUE_MAX_WAIT: Duration = Duration::from_secs(15 * 60);
+
+/// Entrega `message` quando o destino parar de escrever, numa thread própria. Volta na hora.
+fn deliver_when_quiet(pty: u32, target: &str, message: String) {
+    let lock = delivery_lock(target);
+    std::thread::spawn(move || {
+        let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
+        wait_until_quiet(pty, Duration::from_millis(1500), QUEUE_MAX_WAIT, false);
+        let _ = submit_prompt(pty, &message);
+    });
+}
+
+/// Entrega já se o destino se aquietar em até `SENDER_WAIT`; senão enfileira. `true` = já foi.
+fn deliver_now_or_queue(pty: u32, target: &str, message: String) -> Result<bool, String> {
+    let lock = delivery_lock(target);
+    if let Ok(_turn) = lock.try_lock() {
+        if wait_until_quiet(pty, Duration::from_millis(1500), SENDER_WAIT, false) {
+            submit_prompt(pty, &message)?;
+            return Ok(true);
+        }
+    }
+    deliver_when_quiet(pty, target, message);
+    Ok(false)
 }
 
 pub(super) fn peer_list(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -561,11 +599,17 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
         TellBody::Send(body) => body,
     };
 
-    // No se interrumpe a quien está a mitad de un turno: se espera a que se calle un poco.
-    wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(60), false);
-    submit_prompt(pty, &outgoing(&from_name, &text, false, is_raw(args)))?;
+    // Não se interrompe quem está no meio de um turno, mas também não se prende o remetente:
+    // quieto em poucos segundos, vai já; senão entra na fila do destino e é entregue quando ele
+    // terminar o turno (ver `deliver_now_or_queue`).
+    let delivered = deliver_now_or_queue(pty, &target.id, outgoing(&from_name, &text, false, is_raw(args)))?;
     emit_peer_message(app, "tell", &from, Some(&target.id), Some(&text));
-    Ok(json!({ "peer": describe(target), "sent": true }))
+    Ok(if delivered {
+        json!({ "peer": describe(target), "sent": true })
+    } else {
+        json!({ "peer": describe(target), "sent": true, "queued": true,
+            "note": "O destino está trabalhando: a mensagem será entregue quando ele terminar o turno. Siga com o seu trabalho." })
+    })
 }
 
 /// Avisa al frontend de un mensaje entre agentes (`cc-peer-message`). Un `tell` le da una tarea
@@ -635,8 +679,15 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
         finish_ask(from_id, &target.id, started_ms, false);
         let _ = app.emit("cc-peer-timing", json!({ "from": from_name, "to": target.name, "toTabId": target.id,
             "startedMs": started_ms, "endedMs": crate::util::now_ts_ms(), "finished": false }));
-        return Ok(json!({ "peer": describe(target), "finished": false, "sent": false, "reply": [], "status": "busy" }));
+        // Ocupado: antes a pergunta era descartada ("busy", sent:false) e quem perguntou esperava
+        // algo que nunca chegaria. Agora ela entra na fila do destino e vai ao fim do turno dele.
+        deliver_when_quiet(pty, &target.id, outgoing(from_name, text, false, raw));
+        emit_peer_message(app, "ask", from_id, Some(&target.id), None);
+        return Ok(json!({ "peer": describe(target), "finished": false, "sent": true, "queued": true, "reply": [], "status": "queued",
+            "note": format!("{0} está trabalhando: a pergunta foi enfileirada e será entregue ao fim do turno dele, com o pedido de responder por ags peer tell. Siga com outra coisa; se precisar, leia a tela com ags peer check \"{0}\".", target.name) }));
     }
+    let delivery = delivery_lock(&target.id);
+    let _turn = delivery.lock().unwrap_or_else(|e| e.into_inner());
     submit_prompt(pty, &outgoing(from_name, text, true, raw))?;
     emit_peer_message(app, "ask", from_id, Some(&target.id), None);
     remember_ask(&target.id, AskStatus { started_ms, ended_ms: None, mark, finished: None, from: from_id.into(), sent: true });

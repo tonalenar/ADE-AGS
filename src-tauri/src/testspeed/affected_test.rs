@@ -156,3 +156,20 @@ fn unsafe_added_in_diff_marks_the_file_risky() {
     assert!(plan.risk[0].contains("adiciona unsafe"));
     assert!(files_adding_unsafe("").is_empty());
 }
+
+#[test]
+fn ci_editor_and_git_attributes_do_not_force_the_full_suite() {
+    let plan = p(&[".github/workflows/ci.yml", ".vscode/settings.json", ".gitattributes"]);
+    assert!(!plan.full);
+    assert!(plan.steps.is_empty());
+    assert!(plan.unmapped.is_empty());
+}
+
+#[test]
+fn a_database_query_is_module_code_not_a_schema_risk() {
+    let plan = p(&["src-tauri/src/database/queries.rs"]);
+    assert!(plan.risk.is_empty());
+    assert!(!plan.full);
+    let migrations = p(&["src-tauri/src/database/migrations.rs"]);
+    assert!(migrations.full);
+}

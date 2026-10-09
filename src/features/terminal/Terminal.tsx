@@ -492,7 +492,7 @@ export function Terminal({
             env,
             // Quién es esta terminal. `ags peer ...` lo reenvía como `from`, y es contra
             // eso que el backend compara las conexiones del canvas.
-            tabId ? { ADE_TAB_ID: tabId } : undefined
+            tabId ? { ADE_TAB_ID: tabId, ...(missionId ? { ADE_MISSION_ID: missionId } : {}) } : undefined
           ),
           prelaunch: resolvedPrelaunch,
         });
