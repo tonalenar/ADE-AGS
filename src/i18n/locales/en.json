@@ -610,6 +610,7 @@
   "panel.collapse": "Collapse the panel",
   "panel.expand": "Expand the panel",
   "btn.close": "Close",
+  "fleet.new.needsFolder": "Open a workspace with a folder to launch an agent",
   "missions.form.missing": "Still missing: {{fields}}",
   "settings.accounts.limits.budgetHelper": "The daily budget must be a number greater than or equal to zero.",
   "app.routeError.title": "This screen hit an error",

@@ -610,6 +610,7 @@
   "panel.collapse": "Plegar el panel",
   "panel.expand": "Desplegar el panel",
   "btn.close": "Cerrar",
+  "fleet.new.needsFolder": "Abre un espacio de trabajo con una carpeta para lanzar un agente",
   "missions.form.missing": "Falta completar: {{fields}}",
   "settings.accounts.limits.budgetHelper": "El presupuesto diario debe ser un número mayor o igual a cero.",
   "app.routeError.title": "Esta pantalla encontró un error",

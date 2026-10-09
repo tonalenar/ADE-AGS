@@ -220,6 +220,8 @@ function PaletteDialog() {
   }, [commands, query]);
 
   useEffect(() => { setCursor(0); }, [query]);
+  // A lista pode encolher sem a busca mudar (uma aba fecha, uma aprovação some): o cursor não fica no vazio.
+  useEffect(() => { setCursor((c) => (c >= results.length ? Math.max(0, results.length - 1) : c)); }, [results.length]);
 
   // A linha sob o cursor sempre visível, também navegando pelo teclado.
   useEffect(() => {
