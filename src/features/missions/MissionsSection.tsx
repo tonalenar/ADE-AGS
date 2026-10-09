@@ -78,7 +78,14 @@ export function MissionsSection() {
   const archived = missions.filter(isArchived);
 
   const go = (m: MissionSummary) => {
-    if (openMission(m.id)) navigate("/workspace");
+    if (openMission(m.id)) {
+      navigate("/workspace");
+      return;
+    }
+    // Sem terminais abertos (missão iniciada pelo CLI, que roda headless, ou já encerrada): antes
+    // o clique não fazia nada. Agora leva à página de Missões com ela selecionada.
+    useUiStore.getState().requestMission(m.id);
+    navigate("/missions");
   };
 
   const [duplicatePrompt, setDuplicatePrompt] = useState<{ id: string; title: string; status: string; isRunning: boolean; target: MissionSummary } | null>(null);
