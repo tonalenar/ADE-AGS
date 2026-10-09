@@ -3,8 +3,10 @@ import { useTranslation } from "react-i18next";
 
 import type { BulkOutcome } from "./bulkReview";
 import { approveDream, diffLines, reviewableDreams } from "./dreamReview";
+import { AlertaToast } from "neogestify-ui-components";
 import * as memoryIpc from "./ipc";
 import type { MemoryDream } from "./types";
+import { dateLocale } from "@/i18n/dateLocale";
 
 const DIFF_STYLE = { add: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300", del: "bg-red-500/15 text-red-700 dark:text-red-300", ctx: "text-gray-500 dark:text-white/45" } as const;
 
@@ -30,7 +32,14 @@ export function DreamSection({ workspaceId, onChanged }: { workspaceId: string; 
   };
   const reject = async (d: MemoryDream) => {
     setBusy(true);
-    try { for (const p of d.proposals) await memoryIpc.decideMemory(p.entryId, p.revision, false).catch(() => undefined); await load(); onChanged(); }
+    // Rejeitar sem avisar nada escondia falhas: conta as que não foram e diz quantas.
+    let failed = 0;
+    try {
+      for (const p of d.proposals) await memoryIpc.decideMemory(p.entryId, p.revision, false).catch(() => { failed += 1; });
+      await load();
+      onChanged();
+      if (failed > 0) AlertaToast(t("memoryInbox.syncRetry"), t("memoryDream.rejectFailed", { count: failed }), "warning", 8000);
+    }
     finally { setBusy(false); }
   };
 
@@ -43,7 +52,7 @@ export function DreamSection({ workspaceId, onChanged }: { workspaceId: string; 
         {message && <span role="status" className="text-[10.5px] text-gray-500 dark:text-white/45">{message}</span>}
       </div>
       {ready.map((d) => {
-        const title = t("memoryDream.group", { date: new Date(d.createdAt).toLocaleDateString() });
+        const title = t("memoryDream.group", { date: new Date(d.createdAt).toLocaleDateString(dateLocale()) });
         return (
           <section key={d.dreamId} aria-label={title} className="mt-2 rounded-xl bg-gray-100/70 p-3 dark:bg-surface-raised/60">
             <h3 className="flex items-center gap-2 text-[12px] font-semibold text-gray-900 dark:text-gray-100">

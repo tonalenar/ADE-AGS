@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { planLimits } from "./budgetIpc";
 import { nearLimit, type PlanLimits } from "./budgetTypes";
+import { dateLocale } from "@/i18n/dateLocale";
 
 /** Solo lectura de las ventanas de uso de cada plan; sin datos expuestos = «no medido», en gris. */
 export function PlanLimitsView({ limits }: { limits: PlanLimits[] }) {
@@ -17,7 +18,7 @@ export function PlanLimitsView({ limits }: { limits: PlanLimits[] }) {
             {t(`missions.plan.provider.${l.provider}`)}
             {l.observedAt != null && (
               <span className="ml-2 font-normal text-[10px] text-gray-400 dark:text-white/35" title={t("missions.plan.observedHint")}>
-                {t("missions.plan.observed", { at: new Date(l.observedAt * 1000).toLocaleString() })}
+                {t("missions.plan.observed", { at: new Date(l.observedAt * 1000).toLocaleString(dateLocale()) })}
               </span>
             )}
           </span>
@@ -37,7 +38,7 @@ export function PlanLimitsView({ limits }: { limits: PlanLimits[] }) {
                     <span className={nearLimit(w) ? "text-amber-700 dark:text-amber-300" : "text-gray-500 dark:text-white/45"}>{Math.round(w.usedPct)}%</span>
                   </>
                 )}
-                {w.resetsAt && <span className="text-gray-400 dark:text-white/35">{t("missions.plan.resets", { at: new Date(w.resetsAt).toLocaleString() })}</span>}
+                {w.resetsAt && <span className="text-gray-400 dark:text-white/35">{t("missions.plan.resets", { at: new Date(w.resetsAt).toLocaleString(dateLocale()) })}</span>}
               </div>
             ))
           )}

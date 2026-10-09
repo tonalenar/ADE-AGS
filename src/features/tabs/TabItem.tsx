@@ -130,7 +130,7 @@ export function TabItem({
           onClose(e);
         }}
         onMouseDown={(e) => e.stopPropagation()}
-        title="Cerrar"
+        title={t("tabs.close")}
         className="
           absolute right-1 shrink-0 flex items-center justify-center
           w-[18px] h-[18px] rounded-md

@@ -88,6 +88,21 @@ const WAITING_FOR_USER = [
 ];
 
 /** ¿La pantalla muestra un diálogo que espera una decisión del usuario? Pura. */
+/** Sinais de que a TUI está trabalhando agora (spinner, comandos em curso), mesmo que escreva pouco. */
+const WORKING = [
+  /esc to interrupt/i,
+  /\bworking \(\d+\s*s/i,
+  /running (hooks?|tools?|command)/i,
+  /\bmanaging tasks\b/i,
+  /\bthinking( with \w+ effort)?\b/i,
+];
+
+/** A tela mostra que o agente está trabalhando? Pura. */
+export function isWorking(lines: readonly string[]): boolean {
+  const tail = lines.filter((l) => l.trim() !== "").slice(-TAIL_LINES).join("\n");
+  return WORKING.some((re) => re.test(tail));
+}
+
 export function isWaitingForUser(lines: readonly string[]): boolean {
   const tail = lines.filter((l) => l.trim() !== "").slice(-TAIL_LINES).join("\n");
   return WAITING_FOR_USER.some((re) => re.test(tail));
@@ -134,7 +149,9 @@ export function findStalls(pending: PendingTasks, probe: StallProbe, stallMs = S
     const quietMs = probe.now - Math.max(task.at, output, input);
     if (quietMs < stallMs) continue;
     const lines = probe.screen(task.tabId);
-    if (lines && isWaitingForUser(lines)) continue;
+    // Trabalhando (spinner, "esc to interrupt") não é parado, mesmo sem escrever: antes o aviso
+    // disparava com o agente em plena execução.
+    if (lines && (isWaitingForUser(lines) || isWorking(lines))) continue;
     out.push({
       tabId: task.tabId,
       fromTabId: task.fromTabId,

@@ -17,6 +17,7 @@ import { useActiveBoardKey, boardKeyOfTab } from "./store";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { ResponsePicker } from "./ResponsePicker";
 import { CHAT_MARGIN, clampSize, isDefaultSize, loadChatSize, resizeBy, saveChatSize, DEFAULT_CHAT_SIZE, type ChatSize, type ChatSizeState } from "./chatSize";
+import { dateLocale } from "@/i18n/dateLocale";
 
 /** Los siete hilos, en el orden en que los conoce el backend (`chat::THREADS`). */
 export const THREADS = ["blue", "purple", "pink", "red", "orange", "yellow", "green"] as const;
@@ -57,7 +58,7 @@ export function threadCounts(messages: ChatMessage[]): Record<Thread, number> {
   return counts;
 }
 
-const clock = (unix: number) => new Date(unix * 1000).toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+const clock = (unix: number) => new Date(unix * 1000).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 
 /**
  * El chat con un agente: globos en vez del flujo mezclado de su terminal, y siete hilos de

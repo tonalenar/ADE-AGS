@@ -427,7 +427,7 @@ function MissionRow({ mission, squad, phase, active, onSelect }: {
           ? "bg-accent-500/15 shadow-[inset_0_0_0_0.5px_rgba(10,132,255,0.35)]"
           : "hover:bg-black/[0.04] dark:hover:bg-white/[0.04]"}`}
     >
-      <span className="truncate text-[13px] leading-[17px] font-semibold text-gray-900 dark:text-[#f5f5f7]">{readableTitle(mission.title)}</span>
+      <span title={mission.title} className="truncate text-[13px] leading-[17px] font-semibold text-gray-900 dark:text-[#f5f5f7]">{readableTitle(mission.title)}</span>
       <span className="mt-1 flex items-center gap-2 min-w-0 text-[11px] leading-[14px] text-gray-500 dark:text-white/60">
         <StatusBadge phase={phase} />
         <span className="flex min-w-0 items-center gap-[5px]">

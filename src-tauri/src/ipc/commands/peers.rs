@@ -191,6 +191,24 @@ pub(crate) fn framed(from_name: &str, text: &str, expects_reply: bool) -> String
     format!("[Mensagem de {from_name} via ADE AGS] {text}\n({how})")
 }
 
+/// Mensagens já entregues (ou na fila) ao mesmo destino, por (destino, texto), com quando. Uma
+/// tarefa que se repete igual (o orquestrador reenvia, ou um tell que deu timeout e ficou na fila)
+/// não chega DUAS vezes ao agente: era isso que fazia integrantes já liberados refazerem o trabalho.
+const DUPLICATE_WINDOW: Duration = Duration::from_secs(10 * 60);
+
+/// `true` na primeira vez que este texto vai para este destino dentro da janela; `false` se é repetido.
+fn first_time_for(target: &str, text: &str) -> bool {
+    static SEEN: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock::new();
+    let mut seen = SEEN.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap_or_else(|e| e.into_inner());
+    seen.retain(|_, at| at.elapsed() < DUPLICATE_WINDOW);
+    let key = format!("{target}\u{1}{text}");
+    if seen.contains_key(&key) {
+        return false;
+    }
+    seen.insert(key, std::time::Instant::now());
+    true
+}
+
 /// Um cadeado por terminal de destino: duas mensagens para o mesmo agente (dois remetentes,
 /// ou um tell e um ask) nunca são coladas ao mesmo tempo na mesma caixa de entrada.
 fn delivery_lock(target: &str) -> std::sync::Arc<Mutex<()>> {
@@ -206,27 +224,44 @@ const SENDER_WAIT: Duration = Duration::from_secs(3);
 /// Até quando a fila espera o destino terminar o turno antes de entregar mesmo assim.
 const QUEUE_MAX_WAIT: Duration = Duration::from_secs(15 * 60);
 
-/// Entrega `message` quando o destino parar de escrever, numa thread própria. Volta na hora.
-fn deliver_when_quiet(pty: u32, target: &str, message: String) {
+/// Entrega `message` quando o destino parar de escrever, numa thread própria. `false` se era repetida.
+fn deliver_when_quiet(pty: u32, target: &str, message: String) -> bool {
+    if !first_time_for(target, &message) {
+        return false;
+    }
     let lock = delivery_lock(target);
     std::thread::spawn(move || {
         let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
         wait_until_quiet(pty, Duration::from_millis(1500), QUEUE_MAX_WAIT, false);
         let _ = submit_prompt(pty, &message);
     });
+    true
 }
 
-/// Entrega já se o destino se aquietar em até `SENDER_WAIT`; senão enfileira. `true` = já foi.
-fn deliver_now_or_queue(pty: u32, target: &str, message: String) -> Result<bool, String> {
+/// O que aconteceu com uma mensagem: entregue já, na fila, ou descartada por ser repetida.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub(crate) enum Delivery { Now, Queued, Duplicate }
+
+/// Entrega já se o destino se aquietar em até `SENDER_WAIT`; senão enfileira; repetida, não manda.
+fn deliver_now_or_queue(pty: u32, target: &str, message: String) -> Result<Delivery, String> {
+    if !first_time_for(target, &message) {
+        return Ok(Delivery::Duplicate);
+    }
     let lock = delivery_lock(target);
     if let Ok(_turn) = lock.try_lock() {
         if wait_until_quiet(pty, Duration::from_millis(1500), SENDER_WAIT, false) {
             submit_prompt(pty, &message)?;
-            return Ok(true);
+            return Ok(Delivery::Now);
         }
     }
-    deliver_when_quiet(pty, target, message);
-    Ok(false)
+    // Já registrada como vista acima: a fila entrega sem repetir a checagem de duplicata.
+    let lock = delivery_lock(target);
+    std::thread::spawn(move || {
+        let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
+        wait_until_quiet(pty, Duration::from_millis(1500), QUEUE_MAX_WAIT, false);
+        let _ = submit_prompt(pty, &message);
+    });
+    Ok(Delivery::Queued)
 }
 
 pub(super) fn peer_list(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -602,13 +637,16 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     // Não se interrompe quem está no meio de um turno, mas também não se prende o remetente:
     // quieto em poucos segundos, vai já; senão entra na fila do destino e é entregue quando ele
     // terminar o turno (ver `deliver_now_or_queue`).
-    let delivered = deliver_now_or_queue(pty, &target.id, outgoing(&from_name, &text, false, is_raw(args)))?;
-    emit_peer_message(app, "tell", &from, Some(&target.id), Some(&text));
-    Ok(if delivered {
-        json!({ "peer": describe(target), "sent": true })
-    } else {
-        json!({ "peer": describe(target), "sent": true, "queued": true,
-            "note": "O destino está trabalhando: a mensagem será entregue quando ele terminar o turno. Siga com o seu trabalho." })
+    let outcome = deliver_now_or_queue(pty, &target.id, outgoing(&from_name, &text, false, is_raw(args)))?;
+    if outcome != Delivery::Duplicate {
+        emit_peer_message(app, "tell", &from, Some(&target.id), Some(&text));
+    }
+    Ok(match outcome {
+        Delivery::Now => json!({ "peer": describe(target), "sent": true }),
+        Delivery::Queued => json!({ "peer": describe(target), "sent": true, "queued": true,
+            "note": "O destino está trabalhando: a mensagem será entregue quando ele terminar o turno. Siga com o seu trabalho." }),
+        Delivery::Duplicate => json!({ "peer": describe(target), "sent": false, "duplicate": true,
+            "note": "Essa mesma mensagem já foi entregue a este agente há pouco; não foi enviada de novo." }),
     })
 }
 
@@ -681,7 +719,10 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
             "startedMs": started_ms, "endedMs": crate::util::now_ts_ms(), "finished": false }));
         // Ocupado: antes a pergunta era descartada ("busy", sent:false) e quem perguntou esperava
         // algo que nunca chegaria. Agora ela entra na fila do destino e vai ao fim do turno dele.
-        deliver_when_quiet(pty, &target.id, outgoing(from_name, text, false, raw));
+        if !deliver_when_quiet(pty, &target.id, outgoing(from_name, text, false, raw)) {
+            return Ok(json!({ "peer": describe(target), "finished": false, "sent": false, "reply": [], "status": "duplicate", "duplicate": true,
+                "note": "Essa mesma pergunta já foi enviada a este agente há pouco; leia a resposta com `ags peer check`." }));
+        }
         emit_peer_message(app, "ask", from_id, Some(&target.id), None);
         return Ok(json!({ "peer": describe(target), "finished": false, "sent": true, "queued": true, "reply": [], "status": "queued",
             "note": format!("{0} está trabalhando: a pergunta foi enfileirada e será entregue ao fim do turno dele, com o pedido de responder por ags peer tell. Siga com outra coisa; se precisar, leia a tela com ags peer check \"{0}\".", target.name) }));
@@ -937,5 +978,20 @@ mod test {
         assert!(ask.starts_with("[Mensagem de Líder via ADE AGS] rodar os testes"));
         let tell = framed("Líder", "pronto", false);
         assert!(tell.contains("ags peer tell \"Líder\""));
+    }
+}
+
+#[cfg(test)]
+mod dedupe_tests {
+    use super::first_time_for;
+
+    /// AGS-023: a mesma mensagem não vai duas vezes ao mesmo agente dentro da janela.
+    #[test]
+    fn a_mesma_mensagem_ao_mesmo_destino_nao_repete() {
+        assert!(first_time_for("tab-dedupe-a", "tarefa X"));
+        assert!(!first_time_for("tab-dedupe-a", "tarefa X"));
+        // Outro destino ou outro texto continuam válidos.
+        assert!(first_time_for("tab-dedupe-b", "tarefa X"));
+        assert!(first_time_for("tab-dedupe-a", "tarefa Y"));
     }
 }

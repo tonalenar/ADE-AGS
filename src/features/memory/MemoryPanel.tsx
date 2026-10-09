@@ -41,6 +41,7 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
   const [flags, setFlags] = useState<Set<Flag>>(new Set());
   const [pending, setPending] = useState<MemoryReviewItem[]>([]);
   const [entries, setEntries] = useState<Record<"approved" | "rejected", MemoryEntry[] | null>>({ approved: null, rejected: null });
+  const [entriesError, setEntriesError] = useState<Partial<Record<"approved" | "rejected", string>>>({});
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState("");
@@ -63,8 +64,11 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
     try {
       const page = await memoryIpc.queryMemory(workspaceId, null, { status: which });
       setEntries((cur) => ({ ...cur, [which]: Array.isArray(page?.items) ? page.items : [] }));
-    } catch {
+      setEntriesError((cur) => ({ ...cur, [which]: undefined }));
+    } catch (e) {
+      // Falha não é "nenhuma memória": mostra o erro e deixa a aba tentar de novo ao voltar.
       setEntries((cur) => ({ ...cur, [which]: [] }));
+      setEntriesError((cur) => ({ ...cur, [which]: String(e) }));
     }
   }, [workspaceId]);
 
@@ -195,6 +199,8 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
               })}
             </ul>
           )
+        ) : entriesError[tab as "approved" | "rejected"] ? (
+          <p role="alert" className="py-8 text-center text-[12.5px] text-red-600 dark:text-red-400">{entriesError[tab as "approved" | "rejected"]}</p>
         ) : entries[tab] === null ? (
           <p className="py-8 text-center text-[12.5px] text-gray-400 dark:text-white/35">{t("memoryInbox.loading")}</p>
         ) : shownEntries.length === 0 ? (

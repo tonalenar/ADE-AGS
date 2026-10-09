@@ -99,6 +99,11 @@ describe("resolveGoto", () => {
     expect(resolveGoto("/marketplace", "/marketplace", true)).toBe("/workspace");
   });
 
+  it("numa sub-rota da seção (ex.: /skills/<id>) também volta à terminal", () => {
+    expect(resolveGoto("/skills", "/skills/abc", true)).toBe("/workspace");
+    expect(resolveGoto("/skills", "/skillsx", true)).toBe("/skills");
+  });
+
   /// Sin tabs, `/workspace` rebota a Home solo: el atajo no debe provocar ese parpadeo.
   it("sin tabs abiertas no hace nada en vez de rebotar", () => {
     expect(resolveGoto("/marketplace", "/marketplace", false)).toBeNull();
