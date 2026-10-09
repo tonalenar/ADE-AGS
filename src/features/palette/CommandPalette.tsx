@@ -132,7 +132,7 @@ function PaletteDialog() {
         id: `ws:${ws.id}`,
         group: "workspaces",
         title: ws.name,
-        subtitle: t("palette.workspaceMeta", { tabs: ws.tabCount }),
+        subtitle: t("palette.workspaceMeta", { count: ws.tabCount }),
         keywords: ["workspace"],
         icon: <StackIcon className={icon} />,
         // Já aberto em outra janela: só a traz para frente. Senão abre ao lado, sem fechar

@@ -275,7 +275,7 @@ export function MissionsPage() {
               <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("missions.search")}
                 aria-label={t("missions.search")}
                 className="min-w-0 flex-1 bg-transparent text-[13px] text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 outline-none" />
-              {query && <button type="button" onClick={() => setQuery("")} aria-label={t("btn.clear", { defaultValue: "Limpar" })}
+              {query && <button type="button" onClick={() => setQuery("")} aria-label={t("btn.clear")}
                 className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-400/60 text-[10px] text-white">×</button>}
               {!query && <kbd className="shrink-0 rounded-[5px] bg-black/[0.06] dark:bg-surface-overlay px-1.5 py-0.5 font-mono text-[11px] leading-[14px] text-gray-500 dark:text-white/60 shadow-[0_1px_0_rgba(0,0,0,0.4)]">{SEARCH_KEY}</kbd>}
             </label>
@@ -294,7 +294,7 @@ export function MissionsPage() {
                 </button>
               ))}
             </div>
-            {shownGroups.length === 0 && <p className="mt-6 px-2 text-center text-[12.5px] text-gray-400 dark:text-white/35">{t("missions.noResults")}</p>}
+            {loaded && shownGroups.length === 0 && <p className="mt-6 px-2 text-center text-[12.5px] text-gray-400 dark:text-white/35">{t("missions.noResults")}</p>}
             {shownGroups.map((group) => (
               <div key={group.key} className="mt-[14px] flex flex-col gap-0.5">
                 <button type="button" onClick={() => setCollapsed((c) => ({ ...c, [group.key]: !c[group.key] }))} aria-expanded={group.open}
@@ -348,7 +348,8 @@ export function MissionsPage() {
           ) : (
             workspaceId ? (
               <div className="flex flex-col gap-4 p-5">
-                <p className="text-[12px] text-gray-400 dark:text-white/35">{t("missions.pick")}</p>
+                {/* Com uma missão escolhida e o detalhe ainda a caminho não se pede "escolha uma". */}
+                {!selected && <p className="text-[12px] text-gray-400 dark:text-white/35">{t("missions.pick")}</p>}
                 <SharedMemoryPanel
                   key={`${workspaceId}-${focusNonce}`}
                   workspaceId={workspaceId}
