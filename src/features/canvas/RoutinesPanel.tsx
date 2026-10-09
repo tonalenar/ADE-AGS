@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
 import { dateLocale } from "@/i18n/dateLocale";
+import { useDockWidth } from "./dockWidth";
 
 export type Schedule =
   | { kind: "every"; secs: number }
@@ -106,9 +107,11 @@ export function RoutinesPanel({ onClose }: { onClose: () => void }) {
   const small = `cc-t h-6 px-2 rounded-md text-[11px] font-medium text-gray-600 dark:text-gray-300
     hover:bg-gray-100 dark:hover:bg-white/8 disabled:opacity-40`;
 
+  const dockWidth = useDockWidth((st) => st.width);
   return (
-    <div className="pointer-events-auto absolute right-3 bottom-[4.75rem] w-[26rem] max-h-[60%] flex flex-col rounded-lg
-      border border-gray-200 dark:border-white/10 bg-white/98 dark:bg-surface-raised/98 shadow-lg overflow-hidden">
+    <div className="pointer-events-auto absolute right-3 bottom-[4.75rem] w-[26rem] max-h-[60%] flex flex-col rounded-xl
+      border border-gray-200 dark:border-white/10 bg-white/98 dark:bg-surface-raised/98 shadow-lg overflow-hidden"
+      style={dockWidth > 0 ? { width: dockWidth } : undefined}>
       <div className="flex items-center gap-2 px-3 h-9 shrink-0 border-b border-gray-200 dark:border-white/10">
         <span className="text-[12.5px] font-medium text-gray-800 dark:text-gray-100">{t("canvas.routines.title")}</span>
         <span className="flex-1" />

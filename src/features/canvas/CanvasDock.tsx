@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MiniMap, useNodesInitialized, useReactFlow } from "@xyflow/react";
 import { Button, CloseIcon } from "neogestify-ui-components";
@@ -9,6 +9,7 @@ import type { AgentAccount } from "@/features/accounts/types";
 import { useVigiaSwitch } from "@/features/missions/vigiaSwitch";
 
 import { unreadOf, useUnreadStore } from "./chatUnread";
+import { useDockWidth } from "./dockWidth";
 import { FloorBar } from "./FloorBar";
 import { RING_COLORS, Ring } from "./Ring";
 import { UsageBoard } from "./UsageBoard";
@@ -131,6 +132,20 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump]);
   const unreadTotal = useUnreadStore((s) => Object.values(s.unread).reduce((n, by) => n + unreadOf(by), 0));
+  // Mede a barra para os painéis de cima terem a mesma largura dela.
+  const dockRef = useRef<HTMLDivElement>(null);
+  const dockWidth = useDockWidth((s) => s.width);
+  useEffect(() => {
+    const el = dockRef.current;
+    if (!el) return;
+    const publish = () => useDockWidth.getState().setWidth(Math.round(el.getBoundingClientRect().width));
+    publish();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(publish);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const sameWidth = dockWidth > 0 ? { width: dockWidth } : undefined;
   const vigiaOn = useVigiaSwitch((s) => s.enabled);
   const toggleVigia = useVigiaSwitch((s) => s.toggle);
   useEffect(() => startUsagePolling(accounts), [accounts]);
@@ -141,14 +156,15 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
   return (
     <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
       {panel === "layers" && (
-        <div className={`${popover} p-2`}><FloorBar inline /></div>
+        <div className={`${popover} p-2`} style={sameWidth}><FloorBar inline /></div>
       )}
-      {usageOpen && panel === null && <UsagePanel accounts={accounts} onClose={toggleUsage} />}
+      {usageOpen && panel === null && <UsagePanel accounts={accounts} onClose={toggleUsage} width={dockWidth} />}
       {panel === "map" && (
-        <div className={`${popover} w-[17rem]`}>
+        <div className={`${popover} w-[17rem]`} style={sameWidth}>
           <div className="relative h-44">
             {nodesReady && (
-              <MiniMap pannable zoomable nodeColor="var(--color-accent-400)" maskColor="rgba(0,0,0,0.3)"
+              <MiniMap pannable zoomable nodeColor="var(--color-accent-400)" nodeStrokeColor="rgba(0,0,0,0.55)" nodeStrokeWidth={14} nodeBorderRadius={18}
+                maskColor="rgba(0,0,0,0.45)" maskStrokeColor="var(--color-accent-300)" maskStrokeWidth={3}
                 style={{ position: "absolute", inset: 0, margin: 0, width: "100%", height: "100%", background: "transparent" }} />
             )}
             <Button variant="custom" onClick={() => onTogglePanel("map")} aria-label={t("canvas.dock.close")}
@@ -159,7 +175,7 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
         </div>
       )}
 
-      <div className={`pointer-events-auto absolute right-3 bottom-3 flex items-center gap-1 h-[52px] px-2.5 rounded-2xl ${material}`}>
+      <div ref={dockRef} className={`pointer-events-auto absolute right-3 bottom-3 flex items-center gap-1 h-[52px] px-2.5 rounded-2xl ${material}`}>
         <Pill label={t("canvas.chat.hint")} active={panel === "chat"} onClick={() => onTogglePanel("chat")} className="relative">
           <ChatIcon />
           {unreadTotal > 0 && (
@@ -213,10 +229,10 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
  * El panel "Uso dos agentes": el cupo del plan de cada cuenta con sesión — anillo, barras
  * por límite y cuándo se reinicia (ver `UsageBoard`).
  */
-function UsagePanel({ accounts, onClose }: { accounts: AgentAccount[]; onClose: () => void }) {
+function UsagePanel({ accounts, onClose, width }: { accounts: AgentAccount[]; onClose: () => void; width: number }) {
   const { t } = useTranslation();
   return (
-    <div className={`${popover} w-[22rem] max-h-[calc(100%-6.5rem)] flex flex-col`}>
+    <div className={`${popover} w-[22rem] max-h-[calc(100%-6.5rem)] flex flex-col`} style={width > 0 ? { width } : undefined}>
       <div className={`flex items-center gap-1 pl-4 pr-2 h-11 shrink-0 border-b ${hairline}`}>
         <span className="text-[13px] font-semibold tracking-[-0.01em] text-gray-800 dark:text-gray-100">{t("canvas.dock.usageTitle")}</span>
         <span className="flex-1" />
