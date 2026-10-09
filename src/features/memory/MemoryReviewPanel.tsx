@@ -86,7 +86,7 @@ export function MemoryReviewPanel({ missionId, workspaceId, refreshKey = "" }: {
                 <button type="button" disabled={busy} onClick={() => run([item], false)}
                   className="h-6 rounded-md bg-gray-200/80 px-2.5 text-[11px] font-medium text-gray-800 hover:bg-gray-300/70 disabled:opacity-50 dark:bg-surface-overlay dark:text-gray-100 dark:hover:bg-white/[0.14]">{t("memoryReview.reject")}</button>
               </div>
-              <p className="line-clamp-3 whitespace-pre-wrap text-[11.5px] leading-4 text-gray-600 dark:text-gray-300">{item.body}</p>
+              <p title={item.body} className="line-clamp-3 whitespace-pre-wrap text-[11.5px] leading-4 text-gray-600 dark:text-gray-300">{item.body}</p>
               <p className="font-mono text-[10.5px] leading-[14px] text-gray-500 dark:text-white/40">
                 {t("memoryReview.evidence")}: {t(`memoryReview.actor.${item.evidence.actorKind}`)}
                 {ev.runId ? ` · run ${ev.runId.slice(0, 8)}` : ""}

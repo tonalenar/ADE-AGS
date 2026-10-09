@@ -519,6 +519,22 @@ fn memory_caller_drops_a_forged_session_and_keeps_the_pty_token() {
 }
 
 #[test]
+fn smoke_probes_of_the_file_flag_work_offline_and_the_summary_counts_failures() {
+    use super::smoke::{file_flag_probe, missing_file_probe, summarize, Check, Outcome};
+    assert!(file_flag_probe().unwrap().contains("intactos"));
+    assert!(missing_file_probe().unwrap().contains("nada enviado"));
+    let checks = vec![
+        Check { name: "a", outcome: Outcome::Pass("ok".into()), ms: 1 },
+        Check { name: "b", outcome: Outcome::Skip("fora do terminal".into()), ms: 1 },
+    ];
+    let (body, passed) = summarize(&checks);
+    assert!(passed && body["failed"] == 0 && body["checks"][1]["status"] == "skip");
+    let with_failure = vec![Check { name: "c", outcome: Outcome::Fail("quebrou".into()), ms: 2 }];
+    let (body, passed) = summarize(&with_failure);
+    assert!(!passed && body["failed"] == 1 && body["checks"][0]["detail"] == "quebrou");
+}
+
+#[test]
 fn peer_messages_from_a_file_land_in_the_text_field_without_shell_quotes() {
     // No Windows, aspas e `<`/`>` dentro de `ags peer tell "..."` quebram a mensagem. Com --file
     // o texto vai pelo arquivo e tem que chegar no campo `text`, que é o que o backend lê.

@@ -150,3 +150,11 @@ Os dois checks são **obrigatórios para o merge** na `master`: o ruleset [`mast
 
 ### Histórico
 O PR **117** ("Windows: corrige o build do named pipe de credencial") corrigiu uma quebra só-Windows do named pipe de credencial que o CI de Linux não compilava; o run de CI desse PR levou ~18 min. O commit de correção (`a6e803e`) cita "(#113)" no assunto, mas o PR #113 mergeado é outro (M8, `50b21b1`), então a doc cita o 117. Não verificamos qual PR introduziu a quebra. O job `check (windows)` existe para pegar esse tipo de quebra antes do merge.
+
+## `ags test smoke`
+
+Roteiro fixo do CLI contra o app aberto, em milissegundos e com asserções (`src-tauri/src/cli_smoke.rs`). Cobre `tab list`/`output`, recusa de tab e missão inexistentes, `peers`, `memory index`, `--file` do `peer tell` (o arquivo chega como `text`, com aspas, acento, `$HOME` e crase intactos) e erro de leitura de arquivo que não existe. Saída: JSON com `passed`, `failed` e uma linha por passo (`pass`/`skip`/`fail`); código 0 se nada falhou, 1 se algo falhou, e o código de "app fechado" se o app não está rodando.
+
+`peers`, `memory` e `peer tell` só valem DENTRO de um terminal do ADE AGS (precisam de `ADE_TAB_ID` e da sessão). Fora dele o passo aparece como `skip`, nunca como falha. O envio vai a um destino que não existe: prova o caminho do `--file` sem entregar mensagem nem esperar confirmação de ninguém.
+
+Uso numa missão de teste: o Backend roda `ags test run rust|frontend|tsc` e `ags test smoke` em vez de improvisar chamadas.

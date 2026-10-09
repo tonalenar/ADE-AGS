@@ -27,6 +27,7 @@ TESTES LOCAIS (no worktree atual, sem precisar da app)
   test affected [--dry-run] [--force]          Testes afetados desde origin/master + alterações locais
   test run <frontend|rust|tsc|babel> [--force]  Suite completa; reutiliza verde apenas com árvore limpa
   test status                                Últimos resultados deste repositório
+  test smoke                                 Roteiro fixo do CLI contra o app aberto (tab, mission, peers, memory, --file)
              [--mission <id>] [--cwd <raiz>]  Contexto opcional para spans de testes
 
   El primer valor puede ir suelto, sin su flag:
@@ -364,6 +365,11 @@ fn main() -> ExitCode {
             return ExitCode::from(EXIT_USAGE);
         }
     };
+
+    // `ags test smoke` fala com o app aberto (não roda suítes), então vem antes dos testes locais.
+    if command == "test.smoke" {
+        return smoke::run();
+    }
 
     // Tests belong to the caller's worktree, not to the running app's cwd or
     // Cargo target. They also work when the app is offline.
@@ -1162,6 +1168,9 @@ fn run_mcp(args: &[String]) -> ExitCode {
 // El archivo vive fuera de `src/bin/` a propósito: el bundler de Tauri trata CADA entrada
 // de ese directorio como un ejecutable a empaquetar, así que una carpeta `cli/` al lado de
 // `cli.rs` le hacía buscar un binario `cli` que no existe y abortaba el empaquetado.
+#[path = "../cli_smoke.rs"]
+mod smoke;
+
 #[cfg(test)]
 #[path = "../cli_test.rs"]
 mod test;
