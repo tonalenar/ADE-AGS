@@ -217,6 +217,50 @@ fn claude_without_account_uses_the_system_profile() {
     assert!(dir.ends_with(".claude/projects/-home-u-proj"), "{dir:?}");
 }
 
+/// Regresión del sessionId `opencode_stream` en una tab de Claude Code. Con un cwd absoluto
+/// el respaldo viejo apuntaba al propio proyecto y se recorría entero: un `.jsonl` anidado
+/// dentro del repo (como el fixture de `runs/fixtures`) pasaba por la sesión de la tab.
+/// En Linux el cwd absoluto no produce una ruta absoluta tras reemplazar las barras, así
+/// que este test vale sobre todo en Windows; el de abajo cubre el nombre en cualquier SO.
+#[test]
+fn claude_never_takes_a_transcript_from_inside_the_project_tree() {
+    let d = TempDir::new();
+    let profile = d.0.join("perfil");
+    fs::create_dir_all(profile.join("projects")).unwrap();
+    d.write("proyecto/src/fixtures/opencode_stream.jsonl", "{}\n");
+    let cwd = d.0.join("proyecto").to_string_lossy().to_string();
+
+    assert_eq!(claude_session_file(&cwd, None, None, Some(profile.as_path())), None);
+}
+
+/// Nombres que no pueden ser UNA carpeta dentro de `projects` se rechazan en cualquier
+/// plataforma: rutas de Windows, raíz, `.` y `..`, o vacío.
+#[test]
+fn the_legacy_folder_is_only_ever_one_name_inside_projects() {
+    let projects = Path::new("/perfil/projects");
+    for cwd in ["C:\\Users\\u\\proj", "\\\\?\\C:\\proj", "C:\\", "..", ".", ""] {
+        assert_eq!(claude_legacy_project_dir(projects, cwd), None, "{cwd:?}");
+    }
+    assert_eq!(
+        claude_legacy_project_dir(projects, "/home/u/proj"),
+        Some(PathBuf::from("/perfil/projects/-home-u-proj"))
+    );
+}
+
+/// El respaldo legítimo sigue funcionando: una instalación vieja que escribía las barras y
+/// dejaba el resto tal cual (`_` en este caso) tiene su carpeta, y la sesión se encuentra.
+#[test]
+fn claude_still_finds_a_legitimate_legacy_folder() {
+    let d = TempDir::new();
+    let profile = d.0.join("perfil");
+    let legacy = d.write("perfil/projects/-home-u-mi_proyecto/s1.jsonl", "{}\n");
+
+    assert_eq!(
+        claude_session_file("/home/u/mi_proyecto", None, None, Some(profile.as_path())),
+        Some(legacy)
+    );
+}
+
 /// El bug que dejaba sin sesión a proyectos enteros: la ruta con un espacio se traducía
 /// a una carpeta inexistente, así que no se descubría nada. Verificado contra las
 /// carpetas reales de una instalación de Claude Code.
