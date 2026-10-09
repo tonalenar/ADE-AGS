@@ -164,7 +164,8 @@ MISIONES (también sin interfaz: `ade-ags --headless`)
               [--title ...] [--agent claude-code] [--model ...] [--account <id>]
               [--squad <id>] [--budget 5] [--max-parallel 2]
                                               Crea, arranca y espera; sale con 1 si falla
-  mission create|start|status|wait <id>       Paso a paso (wait: --timeout)
+  mission create --objective \"...\" --cwd .   Solo crea el borrador (mismos flags que run, sin --wait)
+  mission start|status|wait <id>              Paso a paso (wait: --timeout)
   mission create|run|start ... --test          Marca explicitamente teste/E2E (fora da taxa de sucesso)
   mission review <id>                         Lo que entregó cada tarea aislada
   mission timings <id>                        Tiempo activo, delegación, alertas/esperas del orquestador y tiempo hasta todos trabajando
@@ -288,6 +289,11 @@ fn main() -> ExitCode {
         eprint!("{USAGE}");
         return ExitCode::from(if args.is_empty() { EXIT_USAGE } else { EXIT_OK });
     }
+    // `ags tab --help`, `ags mission create --help`: ayuda, no un comando que viaja a la app.
+    if args[0] != "mcp" && args.iter().any(|a| a == "--help") {
+        eprint!("{USAGE}");
+        return ExitCode::from(EXIT_OK);
+    }
     if args[0] == "--version" || args[0] == "-V" {
         let mut version = ade_ags_lib::build_info::current();
         version["protocol"] = json!(PROTOCOL_VERSION);
@@ -394,6 +400,10 @@ fn main() -> ExitCode {
                 return execute_standalone_redeliver(&parsed);
             }
             println!("{}", json!({ "error": err }));
+            // Un argumento obligatorio que falta es un error de USO (2), no un comando que falló (1).
+            if err.starts_with("Falta el argumento --") {
+                return ExitCode::from(EXIT_USAGE);
+            }
             ExitCode::from(EXIT_COMMAND_FAILED)
         }
         Err(e) => {
