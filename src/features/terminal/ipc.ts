@@ -17,6 +17,8 @@ export const ptyCreate = (args: PtyCreateArgs) => invoke<number>("pty_create", {
 
 /** Scrollback acumulado de un PTY vivo — reconectarse a él no lo reinicia. */
 export const ptyAttach = (id: number) => invoke<string>("pty_attach", { id });
+/** O scrollback do PTY e o ponto do fluxo (`end` dos eventos) em que foi tirado. */
+export const ptySnapshot = (id: number) => invoke<{ data: string; total: number }>("pty_snapshot", { id });
 
 /** Bytes escritos desde que arrancó el PTY, sin copiar el scrollback. `null` = ya no existe. */
 export const ptyOutputTotal = (id: number) => invoke<number | null>("pty_output_total", { id });

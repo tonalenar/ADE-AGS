@@ -29,7 +29,8 @@ import { reconcileTabSkills } from "@/features/skills/ipc";
 import { hasBrowserMcp, withBrowserMcp } from "@/features/browser/tabMcp";
 import { missionOfTab } from "@/features/canvas/store";
 import { homeDir } from "@/shared/ipc/window";
-import { ptyAttach, ptyCreate, ptyForTab, ptyKill, ptyResize, ptyWrite, savePastedImage } from "./ipc";
+import { ptyAttach, ptyCreate, ptyForTab, ptyKill, ptyResize, ptySnapshot, ptyWrite, savePastedImage } from "./ipc";
+import { createPtyReplay } from "./ptyReplay";
 import { clearPtyLaunch, ptyLaunchRequested, subscribePtyLaunch } from "./ptyLaunch";
 import { decidePaste } from "./pasteDecision";
 import { formatPathsForAgent } from "./formatPathsForAgent";
@@ -317,12 +318,16 @@ export function Terminal({
       });
     };
 
-    const attachListeners = async (ptyId: number) => {
+    // `withReplay`: um PTY recém-criado já pode ter escrito antes de o ouvinte existir. Escuta-se
+    // enfileirando, pede-se o snapshot e junta-se tudo sem perder nem repetir (ver `ptyReplay`).
+    const attachListeners = async (ptyId: number, withReplay = false) => {
+      const replay = withReplay ? createPtyReplay((data) => term.write(data)) : null;
       // ── 3. Escuchar stdout del PTY ──────────────────────
-      unlistenData = await listen<{ data: string }>(
+      unlistenData = await listen<{ data: string; end?: number }>(
         `pty-data-${ptyId}`,
         (event) => {
-          term.write(event.payload.data);
+          if (replay) replay.push(event.payload);
+          else term.write(event.payload.data);
           markOutput(tabId, agentId);
         }
       );
@@ -338,6 +343,14 @@ export function Terminal({
           onExit?.(event.payload.code);
         }
       );
+      if (replay) {
+        try {
+          replay.ready(await ptySnapshot(ptyId));
+        } catch {
+          // O PTY já terminou antes de o snapshot: o que chegou ao vivo basta.
+          replay.abort();
+        }
+      }
     };
 
     const initPty = async () => {
@@ -488,7 +501,7 @@ export function Terminal({
         setStatus("running");
         onReady?.(ptyId);
         pollSessionId(resolvedCwd, startedAfter);
-        await attachListeners(ptyId);
+        await attachListeners(ptyId, true);
       } catch (err) {
         term.write(`\r\n\x1b[31m${t("terminal.ptyError", { error: err })}\x1b[0m\r\n`);
         setStatus("exited");

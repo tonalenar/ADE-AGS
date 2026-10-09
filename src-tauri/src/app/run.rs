@@ -99,6 +99,7 @@ pub fn run() {
             // Terminal embebida (PTY)
             crate::terminal::pty_create,
             crate::terminal::pty_attach,
+            crate::terminal::pty_snapshot,
             crate::terminal::pty_output_total,
             crate::terminal::pty_for_tab,
             crate::terminal::pty_write,

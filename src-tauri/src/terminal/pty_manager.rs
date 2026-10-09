@@ -131,6 +131,30 @@ fn buffers() -> MutexGuard<'static, HashMap<u32, PtyBuffer>> {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PtyDataPayload {
     pub data: String,
+    /// Posição no fluxo do processo (bytes totais lidos até o fim deste pedaço). Com ela, quem
+    /// escuta depois do início pede `pty_snapshot` e descarta o que o snapshot já trouxe, em
+    /// vez de perder (ou repetir) a saída que saiu antes de o ouvinte existir. Os avisos do app
+    /// (`display_notice`) não pertencem ao fluxo e vão sem posição.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<u64>,
+}
+
+/// O scrollback acumulado e o total de bytes que ele representa (a mesma régua de `end`).
+#[derive(Serialize)]
+pub struct PtySnapshot {
+    pub data: String,
+    pub total: u64,
+}
+
+/// O que o processo já escreveu, com a posição exata do fluxo em que o snapshot foi tirado.
+/// Erro se o PTY já terminou (o frontend então não espera mais saída).
+#[tauri::command]
+pub fn pty_snapshot(id: u32) -> Result<PtySnapshot, String> {
+    if !registry().contains_key(&id) {
+        return Err(format!("PTY session {id} not found"));
+    }
+    let (bytes, total) = copy_scrollback_bytes(id).unwrap_or_default();
+    Ok(PtySnapshot { data: String::from_utf8_lossy(&bytes).into_owned(), total })
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -735,17 +759,19 @@ pub async fn pty_create(
         // hasta 16 veces más — cada uno es un JSON y un `eval` en el webview.
         let mut buf = vec![0u8; 64 * 1024];
         let mut text = Utf8Stream::default();
+        let mut stream_end = 0u64;
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
                     append_to_buffer(id, &buf[..n]);
+                    stream_end += n as u64;
                     // Modo push del orquestador (Fase 9): si nadie observa esta tab, esto
                     // es una lectura atómica y vuelve.
                     crate::orchestrator::watch::observe(id, &buf[..n]);
                     let data = text.push(&buf[..n]);
                     if !data.is_empty() {
-                        app_clone.emit(&event_name, PtyDataPayload { data }).ok();
+                        app_clone.emit(&event_name, PtyDataPayload { data, end: Some(stream_end) }).ok();
                     }
                 }
                 Err(_) => break,
@@ -753,7 +779,7 @@ pub async fn pty_create(
         }
         let rest = text.finish();
         if !rest.is_empty() {
-            app_clone.emit(&event_name, PtyDataPayload { data: rest }).ok();
+            app_clone.emit(&event_name, PtyDataPayload { data: rest, end: Some(stream_end) }).ok();
         }
         // Se recoge el estado real del hijo antes de avisar al frontend. Sin este `wait`
         // el proceso queda además como zombie hasta que muere la app, porque nadie
@@ -849,7 +875,7 @@ pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {
 pub fn display_notice(app:&tauri::AppHandle,tab_id:&str,message:&str) {
     let id={let reg=registry(); newest_for_tab(reg.iter().map(|(id,s)|(*id,s.tab_id.as_deref())),tab_id)};
     if let Some(id)=id {
-        let _=app.emit(&format!("pty-data-{id}"),PtyDataPayload {data:format!("\r\n{message}\r\n")});
+        let _=app.emit(&format!("pty-data-{id}"),PtyDataPayload {data:format!("\r\n{message}\r\n"),end:None});
     }
 }
 
