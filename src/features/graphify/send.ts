@@ -15,10 +15,11 @@ import { pasteIntoTab } from "@/features/terminal/terminalRegistry";
 import { useTabsStore } from "@/features/tabs/store";
 
 /** La TUI de emergencia: una terminal pelada, que es donde corre un comando del sistema. */
+const WINDOWS = typeof navigator !== "undefined" && /Windows/i.test(navigator.userAgent);
 const SHELL_AGENT: AgentInfo = {
   id: "bash",
-  label: "Terminal (bash)",
-  command: "bash",
+  label: WINDOWS ? "Terminal (PowerShell)" : "Terminal (bash)",
+  command: WINDOWS ? "powershell" : "bash",
   available: true,
 };
 

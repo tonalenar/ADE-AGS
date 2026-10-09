@@ -15,7 +15,8 @@ import { openNewAgentWizard } from "@/features/tabs/tabActions";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import type { BrowserView } from "@/features/tabs/viewTabs";
 import type { Tab } from "@/features/tabs/types";
-import { screenOf } from "@/features/terminal/terminalRegistry";
+import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { forgetOrchestrator, orchestratorNotice, shouldAnnounce } from "./orchestratorNotice";
 
 import { isHiddenNote, shownNote, stackMembers,
   NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isFreeNodeId, neighbors, thin, type CanvasNote, type CanvasPortal, type Stroke,
@@ -53,6 +54,19 @@ import { useMissionIndex } from "@/features/missions/groups";
 import { RoutinesPanel } from "./RoutinesPanel";
 import { boardKeyOfTab, canvasActions, missionOfKey, useActiveBoardKey, useCanvasStore } from "./store";
 import { cleanPreviewLines } from "./previewText";
+
+/** Conta ao orquestrador quem está ligado a ele (só quando a lista de ligados muda). */
+function announceToOrchestrators(key: string, ids: string[]): void {
+  const board = useCanvasStore.getState().boards[key];
+  if (!board) return;
+  const tabs = useTabsStore.getState().tabs;
+  for (const id of ids) {
+    if (!board.orchestrators.includes(id)) { forgetOrchestrator(id); continue; }
+    if (!shouldAnnounce(board, id)) continue;
+    const text = orchestratorNotice(board, tabs, id);
+    if (text) sendWhenReady(id, text);
+  }
+}
 
 interface AgentNodeData extends Record<string, unknown> {
   tab: Tab;
@@ -271,7 +285,7 @@ function CanvasInner() {
         orchestrator: board.orchestrators.includes(tab.id),
         role: board.roles[tab.id],
         onFocus: focusNode,
-        onToggleOrchestrator: (id: string) => key && canvasActions.toggleOrchestrator(key, id),
+        onToggleOrchestrator: (id: string) => { if (!key) return; canvasActions.toggleOrchestrator(key, id); announceToOrchestrators(key, [id]); },
       },
     }];
     // `focusNode` cambia con cada render y no aporta nada nuevo al nodo.
@@ -570,6 +584,7 @@ function CanvasInner() {
   const onConnect = (c: Connection) => {
     if (!key || !c.source || !c.target) return;
     canvasActions.connect(key, c.source, c.target);
+    announceToOrchestrators(key, [c.source, c.target]);
     const made = useCanvasStore.getState().boards[key]?.edges.find(
       (e) => (e.a === c.source && e.b === c.target) || (e.a === c.target && e.b === c.source));
     if (made) flashNode(c.target, cordColor(made.id));
@@ -587,6 +602,7 @@ function CanvasInner() {
     if (same) return;
     canvasActions.disconnect(key, old.id);
     canvasActions.connect(key, c.source, c.target);
+    announceToOrchestrators(key, [c.source, c.target]);
     flashNode(c.target, cordColor(old.id));
   };
   const onReconnectEnd = (_: unknown, edge: Edge) => {
