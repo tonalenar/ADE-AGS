@@ -324,6 +324,8 @@
   "settings.accounts.limits.budget": "24 h budget (US$)",
   "settings.accounts.limits.budgetHelper": "Based on the cost the CLI reports (Claude Code, OpenCode). Once reached, the account leaves routing until the spend leaves the 24 h window. Codex does not report cost.",
   "settings.accounts.limits.save": "Save",
+  "settings.accounts.limits.loading": "Reading this account's limits…",
+  "settings.accounts.limits.loadError": "Could not read this account's limits ({{error}}). Saving is disabled so the current limits are not erased.",
   "settings.accounts.limits.badgeConcurrent": "max {{n}}",
   "settings.accounts.limits.badgeBudget": "US$ {{n}}/24 h",
   "settings.accounts.add.noneInstalled": "No installed TUI supports multiple accounts.",

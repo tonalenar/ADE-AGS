@@ -9,6 +9,7 @@ import type {
   AccountCapableAgent, AccountLimits, AccountUsageSummary, AgentAccount,
 } from "@/features/accounts/types";
 import { accountLimitsGet, accountLimitsSet, accountUsageSummary } from "@/features/accounts/ipc";
+import { loadLimitsFor, loadLimitsTolerant, parseLimitsForm, type LimitsLoad } from "@/features/accounts/limits";
 import { AddAccountDialog } from "@/features/accounts/AddAccountDialog";
 import { LoginTerminal } from "@/features/accounts/LoginTerminal";
 import { AppDialog } from "@/shared/ui/AppDialog";
@@ -74,31 +75,41 @@ function LimitBadges({ limits }: { limits: AccountLimits | undefined }) {
 }
 
 /** Los topes propios de una cuenta: cuántas tareas a la vez y cuánto gastar en 24 h. */
-function LimitsDialog({ account, limits, onClose, onSaved }: {
+function LimitsDialog({ account, onClose, onSaved }: {
   account: AgentAccount;
-  limits: AccountLimits;
   onClose: () => void;
   onSaved: (limits: AccountLimits) => void;
 }) {
   const { t } = useTranslation();
-  const [concurrent, setConcurrent] = useState(limits.maxConcurrent?.toString() ?? "");
-  const [budget, setBudget] = useState(limits.dailyBudgetUsd?.toString() ?? "");
+  // Los topes se leen al abrir, de esta cuenta: con los de la lista (que pueden no haber llegado)
+  // el formulario arrancaba vacío y Guardar borraba los que había.
+  const [load, setLoad] = useState<LimitsLoad>({ status: "loading" });
+  const [concurrent, setConcurrent] = useState("");
+  const [budget, setBudget] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
+  useEffect(() => {
+    let stale = false;
+    loadLimitsFor(account.id, accountLimitsGet).then((next) => {
+      if (stale) return;
+      setLoad(next);
+      if (next.status === "ready") {
+        setConcurrent(next.limits.maxConcurrent?.toString() ?? "");
+        setBudget(next.limits.dailyBudgetUsd?.toString() ?? "");
+      }
+    });
+    return () => { stale = true; };
+  }, [account.id]);
+
   const save = async () => {
-    const next: AccountLimits = {
-      maxConcurrent: concurrent.trim() ? Math.floor(Number(concurrent)) : null,
-      dailyBudgetUsd: budget.trim() ? Number(budget.replace(",", ".")) : null,
-    };
-    if (next.maxConcurrent !== null && !(next.maxConcurrent >= 1)) {
-      setError(t("settings.accounts.limits.maxConcurrentHelper"));
+    const parsed = parseLimitsForm(load, concurrent, budget);
+    if (!parsed.ok) {
+      if (parsed.problem === "maxConcurrent") setError(t("settings.accounts.limits.maxConcurrentHelper"));
+      if (parsed.problem === "budget") setError(t("settings.accounts.limits.budgetHelper"));
       return;
     }
-    if (next.dailyBudgetUsd !== null && !(next.dailyBudgetUsd >= 0)) {
-      setError(t("settings.accounts.limits.budgetHelper"));
-      return;
-    }
+    const next = parsed.limits;
     setBusy(true);
     try {
       await accountLimitsSet(account.id, next);
@@ -119,7 +130,7 @@ function LimitsDialog({ account, limits, onClose, onSaved }: {
       footer={
         <>
           <Button variant="outline" disabled={busy} onClick={onClose}>{t("btn.cancel")}</Button>
-          <Button variant="primary" disabled={busy} onClick={save}>{t("settings.accounts.limits.save")}</Button>
+          <Button variant="primary" disabled={busy || load.status !== "ready"} onClick={save}>{t("settings.accounts.limits.save")}</Button>
         </>
       }
     >
@@ -130,6 +141,7 @@ function LimitsDialog({ account, limits, onClose, onSaved }: {
           min={1}
           step={1}
           value={concurrent}
+          disabled={load.status !== "ready"}
           onChange={(e) => { setConcurrent(e.target.value); setError(""); }}
           variant="outline"
           helperText={t("settings.accounts.limits.maxConcurrentHelper")}
@@ -140,10 +152,19 @@ function LimitsDialog({ account, limits, onClose, onSaved }: {
           min={0}
           step={0.5}
           value={budget}
+          disabled={load.status !== "ready"}
           onChange={(e) => { setBudget(e.target.value); setError(""); }}
           variant="outline"
           helperText={t("settings.accounts.limits.budgetHelper")}
         />
+        {load.status === "loading" && (
+          <p className="text-[11.5px] text-gray-500 dark:text-white/45">{t("settings.accounts.limits.loading")}</p>
+        )}
+        {load.status === "error" && (
+          <p role="alert" className="text-[11.5px] text-red-500 dark:text-red-400">
+            {t("settings.accounts.limits.loadError", { error: load.message })}
+          </p>
+        )}
         {error && <p className="text-[11.5px] text-red-500 dark:text-red-400">{error}</p>}
       </div>
     </AppDialog>
@@ -286,8 +307,9 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
       .then((list) => { if (!stale) setUsage(Object.fromEntries(list.map((u) => [u.accountKey, u]))); })
       .catch(() => {});
     const ids = keys ? keys.split("|") : [];
-    Promise.all(ids.map((id) => accountLimitsGet(id).then((l) => [id, l] as const)))
-      .then((pairs) => { if (!stale) setLimits(Object.fromEntries(pairs)); })
+    // Una cuenta cuyos topes no se pueden leer no deja a las otras sin los suyos.
+    loadLimitsTolerant(ids, accountLimitsGet)
+      .then((next) => { if (!stale) setLimits(next); })
       .catch(() => {});
     return () => { stale = true; };
   }, [keys]);
@@ -378,7 +400,6 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
       {limitsFor && (
         <LimitsDialog
           account={limitsFor}
-          limits={limits[limitsFor.id] ?? { maxConcurrent: null, dailyBudgetUsd: null }}
           onClose={() => setLimitsFor(null)}
           onSaved={(next) => setLimits((prev) => ({ ...prev, [limitsFor.id]: next }))}
         />
