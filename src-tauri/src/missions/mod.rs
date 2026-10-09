@@ -33,6 +33,7 @@ mod active_consistency_test;
 mod worktrees_cleanup_test;
 mod types;
 pub mod active;
+pub mod vigia;
 
 pub use types::{
     FailureActionKey, FailureCategory, FailureClassification, Mission, MissionDetail,
