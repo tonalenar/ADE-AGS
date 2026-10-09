@@ -1,6 +1,6 @@
 # Relatório — Teste completo v2 (squad Pro)
 
-**Estado: consolidação documental concluída; validação GUI permanece incompleta.** Data: 2026-10-09. Missão: `efd083e9-682e-4de5-a4b0-2934d85248c9`. Base informada pelo Frontend: `378d9e5`. Consolidado pelo Reviewer em `cc/mission-efd083e9-682e-4de5-a4b0-3a5c8fce` (commit `a1571c1`); entregue pelo Orquestrador em `cc/mission-efd083e9-682e-4de5-a4b0-144244ac`, com AGS-022 acrescentado.
+**Estado: consolidação documental concluída; validação GUI permanece incompleta.** Data: 2026-10-09. Missão: `efd083e9-682e-4de5-a4b0-2934d85248c9`. Base informada pelo Frontend: `378d9e5`. Consolidado pelo Reviewer em `cc/mission-efd083e9-682e-4de5-a4b0-3a5c8fce` (commit `a1571c1`); entregue pelo Orquestrador em `cc/mission-efd083e9-682e-4de5-a4b0-144244ac`, com AGS-022 e AGS-023 acrescentados.
 
 ## Resumo e método
 
@@ -17,7 +17,7 @@ Fontes recebidas:
 - QA: `C:\Users\tonz1n\.ags\worktrees\9fa8f030\docs\ade-ags\achados-qa.md` e `src/features/terminal/tests/qa_edge_cases.test.ts`, commit `1bf908a`. Código e cinco testes de caracterização conferidos; sem execução GUI. Testes não copiados para esta entrega documental.
 - Backend: `C:\Users\tonz1n\.ags\worktrees\cd948421\docs\ade-ags\achados-backend.md`, commit `8663624adbfd6a27f99c41a3360314289d77a623`. Logs conferidos em `%TEMP%\ade-ags-cd948421-{rust,frontend,tsc}.log`; base `378d9e5870f8a68a4c77c3a9bcce0e972a1af94e`, árvore testada `ec00b59d4d91ffcb8ed4f6a81f832cbcc0cc3ae5`, CLI 1.8.7.
 
-Consolidação atual: **3 altos, 8 médios, 11 baixos; nenhum bloqueante confirmado**. Inclui achados estáticos condicionais explicitados abaixo; não equivale a 22 falhas reproduzidas na GUI. Os achados QA estão incorporados nas respectivas gravidades.
+Consolidação atual: **3 altos, 8 médios, 12 baixos; nenhum bloqueante confirmado**. Inclui achados estáticos condicionais explicitados abaixo; não equivale a 23 falhas reproduzidas na GUI. Os achados QA estão incorporados nas respectivas gravidades.
 
 Nenhum código do produto alterado. Nenhum reinício, `tauri dev` ou `cargo build --bin ags` executado pelo Reviewer. O erro conhecido do sandbox do Codex 0.161.0 está excluído.
 
@@ -246,6 +246,15 @@ Nenhum confirmado nas evidências recebidas até aqui.
 - **Esperado:** aviso só quando o agente estiver de fato ocioso.
 - **Obtido:** a tela do Reviewer mostrava `• Working (4m 39s • esc to interrupt)` com comandos em execução, e o Reviewer fez novos commits logo depois. O Vigia também repetiu cobranças já atendidas (Backend “sem commit” depois do commit `8663624`).
 - **Impacto:** ruído para o orquestrador e risco de reenviar tarefas a agentes ocupados. Pode estar ligado a AGS-001 (leitura de tela pela mesma ponte), hipótese não verificada.
+
+### AGS-023 — Tarefa original é reenviada a integrantes já liberados
+
+- **Origem/confirmação:** Orquestrador, observação direta após o encerramento da missão; causa não investigada no código.
+- **Local:** fluxo de entrega de tarefas do squad (briefing/reenvio automático); origem não isolada.
+- **Passos:** concluir a missão, avisar cada integrante do encerramento (`ags peer tell <nome> "missão concluída"`) e aguardar alguns minutos sem enviar nada.
+- **Esperado:** nenhuma tarefa nova chega a integrante liberado sem ação do orquestrador.
+- **Obtido:** Frontend, Reviewer e QA / Tests voltaram a receber a tarefa original. Frontend e Reviewer reconheceram a entrega anterior e não alteraram nada. O QA refez o trabalho e criou um commit novo (`adc2a26`, +23 linhas em `achados-qa.md`). Em seguida chegaram avisos de “recebeu uma tarefa há 2 min” para o Frontend (ver AGS-022).
+- **Impacto:** gasto de tokens e cota, além de commits duplicados ou trabalho refeito por agentes já liberados. Agentes menos cautelosos podem alterar entregas já consolidadas.
 
 ## Descartados e hipóteses pendentes
 
