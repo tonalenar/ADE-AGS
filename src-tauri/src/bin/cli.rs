@@ -401,7 +401,9 @@ fn main() -> ExitCode {
             }
             println!("{}", json!({ "error": err }));
             // Un argumento obligatorio que falta es un error de USO (2), no un comando que falló (1).
-            if err.starts_with("Falta el argumento --") {
+            // Um flag com valor inválido (`--limit banana`, `--at 2026-13-99`) também é uso incorreto:
+            // a própria mensagem nomeia o flag, e a automação precisa distinguir isso de uma falha real.
+            if err.starts_with("Falta el argumento --") || err.starts_with("--") {
                 return ExitCode::from(EXIT_USAGE);
             }
             ExitCode::from(EXIT_COMMAND_FAILED)

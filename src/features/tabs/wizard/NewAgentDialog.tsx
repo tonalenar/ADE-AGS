@@ -132,16 +132,19 @@ export function NewAgentDialog({
     if (!agent || confirming.current) return;
     confirming.current = true;
     // `pool:Nombre` se resuelve acá, al abrir: el pool elige la cuenta con lo que se sabe ahora.
-    void resolveAccountChoice(agent.id, accountId)
-      .catch((e) => {
-        AlertaToast(t("accounts.pools.title"), String(e), "error", 6000);
-        return accountId;
-      })
-      .then((resolved) => {
+    // Se o pool não resolve, o diálogo continua aberto para corrigir a conta: antes criava uma aba
+    // com a referência "pool:…" inválida, que nunca arrancava.
+    void resolveAccountChoice(agent.id, accountId).then(
+      (resolved) => {
         confirming.current = false;
         onConfirm({ agent, skillIds, accountId: resolved, prelaunch, memoryBlock: memoryBlockFor(agent.id, memoryBlock) });
         onClose();
-      });
+      },
+      (e) => {
+        confirming.current = false;
+        AlertaToast(t("accounts.pools.title"), String(e), "error", 6000);
+      },
+    );
   };
 
   return (

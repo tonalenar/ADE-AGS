@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
 import { useTranslation } from "react-i18next";
+import { useLocation } from "react-router-dom";
 import { Button, CloseIcon } from "neogestify-ui-components";
 
 import { usePageHost } from "@/shared/ui/pageHost";
@@ -23,7 +24,8 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
   const frameRef = useRef<HTMLDivElement>(null);
   const host = usePageHost();
   // Ver `useFocusInside`: sem isto o teclado seguia na terminal de trás.
-  useFocusInside(frameRef);
+  const { pathname } = useLocation();
+  useFocusInside(frameRef, pathname);
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {

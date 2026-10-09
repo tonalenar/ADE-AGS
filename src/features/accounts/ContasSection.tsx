@@ -237,7 +237,7 @@ export function ContasSection() {
         <SettingsGroup>
           <NotificationsSetting />
           <SettingsRow label={t("settings.accounts.pools")} hint={t("settings.accounts.poolsHint")}>
-            <button type="button" onClick={() => manage({ agentId: "claude-code" } as AgentAccount)}
+            <button type="button" onClick={() => { const first = rows[0] ?? systemAccounts[0]; if (first) manage(first); }}
               className="h-7 rounded-[7px] bg-black/[0.06] px-3 text-[13px] font-medium text-gray-900 hover:bg-black/[0.09] dark:bg-surface-overlay dark:text-[#f5f5f7] dark:hover:brightness-110">
               {t("settings.accounts.configure")}
             </button>

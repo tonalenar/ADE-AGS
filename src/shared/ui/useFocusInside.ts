@@ -17,12 +17,14 @@ import { useEffect, type RefObject } from "react";
  * El rAF es por lo mismo que en `Terminal`: en WebKitGTK `focus()` sobre algo que todavía
  * no terminó de pintarse es un no-op silencioso.
  */
-export function useFocusInside(ref: RefObject<HTMLElement | null>) {
+export function useFocusInside(ref: RefObject<HTMLElement | null>, trigger?: unknown) {
   useEffect(() => {
     const frame = requestAnimationFrame(() => {
       const el = ref.current;
       if (el && !el.contains(document.activeElement)) el.focus({ preventScroll: true });
     });
     return () => cancelAnimationFrame(frame);
-  }, [ref]);
+    // `trigger` (a rota, nas telas de tela cheia): trocar de página desmonta o campo que tinha o foco,
+    // e sem isto o teclado ficava no corpo da página, sem nada que o recebesse.
+  }, [ref, trigger]);
 }

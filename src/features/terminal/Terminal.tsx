@@ -474,6 +474,10 @@ export function Terminal({
             : { command, env: {} };
         if (cancelled) return;
 
+        // O tamanho com que o processo NASCE; se a grade mudou enquanto o backend respondia, o PTY
+        // tem que receber o tamanho atual, não só a marca de "já enviado".
+        const createdCols = term.cols;
+        const createdRows = term.rows;
         const ptyId = await ptyCreate({
           command: browser.command,
           cwd: resolvedCwd,
@@ -497,7 +501,11 @@ export function Terminal({
           prelaunch: resolvedPrelaunch,
         });
         ptyIdRef.current = ptyId;
-        sentSize = `${term.cols}x${term.rows}`;
+        sentSize = `${createdCols}x${createdRows}`;
+        if (term.cols !== createdCols || term.rows !== createdRows) {
+          sentSize = `${term.cols}x${term.rows}`;
+          ptyResize(ptyId, term.cols, term.rows).catch(console.error);
+        }
         setStatus("running");
         onReady?.(ptyId);
         pollSessionId(resolvedCwd, startedAfter);
