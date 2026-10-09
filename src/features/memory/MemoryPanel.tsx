@@ -213,7 +213,7 @@ export function MemoryPanel({ workspaceId, workspaceName, onOpenMemory }: {
                   <h3 className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-[#f5f5f7]" title={e.key}>{e.key}</h3>
                   <span className="shrink-0 rounded-full bg-black/[0.06] px-2 text-[10.5px] leading-[18px] text-gray-500 dark:bg-white/[0.08] dark:text-white/60">{e.kind}</span>
                 </div>
-                {e.body && <p className="line-clamp-4 whitespace-pre-wrap break-words text-[12.5px] leading-[17px] text-gray-600 dark:text-white/60">{e.body}</p>}
+                {e.body && <p title={e.body} className="line-clamp-4 whitespace-pre-wrap break-words text-[12.5px] leading-[17px] text-gray-600 dark:text-white/60">{e.body}</p>}
               </li>
             ))}
           </ul>

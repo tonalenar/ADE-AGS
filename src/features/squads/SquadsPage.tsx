@@ -86,7 +86,7 @@ export function SquadsPage() {
               className={`cc-t w-full flex flex-col items-stretch gap-1 px-3 py-2.5 text-left rounded-none border-b border-gray-100 dark:border-white/5
                 ${selectedId === squad.id ? "bg-accent-500/10" : "hover:bg-gray-100 dark:hover:bg-white/4"}`}>
               <span className="flex items-center gap-2">
-                <span className="flex-1 truncate text-[12px] font-medium text-gray-900 dark:text-gray-100">{squad.name}</span>
+                <span title={squad.name} className="flex-1 truncate text-[12px] font-medium text-gray-900 dark:text-gray-100">{squad.name}</span>
                 {!squad.available && <span className="text-[9px] font-semibold text-amber-700 dark:text-amber-300">{t("squads.unavailable")}</span>}
               </span>
               <span className="text-[10px] text-gray-400 dark:text-white/35">
@@ -146,7 +146,7 @@ function SquadDetail({ squad, agentLabel, accountLabel, onEdit, onDelete }: {
     <div className="flex flex-col gap-4 p-5">
       <div className="flex items-start gap-3">
         <div className="flex-1 min-w-0">
-          <h2 className="truncate text-[15px] font-semibold text-gray-900 dark:text-white">{squad.name}</h2>
+          <h2 title={squad.name} className="truncate text-[15px] font-semibold text-gray-900 dark:text-white">{squad.name}</h2>
           {squad.description && <p className="mt-1 text-[11.5px] text-gray-500 dark:text-white/45">{squad.description}</p>}
         </div>
         {!squad.available && <span className="rounded px-2 py-1 text-[10px] font-semibold bg-amber-500/15 text-amber-700 dark:text-amber-300">{t("squads.unavailable")}</span>}

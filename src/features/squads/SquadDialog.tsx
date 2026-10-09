@@ -163,7 +163,7 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
                     className="flex min-w-0 flex-1 items-center gap-2 text-left">
                     <svg viewBox="0 0 12 12" className={`h-3 w-3 shrink-0 text-gray-400 transition-transform ${open ? "rotate-90" : ""}`} fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M4.5 2.5 8 6l-3.5 3.5" /></svg>
                     <span className="min-w-0">
-                      <span className="block truncate text-[13px] font-semibold text-gray-900 dark:text-gray-50">{role?.label ?? member.roleId}</span>
+                      <span title={role?.label ?? member.roleId} className="block truncate text-[13px] font-semibold text-gray-900 dark:text-gray-50">{role?.label ?? member.roleId}</span>
                       {open && role?.description && <span className="mt-0.5 block text-[11.5px] leading-[15px] text-gray-500 dark:text-gray-400">{role.description}</span>}
                     </span>
                   </button>
@@ -305,8 +305,8 @@ const TEXTAREA = `w-full rounded-md px-3 py-2 outline-none text-[13px] leading-[
 function Summary({ provider, model }: { provider: string; model: string | null }) {
   return (
     <span className="hidden sm:flex shrink-0 items-center gap-1.5 rounded-full bg-black/[0.05] dark:bg-white/[0.07] px-2.5 h-6 text-[11.5px] text-gray-600 dark:text-gray-300">
-      <span className="max-w-28 truncate">{provider}</span>
-      {model && <><span className="text-gray-400">·</span><span className="max-w-40 truncate font-mono text-[11px]">{model}</span></>}
+      <span title={provider} className="max-w-28 truncate">{provider}</span>
+      {model && <><span className="text-gray-400">·</span><span title={model} className="max-w-40 truncate font-mono text-[11px]">{model}</span></>}
     </span>
   );
 }
