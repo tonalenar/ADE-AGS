@@ -3,7 +3,7 @@ use crate::agents::SessionSource;
 use serde_json::Value;
 use std::fs;
 use std::io::{BufRead, BufReader};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
 #[derive(Serialize, Clone)]
@@ -197,11 +197,35 @@ pub(super) fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
     }
     // Respaldo para instalaciones viejas de Claude Code, que sí usaban solo las barras.
     // Solo se toma si existe de verdad, así que no puede tapar a la regla buena.
-    let legacy = projects.join(cwd.replace('/', "-"));
-    if legacy.exists() {
-        return legacy;
+    if let Some(legacy) = claude_legacy_project_dir(&projects, cwd) {
+        if legacy.exists() {
+            return legacy;
+        }
     }
     dir
+}
+
+/// Carpeta del respaldo viejo (solo las barras reemplazadas por `-`), o `None` si ese nombre
+/// no puede ser UNA carpeta dentro de `projects`.
+///
+/// `PathBuf::join` con una ruta absoluta descarta la base. En Windows el cwd empieza con
+/// `C:\`, así que el "respaldo" quedaba igual al propio proyecto: `claude_session_file` lo
+/// recorría entero y tomaba como sesión cualquier `.jsonl` dentro del repo (un fixture de
+/// tests apareció como sesión de una tab de Claude Code).
+pub(super) fn claude_legacy_project_dir(projects: &Path, cwd: &str) -> Option<PathBuf> {
+    let name = cwd.replace('/', "-");
+    // La barra invertida es separador en Windows y no en Linux: se rechaza en las dos, así el
+    // resultado no depende de dónde corre la app.
+    if name.contains('\\') {
+        return None;
+    }
+    let mut parts = Path::new(&name).components();
+    let is_one_normal_part = matches!(
+        (parts.next(), parts.next()),
+        (Some(Component::Normal(_)), None)
+    );
+    let legacy = projects.join(&name);
+    (is_one_normal_part && legacy.starts_with(projects)).then_some(legacy)
 }
 
 pub(super) fn claude_session_file(

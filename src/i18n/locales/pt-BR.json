@@ -324,6 +324,8 @@
   "settings.accounts.limits.budget": "Orçamento em 24 h (US$)",
   "settings.accounts.limits.budgetHelper": "Pelo custo que a CLI informa (Claude Code, OpenCode). Ao atingir, a conta sai do roteamento até o gasto sair da janela de 24 h. O Codex não informa custo.",
   "settings.accounts.limits.save": "Salvar",
+  "settings.accounts.limits.loading": "Lendo os limites desta conta…",
+  "settings.accounts.limits.loadError": "Não foi possível ler os limites desta conta ({{error}}). Salvar fica desativado para não apagar os limites atuais.",
   "settings.accounts.limits.badgeConcurrent": "máx {{n}}",
   "settings.accounts.limits.badgeBudget": "US$ {{n}}/24 h",
   "settings.accounts.add.noneInstalled": "Nenhuma TUI instalada suporta múltiplas contas.",

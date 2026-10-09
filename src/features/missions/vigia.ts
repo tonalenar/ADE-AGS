@@ -174,6 +174,15 @@ function reportToChat(tabId: string, text: string): void {
   invoke("vigia_report", { tabId, text }).catch(() => undefined);
 }
 
+/**
+ * Quando a missão começou, em milissegundos (a unidade de `now`). `mission.startedAt` vem do banco
+ * em SEGUNDOS (epoch); sem converter, `now - startedAt` vale ~1,8e12 e o primeiro ciclo já acusa
+ * "sem tarefa há milhões de minutos". Pura.
+ */
+export function missionStartMs(startedAtSec: number | null, now: number): number {
+  return startedAtSec != null ? startedAtSec * 1000 : now;
+}
+
 /** Um passo: as regras sem modelo primeiro; se não acharem nada, o modelo barato para os ociosos. */
 export function vigiaTick(now = Date.now()): void {
   const { tabs, detectedAgents } = useTabsStore.getState();
@@ -190,7 +199,7 @@ export function vigiaTick(now = Date.now()): void {
     const lead = team.find((tab) => board?.orchestrators.includes(tab.id)) ?? team[0];
     if (!lead) continue;
 
-    const watch = watches.get(mission.id) ?? { startedAt: mission.startedAt ?? now, nudges: 0, limitReported: false };
+    const watch = watches.get(mission.id) ?? { startedAt: missionStartMs(mission.startedAt, now), nudges: 0, limitReported: false };
     watches.set(mission.id, watch);
     const leadSent = sentAt.get(lead.id);
     // O Orquestrador voltou a falar depois do último lembrete: a conta recomeça.

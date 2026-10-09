@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it } from "vitest";
-import { LEAD_SILENT_MS, NUDGE_LIMIT, OPEN_TASK_MS, UNTASKED_MS, VIGIA_COOLDOWN_MS, reportLine, watchdogFinding, type WatchInput } from "../vigia";
+import { LEAD_SILENT_MS, NUDGE_LIMIT, OPEN_TASK_MS, UNTASKED_MS, VIGIA_COOLDOWN_MS, missionStartMs, reportLine, watchdogFinding, type WatchInput } from "../vigia";
 
 const MIN = 60_000;
 
@@ -96,5 +96,32 @@ describe("Vigia: travas que ele destrava sem modelo", () => {
 
   it("o relatório do chat diz o que travou e o que foi feito", () => {
     expect(reportLine("Backend sem tarefa.", "lembrete 1/3 enviado.")).toBe("**Vigia** — travado: Backend sem tarefa. Feito: lembrete 1/3 enviado.");
+  });
+});
+
+describe("Vigia: início da missão vem do banco em segundos", () => {
+  // missions.started_at é epoch em SEGUNDOS: 1791568168 = 09/10/2026 14:49:28 (horário local).
+  const STARTED_SEC = 1791568168;
+  const START = STARTED_SEC * 1000;
+
+  it("missionStartMs converte segundos em milissegundos e usa o agora quando não há início", () => {
+    expect(missionStartMs(STARTED_SEC, START + 30_000)).toBe(START);
+    expect(missionStartMs(null, 42)).toBe(42);
+  });
+
+  it("com início realista em segundos, nenhum aviso 'sem tarefa' antes de UNTASKED_MS", () => {
+    // Equipe ativa (todos escrevendo agora), Backend ainda sem tarefa, Orquestrador sem delegar.
+    const at = (now: number): WatchInput => ({
+      now,
+      startedAt: missionStartMs(STARTED_SEC, now),
+      lead: { id: "lead", name: "Orquestrador", lastOutput: now },
+      members: [{ id: "b", name: "Backend", hasTask: false, lastOutput: now }],
+      nudges: 0,
+    });
+    // Primeiro ciclo do Vigia (30 s) e logo antes do limite: nada.
+    expect(watchdogFinding(at(START + 30_000))).toBeNull();
+    expect(watchdogFinding(at(START + UNTASKED_MS - 1))).toBeNull();
+    // Passado o limite, aí sim.
+    expect(watchdogFinding(at(START + UNTASKED_MS))?.kind).toBe("untasked");
   });
 });

@@ -23,6 +23,7 @@ import {
   type SessionFilterState,
 } from "@/features/sessions/filters";
 
+import { listHandlesKey } from "./listKeys";
 import { useResumeSession } from "./useResumeSession";
 
 export function SessionsPage() {
@@ -100,6 +101,8 @@ export function SessionsPage() {
     });
 
   const onKeyDown = (e: React.KeyboardEvent) => {
+    // Enter en Exportar/Apagar/una carpeta es de ese botón, no "retomar la sesión marcada".
+    if (!listHandlesKey(e.key, e.target as HTMLElement, e.currentTarget as HTMLElement)) return;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       setSelectedId((current) =>
