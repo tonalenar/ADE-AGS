@@ -6,6 +6,10 @@ import { SharedMemoryPanel, localeForLanguage } from "../SharedMemoryPanel";
 import type { MemoryDetail, MemoryEntry, MemoryRevision, MemoryValidityInterval } from "../types";
 import type { Run } from "@/features/runs/types";
 import ptBR from "@/i18n/locales/pt-BR.json";
+import i18next from "i18next";
+
+// Os rótulos fora de componentes (tipo, operação, ator) usam a instância global do i18next.
+void i18next.init({ lng: "pt-BR", resources: { "pt-BR": { translation: ptBR } }, interpolation: { escapeValue: false } });
 
 const mock = vi.hoisted(() => ({
   list: vi.fn(),
