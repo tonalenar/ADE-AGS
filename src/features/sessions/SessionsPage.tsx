@@ -211,7 +211,7 @@ export function SessionsPage() {
                           text-[10.5px] text-gray-400 dark:text-white/30">
                           <BranchIcon className="w-3 h-3 shrink-0" />
                           <span className="truncate font-mono">
-                            {ws.isWorktree && "worktree · "}{ws.branch}
+                            {ws.isWorktree && t("sessions.worktreePrefix")}{ws.branch}
                           </span>
                         </span>
                       )}

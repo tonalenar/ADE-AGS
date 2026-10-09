@@ -164,7 +164,7 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
             onKeyDown={(e) => {
               if (e.key === "Enter" && canCreate && !busy) handleCreate();
             }}
-            placeholder="trabajo"
+            placeholder={t("settings.accounts.namePlaceholder")}
             variant="outline"
             autoFocus
             error={taken ? t("settings.accounts.add.taken") : undefined}

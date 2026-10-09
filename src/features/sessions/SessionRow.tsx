@@ -26,19 +26,24 @@ function formatDateTime(unixSeconds: number): string {
   });
 }
 
-function formatRelative(unixSeconds: number): string {
+/** "5m", "2h", "3d": a unidade abreviada pelo idioma (Intl), não por letras fixas. */
+function formatRelative(unixSeconds: number, language = "pt-BR"): string {
   const diffSeconds = Math.max(0, Math.floor(Date.now() / 1000) - unixSeconds);
-  const units: [number, string][] = [
-    [60, "s"], [60, "m"], [24, "h"], [30, "d"], [12, "mo"], [Infinity, "y"],
+  const units: [number, Intl.NumberFormatOptions["unit"]][] = [
+    [60, "second"], [60, "minute"], [24, "hour"], [30, "day"], [12, "month"], [Infinity, "year"],
   ];
   let value = diffSeconds;
-  let unit = "s";
+  let unit: Intl.NumberFormatOptions["unit"] = "second";
   for (const [size, label] of units) {
     if (value < size) { unit = label; break; }
     value = Math.floor(value / size);
     unit = label;
   }
-  return `${value}${unit}`;
+  try {
+    return new Intl.NumberFormat(language, { style: "unit", unit, unitDisplay: "narrow" }).format(value);
+  } catch {
+    return `${value} ${unit}`;
+  }
 }
 
 /** Nombre de archivo sugerido al exportar: legible y sin caracteres problemáticos. */
@@ -97,7 +102,7 @@ interface SessionRowProps {
 export function SessionRow({
   entry, workspaceId, selected, rowRef, onSelect, onResume, onResumeWithSkills,
 }: SessionRowProps) {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const deleteSession = useSessionsStore((s) => s.deleteSession);
   const exportSession = useSessionsStore((s) => s.exportSession);
   const [expanded, setExpanded] = useState(false);
@@ -191,7 +196,7 @@ export function SessionRow({
             )}
             <span className="shrink-0 opacity-50">·</span>
             <span className="truncate" title={formatDateTime(entry.openedAt)}>
-              {t("sessions.closed", { time: formatRelative(entry.closedAt) })}
+              {t("sessions.closed", { time: formatRelative(entry.closedAt, i18n.language) })}
             </span>
           </span>
         </span>
