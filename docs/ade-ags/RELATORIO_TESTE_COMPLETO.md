@@ -207,7 +207,7 @@ O ponto mais visível: **o Vigia dispara desde o primeiro ciclo de toda missão*
 - **Nova missão:** o botão de criar trava contra duplo clique.
 - **Terminal:** o fit ignora contêiner 0×0. O resize tem debounce de 120 ms e deduplicação. WebGL só roda em terminal visível, com fallback para DOM. Conta ausente aborta o lançamento com mensagem, sem cair na conta do sistema.
 - **Tela cheia:** são rotas internas (`RouteModal.tsx`), que saem com Esc ou X. Não existe F11 nem tela cheia do sistema; se isso é o desenho, não é defeito.
-- **`ags peer tell --file`:** aspas, crase, `< >`, `$HOME`, `$(…)`, `%TEMP%`, barras invertidas, JSON, cedilha, emoji, tabulação e várias linhas chegaram íntegros ao destino (Generalist → QA). As palavras acentuadas (ação, coração, ÉÍÓÚ, ãõ, ü, ñ) foram testadas à parte (Orquestrador → Frontend) e também chegaram íntegras. Envios para um peer ocupado ficam na fila (`queued:true`) e são entregues quando ele termina o turno.
+- **`ags peer tell --file`:** aspas, crase, `< >`, `$HOME`, `$(…)`, `%TEMP%`, barras invertidas, JSON, cedilha, emoji, tabulação e várias linhas chegaram íntegros ao destino (Generalist → QA). As palavras acentuadas (ação, coração, ÉÍÓÚ, ãõ, ü, ñ) foram testadas à parte (Orquestrador → Frontend, e Generalist → QA depois de sair da fila) e também chegaram íntegras. Envios para um peer ocupado ficam na fila (`queued:true`) e são entregues quando ele termina o turno.
 - **CLI:** `tab list/close/output`, `memory index/open/search`, `mission status`, `peers`, `peer check` e erros de agente/peer desconhecido funcionam como esperado e devolvem JSON. `memory open` marca o conteúdo como `UNTRUSTED DATA`.
 
 ## Observações (não são defeitos)
