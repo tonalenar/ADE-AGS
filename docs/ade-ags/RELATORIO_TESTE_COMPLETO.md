@@ -27,7 +27,7 @@ O flake conhecido `orchestrator::test::esperar_sin_nada_que_reportar_vence_vacio
 |---|---|---|
 | Bloqueante | 0 | |
 | Alto | 4 | A1 Vigia (unidade de tempo), A2 sessionId errado, A3 Limites de conta apagados, A4 Enter no Histórico |
-| Médio | 21 | M1–M21 (Vigia e terminais M1–M6, telas M7–M16, CLI M17–M19, coordenação M20–M21) |
+| Médio | 22 | M1–M22 (Vigia e terminais M1–M6, telas M7–M16, CLI M17–M19, coordenação M20–M22) |
 | Baixo | 15 | B1–B15 |
 
 O ponto mais visível: **o Vigia dispara desde o primeiro ciclo de toda missão** (A1). Somado a M3, depois de cerca de 12 min ele esgota os lembretes e para de checar. Ou seja, nesta versão ele avisa à toa no começo e se cala quando um travamento real poderia acontecer.
@@ -172,6 +172,13 @@ O ponto mais visível: **o Vigia dispara desde o primeiro ciclo de toda missão*
   - Depois que o Frontend entregou o resultado e recebeu "aguarde", o app mandou ao Orquestrador: "O agente Frontend recebeu uma tarefa há 3 min 36 s e está parado…".
   - A mensagem de "aguarde" foi contada como tarefa nova.
   - Pede ação onde não há nenhuma; é a mesma família de M1 e M2.
+
+- **M22. O Vigia usa como sinal o texto não enviado da caixa e manda avisos já resolvidos.**
+  - Ele mandou ao Orquestrador "Sua caixa tem 'abra um PR com as correções' digitado e não enviado. Envie a mensagem para seguir com o PR."
+  - Isso empurra o agente a agir sobre um rascunho que o usuário não enviou. Abrir um PR é uma ação externa e precisa de pedido explícito.
+  - Na mesma rodada, avisou que o Generalist "está ocioso esperando sua resposta sobre o trailer", quando essa resposta já tinha sido dada e o QA já tinha aprovado.
+  - Esperado: rascunho não enviado não é instrução, e um aviso precisa ser conferido contra as mensagens já trocadas.
+  - Observado pelo Orquestrador.
 
 ## Baixo
 
