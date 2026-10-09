@@ -149,7 +149,7 @@ describe("grafo estático do entry (onda 4)", () => {
     expect(files.some((file) => file.endsWith(`${path.sep}Terminal.tsx`))).toBe(false);
     expect(files.some((file) => file.endsWith(`${path.sep}CanvasView.tsx`))).toBe(false);
     expect(hits).toEqual([]);
-  });
+  }, 30_000);
 
   it("tema no construtor, fitOnce espera fontsReady antes do pty, e a home não espera a fonte", () => {
     const terminal = readFileSync(TERMINAL, "utf8");

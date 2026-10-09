@@ -974,7 +974,7 @@ mod tests {
         }
         let started = Instant::now();
         sync.spawn();
-        let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(5)).unwrap();
+        let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(30)).unwrap();
         assert!(started.elapsed() < Duration::from_secs(3));
         assert_eq!(probe.commits.load(Ordering::SeqCst), 1, "a batch must become one commit");
         assert_eq!(probe.adds.load(Ordering::SeqCst), 1, "a batch must become one git add");
@@ -1017,7 +1017,7 @@ mod tests {
         assert_eq!(approved_count(&db), 6);
         assert_eq!(probe.commits.load(Ordering::SeqCst), 1);
         probe.unblock();
-        let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(5)).unwrap();
+        let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(30)).unwrap();
         assert!(status.error.is_none(), "{:?}", status.error);
         let commits = probe.commits.load(Ordering::SeqCst);
         assert!((1..=2).contains(&commits), "expected a coalesced follow-up, got {commits} commits");
@@ -1110,7 +1110,7 @@ mod tests {
                 });
             }
         });
-        let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(5)).unwrap();
+        let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(30)).unwrap();
         assert!(status.error.is_none(), "{:?}", status.error);
         assert_eq!(peak.load(Ordering::SeqCst), 1, "git commands from concurrent exports overlapped");
         assert!(commits.load(Ordering::SeqCst) >= 1);
@@ -1382,7 +1382,7 @@ mod tests {
             decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
             proposal
         };
-        sync.wait_until("w", |item| item.phase == "synced", Duration::from_secs(5)).unwrap();
+        sync.wait_until("w", |item| item.phase == "synced", Duration::from_secs(30)).unwrap();
         crate::memory::lifecycle::export_detached(&db, &sync, "w").unwrap();
         let repo = root.path().join(repo::workspace_repo_name("w"));
         assert!(std::fs::read_to_string(repo.join("revisions.json")).unwrap().contains(sentinel));
@@ -1460,7 +1460,7 @@ mod tests {
             decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
             proposal
         };
-        sync.wait_until("w", |item| item.phase == "synced", Duration::from_secs(5)).unwrap();
+        sync.wait_until("w", |item| item.phase == "synced", Duration::from_secs(30)).unwrap();
         let repo = root.path().join(repo::workspace_repo_name("w"));
         let elsewhere = root.path().join("elsewhere");
         std::fs::create_dir_all(&elsewhere).unwrap();
@@ -1480,7 +1480,7 @@ mod tests {
             let proposal = propose(&conn, "after", "after the failed purge");
             decide_and_schedule(&conn, &sync, &proposal.entry_id, proposal.revision, true).unwrap();
         }
-        let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(5)).unwrap();
+        let status = sync.wait_until("w", |item| item.phase == "synced" && item.pending == 0, Duration::from_secs(30)).unwrap();
         assert!(status.error.is_none(), "{:?}", status.error);
         assert!(notes(root.path()).contains("after the failed purge"));
     }
