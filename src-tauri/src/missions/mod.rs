@@ -719,7 +719,8 @@ pub async fn mission_precheck(app: AppHandle, mission_id: String) -> Result<Stri
 pub(crate) fn memory_context_text(conn: &Connection, mission_id: &str) -> Result<String, String> {
     let mission = store::get(conn, mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
     let docs = crate::memory::search::load_docs(conn, &mission.workspace_id, Some(&mission.id))?;
-    Ok(crate::memory::search::briefing_block(&docs, &mission.id, 8, 1_800))
+    // 10 entradas / 2.600 caracteres: cabem ~9 com o corte de 280 por corpo (antes eram ~6).
+    Ok(crate::memory::search::briefing_block(&docs, &mission.id, &mission.objective, 10, 2_600))
 }
 
 #[tauri::command]

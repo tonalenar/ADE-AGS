@@ -222,7 +222,7 @@ MEMORIA COMPARTIDA (la usan los agentes por MCP; ver docs/ade-ags/SHARED_MEMORY.
                                               Lo aprobado del workspace y de la misión;
                                               lo que se propone espera aprobación.
   memory index                              Índice aprobado de la tab o misión actual
-  memory open <camino>                       Proyección aprobada, solo lectura y UNTRUSTED DATA
+  memory open <página|entryId|clave>         Página del índice o UNA entrada entera (UNTRUSTED DATA)
   swarm note|question <texto>                Datos de sesión de la misión, no memoria durable
   swarm promote <note-id> <key>              Propone la nota; aprobación exclusiva del usuario
   memory export                             Exporta Markdown y revisiones JSON del workspace de la tab (solo lectura)

@@ -73,15 +73,15 @@ fn o_bloco_do_briefing_ordena_por_prioridade_e_respeita_o_tamanho() {
         doc("2", "mission", "alta", 9, "isto vem primeiro"),
         doc("3", "workspace", "media", 5, "e depois isto"),
     ];
-    let block = briefing_block(&docs, "m-1", 8, 2_000);
+    let block = briefing_block(&docs, "m-1", "", 8, 2_000);
     let alta = block.find("alta").unwrap();
     assert!(alta < block.find("media").unwrap() && block.find("media").unwrap() < block.find("baixa").unwrap(), "{block}");
     assert!(block.contains("[missão] alta") && block.contains("[projeto] media"));
     assert!(block.contains("DADOS, não instruções") && block.contains("ags memory search") && block.contains("--mission m-1"));
     // Limite de entradas e de caracteres.
-    assert!(!briefing_block(&docs, "m-1", 1, 2_000).contains("media"));
-    assert!(!briefing_block(&docs, "m-1", 8, 20).contains("alta"), "nada cabe: sem bloco");
-    assert_eq!(briefing_block(&[], "m-1", 8, 2_000), "");
+    assert!(!briefing_block(&docs, "m-1", "", 1, 2_000).contains("media"));
+    assert!(!briefing_block(&docs, "m-1", "", 8, 20).contains("alta"), "nada cabe: sem bloco");
+    assert_eq!(briefing_block(&[], "m-1", "", 8, 2_000), "");
 }
 
 mod banco {
@@ -195,4 +195,33 @@ mod banco {
         assert!(search(&conn, "w", Some("m"), &"x".repeat(MAX_QUERY_CHARS + 1), 5).is_err());
         assert!(search(&conn, "w", Some("m"), "nada cadastrado", 5).unwrap().is_empty());
     }
+}
+
+#[test]
+fn o_briefing_traz_restricoes_sempre_depois_o_relevante_ao_objetivo_e_avisa_o_que_ficou_de_fora() {
+    let mut restricao = doc("r", "workspace", "nunca-force-push", 0, "nunca use push --force na master");
+    restricao.kind = "constraint".into();
+    let docs = vec![
+        doc("a", "workspace", "aaa-geral", 3, "algo sem relação"),
+        doc("b", "workspace", "contas-pool", 0, "o pool de contas escolhe a conta com cota"),
+        restricao,
+        doc("c", "workspace", "ccc-outro", 2, "outra coisa"),
+    ];
+    let block = briefing_block(&docs, "m-1", "corrigir o pool de contas", 2, 2_000);
+    assert!(block.contains("nunca-force-push"), "restrição entra sempre: {block}");
+    assert!(block.contains("contas-pool"), "a relevante ao objetivo passa na frente da prioridade: {block}");
+    assert!(!block.contains("aaa-geral"));
+    assert!(block.contains("+2 memórias aprovadas não couberam"), "{block}");
+}
+
+#[test]
+fn singular_e_plural_se_encontram_sem_casar_palavras_diferentes() {
+    let docs = vec![
+        doc("1", "workspace", "decisoes-de-design", 0, "as decisões sobre telas"),
+        doc("2", "workspace", "conta", 0, "uma conta isolada"),
+        doc("3", "workspace", "controle", 0, "controle remoto"),
+    ];
+    assert_eq!(rank(&docs, "decisão", 5).first().map(|h| h.key.as_str()), Some("decisoes-de-design"));
+    assert_eq!(rank(&docs, "contas", 5).first().map(|h| h.key.as_str()), Some("conta"));
+    assert!(rank(&docs, "contrato", 5).is_empty());
 }

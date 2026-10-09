@@ -217,3 +217,18 @@ fn quoted_credentials_and_entropy_are_detected_but_evidence_ids_are_safe() {
     assert!(!looks_like_secret("aabbccddeeff00112233445566778899aabbccddeeff00112233445566778899"));
     assert!(!looks_like_secret("43529552-1fb2-4994-8f51-473f6546eac4"));
 }
+
+#[test]
+fn a_mesma_chave_ja_aprovada_vira_proposta_de_correcao() {
+    let conn = setup();
+    let first = propose_for_mission(&conn, &proposal("workspace", "porta-do-dev", "O dev server usa a porta 1420.", 1)).unwrap();
+    crate::memory::decide(&conn, &first.entry_id, first.revision, true).unwrap();
+    // Antes: erro "a chave já existe". Agora: uma revisão nova, pendente, sobre a atual.
+    let fix = propose_for_mission(&conn, &proposal("workspace", "porta-do-dev", "O dev server usa a porta 1421.", 1)).unwrap();
+    assert_eq!(fix.entry_id, first.entry_id);
+    assert!(fix.revision > first.revision);
+    let (operation, status): (String, String) = conn
+        .query_row("SELECT operation, status FROM memory_revisions WHERE entry_id=?1 AND revision=?2", rusqlite::params![fix.entry_id, fix.revision], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((operation.as_str(), status.as_str()), ("update", "proposed"));
+}

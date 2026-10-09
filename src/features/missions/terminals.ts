@@ -285,6 +285,9 @@ export function memberBriefing(mission: Pick<Mission, "title" | "objective"> & {
     "- Se depender de outro integrante, fale direto com ele (`ags peer ask \"<nome>\" \"...\"`) em vez de esperar o Orquestrador repassar.",
     "",
     `Ao concluir, envie UMA mensagem final curta ao orquestrador por \`ags peer tell "${LEAD_NAME}"\`, com resultado, decisões, arquivos tocados, testes e bloqueios. Use caminhos relativos e \`nenhum\` quando um campo estiver vazio.`,
+    ...(mission.id ? [
+      `Se aprendeu algo durável e não óbvio no código (uma decisão, uma restrição, uma armadilha), sugira até 1 memória antes de reportar: \`ags memory suggest --mission ${mission.id} --scope workspace --kind decision|constraint|finding --key <nome-curto> --body "..."\`. Mesma chave de uma memória existente = proposta de correção dela. Nunca segredos.`,
+    ] : []),
     "Atualizações intermediárias só são necessárias para sinalizar um bloqueio ou uma mudança de decisão; não repita dados do briefing ou de entregas já registradas.",
     "Aguarde as instruções do orquestrador e responda ao que ele perguntar.",
   ]
