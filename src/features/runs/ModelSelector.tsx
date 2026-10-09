@@ -24,6 +24,10 @@ export function ModelSelector({ roster, agentId, accountId, autoAccount, model, 
   const catalog = modelsForAccount(agent, accountId, autoAccount);
   const mode = modelSelectionMode(model, complexity);
   const selected = catalog.find((entry) => entry.id === model);
+  // "Manual" escolhido: o campo de texto fica, mesmo que o id digitado coincida com um do catálogo
+  // (senão ele sumia no meio da digitação).
+  const [manual, setManual] = useState(false);
+  const pinned = manual ? undefined : selected;
   const efforts = reasoningOptions(model, catalog);
   const selectModel = (patch: { model: string | null; complexity: Complexity | null }) => onChange(withModelEffort(patch, reasoningEffort, catalog));
   const groups = [
@@ -52,14 +56,14 @@ export function ModelSelector({ roster, agentId, accountId, autoAccount, model, 
       {(["trivial", "standard", "hard"] as const).map((value) => <option key={value} value={value}>{t(`fleet.complexity.${value}`)}</option>)}
     </PopupSelect>}
     {mode === "specific" && <>
-      <PopupSelect className="w-full" aria-label={t("squads.form.model")} value={selected ? model ?? "" : "__manual__"}
-        onChange={(event) => selectModel({ model: event.target.value === "__manual__" ? "" : event.target.value, complexity: null })}>
+      <PopupSelect className="w-full" aria-label={t("squads.form.model")} value={pinned ? model ?? "" : "__manual__"}
+        onChange={(event) => { setManual(event.target.value === "__manual__"); selectModel({ model: event.target.value === "__manual__" ? "" : event.target.value, complexity: null }); }}>
         {groups.filter((group) => group.models.length > 0).map((group) => <optgroup key={group.label} label={group.label}>
           {group.models.map((entry) => <option key={entry.id} value={entry.id}>{entry.label} · {entry.id}{entry.source === "ade_history" ? ` · ${t("squads.form.unverified")}` : entry.availability === "unavailable" ? ` · ${t("squads.unavailable")}` : ""}</option>)}
         </optgroup>)}
         <option value="__manual__">{t("squads.form.manualModel")}</option>
       </PopupSelect>
-      {!selected && <Input size="sm" aria-label={t("squads.form.modelId")} placeholder={t("squads.form.modelPlaceholder")} value={model ?? ""}
+      {!pinned && <Input size="sm" aria-label={t("squads.form.modelId")} placeholder={t("squads.form.modelPlaceholder")} value={model ?? ""}
         onChange={(event) => selectModel({ model: event.target.value, complexity: null })} />}
       {modelIsUnverified(model, catalog) && <span className="text-[10px] text-amber-700 dark:text-amber-300">{t("squads.form.unverified")}</span>}
       {selected?.availability === "unknown" && <span className="text-[10px] text-gray-400">{t("squads.form.entitlementUnknown")}</span>}

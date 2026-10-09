@@ -176,8 +176,9 @@ export function CustomAgentForm({ initial, onSubmit, onCancel }: CustomAgentForm
 
           <Field label={t("settings.tuis.env")} hint={t("settings.tuis.envHint")}>
             <div className="flex flex-col gap-2">
-              {envRows.map(([key, value]) => (
-                <div key={key} className="flex items-center gap-2">
+              {envRows.map(([key, value], index) => (
+                // A posição e não o nome: o nome muda a cada tecla e remontava o campo (perdia o foco).
+                <div key={index} className="flex items-center gap-2">
                   <Input
                     value={key}
                     onChange={(e) => setEnvKey(key, e.target.value)}

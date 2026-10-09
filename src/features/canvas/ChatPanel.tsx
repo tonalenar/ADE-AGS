@@ -151,9 +151,14 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
   const repos = useRepoInfo(current ? [current.cwd] : []);
   const branch = current ? repos.get(current.cwd)?.branch ?? null : null;
 
+  // A resposta de um agente que já não está à vista não pode pintar por cima do atual.
+  const loadSeq = useRef(0);
   const load = useCallback(() => {
+    const mine = ++loadSeq.current;
     if (!currentId) return setConversation(null);
-    invoke<Conversation>("chat_history", { tabId: currentId }).then(setConversation).catch(() => setConversation(null));
+    invoke<Conversation>("chat_history", { tabId: currentId })
+      .then((c) => { if (mine === loadSeq.current) setConversation(c); })
+      .catch(() => { if (mine === loadSeq.current) setConversation(null); });
   }, [currentId]);
 
   useEffect(() => {

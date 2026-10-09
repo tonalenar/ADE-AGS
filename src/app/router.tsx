@@ -1,6 +1,7 @@
 import { createHashRouter } from "react-router-dom";
 import { AppShell } from "@/app/AppShell";
 import { HomePage } from "@/features/workspaces/HomePage";
+import { RouteError } from "@/app/RouteError";
 
 // Las páginas que no son la primera pantalla se cargan al entrar a ellas: antes iban todas
 // en el chunk principal, que había que bajar y parsear entero antes de pintar nada.
@@ -8,6 +9,8 @@ export const router = createHashRouter([
   {
     path: "/",
     element: <AppShell />,
+    // Uma página que quebra mostra o erro dentro da casca, não derruba o app inteiro.
+    errorElement: <RouteError />,
     children: [
       { index: true, element: <HomePage /> },
       { path: "workspace", element: <></> },
