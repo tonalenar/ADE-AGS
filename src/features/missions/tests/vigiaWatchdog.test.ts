@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it } from "vitest";
-import { LEAD_SILENT_MS, NUDGE_LIMIT, OPEN_TASK_MS, UNTASKED_MS, VIGIA_COOLDOWN_MS, missionStartMs, reportLine, watchdogFinding, type WatchInput } from "../vigia";
+import { LEAD_SILENT_MS, NUDGE_LIMIT, OPEN_TASK_MS, UNTASKED_MS, VIGIA_COOLDOWN_MS, doneLine, isClosure, missionStartMs, reportLine, watchdogFinding, type WatchInput } from "../vigia";
 
 const MIN = 60_000;
 
@@ -25,7 +25,7 @@ describe("Vigia: travas que ele destrava sem modelo", () => {
     const finding = watchdogFinding(scene());
     expect(finding?.kind).toBe("untasked");
     expect(finding?.stuck).toContain("Backend");
-    expect(finding && finding.kind !== "limit" ? finding.nudge : "").toContain("--file");
+    expect(finding && "nudge" in finding ? finding.nudge : "").toContain("--file");
   });
 
   it("não lembra enquanto o Orquestrador ainda está delegando", () => {
@@ -92,6 +92,37 @@ describe("Vigia: travas que ele destrava sem modelo", () => {
     });
     expect(watchdogFinding(busy)).toBeNull();
     expect(UNTASKED_MS).toBeGreaterThan(0);
+  });
+
+  it("todos reportaram e a equipe está quieta: a missão acabou, não é travamento", () => {
+    // O Orquestrador mandou "Encerrado" depois (isso não conta como tarefa): taskAt segue na tarefa de verdade.
+    const finished = scene({
+      now: 90 * MIN,
+      leadLastSent: 40 * MIN,
+      lead: { id: "lead", name: "Orquestrador", lastOutput: 40 * MIN },
+      members: [
+        { id: "b", name: "Backend", hasTask: true, taskAt: 1 * MIN, reportedAt: 20 * MIN, lastOutput: 20 * MIN },
+        { id: "q", name: "QA", hasTask: true, taskAt: 1 * MIN, reportedAt: 25 * MIN, lastOutput: 25 * MIN },
+      ],
+    });
+    expect(watchdogFinding(finished)?.kind).toBe("done");
+    // Quem ainda não reportou mantém o alarme normal.
+    const pending = scene({ ...finished, members: [{ id: "b", name: "Backend", hasTask: true, taskAt: 1 * MIN, lastOutput: 20 * MIN }] });
+    expect(watchdogFinding(pending)?.kind).toBe("open");
+    // Orquestrador ainda escrevendo (consolidando): não anuncia que acabou.
+    expect(watchdogFinding({ ...finished, lead: { id: "lead", name: "Orquestrador", lastOutput: 89 * MIN } })?.kind).not.toBe("done");
+    expect(doneLine()).toContain("Finalizar");
+  });
+
+  it("mensagem de encerramento ou de espera não é tarefa", () => {
+    expect(isClosure("Encerrado. As 3 correções estão no PR #147; não edite nada.")).toBe(true);
+    expect(isClosure("Frontend: aguarde, sem nova tarefa por ora.")).toBe(true);
+    expect(isClosure("Rode as suítes do backend e registre os erros.")).toBe(false);
+    expect(isClosure(null)).toBe(false);
+  });
+
+  it("o rótulo do relatório muda quando não é travamento", () => {
+    expect(reportLine("Frontend entregou.", "mandei a Orquestrador.", "aviso")).toBe("**Vigia** — aviso: Frontend entregou. Feito: mandei a Orquestrador.");
   });
 
   it("o relatório do chat diz o que travou e o que foi feito", () => {
