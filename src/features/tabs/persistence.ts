@@ -11,6 +11,8 @@ const SAVE_DEBOUNCE_MS = 400;
 // e troca de janela o scrollback já é salvo; isto só protege contra um fim abrupto do app.
 const SCROLLBACK_REFRESH_MS = 60_000;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+/** Último tamanho e posição da janela NÃO maximizada (o que a restauração deve devolver). */
+let lastNormalBounds: { x: number | null; y: number | null; width: number | null; height: number | null } | null = null;
 let initialized = false;
 
 // El scrollback de cada PTY puede pesar hasta MAX_BUFFER_BYTES (3MB, ver pty_manager.rs).
@@ -177,7 +179,14 @@ async function saveNow(opts: SaveOpts = {}, progress?: SaveProgress) {
   try {
     const pos = await win.outerPosition();
     const size = await win.outerSize();
-    bounds = { x: pos.x, y: pos.y, width: size.width, height: size.height };
+    // Maximizada, o tamanho é o da tela: guardá-lo faria a restauração abrir em tela cheia
+    // também, em vez da janela normal. Mantém-se o último tamanho normal conhecido.
+    if (await win.isMaximized()) {
+      bounds = lastNormalBounds ?? bounds;
+    } else {
+      bounds = { x: pos.x, y: pos.y, width: size.width, height: size.height };
+      lastNormalBounds = bounds;
+    }
   } catch {
     // ventana ya cerrándose; se guarda solo el estado de tabs
   }

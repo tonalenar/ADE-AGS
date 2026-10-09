@@ -31,7 +31,13 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
   const [roster, setRoster] = useState<Roster | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  useEffect(() => { getRoster().then(setRoster).catch(() => setRoster(null)); }, []);
+  // Falhar ao carregar os provedores não pode parecer "nenhum provedor": mostra o erro e deixa tentar de novo.
+  const [rosterError, setRosterError] = useState("");
+  const loadRoster = () => {
+    setRosterError("");
+    getRoster().then(setRoster).catch((e) => { setRoster(null); setRosterError(String(e)); });
+  };
+  useEffect(() => { loadRoster(); }, []);
 
   const remainingRoles = useMemo(() => availableSquadRoles(roles, form.members), [roles, form.members]);
   // Funções recolhidas: com 3–4 funções abertas o modal virava uma parede. Ao editar começam
@@ -45,8 +51,11 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
   const providerLabel = (agentId: string) => roster?.agents.find((a) => a.agentId === agentId)?.label ?? agentId;
   const canSaveAssignment = (assignment: { agentId: string; model: string | null; complexity: SquadMemberInput["complexity"] }) =>
     Boolean(assignment.agentId && (modelSelectionMode(assignment.model, assignment.complexity) !== "specific" || assignment.model?.trim()));
+  // O Lead precisa do contrato de orquestração: um provedor sem ele não pode liderar missão, e o
+  // backend o marcaria como indisponível depois. Não se deixa salvar.
+  const leadAgent = roster?.agents.find((agent) => agent.agentId === form.lead.agentId);
   const ready = Boolean(form.name.trim() && canSaveAssignment(form.lead) && form.members.every(canSaveAssignment)
-    && subagentDefaultIsReady(form.defaultSubagent));
+    && subagentDefaultIsReady(form.defaultSubagent) && !leadUnsupported(leadAgent));
 
   const save = async () => {
     if (!ready || busy) return;
@@ -189,6 +198,11 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
         </section>
         <SubagentDefaultSection roster={roster} onRoster={setRoster} value={form.defaultSubagent}
           onChange={(defaultSubagent) => setForm((current) => ({ ...current, defaultSubagent }))} />
+        {rosterError && (
+          <Alert variant="danger">
+            {rosterError} <button type="button" onClick={loadRoster} className="underline">{t("missions.action.retry")}</button>
+          </Alert>
+        )}
         {error && <Alert variant="danger">{error}</Alert>}
       </div>
     </AppDialog>
@@ -225,7 +239,7 @@ function AgentConfig({ roster, onRoster, agentId, model, reasoningEffort, fastMo
             <option value={agentId}>{agentId} · {t("squads.unavailable")}</option>
           )}
           {roster?.agents.filter((agent) => lead || agent.capabilities.headless).map((agent) => (
-            <option key={agent.agentId} value={agent.agentId} disabled={!lead && providerDisabled(agent, false)}>
+            <option key={agent.agentId} value={agent.agentId} disabled={providerDisabled(agent, lead)}>
               {agent.label}
             </option>
           ))}

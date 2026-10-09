@@ -24,6 +24,12 @@ const MODEL_FLAG: Record<string, string> = {
  * `additional_speed_tiers`). Valor fijo: nunca sale de texto libre, así no hay forma de colar un flag.
  */
 const CODEX_FAST_FLAGS = ["-c", "service_tier=fast"];
+/**
+ * Modo normal de Codex, explícito. A configuração global do usuário (`~/.codex/config.toml`) pode
+ * deixar a feature `fast_mode` ligada e o `service_tier` em "priority": sem esta flag, todo Codex
+ * de missão herdava o fast. Desligar a feature no comando vale para este processo só.
+ */
+const CODEX_NORMAL_FLAGS = ["-c", "features.fast_mode=false"];
 
 /** El comando con el modelo, el esfuerzo y (solo Codex) el modo Fast pedidos. No repite lo que ya trae. Pura. */
 export function withModel(
@@ -47,8 +53,9 @@ export function withModel(
       parts.push("--effort", cleanEffort);
     }
   }
-  if (fast === true && agentId === "codex" && !command.includes("service_tier")) {
-    parts.push(...CODEX_FAST_FLAGS);
+  if (agentId === "codex" && !command.includes("fast_mode") && !command.includes("service_tier")) {
+    // Sem fast pedido, o modo normal é explícito: não depende do que a configuração global diz.
+    parts.push(...(fast === true ? CODEX_FAST_FLAGS : CODEX_NORMAL_FLAGS));
   }
   return parts.join(" ");
 }

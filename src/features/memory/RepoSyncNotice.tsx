@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { AlertaToast } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 
 import * as memoryIpc from "./ipc";
@@ -52,7 +53,7 @@ export function RepoSyncNotice({ workspaceId }: { workspaceId: string }) {
         {warnings.map((warning) => <p key={warning}>{warning}</p>)}
       </div>
       {failed && (
-        <button type="button" onClick={() => { void memoryIpc.retryRepoSync(workspaceId).then(apply).catch(() => undefined); }}
+        <button type="button" onClick={() => { void memoryIpc.retryRepoSync(workspaceId).then(apply).catch((e) => AlertaToast(t("memoryInbox.syncRetry"), String(e), "error", 6000)); }}
           className="h-6 rounded-md bg-red-600 px-2.5 text-[11px] font-medium text-white hover:bg-red-500">
           {t("memoryInbox.syncRetry")}
         </button>

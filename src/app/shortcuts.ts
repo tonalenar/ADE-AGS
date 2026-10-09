@@ -116,7 +116,9 @@ export function matchShortcut(e: KeyChord): Shortcut | null {
  * vista para terminar donde ya estaba.
  */
 export function resolveGoto(target: string, currentPath: string, hasTabs: boolean): string | null {
-  if (target !== currentPath) return target;
+  // `/skills/<id>` é a seção Skills: o atalho de Skills nessa página também deve voltar à terminal.
+  const inSection = currentPath === target || currentPath.startsWith(`${target}/`);
+  if (!inSection) return target;
   return hasTabs ? WORKSPACE_PATH : null;
 }
 

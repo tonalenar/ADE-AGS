@@ -84,7 +84,12 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
         passed INTEGER NOT NULL CHECK(passed IN (0,1)), clean INTEGER NOT NULL CHECK(clean IN (0,1)),
         finished_at INTEGER NOT NULL
     ); CREATE INDEX IF NOT EXISTS idx_test_results_cache
-        ON test_results(repository, tree_hash, suite, command_key, id);")
+        ON test_results(repository, tree_hash, suite, command_key, id);
+    CREATE TABLE IF NOT EXISTS test_inflight (
+        repository TEXT NOT NULL, tree_hash TEXT NOT NULL, suite TEXT NOT NULL, command_key TEXT NOT NULL,
+        owner TEXT NOT NULL, started_at INTEGER NOT NULL,
+        PRIMARY KEY (repository, tree_hash, suite, command_key)
+    );")
 }
 
 fn git(root: &Path, args: &[&str]) -> Result<String, String> {
@@ -200,7 +205,8 @@ pub fn clean_tree(root: &Path) -> Result<Option<String>, String> {
 /// A árvore do diretório de trabalho, como `git write-tree` a veria se tudo fosse adicionado.
 /// Usa uma cópia do índice num arquivo temporário: o índice real nunca muda. Os montes de
 /// skills dos agentes (`.claude/`, `.codex/`…) ficam de fora, como em `relevant_dirty`, para
-/// que dois worktrees com o mesmo código tenham a mesma chave.
+/// que dois worktrees com o mesmo código tenham a mesma chave. `docs/` e `*.md` também ficam de
+/// fora: relatórios que os agentes escrevem não mudam o que um teste vê, e mudavam a chave a cada rodada.
 fn working_tree(root: &Path) -> Result<String, String> {
     let index = git(root, &["rev-parse", "--path-format=absolute", "--git-path", "index"])?;
     // Pid + contador: dois passos em paralelo (cargo numa thread) nunca dividem o arquivo.
@@ -211,7 +217,7 @@ fn working_tree(root: &Path) -> Result<String, String> {
         std::fs::copy(&index, &temp).map_err(|e| e.to_string())?;
     }
     let result = (|| {
-        const AGENT_ROOTS: &[&str] = &[".agents", ".claude", ".gemini", ".codex", ".kimi", ".opencode", ".cursor/skills"];
+        const AGENT_ROOTS: &[&str] = &[".agents", ".claude", ".gemini", ".codex", ".kimi", ".opencode", ".cursor/skills", "docs", "*.md"];
         let excludes: Vec<String> = AGENT_ROOTS.iter().map(|root| format!(":(exclude){root}")).collect();
         let mut args: Vec<&str> = vec!["add", "-A", "--", "."];
         args.extend(excludes.iter().map(String::as_str));
@@ -378,6 +384,78 @@ pub fn record_span(
     Ok(())
 }
 
+/// Uma vez de rodar uma suíte neste hash: ou já há um verde para ele, ou a vez é nossa.
+enum Turn<'a> {
+    /// Verde já registrado; `shared` = um integrante acabou de rodá-lo enquanto esperávamos.
+    Cached { at: i64, shared: bool },
+    /// Nossa vez. `Some` enquanto a execução dura (solta ao terminar); `None` se a espera estourou.
+    Mine(Option<Claim<'a>>),
+}
+
+/// Quem está rodando esta suíte neste hash agora. Enquanto o dono roda, os outros esperam o
+/// resultado em vez de rodar de novo: é a mesma suíte, no mesmo código, disputando CPU e o lock
+/// do cargo. Vale entre processos (cada `ags` é um), por isso a posse fica no banco.
+struct Claim<'a> {
+    conn: &'a Connection,
+    ids: [String; 4],
+    owner: String,
+}
+
+/// Depois disto um dono sem resposta é considerado morto (um processo que caiu não trava a fila).
+const OWNER_STALE: Duration = Duration::from_secs(20 * 60);
+/// De quanto em quanto a espera confere se o verde já apareceu ou o dono terminou.
+const WAIT_STEP: Duration = Duration::from_secs(1);
+
+impl<'a> Claim<'a> {
+    /// A vez é nossa se ninguém mais tem a mesma (repositório, hash, suíte, comando). `None` se tem dono.
+    fn try_new(conn: &'a Connection, ids: [String; 4], owner: String, now: i64) -> Result<Option<Self>, String> {
+        let stale_before = now - OWNER_STALE.as_millis() as i64;
+        conn.execute(
+            "DELETE FROM test_inflight WHERE repository=?1 AND tree_hash=?2 AND suite=?3 AND command_key=?4 AND started_at<?5",
+            params![ids[0], ids[1], ids[2], ids[3], stale_before],
+        )
+        .map_err(|e| e.to_string())?;
+        let taken = conn
+            .execute(
+                "INSERT OR IGNORE INTO test_inflight(repository,tree_hash,suite,command_key,owner,started_at) VALUES(?1,?2,?3,?4,?5,?6)",
+                params![ids[0], ids[1], ids[2], ids[3], owner, now],
+            )
+            .map_err(|e| e.to_string())?;
+        Ok((taken == 1).then_some(Claim { conn, ids, owner }))
+    }
+}
+
+impl Drop for Claim<'_> {
+    fn drop(&mut self) {
+        // Só solta a própria linha: se a nossa foi considerada morta e outro a pegou, ela fica.
+        let _ = self.conn.execute(
+            "DELETE FROM test_inflight WHERE repository=?1 AND tree_hash=?2 AND suite=?3 AND command_key=?4 AND owner=?5",
+            params![self.ids[0], self.ids[1], self.ids[2], self.ids[3], self.owner],
+        );
+    }
+}
+
+/// Pede a vez de rodar: devolve o verde se algum integrante já o registrou; senão, a vez (com a
+/// posse) ou, depois de `test_timeout`, roda sem posse para não travar a missão.
+fn take_turn<'a>(conn: &'a Connection, repo: &str, tree: &str, suite: &str, key: &str) -> Result<Turn<'a>, String> {
+    let deadline = Instant::now() + test_timeout();
+    let mut waited = false;
+    loop {
+        if let Some(at) = cached_green(conn, repo, Some(tree), suite, key)? {
+            return Ok(Turn::Cached { at, shared: waited });
+        }
+        let ids = [repo.to_string(), tree.to_string(), suite.to_string(), key.to_string()];
+        if let Some(claim) = Claim::try_new(conn, ids, uuid::Uuid::new_v4().to_string(), now_ms())? {
+            return Ok(Turn::Mine(Some(claim)));
+        }
+        if Instant::now() >= deadline {
+            return Ok(Turn::Mine(None));
+        }
+        waited = true;
+        std::thread::sleep(WAIT_STEP);
+    }
+}
+
 pub fn run(
     conn: &Connection,
     root: &Path,
@@ -393,33 +471,45 @@ pub fn run(
     let repo = repository_key(root)?;
     let tree = clean_tree(root)?;
     let key = command_key(commands);
+    // Quem já tem o verde deste hash, ou um integrante rodando a mesma suíte nele, não repete:
+    // espera o resultado (ver `take_turn`). Sem árvore identificável não há o que compartilhar.
+    let mut _claim = None;
     if !force {
-        if let Some(at) = cached_green(conn, &repo, tree.as_deref(), suite, &key)? {
-            let now = now_ms();
-            for command in commands {
-                record_span(
-                    conn,
-                    mission,
-                    actor,
-                    &command.suite,
-                    &serde_json::to_string(command).map_err(|e| e.to_string())?,
-                    now,
-                    now,
-                    true,
-                    0,
-                )?;
+        let turn = match tree.as_deref() {
+            Some(tree_hash) => take_turn(conn, &repo, tree_hash, suite, &key)?,
+            None => Turn::Mine(None),
+        };
+        match turn {
+            Turn::Cached { at, shared } => {
+                let now = now_ms();
+                for command in commands {
+                    record_span(
+                        conn,
+                        mission,
+                        actor,
+                        &command.suite,
+                        &serde_json::to_string(command).map_err(|e| e.to_string())?,
+                        now,
+                        now,
+                        true,
+                        0,
+                    )?;
+                }
+                let message = if shared {
+                    format!("reaproveitado: outro integrante rodou esta suíte neste mesmo hash (há {} min)", (now - at).max(0) / 60_000)
+                } else {
+                    format!("já verde neste hash (há {} min)", (now - at).max(0) / 60_000)
+                };
+                return Ok(RunResult {
+                    suite: suite.into(),
+                    passed: true,
+                    cache_hit: true,
+                    duration_ms: 0,
+                    tree_hash: tree,
+                    message,
+                });
             }
-            return Ok(RunResult {
-                suite: suite.into(),
-                passed: true,
-                cache_hit: true,
-                duration_ms: 0,
-                tree_hash: tree,
-                message: format!(
-                    "já verde neste hash (há {} min)",
-                    (now - at).max(0) / 60_000
-                ),
-            });
+            Turn::Mine(claim) => _claim = claim,
         }
     }
     let timer = Instant::now();
@@ -511,6 +601,64 @@ mod tests {
         git(&root, &["commit", "-m", "initial"]).unwrap();
         root
     }
+    #[test]
+    fn docs_and_markdown_do_not_change_the_test_identity() {
+        let root = repository();
+        let initial = clean_tree(&root).unwrap().unwrap();
+        // Relatórios de agente escritos no worktree não mudam o que os testes veem.
+        std::fs::create_dir_all(root.join("docs")).unwrap();
+        std::fs::write(root.join("docs").join("relatorio.md"), "achados").unwrap();
+        std::fs::write(root.join("NOTAS.md"), "nota").unwrap();
+        assert_eq!(clean_tree(&root).unwrap().unwrap(), initial);
+        // Código de verdade continua contando.
+        std::fs::write(root.join("tracked"), "two").unwrap();
+        assert_ne!(clean_tree(&root).unwrap().unwrap(), initial);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn a_member_waits_for_the_run_already_in_progress_instead_of_repeating_it() {
+        let root = repository();
+        let db = std::env::temp_dir().join(format!("ags-test-inflight-{}.sqlite", uuid::Uuid::new_v4()));
+        let conn = Connection::open(&db).unwrap();
+        conn.busy_timeout(Duration::from_secs(5)).unwrap();
+        migrate(&conn).unwrap();
+        let commands = vec![TestCommand {
+            suite: "probe".into(),
+            program: "git".into(),
+            args: vec!["--version".into()],
+            cwd: ".".into(),
+        }];
+        let repo = repository_key(&root).unwrap();
+        let tree = clean_tree(&root).unwrap().unwrap();
+        let key = command_key(&commands);
+        // Outro integrante (outra conexão, como outro processo `ags`) roda "probe" neste hash e,
+        // depois de um tempo, registra o verde e solta a posse.
+        let ids = [repo.clone(), tree.clone(), "probe".to_string(), key.clone()];
+        let worker_db = db.clone();
+        let worker_ids = ids.clone();
+        let other = std::thread::spawn(move || {
+            let other = Connection::open(&worker_db).unwrap();
+            other.busy_timeout(Duration::from_secs(5)).unwrap();
+            let claim = Claim::try_new(&other, worker_ids.clone(), "outro".into(), now_ms()).unwrap().unwrap();
+            std::thread::sleep(Duration::from_millis(1500));
+            other
+                .execute(
+                    "INSERT INTO test_results(repository,tree_hash,suite,command_key,commands,duration_ms,passed,clean,finished_at) VALUES(?1,?2,'probe',?3,'[]',1,1,1,?4)",
+                    params![worker_ids[0], worker_ids[1], worker_ids[3], now_ms()],
+                )
+                .unwrap();
+            drop(claim);
+        });
+        std::thread::sleep(Duration::from_millis(300));
+        let result = run(&conn, &root, "probe", &commands, false, None, "").unwrap();
+        other.join().unwrap();
+        assert!(result.cache_hit && result.passed, "{}", result.message);
+        assert!(result.message.contains("outro integrante"), "{}", result.message);
+        std::fs::remove_file(&db).ok();
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[test]
     fn git_tree_follows_the_working_tree_content_staged_or_not() {
         let root = repository();

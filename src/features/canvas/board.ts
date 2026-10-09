@@ -141,7 +141,10 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
   // vale mientras ese agente siga abierto, aunque no tenga nodo acá.
   const anywhere = new Set(allTabIds);
   const alive = (id: string) => open.has(id) || anywhere.has(id) || id in board.notes || id in board.portals;
-  const edges = board.edges.filter((e) => alive(e.a) && alive(e.b));
+  // Uma tab ainda aberta NUNCA perde a ligação por uma reconciliação parcial (ex.: a janela ainda
+  // não sabe que ela é deste canvas). Antes a aresta sumia e o integrante saía de `ags peers` com a
+  // aba viva: o orquestrador deixava de conseguir falar com ele.
+  const edges = board.edges.filter((e) => (alive(e.a) && alive(e.b)) || (anywhere.has(e.a) && anywhere.has(e.b)));
   const orchestrators = board.orchestrators.filter((id) => open.has(id));
   // El papel de una tab cerrada se va con ella.
   const roleIds = Object.keys(board.roles);

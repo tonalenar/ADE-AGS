@@ -134,7 +134,14 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
     window.clearTimeout(timer);
     timer = window.setTimeout(send, SETTLE_MS);
   });
-  const giveUp = window.setTimeout(() => { if (sawOutput) send(); else sub.dispose(); }, GIVE_UP_MS);
+  // Sem saída nenhuma em GIVE_UP_MS: a TUI já estava pronta e simplesmente não repintou (um
+  // terminal vivo e quieto). Antes a mensagem era descartada em silêncio, sem reenvio nem aviso.
+  // Agora é enviada assim mesmo e o aviso de "não mostrou atividade" continua pelo watchStart.
+  const giveUp = window.setTimeout(() => {
+    if (terminals.get(tabId) !== term) { sub.dispose(); queued.delete(tabId); queuedTimings.delete(tabId); return; }
+    if (!sawOutput) timings?.onStalled?.();
+    send();
+  }, GIVE_UP_MS);
 }
 
 /**

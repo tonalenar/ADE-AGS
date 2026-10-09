@@ -231,7 +231,7 @@ export function AppShell() {
       text-gray-900 dark:text-white
       ${isMaximized ? "" : "rounded-xl"}`}>
 
-      <ResizeHandles />
+      {!isMaximized && <ResizeHandles />}
       <AppExitListener />
       <SyncRunner />
       <PoolFailoverNotice />

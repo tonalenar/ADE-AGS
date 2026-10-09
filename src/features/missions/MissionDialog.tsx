@@ -47,10 +47,14 @@ export function MissionDialog({ initial, editing, editingId, onClose, onSave }: 
   const set = <K extends keyof MissionForm>(key: K, value: MissionForm[K]) => setForm((f) => ({ ...f, [key]: value }));
 
   // Solo para ofrecer modelos. Crear el borrador no depende de que el roster conteste.
-  useEffect(() => {
-    getRoster().then(setRoster).catch(() => setRoster(null));
-    listSquads().then(setSquads).catch(() => setSquads([]));
-  }, []);
+  // Falha ao carregar não some em silêncio: mostra o erro e deixa tentar de novo.
+  const [loadError, setLoadError] = useState("");
+  const loadOptions = () => {
+    setLoadError("");
+    getRoster().then(setRoster).catch((e) => { setRoster(null); setLoadError(String(e)); });
+    listSquads().then(setSquads).catch((e) => { setSquads([]); setLoadError(String(e)); });
+  };
+  useEffect(() => { loadOptions(); }, []);
 
   const agents = roster?.agents ?? [];
   const missing = missingFields(form);
@@ -259,6 +263,11 @@ export function MissionDialog({ initial, editing, editingId, onClose, onSave }: 
           )}
         </div>
 
+        {loadError && (
+          <Alert variant="warning">
+            {loadError} <button type="button" onClick={loadOptions} className="underline">{t("missions.action.retry")}</button>
+          </Alert>
+        )}
         {error && <Alert variant="danger">{error}</Alert>}
       </div>
     </AppDialog>

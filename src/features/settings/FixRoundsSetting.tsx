@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getSetting, setSetting } from "@/shared/ipc/settings";
+import { AlertaToast } from "neogestify-ui-components";
 
 /** A mesma chave que `runs/fixrounds.rs` lee. Sin valor, el teto es 2. */
 const KEY = "fix_rounds.max";
@@ -26,8 +27,12 @@ export function FixRoundsSetting() {
   const change = (raw: string) => {
     const n = Number(raw);
     if (!Number.isInteger(n) || n < 0 || n > 20) return;
+    const previous = value;
     setValue(String(n));
-    setSetting(KEY, String(n)).catch(console.error);
+    setSetting(KEY, String(n)).catch((e) => {
+      setValue(previous);
+      AlertaToast(t("settings.fixRounds.label"), String(e), "error", 6000);
+    });
   };
 
   return (

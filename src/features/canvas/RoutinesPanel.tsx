@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
+import { dateLocale } from "@/i18n/dateLocale";
 
 export type Schedule =
   | { kind: "every"; secs: number }
@@ -46,7 +47,7 @@ export function describeSchedule(s: Schedule, t?: Translate): string {
 
 function when(unix: number | null): string {
   if (!unix) return "—";
-  return new Date(unix * 1000).toLocaleString(undefined, { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
+  return new Date(unix * 1000).toLocaleString(dateLocale(), { day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
 }
 
 /**

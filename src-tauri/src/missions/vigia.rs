@@ -9,6 +9,8 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
+use tauri::{AppHandle, Emitter};
+
 /// Quanto se espera pela resposta do modelo.
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
 /// Quanto da tela de cada um vai para o modelo (fim da saída, sem ANSI).
@@ -162,6 +164,22 @@ pub async fn vigia_check(
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Escreve no chat do Orquestrador o que travou e o que foi feito: é ali que o usuário lê, não num
+/// toast que some. Sai como resposta do agente e SEM aviso do sistema: é registro, não pedido de
+/// atenção (o `ags say` é que pede atenção).
+#[tauri::command]
+pub fn vigia_report(app: AppHandle, tab_id: String, text: String) -> Result<(), String> {
+    let text = crate::chat::clean_text(&text)?;
+    let now = crate::util::now_ts();
+    crate::chat::update(&tab_id, |conv| {
+        let thread = crate::chat::reply_thread(conv, None)?;
+        crate::chat::push(conv, thread, crate::chat::Kind::Say, text.clone(), now);
+        Ok(())
+    })?;
+    let _ = app.emit(crate::ipc::commands::chat::CHANGED_EVENT, &tab_id);
+    Ok(())
 }
 
 #[cfg(test)]

@@ -15,11 +15,11 @@ describe("recruitCommand", () => {
   });
 
   it("sem modelo nem esforço não acrescenta nada (fica o padrão da TUI)", () => {
-    expect(recruitCommand("codex", "codex", "ask")).toBe("codex");
+    expect(recruitCommand("codex", "codex", "ask")).toBe("codex -c features.fast_mode=false");
   });
 
   it("rejeita um modelo com caracteres perigosos", () => {
-    expect(recruitCommand("codex", "codex", "ask", "x; rm -rf /", null)).toBe("codex");
+    expect(recruitCommand("codex", "codex", "ask", "x; rm -rf /", null)).toBe("codex -c features.fast_mode=false");
   });
 
   it("--fast liga o service_tier só no Codex recrutado", () => {

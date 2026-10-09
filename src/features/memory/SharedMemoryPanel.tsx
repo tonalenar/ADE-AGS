@@ -528,7 +528,7 @@ function MemoryHistory({ detail, onClose }: { detail: MemoryDetail; onClose: () 
           <p className={META}>{t("sharedMemory.kindPriority", { kind: KIND_LABEL[revision.kind], priority: revision.priority })}{revision.expectedRevision !== null ? t("sharedMemory.basedOn", { rev: revision.expectedRevision }) : ""}</p>
           <pre className={BODY}>{revision.body}</pre>
           {revision.reason && <p className={META}>{t("sharedMemory.reason", { reason: revision.reason })}</p>}
-          {(revision.sourceRunId || revision.sourceTaskId || revision.sourceFactId) && <p className={META}>{t("sharedMemory.sourceLine", { from: revision.sourceFactId ? t("sharedMemory.fromFact", { id: revision.sourceFactId.slice(0, 8) }) : t("sharedMemory.fromRun"), task: revision.sourceTaskId ? ` · Task ${revision.sourceTaskId.slice(0, 8)}` : "" })}</p>}
+          {(revision.sourceRunId || revision.sourceTaskId || revision.sourceFactId) && <p className={META}>{t("sharedMemory.sourceLine", { from: revision.sourceFactId ? t("sharedMemory.fromFact", { id: revision.sourceFactId.slice(0, 8) }) : t("sharedMemory.fromRun"), task: revision.sourceTaskId ? ` · ${tr("sharedMemory.task")} ${revision.sourceTaskId.slice(0, 8)}` : "" })}</p>}
         </article>
       ))}
     </section>
@@ -634,9 +634,9 @@ function RunSnapshot({ snapshot }: { snapshot: MemorySnapshot | null }) {
 
 function actorLabel(actor: string): string {
   if (actor === "user") return tr("sharedMemory.actor.user");
-  if (actor === "lead") return "Lead";
-  if (actor === "worker") return "Worker";
-  if (actor === "dreamer") return "Dreamer";
+  if (actor === "lead") return tr("sharedMemory.actor.lead");
+  if (actor === "worker") return tr("sharedMemory.actor.worker");
+  if (actor === "dreamer") return tr("sharedMemory.actor.dreamer");
   return actor;
 }
 

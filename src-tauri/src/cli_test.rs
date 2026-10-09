@@ -517,3 +517,25 @@ fn memory_caller_drops_a_forged_session_and_keeps_the_pty_token() {
     assert_eq!(args["from"], "real-tab");
     assert!(args.get("session").is_none());
 }
+
+#[test]
+fn peer_messages_from_a_file_land_in_the_text_field_without_shell_quotes() {
+    // No Windows, aspas e `<`/`>` dentro de `ags peer tell "..."` quebram a mensagem. Com --file
+    // o texto vai pelo arquivo e tem que chegar no campo `text`, que é o que o backend lê.
+    let path = std::env::temp_dir().join(format!("ags-cli-file-{}.md", uuid::Uuid::new_v4()));
+    std::fs::write(&path, "Entrega de <papel>: \"tudo\" > x").unwrap();
+    let file = path.to_string_lossy().into_owned();
+    let args = vec!["Backend".to_string(), "--file".into(), file.clone()];
+    let parsed = inline_file(parse_flags(&args, positionals("peer.tell")).unwrap(), "peer.tell").unwrap();
+    assert_eq!(parsed["to"], "Backend");
+    assert_eq!(parsed["text"], "Entrega de <papel>: \"tudo\" > x");
+    assert!(parsed.get("content").is_none());
+
+    let both = vec!["Backend".to_string(), "oi".into(), "--file".into(), file];
+    let error = inline_file(parse_flags(&both, positionals("peer.tell")).unwrap(), "peer.tell").unwrap_err();
+    assert!(error.contains("--text"), "{error}");
+    // Notas e roles continuam em `content`; swarm usa `body`.
+    assert_eq!(text_field("note.write"), "content");
+    assert_eq!(text_field("swarm.note"), "body");
+    std::fs::remove_file(path).unwrap();
+}

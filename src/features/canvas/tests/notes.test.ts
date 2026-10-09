@@ -132,3 +132,17 @@ describe("pilas de notas", () => {
     expect(stackInto(created, "note-a", "note-a")).toBe(created);
   });
 });
+
+describe("reconcile não derruba a ligação de uma aba que segue aberta (AGS-014)", () => {
+  it("uma aba aberta em outro piso mantém a aresta com o orquestrador", () => {
+    const board = addEdge(reconcile(emptyBoard(), ["lead", "backend"]), "lead", "backend");
+    // O canvas deste piso já não tem "backend" entre as suas, mas a aba segue aberta.
+    const next = reconcile(board, ["lead"], ["lead", "backend"]);
+    expect(next.edges.some((e) => (e.a === "lead" && e.b === "backend") || (e.a === "backend" && e.b === "lead"))).toBe(true);
+  });
+  it("uma aba fechada perde a ligação, como antes", () => {
+    const board = addEdge(reconcile(emptyBoard(), ["lead", "backend"]), "lead", "backend");
+    const next = reconcile(board, ["lead"], ["lead"]);
+    expect(next.edges.some((e) => e.a === "backend" || e.b === "backend")).toBe(false);
+  });
+});
