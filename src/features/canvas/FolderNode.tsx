@@ -143,7 +143,7 @@ export const FolderNode = memo(function FolderNode({ data, selected }: NodeProps
     <div className={`h-full w-full flex flex-col rounded-lg overflow-hidden border bg-white dark:bg-surface
       ${selected ? "border-accent-500 dark:border-accent-400 shadow-[0_0_0_1px_var(--color-accent-400)]" : "border-emerald-300/70 dark:border-emerald-200/15"}`}>
       <NodeResizer isVisible={selected} minWidth={FOLDER_MIN.w} minHeight={FOLDER_MIN.h}
-        lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
+        lineClassName="border-transparent!" handleClassName="w-2! h-2! rounded-[3px]! bg-white! dark:bg-surface! border-[1.5px]! border-accent-500! shadow-sm!" />
 
       <div className="ade-node-drag flex items-center gap-2 pl-3 pr-1.5 h-[34px] shrink-0 cursor-grab active:cursor-grabbing
         border-b border-emerald-200 dark:border-emerald-100/10 bg-emerald-50 dark:bg-emerald-100/5">

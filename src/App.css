@@ -665,7 +665,9 @@ html.dark {
 }
 
 /* As alças dos nós são as "portas" das cordas: crescem ao passar o mouse e ao conectar. */
-.react-flow__handle.ade-port { transition: transform 0.15s ease, background-color 0.2s; }
+.react-flow__handle.ade-port { transition: transform 0.15s ease, background-color 0.2s, opacity 0.15s ease; }
+/* Portas discretas: inteiras com o mouse no nó, com ele selecionado, com corda presa ou ao conectar. */
+.react-flow__node:not(.selected):not(:hover) .react-flow__handle.ade-port:not(.ade-port--linked):not(.connectingto) { opacity: 0.45; }
 .react-flow__handle.ade-port:hover,
 .react-flow__handle.ade-port.connectingto { transform: translate(-50%, -50%) scale(1.35); }
 .react-flow__handle-left.ade-port:hover, .react-flow__handle-right.ade-port:hover { transform: translate(-50%, -50%) scale(1.35); }

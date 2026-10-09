@@ -205,7 +205,7 @@ export const DeviceNode = memo(function DeviceNode({ id, portal, links, selected
           : "border-emerald-300/80 dark:border-emerald-200/20"}`}
     >
       <NodeResizer isVisible={selected} minWidth={PHONE_MIN.w} minHeight={PHONE_MIN.h}
-        lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
+        lineClassName="border-transparent!" handleClassName="w-2! h-2! rounded-[3px]! bg-white! dark:bg-surface! border-[1.5px]! border-accent-500! shadow-sm!" />
       <CordPort id="l" type="source" position={Position.Left} className={handle} />
       <CordPort id="r" type="source" position={Position.Right} className={handle} />
       <CordPort id="t" type="source" position={Position.Top} className={handle} />
