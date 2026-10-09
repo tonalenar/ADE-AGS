@@ -193,6 +193,7 @@ export function CustomAgentForm({ initial, onSubmit, onCancel }: CustomAgentForm
                   />
                   <Button
                     variant="danger"
+                    aria-label={t("btn.delete")}
                     className="shrink-0"
                     onClick={() => {
                       const next = { ...draft.env };
