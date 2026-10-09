@@ -9,6 +9,7 @@ import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { showBotToast } from "@/shared/brand/botToastStore";
 import { missionIndex, tabsByMission } from "./groups";
 import { useMissionsStore } from "./store";
+import { useVigiaSwitch } from "./vigiaSwitch";
 
 /**
  * O Vigia: um vigia BARATO, em segundo plano e SEM TERMINAL, que destrava a missão e conta no chat
@@ -185,6 +186,8 @@ export function missionStartMs(startedAtSec: number | null, now: number): number
 
 /** Um passo: as regras sem modelo primeiro; se não acharem nada, o modelo barato para os ociosos. */
 export function vigiaTick(now = Date.now()): void {
+  // Desligado por padrão: o Vigia só age quando o usuário liga o botão ao lado do chat.
+  if (!useVigiaSwitch.getState().enabled) return;
   const { tabs, detectedAgents } = useTabsStore.getState();
   const missions = useMissionsStore.getState().missions.filter((m) => m.status === "running");
   if (missions.length === 0) return;

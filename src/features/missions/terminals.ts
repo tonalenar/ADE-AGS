@@ -15,6 +15,7 @@ import { useStallAlerts } from "./stallAlerts";
 import { recordSpan } from "./timings";
 import { missionTurns } from "./turns";
 import { VIGIA_NAME, vigiaAgentFor } from "./vigia";
+import { useVigiaSwitch } from "./vigiaSwitch";
 
 import type { Mission } from "./types";
 
@@ -360,7 +361,7 @@ export async function startMissionInTerminals(
   const memberAgents = team.map((m) => agentFor(m.agentId, m.model, m.effort, m.fast));
   // O Vigia roda em segundo plano, sem terminal (ver `vigia.ts`). Só se avisa o Orquestrador de
   // que ele existe quando há um modelo barato instalado para ele.
-  const hasVigia = vigiaAgentFor(leadAgentId, detectedAgents.filter((a) => a.available).map((a) => a.id)) !== null;
+  const hasVigia = useVigiaSwitch.getState().enabled && vigiaAgentFor(leadAgentId, detectedAgents.filter((a) => a.available).map((a) => a.id)) !== null;
 
   // Una cuenta sin login abriría el selector de login de la TUI, y el briefing se pegaría ahí.
   // Cada cuenta tiene su perfil aislado: el login se hace una vez, a mano, en Cuentas.

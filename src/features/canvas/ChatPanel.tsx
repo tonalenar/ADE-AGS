@@ -18,6 +18,7 @@ import { ChatMarkdown } from "./ChatMarkdown";
 import { ResponsePicker } from "./ResponsePicker";
 import { CHAT_MARGIN, clampSize, isDefaultSize, loadChatSize, resizeBy, saveChatSize, DEFAULT_CHAT_SIZE, type ChatSize, type ChatSizeState } from "./chatSize";
 import { dateLocale } from "@/i18n/dateLocale";
+import { useDockWidth } from "./dockWidth";
 
 /** Los siete hilos, en el orden en que los conoce el backend (`chat::THREADS`). */
 export const THREADS = ["blue", "purple", "pink", "red", "orange", "yellow", "green"] as const;
@@ -130,9 +131,12 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
   };
   const toggleMax = () => commit({ ...view, maximized: !view.maximized });
   const clamped = clampSize(view.size, { width: 4000, height: 4000 });
+  // Sem tamanho escolhido pelo usuário, o chat tem a largura da dock.
+  const dockWidth = useDockWidth((s) => s.width);
+  const panelWidth = isDefaultSize(view.size) && dockWidth > 0 ? dockWidth : clamped.width;
   const sizeStyle: React.CSSProperties = view.maximized
     ? { width: `calc(100% - ${CHAT_MARGIN.x}px)`, height: `calc(100% - ${CHAT_MARGIN.y}px)` }
-    : { width: clamped.width, height: clamped.height, maxWidth: `calc(100% - ${CHAT_MARGIN.x}px)`, maxHeight: `calc(100% - ${CHAT_MARGIN.y}px)` };
+    : { width: panelWidth, height: clamped.height, maxWidth: `calc(100% - ${CHAT_MARGIN.x}px)`, maxHeight: `calc(100% - ${CHAT_MARGIN.y}px)` };
   const handleCls = "absolute z-20 bg-transparent hover:bg-accent-400/30 focus-visible:bg-accent-400/40 focus-visible:outline-none";
   const unread = useUnreadStore((s) => s.unread);
   const sound = useUnreadStore((s) => s.sound);
@@ -246,7 +250,7 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
 
   return (
     <AIChatCard
-      className="pointer-events-auto absolute right-3 bottom-16"
+      className="pointer-events-auto absolute right-3 bottom-[4.75rem]"
       style={sizeStyle}
       onKeyDown={(e) => {
         if (e.key === "Escape" && !picking) { e.stopPropagation(); onClose(); }

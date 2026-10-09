@@ -673,7 +673,7 @@ function CanvasInner() {
           <DesignPanel details={design.details} reload={design.reload} initial={designFocus} onClose={() => { setPanel(null); setDesignFocus(null); }} />
         )}
         {design.notice && (
-          <div role="status" className="pointer-events-auto absolute right-3 bottom-16 flex items-center gap-2 rounded-lg border border-accent-500/40
+          <div role="status" className="pointer-events-auto absolute right-3 bottom-[4.75rem] flex items-center gap-2 rounded-lg border border-accent-500/40
             bg-white/95 dark:bg-surface-raised/95 shadow-lg px-3 py-2 text-[12.5px] text-gray-800 dark:text-gray-100">
             <span>{t("canvas.design.newDesign", { title: design.notice.title })}</span>
             <Button variant="custom" className="cc-t h-7 px-2.5 rounded-md bg-accent-500/15 text-accent-600 dark:text-accent-300 text-[11.5px] font-medium"

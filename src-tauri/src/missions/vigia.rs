@@ -59,8 +59,10 @@ pub(crate) fn prompt(mission_title: &str, lead: &str, screens: &[(String, String
         "Você é o VIGIA da missão \"{mission_title}\" num app que coordena agentes de código. Você só OBSERVA.\n\
 Abaixo está o fim da tela de agentes que estão sem escrever nada há mais de 90 s, e a do Orquestrador \"{lead}\".\n\
 Decida, para cada um, se está OCIOSO de fato: esperando tarefa; terminou e não reportou; esperando resposta de alguém; \
-texto colado na caixa sem enviar; travado num erro; ou esperando aprovação/pergunta do usuário. \
-Quem está trabalhando (pensando, rodando build/teste longo) NÃO é ocioso.\n\n"
+travado num erro; ou esperando aprovação/pergunta do usuário. \
+Quem está trabalhando (pensando, rodando build/teste longo) NÃO é ocioso.\n\
+IGNORE a caixa de digitação do prompt (a linha depois de \">\" ou do cursor) e qualquer sugestão em cinza: \
+é rascunho do usuário ou sugestão da própria ferramenta, nunca é motivo para agir nem para citar.\n\n"
     );
     for (name, screen) in screens {
         text.push_str(&format!("=== TELA DE \"{name}\" ===\n{}\n\n", if screen.is_empty() { "(vazia)" } else { screen }));
@@ -69,7 +71,7 @@ Quem está trabalhando (pensando, rodando build/teste longo) NÃO é ocioso.\n\n
         "Responda SÓ com um array JSON, sem texto antes ou depois. Cada item: {{\"to\": \"<nome>\", \"message\": \"<curta, em português>\"}}.\n\
 - Ocioso esperando tarefa, esperando resposta ou travado: to = \"{lead}\", dizendo quem, a situação e o próximo passo sugerido.\n\
 - O próprio Orquestrador ocioso com a equipe esperando: to = \"{lead}\".\n\
-- Texto colado sem enviar, ou terminou e não reportou: to = o nome do próprio agente, pedindo para enviar/reportar.\n\
+- Terminou e não reportou: to = o nome do próprio agente, pedindo para reportar ao Orquestrador.\n\
 - Esperando o usuário: to = \"usuario\".\n\
 Ninguém ocioso de fato: responda []. No máximo 3 itens. Nunca invente tarefas."
     ));

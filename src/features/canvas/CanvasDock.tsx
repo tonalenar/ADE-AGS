@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MiniMap, useNodesInitialized, useReactFlow } from "@xyflow/react";
 import { Button, CloseIcon } from "neogestify-ui-components";
@@ -6,7 +6,10 @@ import { Button, CloseIcon } from "neogestify-ui-components";
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
 
+import { useVigiaSwitch } from "@/features/missions/vigiaSwitch";
+
 import { unreadOf, useUnreadStore } from "./chatUnread";
+import { useDockWidth } from "./dockWidth";
 import { FloorBar } from "./FloorBar";
 import { RING_COLORS, Ring } from "./Ring";
 import { UsageBoard } from "./UsageBoard";
@@ -54,6 +57,7 @@ function Svg({ children }: { children: React.ReactNode }) {
 const LayersIcon = () => <Svg><path d="M12 3l9 5-9 5-9-5 9-5Z" /><path d="M3 13l9 5 9-5" /></Svg>;
 const MapIcon = () => <Svg><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z" /><path d="M9 4v14M15 6v14" /></Svg>;
 const ChatIcon = () => <Svg><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.5A8 8 0 1 1 21 12Z" /></Svg>;
+const EyeIcon = () => <Svg><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></Svg>;
 const ClockIcon = () => <Svg><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>;
 const DesignIcon = () => <Svg><rect x="3" y="4" width="8" height="16" rx="1.5" /><rect x="13" y="4" width="8" height="9" rx="1.5" /></Svg>;
 const FitIcon = () => <Svg><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" /></Svg>;
@@ -81,7 +85,7 @@ function Pill({ label, active, onClick, children, className = "" }: {
 /** Separador hairline entre grupos de la barra. */
 const Sep = () => <span aria-hidden className="w-px h-[22px] mx-1.5 bg-black/10 dark:bg-white/[0.08]" />;
 
-const popover = `pointer-events-auto absolute right-3 bottom-16 rounded-xl overflow-hidden border ${hairline} ${material}`;
+const popover = `pointer-events-auto absolute right-3 bottom-[4.75rem] rounded-xl overflow-hidden border ${hairline} ${material}`;
 
 /**
  * La barra de abajo del canvas: andares, uso de los agentes (anillos), mapa y zoom, más el
@@ -128,6 +132,22 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [jump]);
   const unreadTotal = useUnreadStore((s) => Object.values(s.unread).reduce((n, by) => n + unreadOf(by), 0));
+  // Mede a barra para os painéis de cima terem a mesma largura dela.
+  const dockRef = useRef<HTMLDivElement>(null);
+  const dockWidth = useDockWidth((s) => s.width);
+  useEffect(() => {
+    const el = dockRef.current;
+    if (!el) return;
+    const publish = () => useDockWidth.getState().setWidth(Math.round(el.getBoundingClientRect().width));
+    publish();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(publish);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
+  const sameWidth = dockWidth > 0 ? { width: dockWidth } : undefined;
+  const vigiaOn = useVigiaSwitch((s) => s.enabled);
+  const toggleVigia = useVigiaSwitch((s) => s.toggle);
   useEffect(() => startUsagePolling(accounts), [accounts]);
   const [usageOpen, setUsageOpen] = useState(readUsageOpen);
   useEffect(() => writeUsageOpen(usageOpen), [usageOpen]);
@@ -136,14 +156,15 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
   return (
     <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
       {panel === "layers" && (
-        <div className={`${popover} p-2`}><FloorBar inline /></div>
+        <div className={`${popover} p-2`} style={sameWidth}><FloorBar inline /></div>
       )}
-      {usageOpen && panel === null && <UsagePanel accounts={accounts} onClose={toggleUsage} />}
+      {usageOpen && panel === null && <UsagePanel accounts={accounts} onClose={toggleUsage} width={dockWidth} />}
       {panel === "map" && (
-        <div className={`${popover} w-[17rem]`}>
+        <div className={`${popover} w-[17rem]`} style={sameWidth}>
           <div className="relative h-44">
             {nodesReady && (
-              <MiniMap pannable zoomable nodeColor="var(--color-accent-400)" maskColor="rgba(0,0,0,0.3)"
+              <MiniMap pannable zoomable nodeColor="var(--color-accent-400)" nodeStrokeColor="rgba(0,0,0,0.55)" nodeStrokeWidth={14} nodeBorderRadius={18}
+                maskColor="rgba(0,0,0,0.45)" maskStrokeColor="var(--color-accent-300)" maskStrokeWidth={3}
                 style={{ position: "absolute", inset: 0, margin: 0, width: "100%", height: "100%", background: "transparent" }} />
             )}
             <Button variant="custom" onClick={() => onTogglePanel("map")} aria-label={t("canvas.dock.close")}
@@ -154,7 +175,7 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
         </div>
       )}
 
-      <div className={`pointer-events-auto absolute right-3 bottom-3 flex items-center gap-1 h-[52px] px-2.5 rounded-2xl ${material}`}>
+      <div ref={dockRef} className={`pointer-events-auto absolute right-3 bottom-3 flex items-center gap-1 h-[52px] px-2.5 rounded-2xl ${material}`}>
         <Pill label={t("canvas.chat.hint")} active={panel === "chat"} onClick={() => onTogglePanel("chat")} className="relative">
           <ChatIcon />
           {unreadTotal > 0 && (
@@ -162,6 +183,7 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
               leading-[17px] text-center shadow">{unreadTotal > 9 ? "9+" : unreadTotal}</span>
           )}
         </Pill>
+        <Pill label={t(vigiaOn ? "canvas.vigia.on" : "canvas.vigia.off")} active={vigiaOn} onClick={toggleVigia}><EyeIcon /></Pill>
         {hasDesign && (
           <Pill label={t("canvas.design.hint")} active={panel === "design"} onClick={() => onTogglePanel("design")} className="relative">
             <DesignIcon />
@@ -207,10 +229,10 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
  * El panel "Uso dos agentes": el cupo del plan de cada cuenta con sesión — anillo, barras
  * por límite y cuándo se reinicia (ver `UsageBoard`).
  */
-function UsagePanel({ accounts, onClose }: { accounts: AgentAccount[]; onClose: () => void }) {
+function UsagePanel({ accounts, onClose, width }: { accounts: AgentAccount[]; onClose: () => void; width: number }) {
   const { t } = useTranslation();
   return (
-    <div className={`${popover} w-[22rem] max-h-[calc(100%-5rem)] flex flex-col`}>
+    <div className={`${popover} w-[22rem] max-h-[calc(100%-6.5rem)] flex flex-col`} style={width > 0 ? { width } : undefined}>
       <div className={`flex items-center gap-1 pl-4 pr-2 h-11 shrink-0 border-b ${hairline}`}>
         <span className="text-[13px] font-semibold tracking-[-0.01em] text-gray-800 dark:text-gray-100">{t("canvas.dock.usageTitle")}</span>
         <span className="flex-1" />
