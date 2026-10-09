@@ -320,9 +320,11 @@ pub const AGENTS: &[AgentDef] = &[
         // No es una TUI de agente: es la salida de emergencia a una terminal pelada. Está
         // en la tabla porque el resto de la app la trata como un agente más (tiene id,
         // icono y tabs), pero no gestiona skills ni cuentas ni sesiones.
+        // O id continua "bash" (a app inteira o usa); o programa é o do sistema. No Windows
+        // `bash` é o launcher do WSL (Linux), não o terminal da máquina: PowerShell no lugar.
         id: "bash",
-        label: "Terminal (bash)",
-        command: "bash",
+        label: if cfg!(windows) { "Terminal (PowerShell)" } else { "Terminal (bash)" },
+        command: if cfg!(windows) { "powershell" } else { "bash" },
         launch_args: None,
         version_flag: "--version",
         skills_dir: None,

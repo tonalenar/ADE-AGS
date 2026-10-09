@@ -102,7 +102,7 @@ fn el_registro_conserva_los_valores_que_estaban_repartidos() {
         ),
         // bash no es una TUI de agente: no gestiona skills, ni cuentas, ni sesiones.
         e("antigravity", "agy", None, None, None),
-        e("bash", "bash", None, None, None),
+        e("bash", if cfg!(windows) { "powershell" } else { "bash" }, None, None, None),
     ];
 
     assert_eq!(

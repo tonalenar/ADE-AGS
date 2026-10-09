@@ -171,7 +171,7 @@ fn bash_no_finge_capabilities_de_agente() {
     let agent = adapter("bash");
     let caps = agent.capabilities();
 
-    assert_eq!(agent.def().command, "bash");
+    assert_eq!(agent.def().command, if cfg!(windows) { "powershell" } else { "bash" });
     assert!(agent.def().profile.is_none());
     assert_eq!(agent.def().sessions, SessionSource::None);
     assert_eq!(agent.def().mcp, McpStyle::None);
