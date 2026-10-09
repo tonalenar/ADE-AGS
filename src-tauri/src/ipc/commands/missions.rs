@@ -13,7 +13,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Manager};
 
 use crate::bus::{self, Filter};
-use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_opt};
+use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_checked, arg_u64_opt};
 use crate::missions::{MissionDetail, MissionInput};
 
 const MAX_WAIT_SECS: u64 = 6 * 3600;
@@ -52,6 +52,21 @@ fn is_final(status: &str) -> bool {
     matches!(status, "done" | "done_without_delivery" | "failed" | "cancelled")
 }
 
+/// `--budget`: ausente é "sem teto"; escrito errado (`abc`) é erro, não "sem teto" em silêncio.
+fn budget_arg(args: &Value) -> Result<Option<f64>, String> {
+    match args.get("budget") {
+        None | Some(Value::Null) => Ok(None),
+        Some(Value::Number(n)) => Ok(n.as_f64()),
+        Some(Value::String(s)) => s
+            .trim()
+            .replace(',', ".")
+            .parse::<f64>()
+            .map(Some)
+            .map_err(|_| format!("--budget precisa ser um número em dólares (recebi {s:?})")),
+        Some(other) => Err(format!("--budget precisa ser um número em dólares (recebi {other})")),
+    }
+}
+
 pub(super) fn mission_create(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let objective = arg_str(args, "objective")?;
     let cwd = arg_str(args, "cwd")?;
@@ -64,8 +79,8 @@ pub(super) fn mission_create(app: &AppHandle, args: &Value) -> Result<Value, Str
         title: arg_str_opt(args, "title").unwrap_or_else(|| objective.chars().take(60).collect()),
         objective,
         cwd,
-        max_parallel: arg_u64_opt(args, "maxParallel").map(|n| n as i64),
-        budget_usd: args.get("budget").and_then(|b| b.as_str().and_then(|s| s.parse().ok()).or_else(|| b.as_f64())),
+        max_parallel: arg_u64_checked(args, "maxParallel")?.map(|n| n as i64),
+        budget_usd: budget_arg(args)?,
         lead_agent_id: arg_str_opt(args, "agent"),
         lead_model: arg_str_opt(args, "model"),
         lead_account_id: arg_str_opt(args, "account"),
@@ -240,7 +255,7 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
 pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = memory_caller_mission(args)?;
     let query = arg_str(args, "query")?;
-    let limit = arg_u64_opt(args, "limit").unwrap_or(5) as usize;
+    let limit = arg_u64_checked(args, "limit")?.unwrap_or(5) as usize;
     let at = match args.get("at") {
         Some(Value::String(value)) => Some(parse_memory_at(value)?),
         Some(Value::Number(value)) => Some(

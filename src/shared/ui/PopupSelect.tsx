@@ -117,10 +117,12 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
     };
     document.addEventListener("mousedown", close, true);
     window.addEventListener("scroll", onScroll, true);
-    window.addEventListener("resize", () => setOpen(false), { once: true });
+    const onResize = () => setOpen(false);
+    window.addEventListener("resize", onResize);
     return () => {
       document.removeEventListener("mousedown", close, true);
       window.removeEventListener("scroll", onScroll, true);
+      window.removeEventListener("resize", onResize);
     };
   }, [open]);
 
@@ -155,7 +157,9 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
       e.preventDefault(); setOpen(true); return;
     }
     if (!open) return;
-    if (e.key === "Escape" || e.key === "Tab") { setOpen(false); return; }
+    // Escape fecha só o menu: sem isto o <dialog> nativo de trás também recebia o "cancel" e fechava.
+    if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); setOpen(false); return; }
+    if (e.key === "Tab") { setOpen(false); return; }
     if (e.key === "ArrowDown") { e.preventDefault(); move(1); }
     else if (e.key === "ArrowUp") { e.preventDefault(); move(-1); }
     else if (e.key === "Home") { e.preventDefault(); setActive(0); }

@@ -49,7 +49,12 @@ export function MissionReviewPanel({ missionId, refreshKey }: { missionId: strin
     }
   };
 
-  if (!review || review.deliveries.length === 0) return null;
+  // Sem entregas não há o que revisar, mas um erro (ou o resultado de uma ação) tem que aparecer.
+  if (!review || review.deliveries.length === 0) {
+    return message ? (
+      <p className={`text-[11px] ${message.tone === "ok" ? "text-emerald-600 dark:text-emerald-400" : "text-red-500 dark:text-red-400"}`}>{message.text}</p>
+    ) : null;
+  }
 
   return (
     <section className="flex flex-col gap-1.5">

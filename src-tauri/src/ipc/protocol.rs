@@ -177,3 +177,32 @@ pub fn arg_str_opt(args: &serde_json::Value, key: &str) -> Option<String> {
 pub fn arg_u64_opt(args: &serde_json::Value, key: &str) -> Option<u64> {
     args.get(key).and_then(|v| v.as_u64())
 }
+
+/// Como `arg_u64_opt`, mas um valor que está presente e não é um inteiro não negativo é um
+/// ERRO que nomeia o flag, em vez de virar "ausente" e cair no padrão em silêncio (`--lines abc`
+/// devolvia 40 linhas como se nada tivesse acontecido). Ausente continua sendo `Ok(None)`.
+pub fn arg_u64_checked(args: &serde_json::Value, key: &str) -> Result<Option<u64>, String> {
+    match args.get(key) {
+        None | Some(serde_json::Value::Null) => Ok(None),
+        Some(v) => v
+            .as_u64()
+            .or_else(|| v.as_str().and_then(|s| s.trim().parse::<u64>().ok()))
+            .map(Some)
+            .ok_or_else(|| format!("--{key} precisa ser um número inteiro não negativo (recebi {v})")),
+    }
+}
+
+#[cfg(test)]
+mod checked_tests {
+    use super::arg_u64_checked;
+    use serde_json::json;
+
+    #[test]
+    fn ausente_e_ok_none_numero_e_some_e_lixo_e_erro_com_o_nome_do_flag() {
+        assert_eq!(arg_u64_checked(&json!({}), "lines"), Ok(None));
+        assert_eq!(arg_u64_checked(&json!({"lines": 3}), "lines"), Ok(Some(3)));
+        assert_eq!(arg_u64_checked(&json!({"lines": "7"}), "lines"), Ok(Some(7)));
+        assert!(arg_u64_checked(&json!({"lines": "abc"}), "lines").unwrap_err().contains("--lines"));
+        assert!(arg_u64_checked(&json!({"lines": "-1"}), "lines").is_err());
+    }
+}

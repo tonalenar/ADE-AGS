@@ -29,6 +29,7 @@ export function SessionsPage() {
   const { t } = useTranslation();
   const history = useSessionsStore((s) => s.history);
   const loadHistory = useSessionsStore((s) => s.loadHistory);
+  const loadError = useSessionsStore((s) => s.error);
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const {
     pendingResume,
@@ -145,6 +146,9 @@ export function SessionsPage() {
 
       {/* ══ el árbol: repo → carpeta → sesiones ═══════════════════════════ */}
       <div className="flex-1 min-h-0 cc-scroll py-1.5" onKeyDown={onKeyDown} tabIndex={-1}>
+        {loadError && (
+          <p role="alert" className="mx-4 mb-2 rounded-md bg-red-500/10 px-3 py-2 text-[12px] text-red-600 dark:text-red-400">{loadError}</p>
+        )}
         {history.length === 0 ? (
           <EmptyState
             className="py-14"

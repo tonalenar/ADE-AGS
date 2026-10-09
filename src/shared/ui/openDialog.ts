@@ -12,5 +12,6 @@
  * riesgo de que llegue a la terminal, porque un `<dialog>` modal tiene el foco adentro.
  */
 export function hasOpenDialog(): boolean {
-  return document.querySelector("dialog[open]") !== null;
+  // Um menu de PopupSelect aberto também é dono do Escape: fecha só o menu, não a tela.
+  return document.querySelector("dialog[open], [role=listbox][popover]") !== null;
 }

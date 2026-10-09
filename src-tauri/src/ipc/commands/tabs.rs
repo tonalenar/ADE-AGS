@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter};
 use super::agents::{resolve_account_id, resolve_prelaunch_steps};
 use super::shared::{bridge_call, db};
 use crate::ipc::bridge::{ask_frontend, unwrap_frontend_result};
-use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_opt};
+use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_checked, arg_u64_opt};
 
 /// Tabs de todas las ventanas ABIERTAS, con el id de PTY vivo si lo tienen. Las tabs de
 /// ventanas cerradas (workspaces guardados) no se listan: para la CLI, "las tabs" son las
@@ -358,7 +358,7 @@ pub(super) fn tab_output(app: &AppHandle, args: &Value) -> Result<Value, String>
 
     let full = args.get("full").and_then(|v| v.as_bool()).unwrap_or(false);
     let raw_mode = args.get("raw").and_then(|v| v.as_bool()).unwrap_or(false);
-    let tail_lines = arg_u64_opt(args, "lines").unwrap_or(DEFAULT_TAIL_LINES as u64) as usize;
+    let tail_lines = arg_u64_checked(args, "lines")?.unwrap_or(DEFAULT_TAIL_LINES as u64) as usize;
 
     if raw_mode {
         // El crudo no mueve el cursor: es una inspección puntual, no "leer lo nuevo".
