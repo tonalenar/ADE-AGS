@@ -164,7 +164,8 @@ MISIONES (también sin interfaz: `ade-ags --headless`)
               [--title ...] [--agent claude-code] [--model ...] [--account <id>]
               [--squad <id>] [--budget 5] [--max-parallel 2]
                                               Crea, arranca y espera; sale con 1 si falla
-  mission create|start|status|wait <id>       Paso a paso (wait: --timeout)
+  mission create --objective \"...\" --cwd .   Solo crea el borrador (mismos flags que run, sin --wait)
+  mission start|status|wait <id>              Paso a paso (wait: --timeout)
   mission create|run|start ... --test          Marca explicitamente teste/E2E (fora da taxa de sucesso)
   mission review <id>                         Lo que entregó cada tarea aislada
   mission timings <id>                        Tiempo activo, delegación, alertas/esperas del orquestador y tiempo hasta todos trabajando
@@ -221,7 +222,7 @@ MEMORIA COMPARTIDA (la usan los agentes por MCP; ver docs/ade-ags/SHARED_MEMORY.
                                               Lo aprobado del workspace y de la misión;
                                               lo que se propone espera aprobación.
   memory index                              Índice aprobado de la tab o misión actual
-  memory open <camino>                       Proyección aprobada, solo lectura y UNTRUSTED DATA
+  memory open <página|entryId|clave>         Página del índice o UNA entrada entera (UNTRUSTED DATA)
   swarm note|question <texto>                Datos de sesión de la misión, no memoria durable
   swarm promote <note-id> <key>              Propone la nota; aprobación exclusiva del usuario
   memory export                             Exporta Markdown y revisiones JSON del workspace de la tab (solo lectura)
@@ -287,6 +288,11 @@ fn main() -> ExitCode {
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" || args[0] == "help" {
         eprint!("{USAGE}");
         return ExitCode::from(if args.is_empty() { EXIT_USAGE } else { EXIT_OK });
+    }
+    // `ags tab --help`, `ags mission create --help`: ayuda, no un comando que viaja a la app.
+    if args[0] != "mcp" && args.iter().any(|a| a == "--help") {
+        eprint!("{USAGE}");
+        return ExitCode::from(EXIT_OK);
     }
     if args[0] == "--version" || args[0] == "-V" {
         let mut version = ade_ags_lib::build_info::current();
@@ -394,6 +400,10 @@ fn main() -> ExitCode {
                 return execute_standalone_redeliver(&parsed);
             }
             println!("{}", json!({ "error": err }));
+            // Un argumento obligatorio que falta es un error de USO (2), no un comando que falló (1).
+            if err.starts_with("Falta el argumento --") {
+                return ExitCode::from(EXIT_USAGE);
+            }
             ExitCode::from(EXIT_COMMAND_FAILED)
         }
         Err(e) => {
@@ -442,7 +452,9 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
     let home = dirs::home_dir().ok_or("Não foi possível localizar a pasta do usuário.")?;
     std::fs::create_dir_all(home.join(".ags")).map_err(|e| e.to_string())?;
     let conn = rusqlite::Connection::open(home.join(".ags/data.db")).map_err(|e| e.to_string())?;
-    conn.execute_batch("PRAGMA busy_timeout=5000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
+    // 30 s e não 5: o app grava em WAL ao mesmo tempo, e um "database is locked" aqui jogava
+    // fora um verde já obtido (a próxima chamada rodava a suíte de novo).
+    conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
     // Additive DDL only: the standalone CLI never migrates or downgrades the app DB.
     test_runner::migrate(&conn).map_err(|e| e.to_string())?;
     if command == "test.status" { return Ok((test_runner::status(&conn,&root)?,true)); }
@@ -460,13 +472,37 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
         let skipped = ["frontend","rust","tsc","babel"].iter().filter(|s| !suites.contains(**s)).count();
         let now = chrono::Utc::now().timestamp_millis();
         test_runner::record_span(&conn,mission.as_deref(),&actor,"affected","",now,now,false,skipped)?;
+        // O cargo (o passo lento) corre numa thread própria, com a sua conexão, enquanto babel,
+        // tsc e vitest correm aqui em série. Antes era tudo em fila: o tempo do cargo somava ao
+        // dos outros. Cada thread para no primeiro passo que falha dela.
+        let (rust_steps, quick_steps): (Vec<_>, Vec<_>) = commands.iter().cloned().partition(|step| step.suite == "rust");
+        let rust_thread = (!rust_steps.is_empty()).then(|| {
+            let (db, root, mission, actor) = (home.join(".ags/data.db"), root.clone(), mission.clone(), actor.clone());
+            std::thread::spawn(move || -> Result<Vec<test_runner::RunResult>, String> {
+                let conn = rusqlite::Connection::open(db).map_err(|e| e.to_string())?;
+                conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
+                let mut out = Vec::new();
+                for step in &rust_steps {
+                    let result = test_runner::run(&conn,&root,&step.suite,std::slice::from_ref(step),force,mission.as_deref(),&actor)?;
+                    let ok = result.passed;
+                    out.push(result);
+                    if !ok { break; }
+                }
+                Ok(out)
+            })
+        });
         let mut results = Vec::new();
         let mut passed = true;
-        for step in &commands {
+        for step in &quick_steps {
             let result = test_runner::run(&conn,&root,&step.suite,std::slice::from_ref(step),force,mission.as_deref(),&actor)?;
             passed &= result.passed;
             results.push(result);
             if !passed { break; }
+        }
+        if let Some(thread) = rust_thread {
+            let rust = thread.join().map_err(|_| "o passo de Rust terminou com pânico".to_string())??;
+            passed &= rust.iter().all(|result| result.passed);
+            results.extend(rust);
         }
         return Ok((json!({"results":results,"passed":passed,"full":plan.full,"risk":plan.risk,"unmapped":plan.unmapped,"ignored":plan.ignored,"skippedAffected":skipped}),passed));
     }

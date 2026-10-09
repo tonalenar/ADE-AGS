@@ -172,7 +172,9 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
         <Pill label={t("canvas.routines.hint")} active={panel === "routines"} onClick={() => onTogglePanel("routines")}><ClockIcon /></Pill>
         <Pill label={t("canvas.dock.layers")} active={panel === "layers"} onClick={() => onTogglePanel("layers")}><LayersIcon /></Pill>
         <Sep />
-        <Pill label={t("canvas.dock.usage")} active={usageOpen} onClick={toggleUsage} className="gap-1 px-2">
+        <Pill label={t("canvas.dock.usage")} active={usageOpen && panel === null}
+          // Com outro painel aberto o de Uso não aparece: o clique fecha o outro e mostra o de Uso.
+          onClick={() => { if (panel !== null) { onTogglePanel(panel); setUsageOpen(true); } else toggleUsage(); }} className="gap-1 px-2">
           <Ring percent={rings.claude} color={RING_COLORS.claude} />
           <Ring percent={rings.codex} color={RING_COLORS.codex} />
           {rings.antigravity !== null && <Ring percent={rings.antigravity} color={RING_COLORS.gemini} />}

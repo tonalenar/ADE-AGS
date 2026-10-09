@@ -40,7 +40,9 @@ import { DuplicateMissionDialog } from "./DuplicateMissionDialog";
 import { findDuplicateMission } from "./duplicates";
 import { MissionReviewPanel } from "./MissionReviewPanel";
 import { MissionFinishDialog } from "./MissionFinishDialog";
-import { DeliveryCard, MissionMetricsCard, MissionTeamCard, capitalize, formatActive, prLabel, prUrl } from "./MissionOverview";
+import { DeliveryCard, MissionMetricsCard, MissionTeamCard, capitalize, formatActive, formatUsd, prLabel, prUrl } from "./MissionOverview";
+import i18n from "@/i18n";
+import { useUiStore } from "@/app/uiStore";
 import { agentTile } from "@/features/agents/agentTile";
 import * as missionIpc from "./ipc";
 import {
@@ -105,6 +107,14 @@ export function MissionsPage() {
   const loadSquads = useSquadsStore((s) => s.load);
 
   const [selected, setSelected] = useState<string | null>(null);
+  // Pedido de fora (um rascunho clicado na lateral): escolhe a missão e limpa o pedido.
+  const missionRequest = useUiStore((s) => s.missionRequest);
+  useEffect(() => {
+    if (!missionRequest) return;
+    setSelected(missionRequest);
+    setFleet(false);
+    useUiStore.getState().requestMission(null);
+  }, [missionRequest]);
   // Busca da lista (prancheta 2): filtra só o que aparece, por título e objetivo.
   const [query, setQuery] = useState("");
   // Filtro por grupo (os chips sob a busca), grupos recolhidos e grupos abertos por inteiro.
@@ -274,7 +284,7 @@ export function MissionsPage() {
               <input ref={searchRef} value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("missions.search")}
                 aria-label={t("missions.search")}
                 className="min-w-0 flex-1 bg-transparent text-[13px] text-gray-900 dark:text-gray-100 placeholder:text-gray-400 dark:placeholder:text-gray-500 outline-none" />
-              {query && <button type="button" onClick={() => setQuery("")} aria-label={t("btn.clear", { defaultValue: "Limpar" })}
+              {query && <button type="button" onClick={() => setQuery("")} aria-label={t("btn.clear")}
                 className="flex h-4 w-4 items-center justify-center rounded-full bg-gray-400/60 text-[10px] text-white">×</button>}
               {!query && <kbd className="shrink-0 rounded-[5px] bg-black/[0.06] dark:bg-surface-overlay px-1.5 py-0.5 font-mono text-[11px] leading-[14px] text-gray-500 dark:text-white/60 shadow-[0_1px_0_rgba(0,0,0,0.4)]">{SEARCH_KEY}</kbd>}
             </label>
@@ -293,7 +303,7 @@ export function MissionsPage() {
                 </button>
               ))}
             </div>
-            {shownGroups.length === 0 && <p className="mt-6 px-2 text-center text-[12.5px] text-gray-400 dark:text-white/35">{t("missions.noResults")}</p>}
+            {loaded && shownGroups.length === 0 && <p className="mt-6 px-2 text-center text-[12.5px] text-gray-400 dark:text-white/35">{t("missions.noResults")}</p>}
             {shownGroups.map((group) => (
               <div key={group.key} className="mt-[14px] flex flex-col gap-0.5">
                 <button type="button" onClick={() => setCollapsed((c) => ({ ...c, [group.key]: !c[group.key] }))} aria-expanded={group.open}
@@ -347,7 +357,8 @@ export function MissionsPage() {
           ) : (
             workspaceId ? (
               <div className="flex flex-col gap-4 p-5">
-                <p className="text-[12px] text-gray-400 dark:text-white/35">{t("missions.pick")}</p>
+                {/* Com uma missão escolhida e o detalhe ainda a caminho não se pede "escolha uma". */}
+                {!selected && <p className="text-[12px] text-gray-400 dark:text-white/35">{t("missions.pick")}</p>}
                 <SharedMemoryPanel
                   key={`${workspaceId}-${focusNonce}`}
                   workspaceId={workspaceId}
@@ -692,7 +703,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
           label={t("missions.detail.budget")}
           value={mission.budgetUsd !== null ? `$${mission.budgetUsd.toFixed(2)}` : t("missions.detail.noBudget")}
         />
-        <Stat label={t("missions.detail.spent")} value={`$${summary.spentUsd.toFixed(3)}`} />
+        <Stat label={t("missions.detail.spent")} value={formatUsd(summary.spentUsd, i18n.language, 3)} />
       </dl>
 
       {run?.squadName ? (
@@ -862,7 +873,7 @@ function TaskRow({ task, tasks, accountLabel, blocked, approval, focused, onDeci
           {task.agentId}{task.model ? ` · ${task.model}` : ""}{task.accountId ? ` · ${accountLabel(task.accountId, false)}` : ""}
         </span>
         <span className="shrink-0 text-[10.5px] text-gray-500 dark:text-white/45">{t(`missions.state.${state}`)}</span>
-        {task.costUsd !== null && <span className="shrink-0 tabular-nums text-[10.5px] text-gray-400">${task.costUsd.toFixed(3)}</span>}
+        {task.costUsd !== null && <span className="shrink-0 tabular-nums text-[10.5px] text-gray-400">{formatUsd(task.costUsd, i18n.language, 3)}</span>}
       </span>
       {deps.length > 0 && (
         <span className="pl-3.5 text-[10.5px] text-gray-400 dark:text-white/35">{t("missions.detail.dependsOn", { deps: deps.join(", ") })}</span>

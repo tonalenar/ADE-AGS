@@ -8,7 +8,9 @@ use tauri::{AppHandle, Emitter};
 
 struct PtySession {
     master: Box<dyn MasterPty + Send>,
-    writer: Box<dyn Write + Send>,
+    /// Próprio cadeado: escrever num PTY cuja TUI parou de ler pode bloquear, e isso não pode
+    /// segurar o registro inteiro (todas as outras terminais esperavam junto).
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
     killer: Box<dyn portable_pty::Child + Send>,
     /// Contenedor de ciclo de vida de la tab. Matar `killer` alcanza solo al proceso que
     /// lanzamos; esto se lleva además a toda su descendencia (ver `containment`).
@@ -131,6 +133,30 @@ fn buffers() -> MutexGuard<'static, HashMap<u32, PtyBuffer>> {
 #[derive(Serialize, Deserialize, Clone)]
 pub struct PtyDataPayload {
     pub data: String,
+    /// Posição no fluxo do processo (bytes totais lidos até o fim deste pedaço). Com ela, quem
+    /// escuta depois do início pede `pty_snapshot` e descarta o que o snapshot já trouxe, em
+    /// vez de perder (ou repetir) a saída que saiu antes de o ouvinte existir. Os avisos do app
+    /// (`display_notice`) não pertencem ao fluxo e vão sem posição.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub end: Option<u64>,
+}
+
+/// O scrollback acumulado e o total de bytes que ele representa (a mesma régua de `end`).
+#[derive(Serialize)]
+pub struct PtySnapshot {
+    pub data: String,
+    pub total: u64,
+}
+
+/// O que o processo já escreveu, com a posição exata do fluxo em que o snapshot foi tirado.
+/// Erro se o PTY já terminou (o frontend então não espera mais saída).
+#[tauri::command]
+pub fn pty_snapshot(id: u32) -> Result<PtySnapshot, String> {
+    if !registry().contains_key(&id) {
+        return Err(format!("PTY session {id} not found"));
+    }
+    let (bytes, total) = copy_scrollback_bytes(id).unwrap_or_default();
+    Ok(PtySnapshot { data: String::from_utf8_lossy(&bytes).into_owned(), total })
 }
 
 #[derive(Serialize, Deserialize, Clone)]
@@ -675,10 +701,10 @@ pub async fn pty_create(
     group.adopt(&*child);
     let root_pid = child.process_id();
 
-    let writer = pair
+    let writer = Arc::new(Mutex::new(pair
         .master
         .take_writer()
-        .map_err(|e| format!("Failed to get PTY writer: {e}"))?;
+        .map_err(|e| format!("Failed to get PTY writer: {e}"))?));
 
     let mut reader = pair
         .master
@@ -735,17 +761,19 @@ pub async fn pty_create(
         // hasta 16 veces más — cada uno es un JSON y un `eval` en el webview.
         let mut buf = vec![0u8; 64 * 1024];
         let mut text = Utf8Stream::default();
+        let mut stream_end = 0u64;
         loop {
             match reader.read(&mut buf) {
                 Ok(0) => break,
                 Ok(n) => {
                     append_to_buffer(id, &buf[..n]);
+                    stream_end += n as u64;
                     // Modo push del orquestador (Fase 9): si nadie observa esta tab, esto
                     // es una lectura atómica y vuelve.
                     crate::orchestrator::watch::observe(id, &buf[..n]);
                     let data = text.push(&buf[..n]);
                     if !data.is_empty() {
-                        app_clone.emit(&event_name, PtyDataPayload { data }).ok();
+                        app_clone.emit(&event_name, PtyDataPayload { data, end: Some(stream_end) }).ok();
                     }
                 }
                 Err(_) => break,
@@ -753,7 +781,7 @@ pub async fn pty_create(
         }
         let rest = text.finish();
         if !rest.is_empty() {
-            app_clone.emit(&event_name, PtyDataPayload { data: rest }).ok();
+            app_clone.emit(&event_name, PtyDataPayload { data: rest, end: Some(stream_end) }).ok();
         }
         // Se recoge el estado real del hijo antes de avisar al frontend. Sin este `wait`
         // el proceso queda además como zombie hasta que muere la app, porque nadie
@@ -839,17 +867,19 @@ pub fn scrollback_of(id: u32) -> Option<(String, u64)> {
 /// Escribe al PTY desde código Rust (servidor IPC). `pty_write` es la versión `async`
 /// que expone el mismo comportamiento al frontend vía invoke.
 pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {
-    let mut registry = registry();
-    let session = registry.get_mut(&id).ok_or_else(|| format!("PTY session {id} not found"))?;
-    session.writer.write_all(data.as_bytes()).map_err(|e| format!("PTY write error: {e}"))?;
-    session.writer.flush().map_err(|e| format!("PTY flush error: {e}"))
+    // Pega o escritor e SOLTA o registro antes de escrever: um write bloqueado (TUI travada,
+    // colagem grande) só espera ele mesmo.
+    let writer = registry().get(&id).map(|session| session.writer.clone()).ok_or_else(|| format!("PTY session {id} not found"))?;
+    let mut writer = writer.lock().unwrap_or_else(|e| e.into_inner());
+    writer.write_all(data.as_bytes()).map_err(|e| format!("PTY write error: {e}"))?;
+    writer.flush().map_err(|e| format!("PTY flush error: {e}"))
 }
 
 /// Display an app notice as output. Never inject it as input into an agent's TUI.
 pub fn display_notice(app:&tauri::AppHandle,tab_id:&str,message:&str) {
     let id={let reg=registry(); newest_for_tab(reg.iter().map(|(id,s)|(*id,s.tab_id.as_deref())),tab_id)};
     if let Some(id)=id {
-        let _=app.emit(&format!("pty-data-{id}"),PtyDataPayload {data:format!("\r\n{message}\r\n")});
+        let _=app.emit(&format!("pty-data-{id}"),PtyDataPayload {data:format!("\r\n{message}\r\n"),end:None});
     }
 }
 
@@ -898,7 +928,10 @@ pub async fn pty_resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
 /// Termina el proceso del PTY y limpia la sesión.
 #[tauri::command]
 pub async fn pty_kill(id: u32) -> Result<(), String> {
-    if let Some(mut session) = registry().remove(&id) {
+    // Em duas linhas de propósito: o `if let` segurava o registro durante o kill e o wait
+    // (até ~300 ms), travando todas as outras terminais a cada agente fechado.
+    let removed = registry().remove(&id);
+    if let Some(mut session) = removed {
         forget_session(&session);
         // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
         // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los

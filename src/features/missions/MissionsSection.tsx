@@ -4,6 +4,7 @@ import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
 import { AddIcon, AlertaToast, Button, Tooltip } from "neogestify-ui-components";
 
+import { useUiStore } from "@/app/uiStore";
 import { useSquadsStore } from "@/features/squads/store";
 import { useTabsStore } from "@/features/tabs/store";
 
@@ -130,7 +131,12 @@ export function MissionsSection() {
       <div
         className={`group/mission mx-1 flex items-center gap-2 pl-2.5 pr-1.5 h-7 rounded-md cursor-pointer
           ${active ? "bg-accent-500/15 ring-1 ring-inset ring-accent-500/30" : "hover:bg-gray-200/60 dark:hover:bg-white/5"}`}
-        onClick={() => (m.status === "draft" ? undefined : go(m))}
+        onClick={() => {
+          if (m.status !== "draft") return go(m);
+          // Rascunho não tem terminais: abre a página de Missões com ele escolhido.
+          useUiStore.getState().requestMission(m.id);
+          navigate("/missions");
+        }}
         title={m.objective}>
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${DOT[m.status]}`} />
         <span className={`flex-1 min-w-0 truncate text-[12px] ${active ? "font-semibold text-gray-900 dark:text-white" : "text-gray-700 dark:text-gray-300"}`}>

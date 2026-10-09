@@ -139,10 +139,17 @@ export function FileTab({ view, active, focused = active }: { view: FileView; ac
 
   useEffect(() => {
     if (!active || content?.kind !== "text") return;
+    // O `git show :arquivo` da linha de base é um processo novo: antes rodava a cada 2 s, mesmo
+    // sem mudança. Agora só quando o arquivo muda, ou a cada ~30 s (pega commits e `git add`).
+    let ticks = 0;
+    let lastSeenMtime: number | null = null;
     const id = setInterval(async () => {
       if (document.visibilityState !== "visible") return;
-      loadBaseline();
       const stat = await fileStat(view.path).catch(() => undefined);
+      ticks += 1;
+      const fileChanged = stat ? stat.mtime !== lastSeenMtime : false;
+      if (stat) lastSeenMtime = stat.mtime;
+      if (fileChanged || ticks % 15 === 0) loadBaseline();
       if (stat === undefined) return;
       if (stat === null) {
         setBanner("deleted");

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { AlertaToast, Button, FolderIcon } from "neogestify-ui-components";
 
@@ -74,6 +74,8 @@ export function NewAgentDialog({
   const [prelaunch, setPrelaunch] = useState<PrelaunchStep[]>([]);
   const [memoryBlock, setMemoryBlock] = useState(false);
   const [step, setStep] = useState<StepId>("agent");
+  // Um segundo clique em "Abrir agente" enquanto o pool ainda resolve não pode abrir outro agente.
+  const confirming = useRef(false);
 
   // Las cuentas de la TUI elegida se miran desde acá —y no solo adentro del paso— porque
   // deciden si ese paso existe: con una sola cuenta no hay nada que elegir. Se piden
@@ -127,7 +129,8 @@ export function NewAgentDialog({
   };
 
   const confirm = () => {
-    if (!agent) return;
+    if (!agent || confirming.current) return;
+    confirming.current = true;
     // `pool:Nombre` se resuelve acá, al abrir: el pool elige la cuenta con lo que se sabe ahora.
     void resolveAccountChoice(agent.id, accountId)
       .catch((e) => {
@@ -135,6 +138,7 @@ export function NewAgentDialog({
         return accountId;
       })
       .then((resolved) => {
+        confirming.current = false;
         onConfirm({ agent, skillIds, accountId: resolved, prelaunch, memoryBlock: memoryBlockFor(agent.id, memoryBlock) });
         onClose();
       });

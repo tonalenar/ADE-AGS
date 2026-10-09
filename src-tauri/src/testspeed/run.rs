@@ -11,7 +11,16 @@ use std::{
 const GIT_LIMIT: Duration = Duration::from_secs(20);
 
 fn git_raw(root: &Path, args: &[&str]) -> Result<std::process::Output, String> {
+    git_raw_with_index(root, args, None)
+}
+
+/// `index`: um `GIT_INDEX_FILE` próprio (temporário). O índice do worktree, que é de um
+/// agente trabalhando nele, nunca é tocado.
+fn git_raw_with_index(root: &Path, args: &[&str], index: Option<&Path>) -> Result<std::process::Output, String> {
     let mut cmd = crate::util::spawn::hidden_command("git");
+    if let Some(index) = index {
+        cmd.env("GIT_INDEX_FILE", index);
+    }
     // O git global desta máquina (e o de quem assina commits) não pode travar o
     // `ags test`: sem GPG/SSH, sem fsmonitor e sem editor. Os `-c` valem só
     // para este processo.
@@ -171,15 +180,53 @@ fn tracked(root: &Path, file: &str) -> Result<bool, String> {
 /// Product changes count as dirty. Untracked skill mounts do not: they are not
 /// in `HEAD^{tree}` and must not force every worktree to miss the cache.
 /// No index writes, so another agent's staging area is never changed.
+///
+/// Árvore suja: em vez de "sem cache", a identidade é a árvore do DIRETÓRIO DE TRABALHO,
+/// escrita num índice temporário (`working_tree`). Antes, quem testava antes de commitar
+/// rodava a suíte inteira sempre e o verde nunca ficava para o QA; era a maior causa de
+/// repetição (só ~11% de acerto de cache nas missões).
 pub fn clean_tree(root: &Path) -> Result<Option<String>, String> {
     if relevant_dirty(&porcelain_entries(root)?) {
-        return Ok(None);
+        // Um erro aqui (git antigo, disco cheio) volta ao comportamento seguro: sem cache.
+        return Ok(working_tree(root).ok());
     }
     let tree = git(root, &["rev-parse", "HEAD^{tree}"])?;
     if relevant_dirty(&porcelain_entries(root)?) || git(root, &["rev-parse", "HEAD^{tree}"])? != tree {
         return Ok(None);
     }
     Ok(Some(tree))
+}
+
+/// A árvore do diretório de trabalho, como `git write-tree` a veria se tudo fosse adicionado.
+/// Usa uma cópia do índice num arquivo temporário: o índice real nunca muda. Os montes de
+/// skills dos agentes (`.claude/`, `.codex/`…) ficam de fora, como em `relevant_dirty`, para
+/// que dois worktrees com o mesmo código tenham a mesma chave.
+fn working_tree(root: &Path) -> Result<String, String> {
+    let index = git(root, &["rev-parse", "--path-format=absolute", "--git-path", "index"])?;
+    // Pid + contador: dois passos em paralelo (cargo numa thread) nunca dividem o arquivo.
+    static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+    let seq = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let temp = std::env::temp_dir().join(format!("ags-test-index-{}-{}-{seq}", std::process::id(), now_ms()));
+    if Path::new(&index).is_file() {
+        std::fs::copy(&index, &temp).map_err(|e| e.to_string())?;
+    }
+    let result = (|| {
+        const AGENT_ROOTS: &[&str] = &[".agents", ".claude", ".gemini", ".codex", ".kimi", ".opencode", ".cursor/skills"];
+        let excludes: Vec<String> = AGENT_ROOTS.iter().map(|root| format!(":(exclude){root}")).collect();
+        let mut args: Vec<&str> = vec!["add", "-A", "--", "."];
+        args.extend(excludes.iter().map(String::as_str));
+        let added = git_raw_with_index(root, &args, Some(&temp))?;
+        if !added.status.success() {
+            return Err(String::from_utf8_lossy(&added.stderr).trim().to_string());
+        }
+        let written = git_raw_with_index(root, &["write-tree"], Some(&temp))?;
+        if !written.status.success() {
+            return Err(String::from_utf8_lossy(&written.stderr).trim().to_string());
+        }
+        Ok(String::from_utf8_lossy(&written.stdout).trim().to_string())
+    })();
+    let _ = std::fs::remove_file(&temp);
+    result
 }
 
 fn porcelain_entries(root: &Path) -> Result<Vec<(String, String)>, String> {
@@ -465,18 +512,25 @@ mod tests {
         root
     }
     #[test]
-    fn git_tree_rejects_untracked_staged_and_unstaged_changes() {
+    fn git_tree_follows_the_working_tree_content_staged_or_not() {
         let root = repository();
         let initial = clean_tree(&root).unwrap().unwrap();
+        // Um arquivo novo muda a identidade; apagá-lo volta à do commit.
         std::fs::write(root.join("untracked"), "two").unwrap();
-        assert_eq!(clean_tree(&root).unwrap(), None);
+        let with_untracked = clean_tree(&root).unwrap().unwrap();
+        assert_ne!(with_untracked, initial);
         std::fs::remove_file(root.join("untracked")).unwrap();
+        assert_eq!(clean_tree(&root).unwrap().unwrap(), initial);
+        // Editado: o mesmo conteúdo dá a mesma identidade, staged ou não, e o índice real não muda.
         std::fs::write(root.join("tracked"), "two").unwrap();
-        assert_eq!(clean_tree(&root).unwrap(), None);
+        let unstaged = clean_tree(&root).unwrap().unwrap();
+        assert_ne!(unstaged, initial);
+        assert!(git(&root, &["diff", "--cached", "--name-only"]).unwrap().is_empty(), "o índice do agente não pode ser tocado");
         git(&root, &["add", "tracked"]).unwrap();
-        assert_eq!(clean_tree(&root).unwrap(), None);
+        assert_eq!(clean_tree(&root).unwrap().unwrap(), unstaged);
+        // Commitar o que foi testado mantém a identidade: o verde vale para o commit.
         git(&root, &["commit", "-m", "changed"]).unwrap();
-        assert_ne!(clean_tree(&root).unwrap().unwrap(), initial);
+        assert_eq!(clean_tree(&root).unwrap().unwrap(), unstaged);
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
@@ -497,7 +551,7 @@ mod tests {
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]
-    fn execution_reuses_green_force_bypasses_and_dirty_always_runs() {
+    fn execution_reuses_green_force_bypasses_and_dirty_reuses_same_content() {
         let root = repository();
         let conn = Connection::open_in_memory().unwrap();
         migrate(&conn).unwrap();
@@ -522,12 +576,19 @@ mod tests {
                 .unwrap()
                 .cache_hit
         );
+        // Árvore suja: o primeiro roda, o segundo (mesmo conteúdo) reaproveita; mudar roda de novo.
         std::fs::write(root.join("dirty"), "dirty").unwrap();
         assert!(
             !run(&conn, &root, "probe", &commands, false, None, "")
                 .unwrap()
                 .cache_hit
         );
+        assert!(
+            run(&conn, &root, "probe", &commands, false, None, "")
+                .unwrap()
+                .cache_hit
+        );
+        std::fs::write(root.join("dirty"), "changed").unwrap();
         assert!(
             !run(&conn, &root, "probe", &commands, false, None, "")
                 .unwrap()
@@ -616,7 +677,12 @@ mod tests {
         std::fs::write(root.join("product.ts"), "export {}\n").unwrap();
         let changed = changed_files(&root).unwrap();
         assert_eq!(changed, vec!["product.ts"]);
-        assert!(clean_tree(&root).unwrap().is_none());
+        // Mudança de produto muda a identidade; os montes de skills seguem fora dela.
+        let dirty = clean_tree(&root).unwrap().unwrap();
+        assert_ne!(dirty, clean);
+        std::fs::remove_dir_all(root.join(".agents")).unwrap();
+        std::fs::remove_dir_all(root.join(".claude")).unwrap();
+        assert_eq!(clean_tree(&root).unwrap().unwrap(), dirty);
         std::fs::remove_dir_all(root).unwrap();
     }
     #[test]

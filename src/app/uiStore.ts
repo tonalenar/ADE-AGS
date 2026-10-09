@@ -28,6 +28,9 @@ interface UiState {
   settingsOpen: boolean;
   /** Pedido de abrir Contas: agora é uma seção das Configurações. */
   accountsOpen: boolean;
+  /** Pedido de abrir a página de Missões já com esta missão escolhida (a página o consome e limpa). */
+  missionRequest: string | null;
+  requestMission: (id: string | null) => void;
   /** Qual seção das Configurações está aberta. */
   settingsSection: SettingsSectionId;
   setSettingsSection: (section: SettingsSectionId) => void;
@@ -90,6 +93,8 @@ function persist(state: UiState) {
 
 export const useUiStore = create<UiState>((set, get) => ({
   ...load(),
+  missionRequest: null,
+  requestMission: (missionRequest) => set({ missionRequest }),
   settingsOpen: false,
   accountsOpen: false,
   settingsSection: "general",

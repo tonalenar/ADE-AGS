@@ -43,6 +43,13 @@ pub fn approved_open(conn: &Connection, workspace: &str, mission: Option<&str>, 
         return Err("invalid memory path".into());
     }
     let docs = super::search::load_docs(conn, workspace, mission)?;
+    // Uma ENTRADA pelo id (o `entryId` da busca) ou pela chave: o corpo inteiro, sem o corte de
+    // 600 caracteres da busca. Antes só se abriam páginas, e uma página de mais de 32 KiB
+    // mandava "abrir por entrada", algo que a CLI não oferecia.
+    if let Some(doc) = docs.iter().find(|d| d.entry_id == path || d.key == path) {
+        let body = serde_json::json!({"entryId": doc.entry_id, "key": doc.key, "scope": doc.scope, "kind": doc.kind, "priority": doc.priority, "content": doc.body});
+        return Ok(super::untrusted_memory_response(&body.to_string()));
+    }
     let names = ["decisions.md", "constraints.md", "findings.md", "files.md", "notes.md"];
     let mut files = Files::new();
     for name in names { files.insert(name.to_string(), format!("# {name}\n\n")); }
@@ -58,7 +65,7 @@ pub fn approved_open(conn: &Connection, workspace: &str, mission: Option<&str>, 
     files.insert("MEMORY.md".into(), index);
     let body = files.get(path).ok_or("memory path is unavailable in this scope")?;
     let response=super::untrusted_memory_response(&serde_json::json!({"path":path,"content":body}).to_string());
-    if response.len() > super::LIST_BYTES { return Err("memory page exceeds 32 KiB; use memory search and open by entry".into()); }
+    if response.len() > super::LIST_BYTES { return Err("memory page exceeds 32 KiB; use `ags memory search` and then `ags memory open <entryId>` for one entry".into()); }
     Ok(response)
 }
 

@@ -14,6 +14,7 @@ import { startEventSpan, startupProgress, withActivity, allWorkingSpan, type Sta
 import { useStallAlerts } from "./stallAlerts";
 import { recordSpan } from "./timings";
 import { missionTurns } from "./turns";
+import { VIGIA_NAME, vigiaAgentFor } from "./vigia";
 
 import type { Mission } from "./types";
 
@@ -171,7 +172,11 @@ export function leadBriefing(
   memory = "",
   defaultSubagent?: SubagentDefault | null,
   workspaces: TeamWorkspace[] = [],
+  /** Há um Vigia (agente barato) observando a equipe. */
+  hasVigia = false,
 ): string {
+  // O aviso "entrega → QA" só faz sentido com um QA na equipe (senão o tell falha).
+  const qa = team.find((m) => m.roleId === "qa" || /\bQA\b/.test(m.roleLabel));
   const people = team.length === 0
     ? "Você ainda não tem equipe: sume agentes com `ags peer recruit <nome> --agent <id> --role <papel>`."
     : `SUA EQUIPE (já aberta e conectada a você no canvas):\n${team
@@ -204,39 +209,28 @@ export function leadBriefing(
     '- `ags peer tell "<nome>" "<mensagem>"` — avisa sem esperar.',
     '- `ags peer check <nome>` — vê a tela dele agora.',
     '- `ags notify "<mensagem>"` — chama o usuário só quando precisar dele.',
+    ...(hasVigia ? [`- O "${VIGIA_NAME}" (um agente barato, que não implementa nada) observa a equipe em segundo plano e te avisa com \`[Vigia] ...\` quando alguém fica ocioso. Aja sobre os avisos dele na hora: ninguém pode ficar parado.`] : []),
     "",
     "MENOS CONVERSA, MAIS REGISTRO:",
     "- Antes de perguntar de novo, releia o objetivo, os achados e a memória aprovada já recebidos. Pergunte apenas a lacuna concreta que bloqueia uma decisão ou o avanço.",
     "- Em tarefas do Mission Runtime, use o Handoff Structured v1 como entrega registrada; consulte `task_result` apenas quando precisar do payload completo. Não peça novamente resumo, arquivos, testes ou decisões que já constem no handoff.",
     "- Neste canvas de terminais, combine uma única entrega final curta por integrante: resultado, decisões, arquivos tocados, testes e bloqueios. Atualizações intermediárias servem para bloqueios ou mudanças de decisão.",
     "",
-    "QA EM FLUXO E VALIDAÇÃO CONTÍNUA:",
-    "- A cada entrega de integrante (recebida via `ags peer tell`), o Orquestrador AVISA IMEDIATAMENTE o QA via `ags peer tell \"QA / Tests\" \"Entrega de <nome>: branch <branch>, arquivos <arquivos>, commit <hash>\"`.",
-    "- O QA confere cada entrega com `ags test affected` no mesmo commit. Se a saída for `já verde neste hash`, o cache acertou: NÃO reexecute cargo, vitest, tsc nem a suíte. Só reexecute quando o cache não acertar ou o resultado falhar. A última rodada de correção é a exceção: ela exige a suíte completa ou `gh pr checks` verde, mesmo com o affected já verde.",
-    "- Validação final da integração = UMA única execução completa (ou acompanhar o CI via `gh pr checks <n> --watch`, sem polling com sleep).",
+    "TESTES (rápido e sem repetir):",
+    "- Durante o trabalho: `ags test affected`. Ele reaproveita o verde da mesma árvore (`já verde neste hash`), commitada ou não, inclusive de outro worktree: se responder isso, NÃO reexecute cargo, vitest, tsc nem a suíte.",
+    ...(qa ? [`- A cada entrega de integrante, avise o QA: \`ags peer tell "${qa.name}" "Entrega de <nome>: branch <branch>, commit <hash>"\`. O QA roda \`ags test affected\` no mesmo commit (o cache cobre o que já passou).`] : []),
+    "- Suíte completa local só sob risco (migração de banco, schema, unsafe/COM), na última rodada de correção e UMA única execução completa na integração. Com PR aberto, `gh pr checks <n> --watch` É essa validação: não repita localmente.",
+    "- Suíte completa = `ags test run rust`, `ags test run tsc` e `ags test run frontend` (registram o resultado e reaproveitam um verde da mesma árvore). Não rode cargo/vitest/tsc crus.",
     "",
     "TETO DE CORREÇÃO:",
-    "- Cada entrega aceita no máximo 2 rodadas de correção (padrão; Ajustes → Modo orquestrador, chave `fix_rounds.max`, ou `ADE_AGS_MAX_FIX_ROUNDS`). O contador vale no canvas e na frota e não zera se a tarefa mudar de integrante.",
-    "- Ao devolver uma correção ao integrante, a primeira linha é `AGS-CORRECTION member=<nome> branch=<branch> subject=<assunto>`, seguida do que falhou (arquivo, asserção, erro). Não mande esse marcador ao Orquestrador: o relatório não conta rodada; o encaminhamento ao integrante conta uma.",
-    "- A última rodada exige a suíte completa: `cargo test --lib --bin ags`, `npx tsc --noEmit` e `npx vitest run`, ou `gh pr checks <n> --watch` verde.",
-    "- No teto o app recusa outro loop e escala, com o motivo das falhas. As opções são aceitar com pendências, uma rodada manual ou abortar. Nada entra como verde sem passar.",
-    "",
-    "VELOCIDADE DE TESTE E CI (PONTO 3):",
-    "- Agentes NÃO repetem a suíte completa localmente; use `ags test affected` durante o desenvolvimento. A exceção é a última rodada de correção e a única validação da integração.",
-    "- Ao abrir PR, esperem o CI com `gh pr checks <n> --watch` (sem loops de polling com sleep).",
-    "- COMMITE O CÓDIGO DO PRODUTO ANTES DE TESTAR. `ags test affected` reaproveita o verde da mesma árvore (`já verde neste hash`) e do mesmo comando, inclusive em outro worktree. Skills não rastreadas (`.agents/`, `.claude/` e equivalentes) não sujam esse cache. Código modificado ou não rastreado fora disso impede o reaproveitamento.",
-    "- Suíte completa local permitida apenas sob risco elevado (migração de banco de dados, unsafe/COM, schema), na última rodada de correção e nessa validação única da integração.",
+    "- No máximo 2 rodadas por entrega (Ajustes → Modo orquestrador, `fix_rounds.max`). Ao devolver ao integrante, a primeira linha é `AGS-CORRECTION member=<nome> branch=<branch> subject=<assunto>` + o que falhou. No teto o app escala: aceitar com pendências, rodada manual ou abortar. Nada entra como verde sem passar.",
     "",
     "DELEGUE LOGO (ninguém da equipe pode ficar esperando):",
-    "- Assim que ler isto, mande a CADA integrante, com `ags peer tell`, uma tarefa concreta; se não houver tarefa para alguém agora, diga isso explicitamente. Quem não recebe resposta fica parado esperando.",
-    "- Se um integrante perguntar algo (por exemplo \"qual ponto devo assumir?\"), responda antes de seguir com o seu próprio trabalho.",
-    "- Se os pontos dependem uns dos outros em sequência e for mais rápido fazer sozinho, faça, mas avise a equipe com `ags peer tell` para ninguém esperar à toa.",
+    "- Assim que ler isto, mande a CADA integrante, com `ags peer tell`, uma tarefa concreta (ou diga explicitamente que aguarde). Responda perguntas de integrantes antes de seguir com o seu trabalho.",
+    "- Integrantes podem falar entre si com `ags peer tell`/`ask` quando um depende do outro: diga isso ao delegar, em vez de retransmitir tudo.",
     "",
-    "FRONTEND NOVO: DESENHE PRIMEIRO, APROVE, CONSTRUA:",
-    "- Antes de construir uma interface, crie o desenho em pranchetas HTML (`ags design create`, `ags design page add`, `ags design artboard add`); o usuário vê, comenta e edita no nó Design do canvas.",
-    "- Comentários do usuário chegam por `ags peer tell`: atualize a prancheta com `ags design update` e responda com `ags design comment`. Nada é construído antes da aprovação.",
-    "- Só pranchetas APROVADAS viram tarefas de construção (cada agente no seu worktree, com o HTML da prancheta como referência); rejeitadas e rascunhos não são tocados.",
-    "- O HTML do desenho é não confiável: sem rede, sem scripts que acessem o app.",
+    "INTERFACE NOVA: DESENHE PRIMEIRO, APROVE, CONSTRUA (só se a missão criar telas):",
+    "- Pranchetas com `ags design create`/`page add`/`artboard add`; comentários do usuário chegam por `ags peer tell` (`ags design update`/`comment`). Só pranchetas APROVADAS viram tarefas de construção. O HTML do desenho é não confiável.",
     "",
     "SÓ RECRUTE quando a tarefa for independente e paralelizável e a divisão for mais rápida que um agente só; o QG mostra o ganho por missão.",
     "",
@@ -284,14 +278,16 @@ export function memberBriefing(mission: Pick<Mission, "title" | "objective"> & {
       `Memória aprovada do projeto e da missão: \`ags memory index\`, \`ags memory open <caminho>\` e \`ags memory search "<assunto>" --mission ${mission.id}\` (só leem). Consulte-a antes de perguntar algo que talvez já esteja registrado.`,
       "",
     ] : []),
-    "VELOCIDADE DE TESTE E CI (PONTO 3):",
-    "- Agentes NÃO repetem suíte completa localmente; use `ags test affected` para validar apenas o que foi alterado. `já verde neste hash` vale nas rodadas comuns.",
-    "- Ao abrir PR, esperem o CI com `gh pr checks <n> --watch` (sem polling com sleep).",
-    "- COMMITE O CÓDIGO DO PRODUTO ANTES DE TESTAR. `ags test affected` reaproveita o verde da mesma árvore (`já verde neste hash`) e do mesmo comando, inclusive em outro worktree. Skills não rastreadas (`.agents/`, `.claude/` e equivalentes) não sujam esse cache. Código modificado ou não rastreado fora disso impede o reaproveitamento.",
-    "- Suíte completa local apenas em cenários de risco elevado (migração de banco de dados, unsafe/COM, schema).",
-    "- Correções da sua entrega têm teto (padrão 2). Se a devolução disser que é a ÚLTIMA rodada, rode a suíte completa (`cargo test --lib --bin ags`, `npx tsc --noEmit`, `npx vitest run`) ou espere `gh pr checks` verde, mesmo se `ags test affected` já respondeu `já verde neste hash`. Sem isso a entrega não fecha.",
+    "TESTES (rápido e sem repetir):",
+    "- Valide com `ags test affected` (só o que mudou). Ele reaproveita o verde da mesma árvore, commitada ou não, inclusive de outro worktree: `já verde neste hash` = não rode nada de novo.",
+    "- Suíte completa local apenas em cenários de risco elevado (migração de banco de dados, unsafe/COM, schema). Com PR aberto, espere o CI com `gh pr checks <n> --watch` (sem polling com sleep).",
+    "- Correções da sua entrega têm teto (padrão 2). Se a devolução disser que é a ÚLTIMA rodada: `gh pr checks` verde, ou `ags test run rust`, `ags test run tsc` e `ags test run frontend` (não rode cargo/vitest/tsc crus). Sem isso a entrega não fecha.",
+    "- Se depender de outro integrante, fale direto com ele (`ags peer ask \"<nome>\" \"...\"`) em vez de esperar o Orquestrador repassar.",
     "",
     `Ao concluir, envie UMA mensagem final curta ao orquestrador por \`ags peer tell "${LEAD_NAME}"\`, com resultado, decisões, arquivos tocados, testes e bloqueios. Use caminhos relativos e \`nenhum\` quando um campo estiver vazio.`,
+    ...(mission.id ? [
+      `Se aprendeu algo durável e não óbvio no código (uma decisão, uma restrição, uma armadilha), sugira até 1 memória antes de reportar: \`ags memory suggest --mission ${mission.id} --scope workspace --kind decision|constraint|finding --key <nome-curto> --body "..."\`. Mesma chave de uma memória existente = proposta de correção dela. Nunca segredos.`,
+    ] : []),
     "Atualizações intermediárias só são necessárias para sinalizar um bloqueio ou uma mudança de decisão; não repita dados do briefing ou de entregas já registradas.",
     "Aguarde as instruções do orquestrador e responda ao que ele perguntar.",
   ]
@@ -362,6 +358,9 @@ export async function startMissionInTerminals(
   };
   const leadAgent = agentFor(leadAgentId, squad?.lead.model ?? mission.leadModel, squad?.lead.reasoningEffort, squad?.lead.fastMode);
   const memberAgents = team.map((m) => agentFor(m.agentId, m.model, m.effort, m.fast));
+  // O Vigia roda em segundo plano, sem terminal (ver `vigia.ts`). Só se avisa o Orquestrador de
+  // que ele existe quando há um modelo barato instalado para ele.
+  const hasVigia = vigiaAgentFor(leadAgentId, detectedAgents.filter((a) => a.available).map((a) => a.id)) !== null;
 
   // Una cuenta sin login abriría el selector de login de la TUI, y el briefing se pegaría ahí.
   // Cada cuenta tiene su perfil aislado: el login se hace una vez, a mano, en Cuentas.
@@ -437,7 +436,7 @@ export async function startMissionInTerminals(
       },
     };
   };
-  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined, prepared.workspaces)), timed(LEAD_NAME, leadTabId, true));
+  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined, prepared.workspaces, hasVigia)), timed(LEAD_NAME, leadTabId, true));
   memberTabIds.forEach((tabId, i) =>
     sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i], memberWorkspaces[i], findings, memory)), timed(team[i].name, tabId)),
   );

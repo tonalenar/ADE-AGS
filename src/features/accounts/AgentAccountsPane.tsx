@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import {
   AddIcon, Avatar, Badge, Button, EmptyState, InfoIcon, Input, Tooltip, TrashIcon, UserIcon,
@@ -91,8 +91,12 @@ function LimitsDialog({ account, limits, onClose, onSaved }: {
       maxConcurrent: concurrent.trim() ? Math.floor(Number(concurrent)) : null,
       dailyBudgetUsd: budget.trim() ? Number(budget.replace(",", ".")) : null,
     };
-    if ((next.maxConcurrent !== null && !(next.maxConcurrent >= 1)) || (next.dailyBudgetUsd !== null && !(next.dailyBudgetUsd >= 0))) {
+    if (next.maxConcurrent !== null && !(next.maxConcurrent >= 1)) {
       setError(t("settings.accounts.limits.maxConcurrentHelper"));
+      return;
+    }
+    if (next.dailyBudgetUsd !== null && !(next.dailyBudgetUsd >= 0)) {
+      setError(t("settings.accounts.limits.budgetHelper"));
       return;
     }
     setBusy(true);
@@ -257,6 +261,8 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
   const [adding, setAdding] = useState(false);
   const [loginFor, setLoginFor] = useState<AgentAccount | null>(null);
   const [deleting, setDeleting] = useState<AgentAccount | null>(null);
+  // Um segundo clique em "Remover" enquanto o primeiro ainda corre não pode disparar outra remoção.
+  const removing = useRef(false);
   const [limitsFor, setLimitsFor] = useState<AgentAccount | null>(null);
   const [error, setError] = useState("");
 
@@ -287,12 +293,14 @@ export function AgentAccountsPane({ agent }: { agent: AccountCapableAgent }) {
   }, [keys]);
 
   const handleDelete = async (deleteFiles: boolean) => {
-    if (!deleting) return;
+    if (!deleting || removing.current) return;
+    removing.current = true;
     try {
       await remove(deleting.id, deleteFiles);
     } catch (e) {
       setError(String(e));
     } finally {
+      removing.current = false;
       setDeleting(null);
     }
   };

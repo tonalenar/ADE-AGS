@@ -22,8 +22,8 @@ concurrency:
 jobs:
   test:
     runs-on: ubuntu-22.04
-    # Um run normal leva ~4 min; passar de 15 é job travado, não lento.
-    timeout-minutes: 15
+    # Um run normal leva ~4 min com cache e ~15 sem; passar de 30 é job travado, não lento.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
 

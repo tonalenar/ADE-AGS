@@ -182,13 +182,13 @@ export function CustomAgentForm({ initial, onSubmit, onCancel }: CustomAgentForm
                   <Input
                     value={key}
                     onChange={(e) => setEnvKey(key, e.target.value)}
-                    placeholder="MI_VARIABLE"
+                    placeholder={t("settings.tuis.envNamePlaceholder")}
                     variant="outline"
                   />
                   <Input
                     value={value}
                     onChange={(e) => patch({ env: { ...draft.env, [key]: e.target.value } })}
-                    placeholder="valor"
+                    placeholder={t("settings.tuis.envValuePlaceholder")}
                     variant="outline"
                   />
                   <Button

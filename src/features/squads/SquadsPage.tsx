@@ -132,9 +132,9 @@ function SquadDetail({ squad, agentLabel, accountLabel, onEdit, onDelete }: {
   onDelete: () => void;
 }) {
   const { t } = useTranslation();
-  const assignment = (agentId: string, model: string | null, accountId: string | null, autoAccount: boolean, availability: Squad["lead"]["availability"], reason: string | null) => (
+  const assignment = (agentId: string, model: string | null, accountId: string | null, autoAccount: boolean, availability: Squad["lead"]["availability"], reason: string | null, complexity: Squad["lead"]["complexity"] = null) => (
     <div className="text-[10.5px] text-gray-500 dark:text-white/45">
-      {agentLabel(agentId)} · {model ?? t("squads.providerDefault")} · {accountLabel(accountId, autoAccount)}
+      {agentLabel(agentId)} · {model ?? (complexity ? t(`fleet.complexity.${complexity}`) : t("squads.providerDefault"))} · {accountLabel(accountId, autoAccount)}
       {availability !== "available" && (
         <div className={availability === "unknown" ? "text-gray-400 dark:text-white/35" : "text-amber-700 dark:text-amber-300"}>
           {t(`squads.availability.${availability}`)}{reason ? ` · ${reason}` : ""}
@@ -157,7 +157,7 @@ function SquadDetail({ squad, agentLabel, accountLabel, onEdit, onDelete }: {
 
       <section className="rounded-xl border border-violet-300/50 dark:border-violet-400/15 bg-violet-500/5 p-3">
         <h3 className="text-[11.5px] font-semibold text-gray-800 dark:text-gray-200">{t("squads.lead")}</h3>
-        {assignment(squad.lead.agentId, squad.lead.model, squad.lead.accountId, squad.lead.autoAccount, squad.lead.availability, squad.lead.unavailableReason)}
+        {assignment(squad.lead.agentId, squad.lead.model, squad.lead.accountId, squad.lead.autoAccount, squad.lead.availability, squad.lead.unavailableReason, squad.lead.complexity)}
       </section>
 
       <section className="flex flex-col gap-2">
@@ -169,7 +169,7 @@ function SquadDetail({ squad, agentLabel, accountLabel, onEdit, onDelete }: {
               <h4 className="text-[11.5px] font-semibold text-gray-800 dark:text-gray-200">
                 {t(`squads.roleNames.${member.roleId}`, { defaultValue: member.roleId })}
               </h4>
-              {assignment(member.agentId, member.model, member.accountId, member.autoAccount, member.availability, member.unavailableReason)}
+              {assignment(member.agentId, member.model, member.accountId, member.autoAccount, member.availability, member.unavailableReason, member.complexity)}
             </div>
           </article>
         ))}

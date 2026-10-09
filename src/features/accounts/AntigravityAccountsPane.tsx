@@ -8,7 +8,8 @@ import { detectAgents } from "@/features/agents/ipc";
 export function AntigravityAccountsPane() {
   const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [installed, setInstalled] = useState(false);
+  // `null` = ainda detectando (ou a detecção falhou): não se diz "instalação necessária" sem saber.
+  const [installed, setInstalled] = useState<boolean | null>(null);
   const [error, setError] = useState("");
   useEffect(() => {
     let stale = false;
@@ -24,10 +25,10 @@ export function AntigravityAccountsPane() {
       <p className="text-xs text-gray-500">{t("accounts.antigravity.description")}</p>
       <p className="text-xs text-gray-500">{t("accounts.antigravity.scope")}</p>
       <p className="text-xs text-gray-500">{t("accounts.antigravity.multipleAccounts")}</p>
-      <Button disabled={!installed} onClick={() => setOpen(!open)}>
+      <Button disabled={installed !== true} onClick={() => setOpen(!open)}>
         {t(open ? "accounts.antigravity.close" : "accounts.antigravity.connect")}
       </Button>
-      {!installed && <p className="text-xs text-gray-500">{t("accounts.antigravity.installRequired")}</p>}
+      {installed === false && <p className="text-xs text-gray-500">{t("accounts.antigravity.installRequired")}</p>}
       {error && <p className="text-xs text-red-500">{error}</p>}
       {open && <div className="h-96 min-h-0 overflow-hidden rounded-lg border border-gray-200 dark:border-white/10">
         <Terminal command="agy" isActive />

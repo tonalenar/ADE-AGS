@@ -378,11 +378,12 @@ pub fn correction_brief(round: i64, max: i64, full_gate: bool, failure: &str) ->
     if full_gate {
         out.push_str(
             "\nEsta é a ÚLTIMA rodada. Ela termina no gate completo, com a suíte inteira, não só no teste afetado. \
-Rode e registre como passou, no resultado ou no task_handoff (tests com status passed):\n\
-- cargo test --lib --bin ags\n\
-- npx tsc --noEmit\n\
-- npx vitest run\n\
-Se já existir pull request, `gh pr checks <número> --watch` cobre esse gate. \
+Se já existir pull request, `gh pr checks <número> --watch` É o gate: não repita a suíte localmente. \
+Sem PR, rode pelo `ags` (registra o resultado e reaproveita um verde da mesma árvore) e anote como passou, \
+no resultado ou no task_handoff (tests com status passed):\n\
+- ags test run rust\n\
+- ags test run tsc\n\
+- ags test run frontend\n\
 Sem essa evidência a entrega não fecha como verde.\n",
         );
     } else {
@@ -728,7 +729,7 @@ pub fn full_gate_satisfied(result: &str, handoff: Option<&super::handoff::Struct
     rust && tsc && vitest
 }
 
-pub const MISSING_GATE: &str = "[gate completo] a última rodada de correção terminou sem a suíte completa (cargo test --lib --bin ags, tsc --noEmit e vitest run, ou gh pr checks --watch). A entrega não fecha como verde.";
+pub const MISSING_GATE: &str = "[gate completo] a última rodada de correção terminou sem a suíte completa (gh pr checks verde, ou ags test run rust, tsc e frontend). A entrega não fecha como verde.";
 
 fn load(conn: &Connection, scope: &str, key: &str) -> Result<Ledger, String> {
     let row: Option<(i64, String, String, i64, i64, String)> = conn
@@ -1003,7 +1004,7 @@ mod tests {
         assert!(full_gate_satisfied("gh pr checks 12 --watch: pass", None));
         let brief = correction_brief(2, 2, true, "assertion falhou");
         assert!(brief.contains("ÚLTIMA"));
-        assert!(brief.contains("cargo test --lib --bin ags"));
+        assert!(brief.contains("ags test run rust"));
         assert!(brief.contains("assertion falhou"));
         assert!(!correction_brief(1, 2, false, "x").contains("ÚLTIMA"));
     }
@@ -1049,7 +1050,7 @@ mod tests {
         match second {
             CanvasOutcome::Deliver { round, full_gate, text, .. } => {
                 assert_eq!((round, full_gate), (2, true));
-                assert!(text.contains("cargo test --lib --bin ags"));
+                assert!(text.contains("ags test run rust"));
             }
             other => panic!("esperava a última rodada com gate completo: {other:?}"),
         }

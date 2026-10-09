@@ -133,8 +133,13 @@ pub fn line_adds_unsafe(added: &str) -> bool {
 
 /// Motivo de risco de um caminho, se houver. Pura.
 fn risk_reason(path: &str) -> Option<String> {
-    if path.starts_with("src-tauri/src/database/") {
-        return Some(format!("{path} (banco/schema/migração)"));
+    // Só o que muda o formato do banco é risco de suíte inteira: schema, migrações e a conexão
+    // (pragmas/WAL). Uma consulta em `database/queries` é código comum, coberto pelo módulo.
+    if let Some(rest) = path.strip_prefix("src-tauri/src/database/") {
+        let lower = rest.to_ascii_lowercase();
+        if lower.contains("schema") || lower.contains("migrat") || lower.starts_with("connection") || lower == "mod.rs" {
+            return Some(format!("{path} (banco/schema/migração)"));
+        }
     }
     let lower = path.to_ascii_lowercase();
     if lower.ends_with(".sql") || lower.ends_with(".schema.json") || lower.contains("/schema/") || lower.ends_with("/schema.rs") {
@@ -198,7 +203,12 @@ fn classify(path: &str) -> Kind {
             _ => Kind::Unmapped,
         };
     }
-    if path.starts_with("docs/") || path.starts_with("skills/") || path.starts_with("public/") {
+    // CI, editor e atributos do git não mudam o produto: não são motivo para a suíte inteira.
+    // (O CI roda de qualquer jeito no PR.)
+    if path.starts_with("docs/") || path.starts_with("skills/") || path.starts_with("public/")
+        || path.starts_with(".github/") || path.starts_with(".vscode/")
+        || path == ".gitattributes" || path == ".editorconfig"
+    {
         return Kind::Ignored;
     }
     if !path.contains('/') {

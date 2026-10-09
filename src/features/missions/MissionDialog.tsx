@@ -104,7 +104,7 @@ export function MissionDialog({ initial, editing, editingId, onClose, onSave }: 
     >
       <div className="flex flex-col gap-4">
         <Field label={t("missions.form.name")}>
-          <input value={form.title} onChange={(e) => set("title", e.target.value)} autoFocus className={FIELD} />
+          <input value={form.title} onChange={(e) => set("title", e.target.value)} autoFocus maxLength={120} className={FIELD} />
         </Field>
 
         <Field label={t("missions.form.objective")} hint={t("missions.form.objectiveHint")}>
@@ -173,7 +173,7 @@ export function MissionDialog({ initial, editing, editingId, onClose, onSave }: 
               <Row stacked label={t("missions.form.leadProviderModel")}>
                 <PopupSelect className={SELECT} aria-label={t("squads.form.provider")} value={form.agentId}
                   onChange={(event) => setForm((current) => ({ ...current, agentId: event.target.value, model: null, reasoningEffort: null, mode: "fixed", accountId: null, autoAccount: true }))}>
-                  {!agents.some((agent) => agent.agentId === form.agentId) && <option value={form.agentId}>{form.agentId} ? {t("squads.unavailable")}</option>}
+                  {!agents.some((agent) => agent.agentId === form.agentId) && <option value={form.agentId}>{form.agentId} · {t("squads.unavailable")}</option>}
                   {agents.map((agent) => <option key={agent.agentId} value={agent.agentId} disabled={providerDisabled(agent, true)}>{agent.label}{leadUnsupported(agent) ? " · " + t("squads.leadUnsupported") : ""}</option>)}
                 </PopupSelect>
                 {leadUnsupported(agents.find((agent) => agent.agentId === form.agentId)) && <Alert variant="warning">{t("squads.leadUnsupported")}</Alert>}
@@ -252,6 +252,11 @@ export function MissionDialog({ initial, editing, editingId, onClose, onSave }: 
             </Row>
           </div>
           <p className="mt-2 px-1 text-[11.5px] leading-4 text-gray-400 dark:text-white/35">{t("missions.form.draftHint")}</p>
+          {missing.length > 0 && (
+            <p className="mt-1 px-1 text-[11.5px] leading-4 text-amber-700 dark:text-amber-300">
+              {t("missions.form.missing", { fields: missing.map((field) => t(field === "title" ? "missions.form.name" : field === "objective" ? "missions.form.objective" : "missions.form.project")).join(", ") })}
+            </p>
+          )}
         </div>
 
         {error && <Alert variant="danger">{error}</Alert>}

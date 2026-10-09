@@ -1,4 +1,8 @@
+import i18next from "i18next";
 import { GAP, nextFreeBox, type Box, type Viewport } from "./geometry";
+
+/** O nome padrão de uma nota, no idioma da app (sem i18n iniciada, como em testes, "Nota"). */
+const defaultNote = (): string => (i18next.isInitialized ? i18next.t("canvas.note.defaultName") : "Nota");
 
 /** Una conexión entre dos terminales. Sin sentido: los dos lados pueden hablarse. */
 export interface CanvasEdge {
@@ -319,7 +323,7 @@ export function uniqueNoteName(board: Board, wanted: string, except?: string): s
   const taken = new Set(
     Object.entries(board.notes).filter(([id]) => id !== except).map(([, n]) => n.name.toLowerCase()),
   );
-  const base = wanted.trim() || "Nota";
+  const base = wanted.trim() || defaultNote();
   if (!taken.has(base.toLowerCase())) return base;
   for (let k = 2; ; k++) {
     const candidate = `${base} ${k}`;
@@ -330,7 +334,7 @@ export function uniqueNoteName(board: Board, wanted: string, except?: string): s
 /** El nombre por defecto de una nota: su primera línea con texto, sin `#`, cortada. */
 export function defaultNoteName(content: string): string {
   const first = content.split("\n").map((l) => l.replace(/^#+\s*/, "").trim()).find((l) => l.length > 0);
-  return first ? first.slice(0, 40) : "Nota";
+  return first ? first.slice(0, 40) : defaultNote();
 }
 
 function overlaps(a: Box, b: Box): boolean {

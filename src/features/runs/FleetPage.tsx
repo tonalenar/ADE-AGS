@@ -254,7 +254,7 @@ export function FleetPage() {
             title={t("fleet.empty.title")}
             description={t("fleet.empty.desc")}
             action={
-              <Button variant="primary" size="sm" disabled={!cwd} onClick={() => setNewOpen(true)}>
+              <Button variant="primary" size="sm" disabled={!cwd} title={!cwd ? t("fleet.new.needsFolder") : undefined} onClick={() => setNewOpen(true)}>
                 {t("fleet.new.card")}
               </Button>
             }

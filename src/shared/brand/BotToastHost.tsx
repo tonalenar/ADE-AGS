@@ -26,7 +26,7 @@ function Item({ toast, level }: { toast: BotToast; level: number }) {
       <div className={`relative max-w-[320px] rounded-2xl rounded-bl-sm border bg-white/97 dark:bg-surface-raised/97 shadow-xl px-3 py-2 ${TONE[toast.tone]}`}>
         <button
           type="button"
-          aria-label={t("common.close", { defaultValue: "Cerrar" })}
+          aria-label={t("btn.close")}
           onClick={() => dismiss(toast.id)}
           className="absolute top-1 right-1.5 text-[13px] leading-none text-gray-400 hover:text-gray-700 dark:hover:text-white"
         >

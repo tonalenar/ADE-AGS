@@ -280,8 +280,9 @@ appropriate worker. The lead never integrates or modifies files.\n\
 the configured ceiling (default 2 rounds; Settings → Orchestrator mode, key `fix_rounds.max`; \
 `ADE_AGS_MAX_FIX_ROUNDS` overrides it). The counter is per delivery: reroute, reassignment and a new \
 `task_add` for the same objective share it. When you add a correction, set `corrects` to the failed task's \
-key. The last round must run the full suite (`cargo test --lib --bin ags`, `npx tsc --noEmit`, `npx vitest run`, \
-or `gh pr checks <n> --watch`), not only affected tests. When the ceiling is hit the task escalates and stays \
+key. The last round must pass the full suite, not only affected tests: `gh pr checks <n> --watch` when a PR \
+exists (do not repeat it locally), otherwise `ags test run rust`, `ags test run tsc` and `ags test run frontend` \
+(recorded and cache-aware). When the ceiling is hit the task escalates and stays \
 failed: do not add another correction and do not treat it as done. Report the failures and the options: accept \
 with pending issues (not integrated as green), one manual extra round, or abort.\n\
 5. Share decisions every worker must follow with `fact_add` before or while they run.\n\

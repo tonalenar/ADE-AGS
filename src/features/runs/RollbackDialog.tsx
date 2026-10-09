@@ -74,7 +74,7 @@ export function RollbackDialog({ task, onClose, onDone }: { task: Task; onClose:
               {preview.tasks.map((p) => (
                 <li key={p.id} className="flex items-center gap-2 py-0.5">
                   <span className="truncate">{p.title}</span>
-                  <span className="shrink-0 text-[10.5px] text-gray-400">{p.status}</span>
+                  <span className="shrink-0 text-[10.5px] text-gray-400">{t(`fleet.rollback.status.${p.status}`, { defaultValue: p.status })}</span>
                 </li>
               ))}
             </ul>

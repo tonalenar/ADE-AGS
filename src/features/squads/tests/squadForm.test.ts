@@ -88,5 +88,6 @@ describe("Squad form", () => {
     expect(subagentDefaultIsReady(undefined)).toBe(true);
     expect(subagentDefaultIsReady({ agentId: "codex", model: null })).toBe(true);
     expect(subagentDefaultIsReady({ agentId: "  ", model: null })).toBe(false);
+    expect(subagentDefaultIsReady({ agentId: "codex", model: "" })).toBe(false);
   });
 });

@@ -91,8 +91,8 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
           <Button
             variant="primary"
             onClick={async () => {
-              await load();
-              onClose();
+              // Se recarregar a lista falhar, ainda assim se fecha: o login já foi feito.
+              try { await load(); } finally { onClose(); }
             }}
           >
             {t("settings.accounts.login.done")}
@@ -164,7 +164,7 @@ export function AddAccountDialog({ agentId, onClose }: AddAccountDialogProps) {
             onKeyDown={(e) => {
               if (e.key === "Enter" && canCreate && !busy) handleCreate();
             }}
-            placeholder="trabajo"
+            placeholder={t("settings.accounts.namePlaceholder")}
             variant="outline"
             autoFocus
             error={taken ? t("settings.accounts.add.taken") : undefined}

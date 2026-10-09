@@ -6,7 +6,7 @@ use tauri::{AppHandle, Emitter};
 use super::agents::{resolve_account_id, resolve_prelaunch_steps};
 use super::shared::{bridge_call, db};
 use crate::ipc::bridge::{ask_frontend, unwrap_frontend_result};
-use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_checked, arg_u64_opt};
+use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_checked};
 
 /// Tabs de todas las ventanas ABIERTAS, con el id de PTY vivo si lo tienen. Las tabs de
 /// ventanas cerradas (workspaces guardados) no se listan: para la CLI, "las tabs" son las
@@ -326,7 +326,56 @@ pub(super) fn submit_prompt(pty_id: u32, text: &str) -> Result<(), String> {
 
     crate::terminal::write_to_pty(pty_id, text)?;
     wait_until_quiet(pty_id, ECHO_QUIET, ECHO_MAX, false);
-    crate::terminal::write_to_pty(pty_id, "\r")
+    crate::terminal::write_to_pty(pty_id, "\r")?;
+    // Um pegado grande vira "[Pasted Content 3904 chars]" e pode engolir o Enter: a mensagem
+    // fica escrita e ninguém a recebe. O frontend já reenviava o Enter nesse caso; o backend
+    // (peer tell/ask/recruit, tab send) não. Se o marcador segue na caixa e quase nada saiu
+    // depois do Enter, manda outro — no máximo duas vezes (Enter numa caixa vazia não faz nada).
+    for _ in 0..2 {
+        let before = crate::terminal::output_total(pty_id).unwrap_or(0);
+        wait_until_quiet(pty_id, std::time::Duration::from_millis(400), std::time::Duration::from_secs(4), false);
+        let wrote = crate::terminal::output_total(pty_id).unwrap_or(0).saturating_sub(before);
+        if wrote > 400 || !paste_still_pending(pty_id) {
+            break;
+        }
+        crate::terminal::write_to_pty(pty_id, "\r")?;
+    }
+    Ok(())
+}
+
+/// O fim da saída do PTY ainda mostra um pegado na caixa de entrada?
+fn paste_still_pending(pty_id: u32) -> bool {
+    let Some((text, _)) = crate::terminal::scrollback_of(pty_id) else { return false };
+    let start = text.len().saturating_sub(4096);
+    let start = (start..=text.len()).find(|i| text.is_char_boundary(*i)).unwrap_or(text.len());
+    pending_paste_in(&crate::orchestrator::digest::strip_ansi(&text[start..]))
+}
+
+/// Pura: nas últimas linhas com texto, uma linha de prompt (>, ›, ❯) com o marcador de pegado.
+pub(super) fn pending_paste_in(screen: &str) -> bool {
+    screen
+        .lines()
+        .rev()
+        .filter(|line| !line.trim().is_empty())
+        .take(6)
+        .any(|line| {
+            let trimmed = line.trim_start();
+            (trimmed.starts_with('>') || trimmed.starts_with('›') || trimmed.starts_with('❯'))
+                && (line.contains("[Pasted Content") || line.contains("[Pasted text"))
+        })
+}
+
+#[cfg(test)]
+mod paste_tests {
+    use super::pending_paste_in;
+
+    #[test]
+    fn marker_on_the_prompt_line_is_pending_and_in_history_is_not() {
+        assert!(pending_paste_in("trabalho\n> [Pasted Content 3904 chars]\n"));
+        assert!(pending_paste_in("› [Pasted text #1 +30 lines]"));
+        assert!(!pending_paste_in("> pergunta enviada\n⏺ resposta"));
+        assert!(!pending_paste_in("  [Pasted text #1 +30 lines] (histórico)\n> "));
+    }
 }
 
 

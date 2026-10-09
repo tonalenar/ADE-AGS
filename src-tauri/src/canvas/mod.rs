@@ -275,14 +275,21 @@ pub fn team_of(boards: &Boards, tab: &str) -> BTreeSet<String> {
     seen
 }
 
-/// A quién puede hablarle `tab`. Una orquestadora, a todo su equipo; cualquier otra, solo a
-/// las conectadas directamente con ella.
+/// A quién puede hablarle `tab`. Una orquestadora, a todo su equipo; cualquier otra, a las
+/// conectadas directamente con ella y, si una de ellas es orquestadora, también al resto del
+/// equipo de esa orquestadora. Así los integrantes de una misión (topología en estrella) se
+/// hablan entre sí sin que el lead tenga que retransmitir cada pregunta.
 pub fn reachable(boards: &Boards, tab: &str) -> BTreeSet<String> {
     if is_orchestrator(boards, tab) {
-        team_of(boards, tab)
-    } else {
-        peers_of(boards, tab)
+        return team_of(boards, tab);
     }
+    let direct = peers_of(boards, tab);
+    let mut out = direct.clone();
+    for lead in direct.iter().filter(|peer| is_orchestrator(boards, peer)) {
+        out.extend(peers_of(boards, lead));
+    }
+    out.remove(tab);
+    out
 }
 
 // ── Comandos Tauri ───────────────────────────────────────────────────

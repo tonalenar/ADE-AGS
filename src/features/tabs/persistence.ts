@@ -7,7 +7,9 @@ import { saveWindowState } from "./ipc";
 import type { Tab } from "./types";
 
 const SAVE_DEBOUNCE_MS = 400;
-const SCROLLBACK_REFRESH_MS = 20_000;
+// 60 s e não 20: cada refresh pode copiar e gravar até 3 MB por aba que mudou. A cada fechamento
+// e troca de janela o scrollback já é salvo; isto só protege contra um fim abrupto do app.
+const SCROLLBACK_REFRESH_MS = 60_000;
 let debounceTimer: ReturnType<typeof setTimeout> | null = null;
 let initialized = false;
 

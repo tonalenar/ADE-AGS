@@ -132,7 +132,7 @@ function PaletteDialog() {
         id: `ws:${ws.id}`,
         group: "workspaces",
         title: ws.name,
-        subtitle: t("palette.workspaceMeta", { tabs: ws.tabCount }),
+        subtitle: t("palette.workspaceMeta", { count: ws.tabCount }),
         keywords: ["workspace"],
         icon: <StackIcon className={icon} />,
         // Já aberto em outra janela: só a traz para frente. Senão abre ao lado, sem fechar
@@ -220,6 +220,8 @@ function PaletteDialog() {
   }, [commands, query]);
 
   useEffect(() => { setCursor(0); }, [query]);
+  // A lista pode encolher sem a busca mudar (uma aba fecha, uma aprovação some): o cursor não fica no vazio.
+  useEffect(() => { setCursor((c) => (c >= results.length ? Math.max(0, results.length - 1) : c)); }, [results.length]);
 
   // A linha sob o cursor sempre visível, também navegando pelo teclado.
   useEffect(() => {

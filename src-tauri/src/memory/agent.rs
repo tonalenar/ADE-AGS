@@ -172,14 +172,23 @@ pub fn propose_for_mission(conn: &Connection, p: &AgentProposal<'_>) -> Result<P
         return Err("A proposta parece conter uma credencial (chave, token ou senha). Memória não guarda segredos: reescreva sem o valor.".into());
     }
     let short: String = p.mission_id.chars().take(8).collect();
+    // Mesma chave já ativa: a proposta é uma CORREÇÃO (update) da revisão atual, não um erro
+    // "a chave já existe". Antes o agente não tinha como corrigir uma memória desatualizada.
+    let current: Option<i64> = conn
+        .query_row(
+            "SELECT current_revision FROM memory_entries WHERE workspace_id=?1 AND scope=?2 AND key=?3 AND status='active' AND current_revision IS NOT NULL AND (?2='workspace' OR mission_id=?4)",
+            rusqlite::params![workspace_id, scope, p.key, p.mission_id],
+            |r| r.get(0),
+        )
+        .ok();
     let input = ProposalInput {
         scope: scope.into(),
         key: p.key.into(),
         kind: p.kind.into(),
         body: p.body.into(),
         priority: p.priority.clamp(0, MAX_AGENT_PRIORITY),
-        operation: "create".into(),
-        expected_revision: None,
+        operation: if current.is_some() { "update".into() } else { "create".into() },
+        expected_revision: current,
         source_fact_id: None,
         reason: Some(format!("Proposta de {} na missão {short}", p.author_name)),
         acknowledge_secret: false,
