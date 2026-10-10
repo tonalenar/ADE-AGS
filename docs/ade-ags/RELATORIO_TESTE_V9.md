@@ -40,7 +40,7 @@ O Frontend apontou ~40 valores de `es.json` iguais ao pt-BR. Os exemplos que ver
 - i18n: pt-BR, es e en com as mesmas 2846 chaves e os mesmos placeholders. Nenhuma chave crua e nenhum espanhol visível no pt-BR nas telas revisadas.
 - 0 `<button>` sem rótulo acessível.
 - `ags test smoke`: 9/9 passou, rodado no terminal do QA.
-- `peer tell --file`: o arquivo com BOM (`Set-Content -Encoding utf8`) e o em UTF-16 (`Out-File`) chegaram íntegros, com "ação, configuração, memória, revisão, coração". Conferido pelo QA no decodificador `cli.rs:898-913`; o teste unitário de BOM passou.
+- `peer tell --file` com BOM (`Set-Content -Encoding utf8`): o QA confirmou o recebimento com "ação, configuração, memória, revisão, coração" íntegros e sem BOM visível. UTF-16 (`Out-File`): o QA o decodificou pelo caminho de `cli.rs:898-913` e relatou integridade, mas o Backend ainda não tinha confirmação do recebimento pela tela do destino. Tratar o UTF-16 como verificado só no decodificador.
 
 ## 3. Suítes e cache (Backend; rodadas em paralelo, não é benchmark isolado)
 | suíte | resultado | tempo | base | dif. |
