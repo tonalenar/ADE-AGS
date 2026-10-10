@@ -83,7 +83,7 @@ pub fn get(conn: &Connection, mission_id: &str) -> Result<MissionEfficiency, Str
         )
         .optional()
         .map_err(|error| error.to_string())?
-        .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+        .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
 
     let now = now_ts();
     let current = measure(conn, mission_id, mission.1, mission.2, now)?;

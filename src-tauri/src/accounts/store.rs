@@ -19,10 +19,10 @@ use super::profiles::{read_identity, spec_for};
 pub fn validate_name(name: &str) -> Result<(), String> {
     let name = name.trim();
     if name.is_empty() {
-        return Err("El nombre no puede estar vacío".into());
+        return Err("O nome não pode estar vazio".into());
     }
     if name.len() > 40 {
-        return Err("El nombre no puede tener más de 40 caracteres".into());
+        return Err("O nome não pode ter mais de 40 caracteres".into());
     }
     if !name
         .chars()
@@ -31,7 +31,7 @@ pub fn validate_name(name: &str) -> Result<(), String> {
         return Err("Solo se permiten letras, números, '-', '_' y '.'".into());
     }
     if name.starts_with('.') || name.chars().all(|c| c == '.') {
-        return Err("El nombre no puede empezar con '.'".into());
+        return Err("O nome não pode começar com '.'".into());
     }
     const RESERVED: &[&str] = &[
         "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "lpt1", "lpt2", "lpt3",

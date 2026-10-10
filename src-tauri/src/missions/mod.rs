@@ -104,7 +104,7 @@ pub(crate) fn update(
 /// La misión con sus runs, y las tareas y los hechos del run activo.
 pub(crate) fn detail(conn: &Connection, mission_id: &str) -> Result<MissionDetail, String> {
     let mission = store::get(conn, mission_id)?
-        .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+        .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
     let runs = crate::runs::store::runs_of_mission(conn, &mission.id)?;
     let (tasks, facts) = match &mission.active_run_id {
         Some(run_id) => (
@@ -182,7 +182,7 @@ pub(crate) fn start_with_force(
             }
         }
         let mission = store::get(&conn, mission_id)?
-            .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
         let squad = mission
             .squad_id
             .as_deref()
@@ -197,7 +197,7 @@ pub(crate) fn start_with_force(
         return Err("missions.error.notStartable".into());
     }
     if !Path::new(&mission.cwd).is_dir() {
-        return Err(format!("la carpeta {} no existe", mission.cwd));
+        return Err(format!("a pasta {} não existe", mission.cwd));
     }
     if let Some(squad) = &squad {
         if !squad.available {
@@ -253,7 +253,7 @@ pub(crate) fn cancel(
     let mission = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         store::get(&conn, mission_id)?
-            .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?
+            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?
     };
     match mission.status.as_str() {
         status::DRAFT => {
@@ -277,7 +277,7 @@ pub(crate) fn cancel(
                 .ok_or("la misión corre sin run activo")?;
             cancel_run(run_id)?;
         }
-        other => return Err(format!("la misión ya terminó ({other})")),
+        other => return Err(format!("a missão já terminou ({other})")),
     }
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::get(&conn, mission_id)?.ok_or_else(|| "la misión se perdió".to_string())
@@ -497,12 +497,12 @@ pub fn mission_start_terminals(app: AppHandle, mission_id: String, force: Option
     mark_test_now(&app, &mission_id, is_test)?;
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let mission = store::get(&conn, &mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+        let mission = store::get(&conn, &mission_id)?.ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
         if mission.status != status::DRAFT && mission.status != status::FAILED {
-            return Err(format!("la misión ya está en estado '{}'", mission.status));
+            return Err(format!("a missão já está no estado '{}'", mission.status));
         }
         if !store::mark_started_terminals(&conn, &mission_id)? {
-            return Err("la misión cambió de estado mientras tanto".into());
+            return Err("a missão mudou de estado nesse meio-tempo".into());
         }
     }
     notify(&app, &mission_id);
@@ -550,9 +550,9 @@ pub async fn mission_finish_terminals(
     let cwd = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let mission = store::get(&conn, &mission_id)?
-            .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
         if mission.status != status::RUNNING || mission.active_run_id.is_some() {
-            return Err("Solo se termina a mano una misión en terminales que está corriendo.".into());
+            return Err("Só se finaliza à mão uma missão em terminais que esteja rodando.".into());
         }
         mission.cwd
     };
@@ -564,7 +564,7 @@ pub async fn mission_finish_terminals(
     {
         let conn = db.lock().map_err(|e| e.to_string())?;
         if !store::finish_terminals(&conn, &mission_id, &evidence)? {
-            return Err("Solo se termina a mano una misión en terminales que está corriendo.".into());
+            return Err("Só se finaliza à mão uma missão em terminais que esteja rodando.".into());
         }
     }
     crate::decisions::observe_mission(db.clone(), &mission_id, &evidence);
@@ -602,7 +602,7 @@ pub fn redeliver_now(
     let cwd = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let mission = store::get(&conn, mission_id)?
-            .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+            .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
         mission.cwd
     };
     let conn = db.lock().map_err(|e| e.to_string())?;
@@ -664,7 +664,7 @@ pub(crate) fn timings_of(conn: &Connection, mission_id: &str) -> Result<MissionT
         .query_row("SELECT started_at, ended_at FROM missions WHERE id = ?1", [mission_id], |row| Ok((row.get(0)?, row.get(1)?)))
     {
         Ok(times) => times,
-        Err(rusqlite::Error::QueryReturnedNoRows) => return Err(format!("no hay ninguna misión con id {mission_id}")),
+        Err(rusqlite::Error::QueryReturnedNoRows) => return Err(format!("não há nenhuma missão com o id {mission_id}")),
         Err(e) => return Err(e.to_string()),
     };
     let turn_ms = efficiency::turn_ms(&spans);
@@ -697,7 +697,7 @@ pub fn mission_efficiency(app: AppHandle, mission_id: String) -> Result<MissionE
 /// O texto do briefing com o que o repositório e as missões anteriores já dizem sobre o
 /// objetivo (ver `precheck`). Vazio se não há nada a dizer.
 pub(crate) fn precheck_text(conn: &Connection, mission_id: &str) -> Result<String, String> {
-    let mission = store::get(conn, mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+    let mission = store::get(conn, mission_id)?.ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
     Ok(precheck::render(&precheck::run(conn, &mission.id, &mission.cwd, &mission.objective)))
 }
 
@@ -719,7 +719,7 @@ pub async fn mission_precheck(app: AppHandle, mission_id: String) -> Result<Stri
 /// El bloque de memoria aprobada (workspace + misión) para el briefing del Orquestador. Vacío si
 /// no hay nada. Solo lee.
 pub(crate) fn memory_context_text(conn: &Connection, mission_id: &str) -> Result<String, String> {
-    let mission = store::get(conn, mission_id)?.ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+    let mission = store::get(conn, mission_id)?.ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
     let docs = crate::memory::search::load_docs(conn, &mission.workspace_id, Some(&mission.id))?;
     // 10 entradas / 2.600 caracteres: cabem ~9 com o corte de 280 por corpo (antes eram ~6).
     Ok(crate::memory::search::briefing_block(&docs, &mission.id, &mission.objective, 10, 2_600))

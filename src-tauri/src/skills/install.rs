@@ -24,7 +24,7 @@ use super::types::{
 pub fn preview_skill_metadata(source_file: String) -> Result<SkillPreview, String> {
     let (file, folder) = resolve_skill_file(&source_file)?;
     let Some((meta, _content)) = scan_skill_file(&file) else {
-        return Err(format!("No se pudo leer {source_file}"));
+        return Err(format!("Não foi possível ler {source_file}"));
     };
     let folder_name = folder
         .file_name()
@@ -138,7 +138,7 @@ pub(crate) fn install_skill_internal(
 
     let (file, source) = resolve_skill_file(source_file)?;
     let Some((parsed_meta, original_content)) = scan_skill_file(&file) else {
-        return Err(format!("No se pudo leer {source_file}"));
+        return Err(format!("Não foi possível ler {source_file}"));
     };
 
     // Si el usuario completó metadata faltante en el formulario de instalación, esos
@@ -360,7 +360,7 @@ pub(crate) fn update_installed(
 ) -> Result<SkillInfo, String> {
     let (file, source) = resolve_skill_file(source_file)?;
     let Some((parsed_meta, original_content)) = scan_skill_file(&file) else {
-        return Err(format!("No se pudo leer {source_file}"));
+        return Err(format!("Não foi possível ler {source_file}"));
     };
     let meta: SkillFrontmatter = match overrides {
         Some(o) => o.into(),

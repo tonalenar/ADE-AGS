@@ -62,13 +62,13 @@ pub fn hint(key: &str) -> String {
 /// el header que arma la CLI) y de un largo razonable.
 pub fn validate_key(key: &str) -> Result<(), String> {
     if key.len() < 8 {
-        return Err("La API key es demasiado corta".into());
+        return Err("A chave da API é curta demais".into());
     }
     if key.len() > 512 {
-        return Err("La API key es demasiado larga".into());
+        return Err("A chave da API é longa demais".into());
     }
     if key.chars().any(|c| c.is_whitespace() || c.is_control()) {
-        return Err("La API key no puede tener espacios ni saltos de línea".into());
+        return Err("A chave da API não pode ter espaços nem quebras de linha".into());
     }
     Ok(())
 }
@@ -76,15 +76,15 @@ pub fn validate_key(key: &str) -> Result<(), String> {
 /// Un endpoint compatible: HTTPS, o HTTP solo hacia esta máquina (un proxy local). Por un
 /// endpoint cualquiera en HTTP la key viajaría en claro.
 pub fn validate_base_url(raw: &str) -> Result<String, String> {
-    let url = url::Url::parse(raw.trim()).map_err(|_| format!("'{raw}' no es una URL válida"))?;
+    let url = url::Url::parse(raw.trim()).map_err(|_| format!("'{raw}' não é uma URL válida"))?;
     let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
     match url.scheme() {
         "https" => {}
         "http" if local => {}
-        _ => return Err("El endpoint tiene que ser HTTPS (o HTTP hacia localhost)".into()),
+        _ => return Err("O endpoint precisa ser HTTPS (ou HTTP para localhost)".into()),
     }
     if !url.username().is_empty() || url.password().is_some() {
-        return Err("La URL no puede llevar usuario ni contraseña: la key va aparte".into());
+        return Err("A URL não pode ter usuário nem senha: a chave vai à parte".into());
     }
     Ok(url.as_str().trim_end_matches('/').to_string())
 }

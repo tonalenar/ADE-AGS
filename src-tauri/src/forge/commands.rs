@@ -127,7 +127,7 @@ pub async fn forge_add_token(
     let host = normalize_host(&host)?;
     let token = token.trim().to_string();
     if token.is_empty() {
-        return Err("Falta el token".to_string());
+        return Err("Falta o token".to_string());
     }
     let username = username.map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
     let user = if kind.has_api() {

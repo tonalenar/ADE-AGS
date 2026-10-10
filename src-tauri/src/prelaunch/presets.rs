@@ -9,10 +9,10 @@ use crate::util::now_ts;
 /// nombrar desde `ags --pre-preset`.
 pub fn validate_preset(name: &str, command: &str) -> Result<(), String> {
     if name.trim().is_empty() {
-        return Err("El nombre no puede estar vacío".into());
+        return Err("O nome não pode estar vazio".into());
     }
     if command.trim().is_empty() {
-        return Err("El comando no puede estar vacío".into());
+        return Err("O comando não pode estar vazio".into());
     }
     Ok(())
 }

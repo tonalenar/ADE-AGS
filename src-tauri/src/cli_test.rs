@@ -555,3 +555,21 @@ fn peer_messages_from_a_file_land_in_the_text_field_without_shell_quotes() {
     assert_eq!(text_field("swarm.note"), "body");
     std::fs::remove_file(path).unwrap();
 }
+
+#[test]
+fn o_arquivo_perde_o_bom_do_powershell_e_o_resto_fica_intacto() {
+    let text = "Linha 1: \"aspas\", ação, $HOME e `crase`";
+    // UTF-8 com BOM (Set-Content -Encoding utf8 no PowerShell 5).
+    let mut with_bom = vec![0xEF, 0xBB, 0xBF];
+    with_bom.extend_from_slice(text.as_bytes());
+    assert_eq!(decode_text_file(&with_bom).unwrap(), text);
+    // UTF-16 LE e BE com BOM (Out-File padrão).
+    let le: Vec<u8> = [0xFF, 0xFE].into_iter().chain(text.encode_utf16().flat_map(|u| u.to_le_bytes())).collect();
+    let be: Vec<u8> = [0xFE, 0xFF].into_iter().chain(text.encode_utf16().flat_map(|u| u.to_be_bytes())).collect();
+    assert_eq!(decode_text_file(&le).unwrap(), text);
+    assert_eq!(decode_text_file(&be).unwrap(), text);
+    // Sem BOM nada muda, e bytes inválidos continuam sendo erro.
+    assert_eq!(decode_text_file(text.as_bytes()).unwrap(), text);
+    assert!(decode_text_file(&[0xFF, 0x41]).is_err());
+    assert_eq!(decode_text_file(b"").unwrap(), "");
+}

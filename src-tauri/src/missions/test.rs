@@ -485,7 +485,7 @@ fn una_mision_arrancada_solo_cambia_el_titulo() {
         },
     )
     .unwrap_err();
-    assert!(e.contains("solo se le puede cambiar el título"), "{e}");
+    assert!(e.contains("só o título pode ser alterado"), "{e}");
     let m = update(
         &conn,
         &id,
@@ -521,7 +521,7 @@ fn una_mision_terminada_tampoco_se_reconfigura() {
         },
     )
     .unwrap_err();
-    assert!(e.contains("solo se le puede cambiar el título"), "{e}");
+    assert!(e.contains("só o título pode ser alterado"), "{e}");
 }
 
 // ── Arrancar ────────────────────────────────────────────────────
@@ -656,7 +656,7 @@ fn una_carpeta_que_no_existe_frena_antes_de_rutear() {
         |_| panic!("no se lanza"),
     )
     .unwrap_err();
-    assert!(e.contains("no existe"), "{e}");
+    assert!(e.contains("não existe"), "{e}");
     assert_eq!(estado(&db, &id), status::DRAFT);
 }
 
@@ -1051,7 +1051,7 @@ fn una_mision_terminada_no_se_cancela() {
         },
     );
     let e = cancel(&db, &id, |_| panic!("no hay nada que parar")).unwrap_err();
-    assert!(e.contains("ya terminó"), "{e}");
+    assert!(e.contains("já terminou"), "{e}");
 }
 
 // ── Lo de antes sigue igual ─────────────────────────────────────
