@@ -25,7 +25,7 @@ Versão testada: ADE AGS 1.8.7, master `fed4b59`. Nenhum código do produto foi 
 
 ## Resultados
 - **Suítes** (Backend): rust 1362+40 testes, 10 ignorados, 127 s (linha de base ~136 s). frontend 199 arquivos/1664 testes, 23,2 s (base 18 s, +29%, com Rust rodando junto). tsc 21,3 s (base 23 s). Segunda execução de cada suíte: `cacheHit`, "já verde neste hash". `affected`: plano vazio, nada a testar.
-- **`ags test smoke`** (QA): 9/9 passos passaram.
+- **`ags test smoke`** (QA, no próprio terminal): 9 passaram, 0 pularam, 0 falharam (~45 ms): app responde, tab output, tab inexistente recusada, missão inexistente recusada, peers, índice de memória, `--file` íntegro (aspas, acentos, `$HOME`, crase), `--file` inexistente, destino inexistente recusado.
 - **CLI** (Backend): `tab list/send`, `peers`, `peer check`, `mission status/review/timings`, `memory index/search` OK. `peer tell` com destino ocupado retorna `queued:true, sent:true`; texto não visto na tela retorna `sent:false, unconfirmed:true` e libera o reenvio (QA).
 - **Dreaming:** `ags memory dream` não existe (`memory.dream` desconhecido); só há o comando interno `memory_dream_start`. Não foi possível disparar por CLI. A interface real e o erro 206 de ponta a ponta **não foram verificados**. O teste unitário `prompt_grande_do_claude_vai_pelo_stdin` passou.
 - **Shell:** abriu com prompt normal, sem tela em branco, e fechou limpo. Claude, Codex e Antigravity: PTY e CLI operando. Nenhum laço vazio de Codex observado.
@@ -34,12 +34,12 @@ Versão testada: ADE AGS 1.8.7, master `fed4b59`. Nenhum código do produto foi 
 - 13 linhas: `memory_approval` 11, `mission_gate` 2, `fleet_gate` 0, `dream_triage` 0.
 - Latência: v7 média 499 ms, máx 514 ms; geral `memory_approval` média 536 ms, máx 671 ms; `mission_gate` média 397 ms. Erros 0; nenhuma ≥ 2 s.
 - `ags memory suggest` não dispara a Laya; só a revisão pela interface (`memory/review.rs:241,338`). As 4 propostas do QA foram revisadas depois, o que gerou as linhas v7.
-- **Não verificado:** o controle positivo `senha=hunter2`. O QA relata que a proposta foi bloqueada com "credencial detectada" (Exit 1), mas não há linha da Laya para ela e o `memory suggest` não passa pela Laya, então o bloqueio veio provavelmente de outra verificação. Não atribuir à Laya.
+- **Controle positivo `senha=hunter2`:** `ags memory suggest` recusou a proposta antes de salvar (Exit 1, "A proposta parece conter uma credencial (chave, token ou senha)..."); não gerou entrada nem revisão. O QA atribui o bloqueio à Laya, mas o Backend confirma que o `memory suggest` não dispara a Laya e que não há linha dela para essa proposta; é provável que seja um detector local no próprio comando. A detecção da Laya em credencial real **não foi observada**.
 - Impacto no tempo da missão: não medido (a sombra roda em segundo plano).
 
 ## Balanço do Vigia
 - **Não foi avaliado.** O QA reporta o Vigia desligado (0 mensagens no chat); a instrução era ligá-lo, e não há confirmação de que isso tenha sido feito. Não houve cutucadas visíveis para contabilizar.
-- Mensagens recebidas nos terminais (QA, inclui probes e mensagens do Orquestrador): Orquestrador 3, Backend 4, Frontend 2, QA 2. Nenhuma atribuível ao Vigia.
+- Mensagens recebidas nos terminais (QA, inclui probes e um aviso do sistema sobre atraso do QA e mensagens do Orquestrador): Orquestrador 3, Backend 4, Frontend 2, QA 2. Nenhuma atribuível ao Vigia.
 - Texto colado sem enviar: dois casos, ambos de causa externa ao Vigia (modal Daybreak no Backend; aviso de caractere invisível no Claude).
 - Esc em popup: o Esc fechou o popup do Codex, mas o texto colado precisou de Enter manual.
 
