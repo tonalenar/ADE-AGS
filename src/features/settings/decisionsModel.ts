@@ -35,6 +35,12 @@ export function defaultDecisionSettings(): DecisionSettings {
   };
 }
 
+/** Algo mudou em relação ao que está salvo (a chave do cofre fica de fora). Pura. */
+export function isDirty(current: DecisionSettings, saved: DecisionSettings): boolean {
+  const strip = ({ keySaved: _ignored, ...rest }: DecisionSettings) => JSON.stringify(rest);
+  return strip(current) !== strip(saved);
+}
+
 export function clampTimeout(value: number): number {
   if (!Number.isFinite(value)) return 800;
   return Math.min(30_000, Math.max(50, Math.round(value)));
