@@ -293,7 +293,7 @@ fn row_for(
         ts: now_ts(),
         point: job.point.to_string(),
         provider: settings.provider.as_str().to_string(),
-        model: settings.model.clone(),
+        model: settings.provider.coerce_model(&settings.model),
         state_hash: outcome.state_hash.clone(),
         heuristic: redact(&outcome.returned, secret),
         provider_decision: outcome

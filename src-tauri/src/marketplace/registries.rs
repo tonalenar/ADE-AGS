@@ -146,7 +146,7 @@ pub fn set_registry_enabled(
 pub fn rename_registry(id: String, name: String, db: tauri::State<DbConnection>) -> Result<(), String> {
     let trimmed = name.trim();
     if trimmed.is_empty() {
-        return Err("El nombre no puede estar vacío".to_string());
+        return Err("O nome não pode estar vazio".to_string());
     }
     let conn = db.lock().map_err(|e| e.to_string())?;
     let affected = conn

@@ -129,7 +129,7 @@ async fn resolve_branch(
     let url = format!("https://api.github.com/repos/{owner}/{repo}");
     let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return Err(format!("No se pudo acceder a {owner}/{repo} ({})", resp.status()));
+        return Err(format!("Não foi possível acessar {owner}/{repo} ({})", resp.status()));
     }
     let info: GhRepoInfo = resp.json().await.map_err(|e| e.to_string())?;
     Ok(info.default_branch)
@@ -145,7 +145,7 @@ async fn fetch_raw_github(
     let url = format!("https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{path}");
     let resp = client.get(&url).send().await.map_err(|e| e.to_string())?;
     if !resp.status().is_success() {
-        return Err(format!("No se pudo descargar {path} ({})", resp.status()));
+        return Err(format!("Não foi possível baixar {path} ({})", resp.status()));
     }
     resp.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
 }
@@ -295,7 +295,7 @@ pub(super) async fn install_from_github(
 
         let skill_md = tmp_root.join("SKILL.md");
         if !skill_md.is_file() {
-            return Err("No se encontró SKILL.md tras descargar la carpeta de la skill".to_string());
+            return Err("SKILL.md não foi encontrado depois de baixar a pasta da skill".to_string());
         }
         install_skill_internal(&skill_md.to_string_lossy(), None, Some(origin), db)
     }

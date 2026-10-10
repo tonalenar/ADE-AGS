@@ -339,7 +339,7 @@ pub fn db_delete_workspace(
 
 pub fn soft_delete_workspace(conn:&Connection,workspace_id:&str)->Result<(),String> {
     if workspace_id == DEFAULT_WORKSPACE_ID {
-        return Err("No se puede eliminar el workspace por defecto".to_string());
+        return Err("Não é possível excluir o workspace padrão".to_string());
     }
 
     let open_count: i64 = conn

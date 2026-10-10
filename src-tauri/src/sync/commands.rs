@@ -194,7 +194,7 @@ pub async fn sync_now(app: AppHandle, prefs: Map<String, Value>) -> Result<SyncR
     let (account_id, url, base_rev, pending) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let (Some(account), Some(url)) = (get(&conn, "sync.account_id"), get(&conn, "sync.url")) else {
-            return Err("La sincronización no está configurada".into());
+            return Err("A sincronização não está configurada".into());
         };
         (account, url, get(&conn, "sync.base"), load_pending(&conn))
     };

@@ -51,10 +51,10 @@ pub fn load_limits(conn: &Connection, account_key: &str) -> AccountLimits {
 
 pub fn save_limits(db: &DbConnection, account_key: &str, limits: &AccountLimits) -> Result<(), String> {
     if limits.max_concurrent == Some(0) {
-        return Err("El máximo de tareas simultáneas tiene que ser al menos 1".into());
+        return Err("O máximo de tarefas simultâneas precisa ser pelo menos 1".into());
     }
     if limits.daily_budget_usd.is_some_and(|b| !b.is_finite() || b < 0.0) {
-        return Err("El presupuesto tiene que ser un número positivo".into());
+        return Err("O orçamento precisa ser um número positivo".into());
     }
     let raw = serde_json::to_string(limits).map_err(|e| e.to_string())?;
     crate::database::set_setting(db, &limits_key(account_key), &raw)

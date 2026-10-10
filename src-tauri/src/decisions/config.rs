@@ -58,6 +58,47 @@ impl ProviderKind {
         }
     }
 
+    /// Nomes aceitos no campo `model`. A Laya local e a Studio usam os checkpoints
+    /// (`multilingual`, `english`, `typed-decisions`); a Studio até aceita `jev-latest`
+    /// e ignora, mas o seletor oferece os checkpoints. O Jev exige um nome dele.
+    pub fn models(self) -> &'static [&'static str] {
+        match self {
+            Self::Jev => &["jev-latest", "jev-preview", "jev-1.13.0"],
+            Self::None | Self::LayaLocal | Self::LayaStudio | Self::Clef => {
+                &["multilingual", "english", "typed-decisions"]
+            }
+        }
+    }
+
+    /// `jev-latest` no Jev (hoje aponta para `jev-1.13.0`); `multilingual` nos outros.
+    pub fn default_model(self) -> &'static str {
+        match self {
+            Self::Jev => "jev-latest",
+            Self::None | Self::LayaLocal | Self::LayaStudio | Self::Clef => DEFAULT_MODEL,
+        }
+    }
+
+    /// Um nome que este provedor não aceita vira o padrão dele.
+    pub fn coerce_model(self, model: &str) -> String {
+        let model = model.trim();
+        if self.models().contains(&model) {
+            model.to_string()
+        } else {
+            self.default_model().to_string()
+        }
+    }
+
+    /// Caracteres de `state` que o envio pode levar. O corte de ~1.024 tokens é só da
+    /// Laya multilingual; o Jev aceita cerca de 32k e aqui fica num teto conservador.
+    pub fn state_char_budget(self) -> usize {
+        match self {
+            Self::Jev => super::protocol::JEV_STATE_CHAR_BUDGET,
+            Self::None | Self::LayaLocal | Self::LayaStudio | Self::Clef => {
+                super::protocol::STATE_CHAR_BUDGET
+            }
+        }
+    }
+
     pub fn is_configured(self) -> bool {
         !matches!(self, Self::None)
     }
@@ -136,9 +177,21 @@ pub fn load(conn: &Connection) -> Result<Settings, String> {
     settings.base_url = text(conn, KEY_BASE_URL)
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| settings.provider.default_base_url().to_string());
-    settings.model = text(conn, KEY_MODEL)
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| DEFAULT_MODEL.into());
+    let stored_model = text(conn, KEY_MODEL).filter(|value| !value.is_empty());
+    let model = settings.provider.coerce_model(
+        stored_model
+            .as_deref()
+            .unwrap_or(settings.provider.default_model()),
+    );
+    // Config já gravada com um nome do outro provedor (Jev + `multilingual`) é corrigida
+    // aqui, não só na próxima vez que alguém salvar.
+    if stored_model
+        .as_deref()
+        .is_some_and(|stored| stored != model)
+    {
+        let _ = put(conn, KEY_MODEL, &model);
+    }
+    settings.model = model;
     settings.timeout_ms = text(conn, KEY_TIMEOUT)
         .and_then(|value| value.parse().ok())
         .map(clamp_timeout)
@@ -152,7 +205,9 @@ pub fn load(conn: &Connection) -> Result<Settings, String> {
 
 pub fn persist(conn: &Connection, settings: &Settings) -> Result<(), String> {
     let base_url = normalize_base_url(&settings.base_url)?;
-    let model = normalize_model(&settings.model)?;
+    let model = settings
+        .provider
+        .coerce_model(&normalize_model(&settings.model)?);
     let rows = [
         (KEY_ENABLED, bool_text(settings.enabled)),
         (KEY_PROVIDER, settings.provider.as_str().to_string()),
@@ -165,12 +220,17 @@ pub fn persist(conn: &Connection, settings: &Settings) -> Result<(), String> {
         (KEY_MISSION, bool_text(settings.mission_gate)),
     ];
     for (key, value) in rows {
-        conn.execute(
-            "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            rusqlite::params![key, value],
-        )
-        .map_err(|error| error.to_string())?;
+        put(conn, key, &value)?;
     }
+    Ok(())
+}
+
+fn put(conn: &Connection, key: &str, value: &str) -> Result<(), String> {
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        rusqlite::params![key, value],
+    )
+    .map_err(|error| error.to_string())?;
     Ok(())
 }
 

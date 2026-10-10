@@ -4,10 +4,9 @@ import { useTranslation } from "react-i18next";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
 import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, setDecisionKey, setDecisionSettings, testDecisionConnection, type PointReport, type ShadowReport } from "@/features/settings/decisionsIpc";
-import { clampTimeout, defaultDecisionSettings, isDirty, sendsOffMachine, urlAfterProviderChange, urlHost, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
+import { clampTimeout, defaultDecisionSettings, isDirty, modelAfterProviderChange, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
 
 const PROVIDERS: DecisionProviderId[] = ["none", "laya_local", "laya_studio", "jev"];
-const MODELS = ["multilingual", "english", "typed-decisions"];
 const POINT_LABEL: Record<string, string> = {
   memory_approval: "settings.decisions.point.memory",
   dream_triage: "settings.decisions.point.dream",
@@ -65,7 +64,12 @@ export function DecisionsSection() {
 
   useEffect(() => {
     getDecisionSettings()
-      .then((loaded) => { setSettings(loaded); setSaved(loaded); })
+      .then((loaded) => {
+        // Uma config já gravada com um modelo que o provedor não aceita (Jev com multilingual) é corrigida
+        // na tela e aparece como alteração a salvar.
+        setSettings({ ...loaded, model: modelAfterProviderChange(loaded.model, loaded.provider) });
+        setSaved(loaded);
+      })
       .catch((error: unknown) => setStatus(String(error)));
     decisionShadowReport().then(setReport).catch(() => undefined);
   }, []);
@@ -81,7 +85,7 @@ export function DecisionsSection() {
         enabled: settings.enabled,
         provider: settings.provider,
         baseUrl: settings.baseUrl,
-        model: settings.model,
+        model: modelAfterProviderChange(settings.model, settings.provider),
         timeoutMs: clampTimeout(settings.timeoutMs),
         memoryApproval: settings.memoryApproval,
         dreamTriage: settings.dreamTriage,
@@ -168,7 +172,12 @@ export function DecisionsSection() {
             value={settings.provider}
             onChange={(event) => {
               const provider = event.target.value as DecisionProviderId;
-              setSettings({ ...settings, provider, baseUrl: urlAfterProviderChange(settings.baseUrl, provider) });
+              setSettings({
+                ...settings,
+                provider,
+                baseUrl: urlAfterProviderChange(settings.baseUrl, provider),
+                model: modelAfterProviderChange(settings.model, provider),
+              });
             }}
             className="min-w-44"
           >
@@ -187,11 +196,11 @@ export function DecisionsSection() {
         <SettingsRow label={t("settings.decisions.model")}>
           <PopupSelect
             aria-label={t("settings.decisions.model")}
-            value={settings.model}
+            value={modelAfterProviderChange(settings.model, settings.provider)}
             onChange={(event) => setSettings({ ...settings, model: event.target.value })}
             className="min-w-44"
           >
-            {MODELS.map((model) => <option key={model} value={model}>{model}</option>)}
+            {modelsFor(settings.provider).map((model) => <option key={model} value={model}>{model}</option>)}
           </PopupSelect>
         </SettingsRow>
         <SettingsRow label={t("settings.decisions.timeout")} hint={t("settings.decisions.timeoutHint")}>

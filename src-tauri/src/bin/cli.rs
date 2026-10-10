@@ -889,10 +889,30 @@ fn inline_file(args: Value, command: &str) -> Result<Value, String> {
     if map.contains_key(field) {
         return Err(format!("Usá --file o --{field}, no los dos"));
     }
-    let content = std::fs::read_to_string(path)
-        .map_err(|e| format!("No se pudo leer {path}: {e}"))?;
+    let bytes = std::fs::read(path).map_err(|e| format!("No se pudo leer {path}: {e}"))?;
+    let content = decode_text_file(&bytes).map_err(|e| format!("No se pudo leer {path}: {e}"))?;
     map.insert(field.to_string(), Value::String(content));
     Ok(Value::Object(map))
+}
+
+/// O texto de um arquivo, sem a marca de ordem de bytes (BOM). O PowerShell 5 grava `utf8` com BOM e
+/// `Out-File` em UTF-16: o BOM chegava ao agente como um caractere invisível, e o Claude Code parava
+/// em "Removed 1 invisible character · review and press Enter to send" sem enviar a mensagem. Pura.
+fn decode_text_file(bytes: &[u8]) -> Result<String, String> {
+    if let Some(rest) = bytes.strip_prefix(&[0xEF, 0xBB, 0xBF]) {
+        return String::from_utf8(rest.to_vec()).map_err(|e| e.to_string());
+    }
+    let utf16 = |rest: &[u8], big: bool| -> Result<String, String> {
+        let units: Vec<u16> = rest.chunks_exact(2).map(|p| if big { u16::from_be_bytes([p[0], p[1]]) } else { u16::from_le_bytes([p[0], p[1]]) }).collect();
+        String::from_utf16(&units).map_err(|e| e.to_string())
+    };
+    if let Some(rest) = bytes.strip_prefix(&[0xFF, 0xFE]) {
+        return utf16(rest, false);
+    }
+    if let Some(rest) = bytes.strip_prefix(&[0xFE, 0xFF]) {
+        return utf16(rest, true);
+    }
+    String::from_utf8(bytes.to_vec()).map_err(|e| e.to_string())
 }
 
 /// El campo que `--file` llena: el texto del comando (`text`, como `peer tell`, `tab send` o

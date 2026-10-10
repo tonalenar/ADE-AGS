@@ -19,7 +19,7 @@ pub(super) fn resolve_skill_file(source_file: &str) -> Result<(PathBuf, PathBuf)
         return Err("Selecciona un archivo SKILL.md".to_string());
     }
     if !file.is_file() {
-        return Err(format!("No se encontró el archivo {source_file}"));
+        return Err(format!("Arquivo {source_file} não encontrado"));
     }
     let folder = file
         .parent()

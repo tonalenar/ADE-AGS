@@ -335,10 +335,10 @@ pub fn accept(
         let mission = super::store::get(&conn, mission_id)?.ok_or("la misión ya no existe")?;
         let task = crate::runs::store::task_by_id(&conn, task_id)?.ok_or("la tarea ya no existe")?;
         if mission.active_run_id.as_deref() != Some(task.run_id.as_str()) {
-            return Err("la tarea no es del run actual de la misión".into());
+            return Err("a tarefa não é do run atual da missão".into());
         }
         if matches!(task.status.as_str(), "pending" | "ready" | "running") {
-            return Err("la tarea todavía no terminó".into());
+            return Err("a tarefa ainda não terminou".into());
         }
         if matches!(task.fix_status.as_str(), "escalated" | "accepted_pending" | "aborted")
             || (task.status != "done" && task.fix_round > 0)
@@ -399,7 +399,7 @@ pub fn apply(db: &crate::database::DbConnection, mission_id: &str) -> Result<Mer
     let project = Path::new(&mission.cwd);
     let root = crate::runs::worktrees::repo_root(project)?;
     if git(&root, &["symbolic-ref", "-q", "HEAD"], GIT_FAST).is_err() {
-        return Err("el proyecto está en un HEAD desprendido: cambiá a una rama antes de aplicar".into());
+        return Err("o projeto está com o HEAD solto: mude para uma branch antes de aplicar".into());
     }
     // Solo lo rastreado: un archivo nuevo que el usuario no agregó (o los symlinks de skills
     // de la app) no impide un merge, y negarse por eso no tendría sentido.

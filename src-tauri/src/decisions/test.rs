@@ -58,12 +58,70 @@ fn serve_times(status: u16, body: &str, delay: Duration, times: usize) -> String
     format!("http://{address}")
 }
 
+/// Devolve a URL e o pedido HTTP cru, para ver o `model` e o `state` que saíram.
+fn serve_capture(status: u16, body: &str) -> (String, Arc<Mutex<String>>) {
+    let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+    let address = listener.local_addr().unwrap();
+    let body = body.to_string();
+    let captured = Arc::new(Mutex::new(String::new()));
+    let slot = Arc::clone(&captured);
+    std::thread::spawn(move || {
+        let Ok((mut stream, _)) = listener.accept() else {
+            return;
+        };
+        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+        let mut buf = Vec::new();
+        let mut tmp = [0u8; 8_192];
+        let mut header_end: Option<usize> = None;
+        let mut need: Option<usize> = None;
+        loop {
+            match stream.read(&mut tmp) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    buf.extend_from_slice(&tmp[..n]);
+                    if header_end.is_none()
+                        && let Some(pos) = buf.windows(4).position(|window| window == b"\r\n\r\n")
+                    {
+                        header_end = Some(pos);
+                        let headers = String::from_utf8_lossy(&buf[..pos]);
+                        need = headers.lines().find_map(|line| {
+                            let (key, value) = line.split_once(':')?;
+                            if key.eq_ignore_ascii_case("content-length") {
+                                value.trim().parse().ok()
+                            } else {
+                                None
+                            }
+                        });
+                    }
+                    if let (Some(pos), Some(len)) = (header_end, need)
+                        && buf.len() >= pos + 4 + len
+                    {
+                        break;
+                    }
+                    if buf.len() > 2_000_000 {
+                        break;
+                    }
+                }
+            }
+        }
+        *slot.lock().unwrap() = String::from_utf8_lossy(&buf).into_owned();
+        let header = format!(
+            "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len()
+        );
+        let _ = stream.write_all(header.as_bytes());
+        let _ = stream.write_all(body.as_bytes());
+    });
+    (format!("http://{address}"), captured)
+}
+
 fn provider(base_url: &str, key: Option<&str>, timeout_ms: u64) -> SystemOneHttpProvider {
     SystemOneHttpProvider {
         base_url: base_url.into(),
         api_key: key.map(str::to_string),
         timeout: Duration::from_millis(timeout_ms),
         model: "multilingual".into(),
+        provider: ProviderKind::LayaLocal,
     }
 }
 
@@ -474,11 +532,20 @@ fn heuristica_dos_pontos_segue_as_funcoes_que_ja_decidem() {
 
 #[test]
 fn state_longo_e_cortado_antes_do_hash() {
-    let long = "á".repeat(5_000);
-    let cut = protocol::truncate_state(&long);
-    assert!(cut.len() <= protocol::STATE_CHAR_BUDGET);
-    assert!(cut.is_char_boundary(cut.len()));
-    assert_eq!(protocol::state_hash(&long), protocol::state_hash(&cut));
+    let long = "á".repeat(40_000);
+    let laya = protocol::truncate_state(&long);
+    assert!(laya.len() <= protocol::STATE_CHAR_BUDGET);
+    assert!(laya.is_char_boundary(laya.len()));
+    let jev = protocol::truncate_chars(&long, protocol::JEV_STATE_CHAR_BUDGET);
+    assert!(jev.len() <= protocol::JEV_STATE_CHAR_BUDGET);
+    assert!(jev.len() > laya.len());
+    assert!(jev.is_char_boundary(jev.len()));
+    assert_eq!(protocol::state_hash(&long), protocol::state_hash(&jev));
+    assert_ne!(
+        protocol::state_hash(&long),
+        protocol::state_hash(&laya),
+        "o que passa do corte da Laya ainda distingue a amostra do Jev"
+    );
 }
 
 #[test]
@@ -513,7 +580,6 @@ fn ajustes_padrao_ficam_desligados_e_a_url_rejeita_segredo_na_propria_url() {
         "https://api.laya.studio"
     );
 }
-
 
 fn log_rows(db: &DbConnection) -> i64 {
     db.lock()
@@ -683,7 +749,11 @@ fn o_relatorio_separa_as_perguntas_e_o_que_so_o_provedor_diz() {
         "a decisão inteira só bate em 1 de 4"
     );
 
-    let action = point.questions.iter().find(|q| q.question == "acao").unwrap();
+    let action = point
+        .questions
+        .iter()
+        .find(|q| q.question == "acao")
+        .unwrap();
     assert_eq!(action.compared, 4);
     assert!((action.agreement_rate - 0.25).abs() < 1e-9);
     assert!(
@@ -713,8 +783,14 @@ fn o_relatorio_separa_as_perguntas_e_o_que_so_o_provedor_diz() {
     assert!(secret.blind_labels.is_empty());
 
     let csv = log::export_csv(&conn).unwrap();
-    assert!(csv.contains("par,memory_approval,acao,revisar,aprovar,2"), "{csv}");
-    assert!(csv.contains(",4,true\n"), "comparadas e amostra_pequena no resumo: {csv}");
+    assert!(
+        csv.contains("par,memory_approval,acao,revisar,aprovar,2"),
+        "{csv}"
+    );
+    assert!(
+        csv.contains(",4,true\n"),
+        "comparadas e amostra_pequena no resumo: {csv}"
+    );
 }
 
 #[test]
@@ -722,7 +798,13 @@ fn a_amostra_deixa_de_ser_pequena_na_trigesima_comparacao() {
     let conn = Connection::open_in_memory().unwrap();
     log::migrate(&conn).unwrap();
     for index in 0..log::MIN_SAMPLE {
-        insert(&conn, index, "fleet_gate", "despacho=lancar", "despacho=lancar");
+        insert(
+            &conn,
+            index,
+            "fleet_gate",
+            "despacho=lancar",
+            "despacho=lancar",
+        );
     }
     let report = log::report(&conn).unwrap();
     assert!(!report.points[0].low_sample);
@@ -813,7 +895,11 @@ fn fleet_hash(db: &DbConnection, run: &Run, running: i64) -> (String, String) {
 #[test]
 fn o_estado_da_frota_so_muda_quando_a_decisao_pode_mudar() {
     let db = memory_db();
-    config::persist(&db.lock().unwrap(), &local_settings("http://localhost:8000".into())).unwrap();
+    config::persist(
+        &db.lock().unwrap(),
+        &local_settings("http://localhost:8000".into()),
+    )
+    .unwrap();
 
     let (base, state) = fleet_hash(&db, &fleet_run(Some(10.0), 0.10), 1);
     assert!(!state.contains("gasto"), "{state}");
@@ -827,7 +913,11 @@ fn o_estado_da_frota_so_muda_quando_a_decisao_pode_mudar() {
     assert_ne!(over, base);
     assert!(state.contains("orcamento: estourado"), "{state}");
     assert_ne!(fleet_hash(&db, &fleet_run(Some(10.0), 0.10), 2).0, base);
-    assert!(fleet_hash(&db, &fleet_run(None, 3.0), 1).1.contains("orcamento: sem limite"));
+    assert!(
+        fleet_hash(&db, &fleet_run(None, 3.0), 1)
+            .1
+            .contains("orcamento: sem limite")
+    );
 }
 
 #[test]
@@ -848,7 +938,10 @@ fn a_frota_so_monta_trabalho_com_o_ponto_ligado() {
         "outro ponto ligado não liga este"
     );
     config::persist(&conn, &local_settings("http://localhost:8000".into())).unwrap();
-    assert_eq!(points::fleet_jobs(&conn, &run, &tasks, 0, &[], &[]).len(), 1);
+    assert_eq!(
+        points::fleet_jobs(&conn, &run, &tasks, 0, &[], &[]).len(),
+        1
+    );
 }
 
 #[test]
@@ -884,18 +977,31 @@ fn a_fila_e_uma_so_sem_repetir_e_com_teto() {
         "a primeira entrada pede o trabalhador"
     );
     assert_eq!(queue.len(), 2, "o gêmeo não entra");
-    assert!(!queue.push(&db, vec![job("c"), job("a")], 10), "já há trabalhador");
+    assert!(
+        !queue.push(&db, vec![job("c"), job("a")], 10),
+        "já há trabalhador"
+    );
     assert_eq!(queue.len(), 3);
     queue.push(&other, vec![job("a")], 10);
-    assert_eq!(queue.len(), 4, "o mesmo texto em outro banco é outra amostra");
+    assert_eq!(
+        queue.len(),
+        4,
+        "o mesmo texto em outro banco é outra amostra"
+    );
 
     let mut small = shadow::Queue::new();
     small.push(&db, vec![job("1"), job("2"), job("3")], 2);
     assert_eq!(small.len(), 2, "o que passa do teto é descartado");
 
     assert_eq!(queue.take().len(), 4, "o trabalhador leva tudo de uma vez");
-    assert!(queue.take().is_empty(), "e a vez seguinte, vazia, o encerra");
-    assert!(queue.push(&db, vec![job("z")], 10), "livre para outro começar");
+    assert!(
+        queue.take().is_empty(),
+        "e a vez seguinte, vazia, o encerra"
+    );
+    assert!(
+        queue.push(&db, vec![job("z")], 10),
+        "livre para outro começar"
+    );
 }
 
 // ── Missão: cada uma vale uma amostra ───────────────────────────────────
@@ -945,6 +1051,197 @@ fn a_resposta_real_do_laya_serve_e_lida() {
         provider(&url, None, 1_000).decide(&sample_request()),
         7,
     );
-    assert_eq!(outcome.provider_decision.as_deref(), Some("acao=revisar;segredo=nao"));
-    assert_eq!(outcome.returned, "acao=revisar;segredo=nao", "a heurística de exemplo também diz revisar/nao");
+    assert_eq!(
+        outcome.provider_decision.as_deref(),
+        Some("acao=revisar;segredo=nao")
+    );
+    assert_eq!(
+        outcome.returned, "acao=revisar;segredo=nao",
+        "a heurística de exemplo também diz revisar/nao"
+    );
+}
+
+fn settings_db() -> Connection {
+    let conn = Connection::open_in_memory().unwrap();
+    conn.execute_batch("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);")
+        .unwrap();
+    conn
+}
+
+fn put_setting(conn: &Connection, key: &str, value: &str) {
+    conn.execute(
+        "INSERT INTO settings (key, value) VALUES (?1, ?2)",
+        [key, value],
+    )
+    .unwrap();
+}
+
+#[test]
+fn configuracao_antiga_do_jev_com_multilingual_e_corrigida_ao_carregar() {
+    let conn = settings_db();
+    put_setting(&conn, config::KEY_PROVIDER, "jev");
+    put_setting(&conn, config::KEY_MODEL, "multilingual");
+    put_setting(&conn, config::KEY_BASE_URL, "https://api.typesafe.ai");
+
+    let settings = config::load(&conn).unwrap();
+    assert_eq!(settings.provider, ProviderKind::Jev);
+    assert_eq!(settings.model, "jev-latest");
+    let stored: String = conn
+        .query_row(
+            "SELECT value FROM settings WHERE key = ?1",
+            [config::KEY_MODEL],
+            |row| row.get(0),
+        )
+        .unwrap();
+    assert_eq!(stored, "jev-latest");
+
+    // Um nome válido do provedor fica. A Laya não é reescrita para o Jev.
+    let conn = settings_db();
+    put_setting(&conn, config::KEY_PROVIDER, "jev");
+    put_setting(&conn, config::KEY_MODEL, "jev-preview");
+    assert_eq!(config::load(&conn).unwrap().model, "jev-preview");
+
+    let conn = settings_db();
+    put_setting(&conn, config::KEY_PROVIDER, "laya_studio");
+    put_setting(&conn, config::KEY_MODEL, "english");
+    assert_eq!(config::load(&conn).unwrap().model, "english");
+
+    let conn = settings_db();
+    put_setting(&conn, config::KEY_PROVIDER, "laya_local");
+    put_setting(&conn, config::KEY_MODEL, "jev-latest");
+    assert_eq!(config::load(&conn).unwrap().model, "multilingual");
+}
+
+#[test]
+fn persistir_jev_com_modelo_da_laya_grava_jev_latest() {
+    let conn = settings_db();
+    let settings = Settings {
+        provider: ProviderKind::Jev,
+        base_url: "https://api.typesafe.ai".into(),
+        model: "multilingual".into(),
+        ..Settings::default()
+    };
+    config::persist(&conn, &settings).unwrap();
+    assert_eq!(config::load(&conn).unwrap().model, "jev-latest");
+
+    let studio = Settings {
+        provider: ProviderKind::LayaStudio,
+        base_url: "https://api.laya.studio".into(),
+        model: "typed-decisions".into(),
+        ..Settings::default()
+    };
+    config::persist(&conn, &studio).unwrap();
+    assert_eq!(config::load(&conn).unwrap().model, "typed-decisions");
+}
+
+#[test]
+fn pedido_ao_jev_sai_com_jev_latest_e_state_acima_do_corte_da_laya() {
+    let (url, captured) = serve_capture(200, SUCCESS);
+    let conn = settings_db();
+    put_setting(&conn, config::KEY_PROVIDER, "jev");
+    put_setting(&conn, config::KEY_MODEL, "multilingual");
+    put_setting(&conn, config::KEY_BASE_URL, &url);
+    let settings = config::load(&conn).unwrap();
+    assert_eq!(settings.model, "jev-latest");
+
+    let mut request = sample_request();
+    request.model = "multilingual".into();
+    request.state = "á".repeat(8_000);
+    super::http::execute(&settings, None, &request).unwrap();
+
+    let raw = captured.lock().unwrap().clone();
+    assert!(
+        raw.contains("\"model\":\"jev-latest\""),
+        "o fio não pode levar multilingual: {raw}"
+    );
+    assert!(
+        !raw.contains("multilingual"),
+        "sobrou nome da Laya no pedido: {raw}"
+    );
+    let sent = raw.chars().filter(|ch| *ch == 'á').count();
+    assert_eq!(
+        sent, 8_000,
+        "o Jev recebe o state abaixo do teto de 16k tokens"
+    );
+
+    let (laya_url, laya_captured) = serve_capture(200, SUCCESS);
+    let laya = local_settings(laya_url);
+    super::http::execute(&laya, None, &request).unwrap();
+    let laya_raw = laya_captured.lock().unwrap().clone();
+    assert!(
+        laya_raw.contains("\"model\":\"multilingual\""),
+        "{laya_raw}"
+    );
+    let laya_sent = laya_raw.chars().filter(|ch| *ch == 'á').count();
+    assert_eq!(
+        laya_sent, 2_048,
+        "a Laya continua no corte de ~1.024 tokens (4.096 bytes)"
+    );
+}
+
+#[test]
+fn http_400_com_corpo_vira_mensagem_legivel_na_tela_e_no_log() {
+    let key = "super-secret-key-xyz";
+    let body = format!(
+        r#"{{"detail":{{"error_type":"api_usage_error","message":"Unknown model: multilingual {key}"}}}}"#
+    );
+    let url = serve(400, &body, Duration::ZERO);
+    let error = provider(&url, Some(key), 1_000)
+        .decide(&sample_request())
+        .unwrap_err();
+    let shown = error.code();
+    assert!(shown.contains("Unknown model: multilingual"), "{shown}");
+    assert!(shown.starts_with("http 400"), "{shown}");
+    assert!(!shown.contains(key), "{shown}");
+    assert!(shown.contains("[redacted]"), "{shown}");
+
+    let outcome = evaluate(&job_from(sample_request()), Err(error), 4);
+    let logged = outcome.error.unwrap();
+    assert!(logged.contains("Unknown model: multilingual"), "{logged}");
+    assert!(!logged.contains(key), "{logged}");
+
+    assert_eq!(
+        protocol::client_error_message(r#"{"error":{"message":"chave recusada"}}"#),
+        "chave recusada"
+    );
+    assert_eq!(
+        protocol::client_error_message(r#"{"detail":"modelo invalido"}"#),
+        "modelo invalido"
+    );
+    assert_eq!(
+        protocol::client_error_message(
+            r#"{"detail":[{"type":"missing","loc":["body","model"],"msg":"Field required"}]}"#
+        ),
+        "body.model: Field required"
+    );
+    let long = "x".repeat(500);
+    assert!(protocol::client_error_message(&format!(r#"{{"message":"{long}"}}"#)).len() <= 300);
+
+    let db = memory_db();
+    let shadow_body = format!(r#"{{"error":{{"message":"Unknown model: multilingual ({key})"}}}}"#);
+    let shadow_url = serve(400, &shadow_body, Duration::ZERO);
+    let settings = Settings {
+        provider: ProviderKind::Jev,
+        model: "multilingual".into(),
+        ..local_settings(shadow_url)
+    };
+    shadow::run_jobs_with(
+        db.clone(),
+        vec![job_from(sample_request())],
+        &settings,
+        Some(key.into()),
+    );
+    let (logged_error, logged_model): (String, String) = db
+        .lock()
+        .unwrap()
+        .query_row("SELECT error, model FROM decision_shadow_log", [], |row| {
+            Ok((row.get(0)?, row.get(1)?))
+        })
+        .unwrap();
+    assert!(
+        logged_error.contains("Unknown model: multilingual"),
+        "{logged_error}"
+    );
+    assert!(!logged_error.contains(key), "{logged_error}");
+    assert_eq!(logged_model, "jev-latest");
 }

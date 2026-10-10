@@ -198,7 +198,7 @@ pub fn create(conn: &Connection, workspace_id: &str, valid: &Valid) -> Result<Mi
         .optional()
         .map_err(|e| e.to_string())?;
     if exists.is_none() {
-        return Err(format!("no hay ningún workspace {workspace_id}"));
+        return Err(format!("não há nenhum workspace {workspace_id}"));
     }
     let id = Uuid::new_v4().to_string();
     let now = now_ts();
@@ -326,7 +326,7 @@ pub fn list(conn: &Connection, workspace_id: &str) -> Result<Vec<MissionSummary>
 /// En borrador cambia todo. Después de arrancar solo cambia el título: el resto describe
 /// cómo se ejecutó, y cambiarlo reescribiría lo que pasó.
 pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, String> {
-    let current = get(conn, id)?.ok_or_else(|| format!("no hay ninguna misión {id}"))?;
+    let current = get(conn, id)?.ok_or_else(|| format!("não há nenhuma missão {id}"))?;
     if current.status != status::DRAFT {
         let same_config = current.objective == valid.objective
             && current.cwd == valid.cwd
@@ -341,7 +341,7 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
         let same_config = same_config && current.squad_id == valid.squad_id
             && valid.is_test.is_none_or(|marked| marked == current.is_test);
         if !same_config {
-            return Err("la misión ya arrancó: solo se le puede cambiar el título".into());
+            return Err("a missão já começou: só o título pode ser alterado".into());
         }
         conn.execute(
             "UPDATE missions SET title = ?1, updated_at = ?2 WHERE id = ?3",
@@ -379,7 +379,7 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
         )
         .map_err(|e| e.to_string())?;
     if n == 0 {
-        return Err("la misión ya arrancó: solo se le puede cambiar el título".into());
+        return Err("a missão já começou: só o título pode ser alterado".into());
     }
     get(conn, id)?.ok_or_else(|| "la misión se perdió".to_string())
 }
@@ -420,7 +420,7 @@ pub fn mark_started_terminals(conn: &Connection, id: &str) -> Result<bool, Strin
 /// exige evidencia y usa `finish_terminals`; una misión con run la cierra `refresh_status`.
 pub fn close_terminals(conn: &Connection, id: &str, outcome: &str) -> Result<bool, String> {
     if outcome != status::CANCELLED {
-        return Err("Una misión en terminal solo se concluye con evidencia de entrega.".into());
+        return Err("Uma missão em terminais só é concluída com evidência de entrega.".into());
     }
     let now = now_ts();
     let n = conn
@@ -572,7 +572,7 @@ where
     F: Fn(&std::path::Path, &str) -> (PrState, CiStatus),
 {
     let mission = get(conn, mission_id)?
-        .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+        .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
 
     // Nunca mexe em missão failed ou cancelled
     if mission.status == status::FAILED || mission.status == status::CANCELLED {

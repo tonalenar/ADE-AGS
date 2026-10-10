@@ -151,7 +151,7 @@ pub fn upsert_custom_agent(
     let label = label.trim().to_string();
     let command = command.trim().to_string();
     if label.is_empty() || command.is_empty() {
-        return Err("El nombre y el comando son obligatorios".to_string());
+        return Err("O nome e o comando são obrigatórios".to_string());
     }
 
     let resume_args = blank_to_none(resume_args);

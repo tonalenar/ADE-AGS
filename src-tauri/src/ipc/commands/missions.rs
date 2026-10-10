@@ -277,7 +277,7 @@ pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, Stri
     };
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
-    let mission = crate::missions::store::get(&conn, &id)?.ok_or_else(|| format!("no hay ninguna misión {id}"))?;
+    let mission = crate::missions::store::get(&conn, &id)?.ok_or_else(|| format!("não há nenhuma missão {id}"))?;
     let hits = match at {
         Some(at) => crate::memory::search::search_at(
             &conn,
@@ -392,7 +392,7 @@ pub(super) fn memory_history(app: &AppHandle, args: &Value) -> Result<Value, Str
     let db = db(app)?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mission = crate::missions::store::get(&conn, &mission_id)?
-        .ok_or_else(|| format!("no hay ninguna misión {mission_id}"))?;
+        .ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
     let entry_id: String = match scope.as_str() {
         "workspace" => conn.query_row(
             "SELECT id FROM memory_entries WHERE workspace_id=?1 AND scope='workspace' AND key=?2",
