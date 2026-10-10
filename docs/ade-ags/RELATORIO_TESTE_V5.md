@@ -46,3 +46,9 @@ Ativa 800 s; parede 756 s; primeira delegação 37,9 s; equipe trabalhando em 28
 
 ## Não coberto
 Telas ao vivo (texto cortado, botões sem resposta, canvas: halo/alças/portas/minimapa/dock, aviso de privacidade em Decisões, missão iniciada abre canvas, missão falha com "iniciar", Esc em tela cheia real), terminais em branco, restauração de abas e janela maximizada observadas na UI, três idiomas na UI.
+
+## Complemento do QA (leitura de código, não UI ao vivo)
+- O QA declarou que a janela Tauri não é acessível a agentes (sem porta CDP; portas 9222/5173 fechadas; handle da janela zerado). Confirma que a UI real não foi exercitada por ninguém.
+- Por leitura de código, sem execução: o aviso de privacidade em Decisões (`sendsOffMachine`: provedor ≠ none e URL não local, `settings.decisions.remoteWarn`) existe e nada é salvo sem clicar em Salvar; iniciar missão chama `startMissionInTerminals` e navega para `/workspace`; missão `failed` oferece a ação "retry" nos 3 idiomas; `routeModalEscape.test.tsx` cobre o Esc (o caso de foco em `role="option"` segue como achado baixo 2).
+- O QA contou 353 valores iguais entre es e pt-BR (o Frontend contou 321) e os considerou termos idênticos legítimos; divergência de contagem e classificação não verificadas.
+- `~/.ags/data.db` não foi alterado (só leitura).
