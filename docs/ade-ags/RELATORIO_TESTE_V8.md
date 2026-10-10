@@ -2,9 +2,9 @@
 
 Versão instalada: ADE AGS 1.8.7, master `d655f72`. Missão `eb2159f6`. Nenhum código do produto foi alterado. A **janela real do app não foi aberta** por nenhum integrante: tudo que é interface foi conferido apenas por leitura de código.
 
-## 1. VIGIA — resultado inconclusivo (provavelmente DESLIGADO)
+## 1. VIGIA — ligado, com 1 cutucada indevida observada
 
-**Nenhuma linha "Vigia" apareceu no chat do Orquestrador durante toda a missão, e nenhum integrante recebeu cutucada.** Pela regra da missão, isso indica que o Vigia estava desligado, e **nada pode ser concluído sobre as regras novas dele**.
+O Vigia **estava ligado**: o Frontend relatou, depois da entrega, que recebeu um lembrete do Vigia. Esta seção corrige a leitura inicial, feita antes dessa informação, de que ele estaria desligado. Nenhuma linha "Vigia" apareceu no chat do Orquestrador e nenhum outro terminal recebeu cutucada.
 
 Balanço:
 
@@ -12,23 +12,25 @@ Balanço:
 |---|---|
 | Mensagens do Vigia ao chat do Orquestrador | 0 |
 | Cutucadas no terminal do Backend | 0 (até 10:23 BRT) |
-| Cutucadas no terminal do Frontend | 0 (~15 min, sempre Working) |
 | Cutucadas no terminal do QA | 0 (10:16–10:23, sempre Working) |
-| Úteis / ruído | 0 / 0 |
+| Cutucadas no terminal do Frontend | 1, **depois** de ele já ter entregue o relatório e estar ocioso |
+| Úteis / ruído | 0 / 1 (ruído leve, segundo o Frontend) |
 | `[Pasted text #N]` empacado | 0 |
-| Cutucou quem já tinha entregue | não observado |
+| Cutucou quem já tinha entregue | **SIM** (Frontend) |
+| Cutucou agente em Working | não observado (Frontend, QA e Backend sempre Working antes das entregas) |
 | Codex em Working com tela parada > 8 min | não testado |
 
-Observações:
-- O QA afirmou que o botão estava "desligado por padrão na UI", mas ele não abre a interface. Isso **não foi verificado**: a única evidência é a ausência de linhas e cutucadas.
-- Não verificadas: UMA cutucada por vez, ignorar integrante que já reportou, missão já entregue e o aviso de 8 min do Codex. Repetir com o olho confirmado como ligado.
-- O Vigia não tinha o que fazer, porque ninguém ficou parado. Isso também explica zero cutucadas, então o resultado não distingue "desligado" de "ligado e sem necessidade".
+**Achado (médio): o Vigia cutucou um integrante que já tinha reportado a tarefa.** Isso contraria a regra "ignora integrante que já reportou a tarefa". Reprodução: Frontend entregou o relatório final ao Orquestrador, ficou ocioso, e o lembrete chegou ao terminal dele em seguida. O texto e o horário exatos da mensagem não foram capturados (saiu da tela antes da leitura). Para confirmar, rodar de novo e anotar horário da entrega e da cutucada.
+
+Limites: a regra de "uma cutucada por vez", a regra da missão já entregue e o aviso de 8 min do Codex não foram verificados. O QA afirmou que o botão estava "desligado na UI", mas ele não abre a interface e a informação é contradita pela cutucada no Frontend. Os zeros dos outros terminais podem ser só falta de motivo para cutucar: ninguém ficou parado.
 
 ## 2. Achados por gravidade
 
 **Bloqueante:** nenhum. **Alto:** nenhum.
 
 ### Médio
+
+**M0. Vigia cutucou integrante que já tinha entregue** (Frontend, depois do relatório final). Ver seção 1.
 
 **M1. Mensagens de erro em espanhol no CLI (cliBridge, front-end).** Confirmado por leitura: `src/features/orchestrator/cliBridge.ts` tem 16 ocorrências. Exemplos: linha 78 "Falta --agent", 87 "Agente desconocido", 124/138 "Falta --tab", 128/140 "Esta ventana no tiene ninguna tab con id", 174 "Falta la carpeta del proyecto", 186 "Falta la pregunta", 236 "Faltan cwd, a o b", 257 "La tab .. no tiene una terminal abierta", 326 "Falta el mensaje", 352 "El frontend no sabe atender". O commit `1297ae6` traduziu só o Rust. Repro: rodar comando de tab/nota/portal sem a flag obrigatória ou com `--tab` inexistente. (Frontend leu o código e não executou os comandos.)
 
@@ -109,6 +111,6 @@ Configuração: habilitada, laya_local, `http://localhost:8000`, modelo multilin
 ## 7. Limites da verificação
 
 - A interface real não foi aberta. Mudanças de UI (tela de Decisões, painel de memória com balão, borda do canvas, jev-latest) foram avaliadas só por código.
-- Vigia não verificado (seção 1).
+- Vigia verificado só em parte (seção 1).
 - Já conhecidos e não relatados: sessão do Antigravity, janela maximizada com bounds nulos, abas sem PTY, sandbox do Codex, laço do Codex gpt-6.1-sol, `ags memory suggest`, `ags memory dream`, modal Daybreak.
 - O Backend criou, via CLI, um rascunho de missão de teste (`df63f9e4`, `isTest=true`, sem agentes lançados) que permanece em rascunho.
