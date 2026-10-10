@@ -32,7 +32,7 @@ path = "src/bin/cli.rs"
 # de nombre y scripts del usuario siguen funcionando. Mismo código, otro nombre.
 [[bin]]
 name = "ccode"
-path = "src/bin/cli.rs"
+path = "src/bin/ccode.rs"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }

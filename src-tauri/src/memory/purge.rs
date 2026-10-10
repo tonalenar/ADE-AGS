@@ -34,6 +34,7 @@ pub fn main_database_file(conn: &Connection) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
+#[cfg(test)]
 pub fn revisions(conn: &Connection, entry_id: &str, revision: Option<i64>, scope: Option<&Scope>) -> Result<(), String> {
     let applied = apply_sqlite(conn, entry_id, revision, scope.and_then(|scope| scope.events_root.as_deref()))?;
     if applied.bodies.is_empty() && scope.is_none() {
@@ -103,6 +104,7 @@ fn apply_sqlite(conn: &Connection, entry_id: &str, revision: Option<i64>, events
     Ok(Applied { workspace, entry_id: entry_id.to_string(), revisions, bodies })
 }
 
+#[cfg(test)]
 fn finish_local(conn: &Connection, applied: &Applied, scope: Option<&Scope>) -> Result<(), String> {
     if let Err(error) = reclaim_pages(conn) {
         return Err(format!("A memória foi removida do banco, mas a limpeza do arquivo do banco falhou ({error}). Repita o apagamento para concluir."));
@@ -200,6 +202,7 @@ fn reclaim_pages(conn: &Connection) -> Result<(), String> {
     conn.execute_batch("VACUUM").map_err(|error| error.to_string())
 }
 
+#[cfg(test)]
 fn scrub_artifacts(conn: &Connection, workspace: &str, entry_id: &str, scope: &Scope, revisions: &[i64], bodies: &[String]) -> Result<(), String> {
     super::repo::replace_local_history(conn, workspace, &scope.memory_root, bodies)?;
     for dir in super::repo::workspace_repo_dirs(&scope.memory_root, workspace)? {
