@@ -197,9 +197,13 @@ pub(crate) fn framed(from_name: &str, text: &str, expects_reply: bool) -> String
 const DUPLICATE_WINDOW: Duration = Duration::from_secs(10 * 60);
 
 /// `true` na primeira vez que este texto vai para este destino dentro da janela; `false` se é repetido.
-fn first_time_for(target: &str, text: &str) -> bool {
+fn first_time_seen() -> &'static Mutex<HashMap<String, std::time::Instant>> {
     static SEEN: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock::new();
-    let mut seen = SEEN.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap_or_else(|e| e.into_inner());
+    SEEN.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+fn first_time_for(target: &str, text: &str) -> bool {
+    let mut seen = first_time_seen().lock().unwrap_or_else(|e| e.into_inner());
     seen.retain(|_, at| at.elapsed() < DUPLICATE_WINDOW);
     let key = format!("{target}\u{1}{text}");
     if seen.contains_key(&key) {
@@ -207,6 +211,59 @@ fn first_time_for(target: &str, text: &str) -> bool {
     }
     seen.insert(key, std::time::Instant::now());
     true
+}
+
+/// Esquece que este texto foi para este destino: a entrega não se confirmou, então o reenvio do
+/// mesmo texto não pode ser tratado como repetido.
+fn forget_sent(target: &str, text: &str) {
+    first_time_seen().lock().unwrap_or_else(|e| e.into_inner()).remove(&format!("{target}{text}"));
+}
+
+/// O fim da saída do PTY, sem escapes, para conferir se uma mensagem apareceu na tela.
+fn tail_text(pty: u32) -> String {
+    let Some((text, _)) = crate::terminal::scrollback_of(pty) else { return String::new() };
+    let start = text.len().saturating_sub(64 * 1024);
+    let start = (start..=text.len()).find(|i| text.is_char_boundary(*i)).unwrap_or(text.len());
+    crate::orchestrator::digest::strip_ansi(&text[start..])
+}
+
+/// As primeiras palavras do corpo de uma mensagem com cabeçalho (`[Mensagem de X via ADE AGS] ...`),
+/// para achá-las na tela do destino. `None` se não há o que conferir (`--raw`, ou corpo vazio).
+pub(crate) fn snippet_of(message: &str) -> Option<String> {
+    let body = message.strip_prefix("[Mensagem de ")?.split_once("] ")?.1;
+    let snippet: String = body.split_whitespace().take(3).collect::<Vec<_>>().join(" ").chars().take(24).collect();
+    (!snippet.is_empty()).then_some(snippet)
+}
+
+/// Pura: a mensagem apareceu na tela entre `before` e `after`? O trecho do corpo aparece mais vezes,
+/// ou um pegado grande (`[Pasted ...]`, que esconde o texto) foi somado. Espaços e quebras de linha
+/// não contam: a TUI quebra linhas onde quer.
+pub(crate) fn arrived(before: &str, after: &str, snippet: &str) -> bool {
+    let squash = |s: &str| s.split_whitespace().collect::<Vec<_>>().join(" ");
+    let (before, after) = (squash(before), squash(after));
+    after.matches(snippet).count() > before.matches(snippet).count()
+        || after.matches("[Pasted").count() > before.matches("[Pasted").count()
+}
+
+/// Cola a mensagem e confere que ela apareceu na tela do destino. Um destino rodando um slash
+/// command, por exemplo, engole o texto: sem isto o `peer tell` dizia "enviado" e o reenvio era
+/// recusado como repetido. `false` = não confirmou (e o texto deixa de contar como já enviado).
+fn submit_confirmed(pty: u32, target: &str, message: &str) -> Result<bool, String> {
+    let before = tail_text(pty);
+    submit_prompt(pty, message)?;
+    let Some(snippet) = snippet_of(message) else { return Ok(true) };
+    let deadline = std::time::Instant::now() + Duration::from_millis(1500);
+    loop {
+        if arrived(&before, &tail_text(pty), &snippet) {
+            return Ok(true);
+        }
+        if std::time::Instant::now() >= deadline {
+            break;
+        }
+        std::thread::sleep(Duration::from_millis(250));
+    }
+    forget_sent(target, message);
+    Ok(false)
 }
 
 /// Um cadeado por terminal de destino: duas mensagens para o mesmo agente (dois remetentes,
@@ -230,17 +287,18 @@ fn deliver_when_quiet(pty: u32, target: &str, message: String) -> bool {
         return false;
     }
     let lock = delivery_lock(target);
+    let target = target.to_string();
     std::thread::spawn(move || {
         let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
         wait_until_quiet(pty, Duration::from_millis(1500), QUEUE_MAX_WAIT, false);
-        let _ = submit_prompt(pty, &message);
+        let _ = submit_confirmed(pty, &target, &message);
     });
     true
 }
 
 /// O que aconteceu com uma mensagem: entregue já, na fila, ou descartada por ser repetida.
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Delivery { Now, Queued, Duplicate }
+pub(crate) enum Delivery { Now, Queued, Duplicate, Unconfirmed }
 
 /// Entrega já se o destino se aquietar em até `SENDER_WAIT`; senão enfileira; repetida, não manda.
 fn deliver_now_or_queue(pty: u32, target: &str, message: String) -> Result<Delivery, String> {
@@ -250,16 +308,16 @@ fn deliver_now_or_queue(pty: u32, target: &str, message: String) -> Result<Deliv
     let lock = delivery_lock(target);
     if let Ok(_turn) = lock.try_lock() {
         if wait_until_quiet(pty, Duration::from_millis(1500), SENDER_WAIT, false) {
-            submit_prompt(pty, &message)?;
-            return Ok(Delivery::Now);
+            return Ok(if submit_confirmed(pty, target, &message)? { Delivery::Now } else { Delivery::Unconfirmed });
         }
     }
     // Já registrada como vista acima: a fila entrega sem repetir a checagem de duplicata.
     let lock = delivery_lock(target);
+    let target = target.to_string();
     std::thread::spawn(move || {
         let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
         wait_until_quiet(pty, Duration::from_millis(1500), QUEUE_MAX_WAIT, false);
-        let _ = submit_prompt(pty, &message);
+        let _ = submit_confirmed(pty, &target, &message);
     });
     Ok(Delivery::Queued)
 }
@@ -638,13 +696,17 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     // quieto em poucos segundos, vai já; senão entra na fila do destino e é entregue quando ele
     // terminar o turno (ver `deliver_now_or_queue`).
     let outcome = deliver_now_or_queue(pty, &target.id, outgoing(&from_name, &text, false, is_raw(args)))?;
-    if outcome != Delivery::Duplicate {
+    // Sem confirmação, o destino pode não ter recebido: não conta como tarefa dada (o Vigia segue
+    // cobrando a delegação).
+    if !matches!(outcome, Delivery::Duplicate | Delivery::Unconfirmed) {
         emit_peer_message(app, "tell", &from, Some(&target.id), Some(&text));
     }
     Ok(match outcome {
         Delivery::Now => json!({ "peer": describe(target), "sent": true }),
         Delivery::Queued => json!({ "peer": describe(target), "sent": true, "queued": true,
             "note": "O destino está trabalhando: a mensagem será entregue quando ele terminar o turno. Siga com o seu trabalho." }),
+        Delivery::Unconfirmed => json!({ "peer": describe(target), "sent": false, "unconfirmed": true,
+            "note": "O texto foi escrito no terminal do destino, mas não apareceu na tela dele (talvez ele esteja rodando um comando ou um slash command). Espere ele ficar livre e reenvie: o reenvio não conta como repetido." }),
         Delivery::Duplicate => json!({ "peer": describe(target), "sent": false, "duplicate": true,
             "note": "Essa mesma mensagem já foi entregue a este agente há pouco; não foi enviada de novo." }),
     })
@@ -993,5 +1055,38 @@ mod dedupe_tests {
         // Outro destino ou outro texto continuam válidos.
         assert!(first_time_for("tab-dedupe-b", "tarefa X"));
         assert!(first_time_for("tab-dedupe-a", "tarefa Y"));
+        // Entrega não confirmada: o reenvio do mesmo texto passa.
+        super::forget_sent("tab-dedupe-a", "tarefa X");
+        assert!(first_time_for("tab-dedupe-a", "tarefa X"));
+    }
+
+    #[test]
+    fn o_trecho_do_corpo_vem_depois_do_cabecalho_e_raw_nao_confere() {
+        use super::{framed, snippet_of};
+        assert_eq!(snippet_of(&framed("Orquestrador", "Frontend: revise as telas de Missões agora", false)).as_deref(), Some("Frontend: revise as"));
+        assert_eq!(snippet_of("/compact"), None, "--raw não tem cabeçalho");
+        assert_eq!(snippet_of("[Mensagem de X via ADE AGS] "), None);
+    }
+
+    #[test]
+    fn a_mensagem_so_conta_como_recebida_se_apareceu_na_tela() {
+        use super::arrived;
+        let before = "> 
+Frontend: revise as telas
+(antiga)";
+        // Slash command rodando: a tela só repinta, o texto não entra.
+        assert!(!arrived(before, "> 
+Frontend: revise as telas
+(antiga)
+/auto-mode-setup ...", "Frontend: revise as"));
+        // Apareceu de novo (mesmo quebrada em duas linhas pela TUI).
+        assert!(arrived(before, "> 
+Frontend: revise as telas
+(antiga)
+[Mensagem de O] Frontend: revise
+as telas", "Frontend: revise as"));
+        // Um pegado grande esconde o texto atrás do marcador.
+        assert!(arrived("> ", "> [Pasted Content 3904 chars]", "qualquer coisa"));
+        assert!(!arrived("[Pasted Content 10 chars]", "[Pasted Content 10 chars]", "qualquer coisa"));
     }
 }

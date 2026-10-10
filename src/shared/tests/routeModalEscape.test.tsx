@@ -38,4 +38,28 @@ describe("RouteModal Escape", () => {
     expect(onClose).not.toHaveBeenCalled();
     expect(ev.defaultPrevented).toBe(false);
   });
+
+  it("não fecha a tela com o foco numa opção do popup aberto", () => {
+    const onClose = vi.fn();
+    act(() => root.render(<MemoryRouter><RouteModal onClose={onClose}>
+      <button aria-haspopup="listbox" aria-expanded="true">escolher</button>
+      <div role="listbox"><button role="option" aria-selected="false">um</button></div>
+    </RouteModal></MemoryRouter>));
+    const option = host.querySelector("[role=option]") as HTMLElement;
+    option.focus();
+    const ev = esc(option);
+    expect(onClose).not.toHaveBeenCalled();
+    expect(ev.defaultPrevented).toBe(false);
+  });
+
+  it("fecha a tela com o foco numa lista fixa, sem nenhum popup aberto", () => {
+    const onClose = vi.fn();
+    act(() => root.render(<MemoryRouter><RouteModal onClose={onClose}>
+      <div role="listbox"><button role="option" aria-selected="false">um</button></div>
+    </RouteModal></MemoryRouter>));
+    const option = host.querySelector("[role=option]") as HTMLElement;
+    option.focus();
+    esc(option);
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
 });

@@ -927,3 +927,24 @@ fn cada_missao_vale_uma_amostra_mesmo_com_o_mesmo_resultado() {
     shadow::run_jobs_with(db.clone(), vec![make(Some("m1"))], &settings, None);
     assert_eq!(log_rows(&db), 2);
 }
+
+/// Resposta capturada de um `laya-serve` real (2026-10-10, modelo multilingual): traz campos além
+/// dos que o cliente usa (`answer_confidence`, `action`, `routing`, `state_tokens`...).
+const LAYA_SERVE_REAL: &str = r#"{"model":"laya-rl-agent","answers":{"acao":{"type":"choice","choice":"revisar","probabilities":{"aprovar":0.1463,"rejeitar":0.2555,"revisar":0.5982},"confidence":0.1469,"answer_confidence":0.5982,"action":{"act_probability":1.0}},"segredo":{"type":"noul","noul":0.0142,"confidence":0.9858,"answer_confidence":0.9858,"action":{"act_probability":1.0}}},"usage":{"input_tokens":176,"output_tokens":0,"state_tokens":47,"state_tokens_dropped":0,"truncated":false,"truncated_questions":[]},"routing":{"model":"multilingual","repo":"convaiinnovations/laya/multilingual","reason":"explicit model='multilingual'","detection":null,"workflow":null}}"#;
+
+#[test]
+fn a_resposta_real_do_laya_serve_e_lida() {
+    let response = parse_response(LAYA_SERVE_REAL).unwrap();
+    assert_eq!(response.answers["acao"].label, "revisar");
+    assert_eq!(response.answers["acao"].probability, Some(0.5982));
+    assert_eq!(response.answers["segredo"].label, "nao");
+    assert_eq!(response.input_tokens, 176);
+    let url = serve(200, LAYA_SERVE_REAL, Duration::ZERO);
+    let outcome = evaluate(
+        &job_from(sample_request()),
+        provider(&url, None, 1_000).decide(&sample_request()),
+        7,
+    );
+    assert_eq!(outcome.provider_decision.as_deref(), Some("acao=revisar;segredo=nao"));
+    assert_eq!(outcome.returned, "acao=revisar;segredo=nao", "a heurística de exemplo também diz revisar/nao");
+}
