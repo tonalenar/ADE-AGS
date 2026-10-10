@@ -69,7 +69,7 @@ fn write_and_read(mut stream: impl Read + Write, payload: &str) -> Result<String
     stream
         .write_all(line.as_bytes())
         .and_then(|_| stream.flush())
-        .map_err(|e| ExchangeError::gone(format!("No se pudo enviar el comando: {e}")))?;
+        .map_err(|e| ExchangeError::gone(format!("Não foi possível enviar o comando: {e}")))?;
     let mut response = String::new();
     BufReader::new(stream)
         .read_line(&mut response)
@@ -85,7 +85,7 @@ fn exchange_tcp(handshake: &Handshake, payload: &str, timeout: Duration) -> Resu
     let addr = SocketAddrV4::new(Ipv4Addr::LOCALHOST, handshake.port);
     let stream = TcpStream::connect_timeout(&addr.into(), Duration::from_secs(2)).map_err(|_| {
         ExchangeError::unreachable(format!(
-            "No se pudo conectar al puerto {} (la app con PID {} pudo haber cerrado). Reiniciá la app.",
+            "Não foi possível conectar à porta {} (o app com PID {} pode ter fechado). Reinicie o app.",
             handshake.port, handshake.pid
         ))
     })?;
@@ -99,7 +99,7 @@ fn exchange_credential(endpoint: &str, payload: &str, timeout: Duration) -> Resu
     use std::os::unix::net::UnixStream;
     let stream = UnixStream::connect(endpoint).map_err(|e| {
         ExchangeError::unreachable(format!(
-            "No se pudo conectar al socket de credencial {endpoint} ({e}). Reiniciá la app."
+            "Não foi possível conectar ao socket de credencial {endpoint} ({e}). Reinicie o app."
         ))
     })?;
     let _ = stream.set_read_timeout(Some(timeout));
@@ -111,7 +111,7 @@ fn exchange_credential(endpoint: &str, payload: &str, timeout: Duration) -> Resu
 fn exchange_credential(endpoint: &str, payload: &str, timeout: Duration) -> Result<String, ExchangeError> {
     let file = std::fs::OpenOptions::new().read(true).write(true).open(endpoint).map_err(|e| {
         ExchangeError::unreachable(format!(
-            "No se pudo conectar al pipe {endpoint} ({e}). Reiniciá la app."
+            "Não foi possível conectar ao pipe {endpoint} ({e}). Reinicie o app."
         ))
     })?;
     // `File` não tem timeout de leitura. A thread só existe para não deixar

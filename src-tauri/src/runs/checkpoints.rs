@@ -88,7 +88,7 @@ fn git(dir: &Path, args: &[&str], envs: &[(&str, &str)], limit: Duration) -> Res
     for (k, v) in envs {
         cmd.env(k, v);
     }
-    let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("no se pudo correr git: {e}"))?;
+    let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("não foi possível rodar o git: {e}"))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string())
     } else {
@@ -113,7 +113,7 @@ pub struct Snapshot {
 pub fn snapshot(dir: &Path, id: &str, label: &str) -> Result<Snapshot, String> {
     let root = root_of(dir)?;
     let head = git(&root, &["rev-parse", "--verify", "HEAD"], &[], GIT_FAST)
-        .map_err(|_| "el repositorio todavía no tiene ningún commit: no hay de dónde tomar una foto".to_string())?;
+        .map_err(|_| "o repositório ainda não tem nenhum commit: não há de onde tirar uma foto".to_string())?;
     let git_dir = git(&root, &["rev-parse", "--absolute-git-dir"], &[], GIT_FAST)?;
     let index = Path::new(&git_dir).join(format!("cc-checkpoint-{id}.index"));
     let index_s = index.to_string_lossy().to_string();
@@ -136,9 +136,9 @@ pub fn snapshot(dir: &Path, id: &str, label: &str) -> Result<Snapshot, String> {
 pub fn restore(root: &Path, commit: &str, head: &str) -> Result<(), String> {
     // El árbol de la foto tiene que existir: si alguien corrió un `gc` agresivo, se dice acá y no a medias.
     git(root, &["cat-file", "-e", &format!("{commit}^{{tree}}")], &[], GIT_FAST)
-        .map_err(|_| "la foto ya no está en el repositorio (¿se limpió con git gc?)".to_string())?;
+        .map_err(|_| "a foto não está mais no repositório (foi limpa com git gc?)".to_string())?;
     git(root, &["cat-file", "-e", &format!("{head}^{{commit}}")], &[], GIT_FAST)
-        .map_err(|_| "el commit de ese momento ya no está en el repositorio".to_string())?;
+        .map_err(|_| "o commit daquele momento não está mais no repositório".to_string())?;
     git(root, &["reset", "-q", "--hard", head], &[], GIT_SLOW)?;
     git(root, &["read-tree", "--reset", "-u", &format!("{commit}^{{tree}}")], &[], GIT_SLOW)?;
     // Lo que nació después de la foto (no versionado, no ignorado) no está en el índice ahora.
@@ -386,7 +386,7 @@ pub fn rollback(db: &crate::database::DbConnection, run_id: &str, plan: &Plan) -
 
 fn db_of(app: &tauri::AppHandle) -> Result<crate::database::DbConnection, String> {
     use tauri::Manager;
-    Ok(app.try_state::<crate::database::DbConnection>().ok_or("la base no está disponible")?.inner().clone())
+    Ok(app.try_state::<crate::database::DbConnection>().ok_or("o banco de dados não está disponível")?.inner().clone())
 }
 
 #[tauri::command]

@@ -297,7 +297,7 @@ function SquadExecutionSummary({ squad }: { squad: Squad }) {
       {squad.members.map((member) => (
         <div key={member.roleId} className="flex items-center justify-between gap-3 text-[10.5px]">
           <span className="font-medium text-gray-700 dark:text-gray-300">{t(`squads.roleNames.${member.roleId}`, { defaultValue: member.roleId })}</span>
-          <span className="truncate text-right text-gray-500 dark:text-white/45">
+          <span className="truncate text-right text-gray-500 dark:text-white/45" title={`${agentLabel(member.agentId)} · ${modelLabel(member.agentId, member.model)} · ${accountLabel(member.accountId, member.autoAccount)}`}>
             {agentLabel(member.agentId)} · {modelLabel(member.agentId, member.model)} · {accountLabel(member.accountId, member.autoAccount)}
           </span>
           {member.availability !== "available" && (

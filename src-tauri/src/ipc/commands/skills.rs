@@ -127,7 +127,7 @@ pub(super) fn skill_install(app: &AppHandle, args: &Value) -> Result<Value, Stri
                     })
                     .collect();
                 Err(format!(
-                    "Hay {} skills llamadas '{skill}' y no son la misma. Instalá por id: {}",
+                    "Há {} skills chamadas '{skill}' e não são a mesma. Instale pelo id: {}",
                     varias.len(),
                     detalle.join(" · ")
                 ))
@@ -152,9 +152,9 @@ pub(super) fn skill_install(app: &AppHandle, args: &Value) -> Result<Value, Stri
                 .map(|rows| rows.iter().any(|s| s.skill.name.to_lowercase() == wanted))
                 .unwrap_or(false);
             if already {
-                format!("'{skill}' ya está instalada; podés usarla directo en --skills")
+                format!("'{skill}' já está instalada; use direto em --skills")
             } else {
-                format!("No se encontró '{skill}' en los repositorios habilitados (mirá 'ags skills' o refrescá los repos)")
+                format!("Não encontrei '{skill}' nos repositórios habilitados (veja 'ags skills' ou atualize os repositórios)")
             }
         })?;
 
@@ -251,7 +251,7 @@ pub(super) fn skill_edit(app: &AppHandle, args: &Value) -> Result<Value, String>
         "saved": { "id": copy.id, "name": copy.name, "copied": true },
         // Se dice explícitamente por qué hay una skill nueva: quien automatiza tiene que
         // poder distinguir "guardé" de "creé otra".
-        "note": "La original vino de un repositorio y no se toca; los cambios quedaron en una copia local",
+        "note": "A original veio de um repositório e não é alterada; as mudanças ficaram numa cópia local",
     }))
 }
 
@@ -274,12 +274,12 @@ fn resolve_installed(
     let id = super::tabs::match_skill_ids(&installed, std::slice::from_ref(&wanted.to_string()))?
         .into_iter()
         .next()
-        .ok_or_else(|| format!("No se encontró la skill '{wanted}'"))?;
+        .ok_or_else(|| format!("Não encontrei a skill '{wanted}'"))?;
 
     rows.into_iter()
         .map(|s| s.skill)
         .find(|s| s.id == id)
-        .ok_or_else(|| format!("No se encontró la skill '{wanted}'"))
+        .ok_or_else(|| format!("Não encontrei a skill '{wanted}'"))
 }
 
 /// `--categories a,b` / `--agents a,b` llegan como array (los parte la CLI).

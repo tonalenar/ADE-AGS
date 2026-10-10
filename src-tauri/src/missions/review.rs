@@ -35,7 +35,7 @@ fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
     cmd.arg("-C").arg(external_path(dir)).args(args);
     // Sin terminal que conteste: un editor o un prompt colgarían el comando.
     cmd.env("GIT_TERMINAL_PROMPT", "0").env("GIT_EDITOR", "true").env("GIT_MERGE_AUTOEDIT", "no");
-    let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("no se pudo correr git: {e}"))?;
+    let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("não foi possível rodar o git: {e}"))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string())
     } else {
@@ -141,7 +141,7 @@ mod integration_conflict_test {
 
 fn merge_with_policy(dir: &Path, branch: &str, message: &str, keep_conflicts:bool) -> Result<MergeOutcome, String> {
     if branch.starts_with('-') {
-        return Err(format!("rama inválida: {branch}"));
+        return Err(format!("branch inválida: {branch}"));
     }
     let mut args = identity_args(dir);
     args.extend(["merge", "--no-ff", "--no-edit", "-m", message, branch].map(str::to_string));
@@ -197,7 +197,7 @@ pub struct MissionReview {
 
 /// Las tareas con rama del run activo de la misión, con lo que entregó cada una.
 pub fn review(conn: &Connection, mission_id: &str) -> Result<MissionReview, String> {
-    let mission = super::store::get(conn, mission_id)?.ok_or("la misión ya no existe")?;
+    let mission = super::store::get(conn, mission_id)?.ok_or("a missão não existe mais")?;
     let (integration_branch, applied_at) = integration_of(conn, mission_id)?;
     let project = Path::new(&mission.cwd);
     let mut deliveries = Vec::new();
@@ -251,8 +251,8 @@ fn managed_links(conn: &Connection, task: &crate::runs::Task) -> Vec<PathBuf> {
 
 /// El diff completo de una entrega contra el proyecto (desde donde se separó).
 pub fn task_diff(conn: &Connection, task_id: &str) -> Result<String, String> {
-    let task = crate::runs::store::task_by_id(conn, task_id)?.ok_or("la tarea ya no existe")?;
-    let branch = task.branch.ok_or("esta tarea no corrió aislada: no tiene rama propia")?;
+    let task = crate::runs::store::task_by_id(conn, task_id)?.ok_or("a tarefa não existe mais")?;
+    let branch = task.branch.ok_or("esta tarefa não rodou isolada: não tem branch própria")?;
     let project = mission_cwd_of_run(conn, &task.run_id)?.unwrap_or(task.cwd);
     let mut diff = git(Path::new(&project), &["diff", &format!("HEAD...{branch}")], GIT_SLOW)?;
     if diff.len() > MAX_DIFF_BYTES {
@@ -261,7 +261,7 @@ pub fn task_diff(conn: &Connection, task_id: &str) -> Result<String, String> {
             cut -= 1;
         }
         diff.truncate(cut);
-        diff.push_str("\n\n… (diff cortado: abrí la rama en el explorador para verlo entero)\n");
+        diff.push_str("\n\n… (diff cortado: abra a branch no explorador para ver inteiro)\n");
     }
     Ok(diff)
 }
@@ -332,8 +332,8 @@ pub fn accept(
 ) -> Result<MergeOutcome, String> {
     let (mission, task, existing) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let mission = super::store::get(&conn, mission_id)?.ok_or("la misión ya no existe")?;
-        let task = crate::runs::store::task_by_id(&conn, task_id)?.ok_or("la tarea ya no existe")?;
+        let mission = super::store::get(&conn, mission_id)?.ok_or("a missão não existe mais")?;
+        let task = crate::runs::store::task_by_id(&conn, task_id)?.ok_or("a tarefa não existe mais")?;
         if mission.active_run_id.as_deref() != Some(task.run_id.as_str()) {
             return Err("a tarefa não é do run atual da missão".into());
         }
@@ -352,7 +352,7 @@ pub fn accept(
             let pending = dirty(Path::new(root), &managed_links(&conn, &task))?;
             if !pending.is_empty() {
                 return Err(format!(
-                    "la tarea dejó cambios sin commitear ({}): no están en su rama. Pedile que los commitee o descartalos antes de aceptarla",
+                    "a tarefa deixou mudanças sem commit ({}): elas não estão na branch dela. Peça que ela faça o commit ou descarte antes de aceitar",
                     pending.join(", ")
                 ));
             }
@@ -360,7 +360,7 @@ pub fn accept(
         let existing = integration_path(&conn, mission_id)?;
         (mission, task, existing)
     };
-    let branch = task.branch.clone().ok_or("esta tarea no corrió aislada: no tiene rama propia")?;
+    let branch = task.branch.clone().ok_or("esta tarefa não rodou isolada: não tem branch própria")?;
 
     let integration_dir = match existing.filter(|(_, path)| Path::new(path).is_dir()) {
         Some((_, path)) => PathBuf::from(path),
@@ -392,8 +392,8 @@ pub fn accept(
 pub fn apply(db: &crate::database::DbConnection, mission_id: &str) -> Result<MergeOutcome, String> {
     let (mission, integration) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        let mission = super::store::get(&conn, mission_id)?.ok_or("la misión ya no existe")?;
-        let integration = integration_path(&conn, mission_id)?.ok_or("todavía no se aceptó ninguna entrega")?;
+        let mission = super::store::get(&conn, mission_id)?.ok_or("a missão não existe mais")?;
+        let integration = integration_path(&conn, mission_id)?.ok_or("ainda não foi aceita nenhuma entrega")?;
         (mission, integration)
     };
     let project = Path::new(&mission.cwd);
@@ -411,7 +411,7 @@ pub fn apply(db: &crate::database::DbConnection, mission_id: &str) -> Result<Mer
         .collect();
     if !pending.is_empty() {
         return Err(format!(
-            "el proyecto tiene cambios sin commitear ({}): commitealos o guardalos antes de aplicar la misión",
+            "o projeto tem mudanças sem commit ({}): faça o commit ou guarde com stash antes de aplicar a missão",
             pending.join(", ")
         ));
     }
@@ -424,7 +424,7 @@ pub fn apply(db: &crate::database::DbConnection, mission_id: &str) -> Result<Mer
         let refresh=merge_with_policy(integration_dir,"origin/master","ADE: atualizar integração com origin/master",true)?;
         if matches!(refresh,MergeOutcome::Conflict {..}) {return Ok(refresh)}
     }
-    let outcome = merge(&root, &integration.0, &format!("ADE: misión {}", mission.title))?;
+    let outcome = merge(&root, &integration.0, &format!("ADE: missão {}", mission.title))?;
     if matches!(outcome, MergeOutcome::Merged { .. }) {
         let conn = db.lock().map_err(|e| e.to_string())?;
         mark_applied(&conn, mission_id, crate::util::now_ts())?;

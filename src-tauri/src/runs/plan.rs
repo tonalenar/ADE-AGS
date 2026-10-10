@@ -137,39 +137,39 @@ mod schema_tests {
 pub fn validate(tasks: &[PlanTask], existing: &HashSet<String>) -> Result<Vec<PlanTask>, String> {
     let mut errors = Vec::new();
     if tasks.is_empty() {
-        return Err("el plan no tiene tareas".into());
+        return Err("o plano não tem tarefas".into());
     }
     if tasks.len() > MAX_TASKS {
-        errors.push(format!("el plan tiene {} tareas; el máximo es {MAX_TASKS}", tasks.len()));
+        errors.push(format!("o plano tem {} tarefas; o máximo é {MAX_TASKS}", tasks.len()));
     }
 
     let mut seen = HashSet::new();
     for task in tasks {
         if !valid_key(&task.key) {
-            errors.push(format!("'{}' no sirve como key: letras, números, - y _, hasta 40", task.key));
+            errors.push(format!("'{}' não serve como key: letras, números, - e _, até 40", task.key));
         }
         if !seen.insert(task.key.as_str()) {
-            errors.push(format!("la key '{}' está repetida en el plan", task.key));
+            errors.push(format!("a key '{}' está repetida no plano", task.key));
         } else if existing.contains(&task.key) {
-            errors.push(format!("la key '{}' ya la usa otra tarea de este run", task.key));
+            errors.push(format!("a key '{}' já é usada por outra tarefa deste run", task.key));
         }
         if task.title.trim().is_empty() {
             errors.push(format!("'{}' no tiene título", task.key));
         }
         if task.prompt.trim().is_empty() {
-            errors.push(format!("'{}' no tiene prompt", task.key));
+            errors.push(format!("'{}' não tem prompt", task.key));
         }
         if task.model.is_some() && task.agent.is_none() {
-            errors.push(format!("'{}' nombra un modelo sin decir de qué agente", task.key));
+            errors.push(format!("'{}' cita um modelo sem dizer de qual agente", task.key));
         }
         if task.budget_usd.is_some_and(|b| b.is_nan() || b <= 0.0) {
-            errors.push(format!("'{}' tiene un presupuesto que no es positivo", task.key));
+            errors.push(format!("'{}' tem um orçamento que não é positivo", task.key));
         }
         for dep in &task.depends_on {
             if dep == &task.key {
                 errors.push(format!("'{}' depende de sí misma", task.key));
             } else if !tasks.iter().any(|t| &t.key == dep) && !existing.contains(dep) {
-                errors.push(format!("'{}' depende de '{dep}', que no existe", task.key));
+                errors.push(format!("'{}' depende de '{dep}', que não existe", task.key));
             }
         }
     }
@@ -195,7 +195,7 @@ fn topological(tasks: &[PlanTask]) -> Result<Vec<PlanTask>, String> {
         let Some(next) = tasks.iter().find(|t| pending.get(t.key.as_str()) == Some(&0)) else {
             let mut stuck: Vec<&str> = pending.keys().copied().collect();
             stuck.sort_unstable();
-            return Err(format!("el plan tiene un ciclo entre: {}", stuck.join(", ")));
+            return Err(format!("o plano tem um ciclo entre: {}", stuck.join(", ")));
         };
         pending.remove(next.key.as_str());
         for t in tasks {

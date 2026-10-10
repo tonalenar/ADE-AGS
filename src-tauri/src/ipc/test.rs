@@ -139,7 +139,7 @@ fn una_cuenta_se_resuelve_dentro_de_su_propia_tui() {
 #[test]
 fn una_cuenta_de_otro_agente_se_rechaza_por_nombre() {
     let err = match_account_id(&accounts(), "opencode", "personal").unwrap_err();
-    assert!(err.contains("es de 'claude-code'"), "{err}");
+    assert!(err.contains("é de 'claude-code'"), "{err}");
 }
 
 /// Un nombre desconocido lista las que hay; si esa TUI no tiene ninguna, explica dónde
@@ -150,7 +150,7 @@ fn una_cuenta_desconocida_explica_que_opciones_existen() {
     assert!(err.contains("trabajo") && err.contains("personal"), "{err}");
 
     let err = match_account_id(&accounts(), "codex", "qa").unwrap_err();
-    assert!(err.contains("no tiene ninguna cuenta creada"), "{err}");
+    assert!(err.contains("não tem nenhuma conta criada"), "{err}");
 }
 
 fn skill(id: &str, name: &str, author: Option<&str>, registry: Option<&str>) -> InstalledSkill {

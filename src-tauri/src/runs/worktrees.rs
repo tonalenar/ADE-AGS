@@ -55,7 +55,7 @@ fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
     let dir = external_path(dir);
     let mut cmd = crate::util::spawn::hidden_command("git");
     cmd.arg("-C").arg(&dir).args(args);
-    let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("no se pudo correr git: {e}"))?;
+    let out = output_with_timeout(&mut cmd, limit).map_err(|e| format!("não foi possível rodar o git: {e}"))?;
     if out.status.success() {
         Ok(String::from_utf8_lossy(&out.stdout).trim_end_matches(['\n', '\r']).to_string())
     } else {
@@ -68,9 +68,9 @@ fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
 /// sin commit no hay de dónde sacar un worktree.
 pub fn repo_root(cwd: &Path) -> Result<PathBuf, String> {
     let root = git(cwd, &["rev-parse", "--show-toplevel"], GIT_FAST)
-        .map_err(|_| "esta carpeta no es un repositorio de git".to_string())?;
+        .map_err(|_| "esta pasta não é um repositório git".to_string())?;
     git(cwd, &["rev-parse", "--verify", "HEAD"], GIT_FAST)
-        .map_err(|_| "el repositorio todavía no tiene ningún commit".to_string())?;
+        .map_err(|_| "o repositório ainda não tem nenhum commit".to_string())?;
     Ok(PathBuf::from(root))
 }
 
@@ -246,7 +246,7 @@ pub fn remove(repo_hint: &Path, wt: &Worktree, links_dir: &Path, skills_dir: &Pa
             let shown: Vec<&str> = dirty.iter().take(5).map(String::as_str).collect();
             let more = if dirty.len() > 5 { format!(" y {} más", dirty.len() - 5) } else { String::new() };
             return Err(format!(
-                "el worktree tiene cambios sin commitear ({}{more}); commitealos o descartalos antes",
+                "o worktree tem mudanças sem commit ({}{more}); faça o commit ou descarte antes",
                 shown.join(", ")
             ));
         }

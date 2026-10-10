@@ -712,7 +712,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
             {lead && (
               <div className="flex justify-between gap-3">
                 <span className="font-medium text-violet-700 dark:text-violet-300">{t("squads.lead")}</span>
-                <span className="truncate text-right">
+                <span className="truncate text-right" title={`${lead.agentId}${lead.model ? ` · ${lead.model}` : ""} · ${accountLabel(lead.accountId, false)}`}>
                   {lead.agentId}{lead.model ? ` · ${lead.model}` : ""} · {accountLabel(lead.accountId, false)}
                 </span>
               </div>
@@ -722,7 +722,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
                 <span className="font-medium text-gray-700 dark:text-gray-300">
                   {t(`squads.roleNames.${member.roleId}`, { defaultValue: member.roleId })}
                 </span>
-                <span className="truncate text-right">
+                <span className="truncate text-right" title={`${member.agentId}${member.model ? ` · ${member.model}` : ""} · ${accountLabel(member.accountId, member.autoAccount)}`}>
                   {member.agentId}{member.model ? ` · ${member.model}` : ""} · {accountLabel(member.accountId, member.autoAccount)}
                 </span>
               </div>
@@ -908,7 +908,7 @@ function SquadSummary({ squad, accountLabel }: {
       {squad.members.map((member) => (
         <div key={member.roleId} className="flex justify-between gap-3">
           <span className="font-medium text-gray-700 dark:text-gray-300">{t(`squads.roleNames.${member.roleId}`, { defaultValue: member.roleId })}</span>
-          <span className="truncate text-right">
+          <span className="truncate text-right" title={`${member.agentId}${member.model ? ` · ${member.model}` : ""} · ${accountLabel(member.accountId, member.autoAccount)}`}>
             {member.agentId}{member.model ? ` · ${member.model}` : ""} · {accountLabel(member.accountId, member.autoAccount)}
           </span>
           {member.availability !== "available" && <span className="text-amber-700 dark:text-amber-300">{t(`squads.availability.${member.availability}`)}</span>}

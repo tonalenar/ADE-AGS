@@ -80,7 +80,7 @@ fn project_of_task(app: &AppHandle, task_id: &str) -> Result<String, String> {
         [task_id],
         |row| row.get::<_, String>(0),
     )
-    .map_err(|_| format!("No hay ninguna tarea con id {task_id}"))
+    .map_err(|_| format!("Não há nenhuma tarefa com o id {task_id}"))
 }
 
 /// Misma carpeta aunque una venga con la barra al final o, en Windows, con otras

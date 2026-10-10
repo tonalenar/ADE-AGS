@@ -16,7 +16,7 @@ use crate::ipc::protocol::{arg_str, arg_str_opt};
 pub const CHANGED_EVENT: &str = "cc-pools-changed";
 
 fn db(app: &AppHandle) -> Result<DbConnection, String> {
-    Ok(app.try_state::<DbConnection>().ok_or("la base no está disponible")?.inner().clone())
+    Ok(app.try_state::<DbConnection>().ok_or("o banco de dados não está disponível")?.inner().clone())
 }
 
 /// Las cuentas creadas: `(id, agent_id, nombre)`.
@@ -171,7 +171,7 @@ mod test {
     #[test]
     fn una_cuenta_de_otra_tui_o_inexistente_falla_diciendo_cual() {
         assert!(members_from_names(&accounts(), "claude-code", "Otra").unwrap_err().contains("'codex'"));
-        assert!(members_from_names(&accounts(), "claude-code", "nada").unwrap_err().contains("Tiene"));
+        assert!(members_from_names(&accounts(), "claude-code", "nada").unwrap_err().contains("Tem"));
     }
 
     #[test]

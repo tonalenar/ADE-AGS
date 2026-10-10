@@ -127,12 +127,12 @@ fn wait_for(app: &AppHandle, id: &str, timeout: Duration) -> Result<Value, Strin
             return if status == "done" {
                 Ok(out)
             } else {
-                Err(format!("la misión terminó como {status}: {out}"))
+                Err(format!("a missão terminou como {status}: {out}"))
             };
         }
         let now = Instant::now();
         if now >= deadline {
-            return Err(format!("la misión sigue {status} después de {} s", timeout.as_secs()));
+            return Err(format!("a missão continua {status} depois de {} s", timeout.as_secs()));
         }
         // Un tope por vuelta: si un cambio no publica en el bus, igual se vuelve a mirar.
         let page = bus::wait(after, &filter, 10, (deadline - now).min(Duration::from_secs(30)));
@@ -474,7 +474,7 @@ pub(super) fn worktrees(app:&AppHandle,args:&Value,prune:bool)->Result<Value,Str
 pub(super) fn mission_accept(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let id = arg_str(args, "mission")?;
     let task = arg_str(args, "task")?;
-    let base = dirs::home_dir().ok_or("no se pudo resolver el home")?.join(".ags").join("worktrees");
+    let base = dirs::home_dir().ok_or("não foi possível localizar a pasta do usuário")?.join(".ags").join("worktrees");
     let outcome = crate::missions::review::accept(&db(app)?, &base, &id, &task)?;
     crate::missions::notify(app, &id);
     Ok(json!(outcome))
@@ -518,7 +518,7 @@ pub(super) fn approval_decide(app: &AppHandle, args: &Value) -> Result<Value, St
     let remember = args.get("remember").and_then(Value::as_bool).unwrap_or(false);
     let decided = crate::runs::decide_approval(app, &db(app)?, &id, allow, remember)?;
     if !decided {
-        return Err("ese pedido ya no está esperando (venció o se canceló la tarea)".into());
+        return Err("esse pedido não está mais esperando (venceu ou a tarefa foi cancelada)".into());
     }
     Ok(json!({ "id": id, "allow": allow, "remembered": remember }))
 }

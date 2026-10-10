@@ -36,7 +36,7 @@ pub(super) fn workspace_open(app: &AppHandle, args: &Value) -> Result<Value, Str
         )
         .optional()
         .map_err(|e| e.to_string())?
-        .ok_or_else(|| format!("No existe el workspace '{requested}'"))?
+        .ok_or_else(|| format!("Não existe o workspace '{requested}'"))?
     };
 
     // `open_workspace` es `async` pero su cuerpo no espera nada que necesite el runtime

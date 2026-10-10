@@ -432,7 +432,7 @@ fn un_provider_que_no_existe_se_rechaza() {
         },
     )
     .unwrap_err();
-    assert!(e.contains("no es un provider conocido"), "{e}");
+    assert!(e.contains("não é um provider conhecido"), "{e}");
 }
 
 /// La terminal está en el registro, pero no tiene `HeadlessAgent`: no puede ser lead.
@@ -448,7 +448,7 @@ fn un_provider_sin_headless_no_puede_ser_lead() {
         },
     )
     .unwrap_err();
-    assert!(e.contains("sin terminal"), "{e}");
+    assert!(e.contains("sem terminal"), "{e}");
 }
 
 #[test]
@@ -465,7 +465,7 @@ fn un_modelo_sin_agente_y_un_presupuesto_no_positivo_se_rechazan() {
     )
     .unwrap_err();
     assert!(
-        e.contains("modelo fijo") && e.contains("presupuesto"),
+        e.contains("modelo fixo") && e.contains("orçamento"),
         "{e}"
     );
 }
@@ -627,7 +627,7 @@ fn si_el_ruteo_elige_un_provider_sin_headless_no_se_crea_nada() {
         },
     )
     .unwrap_err();
-    assert!(e.contains("sin terminal"), "{e}");
+    assert!(e.contains("sem terminal"), "{e}");
     assert!(!lanzo.into_inner());
     assert_eq!(estado(&db, &id), status::DRAFT);
     assert_eq!(count(&db.lock().unwrap(), "SELECT COUNT(*) FROM runs"), 0);
@@ -1147,7 +1147,7 @@ fn la_orquestacion_de_la_flota_rechaza_un_lead_sin_headless_sin_crear_filas() {
         |_| panic!("no se lanza"),
     )
     .unwrap_err();
-    assert!(e.contains("sin terminal"), "{e}");
+    assert!(e.contains("sem terminal"), "{e}");
     assert_eq!(count(&db.lock().unwrap(), "SELECT COUNT(*) FROM runs"), 0);
 }
 

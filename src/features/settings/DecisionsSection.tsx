@@ -61,8 +61,9 @@ function Stat({ label, value, muted = false }: { label: string; value: string; m
 }
 
 /** O campo da chave: escondida por padrão, com o olho para mostrar e, se já há uma no cofre, o botão de apagar. */
-function KeyField({ label, hint, placeholder, value, onChange, saved, onClear }: {
+function KeyField({ label, hint, placeholder, value, onChange, saved, onClear, clearLabel }: {
   label: string;
+  clearLabel: string;
   hint: string;
   placeholder: string;
   value: string;
@@ -97,7 +98,7 @@ function KeyField({ label, hint, placeholder, value, onChange, saved, onClear }:
           </button>
         </span>
         {saved && (
-          <button type="button" onClick={onClear} className={`${BTN} text-red-600 dark:text-red-300`}>
+          <button type="button" onClick={onClear} title={clearLabel} aria-label={clearLabel} className={`${BTN} text-red-600 dark:text-red-300`}>
             {t("settings.decisions.keyClear")}
           </button>
         )}
@@ -324,8 +325,9 @@ export function DecisionsSection() {
         </SettingsRow>
         <KeyField
           label={t("settings.decisions.key")}
-          hint={settings.keySaved ? t("settings.decisions.key.saved") : t("settings.decisions.keyHint")}
-          placeholder={t("settings.decisions.key.placeholder")}
+          hint={settings.keySaved ? t("settings.decisions.key.saved") : t(settings.provider === "jev" ? "settings.decisions.keyHintRequired" : "settings.decisions.keyHint")}
+          placeholder={t(settings.provider === "jev" ? "settings.decisions.key.placeholderRequired" : "settings.decisions.key.placeholder")}
+          clearLabel={t("settings.decisions.keyClearFor", { provider: providerName(settings.provider) })}
           value={keyDraft}
           onChange={setKeyDraft}
           saved={settings.keySaved}
@@ -377,8 +379,9 @@ export function DecisionsSection() {
             </SettingsRow>
             <KeyField
               label={`${t("settings.decisions.key")} (${t("settings.decisions.compare.provider")})`}
-              hint={settings.secondaryKeySaved ? t("settings.decisions.key.saved") : t("settings.decisions.keyHint")}
-              placeholder={t("settings.decisions.key.placeholder")}
+              hint={settings.secondaryKeySaved ? t("settings.decisions.key.saved") : t(settings.secondaryProvider === "jev" ? "settings.decisions.keyHintRequired" : "settings.decisions.keyHint")}
+              placeholder={t(settings.secondaryProvider === "jev" ? "settings.decisions.key.placeholderRequired" : "settings.decisions.key.placeholder")}
+              clearLabel={t("settings.decisions.keyClearFor", { provider: providerName(settings.secondaryProvider) })}
               value={secondaryKeyDraft}
               onChange={setSecondaryKeyDraft}
               saved={settings.secondaryKeySaved}
@@ -499,7 +502,7 @@ export function DecisionsSection() {
               ) : (
                 <ul className="flex flex-col gap-1 font-mono text-[11.5px] text-gray-700 dark:text-gray-200">
                   {report.disagreements.map((row) => (
-                    <li key={`${row.point}-${row.stateHash}-${row.heuristic}-${row.providerDecision}`} className="break-all">{row.point} {row.stateHash} {row.heuristic} ≠ {row.providerDecision}</li>
+                    <li key={`${row.point}-${row.provider}-${row.stateHash}-${row.heuristic}-${row.providerDecision}`} className="break-all">{providerName(row.provider)} · {row.point} {row.stateHash} {row.heuristic} ≠ {row.providerDecision}</li>
                   ))}
                 </ul>
               )}

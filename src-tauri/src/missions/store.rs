@@ -101,18 +101,18 @@ pub fn validate(conn: &Connection, input: &MissionInput) -> Result<Valid, String
     let objective = input.objective.trim().to_string();
     let cwd = input.cwd.trim().to_string();
     if title.is_empty() {
-        errors.push("falta el título".to_string());
+        errors.push("falta o título".to_string());
     } else if title.chars().count() > MAX_TITLE {
-        errors.push(format!("el título tiene más de {MAX_TITLE} caracteres"));
+        errors.push(format!("o título tem mais de {MAX_TITLE} caracteres"));
     }
     if objective.is_empty() {
-        errors.push("falta el objetivo".to_string());
+        errors.push("falta o objetivo".to_string());
     }
     if cwd.is_empty() {
-        errors.push("falta la carpeta del proyecto".to_string());
+        errors.push("falta a pasta do projeto".to_string());
     }
     if input.budget_usd.is_some_and(|b| !b.is_finite() || b <= 0.0) {
-        errors.push("el presupuesto tiene que ser positivo".to_string());
+        errors.push("o orçamento precisa ser positivo".to_string());
     }
     let squad_id = blank_to_none(&input.squad_id);
     if let Some(id) = &squad_id {
@@ -146,7 +146,7 @@ pub fn validate(conn: &Connection, input: &MissionInput) -> Result<Valid, String
         blank_to_none(&input.lead_model)
     };
     if lead_model.is_some() && lead_agent_id.is_none() {
-        errors.push("un modelo fijo necesita decir de qué agente es".to_string());
+        errors.push("um modelo fixo precisa dizer de qual agente é".to_string());
     }
     if lead_model.is_some() && input.complexity.is_some() {
         errors.push("Specific model and complexity routing cannot be selected together".into());
@@ -228,7 +228,7 @@ pub fn create(conn: &Connection, workspace_id: &str, valid: &Valid) -> Result<Mi
         ],
     )
     .map_err(|e| e.to_string())?;
-    get(conn, &id)?.ok_or_else(|| "la misión no quedó guardada".to_string())
+    get(conn, &id)?.ok_or_else(|| "a missão não foi salva".to_string())
 }
 
 pub fn get(conn: &Connection, id: &str) -> Result<Option<Mission>, String> {
@@ -348,7 +348,7 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
             rusqlite::params![valid.title, now_ts(), id],
         )
         .map_err(|e| e.to_string())?;
-        return get(conn, id)?.ok_or_else(|| "la misión se perdió".to_string());
+        return get(conn, id)?.ok_or_else(|| "a missão se perdeu".to_string());
     }
     // `status = draft` también en el WHERE: si otro la arrancó entre la lectura y acá, la
     // edición no puede cambiarle la configuración a una ejecución ya lanzada.
@@ -381,7 +381,7 @@ pub fn update(conn: &Connection, id: &str, valid: &Valid) -> Result<Mission, Str
     if n == 0 {
         return Err("a missão já começou: só o título pode ser alterado".into());
     }
-    get(conn, id)?.ok_or_else(|| "la misión se perdió".to_string())
+    get(conn, id)?.ok_or_else(|| "a missão se perdeu".to_string())
 }
 
 // ── Ciclo de vida ───────────────────────────────────────────────

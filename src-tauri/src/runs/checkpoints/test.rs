@@ -113,7 +113,7 @@ fn restaurar_una_foto_que_ya_no_esta_falla_sin_tocar_nada() {
     std::fs::write(r.0.join("a.txt"), "cambiado\n").unwrap();
     let head = sh(&r.0, &["rev-parse", "HEAD"]);
     let err = restore(&r.0, "0123456789012345678901234567890123456789", &head).unwrap_err();
-    assert!(err.contains("ya no está"), "{err}");
+    assert!(err.contains("não está mais"), "{err}");
     assert_eq!(read(&r.0, "a.txt").as_deref(), Some("cambiado\n"), "no se perdió nada");
 }
 
@@ -121,7 +121,7 @@ fn restaurar_una_foto_que_ya_no_esta_falla_sin_tocar_nada() {
 fn sin_commits_no_hay_foto_y_lo_dice() {
     let t = Tmp::new("vacio");
     sh(&t.0, &["init", "-q", "-b", "main"]);
-    assert!(snapshot(&t.0, "x", "l").unwrap_err().contains("ningún commit"));
+    assert!(snapshot(&t.0, "x", "l").unwrap_err().contains("nenhum commit"));
     let fuera = Tmp::new("no-repo");
     assert!(snapshot(&fuera.0, "x", "l").is_err());
 }

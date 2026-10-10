@@ -1531,12 +1531,12 @@ fn un_worktree_con_espacios_y_unicode_se_crea_y_se_borra() {
 fn sin_repo_o_sin_commits_se_dice_por_que_no_hay_worktree() {
     let suelta = Tmp::new("suelta");
     let err = worktrees::repo_root(&suelta.0).unwrap_err();
-    assert!(err.contains("no es un repositorio"), "{err}");
+    assert!(err.contains("não é um repositório"), "{err}");
 
     let vacio = Tmp::new("vacio");
     sh_git(&vacio.0, &["init", "-q"]);
     let err = worktrees::repo_root(&vacio.0).unwrap_err();
-    assert!(err.contains("ningún commit"), "{err}");
+    assert!(err.contains("nenhum commit"), "{err}");
 }
 
 /// Un directorio global de skills con una skill, y la carpeta de symlinks de un proyecto
@@ -2219,7 +2219,7 @@ fn un_modelo_que_no_usa_herramientas_nunca_se_elige_aunque_sea_el_mas_barato() {
         "se descartó algo del tramo"
     );
     assert!(
-        a.notes[0].contains("ollama/chiquito") && a.notes[0].contains("herramientas"),
+        a.notes[0].contains("ollama/chiquito") && a.notes[0].contains("ferramentas"),
         "{:?}",
         a.notes
     );
@@ -2258,7 +2258,7 @@ fn con_la_ventana_quemada_cambia_de_cuenta_antes_que_de_modelo() {
     assert_eq!(a.routed_by, RoutedBy::Fallback);
     assert_eq!(
         a.notes,
-        ["la cuenta principal agotó su cupo (se reinicia en 40 min)"]
+        ["a conta principal esgotou a cota (reinicia em 40 min)"]
     );
 }
 
@@ -2279,7 +2279,7 @@ fn con_todas_las_cuentas_quemadas_no_se_lanza_y_dice_por_que() {
     )
     .unwrap_err();
     assert!(
-        err.contains("tramo standard") && err.contains("se reinicia en 10 min"),
+        err.contains("faixa standard") && err.contains("reinicia em 10 min"),
         "{err}"
     );
 }
@@ -2323,7 +2323,7 @@ fn una_cuenta_elegida_sin_sesion_no_se_cambia_por_otra() {
         account: AccountChoice::Fixed(Some("trabajo".into())),
     };
     let err = routing::route(&roster, &Tiers::default(), &pedido, AHORA).unwrap_err();
-    assert!(err.contains("trabajo no tiene sesión"), "{err}");
+    assert!(err.contains("trabajo não tem sessão"), "{err}");
 }
 
 #[test]
@@ -2371,7 +2371,7 @@ fn un_tramo_restringido_a_un_agente_sin_modelos_ahi_lo_dice() {
         ..por_complejidad(Complexity::Hard)
     };
     let err = routing::route(&roster_de_prueba(), &Tiers::default(), &pedido, AHORA).unwrap_err();
-    assert_eq!(err, "el tramo hard no tiene modelos de 'opencode'");
+    assert_eq!(err, "a faixa hard não tem modelos de 'opencode'");
 }
 
 #[test]
@@ -2448,11 +2448,11 @@ fn un_plan_con_errores_se_rechaza_entero_y_dice_todos() {
     ];
     let err = planes::validate(&plan, &Default::default()).unwrap_err();
     for pista in [
-        "'fantasma', que no existe",
-        "'b' no tiene prompt",
-        "sin decir de qué agente",
+        "'fantasma', que não existe",
+        "'b' não tem prompt",
+        "sem dizer de qual agente",
         "'a' está repetida",
-        "no sirve como key",
+        "não serve como key",
     ] {
         assert!(err.contains(pista), "falta «{pista}» en: {err}");
     }
@@ -2480,7 +2480,7 @@ fn se_puede_depender_de_lo_que_el_run_ya_tenia() {
     assert!(
         planes::validate(&[pt("api", &[])], &existing)
             .unwrap_err()
-            .contains("ya la usa")
+            .contains("já é usada")
     );
 }
 
@@ -4167,7 +4167,7 @@ mod politica_del_lead {
 
 #[test]
 fn empty_plan_does_not_count_as_delegation() {
-    assert!(super::plan::validate(&[], &Default::default()).unwrap_err().contains("no tiene tareas"));
+    assert!(super::plan::validate(&[], &Default::default()).unwrap_err().contains("não tem tarefas"));
 }
 
 /// La respuesta real de `account/rateLimits/read` (Codex 0.159, cuenta Plus).
@@ -4590,7 +4590,7 @@ fn un_pool_sin_cuentas_usables_dice_por_que_y_uno_de_otra_tui_se_rechaza() {
         a.logged_in = false;
     }
     let err = elegida(&mut roster, &pool_spec(Strategy::Sticky, &[Some("trabajo"), Some("extra")], 0)).unwrap_err();
-    assert!(err.contains("ninguna cuenta del pool 'Trabajo'") && err.contains("sin sesión") || err.contains("no tiene sesión"), "{err}");
+    assert!(err.contains("nenhuma conta do pool 'Trabajo'") && err.contains("sem sessão") || err.contains("não tem sessão"), "{err}");
 
     let mut roster = claude_con_tres();
     let mut ajeno = pool_spec(Strategy::Sticky, &[Some("trabajo"), Some("extra")], 0);

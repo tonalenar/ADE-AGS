@@ -233,7 +233,7 @@ pub fn wrap(mode: Mode, program: &Path, args: &[String], policy: &Policy) -> Res
     if !status.fs_isolation {
         if mode == Mode::Strict {
             return Err(format!(
-                "sandbox estricto: esta máquina no puede limitar la escritura del agente ({})",
+                "sandbox estrito: esta máquina não consegue limitar a escrita do agente ({})",
                 status.reason.unwrap_or("sin mecanismo")
             ));
         }

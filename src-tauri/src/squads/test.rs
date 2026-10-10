@@ -140,7 +140,7 @@ fn squad_validation_rejects_invalid_names_roles_providers_and_accounts() {
     assert!(
         store::validate(&conn, &invalid)
             .unwrap_err()
-            .contains("no es un provider conocido")
+            .contains("não é um provider conhecido")
     );
 
     invalid = input("Terminal provider");
@@ -148,7 +148,7 @@ fn squad_validation_rejects_invalid_names_roles_providers_and_accounts() {
     assert!(
         store::validate(&conn, &invalid)
             .unwrap_err()
-            .contains("no se puede correr sin terminal")
+            .contains("não roda sem terminal")
     );
 
     invalid = input("Missing account");

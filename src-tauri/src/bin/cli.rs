@@ -18,120 +18,120 @@ const EXIT_USAGE: u8 = 2;
 const EXIT_NO_APP: u8 = 3;
 
 const USAGE: &str = "\
-ags — controla la app ADE AGS desde la terminal
+ags — controla o app ADE AGS pelo terminal
 
 USO
-  ags <grupo> <acción> [valor] [--flag valor ...]
+  ags <grupo> <ação> [valor] [--flag valor ...]
 
-TESTES LOCAIS (no worktree atual, sem precisar da app)
+TESTES LOCAIS (no worktree atual, sem precisar do app)
   test affected [--dry-run] [--force]          Testes afetados desde origin/master + alterações locais
-  test run <frontend|rust|tsc|babel> [--force]  Suite completa; reutiliza verde apenas com árvore limpa
+  test run <frontend|rust|tsc|babel> [--force]  Suíte completa; reutiliza o verde só com a árvore limpa
   test status                                Últimos resultados deste repositório
   test smoke                                 Roteiro fixo do CLI contra o app aberto (tab, mission, peers, memory, --file)
-             [--mission <id>] [--cwd <raiz>]  Contexto opcional para spans de testes
+             [--mission <id>] [--cwd <raiz>]  Contexto opcional para os spans de testes
 
-  El primer valor puede ir suelto, sin su flag:
+  O primeiro valor pode vir solto, sem a flag:
     ags skill install git-helper       =  ags skill install --skill git-helper
-    ags tab send <id> \"corré los tests\" =  ags tab send --tab <id> --text \"...\"
+    ags tab send <id> \"rode os testes\" =  ags tab send --tab <id> --text \"...\"
 
 TABS
-  tab list                                    Tabs abiertas ahora
-  tab create <ruta> --agent <id>              Abre una tab nueva
-             [--skills a,b]                   · skills a adjuntar, por nombre
-             [--account <nombre>]             · cuenta de esa TUI (ver `accounts`)
-             [--pre <comando|guardado>]       · a ejecutar ANTES del agente; repetible
-             [--pre-preset <nombre>]          · fuerza que sea un guardado, no un comando
-             [--initprompt \"...\"]             · prompt inicial, enviado con Enter
-             [--window <label>]                 cuando la TUI terminó de arrancar
-  tab close <id>                              Cierra una tab
-  tab output <id> [--lines 40]                Lo NUEVO desde la lectura anterior,
-             [--full] [--raw]                 comprimido (errores, warnings, cola)
-  tab send <id> \"...\" [--no-enter]            Escribe en su terminal (+ Enter) —
-                                              así se sigue la conversación con
-                                              una tab que ya está abierta
+  tab list                                    Tabs abertas agora
+  tab create <caminho> --agent <id>           Abre uma tab nova
+             [--skills a,b]                   · skills a anexar, por nome
+             [--account <nome>]               · conta dessa TUI (veja `accounts`)
+             [--pre <comando|salvo>]          · a executar ANTES do agente; repetível
+             [--pre-preset <nome>]            · força que seja um item salvo, não um comando
+             [--initprompt \"...\"]             · prompt inicial, enviado com Enter
+             [--window <label>]                 quando a TUI terminou de iniciar
+  tab close <id>                              Fecha uma tab
+  tab output <id> [--lines 40]                O que é NOVO desde a leitura anterior,
+             [--full] [--raw]                 comprimido (erros, avisos, final)
+  tab send <id> \"...\" [--no-enter]            Escreve no terminal dela (+ Enter) —
+                                              assim a conversa segue com
+                                              uma tab que já está aberta
 
-AGENTES CONECTADOS (canvas) — solo alcanza a los conectados con esta terminal
-  peers                                       Quién está conectado con vos
-  peer ask <nombre> \"...\" [--timeout 600]    Le pregunta y ESPERA su respuesta
-  peer tell <nombre> \"...\"                    Le avisa algo, sin esperar
-  peer tell <nombre> --file <ruta>            Lo mismo, con el texto en un archivo (sin líos de comillas en Windows)
-  peer ask <nombre> --file <ruta>             Lo mismo que ask, con la pregunta en un archivo
-             (ask/tell --raw: el texto tal cual, sin el encabezado \"[Mensagem de ...]\"; para
-              mandarle a una TUI un comando suyo, p. ej. /compact o /clear)
-  peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'  Le pregunta a varios A LA VEZ y espera a todos
-  peer check <nombre> [--lines 60]            Lo que se ve ahora en su terminal
-  notify \"mensaje\"                            Avisa al usuario (aviso en pantalla; barra de tareas)
-  Solo orquestadores (corona en el canvas):
-  peer recruit <nombre> [--agent <id>]        Abre un agente nuevo, ya conectado
-              [--prompt \"...\"] [--account <n>]  · con su primera tarea
-              [--role <papel>]                  · con un papel (ver roles)
-              [--model <id>] [--effort <nivel>] · con ese modelo y esfuerzo (ej.: --model gpt-6.1-luna --effort max)
-                                                Sin ellos, usa el subagente padrão del Squad de la misión (si lo hay);
-                                                --model/--effort explícitos siempre ganan. Sin --agent, el del padrão
-              [--fast]                          · modo Fast del Codex (solo --agent codex)
-              [--floor <piso>]                  · en ese piso (o `ground`, la planta baja)
-  peer connect <a> <b>                        Conecta dos agentes del equipo
-  peer disconnect <a> <b>                     Los desconecta
+AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
+  peers                                       Quem está conectado a você
+  peer ask <nome> \"...\" [--timeout 600]      Pergunta e ESPERA a resposta
+  peer tell <nome> \"...\"                      Avisa algo, sem esperar
+  peer tell <nome> --file <caminho>           O mesmo, com o texto em um arquivo (sem confusão de aspas no Windows)
+  peer ask <nome> --file <caminho>            O mesmo que ask, com a pergunta em um arquivo
+             (ask/tell --raw: o texto como está, sem o cabeçalho \"[Mensagem de ...]\"; para
+              mandar a uma TUI um comando dela, p. ex. /compact ou /clear)
+  peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'  Pergunta a vários AO MESMO TEMPO e espera todos
+  peer check <nome> [--lines 60]              O que aparece agora no terminal dele
+  notify \"mensagem\"                           Avisa o usuário (aviso na tela; barra de tarefas)
+  Só orquestradores (coroa no canvas):
+  peer recruit <nome> [--agent <id>]          Abre um agente novo, já conectado
+              [--prompt \"...\"] [--account <n>]  · com a primeira tarefa
+              [--role <papel>]                  · com um papel (veja roles)
+              [--model <id>] [--effort <nível>] · com esse modelo e esforço (ex.: --model gpt-6.1-luna --effort max)
+                                                Sem eles, usa o subagente padrão do Squad da missão (se houver);
+                                                --model/--effort explícitos sempre vencem. Sem --agent, o do padrão
+              [--fast]                          · modo Fast do Codex (só --agent codex)
+              [--floor <andar>]                 · nesse andar (ou `ground`, o térreo)
+  peer connect <a> <b>                        Conecta dois agentes da equipe
+  peer disconnect <a> <b>                     Desconecta os dois
 
 CORREÇÕES — teto de rodadas da mesma entrega (canvas e frota)
   fix list <escopo>                           Entregas e quantas rodadas cada uma usou
   fix decide <escopo> <trabalho> <ação>       accept | extra | abort
               [--task <id>]                   escopo: run:<id> ou mission:<id>
 
-POOLS DE CUENTAS — repartir entre varias cuentas de una TUI con una estrategia
-  pools                                       Los pools creados, con sus cuentas y su estrategia
-  pool create <nombre> --agent <id> --accounts principal,trabajo [--strategy least-used|round-robin|sticky]
-  pool delete <nombre>
-  Se piden donde iría una cuenta: tab create --agent claude-code --account pool:Trabajo, o el
-  \"account\" de una tarea de un plan / de un miembro de un Squad (pool:Trabajo).
+POOLS DE CONTAS — repartir entre várias contas de uma TUI com uma estratégia
+  pools                                       Os pools criados, com suas contas e sua estratégia
+  pool create <nome> --agent <id> --accounts principal,trabalho [--strategy least-used|round-robin|sticky]
+  pool delete <nome>
+  Pedem-se onde iria uma conta: tab create --agent claude-code --account pool:Trabalho, ou o
+  \"account\" de uma tarefa de um plano / de um membro de um Squad (pool:Trabalho).
 
-DISPOSITIVOS ANDROID DEL CANVAS — un emulador o teléfono conectado con esta terminal (por adb)
-  devices                                     Los que manejás, lo que adb ve y los emuladores (AVD)
-  device create [<nombre>] [--avd <avd>]      Crea uno a tu lado, ya conectado
-  device start <dispositivo> [--avd <avd>]    Arranca su emulador y espera a que termine de iniciar
-  device tap <dispositivo> --x N --y N        Toca · o --text \"Entrar\" (busca el elemento en pantalla)
-  device swipe <dispositivo> --dir up|down|left|right   · o --x1 --y1 --x2 --y2 [--ms 300]
-  device type <dispositivo> \"texto\"          Escribe (solo ASCII) · device key <d> back|home|enter|...
-  device launch <dispositivo> <paquete>       Abre una app (com.android.settings)
-  device shot|tree <dispositivo>              Captura (devuelve la ruta del PNG) · elementos con su texto y dónde tocar
+DISPOSITIVOS ANDROID DO CANVAS — um emulador ou telefone conectado a este terminal (por adb)
+  devices                                     Os que você controla, o que o adb vê e os emuladores (AVD)
+  device create [<nome>] [--avd <avd>]        Cria um ao seu lado, já conectado
+  device start <dispositivo> [--avd <avd>]    Liga o emulador e espera terminar de iniciar
+  device tap <dispositivo> --x N --y N        Toca · ou --text \"Entrar\" (procura o elemento na tela)
+  device swipe <dispositivo> --dir up|down|left|right   · ou --x1 --y1 --x2 --y2 [--ms 300]
+  device type <dispositivo> \"texto\"          Digita (só ASCII) · device key <d> back|home|enter|...
+  device launch <dispositivo> <pacote>        Abre um app (com.android.settings)
+  device shot|tree <dispositivo>              Captura (devolve o caminho do PNG) · elementos com seu texto e onde tocar
 
-PORTALES DEL CANVAS — navegadores conectados con esta terminal (orquestador: los del equipo)
-  portals                                     Los portales que manejás
-  portal create [<nombre>] [<url>]            Crea uno a tu lado, ya conectado
-  portal navigate <portal> <url>              Va a una URL
-  portal snapshot <portal> [--full]           El árbol de la página, con refs (@e3)
-  portal click|hover <portal> <@ref|selector>
+PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os da equipe)
+  portals                                     Os portais que você controla
+  portal create [<nome>] [<url>]              Cria um ao seu lado, já conectado
+  portal navigate <portal> <url>              Vai a uma URL
+  portal snapshot <portal> [--full]           A árvore da página, com refs (@e3)
+  portal click|hover <portal> <@ref|seletor>
   portal type <portal> <@ref> \"texto\" [--clear] [--submit]
   portal press <portal> <tecla> [--target <ref>]   · scroll · select · wait · history
-  portal screenshot|console|layout <portal>   Foto, consola y medidas
-                                              (sin eval, upload ni cookies: eso es del usuario)
+  portal screenshot|console|layout <portal>   Foto, console e medidas
+                                              (sem eval, upload nem cookies: isso é do usuário)
 
-CHAT CON EL USUARIO — su chat por hilos (siete colores); lo que escribís en la terminal NO le llega
-  say \"texto\" [--progress] [--thread <color>]  Le contestás en el chat (--progress: aviso, tu turno sigue)
-      [--file <ruta>]                         · el texto desde un archivo
-  recall [<color>|list] [--turns 10 | --all]  Lo que se habló en un hilo (list: los hilos con actividad)
+CHAT COM O USUÁRIO — o chat dele por conversas (sete cores); o que você escreve no terminal NÃO chega a ele
+  say \"texto\" [--progress] [--thread <cor>]    Responde no chat (--progress: aviso, seu turno continua)
+      [--file <caminho>]                      · o texto a partir de um arquivo
+  recall [<cor>|list] [--turns 10 | --all]   O que foi dito numa conversa (list: as conversas com atividade)
 
-ROTINAS — mensajes a la hora, a vos, a un agente que alcanzás o al usuario
-  routines                                    Las tuyas (en un shell: todas)
-  routine create <nombre> \"texto\" <cuándo>   · --every 30m | --at 09:00 [--days seg,qua] | --in 45m
-              [--to <agente>] [--remind]      · a quién: vos (default), otro agente, o --remind al usuario
-              [--catch-up]                    · si la app estaba cerrada a la hora, corre UNA vez al abrir (diaria/única, hasta 24 h)
-  routine show|run|enable|disable|delete <nombre>
-  routine edit <nombre> [\"texto\"] [--rename <n>] [<cuándo>] [--catch-up|--no-catch-up]
-                                              (mínimo 5 min; las de intervalo no recuperan lo perdido con la app cerrada)
+ROTINAS — mensagens na hora marcada, para você, para um agente que você alcança ou para o usuário
+  routines                                    As suas (num shell: todas)
+  routine create <nome> \"texto\" <quando>      · --every 30m | --at 09:00 [--days seg,qua] | --in 45m
+              [--to <agente>] [--remind]      · para quem: você (padrão), outro agente, ou --remind ao usuário
+              [--catch-up]                    · se o app estava fechado na hora, roda UMA vez ao abrir (diária/única, até 24 h)
+  routine show|run|enable|disable|delete <nome>
+  routine edit <nome> [\"texto\"] [--rename <n>] [<quando>] [--catch-up|--no-catch-up]
+                                              (mínimo 5 min; as de intervalo não recuperam o perdido com o app fechado)
 
-PISOS — copias aisladas del proyecto (worktree + rama + canvas propio)
-  floors                                      Los pisos de este proyecto y en cuál estás
-  floor create <nombre> [--from <rama>]       Solo orquestadores; parte de HEAD o de esa rama
-                                              (borrarlos queda en manos del usuario)
+ANDARES — cópias isoladas do projeto (worktree + branch + canvas próprio)
+  floors                                      Os andares deste projeto e em qual você está
+  floor create <nome> [--from <branch>]       Só orquestradores; parte do HEAD ou dessa branch
+                                              (apagá-los fica com o usuário)
 
-PAPELES (para recrutar con --role)
-  roles                                       Los papeles: catálogo + los del usuario
-  role show <papel>                           Sus instrucciones
-  role create <nombre> \"instrucciones\"        Solo orquestadores; también --file <ruta>
-  role edit <papel> \"instrucciones\" [--name]  Solo orquestadores; el catálogo no se edita
+PAPÉIS (para recrutar com --role)
+  roles                                       Os papéis: catálogo + os do usuário
+  role show <papel>                           As instruções dele
+  role create <nome> \"instruções\"             Só orquestradores; também --file <caminho>
+  role edit <papel> \"instruções\" [--name]     Só orquestradores; o catálogo não se edita
 
-NOTAS DEL CANVAS — las conectadas con esta terminal (orquestador: las del equipo)
+NOTAS DO CANVAS — as conectadas a este terminal (orquestrador: as da equipe)
   design create <title> [--workspace <path>] [--mission-id <id>] [--owner-tab-id <id>]
   design list [--workspace <path>] | get <designId>
   design delete <designId> | archive <designId>
@@ -142,147 +142,147 @@ NOTAS DEL CANVAS — las conectadas con esta terminal (orquestador: las del equi
   design comment <artboardId> <text> [--author user|agent] [--selector <css>]
   design approve|reject <artboardId> | approve all <designId>
   design revert <artboardId> --version <n>
-  notes                                       Las notas que alcanzás
-  note create [\"texto\"] [--name <n>]          Crea una nota a tu lado, ya conectada
-              [--stack <nota>]                · en vez de al lado: dentro de la pila de esa nota (comparten lugar)
-              [--file <ruta>]                 · el contenido desde un archivo
-  note read <nota> [desde] [cantidad]         La lee con números de línea
-  note write <nota> \"texto\" [--file <ruta>]   Reemplaza todo el contenido
-  note edit <nota> \"viejo\" \"nuevo\"           Cambia un trecho que aparece UNA vez
+  notes                                       As notas que você alcança
+  note create [\"texto\"] [--name <n>]          Cria uma nota ao seu lado, já conectada
+              [--stack <nota>]                · em vez de ao lado: dentro da pilha dessa nota (dividem o lugar)
+              [--file <caminho>]              · o conteúdo a partir de um arquivo
+  note read <nota> [desde] [quantidade]       Lê com números de linha
+  note write <nota> \"texto\" [--file <caminho>]  Substitui todo o conteúdo
+  note edit <nota> \"antigo\" \"novo\"           Troca um trecho que aparece UMA vez
 
-OBSERVAR TABS (modo push — evita el polling)
-  watch add <id> [--idle 20]                  Empieza a observar una tab
-  watch remove <id>                           Deja de observarla
-  watch list                                  Tabs observadas y el límite vigente
-  watch wait [--timeout 300] [--max 20]       Espera a que alguna tenga novedades
+OBSERVAR TABS (modo push — evita o polling)
+  watch add <id> [--idle 20]                  Começa a observar uma tab
+  watch remove <id>                           Para de observá-la
+  watch list                                  Tabs observadas e o limite vigente
+  watch wait [--timeout 300] [--max 20]       Espera até alguma ter novidades
 
-EVENTOS (el bus de la flota y las misiones)
-  events since [--after <seq>] [filtros]      Lo que pasó después de ese número
+EVENTOS (o barramento da frota e das missões)
+  events since [--after <seq>] [filtros]      O que aconteceu depois desse número
   events wait --after <seq> [--timeout 60] [filtros]
-                                              Espera al próximo evento (sin polling)
+                                              Espera o próximo evento (sem polling)
   Filtros: --topics task.,mission. --run <id> --mission <id> --task <id> --limit 100
 
-MISIONES (también sin interfaz: `ade-ags --headless`)
+MISSÕES (também sem interface: `ade-ags --headless`)
   mission run --objective \"...\" --cwd . [--test] [--wait] [--timeout 3600]
               [--title ...] [--agent claude-code] [--model ...] [--account <id>]
               [--squad <id>] [--budget 5] [--max-parallel 2]
-                                              Crea, arranca y espera; sale con 1 si falla
-  mission create --objective \"...\" --cwd .   Solo crea el borrador (mismos flags que run, sin --wait)
-  mission start|status|wait <id>              Paso a paso (wait: --timeout)
+                                              Cria, inicia e espera; sai com 1 se falhar
+  mission create --objective \"...\" --cwd .    Só cria o rascunho (mesmas flags do run, sem --wait)
+  mission start|status|wait <id>              Passo a passo (wait: --timeout)
   mission create|run|start ... --test          Marca explicitamente teste/E2E (fora da taxa de sucesso)
-  mission review <id>                         Lo que entregó cada tarea aislada
-  mission timings <id>                        Tiempo activo, delegación, alertas/esperas del orquestador y tiempo hasta todos trabajando
-  mission efficiency <id>                     Tiempo activo unificado (mission_active > spans > reloj), costo e histórico por agentes
-  mission cleanup <id> [--dry-run]             Limpia worktrees y ramas integradas de una misión cerrada
-  worktrees list [--cwd <ruta>]                Worktrees gestionados, tamaño y bloqueos de limpieza
-  worktrees prune [--cwd <ruta>] [--dry-run]    Limpia misiones cerradas integradas; conserva huérfanos para revisión
-  mission precheck <id>                       Lo que el repositorio y las misiones anteriores ya dicen del objetivo
-  mission startcheck <id>                     Evidencia de briefing y actividad por agente; límite de 2 minutos
+  mission review <id>                         O que cada tarefa isolada entregou
+  mission timings <id>                        Tempo ativo, delegação, alertas/esperas do orquestrador e tempo até todos trabalharem
+  mission efficiency <id>                     Tempo ativo unificado (mission_active > spans > relógio), custo e histórico por agente
+  mission cleanup <id> [--dry-run]             Limpa worktrees e branches integrados de uma missão encerrada
+  worktrees list [--cwd <caminho>]             Worktrees gerenciados, tamanho e bloqueios de limpeza
+  worktrees prune [--cwd <caminho>] [--dry-run]  Limpa missões encerradas integradas; mantém órfãos para revisão
+  mission precheck <id>                       O que o repositório e as missões anteriores já dizem sobre o objetivo
+  mission startcheck <id>                     Evidência de briefing e atividade por agente; limite de 2 minutos
   memory search \"<tema>\" --mission <id> [--limit 5] [--at <YYYY-MM-DD|YYYY-MM-DDTHH:MM|unix-seconds>]
-                                              Busca memoria vigente ahora o en ese instante (fechas en UTC)
-  memory history --mission <id> --key <nombre> --scope workspace|mission
-                                              Revisiones aprobadas y sus intervalos de validez
-  memory suggest --mission <id> --key <nombre> --body \"...\" [--scope workspace|mission]
+                                              Busca a memória vigente agora ou nesse instante (datas em UTC)
+  memory history --mission <id> --key <nome> --scope workspace|mission
+                                              Revisões aprovadas e seus intervalos de validade
+  memory suggest --mission <id> --key <nome> --body \"...\" [--scope workspace|mission]
                  [--kind decision|constraint|finding|file|note] [--priority 0-3]
-                                              SUGIERE una memoria (queda pendiente; la aprueba el usuario)
-  mission accept <id> <tarea>                 La junta en la integración de la misión
-  mission apply <id>                          Lleva lo aceptado al proyecto
+                                              SUGERE uma memória (fica pendente; o usuário aprova)
+  mission accept <id> <tarefa>                Junta na integração da missão
+  mission apply <id>                          Leva o aceito para o projeto
   mission redeliver <id> [--pr <N>] [--test passed|failed|not_run]
                                               Reavalia entrega no repo origin (só promove se PR mesclado e CI verde)
-  approval list                               Pedidos de permiso esperando
+  approval list                               Pedidos de permissão esperando
   approval decide <id> --allow|--deny [--remember]
 
-VENTANAS
-  window list                                 Ventanas abiertas
-  window create                               Abre una ventana nueva
+JANELAS
+  window list                                 Janelas abertas
+  window create                               Abre uma janela nova
 
 WORKSPACES
-  workspace list                              Workspaces guardados
-  workspace open <id|nombre>                  Abre uno
+  workspace list                              Workspaces salvos
+  workspace open <id|nome>                    Abre um
                  [--close-current]
-  workspace status                            Qué hay abierto ahora
+  workspace status                            O que está aberto agora
 
-FLOTA (agentes headless, los de la consola)
-  run roster                                  Qué agentes, modelos y cuentas pueden
-                                              correr ahora, con costo y cupo
-  run status [--cwd <ruta>] [--run-id <id>]   El tablero del run: cada tarea con su
-                                              estado, modelo, costo y de qué depende
-  run result --task <key|id> [--run-id <id>]  Todo lo que entregó una tarea
-  run await [--timeout-s 300]                 Bloquea hasta que una tarea cierre
-  run facts [--run-id <id>]                   Lo que los agentes se dejaron escrito
-  run add-fact --kind decision --body \"...\"   Comparte un dato con todo el run
-  run cancel-task --task <key|id>             Para una, o saca de la cola una que espera
-  run reroute-task --task <key|id>            Se la pasa a otro agente, con lo que el
-                  [--agent <id>] [--model <m>] anterior ya hizo; misma rama y worktree
-  run plan --json-args '{\"objective\":\"...\",  Declara el DAG entero de una vez
-           \"tasks\":[{...}]}'                  (más cómodo desde un agente: run_plan)
+FROTA (agentes headless, os do console)
+  run roster                                  Quais agentes, modelos e contas podem
+                                              rodar agora, com custo e cota
+  run status [--cwd <caminho>] [--run-id <id>]  O quadro do run: cada tarefa com seu
+                                              estado, modelo, custo e do que depende
+  run result --task <key|id> [--run-id <id>]  Tudo o que uma tarefa entregou
+  run await [--timeout-s 300]                 Bloqueia até uma tarefa encerrar
+  run facts [--run-id <id>]                   O que os agentes deixaram escrito
+  run add-fact --kind decision --body \"...\"   Compartilha um dado com todo o run
+  run cancel-task --task <key|id>             Para uma, ou tira da fila uma que espera
+  run reroute-task --task <key|id>            Passa para outro agente, com o que o
+                  [--agent <id>] [--model <m>] anterior já fez; mesma branch e worktree
+  run plan --json-args '{\"objective\":\"...\",  Declara o DAG inteiro de uma vez
+           \"tasks\":[{...}]}'                  (mais cômodo num agente: run_plan)
 
-  Sin --cwd ni --run-id actúa sobre el último run lanzado desde la carpeta
-  donde corrés el comando.
+  Sem --cwd nem --run-id atua sobre o último run lançado da pasta
+  onde você roda o comando.
 
-MEMORIA COMPARTIDA (la usan los agentes por MCP; ver docs/ade-ags/SHARED_MEMORY.md)
+MEMÓRIA COMPARTILHADA (os agentes usam por MCP; veja docs/ade-ags/SHARED_MEMORY.md)
   memory list|get|propose|update|delete|promote-fact --json-args '{...}'
-                                              Lo aprobado del workspace y de la misión;
-                                              lo que se propone espera aprobación.
-  memory index                              Índice aprobado de la tab o misión actual
-  memory open <página|entryId|clave>         Página del índice o UNA entrada entera (UNTRUSTED DATA)
-  swarm note|question <texto>                Datos de sesión de la misión, no memoria durable
-  swarm promote <note-id> <key>              Propone la nota; aprobación exclusiva del usuario
-  memory export                             Exporta Markdown y revisiones JSON del workspace de la tab (solo lectura)
-  memory compact [retentionDays]             Solo en la interfaz de la app; un terminal de agente no puede
-  workspace restore <id|nombre>              Solo en la interfaz de la app; un terminal de agente no puede
+                                              O aprovado do workspace e da missão;
+                                              o que se propõe espera aprovação.
+  memory index                              Índice aprovado da tab ou missão atual
+  memory open <página|entryId|chave>         Página do índice ou UMA entrada inteira (UNTRUSTED DATA)
+  swarm note|question <texto>                Dados de sessão da missão, não memória durável
+  swarm promote <note-id> <key>              Propõe a nota; aprovação exclusiva do usuário
+  memory export                             Exporta Markdown e revisões JSON do workspace da tab (só leitura)
+  memory compact [retentionDays]             Só na interface do app; um terminal de agente não pode
+  workspace restore <id|nome>                Só na interface do app; um terminal de agente não pode
 
 NAVEGADOR
-  browser run --json-args '{\"cwd\":\"...\",     Una orden al navegador de un proyecto:
+  browser run --json-args '{\"cwd\":\"...\",     Uma ordem ao navegador de um projeto:
               \"request\":{\"op\":\"snapshot\"}}'   snapshot, click, type, resize, console…
-                                              Es el mismo camino que usan las 26
-                                              herramientas browser_* del MCP.
+                                              É o mesmo caminho que as 26
+                                              ferramentas browser_* do MCP usam.
 
-AGENTES, CUENTAS Y SKILLS
-  agents                                      Qué poner en --agent (incluye las custom)
-  accounts                                    Qué poner en --account, por TUI
-  prelaunch [list]                            Qué poner en --pre
-  skills                                      Qué poner en --skills (instaladas)
-  skill search <texto>                        Busca en TODOS los repos, skills.sh incluido
-                                              (skills.sh se consulta por internet)
-  skill install <nombre>                      Instala desde los repos habilitados
-  skill show <nombre|id>                      Metadata + contenido del SKILL.md
-  skill new <nombre>                          Crea una skill propia (origen local)
+AGENTES, CONTAS E SKILLS
+  agents                                      O que pôr em --agent (inclui os custom)
+  accounts                                    O que pôr em --account, por TUI
+  prelaunch [list]                            O que pôr em --pre
+  skills                                      O que pôr em --skills (instaladas)
+  skill search <texto>                        Busca em TODOS os repositórios, skills.sh incluído
+                                              (o skills.sh é consultado pela internet)
+  skill install <nome>                        Instala dos repositórios habilitados
+  skill show <nome|id>                        Metadados + conteúdo do SKILL.md
+  skill new <nome>                            Cria uma skill própria (origem local)
              [--description ...] [--categories a,b] [--agents a,b]
-             [--file <ruta> | --content \"...\"]
-  skill edit <nombre|id>                      Guarda contenido nuevo
-             [--file <ruta> | --content \"...\"] [--name <nuevo>] [--copy]
+             [--file <caminho> | --content \"...\"]
+  skill edit <nome|id>                        Salva conteúdo novo
+             [--file <caminho> | --content \"...\"] [--name <novo>] [--copy]
 
-SERVIDOR MCP (no lo escribís vos: lo lanza la app)
-  mcp --cwd <carpeta> [--tab <id>]            El puente de una tab interactiva
-  mcp --task <id-de-tarea>                    El de una tarea de la flota
+SERVIDOR MCP (não é você quem digita: o app o inicia)
+  mcp --cwd <pasta> [--tab <id>]              A ponte de uma tab interativa
+  mcp --task <id-da-tarefa>                   A de uma tarefa da frota
 
-  A diferencia del resto, esto NO devuelve una línea JSON: se queda tomado de stdin
-  y stdout hablando JSON-RPC con el agente que lo lanzó. Es el servidor `ade-ags`
-  que le da sus herramientas: el navegador del proyecto, la orquestación de la flota,
-  la cuenta de git del usuario (PRs, issues, push/pull), preguntarle algo al usuario,
-  y —solo con --task— el permiso de cada acción.
+  Diferente do resto, isto NÃO devolve uma linha JSON: fica preso no stdin
+  e no stdout falando JSON-RPC com o agente que o iniciou. É o servidor `ade-ags`
+  que dá a ele suas ferramentas: o navegador do projeto, a orquestração da frota,
+  a conta de git do usuário (PRs, issues, push/pull), perguntar algo ao usuário,
+  e —só com --task— a permissão de cada ação.
 
-  La app se lo agrega sola al comando de cada tab de Claude Code, con un
-  `--mcp-config` escrito en ~/.ags/mcp/. No hace falta instalar la CLI para
-  que funcione: el archivo apunta al binario que viene adentro de la app.
+  O app o adiciona sozinho ao comando de cada tab do Claude Code, com um
+  `--mcp-config` escrito em ~/.ags/mcp/. Não precisa instalar o CLI para
+  funcionar: o arquivo aponta para o binário que vem dentro do app.
 
-OTROS
-  app status                                  Versión y estado de la app
-  --json-args '{...}'                         Pasa argumentos crudos en JSON
-  --version                                   Versión de esta CLI y del protocolo
+OUTROS
+  app status                                  Versão e estado do app
+  --json-args '{...}'                         Passa argumentos crus em JSON
+  --version                                   Versão deste CLI e do protocolo
 
-`agents`, `accounts` y `skills` son atajos de `agent list`, `account list` y `skill list`.
-Editar una skill que vino de un repositorio NO la pisa: guarda una copia de origen local y
-deja la original recibiendo actualizaciones. `--copy` fuerza esa copia también para una
-skill propia. `--file` se lee desde el directorio donde corrés el comando.
-Sin --account, la tab usa la cuenta principal (la de siempre).
---pre se repite sin límite y sus valores corren EN EL ORDEN ESCRITO; si uno falla, el
-agente no arranca. Cada valor puede ser el nombre de un guardado o un comando literal:
-  ags tab create --cwd . --agent claude-code --pre \"entorno conda\" --pre \"nvm use\"
+`agents`, `accounts` e `skills` são atalhos de `agent list`, `account list` e `skill list`.
+Editar uma skill que veio de um repositório NÃO a sobrescreve: guarda uma cópia de origem local e
+deixa a original recebendo atualizações. `--copy` força essa cópia também para uma
+skill própria. `--file` é lido a partir do diretório onde você roda o comando.
+Sem --account, a tab usa a conta principal (a de sempre).
+--pre se repete sem limite e seus valores rodam NA ORDEM ESCRITA; se um falhar, o
+agente não inicia. Cada valor pode ser o nome de um item salvo ou um comando literal:
+  ags tab create --cwd . --agent claude-code --pre \"ambiente conda\" --pre \"nvm use\"
 
-La salida siempre es una línea JSON en stdout (salvo `mcp`, que habla JSON-RPC).
-Códigos de salida: 0 ok · 1 el comando falló · 2 uso incorrecto · 3 la app no corre
+A saída é sempre uma linha JSON no stdout (exceto `mcp`, que fala JSON-RPC).
+Códigos de saída: 0 ok · 1 o comando falhou · 2 uso incorreto · 3 o app não está rodando
 ";
 
 pub(crate) fn main() -> ExitCode {
@@ -332,7 +332,7 @@ pub(crate) fn main() -> ExitCode {
         }
         None => {
             if args.len() < 2 {
-                eprintln!("Falta la acción para '{}'. Probá: ags --help", args[0]);
+                eprintln!("Falta a ação para '{}'. Tente: ags --help", args[0]);
                 return ExitCode::from(EXIT_USAGE);
             }
             (format!("{}.{}", args[0], args[1]), &args[2..])
@@ -807,18 +807,18 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
     while i < args.len() {
         let raw = &args[i];
         let Some(key) = raw.strip_prefix("--") else {
-            return Err(format!("Argumento inesperado '{raw}' (los flags empiezan con --)"));
+            return Err(format!("Argumento inesperado '{raw}' (as flags começam com --)"));
         };
 
         // Escotilla para lo que el parseo simple no cubra (objetos anidados, etc.).
         if key == "json-args" {
-            let value = args.get(i + 1).ok_or("--json-args necesita un valor")?;
+            let value = args.get(i + 1).ok_or("--json-args precisa de um valor")?;
             let extra: Value = serde_json::from_str(value)
-                .map_err(|e| format!("--json-args no es JSON válido: {e}"))?;
+                .map_err(|e| format!("--json-args não é um JSON válido: {e}"))?;
             if let Value::Object(obj) = extra {
                 map.extend(obj);
             } else {
-                return Err("--json-args tiene que ser un objeto JSON".to_string());
+                return Err("--json-args precisa ser um objeto JSON".to_string());
             }
             i += 2;
             continue;
@@ -837,7 +837,7 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
             let value = args
                 .get(i + 1)
                 .filter(|v| !v.starts_with("--"))
-                .ok_or_else(|| format!("--{key} necesita un valor"))?;
+                .ok_or_else(|| format!("--{key} precisa de um valor"))?;
             let step = if key == "pre" {
                 json!({ "pre": value })
             } else {
@@ -883,14 +883,14 @@ fn inline_file(args: Value, command: &str) -> Result<Value, String> {
     let Value::Object(mut map) = args else { return Ok(args) };
     let Some(file) = map.remove("file") else { return Ok(Value::Object(map)) };
     let Some(path) = file.as_str() else {
-        return Err("--file necesita una ruta".to_string());
+        return Err("--file precisa de um caminho".to_string());
     };
     let field = text_field(command);
     if map.contains_key(field) {
-        return Err(format!("Usá --file o --{field}, no los dos"));
+        return Err(format!("Use --file ou --{field}, não os dois"));
     }
-    let bytes = std::fs::read(path).map_err(|e| format!("No se pudo leer {path}: {e}"))?;
-    let content = decode_text_file(&bytes).map_err(|e| format!("No se pudo leer {path}: {e}"))?;
+    let bytes = std::fs::read(path).map_err(|e| format!("Não foi possível ler {path}: {e}"))?;
+    let content = decode_text_file(&bytes).map_err(|e| format!("Não foi possível ler {path}: {e}"))?;
     map.insert(field.to_string(), Value::String(content));
     Ok(Value::Object(map))
 }
@@ -1075,20 +1075,20 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
     let path = client_handshake_path();
     let raw = std::fs::read_to_string(&path).map_err(|_| {
         CliError::not_yet(format!(
-            "ADE AGS no parece estar corriendo (no se encontró {}). Abrí la app y volvé a intentar.",
+            "O ADE AGS não parece estar em execução (não encontrei {}). Abra o app e tente de novo.",
             path.display()
         ))
     })?;
 
     // Reintentable: la app lo reescribe sola si quedó mal (ver `ipc::server::watch_handshakes`).
     let handshake: Handshake = serde_json::from_str(&raw)
-        .map_err(|e| CliError::not_yet(format!("El archivo de handshake {} está corrupto ({e}); reiniciá la app", path.display())))?;
+        .map_err(|e| CliError::not_yet(format!("O arquivo de handshake {} está corrompido ({e}); reinicie o app", path.display())))?;
 
     if handshake.protocol != PROTOCOL_VERSION {
         // A propósito NO es reintentable: esperar no cambia la versión de nadie.
         return Err(CliError::new(
             format!(
-                "La app habla el protocolo v{} y esta CLI la v{PROTOCOL_VERSION}. Actualizá la que haya quedado vieja.",
+                "O app fala o protocolo v{} e este CLI, o v{PROTOCOL_VERSION}. Atualize o que ficou antigo.",
                 handshake.protocol
             ),
             EXIT_NO_APP,
@@ -1102,7 +1102,7 @@ fn send(command: &str, args: Value) -> Result<Response, CliError> {
         if e.retryable { CliError::not_yet(e.message) } else { CliError::new(e.message, EXIT_NO_APP) }
     })?;
 
-    serde_json::from_str(&line).map_err(|e| CliError::new(format!("Respuesta ilegible de la app: {e}"), EXIT_NO_APP))
+    serde_json::from_str(&line).map_err(|e| CliError::new(format!("Resposta ilegível do app: {e}"), EXIT_NO_APP))
 }
 
 /// `ags mcp`: el puente MCP de un agente. Con `--task` es el de una tarea de la flota
@@ -1124,7 +1124,7 @@ fn parse_mcp_args(args: &[String]) -> Result<(ade_ags_lib::ipc::mcp::McpContext,
         match flag.as_str() {
             name @ ("--task" | "--cwd" | "--tab" | "--mission" | "--role" | "--prefix") => {
                 let Some(value) = rest.next() else {
-                    return Err(format!("Falta el valor de {name}"));
+                    return Err(format!("Falta o valor de {name}"));
                 };
                 flags.insert(name, value.clone());
             }
@@ -1143,7 +1143,7 @@ fn parse_mcp_args(args: &[String]) -> Result<(ade_ags_lib::ipc::mcp::McpContext,
             role: flags.remove("--role"),
         },
         (None, None) => {
-            return Err("Uso: ags mcp --task <id-de-tarea> | --cwd <carpeta> [--tab <id-de-tab>] [--mission <id>] [--role <papel>] [--prefix <prefijo>]".into());
+            return Err("Uso: ags mcp --task <id-da-tarefa> | --cwd <pasta> [--tab <id-da-tab>] [--mission <id>] [--role <papel>] [--prefix <prefixo>]".into());
         }
     };
     // Lo que esta TUI le antepone al nombre de cada tool. Vacío = no antepone nada.
@@ -1171,7 +1171,7 @@ fn run_mcp(args: &[String]) -> ExitCode {
             if response.ok {
                 Ok(response.data.unwrap_or(Value::Null))
             } else {
-                Err(response.error.unwrap_or_else(|| "la app rechazó el pedido".into()))
+                Err(response.error.unwrap_or_else(|| "o app recusou o pedido".into()))
             }
         },
     );

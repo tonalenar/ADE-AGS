@@ -68,7 +68,7 @@ pub trait HeadlessAgent {
                 ..Default::default()
             },
             None => TaskOutcome::failed(format!(
-                "el agente terminó con código {code} sin dar resultado"
+                "o agente terminou com código {code} sem dar resultado"
             )),
         }
     }

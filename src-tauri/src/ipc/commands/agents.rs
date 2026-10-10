@@ -41,7 +41,7 @@ pub(super) fn resolve_pool_account(app: &AppHandle, agent_id: &str, pool: &str) 
         .agents
         .iter()
         .find(|a| a.agent_id == agent_id)
-        .ok_or_else(|| format!("'{agent_id}' no existe: indique el agente con --agent para usar un pool"))?;
+        .ok_or_else(|| format!("'{agent_id}' não existe: indique o agente com --agent para usar um pool"))?;
     crate::runs::routing::pick_in_pool(agent, &spec, crate::util::now_ts()).map(|(id, _)| id).map_err(|e| format!("Pool '{pool}': {e}"))
 }
 
@@ -69,18 +69,18 @@ pub(crate) fn match_account_id(
         .find(|(_, _, n)| n.to_lowercase() == needle)
     {
         return Err(format!(
-            "La cuenta '{name}' es de '{otro}', no de '{agent_id}'"
+            "A conta '{name}' é de '{otro}', não de '{agent_id}'"
         ));
     }
 
     let names: Vec<&str> = of_agent.iter().map(|(_, _, n)| n.as_str()).collect();
     if names.is_empty() {
         Err(format!(
-            "'{agent_id}' no tiene ninguna cuenta creada. Se crean desde Configuración › Cuentas; 'ags accounts' las lista"
+            "'{agent_id}' não tem nenhuma conta criada. Elas são criadas em Configurações › Contas; 'ags accounts' lista"
         ))
     } else {
         Err(format!(
-            "'{agent_id}' no tiene ninguna cuenta llamada '{name}'. Tiene: {}",
+            "'{agent_id}' não tem nenhuma conta chamada '{name}'. Tem: {}",
             names.join(", ")
         ))
     }
@@ -136,7 +136,7 @@ pub(super) fn resolve_prelaunch_steps(app: &AppHandle, steps: &[Value]) -> Resul
             let name = step
                 .get("presetName")
                 .and_then(|v| v.as_str())
-                .ok_or("Paso de pre-lanzamiento sin comando ni nombre de guardado")?;
+                .ok_or("Passo de pré-lançamento sem comando nem nome de item salvo")?;
             Ok(json!({ "presetId": match_preset_id(&presets, name)? }))
         })
         .collect()
@@ -169,7 +169,7 @@ pub(crate) fn match_preset_id(presets: &[(String, String)], name: &str) -> Resul
     }
     let names: Vec<&str> = presets.iter().map(|(_, n)| n.as_str()).collect();
     Err(format!(
-        "No existe un comando de pre-lanzamiento llamado '{name}'. Hay: {}",
+        "Não existe um comando de pré-lançamento chamado '{name}'. Existem: {}",
         names.join(", ")
     ))
 }

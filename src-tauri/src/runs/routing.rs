@@ -200,7 +200,7 @@ fn manual(roster: &Roster, req: &RouteRequest, now: i64) -> Result<Assignment, S
     let agent_id = req
         .agent_id
         .as_deref()
-        .ok_or("falta decir qué agente la corre")?;
+        .ok_or("falta dizer qual agente a roda")?;
     let agent = roster
         .agent(agent_id)
         .ok_or_else(|| format!("'{agent_id}' no es un agente conocido"))?;
@@ -237,10 +237,10 @@ fn by_tier(
     if entries.is_empty() {
         return Err(match &req.agent_id {
             Some(id) => format!(
-                "el tramo {} no tiene modelos de '{id}'",
+                "a faixa {} não tem modelos de '{id}'",
                 complexity.as_str()
             ),
-            None => format!("el tramo {} no tiene modelos", complexity.as_str()),
+            None => format!("a faixa {} não tem modelos", complexity.as_str()),
         });
     }
 
@@ -248,7 +248,7 @@ fn by_tier(
     for entry in entries {
         let what = format!("{} ({})", entry.model, entry.agent_id);
         let Some(agent) = roster.agent(&entry.agent_id) else {
-            notes.push(format!("{what}: no es un agente conocido"));
+            notes.push(format!("{what}: não é um agente conhecido"));
             continue;
         };
         if let Some(reason) = &agent.unavailable {
@@ -281,7 +281,7 @@ fn by_tier(
     }
 
     Err(format!(
-        "ningún modelo del tramo {} se puede usar ahora — {}",
+        "nenhum modelo da faixa {} pode ser usado agora — {}",
         complexity.as_str(),
         notes.join("; ")
     ))
@@ -298,7 +298,7 @@ fn model_problem(agent: &RosterAgent, model: &str) -> Option<String> {
         return Some(reason.clone());
     }
     (listed.toolcall == Some(false)).then(|| {
-        "no puede usar herramientas: contestaría con texto sin tocar un archivo".to_string()
+        "não pode usar ferramentas: responderia só com texto, sem tocar em arquivo".to_string()
     })
 }
 
@@ -312,7 +312,7 @@ fn pick_account(
     if agent.accounts.is_empty() {
         return match choice {
             AccountChoice::Fixed(Some(id)) => Err(format!(
-                "{} no maneja cuentas: '{id}' no existe",
+                "{} não gerencia contas: '{id}' não existe",
                 agent.label
             )),
             _ => Ok((None, Vec::new())),
@@ -326,7 +326,7 @@ fn pick_account(
                 .accounts
                 .iter()
                 .find(|a| &a.account_id == id)
-                .ok_or("la cuenta elegida ya no existe")?;
+                .ok_or("a conta escolhida não existe mais")?;
             account_problem(account, now).map_or(Ok(()), Err)?;
             Ok((account.account_id.clone(), Vec::new()))
         }
@@ -357,7 +357,7 @@ fn pick_account(
             match usable.first() {
                 Some((_, account)) => Ok((account.account_id.clone(), notes)),
                 None => Err(format!(
-                    "ninguna cuenta de {} se puede usar — {}",
+                    "nenhuma conta de {} pode ser usada — {}",
                     agent.label,
                     notes.join("; ")
                 )),
@@ -396,7 +396,7 @@ pub(crate) fn pick_in_pool(
         match account_problem(account, now) {
             Some(problem) => notes.push(problem),
             None if super::pool_failover::account_in_cooldown(&account.key, now) => {
-                notes.push(format!("la cuenta {} está en cooldown del pool", account.name));
+                notes.push(format!("a conta {} está em cooldown do pool", account.name));
             }
             None => usable.push((order, account)),
         }
@@ -421,7 +421,7 @@ pub(crate) fn pick_in_pool(
 
     match usable.first() {
         Some((_, account)) => Ok((account.account_id.clone(), notes)),
-        None => Err(format!("ninguna cuenta del pool '{}' se puede usar — {}", spec.name, notes.join("; "))),
+        None => Err(format!("nenhuma conta do pool '{}' pode ser usada — {}", spec.name, notes.join("; "))),
     }
 }
 
@@ -444,7 +444,7 @@ fn account_problem(account: &RosterAccount, now: i64) -> Option<String> {
         Some(_) => account.name.as_str(),
     };
     if !account.logged_in {
-        return Some(format!("la cuenta {name} no tiene sesión iniciada"));
+        return Some(format!("a conta {name} não tem sessão iniciada"));
     }
     if let Some(limit) = &account.limit {
         return Some(format!("la cuenta {name} {limit}"));
@@ -463,10 +463,10 @@ fn account_problem(account: &RosterAccount, now: i64) -> Option<String> {
     .min();
     Some(match reset {
         Some(at) => format!(
-            "la cuenta {name} agotó su cupo (se reinicia en {})",
+            "a conta {name} esgotou a cota (reinicia em {})",
             minutes(at - now)
         ),
-        None => format!("la cuenta {name} agotó su cupo"),
+        None => format!("a conta {name} esgotou a cota"),
     })
 }
 

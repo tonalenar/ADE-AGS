@@ -54,7 +54,7 @@ use crate::database::DbConnection;
 fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
     Ok(app
         .try_state::<DbConnection>()
-        .ok_or_else(|| "la base no está disponible".to_string())?
+        .ok_or_else(|| "o banco de dados não está disponível".to_string())?
         .inner()
         .clone())
 }
@@ -165,7 +165,7 @@ pub async fn run_start_task(
     }
 
     let conn = db.lock().map_err(|e| e.to_string())?;
-    store::task_by_id(&conn, &task.id)?.ok_or_else(|| "la tarea se perdió al lanzarla".into())
+    store::task_by_id(&conn, &task.id)?.ok_or_else(|| "a tarefa se perdeu ao ser lançada".into())
 }
 
 /// Lanza un lead: el agente que va a repartir `objective` en tareas para otros agentes.
@@ -264,7 +264,7 @@ pub(crate) fn start_orchestration(
     let objective = spec.objective.trim();
     let _update_guard = crate::agents::updates::activity_guard()?;
     if objective.is_empty() {
-        return Err("falta el objetivo".into());
+        return Err("falta o objetivo".into());
     }
     // Antes de crear nada: una fila de un lead que nunca podía lanzarse es ruido.
     ensure_orchestration(&assignment.agent_id)?;
@@ -306,9 +306,9 @@ if let Some(squad) = spec.squad {
                 .collect(),
         };
         let budget = spec.budget_usd
-            .map(|b| format!(" El run tiene un presupuesto de ${b:.2}: ninguna tarea nueva arranca después de gastarlo."))
+            .map(|b| format!(" O run tem um orçamento de ${b:.2}: nenhuma tarefa nova começa depois de gastá-lo."))
             .unwrap_or_default();
-        let prompt = format!("{objective}\n\n(Hasta {max_parallel} tareas en paralelo.{budget})");
+        let prompt = format!("{objective}\n\n(Até {max_parallel} tarefas em paralelo.{budget})");
         let task = store::create_task(
             &tx,
             &store::NewTask {
@@ -341,7 +341,7 @@ if let Some(squad) = spec.squad {
         return Err(e);
     }
     let conn = db.lock().map_err(|e| e.to_string())?;
-    store::task_by_id(&conn, &task.id)?.ok_or_else(|| "la tarea se perdió al lanzarla".into())
+    store::task_by_id(&conn, &task.id)?.ok_or_else(|| "a tarefa se perdeu ao ser lançada".into())
 }
 
 /// Lanza un lead por el supervisor, con las tools de orquestación: leer el run, dejar hechos
@@ -385,7 +385,7 @@ pub(crate) fn launch_planned(app: &AppHandle, db: &DbConnection, task: Task) -> 
         if task.role.as_deref()==Some(types::role::DREAMER) {return launch_memory_dream(app,&task);}
         let (run, deps, facts) = {
             let conn = db.lock().map_err(|e| e.to_string())?;
-            let run = store::run_by_id(&conn, &task.run_id)?.ok_or("el run ya no existe")?;
+            let run = store::run_by_id(&conn, &task.run_id)?.ok_or("o run não existe mais")?;
             let mut deps = Vec::new();
             for id in &task.depends_on {
                 if let Some(dep) = store::task_by_id(&conn, id)? {
@@ -493,7 +493,7 @@ pub(crate) fn cancel_run_with(
 ) -> Result<Vec<String>, String> {
     let live: Vec<String> = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        store::cancel_pending(&conn, run_id, "se canceló el run")?;
+        store::cancel_pending(&conn, run_id, "o run foi cancelado")?;
         store::tasks_of_run(&conn, run_id)?
             .into_iter()
             .filter(|t| {
@@ -528,10 +528,10 @@ pub fn run_list_facts(run_id: String, db: tauri::State<DbConnection>) -> Result<
 /// terminal de emergencia queda afuera por no tenerlo.
 pub(crate) fn ensure_headless(agent_id: &str) -> Result<(), String> {
     let adapter = crate::agents::adapter_for(agent_id)
-        .ok_or_else(|| format!("'{agent_id}' no es un provider conocido"))?;
+        .ok_or_else(|| format!("'{agent_id}' não é um provider conhecido"))?;
     if !adapter.capabilities().headless {
         return Err(format!(
-            "'{agent_id}' no se puede correr sin terminal: no puede ser lead"
+            "'{agent_id}' não roda sem terminal: não pode ser lead"
         ));
     }
     Ok(())
@@ -703,7 +703,7 @@ pub fn run_set_tiers(
         // siempre, y se enteraría quien lanza en vez de quien lo dejó vacío.
         if entries.is_empty() {
             return Err(format!(
-                "el tramo {} necesita al menos un modelo",
+                "a faixa {} precisa de pelo menos um modelo",
                 c.as_str()
             ));
         }
@@ -711,11 +711,11 @@ pub fn run_set_tiers(
             .iter()
             .find(|e| crate::agents::adapter_for(&e.agent_id).is_none())
         {
-            return Err(format!("'{}' no es un agente conocido", bad.agent_id));
+            return Err(format!("'{}' não é um agente conhecido", bad.agent_id));
         }
         if entries.iter().any(|e| e.model.trim().is_empty()) {
             return Err(format!(
-                "el tramo {} tiene un modelo sin nombre",
+                "a faixa {} tem um modelo sem nome",
                 c.as_str()
             ));
         }
@@ -744,7 +744,7 @@ pub(crate) fn worktree_count() -> usize {
 /// el mismo agente) los encontraría como si fueran parte del código.
 fn worktrees_base() -> Result<std::path::PathBuf, String> {
     Ok(dirs::home_dir()
-        .ok_or_else(|| "no se pudo resolver el home".to_string())?
+        .ok_or_else(|| "não foi possível localizar a pasta do usuário".to_string())?
         .join(".ags")
         .join("worktrees"))
 }
@@ -786,7 +786,7 @@ pub(crate) fn isolate_task_from(
         &wt.root.to_string_lossy(),
         &wt.branch,
     )?;
-    store::task_by_id(&conn, &task.id)?.ok_or_else(|| "la tarea se perdió al aislarla".into())
+    store::task_by_id(&conn, &task.id)?.ok_or_else(|| "a tarefa se perdeu ao ser isolada".into())
 }
 
 #[derive(serde::Serialize)]
@@ -807,8 +807,8 @@ pub fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<Discarded
     let (task, project_cwd, skills_dir) = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let task = store::task_by_id(&conn, &task_id)?
-            .ok_or_else(|| "la tarea ya no existe".to_string())?;
-        let project = store::project_cwd_of_task(&conn, &task_id).ok_or("la tarea no tiene run")?;
+            .ok_or_else(|| "a tarefa não existe mais".to_string())?;
+        let project = store::project_cwd_of_task(&conn, &task_id).ok_or("a tarefa não tem run")?;
         (task, project, crate::skills::skills_dir_from_conn(&conn)?)
     };
 
@@ -816,13 +816,13 @@ pub fn run_discard_worktree(app: AppHandle, task_id: String) -> Result<Discarded
         task.status.as_str(),
         types::status::READY | types::status::RUNNING
     ) {
-        return Err("la tarea todavía está corriendo: parala o esperá a que termine".into());
+        return Err("a tarefa ainda está rodando: pare-a ou espere terminar".into());
     }
     let (Some(root), Some(branch)) = (task.worktree_path.clone(), task.branch.clone()) else {
-        return Err("esta tarea no corre en un worktree".into());
+        return Err("esta tarefa não roda num worktree".into());
     };
     if task.worktree_removed {
-        return Err("el worktree de esta tarea ya se descartó".into());
+        return Err("o worktree desta tarefa já foi descartado".into());
     }
 
     let wt = worktrees::Worktree {
@@ -912,12 +912,12 @@ pub fn reroute_to(
     let db = db_of(app)?;
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        store::task_by_id(&conn, task_id)?.ok_or_else(|| "la tarea ya no existe".to_string())?
+        store::task_by_id(&conn, task_id)?.ok_or_else(|| "a tarefa não existe mais".to_string())?
     };
     if task.role.as_deref() == Some(types::role::LEAD)
         && (assignment.agent_id != task.agent_id || assignment.pool_origin.is_none())
     {
-        return Err("el lead no se pasa a otro agente: es quien reparte".into());
+        return Err("o lead não passa para outro agente: é quem distribui".into());
     }
 
     // Se para ANTES de leer el registro: mientras el proceso vive sigue escribiendo, y el
@@ -965,7 +965,7 @@ pub fn reroute_to(
         )?;
         if !moved {
             return Err(
-                "la tarea no está en un estado en el que se pueda pasar a otro agente".into(),
+                "a tarefa não está num estado em que possa passar para outro agente".into(),
             );
         }
         pool_failover::record_task_pool(&tx, task_id, assignment.pool_origin.as_ref())?;
@@ -985,7 +985,7 @@ pub fn reroute_to(
     // entrar lo trabaría. Tiquean los de afuera.
     let conn = db.lock().map_err(|e| e.to_string())?;
     let updated =
-        store::task_by_id(&conn, task_id)?.ok_or_else(|| "la tarea ya no existe".to_string())?;
+        store::task_by_id(&conn, task_id)?.ok_or_else(|| "a tarefa não existe mais".to_string())?;
     Ok((updated, assignment))
 }
 
@@ -1015,7 +1015,7 @@ pub async fn run_reroute_task(
             None => routing::AccountChoice::Auto,
         },
     };
-    let reason = reason.unwrap_or_else(|| "lo pidió el usuario desde la consola".into());
+    let reason = reason.unwrap_or_else(|| "o usuário pediu pelo console".into());
     reroute(&app, &task_id, request, &reason)
         .await
         .map(|(task, _)| task)
@@ -1031,19 +1031,19 @@ pub fn run_hand_off_task(app: AppHandle, task_id: String) -> Result<Task, String
     let db = db_of(&app)?;
     let task = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        store::task_by_id(&conn, &task_id)?.ok_or_else(|| "la tarea ya no existe".to_string())?
+        store::task_by_id(&conn, &task_id)?.ok_or_else(|| "a tarefa não existe mais".to_string())?
     };
 
     // Sin sesión no hay nada que reanudar: la tarea falló antes de que la TUI arrancara.
     // Abrir una tab igual daría una conversación NUEVA presentada como la de la tarea.
     if task.session_id.is_none() {
-        return Err("esta tarea nunca llegó a arrancar: no hay conversación para seguir".into());
+        return Err("esta tarefa nunca chegou a iniciar: não há conversa para continuar".into());
     }
     // La sesión quedó atada a la ruta del worktree: sin la carpeta, `--resume` en otro
     // lado no la encuentra y abriría una conversación nueva haciéndose pasar por esta.
     if task.worktree_removed {
         return Err(
-            "el worktree de esta tarea se descartó: su conversación ya no tiene dónde retomarse"
+            "o worktree desta tarefa foi descartado: a conversa dela não tem mais onde ser retomada"
                 .into(),
         );
     }
@@ -1056,7 +1056,7 @@ pub fn run_hand_off_task(app: AppHandle, task_id: String) -> Result<Task, String
     }
 
     let conn = db.lock().map_err(|e| e.to_string())?;
-    store::task_by_id(&conn, &task_id)?.ok_or_else(|| "la tarea ya no existe".into())
+    store::task_by_id(&conn, &task_id)?.ok_or_else(|| "a tarefa não existe mais".into())
 }
 
 // ── Permisos ────────────────────────────────────────────────────
@@ -1177,7 +1177,7 @@ pub fn run_add_rule(
 ) -> Result<store::RuleRow, String> {
     if !rules::is_valid_pattern(&pattern) {
         return Err(format!(
-            "'{pattern}' no tiene la forma de una regla: Herramienta o Herramienta(patrón)"
+            "'{pattern}' não tem a forma de uma regra: Ferramenta ou Ferramenta(padrão)"
         ));
     }
     let row = {

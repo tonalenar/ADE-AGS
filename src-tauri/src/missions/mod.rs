@@ -75,7 +75,7 @@ pub(crate) fn notify_for_run<R: Runtime>(app: &AppHandle<R>, conn: &Connection, 
 fn db_of(app: &AppHandle) -> Result<DbConnection, String> {
     Ok(app
         .try_state::<DbConnection>()
-        .ok_or_else(|| "la base no está disponible".to_string())?
+        .ok_or_else(|| "o banco de dados não está disponível".to_string())?
         .inner()
         .clone())
 }
@@ -240,7 +240,7 @@ pub(crate) fn start_with_force(
     crate::runs::start_orchestration(db, &spec, &assignment, complexity, mark, launch)?;
 
     let conn = db.lock().map_err(|e| e.to_string())?;
-    store::get(&conn, mission_id)?.ok_or_else(|| "la misión se perdió al arrancarla".to_string())
+    store::get(&conn, mission_id)?.ok_or_else(|| "a missão se perdeu ao iniciar".to_string())
 }
 
 /// Cancela una misión. Un borrador se marca y listo; una que corre cancela su run activo
@@ -260,7 +260,7 @@ pub(crate) fn cancel(
             let conn = db.lock().map_err(|e| e.to_string())?;
             if !store::cancel_draft(&conn, mission_id)? {
                 return Err(
-                    "la misión arrancó mientras tanto: volvé a intentar para cancelar su run"
+                    "a missão iniciou nesse meio-tempo: tente de novo para cancelar o run dela"
                         .into(),
                 );
             }
@@ -274,13 +274,13 @@ pub(crate) fn cancel(
             let run_id = mission
                 .active_run_id
                 .as_deref()
-                .ok_or("la misión corre sin run activo")?;
+                .ok_or("a missão está rodando sem run ativo")?;
             cancel_run(run_id)?;
         }
         other => return Err(format!("a missão já terminou ({other})")),
     }
     let conn = db.lock().map_err(|e| e.to_string())?;
-    store::get(&conn, mission_id)?.ok_or_else(|| "la misión se perdió".to_string())
+    store::get(&conn, mission_id)?.ok_or_else(|| "a missão se perdeu".to_string())
 }
 
 // ── Comandos ────────────────────────────────────────────────────
@@ -414,7 +414,7 @@ pub async fn mission_task_diff(app: AppHandle, task_id: String) -> Result<String
 #[tauri::command]
 pub async fn mission_accept_task(app: AppHandle, mission_id: String, task_id: String) -> Result<review::MergeOutcome, String> {
     let db = db_of(&app)?;
-    let base = dirs::home_dir().ok_or("no se pudo resolver el home")?.join(".ags").join("worktrees");
+    let base = dirs::home_dir().ok_or("não foi possível localizar a pasta do usuário")?.join(".ags").join("worktrees");
     let id = mission_id.clone();
     let outcome = tauri::async_runtime::spawn_blocking(move || review::accept(&db, &base, &id, &task_id))
         .await
@@ -507,7 +507,7 @@ pub fn mission_start_terminals(app: AppHandle, mission_id: String, force: Option
     }
     notify(&app, &mission_id);
     let conn = db.lock().map_err(|e| e.to_string())?;
-    store::get(&conn, &mission_id)?.ok_or_else(|| "la misión desapareció".to_string())
+    store::get(&conn, &mission_id)?.ok_or_else(|| "a missão desapareceu".to_string())
 }
 
 #[tauri::command]
@@ -570,7 +570,7 @@ pub async fn mission_finish_terminals(
     crate::decisions::observe_mission(db.clone(), &mission_id, &evidence);
     notify(&app, &mission_id);
     let conn = db.lock().map_err(|e| e.to_string())?;
-    store::get(&conn, &mission_id)?.ok_or_else(|| "la misión desapareció".to_string())
+    store::get(&conn, &mission_id)?.ok_or_else(|| "a missão desapareceu".to_string())
 }
 
 /// Reavalia de forma segura e idempotente a entrega de uma missão concluída.

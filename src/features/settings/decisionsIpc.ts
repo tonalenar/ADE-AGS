@@ -42,6 +42,7 @@ export interface PointReport {
 
 export interface Disagreement {
   point: string;
+  provider: string;
   stateHash: string;
   heuristic: string;
   providerDecision: string;
