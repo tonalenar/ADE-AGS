@@ -27,6 +27,8 @@ export interface QuestionReport {
 
 export interface PointReport {
   point: string;
+  /** Qual provedor respondeu: com dois ligados há um cartão por (ponto, provedor). */
+  provider: string;
   total: number;
   compared: number;
   lowSample: boolean;
@@ -45,23 +47,37 @@ export interface Disagreement {
   providerDecision: string;
 }
 
+/** Dois provedores diante das MESMAS propostas. Em cada par, `heuristic` é o que o provedor A disse e
+ * `provider` o que o B disse. */
+export interface Comparison {
+  point: string;
+  providerA: string;
+  providerB: string;
+  compared: number;
+  agreementRate: number;
+  questions: QuestionReport[];
+}
+
 export interface ShadowReport {
   generatedAt: number;
   minSample: number;
   points: PointReport[];
+  comparisons: Comparison[];
   disagreements: Disagreement[];
 }
 
 export const getDecisionSettings = () => invoke<DecisionSettings>("decision_settings_get");
 
-export const setDecisionSettings = (settings: Omit<DecisionSettings, "keySaved">) =>
+export type KeySlot = "primary" | "secondary";
+
+export const setDecisionSettings = (settings: Omit<DecisionSettings, "keySaved" | "secondaryKeySaved">) =>
   invoke<DecisionSettings>("decision_settings_set", { input: settings });
 
-export const setDecisionKey = (key: string) => invoke<void>("decision_key_set", { key });
+export const setDecisionKey = (key: string, slot: KeySlot = "primary") => invoke<void>("decision_key_set", { key, slot });
 
-export const clearDecisionKey = () => invoke<void>("decision_key_clear");
+export const clearDecisionKey = (slot: KeySlot = "primary") => invoke<void>("decision_key_clear", { slot });
 
-export const testDecisionConnection = () => invoke<ConnectionTest>("decision_test_connection");
+export const testDecisionConnection = (slot: KeySlot = "primary") => invoke<ConnectionTest>("decision_test_connection", { slot });
 
 export const decisionShadowReport = () => invoke<ShadowReport>("decision_shadow_report");
 

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseTimeout, clampTimeout, defaultDecisionSettings, defaultModel, isDirty, isLocalUrl, modelAfterProviderChange, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
+import { remoteHosts, parseTimeout, clampTimeout, defaultDecisionSettings, defaultModel, isDirty, isLocalUrl, modelAfterProviderChange, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
 
 describe("ajustes das decisões em sombra", () => {
   it("nasce desligado, em multilingual, com a Laya local e 800 ms", () => {
@@ -63,6 +63,14 @@ describe("ajustes das decisões em sombra", () => {
     expect(isDirty(base, { ...base, keySaved: true })).toBe(false);
     expect(isDirty({ ...base, timeoutMs: 2000 }, base)).toBe(true);
     expect(isDirty({ ...base, fleetGate: true }, base)).toBe(true);
+  });
+
+  it("lista os destinos de fora, o principal e o segundo", () => {
+    const base = { provider: "laya_local" as const, baseUrl: "http://localhost:8000", secondaryProvider: "none" as const, secondaryBaseUrl: "https://api.typesafe.ai" };
+    expect(remoteHosts(base)).toEqual([]);
+    expect(remoteHosts({ ...base, secondaryProvider: "jev" })).toEqual(["api.typesafe.ai"]);
+    expect(remoteHosts({ ...base, provider: "laya_studio", baseUrl: "https://api.laya.studio", secondaryProvider: "jev" })).toEqual(["api.laya.studio", "api.typesafe.ai"]);
+    expect(remoteHosts({ ...base, provider: "none", baseUrl: "https://api.laya.studio" })).toEqual([]);
   });
 
   it("separa o que fica nesta máquina do que sai dela, pelo endereço", () => {

@@ -20,9 +20,20 @@ const settings = (over: Partial<DecisionSettings>): DecisionSettings => ({ ...de
 const report: ShadowReport = {
   generatedAt: 1,
   minSample: 30,
+  comparisons: [
+    {
+      point: "memory_approval",
+      providerA: "jev",
+      providerB: "laya_local",
+      compared: 5,
+      agreementRate: 0.4,
+      questions: [{ question: "acao", compared: 5, agreementRate: 0.4, blindRate: 0, blindLabels: [], pairs: [{ heuristic: "revisar", provider: "aprovar", count: 3 }] }],
+    },
+  ],
   points: [
     {
       point: "memory_approval",
+      provider: "laya_local",
       total: 4,
       compared: 4,
       lowSample: true,
@@ -124,6 +135,23 @@ describe("seção Decisões (experimental)", () => {
   it("avisa também quando a \"Laya local\" aponta para um servidor da rede", async () => {
     await mount(settings({ provider: "laya_local", baseUrl: "https://laya.interno.exemplo" }));
     expect(host.querySelector('[role="note"]')?.textContent).toContain("laya.interno.exemplo");
+  });
+
+  it("mostra os dois provedores lado a lado quando há propostas consultadas pelos dois", async () => {
+    await mount(settings({ provider: "laya_local", secondaryProvider: "jev", secondaryBaseUrl: "https://api.typesafe.ai", secondaryModel: "jev-latest" }));
+    const text = host.textContent ?? "";
+    expect(text).toContain("settings.decisions.compare.agree");
+    expect(text).toContain('"n":5');
+    expect(text).toContain("settings.decisions.provider.jev: revisar");
+    expect(text).toContain("settings.decisions.provider.layaLocal: aprovar");
+    // O destino remoto do segundo provedor também ganha o aviso de privacidade.
+    expect(host.querySelector('[role="note"]')?.textContent).toContain("api.typesafe.ai");
+  });
+
+  it("só mostra os campos do segundo provedor quando ele está ligado", async () => {
+    await mount(settings({ provider: "laya_local" }));
+    expect(host.querySelector('input[aria-label*="settings.decisions.compare.provider"]')).toBeNull();
+    expect(host.textContent).not.toContain("settings.decisions.compare.same");
   });
 
   it("mostra a concordância por pergunta, o que só o provedor diz e a amostra pequena", async () => {

@@ -601,6 +601,7 @@ fn local_settings(base_url: String) -> Settings {
         dream_triage: true,
         fleet_gate: true,
         mission_gate: true,
+        secondary: None,
     }
 }
 
@@ -1244,4 +1245,99 @@ fn http_400_com_corpo_vira_mensagem_legivel_na_tela_e_no_log() {
     );
     assert!(!logged_error.contains(key), "{logged_error}");
     assert_eq!(logged_model, "jev-latest");
+}
+
+// ── Dois provedores lado a lado ─────────────────────────────────────────
+
+fn second_endpoint(url: String) -> config::Endpoint {
+    config::Endpoint {
+        provider: ProviderKind::Jev,
+        base_url: url,
+        model: "jev-latest".into(),
+    }
+}
+
+#[test]
+fn a_mesma_proposta_vai_aos_dois_provedores_e_cada_resposta_vira_uma_linha() {
+    let second = SUCCESS.replace("\"choice\": \"aprovar\"", "\"choice\": \"revisar\"");
+    let db = memory_db();
+    let settings = Settings {
+        secondary: Some(second_endpoint(serve(200, &second, Duration::ZERO))),
+        ..local_settings(serve(200, SUCCESS, Duration::ZERO))
+    };
+    let job = job_from(sample_request());
+    shadow::run_jobs_with_keys(db.clone(), vec![job.clone()], &settings, None, None);
+    assert_eq!(log_rows(&db), 2);
+    // Já consultados: repetir a proposta na janela não chama nenhum dos dois de novo.
+    shadow::run_jobs_with_keys(db.clone(), vec![job], &settings, None, None);
+    assert_eq!(log_rows(&db), 2);
+
+    let conn = db.lock().unwrap();
+    let report = log::report(&conn).unwrap();
+    assert_eq!(report.points.len(), 2, "um cartão por (ponto, provedor)");
+    assert!(report.points.iter().any(|p| p.provider == "laya_local"));
+    assert!(report.points.iter().any(|p| p.provider == "jev"));
+    assert_eq!(report.comparisons.len(), 1);
+    let comparison = &report.comparisons[0];
+    assert_eq!(comparison.compared, 1);
+    assert!(comparison.agreement_rate.abs() < f64::EPSILON, "um aprovou e o outro revisou");
+    let action = comparison.questions.iter().find(|q| q.question == "acao").unwrap();
+    assert_eq!(action.pairs[0].heuristic, "revisar", "A: jev (ordem alfabética), B: laya_local");
+    let secret = comparison.questions.iter().find(|q| q.question == "segredo").unwrap();
+    assert!((secret.agreement_rate - 1.0).abs() < f64::EPSILON, "os dois acharam o mesmo sobre segredo");
+    let csv = log::export_csv(&conn).unwrap();
+    assert!(csv.contains("comparacao,memory_approval,jev,laya_local,1,0.0000"), "{csv}");
+}
+
+#[test]
+fn o_segredo_so_deixa_de_ir_ao_destino_que_fica_fora_da_maquina() {
+    let db = memory_db();
+    let settings = Settings {
+        secondary: Some(second_endpoint("https://api.typesafe.ai".into())),
+        ..local_settings(serve(200, SUCCESS, Duration::ZERO))
+    };
+    let mut secret = job_from(sample_request());
+    secret.sensitive = true;
+    shadow::run_jobs_with_keys(db.clone(), vec![secret], &settings, None, None);
+    // Só o local respondeu. Qualquer tentativa ao remoto gravaria uma linha (de erro).
+    assert_eq!(log_rows(&db), 1);
+    let provider: String = db
+        .lock()
+        .unwrap()
+        .query_row("SELECT provider FROM decision_shadow_log", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(provider, "laya_local");
+}
+
+#[test]
+fn o_segundo_provedor_vai_e_volta_da_configuracao() {
+    let db = memory_db();
+    let conn = db.lock().unwrap();
+    let mut settings = local_settings("http://localhost:8000".into());
+    settings.secondary = Some(config::Endpoint {
+        provider: ProviderKind::Jev,
+        base_url: "https://api.typesafe.ai".into(),
+        model: "jev-latest".into(),
+    });
+    config::persist(&conn, &settings).unwrap();
+    let loaded = config::load(&conn).unwrap();
+    assert_eq!(loaded.secondary, settings.secondary);
+    assert_eq!(loaded.endpoints().len(), 2);
+
+    // Um modelo do outro provedor é corrigido; igual ao principal não vira um segundo destino.
+    settings.secondary = Some(config::Endpoint {
+        provider: ProviderKind::Jev,
+        base_url: "https://api.typesafe.ai".into(),
+        model: "multilingual".into(),
+    });
+    config::persist(&conn, &settings).unwrap();
+    assert_eq!(config::load(&conn).unwrap().secondary.unwrap().model, "jev-latest");
+    settings.secondary = Some(settings.primary());
+    assert_eq!(settings.endpoints().len(), 1);
+
+    // Desligar o segundo.
+    settings.secondary = None;
+    config::persist(&conn, &settings).unwrap();
+    assert!(config::load(&conn).unwrap().secondary.is_none());
+    assert_eq!(config::load(&conn).unwrap().endpoints().len(), 1);
 }
