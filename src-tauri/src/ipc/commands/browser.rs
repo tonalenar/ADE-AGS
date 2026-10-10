@@ -18,7 +18,7 @@ pub(super) fn browser_run(app: &AppHandle, args: &Value) -> Result<Value, String
         .get("request")
         .filter(|r| r.get("op").and_then(Value::as_str).is_some())
         .cloned()
-        .ok_or_else(|| "Falta qué hacer en el navegador ('request.op')".to_string())?;
+        .ok_or_else(|| "Falta dizer o que fazer no navegador ('request.op')".to_string())?;
 
     let cwd = match args.get("cwd").and_then(Value::as_str) {
         Some(cwd) => cwd.to_string(),

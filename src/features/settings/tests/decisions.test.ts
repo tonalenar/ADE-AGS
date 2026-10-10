@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampTimeout, defaultDecisionSettings, defaultModel, isDirty, isLocalUrl, modelAfterProviderChange, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
+import { parseTimeout, clampTimeout, defaultDecisionSettings, defaultModel, isDirty, isLocalUrl, modelAfterProviderChange, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
 
 describe("ajustes das decisões em sombra", () => {
   it("nasce desligado, em multilingual, com a Laya local e 800 ms", () => {
@@ -39,6 +39,15 @@ describe("ajustes das decisões em sombra", () => {
     expect(urlAfterProviderChange("http://localhost:8000", "laya_studio")).toBe("https://api.laya.studio");
     expect(urlAfterProviderChange("https://api.laya.studio/", "jev")).toBe("https://api.typesafe.ai");
     expect(urlAfterProviderChange("https://laya.interno.exemplo", "laya_local")).toBe("https://laya.interno.exemplo");
+  });
+
+  it("campo de timeout vazio ou sem número volta ao padrão, e o resto é limitado", () => {
+    expect(parseTimeout("")).toBe(800);
+    expect(parseTimeout("   ")).toBe(800);
+    expect(parseTimeout("abc")).toBe(800);
+    expect(parseTimeout("2000")).toBe(2000);
+    expect(parseTimeout("5")).toBe(50);
+    expect(parseTimeout("99999")).toBe(30_000);
   });
 
   it("segura o timeout no intervalo aceito pelo backend", () => {

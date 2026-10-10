@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
 import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, setDecisionKey, setDecisionSettings, testDecisionConnection, type PointReport, type ShadowReport } from "@/features/settings/decisionsIpc";
-import { clampTimeout, defaultDecisionSettings, isDirty, modelAfterProviderChange, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
+import { defaultDecisionSettings, isDirty, modelAfterProviderChange, modelsFor, parseTimeout, sendsOffMachine, urlAfterProviderChange, urlHost, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
 
 const PROVIDERS: DecisionProviderId[] = ["none", "laya_local", "laya_studio", "jev"];
 const POINT_LABEL: Record<string, string> = {
@@ -57,6 +57,8 @@ export function DecisionsSection() {
   const [saved, setSaved] = useState<DecisionSettings>(defaultDecisionSettings);
   const [keyDraft, setKeyDraft] = useState("");
   const [showKey, setShowKey] = useState(false);
+  // O texto do campo de timeout enquanto se edita: apagar tudo para digitar de novo não pode virar 0.
+  const [timeoutDraft, setTimeoutDraft] = useState<string | null>(null);
   const [status, setStatus] = useState("");
   const [testing, setTesting] = useState(false);
   const [conn, setConn] = useState<{ ok: boolean; text: string } | null>(null);
@@ -86,7 +88,7 @@ export function DecisionsSection() {
         provider: settings.provider,
         baseUrl: settings.baseUrl,
         model: modelAfterProviderChange(settings.model, settings.provider),
-        timeoutMs: clampTimeout(settings.timeoutMs),
+        timeoutMs: timeoutDraft === null ? parseTimeout(String(settings.timeoutMs)) : parseTimeout(timeoutDraft),
         memoryApproval: settings.memoryApproval,
         dreamTriage: settings.dreamTriage,
         fleetGate: settings.fleetGate,
@@ -210,8 +212,17 @@ export function DecisionsSection() {
               type="number"
               min={50}
               max={30000}
-              value={settings.timeoutMs}
-              onChange={(event) => setSettings({ ...settings, timeoutMs: Number(event.target.value) })}
+              value={timeoutDraft ?? String(settings.timeoutMs)}
+              onChange={(event) => {
+                setTimeoutDraft(event.target.value);
+                const typed = Number(event.target.value);
+                if (event.target.value.trim() !== "" && Number.isFinite(typed)) setSettings({ ...settings, timeoutMs: typed });
+              }}
+              onBlur={() => {
+                if (timeoutDraft === null) return;
+                setSettings({ ...settings, timeoutMs: parseTimeout(timeoutDraft) });
+                setTimeoutDraft(null);
+              }}
               className={`${FIELD} w-24 text-right tabular-nums`}
             />
             <span className="text-[12px] text-gray-500 dark:text-white/40">ms</span>

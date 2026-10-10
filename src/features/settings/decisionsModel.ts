@@ -62,6 +62,14 @@ export function isDirty(current: DecisionSettings, saved: DecisionSettings): boo
   return strip(current) !== strip(saved);
 }
 
+/** O que vale ao sair do campo de timeout: vazio ou texto sem número volta ao padrão (800 ms), o resto é limitado a 50 a 30000. Pura. */
+export function parseTimeout(text: string): number {
+  const trimmed = text.trim();
+  if (trimmed === "") return 800;
+  const value = Number(trimmed);
+  return Number.isFinite(value) ? clampTimeout(value) : 800;
+}
+
 export function clampTimeout(value: number): number {
   if (!Number.isFinite(value)) return 800;
   return Math.min(30_000, Math.max(50, Math.round(value)));
