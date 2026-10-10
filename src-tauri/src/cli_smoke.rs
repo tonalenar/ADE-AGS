@@ -91,7 +91,7 @@ pub(crate) fn file_flag_probe() -> Result<String, String> {
 pub(crate) fn missing_file_probe() -> Result<String, String> {
     let args = vec!["smoke-inexistente".to_string(), "--file".to_string(), "arquivo-que-nao-existe.smoke".to_string()];
     match parse_flags(&args, positionals("peer.tell")).and_then(|v| inline_file(v, "peer.tell")) {
-        Err(e) if e.contains("No se pudo leer") => Ok("erro de leitura claro, nada enviado".into()),
+        Err(e) if e.contains("Não foi possível ler") => Ok("erro de leitura claro, nada enviado".into()),
         Err(e) => Err(format!("erro inesperado: {e}")),
         Ok(_) => Err("aceitou um arquivo que não existe".into()),
     }
@@ -139,7 +139,7 @@ pub(crate) fn run() -> ExitCode {
     });
     // Sem app não há o que testar: devolve o erro de sempre, com o código de "app fechado".
     if let Outcome::Fail(message) = &first.outcome {
-        if message.contains("no parece estar corriendo") || message.contains("handshake") {
+        if message.contains("não parece estar em execução") || message.contains("handshake") {
             println!("{}", json!({ "error": message }));
             return ExitCode::from(EXIT_NO_APP);
         }
