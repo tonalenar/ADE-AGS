@@ -69,8 +69,8 @@ fn caller(conn: &Connection, payload: &Value) -> Result<Caller, String> {
 }
 
 fn args(payload: &Value) -> &Value {
-    static EMPTY: Value = Value::Null;
-    payload.get("args").unwrap_or(&EMPTY)
+    // O CLI manda as flags num mapa plano; as ferramentas MCP, dentro de `args`.
+    payload.get("args").unwrap_or(payload)
 }
 
 fn arg_str<'a>(args: &'a Value, key: &str) -> Option<&'a str> {
@@ -671,7 +671,7 @@ pub fn board(conn: &Connection, run: &Run) -> Result<String, String> {
         .map(|b| format!(" de ${b:.2}"))
         .unwrap_or_default();
     let mut out = format!(
-        "Run {} — {}\nestado: {} · gastado ${:.2}{budget} · hasta {} en paralelo\n",
+        "Run {} — {}\nestado: {} · gasto ${:.2}{budget} · até {} em paralelo\n",
         run.id,
         first_line(&run.objective, 120),
         run.status,
@@ -693,13 +693,13 @@ pub fn board(conn: &Connection, run: &Run) -> Result<String, String> {
             line.push_str(&format!(" · depende de {}", deps.join(", ")));
         }
         if t.attempt > 1 {
-            line.push_str(&format!(" · intento {}", t.attempt));
+            line.push_str(&format!(" · tentativa {}", t.attempt));
         }
         if t.fix_round > 0 {
             line.push_str(&format!(" · correção {}{}", t.fix_round, if t.full_gate { " (gate completo)" } else { "" }));
         }
         if let Some(e) = &t.error {
-            line.push_str(&format!("\n    error: {}", first_line(e, 160)));
+            line.push_str(&format!("\n    erro: {}", first_line(e, 160)));
         } else if let Some(r) = &t.result {
             line.push_str(&format!("\n    resultado: {}", first_line(r, 160)));
         }
@@ -722,7 +722,7 @@ fn result_text(conn: &Connection, run: &Run, task: &Task) -> Result<String, Stri
     let tasks = store::tasks_of_run(conn, &run.id)?;
     let keys: HashMap<&str, String> = tasks.iter().map(|t| (t.id.as_str(), key_of(t))).collect();
     let mut out = format!(
-        "{} — {}\nestado: {} · intentos {} · costo {} · {}/{}\n",
+        "{} — {}\nestado: {} · tentativas {} · custo {} · {}/{}\n",
         key_of(task),
         task.title,
         task.status,
@@ -737,7 +737,7 @@ fn result_text(conn: &Connection, run: &Run, task: &Task) -> Result<String, Stri
         } else {
             format!("worktree {}", task.worktree_path.as_deref().unwrap_or("?"))
         };
-        out.push_str(&format!("rama: {branch} ({place})\n"));
+        out.push_str(&format!("branch: {branch} ({place})\n"));
     }
     if !task.depends_on.is_empty() {
         let deps: Vec<&str> = task
@@ -758,15 +758,15 @@ fn result_text(conn: &Connection, run: &Run, task: &Task) -> Result<String, Stri
     };
     match (&task.result, &task.error) {
         (Some(r), _) => out.push_str(&format!("resultado:\n{}\n", clip(r))),
-        (None, Some(e)) => out.push_str(&format!("error:\n{}\n", clip(e))),
+        (None, Some(e)) => out.push_str(&format!("erro:\n{}\n", clip(e))),
         (None, None) if status::is_final(&task.status) => {
-            out.push_str("(terminó sin dejar resultado)\n")
+            out.push_str("(terminou sem deixar resultado)\n")
         }
         (None, None) => out.push_str("(ainda não terminou)\n"),
     }
     if let Some(prev) = &task.last_error {
         out.push_str(&format!(
-            "error del intento anterior: {}\n",
+            "erro da tentativa anterior: {}\n",
             first_line(prev, 300)
         ));
     }
@@ -1019,4 +1019,20 @@ fn cancel_task(app: &AppHandle, db: &DbConnection, payload: &Value) -> Result<St
         "'{}' cancelada. Lo que dependía de ella no va a correr.",
         key_of(&task)
     ))
+}
+
+#[cfg(test)]
+mod args_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn as_flags_do_cli_chegam_planas_e_as_do_mcp_dentro_de_args() {
+        let cli = json!({ "cwd": "/p", "runId": "r1", "task": "api" });
+        assert_eq!(arg_str(args(&cli), "runId"), Some("r1"));
+        assert_eq!(arg_str(args(&cli), "task"), Some("api"));
+        let mcp = json!({ "cwd": "/p", "args": { "run_id": "r2", "task": "db" } });
+        assert_eq!(arg_str(args(&mcp), "run_id"), Some("r2"));
+        assert_eq!(arg_str(args(&mcp), "task"), Some("db"));
+    }
 }

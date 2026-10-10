@@ -61,7 +61,7 @@ export function SettingsRow({ label, hint, children }: {
   return (
     <div className="flex items-center justify-between gap-4 min-h-10 px-3 py-2">
       <span className="flex flex-col gap-px min-w-0">
-        <span className="truncate text-[13px] leading-[18px] text-gray-900 dark:text-gray-100">{label}</span>
+        <span title={label} className="truncate text-[13px] leading-[18px] text-gray-900 dark:text-gray-100">{label}</span>
         {hint && (
           <span title={hint} className="truncate text-[11.5px] leading-4 text-gray-500 dark:text-white/40">{hint}</span>
         )}
