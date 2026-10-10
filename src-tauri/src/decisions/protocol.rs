@@ -1,16 +1,23 @@
 //! Corpo e resposta de `POST /v1/systemone`, no formato documentado do Jev e da Laya.
 //!
 //! `choice`, `score` e `noul` são os únicos tipos. O `state` que sai daqui já está
-//! truncado: o checkpoint multilingual lê cerca de 1.024 tokens por pergunta.
+//! truncado. O corte de ~1.024 tokens é do checkpoint multilingual da Laya; o Jev
+//! aceita cerca de 32k tokens de `state` e usa um teto maior.
 
 use std::collections::BTreeMap;
 
 use serde::Serialize;
 use serde_json::Value;
 
-/// Orçamento de caracteres do `state`. 4 caracteres por token é uma aproximação
+/// Orçamento de caracteres do `state` da Laya. 4 caracteres por token é uma aproximação
 /// conservadora dos 1.024 tokens do checkpoint multilingual.
 pub const STATE_CHAR_BUDGET: usize = 4_096;
+
+/// Teto do Jev: ~16k tokens estimados, abaixo dos ~32k que o modelo aceita no `state`.
+pub const JEV_STATE_CHAR_BUDGET: usize = 16_000 * 4;
+
+/// Quanto da mensagem de um 4xx cabe na tela e no log.
+const ERROR_TEXT_BUDGET: usize = 300;
 
 /// Menos de 20 opções por pergunta. A Laya perde qualidade acima disso.
 pub const MAX_OPTIONS: usize = 19;
@@ -77,6 +84,10 @@ pub struct SystemOneBody {
 
 impl DecisionRequest {
     pub fn wire(&self) -> Result<SystemOneBody, DecisionError> {
+        self.wire_with_budget(STATE_CHAR_BUDGET)
+    }
+
+    pub fn wire_with_budget(&self, budget: usize) -> Result<SystemOneBody, DecisionError> {
         if self.questions.is_empty() {
             return Err(DecisionError::Malformed("sem perguntas".into()));
         }
@@ -87,8 +98,13 @@ impl DecisionRequest {
                 )));
             }
         }
+        let state = if budget == STATE_CHAR_BUDGET {
+            truncate_state(&self.state)
+        } else {
+            truncate_chars(self.state.trim(), budget)
+        };
         Ok(SystemOneBody {
-            state: truncate_state(&self.state),
+            state,
             questions: self.questions.clone(),
             model: self.model.clone(),
         })
@@ -116,7 +132,11 @@ pub enum DecisionError {
     Unauthorized,
     Unprocessable(String),
     Malformed(String),
-    Status(u16),
+    /// `message` é a frase do corpo, já truncada e sem a chave. Vazio, fica só o código.
+    Status {
+        code: u16,
+        message: String,
+    },
     Transport(String),
     Unavailable(String),
 }
@@ -128,7 +148,8 @@ impl DecisionError {
             Self::Unauthorized => "401".into(),
             Self::Unprocessable(message) => format!("422: {message}"),
             Self::Malformed(message) => format!("malformed: {message}"),
-            Self::Status(code) => format!("http {code}"),
+            Self::Status { code, message } if message.is_empty() => format!("http {code}"),
+            Self::Status { code, message } => format!("http {code}: {message}"),
             Self::Transport(message) => format!("transport: {message}"),
             Self::Unavailable(message) => format!("unavailable: {message}"),
         }
@@ -175,8 +196,93 @@ pub fn canonical_labels(labels: &BTreeMap<String, String>) -> String {
 
 pub fn state_hash(state: &str) -> String {
     use sha2::{Digest, Sha256};
-    let digest = Sha256::digest(truncate_state(state).as_bytes());
+    // O hash cobre o maior teto que algum provedor envia. O corte menor da Laya acontece
+    // só no fio: dois textos que divergem depois dos 1.024 tokens dela ainda são amostras
+    // diferentes para o Jev.
+    let digest = Sha256::digest(truncate_chars(state.trim(), JEV_STATE_CHAR_BUDGET).as_bytes());
     digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+/// Frase legível de um corpo 4xx: `error`, `error.message`, `message`, `detail`,
+/// `detail.message` ou a lista de validação em `detail`. Sem isso, o corpo truncado.
+pub fn client_error_message(body: &str) -> String {
+    let trimmed = body.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    if let Ok(value) = serde_json::from_str::<Value>(trimmed)
+        && let Some(message) = message_from_value(&value)
+    {
+        let message = message.trim();
+        if !message.is_empty() {
+            return truncate_chars(message, ERROR_TEXT_BUDGET);
+        }
+    }
+    truncate_chars(trimmed, ERROR_TEXT_BUDGET)
+}
+
+fn message_from_value(value: &Value) -> Option<String> {
+    if let Some(text) = value.as_str() {
+        return Some(text.to_string());
+    }
+    let obj = value.as_object()?;
+    if let Some(error) = obj.get("error") {
+        if let Some(text) = non_empty_str(error) {
+            return Some(text);
+        }
+        if let Some(text) = error.get("message").and_then(non_empty_str) {
+            return Some(text);
+        }
+    }
+    if let Some(text) = obj.get("message").and_then(non_empty_str) {
+        return Some(text);
+    }
+    let detail = obj.get("detail")?;
+    if let Some(text) = non_empty_str(detail) {
+        return Some(text);
+    }
+    if let Some(text) = detail.get("message").and_then(non_empty_str) {
+        return Some(text);
+    }
+    let items = detail.as_array()?;
+    let parts: Vec<String> = items.iter().filter_map(validation_item).collect();
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("; "))
+    }
+}
+
+fn non_empty_str(value: &Value) -> Option<String> {
+    value
+        .as_str()
+        .filter(|text| !text.trim().is_empty())
+        .map(str::trim)
+        .map(str::to_string)
+}
+
+fn validation_item(value: &Value) -> Option<String> {
+    let msg = value.get("msg").and_then(non_empty_str)?;
+    let loc = value
+        .get("loc")
+        .and_then(Value::as_array)
+        .map(|parts| {
+            parts
+                .iter()
+                .filter_map(|part| {
+                    part.as_str()
+                        .map(str::to_string)
+                        .or_else(|| part.as_i64().map(|n| n.to_string()))
+                })
+                .collect::<Vec<_>>()
+                .join(".")
+        })
+        .unwrap_or_default();
+    if loc.is_empty() {
+        Some(msg)
+    } else {
+        Some(format!("{loc}: {msg}"))
+    }
 }
 
 pub fn parse_response(body: &str) -> Result<DecisionResponse, DecisionError> {

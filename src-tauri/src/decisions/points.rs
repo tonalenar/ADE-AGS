@@ -272,11 +272,17 @@ fn request(
 }
 
 fn proposal_state(key: &str, kind: &str, operation: &str, body: &str) -> String {
-    let body = truncate_chars(body, 3_500);
-    super::protocol::truncate_state(&format!(
+    // O corte curto é da Laya e acontece no envio. Aqui o texto fica no teto do Jev,
+    // senão um state longo já chegaria cortado para quem aceita mais.
+    let body = truncate_chars(body, super::protocol::JEV_STATE_CHAR_BUDGET);
+    cap_state(&format!(
         "chave: {}\ntipo: {kind}\noperacao: {operation}\ntexto:\n{body}",
         truncate_chars(key, 200)
     ))
+}
+
+fn cap_state(text: &str) -> String {
+    truncate_chars(text.trim(), super::protocol::JEV_STATE_CHAR_BUDGET)
 }
 
 fn fleet_state(run: &Run, task: &Task, tasks: &[Task], running: i64) -> String {
@@ -305,7 +311,7 @@ fn fleet_state(run: &Run, task: &Task, tasks: &[Task], running: i64) -> String {
         Some(limit) if run.spent_usd >= limit => "estourado",
         Some(_) => "dentro",
     };
-    super::protocol::truncate_state(&format!(
+    cap_state(&format!(
         "titulo: {}\npapel: {}\norcamento: {budget}\nem_execucao: {running}\nmax_paralelo: {}\ndependencias: {}",
         truncate_chars(&task.title, 180),
         task.role.as_deref().unwrap_or("manual"),
