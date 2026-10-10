@@ -900,6 +900,7 @@ fn el_sitio_sobrevive_a_reiniciar_la_app() {
         });
         site.save_now().unwrap();
     }
+    #[cfg(unix)]
     let file = dir.join(file_name(origin));
     #[cfg(unix)]
     {

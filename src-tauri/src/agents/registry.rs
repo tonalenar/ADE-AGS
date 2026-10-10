@@ -132,6 +132,7 @@ pub struct ModelAlias {
 #[derive(Clone, Copy, Debug)]
 pub enum ModelSource {
     /// Una lista fija de alias.
+    #[expect(dead_code, reason = "fixed aliases remain supported by the roster for future registry entries")]
     Aliases(&'static [ModelAlias]),
     /// Catálogo visible consultado mediante `codex app-server model/list`.
     CodexAppServer,

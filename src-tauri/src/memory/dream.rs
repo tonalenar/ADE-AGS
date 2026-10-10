@@ -5,6 +5,7 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use tauri::Manager;
 
+#[expect(dead_code, reason = "reserved proposal budget; the current dreamer uses token and byte limits")]
 pub const PROPOSAL_MAX: i64 = 8;
 pub const HISTORY_MISSIONS: usize = 8;
 pub const HISTORY_BYTES: usize = 48 * 1024;

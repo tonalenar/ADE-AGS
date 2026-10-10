@@ -279,6 +279,7 @@ impl RepoSync {
         Ok(())
     }
 
+    #[cfg(test)]
     fn is_paused(&self, workspace: &str) -> bool {
         self.lock_state().slots.get(workspace).is_some_and(|slot| slot.paused)
     }
@@ -367,6 +368,7 @@ impl RepoSync {
         }
     }
 
+    #[cfg(test)]
     pub fn wait_until(
         &self,
         workspace: &str,

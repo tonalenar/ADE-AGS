@@ -9,7 +9,7 @@
 use std::ffi::OsStr;
 use std::io::{self, Read, Write};
 use std::os::windows::ffi::OsStrExt;
-use std::os::windows::io::{AsRawHandle, FromRawHandle, RawHandle};
+use std::os::windows::io::{FromRawHandle, RawHandle};
 use std::sync::{Arc, Mutex};
 
 use portable_pty::{Child, ChildKiller, CommandBuilder, ExitStatus, MasterPty, PtyPair, PtySize, SlavePty};
@@ -146,7 +146,7 @@ pub(crate) fn open(size: PtySize) -> Result<PtyPair, String> {
 fn pipe() -> io::Result<(HANDLE, HANDLE)> {
     let mut read = std::ptr::null_mut();
     let mut write = std::ptr::null_mut();
-    let mut sa = windows_sys::Win32::Security::SECURITY_ATTRIBUTES {
+    let sa = windows_sys::Win32::Security::SECURITY_ATTRIBUTES {
         nLength: std::mem::size_of::<windows_sys::Win32::Security::SECURITY_ATTRIBUTES>() as u32,
         lpSecurityDescriptor: std::ptr::null_mut(),
         bInheritHandle: TRUE,

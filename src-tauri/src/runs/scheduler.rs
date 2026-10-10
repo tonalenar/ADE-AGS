@@ -81,6 +81,7 @@ pub fn decide(run: &Run, tasks: &[Task]) -> Decision {
 /// Un fallo que vale la pena reintentar: el agente llegó a correr, no fue por plata, y la
 /// entrega todavía tiene rodada de correção dentro do teto. `attempt` não decide: o reroute
 /// zera esse número e o teto mora em `fix_round`.
+#[cfg(test)]
 pub fn should_retry(task: &Task, max_rounds: i64) -> bool {
     super::fixrounds::can_retry(task, max_rounds)
 }

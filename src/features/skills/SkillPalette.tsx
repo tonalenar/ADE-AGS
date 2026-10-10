@@ -249,7 +249,7 @@ export function SkillPalette({ target: initial, onClose }: {
                 ? t("skills.palette.note", { dir: target.cwd })
                 : t("skills.palette.noteTab")}
             >
-              <Button variant="icon" className="cc-t flex items-center justify-center w-5 h-5 rounded shrink-0
+              <Button variant="icon" aria-label={target.cwd ? t("skills.palette.note", { dir: target.cwd }) : t("skills.palette.noteTab")} className="cc-t flex items-center justify-center w-5 h-5 rounded shrink-0
                 text-gray-400 dark:text-white/30
                 hover:text-gray-600 dark:hover:text-white/60 p-0">
                 <InfoIcon className="w-3.5 h-3.5" />

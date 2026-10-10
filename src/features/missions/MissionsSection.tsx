@@ -217,7 +217,7 @@ export function MissionsSection() {
           </Button>
         )}
         <Tooltip content={t("missions.new")} placement="bottom">
-          <Button variant="icon" onClick={() => setCreating(true)} disabled={!cwd}
+          <Button variant="icon" aria-label={t("missions.new")} onClick={() => setCreating(true)} disabled={!cwd}
             className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0 text-gray-400 dark:text-white/35
               hover:text-gray-700 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10 p-0 disabled:opacity-40">
             <AddIcon className="w-3.5 h-3.5" />
