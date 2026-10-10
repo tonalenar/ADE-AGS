@@ -9,7 +9,9 @@ import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { showBotToast } from "@/shared/brand/botToastStore";
 import { missionIndex, tabsByMission } from "./groups";
 import { useMissionsStore } from "./store";
+import { isWorking } from "./stalled";
 import { LOOP_DONE, loopStep, loopStuck, type LoopWatch } from "./vigiaLoop";
+import { memberFinished, pokeAllowed } from "./vigiaPoke";
 import { useVigiaSwitch } from "./vigiaSwitch";
 
 /**
@@ -217,6 +219,19 @@ const watches = new Map<string, Watch>();
 const lastPoke = new Map<string, number>();
 const inFlight = new Set<string>();
 const lastErrorReport = new Map<string, number>();
+/** Quando o Vigia escreveu pela última vez no terminal de cada aba (uma cutucada por vez). */
+const pokes = new Map<string, number>();
+
+/** Pode escrever no terminal desta aba agora? Ver `pokeAllowed`. */
+function mayPoke(tabId: string, now: number): boolean {
+  return pokeAllowed(pokes.get(tabId), sentAt.get(tabId), isWorking(screenOf(tabId)?.lines ?? []), now);
+}
+
+function poke(tabId: string, text: string, now: number): void {
+  pokes.set(tabId, now);
+  sendWhenReady(tabId, text);
+}
+
 /** Por terminal Codex: desde quando a tela está igual (fora os contadores) em "Working". */
 const loops = new Map<string, LoopWatch>();
 
@@ -315,15 +330,19 @@ export function vigiaTick(now = Date.now()): void {
       continue;
     }
     if (finding) {
+      // Orquestrador trabalhando, ou sem responder à cutucada anterior: espera o próximo ciclo.
+      if (!mayPoke(lead.id, now)) continue;
       watch.nudges += 1;
       watch.lastNudge = now;
-      sendWhenReady(lead.id, `[${VIGIA_NAME}] ${finding.nudge}`);
+      poke(lead.id, `[${VIGIA_NAME}] ${finding.nudge}`, now);
       reportToChat(lead.id, reportLine(finding.stuck, `lembrete ${watch.nudges}/${NUDGE_LIMIT} enviado ao ${lead.title}.`));
       continue;
     }
 
     if (inFlight.has(mission.id)) continue;
-    const idle = idleCandidates(team, now, lastOutputAt, lastPoke);
+    // Equipe que já entregou, ou integrante que já reportou a tarefa: parados com razão, não travados.
+    if (watch.doneAt !== undefined) continue;
+    const idle = idleCandidates(team, now, lastOutputAt, lastPoke).filter((tab) => !memberFinished(taskAt.get(tab.id), sentAt.get(tab.id)));
     if (idle.length === 0) continue;
     const pick = vigiaAgentFor(lead.agentId, available);
     if (!pick) continue;
@@ -346,8 +365,8 @@ export function vigiaTick(now = Date.now()): void {
             continue;
           }
           const target = team.find((tab) => tab.title === action.to);
-          if (!target) continue;
-          sendWhenReady(target.id, `[${VIGIA_NAME}] ${action.message}`);
+          if (!target || !mayPoke(target.id, now)) continue;
+          poke(target.id, `[${VIGIA_NAME}] ${action.message}`, now);
           reportToChat(lead.id, reportLine(action.message, `mandei a ${action.to}.`, "aviso"));
         }
       })
