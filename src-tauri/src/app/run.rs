@@ -399,6 +399,13 @@ pub fn run() {
             // Settings genéricos (key-value)
             crate::database::db_get_setting,
             crate::database::db_set_setting,
+            crate::decisions::commands::decision_settings_get,
+            crate::decisions::commands::decision_settings_set,
+            crate::decisions::commands::decision_key_set,
+            crate::decisions::commands::decision_key_clear,
+            crate::decisions::commands::decision_test_connection,
+            crate::decisions::commands::decision_shadow_report,
+            crate::decisions::commands::decision_shadow_export_csv,
             crate::database::db_boot_status,
             // Gestión de skills (symlinks globales)
             crate::skills::get_skills_dir,

@@ -567,6 +567,7 @@ pub async fn mission_finish_terminals(
             return Err("Solo se termina a mano una misión en terminales que está corriendo.".into());
         }
     }
+    crate::decisions::observe_mission(db.clone(), &evidence);
     notify(&app, &mission_id);
     let conn = db.lock().map_err(|e| e.to_string())?;
     store::get(&conn, &mission_id)?.ok_or_else(|| "la misión desapareció".to_string())
