@@ -27,7 +27,6 @@ const BOOT_WAIT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone)]
 struct Reachable {
-    key: String,
     id: String,
     portal: Portal,
 }
@@ -38,7 +37,7 @@ fn reachable(from: &str) -> Vec<Reachable> {
         .into_iter()
         .filter_map(|(key, id)| {
             let portal = boards.get(&key)?.portals.get(&id)?.clone();
-            (portal.kind.as_deref() == Some("android")).then_some(Reachable { key, id, portal })
+            (portal.kind.as_deref() == Some("android")).then_some(Reachable { id, portal })
         })
         .collect()
 }
@@ -69,10 +68,6 @@ fn resolve<'a>(list: &'a [Reachable], wanted: &str) -> Result<&'a Reachable, Str
 
 fn describe(d: &Reachable) -> Value {
     json!({ "id": d.id, "name": d.portal.name, "serial": d.portal.serial, "avd": d.portal.avd })
-}
-
-fn window_of(key: &str) -> &str {
-    key.split('|').next().unwrap_or("main")
 }
 
 /// Un número que puede llegar como número (flag) o como texto.
@@ -259,7 +254,7 @@ mod test {
     use super::*;
 
     fn dev(id: &str, name: &str) -> Reachable {
-        Reachable { key: "main|/p".into(), id: id.into(), portal: Portal { name: name.into(), kind: Some("android".into()), ..Default::default() } }
+        Reachable { id: id.into(), portal: Portal { name: name.into(), kind: Some("android".into()), ..Default::default() } }
     }
 
     #[test]

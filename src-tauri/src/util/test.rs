@@ -1,8 +1,11 @@
 //! Tests de las utilidades.
 
+#[cfg(unix)]
 use std::process::Command;
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
 use super::output_with_timeout;
 
 /// Un comando que termina normal se comporta como `Command::output()`.
@@ -50,7 +53,9 @@ fn una_salida_mas_grande_que_el_buffer_del_pipe_no_bloquea() {
 
 // ── `path_env`: el PATH con el que se buscan y se lanzan las TUIs ─────────────────
 
-use super::path_env::{between_markers, find_in, known_dirs, merge};
+use super::path_env::{between_markers, merge};
+#[cfg(unix)]
+use super::path_env::{find_in, known_dirs};
 use std::path::PathBuf;
 
 fn temp_dir(tag: &str) -> PathBuf {

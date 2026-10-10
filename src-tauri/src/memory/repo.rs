@@ -490,6 +490,7 @@ fn ensure_workspace_repo(root: &Path, workspace_id: &str) -> Result<PathBuf, Str
 /// it is dropped with the old `.git` and nothing is pushed. Objects that already left
 /// this machine are outside ADE's control. Every directory of this workspace is rewritten,
 /// including orphans left behind when the workspace was renamed.
+#[cfg(test)]
 pub fn replace_local_history(conn: &Connection, workspace: &str, root: &Path, purged_bodies: &[String]) -> Result<HistoryRewrite, String> {
     let projection = render(conn, workspace, &[]).ok();
     rewrite_workspace_repos(root, workspace, projection.as_ref(), purged_bodies)

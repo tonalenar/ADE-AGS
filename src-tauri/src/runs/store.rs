@@ -191,6 +191,7 @@ pub fn create_run_with_memory_snapshot(
 }
 
 /// Ata un run recién creado a la misión que intenta cumplir.
+#[cfg(test)]
 pub fn set_run_mission(conn: &Connection, run_id: &str, mission_id: &str) -> Result<(), String> {
     conn.execute(
         "UPDATE runs SET mission_id = ?1 WHERE id = ?2",
@@ -605,6 +606,7 @@ pub fn skip_task(conn: &Connection, task_id: &str, reason: &str) -> Result<bool,
 }
 
 /// Vuelve a la cola para un segundo intento, con el motivo del primero.
+#[cfg(test)]
 pub fn requeue_for_retry(conn: &Connection, task_id: &str, error: &str) -> Result<bool, String> {
     let n = conn
         .execute(
