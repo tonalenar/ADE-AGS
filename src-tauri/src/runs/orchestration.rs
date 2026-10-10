@@ -56,9 +56,9 @@ fn caller(conn: &Connection, payload: &Value) -> Result<Caller, String> {
     let cwd = payload
         .get("cwd")
         .and_then(Value::as_str)
-        .ok_or("falta quién pide (taskId o cwd)")?;
+        .ok_or("falta quem pede (taskId ou cwd)")?;
     let workspace_id = store::workspace_of_folder(conn, cwd).ok_or_else(|| {
-        format!("{cwd} no está abierta en ningún workspace de ADE AGS: abrila en una tab para orquestar desde ahí")
+        format!("{cwd} não está aberta em nenhum workspace do ADE AGS: abra-a numa aba para orquestrar de lá")
     })?;
     Ok(Caller {
         task: None,
@@ -96,7 +96,7 @@ fn run_for(conn: &Connection, caller: &Caller, args: &Value) -> Result<Run, Stri
         return Ok(run);
     }
     store::latest_run_in_folder(conn, &caller.workspace_id, &caller.cwd)?.ok_or_else(|| {
-        "todavía no hay ningún run lanzado desde esta carpeta: creá uno con run_plan".to_string()
+        "ainda não há nenhum run lançado desta pasta: crie um com run_plan".to_string()
     })
 }
 

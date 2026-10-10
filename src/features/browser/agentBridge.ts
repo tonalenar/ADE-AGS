@@ -224,8 +224,8 @@ async function sideEffects(host: BrowserHost, firstId: number, startedAt: number
     .slice(-10)
     .map((r) => `  ${r.method} ${r.error ? "ERR" : r.status} ${r.url}${r.error ? ` — ${r.error}` : ""}`);
   const parts: string[] = [];
-  if (logged.length) parts.push(`Consola durante la acción:\n${logged.join("\n")}`);
-  if (failed.length) parts.push(`Pedidos que fallaron durante la acción:\n${failed.join("\n")}`);
+  if (logged.length) parts.push(`Console durante a ação:\n${logged.join("\n")}`);
+  if (failed.length) parts.push(`Pedidos que falharam durante a ação:\n${failed.join("\n")}`);
   return parts.length ? inServerTerms(host, `\n\n${parts.join("\n\n")}`) : "";
 }
 
@@ -260,14 +260,14 @@ async function requestDetailText(host: BrowserHost, id: string): Promise<string>
   const log = debugLogOf(host.viewId);
   if (id.startsWith("g")) {
     const entry = log.requests.find((e) => `g${e.id}` === id);
-    if (!entry) throw new Error(`No hay ningún pedido ${id}: pedí el listado de nuevo.`);
+    if (!entry) throw new Error(`Não há nenhum pedido ${id}: peça a lista de novo.`);
     return detailForAgent(redactDetail(host, detailFromPage(entry)));
   }
   const origin = host.proxyOrigin();
   const seq = Number(id.replace(/^p/, ""));
-  if (!origin || !Number.isInteger(seq)) throw new Error(`'${id}' no es un id del listado (son como p12 o g5).`);
+  if (!origin || !Number.isInteger(seq)) throw new Error(`'${id}' não é um id da lista (são como p12 ou g5).`);
   const detail = await previewRequest(origin, seq);
-  if (!detail) throw new Error(`El pedido ${id} ya no está en el registro del proxy.`);
+  if (!detail) throw new Error(`O pedido ${id} não está mais no registro do proxy.`);
   return detailForAgent(redactDetail(host, detailFromProxy(detail)));
 }
 
@@ -362,7 +362,7 @@ function askerPrefix(owner: ViewOwner | null): string {
 
 /** Las reglas simuladas, para que el agente sepa qué está fingiendo la página. */
 function mocksText(mocks: Mock[]): string {
-  if (mocks.length === 0) return "No hay ninguna respuesta simulada: el servidor del proyecto contesta todo.";
+  if (mocks.length === 0) return "Não há nenhuma resposta simulada: o servidor do projeto responde tudo.";
   const lines = mocks.map((m) => {
     const parts = [`${m.method ?? "any method"} ${m.url} → ${m.status}`];
     if (m.delayMs > 0) parts.push(`${m.delayMs} ms de demora`);
@@ -431,7 +431,7 @@ async function execute(
         const preset = str(request, "preset");
         const fromPreset = preset ? presetById(preset) : undefined;
         if (preset && !fromPreset) {
-          throw new Error(`No hay ningún preset '${preset}'. Hay: ${VIEWPORT_PRESETS.map((p) => `${p.id} (${p.width}×${p.height})`).join(", ")}`);
+          throw new Error(`Não há nenhum preset '${preset}'. Há: ${VIEWPORT_PRESETS.map((p) => `${p.id} (${p.width}×${p.height})`).join(", ")}`);
         }
         const width = num(request, "width") ?? fromPreset?.width;
         const height = num(request, "height") ?? fromPreset?.height ?? host.viewport()?.height ?? 900;
@@ -638,7 +638,7 @@ async function execute(
       }, false);
     case "eval": return inPage(host, { op: "eval", code: required(request, "code") }, true);
     default:
-      throw new Error(`El navegador no sabe hacer '${op}'.`);
+      throw new Error(`O navegador não sabe fazer '${op}'.`);
   }
 }
 
@@ -676,13 +676,13 @@ export async function runPortalRequest(
   owner: ViewOwner | null = null
 ): Promise<string> {
   if (!PORTAL_OPS.has(request.op)) {
-    throw new Error(`Un portal no admite '${request.op}'. Admite: ${[...PORTAL_OPS].join(", ")}.`);
+    throw new Error(`Um portal não aceita '${request.op}'. Aceita: ${[...PORTAL_OPS].join(", ")}.`);
   }
   // El nodo monta el navegador al dibujarse; si el canvas todavía no lo hizo (ventana en
   // otra vista), se espera a que aparezca.
   const host = await waitForHost(portalId, 15_000);
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
-    throw new Error("El portal no tiene ninguna página cargada. Empiece con `ags portal navigate <portal> <url>`.");
+    throw new Error("O portal não tem nenhuma página carregada. Comece com `ags portal navigate <portal> <url>`.");
   }
   return execute(cwd, host, request, false, owner);
 }

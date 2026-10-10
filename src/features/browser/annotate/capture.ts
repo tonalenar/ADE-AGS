@@ -62,13 +62,13 @@ export async function freezePage(page: HTMLElement, column: HTMLElement): Promis
   const viewport = { width: window.innerWidth, height: window.innerHeight };
   const image = await decode(await previewCapture());
   const crop = cropFor(pageBox, columnBox, viewport, { width: image.width, height: image.height });
-  if (!crop) throw new Error("la página no está a la vista");
+  if (!crop) throw new Error("a página não está à vista");
 
   const canvas = document.createElement("canvas");
   canvas.width = crop.source.width;
   canvas.height = crop.source.height;
   const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("no hay canvas 2D");
+  if (!ctx) throw new Error("não há canvas 2D");
   const { left, top, width, height } = crop.source;
   ctx.drawImage(image, left, top, width, height, 0, 0, width, height);
   if ("close" in image && typeof image.close === "function") image.close();
@@ -82,7 +82,7 @@ export async function freezePage(page: HTMLElement, column: HTMLElement): Promis
 
 export async function canvasToPng(canvas: HTMLCanvasElement): Promise<Uint8Array> {
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
-  if (!blob) throw new Error("no se pudo generar la imagen");
+  if (!blob) throw new Error("não foi possível gerar a imagem");
   return new Uint8Array(await blob.arrayBuffer());
 }
 

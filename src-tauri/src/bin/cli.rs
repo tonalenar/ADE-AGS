@@ -411,7 +411,7 @@ pub(crate) fn main() -> ExitCode {
             // Un argumento obligatorio que falta es un error de USO (2), no un comando que falló (1).
             // Um flag com valor inválido (`--limit banana`, `--at 2026-13-99`) também é uso incorreto:
             // a própria mensagem nomeia o flag, e a automação precisa distinguir isso de uma falha real.
-            if err.starts_with("Falta el argumento --") || err.starts_with("--") {
+            if err.starts_with("Falta o argumento --") || err.starts_with("--") {
                 return ExitCode::from(EXIT_USAGE);
             }
             ExitCode::from(EXIT_COMMAND_FAILED)
@@ -793,9 +793,9 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
                 "Argumento inesperado '{}'. Este comando {}",
                 args[i],
                 if positionals.is_empty() {
-                    "solo toma flags (empiezan con --)".to_string()
+                    "só aceita flags (começam com --)".to_string()
                 } else {
-                    format!("toma como máximo {} valor(es) suelto(s): {}", positionals.len(), positionals.join(", "))
+                    format!("aceita no máximo {} valor(es) solto(s): {}", positionals.len(), positionals.join(", "))
                 }
             ));
         };

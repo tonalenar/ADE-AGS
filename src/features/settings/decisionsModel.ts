@@ -11,6 +11,11 @@ export interface DecisionSettings {
   fleetGate: boolean;
   missionGate: boolean;
   keySaved: boolean;
+  /** O segundo provedor da comparação (`none` = só o principal). */
+  secondaryProvider: DecisionProviderId;
+  secondaryBaseUrl: string;
+  secondaryModel: string;
+  secondaryKeySaved: boolean;
 }
 
 export const PROVIDER_URL: Record<DecisionProviderId, string> = {
@@ -53,13 +58,25 @@ export function defaultDecisionSettings(): DecisionSettings {
     fleetGate: false,
     missionGate: false,
     keySaved: false,
+    secondaryProvider: "none",
+    secondaryBaseUrl: PROVIDER_URL.jev,
+    secondaryModel: defaultModel("jev"),
+    secondaryKeySaved: false,
   };
 }
 
 /** Algo mudou em relação ao que está salvo (a chave do cofre fica de fora). Pura. */
 export function isDirty(current: DecisionSettings, saved: DecisionSettings): boolean {
-  const strip = ({ keySaved: _ignored, ...rest }: DecisionSettings) => JSON.stringify(rest);
+  const strip = ({ keySaved: _a, secondaryKeySaved: _b, ...rest }: DecisionSettings) => JSON.stringify(rest);
   return strip(current) !== strip(saved);
+}
+
+/** O que vale ao sair do campo de timeout: vazio ou texto sem número volta ao padrão (800 ms), o resto é limitado a 50 a 30000. Pura. */
+export function parseTimeout(text: string): number {
+  const trimmed = text.trim();
+  if (trimmed === "") return 800;
+  const value = Number(trimmed);
+  return Number.isFinite(value) ? clampTimeout(value) : 800;
 }
 
 export function clampTimeout(value: number): number {
@@ -82,6 +99,17 @@ const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
 export function isLocalUrl(value: string): boolean {
   const host = urlHost(value);
   return host !== null && LOCAL_HOSTS.has(host);
+}
+
+/** Os endereços (hosts) que recebem o texto das propostas e ficam fora desta máquina: o principal e o
+ * segundo, se estiverem ligados. Pura. */
+export function remoteHosts(settings: Pick<DecisionSettings, "provider" | "baseUrl" | "secondaryProvider" | "secondaryBaseUrl">): string[] {
+  const hosts: string[] = [];
+  if (settings.provider !== "none" && !isLocalUrl(settings.baseUrl)) hosts.push(urlHost(settings.baseUrl) ?? settings.baseUrl);
+  if (settings.secondaryProvider !== "none" && !isLocalUrl(settings.secondaryBaseUrl)) {
+    hosts.push(urlHost(settings.secondaryBaseUrl) ?? settings.secondaryBaseUrl);
+  }
+  return hosts;
 }
 
 /** O aviso de privacidade vale com um provedor escolhido e o endereço fora desta máquina. */

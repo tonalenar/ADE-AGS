@@ -84,7 +84,7 @@ fn las_respuestas_omiten_el_campo_que_no_aplica() {
 #[test]
 fn un_argumento_faltante_nombra_el_flag_que_se_olvido() {
     let err = arg_str(&json!({}), "cwd").unwrap_err();
-    assert_eq!(err, "Falta el argumento --cwd");
+    assert_eq!(err, "Falta o argumento --cwd");
     assert_eq!(arg_str(&json!({ "cwd": "/x" }), "cwd").unwrap(), "/x");
 }
 

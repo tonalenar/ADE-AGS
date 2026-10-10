@@ -36,6 +36,7 @@ pub struct LogRow {
 #[serde(rename_all = "camelCase")]
 pub struct PointReport {
     pub point: String,
+    pub provider: String,
     pub total: i64,
     /// Respostas sem erro: o denominador da concordância.
     pub compared: i64,
@@ -71,6 +72,31 @@ pub struct QuestionReport {
     pub pairs: Vec<PairCount>,
 }
 
+/// Quem chegou mais perto da decisão da pessoa. `correct`: disse o mesmo (aprovar ou rejeitar);
+/// `wrong`: disse o contrário; `abstained`: pediu revisão, que não é nem um nem outro.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Judged {
+    pub provider: String,
+    pub decided: i64,
+    pub correct: i64,
+    pub wrong: i64,
+    pub abstained: i64,
+}
+
+/// Dois provedores diante das mesmas propostas. Nos `pairs` de cada pergunta, `heuristic` é o
+/// que o provedor A disse e `provider` o que o B disse.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Comparison {
+    pub point: String,
+    pub provider_a: String,
+    pub provider_b: String,
+    pub compared: i64,
+    pub agreement_rate: f64,
+    pub questions: Vec<QuestionReport>,
+}
+
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Disagreement {
@@ -86,6 +112,9 @@ pub struct ShadowReport {
     pub generated_at: i64,
     pub min_sample: i64,
     pub points: Vec<PointReport>,
+    pub comparisons: Vec<Comparison>,
+    /// Cada provedor (e a heurística do app) contra a decisão da pessoa nas propostas de memória.
+    pub judged: Vec<Judged>,
     pub disagreements: Vec<Disagreement>,
 }
 
@@ -110,7 +139,15 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             output_tokens INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_decision_shadow_log_ts ON decision_shadow_log(ts);
-        CREATE INDEX IF NOT EXISTS idx_decision_shadow_log_point ON decision_shadow_log(point, state_hash, ts);",
+        CREATE INDEX IF NOT EXISTS idx_decision_shadow_log_point ON decision_shadow_log(point, state_hash, ts);
+        CREATE TABLE IF NOT EXISTS decision_human_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            point TEXT NOT NULL,
+            state_hash TEXT NOT NULL,
+            decision TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_decision_human_log_hash ON decision_human_log(point, state_hash);",
     )
 }
 
@@ -144,12 +181,36 @@ pub fn record(conn: &Connection, row: &LogRow) -> Result<(), String> {
     tx.commit().map_err(|error| error.to_string())
 }
 
-pub fn recent(conn: &Connection, point: &str, state_hash: &str, now: i64) -> Result<bool, String> {
+/// A decisão que a PESSOA tomou numa proposta (`aprovar` ou `rejeitar`), pelo hash do texto, sem o
+/// texto: é a referência para dizer quem acertou. Guarda 30 dias, como o resto.
+pub fn record_human(conn: &Connection, point: &str, state_hash: &str, decision: &str) -> Result<(), String> {
+    migrate(conn).map_err(|error| error.to_string())?;
+    let now = now_ts();
+    conn.execute(
+        "INSERT INTO decision_human_log (ts, point, state_hash, decision) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![now, point, state_hash, decision],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "DELETE FROM decision_human_log WHERE ts <= ?1",
+        [now.saturating_sub(RETAIN_DAYS * 86_400)],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+pub fn recent(
+    conn: &Connection,
+    point: &str,
+    state_hash: &str,
+    provider: &str,
+    now: i64,
+) -> Result<bool, String> {
     migrate(conn).map_err(|error| error.to_string())?;
     let found: Option<i64> = conn
         .query_row(
-            "SELECT 1 FROM decision_shadow_log WHERE point = ?1 AND state_hash = ?2 AND ts >= ?3 LIMIT 1",
-            rusqlite::params![point, state_hash, now.saturating_sub(DEDUPE_SECS)],
+            "SELECT 1 FROM decision_shadow_log WHERE point = ?1 AND state_hash = ?2 AND provider = ?3 AND ts >= ?4 LIMIT 1",
+            rusqlite::params![point, state_hash, provider, now.saturating_sub(DEDUPE_SECS)],
             |row| row.get(0),
         )
         .optional()
@@ -182,6 +243,7 @@ pub fn retain_with(
 
 struct Row {
     point: String,
+    provider: String,
     heuristic: String,
     provider_decision: Option<String>,
     latency_ms: Option<i64>,
@@ -192,7 +254,7 @@ struct Row {
 pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
     migrate(conn).map_err(|error| error.to_string())?;
     let mut stmt = conn
-        .prepare("SELECT point, heuristic, provider_decision, latency_ms, error, state_hash FROM decision_shadow_log ORDER BY ts ASC, id ASC")
+        .prepare("SELECT point, heuristic, provider_decision, latency_ms, error, state_hash, provider FROM decision_shadow_log ORDER BY ts ASC, id ASC")
         .map_err(|error| error.to_string())?;
     let rows = stmt
         .query_map([], |row| {
@@ -203,20 +265,26 @@ pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
                 latency_ms: row.get(3)?,
                 error: row.get(4)?,
                 state_hash: row.get(5)?,
+                provider: row.get(6)?,
             })
         })
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
 
-    let mut by_point: BTreeMap<&str, Vec<&Row>> = BTreeMap::new();
+    let mut by_point: BTreeMap<(&str, &str), Vec<&Row>> = BTreeMap::new();
     for row in &rows {
-        by_point.entry(row.point.as_str()).or_default().push(row);
+        by_point
+            .entry((row.point.as_str(), row.provider.as_str()))
+            .or_default()
+            .push(row);
     }
     let points = by_point
         .into_iter()
-        .map(|(point, mine)| point_report(point, &mine))
+        .map(|((point, provider), mine)| point_report(point, provider, &mine))
         .collect();
+    let comparisons = comparisons(&rows);
+    let judged = judged(&rows, &human_decisions(conn)?);
 
     let mut disagreements = Vec::new();
     for row in rows.iter().rev() {
@@ -243,8 +311,60 @@ pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
         generated_at: now_ts(),
         min_sample: MIN_SAMPLE,
         points,
+        comparisons,
+        judged,
         disagreements,
     })
+}
+
+/// A última decisão da pessoa por (ponto, hash).
+fn human_decisions(conn: &Connection) -> Result<BTreeMap<(String, String), String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT point, state_hash, decision FROM decision_human_log ORDER BY ts ASC, id ASC")
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok(((row.get::<_, String>(0)?, row.get::<_, String>(1)?), row.get::<_, String>(2)?)))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(rows.into_iter().collect())
+}
+
+/// Confronta o `acao` de cada provedor (e o da heurística, contado uma vez por proposta) com o que a
+/// pessoa decidiu. Só as propostas que ela decidiu e que o provedor respondeu sem erro. Pura.
+fn judged(rows: &[Row], human: &BTreeMap<(String, String), String>) -> Vec<Judged> {
+    let mut tallies: BTreeMap<String, Judged> = BTreeMap::new();
+    let mut heuristic_seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    let mut tally = |provider: &str, label: Option<&str>, decision: &str| {
+        let slot = tallies.entry(provider.to_string()).or_insert_with(|| Judged {
+            provider: provider.to_string(),
+            decided: 0,
+            correct: 0,
+            wrong: 0,
+            abstained: 0,
+        });
+        slot.decided += 1;
+        match label {
+            Some(label @ ("aprovar" | "rejeitar")) if label == decision => slot.correct += 1,
+            Some("aprovar" | "rejeitar") => slot.wrong += 1,
+            _ => slot.abstained += 1,
+        }
+    };
+    for row in rows
+        .iter()
+        .filter(|row| row.error.is_none() && row.point == super::points::POINT_MEMORY)
+    {
+        let Some(decision) = human.get(&(row.point.clone(), row.state_hash.clone())) else {
+            continue;
+        };
+        if let Some(provider_decision) = row.provider_decision.as_deref() {
+            tally(&row.provider, answers(provider_decision).get("acao").copied(), decision);
+        }
+        if heuristic_seen.insert(row.state_hash.as_str()) {
+            tally("heuristic", answers(&row.heuristic).get("acao").copied(), decision);
+        }
+    }
+    tallies.into_values().collect()
 }
 
 fn rate(part: usize, whole: usize) -> f64 {
@@ -255,7 +375,7 @@ fn rate(part: usize, whole: usize) -> f64 {
     }
 }
 
-fn point_report(point: &str, mine: &[&Row]) -> PointReport {
+fn point_report(point: &str, provider: &str, mine: &[&Row]) -> PointReport {
     let errors = mine.iter().filter(|row| row.error.is_some()).count();
     let timeouts = mine
         .iter()
@@ -278,6 +398,7 @@ fn point_report(point: &str, mine: &[&Row]) -> PointReport {
     latencies.sort_unstable();
     PointReport {
         point: point.to_string(),
+        provider: provider.to_string(),
         total: mine.len() as i64,
         compared: compared.len() as i64,
         low_sample: (compared.len() as i64) < MIN_SAMPLE,
@@ -299,6 +420,17 @@ fn answers(canonical: &str) -> BTreeMap<&str, &str> {
 }
 
 fn question_reports(point: &str, compared: &[&Row]) -> Vec<QuestionReport> {
+    let pairs: Vec<(String, String)> = compared
+        .iter()
+        .map(|row| (row.heuristic.clone(), row.provider_decision.clone().unwrap_or_default()))
+        .collect();
+    tally_questions(point, &pairs)
+}
+
+/// Concordância por pergunta de uma lista de pares (esquerda, direita) em texto canônico. Com a
+/// heurística à esquerda e o provedor à direita (`point` dá os rótulos que a heurística não diz),
+/// ou, na comparação, um provedor contra o outro (`point` vazio).
+fn tally_questions(point: &str, pairs: &[(String, String)]) -> Vec<QuestionReport> {
     #[derive(Default)]
     struct Tally {
         compared: i64,
@@ -307,17 +439,13 @@ fn question_reports(point: &str, compared: &[&Row]) -> Vec<QuestionReport> {
         pairs: BTreeMap<(String, String), i64>,
     }
     let mut tallies: BTreeMap<String, Tally> = BTreeMap::new();
-    for row in compared {
-        let provider = row
-            .provider_decision
-            .as_deref()
-            .map(answers)
-            .unwrap_or_default();
-        for (question, heuristic) in answers(&row.heuristic) {
-            let chosen = provider.get(question).copied().unwrap_or("-");
+    for (left, right) in pairs {
+        let right = answers(right);
+        for (question, left_label) in answers(left) {
+            let chosen = right.get(question).copied().unwrap_or("-");
             let tally = tallies.entry(question.to_string()).or_default();
             tally.compared += 1;
-            if chosen == heuristic {
+            if chosen == left_label {
                 tally.agreed += 1;
             }
             if blind_labels(point, question)
@@ -328,7 +456,7 @@ fn question_reports(point: &str, compared: &[&Row]) -> Vec<QuestionReport> {
             }
             *tally
                 .pairs
-                .entry((heuristic.to_string(), chosen.to_string()))
+                .entry((left_label.to_string(), chosen.to_string()))
                 .or_default() += 1;
         }
     }
@@ -367,15 +495,58 @@ fn question_reports(point: &str, compared: &[&Row]) -> Vec<QuestionReport> {
         .collect()
 }
 
+/// Dois provedores respondendo a MESMA proposta (mesmo ponto e mesmo hash do texto): quantas vezes
+/// decidiram igual e, por pergunta, o que um disse contra o que o outro disse. Em cada par, o
+/// `heuristic` dos contadores é o provedor A e o `provider` é o B. Pura.
+fn comparisons(rows: &[Row]) -> Vec<Comparison> {
+    // ponto -> hash -> provedor -> última decisão sem erro
+    let mut seen: BTreeMap<&str, BTreeMap<&str, BTreeMap<&str, &str>>> = BTreeMap::new();
+    for row in rows.iter().filter(|row| row.error.is_none()) {
+        if let Some(decision) = row.provider_decision.as_deref() {
+            seen.entry(row.point.as_str())
+                .or_default()
+                .entry(row.state_hash.as_str())
+                .or_default()
+                .insert(row.provider.as_str(), decision);
+        }
+    }
+    let mut out = Vec::new();
+    for (point, hashes) in seen {
+        let mut by_pair: BTreeMap<(&str, &str), Vec<(String, String)>> = BTreeMap::new();
+        for providers in hashes.values().filter(|providers| providers.len() >= 2) {
+            let mut it = providers.iter();
+            if let (Some((a, left)), Some((b, right))) = (it.next(), it.next()) {
+                by_pair
+                    .entry((*a, *b))
+                    .or_default()
+                    .push((left.to_string(), right.to_string()));
+            }
+        }
+        for ((a, b), pairs) in by_pair {
+            let agreed = pairs.iter().filter(|(left, right)| left == right).count();
+            out.push(Comparison {
+                point: point.to_string(),
+                provider_a: a.to_string(),
+                provider_b: b.to_string(),
+                compared: pairs.len() as i64,
+                agreement_rate: rate(agreed, pairs.len()),
+                questions: tally_questions("", &pairs),
+            });
+        }
+    }
+    out
+}
+
 pub fn export_csv(conn: &Connection) -> Result<String, String> {
     let report = report(conn)?;
     let mut csv = String::from(
-        "tipo,ponto,total,concordancia,p50_ms,p95_ms,taxa_erro,taxa_timeout,comparadas,amostra_pequena\n",
+        "tipo,ponto,provedor,total,concordancia,p50_ms,p95_ms,taxa_erro,taxa_timeout,comparadas,amostra_pequena\n",
     );
     for point in &report.points {
         csv.push_str(&format!(
-            "resumo,{},{},{:.4},{},{},{:.4},{:.4},{},{}\n",
+            "resumo,{},{},{},{:.4},{},{},{:.4},{:.4},{},{}\n",
             cell(&point.point),
+            cell(&point.provider),
             point.total,
             point.agreement_rate,
             point
@@ -407,15 +578,38 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
         for question in &point.questions {
             for pair in &question.pairs {
                 csv.push_str(&format!(
-                    "par,{},{},{},{},{}\n",
+                    "par,{},{},{},{},{},{}\n",
                     cell(&point.point),
                     cell(&question.question),
                     cell(&pair.heuristic),
                     cell(&pair.provider),
                     pair.count,
+                    cell(&point.provider),
                 ));
             }
         }
+    }
+    csv.push_str("tipo,ponto,provedor_a,provedor_b,comparadas,concordancia\n");
+    for comparison in &report.comparisons {
+        csv.push_str(&format!(
+            "comparacao,{},{},{},{},{:.4}\n",
+            cell(&comparison.point),
+            cell(&comparison.provider_a),
+            cell(&comparison.provider_b),
+            comparison.compared,
+            comparison.agreement_rate,
+        ));
+    }
+    csv.push_str("tipo,provedor,decididas,acertou,errou,absteve\n");
+    for judged in &report.judged {
+        csv.push_str(&format!(
+            "juiz,{},{},{},{},{}\n",
+            cell(&judged.provider),
+            judged.decided,
+            judged.correct,
+            judged.wrong,
+            judged.abstained,
+        ));
     }
     Ok(csv)
 }

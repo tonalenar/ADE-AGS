@@ -25,13 +25,13 @@ export class PageChannel {
 
   run(command: PageCommand, timeoutMs = 10_000): Promise<unknown> {
     const target = this.target();
-    if (!target?.window) return Promise.reject(new Error("No hay ninguna página cargada en el navegador."));
+    if (!target?.window) return Promise.reject(new Error("Não há nenhuma página carregada no navegador."));
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`La página no respondió en ${Math.round(timeoutMs / 1000)} s. `
-          + "¿Sigue cargando, o navegó a un sitio que no pasa por el proxy?"));
+        reject(new Error(`A página não respondeu em ${Math.round(timeoutMs / 1000)} s. `
+          + "Ainda está carregando, ou navegou para um site que não passa pelo proxy?"));
       }, timeoutMs);
       this.pending.set(id, { op: command.op, resolve, reject, timer });
       target.window!.postMessage({ source: "ade-ags", type: "page:run", id, command } satisfies AppMessage, target.origin);

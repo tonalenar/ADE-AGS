@@ -167,7 +167,7 @@ pub fn arg_str(args: &serde_json::Value, key: &str) -> Result<String, String> {
     args.get(key)
         .and_then(|v| v.as_str())
         .map(|s| s.to_string())
-        .ok_or_else(|| format!("Falta el argumento --{key}"))
+        .ok_or_else(|| format!("Falta o argumento --{key}"))
 }
 
 pub fn arg_str_opt(args: &serde_json::Value, key: &str) -> Option<String> {

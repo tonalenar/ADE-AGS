@@ -255,7 +255,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "mission.redeliver" => missions::mission_redeliver(app, args),
         "approval.list" => missions::approval_list(app),
         "approval.decide" => missions::approval_decide(app, args),
-        other => Err(format!("Comando desconocido: {other}")),
+        other => Err(format!("Comando desconhecido: {other}")),
     };
 
     match result {

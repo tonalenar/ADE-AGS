@@ -57,7 +57,7 @@ export function renderAnnotated(page: HTMLCanvasElement, shapes: Shape[]): HTMLC
   out.width = page.width;
   out.height = page.height;
   const ctx = out.getContext("2d");
-  if (!ctx) throw new Error("no hay canvas 2D");
+  if (!ctx) throw new Error("não há canvas 2D");
   ctx.drawImage(page, 0, 0);
   for (const shape of shapes) drawShape(ctx, shape);
   return out;

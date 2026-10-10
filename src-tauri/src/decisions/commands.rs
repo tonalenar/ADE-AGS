@@ -23,6 +23,10 @@ pub struct DecisionSettingsDto {
     pub fleet_gate: bool,
     pub mission_gate: bool,
     pub key_saved: bool,
+    pub secondary_provider: String,
+    pub secondary_base_url: String,
+    pub secondary_model: String,
+    pub secondary_key_saved: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -37,6 +41,12 @@ pub struct DecisionSettingsInput {
     pub dream_triage: bool,
     pub fleet_gate: bool,
     pub mission_gate: bool,
+    #[serde(default)]
+    pub secondary_provider: String,
+    #[serde(default)]
+    pub secondary_base_url: String,
+    #[serde(default)]
+    pub secondary_model: String,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -58,12 +68,35 @@ fn dto(settings: &Settings) -> DecisionSettingsDto {
         dream_triage: settings.dream_triage,
         fleet_gate: settings.fleet_gate,
         mission_gate: settings.mission_gate,
-        key_saved: config::key_saved(),
+        key_saved: config::key_saved_in(config::KeySlot::Primary),
+        secondary_provider: settings
+            .secondary
+            .as_ref()
+            .map_or("none", |second| second.provider.as_str())
+            .into(),
+        secondary_base_url: settings.secondary.as_ref().map_or_else(String::new, |second| second.base_url.clone()),
+        secondary_model: settings.secondary.as_ref().map_or_else(String::new, |second| second.model.clone()),
+        secondary_key_saved: config::key_saved_in(config::KeySlot::Secondary),
     }
 }
 
 fn from_input(input: DecisionSettingsInput) -> Settings {
+    let second_provider = ProviderKind::parse(&input.secondary_provider);
+    let secondary = second_provider.is_configured().then(|| config::Endpoint {
+        provider: second_provider,
+        base_url: if input.secondary_base_url.trim().is_empty() {
+            second_provider.default_base_url().to_string()
+        } else {
+            input.secondary_base_url.clone()
+        },
+        model: if input.secondary_model.trim().is_empty() {
+            second_provider.default_model().to_string()
+        } else {
+            input.secondary_model.clone()
+        },
+    });
     Settings {
+        secondary,
         enabled: input.enabled,
         provider: ProviderKind::parse(&input.provider),
         base_url: input.base_url,
@@ -103,24 +136,39 @@ pub fn decision_settings_set(
 }
 
 #[tauri::command]
-pub fn decision_key_set(key: String) -> Result<(), String> {
-    config::save_key(&key)
+pub fn decision_key_set(key: String, slot: Option<String>) -> Result<(), String> {
+    config::save_key_in(config::KeySlot::parse(slot.as_deref()), &key)
 }
 
 #[tauri::command]
-pub fn decision_key_clear() -> Result<(), String> {
-    config::clear_key()
+pub fn decision_key_clear(slot: Option<String>) -> Result<(), String> {
+    config::clear_key_in(config::KeySlot::parse(slot.as_deref()))
 }
 
 /// Comando síncrono roda na thread principal do Tauri: a chamada de rede (até o timeout, que
 /// pode chegar a 30 s) congelaria a janela. Aqui só se lê o ajuste; o resto vai para fora.
 #[tauri::command]
-pub async fn decision_test_connection(db: State<'_, DbConnection>) -> Result<ConnectionTest, String> {
+pub async fn decision_test_connection(
+    db: State<'_, DbConnection>,
+    slot: Option<String>,
+) -> Result<ConnectionTest, String> {
     let settings = {
         let conn = db.lock().map_err(|error| error.to_string())?;
         config::load(&conn)?
     };
-    tauri::async_runtime::spawn_blocking(move || ping(&settings, config::load_key()))
+    let slot = config::KeySlot::parse(slot.as_deref());
+    let target = match (slot, &settings.secondary) {
+        (config::KeySlot::Secondary, Some(second)) => settings.with_endpoint(second),
+        (config::KeySlot::Secondary, None) => {
+            return Ok(ConnectionTest {
+                ok: false,
+                latency_ms: 0,
+                error: Some("Escolha o segundo provedor antes de testar.".into()),
+            });
+        }
+        (config::KeySlot::Primary, _) => settings,
+    };
+    tauri::async_runtime::spawn_blocking(move || ping(&target, config::load_key_in(slot)))
         .await
         .map_err(|error| error.to_string())
 }

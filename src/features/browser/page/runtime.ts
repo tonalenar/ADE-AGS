@@ -790,15 +790,15 @@ declare global {
     // su selector, que podría no volver a encontrarlo.
     if (target === "pick") {
       const picked = window.__agsLastPick;
-      if (!picked) throw new Error("La persona no marcó nada todavía.");
-      if (!picked.isConnected) throw new Error("Lo que marcó la persona ya no está en la página.");
+      if (!picked) throw new Error("A pessoa ainda não marcou nada.");
+      if (!picked.isConnected) throw new Error("O que a pessoa marcou não está mais na página.");
       return picked;
     }
     const spec = parseTarget(target);
     if (spec.kind === "ref") {
       const el = refs.get(spec.ref) ?? marked.get(spec.ref);
-      if (!el) throw new Error(`No hay ningún elemento ${spec.ref}: tomá un snapshot nuevo (los refs cambian con cada uno).`);
-      if (!el.isConnected) throw new Error(`${spec.ref} ya no está en la página (cambió desde el último snapshot): tomá uno nuevo.`);
+      if (!el) throw new Error(`Não há nenhum elemento ${spec.ref}: tire um novo snapshot (os refs mudam a cada um).`);
+      if (!el.isConnected) throw new Error(`${spec.ref} não está mais na página (mudou desde o último snapshot): tire um novo.`);
       return el;
     }
     if (spec.kind === "text") {
@@ -814,13 +814,13 @@ declare global {
         if (!partial && text.includes(wanted)) partial = hit;
       }
       if (partial) return partial;
-      throw new Error(`No hay ningún elemento visible con el texto "${spec.text}".`);
+      throw new Error(`Não há nenhum elemento visível com o texto "${spec.text}".`);
     }
     let el: Element | null;
     try {
       el = document.querySelector(spec.selector);
     } catch {
-      throw new Error(`"${spec.selector}" no es un ref (e12), un texto (text=Entrar) ni un selector CSS válido.`);
+      throw new Error(`"${spec.selector}" não é um ref (e12), um texto (text=Entrar) nem um seletor CSS válido.`);
     }
     if (!el) throw new Error(`Ningún elemento coincide con "${spec.selector}".`);
     return el;
@@ -874,21 +874,21 @@ declare global {
       target.scrollIntoView({ block: "center", inline: "center" });
       rect = target.getBoundingClientRect();
     }
-    if (rect.width === 0 || rect.height === 0) throw new Error(`${describeElement(el)} no se ve (mide 0×0).`);
+    if (rect.width === 0 || rect.height === 0) throw new Error(`${describeElement(el)} não está visível (mede 0×0).`);
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
     const hit = document.elementFromPoint(x, y);
     const ok = !hit || hit === target || target.contains(hit) || hit.contains(target)
       || (labels !== null && Array.from(labels).some((l) => l === hit || l.contains(hit)));
     if (!ok && hit) {
-      throw new Error(`${describeElement(el)} está tapado por ${describeElement(hit)} (${selectorOf(hit)}). `
-        + "Si es un modal u overlay, cerralo primero; si hay que forzarlo, usá eval.");
+      throw new Error(`${describeElement(el)} está coberto por ${describeElement(hit)} (${selectorOf(hit)}). `
+        + "Se for um modal ou overlay, feche-o primeiro; se for preciso forçar, use eval.");
     }
     return { x, y, target };
   }
 
   async function click(el: Element): Promise<unknown> {
-    if ((el as HTMLButtonElement).disabled) throw new Error(`${describeElement(el)} está deshabilitado.`);
+    if ((el as HTMLButtonElement).disabled) throw new Error(`${describeElement(el)} está desabilitado.`);
     await cursor.toElement(el, "click");
     cursor.click();
     const { x, y, target } = aim(el);
@@ -947,15 +947,15 @@ declare global {
   }
 
   async function type(el: Element, text: string, clear: boolean, submit: boolean): Promise<unknown> {
-    if ((el as HTMLInputElement).disabled) throw new Error(`${describeElement(el)} está deshabilitado.`);
+    if ((el as HTMLInputElement).disabled) throw new Error(`${describeElement(el)} está desabilitado.`);
     await cursor.toElement(el, `type "${clipLabel(text)}"`);
     (el as HTMLElement).focus?.({ preventScroll: false });
     if (el.tagName === "INPUT" || el.tagName === "TEXTAREA") {
       const field = el as HTMLInputElement | HTMLTextAreaElement;
       if (["checkbox", "radio", "button", "submit", "file"].includes((field as HTMLInputElement).type)) {
-        throw new Error(`${describeElement(el)} es un ${(field as HTMLInputElement).type}: se usa con click, no tipeando.`);
+        throw new Error(`${describeElement(el)} es un ${(field as HTMLInputElement).type}: use com click, não digitando.`);
       }
-      if ((field as HTMLInputElement).readOnly) throw new Error(`${describeElement(el)} es de solo lectura.`);
+      if ((field as HTMLInputElement).readOnly) throw new Error(`${describeElement(el)} é somente leitura.`);
       nativeSetValue(field, clear ? text : field.value + text);
       inputEvent(field, text);
       field.dispatchEvent(new Event("change", { bubbles: true }));
@@ -972,7 +972,7 @@ declare global {
         inputEvent(el, text);
       }
     } else {
-      throw new Error(`${describeElement(el)} no es un campo de texto.`);
+      throw new Error(`${describeElement(el)} não é um campo de texto.`);
     }
     if (submit) return press("Enter", el);
     await settle(800);
@@ -1042,7 +1042,7 @@ declare global {
   async function select(el: Element, value: string): Promise<unknown> {
     await cursor.toElement(el, `select "${clipLabel(value)}"`);
     if (el.tagName !== "SELECT") {
-      throw new Error(`${describeElement(el)} no es un <select>. Si es un menú propio, abrilo con click y elegí la opción con click.`);
+      throw new Error(`${describeElement(el)} não é um <select>. Se for um menu próprio, abra-o com click e escolha a opção com click.`);
     }
     const selectEl = el as HTMLSelectElement;
     const options = Array.from(selectEl.options);
@@ -1050,7 +1050,7 @@ declare global {
     const option = options.find((o) => o.value === value) ?? options.find((o) => normalizeName(o.text).toLowerCase() === wanted);
     if (!option) {
       const known = options.slice(0, 25).map((o) => `"${normalizeName(o.text)}"`).join(", ");
-      throw new Error(`Ninguna opción es "${value}". Hay: ${known}`);
+      throw new Error(`Nenhuma opção é "${value}". Há: ${known}`);
     }
     selectEl.value = option.value;
     selectEl.dispatchEvent(new Event("input", { bubbles: true }));
@@ -1121,9 +1121,9 @@ declare global {
     const el = resolve(target);
     const input = el as HTMLInputElement;
     if (input.tagName !== "INPUT" || input.type !== "file") {
-      throw new Error(`${describeElement(el)} no es un <input type="file">.`);
+      throw new Error(`${describeElement(el)} não é um <input type="file">.`);
     }
-    if (typeof DataTransfer !== "function") throw new Error("Este motor no deja poner archivos desde afuera.");
+    if (typeof DataTransfer !== "function") throw new Error("Este motor não permite colocar arquivos de fora.");
     await cursor.toElement(el, `upload ${clipLabel(name)}`);
     const blob = await (await fetch(`data:${mime || "application/octet-stream"};base64,${data}`)).blob();
     const transfer = new DataTransfer();
@@ -1175,7 +1175,7 @@ declare global {
         try {
           return Array.from(document.querySelectorAll(selector)).some(isVisible);
         } catch {
-          throw new Error(`"${selector}" no es un selector CSS válido.`);
+          throw new Error(`"${selector}" não é um seletor CSS válido.`);
         }
       }
       return textOf(document.body ?? document.documentElement).toLowerCase().includes(text!.toLowerCase());
@@ -1193,7 +1193,7 @@ declare global {
         if (ok) done({ waitedMs: Date.now() - started, inFlight });
         else if (Date.now() - started >= timeout) {
           const what = selector ? `el selector "${selector}"` : text ? `el texto "${text}"` : `la red en reposo (${inFlight} pedido(s) sin terminar)`;
-          fail(new Error(`${gone ? "Sigue estando" : "No apareció"} ${what} después de ${timeout} ms.`));
+          fail(new Error(`${gone ? "Continua presente" : "Não apareceu"} ${what} depois de ${timeout} ms.`));
         } else setTimer(tick, 100);
       };
       tick();
@@ -1336,7 +1336,7 @@ declare global {
       return { cookies: documentCookies() };
     }
     if (command.action === "set") {
-      if (/[;\r\n]/.test(command.value) || /[=;\s]/.test(command.name)) throw new Error("El nombre o el valor tienen caracteres que una cookie no admite.");
+      if (/[;\r\n]/.test(command.value) || /[=;\s]/.test(command.name)) throw new Error("O nome ou o valor têm caracteres que um cookie não aceita.");
       const maxAge = command.maxAge != null ? `; max-age=${Math.round(command.maxAge)}` : "";
       document.cookie = `${command.name}=${command.value}; path=${command.path ?? "/"}${maxAge}; samesite=lax`;
       return { set: documentCookies().some((c) => c.name === command.name) };
@@ -1532,7 +1532,7 @@ declare global {
       payload = { id, ok: false, error: e instanceof Error ? e.message : formatValue(e) };
     }
     if (!post({ type: "page:reply", payload })) {
-      post({ type: "page:reply", payload: { id, ok: false, error: "El resultado no se puede transferir a la app." } });
+      post({ type: "page:reply", payload: { id, ok: false, error: "O resultado não pode ser transferido para o app." } });
     }
     driving = false;
     // Lo que la acción haya logueado viaja enseguida: la app lo junta con la respuesta.

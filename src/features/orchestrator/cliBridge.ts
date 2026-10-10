@@ -84,7 +84,7 @@ async function handleCreateTab(args: Record<string, unknown>): Promise<unknown> 
       ...useTabsStore.getState().detectedAgents.map((a) => a.id),
       ...useAgentsStore.getState().customAgents.map((a) => a.id),
     ].join(", ");
-    throw new Error(`Agente desconocido '${agentId}'. Disponibles: ${known}`);
+    throw new Error(`Agente desconhecido '${agentId}'. Disponíveis: ${known}`);
   }
 
   // El backend ya tradujo `--account <nombre>` a un id y falló si no existía (ver
@@ -125,7 +125,7 @@ function handleCloseTab(args: Record<string, unknown>): unknown {
 
   const { tabs, closeTab } = useTabsStore.getState();
   if (!tabs.some((t) => t.id === tabId)) {
-    throw new Error(`Esta ventana no tiene ninguna tab con id ${tabId}`);
+    throw new Error(`Esta janela não tem nenhuma aba com o id ${tabId}`);
   }
   closeTab(tabId);
   return { tabId, closed: true };
@@ -137,7 +137,7 @@ async function handlePtyId(args: Record<string, unknown>): Promise<unknown> {
   const tabId = str(args, "tabId");
   if (!tabId) throw new Error("Falta --tab");
   const tab = useTabsStore.getState().tabs.find((t) => t.id === tabId);
-  if (!tab) throw new Error(`Esta ventana no tiene ninguna tab con id ${tabId}`);
+  if (!tab) throw new Error(`Esta janela não tem nenhuma aba com o id ${tabId}`);
   if (tab.ptyId != null) return { ptyId: tab.ptyId };
   requestPtyLaunch(tabId);
   const deadline = Date.now() + PTY_LAUNCH_WAIT_MS;
@@ -171,9 +171,9 @@ function ownerOf(args: Record<string, unknown>): ViewOwner | null {
 /** Un agente usando el navegador de su proyecto, desde el MCP (`ags mcp`). */
 async function handleBrowser(args: Record<string, unknown>): Promise<unknown> {
   const cwd = str(args, "cwd");
-  if (!cwd) throw new Error("Falta la carpeta del proyecto");
+  if (!cwd) throw new Error("Falta a pasta do projeto");
   const request = args.request as BrowserRequest | undefined;
-  if (!request || typeof request.op !== "string") throw new Error("Falta qué hacer en el navegador");
+  if (!request || typeof request.op !== "string") throw new Error("Falta dizer o que fazer no navegador");
   return { text: await runBrowserRequest(cwd, request, ownerOf(args)) };
 }
 
@@ -183,7 +183,7 @@ async function handleBrowser(args: Record<string, unknown>): Promise<unknown> {
  */
 async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
   const question = str(args, "question");
-  if (!question) throw new Error("Falta la pregunta");
+  if (!question) throw new Error("Falta a pergunta");
   const options = Array.isArray(args.options) ? args.options.filter((o): o is string => typeof o === "string") : [];
   const timeoutMs = (typeof args.timeout_s === "number" ? args.timeout_s : 1800) * 1000;
   const owner = ownerOf(args);
@@ -216,7 +216,7 @@ async function handleAsk(args: Record<string, unknown>): Promise<unknown> {
   });
 
   if (answer === null) {
-    throw new Error("El usuario no contestó: seguí con lo que puedas decidir solo, o dejalo anotado en tu resultado.");
+    throw new Error("O usuário não respondeu: siga com o que puder decidir sozinho, ou deixe anotado no seu resultado.");
   }
   return { text: answer };
 }
@@ -233,7 +233,7 @@ function handleCanvas(args: Record<string, unknown>, apply: (key: string, a: str
   const cwd = str(args, "cwd");
   const a = str(args, "a");
   const b = str(args, "b");
-  if (!cwd || !a || !b) throw new Error("Faltan cwd, a o b");
+  if (!cwd || !a || !b) throw new Error("Faltam cwd, a ou b");
   apply(keyFor(a, cwd), a, b);
   return { ok: true };
 }
@@ -242,7 +242,7 @@ function handleRecruited(args: Record<string, unknown>) {
   const cwd = str(args, "cwd");
   const tabId = str(args, "tabId");
   const near = str(args, "near");
-  if (!cwd || !tabId || !near) throw new Error("Faltan cwd, tabId o near");
+  if (!cwd || !tabId || !near) throw new Error("Faltam cwd, tabId ou near");
   canvasActions.recruited(keyFor(near, cwd), tabId, near, str(args, "role"));
   return { ok: true };
 }
@@ -254,7 +254,7 @@ function handleScreen(args: Record<string, unknown>) {
   const from = typeof args.from === "number" ? args.from : null;
   const max = typeof args.max === "number" ? args.max : 200;
   const screen = screenOf(tabId, from, max);
-  if (!screen) throw new Error(`La tab ${tabId} no tiene una terminal abierta en esta ventana`);
+  if (!screen) throw new Error(`A aba ${tabId} não tem um terminal aberto nesta janela`);
   return screen;
 }
 
@@ -269,7 +269,7 @@ async function handleNote(args: Record<string, unknown>) {
   if (op === "create") {
     const cwd = str(args, "cwd");
     const near = str(args, "near");
-    if (!cwd || !near) throw new Error("Faltan cwd o near");
+    if (!cwd || !near) throw new Error("Faltam cwd ou near");
     const key = keyFor(near, cwd);
     const created = canvasActions.addNote(key, { name: str(args, "name"), content: str(args, "content") ?? "", near, stackWith: str(args, "stackWith") });
     await flushSave(key);
@@ -279,13 +279,13 @@ async function handleNote(args: Record<string, unknown>) {
     const key = str(args, "key");
     const id = str(args, "id");
     const content = str(args, "content");
-    if (!key || !id || content === undefined) throw new Error("Faltan key, id o content");
+    if (!key || !id || content === undefined) throw new Error("Faltam key, id ou content");
     if (!useCanvasStore.getState().boards[key]?.notes[id]) throw new Error("A nota não existe mais.");
     canvasActions.updateNote(key, id, { content });
     await flushSave(key);
     return { ok: true };
   }
-  throw new Error(`Operación de nota desconocida: ${op}`);
+  throw new Error(`Operação de nota desconhecida: ${op}`);
 }
 /**
  * Un agente creando un portal o manejándolo (`ags portal …`). El permiso ya lo verificó
@@ -297,7 +297,7 @@ async function handlePortal(args: Record<string, unknown>) {
   if (op === "create") {
     const cwd = str(args, "cwd");
     const near = str(args, "near");
-    if (!cwd || !near) throw new Error("Faltan cwd o near");
+    if (!cwd || !near) throw new Error("Faltam cwd ou near");
     const key = keyFor(near, cwd);
     const android = str(args, "kind") === "android";
     const created = canvasActions.addPortal(key, {
@@ -310,10 +310,10 @@ async function handlePortal(args: Record<string, unknown>) {
     const cwd = str(args, "cwd");
     const id = str(args, "id");
     const request = args.request as BrowserRequest | undefined;
-    if (!cwd || !id || !request || typeof request.op !== "string") throw new Error("Faltan cwd, id o request");
+    if (!cwd || !id || !request || typeof request.op !== "string") throw new Error("Faltam cwd, id ou request");
     return { text: await runPortalRequest(id, cwd, request, ownerOf(args)) };
   }
-  throw new Error(`Operación de portal desconocida: ${op}`);
+  throw new Error(`Operação de portal desconhecida: ${op}`);
 }
 
 /**
@@ -323,7 +323,7 @@ async function handlePortal(args: Record<string, unknown>) {
  */
 async function handleNotify(args: Record<string, unknown>) {
   const message = str(args, "message");
-  if (!message) throw new Error("Falta el mensaje");
+  if (!message) throw new Error("Falta a mensagem");
   const from = str(args, "from") ?? "Agente";
   AlertaToast(from, message, "info", 10000);
   try {
@@ -349,7 +349,7 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "canvas.note": return handleNote(args);
     case "canvas.portal": return handlePortal(args);
     case "user.notify": return handleNotify(args);
-    default: throw new Error(`El frontend no sabe atender '${command}'`);
+    default: throw new Error(`O frontend não sabe atender '${command}'`);
   }
 }
 

@@ -12,6 +12,7 @@ mod points;
 mod protocol;
 mod shadow;
 
+pub(crate) use points::record_memory_decision;
 pub(crate) use points::{
     fleet_jobs, observe_dreams, observe_memory_mission, observe_memory_workspace, observe_mission,
 };

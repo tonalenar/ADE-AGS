@@ -258,7 +258,7 @@ fn extra_loose_values_are_rejected() {
     assert!(err.contains("b"), "el error tiene que nombrar el argumento sobrante: {err}");
 
     let err = parse("tab.list", &["algo"]).unwrap_err();
-    assert!(err.contains("solo toma flags"));
+    assert!(err.contains("só aceita flags"));
 }
 
 #[test]

@@ -110,7 +110,7 @@ pub fn guard_task(
     command: &str,
 ) -> Result<(), String> {
     if let Some(id) = task_id {
-        let task = super::store::task_by_id(conn, id)?.ok_or("Task not found")?;
+        let task = super::store::task_by_id(conn, id)?.ok_or("Tarefa não encontrada")?;
         if task.role.as_deref() == Some(role::DREAMER) && !dreamer_command_allowed(command) {
             return Err(DREAMER_DENIED.into());
         }
