@@ -1,7 +1,7 @@
 import { create } from "zustand";
 
 /** As seções da tela de Configurações (a barra lateral da prancheta 5). */
-export type SettingsSectionId = "general" | "appearance" | "accounts" | "agents" | "memory" | "terminal" | "shortcuts" | "advanced";
+export type SettingsSectionId = "general" | "appearance" | "accounts" | "agents" | "memory" | "terminal" | "shortcuts" | "decisions" | "advanced";
 
 /** Las secciones del panel derecho. */
 export type ExplorerView = "files" | "search" | "scm";

@@ -22,6 +22,7 @@ import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection
 import { RoutingSection } from "@/features/runs/RoutingSection";
 import { PrelaunchSection } from "@/features/prelaunch/PrelaunchSection";
 import { TerminalSection } from "@/features/terminal/TerminalSection";
+import { DecisionsSection } from "@/features/settings/DecisionsSection";
 import { ShortcutsSection } from "@/features/settings/ShortcutsSection";
 import { SyncSection } from "@/features/sync/SyncSection";
 import { UpdatesSection } from "@/features/updates/UpdatesSection";
@@ -66,13 +67,14 @@ const GLYPH: Record<SettingsSectionId, { tone: string; icon: React.ReactNode }> 
   memory: { tone: "bg-purple-500", icon: <><path d="M8 2.2 13.6 5 8 7.8 2.4 5 8 2.2Z" /><path d="m2.4 8 5.6 2.8L13.6 8M2.4 11l5.6 2.8L13.6 11" /></> },
   terminal: { tone: "bg-sky-400", icon: <><rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2.2" /><path d="M4.6 6.4 6.6 8l-2 1.6M8.8 10.2h2.6" /></> },
   shortcuts: { tone: "bg-red-500", icon: <><rect x="1.4" y="4" width="13.2" height="8" rx="2" /><path d="M4 6.8h.01M6.8 6.8h.01M9.6 6.8h.01M12 6.8h.01M4.4 9.4h7.2" /></> },
+  decisions: { tone: "bg-teal-600", icon: <><circle cx="8" cy="3.2" r="1.5" /><circle cx="4.2" cy="12.2" r="1.5" /><circle cx="11.8" cy="12.2" r="1.5" /><path d="M8 4.7v2.4M8 7.1 4.2 10.7M8 7.1l3.8 3.6" /></> },
   advanced: { tone: "bg-gray-600", icon: <><path d="M2 4.6h12M2 11.4h12" /><circle cx="5.6" cy="4.6" r="1.5" /><circle cx="10.4" cy="11.4" r="1.5" /></> },
 };
 
 /** Os dois grupos da barra lateral (a linha entre eles é a da prancheta). */
 const NAV: SettingsSectionId[][] = [
   ["general", "appearance", "accounts", "agents"],
-  ["memory", "terminal", "shortcuts", "advanced"],
+  ["memory", "terminal", "shortcuts", "decisions", "advanced"],
 ];
 
 function Glyph({ id }: { id: SettingsSectionId }) {
@@ -163,6 +165,7 @@ export function SettingsPage() {
     memory: t("settings.memory"),
     terminal: t("settings.terminal"),
     shortcuts: t("settings.shortcuts"),
+    decisions: t("settings.decisions"),
     advanced: t("settings.advanced"),
   };
   const generalTabs = [
@@ -193,6 +196,7 @@ export function SettingsPage() {
     memory: labels.memory,
     terminal: labels.terminal,
     shortcuts: labels.shortcuts,
+    decisions: [labels.decisions, t("settings.decisions.provider"), "laya", "jev"].join(" "),
     advanced: [labels.advanced, ...advancedTabs.map((x) => x.label)].join(" "),
   }), [t]); // eslint-disable-line react-hooks/exhaustive-deps
   const q = filter.trim().toLocaleLowerCase();
@@ -409,6 +413,7 @@ export function SettingsPage() {
 
           {section === "terminal" && <TerminalSection />}
           {section === "shortcuts" && <ShortcutsSection />}
+          {section === "decisions" && <DecisionsSection />}
 
           {section === "advanced" && (
             <>

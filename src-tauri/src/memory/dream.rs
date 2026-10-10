@@ -391,8 +391,12 @@ pub fn memory_dreams_workspace(
     workspace_id: String,
     db: tauri::State<DbConnection>,
 ) -> Result<Vec<DreamReview>, String> {
-    let conn = db.lock().map_err(|_| "database unavailable")?;
-    dreams_workspace(&conn, &workspace_id)
+    let dreams = {
+        let conn = db.lock().map_err(|_| "database unavailable")?;
+        dreams_workspace(&conn, &workspace_id)?
+    };
+    crate::decisions::observe_dreams(db.inner().clone(), &dreams);
+    Ok(dreams)
 }
 
 #[tauri::command]
