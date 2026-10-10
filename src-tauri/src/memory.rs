@@ -1658,10 +1658,12 @@ pub fn memory_decide_user(
 
 /// Only the native user command invokes this; deliberately absent from agent IPC/MCP.
 /// SQLite-only: tests and internal callers pass no artifact scope, so this never touches `~/.ags`.
+#[cfg(test)]
 pub fn purge_user(conn: &Connection, entry_id: &str, revision: i64) -> Result<(), String> {
     purge::revisions(conn, entry_id, Some(revision), None)
 }
 
+#[cfg(test)]
 pub fn purge_revisions_user(conn: &Connection, entry_id: &str, revision: Option<i64>) -> Result<(), String> {
     purge::revisions(conn, entry_id, revision, None)
 }
@@ -1725,6 +1727,7 @@ pub fn memory_promote_fact_user(
 }
 
 pub mod agent;
+#[cfg(test)]
 pub mod fixtures;
 pub mod history;
 pub mod review;

@@ -32,6 +32,9 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
       if (e.key !== "Escape") return;
       // Um diálogo aberto por cima é o dono deste Escape (ver `hasOpenDialog`).
       if (hasOpenDialog()) return;
+      // Um controle interno com o popup aberto (combobox, autocomplete: aria-expanded) é o
+      // dono deste Escape: fecha o popup, não a tela.
+      if (document.activeElement?.getAttribute("aria-expanded") === "true") return;
       // Corta aqui: senão o Escape segue até a terminal de trás e o agente o recebe como
       // se você o tivesse digitado.
       e.preventDefault();

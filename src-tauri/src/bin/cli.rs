@@ -285,7 +285,7 @@ La salida siempre es una línea JSON en stdout (salvo `mcp`, que habla JSON-RPC)
 Códigos de salida: 0 ok · 1 el comando falló · 2 uso incorrecto · 3 la app no corre
 ";
 
-fn main() -> ExitCode {
+pub(crate) fn main() -> ExitCode {
     let args: Vec<String> = std::env::args().skip(1).collect();
 
     if args.is_empty() || args[0] == "--help" || args[0] == "-h" || args[0] == "help" {

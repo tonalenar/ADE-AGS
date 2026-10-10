@@ -868,6 +868,7 @@ fn record_span_for_mission(conn: &Connection, mission_id: &str, actor: &str, key
     Ok(())
 }
 
+#[cfg(test)]
 pub fn max_fix_round_from_detail(detail: &str) -> Option<i64> {
     detail.split(';').find_map(|part| part.strip_prefix("n=")?.parse().ok())
 }

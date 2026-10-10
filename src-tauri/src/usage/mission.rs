@@ -118,6 +118,7 @@ struct TranscriptUsage {
 
 /// Lê um transcript sem falhar por linhas vazias, truncadas ou corrompidas.
 /// Quando a linha declara um cwd, ela precisa corresponder ao da missão.
+#[cfg(test)]
 pub(crate) fn read_transcript_usage(path: &Path, cwd: &str) -> Vec<UsageRecord> {
     read_transcript_priced(path, cwd)
         .into_iter()

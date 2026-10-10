@@ -66,6 +66,7 @@ pub fn compute_validity(revisions: &[MemoryRevision]) -> Vec<MemoryValidityInter
 }
 
 /// Keep intervals valid at `at`; the start is inclusive and the end is exclusive.
+#[cfg(test)]
 pub fn intervals_at(
     intervals: &[MemoryValidityInterval],
     at: i64,
@@ -126,6 +127,7 @@ pub fn history_for_entry(
 }
 
 /// Return the interval(s) valid at `at` after enforcing workspace and mission ownership.
+#[cfg(test)]
 pub fn validity_at(
     conn: &Connection,
     workspace_id: &str,

@@ -338,7 +338,7 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
           </span>
         )}
         <Tooltip content={t("workspaces.new")} placement="bottom">
-          <Button variant="icon"
+          <Button variant="icon" aria-label={t("workspaces.new")}
             onClick={() => navigate("/")}
             className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
               text-gray-400 dark:text-white/35

@@ -387,6 +387,7 @@ fn shell_safe_id(value: &str) -> bool {
 /// que no conoce, `ADE_TAB_ID` incluida: sin ella `ags peers` no sabe quién pregunta. La
 /// config de Codex tiene `shell_environment_policy.set`, que SÍ llega al shell del sandbox;
 /// se la pasa con `-c` al lanzar. Solo si el programa es `codex` y la tab tiene id. Pura.
+#[cfg(test)]
 pub(super) fn with_codex_tab_id(command: &str, tab_id: Option<&str>) -> String {
     with_codex_identity(command, tab_id, None)
 }
