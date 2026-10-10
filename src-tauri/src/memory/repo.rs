@@ -63,7 +63,7 @@ pub fn approved_open(conn: &Connection, workspace: &str, mission: Option<&str>, 
         if doc.scope=="mission" {if let Some(page)=&mission_page {files.get_mut(page).unwrap().push_str(&format!("\n## {} ({})\n{}\n",doc.key,doc.entry_id,doc.body));}}
     }
     files.insert("MEMORY.md".into(), index);
-    let body = files.get(path).ok_or("memory path is unavailable in this scope")?;
+    let body = files.get(path).ok_or("o caminho da memória não está disponível neste escopo")?;
     let response=super::untrusted_memory_response(&serde_json::json!({"path":path,"content":body}).to_string());
     if response.len() > super::LIST_BYTES { return Err("memory page exceeds 32 KiB; use `ags memory search` and then `ags memory open <entryId>` for one entry".into()); }
     Ok(response)

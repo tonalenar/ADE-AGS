@@ -896,7 +896,7 @@ where
     } else if name == ASK_TOOL {
         ask(context, args, send)
     } else {
-        tool_error(&format!("'{name}' no es una herramienta de este servidor"))
+        tool_error(&format!("'{name}' não é uma ferramenta deste servidor"))
     }
 }
 

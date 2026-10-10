@@ -122,13 +122,13 @@ pub fn limit_problem(limits: &AccountLimits, running: i64, spent_24h: f64) -> Op
         && spent_24h >= budget
     {
         return Some(Limit::Budget(format!(
-            "gastó US$ {spent_24h:.2} en 24 h, su presupuesto es US$ {budget:.2}"
+            "gastou US$ {spent_24h:.2} em 24 h, o orçamento dela é US$ {budget:.2}"
         )));
     }
     if let Some(max) = limits.max_concurrent
         && running >= max as i64
     {
-        return Some(Limit::Concurrency(format!("ya corre {running} tarea(s), su máximo es {max}")));
+        return Some(Limit::Concurrency(format!("já está rodando {running} tarefa(s), o máximo dela é {max}")));
     }
     None
 }

@@ -118,7 +118,7 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
               {task.agentId}
               {task.model && <RoutedModel task={task} />}
             </span>
-            <span className="truncate text-[12.5px] font-semibold text-gray-900 dark:text-white">
+            <span title={task.title} className="truncate text-[12.5px] font-semibold text-gray-900 dark:text-white">
               {task.title}
             </span>
           </span>

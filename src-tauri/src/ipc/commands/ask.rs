@@ -29,7 +29,7 @@ pub(super) fn user_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
         .and_then(Value::as_str)
         .map(str::trim)
         .filter(|q| !q.is_empty())
-        .ok_or_else(|| "falta la pregunta ('question')".to_string())?;
+        .ok_or_else(|| "falta a pergunta ('question')".to_string())?;
 
     let options: Vec<String> = args
         .get("options")

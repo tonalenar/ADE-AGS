@@ -43,13 +43,13 @@ struct BridgeRequest {
 fn resolve_target(app: &AppHandle, requested: Option<&str>) -> Result<String, String> {
     let labels: Vec<String> = app.webview_windows().into_keys().collect();
     if labels.is_empty() {
-        return Err("La app no tiene ninguna ventana abierta".to_string());
+        return Err("O app não tem nenhuma janela aberta".to_string());
     }
     match requested {
         Some(label) => labels
             .into_iter()
             .find(|l| l == label)
-            .ok_or_else(|| format!("No hay ninguna ventana con el label '{label}'")),
+            .ok_or_else(|| format!("Não há nenhuma janela com o label '{label}'")),
         // `webview_windows` no garantiza orden, así que se ordena para que dos llamadas
         // seguidas sin `--window` no caigan en ventanas distintas.
         None => {
@@ -93,11 +93,11 @@ pub fn ask_frontend_within(
     };
     if let Err(e) = app.emit("cc-cli-request", payload) {
         PENDING.lock().ok().and_then(|mut p| p.remove(&request_id));
-        return Err(format!("No se pudo notificar a la ventana: {e}"));
+        return Err(format!("Não foi possível avisar a janela: {e}"));
     }
 
     let result = rx.recv_timeout(timeout).map_err(|_| {
-        "La ventana no respondió a tiempo (¿está la app respondiendo?)".to_string()
+        "A janela não respondeu a tempo (o app está respondendo?)".to_string()
     });
 
     PENDING.lock().ok().and_then(|mut p| p.remove(&request_id));

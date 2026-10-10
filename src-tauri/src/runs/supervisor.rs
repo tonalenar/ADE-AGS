@@ -186,7 +186,7 @@ fn write_mcp_config(app: &AppHandle, task_id: &str) -> Option<PathBuf> {
 /// Dónde va el NDJSON crudo de una tarea.
 fn events_path_for(run_id: &str, task_id: &str) -> Result<PathBuf, String> {
     let dir = dirs::home_dir()
-        .ok_or_else(|| "no se pudo resolver el home".to_string())?
+        .ok_or_else(|| "não foi possível localizar a pasta do usuário".to_string())?
         .join(".ags")
         .join("runs")
         .join(run_id);
@@ -214,7 +214,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let _inside = runtime.inner().enter();
     let Some(adapter) = adapter_for(&task.agent_id) else {
         return Err(format!(
-            "todavía no se sabe correr '{}' sin terminal",
+            "ainda não sabemos rodar '{}' sem terminal",
             task.agent_id
         ));
     };
@@ -234,7 +234,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
 
     let db = app
         .try_state::<DbConnection>()
-        .ok_or_else(|| "la base no está disponible".to_string())?
+        .ok_or_else(|| "o banco de dados não está disponível".to_string())?
         .inner()
         .clone();
 
@@ -249,7 +249,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     // cuenta que la pedida gasta cupo ajeno sin avisar.
     let mut account_env = match &task.account_id {
         Some(id) => crate::accounts::env_for_account(&db, id)
-            .ok_or_else(|| format!("la cuenta '{id}' ya no existe"))?,
+            .ok_or_else(|| format!("a conta '{id}' não existe mais"))?,
         None => Default::default(),
     };
 
@@ -509,7 +509,7 @@ pub fn hand_off(app: &AppHandle, task_id: &str) -> Result<(), String> {
 fn stop(app: &AppHandle, task_id: &str, new_status: &str) -> Result<(), String> {
     let db = app
         .try_state::<DbConnection>()
-        .ok_or_else(|| "la base no está disponible".to_string())?;
+        .ok_or_else(|| "o banco de dados não está disponível".to_string())?;
     let conn = db.lock().map_err(|e| e.to_string())?;
     // `ready` también: una tarea que se está lanzando todavía no llegó a `running`, y
     // pararla en ese instante no puede quedar sin efecto. Y `pending`: parar una que espera

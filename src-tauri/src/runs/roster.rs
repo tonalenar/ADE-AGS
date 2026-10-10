@@ -608,7 +608,7 @@ pub fn snapshot(db: &DbConnection, refresh: bool) -> Result<Roster, String> {
                 Some(format!("{} no está instalado", def.label))
             } else if !has_adapter {
                 Some(format!(
-                    "todavía no se sabe correr {} sin terminal",
+                    "ainda não sabemos rodar {} sem terminal",
                     def.label
                 ))
             } else {

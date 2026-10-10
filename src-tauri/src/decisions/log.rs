@@ -101,6 +101,7 @@ pub struct Comparison {
 #[serde(rename_all = "camelCase")]
 pub struct Disagreement {
     pub point: String,
+    pub provider: String,
     pub state_hash: String,
     pub heuristic: String,
     pub provider_decision: String,
@@ -299,6 +300,7 @@ pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
         }
         disagreements.push(Disagreement {
             point: row.point.clone(),
+            provider: row.provider.clone(),
             state_hash: row.state_hash.clone(),
             heuristic: row.heuristic.clone(),
             provider_decision: provider_decision.clone(),
@@ -563,14 +565,15 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
             point.low_sample,
         ));
     }
-    csv.push_str("tipo,ponto,state_hash,heuristica,provedor\n");
+    csv.push_str("tipo,ponto,state_hash,heuristica,decisao_provedor,provedor\n");
     for row in &report.disagreements {
         csv.push_str(&format!(
-            "discordancia,{},{},{},{}\n",
+            "discordancia,{},{},{},{},{}\n",
             cell(&row.point),
             cell(&row.state_hash),
             cell(&row.heuristic),
             cell(&row.provider_decision),
+            cell(&row.provider),
         ));
     }
     csv.push_str("tipo,ponto,pergunta,heuristica,provedor,contagem\n");

@@ -63,7 +63,7 @@ export function SettingsRow({ label, hint, children }: {
       <span className="flex flex-col gap-px min-w-0">
         <span className="truncate text-[13px] leading-[18px] text-gray-900 dark:text-gray-100">{label}</span>
         {hint && (
-          <span className="truncate text-[11.5px] leading-4 text-gray-500 dark:text-white/40">{hint}</span>
+          <span title={hint} className="truncate text-[11.5px] leading-4 text-gray-500 dark:text-white/40">{hint}</span>
         )}
       </span>
       <span className="shrink-0 flex items-center">{children}</span>

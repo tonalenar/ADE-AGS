@@ -72,7 +72,7 @@ impl Tally {
                     self.error
                         .clone()
                         .or_else(|| self.warning.clone())
-                        .unwrap_or_else(|| format!("el agente terminó con código {code}")),
+                        .unwrap_or_else(|| format!("o agente terminou com código {code}")),
                 )
             },
             cost_usd: self.cost,
@@ -482,7 +482,7 @@ impl HeadlessAgent for Codex {
                     .pointer("/error/message")
                     .and_then(Value::as_str)
                     .map(str::to_string)
-                    .or_else(|| Some("el turno de Codex falló".into()));
+                    .or_else(|| Some("o turno do Codex falhou".into()));
                 Vec::new()
             }
             Some("error") => {

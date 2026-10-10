@@ -54,7 +54,7 @@ pub fn decide(run: &Run, tasks: &[Task]) -> Decision {
                 Some(_) => waiting = true,
                 // Una dependencia que ya no existe (se borró su fila) no se va a cumplir nunca.
                 None => {
-                    broken = Some("depende de una tarea que ya no existe".to_string());
+                    broken = Some("depende de uma tarefa que não existe mais".to_string());
                     break;
                 }
             }
@@ -67,7 +67,7 @@ pub fn decide(run: &Run, tasks: &[Task]) -> Decision {
             continue;
         }
         if over_budget {
-            decision.skip.push((task.id.clone(), "se acabó el presupuesto del run".to_string()));
+            decision.skip.push((task.id.clone(), "o orçamento do run acabou".to_string()));
             continue;
         }
         if free > 0 {
@@ -207,8 +207,8 @@ pub fn tick(app: &AppHandle, run_id: &str) {
     let (out_of_quota, pinned): (Vec<Task>, Vec<Task>) = out_of_quota.into_iter().partition(|t| t.auto_account);
     for task in pinned {
         let reason = format!(
-            "[límite de uso] la cuenta fijada ({}) está sin cupo; no se cambia sola: esperá a que se reinicie o pasala a otra cuenta",
-            task.account_id.as_deref().unwrap_or("la del sistema")
+            "[limite de uso] a conta fixada ({}) está sem cota; ela não muda sozinha: espere reiniciar ou passe para outra conta",
+            task.account_id.as_deref().unwrap_or("a do sistema")
         );
         if let Ok(conn) = db.lock() {
             let _ = store::fail_dispatched(&conn, &task.id, &reason);
@@ -220,7 +220,7 @@ pub fn tick(app: &AppHandle, run_id: &str) {
         match hand_to_another(app, &db, &task) {
             Ok(()) => moved = true,
             Err(e) => {
-                eprintln!("[runs] no se pudo pasar '{}' a otra cuenta: {e}", task.title);
+                eprintln!("[runs] não foi possível passar '{}' para outra conta: {e}", task.title);
                 // Se la deja arrancar igual. Que falle diciendo que no hay cupo es mejor
                 // que dejarla trabada esperando uno que quizá no vuelva hoy — y evita el
                 // ida y vuelta de devolverla a la cola para volver a encontrarla igual.
@@ -229,9 +229,9 @@ pub fn tick(app: &AppHandle, run_id: &str) {
         }
     }
     for (task, limit) in limited {
-        let account = task.account_id.clone().unwrap_or_else(|| "la del sistema".into());
+        let account = task.account_id.clone().unwrap_or_else(|| "a do sistema".into());
         // Con cuenta automática, otra que tenga lugar. Si no hay, o si está fijada:
-        if task.auto_account && reroute_elsewhere(app, &db, &task, &format!("la cuenta {account} {}", limit.reason())).is_ok() {
+        if task.auto_account && reroute_elsewhere(app, &db, &task, &format!("a conta {account} {}", limit.reason())).is_ok() {
             moved = true;
             continue;
         }
@@ -247,7 +247,7 @@ pub fn tick(app: &AppHandle, run_id: &str) {
             // Un presupuesto no se libera hasta que pasen horas: falla con el motivo.
             super::ledger::Limit::Budget(reason) => {
                 if let Ok(conn) = db.lock() {
-                    let _ = store::fail_dispatched(&conn, &task.id, &format!("[presupuesto] la cuenta {account} {reason}"));
+                    let _ = store::fail_dispatched(&conn, &task.id, &format!("[orçamento] a conta {account} {reason}"));
                 }
                 moved = true;
             }
@@ -315,8 +315,8 @@ fn out_of_quota(db: &DbConnection, task: &Task) -> bool {
 /// la deja intentar igual.
 fn hand_to_another(app: &AppHandle, db: &DbConnection, task: &Task) -> Result<(), String> {
     let reason = format!(
-        "la cuenta con la que iba a correr ({}) se quedó sin ventana de 5 h",
-        task.account_id.as_deref().unwrap_or("la del sistema")
+        "a conta com a qual ia rodar ({}) ficou sem janela de 5 h",
+        task.account_id.as_deref().unwrap_or("a do sistema")
     );
     reroute_elsewhere(app, db, task, &reason)
 }
@@ -335,7 +335,7 @@ fn reroute_elsewhere(app: &AppHandle, db: &DbConnection, task: &Task, reason: &s
     let assignment = super::routing::route(&roster, &tiers, &request, crate::util::now_ts())?;
     if (assignment.agent_id.as_str(), assignment.account_id.as_deref()) == (task.agent_id.as_str(), task.account_id.as_deref())
     {
-        return Err("no hay otra cuenta con cupo".into());
+        return Err("não há outra conta com cota".into());
     }
     super::reroute_to(app, &task.id, assignment, reason).map(|_| ())
 }
@@ -383,11 +383,11 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
     use super::failure::FailureKind;
     let key = super::quota::account_key(&task.agent_id, task.account_id.as_deref());
     let now = crate::util::now_ts();
-    let account = task.account_id.as_deref().unwrap_or("la del sistema");
+    let account = task.account_id.as_deref().unwrap_or("a do sistema");
     let reason = match kind {
         FailureKind::RateLimited => {
             mark_exhausted(db, &key, now);
-            format!("la cuenta {account} llegó a su límite de uso")
+            format!("a conta {account} chegou ao limite de uso")
         }
         FailureKind::AuthExpired => {
             super::failure::record_auth_failure(db, &key, now);
@@ -437,15 +437,15 @@ fn on_account_failure(app: &AppHandle, db: &DbConnection, task: &Task, kind: sup
         // Una cuenta fijada no se cambia sola, y el lead no se pasa a otro agente: falla
         // diciendo por qué, y decide quien la fijó.
         if let Ok(conn) = db.lock() {
-            let why = if lead { "[lead: no se reasigna solo]" } else { "[cuenta fijada: no se cambia sola]" };
+            let why = if lead { "[lead: não é reatribuído sozinho]" } else { "[conta fixada: não muda sozinha]" };
             let _ = store::tag_error(&conn, &task.id, why);
         }
         return;
     }
     if let Err(e) = reroute_elsewhere(app, db, task, &reason) {
-        eprintln!("[runs] '{}' no pudo pasar a otra cuenta: {e}", task.title);
+        eprintln!("[runs] '{}' não conseguiu passar para outra conta: {e}", task.title);
         if let Ok(conn) = db.lock() {
-            let _ = store::tag_error(&conn, &task.id, "[sin otra cuenta disponible]");
+            let _ = store::tag_error(&conn, &task.id, "[sem outra conta disponível]");
         }
     }
 }
@@ -466,11 +466,11 @@ fn failover_in_pool(
     // La definición pudo cambiar mientras corría la tarea. Si la cuenta de origen ya no
     // integra ese pool, no intentamos reinterpretar la asignación.
     if !members.contains(&task.account_id) {
-        return Err("la cuenta original ya no pertenece al pool".into());
+        return Err("a conta original não pertence mais ao pool".into());
     }
     let spec = crate::accounts::pools::spec_for(db, &origin.id)?;
     if !spec.failover || spec.agent_id != task.agent_id {
-        return Err("el pool ya no permite failover para esta TUI".into());
+        return Err("o pool não permite mais failover para esta TUI".into());
     }
     let request = super::routing::RouteRequest {
         agent_id: Some(task.agent_id.clone()),
@@ -486,10 +486,10 @@ fn failover_in_pool(
         || assignment.account_id == task.account_id
         || !members.contains(&assignment.account_id)
     {
-        return Err("no quedó otra cuenta elegible dentro del pool".into());
+        return Err("não restou outra conta elegível dentro do pool".into());
     }
     if !super::pool_failover::reserve_failover(db, &task.id, &origin.id, now)? {
-        return Err("se alcanzó el límite de failover de la tarea o del pool".into());
+        return Err("o limite de failover da tarefa ou do pool foi atingido".into());
     }
 
     let from_model = task.model.clone();

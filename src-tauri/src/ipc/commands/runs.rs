@@ -24,7 +24,7 @@ pub(super) fn run_approve(app: &AppHandle, args: &Value) -> Result<Value, String
 
     let db = app
         .try_state::<crate::database::DbConnection>()
-        .ok_or_else(|| "la base no está disponible".to_string())?
+        .ok_or_else(|| "o banco de dados não está disponível".to_string())?
         .inner()
         .clone();
 

@@ -176,8 +176,8 @@ export function MissionTeamCard({ mission, tasks, squad, blocked }: {
               {m.name.slice(0, 1).toUpperCase()}
             </span>
             <span className="flex min-w-0 flex-1 flex-col">
-              <span className="truncate text-[13.5px] leading-[18px] font-medium text-gray-900 dark:text-[#f5f5f7]">{m.name}</span>
-              <span className="truncate text-[11.5px] leading-[14px] text-gray-500 dark:text-white/60">{m.sub}</span>
+              <span title={m.name} className="truncate text-[13.5px] leading-[18px] font-medium text-gray-900 dark:text-[#f5f5f7]">{m.name}</span>
+              <span title={m.sub} className="truncate text-[11.5px] leading-[14px] text-gray-500 dark:text-white/60">{m.sub}</span>
             </span>
             <span className={`flex shrink-0 items-center gap-1.5 text-[12px] leading-4 ${TONE[m.tone].text}`}>
               <span className={`h-[7px] w-[7px] rounded-full ${TONE[m.tone].dot}`} />

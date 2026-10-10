@@ -67,7 +67,7 @@ export function MissionTimingsPanel({ missionId }: { missionId: string }) {
         {summary.slowest.map((s) => (
           <div key={s.id} className="flex items-center gap-2 py-0.5 text-[11.5px]">
             <span className="w-44 shrink-0 truncate text-gray-500 dark:text-gray-400" title={kindLabel(t, s.kind)}>{kindLabel(t, s.kind)}</span>
-            <span className="flex-1 min-w-0 truncate text-gray-700 dark:text-gray-200">
+            <span className="flex-1 min-w-0 truncate text-gray-700 dark:text-gray-200" title={`${s.actor}${s.target ? ` → ${s.target}` : ""}${s.detail ? ` · ${s.detail}` : ""}`}>
               {s.actor}
               {s.target ? ` → ${s.target}` : ""}
               {s.detail ? ` · ${s.detail}` : ""}

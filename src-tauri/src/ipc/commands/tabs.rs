@@ -65,7 +65,7 @@ pub(super) fn pty_id_for_tab(app: &AppHandle, tab_id: &str, window: Option<&str>
         .get("ptyId")
         .and_then(|v| v.as_u64())
         .map(|v| v as u32)
-        .ok_or_else(|| format!("La tab {tab_id} no tiene un proceso corriendo"))
+        .ok_or_else(|| format!("A tab {tab_id} não tem um processo em execução"))
 }
 
 /// Igual, pero esperando: una tab recién creada todavía no tiene PTY (lo abre el frontend
@@ -81,7 +81,7 @@ pub(super) fn wait_for_pty(app: &AppHandle, tab_id: &str, window: Option<&str>) 
         }
         if std::time::Instant::now() >= deadline {
             return Err(format!(
-                "La tab {tab_id} se creó pero su proceso no arrancó en {}s",
+                "A tab {tab_id} foi criada, mas o processo dela não iniciou em {}s",
                 TIMEOUT.as_secs()
             ));
         }
@@ -137,7 +137,7 @@ pub(super) fn tab_create(app: &AppHandle, args: &Value) -> Result<Value, String>
     let tab_id = created
         .get("tabId")
         .and_then(|v| v.as_str())
-        .ok_or("La tab se creó pero no devolvió su id")?
+        .ok_or("A tab foi criada, mas não devolveu o id dela")?
         .to_string();
 
     let pty_id = wait_for_pty(app, &tab_id, window.as_deref())?;
@@ -233,9 +233,9 @@ fn match_one_skill(installed: &[InstalledSkill], wanted: &str) -> Result<String,
         [] => {
             let names: Vec<&str> = installed.iter().map(|s| s.name.as_str()).collect();
             if names.is_empty() {
-                Err(format!("No hay ninguna skill instalada, así que '{wanted}' no existe. Instalá una con 'ags skill install --skill <nombre>'"))
+                Err(format!("Não há nenhuma skill instalada, então '{wanted}' não existe. Instale uma com 'ags skill install --skill <nome>'"))
             } else {
-                Err(format!("No hay ninguna skill instalada llamada '{wanted}'. Instaladas: {}", names.join(", ")))
+                Err(format!("Não há nenhuma skill instalada chamada '{wanted}'. Instaladas: {}", names.join(", ")))
             }
         }
         varias => {
@@ -252,7 +252,7 @@ fn match_one_skill(installed: &[InstalledSkill], wanted: &str) -> Result<String,
                 })
                 .collect();
             Err(format!(
-                "Hay {} skills instaladas llamadas '{wanted}' y no son la misma. Usá el id: {}",
+                "Há {} skills instaladas chamadas '{wanted}' e não são a mesma. Use o id: {}",
                 varias.len(),
                 detalle.join(" · ")
             ))

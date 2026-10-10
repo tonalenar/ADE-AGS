@@ -150,7 +150,7 @@ fn limite_3_cooldown_30_minutos_conta_nao_e_escolhida() {
     // Se só sobrar a mesma conta (todas em cooldown), falha sem escolher nenhuma
     cool_down_account("claude-code:acc-3b", now);
     let err = routing::pick_in_pool(&roster.agents[0], &spec, now + 60).unwrap_err();
-    assert!(err.contains("ninguna cuenta del pool") && err.contains("cooldown"), "{err}");
+    assert!(err.contains("nenhuma conta do pool") && err.contains("cooldown"), "{err}");
 }
 
 /// 4. Access/limit failures are eligible; code, timeout and filesystem errors are not.
@@ -224,7 +224,7 @@ fn limite_5_nunca_failover_outra_tui_nem_fora_do_pool() {
     cool_down_account("claude-code:acc-5a", now);
     let err_fora = routing::pick_in_pool(&roster.agents[0], &spec_acotado, now + 10).unwrap_err();
     assert!(
-        err_fora.contains("ninguna cuenta del pool 'Pool Acotado' se puede usar"),
+        err_fora.contains("nenhuma conta do pool 'Pool Acotado' pode ser usada"),
         "{err_fora}"
     );
 }
@@ -254,7 +254,7 @@ fn limite_6_conta_bloqueada_ou_sem_login_recusada() {
     };
 
     let err = routing::pick_in_pool(&roster.agents[0], &spec, now + 10).unwrap_err();
-    assert!(err.contains("no tiene sesión iniciada") || err.contains("sin sesión"), "{err}");
+    assert!(err.contains("não tem sessão iniciada") || err.contains("sem sessão"), "{err}");
 
     // Caso conta bloqueada/ban/verificação pendente (limit != None)
     roster.agents[0].accounts[1].logged_in = true;

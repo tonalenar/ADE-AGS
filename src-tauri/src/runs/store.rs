@@ -331,7 +331,7 @@ pub fn create_task(conn: &Connection, new: &NewTask) -> Result<Task, String> {
     )
     .map_err(|e| e.to_string())?;
     super::fixrounds::bind_new_task(conn, &id, new.run_id, new.title, new.prompt, new.corrects)?;
-    task_by_id(conn, &id)?.ok_or_else(|| "la tarea no quedó guardada".to_string())
+    task_by_id(conn, &id)?.ok_or_else(|| "a tarefa não foi salva".to_string())
 }
 
 // ── Leer ────────────────────────────────────────────────────────
@@ -727,7 +727,7 @@ pub fn add_fact(
     facts_of_run(conn, run_id)?
         .into_iter()
         .find(|f| f.id == id)
-        .ok_or_else(|| "el hecho no quedó guardado".to_string())
+        .ok_or_else(|| "o fato não foi salvo".to_string())
 }
 
 pub fn facts_of_run(conn: &Connection, run_id: &str) -> Result<Vec<Fact>, String> {
@@ -1075,7 +1075,7 @@ pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
     let n = conn
         .execute(
             "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE status IN ('ready', 'running')",
-            rusqlite::params![status::FAILED, "la app se cerró mientras esta tarea corría", now],
+            rusqlite::params![status::FAILED, "o app foi fechado enquanto esta tarefa rodava", now],
         )
         .map_err(|e| e.to_string())?;
     // Las que esperaban turno no se relanzan solas al reabrir: su lead murió con la app, y
@@ -1085,7 +1085,7 @@ pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
             "UPDATE tasks SET status = ?1, error = ?2, ended_at = ?3 WHERE status = ?4",
             rusqlite::params![
                 status::CANCELLED,
-                "la app se cerró antes de que le tocara correr",
+                "o app foi fechado antes de chegar a vez dela de rodar",
                 now,
                 status::PENDING
             ],
@@ -1192,7 +1192,7 @@ pub fn upsert_rule(
     list_rules(conn, cwd)?
         .into_iter()
         .find(|r| r.pattern == pattern)
-        .ok_or_else(|| "la regla no quedó guardada".to_string())
+        .ok_or_else(|| "a regra não foi salva".to_string())
 }
 
 pub fn delete_rule(conn: &Connection, id: &str) -> Result<bool, String> {

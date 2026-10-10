@@ -131,7 +131,7 @@ pub(super) fn is_installed(target: &Path, source: Option<&PathBuf>) -> bool {
 
 #[tauri::command]
 pub fn cli_install_status(app: AppHandle) -> Result<CliInstallStatus, String> {
-    let dir = target_dir().ok_or("No se pudo determinar el directorio del usuario")?;
+    let dir = target_dir().ok_or("Não foi possível determinar a pasta do usuário")?;
     let target = dir.join(CLI_FILE);
     let source = source_binary(&app);
 
@@ -153,7 +153,7 @@ pub fn install_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
              Si estás corriendo en desarrollo, compilalo con: cargo build --bin ags"
         )
     })?;
-    let dir = target_dir().ok_or("No se pudo determinar el directorio del usuario")?;
+    let dir = target_dir().ok_or("Não foi possível determinar a pasta do usuário")?;
     std::fs::create_dir_all(&dir).map_err(|e| format!("No se pudo crear {}: {e}", dir.display()))?;
     let target = dir.join(CLI_FILE);
 
@@ -179,7 +179,7 @@ pub fn install_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
         // Symlink: al actualizar la app, `ags` sigue apuntando al binario nuevo sin
         // tener que reinstalar nada.
         symlink::symlink_file(&source, &target)
-            .map_err(|e| format!("No se pudo crear el symlink en {}: {e}", target.display()))?;
+            .map_err(|e| format!("Não foi possível criar o symlink em {}: {e}", target.display()))?;
     }
 
     cli_install_status(app)
@@ -187,7 +187,7 @@ pub fn install_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
 
 #[tauri::command]
 pub fn uninstall_cli(app: AppHandle) -> Result<CliInstallStatus, String> {
-    let dir = target_dir().ok_or("No se pudo determinar el directorio del usuario")?;
+    let dir = target_dir().ok_or("Não foi possível determinar a pasta do usuário")?;
     let target = dir.join(CLI_FILE);
 
     if target.symlink_metadata().is_ok() {
@@ -223,11 +223,11 @@ fn add_to_user_path(dir: &Path) -> Result<(), String> {
     let mut cmd = crate::util::spawn::hidden_command("powershell");
     cmd.args(["-NoProfile", "-NonInteractive", "-Command", &script]);
     let output = crate::util::spawn::output(&mut cmd, std::time::Duration::from_secs(30))
-        .map_err(|e| format!("No se pudo actualizar el PATH: {e}"))?;
+        .map_err(|e| format!("Não foi possível atualizar o PATH: {e}"))?;
 
     if !output.status.success() {
         return Err(format!(
-            "No se pudo actualizar el PATH: {}",
+            "Não foi possível atualizar o PATH: {}",
             String::from_utf8_lossy(&output.stderr).trim()
         ));
     }

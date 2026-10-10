@@ -82,7 +82,7 @@ pub struct Verdict {
     pub by: DecidedBy,
 }
 
-const RULE_DENIED: &str = "una regla de esta carpeta lo tiene denegado";
+const RULE_DENIED: &str = "uma regra desta pasta o nega";
 
 struct Waiting {
     pending: PendingApproval,
@@ -152,7 +152,7 @@ pub fn ask(
             None => {
                 return Verdict {
                     allow: false,
-                    reason: Some("la tarea se canceló mientras esperaba".into()),
+                    reason: Some("a tarefa foi cancelada enquanto esperava".into()),
                     by: DecidedBy::Cancelled,
                 };
             }
@@ -164,7 +164,7 @@ pub fn ask(
             q.remove(&id);
             return Verdict {
                 allow: false,
-                reason: Some("nadie contestó el pedido de permiso a tiempo".into()),
+                reason: Some("ninguém respondeu ao pedido de permissão a tempo".into()),
                 by: DecidedBy::Timeout,
             };
         }
@@ -395,7 +395,7 @@ pub fn sweep_orphans(db: &DbConnection) -> Result<usize, String> {
         "UPDATE task_approvals SET status = 'denied', decided_by = 'cancelled',
                                    reason = ?1, decided_at = ?2
          WHERE status = 'pending'",
-        rusqlite::params!["la app se cerró antes de que se decidiera", now_ts()],
+        rusqlite::params!["o app foi fechado antes de decidirem", now_ts()],
     )
     .map_err(|e| e.to_string())
 }
