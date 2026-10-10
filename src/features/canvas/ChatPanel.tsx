@@ -286,7 +286,7 @@ ${text}` : text)); setPicking(false); }} />}
                 ${a.id === currentId
                   ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-[#f5f5f7] dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
                   : "text-gray-500 hover:text-gray-900 dark:text-white/55 dark:hover:text-white"}`}>
-              <span className="truncate">{a.title.split(" — ")[0]}</span>
+              <span title={a.title.split(" — ")[0]} className="truncate">{a.title.split(" — ")[0]}</span>
               {a.id !== currentId && unreadOf(unread[a.id]) > 0 && <Badge n={unreadOf(unread[a.id])} />}
             </button>
           ))}

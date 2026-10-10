@@ -124,7 +124,7 @@ export function PermissionCard({ approval, onDecide, focused }: {
       bg-amber-50 dark:bg-amber-500/8
       border border-amber-300/70 dark:border-amber-500/25">
 
-      <span className="truncate font-mono text-[10.5px] text-amber-800 dark:text-amber-300/90">
+      <span title={preview.title} className="truncate font-mono text-[10.5px] text-amber-800 dark:text-amber-300/90">
         {preview.title}
       </span>
 

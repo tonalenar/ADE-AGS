@@ -51,7 +51,7 @@ export function BoardCard({ board, active, comments, live = true, dragHandle = f
   return (
     <div style={{ width: board.width }}>
       <div className={`flex items-center gap-1.5 h-7 text-[12px] ${dragHandle ? "ade-node-drag cursor-grab active:cursor-grabbing" : ""}`}>
-        <span className="truncate font-medium text-gray-700 dark:text-gray-200">{board.title}</span>
+        <span title={board.title} className="truncate font-medium text-gray-700 dark:text-gray-200">{board.title}</span>
         <StatusChip status={board.status} />
         <span className="text-[10px] text-gray-400">v{board.version}</span>
         {comments > 0 && <span className="text-[10px] text-accent-600 dark:text-accent-300">💬 {comments}</span>}

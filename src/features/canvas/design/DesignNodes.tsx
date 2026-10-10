@@ -74,7 +74,7 @@ export const DesignBoardNode = memo(function DesignBoardNode({ data }: NodeProps
 export const DesignFrameNode = memo(function DesignFrameNode({ data }: NodeProps<DesignFrameFlowNode>) {
   return (
     <div className="pointer-events-none rounded-xl border-2 border-dashed border-accent-500/40 bg-accent-500/[0.04]" style={{ width: data.w, height: data.h }}>
-      <div className="px-4 pt-2 text-[13px] font-semibold text-accent-700 dark:text-accent-300 truncate">{data.title}</div>
+      <div title={data.title} className="px-4 pt-2 text-[13px] font-semibold text-accent-700 dark:text-accent-300 truncate">{data.title}</div>
     </div>
   );
 });

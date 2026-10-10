@@ -28,7 +28,7 @@ function TokenTableRow({ row, tabs }: { row: TokenRow; tabs: TabTokens[] }) {
     <div
       className={`flex items-center gap-2 py-1 text-[11.5px] ${row.isTotal ? "font-semibold text-gray-700 dark:text-gray-200" : ""}`}
     >
-      <span className="w-28 shrink-0 truncate text-gray-600 dark:text-gray-300">
+      <span title={row.isTotal ? t("missions.tokens.total") : row.agentId} className="w-28 shrink-0 truncate text-gray-600 dark:text-gray-300">
         {row.isTotal ? t("missions.tokens.total") : row.agentId}
       </span>
       <span className="flex-1 min-w-0 flex items-center gap-3 justify-end text-right">

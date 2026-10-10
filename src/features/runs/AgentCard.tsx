@@ -155,7 +155,7 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
           </span>
         )}
         {(task.fixRound ?? 0) > 0 && (
-          <span className="truncate text-[10.5px] text-amber-700 dark:text-amber-400/90">
+          <span title={[t("fleet.card.fixRound", { n: task.fixRound }), task.fullGate ? t("fleet.card.fullGate") : "", task.fixStatus === "escalated" ? t("fleet.card.fixEscalated") : ""].filter(Boolean).join(" · ")} className="truncate text-[10.5px] text-amber-700 dark:text-amber-400/90">
             {t("fleet.card.fixRound", { n: task.fixRound })}
             {task.fullGate ? ` · ${t("fleet.card.fullGate")}` : ""}
             {task.fixStatus === "escalated" ? ` · ${t("fleet.card.fixEscalated")}` : ""}
@@ -167,7 +167,7 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
           </span>
         )}
         {activity.map((line, i) => (
-          <span
+          <span title={line}
             key={`${i}-${line}`}
             className="truncate font-mono text-[10.5px] leading-relaxed
               text-gray-600 dark:text-white/55"

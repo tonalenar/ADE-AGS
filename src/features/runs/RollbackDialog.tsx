@@ -73,7 +73,7 @@ export function RollbackDialog({ task, onClose, onDone }: { task: Task; onClose:
             <ul className="text-[12.5px] text-gray-700 dark:text-gray-200">
               {preview.tasks.map((p) => (
                 <li key={p.id} className="flex items-center gap-2 py-0.5">
-                  <span className="truncate">{p.title}</span>
+                  <span title={p.title} className="truncate">{p.title}</span>
                   <span className="shrink-0 text-[10.5px] text-gray-400">{t(`fleet.rollback.status.${p.status}`, { defaultValue: p.status })}</span>
                 </li>
               ))}
@@ -104,7 +104,7 @@ export function RollbackDialog({ task, onClose, onDone }: { task: Task; onClose:
           photos.slice(0, 6).map((c) => (
             <div key={c.id} className="flex items-center gap-2 py-1">
               <div className="min-w-0 flex-1">
-                <div className="truncate text-[12px] text-gray-700 dark:text-gray-200">{c.label || t(`fleet.rollback.kind.${c.kind}`)}</div>
+                <div title={c.label || t(`fleet.rollback.kind.${c.kind}`)} className="truncate text-[12px] text-gray-700 dark:text-gray-200">{c.label || t(`fleet.rollback.kind.${c.kind}`)}</div>
                 <div className="text-[10.5px] text-gray-400 dark:text-white/35">{t(`fleet.rollback.kind.${c.kind}`)} · {when(c.createdAt)}</div>
               </div>
               <Button variant="outline" size="sm" disabled={busy}
