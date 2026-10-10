@@ -432,7 +432,7 @@ function MissionRow({ mission, squad, phase, active, onSelect }: {
         <StatusBadge phase={phase} />
         <span className="flex min-w-0 items-center gap-[5px]">
           <i aria-hidden className="h-1.5 w-1.5 shrink-0 rounded-[2px]" style={{ background: lead ? agentTile(lead) : "#8e8e93" }} />
-          <span className="truncate">{who}</span>
+          <span className="truncate" title={who}>{who}</span>
         </span>
         <span className="ml-auto shrink-0 font-mono tabular-nums text-gray-400 dark:text-white/30">{formatActive(mission.activeSeconds) ?? "—"}</span>
       </span>
@@ -575,7 +575,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
   const metaItems = ([
     squadName ? { key: "squad", node: <>
       <span aria-hidden className="h-4 w-4 shrink-0 rounded" style={{ background: leadAgentId ? agentTile(leadAgentId) : "#8e8e93" }} />
-      <span className="truncate">{t("missions.squadLabel", { name: squadName })}</span>
+      <span className="truncate" title={t("missions.squadLabel", { name: squadName })}>{t("missions.squadLabel", { name: squadName })}</span>
     </> } : null,
     branch ? { key: "branch", node: <>
       <svg viewBox="0 0 18 18" aria-hidden className={metaIcon} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="5" cy="4" r="1.7" /><circle cx="5" cy="14" r="1.7" /><circle cx="13" cy="6" r="1.7" /><path d="M5 5.7v6.6" /><path d="M13 7.7c0 2.9-8 1.9-8 4.6" /></svg>
@@ -868,7 +868,7 @@ function TaskRow({ task, tasks, accountLabel, blocked, approval, focused, onDeci
             {t(`squads.roleNames.${task.functionalRole}`, { defaultValue: task.functionalRole })}
           </span>
         )}
-        <span className="flex-1 truncate font-medium text-gray-800 dark:text-gray-200">{task.planKey ?? task.title}</span>
+        <span className="flex-1 truncate font-medium text-gray-800 dark:text-gray-200" title={task.title}>{task.planKey ?? task.title}</span>
         <span className="shrink-0 text-[10.5px] text-gray-400 dark:text-white/35">
           {task.agentId}{task.model ? ` · ${task.model}` : ""}{task.accountId ? ` · ${accountLabel(task.accountId, false)}` : ""}
         </span>

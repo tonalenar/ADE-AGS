@@ -177,7 +177,7 @@ export function MissionEfficiencyCard({ missionId, compact = false }: { missionI
 }
 
 function Metric({ label, value, labelClass, valueClass }: { label: string; value: string; labelClass: string; valueClass: string }) {
-  return <div className="min-w-0"><div className={labelClass}>{label}</div><div className={`truncate text-[11px] font-semibold tabular-nums ${valueClass}`}>{value}</div></div>;
+  return <div className="min-w-0"><div className={labelClass}>{label}</div><div title={value} className={`truncate text-[11px] font-semibold tabular-nums ${valueClass}`}>{value}</div></div>;
 }
 
 /** O nome de um tipo de medição. Um tipo novo sem tradução aparece legível ("Start all working"), nunca como a chave crua. */

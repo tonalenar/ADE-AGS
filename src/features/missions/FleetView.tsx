@@ -84,8 +84,8 @@ function FleetGroupCard({ group, onOpen }: { group: FleetGroup; onOpen: () => vo
           return (
             <li key={task.id} className="flex items-center gap-2 text-[11px]">
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${task.status === "running" ? "bg-emerald-500 animate-pulse" : "bg-gray-400"}`} />
-              <span className="truncate font-medium text-gray-800 dark:text-gray-100">{task.planKey ?? task.title}</span>
-              <span className="truncate text-gray-500 dark:text-white/45">{task.model ? `${task.agentId} · ${task.model}` : task.agentId}</span>
+              <span className="truncate font-medium text-gray-800 dark:text-gray-100" title={task.title}>{task.planKey ?? task.title}</span>
+              <span className="truncate text-gray-500 dark:text-white/45" title={task.model ? `${task.agentId} · ${task.model}` : task.agentId}>{task.model ? `${task.agentId} · ${task.model}` : task.agentId}</span>
               <span className="ml-auto truncate text-emerald-600 dark:text-emerald-400">{live ?? t(`missions.fleet.task.${task.status}`)}</span>
             </li>
           );
@@ -93,8 +93,8 @@ function FleetGroupCard({ group, onOpen }: { group: FleetGroup; onOpen: () => vo
         {group.terminals.map((term) => (
           <li key={term.tabId} className="flex items-center gap-2 text-[11px]">
             <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${term.working ? "bg-emerald-500 animate-pulse" : "bg-gray-400"}`} />
-            <span className="truncate font-medium text-gray-800 dark:text-gray-100">{term.title}</span>
-            <span className="truncate text-gray-500 dark:text-white/45">{term.agentLabel}</span>
+            <span className="truncate font-medium text-gray-800 dark:text-gray-100" title={term.title}>{term.title}</span>
+            <span className="truncate text-gray-500 dark:text-white/45" title={term.agentLabel}>{term.agentLabel}</span>
             <span className="ml-auto text-gray-500 dark:text-white/45">{term.working ? t("missions.fleet.working") : t("missions.fleet.idle")}</span>
           </li>
         ))}
