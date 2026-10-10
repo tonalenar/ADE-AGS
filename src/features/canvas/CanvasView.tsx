@@ -35,7 +35,7 @@ import { CanvasDock, type DockPanel } from "./CanvasDock";
 import { useUiStore } from "@/app/uiStore";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ChatPanel } from "./ChatPanel";
-import { agentTile } from "@/features/agents/agentTile";
+import { agentAccent, agentTile, nodeFrame } from "@/features/agents/agentTile";
 import { activeTabIds } from "@/features/terminal/activity";
 import { CORD_MAGNET, CordConnectionLine, CordEdge, CordPort, cordColor, flashNode } from "./cords";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
@@ -716,8 +716,10 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
     // As alças ficam FORA do cartão: dentro do `overflow-hidden` saíam cortadas pela metade e a de
     // baixo ficava por baixo do corpo do terminal — por isso era tão difícil puxar uma corda.
     <div className="relative h-full w-full">
-      <NodeResizer isVisible={selected} minWidth={NODE_MIN.w} minHeight={NODE_MIN.h}
-        lineClassName="border-transparent!" handleClassName="w-2! h-2! rounded-[3px]! bg-white! dark:bg-surface! border-[1.5px]! border-accent-500! shadow-sm!" />
+      {/* Sem bolinhas: as bordas e os cantos são a área de arrastar, com o cursor de setas e uma linha
+          fina que acende sob o mouse (ver `.ade-rz-*` no App.css). */}
+      <NodeResizer isVisible minWidth={NODE_MIN.w} minHeight={NODE_MIN.h}
+        lineClassName="ade-rz-line" handleClassName="ade-rz-handle" />
 
       {/* Los puntos de conexión van a la altura de la cabecera: más abajo quedarían
           debajo de la terminal viva, que se dibuja encima del nodo. */}
@@ -729,13 +731,8 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
 
       <div
-        className={`group h-full w-full flex flex-col rounded-[14px] overflow-hidden transition-shadow duration-150
-          bg-white dark:bg-surface
-          ${selected
-            ? "shadow-[0_0_0_1.5px_var(--color-accent-500),0_0_0_5px_color-mix(in_oklab,var(--color-accent-500)_18%,transparent),0_14px_36px_rgba(0,0,0,0.5),0_2px_6px_rgba(0,0,0,0.3)]"
-            : orchestrator
-              ? "shadow-[0_0_0_1px_color-mix(in_oklab,var(--color-glow)_55%,transparent),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]"
-              : "shadow-[0_0_0_0.5px_rgba(0,0,0,0.14),0_8px_24px_rgba(0,0,0,0.12)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]"}`}
+        className="group h-full w-full flex flex-col rounded-[14px] overflow-hidden transition-shadow duration-150 bg-white dark:bg-surface"
+        style={{ boxShadow: nodeFrame(agentAccent(tab.agentId), selected, orchestrator) }}
       >
         <div
           className="ade-node-drag flex items-center gap-2.5 pl-4 pr-3 shrink-0 cursor-grab active:cursor-grabbing select-none

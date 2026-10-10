@@ -782,3 +782,13 @@ button[class*="hover:bg-[var(--nui-danger-hover"] {
 }
 button[class*="hover:bg-[var(--nui-danger-hover"]:not(:disabled):hover { background-color: rgba(255,69,58,0.14) !important; }
 :root:not(.dark) button[class*="hover:bg-[var(--nui-danger-hover"] { color: #d70015 !important; }
+
+/* Redimensionar um terminal sem bolinhas: as bordas e os cantos são a área de arrastar. O cursor de
+   setas vem da biblioteca; aqui só se alarga a área (a linha de 1 px era difícil de acertar) e se
+   acende uma linha fina de acento sob o mouse, para mostrar onde puxar. */
+.react-flow__resize-control.handle.ade-rz-handle { width: 16px; height: 16px; background: transparent; border: 0; border-radius: 0; }
+.react-flow__resize-control.line.ade-rz-line { border-color: transparent; background: transparent; }
+.react-flow__resize-control.line.ade-rz-line.left, .react-flow__resize-control.line.ade-rz-line.right { width: 10px; }
+.react-flow__resize-control.line.ade-rz-line.top, .react-flow__resize-control.line.ade-rz-line.bottom { height: 10px; }
+.react-flow__resize-control.line.ade-rz-line.left:hover, .react-flow__resize-control.line.ade-rz-line.right:hover { background: linear-gradient(90deg, transparent 4px, color-mix(in oklab, var(--color-accent-500) 70%, transparent) 4px, color-mix(in oklab, var(--color-accent-500) 70%, transparent) 6px, transparent 6px); }
+.react-flow__resize-control.line.ade-rz-line.top:hover, .react-flow__resize-control.line.ade-rz-line.bottom:hover { background: linear-gradient(180deg, transparent 4px, color-mix(in oklab, var(--color-accent-500) 70%, transparent) 4px, color-mix(in oklab, var(--color-accent-500) 70%, transparent) 6px, transparent 6px); }
