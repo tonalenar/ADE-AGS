@@ -50,6 +50,10 @@ export function TerminalPanel() {
             key={tab.id}
             style={{
               ...placeStyle(lastRect.current.get(key) ?? null),
+              // No canvas a terminal viva é desenhada POR CIMA do cartão do nó, que tem cantos de 14 px:
+              // sem isto ela saía em ângulo reto por cima dos cantos de baixo. Só os de baixo: o topo
+              // fica debaixo do cabeçalho do nó.
+              ...(placement?.groupId === CANVAS_GROUP ? { borderRadius: "0 0 14px 14px", overflow: "hidden" } : {}),
               // Sin "visible" explícito: así hereda el visibility del contenedor de
               // AppShell (que lo oculta fuera de /workspace) en vez de sobreescribirlo.
               visibility: shown ? undefined : "hidden",
