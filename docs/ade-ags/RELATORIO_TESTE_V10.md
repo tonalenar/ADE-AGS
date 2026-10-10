@@ -67,7 +67,7 @@ Reprodução (`--cwd` numa pasta com dois runs):
 
 - Erros do Laya (texto exato): IDs 16 (2013 ms) e 18 (2006 ms), ambos "timeout".
 - Mesmas propostas (14 state_hash pareados): Jev 469,5 / 457 / 566 ms; Laya 974,3 / 783,5 / 2006 ms; timeouts 0 x 1. Jev ~52% mais rápido na média.
-- segredo=sim: Jev 1/14, Laya 11/14. Nas fixtures `qa-v9-01..08` (sem credencial; **presumido**, não auditado): Jev 0/8, Laya 6/8, ou seja, falsos positivos prováveis do Laya.
+- segredo=sim: Jev 1/14, Laya 11/14. Nas fixtures `qa-v9-01..08` (sem credencial, **confirmado pelo QA**; os corpos não foram impressos): Jev 0/8, Laya 6/8, ou seja, 6 falsos positivos do Laya e nenhum do Jev.
 - Concordância com a decisão humana: 6/11 para cada provedor (todas as 11 decisões foram "aprovar"); sem vantagem de qualidade.
 - Conclusão: o Jev mostrou vantagem de latência e de menos marcações de segredo, não de concordância humana. Amostra pequena, histórica e por conveniência; sem generalizar.
 
