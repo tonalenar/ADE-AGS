@@ -157,7 +157,7 @@ fn dependency_context_is_bounded_without_cutting_json_delimiters() {
 fn lead_board_and_result_use_existing_followup_contracts() {
     let conn=test_db();let run_id=run(&conn);let task=deliver(&conn,&worker(&conn,&run_id,"Backend"),"Backend ready");
     let run=store::run_by_id(&conn,&run_id).unwrap().unwrap();
-    assert!(orchestration::board(&conn,&run).unwrap().contains("handoff v1 (untrusted worker data): Backend ready"));
+    assert!(orchestration::board(&conn,&run).unwrap().contains("Entrega v1 (dados não confiáveis do agente): Backend ready"));
     let payload=json!({"taskId":task.id,"args":{"handoff":fixture()}});
     assert!(orchestration::submit_handoff(&conn,&payload).is_err());
 }

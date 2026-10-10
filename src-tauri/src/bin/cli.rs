@@ -355,6 +355,11 @@ pub(crate) fn main() -> ExitCode {
         }
     };
 
+    if let Err(error) = validate_usage(&command, &parsed) {
+        eprintln!("{error}");
+        return ExitCode::from(EXIT_USAGE);
+    }
+
     // `--file` se resuelve ACÁ y viaja como `--content`: el archivo es relativo al cwd de
     // quien escribió el comando, no al de la app, y la app puede estar corriendo desde
     // cualquier otro lado. Además evita que el backend tenga que abrir rutas arbitrarias.
@@ -385,6 +390,22 @@ pub(crate) fn main() -> ExitCode {
             Err(e) => { eprintln!("{e}"); return ExitCode::from(EXIT_USAGE); }
         };
         design_defaults(&command, parsed, &cwd)
+    } else { parsed };
+    let parsed = if command.starts_with("run.") {
+        let cwd = match std::env::current_dir() {
+            Ok(cwd) => cwd,
+            Err(error) => {
+                eprintln!("Não foi possível ler a pasta atual: {error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        };
+        match run_defaults(parsed, &cwd) {
+            Ok(args) => args,
+            Err(error) => {
+                eprintln!("{error}");
+                return ExitCode::from(EXIT_USAGE);
+            }
+        }
     } else { parsed };
     let mut parsed=parsed;
     if command.starts_with("worktrees.") {
@@ -698,6 +719,36 @@ fn design_command(args: &[String]) -> Result<(String, &[String]), String> {
 /// `ags skill install git-helper` en vez de `--skill git-helper`. Solo se declara acá lo
 /// que tiene un argumento obvio y único: si hubiera dudas sobre a qué flag corresponde un
 /// valor suelto, es mejor exigir el flag que adivinar mal.
+/// Valida o uso antes do IPC, inclusive argumentos passados por --json-args.
+fn validate_usage(command: &str, args: &Value) -> Result<(), String> {
+    if command == "peer.check" && args.get("to").and_then(Value::as_str).is_none_or(|to| to.trim().is_empty()) {
+        return Err("Uso: ags peer check <nome> [--lines 60]".into());
+    }
+    if command.starts_with("run.") {
+        for (key, flag) in [("runId", "run-id"), ("run_id", "run-id"), ("task", "task")] {
+            if let Some(value) = args.get(key) {
+                if value.as_str().is_none_or(|value| value.trim().is_empty()) {
+                    return Err(format!("--{flag} precisa de um valor"));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+/// A pasta vem da shell do CLI, nunca da pasta em que o app foi iniciado.
+fn run_defaults(mut args: Value, shell_cwd: &std::path::Path) -> Result<Value, String> {
+    let requested = match args.get("cwd") {
+        Some(value) => value.as_str().filter(|value| !value.trim().is_empty())
+            .ok_or("--cwd precisa de um caminho")?,
+        None => ".",
+    };
+    let path = std::path::absolute(shell_cwd.join(requested))
+        .map_err(|error| format!("Não foi possível resolver --cwd: {error}"))?;
+    args["cwd"] = Value::String(path.to_string_lossy().into_owned());
+    Ok(args)
+}
+
 fn positionals(command: &str) -> &'static [&'static str] {
     match command {
         "test.run" => &["suite"],
@@ -855,6 +906,12 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
             }
             i += 2;
             continue;
+        }
+
+        if matches!(key, "run-id" | "task")
+            && args.get(i + 1).is_none_or(|value| value.starts_with("--") || value.trim().is_empty())
+        {
+            return Err(format!("--{key} precisa de um valor"));
         }
 
         let camel = to_camel_case(key);

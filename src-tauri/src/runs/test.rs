@@ -3050,12 +3050,12 @@ fn el_tablero_nombra_las_tareas_por_su_key() {
     let board = super::orchestration::board(&conn, &run).unwrap();
     assert!(
         board.contains(
-            "- api [done] api · claude-code/default · $0.12\n    resultado: Endpoint listo"
+            "- api [concluído] api · claude-code/default · $0.12\n    resultado: Endpoint listo"
         ),
         "{board}"
     );
     assert!(
-        board.contains("- ui [pending] ui · claude-code/default · depende de api"),
+        board.contains("- ui [pendente] ui · claude-code/default · depende de api"),
         "{board}"
     );
 }
