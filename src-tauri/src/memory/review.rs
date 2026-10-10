@@ -233,8 +233,13 @@ pub fn memory_review_summary(
     mission_id: String,
     db: tauri::State<DbConnection>,
 ) -> Result<MemoryReviewSummary, String> {
-    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    review_summary(&conn, &mission_id)
+    let summary = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        review_summary(&conn, &mission_id)?
+    };
+    // Sombra: a classificação devolvida é a mesma. O provedor não entra neste retorno.
+    crate::decisions::observe_memory_mission(db.inner().clone(), &summary);
+    Ok(summary)
 }
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
@@ -331,8 +336,12 @@ fn review_workspace(conn:&Connection,workspace_id:&str,include_dreams:bool)->Res
 
 #[tauri::command]
 pub fn memory_review_summary_workspace(workspace_id: String, db: tauri::State<DbConnection>) -> Result<WorkspaceReviewSummary, String> {
-    let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
-    review_summary_workspace(&conn, &workspace_id)
+    let summary = {
+        let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+        review_summary_workspace(&conn, &workspace_id)?
+    };
+    crate::decisions::observe_memory_workspace(db.inner().clone(), &summary);
+    Ok(summary)
 }
 
 #[cfg(test)]

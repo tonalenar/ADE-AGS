@@ -139,11 +139,12 @@ pub fn tick(app: &AppHandle, run_id: &str) {
     let _one = TICK.lock().unwrap_or_else(|e| e.into_inner());
 
     let mut mission_changed = None;
-    let (to_launch, skipped) = {
+    let (to_launch, skipped, shadow) = {
         let Ok(conn) = db.lock() else { return };
         let Ok(Some(run)) = store::run_by_id(&conn, run_id) else { return };
         let Ok(tasks) = store::tasks_of_run(&conn, run_id) else { return };
         let decision = decide(&run, &tasks);
+        let shadow = crate::decisions::fleet_jobs(&run, &tasks, &decision.launch, &decision.skip);
 
         let mut skipped = Vec::new();
         for (id, reason) in &decision.skip {
@@ -163,8 +164,9 @@ pub fn tick(app: &AppHandle, run_id: &str) {
         if let Ok((_, Some(mission))) = store::refresh_run(&conn, run_id) {
             mission_changed = Some(mission);
         }
-        (to_launch, skipped)
+        (to_launch, skipped, shadow)
     };
+    crate::decisions::enqueue(db.clone(), shadow);
 
     // Antes de lanzarlas: la cuenta que se les asignó al planificar puede haberse quedado
     // sin ventana desde entonces. Cambiar de manos ahí cuesta nada; dejarla arrancar cuesta
