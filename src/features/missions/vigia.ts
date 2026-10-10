@@ -5,10 +5,11 @@ import { listen } from "@tauri-apps/api/event";
 import { useCanvasStore } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { lastOutputAt } from "@/features/terminal/activity";
-import { sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { showBotToast } from "@/shared/brand/botToastStore";
 import { missionIndex, tabsByMission } from "./groups";
 import { useMissionsStore } from "./store";
+import { LOOP_DONE, loopStep, loopStuck, type LoopWatch } from "./vigiaLoop";
 import { useVigiaSwitch } from "./vigiaSwitch";
 
 /**
@@ -216,10 +217,29 @@ const watches = new Map<string, Watch>();
 const lastPoke = new Map<string, number>();
 const inFlight = new Set<string>();
 const lastErrorReport = new Map<string, number>();
+/** Por terminal Codex: desde quando a tela está igual (fora os contadores) em "Working". */
+const loops = new Map<string, LoopWatch>();
 
 /** Escreve no chat do Orquestrador (é ali que o usuário lê). Falha silenciosa: é só registro. */
 function reportToChat(tabId: string, text: string): void {
   invoke("vigia_report", { tabId, text }).catch(() => undefined);
+}
+
+/**
+ * Terminais Codex no laço de raciocínio vazio: o spinner escreve (nem o silêncio de saída acusa),
+ * mas a tela não muda há minutos. Só avisa (chat e tela); não interrompe o agente.
+ */
+function watchLoops(team: readonly { id: string; title: string; agentId: string }[], leadId: string, now: number): void {
+  for (const tab of team) {
+    if (tab.agentId !== "codex") continue;
+    const step = loopStep(loops.get(tab.id), screenOf(tab.id)?.lines ?? null, now);
+    if (step.next) loops.set(tab.id, step.next);
+    else loops.delete(tab.id);
+    if (step.stuckMs === undefined) continue;
+    const stuck = loopStuck(tab.title, step.stuckMs);
+    showBotToast({ title: VIGIA_NAME, text: stuck, tone: "warning", ms: 12_000 });
+    reportToChat(leadId, reportLine(stuck, LOOP_DONE, "possível laço"));
+  }
 }
 
 /**
@@ -248,6 +268,7 @@ export function vigiaTick(now = Date.now()): void {
     const board = Object.entries(boards).find(([key]) => key.endsWith(`#m:${mission.id}`))?.[1];
     const lead = team.find((tab) => board?.orchestrators.includes(tab.id)) ?? team[0];
     if (!lead) continue;
+    watchLoops(team, lead.id, now);
 
     const watch = watches.get(mission.id) ?? { startedAt: missionStartMs(mission.startedAt, now), nudges: 0, limitReported: false };
     watches.set(mission.id, watch);
