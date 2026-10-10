@@ -20,12 +20,33 @@ export const PROVIDER_URL: Record<DecisionProviderId, string> = {
   jev: "https://api.typesafe.ai",
 };
 
+/** Checkpoints da Laya. A Studio aceita `jev-latest` e ignora; o seletor oferece estes. */
+const LAYA_MODELS = ["multilingual", "english", "typed-decisions"] as const;
+
+/** Aliases e o id versionado que o Jev (`api.typesafe.ai`) aceita no campo `model`. */
+const JEV_MODELS = ["jev-latest", "jev-preview", "jev-1.13.0"] as const;
+
+/** O que o dropdown oferece. `none` e a Laya usam os checkpoints; o Jev, os nomes dele. */
+export function modelsFor(provider: DecisionProviderId): readonly string[] {
+  return provider === "jev" ? JEV_MODELS : LAYA_MODELS;
+}
+
+/** Padrão do provedor. No Jev é `jev-latest` (hoje `jev-1.13.0`). */
+export function defaultModel(provider: DecisionProviderId): string {
+  return provider === "jev" ? "jev-latest" : "multilingual";
+}
+
+/** Ao trocar de provedor, um modelo que o destino não aceita vira o padrão dele. */
+export function modelAfterProviderChange(current: string, next: DecisionProviderId): string {
+  return modelsFor(next).includes(current) ? current : defaultModel(next);
+}
+
 export function defaultDecisionSettings(): DecisionSettings {
   return {
     enabled: false,
     provider: "none",
     baseUrl: PROVIDER_URL.laya_local,
-    model: "multilingual",
+    model: defaultModel("none"),
     timeoutMs: 800,
     memoryApproval: false,
     dreamTriage: false,

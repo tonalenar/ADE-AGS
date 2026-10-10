@@ -90,6 +90,37 @@ describe("seção Decisões (experimental)", () => {
     expect(host.querySelector('[role="note"]')).toBeNull();
   });
 
+  it("troca o modelo ao mudar o provedor e corrige um nome da Laya carregado no Jev", async () => {
+    await mount(settings({ provider: "laya_local", model: "english", baseUrl: "http://localhost:8000" }));
+    const modelOf = () => host.querySelector<HTMLSelectElement>('select[aria-label="settings.decisions.model"]')!;
+    const provider = host.querySelector<HTMLSelectElement>('select[aria-label="settings.decisions.provider"]')!;
+    expect(Array.from(modelOf().options).map((option) => option.value)).toEqual([
+      "multilingual", "english", "typed-decisions",
+    ]);
+    expect(modelOf().value).toBe("english");
+
+    const choose = async (value: string) => {
+      Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, "value")!.set!.call(provider, value);
+      await act(async () => { provider.dispatchEvent(new Event("change", { bubbles: true })); });
+    };
+    await choose("jev");
+    expect(Array.from(modelOf().options).map((option) => option.value)).toEqual([
+      "jev-latest", "jev-preview", "jev-1.13.0",
+    ]);
+    expect(modelOf().value).toBe("jev-latest");
+    expect(host.querySelector<HTMLInputElement>('input[aria-label="settings.decisions.baseUrl"]')!.value)
+      .toBe("https://api.typesafe.ai");
+
+    await choose("laya_studio");
+    expect(modelOf().value).toBe("multilingual");
+    expect(Array.from(modelOf().options).map((option) => option.value)).toContain("typed-decisions");
+
+    await act(async () => root.unmount());
+    root = createRoot(host);
+    await mount(settings({ provider: "jev", model: "multilingual", baseUrl: "https://api.typesafe.ai" }));
+    expect(modelOf().value).toBe("jev-latest");
+  });
+
   it("avisa também quando a \"Laya local\" aponta para um servidor da rede", async () => {
     await mount(settings({ provider: "laya_local", baseUrl: "https://laya.interno.exemplo" }));
     expect(host.querySelector('[role="note"]')?.textContent).toContain("laya.interno.exemplo");

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampTimeout, defaultDecisionSettings, isLocalUrl, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
+import { clampTimeout, defaultDecisionSettings, defaultModel, isLocalUrl, modelAfterProviderChange, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
 
 describe("ajustes das decisões em sombra", () => {
   it("nasce desligado, em multilingual, com a Laya local e 800 ms", () => {
@@ -15,6 +15,24 @@ describe("ajustes das decisões em sombra", () => {
     expect(settings.fleetGate).toBe(false);
     expect(settings.missionGate).toBe(false);
     expect(settings.keySaved).toBe(false);
+  });
+
+  it("troca o modelo junto com o provedor e mantém um que o destino aceita", () => {
+    expect(modelsFor("laya_local")).toEqual(["multilingual", "english", "typed-decisions"]);
+    expect(modelsFor("laya_studio")).toEqual(["multilingual", "english", "typed-decisions"]);
+    expect(modelsFor("none")).toEqual(["multilingual", "english", "typed-decisions"]);
+    expect(modelsFor("jev")).toEqual(["jev-latest", "jev-preview", "jev-1.13.0"]);
+    expect(defaultModel("jev")).toBe("jev-latest");
+    expect(defaultModel("laya_local")).toBe("multilingual");
+
+    expect(modelAfterProviderChange("multilingual", "jev")).toBe("jev-latest");
+    expect(modelAfterProviderChange("english", "laya_studio")).toBe("english");
+    expect(modelAfterProviderChange("typed-decisions", "laya_local")).toBe("typed-decisions");
+    expect(modelAfterProviderChange("jev-latest", "laya_local")).toBe("multilingual");
+    expect(modelAfterProviderChange("jev-latest", "laya_studio")).toBe("multilingual");
+    expect(modelAfterProviderChange("jev-preview", "jev")).toBe("jev-preview");
+    expect(modelAfterProviderChange("jev-1.13.0", "jev")).toBe("jev-1.13.0");
+    expect(modelAfterProviderChange("multilingual", "none")).toBe("multilingual");
   });
 
   it("troca a URL padrão com o provedor e preserva uma URL escrita à mão", () => {

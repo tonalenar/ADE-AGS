@@ -16,6 +16,7 @@ pub struct SystemOneHttpProvider {
     pub api_key: Option<String>,
     pub timeout: Duration,
     pub model: String,
+    pub provider: ProviderKind,
 }
 
 impl SystemOneHttpProvider {
@@ -24,16 +25,26 @@ impl SystemOneHttpProvider {
             base_url: settings.base_url.clone(),
             api_key,
             timeout: Duration::from_millis(settings.timeout_ms),
-            model: settings.model.clone(),
+            model: settings.provider.coerce_model(&settings.model),
+            provider: settings.provider,
         }
     }
 
     pub fn decide(&self, request: &DecisionRequest) -> Result<DecisionResponse, DecisionError> {
         let mut request = request.clone();
-        if request.model.is_empty() {
-            request.model = self.model.clone();
-        }
-        let body = request.wire()?;
+        let candidate = if request.model.trim().is_empty() {
+            self.model.as_str()
+        } else {
+            request.model.as_str()
+        };
+        request.model = self.provider.coerce_model(candidate);
+        // A Laya passa por `wire` (o corte de ~1.024 tokens). O Jev usa o teto maior.
+        let budget = self.provider.state_char_budget();
+        let body = if budget == super::protocol::STATE_CHAR_BUDGET {
+            request.wire()?
+        } else {
+            request.wire_with_budget(budget)?
+        };
         let url = endpoint(&self.base_url);
         let client = client(self.timeout)?;
         let mut call = client
@@ -58,9 +69,20 @@ impl SystemOneHttpProvider {
                 }
                 other => other,
             }),
+            // 401 fica só o código: o corpo de autenticação não diz como corrigir o pedido.
             401 => Err(DecisionError::Unauthorized),
-            422 => Err(DecisionError::Unprocessable(clip(&text))),
-            code => Err(DecisionError::Status(code)),
+            code => {
+                let message = if (400..500).contains(&code) {
+                    super::protocol::client_error_message(&text)
+                } else {
+                    String::new()
+                };
+                if code == 422 {
+                    Err(DecisionError::Unprocessable(message))
+                } else {
+                    Err(DecisionError::Status { code, message })
+                }
+            }
         }
     }
 }

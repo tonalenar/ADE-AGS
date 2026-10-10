@@ -3,10 +3,9 @@ import { useTranslation } from "react-i18next";
 
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
 import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, setDecisionKey, setDecisionSettings, testDecisionConnection, type ShadowReport } from "@/features/settings/decisionsIpc";
-import { clampTimeout, defaultDecisionSettings, sendsOffMachine, urlAfterProviderChange, urlHost, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
+import { clampTimeout, defaultDecisionSettings, modelAfterProviderChange, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
 
 const PROVIDERS: DecisionProviderId[] = ["none", "laya_local", "laya_studio", "jev"];
-const MODELS = ["multilingual", "english", "typed-decisions"];
 
 function pct(value: number): string {
   return `${Math.round(value * 100)}%`;
@@ -21,7 +20,12 @@ export function DecisionsSection() {
   const [report, setReport] = useState<ShadowReport | null>(null);
 
   useEffect(() => {
-    getDecisionSettings().then(setSettings).catch((error: unknown) => setStatus(String(error)));
+    getDecisionSettings()
+      .then((loaded) => setSettings({
+        ...loaded,
+        model: modelAfterProviderChange(loaded.model, loaded.provider),
+      }))
+      .catch((error: unknown) => setStatus(String(error)));
   }, []);
 
   const providerLabel = (id: DecisionProviderId) => t(`settings.decisions.provider.${id === "laya_local" ? "layaLocal" : id === "laya_studio" ? "layaStudio" : id}`);
@@ -33,7 +37,7 @@ export function DecisionsSection() {
         enabled: settings.enabled,
         provider: settings.provider,
         baseUrl: settings.baseUrl,
-        model: settings.model,
+        model: modelAfterProviderChange(settings.model, settings.provider),
         timeoutMs: clampTimeout(settings.timeoutMs),
         memoryApproval: settings.memoryApproval,
         dreamTriage: settings.dreamTriage,
@@ -99,7 +103,12 @@ export function DecisionsSection() {
             value={settings.provider}
             onChange={(event) => {
               const provider = event.target.value as DecisionProviderId;
-              setSettings({ ...settings, provider, baseUrl: urlAfterProviderChange(settings.baseUrl, provider) });
+              setSettings({
+                ...settings,
+                provider,
+                baseUrl: urlAfterProviderChange(settings.baseUrl, provider),
+                model: modelAfterProviderChange(settings.model, provider),
+              });
             }}
             className="h-8 rounded-md bg-transparent px-2 text-[13px] text-gray-900 dark:text-gray-100"
           >
@@ -117,11 +126,11 @@ export function DecisionsSection() {
         <SettingsRow label={t("settings.decisions.model")}>
           <select
             aria-label={t("settings.decisions.model")}
-            value={settings.model}
+            value={modelAfterProviderChange(settings.model, settings.provider)}
             onChange={(event) => setSettings({ ...settings, model: event.target.value })}
             className="h-8 rounded-md bg-transparent px-2 text-[13px] text-gray-900 dark:text-gray-100"
           >
-            {MODELS.map((model) => <option key={model} value={model}>{model}</option>)}
+            {modelsFor(settings.provider).map((model) => <option key={model} value={model}>{model}</option>)}
           </select>
         </SettingsRow>
         <SettingsRow label={t("settings.decisions.timeout")} hint={t("settings.decisions.timeoutHint")}>
