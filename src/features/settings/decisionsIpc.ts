@@ -58,11 +58,21 @@ export interface Comparison {
   questions: QuestionReport[];
 }
 
+/** Quem chegou mais perto da decisão da pessoa nas propostas de memória (`heuristic` é a heurística do app). */
+export interface Judged {
+  provider: string;
+  decided: number;
+  correct: number;
+  wrong: number;
+  abstained: number;
+}
+
 export interface ShadowReport {
   generatedAt: number;
   minSample: number;
   points: PointReport[];
   comparisons: Comparison[];
+  judged: Judged[];
   disagreements: Disagreement[];
 }
 

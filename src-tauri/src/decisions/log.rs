@@ -72,6 +72,18 @@ pub struct QuestionReport {
     pub pairs: Vec<PairCount>,
 }
 
+/// Quem chegou mais perto da decisão da pessoa. `correct`: disse o mesmo (aprovar ou rejeitar);
+/// `wrong`: disse o contrário; `abstained`: pediu revisão, que não é nem um nem outro.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Judged {
+    pub provider: String,
+    pub decided: i64,
+    pub correct: i64,
+    pub wrong: i64,
+    pub abstained: i64,
+}
+
 /// Dois provedores diante das mesmas propostas. Nos `pairs` de cada pergunta, `heuristic` é o
 /// que o provedor A disse e `provider` o que o B disse.
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -101,6 +113,8 @@ pub struct ShadowReport {
     pub min_sample: i64,
     pub points: Vec<PointReport>,
     pub comparisons: Vec<Comparison>,
+    /// Cada provedor (e a heurística do app) contra a decisão da pessoa nas propostas de memória.
+    pub judged: Vec<Judged>,
     pub disagreements: Vec<Disagreement>,
 }
 
@@ -125,7 +139,15 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             output_tokens INTEGER
         );
         CREATE INDEX IF NOT EXISTS idx_decision_shadow_log_ts ON decision_shadow_log(ts);
-        CREATE INDEX IF NOT EXISTS idx_decision_shadow_log_point ON decision_shadow_log(point, state_hash, ts);",
+        CREATE INDEX IF NOT EXISTS idx_decision_shadow_log_point ON decision_shadow_log(point, state_hash, ts);
+        CREATE TABLE IF NOT EXISTS decision_human_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts INTEGER NOT NULL,
+            point TEXT NOT NULL,
+            state_hash TEXT NOT NULL,
+            decision TEXT NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_decision_human_log_hash ON decision_human_log(point, state_hash);",
     )
 }
 
@@ -157,6 +179,24 @@ pub fn record(conn: &Connection, row: &LogRow) -> Result<(), String> {
     retain_with(&tx, row.ts, RETAIN_DAYS * 86_400, RETAIN_ROWS)
         .map_err(|error| error.to_string())?;
     tx.commit().map_err(|error| error.to_string())
+}
+
+/// A decisão que a PESSOA tomou numa proposta (`aprovar` ou `rejeitar`), pelo hash do texto, sem o
+/// texto: é a referência para dizer quem acertou. Guarda 30 dias, como o resto.
+pub fn record_human(conn: &Connection, point: &str, state_hash: &str, decision: &str) -> Result<(), String> {
+    migrate(conn).map_err(|error| error.to_string())?;
+    let now = now_ts();
+    conn.execute(
+        "INSERT INTO decision_human_log (ts, point, state_hash, decision) VALUES (?1, ?2, ?3, ?4)",
+        rusqlite::params![now, point, state_hash, decision],
+    )
+    .map_err(|error| error.to_string())?;
+    conn.execute(
+        "DELETE FROM decision_human_log WHERE ts <= ?1",
+        [now.saturating_sub(RETAIN_DAYS * 86_400)],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 pub fn recent(
@@ -244,6 +284,7 @@ pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
         .map(|((point, provider), mine)| point_report(point, provider, &mine))
         .collect();
     let comparisons = comparisons(&rows);
+    let judged = judged(&rows, &human_decisions(conn)?);
 
     let mut disagreements = Vec::new();
     for row in rows.iter().rev() {
@@ -271,8 +312,59 @@ pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
         min_sample: MIN_SAMPLE,
         points,
         comparisons,
+        judged,
         disagreements,
     })
+}
+
+/// A última decisão da pessoa por (ponto, hash).
+fn human_decisions(conn: &Connection) -> Result<BTreeMap<(String, String), String>, String> {
+    let mut stmt = conn
+        .prepare("SELECT point, state_hash, decision FROM decision_human_log ORDER BY ts ASC, id ASC")
+        .map_err(|error| error.to_string())?;
+    let rows = stmt
+        .query_map([], |row| Ok(((row.get::<_, String>(0)?, row.get::<_, String>(1)?), row.get::<_, String>(2)?)))
+        .map_err(|error| error.to_string())?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|error| error.to_string())?;
+    Ok(rows.into_iter().collect())
+}
+
+/// Confronta o `acao` de cada provedor (e o da heurística, contado uma vez por proposta) com o que a
+/// pessoa decidiu. Só as propostas que ela decidiu e que o provedor respondeu sem erro. Pura.
+fn judged(rows: &[Row], human: &BTreeMap<(String, String), String>) -> Vec<Judged> {
+    let mut tallies: BTreeMap<String, Judged> = BTreeMap::new();
+    let mut heuristic_seen: std::collections::BTreeSet<&str> = std::collections::BTreeSet::new();
+    let mut tally = |provider: &str, label: Option<&str>, decision: &str| {
+        let slot = tallies.entry(provider.to_string()).or_insert_with(|| Judged {
+            provider: provider.to_string(),
+            decided: 0,
+            correct: 0,
+            wrong: 0,
+            abstained: 0,
+        });
+        slot.decided += 1;
+        match label {
+            Some(label @ ("aprovar" | "rejeitar")) if label == decision => slot.correct += 1,
+            Some("aprovar" | "rejeitar") => slot.wrong += 1,
+            _ => slot.abstained += 1,
+        }
+    };
+    for row in rows
+        .iter()
+        .filter(|row| row.error.is_none() && row.point == super::points::POINT_MEMORY)
+    {
+        let Some(decision) = human.get(&(row.point.clone(), row.state_hash.clone())) else {
+            continue;
+        };
+        if let Some(provider_decision) = row.provider_decision.as_deref() {
+            tally(&row.provider, answers(provider_decision).get("acao").copied(), decision);
+        }
+        if heuristic_seen.insert(row.state_hash.as_str()) {
+            tally("heuristic", answers(&row.heuristic).get("acao").copied(), decision);
+        }
+    }
+    tallies.into_values().collect()
 }
 
 fn rate(part: usize, whole: usize) -> f64 {
@@ -506,6 +598,17 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
             cell(&comparison.provider_b),
             comparison.compared,
             comparison.agreement_rate,
+        ));
+    }
+    csv.push_str("tipo,provedor,decididas,acertou,errou,absteve\n");
+    for judged in &report.judged {
+        csv.push_str(&format!(
+            "juiz,{},{},{},{},{}\n",
+            cell(&judged.provider),
+            judged.decided,
+            judged.correct,
+            judged.wrong,
+            judged.abstained,
         ));
     }
     Ok(csv)

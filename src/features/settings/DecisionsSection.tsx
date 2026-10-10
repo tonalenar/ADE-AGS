@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
-import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
+import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
 import { defaultDecisionSettings, isDirty, modelAfterProviderChange, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
 
 const PROVIDERS: DecisionProviderId[] = ["none", "laya_local", "laya_studio", "jev"];
@@ -471,6 +471,25 @@ export function DecisionsSection() {
                   />
                 </div>
               ))
+            )}
+
+            <h4 className="pt-1 text-[13px] font-medium text-gray-900 dark:text-white">{t("settings.decisions.judged.title")}</h4>
+            {report.judged.length === 0 ? (
+              <p className="text-[12.5px] text-gray-500 dark:text-white/45">{t("settings.decisions.judged.none")}</p>
+            ) : (
+              <ul className="flex flex-col gap-1.5">
+                {report.judged.map((j: Judged) => {
+                  const answered = j.correct + j.wrong;
+                  return (
+                    <li key={j.provider} className="flex flex-wrap items-baseline gap-x-2 rounded-lg border border-gray-200 px-3 py-2 text-[12.5px] dark:border-white/10">
+                      <span className="font-medium text-gray-900 dark:text-white">{j.provider === "heuristic" ? t("settings.decisions.judged.heuristic") : providerName(j.provider)}</span>
+                      <span className="text-gray-700 dark:text-gray-200">
+                        {t("settings.decisions.judged.row", { correct: j.correct, answered, pct: answered > 0 ? pct(j.correct / answered) : "—", abstained: j.abstained, decided: j.decided })}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             )}
 
             <Fragment>

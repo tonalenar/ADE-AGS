@@ -248,6 +248,7 @@ pub fn run_jobs(db: DbConnection, jobs: Vec<ShadowJob>) {
     run_jobs_with_keys(db, jobs, &settings, config::load_key(), secondary_key);
 }
 
+#[cfg(test)]
 pub(crate) fn run_jobs_with(
     db: DbConnection,
     jobs: Vec<ShadowJob>,

@@ -1341,3 +1341,77 @@ fn o_segundo_provedor_vai_e_volta_da_configuracao() {
     assert!(config::load(&conn).unwrap().secondary.is_none());
     assert_eq!(config::load(&conn).unwrap().endpoints().len(), 1);
 }
+
+// ── A decisão da pessoa como referência ─────────────────────────────────
+
+#[test]
+fn o_relatorio_diz_quem_chegou_mais_perto_da_decisao_da_pessoa() {
+    let conn = Connection::open_in_memory().unwrap();
+    log::migrate(&conn).unwrap();
+    let hashes: Vec<String> = (0..4).map(|n| points::memory_state_hash(&format!("k{n}"), "fact", "proposta", "corpo")).collect();
+    // A pessoa: aprovou 0 e 1, rejeitou 2 e 3.
+    for (index, decision) in ["aprovar", "aprovar", "rejeitar", "rejeitar"].into_iter().enumerate() {
+        log::record_human(&conn, "memory_approval", &hashes[index], decision).unwrap();
+    }
+    let say = |label: &str| format!("acao={label};segredo=nao");
+    let put = |index: usize, provider: &str, answer: &str| {
+        log::record(
+            &conn,
+            &LogRow {
+                ts: 100 + index as i64,
+                point: "memory_approval".into(),
+                provider: provider.into(),
+                model: "m".into(),
+                state_hash: hashes[index].clone(),
+                heuristic: say("revisar"),
+                provider_decision: Some(say(answer)),
+                probability: None,
+                confidence: None,
+                latency_ms: Some(10),
+                error: None,
+                input_tokens: Some(1),
+                output_tokens: Some(0),
+            },
+        )
+        .unwrap();
+    };
+    // Laya: acerta 0, erra 1, abstém-se na 2, acerta a 3. Jev: acerta as quatro.
+    for (index, answer) in ["aprovar", "rejeitar", "revisar", "rejeitar"].into_iter().enumerate() {
+        put(index, "laya_local", answer);
+    }
+    for (index, answer) in ["aprovar", "aprovar", "rejeitar", "rejeitar"].into_iter().enumerate() {
+        put(index, "jev", answer);
+    }
+    let report = log::report(&conn).unwrap();
+    let find = |provider: &str| report.judged.iter().find(|j| j.provider == provider).unwrap().clone();
+    let laya = find("laya_local");
+    assert_eq!((laya.decided, laya.correct, laya.wrong, laya.abstained), (4, 2, 1, 1));
+    let jev = find("jev");
+    assert_eq!((jev.decided, jev.correct, jev.wrong, jev.abstained), (4, 4, 0, 0));
+    // A heurística do exemplo diz sempre "revisar": conta uma vez por proposta e nunca decide.
+    let heuristic = find("heuristic");
+    assert_eq!((heuristic.decided, heuristic.correct, heuristic.wrong, heuristic.abstained), (4, 0, 0, 4));
+    assert!(log::export_csv(&conn).unwrap().contains("juiz,jev,4,4,0,0"));
+}
+
+#[test]
+fn aprovar_ou_rejeitar_grava_so_o_hash_e_so_com_o_ponto_ligado() {
+    let db = memory_db();
+    let conn = db.lock().unwrap();
+    // Desligado: nada é gravado.
+    points::record_memory_decision(&conn, "chave", "fact", "create", "texto da proposta", true);
+    let count = |conn: &Connection| -> i64 { conn.query_row("SELECT COUNT(*) FROM decision_human_log", [], |r| r.get(0)).unwrap() };
+    assert_eq!(count(&conn), 0);
+
+    config::persist(&conn, &local_settings("http://localhost:8000".into())).unwrap();
+    points::record_memory_decision(&conn, "chave", "fact", "create", "texto da proposta", false);
+    // As duas rotulagens possíveis da operação (missão: "proposta"; workspace: a da revisão).
+    assert_eq!(count(&conn), 2);
+    let dump: String = conn
+        .query_row("SELECT group_concat(state_hash || decision) FROM decision_human_log", [], |r| r.get(0))
+        .unwrap();
+    assert!(!dump.contains("texto da proposta"), "{dump}");
+    assert!(dump.contains("rejeitar"));
+    let hash = points::memory_state_hash("chave", "fact", "proposta", "texto da proposta");
+    assert!(dump.contains(&hash));
+}

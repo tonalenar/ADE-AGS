@@ -20,6 +20,10 @@ const settings = (over: Partial<DecisionSettings>): DecisionSettings => ({ ...de
 const report: ShadowReport = {
   generatedAt: 1,
   minSample: 30,
+  judged: [
+    { provider: "jev", decided: 6, correct: 4, wrong: 1, abstained: 1 },
+    { provider: "heuristic", decided: 6, correct: 0, wrong: 0, abstained: 6 },
+  ],
   comparisons: [
     {
       point: "memory_approval",
@@ -146,6 +150,16 @@ describe("seção Decisões (experimental)", () => {
     expect(text).toContain("settings.decisions.provider.layaLocal: aprovar");
     // O destino remoto do segundo provedor também ganha o aviso de privacidade.
     expect(host.querySelector('[role="note"]')?.textContent).toContain("api.typesafe.ai");
+  });
+
+  it("mostra quem chegou mais perto da decisão da pessoa, com a heurística como base", async () => {
+    await mount(settings({ provider: "laya_local" }));
+    const text = host.textContent ?? "";
+    expect(text).toContain("settings.decisions.judged.title");
+    // Jev: 4 de 5 que respondeu = 80%; a heurística nunca decide (só pede revisão).
+    expect(text).toContain('"correct":4,"answered":5,"pct":"80%","abstained":1,"decided":6');
+    expect(text).toContain("settings.decisions.judged.heuristic");
+    expect(text).toContain('"correct":0,"answered":0,"pct":"—","abstained":6,"decided":6');
   });
 
   it("só mostra os campos do segundo provedor quando ele está ligado", async () => {

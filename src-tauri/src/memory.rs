@@ -1629,6 +1629,14 @@ pub fn memory_decide_user(
     sync: tauri::State<repo_sync::RepoSync>,
 ) -> Result<(), String> {
     let conn = db.lock().map_err(|_| "database unavailable".to_string())?;
+    // O que a pessoa vai decidir, para a Laya e o Jev serem comparados com ela (só o hash é guardado).
+    let proposal: Option<(String, String, String, String)> = conn
+        .query_row(
+            "SELECT e.key, r.kind, r.body, r.operation FROM memory_entries e JOIN memory_revisions r ON r.entry_id=e.id WHERE e.id=?1 AND r.revision=?2",
+            params![entry_id, revision],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .ok();
     if approve {
         let (key, body, reason): (String, String, Option<String>) = conn
             .query_row(
@@ -1651,6 +1659,11 @@ pub fn memory_decide_user(
     }
     // A decisão grava no banco. A exportação entra na fila e solta o lock antes do git.
     let result = repo_sync::decide_and_schedule(&conn, &sync, &entry_id, revision, approve);
+    if result.is_ok() {
+        if let Some((key, kind, body, operation)) = &proposal {
+            crate::decisions::record_memory_decision(&conn, key, kind, operation, body, approve);
+        }
+    }
     drop(conn);
     notify_changed(&app);
     result

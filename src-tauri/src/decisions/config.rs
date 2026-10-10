@@ -163,6 +163,7 @@ impl Settings {
 
     /// O texto da proposta sai desta máquina? Vale pelo endereço e não pelo nome do provedor:
     /// uma "Laya local" apontada para um servidor da rede também leva o texto para fora.
+    #[cfg(test)]
     pub fn sends_off_machine(&self) -> bool {
         !is_local_url(&self.base_url)
     }
