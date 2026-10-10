@@ -9,6 +9,9 @@ use crate::memory::review::{MemoryReviewSummary, WorkspaceReviewSummary};
 use crate::missions::delivery::{MissionDelivery, mission_status};
 use crate::runs::types::{Run, Task};
 
+use rusqlite::Connection;
+
+use super::config;
 use super::protocol::{DecisionRequest, Question, truncate_chars};
 use super::shadow::{ShadowJob, enqueue};
 
@@ -16,6 +19,17 @@ pub const POINT_MEMORY: &str = "memory_approval";
 pub const POINT_DREAM: &str = "dream_triage";
 pub const POINT_FLEET: &str = "fleet_gate";
 pub const POINT_MISSION: &str = "mission_gate";
+
+/// Rótulos que a pergunta aceita mas que a heurística do ponto nunca devolve. O relatório os
+/// separa: um "desacordo" aí não é erro de ninguém, é o provedor dizendo algo que o código
+/// não tem como dizer.
+pub fn blind_labels(point: &str, question: &str) -> &'static [&'static str] {
+    match (point, question) {
+        (POINT_MEMORY, "acao") => &["aprovar"],
+        (POINT_DREAM, "triagem") => &["descartar"],
+        _ => &[],
+    }
+}
 
 /// Duplicata sem outro sinal → `rejeitar` (a aprovação em massa deixa essas de fora).
 /// Contradição, exclusão, segredo ou o resto → `revisar`. Não existe aprovação automática.
@@ -62,10 +76,10 @@ pub fn mission_choice(delivery: &MissionDelivery) -> &'static str {
     }
 }
 
-struct MemorySignals {
-    duplicate: bool,
-    contradiction: bool,
-    deletion: bool,
+pub(super) struct MemorySignals {
+    pub(super) duplicate: bool,
+    pub(super) contradiction: bool,
+    pub(super) deletion: bool,
 }
 
 pub fn observe_memory_mission(db: DbConnection, summary: &MemoryReviewSummary) {
@@ -121,31 +135,52 @@ pub fn observe_dreams(db: DbConnection, dreams: &[DreamReview]) {
         .iter()
         .flat_map(|dream| dream.proposals.iter())
         .map(|item| {
-            let duplicate = item.item.duplicate_of.is_some();
-            let mut heuristic = BTreeMap::new();
-            heuristic.insert("triagem".into(), dream_choice(duplicate).to_string());
-            let state = proposal_state(
+            dream_job(
                 &item.item.key,
                 &item.item.kind,
                 &item.operation,
                 &item.item.body,
-            );
-            ShadowJob {
-                point: POINT_DREAM,
-                state: state.clone(),
-                request: request(state, dream_questions(), heuristic),
-            }
+                item.item.evidence.reason.as_deref(),
+                item.item.duplicate_of.is_some(),
+            )
         })
         .collect();
     enqueue(db, jobs);
 }
 
+pub(super) fn dream_job(
+    key: &str,
+    kind: &str,
+    operation: &str,
+    body: &str,
+    reason: Option<&str>,
+    duplicate: bool,
+) -> ShadowJob {
+    let mut heuristic = BTreeMap::new();
+    heuristic.insert("triagem".into(), dream_choice(duplicate).to_string());
+    let state = proposal_state(key, kind, operation, body);
+    ShadowJob {
+        point: POINT_DREAM,
+        state: state.clone(),
+        sensitive: memory_secret(key, body, reason),
+        identity: None,
+        request: request(state, dream_questions(), heuristic),
+    }
+}
+
+/// `running` são as vagas ocupadas, que o agendador já conta para decidir e o provedor
+/// precisa ver para decidir igual. Com o ponto desligado não monta nada.
 pub fn fleet_jobs(
+    conn: &Connection,
     run: &Run,
     tasks: &[Task],
+    running: i64,
     launch: &[String],
     skip: &[(String, String)],
 ) -> Vec<ShadowJob> {
+    if !config::point_active(conn, POINT_FLEET) {
+        return Vec::new();
+    }
     tasks
         .iter()
         .filter(|task| task.status == crate::runs::types::status::PENDING)
@@ -155,17 +190,19 @@ pub fn fleet_jobs(
                 "despacho".into(),
                 fleet_label(&task.id, launch, skip).to_string(),
             );
-            let state = fleet_state(run, task, tasks);
+            let state = fleet_state(run, task, tasks, running);
             ShadowJob {
                 point: POINT_FLEET,
                 state: state.clone(),
+                sensitive: false,
+                identity: None,
                 request: request(state, fleet_questions(), heuristic),
             }
         })
         .collect()
 }
 
-pub fn observe_mission(db: DbConnection, delivery: &MissionDelivery) {
+pub fn observe_mission(db: DbConnection, mission_id: &str, delivery: &MissionDelivery) {
     let mut heuristic = BTreeMap::new();
     heuristic.insert("gate".into(), mission_choice(delivery).to_string());
     let state = format!(
@@ -178,12 +215,16 @@ pub fn observe_mission(db: DbConnection, delivery: &MissionDelivery) {
         vec![ShadowJob {
             point: POINT_MISSION,
             state: state.clone(),
+            sensitive: false,
+            // O estado é o mesmo para toda missão com o mesmo resultado: sem a missão no
+            // hash, a janela de uma hora descartaria quase todas as amostras.
+            identity: Some(mission_id.to_string()),
             request: request(state, mission_questions(), heuristic),
         }],
     );
 }
 
-fn memory_job(
+pub(super) fn memory_job(
     point: &'static str,
     key: &str,
     kind: &str,
@@ -211,6 +252,8 @@ fn memory_job(
     ShadowJob {
         point,
         state: state.clone(),
+        sensitive: secret,
+        identity: None,
         request: request(state, memory_questions(), heuristic),
     }
 }
@@ -236,7 +279,7 @@ fn proposal_state(key: &str, kind: &str, operation: &str, body: &str) -> String 
     ))
 }
 
-fn fleet_state(run: &Run, task: &Task, tasks: &[Task]) -> String {
+fn fleet_state(run: &Run, task: &Task, tasks: &[Task], running: i64) -> String {
     let deps = task
         .depends_on
         .iter()
@@ -255,16 +298,18 @@ fn fleet_state(run: &Run, task: &Task, tasks: &[Task]) -> String {
         })
         .collect::<Vec<_>>()
         .join(", ");
-    let budget = run
-        .budget_usd
-        .map(|value| value.to_string())
-        .unwrap_or_else(|| "sem".into());
+    // O agendador só olha se o orçamento estourou e quantas vagas estão ocupadas. O gasto em
+    // dólar mudaria o hash a cada tick e anularia a janela de uma hora.
+    let budget = match run.budget_usd {
+        None => "sem limite",
+        Some(limit) if run.spent_usd >= limit => "estourado",
+        Some(_) => "dentro",
+    };
     super::protocol::truncate_state(&format!(
-        "titulo: {}\npapel: {}\norcamento_usd: {budget}\ngasto_usd: {}\nmax_paralelo: {}\ndependencias: {}",
+        "titulo: {}\npapel: {}\norcamento: {budget}\nem_execucao: {running}\nmax_paralelo: {}\ndependencias: {}",
         truncate_chars(&task.title, 180),
         task.role.as_deref().unwrap_or("manual"),
-        run.spent_usd,
-        run.max_parallel,
+        run.max_parallel.max(1),
         if deps.is_empty() {
             "nenhuma".to_string()
         } else {

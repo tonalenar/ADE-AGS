@@ -8,10 +8,12 @@ use rusqlite::Connection;
 
 use crate::database::DbConnection;
 use crate::missions::delivery::{CiStatus, MissionDelivery, TestResult, mission_status};
+use crate::runs::types::{Run, Task, role, status};
 
+use super::commands;
 use super::config::{self, ProviderKind, Settings};
 use super::http::{DecisionProvider, HeuristicProvider, SystemOneHttpProvider};
-use super::log::{self, LogRow};
+use super::log::{self, LogRow, PairCount};
 use super::points::{
     self, dream_choice, fleet_label, memory_choice, memory_secret, mission_choice,
 };
@@ -27,25 +29,31 @@ fn memory_db() -> DbConnection {
 }
 
 fn serve(status: u16, body: &str, delay: Duration) -> String {
+    serve_times(status, body, delay, 1)
+}
+
+fn serve_times(status: u16, body: &str, delay: Duration, times: usize) -> String {
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     let body = body.to_string();
     std::thread::spawn(move || {
-        let Ok((mut stream, _)) = listener.accept() else {
-            return;
-        };
-        let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
-        let mut buf = [0u8; 16_384];
-        let _ = stream.read(&mut buf);
-        if !delay.is_zero() {
-            std::thread::sleep(delay);
+        for _ in 0..times {
+            let Ok((mut stream, _)) = listener.accept() else {
+                return;
+            };
+            let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+            let mut buf = [0u8; 16_384];
+            let _ = stream.read(&mut buf);
+            if !delay.is_zero() {
+                std::thread::sleep(delay);
+            }
+            let header = format!(
+                "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            );
+            let _ = stream.write_all(header.as_bytes());
+            let _ = stream.write_all(body.as_bytes());
         }
-        let header = format!(
-            "HTTP/1.1 {status} X\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
-            body.len()
-        );
-        let _ = stream.write_all(header.as_bytes());
-        let _ = stream.write_all(body.as_bytes());
     });
     format!("http://{address}")
 }
@@ -91,6 +99,8 @@ fn job_from(request: DecisionRequest) -> ShadowJob {
     ShadowJob {
         point: points::POINT_MEMORY,
         state: request.state.clone(),
+        sensitive: false,
+        identity: None,
         request,
     }
 }
@@ -502,4 +512,418 @@ fn ajustes_padrao_ficam_desligados_e_a_url_rejeita_segredo_na_propria_url() {
         ProviderKind::LayaStudio.default_base_url(),
         "https://api.laya.studio"
     );
+}
+
+
+fn log_rows(db: &DbConnection) -> i64 {
+    db.lock()
+        .unwrap()
+        .query_row("SELECT COUNT(*) FROM decision_shadow_log", [], |row| {
+            row.get(0)
+        })
+        .unwrap()
+}
+
+fn local_settings(base_url: String) -> Settings {
+    Settings {
+        enabled: true,
+        provider: ProviderKind::LayaLocal,
+        base_url,
+        model: "multilingual".into(),
+        timeout_ms: 1_000,
+        memory_approval: true,
+        dream_triage: true,
+        fleet_gate: true,
+        mission_gate: true,
+    }
+}
+
+// ── 1. O que o app marca como segredo não sai da máquina ────────────────
+
+#[test]
+fn o_endereco_decide_se_o_texto_sai_da_maquina() {
+    let off = |url: &str| {
+        Settings {
+            base_url: url.into(),
+            ..Settings::default()
+        }
+        .sends_off_machine()
+    };
+    assert!(!off("http://localhost:8000"));
+    assert!(!off("http://127.0.0.1:8000"));
+    assert!(!off("http://[::1]:8000"));
+    assert!(off("https://api.laya.studio"));
+    assert!(off("https://api.typesafe.ai"));
+    assert!(off("https://laya.interno.exemplo"));
+    assert!(off("isto não é uma url"), "na dúvida, conta como fora");
+}
+
+#[test]
+fn texto_marcado_como_segredo_nao_sai_para_um_endereco_de_fora() {
+    let db = memory_db();
+    let remote = Settings {
+        provider: ProviderKind::LayaStudio,
+        base_url: "https://api.laya.studio".into(),
+        ..local_settings(String::new())
+    };
+    let mut secret = job_from(sample_request());
+    secret.sensitive = true;
+    // Qualquer tentativa de envio gravaria ao menos uma linha (de erro). Nenhuma linha
+    // quer dizer que nem tentou.
+    shadow::run_jobs_with(db.clone(), vec![secret.clone()], &remote, None);
+    assert_eq!(log_rows(&db), 0);
+
+    // O mesmo texto, com o servidor na própria máquina, segue o fluxo de sempre.
+    let local = local_settings(serve(200, SUCCESS, Duration::ZERO));
+    shadow::run_jobs_with(db.clone(), vec![secret], &local, None);
+    assert_eq!(log_rows(&db), 1);
+}
+
+#[test]
+fn memoria_e_sonho_levam_a_marca_de_segredo_para_o_envio() {
+    let signals = || points::MemorySignals {
+        duplicate: false,
+        contradiction: false,
+        deletion: false,
+    };
+    let secret = points::memory_job(
+        points::POINT_MEMORY,
+        "senha",
+        "fact",
+        "proposta",
+        "password: hunter2",
+        None,
+        signals(),
+    );
+    assert!(secret.sensitive);
+    let plain = points::memory_job(
+        points::POINT_MEMORY,
+        "limite",
+        "fact",
+        "proposta",
+        "o pool aceita 20 conexoes",
+        None,
+        signals(),
+    );
+    assert!(!plain.sensitive);
+
+    let dream = points::dream_job("senha", "fact", "add", "token: abc123", None, false);
+    assert!(dream.sensitive);
+    let dream = points::dream_job("limite", "fact", "add", "o pool aceita 20", None, false);
+    assert!(!dream.sensitive);
+}
+
+// ── 2. O teste de conexão não pode prender a janela ─────────────────────
+
+#[test]
+fn o_teste_de_conexao_diz_o_que_falta_e_conecta_quando_ha_servidor() {
+    let none = commands::ping(&Settings::default(), None);
+    assert!(!none.ok);
+    assert!(none.error.unwrap().contains("provedor"));
+
+    let clef = Settings {
+        provider: ProviderKind::Clef,
+        ..Settings::default()
+    };
+    assert!(!commands::ping(&clef, None).ok);
+
+    let settings = local_settings(serve(200, SUCCESS, Duration::ZERO));
+    let result = commands::ping(&settings, None);
+    assert!(result.ok, "{:?}", result.error);
+    assert!(result.error.is_none());
+}
+
+// ── 3. O relatório separa as perguntas e o que só o provedor diz ────────
+
+fn insert(conn: &Connection, index: i64, point: &str, heuristic: &str, provider: &str) {
+    log::record(
+        conn,
+        &LogRow {
+            ts: 100 + index,
+            point: point.into(),
+            provider: "laya_local".into(),
+            model: "multilingual".into(),
+            state_hash: format!("h{index}"),
+            heuristic: heuristic.into(),
+            provider_decision: Some(provider.into()),
+            probability: None,
+            confidence: None,
+            latency_ms: Some(10),
+            error: None,
+            input_tokens: Some(1),
+            output_tokens: Some(0),
+        },
+    )
+    .unwrap();
+}
+
+#[test]
+fn o_relatorio_separa_as_perguntas_e_o_que_so_o_provedor_diz() {
+    let conn = Connection::open_in_memory().unwrap();
+    log::migrate(&conn).unwrap();
+    let heuristic = "acao=revisar;segredo=nao";
+    for (index, provider) in [
+        "acao=revisar;segredo=nao",
+        "acao=aprovar;segredo=nao",
+        "acao=aprovar;segredo=sim",
+        "acao=rejeitar;segredo=nao",
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        insert(&conn, index as i64, "memory_approval", heuristic, provider);
+    }
+    let report = log::report(&conn).unwrap();
+    assert_eq!(report.min_sample, log::MIN_SAMPLE);
+    let point = &report.points[0];
+    assert_eq!(point.compared, 4);
+    assert!(point.low_sample, "4 comparações ainda é amostra pequena");
+    assert!(
+        (point.agreement_rate - 0.25).abs() < 1e-9,
+        "a decisão inteira só bate em 1 de 4"
+    );
+
+    let action = point.questions.iter().find(|q| q.question == "acao").unwrap();
+    assert_eq!(action.compared, 4);
+    assert!((action.agreement_rate - 0.25).abs() < 1e-9);
+    assert!(
+        (action.blind_rate - 0.5).abs() < 1e-9,
+        "o provedor aprovou 2 de 4, e a heurística nunca aprova"
+    );
+    assert_eq!(action.blind_labels, vec!["aprovar".to_string()]);
+    assert_eq!(
+        action.pairs[0],
+        PairCount {
+            heuristic: "revisar".into(),
+            provider: "aprovar".into(),
+            count: 2
+        }
+    );
+
+    let secret = point
+        .questions
+        .iter()
+        .find(|q| q.question == "segredo")
+        .unwrap();
+    assert!(
+        (secret.agreement_rate - 0.75).abs() < 1e-9,
+        "o detector do app e o provedor concordam em 3 de 4"
+    );
+    assert!(secret.blind_rate.abs() < f64::EPSILON);
+    assert!(secret.blind_labels.is_empty());
+
+    let csv = log::export_csv(&conn).unwrap();
+    assert!(csv.contains("par,memory_approval,acao,revisar,aprovar,2"), "{csv}");
+    assert!(csv.contains(",4,true\n"), "comparadas e amostra_pequena no resumo: {csv}");
+}
+
+#[test]
+fn a_amostra_deixa_de_ser_pequena_na_trigesima_comparacao() {
+    let conn = Connection::open_in_memory().unwrap();
+    log::migrate(&conn).unwrap();
+    for index in 0..log::MIN_SAMPLE {
+        insert(&conn, index, "fleet_gate", "despacho=lancar", "despacho=lancar");
+    }
+    let report = log::report(&conn).unwrap();
+    assert!(!report.points[0].low_sample);
+    assert!((report.points[0].agreement_rate - 1.0).abs() < f64::EPSILON);
+}
+
+// ── 4. A frota não consulta além do que mudou ───────────────────────────
+
+fn fleet_run(budget: Option<f64>, spent: f64) -> Run {
+    Run {
+        id: "r".into(),
+        workspace_id: "w".into(),
+        objective: "o".into(),
+        cwd: "/p".into(),
+        status: "running".into(),
+        max_parallel: 2,
+        budget_usd: budget,
+        spent_usd: spent,
+        created_at: 0,
+        ended_at: None,
+        mission_id: None,
+        squad_id: None,
+        squad_name: None,
+        squad_members: Vec::new(),
+    }
+}
+
+fn fleet_task(id: &str, state: &str, deps: &[&str]) -> Task {
+    Task {
+        reasoning_effort: None,
+        id: id.into(),
+        run_id: "r".into(),
+        title: id.into(),
+        prompt: "p".into(),
+        agent_id: "claude-code".into(),
+        account_id: None,
+        model: None,
+        cwd: "/p".into(),
+        budget_usd: None,
+        status: state.into(),
+        session_id: None,
+        attempt: 0,
+        result: None,
+        error: None,
+        cost_usd: None,
+        tokens_in: None,
+        tokens_out: None,
+        events_path: None,
+        worktree_path: None,
+        branch: None,
+        worktree_removed: false,
+        complexity: None,
+        routed_by: None,
+        route_note: None,
+        role: Some(role::WORKER.into()),
+        functional_role: None,
+        plan_key: Some(id.into()),
+        parent_id: None,
+        depth: 1,
+        isolate: false,
+        result_schema: None,
+        last_error: None,
+        handoff: None,
+        structured_handoff: None,
+        depends_on: deps.iter().map(|d| d.to_string()).collect(),
+        auto_account: true,
+        work_key: String::new(),
+        fix_round: 0,
+        full_gate: false,
+        fix_status: String::new(),
+        started_at: None,
+        ended_at: None,
+        created_at: 0,
+    }
+}
+
+fn fleet_hash(db: &DbConnection, run: &Run, running: i64) -> (String, String) {
+    let tasks = vec![
+        fleet_task("a", status::DONE, &[]),
+        fleet_task("b", status::PENDING, &["a"]),
+    ];
+    let conn = db.lock().unwrap();
+    let jobs = points::fleet_jobs(&conn, run, &tasks, running, &[], &[]);
+    assert_eq!(jobs.len(), 1, "só a tarefa pendente entra");
+    (jobs[0].hash(), jobs[0].state.clone())
+}
+
+#[test]
+fn o_estado_da_frota_so_muda_quando_a_decisao_pode_mudar() {
+    let db = memory_db();
+    config::persist(&db.lock().unwrap(), &local_settings("http://localhost:8000".into())).unwrap();
+
+    let (base, state) = fleet_hash(&db, &fleet_run(Some(10.0), 0.10), 1);
+    assert!(!state.contains("gasto"), "{state}");
+    assert!(state.contains("orcamento: dentro"), "{state}");
+    assert!(state.contains("em_execucao: 1"), "{state}");
+
+    // O gasto sobe a cada tick, mas dentro do orçamento a decisão do agendador é a mesma.
+    assert_eq!(fleet_hash(&db, &fleet_run(Some(10.0), 4.75), 1).0, base);
+    // Estourar o orçamento e mudar as vagas ocupadas mudam a decisão: aí o hash muda.
+    let (over, state) = fleet_hash(&db, &fleet_run(Some(10.0), 10.0), 1);
+    assert_ne!(over, base);
+    assert!(state.contains("orcamento: estourado"), "{state}");
+    assert_ne!(fleet_hash(&db, &fleet_run(Some(10.0), 0.10), 2).0, base);
+    assert!(fleet_hash(&db, &fleet_run(None, 3.0), 1).1.contains("orcamento: sem limite"));
+}
+
+#[test]
+fn a_frota_so_monta_trabalho_com_o_ponto_ligado() {
+    let db = memory_db();
+    let run = fleet_run(None, 0.0);
+    let tasks = vec![fleet_task("b", status::PENDING, &[])];
+    let conn = db.lock().unwrap();
+    assert!(points::fleet_jobs(&conn, &run, &tasks, 0, &[], &[]).is_empty());
+
+    let only_memory = Settings {
+        fleet_gate: false,
+        ..local_settings("http://localhost:8000".into())
+    };
+    config::persist(&conn, &only_memory).unwrap();
+    assert!(
+        points::fleet_jobs(&conn, &run, &tasks, 0, &[], &[]).is_empty(),
+        "outro ponto ligado não liga este"
+    );
+    config::persist(&conn, &local_settings("http://localhost:8000".into())).unwrap();
+    assert_eq!(points::fleet_jobs(&conn, &run, &tasks, 0, &[], &[]).len(), 1);
+}
+
+#[test]
+fn ler_se_o_ponto_esta_ligado_respeita_a_chave_geral_e_o_provedor() {
+    let db = memory_db();
+    let conn = db.lock().unwrap();
+    assert!(!config::point_active(&conn, points::POINT_FLEET));
+    let mut settings = local_settings("http://localhost:8000".into());
+    config::persist(&conn, &settings).unwrap();
+    assert!(config::point_active(&conn, points::POINT_FLEET));
+    assert!(!config::point_active(&conn, "ponto_que_nao_existe"));
+    settings.provider = ProviderKind::None;
+    config::persist(&conn, &settings).unwrap();
+    assert!(!config::point_active(&conn, points::POINT_FLEET));
+    settings.provider = ProviderKind::LayaLocal;
+    settings.enabled = false;
+    config::persist(&conn, &settings).unwrap();
+    assert!(!config::point_active(&conn, points::POINT_FLEET));
+}
+
+#[test]
+fn a_fila_e_uma_so_sem_repetir_e_com_teto() {
+    let db = memory_db();
+    let other = memory_db();
+    let job = |state: &str| {
+        let mut job = job_from(sample_request());
+        job.state = state.into();
+        job
+    };
+    let mut queue = shadow::Queue::new();
+    assert!(
+        queue.push(&db, vec![job("a"), job("a"), job("b")], 10),
+        "a primeira entrada pede o trabalhador"
+    );
+    assert_eq!(queue.len(), 2, "o gêmeo não entra");
+    assert!(!queue.push(&db, vec![job("c"), job("a")], 10), "já há trabalhador");
+    assert_eq!(queue.len(), 3);
+    queue.push(&other, vec![job("a")], 10);
+    assert_eq!(queue.len(), 4, "o mesmo texto em outro banco é outra amostra");
+
+    let mut small = shadow::Queue::new();
+    small.push(&db, vec![job("1"), job("2"), job("3")], 2);
+    assert_eq!(small.len(), 2, "o que passa do teto é descartado");
+
+    assert_eq!(queue.take().len(), 4, "o trabalhador leva tudo de uma vez");
+    assert!(queue.take().is_empty(), "e a vez seguinte, vazia, o encerra");
+    assert!(queue.push(&db, vec![job("z")], 10), "livre para outro começar");
+}
+
+// ── Missão: cada uma vale uma amostra ───────────────────────────────────
+
+#[test]
+fn cada_missao_vale_uma_amostra_mesmo_com_o_mesmo_resultado() {
+    let state = "testes: passed\nci: success";
+    let make = |identity: Option<&str>| ShadowJob {
+        point: points::POINT_MISSION,
+        state: state.into(),
+        sensitive: false,
+        identity: identity.map(str::to_string),
+        request: sample_request(),
+    };
+    assert_ne!(make(Some("m1")).hash(), make(Some("m2")).hash());
+    assert_eq!(make(Some("m1")).hash(), make(Some("m1")).hash());
+    assert_eq!(make(None).hash(), protocol::state_hash(state));
+
+    // No worker: duas missões com o mesmo resultado viram duas linhas; a mesma missão de novo, não.
+    let db = memory_db();
+    let settings = local_settings(serve_times(200, SUCCESS, Duration::ZERO, 2));
+    shadow::run_jobs_with(
+        db.clone(),
+        vec![make(Some("m1")), make(Some("m2"))],
+        &settings,
+        None,
+    );
+    assert_eq!(log_rows(&db), 2);
+    shadow::run_jobs_with(db.clone(), vec![make(Some("m1"))], &settings, None);
+    assert_eq!(log_rows(&db), 2);
 }

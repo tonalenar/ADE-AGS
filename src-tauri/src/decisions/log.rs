@@ -1,12 +1,19 @@
 //! Comparação da sombra. O texto do state não entra na tabela: só o hash.
 
+use std::collections::BTreeMap;
+
 use rusqlite::{Connection, OptionalExtension};
 
 use crate::util::now_ts;
 
+use super::points::blind_labels;
+
 pub const RETAIN_DAYS: i64 = 30;
 pub const RETAIN_ROWS: i64 = 50_000;
 pub const DEDUPE_SECS: i64 = 3_600;
+/// Abaixo disso, a concordância de um ponto ainda não diz nada.
+pub const MIN_SAMPLE: i64 = 30;
+const MAX_PAIRS: usize = 12;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LogRow {
@@ -30,11 +37,38 @@ pub struct LogRow {
 pub struct PointReport {
     pub point: String,
     pub total: i64,
+    /// Respostas sem erro: o denominador da concordância.
+    pub compared: i64,
+    pub low_sample: bool,
     pub agreement_rate: f64,
     pub p50_ms: Option<i64>,
     pub p95_ms: Option<i64>,
     pub error_rate: f64,
     pub timeout_rate: f64,
+    pub questions: Vec<QuestionReport>,
+}
+
+/// O que a heurística escolheu e o que o provedor escolheu, contados (`count` vezes).
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairCount {
+    pub heuristic: String,
+    pub provider: String,
+    pub count: i64,
+}
+
+/// A concordância de uma pergunta, separada das outras do mesmo ponto. `blind_rate` é a
+/// parcela em que o provedor escolheu um rótulo que a heurística daquele ponto nunca devolve:
+/// ali o "desacordo" é informação nova, não erro.
+#[derive(Clone, Debug, PartialEq, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QuestionReport {
+    pub question: String,
+    pub compared: i64,
+    pub agreement_rate: f64,
+    pub blind_rate: f64,
+    pub blind_labels: Vec<String>,
+    pub pairs: Vec<PairCount>,
 }
 
 #[derive(Clone, Debug, PartialEq, serde::Serialize)]
@@ -50,6 +84,7 @@ pub struct Disagreement {
 #[serde(rename_all = "camelCase")]
 pub struct ShadowReport {
     pub generated_at: i64,
+    pub min_sample: i64,
     pub points: Vec<PointReport>,
     pub disagreements: Vec<Disagreement>,
 }
@@ -145,6 +180,15 @@ pub fn retain_with(
     Ok(())
 }
 
+struct Row {
+    point: String,
+    heuristic: String,
+    provider_decision: Option<String>,
+    latency_ms: Option<i64>,
+    error: Option<String>,
+    state_hash: String,
+}
+
 pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
     migrate(conn).map_err(|error| error.to_string())?;
     let mut stmt = conn
@@ -152,92 +196,44 @@ pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
         .map_err(|error| error.to_string())?;
     let rows = stmt
         .query_map([], |row| {
-            Ok((
-                row.get::<_, String>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, Option<String>>(2)?,
-                row.get::<_, Option<i64>>(3)?,
-                row.get::<_, Option<String>>(4)?,
-                row.get::<_, String>(5)?,
-            ))
+            Ok(Row {
+                point: row.get(0)?,
+                heuristic: row.get(1)?,
+                provider_decision: row.get(2)?,
+                latency_ms: row.get(3)?,
+                error: row.get(4)?,
+                state_hash: row.get(5)?,
+            })
         })
         .map_err(|error| error.to_string())?
         .collect::<Result<Vec<_>, _>>()
         .map_err(|error| error.to_string())?;
 
-    let mut points: Vec<PointReport> = Vec::new();
-    for (point, heuristic, provider_decision, latency, error, hash) in &rows {
-        let slot = if let Some(found) = points.iter_mut().find(|item| &item.point == point) {
-            found
-        } else {
-            points.push(PointReport {
-                point: point.clone(),
-                total: 0,
-                agreement_rate: 0.0,
-                p50_ms: None,
-                p95_ms: None,
-                error_rate: 0.0,
-                timeout_rate: 0.0,
-            });
-            points.last_mut().expect("acabou de entrar")
-        };
-        slot.total += 1;
-        let _ = (heuristic, provider_decision, latency, error, hash);
+    let mut by_point: BTreeMap<&str, Vec<&Row>> = BTreeMap::new();
+    for row in &rows {
+        by_point.entry(row.point.as_str()).or_default().push(row);
     }
-    for slot in &mut points {
-        let mine: Vec<_> = rows.iter().filter(|row| row.0 == slot.point).collect();
-        let errors = mine.iter().filter(|row| row.4.is_some()).count();
-        let timeouts = mine
-            .iter()
-            .filter(|row| {
-                row.4
-                    .as_deref()
-                    .is_some_and(|error| error == "timeout" || error.starts_with("timeout"))
-            })
-            .count();
-        let compared: Vec<_> = mine.iter().filter(|row| row.4.is_none()).collect();
-        let agreed = compared
-            .iter()
-            .filter(|row| row.2.as_deref() == Some(row.1.as_str()))
-            .count();
-        slot.agreement_rate = if compared.is_empty() {
-            0.0
-        } else {
-            agreed as f64 / compared.len() as f64
-        };
-        slot.error_rate = if slot.total == 0 {
-            0.0
-        } else {
-            errors as f64 / slot.total as f64
-        };
-        slot.timeout_rate = if slot.total == 0 {
-            0.0
-        } else {
-            timeouts as f64 / slot.total as f64
-        };
-        let mut latencies: Vec<i64> = mine.iter().filter_map(|row| row.3).collect();
-        latencies.sort_unstable();
-        slot.p50_ms = percentile(&latencies, 0.50);
-        slot.p95_ms = percentile(&latencies, 0.95);
-    }
-    points.sort_by(|a, b| a.point.cmp(&b.point));
+    let points = by_point
+        .into_iter()
+        .map(|(point, mine)| point_report(point, &mine))
+        .collect();
 
     let mut disagreements = Vec::new();
-    for (point, heuristic, provider_decision, _, error, hash) in rows.into_iter().rev() {
-        if error.is_some() {
+    for row in rows.iter().rev() {
+        if row.error.is_some() {
             continue;
         }
-        let Some(provider_decision) = provider_decision else {
+        let Some(provider_decision) = &row.provider_decision else {
             continue;
         };
-        if provider_decision == heuristic {
+        if *provider_decision == row.heuristic {
             continue;
         }
         disagreements.push(Disagreement {
-            point,
-            state_hash: hash,
-            heuristic,
-            provider_decision,
+            point: row.point.clone(),
+            state_hash: row.state_hash.clone(),
+            heuristic: row.heuristic.clone(),
+            provider_decision: provider_decision.clone(),
         });
         if disagreements.len() == 50 {
             break;
@@ -245,18 +241,140 @@ pub fn report(conn: &Connection) -> Result<ShadowReport, String> {
     }
     Ok(ShadowReport {
         generated_at: now_ts(),
+        min_sample: MIN_SAMPLE,
         points,
         disagreements,
     })
 }
 
+fn rate(part: usize, whole: usize) -> f64 {
+    if whole == 0 {
+        0.0
+    } else {
+        part as f64 / whole as f64
+    }
+}
+
+fn point_report(point: &str, mine: &[&Row]) -> PointReport {
+    let errors = mine.iter().filter(|row| row.error.is_some()).count();
+    let timeouts = mine
+        .iter()
+        .filter(|row| {
+            row.error
+                .as_deref()
+                .is_some_and(|error| error.starts_with("timeout"))
+        })
+        .count();
+    let compared: Vec<&Row> = mine
+        .iter()
+        .copied()
+        .filter(|row| row.error.is_none())
+        .collect();
+    let agreed = compared
+        .iter()
+        .filter(|row| row.provider_decision.as_deref() == Some(row.heuristic.as_str()))
+        .count();
+    let mut latencies: Vec<i64> = mine.iter().filter_map(|row| row.latency_ms).collect();
+    latencies.sort_unstable();
+    PointReport {
+        point: point.to_string(),
+        total: mine.len() as i64,
+        compared: compared.len() as i64,
+        low_sample: (compared.len() as i64) < MIN_SAMPLE,
+        agreement_rate: rate(agreed, compared.len()),
+        p50_ms: percentile(&latencies, 0.50),
+        p95_ms: percentile(&latencies, 0.95),
+        error_rate: rate(errors, mine.len()),
+        timeout_rate: rate(timeouts, mine.len()),
+        questions: question_reports(point, &compared),
+    }
+}
+
+/// `acao=revisar;segredo=nao` vira `{acao: revisar, segredo: nao}`.
+fn answers(canonical: &str) -> BTreeMap<&str, &str> {
+    canonical
+        .split(';')
+        .filter_map(|pair| pair.split_once('='))
+        .collect()
+}
+
+fn question_reports(point: &str, compared: &[&Row]) -> Vec<QuestionReport> {
+    #[derive(Default)]
+    struct Tally {
+        compared: i64,
+        agreed: i64,
+        blind: i64,
+        pairs: BTreeMap<(String, String), i64>,
+    }
+    let mut tallies: BTreeMap<String, Tally> = BTreeMap::new();
+    for row in compared {
+        let provider = row
+            .provider_decision
+            .as_deref()
+            .map(answers)
+            .unwrap_or_default();
+        for (question, heuristic) in answers(&row.heuristic) {
+            let chosen = provider.get(question).copied().unwrap_or("-");
+            let tally = tallies.entry(question.to_string()).or_default();
+            tally.compared += 1;
+            if chosen == heuristic {
+                tally.agreed += 1;
+            }
+            if blind_labels(point, question)
+                .iter()
+                .any(|label| *label == chosen)
+            {
+                tally.blind += 1;
+            }
+            *tally
+                .pairs
+                .entry((heuristic.to_string(), chosen.to_string()))
+                .or_default() += 1;
+        }
+    }
+    tallies
+        .into_iter()
+        .map(|(question, tally)| {
+            let mut pairs: Vec<PairCount> = tally
+                .pairs
+                .into_iter()
+                .map(|((heuristic, provider), count)| PairCount {
+                    heuristic,
+                    provider,
+                    count,
+                })
+                .collect();
+            pairs.sort_by(|a, b| {
+                b.count
+                    .cmp(&a.count)
+                    .then_with(|| a.heuristic.cmp(&b.heuristic))
+                    .then_with(|| a.provider.cmp(&b.provider))
+            });
+            pairs.truncate(MAX_PAIRS);
+            let whole = tally.compared as f64;
+            QuestionReport {
+                blind_labels: blind_labels(point, &question)
+                    .iter()
+                    .map(|label| label.to_string())
+                    .collect(),
+                question,
+                compared: tally.compared,
+                agreement_rate: tally.agreed as f64 / whole,
+                blind_rate: tally.blind as f64 / whole,
+                pairs,
+            }
+        })
+        .collect()
+}
+
 pub fn export_csv(conn: &Connection) -> Result<String, String> {
     let report = report(conn)?;
-    let mut csv =
-        String::from("tipo,ponto,total,concordancia,p50_ms,p95_ms,taxa_erro,taxa_timeout\n");
+    let mut csv = String::from(
+        "tipo,ponto,total,concordancia,p50_ms,p95_ms,taxa_erro,taxa_timeout,comparadas,amostra_pequena\n",
+    );
     for point in &report.points {
         csv.push_str(&format!(
-            "resumo,{},{},{:.4},{},{},{:.4},{:.4}\n",
+            "resumo,{},{},{:.4},{},{},{:.4},{:.4},{},{}\n",
             cell(&point.point),
             point.total,
             point.agreement_rate,
@@ -270,6 +388,8 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
                 .unwrap_or_default(),
             point.error_rate,
             point.timeout_rate,
+            point.compared,
+            point.low_sample,
         ));
     }
     csv.push_str("tipo,ponto,state_hash,heuristica,provedor\n");
@@ -281,6 +401,21 @@ pub fn export_csv(conn: &Connection) -> Result<String, String> {
             cell(&row.heuristic),
             cell(&row.provider_decision),
         ));
+    }
+    csv.push_str("tipo,ponto,pergunta,heuristica,provedor,contagem\n");
+    for point in &report.points {
+        for question in &point.questions {
+            for pair in &question.pairs {
+                csv.push_str(&format!(
+                    "par,{},{},{},{},{}\n",
+                    cell(&point.point),
+                    cell(&question.question),
+                    cell(&pair.heuristic),
+                    cell(&pair.provider),
+                    pair.count,
+                ));
+            }
+        }
     }
     Ok(csv)
 }

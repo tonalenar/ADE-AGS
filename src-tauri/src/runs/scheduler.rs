@@ -81,6 +81,7 @@ pub fn decide(run: &Run, tasks: &[Task]) -> Decision {
 /// Un fallo que vale la pena reintentar: el agente llegó a correr, no fue por plata, y la
 /// entrega todavía tiene rodada de correção dentro do teto. `attempt` não decide: o reroute
 /// zera esse número e o teto mora em `fix_round`.
+#[cfg(test)]
 pub fn should_retry(task: &Task, max_rounds: i64) -> bool {
     super::fixrounds::can_retry(task, max_rounds)
 }
@@ -144,7 +145,8 @@ pub fn tick(app: &AppHandle, run_id: &str) {
         let Ok(Some(run)) = store::run_by_id(&conn, run_id) else { return };
         let Ok(tasks) = store::tasks_of_run(&conn, run_id) else { return };
         let decision = decide(&run, &tasks);
-        let shadow = crate::decisions::fleet_jobs(&run, &tasks, &decision.launch, &decision.skip);
+        let running = tasks.iter().filter(|t| occupies_slot(t)).count() as i64;
+        let shadow = crate::decisions::fleet_jobs(&conn, &run, &tasks, running, &decision.launch, &decision.skip);
 
         let mut skipped = Vec::new();
         for (id, reason) in &decision.skip {

@@ -129,7 +129,7 @@ export function SideHead({ width }: { width: number }) {
         {!collapsed && <div className="flex-1" />}
 
         <Tooltip content={workspacesCollapsed ? t("panel.expand") : t("panel.collapse")} placement="right">
-          <Button variant="icon"
+          <Button variant="icon" aria-label={workspacesCollapsed ? t("panel.expand") : t("panel.collapse")}
             onClick={toggle}
             data-tauri-drag-region="false"
             className="cc-t flex items-center justify-center w-6.5 h-6.5 rounded-lg shrink-0

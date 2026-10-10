@@ -8,8 +8,6 @@
 //! - Clean workspace with 0 history (to test that empty workspaces produce 0 proposals)
 //! - Before/after metrics calculation for `docs/ade-ags/MEMORY_REPO.md`
 
-use std::path::{Path, PathBuf};
-use std::time::Duration;
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 
@@ -428,6 +426,8 @@ pub fn calculate_memory_metrics(conn: &Connection, workspace_id: &str) -> Result
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::path::{Path, PathBuf};
+    use std::time::Duration;
 
     #[test]
     fn isolated_db_never_touches_real_db() {

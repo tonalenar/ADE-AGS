@@ -40,6 +40,28 @@ export function clampTimeout(value: number): number {
   return Math.min(30_000, Math.max(50, Math.round(value)));
 }
 
+/** O host de um endereço, ou null se não der para ler. */
+export function urlHost(value: string): string | null {
+  try {
+    return new URL(value.trim()).hostname;
+  } catch {
+    return null;
+  }
+}
+
+const LOCAL_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]", "::1"]);
+
+/** O texto das propostas fica nesta máquina? Um endereço ilegível conta como de fora. */
+export function isLocalUrl(value: string): boolean {
+  const host = urlHost(value);
+  return host !== null && LOCAL_HOSTS.has(host);
+}
+
+/** O aviso de privacidade vale com um provedor escolhido e o endereço fora desta máquina. */
+export function sendsOffMachine(settings: Pick<DecisionSettings, "provider" | "baseUrl">): boolean {
+  return settings.provider !== "none" && !isLocalUrl(settings.baseUrl);
+}
+
 function knownUrl(value: string): boolean {
   const trimmed = value.trim().replace(/\/$/, "");
   return Object.values(PROVIDER_URL).some((url) => url === trimmed);

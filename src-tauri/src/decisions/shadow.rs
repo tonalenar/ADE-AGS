@@ -1,5 +1,7 @@
 //! A consulta sombra não devolve nada para quem decidiu. Falha e timeout só vão ao log.
 
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::database::DbConnection;
@@ -17,7 +19,22 @@ use super::protocol::{
 pub struct ShadowJob {
     pub point: &'static str,
     pub state: String,
+    /// O detector de segredos do app marcou este texto. Com um provedor fora desta máquina,
+    /// ele não é enviado.
+    pub sensitive: bool,
+    /// O que separa duas ocorrências de um mesmo `state` (a missão, por exemplo). Entra só no
+    /// hash: o provedor continua recebendo exatamente o que a heurística viu.
+    pub identity: Option<String>,
     pub request: DecisionRequest,
+}
+
+impl ShadowJob {
+    pub fn hash(&self) -> String {
+        match &self.identity {
+            Some(identity) => state_hash(&format!("{identity}\n{}", self.state)),
+            None => state_hash(&self.state),
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -54,7 +71,7 @@ pub fn evaluate(
                 latency_ms,
                 input_tokens: response.input_tokens,
                 output_tokens: response.output_tokens,
-                state_hash: state_hash(&job.state),
+                state_hash: job.hash(),
             }
         }
         Err(error) => ShadowOutcome {
@@ -66,7 +83,7 @@ pub fn evaluate(
             latency_ms,
             input_tokens: 0,
             output_tokens: 0,
-            state_hash: state_hash(&job.state),
+            state_hash: job.hash(),
         },
     }
 }
@@ -79,21 +96,135 @@ pub fn redact(text: &str, secret: Option<&str>) -> String {
         .replace(&format!("Bearer {secret}"), "Bearer [redacted]")
 }
 
+/// Teto da fila. É amostra, não auditoria: se o provedor engasga, o que passa do teto é
+/// descartado em vez de acumular tarefas de fundo.
+const QUEUE_CAP: usize = 128;
+
+pub(crate) struct Queued {
+    db: DbConnection,
+    job: ShadowJob,
+    hash: String,
+}
+
+/// Uma fila e um trabalhador só. O agendador chama a cada tick e a tela de revisão a cada
+/// abertura: sem isto, um provedor lento empilharia uma tarefa de fundo por chamada.
+pub(crate) struct Queue {
+    items: VecDeque<Queued>,
+    draining: bool,
+}
+
+impl Queue {
+    pub(crate) const fn new() -> Self {
+        Self {
+            items: VecDeque::new(),
+            draining: false,
+        }
+    }
+
+    /// Põe na fila o que ainda não está nela (mesmo ponto, mesmo hash, mesmo banco).
+    /// Devolve `true` quando alguém precisa começar a drenar.
+    pub(crate) fn push(&mut self, db: &DbConnection, jobs: Vec<ShadowJob>, cap: usize) -> bool {
+        for job in jobs {
+            if self.items.len() >= cap {
+                break;
+            }
+            let hash = job.hash();
+            let twin = self.items.iter().any(|item| {
+                item.job.point == job.point && item.hash == hash && Arc::ptr_eq(&item.db, db)
+            });
+            if !twin {
+                self.items.push_back(Queued {
+                    db: db.clone(),
+                    job,
+                    hash,
+                });
+            }
+        }
+        if self.items.is_empty() || self.draining {
+            return false;
+        }
+        self.draining = true;
+        true
+    }
+
+    /// Tudo o que está esperando, de uma vez. Vazio, encerra o trabalhador.
+    pub(crate) fn take(&mut self) -> Vec<Queued> {
+        if self.items.is_empty() {
+            self.draining = false;
+        }
+        self.items.drain(..).collect()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn len(&self) -> usize {
+        self.items.len()
+    }
+}
+
+static QUEUE: Mutex<Queue> = Mutex::new(Queue::new());
+
+fn drain(queue: &'static Mutex<Queue>) {
+    // Se o trabalhador cair no meio, a próxima chamada precisa poder começar outro.
+    struct Reset(&'static Mutex<Queue>);
+    impl Drop for Reset {
+        fn drop(&mut self) {
+            self.0.lock().unwrap_or_else(|e| e.into_inner()).draining = false;
+        }
+    }
+    let _reset = Reset(queue);
+    loop {
+        let batch = queue.lock().unwrap_or_else(|e| e.into_inner()).take();
+        if batch.is_empty() {
+            return;
+        }
+        run_batch(batch);
+    }
+}
+
+fn run_batch(batch: Vec<Queued>) {
+    let mut batch = batch.into_iter().peekable();
+    while let Some(first) = batch.next() {
+        let db = first.db;
+        let mut jobs = vec![first.job];
+        while let Some(next) = batch.next_if(|item| Arc::ptr_eq(&item.db, &db)) {
+            jobs.push(next.job);
+        }
+        run_jobs(db, jobs);
+    }
+}
+
 pub fn enqueue(db: DbConnection, jobs: Vec<ShadowJob>) {
     if jobs.is_empty() {
         return;
     }
-    let proceed = match db.lock() {
-        Ok(conn) => config::load(&conn).ok().is_some_and(|settings| {
-            settings.active() && jobs.iter().any(|job| settings.allows(job.point))
-        }),
-        Err(_) => false,
+    let jobs: Vec<ShadowJob> = match db.lock() {
+        Ok(conn) => {
+            let mut verdicts: Vec<(&'static str, bool)> = Vec::new();
+            jobs.into_iter()
+                .filter(|job| {
+                    if let Some((_, on)) = verdicts.iter().find(|(point, _)| *point == job.point) {
+                        return *on;
+                    }
+                    let on = config::point_active(&conn, job.point);
+                    verdicts.push((job.point, on));
+                    on
+                })
+                .collect()
+        }
+        Err(_) => Vec::new(),
     };
-    if !proceed {
+    if jobs.is_empty() {
+        return;
+    }
+    let start = QUEUE
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .push(&db, jobs, QUEUE_CAP);
+    if !start {
         return;
     }
     tauri::async_runtime::spawn(async move {
-        let joined = tauri::async_runtime::spawn_blocking(move || run_jobs(db, jobs)).await;
+        let joined = tauri::async_runtime::spawn_blocking(|| drain(&QUEUE)).await;
         if let Err(error) = joined {
             eprintln!("decision shadow: tarefa de fundo encerrada ({error})");
         }
@@ -118,11 +249,16 @@ pub(crate) fn run_jobs_with(
     settings: &Settings,
     api_key: Option<String>,
 ) {
+    let off_machine = settings.sends_off_machine();
     for job in jobs {
         if !settings.allows(job.point) {
             continue;
         }
-        let hash = state_hash(&job.state);
+        // O texto que o próprio app marcou como segredo não vai para fora desta máquina.
+        if job.sensitive && off_machine {
+            continue;
+        }
+        let hash = job.hash();
         let seen = db
             .lock()
             .ok()

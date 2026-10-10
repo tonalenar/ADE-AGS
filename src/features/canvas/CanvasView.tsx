@@ -710,14 +710,14 @@ function CanvasInner() {
 const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const { t } = useTranslation();
   const { tab, box, live, links, orchestrator, role, onFocus, onToggleOrchestrator } = data;
-  const handle = "ade-port z-10! w-3.5! h-3.5! border-[3px]! border-white! dark:border-surface! bg-gray-400! dark:bg-gray-200!";
+  const handle = "ade-port z-10! w-3! h-3! border-2! border-white! dark:border-surface! bg-gray-400! dark:bg-gray-200!";
 
   return (
     // As alças ficam FORA do cartão: dentro do `overflow-hidden` saíam cortadas pela metade e a de
     // baixo ficava por baixo do corpo do terminal — por isso era tão difícil puxar uma corda.
     <div className="relative h-full w-full">
       <NodeResizer isVisible={selected} minWidth={NODE_MIN.w} minHeight={NODE_MIN.h}
-        lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
+        lineClassName="border-transparent!" handleClassName="w-2! h-2! rounded-[3px]! bg-white! dark:bg-surface! border-[1.5px]! border-accent-500! shadow-sm!" />
 
       {/* Los puntos de conexión van a la altura de la cabecera: más abajo quedarían
           debajo de la terminal viva, que se dibuja encima del nodo. */}
@@ -729,13 +729,13 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
 
       <div
-        className={`group h-full w-full flex flex-col rounded-[14px] overflow-hidden
+        className={`group h-full w-full flex flex-col rounded-[14px] overflow-hidden transition-shadow duration-150
           bg-white dark:bg-surface
           ${selected
-            ? "shadow-[0_0_0_1.5px_var(--color-accent-500),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]"
+            ? "shadow-[0_0_0_1.5px_var(--color-accent-500),0_0_0_5px_color-mix(in_oklab,var(--color-accent-500)_18%,transparent),0_14px_36px_rgba(0,0,0,0.5),0_2px_6px_rgba(0,0,0,0.3)]"
             : orchestrator
               ? "shadow-[0_0_0_1px_color-mix(in_oklab,var(--color-glow)_55%,transparent),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]"
-              : "shadow-[0_0_0_0.5px_rgba(0,0,0,0.14),0_8px_24px_rgba(0,0,0,0.12)] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]"}`}
+              : "shadow-[0_0_0_0.5px_rgba(0,0,0,0.14),0_8px_24px_rgba(0,0,0,0.12)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.09),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]"}`}
       >
         <div
           className="ade-node-drag flex items-center gap-2.5 pl-4 pr-3 shrink-0 cursor-grab active:cursor-grabbing select-none
@@ -893,7 +893,7 @@ const NoteNode = memo(function NoteNode({ data, selected }: NodeProps<NoteFlowNo
           : "border-amber-300/80 dark:border-amber-200/15"}`}
     >
       <NodeResizer isVisible={selected} minWidth={NOTE_MIN.w} minHeight={NOTE_MIN.h}
-        lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
+        lineClassName="border-transparent!" handleClassName="w-2! h-2! rounded-[3px]! bg-white! dark:bg-surface! border-[1.5px]! border-accent-500! shadow-sm!" />
       <CordPort id="l" type="source" position={Position.Left} className={handle} />
       <CordPort id="r" type="source" position={Position.Right} className={handle} />
       <CordPort id="t" type="source" position={Position.Top} className={handle} />
@@ -1046,7 +1046,7 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
           : "border-sky-300/80 dark:border-sky-200/20"}`}
     >
       <NodeResizer isVisible={selected} minWidth={PORTAL_MIN.w} minHeight={PORTAL_MIN.h}
-        lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
+        lineClassName="border-transparent!" handleClassName="w-2! h-2! rounded-[3px]! bg-white! dark:bg-surface! border-[1.5px]! border-accent-500! shadow-sm!" />
       <CordPort id="l" type="source" position={Position.Left} className={handle} />
       <CordPort id="r" type="source" position={Position.Right} className={handle} />
       <CordPort id="t" type="source" position={Position.Top} className={handle} />

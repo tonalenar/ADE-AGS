@@ -48,6 +48,7 @@
 /// tienen que quedar contenidas igual, y de las dos se usa exactamente lo mismo: el pid en
 /// unix, el handle en Windows.
 pub trait Adoptable {
+    #[cfg_attr(windows, expect(dead_code, reason = "Windows adopts the process by handle; Unix uses its pid"))]
     fn pid(&self) -> Option<u32>;
     #[cfg(windows)]
     fn raw_handle(&self) -> Option<std::os::windows::io::RawHandle>;
@@ -132,6 +133,7 @@ impl ProcessGroup {
     /// Hoy solo lo usa el test de fin a fin, para no afirmar una garantía que el entorno
     /// donde corre no da.
     #[cfg(test)]
+    #[cfg_attr(not(target_os = "linux"), expect(dead_code, reason = "only Linux tests query this capability"))]
     pub(crate) fn is_escape_proof(&self) -> bool {
         imp::is_escape_proof(&self.imp)
     }

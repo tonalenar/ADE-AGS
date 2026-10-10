@@ -215,6 +215,7 @@ const SANDBOX_EXEC: &str = "/usr/bin/sandbox-exec";
 pub struct Wrapped {
     pub program: PathBuf,
     pub args: Vec<OsString>,
+    #[cfg_attr(not(test), expect(dead_code, reason = "backend metadata is asserted by wrapper tests"))]
     pub backend: Backend,
 }
 

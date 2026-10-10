@@ -45,7 +45,7 @@ export const TextNode = memo(function TextNode({ data, selected }: NodeProps<Tex
   return (
     <div className={`group h-full w-full rounded-md ${selected ? "ring-1 ring-accent-400" : "hover:ring-1 hover:ring-gray-400/40"}`}>
       <NodeResizer isVisible={selected} minWidth={80} minHeight={32}
-        lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
+        lineClassName="border-transparent!" handleClassName="w-2! h-2! rounded-[3px]! bg-white! dark:bg-surface! border-[1.5px]! border-accent-500! shadow-sm!" />
       <div className={`absolute -top-6 left-0 flex items-center gap-0.5 rounded-md px-0.5 py-0.5
         bg-white/95 dark:bg-surface-raised/95 border border-gray-200 dark:border-white/10 shadow-sm
         ${selected ? "opacity-100" : "opacity-0 group-hover:opacity-100"}`}>
@@ -117,7 +117,7 @@ export const ImageNode = memo(function ImageNode({ data, selected }: NodeProps<I
     <div className={`group relative h-full w-full rounded-md overflow-hidden
       ${selected ? "ring-1 ring-accent-400" : "hover:ring-1 hover:ring-gray-400/40"}`}>
       <NodeResizer isVisible={selected} minWidth={40} minHeight={40} keepAspectRatio
-        lineClassName="border-transparent!" handleClassName="w-2.5! h-2.5! rounded-sm! bg-accent-400! border-0!" />
+        lineClassName="border-transparent!" handleClassName="w-2! h-2! rounded-[3px]! bg-white! dark:bg-surface! border-[1.5px]! border-accent-500! shadow-sm!" />
       {src ? (
         <img src={src} alt={image.name} draggable={false} className="h-full w-full object-contain select-none" />
       ) : (
