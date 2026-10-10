@@ -19,6 +19,18 @@ import { useFocusInside } from "@/shared/ui/useFocusInside";
  * repositórios do marketplace); o que muda é só onde se pinta. O contêiner é o `PAGE_HOST_ID`
  * do AppShell (ver `pageHost`).
  */
+/**
+ * Um popup de um controle interno está aberto e é o dono do Escape? Duas formas: o foco está no
+ * próprio controle (combobox, autocomplete: `aria-expanded`) ou numa OPÇÃO do popup (listbox ou
+ * menu com o foco móvel), com algum controle da tela marcado como expandido. Exigir os dois no
+ * segundo caso evita que uma lista fixa da página engula o Escape para sempre.
+ */
+export function popupOwnsEscape(active: Element | null, doc: Document = document): boolean {
+  if (!active) return false;
+  if (active.getAttribute("aria-expanded") === "true") return true;
+  return Boolean(active.closest("[role=\"listbox\"],[role=\"menu\"]")) && doc.querySelector("[aria-expanded=\"true\"]") !== null;
+}
+
 export function RouteModal({ onClose, children }: { onClose: () => void; children: React.ReactNode }) {
   const { t } = useTranslation();
   const frameRef = useRef<HTMLDivElement>(null);
@@ -32,9 +44,9 @@ export function RouteModal({ onClose, children }: { onClose: () => void; childre
       if (e.key !== "Escape") return;
       // Um diálogo aberto por cima é o dono deste Escape (ver `hasOpenDialog`).
       if (hasOpenDialog()) return;
-      // Um controle interno com o popup aberto (combobox, autocomplete: aria-expanded) é o
-      // dono deste Escape: fecha o popup, não a tela.
-      if (document.activeElement?.getAttribute("aria-expanded") === "true") return;
+      // Um controle interno com o popup aberto (combobox, autocomplete, ou o foco numa opção do
+      // popup) é o dono deste Escape: fecha o popup, não a tela.
+      if (popupOwnsEscape(document.activeElement)) return;
       // Corta aqui: senão o Escape segue até a terminal de trás e o agente o recebe como
       // se você o tivesse digitado.
       e.preventDefault();
