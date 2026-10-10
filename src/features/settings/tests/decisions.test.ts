@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampTimeout, defaultDecisionSettings, isLocalUrl, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
+import { clampTimeout, defaultDecisionSettings, isDirty, isLocalUrl, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
 
 describe("ajustes das decisões em sombra", () => {
   it("nasce desligado, em multilingual, com a Laya local e 800 ms", () => {
@@ -28,6 +28,14 @@ describe("ajustes das decisões em sombra", () => {
     expect(clampTimeout(1)).toBe(50);
     expect(clampTimeout(99_999)).toBe(30_000);
     expect(clampTimeout(Number.NaN)).toBe(800);
+  });
+
+  it("só diz que mudou quando algo além da chave do cofre mudou", () => {
+    const base = defaultDecisionSettings();
+    expect(isDirty(base, { ...base })).toBe(false);
+    expect(isDirty(base, { ...base, keySaved: true })).toBe(false);
+    expect(isDirty({ ...base, timeoutMs: 2000 }, base)).toBe(true);
+    expect(isDirty({ ...base, fleetGate: true }, base)).toBe(true);
   });
 
   it("separa o que fica nesta máquina do que sai dela, pelo endereço", () => {

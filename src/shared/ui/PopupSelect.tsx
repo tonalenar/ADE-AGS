@@ -197,7 +197,7 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
         aria-labelledby={!rest["aria-label"] && id ? `${id}-label ${buttonId}` : undefined}
         onClick={() => setOpen((v) => !v)}
         onKeyDown={onKeyDown}
-        className={`group inline-flex items-center justify-between gap-2 h-[30px] min-w-0 pl-3 pr-2 rounded-md text-left text-[13px]
+        className={`group inline-flex items-center justify-between gap-2 h-8 min-w-0 pl-3 pr-2.5 rounded-lg text-left text-[13px] transition-shadow
           bg-white dark:bg-surface-raised text-gray-900 dark:text-gray-100
           shadow-[0_0_0_0.5px_rgba(0,0,0,0.16),0_1px_2px_rgba(0,0,0,0.06)] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.12),0_1px_2px_rgba(0,0,0,0.4)]
           hover:bg-gray-50 dark:hover:bg-[#333336] disabled:opacity-50 disabled:cursor-not-allowed
@@ -205,7 +205,7 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
           ${open ? "ring-[3px] ring-accent-500/25" : ""} ${className}`}
       >
         <span className={`truncate ${selected ? "" : "text-gray-400 dark:text-gray-500"}`}>{selected ? selected.label : (placeholder ?? "")}</span>
-        <ChevronsIcon className="w-3 h-3.5 shrink-0 text-gray-400 dark:text-gray-400 group-hover:text-gray-600 dark:group-hover:text-gray-200" />
+        <ChevronDownIcon className={`w-3.5 h-3.5 shrink-0 text-gray-400 transition-transform group-hover:text-gray-600 dark:group-hover:text-gray-200 ${open ? "rotate-180" : ""}`} />
       </button>
       {open && pos && createPortal(
         <div
@@ -216,7 +216,7 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
           {...{ popover: "manual" }}
           onKeyDown={onKeyDown}
           style={{ position: "fixed", inset: "auto", margin: 0, border: 0, left: pos.left, top: pos.top, minWidth: pos.minWidth, maxHeight: pos.maxHeight, zIndex: 10050, color: "inherit" }}
-          className="cc-scroll overflow-y-auto p-1 rounded-lg text-[13px]
+          className="cc-scroll overflow-y-auto p-1.5 rounded-xl text-[13px]
             bg-white/90 dark:bg-[#2a2a2d]/90 backdrop-blur-xl
             shadow-[0_0_0_0.5px_rgba(0,0,0,0.14),0_10px_30px_rgba(0,0,0,0.18)] dark:shadow-[0_0_0_0.5px_rgba(255,255,255,0.12),0_10px_30px_rgba(0,0,0,0.55)]"
         >
@@ -236,10 +236,10 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
                   onMouseEnter={() => !o.disabled && setActive(i)}
                   onMouseDown={(e) => e.preventDefault()}
                   onClick={() => choose(o)}
-                  className={`flex items-center gap-2 h-[26px] pl-1.5 pr-3 rounded-[5px] whitespace-nowrap cursor-default select-none
-                    ${o.disabled ? "text-gray-300 dark:text-white/25" : isActive ? "bg-accent-500 text-white" : "text-gray-800 dark:text-gray-100"}`}
+                  className={`flex items-center gap-2 h-[30px] pl-1.5 pr-3 rounded-lg whitespace-nowrap cursor-default select-none transition-colors
+                    ${o.disabled ? "text-gray-300 dark:text-white/25" : isActive ? "bg-accent-500/15 text-gray-900 dark:text-white" : isSel ? "text-gray-900 dark:text-white font-medium" : "text-gray-700 dark:text-gray-200"}`}
                 >
-                  <span className={`w-3.5 shrink-0 text-[11px] ${isActive ? "text-white" : "text-accent-500 dark:text-accent-400"}`}>{isSel ? "✓" : ""}</span>
+                  <span className="w-3.5 shrink-0 text-[11px] text-accent-500 dark:text-accent-400">{isSel ? "✓" : ""}</span>
                   <span className="truncate">{o.label}</span>
                 </div>
               </div>
@@ -253,10 +253,10 @@ export function PopupSelect({ children, className = "", placeholder, value, defa
   );
 }
 
-function ChevronsIcon({ className }: { className?: string }) {
+function ChevronDownIcon({ className }: { className?: string }) {
   return (
-    <svg viewBox="0 0 12 16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
-      <path d="M3 6l3-3 3 3M3 10l3 3 3-3" />
+    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="m4 6 4 4 4-4" />
     </svg>
   );
 }

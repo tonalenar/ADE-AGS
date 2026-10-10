@@ -90,6 +90,25 @@ lazy_static::lazy_static! {
     static ref LIVE: Mutex<HashMap<String, ProcessGroup>> = Mutex::new(HashMap::new());
 }
 
+/// Acima disto a linha de comando do Windows (limite de ~32 mil caracteres) recusa o lançamento.
+const ARGV_LIMIT: usize = 24_000;
+
+/// Tira o prompt dos argumentos do Claude Code quando eles passam do limite: `claude -p` sem
+/// prompt o lê da entrada padrão. `true` = quem lança deve mandar o prompt pelo stdin. Pura.
+pub(crate) fn prompt_to_stdin(program: &str, args: &mut Vec<String>, prompt: &str) -> bool {
+    let total: usize = args.iter().map(|a| a.len() + 1).sum();
+    if total <= ARGV_LIMIT || !program.contains("claude") {
+        return false;
+    }
+    match args.iter().position(|a| a == "-p") {
+        Some(i) if args.get(i + 1).is_some_and(|a| a == prompt) => {
+            args.remove(i + 1);
+            true
+        }
+        _ => false,
+    }
+}
+
 fn live() -> std::sync::MutexGuard<'static, HashMap<String, ProcessGroup>> {
     // Igual que en el resto del crate: un panic aislado no debe dejar inutilizable al
     // registro entero.
@@ -273,7 +292,10 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
         read_only,
     };
     let prompt = extras.prompt.unwrap_or_else(|| task.prompt.clone());
-    let launch = adapter.launch(&prompt, task.model.as_deref(), task.budget_usd, &ctx);
+    let mut launch = adapter.launch(&prompt, task.model.as_deref(), task.budget_usd, &ctx);
+    // Um prompt grande (o sonho leva a memória inteira) estoura o limite de ~32 mil caracteres da
+    // linha de comando do Windows (erro 206). Vai pela entrada padrão.
+    let via_stdin = prompt_to_stdin(&launch.program, &mut launch.args, &prompt);
 
     // Con la ruta completa: en Windows, un `claude.cmd` instalado con npm no se ejecuta por
     // su nombre a secas (ver `util::path_env::find_program`). Y sin shell en el medio: el
@@ -287,7 +309,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let policy = super::sandbox::Policy::for_task(&workspace, read_only, &launch.env, home.as_deref());
     let wrapped = super::sandbox::wrap(sandbox_mode, &program, &launch.args, &policy)?;
     let mut command = crate::util::external_command(&wrapped.program, &wrapped.args)
-        .map_err(|e| format!("no se pudo lanzar '{}': {e}", launch.program))?;
+        .map_err(|e| format!("não foi possível iniciar '{}': {e}", launch.program))?;
     if sandbox_mode != super::sandbox::Mode::Off {
         super::sandbox::scrub_env(&mut command);
     }
@@ -299,7 +321,7 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
     let mut command = crate::util::spawn::into_tokio(command);
     command
         .current_dir(&workspace)
-        .stdin(Stdio::null())
+        .stdin(if via_stdin { Stdio::piped() } else { Stdio::null() })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         // Sin esto el hijo hereda el grupo de procesos de la app y un Ctrl-C en la
@@ -313,7 +335,16 @@ pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), St
 
     let mut child = command
         .spawn()
-        .map_err(|e| format!("no se pudo lanzar '{}': {e}", launch.program))?;
+        .map_err(|e| format!("não foi possível iniciar '{}': {e}", launch.program))?;
+    if via_stdin {
+        if let Some(mut stdin) = child.stdin.take() {
+            let text = prompt.clone();
+            tokio::spawn(async move {
+                let _ = stdin.write_all(text.as_bytes()).await;
+                let _ = stdin.shutdown().await;
+            });
+        }
+    }
     group.adopt(&child);
     live().insert(task.id.clone(), group);
 
@@ -516,4 +547,36 @@ fn tail(s: &str, max: usize) -> String {
         return s.to_string();
     }
     format!("…{}", s.chars().skip(n - max).collect::<String>())
+}
+
+#[cfg(test)]
+mod stdin_prompt_tests {
+    use super::{ARGV_LIMIT, prompt_to_stdin};
+
+    fn args(prompt: &str) -> Vec<String> {
+        vec!["-p".into(), prompt.into(), "--output-format".into(), "stream-json".into()]
+    }
+
+    #[test]
+    fn prompt_curto_segue_nos_argumentos() {
+        let mut a = args("oi");
+        assert!(!prompt_to_stdin("claude", &mut a, "oi"));
+        assert_eq!(a.len(), 4);
+    }
+
+    #[test]
+    fn prompt_grande_do_claude_vai_pelo_stdin_sem_perder_o_resto() {
+        let big = "memória ".repeat(ARGV_LIMIT / 4);
+        let mut a = args(&big);
+        assert!(prompt_to_stdin("claude", &mut a, &big));
+        assert_eq!(a, vec!["-p", "--output-format", "stream-json"]);
+    }
+
+    #[test]
+    fn outros_agentes_nao_mudam() {
+        let big = "x".repeat(ARGV_LIMIT + 1);
+        let mut a = args(&big);
+        assert!(!prompt_to_stdin("codex", &mut a, &big));
+        assert_eq!(a.len(), 4);
+    }
 }

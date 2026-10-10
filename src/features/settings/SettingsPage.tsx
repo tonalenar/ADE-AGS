@@ -15,7 +15,7 @@ import { CustomAgentForm } from "@/features/agents/CustomAgentForm";
 import { DetectedAgents } from "@/features/agents/DetectedAgents";
 import { CliInstallSection } from "@/features/settings/CliInstallSection";
 import { GraphifySection } from "@/features/graphify/GraphifySection";
-import { MemoryPanel } from "@/features/memory/MemoryPanel";
+import { MemoryRail } from "@/features/settings/MemoryRail";
 import { SharedMemoryPanel } from "@/features/memory/SharedMemoryPanel";
 import { SkillsShSection } from "@/features/marketplace/SkillsShSection";
 import { OrchestratorSection } from "@/features/orchestrator/OrchestratorSection";
@@ -427,10 +427,8 @@ export function SettingsPage() {
 
       {/* ══ o painel de memória ═══════════════════════════════════════════ */}
       {workspaceId && (
-        <aside className="hidden w-[392px] shrink-0 p-3 pl-0 @5xl:block">
-          <MemoryPanel workspaceId={workspaceId} workspaceName={workspaceName}
-            onOpenMemory={section === "memory" ? undefined : () => setSection("memory")} />
-        </aside>
+        <MemoryRail workspaceId={workspaceId} workspaceName={workspaceName}
+          onOpenMemory={section === "memory" ? undefined : () => setSection("memory")} />
       )}
     </div>
   );
