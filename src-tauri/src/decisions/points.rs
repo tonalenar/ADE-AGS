@@ -271,6 +271,30 @@ fn request(
     }
 }
 
+/// O hash que o provedor e o log usam para esta proposta de memória. Pura.
+pub fn memory_state_hash(key: &str, kind: &str, operation: &str, body: &str) -> String {
+    super::protocol::state_hash(&proposal_state(key, kind, operation, body))
+}
+
+/// A pessoa aprovou ou rejeitou uma proposta de memória: guarda a decisão (só o hash do texto) para
+/// o relatório dizer quem chegou mais perto. A revisão de uma missão rotula a operação como
+/// `proposta` e a do workspace usa a da própria revisão: sem saber qual caminho consultou, grava
+/// as duas. Desligado o ponto, não grava nada.
+pub fn record_memory_decision(conn: &Connection, key: &str, kind: &str, revision_operation: &str, body: &str, approved: bool) {
+    if !config::point_active(conn, POINT_MEMORY) {
+        return;
+    }
+    let decision = if approved { "aprovar" } else { "rejeitar" };
+    let mut operations = vec!["proposta"];
+    if revision_operation != "proposta" {
+        operations.push(revision_operation);
+    }
+    for operation in operations {
+        let hash = memory_state_hash(key, kind, operation, body);
+        let _ = super::log::record_human(conn, POINT_MEMORY, &hash, decision);
+    }
+}
+
 fn proposal_state(key: &str, kind: &str, operation: &str, body: &str) -> String {
     // O corte curto é da Laya e acontece no envio. Aqui o texto fica no teto do Jev,
     // senão um state longo já chegaria cortado para quem aceita mais.

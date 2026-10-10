@@ -240,45 +240,78 @@ pub fn run_jobs(db: DbConnection, jobs: Vec<ShadowJob>) {
         return;
     }
     drop(conn);
-    run_jobs_with(db, jobs, &settings, config::load_key());
+    let secondary_key = settings
+        .secondary
+        .is_some()
+        .then(|| config::load_key_in(config::KeySlot::Secondary))
+        .flatten();
+    run_jobs_with_keys(db, jobs, &settings, config::load_key(), secondary_key);
 }
 
+#[cfg(test)]
 pub(crate) fn run_jobs_with(
     db: DbConnection,
     jobs: Vec<ShadowJob>,
     settings: &Settings,
     api_key: Option<String>,
 ) {
-    let off_machine = settings.sends_off_machine();
+    run_jobs_with_keys(db, jobs, settings, api_key, None);
+}
+
+/// Cada proposta vai para TODOS os destinos (o principal e o segundo, se houver) e cada resposta
+/// vira uma linha própria do log, com o provedor: é isso que permite comparar os dois na mesma
+/// proposta. O texto marcado como segredo não vai para um destino fora desta máquina.
+pub(crate) fn run_jobs_with_keys(
+    db: DbConnection,
+    jobs: Vec<ShadowJob>,
+    settings: &Settings,
+    primary_key: Option<String>,
+    secondary_key: Option<String>,
+) {
+    let targets: Vec<(Settings, Option<String>, bool)> = settings
+        .endpoints()
+        .iter()
+        .enumerate()
+        .map(|(index, endpoint)| {
+            (
+                settings.with_endpoint(endpoint),
+                if index == 0 { primary_key.clone() } else { secondary_key.clone() },
+                endpoint.sends_off_machine(),
+            )
+        })
+        .collect();
     for job in jobs {
         if !settings.allows(job.point) {
             continue;
         }
-        // O texto que o próprio app marcou como segredo não vai para fora desta máquina.
-        if job.sensitive && off_machine {
-            continue;
-        }
         let hash = job.hash();
-        let seen = db
-            .lock()
-            .ok()
-            .and_then(|conn| log::recent(&conn, job.point, &hash, now_ts()).ok())
-            .unwrap_or(false);
-        if seen {
-            continue;
-        }
-        let started = Instant::now();
-        let provider = http::execute(settings, api_key.as_deref(), &job.request);
-        let latency = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
-        let mut outcome = evaluate(&job, provider, latency);
-        if let Ok(heuristic) = HeuristicProvider.decide(&job.request) {
-            outcome.returned = canonical(&heuristic.answers);
-        }
-        if let Ok(conn) = db.lock() {
-            let _ = log::record(
-                &conn,
-                &row_for(settings, &job, &outcome, api_key.as_deref()),
-            );
+        for (target, api_key, off_machine) in &targets {
+            if job.sensitive && *off_machine {
+                continue;
+            }
+            let seen = db
+                .lock()
+                .ok()
+                .and_then(|conn| {
+                    log::recent(&conn, job.point, &hash, target.provider.as_str(), now_ts()).ok()
+                })
+                .unwrap_or(false);
+            if seen {
+                continue;
+            }
+            let started = Instant::now();
+            let provider = http::execute(target, api_key.as_deref(), &job.request);
+            let latency = i64::try_from(started.elapsed().as_millis()).unwrap_or(i64::MAX);
+            let mut outcome = evaluate(&job, provider, latency);
+            if let Ok(heuristic) = HeuristicProvider.decide(&job.request) {
+                outcome.returned = canonical(&heuristic.answers);
+            }
+            if let Ok(conn) = db.lock() {
+                let _ = log::record(
+                    &conn,
+                    &row_for(target, &job, &outcome, api_key.as_deref()),
+                );
+            }
         }
     }
 }

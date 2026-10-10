@@ -11,9 +11,13 @@ pub const KEY_MEMORY: &str = "decisions.point.memory_approval";
 pub const KEY_DREAM: &str = "decisions.point.dream_triage";
 pub const KEY_FLEET: &str = "decisions.point.fleet_gate";
 pub const KEY_MISSION: &str = "decisions.point.mission_gate";
+pub const KEY_SECONDARY_PROVIDER: &str = "decisions.secondary.provider";
+pub const KEY_SECONDARY_URL: &str = "decisions.secondary.base_url";
+pub const KEY_SECONDARY_MODEL: &str = "decisions.secondary.model";
 
 const SERVICE: &str = "ade-ags.decisions";
 const ACCOUNT: &str = "api-key";
+const ACCOUNT_SECONDARY: &str = "api-key-secondary";
 
 pub const DEFAULT_TIMEOUT_MS: u64 = 800;
 pub const DEFAULT_MODEL: &str = "multilingual";
@@ -104,6 +108,22 @@ impl ProviderKind {
     }
 }
 
+/// Um destino das consultas: provedor, endereço e modelo. O principal vem dos ajustes de sempre; o
+/// segundo (opcional) recebe as MESMAS propostas, para comparar os dois lado a lado.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Endpoint {
+    pub provider: ProviderKind,
+    pub base_url: String,
+    pub model: String,
+}
+
+impl Endpoint {
+    /// O texto da proposta sai desta máquina para este destino? Vale pelo endereço.
+    pub fn sends_off_machine(&self) -> bool {
+        !is_local_url(&self.base_url)
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct Settings {
     pub enabled: bool,
@@ -115,6 +135,8 @@ pub struct Settings {
     pub dream_triage: bool,
     pub fleet_gate: bool,
     pub mission_gate: bool,
+    /// O segundo provedor da comparação. `None` = só o principal.
+    pub secondary: Option<Endpoint>,
 }
 
 impl Default for Settings {
@@ -129,6 +151,7 @@ impl Default for Settings {
             dream_triage: false,
             fleet_gate: false,
             mission_gate: false,
+            secondary: None,
         }
     }
 }
@@ -140,8 +163,40 @@ impl Settings {
 
     /// O texto da proposta sai desta máquina? Vale pelo endereço e não pelo nome do provedor:
     /// uma "Laya local" apontada para um servidor da rede também leva o texto para fora.
+    #[cfg(test)]
     pub fn sends_off_machine(&self) -> bool {
         !is_local_url(&self.base_url)
+    }
+
+    pub fn primary(&self) -> Endpoint {
+        Endpoint {
+            provider: self.provider,
+            base_url: self.base_url.clone(),
+            model: self.model.clone(),
+        }
+    }
+
+    /// Para quem se consulta: o principal e, se houver e for outro, o segundo. Cada proposta vai
+    /// para todos.
+    pub fn endpoints(&self) -> Vec<Endpoint> {
+        let primary = self.primary();
+        let mut all = vec![primary.clone()];
+        if let Some(second) = &self.secondary {
+            if second.provider.is_configured() && *second != primary {
+                all.push(second.clone());
+            }
+        }
+        all
+    }
+
+    /// Os mesmos ajustes (timeout, pontos) apontando para outro destino.
+    pub fn with_endpoint(&self, endpoint: &Endpoint) -> Settings {
+        Settings {
+            provider: endpoint.provider,
+            base_url: endpoint.base_url.clone(),
+            model: endpoint.model.clone(),
+            ..self.clone()
+        }
     }
 
     pub fn allows(&self, point: &str) -> bool {
@@ -200,6 +255,19 @@ pub fn load(conn: &Connection) -> Result<Settings, String> {
     settings.dream_triage = flag(conn, KEY_DREAM);
     settings.fleet_gate = flag(conn, KEY_FLEET);
     settings.mission_gate = flag(conn, KEY_MISSION);
+    let second = ProviderKind::parse(&text(conn, KEY_SECONDARY_PROVIDER).unwrap_or_default());
+    settings.secondary = second.is_configured().then(|| Endpoint {
+        provider: second,
+        base_url: text(conn, KEY_SECONDARY_URL)
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| second.default_base_url().to_string()),
+        model: second.coerce_model(
+            text(conn, KEY_SECONDARY_MODEL)
+                .filter(|value| !value.is_empty())
+                .as_deref()
+                .unwrap_or(second.default_model()),
+        ),
+    });
     Ok(settings)
 }
 
@@ -221,6 +289,18 @@ pub fn persist(conn: &Connection, settings: &Settings) -> Result<(), String> {
     ];
     for (key, value) in rows {
         put(conn, key, &value)?;
+    }
+    match &settings.secondary {
+        Some(second) if second.provider.is_configured() => {
+            put(conn, KEY_SECONDARY_PROVIDER, second.provider.as_str())?;
+            put(conn, KEY_SECONDARY_URL, &normalize_base_url(&second.base_url)?)?;
+            put(
+                conn,
+                KEY_SECONDARY_MODEL,
+                &second.provider.coerce_model(&normalize_model(&second.model)?),
+            )?;
+        }
+        _ => put(conn, KEY_SECONDARY_PROVIDER, "none")?,
     }
     Ok(())
 }
@@ -284,17 +364,42 @@ pub fn validate_api_key(key: &str) -> Result<(), String> {
     Ok(())
 }
 
-pub fn save_key(key: &str) -> Result<(), String> {
+/// Onde fica a chave no cofre do sistema: uma para o provedor principal e outra para o segundo.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum KeySlot {
+    Primary,
+    Secondary,
+}
+
+impl KeySlot {
+    /// `Some("secondary")` é o segundo; qualquer outra coisa, o principal.
+    pub fn parse(slot: Option<&str>) -> Self {
+        if slot == Some("secondary") {
+            Self::Secondary
+        } else {
+            Self::Primary
+        }
+    }
+
+    fn account(self) -> &'static str {
+        match self {
+            Self::Primary => ACCOUNT,
+            Self::Secondary => ACCOUNT_SECONDARY,
+        }
+    }
+}
+
+pub fn save_key_in(slot: KeySlot, key: &str) -> Result<(), String> {
     validate_api_key(key)?;
-    let entry = keyring::Entry::new(SERVICE, ACCOUNT)
+    let entry = keyring::Entry::new(SERVICE, slot.account())
         .map_err(|error| scrub_keyring(error.to_string(), key))?;
     entry
         .set_password(key)
         .map_err(|error| scrub_keyring(error.to_string(), key))
 }
 
-pub fn clear_key() -> Result<(), String> {
-    let Ok(entry) = keyring::Entry::new(SERVICE, ACCOUNT) else {
+pub fn clear_key_in(slot: KeySlot) -> Result<(), String> {
+    let Ok(entry) = keyring::Entry::new(SERVICE, slot.account()) else {
         return Ok(());
     };
     match entry.delete_credential() {
@@ -304,16 +409,20 @@ pub fn clear_key() -> Result<(), String> {
     }
 }
 
-pub fn load_key() -> Option<String> {
-    let entry = keyring::Entry::new(SERVICE, ACCOUNT).ok()?;
+pub fn load_key_in(slot: KeySlot) -> Option<String> {
+    let entry = keyring::Entry::new(SERVICE, slot.account()).ok()?;
     match entry.get_password() {
         Ok(value) if !value.is_empty() => Some(value),
         _ => None,
     }
 }
 
-pub fn key_saved() -> bool {
-    load_key().is_some()
+pub fn load_key() -> Option<String> {
+    load_key_in(KeySlot::Primary)
+}
+
+pub fn key_saved_in(slot: KeySlot) -> bool {
+    load_key_in(slot).is_some()
 }
 
 fn scrub_keyring(message: String, key: &str) -> String {
