@@ -97,6 +97,12 @@ impl Settings {
         self.enabled && self.provider.is_configured()
     }
 
+    /// O texto da proposta sai desta máquina? Vale pelo endereço e não pelo nome do provedor:
+    /// uma "Laya local" apontada para um servidor da rede também leva o texto para fora.
+    pub fn sends_off_machine(&self) -> bool {
+        !is_local_url(&self.base_url)
+    }
+
     pub fn allows(&self, point: &str) -> bool {
         match point {
             super::points::POINT_MEMORY => self.memory_approval,
@@ -106,6 +112,21 @@ impl Settings {
             _ => false,
         }
     }
+}
+
+/// Leitura barata para o caminho quente (o agendador passa por aqui a cada tick): só as três
+/// chaves que dizem se o ponto está ligado. Desligado, que é o padrão, custa uma consulta.
+pub fn point_active(conn: &Connection, point: &str) -> bool {
+    let key = match point {
+        super::points::POINT_MEMORY => KEY_MEMORY,
+        super::points::POINT_DREAM => KEY_DREAM,
+        super::points::POINT_FLEET => KEY_FLEET,
+        super::points::POINT_MISSION => KEY_MISSION,
+        _ => return false,
+    };
+    flag(conn, KEY_ENABLED)
+        && ProviderKind::parse(&text(conn, KEY_PROVIDER).unwrap_or_default()).is_configured()
+        && flag(conn, key)
 }
 
 pub fn load(conn: &Connection) -> Result<Settings, String> {
@@ -156,12 +177,21 @@ pub fn persist(conn: &Connection, settings: &Settings) -> Result<(), String> {
 pub fn normalize_base_url(raw: &str) -> Result<String, String> {
     let invalid = "A URL base tem de ser HTTPS, ou HTTP só para localhost, sem usuário nem senha.";
     let url = url::Url::parse(raw.trim()).map_err(|_| invalid.to_string())?;
-    let local = matches!(url.host_str(), Some("localhost" | "127.0.0.1" | "[::1]"));
+    let local = is_local_host(url.host_str());
     let scheme_ok = matches!((url.scheme(), local), ("https", _) | ("http", true));
     if !scheme_ok || !url.username().is_empty() || url.password().is_some() {
         return Err(invalid.into());
     }
     Ok(url.as_str().trim_end_matches('/').to_string())
+}
+
+fn is_local_host(host: Option<&str>) -> bool {
+    matches!(host, Some("localhost" | "127.0.0.1" | "[::1]"))
+}
+
+/// Uma URL que não dá para ler conta como remota: na dúvida, o texto não sai.
+pub fn is_local_url(raw: &str) -> bool {
+    url::Url::parse(raw.trim()).is_ok_and(|url| is_local_host(url.host_str()))
 }
 
 pub fn normalize_model(raw: &str) -> Result<String, String> {

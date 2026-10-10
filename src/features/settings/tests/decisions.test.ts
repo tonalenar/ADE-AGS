@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { clampTimeout, defaultDecisionSettings, urlAfterProviderChange } from "../decisionsModel";
+import { clampTimeout, defaultDecisionSettings, isLocalUrl, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
 
 describe("ajustes das decisões em sombra", () => {
   it("nasce desligado, em multilingual, com a Laya local e 800 ms", () => {
@@ -28,5 +28,23 @@ describe("ajustes das decisões em sombra", () => {
     expect(clampTimeout(1)).toBe(50);
     expect(clampTimeout(99_999)).toBe(30_000);
     expect(clampTimeout(Number.NaN)).toBe(800);
+  });
+
+  it("separa o que fica nesta máquina do que sai dela, pelo endereço", () => {
+    expect(isLocalUrl("http://localhost:8000")).toBe(true);
+    expect(isLocalUrl("http://127.0.0.1:8000/")).toBe(true);
+    expect(isLocalUrl("http://[::1]:8000")).toBe(true);
+    expect(isLocalUrl("https://api.laya.studio")).toBe(false);
+    expect(isLocalUrl("https://laya.interno.exemplo")).toBe(false);
+    expect(isLocalUrl("isto não é uma url")).toBe(false);
+    expect(urlHost("https://api.typesafe.ai/v1")).toBe("api.typesafe.ai");
+    expect(urlHost("")).toBeNull();
+  });
+
+  it("só avisa de privacidade com um provedor escolhido e o endereço de fora", () => {
+    expect(sendsOffMachine({ provider: "none", baseUrl: "https://api.laya.studio" })).toBe(false);
+    expect(sendsOffMachine({ provider: "laya_local", baseUrl: "http://localhost:8000" })).toBe(false);
+    expect(sendsOffMachine({ provider: "laya_studio", baseUrl: "https://api.laya.studio" })).toBe(true);
+    expect(sendsOffMachine({ provider: "laya_local", baseUrl: "https://laya.interno.exemplo" })).toBe(true);
   });
 });

@@ -112,42 +112,49 @@ pub fn decision_key_clear() -> Result<(), String> {
     config::clear_key()
 }
 
+/// Comando síncrono roda na thread principal do Tauri: a chamada de rede (até o timeout, que
+/// pode chegar a 30 s) congelaria a janela. Aqui só se lê o ajuste; o resto vai para fora.
 #[tauri::command]
-pub fn decision_test_connection(db: State<DbConnection>) -> Result<ConnectionTest, String> {
+pub async fn decision_test_connection(db: State<'_, DbConnection>) -> Result<ConnectionTest, String> {
     let settings = {
         let conn = db.lock().map_err(|error| error.to_string())?;
         config::load(&conn)?
     };
+    tauri::async_runtime::spawn_blocking(move || ping(&settings, config::load_key()))
+        .await
+        .map_err(|error| error.to_string())
+}
+
+pub(crate) fn ping(settings: &Settings, key: Option<String>) -> ConnectionTest {
     if matches!(settings.provider, ProviderKind::None) {
-        return Ok(ConnectionTest {
+        return ConnectionTest {
             ok: false,
             latency_ms: 0,
             error: Some("Escolha um provedor antes de testar.".into()),
-        });
+        };
     }
     if matches!(settings.provider, ProviderKind::Clef) {
-        return Ok(ConnectionTest {
+        return ConnectionTest {
             ok: false,
             latency_ms: 0,
             error: Some("Cloudflare Clef ainda não tem cliente.".into()),
-        });
+        };
     }
-    let key = config::load_key();
     let request = ping_request(&settings.model);
     let started = std::time::Instant::now();
-    let result = http::execute(&settings, key.as_deref(), &request);
+    let result = http::execute(settings, key.as_deref(), &request);
     let latency_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
     match result {
-        Ok(_) => Ok(ConnectionTest {
+        Ok(_) => ConnectionTest {
             ok: true,
             latency_ms,
             error: None,
-        }),
-        Err(error) => Ok(ConnectionTest {
+        },
+        Err(error) => ConnectionTest {
             ok: false,
             latency_ms,
             error: Some(public_error(&error, key.as_deref())),
-        }),
+        },
     }
 }
 

@@ -1,9 +1,9 @@
-import { useEffect, useState } from "react";
+import { Fragment, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
 import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, setDecisionKey, setDecisionSettings, testDecisionConnection, type ShadowReport } from "@/features/settings/decisionsIpc";
-import { clampTimeout, defaultDecisionSettings, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
+import { clampTimeout, defaultDecisionSettings, sendsOffMachine, urlAfterProviderChange, urlHost, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
 
 const PROVIDERS: DecisionProviderId[] = ["none", "laya_local", "laya_studio", "jev"];
 const MODELS = ["multilingual", "english", "typed-decisions"];
@@ -152,6 +152,15 @@ export function DecisionsSection() {
         />
       </SettingsGroup>
 
+      {sendsOffMachine(settings) && (
+        <p
+          role="note"
+          className="rounded-md border border-amber-200/70 bg-amber-50/80 px-3 py-2 text-[12.5px] text-amber-900 dark:border-amber-500/20 dark:bg-amber-500/[0.07] dark:text-amber-200"
+        >
+          {t("settings.decisions.remoteWarn", { host: urlHost(settings.baseUrl) ?? settings.baseUrl })}
+        </p>
+      )}
+
       <SettingsGroup>
         <SettingsToggleRow checked={settings.memoryApproval} onChange={(memoryApproval) => setSettings({ ...settings, memoryApproval })} label={t("settings.decisions.point.memory")} description={t("settings.decisions.point.memoryHint")} />
         <SettingsToggleRow checked={settings.dreamTriage} onChange={(dreamTriage) => setSettings({ ...settings, dreamTriage })} label={t("settings.decisions.point.dream")} description={t("settings.decisions.point.dreamHint")} />
@@ -185,14 +194,39 @@ export function DecisionsSection() {
               </thead>
               <tbody>
                 {report.points.map((point) => (
-                  <tr key={point.point} className="border-t border-gray-200 dark:border-white/10">
-                    <td className="py-1 pr-3">{point.point}</td>
-                    <td className="py-1 pr-3">{point.total}</td>
-                    <td className="py-1 pr-3">{pct(point.agreementRate)}</td>
-                    <td className="py-1 pr-3">{point.p50Ms ?? "—"} / {point.p95Ms ?? "—"} ms</td>
-                    <td className="py-1 pr-3">{pct(point.errorRate)}</td>
-                    <td className="py-1">{pct(point.timeoutRate)}</td>
-                  </tr>
+                  <Fragment key={point.point}>
+                    <tr className="border-t border-gray-200 dark:border-white/10">
+                      <td className="py-1 pr-3">{point.point}</td>
+                      <td className="py-1 pr-3">{point.total}</td>
+                      <td className={`py-1 pr-3 ${point.lowSample ? "text-gray-400 dark:text-white/35" : ""}`}>{pct(point.agreementRate)}</td>
+                      <td className="py-1 pr-3">{point.p50Ms ?? "—"} / {point.p95Ms ?? "—"} ms</td>
+                      <td className="py-1 pr-3">{pct(point.errorRate)}</td>
+                      <td className="py-1">{pct(point.timeoutRate)}</td>
+                    </tr>
+                    <tr>
+                      <td colSpan={6} className="pb-2">
+                        {point.lowSample && (
+                          <p className="mb-1 text-[12px] text-amber-700 dark:text-amber-300">
+                            {t("settings.decisions.lowSample", { have: point.compared, n: report.minSample })}
+                          </p>
+                        )}
+                        <ul className="flex flex-col gap-1">
+                          {point.questions.map((q) => (
+                            <li key={q.question} className="text-[12px] text-gray-700 dark:text-gray-200">
+                              <span className="font-medium">{q.question}</span>{" "}
+                              {t("settings.decisions.q.agree", { pct: pct(q.agreementRate), n: q.compared })}
+                              {q.blindLabels.length > 0 && q.blindRate > 0 && (
+                                <> {t("settings.decisions.q.blind", { labels: q.blindLabels.join(", "), pct: pct(q.blindRate) })}</>
+                              )}
+                              <div className="break-all font-mono text-[11px] text-gray-500 dark:text-white/45">
+                                {q.pairs.map((pair) => `${pair.heuristic} → ${pair.provider} ×${pair.count}`).join("   ")}
+                              </div>
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
+                    </tr>
+                  </Fragment>
                 ))}
               </tbody>
             </table>

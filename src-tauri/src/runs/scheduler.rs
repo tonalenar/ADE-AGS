@@ -144,7 +144,8 @@ pub fn tick(app: &AppHandle, run_id: &str) {
         let Ok(Some(run)) = store::run_by_id(&conn, run_id) else { return };
         let Ok(tasks) = store::tasks_of_run(&conn, run_id) else { return };
         let decision = decide(&run, &tasks);
-        let shadow = crate::decisions::fleet_jobs(&run, &tasks, &decision.launch, &decision.skip);
+        let running = tasks.iter().filter(|t| occupies_slot(t)).count() as i64;
+        let shadow = crate::decisions::fleet_jobs(&conn, &run, &tasks, running, &decision.launch, &decision.skip);
 
         let mut skipped = Vec::new();
         for (id, reason) in &decision.skip {

@@ -8,14 +8,34 @@ export interface ConnectionTest {
   error: string | null;
 }
 
+export interface PairCount {
+  heuristic: string;
+  provider: string;
+  count: number;
+}
+
+/** A concordância de uma pergunta. `blindRate` é a parcela em que o provedor escolheu um rótulo
+ * que a heurística daquele ponto nunca devolve (`blindLabels`). */
+export interface QuestionReport {
+  question: string;
+  compared: number;
+  agreementRate: number;
+  blindRate: number;
+  blindLabels: string[];
+  pairs: PairCount[];
+}
+
 export interface PointReport {
   point: string;
   total: number;
+  compared: number;
+  lowSample: boolean;
   agreementRate: number;
   p50Ms: number | null;
   p95Ms: number | null;
   errorRate: number;
   timeoutRate: number;
+  questions: QuestionReport[];
 }
 
 export interface Disagreement {
@@ -27,6 +47,7 @@ export interface Disagreement {
 
 export interface ShadowReport {
   generatedAt: number;
+  minSample: number;
   points: PointReport[];
   disagreements: Disagreement[];
 }
