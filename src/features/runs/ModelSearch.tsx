@@ -153,9 +153,9 @@ export function ModelSearch({ agents, value, onChange, exclude = [], allowDefaul
                       {selected && <CheckIcon className="w-3.5 h-3.5" />}
                     </span>
                     <span className="flex flex-col flex-1 min-w-0">
-                      <span className={`text-[12px] truncate ${row.id ? "" : "italic"}`}>{row.label}</span>
+                      <span title={row.label} className={`text-[12px] truncate ${row.id ? "" : "italic"}`}>{row.label}</span>
                       {row.sub && (
-                        <span className="font-mono text-[10px] truncate text-gray-400 dark:text-white/35">{row.sub}</span>
+                        <span title={row.sub} className="font-mono text-[10px] truncate text-gray-400 dark:text-white/35">{row.sub}</span>
                       )}
                     </span>
                     {row.local && <Badge variant="neutral" size="sm">{t("fleet.new.local")}</Badge>}

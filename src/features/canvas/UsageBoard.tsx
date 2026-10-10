@@ -71,13 +71,13 @@ function Head({ account, plan, percent, color, children }: {
       </div>
       <div className="min-w-0 flex-1">
         <div className="flex items-center gap-2">
-          <span className="truncate text-[14px] font-semibold text-gray-900 dark:text-white">{name}</span>
+          <span title={name} className="truncate text-[14px] font-semibold text-gray-900 dark:text-white">{name}</span>
           {plan && (
             <span className="shrink-0 px-1.5 py-px rounded-md text-[10px] font-semibold uppercase tracking-wide
               bg-gray-100 dark:bg-white/10 text-gray-600 dark:text-gray-300">{plan}</span>
           )}
         </div>
-        <div className="truncate text-[11px] text-gray-500 dark:text-gray-400">{account.label ?? account.name}</div>
+        <div title={account.label ?? account.name} className="truncate text-[11px] text-gray-500 dark:text-gray-400">{account.label ?? account.name}</div>
       </div>
       {children}
     </div>

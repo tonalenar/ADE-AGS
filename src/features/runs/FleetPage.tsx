@@ -314,7 +314,7 @@ export function FleetPage() {
         <span className="tabular-nums shrink-0">
           {t("fleet.spent", { usd: totalCost(tasks).toFixed(3) })}
         </span>
-        <span className="flex-1 truncate">{t("fleet.sortedHint")}</span>
+        <span title={t("fleet.sortedHint")} className="flex-1 truncate">{t("fleet.sortedHint")}</span>
       </div>
 
       {newOpen && cwd && (

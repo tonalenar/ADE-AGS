@@ -56,10 +56,10 @@ function SkillRow({ skill, checked, onToggle }: {
       </span>
 
       <span className="flex flex-col gap-0.5 min-w-0 flex-1">
-        <span className="truncate text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">
+        <span title={skill.name} className="truncate text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">
           {skill.name}
         </span>
-        <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35">
+        <span title={skill.description ?? t("skills.list.noDescription")} className="truncate text-[10.5px] text-gray-400 dark:text-white/35">
           {skill.description ?? t("skills.list.noDescription")}
         </span>
       </span>

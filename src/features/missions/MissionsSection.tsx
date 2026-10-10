@@ -189,7 +189,7 @@ export function MissionsSection() {
             ? "text-gray-900 dark:text-white bg-accent-500/15"
             : "text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-white/5"}`}>
           <span className="w-1 h-1 rounded-full bg-gray-400 dark:bg-white/30 shrink-0" />
-          <span className="truncate">{tab!.title}</span>
+          <span title={tab!.title} className="truncate">{tab!.title}</span>
         </button>
       ))}
       </div>

@@ -40,7 +40,7 @@ function FileCard({ file, onResolve }: { file: ConflictFile; onResolve: (content
   return (
     <section className="flex flex-col gap-2 rounded-lg border border-gray-200 dark:border-white/8 p-3" data-testid="conflict-file">
       <div className="flex items-center gap-2">
-        <span className="truncate font-mono text-[11.5px] font-semibold text-gray-800 dark:text-gray-100">{file.path}</span>
+        <span title={file.path} className="truncate font-mono text-[11.5px] font-semibold text-gray-800 dark:text-gray-100">{file.path}</span>
         <span className="shrink-0 text-[10.5px] text-gray-500 dark:text-white/45">{t("missions.conflicts.blocks", { count: conflictCount(parsed) })}</span>
         <span className="flex-1" />
         {!unsupported && (
