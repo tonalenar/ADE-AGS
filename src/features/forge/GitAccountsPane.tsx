@@ -21,11 +21,11 @@ function GitAccountRow({ account, onRemove }: { account: GitAccount; onRemove: (
       )}
       <div className="flex flex-col gap-0.5 min-w-0 flex-1">
         <div className="flex items-center gap-1.5 min-w-0">
-          <span className="truncate text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">
+          <span className="truncate text-[12.5px] font-semibold text-gray-800 dark:text-gray-100" title={account.login}>
             {account.login}
           </span>
           {account.name && (
-            <span className="truncate text-[11px] text-gray-400 dark:text-white/35">{account.name}</span>
+            <span className="truncate text-[11px] text-gray-400 dark:text-white/35" title={account.name}>{account.name}</span>
           )}
         </div>
         <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35">

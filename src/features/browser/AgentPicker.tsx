@@ -119,7 +119,7 @@ function AgentRow({ tab, index }: { tab: Tab; index: number }) {
     <>
       <span className={`shrink-0 w-2.5 h-2.5 rounded-full ${agentPaint(tab.id).strip}`} />
       <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">{index + 1}</span>
-      <span className="min-w-0 truncate">{tab.title}</span>
+      <span className="min-w-0 truncate" title={tab.title}>{tab.title}</span>
     </>
   );
 }

@@ -102,7 +102,7 @@ export function ClosingProgress() {
           showValue={total > 0}
           label={total > 0 ? t("app.saving.count", { done, total }) : t("app.saving.counting")}
         />
-        <span className="truncate text-[12px] text-gray-500 dark:text-white/45">{label}</span>
+        <span className="truncate text-[12px] text-gray-500 dark:text-white/45" title={label}>{label}</span>
       </div>
     </Modal>
   );

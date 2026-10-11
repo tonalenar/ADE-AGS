@@ -103,17 +103,17 @@ export function DetectedAgents() {
             ) : (
               <span className="w-1.5 h-1.5 mx-1 rounded-full shrink-0 bg-gray-300 dark:bg-white/20" />
             )}
-            <span className="w-28 shrink-0 truncate text-[12px] text-gray-800 dark:text-gray-100">
+            <span className="w-28 shrink-0 truncate text-[12px] text-gray-800 dark:text-gray-100" title={agent.label}>
               {agent.label}
             </span>
             <span className={`flex-1 min-w-0 truncate text-[10.5px] text-gray-400 dark:text-white/35
-              ${agent.available ? "font-mono" : ""}`}>
+              ${agent.available ? "font-mono" : ""}`} title={agent.available ? agent.path ?? agent.command : t("settings.tuis.notFound", { command: agent.command })}>
               {agent.available
                 ? agent.path ?? agent.command
                 : t("settings.tuis.notFound", { command: agent.command })}
             </span>
             {agent.version && (
-              <span className="shrink-0 max-w-40 truncate text-[10.5px] text-gray-400 dark:text-white/35">
+              <span className="shrink-0 max-w-40 truncate text-[10.5px] text-gray-400 dark:text-white/35" title={agent.version}>
                 {agent.version}
               </span>
             )}
@@ -168,7 +168,7 @@ export function DetectedAgents() {
               {searchPath.effective.map((dir) => (
                 <span key={dir} className="flex items-center gap-2 font-mono text-[10.5px]
                   text-gray-600 dark:text-gray-300">
-                  <span className="truncate">{dir}</span>
+                  <span className="truncate" title={dir}>{dir}</span>
                   {searchPath.fromShell.includes(dir) && (
                     <span className="shrink-0 text-[9.5px] text-emerald-600 dark:text-emerald-400">
                       {t("settings.tuis.path.fromShell")}

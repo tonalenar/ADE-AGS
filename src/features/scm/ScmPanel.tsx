@@ -314,7 +314,7 @@ export function ScmPanel({ cwd }: { cwd: string | null }) {
             {open ? <ChevronDownIcon className="w-2.5 h-2.5" /> : <ChevronRightIcon className="w-2.5 h-2.5" />}
           </span>
           <span className="flex-1 min-w-0 truncate text-[10px] font-extrabold uppercase tracking-[0.09em]
-            text-gray-500 dark:text-white/40">
+            text-gray-500 dark:text-white/40" title={label}>
             {label}
           </span>
           <span className="hidden group-hover:flex items-center gap-0.5">{actions}</span>

@@ -161,10 +161,10 @@ export function CommandCatalog({ cwd, onRun }: {
                 >
                   <span className="flex flex-col gap-px min-w-0 flex-1">
                     <span className="truncate font-mono text-[11px]
-                      text-gray-800 dark:text-gray-100">
+                      text-gray-800 dark:text-gray-100" title={isOpen ? line : command.template}>
                       {isOpen ? line : command.template}
                     </span>
-                    <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35">
+                    <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35" title={t(`settings.graphify.cmd.${command.id}`)}>
                       {t(`settings.graphify.cmd.${command.id}`)}
                     </span>
                   </span>

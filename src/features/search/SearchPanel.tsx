@@ -188,10 +188,10 @@ export function SearchPanel({ cwd }: { cwd: string | null }) {
                   {open ? <ChevronDownIcon className="w-2.5 h-2.5" /> : <ChevronRightIcon className="w-2.5 h-2.5" />}
                 </span>
                 <DocumentIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/30" />
-                <span className="shrink-0 max-w-[60%] truncate text-[11.5px] font-semibold text-gray-700 dark:text-gray-300">
+                <span className="shrink-0 max-w-[60%] truncate text-[11.5px] font-semibold text-gray-700 dark:text-gray-300" title={name}>
                   {name}
                 </span>
-                <span className="flex-1 min-w-0 truncate text-[10.5px] text-gray-400 dark:text-white/30" dir="rtl">
+                <span className="flex-1 min-w-0 truncate text-[10.5px] text-gray-400 dark:text-white/30" dir="rtl" title={dir}>
                   {dir}
                 </span>
                 <span className="shrink-0 px-1.5 rounded-full text-[9.5px] tabular-nums
