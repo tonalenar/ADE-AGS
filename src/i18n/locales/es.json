@@ -99,6 +99,7 @@
   "app.exit.closeCurrent": "Cerrar solo esta ventana",
   "app.exit.closeAll": "Cerrar todo",
   "sidebar.home": "Home",
+  "sidebar.workspaceMenu": "Menú del workspace",
   "sidebar.sessions": "Sessions",
   "sidebar.skills": "Skills",
   "sidebar.marketplace": "Marketplace",

@@ -22,9 +22,9 @@ export function PageHeader({ icon, title, subtitle, action }: PageHeaderProps) {
         </span>
         <div className="min-w-0">
           {/* Large title de Apple: 26/32, semibold, tracking apretado. */}
-          <h2 className="text-[26px] leading-8 font-semibold tracking-[-0.4px] text-gray-900 dark:text-white truncate">{title}</h2>
+          <h2 className="text-[26px] leading-8 font-semibold tracking-[-0.4px] text-gray-900 dark:text-white truncate" title={title}>{title}</h2>
           {subtitle && (
-            <p className="text-[13px] leading-[18px] text-gray-500 dark:text-white/50 truncate">{subtitle}</p>
+            <p className="text-[13px] leading-[18px] text-gray-500 dark:text-white/50 truncate" title={subtitle}>{subtitle}</p>
           )}
         </div>
       </div>

@@ -225,7 +225,7 @@ MEMÓRIA COMPARTILHADA (os agentes usam por MCP; veja docs/ade-ags/SHARED_MEMORY
                                               O aprovado do workspace e da missão;
                                               o que se propõe espera aprovação.
   memory index                              Índice aprovado da tab ou missão atual
-  memory open <página|entryId|chave>         Página do índice ou UMA entrada inteira (UNTRUSTED DATA)
+  memory open <página|entryId|chave>         Página do índice ou UMA entrada inteira (DADOS NÃO CONFIÁVEIS)
   swarm note|question <texto>                Dados de sessão da missão, não memória durável
   swarm promote <note-id> <key>              Propõe a nota; aprovação exclusiva do usuário
   memory export                             Exporta Markdown e revisões JSON do workspace da tab (só leitura)
@@ -239,7 +239,7 @@ NAVEGADOR
                                               ferramentas browser_* do MCP usam.
 
 AGENTES, CONTAS E SKILLS
-  agents                                      O que pôr em --agent (inclui os custom)
+  agents                                      O que pôr em --agent (inclui os personalizados)
   accounts                                    O que pôr em --account, por TUI
   prelaunch [list]                            O que pôr em --pre
   skills                                      O que pôr em --skills (instaladas)

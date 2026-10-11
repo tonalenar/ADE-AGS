@@ -94,6 +94,8 @@ export function SideHead({ width }: { width: number }) {
           <div className="relative min-w-0" data-tauri-drag-region="false" ref={menuRef}>
             <Button variant="custom"
               onClick={() => setMenuOpen((v) => !v)}
+              aria-label={t("sidebar.workspaceMenu")}
+              title={t("sidebar.workspaceMenu")}
               className="truncate hover:opacity-80 transition-opacity inline-flex"
             >
               <Logo size={13} />
