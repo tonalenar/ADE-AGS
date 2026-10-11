@@ -1,0 +1,248 @@
+{
+  "at": "2026-10-11T11:10:56.777103+00:00",
+  "shadow": 69,
+  "human": 42,
+  "human_points": {
+    "memory_approval:aprovar": 42
+  },
+  "groups": {
+    "jev:memory_approval": {
+      "n": 24,
+      "mean": 469.71,
+      "median": 459,
+      "p95": 544,
+      "errors": {},
+      "timeouts": 0,
+      "secret": 1,
+      "secret_divergence": 1,
+      "human_matches": 21
+    },
+    "laya_local:memory_approval": {
+      "n": 36,
+      "mean": 848.92,
+      "median": 703.5,
+      "p95": 2006,
+      "errors": {
+        "timeout": 2
+      },
+      "timeouts": 2,
+      "secret": 25,
+      "secret_divergence": 25,
+      "human_matches": 16
+    },
+    "jev:mission_gate": {
+      "n": 3,
+      "mean": 542.67,
+      "median": 576,
+      "p95": 576,
+      "errors": {},
+      "timeouts": 0,
+      "secret": 0,
+      "secret_divergence": 0,
+      "human_matches": 0
+    },
+    "laya_local:mission_gate": {
+      "n": 6,
+      "mean": 467.33,
+      "median": 437,
+      "p95": 633,
+      "errors": {},
+      "timeouts": 0,
+      "secret": 0,
+      "secret_divergence": 0,
+      "human_matches": 0
+    },
+    "jev:dream_triage": {
+      "n": 0,
+      "mean": null,
+      "median": null,
+      "p95": null,
+      "errors": {},
+      "timeouts": 0,
+      "secret": 0,
+      "secret_divergence": 0,
+      "human_matches": 0
+    },
+    "laya_local:dream_triage": {
+      "n": 0,
+      "mean": null,
+      "median": null,
+      "p95": null,
+      "errors": {},
+      "timeouts": 0,
+      "secret": 0,
+      "secret_divergence": 0,
+      "human_matches": 0
+    },
+    "jev:fleet_gate": {
+      "n": 0,
+      "mean": null,
+      "median": null,
+      "p95": null,
+      "errors": {},
+      "timeouts": 0,
+      "secret": 0,
+      "secret_divergence": 0,
+      "human_matches": 0
+    },
+    "laya_local:fleet_gate": {
+      "n": 0,
+      "mean": null,
+      "median": null,
+      "p95": null,
+      "errors": {},
+      "timeouts": 0,
+      "secret": 0,
+      "secret_divergence": 0,
+      "human_matches": 0
+    }
+  },
+  "paired": {
+    "memory_approval": {
+      "n": 19,
+      "jev": {
+        "n": 19,
+        "mean": 469.16,
+        "median": 457,
+        "p95": 566,
+        "errors": {},
+        "timeouts": 0,
+        "secret": 1,
+        "secret_divergence": 1
+      },
+      "laya_local": {
+        "n": 19,
+        "mean": 941.84,
+        "median": 778,
+        "p95": 2006,
+        "errors": {
+          "timeout": 1
+        },
+        "timeouts": 1,
+        "secret": 15,
+        "secret_divergence": 15
+      },
+      "jev_faster": 19,
+      "hashes": [
+        "bd98733d2c24d77fd68abec88f85930b37f6b639792a5bd3199da3dbbf6a4fb3",
+        "0d90977df44463b9db73a6a1c3f4c831c54199ca13d77c28f25d1de2040fa599",
+        "d55112e58a29b501c80b34123b5c1acfb58fea2f0fd64d33234e79e40454f347",
+        "2a8dc4dbbd1d8950fb9f7c09da7c069508abcd5a224896ad4222be46d64e16ac",
+        "271582ee781c0b883500a726926a8b1f25d6b7b7a6ae0a3f3799f2f78474a411",
+        "5dda32c99cce0223f86563b2e565538a21dafcd8a59fc108e357f6a3f1b20b7f",
+        "e80a760e126b82df101dd765ada9d1863beb8604e9e642fddc6eb740807b3f96",
+        "55d696792143ea6f83b92066b4453e3e4c3cf40f5d9890b6ef2df5a6417c89ba",
+        "c32465e72fa34d8cc2b21264ebe8dde773dc2f2f929dc5264bc2ec6acfa9e8e7",
+        "a67722250601594c081ce1a98ade1d8f7701815b96bb1f63d17d758b03104778",
+        "e36c64673cf3c39cf05b6471e9831fd4d18a33896b1ee6dc42d4f7cd575cbc0f",
+        "cf9e62e89db3c41aab40173bdcb674ee81ae0cebae57452c950c2f0a2b6dee70",
+        "ba476c061e790c277c410e6ee604d602a39961800aa8b46afc4ddd3970458138",
+        "3e7189d0e4e284d24e61f8886af0f2d4ab60a3cf3d6253804a8cdd76c4c7ce05",
+        "cf6c3cb57e4e22b61a68cc6265d47bd6b2eabe3e039045a2d97fff0cfc7e3e64",
+        "6fd1672f3aaa5b1882eb7ec1a3d9649864dbdc49b98696722e136262352c8a54",
+        "dbe0c1c6faaa879f0abc36748d99e4d6a284cb8ddd16727397caede7a1b73bce",
+        "1d08f6069b3d62ec71a4465b0a4fd4fdf99e38169501797e8f5cc63dd868acd1",
+        "2bdf3109351cac769436d0f9d5ffc3b9a60e08770c2ce4372f852167f9511d1f"
+      ],
+      "with_human": {
+        "n": 16,
+        "jev_secret": 0,
+        "laya_secret": 13
+      }
+    },
+    "mission_gate": {
+      "n": 2,
+      "jev": {
+        "n": 2,
+        "mean": 526,
+        "median": 526,
+        "p95": 576,
+        "errors": {},
+        "timeouts": 0,
+        "secret": 0,
+        "secret_divergence": 0
+      },
+      "laya_local": {
+        "n": 2,
+        "mean": 476,
+        "median": 476,
+        "p95": 503,
+        "errors": {},
+        "timeouts": 0,
+        "secret": 0,
+        "secret_divergence": 0
+      },
+      "jev_faster": 1,
+      "hashes": [
+        "0805f84c007c33d6646462904c1187a57d6094768417e57752b1dade321a5369",
+        "71f69d0b5c34e64c5703f72e2b491bfc6a1fd546a945d647345cbd4a7cca3f0d"
+      ],
+      "with_human": {
+        "n": 0,
+        "jev_secret": 0,
+        "laya_secret": 0
+      }
+    },
+    "dream_triage": {
+      "n": 0,
+      "jev": {
+        "n": 0,
+        "mean": null,
+        "median": null,
+        "p95": null,
+        "errors": {},
+        "timeouts": 0,
+        "secret": 0,
+        "secret_divergence": 0
+      },
+      "laya_local": {
+        "n": 0,
+        "mean": null,
+        "median": null,
+        "p95": null,
+        "errors": {},
+        "timeouts": 0,
+        "secret": 0,
+        "secret_divergence": 0
+      },
+      "jev_faster": 0,
+      "hashes": [],
+      "with_human": {
+        "n": 0,
+        "jev_secret": 0,
+        "laya_secret": 0
+      }
+    },
+    "fleet_gate": {
+      "n": 0,
+      "jev": {
+        "n": 0,
+        "mean": null,
+        "median": null,
+        "p95": null,
+        "errors": {},
+        "timeouts": 0,
+        "secret": 0,
+        "secret_divergence": 0
+      },
+      "laya_local": {
+        "n": 0,
+        "mean": null,
+        "median": null,
+        "p95": null,
+        "errors": {},
+        "timeouts": 0,
+        "secret": 0,
+        "secret_divergence": 0
+      },
+      "jev_faster": 0,
+      "hashes": [],
+      "with_human": {
+        "n": 0,
+        "jev_secret": 0,
+        "laya_secret": 0
+      }
+    }
+  },
+  "duplicate_pairs": []
+}
