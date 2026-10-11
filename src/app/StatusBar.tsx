@@ -138,7 +138,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
         <>
           <span className="flex items-center gap-1.5 min-w-0 max-w-56">
             <BranchIcon className="w-3 h-3 shrink-0" />
-            <span className="truncate font-mono">{repo.branch}</span>
+            <span className="truncate font-mono" title={repo.branch}>{repo.branch}</span>
           </span>
           <span className="w-px h-3 bg-gray-300 dark:bg-white/10" />
         </>
@@ -146,7 +146,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
 
       {activeTab && (
         <>
-          <span className="truncate max-w-96 font-mono">{activeTab.cwd}</span>
+          <span className="truncate max-w-96 font-mono" title={activeTab.cwd}>{activeTab.cwd}</span>
           <span className="w-px h-3 bg-gray-300 dark:bg-white/10" />
         </>
       )}

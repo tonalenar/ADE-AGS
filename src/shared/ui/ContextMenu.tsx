@@ -133,7 +133,7 @@ export function ContextMenu({ x, y, items, onClose }: {
                 : "hover:bg-accent-500 hover:text-white"}`}
           >
             {item.icon && <span className="shrink-0 flex w-3.5 h-3.5">{item.icon}</span>}
-            <span className="flex-1 truncate">{item.label}</span>
+            <span className="flex-1 truncate" title={item.label}>{item.label}</span>
             {item.hint && (
               <span className="shrink-0 pl-4 font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35
                 group-hover:text-white/75">{item.hint}</span>
