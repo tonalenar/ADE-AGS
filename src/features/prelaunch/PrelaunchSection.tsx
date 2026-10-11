@@ -58,7 +58,8 @@ function PresetForm({
           className="flex-1 font-mono text-xs"
         />
         <div className="flex gap-2">
-          <Button variant="primary" size="sm" onClick={submit} disabled={!valid || saving}>
+          <Button variant="primary" size="sm" onClick={submit} disabled={!valid || saving}
+            aria-label={initial ? undefined : t("btn.add")} title={initial ? undefined : t("btn.add")}>
             {initial ? t("btn.save") : <AddIcon className="w-3.5 h-3.5" />}
           </Button>
           {onCancel && (
