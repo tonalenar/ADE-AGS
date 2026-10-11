@@ -85,14 +85,14 @@ export function PrelaunchChain({ value, onChange, agentCommand }: PrelaunchChain
 
                 <div className="min-w-0 flex-1">
                   {label && (
-                    <div className="text-[10px] font-semibold text-accent-600 dark:text-accent-400 truncate">
+                    <div className="text-[10px] font-semibold text-accent-600 dark:text-accent-400 truncate" title={label}>
                       {label}
                     </div>
                   )}
                   <code className={`block truncate font-mono text-[11px]
                     ${missing
                       ? "text-red-600 dark:text-red-400"
-                      : "text-gray-700 dark:text-gray-200"}`}>
+                      : "text-gray-700 dark:text-gray-200"}`} title={command ?? t("prelaunch.missingPreset")}>
                     {command ?? t("prelaunch.missingPreset")}
                   </code>
                 </div>

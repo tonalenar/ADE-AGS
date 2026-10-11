@@ -144,7 +144,7 @@ export function ForgeItemsView({ cwd, target, what, branch, filter, onFilter, on
                 <span className="font-mono">#{item.number}</span>
                 {item.author && <span>· @{item.author}</span>}
                 {item.sourceBranch && item.targetBranch && (
-                  <span className="truncate font-mono">· {item.sourceBranch} → {item.targetBranch}</span>
+                  <span className="truncate font-mono" title={`· ${item.sourceBranch} → ${item.targetBranch}`}>· {item.sourceBranch} → {item.targetBranch}</span>
                 )}
                 {item.updatedAt && <span className="shrink-0">· {t("forge.updated", { ago: elapsed(Date.parse(item.updatedAt)) })}</span>}
               </span>

@@ -135,7 +135,7 @@ export function GraphBranchFilter({ root, value, onChange, onClose }: {
           ${on ? "border-accent-500 bg-accent-500" : "border-gray-300 dark:border-white/25"}`}>
           {on && <span className="w-1.5 h-1.5 rounded-full bg-white" />}
         </span>
-        <span className="flex-1 min-w-0 truncate text-[11.5px] font-medium">{label}</span>
+        <span className="flex-1 min-w-0 truncate text-[11.5px] font-medium" title={label}>{label}</span>
         <span className="shrink-0 text-[10px] text-gray-400 dark:text-white/30">{hint}</span>
       </Button>
     );
@@ -186,7 +186,7 @@ export function GraphBranchFilter({ root, value, onChange, onClose }: {
                 ? <CloudIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/30" />
                 : <BranchIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/30" />}
               <span className={`flex-1 min-w-0 truncate font-mono text-[11.5px]
-                ${b.current ? "font-semibold text-gray-900 dark:text-white" : "text-gray-700 dark:text-gray-300"}`}>
+                ${b.current ? "font-semibold text-gray-900 dark:text-white" : "text-gray-700 dark:text-gray-300"}`} title={b.name}>
                 {b.name}
               </span>
               {b.current && (

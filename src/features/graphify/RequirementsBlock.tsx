@@ -71,7 +71,7 @@ export function RequirementsBlock({ onRun, running }: {
                 {item.command}
               </span>
               <span className="flex-1 min-w-0 truncate text-[10.5px]
-                text-gray-400 dark:text-white/35">
+                text-gray-400 dark:text-white/35" title={item.version ?? t("settings.graphify.req.missing")}>
                 {item.version ?? t("settings.graphify.req.missing")}
               </span>
               <Button variant="custom"

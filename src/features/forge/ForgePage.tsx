@@ -54,10 +54,10 @@ function RepoRow({ repo, active, onClick }: { repo: OpenRepo; active: boolean; o
     >
       <ForgeIcon kind={target?.kind ?? null} className="w-4 h-4 mt-0.5 shrink-0 text-gray-500 dark:text-white/45" />
       <span className="flex flex-col gap-0.5 min-w-0 flex-1">
-        <span className={`truncate text-[12.5px] ${active ? "font-semibold text-gray-900 dark:text-white" : "text-gray-700 dark:text-gray-200"}`}>
+        <span className={`truncate text-[12.5px] ${active ? "font-semibold text-gray-900 dark:text-white" : "text-gray-700 dark:text-gray-200"}`} title={repo.name}>
           {repo.name}
         </span>
-        <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35">
+        <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35" title={target === undefined ? "…" : target === null ? t("forge.page.noRemote") : target.account ? `${target.host} · @${target.account.login}` : t("forge.page.noAccount", { host: target.host })}>
           {target === undefined
             ? "…"
             : target === null
@@ -67,7 +67,7 @@ function RepoRow({ repo, active, onClick }: { repo: OpenRepo; active: boolean; o
                 : t("forge.page.noAccount", { host: target.host })}
         </span>
         {branches.length > 0 && (
-          <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30">{branches.join(" · ")}</span>
+          <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30" title={branches.join(" · ")}>{branches.join(" · ")}</span>
         )}
       </span>
     </Button>

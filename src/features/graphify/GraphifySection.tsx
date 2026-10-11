@@ -114,8 +114,8 @@ function TargetRow({ target, selected, state, onSelect }: {
       <span className={`w-1.5 h-1.5 rounded-full shrink-0
         ${selected ? "bg-accent-500" : "bg-gray-300 dark:bg-white/20"}`} />
       <span className="flex flex-col gap-px min-w-0 flex-1">
-        <span className="truncate text-[12px] text-gray-800 dark:text-gray-100">{target.label}</span>
-        <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/35">
+        <span className="truncate text-[12px] text-gray-800 dark:text-gray-100" title={target.label}>{target.label}</span>
+        <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/35" title={target.path}>
           {target.path}
         </span>
       </span>
@@ -378,7 +378,7 @@ export function GraphifySection() {
                 <span className="flex items-center gap-1 min-w-0 text-[10.5px]
                   text-gray-400 dark:text-white/35">
                   <FolderIcon className="w-3 h-3 shrink-0" />
-                  <span className="truncate font-mono">{cwd}</span>
+                  <span className="truncate font-mono" title={cwd}>{cwd}</span>
                 </span>
               )}
             </div>

@@ -74,7 +74,7 @@ export function CreateTagDialog({ root, target, onClose, onDone }: {
       }
     >
       <div className="flex flex-col gap-3">
-        <p className="text-[11.5px] text-gray-500 dark:text-white/45 truncate">
+        <p className="text-[11.5px] text-gray-500 dark:text-white/45 truncate" title={target ? t("scm.tag.onCommit", { commit: target.short, subject: target.subject }) : t("scm.tag.onHead")}>
           {target
             ? t("scm.tag.onCommit", { commit: target.short, subject: target.subject })
             : t("scm.tag.onHead")}
