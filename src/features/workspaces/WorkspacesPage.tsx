@@ -134,7 +134,7 @@ export function WorkspacesPage() {
                       onClick={() => handleSelectWorkspace(ws)}
                       className="flex flex-col min-w-0 text-left flex-1 gap-0 items-stretch"
                     >
-                      <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate">
+                      <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate" title={ws.name}>
                         {ws.name}
                       </span>
                       <span className="text-xs text-gray-400 dark:text-gray-500 truncate">

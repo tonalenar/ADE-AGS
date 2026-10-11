@@ -313,12 +313,12 @@ function PaletteDialog() {
                       : "text-gray-700 dark:text-gray-300"}`}
                 >
                   <span className={`shrink-0 flex ${selected ? "text-accent-600 dark:text-accent-400" : "text-gray-500 dark:text-white/50"}`}>{cmd.icon}</span>
-                  <span className="truncate text-[13px]">{cmd.title}</span>
+                  <span className="truncate text-[13px]" title={cmd.title}>{cmd.title}</span>
                   {cmd.id === `tab:${activeTab?.id}` && (
                     <span className="shrink-0 text-[11px] text-gray-400 dark:text-white/30">{t("palette.current")}</span>
                   )}
                   {cmd.subtitle && (
-                    <span className="truncate text-[11px] font-mono text-gray-400 dark:text-white/30">{cmd.subtitle}</span>
+                    <span className="truncate text-[11px] font-mono text-gray-400 dark:text-white/30" title={cmd.subtitle}>{cmd.subtitle}</span>
                   )}
                   {cmd.shortcut && (
                     <span className="ml-auto shrink-0 font-mono text-[12px] tabular-nums text-gray-400 dark:text-white/[0.45]">

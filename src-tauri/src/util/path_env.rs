@@ -289,7 +289,7 @@ fn run_shell(
     }
 
     let result = (|| {
-        let mut child = cmd.spawn().map_err(|e| ShellError::Failed(format!("no se pudo lanzar {shell}: {e}")))?;
+        let mut child = cmd.spawn().map_err(|e| ShellError::Failed(format!("não foi possível iniciar {shell}: {e}")))?;
         let deadline = std::time::Instant::now() + SHELL_TIMEOUT;
         loop {
             match child.try_wait() {
