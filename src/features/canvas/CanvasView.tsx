@@ -960,7 +960,7 @@ const NoteNode = memo(function NoteNode({ data, selected }: NodeProps<NoteFlowNo
         <div className="nodrag nowheel flex items-center gap-0.5 px-1.5 pt-1 shrink-0 overflow-x-auto
           border-b border-amber-200 dark:border-amber-100/10 bg-amber-100/40 dark:bg-amber-100/3">
           {stack.map((m) => (
-            <button key={m.id} type="button" onClick={() => key && canvasActions.bringNoteToFront(key, m.id)}
+            <button key={m.id} type="button" title={m.name} onClick={() => key && canvasActions.bringNoteToFront(key, m.id)}
               className={`shrink-0 max-w-28 truncate px-2 h-5 rounded-t-md text-[10.5px]
                 ${m.id === id
                   ? "bg-amber-50 dark:bg-amber-950/60 text-gray-900 dark:text-white font-medium"

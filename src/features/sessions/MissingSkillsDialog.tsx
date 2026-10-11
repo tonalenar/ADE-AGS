@@ -106,7 +106,7 @@ export function MissingSkillsDialog({
                   bg-gray-50 dark:bg-white/4"
               >
                 <div className="flex flex-col min-w-0 gap-0.5">
-                  <span className={`text-sm font-medium truncate
+                  <span title={s.name} className={`text-sm font-medium truncate
                     ${isPresent
                       ? "text-gray-800 dark:text-gray-100"
                       : "text-amber-600 dark:text-amber-400"}`}>

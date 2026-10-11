@@ -186,7 +186,7 @@ export const FolderNode = memo(function FolderNode({ data, selected }: NodeProps
                 text-gray-700 dark:text-gray-300"
               style={{ paddingLeft: 8 + depth * 14 }}>
               <span className="w-3 shrink-0 text-center text-[9px] text-gray-400">{entry.isDir ? (expanded ? "▾" : "▸") : ""}</span>
-              <span className={`truncate ${entry.isDir ? "font-medium text-gray-800 dark:text-gray-100" : ""} ${entry.isHidden ? "opacity-60" : ""}`}>
+              <span title={entry.name} className={`truncate ${entry.isDir ? "font-medium text-gray-800 dark:text-gray-100" : ""} ${entry.isHidden ? "opacity-60" : ""}`}>
                 {entry.name}
               </span>
             </button>

@@ -52,7 +52,7 @@ export function RunStrip({ summaries, selected, onSelect, onCancel }: {
                   : "border-gray-200 dark:border-white/10 text-gray-600 dark:text-white/55 hover:bg-gray-100 dark:hover:bg-white/5"}`}
             >
               <span className={`w-1.5 h-1.5 shrink-0 rounded-full ${DOT[s.run.status] ?? DOT.done}`} />
-              <span className="truncate">{s.run.objective}</span>
+              <span title={s.run.objective} className="truncate">{s.run.objective}</span>
               <span className="shrink-0 tabular-nums opacity-70">
                 {s.total > 0 ? `${s.done}/${s.total}` : t("fleet.runs.planning")}
               </span>
@@ -130,7 +130,7 @@ function FactsDialog({ runId, onClose }: { runId: string; onClose: () => void })
               <span className="px-1.5 rounded font-semibold uppercase tracking-wider bg-gray-200 dark:bg-white/10 text-gray-600 dark:text-white/60">
                 {t(`fleet.runs.kind.${f.kind}`)}
               </span>
-              <span className="truncate text-gray-400 dark:text-white/35">{f.author ?? t("fleet.runs.authorUser")}</span>
+              <span title={f.author ?? t("fleet.runs.authorUser")} className="truncate text-gray-400 dark:text-white/35">{f.author ?? t("fleet.runs.authorUser")}</span>
               <span className="ml-auto shrink-0 tabular-nums text-gray-400 dark:text-white/30">
                 {new Date(f.createdAt * 1000).toLocaleTimeString()}
               </span>

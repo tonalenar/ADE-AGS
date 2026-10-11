@@ -41,7 +41,7 @@ export function ShortcutsSection() {
         divide-y divide-gray-200 dark:divide-white/[0.08]">
         {SHORTCUTS.map((s) => (
           <li key={s.display} className="flex items-center justify-between gap-4 min-h-10 px-3 py-2">
-            <span className="text-[13px] text-gray-900 dark:text-gray-100 min-w-0 truncate">
+            <span title={t(s.labelKey)} className="text-[13px] text-gray-900 dark:text-gray-100 min-w-0 truncate">
               {t(s.labelKey)}
             </span>
             <Chord display={s.display} />

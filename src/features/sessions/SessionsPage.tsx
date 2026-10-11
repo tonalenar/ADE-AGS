@@ -205,7 +205,7 @@ export function SessionsPage() {
                         : <ChevronDownIcon className="w-3 h-3 shrink-0 text-gray-400 dark:text-white/35" />}
                       {/* La carpeta manda —es como se llama un workspace— y la rama va
                           detrás, atenuada: es estado, y cambia sin que cambie el workspace. */}
-                      <span className="shrink-0 max-w-[14rem] truncate text-[11.5px] font-semibold
+                      <span title={ws.title} className="shrink-0 max-w-[14rem] truncate text-[11.5px] font-semibold
                         text-gray-700 dark:text-gray-300">
                         {ws.title}
                       </span>
@@ -213,7 +213,7 @@ export function SessionsPage() {
                         <span className="flex items-center gap-1 min-w-0
                           text-[10.5px] text-gray-400 dark:text-white/30">
                           <BranchIcon className="w-3 h-3 shrink-0" />
-                          <span className="truncate font-mono">
+                          <span title={`${ws.isWorktree ? t("sessions.worktreePrefix") : ""}${ws.branch}`} className="truncate font-mono">
                             {ws.isWorktree && t("sessions.worktreePrefix")}{ws.branch}
                           </span>
                         </span>
@@ -251,7 +251,7 @@ export function SessionsPage() {
         <span className="flex items-center gap-1.5"><Kbd>↵</Kbd> {t("sessions.key.resume")}</span>
         <span className="flex items-center gap-1.5"><Kbd>↑↓</Kbd> {t("sessions.key.move")}</span>
         <div className="flex-1" />
-        <span className="truncate">{t("sessions.workspaceScopeHint")}</span>
+        <span title={t("sessions.workspaceScopeHint")} className="truncate">{t("sessions.workspaceScopeHint")}</span>
       </div>
 
       {pendingSkillChoice && (

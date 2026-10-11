@@ -76,7 +76,7 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
                   </span>
                 )}
               </span>
-              <span className="truncate text-[11px] leading-[14px] text-gray-500 dark:text-white/60">
+              <span title={agentVendor(agent.id, agent.command, t)} className="truncate text-[11px] leading-[14px] text-gray-500 dark:text-white/60">
                 {agentVendor(agent.id, agent.command, t)}
               </span>
             </span>

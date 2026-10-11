@@ -140,13 +140,13 @@ export function AccountPickerStep({ agentId, value, onChange, showLabel = true, 
                   : "border-gray-200 dark:border-white/10 bg-gray-50/60 dark:bg-white/[0.02] hover:border-gray-300 dark:hover:border-white/20"}
               `}
             >
-              <span className={`text-xs font-semibold truncate max-w-40
+              <span title={option.name} className={`text-xs font-semibold truncate max-w-40
                 ${isSelected
                   ? "text-accent-700 dark:text-accent-300"
                   : "text-gray-800 dark:text-gray-100"}`}>
                 {option.name}
               </span>
-              <span className={`text-[10px] truncate max-w-40
+              <span title={option.hint} className={`text-[10px] truncate max-w-40
                 ${option.warn
                   ? "text-amber-600 dark:text-amber-400"
                   : "text-gray-400 dark:text-white/35"}`}>

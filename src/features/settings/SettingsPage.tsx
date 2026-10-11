@@ -245,7 +245,7 @@ export function SettingsPage() {
                         ? "bg-accent-500 text-white font-medium"
                         : "text-gray-800 dark:text-gray-200 hover:bg-gray-200/60 dark:hover:bg-white/[0.06]"}`}>
                     <Glyph id={id} />
-                    <span className="truncate">{labels[id]}</span>
+                    <span title={labels[id]} className="truncate">{labels[id]}</span>
                   </Button>
                 ))}
               </div>
@@ -332,11 +332,11 @@ export function SettingsPage() {
                             <span className="w-1.5 h-1.5 rounded-full bg-emerald-500 shrink-0
                               shadow-[0_0_0_3px_rgba(48,209,88,0.18)]" />
                             <div className="flex flex-col gap-px min-w-0 flex-1">
-                              <span className="truncate text-[13px] font-semibold
+                              <span title={agent.label} className="truncate text-[13px] font-semibold
                                 text-gray-900 dark:text-gray-100">
                                 {agent.label}
                               </span>
-                              <span className="truncate font-mono text-[11px] tabular-nums
+                              <span title={agent.command} className="truncate font-mono text-[11px] tabular-nums
                                 text-gray-500 dark:text-white/40">
                                 {agent.command}
                               </span>
@@ -393,7 +393,7 @@ export function SettingsPage() {
                   <SettingsGroup>
                     <div className="flex items-center gap-2 min-h-10 px-3 py-2">
                       <FolderIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/35" />
-                      <span className="flex-1 min-w-0 truncate font-mono text-[11.5px] tabular-nums
+                      <span title={skillsDir || "…"} className="flex-1 min-w-0 truncate font-mono text-[11.5px] tabular-nums
                         text-gray-700 dark:text-gray-300">
                         {skillsDir || "…"}
                       </span>

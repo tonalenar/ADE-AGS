@@ -115,7 +115,7 @@ export function ApprovalToast() {
       </div>
 
       <div className="flex flex-col gap-1.5 px-4 pt-2.5">
-        <span className="truncate font-mono text-[11px] text-amber-800 dark:text-amber-300/90">{preview.title}</span>
+        <span title={preview.title} className="truncate font-mono text-[11px] text-amber-800 dark:text-amber-300/90">{preview.title}</span>
         {preview.diff.length > 0 && (
           <div className="flex flex-col rounded-md overflow-hidden bg-gray-50 dark:bg-black/25">
             {preview.diff.slice(0, TOAST_DIFF_LINES).map((line, i) => (

@@ -159,7 +159,7 @@ export function NewTaskDialog({ cwd, busyInFolder, onClose, onStart }: {
       onClose={onClose}
       footer={
         <div className="flex items-center gap-2 px-4 h-12">
-          <span className="flex-1 min-w-0 truncate font-mono text-[10px]
+          <span title={cwd} className="flex-1 min-w-0 truncate font-mono text-[10px]
             text-gray-400 dark:text-white/30">
             {cwd}
           </span>
@@ -349,7 +349,7 @@ function RoutePreview({ roster, assignment, error }: {
       bg-gray-100/70 dark:bg-white/4 border border-gray-200/70 dark:border-white/8">
       <span className="flex items-baseline gap-1.5 min-w-0 text-[11.5px]">
         <span className="shrink-0 text-gray-400 dark:text-white/35">{t("fleet.route.goesTo")}</span>
-        <span className="truncate font-medium text-gray-800 dark:text-gray-200">
+        <span title={parts.join(" · ")} className="truncate font-medium text-gray-800 dark:text-gray-200">
           {parts.join(" · ")}
         </span>
       </span>

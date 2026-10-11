@@ -170,7 +170,7 @@ export function SessionRow({
 
         <span className="flex flex-col gap-0.5 min-w-0 flex-1">
           <span className="flex items-center gap-1.5 min-w-0">
-            <span className="truncate text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">
+            <span title={entry.title ?? entry.agentLabel} className="truncate text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">
               {entry.title ?? entry.agentLabel}
             </span>
             {/* Solo si NO es la cuenta principal: marcar lo habitual sería ruido en todas
@@ -262,7 +262,7 @@ export function SessionRow({
                 {t("sessions.detail.siblings")}
               </span>
               {entry.siblingTabs.map((s, i) => (
-                <span key={`${s.cwd}-${i}`} className="truncate text-[11.5px]
+                <span title={`${s.title ?? s.agentLabel} — ${s.cwd}`} key={`${s.cwd}-${i}`} className="truncate text-[11.5px]
                   text-gray-600 dark:text-gray-400">
                   {s.title ?? s.agentLabel}
                   <span className="font-mono text-gray-400 dark:text-white/30">

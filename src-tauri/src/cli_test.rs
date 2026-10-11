@@ -573,3 +573,62 @@ fn o_arquivo_perde_o_bom_do_powershell_e_o_resto_fica_intacto() {
     assert!(decode_text_file(&[0xFF, 0x41]).is_err());
     assert_eq!(decode_text_file(b"").unwrap(), "");
 }
+
+#[test]
+fn run_cli_usa_a_pasta_da_shell_sem_cwd_e_preserva_a_selecao() {
+    let cwd = std::env::current_dir().unwrap();
+    for command in ["run.status", "run.result", "run.facts"] {
+        let parsed = parse(command, &["--run-id", "antigo", "--task", "api"]).unwrap();
+        validate_usage(command, &parsed).unwrap();
+        let args = run_defaults(parsed, &cwd).unwrap();
+        assert_eq!(std::path::Path::new(args["cwd"].as_str().unwrap()), cwd);
+        assert_eq!(args["runId"], "antigo");
+        assert_eq!(args["task"], "api");
+        assert!(args.get("taskId").is_none());
+    }
+    let task_context = run_defaults(json!({"taskId":"worker"}), &cwd).unwrap();
+    assert_eq!(task_context["taskId"], "worker");
+}
+
+#[test]
+fn run_cli_resolve_cwd_relativo_e_mantem_absoluto_em_windows_e_linux() {
+    let cwd = std::env::current_dir().unwrap();
+    for relative in [".", "src-tauri"] {
+        let args = run_defaults(json!({"cwd":relative}), &cwd).unwrap();
+        let actual = std::path::Path::new(args["cwd"].as_str().unwrap());
+        assert!(actual.is_absolute());
+        let expected = if relative == "." { cwd.clone() } else { cwd.join("src-tauri") };
+        assert_eq!(actual, expected);
+    }
+    let explicit = std::env::temp_dir();
+    let args = run_defaults(json!({"cwd":explicit}), &cwd).unwrap();
+    assert_eq!(std::path::Path::new(args["cwd"].as_str().unwrap()), std::path::absolute(explicit).unwrap());
+    assert_eq!(run_defaults(json!({"cwd":true}), &cwd).unwrap_err(), "--cwd precisa de um caminho");
+}
+
+#[test]
+fn run_id_e_task_sem_valor_sao_erros_de_uso_em_portugues() {
+    for command in ["run.status", "run.result", "run.facts"] {
+        for flag in ["--run-id", "--task"] {
+            for tokens in [vec![flag], vec![flag, "--cwd", "."], vec![flag, ""]] {
+                let error = parse(command, &tokens).unwrap_err();
+                assert_eq!(error, format!("{flag} precisa de um valor"));
+            }
+        }
+    }
+    for (key, flag) in [("runId", "run-id"), ("run_id", "run-id"), ("task", "task")] {
+        for invalid in [json!(true), json!(null), json!(" ")] {
+            assert_eq!(validate_usage("run.result", &json!({key:invalid})).unwrap_err(), format!("--{flag} precisa de um valor"));
+        }
+    }
+}
+
+#[test]
+fn peer_check_sem_destino_mostra_uso_antes_de_conectar_ao_app() {
+    for args in [parse("peer.check", &[]).unwrap(), json!({"to":true}), json!({"to":" "})] {
+        assert_eq!(validate_usage("peer.check", &args).unwrap_err(), "Uso: ags peer check <nome> [--lines 60]");
+    }
+    for args in [parse("peer.check", &["Backend"]).unwrap(), parse("peer.check", &["--to", "Backend"]).unwrap()] {
+        validate_usage("peer.check", &args).unwrap();
+    }
+}
