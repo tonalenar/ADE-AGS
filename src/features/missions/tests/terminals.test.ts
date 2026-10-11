@@ -31,6 +31,17 @@ describe("isolamento e início rápido", () => {
     expect(() => workspaceFor(prepared, "QA")).toThrow();
     expect(() => workspaceFor({ ...prepared, workspaces: [workspace, { ...workspace, name: "QA" }] }, "Backend")).toThrow();
   });
+  it("uma missão, uma branch: o orquestrador integra e abre o único PR; integrante não faz push nem PR", () => {
+    const mission = { title: "T", objective: "O" };
+    const leadWorkspace: TeamWorkspace = { ...workspace, name: LEAD_NAME, branch: "cc/lead-1" };
+    const lead = leadBriefing(mission, [member], "", "", undefined, [leadWorkspace, workspace]);
+    expect(lead).toContain("BRANCH ÚNICA DA MISSÃO");
+    expect(lead).toContain("`cc/lead-1`");
+    expect(lead).toContain("UM por missão");
+    const text = memberBriefing(mission, member, workspace);
+    expect(text).toContain("BRANCH ÚNICA: commite só na sua branch (`cc/backend`)");
+    expect(text).toContain("não faça push nem abra PR");
+  });
   it("mostra o worktree na delegação e mantém membros aguardando com contexto preenchido", () => {
     const mission = { title: "T", objective: "O" };
     const lead = leadBriefing(mission, [member], "ACHADOS", "- [projeto] MEMÓRIA: x", undefined, [workspace]);

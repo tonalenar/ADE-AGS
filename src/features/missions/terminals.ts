@@ -165,6 +165,24 @@ export function memoryEnvelope(memory: string, missionId?: string): string {
   ].join("\n");
 }
 
+/**
+ * Uma missão, uma branch: cada integrante trabalha no próprio worktree (dois agentes no mesmo
+ * checkout se atropelam), mas o que entra no projeto sai de UMA branch, a do orquestrador, e vira
+ * UM PR. As branches dos integrantes são só rascunho: ninguém cria outra nem abre PR por conta. Pura.
+ */
+export function singleBranchRule(role: "lead" | "member", leadBranch?: string, ownBranch?: string): string[] {
+  if (role === "lead") {
+    return [
+      "BRANCH ÚNICA DA MISSÃO:",
+      `- A branch da missão é a SUA${leadBranch ? ` (\`${leadBranch}\`)` : ""}. Cada integrante commita na branch dele; ao receber a entrega, traga para a sua com \`git merge <branch-do-integrante>\` (ou cherry-pick) no SEU worktree e resolva os conflitos aí.`,
+      "- Só você faz push e, quando o objetivo ou o usuário pedir, abre o PR: UM por missão, a partir da sua branch. Proíba os integrantes de criar branches novas, dar push ou abrir PR; se algum já abriu, feche e traga o commit para a sua.",
+    ];
+  }
+  return [
+    `BRANCH ÚNICA: commite só na sua branch${ownBranch ? ` (\`${ownBranch}\`)` : ""}. Não crie outras branches, não faça push nem abra PR: o orquestrador traz a sua branch para a branch da missão e abre o único PR.`,
+  ];
+}
+
 /** Lo primero que lee el orquestador: la misión, su equipo y cómo coordinarlo. Pura. */
 export function leadBriefing(
   mission: Pick<Mission, "title" | "objective"> & { id?: string },
@@ -200,6 +218,8 @@ export function leadBriefing(
     "- Depois de delegar, VERIFIQUE que todos estão trabalhando: use `ags peers` e leia a tela de cada um (`ags peer check <nome>`); quem estiver parado ou com texto colado sem enviar, reenvie a tarefa com `ags peer tell`. Uma linha `[AGS] <nome> não mostrou atividade` indica integrante que não arrancou.",
     ...workspaces.filter((w) => w.name === LEAD_NAME).map((w) => `SEU WORKTREE: ${w.cwd}; branch: ${w.branch}. Trabalhe somente nele.\n${w.environment}`),
     "- Nunca dois agentes no mesmo worktree; preserve a junction node_modules. Não abra PR nem faça merge sem pedido do usuário.",
+    "",
+    ...singleBranchRule("lead", workspaces.find((w) => w.name === LEAD_NAME)?.branch),
     "",
     ...(findings.trim() ? [findings.trim(), ""] : []),
     ...(memoryEnvelope(memory, mission.id) ? [memoryEnvelope(memory, mission.id), ""] : []),
@@ -274,6 +294,7 @@ export function memberBriefing(mission: Pick<Mission, "title" | "objective"> & {
     ...(findings.trim() ? [findings.trim(), ""] : []),
     ...(memoryEnvelope(memory, mission.id) ? [memoryEnvelope(memory, mission.id), ""] : []),
     "Não explore nem edite antes de receber a tarefa do Orquestrador. Aguarde a delegação; use somente seu worktree e preserve a junction node_modules. Não abra PR nem faça merge sem pedido do usuário.",
+    ...singleBranchRule("member", undefined, workspace?.branch),
     "",
     ...(mission.id ? [
       `Memória aprovada do projeto e da missão: \`ags memory index\`, \`ags memory open <caminho>\` e \`ags memory search "<assunto>" --mission ${mission.id}\` (só leem). Consulte-a antes de perguntar algo que talvez já esteja registrado.`,
