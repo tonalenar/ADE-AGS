@@ -189,7 +189,7 @@ export function SkillDetailPage() {
               target="_blank"
               rel="noreferrer"
               className="max-w-[14rem] truncate text-[10px] text-accent-500 dark:text-accent-400 hover:underline"
-            >
+             title={meta.homepage}>
               {meta.homepage}
             </a>
           )}
@@ -225,7 +225,7 @@ export function SkillDetailPage() {
         border-t border-gray-200 dark:border-white/8
         bg-gray-100/60 dark:bg-black/20">
         <span className="flex-1 min-w-0 truncate text-[10.5px] tabular-nums
-          text-gray-400 dark:text-white/35">
+          text-gray-400 dark:text-white/35" title={t("skills.detail.chars", { n: content.length })}>
           {t("skills.detail.chars", { n: content.length })}
         </span>
         {/* Para una skill propia el usuario elige: guardar encima o sacar una copia y

@@ -152,7 +152,7 @@ export function ConsoleView({ viewId, channel }: { viewId: string; channel: Page
               <div key={`d${row.id}`} className="flex items-center gap-2 px-3 pt-2 pb-1 text-[10.5px] text-gray-400 dark:text-white/30">
                 <span className="h-px w-3 bg-current opacity-50" />
                 <span className="shrink-0 tabular-nums">{formatClock(row.doc.at)}</span>
-                <span className="truncate">{t("browser.debug.console.loaded", { url: row.doc.url })}</span>
+                <span className="truncate" title={t("browser.debug.console.loaded", { url: row.doc.url })}>{t("browser.debug.console.loaded", { url: row.doc.url })}</span>
                 <span className="h-px flex-1 bg-current opacity-30" />
               </div>
             ) : row.entry && (

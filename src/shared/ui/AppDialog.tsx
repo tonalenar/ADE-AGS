@@ -33,7 +33,7 @@ export function DialogHeader({ title, icon, onClose }: {
       border-b border-gray-200 dark:border-[rgba(84,84,88,0.55)]">
       {icon}
       <h2 className="flex-1 min-w-0 truncate text-center text-[15px] leading-5 font-semibold tracking-[-0.2px]
-        text-gray-900 dark:text-[#f5f5f7]">
+        text-gray-900 dark:text-[#f5f5f7]" title={title}>
         {title}
       </h2>
       {/* Cerrar está siempre, incluso cuando el diálogo no se cierra con Escape ni

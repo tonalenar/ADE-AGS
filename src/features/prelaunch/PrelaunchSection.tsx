@@ -58,7 +58,8 @@ function PresetForm({
           className="flex-1 font-mono text-xs"
         />
         <div className="flex gap-2">
-          <Button variant="primary" size="sm" onClick={submit} disabled={!valid || saving}>
+          <Button variant="primary" size="sm" onClick={submit} disabled={!valid || saving}
+            aria-label={initial ? undefined : t("btn.add")} title={initial ? undefined : t("btn.add")}>
             {initial ? t("btn.save") : <AddIcon className="w-3.5 h-3.5" />}
           </Button>
           {onCancel && (
@@ -120,10 +121,10 @@ export function PrelaunchSection() {
                   hover:bg-gray-100 dark:hover:bg-white/6"
               >
                 <div className="flex flex-col gap-0.5 min-w-0">
-                  <span className="text-[12.5px] font-semibold text-gray-800 dark:text-gray-100 truncate">
+                  <span className="text-[12.5px] font-semibold text-gray-800 dark:text-gray-100 truncate" title={preset.name}>
                     {preset.name}
                   </span>
-                  <code className="text-[10.5px] font-mono text-gray-400 dark:text-white/35 truncate">
+                  <code className="text-[10.5px] font-mono text-gray-400 dark:text-white/35 truncate" title={preset.command}>
                     {preset.command}
                   </code>
                 </div>

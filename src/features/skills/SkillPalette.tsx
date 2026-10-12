@@ -309,10 +309,10 @@ export function SkillPalette({ target: initial, onClose }: {
                     </span>
 
                     <span className="flex flex-col gap-0.5 min-w-0 flex-1">
-                      <span className="text-[12.5px] font-semibold truncate text-gray-800 dark:text-gray-200">
+                      <span className="text-[12.5px] font-semibold truncate text-gray-800 dark:text-gray-200" title={row.kind === "installed" ? row.skill.name : row.entry.name}>
                         {row.kind === "installed" ? row.skill.name : row.entry.name}
                       </span>
-                      <span className="text-[10.5px] font-mono truncate text-gray-400 dark:text-white/35">
+                      <span className="text-[10.5px] font-mono truncate text-gray-400 dark:text-white/35" title={row.kind === "installed" ? [t("skills.palette.installedTag"), row.skill.registryName ?? t("skills.palette.local")] .filter(Boolean).join(" · ") : [row.entry.author, row.entry.registryName].filter(Boolean).join(" · ")}>
                         {row.kind === "installed"
                           ? [t("skills.palette.installedTag"), row.skill.registryName ?? t("skills.palette.local")]
                               .filter(Boolean).join(" · ")

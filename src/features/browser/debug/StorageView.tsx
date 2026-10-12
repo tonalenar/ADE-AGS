@@ -185,7 +185,7 @@ function NameList({ items }: { items: string[] | null }) {
   if (items.length === 0) return <p className="px-3 pb-2 text-[11px] text-gray-400 dark:text-white/30">{t("browser.debug.storage.none")}</p>;
   return (
     <ul className="px-3 pb-2">
-      {items.map((name) => <li key={name} className="truncate font-mono text-[11px] text-gray-700 dark:text-gray-300">{name}</li>)}
+      {items.map((name) => <li key={name} className="truncate font-mono text-[11px] text-gray-700 dark:text-gray-300" title={name}>{name}</li>)}
     </ul>
   );
 }

@@ -54,8 +54,8 @@ function Row({ icon, title, meta, onClick, tone }: {
         {icon}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[13px] text-gray-800 dark:text-gray-200">{title}</span>
-        {meta && <span className="block truncate text-[11px] font-mono text-gray-400 dark:text-gray-500">{meta}</span>}
+        <span className="block truncate text-[13px] text-gray-800 dark:text-gray-200" title={title}>{title}</span>
+        {meta && <span className="block truncate text-[11px] font-mono text-gray-400 dark:text-gray-500" title={meta}>{meta}</span>}
       </span>
     </Button>
   );

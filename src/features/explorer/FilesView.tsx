@@ -490,7 +490,7 @@ export function FilesView({ cwd, repo, title }: {
       <div className="flex items-center gap-2 h-8 shrink-0 pl-3.5 pr-1.5
         bg-gray-100/60 dark:bg-white/2">
         <span className="flex-1 min-w-0 truncate text-[12.5px] font-semibold tracking-tight
-          text-gray-800 dark:text-gray-200">
+          text-gray-800 dark:text-gray-200" title={title}>
           {title}
         </span>
         {[

@@ -752,7 +752,7 @@ fn result_text(conn: &Connection, run: &Run, task: &Task) -> Result<String, Stri
         } else {
             format!("worktree {}", task.worktree_path.as_deref().unwrap_or("?"))
         };
-        out.push_str(&format!("branch: {branch} ({place})\n"));
+        out.push_str(&format!("ramo: {branch} ({place})\n"));
     }
     if !task.depends_on.is_empty() {
         let deps: Vec<&str> = task
@@ -1059,6 +1059,7 @@ mod args_tests {
         let task = store::create_task(&conn, &store::NewTask {
             run_id: &run.id, title: "API", prompt: "Teste", agent_id: "codex", cwd: "/p", role: Some("worker"), ..Default::default()
         }).unwrap();
+        conn.execute("UPDATE tasks SET branch='cc/teste',worktree_path='/p/teste' WHERE id=?1", [&task.id]).unwrap();
         for (raw, label) in [
             (status::PENDING, "pendente"), (status::READY, "pronto"),
             (status::RUNNING, "em execução"), (status::DONE, "concluído"),
@@ -1074,6 +1075,8 @@ mod args_tests {
             assert!(board.contains(&format!("estado: {label} ·")), "{board}");
             assert!(board.contains(&format!("[{label}]")), "{board}");
             assert!(result.contains(&format!("estado: {label} ·")), "{result}");
+            assert!(result.contains("ramo: cc/teste (worktree /p/teste)\n"), "{result}");
+            assert!(!result.contains("branch:"), "{result}");
             assert_eq!(run.status, raw);
             assert_eq!(task.status, raw);
         }

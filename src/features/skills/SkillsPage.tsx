@@ -58,10 +58,10 @@ function SkillRow({ skill, selected, rowRef, onSelect, onOpen }: {
       </span>
 
       <span className="flex flex-col gap-0.5 min-w-0 flex-1">
-        <span className="truncate text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">
+        <span className="truncate text-[12.5px] font-semibold text-gray-800 dark:text-gray-100" title={skill.name}>
           {skill.name}
         </span>
-        <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35">
+        <span className="truncate text-[10.5px] text-gray-400 dark:text-white/35" title={skill.description ?? t("skills.list.noDescription")}>
           {skill.description ?? t("skills.list.noDescription")}
         </span>
       </span>
@@ -222,7 +222,7 @@ export function SkillsPage() {
                     className="flex items-center gap-2 px-3 py-1.5 text-[11px] font-mono
                       text-amber-800 dark:text-amber-300/90"
                   >
-                    <span className="flex-1 min-w-0 truncate">
+                    <span className="flex-1 min-w-0 truncate" title={`${issue.skillName} — ${issue.tabTitle ?? issue.tabId} (${t(`skills.health.${issue.issue === "stale_target" ? "staleTarget" : issue.issue}`)})`}>
                       {issue.skillName} — {issue.tabTitle ?? issue.tabId}
                       {" ("}
                       {t(`skills.health.${issue.issue === "stale_target" ? "staleTarget" : issue.issue}`)}
@@ -377,7 +377,7 @@ export function SkillsPage() {
                           hover:bg-gray-50 dark:hover:bg-white/8"
                       >
                         <span className="flex-1 min-w-0 truncate text-[11px] font-mono
-                          text-gray-600 dark:text-gray-400">
+                          text-gray-600 dark:text-gray-400" title={(u.scope === "tab" ? (u.tabTitle ?? u.tabId) : (u.cwd || u.workspaceName)) ?? undefined}>
                           {u.scope === "tab"
                             ? (u.tabTitle ?? u.tabId)
                             : (u.cwd || u.workspaceName)}

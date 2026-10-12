@@ -81,7 +81,7 @@ export function BranchMenu({ root, onPick, onClose }: {
             className="flex items-center gap-2 w-full h-7 px-3 text-left hover:bg-gray-100 dark:hover:bg-white/5"
           >
             <AddIcon className="w-3.5 h-3.5 shrink-0 text-accent-500 dark:text-accent-400" />
-            <span className="truncate text-[11.5px] text-gray-700 dark:text-gray-300">
+            <span className="truncate text-[11.5px] text-gray-700 dark:text-gray-300" title={t("scm.branch.create", { name })}>
               {t("scm.branch.create", { name })}
             </span>
           </Button>
@@ -102,11 +102,11 @@ export function BranchMenu({ root, onPick, onClose }: {
                 ? <CloudIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/30" />
                 : <BranchIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/30" />}
             <span className={`flex-1 min-w-0 truncate font-mono text-[11.5px]
-              ${b.current ? "font-semibold text-gray-900 dark:text-white" : "text-gray-700 dark:text-gray-300"}`}>
+              ${b.current ? "font-semibold text-gray-900 dark:text-white" : "text-gray-700 dark:text-gray-300"}`} title={b.name}>
               {b.name}
             </span>
             {b.upstream && !b.remote && (
-              <span className="shrink-0 max-w-24 truncate font-mono text-[10px] text-gray-400 dark:text-white/25">
+              <span className="shrink-0 max-w-24 truncate font-mono text-[10px] text-gray-400 dark:text-white/25" title={b.upstream}>
                 {b.upstream}
               </span>
             )}
