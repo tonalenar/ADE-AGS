@@ -49,12 +49,15 @@ Ressalvas: amostra pequena e histórica, não ensaio controlado da v13; os logs 
 Backend, Frontend e QA: 0 mensagens úteis do Vigia; Frontend registrou 2 lembretes de ruído ("usuário não ouviu de você"); 0 "[Pasted text #N]" empacado; 0 cutucadas pós-entrega; nenhum Codex em "Working" parado >8 min (laço de raciocínio não observado). Contagem do chat/Orquestrador: sem linhas "Vigia" novas além do aviso de partida do QA (acima).
 
 ## 7. Achados por gravidade
-Sem P0/P1/P2.
+Sem P0/P1. Um P2 (ver P2-1 e seção 8).
+- **P2-1** Propostas de memória do QA geradas por `ags memory suggest` apareceram aprovadas 26 s depois, sem decisão humana conhecida (seção 8). Repro: `ags memory history --mission b29ced88-54cd-4867-aa36-904706a87d01 --key tech.v13.cli_exit_codes --scope mission`.
 - **P3-1** `truncate` sem `title` em Workspaces (4 locais, seção 2). Repro: ler o código; nomes longos de branch/workspace aparecem cortados sem tooltip.
 - **P3-2** `ags peer check` sem argumentos sai com código 1; o help define 2 = uso incorreto. Repro: `ags peer check; echo $?` (achado do QA, não reconferido pelo Orquestrador).
 - **P3-3** Falso alarme "[AGS] QA / Tests não mostrou atividade": o QA estava trabalhando (spans `start_retry`/`start_stalled` em ~30 s). Repro: ver `ags mission timings b29ced88-54cd-4867-aa36-904706a87d01`.
 - **P3-4** Backend (Codex) iniciou sem `ADE_TAB_ID` no helper e com `helper_unknown_error: setup refresh had errors` no sandbox; contornado via `tab list`. Não verificado nos outros terminais (conhecido: erro de sandbox do Codex no Windows).
 - **P4** Vocabulário em inglês no `--help` e textos menores de i18n pt-BR (seção 3).
 
-## 8. Memórias pendentes (decidir em "Sugestões de memória")
-`tech.v13.smoke_suite_integrity`, `tech.v13.encoding_bom_le`, `tech.v13.test_caching_behavior`, `tech.v13.ipc_peer_messaging`, `tech.v13.cli_exit_codes`. Todas pendentes; ninguém decidiu nenhuma.
+## 8. Memórias
+CORREÇÃO: as 5 propostas do QA NÃO ficaram pendentes. `ags memory search "tech.v13"` as devolve (a busca só traz aprovadas) e `ags memory history ... --key tech.v13.cli_exit_codes` mostra `operation:create`, `revision:1`, `validFrom:1791836608` (2026-10-12 17:23:28 -03:00), `actorKind:worker`. Foram aprovadas ~26 s depois da geração; as 11 linhas Jev de 17:22:57–17:23:02 têm correspondência no log humano com "aprovar" às 17:23:28. Quem/o que aprovou NÃO foi identificado (nem QA, nem Orquestrador, nem Backend abriram a interface; hipótese: aprovação automática do modo Decisões, não confirmada). Isso contradiz a expectativa da missão de manter as propostas pendentes e é um achado a investigar (**P2-1**: propostas via CLI foram aprovadas sem ação humana conhecida).
+Chaves aprovadas: `tech.v13.smoke_suite_integrity`, `tech.v13.encoding_bom_le`, `tech.v13.test_caching_behavior`, `tech.v13.ipc_peer_messaging`, `tech.v13.cli_exit_codes`.
+Pendentes (sugeridas pelo Orquestrador, histórico vazio): `v13.workspaces-truncate-sem-title`, `v13.jev-laya-amostra`; decida-as em "Sugestões de memória".
