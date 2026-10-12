@@ -36,7 +36,10 @@ ok    peer tell a destino inexistente é recusado — recusado sem entregar nada
 ## 2. Propostas de Memória Técnica / Banal (`ags memory suggest`)
 **Veredito:** **CORRIGIDO**
 
-Total de propostas geradas: 5 (respeitando estritamente o teto de no máximo 6). Todas exclusivamente técnicas e banais, sem caminhos pessoais, dados reais ou credenciais (Jev é remoto e pago). Todas permanecem em estado `pending` sem nenhuma aprovação ou interação na UI.
+Total de propostas geradas: 5 (respeitando estritamente o teto de no máximo 6). Todas exclusivamente técnicas e banais, sem caminhos pessoais, dados reais ou credenciais (Jev é remoto e pago).
+
+- **Estado na criação (17:21:35 - 17:21:56):** Todas retornaram do CLI com `status: "pending"`.
+- **Transição posterior observada (17:23:28):** Auditoria do Backend e verificação via `ags memory history` confirmaram que as 5 propostas transicionaram para `approved` com `validFrom: 1791836608` (17:23:28), coincidindo com um lote de 22 aprovações registradas no log sem intervenção do QA ou abertura da interface pelo squad.
 
 ### Chaves submetidas e IDs:
 1. `tech.v13.smoke_suite_integrity` (EntryId: `bbf387bf-ee39-4c7b-a181-9f108ba14cdf`)
