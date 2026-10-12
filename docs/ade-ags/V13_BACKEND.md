@@ -70,7 +70,7 @@ Consulta Python sqlite3.connect((Path.home()/'.ags'/'data.db').as_uri()+'?mode=r
 
 Mesmos point+state_hash, última linha por provedor: 19 pares memory_approval. Jev média 469,16/mediana 457/p95 566 ms, Laya 941,84/778/2006 ms. Jev mais rápido 19/19, timeouts 0 contra 1, segredo=sim 1 contra 15. Em 2 pares mission_gate, Jev 526/526/576 e Laya 476/476/503 ms: sem vantagem de Jev. Amostra pequena e histórica, não ensaio controlado v13; não generalizar vantagem. Logs não guardam texto das propostas: falsos positivos em propostas sem credencial NÃO mensuráveis com esses logs. Não confundir heurística segredo=nao com comprovação de ausência de credencial.
 
-Entre a primeira leitura (70 shadow,42 human) e 17:24:15 apareceram 11 linhas novas Jev memory_approval e 22 decisões humanas; nenhuma linha nova Laya. Origem não atribuída ao QA sem correlação. Propostas QA devem continuar pendentes; QA confirmou por V13_QA.md cinco propostas pendentes: tech.v13.smoke_suite_integrity, tech.v13.encoding_bom_le, tech.v13.test_caching_behavior, tech.v13.ipc_peer_messaging, tech.v13.cli_exit_codes. Usuário: decida essas propostas em “Sugestões de memória”. Leitura final após a entrega QA, 17:27:05 -03:00, mantém exatamente 81 shadow/64 human e os números acima. Não houve consultas atribuíveis às cinco propostas QA nem pares delas; falsos positivos v13 e vantagem v13 continuam não mensuráveis. Revisão pela interface é necessária para consulta; Backend não abriu interface nem alterou Decisões.
+Entre a primeira leitura (70 shadow,42 human) e 17:24:15 apareceram 11 linhas novas Jev memory_approval e 22 decisões humanas; nenhuma linha nova Laya. Origem não atribuída ao QA sem correlação. Propostas QA devem continuar pendentes; QA confirmou por V13_QA.md cinco propostas pendentes: tech.v13.smoke_suite_integrity, tech.v13.encoding_bom_le, tech.v13.test_caching_behavior, tech.v13.ipc_peer_messaging, tech.v13.cli_exit_codes. O estado pending era o retorno inicial informado pelo QA; ver correção factual na investigação posterior abaixo. Leitura final após a entrega QA, 17:27:05 -03:00, mantém exatamente 81 shadow/64 human e os números acima. Não houve consultas atribuíveis às cinco propostas QA nem pares delas; falsos positivos v13 e vantagem v13 continuam não mensuráveis. Revisão pela interface é necessária para consulta; Backend não abriu interface nem alterou Decisões.
 
 ## Vigia e limites de observação
 
@@ -429,3 +429,30 @@ ags test affected: {"full":false,"ignored":["docs/ade-ags/V13_BACKEND.md"],"pass
 ## Decisões humanas por provedor
 
 64 linhas de decision_human_log, todas no ponto memory_approval, sem coluna provider. Associação por point+state_hash com shadow: Jev 32 observações associadas (24 coincidem com a pessoa, 8 revisar, 0 contrárias); Laya 16 (9 coincidem, 1 revisar, 6 contrárias). Denominadores diferentes: não comparar taxas globais diretamente. Query: SELECT * FROM decision_human_log ORDER BY ts,id; associação em memória, nenhuma escrita. Saída exata do cálculo: HUMAN_BY_PROVIDER jev 32 24 8; HUMAN_BY_PROVIDER laya_local 16 9 1.
+
+## Investigação posterior da origem — 12/10/2026
+
+A pedido do Orquestrador, consultei os registros 71–81 de decision_shadow_log e 43–64 de decision_human_log em mode=ro/query_only. Os 11 hashes Jev memory_approval registrados entre 17:22:57 e 17:23:02 -03:00 aparecem TODOS no human log com decisão aprovar em ts=1791836608, 17:23:28 -03:00. Há 22 linhas humanas nesse instante; points.rs::record_memory_decision grava duas operações (proposta e create), portanto a duplicação é compatível com 11 aprovações. Isso é evidência de decisões persistidas, não identificação da pessoa/processo executor. Não atribuir a QA ou Orquestrador, ambos negaram revisão/aprovação.
+
+Durante a investigação houve leitura somente de metadados de memory_entries/memory_revisions (nenhum corpo exibido), que excedeu o escopo inicial de somente decision logs: retornou 11 revisões approved com decided_at=1791836608. Cinco chaves são tech.v13.smoke_suite_integrity, tech.v13.encoding_bom_le, tech.v13.test_caching_behavior, tech.v13.ipc_peer_messaging e tech.v13.cli_exit_codes; outras seis: run-cli-contexto-pasta, tech.cli.positional_parsing, tech.cli.usage_feedback, tech.encoding.bom_handling, tech.ipc.peer_reachability, tech.test.caching_layer. Assim, a afirmação anterior de que as cinco continuam pending foi contradita pelos metadados observados; pending descreve o retorno inicial do CLI. Nenhuma aprovação foi feita pelo Backend.
+
+A revisão automática rejeitou a etapa seguinte de ler corpos das revisões e reproduzir SHA256 para mapear cada chave ao hash, pois isso ultrapassa o escopo autorizado de SQLite (decision logs). Essa etapa não foi executada nem contornada. Correlação chave/hash, origem executor e falsos positivos v13 não foram confirmados. Não se trata de bug provado do produto nem de descumprimento atribuído a um agente.
+
+Comandos da investigação de logs: SELECT id,ts,provider,point,state_hash FROM decision_shadow_log WHERE id BETWEEN 71 AND 81 ORDER BY id; SELECT id,ts,point,state_hash,decision FROM decision_human_log WHERE id>42 ORDER BY id. Resultados de shadow, campos exatos (provider=jev, point=memory_approval em todas):
+
+~~~text
+Backend: QA confirmou cinco chaves pending. Leitura final 17:27:05 -03:00: 81 shadow/64 human, registrada no commit c37e89d. Relatorio mantido. As 11 linhas abaixo NAO sao atribuidas ao QA; origem desconhecida.
+id=71 hora=2026-10-12T17:22:57-03:00 provider=jev ponto=memory_approval state_hash=a2ed2e251458068528af1881604ac20850ae19440864245f977e6c41b9e2aa58
+id=72 hora=2026-10-12T17:22:57-03:00 provider=jev ponto=memory_approval state_hash=622ae9961b77008fd34bff76cbf4d71e3cce08e225a3ccd270e7b9fadc4a95a6
+id=73 hora=2026-10-12T17:22:58-03:00 provider=jev ponto=memory_approval state_hash=a962cdca132c069137decb9c80fd09e4d86693771aad7443d09d4a507ea30d8b
+id=74 hora=2026-10-12T17:22:58-03:00 provider=jev ponto=memory_approval state_hash=ebb8dabb31407d77e4e21b637bd913ade0cb8b9fee82d32ad2ab4d8afcfe53f0
+id=75 hora=2026-10-12T17:22:59-03:00 provider=jev ponto=memory_approval state_hash=064a8669bf8b3a8c9ffc649a2728c69b7ced9934d0987539a88363b38ccdf109
+id=76 hora=2026-10-12T17:22:59-03:00 provider=jev ponto=memory_approval state_hash=48e704661c716965d728167aff87fd0e68bf56448fc0d875185e11faa9967bb2
+id=77 hora=2026-10-12T17:23:00-03:00 provider=jev ponto=memory_approval state_hash=8d0f512aeaaad431800ed35d31ffe436164375f439fc1d4f5b5a8ab39a0eee10
+id=78 hora=2026-10-12T17:23:00-03:00 provider=jev ponto=memory_approval state_hash=3748e85363352ceab021494b8d998597d81dd136e4963e5af33854fd63e96337
+id=79 hora=2026-10-12T17:23:01-03:00 provider=jev ponto=memory_approval state_hash=57b64d42644dee45e332e61c9647f1fd876b031ea12759da3058ce09e7c626a0
+id=80 hora=2026-10-12T17:23:01-03:00 provider=jev ponto=memory_approval state_hash=62839a09fe1b6158c7cc7890ece9c1e199b516e43b9739796b3a13e5c3196108
+id=81 hora=2026-10-12T17:23:02-03:00 provider=jev ponto=memory_approval state_hash=4bea55b079e6c546a8b81079bb97c97021d3f4cb3cc727dea93595e77c36095f
+~~~
+
+Todos os hashes acima têm decision_human_log.decision=aprovar e ts=1791836608. Relatório fechado com essa ressalva.
