@@ -111,12 +111,18 @@ O Backend e o Orquestrador foram notificados via `ags peer tell` sobre a conclus
   - `v13_utf16.txt`: UTF-16 LE com BOM (`V13_UTF16: ação, coração, ç, á, 漢字.\nFim UTF16.`)
 - **Transcrições de recebimento via `ags peer tell`:**
   - O Backend executou o envio de `v13_bom.txt` via `ags peer tell "QA / Tests" --file "$env:TEMP/v13_bom.txt"`.
-  - Mensagem recebida no terminal do QA com integridade total, sem perda de acentuação ou caracteres especiais:
+  - Mensagem recebida no terminal do QA com integridade total:
     ```text
     [Mensagem de Backend via ADE AGS] V13_BOM: ação, coração, ç, á, 漢字.
     Fim BOM.
     ```
-  - Marcadores, quebras de linha e caracteres multibyte preservados ponta a ponta. Confirmação retornada ao Backend via `ags peer tell`.
+  - O Backend executou o envio de `v13_utf16.txt` via `ags peer tell "QA / Tests" --file "$env:TEMP/v13_utf16.txt"`.
+  - Mensagem recebida no terminal do QA com integridade total:
+    ```text
+    [Mensagem de Backend via ADE AGS] V13_UTF16: ação, coração, ç, á, 漢字.
+    Fim UTF16.
+    ```
+  - Marcadores, quebras de linha e caracteres multibyte preservados ponta a ponta em ambos os envios. Confirmações retornadas ao Backend via `ags peer tell`.
 
 ---
 
