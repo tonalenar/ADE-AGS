@@ -572,7 +572,7 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         let pty = wait_for_pty(app, &tab_id, Some(&me.window))?;
         let ready = wait_until_ready(pty);
         submit_prompt(pty, &framed(&me.name, &text, false))?;
-        emit_peer_message(app, "tell", &me.id, Some(&tab_id), Some(&text));
+        emit_peer_message(app, "tell", &me.id, Some(&tab_id), Some(&text), Some(&text));
         out["promptSent"] = json!(true);
         out["promptWaitedForReady"] = json!(ready);
     }
@@ -664,7 +664,7 @@ fn notify_orchestrator(app: &AppHandle, from: &str, from_name: &str, peers: &[Op
     let Ok(pty) = pty_id_for_tab(app, &lead.id, Some(&lead.window)) else { return };
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(20), false);
     if submit_prompt(pty, &outgoing(from_name, message, false, false)).is_ok() {
-        emit_peer_message(app, "tell", from, Some(&lead.id), Some(message));
+        emit_peer_message(app, "tell", from, Some(&lead.id), Some(message), Some(message));
     }
 }
 
@@ -699,7 +699,7 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     // Sem confirmação, o destino pode não ter recebido: não conta como tarefa dada (o Vigia segue
     // cobrando a delegação).
     if !matches!(outcome, Delivery::Duplicate | Delivery::Unconfirmed) {
-        emit_peer_message(app, "tell", &from, Some(&target.id), Some(&text));
+        emit_peer_message(app, "tell", &from, Some(&target.id), Some(&text), Some(&text));
     }
     Ok(match outcome {
         Delivery::Now => json!({ "peer": describe(target), "sent": true }),
@@ -715,12 +715,21 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
 /// Avisa al frontend de un mensaje entre agentes (`cc-peer-message`). Un `tell` le da una tarea
 /// al destino; cualquier mensaje del remitente prueba que él sí está activo. Con eso el
 /// detector de "agente parado" (`missions/stalled.ts`) sabe quién debe una respuesta.
-fn emit_peer_message(app: &AppHandle, kind: &str, from_tab_id: &str, to_tab_id: Option<&str>, text: Option<&str>) {
+///
+/// `log_text` é o texto que vai para o chat unificado da equipe (`mission_messages`), só quando os
+/// dois lados são da mesma missão; no `ask` o evento não leva texto, mas o chat leva a pergunta.
+fn emit_peer_message(app: &AppHandle, kind: &str, from_tab_id: &str, to_tab_id: Option<&str>, text: Option<&str>, log_text: Option<&str>) {
     // Persist successful lead-to-member sends independently of UI listeners.
     let boards = crate::canvas::load_boards();
+    // Os nomes vêm da janela: pedidos antes de pegar o lock do banco, para não prender os dois.
+    let tabs = if log_text.is_some() && to_tab_id.is_some() { open_tabs(app).unwrap_or_default() } else { Vec::new() };
     if let (Some(target), Ok(db)) = (to_tab_id, super::shared::db(app)) {
         if let Ok(conn) = db.inner().lock() {
             let _ = crate::missions::timings::record_delegation(&conn, &boards, kind, from_tab_id, target, crate::util::now_ts_ms());
+            if let Some(body) = log_text {
+                let name_of = |id: &str| tabs.iter().find(|t| t.id == id).map(|t| t.name.clone()).unwrap_or_else(|| id.to_string());
+                let _ = crate::missions::messages::record(&conn, &boards, kind, (from_tab_id, &name_of(from_tab_id)), (target, &name_of(target)), body, crate::util::now_ts_ms());
+            }
         }
     }
     let _ = app.emit(
@@ -785,14 +794,14 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
             return Ok(json!({ "peer": describe(target), "finished": false, "sent": false, "reply": [], "status": "duplicate", "duplicate": true,
                 "note": "Essa mesma pergunta já foi enviada a este agente há pouco; leia a resposta com `ags peer check`." }));
         }
-        emit_peer_message(app, "ask", from_id, Some(&target.id), None);
+        emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text));
         return Ok(json!({ "peer": describe(target), "finished": false, "sent": true, "queued": true, "reply": [], "status": "queued",
             "note": format!("{0} está trabalhando: a pergunta foi enfileirada e será entregue ao fim do turno dele, com o pedido de responder por ags peer tell. Siga com outra coisa; se precisar, leia a tela com ags peer check \"{0}\".", target.name) }));
     }
     let delivery = delivery_lock(&target.id);
     let _turn = delivery.lock().unwrap_or_else(|e| e.into_inner());
     submit_prompt(pty, &outgoing(from_name, text, true, raw))?;
-    emit_peer_message(app, "ask", from_id, Some(&target.id), None);
+    emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text));
     remember_ask(&target.id, AskStatus { started_ms, ended_ms: None, mark, finished: None, from: from_id.into(), sent: true });
     let finished = wait_turn(pty, before, timeout.saturating_sub(started.elapsed()));
     finish_ask(from_id, &target.id, started_ms, finished);

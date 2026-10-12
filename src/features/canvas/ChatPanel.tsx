@@ -13,7 +13,9 @@ import { open as pickFile } from "@tauri-apps/plugin-dialog";
 
 const TOOL = "cc-t flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white";
 import { unreadOf, useUnreadStore } from "./chatUnread";
-import { useActiveBoardKey, boardKeyOfTab } from "./store";
+import { useActiveBoardKey, boardKeyOfTab, missionOfKey } from "./store";
+import { TeamFeed, useMissionApprovals, useTeamMessages } from "./TeamFeed";
+import { parseMention, suggestMentions, type UserNote } from "./teamFeedModel";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { ResponsePicker } from "./ResponsePicker";
 import { CHAT_MARGIN, clampSize, isDefaultSize, loadChatSize, resizeBy, saveChatSize, DEFAULT_CHAT_SIZE, type ChatSize, type ChatSizeState } from "./chatSize";
@@ -72,6 +74,9 @@ const clock = (unix: number) => new Date(unix * 1000).toLocaleTimeString(dateLoc
  * Las respuestas del agente se muestran como Markdown seguro (`ChatMarkdown`: sin HTML crudo,
  * enlaces solo http/https). Lo que escribe el usuario queda como texto plano.
  */
+/** A aba "Equipe" do chat de uma missão: o chat unificado, em vez da conversa de um agente. */
+const TEAM = "__team__";
+
 export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewAgent: () => void }) {
   const { t } = useTranslation();
   const key = useActiveBoardKey();
@@ -83,6 +88,14 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
     [allTabs, key],
   );
   const [tabId, setTabId] = useState<string | null>(null);
+  // Numa missão o chat abre na linha do tempo da equipe; escolher um agente leva à conversa dele.
+  const missionId = missionOfKey(key);
+  const teamView = missionId !== null && (tabId === null || tabId === TEAM);
+  const teamMessages = useTeamMessages(missionId);
+  const teamApprovals = useMissionApprovals(missionId);
+  const [notes, setNotes] = useState<UserNote[]>([]);
+  useEffect(() => setNotes([]), [missionId]);
+  const addressees = useMemo(() => agents.map((a) => ({ id: a.id, name: a.title.split(" — ")[0] })), [agents]);
   const [thread, setThread] = useState<Thread>("blue");
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [draft, setDraft] = useState("");
@@ -214,7 +227,31 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
     }
   };
 
+  const sendTeam = async () => {
+    const typed = draft.trim();
+    if (!typed || sending) return;
+    // Sem @, a mensagem vai ao orquestrador; com @Nome, ao agente escolhido.
+    const mention = parseMention(typed, addressees);
+    const lead = addressees.find((a) => /^orquestrador/i.test(a.name)) ?? addressees[0];
+    const to = mention?.to ?? lead;
+    const text = mention?.text ?? typed;
+    if (!to) return AlertaToast(t("canvas.chat.title"), t("canvas.team.noAddressee"), "error", 6000);
+    if (typed.startsWith("@") && !mention) return AlertaToast(t("canvas.chat.title"), t("canvas.team.unknownMention"), "error", 6000);
+    setSending(true);
+    setDraft("");
+    try {
+      await invoke("chat_send", { tabId: to.id, thread: "blue", text });
+      setNotes((all) => [...all, { key: `u${Date.now()}`, atMs: Date.now(), toName: to.name, text }]);
+    } catch (e) {
+      setDraft(typed);
+      AlertaToast(t("canvas.chat.title"), String(e), "error", 6000);
+    } finally {
+      setSending(false);
+    }
+  };
+
   const send = async () => {
+    if (teamView) return sendTeam();
     const typed = draft.trim();
     const text = typed && mode === "plan" ? `${t("canvas.chat.planPrefix")}\n\n${typed}` : typed;
     if (!text || !currentId || sending) return;
@@ -277,13 +314,23 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
 ${text}` : text)); setPicking(false); }} />}
       </>}
       title={t("canvas.chat.title")}
-      subtitle={current?.title ?? t("canvas.chat.subtitle")}
+      subtitle={teamView ? t("canvas.team.subtitle") : current?.title ?? t("canvas.chat.subtitle")}
       heading={agents.length > 0 ? (
         <div className="flex min-w-0 gap-0.5 overflow-x-auto rounded-[9px] bg-black/[0.05] p-0.5 dark:bg-surface-raised" role="tablist" aria-label={t("canvas.chat.title")}>
-          {agents.map((a) => (
-            <button key={a.id} type="button" role="tab" onClick={() => setTabId(a.id)} title={a.title} aria-selected={a.id === currentId}
+          {missionId && (
+            <button type="button" role="tab" onClick={() => setTabId(TEAM)} title={t("canvas.team.title")} aria-selected={teamView}
               className={`cc-t flex h-[26px] min-w-0 max-w-44 flex-1 items-center justify-center rounded-[7px] px-3 text-[12.5px] font-medium
-                ${a.id === currentId
+                ${teamView
+                  ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-[#f5f5f7] dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
+                  : "text-gray-500 hover:text-gray-900 dark:text-white/55 dark:hover:text-white"}`}>
+              <span className="truncate">{t("canvas.team.tab")}</span>
+              {!teamView && teamApprovals.length > 0 && <Badge n={teamApprovals.length} />}
+            </button>
+          )}
+          {agents.map((a) => (
+            <button key={a.id} type="button" role="tab" onClick={() => setTabId(a.id)} title={a.title} aria-selected={!teamView && a.id === currentId}
+              className={`cc-t flex h-[26px] min-w-0 max-w-44 flex-1 items-center justify-center rounded-[7px] px-3 text-[12.5px] font-medium
+                ${!teamView && a.id === currentId
                   ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-[#f5f5f7] dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
                   : "text-gray-500 hover:text-gray-900 dark:text-white/55 dark:hover:text-white"}`}>
               <span title={a.title.split(" — ")[0]} className="truncate">{a.title.split(" — ")[0]}</span>
@@ -297,7 +344,7 @@ ${text}` : text)); setPicking(false); }} />}
         </div>
       )}
       greeting={t("canvas.chat.greeting")}
-      prompt={t(current ? "canvas.chat.empty" : "canvas.chat.noAgents")}
+      prompt={teamView ? t("canvas.team.empty") : t(current ? "canvas.chat.empty" : "canvas.chat.noAgents")}
       placeholder={t("canvas.chat.composerPlaceholder")}
       inputLabel={t("canvas.chat.placeholder", { name: current?.title ?? "" })}
       sendLabel={t("canvas.chat.send")}
@@ -305,8 +352,18 @@ ${text}` : text)); setPicking(false); }} />}
       onMessageChange={setDraft}
       onSend={() => void send()}
       busy={sending}
-      disabled={!current}
-      composerHint={current && <span className="flex min-w-0 items-center gap-1">
+      disabled={teamView ? agents.length === 0 : !current}
+      composerHint={teamView ? (
+        <span className="flex min-w-0 flex-wrap items-center gap-1" aria-label={t("canvas.team.mention")}>
+          {(suggestMentions(draft, addressees).length > 0 && draft.trimStart().startsWith("@") ? suggestMentions(draft, addressees) : addressees).map((a) => (
+            <button key={a.id} type="button" title={t("canvas.team.mentionHint", { name: a.name })}
+              onClick={() => setDraft(`@${a.name} `)}
+              className="cc-t h-[22px] max-w-32 truncate rounded-md bg-black/[0.05] px-2 text-[11.5px] text-gray-700 hover:bg-black/[0.08] dark:bg-surface-raised dark:text-white/75 dark:hover:text-white">
+              @{a.name}
+            </button>
+          ))}
+        </span>
+      ) : current && <span className="flex min-w-0 items-center gap-1">
         <button type="button" onClick={() => void attach()} title={t("canvas.chat.attach")} aria-label={t("canvas.chat.attach")} className={TOOL}>
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden><path d="m20 11.5-7.8 7.8a5 5 0 0 1-7.1-7.1l8.5-8.5a3.3 3.3 0 0 1 4.7 4.7l-8.5 8.5a1.7 1.7 0 0 1-2.4-2.4l7.8-7.8" /></svg>
         </button>
@@ -321,7 +378,7 @@ ${text}` : text)); setPicking(false); }} />}
           <svg viewBox="0 0 18 18" aria-hidden className="h-3 w-3 shrink-0 text-gray-400 dark:text-white/40" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round"><path d="m5.5 7.5 3.5-3.5 3.5 3.5M5.5 10.5 9 14l3.5-3.5" /></svg>
         </button>
       </span>}
-      composerRight={current && (
+      composerRight={!teamView && current && (
         <span role="radiogroup" aria-label={t("canvas.chat.mode")} className="flex shrink-0 rounded-md bg-black/[0.05] p-0.5 dark:bg-white/[0.07]">
           {(["chat", "plan"] as const).map((m) => (
             <button key={m} type="button" role="radio" aria-checked={mode === m} onClick={() => setMode(m)}
@@ -345,7 +402,7 @@ ${text}` : text)); setPicking(false); }} />}
           <svg viewBox="0 0 18 18" aria-hidden className="h-4 w-4" fill="currentColor"><circle cx="4" cy="9" r="1.3" /><circle cx="9" cy="9" r="1.3" /><circle cx="14" cy="9" r="1.3" /></svg>
         </button>
       </>}
-      toolbar={current && <div className="flex h-7 shrink-0 items-center gap-2 px-4 pb-1">
+      toolbar={!teamView && current && <div className="flex h-7 shrink-0 items-center gap-2 px-4 pb-1">
           <svg viewBox="0 0 18 18" aria-hidden className="h-3 w-3 shrink-0 text-gray-400 dark:text-white/35" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="5" cy="4" r="1.7" /><circle cx="5" cy="14" r="1.7" /><circle cx="13" cy="6" r="1.7" /><path d="M5 5.7v6.6" /><path d="M13 7.7c0 2.9-8 1.9-8 4.6" /></svg>
           <span title={current.cwd} className="min-w-0 flex-1 truncate font-mono text-[11px] text-gray-500 dark:text-white/45">{branch ?? current.cwd}</span>
           {THREADS.map((th) => (
@@ -366,7 +423,9 @@ ${text}` : text)); setPicking(false); }} />}
           ))}
       </div>}
     >
-      {current && messages.length > 0 ? <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.chat.title")}>
+      {teamView ? (teamMessages.length + teamApprovals.length + notes.length > 0
+        ? <TeamFeed messages={teamMessages} approvals={teamApprovals} notes={notes} /> : undefined)
+        : current && messages.length > 0 ? <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.chat.title")}>
               {messages.map((m) => (
                 <div key={m.id} className={`flex flex-col ${m.kind === "user" ? "items-end" : "items-stretch"}`}>
                   {m.kind !== "user" && current && (
