@@ -3,6 +3,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 import { Terminal } from "@/features/terminal/LazyTerminal";
 import { detectAgents } from "@/features/agents/ipc";
+import { AntigravityOAuthSection } from "./AntigravityOAuthSection";
 
 /** Uses the CLI's native login and OS keyring, without copying credentials. */
 export function AntigravityAccountsPane() {
@@ -33,6 +34,7 @@ export function AntigravityAccountsPane() {
       {open && <div className="h-96 min-h-0 overflow-hidden rounded-lg border border-gray-200 dark:border-white/10">
         <Terminal command="agy" isActive />
       </div>}
+      <AntigravityOAuthSection />
       <a className="text-xs text-accent-500" href="https://antigravity.google/docs/cli/install/" target="_blank" rel="noreferrer">
         {t("accounts.antigravity.docs")}
       </a>
