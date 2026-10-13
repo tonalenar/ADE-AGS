@@ -2712,7 +2712,7 @@
   "memoryInbox.jev.secretNo": "no secret suspected",
   "memoryInbox.jev.title": "{{provider}}'s opinion (confidence {{confidence}}, {{secret}}). Only a hint: you decide.",
   "memoryInbox.jev.select": "Select the ones Jev would approve ({{count}})",
-  "memoryInbox.jev.selectHint": "Selects only the ones Jev would approve with no secret suspicion and high confidence. Nothing is approved until you confirm.",
+  "memoryInbox.jev.selectHint": "Selects only the ones Jev would approve with no secret suspicion and a majority of the probability on \"approve\". Nothing is approved until you confirm.",
   "memoryInbox.workspaceGroup": "Workspace / no mission",
   "memoryInbox.deletion": "DELETION",
   "memoryInbox.skippedDeletions": "Deletions not accepted (confirmation required): {{keys}}.",

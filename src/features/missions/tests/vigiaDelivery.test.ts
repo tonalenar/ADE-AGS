@@ -146,8 +146,8 @@ describe("Vigia: o Jev confirma o relatório final que a regra local não reconh
 
   const finishedOf = (id: string) => JSON.parse(localStorage.getItem("ags.vigia.peers.v1") ?? "{}").finished?.[id];
 
-  it("com o Jev dizendo 'final' (confiança alta), o integrante passa a constar como entregue", async () => {
-    mocks.invoke.mockImplementation((command: string) => Promise.resolve(command === "decision_classify_report" ? { label: "final", confidence: 0.93 } : []));
+  it("com o Jev dizendo 'final' (probabilidade de maioria), o integrante passa a constar como entregue", async () => {
+    mocks.invoke.mockImplementation((command: string) => Promise.resolve(command === "decision_classify_report" ? { label: "final", confidence: 0.4, probability: 0.8 } : []));
     const { useVigiaDriver } = await import("../vigia");
     useVigiaDriver();
     peer("lead", "back", "Rode os testes.", "tell", 1_000_000 - 100_000);
@@ -158,10 +158,10 @@ describe("Vigia: o Jev confirma o relatório final que a regra local não reconh
     expect(finishedOf("back")).toBe(1_000_000 - 10_000);
   });
 
-  it("andamento, confiança baixa, ponto desligado (null) ou falha: nada muda", async () => {
+  it("andamento, probabilidade baixa, ponto desligado (null) ou falha: nada muda", async () => {
     const { useVigiaDriver } = await import("../vigia");
     useVigiaDriver();
-    for (const answer of [{ label: "andamento", confidence: 0.99 }, { label: "final", confidence: 0.5 }, null]) {
+    for (const answer of [{ label: "andamento", confidence: 0.9, probability: 0.99 }, { label: "final", confidence: 0.9, probability: 0.4 }, null]) {
       mocks.invoke.mockImplementation((command: string) => Promise.resolve(command === "decision_classify_report" ? answer : []));
       peer("back", "lead", SHORT_REPORT, "tell");
       await flush();

@@ -28,6 +28,8 @@ pub struct Hint {
     pub action: String,
     pub secret: Option<bool>,
     pub confidence: Option<f64>,
+    /// A probabilidade que o provedor deu ao rótulo escolhido (a confiança não separa certo de errado).
+    pub probability: Option<f64>,
 }
 
 /// `acao=aprovar;segredo=nao` → ("aprovar", Some(false)). Pura.
@@ -55,15 +57,15 @@ pub fn memory_hints(conn: &Connection, items: &[HintInput]) -> Result<Vec<Hint>,
             memory_state_hash(&item.key, &item.kind, "proposta", &item.body),
             memory_state_hash(&item.key, &item.kind, &item.operation, &item.body),
         ];
-        let mut best: Option<(String, String, Option<f64>)> = None;
+        let mut best: Option<(String, String, Option<f64>, Option<f64>)> = None;
         for hash in hashes {
-            let row: Option<(String, String, Option<f64>)> = conn
+            let row: Option<(String, String, Option<f64>, Option<f64>)> = conn
                 .query_row(
-                    "SELECT provider, provider_decision, confidence FROM decision_shadow_log \
+                    "SELECT provider, provider_decision, confidence, probability FROM decision_shadow_log \
                      WHERE point = ?1 AND state_hash = ?2 AND error IS NULL AND provider_decision IS NOT NULL \
                      ORDER BY (provider = 'jev') DESC, ts DESC LIMIT 1",
                     params![POINT_MEMORY, hash],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
                 )
                 .optional()
                 .map_err(|e| e.to_string())?;
@@ -72,10 +74,10 @@ pub fn memory_hints(conn: &Connection, items: &[HintInput]) -> Result<Vec<Hint>,
                 break;
             }
         }
-        if let Some((provider, decision, confidence)) = best {
+        if let Some((provider, decision, confidence, probability)) = best {
             let (action, secret) = parse_answer(&decision);
             if let Some(action) = action {
-                hints.push(Hint { index, provider, action, secret, confidence });
+                hints.push(Hint { index, provider, action, secret, confidence, probability });
             }
         }
     }
@@ -97,6 +99,11 @@ mod tests {
     use crate::decisions::log::{record, LogRow};
 
     fn put(conn: &Connection, provider: &str, hash: &str, decision: Option<&str>, error: Option<&str>, ts: i64, confidence: Option<f64>) {
+        put_p(conn, provider, hash, decision, error, ts, confidence, confidence.map(|c| c + 0.1));
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    fn put_p(conn: &Connection, provider: &str, hash: &str, decision: Option<&str>, error: Option<&str>, ts: i64, confidence: Option<f64>, probability: Option<f64>) {
         record(
             conn,
             &LogRow {
@@ -107,7 +114,7 @@ mod tests {
                 state_hash: hash.into(),
                 heuristic: "acao=revisar;segredo=nao".into(),
                 provider_decision: decision.map(str::to_string),
-                probability: None,
+                probability,
                 confidence,
                 latency_ms: Some(10),
                 error: error.map(str::to_string),
@@ -131,7 +138,7 @@ mod tests {
         put(&conn, "jev", &hash, Some("acao=aprovar;segredo=nao"), None, 90, Some(0.93));
         put(&conn, "jev", &hash, None, Some("timeout"), 200, None);
         let hints = memory_hints(&conn, &[item("k1", "create")]).unwrap();
-        assert_eq!(hints, vec![Hint { index: 0, provider: "jev".into(), action: "aprovar".into(), secret: Some(false), confidence: Some(0.93) }]);
+        assert_eq!(hints, vec![Hint { index: 0, provider: "jev".into(), action: "aprovar".into(), secret: Some(false), confidence: Some(0.93), probability: Some(0.93 + 0.1) }]);
     }
 
     #[test]

@@ -35,6 +35,8 @@ const LABELS: [&str; 4] = ["final", "andamento", "pergunta", "conversa"];
 pub struct ReportClass {
     pub label: String,
     pub confidence: Option<f64>,
+    /// A probabilidade do rótulo escolhido: é ela, e não a confiança, que o Vigia confere.
+    pub probability: Option<f64>,
 }
 
 fn questions() -> BTreeMap<String, Question> {
@@ -72,9 +74,9 @@ pub fn request_for(text: &str, local: &str) -> DecisionRequest {
 }
 
 /// Lê a resposta do provedor: só vale um rótulo conhecido. Pura.
-pub fn read_answer(canonical_answer: &str, confidence: Option<f64>) -> Option<ReportClass> {
+pub fn read_answer(canonical_answer: &str, confidence: Option<f64>, probability: Option<f64>) -> Option<ReportClass> {
     let label = canonical_answer.split(';').find_map(|pair| pair.strip_prefix("tipo="))?;
-    LABELS.contains(&label).then(|| ReportClass { label: label.to_string(), confidence })
+    LABELS.contains(&label).then(|| ReportClass { label: label.to_string(), confidence, probability })
 }
 
 /// Pergunta ao provedor principal. Bloqueante: chamar de `spawn_blocking`.
@@ -133,7 +135,7 @@ pub(super) fn classify_with(
             },
         );
     }
-    read_answer(&decision?, confidence)
+    read_answer(&decision?, confidence, probability)
 }
 
 #[tauri::command]
@@ -171,10 +173,10 @@ mod tests {
 
     #[test]
     fn so_vale_um_rotulo_conhecido() {
-        assert_eq!(read_answer("tipo=final", Some(0.9)), Some(ReportClass { label: "final".into(), confidence: Some(0.9) }));
-        assert_eq!(read_answer("tipo=andamento", None).map(|c| c.label), Some("andamento".into()));
-        assert_eq!(read_answer("tipo=talvez", Some(0.9)), None);
-        assert_eq!(read_answer("outra=final", None), None);
-        assert_eq!(read_answer("", None), None);
+        assert_eq!(read_answer("tipo=final", Some(0.9), Some(0.95)), Some(ReportClass { label: "final".into(), confidence: Some(0.9), probability: Some(0.95) }));
+        assert_eq!(read_answer("tipo=andamento", None, None).map(|c| c.label), Some("andamento".into()));
+        assert_eq!(read_answer("tipo=talvez", Some(0.9), Some(0.9)), None);
+        assert_eq!(read_answer("outra=final", None, None), None);
+        assert_eq!(read_answer("", None, None), None);
     }
 }
