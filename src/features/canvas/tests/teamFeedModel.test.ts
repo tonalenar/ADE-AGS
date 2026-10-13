@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildFeed, feedFilterOptions, filterFeed, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, parseMention, resolveMention, suggestMentions, type TeamMessage } from "../teamFeedModel";
+import { buildFeed, codeAddresses, emphasizeTitle, formatMessageText, feedFilterOptions, filterFeed, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, parseMention, resolveMention, suggestMentions, type TeamMessage } from "../teamFeedModel";
 
 const team = [
   { id: "t1", name: "Orquestrador" },
@@ -103,5 +103,27 @@ describe("filtros, continuação e texto longo", () => {
     expect(needsCollapse("curto")).toBe(false);
     expect(needsCollapse("a".repeat(481))).toBe(true);
     expect(needsCollapse("1\n2\n3\n4\n5\n6\n7\n8")).toBe(true);
+  });
+});
+
+describe("formatação do texto das mensagens", () => {
+  it("põe caminhos, branches e arquivos em fonte de código, sem mexer no que já é código", () => {
+    expect(codeAddresses("Worktree: C:\\Users\\tonz1n\\.ags\\worktrees\\67cb84ad, branch cc/mission-a2d1-67cb84ad.")).toBe(
+      "Worktree: `C:\\Users\\tonz1n\\.ags\\worktrees\\67cb84ad`, branch `cc/mission-a2d1-67cb84ad`.",
+    );
+    expect(codeAddresses("Veja docs/ade-ags/TEST_CACHE.md: e AUDITORIA_MEMORIA.md.")).toBe("Veja `docs/ade-ags/TEST_CACHE.md`: e `AUDITORIA_MEMORIA.md`.");
+    expect(codeAddresses("já é `src/a.ts` e\n```\nsrc/b.ts\n```")).toBe("já é `src/a.ts` e\n```\nsrc/b.ts\n```");
+    // não é endereço: lista de idiomas e frase comum
+    expect(codeAddresses("chaves em pt-BR, en e es; e/ou nada")).toBe("chaves em pt-BR, en e es; e/ou nada");
+  });
+  it("o título da tarefa (primeira linha de uma mensagem longa) vira negrito", () => {
+    expect(emphasizeTitle("TAREFA QA (missão X).\nSeu worktree: ...")).toBe("**TAREFA QA (missão X).**\n\nSeu worktree: ...");
+    expect(emphasizeTitle("uma linha só")).toBe("uma linha só");
+    expect(emphasizeTitle("1. item\noutro")).toBe("1. item\noutro");
+    expect(emphasizeTitle("**já em negrito**\nresto")).toBe("**já em negrito**\nresto");
+    expect(emphasizeTitle("# Título\nresto")).toBe("# Título\nresto");
+  });
+  it("formatMessageText junta as duas coisas", () => {
+    expect(formatMessageText("  TAREFA Backend\nEdite src-tauri/src/memory.rs agora  ")).toBe("**TAREFA Backend**\n\nEdite `src-tauri/src/memory.rs` agora");
   });
 });
