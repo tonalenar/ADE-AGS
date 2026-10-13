@@ -8,7 +8,7 @@ import { useRunsStore } from "@/features/runs/store";
 import { useMissionsStore } from "@/features/missions/store";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { dateLocale } from "@/i18n/dateLocale";
-import { buildFeed, feedFilterOptions, filterFeed, formatMessageText, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, type FeedFilter, type FeedItem, type TeamMessage, type UserNote } from "./teamFeedModel";
+import { buildFeed, feedFilterOptions, filterFeed, formatMessageText, parseVigiaText, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, type FeedFilter, type FeedItem, type TeamMessage, type UserNote } from "./teamFeedModel";
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 
@@ -71,6 +71,43 @@ function Avatar({ name, color }: { name: string; color?: string }) {
     <span aria-hidden className="flex h-[18px] w-[18px] shrink-0 items-center justify-center rounded-full text-[10px] font-bold leading-none text-white" style={{ background: color ?? "#8e8e93" }}>
       {name.trim().charAt(0).toUpperCase() || "?"}
     </span>
+  );
+}
+
+/** O aviso do Vigia: um cartão discreto com a gravidade, o que ele viu e o que fez. */
+function VigiaCard({ message }: { message: TeamMessage }) {
+  const { t } = useTranslation();
+  const note = useMemo(() => parseVigiaText(message.text), [message.text]);
+  const [open, setOpen] = useState(false);
+  const long = note.body.length > 150 || (note.action?.length ?? 0) > 110;
+  const tone = {
+    stuck: { bar: "border-red-500/70", pill: "bg-red-500/15 text-red-600 dark:text-red-300" },
+    warn: { bar: "border-amber-500/70", pill: "bg-amber-500/15 text-amber-700 dark:text-amber-300" },
+    info: { bar: "border-gray-400/60 dark:border-white/25", pill: "bg-black/[0.06] text-gray-600 dark:bg-white/[0.08] dark:text-white/65" },
+  }[note.tone];
+  return (
+    <div className={`rounded-xl border-l-[3px] bg-black/[0.025] px-3.5 py-2.5 dark:bg-white/[0.035] ${tone.bar}`}>
+      <div className="mb-1 flex items-center gap-1.5 text-[11.5px] leading-4">
+        <svg viewBox="0 0 24 24" aria-hidden className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-white/55" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg>
+        <span className="font-semibold text-gray-800 dark:text-white/85">{t("canvas.team.vigia")}</span>
+        {note.label && <span className={`rounded-full px-1.5 text-[10px] font-medium leading-4 ${tone.pill}`}>{t(`canvas.team.vigiaTone.${note.tone}`)}</span>}
+        {message.toName && message.toTabId !== message.fromTabId && <span title={message.toName} className="min-w-0 max-w-[40%] truncate text-gray-500 dark:text-white/50">→ {message.toName}</span>}
+        <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35">{clock(message.atMs)}</span>
+      </div>
+      <p className={`text-[12.5px] leading-[19px] text-gray-700 dark:text-white/75 ${long && !open ? "line-clamp-3" : ""}`}>{note.body}</p>
+      {note.action && (
+        <p className={`mt-1.5 flex gap-1.5 text-[12px] leading-[18px] text-gray-500 dark:text-white/50 ${long && !open ? "line-clamp-2" : ""}`}>
+          <span className="shrink-0 font-medium text-emerald-600 dark:text-emerald-400">{t("canvas.team.vigiaDone")}</span>
+          <span>{note.action}</span>
+        </p>
+      )}
+      {long && (
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+          className="cc-t mt-1.5 text-[11.5px] font-medium text-accent-600 hover:underline dark:text-accent-300">
+          {t(open ? "canvas.team.showLess" : "canvas.team.showMore")}
+        </button>
+      )}
+    </div>
   );
 }
 
@@ -171,14 +208,7 @@ export function TeamFeed({ items, colors = {} }: {
     }
     const m = item.message;
     if (isVigiaMessage(m)) {
-      return (
-        <div key={item.key} className="flex items-baseline gap-1.5 px-1 text-[11.5px] leading-4 text-gray-500 dark:text-white/50">
-          <span className="shrink-0 font-semibold">{t("canvas.team.vigia")}</span>
-          {m.toName && m.toTabId !== m.fromTabId && <span title={m.toName} className="max-w-[30%] shrink-0 truncate">→ {m.toName}</span>}
-          <span title={m.text} className="min-w-0 flex-1 truncate italic">{m.text}</span>
-          <span className="shrink-0 font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35">{clock(m.atMs)}</span>
-        </div>
-      );
+      return <VigiaCard key={item.key} message={m} />;
     }
     const continuation = isContinuation(items[index - 1], item);
     return (

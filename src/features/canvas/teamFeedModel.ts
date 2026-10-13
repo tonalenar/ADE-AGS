@@ -195,3 +195,36 @@ export function emphasizeTitle(text: string): string {
 export function formatMessageText(text: string): string {
   return codeAddresses(emphasizeTitle(text.trim()));
 }
+
+// ── Avisos do Vigia ────────────────────────────────────────────────────
+
+export type VigiaTone = "warn" | "stuck" | "info";
+
+export interface VigiaNote {
+  tone: VigiaTone;
+  /** A palavra que o Vigia usou (`aviso`, `travado`…), se houver. */
+  label: string | null;
+  /** O que ele viu. */
+  body: string;
+  /** O que ele fez ("Feito: …"), se disse. */
+  action: string | null;
+}
+
+/**
+ * O texto do Vigia vem como `**Vigia** — aviso: o Backend parou. Feito: avisei você na tela.`
+ * (às vezes sem o negrito). Tira o prefixo, separa a palavra de gravidade, o que ele viu e o que fez. Pura.
+ */
+export function parseVigiaText(text: string): VigiaNote {
+  let rest = text.replace(/\*\*/g, "").trim().replace(/^vigia\s*[—–-]\s*/i, "");
+  let label: string | null = null;
+  const head = /^([A-Za-zÀ-ÿ]{3,14}):\s+/.exec(rest);
+  if (head && head[1].toLowerCase() !== "feito") {
+    label = head[1].toLowerCase();
+    rest = rest.slice(head[0].length);
+  }
+  const split = /\s*\bFeito:\s*/i.exec(rest);
+  const body = (split ? rest.slice(0, split.index) : rest).trim();
+  const action = split ? rest.slice(split.index + split[0].length).trim() || null : null;
+  const tone: VigiaTone = label === "travado" ? "stuck" : label === "aviso" || label === "atenção" || label === "atencao" ? "warn" : "info";
+  return { tone, label, body, action };
+}

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildFeed, codeAddresses, emphasizeTitle, formatMessageText, feedFilterOptions, filterFeed, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, parseMention, resolveMention, suggestMentions, type TeamMessage } from "../teamFeedModel";
+import { buildFeed, parseVigiaText, codeAddresses, emphasizeTitle, formatMessageText, feedFilterOptions, filterFeed, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, parseMention, resolveMention, suggestMentions, type TeamMessage } from "../teamFeedModel";
 
 const team = [
   { id: "t1", name: "Orquestrador" },
@@ -125,5 +125,23 @@ describe("formatação do texto das mensagens", () => {
   });
   it("formatMessageText junta as duas coisas", () => {
     expect(formatMessageText("  TAREFA Backend\nEdite src-tauri/src/memory.rs agora  ")).toBe("**TAREFA Backend**\n\nEdite `src-tauri/src/memory.rs` agora");
+  });
+});
+
+describe("parseVigiaText", () => {
+  it("separa a gravidade, o que o Vigia viu e o que ele fez, sem o prefixo nem o negrito", () => {
+    expect(parseVigiaText("**Vigia** — aviso: O agente Backend está parado numa caixa de diálogo. Feito: avisei você na tela: a decisão é sua.")).toEqual({
+      tone: "warn",
+      label: "aviso",
+      body: "O agente Backend está parado numa caixa de diálogo.",
+      action: "avisei você na tela: a decisão é sua.",
+    });
+    const stuck = parseVigiaText("Vigia — travado: Backend há 42 min na mesma tarefa, sem reportar nada. Feito: lembrete 3/3 enviado ao Orquestrador.");
+    expect(stuck.tone).toBe("stuck");
+    expect(stuck.action).toBe("lembrete 3/3 enviado ao Orquestrador.");
+  });
+  it("sem gravidade nem ação, vira informação com o texto inteiro", () => {
+    expect(parseVigiaText("tudo certo por aqui")).toEqual({ tone: "info", label: null, body: "tudo certo por aqui", action: null });
+    expect(parseVigiaText("Vigia — Feito: nada").action).toBe("nada");
   });
 });
