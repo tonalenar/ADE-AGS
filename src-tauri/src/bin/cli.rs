@@ -225,6 +225,7 @@ MEMÓRIA COMPARTILHADA (os agentes usam por MCP; veja docs/ade-ags/SHARED_MEMORY
                                               O aprovado do workspace e da missão;
                                               o que se propõe espera aprovação.
   memory index                              Índice aprovado da tab ou missão atual
+  memory usage [--since <unix-seconds>]      Quem leu a memória: buscas, aberturas e memórias nunca lidas
   memory open <página|entryId|chave>         Página do índice ou UMA entrada inteira (DADOS NÃO CONFIÁVEIS)
   swarm note|question <texto>                Dados de sessão da missão, não memória durável
   swarm promote <note-id> <key>              Propõe a nota; aprovação exclusiva do usuário

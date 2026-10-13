@@ -19,6 +19,8 @@ pub(crate) use points::{
     fleet_jobs, observe_dreams, observe_memory_mission, observe_memory_workspace, observe_mission,
 };
 pub(crate) use shadow::enqueue;
+#[cfg(test)]
+pub(crate) use points::{memory_state_hash, POINT_MEMORY};
 
 #[cfg(test)]
 mod test;

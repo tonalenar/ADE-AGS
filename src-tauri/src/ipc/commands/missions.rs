@@ -295,6 +295,9 @@ pub(super) fn memory_search(app: &AppHandle, args: &Value) -> Result<Value, Stri
             limit,
         )?,
     };
+    let keys: Vec<String> = hits.iter().map(|hit| hit.key.clone()).collect();
+    let tab = authenticated_tab(args).ok();
+    crate::memory::usage::record(&conn, &crate::memory::usage::UsageRow { ts: crate::memory::usage::now(), workspace_id: &mission.workspace_id, mission_id: Some(&id), tab_id: tab.as_deref(), action: "search", query: Some(query.as_str()), hits: hits.len() as u32, entry_keys: &keys });
     Ok(match at {
         Some(at) => json!({ "query": query, "at": at, "results": hits }),
         None => json!({ "query": query, "results": hits }),
@@ -308,7 +311,24 @@ pub(super) fn memory_repo_read(app: &AppHandle, args: &Value, index: bool) -> Re
     let conn = db.lock().map_err(|e| e.to_string())?;
     let (workspace, mission) = workspace_for_caller(&conn, &tab)?;
     let text = crate::memory::repo::approved_open(&conn, &workspace, mission.as_deref(), &path)?;
+    let read_keys: Vec<String> = if index { Vec::new() } else { vec![path.clone()] };
+    let hits = u32::from(!text.trim().is_empty());
+    let action = if index { "index" } else { "open" };
+    crate::memory::usage::record(&conn, &crate::memory::usage::UsageRow { ts: crate::memory::usage::now(), workspace_id: &workspace, mission_id: mission.as_deref(), tab_id: Some(tab.as_str()), action, query: None, hits, entry_keys: &read_keys });
     Ok(json!({"path": path, "text": text}))
+}
+
+/// `ags memory usage [--since <unix-seconds>]`: quem leu a memória do workspace da aba.
+pub(super) fn memory_usage(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let tab = authenticated_tab(args)?;
+    let since = match args.get("since") {
+        None | Some(Value::Null) => None,
+        Some(value) => Some(value.as_i64().ok_or("--since precisa de Unix seconds")?),
+    };
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let (workspace, _) = workspace_for_caller(&conn, &tab)?;
+    Ok(json!(crate::memory::usage::report(&conn, &workspace, since)?))
 }
 
 pub(super) fn swarm_write(app: &AppHandle, args: &Value, question: bool) -> Result<Value,String> {
