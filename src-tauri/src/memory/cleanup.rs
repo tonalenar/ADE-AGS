@@ -22,6 +22,10 @@ const PREVIEW_CHARS: usize = 200;
 /// Só conta a rejeição do Jev quando a probabilidade dele chega a este valor (se ela existir).
 const JEV_MIN_PROBABILITY: f64 = 0.45;
 const TEST_KEY_PREFIXES: &[&str] = &["neg-", "test-", "tmp-", "teste-"];
+/// Chaves que são, por inteiro, de teste (sem hífen depois).
+const TEST_KEYS: &[&str] = &["test", "teste", "tmp", "temp", "foo", "asdf"];
+/// Corpos que não dizem nada: o que se escreve para ver se funciona.
+const PLACEHOLDER_BODIES: &[&str] = &["test", "teste", "testing", "tmp", "ok", "asdf", "foo", "bar", "lorem ipsum", "xxx", "..."];
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -116,8 +120,13 @@ pub fn candidates_for(conn: &Connection, workspace_id: &str) -> Result<Vec<Candi
     // (b) Chaves de teste.
     for (i, row) in rows.iter().enumerate() {
         let key = row.key.to_lowercase();
-        if TEST_KEY_PREFIXES.iter().any(|prefix| key.starts_with(prefix)) {
+        if TEST_KEY_PREFIXES.iter().any(|prefix| key.starts_with(prefix)) || TEST_KEYS.contains(&key.trim()) {
             reasons[i].push("chave de teste".to_string());
+        }
+        // Corpo sem conteúdo: de até 2 caracteres ou uma das palavras de preenchimento.
+        let body = normalize_body(&row.body);
+        if body.chars().count() <= 2 || PLACEHOLDER_BODIES.contains(&body.as_str()) {
+            reasons[i].push("corpo sem conteúdo".to_string());
         }
     }
 
@@ -337,6 +346,23 @@ mod tests {
         assert_eq!(reasons_of(&list, "tmpfoo"), None);
         // Ordenação: número de motivos desc, depois chave.
         assert_eq!(list.iter().map(|c| c.key.as_str()).collect::<Vec<_>>(), vec!["TEST-y", "Teste-z", "neg-x"]);
+    }
+
+    #[test]
+    fn chave_de_teste_inteira_e_corpo_sem_conteudo_tambem_entram() {
+        let conn = db();
+        seed(&conn);
+        add(&conn, "workspace", "w1", None, "test", "test");
+        add(&conn, "workspace", "w1", None, "regra-real", "ok");
+        add(&conn, "workspace", "w1", None, "testando", "A regra do projeto é X e vale para todos os módulos");
+        add(&conn, "workspace", "w1", None, "contexto", "Lorem Ipsum");
+        let list = candidates_for(&conn, "w1").unwrap();
+        assert_eq!(reasons_of(&list, "test"), Some(vec!["chave de teste".to_string(), "corpo sem conteúdo".to_string()]));
+        assert_eq!(reasons_of(&list, "regra-real"), Some(vec!["corpo sem conteúdo".to_string()]));
+        assert_eq!(reasons_of(&list, "contexto"), Some(vec!["corpo sem conteúdo".to_string()]));
+        assert_eq!(reasons_of(&list, "testando"), None, "só a chave inteira conta, não o começo de uma palavra");
+        // Mais motivos primeiro.
+        assert_eq!(list[0].key, "test");
     }
 
     #[test]
