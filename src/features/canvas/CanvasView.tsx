@@ -743,12 +743,12 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
         >
           <NodeStatus tabId={tab.id} />
           <span className="flex min-w-0 flex-1 flex-col">
-            <span className="truncate text-[15px] leading-5 font-semibold tracking-[-0.1px] text-gray-900 dark:text-[#f5f5f7]">{tab.title.split(" — ")[0]}</span>
+            <span title={tab.title.split(" — ")[0]} className="truncate text-[15px] leading-5 font-semibold tracking-[-0.1px] text-gray-900 dark:text-[#f5f5f7]">{tab.title.split(" — ")[0]}</span>
             <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-[14px] text-gray-500 dark:text-white/60" title={tab.title}>
               <span aria-hidden className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: agentTile(tab.agentId) }} />
               <span className="shrink-0">{tab.agentLabel}</span>
               {tab.title.includes(" — ") && (
-                <span className="min-w-0 truncate font-mono text-[10.5px] text-gray-400 dark:text-white/30">{tab.title.split(" — ").slice(1).join(" — ")}</span>
+                <span title={tab.title.split(" — ").slice(1).join(" — ")} className="min-w-0 truncate font-mono text-[10.5px] text-gray-400 dark:text-white/30">{tab.title.split(" — ").slice(1).join(" — ")}</span>
               )}
             </span>
           </span>

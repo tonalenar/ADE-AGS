@@ -268,6 +268,19 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("ao cancelar a confirmação do lote, o foco volta ao diálogo e não fica num botão que saiu da tela", async () => {
+    await act(async () => {
+      root.render(<MemoryInbox workspaceId="w1" onClose={vi.fn()} />);
+    });
+    const approveAll = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent?.includes("memoryInbox.approveAll"));
+    await act(async () => { approveAll?.click(); });
+    const cancel = document.body.querySelector<HTMLButtonElement>('[role="alertdialog"] button[aria-label="memoryInbox.cancel"]');
+    cancel?.focus();
+    await act(async () => { cancel?.click(); });
+    expect(document.body.querySelector('[role="alertdialog"]')).toBeNull();
+    expect(document.activeElement).toBe(document.body.querySelector('[role="dialog"]'));
+  });
+
   it("quando confirm NÃO está aberto, Escape fecha o inbox chamando onClose", async () => {
     const onClose = vi.fn();
 

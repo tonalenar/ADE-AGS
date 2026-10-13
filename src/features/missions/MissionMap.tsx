@@ -246,11 +246,11 @@ function Node({ task, x, y, activity, account }: {
     >
       <div className="flex items-center gap-1.5 min-w-0">
         <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_DOT[task.status]}`} />
-        <span className="truncate text-[11.5px] font-semibold text-gray-800 dark:text-gray-100">{task.planKey ?? task.title}</span>
+        <span title={task.title} className="truncate text-[11.5px] font-semibold text-gray-800 dark:text-gray-100">{task.planKey ?? task.title}</span>
         {task.handoff && <span className="shrink-0 text-[10px] text-violet-500" title={t("missions.map.rerouted")}>↻</span>}
       </div>
-      <span className="truncate text-[10px] text-gray-500 dark:text-white/45">{[role, agent].filter(Boolean).join(" · ")}</span>
-      <span className="truncate text-[10px] text-gray-400 dark:text-white/35">
+      <span title={[role, agent].filter(Boolean).join(" · ")} className="truncate text-[10px] text-gray-500 dark:text-white/45">{[role, agent].filter(Boolean).join(" · ")}</span>
+      <span title={live ?? account ?? undefined} className="truncate text-[10px] text-gray-400 dark:text-white/35">
         {live ? <span className="text-emerald-600 dark:text-emerald-400">{live}</span> : account}
       </span>
     </div>
