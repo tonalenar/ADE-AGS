@@ -20,7 +20,20 @@ export function pokeAllowed(pokedAt: number | undefined, repliedAt: number | und
   return now - pokedAt >= POKE_PENDING_MS;
 }
 
-/** Recebeu uma tarefa e já reportou depois dela: parado à espera, não travado. */
+/** Só o relatório final explícito encerra a tarefa; perguntas e progresso não encerram. */
+export function isFinalReport(text: string | null | undefined, kind = "tell", name?: string): boolean {
+  if (kind !== "tell") return false;
+  const firstLine = (text ?? "").trim().split(/\r?\n/, 1)[0];
+  let plain = firstLine;
+  if (name) {
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    plain = plain.replace(new RegExp(`^${escaped}(?:\\s+v\\d+)?(?:\\s*[:—-]\\s*|\\s+)`, "i"), "");
+  }
+  return !firstLine.includes("?")
+    && /^(entregue|entrega final|trabalho conclu[ií]do|encerrad[oa]|finalizad[oa]|conclu[ií]d[oa]|terminei)\b/i.test(plain);
+}
+
+/** Recebeu uma tarefa e entregou um relatório FINAL depois dela: parado à espera. */
 export function memberFinished(taskAt: number | undefined, reportedAt: number | undefined): boolean {
   return taskAt !== undefined && reportedAt !== undefined && reportedAt >= taskAt;
 }

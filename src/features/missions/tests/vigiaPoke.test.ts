@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { memberFinished, POKE_PENDING_MS, pokeAllowed } from "../vigiaPoke";
+import { isFinalReport, memberFinished, POKE_PENDING_MS, pokeAllowed } from "../vigiaPoke";
 
 const MIN = 60_000;
 
@@ -36,6 +36,29 @@ describe("integrante que já entregou", () => {
   it("sem tarefa, ou sem relatório depois dela, não terminou", () => {
     expect(memberFinished(undefined, 20)).toBe(false);
     expect(memberFinished(10, undefined)).toBe(false);
+    expect(memberFinished(30, 20)).toBe(false);
+  });
+});
+
+describe("relatório final explícito", () => {
+  it("pergunta e status de progresso não encerram a tarefa", () => {
+    expect(isFinalReport("Backend iniciou: testes em execução.")).toBe(false);
+    expect(isFinalReport("QA: informe o estado das propostas.", "ask")).toBe(false);
+    expect(isFinalReport("Backend entregue? Preciso confirmar.")).toBe(false);
+    expect(isFinalReport("Ainda não entregue: testes em execução.")).toBe(false);
+    expect(isFinalReport("Use o marcador ENTREGUE na mensagem final.", "tell", "Backend")).toBe(false);
+    expect(isFinalReport("G5: a primeira linha precisa conter ENTREGUE.", "tell", "Backend")).toBe(false);
+    expect(isFinalReport("Backend: teste concluído, sigo trabalhando.")).toBe(false);
+    expect(isFinalReport("Em progresso.\nEntrega final será depois dos testes.")).toBe(false);
+  });
+
+  it("entrega final explícita encerra só a tarefa anterior", () => {
+    expect(isFinalReport("BACKEND ENTREGUE. Branch: cc/missao; commit: abc.", "tell", "Backend")).toBe(true);
+    expect(isFinalReport("Frontend: trabalho concluído.", "tell", "Frontend")).toBe(true);
+    expect(isFinalReport("Entrega final: relatório validado.")).toBe(true);
+    expect(isFinalReport("QA / Tests v16 — ENTREGUE.", "tell", "QA / Tests")).toBe(true);
+    expect(isFinalReport("Test[1]: ENTREGUE.", "tell", "Test[1]")).toBe(true);
+    expect(isFinalReport("BACKEND ENTREGUE.", "ask")).toBe(false);
     expect(memberFinished(30, 20)).toBe(false);
   });
 });

@@ -9,7 +9,7 @@
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
 
-use tauri::{AppHandle, Emitter};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// Quanto se espera pela resposta do modelo.
 const CALL_TIMEOUT: Duration = Duration::from_secs(120);
@@ -181,6 +181,14 @@ pub fn vigia_report(app: AppHandle, tab_id: String, text: String) -> Result<(), 
         Ok(())
     })?;
     let _ = app.emit(crate::ipc::commands::chat::CHANGED_EVENT, &tab_id);
+    let boards = crate::canvas::load_boards();
+    let db = app.state::<crate::database::DbConnection>();
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let name: String = conn.query_row(
+        "SELECT COALESCE(NULLIF(title, ''), agent_label) FROM tabs WHERE id=?1",
+        [&tab_id], |r| r.get(0),
+    ).unwrap_or_else(|_| tab_id.clone());
+    crate::missions::messages::record_vigia(&conn, &boards, (&tab_id, &name), &text, now * 1000)?;
     Ok(())
 }
 
