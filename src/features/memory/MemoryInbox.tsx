@@ -72,7 +72,7 @@ const BTN_ITEM_SEC = "h-7 rounded-[7px] bg-gray-200/80 px-3 text-[13px] font-med
  * Modal único con TODAS las sugerencias pendientes del workspace, agrupadas por misión. Aceptar o
  * rechazar es siempre un clic del usuario; aceptar en masa pide confirmación con la cuenta y, si hay
  * contradicciones, un aviso explícito (sin confirmarlo no se aceptan).
- * Teclado: Esc cierra (o cancela la confirmación), Enter confirma SIN aceptar avisos.
+ * Teclado: Esc cierra (o cancela la confirmación), Enter solo confirma con el foco en el botón.
  */
 export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
   const { t } = useTranslation();
@@ -120,6 +120,14 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
   useEffect(() => { loadDrafts(); }, [loadDrafts]);
   useEffect(() => { root.current?.focus(); }, []);
 
+  /** Origem visível sem abrir a proposta: missão, quem propôs, tipo e prioridade. */
+  const originLine = (item: MemoryReviewItem) => {
+    const g = groups.find((x) => x.items.includes(item));
+    return t("memoryInbox.origin", {
+      mission: g?.title ?? "", actor: t(`memoryReview.actor.${item.evidence.actorKind}`),
+      kind: t(`memorySearch.kinds.${item.kind}`), priority: item.priority,
+    });
+  };
   const all = useMemo(() => flatten(groups), [groups]);
   const chosen = useMemo(() => selectedItems(groups, selected), [groups, selected]);
 
@@ -164,10 +172,6 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     const action = inboxKeyAction(e.key, !!confirm);
     if (action.type === "close") { e.stopPropagation(); onClose(); }
     else if (action.type === "cancel-confirm") { e.stopPropagation(); setConfirm(null); }
-    else if (action.type === "approve" && confirm) {
-      e.preventDefault();
-      void approve(confirm.items, action.acknowledge);
-    }
   };
 
   const plan = confirm ? planBulk(confirm.items) : null;
@@ -214,7 +218,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
           {!loaded && <p className="py-10 text-center text-[12.5px] text-gray-500 dark:text-white/45">{t("memoryInbox.loading")}</p>}
           {groups.map((g) => (
             <section key={g.missionId} className="mb-4" aria-label={g.title}>
-              <h3 className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-gray-900 dark:text-gray-100">
+              <h3 title={g.title} className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-gray-900 dark:text-gray-100">
                 <input type="checkbox" className="size-3.5 accent-accent-500" aria-label={t("memoryInbox.selectMission", { title: g.title })}
                   checked={g.items.every((i) => selected.has(itemId(i)))}
                   onChange={(e) => setSelected((cur) => {
@@ -231,18 +235,20 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                   const ev = evidenceParts(item);
                   const id = itemId(item);
                   return (
-                    <li key={id} data-flag={flag}
-                      className={`flex flex-col gap-1.5 rounded-[10px] p-3 transition-colors ${selected.has(id)
+                    <li key={id} data-flag={flag} data-high-priority={asksHighPriority(item) ? "true" : undefined}
+                      className={`flex flex-col gap-1.5 rounded-[10px] p-3 transition-colors ${asksHighPriority(item) ? "border-l-2 border-amber-500 " : ""}${selected.has(id)
                         ? "bg-accent-500/[0.06] shadow-[inset_0_0_0_1px_var(--color-accent-500)]"
                         : "bg-white shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.1)] dark:bg-surface-raised/60 dark:shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06)]"}`}>
                       <div className="flex items-center gap-2">
                         <input type="checkbox" className="size-3.5 accent-accent-500" checked={selected.has(id)} onChange={() => toggle(id)} aria-label={t("memoryInbox.selectItem", { key: item.key })} />
                         <span className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-[#f5f5f7]" title={item.key}>{item.key}</span>
-                        {isDeletion(item) && <span className="inline-flex h-[18px] items-center rounded-full bg-red-600 px-2 text-[10px] font-bold text-white">{t("memoryInbox.deletion")}</span>}
-                        {asksHighPriority(item) && <span className="inline-flex h-[18px] items-center rounded-full bg-amber-500/15 px-2 text-[10px] font-semibold text-amber-700 dark:text-amber-300" title={t("memoryInbox.highPriorityHint")}>{t("memoryInbox.highPriority", { priority: item.priority })}</span>}
+                        {isDeletion(item) && <span title={t("memoryInbox.deletion")} className="inline-flex h-[18px] items-center rounded-full bg-red-600 px-2 text-[10px] font-bold text-white">{t("memoryInbox.deletion")}</span>}
+                        {asksHighPriority(item) && <span role="note" aria-label={t("memoryInbox.highPriorityHint")} className="inline-flex h-[18px] items-center rounded-full bg-amber-500/25 px-2 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-500/60 dark:text-amber-200" title={t("memoryInbox.highPriorityHint")}>⚠ {t("memoryInbox.highPriority", { priority: item.priority })}</span>}
                         {flag === "highValue" && <span className={`inline-flex h-[18px] items-center rounded-full px-2 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>}
                       </div>
-                      <p className="whitespace-pre-wrap break-words text-[12.5px] leading-[17px] text-gray-600 dark:text-white/60">{item.body}</p>
+                      <p data-testid="memory-origin" className="truncate text-[10.5px] leading-[14px] text-gray-500 dark:text-white/45"
+                        title={originLine(item)}>{originLine(item)}</p>
+                      <p title={item.body} className="whitespace-pre-wrap break-words text-[12.5px] leading-[17px] text-gray-600 dark:text-white/60">{item.body}</p>
                       <p className="font-mono text-[10.5px] leading-[14px] text-gray-500 dark:text-white/40">
                         {t("memoryReview.evidence")}: {t(`memoryReview.actor.${item.evidence.actorKind}`)}
                         {ev.runId ? ` · run ${ev.runId.slice(0, 8)}` : ""}
@@ -288,7 +294,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                 </div>
               )}
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setConfirm(null)} className={BTN_SEC}>{t("memoryInbox.cancel")}</button>
+                <button type="button" aria-label={t("memoryInbox.cancel")} onClick={() => setConfirm(null)} className={BTN_SEC}>{t("memoryInbox.cancel")}</button>
                 {plan.needsWarning && (
                   <button type="button" onClick={() => void approve(confirm.items, true)} className="h-7 rounded-md border border-red-500/60 px-3 text-[12px] text-red-700 hover:bg-red-500/10 dark:text-red-300">
                     {t("memoryInbox.confirmAnyway")}

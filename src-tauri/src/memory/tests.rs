@@ -1509,6 +1509,52 @@ fn task_reads_never_expose_pending_or_rejected_content() {
 }
 
 #[test]
+fn task_revision_reads_only_expose_current_approval_across_missions() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_mission(&conn, "origin", "w1");
+    seed_mission(&conn, "reader", "w1");
+    seed_run(&conn, "origin-run", "w1", Some("origin"));
+    seed_run(&conn, "reader-run", "w1", Some("reader"));
+    for role in ["lead", "worker"] {
+        seed_task(&conn, role, "reader-run", Some(role));
+    }
+    let first = activate(&conn, "workspace", None, "shared", "superseded approval");
+    let current = propose(&conn, "workspace", None, "shared", "current approval", "update", Some(first.revision));
+    decide(&conn, &current.entry_id, current.revision, true).unwrap();
+    let rejected = propose(&conn, "workspace", None, "shared", "rejected from origin", "update", Some(current.revision));
+    decide(&conn, &rejected.entry_id, rejected.revision, false).unwrap();
+    let pending = propose(&conn, "workspace", None, "shared", "pending from origin", "update", Some(current.revision));
+    for role in ["lead", "worker"] {
+        for revision in [first.revision, rejected.revision, pending.revision] {
+            assert!(task_tool(&conn, role, "memory.get", json!({"entry_id":first.entry_id,"revision":revision})).is_err());
+        }
+        for (command, args) in [
+            ("memory.list", json!({"scope":"workspace"})),
+            ("memory.get", json!({"entry_id":first.entry_id})),
+            ("memory.get", json!({"entry_id":first.entry_id,"revision":current.revision})),
+        ] {
+            let response = task_tool(&conn, role, command, args).unwrap();
+            let text = response["text"].as_str().unwrap();
+            assert!(text.contains("current approval"));
+            for hidden in ["superseded approval", "rejected from origin", "pending from origin"] {
+                assert!(!text.contains(hidden));
+            }
+        }
+    }
+    // Local human review keeps the full history, including prior approvals.
+    assert_eq!(detail_for_owner(&conn, &first.entry_id, "w1", None).unwrap().revisions.len(), 4);
+    decide(&conn, &pending.entry_id, pending.revision, false).unwrap();
+    let deleted = propose(&conn, "workspace", None, "shared", "current approval", "delete", Some(current.revision));
+    decide(&conn, &deleted.entry_id, deleted.revision, true).unwrap();
+    for role in ["lead", "worker"] {
+        for revision in [first.revision, current.revision, deleted.revision] {
+            assert!(task_tool(&conn, role, "memory.get", json!({"entry_id":first.entry_id,"revision":revision})).is_err());
+        }
+    }
+}
+
+#[test]
 fn secrets_are_rejected_by_core_task_suggest_promotion_and_run_facts() {
     let conn = db(); seed_workspace(&conn, "w1"); seed_mission(&conn, "m1", "w1");
     seed_run(&conn, "r1", "w1", Some("m1")); seed_task(&conn, "worker", "r1", Some("worker"));

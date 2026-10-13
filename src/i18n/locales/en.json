@@ -2710,6 +2710,7 @@
   "memoryInbox.confirmDuplicates": "{{count}} duplicate(s) will NOT be accepted in bulk.",
   "memoryInbox.highPriority": "asks high priority ({{priority}})",
   "memoryInbox.highPriorityHint": "The agent asked for high priority; this does not make it more trustworthy.",
+  "memoryInbox.origin": "Origin: {{mission}} · {{actor}} · {{kind}} · priority {{priority}}",
   "memoryInbox.syncQueued": "Memory repository export is queued.",
   "memoryInbox.syncing": "Syncing the memory repository…",
   "memoryInbox.syncFailed": "The approval was saved, but the repository export failed: {{error}}",

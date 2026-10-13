@@ -2710,6 +2710,7 @@
   "memoryInbox.confirmDuplicates": "{{count}} duplicata(s) NÃO serão aceitas em massa.",
   "memoryInbox.highPriority": "pede prioridade alta ({{priority}})",
   "memoryInbox.highPriorityHint": "O agente pediu prioridade alta; isso não a torna mais confiável.",
+  "memoryInbox.origin": "Origem: {{mission}} · {{actor}} · {{kind}} · prioridade {{priority}}",
   "memoryInbox.syncQueued": "A exportação do repositório de memória está na fila.",
   "memoryInbox.syncing": "Sincronizando o repositório de memória…",
   "memoryInbox.syncFailed": "A aprovação foi salva, mas a exportação do repositório falhou: {{error}}",

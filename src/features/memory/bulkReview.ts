@@ -73,13 +73,12 @@ export const asksHighPriority = (item: Pick<MemoryReviewItem, "priority" | "evid
   item.evidence.actorKind !== "user" && item.priority >= AGENT_HIGH_PRIORITY;
 
 /**
- * Qué hace una tecla en el modal. Enter confirma SIEMPRE sin aceptar avisos (contradicciones y
- * exclusiones quedan fuera): aceptarlos exige el clic explícito en "Aceptar igual". Pura.
+ * Qué hace una tecla en el modal. Enter NO aprueba nada a nivel del diálogo: solo confirma el botón
+ * que tiene el foco (clic nativo), así Enter con foco en "Cancelar" o fuera de los botones no aprueba. Pura.
  */
-export type InboxKeyAction = { type: "close" } | { type: "cancel-confirm" } | { type: "approve"; acknowledge: false } | { type: "none" };
+export type InboxKeyAction = { type: "close" } | { type: "cancel-confirm" } | { type: "none" };
 export function inboxKeyAction(key: string, confirmOpen: boolean): InboxKeyAction {
   if (key === "Escape") return confirmOpen ? { type: "cancel-confirm" } : { type: "close" };
-  if (key === "Enter" && confirmOpen) return { type: "approve", acknowledge: false };
   return { type: "none" };
 }
 

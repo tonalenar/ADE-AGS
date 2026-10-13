@@ -154,7 +154,7 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
     container.remove();
   });
 
-  it("ao abrir confirmação e pressionar Enter, não aprova contradições nem duplicatas cegamente", async () => {
+  it("ao abrir confirmação e pressionar Enter, não aprova nada fora do botão focado", async () => {
     const onClose = vi.fn();
 
     await act(async () => {
@@ -184,16 +184,38 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
       );
     });
 
-    // 3. Verifica que APENAS o item seguro foi decidido, e NÃO os que contradizem ou duplicam
-    expect(decideMemoryMock).toHaveBeenCalledTimes(1);
-    expect(decideMemoryMock).toHaveBeenCalledWith(
-      "entry-safe",
-      1,
-      true,
-    );
+    // 3. Enter solto no diálogo (foco fora do botão) não decide nada
+    expect(decideMemoryMock).not.toHaveBeenCalled();
+    // 3b. O botão primário é o que tem o foco (Enter nativo = clique nele)
+    expect(document.body.querySelector('[role="alertdialog"] button[autofocus], [role="alertdialog"] button:focus')).not.toBeNull();
 
     // 4. O modal não foi fechado por engano (onClose não deve ser chamado no Enter)
     expect(onClose).not.toHaveBeenCalled();
+  });
+
+  it("cada proposta mostra a origem (missão, agente, tipo, prioridade) sem abrir", async () => {
+    await act(async () => { root.render(<MemoryInbox workspaceId="w1" onClose={vi.fn()} />); });
+    const origins = Array.from(document.body.querySelectorAll('[data-testid="memory-origin"]'));
+    expect(origins).toHaveLength(3);
+    expect(origins[0].textContent).toContain("memoryInbox.origin");
+    expect(origins[0].getAttribute("title")).toBe(origins[0].textContent);
+  });
+
+  it("agente que pede prioridade alta recebe aviso visual; prioridade baixa não", async () => {
+    mockReviewSummary.groups[0].items = [{ ...safeItem, priority: 9 }, duplicateItem];
+    await act(async () => { root.render(<MemoryInbox workspaceId="w1" onClose={vi.fn()} />); });
+    const flagged = document.body.querySelectorAll('li[data-high-priority="true"]');
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0].querySelector('[role="note"]')?.getAttribute("aria-label")).toBe("memoryInbox.highPriorityHint");
+  });
+
+  it("texto longo tem title e o botão Cancelar tem rótulo acessível", async () => {
+    await act(async () => { root.render(<MemoryInbox workspaceId="w1" onClose={vi.fn()} />); });
+    const body = Array.from(document.body.querySelectorAll("li p")).find((p) => p.textContent === "Porta 8080 configurada");
+    expect(body?.getAttribute("title")).toBe("Porta 8080 configurada");
+    const approveAll = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent?.includes("memoryInbox.approveAll"));
+    await act(async () => { approveAll?.click(); });
+    expect(document.body.querySelector('[role="alertdialog"] button[aria-label="memoryInbox.cancel"]')).not.toBeNull();
   });
 
   it("quando confirm NÃO está aberto, pressionar Enter não executa aprovações", async () => {
