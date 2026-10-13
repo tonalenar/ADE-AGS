@@ -22,6 +22,8 @@ import { isHiddenNote, shownNote, stackMembers,
   NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isFreeNodeId, neighbors, thin, type CanvasNote, type CanvasPortal, type Stroke,
 } from "./board";
 import { CanvasToolbar, type DrawStyle, type Tool } from "./CanvasToolbar";
+import { boxFromDrag, defaultSize as defaultPlaceSize, isDrag, loadSizes, rememberSize, sizeLabel, type PlaceKind, type Point, type Size } from "./placeBox";
+import { setPlacement } from "./placement";
 import { DrawingLayer } from "./DrawingLayer";
 import { ImageNode, TextNode, type ImageFlowNode, type TextFlowNode } from "./ExtraNodes";
 import { DeviceNode } from "./DeviceNode";
@@ -254,6 +256,29 @@ function CanvasInner() {
   const [drawStyle, setDrawStyle] = useState<DrawStyle>({ color: "#ef4444", width: 4 });
   const [liveStroke, setLiveStroke] = useState<Stroke | null>(null);
   const strokeRef = useRef<Stroke | null>(null);
+  // Criar desenhando: o tipo esperando o retângulo, o arrasto em curso, os tamanhos que a pessoa mandou lembrar
+  // e o que acabou de ser criado (oferece "usar este tamanho").
+  const [armed, setArmed] = useState<PlaceKind | null>(null);
+  const [placeDrag, setPlaceDrag] = useState<{ from: Point; to: Point } | null>(null);
+  const placeRef = useRef<{ from: Point; to: Point } | null>(null);
+  const [sizes, setSizes] = useState(loadSizes);
+  const [lastPlaced, setLastPlaced] = useState<{ kind: PlaceKind; size: Size } | null>(null);
+  useEffect(() => {
+    if (!lastPlaced) return;
+    const timer = window.setTimeout(() => setLastPlaced(null), 9000);
+    return () => window.clearTimeout(timer);
+  }, [lastPlaced]);
+  useEffect(() => {
+    if (!armed) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      placeRef.current = null;
+      setPlaceDrag(null);
+      setArmed(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [armed]);
   const fileInput = useRef<HTMLInputElement>(null);
   // Una nota o un portal seleccionado no es un agente activo: se lleva aparte.
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
@@ -478,41 +503,39 @@ function CanvasInner() {
   /** El centro de lo que se ve, en coordenadas del canvas: donde aparece lo que se agrega. */
   const viewCenter = () => ({ x: (size.width / 2 - vp.x) / vp.zoom, y: (size.height / 2 - vp.y) / vp.zoom });
 
-  const addNoteHere = () => {
+  /** Cria o elemento no retângulo escolhido (desenhado ou, num clique solto, o padrão centrado no ponto). */
+  const placeBox = async (kind: PlaceKind, box: Box) => {
     if (!key) return;
-    const c = viewCenter();
-    const { id } = canvasActions.addNote(key, { name: t("canvas.noteDefaultName"), content: "", at: { x: c.x - 160, y: c.y - 120 } });
-    setSelectedNote(id);
-  };
-  const addPortalHere = () => {
-    if (!key) return;
-    const c = viewCenter();
-    const { id } = canvasActions.addPortal(key, { name: t("canvas.portalDefaultName"), at: { x: c.x - 320, y: c.y - 220 } });
-    setSelectedNote(id);
-  };
-  const addDeviceHere = () => {
-    if (!key) return;
-    const c = viewCenter();
-    const { id } = canvasActions.addPortal(key, { name: t("canvas.device.defaultName"), kind: "android", at: { x: c.x - 160, y: c.y - 320 } });
-    setSelectedNote(id);
-  };
-  /** Una carpeta del disco: se elige con el diálogo del sistema y se pone con su árbol a la vista. */
-  const addFolderHere = async () => {
-    if (!key) return;
-    try {
-      const picked = await pickFolder({ directory: true, multiple: false, defaultPath: portalCwd || undefined });
-      if (typeof picked !== "string") return;
-      const c = viewCenter();
-      setSelectedNote(canvasActions.addFolder(key, { path: picked, name: baseName(picked), at: { x: c.x - 150, y: c.y - 190 } }));
-    } catch (e) {
-      AlertaToast(t("canvas.tool.folder"), String(e), "error", 6000);
+    const at = { x: box.x, y: box.y };
+    const size = { w: box.w, h: box.h };
+    switch (kind) {
+      case "terminal":
+        setPlacement(key, box);
+        openNewAgentWizard();
+        break;
+      case "note":
+        setSelectedNote(canvasActions.addNote(key, { name: t("canvas.noteDefaultName"), content: "", at, size }).id);
+        break;
+      case "portal":
+        setSelectedNote(canvasActions.addPortal(key, { name: t("canvas.portalDefaultName"), at, size }).id);
+        break;
+      case "device":
+        setSelectedNote(canvasActions.addPortal(key, { name: t("canvas.device.defaultName"), kind: "android", at, size }).id);
+        break;
+      case "text":
+        setSelectedNote(canvasActions.addText(key, at, size));
+        break;
+      case "folder":
+        // Uma pasta do disco: escolhida com o diálogo do sistema e posta, com a árvore à vista, no retângulo.
+        try {
+          const picked = await pickFolder({ directory: true, multiple: false, defaultPath: portalCwd || undefined });
+          if (typeof picked !== "string") return;
+          setSelectedNote(canvasActions.addFolder(key, { path: picked, name: baseName(picked), at, size }));
+        } catch (e) {
+          AlertaToast(t("canvas.tool.folder"), String(e), "error", 6000);
+        }
+        break;
     }
-  };
-  const addTextHere = () => {
-    if (!key) return;
-    const c = viewCenter();
-    setSelectedNote(canvasActions.addText(key, { x: c.x - 120, y: c.y - 24 }));
-    setTool("select");
   };
 
   /** Una imagen elegida del disco: se copia a la carpeta de la app (ver `canvas::assets`) y
@@ -546,6 +569,15 @@ function CanvasInner() {
   const inCanvas = (e: React.PointerEvent) => (e.target as HTMLElement).closest(".react-flow") !== null;
   const strokeWidth = drawStyle.width / vp.zoom;
   const onDrawDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (armed && e.button === 0 && inCanvas(e)) {
+      e.preventDefault();
+      e.stopPropagation();
+      e.currentTarget.setPointerCapture(e.pointerId);
+      const at = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      placeRef.current = { from: at, to: at };
+      setPlaceDrag(placeRef.current);
+      return;
+    }
     if (tool !== "draw" || e.button !== 0 || !inCanvas(e)) return;
     e.preventDefault();
     e.stopPropagation();
@@ -556,6 +588,12 @@ function CanvasInner() {
     setLiveStroke(stroke);
   };
   const onDrawMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (placeRef.current) {
+      const to = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
+      placeRef.current = { ...placeRef.current, to };
+      setPlaceDrag(placeRef.current);
+      return;
+    }
     const stroke = strokeRef.current;
     if (!stroke) return;
     const at = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
@@ -563,7 +601,19 @@ function CanvasInner() {
     strokeRef.current = next;
     setLiveStroke(next);
   };
-  const onDrawUp = () => {
+  const onDrawUp = (e?: React.PointerEvent<HTMLDivElement>) => {
+    const drag = placeRef.current;
+    if (drag) {
+      placeRef.current = null;
+      setPlaceDrag(null);
+      if (e?.type === "pointercancel" || !armed) return;
+      const kind = armed;
+      const box = boxFromDrag(kind, drag.from, drag.to, vp.zoom, sizes);
+      setArmed(null);
+      if (isDrag(drag.from, drag.to, vp.zoom)) setLastPlaced({ kind, size: { w: box.w, h: box.h } });
+      void placeBox(kind, box);
+      return;
+    }
     const stroke = strokeRef.current;
     strokeRef.current = null;
     setLiveStroke(null);
@@ -613,7 +663,7 @@ function CanvasInner() {
 
   return (
     <div ref={wrapRef} className="absolute inset-0 bg-gray-50 dark:bg-surface-deep"
-      style={{ cursor: tool === "draw" ? "crosshair" : undefined }}
+      style={{ cursor: tool === "draw" || armed ? "crosshair" : undefined }}
       onPointerDownCapture={onDrawDown} onPointerMoveCapture={onDrawMove} onPointerUpCapture={onDrawUp}
       onPointerCancelCapture={onDrawUp}>
       <DesignActionsContext.Provider value={designActions}>
@@ -661,12 +711,23 @@ function CanvasInner() {
           { key: "disconnect", label: t("canvas.disconnect"), danger: true, hint: "⌫", onSelect: () => canvasActions.disconnect(key, edgeMenu.id) },
         ]} />
       )}
+      {placeDrag && armed && isDrag(placeDrag.from, placeDrag.to, vp.zoom) && (() => {
+        const box = boxFromDrag(armed, placeDrag.from, placeDrag.to, vp.zoom, sizes);
+        return (
+          <div aria-hidden className="absolute pointer-events-none rounded-md border-2 border-dashed border-accent-500 bg-accent-500/10"
+            style={{ zIndex: 15, left: box.x * vp.zoom + vp.x, top: box.y * vp.zoom + vp.y, width: box.w * vp.zoom, height: box.h * vp.zoom }}>
+            <span className="absolute -top-6 left-0 rounded bg-accent-500 px-1.5 py-0.5 text-[11px] font-medium text-white">{sizeLabel(box)}</span>
+          </div>
+        );
+      })()}
       <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
         <CanvasToolbar
           tool={tool} onTool={setTool} style={drawStyle} onStyle={setDrawStyle}
-          onTerminal={() => openNewAgentWizard()}
-          onNote={addNoteHere} onPortal={addPortalHere} onDevice={addDeviceHere} onText={addTextHere}
-          onImage={() => fileInput.current?.click()} onFolder={() => void addFolderHere()}
+          armed={armed} onArm={setArmed} lastPlaced={lastPlaced}
+          defaultSize={armed && sizes[armed] ? defaultPlaceSize(armed, sizes) : null}
+          onUseSize={() => { if (lastPlaced) setSizes((cur) => rememberSize(cur, lastPlaced.kind, lastPlaced.size)); setLastPlaced(null); }}
+          onResetSize={() => { if (armed) setSizes((cur) => rememberSize(cur, armed, null)); }}
+          onImage={() => fileInput.current?.click()}
           onUndo={() => key && canvasActions.undoStroke(key)} canUndo={board.drawings.length > 0} />
         {panel === "routines" && <RoutinesPanel onClose={() => setPanel(null)} />}
         {panel === "design" && design.details.length > 0 && (

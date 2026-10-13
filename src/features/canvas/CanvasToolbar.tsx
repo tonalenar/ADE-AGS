@@ -1,6 +1,8 @@
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
+import { sizeLabel, type PlaceKind, type Size } from "./placeBox";
+
 /** Qué hace el mouse sobre el canvas: mover y seleccionar, dibujar o borrar trazos. */
 export type Tool = "select" | "draw" | "erase";
 
@@ -65,17 +67,20 @@ const Divider = () => <span aria-hidden className="w-px h-5 mx-0.5 bg-black/10 d
  * volver a "seleccionar".
  */
 export function CanvasToolbar({
-  tool, onTool, onTerminal, onNote, onImage, onFolder, onPortal, onDevice, onText, style, onStyle, onUndo, canUndo,
+  tool, onTool, armed, onArm, lastPlaced, defaultSize, onUseSize, onResetSize, onImage, style, onStyle, onUndo, canUndo,
 }: {
   tool: Tool;
   onTool: (tool: Tool) => void;
-  onTerminal: () => void;
-  onNote: () => void;
+  /** O tipo de elemento esperando ser desenhado no canvas (arrastar para delimitar o tamanho), se há. */
+  armed: PlaceKind | null;
+  onArm: (kind: PlaceKind | null) => void;
+  /** O que acabou de ser desenhado (some sozinho): oferece lembrar aquele tamanho como padrão do tipo. */
+  lastPlaced: { kind: PlaceKind; size: Size } | null;
+  /** O padrão que já vale para o tipo armado, se a pessoa lembrou algum. */
+  defaultSize: Size | null;
+  onUseSize: () => void;
+  onResetSize: () => void;
   onImage: () => void;
-  onFolder: () => void;
-  onPortal: () => void;
-  onDevice: () => void;
-  onText: () => void;
   style: DrawStyle;
   onStyle: (style: DrawStyle) => void;
   onUndo: () => void;
@@ -87,18 +92,36 @@ export function CanvasToolbar({
   return (
     <div className="pointer-events-auto absolute left-1/2 top-3 -translate-x-1/2 flex flex-col items-center gap-1.5">
       <div className={`flex items-center gap-0.5 p-1 rounded-xl border ${material}`}>
-        <ToolButton label={t("canvas.tool.select")} active={tool === "select"} onClick={() => onTool("select")}>{ICONS.select}</ToolButton>
+        <ToolButton label={t("canvas.tool.select")} active={tool === "select" && armed === null} onClick={() => { onArm(null); onTool("select"); }}>{ICONS.select}</ToolButton>
         <Divider />
-        <ToolButton label={t("canvas.tool.terminal")} onClick={onTerminal}>{ICONS.terminal}</ToolButton>
-        <ToolButton label={t("canvas.tool.note")} onClick={onNote}>{ICONS.note}</ToolButton>
+        <ToolButton label={t("canvas.tool.terminal")} active={armed === "terminal"} onClick={() => onArm(armed === "terminal" ? null : "terminal")}>{ICONS.terminal}</ToolButton>
+        <ToolButton label={t("canvas.tool.note")} active={armed === "note"} onClick={() => onArm(armed === "note" ? null : "note")}>{ICONS.note}</ToolButton>
         <ToolButton label={t("canvas.tool.image")} onClick={onImage}>{ICONS.image}</ToolButton>
-        <ToolButton label={t("canvas.tool.folder")} onClick={onFolder}>{ICONS.folder}</ToolButton>
-        <ToolButton label={t("canvas.tool.portal")} onClick={onPortal}>{ICONS.portal}</ToolButton>
-        <ToolButton label={t("canvas.tool.device")} onClick={onDevice}>{ICONS.device}</ToolButton>
-        <ToolButton label={t("canvas.tool.text")} onClick={onText}>{ICONS.text}</ToolButton>
+        <ToolButton label={t("canvas.tool.folder")} active={armed === "folder"} onClick={() => onArm(armed === "folder" ? null : "folder")}>{ICONS.folder}</ToolButton>
+        <ToolButton label={t("canvas.tool.portal")} active={armed === "portal"} onClick={() => onArm(armed === "portal" ? null : "portal")}>{ICONS.portal}</ToolButton>
+        <ToolButton label={t("canvas.tool.device")} active={armed === "device"} onClick={() => onArm(armed === "device" ? null : "device")}>{ICONS.device}</ToolButton>
+        <ToolButton label={t("canvas.tool.text")} active={armed === "text"} onClick={() => onArm(armed === "text" ? null : "text")}>{ICONS.text}</ToolButton>
         <Divider />
-        <ToolButton label={t("canvas.tool.draw")} active={drawing} onClick={() => onTool(tool === "draw" ? "select" : "draw")}>{ICONS.draw}</ToolButton>
+        <ToolButton label={t("canvas.tool.draw")} active={drawing} onClick={() => { onArm(null); onTool(tool === "draw" ? "select" : "draw"); }}>{ICONS.draw}</ToolButton>
       </div>
+
+      {(armed || lastPlaced) && (
+        <div role="status" className={`flex items-center gap-2 px-3 py-1.5 rounded-xl border text-[11.5px] text-gray-600 dark:text-gray-300 ${material}`}>
+          {armed && <span>{t("canvas.place.hint", { kind: t(`canvas.tool.${armed}`) })}</span>}
+          {lastPlaced && (
+            <Button variant="custom" onClick={onUseSize} title={t("canvas.place.useSizeHint")}
+              className="cc-t h-6 px-2 rounded-md bg-accent-500/15 text-accent-600 dark:text-accent-300 font-medium">
+              {t("canvas.place.useSize", { size: sizeLabel(lastPlaced.size) })}
+            </Button>
+          )}
+          {armed && defaultSize && (
+            <Button variant="custom" onClick={onResetSize} title={t("canvas.place.resetSizeHint")}
+              className="cc-t h-6 px-2 rounded-md text-gray-500 hover:text-gray-800 dark:hover:text-gray-100">
+              {t("canvas.place.resetSize", { size: sizeLabel(defaultSize) })}
+            </Button>
+          )}
+        </div>
+      )}
 
       {drawing && (
         <div className={`flex items-center gap-1 px-2 py-1 rounded-xl border ${material}`}>

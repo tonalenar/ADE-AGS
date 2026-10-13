@@ -351,7 +351,7 @@ function overlaps(a: Box, b: Box): boolean {
  */
 export function addNote(
   board: Board,
-  note: { id: string; name?: string; content: string; near?: string; at?: { x: number; y: number }; stackWith?: string },
+  note: { id: string; name?: string; content: string; near?: string; at?: { x: number; y: number }; stackWith?: string; size?: { w: number; h: number } },
 ): { board: Board; name: string } {
   const name = uniqueNoteName(board, note.name ?? defaultNoteName(note.content));
   const others = allBoxes(board);
@@ -363,7 +363,7 @@ export function addNote(
       box = { ...box, y: anchor.y + k * (NOTE_SIZE.h + GAP / 2) };
     }
   } else if (note.at) {
-    box = { x: Math.round(note.at.x), y: Math.round(note.at.y), ...NOTE_SIZE };
+    box = { x: Math.round(note.at.x), y: Math.round(note.at.y), ...(note.size ?? NOTE_SIZE) };
   } else {
     box = nextFreeBox(others, NOTE_SIZE);
   }
@@ -512,10 +512,10 @@ export function uniquePortalName(board: Board, wanted: string, except?: string):
 /** Agrega un portal; con `near`, a la derecha de ese nodo y conectado a él. */
 export function addPortal(
   board: Board,
-  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android"; avd?: string },
+  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android"; avd?: string; size?: { w: number; h: number } },
 ): { board: Board; name: string } {
   const android = portal.kind === "android";
-  const size = android ? PHONE_SIZE : PORTAL_SIZE;
+  const size = portal.size ?? (android ? PHONE_SIZE : PORTAL_SIZE);
   const name = uniquePortalName(board, portal.name ?? (android ? "Android" : "Portal"));
   const others = allBoxes(board);
   const anchor = portal.near ? boxOf(board, portal.near) : undefined;
@@ -557,9 +557,9 @@ export const TEXT_DEFAULT = { w: 240, h: 64, size: 20 };
 export const IMAGE_MAX_SIDE = 420;
 
 /** Un rótulo nuevo, en `at` (centro de lo que se ve). */
-export function addText(board: Board, t: { id: string; at: { x: number; y: number }; text?: string; size?: number }): Board {
+export function addText(board: Board, t: { id: string; at: { x: number; y: number }; text?: string; size?: number; box?: { w: number; h: number } }): Board {
   const size = t.size ?? TEXT_DEFAULT.size;
-  const box: Box = { x: Math.round(t.at.x), y: Math.round(t.at.y), w: TEXT_DEFAULT.w, h: Math.round(size * 2.6) };
+  const box: Box = { x: Math.round(t.at.x), y: Math.round(t.at.y), w: t.box?.w ?? TEXT_DEFAULT.w, h: t.box?.h ?? Math.round(size * 2.6) };
   return { ...board, texts: { ...board.texts, [t.id]: { text: t.text ?? "", size, box } } };
 }
 
@@ -639,8 +639,8 @@ export function strokePath(points: number[]): string {
 // ── Carpetas ────────────────────────────────────────────────────────
 
 /** Una carpeta nueva en `at` (la esquina de arriba a la izquierda). */
-export function addFolder(board: Board, f: { id: string; path: string; name: string; at: { x: number; y: number } }): Board {
-  const box: Box = { x: Math.round(f.at.x), y: Math.round(f.at.y), ...FOLDER_SIZE };
+export function addFolder(board: Board, f: { id: string; path: string; name: string; at: { x: number; y: number }; size?: { w: number; h: number } }): Board {
+  const box: Box = { x: Math.round(f.at.x), y: Math.round(f.at.y), ...(f.size ?? FOLDER_SIZE) };
   return { ...board, folders: { ...board.folders, [f.id]: { path: f.path, name: f.name, open: [], box } } };
 }
 
