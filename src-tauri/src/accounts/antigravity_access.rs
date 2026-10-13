@@ -18,6 +18,73 @@ pub struct Model {
     /// RFC 3339 instant when that quota resets, when the service reports it.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     reset_time: Option<String>,
+    /// Outras janelas de cota que o catálogo traga junto (semanal, sessão…): cada objeto com
+    /// `remainingFraction`/`resetTime` fora do `quotaInfo` principal. Vazio = o serviço só informa uma.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    windows: Vec<Window>,
+    /// Só os NOMES dos campos do catálogo deste modelo (nunca valores): serve para descobrir onde o
+    /// serviço guarda cada janela sem registrar nada da conta.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    shape: Vec<String>,
+}
+
+#[derive(Serialize, Deserialize, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct Window {
+    field: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    remaining_fraction: Option<f64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    reset_time: Option<String>,
+}
+
+fn clean_name(name: &str) -> bool {
+    !name.is_empty() && name.len() <= 64 && !name.chars().any(char::is_control)
+}
+
+/// Os objetos de cota além do `quotaInfo` principal, achados em `info` e dentro de `quotaInfo`. Tolerante:
+/// o que não tem os dois campos conhecidos não entra. No máximo 4. Pura.
+fn windows(info: &Value) -> Vec<Window> {
+    let mut found = Vec::new();
+    let mut scan = |prefix: &str, object: &Value, skip: &str| {
+        let Some(map) = object.as_object() else { return };
+        for (key, value) in map {
+            if key == skip || !clean_name(key) || !value.is_object() {
+                continue;
+            }
+            let (remaining_fraction, reset_time) = {
+                let remaining = value["remainingFraction"].as_f64().filter(|f| f.is_finite()).map(|f| f.clamp(0.0, 1.0));
+                let reset = value["resetTime"].as_str().filter(|r| r.len() <= 64 && !r.chars().any(char::is_control)).map(str::to_owned);
+                (remaining, reset)
+            };
+            if remaining_fraction.is_some() || reset_time.is_some() {
+                found.push(Window { field: format!("{prefix}{key}"), remaining_fraction, reset_time });
+            }
+        }
+    };
+    scan("", info, "quotaInfo");
+    scan("quotaInfo.", &info["quotaInfo"], "");
+    found.truncate(4);
+    found
+}
+
+/// Os nomes dos campos de um modelo e do que há dentro de cada objeto (`quotaInfo.resetTime`…). Sem valores. Pura.
+fn shape(info: &Value) -> Vec<String> {
+    let mut names = Vec::new();
+    if let Some(map) = info.as_object() {
+        for (key, value) in map {
+            if !clean_name(key) {
+                continue;
+            }
+            names.push(key.clone());
+            if let Some(inner) = value.as_object() {
+                names.extend(inner.keys().filter(|k| clean_name(k)).map(|k| format!("{key}.{k}")));
+            }
+        }
+    }
+    names.sort();
+    names.truncate(40);
+    names
 }
 
 /// `quotaInfo` of one catalogue entry. Tolerant on purpose: a missing or malformed field is
@@ -84,6 +151,8 @@ fn models(data: &Value) -> Result<Vec<Model>, String> {
             name: name.to_owned(),
             remaining_fraction,
             reset_time,
+            windows: windows(info),
+            shape: shape(info),
         });
     }
     rows.sort_by(|a, b| a.id.cmp(&b.id));
@@ -261,5 +330,33 @@ mod tests {
         let back: Discovery = serde_json::from_value(value).unwrap();
         assert_eq!(back.fetched_at, 10);
         assert!(!back.cached);
+    }
+}
+
+#[cfg(test)]
+mod window_tests {
+    use super::*;
+
+    #[test]
+    fn outras_janelas_de_cota_aparecem_e_o_resto_e_ignorado() {
+        let info = json!({
+            "displayName": "M",
+            "quotaInfo": { "remainingFraction": 0.9, "resetTime": "2026-10-13T20:00:00Z", "weekly": { "remainingFraction": 0.84, "resetTime": "2026-10-17T00:00:00Z" } },
+            "sessionQuota": { "remainingFraction": 0.93, "resetTime": "2026-10-13T18:00:00Z" },
+            "outro": { "x": 1 },
+            "texto": "nada"
+        });
+        let found = windows(&info);
+        let fields: Vec<_> = found.iter().map(|w| w.field.as_str()).collect();
+        assert_eq!(fields, vec!["sessionQuota", "quotaInfo.weekly"]);
+        assert_eq!(found[1].remaining_fraction, Some(0.84));
+        assert!(windows(&json!({ "quotaInfo": { "remainingFraction": 0.5 } })).is_empty());
+    }
+
+    #[test]
+    fn a_forma_lista_so_nomes_sem_valores() {
+        let names = shape(&json!({ "displayName": "segredo-nao-deve-aparecer", "quotaInfo": { "resetTime": "x" } }));
+        assert_eq!(names, vec!["displayName", "quotaInfo", "quotaInfo.resetTime"]);
+        assert!(names.iter().all(|n| !n.contains("segredo")));
     }
 }
