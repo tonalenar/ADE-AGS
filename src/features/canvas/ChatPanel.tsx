@@ -14,7 +14,7 @@ import { open as pickFile } from "@tauri-apps/plugin-dialog";
 const TOOL = "cc-t flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white";
 import { unreadOf, useUnreadStore } from "./chatUnread";
 import { useActiveBoardKey, boardKeyOfTab, missionOfKey } from "./store";
-import { TeamFeed, useMissionApprovals, useTeamMessages } from "./TeamFeed";
+import { TeamFeed, TeamFilterBar, useMissionApprovals, useTeamFeed, useTeamMessages } from "./TeamFeed";
 import { resolveMention, suggestMentions, type UserNote } from "./teamFeedModel";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { ResponsePicker } from "./ResponsePicker";
@@ -94,6 +94,7 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
   const teamMessages = useTeamMessages(missionId);
   const teamApprovals = useMissionApprovals(missionId);
   const [notes, setNotes] = useState<UserNote[]>([]);
+  const teamFeed = useTeamFeed(teamMessages, teamApprovals, notes);
   useEffect(() => setNotes([]), [missionId]);
   const addressees = useMemo(() => agents.map((a) => ({ id: a.id, name: a.title.split(" — ")[0] })), [agents]);
   const [thread, setThread] = useState<Thread>("blue");
@@ -410,7 +411,7 @@ ${text}` : text)); setPicking(false); }} />}
           <svg viewBox="0 0 18 18" aria-hidden className="h-4 w-4" fill="currentColor"><circle cx="4" cy="9" r="1.3" /><circle cx="9" cy="9" r="1.3" /><circle cx="14" cy="9" r="1.3" /></svg>
         </button>
       </>}
-      toolbar={!teamView && current && <div className="flex h-7 shrink-0 items-center gap-2 px-4 pb-1">
+      toolbar={teamView ? <TeamFilterBar options={teamFeed.options} active={teamFeed.active} onChange={teamFeed.setFilter} /> : current && <div className="flex h-7 shrink-0 items-center gap-2 px-4 pb-1">
           <svg viewBox="0 0 18 18" aria-hidden className="h-3 w-3 shrink-0 text-gray-400 dark:text-white/35" fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round"><circle cx="5" cy="4" r="1.7" /><circle cx="5" cy="14" r="1.7" /><circle cx="13" cy="6" r="1.7" /><path d="M5 5.7v6.6" /><path d="M13 7.7c0 2.9-8 1.9-8 4.6" /></svg>
           <span title={current.cwd} className="min-w-0 flex-1 truncate font-mono text-[11px] text-gray-500 dark:text-white/45">{branch ?? current.cwd}</span>
           {THREADS.map((th) => (
@@ -432,7 +433,7 @@ ${text}` : text)); setPicking(false); }} />}
       </div>}
     >
       {teamView ? (teamMessages.length + teamApprovals.length + notes.length > 0
-        ? <TeamFeed messages={teamMessages} approvals={teamApprovals} notes={notes} colors={Object.fromEntries(agents.map((a) => [a.id, agentTile(a.agentId)]))} /> : undefined)
+        ? <TeamFeed items={teamFeed.items} colors={Object.fromEntries(agents.map((a) => [a.id, agentTile(a.agentId)]))} /> : undefined)
         : current && messages.length > 0 ? <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.chat.title")}>
               {messages.map((m) => (
                 <div key={m.id} className={`flex flex-col ${m.kind === "user" ? "items-end" : "items-stretch"}`}>

@@ -396,7 +396,9 @@ export function useVigiaDriver(): void {
       const at = e.payload.atMs || Date.now();
       sentAt.set(e.payload.fromTabId, at);
       const sender = useTabsStore.getState().tabs.find((tab) => tab.id === e.payload.fromTabId);
-      const final = isFinalReport(e.payload.text, e.payload.kind, sender?.title);
+      const boards = useCanvasStore.getState().boards;
+      const toLead = !!e.payload.toTabId && Object.values(boards).some((board) => board.orchestrators.includes(e.payload.toTabId as string));
+      const final = isFinalReport(e.payload.text, e.payload.kind, sender?.title, toLead);
       if (final) finishedAt.set(e.payload.fromTabId, at);
       if (e.payload.toTabId) {
         gotAt.set(e.payload.toTabId, at);

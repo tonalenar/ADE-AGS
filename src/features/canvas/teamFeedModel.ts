@@ -159,3 +159,72 @@ export function isContinuation(prev: FeedItem | undefined, item: FeedItem): bool
 export function needsCollapse(text: string): boolean {
   return text.length > 480 || text.split("\n").length > 7;
 }
+
+// ── Formatação do texto das mensagens ──────────────────────────────────
+
+/** Caminhos, branches e arquivos: o que vale mostrar em fonte de código. */
+const ADDRESS = /[A-Za-z]:[\\/][^\s`,;)"']+|~\/[^\s`,;)"']+|\bcc\/[\w./-]+|\b(?:[\w.-]+\/)+[\w.-]+\.(?:md|tsx?|jsx?|rs|json|toml|cjs|mjs|txt|css|ya?ml|db|exe)\b|\b[\w.-]+\.(?:md|tsx?|rs|json|toml)\b/g;
+/** O que já é código (bloco ou trecho entre crases) não se mexe. */
+const CODE_SPLIT = /(```[\s\S]*?```|`[^`\n]*`)/;
+
+/** Põe os endereços (caminhos, branches, arquivos) entre crases, para saírem em fonte de código. Pura. */
+export function codeAddresses(text: string): string {
+  return text
+    .split(CODE_SPLIT)
+    .map((part, i) => {
+      if (i % 2 === 1) return part;
+      return part.replace(ADDRESS, (match) => {
+        const trail = /[.:]+$/.exec(match)?.[0] ?? "";
+        const core = trail ? match.slice(0, -trail.length) : match;
+        return core ? `\`${core}\`${trail}` : match;
+      });
+    })
+    .join("");
+}
+
+/** A primeira linha de uma mensagem em várias linhas (o título da tarefa) vira negrito. Pura. */
+export function emphasizeTitle(text: string): string {
+  const lines = text.split("\n");
+  const first = lines[0]?.trim() ?? "";
+  if (lines.length < 2 || !first || first.length > 140) return text;
+  if (/^(#|\*|-|>|\||\d+[.)]\s|```)/.test(first) || first.includes("**")) return text;
+  return [`**${first}**`, "", ...lines.slice(1).filter((l, i) => !(i === 0 && l.trim() === ""))].join("\n");
+}
+
+/** O texto como o chat da equipe mostra: título em negrito e endereços em fonte de código. Pura. */
+export function formatMessageText(text: string): string {
+  return codeAddresses(emphasizeTitle(text.trim()));
+}
+
+// ── Avisos do Vigia ────────────────────────────────────────────────────
+
+export type VigiaTone = "warn" | "stuck" | "info";
+
+export interface VigiaNote {
+  tone: VigiaTone;
+  /** A palavra que o Vigia usou (`aviso`, `travado`…), se houver. */
+  label: string | null;
+  /** O que ele viu. */
+  body: string;
+  /** O que ele fez ("Feito: …"), se disse. */
+  action: string | null;
+}
+
+/**
+ * O texto do Vigia vem como `**Vigia** — aviso: o Backend parou. Feito: avisei você na tela.`
+ * (às vezes sem o negrito). Tira o prefixo, separa a palavra de gravidade, o que ele viu e o que fez. Pura.
+ */
+export function parseVigiaText(text: string): VigiaNote {
+  let rest = text.replace(/\*\*/g, "").trim().replace(/^vigia\s*[—–-]\s*/i, "");
+  let label: string | null = null;
+  const head = /^([A-Za-zÀ-ÿ]{3,14}):\s+/.exec(rest);
+  if (head && head[1].toLowerCase() !== "feito") {
+    label = head[1].toLowerCase();
+    rest = rest.slice(head[0].length);
+  }
+  const split = /\s*\bFeito:\s*/i.exec(rest);
+  const body = (split ? rest.slice(0, split.index) : rest).trim();
+  const action = split ? rest.slice(split.index + split[0].length).trim() || null : null;
+  const tone: VigiaTone = label === "travado" ? "stuck" : label === "aviso" || label === "atenção" || label === "atencao" ? "warn" : "info";
+  return { tone, label, body, action };
+}

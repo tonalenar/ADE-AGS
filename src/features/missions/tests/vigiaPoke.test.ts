@@ -62,3 +62,21 @@ describe("relatório final explícito", () => {
     expect(memberFinished(30, 20)).toBe(false);
   });
 });
+
+describe("relatório final ao Orquestrador (sem marcador)", () => {
+  const report = "Relatório Final de QA — Missão Melhoria da Memória.\n1. Cache de testes: mesma árvore em 2 worktrees, hash igual; 'já verde neste hash'.\n2. Fluxo de memória pelo CLI sem achados. Smoke 9/9.";
+  it("um tell com corpo de relatório ao Orquestrador entrega a tarefa, mesmo sem ENTREGUE na primeira linha", () => {
+    expect(isFinalReport(report, "tell", "QA / Tests", true)).toBe(true);
+    expect(isFinalReport("Backend: corrigi A1 e A2 em src-tauri/src/memory.rs, commit 4f1a2b3, ags test run rust verde (1378 passaram), sem pendências.", "tell", "Backend", true)).toBe(true);
+  });
+  it("a mesma mensagem a outro integrante não é entrega", () => {
+    expect(isFinalReport(report, "tell", "QA / Tests", false)).toBe(false);
+  });
+  it("recebi, andamento, pergunta e mensagem curta ao Orquestrador não entregam", () => {
+    expect(isFinalReport("Recebido. Iniciando a tarefa agora; volto com o relatório quando terminar os testes e a revisão.", "tell", "Backend", true)).toBe(false);
+    expect(isFinalReport("Em progresso: rodando a suíte, ainda sem resultado para reportar ao Orquestrador neste momento.", "tell", "Backend", true)).toBe(false);
+    expect(isFinalReport("Posso mexer no schema para o item M2? Preciso saber antes de continuar com a correção da quota de memória.", "tell", "Backend", true)).toBe(false);
+    expect(isFinalReport("Pronto.", "tell", "Backend", true)).toBe(false);
+    expect(isFinalReport(report, "ask", "QA / Tests", true)).toBe(false);
+  });
+});

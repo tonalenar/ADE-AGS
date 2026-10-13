@@ -8,7 +8,7 @@ import { useRunsStore } from "@/features/runs/store";
 import { useMissionsStore } from "@/features/missions/store";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { dateLocale } from "@/i18n/dateLocale";
-import { buildFeed, feedFilterOptions, filterFeed, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, type FeedFilter, type FeedItem, type TeamMessage, type UserNote } from "./teamFeedModel";
+import { buildFeed, feedFilterOptions, filterFeed, formatMessageText, parseVigiaText, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, type FeedFilter, type FeedItem, type TeamMessage, type UserNote } from "./teamFeedModel";
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 
@@ -74,19 +74,36 @@ function Avatar({ name, color }: { name: string; color?: string }) {
   );
 }
 
-/** O corpo da mensagem: dobrado em seis linhas quando é longo, com "Ver mais". */
-function MessageBody({ text }: { text: string }) {
+/** O aviso do Vigia: um cartão discreto com a gravidade, o que ele viu e o que fez. */
+function VigiaCard({ message }: { message: TeamMessage }) {
   const { t } = useTranslation();
-  const long = needsCollapse(text);
+  const note = useMemo(() => parseVigiaText(message.text), [message.text]);
   const [open, setOpen] = useState(false);
+  const long = note.body.length > 150 || (note.action?.length ?? 0) > 110;
+  const tone = {
+    stuck: { bar: "border-red-500/70", pill: "bg-red-500/15 text-red-600 dark:text-red-300" },
+    warn: { bar: "border-amber-500/70", pill: "bg-amber-500/15 text-amber-700 dark:text-amber-300" },
+    info: { bar: "border-gray-400/60 dark:border-white/25", pill: "bg-black/[0.06] text-gray-600 dark:bg-white/[0.08] dark:text-white/65" },
+  }[note.tone];
   return (
-    <div className="rounded-[14px] bg-gray-100 px-3.5 py-2 text-[13px] leading-[19px] break-words text-gray-900 dark:bg-surface-raised dark:text-[#f5f5f7]">
-      <div className={long && !open ? "max-h-[7.5rem] overflow-hidden [mask-image:linear-gradient(to_bottom,black_70%,transparent)]" : undefined}>
-        <ChatMarkdown text={text} />
+    <div className={`rounded-xl border-l-[3px] bg-black/[0.025] px-3.5 py-2.5 dark:bg-white/[0.035] ${tone.bar}`}>
+      <div className="mb-1 flex items-center gap-1.5 text-[11.5px] leading-4">
+        <svg viewBox="0 0 24 24" aria-hidden className="h-3.5 w-3.5 shrink-0 text-gray-500 dark:text-white/55" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></svg>
+        <span className="font-semibold text-gray-800 dark:text-white/85">{t("canvas.team.vigia")}</span>
+        {note.label && <span className={`rounded-full px-1.5 text-[10px] font-medium leading-4 ${tone.pill}`}>{t(`canvas.team.vigiaTone.${note.tone}`)}</span>}
+        {message.toName && message.toTabId !== message.fromTabId && <span title={message.toName} className="min-w-0 max-w-[40%] truncate text-gray-500 dark:text-white/50">→ {message.toName}</span>}
+        <span className="ml-auto shrink-0 font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35">{clock(message.atMs)}</span>
       </div>
+      <p className={`text-[12.5px] leading-[19px] text-gray-700 dark:text-white/75 ${long && !open ? "line-clamp-3" : ""}`}>{note.body}</p>
+      {note.action && (
+        <p className={`mt-1.5 flex gap-1.5 text-[12px] leading-[18px] text-gray-500 dark:text-white/50 ${long && !open ? "line-clamp-2" : ""}`}>
+          <span className="shrink-0 font-medium text-emerald-600 dark:text-emerald-400">{t("canvas.team.vigiaDone")}</span>
+          <span>{note.action}</span>
+        </p>
+      )}
       {long && (
         <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
-          className="cc-t mt-1 text-[12px] font-medium text-accent-600 hover:underline dark:text-accent-300">
+          className="cc-t mt-1.5 text-[11.5px] font-medium text-accent-600 hover:underline dark:text-accent-300">
           {t(open ? "canvas.team.showLess" : "canvas.team.showMore")}
         </button>
       )}
@@ -94,35 +111,79 @@ function MessageBody({ text }: { text: string }) {
   );
 }
 
-/** A linha do tempo da equipe: o que os agentes dizem entre si, o que você mandou e o que espera decisão. */
-export function TeamFeed({ messages, approvals, notes, colors = {} }: {
-  messages: TeamMessage[];
-  approvals: { approval: import("@/features/runs/types").PendingApproval; who: string }[];
-  notes: UserNote[];
-  /** A cor de cada agente, por id de tab. */
-  colors?: Record<string, string>;
-}) {
+/** O corpo da mensagem: dobrado em seis linhas quando é longo, com "Ver mais". */
+function MessageBody({ text }: { text: string }) {
   const { t } = useTranslation();
-  const decide = useRunsStore((s) => s.decideApproval);
+  const long = needsCollapse(text);
+  const [open, setOpen] = useState(false);
+  const shown = useMemo(() => formatMessageText(text), [text]);
+  return (
+    <div className="rounded-2xl bg-gray-100 px-4 py-3 text-[13px] leading-[21px] break-words text-gray-900 dark:bg-surface-raised dark:text-[#f5f5f7] [&_.chat-md_p]:my-2.5 [&_.chat-md_ol]:my-2.5 [&_.chat-md_ol]:gap-2 [&_.chat-md_ul]:my-2.5 [&_.chat-md_ul]:gap-2 [&_.chat-md_strong]:font-semibold [&_.chat-md_strong]:text-gray-950 dark:[&_.chat-md_strong]:text-white [&_.chat-md_code]:break-all [&_.chat-md_code]:rounded-md [&_.chat-md_code]:bg-black/[0.06] [&_.chat-md_code]:px-1.5 [&_.chat-md_code]:py-0.5 [&_.chat-md_code]:text-[11.5px] [&_.chat-md_code]:font-medium [&_.chat-md_code]:text-accent-700 dark:[&_.chat-md_code]:bg-white/[0.08] dark:[&_.chat-md_code]:text-accent-300">
+      <div className={long && !open ? "max-h-[9rem] overflow-hidden [mask-image:linear-gradient(to_bottom,black_70%,transparent)]" : undefined}>
+        <ChatMarkdown text={shown} />
+      </div>
+      {long && (
+        <button type="button" onClick={() => setOpen((v) => !v)} aria-expanded={open}
+          className="cc-t mt-2 text-[12px] font-medium text-accent-600 hover:underline dark:text-accent-300">
+          {t(open ? "canvas.team.showLess" : "canvas.team.showMore")}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/** A linha do tempo montada e o filtro dela. O filtro mora fora da lista que rola (na barra do chat). */
+export function useTeamFeed(
+  messages: TeamMessage[],
+  approvals: { approval: import("@/features/runs/types").PendingApproval; who: string }[],
+  notes: UserNote[],
+) {
   const all = useMemo(() => buildFeed(messages, approvals, notes), [messages, approvals, notes]);
   const [filter, setFilter] = useState<FeedFilter>("all");
   const options = useMemo(() => feedFilterOptions(all), [all]);
   // Um filtro que deixou de existir (o pedido foi decidido) volta para "tudo".
   const active: FeedFilter = filter === "approvals" && options.approvals === 0 ? "all" : filter;
   const items = useMemo(() => filterFeed(all, active), [all, active]);
-  const bottom = useRef<HTMLDivElement>(null);
-  useEffect(() => { bottom.current?.scrollIntoView({ block: "end" }); }, [items.length]);
-  const firstApproval = items.find((i) => i.type === "approval")?.key;
+  return { items, options, active, setFilter };
+}
 
+/** Os filtros da linha do tempo: uma faixa fixa, sempre com fundo próprio, fora da lista que rola. */
+export function TeamFilterBar({ options, active, onChange }: {
+  options: { names: string[]; approvals: number };
+  active: FeedFilter;
+  onChange: (filter: FeedFilter) => void;
+}) {
+  const { t } = useTranslation();
+  if (options.names.length <= 1 && options.approvals === 0) return null;
   const chip = (value: FeedFilter, label: string, badge?: number) => (
-    <button key={value} type="button" onClick={() => setFilter(value)} aria-pressed={active === value} title={label}
-      className={`cc-t flex h-[22px] max-w-32 shrink-0 items-center gap-1 rounded-full px-2.5 text-[11.5px] font-medium ${active === value
+    <button key={value} type="button" onClick={() => onChange(value)} aria-pressed={active === value} title={label}
+      className={`cc-t flex h-6 max-w-32 shrink-0 items-center gap-1 rounded-full px-3 text-[11.5px] font-medium ${active === value
         ? "bg-accent-500 text-white"
         : "bg-black/[0.05] text-gray-600 hover:text-gray-900 dark:bg-white/[0.07] dark:text-white/65 dark:hover:text-white"}`}>
       <span className="truncate">{label}</span>
       {badge ? <span className="rounded-full bg-amber-500 px-1 text-[9.5px] font-bold leading-[14px] text-white">{badge}</span> : null}
     </button>
   );
+  return (
+    <div className="flex shrink-0 gap-1.5 overflow-x-auto px-4 pb-2 pt-1" role="group" aria-label={t("canvas.team.filter")}>
+      {chip("all", t("canvas.team.filterAll"))}
+      {options.approvals > 0 && chip("approvals", t("canvas.team.filterApprovals"), options.approvals)}
+      {options.names.map((name) => chip(`agent:${name}`, name))}
+    </div>
+  );
+}
+
+/** A linha do tempo da equipe: o que os agentes dizem entre si, o que você mandou e o que espera decisão. */
+export function TeamFeed({ items, colors = {} }: {
+  items: FeedItem[];
+  /** A cor de cada agente, por id de tab. */
+  colors?: Record<string, string>;
+}) {
+  const { t } = useTranslation();
+  const decide = useRunsStore((s) => s.decideApproval);
+  const bottom = useRef<HTMLDivElement>(null);
+  useEffect(() => { bottom.current?.scrollIntoView({ block: "end" }); }, [items.length]);
+  const firstApproval = items.find((i) => i.type === "approval")?.key;
 
   const render = (item: FeedItem, index: number) => {
     if (item.type === "user") {
@@ -147,18 +208,11 @@ export function TeamFeed({ messages, approvals, notes, colors = {} }: {
     }
     const m = item.message;
     if (isVigiaMessage(m)) {
-      return (
-        <div key={item.key} className="flex items-baseline gap-1.5 px-1 text-[11.5px] leading-4 text-gray-500 dark:text-white/50">
-          <span className="shrink-0 font-semibold">{t("canvas.team.vigia")}</span>
-          {m.toName && m.toTabId !== m.fromTabId && <span title={m.toName} className="max-w-[30%] shrink-0 truncate">→ {m.toName}</span>}
-          <span title={m.text} className="min-w-0 flex-1 truncate italic">{m.text}</span>
-          <span className="shrink-0 font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35">{clock(m.atMs)}</span>
-        </div>
-      );
+      return <VigiaCard key={item.key} message={m} />;
     }
     const continuation = isContinuation(items[index - 1], item);
     return (
-      <div key={item.key} className={`flex flex-col items-stretch ${continuation ? "-mt-2.5" : ""}`}>
+      <div key={item.key} className={`flex flex-col items-stretch ${continuation ? "-mt-3" : ""}`}>
         {!continuation && (
           <div className="mb-1 flex items-center gap-1.5 text-[11.5px] leading-4">
             <Avatar name={m.fromName} color={colors[m.fromTabId]} />
@@ -176,14 +230,7 @@ export function TeamFeed({ messages, approvals, notes, colors = {} }: {
   };
 
   return (
-    <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.team.title")}>
-      {(options.names.length > 1 || options.approvals > 0) && (
-        <div className="sticky top-0 z-10 -mx-1 flex gap-1 overflow-x-auto bg-white/90 px-1 pb-1.5 backdrop-blur dark:bg-surface/90" role="group" aria-label={t("canvas.team.filter")}>
-          {chip("all", t("canvas.team.filterAll"))}
-          {options.approvals > 0 && chip("approvals", t("canvas.team.filterApprovals"), options.approvals)}
-          {options.names.map((name) => chip(`agent:${name}`, name))}
-        </div>
-      )}
+    <div className="space-y-6 px-0.5 pb-1 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.team.title")}>
       {items.map(render)}
       <div ref={bottom} />
     </div>

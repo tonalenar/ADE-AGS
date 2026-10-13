@@ -119,19 +119,9 @@ describe("A3: higiene da aprovacao", () => {
     await approveBulk([dup("d")], decide, { acknowledgeContradictions: true, explicit: true });
     expect(decide).toHaveBeenCalledTimes(1);
   });
-  it("Enter NUNCA confirma aviso: approve com acknowledge=false", () => {
-    expect(inboxKeyAction("Enter", true)).toEqual({ type: "approve", acknowledge: false });
+  it("Enter nao aprova a nivel do dialogo: so o botao focado confirma", () => {
+    expect(inboxKeyAction("Enter", true)).toEqual({ type: "none" });
     expect(inboxKeyAction("Enter", false)).toEqual({ type: "none" });
-  });
-  it("Enter em lote com contradicao/exclusao nao decide a contradicao", async () => {
-    const decide = vi.fn().mockResolvedValue(undefined);
-    const items = [item("a"), contra("c"), item("x", { operation: "delete" })];
-    const act = inboxKeyAction("Enter", true);
-    if (act.type !== "approve") throw new Error("esperava approve");
-    const out = await approveBulk(items, decide, { acknowledgeContradictions: act.acknowledge });
-    expect(decide.mock.calls.map((c) => c[0])).toEqual(["e-a"]);
-    expect(out.skippedContradictions).toEqual(["c"]);
-    expect(out.skippedDeletions).toEqual(["x"]);
   });
   it("Esc fecha ou cancela a confirmacao", () => {
     expect(inboxKeyAction("Escape", false).type).toBe("close");
