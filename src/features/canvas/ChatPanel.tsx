@@ -94,7 +94,7 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
   const teamMessages = useTeamMessages(missionId);
   const teamApprovals = useMissionApprovals(missionId);
   const [notes, setNotes] = useState<UserNote[]>([]);
-  const teamFeed = useTeamFeed(teamMessages, teamApprovals, notes);
+  const teamFeed = useTeamFeed(missionId, teamMessages, teamApprovals, notes);
   useEffect(() => setNotes([]), [missionId]);
   const addressees = useMemo(() => agents.map((a) => ({ id: a.id, name: a.title.split(" — ")[0] })), [agents]);
   const [thread, setThread] = useState<Thread>("blue");

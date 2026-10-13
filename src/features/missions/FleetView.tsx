@@ -70,7 +70,7 @@ function FleetGroupCard({ group, onOpen }: { group: FleetGroup; onOpen: () => vo
     <section className="flex flex-col gap-2 rounded-lg border border-gray-200 dark:border-white/8 p-3" data-testid={`fleet-group-${group.missionId}`}>
       <button type="button" onClick={onOpen} className="flex items-center gap-2 text-left min-w-0" title={t("missions.fleet.open")}>
         <MissionTabIndicator state={state} workingCount={workingCount} />
-        <span className="truncate text-[12.5px] font-semibold text-gray-900 dark:text-white">{group.title}</span>
+        <span title={group.title} className="truncate text-[12.5px] font-semibold text-gray-900 dark:text-white">{group.title}</span>
         <span className="shrink-0 text-[10.5px] text-gray-500 dark:text-white/45">
           {t(`missions.indicator.${state}`, { count: workingCount })}
         </span>
@@ -86,7 +86,7 @@ function FleetGroupCard({ group, onOpen }: { group: FleetGroup; onOpen: () => vo
               <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${task.status === "running" ? "bg-emerald-500 animate-pulse" : "bg-gray-400"}`} />
               <span className="truncate font-medium text-gray-800 dark:text-gray-100" title={task.title}>{task.planKey ?? task.title}</span>
               <span className="truncate text-gray-500 dark:text-white/45" title={task.model ? `${task.agentId} · ${task.model}` : task.agentId}>{task.model ? `${task.agentId} · ${task.model}` : task.agentId}</span>
-              <span className="ml-auto truncate text-emerald-600 dark:text-emerald-400">{live ?? t(`missions.fleet.task.${task.status}`)}</span>
+              <span title={live ?? t(`missions.fleet.task.${task.status}`)} className="ml-auto truncate text-emerald-600 dark:text-emerald-400">{live ?? t(`missions.fleet.task.${task.status}`)}</span>
             </li>
           );
         })}

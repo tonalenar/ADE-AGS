@@ -40,7 +40,9 @@ describe("isolamento e início rápido", () => {
     expect(lead).toContain("UM por missão");
     expect(lead).toContain("RESUMO AO FIM DE CADA TURNO");
     expect(lead).toContain("NO MÁXIMO 3 linhas");
-    expect(lead).toContain("Não cite integrante por nome");
+    expect(lead).toContain("inclusive o 3º, o 5º e os seguintes");
+    expect(lead).toContain("releia-o e troque qualquer nome de integrante");
+    expect(lead).toContain("nenhum nome de integrante");
     const text = memberBriefing(mission, member, workspace);
     expect(text).toContain("BRANCH ÚNICA: commite só na sua branch (`cc/backend`)");
     expect(text).toContain("não faça push nem abra PR");

@@ -134,12 +134,15 @@ function MessageBody({ text }: { text: string }) {
 
 /** A linha do tempo montada e o filtro dela. O filtro mora fora da lista que rola (na barra do chat). */
 export function useTeamFeed(
+  missionId: string | null,
   messages: TeamMessage[],
   approvals: { approval: import("@/features/runs/types").PendingApproval; who: string }[],
   notes: UserNote[],
 ) {
   const all = useMemo(() => buildFeed(messages, approvals, notes), [messages, approvals, notes]);
   const [filter, setFilter] = useState<FeedFilter>("all");
+  // Outra missão, outros nomes: o filtro de um agente da anterior não vale.
+  useEffect(() => setFilter("all"), [missionId]);
   const options = useMemo(() => feedFilterOptions(all), [all]);
   // Um filtro que deixou de existir (o pedido foi decidido) volta para "tudo".
   const active: FeedFilter = filter === "approvals" && options.approvals === 0 ? "all" : filter;

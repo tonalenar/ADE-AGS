@@ -119,6 +119,12 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
   useEffect(() => { void load(); }, [load]);
   useEffect(() => { loadDrafts(); }, [loadDrafts]);
   useEffect(() => { root.current?.focus(); }, []);
+  // Cancelar (ou Esc) a confirmação do lote: o foco volta ao diálogo, não fica num botão que saiu da tela.
+  const hadConfirm = useRef(false);
+  useEffect(() => {
+    if (hadConfirm.current && !confirm) root.current?.focus();
+    hadConfirm.current = !!confirm;
+  }, [confirm]);
 
   /** Origem visível sem abrir a proposta: missão, quem propôs, tipo e prioridade. */
   const originLine = (item: MemoryReviewItem) => {

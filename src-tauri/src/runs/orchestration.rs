@@ -179,7 +179,7 @@ pub fn handle(app: &AppHandle, command: &str, payload: &Value) -> Result<Value, 
             let task_id = payload
                 .get("taskId")
                 .and_then(Value::as_str)
-                .ok_or("As ferramentas MCP de Memória Compartilhada exigem uma tarefa Lead ou Worker")?;
+                .ok_or("As ferramentas MCP de Memória Compartilhada exigem uma tarefa Lead ou Worker da frota. Num terminal use ags memory search, ags memory index ou ags memory open <chave>")?;
             let result=crate::memory::task_tool(&conn, task_id, command, args(payload).clone());
             drop(conn);
             if result.is_ok() && !matches!(command,"memory.list"|"memory.get"|"memory.searchApproved"|"memory.workspaceHistory") {crate::memory::notify_changed(app);}

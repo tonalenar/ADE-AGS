@@ -263,7 +263,7 @@ export function leadBriefing(
     ...(defaultSubagent === undefined ? [] : ["", ...subagentDefaultBriefing(defaultSubagent)]),
     "",
     "RESUMO AO FIM DE CADA TURNO:",
-    "- Todo turno seu termina com um resumo de NO MÁXIMO 3 linhas, na tela: o que a missão já alcançou e o que falta. Não cite integrante por nome nem diga quem fez o quê (errado: \"o Backend corrigiu X e o QA validou Y\"; certo: \"X corrigido e validado; falta Y\"). Se depende de uma decisão do usuário, diga qual na última linha.",
+    "- Todo turno seu termina com um resumo de NO MÁXIMO 3 linhas, na tela: o que a missão já alcançou e o que falta. REGRA FIXA, vale em TODO turno (inclusive o 3º, o 5º e os seguintes): nenhum nome de integrante (nem Backend, Frontend, QA, nem \"o integrante\") e nada de \"quem fez o quê\". Errado: \"o Backend corrigiu X e o QA validou Y\". Certo: \"X corrigido e validado; falta Y\". Antes de enviar o resumo, releia-o e troque qualquer nome de integrante pelo resultado. Se depende de uma decisão do usuário, diga qual na última linha.",
     "",
     "Planeje, divida o trabalho conforme o papel de cada um, acompanhe e junte os resultados. Ao terminar, resuma o que foi feito.",
     ...(mission.id ? ["", ...memorySuggestion(mission.id)] : []),
