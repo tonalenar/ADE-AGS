@@ -39,6 +39,8 @@ export interface Conversation {
   preview: string | null;
   lastActiveAt: number;
   resumable: boolean;
+  /** `true` só para as entradas ocultas incluídas por `includeHidden`. */
+  hidden: boolean;
 }
 
 export interface BuildConversationsInput {
@@ -50,6 +52,18 @@ export interface BuildConversationsInput {
   resumable: (agentId: string) => boolean;
   /** Reservado: `lastActiveAt` não depende do relógio; o "hoje" é decidido por `groupByDay`. */
   now: number;
+  /** Abas abertas que NÃO viram conversa (ex.: terminais de missão). */
+  excludeTabIds?: ReadonlySet<string>;
+  /** Sessões que NÃO viram conversa: entradas do histórico e abas com esse `sessionId`. */
+  excludeSessionIds?: ReadonlySet<string>;
+  /** Padrão `false`: as ocultas ficam fora. Com `true` entram como arquivadas, com `hidden: true`. */
+  includeHidden?: boolean;
+}
+
+export interface CountHiddenInput {
+  groupCwds: string[];
+  history: SessionHistoryEntry[];
+  excludeSessionIds?: ReadonlySet<string>;
 }
 
 export type ConversationBucket = "pinned" | "open" | "today" | "yesterday" | "week" | "older";
@@ -68,6 +82,11 @@ function folderKey(path: string): string {
 function folderIsIn(cwd: string, roots: string[]): boolean {
   const c = folderKey(cwd);
   return roots.some((r) => c === r || c.startsWith(r.endsWith("/") ? r : `${r}/`));
+}
+
+/** Raízes do projeto já normalizadas; grupos vazios são ignorados. */
+function raizesDo(groupCwds: string[]): string[] {
+  return groupCwds.filter((c) => c.trim() !== "").map(folderKey);
 }
 
 /** Texto útil ou `null`: vazio e só espaços contam como nada. */
@@ -97,15 +116,24 @@ function neutralizar(texto: string): string {
   return out;
 }
 
+/** `sessionId` está no conjunto de exclusão? Vazio ou ausente nunca está. */
+function sessaoExcluida(sid: string | null | undefined, excludeSessionIds?: ReadonlySet<string>): boolean {
+  const s = cleanText(sid);
+  return s !== null && (excludeSessionIds?.has(s) ?? false);
+}
+
 export function buildConversations(input: BuildConversationsInput): Conversation[] {
-  const { groupCwds, tabs, history, resumable } = input;
-  const roots = groupCwds.filter((c) => c.trim() !== "").map(folderKey);
+  const { groupCwds, tabs, history, resumable, excludeTabIds, excludeSessionIds, includeHidden = false } = input;
+  const roots = raizesDo(groupCwds);
   const noProjeto = (cwd: string) => folderIsIn(cwd, roots);
 
   const consumidas = new Set<string>();
   const abertas: Conversation[] = [];
 
-  for (const tab of tabs.filter((t) => noProjeto(t.cwd))) {
+  const abasVisiveis = tabs.filter(
+    (t) => noProjeto(t.cwd) && !excludeTabIds?.has(t.tabId) && !sessaoExcluida(t.sessionId, excludeSessionIds)
+  );
+  for (const tab of abasVisiveis) {
     const casadas = history.filter((e) => matchesTab(tab, e));
     for (const e of casadas) consumidas.add(e.id);
     // Se casarem várias, a de fechamento mais recente é a que enriquece.
@@ -128,10 +156,17 @@ export function buildConversations(input: BuildConversationsInput): Conversation
       preview: cleanText(melhor?.preview),
       lastActiveAt: Math.max(tab.openedAt, melhor?.checkpointedAt ?? 0),
       resumable: true,
+      hidden: false,
     });
   }
 
-  const pendentes = history.filter((e) => !e.hidden && !consumidas.has(e.id) && noProjeto(e.cwd));
+  const pendentes = history.filter(
+    (e) =>
+      (includeHidden || !e.hidden) &&
+      !consumidas.has(e.id) &&
+      noProjeto(e.cwd) &&
+      !sessaoExcluida(e.sessionId, excludeSessionIds)
+  );
   // Uma mesma sessão pode ter várias entradas; conta a de fechamento mais recente.
   const melhorPorSessao = new Map<string, SessionHistoryEntry>();
   for (const e of pendentes) {
@@ -161,18 +196,46 @@ export function buildConversations(input: BuildConversationsInput): Conversation
       preview: cleanText(e.preview),
       lastActiveAt: Math.max(e.checkpointedAt ?? 0, e.closedAt),
       resumable: resumable(e.agentId) && sessionId !== null,
+      hidden: e.hidden === true,
     };
   });
 
   return [...abertas, ...arquivadas].sort(compararConversas);
 }
 
-/** Fixadas primeiro; depois working, open e arquivadas; dentro de cada grupo, a mais recente. */
+/** Quantas entradas ocultas o projeto tem. Sessão repetida conta uma; as excluídas não contam. */
+export function countHidden({ groupCwds, history, excludeSessionIds }: CountHiddenInput): number {
+  const roots = raizesDo(groupCwds);
+  let semSessao = 0;
+  const comSessao = new Set<string>();
+  for (const e of history) {
+    if (!e.hidden || !folderIsIn(e.cwd, roots)) continue;
+    if (sessaoExcluida(e.sessionId, excludeSessionIds)) continue;
+    const sid = cleanText(e.sessionId);
+    if (sid === null) semSessao++;
+    else comSessao.add(sid);
+  }
+  return semSessao + comSessao.size;
+}
+
+/**
+ * Como abrir a conversa: `"resume"` retoma a sessão; `"summary"` abre uma conversa nova
+ * com o resumo da anterior.
+ */
+export function fallbackNotice(conv: Conversation): "resume" | "summary" {
+  return conv.resumable ? "resume" : "summary";
+}
+
+/**
+ * Fixadas primeiro; depois working, open e arquivadas; dentro de cada grupo, as ocultas por
+ * último e, entre elas, a mais recente. Uma oculta não conta como fixada na ordenação.
+ */
 function compararConversas(a: Conversation, b: Conversation): number {
-  const pa = a.pinned ? 0 : 1;
-  const pb = b.pinned ? 0 : 1;
+  const pa = a.pinned && !a.hidden ? 0 : 1;
+  const pb = b.pinned && !b.hidden ? 0 : 1;
   if (pa !== pb) return pa - pb;
   if (STATE_RANK[a.state] !== STATE_RANK[b.state]) return STATE_RANK[a.state] - STATE_RANK[b.state];
+  if (a.hidden !== b.hidden) return a.hidden ? 1 : -1;
   return b.lastActiveAt - a.lastActiveAt;
 }
 

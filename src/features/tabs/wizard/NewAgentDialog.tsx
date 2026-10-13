@@ -6,6 +6,7 @@ import { useAccountsStore } from "@/features/accounts/store";
 import { resolveAccountChoice } from "@/features/accounts/pools";
 import { useSkillsStore } from "@/features/skills/store";
 import { AgentPickerStep } from "@/features/tabs/wizard/AgentPickerStep";
+import { loadLastAgent, orderAgents, rememberLastAgent } from "@/features/tabs/wizard/lastAgent";
 import { AccountPickerStep, useAgentAccounts } from "@/features/tabs/wizard/AccountPickerStep";
 import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
 import { memoryBlockFor } from "@/features/memory/tabMemory";
@@ -68,6 +69,9 @@ export function NewAgentDialog({
 }: NewAgentDialogProps) {
   const { t } = useTranslation();
   const allAgents = useAvailableAgents();
+  // Lido ao abrir: o último usado vem primeiro na lista e ganha a etiqueta.
+  const lastId = useMemo(() => (isOpen ? loadLastAgent() : null), [isOpen]);
+  const orderedAgents = useMemo(() => orderAgents(allAgents, lastId), [allAgents, lastId]);
   const [agent, setAgent] = useState<AgentInfo | null>(null);
   const [skillIds, setSkillIds] = useState<string[]>([]);
   const [accountId, setAccountId] = useState<string | undefined>();
@@ -137,6 +141,7 @@ export function NewAgentDialog({
     void resolveAccountChoice(agent.id, accountId).then(
       (resolved) => {
         confirming.current = false;
+        rememberLastAgent(agent.id);
         onConfirm({ agent, skillIds, accountId: resolved, prelaunch, memoryBlock: memoryBlockFor(agent.id, memoryBlock) });
         onClose();
       },
@@ -202,7 +207,8 @@ export function NewAgentDialog({
         <div className="min-h-72">
           {step === "agent" && (
             <AgentPickerStep
-              agents={allAgents}
+              agents={orderedAgents}
+              lastId={lastId}
               selected={agent?.id ?? null}
               onSelect={(next) => {
                 setAgent(next);

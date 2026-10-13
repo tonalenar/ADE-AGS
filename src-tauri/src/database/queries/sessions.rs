@@ -508,6 +508,54 @@ pub fn db_list_session_history(
     Ok(entries)
 }
 
+/// Límite de ids que devuelve [`db_mission_session_ids`]: el conjunto de sesiones de
+/// misiones de un workspace crece sin techo, y la vista de Sesiones no lo necesita entero.
+const MISSION_SESSION_IDS_LIMIT: usize = 5000;
+
+/// Ids de sesión de los terminales de misiones de un workspace: `session_id` de cada tab
+/// más cada elemento del array JSON `session_ids`. Sin repetidos, ordenados, como mucho
+/// [`MISSION_SESSION_IDS_LIMIT`]. Un `session_ids` con JSON inválido se ignora.
+pub(crate) fn mission_session_ids(
+    conn: &Connection,
+    workspace_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT u.session_id, u.session_ids FROM mission_usage_tabs u
+             JOIN missions m ON m.id = u.mission_id
+             WHERE m.workspace_id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([workspace_id], |r| {
+            Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut ids = std::collections::BTreeSet::new();
+    for row in rows {
+        let (session_id, session_ids) = row.map_err(|e| e.to_string())?;
+        if let Some(s) = session_id.filter(|s| !s.trim().is_empty()) {
+            ids.insert(s);
+        }
+        if let Some(json) = session_ids {
+            if let Ok(list) = serde_json::from_str::<Vec<String>>(&json) {
+                ids.extend(list.into_iter().filter(|s| !s.trim().is_empty()));
+            }
+        }
+    }
+    Ok(ids.into_iter().take(MISSION_SESSION_IDS_LIMIT).collect())
+}
+
+/// Comando: ids de sesión de terminales de misiones del workspace (ver [`mission_session_ids`]).
+#[tauri::command]
+pub fn db_mission_session_ids(
+    workspace_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Vec<String>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    mission_session_ids(&conn, &workspace_id)
+}
 
 /// Borra una entrada del historial. No toca el archivo de sesión del agente en disco
 /// (vive fuera de la app, en `~/.claude/projects` y equivalentes): esto solo saca la
@@ -846,4 +894,78 @@ pub(crate) fn open_tab_for_session(
         |row| Ok(OpenTabLocation { window_label: row.get(0)?, tab_id: row.get(1)? }),
     )
     .optional()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Dos workspaces; `ws` con dos misiones y `other` con una. Los datos de cada tab
+    /// cubren los casos de borde: session_id nulo/vacío, JSON inválido, repetidos.
+    fn seeded() -> Connection {
+        let conn = crate::database::test_db();
+        conn.execute_batch(
+            "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+             INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('other', 'Otro', 0, 0);
+             INSERT INTO missions (id, workspace_id, title, objective, cwd, created_at, updated_at)
+               VALUES ('m1', 'ws', 'M1', 'O', '/repo', 0, 0),
+                      ('m2', 'ws', 'M2', 'O', '/repo', 0, 0),
+                      ('mo', 'other', 'MO', 'O', '/repo', 0, 0);
+             INSERT INTO mission_usage_tabs (mission_id, tab_id, agent_id, label, kind, cwd, session_id, session_ids, opened_at)
+               VALUES ('m1', 't1', 'codex', 'A', 'member', '/wt', 'sA', '[\"sB\",\"sA\",\"sC\"]', 1),
+                      ('m1', 't2', 'codex', 'B', 'member', '/wt', NULL, '[]', 2),
+                      ('m1', 't3', 'codex', 'C', 'member', '/wt', '', '[\"\",\"sD\"]', 3),
+                      ('m2', 't4', 'claude', 'D', 'member', '/wt', 'sE', 'no-es-json', 4),
+                      ('m2', 't5', 'claude', 'E', 'member', '/wt', 'sB', '[]', 5),
+                      ('mo', 't6', 'codex', 'F', 'member', '/wt', 'sOTHER', '[\"sOTHER2\"]', 6);",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn mission_session_ids_junta_duas_misiones_del_workspace() {
+        let conn = seeded();
+        let ids = mission_session_ids(&conn, "ws").unwrap();
+        assert!(ids.contains(&"sA".to_string()));
+        assert!(ids.contains(&"sE".to_string()));
+        assert!(ids.contains(&"sB".to_string()));
+    }
+
+    #[test]
+    fn mission_session_ids_no_trae_otro_workspace() {
+        let conn = seeded();
+        let ids = mission_session_ids(&conn, "ws").unwrap();
+        assert!(!ids.iter().any(|s| s.starts_with("sOTHER")));
+        let otro = mission_session_ids(&conn, "other").unwrap();
+        assert_eq!(otro, vec!["sOTHER".to_string(), "sOTHER2".to_string()]);
+    }
+
+    #[test]
+    fn mission_session_ids_expande_json_e_ignora_invalidos_nulos_y_vacios() {
+        let conn = seeded();
+        let ids = mission_session_ids(&conn, "ws").unwrap();
+        // sA, sB, sC (JSON de t1), sD (JSON de t3), sE (session_id de t4; su JSON inválido se ignora).
+        assert_eq!(ids, vec!["sA", "sB", "sC", "sD", "sE"]);
+    }
+
+    #[test]
+    fn mission_session_ids_sin_repeticion_y_ordenado() {
+        let conn = seeded();
+        let ids = mission_session_ids(&conn, "ws").unwrap();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(ids, sorted);
+    }
+
+    #[test]
+    fn mission_session_ids_respeta_el_limite() {
+        let conn = seeded();
+        conn.execute("INSERT INTO mission_usage_tabs (mission_id, tab_id, agent_id, label, kind, cwd, session_id, session_ids, opened_at) VALUES ('m1','big','codex','X','member','/wt',NULL,?1,7)",
+            [serde_json::to_string(&(0..6000).map(|i| format!("big-{i:05}")).collect::<Vec<_>>()).unwrap()])
+            .unwrap();
+        let ids = mission_session_ids(&conn, "ws").unwrap();
+        assert_eq!(ids.len(), MISSION_SESSION_IDS_LIMIT);
+    }
 }

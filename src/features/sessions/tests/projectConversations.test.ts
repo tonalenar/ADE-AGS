@@ -4,6 +4,8 @@ import type { SessionHistoryEntry } from "@/features/sessions/types";
 import {
   buildConversations,
   continuePrompt,
+  countHidden,
+  fallbackNotice,
   filterConversations,
   groupByDay,
   type Conversation,
@@ -62,6 +64,7 @@ function conv(over: Partial<Conversation> & { key: string }): Conversation {
     preview: null,
     lastActiveAt: NOW,
     resumable: false,
+    hidden: false,
     ...over,
   };
 }
@@ -263,6 +266,167 @@ describe("resumable", () => {
   it("aberta é sempre retomável, mesmo com o predicado negando", () => {
     const out = build({ tabs: [tab({ tabId: "t1" })], resumable: () => false });
     expect(out[0].resumable).toBe(true);
+  });
+});
+
+describe("exclusão por aba", () => {
+  it("aba em excludeTabIds não vira conversa, as outras ficam", () => {
+    const out = build({
+      tabs: [tab({ tabId: "missao" }), tab({ tabId: "normal" })],
+      excludeTabIds: new Set(["missao"]),
+    });
+    expect(out.map((c) => c.key)).toEqual(["tab:normal"]);
+  });
+
+  it("aba excluída não consome a entrada do histórico, que vira arquivada", () => {
+    const out = build({
+      tabs: [tab({ tabId: "missao", historyId: "h1" })],
+      history: [entry({ id: "h1", sessionId: "s1" })],
+      excludeTabIds: new Set(["missao"]),
+    });
+    expect(out.map((c) => c.key)).toEqual(["hist:h1"]);
+  });
+});
+
+describe("exclusão por sessionId", () => {
+  it("entrada do histórico com sessionId excluído não vira arquivada", () => {
+    const out = build({
+      history: [entry({ id: "h1", sessionId: "s1" }), entry({ id: "h2", sessionId: "s2" })],
+      excludeSessionIds: new Set(["s1"]),
+    });
+    expect(out.map((c) => c.historyId)).toEqual(["h2"]);
+  });
+
+  it("aba com sessionId excluído também some", () => {
+    const out = build({
+      tabs: [tab({ tabId: "t1", sessionId: "s1" })],
+      excludeSessionIds: new Set(["s1"]),
+    });
+    expect(out).toEqual([]);
+  });
+
+  it("a aba excluída por sessionId não deixa a entrada de mesmo sessionId aparecer", () => {
+    const out = build({
+      tabs: [tab({ tabId: "t1", sessionId: "s1" })],
+      history: [entry({ id: "h1", sessionId: "s1" })],
+      excludeSessionIds: new Set(["s1"]),
+    });
+    expect(out).toEqual([]);
+  });
+
+  it("sem excludeSessionIds, o comportamento de antes continua", () => {
+    const out = build({ history: [entry({ id: "h1", sessionId: "s1" })] });
+    expect(out).toHaveLength(1);
+  });
+});
+
+describe("includeHidden", () => {
+  const ocultas = [entry({ id: "oc", sessionId: "s1", hidden: true }), entry({ id: "vis", sessionId: "s2" })];
+
+  it("por padrão as ocultas ficam fora", () => {
+    const out = build({ history: ocultas });
+    expect(out.map((c) => c.historyId)).toEqual(["vis"]);
+  });
+
+  it("com includeHidden as ocultas entram como arquivadas com hidden true", () => {
+    const out = build({ history: ocultas, includeHidden: true });
+    expect(out.find((c) => c.historyId === "oc")).toMatchObject({ state: "archived", hidden: true });
+    expect(out.find((c) => c.historyId === "vis")?.hidden).toBe(false);
+  });
+
+  it("aba viva tem hidden false", () => {
+    expect(build({ tabs: [tab({ tabId: "t1" })] })[0].hidden).toBe(false);
+  });
+
+  it("uma oculta nunca vem antes de uma visível do mesmo estado, mesmo mais recente", () => {
+    const out = build({
+      includeHidden: true,
+      history: [
+        entry({ id: "oc", sessionId: "s1", hidden: true, closedAt: NOW - 1 }),
+        entry({ id: "vis", sessionId: "s2", closedAt: NOW - 9000 }),
+      ],
+    });
+    expect(out.map((c) => c.historyId)).toEqual(["vis", "oc"]);
+  });
+
+  it("uma oculta fixada não sobe acima de uma visível não fixada", () => {
+    const out = build({
+      includeHidden: true,
+      history: [
+        entry({ id: "oc", sessionId: "s1", hidden: true, pinned: true }),
+        entry({ id: "vis", sessionId: "s2", pinned: false, closedAt: NOW - 9000 }),
+      ],
+    });
+    expect(out.map((c) => c.historyId)).toEqual(["vis", "oc"]);
+  });
+
+  it("uma oculta com sessionId excluído continua fora mesmo com includeHidden", () => {
+    const out = build({
+      includeHidden: true,
+      history: [entry({ id: "oc", sessionId: "s1", hidden: true })],
+      excludeSessionIds: new Set(["s1"]),
+    });
+    expect(out).toEqual([]);
+  });
+});
+
+describe("countHidden", () => {
+  it("conta só as ocultas da pasta do projeto", () => {
+    const n = countHidden({
+      groupCwds: ["/proj"],
+      history: [
+        entry({ id: "a", sessionId: "s1", hidden: true }),
+        entry({ id: "b", sessionId: "s2", hidden: true, cwd: "/proj/.worktrees/x" }),
+        entry({ id: "c", sessionId: "s3", hidden: true, cwd: "/outro" }),
+        entry({ id: "d", sessionId: "s4", hidden: false }),
+      ],
+    });
+    expect(n).toBe(2);
+  });
+
+  it("sessionId repetido em ocultas conta uma vez", () => {
+    const n = countHidden({
+      groupCwds: ["/proj"],
+      history: [
+        entry({ id: "a", sessionId: "s1", hidden: true, closedAt: NOW - 1 }),
+        entry({ id: "b", sessionId: "s1", hidden: true, closedAt: NOW - 9 }),
+      ],
+    });
+    expect(n).toBe(1);
+  });
+
+  it("entradas ocultas sem sessionId contam cada uma", () => {
+    const n = countHidden({
+      groupCwds: ["/proj"],
+      history: [entry({ id: "a", hidden: true }), entry({ id: "b", hidden: true })],
+    });
+    expect(n).toBe(2);
+  });
+
+  it("as excluídas por excludeSessionIds não contam", () => {
+    const n = countHidden({
+      groupCwds: ["/proj"],
+      history: [
+        entry({ id: "a", sessionId: "s1", hidden: true }),
+        entry({ id: "b", sessionId: "s2", hidden: true }),
+      ],
+      excludeSessionIds: new Set(["s1"]),
+    });
+    expect(n).toBe(1);
+  });
+
+  it("sem ocultas devolve zero", () => {
+    expect(countHidden({ groupCwds: ["/proj"], history: [entry({ id: "a", sessionId: "s1" })] })).toBe(0);
+  });
+});
+
+describe("fallbackNotice", () => {
+  it("retomável dá resume", () => {
+    expect(fallbackNotice(conv({ key: "k", resumable: true }))).toBe("resume");
+  });
+
+  it("não retomável dá summary", () => {
+    expect(fallbackNotice(conv({ key: "k", resumable: false }))).toBe("summary");
   });
 });
 

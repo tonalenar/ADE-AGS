@@ -4,6 +4,7 @@ import { AlertaToast, Button, ArchiveIcon, AddIcon } from "neogestify-ui-compone
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import { RunningIcon } from "@/app/icons";
+import { useMissionIndex } from "@/features/missions/groups";
 import { useTabsStore } from "@/features/tabs/store";
 import { openNewAgentWith } from "@/features/tabs/tabActions";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
@@ -13,10 +14,10 @@ import { ResumeOptionsDialog } from "@/features/sessions/ResumeOptionsDialog";
 
 import { isResumable } from "./agentResume";
 import {
-  buildConversations, continuePrompt, filterConversations, groupByDay,
+  buildConversations, continuePrompt, countHidden, fallbackNotice, filterConversations, groupByDay,
   type Conversation, type OpenTabInfo,
 } from "./projectConversations";
-import { updateHistoryEntry } from "./ipc.conversations";
+import { missionSessionIds, updateHistoryEntry } from "./ipc.conversations";
 import { sessionMarkdown } from "./ipc";
 import { useSessionsStore } from "./store";
 import { useResumeSession } from "./useResumeSession";
@@ -25,14 +26,18 @@ import { useResumeSession } from "./useResumeSession";
 const PAGE = 8;
 /** A partir de quantas conversas aparece a busca. */
 const SEARCH_FROM = 6;
+const EMPTY_SET: ReadonlySet<string> = new Set();
 
 const secondsNow = () => Math.floor(Date.now() / 1000);
 
 /**
  * As conversas de um projeto: as abertas e as arquivadas juntas, mais recentes primeiro. Clicar numa aberta vai
- * até ela; numa arquivada reabre e retoma de onde parou (mesma sessão, conta, skills e posição no canvas).
- * "+ Nova conversa" abre o assistente de agente na pasta do projeto. O arquivamento é automático (ao fechar
- * a aba e por checkpoints periódicos); aqui só se fixa, renomeia, oculta ou continua a partir de uma.
+ * até ela; numa arquivada reabre e retoma de onde parou (mesma sessão, conta, skills e posição no canvas). Um
+ * agente que não sabe retomar abre uma nova conversa com o resumo da anterior. Os terminais de missão ficam
+ * de fora (vivem na própria missão). "+ Nova" abre o assistente de agente na pasta do projeto.
+ *
+ * O arquivamento é automático (ao fechar a aba e por checkpoints periódicos); aqui só se fixa, renomeia, oculta
+ * (e reexibe) ou continua a partir de uma.
  */
 export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTabMenu }: {
   cwd: string;
@@ -40,7 +45,7 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
   workspaceId: string;
   onOpenTab: (tabId: string) => void;
   /** Menu de uma aba aberta (skills, fechar): é o mesmo de antes. */
-  onTabMenu: (e: React.MouseEvent, tabId: string) => void;
+  onTabMenu: (x: number, y: number, tabId: string) => void;
 }) {
   const { t } = useTranslation();
   const tabs = useTabsStore((s) => s.tabs);
@@ -48,10 +53,13 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
   const history = useSessionsStore((s) => s.history);
   const loadHistory = useSessionsStore((s) => s.loadHistory);
   const deleteSession = useSessionsStore((s) => s.deleteSession);
+  const missionOf = useMissionIndex();
   const { pendingResume, setPendingResume, pendingSkillChoice, setPendingSkillChoice, openSession, resume } = useResumeSession();
 
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(PAGE);
+  const [showHidden, setShowHidden] = useState(false);
+  const [missionSessions, setMissionSessions] = useState<ReadonlySet<string>>(EMPTY_SET);
   const [menu, setMenu] = useState<{ x: number; y: number; conv: Conversation } | null>(null);
   const [renaming, setRenaming] = useState<{ key: string; value: string } | null>(null);
   /** A conversa que espera a confirmação de apagar (se desarma sozinha). */
@@ -59,11 +67,21 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
 
   // O histórico se recarrega ao abrir e quando o número de abas muda (fechar uma arquiva a sessão).
   useEffect(() => { void loadHistory(workspaceId); }, [workspaceId, tabs.length, loadHistory]);
+  // As sessões que pertencem a missões: não são conversas comuns do projeto.
+  useEffect(() => {
+    let alive = true;
+    missionSessionIds(workspaceId)
+      .then((ids) => { if (alive) setMissionSessions(new Set(ids)); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [workspaceId, tabs.length]);
   useEffect(() => {
     if (!armed) return;
     const timer = window.setTimeout(() => setArmed(null), 3000);
     return () => window.clearTimeout(timer);
   }, [armed]);
+
+  const excludeTabIds = useMemo(() => new Set(tabs.filter((tab) => missionOf[tab.id]).map((tab) => tab.id)), [tabs, missionOf]);
 
   const openTabs = useMemo<OpenTabInfo[]>(() => tabs
     .filter((tab) => tab.agentId !== "bash")
@@ -80,8 +98,15 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
     })), [tabs]);
 
   const all = useMemo(
-    () => buildConversations({ groupCwds, tabs: openTabs, history, resumable: isResumable, now: secondsNow() }),
-    [groupCwds, openTabs, history],
+    () => buildConversations({
+      groupCwds, tabs: openTabs, history, resumable: isResumable, now: secondsNow(),
+      excludeTabIds, excludeSessionIds: missionSessions, includeHidden: showHidden,
+    }),
+    [groupCwds, openTabs, history, excludeTabIds, missionSessions, showHidden],
+  );
+  const hiddenCount = useMemo(
+    () => countHidden({ groupCwds, history, excludeSessionIds: missionSessions }),
+    [groupCwds, history, missionSessions],
   );
   const shown = useMemo(() => filterConversations(all, query), [all, query]);
   const visible = useMemo(() => shown.slice(0, query ? shown.length : limit), [shown, limit, query]);
@@ -89,10 +114,28 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
 
   const entryOf = (conv: Conversation) => history.find((h) => h.id === conv.historyId) ?? null;
 
+  const continueFrom = async (conv: Conversation) => {
+    let tail = conv.preview ?? "";
+    if (conv.historyId) {
+      try {
+        tail = (await sessionMarkdown(conv.historyId)) || tail;
+      } catch {
+        /* sem a conversa inteira, vale a prévia */
+      }
+    }
+    openNewAgentWith({ cwd: conv.cwd || cwd, title: t("conversations.continueTitle", { title: conv.title }), prompt: continuePrompt(conv, tail) });
+  };
+
   const open = async (conv: Conversation) => {
     if (conv.tabId) return onOpenTab(conv.tabId);
     const entry = entryOf(conv);
     if (!entry) return;
+    // Um agente que não sabe retomar não tem o que retomar: abre uma conversa nova com o resumo da anterior.
+    if (fallbackNotice(conv) === "summary") {
+      AlertaToast(t("conversations.title"), t("conversations.noResume", { agent: conv.agentLabel }), "info", 6000);
+      await continueFrom(conv);
+      return;
+    }
     try {
       await resume(entry);
     } catch (e) {
@@ -120,18 +163,6 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
     await patch(conv, { customTitle: title || null });
   };
 
-  const continueFrom = async (conv: Conversation) => {
-    let tail = conv.preview ?? "";
-    if (conv.historyId) {
-      try {
-        tail = (await sessionMarkdown(conv.historyId)) || tail;
-      } catch {
-        /* sem a conversa inteira, vale a prévia */
-      }
-    }
-    openNewAgentWith({ cwd: conv.cwd || cwd, title: t("conversations.continueTitle", { title: conv.title }), prompt: continuePrompt(conv, tail) });
-  };
-
   const forget = async (conv: Conversation) => {
     if (!conv.historyId) return;
     if (armed !== conv.key) { setArmed(conv.key); return; }
@@ -144,6 +175,38 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
   };
 
   const bucketLabel = (bucket: string) => t(`conversations.bucket.${bucket}`);
+
+  /** O menu de uma conversa: o das abertas leva ao menu antigo (skills, fechar) em "Mais ações". */
+  const menuItems = (conv: Conversation, x: number, y: number) => {
+    const live = conv.tabId !== null;
+    const pinItem = {
+      key: "pin",
+      label: conv.pinned ? t("conversations.unpin") : conv.historyId ? t("conversations.pin") : t("conversations.pinWait"),
+      disabled: !conv.historyId,
+      separator: !live,
+      onSelect: () => void patch(conv, { pinned: !conv.pinned }),
+    };
+    const renameItem = { key: "rename", label: t("conversations.rename"), onSelect: () => setRenaming({ key: conv.key, value: conv.title }) };
+    const continueItem = { key: "continue", label: t("conversations.continueFrom"), onSelect: () => void continueFrom(conv) };
+    if (live) {
+      return [
+        continueItem,
+        pinItem,
+        renameItem,
+        { key: "more", label: t("conversations.moreActions"), separator: true, onSelect: () => onTabMenu(x, y, conv.tabId!) },
+      ];
+    }
+    return [
+      { key: "open", label: fallbackNotice(conv) === "resume" ? t("conversations.resume") : t("conversations.resumeSummary"), onSelect: () => void open(conv) },
+      continueItem,
+      pinItem,
+      renameItem,
+      conv.hidden
+        ? { key: "unhide", label: t("conversations.unhide"), onSelect: () => void patch(conv, { hidden: false }) }
+        : { key: "hide", label: t("conversations.hide"), onSelect: () => void patch(conv, { hidden: true }) },
+      { key: "forget", label: t("conversations.forget"), danger: true, separator: true, onSelect: () => setArmed(conv.key) },
+    ];
+  };
 
   return (
     <div className="flex flex-col gap-0.5" aria-label={t("conversations.title")}>
@@ -182,14 +245,10 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
                     className="mx-1 h-[25px] w-[calc(100%-0.5rem)] px-2 rounded-md text-[11px] outline-none bg-white dark:bg-white/8 border border-accent-400 text-gray-800 dark:text-gray-100" />
                 ) : (
                   <Button variant="custom" onClick={() => void open(conv)}
-                    onContextMenu={(e) => {
-                      e.preventDefault();
-                      if (conv.tabId) onTabMenu(e, conv.tabId);
-                      else setMenu({ x: e.clientX, y: e.clientY, conv });
-                    }}
+                    onContextMenu={(e) => { e.preventDefault(); setMenu({ x: e.clientX, y: e.clientY, conv }); }}
                     title={[conv.title, conv.preview, conv.cwd].filter(Boolean).join("\n\n")}
                     className={`flex items-center gap-2 h-[25px] pl-1.5 pr-1 rounded-md w-full text-left transition-colors duration-150
-                      ${active ? "bg-accent-500/12 dark:bg-accent-400/13" : "hover:bg-gray-200/60 dark:hover:bg-white/5"}`}>
+                      ${active ? "bg-accent-500/12 dark:bg-accent-400/13" : "hover:bg-gray-200/60 dark:hover:bg-white/5"} ${conv.hidden ? "opacity-60" : ""}`}>
                     {conv.state === "archived"
                       ? <ArchiveIcon className="w-3.5 h-3.5 shrink-0 text-gray-400 dark:text-white/25" />
                       : <RunningIcon className={`w-3.5 h-3.5 shrink-0 ${conv.state === "working" ? "text-emerald-500" : "text-amber-500"}`} />}
@@ -215,15 +274,15 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
         </Button>
       )}
 
+      {hiddenCount > 0 && (
+        <Button variant="custom" aria-pressed={showHidden} onClick={() => setShowHidden((on) => !on)}
+          className="cc-t ml-[18px] h-5 w-fit px-1.5 rounded text-[10.5px] text-gray-500 dark:text-white/40 hover:bg-gray-200/60 dark:hover:bg-white/5">
+          {showHidden ? t("conversations.hideHidden") : t("conversations.showHidden", { count: hiddenCount })}
+        </Button>
+      )}
+
       {menu && (
-        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
-          { key: "open", label: menu.conv.resumable ? t("conversations.resume") : t("conversations.reopen"), onSelect: () => void open(menu.conv) },
-          { key: "continue", label: t("conversations.continueFrom"), onSelect: () => void continueFrom(menu.conv) },
-          { key: "pin", label: menu.conv.pinned ? t("conversations.unpin") : t("conversations.pin"), separator: true, onSelect: () => void patch(menu.conv, { pinned: !menu.conv.pinned }) },
-          { key: "rename", label: t("conversations.rename"), onSelect: () => setRenaming({ key: menu.conv.key, value: menu.conv.title }) },
-          { key: "hide", label: t("conversations.hide"), onSelect: () => void patch(menu.conv, { hidden: true }) },
-          { key: "forget", label: t("conversations.forget"), danger: true, separator: true, onSelect: () => setArmed(menu.conv.key) },
-        ]} />
+        <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={menuItems(menu.conv, menu.x, menu.y)} />
       )}
       {armed && all.find((c) => c.key === armed) && (
         <p className="pl-[18px] pr-1 text-[10px] text-red-500">

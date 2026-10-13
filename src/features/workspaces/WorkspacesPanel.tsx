@@ -124,9 +124,9 @@ function WorkspaceItem({ ws, groupCwds, workspaceId, expanded, onActivate, onOpe
         groupCwds={groupCwds}
         workspaceId={workspaceId}
         onOpenTab={onOpenAgent}
-        onTabMenu={(e, tabId) => {
+        onTabMenu={(x, y, tabId) => {
           const agent = ws.agents.find((a) => a.tabId === tabId);
-          if (agent) onAgentMenu(e, agent);
+          if (agent) onAgentMenu({ clientX: x, clientY: y } as React.MouseEvent, agent);
         }}
       />
     </div>
