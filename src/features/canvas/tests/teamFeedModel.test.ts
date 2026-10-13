@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { buildFeed, isVigiaMessage, mergeMessages, parseMention, resolveMention, suggestMentions, type TeamMessage } from "../teamFeedModel";
+import { buildFeed, feedFilterOptions, filterFeed, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, parseMention, resolveMention, suggestMentions, type TeamMessage } from "../teamFeedModel";
 
 const team = [
   { id: "t1", name: "Orquestrador" },
@@ -81,5 +81,27 @@ describe("mergeMessages e isVigiaMessage", () => {
     expect(isVigiaMessage(msg(1, "Vigia"))).toBe(true);
     expect(isVigiaMessage(msg(1, " vigia "))).toBe(true);
     expect(isVigiaMessage(msg(1))).toBe(false);
+  });
+});
+
+describe("filtros, continuação e texto longo", () => {
+  const m = (id: number, from: string, to: string, atMs: number, kind: "tell" | "ask" = "tell"): TeamMessage => ({ id, missionId: "m", atMs, kind, fromTabId: from, fromName: from, toTabId: to, toName: to, text: "x" });
+  const feed = buildFeed([m(1, "Orq", "Back", 1000), m(2, "Orq", "Back", 60_000), m(3, "Back", "Orq", 70_000), m(4, "Orq", "Back", 400_000)], [], [{ key: "u", atMs: 80_000, toName: "Back", text: "oi" }]);
+  it("lista os nomes que aparecem e filtra por agente", () => {
+    expect(feedFilterOptions(feed)).toEqual({ names: ["Orq", "Back"], approvals: 0 });
+    expect(filterFeed(feed, "agent:Back").length).toBe(5);
+    expect(filterFeed(feed, "approvals")).toEqual([]);
+    expect(filterFeed(feed, "all")).toBe(feed);
+  });
+  it("junta mensagens seguidas do mesmo remetente ao mesmo destino em até 2 minutos", () => {
+    expect(isContinuation(feed[0], feed[1])).toBe(true);
+    expect(isContinuation(feed[1], feed[2])).toBe(false);
+    expect(isContinuation(feed[3], feed[4])).toBe(false);
+    expect(isContinuation(undefined, feed[0])).toBe(false);
+  });
+  it("dobra só texto comprido", () => {
+    expect(needsCollapse("curto")).toBe(false);
+    expect(needsCollapse("a".repeat(481))).toBe(true);
+    expect(needsCollapse("1\n2\n3\n4\n5\n6\n7\n8")).toBe(true);
   });
 });
