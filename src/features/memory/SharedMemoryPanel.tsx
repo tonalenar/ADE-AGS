@@ -11,6 +11,7 @@ import { EMPTY_SEARCH, isEmptySearch, toFilter, verificationOf, type SearchState
 import { PurgeButton } from "./PurgeButton";
 import { SourceCheck } from "./SourceCheck";
 import { RepoSyncNotice } from "./RepoSyncNotice";
+import { MemoryUsageCard } from "./MemoryUsageCard";
 import * as memoryIpc from "./ipc";
 import { errorText, needsSecretConfirmation } from "./secretConfirm";
 import type { MemoryDetail, MemoryEntry, MemoryKind, MemoryPage, MemoryProposal, MemoryScope, MemorySnapshot, MemoryValidityInterval, MemoryWorkspaceStats } from "./types";
@@ -315,6 +316,7 @@ export function SharedMemoryPanel({ workspaceId, missionId = null, runs = [], ac
         )}
       </div>
       <RepoSyncNotice workspaceId={workspaceId} />
+      {missionId === null && <MemoryUsageCard workspaceId={workspaceId} />}
 
       <div role="tablist" aria-label={t("sharedMemory.sections")} className="flex flex-wrap gap-0.5 rounded-lg bg-gray-200/70 p-0.5 dark:bg-surface-raised">
         {tabs.map((item) => (

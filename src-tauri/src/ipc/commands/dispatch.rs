@@ -242,6 +242,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "memory.search" => missions::memory_search(app, args),
         "memory.index" => missions::memory_repo_read(app, args, true),
         "memory.open" => missions::memory_repo_read(app, args, false),
+        "memory.usage" => missions::memory_usage(app, args),
         "swarm.note" => missions::swarm_write(app, args, false),
         "swarm.question" => missions::swarm_write(app, args, true),
         "swarm.promote" => missions::swarm_promote(app, args),

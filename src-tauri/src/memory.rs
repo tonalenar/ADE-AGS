@@ -1047,7 +1047,11 @@ pub fn memory_query(workspace_id:String,mission_id:Option<String>,cursor:Option<
 pub fn memory_index(workspace_id: String, mission_id: Option<String>, db: tauri::State<DbConnection>) -> Result<String, String> {
     let conn = db.lock().map_err(|_| "database unavailable")?;
     validate_owner(&conn, if mission_id.is_some() { "mission" } else { "workspace" }, &workspace_id, mission_id.as_deref())?;
-    repo::approved_open(&conn, &workspace_id, mission_id.as_deref(), "MEMORY.md")
+    let text = repo::approved_open(&conn, &workspace_id, mission_id.as_deref(), "MEMORY.md")?;
+    // Injeção do índice no início da sessão: quantas linhas de memória o agente recebeu.
+    let injected = text.lines().filter(|line| line.starts_with("- ")).count() as u32;
+    usage::record(&conn, &usage::UsageRow { ts: usage::now(), workspace_id: &workspace_id, mission_id: mission_id.as_deref(), tab_id: None, action: "injected", query: None, hits: injected, entry_keys: &[] });
+    Ok(text)
 }
 
 pub fn promote_fact(
@@ -1254,7 +1258,10 @@ pub fn task_tool(
             #[serde(deny_unknown_fields)]
             struct Input { query: String, limit: Option<usize> }
             let input: Input = serde_json::from_value(args).map_err(|_| "invalid memory.search arguments")?;
-            encode(&serde_json::to_value(search::search(conn, &workspace_id, mission_id.as_deref(), &input.query, input.limit.unwrap_or(5))?).map_err(|_| "could not encode memory search")?)?
+            let hits = search::search(conn, &workspace_id, mission_id.as_deref(), &input.query, input.limit.unwrap_or(5))?;
+            let keys: Vec<String> = hits.iter().map(|hit| hit.key.clone()).collect();
+            usage::record(conn, &usage::UsageRow { ts: usage::now(), workspace_id: &workspace_id, mission_id: mission_id.as_deref(), tab_id: Some(task_id), action: "search", query: Some(input.query.as_str()), hits: hits.len() as u32, entry_keys: &keys });
+            encode(&serde_json::to_value(hits).map_err(|_| "could not encode memory search")?)?
         }
         "memory.workspaceHistory" => {
             #[derive(Deserialize)]
@@ -1325,6 +1332,8 @@ pub fn task_tool(
                     None
                 },
             )?;
+            let read_key = vec![detail.entry.key.clone()];
+            usage::record(conn, &usage::UsageRow { ts: usage::now(), workspace_id: &workspace_id, mission_id: mission_id.as_deref(), tab_id: Some(task_id), action: "open", query: None, hits: 1, entry_keys: &read_key });
             if let Some(revision) = input.revision {
                 let revision = detail.revisions.iter().find(|item| {
                     item.revision == revision
@@ -1755,6 +1764,8 @@ pub mod repo_sync;
 pub mod dream;
 pub mod lifecycle;
 pub mod purge;
+pub mod cleanup;
+pub mod usage;
 
 #[cfg(test)]
 mod tests;
