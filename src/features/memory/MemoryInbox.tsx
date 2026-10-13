@@ -120,6 +120,14 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
   useEffect(() => { loadDrafts(); }, [loadDrafts]);
   useEffect(() => { root.current?.focus(); }, []);
 
+  /** Origem visível sem abrir a proposta: missão, quem propôs, tipo e prioridade. */
+  const originLine = (item: MemoryReviewItem) => {
+    const g = groups.find((x) => x.items.includes(item));
+    return t("memoryInbox.origin", {
+      mission: g?.title ?? "", actor: t(`memoryReview.actor.${item.evidence.actorKind}`),
+      kind: t(`memorySearch.kinds.${item.kind}`), priority: item.priority,
+    });
+  };
   const all = useMemo(() => flatten(groups), [groups]);
   const chosen = useMemo(() => selectedItems(groups, selected), [groups, selected]);
 
@@ -238,6 +246,8 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                         {asksHighPriority(item) && <span className="inline-flex h-[18px] items-center rounded-full bg-amber-500/15 px-2 text-[10px] font-semibold text-amber-700 dark:text-amber-300" title={t("memoryInbox.highPriorityHint")}>{t("memoryInbox.highPriority", { priority: item.priority })}</span>}
                         {flag === "highValue" && <span className={`inline-flex h-[18px] items-center rounded-full px-2 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>}
                       </div>
+                      <p data-testid="memory-origin" className="truncate text-[10.5px] leading-[14px] text-gray-500 dark:text-white/45"
+                        title={originLine(item)}>{originLine(item)}</p>
                       <p className="whitespace-pre-wrap break-words text-[12.5px] leading-[17px] text-gray-600 dark:text-white/60">{item.body}</p>
                       <p className="font-mono text-[10.5px] leading-[14px] text-gray-500 dark:text-white/40">
                         {t("memoryReview.evidence")}: {t(`memoryReview.actor.${item.evidence.actorKind}`)}

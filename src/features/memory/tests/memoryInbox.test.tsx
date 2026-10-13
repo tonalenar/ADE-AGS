@@ -193,6 +193,14 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
     expect(onClose).not.toHaveBeenCalled();
   });
 
+  it("cada proposta mostra a origem (missão, agente, tipo, prioridade) sem abrir", async () => {
+    await act(async () => { root.render(<MemoryInbox workspaceId="w1" onClose={vi.fn()} />); });
+    const origins = Array.from(document.body.querySelectorAll('[data-testid="memory-origin"]'));
+    expect(origins).toHaveLength(3);
+    expect(origins[0].textContent).toContain("memoryInbox.origin");
+    expect(origins[0].getAttribute("title")).toBe(origins[0].textContent);
+  });
+
   it("quando confirm NÃO está aberto, pressionar Enter não executa aprovações", async () => {
     const onClose = vi.fn();
 
