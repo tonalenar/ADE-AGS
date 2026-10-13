@@ -34,4 +34,10 @@ describe("uso da memória", () => {
     const list = [c("a", ["duplicada de x"]), c("b", ["chave de teste"]), c("c", ["o Jev rejeitaria"]), c("d", ["o Jev rejeitaria", "outro"])];
     expect(suggestedIds(list)).toEqual(["a", "b", "d"]);
   });
+
+  it("o pedido de revisão do Jev sozinho nunca vem marcado, e não conta como segundo motivo", () => {
+    const c = (entryId: string, reasons: string[]): CleanupCandidate => ({ entryId, scope: "workspace", missionId: null, key: entryId, kind: "note", bodyPreview: "", reasons });
+    const list = [c("r", ["o Jev pediu revisão"]), c("s", ["o Jev pediu revisão", "corpo sem conteúdo"]), c("t", ["o Jev pediu revisão", "duplicada de x"])];
+    expect(suggestedIds(list)).toEqual(["t"]);
+  });
 });

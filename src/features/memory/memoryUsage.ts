@@ -95,9 +95,15 @@ export function percent(part: number, whole: number): number | null {
   return whole > 0 ? Math.round((part / whole) * 100) : null;
 }
 
-/** O que se marca de uma vez na limpeza: o que tem 2+ motivos, ou é duplicada, ou chave de teste. Pura. */
+/** "O Jev pediu revisão" só informa: pede o seu olhar, não é motivo para apagar. */
+export const REVIEW_REASON = "o Jev pediu revisão";
+
+/** O que se marca de uma vez na limpeza: duplicada, chave de teste, ou 2+ motivos (sem contar o pedido de revisão do Jev). Pura. */
 export function suggestedIds(list: CleanupCandidate[]): string[] {
   return list
-    .filter((c) => c.reasons.length >= 2 || c.reasons.some((r) => r.startsWith("duplicada") || r.startsWith("chave de teste")))
+    .filter((c) => {
+      const strong = c.reasons.filter((r) => r !== REVIEW_REASON);
+      return strong.length >= 2 || strong.some((r) => r.startsWith("duplicada") || r.startsWith("chave de teste"));
+    })
     .map((c) => c.entryId);
 }
