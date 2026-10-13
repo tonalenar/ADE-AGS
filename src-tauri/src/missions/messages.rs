@@ -50,7 +50,8 @@ fn clip(text: &str) -> String {
     if text.chars().count() <= MAX_TEXT {
         return text.to_string();
     }
-    let mut out: String = text.chars().take(MAX_TEXT).collect();
+    // O reticências entra DENTRO do limite: o texto guardado nunca passa de MAX_TEXT.
+    let mut out: String = text.chars().take(MAX_TEXT - 1).collect();
     out.push('…');
     out
 }
@@ -185,7 +186,7 @@ mod tests {
 
         record(&conn, &b, "tell", ("lead", "O"), ("back", "B"), &"a".repeat(MAX_TEXT + 50), 3).unwrap();
         let big = list(&conn, "m1", 0, 100).unwrap().pop().unwrap();
-        assert_eq!(big.text.chars().count(), MAX_TEXT + 1);
+        assert_eq!(big.text.chars().count(), MAX_TEXT);
         assert!(big.text.ends_with('…'));
 
         for n in 0..(KEEP + 10) {
