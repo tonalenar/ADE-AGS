@@ -22,7 +22,7 @@ Antes: `git merge cc/mission-bbe782a6-ec77-4100-8509-cb6b7b23` (limpo). Janela d
 
 ## G2 — avisos do Vigia no TeamFeed
 - `teamFeedModel.ts` `isVigiaMessage` (`from_name` "Vigia", sem caixa); `TeamFeed.tsx` mostra essas linhas discretas: rótulo "Vigia"/"Watcher"/"Vigía" (`canvas.team.vigia`), `→ destino` se houver, texto em itálico cortado com `title`, hora. Mensagens normais e o modelo existente não mudaram.
-- Contrato assumido (enviado ao Backend): `from_name == "Vigia"`, `kind` tell, `to_name` do agente avisado ou vazio. Sem resposta do Backend até a entrega; se ele usar outro `from_name`, ajustar `isVigiaMessage`.
+- Contrato final (Backend): `from_name "Vigia"`, kind tell, `to_tab_id == from_tab_id` (lead), `to_name` = Orquestrador. O feed omite o "→ destino" quando `toTabId === fromTabId` (commit ed4e7a91).
 - Teste: `teamFeedModel.test.ts` (`isVigiaMessage`).
 
 ## Validação
