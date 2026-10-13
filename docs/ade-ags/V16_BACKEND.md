@@ -4,7 +4,7 @@ Missão bbe782a6-ec77-4100-8509-b6b1108b09ea. Branch cc/mission-bbe782a6-ec77-41
 
 ## Estado da entrega
 
-G2, G5 e G6 implementados; validação ainda NÃO concluída. Duas rodadas completas executadas. A rodada 2 deixa uma expectativa de teste falhando por ignorar o cooldown existente de 4 min. O teto de duas rodadas foi atingido e escalado ao Orquestrador; não foi iniciada terceira correção sem autorização.
+G2, G5 e G6 implementados. As duas rodadas iniciais e a escalada estão preservadas abaixo como histórico. O usuário autorizou explicitamente uma rodada manual limitada ao teste: avançar vi.setSystemTime por VIGIA_COOLDOWN_MS+1. Somente essas duas linhas foram acrescentadas ao teste; nenhum código de produto foi alterado depois do candidato f795e7fd. Validação manual final CONCLUÍDA: affected, frontend completo, tsc e Rust completos verdes, todos exit 0. G2, G5 e G6 CORRIGIDOS no código e nos testes. Sem pendência de teste ou bloqueio.
 
 ## G2 — aviso no feed da missão
 
@@ -24,7 +24,7 @@ Teste novo: missions::messages::tests::vigia_vai_uma_vez_ao_feed_da_missao_sem_l
 
 ## G5 — entrega final e resposta assíncrona
 
-CORRIGIDO no código; testes de status, pergunta e entrega durante consulta passam. sentAt continua registrando atividade/resposta a poke. Novo finishedAt, persistido no mesmo objeto localStorage ags.vigia.peers.v1, guarda só declaração de entrega final explícita. Dados antigos sem finished são carregados sem converter atividade antiga em entrega.
+CORRIGIDO no código e validação final: testes de status, pergunta, entrega durante consulta e reativação após nova tarefa/cooldown passam. sentAt continua registrando atividade/resposta a poke. Novo finishedAt, persistido no mesmo objeto localStorage ags.vigia.peers.v1, guarda só declaração de entrega final explícita. Dados antigos sem finished são carregados sem converter atividade antiga em entrega.
 
 isFinalReport exige kind=tell e declaração no começo da primeira linha, aceitando prefixo do nome real do agente e vN. Marcadores: ENTREGUE, Entrega final, trabalho concluído, encerrado/finalizado/concluído ou terminei. Pergunta, status, negação, conclusão de um teste intermediário e texto que apenas explica o marcador não encerram a tarefa. Nomes com caracteres especiais são escapados. O contrato da mensagem final foi comunicado ao Frontend.
 
@@ -39,7 +39,7 @@ Testes novos/refinados:
 - Teste integrado verifica status ainda observado, entrega final removida de idle e timestamp do destinatário preservado.
 - Teste integrado resolve consulta após entrega final e confirma zero poke.
 
-A falha restante está na extensão do teste integrado que espera vigia_check imediatamente após nova tarefa, ainda dentro de VIGIA_COOLDOWN_MS. A implementação não foi alterada para ignorar esse cooldown legítimo.
+A falha da segunda rodada estava na extensão do teste integrado que esperava vigia_check imediatamente após nova tarefa, ainda dentro de VIGIA_COOLDOWN_MS. A rodada manual autorizada ajustou o relógio do teste; a implementação não foi alterada para ignorar esse cooldown legítimo.
 
 ## G6 — confirmação real de envio e erro visível
 
@@ -61,7 +61,7 @@ Testes novos integrados: fila sem callback não registra envio; onSent passa a r
 
 Não houve edição de schema, instalador, CI, permissões, segurança, versões, Contas, chaves ou Ajustes > Decisões. Não houve consulta mutante ou escrita direta no banco real. A janela do app não foi aberta, fechada ou reiniciada. O app instalado permanece na versão original: mudanças verificadas em código/testes, sem alegar teste visual/runtime do executável novo.
 
-## Validação — comandos e saídas exatas pertinentes
+## Histórico das duas rodadas iniciais — comandos e saídas exatas pertinentes
 
 ags test affected foi usado a cada passo, sem cargo/vitest/tsc crus. Diagnósticos [spawn] e nomes de testes não relacionados foram omitidos nos trechos abaixo. G2: exit 0 (138 testes Rust relacionados); G5 inicial: exit 0 (102 testes frontend relacionados); G6 e refinamento de declaração: exit 0 (107 relacionados).
 
@@ -198,3 +198,45 @@ Rodada 1: frontend 1713 passaram/1 falhou; tsc exit 0; Rust 1377 passaram/10 ign
 Rodada 2: frontend 1713 passaram/1 falhou; tsc exit 0; Rust verde, incluindo teste novo G2 e teste intermitente antigo. Expectativa restante: nova consulta imediata, apesar do cooldown 4 min. Correção sugerida ao Orquestrador: no teste, vi.setSystemTime(Date.now()+VIGIA_COOLDOWN_MS+1) antes de esperar nova consulta. Sem mudar comportamento de produto ou remover a asserção.
 
 A árvore mudou apenas no teste frontend durante a execução Rust da rodada 1; o CLI registrou “árvore suja ou alterada durante o teste: sem reutilização de cache”. A suíte Rust da rodada 2 foi executada de novo com --force na árvore estável. Não foi usado o verde antigo para fechar a entrega.
+
+## Rodada manual autorizada — entrega final verde
+
+O Orquestrador comunicou autorização explícita do usuário para UMA rodada manual só de teste. O ajuste foi limitado a duas linhas em vigiaDelivery.test.ts: importar VIGIA_COOLDOWN_MS e chamar vi.setSystemTime(Date.now()+VIGIA_COOLDOWN_MS+1) antes da expectativa de consulta de uma nova tarefa. A asserção não foi removida e nenhum comportamento do produto foi alterado depois do candidato f795e7fd. git diff contra o candidato, excluindo esse teste e documentação, não mostrou arquivos de produto modificados.
+
+As falhas das duas rodadas anteriores acima são histórico resolvido; não são falhas abertas na entrega final. Os comandos abaixo foram executados uma vez nesta rodada manual. --force nas suítes completas garante execução real, inclusive do teste intermitente de encerramento de processos.
+
+### ags test affected — exit 0
+
+```text
+ Test Files  10 passed (10)
+      Tests  107 passed (107)
+{"full":false,"ignored":["docs/ade-ags/RELATORIO_TESTE_V14.md","docs/ade-ags/RELATORIO_TESTE_V15.md","docs/ade-ags/V14_BACKEND.md","docs/ade-ags/V14_FRONTEND.md","docs/ade-ags/V14_QA.md","docs/ade-ags/V15_BACKEND.md","docs/ade-ags/V15_FRONTEND.md","docs/ade-ags/V15_QA.md","docs/ade-ags/V16_BACKEND.md"],"passed":true,"results":[{"cacheHit":false,"durationMs":1050,"message":"resultado registrado","passed":true,"suite":"babel","treeHash":"884fffc430f767dba30a0585a5fdb3fb6bbba27a"},{"cacheHit":false,"durationMs":14564,"message":"resultado registrado","passed":true,"suite":"tsc","treeHash":"884fffc430f767dba30a0585a5fdb3fb6bbba27a"},{"cacheHit":false,"durationMs":4804,"message":"resultado registrado","passed":true,"suite":"frontend","treeHash":"884fffc430f767dba30a0585a5fdb3fb6bbba27a"},{"cacheHit":true,"durationMs":0,"message":"já verde neste hash (há 15 min)","passed":true,"suite":"rust","treeHash":"884fffc430f767dba30a0585a5fdb3fb6bbba27a"}],"risk":[],"skippedAffected":0,"unmapped":[]}
+```
+
+### ags test run frontend --force — exit 0
+
+```text
+ Test Files  203 passed (203)
+      Tests  1714 passed (1714)
+{"cacheHit":false,"durationMs":12610,"message":"resultado registrado","passed":true,"suite":"frontend","treeHash":"884fffc430f767dba30a0585a5fdb3fb6bbba27a"}
+```
+
+### ags test run tsc --force — exit 0
+
+```text
+{"cacheHit":false,"durationMs":14901,"message":"resultado registrado","passed":true,"suite":"tsc","treeHash":"884fffc430f767dba30a0585a5fdb3fb6bbba27a"}
+```
+
+### ags test run rust --force — exit 0
+
+```text
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1386 filtered out; finished in 0.06s
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 1386 filtered out; finished in 0.10s
+test missions::messages::tests::vigia_vai_uma_vez_ao_feed_da_missao_sem_liberar_peer_para_si_mesmo ... ok
+test terminal::test::tests_e2e::matar_una_tab_se_lleva_al_proceso_que_lanzo_el_agente ... ok
+test result: ok. 1377 passed; 0 failed; 10 ignored; 0 measured; 0 filtered out; finished in 42.53s
+test result: ok. 45 passed; 0 failed; 0 ignored; 0 measured; 0 filtered out; finished in 0.00s
+{"cacheHit":false,"durationMs":121674,"message":"resultado registrado","passed":true,"suite":"rust","treeHash":"884fffc430f767dba30a0585a5fdb3fb6bbba27a"}
+```
+
+Resumo final: affected 107/107 relacionados; frontend 203 arquivos e 1714/1714 testes; tsc exit 0; Rust 1377 passaram/0 falhas/10 ignorados e CLI 45/45. O teste G2 e o teste intermitente antigo passaram. TreeHash validado: 884fffc430f767dba30a0585a5fdb3fb6bbba27a. git diff --check sem saída. Nenhuma suíte adicional foi repetida depois desse verde.

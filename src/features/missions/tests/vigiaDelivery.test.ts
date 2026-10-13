@@ -50,6 +50,8 @@ describe("Vigia: entrega final e confirmação de envio", () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
     expect(JSON.parse(localStorage.getItem("ags.vigia.peers.v1")!).task.lead).toBe(Date.now() - 1000);
     peer("lead", "back", "Rode a próxima tarefa.", "tell", Date.now() + 1);
+    const { VIGIA_COOLDOWN_MS } = await import("../vigia");
+    vi.setSystemTime(Date.now() + VIGIA_COOLDOWN_MS + 1);
     vigiaTick();
     expect(mocks.invoke).toHaveBeenCalledWith("vigia_check", expect.objectContaining({ idle: [{ tabId: "back", name: "Backend" }] }));
     await flush();
