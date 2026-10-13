@@ -38,7 +38,7 @@ Vantagem do Jev na aprovação de memória (menor latência, zero timeouts); sem
 
 ## Balanço do Vigia
 
-1 aviso (12:05:45), correto e útil; zero ruído no terminal do QA, zero "[Pasted text #N]" empacado, nenhuma cutucada em quem já entregou. Tempos: briefing → todos trabalhando em ~35 s; primeira delegação em 40 s; missão ativa ~22 min.
+2 avisos (12:05:45 e outro depois do relatório do QA), ambos "Frontend ocioso, libere ou dê tarefa", corretos e úteis, nenhum "travado" sobre quem já reportou; zero ruído no terminal do QA, zero "[Pasted text #N]" empacado, nenhuma cutucada em quem já entregou. Tempos: briefing → todos trabalhando em ~35 s; primeira delegação em 40 s; missão ativa ~22 min.
 
 ## Propostas de memória pendentes (para decidir em "Sugestões de memória")
 
