@@ -96,7 +96,7 @@ ok    peer tell a destino inexistente é recusado — recusado sem entregar nada
    - **Arquivos:** `src-tauri/src/memory.rs`, `src-tauri/src/memory/tests.rs`
    - **Escopo:** Restringe leitura de revisões por tarefas ao status ativo e aprovado atual.
    - **Testes:** Adicionado teste `task_revision_reads_only_expose_current_approval_across_missions`.
-   - **Validação:** `ags test affected` verde (`cacheHit: true` para `memory::`).
+   - **Validação:** `ags test affected` verde (`cacheHit: true` para `memory::`) e suíte completa `ags test run rust` verde (1.378 lib + 45 CLI, 0 falhas, hash `5e22f6065adb3291a7e8076b868117310a9b3010`).
    - **Veredito:** Aprovado.
 
 2. **Frontend (`9b9b5d16`, `a21b0285`, `04f61fb7`, `2434c9fd`):**
