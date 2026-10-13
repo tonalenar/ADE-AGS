@@ -602,6 +602,8 @@ fn local_settings(base_url: String) -> Settings {
         fleet_gate: true,
         mission_gate: true,
         delivery_gate: false,
+        memory_relevance: false,
+        turn_routing: false,
         secondary: None,
     }
 }
@@ -1470,4 +1472,148 @@ fn desligado_ou_com_segredo_nem_chega_ao_provedor() {
     }
     assert_eq!(super::delivery::classify(&db, "Backend: a senha do banco é hunter2hunter2 e a api_key=sk-live-AAAABBBBCCCCDDDD", "final"), None);
     assert_eq!(log_rows(&db), 0);
+}
+
+// ── Sugestão de destino na aba Equipe, sem @ (routing.rs) ───────────────
+
+use super::routing::{self, Member};
+
+fn membro(name: &str, role: &str) -> Member {
+    Member { name: name.into(), role: role.into() }
+}
+
+fn equipe() -> Vec<Member> {
+    vec![membro("Ana", "Frontend: telas React e CSS"), membro("Bruno", "Backend: Rust, banco e testes")]
+}
+
+const ROTA_D1: &str = r#"{"model":"jev","answers":{"destino":{"type":"choice","choice":"d1","probabilities":{"d0":0.1,"d1":0.85,"orquestrador":0.05},"confidence":0.85,"answer_confidence":0.85,"action":{"act_probability":1.0}}},"usage":{"input_tokens":90,"output_tokens":4,"state_tokens":40,"state_tokens_dropped":0,"truncated":false,"truncated_questions":[]}}"#;
+
+fn routing_db(base: &str) -> DbConnection {
+    let db = memory_db();
+    {
+        let conn = db.lock().unwrap();
+        let mut settings = local_settings(base.into());
+        settings.turn_routing = true;
+        config::persist(&conn, &settings).unwrap();
+    }
+    db
+}
+
+#[test]
+fn a_pergunta_tem_uma_opcao_por_integrante_e_o_orquestrador() {
+    let request = routing::request_for("Preciso de ajuda com o banco", &equipe(), "d1");
+    let question = request.questions.get("destino").expect("pergunta");
+    assert_eq!(question.option_count(), 3);
+    let json = serde_json::to_string(question).unwrap();
+    assert!(json.contains("\"d0\"") && json.contains("\"d1\"") && json.contains("\"orquestrador\""));
+    assert!(json.contains("Backend: Rust, banco e testes"), "o papel é a descrição da opção");
+    assert!(!json.contains("\"Bruno\""), "o provedor escolhe por id, não por nome");
+    assert_eq!(request.heuristic.get("destino").map(String::as_str), Some("d1"));
+}
+
+#[test]
+fn so_os_doze_primeiros_integrantes_entram_na_pergunta() {
+    let members: Vec<Member> = (0..15).map(|i| membro(&format!("M{i}"), "papel")).collect();
+    let request = routing::request_for("texto", &members, "nenhum");
+    let question = request.questions.get("destino").unwrap();
+    assert_eq!(question.option_count(), routing::MAX_MEMBERS + 1, "12 integrantes e o orquestrador");
+    assert!(!serde_json::to_string(question).unwrap().contains("\"d12\""));
+}
+
+#[test]
+fn o_texto_vai_cortado_como_no_vigia() {
+    let long = "a".repeat(super::delivery::MAX_CHARS + 50);
+    let request = routing::request_for(&long, &equipe(), "nenhum");
+    assert_eq!(request.state.chars().count(), super::delivery::MAX_CHARS + 1);
+    assert!(request.state.ends_with('…'));
+}
+
+#[test]
+fn a_resposta_volta_para_o_nome_e_so_aceita_opcao_conhecida() {
+    let members = equipe();
+    let ok = routing::read_answer("destino=d1", &members, Some(0.8), Some(0.9)).expect("rota");
+    assert_eq!(ok.target, "Bruno", "d1 é o segundo integrante, não um texto livre do provedor");
+    assert_eq!(ok.probability, Some(0.9));
+    assert_eq!(routing::read_answer("destino=orquestrador", &members, None, None).map(|r| r.target), Some("orquestrador".into()));
+    assert_eq!(routing::read_answer("destino=d7", &members, None, None), None);
+    assert_eq!(routing::read_answer("destino=d01", &members, None, None), None);
+    assert_eq!(routing::read_answer("destino=Bruno", &members, None, None), None);
+    assert_eq!(routing::read_answer("outra=d1", &members, None, None), None);
+}
+
+#[test]
+fn a_regra_local_acerta_pelo_papel_e_empate_ou_palavra_curta_nao_sugere() {
+    let members = equipe();
+    assert_eq!(routing::local_guess("o teste de backend quebrou", &members), Some("Bruno".into()));
+    assert_eq!(routing::local_guess("Frontend: a tela ficou feia", &members), Some("Ana".into()));
+    assert_eq!(routing::local_guess("bom dia a todos", &members), None, "sem palavra em comum");
+    assert_eq!(routing::local_guess("rust react", &members), None, "um acerto para cada: empate não sugere");
+    let curtas = vec![membro("Xi", "API e db")];
+    assert_eq!(routing::local_guess("api db", &curtas), None, "até 3 letras não contam");
+    let acento = vec![membro("Carla", "Documentação e revisão")];
+    assert_eq!(routing::local_guess("documentacao urgente", &acento), Some("Carla".into()), "acento não atrapalha");
+}
+
+#[test]
+fn recusa_sem_chamar_o_provedor_quando_desligado_sem_destino_ou_com_segredo() {
+    // Desligado (padrão): nada sai.
+    let db = memory_db();
+    assert_eq!(routing::route(&db, "o teste do backend quebrou", &equipe(), Some("Bruno")), None);
+    assert_eq!(log_rows(&db), 0);
+    // Ligado, mas sem integrante: só o orquestrador, nada a sugerir.
+    let db = routing_db("http://localhost:8000");
+    assert_eq!(routing::route(&db, "o teste do backend quebrou", &[], None), None);
+    assert_eq!(log_rows(&db), 0);
+    // Texto vazio.
+    assert_eq!(routing::route(&db, "   ", &equipe(), None), None);
+    assert_eq!(log_rows(&db), 0);
+    // O detector de segredos marca a mensagem: não sai, mesmo ligado.
+    assert_eq!(routing::route(&db, "a senha do banco é hunter2hunter2 e a api_key=sk-live-AAAABBBBCCCCDDDD", &equipe(), None), None);
+    assert_eq!(log_rows(&db), 0);
+}
+
+#[test]
+fn o_provedor_sugere_o_integrante_e_a_consulta_vira_uma_linha_do_log() {
+    let base = serve(200, ROTA_D1, Duration::ZERO);
+    let db = memory_db();
+    let mut settings = local_settings(base);
+    settings.turn_routing = true;
+    let route = routing::route_with(&db, &settings, None, "Preciso que alguém revise o banco", &equipe(), Some("Bruno")).expect("sugeriu");
+    assert_eq!(route.target, "Bruno");
+    let (point, heuristic, decision): (String, String, String) = db
+        .lock()
+        .unwrap()
+        .query_row("SELECT point, heuristic, provider_decision FROM decision_shadow_log", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap();
+    assert_eq!(point, "turn_routing");
+    assert_eq!(heuristic, "destino=d1", "a regra local fica ao lado, no vocabulário de ids");
+    assert!(decision.contains("destino=d1"));
+}
+
+#[test]
+fn a_pergunta_chega_ao_provedor_com_o_texto_e_as_opcoes() {
+    let (base, captured) = serve_capture(200, ROTA_D1);
+    let db = memory_db();
+    let mut settings = local_settings(base);
+    settings.turn_routing = true;
+    let _ = routing::route_with(&db, &settings, None, "Preciso que alguém revise o banco", &equipe(), None);
+    let sent = captured.lock().unwrap().clone();
+    assert!(sent.contains("Para quem esta mensagem deve ir?"));
+    assert!(sent.contains("Preciso que alguém revise o banco"));
+    assert!(sent.contains("orquestrador"));
+}
+
+#[test]
+fn falha_ou_resposta_desconhecida_vira_nada() {
+    let db = memory_db();
+    let mut settings = local_settings(serve(500, "{}", Duration::ZERO));
+    settings.turn_routing = true;
+    assert_eq!(routing::route_with(&db, &settings, None, "mensagem ao time", &equipe(), None), None);
+    let error: Option<String> = db.lock().unwrap().query_row("SELECT error FROM decision_shadow_log", [], |r| r.get(0)).unwrap();
+    assert!(error.is_some(), "o erro fica no log");
+
+    let desconhecida = ROTA_D1.replace("\"choice\":\"d1\"", "\"choice\":\"d7\"");
+    let mut settings = local_settings(serve(200, &desconhecida, Duration::ZERO));
+    settings.turn_routing = true;
+    assert_eq!(routing::route_with(&memory_db(), &settings, None, "mensagem ao time", &equipe(), None), None);
 }

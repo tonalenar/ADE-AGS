@@ -23,6 +23,8 @@ pub struct DecisionSettingsDto {
     pub fleet_gate: bool,
     pub mission_gate: bool,
     pub delivery_gate: bool,
+    pub memory_relevance: bool,
+    pub turn_routing: bool,
     pub key_saved: bool,
     pub secondary_provider: String,
     pub secondary_base_url: String,
@@ -44,6 +46,10 @@ pub struct DecisionSettingsInput {
     pub mission_gate: bool,
     #[serde(default)]
     pub delivery_gate: bool,
+    #[serde(default)]
+    pub memory_relevance: bool,
+    #[serde(default)]
+    pub turn_routing: bool,
     #[serde(default)]
     pub secondary_provider: String,
     #[serde(default)]
@@ -72,6 +78,8 @@ fn dto(settings: &Settings) -> DecisionSettingsDto {
         fleet_gate: settings.fleet_gate,
         mission_gate: settings.mission_gate,
         delivery_gate: settings.delivery_gate,
+        memory_relevance: settings.memory_relevance,
+        turn_routing: settings.turn_routing,
         key_saved: config::key_saved_in(config::KeySlot::Primary),
         secondary_provider: settings
             .secondary
@@ -111,6 +119,8 @@ fn from_input(input: DecisionSettingsInput) -> Settings {
         fleet_gate: input.fleet_gate,
         mission_gate: input.mission_gate,
         delivery_gate: input.delivery_gate,
+        memory_relevance: input.memory_relevance,
+        turn_routing: input.turn_routing,
     }
 }
 

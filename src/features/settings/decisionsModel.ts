@@ -12,6 +12,8 @@ export interface DecisionSettings {
   missionGate: boolean;
   /** O Vigia pergunta ao Jev se uma mensagem ao Orquestrador é relatório final (envia o começo do texto). */
   deliveryGate: boolean;
+  memoryRelevance: boolean;
+  turnRouting: boolean;
   keySaved: boolean;
   /** O segundo provedor da comparação (`none` = só o principal). */
   secondaryProvider: DecisionProviderId;
@@ -60,6 +62,8 @@ export function defaultDecisionSettings(): DecisionSettings {
     fleetGate: false,
     missionGate: false,
     deliveryGate: false,
+    memoryRelevance: false,
+    turnRouting: false,
     keySaved: false,
     secondaryProvider: "none",
     secondaryBaseUrl: PROVIDER_URL.jev,

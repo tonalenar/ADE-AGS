@@ -10,8 +10,11 @@ mod http;
 pub(crate) mod delivery;
 pub(crate) mod hints;
 pub(crate) mod log;
+pub(crate) mod relevance;
 mod points;
 mod protocol;
+pub mod routing;
+pub mod scorecard;
 mod shadow;
 
 pub(crate) use points::record_memory_decision;

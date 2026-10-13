@@ -22,6 +22,10 @@ pub const POINT_MISSION: &str = "mission_gate";
 /// Diferente dos outros: não é só sombra. O Vigia pergunta ao Jev se uma mensagem é relatório final
 /// (ver `delivery.rs`); ligado só por quem escolhe, e a regra local continua de reserva.
 pub const POINT_DELIVERY: &str = "delivery_gate";
+/// Como o delivery_gate, o Jev AJUDA (escolhe memórias para o briefing); desligado por padrão, com a busca local de reserva.
+pub const POINT_RELEVANCE: &str = "memory_relevance";
+/// Só sugere: a pessoa clica. Desligado por padrão.
+pub const POINT_ROUTING: &str = "turn_routing";
 
 /// Rótulos que a pergunta aceita mas que a heurística do ponto nunca devolve. O relatório os
 /// separa: um "desacordo" aí não é erro de ninguém, é o provedor dizendo algo que o código

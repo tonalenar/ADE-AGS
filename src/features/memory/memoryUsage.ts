@@ -42,6 +42,25 @@ export interface CleanupResult {
   failed: { entryId: string; error: string }[];
 }
 
+export interface Scorecard {
+  labeled: number;
+  answered: number;
+  jevReject: number;
+  jevApprove: number;
+  jevReview: number;
+  secretFlagged: number;
+  rejectRecall: number | null;
+  approvedByHuman: number;
+  jevRejectedThoseApproved: number;
+  falseAlarmRate: number | null;
+}
+
+export const fetchScorecard = () => invoke<Scorecard>("decision_jev_scorecard");
+
+/** O placar só vale com pelo menos 5 rótulos de limpeza respondidos pelo Jev: abaixo disso é anedota. Pura. */
+export const SCORECARD_MIN_ANSWERED = 5;
+export const scorecardReliable = (s: Scorecard | null): boolean => !!s && s.answered >= SCORECARD_MIN_ANSWERED;
+
 export const fetchUsage = (workspaceId: string) =>
   invoke<UsageReport>("memory_usage_report", { workspaceId, sinceTs: null });
 
