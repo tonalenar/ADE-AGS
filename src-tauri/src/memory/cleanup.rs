@@ -21,6 +21,8 @@ pub const APPLY_MAX_IDS: usize = 100;
 const PREVIEW_CHARS: usize = 200;
 /// Só conta a rejeição do Jev quando a probabilidade dele chega a este valor (se ela existir).
 const JEV_MIN_PROBABILITY: f64 = 0.45;
+/// O Jev não rejeitou nem aprovou: pediu uma olhada da pessoa. Só informa; nunca vem marcada sozinha.
+pub const REVIEW_REASON: &str = "o Jev pediu revisão";
 const TEST_KEY_PREFIXES: &[&str] = &["neg-", "test-", "tmp-", "teste-"];
 /// Chaves que são, por inteiro, de teste (sem hífen depois).
 const TEST_KEYS: &[&str] = &["test", "teste", "tmp", "temp", "foo", "asdf"];
@@ -130,20 +132,31 @@ pub fn candidates_for(conn: &Connection, workspace_id: &str) -> Result<Vec<Candi
         }
     }
 
-    // (c) O Jev rejeitaria: o log de decisões tem `rejeitar` para (key, kind, proposta, body).
-    let inputs: Vec<HintInput> = rows
-        .iter()
-        .map(|row| HintInput {
-            key: row.key.clone(),
-            kind: row.kind.clone(),
-            operation: "proposta".to_string(),
-            body: row.body.clone(),
-        })
-        .collect();
-    for hint in memory_hints(conn, &inputs)? {
-        let confident = hint.probability.is_none_or(|p| p >= JEV_MIN_PROBABILITY);
-        if hint.action == "rejeitar" && hint.secret != Some(true) && confident {
-            reasons[hint.index].push("o Jev rejeitaria".to_string());
+    // (c) O que o Jev achou: `rejeitar` (com probabilidade e sem segredo) ou `revisar`, pelo log de decisões. A mesma
+    // proposta foi consultada sob `proposta` e sob a operação da revisão: tenta as duas e fica com o primeiro achado.
+    let mut judged: HashSet<usize> = HashSet::new();
+    for operation in ["create", "update"] {
+        let inputs: Vec<HintInput> = rows
+            .iter()
+            .map(|row| HintInput {
+                key: row.key.clone(),
+                kind: row.kind.clone(),
+                operation: operation.to_string(),
+                body: row.body.clone(),
+            })
+            .collect();
+        for hint in memory_hints(conn, &inputs)? {
+            if judged.contains(&hint.index) {
+                continue;
+            }
+            let confident = hint.probability.is_none_or(|p| p >= JEV_MIN_PROBABILITY);
+            if hint.action == "rejeitar" && hint.secret != Some(true) && confident {
+                reasons[hint.index].push("o Jev rejeitaria".to_string());
+                judged.insert(hint.index);
+            } else if hint.action == "revisar" {
+                reasons[hint.index].push(REVIEW_REASON.to_string());
+                judged.insert(hint.index);
+            }
         }
     }
 
@@ -363,6 +376,35 @@ mod tests {
         assert_eq!(reasons_of(&list, "testando"), None, "só a chave inteira conta, não o começo de uma palavra");
         // Mais motivos primeiro.
         assert_eq!(list[0].key, "test");
+    }
+
+    #[test]
+    fn jev_pediu_revisao_aparece_como_motivo_proprio_mesmo_sob_o_hash_da_operacao() {
+        let conn = db();
+        seed(&conn);
+        migrate_log(&conn).unwrap();
+        add(&conn, "workspace", "w1", None, "para-revisar", "texto que o Jev quer ver");
+        record(
+            &conn,
+            &LogRow {
+                ts: 1,
+                point: POINT_MEMORY.into(),
+                provider: "jev".into(),
+                model: "m".into(),
+                state_hash: memory_state_hash("para-revisar", "note", "create", "texto que o Jev quer ver"),
+                heuristic: "acao=revisar;segredo=nao".into(),
+                provider_decision: Some("acao=revisar;segredo=nao".into()),
+                probability: Some(0.7),
+                confidence: None,
+                latency_ms: Some(1),
+                error: None,
+                input_tokens: Some(1),
+                output_tokens: Some(0),
+            },
+        )
+        .unwrap();
+        let list = candidates_for(&conn, "w1").unwrap();
+        assert_eq!(reasons_of(&list, "para-revisar"), Some(vec![REVIEW_REASON.to_string()]));
     }
 
     #[test]
