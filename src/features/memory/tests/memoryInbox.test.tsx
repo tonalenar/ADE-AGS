@@ -154,7 +154,7 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
     container.remove();
   });
 
-  it("ao abrir confirmação e pressionar Enter, não aprova contradições nem duplicatas cegamente", async () => {
+  it("ao abrir confirmação e pressionar Enter, não aprova nada fora do botão focado", async () => {
     const onClose = vi.fn();
 
     await act(async () => {
@@ -184,13 +184,10 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
       );
     });
 
-    // 3. Verifica que APENAS o item seguro foi decidido, e NÃO os que contradizem ou duplicam
-    expect(decideMemoryMock).toHaveBeenCalledTimes(1);
-    expect(decideMemoryMock).toHaveBeenCalledWith(
-      "entry-safe",
-      1,
-      true,
-    );
+    // 3. Enter solto no diálogo (foco fora do botão) não decide nada
+    expect(decideMemoryMock).not.toHaveBeenCalled();
+    // 3b. O botão primário é o que tem o foco (Enter nativo = clique nele)
+    expect(document.body.querySelector('[role="alertdialog"] button[autofocus], [role="alertdialog"] button:focus')).not.toBeNull();
 
     // 4. O modal não foi fechado por engano (onClose não deve ser chamado no Enter)
     expect(onClose).not.toHaveBeenCalled();

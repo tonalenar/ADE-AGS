@@ -72,7 +72,7 @@ const BTN_ITEM_SEC = "h-7 rounded-[7px] bg-gray-200/80 px-3 text-[13px] font-med
  * Modal único con TODAS las sugerencias pendientes del workspace, agrupadas por misión. Aceptar o
  * rechazar es siempre un clic del usuario; aceptar en masa pide confirmación con la cuenta y, si hay
  * contradicciones, un aviso explícito (sin confirmarlo no se aceptan).
- * Teclado: Esc cierra (o cancela la confirmación), Enter confirma SIN aceptar avisos.
+ * Teclado: Esc cierra (o cancela la confirmación), Enter solo confirma con el foco en el botón.
  */
 export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onClose: () => void }) {
   const { t } = useTranslation();
@@ -164,10 +164,6 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
     const action = inboxKeyAction(e.key, !!confirm);
     if (action.type === "close") { e.stopPropagation(); onClose(); }
     else if (action.type === "cancel-confirm") { e.stopPropagation(); setConfirm(null); }
-    else if (action.type === "approve" && confirm) {
-      e.preventDefault();
-      void approve(confirm.items, action.acknowledge);
-    }
   };
 
   const plan = confirm ? planBulk(confirm.items) : null;
