@@ -209,6 +209,15 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
     expect(flagged[0].querySelector('[role="note"]')?.getAttribute("aria-label")).toBe("memoryInbox.highPriorityHint");
   });
 
+  it("texto longo tem title e o botão Cancelar tem rótulo acessível", async () => {
+    await act(async () => { root.render(<MemoryInbox workspaceId="w1" onClose={vi.fn()} />); });
+    const body = Array.from(document.body.querySelectorAll("li p")).find((p) => p.textContent === "Porta 8080 configurada");
+    expect(body?.getAttribute("title")).toBe("Porta 8080 configurada");
+    const approveAll = Array.from(document.body.querySelectorAll("button")).find((b) => b.textContent?.includes("memoryInbox.approveAll"));
+    await act(async () => { approveAll?.click(); });
+    expect(document.body.querySelector('[role="alertdialog"] button[aria-label="memoryInbox.cancel"]')).not.toBeNull();
+  });
+
   it("quando confirm NÃO está aberto, pressionar Enter não executa aprovações", async () => {
     const onClose = vi.fn();
 

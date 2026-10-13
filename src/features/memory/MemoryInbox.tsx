@@ -218,7 +218,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
           {!loaded && <p className="py-10 text-center text-[12.5px] text-gray-500 dark:text-white/45">{t("memoryInbox.loading")}</p>}
           {groups.map((g) => (
             <section key={g.missionId} className="mb-4" aria-label={g.title}>
-              <h3 className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-gray-900 dark:text-gray-100">
+              <h3 title={g.title} className="mb-2 flex items-center gap-2 text-[12px] font-semibold text-gray-900 dark:text-gray-100">
                 <input type="checkbox" className="size-3.5 accent-accent-500" aria-label={t("memoryInbox.selectMission", { title: g.title })}
                   checked={g.items.every((i) => selected.has(itemId(i)))}
                   onChange={(e) => setSelected((cur) => {
@@ -242,13 +242,13 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                       <div className="flex items-center gap-2">
                         <input type="checkbox" className="size-3.5 accent-accent-500" checked={selected.has(id)} onChange={() => toggle(id)} aria-label={t("memoryInbox.selectItem", { key: item.key })} />
                         <span className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-[#f5f5f7]" title={item.key}>{item.key}</span>
-                        {isDeletion(item) && <span className="inline-flex h-[18px] items-center rounded-full bg-red-600 px-2 text-[10px] font-bold text-white">{t("memoryInbox.deletion")}</span>}
+                        {isDeletion(item) && <span title={t("memoryInbox.deletion")} className="inline-flex h-[18px] items-center rounded-full bg-red-600 px-2 text-[10px] font-bold text-white">{t("memoryInbox.deletion")}</span>}
                         {asksHighPriority(item) && <span role="note" aria-label={t("memoryInbox.highPriorityHint")} className="inline-flex h-[18px] items-center rounded-full bg-amber-500/25 px-2 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-500/60 dark:text-amber-200" title={t("memoryInbox.highPriorityHint")}>⚠ {t("memoryInbox.highPriority", { priority: item.priority })}</span>}
                         {flag === "highValue" && <span className={`inline-flex h-[18px] items-center rounded-full px-2 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>}
                       </div>
                       <p data-testid="memory-origin" className="truncate text-[10.5px] leading-[14px] text-gray-500 dark:text-white/45"
                         title={originLine(item)}>{originLine(item)}</p>
-                      <p className="whitespace-pre-wrap break-words text-[12.5px] leading-[17px] text-gray-600 dark:text-white/60">{item.body}</p>
+                      <p title={item.body} className="whitespace-pre-wrap break-words text-[12.5px] leading-[17px] text-gray-600 dark:text-white/60">{item.body}</p>
                       <p className="font-mono text-[10.5px] leading-[14px] text-gray-500 dark:text-white/40">
                         {t("memoryReview.evidence")}: {t(`memoryReview.actor.${item.evidence.actorKind}`)}
                         {ev.runId ? ` · run ${ev.runId.slice(0, 8)}` : ""}
@@ -294,7 +294,7 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                 </div>
               )}
               <div className="mt-4 flex justify-end gap-2">
-                <button type="button" onClick={() => setConfirm(null)} className={BTN_SEC}>{t("memoryInbox.cancel")}</button>
+                <button type="button" aria-label={t("memoryInbox.cancel")} onClick={() => setConfirm(null)} className={BTN_SEC}>{t("memoryInbox.cancel")}</button>
                 {plan.needsWarning && (
                   <button type="button" onClick={() => void approve(confirm.items, true)} className="h-7 rounded-md border border-red-500/60 px-3 text-[12px] text-red-700 hover:bg-red-500/10 dark:text-red-300">
                     {t("memoryInbox.confirmAnyway")}
