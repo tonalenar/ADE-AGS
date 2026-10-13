@@ -337,11 +337,28 @@ fn codex_server_drop_terminates_owned_process() {
     let mut command = crate::util::program("powershell");
     command.args(["-NoProfile", "-NonInteractive", "-Command", "Start-Sleep -Seconds 60"])
         .stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped()).stderr(std::process::Stdio::piped());
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::Foundation::{HANDLE, WAIT_OBJECT_0};
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE};
+
     let child = command.spawn().unwrap();
     let pid = child.id();
+    // Um handle do processo ORIGINAL: consultar o PID depois (por PowerShell ou tasklist) pode cair num
+    // processo novo que o Windows deu o mesmo PID, e isso fazia o teste falhar de vez em quando sob carga.
+    // SAFETY: OpenProcess devolve um handle novo, entregue uma única vez ao RAII.
+    let original = unsafe {
+        let raw = OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE, 0, pid);
+        assert!(!raw.is_null(), "OpenProcess({pid}): {}", std::io::Error::last_os_error());
+        OwnedHandle::from_raw_handle(raw as _)
+    };
+    let handle = original.as_raw_handle() as HANDLE;
     drop(super::CodexServer::new(child).unwrap());
-    let output = crate::util::program("powershell").args(["-NoProfile", "-NonInteractive", "-Command", &format!("Get-Process -Id {pid} -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Id")]).output().unwrap();
-    assert!(output.stdout.is_empty(), "owned process survived cleanup");
+    let wait = unsafe { WaitForSingleObject(handle, 5_000) };
+    if wait != WAIT_OBJECT_0 {
+        // A limpeza usa a mesma identidade estável: nunca mata outro processo pelo PID reciclado.
+        unsafe { TerminateProcess(handle, 1); }
+    }
+    assert_eq!(wait, WAIT_OBJECT_0, "owned process survived cleanup (wait={wait})");
 }
 
 #[test]
