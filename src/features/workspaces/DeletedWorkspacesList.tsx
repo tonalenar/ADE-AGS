@@ -61,7 +61,7 @@ export function DeletedWorkspacesList({ onRestored }: { onRestored?: () => void 
             const soon = isExpiringSoon(days);
             return (
               <li key={w.id} className="flex items-center justify-between gap-3 rounded-lg border border-gray-200 bg-white px-4 py-2 dark:border-gray-700 dark:bg-gray-800/50">
-                <span className="min-w-0 truncate text-sm text-gray-800 dark:text-gray-100">
+                <span title={w.name} className="min-w-0 truncate text-sm text-gray-800 dark:text-gray-100">
                   {w.name}{" "}
                   <span className={`ml-1 rounded-full border px-2 py-px text-[11px] ${soon ? "border-red-500/60 text-red-600 dark:text-red-400" : "border-amber-500/60 text-amber-700 dark:text-amber-400"}`}>
                     {days === null ? t("workspaceDelete.noDeadline") : t("workspaceDelete.remaining", { count: days })}

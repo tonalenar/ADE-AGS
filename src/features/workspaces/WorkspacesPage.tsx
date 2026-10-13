@@ -137,7 +137,7 @@ export function WorkspacesPage() {
                       <span className="text-sm font-semibold text-gray-800 dark:text-gray-100 truncate" title={ws.name}>
                         {ws.name}
                       </span>
-                      <span className="text-xs text-gray-400 dark:text-gray-500 truncate">
+                      <span className="text-xs text-gray-400 dark:text-gray-500 truncate" title={`${t("workspace.list.summary", { windows: ws.windowCount, tabs: ws.tabCount })} · ${formatRelative(ws.lastActive, t)}`}>
                         {t("workspace.list.summary", { windows: ws.windowCount, tabs: ws.tabCount })}
                         {" · "}
                         {formatRelative(ws.lastActive, t)}

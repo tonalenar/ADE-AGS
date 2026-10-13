@@ -11,7 +11,7 @@ import { missionIndex, tabsByMission } from "./groups";
 import { useMissionsStore } from "./store";
 import { isWorking } from "./stalled";
 import { LOOP_DONE, loopStep, loopStuck, type LoopWatch } from "./vigiaLoop";
-import { memberFinished, pokeAllowed } from "./vigiaPoke";
+import { isFinalReport, memberFinished, pokeAllowed } from "./vigiaPoke";
 import { useVigiaSwitch } from "./vigiaSwitch";
 
 /**
@@ -190,26 +190,27 @@ interface Watch { startedAt: number; nudges: number; lastNudge?: number; limitRe
 
 /**
  * Quando cada aba mandou (`sentAt`) e recebeu (`gotAt`) uma mensagem entre agentes, e quando
- * recebeu a última TAREFA (`taskAt`, sem contar "encerrado"/"aguarde"). Ficam guardadas: ao
+ * recebeu a última TAREFA (`taskAt`, sem contar "encerrado"/"aguarde") e entregou (`finishedAt`). Ficam guardadas: ao
  * reabrir o app o Vigia lembrava de nada e acusava "você ainda não delegou" de uma missão pronta.
  */
 const STORE_KEY = "ags.vigia.peers.v1";
-function loadPeers(): { sent: Map<string, number>; got: Map<string, number>; task: Map<string, number> } {
+function loadPeers(): { sent: Map<string, number>; got: Map<string, number>; task: Map<string, number>; finished: Map<string, number> } {
   try {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY) ?? "{}") as Record<string, Record<string, number>>;
     const toMap = (o: Record<string, number> | undefined) => new Map(Object.entries(o ?? {}).filter(([, v]) => Number.isFinite(v)));
-    return { sent: toMap(raw.sent), got: toMap(raw.got), task: toMap(raw.task) };
+    return { sent: toMap(raw.sent), got: toMap(raw.got), task: toMap(raw.task), finished: toMap(raw.finished) };
   } catch {
-    return { sent: new Map(), got: new Map(), task: new Map() };
+    return { sent: new Map(), got: new Map(), task: new Map(), finished: new Map() };
   }
 }
 const peers = loadPeers();
 const sentAt = peers.sent;
 const gotAt = peers.got;
 const taskAt = peers.task;
+const finishedAt = peers.finished;
 function rememberPeers(): void {
   try {
-    localStorage.setItem(STORE_KEY, JSON.stringify({ sent: Object.fromEntries(sentAt), got: Object.fromEntries(gotAt), task: Object.fromEntries(taskAt) }));
+    localStorage.setItem(STORE_KEY, JSON.stringify({ sent: Object.fromEntries(sentAt), got: Object.fromEntries(gotAt), task: Object.fromEntries(taskAt), finished: Object.fromEntries(finishedAt) }));
   } catch {
     /* sem armazenamento: vale só nesta sessão */
   }
@@ -227,17 +228,20 @@ function mayPoke(tabId: string, now: number): boolean {
   return pokeAllowed(pokes.get(tabId), sentAt.get(tabId), isWorking(screenOf(tabId)?.lines ?? []), now);
 }
 
-function poke(tabId: string, text: string, now: number): void {
+function poke(tabId: string, text: string, now: number, onSent: () => void): void {
   pokes.set(tabId, now);
-  sendWhenReady(tabId, text);
+  sendWhenReady(tabId, text, { onSent: (at) => {
+    pokes.set(tabId, at);
+    onSent();
+  } });
 }
 
 /** Por terminal Codex: desde quando a tela está igual (fora os contadores) em "Working". */
 const loops = new Map<string, LoopWatch>();
 
-/** Escreve no chat do Orquestrador (é ali que o usuário lê). Falha silenciosa: é só registro. */
+/** Escreve no chat e no feed; falhas ficam visíveis no console do app. */
 function reportToChat(tabId: string, text: string): void {
-  invoke("vigia_report", { tabId, text }).catch(() => undefined);
+  invoke("vigia_report", { tabId, text }).catch((error: unknown) => console.error("[Vigia] não foi possível registrar o aviso", error));
 }
 
 /**
@@ -304,7 +308,7 @@ export function vigiaTick(now = Date.now()): void {
         hasTask: gotAt.has(tab.id),
         lastOutput: lastOutputAt(tab.id),
         taskAt: taskAt.get(tab.id),
-        reportedAt: sentAt.get(tab.id),
+        reportedAt: finishedAt.get(tab.id),
       }));
     const finding = watchdogFinding({
       now,
@@ -332,17 +336,18 @@ export function vigiaTick(now = Date.now()): void {
     if (finding) {
       // Orquestrador trabalhando, ou sem responder à cutucada anterior: espera o próximo ciclo.
       if (!mayPoke(lead.id, now)) continue;
-      watch.nudges += 1;
-      watch.lastNudge = now;
-      poke(lead.id, `[${VIGIA_NAME}] ${finding.nudge}`, now);
-      reportToChat(lead.id, reportLine(finding.stuck, `lembrete ${watch.nudges}/${NUDGE_LIMIT} enviado ao ${lead.title}.`));
+      poke(lead.id, `[${VIGIA_NAME}] ${finding.nudge}`, now, () => {
+        watch.nudges += 1;
+        watch.lastNudge = Date.now();
+        reportToChat(lead.id, reportLine(finding.stuck, `lembrete ${watch.nudges}/${NUDGE_LIMIT} enviado ao ${lead.title}.`));
+      });
       continue;
     }
 
     if (inFlight.has(mission.id)) continue;
     // Equipe que já entregou, ou integrante que já reportou a tarefa: parados com razão, não travados.
     if (watch.doneAt !== undefined) continue;
-    const idle = idleCandidates(team, now, lastOutputAt, lastPoke).filter((tab) => !memberFinished(taskAt.get(tab.id), sentAt.get(tab.id)));
+    const idle = idleCandidates(team, now, lastOutputAt, lastPoke).filter((tab) => !memberFinished(taskAt.get(tab.id), finishedAt.get(tab.id)));
     if (idle.length === 0) continue;
     const pick = vigiaAgentFor(lead.agentId, available);
     if (!pick) continue;
@@ -365,9 +370,10 @@ export function vigiaTick(now = Date.now()): void {
             continue;
           }
           const target = team.find((tab) => tab.title === action.to);
-          if (!target || !mayPoke(target.id, now)) continue;
-          poke(target.id, `[${VIGIA_NAME}] ${action.message}`, now);
-          reportToChat(lead.id, reportLine(action.message, `mandei a ${action.to}.`, "aviso"));
+          if (!target || memberFinished(taskAt.get(target.id), finishedAt.get(target.id)) || !mayPoke(target.id, Date.now())) continue;
+          poke(target.id, `[${VIGIA_NAME}] ${action.message}`, Date.now(), () => {
+            reportToChat(lead.id, reportLine(action.message, `mandei a ${action.to}.`, "aviso"));
+          });
         }
       })
       .catch((error: unknown) => {
@@ -386,12 +392,15 @@ export function vigiaTick(now = Date.now()): void {
 export function useVigiaDriver(): void {
   useEffect(() => {
     const timer = window.setInterval(() => vigiaTick(), VIGIA_TICK_MS);
-    const off = listen<{ fromTabId: string; toTabId: string | null; atMs: number; text?: string | null }>("cc-peer-message", (e) => {
+    const off = listen<{ kind?: string; fromTabId: string; toTabId: string | null; atMs: number; text?: string | null }>("cc-peer-message", (e) => {
       const at = e.payload.atMs || Date.now();
       sentAt.set(e.payload.fromTabId, at);
+      const sender = useTabsStore.getState().tabs.find((tab) => tab.id === e.payload.fromTabId);
+      const final = isFinalReport(e.payload.text, e.payload.kind, sender?.title);
+      if (final) finishedAt.set(e.payload.fromTabId, at);
       if (e.payload.toTabId) {
         gotAt.set(e.payload.toTabId, at);
-        if (!isClosure(e.payload.text)) taskAt.set(e.payload.toTabId, at);
+        if (!final && !isClosure(e.payload.text)) taskAt.set(e.payload.toTabId, at);
       }
       rememberPeers();
     });
