@@ -4,7 +4,7 @@ import { AlertaToast, Button } from "neogestify-ui-components";
 
 import { AppDialog } from "@/shared/ui/AppDialog";
 
-import { agentReads, applyCleanup, fetchCandidates, fetchUsage, percent, suggestedIds, usageVerdict, type CleanupCandidate, type UsageReport } from "./memoryUsage";
+import { agentReads, applyCleanup, fetchCandidates, fetchScorecard, fetchUsage, percent, scorecardReliable, type Scorecard, suggestedIds, usageVerdict, type CleanupCandidate, type UsageReport } from "./memoryUsage";
 
 /**
  * "Uso da memória": se os agentes estão lendo o que foi aprovado. Mostra buscas, aberturas, cobertura (quanto
@@ -16,9 +16,11 @@ export function MemoryUsageCard({ workspaceId }: { workspaceId: string }) {
   const [report, setReport] = useState<UsageReport | null>(null);
   const [failed, setFailed] = useState(false);
   const [cleaning, setCleaning] = useState(false);
+  const [score, setScore] = useState<Scorecard | null>(null);
 
   const load = useCallback(() => {
     fetchUsage(workspaceId).then((r) => { setReport(r); setFailed(false); }).catch(() => setFailed(true));
+    fetchScorecard().then(setScore).catch(() => setScore(null));
   }, [workspaceId]);
   useEffect(load, [load]);
 
@@ -84,6 +86,15 @@ export function MemoryUsageCard({ workspaceId }: { workspaceId: string }) {
           )}
           {verdict !== "unknown" && <p className="mt-2 text-[10.5px] text-gray-500">{t("memoryUsage.note", { reads: agentReads(report) })}</p>}
         </>
+      )}
+      {score && score.labeled > 0 && (
+        <div className="mt-3 border-t border-gray-200 dark:border-white/8 pt-2">
+          <p className="font-medium text-gray-900 dark:text-gray-100">{t("memoryUsage.score.title")}</p>
+          <p className="text-gray-500">{t("memoryUsage.score.body", { labeled: score.labeled, answered: score.answered, rejected: score.jevReject })}</p>
+          {score.rejectRecall !== null && <p className="font-mono">{t("memoryUsage.score.recall", { pct: Math.round(score.rejectRecall * 100) })}</p>}
+          {score.falseAlarmRate !== null && <p className="font-mono">{t("memoryUsage.score.falseAlarm", { pct: Math.round(score.falseAlarmRate * 100), n: score.approvedByHuman })}</p>}
+          {!scorecardReliable(score) && <p className="text-[10.5px] text-amber-600 dark:text-amber-400">{t("memoryUsage.score.few")}</p>}
+        </div>
       )}
       {cleaning && <CleanupDialog workspaceId={workspaceId} onClose={() => setCleaning(false)} onDone={load} />}
     </section>

@@ -414,7 +414,9 @@ pub fn run() {
             crate::decisions::commands::decision_shadow_report,
             crate::decisions::commands::decision_shadow_export_csv,
             crate::decisions::hints::decision_memory_hints,
+            crate::decisions::scorecard::decision_jev_scorecard,
             crate::decisions::delivery::decision_classify_report,
+            crate::decisions::routing::decision_route_turn,
             crate::database::db_boot_status,
             // Gestión de skills (symlinks globales)
             crate::skills::get_skills_dir,

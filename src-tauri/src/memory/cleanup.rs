@@ -199,7 +199,11 @@ fn delete_as_user(conn: &Connection, sync: &RepoSync, workspace_id: &str, entry_
         ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None },
     )?;
     repo_sync::decide_and_schedule(conn, sync, &proposal.entry_id, proposal.revision, true)?;
-    crate::decisions::record_memory_decision(conn, &key, &kind, "delete", &body, true);
+    // Apagar pela limpeza é a rejeição humana da proposta (origem `limpeza`), não uma aprovação.
+    // Falha ao gravar o rótulo nunca derruba a exclusão, que já aconteceu.
+    if let Err(error) = crate::decisions::scorecard::record_cleanup_rejection(conn, &key, &kind, &body) {
+        eprintln!("limpeza de memória: rótulo do gabarito não gravado: {error}");
+    }
     Ok(())
 }
 
@@ -252,6 +256,7 @@ mod tests {
     use super::*;
     use crate::decisions::log::{migrate as migrate_log, record, LogRow};
     use crate::decisions::{memory_state_hash, POINT_MEMORY};
+    use crate::decisions::scorecard::CLEANUP_POINT;
     use crate::memory::{decide, propose, ProposalResult};
 
     fn db() -> Connection {
@@ -421,6 +426,36 @@ mod tests {
         assert_eq!(again.deleted, 0);
         assert_eq!(again.failed[0].error, "memória não está ativa");
         assert!(candidates_for(&conn, "w1").unwrap().iter().all(|c| c.entry_id != old.entry_id));
+    }
+
+    #[test]
+    fn apply_grava_o_rotulo_de_limpeza_uma_vez_e_nao_grava_aprovacao() {
+        let conn = db();
+        seed(&conn);
+        let old = add(&conn, "workspace", "w1", None, "rot-key", "para rotular");
+        let other = add(&conn, "workspace", "w2", None, "rot-other", "de outro workspace");
+        let sync = sync();
+        let hash = memory_state_hash("rot-key", "note", "proposta", "para rotular");
+        let count = |point: &str| -> i64 {
+            conn.query_row("SELECT COUNT(*) FROM decision_human_log WHERE point = ?1", [point], |r| r.get(0)).unwrap()
+        };
+
+        // Recusada (outro workspace): nada é rotulado.
+        assert_eq!(apply_for(&conn, &sync, "w1", &[other.entry_id.clone()]).unwrap().deleted, 0);
+        assert_eq!(count(CLEANUP_POINT), 0);
+
+        assert_eq!(apply_for(&conn, &sync, "w1", &[old.entry_id.clone()]).unwrap().deleted, 1);
+        assert_eq!(count(CLEANUP_POINT), 1);
+        let (stored_hash, decision): (String, String) = conn
+            .query_row("SELECT state_hash, decision FROM decision_human_log WHERE point = ?1", [CLEANUP_POINT], |r| Ok((r.get(0)?, r.get(1)?)))
+            .unwrap();
+        assert_eq!((stored_hash.as_str(), decision.as_str()), (hash.as_str(), "rejeitar"));
+        // A exclusão não entra como aprovação da tela normal.
+        assert_eq!(count(POINT_MEMORY), 0);
+
+        // Repetir o rótulo (mesma proposta) não duplica.
+        assert!(!crate::decisions::scorecard::record_cleanup_rejection(&conn, "rot-key", "note", "para rotular").unwrap());
+        assert_eq!(count(CLEANUP_POINT), 1);
     }
 
     #[test]

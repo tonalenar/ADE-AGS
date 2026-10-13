@@ -135,8 +135,12 @@ pub async fn mission_prepare_team(app: AppHandle, mission_id: String, members: V
             }).collect();
             handles.into_iter().map(|h| h.join().unwrap_or_else(|_| Err("Falha ao preparar o worktree.".into()))).collect::<Result<Vec<_>, _>>()
         })?;
-        let conn = db.lock().map_err(|e| e.to_string())?;
-        Ok(PreparedTeam { workspaces, precheck: super::precheck_text(&conn, &mission_id)?, memory: super::memory_context_text(&conn, &mission_id)? })
+        let precheck = {
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            super::precheck_text(&conn, &mission_id)?
+        };
+        let memory = super::memory_briefing(&db, &mission_id)?;
+        Ok(PreparedTeam { workspaces, precheck, memory })
     }).await.map_err(|e| e.to_string())?
 }
 

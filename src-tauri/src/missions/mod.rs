@@ -726,6 +726,22 @@ pub(crate) fn memory_context_text(conn: &Connection, mission_id: &str) -> Result
     Ok(crate::memory::search::briefing_block(&docs, &mission.id, &mission.objective, 10, 2_600))
 }
 
+/// O bloco de memória do briefing do `prepare_team`. Com `memory_relevance` ligado, o Jev escolhe as
+/// memórias relevantes ao objetivo (ver `decisions/relevance.rs`); se não escolher, sai o índice de
+/// sempre, com as mesmas entradas de `memory_context_text`. Não segura o banco na chamada ao provedor.
+pub(crate) fn memory_briefing(db: &DbConnection, mission_id: &str) -> Result<String, String> {
+    let (mission, docs) = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mission = store::get(&conn, mission_id)?.ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
+        let docs = crate::memory::search::load_docs(&conn, &mission.workspace_id, Some(&mission.id))?;
+        (mission, docs)
+    };
+    if let Some(text) = crate::decisions::relevance::briefing(db, &mission.workspace_id, &mission.id, &mission.objective, &docs) {
+        return Ok(text);
+    }
+    Ok(crate::memory::search::briefing_block(&docs, &mission.id, &mission.objective, 10, 2_600))
+}
+
 #[tauri::command]
 pub fn mission_memory_context(app: AppHandle, mission_id: String) -> Result<String, String> {
     let db = db_of(&app)?;

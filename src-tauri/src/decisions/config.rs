@@ -12,6 +12,8 @@ pub const KEY_DREAM: &str = "decisions.point.dream_triage";
 pub const KEY_FLEET: &str = "decisions.point.fleet_gate";
 pub const KEY_MISSION: &str = "decisions.point.mission_gate";
 pub const KEY_DELIVERY: &str = "decisions.point.delivery_gate";
+pub const KEY_RELEVANCE: &str = "decisions.point.memory_relevance";
+pub const KEY_ROUTING: &str = "decisions.point.turn_routing";
 pub const KEY_SECONDARY_PROVIDER: &str = "decisions.secondary.provider";
 pub const KEY_SECONDARY_URL: &str = "decisions.secondary.base_url";
 pub const KEY_SECONDARY_MODEL: &str = "decisions.secondary.model";
@@ -138,6 +140,10 @@ pub struct Settings {
     pub mission_gate: bool,
     /// O Vigia pergunta ao provedor se uma mensagem ao Orquestrador é relatório final.
     pub delivery_gate: bool,
+    /// O Jev escolhe, entre as memórias aprovadas, as que importam para o objetivo da missão (ver `relevance.rs`).
+    pub memory_relevance: bool,
+    /// O Jev sugere para quem vai uma mensagem escrita na aba Equipe sem @ (ver `routing.rs`).
+    pub turn_routing: bool,
     /// O segundo provedor da comparação. `None` = só o principal.
     pub secondary: Option<Endpoint>,
 }
@@ -155,6 +161,8 @@ impl Default for Settings {
             fleet_gate: false,
             mission_gate: false,
             delivery_gate: false,
+            memory_relevance: false,
+            turn_routing: false,
             secondary: None,
         }
     }
@@ -210,6 +218,8 @@ impl Settings {
             super::points::POINT_FLEET => self.fleet_gate,
             super::points::POINT_MISSION => self.mission_gate,
             super::points::POINT_DELIVERY => self.delivery_gate,
+            super::points::POINT_RELEVANCE => self.memory_relevance,
+            super::points::POINT_ROUTING => self.turn_routing,
             _ => false,
         }
     }
@@ -261,6 +271,8 @@ pub fn load(conn: &Connection) -> Result<Settings, String> {
     settings.fleet_gate = flag(conn, KEY_FLEET);
     settings.mission_gate = flag(conn, KEY_MISSION);
     settings.delivery_gate = flag(conn, KEY_DELIVERY);
+    settings.memory_relevance = flag(conn, KEY_RELEVANCE);
+    settings.turn_routing = flag(conn, KEY_ROUTING);
     let second = ProviderKind::parse(&text(conn, KEY_SECONDARY_PROVIDER).unwrap_or_default());
     settings.secondary = second.is_configured().then(|| Endpoint {
         provider: second,
@@ -293,6 +305,8 @@ pub fn persist(conn: &Connection, settings: &Settings) -> Result<(), String> {
         (KEY_FLEET, bool_text(settings.fleet_gate)),
         (KEY_MISSION, bool_text(settings.mission_gate)),
         (KEY_DELIVERY, bool_text(settings.delivery_gate)),
+        (KEY_RELEVANCE, bool_text(settings.memory_relevance)),
+        (KEY_ROUTING, bool_text(settings.turn_routing)),
     ];
     for (key, value) in rows {
         put(conn, key, &value)?;

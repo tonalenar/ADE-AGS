@@ -13,8 +13,9 @@ import { open as pickFile } from "@tauri-apps/plugin-dialog";
 
 const TOOL = "cc-t flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white";
 import { unreadOf, useUnreadStore } from "./chatUnread";
-import { useActiveBoardKey, boardKeyOfTab, missionOfKey } from "./store";
+import { useActiveBoardKey, boardKeyOfTab, missionOfKey, useCanvasStore } from "./store";
 import { TeamFeed, TeamFilterBar, useMissionApprovals, useTeamFeed, useTeamMessages } from "./TeamFeed";
+import { useRouteSuggestion, withTarget } from "./routeSuggestion";
 import { resolveMention, suggestMentions, type UserNote } from "./teamFeedModel";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { ResponsePicker } from "./ResponsePicker";
@@ -97,9 +98,11 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
   const teamFeed = useTeamFeed(missionId, teamMessages, teamApprovals, notes);
   useEffect(() => setNotes([]), [missionId]);
   const addressees = useMemo(() => agents.map((a) => ({ id: a.id, name: a.title.split(" — ")[0] })), [agents]);
+  const roles = useCanvasStore((s) => (key ? s.boards[key]?.roles : undefined));
   const [thread, setThread] = useState<Thread>("blue");
   const [conversation, setConversation] = useState<Conversation | null>(null);
   const [draft, setDraft] = useState("");
+  const routeOffer = useRouteSuggestion(draft, addressees, roles, teamView);
   const [sending, setSending] = useState(false);
   const bottom = useRef<HTMLDivElement>(null);
   const [picking, setPicking] = useState(false);
@@ -361,6 +364,12 @@ ${text}` : text)); setPicking(false); }} />}
       disabled={teamView ? agents.length === 0 : !current}
       composerHint={teamView ? (
         <span className="flex min-w-0 flex-wrap items-center gap-1" aria-label={t("canvas.team.mention")}>
+          {routeOffer && (
+            <button type="button" title={t("canvas.team.routeHint")} onClick={() => setDraft(withTarget(draft, routeOffer))}
+              className="cc-t h-[22px] max-w-40 truncate rounded-md border border-accent-500/50 px-2 text-[11.5px] text-accent-600 hover:bg-accent-500/10 dark:text-accent-300">
+              {t("canvas.team.routeSuggest", { name: routeOffer.name })}
+            </button>
+          )}
           {(suggestMentions(draft, addressees).length > 0 && draft.trimStart().startsWith("@") ? suggestMentions(draft, addressees) : addressees).map((a) => (
             <button key={a.id} type="button" title={t("canvas.team.mentionHint", { name: a.name })}
               onClick={() => setDraft(`@${a.name} `)}
