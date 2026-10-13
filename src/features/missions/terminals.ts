@@ -1,4 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
+import { priorContext } from "./abArm";
 import i18n from "i18next";
 
 import { useAccountsStore } from "@/features/accounts/store";
@@ -400,7 +401,8 @@ export async function startMissionInTerminals(
   const prepared = await invoke<PreparedTeam>("mission_prepare_team", { missionId: mission.id, members: [LEAD_NAME, ...team.map((m) => m.name)] });
   const leadWorkspace = workspaceFor(prepared, LEAD_NAME);
   const memberWorkspaces = team.map((m) => workspaceFor(prepared, m.name));
-  const { precheck: findings, memory } = prepared;
+  // Teste A/B: o braço "sem-memoria" (marcador no título) sai sem memória nem resumo de missões anteriores.
+  const { findings, memory } = priorContext(mission.title, prepared);
 
   await invoke("mission_start_terminals", { missionId: mission.id, force: Boolean(options?.force) });
   // Cuánto tardó armar la misión antes de abrir el canvas (worktrees, precheck, memoria): aparece en
