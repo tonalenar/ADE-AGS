@@ -164,7 +164,7 @@ Comando reprodutível das estatísticas (PowerShell):
 
 ```powershell
 $codigo = @'
-import sqlite3,json,sys,statistics,math; sys.stdout.reconfigure(encoding='utf-8'); c=sqlite3.connect('file:C:/Users/tonz1n/.ags/data.db?mode=ro',uri=True); c.execute('PRAGMA query_only=ON'); 
+import sqlite3,json,sys,statistics,math; sys.stdout.reconfigure(encoding='utf-8'); c=sqlite3.connect('file:C:/Users/tonz1n/.ags/data.db?mode=ro',uri=True); c.execute('PRAGMA query_only=ON');
 for provider,point in c.execute('SELECT DISTINCT provider,point FROM decision_shadow_log ORDER BY provider,point'):
  rows=c.execute('SELECT latency_ms,error FROM decision_shadow_log WHERE provider=? AND point=?',(provider,point)).fetchall(); xs=sorted(x[0] for x in rows if x[0] is not None); errors=[x[1] for x in rows if x[1]]; print(json.dumps({'provider':provider,'point':point,'rows':len(rows),'mean_ms':statistics.mean(xs) if xs else None,'median_ms':statistics.median(xs) if xs else None,'p95_ms':xs[math.ceil(.95*len(xs))-1] if xs else None,'errors':len(errors),'timeouts':sum('timeout' in e.lower() or 'timed out' in e.lower() or 'tempo' in e.lower() for e in errors)},ensure_ascii=False))
 print('human',json.dumps(c.execute('SELECT point,count(*) FROM decision_human_log GROUP BY point').fetchall(),ensure_ascii=False))
@@ -195,3 +195,112 @@ cc/mission-4d39a704-c0b0-4ed0-9987-0af86375
 ```
 
 `git diff --check`: exit 0, sem saída. `gh pr list --head "cc/*" --state open`: exit 0, sem saída. O filtro head pode ser literal; saída vazia desse comando não demonstra sozinho ausência de todos os PRs cc/. Este integrante não criou branches ou PRs, não deu push nem fez merge.
+
+Recorte desta missão: started_at = 1791903390 (2026-10-13 11:56:30 -03:00). Consultas somente leitura:
+
+```sql
+SELECT provider,point,count(*) FROM decision_shadow_log WHERE ts >= (SELECT started_at FROM missions WHERE id='4d39a704-c0b0-4ed0-9987-139cfcbb36b8') GROUP BY provider,point;
+SELECT point,count(*) FROM decision_human_log WHERE ts >= (SELECT started_at FROM missions WHERE id='4d39a704-c0b0-4ed0-9987-139cfcbb36b8') GROUP BY point;
+```
+
+Saída JSON de cada consulta: `[]`. Nenhuma linha nova desses logs durante a amostra da missão; a vantagem citada acima é histórica. Não concluo vantagem experimental nova do Jev nesta rodada.
+
+## Mensagens e Vigia após todas as entregas
+
+Consulta feita após os relatórios finais dos três integrantes; comando somente leitura:
+
+```powershell
+$codigo = @'
+import sqlite3,json,sys,statistics,math; sys.stdout.reconfigure(encoding='utf-8'); c=sqlite3.connect('file:C:/Users/tonz1n/.ags/data.db?mode=ro',uri=True); c.execute('PRAGMA query_only=ON');
+import datetime
+mission='4d39a704-c0b0-4ed0-9987-139cfcbb36b8'
+iso=lambda ms:datetime.datetime.fromtimestamp(ms/1000,datetime.timezone(datetime.timedelta(hours=-3))).isoformat(timespec='milliseconds')
+rows=c.execute('SELECT id,at_ms,kind,from_name,to_name,text FROM mission_messages WHERE mission_id=? ORDER BY at_ms,id',(mission,)).fetchall()
+reports=[r for r in rows if r[4]=='Orquestrador' and (r[5].startswith('Frontend V19') or r[5].startswith('Relatório de QA da Missão V19 concluído') or r[5].startswith('Backend V19: relatório de testes concluído'))]
+print('relatorios',json.dumps([{'id':r[0],'at_ms':r[1],'hora':iso(r[1]),'from':r[3],'chars':len(r[5]),'primeira_linha':r[5].splitlines()[0]} for r in reports],ensure_ascii=False))
+print('maximo',json.dumps(c.execute('SELECT max(length(text)),sum(length(text)>6000),count(*) FROM mission_messages WHERE mission_id=?',(mission,)).fetchone()))
+print('grupos',json.dumps(c.execute('SELECT kind,from_name,to_name,count(*),max(length(text)) FROM mission_messages WHERE mission_id=? GROUP BY kind,from_name,to_name',(mission,)).fetchall(),ensure_ascii=False))
+vigia=[r for r in rows if r[3]=='Vigia']
+print('vigia',json.dumps([{'id':r[0],'at_ms':r[1],'hora':iso(r[1]),'text':r[5]} for r in vigia],ensure_ascii=False))
+after=[{'aviso':v[0],'hora_aviso':iso(v[1]),'integrante':r[3],'hora_relatorio':iso(r[1])} for v in vigia for r in reports if v[1]>r[1] and 'travado' in v[5].lower() and r[3].lower() in v[5].lower() and 'sem reportar nada' in v[5].lower()]
+print('travado_apos_relatorio',json.dumps(after,ensure_ascii=False))
+print('snapshot',datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=-3))).isoformat(timespec='milliseconds'))
+'@
+python -c $codigo
+```
+
+Saída exata:
+
+```text
+relatorios [{"id": 119, "at_ms": 1791903596371, "hora": "2026-10-13T11:59:56.371-03:00", "from": "Frontend", "chars": 1016, "primeira_linha": "Frontend V19 (por codigo; a janela do app NAO foi aberta). Relatorio em docs/ade-ags/V19_FRONTEND.md (commit na branch cc/mission-4d39a704-c0b0-4ed0-9987-5ca9dc3f). Nenhum codigo do produto alterado; nenhum teste rodado."}, {"id": 135, "at_ms": 1791904359861, "hora": "2026-10-13T12:12:39.861-03:00", "from": "QA / Tests", "chars": 834, "primeira_linha": "Relatório de QA da Missão V19 concluído e commitado na branch cc/mission-4d39a704-c0b0-4ed0-9987-f2e6aed5 (commit bea32982)."}, {"id": 138, "at_ms": 1791904491847, "hora": "2026-10-13T12:14:51.847-03:00", "from": "Backend", "chars": 936, "primeira_linha": "Backend V19: relatório de testes concluído, com um bug P2 confirmado."}]
+maximo [2020, 0, 25]
+grupos [["ask", "Backend", "Frontend", 1, 49], ["tell", "Backend", "Orquestrador", 5, 936], ["tell", "Backend", "QA / Tests", 2, 92], ["tell", "Frontend", "Orquestrador", 1, 1016], ["tell", "Frontend", "QA / Tests", 3, 96], ["tell", "Orquestrador", "Backend", 1, 1695], ["tell", "Orquestrador", "Frontend", 1, 1778], ["tell", "Orquestrador", "QA / Tests", 1, 2020], ["tell", "QA / Tests", "Backend", 2, 254], ["tell", "QA / Tests", "Frontend", 5, 112], ["tell", "QA / Tests", "Orquestrador", 2, 834], ["tell", "Vigia", "Orquestrador", 1, 247]]
+vigia [{"id": 130, "at_ms": 1791903945000, "hora": "2026-10-13T12:05:45.000-03:00", "text": "**Vigia** — aviso: Frontend está ocioso aguardando novas instruções: a integração já foi feita e o relatório foi entregue. Sugestão: atribuir nova tarefa ao Frontend ou liberá-lo, já que ele não tem trabalho pendente. Feito: mandei a Orquestrador."}]
+travado_apos_relatorio []
+snapshot 2026-10-13T12:15:26.852-03:00
+```
+
+Validação dos nomes contra os IDs de terminal confirmados por peer check/peer tell (Vigia é remetente sintético, corretamente preservado):
+
+```powershell
+$codigo = @'
+import sqlite3,json,sys,statistics,math; sys.stdout.reconfigure(encoding='utf-8'); c=sqlite3.connect('file:C:/Users/tonz1n/.ags/data.db?mode=ro',uri=True); c.execute('PRAGMA query_only=ON');
+expected={'5e0436c1-1f1b-4742-b8f0-adbd7f6a6f66':'Orquestrador','a80ad187-f630-49a4-b9d3-0902414ac46a':'Backend','949cbbb1-308e-4cf9-8845-c79c3e3672ef':'Frontend','7b5f1a75-e29e-4605-8bf6-724797aa8061':'QA / Tests'}
+rows=c.execute('SELECT id,from_tab_id,from_name,to_tab_id,to_name FROM mission_messages WHERE mission_id=?',('4d39a704-c0b0-4ed0-9987-139cfcbb36b8',)).fetchall()
+errors=[r for r in rows if (r[2]!='Vigia' and expected.get(r[1])!=r[2]) or expected.get(r[3])!=r[4]]
+print(json.dumps({'rows':len(rows),'nomes_incorretos':errors},ensure_ascii=False))
+'@
+python -c $codigo
+```
+
+Saída exata:
+
+```text
+{"rows": 27, "nomes_incorretos": []}
+```
+
+Releitura final com o mesmo comando acima:
+
+```text
+relatorios [{"id": 119, "at_ms": 1791903596371, "hora": "2026-10-13T11:59:56.371-03:00", "from": "Frontend", "chars": 1016, "primeira_linha": "Frontend V19 (por codigo; a janela do app NAO foi aberta). Relatorio em docs/ade-ags/V19_FRONTEND.md (commit na branch cc/mission-4d39a704-c0b0-4ed0-9987-5ca9dc3f). Nenhum codigo do produto alterado; nenhum teste rodado."}, {"id": 135, "at_ms": 1791904359861, "hora": "2026-10-13T12:12:39.861-03:00", "from": "QA / Tests", "chars": 834, "primeira_linha": "Relatório de QA da Missão V19 concluído e commitado na branch cc/mission-4d39a704-c0b0-4ed0-9987-f2e6aed5 (commit bea32982)."}, {"id": 138, "at_ms": 1791904491847, "hora": "2026-10-13T12:14:51.847-03:00", "from": "Backend", "chars": 936, "primeira_linha": "Backend V19: relatório de testes concluído, com um bug P2 confirmado."}]
+maximo [2020, 0, 27]
+grupos [["ask", "Backend", "Frontend", 1, 49], ["tell", "Backend", "Orquestrador", 5, 936], ["tell", "Backend", "QA / Tests", 2, 92], ["tell", "Frontend", "Orquestrador", 1, 1016], ["tell", "Frontend", "QA / Tests", 3, 96], ["tell", "Orquestrador", "Backend", 1, 1695], ["tell", "Orquestrador", "Frontend", 1, 1778], ["tell", "Orquestrador", "QA / Tests", 1, 2020], ["tell", "QA / Tests", "Backend", 3, 254], ["tell", "QA / Tests", "Frontend", 6, 112], ["tell", "QA / Tests", "Orquestrador", 2, 834], ["tell", "Vigia", "Orquestrador", 1, 247]]
+vigia [{"id": 130, "at_ms": 1791903945000, "hora": "2026-10-13T12:05:45.000-03:00", "text": "**Vigia** — aviso: Frontend está ocioso aguardando novas instruções: a integração já foi feita e o relatório foi entregue. Sugestão: atribuir nova tarefa ao Frontend ou liberá-lo, já que ele não tem trabalho pendente. Feito: mandei a Orquestrador."}]
+travado_apos_relatorio []
+snapshot 2026-10-13T12:17:06.373-03:00
+```
+
+Resultado do item 3: FUNCIONA. Tell e ask da missão persistidos com nomes corretos; maior texto 2020 caracteres, zero acima de 6000. Os testes BOM/UTF-16 aparecem íntegros nas mensagens da missão; a validação específica pertence ao QA.
+
+Resultado do item 1 ao vivo: FUNCIONA na janela observada. Único aviso do Vigia às 12:05:45 -03:00 reconhece a entrega de Frontend às 11:59:56.371 -03:00 e sugere nova tarefa/liberação; não acusa travamento. Nenhuma mensagem de travado sobre integrante após seu relatório final. O relatório Backend foi registrado às 12:14:51.847 -03:00, id 138, com 936 caracteres, primeira linha sem o marcador solicitado. A confirmação forte do critério de entrega depende também da função pura: recebido curto FUNCIONA; progresso longo prefixado com nome FALHA, conforme reprodução P2 acima.
+
+Limite da observação: tick do Vigia = 30 s; candidato ocioso = 90 s; cobrança de tarefa aberta = 30 min. A missão ainda não alcançou 30 min no snapshot; ausência de cobrança não prova o comportamento futuro. Não reabri nem modifiquei a janela/configuração para forçar outro estado.
+
+Validação final do complemento: affected passou; diff --check apontou espaços finais nos snippets Python, removidos antes do commit. Saída original dos quatro comandos:
+
+```text
+[spawn] program=git argv=-c commit.gpgsign=false -c tag.gpgsign=false -c core.fsmonitor= diff --name-only -z --no-renames origin/master...HEAD dur_ms=55 exit=0
+[spawn] program=git argv=-c commit.gpgsign=false -c tag.gpgsign=false -c core.fsmonitor= diff --name-only -z --no-renames HEAD dur_ms=81 exit=0
+[spawn] program=git argv=-c commit.gpgsign=false -c tag.gpgsign=false -c core.fsmonitor= ls-files --others --exclude-standard -z dur_ms=81 exit=0
+[spawn] program=git argv=-c commit.gpgsign=false -c tag.gpgsign=false -c core.fsmonitor= -c core.quotePath=false diff --no-ext-diff --no-textconv --no-renames origin/master...HEAD dur_ms=55 exit=0
+[spawn] program=git argv=-c commit.gpgsign=false -c tag.gpgsign=false -c core.fsmonitor= -c core.quotePath=false diff --no-ext-diff --no-textconv --no-renames HEAD dur_ms=82 exit=0
+Nada a testar: só arquivos sem efeito em código.
+Sem teste (1): docs/ade-ags/V19_BACKEND.md
+{"commands":[],"full":false,"ignored":["docs/ade-ags/V19_BACKEND.md"],"risk":[],"unmapped":[]}
+[spawn] program=git argv=-c commit.gpgsign=false -c tag.gpgsign=false -c core.fsmonitor= diff --name-only -z --no-renames origin/master...HEAD dur_ms=56 exit=0
+[spawn] program=git argv=-c commit.gpgsign=false -c tag.gpgsign=false -c core.fsmonitor= diff --name-only -z --no-renames HEAD dur_ms=81 exit=0
+[spawn] program=git argv=-c commit.gpgsign=false -c tag.gpgsign=false -c core.fsmonitor= ls-files --others --exclude-standard -z dur_ms=81 exit=0
+[spawn] program=git argv=-c commit.gpgsign=false -c tag.gpgsign=false -c core.fsmonitor= -c core.quotePath=false diff --no-ext-diff --no-textconv --no-renames origin/master...HEAD dur_ms=56 exit=0
+[spawn] program=git argv=-c commit.gpgsign=false -c tag.gpgsign=false -c core.fsmonitor= -c core.quotePath=false diff --no-ext-diff --no-textconv --no-renames HEAD dur_ms=81 exit=0
+Nada a testar: só arquivos sem efeito em código.
+Sem teste (1): docs/ade-ags/V19_BACKEND.md
+{"full":false,"ignored":["docs/ade-ags/V19_BACKEND.md"],"passed":true,"results":[],"risk":[],"skippedAffected":4,"unmapped":[]}
+warning: in the working copy of 'docs/ade-ags/V19_BACKEND.md', CRLF will be replaced by LF the next time Git touches it
+docs/ade-ags/V19_BACKEND.md:214: trailing whitespace.
++import sqlite3,json,sys,statistics,math; sys.stdout.reconfigure(encoding='utf-8'); c=sqlite3.connect('file:C:/Users/tonz1n/.ags/data.db?mode=ro',uri=True); c.execute('PRAGMA query_only=ON');
+docs/ade-ags/V19_BACKEND.md:247: trailing whitespace.
++import sqlite3,json,sys,statistics,math; sys.stdout.reconfigure(encoding='utf-8'); c=sqlite3.connect('file:C:/Users/tonz1n/.ags/data.db?mode=ro',uri=True); c.execute('PRAGMA query_only=ON');
+ M docs/ade-ags/V19_BACKEND.md
+```
+
+Após remover os espaços finais dos snippets, `git diff --check` retornou exit 0, sem saída.
