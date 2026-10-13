@@ -382,7 +382,7 @@ export function vigiaTick(now = Date.now()): void {
         if (last !== undefined && now - last < ERROR_REPORT_MS) return;
         lastErrorReport.set(mission.id, now);
         const reason = String(error).slice(0, 160);
-        reportToChat(lead.id, reportLine(`o modelo do Vigia não respondeu (${reason}).`, "nada; as regras sem modelo continuam valendo e tento de novo no próximo ciclo."));
+        reportToChat(lead.id, reportLine(`o modelo do Vigia não respondeu (${reason}).`, "nada; as regras sem modelo continuam valendo e tento de novo no próximo ciclo.", "aviso"));
       })
       .finally(() => inFlight.delete(mission.id));
   }
@@ -402,7 +402,10 @@ export function useVigiaDriver(): void {
       if (final) finishedAt.set(e.payload.fromTabId, at);
       if (e.payload.toTabId) {
         gotAt.set(e.payload.toTabId, at);
-        if (!final && !isClosure(e.payload.text)) taskAt.set(e.payload.toTabId, at);
+        // Tarefa nova só vem do Orquestrador: "confirmado, obrigado" entre integrantes não reabre a tarefa de ninguém
+        // (isso fazia o Vigia cobrar "travado" de quem já tinha entregue).
+        const fromLead = Object.values(boards).some((board) => board.orchestrators.includes(e.payload.fromTabId));
+        if (fromLead && !final && !isClosure(e.payload.text)) taskAt.set(e.payload.toTabId, at);
       }
       rememberPeers();
     });

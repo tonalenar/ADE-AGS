@@ -35,12 +35,13 @@ export const REPORT_MIN_CHARS = 100;
 export function isFinalReport(text: string | null | undefined, kind = "tell", name?: string, toLead = false): boolean {
   if (kind !== "tell") return false;
   const firstLine = (text ?? "").trim().split(/\r?\n/, 1)[0];
-  if (toLead && !firstLine.includes("?") && (text ?? "").trim().length >= REPORT_MIN_CHARS && !NOT_A_DELIVERY.test(firstLine.trim())) return true;
   let plain = firstLine;
   if (name) {
     const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     plain = plain.replace(new RegExp(`^${escaped}(?:\\s+v\\d+)?(?:\\s*[:—-]\\s*|\\s+)`, "i"), "");
   }
+  // O prefixo com o nome ("Backend: em andamento…") sai antes de olhar se é só andamento.
+  if (toLead && !firstLine.includes("?") && (text ?? "").trim().length >= REPORT_MIN_CHARS && !NOT_A_DELIVERY.test(plain.trim())) return true;
   return !firstLine.includes("?")
     && /^(entregue|entrega final|trabalho conclu[ií]do|encerrad[oa]|finalizad[oa]|conclu[ií]d[oa]|terminei)\b/i.test(plain);
 }

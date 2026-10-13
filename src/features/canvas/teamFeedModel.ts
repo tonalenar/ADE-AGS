@@ -163,9 +163,9 @@ export function needsCollapse(text: string): boolean {
 // ── Formatação do texto das mensagens ──────────────────────────────────
 
 /** Caminhos, branches e arquivos: o que vale mostrar em fonte de código. */
-const ADDRESS = /[A-Za-z]:[\\/][^\s`,;)"']+|~\/[^\s`,;)"']+|\bcc\/[\w./-]+|\b(?:[\w.-]+\/)+[\w.-]+\.(?:md|tsx?|jsx?|rs|json|toml|cjs|mjs|txt|css|ya?ml|db|exe)\b|\b[\w.-]+\.(?:md|tsx?|rs|json|toml)\b/g;
+const ADDRESS = /[A-Za-z]:[\\/][^\s`,;)"'*]+|~\/[^\s`,;)"'*]+|\bcc\/[\w./-]+|\b(?:[\w.-]+\/)+[\w.-]+\.(?:md|tsx?|jsx?|rs|json|toml|cjs|mjs|txt|css|ya?ml|db|exe)\b|\b[\w.-]+\.(?:md|tsx?|rs|json|toml)\b/g;
 /** O que já é código (bloco ou trecho entre crases) não se mexe. */
-const CODE_SPLIT = /(```[\s\S]*?```|`[^`\n]*`)/;
+const CODE_SPLIT = /(```[\s\S]*?```|`[^`\n]*`|https?:\/\/[^\s)>\]]+|\]\([^)]*\))/;
 
 /** Põe os endereços (caminhos, branches, arquivos) entre crases, para saírem em fonte de código. Pura. */
 export function codeAddresses(text: string): string {
@@ -217,7 +217,7 @@ export interface VigiaNote {
 export function parseVigiaText(text: string): VigiaNote {
   let rest = text.replace(/\*\*/g, "").trim().replace(/^vigia\s*[—–-]\s*/i, "");
   let label: string | null = null;
-  const head = /^([A-Za-zÀ-ÿ]{3,14}):\s+/.exec(rest);
+  const head = /^(aviso|travado|aten[cç][aã]o|lembrete|poss[ií]vel la[cç]o):\s+/i.exec(rest);
   if (head && head[1].toLowerCase() !== "feito") {
     label = head[1].toLowerCase();
     rest = rest.slice(head[0].length);
@@ -225,6 +225,6 @@ export function parseVigiaText(text: string): VigiaNote {
   const split = /\s*\bFeito:\s*/i.exec(rest);
   const body = (split ? rest.slice(0, split.index) : rest).trim();
   const action = split ? rest.slice(split.index + split[0].length).trim() || null : null;
-  const tone: VigiaTone = label === "travado" ? "stuck" : label === "aviso" || label === "atenção" || label === "atencao" ? "warn" : "info";
+  const tone: VigiaTone = label === "travado" ? "stuck" : label !== null && label !== "lembrete" ? "warn" : "info";
   return { tone, label, body, action };
 }

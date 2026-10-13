@@ -48,7 +48,8 @@ describe("Vigia: entrega final e confirmação de envio", () => {
     peer("back", "lead", "BACKEND ENTREGUE. Commit abc.");
     vigiaTick();
     expect(mocks.invoke).not.toHaveBeenCalled();
-    expect(JSON.parse(localStorage.getItem("ags.vigia.peers.v1")!).task.lead).toBe(Date.now() - 1000);
+    // Só o Orquestrador passa tarefa: a mensagem do integrante a ele não vira "tarefa" do Orquestrador.
+    expect(JSON.parse(localStorage.getItem("ags.vigia.peers.v1")!).task.lead).toBeUndefined();
     peer("lead", "back", "Rode a próxima tarefa.", "tell", Date.now() + 1);
     const { VIGIA_COOLDOWN_MS } = await import("../vigia");
     vi.setSystemTime(Date.now() + VIGIA_COOLDOWN_MS + 1);
@@ -103,5 +104,30 @@ describe("Vigia: entrega final e confirmação de envio", () => {
     vigiaTick();
     await flush();
     expect(log).toHaveBeenCalledWith("[Vigia] não foi possível registrar o aviso", error);
+  });
+});
+
+describe("Vigia: conversa entre integrantes não reabre a tarefa de quem entregou", () => {
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    localStorage.clear();
+    mocks.startedAt = 1000;
+    mocks.invoke.mockImplementation(() => Promise.resolve([]));
+  });
+  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  it("o 'excelente, obrigado' de outro integrante depois da entrega não vira tarefa nova", async () => {
+    const { useVigiaDriver } = await import("../vigia");
+    useVigiaDriver();
+    peer("lead", "back", "Rode os testes.", "tell", 1_000_000 - 100_000);
+    peer("back", "lead", "Backend: corrigi A1 em src-tauri/src/memory.rs, commit 4f1a2b3, ags test run rust verde (1378 passaram), sem pendências.", "tell", 1_000_000 - 50_000);
+    peer("qa", "back", "Excelente! Entrega confirmada e registrada no relatório de QA, obrigado pela rapidez.", "tell", 1_000_000 - 10_000);
+    const saved = JSON.parse(localStorage.getItem("ags.vigia.peers.v1")!);
+    expect(saved.task.back).toBe(1_000_000 - 100_000);
+    expect(saved.finished.back).toBe(1_000_000 - 50_000);
+    expect(saved.finished.back).toBeGreaterThanOrEqual(saved.task.back);
   });
 });

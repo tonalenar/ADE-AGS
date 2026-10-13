@@ -80,3 +80,11 @@ describe("relatório final ao Orquestrador (sem marcador)", () => {
     expect(isFinalReport(report, "ask", "QA / Tests", true)).toBe(false);
   });
 });
+
+describe("andamento com o nome na frente não é entrega (v19 B1)", () => {
+  it("'Backend: em andamento…' ao Orquestrador não conta; o relatório com o nome na frente conta", () => {
+    expect(isFinalReport("Backend: em andamento. Vou executar as suítes e ler o banco; resultados ainda pendentes, nenhum relatório final disponível.", "tell", "Backend", true)).toBe(false);
+    expect(isFinalReport("Backend: recebido, começando agora; volto com o resultado completo dos testes e dos arquivos quando terminar a rodada de leitura.", "tell", "Backend", true)).toBe(false);
+    expect(isFinalReport("Backend: corrigi A1 em src-tauri/src/memory.rs, commit 4f1a2b3, ags test run rust verde (1378 passaram), sem pendências.", "tell", "Backend", true)).toBe(true);
+  });
+});

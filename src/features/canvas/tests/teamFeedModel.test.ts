@@ -145,3 +145,18 @@ describe("parseVigiaText", () => {
     expect(parseVigiaText("Vigia — Feito: nada").action).toBe("nada");
   });
 });
+
+describe("correções da v19", () => {
+  it("título com caminho vira negrito inteiro, sem quebrar o ** nem engolir o negrito", () => {
+    expect(formatMessageText("TAREFA em C:\\x\\a.md\nresto")).toBe("**TAREFA em `C:\\x\\a.md`**\n\nresto");
+  });
+  it("não põe crases dentro de URL nem de destino de link markdown", () => {
+    expect(codeAddresses("veja https://github.com/o/r/pull/183/files/src/a.ts agora")).toBe("veja https://github.com/o/r/pull/183/files/src/a.ts agora");
+    expect(codeAddresses("[o arquivo](docs/ade-ags/X.md) e docs/ade-ags/Y.md")).toBe("[o arquivo](docs/ade-ags/X.md) e `docs/ade-ags/Y.md`");
+  });
+  it("o rótulo do Vigia só vale para as palavras dele, não para um nome de agente", () => {
+    expect(parseVigiaText("Backend: terminou os testes. Feito: nada").label).toBeNull();
+    expect(parseVigiaText("**Vigia** — possível laço: tela igual há 8 min. Feito: avisei.").tone).toBe("warn");
+    expect(parseVigiaText("Vigia — lembrete: confira o QA. Feito: lembrete 1/3.").tone).toBe("info");
+  });
+});
