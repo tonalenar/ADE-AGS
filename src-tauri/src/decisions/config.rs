@@ -11,6 +11,7 @@ pub const KEY_MEMORY: &str = "decisions.point.memory_approval";
 pub const KEY_DREAM: &str = "decisions.point.dream_triage";
 pub const KEY_FLEET: &str = "decisions.point.fleet_gate";
 pub const KEY_MISSION: &str = "decisions.point.mission_gate";
+pub const KEY_DELIVERY: &str = "decisions.point.delivery_gate";
 pub const KEY_SECONDARY_PROVIDER: &str = "decisions.secondary.provider";
 pub const KEY_SECONDARY_URL: &str = "decisions.secondary.base_url";
 pub const KEY_SECONDARY_MODEL: &str = "decisions.secondary.model";
@@ -135,6 +136,8 @@ pub struct Settings {
     pub dream_triage: bool,
     pub fleet_gate: bool,
     pub mission_gate: bool,
+    /// O Vigia pergunta ao provedor se uma mensagem ao Orquestrador é relatório final.
+    pub delivery_gate: bool,
     /// O segundo provedor da comparação. `None` = só o principal.
     pub secondary: Option<Endpoint>,
 }
@@ -151,6 +154,7 @@ impl Default for Settings {
             dream_triage: false,
             fleet_gate: false,
             mission_gate: false,
+            delivery_gate: false,
             secondary: None,
         }
     }
@@ -205,6 +209,7 @@ impl Settings {
             super::points::POINT_DREAM => self.dream_triage,
             super::points::POINT_FLEET => self.fleet_gate,
             super::points::POINT_MISSION => self.mission_gate,
+            super::points::POINT_DELIVERY => self.delivery_gate,
             _ => false,
         }
     }
@@ -255,6 +260,7 @@ pub fn load(conn: &Connection) -> Result<Settings, String> {
     settings.dream_triage = flag(conn, KEY_DREAM);
     settings.fleet_gate = flag(conn, KEY_FLEET);
     settings.mission_gate = flag(conn, KEY_MISSION);
+    settings.delivery_gate = flag(conn, KEY_DELIVERY);
     let second = ProviderKind::parse(&text(conn, KEY_SECONDARY_PROVIDER).unwrap_or_default());
     settings.secondary = second.is_configured().then(|| Endpoint {
         provider: second,
@@ -286,6 +292,7 @@ pub fn persist(conn: &Connection, settings: &Settings) -> Result<(), String> {
         (KEY_DREAM, bool_text(settings.dream_triage)),
         (KEY_FLEET, bool_text(settings.fleet_gate)),
         (KEY_MISSION, bool_text(settings.mission_gate)),
+        (KEY_DELIVERY, bool_text(settings.delivery_gate)),
     ];
     for (key, value) in rows {
         put(conn, key, &value)?;

@@ -12,6 +12,7 @@ const POINT_LABEL: Record<string, string> = {
   dream_triage: "settings.decisions.point.dream",
   fleet_gate: "settings.decisions.point.fleet",
   mission_gate: "settings.decisions.point.mission",
+  delivery_gate: "settings.decisions.point.delivery",
 };
 
 const FIELD = "h-8 rounded-lg border border-gray-300 bg-white px-2.5 text-[13px] text-gray-900 outline-none transition-shadow placeholder:text-gray-400 focus:border-accent-500 focus:ring-[3px] focus:ring-accent-500/25 dark:border-white/15 dark:bg-surface-raised dark:text-gray-100 dark:placeholder:text-white/30";
@@ -180,6 +181,7 @@ export function DecisionsSection() {
         dreamTriage: settings.dreamTriage,
         fleetGate: settings.fleetGate,
         missionGate: settings.missionGate,
+        deliveryGate: settings.deliveryGate,
         secondaryProvider: settings.secondaryProvider,
         secondaryBaseUrl: settings.secondaryBaseUrl,
         secondaryModel: modelAfterProviderChange(settings.secondaryModel, settings.secondaryProvider),
@@ -407,6 +409,7 @@ export function DecisionsSection() {
         <SettingsToggleRow checked={settings.dreamTriage} onChange={(dreamTriage) => setSettings({ ...settings, dreamTriage })} label={t("settings.decisions.point.dream")} description={t("settings.decisions.point.dreamHint")} />
         <SettingsToggleRow checked={settings.fleetGate} onChange={(fleetGate) => setSettings({ ...settings, fleetGate })} label={t("settings.decisions.point.fleet")} description={t("settings.decisions.point.fleetHint")} />
         <SettingsToggleRow checked={settings.missionGate} onChange={(missionGate) => setSettings({ ...settings, missionGate })} label={t("settings.decisions.point.mission")} description={t("settings.decisions.point.missionHint")} />
+        <SettingsToggleRow checked={settings.deliveryGate} onChange={(deliveryGate) => setSettings({ ...settings, deliveryGate })} label={t("settings.decisions.point.delivery")} description={t("settings.decisions.point.deliveryHint")} />
       </SettingsGroup>
 
       <div className="flex flex-wrap items-center gap-2">

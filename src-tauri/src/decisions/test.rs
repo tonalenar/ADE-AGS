@@ -601,6 +601,7 @@ fn local_settings(base_url: String) -> Settings {
         dream_triage: true,
         fleet_gate: true,
         mission_gate: true,
+        delivery_gate: false,
         secondary: None,
     }
 }
@@ -1414,4 +1415,59 @@ fn aprovar_ou_rejeitar_grava_so_o_hash_e_so_com_o_ponto_ligado() {
     assert!(dump.contains("rejeitar"));
     let hash = points::memory_state_hash("chave", "fact", "proposta", "texto da proposta");
     assert!(dump.contains(&hash));
+}
+
+// ── O Jev diz se a mensagem é relatório final (Vigia) ───────────────────
+
+const TIPO_FINAL: &str = r#"{"model":"jev","answers":{"tipo":{"type":"choice","choice":"final","probabilities":{"final":0.93,"andamento":0.04,"pergunta":0.02,"conversa":0.01},"confidence":0.93,"answer_confidence":0.93,"action":{"act_probability":1.0}}},"usage":{"input_tokens":120,"output_tokens":6,"state_tokens":50,"state_tokens_dropped":0,"truncated":false,"truncated_questions":[]}}"#;
+
+#[test]
+fn o_provedor_classifica_a_mensagem_e_a_consulta_vira_uma_linha_do_log() {
+    let base = serve(200, TIPO_FINAL, Duration::ZERO);
+    let db = memory_db();
+    let mut settings = local_settings(base);
+    settings.delivery_gate = true;
+    let text = "Backend: corrigi A1 em src-tauri/src/memory.rs, commit 4f1a2b3, testes verdes (1378).";
+    let class = super::delivery::classify_with(&db, &settings, None, text, "andamento").expect("classificou");
+    assert_eq!(class.label, "final");
+    assert_eq!(class.confidence, Some(0.93));
+    let (point, heuristic, decision): (String, String, String) = db
+        .lock()
+        .unwrap()
+        .query_row("SELECT point, heuristic, provider_decision FROM decision_shadow_log", [], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+        .unwrap();
+    assert_eq!(point, "delivery_gate");
+    assert_eq!(heuristic, "tipo=andamento", "a regra local fica ao lado, para medir quem acerta");
+    assert!(decision.contains("tipo=final"));
+}
+
+#[test]
+fn falha_do_provedor_vira_nada_e_o_vigia_segue_com_a_regra_local() {
+    let base = serve(500, "{}", Duration::ZERO);
+    let db = memory_db();
+    let mut settings = local_settings(base);
+    settings.delivery_gate = true;
+    assert_eq!(super::delivery::classify_with(&db, &settings, None, "mensagem qualquer ao orquestrador", "final"), None);
+    let error: Option<String> = db.lock().unwrap().query_row("SELECT error FROM decision_shadow_log", [], |r| r.get(0)).unwrap();
+    assert!(error.is_some(), "o erro fica no log");
+}
+
+#[test]
+fn desligado_ou_com_segredo_nem_chega_ao_provedor() {
+    let db = memory_db();
+    // Desligado (padrão): nenhuma chamada, nenhuma linha.
+    assert_eq!(super::delivery::classify(&db, "Backend: terminei, commit abc, testes verdes e relatório completo enviado.", "final"), None);
+    assert_eq!(log_rows(&db), 0);
+    // O detector de segredos do app marca o texto: não sai, mesmo ligado.
+    {
+        let conn = db.lock().unwrap();
+        config::persist(&conn, &{
+            let mut s = local_settings("http://localhost:8000".into());
+            s.delivery_gate = true;
+            s
+        })
+        .unwrap();
+    }
+    assert_eq!(super::delivery::classify(&db, "Backend: a senha do banco é hunter2hunter2 e a api_key=sk-live-AAAABBBBCCCCDDDD", "final"), None);
+    assert_eq!(log_rows(&db), 0);
 }

@@ -388,6 +388,20 @@ export function vigiaTick(now = Date.now()): void {
   }
 }
 
+/** O Jev confirma como final uma mensagem ao Orquestrador que a regra local não reconheceu. Com o ponto desligado (padrão) ou com falha, não faz nada. */
+export const JEV_FINAL_MIN_CONFIDENCE = 0.8;
+function askJevIfFinal(fromTabId: string, text: string | null | undefined, at: number): void {
+  const body = (text ?? "").trim();
+  if (body.length < 40 || body.includes("?")) return;
+  invoke<{ label: string; confidence: number | null } | null>("decision_classify_report", { text: body, local: "andamento" })
+    .then((answer) => {
+      if (!answer || answer.label !== "final" || (answer.confidence !== null && answer.confidence < JEV_FINAL_MIN_CONFIDENCE)) return;
+      if ((finishedAt.get(fromTabId) ?? 0) < at) finishedAt.set(fromTabId, at);
+      rememberPeers();
+    })
+    .catch(() => {});
+}
+
 /** Liga o ciclo do Vigia e escuta as mensagens entre agentes (para saber quem delegou e quem tem tarefa). */
 export function useVigiaDriver(): void {
   useEffect(() => {
@@ -400,6 +414,7 @@ export function useVigiaDriver(): void {
       const toLead = !!e.payload.toTabId && Object.values(boards).some((board) => board.orchestrators.includes(e.payload.toTabId as string));
       const final = isFinalReport(e.payload.text, e.payload.kind, sender?.title, toLead);
       if (final) finishedAt.set(e.payload.fromTabId, at);
+      else if (toLead && e.payload.kind !== "ask") askJevIfFinal(e.payload.fromTabId, e.payload.text, at);
       if (e.payload.toTabId) {
         gotAt.set(e.payload.toTabId, at);
         // Tarefa nova só vem do Orquestrador: "confirmado, obrigado" entre integrantes não reabre a tarefa de ninguém

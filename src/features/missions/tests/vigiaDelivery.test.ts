@@ -131,3 +131,56 @@ describe("Vigia: conversa entre integrantes não reabre a tarefa de quem entrego
     expect(saved.finished.back).toBeGreaterThanOrEqual(saved.task.back);
   });
 });
+
+describe("Vigia: o Jev confirma o relatório final que a regra local não reconheceu", () => {
+  const SHORT_REPORT = "Backend: A1 corrigido no commit 4f1a2b3, testes verdes, sem pendências.";
+  beforeEach(() => {
+    vi.resetModules();
+    vi.clearAllMocks();
+    vi.useFakeTimers();
+    vi.setSystemTime(1_000_000);
+    localStorage.clear();
+    mocks.startedAt = 1000;
+  });
+  afterEach(() => { vi.clearAllTimers(); vi.useRealTimers(); vi.restoreAllMocks(); });
+
+  const finishedOf = (id: string) => JSON.parse(localStorage.getItem("ags.vigia.peers.v1") ?? "{}").finished?.[id];
+
+  it("com o Jev dizendo 'final' (confiança alta), o integrante passa a constar como entregue", async () => {
+    mocks.invoke.mockImplementation((command: string) => Promise.resolve(command === "decision_classify_report" ? { label: "final", confidence: 0.93 } : []));
+    const { useVigiaDriver } = await import("../vigia");
+    useVigiaDriver();
+    peer("lead", "back", "Rode os testes.", "tell", 1_000_000 - 100_000);
+    peer("back", "lead", SHORT_REPORT, "tell", 1_000_000 - 10_000);
+    expect(finishedOf("back")).toBeUndefined();
+    await flush();
+    expect(mocks.invoke).toHaveBeenCalledWith("decision_classify_report", expect.objectContaining({ text: SHORT_REPORT }));
+    expect(finishedOf("back")).toBe(1_000_000 - 10_000);
+  });
+
+  it("andamento, confiança baixa, ponto desligado (null) ou falha: nada muda", async () => {
+    const { useVigiaDriver } = await import("../vigia");
+    useVigiaDriver();
+    for (const answer of [{ label: "andamento", confidence: 0.99 }, { label: "final", confidence: 0.5 }, null]) {
+      mocks.invoke.mockImplementation((command: string) => Promise.resolve(command === "decision_classify_report" ? answer : []));
+      peer("back", "lead", SHORT_REPORT, "tell");
+      await flush();
+    }
+    mocks.invoke.mockImplementation((command: string) => (command === "decision_classify_report" ? Promise.reject(new Error("timeout")) : Promise.resolve([])));
+    peer("back", "lead", SHORT_REPORT, "tell");
+    await flush();
+    expect(finishedOf("back")).toBeUndefined();
+  });
+
+  it("só pergunta ao Jev sobre mensagem ao Orquestrador, sem '?' e com algum corpo", async () => {
+    mocks.invoke.mockImplementation(() => Promise.resolve(null));
+    const { useVigiaDriver } = await import("../vigia");
+    useVigiaDriver();
+    peer("back", "qa", SHORT_REPORT, "tell");
+    peer("back", "lead", "Posso mexer no schema para fechar o item M2 da auditoria agora?", "tell");
+    peer("back", "lead", "ok, recebido", "tell");
+    peer("back", "lead", SHORT_REPORT, "ask");
+    await flush();
+    expect(mocks.invoke.mock.calls.filter(([command]) => command === "decision_classify_report")).toHaveLength(0);
+  });
+});

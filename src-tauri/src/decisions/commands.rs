@@ -22,6 +22,7 @@ pub struct DecisionSettingsDto {
     pub dream_triage: bool,
     pub fleet_gate: bool,
     pub mission_gate: bool,
+    pub delivery_gate: bool,
     pub key_saved: bool,
     pub secondary_provider: String,
     pub secondary_base_url: String,
@@ -41,6 +42,8 @@ pub struct DecisionSettingsInput {
     pub dream_triage: bool,
     pub fleet_gate: bool,
     pub mission_gate: bool,
+    #[serde(default)]
+    pub delivery_gate: bool,
     #[serde(default)]
     pub secondary_provider: String,
     #[serde(default)]
@@ -68,6 +71,7 @@ fn dto(settings: &Settings) -> DecisionSettingsDto {
         dream_triage: settings.dream_triage,
         fleet_gate: settings.fleet_gate,
         mission_gate: settings.mission_gate,
+        delivery_gate: settings.delivery_gate,
         key_saved: config::key_saved_in(config::KeySlot::Primary),
         secondary_provider: settings
             .secondary
@@ -106,6 +110,7 @@ fn from_input(input: DecisionSettingsInput) -> Settings {
         dream_triage: input.dream_triage,
         fleet_gate: input.fleet_gate,
         mission_gate: input.mission_gate,
+        delivery_gate: input.delivery_gate,
     }
 }
 
