@@ -288,3 +288,11 @@ EXIT_AFFECTED=0
 ?? docs/ade-ags/V14_BACKEND.md
 
 ```
+
+## Confirmação posterior do QA — recepção no terminal
+
+QA / Tests confirmou via peer tell, após a entrega Backend, que BOM e UTF-16 chegaram íntegros no terminal com acentos e ideogramas. Assim a regressão tem evidência de persistência Backend e recepção observada pelo QA. A reprodução textual enviada pelo QA omite o travessão; os textos persistidos no banco acima incluem esse caractere. Mensagem recebida, transcrita exatamente:
+
+```text
+Confirmado: BOM e UTF-16 chegaram íntegros com acentos e ideogramas ('V14 Backend BOM: ação íntegra  ç ã é 漢字' e 'V14 Backend UTF16: ação íntegra  ç ã é 漢字'). As 6 propostas v14: estado inicial de todas = status pending, history=[]; estado 60 s depois de todas = history=[] (pendentes de aprovação pelo usuário). Limite de 6 propostas respeitado, nenhuma outra será gerada.
+```
