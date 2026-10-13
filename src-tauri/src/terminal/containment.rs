@@ -388,12 +388,7 @@ pub(crate) mod imp {
         // carrera de que ese pid haya sido reutilizado, que en Windows pasa seguido.
         let Some(handle) = child.raw_handle() else { return };
         unsafe {
-            let assigned = AssignProcessToJobObject(g.job, handle as RawHandle as HANDLE);
-            #[cfg(test)]
-            eprintln!("[V17] AssignProcessToJobObject ok={} error={}", assigned != 0,
-                if assigned == 0 { std::io::Error::last_os_error().to_string() } else { "none".into() });
-            #[cfg(not(test))]
-            let _ = assigned;
+            AssignProcessToJobObject(g.job, handle as RawHandle as HANDLE);
         }
     }
 
@@ -407,29 +402,10 @@ pub(crate) mod imp {
             return;
         }
         unsafe {
-            let terminated = TerminateJobObject(g.job, 1);
-            #[cfg(test)]
-            eprintln!("[V17] TerminateJobObject ok={} error={}", terminated != 0,
-                if terminated == 0 { std::io::Error::last_os_error().to_string() } else { "none".into() });
-            #[cfg(not(test))]
-            let _ = terminated;
+            TerminateJobObject(g.job, 1);
             CloseHandle(g.job);
         }
         g.job = std::ptr::null_mut();
-    }
-
-    /// Diagnóstico do teste: não mantém um handle que impediria a reutilização do PID.
-    #[cfg(test)]
-    pub fn process_in_job(g: &Group, pid: u32) -> Result<bool, String> {
-        use windows_sys::Win32::System::JobObjects::IsProcessInJob;
-        use windows_sys::Win32::System::Threading::{OpenProcess, PROCESS_QUERY_LIMITED_INFORMATION};
-        let process = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, pid) };
-        if process.is_null() { return Err(std::io::Error::last_os_error().to_string()); }
-        let mut inside = 0;
-        let ok = unsafe { IsProcessInJob(process, g.job, &mut inside) };
-        let result = if ok != 0 { Ok(inside != 0) } else { Err(std::io::Error::last_os_error().to_string()) };
-        unsafe { CloseHandle(process); }
-        result
     }
 
     #[cfg(test)]

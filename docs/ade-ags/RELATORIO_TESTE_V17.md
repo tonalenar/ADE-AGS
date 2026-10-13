@@ -10,7 +10,7 @@ Evidência capturada pela suíte instrumentada: o `PING.EXE` (PID 43408) estava 
 
 ## Conserto (commit `fe90c9d8`)
 
-Só o teste: abre e mantém o handle do processo original antes do kill, espera até 5 s (`WaitForSingleObject`) e limpa pelo mesmo handle (`TerminateProcess`). Produto sem mudança de comportamento: em `containment.rs` os retornos de `AssignProcessToJobObject`/`TerminateJobObject` passaram a ser guardados e descartados fora de `#[cfg(test)]`; o diagnóstico (`[V17]` em `eprintln!` e `process_in_job`) existe só em teste.
+Só o teste: abre e mantém o handle do processo original antes do kill, espera até 5 s (`WaitForSingleObject`) e limpa pelo mesmo handle (`TerminateProcess`). Produto sem mudança: as linhas de diagnóstico `[V17]` (e o helper `process_in_job`) usadas na investigação foram removidas depois, em commit à parte; `containment.rs` voltou ao código original.
 
 ## Medição (QA)
 
@@ -26,5 +26,5 @@ Só o teste: abre e mantém o handle do processo original antes do kill, espera 
 
 - O laço isolado nunca reproduziu a falha (só a suíte completa a expõe), então a prova é a causa capturada e não só a repetição: 5/5 depois é amostra pequena contra uma taxa de ~2/5 antes.
 - Os casos históricos (36812 e 28540) não foram comprovados um a um como reutilização de PID; a captura é de uma ocorrência (43408).
-- As linhas `[V17]` de diagnóstico seguem no código de teste e imprimem em toda execução; vale removê-las ou deixar sob uma variável de ambiente se atrapalharem.
 - Vigia na v17: 0 linhas `[Vigia]` no terminal do QA; os avisos ao orquestrador sobre o Frontend ocioso (ocioso de propósito) se repetiram e foram ruído.
+
