@@ -235,15 +235,15 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                   const ev = evidenceParts(item);
                   const id = itemId(item);
                   return (
-                    <li key={id} data-flag={flag}
-                      className={`flex flex-col gap-1.5 rounded-[10px] p-3 transition-colors ${selected.has(id)
+                    <li key={id} data-flag={flag} data-high-priority={asksHighPriority(item) ? "true" : undefined}
+                      className={`flex flex-col gap-1.5 rounded-[10px] p-3 transition-colors ${asksHighPriority(item) ? "border-l-2 border-amber-500 " : ""}${selected.has(id)
                         ? "bg-accent-500/[0.06] shadow-[inset_0_0_0_1px_var(--color-accent-500)]"
                         : "bg-white shadow-[inset_0_0_0_0.5px_rgba(0,0,0,0.1)] dark:bg-surface-raised/60 dark:shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.06)]"}`}>
                       <div className="flex items-center gap-2">
                         <input type="checkbox" className="size-3.5 accent-accent-500" checked={selected.has(id)} onChange={() => toggle(id)} aria-label={t("memoryInbox.selectItem", { key: item.key })} />
                         <span className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-[#f5f5f7]" title={item.key}>{item.key}</span>
                         {isDeletion(item) && <span className="inline-flex h-[18px] items-center rounded-full bg-red-600 px-2 text-[10px] font-bold text-white">{t("memoryInbox.deletion")}</span>}
-                        {asksHighPriority(item) && <span className="inline-flex h-[18px] items-center rounded-full bg-amber-500/15 px-2 text-[10px] font-semibold text-amber-700 dark:text-amber-300" title={t("memoryInbox.highPriorityHint")}>{t("memoryInbox.highPriority", { priority: item.priority })}</span>}
+                        {asksHighPriority(item) && <span role="note" aria-label={t("memoryInbox.highPriorityHint")} className="inline-flex h-[18px] items-center rounded-full bg-amber-500/25 px-2 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-500/60 dark:text-amber-200" title={t("memoryInbox.highPriorityHint")}>⚠ {t("memoryInbox.highPriority", { priority: item.priority })}</span>}
                         {flag === "highValue" && <span className={`inline-flex h-[18px] items-center rounded-full px-2 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>}
                       </div>
                       <p data-testid="memory-origin" className="truncate text-[10.5px] leading-[14px] text-gray-500 dark:text-white/45"

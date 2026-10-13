@@ -201,6 +201,14 @@ describe("MemoryInbox - componente e atalho Enter (Etapa 24)", () => {
     expect(origins[0].getAttribute("title")).toBe(origins[0].textContent);
   });
 
+  it("agente que pede prioridade alta recebe aviso visual; prioridade baixa não", async () => {
+    mockReviewSummary.groups[0].items = [{ ...safeItem, priority: 9 }, duplicateItem];
+    await act(async () => { root.render(<MemoryInbox workspaceId="w1" onClose={vi.fn()} />); });
+    const flagged = document.body.querySelectorAll('li[data-high-priority="true"]');
+    expect(flagged).toHaveLength(1);
+    expect(flagged[0].querySelector('[role="note"]')?.getAttribute("aria-label")).toBe("memoryInbox.highPriorityHint");
+  });
+
   it("quando confirm NÃO está aberto, pressionar Enter não executa aprovações", async () => {
     const onClose = vi.fn();
 
