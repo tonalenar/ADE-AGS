@@ -104,7 +104,7 @@ export function TeamFeed({ messages, approvals, notes }: {
       return (
         <div key={item.key} className="flex items-baseline gap-1.5 px-1 text-[11.5px] leading-4 text-gray-500 dark:text-white/50">
           <span className="shrink-0 font-semibold">{t("canvas.team.vigia")}</span>
-          {m.toName && <span title={m.toName} className="max-w-[30%] shrink-0 truncate">→ {m.toName}</span>}
+          {m.toName && m.toTabId !== m.fromTabId && <span title={m.toName} className="max-w-[30%] shrink-0 truncate">→ {m.toName}</span>}
           <span title={m.text} className="min-w-0 flex-1 truncate italic">{m.text}</span>
           <span className="shrink-0 font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35">{clock(m.atMs)}</span>
         </div>
