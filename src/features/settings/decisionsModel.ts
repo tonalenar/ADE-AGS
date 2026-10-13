@@ -10,6 +10,8 @@ export interface DecisionSettings {
   dreamTriage: boolean;
   fleetGate: boolean;
   missionGate: boolean;
+  /** O Vigia pergunta ao Jev se uma mensagem ao Orquestrador é relatório final (envia o começo do texto). */
+  deliveryGate: boolean;
   keySaved: boolean;
   /** O segundo provedor da comparação (`none` = só o principal). */
   secondaryProvider: DecisionProviderId;
@@ -57,6 +59,7 @@ export function defaultDecisionSettings(): DecisionSettings {
     dreamTriage: false,
     fleetGate: false,
     missionGate: false,
+    deliveryGate: false,
     keySaved: false,
     secondaryProvider: "none",
     secondaryBaseUrl: PROVIDER_URL.jev,

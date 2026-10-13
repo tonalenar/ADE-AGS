@@ -275,6 +275,8 @@
   "settings.decisions.point.fleetHint": "Lanzar, esperar o saltar, como ya decide el planificador.",
   "settings.decisions.point.mission": "Compuerta de entrega de la misión",
   "settings.decisions.point.missionHint": "Entregar o retener, con el mismo criterio de pruebas y CI.",
+  "settings.decisions.point.delivery": "Vigía: informe final (Jev ayuda)",
+  "settings.decisions.point.deliveryHint": "No es solo observación: el Vigía pregunta al proveedor si un mensaje al Orquestador es un informe final. Envía el COMIENZO (600 caracteres) de los mensajes de los agentes, que pueden citar archivos y resultados del proyecto. El texto con secretos no sale. Si falla, vale la regla local.",
   "settings.decisions.report": "Informe de la sombra",
   "settings.decisions.refresh": "Actualizar informe",
   "settings.decisions.export": "Exportar CSV",

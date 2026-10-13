@@ -275,6 +275,8 @@
   "settings.decisions.point.fleetHint": "Lançar, esperar ou pular, como o agendador já decide.",
   "settings.decisions.point.mission": "Gate de entrega da missão",
   "settings.decisions.point.missionHint": "Entregar ou reter, pelo mesmo critério de testes e CI.",
+  "settings.decisions.point.delivery": "Vigia: relatório final (o Jev ajuda)",
+  "settings.decisions.point.deliveryHint": "Não é só observação: o Vigia pergunta ao provedor se uma mensagem ao Orquestrador é relatório final. Envia o COMEÇO (600 caracteres) das mensagens dos agentes, que podem citar arquivos e resultados do projeto. Textos com segredo não saem. Se falhar, vale a regra local.",
   "settings.decisions.report": "Relatório da sombra",
   "settings.decisions.refresh": "Atualizar relatório",
   "settings.decisions.export": "Exportar CSV",
