@@ -99,14 +99,15 @@ ok    peer tell a destino inexistente é recusado — recusado sem entregar nada
    - **Validação:** `ags test affected` verde (`cacheHit: true` para `memory::`).
    - **Veredito:** Aprovado.
 
-2. **Frontend (`04f61fb7`, `2434c9fd`, `9b9b5d16`):**
+2. **Frontend (`9b9b5d16`, `a21b0285`, `04f61fb7`, `2434c9fd`):**
    - **Commits:**
+     - `9b9b5d16`: `fix(memória): Enter no diálogo de lote só confirma com o foco no botão`
+     - `a21b0285`: `feat(memória): mostra a origem (missão, agente, tipo, prioridade) em cada proposta`
      - `04f61fb7`: `feat(memória): aviso visual de prioridade alta pedida por agente`
      - `2434c9fd`: `feat(memória): title em textos cortados e rótulo acessível no Cancelar da confirmação`
-     - `9b9b5d16`: `fix(memória): Enter no diálogo de lote só confirma com o foco no botão`
-   - **Arquivos:** `src/features/memory/MemoryInbox.tsx`, `src/features/memory/bulkReview.ts`, `src/features/memory/tests/bulkReview.test.ts`, `src/features/memory/tests/memoryInbox.test.tsx`
-   - **Escopo:** Interface e lógica de confirmação da revisão de memórias em lote.
-   - **Testes:** Testes unitários e de componente atualizados (`bulkReview.test.ts` e `memoryInbox.test.tsx`) garantindo que Enter no modal só dispara ação com foco nativo no botão.
+   - **Arquivos:** `src/features/memory/MemoryInbox.tsx`, `src/features/memory/bulkReview.ts`, `src/features/memory/tests/bulkReview.test.ts`, `src/features/memory/tests/memoryInbox.test.tsx`, `src/i18n/locales/*.json`
+   - **Escopo:** Interface e lógica da caixa de entrada de revisão de memórias.
+   - **Testes:** Testes unitários e de componente atualizados e adicionados em `memoryInbox.test.tsx` e `bulkReview.test.ts`.
    - **Validação:** `ags test affected` verde (`babel`, `tsc`, `frontend` 100% verdes).
    - **Veredito:** Aprovado.
 
