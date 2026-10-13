@@ -49,7 +49,7 @@ pub struct Worktree {
 /// No reusa `explorer::git`, que se traga los errores a propósito (para el explorador, "no
 /// es un repo" y "falló" son lo mismo). Acá no: "la rama ya existe" o "el repo no tiene
 /// commits" es justo lo que el usuario necesita leer.
-fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
+pub(crate) fn git(dir: &Path, args: &[&str], limit: Duration) -> Result<String, String> {
     // `-C` también: el directorio canónico llega como `\\?\C:\...` y git lo rechaza
     // igual que al argumento de `worktree add`.
     let dir = external_path(dir);
@@ -113,6 +113,65 @@ pub fn create(base: &Path, project_cwd: &Path, title: &str) -> Result<Worktree, 
 /// `base` es la carpeta donde viven los worktrees de la app (`~/.ags/worktrees`);
 /// se recibe como parámetro para poder probarlo sin tocar el home.
 pub fn create_from(base: &Path, project_cwd: &Path, title: &str, start: &str) -> Result<Worktree, String> {
+    let short = Uuid::new_v4().simple().to_string()[..8].to_string();
+    let branch = format!("{BRANCH_PREFIX}{}-{short}", branch_slug(title));
+    add_worktree(base, project_cwd, &short, &branch, Some(start))
+}
+
+/// Worktree sobre una rama que ya existe (la del usuario, no una nueva). Se niega si esa
+/// rama ya está abierta en otro worktree o en la carpeta principal: git lo rechazaría igual,
+/// pero con un mensaje que no dice qué hacer.
+pub fn create_on_branch(base: &Path, project_cwd: &Path, branch: &str) -> Result<Worktree, String> {
+    if branch.is_empty() || branch.starts_with('-') {
+        return Err("O nome da branch não pode começar com '-'.".into());
+    }
+    let repo = repo_root(project_cwd)?;
+    if git(&repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")], GIT_FAST).is_err() {
+        return Err(format!("Não existe a branch '{branch}' neste projeto."));
+    }
+    let open = list_worktrees(&repo)?
+        .into_iter()
+        .find(|(_, b)| b.as_deref() == Some(branch));
+    if let Some((path, _)) = open {
+        return Err(format!(
+            "A branch '{branch}' já está aberta em {}. Feche esse worktree ou escolha outra branch.",
+            path.display()
+        ));
+    }
+    let short = Uuid::new_v4().simple().to_string()[..8].to_string();
+    add_worktree(base, project_cwd, &short, branch, None)
+}
+
+/// Los worktrees del repo: ruta y rama (`None` si está suelto en un commit).
+pub fn list_worktrees(repo: &Path) -> Result<Vec<(PathBuf, Option<String>)>, String> {
+    let out = git(repo, &["worktree", "list", "--porcelain"], GIT_FAST)?;
+    Ok(parse_worktree_porcelain(&out))
+}
+
+/// La salida de `git worktree list --porcelain`: un bloque por worktree, separado por una
+/// línea vacía. La rama viene como `branch refs/heads/<nombre>`.
+pub fn parse_worktree_porcelain(out: &str) -> Vec<(PathBuf, Option<String>)> {
+    let mut found = Vec::new();
+    let mut path: Option<PathBuf> = None;
+    let mut branch: Option<String> = None;
+    for line in out.lines().chain(std::iter::once("")) {
+        if line.is_empty() {
+            if let Some(p) = path.take() {
+                found.push((p, branch.take()));
+            }
+            branch = None;
+        } else if let Some(p) = line.strip_prefix("worktree ") {
+            path = Some(PathBuf::from(p));
+        } else if let Some(b) = line.strip_prefix("branch refs/heads/") {
+            branch = Some(b.to_string());
+        }
+    }
+    found
+}
+
+/// Núcleo de la creación: el worktree en `<base>/<short>`, sobre `branch`. Con `start`, la
+/// rama es nueva (`-b`) y se parte de ahí; sin `start`, la rama ya existía y se usa tal cual.
+fn add_worktree(base: &Path, project_cwd: &Path, short: &str, branch: &str, start: Option<&str>) -> Result<Worktree, String> {
     let repo = repo_root(project_cwd)?;
     // Canónicas las dos: en macOS `/tmp` es un symlink a `/private/tmp`, y comparar una
     // ruta resuelta con otra sin resolver haría fallar el `strip_prefix` de abajo.
@@ -120,27 +179,30 @@ pub fn create_from(base: &Path, project_cwd: &Path, title: &str, start: &str) ->
     let project = project_cwd.canonicalize().unwrap_or_else(|_| project_cwd.to_path_buf());
     let rel = project.strip_prefix(&repo).unwrap_or(Path::new("")).to_path_buf();
 
-    let short = Uuid::new_v4().simple().to_string()[..8].to_string();
-    let branch = format!("{BRANCH_PREFIX}{}-{short}", branch_slug(title));
     // `base` suele llegar ya canónico (`\\?\...` en Windows). La comparación de arriba
     // necesita esa forma; git, no. Se guarda la forma que git acepta para que el
     // `worktree remove` posterior use la misma ruta que quedó registrada.
-    let root = external_path(&base.join(&short));
+    let root = external_path(&base.join(short));
 
     std::fs::create_dir_all(base).map_err(|e| e.to_string())?;
     let root_arg = root.to_string_lossy();
-    if let Err(e) = git(&repo, &["worktree", "add", "-b", &branch, &root_arg, start], GIT_SLOW) {
+    let result = match start {
+        Some(start) => git(&repo, &["worktree", "add", "-b", branch, &root_arg, start], GIT_SLOW),
+        None => git(&repo, &["worktree", "add", &root_arg, branch], GIT_SLOW),
+    };
+    if let Err(e) = result {
         // Un fallo a medias (por ejemplo un lock de git con varios worktrees a la vez) puede dejar la
         // rama recién creada sin worktree: se limpia para no acumular ramas huérfanas en cada reintento.
+        // Una rama que ya existía es del usuario y no se toca.
         let _ = git(&repo, &["worktree", "prune"], GIT_SLOW);
-        if !root.exists() {
-            let _ = git(&repo, &["branch", "-D", &branch], GIT_SLOW);
+        if start.is_some() && !root.exists() {
+            let _ = git(&repo, &["branch", "-D", branch], GIT_SLOW);
         }
         return Err(e);
     }
 
     let task_cwd = if rel.as_os_str().is_empty() { root.clone() } else { root.join(&rel) };
-    Ok(Worktree { root, task_cwd, branch })
+    Ok(Worktree { root, task_cwd, branch: branch.to_string() })
 }
 
 /// Los commits que dejó una tarea, del más viejo al más nuevo.
@@ -239,6 +301,18 @@ pub struct Removed {
 /// en ningún commit, y borrarlo no tiene vuelta atrás. La rama se borra solo si está
 /// mergeada (`branch -d`, nunca `-D`); si tiene commits propios, queda.
 pub fn remove(repo_hint: &Path, wt: &Worktree, links_dir: &Path, skills_dir: &Path) -> Result<Removed, String> {
+    remove_with_branch(repo_hint, wt, links_dir, skills_dir, true)
+}
+
+/// Como `remove`, pero con `delete_branch` en falso la rama siempre queda (por ejemplo, la
+/// que el usuario ya tenía y el piso solo usaba).
+pub fn remove_with_branch(
+    repo_hint: &Path,
+    wt: &Worktree,
+    links_dir: &Path,
+    skills_dir: &Path,
+    delete_branch: bool,
+) -> Result<Removed, String> {
     if wt.root.exists() {
         let managed = managed_links(links_dir, skills_dir);
         let dirty = dirty_files(&wt.root, &managed)?;
@@ -270,7 +344,7 @@ pub fn remove(repo_hint: &Path, wt: &Worktree, links_dir: &Path, skills_dir: &Pa
         let _ = git(repo_hint, &["worktree", "prune"], GIT_FAST);
     }
 
-    let branch_kept = git(repo_hint, &["branch", "-d", &wt.branch], GIT_FAST).is_err();
+    let branch_kept = !delete_branch || git(repo_hint, &["branch", "-d", &wt.branch], GIT_FAST).is_err();
     Ok(Removed { branch_kept })
 }
 

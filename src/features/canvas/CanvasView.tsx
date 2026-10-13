@@ -510,6 +510,7 @@ function CanvasInner() {
     const size = { w: box.w, h: box.h };
     switch (kind) {
       case "terminal":
+        if (!useTabsStore.getState().activeTabId) break;
         setPlacement(key, box);
         openNewAgentWizard();
         break;
@@ -588,6 +589,12 @@ function CanvasInner() {
     setLiveStroke(stroke);
   };
   const onDrawMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    // O botão foi solto fora da janela e o pointerup se perdeu: encerra o arrasto em vez de segui-lo.
+    if (placeRef.current && e.buttons === 0) {
+      placeRef.current = null;
+      setPlaceDrag(null);
+      return;
+    }
     if (placeRef.current) {
       const to = rf.screenToFlowPosition({ x: e.clientX, y: e.clientY });
       placeRef.current = { ...placeRef.current, to };

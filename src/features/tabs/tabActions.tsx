@@ -219,7 +219,7 @@ export function TabDialogs() {
           const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch });
           // O terminal nasce no retângulo que a pessoa desenhou no canvas, se desenhou um.
           const placement = takePlacement();
-          if (placement) canvasActions.placeNode(placement.key, tabId, placement.box);
+          if (placement && !wizardFor) canvasActions.placeNode(placement.key, tabId, placement.box);
           navigate("/workspace");
 
           // Los symlinks de las skills elegidas tienen que existir en el cwd ANTES de que

@@ -30,6 +30,7 @@ use std::ffi::OsStr;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
+use std::time::Duration;
 
 use serde::{Deserialize, Serialize};
 
@@ -45,6 +46,21 @@ pub struct Floor {
     /// La raíz del worktree.
     pub root: String,
     pub branch: String,
+    /// Carpetas o patrones que el piso deja fuera. Por ahora solo se guardan: todavía no
+    /// hay nada que los aplique.
+    #[serde(default)]
+    pub excluded: Vec<String>,
+}
+
+/// Lo que se le puede pedir a un piso al crearlo. Todo opcional: sin nada, es un piso nuevo
+/// desde `HEAD`.
+#[derive(Debug, Default, Clone)]
+pub struct CreateOpts {
+    /// De dónde parte la rama nueva (rama o commit). `HEAD` si no se dice.
+    pub start: Option<String>,
+    /// Una rama que ya existe: el piso trabaja sobre ella en vez de crear una nueva.
+    pub existing_branch: Option<String>,
+    pub exclude: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -386,6 +402,43 @@ pub fn check_start(start: Option<&str>) -> Result<&str, String> {
     Ok(start)
 }
 
+/// Una carpeta a excluir del piso, en forma relativa a la raíz del proyecto (`docs`,
+/// `apps/web`). Sin curingas ni `..`: se pasa tal cual a `git sparse-checkout`.
+pub fn check_exclude(raw: &str) -> Result<String, String> {
+    let path = raw.trim().replace('\\', "/");
+    let path = path.trim_matches('/').to_string();
+    if path.is_empty() {
+        return Err("A pasta excluída não pode ser vazia.".into());
+    }
+    if path.starts_with('-') {
+        return Err(format!("A pasta excluída '{raw}' não pode começar com '-'."));
+    }
+    if path.contains(':') {
+        return Err(format!("A pasta excluída '{raw}' precisa ser relativa ao projeto."));
+    }
+    if path.split('/').any(|c| c == ".." || c == ".") {
+        return Err(format!("A pasta excluída '{raw}' não pode usar '..' ou '.'."));
+    }
+    if path.chars().any(|c| matches!(c, '*' | '?' | '[' | ']' | '!')) {
+        return Err(format!("A pasta excluída '{raw}' não aceita curingas (* ? [ ] !)."));
+    }
+    Ok(path)
+}
+
+/// Deja fuera del worktree las carpetas pedidas: sparse-checkout sin modo cono, con todo
+/// incluido salvo esas rutas. Una carpeta que no existe en el repo no es error.
+pub(crate) fn apply_exclusions(root: &Path, excluded: &[String]) -> Result<(), String> {
+    if excluded.is_empty() {
+        return Ok(());
+    }
+    let mut args = vec!["sparse-checkout".to_string(), "set".into(), "--no-cone".into(), "/*".into()];
+    args.extend(excluded.iter().map(|p| format!("!/{p}/")));
+    let refs: Vec<&str> = args.iter().map(String::as_str).collect();
+    crate::runs::worktrees::git(root, &refs, Duration::from_secs(120))
+        .map(|_| ())
+        .map_err(|e| format!("não foi possível deixar as pastas de fora do andar: {e}"))
+}
+
 /// Todos los pisos guardados.
 pub fn all() -> Vec<Floor> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
@@ -395,14 +448,48 @@ pub fn all() -> Vec<Floor> {
 /// Crea un piso: un worktree nuevo del proyecto de `cwd`, partiendo de `start` (`HEAD` si
 /// no se dice) y lo guarda.
 pub fn create(cwd: &str, name: &str, start: Option<&str>) -> Result<Floor, String> {
+    create_with(cwd, name, CreateOpts { start: start.map(str::to_string), ..Default::default() })
+}
+
+/// Como `create`, con las opciones del piso. Sobre una rama existente (`existing_branch`) el
+/// piso no crea rama: la origen (`start`) no tiene sentido ahí y se rechaza.
+pub fn create_with(cwd: &str, name: &str, opts: CreateOpts) -> Result<Floor, String> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut floors = read_file();
     let ground = ground_for(&floors, cwd);
     let name = check_name(&floors, &ground, name)?;
+    // Se valida antes de crear nada: una pasta mala no deja un worktree a medias.
+    let excluded = opts.exclude.iter().map(|e| check_exclude(e)).collect::<Result<Vec<_>, _>>()?;
 
     let base = data_dir()?.join("floors");
-    let start = check_start(start)?;
-    let wt = crate::runs::worktrees::create_from(&base, Path::new(&ground), &name, start)?;
+    let existing = opts.existing_branch.as_deref().map(str::trim).filter(|b| !b.is_empty());
+    let wt = match existing {
+        Some(branch) => {
+            if opts.start.as_deref().map(str::trim).is_some_and(|s| !s.is_empty()) {
+                return Err("Escolha uma branch existente ou uma origem, não as duas.".into());
+            }
+            crate::runs::worktrees::create_on_branch(&base, Path::new(&ground), branch)?
+        }
+        None => {
+            let start = check_start(opts.start.as_deref())?;
+            crate::runs::worktrees::create_from(&base, Path::new(&ground), &name, start)?
+        }
+    };
+
+    if let Err(error) = apply_exclusions(&wt.root, &excluded) {
+        // El piso no llega a existir: se descarta lo recién creado y se devuelve el motivo.
+        let undo = crate::runs::worktrees::remove_with_branch(
+            Path::new(&ground),
+            &wt,
+            Path::new(""),
+            Path::new(""),
+            existing.is_none(),
+        );
+        return Err(match undo {
+            Ok(_) => error,
+            Err(e) => format!("{error}; além disso, o worktree ficou em {}: {e}", wt.root.display()),
+        });
+    }
 
     // `node_modules` é ignorado pelo Git e não vem no checkout do worktree. O link é
     // derivado: se não puder ser criado, o piso continua válido e o motivo fica avisado.
@@ -430,6 +517,7 @@ pub fn create(cwd: &str, name: &str, start: Option<&str>) -> Result<Floor, Strin
         cwd: wt.task_cwd.to_string_lossy().to_string(),
         root: wt.root.to_string_lossy().to_string(),
         branch: wt.branch,
+        excluded,
     };
     floors.push(floor.clone());
     write_file(&floors)?;
@@ -455,6 +543,12 @@ pub struct Dropped {
 /// Borra un piso: descarta su worktree (con las salvaguardas de `worktrees::remove`) y
 /// recién entonces lo saca de la lista. Si el descarte falla, el piso sigue donde estaba.
 pub fn remove(id: &str, skills_dir: &Path) -> Result<Dropped, String> {
+    remove_with(id, skills_dir, false)
+}
+
+/// Como `remove`. La rama solo se borra si la creó la app (`cc/…`): una que el usuario ya
+/// tenía no se toca, aunque esté mergeada. Con `keep_branch`, nunca se borra.
+pub(crate) fn remove_with(id: &str, skills_dir: &Path, keep_branch: bool) -> Result<Dropped, String> {
     let _guard = LOCK.lock().unwrap_or_else(|e| e.into_inner());
     let mut floors = read_file();
     let floor = floors.iter().find(|f| f.id == id).cloned().ok_or("Esse andar já não existe.")?;
@@ -474,7 +568,14 @@ pub fn remove(id: &str, skills_dir: &Path) -> Result<Dropped, String> {
         task_cwd: PathBuf::from(&floor.cwd),
         branch: floor.branch.clone(),
     };
-    let removed = crate::runs::worktrees::remove(Path::new(&floor.ground), &wt, Path::new(""), skills_dir)?;
+    let delete_branch = !keep_branch && floor.branch.starts_with(crate::runs::worktrees::BRANCH_PREFIX);
+    let removed = crate::runs::worktrees::remove_with_branch(
+        Path::new(&floor.ground),
+        &wt,
+        Path::new(""),
+        skills_dir,
+        delete_branch,
+    )?;
 
     take(&mut floors, id)?;
     write_file(&floors)?;
@@ -516,9 +617,21 @@ pub fn floor_list(cwd: String) -> FloorList {
 /// `async`: `git worktree add` hace un checkout completo y en un repo grande tarda; en la
 /// hebra principal congelaría la ventana.
 #[tauri::command(async)]
-pub fn floor_create(app: tauri::AppHandle, cwd: String, name: String, from: Option<String>) -> Result<Floor, String> {
+pub fn floor_create(
+    app: tauri::AppHandle,
+    cwd: String,
+    name: String,
+    from: Option<String>,
+    existing_branch: Option<String>,
+    exclude: Option<Vec<String>>,
+) -> Result<Floor, String> {
     use tauri::Emitter;
-    let floor = create(&cwd, &name, from.as_deref())?;
+    let opts = CreateOpts {
+        start: from,
+        existing_branch,
+        exclude: exclude.unwrap_or_default(),
+    };
+    let floor = create_with(&cwd, &name, opts)?;
     let _ = app.emit(CHANGED_EVENT, &floor.id);
     Ok(floor)
 }
@@ -549,6 +662,7 @@ mod test {
             cwd: format!("/wt/{name}/app"),
             root: format!("/wt/{name}"),
             branch: format!("cc/{name}"),
+            excluded: Vec::new(),
         }
     }
 
@@ -730,6 +844,48 @@ mod test {
         assert!(std::fs::symlink_metadata(&link).unwrap().file_type().is_symlink());
 
         crate::skills::remove_mount(&link).unwrap();
+        crate::runs::worktrees::remove(&repo, &wt, Path::new(""), Path::new("")).unwrap();
+        let _ = std::fs::remove_dir_all(scratch);
+    }
+
+    #[test]
+    fn las_carpetas_excluidas_se_validan() {
+        assert_eq!(check_exclude(" docs/ ").unwrap(), "docs");
+        assert_eq!(check_exclude("apps\\web").unwrap(), "apps/web");
+        for bad in ["", "   ", "-x", "../x", "a/../b", ".", "C:/x", "*.md", "pasta?"] {
+            assert!(check_exclude(bad).is_err(), "{bad:?} debía rechazarse");
+        }
+    }
+
+    #[test]
+    fn excluir_una_carpeta_la_saca_del_worktree_y_lo_demas_queda() {
+        use std::process::Command;
+
+        let scratch = std::env::temp_dir().join(format!("ags-floor-exclude-{}", uuid::Uuid::new_v4().simple()));
+        let repo = scratch.join("repo");
+        std::fs::create_dir_all(repo.join("docs")).unwrap();
+        std::fs::create_dir_all(repo.join("src")).unwrap();
+        let git = |args: &[&str]| {
+            let output = Command::new("git").arg("-C").arg(&repo).args(args).output().unwrap();
+            assert!(output.status.success(), "git {args:?}: {}", String::from_utf8_lossy(&output.stderr));
+        };
+        git(&["init", "--quiet"]);
+        git(&["config", "user.name", "ADE AGS tests"]);
+        git(&["config", "user.email", "tests@ags.local"]);
+        std::fs::write(repo.join("docs").join("guia.md"), "docs\n").unwrap();
+        std::fs::write(repo.join("src").join("main.rs"), "fn main() {}\n").unwrap();
+        std::fs::write(repo.join("README.md"), "fixture\n").unwrap();
+        git(&["add", "."]);
+        git(&["commit", "--quiet", "-m", "fixture"]);
+
+        let wt = crate::runs::worktrees::create_from(&scratch.join("worktrees"), &repo, "exclude fixture", "HEAD").unwrap();
+        // Una carpeta que no existe en el repo tampouco é erro.
+        apply_exclusions(&wt.root, &["docs".to_string(), "no-existe".to_string()]).unwrap();
+
+        assert!(!wt.root.join("docs").exists(), "la carpeta excluida no debe estar en el worktree");
+        assert!(wt.root.join("src").join("main.rs").exists(), "el resto sí");
+        assert!(wt.root.join("README.md").exists(), "la raíz sí");
+
         crate::runs::worktrees::remove(&repo, &wt, Path::new(""), Path::new("")).unwrap();
         let _ = std::fs::remove_dir_all(scratch);
     }

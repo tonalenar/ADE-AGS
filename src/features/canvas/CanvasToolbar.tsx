@@ -94,13 +94,13 @@ export function CanvasToolbar({
       <div className={`flex items-center gap-0.5 p-1 rounded-xl border ${material}`}>
         <ToolButton label={t("canvas.tool.select")} active={tool === "select" && armed === null} onClick={() => { onArm(null); onTool("select"); }}>{ICONS.select}</ToolButton>
         <Divider />
-        <ToolButton label={t("canvas.tool.terminal")} active={armed === "terminal"} onClick={() => onArm(armed === "terminal" ? null : "terminal")}>{ICONS.terminal}</ToolButton>
-        <ToolButton label={t("canvas.tool.note")} active={armed === "note"} onClick={() => onArm(armed === "note" ? null : "note")}>{ICONS.note}</ToolButton>
+        <ToolButton label={t("canvas.tool.terminal")} active={armed === "terminal"} onClick={() => { onTool("select"); onArm(armed === "terminal" ? null : "terminal"); }}>{ICONS.terminal}</ToolButton>
+        <ToolButton label={t("canvas.tool.note")} active={armed === "note"} onClick={() => { onTool("select"); onArm(armed === "note" ? null : "note"); }}>{ICONS.note}</ToolButton>
         <ToolButton label={t("canvas.tool.image")} onClick={onImage}>{ICONS.image}</ToolButton>
-        <ToolButton label={t("canvas.tool.folder")} active={armed === "folder"} onClick={() => onArm(armed === "folder" ? null : "folder")}>{ICONS.folder}</ToolButton>
-        <ToolButton label={t("canvas.tool.portal")} active={armed === "portal"} onClick={() => onArm(armed === "portal" ? null : "portal")}>{ICONS.portal}</ToolButton>
-        <ToolButton label={t("canvas.tool.device")} active={armed === "device"} onClick={() => onArm(armed === "device" ? null : "device")}>{ICONS.device}</ToolButton>
-        <ToolButton label={t("canvas.tool.text")} active={armed === "text"} onClick={() => onArm(armed === "text" ? null : "text")}>{ICONS.text}</ToolButton>
+        <ToolButton label={t("canvas.tool.folder")} active={armed === "folder"} onClick={() => { onTool("select"); onArm(armed === "folder" ? null : "folder"); }}>{ICONS.folder}</ToolButton>
+        <ToolButton label={t("canvas.tool.portal")} active={armed === "portal"} onClick={() => { onTool("select"); onArm(armed === "portal" ? null : "portal"); }}>{ICONS.portal}</ToolButton>
+        <ToolButton label={t("canvas.tool.device")} active={armed === "device"} onClick={() => { onTool("select"); onArm(armed === "device" ? null : "device"); }}>{ICONS.device}</ToolButton>
+        <ToolButton label={t("canvas.tool.text")} active={armed === "text"} onClick={() => { onTool("select"); onArm(armed === "text" ? null : "text"); }}>{ICONS.text}</ToolButton>
         <Divider />
         <ToolButton label={t("canvas.tool.draw")} active={drawing} onClick={() => { onArm(null); onTool(tool === "draw" ? "select" : "draw"); }}>{ICONS.draw}</ToolButton>
       </div>
