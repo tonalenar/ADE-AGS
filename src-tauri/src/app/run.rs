@@ -126,6 +126,7 @@ pub fn run() {
             crate::missions::mission_timing_add,
             crate::missions::mission_active_add,
             crate::missions::mission_timings,
+            crate::missions::messages::mission_messages,
             crate::missions::mission_efficiency,
             crate::missions::mission_precheck,
             crate::missions::mission_memory_context,

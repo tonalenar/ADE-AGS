@@ -262,6 +262,9 @@ export function leadBriefing(
     "- `--fast` liga o modo Fast do Codex (só com `--agent codex`).",
     ...(defaultSubagent === undefined ? [] : ["", ...subagentDefaultBriefing(defaultSubagent)]),
     "",
+    "RESUMO AO FIM DE CADA TURNO:",
+    "- Todo turno seu termina com um resumo curto, na tela, do que foi feito na missão até agora e do que falta: o resultado e o estado, não o que cada integrante fez. Se depende de uma decisão do usuário, diga qual no fim do resumo.",
+    "",
     "Planeje, divida o trabalho conforme o papel de cada um, acompanhe e junte os resultados. Ao terminar, resuma o que foi feito.",
     ...(mission.id ? ["", ...memorySuggestion(mission.id)] : []),
   ].join("\n");
