@@ -9,6 +9,7 @@ import { SideHead } from "@/app/SideHead";
 import { ActivityRail, RAIL_COMPACT_W, RAIL_EXPANDED_W } from "@/app/ActivityRail";
 import { CommandPalette } from "@/features/palette/CommandPalette";
 import { initCanvasSync } from "@/features/canvas/store";
+import { useSessionCheckpoints } from "@/features/sessions/useSessionCheckpoints";
 import { StatusBar } from "@/app/StatusBar";
 import { TabBar } from "@/features/tabs/TabBar";
 import { WorkspacesPanel } from "@/features/workspaces/WorkspacesPanel";
@@ -67,6 +68,7 @@ function toFrontendTab(row: RestoredTabRow): Tab {
 
 export function AppShell() {
   useFileDropToTerminal();
+  useSessionCheckpoints();
   const tabs = useTabsStore((s) => s.tabs);
   const setDetectedAgents = useTabsStore((s) => s.setDetectedAgents);
   const activateTab = useTabsStore((s) => s.activateTab);

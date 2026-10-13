@@ -39,7 +39,7 @@ fn etapa17_v32_v33_upgrades_preserve_tab_usage_and_fast_snapshots() {
         }
         conn.pragma_update(None, "user_version", version).unwrap();
         schema::migrate(&conn).unwrap();
-        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),41);
+        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM missions WHERE id='m17'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM mission_usage_tabs", [], |r| r.get::<_, i64>(0)).unwrap(), if version >= 33 { 1 } else { 0 });
         if version >= 33 {
@@ -934,7 +934,7 @@ fn v32_terminal_workspaces_migrate_additively_and_keep_ownership() {
     let root: String = conn.query_row("SELECT root FROM mission_team_workspaces WHERE mission_id='team-m'", [], |r| r.get(0)).unwrap();
     assert_eq!(root, "/wt");
     assert!(conn.execute("INSERT INTO mission_team_workspaces(mission_id,name,cwd,root,branch) VALUES ('team-m','QA','/wt','/wt','cc/qa')", []).is_err());
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),41);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
 }
 
 #[test]
@@ -943,7 +943,7 @@ fn v20_nuevo_crea_tablas_indices_y_referencias_de_squads() {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
 
     for table in ["squads", "squad_members", "run_squad_members"] {
         assert!(
@@ -1043,7 +1043,7 @@ fn migrar_v19_a_v20_conserva_mission_runs_y_tasks_anteriores() {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 41);
+    assert_eq!(version, 42);
     assert_eq!(
         conn.query_row(
             "SELECT title FROM missions WHERE id = 'mission-old'",
@@ -1312,7 +1312,7 @@ fn migrate_v20_to_v21_adds_nullable_effort_without_rewriting_history() {
     }
     conn.pragma_update(None, "user_version", 20).unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),41);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
     let (model, effort): (String, Option<String>) = conn.query_row("SELECT model,reasoning_effort FROM tasks WHERE id='eff-t'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
     assert_eq!(model, "old-model");
     assert_eq!(effort, None);
@@ -1333,7 +1333,7 @@ fn migrate_v21_to_v22_preserves_legacy_and_is_idempotent() {
         ALTER TABLE tasks DROP COLUMN structured_handoff;
         PRAGMA user_version=21;").unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),41);
+    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),42);
     let (legacy, structured): (String,Option<String>) = conn.query_row("SELECT handoff,structured_handoff FROM tasks WHERE id='h-t'",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
     assert_eq!(legacy,"legacy");assert_eq!(structured,None);
     conn.execute("UPDATE tasks SET structured_handoff=?1 WHERE id='h-t'",[r#"{"version":1,"summary":"old delivery"}"#]).unwrap();
@@ -1353,7 +1353,7 @@ fn migrate_v22_to_v23_keeps_separate_oauth_metadata_without_tokens() {
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM antigravity_oauth_accounts", [], |r|r.get::<_,i64>(0)).unwrap(), 2);
     assert!(conn.execute("INSERT INTO antigravity_oauth_accounts VALUES('c','google-a','Duplicate','c@example.com',0)", []).is_err());
     assert!(conn.prepare("SELECT access_token,refresh_token FROM antigravity_oauth_accounts").is_err());
-    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),41);
+    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),42);
 }
 
 #[test]
@@ -1375,7 +1375,7 @@ fn migrate_v26_to_v29_preserves_historical_mission_statuses() {
         .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
     assert_eq!(statuses, vec![("old-done".into(), "done".into()), ("old-failed".into(), "failed".into())]);
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM mission_terminal_deliveries", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(),41);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(),42);
 }
 
 /// Un guardado de metadata (renombrar, mover la ventana) no reenvía el scrollback que la
@@ -1450,7 +1450,7 @@ fn etapa10_migrations_v27_v28_v29_preserve_each_preceding_stage() {
         conn.pragma_update(None, "user_version", from).unwrap();
         schema::migrate(&conn).unwrap();
         schema::migrate(&conn).unwrap();
-        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),41);
+        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
         let (status, marked, class): (String, i64, Option<String>) = conn.query_row("SELECT status,is_test,failure_class FROM missions WHERE id='stage-m'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
         assert_eq!(status, "done");
         assert_eq!(marked, i64::from(from >= 27));
@@ -1467,7 +1467,7 @@ fn v30_adds_fast_mode_columns_idempotently_and_keeps_existing_squads_off() {
     conn.pragma_update(None, "user_version", 29).unwrap();
     schema::migrate(&conn).unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),41);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
     let fast: i64 = conn.query_row("SELECT fast_mode FROM squads WHERE id='s1'", [], |r| r.get(0)).unwrap();
     assert_eq!(fast, 0);
     conn.execute("SELECT fast_mode FROM squad_members LIMIT 1", []).ok();
@@ -1483,7 +1483,7 @@ fn v31_adds_subagent_default_columns_idempotently_and_keeps_old_squads_automatic
     conn.pragma_update(None, "user_version", 30).unwrap();
     schema::migrate(&conn).unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),41);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
     let (agent, fast): (Option<String>, i64) = conn
         .query_row("SELECT subagent_agent_id, subagent_fast FROM squads WHERE id='s1'", [], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap();
@@ -1505,5 +1505,377 @@ fn v35_delivery_audit_migrates_additively_and_idempotently() {
     schema::migrate(&conn).unwrap();
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM mission_delivery_audit WHERE mission_id='m-audit'", [], |r| r.get(0)).unwrap();
     assert_eq!(count, 1);
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),41);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
+}
+
+// ── Historial vivo: checkpoints, edición y búsqueda ─────────────
+
+fn only_history_id(conn: &Connection) -> String {
+    conn.query_row("SELECT id FROM session_history", [], |r| r.get(0)).unwrap()
+}
+
+fn checkpoint_one(db: &DbConnection, tab_id: &str, preview: Option<&str>) -> u32 {
+    let extras = [CheckpointExtra {
+        tab_id: tab_id.to_string(),
+        preview: preview.map(str::to_string),
+        box_rect: None,
+    }];
+    checkpoint_sessions(db, "ws", &extras).unwrap()
+}
+
+/// Tab cerrada de verdad: se archiva y su fila sale de `tabs`, como hace la app.
+fn close_tab(db: &DbConnection, tab_id: &str) {
+    archive(db, tab_id, "ws");
+    db.lock().unwrap().execute("DELETE FROM tabs WHERE id = ?1", [tab_id]).unwrap();
+}
+
+#[test]
+fn checkpoint_crea_la_entrada_sin_cerrar_la_tab() {
+    let db = setup_db();
+    let profile = TempDir::new();
+    insert_tab_with_account(&db.lock().unwrap(), "tab-1", Some("sess-1"), &profile.0);
+
+    let extras = [CheckpointExtra {
+        tab_id: "tab-1".into(),
+        preview: Some("linea uno\n\tlinea dos\u{7}".into()),
+        box_rect: Some(BoxRect { x: 10.0, y: 20.0, w: 300.0, h: 200.0 }),
+    }];
+    assert_eq!(checkpoint_sessions(&db, "ws", &extras).unwrap(), 1);
+
+    let conn = db.lock().unwrap();
+    // La tab sigue viva: el checkpoint no la quita de `tabs`.
+    assert_eq!(count(&conn, "SELECT COUNT(*) FROM tabs WHERE id = 'tab-1'"), 1);
+    let (hid, preview, box_json, checkpointed): (String, Option<String>, Option<String>, Option<i64>) = conn
+        .query_row(
+            "SELECT id, preview, box, checkpointed_at FROM session_history",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    // Tab y control: el tab pasa a espacio, el BEL se descarta, el salto de línea se conserva.
+    assert_eq!(preview.as_deref(), Some("linea uno\n linea dos"));
+    let stored: BoxRect = serde_json::from_str(&box_json.unwrap()).unwrap();
+    assert_eq!(stored, BoxRect { x: 10.0, y: 20.0, w: 300.0, h: 200.0 });
+    assert!(checkpointed.is_some());
+    let linked: Option<String> = conn
+        .query_row("SELECT history_id FROM tabs WHERE id = 'tab-1'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(linked.as_deref(), Some(hid.as_str()));
+    assert_eq!(archived_session_id(&conn).as_deref(), Some("sess-1"));
+}
+
+/// El caso que importa: dos checkpoints y el cierre final actualizan UNA sola fila, y el
+/// cierre no pisa lo que el usuario puso (fijado, título) ni la última prévia.
+#[test]
+fn checkpoint_y_cierre_actualizan_la_misma_fila_sin_perder_lo_del_usuario() {
+    let db = setup_db();
+    let profile = TempDir::new();
+    insert_tab_with_account(&db.lock().unwrap(), "tab-1", Some("sess-1"), &profile.0);
+
+    assert_eq!(checkpoint_one(&db, "tab-1", Some("primera")), 1);
+    {
+        let conn = db.lock().unwrap();
+        let id = only_history_id(&conn);
+        update_session_history(
+            &conn,
+            &id,
+            &SessionPatch {
+                custom_title: Some(Some("Mi título".into())),
+                pinned: Some(true),
+                hidden: None,
+            },
+        )
+        .unwrap();
+    }
+    assert_eq!(checkpoint_one(&db, "tab-1", Some("segunda")), 1);
+    close_tab(&db, "tab-1");
+
+    let conn = db.lock().unwrap();
+    assert_eq!(history_count(&conn), 1);
+    let (preview, pinned, custom, checkpointed): (Option<String>, i64, Option<String>, Option<i64>) = conn
+        .query_row(
+            "SELECT preview, pinned, custom_title, checkpointed_at FROM session_history",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!(preview.as_deref(), Some("segunda"));
+    assert_eq!(pinned, 1);
+    assert_eq!(custom.as_deref(), Some("Mi título"));
+    assert!(checkpointed.is_some());
+}
+
+/// Una conversación que ya estaba archivada (tab cerrada antes) no se duplica cuando otra
+/// tab la reabre y se le saca un checkpoint: se reutiliza por `session_id`.
+#[test]
+fn checkpoint_respeta_la_deduplicacion_por_session_id() {
+    let db = setup_db();
+    let profile = TempDir::new();
+    insert_tab_with_account(&db.lock().unwrap(), "tab-0", Some("misma"), &profile.0);
+    close_tab(&db, "tab-0");
+    let antes = only_history_id(&db.lock().unwrap());
+
+    insert_tab_with_account(&db.lock().unwrap(), "tab-1", Some("misma"), &profile.0);
+    assert_eq!(checkpoint_one(&db, "tab-1", None), 1);
+
+    let conn = db.lock().unwrap();
+    assert_eq!(history_count(&conn), 1);
+    let linked: Option<String> = conn
+        .query_row("SELECT history_id FROM tabs WHERE id = 'tab-1'", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(linked.as_deref(), Some(antes.as_str()));
+}
+
+/// Las shell (`bash`), las de carpeta vacía y las de ventanas cerradas no se archivan con
+/// checkpoint: no hay de qué reconstruir una sesión.
+#[test]
+fn checkpoint_ignora_shells_sin_carpeta_y_ventanas_cerradas() {
+    let db = setup_db();
+    {
+        let conn = db.lock().unwrap();
+        conn.execute_batch(
+            "INSERT INTO windows (id, label, workspace_id, is_open, last_active)
+                 VALUES ('win-off', 'off', 'ws', 0, 0);
+             INSERT INTO tabs (id, window_id, title, agent_id, agent_label, command, cwd, opened_at, created_at, last_active)
+                 VALUES ('tab-sh', 'win', 'Shell', 'bash', 'Shell', 'bash', '/proj', 0, 0, 0),
+                        ('tab-vacia', 'win', 'Sin carpeta', 'claude-code', 'Claude Code', 'claude', '', 0, 0, 0),
+                        ('tab-off', 'win-off', 'Cerrada', 'claude-code', 'Claude Code', 'claude', '/proj', 0, 0, 0);",
+        )
+        .unwrap();
+    }
+    assert_eq!(checkpoint_one(&db, "tab-sh", None), 0);
+    assert_eq!(checkpoint_one(&db, "tab-vacia", None), 0);
+    assert_eq!(checkpoint_one(&db, "tab-off", None), 0);
+    assert_eq!(history_count(&db.lock().unwrap()), 0);
+}
+
+/// Una posición que no es un número finito no se guarda, y la prévia se corta en 2000.
+#[test]
+fn checkpoint_descarta_posiciones_no_finitas_y_corta_la_previa() {
+    let db = setup_db();
+    let profile = TempDir::new();
+    insert_tab_with_account(&db.lock().unwrap(), "tab-1", Some("sess-1"), &profile.0);
+
+    let extras = [CheckpointExtra {
+        tab_id: "tab-1".into(),
+        preview: Some("a".repeat(2500)),
+        box_rect: Some(BoxRect { x: f64::NAN, y: 0.0, w: 1.0, h: 1.0 }),
+    }];
+    assert_eq!(checkpoint_sessions(&db, "ws", &extras).unwrap(), 1);
+
+    let conn = db.lock().unwrap();
+    let (preview, box_json): (String, Option<String>) = conn
+        .query_row("SELECT preview, box FROM session_history", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!(preview.chars().count(), 2000);
+    assert!(box_json.is_none());
+}
+
+#[test]
+fn el_parche_distingue_no_tocar_de_limpiar() {
+    let vacio: SessionPatch = serde_json::from_str("{}").unwrap();
+    assert!(vacio.custom_title.is_none() && vacio.pinned.is_none() && vacio.hidden.is_none());
+    let limpia: SessionPatch = serde_json::from_str(r#"{"customTitle":null}"#).unwrap();
+    assert_eq!(limpia.custom_title, Some(None));
+    let pone: SessionPatch = serde_json::from_str(r#"{"customTitle":"Hola","pinned":true}"#).unwrap();
+    assert_eq!(pone.custom_title, Some(Some("Hola".to_string())));
+    assert_eq!(pone.pinned, Some(true));
+}
+
+#[test]
+fn el_checkpoint_llega_en_camel_case_con_la_caja_como_box() {
+    let e: CheckpointExtra =
+        serde_json::from_str(r#"{"tabId":"t1","preview":"x","box":{"x":1,"y":2,"w":3,"h":4}}"#).unwrap();
+    assert_eq!(e.tab_id, "t1");
+    assert_eq!(e.box_rect, Some(BoxRect { x: 1.0, y: 2.0, w: 3.0, h: 4.0 }));
+}
+
+/// Lo que ve el frontend: la entrada serializada en camelCase, con `box` como objeto.
+#[test]
+fn la_entrada_se_serializa_con_los_campos_nuevos() {
+    let db = setup_db();
+    let profile = TempDir::new();
+    insert_tab_with_account(&db.lock().unwrap(), "tab-1", Some("sess-1"), &profile.0);
+    checkpoint_sessions(
+        &db,
+        "ws",
+        &[CheckpointExtra {
+            tab_id: "tab-1".into(),
+            preview: Some("hola".into()),
+            box_rect: Some(BoxRect { x: 1.0, y: 2.0, w: 3.0, h: 4.0 }),
+        }],
+    )
+    .unwrap();
+    let conn = db.lock().unwrap();
+    let id = only_history_id(&conn);
+    update_session_history(
+        &conn,
+        &id,
+        &SessionPatch { custom_title: Some(Some("Título".into())), pinned: Some(true), hidden: Some(false) },
+    )
+    .unwrap();
+
+    let json = serde_json::to_value(session_history_entry(&conn, &id).unwrap().unwrap()).unwrap();
+    assert_eq!(json["box"]["w"], 3.0);
+    assert_eq!(json["preview"], "hola");
+    assert_eq!(json["pinned"], true);
+    assert_eq!(json["hidden"], false);
+    assert_eq!(json["customTitle"], "Título");
+    assert!(json["checkpointedAt"].is_number());
+}
+
+#[test]
+fn editar_titulo_fijar_y_ocultar_respetan_lo_que_no_viene() {
+    let db = setup_db();
+    let profile = TempDir::new();
+    insert_tab_with_account(&db.lock().unwrap(), "tab-1", Some("sess-1"), &profile.0);
+    checkpoint_one(&db, "tab-1", Some("x"));
+    let conn = db.lock().unwrap();
+    let id = only_history_id(&conn);
+    let title = |conn: &Connection| -> Option<String> {
+        conn.query_row("SELECT custom_title FROM session_history", [], |r| r.get(0)).unwrap()
+    };
+
+    // Control y espacios sobrando: se limpia.
+    update_session_history(
+        &conn,
+        &id,
+        &SessionPatch { custom_title: Some(Some("  Auth\u{7} refactor  ".into())), ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(title(&conn).as_deref(), Some("Auth refactor"));
+
+    // Fijar y ocultar sin tocar el título.
+    update_session_history(
+        &conn,
+        &id,
+        &SessionPatch { pinned: Some(true), hidden: Some(true), ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(title(&conn).as_deref(), Some("Auth refactor"));
+    let (pinned, hidden): (i64, i64) = conn
+        .query_row("SELECT pinned, hidden FROM session_history", [], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap();
+    assert_eq!((pinned, hidden), (1, 1));
+
+    // Solo espacios equivale a borrar el título propio.
+    update_session_history(
+        &conn,
+        &id,
+        &SessionPatch { custom_title: Some(Some("   ".into())), ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(title(&conn), None);
+
+    // Un título largo se recorta a 120 caracteres.
+    update_session_history(
+        &conn,
+        &id,
+        &SessionPatch { custom_title: Some(Some("é".repeat(200))), ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(title(&conn).unwrap().chars().count(), 120);
+
+    // `null` limpia el título.
+    update_session_history(
+        &conn,
+        &id,
+        &SessionPatch { custom_title: Some(None), ..Default::default() },
+    )
+    .unwrap();
+    assert_eq!(title(&conn), None);
+
+    // Una entrada que no existe es un error, no un no-op silencioso.
+    assert!(update_session_history(
+        &conn,
+        "no-existe",
+        &SessionPatch { pinned: Some(true), ..Default::default() },
+    )
+    .is_err());
+}
+
+#[test]
+fn buscar_encuentra_por_previa_y_titulo_y_escapa_los_comodines() {
+    let db = setup_db();
+    let profile = TempDir::new();
+    {
+        let conn = db.lock().unwrap();
+        insert_tab_with_account(&conn, "tab-1", Some("a"), &profile.0);
+        insert_tab_with_account(&conn, "tab-2", Some("b"), &profile.0);
+    }
+    checkpoint_one(&db, "tab-1", Some("Erro: 100% falhou"));
+    checkpoint_one(&db, "tab-2", Some("tudo certo, 1000 linhas"));
+    {
+        let conn = db.lock().unwrap();
+        let id_b: String = conn
+            .query_row("SELECT id FROM session_history WHERE session_id = 'b'", [], |r| r.get(0))
+            .unwrap();
+        update_session_history(
+            &conn,
+            &id_b,
+            &SessionPatch { custom_title: Some(Some("Refatorar Auth".into())), ..Default::default() },
+        )
+        .unwrap();
+    }
+
+    let conn = db.lock().unwrap();
+    let ids = |q: &str| -> Vec<Option<String>> {
+        search_session_history(&conn, "ws", q, None)
+            .unwrap()
+            .into_iter()
+            .map(|e| e.session_id)
+            .collect()
+    };
+    // `%` es literal: no matchea todo, solo la prévia que lo contiene.
+    assert_eq!(ids("100%"), vec![Some("a".to_string())]);
+    assert_eq!(ids("%"), vec![Some("a".to_string())]);
+    // `_` también es literal: ninguna prévia lo tiene.
+    assert!(ids("_").is_empty());
+    // Por título propio, sin distinguir mayúsculas (ASCII).
+    assert_eq!(ids("refatorar auth"), vec![Some("b".to_string())]);
+    // Consulta vacía no busca nada.
+    assert!(ids("   ").is_empty());
+    // Ocultar no saca la entrada de la búsqueda.
+    let id_b: String = conn
+        .query_row("SELECT id FROM session_history WHERE session_id = 'b'", [], |r| r.get(0))
+        .unwrap();
+    update_session_history(&conn, &id_b, &SessionPatch { hidden: Some(true), ..Default::default() }).unwrap();
+    assert_eq!(ids("auth"), vec![Some("b".to_string())]);
+    // El límite se respeta.
+    assert_eq!(search_session_history(&conn, "ws", "a", Some(1)).unwrap().len(), 1);
+}
+
+/// Una base con el esquema anterior (sin las columnas nuevas y `user_version` 41) se migra
+/// agregándolas, y las filas que ya había quedan con los valores por defecto.
+#[test]
+fn v42_agrega_las_columnas_del_historial_vivo_sin_perder_filas() {
+    let conn = schema::in_memory();
+    conn.execute_batch(
+        "ALTER TABLE session_history DROP COLUMN preview;
+         ALTER TABLE session_history DROP COLUMN box;
+         ALTER TABLE session_history DROP COLUMN pinned;
+         ALTER TABLE session_history DROP COLUMN custom_title;
+         ALTER TABLE session_history DROP COLUMN hidden;
+         ALTER TABLE session_history DROP COLUMN checkpointed_at;
+         INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws-old', 'Old', 0, 0);
+         INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, opened_at, closed_at)
+             VALUES ('h1', 'ws-old', 'claude-code', 'Claude Code', 'claude', '/proj', 'Vieja', 's-old', '[]', 1, 2);
+         PRAGMA user_version = 41;",
+    )
+    .unwrap();
+
+    schema::migrate(&conn).unwrap();
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 42);
+
+    let (preview, pinned, hidden, title): (Option<String>, i64, i64, Option<String>) = conn
+        .query_row(
+            "SELECT preview, pinned, hidden, title FROM session_history WHERE id = 'h1'",
+            [],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+        )
+        .unwrap();
+    assert_eq!((preview, pinned, hidden), (None, 0, 0));
+    assert_eq!(title.as_deref(), Some("Vieja"));
+    // Correr la migración de nuevo no rompe nada.
+    schema::migrate(&conn).unwrap();
 }

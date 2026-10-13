@@ -153,6 +153,31 @@ pub struct SessionHistoryEntry {
     pub prelaunch: Vec<crate::prelaunch::PrelaunchStep>,
     pub opened_at: i64,
     pub closed_at: i64,
+    /// Prévia de la pantalla al último checkpoint (texto plano, máx. 2000 caracteres).
+    #[serde(default)]
+    pub preview: Option<String>,
+    /// Posición de la tarjeta en el canvas del historial (JSON `box` en la base).
+    #[serde(default, rename = "box")]
+    pub box_rect: Option<BoxRect>,
+    #[serde(default)]
+    pub pinned: bool,
+    /// Título puesto a mano por el usuario; manda sobre `title`.
+    #[serde(default)]
+    pub custom_title: Option<String>,
+    #[serde(default)]
+    pub hidden: bool,
+    /// Último checkpoint (ms de la app en segundos, igual que `closed_at`); `None` = nunca.
+    #[serde(default)]
+    pub checkpointed_at: Option<i64>,
+}
+
+/// Rectángulo de una tarjeta en el canvas del historial. Se guarda como JSON en la base.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq)]
+pub struct BoxRect {
+    pub x: f64,
+    pub y: f64,
+    pub w: f64,
+    pub h: f64,
 }
 
 /// Tab que convivía con la sesión archivada, para poder mostrar con qué configuración de

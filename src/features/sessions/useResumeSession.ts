@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { boardKeyOfTab, canvasActions, useCanvasStore } from "@/features/canvas/store";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 
@@ -99,6 +100,12 @@ export function useResumeSession() {
       // se hereda al spawnear y no se puede tocar con el agente ya corriendo).
       prelaunch: prelaunch ?? entry.prelaunch,
     });
+    // De volta ao mesmo lugar e tamanho no canvas em que estava (se o checkpoint guardou).
+    if (entry.box) {
+      const boards = useCanvasStore.getState().boards;
+      const tab = useTabsStore.getState().tabs.find((x) => x.id === tabId);
+      if (tab) canvasActions.placeNode(boardKeyOfTab(tab, boards), tabId, entry.box);
+    }
     navigate("/workspace");
 
     // Mismo gate que el wizard del "+": los symlinks tienen que estar en disco ANTES de

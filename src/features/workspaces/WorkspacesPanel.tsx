@@ -8,9 +8,7 @@ import {
 } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
-import { agentIcon } from "@/features/agents/agentIcons";
-import { BranchIcon, RunningIcon } from "@/app/icons";
-import { elapsed } from "@/features/workspaces/useRepoInfo";
+import { BranchIcon } from "@/app/icons";
 import { flattenWorkspaces } from "@/features/workspaces/workspaceTree";
 import type { RepoGroup, WorkspaceAgent, WorkspaceNode } from "@/features/workspaces/workspaceTree";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
@@ -21,44 +19,7 @@ import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { flushPendingSave } from "@/features/tabs/persistence";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
-
-function AgentRow({ agent, onClick, onContextMenu }: {
-  agent: WorkspaceAgent;
-  onClick: () => void;
-  onContextMenu: (e: React.MouseEvent) => void;
-}) {
-  const Icon = agentIcon(agent.agentId, agent.agentLabel);
-  return (
-    <Button variant="custom"
-      onClick={onClick}
-      onContextMenu={(e) => { e.preventDefault(); onContextMenu(e); }}
-      title={agent.title}
-      className={`flex items-center gap-2 h-[25px] pl-1.5 pr-1 rounded-md w-full text-left
-        transition-colors duration-150
-        ${agent.isActive
-          ? "bg-accent-500/12 dark:bg-accent-400/13"
-          : "hover:bg-gray-200/60 dark:hover:bg-white/5"}`}
-    >
-      <RunningIcon
-        className={`w-3.5 h-3.5 shrink-0 ${
-          agent.status === "running" ? "text-emerald-500" : "text-amber-500"}`}
-      />
-      <span className="shrink-0 flex items-center justify-center w-3.5 h-3.5 rounded
-        text-gray-500 dark:text-gray-400">
-        <Icon className="w-3.5 h-3.5" />
-      </span>
-      <span className={`flex-1 min-w-0 truncate text-[11px]
-        ${agent.isActive
-          ? "text-gray-900 dark:text-accent-100"
-          : "text-gray-600 dark:text-gray-400"}`}>
-        {agent.title}
-      </span>
-      <span className="shrink-0 text-[10px] tabular-nums text-gray-400 dark:text-white/35">
-        {elapsed(agent.openedAt)}
-      </span>
-    </Button>
-  );
-}
+import { ConversationList } from "@/features/sessions/ConversationList";
 
 /**
  * Un workspace en el panel.
@@ -68,8 +29,11 @@ function AgentRow({ agent, onClick, onContextMenu }: {
  * piezas distintas y se notaba el salto — al cambiar de workspace parecía que la fila se
  * reemplazaba por otra cosa en vez de crecer.
  */
-function WorkspaceItem({ ws, expanded, onActivate, onOpenAgent, onWorkspaceMenu, onAgentMenu }: {
+function WorkspaceItem({ ws, groupCwds, workspaceId, expanded, onActivate, onOpenAgent, onWorkspaceMenu, onAgentMenu }: {
   ws: WorkspaceNode;
+  /** As pastas do projeto (raiz e worktrees): de onde saem as conversas. */
+  groupCwds: string[];
+  workspaceId: string;
   expanded: boolean;
   onActivate: () => void;
   onOpenAgent: (id: string) => void;
@@ -155,16 +119,16 @@ function WorkspaceItem({ ws, expanded, onActivate, onOpenAgent, onWorkspaceMenu,
         )}
       </div>
 
-      <div className="flex flex-col gap-px">
-        {ws.agents.map((a) => (
-          <AgentRow
-            key={a.tabId}
-            agent={a}
-            onClick={() => onOpenAgent(a.tabId)}
-            onContextMenu={(e) => onAgentMenu(e, a)}
-          />
-        ))}
-      </div>
+      <ConversationList
+        cwd={ws.cwd}
+        groupCwds={groupCwds}
+        workspaceId={workspaceId}
+        onOpenTab={onOpenAgent}
+        onTabMenu={(e, tabId) => {
+          const agent = ws.agents.find((a) => a.tabId === tabId);
+          if (agent) onAgentMenu(e, agent);
+        }}
+      />
     </div>
   );
 }
@@ -205,6 +169,17 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
       .filter((ws) => ws.closed || ws.agents.length > 0),
     [groups, missionOf],
   );
+
+  // As pastas de cada projeto (o repo e seus worktrees/andares), por workspace: as conversas do projeto
+  // vêm de todas elas, não só da pasta aberta.
+  const cwdsOf = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const group of groups) {
+      const cwds = [...new Set([group.key, ...group.workspaces.map((w) => w.cwd)])];
+      for (const w of group.workspaces) map.set(w.key, cwds);
+    }
+    return map;
+  }, [groups]);
 
   const running = useMemo(
     () => groups.flatMap((g) => g.workspaces).flatMap((w) => w.agents).filter((a) => a.status === "running").length,
@@ -363,6 +338,8 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
             <WorkspaceItem
               key={ws.key}
               ws={ws}
+              groupCwds={cwdsOf.get(ws.key) ?? [ws.cwd]}
+              workspaceId={workspaceId}
               expanded={ws.agents.some((a) => a.tabId === activeTabId)}
               onActivate={() => (ws.closed
                 ? reopenWorkspace(ws).catch(console.error)

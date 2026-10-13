@@ -172,6 +172,9 @@ pub fn run() {
             crate::memory::lifecycle::workspace_deleted_list,
             crate::database::default_workspace_has_content,
             crate::database::db_list_session_history,
+            crate::database::db_checkpoint_sessions,
+            crate::database::db_update_session_history,
+            crate::database::db_search_session_history,
             // Workspaces cerrados a mano (v10)
             crate::database::save_workspace_snapshot,
             crate::database::list_workspace_snapshots,
