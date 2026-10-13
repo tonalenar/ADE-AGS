@@ -4,6 +4,8 @@ import { create } from "zustand";
 import { BoxIcon, Button, CloseIcon, CopyIcon, IconReset } from "neogestify-ui-components";
 
 import { SplitDownIcon, SplitRightIcon } from "@/app/icons";
+import { clearPlacement, takePlacement } from "@/features/canvas/placement";
+import { canvasActions } from "@/features/canvas/store";
 import { refreshSessionTitle } from "@/features/sessions/sessionTitle";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { attachSkillsToTab, tabSkillIds } from "@/features/skills/attachSkills";
@@ -209,12 +211,15 @@ export function TabDialogs() {
         title={wizardFor?.title}
         initialSkillIds={wizardFor?.skillIds}
         initialPrelaunch={wizardFor?.prelaunch}
-        onClose={() => close({ wizardOpen: false, wizardFor: null })}
+        onClose={() => { clearPlacement(); close({ wizardOpen: false, wizardFor: null }); }}
         onConfirm={({ agent, skillIds, accountId, prelaunch, memoryBlock }) => {
           const cwd = wizardFor?.cwd ?? activeTab?.cwd;
           const prompt = wizardFor?.prompt;
           if (!cwd) return;
           const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch });
+          // O terminal nasce no retângulo que a pessoa desenhou no canvas, se desenhou um.
+          const placement = takePlacement();
+          if (placement && !wizardFor) canvasActions.placeNode(placement.key, tabId, placement.box);
           navigate("/workspace");
 
           // Los symlinks de las skills elegidas tienen que existir en el cwd ANTES de que

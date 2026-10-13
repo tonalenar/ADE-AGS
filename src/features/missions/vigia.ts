@@ -389,13 +389,13 @@ export function vigiaTick(now = Date.now()): void {
 }
 
 /** O Jev confirma como final uma mensagem ao Orquestrador que a regra local não reconheceu. Com o ponto desligado (padrão) ou com falha, não faz nada. */
-export const JEV_FINAL_MIN_CONFIDENCE = 0.8;
+export const JEV_FINAL_MIN_PROBABILITY = 0.5;
 function askJevIfFinal(fromTabId: string, text: string | null | undefined, at: number): void {
   const body = (text ?? "").trim();
   if (body.length < 40 || body.includes("?")) return;
-  invoke<{ label: string; confidence: number | null } | null>("decision_classify_report", { text: body, local: "andamento" })
+  invoke<{ label: string; confidence: number | null; probability: number | null } | null>("decision_classify_report", { text: body, local: "andamento" })
     .then((answer) => {
-      if (!answer || answer.label !== "final" || (answer.confidence !== null && answer.confidence < JEV_FINAL_MIN_CONFIDENCE)) return;
+      if (!answer || answer.label !== "final" || (answer.probability !== null && answer.probability < JEV_FINAL_MIN_PROBABILITY)) return;
       if ((finishedAt.get(fromTabId) ?? 0) < at) finishedAt.set(fromTabId, at);
       rememberPeers();
     })

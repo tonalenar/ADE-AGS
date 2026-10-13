@@ -7,7 +7,7 @@ import { allHinted, fetchHints, hintTone, jevApprovedIds, type JevHint } from ".
 import type { MemoryReviewItem } from "../types";
 
 const item = (n: number): MemoryReviewItem => ({ entryId: `e${n}`, revision: 1, key: `k${n}`, kind: "note", body: `corpo ${n}`, operation: "create" } as unknown as MemoryReviewItem);
-const hint = (index: number, action: JevHint["action"], extra: Partial<JevHint> = {}): JevHint => ({ index, provider: "jev", action, secret: false, confidence: 0.95, ...extra });
+const hint = (index: number, action: JevHint["action"], extra: Partial<JevHint> = {}): JevHint => ({ index, provider: "jev", action, secret: false, confidence: 0.3, probability: 0.75, ...extra });
 
 describe("dicas do Jev na revisão de memória", () => {
   it("manda as propostas ao backend e liga cada dica à sua proposta pelo índice", async () => {
@@ -27,15 +27,15 @@ describe("dicas do Jev na revisão de memória", () => {
     expect(invoke).not.toHaveBeenCalled();
   });
 
-  it("só marca o que o Jev aprovaria: sem suspeita de segredo e com confiança alta", () => {
+  it("só marca o que o Jev aprovaria: rótulo aprovar, sem suspeita de segredo e com probabilidade de maioria (a confiança não conta)", () => {
     const items = [0, 1, 2, 3, 4, 5].map(item);
     const hints: Record<string, JevHint> = {
       "e0:1": hint(0, "aprovar"),
       "e1:1": hint(1, "aprovar", { secret: true }),
-      "e2:1": hint(2, "aprovar", { confidence: 0.6 }),
+      "e2:1": hint(2, "aprovar", { probability: 0.4 }),
       "e3:1": hint(3, "revisar"),
       "e4:1": hint(4, "rejeitar"),
-      "e5:1": hint(5, "aprovar", { confidence: null }),
+      "e5:1": hint(5, "aprovar", { probability: null, confidence: 0.1 }),
     };
     expect(jevApprovedIds(items, hints)).toEqual(["e0:1", "e5:1"]);
   });

@@ -144,9 +144,12 @@ export const canvasActions = {
       if (!box) return b;
       return { ...b, nodes: { ...b.nodes, [id]: { ...box, ...patch } } };
     }),
+  /** Põe o terminal de uma aba num retângulo escolhido (o desenhado na tela); o nó nasce aí em vez da próxima célula livre. */
+  placeNode: (key: string, tabId: string, box: Box) =>
+    updateBoard(key, (b) => ({ ...b, nodes: { ...b.nodes, [tabId]: box } })),
   /** Crea una nota y devuelve su id y su nombre final. Con `near`, al lado de ese nodo y
    *  conectada a él. */
-  addNote: (key: string, note: { name?: string; content: string; near?: string; at?: { x: number; y: number }; stackWith?: string }) => {
+  addNote: (key: string, note: { name?: string; content: string; near?: string; at?: { x: number; y: number }; stackWith?: string; size?: { w: number; h: number } }) => {
     const id = `${NOTE_PREFIX}${crypto.randomUUID()}`;
     let name = "";
     updateBoard(key, (b) => {
@@ -167,7 +170,7 @@ export const canvasActions = {
   unstackNote: (key: string, id: string) => updateBoard(key, (b) => unstack(b, id)),
   /** Crea un portal y devuelve su id y su nombre final. Con `near`, al lado de ese nodo y
    *  conectado a él. */
-  addPortal: (key: string, portal: { name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android"; avd?: string }) => {
+  addPortal: (key: string, portal: { name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android"; avd?: string; size?: { w: number; h: number } }) => {
     const id = `${PORTAL_PREFIX}${crypto.randomUUID()}`;
     let name = "";
     updateBoard(key, (b) => {
@@ -180,9 +183,9 @@ export const canvasActions = {
   updatePortal: (key: string, id: string, patch: Partial<Omit<CanvasPortal, "box">>) =>
     updateBoard(key, (b) => updatePortal(b, id, patch)),
   removePortal: (key: string, id: string) => updateBoard(key, (b) => removePortal(b, id)),
-  addText: (key: string, at: { x: number; y: number }) => {
+  addText: (key: string, at: { x: number; y: number }, box?: { w: number; h: number }) => {
     const id = `${TEXT_PREFIX}${crypto.randomUUID()}`;
-    updateBoard(key, (b) => addText(b, { id, at }));
+    updateBoard(key, (b) => addText(b, { id, at, box }));
     return id;
   },
   updateText: (key: string, id: string, patch: Partial<Omit<CanvasText, "box">>) =>
@@ -194,7 +197,7 @@ export const canvasActions = {
     return id;
   },
   removeImage: (key: string, id: string) => updateBoard(key, (b) => removeImage(b, id)),
-  addFolder: (key: string, folder: { path: string; name: string; at: { x: number; y: number } }) => {
+  addFolder: (key: string, folder: { path: string; name: string; at: { x: number; y: number }; size?: { w: number; h: number } }) => {
     const id = `${FOLDER_PREFIX}${crypto.randomUUID()}`;
     updateBoard(key, (b) => addFolder(b, { ...folder, id }));
     return id;

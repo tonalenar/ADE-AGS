@@ -117,6 +117,9 @@ pub fn run() {
             crate::floors::floor_list,
             crate::floors::floor_create,
             crate::floors::floor_delete,
+            crate::floors_land::floor_branches,
+            crate::floors_land::floor_land_preview,
+            crate::floors_land::floor_land,
             // El pet sube de nivel con los tokens de los agentes
             crate::missions::mission_start_terminals,
             crate::missions::mission_finish_terminals,

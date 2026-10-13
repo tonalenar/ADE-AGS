@@ -15,10 +15,16 @@ export interface JevHint {
   action: HintAction;
   secret: boolean | null;
   confidence: number | null;
+  probability: number | null;
 }
 
-/** Abaixo disto o Jev "se arriscou" pouco: a dica aparece, mas fora da seleção automática. */
-export const HINT_SELECT_MIN_CONFIDENCE = 0.85;
+/**
+ * Para a seleção: o rótulo "aprovar" com probabilidade de pelo menos 0.45 (a maioria numa pergunta de 3 opções).
+ * No conjunto de rejeição o Jev acertou todos os rótulos, mas sua "confiança" (0.2 a 0.98) não separava o certo
+ * do errado, então um piso de 0.85 não deixava passar nenhuma aprovação correta. Quem decide é o rótulo + o
+ * filtro de segredo; o clique de confirmar continua sendo da pessoa.
+ */
+export const HINT_SELECT_MIN_PROBABILITY = 0.45;
 
 /** Pergunta ao backend o que o log já tem sobre estas propostas. Sem Jev configurado, volta vazio. */
 export async function fetchHints(items: MemoryReviewItem[]): Promise<Record<string, JevHint>> {
@@ -34,13 +40,13 @@ export async function fetchHints(items: MemoryReviewItem[]): Promise<Record<stri
   return byId;
 }
 
-/** Os ids que o Jev aprovaria com segurança: ação "aprovar", sem suspeita de segredo e (se há confiança) acima do mínimo. Pura. */
+/** Os ids que o Jev aprovaria: ação "aprovar", sem suspeita de segredo e (se há probabilidade) acima do mínimo. Pura. */
 export function jevApprovedIds(items: MemoryReviewItem[], hints: Record<string, JevHint>): string[] {
   return items
     .map(itemId)
     .filter((id) => {
       const hint = hints[id];
-      return !!hint && hint.action === "aprovar" && hint.secret !== true && (hint.confidence === null || hint.confidence >= HINT_SELECT_MIN_CONFIDENCE);
+      return !!hint && hint.action === "aprovar" && hint.secret !== true && (hint.probability === null || hint.probability >= HINT_SELECT_MIN_PROBABILITY);
     });
 }
 
