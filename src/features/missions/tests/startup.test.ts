@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { allWorkingSpan, startEventSpan, startupProgress, withActivity, type StartupState } from "../startup";
+import { STALL_GRACE_MS, allWorkingSpan, shouldWarnStalled, startEventSpan, startupProgress, withActivity, type StartupState } from "../startup";
 
 const base = (): StartupState => ({ openedAt: 1000, names: ["Orquestrador", "Backend", "QA"], activityAt: new Map() });
 
@@ -43,5 +43,15 @@ describe("spans", () => {
     let s = base();
     for (const [i, n] of s.names.entries()) s = withActivity(s, n, 2000 + i * 1000);
     expect(allWorkingSpan(s)).toEqual({ kind: "start_all_working", actor: "all", startedMs: 1000, endedMs: 4000, detail: "" });
+  });
+});
+
+describe("aviso de integrante sem atividade", () => {
+  it("só avisa se, passada a carência, o integrante ainda não mostrou atividade", () => {
+    const base: StartupState = { openedAt: 0, names: ["Orquestrador", "QA"], activityAt: new Map() };
+    expect(shouldWarnStalled(base, "QA")).toBe(true);
+    expect(shouldWarnStalled(withActivity(base, "QA", 5), "QA")).toBe(false);
+    expect(shouldWarnStalled(base, "Desconhecido")).toBe(false);
+    expect(STALL_GRACE_MS).toBeGreaterThanOrEqual(15_000);
   });
 });

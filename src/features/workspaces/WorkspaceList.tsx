@@ -59,7 +59,7 @@ export function WorkspaceList({ workspaces, onSelect }: WorkspaceListProps) {
               <span className="text-sm font-medium text-gray-800 dark:text-gray-100 truncate" title={ws.name}>
                 {ws.name}
               </span>
-              <span className="text-xs text-gray-400 dark:text-gray-500 truncate">
+              <span className="text-xs text-gray-400 dark:text-gray-500 truncate" title={t("workspace.list.summary", { windows: ws.windowCount, tabs: ws.tabCount })}>
                 {t("workspace.list.summary", { windows: ws.windowCount, tabs: ws.tabCount })}
               </span>
             </div>

@@ -15,7 +15,7 @@ const TOOL = "cc-t flex h-[26px] w-[26px] shrink-0 items-center justify-center r
 import { unreadOf, useUnreadStore } from "./chatUnread";
 import { useActiveBoardKey, boardKeyOfTab, missionOfKey } from "./store";
 import { TeamFeed, useMissionApprovals, useTeamMessages } from "./TeamFeed";
-import { parseMention, suggestMentions, type UserNote } from "./teamFeedModel";
+import { resolveMention, suggestMentions, type UserNote } from "./teamFeedModel";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { ResponsePicker } from "./ResponsePicker";
 import { CHAT_MARGIN, clampSize, isDefaultSize, loadChatSize, resizeBy, saveChatSize, DEFAULT_CHAT_SIZE, type ChatSize, type ChatSizeState } from "./chatSize";
@@ -231,12 +231,17 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
     const typed = draft.trim();
     if (!typed || sending) return;
     // Sem @, a mensagem vai ao orquestrador; com @Nome, ao agente escolhido.
-    const mention = parseMention(typed, addressees);
-    const lead = addressees.find((a) => /^orquestrador/i.test(a.name)) ?? addressees[0];
-    const to = mention?.to ?? lead;
-    const text = mention?.text ?? typed;
-    if (!to) return AlertaToast(t("canvas.chat.title"), t("canvas.team.noAddressee"), "error", 6000);
-    if (typed.startsWith("@") && !mention) return AlertaToast(t("canvas.chat.title"), t("canvas.team.unknownMention"), "error", 6000);
+    const mention = resolveMention(typed, addressees);
+    const warn = (key: string, opts?: Record<string, string>) => AlertaToast(t("canvas.chat.title"), t(key, opts), "error", 6000);
+    if (mention.kind === "unknown") return warn("canvas.team.unknownMention");
+    if (mention.kind === "empty") return warn("canvas.team.emptyMention", { name: mention.to.name });
+    if (mention.kind === "ambiguous") return warn("canvas.team.ambiguousMention", { names: mention.names.join(", ") });
+    const lead = addressees.find((a) => /^orquestrador/i.test(a.name));
+    if (mention.kind === "none" && addressees.length === 0) return warn("canvas.team.noAddressee");
+    // Sem Orquestrador aberto não há "a quem for": não adivinha o primeiro agente.
+    if (mention.kind === "none" && !lead) return warn("canvas.team.noLead", { names: addressees.map((a) => a.name).join(", ") });
+    const to = mention.kind === "ok" ? mention.to : lead!;
+    const text = mention.kind === "ok" ? mention.text : typed;
     setSending(true);
     setDraft("");
     try {
@@ -358,7 +363,10 @@ ${text}` : text)); setPicking(false); }} />}
           {(suggestMentions(draft, addressees).length > 0 && draft.trimStart().startsWith("@") ? suggestMentions(draft, addressees) : addressees).map((a) => (
             <button key={a.id} type="button" title={t("canvas.team.mentionHint", { name: a.name })}
               onClick={() => setDraft(`@${a.name} `)}
-              className="cc-t h-[22px] max-w-32 truncate rounded-md bg-black/[0.05] px-2 text-[11.5px] text-gray-700 hover:bg-black/[0.08] dark:bg-surface-raised dark:text-white/75 dark:hover:text-white">
+              aria-pressed={draft.trimStart().toLowerCase().startsWith(`@${a.name.toLowerCase()} `)}
+              className={`cc-t h-[22px] max-w-32 truncate rounded-md px-2 text-[11.5px] ${draft.trimStart().toLowerCase().startsWith(`@${a.name.toLowerCase()} `)
+                ? "bg-accent-500 text-white"
+                : "bg-black/[0.05] text-gray-700 hover:bg-black/[0.08] dark:bg-surface-raised dark:text-white/75 dark:hover:text-white"}`}>
               @{a.name}
             </button>
           ))}
@@ -424,7 +432,7 @@ ${text}` : text)); setPicking(false); }} />}
       </div>}
     >
       {teamView ? (teamMessages.length + teamApprovals.length + notes.length > 0
-        ? <TeamFeed messages={teamMessages} approvals={teamApprovals} notes={notes} /> : undefined)
+        ? <TeamFeed messages={teamMessages} approvals={teamApprovals} notes={notes} colors={Object.fromEntries(agents.map((a) => [a.id, agentTile(a.agentId)]))} /> : undefined)
         : current && messages.length > 0 ? <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.chat.title")}>
               {messages.map((m) => (
                 <div key={m.id} className={`flex flex-col ${m.kind === "user" ? "items-end" : "items-stretch"}`}>

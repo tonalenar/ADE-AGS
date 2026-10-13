@@ -56,7 +56,7 @@ export function ResponsePicker({ tabId, onPick, onClose }: { tabId: string; onPi
             className={`rounded-xl border p-2.5 transition-colors ${i === active
               ? "border-accent-400 bg-accent-50 dark:border-accent-400/60 dark:bg-accent-400/10"
               : "border-gray-200 dark:border-white/10"}`}>
-            <p className="truncate text-[10.5px] font-medium text-gray-500 dark:text-gray-400">{o.label}</p>
+            <p title={o.label} className="truncate text-[10.5px] font-medium text-gray-500 dark:text-gray-400">{o.label}</p>
             <pre className="mt-1 max-h-24 overflow-hidden whitespace-pre-wrap break-words font-sans text-[12px] leading-snug">{o.text}</pre>
             <button type="button" onClick={() => onPick(o.text)} aria-label={`${t("canvas.chat.pick.send")}: ${o.label}`}
               className="mt-1.5 rounded-full bg-gray-950 px-3 py-1 text-[11px] font-medium text-white dark:bg-white dark:text-gray-950">

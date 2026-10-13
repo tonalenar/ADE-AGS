@@ -42,4 +42,19 @@ describe("PermissionCard: teclado", () => {
     expect(onDecide).toHaveBeenCalledTimes(2);
     expect(onDecide).toHaveBeenLastCalledWith(false, false);
   });
+
+  it("cartão num ancestral escondido não responde: um y decide só o cartão visível", () => {
+    const hiddenDecide = vi.fn();
+    const visibleDecide = vi.fn();
+    act(() => root.render(
+      <>
+        <div style={{ visibility: "hidden" }}><PermissionCard approval={approval("1")} onDecide={hiddenDecide} focused /></div>
+        <div><PermissionCard approval={approval("2")} onDecide={visibleDecide} focused /></div>
+      </>,
+    ));
+    press({ key: "y" });
+    expect(hiddenDecide).not.toHaveBeenCalled();
+    expect(visibleDecide).toHaveBeenCalledTimes(1);
+    expect(visibleDecide).toHaveBeenCalledWith(true, false);
+  });
 });

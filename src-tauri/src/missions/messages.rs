@@ -50,7 +50,8 @@ fn clip(text: &str) -> String {
     if text.chars().count() <= MAX_TEXT {
         return text.to_string();
     }
-    let mut out: String = text.chars().take(MAX_TEXT).collect();
+    // O reticências entra DENTRO do limite: o texto guardado nunca passa de MAX_TEXT.
+    let mut out: String = text.chars().take(MAX_TEXT - 1).collect();
     out.push('…');
     out
 }
@@ -66,7 +67,20 @@ pub fn record(
     text: &str,
     at_ms: i64,
 ) -> Result<bool, String> {
-    if !matches!(kind, "tell" | "ask") || text.trim().is_empty() || from.0 == to.0 {
+    record_inner(conn, boards, kind, from, to, text, at_ms, false)
+}
+
+/// Aviso do Vigia à missão da aba: o destino é o Orquestrador, sem inventar um peer.
+pub fn record_vigia(conn: &Connection, boards: &Boards, lead: (&str, &str), text: &str, at_ms: i64) -> Result<bool, String> {
+    record_inner(conn, boards, "tell", (lead.0, "Vigia"), lead, text, at_ms, true)
+}
+
+#[allow(clippy::too_many_arguments)]
+fn record_inner(
+    conn: &Connection, boards: &Boards, kind: &str, from: (&str, &str), to: (&str, &str),
+    text: &str, at_ms: i64, notice: bool,
+) -> Result<bool, String> {
+    if !matches!(kind, "tell" | "ask") || text.trim().is_empty() || (from.0 == to.0 && !notice) {
         return Ok(false);
     }
     let Some(mission) = mission_of_tab(boards, from.0) else { return Ok(false) };
@@ -172,7 +186,7 @@ mod tests {
 
         record(&conn, &b, "tell", ("lead", "O"), ("back", "B"), &"a".repeat(MAX_TEXT + 50), 3).unwrap();
         let big = list(&conn, "m1", 0, 100).unwrap().pop().unwrap();
-        assert_eq!(big.text.chars().count(), MAX_TEXT + 1);
+        assert_eq!(big.text.chars().count(), MAX_TEXT);
         assert!(big.text.ends_with('…'));
 
         for n in 0..(KEEP + 10) {
@@ -180,5 +194,20 @@ mod tests {
         }
         let count: i64 = conn.query_row("SELECT COUNT(*) FROM mission_messages WHERE mission_id='m1'", [], |r| r.get(0)).unwrap();
         assert_eq!(count, KEEP);
+    }
+
+    #[test]
+    fn vigia_vai_uma_vez_ao_feed_da_missao_sem_liberar_peer_para_si_mesmo() {
+        let conn = Connection::open_in_memory().unwrap();
+        let b = boards();
+        assert!(record_vigia(&conn, &b, ("lead", "Orquestrador"), "**Vigia** — aviso", 10).unwrap());
+        assert!(!record_vigia(&conn, &b, ("ghost", "Fora"), "não guardar", 11).unwrap());
+        assert!(!record(&conn, &b, "tell", ("lead", "Vigia"), ("lead", "Orquestrador"), "eco peer", 12).unwrap());
+        let all = list(&conn, "m1", 0, 100).unwrap();
+        assert_eq!(all.len(), 1);
+        assert_eq!((all[0].kind.as_str(), all[0].from_name.as_str(), all[0].to_name.as_str()), ("tell", "Vigia", "Orquestrador"));
+        assert_eq!((all[0].from_tab_id.as_str(), all[0].to_tab_id.as_str()), ("lead", "lead"));
+        assert_eq!(all[0].text, "**Vigia** — aviso");
+        assert!(list(&conn, "m2", 0, 100).unwrap().is_empty());
     }
 }

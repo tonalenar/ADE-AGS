@@ -44,6 +44,14 @@ export function withActivity(state: StartupState, name: string, at: number): Sta
   return { ...state, activityAt: new Map(state.activityAt).set(name, at) };
 }
 
+/** Quanto se espera, depois do aviso de "sem atividade", antes de incomodar o orquestrador: o agente pode só estar iniciando. */
+export const STALL_GRACE_MS = 20_000;
+
+/** O orquestrador só é avisado se, passada a carência, o integrante AINDA não mostrou atividade. Pura. */
+export function shouldWarnStalled(state: StartupState, name: string): boolean {
+  return state.names.includes(name) && !state.activityAt.has(name);
+}
+
 /** Span `start_all_working`: da abertura ao último agente arrancar. `null` se ainda falta alguém. Pura. */
 export function allWorkingSpan(state: StartupState): NewSpan | null {
   const p = startupProgress(state);

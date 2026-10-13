@@ -410,14 +410,17 @@ mod tests_e2e {
     use crate::terminal::containment::{imp, ProcessGroup};
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
     use std::io::Read;
-    use std::time::{Duration, Instant};
+    use std::time::Duration;
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE};
 
-    fn vivo(pid: u32) -> bool {
-        std::process::Command::new("tasklist")
-            .args(["/FI", &format!("PID eq {pid}"), "/NH"])
-            .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
-            .unwrap_or(false)
+    fn process_handle(pid: u32) -> OwnedHandle {
+        // O handle fica válido após a morte do processo; o PID pode ser reutilizado.
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE, 0, pid) };
+        assert!(!handle.is_null(), "OpenProcess({pid}): {}", std::io::Error::last_os_error());
+        // SAFETY: OpenProcess devolveu um handle válido, transferido uma única vez ao RAII.
+        unsafe { OwnedHandle::from_raw_handle(handle as _) }
     }
 
     #[test]
@@ -465,23 +468,19 @@ mod tests_e2e {
             }
         });
         let nieto = rx.recv_timeout(Duration::from_secs(30)).expect("pid del nieto");
-        assert!(vivo(nieto), "el nieto tendría que estar vivo antes de matar el grupo");
-
+        let original = process_handle(nieto);
+        let handle = original.as_raw_handle() as HANDLE;
+        assert_eq!(unsafe { WaitForSingleObject(handle, 0) }, WAIT_TIMEOUT, "el nieto tendría que estar vivo antes de matar el grupo");
         group.kill_all();
         drop(pty);
 
-        let limite = Instant::now() + Duration::from_secs(5);
-        while vivo(nieto) && Instant::now() < limite {
-            std::thread::sleep(Duration::from_millis(50));
+        // Espera o processo ORIGINAL, sem consultar de novo um PID que pode ser de git/tasklist.
+        let wait = unsafe { WaitForSingleObject(handle, 5_000) };
+        if wait != WAIT_OBJECT_0 {
+            // A limpeza também usa identidade estável: nunca mata outro processo pelo PID reciclado.
+            unsafe { TerminateProcess(handle, 1); }
         }
-
-        let sobrevivio = vivo(nieto);
-        if sobrevivio {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/PID", &nieto.to_string()])
-                .output();
-        }
-        assert!(!sobrevivio, "el nieto {nieto} quedó huérfano tras matar el grupo");
+        assert_eq!(wait, WAIT_OBJECT_0, "el nieto original {nieto} quedó vivo tras matar el grupo (wait={wait})");
     }
 }
 

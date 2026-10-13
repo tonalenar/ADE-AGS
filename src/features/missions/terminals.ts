@@ -10,7 +10,7 @@ import { pasteIntoTab, sendWhenReady, type SendTimings } from "@/features/termin
 
 import { getAutonomy, withAutonomy } from "./autonomy";
 import { withModel } from "./modelFlags";
-import { startEventSpan, startupProgress, withActivity, allWorkingSpan, type StartupState } from "./startup";
+import { STALL_GRACE_MS, shouldWarnStalled, startEventSpan, startupProgress, withActivity, allWorkingSpan, type StartupState } from "./startup";
 import { useStallAlerts } from "./stallAlerts";
 import { recordSpan } from "./timings";
 import { missionTurns } from "./turns";
@@ -263,7 +263,7 @@ export function leadBriefing(
     ...(defaultSubagent === undefined ? [] : ["", ...subagentDefaultBriefing(defaultSubagent)]),
     "",
     "RESUMO AO FIM DE CADA TURNO:",
-    "- Todo turno seu termina com um resumo curto, na tela, do que foi feito na missão até agora e do que falta: o resultado e o estado, não o que cada integrante fez. Se depende de uma decisão do usuário, diga qual no fim do resumo.",
+    "- Todo turno seu termina com um resumo de NO MÁXIMO 3 linhas, na tela: o que a missão já alcançou e o que falta. Não cite integrante por nome nem diga quem fez o quê (errado: \"o Backend corrigiu X e o QA validou Y\"; certo: \"X corrigido e validado; falta Y\"). Se depende de uma decisão do usuário, diga qual na última linha.",
     "",
     "Planeje, divida o trabalho conforme o papel de cada um, acompanhe e junte os resultados. Ao terminar, resuma o que foi feito.",
     ...(mission.id ? ["", ...memorySuggestion(mission.id)] : []),
@@ -452,7 +452,11 @@ export async function startMissionInTerminals(
         ? () => recordSpan(mission.id, startEventSpan("start_stalled", actor, Date.now()))
         : () => {
           recordSpan(mission.id, startEventSpan("start_stalled", actor, Date.now()));
-          pasteIntoTab(leadTabId, `[AGS] ${actor} não mostrou atividade após o briefing (recebeu um Enter). Confirme se ele está trabalhando; se não, reenvie a tarefa dele com ags peer tell.`, true);
+          // Carência: o agente pode só estar iniciando (o Antigravity levou 15 s para a 1ª saída). Só avisa se continuar mudo.
+          window.setTimeout(() => {
+            if (!shouldWarnStalled(startup, actor)) return;
+            pasteIntoTab(leadTabId, `[AGS] ${actor} não mostrou atividade após o briefing (recebeu um Enter). Confirme se ele está trabalhando; se não, reenvie a tarefa dele com ags peer tell.`, true);
+          }, STALL_GRACE_MS);
         },
       onSent: (at) => {
         missionTurns.start(tabId, mission.id, actor, at, "briefing");

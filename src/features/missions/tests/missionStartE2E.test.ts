@@ -1,4 +1,5 @@
 // @vitest-environment happy-dom
+import { STALL_GRACE_MS } from "../startup";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import type { FunctionalRole, Squad } from "@/features/squads/types";
@@ -424,7 +425,11 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
     expect(recordedSpans.filter((s) => s.span.kind === "start_stalled" && s.span.actor === "QA")).toHaveLength(1);
     expect(recordedSpans.filter((s) => s.span.kind === "start_retry" && s.span.actor === "QA")).toHaveLength(1);
 
-    // - Orquestrador recebeu o aviso explícito colado no seu terminal!
+    // - O aviso ao orquestrador espera a carência: o agente pode só estar iniciando (falso alarme da v14).
+    expect(leadTerm.pastes.length).toBe(leadPastesBeforeCheck);
+    vi.advanceTimersByTime(STALL_GRACE_MS);
+
+    // - Passada a carência, o QA continua mudo: o orquestrador recebeu o aviso explícito colado no seu terminal!
     expect(leadTerm.pastes.length).toBe(leadPastesBeforeCheck + 1);
     const avisoOrquestrador = leadTerm.pastes[leadTerm.pastes.length - 1];
     expect(avisoOrquestrador).toContain("[AGS] QA não mostrou atividade após o briefing (recebeu um Enter).");

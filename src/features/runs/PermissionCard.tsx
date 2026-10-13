@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Button, Kbd } from "neogestify-ui-components";
 
@@ -62,6 +62,18 @@ function shortPath(path?: string): string {
 }
 
 /**
+ * Una tarjeta escondida (`visibility:hidden` / `display:none` en ella o en un ancestro) no responde al
+ * teclado: o canvas e o chat ficam montados por trás de /missions e /fleet, e um `y` decidiria dois.
+ */
+export function isHiddenInTree(el: Element | null): boolean {
+  for (let node = el; node; node = node.parentElement) {
+    const style = getComputedStyle(node);
+    if (style.visibility === "hidden" || style.display === "none") return true;
+  }
+  return false;
+}
+
+/**
  * La tarjeta que pide una decisión.
  *
  * `y` aprueba y `n` rechaza sin sacar las manos del teclado, que es como se contesta una
@@ -82,6 +94,7 @@ export function PermissionCard({ approval, onDecide, focused }: {
   const { t } = useTranslation();
   const [busy, setBusy] = useState(false);
   const [remember, setRemember] = useState(false);
+  const card = useRef<HTMLDivElement>(null);
   const canRemember = approval.suggestedRule !== null;
   const preview = useMemo(
     () => buildPreview(approval.toolName, approval.input),
@@ -102,6 +115,8 @@ export function PermissionCard({ approval, onDecide, focused }: {
     const onKey = (e: KeyboardEvent) => {
       // Ctrl/Cmd/Alt+Y|N|R são atalhos de outras coisas (refazer, copiar…): nunca decidem um pedido.
       if (e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+      // Escondida (outra página por cima): quem responde é o cartão que se vê.
+      if (isHiddenInTree(card.current)) return;
       // Con un campo de texto enfocado, `y` es una letra que alguien está escribiendo.
       const el = document.activeElement;
       if (el instanceof HTMLInputElement || el instanceof HTMLTextAreaElement) return;
@@ -120,7 +135,7 @@ export function PermissionCard({ approval, onDecide, focused }: {
   }, [focused, busy, approval.id, remember, canRemember]);
 
   return (
-    <div className="flex flex-col gap-2 mx-3 mb-2.5 p-2.5 rounded-lg
+    <div ref={card} className="flex flex-col gap-2 mx-3 mb-2.5 p-2.5 rounded-lg
       bg-amber-50 dark:bg-amber-500/8
       border border-amber-300/70 dark:border-amber-500/25">
 
