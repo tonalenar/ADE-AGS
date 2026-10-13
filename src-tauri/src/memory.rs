@@ -1326,7 +1326,12 @@ pub fn task_tool(
                 },
             )?;
             if let Some(revision) = input.revision {
-                let revision = detail.revisions.iter().find(|item| item.revision == revision && item.status == "approved")
+                let revision = detail.revisions.iter().find(|item| {
+                    item.revision == revision
+                        && item.status == "approved"
+                        && detail.entry.status == "active"
+                        && detail.entry.current_revision == Some(item.revision)
+                })
                     .ok_or("memory revision is unavailable in this entry")?;
                 encode(&serde_json::to_value(revision)
                     .map_err(|_| "could not encode memory revision".to_string())?)?
