@@ -411,13 +411,24 @@ mod tests_e2e {
     use portable_pty::{native_pty_system, CommandBuilder, PtySize};
     use std::io::Read;
     use std::time::{Duration, Instant};
+    use std::os::windows::io::{AsRawHandle, FromRawHandle, OwnedHandle};
+    use windows_sys::Win32::Foundation::{HANDLE, WAIT_OBJECT_0, WAIT_TIMEOUT};
+    use windows_sys::Win32::System::Threading::{OpenProcess, TerminateProcess, WaitForSingleObject, PROCESS_SYNCHRONIZE, PROCESS_TERMINATE};
 
-    fn vivo(pid: u32) -> bool {
+    fn process_handle(pid: u32) -> OwnedHandle {
+        // O handle fica válido após a morte do processo; o PID pode ser reutilizado.
+        let handle = unsafe { OpenProcess(PROCESS_SYNCHRONIZE | PROCESS_TERMINATE, 0, pid) };
+        assert!(!handle.is_null(), "OpenProcess({pid}): {}", std::io::Error::last_os_error());
+        // SAFETY: OpenProcess devolveu um handle válido, transferido uma única vez ao RAII.
+        unsafe { OwnedHandle::from_raw_handle(handle as _) }
+    }
+
+    fn process_snapshot(pid: u32) -> String {
         std::process::Command::new("tasklist")
             .args(["/FI", &format!("PID eq {pid}"), "/NH"])
             .output()
-            .map(|o| String::from_utf8_lossy(&o.stdout).contains(&pid.to_string()))
-            .unwrap_or(false)
+            .map(|o| String::from_utf8_lossy(&o.stdout).into_owned())
+            .unwrap_or_default()
     }
 
     #[test]
@@ -437,8 +448,13 @@ mod tests_e2e {
         );
 
         let mut group = ProcessGroup::new(9_003);
+        let spawn_at = Instant::now();
         let child = pty.slave.spawn_command(cmd).expect("spawn");
+        let spawned_at = Instant::now();
         group.adopt(&*child);
+        eprintln!("[V17] root={:?} spawn_us={} adopt_us={} root_in_job={:?}", child.process_id(),
+            spawned_at.duration_since(spawn_at).as_micros(), spawned_at.elapsed().as_micros(),
+            child.process_id().map(|pid| imp::process_in_job(&group.imp, pid)));
         assert!(imp::usa_job(&group.imp), "no se pudo crear el Job Object");
 
         let mut reader = pty.master.try_clone_reader().expect("reader");
@@ -465,23 +481,23 @@ mod tests_e2e {
             }
         });
         let nieto = rx.recv_timeout(Duration::from_secs(30)).expect("pid del nieto");
-        assert!(vivo(nieto), "el nieto tendría que estar vivo antes de matar el grupo");
-
+        let original = process_handle(nieto);
+        let handle = original.as_raw_handle() as HANDLE;
+        assert_eq!(unsafe { WaitForSingleObject(handle, 0) }, WAIT_TIMEOUT, "el nieto tendría que estar vivo antes de matar el grupo");
+        eprintln!("[V17] tasklist pid={nieto} text={:?}", process_snapshot(nieto));
+        eprintln!("[V17] nieto={nieto} in_job_before_kill={:?}", imp::process_in_job(&group.imp, nieto));
+        let kill_at = Instant::now();
         group.kill_all();
         drop(pty);
 
-        let limite = Instant::now() + Duration::from_secs(5);
-        while vivo(nieto) && Instant::now() < limite {
-            std::thread::sleep(Duration::from_millis(50));
+        // Espera o processo ORIGINAL, sem consultar de novo um PID que pode ser de git/tasklist.
+        let wait = unsafe { WaitForSingleObject(handle, 5_000) };
+        eprintln!("[V17] nieto={nieto} original_wait={wait} elapsed_ms={}", kill_at.elapsed().as_millis());
+        if wait != WAIT_OBJECT_0 {
+            // A limpeza também usa identidade estável: nunca mata outro processo pelo PID reciclado.
+            unsafe { TerminateProcess(handle, 1); }
         }
-
-        let sobrevivio = vivo(nieto);
-        if sobrevivio {
-            let _ = std::process::Command::new("taskkill")
-                .args(["/F", "/PID", &nieto.to_string()])
-                .output();
-        }
-        assert!(!sobrevivio, "el nieto {nieto} quedó huérfano tras matar el grupo");
+        assert_eq!(wait, WAIT_OBJECT_0, "el nieto original {nieto} quedó vivo tras matar el grupo (wait={wait})");
     }
 }
 
