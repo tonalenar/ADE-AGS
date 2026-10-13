@@ -358,7 +358,10 @@ ${text}` : text)); setPicking(false); }} />}
           {(suggestMentions(draft, addressees).length > 0 && draft.trimStart().startsWith("@") ? suggestMentions(draft, addressees) : addressees).map((a) => (
             <button key={a.id} type="button" title={t("canvas.team.mentionHint", { name: a.name })}
               onClick={() => setDraft(`@${a.name} `)}
-              className="cc-t h-[22px] max-w-32 truncate rounded-md bg-black/[0.05] px-2 text-[11.5px] text-gray-700 hover:bg-black/[0.08] dark:bg-surface-raised dark:text-white/75 dark:hover:text-white">
+              aria-pressed={draft.trimStart().toLowerCase().startsWith(`@${a.name.toLowerCase()} `)}
+              className={`cc-t h-[22px] max-w-32 truncate rounded-md px-2 text-[11.5px] ${draft.trimStart().toLowerCase().startsWith(`@${a.name.toLowerCase()} `)
+                ? "bg-accent-500 text-white"
+                : "bg-black/[0.05] text-gray-700 hover:bg-black/[0.08] dark:bg-surface-raised dark:text-white/75 dark:hover:text-white"}`}>
               @{a.name}
             </button>
           ))}
@@ -424,7 +427,7 @@ ${text}` : text)); setPicking(false); }} />}
       </div>}
     >
       {teamView ? (teamMessages.length + teamApprovals.length + notes.length > 0
-        ? <TeamFeed messages={teamMessages} approvals={teamApprovals} notes={notes} /> : undefined)
+        ? <TeamFeed messages={teamMessages} approvals={teamApprovals} notes={notes} colors={Object.fromEntries(agents.map((a) => [a.id, agentTile(a.agentId)]))} /> : undefined)
         : current && messages.length > 0 ? <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.chat.title")}>
               {messages.map((m) => (
                 <div key={m.id} className={`flex flex-col ${m.kind === "user" ? "items-end" : "items-stretch"}`}>
