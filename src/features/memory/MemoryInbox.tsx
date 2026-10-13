@@ -15,6 +15,7 @@ import * as memoryIpc from "./ipc";
 import { ReviewMarks } from "./ReviewMarks";
 import { usePendingMemoryStore } from "./pendingStore";
 import { isDeletion } from "./bulkReview";
+import { allHinted, fetchHints, hintTone, jevApprovedIds, type JevHint } from "./jevHints";
 import { evidenceParts, reviewFlag } from "./review";
 import type { MemoryPendingCounts, MemoryReviewItem } from "./types";
 
@@ -137,6 +138,22 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
   const all = useMemo(() => flatten(groups), [groups]);
   const chosen = useMemo(() => selectedItems(groups, selected), [groups, selected]);
 
+  // O que o Jev achou de cada proposta (só mostra; quem decide é a pessoa). A consulta ao provedor roda em
+  // segundo plano quando a revisão abre, então as dicas chegam depois: tenta de novo até todas terem uma.
+  const [hints, setHints] = useState<Record<string, JevHint>>({});
+  useEffect(() => {
+    if (all.length === 0) return;
+    let alive = true;
+    const timers: number[] = [];
+    const pull = () => {
+      fetchHints(all).then((found) => { if (alive) setHints((cur) => ({ ...cur, ...found })); }).catch(() => {});
+    };
+    [400, 1500, 4000, 9000].forEach((ms) => timers.push(window.setTimeout(pull, ms)));
+    return () => { alive = false; timers.forEach((id) => window.clearTimeout(id)); };
+  }, [all]);
+  const jevApproves = useMemo(() => jevApprovedIds(all, hints), [all, hints]);
+  const hintsDone = useMemo(() => allHinted(all, hints), [all, hints]);
+
   const finish = async (o: BulkOutcome) => {
     const parts: string[] = [];
     if (o.failed.length) parts.push(t("memoryReview.failed", { keys: o.failed.join(", ") }));
@@ -209,6 +226,12 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
             className={BTN_SEC}>{t("memoryInbox.rejectAll")}</button>
           <button type="button" disabled={busy || chosen.length === 0} onClick={() => void reject(chosen)}
             className={BTN_SEC}>{t("memoryInbox.rejectSelected", { count: chosen.length })}</button>
+          {Object.keys(hints).length > 0 && (
+            <button type="button" disabled={busy || jevApproves.length === 0} onClick={() => setSelected(new Set(jevApproves))}
+              title={t("memoryInbox.jev.selectHint")} className={BTN_SEC}>
+              {t("memoryInbox.jev.select", { count: jevApproves.length })}{hintsDone ? "" : " …"}
+            </button>
+          )}
           <span className="ml-auto text-[10.5px] text-gray-500 dark:text-white/40">{t("memoryReview.note")}</span>
         </div>
 
@@ -248,6 +271,15 @@ export function MemoryInbox({ workspaceId, onClose }: { workspaceId: string; onC
                       <div className="flex items-center gap-2">
                         <input type="checkbox" className="size-3.5 accent-accent-500" checked={selected.has(id)} onChange={() => toggle(id)} aria-label={t("memoryInbox.selectItem", { key: item.key })} />
                         <span className="min-w-0 flex-1 truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-[#f5f5f7]" title={item.key}>{item.key}</span>
+                        {hints[id] && (
+                          <span title={t("memoryInbox.jev.title", { provider: hints[id].provider, confidence: hints[id].confidence === null ? "—" : Math.round((hints[id].confidence ?? 0) * 100) + "%", secret: hints[id].secret ? t("memoryInbox.jev.secretYes") : t("memoryInbox.jev.secretNo") })}
+                            data-testid="jev-hint" data-tone={hintTone(hints[id])}
+                            className={`inline-flex h-[18px] items-center rounded-full px-2 text-[10px] font-semibold ${hintTone(hints[id]) === "approve"
+                              ? "bg-emerald-500/15 text-emerald-700 dark:text-emerald-300"
+                              : hintTone(hints[id]) === "reject" ? "bg-red-500/15 text-red-700 dark:text-red-300" : "bg-gray-500/15 text-gray-600 dark:text-gray-300"}`}>
+                            {t(`memoryInbox.jev.${hints[id].action}`)}{hints[id].secret ? " · " + t("memoryInbox.jev.secret") : ""}
+                          </span>
+                        )}
                         {isDeletion(item) && <span title={t("memoryInbox.deletion")} className="inline-flex h-[18px] items-center rounded-full bg-red-600 px-2 text-[10px] font-bold text-white">{t("memoryInbox.deletion")}</span>}
                         {asksHighPriority(item) && <span role="note" aria-label={t("memoryInbox.highPriorityHint")} className="inline-flex h-[18px] items-center rounded-full bg-amber-500/25 px-2 text-[10px] font-semibold text-amber-800 ring-1 ring-amber-500/60 dark:text-amber-200" title={t("memoryInbox.highPriorityHint")}>⚠ {t("memoryInbox.highPriority", { priority: item.priority })}</span>}
                         {flag === "highValue" && <span className={`inline-flex h-[18px] items-center rounded-full px-2 text-[10px] font-semibold ${FLAG_STYLE[flag]}`}>{t(`memoryReview.flag.${flag}`)}</span>}

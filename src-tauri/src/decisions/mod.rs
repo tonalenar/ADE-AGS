@@ -7,6 +7,7 @@
 pub(crate) mod commands;
 mod config;
 mod http;
+pub(crate) mod hints;
 pub(crate) mod log;
 mod points;
 mod protocol;
