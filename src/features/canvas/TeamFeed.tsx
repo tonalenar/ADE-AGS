@@ -8,7 +8,7 @@ import { useRunsStore } from "@/features/runs/store";
 import { useMissionsStore } from "@/features/missions/store";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { dateLocale } from "@/i18n/dateLocale";
-import { buildFeed, type FeedItem, type TeamMessage, type UserNote } from "./teamFeedModel";
+import { buildFeed, isVigiaMessage, mergeMessages, type FeedItem, type TeamMessage, type UserNote } from "./teamFeedModel";
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 
@@ -21,14 +21,23 @@ export function useTeamMessages(missionId: string | null): TeamMessage[] {
     last.current = 0;
     if (!missionId) return;
     let alive = true;
+    // Uma leitura por vez: duas em voo usariam o mesmo `afterId` e trariam as mesmas linhas.
+    let inflight = false;
+    let again = false;
     const pull = () => {
+      if (inflight) { again = true; return; }
+      inflight = true;
       invoke<TeamMessage[]>("mission_messages", { missionId, afterId: last.current })
         .then((fresh) => {
           if (!alive || fresh.length === 0) return;
-          last.current = fresh[fresh.length - 1].id;
-          setMessages((all) => [...all, ...fresh]);
+          last.current = Math.max(last.current, ...fresh.map((m) => m.id));
+          setMessages((all) => mergeMessages(all, fresh));
         })
-        .catch(() => {});
+        .catch(() => {})
+        .finally(() => {
+          inflight = false;
+          if (again && alive) { again = false; pull(); }
+        });
     };
     pull();
     const off = listen("cc-peer-message", () => setTimeout(pull, 150));
@@ -91,6 +100,16 @@ export function TeamFeed({ messages, approvals, notes }: {
       );
     }
     const m = item.message;
+    if (isVigiaMessage(m)) {
+      return (
+        <div key={item.key} className="flex items-baseline gap-1.5 px-1 text-[11.5px] leading-4 text-gray-500 dark:text-white/50">
+          <span className="shrink-0 font-semibold">{t("canvas.team.vigia")}</span>
+          {m.toName && <span title={m.toName} className="max-w-[30%] shrink-0 truncate">→ {m.toName}</span>}
+          <span title={m.text} className="min-w-0 flex-1 truncate italic">{m.text}</span>
+          <span className="shrink-0 font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35">{clock(m.atMs)}</span>
+        </div>
+      );
+    }
     return (
       <div key={item.key} className="flex flex-col items-stretch">
         <div className="mb-1 flex items-center gap-1.5 text-[11.5px] leading-4">

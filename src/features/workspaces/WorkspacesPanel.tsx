@@ -141,7 +141,7 @@ function WorkspaceItem({ ws, expanded, onActivate, onOpenAgent, onWorkspaceMenu,
       <div className="flex items-center gap-2 pl-[18px]">
         <span className="flex items-center gap-1.5 min-w-0 flex-1">
           <BranchIcon className="w-3 h-3 shrink-0 text-accent-500 dark:text-accent-400" />
-          <span className="truncate font-mono text-[10px] text-gray-500 dark:text-white/45">
+          <span title={ws.branch ?? t("workspaces.noRepo")} className="truncate font-mono text-[10px] text-gray-500 dark:text-white/45">
             {ws.isWorktree && (
               <span className="text-gray-400 dark:text-white/25">worktree · </span>
             )}

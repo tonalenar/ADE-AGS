@@ -15,7 +15,7 @@ const TOOL = "cc-t flex h-[26px] w-[26px] shrink-0 items-center justify-center r
 import { unreadOf, useUnreadStore } from "./chatUnread";
 import { useActiveBoardKey, boardKeyOfTab, missionOfKey } from "./store";
 import { TeamFeed, useMissionApprovals, useTeamMessages } from "./TeamFeed";
-import { parseMention, suggestMentions, type UserNote } from "./teamFeedModel";
+import { resolveMention, suggestMentions, type UserNote } from "./teamFeedModel";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { ResponsePicker } from "./ResponsePicker";
 import { CHAT_MARGIN, clampSize, isDefaultSize, loadChatSize, resizeBy, saveChatSize, DEFAULT_CHAT_SIZE, type ChatSize, type ChatSizeState } from "./chatSize";
@@ -231,12 +231,17 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
     const typed = draft.trim();
     if (!typed || sending) return;
     // Sem @, a mensagem vai ao orquestrador; com @Nome, ao agente escolhido.
-    const mention = parseMention(typed, addressees);
-    const lead = addressees.find((a) => /^orquestrador/i.test(a.name)) ?? addressees[0];
-    const to = mention?.to ?? lead;
-    const text = mention?.text ?? typed;
-    if (!to) return AlertaToast(t("canvas.chat.title"), t("canvas.team.noAddressee"), "error", 6000);
-    if (typed.startsWith("@") && !mention) return AlertaToast(t("canvas.chat.title"), t("canvas.team.unknownMention"), "error", 6000);
+    const mention = resolveMention(typed, addressees);
+    const warn = (key: string, opts?: Record<string, string>) => AlertaToast(t("canvas.chat.title"), t(key, opts), "error", 6000);
+    if (mention.kind === "unknown") return warn("canvas.team.unknownMention");
+    if (mention.kind === "empty") return warn("canvas.team.emptyMention", { name: mention.to.name });
+    if (mention.kind === "ambiguous") return warn("canvas.team.ambiguousMention", { names: mention.names.join(", ") });
+    const lead = addressees.find((a) => /^orquestrador/i.test(a.name));
+    if (mention.kind === "none" && addressees.length === 0) return warn("canvas.team.noAddressee");
+    // Sem Orquestrador aberto não há "a quem for": não adivinha o primeiro agente.
+    if (mention.kind === "none" && !lead) return warn("canvas.team.noLead", { names: addressees.map((a) => a.name).join(", ") });
+    const to = mention.kind === "ok" ? mention.to : lead!;
+    const text = mention.kind === "ok" ? mention.text : typed;
     setSending(true);
     setDraft("");
     try {

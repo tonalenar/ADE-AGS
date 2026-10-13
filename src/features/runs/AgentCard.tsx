@@ -122,9 +122,10 @@ export function AgentCard({ task, activity, waiting = [], approval, focused, onC
               {task.title}
             </span>
           </span>
-          <span className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30">
+          <span title={task.branch ? `${task.branch}
+${task.cwd}` : task.cwd} className="truncate font-mono text-[10px] text-gray-400 dark:text-white/30">
             {task.branch ? (
-              <span title={task.cwd}>
+              <span>
                 <span className="text-violet-500 dark:text-violet-400">
                   {task.worktreeRemoved ? t("fleet.card.branchOnly") : t("fleet.card.worktree")}
                 </span>{" "}
