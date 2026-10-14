@@ -158,6 +158,7 @@ pub fn run() {
             crate::ipc::commands::routine::routine_set_catch_up,
             crate::ipc::commands::routine::routine_run_now,
             crate::ipc::commands::routine::routine_remove,
+            crate::ipc::commands::routine::routine_create_ui,
             // Chat con los agentes, por hilos
             crate::ipc::commands::chat::chat_history,
             crate::ipc::commands::chat::chat_send,

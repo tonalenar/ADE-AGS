@@ -313,6 +313,13 @@
 .ags-hq__item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ags-hq__dim { color: var(--hq-dim); }
 
+.ags-hq__sec { margin: 14px 0 6px; font-size: 10px; letter-spacing: 0.14em; color: var(--hq-yellow); }
+.ags-hq__conv { grid-template-columns: 18px 1fr auto auto; }
+.ags-hq__conv-main { display: grid; min-width: 0; }
+.ags-hq__conv-sum { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 10px; color: var(--hq-dim); }
+.ags-hq__pill { font-size: 9px; letter-spacing: 0.1em; padding: 1px 6px; border: 1px solid var(--hq-green); border-radius: 3px; color: var(--hq-green); }
+.ags-hq__pill--saved { border-color: var(--hq-line-2); color: var(--hq-dim); }
+
 .ags-hq__detail { margin-top: 12px; border-top: 1px dashed var(--hq-line-2); padding-top: 12px; }
 .ags-hq__row { display: grid; grid-template-columns: 130px 1fr 80px; gap: 10px; align-items: center; margin-bottom: 8px; font-size: 10px; }
 .ags-hq__row .ags-hq__meter { margin-top: 0; }

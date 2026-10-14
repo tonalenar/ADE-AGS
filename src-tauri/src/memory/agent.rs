@@ -164,6 +164,20 @@ pub fn propose_for_mission(conn: &Connection, p: &AgentProposal<'_>) -> Result<P
     let (workspace_id,): (String,) = conn
         .query_row("SELECT workspace_id FROM missions WHERE id = ?1", [p.mission_id], |r| Ok((r.get(0)?,)))
         .map_err(|_| format!("Não existe a missão {}.", p.mission_id))?;
+    propose_in(conn, &workspace_id, Some(p.mission_id), p)
+}
+
+/// Propõe uma memória do PROJETO a partir de uma conversa (sem missão): vale só o escopo `workspace`,
+/// que é o do projeto onde o agente está. Fica pendente, como qualquer proposta de agente.
+pub fn propose_for_workspace(conn: &Connection, workspace_id: &str, p: &AgentProposal<'_>) -> Result<ProposalResult, String> {
+    if p.scope != "workspace" {
+        return Err("Fora de uma missão só existe o escopo 'workspace' (memória do projeto): use --scope workspace.".into());
+    }
+    propose_in(conn, workspace_id, None, p)
+}
+
+fn propose_in(conn: &Connection, workspace_id: &str, mission: Option<&str>, p: &AgentProposal<'_>) -> Result<ProposalResult, String> {
+    let workspace_id = workspace_id.to_string();
     let scope = match p.scope {
         "workspace" | "mission" => p.scope,
         other => return Err(format!("O escopo '{other}' não existe. Use 'workspace' (vale para o projeto) ou 'mission'.")),
@@ -171,13 +185,13 @@ pub fn propose_for_mission(conn: &Connection, p: &AgentProposal<'_>) -> Result<P
     if looks_like_secret(p.body) || looks_like_secret(p.key) {
         return Err("A proposta parece conter uma credencial (chave, token ou senha). Memória não guarda segredos: reescreva sem o valor.".into());
     }
-    let short: String = p.mission_id.chars().take(8).collect();
+    let short: String = mission.unwrap_or("").chars().take(8).collect();
     // Mesma chave já ativa: a proposta é uma CORREÇÃO (update) da revisão atual, não um erro
     // "a chave já existe". Antes o agente não tinha como corrigir uma memória desatualizada.
     let current: Option<i64> = conn
         .query_row(
             "SELECT current_revision FROM memory_entries WHERE workspace_id=?1 AND scope=?2 AND key=?3 AND status='active' AND current_revision IS NOT NULL AND (?2='workspace' OR mission_id=?4)",
-            rusqlite::params![workspace_id, scope, p.key, p.mission_id],
+            rusqlite::params![workspace_id, scope, p.key, mission.unwrap_or("")],
             |r| r.get(0),
         )
         .ok();
@@ -190,14 +204,14 @@ pub fn propose_for_mission(conn: &Connection, p: &AgentProposal<'_>) -> Result<P
         operation: if current.is_some() { "update".into() } else { "create".into() },
         expected_revision: current,
         source_fact_id: None,
-        reason: Some(format!("Proposta de {} na missão {short}", p.author_name)),
+        reason: Some(if mission.is_some() { format!("Proposta de {} na missão {short}", p.author_name) } else { format!("Proposta de {} numa conversa do projeto", p.author_name) }),
         acknowledge_secret: false,
     };
     propose(
         conn,
         scope,
         &workspace_id,
-        if scope == "mission" { Some(p.mission_id) } else { None },
+        if scope == "mission" { mission } else { None },
         &input,
         ProposalActor { kind: p.author.kind(), run_id: None, task_id: None, fact_id: None },
     )

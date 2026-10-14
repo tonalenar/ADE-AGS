@@ -15,7 +15,7 @@ use std::collections::HashSet;
 use std::sync::Mutex;
 use std::time::Duration;
 
-use chrono::Local;
+use chrono::{DateTime, Local};
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
@@ -263,12 +263,6 @@ pub(super) fn routine_create(app: &AppHandle, args: &Value) -> Result<Value, Str
 
     let now = Local::now();
     let created = routines::update(|all| {
-        if all.len() >= routines::MAX_ROUTINES {
-            return Err(format!("Já há {} rotinas, o máximo. Apague alguma com `ags routine delete`.", routines::MAX_ROUTINES));
-        }
-        if all.iter().any(|r| r.name.to_lowercase() == name.to_lowercase()) {
-            return Err(format!("Já existe uma rotina chamada '{name}'."));
-        }
         let routine = Routine {
             id: routines::new_id(),
             name: name.clone(),
@@ -285,11 +279,115 @@ pub(super) fn routine_create(app: &AppHandle, args: &Value) -> Result<Value, Str
             catch_up: flag(args, "catch-up") && !matches!(schedule, routines::Schedule::Every { .. }),
             missed_at: None,
         };
-        all.push(routine.clone());
-        Ok(routine)
+        insert_new(all, routine)
     })?;
     changed(app);
     Ok(json!({ "created": describe(&created) }))
+}
+
+/// Põe uma rotina nova na lista, respeitando o limite e o nome único (sem maiúsculas).
+fn insert_new(all: &mut Vec<Routine>, routine: Routine) -> Result<Routine, String> {
+    if all.len() >= routines::MAX_ROUTINES {
+        return Err(format!("Já há {} rotinas, o máximo. Apague alguma antes.", routines::MAX_ROUTINES));
+    }
+    if all.iter().any(|r| r.name.to_lowercase() == routine.name.to_lowercase()) {
+        return Err(format!("Já existe uma rotina chamada '{}'.", routine.name));
+    }
+    all.push(routine.clone());
+    Ok(routine)
+}
+
+/// O horário que veio da tela: as mesmas regras que a linha de comandos (`build_schedule`).
+fn validate_schedule(schedule: routines::Schedule, now: DateTime<Local>) -> Result<routines::Schedule, String> {
+    use routines::Schedule;
+    match schedule {
+        Schedule::Every { secs } if secs < routines::MIN_EVERY_SECS => Err("O intervalo mínimo é de 5 minutos.".into()),
+        Schedule::Every { secs } => Ok(Schedule::Every { secs }),
+        Schedule::Daily { hour, minute, mut days } => {
+            if hour > 23 || minute > 59 {
+                return Err("Horário inválido (00:00 a 23:59).".into());
+            }
+            if days.iter().any(|d| *d > 6) {
+                return Err("Dia inválido: use 0 (segunda) a 6 (domingo).".into());
+            }
+            days.sort_unstable();
+            days.dedup();
+            Ok(Schedule::Daily { hour, minute, days })
+        }
+        Schedule::Once { at } => {
+            if at < now.timestamp() + routines::MIN_IN_SECS {
+                return Err("Escolha um horário no futuro (com pelo menos 1 minuto de folga).".into());
+            }
+            Ok(Schedule::Once { at })
+        }
+    }
+}
+
+/// `creator` de quem cria pela tela: não é um agente, então nenhum agente a "possui".
+const USER_CREATOR: &str = "usuario";
+
+/// Monta uma rotina criada pelo usuário na tela. `target` = (id, nome) da aba que recebe,
+/// ou `None` para um lembrete para ele.
+fn user_routine(
+    name: String,
+    text: String,
+    schedule: routines::Schedule,
+    target: Option<(String, String)>,
+    catch_up: bool,
+    now: DateTime<Local>,
+) -> Routine {
+    let catch_up = catch_up && !matches!(schedule, routines::Schedule::Every { .. });
+    let (target_tab, target_name) = match target {
+        Some((id, name)) => (Some(id), name),
+        None => (None, String::new()),
+    };
+    Routine {
+        id: routines::new_id(),
+        name,
+        text,
+        target_tab,
+        target_name,
+        creator: USER_CREATOR.into(),
+        next_run: routines::next_run(&schedule, now).map(|t| t.timestamp()),
+        schedule,
+        enabled: true,
+        last_run: None,
+        last_result: String::new(),
+        runs: 0,
+        catch_up,
+        missed_at: None,
+    }
+}
+
+/// Cria uma rotina pela tela (o usuário). `target_tab` = `None` é um lembrete para ele.
+/// `async`: lista as abas, que pedem ao frontend.
+#[tauri::command(async)]
+pub fn routine_create_ui(
+    app: AppHandle,
+    name: String,
+    text: String,
+    schedule: routines::Schedule,
+    target_tab: Option<String>,
+    catch_up: bool,
+) -> Result<Routine, String> {
+    let now = Local::now();
+    let name = routines::clean_name(&name)?;
+    let text = routines::clean_text(&text)?;
+    let schedule = validate_schedule(schedule, now)?;
+    let target = match target_tab.filter(|t| !t.trim().is_empty()) {
+        None => None,
+        Some(id) => {
+            let tab = open_tabs(&app)?
+                .into_iter()
+                .find(|t| t.id == id)
+                .ok_or("A aba escolhida não está mais aberta. Escolha outra ou use só lembrete.")?;
+            Some((tab.id, tab.name))
+        }
+    };
+    let routine = user_routine(name, text, schedule, target, catch_up, now);
+    let created = routines::update(|all| insert_new(all, routine))?;
+    changed(&app);
+    Ok(created)
 }
 
 pub(super) fn routine_edit(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -521,5 +619,58 @@ mod test {
         let err = apply_enabled(&mut r, true, now).unwrap_err();
         assert!(err.contains("já passou"), "{err}");
         assert!(!r.enabled);
+    }
+
+    #[test]
+    fn routine_ui_valida_o_horario_como_a_cli() {
+        let now = Local.with_ymd_and_hms(2026, 10, 5, 12, 0, 0).earliest().unwrap();
+        assert!(validate_schedule(Schedule::Every { secs: 299 }, now).is_err(), "mínimo de 5 min");
+        assert!(validate_schedule(Schedule::Every { secs: 300 }, now).is_ok());
+        assert!(validate_schedule(Schedule::Daily { hour: 24, minute: 0, days: vec![] }, now).is_err());
+        assert!(validate_schedule(Schedule::Daily { hour: 9, minute: 60, days: vec![] }, now).is_err());
+        assert!(validate_schedule(Schedule::Daily { hour: 9, minute: 0, days: vec![7] }, now).is_err());
+        let ok = validate_schedule(Schedule::Daily { hour: 9, minute: 0, days: vec![4, 0, 4] }, now).unwrap();
+        assert_eq!(ok, Schedule::Daily { hour: 9, minute: 0, days: vec![0, 4] }, "ordena e tira repetidos");
+        assert!(validate_schedule(Schedule::Once { at: now.timestamp() + 30 }, now).is_err(), "folga de 1 min");
+        assert!(validate_schedule(Schedule::Once { at: now.timestamp() - 60 }, now).is_err(), "no passado");
+        assert!(validate_schedule(Schedule::Once { at: now.timestamp() + 600 }, now).is_ok());
+    }
+
+    #[test]
+    fn routine_ui_monta_lembrete_ou_agente_sem_criador_agente() {
+        let now = Local.with_ymd_and_hms(2026, 10, 5, 12, 0, 0).earliest().unwrap();
+        let lembrete = user_routine("Água".into(), "beba".into(), Schedule::Once { at: now.timestamp() + 600 }, None, true, now);
+        assert_eq!(lembrete.target_tab, None);
+        assert_eq!(lembrete.target_name, "");
+        assert_eq!(lembrete.creator, USER_CREATOR);
+        assert!(lembrete.catch_up, "uma vez aceita recuperar");
+        assert!(lembrete.enabled && lembrete.next_run == Some(now.timestamp() + 600));
+
+        let agente = user_routine(
+            "Testes".into(),
+            "rode os testes".into(),
+            Schedule::Every { secs: 600 },
+            Some(("t1".into(), "Claude A".into())),
+            true,
+            now,
+        );
+        assert_eq!(agente.target_tab.as_deref(), Some("t1"));
+        assert_eq!(agente.target_name, "Claude A");
+        assert!(!agente.catch_up, "intervalo nunca recupera, mesmo que peçam");
+        assert!(!can_manage(&tab("a1", "claude"), &agente), "a tela gerencia, e o criador não é um agente");
+    }
+
+    #[test]
+    fn insert_new_respeita_limite_e_nome_unico() {
+        let now = Local.with_ymd_and_hms(2026, 10, 5, 12, 0, 0).earliest().unwrap();
+        let mk = |name: &str| user_routine(name.into(), "x".into(), Schedule::Every { secs: 600 }, None, false, now);
+        let mut all = vec![mk("Testes")];
+        let dup = insert_new(&mut all, mk("TESTES")).unwrap_err();
+        assert!(dup.contains("Já existe"), "{dup}");
+        for i in 1..routines::MAX_ROUTINES {
+            insert_new(&mut all, mk(&format!("r{i}"))).unwrap();
+        }
+        assert_eq!(all.len(), routines::MAX_ROUTINES);
+        assert!(insert_new(&mut all, mk("mais uma")).unwrap_err().contains("máximo"));
     }
 }

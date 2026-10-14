@@ -4,6 +4,16 @@
  */
 import type { PendingApproval } from "@/features/runs/types";
 
+import type { PermissionPrompt } from "./terminalPrompts";
+
+/** Um pedido de permissão aberto no terminal de um agente (ver `useTerminalPrompts`). */
+export interface TerminalPromptItem {
+  tabId: string;
+  who: string;
+  prompt: PermissionPrompt;
+  atMs: number;
+}
+
 /** Uma mensagem entre dois agentes (`mission_messages`). */
 export interface TeamMessage {
   id: number;
@@ -20,6 +30,8 @@ export interface TeamMessage {
 export type FeedItem =
   | { type: "message"; key: string; atMs: number; message: TeamMessage }
   | { type: "approval"; key: string; atMs: number; approval: PendingApproval; who: string }
+  /** Um pedido de permissão que o TUI de um agente está mostrando agora no terminal dele. */
+  | { type: "prompt"; key: string; atMs: number; tabId: string; who: string; prompt: PermissionPrompt }
   /** O que a pessoa mandou a um agente por este chat. */
   | { type: "user"; key: string; atMs: number; toName: string; text: string };
 
@@ -110,7 +122,7 @@ export function mergeMessages(all: TeamMessage[], fresh: TeamMessage[]): TeamMes
 }
 
 /** Mensagens e pedidos de permissão em ordem de chegada. Pura. */
-export function buildFeed(messages: TeamMessage[], approvals: { approval: PendingApproval; who: string }[], notes: UserNote[] = []): FeedItem[] {
+export function buildFeed(messages: TeamMessage[], approvals: { approval: PendingApproval; who: string }[], notes: UserNote[] = [], prompts: TerminalPromptItem[] = []): FeedItem[] {
   const items: FeedItem[] = [
     ...messages.map((message): FeedItem => ({ type: "message", key: `m${message.id}`, atMs: message.atMs, message })),
     ...approvals.map(({ approval, who }): FeedItem => ({
@@ -121,6 +133,7 @@ export function buildFeed(messages: TeamMessage[], approvals: { approval: Pendin
       approval,
       who,
     })),
+    ...prompts.map((p): FeedItem => ({ type: "prompt", key: `p${p.tabId}`, atMs: p.atMs, tabId: p.tabId, who: p.who, prompt: p.prompt })),
     ...notes.map((n): FeedItem => ({ type: "user", key: n.key, atMs: n.atMs, toName: n.toName, text: n.text })),
   ];
   return items.sort((a, b) => a.atMs - b.atMs || a.key.localeCompare(b.key));
@@ -131,9 +144,9 @@ export type FeedFilter = "all" | "approvals" | `agent:${string}`;
 
 export function filterFeed(items: FeedItem[], filter: FeedFilter): FeedItem[] {
   if (filter === "all") return items;
-  if (filter === "approvals") return items.filter((i) => i.type === "approval");
+  if (filter === "approvals") return items.filter((i) => i.type === "approval" || i.type === "prompt");
   const name = filter.slice("agent:".length);
-  return items.filter((i) => (i.type === "message" ? i.message.fromName === name || i.message.toName === name : i.type === "user" ? i.toName === name : false));
+  return items.filter((i) => (i.type === "message" ? i.message.fromName === name || i.message.toName === name : i.type === "user" ? i.toName === name : i.type === "prompt" ? i.who === name : false));
 }
 
 /** Os nomes que aparecem nas mensagens (na ordem em que surgem) e quantos pedidos esperam. Pura. */
@@ -141,7 +154,7 @@ export function feedFilterOptions(items: FeedItem[]): { names: string[]; approva
   const names: string[] = [];
   let approvals = 0;
   for (const item of items) {
-    if (item.type === "approval") approvals += 1;
+    if (item.type === "approval" || item.type === "prompt") approvals += 1;
     else if (item.type === "message") for (const n of [item.message.fromName, item.message.toName]) if (!names.includes(n)) names.push(n);
   }
   return { names, approvals };

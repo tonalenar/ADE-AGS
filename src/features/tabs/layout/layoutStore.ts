@@ -6,7 +6,7 @@ import { comparablePath } from "@/features/tabs/viewTabs";
 
 import { gridPlacements, useMissionGrid } from "@/features/canvas/gridMode";
 import { gridTabs } from "@/features/canvas/gridMode";
-import { boardKeyOfTab, missionOfKey, useCanvasStore, useWorkMode, type WorkMode } from "@/features/canvas/store";
+import { boardKeyOfTab, conversationOfKey, missionOfKey, useCanvasStore, useWorkMode, type WorkMode } from "@/features/canvas/store";
 import {
   activate, agentKey, allGroups, closeGroup, createLayout, findGroup, focusGroup as focusInTree, isAgentKey, keyId,
   moveItem, parseLayout, reconcile, resize, split, viewKey, type SplitSide, type WorkspaceLayout,
@@ -436,7 +436,7 @@ export function currentPlacements(): Placements {
   const key = active ? boardKeyOfTab(active, canvas.boards) : null;
   const mode: WorkMode = key ? canvas.modes[key] ?? "tabs" : "tabs";
   const tabIds = key ? tabs.filter((t) => boardKeyOfTab(t, canvas.boards) === key).map((t) => t.id) : [];
-  const grid = activeViewId != null ? null : gridTabs({ on: key ? !!canvas.grids[key] : false, mission: missionOfKey(key), mode, tabIds });
+  const grid = activeViewId != null ? null : gridTabs({ on: key ? !!canvas.grids[key] : false, mission: missionOfKey(key) ?? conversationOfKey(key), mode, tabIds });
   return placementsFrom({ layout, slots, activeTabId, activeViewId, mode, liveRects: canvas.liveRects, grid });
 }
 

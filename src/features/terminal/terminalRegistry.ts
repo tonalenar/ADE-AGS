@@ -234,6 +234,14 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRet
   return true;
 }
 
+/** Escribe teclas cruas na terminal da tab (ex.: "1" ou Esc para responder a um menu do TUI). `false` se não há terminal viva. */
+export function sendKeysToTab(tabId: string, keys: string): boolean {
+  const term = terminals.get(tabId);
+  if (!term) return false;
+  term.input(keys);
+  return true;
+}
+
 /** Cuándo (ms tras pegar) se vuelve a mirar si el pegado quedó sin enviar. */
 export const SUBMIT_RETRY_MS = [900, 2200, 4500, 8000, 12_000, 18_000, 25_000, 35_000, 50_000];
 

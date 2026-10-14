@@ -8,7 +8,8 @@ import { useRunsStore } from "@/features/runs/store";
 import { useMissionsStore } from "@/features/missions/store";
 import { ChatMarkdown } from "./ChatMarkdown";
 import { dateLocale } from "@/i18n/dateLocale";
-import { buildFeed, feedFilterOptions, filterFeed, formatMessageText, parseVigiaText, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, type FeedFilter, type FeedItem, type TeamMessage, type UserNote } from "./teamFeedModel";
+import { buildFeed, feedFilterOptions, filterFeed, formatMessageText, parseVigiaText, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, type FeedFilter, type FeedItem, type TeamMessage, type TerminalPromptItem, type UserNote } from "./teamFeedModel";
+import { answerTerminalPrompt } from "./useTerminalPrompts";
 
 const clock = (ms: number) => new Date(ms).toLocaleTimeString(dateLocale(), { hour: "2-digit", minute: "2-digit" });
 
@@ -138,8 +139,9 @@ export function useTeamFeed(
   messages: TeamMessage[],
   approvals: { approval: import("@/features/runs/types").PendingApproval; who: string }[],
   notes: UserNote[],
+  prompts: TerminalPromptItem[] = [],
 ) {
-  const all = useMemo(() => buildFeed(messages, approvals, notes), [messages, approvals, notes]);
+  const all = useMemo(() => buildFeed(messages, approvals, notes, prompts), [messages, approvals, notes, prompts]);
   const [filter, setFilter] = useState<FeedFilter>("all");
   // Outra missão, outros nomes: o filtro de um agente da anterior não vale.
   useEffect(() => setFilter("all"), [missionId]);
@@ -187,6 +189,7 @@ export function TeamFeed({ items, colors = {} }: {
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => { bottom.current?.scrollIntoView({ block: "end" }); }, [items.length]);
   const firstApproval = items.find((i) => i.type === "approval")?.key;
+  const [answered, setAnswered] = useState<Record<string, string>>({});
 
   const render = (item: FeedItem, index: number) => {
     if (item.type === "user") {
@@ -195,6 +198,34 @@ export function TeamFeed({ items, colors = {} }: {
           <span className="mb-1 text-[11px] text-gray-500 dark:text-white/50">{t("canvas.team.you", { name: item.toName })}</span>
           <div className="max-w-[85%] whitespace-pre-wrap break-words rounded-2xl bg-accent-500 px-3.5 py-2 text-[13px] leading-[19px] text-white">{item.text}</div>
           <span className="mt-1 font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35">{clock(item.atMs)}</span>
+        </div>
+      );
+    }
+    if (item.type === "prompt") {
+      const done = answered[item.key + item.prompt.signature];
+      return (
+        <div key={item.key} className="rounded-xl border border-amber-500/40 bg-amber-500/[0.06] p-3">
+          <div className="mb-1.5 flex items-center gap-1.5 text-[11.5px] font-semibold text-amber-700 dark:text-amber-300">
+            <span title={item.who} className="truncate">{t("canvas.team.permission", { who: item.who })}</span>
+            <span className="ml-auto font-mono text-[11px] font-normal tabular-nums text-gray-400 dark:text-white/35">{clock(item.atMs)}</span>
+          </div>
+          <p className="text-[13px] font-medium leading-[18px] text-gray-900 dark:text-[#f5f5f7]">{item.prompt.title}</p>
+          {item.prompt.detail && (
+            <pre className="mt-1.5 max-h-40 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-black/[0.05] px-2.5 py-2 font-mono text-[11.5px] leading-[17px] text-gray-700 dark:bg-white/[0.06] dark:text-white/75">{item.prompt.detail}</pre>
+          )}
+          <div className="mt-2.5 flex flex-wrap gap-1.5">
+            {item.prompt.choices.map((choice) => (
+              <button key={choice.id} type="button" disabled={!!done}
+                onClick={() => { if (answerTerminalPrompt(item.tabId, choice)) setAnswered((all) => ({ ...all, [item.key + item.prompt.signature]: choice.id })); }}
+                className={`cc-t h-7 rounded-lg px-3 text-[12px] font-medium disabled:opacity-50 ${choice.id === "allow"
+                  ? "bg-accent-500 text-white hover:bg-accent-600"
+                  : choice.id === "deny"
+                    ? "bg-red-500/15 text-red-600 hover:bg-red-500/25 dark:text-red-300"
+                    : "bg-black/[0.06] text-gray-700 hover:bg-black/[0.1] dark:bg-white/[0.08] dark:text-white/80 dark:hover:bg-white/[0.14]"}`}>
+                {t(`canvas.team.prompt.${choice.id}`)}
+              </button>
+            ))}
+          </div>
         </div>
       );
     }

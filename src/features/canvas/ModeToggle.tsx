@@ -2,7 +2,7 @@ import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
-import { missionOfKey, setMissionGrid, setWorkMode, useActiveBoardKey, useCanvasStore, useWorkMode, type WorkMode } from "./store";
+import { conversationOfKey, missionOfKey, setMissionGrid, setWorkMode, useActiveBoardKey, useCanvasStore, useWorkMode, type WorkMode } from "./store";
 
 /** Abas ou canvas, para la carpeta del agente activo. Vive en la barra de tabs. */
 export function ModeToggle() {
@@ -13,7 +13,7 @@ export function ModeToggle() {
   const grid = useCanvasStore((s) => (key ? !!s.grids[key] : false));
   if (!key) return null;
   // La grade es de una misión y de la vista de abas: individual, no global.
-  const gridable = mode === "tabs" && missionOfKey(key) !== null;
+  const gridable = mode === "tabs" && (missionOfKey(key) !== null || conversationOfKey(key) !== null);
 
   const option = (value: WorkMode, label: string) => (
     <Button variant="custom"

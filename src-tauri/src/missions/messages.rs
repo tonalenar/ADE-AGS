@@ -6,7 +6,7 @@
 
 use rusqlite::{params, Connection};
 
-use crate::canvas::{mission_of_tab, Boards};
+use crate::canvas::{team_scope_of_tab, Boards};
 
 /// Quantas mensagens ficam por missão.
 const KEEP: i64 = 2_000;
@@ -83,8 +83,9 @@ fn record_inner(
     if !matches!(kind, "tell" | "ask") || text.trim().is_empty() || (from.0 == to.0 && !notice) {
         return Ok(false);
     }
-    let Some(mission) = mission_of_tab(boards, from.0) else { return Ok(false) };
-    if mission_of_tab(boards, to.0).as_deref() != Some(mission.as_str()) {
+    // O chat da equipe vale para uma missão e também para uma conversa de projeto (`c:<id>`).
+    let Some(mission) = team_scope_of_tab(boards, from.0) else { return Ok(false) };
+    if team_scope_of_tab(boards, to.0).as_deref() != Some(mission.as_str()) {
         return Ok(false);
     }
     migrate(conn).map_err(|e| e.to_string())?;

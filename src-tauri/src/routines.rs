@@ -36,7 +36,7 @@ const MAX_NAME: usize = 40;
 /// O menor intervalo de uma rotina que se repete.
 pub const MIN_EVERY_SECS: i64 = 5 * 60;
 /// O menor prazo de um lembrete único.
-const MIN_IN_SECS: i64 = 60;
+pub const MIN_IN_SECS: i64 = 60;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "camelCase")]

@@ -216,10 +216,12 @@ fn memory_mission_in_boards(args: &Value, boards: &crate::canvas::Boards) -> Res
 pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, String> {
     use crate::memory::agent::{author_of, propose_for_mission, AgentProposal};
 
-    let mission = memory_caller_mission(args)?;
+    // Numa missão, a proposta é da missão; numa conversa de projeto (sem missão) vale para o projeto.
+    let caller_tab = authenticated_tab(args)?;
+    let mission = memory_caller_mission(args).ok();
     let key = arg_str(args, "key")?;
     let body = arg_str(args, "body")?;
-    let scope = arg_str_opt(args, "scope").unwrap_or_else(|| "mission".into());
+    let scope = arg_str_opt(args, "scope").unwrap_or_else(|| if mission.is_some() { "mission".into() } else { "workspace".into() });
     let kind = arg_str_opt(args, "kind").unwrap_or_else(|| "note".into());
     let priority = args.get("priority").and_then(Value::as_i64).unwrap_or(0);
 
@@ -234,15 +236,26 @@ pub(super) fn memory_suggest(app: &AppHandle, args: &Value) -> Result<Value, Str
     let db = db(app)?;
     let result = {
         let conn = db.lock().map_err(|e| e.to_string())?;
-        propose_for_mission(
-            &conn,
-            &AgentProposal { mission_id: &mission, scope: &scope, key: &key, kind: &kind, body: &body, priority, author, author_name: &name },
-        )?
+        match &mission {
+            Some(mission) => propose_for_mission(
+                &conn,
+                &AgentProposal { mission_id: mission, scope: &scope, key: &key, kind: &kind, body: &body, priority, author, author_name: &name },
+            )?,
+            None => {
+                let (workspace, _) = workspace_for_caller(&conn, &caller_tab)?;
+                crate::memory::agent::propose_for_workspace(
+                    &conn,
+                    &workspace,
+                    &AgentProposal { mission_id: "", scope: &scope, key: &key, kind: &kind, body: &body, priority, author, author_name: &name },
+                )?
+            }
+        }
     };
     crate::memory::notify_changed(app);
     let draft_warning = if result.status == "agent_draft" {
         let conn=db.lock().map_err(|e|e.to_string())?;
-        let count:i64=conn.query_row("SELECT COUNT(*) FROM memory_agent_drafts WHERE workspace_id=(SELECT workspace_id FROM missions WHERE id=?1)",[&mission],|r|r.get(0)).map_err(|e|e.to_string())?;
+        let (workspace, _) = workspace_for_caller(&conn, &caller_tab)?;
+        let count:i64=conn.query_row("SELECT COUNT(*) FROM memory_agent_drafts WHERE workspace_id=?1",[&workspace],|r|r.get(0)).map_err(|e|e.to_string())?;
         let warning=format!("Memória: {count} rascunhos de agente aguardam revisão do usuário; a caixa de 32 pendências está cheia.");
         let app=app.clone();let from=from.clone();let notice=warning.clone();
         tauri::async_runtime::spawn_blocking(move || {
