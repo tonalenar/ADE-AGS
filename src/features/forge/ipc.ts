@@ -13,6 +13,11 @@ import type {
 export const forgeKinds = () => invoke<ForgeKindInfo[]>("forge_kinds");
 export const forgeOauthAvailable = (kind: ForgeKind, host: string) =>
   invoke<boolean>("forge_oauth_available", { kind, host });
+/** Qual aplicativo OAuth o login pelo navegador usa: o do usuário (`custom`) ou o embutido. */
+export interface OauthClient { clientId: string; custom: boolean }
+export const forgeOauthClient = (kind: ForgeKind) => invoke<OauthClient>("forge_oauth_client", { kind });
+export const forgeOauthSetClient = (kind: ForgeKind, clientId: string | null) =>
+  invoke<OauthClient>("forge_oauth_set_client", { kind, clientId });
 export const forgeAccounts = () => invoke<GitAccount[]>("forge_accounts");
 export const forgeDeviceStart = (kind: ForgeKind, host: string) =>
   invoke<DeviceStart>("forge_device_start", { kind, host });

@@ -245,6 +245,8 @@ pub fn run() {
             // Cuentas de git (GitHub, GitLab, Gitea…): repos, clonar, PRs e issues
             crate::forge::forge_kinds,
             crate::forge::forge_oauth_available,
+            crate::forge::forge_oauth_client,
+            crate::forge::forge_oauth_set_client,
             crate::forge::forge_accounts,
             crate::forge::forge_device_start,
             crate::forge::forge_device_poll,

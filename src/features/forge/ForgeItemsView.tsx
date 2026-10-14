@@ -1,13 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AddIcon, Badge, Button, EmptyState, Skeleton, Tooltip } from "neogestify-ui-components";
+import { AddIcon, Badge, Button, CheckIcon, EmptyState, Skeleton, Tooltip } from "neogestify-ui-components";
 
 import { IssueIcon, PullRequestIcon, RefreshIcon } from "@/app/icons";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
 
 import { CreateIssueDialog } from "./CreateIssueDialog";
 import { CreatePullDialog } from "./CreatePullDialog";
-import { ForgeIcon } from "./forgeMeta";
+import { ForgeIcon, forgeLabel } from "./forgeMeta";
 import { forgeIssues, forgePulls } from "./ipc";
 import { SignInButton } from "./SignInButton";
 import { forgeErrorOf, type ForgeError, type ForgeItem, type RepoTarget } from "./types";
@@ -24,14 +24,44 @@ const STATE_CLASS: Record<string, string> = {
 export function ForgeErrorView({ error, target }: { error: ForgeError; target: RepoTarget }) {
   const { t } = useTranslation();
   if (error.kind === "noAccount" || error.kind === "auth") {
+    const isAuth = error.kind === "auth";
+    const provider = target.kind && target.kind !== "other" ? forgeLabel(target.kind, t) : target.host;
+    const benefits = ["forge.panel.benefitView", "forge.panel.benefitCreate", "forge.panel.benefitGit"];
     return (
-      <EmptyState
-        className="m-auto px-4"
-        icon={<ForgeIcon kind={target.kind} className="w-8 h-8" />}
-        title={t(error.kind === "auth" ? "forge.error.auth" : "forge.error.noAccount", { host: target.host })}
-        description={error.kind === "auth" ? error.message : t("forge.error.noAccountDesc")}
-        action={<SignInButton target={target} />}
-      />
+      <div className="flex flex-1 min-h-0 items-center justify-center overflow-y-auto cc-scroll p-6">
+        <section className="w-full max-w-[28rem] flex flex-col items-center text-center gap-4">
+          <span className="flex items-center justify-center w-16 h-16 rounded-2xl bg-gray-100 dark:bg-white/6 text-gray-700 dark:text-white/80">
+            <ForgeIcon kind={target.kind} className="w-8 h-8" />
+          </span>
+          <h2 className="text-[15px] font-bold leading-snug text-gray-900 dark:text-white">
+            {isAuth ? t("forge.panel.renewTitle", { host: target.host }) : t("forge.panel.connectTitle", { provider })}
+          </h2>
+          <p className="text-[12.5px] leading-relaxed text-gray-500 dark:text-white/50">
+            {isAuth ? t("forge.panel.renewDesc") : t("forge.panel.connectDesc")}
+          </p>
+          {isAuth && error.message && (
+            <p className="w-full px-3 py-2 rounded-lg text-left font-mono text-[11px] leading-relaxed break-words
+              bg-gray-100 dark:bg-white/5 text-gray-500 dark:text-white/45">
+              {error.message}
+            </p>
+          )}
+          {!isAuth && (
+            <ul className="w-full flex flex-col gap-2.5 p-4 rounded-xl text-left
+              border border-gray-200 dark:border-white/8 bg-gray-50/70 dark:bg-white/3">
+              {benefits.map((key) => (
+                <li key={key} className="flex items-start gap-2.5 text-[12.5px] leading-snug text-gray-700 dark:text-white/75">
+                  <CheckIcon className="w-4 h-4 mt-px shrink-0 text-emerald-500 dark:text-emerald-400" />
+                  {t(key)}
+                </li>
+              ))}
+            </ul>
+          )}
+          <SignInButton target={target} size="md" label={t("forge.panel.signInWith", { provider })} />
+          <p className="text-[11px] leading-relaxed text-gray-400 dark:text-white/35">
+            {t("forge.panel.tokenHint")}
+          </p>
+        </section>
+      </div>
     );
   }
   return (

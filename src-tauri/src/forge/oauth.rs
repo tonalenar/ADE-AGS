@@ -48,22 +48,94 @@ const GITHUB_SCOPES: &str = "repo read:org workflow";
 const GITLAB_SCOPES: &str = "api read_user write_repository";
 
 struct Endpoints {
-    client_id: &'static str,
+    client_id: String,
     device: &'static str,
     token: &'static str,
     scopes: &'static str,
 }
 
+/// O Client ID que o usuário fixou para o próprio aplicativo OAuth (um arquivo local: o ID não é segredo).
+/// Sem isso vale o embutido na compilação, que é do aplicativo OAuth de quem publicou o projeto original.
+fn override_path() -> Option<std::path::PathBuf> {
+    dirs::home_dir().map(|home| home.join(".ags").join("forge-oauth.json"))
+}
+
+fn read_overrides() -> serde_json::Map<String, Value> {
+    override_path()
+        .and_then(|path| std::fs::read_to_string(path).ok())
+        .and_then(|raw| serde_json::from_str::<Value>(&raw).ok())
+        .and_then(|value| value.as_object().cloned())
+        .unwrap_or_default()
+}
+
+fn kind_key(kind: ForgeKind) -> Option<&'static str> {
+    match kind {
+        ForgeKind::Github => Some("github"),
+        ForgeKind::Gitlab => Some("gitlab"),
+        _ => None,
+    }
+}
+
+/// Um Client ID plausível: letras, números e `._-`, sem espaços nem aspas (vai num corpo de formulário).
+pub fn valid_client_id(id: &str) -> bool {
+    (10..=120).contains(&id.len()) && id.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '_' | '-'))
+}
+
+/// O Client ID em uso: o do usuário, se houver, senão o embutido.
+fn client_id(kind: ForgeKind) -> String {
+    let own = kind_key(kind).and_then(|key| read_overrides().get(key).and_then(Value::as_str).map(str::to_string));
+    match own {
+        Some(id) if valid_client_id(&id) => id,
+        _ => match kind {
+            ForgeKind::Github => GITHUB_CLIENT_ID.to_string(),
+            ForgeKind::Gitlab => GITLAB_CLIENT_ID.to_string(),
+            _ => String::new(),
+        },
+    }
+}
+
+/// Qual aplicativo OAuth o login pelo navegador vai usar.
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClientInfo {
+    pub client_id: String,
+    /// `true` = o do próprio usuário; `false` = o embutido no aplicativo.
+    pub custom: bool,
+}
+
+pub fn client_info(kind: ForgeKind) -> ClientInfo {
+    let custom = kind_key(kind)
+        .and_then(|key| read_overrides().get(key).and_then(Value::as_str).map(valid_client_id))
+        .unwrap_or(false);
+    ClientInfo { client_id: client_id(kind), custom }
+}
+
+/// Fixa (ou, com `None`, remove) o Client ID do aplicativo OAuth do usuário para este tipo de host.
+pub fn set_client_override(kind: ForgeKind, id: Option<&str>) -> Result<(), String> {
+    let key = kind_key(kind).ok_or("Este tipo de host não tem login pelo navegador.")?;
+    let path = override_path().ok_or("Não foi possível achar a pasta do usuário.")?;
+    let mut map = read_overrides();
+    match id.map(str::trim).filter(|v| !v.is_empty()) {
+        Some(id) if valid_client_id(id) => { map.insert(key.into(), Value::String(id.into())); }
+        Some(_) => return Err("O Client ID não parece válido: use só letras, números, ponto, hífen e sublinhado (10 a 120 caracteres).".into()),
+        None => { map.remove(key); }
+    }
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    std::fs::write(path, serde_json::to_string_pretty(&Value::Object(map)).map_err(|e| e.to_string())?).map_err(|e| e.to_string())
+}
+
 fn endpoints(kind: ForgeKind, host: &str) -> Option<Endpoints> {
     match (kind, host) {
-        (ForgeKind::Github, "github.com") if !GITHUB_CLIENT_ID.is_empty() => Some(Endpoints {
-            client_id: GITHUB_CLIENT_ID,
+        (ForgeKind::Github, "github.com") if !client_id(ForgeKind::Github).is_empty() => Some(Endpoints {
+            client_id: client_id(ForgeKind::Github),
             device: "https://github.com/login/device/code",
             token: "https://github.com/login/oauth/access_token",
             scopes: GITHUB_SCOPES,
         }),
-        (ForgeKind::Gitlab, "gitlab.com") if !GITLAB_CLIENT_ID.is_empty() => Some(Endpoints {
-            client_id: GITLAB_CLIENT_ID,
+        (ForgeKind::Gitlab, "gitlab.com") if !client_id(ForgeKind::Gitlab).is_empty() => Some(Endpoints {
+            client_id: client_id(ForgeKind::Gitlab),
             device: "https://gitlab.com/oauth/authorize_device",
             token: "https://gitlab.com/oauth/token",
             scopes: GITLAB_SCOPES,
@@ -120,7 +192,7 @@ pub async fn start(kind: ForgeKind, host: &str) -> Result<DeviceStart, String> {
     let res: Value = http()?
         .post(ep.device)
         .header("Accept", "application/json")
-        .form(&[("client_id", ep.client_id), ("scope", ep.scopes)])
+        .form(&[("client_id", ep.client_id.as_str()), ("scope", ep.scopes)])
         .send()
         .await
         .map_err(|e| format!("No se pudo contactar a {host}: {e}"))?
@@ -169,7 +241,7 @@ pub async fn poll(flow_id: &str) -> Result<Poll, String> {
         .post(ep.token)
         .header("Accept", "application/json")
         .form(&[
-            ("client_id", ep.client_id),
+            ("client_id", ep.client_id.as_str()),
             ("device_code", device_code.as_str()),
             ("grant_type", "urn:ietf:params:oauth:grant-type:device_code"),
         ])
@@ -230,7 +302,7 @@ pub async fn refresh(kind: ForgeKind, host: &str, refresh_token: &str) -> Result
         .post(ep.token)
         .header("Accept", "application/json")
         .form(&[
-            ("client_id", ep.client_id),
+            ("client_id", ep.client_id.as_str()),
             ("grant_type", "refresh_token"),
             ("refresh_token", refresh_token),
         ])

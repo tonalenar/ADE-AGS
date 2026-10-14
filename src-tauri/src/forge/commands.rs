@@ -36,6 +36,19 @@ pub fn forge_kinds() -> Vec<ForgeKindInfo> {
         .collect()
 }
 
+/// Qual aplicativo OAuth o login pelo navegador usa (o do usuário ou o embutido).
+#[tauri::command]
+pub fn forge_oauth_client(kind: ForgeKind) -> oauth::ClientInfo {
+    oauth::client_info(kind)
+}
+
+/// Fixa o Client ID do aplicativo OAuth do próprio usuário (vazio = volta ao embutido).
+#[tauri::command]
+pub fn forge_oauth_set_client(kind: ForgeKind, client_id: Option<String>) -> Result<oauth::ClientInfo, String> {
+    oauth::set_client_override(kind, client_id.as_deref())?;
+    Ok(oauth::client_info(kind))
+}
+
 /// Si un host concreto (uno propio) tiene inicio de sesión con navegador.
 #[tauri::command]
 pub fn forge_oauth_available(kind: ForgeKind, host: String) -> bool {
