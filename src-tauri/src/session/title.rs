@@ -1293,3 +1293,142 @@ pub(crate) fn get_session_title_sync(
         }
     }
 }
+
+// ── Actividad de la sesión ────────────────────────────────────────────
+
+/// Briefings que las misiones escriben como primer mensaje del usuario. Van en minúsculas:
+/// se comparan contra el mensaje limpio, también en minúsculas.
+const MISSION_BRIEF_MARKERS: &[&str] = &[
+    "você é o orquestrador da missão",
+    "você faz parte da equipe da missão",
+    "você é o vigia",
+];
+
+/// `true` si [`session_activity`] puede medir este agente sin levantar un proceso. OpenCode
+/// necesita `opencode session list`, y medirlo en cada pasada de refresco no vale el costo.
+pub(crate) fn activity_is_measurable(agent_id: &str) -> bool {
+    !matches!(source_of(agent_id), SessionSource::ProcessQuery)
+}
+
+/// Clasifica los primeros mensajes del usuario de una sesión: `mission` si alguno arranca
+/// como briefing de misión, `task` si alguno sirve como mensaje, `empty` si ninguno sirve.
+fn activity_of<'a>(messages: impl IntoIterator<Item = &'a str>) -> &'static str {
+    let mut has_task = false;
+    for msg in messages {
+        let Some(clean) = clean_message(msg) else { continue };
+        let lower = clean.to_lowercase();
+        if MISSION_BRIEF_MARKERS.iter().any(|marker| lower.starts_with(marker)) {
+            return "mission";
+        }
+        has_task = true;
+    }
+    if has_task { "task" } else { "empty" }
+}
+
+/// Textos de los primeros mensajes del usuario de un transcript (hasta [`TITLE_SCAN_LIMIT`]).
+/// `extract` devuelve el texto de una línea, o `None` si esa línea no es un mensaje del
+/// usuario. `None` si el archivo no se puede leer.
+fn first_user_texts(path: &Path, extract: fn(&Value) -> Option<String>) -> Option<Vec<String>> {
+    let content = fs::read_to_string(path).ok()?;
+    let mut texts = Vec::new();
+    for line in content.lines() {
+        if texts.len() >= TITLE_SCAN_LIMIT {
+            break;
+        }
+        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+        if let Some(text) = extract(&v) {
+            texts.push(text);
+        }
+    }
+    Some(texts)
+}
+
+fn claude_user_text(v: &Value) -> Option<String> {
+    if v.get("type").and_then(|t| t.as_str()) != Some("user") {
+        return None;
+    }
+    v.get("message").and_then(|m| m.get("content")).and_then(extract_text_block)
+}
+
+fn gemini_user_text(v: &Value) -> Option<String> {
+    if v.get("type").and_then(|t| t.as_str()) != Some("user") {
+        return None;
+    }
+    v.get("content").and_then(extract_text_block)
+}
+
+/// Mismas formas que lee [`codex_title`], sin el contexto sintético que Codex inyecta.
+fn codex_user_text(v: &Value) -> Option<String> {
+    let msg_type = v.get("type").and_then(|t| t.as_str());
+    let text = if msg_type == Some("event_msg") {
+        let payload = v.get("payload")?;
+        if payload.get("type").and_then(|t| t.as_str()) != Some("user_message") {
+            return None;
+        }
+        payload.get("message").and_then(|m| m.as_str())?.to_string()
+    } else if msg_type == Some("response_item") {
+        let body = v.get("payload").unwrap_or(v);
+        if body.get("role").and_then(|r| r.as_str()) != Some("user") {
+            return None;
+        }
+        body.get("content").and_then(extract_text_block)?
+    } else {
+        return None;
+    };
+    (!codex_is_synthetic(&text)).then_some(text)
+}
+
+/// Actividad de una sesión (`task`, `empty`, `mission`) leyendo su transcripción, o `None`
+/// si no se puede medir: archivo ausente, id inseguro, agente que solo se consulta con un
+/// proceso (OpenCode) o TUI custom sin declarar (`custom` es `None`).
+///
+/// Recibe el perfil de cuenta y la TUI custom ya resueltos, igual que
+/// [`get_session_title_sync`]: quien la llama puede tener la conexión tomada.
+pub fn session_activity(
+    agent_id: &str,
+    cwd: &str,
+    session_id: &str,
+    profile: Option<&Path>,
+    custom: Option<&crate::agents::CustomAgent>,
+) -> Option<&'static str> {
+    // El id termina en un nombre de archivo: nada que no sea un id real.
+    if !is_safe_session_id(session_id) {
+        return None;
+    }
+    match source_of(agent_id) {
+        // Solo el archivo con ese id exacto. `claude_session_file` caería a "el más nuevo",
+        // y la actividad de OTRA sesión quedaría grabada en esta.
+        SessionSource::ClaudeProjects => {
+            let path = claude_project_dir(cwd, profile).join(format!("{session_id}.jsonl"));
+            let texts = first_user_texts(&path, claude_user_text)?;
+            Some(activity_of(texts.iter().map(String::as_str)))
+        }
+        SessionSource::GeminiTmp => {
+            let path = gemini_session_file_by_id(&gemini_home(profile), cwd, session_id)?;
+            let texts = first_user_texts(&path, gemini_user_text)?;
+            Some(activity_of(texts.iter().map(String::as_str)))
+        }
+        SessionSource::CodexRollouts => {
+            let path = codex_session_file_by_id(session_id, profile)?;
+            let texts = first_user_texts(&path, codex_user_text)?;
+            Some(activity_of(texts.iter().map(String::as_str)))
+        }
+        SessionSource::ProcessQuery => None,
+        // Kimi no tiene un formato de wire verificado acá: se mide solo con `lastPrompt`. Si
+        // ese prompt no sirve, no se afirma "vacía": queda sin medir.
+        SessionSource::KimiSessions => {
+            let dir = kimi_session_dir_by_id(session_id, profile)?;
+            let state = kimi_state(&dir)?;
+            let last = state.get("lastPrompt").and_then(|v| v.as_str())?;
+            match activity_of([last]) {
+                "empty" => None,
+                activity => Some(activity),
+            }
+        }
+        SessionSource::None => {
+            let path = custom_session_file_by_id(custom?, session_id)?;
+            let texts = first_user_texts(&path, codex_user_text)?;
+            Some(activity_of(texts.iter().map(String::as_str)))
+        }
+    }
+}

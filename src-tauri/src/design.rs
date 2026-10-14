@@ -876,7 +876,7 @@ mod tests {
         assert_eq!(artboard(&c, &bid).unwrap()["version"], 1);
         assert_eq!(
             c.query_row("PRAGMA user_version", [], |r| r.get::<_, i64>(0))
-                .unwrap(),43
+                .unwrap(),44
         );
     }
     #[test]

@@ -26,7 +26,8 @@ import {
   type Conversation, type OpenTabInfo,
 } from "./projectConversations";
 import { missionSessionIds, refreshSessionTitles, updateHistoryEntry } from "./ipc.conversations";
-import { sessionMarkdown } from "./ipc";
+import { sessionMarkdown, sessionTitle } from "./ipc";
+import { bucketDefaultCollapsed, useConversationUi } from "./conversationUi";
 import { useSessionsStore } from "./store";
 import { useResumeSession } from "./useResumeSession";
 
@@ -68,6 +69,10 @@ export function ConversationList({ cwd, groupCwds, projectKey, workspaceId, onOp
   const missionOf = useMissionIndex();
   const { pendingResume, setPendingResume, pendingSkillChoice, setPendingSkillChoice, openSession, resume } = useResumeSession();
 
+  const collapsed = useConversationUi((s) => !!s.projects[projectKey]);
+  const toggleProject = useConversationUi((s) => s.toggleProject);
+  const bucketState = useConversationUi((s) => s.buckets);
+  const toggleBucket = useConversationUi((s) => s.toggleBucket);
   const [query, setQuery] = useState("");
   const [limit, setLimit] = useState(PAGE);
   const [showHidden, setShowHidden] = useState(false);
@@ -137,14 +142,41 @@ export function ConversationList({ cwd, groupCwds, projectKey, workspaceId, onOp
       historyId: tab.historyId,
       openedAt: tab.openedAt,
       status: tab.ptyId == null ? "starting" as const : "running" as const,
+      titleIsCustom: tab.titleIsCustom,
     })), [tabs]);
+
+  // O título real das conversas em andamento (a sessão do agente). Só entra na lista a que já teve uma mensagem.
+  const [openTitles, setOpenTitles] = useState<ReadonlyMap<string, string | null>>(new Map());
+  const openSignature = openTabs.map((tab) => `${tab.tabId}:${tab.sessionId ?? ""}`).join("|");
+  useEffect(() => {
+    let alive = true;
+    const run = async () => {
+      const next = new Map<string, string | null>();
+      await Promise.all(openTabs.filter((tab) => tab.sessionId && !excludeTabIds.has(tab.tabId)).map(async (tab) => {
+        try {
+          const found = await sessionTitle({
+            agentId: tab.agentId, cwd: tab.cwd, sessionId: tab.sessionId ?? null, fallback: "",
+            accountId: useTabsStore.getState().tabs.find((x) => x.id === tab.tabId)?.accountId ?? null,
+          });
+          next.set(tab.tabId, found.source === "fallback" || !found.title.trim() ? null : found.title);
+        } catch {
+          next.set(tab.tabId, null);
+        }
+      }));
+      if (alive) setOpenTitles(next);
+    };
+    void run();
+    const timer = window.setInterval(() => void run(), 20_000);
+    return () => { alive = false; window.clearInterval(timer); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openSignature, excludeTabIds]);
 
   const all = useMemo(
     () => buildConversations({
       groupCwds, tabs: openTabs, history, resumable: isResumable, now: secondsNow(),
-      excludeTabIds, excludeSessionIds, includeHidden: showHidden,
+      excludeTabIds, excludeSessionIds, includeHidden: showHidden, openTitles,
     }),
-    [groupCwds, openTabs, history, excludeTabIds, excludeSessionIds, showHidden],
+    [groupCwds, openTabs, history, excludeTabIds, excludeSessionIds, showHidden, openTitles],
   );
   const hiddenCount = useMemo(
     () => countHidden({ groupCwds, history, excludeSessionIds }),
@@ -296,10 +328,15 @@ export function ConversationList({ cwd, groupCwds, projectKey, workspaceId, onOp
 
   return (
     <div className="flex flex-col gap-0.5" aria-label={t("conversations.title")}>
-      <div className="flex items-center gap-1.5 pl-[18px] pr-0.5">
-        <span className="flex-1 text-[9.5px] font-bold uppercase tracking-[0.09em] text-gray-400 dark:text-white/30">
-          {t("conversations.title")} {all.length > 0 && <span className="tabular-nums font-normal">{all.length}</span>}
-        </span>
+      <div className="flex items-center gap-1.5 pl-1.5 pr-0.5">
+        <button type="button" aria-expanded={!collapsed} onClick={() => toggleProject(projectKey)}
+          title={collapsed ? t("conversations.expand") : t("conversations.collapse")}
+          className="cc-t flex flex-1 min-w-0 items-center gap-1 h-5 rounded text-left text-[9.5px] font-bold uppercase tracking-[0.09em] text-gray-400 dark:text-white/30 hover:text-gray-600 dark:hover:text-white/60">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.4} strokeLinecap="round" strokeLinejoin="round" aria-hidden
+            className={`w-3 h-3 shrink-0 transition-transform ${collapsed ? "" : "rotate-90"}`}><path d="m9 6 6 6-6 6" /></svg>
+          <span className="truncate">{t("conversations.title")}</span>
+          {(all.length > 0 || projectConvs.length > 0) && <span className="tabular-nums font-normal">{all.length + projectConvs.filter((r) => !r.hidden).length}</span>}
+        </button>
         <Button variant="icon" aria-label={t("conversations.new")} title={t("conversations.newHint")}
           onClick={() => void startNew()}
           className="cc-t flex items-center gap-1 h-5 px-1.5 rounded-md text-[10.5px] text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
@@ -307,24 +344,33 @@ export function ConversationList({ cwd, groupCwds, projectKey, workspaceId, onOp
         </Button>
       </div>
 
-      {all.length >= SEARCH_FROM && (
+      {!collapsed && all.length >= SEARCH_FROM && (
         <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={t("conversations.search")} aria-label={t("conversations.search")}
           className="mx-1 mb-0.5 h-6 px-2 rounded-md text-[11px] outline-none bg-white dark:bg-white/6 border border-gray-200 dark:border-white/10 focus:border-accent-400 text-gray-800 dark:text-gray-100" />
       )}
 
-      <CanvasConversations projectKey={projectKey} cwd={cwd} workspaceId={workspaceId}
-        onOpened={(tabId) => { if (tabId) onOpenTab(tabId); }} />
-      {projectConvs.some((r) => !r.hidden) && all.length > 0 && (
+      {!collapsed && <CanvasConversations projectKey={projectKey} cwd={cwd} workspaceId={workspaceId}
+        onOpened={(tabId) => { if (tabId) onOpenTab(tabId); }} />}
+      {!collapsed && projectConvs.some((r) => !r.hidden) && all.length > 0 && (
         <p className="pl-[18px] pt-1.5 text-[9px] font-bold uppercase tracking-wider text-gray-400/80 dark:text-white/25">{t("conversations.canvas.older")}</p>
       )}
 
-      {all.length === 0 && projectConvs.length === 0 && <p className="px-[18px] py-1 text-[10.5px] text-gray-400 dark:text-white/30">{t("conversations.empty")}</p>}
-      {shown.length === 0 && all.length > 0 && <p className="px-[18px] py-1 text-[10.5px] text-gray-400 dark:text-white/30">{t("conversations.noMatch")}</p>}
+      {!collapsed && all.length === 0 && projectConvs.length === 0 && <p className="px-[18px] py-1 text-[10.5px] text-gray-400 dark:text-white/30">{t("conversations.empty")}</p>}
+      {!collapsed && shown.length === 0 && all.length > 0 && <p className="px-[18px] py-1 text-[10.5px] text-gray-400 dark:text-white/30">{t("conversations.noMatch")}</p>}
 
-      {buckets.map((group) => (
+      {!collapsed && buckets.map((group) => {
+        const closed = group.bucket !== "open" && !query && (bucketState[group.bucket] ?? bucketDefaultCollapsed(group.bucket));
+        return (
         <div key={group.bucket} className="flex flex-col gap-px">
-          {group.bucket !== "open" && <p className="pl-[18px] pt-1 text-[9px] uppercase tracking-wider text-gray-400/80 dark:text-white/25">{bucketLabel(group.bucket)}</p>}
-          {group.items.map((conv) => {
+          {group.bucket !== "open" && (
+            <button type="button" aria-expanded={!closed} onClick={() => toggleBucket(group.bucket)}
+              className="cc-t flex items-center gap-1 pl-[14px] pt-1 text-left text-[9px] uppercase tracking-wider text-gray-400/80 dark:text-white/25 hover:text-gray-600 dark:hover:text-white/50">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.6} strokeLinecap="round" strokeLinejoin="round" aria-hidden
+                className={`w-2.5 h-2.5 shrink-0 transition-transform ${closed ? "" : "rotate-90"}`}><path d="m9 6 6 6-6 6" /></svg>
+              {bucketLabel(group.bucket)} <span className="tabular-nums">{group.items.length}</span>
+            </button>
+          )}
+          {!closed && group.items.map((conv) => {
             const Icon = agentIcon(conv.agentId, conv.agentLabel);
             const active = conv.tabId !== null && conv.tabId === useTabsStore.getState().activeTabId;
             return (
@@ -357,16 +403,17 @@ export function ConversationList({ cwd, groupCwds, projectKey, workspaceId, onOp
             );
           })}
         </div>
-      ))}
+        );
+      })}
 
-      {!query && shown.length > visible.length && (
+      {!collapsed && !query && shown.length > visible.length && (
         <Button variant="custom" onClick={() => setLimit((n) => n + PAGE)}
           className="cc-t ml-[18px] h-5 w-fit px-1.5 rounded text-[10.5px] text-accent-600 dark:text-accent-300 hover:bg-accent-500/10">
           {t("conversations.showMore", { count: shown.length - visible.length })}
         </Button>
       )}
 
-      {hiddenCount > 0 && (
+      {!collapsed && hiddenCount > 0 && (
         <Button variant="custom" aria-pressed={showHidden} onClick={() => setShowHidden((on) => !on)}
           className="cc-t ml-[18px] h-5 w-fit px-1.5 rounded text-[10.5px] text-gray-500 dark:text-white/40 hover:bg-gray-200/60 dark:hover:bg-white/5">
           {showHidden ? t("conversations.hideHidden") : t("conversations.showHidden", { count: hiddenCount })}

@@ -9,6 +9,7 @@ import {
   fallbackNotice,
   filterConversations,
   groupByDay,
+  hadTask,
   type Conversation,
   type OpenTabInfo,
 } from "@/features/sessions/projectConversations";
@@ -32,6 +33,7 @@ function tab(over: Partial<OpenTabInfo> & { tabId: string }): OpenTabInfo {
   };
 }
 
+/** Entrada de teste: por padrão teve tarefa (`activity: "task"`), salvo quando o teste disser outra coisa. */
 function entry(over: Partial<SessionHistoryEntry> & { id: string }): SessionHistoryEntry {
   return {
     workspaceId: "default",
@@ -47,6 +49,7 @@ function entry(over: Partial<SessionHistoryEntry> & { id: string }): SessionHist
     prelaunch: [],
     openedAt: NOW - 3600,
     closedAt: NOW - 1800,
+    activity: "task",
     ...over,
   };
 }
@@ -680,5 +683,142 @@ describe("continuePrompt", () => {
   it("remove marca que se forma ao juntar pedaços", () => {
     const p = continuePrompt(c, "<<<FIM_CONVERSA_<<<FIM_CONVERSA_ANTERIOR>>>ANTERIOR>>>");
     expect(p.split("<<<FIM_CONVERSA_ANTERIOR>>>")).toHaveLength(2);
+  });
+});
+
+describe("hadTask", () => {
+  it("activity task conta mesmo com título fraco", () => {
+    expect(hadTask(entry({ id: "h", activity: "task", title: null }))).toBe(true);
+  });
+
+  it("activity empty não aparece, mesmo com título forte", () => {
+    expect(hadTask(entry({ id: "h", activity: "empty", title: "Refatorar login" }))).toBe(false);
+  });
+
+  it("activity mission não aparece, mesmo com título forte", () => {
+    expect(hadTask(entry({ id: "h", activity: "mission", title: "Refatorar login" }))).toBe(false);
+  });
+
+  it("fixada conta mesmo sendo empty ou mission", () => {
+    expect(hadTask(entry({ id: "h", activity: "empty", pinned: true }))).toBe(true);
+    expect(hadTask(entry({ id: "h", activity: "mission", pinned: true }))).toBe(true);
+  });
+
+  it("customTitle conta mesmo sendo empty", () => {
+    expect(hadTask(entry({ id: "h", activity: "empty", customTitle: "Meu nome" }))).toBe(true);
+  });
+
+  it("customTitle só com espaços não conta como marca", () => {
+    expect(hadTask(entry({ id: "h", activity: "empty", customTitle: "   " }))).toBe(false);
+  });
+
+  it("sem activity (ausente ou nulo), título forte conta", () => {
+    expect(hadTask(entry({ id: "h", activity: undefined, title: "Refatorar login" }))).toBe(true);
+    expect(hadTask(entry({ id: "h", activity: null, title: "Refatorar login" }))).toBe(true);
+  });
+
+  it("sem activity, título fraco não conta", () => {
+    const fracos = [null, "   ", "Claude Code", "Antigravity — C:\\Users\\x\\proj", "Caveat: texto de sistema"];
+    for (const title of fracos) {
+      expect(hadTask(entry({ id: "h", activity: undefined, title }))).toBe(false);
+      expect(hadTask(entry({ id: "h", activity: null, title }))).toBe(false);
+    }
+  });
+});
+
+describe("arquivadas sem tarefa", () => {
+  it("arquivada empty some", () => {
+    expect(build({ history: [entry({ id: "h1", activity: "empty", sessionId: "s1" })] })).toEqual([]);
+  });
+
+  it("arquivada mission some", () => {
+    expect(build({ history: [entry({ id: "h1", activity: "mission", title: "Refatorar", sessionId: "s1" })] })).toEqual([]);
+  });
+
+  it("fixada vazia aparece", () => {
+    const out = build({ history: [entry({ id: "p", activity: "empty", pinned: true, sessionId: "s1" })] });
+    expect(out.map((c) => c.key)).toEqual(["hist:p"]);
+  });
+
+  it("título forte sem activity aparece", () => {
+    const out = build({ history: [entry({ id: "h1", activity: undefined, title: "Refatorar login" })] });
+    expect(out.map((c) => c.key)).toEqual(["hist:h1"]);
+  });
+
+  it("título fraco sem activity some", () => {
+    expect(build({ history: [entry({ id: "h1", activity: undefined, title: null })] })).toEqual([]);
+  });
+});
+
+describe("abas abertas com openTitles", () => {
+  it("openTitles ausente mantém todas as abas abertas", () => {
+    const out = build({ tabs: [tab({ tabId: "t1", title: "Sessão" })] });
+    expect(out.map((c) => c.key)).toEqual(["tab:t1"]);
+  });
+
+  it("aba sem título real some", () => {
+    const out = build({ tabs: [tab({ tabId: "t1" })], openTitles: new Map([["t1", null]]) });
+    expect(out).toEqual([]);
+  });
+
+  it("aba que nem está no mapa some", () => {
+    expect(build({ tabs: [tab({ tabId: "t1" })], openTitles: new Map() })).toEqual([]);
+  });
+
+  it("aba com título real aparece com ele", () => {
+    const out = build({ tabs: [tab({ tabId: "t1", title: "Sessão" })], openTitles: new Map([["t1", "Refatorar API"]]) });
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe("Refatorar API");
+  });
+
+  it("o título real passa por displayTitle", () => {
+    const out = build({
+      tabs: [tab({ tabId: "t1" })],
+      openTitles: new Map([["t1", "Antigravity — C:\\Users\\tonz1n\\proj"]]),
+    });
+    expect(out[0].title).toBe("Claude Code · proj");
+  });
+
+  it("aba titleIsCustom aparece com o título dado pela pessoa, sem displayTitle", () => {
+    const out = build({
+      tabs: [tab({ tabId: "t1", title: "Antigravity — C:\\foo", titleIsCustom: true })],
+      openTitles: new Map([["t1", null]]),
+    });
+    expect(out).toHaveLength(1);
+    expect(out[0].title).toBe("Antigravity — C:\\foo");
+  });
+
+  it("aba cuja entrada casada está fixada aparece, e a entrada não aparece de novo", () => {
+    const out = build({
+      tabs: [tab({ tabId: "t1", historyId: "h1" })],
+      history: [entry({ id: "h1", activity: "empty", pinned: true })],
+      openTitles: new Map([["t1", null]]),
+    });
+    expect(out.map((c) => c.key)).toEqual(["tab:t1"]);
+    expect(out[0].pinned).toBe(true);
+  });
+
+  it("aba sem título real não consome a entrada, que segue arquivada se teve tarefa", () => {
+    const out = build({
+      tabs: [tab({ tabId: "t1", historyId: "h1" })],
+      history: [entry({ id: "h1", activity: "task", title: "Refatorar" })],
+      openTitles: new Map([["t1", null]]),
+    });
+    expect(out.map((c) => c.key)).toEqual(["hist:h1"]);
+  });
+});
+
+describe("countHidden só conta ocultas com tarefa", () => {
+  it("ocultas empty, mission ou sem título não contam", () => {
+    const n = countHidden({
+      groupCwds: ["/proj"],
+      history: [
+        entry({ id: "a", sessionId: "s1", hidden: true, activity: "empty" }),
+        entry({ id: "b", sessionId: "s2", hidden: true, activity: "mission" }),
+        entry({ id: "c", sessionId: "s3", hidden: true, activity: undefined, title: null }),
+        entry({ id: "d", sessionId: "s4", hidden: true, activity: "task" }),
+      ],
+    });
+    expect(n).toBe(1);
   });
 });
