@@ -5,6 +5,8 @@ import { useTabsStore } from "@/features/tabs/store";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 
 import { buildExtras, CHECKPOINT_MS, sendCheckpoints } from "./checkpoint";
+import { saveActiveSnapshots } from "./conversationFlow";
+import { useConversationsStore } from "./conversationsStore";
 import { useSessionsStore } from "./store";
 
 /**
@@ -13,6 +15,14 @@ import { useSessionsStore } from "./store";
  * o arquivamento ao fechar a aba continua sendo a rede de segurança.
  */
 export function useSessionCheckpoints(): void {
+  // As conversas do workspace carregam logo que as abas voltam: sem elas, o que se abre não saberia a que
+  // conversa ativa pertence, mesmo com a barra lateral recolhida.
+  const hydrated = useTabsStore((s) => s.hydrated);
+  const workspaceId = useTabsStore((s) => s.workspaceId);
+  useEffect(() => {
+    if (hydrated) void useConversationsStore.getState().load(workspaceId);
+  }, [hydrated, workspaceId]);
+
   useEffect(() => {
     let busy = false;
     const run = async () => {
@@ -28,6 +38,7 @@ export function useSessionCheckpoints(): void {
         );
         if (extras.length === 0) return;
         await sendCheckpoints(workspaceId, extras);
+        await saveActiveSnapshots().catch(() => undefined);
         void useSessionsStore.getState().loadHistory(workspaceId);
       } catch (e) {
         console.error("checkpoint das conversas falhou", e);

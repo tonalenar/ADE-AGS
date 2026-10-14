@@ -40,6 +40,20 @@ export function boardKey(cwd: string): string {
 /** Lo que separa la carpeta de la misión en la clave de un canvas de misión. */
 const MISSION_SEP = "#m:";
 
+/** Lo que separa la carpeta de la conversa na chave de um canvas de conversa de projeto. */
+const CONV_SEP = "#c:";
+
+/** A chave do canvas de uma conversa de projeto: o da sua pasta, com a conversa colada. */
+export function conversationBoardKey(cwd: string, conversationId: string): string {
+  return `${boardKey(cwd)}${CONV_SEP}${conversationId}`;
+}
+
+/** A conversa de que é um canvas, se for de uma. */
+export function conversationOfKey(key: string | null): string | null {
+  const at = key?.indexOf(CONV_SEP) ?? -1;
+  return key && at >= 0 ? key.slice(at + CONV_SEP.length) : null;
+}
+
 /** La clave del canvas de una misión en terminales: el de su carpeta, con la misión pegada. */
 export function missionBoardKey(cwd: string, missionId: string): string {
   return `${boardKey(cwd)}${MISSION_SEP}${missionId}`;
@@ -59,7 +73,8 @@ export function missionOfKey(key: string | null): string | null {
 export function boardKeyOfTab(tab: { id: string; cwd: string }, boards: Record<string, Board> = useCanvasStore.getState().boards): string {
   const prefix = `${windowLabel}|`;
   for (const [key, board] of Object.entries(boards)) {
-    if (key.startsWith(prefix) && key.includes(MISSION_SEP) && tab.id in board.nodes) return key;
+    // O canvas de uma missão ou de uma conversa de projeto: a aba pertence ao em que é um nó.
+    if (key.startsWith(prefix) && (key.includes(MISSION_SEP) || key.includes(CONV_SEP)) && tab.id in board.nodes) return key;
   }
   return boardKey(tab.cwd);
 }

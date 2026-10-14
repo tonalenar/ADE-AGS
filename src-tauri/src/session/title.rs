@@ -161,6 +161,95 @@ pub(super) fn extract_text_block(content: &Value) -> Option<String> {
     }
 }
 
+// ── Mensajes que no son lo que escribió la persona ──────────────────────
+//
+// Las TUIs anteponen envoltorios a los mensajes del usuario (caveats de comandos locales,
+// contexto de IDE, recordatorios del sistema) y el contenido pegado llega como
+// `<pasted_content id="…">…</pasted_content>`. Como título eso sale como XML entero o como
+// ruido, así que se saltean y se busca el primer mensaje que sí sea texto.
+
+/// Tags de envoltorio que las TUIs inyectan dentro del mensaje del usuario.
+const NOISE_TAGS: &[&str] = &[
+    "local-command-caveat",
+    "command-name",
+    "command-message",
+    "command-args",
+    "local-command-stdout",
+    "system-reminder",
+    "browser_instruction",
+    "ide_opened_file",
+    "ide_selection",
+];
+
+/// Cuántos mensajes del usuario se miran, como mucho, buscando uno que sirva de título.
+const TITLE_SCAN_LIMIT: usize = 30;
+
+/// `true` si el mensaje es un envoltorio del sistema y no algo que escribió la persona.
+/// `<pasted_content` también cuenta: `clean_message` lo desenvuelve antes de decidir.
+pub(super) fn is_noise_message(text: &str) -> bool {
+    let t = text.trim();
+    if t.starts_with("This session is being continued")
+        || t.starts_with("Caveat:")
+        || t.starts_with("[Request interrupted")
+        || t.starts_with("<pasted_content")
+    {
+        return true;
+    }
+    let Some(rest) = t.strip_prefix('<') else { return false };
+    let tag = rest
+        .split(|c: char| !(c.is_ascii_alphanumeric() || c == '-' || c == '_'))
+        .next()
+        .unwrap_or("");
+    NOISE_TAGS.contains(&tag)
+}
+
+/// Lo que puede servir de título de un mensaje del usuario, o `None` si es ruido o está
+/// vacío. Desenvuelve `<pasted_content …>` (queda el texto de adentro) y devuelve la
+/// primera línea con contenido.
+pub(super) fn clean_message(text: &str) -> Option<String> {
+    let mut body = text.trim();
+    if body.starts_with("<pasted_content") {
+        if let Some(end) = body.find('>') {
+            body = &body[end + 1..];
+        }
+        body = body.trim_end().strip_suffix("</pasted_content>").unwrap_or(body);
+    }
+    let body = body.trim();
+    if is_noise_message(body) {
+        return None;
+    }
+    let line = body.lines().map(str::trim).find(|l| !l.is_empty())?;
+    if is_noise_message(line) {
+        return None;
+    }
+    Some(line.to_string())
+}
+
+/// Un título que NO conviene mostrar: vacío, XML/envoltorio, el placeholder
+/// `<agente> — <carpeta/ruta>` o simplemente el nombre del agente. Sirve para decidir si
+/// una sesión ya guardada merece recalcularse.
+pub fn is_weak_title(title: &str, agent_label: &str) -> bool {
+    let t = title.trim();
+    if t.is_empty() || t.starts_with('<') || is_noise_message(t) {
+        return true;
+    }
+    if t == agent_label.trim() {
+        return true;
+    }
+    if let Some((_, rest)) = t.split_once(" — ") {
+        let rest = rest.trim_start();
+        let b = rest.as_bytes();
+        let is_drive = b.len() >= 3
+            && b[0].is_ascii_alphabetic()
+            && b[1] == b':'
+            && (b[2] == b'\\' || b[2] == b'/');
+        if rest.starts_with('/') || rest.starts_with('\\') || is_drive {
+            return true;
+        }
+    }
+    false
+}
+
 // ── Claude Code: ~/.claude/projects/<cwd con '/' -> '-'>/<uuid>.jsonl ────
 
 /// Nombre de carpeta que Claude Code le da a un proyecto.
@@ -249,6 +338,7 @@ pub(super) fn claude_session_file(
 pub(super) fn claude_title(path: &Path, fallback: &str) -> SessionTitleResult {
     let Ok(content) = fs::read_to_string(path) else { return fallback_result(fallback) };
     let mut first_user_msg: Option<String> = None;
+    let mut user_msgs_seen = 0usize;
 
     for line in content.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
@@ -257,8 +347,16 @@ pub(super) fn claude_title(path: &Path, fallback: &str) -> SessionTitleResult {
                 return SessionTitleResult { title: truncate(s, 60), source: "summary".into() };
             }
         }
-        if first_user_msg.is_none() && v.get("type").and_then(|t| t.as_str()) == Some("user") {
-            first_user_msg = v.get("message").and_then(|m| m.get("content")).and_then(extract_text_block);
+        if first_user_msg.is_none()
+            && user_msgs_seen < TITLE_SCAN_LIMIT
+            && v.get("type").and_then(|t| t.as_str()) == Some("user")
+        {
+            user_msgs_seen += 1;
+            first_user_msg = v
+                .get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(extract_text_block)
+                .and_then(|t| clean_message(&t));
         }
     }
 
@@ -402,6 +500,7 @@ pub(super) fn gemini_session_file_by_id(home: &Path, cwd: &str, session_id: &str
 pub(super) fn gemini_title(path: &Path, fallback: &str) -> SessionTitleResult {
     let Ok(content) = fs::read_to_string(path) else { return fallback_result(fallback) };
     let mut first_user_msg: Option<String> = None;
+    let mut user_msgs_seen = 0usize;
 
     for line in content.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
@@ -412,8 +511,15 @@ pub(super) fn gemini_title(path: &Path, fallback: &str) -> SessionTitleResult {
         }
         // El contenido es un PartListUnion, no un string: `as_str()` solo cubría el caso
         // más raro (string pelado) y dejaba afuera el habitual, `[{"text": "…"}]`.
-        if first_user_msg.is_none() && v.get("type").and_then(|t| t.as_str()) == Some("user") {
-            first_user_msg = v.get("content").and_then(extract_text_block);
+        if first_user_msg.is_none()
+            && user_msgs_seen < TITLE_SCAN_LIMIT
+            && v.get("type").and_then(|t| t.as_str()) == Some("user")
+        {
+            user_msgs_seen += 1;
+            first_user_msg = v
+                .get("content")
+                .and_then(extract_text_block)
+                .and_then(|t| clean_message(&t));
         }
     }
 
@@ -535,8 +641,12 @@ pub(super) fn codex_is_synthetic(text: &str) -> bool {
 
 pub(super) fn codex_title(path: &Path, fallback: &str) -> SessionTitleResult {
     let Ok(content) = fs::read_to_string(path) else { return fallback_result(fallback) };
+    let mut user_msgs_seen = 0usize;
 
     for line in content.lines() {
+        if user_msgs_seen >= TITLE_SCAN_LIMIT {
+            break;
+        }
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
         let msg_type = v.get("type").and_then(|t| t.as_str());
 
@@ -545,10 +655,13 @@ pub(super) fn codex_title(path: &Path, fallback: &str) -> SessionTitleResult {
             if payload.and_then(|p| p.get("type")).and_then(|t| t.as_str()) == Some("user_message") {
                 if let Some(m) = payload.and_then(|p| p.get("message")).and_then(|m| m.as_str()) {
                     if !codex_is_synthetic(m) {
-                        return SessionTitleResult {
-                            title: truncate(m, 60),
-                            source: "first_message".into(),
-                        };
+                        user_msgs_seen += 1;
+                        if let Some(clean) = clean_message(m) {
+                            return SessionTitleResult {
+                                title: truncate(&clean, 60),
+                                source: "first_message".into(),
+                            };
+                        }
                     }
                 }
             }
@@ -562,10 +675,13 @@ pub(super) fn codex_title(path: &Path, fallback: &str) -> SessionTitleResult {
             if body.get("role").and_then(|r| r.as_str()) == Some("user") {
                 if let Some(text) = body.get("content").and_then(extract_text_block) {
                     if !codex_is_synthetic(&text) {
-                        return SessionTitleResult {
-                            title: truncate(&text, 60),
-                            source: "first_message".into(),
-                        };
+                        user_msgs_seen += 1;
+                        if let Some(clean) = clean_message(&text) {
+                            return SessionTitleResult {
+                                title: truncate(&clean, 60),
+                                source: "first_message".into(),
+                            };
+                        }
                     }
                 }
             }
@@ -828,12 +944,14 @@ pub(super) fn kimi_wire_file(dir: &Path) -> Option<PathBuf> {
 pub(super) fn kimi_title(dir: &Path, fallback: &str) -> SessionTitleResult {
     let Some(state) = kimi_state(dir) else { return fallback_result(fallback) };
 
-    for (key, source) in [("title", "summary"), ("lastPrompt", "first_message")] {
-        if let Some(s) = state.get(key).and_then(|v| v.as_str()) {
-            if !s.trim().is_empty() {
-                return SessionTitleResult { title: truncate(s, 60), source: source.into() };
-            }
+    if let Some(s) = state.get("title").and_then(|v| v.as_str()) {
+        if !s.trim().is_empty() {
+            return SessionTitleResult { title: truncate(s, 60), source: "summary".into() };
         }
+    }
+    // `lastPrompt` es un mensaje del usuario: puede ser un envoltorio, igual que el resto.
+    if let Some(clean) = state.get("lastPrompt").and_then(|v| v.as_str()).and_then(clean_message) {
+        return SessionTitleResult { title: truncate(&clean, 60), source: "first_message".into() };
     }
     fallback_result(fallback)
 }

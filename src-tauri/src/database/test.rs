@@ -39,7 +39,7 @@ fn etapa17_v32_v33_upgrades_preserve_tab_usage_and_fast_snapshots() {
         }
         conn.pragma_update(None, "user_version", version).unwrap();
         schema::migrate(&conn).unwrap();
-        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
+        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),43);
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM missions WHERE id='m17'", [], |r| r.get::<_, i64>(0)).unwrap(), 1);
         assert_eq!(conn.query_row("SELECT COUNT(*) FROM mission_usage_tabs", [], |r| r.get::<_, i64>(0)).unwrap(), if version >= 33 { 1 } else { 0 });
         if version >= 33 {
@@ -934,7 +934,7 @@ fn v32_terminal_workspaces_migrate_additively_and_keep_ownership() {
     let root: String = conn.query_row("SELECT root FROM mission_team_workspaces WHERE mission_id='team-m'", [], |r| r.get(0)).unwrap();
     assert_eq!(root, "/wt");
     assert!(conn.execute("INSERT INTO mission_team_workspaces(mission_id,name,cwd,root,branch) VALUES ('team-m','QA','/wt','/wt','cc/qa')", []).is_err());
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),43);
 }
 
 #[test]
@@ -943,7 +943,7 @@ fn v20_nuevo_crea_tablas_indices_y_referencias_de_squads() {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
 
     for table in ["squads", "squad_members", "run_squad_members"] {
         assert!(
@@ -1043,7 +1043,7 @@ fn migrar_v19_a_v20_conserva_mission_runs_y_tasks_anteriores() {
     let version: i32 = conn
         .query_row("PRAGMA user_version", [], |row| row.get(0))
         .unwrap();
-    assert_eq!(version, 42);
+    assert_eq!(version, 43);
     assert_eq!(
         conn.query_row(
             "SELECT title FROM missions WHERE id = 'mission-old'",
@@ -1312,7 +1312,7 @@ fn migrate_v20_to_v21_adds_nullable_effort_without_rewriting_history() {
     }
     conn.pragma_update(None, "user_version", 20).unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),43);
     let (model, effort): (String, Option<String>) = conn.query_row("SELECT model,reasoning_effort FROM tasks WHERE id='eff-t'", [], |r| Ok((r.get(0)?,r.get(1)?))).unwrap();
     assert_eq!(model, "old-model");
     assert_eq!(effort, None);
@@ -1333,7 +1333,7 @@ fn migrate_v21_to_v22_preserves_legacy_and_is_idempotent() {
         ALTER TABLE tasks DROP COLUMN structured_handoff;
         PRAGMA user_version=21;").unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),42);
+    assert_eq!(conn.pragma_query_value(None,"user_version",|row|row.get::<_,i64>(0)).unwrap(),43);
     let (legacy, structured): (String,Option<String>) = conn.query_row("SELECT handoff,structured_handoff FROM tasks WHERE id='h-t'",[],|row|Ok((row.get(0)?,row.get(1)?))).unwrap();
     assert_eq!(legacy,"legacy");assert_eq!(structured,None);
     conn.execute("UPDATE tasks SET structured_handoff=?1 WHERE id='h-t'",[r#"{"version":1,"summary":"old delivery"}"#]).unwrap();
@@ -1353,7 +1353,7 @@ fn migrate_v22_to_v23_keeps_separate_oauth_metadata_without_tokens() {
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM antigravity_oauth_accounts", [], |r|r.get::<_,i64>(0)).unwrap(), 2);
     assert!(conn.execute("INSERT INTO antigravity_oauth_accounts VALUES('c','google-a','Duplicate','c@example.com',0)", []).is_err());
     assert!(conn.prepare("SELECT access_token,refresh_token FROM antigravity_oauth_accounts").is_err());
-    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),42);
+    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),43);
 }
 
 #[test]
@@ -1375,7 +1375,7 @@ fn migrate_v26_to_v29_preserves_historical_mission_statuses() {
         .unwrap().collect::<rusqlite::Result<Vec<_>>>().unwrap();
     assert_eq!(statuses, vec![("old-done".into(), "done".into()), ("old-failed".into(), "failed".into())]);
     assert_eq!(conn.query_row("SELECT COUNT(*) FROM mission_terminal_deliveries", [], |row| row.get::<_, i64>(0)).unwrap(), 0);
-    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(),42);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |row| row.get::<_, i64>(0)).unwrap(),43);
 }
 
 /// Un guardado de metadata (renombrar, mover la ventana) no reenvía el scrollback que la
@@ -1450,7 +1450,7 @@ fn etapa10_migrations_v27_v28_v29_preserve_each_preceding_stage() {
         conn.pragma_update(None, "user_version", from).unwrap();
         schema::migrate(&conn).unwrap();
         schema::migrate(&conn).unwrap();
-        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
+        assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),43);
         let (status, marked, class): (String, i64, Option<String>) = conn.query_row("SELECT status,is_test,failure_class FROM missions WHERE id='stage-m'", [], |r| Ok((r.get(0)?,r.get(1)?,r.get(2)?))).unwrap();
         assert_eq!(status, "done");
         assert_eq!(marked, i64::from(from >= 27));
@@ -1467,7 +1467,7 @@ fn v30_adds_fast_mode_columns_idempotently_and_keeps_existing_squads_off() {
     conn.pragma_update(None, "user_version", 29).unwrap();
     schema::migrate(&conn).unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),43);
     let fast: i64 = conn.query_row("SELECT fast_mode FROM squads WHERE id='s1'", [], |r| r.get(0)).unwrap();
     assert_eq!(fast, 0);
     conn.execute("SELECT fast_mode FROM squad_members LIMIT 1", []).ok();
@@ -1483,7 +1483,7 @@ fn v31_adds_subagent_default_columns_idempotently_and_keeps_old_squads_automatic
     conn.pragma_update(None, "user_version", 30).unwrap();
     schema::migrate(&conn).unwrap();
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),43);
     let (agent, fast): (Option<String>, i64) = conn
         .query_row("SELECT subagent_agent_id, subagent_fast FROM squads WHERE id='s1'", [], |r| Ok((r.get(0)?, r.get(1)?)))
         .unwrap();
@@ -1505,7 +1505,7 @@ fn v35_delivery_audit_migrates_additively_and_idempotently() {
     schema::migrate(&conn).unwrap();
     let count: i64 = conn.query_row("SELECT COUNT(*) FROM mission_delivery_audit WHERE mission_id='m-audit'", [], |r| r.get(0)).unwrap();
     assert_eq!(count, 1);
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),42);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),43);
 }
 
 // ── Historial vivo: checkpoints, edición y búsqueda ─────────────
@@ -1865,7 +1865,7 @@ fn v42_agrega_las_columnas_del_historial_vivo_sin_perder_filas() {
     .unwrap();
 
     schema::migrate(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 42);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(), 43);
 
     let (preview, pinned, hidden, title): (Option<String>, i64, i64, Option<String>) = conn
         .query_row(
@@ -1878,4 +1878,95 @@ fn v42_agrega_las_columnas_del_historial_vivo_sin_perder_filas() {
     assert_eq!(title.as_deref(), Some("Vieja"));
     // Correr la migración de nuevo no rompe nada.
     schema::migrate(&conn).unwrap();
+}
+
+// ── Refresco de títulos débiles del historial ──────────────────
+
+/// Transcript de Claude Code con un mensaje del usuario por cada texto de `mensajes`.
+fn write_claude_messages(profile: &std::path::Path, cwd: &str, session_id: &str, mensajes: &[&str]) {
+    let dir = profile.join("projects").join(cwd.replace('/', "-"));
+    std::fs::create_dir_all(&dir).unwrap();
+    let body: String = mensajes
+        .iter()
+        .map(|m| {
+            let line = serde_json::json!({"type": "user", "message": {"role": "user", "content": m}});
+            format!("{line}\n")
+        })
+        .collect();
+    std::fs::write(dir.join(format!("{session_id}.jsonl")), body).unwrap();
+}
+
+fn insert_history_row(
+    conn: &Connection,
+    id: &str,
+    cwd: &str,
+    title: Option<&str>,
+    session_id: Option<&str>,
+    account_id: Option<&str>,
+    custom_title: Option<&str>,
+) {
+    conn.execute(
+        "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, account_id, custom_title, opened_at, closed_at)
+         VALUES (?1, 'ws', 'claude-code', 'Claude Code', 'claude', ?2, ?3, ?4, ?5, ?6, 0, 0)",
+        rusqlite::params![id, cwd, title, session_id, account_id, custom_title],
+    )
+    .unwrap();
+}
+
+fn history_titles(conn: &Connection, id: &str) -> (Option<String>, Option<String>) {
+    conn.query_row(
+        "SELECT title, custom_title FROM session_history WHERE id = ?1",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?)),
+    )
+    .unwrap()
+}
+
+/// Solo las entradas con título débil Y sesión se recalculan. El título bueno no se toca, el
+/// `custom_title` nunca cambia, y una sesión sin transcript deja el título como estaba.
+#[test]
+fn refrescar_titulos_solo_toca_las_entradas_debiles_con_sesion() {
+    let profile = TempDir::new();
+    write_claude_messages(
+        &profile.0,
+        "/proj",
+        "s-ruido",
+        &["<local-command-caveat>Caveat: generado</local-command-caveat>", "<pasted_content id=\"1\">arreglá el login</pasted_content>"],
+    );
+    write_claude_messages(&profile.0, "/proj", "s-custom", &["hola desde la cuenta"]);
+    write_claude_messages(&profile.0, "/proj", "s-buena", &["otra cosa"]);
+
+    let db: DbConnection = std::sync::Arc::new(std::sync::Mutex::new(setup()));
+    {
+        let conn = db.lock().unwrap();
+        conn.execute(
+            "INSERT INTO agent_accounts (id, agent_id, name, dir, created_at)
+             VALUES ('acc', 'claude-code', 'trabajo', ?1, 0)",
+            [profile.0.to_string_lossy()],
+        )
+        .unwrap();
+        insert_history_row(&conn, "h-ruido", "/proj", Some("<local-command-caveat>Caveat: x"), Some("s-ruido"), Some("acc"), None);
+        insert_history_row(&conn, "h-custom", "/proj", Some(""), Some("s-custom"), Some("acc"), Some("Mío"));
+        insert_history_row(&conn, "h-buena", "/proj", Some("Ya bueno"), Some("s-buena"), Some("acc"), None);
+        // Otro cwd sin carpeta de transcripts: la sesión no aparece y el título queda vacío.
+        insert_history_row(&conn, "h-sin-archivo", "/otro", Some(""), Some("s-no-existe"), Some("acc"), None);
+        // Sin session_id no entra al recálculo, aunque su título sea débil.
+        insert_history_row(&conn, "h-sin-sesion", "/proj", None, None, None, None);
+    }
+
+    assert_eq!(refresh_weak_session_titles(&db, "ws").unwrap(), 2);
+
+    let conn = db.lock().unwrap();
+    assert_eq!(history_titles(&conn, "h-ruido").0.as_deref(), Some("arreglá el login"));
+    assert_eq!(
+        history_titles(&conn, "h-custom"),
+        (Some("hola desde la cuenta".to_string()), Some("Mío".to_string())),
+    );
+    assert_eq!(history_titles(&conn, "h-buena").0.as_deref(), Some("Ya bueno"));
+    assert_eq!(history_titles(&conn, "h-sin-archivo").0.as_deref(), Some(""));
+    assert_eq!(history_titles(&conn, "h-sin-sesion").0, None);
+    drop(conn);
+
+    // Una segunda pasada no encuentra nada nuevo que grabar.
+    assert_eq!(refresh_weak_session_titles(&db, "ws").unwrap(), 0);
 }

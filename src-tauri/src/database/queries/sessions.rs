@@ -508,6 +508,126 @@ pub fn db_list_session_history(
     Ok(entries)
 }
 
+/// Cuántas entradas débiles se recalculan por llamada de [`db_refresh_session_titles`].
+const REFRESH_TITLES_LIMIT: usize = 200;
+
+/// Recalcula los títulos débiles (vacíos, envoltorios, placeholders) de las entradas del
+/// workspace que tienen sesión, leyendo la conversación real de cada una. Devuelve cuántas
+/// cambiaron.
+///
+/// Tres fases, a propósito: las consultas (fila, cuenta, TUI custom) van con el lock
+/// tomado; la lectura de transcripts —que para OpenCode lanza un proceso— va SIN el lock,
+/// igual que en `resolve_for_archive`; y la escritura vuelve a tomarlo. Nunca toca
+/// `custom_title`: lo que puso la persona manda. Un título que sigue siendo débil no se
+/// graba, así que una sesión que no se encuentra queda como estaba.
+pub(crate) fn refresh_weak_session_titles(db: &DbConnection, workspace_id: &str) -> Result<u32, String> {
+    struct Candidate {
+        id: String,
+        agent_id: String,
+        agent_label: String,
+        cwd: String,
+        title: String,
+        session_id: String,
+        profile: Option<String>,
+        custom: Option<crate::agents::CustomAgent>,
+    }
+
+    let candidates: Vec<Candidate> = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, agent_id, agent_label, cwd, title, session_id, account_id
+                 FROM session_history
+                 WHERE workspace_id = ?1 AND session_id IS NOT NULL
+                 ORDER BY closed_at DESC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows = stmt
+            .query_map([workspace_id], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, String>(2)?,
+                    r.get::<_, String>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                    r.get::<_, String>(5)?,
+                    r.get::<_, Option<String>>(6)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?
+            .collect::<Result<Vec<_>, _>>()
+            .map_err(|e| e.to_string())?;
+
+        let mut out = Vec::new();
+        for (id, agent_id, agent_label, cwd, title, session_id, account_id) in rows {
+            let title = title.unwrap_or_default();
+            if !crate::session::is_weak_title(&title, &agent_label) {
+                continue;
+            }
+            let profile = account_id.and_then(|acc| crate::accounts::dir_for_conn(&conn, &acc));
+            let custom = crate::agents::find(&conn, &agent_id);
+            out.push(Candidate { id, agent_id, agent_label, cwd, title, session_id, profile, custom });
+            if out.len() >= REFRESH_TITLES_LIMIT {
+                break;
+            }
+        }
+        out
+    };
+    if candidates.is_empty() {
+        return Ok(0);
+    }
+
+    // Lectura de disco fuera del lock. Como fallback va el título actual: si la sesión no
+    // aparece, el resultado es igual al actual y no se graba nada.
+    let updates: Vec<(String, String)> = candidates
+        .iter()
+        .filter_map(|c| {
+            let profile = c.profile.as_deref().map(std::path::Path::new);
+            let found = crate::session::get_session_title_sync(
+                &c.agent_id,
+                &c.cwd,
+                Some(c.session_id.clone()),
+                c.title.clone(),
+                profile,
+                c.custom.as_ref(),
+            )
+            .title;
+            (found != c.title && !crate::session::is_weak_title(&found, &c.agent_label))
+                .then(|| (c.id.clone(), found))
+        })
+        .collect();
+    if updates.is_empty() {
+        return Ok(0);
+    }
+
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let mut changed = 0u32;
+    for (id, title) in &updates {
+        let n = conn
+            .execute(
+                "UPDATE session_history SET title = ?1 WHERE id = ?2",
+                params![title, id],
+            )
+            .map_err(|e| e.to_string())?;
+        changed += n as u32;
+    }
+    Ok(changed)
+}
+
+/// Recalcula los títulos débiles del historial de un workspace (hasta 200 por llamada).
+/// Devuelve cuántas entradas cambiaron de título.
+/// `async` + `spawn_blocking`: ler transcripts (e lançar `opencode session list`) não pode rodar na thread principal.
+#[tauri::command]
+pub async fn db_refresh_session_titles(
+    workspace_id: String,
+    db: tauri::State<'_, DbConnection>,
+) -> Result<u32, String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || refresh_weak_session_titles(&db, &workspace_id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
 /// Límite de ids que devuelve [`db_mission_session_ids`]: el conjunto de sesiones de
 /// misiones de un workspace crece sin techo, y la vista de Sesiones no lo necesita entero.
 const MISSION_SESSION_IDS_LIMIT: usize = 5000;
