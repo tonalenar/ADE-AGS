@@ -115,6 +115,8 @@ export interface Board {
   /** El papel con que se recrutó cada agente (id de tab → nombre del papel). Solo una
    *  etiqueta para el nodo: no da ni quita permisos. */
   roles: Record<string, string>;
+  /** Os terminais marcados como subagentes (id de tab): apoio que a orquestradora comanda. Só uma etiqueta. */
+  subagents: string[];
   edges: CanvasEdge[];
   viewport: Viewport;
   /** Las orquestadoras: alcanzan a todo su equipo y pueden sumar agentes y conectarlos. */
@@ -122,7 +124,7 @@ export interface Board {
 }
 
 export function emptyBoard(): Board {
-  return { nodes: {}, notes: {}, portals: {}, texts: {}, images: {}, folders: {}, drawings: [], roles: {}, edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
+  return { nodes: {}, notes: {}, portals: {}, texts: {}, images: {}, folders: {}, drawings: [], roles: {}, subagents: [], edges: [], viewport: { x: 40, y: 40, zoom: 1 }, orchestrators: [] };
 }
 
 /**
@@ -151,11 +153,12 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
   const roles = roleIds.every((id) => open.has(id))
     ? board.roles
     : Object.fromEntries(Object.entries(board.roles).filter(([id]) => open.has(id)));
+  const subagents = board.subagents.every((id) => open.has(id)) ? board.subagents : board.subagents.filter((id) => open.has(id));
 
   if (
     missing.length === 0 && kept.length === Object.keys(board.nodes).length &&
     edges.length === board.edges.length && orchestrators.length === board.orchestrators.length &&
-    roles === board.roles
+    roles === board.roles && subagents === board.subagents
   ) {
     return board;
   }
@@ -163,7 +166,7 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
   const nodes: Record<string, Box> = Object.fromEntries(kept);
   const noteBoxes = [...Object.values(board.notes), ...Object.values(board.portals)].map((n) => n.box);
   for (const id of missing) nodes[id] = nextFreeBox([...Object.values(nodes), ...noteBoxes]);
-  return { ...board, nodes, edges, orchestrators, roles };
+  return { ...board, nodes, edges, orchestrators, roles, subagents };
 }
 
 /**
@@ -176,7 +179,7 @@ export function reconcile(board: Board, tabIds: string[], allTabIds: string[] = 
 export function buildMissionTeam(
   board: Board,
   leadId: string,
-  members: { tabId: string; roleId?: string | null }[],
+  members: { tabId: string; roleId?: string | null; subagent?: boolean }[],
 ): Board {
   const ids = [leadId, ...members.map((m) => m.tabId)];
   let next = reconcile(board, ids, ids);
@@ -185,6 +188,7 @@ export function buildMissionTeam(
   for (const m of members) {
     next = addEdge(next, leadId, m.tabId);
     if (m.roleId) next = { ...next, roles: { ...next.roles, [m.tabId]: m.roleId } };
+    if (m.subagent && !next.subagents.includes(m.tabId)) next = { ...next, subagents: [...next.subagents, m.tabId] };
   }
   return next;
 }
@@ -272,6 +276,18 @@ export function addEdge(board: Board, a: string, b: string, id: string = crypto.
 export function removeEdgeBetween(board: Board, a: string, b: string): Board {
   const edge = board.edges.find((e) => (e.a === a && e.b === b) || (e.a === b && e.b === a));
   return edge ? removeEdge(board, edge.id) : board;
+}
+
+/**
+ * Define o que um terminal é no canvas: o papel (`null` = sem especificação, o orquestrador decide) e se é
+ * subagente. É só uma etiqueta: o orquestrador é quem decide o que fazer com ela. Pura.
+ */
+export function setRole(board: Board, tabId: string, role: string | null, subagent: boolean): Board {
+  const { [tabId]: _removed, ...rest } = board.roles;
+  const label = role?.trim();
+  const roles = label ? { ...rest, [tabId]: label } : rest;
+  const others = board.subagents.filter((id) => id !== tabId);
+  return { ...board, roles, subagents: subagent ? [...others, tabId] : others };
 }
 
 export function toggleOrchestrator(board: Board, tabId: string): Board {

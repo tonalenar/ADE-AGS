@@ -143,6 +143,9 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
     await act(async () => {
       codexBtn?.click();
     });
+    await act(async () => {
+      byText("btn.next")?.click();
+    });
 
     const sw = memorySwitch();
     expect(sw).not.toBeNull();
@@ -159,6 +162,9 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
     expect(backBtn).toBeDefined();
     await act(async () => {
       backBtn?.click();
+    });
+    await act(async () => {
+      byText("btn.back")?.click();
     });
 
     // 5. Escolhe o Shell (bash)
@@ -242,6 +248,9 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
     await act(async () => {
       codexBtn?.click();
     });
+    await act(async () => {
+      byText("btn.next")?.click();
+    });
 
     const sw = memorySwitch();
     expect(sw).not.toBeNull();
@@ -289,6 +298,9 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
       const codexBtn = byText("Codex");
       await act(async () => {
         codexBtn?.click();
+      });
+      await act(async () => {
+        byText("btn.next")?.click();
       });
 
       // Liga memória
@@ -352,6 +364,9 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
       await act(async () => {
         codexBtn?.click();
       });
+      await act(async () => {
+        byText("btn.next")?.click();
+      });
 
       const sw = memorySwitch();
       await act(async () => {
@@ -363,6 +378,9 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
       const backBtn = byText("btn.back");
       await act(async () => {
         backBtn?.click();
+      });
+      await act(async () => {
+        byText("btn.back")?.click();
       });
 
       const shellBtn = byText("Terminal (bash)");
@@ -405,10 +423,16 @@ describe("NewAgentDialog e segurança de memória em tabs (Etapa 25)", () => {
         byText("Codex")?.click();
       });
       await act(async () => {
+        byText("btn.next")?.click();
+      });
+      await act(async () => {
         memorySwitch()?.click();
       });
 
       // Volta e escolhe Shell
+      await act(async () => {
+        byText("btn.back")?.click();
+      });
       await act(async () => {
         byText("btn.back")?.click();
       });

@@ -31,7 +31,10 @@ export interface TeamMember {
   /** Modo Fast de Codex del Squad; solo Codex lo aplica. */
   fast?: boolean;
   accountId: string | null;
+  /** Vazio = sem especificação: o orquestrador define o papel (ags peer role). */
   roleId: string;
+  /** Subagente extra do Squad. */
+  subagent?: boolean;
   roleLabel: string;
   roleDescription: string;
   roleInstructions: string;
@@ -51,8 +54,10 @@ export function uniqueNames(names: string[]): string[] {
 export function teamOf(squad: Squad | null, roles: FunctionalRole[]): TeamMember[] {
   if (!squad) return [];
   const labels = squad.members.map((m) => roles.find((r) => r.id === m.roleId)?.label ?? m.roleId);
-  const names = uniqueNames([LEAD_NAME, ...labels]).slice(1);
-  return squad.members.map((m, i) => {
+  const extras = squad.extraMembers ?? [];
+  const extraLabels = extras.map((m) => (m.roleId ? roles.find((r) => r.id === m.roleId)?.label ?? m.roleId : "Subagente"));
+  const names = uniqueNames([LEAD_NAME, ...labels, ...extraLabels]).slice(1);
+  const fixed = squad.members.map((m, i) => {
     const role = roles.find((r) => r.id === m.roleId);
     return {
       name: names[i],
@@ -68,7 +73,25 @@ export function teamOf(squad: Squad | null, roles: FunctionalRole[]): TeamMember
       roleInstructions: role?.instructions ?? "",
     };
   });
+  const subagents = extras.map((m, i): TeamMember => {
+    const role = m.roleId ? roles.find((r) => r.id === m.roleId) : undefined;
+    return {
+      name: names[fixed.length + i],
+      agentId: m.agentId,
+      model: m.model,
+      effort: m.reasoningEffort ?? null,
+      fast: m.fastMode === true,
+      accountId: m.autoAccount ? null : m.accountId,
+      roleId: m.roleId ?? "",
+      subagent: true,
+      roleLabel: m.roleId ? role?.label ?? m.roleId : "Subagente",
+      roleDescription: role?.description ?? "",
+      roleInstructions: role?.instructions ?? "",
+    };
+  });
+  return [...fixed, ...subagents];
 }
+
 
 export const LEAD_NAME = "Orquestrador";
 
@@ -202,7 +225,8 @@ export function leadBriefing(
     : `SUA EQUIPE (já aberta e conectada a você no canvas):\n${team
         .map((m) => {
           const workspace = workspaces.find((w) => w.name === m.name);
-          return `- ${m.name} — ${m.roleLabel}${m.roleDescription ? `: ${m.roleDescription}` : ""}${workspace ? `; worktree: ${workspace.cwd}; branch: ${workspace.branch}` : ""}`;
+          const open = m.roleId ? "" : " [SEM PAPEL: decida pelo trabalho e defina com " + "`ags peer role \"" + m.name + "\" <papel>`]";
+          return `- ${m.name} — ${m.roleLabel}${m.subagent ? " (subagente)" : ""}${open}${m.roleDescription ? `: ${m.roleDescription}` : ""}${workspace ? `; worktree: ${workspace.cwd}; branch: ${workspace.branch}` : ""}`;
         })
         .join("\n")}`;
   return [
@@ -291,8 +315,11 @@ export function memberBriefing(mission: Pick<Mission, "title" | "objective"> & {
     "OBJETIVO DA MISSÃO",
     mission.objective,
     "",
-    `SEU PAPEL: ${member.roleLabel}${member.roleDescription ? ` — ${member.roleDescription}` : ""}`,
+    member.roleId
+      ? `SEU PAPEL: ${member.roleLabel}${member.roleDescription ? ` — ${member.roleDescription}` : ""}`
+      : `SEU PAPEL: ainda não definido. O orquestrador "${LEAD_NAME}" vai decidir e avisar; até lá, aguarde.`,
     member.roleInstructions,
+    ...(member.subagent ? ["Você é um SUBAGENTE do orquestrador: execute o que ele enviar e responda a ele."] : []),
     "",
     ...(workspace ? [`SEU WORKTREE: ${workspace.cwd}; branch: ${workspace.branch}. Trabalhe somente nele.`, workspace.environment, ""] : []),
     ...(findings.trim() ? [findings.trim(), ""] : []),
@@ -425,7 +452,7 @@ export async function startMissionInTerminals(
   canvasActions.buildMissionTeam(
     key,
     leadTabId,
-    memberTabIds.map((tabId, i) => ({ tabId, roleId: team[i].roleLabel })),
+    memberTabIds.map((tabId, i) => ({ tabId, roleId: team[i].roleId ? team[i].roleLabel : null, subagent: team[i].subagent })),
   );
   setWorkMode(key, "canvas");
   activateTab(leadTabId);

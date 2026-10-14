@@ -8,7 +8,7 @@ import { AccountPickerStep, AUTO_ACCOUNT } from "@/features/tabs/wizard/AccountP
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 
-import { addSquadRole, availableSquadRoles, EMPTY_SQUAD_INPUT, removeSquadRole, subagentDefaultIsReady } from "./squadForm";
+import { addExtraMember, addSquadRole, availableSquadRoles, removeExtraMember, EMPTY_SQUAD_INPUT, removeSquadRole, subagentDefaultIsReady } from "./squadForm";
 import { FastSwitch } from "./FastSwitch";
 import { SubagentDefaultSection } from "./SubagentDefaultSection";
 import { modelSelectionMode, modelsForAccount, withModelEffort } from "./modelSelection";
@@ -55,7 +55,7 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
   // backend o marcaria como indisponível depois. Não se deixa salvar.
   const leadAgent = roster?.agents.find((agent) => agent.agentId === form.lead.agentId);
   const ready = Boolean(form.name.trim() && canSaveAssignment(form.lead) && form.members.every(canSaveAssignment)
-    && subagentDefaultIsReady(form.defaultSubagent) && !leadUnsupported(leadAgent));
+    && (form.extraMembers ?? []).every(canSaveAssignment) && subagentDefaultIsReady(form.defaultSubagent) && !leadUnsupported(leadAgent));
 
   const save = async () => {
     if (!ready || busy) return;
@@ -68,6 +68,7 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
         description: form.description.trim(),
         lead: { ...form.lead, model: form.lead.model?.trim() || null },
         members: form.members.map((member) => ({ ...member, model: member.model?.trim() || null })),
+        extraMembers: (form.extraMembers ?? []).map((member) => ({ ...member, roleId: member.roleId || null, model: member.model?.trim() || null })),
         defaultSubagent: form.defaultSubagent
           ? { ...form.defaultSubagent, model: form.defaultSubagent.model?.trim() || null }
           : null,
@@ -195,6 +196,54 @@ export function SquadDialog({ initial = EMPTY_SQUAD_INPUT, roles, editing, squad
               </div>
             );
           })}
+        </section>
+        <section className="flex flex-col gap-2.5">
+          <div className="flex items-center gap-2">
+            <h3 className="flex-1 text-[11px] font-semibold uppercase tracking-[0.06em] text-gray-500 dark:text-gray-400">
+              {t("squads.extra.title")} <span className="font-mono tabular-nums normal-case tracking-normal">· {(form.extraMembers ?? []).length}</span>
+            </h3>
+            <Button variant="outline" size="sm" onClick={() => setForm((current) => addExtraMember(current))}>+ {t("squads.extra.add")}</Button>
+          </div>
+          <p className="text-[11.5px] leading-[15px] text-gray-500 dark:text-gray-400">{t("squads.extra.hint")}</p>
+          {(form.extraMembers ?? []).map((member, index) => (
+            <div key={index} className="flex flex-col gap-3 rounded-xl bg-white dark:bg-surface-raised/50 shadow-[0_0_0_0.5px_rgba(0,0,0,0.1),0_1px_2px_rgba(0,0,0,0.04)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.07)] px-4 py-3">
+              <div className="flex items-center gap-2.5">
+                <span className="text-[13px] font-semibold text-gray-900 dark:text-gray-50">{t("squads.extra.one", { n: index + 1 })}</span>
+                <PopupSelect className="min-w-48 flex-1" aria-label={t("squads.extra.role")} value={member.roleId ?? ""}
+                  onChange={(event) => setForm((current) => ({
+                    ...current,
+                    extraMembers: (current.extraMembers ?? []).map((entry, i) => i === index ? { ...entry, roleId: event.target.value || null } : entry),
+                  }))}>
+                  <option value="">{t("role.none")} — {t("role.noneHint")}</option>
+                  {roles.filter((role) => role.id !== "dreamer").map((role) => <option key={role.id} value={role.id}>{role.label}</option>)}
+                </PopupSelect>
+                {member.agentId && <Summary provider={providerLabel(member.agentId)} model={member.model} />}
+                <button type="button" onClick={() => setForm((current) => removeExtraMember(current, index))}
+                  title={t("squads.extra.remove")} aria-label={t("squads.extra.remove")}
+                  className="flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-gray-400 hover:bg-red-500/10 hover:text-red-500">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.7} strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden><path d="M4 7h16M10 11v6M14 11v6M5.5 7l1 12a2 2 0 0 0 2 1.8h7a2 2 0 0 0 2-1.8l1-12M9 7V4.5h6V7" /></svg>
+                </button>
+              </div>
+              <AgentConfig
+                roster={roster}
+                onRoster={setRoster}
+                agentId={member.agentId}
+                model={member.model}
+                reasoningEffort={member.reasoningEffort}
+                fastMode={member.fastMode}
+                accountId={member.accountId}
+                autoAccount={member.autoAccount}
+                complexity={member.complexity}
+                isolateDefault={member.isolateDefault}
+                availability={squad?.extraMembers?.[index]?.availability}
+                unavailableReason={squad?.extraMembers?.[index]?.unavailableReason}
+                onChange={(patch) => setForm((current) => ({
+                  ...current,
+                  extraMembers: (current.extraMembers ?? []).map((entry, i) => i === index ? { ...entry, ...patch } : entry),
+                }))}
+              />
+            </div>
+          ))}
         </section>
         <SubagentDefaultSection roster={roster} onRoster={setRoster} value={form.defaultSubagent}
           onChange={(defaultSubagent) => setForm((current) => ({ ...current, defaultSubagent }))} />

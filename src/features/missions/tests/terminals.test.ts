@@ -95,6 +95,19 @@ describe("el equipo de una misión", () => {
     expect(uniqueNames([])).toEqual([]);
   });
 
+  it("os subagentes extras entram na equipe: função repetida numerada, sem função = o orquestrador decide", () => {
+    const base = squad([{ roleId: "backend" }]);
+    const extra = { agentId: "codex", model: null, accountId: null, autoAccount: true, complexity: null, isolateDefault: true, availability: "available", unavailableReason: null };
+    const team = teamOf({ ...base, extraMembers: [{ ...extra, roleId: "backend" }, { ...extra, roleId: null }] } as never, roles);
+    expect(team.map((m) => m.name)).toEqual(["Backend", "Backend 2", "Subagente"]);
+    expect(team.map((m) => m.subagent === true)).toEqual([false, true, true]);
+    expect(team[2].roleId).toBe("");
+    const lead = leadBriefing({ title: "m", objective: "o" }, team);
+    expect(lead).toContain("(subagente) [SEM PAPEL");
+    expect(lead).toContain("ags peer role \"Subagente\"");
+    expect(memberBriefing({ title: "m", objective: "o" }, team[2])).toContain("ainda não definido");
+  });
+
   it("un integrante por miembro, con su papel y su cuenta (la automática no fija ninguna)", () => {
     const team = teamOf(squad([{ roleId: "backend", autoAccount: false, accountId: "acc-1" }, { roleId: "qa" }, { roleId: "desaparecido" }]), roles);
     expect(team.map((m) => m.name)).toEqual(["Backend", "QA", "desaparecido"]);

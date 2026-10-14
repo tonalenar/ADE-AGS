@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-pub(crate) const SCHEMA_VERSION: i32 = 44;
+pub(crate) const SCHEMA_VERSION: i32 = 45;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1243,6 +1243,11 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     // Solo aditiva: las filas existentes quedan NULL y se miden en la próxima pasada.
     if !has_column(conn, "session_history", "activity") {
         conn.execute_batch("ALTER TABLE session_history ADD COLUMN activity TEXT;")?;
+    }
+    // v45 — integrantes extra del Squad (subagentes sin límite de roles), guardados como JSON.
+    // Aditiva: los Squads anteriores quedan con `[]`.
+    if table_exists(conn, "squads") && !has_column(conn, "squads", "extra_members") {
+        conn.execute_batch("ALTER TABLE squads ADD COLUMN extra_members TEXT NOT NULL DEFAULT '[]';")?;
     }
     set_user_version(conn, SCHEMA_VERSION)
 }

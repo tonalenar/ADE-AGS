@@ -25,11 +25,23 @@ export function orchestratorNotice(board: Board, tabs: NamedTab[], orchestratorI
     .map((id) => byId.get(id))
     .filter((tab): tab is NamedTab => !!tab);
   if (peers.length === 0) return null;
-  const names = peers.map((tab) => `${tab.title.split(" — ")[0]} (${tab.agentLabel})`).join(", ");
+  const nameOf = (tab: NamedTab) => tab.title.split(" — ")[0];
+  const describe = (tab: NamedTab) => {
+    const role = board.roles[tab.id];
+    const tags = [role ? `papel: ${role}` : "sem papel definido", ...(board.subagents.includes(tab.id) ? ["subagente"] : [])];
+    return `${nameOf(tab)} (${tab.agentLabel}; ${tags.join(", ")})`;
+  };
+  const names = peers.map(describe).join(", ");
+  const open = peers.filter((tab) => !board.roles[tab.id]);
+  const decide = open.length > 0
+    ? ` Estes terminais estão SEM PAPEL e a decisão é sua: ${open.map(nameOf).join(", ")}. `
+      + "Escolha o papel de cada um pelo trabalho que você tem para dar (veja `ags roles`) e defina com `ags peer role <nome> <papel>` "
+      + "(acrescente --subagent se for só apoio): o agente recebe a instrução e o canvas mostra o papel."
+    : "";
   return `[ADE AGS] Você é o orquestrador deste canvas e tem ${peers.length === 1 ? "um terminal conectado" : `${peers.length} terminais conectados`} a você: ${names}. `
     + "Rode `ags peers` para ver os nomes exatos. Use `ags peer ask <nome> \"...\"` para pedir algo e esperar a resposta, "
     + "`ags peer tell <nome> \"...\"` para avisar sem esperar e `ags tab output <id>` para ler a tela deles. "
-    + "Delegue o trabalho a eles em vez de fazer tudo sozinho.";
+    + "Delegue o trabalho a eles em vez de fazer tudo sozinho." + decide;
 }
 
 /** O que já foi dito a cada orquestrador (a lista de ligados), para não repetir o mesmo aviso. */
@@ -43,7 +55,9 @@ export function forgetOrchestrator(orchestratorId: string): void {
 /** `true` se há um aviso novo para este orquestrador (a lista de ligados mudou desde o último). */
 export function shouldAnnounce(board: Board, orchestratorId: string): boolean {
   if (!board.orchestrators.includes(orchestratorId)) return false;
-  const signature = linkedPeers(board, orchestratorId).sort().join("|");
+  // O papel entra na assinatura: definir ou trocar o papel de um ligado avisa o orquestrador de novo.
+  const signature = linkedPeers(board, orchestratorId).sort()
+    .map((id) => `${id}:${board.roles[id] ?? ""}:${board.subagents.includes(id) ? "s" : ""}`).join("|");
   if (!signature || told.get(orchestratorId) === signature) return false;
   told.set(orchestratorId, signature);
   return true;

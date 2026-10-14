@@ -374,6 +374,7 @@ pub fn run() {
             crate::memory::lifecycle::memory_set_verification,
             // Functional roles and reusable Squad routing policies
             crate::roles::functional_roles_list,
+            crate::canvas::roles::canvas_roles_all,
             crate::roles::functional_role_get,
             crate::squads::squad_create,
             crate::squads::squad_update,

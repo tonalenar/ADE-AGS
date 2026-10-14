@@ -58,6 +58,10 @@ pub struct Board {
     /// en su nodo. Es solo una etiqueta: no da ni quita permisos.
     #[serde(default)]
     pub roles: BTreeMap<String, String>,
+    /// Tabs marcadas como subagentes: terminais de apoio que a orquestradora comanda. É só uma
+    /// etiqueta (como `roles`): não dá nem tira permissões.
+    #[serde(default)]
+    pub subagents: Vec<String>,
     /// Rótulos, imágenes y trazos: decoración que dibuja y edita el frontend. El backend no
     /// los interpreta, pero tienen que sobrevivir al guardado.
     #[serde(default)]
@@ -252,6 +256,16 @@ pub fn mission_of_tab(boards: &Boards, tab: &str) -> Option<String> {
         let (_, mission) = key.rsplit_once(MISSION_SEP)?;
         (member && !mission.is_empty()).then(|| mission.to_string())
     })
+}
+
+/// O papel mostrado no nó de `tab` (o que o usuário escolheu ou o orquestrador definiu), se houver.
+pub fn role_of(boards: &Boards, tab: &str) -> Option<String> {
+    boards.values().find_map(|b| b.roles.get(tab).cloned()).filter(|r| !r.trim().is_empty())
+}
+
+/// ¿Está `tab` marcada como subagente en algún canvas?
+pub fn is_subagent(boards: &Boards, tab: &str) -> bool {
+    boards.values().any(|b| b.subagents.iter().any(|s| s == tab))
 }
 
 /// ¿Está `tab` marcada como orquestadora en algún canvas?

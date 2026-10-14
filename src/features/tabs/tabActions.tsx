@@ -4,6 +4,7 @@ import { create } from "zustand";
 import { BoxIcon, Button, CloseIcon, CopyIcon, IconReset } from "neogestify-ui-components";
 
 import { SplitDownIcon, SplitRightIcon } from "@/app/icons";
+import { applyTabRole } from "@/features/canvas/applyRole";
 import { clearPlacement, takePlacement } from "@/features/canvas/placement";
 import { canvasActions } from "@/features/canvas/store";
 import { joinActiveConversation } from "@/features/sessions/conversationFlow";
@@ -213,7 +214,7 @@ export function TabDialogs() {
         initialSkillIds={wizardFor?.skillIds}
         initialPrelaunch={wizardFor?.prelaunch}
         onClose={() => { clearPlacement(); close({ wizardOpen: false, wizardFor: null }); }}
-        onConfirm={({ agent, skillIds, accountId, prelaunch, memoryBlock }) => {
+        onConfirm={({ agent, skillIds, accountId, prelaunch, memoryBlock, role }) => {
           const cwd = wizardFor?.cwd ?? activeTab?.cwd;
           const prompt = wizardFor?.prompt;
           if (!cwd) return;
@@ -230,15 +231,18 @@ export function TabDialogs() {
           // el agente arranque (varias TUIs solo escanean su carpeta al boot) —
           // Terminal.tsx espera esta promesa antes de invocar pty_create.
           registerPendingSkillSetup(tabId, attachSkillsToTab(tabId, workspaceId, skillIds));
-          // Prompt e memória saem em UM só envio: `sendWhenReady` guarda um texto por tab e uma
-          // segunda chamada pisaria o prompt. Memória só para TUI (nunca shell), só leitura; se
-          // falhar ou vier vazia, a tab abre normal.
-          if (memoryBlockFor(agent.id, memoryBlock)) {
-            void tabMemoryMessage({ id: tabId, agentId: agent.id, memoryBlock }, workspaceId).then((memory) => {
-              const text = startupText(memory, prompt);
-              if (text) sendWhenReady(tabId, text);
-            });
-          } else if (prompt) sendWhenReady(tabId, prompt);
+          // Função, memória e prompt saem em UM só envio: `sendWhenReady` guarda um texto por tab e uma
+          // segunda chamada pisaria o anterior. Memória só para TUI (nunca shell), só leitura; se
+          // falhar ou vier vazia, a tab abre normal. A função (QA, Backend… ou nenhuma) fica no canvas e
+          // o agente a lê primeiro; sem função e sem subagente não se diz nada.
+          const wantsMemory = memoryBlockFor(agent.id, memoryBlock);
+          void Promise.all([
+            applyTabRole(tabId, role).catch(() => null),
+            wantsMemory ? tabMemoryMessage({ id: tabId, agentId: agent.id, memoryBlock }, workspaceId).catch(() => null) : Promise.resolve(null),
+          ]).then(([briefing, memory]) => {
+            const text = [briefing, startupText(memory, prompt)].filter(Boolean).join("\n\n");
+            if (text) sendWhenReady(tabId, text);
+          });
         }}
       />
     </>

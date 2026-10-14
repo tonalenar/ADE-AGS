@@ -28,7 +28,7 @@ use super::routine::{
     routine_create, routine_delete, routine_disable, routine_edit, routine_enable, routine_list, routine_run, routine_show,
 };
 use super::chat::{chat_recall, chat_say};
-use super::peers::{peer_ask, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_tell};
+use super::peers::{peer_ask, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_role, peer_tell};
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
 use super::shared::bridge_call;
@@ -109,6 +109,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "peer.recruit" => peer_recruit(app, args),
         "peer.connect" => peer_connect(app, args),
         "peer.disconnect" => peer_disconnect(app, args),
+        "peer.role" => peer_role(app, args),
         // Las notas del canvas conectadas con quien pide (ver `notes`).
         "note.list" => note_list(app, args),
         "note.read" => note_read(app, args),

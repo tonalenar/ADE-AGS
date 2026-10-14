@@ -47,6 +47,14 @@ export interface SquadMember {
   unavailableReason: string | null;
 }
 
+/**
+ * Um subagente do Squad: quantos a pessoa quiser, inclusive com a mesma função repetida.
+ * `roleId: null` = sem especificação: o orquestrador decide o que ele é (`ags peer role`).
+ */
+export interface SquadExtraMember extends Omit<SquadMember, "roleId"> {
+  roleId: string | null;
+}
+
 /** O LLM padrão dos subagentes recrutados. Ausente/`null` = Automático (a orquestradora decide). */
 export interface SubagentDefault {
   agentId: string;
@@ -61,6 +69,8 @@ export interface Squad {
   description: string;
   lead: SquadLead;
   members: SquadMember[];
+  /** Os subagentes extras (ilimitados). Squads antigos não têm. */
+  extraMembers?: SquadExtraMember[];
   defaultSubagent?: SubagentDefault | null;
   createdAt: number;
   updatedAt: number;
@@ -90,11 +100,16 @@ export interface SquadMemberInput {
   isolateDefault: boolean;
 }
 
+export interface SquadExtraMemberInput extends Omit<SquadMemberInput, "roleId"> {
+  roleId: string | null;
+}
+
 export interface SquadInput {
   name: string;
   description: string;
   lead: SquadLeadInput;
   members: SquadMemberInput[];
+  extraMembers?: SquadExtraMemberInput[];
   defaultSubagent?: SubagentDefault | null;
 }
 
