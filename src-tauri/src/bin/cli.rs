@@ -107,6 +107,8 @@ PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os d
   portal press <portal> <tecla> [--target <ref>]   · scroll · select · wait · history
   portal screenshot|console|layout <portal>   Foto, console e medidas
                                               (sem eval, upload nem cookies: isso é do usuário)
+  portal act <portal> \"objetivo\" [--fill campo=valor]... [--steps 8]
+                                              O Jev navega sozinho até o objetivo, passo a passo (Ajustes → Decisões → Navegador do canvas)
 
 CHAT COM O USUÁRIO — o chat dele por conversas (sete cores); o que você escreve no terminal NÃO chega a ele
   say \"texto\" [--progress] [--thread <cor>]    Responde no chat (--progress: aviso, seu turno continua)
@@ -817,6 +819,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         // `ags portal click Web @e3`: el portal primero, después lo que cada acción pide.
         "portal.create" => &["name", "url"],
         "portal.open" => &["url"],
+        "portal.act" => &["name", "goal"],
         "portal.navigate" => &["name", "url"],
         "portal.history" => &["name", "action"],
         "portal.click" | "portal.hover" => &["name", "target"],
@@ -912,6 +915,26 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
                 }
                 serde_json::map::Entry::Vacant(e) => {
                     e.insert(Value::Array(vec![step]));
+                }
+            }
+            i += 2;
+            continue;
+        }
+
+        // `--fill campo=valor` repete (um por campo do formulário): acumula numa lista, como `--pre`.
+        if key == "fill" {
+            let value = args
+                .get(i + 1)
+                .filter(|v| !v.starts_with("--"))
+                .ok_or("--fill precisa de campo=valor")?;
+            match map.entry("fill".to_string()) {
+                serde_json::map::Entry::Occupied(mut e) => {
+                    if let Some(list) = e.get_mut().as_array_mut() {
+                        list.push(json!(value));
+                    }
+                }
+                serde_json::map::Entry::Vacant(e) => {
+                    e.insert(Value::Array(vec![json!(value)]));
                 }
             }
             i += 2;

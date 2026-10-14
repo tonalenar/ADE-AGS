@@ -14,7 +14,8 @@ import { isPortalId, type Board } from "./board";
 /** A linha que ensina a abrir um navegador no canvas, já ligado ao agente que a lê. */
 export const BROWSER_HINT =
   "NAVEGADOR: para abrir um site, o app que você está construindo ou qualquer URL, use `ags portal create \"<nome>\" <url>` — abre um navegador no canvas, já conectado a você (não abra o navegador do sistema). "
-  + "Depois: `ags portal snapshot \"<nome>\"` (a página, com refs @e1…), `click`, `type`, `press`, `scroll`, `wait`, `screenshot`. `ags --help` lista tudo.";
+  + "Depois: `ags portal snapshot \"<nome>\"` (a página, com refs @e1…), `click`, `type`, `press`, `scroll`, `wait`, `screenshot`. "
+  + "Para um trajeto de vários cliques (login, formulário), `ags portal act \"<nome>\" \"<objetivo>\" --fill campo=valor` deixa o Jev navegar rápido (se estiver ligado); confira a página que ele devolve. `ags --help` lista tudo.";
 
 /** O aviso de que um navegador foi ligado a este agente, ou `null` se a corda não é entre um agente e um navegador. */
 export function portalConnectedNotice(board: Board, a: string, b: string): { agent: string; text: string } | null {

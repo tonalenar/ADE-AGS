@@ -26,6 +26,9 @@ pub const POINT_DELIVERY: &str = "delivery_gate";
 pub const POINT_RELEVANCE: &str = "memory_relevance";
 /// Só sugere: a pessoa clica. Desligado por padrão.
 pub const POINT_ROUTING: &str = "turn_routing";
+/// O piloto do navegador: o Jev escolhe o próximo elemento a tocar numa página (ver `browse.rs`). Ajuda de verdade
+/// (o agente pediu `ags portal act`); desligado por padrão, porque o texto da página sai da máquina.
+pub const POINT_BROWSE: &str = "browser_step";
 
 /// Rótulos que a pergunta aceita mas que a heurística do ponto nunca devolve. O relatório os
 /// separa: um "desacordo" aí não é erro de ninguém, é o provedor dizendo algo que o código

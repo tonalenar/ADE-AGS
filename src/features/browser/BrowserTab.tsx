@@ -6,6 +6,8 @@ import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, TextArea, Tras
 import {
   BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
 } from "@/app/icons";
+import { neighbors } from "@/features/canvas/board";
+import { useCanvasStore } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { normalizeUrl, type BrowserView } from "@/features/tabs/viewTabs";
@@ -84,10 +86,14 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const activateTab = useTabsStore((s) => s.activateTab);
   // Solo agentes: a una terminal `bash` no se le manda lo que marcaste — no lo lee nadie,
   // se pegaría como texto en un prompt de shell.
-  const agents = useMemo(
-    () => tabs.filter((tab) => tab.cwd === view.cwd && tab.agentId !== "bash"),
-    [tabs, view.cwd]
-  );
+  // Num navegador do canvas, os agentes ligados a ele por corda vêm primeiro e um deles é o destino
+  // padrão: é a eles que a pessoa quer mandar o que marca na página.
+  const linkedKey = useCanvasStore((s) => Object.values(s.boards).flatMap((b) => (view.id in b.portals ? neighbors(b, view.id) : [])).join(","));
+  const agents = useMemo(() => {
+    const linked = linkedKey ? linkedKey.split(",") : [];
+    const mine = tabs.filter((tab) => tab.cwd === view.cwd && tab.agentId !== "bash");
+    return [...mine.filter((tab) => linked.includes(tab.id)), ...mine.filter((tab) => !linked.includes(tab.id))];
+  }, [tabs, view.cwd, linkedKey]);
 
   const [address, setAddress] = useState(view.url);
   const [target, setTarget] = useState<PreviewTarget | null>(null);
@@ -426,10 +432,18 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     return () => highlightAgent(null);
   }, [composerOpen, agentId]);
 
-  // Si el agente elegido se cerró, se propone el que esté activo.
+  // Si el agente elegido se cerró, se propone el primero (con corda, el ligado a este navegador).
   useEffect(() => {
     if (!agents.some((a) => a.id === agentId)) setAgentId(agents[0]?.id ?? null);
   }, [agents, agentId]);
+
+  // Ligar uma corda a este navegador faz desse agente o destino, uma vez por agente ligado.
+  const firstLinked = linkedKey.split(",")[0] || null;
+  useEffect(() => {
+    if (firstLinked && agents.some((a) => a.id === firstLinked)) setAgentId(firstLinked);
+    // Só quando muda quem está ligado: escolher outro depois, à mão, vale.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstLinked]);
 
   const togglePicking = () => {
     const next = !picking;

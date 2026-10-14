@@ -296,6 +296,8 @@
   "settings.decisions.point.relevanceHint": "Al armar el briefing, Jev elige las memorias aprobadas que importan para el objetivo. El texto del objetivo y de las memorias candidatas sale de la máquina. La búsqueda local es el respaldo.",
   "settings.decisions.point.routing": "Enrutamiento por turno (Jev sugiere)",
   "settings.decisions.point.routingHint": "En la pestaña Equipo, un mensaje sin @ recibe una sugerencia de a quién enviarlo. Solo sugiere: haces clic. El texto del mensaje y los nombres y roles del equipo salen de la máquina.",
+  "settings.decisions.point.browser": "Navegador del canvas (Jev lo pilota)",
+  "settings.decisions.point.browserHint": "Con `ags portal act` el agente da un objetivo y Jev elige, paso a paso, qué tocar en la página — más rápido que un modelo grande mirando cada pantalla. El título, la dirección (sin consulta), el texto visible y los nombres de los botones y campos de la página salen de esta máquina; los valores escritos y las contraseñas nunca.",
   "settings.decisions.report": "Informe de la sombra",
   "settings.decisions.refresh": "Actualizar informe",
   "settings.decisions.export": "Exportar CSV",

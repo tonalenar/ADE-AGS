@@ -25,12 +25,14 @@ use crate::ipc::protocol::{arg_str, arg_str_opt};
 
 /// Cuánto puede tardar una acción en la página (cargar, esperar un texto…).
 const ACTION_TIMEOUT_S: u64 = 90;
+/// `act` encadeia vários passos (cada um é um snapshot, uma pergunta ao Jev e uma ação).
+const ACT_TIMEOUT_S: u64 = 115;
 
 /// Qué acciones admite un portal y cómo se arma su pedido. Es la lista del frontend
 /// (`PORTAL_OPS`); está acá también para fallar con un mensaje útil antes de molestarlo.
 pub(crate) const ACTIONS: &[&str] = &[
     "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll", "wait",
-    "screenshot", "console", "layout",
+    "screenshot", "console", "layout", "act",
 ];
 
 #[derive(Debug, Clone)]
@@ -161,6 +163,22 @@ pub(crate) fn request_for(action: &str, args: &Value) -> Result<Value, String> {
                 set(&mut req, "timeout_ms", json!(ms));
             }
         }
+        // O Jev pilota: o agente dá o objetivo (e os valores a digitar) e a app navega passo a passo.
+        "act" => {
+            set(&mut req, "goal", json!(need(args, "goal", action)?));
+            let fills: Vec<Value> = match args.get("fill") {
+                Some(Value::Array(list)) => list.clone(),
+                Some(Value::String(one)) if !one.is_empty() => vec![json!(one)],
+                _ => Vec::new(),
+            };
+            if fills.iter().any(|f| !f.as_str().is_some_and(|s| s.contains('='))) {
+                return Err("--fill precisa de `campo=valor` (repita a flag para vários).".into());
+            }
+            set(&mut req, "fills", Value::Array(fills));
+            if let Some(n) = num(args, "steps")? {
+                set(&mut req, "steps", json!(n));
+            }
+        }
         "console" => {
             if let Some(l) = arg_str_opt(args, "level") {
                 set(&mut req, "level", json!(l));
@@ -268,7 +286,7 @@ pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Resu
         "canvas.portal",
         &json!({ "op": "run", "cwd": cwd, "id": target.id, "request": request, "owner": owner }),
         Some(window_of(&target.key)),
-        std::time::Duration::from_secs(ACTION_TIMEOUT_S),
+        std::time::Duration::from_secs(if action == "act" { ACT_TIMEOUT_S } else { ACTION_TIMEOUT_S }),
     )?;
     let out = unwrap_frontend_result(raw)?;
     Ok(json!({ "portal": describe(target), "text": out.get("text").cloned().unwrap_or(Value::Null) }))
@@ -326,6 +344,19 @@ mod test {
             let err = request_for(banned, &json!({})).unwrap_err();
             assert!(err.contains("não admite"), "{banned}: {err}");
         }
+    }
+
+    #[test]
+    fn act_leva_o_objetivo_os_valores_e_o_limite_de_passos() {
+        let req = request_for("act", &json!({ "goal": "entrar", "fill": ["email=a@b.c", "senha=x=y"], "steps": "5" })).unwrap();
+        assert_eq!(req["op"], "act");
+        assert_eq!(req["goal"], "entrar");
+        assert_eq!(req["fills"], json!(["email=a@b.c", "senha=x=y"]));
+        assert_eq!(req["steps"], 5.0);
+        let one = request_for("act", &json!({ "goal": "x", "fill": "a=1" })).unwrap();
+        assert_eq!(one["fills"], json!(["a=1"]));
+        assert!(request_for("act", &json!({})).unwrap_err().contains("--goal"));
+        assert!(request_for("act", &json!({ "goal": "x", "fill": ["sem-igual"] })).unwrap_err().contains("campo=valor"));
     }
 
     #[test]
