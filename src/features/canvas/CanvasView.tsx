@@ -17,6 +17,7 @@ import type { BrowserView } from "@/features/tabs/viewTabs";
 import type { Tab } from "@/features/tabs/types";
 import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { forgetOrchestrator, orchestratorNotice, shouldAnnounce } from "./orchestratorNotice";
+import { portalConnectedNotice } from "./portalNotice";
 
 import { isHiddenNote, shownNote, stackMembers,
   NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isFreeNodeId, neighbors, thin, type CanvasNote, type CanvasPortal, type Stroke,
@@ -71,6 +72,13 @@ function announceToOrchestrators(key: string, ids: string[]): void {
     const text = orchestratorNotice(board, tabs, id);
     if (text) sendWhenReady(id, text);
   }
+}
+
+/** Avisa o agente quando a pessoa liga uma corda entre ele e um navegador do canvas. */
+function announcePortal(key: string, a: string, b: string): void {
+  const board = useCanvasStore.getState().boards[key];
+  const notice = board ? portalConnectedNotice(board, a, b) : null;
+  if (notice) sendWhenReady(notice.agent, notice.text);
 }
 
 interface AgentNodeData extends Record<string, unknown> {
@@ -657,6 +665,7 @@ function CanvasInner() {
     if (!key || !c.source || !c.target) return;
     canvasActions.connect(key, c.source, c.target);
     announceToOrchestrators(key, [c.source, c.target]);
+    announcePortal(key, c.source, c.target);
     const made = useCanvasStore.getState().boards[key]?.edges.find(
       (e) => (e.a === c.source && e.b === c.target) || (e.a === c.target && e.b === c.source));
     if (made) flashNode(c.target, cordColor(made.id));
@@ -675,6 +684,7 @@ function CanvasInner() {
     canvasActions.disconnect(key, old.id);
     canvasActions.connect(key, c.source, c.target);
     announceToOrchestrators(key, [c.source, c.target]);
+    announcePortal(key, c.source, c.target);
     flashNode(c.target, cordColor(old.id));
   };
   const onReconnectEnd = (_: unknown, edge: Edge) => {
@@ -1117,7 +1127,7 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
   const key = useActiveBoardKey();
   const { id, cwd, portal, links } = data;
   const [armed, setArmed] = useState(false);
-  const handle = "w-2.5! h-2.5! border-2! border-white! dark:border-surface-deep! bg-sky-400! dark:bg-sky-500!";
+  const handle = "ade-port z-10! w-3! h-3! border-2! border-white! dark:border-surface! bg-sky-400! dark:bg-sky-300!";
 
   // La vista del navegador se crea una vez, con la URL con que se guardó el portal.
   const ensure = useViewTabsStore((s) => s.ensurePortalView);
@@ -1142,83 +1152,94 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
     return () => window.clearTimeout(timer);
   }, [armed]);
 
+  const host = hostOf(shown);
+
   return (
-    <div
-      className={`h-full w-full flex flex-col rounded-lg overflow-hidden border bg-white dark:bg-surface
-        ${selected
-          ? "border-accent-500 dark:border-accent-400 shadow-[0_0_0_1px_var(--color-accent-400)]"
-          : "border-sky-300/80 dark:border-sky-200/20"}`}
-    >
-      <NodeResizer isVisible={selected} minWidth={PORTAL_MIN.w} minHeight={PORTAL_MIN.h}
-        lineClassName="border-transparent!" handleClassName="w-2! h-2! rounded-[3px]! bg-white! dark:bg-surface! border-[1.5px]! border-accent-500! shadow-sm!" />
-      <CordPort id="l" type="source" position={Position.Left} className={handle} />
-      <CordPort id="r" type="source" position={Position.Right} className={handle} />
+    // Mesma estrutura do cartão do terminal (`AgentNode`): alças FORA do cartão, bordas como área de
+    // arrastar e um contorno de 2 px na cor do nó (azul-céu, a do navegador).
+    <div className="relative h-full w-full">
+      <NodeResizer isVisible minWidth={PORTAL_MIN.w} minHeight={PORTAL_MIN.h}
+        lineClassName="ade-rz-line" handleClassName="ade-rz-handle" />
+      <CordPort id="l" type="source" position={Position.Left} style={{ top: HEADER_H / 2 }} className={handle} />
+      <CordPort id="r" type="source" position={Position.Right} style={{ top: HEADER_H / 2 }} className={handle} />
       <CordPort id="t" type="source" position={Position.Top} className={handle} />
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
 
       <div
-        className="ade-node-drag flex items-center gap-2 pl-3 pr-1.5 shrink-0 cursor-grab active:cursor-grabbing
-          border-b border-sky-200 dark:border-sky-100/10 bg-sky-50 dark:bg-sky-100/5"
-        style={{ height: NOTE_HEADER_H }}
+        className="group h-full w-full flex flex-col rounded-[14px] overflow-hidden transition-shadow duration-150 bg-white dark:bg-surface"
+        style={{ boxShadow: nodeFrame(PORTAL_ACCENT, !!selected, false) }}
       >
-        <GlobeIcon className="w-3.5 h-3.5 shrink-0 text-sky-600 dark:text-sky-300/80" />
-        <input
-          value={portal.name}
-          onChange={(e) => key && canvasActions.updatePortal(key, id, { name: e.target.value })}
-          aria-label={t("canvas.portalName")}
-          spellCheck={false}
-          className="nodrag min-w-0 flex-1 bg-transparent outline-none text-[12.5px] font-medium
-            text-gray-800 dark:text-gray-100 focus:bg-white/60 dark:focus:bg-white/5 rounded px-1 -mx-1"
-        />
-        {links > 0 && (
-          <span className="shrink-0 text-[10.5px] tabular-nums px-1.5 rounded-full
-            bg-sky-200/70 dark:bg-white/8 text-sky-800 dark:text-gray-400" title={t("canvas.links", { count: links })}>
-            ⇄ {links}
-          </span>
-        )}
-        <Button variant="custom"
-          onClick={() => {
-            if (!key) return;
-            if (armed) canvasActions.removePortal(key, id);
-            else setArmed(true);
-          }}
-          title={armed ? t("canvas.portalDeleteConfirm") : t("canvas.portalDelete")}
-          aria-label={armed ? t("canvas.portalDeleteConfirm") : t("canvas.portalDelete")}
-          className={`nodrag cc-t shrink-0 flex items-center justify-center h-6 rounded-md
-            ${armed
-              ? "px-2 text-[11px] font-medium text-white bg-red-500 hover:bg-red-600"
-              : "w-6 text-gray-400 hover:text-red-500 hover:bg-sky-200/60 dark:hover:bg-white/8"}`}
+        <div
+          className="ade-node-drag flex items-center gap-2.5 pl-4 pr-3 shrink-0 cursor-grab active:cursor-grabbing select-none
+            border-b border-black/[0.06] dark:border-[rgba(84,84,88,0.55)] bg-white dark:bg-surface"
+          style={{ height: HEADER_H }}
         >
-          {armed ? t("canvas.portalDeleteConfirm") : <CloseIcon className="w-3 h-3" />}
-        </Button>
-      </div>
+          <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${shown
+            ? "bg-[#30d158] shadow-[0_0_0_3px_rgba(48,209,88,0.18)]"
+            : "bg-gray-300 dark:bg-white/25 shadow-[0_0_0_3px_rgba(142,142,147,0.12)]"}`} />
+          <span className="flex min-w-0 flex-1 flex-col">
+            <input
+              value={portal.name}
+              onChange={(e) => key && canvasActions.updatePortal(key, id, { name: e.target.value })}
+              aria-label={t("canvas.portalName")}
+              spellCheck={false}
+              className="nodrag min-w-0 w-full bg-transparent outline-none truncate text-[15px] leading-5 font-semibold tracking-[-0.1px]
+                text-gray-900 dark:text-[#f5f5f7] focus:bg-black/[0.04] dark:focus:bg-white/5 rounded px-1 -mx-1"
+            />
+            <span className="flex min-w-0 items-center gap-1.5 text-[11px] leading-[14px] text-gray-500 dark:text-white/60" title={shown || undefined}>
+              <span aria-hidden className="h-2 w-2 shrink-0 rounded-[3px]" style={{ background: PORTAL_ACCENT }} />
+              <span className="shrink-0">{t("canvas.portalKind")}</span>
+              {host && <span className="min-w-0 truncate font-mono text-[10.5px] text-gray-400 dark:text-white/30">{host}</span>}
+            </span>
+          </span>
+          {links > 0 && (
+            <span className="shrink-0 font-mono text-[10.5px] tabular-nums px-1.5 py-0.5 rounded-full
+              bg-gray-200/70 dark:bg-white/[0.07] text-gray-500 dark:text-gray-400" title={t("canvas.links", { count: links })}>
+              ⇄ {links}
+            </span>
+          )}
+          <Button variant="custom"
+            onClick={() => {
+              if (!key) return;
+              if (armed) canvasActions.removePortal(key, id);
+              else setArmed(true);
+            }}
+            title={armed ? t("canvas.portalDeleteConfirm") : t("canvas.portalDelete")}
+            aria-label={armed ? t("canvas.portalDeleteConfirm") : t("canvas.portalDelete")}
+            className={`nodrag cc-t shrink-0 flex items-center justify-center h-6 rounded-md
+              ${armed
+                ? "px-2 text-[11px] font-medium text-white bg-red-500 hover:bg-red-600"
+                : "w-6 text-gray-300 dark:text-white/20 hover:text-red-500 hover:bg-gray-200/70 dark:hover:bg-white/8"}`}
+          >
+            {armed ? t("canvas.portalDeleteConfirm") : <CloseIcon className="w-3 h-3" />}
+          </Button>
+        </div>
 
-      {/* `nodrag nowheel nopan`: dentro de la página, arrastrar y la rueda son de la página. */}
-      <div className="nodrag nowheel nopan relative flex-1 min-h-0">
-        {view && (
-          <Suspense fallback={null}>
-            <PortalBody view={view} active={selected} />
-          </Suspense>
-        )}
+        {/* `nodrag nowheel nopan`: dentro de la página, arrastrar y la rueda son de la página. */}
+        <div className="nodrag nowheel nopan relative flex-1 min-h-0">
+          {view && (
+            <Suspense fallback={null}>
+              <PortalBody view={view} active={selected} />
+            </Suspense>
+          )}
+        </div>
       </div>
     </div>
   );
 });
 
+/** A cor do navegador no canvas: azul-céu, para se distinguir dos agentes. */
+const PORTAL_ACCENT = "#64d2ff";
+
+/** O host de uma URL, sem `www.`; vazio se não for uma URL. */
+function hostOf(url: string): string {
+  try { return new URL(url).host.replace(/^www\./, ""); } catch { return ""; }
+}
+
 /** El navegador dentro del portal. `memo`: mover o redimensionar el nodo no lo toca. */
 const PortalBody = memo(function PortalBody({ view, active }: { view: BrowserView; active: boolean }) {
   return <BrowserTab view={view} active={active} />;
 });
-
-function GlobeIcon({ className }: { className?: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round"
-      strokeLinejoin="round" className={className} aria-hidden>
-      <circle cx="12" cy="12" r="9" />
-      <path d="M3 12h18M12 3c2.5 2.7 3.8 5.7 3.8 9s-1.3 6.3-3.8 9c-2.5-2.7-3.8-5.7-3.8-9S9.5 5.7 12 3Z" />
-    </svg>
-  );
-}
 
 // ── Conexión: ver `cords.tsx` (cordas, ímã y raio) ────────────────────
 

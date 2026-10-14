@@ -4,6 +4,7 @@ import i18n from "i18next";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import type { AgentAccount } from "@/features/accounts/types";
+import { BROWSER_HINT } from "@/features/canvas/portalNotice";
 import { canvasActions, missionBoardKey, setWorkMode } from "@/features/canvas/store";
 import type { FunctionalRole, Squad, SubagentDefault } from "@/features/squads/types";
 import { useTabsStore } from "@/features/tabs/store";
@@ -255,6 +256,7 @@ export function leadBriefing(
     '- `ags peer tell "<nome>" "<mensagem>"` — avisa sem esperar. Para tarefa, bloqueio ou entrega com aspas, <, >, $ ou mais de uma linha, use `ags peer tell "<nome>" --file <arquivo>`: escreva o texto num arquivo fora do repositório. No Windows o shell quebra essas aspas e a mensagem não chega.',
     '- `ags peer check <nome>` — vê a tela dele agora.',
     '- `ags notify "<mensagem>"` — chama o usuário só quando precisar dele.',
+    `- ${BROWSER_HINT}`,
     ...(hasVigia ? [`- O "${VIGIA_NAME}" (um agente barato, que não implementa nada) observa a equipe em segundo plano: quando alguém fica parado, te manda \`[Vigia] ...\` e registra no chat o que travou e o que fez para destravar. Aja sobre os avisos dele na hora: ninguém pode ficar parado.`] : []),
     "",
     "MENOS CONVERSA, MAIS REGISTRO:",
@@ -336,6 +338,7 @@ export function memberBriefing(mission: Pick<Mission, "title" | "objective"> & {
     "- Suíte completa local apenas em cenários de risco elevado (migração de banco de dados, unsafe/COM, schema). Com PR aberto, espere o CI com `gh pr checks <n> --watch` (sem polling com sleep).",
     "- Correções da sua entrega têm teto (padrão 2). Se a devolução disser que é a ÚLTIMA rodada: `gh pr checks` verde, ou `ags test run rust`, `ags test run tsc` e `ags test run frontend` (não rode cargo/vitest/tsc crus). Sem isso a entrega não fecha.",
     "- Se depender de outro integrante, fale direto com ele (`ags peer ask \"<nome>\" \"...\"`) em vez de esperar o Orquestrador repassar.",
+    `- ${BROWSER_HINT}`,
     "",
     `Ao concluir, envie UMA mensagem final curta ao orquestrador por \`ags peer tell "${LEAD_NAME}"\`, com resultado, decisões, arquivos tocados, testes e bloqueios. Use caminhos relativos e \`nenhum\` quando um campo estiver vazio.`,
     ...(mission.id ? [

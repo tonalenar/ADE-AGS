@@ -205,6 +205,53 @@ pub(super) fn portal_create(app: &AppHandle, args: &Value) -> Result<Value, Stri
     Ok(json!({ "created": created }))
 }
 
+/// Un endereço do próprio computador: o app que o agente está construindo (`localhost:5173`), não um site.
+fn is_local(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(d)) => d == "localhost" || d.ends_with(".localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback() || ip.is_unspecified(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback() || ip.is_unspecified(),
+        None => false,
+    }
+}
+
+/// Mesma origem (esquema, host e porta): um servidor de desenvolvimento que reinicia abre o mesmo endereço de novo.
+fn same_origin(a: &str, b: &str) -> bool {
+    match (url::Url::parse(a.trim()), url::Url::parse(b.trim())) {
+        (Ok(a), Ok(b)) => a.origin() == b.origin(),
+        _ => false,
+    }
+}
+
+/// `ags open <url>` (e `ags http://…`, que é como as ferramentas que respeitam `$BROWSER` chamam o navegador).
+/// Um endereço local abre no canvas — reaproveitando o navegador conectado que já está nessa origem — e qualquer outro vai
+/// para o navegador do sistema: um login (`gh auth login`, `vercel login`) precisa das sessões da pessoa, que o
+/// navegador do canvas não tem. `--canvas` força o canvas.
+pub(super) fn portal_open(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let raw = need(args, "url", "open")?;
+    let parsed = url::Url::parse(raw.trim())
+        .ok()
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .ok_or_else(|| format!("'{raw}' não é um endereço http(s)."))?;
+    if !is_local(&parsed) && !flag(args, "canvas") {
+        use tauri_plugin_opener::OpenerExt;
+        app.opener().open_url(parsed.as_str(), None::<&str>).map_err(|e| e.to_string())?;
+        return Ok(json!({ "opened": "system", "url": parsed.as_str() }));
+    }
+    let from = caller(args)?;
+    let portals = reachable(&canvas::load_boards(), &from);
+    if let Some(existing) = portals.iter().find(|p| same_origin(&p.portal.url, parsed.as_str())) {
+        let mut nav = args.clone();
+        nav["name"] = json!(existing.id);
+        let done = portal_action(app, &nav, "navigate")?;
+        return Ok(json!({ "opened": "canvas", "reused": describe(existing), "navigated": done.get("portal").cloned().unwrap_or(Value::Null) }));
+    }
+    let mut create = args.clone();
+    create["url"] = json!(parsed.as_str());
+    let made = portal_create(app, &create)?;
+    Ok(json!({ "opened": "canvas", "created": made.get("created").cloned().unwrap_or(Value::Null) }))
+}
+
 /// `ags portal <acción> <portal> …`: lo que el agente le pide a ese navegador.
 pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Result<Value, String> {
     let from = caller(args)?;
@@ -279,6 +326,24 @@ mod test {
             let err = request_for(banned, &json!({})).unwrap_err();
             assert!(err.contains("não admite"), "{banned}: {err}");
         }
+    }
+
+    #[test]
+    fn so_o_proprio_computador_abre_no_canvas() {
+        let local = |s: &str| is_local(&url::Url::parse(s).unwrap());
+        for yes in ["http://localhost:5173", "http://127.0.0.1:3000/x", "http://[::1]:8080", "http://app.localhost:3000", "http://0.0.0.0:4000"] {
+            assert!(local(yes), "{yes}");
+        }
+        for no in ["https://github.com/login/device", "http://192.168.0.5:3000", "https://localhost.evil.com"] {
+            assert!(!local(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn a_mesma_origem_reaproveita_o_navegador() {
+        assert!(same_origin("http://localhost:5173/", "http://localhost:5173/login"));
+        assert!(!same_origin("http://localhost:5173", "http://localhost:3000"));
+        assert!(!same_origin("", "http://localhost:3000"));
     }
 
     #[test]

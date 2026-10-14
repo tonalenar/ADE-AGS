@@ -32,6 +32,8 @@ import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessa
 import { ResponsiveStage } from "./ResponsiveStage";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
+import { ZoomControl } from "./ZoomControl";
+import { clampZoom, stepZoom } from "./zoom";
 
 /** Lo que el proxy inyecta en cada página: el selector y el runtime (control del agente y
  *  captura de debug). Dos scripts sueltos en un solo archivo, así es un único pedido. */
@@ -181,6 +183,9 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       if (debugOpen) previewSetRecording(recordingOrigin, view.id, false).catch(() => undefined);
     };
   }, [debugOpen, recordingOrigin, view.id]);
+
+  const zoom = clampZoom(view.zoom ?? 1);
+  const setZoom = useCallback((next: number) => updateView(view.id, { zoom: clampZoom(next) }), [updateView, view.id]);
 
   const setViewport = useCallback((next: Viewport | null) => {
     viewportRef.current = next;
@@ -603,6 +608,8 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
 
   const tabTools = (
     <>
+      <ZoomControl zoom={zoom} disabled={!target || !!frozen}
+        onStep={(dir) => setZoom(stepZoom(zoom, dir))} onReset={() => setZoom(1)} />
       <ToolButton label={viewport ? t("browser.viewport.exit") : t("browser.viewport.enter")} active={!!viewport}
         onClick={() => {
           const next = viewport ? null : (presetById("phone") ?? null);
@@ -706,7 +713,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         <div ref={column} data-browser-column className="relative flex flex-col flex-1 min-w-0 min-h-0">
           {shownError}
           {target ? (
-            <ResponsiveStage viewport={viewport} onResize={setViewport}>
+            <ResponsiveStage viewport={viewport} onResize={setViewport} zoom={zoom}>
             <iframe
               ref={iframe}
               src={target.proxiedUrl}

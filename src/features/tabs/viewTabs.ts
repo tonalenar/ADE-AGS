@@ -64,6 +64,8 @@ export interface BrowserView extends ViewBase {
    *  Se persiste por lo mismo que el tamaño, y se vuelve a aplicar en cada carga —una
    *  página nueva trae sus hojas de estilo sin tocar. */
   touch?: boolean;
+  /** O zoom da página (1 = 100%). Ausente = 100%. Não muda o tamanho do navegador, só o da página. */
+  zoom?: number;
 }
 
 export type ViewTab = FileView | DiffView | BrowserView;

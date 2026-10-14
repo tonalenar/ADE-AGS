@@ -661,6 +661,12 @@ pub async fn pty_create(
     if let Some(path) = path_with_app_dir(&child_path) {
         cmd.env("PATH", path);
     }
+    // Quem respeita `$BROWSER` (Vite com `--open`, `python -m webbrowser`…) abre o endereço pelo `ags`, que leva
+    // um `localhost` para um navegador do canvas ligado a este terminal. Só nos terminais da app (precisam do
+    // `ADE_TAB_ID`) e sem pisar num `BROWSER` que a pessoa já tenha definido.
+    if tab_id.is_some() && std::env::var_os("BROWSER").is_none() {
+        cmd.env("BROWSER", "ags");
+    }
     let env = env.unwrap_or_default();
     // Con una cuenta de la app, una API key heredada no le gana a su login.
     for var in crate::agents::overriding_env(env.keys()) {
