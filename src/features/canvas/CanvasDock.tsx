@@ -85,6 +85,19 @@ function Pill({ label, active, onClick, children, className = "" }: {
 /** Separador hairline entre grupos de la barra. */
 const Sep = () => <span aria-hidden className="w-px h-[22px] mx-1.5 bg-black/10 dark:bg-white/[0.08]" />;
 
+/** O mapa: um tamanho fixo e legível, independente da largura da dock. */
+const MAP_SIZE = { w: 236, h: 150 };
+
+/** A cor de cada nó no mapa: terminais em destaque, o resto em cinza. */
+function mapNodeColor(node: { type?: string }): string {
+  switch (node.type) {
+    case "agent": return "#0a84ff";
+    case "note": return "#ffd60a";
+    case "portal": case "device": return "#bf5af2";
+    default: return "#8e8e93";
+  }
+}
+
 const popover = `pointer-events-auto absolute right-3 bottom-[4.75rem] rounded-xl overflow-hidden border ${hairline} ${material}`;
 
 /**
@@ -160,12 +173,14 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
       )}
       {usageOpen && panel === null && <UsagePanel accounts={accounts} onClose={toggleUsage} width={dockWidth} />}
       {panel === "map" && (
-        <div className={`${popover} w-[17rem]`} style={sameWidth}>
-          <div className="relative h-44">
+        // Tamanho próprio (não o da dock): um mapa de 500 px de largura não cabia em nada e os nós sumiam.
+        <div className={`${popover} p-1.5`} style={{ width: MAP_SIZE.w + 12 }}>
+          <div className="relative rounded-lg overflow-hidden bg-black/[0.04] dark:bg-white/[0.04]" style={{ width: MAP_SIZE.w, height: MAP_SIZE.h }}>
             {nodesReady && (
-              <MiniMap pannable zoomable nodeColor="var(--color-accent-400)" nodeStrokeColor="rgba(0,0,0,0.55)" nodeStrokeWidth={14} nodeBorderRadius={18}
-                maskColor="rgba(0,0,0,0.45)" maskStrokeColor="var(--color-accent-300)" maskStrokeWidth={3}
-                style={{ position: "absolute", inset: 0, margin: 0, width: "100%", height: "100%", background: "transparent" }} />
+              <MiniMap pannable zoomable position="top-left" nodeColor={mapNodeColor} nodeStrokeWidth={0} nodeBorderRadius={6}
+                maskColor="rgba(10,132,255,0.10)" maskStrokeColor="rgba(10,132,255,0.9)" maskStrokeWidth={2}
+                ariaLabel={t("canvas.dock.map")}
+                style={{ position: "absolute", inset: 0, margin: 0, width: MAP_SIZE.w, height: MAP_SIZE.h, background: "transparent" }} />
             )}
             <Button variant="custom" onClick={() => onTogglePanel("map")} aria-label={t("canvas.dock.close")}
               className="cc-t absolute right-2 top-2 z-10 w-6 h-6 flex items-center justify-center rounded-full bg-black/45 text-white hover:bg-black/65">

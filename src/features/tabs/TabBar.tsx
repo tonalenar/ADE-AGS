@@ -13,7 +13,7 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { viewsOfWorkspace } from "@/features/tabs/viewTabs";
 import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
 import { ModeToggle } from "@/features/canvas/ModeToggle";
-import { useWorkMode } from "@/features/canvas/store";
+import { conversationOfKey, useActiveBoardKey, useWorkMode } from "@/features/canvas/store";
 import { MissionChips } from "@/features/missions/MissionChips";
 import { useActiveGroup, useMissionIndex } from "@/features/missions/groups";
 
@@ -54,6 +54,9 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
   // El grupo que se mira: una misión (sus terminales) o lo suelto.
   const missionOf = useMissionIndex();
   const group = useActiveGroup();
+  // Uma conversa de projeto também tem canvas próprio: lá os terminais são nós, como numa missão.
+  const inConversation = conversationOfKey(useActiveBoardKey()) !== null;
+  const teamCanvas = canvas && (group !== null || inConversation);
   const inGroup = (key: string) => (isAgentKey(key) ? (missionOf[keyId(key)] ?? null) === group : group === null);
   const groups = layout ? allGroups(layout.root) : [];
   const only = groups.length === 1 ? groups[0]! : null;
@@ -91,7 +94,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
 
         {/* Con una misión en el canvas, las terminales ya se ven como nodos y no van en la tira:
             quedan «Canvas» (volver) y las vistas del workspace (navegador, archivos, diffs). */}
-        {canvas && group !== null && (
+        {teamCanvas && (
           <>
             <button
               type="button"
@@ -114,7 +117,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
           </>
         )}
 
-        {!divided && !(canvas && group !== null) && (
+        {!divided && !teamCanvas && (
           <GroupTabStrip
             items={items}
             active={only ? only.active : fallbackActive}

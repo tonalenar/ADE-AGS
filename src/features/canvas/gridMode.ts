@@ -1,6 +1,6 @@
 import { useMemo } from "react";
 
-import { boardKeyOfTab, missionOfKey, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
+import { boardKeyOfTab, conversationOfKey, missionOfKey, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath } from "@/features/tabs/viewTabs";
@@ -14,7 +14,7 @@ export function gridColumns(count: number): number {
 }
 
 /**
- * Los panes de la grade de una misión, o `null` si no corresponde (opción apagada, no es una
+ * Los panes de la grade de una misión o conversa de proyecto, o `null` si no corresponde (opción apagada, no es una
  * misión, hay menos de dos terminales, o la vista no es de abas). Pura.
  */
 export function gridTabs(opts: { on: boolean; mission: string | null; mode: string; tabIds: string[] }): string[] | null {
@@ -66,7 +66,7 @@ export function useMissionGrid(): string[] | null {
   );
   const joined = ids.join("|");
   return useMemo(
-    () => (viewActive ? null : gridTabs({ on, mission: missionOfKey(key), mode, tabIds: joined ? joined.split("|") : [] })),
+    () => (viewActive ? null : gridTabs({ on, mission: missionOfKey(key) ?? conversationOfKey(key), mode, tabIds: joined ? joined.split("|") : [] })),
     [on, key, mode, joined, viewActive],
   );
 }

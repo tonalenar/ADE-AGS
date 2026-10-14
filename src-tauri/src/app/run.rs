@@ -158,6 +158,7 @@ pub fn run() {
             crate::ipc::commands::routine::routine_set_catch_up,
             crate::ipc::commands::routine::routine_run_now,
             crate::ipc::commands::routine::routine_remove,
+            crate::ipc::commands::routine::routine_create_ui,
             // Chat con los agentes, por hilos
             crate::ipc::commands::chat::chat_history,
             crate::ipc::commands::chat::chat_send,
@@ -244,6 +245,8 @@ pub fn run() {
             // Cuentas de git (GitHub, GitLab, Gitea…): repos, clonar, PRs e issues
             crate::forge::forge_kinds,
             crate::forge::forge_oauth_available,
+            crate::forge::forge_oauth_client,
+            crate::forge::forge_oauth_set_client,
             crate::forge::forge_accounts,
             crate::forge::forge_device_start,
             crate::forge::forge_device_poll,

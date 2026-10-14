@@ -13,7 +13,8 @@ import { open as pickFile } from "@tauri-apps/plugin-dialog";
 
 const TOOL = "cc-t flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white";
 import { unreadOf, useUnreadStore } from "./chatUnread";
-import { useActiveBoardKey, boardKeyOfTab, missionOfKey, useCanvasStore } from "./store";
+import { useActiveBoardKey, boardKeyOfTab, conversationOfKey, missionOfKey, useCanvasStore } from "./store";
+import { useTerminalPrompts } from "./useTerminalPrompts";
 import { TeamFeed, TeamFilterBar, useMissionApprovals, useTeamFeed, useTeamMessages } from "./TeamFeed";
 import { useRouteSuggestion, withTarget } from "./routeSuggestion";
 import { resolveMention, suggestMentions, type UserNote } from "./teamFeedModel";
@@ -90,13 +91,20 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
   );
   const [tabId, setTabId] = useState<string | null>(null);
   // Numa missão o chat abre na linha do tempo da equipe; escolher um agente leva à conversa dele.
+  // Uma conversa de projeto com o time montado (canvas `#c:`) tem o mesmo chat da equipe de uma missão.
   const missionId = missionOfKey(key);
-  const teamView = missionId !== null && (tabId === null || tabId === TEAM);
-  const teamMessages = useTeamMessages(missionId);
+  const conversationId = conversationOfKey(key);
+  const teamScope = missionId ?? (conversationId ? `c:${conversationId}` : null);
+  const teamView = teamScope !== null && (tabId === null || tabId === TEAM);
+  const teamMessages = useTeamMessages(teamScope);
   const teamApprovals = useMissionApprovals(missionId);
   const [notes, setNotes] = useState<UserNote[]>([]);
-  const teamFeed = useTeamFeed(missionId, teamMessages, teamApprovals, notes);
-  useEffect(() => setNotes([]), [missionId]);
+  // Os pedidos de permissão que os TUIs dos agentes mostram nos terminais chegam aqui para aprovar ou recusar.
+  const promptTabs = useMemo(() => agents.map((a) => ({ id: a.id, name: a.title.split(" — ")[0] })), [agents]);
+  const terminalPrompts = useTerminalPrompts(promptTabs, teamScope !== null);
+  const teamFeed = useTeamFeed(teamScope, teamMessages, teamApprovals, notes, terminalPrompts);
+  useEffect(() => setNotes([]), [teamScope]);
+  const orchestratorIds = useCanvasStore((s) => (key ? s.boards[key]?.orchestrators : undefined));
   const addressees = useMemo(() => agents.map((a) => ({ id: a.id, name: a.title.split(" — ")[0] })), [agents]);
   const roles = useCanvasStore((s) => (key ? s.boards[key]?.roles : undefined));
   const [thread, setThread] = useState<Thread>("blue");
@@ -148,9 +156,9 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
   };
   const toggleMax = () => commit({ ...view, maximized: !view.maximized });
   const clamped = clampSize(view.size, { width: 4000, height: 4000 });
-  // Sem tamanho escolhido pelo usuário, o chat tem a largura da dock.
+  // O chat tem sempre a largura da dock (redimensionar muda só a altura): chat, rotinas, andares e uso alinham.
   const dockWidth = useDockWidth((s) => s.width);
-  const panelWidth = isDefaultSize(view.size) && dockWidth > 0 ? dockWidth : clamped.width;
+  const panelWidth = dockWidth > 0 ? dockWidth : clamped.width;
   const sizeStyle: React.CSSProperties = view.maximized
     ? { width: `calc(100% - ${CHAT_MARGIN.x}px)`, height: `calc(100% - ${CHAT_MARGIN.y}px)` }
     : { width: panelWidth, height: clamped.height, maxWidth: `calc(100% - ${CHAT_MARGIN.x}px)`, maxHeight: `calc(100% - ${CHAT_MARGIN.y}px)` };
@@ -240,7 +248,8 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
     if (mention.kind === "unknown") return warn("canvas.team.unknownMention");
     if (mention.kind === "empty") return warn("canvas.team.emptyMention", { name: mention.to.name });
     if (mention.kind === "ambiguous") return warn("canvas.team.ambiguousMention", { names: mention.names.join(", ") });
-    const lead = addressees.find((a) => /^orquestrador/i.test(a.name));
+    // O orquestrador é o terminal com a coroa; na missão em terminais é também o que se chama "Orquestrador".
+    const lead = addressees.find((a) => orchestratorIds?.includes(a.id)) ?? addressees.find((a) => /^orquestrador/i.test(a.name));
     if (mention.kind === "none" && addressees.length === 0) return warn("canvas.team.noAddressee");
     // Sem Orquestrador aberto não há "a quem for": não adivinha o primeiro agente.
     if (mention.kind === "none" && !lead) return warn("canvas.team.noLead", { names: addressees.map((a) => a.name).join(", ") });
@@ -326,14 +335,14 @@ ${text}` : text)); setPicking(false); }} />}
       subtitle={teamView ? t("canvas.team.subtitle") : current?.title ?? t("canvas.chat.subtitle")}
       heading={agents.length > 0 ? (
         <div className="flex min-w-0 gap-0.5 overflow-x-auto rounded-[9px] bg-black/[0.05] p-0.5 dark:bg-surface-raised" role="tablist" aria-label={t("canvas.chat.title")}>
-          {missionId && (
+          {teamScope && (
             <button type="button" role="tab" onClick={() => setTabId(TEAM)} title={t("canvas.team.title")} aria-selected={teamView}
               className={`cc-t flex h-[26px] min-w-0 max-w-44 flex-1 items-center justify-center rounded-[7px] px-3 text-[12.5px] font-medium
                 ${teamView
                   ? "bg-white text-gray-900 shadow-[0_1px_2px_rgba(0,0,0,0.12)] dark:bg-surface-overlay dark:text-[#f5f5f7] dark:shadow-[0_1px_2px_rgba(0,0,0,0.4)]"
                   : "text-gray-500 hover:text-gray-900 dark:text-white/55 dark:hover:text-white"}`}>
               <span className="truncate">{t("canvas.team.tab")}</span>
-              {!teamView && teamApprovals.length > 0 && <Badge n={teamApprovals.length} />}
+              {!teamView && teamApprovals.length + terminalPrompts.length > 0 && <Badge n={teamApprovals.length + terminalPrompts.length} />}
             </button>
           )}
           {agents.map((a) => (
@@ -441,7 +450,7 @@ ${text}` : text)); setPicking(false); }} />}
           ))}
       </div>}
     >
-      {teamView ? (teamMessages.length + teamApprovals.length + notes.length > 0
+      {teamView ? (teamMessages.length + teamApprovals.length + terminalPrompts.length + notes.length > 0
         ? <TeamFeed items={teamFeed.items} colors={Object.fromEntries(agents.map((a) => [a.id, agentTile(a.agentId)]))} /> : undefined)
         : current && messages.length > 0 ? <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.chat.title")}>
               {messages.map((m) => (

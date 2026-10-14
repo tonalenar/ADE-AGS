@@ -14,11 +14,14 @@ import { TabCostList } from "@/features/missions/TabCostList";
 import { estimateOf, formatCompactNumber, formatUsd, getTokens, tabsOfAgent, type CostEstimate, type MissionTokens } from "@/features/missions/tokens";
 import type { MissionReview } from "@/features/missions/types";
 import { useAgentActivity } from "@/features/terminal/activity";
+import { useConversationsStore } from "@/features/sessions/conversationsStore";
 import { LevelNumber } from "@/shared/brand/LevelNumber";
 import { Pet, powerTier, usePetStatus } from "@/shared/brand/Pet";
 
 import { type FailureKey, failureActionKey, failureKey, failureLabelKey } from "@/features/missions/failureClass";
 import { type RateWindow, botStats, clock, missionSeconds, rankKey, recentMissions, scoreDigits, trophies } from "./botStats";
+import { ConversationList, useConversationLive } from "./ConversationCards";
+import { recentConversations } from "./conversationStats";
 import { useBotPanelStore } from "./botPanelStore";
 import { LiveArcade } from "./LiveArcade";
 import { LiveArcadeGrid, LiveSelector } from "./LiveArcadeGrid";
@@ -77,6 +80,15 @@ export function BotPanel() {
   const [liveReview, setLiveReview] = useState<MissionReview | null>(null);
   // Costo estimado y ahorro de cada misión de la lista (se leen de a una, en segundo plano).
   const [estimates, setEstimates] = useState<Record<string, CostEstimate | null>>({});
+  // Conversas de projeto (canvas con equipo de agentes) del workspace abierto.
+  const convRows = useConversationsStore((s) => s.rows);
+  const conversations = useMemo(() => recentConversations(convRows), [convRows]);
+  const activeConvCount = useMemo(() => convRows.filter((r) => r.state === "active" && !r.hidden).length, [convRows]);
+  const convLive = useConversationLive(conversations, now);
+  const liveConversations = useMemo(
+    () => conversations.filter((r) => r.state === "active" && (convLive.get(r.id)?.working ?? 0) > 0),
+    [conversations, convLive],
+  );
 
   const recent = useMemo(() => recentMissions(missions), [missions]);
   const stats = useMemo(() => botStats(missions, now), [missions, now]);
@@ -240,6 +252,7 @@ export function BotPanel() {
                   {stats.testCount > 0 && <Card label={t("botPanel.card.tests")} value={scoreDigits(stats.testCount, 3)} sub={t("botPanel.card.testsSub")} />}
                   <Card label={t("botPanel.card.failed")} value={scoreDigits(stats.failed, 3)} color="var(--hq-pink)" />
                   <Card label={t("botPanel.card.total")} value={scoreDigits(stats.total, 3)} />
+                  <Card label={t("botPanel.card.conversations")} value={scoreDigits(activeConvCount, 3)} color="var(--hq-green)" />
                   {Object.entries(stats.failuresByClass).map(([k, n]) => (
                     <Card key={k} label={t("botPanel.card.failCause", { cause: t(failureLabelKey(k as FailureKey)) })} value={scoreDigits(n ?? 0, 3)} color="var(--hq-pink)" />
                   ))}
@@ -247,7 +260,8 @@ export function BotPanel() {
               )}
 
               {view === "missions" && (
-                recent.length === 0 ? <p className="ags-hq__dim">{t("botPanel.empty")}</p> : (
+                <>
+                {recent.length === 0 ? <p className="ags-hq__dim">{t("botPanel.empty")}</p> : (
                   <>
                     <div className="ags-hq__list" role="listbox">
                       {recent.map((m, i) => (
@@ -289,7 +303,12 @@ export function BotPanel() {
                       </div>
                     )}
                   </>
-                )
+                )}
+                <div className="ags-hq__sec">{t("botPanel.conversations.title")} · {conversations.length}</div>
+                {conversations.length === 0
+                  ? <p className="ags-hq__dim">{t("botPanel.conversations.empty")}</p>
+                  : <ConversationList rows={conversations} live={convLive} now={now} />}
+                </>
               )}
 
               {view === "tokens" && (
@@ -343,6 +362,12 @@ export function BotPanel() {
                 current
                   ? <LiveArcade key={current.id} mission={current} tasks={currentDetail?.tasks ?? EMPTY_ARCADE_TASKS} timings={timings} review={liveReview} tokens={tokens} />
                   : <p className="ags-hq__dim">{t("botPanel.live.empty")}</p>
+              )}
+              {view === "live" && liveConversations.length > 0 && (
+                <>
+                  <div className="ags-hq__sec">{t("botPanel.conversations.liveTitle")} · {liveConversations.length}</div>
+                  <ConversationList rows={liveConversations} live={convLive} now={now} showWorking />
+                </>
               )}
             </div>
             </div>

@@ -268,6 +268,26 @@ pub fn is_subagent(boards: &Boards, tab: &str) -> bool {
     boards.values().any(|b| b.subagents.iter().any(|s| s == tab))
 }
 
+/// Lo que separa la carpeta de la conversa de proyecto en la clave de su canvas (ver
+/// `conversationBoardKey` en el frontend).
+const CONVERSATION_SEP: &str = "#c:";
+
+/// La conversa de proyecto a la que pertenece `tab`: la del canvas `#c:` que la tiene como nodo
+/// u orquestadora. `None` si no está en ninguna.
+pub fn conversation_of_tab(boards: &Boards, tab: &str) -> Option<String> {
+    boards.iter().find_map(|(key, board)| {
+        let member = board.orchestrators.iter().any(|o| o == tab)
+            || board.nodes.as_object().is_some_and(|nodes| nodes.contains_key(tab));
+        let (_, conversation) = key.rsplit_once(CONVERSATION_SEP)?;
+        (member && !conversation.is_empty()).then(|| conversation.to_string())
+    })
+}
+
+/// El equipo (chat unificado) de `tab`: su misión o, si no tiene, su conversa (`c:<id>`).
+pub fn team_scope_of_tab(boards: &Boards, tab: &str) -> Option<String> {
+    mission_of_tab(boards, tab).or_else(|| conversation_of_tab(boards, tab).map(|id| format!("c:{id}")))
+}
+
 /// ¿Está `tab` marcada como orquestadora en algún canvas?
 pub fn is_orchestrator(boards: &Boards, tab: &str) -> bool {
     boards.values().any(|b| b.orchestrators.iter().any(|o| o == tab))
