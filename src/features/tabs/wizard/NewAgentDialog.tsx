@@ -11,6 +11,8 @@ import { AccountPickerStep, useAgentAccounts } from "@/features/tabs/wizard/Acco
 import { AdvancedOptions } from "@/features/tabs/wizard/AdvancedOptions";
 import { memoryBlockFor } from "@/features/memory/tabMemory";
 import { MemoryBlockSwitch } from "@/features/memory/MemoryBlockSwitch";
+import { NO_ROLE, type AgentRoleChoice } from "@/features/canvas/agentRole";
+import { RolePicker } from "@/features/canvas/RolePicker";
 import { PrelaunchChain } from "@/features/prelaunch/PrelaunchChain";
 import { SkillPickerStep } from "@/features/tabs/wizard/SkillPickerStep";
 import { useAvailableAgents } from "@/features/agents/useAvailableAgents";
@@ -31,6 +33,8 @@ interface NewAgentDialogProps {
     prelaunch: PrelaunchStep[];
     /** Bloque de memoria de solo lectura al inicio de la sesión. Desactivado por defecto. */
     memoryBlock: boolean;
+    /** O que o terminal vai ser no time: uma função ou nenhuma (o orquestrador decide). */
+    role: AgentRoleChoice;
   }) => void;
   /** Al duplicar una tab: sus skills vienen marcadas en cualquier TUI que se elija (las
    *  que esa TUI soporta), y sus comandos previos también. */
@@ -39,7 +43,7 @@ interface NewAgentDialogProps {
   title?: string;
 }
 
-type StepId = "agent" | "account" | "skills" | "prelaunch";
+type StepId = "agent" | "account" | "role" | "skills" | "prelaunch";
 
 /**
  * Abrir otro agente en el workspace en el que estás, un paso por vez.
@@ -77,6 +81,7 @@ export function NewAgentDialog({
   const [accountId, setAccountId] = useState<string | undefined>();
   const [prelaunch, setPrelaunch] = useState<PrelaunchStep[]>([]);
   const [memoryBlock, setMemoryBlock] = useState(false);
+  const [role, setRole] = useState<AgentRoleChoice>(NO_ROLE);
   const [step, setStep] = useState<StepId>("agent");
   // Um segundo clique em "Abrir agente" enquanto o pool ainda resolve não pode abrir outro agente.
   const confirming = useRef(false);
@@ -99,6 +104,7 @@ export function NewAgentDialog({
     setAccountId(undefined);
     setPrelaunch([]);
     setMemoryBlock(false);
+    setRole(NO_ROLE);
     setStep("agent");
   }, [isOpen]);
 
@@ -106,8 +112,9 @@ export function NewAgentDialog({
   // O interruptor some no shell: a opção não pode sobreviver escondida e mandar memória a um bash.
   useEffect(() => { if (isShell) setMemoryBlock(false); }, [isShell]);
   const steps = useMemo<StepId[]>(() => {
-    const last: StepId = isShell ? "prelaunch" : "skills";
-    return accounts.length > 0 ? ["agent", "account", last] : ["agent", last];
+    // A terminal pelada não é parte do time: sem função, só os comandos prévios.
+    const tail: StepId[] = isShell ? ["prelaunch"] : ["role", "skills"];
+    return accounts.length > 0 ? ["agent", "account", ...tail] : ["agent", ...tail];
   }, [accounts.length, isShell]);
 
   // Cambiar de TUI puede borrar el paso donde estabas parado (la nueva no tiene cuentas).
@@ -121,6 +128,7 @@ export function NewAgentDialog({
   const LABELS: Record<StepId, string> = {
     agent: t("newAgent.step.agent"),
     account: t("newAgent.step.account"),
+    role: t("role.step"),
     skills: t("newAgent.step.skills"),
     prelaunch: t("newAgent.step.prelaunch"),
   };
@@ -142,7 +150,7 @@ export function NewAgentDialog({
       (resolved) => {
         confirming.current = false;
         rememberLastAgent(agent.id);
-        onConfirm({ agent, skillIds, accountId: resolved, prelaunch, memoryBlock: memoryBlockFor(agent.id, memoryBlock) });
+        onConfirm({ agent, skillIds, accountId: resolved, prelaunch, memoryBlock: memoryBlockFor(agent.id, memoryBlock), role: isShell ? NO_ROLE : role });
         onClose();
       },
       (e) => {
@@ -226,7 +234,7 @@ export function NewAgentDialog({
                 // cuentas de la TUI anterior hasta el próximo render.
                 const hasAccounts = useAccountsStore.getState()
                   .accounts.some((a) => a.agentId === next.id);
-                setStep(hasAccounts ? "account" : next.id === SHELL_AGENT_ID ? "prelaunch" : "skills");
+                setStep(hasAccounts ? "account" : next.id === SHELL_AGENT_ID ? "prelaunch" : "role");
               }}
             />
           )}
@@ -242,6 +250,13 @@ export function NewAgentDialog({
                 onChange={setAccountId}
                 showLabel={false}
               />
+            </div>
+          )}
+
+          {step === "role" && agent && (
+            <div className="flex flex-col gap-3">
+              <p className="text-xs text-gray-500 dark:text-gray-400">{t("role.stepHint")}</p>
+              <RolePicker value={role} onChange={setRole} />
             </div>
           )}
 

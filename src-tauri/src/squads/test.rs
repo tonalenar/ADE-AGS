@@ -8,7 +8,7 @@ use crate::{
 
 use super::{
     store,
-    types::{AssignmentAvailability, SquadInput, SquadLeadInput, SquadMemberInput},
+    types::{AssignmentAvailability, SquadExtraMemberInput, SquadInput, SquadLeadInput, SquadMemberInput},
 };
 
 fn member(role_id: &str, agent_id: &str) -> SquadMemberInput {
@@ -40,6 +40,7 @@ fn input(name: &str) -> SquadInput {
         },
         members: vec![member("backend", "codex")],
         default_subagent: None,
+        extra_members: vec![],
     }
 }
 
@@ -404,6 +405,88 @@ fn default_subagent_validation_rejects_bad_combinations() {
     assert!(check(subagent("claude-code", None, None, true)).contains("Codex"));
     // Modelo vacío cuenta como "sin modelo": el esfuerzo sigue requiriéndolo.
     assert!(check(subagent("codex", Some("  "), Some("low"), false)).contains("requires a specific model"));
+}
+
+fn extra(role: Option<&str>, agent: &str) -> SquadExtraMemberInput {
+    SquadExtraMemberInput {
+        role_id: role.map(str::to_string),
+        agent_id: agent.into(),
+        reasoning_effort: None,
+        model: None,
+        account_id: None,
+        auto_account: true,
+        complexity: None,
+        fast_mode: false,
+        isolate_default: false,
+    }
+}
+
+#[test]
+fn extra_members_roundtrip_without_role_limit_and_stay_apart_from_members() {
+    let conn = test_db();
+    assert!(create(&conn, "Plain").extra_members.is_empty());
+
+    let mut raw = input("With extras");
+    raw.extra_members = vec![
+        extra(Some("backend"), "codex"),
+        extra(Some("backend"), "codex"),
+        extra(None, "opencode"),
+    ];
+    let squad = store::create(&conn, &store::validate(&conn, &raw).unwrap()).unwrap();
+    let saved = store::get(&conn, &squad.id).unwrap().unwrap();
+    assert_eq!(saved.extra_members.len(), 3);
+    assert_eq!(
+        saved.extra_members.iter().map(|m| m.role_id.clone()).collect::<Vec<_>>(),
+        vec![Some("backend".to_string()), Some("backend".to_string()), None]
+    );
+    assert_eq!(saved.extra_members[2].agent_id, "opencode");
+    assert_eq!(saved.extra_members[0].availability, AssignmentAvailability::Available);
+    assert_eq!(saved.members.len(), 1, "los members no cambian");
+
+    raw.extra_members.truncate(1);
+    let valid = store::validate(&conn, &raw).unwrap();
+    let updated = store::update(&conn, &squad.id, &valid).unwrap();
+    assert_eq!(updated.extra_members.len(), 1);
+}
+
+#[test]
+fn extra_members_validation_rejects_bad_entries_with_their_position() {
+    let conn = test_db();
+    // La primera extra es válida: así el error debe señalar la #2.
+    let check = |bad: SquadExtraMemberInput| {
+        let mut raw = input("Invalid extra");
+        raw.extra_members = vec![extra(None, "codex"), bad];
+        store::validate(&conn, &raw).unwrap_err()
+    };
+    let missing_role = check(extra(Some("no-such-role"), "codex"));
+    assert!(missing_role.starts_with("extra #2:") && missing_role.contains("does not exist"), "{missing_role}");
+    let no_provider = check(extra(None, "  "));
+    assert!(no_provider.starts_with("extra #2:") && no_provider.contains("provider is required"), "{no_provider}");
+    let unknown = check(extra(None, "no-such-agent"));
+    assert!(unknown.starts_with("extra #2:"), "{unknown}");
+    let mut fast = extra(None, "opencode");
+    fast.fast_mode = true;
+    assert!(check(fast).contains("Codex"));
+    let mut effort = extra(None, "codex");
+    effort.reasoning_effort = Some("max".into());
+    assert!(check(effort).contains("requires a specific model"));
+
+    let mut too_many = input("Too many");
+    too_many.extra_members = (0..25).map(|_| extra(None, "codex")).collect();
+    assert!(store::validate(&conn, &too_many).unwrap_err().contains("at most 24"));
+}
+
+#[test]
+fn squad_saved_before_extra_members_reads_as_empty() {
+    let conn = test_db();
+    conn.execute(
+        "INSERT INTO squads (id, name, description, lead_agent_id, created_at, updated_at)
+         VALUES ('legacy', 'Legacy', '', 'claude-code', 0, 0)",
+        [],
+    )
+    .unwrap();
+    let squad = store::get(&conn, "legacy").unwrap().unwrap();
+    assert!(squad.extra_members.is_empty());
 }
 
 mod recruit_default {

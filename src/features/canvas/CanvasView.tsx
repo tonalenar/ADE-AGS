@@ -54,6 +54,9 @@ import { useScopedDesigns } from "./design/useScopedDesigns";
 import { useCliOutdatedNotice } from "./cliStatus";
 import { useMissionIndex } from "@/features/missions/groups";
 import { RoutinesPanel } from "./RoutinesPanel";
+import { RoleEditDialog } from "./RoleEditDialog";
+import { applyTabRole } from "./applyRole";
+import type { AgentRoleChoice } from "./agentRole";
 import { boardKeyOfTab, canvasActions, missionOfKey, useActiveBoardKey, useCanvasStore } from "./store";
 import { cleanPreviewLines } from "./previewText";
 
@@ -77,8 +80,11 @@ interface AgentNodeData extends Record<string, unknown> {
   links: number;
   orchestrator: boolean;
   role?: string;
+  subagent: boolean;
   onFocus: (tabId: string) => void;
   onToggleOrchestrator: (tabId: string) => void;
+  /** A pessoa mudou o que o terminal é (função e subagente). */
+  onSetRole: (tabId: string, choice: AgentRoleChoice) => void;
 }
 
 type AgentFlowNode = Node<AgentNodeData, "agent">;
@@ -309,7 +315,16 @@ function CanvasInner() {
         links: neighbors(board, tab.id).length,
         orchestrator: board.orchestrators.includes(tab.id),
         role: board.roles[tab.id],
+        subagent: board.subagents.includes(tab.id),
         onFocus: focusNode,
+        onSetRole: (id: string, choice: AgentRoleChoice) => {
+          if (!key) return;
+          // O agente lê a nova função; os orquestradores ligados a ele recebem o aviso atualizado.
+          void applyTabRole(id, choice).then((briefing) => {
+            if (briefing) sendWhenReady(id, briefing);
+            announceToOrchestrators(key, useCanvasStore.getState().boards[key]?.orchestrators ?? []);
+          });
+        },
         onToggleOrchestrator: (id: string) => { if (!key) return; canvasActions.toggleOrchestrator(key, id); announceToOrchestrators(key, [id]); },
       },
     }];
@@ -777,7 +792,8 @@ function CanvasInner() {
 
 const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const { t } = useTranslation();
-  const { tab, box, live, links, orchestrator, role, onFocus, onToggleOrchestrator } = data;
+  const { tab, box, live, links, orchestrator, role, subagent, onFocus, onToggleOrchestrator, onSetRole } = data;
+  const [editingRole, setEditingRole] = useState(false);
   const handle = "ade-port z-10! w-3! h-3! border-2! border-white! dark:border-surface! bg-gray-400! dark:bg-gray-200!";
 
   return (
@@ -798,6 +814,10 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
       <CordPort id="t" type="source" position={Position.Top} className={handle} />
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
 
+      {editingRole && (
+        <RoleEditDialog name={tab.title.split(" — ")[0]} label={role} subagent={subagent}
+          onClose={() => setEditingRole(false)} onSave={(choice) => onSetRole(tab.id, choice)} />
+      )}
       <div
         className="group h-full w-full flex flex-col rounded-[14px] overflow-hidden transition-shadow duration-150 bg-white dark:bg-surface"
         style={{ boxShadow: nodeFrame(agentAccent(tab.agentId), selected, orchestrator) }}
@@ -825,6 +845,7 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
           ) : role ? (
             <span className={`${PILL} max-w-32 truncate ${rolePill(role)}`} title={t("canvas.role", { role })}>{role}</span>
           ) : null}
+          {subagent && <span className={`${PILL} bg-black/[0.06] text-gray-500 dark:bg-white/[0.08] dark:text-white/60`}>{t("role.subagentTag")}</span>}
           {/* `nodrag`: sin esto el clic arrastraría el nodo en vez de apretar el botón. */}
           <Button variant="custom"
             onClick={() => onToggleOrchestrator(tab.id)}
@@ -837,6 +858,16 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
               hover:bg-gray-200/70 dark:hover:bg-white/8`}
           >
             <CrownIcon className="w-3.5 h-3.5" />
+          </Button>
+          {/* O lápis edita o que o terminal é: função (ou nenhuma, o orquestrador decide) e subagente. */}
+          <Button variant="custom"
+            onClick={() => setEditingRole(true)}
+            title={t("role.edit")}
+            aria-label={t("role.edit")}
+            className="nodrag cc-t shrink-0 flex items-center justify-center w-6 h-6 rounded-md
+              text-gray-300 dark:text-white/20 hover:text-gray-600 dark:hover:text-white/60 hover:bg-gray-200/70 dark:hover:bg-white/8"
+          >
+            <PencilIcon className="w-3.5 h-3.5" />
           </Button>
           {links > 0 && (
             <span className="shrink-0 font-mono text-[10.5px] tabular-nums px-1.5 py-0.5 rounded-full
@@ -880,6 +911,14 @@ function NodeStatus({ tabId }: { tabId: string }) {
     <span aria-hidden className={`h-2 w-2 shrink-0 rounded-full ${on
       ? "bg-[#30d158] shadow-[0_0_0_3px_rgba(48,209,88,0.18)]"
       : "bg-gray-300 dark:bg-white/25 shadow-[0_0_0_3px_rgba(142,142,147,0.12)]"}`} />
+  );
+}
+
+function PencilIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round" className={className} aria-hidden>
+      <path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" />
+    </svg>
   );
 }
 

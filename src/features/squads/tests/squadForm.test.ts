@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  addExtraMember,
   addSquadRole,
+  removeExtraMember,
   availableSquadRoles,
   EMPTY_SQUAD_INPUT,
   inputFromSquad,
@@ -25,6 +27,15 @@ describe("Squad form", () => {
     expect(addSquadRole(withBackend, "backend")).toBe(withBackend);
     expect(availableSquadRoles(roles, withBackend.members).map((role) => role.id)).toEqual(["frontend", "qa"]);
     expect(removeSquadRole(withBackend, "backend").members).toEqual([]);
+  });
+
+  it("adds as many extra subagents as wanted, repeated roles included, and removes by position", () => {
+    let input = addExtraMember(EMPTY_SQUAD_INPUT);
+    input = addExtraMember(input, "backend");
+    input = addExtraMember(input, "backend");
+    expect(input.extraMembers).toHaveLength(3);
+    expect(input.extraMembers?.[0]).toMatchObject({ roleId: null, agentId: "", autoAccount: true });
+    expect(removeExtraMember(input, 1).extraMembers?.map((m) => m.roleId)).toEqual([null, "backend"]);
   });
 
   it("keeps unavailable saved provider and account IDs in the editable draft", () => {

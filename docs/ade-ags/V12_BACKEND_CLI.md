@@ -80,6 +80,7 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
               [--floor <andar>]                 · nesse andar (ou `ground`, o térreo)
   peer connect <a> <b>                        Conecta dois agentes da equipe
   peer disconnect <a> <b>                     Desconecta os dois
+  peer role <nome> <papel> [--subagent]       Define o papel de um agente da equipe (os sem papel esperam por isso)
 
 CORREÇÕES — teto de rodadas da mesma entrega (canvas e frota)
   fix list <escopo>                           Entregas e quantas rodadas cada uma usou

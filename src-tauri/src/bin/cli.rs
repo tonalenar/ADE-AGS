@@ -72,6 +72,7 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
               [--floor <andar>]                 · nesse andar (ou `ground`, o térreo)
   peer connect <a> <b>                        Conecta dois agentes da equipe
   peer disconnect <a> <b>                     Desconecta os dois
+  peer role <nome> <papel> [--subagent]       Define o papel de um agente da equipe (os sem papel esperam por isso)
 
 CORREÇÕES — teto de rodadas da mesma entrega (canvas e frota)
   fix list <escopo>                           Entregas e quantas rodadas cada uma usou
@@ -783,6 +784,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "peer.check" => &["to"],
         "peer.recruit" => &["name"],
         "peer.connect" | "peer.disconnect" => &["a", "b"],
+        "peer.role" => &["to", "role"],
         // `ags note read Plano 10 20`: desde la línea 10, 20 líneas.
         "notify.send" => &["message"],
         // `ags role create "Revisor" "Procure falhas..."`; el texto también va con --file.

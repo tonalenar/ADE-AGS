@@ -4,12 +4,15 @@ use uuid::Uuid;
 use crate::{roles, runs::Complexity, util::now_ts};
 
 use super::types::{
-    AssignmentAvailability, Squad, SquadInput, SquadLead, SquadLeadInput, SquadMember,
-    SquadMemberInput, SubagentDefault, ValidSquad,
+    AssignmentAvailability, Squad, SquadExtraMember, SquadExtraMemberInput, SquadInput, SquadLead,
+    SquadLeadInput, SquadMember, SquadMemberInput, SubagentDefault, ValidSquad,
 };
 
+/// Tope de integrantes extra por Squad: evita que un JSON desbordado llegue al routing.
+const MAX_EXTRA_MEMBERS: usize = 24;
+
 const SQUAD_COLUMNS: &str = "id, name, description, lead_agent_id, lead_model, lead_account_id, \
-                             lead_auto_account, lead_complexity, created_at, updated_at, reasoning_effort, fast_mode, \n                             subagent_agent_id, subagent_model, subagent_effort, subagent_fast";
+                             lead_auto_account, lead_complexity, created_at, updated_at, reasoning_effort, fast_mode, \n                             subagent_agent_id, subagent_model, subagent_effort, subagent_fast, extra_members";
 
 pub(crate) fn validate_effort_input(model: Option<&str>, complexity: Option<Complexity>, effort: Option<&str>) -> Result<(), String> {
     if let Some(effort) = effort {
@@ -145,13 +148,68 @@ pub fn validate(conn: &Connection, input: &SquadInput) -> Result<ValidSquad, Str
         members.push(member);
     }
 
+    let extra_members = validate_extra_members(conn, &input.extra_members)?;
+
     Ok(ValidSquad {
         name,
         description: input.description.trim().to_string(),
         lead,
         members,
         default_subagent,
+        extra_members,
     })
+}
+
+/// Integrantes extra: sin límite de roles (un rol puede repetirse o no tener), pero cada uno
+/// necesita proveedor válido y pasa por las mismas reglas de modelo, esfuerzo, Fast y cuenta
+/// que los `members`. Los errores llevan el prefijo `extra #N:` (N desde 1).
+fn validate_extra_members(
+    conn: &Connection,
+    inputs: &[SquadExtraMemberInput],
+) -> Result<Vec<SquadExtraMemberInput>, String> {
+    if inputs.len() > MAX_EXTRA_MEMBERS {
+        return Err(format!("a squad can have at most {MAX_EXTRA_MEMBERS} extra members"));
+    }
+    let mut out = Vec::with_capacity(inputs.len());
+    for (index, input) in inputs.iter().enumerate() {
+        let n = index + 1;
+        let fail = |message: String| format!("extra #{n}: {message}");
+        let role_id = clean(&input.role_id);
+        if let Some(role) = &role_id
+            && roles::get(role).is_none()
+        {
+            return Err(fail(format!("functional role '{role}' does not exist")));
+        }
+        let agent_id = input.agent_id.trim().to_string();
+        if agent_id.is_empty() {
+            return Err(fail("provider is required".into()));
+        }
+        validate_fast_input(&agent_id, input.fast_mode).map_err(fail)?;
+        let model = clean(&input.model);
+        validate_effort_input(model.as_deref(), input.complexity, input.reasoning_effort.as_deref())
+            .map_err(fail)?;
+        if model.is_some() && input.complexity.is_some() {
+            return Err(fail("specific model and complexity cannot be selected together".into()));
+        }
+        let account_id = if input.auto_account {
+            None
+        } else {
+            clean(&input.account_id)
+        };
+        validate_provider(conn, &agent_id, &account_id, false).map_err(fail)?;
+        out.push(SquadExtraMemberInput {
+            role_id,
+            agent_id,
+            reasoning_effort: clean(&input.reasoning_effort),
+            model,
+            account_id,
+            auto_account: input.auto_account,
+            complexity: input.complexity,
+            fast_mode: input.fast_mode,
+            isolate_default: input.isolate_default,
+        });
+    }
+    Ok(out)
 }
 
 /// El subagente padrão: un agente registrado, modelo opcional, esfuerzo solo con modelo
@@ -288,6 +346,30 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
             })
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
+    let raw_extras: String = row.get(16)?;
+    let extra_inputs: Vec<SquadExtraMemberInput> = serde_json::from_str(&raw_extras).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(16, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    let extra_members = extra_inputs
+        .into_iter()
+        .map(|extra| -> rusqlite::Result<SquadExtraMember> {
+            let (availability, unavailable_reason) =
+                assignment_status(conn, &extra.agent_id, extra.model.as_deref(), &extra.account_id)?;
+            Ok(SquadExtraMember {
+                role_id: extra.role_id,
+                agent_id: extra.agent_id,
+                reasoning_effort: extra.reasoning_effort,
+                model: extra.model,
+                account_id: extra.account_id,
+                auto_account: extra.auto_account,
+                complexity: extra.complexity.map(|value| value.as_str().to_string()),
+                fast_mode: extra.fast_mode,
+                isolate_default: extra.isolate_default,
+                availability,
+                unavailable_reason,
+            })
+        })
+        .collect::<rusqlite::Result<Vec<_>>>()?;
     let unavailable_reasons = lead_reason
         .into_iter()
         .map(|reason| format!("lead: {reason}"))
@@ -307,6 +389,7 @@ fn row_to_squad(conn: &Connection, row: &Row) -> rusqlite::Result<Squad> {
         lead,
         members,
         default_subagent,
+        extra_members,
         created_at: row.get(8)?,
         updated_at: row.get(9)?,
         available: lead_availability.can_attempt(),
@@ -360,6 +443,20 @@ fn save_lead(conn: &Connection, squad_id: &str, lead: &SquadLeadInput) -> Result
     Ok(())
 }
 
+fn save_extra_members(
+    conn: &Connection,
+    squad_id: &str,
+    extras: &[SquadExtraMemberInput],
+) -> Result<(), String> {
+    let raw = serde_json::to_string(extras).map_err(|error| error.to_string())?;
+    conn.execute(
+        "UPDATE squads SET extra_members = ?1 WHERE id = ?2",
+        rusqlite::params![raw, squad_id],
+    )
+    .map_err(|error| error.to_string())?;
+    Ok(())
+}
+
 fn save_subagent(conn: &Connection, squad_id: &str, subagent: Option<&SubagentDefault>) -> Result<(), String> {
     conn.execute(
         "UPDATE squads SET subagent_agent_id = ?1, subagent_model = ?2, subagent_effort = ?3, subagent_fast = ?4 WHERE id = ?5",
@@ -399,6 +496,7 @@ pub fn create(conn: &Connection, valid: &ValidSquad) -> Result<Squad, String> {
     .map_err(|error| error.to_string())?;
     save_lead(&tx, &id, &valid.lead)?;
     save_subagent(&tx, &id, valid.default_subagent.as_ref())?;
+    save_extra_members(&tx, &id, &valid.extra_members)?;
     insert_members(&tx, &id, &valid.members)?;
     tx.commit().map_err(|error| error.to_string())?;
     get(conn, &id)?.ok_or_else(|| "squad was not saved".into())
@@ -441,6 +539,7 @@ pub fn update(conn: &Connection, id: &str, valid: &ValidSquad) -> Result<Squad, 
     }
     save_lead(&tx, id, &valid.lead)?;
     save_subagent(&tx, id, valid.default_subagent.as_ref())?;
+    save_extra_members(&tx, id, &valid.extra_members)?;
     tx.execute("DELETE FROM squad_members WHERE squad_id = ?1", [id])
         .map_err(|error| error.to_string())?;
     insert_members(&tx, id, &valid.members)?;

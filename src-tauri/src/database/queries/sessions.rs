@@ -1252,7 +1252,7 @@ mod tests {
 
         crate::database::migrate_for_tests(&conn).unwrap();
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, 44);
+        assert_eq!(version, 45);
         let title: Option<String> = conn
             .query_row("SELECT title FROM session_history WHERE id = 'h1'", [], |r| r.get(0))
             .unwrap();

@@ -247,6 +247,15 @@ function handleRecruited(args: Record<string, unknown>) {
   return { ok: true };
 }
 
+/** O orquestrador definiu o papel de um terminal (`ags peer role`). O papel só é uma etiqueta no nó. */
+function handleRole(args: Record<string, unknown>) {
+  const cwd = str(args, "cwd");
+  const tabId = str(args, "tabId");
+  if (!cwd || !tabId) throw new Error("Faltam cwd ou tabId");
+  canvasActions.setRole(keyFor(tabId, cwd), tabId, str(args, "role") ?? null, args.subagent === true);
+  return { ok: true };
+}
+
 /** El texto dibujado de una terminal, para `ags peer ask/check` (ver `screenOf`). */
 function handleScreen(args: Record<string, unknown>) {
   const tabId = str(args, "tabId");
@@ -346,6 +355,7 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
     case "canvas.connect": return handleCanvas(args, (key, a, b) => canvasActions.connect(key, a, b));
     case "canvas.disconnect": return handleCanvas(args, (key, a, b) => canvasActions.disconnectPair(key, a, b));
     case "canvas.recruited": return handleRecruited(args);
+    case "canvas.role": return handleRole(args);
     case "canvas.note": return handleNote(args);
     case "canvas.portal": return handlePortal(args);
     case "user.notify": return handleNotify(args);

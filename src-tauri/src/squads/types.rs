@@ -64,6 +64,29 @@ pub struct SquadMemberInput {
     pub isolate_default: bool,
 }
 
+/// Integrante extra del Squad: un subagente más, además de los `members` (que tienen un solo
+/// papel por rol). `role_id` vacío = sin especificar, la orquestadora decide el papel.
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SquadExtraMemberInput {
+    #[serde(default)]
+    pub role_id: Option<String>,
+    pub agent_id: String,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    pub model: Option<String>,
+    #[serde(default)]
+    pub account_id: Option<String>,
+    #[serde(default)]
+    pub auto_account: bool,
+    #[serde(default)]
+    pub complexity: Option<Complexity>,
+    #[serde(default)]
+    pub fast_mode: bool,
+    #[serde(default)]
+    pub isolate_default: bool,
+}
+
 /// Qué LLM usan por defecto los subagentes que la orquestadora suma con `ags peer recruit`.
 /// `None` en el Squad = Automático: la orquestadora decide y justifica la elección.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
@@ -90,6 +113,8 @@ pub struct SquadInput {
     pub members: Vec<SquadMemberInput>,
     #[serde(default)]
     pub default_subagent: Option<SubagentDefault>,
+    #[serde(default)]
+    pub extra_members: Vec<SquadExtraMemberInput>,
 }
 
 #[derive(Serialize, Clone, Debug, PartialEq)]
@@ -134,12 +159,30 @@ pub struct Squad {
     pub lead: SquadLead,
     pub members: Vec<SquadMember>,
     pub default_subagent: Option<SubagentDefault>,
+    pub extra_members: Vec<SquadExtraMember>,
     pub created_at: i64,
     pub updated_at: i64,
     /// Start availability follows the Lead. Optional worker roles are checked only if a
     /// plan uses them; one unavailable member must not disable the whole Squad.
     pub available: bool,
     pub unavailable_reasons: Vec<String>,
+}
+
+/// Integrante extra ya validado y con su disponibilidad calculada.
+#[derive(Serialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct SquadExtraMember {
+    pub role_id: Option<String>,
+    pub agent_id: String,
+    pub reasoning_effort: Option<String>,
+    pub model: Option<String>,
+    pub account_id: Option<String>,
+    pub auto_account: bool,
+    pub complexity: Option<String>,
+    pub fast_mode: bool,
+    pub isolate_default: bool,
+    pub availability: AssignmentAvailability,
+    pub unavailable_reason: Option<String>,
 }
 
 /// Immutable copy of the routing policy stored with a Run. Runtime planning uses these
@@ -197,4 +240,5 @@ pub struct ValidSquad {
     pub lead: SquadLeadInput,
     pub members: Vec<SquadMemberInput>,
     pub default_subagent: Option<SubagentDefault>,
+    pub extra_members: Vec<SquadExtraMemberInput>,
 }

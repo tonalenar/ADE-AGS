@@ -331,6 +331,9 @@ pub(super) fn peer_list(app: &AppHandle, args: &Value) -> Result<Value, String> 
         let mut v = describe(t);
         v["direct"] = json!(direct.contains(&t.id));
         v["orchestrator"] = json!(crate::canvas::is_orchestrator(&boards, &t.id));
+        // Sem papel = "o orquestrador decide": defina com `ags peer role`.
+        v["role"] = json!(crate::canvas::role_of(&boards, &t.id));
+        v["subagent"] = json!(crate::canvas::is_subagent(&boards, &t.id));
         v
     };
     let you = me.as_ref().map(|m| {
@@ -391,6 +394,33 @@ pub(super) fn peer_connect(app: &AppHandle, args: &Value) -> Result<Value, Strin
     }
     canvas_change(app, &me, "canvas.connect", json!({ "cwd": me.cwd, "a": a.id, "b": b.id }))?;
     Ok(json!({ "connected": [describe(&a), describe(&b)] }))
+}
+
+/// `ags peer role <nome> <papel> [--subagent]`: o orquestrador define (ou troca) o papel de um agente da
+/// equipe, em geral um que o usuário abriu "sem especificação". O canvas passa a mostrar o papel e o
+/// agente recebe a instrução do papel.
+pub(super) fn peer_role(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let me = orchestrator(app, args)?;
+    let candidates = operable(app, &me)?;
+    let target = resolve_peer(&candidates, &arg_str(args, "to")?)?.clone();
+    let all = crate::canvas::roles::all();
+    let role = crate::canvas::roles::resolve(&all, &arg_str(args, "role")?)?.clone();
+    let subagent = match args.get("subagent") {
+        Some(Value::Bool(b)) => *b,
+        Some(Value::String(s)) => matches!(s.as_str(), "" | "true" | "1" | "yes"),
+        _ => false,
+    };
+    canvas_change(app, &me, "canvas.role", json!({ "cwd": target.cwd, "tabId": target.id, "role": role.label, "subagent": subagent }))?;
+    let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
+    let text = if subagent {
+        format!("{}
+Você é um subagente de {}: execute as tarefas que ele enviar e responda com ags peer tell.", crate::canvas::roles::briefing(&role), me.name)
+    } else {
+        crate::canvas::roles::briefing(&role)
+    };
+    let outcome = deliver_now_or_queue(pty, &target.id, framed(&me.name, &text, false))?;
+    Ok(json!({ "peer": describe(&target), "role": role.id, "subagent": subagent,
+        "delivered": matches!(outcome, Delivery::Now | Delivery::Queued) }))
 }
 
 pub(super) fn peer_disconnect(app: &AppHandle, args: &Value) -> Result<Value, String> {

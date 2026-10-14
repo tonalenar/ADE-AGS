@@ -1,10 +1,11 @@
-import type { FunctionalRole, Squad, SquadInput, SquadMemberInput } from "./types";
+import type { FunctionalRole, Squad, SquadExtraMemberInput, SquadInput, SquadMemberInput } from "./types";
 
 export const EMPTY_SQUAD_INPUT: SquadInput = {
   name: "",
   description: "",
   lead: { agentId: "", model: null, accountId: null, autoAccount: true, complexity: null },
   members: [],
+  extraMembers: [],
   defaultSubagent: null,
 };
 
@@ -24,6 +25,17 @@ export function inputFromSquad(squad: Squad): SquadInput {
     defaultSubagent: squad.defaultSubagent
       ? { ...squad.defaultSubagent, reasoningEffort: squad.defaultSubagent.reasoningEffort ?? null, fastMode: squad.defaultSubagent.fastMode === true }
       : null,
+    extraMembers: (squad.extraMembers ?? []).map((member) => ({
+      roleId: member.roleId,
+      agentId: member.agentId,
+      model: member.model,
+      reasoningEffort: member.reasoningEffort ?? null,
+      accountId: member.accountId,
+      autoAccount: member.autoAccount,
+      complexity: member.complexity,
+      fastMode: member.fastMode === true,
+      isolateDefault: member.isolateDefault,
+    })),
     members: squad.members.map((member) => ({
       roleId: member.roleId,
       agentId: member.agentId,
@@ -57,6 +69,18 @@ export function addSquadRole(input: SquadInput, roleId: string): SquadInput {
       isolateDefault: true,
     }],
   };
+}
+
+/** Soma um subagente (sem função, o orquestrador decide) ao fim da lista; não há limite nem unicidade. */
+export function addExtraMember(input: SquadInput, roleId: string | null = null): SquadInput {
+  const extra: SquadExtraMemberInput = {
+    roleId, agentId: "", model: null, accountId: null, autoAccount: true, complexity: null, isolateDefault: true,
+  };
+  return { ...input, extraMembers: [...(input.extraMembers ?? []), extra] };
+}
+
+export function removeExtraMember(input: SquadInput, index: number): SquadInput {
+  return { ...input, extraMembers: (input.extraMembers ?? []).filter((_, i) => i !== index) };
 }
 
 export function removeSquadRole(input: SquadInput, roleId: string): SquadInput {

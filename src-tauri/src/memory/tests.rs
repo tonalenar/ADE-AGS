@@ -61,7 +61,7 @@ fn v40_to_v41_is_additive_idempotent_and_preserves_the_delete_guard() {
     }
     conn.execute_batch("DROP TABLE memory_agent_drafts;DROP TABLE memory_compacted_revisions;DROP TABLE memory_swarm_notes;PRAGMA user_version=40;").unwrap();
     crate::database::migrate_for_tests(&conn).unwrap();crate::database::migrate_for_tests(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),44);
+    assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),45);
     let entry=detail_for_owner(&conn,&approved.entry_id,"w1",None).unwrap();assert_eq!(entry.revisions[0].body,"preserved revision");assert_eq!(entry.entry.last_verified,None);assert_eq!(entry.entry.ttl_days,None);
     assert!(conn.execute("DELETE FROM memory_revisions WHERE entry_id=?1",[&approved.entry_id]).is_err());
     // The existing guard makes raw cascading deletion fail rather than losing
@@ -364,7 +364,7 @@ fn migration_v23_to_v24_adds_memory_tables_and_immutable_triggers() {
     let version: i64 = conn
         .query_row("PRAGMA user_version", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(version, 44);
+    assert_eq!(version, 45);
     for table in [
         "memory_entries",
         "memory_revisions",
@@ -1152,7 +1152,7 @@ fn additive_upgrades_from_v19_through_v23_preserve_data_and_are_idempotent() {
         conn.pragma_update(None,"user_version",version).unwrap();
         crate::database::migrate_for_tests(&conn).unwrap();
         crate::database::migrate_for_tests(&conn).unwrap();
-        assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),44);
+        assert_eq!(conn.pragma_query_value(None,"user_version",|r|r.get::<_,i64>(0)).unwrap(),45);
         assert_eq!(conn.query_row("SELECT model,handoff FROM tasks WHERE id='old-task'",[],|r|Ok((r.get::<_,String>(0)?,r.get::<_,String>(1)?))).unwrap(),("old-model".into(),"legacy delivery".into()));
         assert_eq!(conn.query_row("SELECT body FROM run_facts WHERE id='old-fact'",[],|r|r.get::<_,String>(0)).unwrap(),"historical fact");
         activate(&conn,"mission",Some("m1"),"upgrade","memory works");
@@ -1339,7 +1339,7 @@ fn migration_v24_failure_rolls_back_ddl_and_schema_version() {
     assert_eq!(conn.query_row("SELECT legacy FROM memory_revisions", [], |r| r.get::<_, String>(0)).unwrap(), "preserved");
     conn.execute("DROP TABLE memory_revisions", []).unwrap();
     crate::database::migrate_for_tests(&conn).unwrap();
-    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),44);
+    assert_eq!(conn.pragma_query_value(None, "user_version", |r| r.get::<_, i64>(0)).unwrap(),45);
 }
 
 #[test]

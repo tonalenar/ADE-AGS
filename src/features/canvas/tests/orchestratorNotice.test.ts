@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addEdge, emptyBoard, reconcile, toggleOrchestrator } from "../board";
+import { addEdge, emptyBoard, reconcile, setRole, toggleOrchestrator } from "../board";
 import { forgetOrchestrator, linkedPeers, orchestratorNotice, shouldAnnounce } from "../orchestratorNotice";
 
 const tabs = [
@@ -22,7 +22,8 @@ describe("aviso ao orquestrador", () => {
   it("o texto cita os terminais e os comandos de peers", () => {
     const text = orchestratorNotice(board(), tabs, "a")!;
     expect(text).toContain("2 terminais conectados");
-    expect(text).toContain("Codex (Codex)");
+    expect(text).toContain("Codex (Codex; sem papel definido)");
+    expect(text).toContain("ags peer role");
     expect(text).toContain("ags peer ask");
   });
 
@@ -39,5 +40,29 @@ describe("aviso ao orquestrador", () => {
     expect(shouldAnnounce(b, "a")).toBe(false);
     const more = reconcile(b, ["a", "b", "c", "d"]);
     expect(shouldAnnounce(addEdge(more, "a", "d"), "a")).toBe(true);
+  });
+
+  it("cita o papel e o subagente e só pede decisão dos que estão sem papel", () => {
+    const b = setRole(setRole(board(), "b", "QA / Tests", true), "c", "Backend", false);
+    const text = orchestratorNotice(b, tabs, "a")!;
+    expect(text).toContain("Codex (Codex; papel: QA / Tests, subagente)");
+    expect(text).toContain("papel: Backend");
+    expect(text).not.toContain("SEM PAPEL");
+  });
+
+  it("definir o papel de um ligado avisa o orquestrador de novo", () => {
+    forgetOrchestrator("a");
+    const b = board();
+    expect(shouldAnnounce(b, "a")).toBe(true);
+    expect(shouldAnnounce(setRole(b, "b", "QA / Tests", false), "a")).toBe(true);
+  });
+
+  it("setRole grava e limpa o papel e o subagente", () => {
+    const b = setRole(board(), "b", "QA", true);
+    expect(b.roles.b).toBe("QA");
+    expect(b.subagents).toEqual(["b"]);
+    const cleared = setRole(b, "b", null, false);
+    expect(cleared.roles.b).toBeUndefined();
+    expect(cleared.subagents).toEqual([]);
   });
 });

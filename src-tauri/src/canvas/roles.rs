@@ -202,6 +202,12 @@ fn only_custom(roles: &[Role]) -> Vec<Role> {
     roles.iter().filter(|r| !r.builtin).cloned().collect()
 }
 
+/// O catálogo e os papéis do usuário, para a tela de novo agente e a edição do papel no canvas.
+#[tauri::command]
+pub fn canvas_roles_all() -> Vec<Role> {
+    all()
+}
+
 /// O que um agente novo lê antes da primeira tarefa: o papel, e que a tarefa vem depois.
 pub fn briefing(role: &Role) -> String {
     format!("Seu papel neste time: {} — {}", role.label, role.instructions)

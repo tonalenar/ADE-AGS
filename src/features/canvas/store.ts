@@ -8,7 +8,7 @@ import {
   FOLDER_PREFIX, IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addFolder, addImage, addNote, addPortal,
   addStroke, addText, removeFolder, updateFolder,
   emptyBoard, placeInNextGridCell, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
-  buildMissionTeam, removeStroke, removeText, toggleOrchestrator, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
+  buildMissionTeam, setRole, removeStroke, removeText, toggleOrchestrator, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
   type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
 } from "./board";
 import { safeViewport, type Box, type Rect, type Viewport } from "./geometry";
@@ -229,6 +229,9 @@ export const canvasActions = {
   disconnect: (key: string, edgeId: string) => updateBoard(key, (board) => removeEdge(board, edgeId)),
   disconnectPair: (key: string, a: string, b: string) => updateBoard(key, (board) => removeEdgeBetween(board, a, b)),
   toggleOrchestrator: (key: string, tabId: string) => updateBoard(key, (board) => toggleOrchestrator(board, tabId)),
+  /** O que o terminal é: papel (`null` = o orquestrador decide) e se é subagente. */
+  setRole: (key: string, tabId: string, role: string | null, subagent: boolean) =>
+    updateBoard(key, (board) => setRole(board, tabId, role, subagent)),
   /** Posiciona o recruit na proxima celula livre e o conecta a quem o recrutou. */
   recruited: (key: string, tabId: string, near: string, role?: string | null) => updateBoard(key, (board) => {
     const withNode = tabId in board.nodes ? board : reconcile(board, [...Object.keys(board.nodes), tabId]);
@@ -243,7 +246,7 @@ export const canvasActions = {
   }),
   /** El canvas de una misión en terminales: el orquestador y su equipo, ya conectados y con su papel.
    *  `key` es `missionBoardKey`. Crea el canvas si no existe. */
-  buildMissionTeam: (key: string, leadId: string, members: { tabId: string; roleId?: string | null }[]) =>
+  buildMissionTeam: (key: string, leadId: string, members: { tabId: string; roleId?: string | null; subagent?: boolean }[]) =>
     updateBoard(key, (board) => buildMissionTeam(board, leadId, members)),
   setLiveRects: (liveRects: Record<string, Rect>) => {
     const prev = useCanvasStore.getState().liveRects;
@@ -331,7 +334,7 @@ export function initCanvasSync(label: string): () => void {
       const mine = Object.fromEntries(
         Object.entries(saved ?? {})
           .filter(([k]) => k.startsWith(`${label}|`))
-          .map(([k, b]) => [k, { ...emptyBoard(), ...b, viewport: safeViewport(b?.viewport), nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], roles: b?.roles ?? {} }]),
+          .map(([k, b]) => [k, { ...emptyBoard(), ...b, viewport: safeViewport(b?.viewport), nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], roles: b?.roles ?? {}, subagents: b?.subagents ?? [] }]),
       );
       useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards } });
       unsub = useTabsStore.subscribe(syncBoards);
