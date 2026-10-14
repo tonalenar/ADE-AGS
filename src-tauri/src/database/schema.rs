@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-pub(crate) const SCHEMA_VERSION: i32 = 42;
+pub(crate) const SCHEMA_VERSION: i32 = 43;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1218,6 +1218,26 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
             conn.execute_batch(&format!("ALTER TABLE session_history ADD COLUMN {column} {definition};"))?;
         }
     }
+    // v43 — Conversaciones por proyecto: cada una es un canvas con sus terminales guardados
+    // (`terminals`, JSON) y un estado 'active'/'saved'. Solo aditiva.
+    conn.execute_batch(
+        "CREATE TABLE IF NOT EXISTS project_conversations (
+            id TEXT PRIMARY KEY,
+            workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            project_key TEXT NOT NULL,
+            cwd TEXT NOT NULL,
+            title TEXT,
+            custom_title TEXT,
+            pinned INTEGER NOT NULL DEFAULT 0,
+            hidden INTEGER NOT NULL DEFAULT 0,
+            state TEXT NOT NULL DEFAULT 'saved' CHECK(state IN ('active','saved')),
+            terminals TEXT NOT NULL DEFAULT '[]',
+            created_at INTEGER NOT NULL,
+            last_active_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS idx_project_conversations_project
+            ON project_conversations (workspace_id, project_key);",
+    )?;
     set_user_version(conn, SCHEMA_VERSION)
 }
 

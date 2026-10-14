@@ -172,6 +172,13 @@ pub fn run() {
             crate::memory::lifecycle::workspace_deleted_list,
             crate::database::default_workspace_has_content,
             crate::database::db_list_session_history,
+            // Conversaciones por proyecto (v43)
+            crate::database::db_conversation_create,
+            crate::database::db_conversation_list,
+            crate::database::db_conversation_update,
+            crate::database::db_conversation_delete,
+            crate::database::db_conversation_set_active,
+            crate::database::db_refresh_session_titles,
             crate::database::db_mission_session_ids,
             crate::database::db_checkpoint_sessions,
             crate::database::db_update_session_history,

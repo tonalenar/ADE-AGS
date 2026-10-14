@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { joinActiveConversation } from "./conversationFlow";
 import { boardKeyOfTab, canvasActions, useCanvasStore } from "@/features/canvas/store";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
@@ -100,8 +101,9 @@ export function useResumeSession() {
       // se hereda al spawnear y no se puede tocar con el agente ya corriendo).
       prelaunch: prelaunch ?? entry.prelaunch,
     });
-    // De volta ao mesmo lugar e tamanho no canvas em que estava (se o checkpoint guardou).
-    if (entry.box) {
+    // Com uma conversa ativa neste projeto, a sessão reaberta entra no canvas dela (no lugar em que estava, se
+    // o checkpoint guardou); sem conversa, volta ao canvas da pasta, ao mesmo lugar e tamanho.
+    if (!joinActiveConversation(tabId, entry.cwd, entry.box ?? null) && entry.box) {
       const boards = useCanvasStore.getState().boards;
       const tab = useTabsStore.getState().tabs.find((x) => x.id === tabId);
       if (tab) canvasActions.placeNode(boardKeyOfTab(tab, boards), tabId, entry.box);

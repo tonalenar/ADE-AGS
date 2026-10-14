@@ -29,10 +29,12 @@ import { ConversationList } from "@/features/sessions/ConversationList";
  * piezas distintas y se notaba el salto — al cambiar de workspace parecía que la fila se
  * reemplazaba por otra cosa en vez de crecer.
  */
-function WorkspaceItem({ ws, groupCwds, workspaceId, expanded, onActivate, onOpenAgent, onWorkspaceMenu, onAgentMenu }: {
+function WorkspaceItem({ ws, groupCwds, projectKey, workspaceId, expanded, onActivate, onOpenAgent, onWorkspaceMenu, onAgentMenu }: {
   ws: WorkspaceNode;
   /** As pastas do projeto (raiz e worktrees): de onde saem as conversas. */
   groupCwds: string[];
+  /** A raiz do projeto (repo) a que o workspace pertence. */
+  projectKey: string;
   workspaceId: string;
   expanded: boolean;
   onActivate: () => void;
@@ -122,6 +124,7 @@ function WorkspaceItem({ ws, groupCwds, workspaceId, expanded, onActivate, onOpe
       <ConversationList
         cwd={ws.cwd}
         groupCwds={groupCwds}
+        projectKey={projectKey}
         workspaceId={workspaceId}
         onOpenTab={onOpenAgent}
         onTabMenu={(x, y, tabId) => {
@@ -178,6 +181,11 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
       const cwds = [...new Set([group.key, ...group.workspaces.map((w) => w.cwd)])];
       for (const w of group.workspaces) map.set(w.key, cwds);
     }
+    return map;
+  }, [groups]);
+  const projectKeyOf = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const group of groups) for (const w of group.workspaces) map.set(w.key, group.key);
     return map;
   }, [groups]);
 
@@ -339,6 +347,7 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
               key={ws.key}
               ws={ws}
               groupCwds={cwdsOf.get(ws.key) ?? [ws.cwd]}
+              projectKey={projectKeyOf.get(ws.key) ?? ws.cwd}
               workspaceId={workspaceId}
               expanded={ws.agents.some((a) => a.tabId === activeTabId)}
               onActivate={() => (ws.closed

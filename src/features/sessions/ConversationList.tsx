@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { AlertaToast, Button, ArchiveIcon, AddIcon } from "neogestify-ui-components";
 
@@ -7,17 +8,24 @@ import { RunningIcon } from "@/app/icons";
 import { useMissionIndex } from "@/features/missions/groups";
 import { useTabsStore } from "@/features/tabs/store";
 import { openNewAgentWith } from "@/features/tabs/tabActions";
+import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
 import { MissingSkillsDialog } from "@/features/sessions/MissingSkillsDialog";
 import { ResumeOptionsDialog } from "@/features/sessions/ResumeOptionsDialog";
 
 import { isResumable } from "./agentResume";
+import { boardKeyOfTab, useCanvasStore } from "@/features/canvas/store";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { CanvasConversations } from "./CanvasConversations";
+import { joinActiveConversation, startConversation } from "./conversationFlow";
+import { parseConversationSnapshot } from "./conversationModel";
+import { useConversationsStore } from "./conversationsStore";
 import {
   buildConversations, continuePrompt, countHidden, fallbackNotice, filterConversations, groupByDay,
   type Conversation, type OpenTabInfo,
 } from "./projectConversations";
-import { missionSessionIds, updateHistoryEntry } from "./ipc.conversations";
+import { missionSessionIds, refreshSessionTitles, updateHistoryEntry } from "./ipc.conversations";
 import { sessionMarkdown } from "./ipc";
 import { useSessionsStore } from "./store";
 import { useResumeSession } from "./useResumeSession";
@@ -39,8 +47,10 @@ const secondsNow = () => Math.floor(Date.now() / 1000);
  * O arquivamento é automático (ao fechar a aba e por checkpoints periódicos); aqui só se fixa, renomeia, oculta
  * (e reexibe) ou continua a partir de uma.
  */
-export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTabMenu }: {
+export function ConversationList({ cwd, groupCwds, projectKey, workspaceId, onOpenTab, onTabMenu }: {
   cwd: string;
+  /** A raiz do projeto: agrupa as conversas-canvas dele. */
+  projectKey: string;
   groupCwds: string[];
   workspaceId: string;
   onOpenTab: (tabId: string) => void;
@@ -48,6 +58,8 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
   onTabMenu: (x: number, y: number, tabId: string) => void;
 }) {
   const { t } = useTranslation();
+  const navigate = useNavigate();
+  const addTab = useTabsStore((s) => s.addTab);
   const tabs = useTabsStore((s) => s.tabs);
   const updateTab = useTabsStore((s) => s.updateTab);
   const history = useSessionsStore((s) => s.history);
@@ -67,6 +79,14 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
 
   // O histórico se recarrega ao abrir e quando o número de abas muda (fechar uma arquiva a sessão).
   useEffect(() => { void loadHistory(workspaceId); }, [workspaceId, tabs.length, loadHistory]);
+  // Os títulos fracos se refazem uma vez por projeto aberto (lê os arquivos de sessão fora do banco).
+  useEffect(() => {
+    let alive = true;
+    refreshSessionTitles(workspaceId)
+      .then((changed) => { if (alive && changed > 0) void loadHistory(workspaceId); })
+      .catch(() => undefined);
+    return () => { alive = false; };
+  }, [workspaceId, loadHistory]);
   // As sessões que pertencem a missões: não são conversas comuns do projeto.
   useEffect(() => {
     let alive = true;
@@ -81,7 +101,29 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
     return () => window.clearTimeout(timer);
   }, [armed]);
 
-  const excludeTabIds = useMemo(() => new Set(tabs.filter((tab) => missionOf[tab.id]).map((tab) => tab.id)), [tabs, missionOf]);
+  const convRows = useConversationsStore((s) => s.rows);
+  const boards = useCanvasStore((s) => s.boards);
+  const projectConvs = useMemo(() => convRows.filter((r) => r.projectKey === projectKey), [convRows, projectKey]);
+  // As abas e as sessões de uma conversa-canvas aparecem dentro dela, não soltas na lista de sessões anteriores.
+  const inConversation = useMemo(() => {
+    const tabIds = new Set<string>();
+    const sessionIds = new Set<string>();
+    for (const tab of tabs) {
+      if (boardKeyOfTab(tab, boards).includes("#c:")) {
+        tabIds.add(tab.id);
+        if (tab.sessionId) sessionIds.add(tab.sessionId);
+      }
+    }
+    for (const row of projectConvs) {
+      for (const terminal of parseConversationSnapshot(row.terminals).terminals) if (terminal.sessionId) sessionIds.add(terminal.sessionId);
+    }
+    return { tabIds, sessionIds };
+  }, [tabs, boards, projectConvs]);
+  const excludeTabIds = useMemo(
+    () => new Set([...tabs.filter((tab) => missionOf[tab.id]).map((tab) => tab.id), ...inConversation.tabIds]),
+    [tabs, missionOf, inConversation],
+  );
+  const excludeSessionIds = useMemo(() => new Set([...missionSessions, ...inConversation.sessionIds]), [missionSessions, inConversation]);
 
   const openTabs = useMemo<OpenTabInfo[]>(() => tabs
     .filter((tab) => tab.agentId !== "bash")
@@ -100,13 +142,13 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
   const all = useMemo(
     () => buildConversations({
       groupCwds, tabs: openTabs, history, resumable: isResumable, now: secondsNow(),
-      excludeTabIds, excludeSessionIds: missionSessions, includeHidden: showHidden,
+      excludeTabIds, excludeSessionIds, includeHidden: showHidden,
     }),
-    [groupCwds, openTabs, history, excludeTabIds, missionSessions, showHidden],
+    [groupCwds, openTabs, history, excludeTabIds, excludeSessionIds, showHidden],
   );
   const hiddenCount = useMemo(
-    () => countHidden({ groupCwds, history, excludeSessionIds: missionSessions }),
-    [groupCwds, history, missionSessions],
+    () => countHidden({ groupCwds, history, excludeSessionIds }),
+    [groupCwds, history, excludeSessionIds],
   );
   const shown = useMemo(() => filterConversations(all, query), [all, query]);
   const visible = useMemo(() => shown.slice(0, query ? shown.length : limit), [shown, limit, query]);
@@ -126,14 +168,45 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
     openNewAgentWith({ cwd: conv.cwd || cwd, title: t("conversations.continueTitle", { title: conv.title }), prompt: continuePrompt(conv, tail) });
   };
 
+  /**
+   * Continua uma conversa que não dá para retomar: abre uma aba NOVA no mesmo agente, conta e entorno, já com o
+   * resumo da anterior (sem passar pelo assistente). É o que acontece quando o agente não retoma sessões ou
+   * quando a sessão nunca teve o id gravado.
+   */
+  const continueInSameAgent = async (conv: Conversation, entry: NonNullable<ReturnType<typeof entryOf>>) => {
+    let tail = conv.preview ?? "";
+    if (conv.historyId) {
+      try {
+        tail = (await sessionMarkdown(conv.historyId)) || tail;
+      } catch {
+        /* sem a conversa inteira, vale a prévia */
+      }
+    }
+    const tabId = addTab({
+      cwd: conv.cwd || cwd,
+      agent: { id: entry.agentId, label: entry.agentLabel, command: entry.command, available: true },
+      accountId: entry.accountId ?? undefined,
+      prelaunch: entry.prelaunch,
+      title: t("conversations.continueTitle", { title: conv.title }),
+    });
+    joinActiveConversation(tabId, conv.cwd || cwd);
+    sendWhenReady(tabId, continuePrompt(conv, tail));
+    navigate("/workspace");
+  };
+
   const open = async (conv: Conversation) => {
     if (conv.tabId) return onOpenTab(conv.tabId);
     const entry = entryOf(conv);
     if (!entry) return;
-    // Um agente que não sabe retomar não tem o que retomar: abre uma conversa nova com o resumo da anterior.
+    // Sem o que retomar, abre uma conversa nova, no mesmo agente, com o resumo da anterior. E diz o motivo certo.
     if (fallbackNotice(conv) === "summary") {
-      AlertaToast(t("conversations.title"), t("conversations.noResume", { agent: conv.agentLabel }), "info", 6000);
-      await continueFrom(conv);
+      const why = isResumable(conv.agentId) ? "conversations.noSession" : "conversations.noResume";
+      AlertaToast(t("conversations.title"), t(why, { agent: conv.agentLabel }), "info", 6000);
+      try {
+        await continueInSameAgent(conv, entry);
+      } catch (e) {
+        AlertaToast(t("conversations.title"), String(e), "error", 6000);
+      }
       return;
     }
     try {
@@ -171,6 +244,19 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
       await deleteSession(conv.historyId, workspaceId);
     } catch (e) {
       AlertaToast(t("conversations.title"), String(e), "error", 6000);
+    }
+  };
+
+  /** Nova conversa = novo canvas: salva e fecha a atual (se houver) e abre o assistente de agente na nova. */
+  const startNew = async () => {
+    try {
+      const row = await startConversation({
+        workspaceId, cwd, projectKey,
+        confirmWorking: (names) => ask(t("conversations.canvas.confirmWorking", { names: names.join(", ") }), { title: t("conversations.title"), kind: "warning" }),
+      });
+      if (row) openNewAgentWith({ cwd, title: t("conversations.newTitle") });
+    } catch (e) {
+      AlertaToast(t("conversations.title"), String(e), "error", 7000);
     }
   };
 
@@ -215,7 +301,7 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
           {t("conversations.title")} {all.length > 0 && <span className="tabular-nums font-normal">{all.length}</span>}
         </span>
         <Button variant="icon" aria-label={t("conversations.new")} title={t("conversations.newHint")}
-          onClick={() => openNewAgentWith({ cwd, title: t("conversations.newTitle") })}
+          onClick={() => void startNew()}
           className="cc-t flex items-center gap-1 h-5 px-1.5 rounded-md text-[10.5px] text-gray-500 dark:text-white/45 hover:text-gray-800 dark:hover:text-white hover:bg-gray-200 dark:hover:bg-white/10">
           <AddIcon className="w-3 h-3" />{t("conversations.new")}
         </Button>
@@ -226,7 +312,13 @@ export function ConversationList({ cwd, groupCwds, workspaceId, onOpenTab, onTab
           className="mx-1 mb-0.5 h-6 px-2 rounded-md text-[11px] outline-none bg-white dark:bg-white/6 border border-gray-200 dark:border-white/10 focus:border-accent-400 text-gray-800 dark:text-gray-100" />
       )}
 
-      {all.length === 0 && <p className="px-[18px] py-1 text-[10.5px] text-gray-400 dark:text-white/30">{t("conversations.empty")}</p>}
+      <CanvasConversations projectKey={projectKey} cwd={cwd} workspaceId={workspaceId}
+        onOpened={(tabId) => { if (tabId) onOpenTab(tabId); }} />
+      {projectConvs.some((r) => !r.hidden) && all.length > 0 && (
+        <p className="pl-[18px] pt-1.5 text-[9px] font-bold uppercase tracking-wider text-gray-400/80 dark:text-white/25">{t("conversations.canvas.older")}</p>
+      )}
+
+      {all.length === 0 && projectConvs.length === 0 && <p className="px-[18px] py-1 text-[10.5px] text-gray-400 dark:text-white/30">{t("conversations.empty")}</p>}
       {shown.length === 0 && all.length > 0 && <p className="px-[18px] py-1 text-[10.5px] text-gray-400 dark:text-white/30">{t("conversations.noMatch")}</p>}
 
       {buckets.map((group) => (

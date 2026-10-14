@@ -122,6 +122,55 @@ function sessaoExcluida(sid: string | null | undefined, excludeSessionIds?: Read
   return s !== null && (excludeSessionIds?.has(s) ?? false);
 }
 
+const TITULO_MAX = 60;
+const CUSTOM_MAX = 120;
+
+/** Tags de marcação (`<pasted_content …>`, `<local-command-caveat>`…): saem, o conteúdo entre elas fica. */
+const TAG = /<\/?[A-Za-z][^<>]*>/g;
+/** `"<qualquer coisa> — <caminho>"`: o caminho é do disco, não um título. */
+const CAMINHO_APOS_TRAVESSAO = /— (?:[A-Za-z]:\\|\/|\\\\)/;
+
+function colapsar(s: string): string {
+  return s.replace(/\s+/g, " ").trim();
+}
+
+/** Corta por caractere (code point), sem partir pares substitutos; o total inclui a reticência. */
+function cortar(s: string, max: number): string {
+  const chars = Array.from(s);
+  return chars.length <= max ? s : `${chars.slice(0, max - 1).join("")}…`;
+}
+
+/** Último segmento de `cwd`, aceitando `\` e `/`, ignorando barras finais. */
+function nomeDaPasta(cwd: string): string {
+  const partes = cwd.trim().replace(/[\\/]+$/, "").split(/[\\/]/);
+  return partes[partes.length - 1] ?? "";
+}
+
+/**
+ * Título legível para uma conversa, tirado de um texto bruto (primeira mensagem, título da aba…).
+ * Tags saem, fica a primeira linha útil; texto de sistema e títulos que são só o caminho ou o
+ * nome do agente viram `"{agente} · {pasta}"`. Sempre no máximo 60 caracteres.
+ */
+export function displayTitle(raw: string | null | undefined, agentLabel: string, cwd: string): string {
+  const semTags = (raw ?? "").replace(TAG, "");
+  const limpo = semTags.split(/\r?\n/).map(colapsar).find((l) => l !== "") ?? "";
+  const rotulo = colapsar(agentLabel);
+
+  if (limpo.startsWith("This session is being continued")) return cortar("Conversa continuada", TITULO_MAX);
+
+  const ruido = limpo === "" || limpo.startsWith("Caveat:") || limpo.startsWith("[Request interrupted");
+  if (ruido || limpo === rotulo || CAMINHO_APOS_TRAVESSAO.test(limpo)) {
+    const pasta = nomeDaPasta(cwd);
+    return cortar(pasta ? `${rotulo} · ${pasta}` : rotulo, TITULO_MAX);
+  }
+  return cortar(limpo, TITULO_MAX);
+}
+
+/** `customTitle` é do usuário: não passa por `displayTitle`, só é aparado e cortado. */
+function tituloFinal(custom: string | null, escolhido: string, agentLabel: string, cwd: string): string {
+  return custom !== null ? cortar(custom, CUSTOM_MAX) : displayTitle(escolhido, agentLabel, cwd);
+}
+
 export function buildConversations(input: BuildConversationsInput): Conversation[] {
   const { groupCwds, tabs, history, resumable, excludeTabIds, excludeSessionIds, includeHidden = false } = input;
   const roots = raizesDo(groupCwds);
@@ -145,7 +194,12 @@ export function buildConversations(input: BuildConversationsInput): Conversation
     abertas.push({
       key: `tab:${tab.tabId}`,
       state: tab.status === "running" ? "working" : "open",
-      title: cleanText(melhor?.customTitle) ?? cleanText(tab.title) ?? cleanText(melhor?.title) ?? tab.agentLabel,
+      title: tituloFinal(
+        cleanText(melhor?.customTitle),
+        cleanText(tab.title) ?? cleanText(melhor?.title) ?? tab.agentLabel,
+        tab.agentLabel,
+        tab.cwd
+      ),
       agentId: tab.agentId,
       agentLabel: tab.agentLabel,
       cwd: tab.cwd,
@@ -185,7 +239,7 @@ export function buildConversations(input: BuildConversationsInput): Conversation
     return {
       key: `hist:${e.id}`,
       state: "archived",
-      title: cleanText(e.customTitle) ?? cleanText(e.title) ?? e.agentLabel,
+      title: tituloFinal(cleanText(e.customTitle), cleanText(e.title) ?? e.agentLabel, e.agentLabel, e.cwd),
       agentId: e.agentId,
       agentLabel: e.agentLabel,
       cwd: e.cwd,
