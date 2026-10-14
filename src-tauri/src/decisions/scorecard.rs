@@ -114,12 +114,18 @@ fn proposal_groups(conn: &Connection) -> BTreeMap<String, Vec<String>> {
     }) else {
         return groups;
     };
+    // A proposta é identificada pelo hash `proposta` (chave, tipo, texto). Todas as revisões do mesmo texto (criar,
+    // atualizar, apagar…) entram no MESMO grupo: uma revisão posterior não pode apagar os hashes da anterior.
+    let mut unions: BTreeMap<String, BTreeSet<String>> = BTreeMap::new();
     for (key, kind, operation, body) in rows.flatten() {
-        let mut hashes = vec![memory_state_hash(&key, &kind, "proposta", &body)];
+        let base = memory_state_hash(&key, &kind, "proposta", &body);
         let own = memory_state_hash(&key, &kind, &operation, &body);
-        if own != hashes[0] {
-            hashes.push(own);
-        }
+        let set = unions.entry(base.clone()).or_insert_with(|| BTreeSet::from([base]));
+        set.insert(own);
+    }
+    for (base, set) in unions {
+        let mut hashes = vec![base.clone()];
+        hashes.extend(set.into_iter().filter(|hash| *hash != base));
         for hash in &hashes {
             groups.insert(hash.clone(), hashes.clone());
         }
@@ -359,6 +365,33 @@ mod tests {
         // Só a "boa" segue aprovada, contada uma vez (não duas), e o Jev não a rejeitaria.
         assert_eq!((card.approved_by_human, card.jev_rejected_those_approved), (1, 0));
         assert_eq!(card.false_alarm_rate, Some(0.0));
+    }
+
+    #[test]
+    fn a_revisao_de_exclusao_nao_apaga_os_hashes_da_criacao() {
+        use crate::memory::{decide, propose, ProposalActor, ProposalInput};
+        let conn = test_db();
+        conn.execute_batch("INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w1','W1',0,0);").unwrap();
+        let input = |operation: &str, expected: Option<i64>| ProposalInput {
+            scope: "workspace".into(), key: "apagada".into(), kind: "note".into(), body: "texto antigo".into(), priority: 0,
+            operation: operation.into(), expected_revision: expected, source_fact_id: None, reason: None, acknowledge_secret: false,
+        };
+        let actor = || ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None };
+        let made = propose(&conn, "workspace", "w1", None, &input("create", None), actor()).unwrap();
+        decide(&conn, &made.entry_id, made.revision, true).unwrap();
+        // A pessoa apagou: nasce uma revisão de exclusão com o MESMO texto.
+        let gone = propose(&conn, "workspace", "w1", None, &input("delete", Some(made.revision)), actor()).unwrap();
+        decide(&conn, &gone.entry_id, gone.revision, true).unwrap();
+        // O Jev respondeu sob o hash da criação; o rótulo da limpeza usa o hash proposta.
+        record(&conn, &LogRow {
+            ts: 5, point: POINT_MEMORY.into(), provider: "jev".into(), model: "m".into(),
+            state_hash: memory_state_hash("apagada", "note", "create", "texto antigo"), heuristic: "acao=revisar;segredo=nao".into(),
+            provider_decision: Some("acao=revisar;segredo=nao".into()), probability: Some(0.7), confidence: None, latency_ms: Some(1),
+            error: None, input_tokens: None, output_tokens: None,
+        }).unwrap();
+        record_cleanup_rejection(&conn, "apagada", "note", "texto antigo").unwrap();
+        let card = scorecard(&conn).unwrap();
+        assert_eq!((card.labeled, card.answered, card.jev_review), (1, 1, 1), "achou a resposta mesmo com a revisão de exclusão");
     }
 
     #[test]

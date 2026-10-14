@@ -189,6 +189,12 @@ fn render_without_transcript_still_documents_the_session() {
         }],
         opened_at: 0,
         closed_at: 60,
+        preview: None,
+        box_rect: None,
+        pinned: false,
+        custom_title: None,
+        hidden: false,
+        checkpointed_at: None,
     };
 
     let md = render(&entry, Some("Mi WS"), &[]);

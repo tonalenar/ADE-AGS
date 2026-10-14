@@ -4,12 +4,13 @@
 //! cerrar la tab, cerrar la ventana, salir de la app— así que lo que se resuelva acá vale
 //! para todos.
 
-use rusqlite::{Connection, OptionalExtension, Result as SqlResult};
+use rusqlite::{Connection, OptionalExtension, Result as SqlResult, params};
+use serde::{Deserialize, Deserializer};
 use uuid::Uuid;
 
 use crate::util::now_ts;
 use crate::database::models::{
-    ArchivedSkill, OpenTabLocation, SessionHistoryEntry, SiblingTab,
+    ArchivedSkill, BoxRect, OpenTabLocation, SessionHistoryEntry, SiblingTab,
 };
 use crate::database::DbConnection;
 
@@ -207,6 +208,24 @@ pub(crate) fn archive_tab_row(
     conn.execute("UPDATE tabs SET session_id=COALESCE(?1,session_id) WHERE id=?2",rusqlite::params![resolved.session_id,tab_id]).map_err(|e|e.to_string())?;
     crate::usage::capture_mission_tabs(conn, &crate::canvas::load_boards())?;
     conn.execute("UPDATE mission_usage_tabs SET closed_at=?1 WHERE tab_id=?2 AND closed_at IS NULL",rusqlite::params![now_ts(),tab_id]).map_err(|e|e.to_string())?;
+    upsert_history_row(conn, tab_id, workspace_id, resolved, now_ts())?;
+    Ok(())
+}
+
+/// Escribe o actualiza la fila de `session_history` de una tab. NO toca `tabs` ni el uso de
+/// misiones: lo comparten el cierre ([`archive_tab_row`]) y el checkpoint
+/// ([`checkpoint_sessions`]), que deja la tab viva. Devuelve el id de la entrada, o `None`
+/// si la tab ya no está en `tabs`.
+///
+/// El UPDATE de la fila existente solo toca las columnas del archivado: `preview`, `box`,
+/// `pinned`, `custom_title`, `hidden` y `checkpointed_at` quedan como estaban.
+pub(crate) fn upsert_history_row(
+    conn: &Connection,
+    tab_id: &str,
+    workspace_id: &str,
+    resolved: &ResolvedSession,
+    now: i64,
+) -> Result<Option<String>, String> {
     #[allow(clippy::type_complexity)]
     let row: Option<(String, String, String, String, Option<String>, Option<String>, Option<String>, Option<String>, String, i64)> = conn
         .query_row(
@@ -229,7 +248,7 @@ pub(crate) fn archive_tab_row(
         prelaunch,
         opened_at,
     )) = row
-    else { return Ok(()) };
+    else { return Ok(None) };
 
     // Lo resuelto fuera del lock manda; si no se resolvió nada, queda lo que traía la tab.
     let session_id = resolved.session_id.clone().or(session_id);
@@ -279,8 +298,6 @@ pub(crate) fn archive_tab_row(
     };
     let siblings_json = serde_json::to_string(&siblings).unwrap_or_else(|_| "[]".to_string());
 
-    let now = now_ts();
-
     // A qué entrada del historial corresponde esta tab, en orden de confianza:
     //
     // 1. `history_id` — la tab se abrió DESDE el historial, así que sabemos exactamente
@@ -322,14 +339,15 @@ pub(crate) fn archive_tab_row(
             rusqlite::params![agent_id, agent_label, command, cwd, title, session_id, skills_json, siblings_json, account_id, prelaunch, now, hid],
         )
         .map_err(|e| e.to_string())?;
-        return Ok(());
+        return Ok(Some(hid));
     }
 
+    let new_id = Uuid::new_v4().to_string();
     conn.execute(
         "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, prelaunch, opened_at, closed_at)
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14)",
         rusqlite::params![
-            Uuid::new_v4().to_string(),
+            new_id,
             workspace_id,
             agent_id,
             agent_label,
@@ -347,7 +365,7 @@ pub(crate) fn archive_tab_row(
     )
     .map_err(|e| e.to_string())?;
 
-    Ok(())
+    Ok(Some(new_id))
 }
 
 /// Colapsa las entradas duplicadas que dejó la versión anterior: cada vez que se reabría
@@ -436,6 +454,39 @@ fn parse_archived_skills(json: &str) -> Vec<ArchivedSkill> {
 
 /// Historial de tabs cerradas de un workspace, más reciente primero. Filtrado
 /// estrictamente por `workspace_id` — dos workspaces nunca comparten entradas.
+/// Columnas que lee [`entry_from_row`], en ese orden. Toda consulta que devuelva una
+/// `SessionHistoryEntry` tiene que usar esta lista, no una propia.
+const ENTRY_COLUMNS: &str = "id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, prelaunch, opened_at, closed_at, preview, box, pinned, custom_title, hidden, checkpointed_at";
+
+/// Traduce una fila con [`ENTRY_COLUMNS`] a una entrada del historial.
+fn entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<SessionHistoryEntry> {
+    let skills_json: String = row.get(8)?;
+    let siblings_json: String = row.get(9)?;
+    let box_json: Option<String> = row.get(15)?;
+    Ok(SessionHistoryEntry {
+        id: row.get(0)?,
+        workspace_id: row.get(1)?,
+        agent_id: row.get(2)?,
+        agent_label: row.get(3)?,
+        command: row.get(4)?,
+        cwd: row.get(5)?,
+        title: row.get(6)?,
+        session_id: row.get(7)?,
+        skills: parse_archived_skills(&skills_json),
+        sibling_tabs: serde_json::from_str(&siblings_json).unwrap_or_default(),
+        account_id: row.get(10)?,
+        prelaunch: crate::prelaunch::steps_from_json(&row.get::<_, String>(11)?),
+        opened_at: row.get(12)?,
+        closed_at: row.get(13)?,
+        preview: row.get(14)?,
+        box_rect: box_json.as_deref().and_then(|s| serde_json::from_str(s).ok()),
+        pinned: row.get::<_, i64>(16)? != 0,
+        custom_title: row.get(17)?,
+        hidden: row.get::<_, i64>(18)? != 0,
+        checkpointed_at: row.get(19)?,
+    })
+}
+
 #[tauri::command]
 pub fn db_list_session_history(
     workspace_id: String,
@@ -443,36 +494,13 @@ pub fn db_list_session_history(
 ) -> Result<Vec<SessionHistoryEntry>, String> {
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut stmt = conn
-        .prepare(
-            "SELECT id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, prelaunch, opened_at, closed_at
-             FROM session_history WHERE workspace_id = ?1 ORDER BY closed_at DESC",
-        )
+        .prepare(&format!(
+            "SELECT {ENTRY_COLUMNS} FROM session_history WHERE workspace_id = ?1 ORDER BY closed_at DESC"
+        ))
         .map_err(|e| e.to_string())?;
 
     let entries = stmt
-        .query_map([&workspace_id], |row| {
-            let skills_json: String = row.get(8)?;
-            let skills = parse_archived_skills(&skills_json);
-            let siblings_json: String = row.get(9)?;
-            let sibling_tabs: Vec<SiblingTab> =
-                serde_json::from_str(&siblings_json).unwrap_or_default();
-            Ok(SessionHistoryEntry {
-                id: row.get(0)?,
-                workspace_id: row.get(1)?,
-                agent_id: row.get(2)?,
-                agent_label: row.get(3)?,
-                command: row.get(4)?,
-                cwd: row.get(5)?,
-                title: row.get(6)?,
-                session_id: row.get(7)?,
-                skills,
-                sibling_tabs,
-                account_id: row.get(10)?,
-                prelaunch: crate::prelaunch::steps_from_json(&row.get::<_, String>(11)?),
-                opened_at: row.get(12)?,
-                closed_at: row.get(13)?,
-            })
-        })
+        .query_map([&workspace_id], entry_from_row)
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
@@ -480,6 +508,54 @@ pub fn db_list_session_history(
     Ok(entries)
 }
 
+/// Límite de ids que devuelve [`db_mission_session_ids`]: el conjunto de sesiones de
+/// misiones de un workspace crece sin techo, y la vista de Sesiones no lo necesita entero.
+const MISSION_SESSION_IDS_LIMIT: usize = 5000;
+
+/// Ids de sesión de los terminales de misiones de un workspace: `session_id` de cada tab
+/// más cada elemento del array JSON `session_ids`. Sin repetidos, ordenados, como mucho
+/// [`MISSION_SESSION_IDS_LIMIT`]. Un `session_ids` con JSON inválido se ignora.
+pub(crate) fn mission_session_ids(
+    conn: &Connection,
+    workspace_id: &str,
+) -> Result<Vec<String>, String> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT u.session_id, u.session_ids FROM mission_usage_tabs u
+             JOIN missions m ON m.id = u.mission_id
+             WHERE m.workspace_id = ?1",
+        )
+        .map_err(|e| e.to_string())?;
+    let rows = stmt
+        .query_map([workspace_id], |r| {
+            Ok((r.get::<_, Option<String>>(0)?, r.get::<_, Option<String>>(1)?))
+        })
+        .map_err(|e| e.to_string())?;
+
+    let mut ids = std::collections::BTreeSet::new();
+    for row in rows {
+        let (session_id, session_ids) = row.map_err(|e| e.to_string())?;
+        if let Some(s) = session_id.filter(|s| !s.trim().is_empty()) {
+            ids.insert(s);
+        }
+        if let Some(json) = session_ids {
+            if let Ok(list) = serde_json::from_str::<Vec<String>>(&json) {
+                ids.extend(list.into_iter().filter(|s| !s.trim().is_empty()));
+            }
+        }
+    }
+    Ok(ids.into_iter().take(MISSION_SESSION_IDS_LIMIT).collect())
+}
+
+/// Comando: ids de sesión de terminales de misiones del workspace (ver [`mission_session_ids`]).
+#[tauri::command]
+pub fn db_mission_session_ids(
+    workspace_id: String,
+    db: tauri::State<DbConnection>,
+) -> Result<Vec<String>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    mission_session_ids(&conn, &workspace_id)
+}
 
 /// Borra una entrada del historial. No toca el archivo de sesión del agente en disco
 /// (vive fuera de la app, en `~/.claude/projects` y equivalentes): esto solo saca la
@@ -495,6 +571,261 @@ pub fn db_delete_session_history(
     Ok(())
 }
 
+// ── Historial vivo: checkpoints, edición y búsqueda ─────────────
+
+const PREVIEW_MAX_CHARS: usize = 2000;
+const TITLE_MAX_CHARS: usize = 120;
+const SEARCH_DEFAULT_LIMIT: u32 = 50;
+const SEARCH_MAX_LIMIT: u32 = 200;
+
+/// Lo que el frontend sabe de una tab viva al hacer checkpoint: su prévia y su posición en
+/// el canvas. Ambos opcionales; lo que no llega conserva lo que ya estaba guardado.
+#[derive(Deserialize, Debug, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckpointExtra {
+    pub tab_id: String,
+    #[serde(default)]
+    pub preview: Option<String>,
+    #[serde(default, rename = "box")]
+    pub box_rect: Option<BoxRect>,
+}
+
+/// Cambios del usuario sobre una entrada. Cada campo distingue "no tocar" (ausente) de
+/// "limpiar": `customTitle: null` borra el título propio, ausente lo deja como estaba.
+#[derive(Deserialize, Debug, Clone, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct SessionPatch {
+    #[serde(default, deserialize_with = "double_option")]
+    pub custom_title: Option<Option<String>>,
+    #[serde(default)]
+    pub pinned: Option<bool>,
+    #[serde(default)]
+    pub hidden: Option<bool>,
+}
+
+/// `Option<Option<T>>` que distingue ausente (`None`) de `null` (`Some(None)`).
+fn double_option<'de, D, T>(de: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Option::<T>::deserialize(de).map(Some)
+}
+
+/// Texto de usuario limpio: sin caracteres de control (los saltos de línea solo si
+/// `multiline`), recortado a `max` caracteres y sin espacios sobrantes. Vacío = `None`.
+fn clean_text(raw: &str, multiline: bool, max: usize) -> Option<String> {
+    let cleaned: String = raw
+        .chars()
+        .filter_map(|c| match c {
+            '\n' if multiline => Some('\n'),
+            '\n' | '\t' => Some(' '),
+            c if c.is_control() => None,
+            c => Some(c),
+        })
+        .take(max)
+        .collect();
+    let t = cleaned.trim();
+    (!t.is_empty()).then(|| t.to_string())
+}
+
+/// Un rectángulo solo se guarda si sus cuatro valores son números finitos: un NaN se
+/// serializaría como `null` y leerlo después daría una tarjeta sin posición.
+fn finite_box(b: BoxRect) -> Option<BoxRect> {
+    [b.x, b.y, b.w, b.h].iter().all(|v| v.is_finite()).then_some(b)
+}
+
+/// Guarda un checkpoint de cada tab viva del workspace en `session_history`, SIN cerrarla
+/// ni quitarla de `tabs`. Pasa por [`upsert_history_row`], así que la deduplicación es la
+/// misma que al archivar, y deja `tabs.history_id` apuntando a la entrada: al cerrar la tab
+/// después, el archivado actualiza esa misma fila.
+///
+/// Como [`resolve_for_archive`] puede leer disco o lanzar procesos, se llama con el lock
+/// suelto, tab por tab. Devuelve cuántas entradas se escribieron.
+pub(crate) fn checkpoint_sessions(
+    db: &DbConnection,
+    workspace_id: &str,
+    extras: &[CheckpointExtra],
+) -> Result<u32, String> {
+    // Solo tabs de ventanas abiertas, que no sean shell y que tengan carpeta y un agente
+    // conocido (integrado o personalizado). El resto no tiene de qué reconstruir una sesión.
+    let candidates: Vec<String> = {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mut stmt = conn
+            .prepare(
+                "SELECT t.id, t.agent_id FROM tabs t
+                 JOIN windows w ON w.id = t.window_id
+                 WHERE w.workspace_id = ?1 AND w.is_open = 1
+                   AND t.agent_id != 'bash' AND t.cwd != ''
+                 ORDER BY t.tab_order ASC",
+            )
+            .map_err(|e| e.to_string())?;
+        let rows: Vec<(String, String)> = stmt
+            .query_map([workspace_id], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(|e| e.to_string())?
+            .filter_map(|r| r.ok())
+            .collect();
+        rows.into_iter()
+            .filter(|(_, agent)| {
+                crate::agents::adapter_for(agent).is_some()
+                    || crate::agents::find(&conn, agent).is_some()
+            })
+            .map(|(id, _)| id)
+            .collect()
+    };
+
+    let now = now_ts();
+    let mut written = 0;
+    for tab_id in candidates {
+        // Sin el lock: lee disco y, para algunas TUIs, lanza un proceso.
+        let resolved = resolve_for_archive(db, &tab_id);
+        let extra = extras.iter().find(|e| e.tab_id == tab_id);
+        let preview = extra
+            .and_then(|e| e.preview.as_deref())
+            .and_then(|p| clean_text(p, true, PREVIEW_MAX_CHARS));
+        let box_json = extra
+            .and_then(|e| e.box_rect)
+            .and_then(finite_box)
+            .and_then(|b| serde_json::to_string(&b).ok());
+
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let Some(hid) = upsert_history_row(&conn, &tab_id, workspace_id, &resolved, now)? else {
+            continue;
+        };
+        conn.execute(
+            "UPDATE tabs SET session_id = COALESCE(?1, session_id), history_id = ?2 WHERE id = ?3",
+            params![resolved.session_id, hid, tab_id],
+        )
+        .map_err(|e| e.to_string())?;
+        conn.execute(
+            "UPDATE session_history
+             SET checkpointed_at = ?1, preview = COALESCE(?2, preview), box = COALESCE(?3, box)
+             WHERE id = ?4",
+            params![now, preview, box_json, hid],
+        )
+        .map_err(|e| e.to_string())?;
+        written += 1;
+    }
+    Ok(written)
+}
+
+/// Guarda un checkpoint de las tabs vivas del workspace. Ver [`checkpoint_sessions`].
+#[tauri::command]
+pub fn db_checkpoint_sessions(
+    workspace_id: String,
+    extras: Vec<CheckpointExtra>,
+    db: tauri::State<DbConnection>,
+) -> Result<u32, String> {
+    checkpoint_sessions(&db, &workspace_id, &extras)
+}
+
+/// Aplica título, fijado y ocultar sobre una entrada. Lo que no viene en el parche no se
+/// toca. Un título vacío o solo con espacios borra el título propio.
+pub(crate) fn update_session_history(
+    conn: &Connection,
+    history_id: &str,
+    patch: &SessionPatch,
+) -> Result<(), String> {
+    let set_title = patch.custom_title.is_some();
+    let title = patch
+        .custom_title
+        .clone()
+        .flatten()
+        .and_then(|t| clean_text(&t, false, TITLE_MAX_CHARS));
+    let changed = conn
+        .execute(
+            "UPDATE session_history SET
+               custom_title = CASE WHEN ?1 THEN ?2 ELSE custom_title END,
+               pinned = COALESCE(?3, pinned),
+               hidden = COALESCE(?4, hidden)
+             WHERE id = ?5",
+            params![
+                set_title,
+                title,
+                patch.pinned.map(i64::from),
+                patch.hidden.map(i64::from),
+                history_id
+            ],
+        )
+        .map_err(|e| e.to_string())?;
+    if changed == 0 {
+        return Err("Esta entrada do histórico já não existe.".to_string());
+    }
+    Ok(())
+}
+
+/// Cambia título propio, fijado u ocultar de una entrada del historial.
+#[tauri::command]
+pub fn db_update_session_history(
+    history_id: String,
+    patch: SessionPatch,
+    db: tauri::State<DbConnection>,
+) -> Result<(), String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    update_session_history(&conn, &history_id, &patch)
+}
+
+/// Escapa `%`, `_` y el propio escape `!` para usar `q` como texto literal dentro de LIKE.
+fn like_literal(q: &str) -> String {
+    let mut out = String::with_capacity(q.len());
+    for c in q.chars() {
+        if matches!(c, '%' | '_' | '!') {
+            out.push('!');
+        }
+        out.push(c);
+    }
+    out
+}
+
+/// Busca en el historial de un workspace por título propio, título, agente y prévia. Las
+/// ocultas también aparecen. Igual que el resto del historial, más reciente primero.
+///
+/// Usa LIKE de SQLite, que distingue mayúsculas solo para ASCII: "ação" no encuentra
+/// "AÇÃO". Si hace falta plegado Unicode, hay que filtrar en Rust.
+#[tauri::command]
+pub fn db_search_session_history(
+    workspace_id: String,
+    query: String,
+    limit: Option<u32>,
+    db: tauri::State<DbConnection>,
+) -> Result<Vec<SessionHistoryEntry>, String> {
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    search_session_history(&conn, &workspace_id, &query, limit)
+}
+
+/// La búsqueda en sí, sobre una conexión ya lockeada. Ver [`db_search_session_history`].
+pub(crate) fn search_session_history(
+    conn: &Connection,
+    workspace_id: &str,
+    query: &str,
+    limit: Option<u32>,
+) -> Result<Vec<SessionHistoryEntry>, String> {
+    let q = query.trim();
+    if q.is_empty() {
+        return Ok(Vec::new());
+    }
+    let pattern = format!("%{}%", like_literal(q));
+    let limit = limit.unwrap_or(SEARCH_DEFAULT_LIMIT).clamp(1, SEARCH_MAX_LIMIT);
+
+    let mut stmt = conn
+        .prepare(&format!(
+            "SELECT {ENTRY_COLUMNS} FROM session_history
+             WHERE workspace_id = ?1 AND (
+               custom_title LIKE ?2 ESCAPE '!' OR
+               title LIKE ?2 ESCAPE '!' OR
+               agent_label LIKE ?2 ESCAPE '!' OR
+               preview LIKE ?2 ESCAPE '!')
+             ORDER BY closed_at DESC LIMIT ?3"
+        ))
+        .map_err(|e| e.to_string())?;
+    let entries = stmt
+        .query_map(params![workspace_id, pattern, limit], entry_from_row)
+        .map_err(|e| e.to_string())?
+        .filter_map(|r| r.ok())
+        .collect();
+    Ok(entries)
+}
+
 /// Una entrada puntual del historial, sobre una conexión ya lockeada — la usa el
 /// exportador a markdown, que necesita toda la metadata de la sesión.
 pub fn session_history_entry(
@@ -502,29 +833,9 @@ pub fn session_history_entry(
     history_id: &str,
 ) -> Result<Option<SessionHistoryEntry>, String> {
     conn.query_row(
-        "SELECT id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, prelaunch, opened_at, closed_at
-         FROM session_history WHERE id = ?1",
+        &format!("SELECT {ENTRY_COLUMNS} FROM session_history WHERE id = ?1"),
         [history_id],
-        |row| {
-            let skills_json: String = row.get(8)?;
-            let siblings_json: String = row.get(9)?;
-            Ok(SessionHistoryEntry {
-                id: row.get(0)?,
-                workspace_id: row.get(1)?,
-                agent_id: row.get(2)?,
-                agent_label: row.get(3)?,
-                command: row.get(4)?,
-                cwd: row.get(5)?,
-                title: row.get(6)?,
-                session_id: row.get(7)?,
-                skills: parse_archived_skills(&skills_json),
-                sibling_tabs: serde_json::from_str(&siblings_json).unwrap_or_default(),
-                account_id: row.get(10)?,
-                prelaunch: crate::prelaunch::steps_from_json(&row.get::<_, String>(11)?),
-                opened_at: row.get(12)?,
-                closed_at: row.get(13)?,
-            })
-        },
+        entry_from_row,
     )
     .optional()
     .map_err(|e| e.to_string())
@@ -583,4 +894,78 @@ pub(crate) fn open_tab_for_session(
         |row| Ok(OpenTabLocation { window_label: row.get(0)?, tab_id: row.get(1)? }),
     )
     .optional()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Dos workspaces; `ws` con dos misiones y `other` con una. Los datos de cada tab
+    /// cubren los casos de borde: session_id nulo/vacío, JSON inválido, repetidos.
+    fn seeded() -> Connection {
+        let conn = crate::database::test_db();
+        conn.execute_batch(
+            "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+             INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('other', 'Otro', 0, 0);
+             INSERT INTO missions (id, workspace_id, title, objective, cwd, created_at, updated_at)
+               VALUES ('m1', 'ws', 'M1', 'O', '/repo', 0, 0),
+                      ('m2', 'ws', 'M2', 'O', '/repo', 0, 0),
+                      ('mo', 'other', 'MO', 'O', '/repo', 0, 0);
+             INSERT INTO mission_usage_tabs (mission_id, tab_id, agent_id, label, kind, cwd, session_id, session_ids, opened_at)
+               VALUES ('m1', 't1', 'codex', 'A', 'member', '/wt', 'sA', '[\"sB\",\"sA\",\"sC\"]', 1),
+                      ('m1', 't2', 'codex', 'B', 'member', '/wt', NULL, '[]', 2),
+                      ('m1', 't3', 'codex', 'C', 'member', '/wt', '', '[\"\",\"sD\"]', 3),
+                      ('m2', 't4', 'claude', 'D', 'member', '/wt', 'sE', 'no-es-json', 4),
+                      ('m2', 't5', 'claude', 'E', 'member', '/wt', 'sB', '[]', 5),
+                      ('mo', 't6', 'codex', 'F', 'member', '/wt', 'sOTHER', '[\"sOTHER2\"]', 6);",
+        )
+        .unwrap();
+        conn
+    }
+
+    #[test]
+    fn mission_session_ids_junta_duas_misiones_del_workspace() {
+        let conn = seeded();
+        let ids = mission_session_ids(&conn, "ws").unwrap();
+        assert!(ids.contains(&"sA".to_string()));
+        assert!(ids.contains(&"sE".to_string()));
+        assert!(ids.contains(&"sB".to_string()));
+    }
+
+    #[test]
+    fn mission_session_ids_no_trae_otro_workspace() {
+        let conn = seeded();
+        let ids = mission_session_ids(&conn, "ws").unwrap();
+        assert!(!ids.iter().any(|s| s.starts_with("sOTHER")));
+        let otro = mission_session_ids(&conn, "other").unwrap();
+        assert_eq!(otro, vec!["sOTHER".to_string(), "sOTHER2".to_string()]);
+    }
+
+    #[test]
+    fn mission_session_ids_expande_json_e_ignora_invalidos_nulos_y_vacios() {
+        let conn = seeded();
+        let ids = mission_session_ids(&conn, "ws").unwrap();
+        // sA, sB, sC (JSON de t1), sD (JSON de t3), sE (session_id de t4; su JSON inválido se ignora).
+        assert_eq!(ids, vec!["sA", "sB", "sC", "sD", "sE"]);
+    }
+
+    #[test]
+    fn mission_session_ids_sin_repeticion_y_ordenado() {
+        let conn = seeded();
+        let ids = mission_session_ids(&conn, "ws").unwrap();
+        let mut sorted = ids.clone();
+        sorted.sort();
+        sorted.dedup();
+        assert_eq!(ids, sorted);
+    }
+
+    #[test]
+    fn mission_session_ids_respeta_el_limite() {
+        let conn = seeded();
+        conn.execute("INSERT INTO mission_usage_tabs (mission_id, tab_id, agent_id, label, kind, cwd, session_id, session_ids, opened_at) VALUES ('m1','big','codex','X','member','/wt',NULL,?1,7)",
+            [serde_json::to_string(&(0..6000).map(|i| format!("big-{i:05}")).collect::<Vec<_>>()).unwrap()])
+            .unwrap();
+        let ids = mission_session_ids(&conn, "ws").unwrap();
+        assert_eq!(ids.len(), MISSION_SESSION_IDS_LIMIT);
+    }
 }

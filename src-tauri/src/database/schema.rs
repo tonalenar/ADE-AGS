@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-pub(crate) const SCHEMA_VERSION: i32 = 41;
+pub(crate) const SCHEMA_VERSION: i32 = 42;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1203,6 +1203,21 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
             PRIMARY KEY (scope, work_key)
         );",
     )?;
+    // v42 — Historial vivo: checkpoints de las conversaciones mientras la tab sigue abierta,
+    // con prévia, posición en el canvas, fijado, título propio y ocultar. Solo aditiva:
+    // las filas que ya existen quedan con los defaults (sin prévia, sin fijar, visibles).
+    for (column, definition) in [
+        ("preview", "TEXT"),
+        ("box", "TEXT"),
+        ("pinned", "INTEGER NOT NULL DEFAULT 0"),
+        ("custom_title", "TEXT"),
+        ("hidden", "INTEGER NOT NULL DEFAULT 0"),
+        ("checkpointed_at", "INTEGER"),
+    ] {
+        if !has_column(conn, "session_history", column) {
+            conn.execute_batch(&format!("ALTER TABLE session_history ADD COLUMN {column} {definition};"))?;
+        }
+    }
     set_user_version(conn, SCHEMA_VERSION)
 }
 

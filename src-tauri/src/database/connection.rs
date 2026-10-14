@@ -226,7 +226,7 @@ mod backup_tests {
 
         upgrade_schema(&conn, &path).unwrap();
 
-        assert_eq!(user_version(&conn), 41);
+        assert_eq!(user_version(&conn), 42);
         assert!(
             conn.prepare("SELECT deleted_at FROM workspaces LIMIT 0")
                 .is_ok()

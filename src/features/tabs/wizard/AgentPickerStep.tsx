@@ -8,6 +8,8 @@ import type { AgentInfo } from "@/features/tabs/types";
 interface AgentPickerStepProps {
   agents: AgentInfo[];
   selected: string | null;
+  /** O último agente usado: quando vem primeiro na lista, ganha a etiqueta. */
+  lastId?: string | null;
   onSelect: (agent: AgentInfo) => void;
 }
 
@@ -23,7 +25,7 @@ interface AgentPickerStepProps {
  * El logo de la TUI es el mismo que después identifica la tab en la barra: la elección de
  * acá y lo que se ve arriba después tienen que poder reconocerse entre sí.
  */
-export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepProps) {
+export function AgentPickerStep({ agents, selected, lastId, onSelect }: AgentPickerStepProps) {
   const { t } = useTranslation();
   const available = agents.filter((a) => a.available);
 
@@ -37,8 +39,10 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
 
   return (
     <div className="grid grid-cols-2 gap-2">
-      {available.map((agent) => {
+      {available.map((agent, index) => {
         const isSelected = agent.id === selected;
+        // Só o primeiro item carrega a etiqueta: é ele que o `orderAgents` leva para o topo.
+        const isLastUsed = index === 0 && agent.id === lastId;
         const AgentIcon = agentIcon(agent.id, agent.command);
         return (
           <Button variant="custom"
@@ -69,6 +73,12 @@ export function AgentPickerStep({ agents, selected, onSelect }: AgentPickerStepP
                 <span className="truncate text-[13.5px] leading-[18px] font-semibold text-gray-900 dark:text-[#f5f5f7]">
                   {agent.label}
                 </span>
+                {isLastUsed && (
+                  <span className="shrink-0 px-1 rounded text-[9.5px]
+                    bg-accent-500/12 text-accent-600 dark:text-accent-400">
+                    {t("wizard.lastUsed")}
+                  </span>
+                )}
                 {agent.isCustom && (
                   <span className="shrink-0 px-1 rounded text-[9.5px]
                     bg-violet-500/12 text-violet-600 dark:text-violet-400">

@@ -53,4 +53,16 @@ export interface SessionHistoryEntry {
   prelaunch: PrelaunchStep[];
   openedAt: number;
   closedAt: number;
+  /* Campos nuevos que el backend ya empieza a guardar. Opcionales: las entradas viejas no los traen. */
+  /** Primer texto de la conversación, para buscar y reconocerla. */
+  preview?: string | null;
+  pinned?: boolean;
+  /** Título que puso el usuario; pisa al título automático. */
+  customTitle?: string | null;
+  /** Oculta la entrada del historial sin borrarla. */
+  hidden?: boolean;
+  /** Último checkpoint guardado, en segundos epoch. */
+  checkpointedAt?: number | null;
+  /** Posición en el lienzo, si la conversación está ubicada ahí. */
+  box?: { x: number; y: number; w: number; h: number } | null;
 }
