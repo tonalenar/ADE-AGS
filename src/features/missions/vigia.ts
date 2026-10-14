@@ -2,7 +2,10 @@ import { useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
-import { useCanvasStore } from "@/features/canvas/store";
+import { linkedPeers } from "@/features/canvas/orchestratorNotice";
+import { boardKeyOfTab, conversationOfKey, useCanvasStore } from "@/features/canvas/store";
+import type { Board } from "@/features/canvas/board";
+import type { Tab } from "@/features/tabs/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { lastOutputAt } from "@/features/terminal/activity";
 import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
@@ -10,6 +13,7 @@ import { showBotToast } from "@/shared/brand/botToastStore";
 import { missionIndex, tabsByMission } from "./groups";
 import { useMissionsStore } from "./store";
 import { isWorking } from "./stalled";
+import { prematureClosing } from "./vigiaClosing";
 import { LOOP_DONE, loopStep, loopStuck, type LoopWatch } from "./vigiaLoop";
 import { isFinalReport, memberFinished, pokeAllowed } from "./vigiaPoke";
 import { useVigiaSwitch } from "./vigiaSwitch";
@@ -270,24 +274,84 @@ export function missionStartMs(startedAtSec: number | null, now: number): number
   return startedAtSec != null ? startedAtSec * 1000 : now;
 }
 
+/** O que o Vigia supervisiona: uma missão em andamento ou o time montado numa conversa de projeto. */
+interface WatchedTeam {
+  id: string;
+  title: string;
+  /** Epoch em segundos (como vem do banco) ou `null` = desde que o Vigia viu o time. */
+  startedAt: number | null;
+  team: Tab[];
+  lead: Tab;
+}
+
+/** Quando o Orquestrador foi avisado do fechamento antecipado de cada time, e quantas vezes seguidas. */
+const closingNudges = new Map<string, { at: number; count: number }>();
+/** O mesmo aviso de fechamento antecipado não se repete antes disto. */
+export const CLOSING_COOLDOWN_MS = 3 * 60_000;
+
+/** Os times de conversa: o Orquestrador do canvas `#c:` com os terminais ligados a ele por corda. */
+function conversationTeams(tabs: Tab[], boards: Record<string, Board>): WatchedTeam[] {
+  const out: WatchedTeam[] = [];
+  for (const [key, board] of Object.entries(boards)) {
+    const conversation = conversationOfKey(key);
+    if (!conversation) continue;
+    const open = tabs.filter((tab) => tab.agentId !== "bash" && boardKeyOfTab(tab, boards) === key);
+    const lead = open.find((tab) => board.orchestrators.includes(tab.id));
+    if (!lead) continue;
+    const linked = new Set(linkedPeers(board, lead.id));
+    const team = [lead, ...open.filter((tab) => tab.id !== lead.id && linked.has(tab.id))];
+    if (team.length < 2) continue;
+    out.push({ id: `c:${conversation}`, title: lead.title.split(" — ")[0], startedAt: null, team, lead });
+  }
+  return out;
+}
+
 /** Um passo: as regras sem modelo primeiro; se não acharem nada, o modelo barato para os ociosos. */
 export function vigiaTick(now = Date.now()): void {
   // Desligado por padrão: o Vigia só age quando o usuário liga o botão ao lado do chat.
   if (!useVigiaSwitch.getState().enabled) return;
   const { tabs, detectedAgents } = useTabsStore.getState();
-  const missions = useMissionsStore.getState().missions.filter((m) => m.status === "running");
-  if (missions.length === 0) return;
+  const running = useMissionsStore.getState().missions.filter((m) => m.status === "running");
   const boards = useCanvasStore.getState().boards;
   const byMission = tabsByMission(missionIndex(boards, tabs), tabs);
   const available = detectedAgents.filter((a) => a.available).map((a) => a.id);
-  for (const mission of missions) {
+  const watched: WatchedTeam[] = [];
+  for (const mission of running) {
     const team = (byMission[mission.id] ?? [])
       .map((id) => tabs.find((tab) => tab.id === id))
       .filter((tab): tab is NonNullable<typeof tab> => !!tab && tab.agentId !== "bash");
     const board = Object.entries(boards).find(([key]) => key.endsWith(`#m:${mission.id}`))?.[1];
     const lead = team.find((tab) => board?.orchestrators.includes(tab.id)) ?? team[0];
-    if (!lead) continue;
+    if (lead) watched.push({ id: mission.id, title: mission.title, startedAt: mission.startedAt, team, lead });
+  }
+  // Uma conversa com o time montado (sem missão) também é supervisionada.
+  watched.push(...conversationTeams(tabs, boards));
+  for (const mission of watched) {
+    const { team, lead } = mission;
     watchLoops(team, lead.id, now);
+
+    // Fechamento antecipado: o Orquestrador pede o OK para commit/PR com integrante ainda trabalhando.
+    const closing = prematureClosing({
+      leadLines: screenOf(lead.id)?.lines ?? null,
+      members: team.filter((tab) => tab.id !== lead.id).map((tab) => ({
+        name: tab.title.split(" — ")[0],
+        working: isWorking(screenOf(tab.id)?.lines ?? []),
+        owesReport: taskAt.has(tab.id) && !memberFinished(taskAt.get(tab.id), finishedAt.get(tab.id)),
+      })),
+    });
+    if (closing) {
+      const before = closingNudges.get(mission.id);
+      if ((!before || now - before.at >= CLOSING_COOLDOWN_MS) && (before?.count ?? 0) < NUDGE_LIMIT && mayPoke(lead.id, now)) {
+        showBotToast({ title: VIGIA_NAME, text: closing.stuck, tone: "warning", ms: 12_000 });
+        poke(lead.id, `[${VIGIA_NAME}] ${closing.nudge}`, now, () => {
+          closingNudges.set(mission.id, { at: Date.now(), count: (closingNudges.get(mission.id)?.count ?? 0) + 1 });
+          reportToChat(lead.id, reportLine(closing.stuck, `lembrei o ${lead.title.split(" — ")[0]} de esperar a entrega.`, "fechamento antecipado"));
+        });
+      }
+      continue;
+    }
+    // Voltou ao normal: um próximo fechamento antecipado vale um aviso novo.
+    closingNudges.delete(mission.id);
 
     const watch = watches.get(mission.id) ?? { startedAt: missionStartMs(mission.startedAt, now), nudges: 0, limitReported: false };
     watches.set(mission.id, watch);

@@ -815,7 +815,7 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
 
       {editingRole && (
-        <RoleEditDialog name={tab.title.split(" — ")[0]} label={role} subagent={subagent}
+        <RoleEditDialog name={tab.title.split(" — ")[0]} label={role} subagent={subagent} tab={tab}
           onClose={() => setEditingRole(false)} onSave={(choice) => onSetRole(tab.id, choice)} />
       )}
       <div
