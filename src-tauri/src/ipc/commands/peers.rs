@@ -281,6 +281,31 @@ const SENDER_WAIT: Duration = Duration::from_secs(3);
 /// Até quando a fila espera o destino terminar o turno antes de entregar mesmo assim.
 const QUEUE_MAX_WAIT: Duration = Duration::from_secs(15 * 60);
 
+/// A partir de quanto tempo na fila uma mensagem ganha o aviso de que pode estar velha.
+const STALE_AFTER: Duration = Duration::from_secs(20);
+
+/// O aviso que acompanha uma mensagem que esperou na fila enquanto o destino trabalhava: o texto foi
+/// escrito pelo remetente em cima do que ele via ANTES, e o destino pode ter mudado o código nesse meio tempo
+/// (o orquestrador respondia a relatórios de uma revisão que ele já tinha corrigido). `None` se foi rápida.
+pub(crate) fn stale_note(waited: Duration) -> Option<String> {
+    if waited < STALE_AFTER {
+        return None;
+    }
+    let secs = waited.as_secs();
+    let how = if secs >= 120 { format!("{} min", secs / 60) } else { format!("{secs} s") };
+    Some(format!(
+        "(Esta mensagem foi escrita há {how}, enquanto você trabalhava, e ficou na fila até agora: o remetente viu o estado de ANTES. Se você já mudou algo que ela cita, confira antes de agir e não refaça o que já fez.)"
+    ))
+}
+
+/// A mensagem com o aviso de atraso, se ela esperou o bastante.
+fn with_stale_note(message: String, queued_at: Instant) -> String {
+    match stale_note(queued_at.elapsed()) {
+        Some(note) => format!("{message}\n{note}"),
+        None => message,
+    }
+}
+
 /// Entrega `message` quando o destino parar de escrever, numa thread própria. `false` se era repetida.
 fn deliver_when_quiet(pty: u32, target: &str, message: String) -> bool {
     if !first_time_for(target, &message) {
@@ -288,10 +313,11 @@ fn deliver_when_quiet(pty: u32, target: &str, message: String) -> bool {
     }
     let lock = delivery_lock(target);
     let target = target.to_string();
+    let queued_at = Instant::now();
     std::thread::spawn(move || {
         let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
         wait_until_quiet(pty, Duration::from_millis(1500), QUEUE_MAX_WAIT, false);
-        let _ = submit_confirmed(pty, &target, &message);
+        let _ = submit_confirmed(pty, &target, &with_stale_note(message, queued_at));
     });
     true
 }
@@ -314,10 +340,11 @@ fn deliver_now_or_queue(pty: u32, target: &str, message: String) -> Result<Deliv
     // Já registrada como vista acima: a fila entrega sem repetir a checagem de duplicata.
     let lock = delivery_lock(target);
     let target = target.to_string();
+    let queued_at = Instant::now();
     std::thread::spawn(move || {
         let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
         wait_until_quiet(pty, Duration::from_millis(1500), QUEUE_MAX_WAIT, false);
-        let _ = submit_confirmed(pty, &target, &message);
+        let _ = submit_confirmed(pty, &target, &with_stale_note(message, queued_at));
     });
     Ok(Delivery::Queued)
 }
@@ -985,6 +1012,15 @@ mod test {
         finish_ask("qa", target, 200, false);
         assert_eq!(asks().lock().unwrap().get(target).unwrap().finished, Some(false));
         asks().lock().unwrap().remove(target);
+    }
+
+    #[test]
+    fn a_message_that_waited_in_the_queue_warns_the_target_it_may_be_stale() {
+        assert_eq!(stale_note(Duration::from_secs(5)), None, "entrega rápida não leva aviso");
+        let short = stale_note(Duration::from_secs(45)).unwrap();
+        assert!(short.contains("45 s") && short.contains("confira"), "{short}");
+        let long = stale_note(Duration::from_secs(600)).unwrap();
+        assert!(long.contains("10 min"), "{long}");
     }
 
     #[test]
