@@ -8,7 +8,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("react", () => ({ useEffect: (effect: () => unknown) => effect() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: (_event: string, listener: typeof mocks.listener) => { mocks.listener = listener; return Promise.resolve(() => {}); } }));
-vi.mock("@/features/canvas/store", () => ({ useCanvasStore: { getState: () => ({ boards: { "repo#m:m": { orchestrators: ["lead"] } } }) } }));
+vi.mock("@/features/canvas/store", () => ({ useCanvasStore: { getState: () => ({ boards: { "repo#m:m": { orchestrators: ["lead"] } } }) }, boardKeyOfTab: () => "repo", conversationOfKey: () => null }));
 vi.mock("@/features/tabs/store", () => ({ useTabsStore: { getState: () => ({ tabs: [
   { id: "lead", title: "Orquestrador", agentId: "claude-code", cwd: "repo" },
   { id: "back", title: "Backend", agentId: "claude-code", cwd: "repo" },
