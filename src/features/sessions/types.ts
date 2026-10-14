@@ -65,4 +65,6 @@ export interface SessionHistoryEntry {
   checkpointedAt?: number | null;
   /** Posición en el lienzo, si la conversación está ubicada ahí. */
   box?: { x: number; y: number; w: number; h: number } | null;
+  /** Medido pelo backend lendo a sessão do agente. Ausente ou nulo = ainda não medido. */
+  activity?: "task" | "empty" | "mission" | null;
 }

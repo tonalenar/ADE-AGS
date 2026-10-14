@@ -456,7 +456,7 @@ fn parse_archived_skills(json: &str) -> Vec<ArchivedSkill> {
 /// estrictamente por `workspace_id` — dos workspaces nunca comparten entradas.
 /// Columnas que lee [`entry_from_row`], en ese orden. Toda consulta que devuelva una
 /// `SessionHistoryEntry` tiene que usar esta lista, no una propia.
-const ENTRY_COLUMNS: &str = "id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, prelaunch, opened_at, closed_at, preview, box, pinned, custom_title, hidden, checkpointed_at";
+const ENTRY_COLUMNS: &str = "id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, skills, sibling_tabs, account_id, prelaunch, opened_at, closed_at, preview, box, pinned, custom_title, hidden, checkpointed_at, activity";
 
 /// Traduce una fila con [`ENTRY_COLUMNS`] a una entrada del historial.
 fn entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<SessionHistoryEntry> {
@@ -484,6 +484,7 @@ fn entry_from_row(row: &rusqlite::Row) -> rusqlite::Result<SessionHistoryEntry> 
         custom_title: row.get(17)?,
         hidden: row.get::<_, i64>(18)? != 0,
         checkpointed_at: row.get(19)?,
+        activity: row.get(20)?,
     })
 }
 
@@ -527,16 +528,22 @@ pub(crate) fn refresh_weak_session_titles(db: &DbConnection, workspace_id: &str)
         agent_label: String,
         cwd: String,
         title: String,
+        /// El título actual es débil y hay que recalcularlo.
+        title_weak: bool,
         session_id: String,
         profile: Option<String>,
         custom: Option<crate::agents::CustomAgent>,
+        /// La entrada no tiene `activity` (o la tiene como `empty`) y el agente la puede medir.
+        needs_activity: bool,
+        /// Lo que ya estaba medido: solo se graba si la nueva medición es distinta.
+        old_activity: Option<String>,
     }
 
     let candidates: Vec<Candidate> = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
-                "SELECT id, agent_id, agent_label, cwd, title, session_id, account_id
+                "SELECT id, agent_id, agent_label, cwd, title, session_id, account_id, activity
                  FROM session_history
                  WHERE workspace_id = ?1 AND session_id IS NOT NULL
                  ORDER BY closed_at DESC",
@@ -552,6 +559,7 @@ pub(crate) fn refresh_weak_session_titles(db: &DbConnection, workspace_id: &str)
                     r.get::<_, Option<String>>(4)?,
                     r.get::<_, String>(5)?,
                     r.get::<_, Option<String>>(6)?,
+                    r.get::<_, Option<String>>(7)?,
                 ))
             })
             .map_err(|e| e.to_string())?
@@ -559,14 +567,30 @@ pub(crate) fn refresh_weak_session_titles(db: &DbConnection, workspace_id: &str)
             .map_err(|e| e.to_string())?;
 
         let mut out = Vec::new();
-        for (id, agent_id, agent_label, cwd, title, session_id, account_id) in rows {
+        for (id, agent_id, agent_label, cwd, title, session_id, account_id, activity) in rows {
             let title = title.unwrap_or_default();
-            if !crate::session::is_weak_title(&title, &agent_label) {
+            let title_weak = crate::session::is_weak_title(&title, &agent_label);
+            // `task` y `mission` son definitivas; `empty` se vuelve a medir (la sesión pudo recibir una tarea después).
+            let needs_activity = matches!(activity.as_deref(), None | Some("empty"))
+                && crate::session::activity_is_measurable(&agent_id);
+            if !title_weak && !needs_activity {
                 continue;
             }
             let profile = account_id.and_then(|acc| crate::accounts::dir_for_conn(&conn, &acc));
             let custom = crate::agents::find(&conn, &agent_id);
-            out.push(Candidate { id, agent_id, agent_label, cwd, title, session_id, profile, custom });
+            out.push(Candidate {
+                id,
+                agent_id,
+                agent_label,
+                cwd,
+                title,
+                title_weak,
+                session_id,
+                profile,
+                custom,
+                needs_activity,
+                old_activity: activity,
+            });
             if out.len() >= REFRESH_TITLES_LIMIT {
                 break;
             }
@@ -578,35 +602,59 @@ pub(crate) fn refresh_weak_session_titles(db: &DbConnection, workspace_id: &str)
     }
 
     // Lectura de disco fuera del lock. Como fallback va el título actual: si la sesión no
-    // aparece, el resultado es igual al actual y no se graba nada.
-    let updates: Vec<(String, String)> = candidates
+    // aparece, el título queda igual y no se graba nada. La actividad solo se graba si se
+    // pudo medir.
+    type Update = (String, Option<String>, Option<&'static str>);
+    let updates: Vec<Update> = candidates
         .iter()
         .filter_map(|c| {
             let profile = c.profile.as_deref().map(std::path::Path::new);
-            let found = crate::session::get_session_title_sync(
-                &c.agent_id,
-                &c.cwd,
-                Some(c.session_id.clone()),
-                c.title.clone(),
-                profile,
-                c.custom.as_ref(),
-            )
-            .title;
-            (found != c.title && !crate::session::is_weak_title(&found, &c.agent_label))
-                .then(|| (c.id.clone(), found))
+            let new_title = if c.title_weak {
+                let found = crate::session::get_session_title_sync(
+                    &c.agent_id,
+                    &c.cwd,
+                    Some(c.session_id.clone()),
+                    c.title.clone(),
+                    profile,
+                    c.custom.as_ref(),
+                )
+                .title;
+                (found != c.title && !crate::session::is_weak_title(&found, &c.agent_label))
+                    .then_some(found)
+            } else {
+                None
+            };
+            let activity = if c.needs_activity {
+                crate::session::session_activity(
+                    &c.agent_id,
+                    &c.cwd,
+                    &c.session_id,
+                    profile,
+                    c.custom.as_ref(),
+                )
+            } else {
+                None
+            };
+            // Medir de nuevo y obtener lo mismo no es un cambio (la segunda pasada devuelve 0).
+            let activity = activity.filter(|a| Some(*a) != c.old_activity.as_deref());
+            (new_title.is_some() || activity.is_some())
+                .then(|| (c.id.clone(), new_title, activity))
         })
         .collect();
     if updates.is_empty() {
         return Ok(0);
     }
 
+    // `COALESCE` deja intacto lo que no se recalculó. `custom_title` nunca se toca.
     let conn = db.lock().map_err(|e| e.to_string())?;
     let mut changed = 0u32;
-    for (id, title) in &updates {
+    for (id, title, activity) in &updates {
         let n = conn
             .execute(
-                "UPDATE session_history SET title = ?1 WHERE id = ?2",
-                params![title, id],
+                "UPDATE session_history
+                 SET title = COALESCE(?1, title), activity = COALESCE(?2, activity)
+                 WHERE id = ?3",
+                params![title, activity, id],
             )
             .map_err(|e| e.to_string())?;
         changed += n as u32;
@@ -1087,5 +1135,134 @@ mod tests {
             .unwrap();
         let ids = mission_session_ids(&conn, "ws").unwrap();
         assert_eq!(ids.len(), MISSION_SESSION_IDS_LIMIT);
+    }
+
+    fn claude_line(text: &str) -> String {
+        serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string()
+    }
+
+    /// Workspace `ws`, cuenta de Claude en `perfil` y una entrada `h1` con la sesión `sess-1`.
+    /// `title` decide si el título es débil; `activity` es lo que ya se midió.
+    fn refresh_db(perfil: &std::path::Path, title: &str, activity: Option<&str>) -> crate::database::DbConnection {
+        let conn = crate::database::test_db();
+        conn.execute_batch(
+            "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+             INSERT INTO agent_accounts (id, agent_id, name, dir, created_at)
+               VALUES ('acc', 'claude-code', 'Trabalho', 'x', 0);",
+        )
+        .unwrap();
+        conn.execute(
+            "UPDATE agent_accounts SET dir = ?1 WHERE id = 'acc'",
+            [perfil.to_string_lossy().to_string()],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, session_id, account_id, opened_at, closed_at, activity)
+             VALUES ('h1', 'ws', 'claude-code', 'Claude Code', 'claude', '/proj', ?1, 'sess-1', 'acc', 1, 2, ?2)",
+            params![title, activity],
+        )
+        .unwrap();
+        std::sync::Arc::new(std::sync::Mutex::new(conn))
+    }
+
+    fn scratch_dir() -> std::path::PathBuf {
+        std::env::temp_dir().join(format!("ags-activity-{}", Uuid::new_v4()))
+    }
+
+    fn write_claude_transcript(perfil: &std::path::Path, lines: &[String]) {
+        let dir = perfil.join("projects").join("-proj");
+        std::fs::create_dir_all(&dir).unwrap();
+        std::fs::write(dir.join("sess-1.jsonl"), lines.join("\n") + "\n").unwrap();
+    }
+
+    fn entry_activity(db: &crate::database::DbConnection) -> Option<String> {
+        let conn = db.lock().unwrap();
+        conn.query_row(
+            &format!("SELECT {ENTRY_COLUMNS} FROM session_history WHERE id = 'h1'"),
+            [],
+            entry_from_row,
+        )
+        .unwrap()
+        .activity
+    }
+
+    #[test]
+    fn refresh_graba_la_actividad_y_es_idempotente() {
+        let perfil = scratch_dir();
+        write_claude_transcript(&perfil, &[claude_line("arrumá o build")]);
+        // Título propio de la tab: no es débil, así que solo se mide la actividad.
+        let db = refresh_db(&perfil, "Mi tab", None);
+
+        assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(1));
+        assert_eq!(entry_activity(&db).as_deref(), Some("task"));
+        assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(0), "la 2ª pasada no cambia nada");
+
+        let title: Option<String> = db
+            .lock()
+            .unwrap()
+            .query_row("SELECT title FROM session_history WHERE id = 'h1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title.as_deref(), Some("Mi tab"), "un título que no es débil no se toca");
+        let _ = std::fs::remove_dir_all(&perfil);
+    }
+
+    #[test]
+    fn refresh_no_mide_de_nuevo_una_actividad_ya_guardada() {
+        let perfil = scratch_dir();
+        write_claude_transcript(&perfil, &[claude_line("otra cosa")]);
+        let db = refresh_db(&perfil, "Mi tab", Some("mission"));
+
+        assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(0));
+        assert_eq!(entry_activity(&db).as_deref(), Some("mission"));
+        let _ = std::fs::remove_dir_all(&perfil);
+    }
+
+    #[test]
+    fn una_sesion_vacia_que_despues_recibe_tarea_pasa_a_task_y_task_ya_no_se_mide() {
+        let perfil = scratch_dir();
+        // La sesión se midió "vacía" (la tab recién abierta), pero después la persona escribió algo.
+        write_claude_transcript(&perfil, &[claude_line("<local-command-caveat>solo ruido</local-command-caveat>")]);
+        let db = refresh_db(&perfil, "Mi tab", None);
+        assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(1));
+        assert_eq!(entry_activity(&db).as_deref(), Some("empty"));
+        assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(0), "medir de nuevo y obtener lo mismo no cambia nada");
+
+        write_claude_transcript(&perfil, &[claude_line("<local-command-caveat>solo ruido</local-command-caveat>"), claude_line("arrumá o build")]);
+        assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(1));
+        assert_eq!(entry_activity(&db).as_deref(), Some("task"), "empty no es definitiva");
+
+        // Y lo que ya es task no se vuelve a medir aunque el archivo cambie.
+        write_claude_transcript(&perfil, &[claude_line("<local-command-caveat>solo ruido</local-command-caveat>")]);
+        assert_eq!(refresh_weak_session_titles(&db, "ws"), Ok(0));
+        assert_eq!(entry_activity(&db).as_deref(), Some("task"));
+        let _ = std::fs::remove_dir_all(&perfil);
+    }
+
+    #[test]
+    fn migracion_v44_agrega_activity_sin_tocar_las_filas() {
+        let conn = crate::database::test_db();
+        conn.execute_batch(
+            "INSERT INTO workspaces (id, name, created_at, last_active) VALUES ('ws', 'WS', 0, 0);
+             INSERT INTO session_history (id, workspace_id, agent_id, agent_label, command, cwd, title, opened_at, closed_at)
+               VALUES ('h1', 'ws', 'codex', 'Codex', 'codex', '/proj', 'Algo', 1, 2);
+             ALTER TABLE session_history DROP COLUMN activity;
+             PRAGMA user_version = 43;",
+        )
+        .unwrap();
+
+        crate::database::migrate_for_tests(&conn).unwrap();
+        let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
+        assert_eq!(version, 44);
+        let title: Option<String> = conn
+            .query_row("SELECT title FROM session_history WHERE id = 'h1'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(title.as_deref(), Some("Algo"));
+        let entry = conn
+            .query_row(&format!("SELECT {ENTRY_COLUMNS} FROM session_history WHERE id = 'h1'"), [], entry_from_row)
+            .unwrap();
+        assert_eq!(entry.activity, None, "las filas viejas quedan sin medir");
+
+        // Idempotente: migrar otra vez no falla ni vuelve a agregar la columna.
+        crate::database::migrate_for_tests(&conn).unwrap();
     }
 }

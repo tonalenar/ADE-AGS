@@ -591,7 +591,7 @@ mod tests {
         conn.execute_batch("DROP TABLE project_conversations; PRAGMA user_version = 42;").unwrap();
         crate::database::migrate_for_tests(&conn).unwrap();
         let version: i64 = conn.query_row("PRAGMA user_version", [], |r| r.get(0)).unwrap();
-        assert_eq!(version, 43);
+        assert_eq!(version, 44);
         assert!(list_conversations(&conn, "ws", None).unwrap().is_empty());
         // Idempotente: migrar otra vez no falla.
         crate::database::migrate_for_tests(&conn).unwrap();

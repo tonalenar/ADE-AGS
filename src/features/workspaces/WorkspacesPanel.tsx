@@ -20,6 +20,7 @@ import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
 import { flushPendingSave } from "@/features/tabs/persistence";
 import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ConversationList } from "@/features/sessions/ConversationList";
+import { useConversationUi } from "@/features/sessions/conversationUi";
 
 /**
  * Un workspace en el panel.
@@ -189,6 +190,12 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
     return map;
   }, [groups]);
 
+  // Recolher/abrir as conversas de todos os projetos de uma vez.
+  const projectKeys = useMemo(() => [...new Set(groups.map((g) => g.key))], [groups]);
+  const projectsCollapsed = useConversationUi((s) => s.projects);
+  const setAllProjects = useConversationUi((s) => s.setAllProjects);
+  const allCollapsed = projectKeys.length > 0 && projectKeys.every((key) => projectsCollapsed[key]);
+
   const running = useMemo(
     () => groups.flatMap((g) => g.workspaces).flatMap((w) => w.agents).filter((a) => a.status === "running").length,
     [groups]
@@ -320,6 +327,20 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
             )}
           </span>
         )}
+        <Tooltip content={allCollapsed ? t("conversations.expandAll") : t("conversations.collapseAll")} placement="bottom">
+          <Button variant="icon" aria-label={allCollapsed ? t("conversations.expandAll") : t("conversations.collapseAll")}
+            aria-pressed={allCollapsed}
+            onClick={() => setAllProjects(projectKeys, !allCollapsed)}
+            className="cc-t flex items-center justify-center w-5.5 h-5.5 rounded-md shrink-0
+              text-gray-400 dark:text-white/35
+              hover:text-gray-700 dark:hover:text-white
+              hover:bg-gray-200 dark:hover:bg-white/10 p-0"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden className="w-3.5 h-3.5">
+              {allCollapsed ? <path d="m7 15 5 5 5-5M7 9l5-5 5 5" /> : <path d="m7 20 5-5 5 5M7 4l5 5 5-5" />}
+            </svg>
+          </Button>
+        </Tooltip>
         <Tooltip content={t("workspaces.new")} placement="bottom">
           <Button variant="icon" aria-label={t("workspaces.new")}
             onClick={() => navigate("/")}

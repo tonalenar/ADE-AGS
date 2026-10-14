@@ -169,6 +169,10 @@ pub struct SessionHistoryEntry {
     /// Último checkpoint (ms de la app en segundos, igual que `closed_at`); `None` = nunca.
     #[serde(default)]
     pub checkpointed_at: Option<i64>,
+    /// Qué había en la sesión: `task` (una tarea real de la persona), `empty` (sin mensaje
+    /// útil) o `mission` (briefing de una misión). `None` = todavía no se midió.
+    #[serde(default)]
+    pub activity: Option<String>,
 }
 
 /// Rectángulo de una tarjeta en el canvas del historial. Se guarda como JSON en la base.

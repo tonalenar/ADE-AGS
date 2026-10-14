@@ -16,7 +16,7 @@ use rusqlite::{Connection, Result as SqlResult};
 
 /// Versión de schema que espera ESTA build. Se guarda en `PRAGMA user_version`, así que
 /// la base sabe sola en qué versión está en vez de deducirlo probando columnas.
-pub(crate) const SCHEMA_VERSION: i32 = 43;
+pub(crate) const SCHEMA_VERSION: i32 = 44;
 
 fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
@@ -1238,6 +1238,12 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         CREATE INDEX IF NOT EXISTS idx_project_conversations_project
             ON project_conversations (workspace_id, project_key);",
     )?;
+    // v44 — Actividad de la sesión (`task`, `empty`, `mission`), medida una vez al leer su
+    // transcripción para separar las conversaciones con una tarea real. NULL = no medida.
+    // Solo aditiva: las filas existentes quedan NULL y se miden en la próxima pasada.
+    if !has_column(conn, "session_history", "activity") {
+        conn.execute_batch("ALTER TABLE session_history ADD COLUMN activity TEXT;")?;
+    }
     set_user_version(conn, SCHEMA_VERSION)
 }
 

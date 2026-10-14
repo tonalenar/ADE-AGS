@@ -21,6 +21,8 @@ export interface OpenTabInfo {
   historyId?: string;
   openedAt: number;
   status: "starting" | "running";
+  /** `true` quando a própria pessoa deu o título desta aba. */
+  titleIsCustom?: boolean;
 }
 
 export type ConversationState = "working" | "open" | "archived";
@@ -58,6 +60,11 @@ export interface BuildConversationsInput {
   excludeSessionIds?: ReadonlySet<string>;
   /** Padrão `false`: as ocultas ficam fora. Com `true` entram como arquivadas, com `hidden: true`. */
   includeHidden?: boolean;
+  /**
+   * Título real de cada aba aberta (`null` = a sessão ainda não tem mensagem). Sem ele (`undefined`)
+   * todas as abas entram. Com ele, a aba só vira conversa se tiver título real ou marca da pessoa.
+   */
+  openTitles?: ReadonlyMap<string, string | null>;
 }
 
 export interface CountHiddenInput {
@@ -151,19 +158,40 @@ function nomeDaPasta(cwd: string): string {
  * Tags saem, fica a primeira linha útil; texto de sistema e títulos que são só o caminho ou o
  * nome do agente viram `"{agente} · {pasta}"`. Sempre no máximo 60 caracteres.
  */
-export function displayTitle(raw: string | null | undefined, agentLabel: string, cwd: string): string {
+/** Primeira linha útil do texto bruto, sem tags; `""` se não sobrar nada. */
+function primeiraLinha(raw: string | null | undefined): string {
   const semTags = (raw ?? "").replace(TAG, "");
-  const limpo = semTags.split(/\r?\n/).map(colapsar).find((l) => l !== "") ?? "";
+  return semTags.split(/\r?\n/).map(colapsar).find((l) => l !== "") ?? "";
+}
+
+/** Texto que não serve de título: vazio, ruído, o próprio nome do agente ou um caminho. */
+function tituloFraco(limpo: string, rotulo: string): boolean {
+  const ruido = limpo === "" || limpo.startsWith("Caveat:") || limpo.startsWith("[Request interrupted");
+  return ruido || limpo === rotulo || CAMINHO_APOS_TRAVESSAO.test(limpo);
+}
+
+export function displayTitle(raw: string | null | undefined, agentLabel: string, cwd: string): string {
+  const limpo = primeiraLinha(raw);
   const rotulo = colapsar(agentLabel);
 
   if (limpo.startsWith("This session is being continued")) return cortar("Conversa continuada", TITULO_MAX);
 
-  const ruido = limpo === "" || limpo.startsWith("Caveat:") || limpo.startsWith("[Request interrupted");
-  if (ruido || limpo === rotulo || CAMINHO_APOS_TRAVESSAO.test(limpo)) {
+  if (tituloFraco(limpo, rotulo)) {
     const pasta = nomeDaPasta(cwd);
     return cortar(pasta ? `${rotulo} · ${pasta}` : rotulo, TITULO_MAX);
   }
   return cortar(limpo, TITULO_MAX);
+}
+
+/**
+ * A sessão arquivada teve tarefa, ou seja, vale uma linha na lista? `activity` vem medido do
+ * backend. Sem medição, a pessoa ter mexido (fixada, renomeada) conta, e um título forte também.
+ */
+export function hadTask(entry: SessionHistoryEntry): boolean {
+  if (entry.activity === "task") return true;
+  if (entry.pinned === true || cleanText(entry.customTitle) !== null) return true;
+  if (entry.activity === "empty" || entry.activity === "mission") return false;
+  return !tituloFraco(primeiraLinha(entry.title), colapsar(entry.agentLabel));
 }
 
 /** `customTitle` é do usuário: não passa por `displayTitle`, só é aparado e cortado. */
@@ -172,7 +200,8 @@ function tituloFinal(custom: string | null, escolhido: string, agentLabel: strin
 }
 
 export function buildConversations(input: BuildConversationsInput): Conversation[] {
-  const { groupCwds, tabs, history, resumable, excludeTabIds, excludeSessionIds, includeHidden = false } = input;
+  const { groupCwds, tabs, history, resumable, excludeTabIds, excludeSessionIds, includeHidden = false, openTitles } =
+    input;
   const roots = raizesDo(groupCwds);
   const noProjeto = (cwd: string) => folderIsIn(cwd, roots);
 
@@ -184,19 +213,27 @@ export function buildConversations(input: BuildConversationsInput): Conversation
   );
   for (const tab of abasVisiveis) {
     const casadas = history.filter((e) => matchesTab(tab, e));
-    for (const e of casadas) consumidas.add(e.id);
     // Se casarem várias, a de fechamento mais recente é a que enriquece.
     const melhor = casadas.reduce<SessionHistoryEntry | null>(
       (acc, e) => (!acc || e.closedAt > acc.closedAt ? e : acc),
       null
     );
 
+    // Com `openTitles`, aba sem título real (sessão vazia) só aparece se a pessoa a marcou.
+    const tituloReal = openTitles === undefined ? null : cleanText(openTitles.get(tab.tabId));
+    const marcada = melhor?.pinned === true || cleanText(melhor?.customTitle) !== null || tab.titleIsCustom === true;
+    if (openTitles !== undefined && tituloReal === null && !marcada) continue;
+
+    // Aba que não aparece não consome a entrada do histórico: ela segue arquivada, se tiver tarefa.
+    for (const e of casadas) consumidas.add(e.id);
+
+    const customTab = tab.titleIsCustom === true ? cleanText(tab.title) : null;
     abertas.push({
       key: `tab:${tab.tabId}`,
       state: tab.status === "running" ? "working" : "open",
       title: tituloFinal(
-        cleanText(melhor?.customTitle),
-        cleanText(tab.title) ?? cleanText(melhor?.title) ?? tab.agentLabel,
+        cleanText(melhor?.customTitle) ?? customTab,
+        tituloReal ?? cleanText(tab.title) ?? cleanText(melhor?.title) ?? tab.agentLabel,
         tab.agentLabel,
         tab.cwd
       ),
@@ -219,7 +256,8 @@ export function buildConversations(input: BuildConversationsInput): Conversation
       (includeHidden || !e.hidden) &&
       !consumidas.has(e.id) &&
       noProjeto(e.cwd) &&
-      !sessaoExcluida(e.sessionId, excludeSessionIds)
+      !sessaoExcluida(e.sessionId, excludeSessionIds) &&
+      hadTask(e)
   );
   // Uma mesma sessão pode ter várias entradas; conta a de fechamento mais recente.
   const melhorPorSessao = new Map<string, SessionHistoryEntry>();
@@ -257,13 +295,16 @@ export function buildConversations(input: BuildConversationsInput): Conversation
   return [...abertas, ...arquivadas].sort(compararConversas);
 }
 
-/** Quantas entradas ocultas o projeto tem. Sessão repetida conta uma; as excluídas não contam. */
+/**
+ * Quantas entradas ocultas o projeto tem e que apareceriam reexibidas (só as que tiveram tarefa).
+ * Sessão repetida conta uma; as excluídas não contam.
+ */
 export function countHidden({ groupCwds, history, excludeSessionIds }: CountHiddenInput): number {
   const roots = raizesDo(groupCwds);
   let semSessao = 0;
   const comSessao = new Set<string>();
   for (const e of history) {
-    if (!e.hidden || !folderIsIn(e.cwd, roots)) continue;
+    if (!e.hidden || !folderIsIn(e.cwd, roots) || !hadTask(e)) continue;
     if (sessaoExcluida(e.sessionId, excludeSessionIds)) continue;
     const sid = cleanText(e.sessionId);
     if (sid === null) semSessao++;

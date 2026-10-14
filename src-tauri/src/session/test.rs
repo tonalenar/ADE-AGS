@@ -195,6 +195,7 @@ fn render_without_transcript_still_documents_the_session() {
         custom_title: None,
         hidden: false,
         checkpointed_at: None,
+        activity: None,
     };
 
     let md = render(&entry, Some("Mi WS"), &[]);
@@ -776,4 +777,101 @@ fn codex_title_saltea_los_envoltorios_del_mensaje() {
     let result = codex_title(&path, "sin título");
     assert_eq!(result.title, "migrá la base");
     assert_eq!(result.source, "first_message");
+}
+
+// ── Actividad de la sesión ────────────────────────────────────────────
+
+const ACT_ID: &str = "sess-act";
+
+/// Línea de transcripción de Claude Code con un mensaje escrito por la persona.
+fn claude_user_line(text: &str) -> String {
+    serde_json::json!({ "type": "user", "message": { "role": "user", "content": text } }).to_string()
+}
+
+/// Perfil de Claude con un transcript del proyecto `cwd`, ya escrito bajo el id `ACT_ID`.
+fn claude_transcript(d: &TempDir, cwd: &str, lines: &[String]) -> PathBuf {
+    let rel = format!("perfil/projects/{}/{ACT_ID}.jsonl", claude_project_slug(cwd));
+    d.write(&rel, &(lines.join("\n") + "\n"))
+}
+
+#[test]
+fn activity_claude_con_tarea_real_es_task() {
+    let d = TempDir::new();
+    let profile = d.0.join("perfil");
+    claude_transcript(&d, "/proj", &[claude_user_line("arreglá el login")]);
+    assert_eq!(session_activity("claude-code", "/proj", ACT_ID, Some(&profile), None), Some("task"));
+}
+
+#[test]
+fn activity_claude_solo_con_ruido_es_empty() {
+    let d = TempDir::new();
+    let profile = d.0.join("perfil");
+    claude_transcript(
+        &d,
+        "/proj",
+        &[
+            claude_user_line("<system-reminder>contexto</system-reminder>"),
+            claude_user_line("[Request interrupted by user]"),
+            claude_user_line("   "),
+        ],
+    );
+    assert_eq!(session_activity("claude-code", "/proj", ACT_ID, Some(&profile), None), Some("empty"));
+}
+
+#[test]
+fn activity_briefing_de_mision_dentro_de_pasted_content_es_mission() {
+    let d = TempDir::new();
+    let profile = d.0.join("perfil");
+    let briefing = "<pasted_content id=\"1\">\nVocê é o ORQUESTRADOR da missão Alfa.\nDetalles\n</pasted_content>";
+    claude_transcript(&d, "/proj", &[claude_user_line(briefing)]);
+    assert_eq!(session_activity("claude-code", "/proj", ACT_ID, Some(&profile), None), Some("mission"));
+}
+
+#[test]
+fn activity_briefing_de_mision_aunque_haya_una_tarea_antes() {
+    let d = TempDir::new();
+    let profile = d.0.join("perfil");
+    claude_transcript(
+        &d,
+        "/proj",
+        &[
+            claude_user_line("hola"),
+            claude_user_line("Você é o VIGIA da missão Beta"),
+        ],
+    );
+    assert_eq!(session_activity("claude-code", "/proj", ACT_ID, Some(&profile), None), Some("mission"));
+}
+
+#[test]
+fn activity_sin_archivo_es_none() {
+    let d = TempDir::new();
+    let profile = d.0.join("perfil");
+    fs::create_dir_all(profile.join("projects")).unwrap();
+    assert_eq!(session_activity("claude-code", "/proj", ACT_ID, Some(&profile), None), None);
+    // Un id que no es un nombre de archivo seguro nunca se busca en disco.
+    assert_eq!(session_activity("claude-code", "/proj", "../x", Some(&profile), None), None);
+}
+
+#[test]
+fn activity_opencode_no_se_mide_sin_proceso() {
+    let d = TempDir::new();
+    assert_eq!(session_activity("opencode", "/proj", ACT_ID, Some(&d.0), None), None);
+}
+
+#[test]
+fn activity_codex_distingue_tarea_ruido_y_mision() {
+    let d = TempDir::new();
+    let profile = d.0.join("perfil");
+    let ctx = r#"{"timestamp":"t","type":"response_item","payload":{"role":"user","content":[{"type":"input_text","text":"<environment_context>\n  cwd: /proj\n</environment_context>"}]}}"#;
+    let task = r#"{"timestamp":"t","type":"event_msg","payload":{"type":"user_message","message":"agregá tests"}}"#;
+    let mission = r#"{"timestamp":"t","type":"event_msg","payload":{"type":"user_message","message":"Você faz parte da equipe da missão Gama"}}"#;
+
+    d.write("perfil/sessions/2026/08/03/rollout-a.jsonl", &codex_rollout(ACT_ID, "/proj", &format!("{ctx}\n{task}")));
+    assert_eq!(session_activity("codex", "/proj", ACT_ID, Some(&profile), None), Some("task"));
+
+    d.write("perfil/sessions/2026/08/03/rollout-a.jsonl", &codex_rollout(ACT_ID, "/proj", ctx));
+    assert_eq!(session_activity("codex", "/proj", ACT_ID, Some(&profile), None), Some("empty"));
+
+    d.write("perfil/sessions/2026/08/03/rollout-a.jsonl", &codex_rollout(ACT_ID, "/proj", &format!("{ctx}\n{mission}")));
+    assert_eq!(session_activity("codex", "/proj", ACT_ID, Some(&profile), None), Some("mission"));
 }
