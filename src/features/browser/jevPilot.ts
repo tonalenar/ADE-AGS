@@ -267,7 +267,15 @@ export async function runPilot(
     ({ outcome, steps: log, note, finalSnapshot: snapshot });
 
   for (let step = 1; step <= limit; step++) {
-    const page = parseSnapshot(snapshot);
+    let page = parseSnapshot(snapshot);
+    // O que não é escolha não vai ao Jev: um campo cujo nome casa com um `--fill` recebe o valor direto.
+    const filled = await autoFill(page, fills, taken, done, deps);
+    if (filled.length > 0) {
+      log.push(...filled.map((what) => `${what} (pelo nome do campo, sem o Jev)`));
+      await deps.settle();
+      snapshot = await deps.snapshot();
+      page = parseSnapshot(snapshot);
+    }
     const { state, options } = buildStep(page, goal, fills.map(([key]) => key).filter((key) => !taken.has(key)), done);
     const reply = await deps.pick(state, options);
     if (reply.status !== "ok" || !reply.choice) {
@@ -312,6 +320,37 @@ export async function runPilot(
     snapshot = await deps.snapshot();
   }
   return finish("limit", `Cheguei ao limite de ${limit} passos sem o Jev dizer que terminou. Confira a página e continue, ou rode de novo.`);
+}
+
+/**
+ * Preenche, sem perguntar ao Jev, os campos cujo nome casa com um `--fill` ainda não usado: digitar o nome em
+ * "Customer name" não é uma escolha. Devolve o que fez (sem os valores). Pura em relação à página: só usa `deps`.
+ */
+export async function autoFill(
+  page: ParsedPage,
+  fills: [string, string][],
+  taken: Set<string>,
+  done: Done[],
+  deps: PilotDeps,
+): Promise<string[]> {
+  const out: string[] = [];
+  const touched = new Set(done.map((d) => d.ref));
+  for (const [key] of fills) {
+    if (taken.has(key)) continue;
+    let best: PageElement | null = null;
+    let bestScore = 0;
+    for (const el of page.elements) {
+      if (!(TYPING.has(el.role) || CHOOSING.has(el.role)) || touched.has(el.ref) || el.states.includes("disabled")) continue;
+      const score = similarity(el.name, key);
+      if (score > bestScore) { best = el; bestScore = score; }
+    }
+    if (!best) continue;
+    touched.add(best.ref);
+    const what = await act(best, fills, taken, deps);
+    done.push({ ref: best.ref, what });
+    out.push(what);
+  }
+  return out;
 }
 
 /** Faz o que o elemento pede e conta o que fez, sem o valor digitado. */

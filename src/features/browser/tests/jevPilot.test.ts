@@ -108,8 +108,8 @@ function harness(script: StepReply[], pages: string[] = pagesOf(8)) {
 const ok = (choice: string, probability = 0.9): StepReply => ({ status: "ok", choice, probability, reason: null, latencyMs: 300 });
 
 describe("o laço do piloto", () => {
-  it("digita com o valor do --fill, clica e termina quando o Jev diz done", async () => {
-    const h = harness([ok("e1"), ok("e2"), ok("e4"), ok("done")]);
+  it("digita com o valor do --fill (sem o Jev), clica no que o Jev escolhe e termina no done", async () => {
+    const h = harness([ok("e4"), ok("done")]);
     const result = await runPilot("entrar", ["email=a@b.c", "senha=123"], undefined, h.deps);
     expect(result.outcome).toBe("done");
     expect(h.calls).toEqual(["type e1 a@b.c", "type e2 123", "click e4"]);
@@ -117,6 +117,23 @@ describe("o laço do piloto", () => {
     expect(result.steps.join("\n")).not.toContain("123");
     expect(result.steps.join("\n")).not.toContain("a@b.c");
     expect(h.asked.every((q) => !q.state.includes("123") && !q.state.includes("a@b.c"))).toBe(true);
+    // o Jev só foi consultado depois dos campos, e para o que é escolha
+    expect(h.asked.length).toBe(2);
+    expect(result.steps[0]).toContain("sem o Jev");
+  });
+
+  it("os campos com --fill não gastam passo nem pergunta: o limite é só das escolhas do Jev", async () => {
+    const h = harness([ok("e4")]);
+    const result = await runPilot("entrar", ["email=a@b.c", "senha=123"], 1, h.deps);
+    expect(h.calls.slice(0, 2)).toEqual(["type e1 a@b.c", "type e2 123"]);
+    expect(h.asked.length).toBe(1);
+    expect(result.outcome).toBe("limit");
+  });
+
+  it("um --fill sem campo parecido não digita em outro: fica para o Jev ou o agente", async () => {
+    const h = harness([ok("stuck")]);
+    await runPilot("entrar", ["cpf=000"], undefined, h.deps);
+    expect(h.calls).toEqual([]);
   });
 
   it("sem certeza (probabilidade baixa), para sem agir e devolve a página", async () => {
