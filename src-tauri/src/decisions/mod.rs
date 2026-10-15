@@ -4,6 +4,7 @@
 //! consultado em segundo plano e a comparação vai para `decision_shadow_log`. Nada daqui
 //! aprova memória, despacha tarefa nem fecha missão.
 
+pub(crate) mod browse;
 pub(crate) mod commands;
 mod config;
 mod http;

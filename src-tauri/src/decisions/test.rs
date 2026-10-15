@@ -604,6 +604,7 @@ fn local_settings(base_url: String) -> Settings {
         delivery_gate: false,
         memory_relevance: false,
         turn_routing: false,
+        browser_pilot: false,
         secondary: None,
     }
 }

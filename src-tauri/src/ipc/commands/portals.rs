@@ -25,12 +25,14 @@ use crate::ipc::protocol::{arg_str, arg_str_opt};
 
 /// Cuánto puede tardar una acción en la página (cargar, esperar un texto…).
 const ACTION_TIMEOUT_S: u64 = 90;
+/// `act` encadeia vários passos (cada um é um snapshot, uma pergunta ao Jev e uma ação).
+const ACT_TIMEOUT_S: u64 = 115;
 
 /// Qué acciones admite un portal y cómo se arma su pedido. Es la lista del frontend
 /// (`PORTAL_OPS`); está acá también para fallar con un mensaje útil antes de molestarlo.
 pub(crate) const ACTIONS: &[&str] = &[
     "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll", "wait",
-    "screenshot", "console", "layout",
+    "screenshot", "console", "layout", "act",
 ];
 
 #[derive(Debug, Clone)]
@@ -161,6 +163,22 @@ pub(crate) fn request_for(action: &str, args: &Value) -> Result<Value, String> {
                 set(&mut req, "timeout_ms", json!(ms));
             }
         }
+        // O Jev pilota: o agente dá o objetivo (e os valores a digitar) e a app navega passo a passo.
+        "act" => {
+            set(&mut req, "goal", json!(need(args, "goal", action)?));
+            let fills: Vec<Value> = match args.get("fill") {
+                Some(Value::Array(list)) => list.clone(),
+                Some(Value::String(one)) if !one.is_empty() => vec![json!(one)],
+                _ => Vec::new(),
+            };
+            if fills.iter().any(|f| !f.as_str().is_some_and(|s| s.contains('='))) {
+                return Err("--fill precisa de `campo=valor` (repita a flag para vários).".into());
+            }
+            set(&mut req, "fills", Value::Array(fills));
+            if let Some(n) = num(args, "steps")? {
+                set(&mut req, "steps", json!(n));
+            }
+        }
         "console" => {
             if let Some(l) = arg_str_opt(args, "level") {
                 set(&mut req, "level", json!(l));
@@ -205,6 +223,53 @@ pub(super) fn portal_create(app: &AppHandle, args: &Value) -> Result<Value, Stri
     Ok(json!({ "created": created }))
 }
 
+/// Un endereço do próprio computador: o app que o agente está construindo (`localhost:5173`), não um site.
+fn is_local(url: &url::Url) -> bool {
+    match url.host() {
+        Some(url::Host::Domain(d)) => d == "localhost" || d.ends_with(".localhost"),
+        Some(url::Host::Ipv4(ip)) => ip.is_loopback() || ip.is_unspecified(),
+        Some(url::Host::Ipv6(ip)) => ip.is_loopback() || ip.is_unspecified(),
+        None => false,
+    }
+}
+
+/// Mesma origem (esquema, host e porta): um servidor de desenvolvimento que reinicia abre o mesmo endereço de novo.
+fn same_origin(a: &str, b: &str) -> bool {
+    match (url::Url::parse(a.trim()), url::Url::parse(b.trim())) {
+        (Ok(a), Ok(b)) => a.origin() == b.origin(),
+        _ => false,
+    }
+}
+
+/// `ags open <url>` (e `ags http://…`, que é como as ferramentas que respeitam `$BROWSER` chamam o navegador).
+/// Um endereço local abre no canvas — reaproveitando o navegador conectado que já está nessa origem — e qualquer outro vai
+/// para o navegador do sistema: um login (`gh auth login`, `vercel login`) precisa das sessões da pessoa, que o
+/// navegador do canvas não tem. `--canvas` força o canvas.
+pub(super) fn portal_open(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let raw = need(args, "url", "open")?;
+    let parsed = url::Url::parse(raw.trim())
+        .ok()
+        .filter(|u| matches!(u.scheme(), "http" | "https"))
+        .ok_or_else(|| format!("'{raw}' não é um endereço http(s)."))?;
+    if !is_local(&parsed) && !flag(args, "canvas") {
+        use tauri_plugin_opener::OpenerExt;
+        app.opener().open_url(parsed.as_str(), None::<&str>).map_err(|e| e.to_string())?;
+        return Ok(json!({ "opened": "system", "url": parsed.as_str() }));
+    }
+    let from = caller(args)?;
+    let portals = reachable(&canvas::load_boards(), &from);
+    if let Some(existing) = portals.iter().find(|p| same_origin(&p.portal.url, parsed.as_str())) {
+        let mut nav = args.clone();
+        nav["name"] = json!(existing.id);
+        let done = portal_action(app, &nav, "navigate")?;
+        return Ok(json!({ "opened": "canvas", "reused": describe(existing), "navigated": done.get("portal").cloned().unwrap_or(Value::Null) }));
+    }
+    let mut create = args.clone();
+    create["url"] = json!(parsed.as_str());
+    let made = portal_create(app, &create)?;
+    Ok(json!({ "opened": "canvas", "created": made.get("created").cloned().unwrap_or(Value::Null) }))
+}
+
 /// `ags portal <acción> <portal> …`: lo que el agente le pide a ese navegador.
 pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Result<Value, String> {
     let from = caller(args)?;
@@ -221,7 +286,7 @@ pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Resu
         "canvas.portal",
         &json!({ "op": "run", "cwd": cwd, "id": target.id, "request": request, "owner": owner }),
         Some(window_of(&target.key)),
-        std::time::Duration::from_secs(ACTION_TIMEOUT_S),
+        std::time::Duration::from_secs(if action == "act" { ACT_TIMEOUT_S } else { ACTION_TIMEOUT_S }),
     )?;
     let out = unwrap_frontend_result(raw)?;
     Ok(json!({ "portal": describe(target), "text": out.get("text").cloned().unwrap_or(Value::Null) }))
@@ -279,6 +344,37 @@ mod test {
             let err = request_for(banned, &json!({})).unwrap_err();
             assert!(err.contains("não admite"), "{banned}: {err}");
         }
+    }
+
+    #[test]
+    fn act_leva_o_objetivo_os_valores_e_o_limite_de_passos() {
+        let req = request_for("act", &json!({ "goal": "entrar", "fill": ["email=a@b.c", "senha=x=y"], "steps": "5" })).unwrap();
+        assert_eq!(req["op"], "act");
+        assert_eq!(req["goal"], "entrar");
+        assert_eq!(req["fills"], json!(["email=a@b.c", "senha=x=y"]));
+        assert_eq!(req["steps"], 5.0);
+        let one = request_for("act", &json!({ "goal": "x", "fill": "a=1" })).unwrap();
+        assert_eq!(one["fills"], json!(["a=1"]));
+        assert!(request_for("act", &json!({})).unwrap_err().contains("--goal"));
+        assert!(request_for("act", &json!({ "goal": "x", "fill": ["sem-igual"] })).unwrap_err().contains("campo=valor"));
+    }
+
+    #[test]
+    fn so_o_proprio_computador_abre_no_canvas() {
+        let local = |s: &str| is_local(&url::Url::parse(s).unwrap());
+        for yes in ["http://localhost:5173", "http://127.0.0.1:3000/x", "http://[::1]:8080", "http://app.localhost:3000", "http://0.0.0.0:4000"] {
+            assert!(local(yes), "{yes}");
+        }
+        for no in ["https://github.com/login/device", "http://192.168.0.5:3000", "https://localhost.evil.com"] {
+            assert!(!local(no), "{no}");
+        }
+    }
+
+    #[test]
+    fn a_mesma_origem_reaproveita_o_navegador() {
+        assert!(same_origin("http://localhost:5173/", "http://localhost:5173/login"));
+        assert!(!same_origin("http://localhost:5173", "http://localhost:3000"));
+        assert!(!same_origin("", "http://localhost:3000"));
     }
 
     #[test]

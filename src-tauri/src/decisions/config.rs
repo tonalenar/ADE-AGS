@@ -14,6 +14,7 @@ pub const KEY_MISSION: &str = "decisions.point.mission_gate";
 pub const KEY_DELIVERY: &str = "decisions.point.delivery_gate";
 pub const KEY_RELEVANCE: &str = "decisions.point.memory_relevance";
 pub const KEY_ROUTING: &str = "decisions.point.turn_routing";
+pub const KEY_BROWSE: &str = "decisions.point.browser_step";
 pub const KEY_SECONDARY_PROVIDER: &str = "decisions.secondary.provider";
 pub const KEY_SECONDARY_URL: &str = "decisions.secondary.base_url";
 pub const KEY_SECONDARY_MODEL: &str = "decisions.secondary.model";
@@ -144,6 +145,8 @@ pub struct Settings {
     pub memory_relevance: bool,
     /// O Jev sugere para quem vai uma mensagem escrita na aba Equipe sem @ (ver `routing.rs`).
     pub turn_routing: bool,
+    /// O Jev pilota o navegador do canvas: escolhe o próximo elemento a tocar (ver `browse.rs`).
+    pub browser_pilot: bool,
     /// O segundo provedor da comparação. `None` = só o principal.
     pub secondary: Option<Endpoint>,
 }
@@ -163,6 +166,7 @@ impl Default for Settings {
             delivery_gate: false,
             memory_relevance: false,
             turn_routing: false,
+            browser_pilot: false,
             secondary: None,
         }
     }
@@ -220,6 +224,7 @@ impl Settings {
             super::points::POINT_DELIVERY => self.delivery_gate,
             super::points::POINT_RELEVANCE => self.memory_relevance,
             super::points::POINT_ROUTING => self.turn_routing,
+            super::points::POINT_BROWSE => self.browser_pilot,
             _ => false,
         }
     }
@@ -273,6 +278,7 @@ pub fn load(conn: &Connection) -> Result<Settings, String> {
     settings.delivery_gate = flag(conn, KEY_DELIVERY);
     settings.memory_relevance = flag(conn, KEY_RELEVANCE);
     settings.turn_routing = flag(conn, KEY_ROUTING);
+    settings.browser_pilot = flag(conn, KEY_BROWSE);
     let second = ProviderKind::parse(&text(conn, KEY_SECONDARY_PROVIDER).unwrap_or_default());
     settings.secondary = second.is_configured().then(|| Endpoint {
         provider: second,
@@ -307,6 +313,7 @@ pub fn persist(conn: &Connection, settings: &Settings) -> Result<(), String> {
         (KEY_DELIVERY, bool_text(settings.delivery_gate)),
         (KEY_RELEVANCE, bool_text(settings.memory_relevance)),
         (KEY_ROUTING, bool_text(settings.turn_routing)),
+        (KEY_BROWSE, bool_text(settings.browser_pilot)),
     ];
     for (key, value) in rows {
         put(conn, key, &value)?;

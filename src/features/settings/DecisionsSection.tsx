@@ -15,6 +15,7 @@ const POINT_LABEL: Record<string, string> = {
   delivery_gate: "settings.decisions.point.delivery",
   memory_relevance: "settings.decisions.point.relevance",
   turn_routing: "settings.decisions.point.routing",
+  browser_step: "settings.decisions.point.browser",
 };
 
 const FIELD = "h-8 rounded-lg border border-gray-300 bg-white px-2.5 text-[13px] text-gray-900 outline-none transition-shadow placeholder:text-gray-400 focus:border-accent-500 focus:ring-[3px] focus:ring-accent-500/25 dark:border-white/15 dark:bg-surface-raised dark:text-gray-100 dark:placeholder:text-white/30";
@@ -186,6 +187,7 @@ export function DecisionsSection() {
         deliveryGate: settings.deliveryGate,
         memoryRelevance: settings.memoryRelevance,
         turnRouting: settings.turnRouting,
+        browserPilot: settings.browserPilot,
         secondaryProvider: settings.secondaryProvider,
         secondaryBaseUrl: settings.secondaryBaseUrl,
         secondaryModel: modelAfterProviderChange(settings.secondaryModel, settings.secondaryProvider),
@@ -416,6 +418,7 @@ export function DecisionsSection() {
         <SettingsToggleRow checked={settings.deliveryGate} onChange={(deliveryGate) => setSettings({ ...settings, deliveryGate })} label={t("settings.decisions.point.delivery")} description={t("settings.decisions.point.deliveryHint")} />
         <SettingsToggleRow checked={settings.memoryRelevance} onChange={(memoryRelevance) => setSettings({ ...settings, memoryRelevance })} label={t("settings.decisions.point.relevance")} description={t("settings.decisions.point.relevanceHint")} />
         <SettingsToggleRow checked={settings.turnRouting} onChange={(turnRouting) => setSettings({ ...settings, turnRouting })} label={t("settings.decisions.point.routing")} description={t("settings.decisions.point.routingHint")} />
+        <SettingsToggleRow checked={settings.browserPilot} onChange={(browserPilot) => setSettings({ ...settings, browserPilot })} label={t("settings.decisions.point.browser")} description={t("settings.decisions.point.browserHint")} />
       </SettingsGroup>
 
       <div className="flex flex-wrap items-center gap-2">

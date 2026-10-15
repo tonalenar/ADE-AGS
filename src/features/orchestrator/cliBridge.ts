@@ -15,7 +15,7 @@ import { recruitCommand } from "./recruitCommand";
 import { respondToCli } from "./ipc";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 import { requestPtyLaunch } from "@/features/terminal/ptyLaunch";
-import { boardKey, boardKeyOfTab, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
+import { boardKey, boardKeyOfTab, canvasActions, flushSave, setWorkMode, useCanvasStore } from "@/features/canvas/store";
 
 /**
  * Lado frontend del puente de la CLI (ver `ipc/bridge.rs`).
@@ -312,6 +312,8 @@ async function handlePortal(args: Record<string, unknown>) {
     const created = canvasActions.addPortal(key, {
       name: str(args, "name"), url: str(args, "url"), near, ...(android ? { kind: "android" as const, avd: str(args, "avd") } : {}),
     });
+    // O navegador só existe na tela se o canvas está à vista: quem pediu um navegador quer vê-lo.
+    if (useCanvasStore.getState().modes[key] !== "canvas") setWorkMode(key, "canvas");
     await flushSave(key);
     return created;
   }

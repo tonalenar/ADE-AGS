@@ -21,7 +21,7 @@ use super::notify::notify_send;
 use super::notes::{note_create, note_edit, note_list, note_read, note_write};
 use super::devices::{device_action, device_create, device_list};
 use super::pool::{pool_create, pool_delete, pool_list};
-use super::portals::{portal_action, portal_create, portal_list};
+use super::portals::{portal_action, portal_create, portal_list, portal_open};
 use super::role::{role_create, role_edit, role_list, role_show};
 use super::floor::{floor_create, floor_list};
 use super::routine::{
@@ -134,6 +134,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "device.tree" => device_action(app, args, "tree"),
         "portal.list" => portal_list(app, args),
         "portal.create" => portal_create(app, args),
+        "portal.open" => portal_open(app, args),
         "portal.navigate" => portal_action(app, args, "navigate"),
         "portal.history" => portal_action(app, args, "history"),
         "portal.snapshot" => portal_action(app, args, "snapshot"),
@@ -147,6 +148,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "portal.screenshot" => portal_action(app, args, "screenshot"),
         "portal.console" => portal_action(app, args, "console"),
         "portal.layout" => portal_action(app, args, "layout"),
+        "portal.act" => portal_action(app, args, "act"),
         // Avisar al usuario (ver `notify`).
         "notify.send" => notify_send(app, args),
         // Papeles para recrutar (ver `role`).

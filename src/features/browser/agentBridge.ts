@@ -11,6 +11,10 @@
  * pasó en la consola y la red durante la acción, que es lo que un agente probando una
  * página necesita ver sin tener que preguntarlo aparte.
  */
+import { neighbors } from "@/features/canvas/board";
+import { boardKeyOfTab, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
+import { invoke } from "@tauri-apps/api/core";
+
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { comparablePath, isLocalUrl, type BrowserView, type ViewOwner } from "@/features/tabs/viewTabs";
@@ -32,6 +36,7 @@ import type { PageChannel } from "./pageChannel";
 import { browserToolPrefix } from "./tabMcp";
 import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
+import { formatResult, runPilot, type PilotDeps } from "./jevPilot";
 
 export interface BrowserHost {
   viewId: string;
@@ -126,6 +131,26 @@ function waitForHost(viewId: string, timeoutMs: number): Promise<BrowserHost> {
 const sameFolder = (a: string, b: string) =>
   comparablePath(a).replace(/\/+$/, "") === comparablePath(b).replace(/\/+$/, "");
 
+/** O portal está ligado por corda a esse agente (em qualquer canvas). */
+function linkedToAgent(agentId: string, portalId: string): boolean {
+  return Object.values(useCanvasStore.getState().boards).some((b) => neighbors(b, portalId).includes(agentId));
+}
+
+/**
+ * Abre um navegador no canvas do agente, ao lado dele e ligado por corda, se o canvas dele está à vista.
+ * Devolve o id do portal, ou `null` (o agente não está num canvas à vista: vale a aba de sempre).
+ */
+async function openPortalFor(owner: ViewOwner, url: string): Promise<string | null> {
+  const tab = useTabsStore.getState().tabs.find((t) => t.id === owner.id);
+  if (!tab) return null;
+  const key = boardKeyOfTab(tab);
+  const board = useCanvasStore.getState().boards[key];
+  if (!board || !(owner.id in board.nodes) || useCanvasStore.getState().modes[key] !== "canvas") return null;
+  const created = canvasActions.addPortal(key, { name: undefined, url, near: owner.id });
+  await flushSave(key);
+  return created.id;
+}
+
 /**
  * El navegador de este agente, abriéndole uno propio si todavía no tiene.
  *
@@ -140,13 +165,21 @@ async function hostFor(
   owner: ViewOwner | null
 ): Promise<{ host: BrowserHost; opened: boolean }> {
   const store = useViewTabsStore.getState();
-  const inFolder = store.views.filter((v): v is BrowserView => v.kind === "browser" && sameFolder(v.cwd, cwd));
+  // Os navegadores do canvas (portais) também são navegadores da pasta: o que a pessoa marcou neles
+  // vale, e os ligados por corda ao agente são dele.
+  const portals = store.portalViews.filter((v) => sameFolder(v.cwd, cwd));
+  const inFolder: BrowserView[] = [
+    ...store.views.filter((v): v is BrowserView => v.kind === "browser" && sameFolder(v.cwd, cwd)),
+    ...portals,
+  ];
   // `pick` y `marked` no son sobre la página del agente sino sobre la ATENCIÓN del usuario:
   // lo que marcó lo marcó en la tab que estaba mirando, que es la suya. Mandarlos a la del
   // agente devolvería siempre "no marcaste nada".
   const ofUser = request.op === "pick" || request.op === "marked";
   // Sin saber quién pide (un agente viejo, sin el dato), se sigue usando el de siempre.
-  const browsers = owner && !ofUser ? inFolder.filter((v) => v.owner?.id === owner.id) : inFolder;
+  const browsers = owner && !ofUser
+    ? inFolder.filter((v) => v.owner?.id === owner.id || (portals.includes(v) && linkedToAgent(owner.id, v.id)))
+    : inFolder;
   const slot = `${owner && !ofUser ? owner.id : "user"}\u0000${comparablePath(cwd)}`;
 
   if (browsers.length === 0) {
@@ -160,6 +193,14 @@ async function hostFor(
           ? "You do not have a browser open in this project yet. Open one with browser_navigate and the project URL."
           : `There is no browser open for ${cwd}. Use browser_navigate with the project URL to open one.`
       );
+    }
+    // Com o canvas à vista, o navegador que o agente pede nasce LÁ, ao lado dele e ligado por corda (a pessoa o vê
+    // trabalhar e pode marcar coisas nele). Fora do canvas, é uma aba, como sempre.
+    const inCanvas = owner && !ofUser ? await openPortalFor(owner, url) : null;
+    if (inCanvas) {
+      lastUsed.set(slot, inCanvas);
+      lastUrl.set(slot, url);
+      return { host: await waitForHost(inCanvas, 15_000), opened: request.op === "navigate" };
     }
     // Sin robarle el foco a quien está escribiendo en la terminal: la tab aparece en la
     // barra y el agente la usa igual.
@@ -183,8 +224,8 @@ async function hostFor(
   // Lo que tenga cargado AHORA, haya navegado el agente o el usuario: los dos usan esta
   // página, y al reabrirla tiene que volver a la última.
   if (view.url) lastUrl.set(slot, view.url);
-  // Una tab restaurada que nadie miró todavía no está montada: no tiene página.
-  store.keepMounted(view.id);
+  // Una tab restaurada que nadie miró todavía no está montada: no tiene página. (Um portal monta com o canvas.)
+  if (!portals.includes(view)) store.keepMounted(view.id);
   return { host: await waitForHost(view.id, 10_000), opened: false };
 }
 
@@ -637,6 +678,11 @@ async function execute(
         gone: bool(request, "gone"), idle: bool(request, "idle"), timeoutMs: num(request, "timeout_ms"),
       }, false);
     case "eval": return inPage(host, { op: "eval", code: required(request, "code") }, true);
+    case "act": {
+      const goal = required(request, "goal");
+      const fills = Array.isArray(request.fills) ? request.fills.filter((f): f is string => typeof f === "string") : [];
+      return formatResult(goal, await runPilot(goal, fills, num(request, "steps"), pilotDeps(host)));
+    }
     default:
       throw new Error(`O navegador não sabe fazer '${op}'.`);
   }
@@ -665,8 +711,22 @@ export async function runBrowserRequest(
  */
 export const PORTAL_OPS = new Set([
   "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll",
-  "wait", "screenshot", "console", "layout",
+  "wait", "screenshot", "console", "layout", "act",
 ]);
+
+/** O que o piloto do Jev usa deste navegador: ver `jevPilot.ts`. As ações são as mesmas que o agente faria à mão. */
+function pilotDeps(host: BrowserHost): PilotDeps {
+  return {
+    snapshot: () => inPage(host, { op: "snapshot", all: false }, false),
+    click: (ref) => inPage(host, { op: "click", target: ref }, true),
+    type: (ref, text) => inPage(host, { op: "type", target: ref, text, clear: true, submit: false }, true),
+    select: (ref, value) => inPage(host, { op: "select", target: ref, value }, true),
+    scroll: () => inPage(host, { op: "scroll", dy: 600 }, false),
+    // Uma ação pode navegar ou redesenhar: esperar a rede assentar um instante. Se vencer, segue assim mesmo.
+    settle: async () => { try { await inPage(host, { op: "wait", idle: true, timeoutMs: 2500 }, false); } catch { /* segue */ } },
+    pick: (state, options) => invoke("decision_pick_step", { state, options }),
+  };
+}
 
 /** Atiende un pedido de un agente sobre un portal, por su id. */
 export async function runPortalRequest(

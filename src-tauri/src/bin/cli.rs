@@ -99,6 +99,7 @@ DISPOSITIVOS ANDROID DO CANVAS — um emulador ou telefone conectado a este term
 PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os da equipe)
   portals                                     Os portais que você controla
   portal create [<nome>] [<url>]              Cria um ao seu lado, já conectado
+  open <url>                                  Abre um site: localhost vai para um navegador do canvas (reaproveita o da mesma origem), o resto para o navegador do sistema
   portal navigate <portal> <url>              Vai a uma URL
   portal snapshot <portal> [--full]           A árvore da página, com refs (@e3)
   portal click|hover <portal> <@ref|seletor>
@@ -106,6 +107,8 @@ PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os d
   portal press <portal> <tecla> [--target <ref>]   · scroll · select · wait · history
   portal screenshot|console|layout <portal>   Foto, console e medidas
                                               (sem eval, upload nem cookies: isso é do usuário)
+  portal act <portal> \"objetivo\" [--fill campo=valor]... [--steps 8]
+                                              O Jev navega sozinho até o objetivo, passo a passo (Ajustes → Decisões → Navegador do canvas)
 
 CHAT COM O USUÁRIO — o chat dele por conversas (sete cores); o que você escreve no terminal NÃO chega a ele
   say \"texto\" [--progress] [--thread <cor>]    Responde no chat (--progress: aviso, seu turno continua)
@@ -319,7 +322,11 @@ pub(crate) fn main() -> ExitCode {
         match design_command(&args) {
             Ok(v) => v,
             Err(e) => { eprintln!("{e}"); return ExitCode::from(EXIT_USAGE); }
-        }    } else { match shortcut(&args[0]) {
+        }    } else if args[0].starts_with("http://") || args[0].starts_with("https://") {
+        // `ags http://localhost:5173`: é como as ferramentas que respeitam $BROWSER (Vite, Python…) chamam
+        // o "navegador": a app põe BROWSER=ags nos terminais, e o endereço chega como único argumento.
+        ("portal.open".to_string(), &args[..])
+    } else { match shortcut(&args[0]) {
         Some(cmd) => {
             // `ags prelaunch` y `ags prelaunch list` son lo mismo. Escribir la accion
             // igual es lo natural para quien viene de `ags account list`, y sin esto
@@ -674,6 +681,7 @@ fn shortcut(word: &str) -> Option<&'static str> {
         "peers" => Some("peer.list"),
         "notes" => Some("note.list"),
         "portals" => Some("portal.list"),
+        "open" => Some("portal.open"),
         "devices" => Some("device.list"),
         "pools" => Some("pool.list"),
         // `ags notify "terminé"`: avisar es lo único que se hace con eso.
@@ -810,6 +818,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "note.edit" => &["name", "old", "new"],
         // `ags portal click Web @e3`: el portal primero, después lo que cada acción pide.
         "portal.create" => &["name", "url"],
+        "portal.open" => &["url"],
+        "portal.act" => &["name", "goal"],
         "portal.navigate" => &["name", "url"],
         "portal.history" => &["name", "action"],
         "portal.click" | "portal.hover" => &["name", "target"],
@@ -905,6 +915,26 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
                 }
                 serde_json::map::Entry::Vacant(e) => {
                     e.insert(Value::Array(vec![step]));
+                }
+            }
+            i += 2;
+            continue;
+        }
+
+        // `--fill campo=valor` repete (um por campo do formulário): acumula numa lista, como `--pre`.
+        if key == "fill" {
+            let value = args
+                .get(i + 1)
+                .filter(|v| !v.starts_with("--"))
+                .ok_or("--fill precisa de campo=valor")?;
+            match map.entry("fill".to_string()) {
+                serde_json::map::Entry::Occupied(mut e) => {
+                    if let Some(list) = e.get_mut().as_array_mut() {
+                        list.push(json!(value));
+                    }
+                }
+                serde_json::map::Entry::Vacant(e) => {
+                    e.insert(Value::Array(vec![json!(value)]));
                 }
             }
             i += 2;

@@ -21,6 +21,7 @@ import { SHELL_AGENT_ID, type AgentInfo, type Tab } from "@/features/tabs/types"
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
 import { memoryBlockFor, startupText, tabMemoryMessage } from "@/features/memory/tabMemory";
+import { BROWSER_HINT } from "@/features/canvas/portalNotice";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import i18n from "@/i18n";
 import { AppDialog } from "@/shared/ui/AppDialog";
@@ -240,7 +241,9 @@ export function TabDialogs() {
             applyTabRole(tabId, role).catch(() => null),
             wantsMemory ? tabMemoryMessage({ id: tabId, agentId: agent.id, memoryBlock }, workspaceId).catch(() => null) : Promise.resolve(null),
           ]).then(([briefing, memory]) => {
-            const text = [briefing, startupText(memory, prompt)].filter(Boolean).join("\n\n");
+            // Um shell não lê isto; um agente fica sabendo que abre o navegador no canvas, ligado a ele.
+            const hint = agent.id === "bash" ? null : `[ADE AGS] ${BROWSER_HINT}`;
+            const text = [briefing, startupText(memory, prompt), hint].filter(Boolean).join("\n\n");
             if (text) sendWhenReady(tabId, text);
           });
         }}

@@ -6,6 +6,8 @@ import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, TextArea, Tras
 import {
   BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
 } from "@/app/icons";
+import { neighbors } from "@/features/canvas/board";
+import { useCanvasStore } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { normalizeUrl, type BrowserView } from "@/features/tabs/viewTabs";
@@ -32,6 +34,8 @@ import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessa
 import { ResponsiveStage } from "./ResponsiveStage";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
+import { ZoomControl } from "./ZoomControl";
+import { clampZoom, stepZoom } from "./zoom";
 
 /** Lo que el proxy inyecta en cada página: el selector y el runtime (control del agente y
  *  captura de debug). Dos scripts sueltos en un solo archivo, así es un único pedido. */
@@ -82,10 +86,14 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   const activateTab = useTabsStore((s) => s.activateTab);
   // Solo agentes: a una terminal `bash` no se le manda lo que marcaste — no lo lee nadie,
   // se pegaría como texto en un prompt de shell.
-  const agents = useMemo(
-    () => tabs.filter((tab) => tab.cwd === view.cwd && tab.agentId !== "bash"),
-    [tabs, view.cwd]
-  );
+  // Num navegador do canvas, os agentes ligados a ele por corda vêm primeiro e um deles é o destino
+  // padrão: é a eles que a pessoa quer mandar o que marca na página.
+  const linkedKey = useCanvasStore((s) => Object.values(s.boards).flatMap((b) => (view.id in b.portals ? neighbors(b, view.id) : [])).join(","));
+  const agents = useMemo(() => {
+    const linked = linkedKey ? linkedKey.split(",") : [];
+    const mine = tabs.filter((tab) => tab.cwd === view.cwd && tab.agentId !== "bash");
+    return [...mine.filter((tab) => linked.includes(tab.id)), ...mine.filter((tab) => !linked.includes(tab.id))];
+  }, [tabs, view.cwd, linkedKey]);
 
   const [address, setAddress] = useState(view.url);
   const [target, setTarget] = useState<PreviewTarget | null>(null);
@@ -181,6 +189,9 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       if (debugOpen) previewSetRecording(recordingOrigin, view.id, false).catch(() => undefined);
     };
   }, [debugOpen, recordingOrigin, view.id]);
+
+  const zoom = clampZoom(view.zoom ?? 1);
+  const setZoom = useCallback((next: number) => updateView(view.id, { zoom: clampZoom(next) }), [updateView, view.id]);
 
   const setViewport = useCallback((next: Viewport | null) => {
     viewportRef.current = next;
@@ -421,10 +432,18 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     return () => highlightAgent(null);
   }, [composerOpen, agentId]);
 
-  // Si el agente elegido se cerró, se propone el que esté activo.
+  // Si el agente elegido se cerró, se propone el primero (con corda, el ligado a este navegador).
   useEffect(() => {
     if (!agents.some((a) => a.id === agentId)) setAgentId(agents[0]?.id ?? null);
   }, [agents, agentId]);
+
+  // Ligar uma corda a este navegador faz desse agente o destino, uma vez por agente ligado.
+  const firstLinked = linkedKey.split(",")[0] || null;
+  useEffect(() => {
+    if (firstLinked && agents.some((a) => a.id === firstLinked)) setAgentId(firstLinked);
+    // Só quando muda quem está ligado: escolher outro depois, à mão, vale.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [firstLinked]);
 
   const togglePicking = () => {
     const next = !picking;
@@ -603,6 +622,8 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
 
   const tabTools = (
     <>
+      <ZoomControl zoom={zoom} disabled={!target || !!frozen}
+        onStep={(dir) => setZoom(stepZoom(zoom, dir))} onReset={() => setZoom(1)} />
       <ToolButton label={viewport ? t("browser.viewport.exit") : t("browser.viewport.enter")} active={!!viewport}
         onClick={() => {
           const next = viewport ? null : (presetById("phone") ?? null);
@@ -706,7 +727,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         <div ref={column} data-browser-column className="relative flex flex-col flex-1 min-w-0 min-h-0">
           {shownError}
           {target ? (
-            <ResponsiveStage viewport={viewport} onResize={setViewport}>
+            <ResponsiveStage viewport={viewport} onResize={setViewport} zoom={zoom}>
             <iframe
               ref={iframe}
               src={target.proxiedUrl}

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { breakpointOf, clampViewport, fitScale, type Viewport } from "./viewport";
+import { clampZoom, stageSize } from "./zoom";
 
 type Edge = "x" | "y" | "xy";
 
@@ -15,9 +16,11 @@ type Edge = "x" | "y" | "xy";
  * Un tamaño más grande que el espacio se muestra achicado, pero la página sigue midiendo
  * lo que se pidió: las media queries ven 1440 px aunque en pantalla ocupe la mitad.
  */
-export function ResponsiveStage({ viewport, onResize, children }: {
+export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
   viewport: Viewport | null;
   onResize: (viewport: Viewport) => void;
+  /** O zoom da página. Sem marco, a página é desenhada maior/menor e escalada de volta; com marco, multiplica a escala. */
+  zoom?: number;
   children: ReactNode;
 }) {
   const stage = useRef<HTMLDivElement>(null);
@@ -38,7 +41,8 @@ export function ResponsiveStage({ viewport, onResize, children }: {
   }, []);
 
   const shown = drag?.draft ?? viewport;
-  const scale = shown ? (drag?.scale ?? fitScale(shown, available)) : 1;
+  const z = clampZoom(zoom);
+  const scale = shown ? (drag?.scale ?? Math.max(0.1, fitScale(shown, available) * z)) : 1;
 
   const startDrag = (edge: Edge) => (e: React.PointerEvent<HTMLDivElement>) => {
     if (!viewport || e.button !== 0) return;
@@ -82,12 +86,12 @@ export function ResponsiveStage({ viewport, onResize, children }: {
       <div
         style={shown
           ? { position: "relative", width: shown.width * scale, height: shown.height * scale, margin: "0 auto", flexShrink: 0 }
-          : { position: "absolute", inset: 0 }}
+          : { position: "absolute", inset: 0, overflow: "hidden" }}
       >
         <div
           style={shown
             ? { width: shown.width, height: shown.height, transform: scale === 1 ? undefined : `scale(${scale})`, transformOrigin: "0 0" }
-            : { width: "100%", height: "100%" }}
+            : { ...stageSize(z), transform: z === 1 ? undefined : `scale(${z})`, transformOrigin: "0 0" }}
           className={shown ? "bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_32px_-12px_rgba(0,0,0,0.35)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_12px_32px_-12px_rgba(0,0,0,0.8)]" : undefined}
         >
           {children}
