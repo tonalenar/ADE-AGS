@@ -31,6 +31,8 @@ export interface PageElement {
   filled: boolean | null;
   /** Só nos links: para onde vão, sem consulta nem fragmento (`/cart.html`). Diz o que um ícone sem nome é. */
   href?: string;
+  /** Só nas listas nativas: o que se pode escolher. Cada opção vira um alvo (`e12_3` = a 4ª opção do elemento e12). */
+  options?: string[];
 }
 
 export interface ParsedPage {
@@ -49,6 +51,7 @@ const STATE = /\[([^\]=]+)\]/g;
 const HEADER = /^page: (?:("(?:[^"\\]|\\.)*") )?(\S+)/;
 const VIEWPORT = /^viewport: (\d+)×(\d+)/;
 const VALUE = / value=("(?:[^"\\]|\\.)*")/;
+const OPTIONS = / options=(\[.*\])\s*$/;
 
 function unquote(raw: string | undefined): string {
   if (!raw) return "";
@@ -81,7 +84,19 @@ export function parseSnapshot(snapshot: string): ParsedPage {
       const states = [...flags.matchAll(STATE)].map((m) => m[1]);
       const value = VALUE.exec(rest);
       const target = rest.split(" → ")[1]?.trim().split(/[?#]/)[0].slice(0, 80);
-      page.elements.push({ ref, role, name, states, filled: value ? unquote(value[1]).length > 0 : null, ...(target ? { href: target } : {}) });
+      let options: string[] | undefined;
+      const listed = OPTIONS.exec(rest);
+      if (listed) {
+        try {
+          const parsed: unknown = JSON.parse(listed[1]);
+          if (Array.isArray(parsed)) options = parsed.filter((o): o is string => typeof o === "string");
+        } catch { /* sem opções legíveis: a lista fica como um elemento só */ }
+      }
+      page.elements.push({
+        ref, role, name, states, filled: value ? unquote(value[1]).length > 0 : null,
+        ...(target ? { href: target } : {}),
+        ...(options?.length ? { options } : {}),
+      });
     } else if (role === "text" && name) {
       page.text.push(name);
     }
@@ -121,7 +136,7 @@ function operationOf(el: PageElement): Operation {
 }
 
 /** Quantos elementos entram em cada pergunta de alvo. O Jev acertou 15 de 15 até 80 opções; fica folga. */
-export const MAX_PER_HEAD = 60;
+export const MAX_PER_HEAD = 100;
 
 const OPERATION_LABEL: Record<string, string> = {
   click: "Click an element, button, menu option, autocomplete suggestion, radio or calendar day.",
@@ -164,6 +179,8 @@ export interface Done {
   what: string;
   /** A página mudou depois da ação? `null` = ainda não se sabe. */
   changed: boolean | null;
+  /** Foi um campo preenchido pelo nome (sem o Jev), não uma escolha dele. */
+  auto?: boolean;
 }
 
 /** O que o Jev lê de um elemento: o papel, o nome e o estado (marcado, expandido, preenchido), nunca o valor. */
@@ -204,8 +221,29 @@ export function fingerprint(page: ParsedPage): string {
   return `${page.elements.length}:${hash}`;
 }
 
-const TEXT_BYTES = 1500;
+const TEXT_BYTES = 3000;
 const HISTORY = 10;
+
+/**
+ * Do texto visível da página, o que vai ao Jev: as linhas que falam do OBJETIVO (e do que já foi feito) primeiro, e o
+ * começo da página no que sobrar do orçamento, na ordem em que aparecem. Antes eram só os primeiros 1.500 bytes, que numa
+ * loja são o cabeçalho e o menu: "Seu carrinho está vazio" nem chegava, e a pergunta "o objetivo já foi atingido?" dava 0,00.
+ * Pura.
+ */
+export function pickText(lines: string[], wanted: Set<string>, budget = TEXT_BYTES): string[] {
+  const scored = lines.map((line, index) => ({ line, index, score: overlap(wanted, words(line)) }));
+  const chosen = new Set<number>();
+  let bytes = 0;
+  const take = (item: { line: string; index: number }) => {
+    if (chosen.has(item.index) || bytes + item.line.length > budget) return;
+    chosen.add(item.index);
+    bytes += item.line.length + 1;
+  };
+  // Primeiro as que mais se parecem com o objetivo, e só depois o começo da página.
+  scored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score || a.index - b.index).forEach(take);
+  scored.forEach(take);
+  return [...chosen].sort((a, b) => a - b).map((index) => lines[index]);
+}
 
 /**
  * A consulta de um passo: o estado (objetivo, página, últimas ações, texto visível), as operações possíveis e os
@@ -218,8 +256,16 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
     + (TYPING.has(el.role) && fillKeys.length > 0 && el.filled !== true ? 1 : 0);
 
   const groups: Record<Operation, { el: PageElement; index: number }[]> = { click: [], type: [], select: [] };
+  // Uma lista nativa com opções vira UM ALVO POR OPÇÃO ("Classificar por → Preço: do menor ao maior"): escolher não
+  // precisa de `--fill`, o objetivo já diz qual.
+  const optionTargets: StepOption[] = [];
   page.elements.forEach((el, index) => {
-    if (!el.states.includes("disabled")) groups[operationOf(el)].push({ el, index });
+    if (el.states.includes("disabled")) return;
+    if (operationOf(el) === "select" && el.options?.length) {
+      el.options.forEach((option, i) => optionTargets.push({ id: `${el.ref}_${i}`, label: `${plain(el)} → option "${option}"` }));
+      return;
+    }
+    groups[operationOf(el)].push({ el, index });
   });
   const targets: Record<string, StepOption[]> = {};
   const shown: { el: PageElement; index: number }[] = [];
@@ -229,30 +275,29 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
     if (kept.length > 0) targets[operation] = kept.map(({ el }) => ({ id: el.ref, label: labelOf(el) }));
     shown.push(...kept);
   }
+  if (optionTargets.length > 0) targets.select = [...optionTargets.slice(0, MAX_PER_HEAD), ...(targets.select ?? [])];
   // A pergunta da OPERAÇÃO também precisa ver os elementos (só as de alvo os listam): sem isso o Jev escolhia
   // "rolar" por não saber o que a página oferece. É a tabela `elements` do estado no jev-ultrafast.
-  const table = shown.sort((a, b) => a.index - b.index).map(({ el }) => `[${el.ref}] ${labelOf(el)}`);
+  const table = [
+    ...shown.sort((a, b) => a.index - b.index).map(({ el }) => `[${el.ref}] ${labelOf(el)}`),
+    ...page.elements.filter((el) => el.options?.length && !el.states.includes("disabled")).map((el) => `[${el.ref}] ${labelOf(el)} with options: ${el.options!.slice(0, 12).join(" | ")}`),
+  ];
 
   const operations: StepOption[] = [];
   const offer = (id: string) => operations.push({ id, label: OPERATION_LABEL[id] });
   if (targets.click) offer("click");
   // Digitar e escolher numa lista precisam de um valor do `--fill`: sem sobrar nenhum, não são operações possíveis.
   if (targets.type && fillKeys.length > 0) offer("type");
-  if (targets.select && fillKeys.length > 0) offer("select");
+  // Escolher numa lista: com opções visíveis não precisa de `--fill`; uma lista sem opções legíveis sim.
+  if (targets.select && (optionTargets.length > 0 || fillKeys.length > 0)) offer("select");
   offer("scroll");
   if (waits < 2) offer("wait");
   offer("done");
   offer("stuck");
   for (const operation of Object.keys(targets)) if (!operations.some((o) => o.id === operation)) delete targets[operation];
 
-  const text: string[] = [];
-  let bytes = 0;
-  for (const line of page.text) {
-    if (bytes + line.length > TEXT_BYTES) break;
-    text.push(line);
-    bytes += line.length + 1;
-  }
   const recent = history.slice(-HISTORY);
+  const text = pickText(page.text, words(`${goal} ${recent.map((d) => d.what).join(" ")}`));
   const state = [
     `GOAL: ${goal}`,
     fillKeys.length > 0 ? `FIELDS THE CALLER WILL FILL (values are not shown): ${fillKeys.join(", ")}` : null,
@@ -299,6 +344,8 @@ export interface StepReply {
   target: string | null;
   /** A menor entre a probabilidade da operação e a do alvo. */
   probability: number | null;
+  /** A probabilidade de o objetivo inteiro já estar atingido (a pergunta direta, à parte da operação). */
+  goalDone?: number | null;
   reason: string | null;
   latencyMs: number | null;
 }
@@ -321,17 +368,20 @@ export interface PilotDeps {
   visual?: (goal: string, recent: string) => Promise<VisualReply>;
   /** Toca num ponto da janela da página (px CSS). Vai junto de `visual`. */
   clickAt?: (x: number, y: number) => Promise<unknown>;
-  click: (ref: string) => Promise<unknown>;
+  /** O que há sob um ponto (nome, texto, id), sem tocar: o piloto confere antes de tocar num ponto apontado por uma foto. */
+  peekAt?: (x: number, y: number) => Promise<string>;
+  /** `navigates`: o toque vai levar a outra página (um link com destino): espera ela carregar antes de reler. */
+  click: (ref: string, navigates?: boolean) => Promise<unknown>;
   type: (ref: string, text: string) => Promise<unknown>;
   select: (ref: string, value: string) => Promise<unknown>;
   scroll: () => Promise<unknown>;
-  /** Espera a página assentar depois de uma ação (nunca lança). */
-  settle: () => Promise<void>;
+  /** Espera a página assentar depois de uma ação (nunca lança). `thorough`: a operação `wait` do Jev, que espera a rede ficar ociosa. */
+  settle: (thorough?: boolean) => Promise<void>;
   pick: (query: StepQuery) => Promise<StepReply>;
 }
 
-/** Abaixo disto o Jev não está seguro: o piloto para e devolve a página ao agente. */
-export const MIN_PROBABILITY = 0.45;
+/** Abaixo disto o Jev não está seguro: o piloto para e devolve a página ao agente. Medido em testes reais: as escolhas certas têm p de 0,43 a 0,56 e as erradas de 0,20 a 0,32. */
+export const MIN_PROBABILITY = 0.4;
 export const DEFAULT_STEPS = 8;
 export const MAX_STEPS = 15;
 
@@ -340,6 +390,20 @@ export const MIN_FOUND = 0.6;
 export const MIN_BOX_CONFIDENCE = 0.4;
 /** Quantas vezes por execução se tira uma foto: ela é mais cara e sai da máquina. */
 export const MAX_VISUAL = 3;
+
+/** Controles que fecham uma compra ou pagam. */
+const PURCHASE = /comprar agora|buy now|buy-now|buynow|one-?click|1-click|finalizar (a )?compra|fechar (o )?pedido|confirmar (o )?(pedido|pagamento)|place (your )?order|proceed to checkout|prosseguir para|ir para o pagamento|checkout|pagar agora|pay now/i;
+
+/**
+ * Um controle de compra ou pagamento que o objetivo NÃO pediu? O piloto nunca fecha uma compra por acaso: o Jev escolhe
+ * "o próximo passo" e, perto do carrinho, um deles é "Comprar agora". Se o objetivo fala em comprar/finalizar/pagar, vale. Pura.
+ */
+export function blockedPurchase(label: string, goal: string): boolean {
+  return PURCHASE.test(label) && !PURCHASE.test(goal) && !/\b(comprar|compra|pagar|pagamento|finalizar|buy|purchase|pay)\b/i.test(goal);
+}
+
+/** Com esta certeza de que o objetivo já está atingido (pergunta direta), o piloto conclui mesmo sem uma operação segura. */
+export const MIN_GOAL_DONE = 0.75;
 
 /**
  * O elemento escolhido não tem nome (nem destino de link) e há outros iguais na mesma pergunta? Então o texto não os
@@ -382,16 +446,21 @@ export async function runPilot(
   let snapshot = await deps.snapshot();
   let lastSignature = "";
   let waits = 0;
+  let staleRetries = 0;
 
   const finish = (outcome: PilotResult["outcome"], note: string): PilotResult =>
     ({ outcome, steps: log, note, finalSnapshot: snapshot });
 
   // A reserva visual: quando o texto não basta, uma foto da página e o Jev aponta onde tocar.
   const triedPhotos = new Set<string>();
+  const tapped: { x: number; y: number }[] = [];
   let photos = 0;
+  /** O passo anterior foi um toque pela foto: a página ainda pode não ter mostrado o efeito, e um segundo toque desfaz o primeiro. */
+  let photoJustTapped = false;
   /** `"acted"` = tocou e a página foi relida; um texto = por que não serviu (vai na nota); `null` = não se aplica. */
   const visualFallback = async (page: ParsedPage, step: number): Promise<"acted" | string | null> => {
     if (!deps.visual || !deps.clickAt || photos >= MAX_VISUAL) return null;
+    if (photoJustTapped) return "A foto acabou de tocar: confira a página antes de tirar outra (um segundo toque pode desfazer o primeiro).";
     const fp = fingerprint(page);
     if (triedPhotos.has(fp) || !page.viewport) return null;
     if (sensitiveFilled(page)) return "A reserva visual não foi usada: há um campo de senha, cartão ou token preenchido e a foto não pode sair.";
@@ -410,8 +479,21 @@ export async function runPilot(
     }
     const x = Math.round(reply.center[0] * page.viewport.width);
     const y = Math.round(reply.center[1] * page.viewport.height);
+    // O mesmo lugar duas vezes desfaz o que a primeira fez (um filtro ligado vira desligado): se a foto aponta onde já se
+    // tocou, a página provavelmente só ainda não mostrou o efeito.
+    if (tapped.some((t) => Math.hypot(t.x - x, t.y - y) < 48)) {
+      return `A foto apontou o mesmo lugar de um toque anterior (${x}, ${y}): não repeti, para não desfazer o que já foi feito. Confira a página.`;
+    }
+    // Antes de tocar num ponto que uma FOTO apontou, olha o que há ali: nunca um botão de compra ou pagamento que o objetivo não pediu.
+    if (deps.peekAt) {
+      const under = await deps.peekAt(x, y).catch(() => "");
+      if (blockedPurchase(under, goal)) {
+        return `A foto apontou um controle de compra ou pagamento (${x}, ${y}) que o objetivo não pediu: não toquei.`;
+      }
+    }
     try {
       await deps.clickAt(x, y);
+      tapped.push({ x, y });
     } catch (e) {
       return `O toque pela foto falhou: ${e instanceof Error ? e.message : String(e)}`;
     }
@@ -420,16 +502,18 @@ export async function runPilot(
     await deps.settle();
     snapshot = await deps.snapshot();
     history.push({ what, changed: fingerprint(parseSnapshot(snapshot)) !== fp });
+    photoJustTapped = true;
     return "acted";
   };
 
   for (let step = 1; step <= limit; step++) {
+    const stepStarted = Date.now();
     let page = parseSnapshot(snapshot);
     // O que não é escolha não vai ao Jev: um campo cujo nome casa com um `--fill` recebe o valor direto.
     const filled = await autoFill(page, fills, taken, deps);
     if (filled.length > 0) {
       for (const what of filled) {
-        history.push({ what, changed: true });
+        history.push({ what, changed: true, auto: true });
         log.push(`${what} (pelo nome do campo, sem o Jev)`);
       }
       await deps.settle();
@@ -443,7 +527,16 @@ export async function runPilot(
       return finish(reply.status === "off" ? "off" : "error", reply.reason ?? "O Jev não respondeu.");
     }
     const operation = reply.operation;
-    const meta = `${reply.probability !== null ? `p=${reply.probability.toFixed(2)}` : "p=?"}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
+    // O objetivo já está atingido? Pergunta direta, à parte da operação: depois de acertar (um filtro aplicado, o carrinho
+    // vazio) o Jev costuma ficar "sem certeza" da PRÓXIMA operação, mas sabe que acabou. Só vale depois de uma ação dele
+    // que mudou a página (os campos preenchidos pelo nome não contam).
+    const lastByJev = [...history].reverse().find((d) => !d.auto);
+    if (lastByJev && lastByJev.changed !== false && (reply.goalDone ?? 0) >= MIN_GOAL_DONE) {
+      log.push(`${step}. objetivo atingido (pergunta direta p=${reply.goalDone!.toFixed(2)})`);
+      return finish("done", "O Jev considera o objetivo atingido. Confira na página abaixo.");
+    }
+    // `fim` = a pergunta direta "o objetivo já foi atingido?": aparece no relatório para o limite poder ser ajustado com dados.
+    const meta = `${reply.probability !== null ? `p=${reply.probability.toFixed(2)}` : "p=?"}${reply.goalDone != null ? `, fim p=${reply.goalDone.toFixed(2)}` : ""}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
     const ambiguous = operation !== "done" && isAmbiguous(query, operation, reply.target);
     if (ambiguous || (reply.probability !== null && reply.probability < MIN_PROBABILITY && operation !== "done")) {
       const fallback = await visualFallback(page, step);
@@ -451,7 +544,8 @@ export async function runPilot(
       if (fallback) log.push(fallback);
       return finish("unsure", ambiguous
         ? `O elemento que o Jev escolheu (${reply.target}) não tem nome e há outros iguais na página: só o texto não os distingue (${meta}). Continue você, com \`snapshot\` e \`click\`, ou ligue a reserva visual em Ajustes → Decisões.`
-        : `O Jev não tem certeza do próximo passo (${operation}${reply.target ? ` ${reply.target}` : ""}, ${meta}). Continue você, com \`snapshot\` e \`click\`, ou diga no objetivo a escolha que falta.`);
+        : `O Jev não tem certeza do próximo passo (${operation}${reply.target ? ` ${reply.target}` : ""}, ${meta}). Continue você, com \`snapshot\` e \`click\`, ou diga no objetivo a escolha que falta.`
+          + (lastByJev?.changed ? " A última ação do piloto mudou a página: o objetivo pode já ter sido atingido, confira antes de continuar." : ""));
     }
     if (operation === "done") {
       log.push(`${step}. concluído (${meta})`);
@@ -483,17 +577,36 @@ export async function runPilot(
       } else if (operation === "wait") {
         waits += 1;
         what = "esperou a página";
+        await deps.settle(true);
       } else {
-        const el = page.elements.find((e) => e.ref === reply.target);
+        // `e12_3` = a 4ª opção da lista e12.
+        const [refPart, optionPart] = (reply.target ?? "").split("_");
+        const el = page.elements.find((e) => e.ref === refPart);
         if (!el) return finish("error", `O Jev escolheu ${reply.target ?? "?"}, que não está na página.`);
-        what = await act(el, operation, fills, taken, deps);
+        const option = optionPart !== undefined ? el.options?.[Number(optionPart)] : undefined;
+        if (blockedPurchase(`${el.name} ${el.href ?? ""}`, goal)) {
+          log.push(`${step}. recusou ${plain(el)}: parece uma compra ou um pagamento, e o objetivo não pediu`);
+          return finish("stuck", "O Jev escolheu um controle de compra ou pagamento que o objetivo não pediu: não cliquei. Se é isso mesmo que você quer, diga no objetivo.");
+        }
+        what = await act(el, operation, fills, taken, deps, option);
       }
     } catch (e) {
-      log.push(`${step}. falhou: ${e instanceof Error ? e.message : String(e)}`);
+      const message = e instanceof Error ? e.message : String(e);
+      // Uma referência que a página já não tem (ela recarregou entre a leitura e o toque): relê e decide de novo.
+      if (/tire um novo snapshot|n[ãa]o est[áa] mais na p[áa]gina/i.test(message) && staleRetries < 2) {
+        staleRetries += 1;
+        lastSignature = "";
+        log.push(`${step}. a página mudou antes do toque; li de novo`);
+        await deps.settle();
+        snapshot = await deps.snapshot();
+        continue;
+      }
+      log.push(`${step}. falhou: ${message}`);
       return finish("error", "A ação falhou; veja o motivo acima e continue você.");
     }
     if (operation !== "wait") waits = 0;
-    log.push(`${step}. ${what} (${meta})`);
+    photoJustTapped = false;
+    log.push(`${step}. ${what} (${meta}, passo ${Date.now() - stepStarted} ms)`);
     await deps.settle();
     snapshot = await deps.snapshot();
     history.push({ what, changed: fingerprint(parseSnapshot(snapshot)) !== fingerprint(page) });
@@ -519,8 +632,9 @@ export async function autoFill(
     let bestScore = 0;
     for (const el of page.elements) {
       if (!(TYPING.has(el.role) || CHOOSING.has(el.role)) || touched.has(el.ref) || el.states.includes("disabled")) continue;
-      const score = similarity(el.name, key);
-      if (score > bestScore) { best = el; bestScore = score; }
+      // Empatando no nome, o campo de TEXTO vence a lista: "Pesquisa" é a barra de busca, não o departamento.
+      const score = similarity(el.name, key) * 2 + (TYPING.has(el.role) ? 1 : 0);
+      if (similarity(el.name, key) > 0 && score > bestScore) { best = el; bestScore = score; }
     }
     if (!best) continue;
     touched.add(best.ref);
@@ -530,7 +644,11 @@ export async function autoFill(
 }
 
 /** Faz o que a operação pede no elemento e conta o que fez, sem o valor digitado. */
-async function act(el: PageElement, operation: string, fills: [string, string][], taken: Set<string>, deps: PilotDeps): Promise<string> {
+async function act(el: PageElement, operation: string, fills: [string, string][], taken: Set<string>, deps: PilotDeps, option?: string): Promise<string> {
+  if (operation === "select" && option !== undefined) {
+    await deps.select(el.ref, option);
+    return `escolheu "${option}" em ${plain(el)}`;
+  }
   if (operation === "type" || operation === "select") {
     const entry = valueFor(el.name, fills, taken);
     if (!entry) throw new Error(`não há valor para ${plain(el)}: passe --fill "<campo>=<valor>"`);
@@ -539,7 +657,9 @@ async function act(el: PageElement, operation: string, fills: [string, string][]
     else await deps.type(el.ref, entry[1]);
     return `${operation === "select" ? "escolheu em" : "digitou em"} ${plain(el)} (valor de ${entry[0]})`;
   }
-  await deps.click(el.ref);
+  // Um link com destino leva a outra página: o piloto espera ela carregar antes de reler (senão "conclui" olhando a antiga).
+  const navigates = el.role === "link" && !!el.href && !/^(javascript:|#)/i.test(el.href);
+  await deps.click(el.ref, navigates);
   return `clicou ${plain(el)}`;
 }
 

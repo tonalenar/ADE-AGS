@@ -33,7 +33,7 @@ import {
 import { isTouch, sendTouch, setTouch } from "./touch";
 import { CORS_HEADER, CRED_HEADER, HEADERS_HEADER, corsMessage, routeRequest, type Routed } from "./route";
 import {
-  displayHref, formatSnapshot, normalizeName, parseKeyCombo, parseTarget, type SnapshotNode,
+  displayHref, formatSnapshot, normalizeName, humanizeId, parseKeyCombo, parseTarget, probePoints, snapToNearest, type Box4, type SnapshotNode,
 } from "./snapshotFormat";
 
 declare global {
@@ -640,9 +640,26 @@ declare global {
       // Un botón que es solo un icono: el nombre está en el `alt` o en el `<title>` del SVG.
       const img = el.querySelector("img[alt], svg title");
       const inner = img?.getAttribute("alt") || img?.textContent || "";
-      return normalizeName(inner || el.getAttribute("title") || "");
+      return normalizeName(inner || el.getAttribute("title") || idHint(el));
     }
-    return normalizeName(el.getAttribute("title") || "");
+    return normalizeName(el.getAttribute("title") || idHint(el));
+  }
+
+  /** Sem nome nenhum, o `id` ou o `data-testid` costuma dizer o que é ("nav-search-submit-button"). */
+  function idHint(el: Element): string {
+    for (const attribute of ["data-testid", "data-test", "data-qa", "data-cy", "id", "name"]) {
+      const hint = humanizeId(el.getAttribute(attribute));
+      if (hint) return hint;
+    }
+    // Sem id, as classes de uma loja costumam dizer o que é ("nav-search-submit"): a de mais palavras.
+    let best = "";
+    let bestWords = 0;
+    for (const token of Array.from(el.classList)) {
+      const hint = humanizeId(token);
+      const count = hint ? hint.split(" ").length : 0;
+      if (count > bestWords) { best = hint; bestWords = count; }
+    }
+    return best;
   }
 
   function statesOf(el: Element, role: string): string[] {
@@ -764,6 +781,11 @@ declare global {
         const href = (el as HTMLAnchorElement).href;
         if (href) entry.href = displayHref(href, location.origin);
       }
+      if (el.tagName === "SELECT") {
+        // As opções de uma lista nativa: é o que um agente (ou o piloto) escolhe ("Preço: do menor ao maior").
+        const options = Array.from((el as HTMLSelectElement).options).slice(0, 40).map((o) => normalizeName(o.text, 60)).filter(Boolean);
+        if (options.length > 0) entry.options = options;
+      }
       add(entry);
       if (!leaf) walkChildren(el, depth + 1);
     };
@@ -783,6 +805,26 @@ declare global {
   function isVisible(el: Element): boolean {
     const style = getComputedStyle(el);
     return style.display !== "none" && style.visibility !== "hidden" && el.getClientRects().length > 0;
+  }
+
+  /** O controle clicável que fica com um ponto: ver `snapToNearest`. `null` = nenhum perto. */
+  function clickableNear(x: number, y: number): Element | null {
+    const area = window.innerWidth * window.innerHeight;
+    const found: { el: Element; box: Box4 }[] = [];
+    for (const el of Array.from(document.querySelectorAll("*"))) {
+      if (SKIP_TAGS.has(el.tagName)) continue;
+      const style = getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden") continue;
+      const role = roleOf(el);
+      if (!(role && INTERACTIVE_ROLES.has(role)) && !looksClickable(el, style)) continue;
+      const r = el.getBoundingClientRect();
+      // Um contêiner enorme que só tem `cursor: pointer` não é o alvo de um toque.
+      if (r.width < 2 || r.height < 2 || r.width * r.height > area * 0.4) continue;
+      found.push({ el, box: { left: r.left, top: r.top, right: r.right, bottom: r.bottom } });
+    }
+    const hit = snapToNearest(found.map((f) => f.box), x, y);
+    if (hit && "ambiguous" in hit) throw new Error(`Há mais de um controle perto do ponto (${Math.round(x)}, ${Math.round(y)}): não sei qual tocar.`);
+    return hit ? found[hit.index].el : null;
   }
 
   function resolve(target: string): Element {
@@ -805,7 +847,12 @@ declare global {
       // O que há sob o ponto; se está dentro de algo clicável (um ícone dentro de um link), o clicável.
       const under = document.elementFromPoint(spec.x, spec.y);
       if (!under) throw new Error(`Não há nada no ponto (${Math.round(spec.x)}, ${Math.round(spec.y)}): fora da janela da página.`);
-      return under.closest("a[href],button,[role=button],[role=link],input,select,textarea,label,summary,[role=tab],[role=menuitem],[role=option],[onclick]") ?? under;
+      const direct = under.closest("a[href],button,[role=button],[role=link],input,select,textarea,label,summary,[role=tab],[role=menuitem],[role=option],[onclick]");
+      if (direct) return direct;
+      // Um ponto que caiu no vazio ao lado de um controle (a foto erra alguns pixels): vai para o clicável mais perto.
+      const near = clickableNear(spec.x, spec.y);
+      if (!near) throw new Error(`Não há nada clicável perto do ponto (${Math.round(spec.x)}, ${Math.round(spec.y)}).`);
+      return near;
     }
     if (spec.kind === "text") {
       const wanted = spec.text.toLowerCase();
@@ -834,7 +881,15 @@ declare global {
 
   /** Espera a que la página termine de reaccionar: sin cambios en el DOM por un rato, o el
    *  tope. Con timers y no con frames: un iframe que no se está mostrando no pinta. */
+  /** O comando em curso é do piloto do Jev: esperas curtas (a página que mudou depois é lida de novo, é barato). */
+  let fastCommand = false;
+
   function settle(maxMs = 1500, quietMs = 150): Promise<void> {
+    if (fastCommand) {
+      // O repositório jev-ultrafast espera 2 quadros ou 50 ms. Aqui, quieto por 60 ms e no máximo 350 ms (um React que re-renderiza).
+      maxMs = Math.min(maxMs, 350);
+      quietMs = Math.min(quietMs, 60);
+    }
     return new Promise((done) => {
       let finished = false;
       let quiet = setTimer(finish, quietMs);
@@ -881,16 +936,17 @@ declare global {
       rect = target.getBoundingClientRect();
     }
     if (rect.width === 0 || rect.height === 0) throw new Error(`${describeElement(el)} não está visível (mede 0×0).`);
-    const x = rect.left + rect.width / 2;
-    const y = rect.top + rect.height / 2;
-    const hit = document.elementFromPoint(x, y);
-    const ok = !hit || hit === target || target.contains(hit) || hit.contains(target)
+    const reaches = (hit: Element | null) => !hit || hit === target || target.contains(hit) || hit.contains(target)
       || (labels !== null && Array.from(labels).some((l) => l === hit || l.contains(hit)));
-    if (!ok && hit) {
-      throw new Error(`${describeElement(el)} está coberto por ${describeElement(hit)} (${selectorOf(hit)}). `
+    // Uma camada decorativa sobre o centro (o corte de um título numa loja) não impede um clique de verdade em outro ponto
+    // do elemento: tenta o centro e, se está coberto, as bordas. Só falha se NENHUM ponto chega ao elemento.
+    const clear = probePoints(rect).find((point) => reaches(document.elementFromPoint(point.x, point.y)));
+    if (!clear) {
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      throw new Error(`${describeElement(el)} está coberto por ${hit ? describeElement(hit) : "outro elemento"} (${hit ? selectorOf(hit) : "?"}). `
         + "Se for um modal ou overlay, feche-o primeiro; se for preciso forçar, use eval.");
     }
-    return { x, y, target };
+    return { x: clear.x, y: clear.y, target };
   }
 
   async function click(el: Element): Promise<unknown> {
@@ -1514,6 +1570,10 @@ declare global {
       case "cookies": return cookies(command);
       case "performance": return performanceReport();
       case "describe": return describe(command.target);
+      case "peek": {
+        const el = resolve(command.target);
+        return { label: [nameOf(el, roleOf(el) || "clickable"), normalizeName(textOf(el), 80), describeElement(el), el.getAttribute("href") ?? ""].filter(Boolean).join(" | ") };
+      }
       case "drag": return drag(command.from, command.to);
       case "upload": return upload(command.target, command.name, command.mime, command.data);
       case "dialogs": {
@@ -1532,6 +1592,8 @@ declare global {
     // Mientras dura la orden, los diálogos de la página los contesta el runtime: si no, la
     // acción del agente quedaría esperando a una persona que quizá no está mirando.
     driving = true;
+    fastCommand = (command as { fast?: boolean }).fast === true;
+    cursor.setFast(fastCommand);
     try {
       payload = { id, ok: true, result: await execute(command) };
     } catch (e) {
@@ -1541,6 +1603,8 @@ declare global {
       post({ type: "page:reply", payload: { id, ok: false, error: "O resultado não pode ser transferido para o app." } });
     }
     driving = false;
+    fastCommand = false;
+    cursor.setFast(false);
     // Lo que la acción haya logueado viaja enseguida: la app lo junta con la respuesta.
     flush();
   }

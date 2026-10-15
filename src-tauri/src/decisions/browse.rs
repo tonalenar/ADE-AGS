@@ -36,6 +36,8 @@ use super::points::{memory_secret, POINT_BROWSE};
 use super::protocol::{canonical, canonical_labels, truncate_chars, DecisionRequest, Question};
 
 const OPERATION: &str = "operacao";
+/// A pergunta direta "o objetivo inteiro já foi atingido?", à parte da operação (sim/não).
+const GOAL_DONE: &str = "concluido";
 /// Quanto do estado (objetivo, página, elementos, passos já dados) vai ao provedor. Abaixo do teto do Jev.
 const STATE_BYTES: usize = 24_000;
 /// Quanto de cada rótulo de opção.
@@ -53,6 +55,10 @@ required fields are ready, CLICK it immediately. SCROLL only when the needed con
 WAIT only when the needed control is absent or disabled, or submitted results are still loading; a recent WAIT is not \
 evidence of loading. DONE requires visible evidence that ALL requirements are satisfied. STUCK means no offered \
 operation can make progress.";
+
+const GOAL_DONE_INSTRUCTIONS: &str = "Is the user's WHOLE goal already visibly satisfied on the CURRENT page? Judge only from what \
+the page shows now (the page text, the elements' state) and the recent actions. An action that just ran only counts \
+if the page now shows its result. Answer no if any part of the goal is still missing.";
 
 const TARGET: &str = "Choose the best offered element if the next operation is the one named in this question. \
 Use the user's entire goal, the elements' state, nearby page text and the recent actions. This question only chooses \
@@ -92,6 +98,8 @@ pub struct StepReply {
     pub target: Option<String>,
     /// A probabilidade do passo: a MENOR entre a da operação e a do alvo. É ela que o piloto confere antes de agir.
     pub probability: Option<f64>,
+    /// A probabilidade de o objetivo inteiro já estar atingido (a pergunta `concluido`).
+    pub goal_done: Option<f64>,
     pub operation_probability: Option<f64>,
     pub target_probability: Option<f64>,
     pub confidence: Option<f64>,
@@ -107,6 +115,7 @@ impl StepReply {
             operation: None,
             target: None,
             probability: None,
+            goal_done: None,
             operation_probability: None,
             target_probability: None,
             confidence: None,
@@ -114,6 +123,22 @@ impl StepReply {
             latency_ms: None,
         }
     }
+}
+
+/**
+ * O texto de uma página para o detector de segredos: sem os ENDEREÇOS. O caminho de um endereço de loja
+ * (`…/Orelhas-Bluetooth-Infantil-COLORIDO-HEADPHONE/dp/B0CGH58XFC`) é longo, de letras e números misturados, e o
+ * detector o lia como uma chave — a Amazon inteira era recusada. O estado já leva só origem + caminho (sem consulta nem
+ * fragmento, que é onde vão tokens), então o que sai daqui não perde nada que importe. Pura.
+ */
+pub(super) fn without_addresses(text: &str) -> String {
+    use std::sync::OnceLock;
+    static ADDRESS: OnceLock<regex::Regex> = OnceLock::new();
+    static ARROW: OnceLock<regex::Regex> = OnceLock::new();
+    let address = ADDRESS.get_or_init(|| regex::Regex::new(r#"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"')]+"#).unwrap());
+    // `link "Nome" → /caminho/longo-do-link`: o destino de um link, que o piloto mostra ao Jev.
+    let arrow = ARROW.get_or_init(|| regex::Regex::new(r"→ \S+").unwrap());
+    arrow.replace_all(&address.replace_all(text, "<url>"), "→ <path>").into_owned()
 }
 
 fn cut(text: &str, max: usize) -> String {
@@ -172,6 +197,10 @@ pub fn request_for(query: &CleanQuery) -> DecisionRequest {
         let instructions = format!("{TARGET} Operation: {}.", operation.to_uppercase());
         questions.insert(target_question_id(operation), Question::choice(&instructions, &refs(options)));
     }
+    questions.insert(
+        GOAL_DONE.to_string(),
+        Question::choice(GOAL_DONE_INSTRUCTIONS, &[("yes", "The whole goal is already satisfied on this page."), ("no", "Something is still missing.")]),
+    );
     let mut heuristic = BTreeMap::new();
     heuristic.insert(OPERATION.to_string(), "nenhum".to_string());
     DecisionRequest { state: truncate_chars(query.state.trim(), STATE_BYTES), questions, model: String::new(), heuristic }
@@ -208,6 +237,17 @@ pub fn read_answer(
     Ok((operation, Some(target), operation_probability, target_answer.probability, confidence))
 }
 
+/// A probabilidade de "sim" na pergunta direta de objetivo atingido. Com duas opções, "não" com p vale 1 − p para o "sim". Pura.
+pub fn goal_done_probability(answers: &BTreeMap<String, super::protocol::DecisionAnswer>) -> Option<f64> {
+    let answer = answers.get(GOAL_DONE)?;
+    let p = answer.probability?;
+    match answer.label.as_str() {
+        "yes" => Some(p),
+        "no" => Some(1.0 - p),
+        _ => None,
+    }
+}
+
 /// Pergunta ao provedor principal. Bloqueante: chamar de `spawn_blocking`.
 pub fn pick(db: &DbConnection, query: &StepQuery) -> StepReply {
     let settings = match db.lock().ok().and_then(|conn| config::load(&conn).ok()) {
@@ -226,7 +266,9 @@ pub fn pick(db: &DbConnection, query: &StepQuery) -> StepReply {
     }
     // O que o detector de segredos marca não sai, qualquer que seja o provedor.
     let labels = clean.operations.iter().chain(clean.targets.values().flatten());
-    if memory_secret("", &clean.state, None) || labels.into_iter().any(|(_, label)| memory_secret("", label, None)) {
+    if memory_secret("", &without_addresses(&clean.state), None)
+        || labels.into_iter().any(|(_, label)| memory_secret("", &without_addresses(label), None))
+    {
         return StepReply::without_choice("secret", "A página tem algo que parece um segredo: não enviei ao provedor.");
     }
     let api_key = config::load_key();
@@ -257,6 +299,7 @@ pub(super) fn pick_with(db: &DbConnection, settings: &config::Settings, api_key:
         (a, b) => a.or(*b),
     });
     let confidence = reading.as_ref().ok().and_then(|(_, _, _, _, c)| *c);
+    let goal_done = result.as_ref().ok().and_then(|response| goal_done_probability(&response.answers));
     if let Ok(conn) = db.lock() {
         let _ = log::record(
             &conn,
@@ -283,6 +326,7 @@ pub(super) fn pick_with(db: &DbConnection, settings: &config::Settings, api_key:
             operation: Some(operation),
             target,
             probability,
+            goal_done,
             operation_probability,
             target_probability,
             confidence,
@@ -339,6 +383,18 @@ mod test {
     }
 
     #[test]
+    fn o_endereco_de_uma_loja_nao_e_um_segredo_mas_uma_chave_de_verdade_continua_sendo() {
+        let amazon = "PAGE: \"Fone\" https://www.amazon.com.br/Orelhas-Bluetooth-Infantil-COLORIDO-HEADPHONE-Sem-Fio/dp/B0CGH58XFC\n\
+[e7] link \"Fone De Ouvido\" → /Fone-De-Ouvido-Headphone-Sem-Fio-Bluetooth-P47-Micro-SD-FM-Preto/dp/B0CGH58XFCa";
+        assert!(memory_secret("", amazon, None), "sem tirar os endereços o detector recusa a página");
+        assert!(!memory_secret("", &without_addresses(amazon), None));
+        let leaked = "GOAL: entrar\nVISIBLE TEXT: token sk-ant-api03-aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1eF3hJ5kL7nP9rS1tU3wX5yA7cD9fG1hJ3k";
+        assert!(memory_secret("", &without_addresses(leaked), None), "uma chave de verdade no texto continua bloqueada");
+        let credentials = "abrir https://user:senha123@exemplo.com/x";
+        assert!(without_addresses(credentials).contains("<url>"));
+    }
+
+    #[test]
     fn o_rotulo_e_uma_linha_curta() {
         let long = format!("botão\n\n  \"{}\"", "x".repeat(300));
         let clean = clean_options(&[option("e1", &long)], MAX_OPTIONS);
@@ -357,7 +413,7 @@ mod test {
     fn o_pedido_leva_a_pergunta_da_operacao_e_uma_de_alvo_por_operacao() {
         let request = request_for(&clean_query(&query(), 60));
         let ids: Vec<&str> = request.questions.keys().map(String::as_str).collect();
-        assert_eq!(ids, ["alvo_click", "alvo_type", "operacao"]);
+        assert_eq!(ids, ["alvo_click", "alvo_type", "concluido", "operacao"]);
         assert_eq!(request.questions["operacao"].option_count(), 4);
         assert_eq!(request.questions["alvo_click"].option_count(), 2);
         assert_eq!(request.heuristic["operacao"], "nenhum");
@@ -375,6 +431,18 @@ mod test {
         let (operation, target, op_p, target_p, _) = read_answer(&answers, &clean).unwrap();
         assert_eq!((operation.as_str(), target.as_deref()), ("type", Some("e3")));
         assert_eq!((op_p, target_p), (Some(0.9), Some(0.8)));
+    }
+
+    #[test]
+    fn a_pergunta_direta_de_objetivo_atingido_vira_a_probabilidade_do_sim() {
+        let yes = BTreeMap::from([("concluido".to_string(), answer("yes", 0.93))]);
+        assert_eq!(goal_done_probability(&yes), Some(0.93));
+        let no = BTreeMap::from([("concluido".to_string(), answer("no", 0.9))]);
+        let p = goal_done_probability(&no).unwrap();
+        assert!((p - 0.1).abs() < 1e-9);
+        assert_eq!(goal_done_probability(&BTreeMap::new()), None);
+        let odd = BTreeMap::from([("concluido".to_string(), answer("talvez", 0.5))]);
+        assert_eq!(goal_done_probability(&odd), None);
     }
 
     #[test]

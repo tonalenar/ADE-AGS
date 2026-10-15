@@ -35,6 +35,7 @@ import { ResponsiveStage } from "./ResponsiveStage";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
 import { ZoomControl } from "./ZoomControl";
+import { visualSize } from "./visualSize";
 import { clampZoom, stepZoom } from "./zoom";
 
 /** Lo que el proxy inyecta en cada página: el selector y el runtime (control del agente y
@@ -304,11 +305,43 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       const frame = column.current;
       if (!page || !frame) throw new Error("La página todavía no está cargada.");
       useViewTabsStore.getState().activateView(view.id);
-      const frozen = await freezePage(page, frame);
-      const rect = page.getBoundingClientRect();
-      // Só vale se a página está toda à vista: uma foto cortada deixaria as frações da caixa apontando para o lugar errado.
-      const complete = Math.abs(frozen.screen.width - rect.width) < 2 && Math.abs(frozen.screen.height - rect.height) < 2;
-      return { path: await previewSaveCapture(await canvasToPng(frozen.canvas), "visual"), complete };
+      const shoot = async () => {
+        const frozen = await freezePage(page, frame);
+        const rect = page.getBoundingClientRect();
+        // Só vale se a página está toda à vista: uma foto cortada deixaria as frações da caixa apontando para o lugar errado.
+        return {
+          frozen, rect,
+          complete: Math.abs(frozen.screen.width - rect.width) < 2 && Math.abs(frozen.screen.height - rect.height) < 2,
+        };
+      };
+      let shot = await shoot().catch(() => null);
+      if (!shot || !shot.complete) {
+        // No canvas o nó pode estar cortado pela borda da tela: a vista o mostra inteiro só pelo tempo da foto.
+        window.dispatchEvent(new CustomEvent("ags:canvas-reveal", { detail: { id: view.id } }));
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 450));
+          shot = await shoot();
+        } finally {
+          window.dispatchEvent(new CustomEvent("ags:canvas-reveal", { detail: { id: view.id, restore: true } }));
+        }
+      }
+      // O Jev só aceita fotos de uma faixa de tamanho (ver `visualSize`): a do nó do canvas costuma ser pequena demais.
+      const source = shot.frozen.canvas;
+      const size = visualSize(source.width, source.height);
+      let canvas = source;
+      if (size.width !== source.width || size.height !== source.height) {
+        canvas = document.createElement("canvas");
+        canvas.width = size.width;
+        canvas.height = size.height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.imageSmoothingQuality = "high";
+          ctx.drawImage(source, 0, 0, size.width, size.height);
+        }
+      }
+      // As medidas vão junto: quando a foto é recusada por "cortada", são elas que dizem por quê.
+      const detail = `foto ${Math.round(shot.frozen.screen.width)}×${Math.round(shot.frozen.screen.height)} de uma página de ${Math.round(shot.rect.width)}×${Math.round(shot.rect.height)}`;
+      return { path: await previewSaveCapture(await canvasToPng(canvas), "visual"), complete: shot.complete, detail };
     },
     requestPick: (timeoutMs) => new Promise((resolve) => {
       // Un solo pedido a la vez: el anterior se da por cancelado en vez de quedar colgado.

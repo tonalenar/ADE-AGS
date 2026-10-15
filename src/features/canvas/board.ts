@@ -44,6 +44,8 @@ export interface CanvasPortal {
   serial?: string;
   /** El emulador (AVD) que arranca. */
   avd?: string;
+  /** A resolução com que a página é renderizada (a que ela "vê"), independente do tamanho do nó: o nó só a mostra reduzida. */
+  viewport?: { width: number; height: number };
 }
 
 export const PORTAL_PREFIX = "portal-";
@@ -496,6 +498,11 @@ export function removeNote(board: Board, id: string): Board {
 // ── Portales ────────────────────────────────────────────────────────
 
 export const PORTAL_SIZE = { w: 640, h: 440 };
+
+/** Um navegador aberto por um agente nasce renderizando em 1920×1080 (uma tela de desktop), como um navegador de verdade… */
+export const AGENT_PORTAL_VIEWPORT = { width: 1920, height: 1080 } as const;
+/** …e num nó maior que o padrão, para a página reduzida continuar legível. */
+export const AGENT_PORTAL_SIZE = { w: 1200, h: 840 } as const;
 /** Un teléfono es alto y angosto. */
 export const PHONE_SIZE = { w: 320, h: 640 };
 export const PHONE_MIN = { w: 240, h: 420 };
@@ -528,7 +535,7 @@ export function uniquePortalName(board: Board, wanted: string, except?: string):
 /** Agrega un portal; con `near`, a la derecha de ese nodo y conectado a él. */
 export function addPortal(
   board: Board,
-  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android"; avd?: string; size?: { w: number; h: number } },
+  portal: { id: string; name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android"; avd?: string; size?: { w: number; h: number }; viewport?: { width: number; height: number } },
 ): { board: Board; name: string } {
   const android = portal.kind === "android";
   const size = portal.size ?? (android ? PHONE_SIZE : PORTAL_SIZE);
@@ -546,7 +553,11 @@ export function addPortal(
   } else {
     box = nextFreeBox(others, size);
   }
-  const made: CanvasPortal = { name, url: portal.url ?? "", box, ...(android ? { kind: "android" as const, ...(portal.avd ? { avd: portal.avd } : {}) } : {}) };
+  const made: CanvasPortal = {
+    name, url: portal.url ?? "", box,
+    ...(android ? { kind: "android" as const, ...(portal.avd ? { avd: portal.avd } : {}) } : {}),
+    ...(!android && portal.viewport ? { viewport: portal.viewport } : {}),
+  };
   const next = { ...board, portals: { ...board.portals, [portal.id]: made } };
   return { board: anchor && portal.near ? addEdge(next, portal.near, portal.id) : next, name };
 }
