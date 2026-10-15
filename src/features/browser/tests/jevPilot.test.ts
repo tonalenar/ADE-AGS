@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, isAmbiguous, isSearchField, submitsOnType, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, isAmbiguous, isSearchField, submitsOnType, emptyFieldsNote, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -651,5 +651,18 @@ describe("compra que o objetivo não pediu", () => {
   it("se o objetivo pede a compra, o botão volta", () => {
     const step = buildStep(parseSnapshot(PRODUTO), "comprar o fone agora", [], []);
     expect(step.targets.click.map((o) => o.id)).toEqual(["e1", "e2"]);
+  });
+});
+
+describe("campos vazios sem --fill", () => {
+  it("avisa quando a página termina com campos de texto vazios e nada foi passado para eles", () => {
+    const page = parseSnapshot(LOGIN);
+    expect(emptyFieldsNote(page, 0)).toContain('"E-mail"');
+    expect(emptyFieldsNote(page, 0)).not.toContain("Senha"); // já preenchida
+    expect(emptyFieldsNote(page, 2)).toBe("");
+  });
+  it("não conta a busca como campo esquecido", () => {
+    const page = parseSnapshot(['page: "L" http://localhost/', '- searchbox "Pesquisar" [ref=e1] value=""'].join("\n"));
+    expect(emptyFieldsNote(page, 0)).toBe("");
   });
 });
