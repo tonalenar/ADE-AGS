@@ -73,12 +73,13 @@ export type AppMessage =
  */
 export type PageCommand =
   | { op: "snapshot"; all?: boolean }
-  | { op: "click"; target: string }
+  /** `fast`: o piloto do Jev — sem a viagem animada do cursor e com a espera de "a página assentou" curta (ver `settle`). */
+  | { op: "click"; target: string; fast?: boolean }
   | { op: "hover"; target: string }
-  | { op: "type"; target: string; text: string; clear?: boolean; submit?: boolean }
+  | { op: "type"; target: string; text: string; clear?: boolean; submit?: boolean; fast?: boolean }
   | { op: "press"; key: string; target?: string }
-  | { op: "select"; target: string; value: string }
-  | { op: "scroll"; target?: string; dy?: number; to?: "top" | "bottom" }
+  | { op: "select"; target: string; value: string; fast?: boolean }
+  | { op: "scroll"; target?: string; dy?: number; to?: "top" | "bottom"; fast?: boolean }
   | { op: "wait"; text?: string; selector?: string; gone?: boolean; idle?: boolean; timeoutMs?: number }
   | { op: "drag"; from: string; to: string }
   /** Pone un archivo en un `<input type=file>`. Los bytes van en base64: es lo único que
@@ -100,7 +101,9 @@ export type PageCommand =
   | { op: "performance" }
   /** Todo lo que se sabe de un elemento: rol, nombre, componente que lo dibujó, dónde está
    *  y con qué estilos. Le asigna un ref (`u1`) que sobrevive a los snapshots. */
-  | { op: "describe"; target: string };
+  | { op: "describe"; target: string }
+  /** O que há sob um alvo (nome, texto, id), sem tocar nele: o piloto olha antes de tocar num ponto apontado por uma foto. */
+  | { op: "peek"; target: string };
 
 export type PageOp = PageCommand["op"];
 

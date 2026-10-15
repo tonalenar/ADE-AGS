@@ -11,7 +11,7 @@
  * pasó en la consola y la red durante la acción, que es lo que un agente probando una
  * página necesita ver sin tener que preguntarlo aparte.
  */
-import { neighbors } from "@/features/canvas/board";
+import { AGENT_PORTAL_SIZE, AGENT_PORTAL_VIEWPORT, neighbors } from "@/features/canvas/board";
 import { boardKeyOfTab, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -70,7 +70,7 @@ export interface BrowserHost {
    *  dice de quién es: va en el nombre del archivo. */
   screenshot: (tag?: string) => Promise<string>;
   /** Uma foto da janela da página para a reserva visual do piloto. `complete` = a página inteira estava à vista (senão a foto sai cortada e as frações não valem). */
-  visualShot: () => Promise<{ path: string; complete: boolean }>;
+  visualShot: () => Promise<{ path: string; complete: boolean; detail?: string }>;
   /** El panel de debug está abierto: solo mientras lo esté se anota la red. */
   debugOpen: () => boolean;
   /** Abre el panel de debug en la red, que es lo que prende el registro. A la vista de la
@@ -148,7 +148,7 @@ async function openPortalFor(owner: ViewOwner, url: string): Promise<string | nu
   const key = boardKeyOfTab(tab);
   const board = useCanvasStore.getState().boards[key];
   if (!board || !(owner.id in board.nodes) || useCanvasStore.getState().modes[key] !== "canvas") return null;
-  const created = canvasActions.addPortal(key, { name: undefined, url, near: owner.id });
+  const created = canvasActions.addPortal(key, { name: undefined, url, near: owner.id, viewport: { ...AGENT_PORTAL_VIEWPORT }, size: { ...AGENT_PORTAL_SIZE } });
   await flushSave(key);
   return created.id;
 }
@@ -720,22 +720,40 @@ export const PORTAL_OPS = new Set([
 function pilotDeps(host: BrowserHost): PilotDeps {
   return {
     snapshot: () => inPage(host, { op: "snapshot", all: false }, false),
-    click: (ref) => inPage(host, { op: "click", target: ref }, true),
-    type: (ref, text) => inPage(host, { op: "type", target: ref, text, clear: true, submit: false }, true),
-    select: (ref, value) => inPage(host, { op: "select", target: ref, value }, true),
-    scroll: () => inPage(host, { op: "scroll", dy: 600 }, false),
-    // Uma ação pode navegar ou redesenhar: esperar a rede assentar um instante. Se vencer, segue assim mesmo.
-    settle: async () => { try { await inPage(host, { op: "wait", idle: true, timeoutMs: 2500 }, false); } catch { /* segue */ } },
+    // Tudo `fast` e sem coletar console/rede (`withEffects` falso): o piloto lê a página de novo depois de cada passo, e é isso que importa.
+    click: async (ref, navigates) => {
+      const loads = host.loadCount();
+      const result = await inPage(host, { op: "click", target: ref, fast: true }, false);
+      // Um link carrega outra página, que leva segundos: relê só depois (ou depois de 6 s).
+      if (navigates) await host.waitForLoad(loads, 6_000);
+      return result;
+    },
+    type: (ref, text) => inPage(host, { op: "type", target: ref, text, clear: true, submit: false, fast: true }, false),
+    select: (ref, value) => inPage(host, { op: "select", target: ref, value, fast: true }, false),
+    scroll: () => inPage(host, { op: "scroll", dy: 600, fast: true }, false),
+    // O comando já esperou a página assentar (60 ms quieta, 350 no máximo). Só a operação `wait` do Jev espera de verdade
+    // (a rede ociosa, até 2,5 s): é o que ele pede quando vê que os resultados ainda carregam.
+    settle: async (thorough) => {
+      if (!thorough) return;
+      try { await inPage(host, { op: "wait", idle: true, timeoutMs: 2500 }, false); } catch { /* segue */ }
+    },
     pick: (query) => invoke("decision_pick_step", { query }),
     // A reserva visual: uma foto da página (só se estiver toda à vista) e o toque no ponto que o Jev apontar.
     visual: async (goal, recent) => {
       const shot = await host.visualShot();
       if (!shot.complete) {
-        return { status: "error", found: null, foundProbability: null, center: null, confidence: null, latencyMs: null, reason: "a página não está toda à vista no canvas: a foto sairia cortada" };
+        return { status: "error", found: null, foundProbability: null, center: null, confidence: null, latencyMs: null, reason: `a página não está toda à vista no canvas: a foto sairia cortada (${shot.detail ?? "sem medidas"})` };
       }
       return invoke("decision_pick_visual", { query: { goal, recent, imagePath: shot.path } });
     },
-    clickAt: (x, y) => inPage(host, { op: "click", target: `@${x},${y}` }, true),
+    peekAt: async (x, y) => inPage(host, { op: "peek", target: `@${x},${y}` }, false),
+    clickAt: async (x, y) => {
+      const loads = host.loadCount();
+      const result = await inPage(host, { op: "click", target: `@${x},${y}`, fast: true }, false);
+      // Um toque pela foto não sabe se é um link: espera um pouco por uma página nova (senão o piloto julga a antiga).
+      await host.waitForLoad(loads, 2_500);
+      return result;
+    },
   };
 }
 

@@ -30,6 +30,8 @@ export interface AgentCursor {
   hide: () => void;
   /** Si la tab del navegador está a la vista. */
   setWatched: (watched: boolean) => void;
+  /** No modo rápido (o piloto do Jev) o ponteiro aparece no destino sem esperar a viagem: ~330 ms a menos por ação. */
+  setFast: (fast: boolean) => void;
 }
 
 function el<K extends keyof HTMLElementTagNameMap>(tag: K, style: Partial<CSSStyleDeclaration>): HTMLElementTagNameMap[K] {
@@ -46,6 +48,7 @@ export function createCursor(): AgentCursor {
   let chip: HTMLDivElement | null = null;
   let ripple: HTMLDivElement | null = null;
   let watched = true;
+  let fast = false;
   let idle: ReturnType<typeof setTimeout> | undefined;
   let at = { x: 0, y: 0 };
 
@@ -90,6 +93,7 @@ export function createCursor(): AgentCursor {
 
   return {
     toElement: async (target, label) => {
+      // (o `fast` vem de `setFast`)
       const rect = target.getBoundingClientRect();
       // El centro, salvo que sea enorme: en un contenedor a pantalla completa el puntero
       // quedaría en el medio de la nada en vez de sobre lo que se va a tocar.
@@ -100,7 +104,7 @@ export function createCursor(): AgentCursor {
       // Sin transición la primera vez: aparecer viajando desde la esquina es ruido.
       if (at.x === 0 && at.y === 0) parts.root.style.transition = "opacity 160ms ease-out";
       place(x, y);
-      if (!watched) return;
+      if (!watched || fast) return;
       await new Promise((r) => setTimeout(r, TRAVEL_MS + SETTLE_MS));
       parts.root.style.transition = `transform ${TRAVEL_MS}ms cubic-bezier(.22,.61,.36,1), opacity 160ms ease-out`;
     },
@@ -124,6 +128,9 @@ export function createCursor(): AgentCursor {
     },
     hide: () => {
       if (root) root.style.opacity = "0";
+    },
+    setFast: (next) => {
+      fast = next;
     },
     setWatched: (next) => {
       watched = next;

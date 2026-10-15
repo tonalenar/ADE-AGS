@@ -16,6 +16,7 @@ import { respondToCli } from "./ipc";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 import { requestPtyLaunch } from "@/features/terminal/ptyLaunch";
 import { boardKey, boardKeyOfTab, canvasActions, flushSave, setWorkMode, useCanvasStore } from "@/features/canvas/store";
+import { AGENT_PORTAL_SIZE, AGENT_PORTAL_VIEWPORT } from "@/features/canvas/board";
 
 /**
  * Lado frontend del puente de la CLI (ver `ipc/bridge.rs`).
@@ -310,7 +311,9 @@ async function handlePortal(args: Record<string, unknown>) {
     const key = keyFor(near, cwd);
     const android = str(args, "kind") === "android";
     const created = canvasActions.addPortal(key, {
-      name: str(args, "name"), url: str(args, "url"), near, ...(android ? { kind: "android" as const, avd: str(args, "avd") } : {}),
+      name: str(args, "name"), url: str(args, "url"), near,
+      // Um navegador (não a tela de um Android) que um agente abre: 1920×1080, num nó maior.
+      ...(android ? { kind: "android" as const, avd: str(args, "avd") } : { viewport: { ...AGENT_PORTAL_VIEWPORT }, size: { ...AGENT_PORTAL_SIZE } }),
     });
     // O navegador só existe na tela se o canvas está à vista: quem pediu um navegador quer vê-lo.
     if (useCanvasStore.getState().modes[key] !== "canvas") setWorkMode(key, "canvas");
