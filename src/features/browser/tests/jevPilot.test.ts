@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, isAmbiguous, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, isAmbiguous, isSearchField, submitsOnType, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -579,5 +579,57 @@ describe("a foto não toca duas vezes no mesmo lugar", () => {
     expect(h.clicks).toHaveLength(1);
     expect(result.steps.join("\n")).toContain("mesmo lugar de um toque anterior");
     expect(result.outcome).toBe("unsure");
+  });
+});
+
+describe("buscas que exigem Enter", () => {
+  const SEARCH = [
+    'page: "Loja" http://localhost/',
+    "viewport: 1280×800 · scroll 0/800",
+    '- searchbox "Pesquisar" [ref=e1] value=""',
+    '- button "" [ref=e2]',
+    '- textbox "Nome" [ref=e3] value=""',
+  ].join("\n");
+
+  it("reconhece campos de busca pelo papel ou pelo nome", () => {
+    const [search, , name] = parseSnapshot(SEARCH).elements;
+    expect(isSearchField(search)).toBe(true);
+    expect(isSearchField(name)).toBe(false);
+    expect(isSearchField({ ref: "e9", role: "textbox", name: "Search Amazon", states: [], filled: false })).toBe(true);
+    // o "q" solto é busca; a letra q dentro de outra palavra não é
+    for (const name of ["Quantidade", "Quantity", "Equipe", "Sequência", "Cheque", "Required"]) {
+      expect(isSearchField({ ref: "e9", role: "textbox", name, states: [], filled: false }), name).toBe(false);
+    }
+    expect(isSearchField({ ref: "e9", role: "textbox", name: "q", states: [], filled: false })).toBe(true);
+  });
+
+  it("não aperta Enter com um controle de compra à vista que o objetivo não pediu", () => {
+    const page = parseSnapshot(['page: "Carrinho" http://localhost/cart', '- searchbox "Pesquisar" [ref=e1] value=""', '- button "Proceed to checkout" [ref=e2]'].join("\n"));
+    expect(submitsOnType(page.elements[0], page, "buscar fone")).toBe(false);
+    expect(submitsOnType(page.elements[0], page, "comprar o fone e finalizar")).toBe(true);
+    expect(submitsOnType(page.elements[0], undefined, "buscar fone")).toBe(true);
+  });
+
+  it("digitar numa busca aperta Enter; num campo comum, não", async () => {
+    const submits: Record<string, boolean> = {};
+    const h = harness([ok("done")], [SEARCH]);
+    h.deps.type = async (ref, _text, submit) => { submits[ref] = !!submit; };
+    const result = await runPilot("buscar", ["Pesquisar=fone", "Nome=Ana"], undefined, h.deps);
+    expect(submits).toEqual({ e1: true, e3: false });
+    expect(result.steps.join("\n")).toContain("e apertou Enter");
+  });
+});
+
+describe("tempo por fase", () => {
+  it("o resultado soma o tempo de cada fase e o relatório traz a linha TEMPOS legível por máquina", async () => {
+    const h = harness([ok("click", "e4"), ok("done")]);
+    const slow = (fn: () => Promise<unknown>) => async () => { await new Promise((r) => setTimeout(r, 5)); return fn(); };
+    h.deps.snapshot = slow(h.deps.snapshot) as PilotDeps["snapshot"];
+    const result = await runPilot("entrar", [], undefined, h.deps);
+    expect(result.timings?.consultas).toBe(2);
+    expect(result.timings?.snapshot).toBeGreaterThan(0);
+    expect(result.timings?.total).toBeGreaterThanOrEqual(result.timings!.snapshot);
+    const line = formatResult("entrar", result).split("\n").find((l) => l.startsWith("TEMPOS: "));
+    expect(JSON.parse(line!.slice("TEMPOS: ".length))).toMatchObject({ consultas: 2, fotos: 0 });
   });
 });

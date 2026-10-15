@@ -372,7 +372,8 @@ export interface PilotDeps {
   peekAt?: (x: number, y: number) => Promise<string>;
   /** `navigates`: o toque vai levar a outra página (um link com destino): espera ela carregar antes de reler. */
   click: (ref: string, navigates?: boolean) => Promise<unknown>;
-  type: (ref: string, text: string) => Promise<unknown>;
+  /** `submit`: aperta Enter depois de digitar (uma busca só roda assim quando a página não tem botão visível). */
+  type: (ref: string, text: string, submit?: boolean) => Promise<unknown>;
   select: (ref: string, value: string) => Promise<unknown>;
   scroll: () => Promise<unknown>;
   /** Espera a página assentar depois de uma ação (nunca lança). `thorough`: a operação `wait` do Jev, que espera a rede ficar ociosa. */
@@ -424,20 +425,57 @@ export function sensitiveFilled(page: ParsedPage): boolean {
   return page.elements.some((el) => el.filled === true && /passw|senha|contrase|cvv|cvc|card|cart[aã]o|tarjeta|token|secret|\bpin\b|\bssn\b|\bcpf\b/i.test(el.name));
 }
 
+/** Onde foi o tempo do piloto, em ms (somas por fase): o Jev (consulta), o snapshot, a ação, a espera, a foto. */
+export interface Timings {
+  jev: number;
+  snapshot: number;
+  acao: number;
+  espera: number;
+  foto: number;
+  consultas: number;
+  fotos: number;
+  total: number;
+}
+
 export interface PilotResult {
   /** `done`, `stuck`, `unsure`, `off`, `limit`, `error`. */
   outcome: "done" | "stuck" | "unsure" | "off" | "limit" | "error";
   steps: string[];
   note: string;
   finalSnapshot: string;
+  timings?: Timings;
+}
+
+/** As mesmas ações, medindo quanto cada fase leva (soma em `t`). Só embrulha: não decide nada. */
+export function timed(deps: PilotDeps, t: Timings): PilotDeps {
+  const wrap = <A extends unknown[], R>(phase: "snapshot" | "acao" | "espera" | "foto" | "jev", fn: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      const started = Date.now();
+      try { return await fn(...args); } finally { t[phase] += Date.now() - started; }
+    };
+  return {
+    snapshot: wrap("snapshot", deps.snapshot),
+    visual: deps.visual && (async (goal, recent) => { t.fotos += 1; return wrap("foto", deps.visual!)(goal, recent); }),
+    clickAt: deps.clickAt && wrap("acao", deps.clickAt),
+    peekAt: deps.peekAt && wrap("acao", deps.peekAt),
+    click: wrap("acao", deps.click),
+    type: wrap("acao", deps.type),
+    select: wrap("acao", deps.select),
+    scroll: wrap("acao", deps.scroll),
+    settle: wrap("espera", deps.settle),
+    pick: async (query) => { t.consultas += 1; return wrap("jev", deps.pick)(query); },
+  };
 }
 
 export async function runPilot(
   goal: string,
   rawFills: string[],
   maxSteps: number | undefined,
-  deps: PilotDeps,
+  rawDeps: PilotDeps,
 ): Promise<PilotResult> {
+  const startedAt = Date.now();
+  const timings: Timings = { jev: 0, snapshot: 0, acao: 0, espera: 0, foto: 0, consultas: 0, fotos: 0, total: 0 };
+  const deps = timed(rawDeps, timings);
   const fills = parseFills(rawFills);
   const limit = Math.min(MAX_STEPS, Math.max(1, Math.round(maxSteps ?? DEFAULT_STEPS)));
   const history: Done[] = [];
@@ -449,7 +487,7 @@ export async function runPilot(
   let staleRetries = 0;
 
   const finish = (outcome: PilotResult["outcome"], note: string): PilotResult =>
-    ({ outcome, steps: log, note, finalSnapshot: snapshot });
+    ({ outcome, steps: log, note, finalSnapshot: snapshot, timings: { ...timings, total: Date.now() - startedAt } });
 
   // A reserva visual: quando o texto não basta, uma foto da página e o Jev aponta onde tocar.
   const triedPhotos = new Set<string>();
@@ -510,7 +548,7 @@ export async function runPilot(
     const stepStarted = Date.now();
     let page = parseSnapshot(snapshot);
     // O que não é escolha não vai ao Jev: um campo cujo nome casa com um `--fill` recebe o valor direto.
-    const filled = await autoFill(page, fills, taken, deps);
+    const filled = await autoFill(page, fills, taken, deps, goal);
     if (filled.length > 0) {
       for (const what of filled) {
         history.push({ what, changed: true, auto: true });
@@ -588,7 +626,7 @@ export async function runPilot(
           log.push(`${step}. recusou ${plain(el)}: parece uma compra ou um pagamento, e o objetivo não pediu`);
           return finish("stuck", "O Jev escolheu um controle de compra ou pagamento que o objetivo não pediu: não cliquei. Se é isso mesmo que você quer, diga no objetivo.");
         }
-        what = await act(el, operation, fills, taken, deps, option);
+        what = await act(el, operation, fills, taken, deps, option, { page, goal });
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -623,6 +661,7 @@ export async function autoFill(
   fills: [string, string][],
   taken: Set<string>,
   deps: PilotDeps,
+  goal = "",
 ): Promise<string[]> {
   const out: string[] = [];
   const touched = new Set<string>();
@@ -638,13 +677,27 @@ export async function autoFill(
     }
     if (!best) continue;
     touched.add(best.ref);
-    out.push(await act(best, operationOf(best), fills, taken, deps));
+    out.push(await act(best, operationOf(best), fills, taken, deps, undefined, { page, goal }));
   }
   return out;
 }
 
+/** Um campo de busca? Digitar nele e apertar Enter é o gesto de pesquisar; a lupa ao lado costuma não ter nome. Pura. */
+export function isSearchField(el: PageElement): boolean {
+  return el.role === "searchbox" || /busca|pesquis|procur|search|\b(q|query)\b/i.test(el.name);
+}
+
+/**
+ * Digitar neste campo aperta Enter? Só numa busca, e nunca com um controle de compra ou pagamento à vista que o objetivo
+ * não pediu: ali o Enter poderia enviar o formulário de fechamento sem passar pela trava dos cliques. Pura.
+ */
+export function submitsOnType(el: PageElement, page: ParsedPage | undefined, goal: string): boolean {
+  if (!isSearchField(el)) return false;
+  return !page?.elements.some((other) => blockedPurchase(`${other.name} ${other.href ?? ""}`, goal));
+}
+
 /** Faz o que a operação pede no elemento e conta o que fez, sem o valor digitado. */
-async function act(el: PageElement, operation: string, fills: [string, string][], taken: Set<string>, deps: PilotDeps, option?: string): Promise<string> {
+async function act(el: PageElement, operation: string, fills: [string, string][], taken: Set<string>, deps: PilotDeps, option?: string, where?: { page: ParsedPage; goal: string }): Promise<string> {
   if (operation === "select" && option !== undefined) {
     await deps.select(el.ref, option);
     return `escolheu "${option}" em ${plain(el)}`;
@@ -653,9 +706,10 @@ async function act(el: PageElement, operation: string, fills: [string, string][]
     const entry = valueFor(el.name, fills, taken);
     if (!entry) throw new Error(`não há valor para ${plain(el)}: passe --fill "<campo>=<valor>"`);
     taken.add(entry[0]);
+    const submit = operation === "type" && submitsOnType(el, where?.page, where?.goal ?? "");
     if (operation === "select") await deps.select(el.ref, entry[1]);
-    else await deps.type(el.ref, entry[1]);
-    return `${operation === "select" ? "escolheu em" : "digitou em"} ${plain(el)} (valor de ${entry[0]})`;
+    else await deps.type(el.ref, entry[1], submit);
+    return `${operation === "select" ? "escolheu em" : "digitou em"} ${plain(el)} (valor de ${entry[0]})${submit ? " e apertou Enter" : ""}`;
   }
   // Um link com destino leva a outra página: o piloto espera ela carregar antes de reler (senão "conclui" olhando a antiga).
   const navigates = el.role === "link" && !!el.href && !/^(javascript:|#)/i.test(el.href);
@@ -672,6 +726,7 @@ export function formatResult(goal: string, result: PilotResult): string {
     `act "${goal}": ${head[result.outcome]}`,
     result.note,
     result.steps.length > 0 ? `\nPassos:\n${result.steps.join("\n")}` : "",
+    result.timings ? `\nTEMPOS: ${JSON.stringify(result.timings)}` : "",
     "\nA página agora (o Jev só escolhe onde tocar: confira o resultado):",
     result.finalSnapshot.length > 6000 ? `${result.finalSnapshot.slice(0, 6000)}\n…` : result.finalSnapshot,
   ].filter(Boolean).join("\n");

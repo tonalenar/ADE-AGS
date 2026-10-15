@@ -724,11 +724,17 @@ function pilotDeps(host: BrowserHost): PilotDeps {
     click: async (ref, navigates) => {
       const loads = host.loadCount();
       const result = await inPage(host, { op: "click", target: ref, fast: true }, false);
-      // Um link carrega outra página, que leva segundos: relê só depois (ou depois de 6 s).
+      // Um link carrega outra página, que leva segundos: relê só depois (ou depois de 2,5 s, numa busca que não recarrega).
       if (navigates) await host.waitForLoad(loads, 6_000);
       return result;
     },
-    type: (ref, text) => inPage(host, { op: "type", target: ref, text, clear: true, submit: false, fast: true }, false),
+    type: async (ref, text, submit) => {
+      const loads = host.loadCount();
+      const result = await inPage(host, { op: "type", target: ref, text, clear: true, submit: !!submit, fast: true }, false);
+      // A busca enviada carrega a página de resultados: relê só depois (ou depois de 2,5 s, numa busca que não recarrega).
+      if (submit) await host.waitForLoad(loads, 2_500);
+      return result;
+    },
     select: (ref, value) => inPage(host, { op: "select", target: ref, value, fast: true }, false),
     scroll: () => inPage(host, { op: "scroll", dy: 600, fast: true }, false),
     // O comando já esperou a página assentar (60 ms quieta, 350 no máximo). Só a operação `wait` do Jev espera de verdade
