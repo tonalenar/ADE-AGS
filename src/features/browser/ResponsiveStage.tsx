@@ -45,6 +45,8 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
 
   const shown = drag?.draft ?? viewport;
   const z = clampZoom(zoom);
+  // `overflow: clip` (não `hidden`): `hidden` ainda é um contêiner de rolagem, e o navegador o rola sozinho (foco ou scrollIntoView
+  // dentro do iframe), deslocando a página para fora da coluna; `clip` não rola.
   // 1920×1080 preenche a janela inteira, sem margem (ver `FILL_VIEWPORT`); arrastar o quadro sai desse modo.
   const fill = !drag && isFillViewport(viewport);
   const filled = fill && viewport ? fillLayout(viewport, box, z) : null;
@@ -86,17 +88,17 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
     <div
       ref={stage}
       className={fill
-        ? "relative flex-1 min-h-0 overflow-hidden bg-white"
+        ? "relative flex-1 min-h-0 overflow-clip bg-white"
         : shown
           ? "relative flex-1 min-h-0 overflow-auto px-7 pt-5 pb-11 bg-gray-100 dark:bg-surface-deep bg-[radial-gradient(circle,rgba(120,130,150,0.22)_1px,transparent_1px)] [background-size:16px_16px]"
           : "relative flex-1 min-h-0 bg-white"}
     >
       <div
         style={fill
-          ? { position: "absolute", inset: 0, overflow: "hidden" }
+          ? { position: "absolute", inset: 0, overflow: "clip" }
           : shown
             ? { position: "relative", width: shown.width * scale, height: shown.height * scale, margin: "0 auto", flexShrink: 0 }
-            : { position: "absolute", inset: 0, overflow: "hidden" }}
+            : { position: "absolute", inset: 0, overflow: "clip" }}
       >
         <div
           style={filled

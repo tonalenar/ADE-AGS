@@ -31,6 +31,14 @@ estão em `src/features/browser/tests/jevBench.test.ts`.
 pior caso: a soma dos limites de passos); o plano para antes de estourar. Sem `--yes`, pede para digitar `CONFIRMO`;
 sem terminal interativo, recusa. As tarefas públicas só entram com `--public`; o SauceDemo, só com `--demo-login`.
 
+## Como rodar ao vivo
+
+- **Qual instância o `ags` fala.** Cada instância do app grava o próprio handshake em `~/.ags/ipc/<pid>.json`; `~/.ags/ipc.json` é só o da ÚLTIMA instância aberta. O CLI lê `AGS_HANDSHAKE` e, sem ela, o global. Os terminais do app instalado já herdam a variável apontando para o handshake DELE.
+- **Apontar para a de debug** (sem tocar no instalado): `$env:AGS_HANDSHAKE = "$HOME\.ags\ipc\$((Get-Process ade-ags | ? Path -like '*cargo-target-agents*').Id).json"` e, de preferência, o CLI da mesma build (`$env:CARGO_TARGET_DIR\debug\ags.exe`) em vez do `ags` do PATH. O `jev-bench.ts --real` chama `ags` e herda o ambiente.
+- **Abrir a de debug com CDP:** `$env:WEBVIEW2_USER_DATA_FOLDER = "$env:LOCALAPPDATA\ade-ags-dev-localwebview"; $env:WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS = "--remote-debugging-port=9223"; Start-Process "$env:CARGO_TARGET_DIR\debug\ade-ags.exe"` (o `dev-local.ps1 -Run` olha `src-tauri\target`, não o alvo compartilhado dos agentes).
+- **Ajustes e chave são COMPARTILHADOS** com o instalado (banco `~/.ags/data.db`; a chave, no Gerenciador de Credenciais do Windows): Jev, piloto e visão já vêm ligados, sem nada a fazer. O mesmo vale para abas e canvas: a de debug restaura as do usuário.
+- **Pré-condições do `portal create`:** a aba do agente (`ADE_TAB_ID`) existe na de debug (vem do banco) e o nó do portal só monta se o canvas da missão estiver à vista: clique na missão na barra lateral e em «Ver todos»; senão o `act` responde «The browser tab did not finish mounting».
+
 ## O que se mede
 
 | medida | como se calcula |
