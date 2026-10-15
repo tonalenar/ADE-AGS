@@ -425,20 +425,57 @@ export function sensitiveFilled(page: ParsedPage): boolean {
   return page.elements.some((el) => el.filled === true && /passw|senha|contrase|cvv|cvc|card|cart[aã]o|tarjeta|token|secret|\bpin\b|\bssn\b|\bcpf\b/i.test(el.name));
 }
 
+/** Onde foi o tempo do piloto, em ms (somas por fase): o Jev (consulta), o snapshot, a ação, a espera, a foto. */
+export interface Timings {
+  jev: number;
+  snapshot: number;
+  acao: number;
+  espera: number;
+  foto: number;
+  consultas: number;
+  fotos: number;
+  total: number;
+}
+
 export interface PilotResult {
   /** `done`, `stuck`, `unsure`, `off`, `limit`, `error`. */
   outcome: "done" | "stuck" | "unsure" | "off" | "limit" | "error";
   steps: string[];
   note: string;
   finalSnapshot: string;
+  timings?: Timings;
+}
+
+/** As mesmas ações, medindo quanto cada fase leva (soma em `t`). Só embrulha: não decide nada. */
+export function timed(deps: PilotDeps, t: Timings): PilotDeps {
+  const wrap = <A extends unknown[], R>(phase: "snapshot" | "acao" | "espera" | "foto" | "jev", fn: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      const started = Date.now();
+      try { return await fn(...args); } finally { t[phase] += Date.now() - started; }
+    };
+  return {
+    snapshot: wrap("snapshot", deps.snapshot),
+    visual: deps.visual && (async (goal, recent) => { t.fotos += 1; return wrap("foto", deps.visual!)(goal, recent); }),
+    clickAt: deps.clickAt && wrap("acao", deps.clickAt),
+    peekAt: deps.peekAt && wrap("acao", deps.peekAt),
+    click: wrap("acao", deps.click),
+    type: wrap("acao", deps.type),
+    select: wrap("acao", deps.select),
+    scroll: wrap("acao", deps.scroll),
+    settle: wrap("espera", deps.settle),
+    pick: async (query) => { t.consultas += 1; return wrap("jev", deps.pick)(query); },
+  };
 }
 
 export async function runPilot(
   goal: string,
   rawFills: string[],
   maxSteps: number | undefined,
-  deps: PilotDeps,
+  rawDeps: PilotDeps,
 ): Promise<PilotResult> {
+  const startedAt = Date.now();
+  const timings: Timings = { jev: 0, snapshot: 0, acao: 0, espera: 0, foto: 0, consultas: 0, fotos: 0, total: 0 };
+  const deps = timed(rawDeps, timings);
   const fills = parseFills(rawFills);
   const limit = Math.min(MAX_STEPS, Math.max(1, Math.round(maxSteps ?? DEFAULT_STEPS)));
   const history: Done[] = [];
@@ -450,7 +487,7 @@ export async function runPilot(
   let staleRetries = 0;
 
   const finish = (outcome: PilotResult["outcome"], note: string): PilotResult =>
-    ({ outcome, steps: log, note, finalSnapshot: snapshot });
+    ({ outcome, steps: log, note, finalSnapshot: snapshot, timings: { ...timings, total: Date.now() - startedAt } });
 
   // A reserva visual: quando o texto não basta, uma foto da página e o Jev aponta onde tocar.
   const triedPhotos = new Set<string>();
@@ -689,6 +726,7 @@ export function formatResult(goal: string, result: PilotResult): string {
     `act "${goal}": ${head[result.outcome]}`,
     result.note,
     result.steps.length > 0 ? `\nPassos:\n${result.steps.join("\n")}` : "",
+    result.timings ? `\nTEMPOS: ${JSON.stringify(result.timings)}` : "",
     "\nA página agora (o Jev só escolhe onde tocar: confira o resultado):",
     result.finalSnapshot.length > 6000 ? `${result.finalSnapshot.slice(0, 6000)}\n…` : result.finalSnapshot,
   ].filter(Boolean).join("\n");

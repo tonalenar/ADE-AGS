@@ -619,3 +619,17 @@ describe("buscas que exigem Enter", () => {
     expect(result.steps.join("\n")).toContain("e apertou Enter");
   });
 });
+
+describe("tempo por fase", () => {
+  it("o resultado soma o tempo de cada fase e o relatório traz a linha TEMPOS legível por máquina", async () => {
+    const h = harness([ok("click", "e4"), ok("done")]);
+    const slow = (fn: () => Promise<unknown>) => async () => { await new Promise((r) => setTimeout(r, 5)); return fn(); };
+    h.deps.snapshot = slow(h.deps.snapshot) as PilotDeps["snapshot"];
+    const result = await runPilot("entrar", [], undefined, h.deps);
+    expect(result.timings?.consultas).toBe(2);
+    expect(result.timings?.snapshot).toBeGreaterThan(0);
+    expect(result.timings?.total).toBeGreaterThanOrEqual(result.timings!.snapshot);
+    const line = formatResult("entrar", result).split("\n").find((l) => l.startsWith("TEMPOS: "));
+    expect(JSON.parse(line!.slice("TEMPOS: ".length))).toMatchObject({ consultas: 2, fotos: 0 });
+  });
+});
