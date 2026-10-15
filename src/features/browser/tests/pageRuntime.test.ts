@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   callerOf, displayPath, formatConsoleArgs, formatValue, MAX_TEXT, toTransferable,
 } from "../page/serialize";
-import { distanceToBox, formatNode, formatSnapshot, parseKeyCombo, parseTarget, snapToNearest } from "../page/snapshotFormat";
+import { distanceToBox, formatNode, formatSnapshot, humanizeId, parseKeyCombo, parseTarget, probePoints, snapToNearest } from "../page/snapshotFormat";
 
 describe("formatValue", () => {
   it("muestra los primitivos como una consola", () => {
@@ -177,6 +177,42 @@ describe("toque por foto: o controle mais perto do ponto", () => {
   it("longe de tudo não toca; entre dois à mesma distância não adivinha", () => {
     expect(snapToNearest([profile, cart], 600, 300)).toBeNull();
     expect(snapToNearest([profile, cart], 1222, 54)).toEqual({ ambiguous: true });
+  });
+});
+
+describe("nome de um elemento sem nome, pelo id", () => {
+  it("ids com palavras viram uma pista legível", () => {
+    expect(humanizeId("nav-search-submit-button")).toBe("nav search submit button");
+    expect(humanizeId("shoppingCartLink")).toBe("shopping cart link");
+    expect(humanizeId("add_to_cart")).toBe("add to cart");
+  });
+
+  it("uma palavra só, lixo gerado ou números não são pista", () => {
+    for (const raw of ["button", "a-autoid-3-announce", "x9f2kq7", "12345", "", null, undefined, "css-1x2y3z-btn-aqwrtkd"]) {
+      expect(humanizeId(raw as string | null | undefined), String(raw)).toBe("");
+    }
+  });
+});
+
+describe("pontos para clicar num elemento", () => {
+  it("o centro vem primeiro, e os outros ficam dentro do elemento", () => {
+    const rect = { left: 100, top: 50, width: 200, height: 40 };
+    const points = probePoints(rect);
+    expect(points[0]).toEqual({ x: 200, y: 70 });
+    for (const p of points) {
+      expect(p.x).toBeGreaterThanOrEqual(100);
+      expect(p.x).toBeLessThanOrEqual(300);
+      expect(p.y).toBeGreaterThanOrEqual(50);
+      expect(p.y).toBeLessThanOrEqual(90);
+    }
+    expect(new Set(points.map((p) => `${p.x},${p.y}`)).size).toBe(points.length);
+  });
+
+  it("um elemento minúsculo não gera pontos fora dele", () => {
+    for (const p of probePoints({ left: 10, top: 10, width: 3, height: 3 })) {
+      expect(p.x).toBeGreaterThanOrEqual(10);
+      expect(p.x).toBeLessThanOrEqual(13);
+    }
   });
 });
 

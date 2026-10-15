@@ -121,7 +121,7 @@ function operationOf(el: PageElement): Operation {
 }
 
 /** Quantos elementos entram em cada pergunta de alvo. O Jev acertou 15 de 15 até 80 opções; fica folga. */
-export const MAX_PER_HEAD = 60;
+export const MAX_PER_HEAD = 100;
 
 const OPERATION_LABEL: Record<string, string> = {
   click: "Click an element, button, menu option, autocomplete suggestion, radio or calendar day.",
@@ -382,6 +382,7 @@ export async function runPilot(
   let snapshot = await deps.snapshot();
   let lastSignature = "";
   let waits = 0;
+  let staleRetries = 0;
 
   const finish = (outcome: PilotResult["outcome"], note: string): PilotResult =>
     ({ outcome, steps: log, note, finalSnapshot: snapshot });
@@ -489,7 +490,17 @@ export async function runPilot(
         what = await act(el, operation, fills, taken, deps);
       }
     } catch (e) {
-      log.push(`${step}. falhou: ${e instanceof Error ? e.message : String(e)}`);
+      const message = e instanceof Error ? e.message : String(e);
+      // Uma referência que a página já não tem (ela recarregou entre a leitura e o toque): relê e decide de novo.
+      if (/tire um novo snapshot|n[ãa]o est[áa] mais na p[áa]gina/i.test(message) && staleRetries < 2) {
+        staleRetries += 1;
+        lastSignature = "";
+        log.push(`${step}. a página mudou antes do toque; li de novo`);
+        await deps.settle();
+        snapshot = await deps.snapshot();
+        continue;
+      }
+      log.push(`${step}. falhou: ${message}`);
       return finish("error", "A ação falhou; veja o motivo acima e continue você.");
     }
     if (operation !== "wait") waits = 0;

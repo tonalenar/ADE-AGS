@@ -330,6 +330,29 @@ describe("a reserva visual do piloto", () => {
   });
 });
 
+describe("referência velha", () => {
+  it("se a página recarregou entre a leitura e o toque, relê e tenta de novo, sem desistir", async () => {
+    const h = harness([ok("click", "e4"), ok("click", "e4"), ok("done")], pagesOf(10).map((p) => p.replace('value="[x]"', 'value=""')));
+    let first = true;
+    const realClick = h.deps.click;
+    h.deps.click = async (ref) => {
+      if (first) { first = false; throw new Error("Não há nenhum elemento e4: tire um novo snapshot (os refs mudam a cada um)."); }
+      return realClick(ref);
+    };
+    const result = await runPilot("entrar", [], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(result.steps.join("\n")).toContain("li de novo");
+    expect(h.calls).toEqual(["click e4"]);
+  });
+
+  it("não fica tentando para sempre: depois de duas, devolve o erro", async () => {
+    const h = harness([ok("click", "e4")], pagesOf(10).map((p) => p.replace('value="[x]"', 'value=""')));
+    h.deps.click = async () => { throw new Error("Não há nenhum elemento e4: tire um novo snapshot."); };
+    const result = await runPilot("entrar", [], undefined, h.deps);
+    expect(result.outcome).toBe("error");
+  });
+});
+
 describe("autoFill: campo de texto antes da lista", () => {
   it("a barra de busca recebe o termo, não o seletor de departamento que tem quase o mesmo nome", async () => {
     const shop = ['page: "Amazon" https://shop.test/', "viewport: 1000×600 · scroll 0/600", "",

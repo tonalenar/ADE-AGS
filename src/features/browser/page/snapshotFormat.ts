@@ -84,6 +84,48 @@ export function parseKeyCombo(combo: string): {
   };
 }
 
+/**
+ * Um nome para um elemento que não tem nenhum, tirado do `id` ou do `data-testid`: `nav-search-submit-button` →
+ * "nav search submit button". Só serve de pista (o piloto distingue o ícone da lupa do ícone do carrinho): vale se tem
+ * pelo menos duas palavras de letras, é curto e não parece um hash. `""` = sem pista. Pura.
+ */
+export function humanizeId(raw: string | null | undefined): string {
+  if (!raw) return "";
+  // Um pedaço só de números ("a-autoid-3-announce", "item-42-title") é id gerado, não um nome.
+  if (raw.split(/[\s_.:\-/]+/).some((part) => /^\d+$/.test(part))) return "";
+  const words = raw
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .split(/[\s_.:\-/]+/)
+    .filter((w) => /^[A-Za-z]{2,}$/.test(w));
+  const text = words.join(" ").toLowerCase();
+  if (words.length < 2 || text.length > 40) return "";
+  // "a autoid 3 announce", "x9f2k...": uma palavra sem vogal é lixo gerado, não um nome.
+  if (words.some((w) => !/[aeiouy]/i.test(w))) return "";
+  return text;
+}
+
+/**
+ * Os pontos onde tentar um clique num elemento: o centro primeiro; se algo decorativo o cobre (a Amazon põe uma
+ * camada sobre o título de um produto), os pontos perto das bordas. Pura.
+ */
+export function probePoints(rect: { left: number; top: number; width: number; height: number }): { x: number; y: number }[] {
+  const { left, top, width, height } = rect;
+  const cx = left + width / 2;
+  const cy = top + height / 2;
+  const inset = (size: number) => Math.min(6, Math.max(1, size / 4));
+  const ix = inset(width);
+  const iy = inset(height);
+  return [
+    { x: cx, y: cy },
+    { x: left + ix, y: cy },
+    { x: left + width - ix, y: cy },
+    { x: cx, y: top + iy },
+    { x: cx, y: top + height - iy },
+    { x: left + ix, y: top + iy },
+    { x: left + width - ix, y: top + height - iy },
+  ];
+}
+
 /** Uma caixa na janela da página, em px CSS. */
 export interface Box4 { left: number; top: number; right: number; bottom: number }
 

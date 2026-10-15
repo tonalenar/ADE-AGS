@@ -33,7 +33,7 @@ import {
 import { isTouch, sendTouch, setTouch } from "./touch";
 import { CORS_HEADER, CRED_HEADER, HEADERS_HEADER, corsMessage, routeRequest, type Routed } from "./route";
 import {
-  displayHref, formatSnapshot, normalizeName, parseKeyCombo, parseTarget, snapToNearest, type Box4, type SnapshotNode,
+  displayHref, formatSnapshot, normalizeName, humanizeId, parseKeyCombo, parseTarget, probePoints, snapToNearest, type Box4, type SnapshotNode,
 } from "./snapshotFormat";
 
 declare global {
@@ -640,9 +640,18 @@ declare global {
       // Un botón que es solo un icono: el nombre está en el `alt` o en el `<title>` del SVG.
       const img = el.querySelector("img[alt], svg title");
       const inner = img?.getAttribute("alt") || img?.textContent || "";
-      return normalizeName(inner || el.getAttribute("title") || "");
+      return normalizeName(inner || el.getAttribute("title") || idHint(el));
     }
-    return normalizeName(el.getAttribute("title") || "");
+    return normalizeName(el.getAttribute("title") || idHint(el));
+  }
+
+  /** Sem nome nenhum, o `id` ou o `data-testid` costuma dizer o que é ("nav-search-submit-button"). */
+  function idHint(el: Element): string {
+    for (const attribute of ["data-testid", "data-test", "data-qa", "data-cy", "id", "name"]) {
+      const hint = humanizeId(el.getAttribute(attribute));
+      if (hint) return hint;
+    }
+    return "";
   }
 
   function statesOf(el: Element, role: string): string[] {
@@ -906,16 +915,17 @@ declare global {
       rect = target.getBoundingClientRect();
     }
     if (rect.width === 0 || rect.height === 0) throw new Error(`${describeElement(el)} não está visível (mede 0×0).`);
-    const x = rect.left + rect.width / 2;
-    const y = rect.top + rect.height / 2;
-    const hit = document.elementFromPoint(x, y);
-    const ok = !hit || hit === target || target.contains(hit) || hit.contains(target)
+    const reaches = (hit: Element | null) => !hit || hit === target || target.contains(hit) || hit.contains(target)
       || (labels !== null && Array.from(labels).some((l) => l === hit || l.contains(hit)));
-    if (!ok && hit) {
-      throw new Error(`${describeElement(el)} está coberto por ${describeElement(hit)} (${selectorOf(hit)}). `
+    // Uma camada decorativa sobre o centro (o corte de um título numa loja) não impede um clique de verdade em outro ponto
+    // do elemento: tenta o centro e, se está coberto, as bordas. Só falha se NENHUM ponto chega ao elemento.
+    const clear = probePoints(rect).find((point) => reaches(document.elementFromPoint(point.x, point.y)));
+    if (!clear) {
+      const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+      throw new Error(`${describeElement(el)} está coberto por ${hit ? describeElement(hit) : "outro elemento"} (${hit ? selectorOf(hit) : "?"}). `
         + "Se for um modal ou overlay, feche-o primeiro; se for preciso forçar, use eval.");
     }
-    return { x, y, target };
+    return { x: clear.x, y: clear.y, target };
   }
 
   async function click(el: Element): Promise<unknown> {
