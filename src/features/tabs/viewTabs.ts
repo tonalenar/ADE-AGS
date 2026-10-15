@@ -185,14 +185,17 @@ export function viewLabels(views: ViewTab[]): Map<string, { title: string; hint:
   // distinguen por el ícono, y agregarles la carpeta a los dos no separa nada.
   const clashKey = (v: ViewTab) => `${v.kind}:${v.title}`;
   const byTitle = new Map<string, ViewTab[]>();
+  // Uma aba sem `path` (de um tipo que esta versão não conhece, salva por outra) não tem pasta para
+  // diferenciar: fica só com o título, em vez de derrubar a tela.
+  const hasPath = (v: ViewTab): v is Exclude<ViewTab, BrowserView> => v.kind !== "browser" && typeof (v as { path?: unknown }).path === "string";
   for (const v of views) {
-    if (v.kind === "browser") continue;
+    if (!hasPath(v)) continue;
     const list = byTitle.get(clashKey(v)) ?? [];
     list.push(v);
     byTitle.set(clashKey(v), list);
   }
   for (const v of views) {
-    if (v.kind === "browser") {
+    if (!hasPath(v)) {
       out.set(v.id, { title: v.title, hint: null });
       continue;
     }

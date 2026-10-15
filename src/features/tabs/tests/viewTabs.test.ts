@@ -79,6 +79,13 @@ describe("títulos repetidos", () => {
     expect(labels.get("a")?.hint).toBeNull();
     expect(labels.get("d")?.hint).toBeNull();
   });
+
+  it("uma aba de tipo desconhecido, sem path (salva por outra versão), fica só com o título", () => {
+    const foreign = { kind: "desktop", id: "g", cwd: "/p", title: "Gemini" } as unknown as Parameters<typeof viewLabels>[0][number];
+    const labels = viewLabels([file("a", "/p", "/p/src/app.ts"), foreign]);
+    expect(labels.get("g")).toEqual({ title: "Gemini", hint: null });
+    expect(labels.get("a")?.hint).toBeNull();
+  });
 });
 
 describe("barra de direcciones", () => {
