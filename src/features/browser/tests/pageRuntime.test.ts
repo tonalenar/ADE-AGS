@@ -246,6 +246,8 @@ describe("parseTarget", () => {
   it("solo e + número es un ref", () => {
     expect(parseTarget("e12x").kind).toBe("css");
     expect(parseTarget("@120.5,40")).toEqual({ kind: "point", x: 120.5, y: 40 });
+    expect(parseTarget("@e63")).toEqual({ kind: "ref", ref: "e63" });
+    expect(parseTarget("@u3")).toEqual({ kind: "ref", ref: "u3" });
     expect(parseTarget("@x,y").kind).toBe("css");
     expect(parseTarget(".e12").kind).toBe("css");
   });

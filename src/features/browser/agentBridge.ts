@@ -741,7 +741,13 @@ function pilotDeps(host: BrowserHost): PilotDeps {
       }
       return invoke("decision_pick_visual", { query: { goal, recent, imagePath: shot.path } });
     },
-    clickAt: (x, y) => inPage(host, { op: "click", target: `@${x},${y}` }, true),
+    clickAt: async (x, y) => {
+      const loads = host.loadCount();
+      const result = await inPage(host, { op: "click", target: `@${x},${y}` }, true);
+      // Um toque pela foto não sabe se é um link: espera um pouco por uma página nova (senão o piloto julga a antiga).
+      await host.waitForLoad(loads, 2_500);
+      return result;
+    },
   };
 }
 

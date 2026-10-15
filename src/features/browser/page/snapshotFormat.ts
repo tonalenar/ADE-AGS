@@ -166,7 +166,9 @@ export type TargetSpec =
 export function parseTarget(target: string): TargetSpec {
   const t = target.trim();
   // `e12` sale de un snapshot; `u3`, de algo que el usuario marcó en el navegador.
-  if (/^[eu]\d+$/.test(t)) return { kind: "ref", ref: t };
+  // `@e63` também: é como a ajuda de `ags portal click` escreve um ref.
+  const asRef = /^@?([eu]\d+)$/.exec(t);
+  if (asRef) return { kind: "ref", ref: asRef[1] };
   const point = /^@(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)$/.exec(t);
   if (point) return { kind: "point", x: Number(point[1]), y: Number(point[2]) };
   const text = /^text[=:](.+)$/s.exec(t);
