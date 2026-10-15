@@ -201,12 +201,28 @@ if (mode === "sim") {
   if (planned.length === 0) fail("O teto não deixa rodar nenhuma tarefa: aumente --max-probes.");
   await confirmReal(planned, budget.maxProbes);
   server = await serveFixtures();
-  const portal = value("portal") ?? "bench-jev";
+  let portal = value("portal") ?? `bench-jev-${Date.now().toString(36)}`;
   if (!value("portal")) {
-    try { await ags(["portal", "create", portal, absolute(planned[0])], 60_000); } catch (e) { server.close(); fail(`Não consegui criar o portal (rode num terminal de agente do app): ${e instanceof Error ? e.message : String(e)}`); }
+    try {
+      // O app pode renomear (`bench-jev 2`) se o nome já existe: vale o nome que ele devolve.
+      const made = await ags(["portal", "create", portal, absolute(planned[0])], 60_000);
+      try { const name = (JSON.parse(made) as { created?: { name?: unknown } }).created?.name; if (typeof name === "string" && name) portal = name; } catch { /* texto puro: fica o nome pedido */ }
+    } catch (e) { server.close(); fail(`Não consegui criar o portal (rode num terminal de agente do app): ${e instanceof Error ? e.message : String(e)}`); }
   }
   let used = 0;
   for (const task of planned) {
+    // Já aconteceu de o canvas perder os portais no meio da rodada («não está conectado com você»): confere antes de cada
+    // tarefa e, se o portal sumiu, cria outro (só quando o runner o criou; com --portal o nome é de quem pediu).
+    if (!value("portal")) {
+      try {
+        const listed = JSON.parse(await ags(["portals"], 30_000)) as { portals?: { name?: unknown }[] };
+        if (!listed.portals?.some((p) => p.name === portal)) {
+          const made = await ags(["portal", "create", `${portal}-r`, absolute(task)], 60_000);
+          const name = (JSON.parse(made) as { created?: { name?: unknown } }).created?.name;
+          if (typeof name === "string" && name) { console.log(`(o portal ${portal} sumiu; criei ${name})`); portal = name; }
+        }
+      } catch { /* sem a conferência a tarefa tenta mesmo assim, e o guarda de infraestrutura cuida do resto */ }
+    }
     const run = await runRealTask(task, portal);
     runs.push(run);
     used += run.outcome === "crash" ? 0 : run.probes ?? Math.max(run.steps + run.photos, 1);
