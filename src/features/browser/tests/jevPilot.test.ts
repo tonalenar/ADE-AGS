@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  MAX_PER_HEAD, MIN_PROBABILITY, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  isAmbiguous, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
+  isAmbiguous, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -497,6 +497,33 @@ describe("clicar num link espera a página carregar", () => {
 
 const ICONS_PAGE = ['page: "Loja" http://shop.test/', "viewport: 1000×600 · scroll 0/600", "", "- clickable [ref=e1]", "- clickable [ref=e2]"].join("\n");
 
+describe("texto da página que vai ao Jev", () => {
+  it("as linhas do objetivo vêm primeiro, mesmo no fim de uma página cheia de menu", () => {
+    const menu = Array.from({ length: 80 }, (_, i) => `Item de menu número ${i} com um texto comprido para encher`);
+    const lines = [...menu, "Seu carrinho da Amazon está vazio"];
+    const picked = pickText(lines, words("remover o produto do carrinho, deixando o carrinho vazio"));
+    expect(picked).toContain("Seu carrinho da Amazon está vazio");
+    expect(picked.join("\n").length).toBeLessThanOrEqual(3100);
+  });
+
+  it("sem linhas parecidas com o objetivo, fica o começo da página, na ordem", () => {
+    const lines = ["primeira", "segunda", "terceira"];
+    expect(pickText(lines, words("xyz abc"))).toEqual(lines);
+  });
+});
+
+describe("foto duas vezes seguidas", () => {
+  it("depois de um toque pela foto, não tira outra foto até uma ação normal", async () => {
+    const h = visualHarness([ok("click", "e1", 0.1), ok("click", "e1", 0.1)], seen([0.1, 0.5]));
+    let reads = 0;
+    h.deps.snapshot = async () => `${ICONS_PAGE}\n- text "leitura ${reads++}"`;
+    const result = await runPilot("filtrar", [], undefined, h.deps);
+    expect(h.clicks).toHaveLength(1);
+    expect(h.asked).toHaveLength(1);
+    expect(result.steps.join("\n")).toContain("acabou de tocar");
+  });
+});
+
 describe("velocidade do piloto", () => {
   it("só a operação wait espera de verdade (a rede ociosa); as ações esperam pouco", async () => {
     const h = harness([ok("click", "e3"), ok("wait"), ok("done")], sortPages(8));
@@ -515,7 +542,8 @@ describe("velocidade do piloto", () => {
 
 describe("a foto não toca duas vezes no mesmo lugar", () => {
   it("se a segunda foto aponta onde a primeira já tocou, não repete (um filtro ligado vira desligado)", async () => {
-    const h = visualHarness([ok("click", "e1", 0.1), ok("click", "e1", 0.1)], seen([0.075, 0.5]));
+    // foto → uma ação normal (rolar) → incerto de novo → a foto aponta o mesmo lugar
+    const h = visualHarness([ok("click", "e1", 0.1), ok("scroll", null, 0.9), ok("click", "e1", 0.1)], seen([0.075, 0.5]));
     // cada leitura traz uma página diferente (o toque mudou algo), como numa página de verdade
     let reads = 0;
     h.deps.snapshot = async () => `${ICONS_PAGE}\n- text "leitura ${reads++}"`;

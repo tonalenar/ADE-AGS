@@ -34,6 +34,24 @@ export const VIEWPORT_PRESETS: ViewportPreset[] = [
   { id: "desktop-large", kind: "desktop", width: 1920, height: 1080 },
 ];
 
+/**
+ * A resolução de um navegador aberto por um agente (e a predefinição "Área de trabalho grande"): 1920×1080. Com ela a
+ * página PREENCHE a janela inteira, sem margem: a largura de layout é a de 1920 px (um layout de desktop) e a altura é a
+ * que sobrar na janela, ao mesmo zoom. Qualquer outra resolução continua num quadro com margem, que se arrasta.
+ */
+export const FILL_VIEWPORT: Viewport = { width: 1920, height: 1080 };
+
+export function isFillViewport(viewport: Viewport | null | undefined): boolean {
+  return !!viewport && viewport.width === FILL_VIEWPORT.width && viewport.height === FILL_VIEWPORT.height;
+}
+
+/** O layout de uma página em modo de preencher: a escala (nunca amplia) e o tamanho, em px CSS, da página dentro da janela. Pura. */
+export function fillLayout(viewport: Viewport, box: Viewport, zoom = 1): { scale: number; width: number | null; height: number | null } {
+  if (box.width <= 0 || box.height <= 0) return { scale: 1, width: null, height: null };
+  const scale = Math.max(0.1, Math.min(1, box.width / viewport.width) * zoom);
+  return { scale, width: box.width / scale, height: box.height / scale };
+}
+
 export const MIN_SIDE = 240;
 export const MAX_SIDE = 3840;
 

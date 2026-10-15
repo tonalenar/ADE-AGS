@@ -221,8 +221,29 @@ export function fingerprint(page: ParsedPage): string {
   return `${page.elements.length}:${hash}`;
 }
 
-const TEXT_BYTES = 1500;
+const TEXT_BYTES = 3000;
 const HISTORY = 10;
+
+/**
+ * Do texto visível da página, o que vai ao Jev: as linhas que falam do OBJETIVO (e do que já foi feito) primeiro, e o
+ * começo da página no que sobrar do orçamento, na ordem em que aparecem. Antes eram só os primeiros 1.500 bytes, que numa
+ * loja são o cabeçalho e o menu: "Seu carrinho está vazio" nem chegava, e a pergunta "o objetivo já foi atingido?" dava 0,00.
+ * Pura.
+ */
+export function pickText(lines: string[], wanted: Set<string>, budget = TEXT_BYTES): string[] {
+  const scored = lines.map((line, index) => ({ line, index, score: overlap(wanted, words(line)) }));
+  const chosen = new Set<number>();
+  let bytes = 0;
+  const take = (item: { line: string; index: number }) => {
+    if (chosen.has(item.index) || bytes + item.line.length > budget) return;
+    chosen.add(item.index);
+    bytes += item.line.length + 1;
+  };
+  // Primeiro as que mais se parecem com o objetivo, e só depois o começo da página.
+  scored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score || a.index - b.index).forEach(take);
+  scored.forEach(take);
+  return [...chosen].sort((a, b) => a - b).map((index) => lines[index]);
+}
 
 /**
  * A consulta de um passo: o estado (objetivo, página, últimas ações, texto visível), as operações possíveis e os
@@ -275,14 +296,8 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
   offer("stuck");
   for (const operation of Object.keys(targets)) if (!operations.some((o) => o.id === operation)) delete targets[operation];
 
-  const text: string[] = [];
-  let bytes = 0;
-  for (const line of page.text) {
-    if (bytes + line.length > TEXT_BYTES) break;
-    text.push(line);
-    bytes += line.length + 1;
-  }
   const recent = history.slice(-HISTORY);
+  const text = pickText(page.text, words(`${goal} ${recent.map((d) => d.what).join(" ")}`));
   const state = [
     `GOAL: ${goal}`,
     fillKeys.length > 0 ? `FIELDS THE CALLER WILL FILL (values are not shown): ${fillKeys.join(", ")}` : null,
@@ -427,9 +442,12 @@ export async function runPilot(
   const triedPhotos = new Set<string>();
   const tapped: { x: number; y: number }[] = [];
   let photos = 0;
+  /** O passo anterior foi um toque pela foto: a página ainda pode não ter mostrado o efeito, e um segundo toque desfaz o primeiro. */
+  let photoJustTapped = false;
   /** `"acted"` = tocou e a página foi relida; um texto = por que não serviu (vai na nota); `null` = não se aplica. */
   const visualFallback = async (page: ParsedPage, step: number): Promise<"acted" | string | null> => {
     if (!deps.visual || !deps.clickAt || photos >= MAX_VISUAL) return null;
+    if (photoJustTapped) return "A foto acabou de tocar: confira a página antes de tirar outra (um segundo toque pode desfazer o primeiro).";
     const fp = fingerprint(page);
     if (triedPhotos.has(fp) || !page.viewport) return null;
     if (sensitiveFilled(page)) return "A reserva visual não foi usada: há um campo de senha, cartão ou token preenchido e a foto não pode sair.";
@@ -464,6 +482,7 @@ export async function runPilot(
     await deps.settle();
     snapshot = await deps.snapshot();
     history.push({ what, changed: fingerprint(parseSnapshot(snapshot)) !== fp });
+    photoJustTapped = true;
     return "acted";
   };
 
@@ -562,6 +581,7 @@ export async function runPilot(
       return finish("error", "A ação falhou; veja o motivo acima e continue você.");
     }
     if (operation !== "wait") waits = 0;
+    photoJustTapped = false;
     log.push(`${step}. ${what} (${meta}, passo ${Date.now() - stepStarted} ms)`);
     await deps.settle();
     snapshot = await deps.snapshot();

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { breakpointOf, clampViewport, fitScale, type Viewport } from "./viewport";
+import { breakpointOf, clampViewport, fillLayout, fitScale, isFillViewport, type Viewport } from "./viewport";
 import { clampZoom, stageSize } from "./zoom";
 
 type Edge = "x" | "y" | "xy";
@@ -25,6 +25,8 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
 }) {
   const stage = useRef<HTMLDivElement>(null);
   const [available, setAvailable] = useState<Viewport>({ width: 0, height: 0 });
+  /** O espaço inteiro do palco (sem a margem do quadro): é o que a página ocupa no modo de preencher. */
+  const [box, setBox] = useState<Viewport>({ width: 0, height: 0 });
   /** Mientras se arrastra: el tamaño en curso y la escala congelada al empezar. Si la
    *  escala se recalculara con cada movimiento, el borde se escaparía del puntero. */
   const [drag, setDrag] = useState<{ draft: Viewport; scale: number } | null>(null);
@@ -35,6 +37,7 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
     const observer = new ResizeObserver(([entry]) => {
       // El padding del escenario y el rótulo de abajo no son espacio para el marco.
       setAvailable({ width: entry.contentRect.width - 56, height: entry.contentRect.height - 64 });
+      setBox({ width: entry.contentRect.width, height: entry.contentRect.height });
     });
     observer.observe(el);
     return () => observer.disconnect();
@@ -42,6 +45,9 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
 
   const shown = drag?.draft ?? viewport;
   const z = clampZoom(zoom);
+  // 1920×1080 preenche a janela inteira, sem margem (ver `FILL_VIEWPORT`); arrastar o quadro sai desse modo.
+  const fill = !drag && isFillViewport(viewport);
+  const filled = fill && viewport ? fillLayout(viewport, box, z) : null;
   const scale = shown ? (drag?.scale ?? Math.max(0.1, fitScale(shown, available) * z)) : 1;
 
   const startDrag = (edge: Edge) => (e: React.PointerEvent<HTMLDivElement>) => {
@@ -79,25 +85,34 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
   return (
     <div
       ref={stage}
-      className={shown
-        ? "relative flex-1 min-h-0 overflow-auto px-7 pt-5 pb-11 bg-gray-100 dark:bg-surface-deep bg-[radial-gradient(circle,rgba(120,130,150,0.22)_1px,transparent_1px)] [background-size:16px_16px]"
-        : "relative flex-1 min-h-0 bg-white"}
+      className={fill
+        ? "relative flex-1 min-h-0 overflow-hidden bg-white"
+        : shown
+          ? "relative flex-1 min-h-0 overflow-auto px-7 pt-5 pb-11 bg-gray-100 dark:bg-surface-deep bg-[radial-gradient(circle,rgba(120,130,150,0.22)_1px,transparent_1px)] [background-size:16px_16px]"
+          : "relative flex-1 min-h-0 bg-white"}
     >
       <div
-        style={shown
-          ? { position: "relative", width: shown.width * scale, height: shown.height * scale, margin: "0 auto", flexShrink: 0 }
-          : { position: "absolute", inset: 0, overflow: "hidden" }}
+        style={fill
+          ? { position: "absolute", inset: 0, overflow: "hidden" }
+          : shown
+            ? { position: "relative", width: shown.width * scale, height: shown.height * scale, margin: "0 auto", flexShrink: 0 }
+            : { position: "absolute", inset: 0, overflow: "hidden" }}
       >
         <div
-          style={shown
-            ? { width: shown.width, height: shown.height, transform: scale === 1 ? undefined : `scale(${scale})`, transformOrigin: "0 0" }
-            : { ...stageSize(z), transform: z === 1 ? undefined : `scale(${z})`, transformOrigin: "0 0" }}
-          className={shown ? "bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_32px_-12px_rgba(0,0,0,0.35)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_12px_32px_-12px_rgba(0,0,0,0.8)]" : undefined}
+          style={filled
+            ? {
+              width: filled.width ?? "100%", height: filled.height ?? "100%",
+              transform: filled.scale === 1 ? undefined : `scale(${filled.scale})`, transformOrigin: "0 0",
+            }
+            : shown
+              ? { width: shown.width, height: shown.height, transform: scale === 1 ? undefined : `scale(${scale})`, transformOrigin: "0 0" }
+              : { ...stageSize(z), transform: z === 1 ? undefined : `scale(${z})`, transformOrigin: "0 0" }}
+          className={shown && !fill ? "bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_32px_-12px_rgba(0,0,0,0.35)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_12px_32px_-12px_rgba(0,0,0,0.8)]" : undefined}
         >
           {children}
         </div>
 
-        {shown && (
+        {shown && !fill && (
           <>
             <Handle edge="x" onPointerDown={startDrag("x")} />
             <Handle edge="y" onPointerDown={startDrag("y")} />
