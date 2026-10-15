@@ -132,6 +132,18 @@ export function nextActiveAfterClose(views: ViewTab[], id: string, activeId: str
 }
 
 /** Lo que se guarda para restaurar. Lo efímero (sin guardar, a dónde saltar) no. */
+/** Os tipos de aba que esta versão sabe desenhar. */
+const KNOWN_KINDS = new Set<string>(["file", "diff", "browser"]);
+
+/**
+ * Das abas salvas, só as de um tipo conhecido. O estado fica no `localStorage` do perfil do WebView2, que
+ * outra versão do app (um build de debug, um instalador mais novo ou mais antigo) pode ter escrito com abas de
+ * um tipo que esta não conhece: sem componente para elas, a tela inteira caía num erro.
+ */
+export function knownViews(views: ViewTab[]): ViewTab[] {
+  return views.filter((v) => !!v && typeof v === "object" && KNOWN_KINDS.has((v as { kind?: string }).kind ?? ""));
+}
+
 export function toPersisted(views: ViewTab[]): ViewTab[] {
   return views.map((v) => {
     if (v.kind !== "file") return v;

@@ -2,7 +2,7 @@ import { create } from "zustand";
 
 import { useTabsStore } from "@/features/tabs/store";
 import {
-  baseName, findExisting, nextActiveAfterClose, toPersisted,
+  baseName, findExisting, knownViews, nextActiveAfterClose, toPersisted,
   type BrowserView, type DiffView, type FileView, type ViewOwner, type ViewTab,
 } from "@/features/tabs/viewTabs";
 import { isMarkdownPath, prefersMarkdownPreview } from "@/features/editor/markdown";
@@ -137,7 +137,7 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
     }
   },
 
-  hydrate: (views) => set({ views, activeViewId: null }),
+  hydrate: (views) => set({ views: knownViews(views), activeViewId: null }),
 }));
 
 // Elegir un agente —desde la barra, el panel izquierdo, un atajo o la CLI— es querer ver
@@ -162,7 +162,10 @@ export function initViewTabsPersistence(windowLabel: string): () => void {
   const key = `${KEY}:${windowLabel}`;
   try {
     const raw = localStorage.getItem(key);
-    if (raw) useViewTabsStore.getState().hydrate(JSON.parse(raw) as ViewTab[]);
+    if (raw) {
+      const parsed: unknown = JSON.parse(raw);
+      useViewTabsStore.getState().hydrate(Array.isArray(parsed) ? (parsed as ViewTab[]) : []);
+    }
   } catch {
     /* basura en localStorage: se arranca sin tabs, que es lo mismo que la primera vez */
   }

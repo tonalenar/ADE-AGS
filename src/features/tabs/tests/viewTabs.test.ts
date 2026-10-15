@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  comparablePath, findExisting, isLocalUrl, nextActiveAfterClose, normalizeUrl, relativeTo, toPersisted, viewLabels,
+  comparablePath, findExisting, isLocalUrl, nextActiveAfterClose, normalizeUrl, knownViews, relativeTo, toPersisted, viewLabels,
   viewsOfWorkspace, type ViewTab,
 } from "../viewTabs";
 
@@ -56,6 +56,14 @@ describe("persistencia", () => {
     const [saved] = toPersisted([{ ...file("a", "/p", "/p/a"), dirty: true, reveal: { line: 3, column: 0, nonce: 1 } } as ViewTab]);
     expect(saved).not.toHaveProperty("dirty");
     expect(saved).not.toHaveProperty("reveal");
+  });
+});
+
+describe("abas salvas por outra versão", () => {
+  it("só as de tipo conhecido voltam", () => {
+    const keep = file("a", "/p", "/p/src/app.ts");
+    const foreign = { kind: "desktop", id: "g", cwd: "/p", title: "Gemini" } as unknown as ViewTab;
+    expect(knownViews([keep, foreign, null as unknown as ViewTab])).toEqual([keep]);
   });
 });
 
