@@ -80,7 +80,7 @@ Browser: a real page the user can see, loaded through a local proxy. The user ca
 annotate screenshots: browser_marked reads what they marked, browser_pick asks them to point at something. \
 Typical loop: browser_navigate to the dev \
 server URL, browser_snapshot to read the page and get element refs, act with browser_click/browser_type/\
-browser_press using those refs, then check browser_console and browser_network for errors. Use browser_resize \
+browser_press using those refs (or give a whole multi-step goal to browser_act, which is faster), then check browser_console and browser_network for errors. Use browser_resize \
 to test responsive layouts. There are no screenshots: read the page through snapshots.\n\
 Orchestration: split a large objective into tasks that other agents run in parallel (each in its own git \
 worktree), visible to the user in ADE AGS's fleet console. agent_roster shows what can run now; run_plan \
@@ -222,6 +222,28 @@ for every interactive element. Take a new one after the page changes: refs are r
 Returns what changed plus console errors and failed requests caused by the click.",
         properties: || json!({ "target": { "type": "string", "description": TARGET } }),
         required: &["target"],
+    },
+    BrowserTool {
+        name: "browser_act",
+        op: "act",
+        description: "Reach a goal in the browser with several steps at once, much faster than snapshot + click one \
+at a time: Jev (a fast decision model) picks each next click/choice from the page while this tool does it. Use it for \
+flows (log in, fill and submit a form, add to cart, open a section). State the goal with EVERY choice it needs (size, \
+item, section): a vague goal makes it guess. Pass the text to type as fills (\"Field name=value\"; the field name has \
+to look like the field's label). Typed values never leave the machine. It stops when Jev is unsure, and always \
+returns the page as it ended: check it. Needs Settings → Decisions → Canvas browser (Jev drives) turned on.",
+        properties: || {
+            json!({
+                "goal": { "type": "string", "description": "What to achieve, with every choice spelled out. e.g. \"log in, add the Backpack to the cart and open the cart\"." },
+                "fills": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Text to type, one entry per field: \"Username=standard_user\". The name must resemble the field's label.",
+                },
+                "steps": { "type": "number", "description": "Max decisions (1-15). Default 8." },
+            })
+        },
+        required: &["goal"],
     },
     BrowserTool {
         name: "browser_type",
