@@ -70,6 +70,23 @@ export function fitScale(v: Viewport, available: Viewport): number {
   return Math.max(0.1, Math.floor(scale * 100) / 100);
 }
 
+/** Desde este ancho el marco es "de escritorio": lo que importa es el ancho (media queries), no la altura exacta. */
+export const FILL_MIN_WIDTH = 1024;
+
+/**
+ * Cómo se dibuja el marco dentro del espacio disponible. Hasta un marco de escritorio (≥ 1024 px) achicado se
+ * acomoda por el ANCHO: la página ocupa el ancho entero y la altura se estira o encoge hasta el borde del nodo.
+ * Con `fitScale` (el menor de los dos lados) un nodo más ancho que 16:9 achicaba un 1920×1080 por la altura y
+ * dejaba una franja vacía a los lados. Teléfono y tablet no se tocan: ahí el tamaño pedido es el que se prueba.
+ */
+export function fillLayout(v: Viewport, available: Viewport): { scale: number; width: number; height: number } {
+  const fit = fitScale(v, available);
+  if (fit >= 1 || v.width < FILL_MIN_WIDTH) return { scale: fit, ...v };
+  const scale = Math.min(1, Math.max(0.1, Math.floor((available.width / v.width) * 100 + 1e-6) / 100));
+  const height = Math.max(MIN_SIDE, Math.min(MAX_SIDE, Math.floor(available.height / scale)));
+  return { scale, width: v.width, height };
+}
+
 /** Los cortes de las librerías que más se usan, para leer el ancho en sus términos. */
 const BREAKPOINTS: [string, number][] = [["2xl", 1536], ["xl", 1280], ["lg", 1024], ["md", 768], ["sm", 640]];
 

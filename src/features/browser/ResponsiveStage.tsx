@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { breakpointOf, clampViewport, fitScale, type Viewport } from "./viewport";
+import { breakpointOf, clampViewport, fillLayout, type Viewport } from "./viewport";
 import { clampZoom, stageSize } from "./zoom";
 
 type Edge = "x" | "y" | "xy";
@@ -40,17 +40,19 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
     return () => observer.disconnect();
   }, []);
 
-  const shown = drag?.draft ?? viewport;
   const z = clampZoom(zoom);
-  const scale = shown ? (drag?.scale ?? Math.max(0.1, fitScale(shown, available) * z)) : 1;
+  // Fora do arraste o marco se acomoda ao espaço (ver `fillLayout`): o tamanho mostrado pode ser menos alto que o pedido.
+  const layout = viewport ? fillLayout(viewport, available) : null;
+  const shown: Viewport | null = drag?.draft ?? (layout ? { width: layout.width, height: layout.height } : null);
+  const scale = shown ? (drag?.scale ?? Math.max(0.1, (layout?.scale ?? 1) * z)) : 1;
 
   const startDrag = (edge: Edge) => (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!viewport || e.button !== 0) return;
+    if (!viewport || !shown || e.button !== 0) return;
     e.preventDefault();
     const handle = e.currentTarget;
     handle.setPointerCapture(e.pointerId);
-    const origin = { x: e.clientX, y: e.clientY, viewport, scale };
-    let draft = viewport;
+    const origin = { x: e.clientX, y: e.clientY, viewport: shown, scale };
+    let draft = shown;
     setDrag({ draft, scale });
 
     const move = (ev: PointerEvent) => {
