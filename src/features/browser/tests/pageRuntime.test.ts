@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   callerOf, displayPath, formatConsoleArgs, formatValue, MAX_TEXT, toTransferable,
 } from "../page/serialize";
-import { formatNode, formatSnapshot, parseKeyCombo, parseTarget } from "../page/snapshotFormat";
+import { distanceToBox, formatNode, formatSnapshot, parseKeyCombo, parseTarget, snapToNearest } from "../page/snapshotFormat";
 
 describe("formatValue", () => {
   it("muestra los primitivos como una consola", () => {
@@ -150,6 +150,33 @@ describe("snapshot", () => {
       '- heading "Hola" [level=1]',
       "… 12 nodos más (pedí el snapshot completo o hacé scroll)",
     ]);
+  });
+});
+
+describe("toque por foto: o controle mais perto do ponto", () => {
+  // A barra da página de teste: perfil em 1162–1210 e carrinho em 1234–1282, ambos de 48 px.
+  const profile = { left: 1162, top: 30, right: 1210, bottom: 78 };
+  const cart = { left: 1234, top: 30, right: 1282, bottom: 78 };
+
+  it("a distância é zero dentro da caixa e cresce para fora", () => {
+    expect(distanceToBox(cart, 1250, 50)).toBe(0);
+    expect(distanceToBox(cart, 1227, 54)).toBe(7);
+    expect(distanceToBox(cart, 1227, 85)).toBeCloseTo(Math.hypot(7, 7));
+  });
+
+  it("o ponto no vazio ao lado do carrinho (o erro real da foto) vai para o carrinho, não para o perfil", () => {
+    expect(snapToNearest([profile, cart], 1227, 54)).toEqual({ index: 1 });
+  });
+
+  it("dentro de um controle fica nele; entre contêineres, no menor", () => {
+    expect(snapToNearest([profile, cart], 1190, 50)).toEqual({ index: 0 });
+    const toolbar = { left: 1100, top: 20, right: 1300, bottom: 90 };
+    expect(snapToNearest([toolbar, cart], 1250, 50)).toEqual({ index: 1 });
+  });
+
+  it("longe de tudo não toca; entre dois à mesma distância não adivinha", () => {
+    expect(snapToNearest([profile, cart], 600, 300)).toBeNull();
+    expect(snapToNearest([profile, cart], 1222, 54)).toEqual({ ambiguous: true });
   });
 });
 

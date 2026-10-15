@@ -84,6 +84,32 @@ export function parseKeyCombo(combo: string): {
   };
 }
 
+/** Uma caixa na janela da página, em px CSS. */
+export interface Box4 { left: number; top: number; right: number; bottom: number }
+
+/** A distância de um ponto a uma caixa: 0 dentro dela. */
+export function distanceToBox(box: Box4, x: number, y: number): number {
+  const dx = Math.max(box.left - x, 0, x - box.right);
+  const dy = Math.max(box.top - y, 0, y - box.bottom);
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * Qual controle clicável fica com um toque que a foto apontou. Uma caixa de imagem de um alvo pequeno erra por
+ * dezenas de pixels (um ícone de 48 px apontado 30 px ao lado, no vazio entre dois ícones), então o ponto vai para
+ * o controle mais próximo: o menor que o contém, ou o mais perto dentro do `radius`. Se dois estão quase à mesma
+ * distância (`margin`), não adivinha. Pura.
+ */
+export function snapToNearest(boxes: Box4[], x: number, y: number, radius = 40, margin = 6): { index: number } | { ambiguous: true } | null {
+  const scored = boxes.map((box, index) => ({ index, d: distanceToBox(box, x, y), area: (box.right - box.left) * (box.bottom - box.top) }));
+  const inside = scored.filter((c) => c.d === 0).sort((a, b) => a.area - b.area);
+  if (inside.length > 0) return { index: inside[0].index };
+  const near = scored.filter((c) => c.d <= radius).sort((a, b) => a.d - b.d);
+  if (near.length === 0) return null;
+  if (near.length > 1 && near[1].d - near[0].d < margin) return { ambiguous: true };
+  return { index: near[0].index };
+}
+
 /** Cómo se parsea un `target`: un ref de snapshot, un texto visible, o un selector CSS. */
 export type TargetSpec =
   | { kind: "ref"; ref: string }

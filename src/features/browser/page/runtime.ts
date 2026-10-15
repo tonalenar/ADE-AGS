@@ -33,7 +33,7 @@ import {
 import { isTouch, sendTouch, setTouch } from "./touch";
 import { CORS_HEADER, CRED_HEADER, HEADERS_HEADER, corsMessage, routeRequest, type Routed } from "./route";
 import {
-  displayHref, formatSnapshot, normalizeName, parseKeyCombo, parseTarget, type SnapshotNode,
+  displayHref, formatSnapshot, normalizeName, parseKeyCombo, parseTarget, snapToNearest, type Box4, type SnapshotNode,
 } from "./snapshotFormat";
 
 declare global {
@@ -785,6 +785,26 @@ declare global {
     return style.display !== "none" && style.visibility !== "hidden" && el.getClientRects().length > 0;
   }
 
+  /** O controle clicável que fica com um ponto: ver `snapToNearest`. `null` = nenhum perto. */
+  function clickableNear(x: number, y: number): Element | null {
+    const area = window.innerWidth * window.innerHeight;
+    const found: { el: Element; box: Box4 }[] = [];
+    for (const el of Array.from(document.querySelectorAll("*"))) {
+      if (SKIP_TAGS.has(el.tagName)) continue;
+      const style = getComputedStyle(el);
+      if (style.display === "none" || style.visibility === "hidden") continue;
+      const role = roleOf(el);
+      if (!(role && INTERACTIVE_ROLES.has(role)) && !looksClickable(el, style)) continue;
+      const r = el.getBoundingClientRect();
+      // Um contêiner enorme que só tem `cursor: pointer` não é o alvo de um toque.
+      if (r.width < 2 || r.height < 2 || r.width * r.height > area * 0.4) continue;
+      found.push({ el, box: { left: r.left, top: r.top, right: r.right, bottom: r.bottom } });
+    }
+    const hit = snapToNearest(found.map((f) => f.box), x, y);
+    if (hit && "ambiguous" in hit) throw new Error(`Há mais de um controle perto do ponto (${Math.round(x)}, ${Math.round(y)}): não sei qual tocar.`);
+    return hit ? found[hit.index].el : null;
+  }
+
   function resolve(target: string): Element {
     // Lo último que la persona marcó con el selector: se resuelve por identidad y no por
     // su selector, que podría no volver a encontrarlo.
@@ -805,7 +825,12 @@ declare global {
       // O que há sob o ponto; se está dentro de algo clicável (um ícone dentro de um link), o clicável.
       const under = document.elementFromPoint(spec.x, spec.y);
       if (!under) throw new Error(`Não há nada no ponto (${Math.round(spec.x)}, ${Math.round(spec.y)}): fora da janela da página.`);
-      return under.closest("a[href],button,[role=button],[role=link],input,select,textarea,label,summary,[role=tab],[role=menuitem],[role=option],[onclick]") ?? under;
+      const direct = under.closest("a[href],button,[role=button],[role=link],input,select,textarea,label,summary,[role=tab],[role=menuitem],[role=option],[onclick]");
+      if (direct) return direct;
+      // Um ponto que caiu no vazio ao lado de um controle (a foto erra alguns pixels): vai para o clicável mais perto.
+      const near = clickableNear(spec.x, spec.y);
+      if (!near) throw new Error(`Não há nada clicável perto do ponto (${Math.round(spec.x)}, ${Math.round(spec.y)}).`);
+      return near;
     }
     if (spec.kind === "text") {
       const wanted = spec.text.toLowerCase();
