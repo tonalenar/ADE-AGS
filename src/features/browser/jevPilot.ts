@@ -261,6 +261,9 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
   const optionTargets: StepOption[] = [];
   page.elements.forEach((el, index) => {
     if (el.states.includes("disabled")) return;
+    // Um botão de compra ou pagamento que o objetivo não pediu nem é oferecido: o Jev escolhe entre os outros (o
+    // "Adicionar ao carrinho" ao lado de um "Comprar agora") em vez de o piloto parar ao ver a escolha barrada.
+    if (blockedPurchase(`${el.name} ${el.href ?? ""}`, goal)) return;
     if (operationOf(el) === "select" && el.options?.length) {
       el.options.forEach((option, i) => optionTargets.push({ id: `${el.ref}_${i}`, label: `${plain(el)} → option "${option}"` }));
       return;

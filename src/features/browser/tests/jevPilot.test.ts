@@ -633,3 +633,23 @@ describe("tempo por fase", () => {
     expect(JSON.parse(line!.slice("TEMPOS: ".length))).toMatchObject({ consultas: 2, fotos: 0 });
   });
 });
+
+describe("compra que o objetivo não pediu", () => {
+  const PRODUTO = [
+    'page: "Fone" http://localhost/p',
+    "viewport: 1280×800 · scroll 0/800",
+    '- button "Comprar agora" [ref=e1]',
+    '- button "Adicionar ao carrinho" [ref=e2]',
+  ].join("\n");
+
+  it("o botão de compra nem é oferecido ao Jev: ele escolhe entre os outros", () => {
+    const step = buildStep(parseSnapshot(PRODUTO), "adicionar o fone ao carrinho", [], []);
+    expect(step.targets.click.map((o) => o.id)).toEqual(["e2"]);
+    expect(step.state).not.toContain("Comprar agora");
+  });
+
+  it("se o objetivo pede a compra, o botão volta", () => {
+    const step = buildStep(parseSnapshot(PRODUTO), "comprar o fone agora", [], []);
+    expect(step.targets.click.map((o) => o.id)).toEqual(["e1", "e2"]);
+  });
+});
