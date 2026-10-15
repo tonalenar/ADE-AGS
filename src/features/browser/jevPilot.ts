@@ -358,8 +358,8 @@ export interface PilotDeps {
   type: (ref: string, text: string) => Promise<unknown>;
   select: (ref: string, value: string) => Promise<unknown>;
   scroll: () => Promise<unknown>;
-  /** Espera a página assentar depois de uma ação (nunca lança). */
-  settle: () => Promise<void>;
+  /** Espera a página assentar depois de uma ação (nunca lança). `thorough`: a operação `wait` do Jev, que espera a rede ficar ociosa. */
+  settle: (thorough?: boolean) => Promise<void>;
   pick: (query: StepQuery) => Promise<StepReply>;
 }
 
@@ -425,6 +425,7 @@ export async function runPilot(
 
   // A reserva visual: quando o texto não basta, uma foto da página e o Jev aponta onde tocar.
   const triedPhotos = new Set<string>();
+  const tapped: { x: number; y: number }[] = [];
   let photos = 0;
   /** `"acted"` = tocou e a página foi relida; um texto = por que não serviu (vai na nota); `null` = não se aplica. */
   const visualFallback = async (page: ParsedPage, step: number): Promise<"acted" | string | null> => {
@@ -447,8 +448,14 @@ export async function runPilot(
     }
     const x = Math.round(reply.center[0] * page.viewport.width);
     const y = Math.round(reply.center[1] * page.viewport.height);
+    // O mesmo lugar duas vezes desfaz o que a primeira fez (um filtro ligado vira desligado): se a foto aponta onde já se
+    // tocou, a página provavelmente só ainda não mostrou o efeito.
+    if (tapped.some((t) => Math.hypot(t.x - x, t.y - y) < 48)) {
+      return `A foto apontou o mesmo lugar de um toque anterior (${x}, ${y}): não repeti, para não desfazer o que já foi feito. Confira a página.`;
+    }
     try {
       await deps.clickAt(x, y);
+      tapped.push({ x, y });
     } catch (e) {
       return `O toque pela foto falhou: ${e instanceof Error ? e.message : String(e)}`;
     }
@@ -461,6 +468,7 @@ export async function runPilot(
   };
 
   for (let step = 1; step <= limit; step++) {
+    const stepStarted = Date.now();
     let page = parseSnapshot(snapshot);
     // O que não é escolha não vai ao Jev: um campo cujo nome casa com um `--fill` recebe o valor direto.
     const filled = await autoFill(page, fills, taken, deps);
@@ -530,6 +538,7 @@ export async function runPilot(
       } else if (operation === "wait") {
         waits += 1;
         what = "esperou a página";
+        await deps.settle(true);
       } else {
         // `e12_3` = a 4ª opção da lista e12.
         const [refPart, optionPart] = (reply.target ?? "").split("_");
@@ -553,7 +562,7 @@ export async function runPilot(
       return finish("error", "A ação falhou; veja o motivo acima e continue você.");
     }
     if (operation !== "wait") waits = 0;
-    log.push(`${step}. ${what} (${meta})`);
+    log.push(`${step}. ${what} (${meta}, passo ${Date.now() - stepStarted} ms)`);
     await deps.settle();
     snapshot = await deps.snapshot();
     history.push({ what, changed: fingerprint(parseSnapshot(snapshot)) !== fingerprint(page) });

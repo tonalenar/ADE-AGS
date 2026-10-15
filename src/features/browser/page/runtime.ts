@@ -873,7 +873,15 @@ declare global {
 
   /** Espera a que la página termine de reaccionar: sin cambios en el DOM por un rato, o el
    *  tope. Con timers y no con frames: un iframe que no se está mostrando no pinta. */
+  /** O comando em curso é do piloto do Jev: esperas curtas (a página que mudou depois é lida de novo, é barato). */
+  let fastCommand = false;
+
   function settle(maxMs = 1500, quietMs = 150): Promise<void> {
+    if (fastCommand) {
+      // O repositório jev-ultrafast espera 2 quadros ou 50 ms. Aqui, quieto por 60 ms e no máximo 350 ms (um React que re-renderiza).
+      maxMs = Math.min(maxMs, 350);
+      quietMs = Math.min(quietMs, 60);
+    }
     return new Promise((done) => {
       let finished = false;
       let quiet = setTimer(finish, quietMs);
@@ -1572,6 +1580,8 @@ declare global {
     // Mientras dura la orden, los diálogos de la página los contesta el runtime: si no, la
     // acción del agente quedaría esperando a una persona que quizá no está mirando.
     driving = true;
+    fastCommand = (command as { fast?: boolean }).fast === true;
+    cursor.setFast(fastCommand);
     try {
       payload = { id, ok: true, result: await execute(command) };
     } catch (e) {
@@ -1581,6 +1591,8 @@ declare global {
       post({ type: "page:reply", payload: { id, ok: false, error: "O resultado não pode ser transferido para o app." } });
     }
     driving = false;
+    fastCommand = false;
+    cursor.setFast(false);
     // Lo que la acción haya logueado viaja enseguida: la app lo junta con la respuesta.
     flush();
   }

@@ -145,6 +145,7 @@ function pagesOf(count: number): string[] {
 function harness(script: StepReply[], pages: string[] = pagesOf(8)) {
   const calls: string[] = [];
   const navs: boolean[] = [];
+  const settles: boolean[] = [];
   let page = 0;
   let pick = 0;
   const asked: StepQuery[] = [];
@@ -154,10 +155,10 @@ function harness(script: StepReply[], pages: string[] = pagesOf(8)) {
     type: async (ref, text) => { calls.push(`type ${ref} ${text}`); page++; },
     select: async (ref, value) => { calls.push(`select ${ref} ${value}`); page++; },
     scroll: async () => { calls.push("scroll"); page++; },
-    settle: async () => undefined,
+    settle: async (thorough) => { settles.push(!!thorough); },
     pick: async (query) => { asked.push(query); return script[Math.min(pick++, script.length - 1)]; },
   };
-  return { deps, calls, asked, navs };
+  return { deps, calls, asked, navs, settles };
 }
 
 const ok = (operation: string, target: string | null = null, probability = 0.9, goalDone: number | null = null): StepReply =>
@@ -489,5 +490,38 @@ describe("clicar num link espera a página carregar", () => {
     const h = harness([ok("click", "e2"), ok("click", "e3"), ok("done")], sortPages(8));
     await runPilot("abrir o produto", [], undefined, h.deps);
     expect(h.navs).toEqual([true, false]);
+  });
+});
+
+// ── Velocidade e o mesmo toque duas vezes ────────────────────────────
+
+const ICONS_PAGE = ['page: "Loja" http://shop.test/', "viewport: 1000×600 · scroll 0/600", "", "- clickable [ref=e1]", "- clickable [ref=e2]"].join("\n");
+
+describe("velocidade do piloto", () => {
+  it("só a operação wait espera de verdade (a rede ociosa); as ações esperam pouco", async () => {
+    const h = harness([ok("click", "e3"), ok("wait"), ok("done")], sortPages(8));
+    await runPilot("filtrar", [], undefined, h.deps);
+    // um clique (rápido), um wait (a espera de verdade) e o fim
+    expect(h.settles.filter(Boolean)).toHaveLength(1);
+    expect(h.settles.filter((thorough) => !thorough).length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("cada passo do relatório diz quanto levou", async () => {
+    const h = harness([ok("click", "e3"), ok("done")], sortPages(8));
+    const result = await runPilot("filtrar", [], undefined, h.deps);
+    expect(result.steps[0]).toMatch(/passo \d+ ms\)/);
+  });
+});
+
+describe("a foto não toca duas vezes no mesmo lugar", () => {
+  it("se a segunda foto aponta onde a primeira já tocou, não repete (um filtro ligado vira desligado)", async () => {
+    const h = visualHarness([ok("click", "e1", 0.1), ok("click", "e1", 0.1)], seen([0.075, 0.5]));
+    // cada leitura traz uma página diferente (o toque mudou algo), como numa página de verdade
+    let reads = 0;
+    h.deps.snapshot = async () => `${ICONS_PAGE}\n- text "leitura ${reads++}"`;
+    const result = await runPilot("filtrar", [], undefined, h.deps);
+    expect(h.clicks).toHaveLength(1);
+    expect(result.steps.join("\n")).toContain("mesmo lugar de um toque anterior");
+    expect(result.outcome).toBe("unsure");
   });
 });

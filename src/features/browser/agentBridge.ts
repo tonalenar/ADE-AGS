@@ -720,18 +720,23 @@ export const PORTAL_OPS = new Set([
 function pilotDeps(host: BrowserHost): PilotDeps {
   return {
     snapshot: () => inPage(host, { op: "snapshot", all: false }, false),
+    // Tudo `fast` e sem coletar console/rede (`withEffects` falso): o piloto lê a página de novo depois de cada passo, e é isso que importa.
     click: async (ref, navigates) => {
       const loads = host.loadCount();
-      const result = await inPage(host, { op: "click", target: ref }, true);
+      const result = await inPage(host, { op: "click", target: ref, fast: true }, false);
       // Um link carrega outra página, que leva segundos: relê só depois (ou depois de 6 s).
       if (navigates) await host.waitForLoad(loads, 6_000);
       return result;
     },
-    type: (ref, text) => inPage(host, { op: "type", target: ref, text, clear: true, submit: false }, true),
-    select: (ref, value) => inPage(host, { op: "select", target: ref, value }, true),
-    scroll: () => inPage(host, { op: "scroll", dy: 600 }, false),
-    // Uma ação pode navegar ou redesenhar: esperar a rede assentar um instante. Se vencer, segue assim mesmo.
-    settle: async () => { try { await inPage(host, { op: "wait", idle: true, timeoutMs: 2500 }, false); } catch { /* segue */ } },
+    type: (ref, text) => inPage(host, { op: "type", target: ref, text, clear: true, submit: false, fast: true }, false),
+    select: (ref, value) => inPage(host, { op: "select", target: ref, value, fast: true }, false),
+    scroll: () => inPage(host, { op: "scroll", dy: 600, fast: true }, false),
+    // O comando já esperou a página assentar (60 ms quieta, 350 no máximo). Só a operação `wait` do Jev espera de verdade
+    // (a rede ociosa, até 2,5 s): é o que ele pede quando vê que os resultados ainda carregam.
+    settle: async (thorough) => {
+      if (!thorough) return;
+      try { await inPage(host, { op: "wait", idle: true, timeoutMs: 2500 }, false); } catch { /* segue */ }
+    },
     pick: (query) => invoke("decision_pick_step", { query }),
     // A reserva visual: uma foto da página (só se estiver toda à vista) e o toque no ponto que o Jev apontar.
     visual: async (goal, recent) => {
@@ -743,7 +748,7 @@ function pilotDeps(host: BrowserHost): PilotDeps {
     },
     clickAt: async (x, y) => {
       const loads = host.loadCount();
-      const result = await inPage(host, { op: "click", target: `@${x},${y}` }, true);
+      const result = await inPage(host, { op: "click", target: `@${x},${y}`, fast: true }, false);
       // Um toque pela foto não sabe se é um link: espera um pouco por uma página nova (senão o piloto julga a antiga).
       await host.waitForLoad(loads, 2_500);
       return result;
