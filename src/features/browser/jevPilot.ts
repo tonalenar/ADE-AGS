@@ -375,7 +375,7 @@ export const MIN_BOX_CONFIDENCE = 0.4;
 export const MAX_VISUAL = 3;
 
 /** Com esta certeza de que o objetivo já está atingido (pergunta direta), o piloto conclui mesmo sem uma operação segura. */
-export const MIN_GOAL_DONE = 0.85;
+export const MIN_GOAL_DONE = 0.75;
 
 /**
  * O elemento escolhido não tem nome (nem destino de link) e há outros iguais na mesma pergunta? Então o texto não os
@@ -488,7 +488,8 @@ export async function runPilot(
       log.push(`${step}. objetivo atingido (pergunta direta p=${reply.goalDone!.toFixed(2)})`);
       return finish("done", "O Jev considera o objetivo atingido. Confira na página abaixo.");
     }
-    const meta = `${reply.probability !== null ? `p=${reply.probability.toFixed(2)}` : "p=?"}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
+    // `fim` = a pergunta direta "o objetivo já foi atingido?": aparece no relatório para o limite poder ser ajustado com dados.
+    const meta = `${reply.probability !== null ? `p=${reply.probability.toFixed(2)}` : "p=?"}${reply.goalDone != null ? `, fim p=${reply.goalDone.toFixed(2)}` : ""}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
     const ambiguous = operation !== "done" && isAmbiguous(query, operation, reply.target);
     if (ambiguous || (reply.probability !== null && reply.probability < MIN_PROBABILITY && operation !== "done")) {
       const fallback = await visualFallback(page, step);
@@ -496,7 +497,8 @@ export async function runPilot(
       if (fallback) log.push(fallback);
       return finish("unsure", ambiguous
         ? `O elemento que o Jev escolheu (${reply.target}) não tem nome e há outros iguais na página: só o texto não os distingue (${meta}). Continue você, com \`snapshot\` e \`click\`, ou ligue a reserva visual em Ajustes → Decisões.`
-        : `O Jev não tem certeza do próximo passo (${operation}${reply.target ? ` ${reply.target}` : ""}, ${meta}). Continue você, com \`snapshot\` e \`click\`, ou diga no objetivo a escolha que falta.`);
+        : `O Jev não tem certeza do próximo passo (${operation}${reply.target ? ` ${reply.target}` : ""}, ${meta}). Continue você, com \`snapshot\` e \`click\`, ou diga no objetivo a escolha que falta.`
+          + (lastByJev?.changed ? " A última ação do piloto mudou a página: o objetivo pode já ter sido atingido, confira antes de continuar." : ""));
     }
     if (operation === "done") {
       log.push(`${step}. concluído (${meta})`);

@@ -467,6 +467,23 @@ describe("objetivo atingido (pergunta direta)", () => {
   });
 });
 
+describe("relatório de quem parou depois de agir", () => {
+  it("mostra a pergunta direta de objetivo atingido e avisa que a página já mudou", async () => {
+    const h = harness([ok("click", "e3"), ok("click", "e3", 0.2, 0.6)], sortPages(8));
+    const result = await runPilot("filtrar", [], undefined, h.deps);
+    expect(result.outcome).toBe("unsure");
+    expect(result.note).toContain("fim p=0.60");
+    expect(result.note).toContain("o objetivo pode já ter sido atingido");
+  });
+
+  it("o limite de objetivo atingido é 0,75", async () => {
+    const at = await runPilot("filtrar", [], undefined, harness([ok("click", "e3"), ok("click", "e3", 0.2, 0.76)], sortPages(8)).deps);
+    expect(at.outcome).toBe("done");
+    const below = await runPilot("filtrar", [], undefined, harness([ok("click", "e3"), ok("click", "e3", 0.2, 0.7)], sortPages(8)).deps);
+    expect(below.outcome).toBe("unsure");
+  });
+});
+
 describe("clicar num link espera a página carregar", () => {
   it("um link com destino avisa que vai navegar; um botão, não", async () => {
     const h = harness([ok("click", "e2"), ok("click", "e3"), ok("done")], sortPages(8));
