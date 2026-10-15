@@ -88,12 +88,21 @@ describe("a consulta de cada passo", () => {
     expect(state).not.toContain("e5"); // o desabilitado fica de fora
   });
 
+  it("um link sem nome é identificado para onde vai (o ícone do carrinho), sem consulta nem fragmento", () => {
+    const shop = parseSnapshot(['page: "Loja" http://shop.test/inventory.html', '- link [ref=e1] → /cart.html?session=abc#x', '- button "Add to cart" [ref=e2]'].join("\n"));
+    const query = buildStep(shop, "abrir o carrinho", [], []);
+    const label = query.targets.click.find((o) => o.id === "e1")?.label;
+    expect(label).toBe("link → /cart.html");
+    expect(query.state).not.toContain("session=abc");
+  });
+
   it("os rótulos mostram o estado, nunca o valor", () => {
     const query = buildStep(page, "entrar", ["email"], []);
     const label = (ref: string) => query.targets.click?.concat(query.targets.type ?? []).find((o) => o.id === ref)?.label;
     expect(label("e1")).toBe('text field "E-mail" (empty)');
     expect(label("e2")).toBe('text field "Senha" (filled)');
     expect(label("e3")).toBe('checkbox "Lembrar de mim" (checked)');
+    expect(query.targets.click.find((o) => o.id === "e6")?.label).toBe('link "Esqueci a senha" → /reset');
   });
 
   it("o estado leva o objetivo, os NOMES dos campos e as últimas ações, nunca valores nem a consulta do endereço", () => {

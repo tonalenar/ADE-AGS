@@ -29,6 +29,8 @@ export interface PageElement {
   states: string[];
   /** Só nos campos: tem valor? (O valor em si nunca é lido.) `null` = não é um campo com valor. */
   filled: boolean | null;
+  /** Só nos links: para onde vão, sem consulta nem fragmento (`/cart.html`). Diz o que um ícone sem nome é. */
+  href?: string;
 }
 
 export interface ParsedPage {
@@ -70,7 +72,8 @@ export function parseSnapshot(snapshot: string): ParsedPage {
       const flags = rest.replace(REF, "").split(" value=")[0].split(" → ")[0];
       const states = [...flags.matchAll(STATE)].map((m) => m[1]);
       const value = VALUE.exec(rest);
-      page.elements.push({ ref, role, name, states, filled: value ? unquote(value[1]).length > 0 : null });
+      const target = rest.split(" → ")[1]?.trim().split(/[?#]/)[0].slice(0, 80);
+      page.elements.push({ ref, role, name, states, filled: value ? unquote(value[1]).length > 0 : null, ...(target ? { href: target } : {}) });
     } else if (role === "text" && name) {
       page.text.push(name);
     }
@@ -165,7 +168,9 @@ function labelOf(el: PageElement): string {
     el.states.includes("pressed") ? "pressed" : null,
     el.filled === null ? null : el.filled ? "filled" : "empty",
   ].filter((mark): mark is string => mark !== null);
-  return `${role}${el.name ? ` "${el.name}"` : ""}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}`;
+  // Um link mostra para onde vai: é o que identifica o ícone do carrinho, que não tem nome.
+  const where = el.href ? ` → ${el.href}` : "";
+  return `${role}${el.name ? ` "${el.name}"` : ""}${where}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}`;
 }
 
 /** O elemento como se conta o que se fez: o papel e o nome, sem o estado de antes da ação. */
