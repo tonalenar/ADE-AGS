@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — cookies</title>
+<!-- L05: a faixa de cookies cobre a página; o botão de comprar só responde depois de tratá-la. -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Mochila Urbana</h1>
+  <p>Mochila de 20 litros, resistente à água. R$ 189,90</p>
+  <div id="status">Carrinho: 0</div>
+  <button onclick="add()">Adicionar ao carrinho</button>
+</main>
+<div class="overlay" id="banner" style="align-items: end;">
+  <div class="box" style="max-width: none; width: 100%; border-radius: 0;">
+    <p>Usamos cookies para melhorar a sua experiência.</p>
+    <button class="green" onclick="hideBanner()">Aceitar todos</button>
+    <button class="gray" onclick="hideBanner()">Recusar</button>
+    <button class="gray" onclick="document.getElementById('status').textContent = 'Carrinho: 0 · preferências de cookies'">Configurar</button>
+  </div>
+</div>
+<script>
+  function hideBanner() { document.getElementById('banner').hidden = true; }
+  function add() {
+    if (!document.getElementById('banner').hidden) return;
+    document.getElementById('status').textContent = 'Carrinho: 1';
+  }
+</script>
+</html>

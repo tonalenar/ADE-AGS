@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — ícones</title>
+<!-- L01: dois ícones SEM NOME (perfil e carrinho). Só a foto os distingue. -->
+<link rel="stylesheet" href="common.css">
+<header>
+  <b>ShopMart</b>
+  <span class="space"></span>
+  <div class="icon" onclick="say('PROFILE OPENED')">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+  </div>
+  <div class="icon" onclick="say('CART OPENED')">
+    <svg viewBox="0 0 24 24"><path d="M3 4h3l2.5 11h10L21 7H7"/><circle cx="10" cy="19" r="1.5"/><circle cx="17" cy="19" r="1.5"/></svg>
+  </div>
+</header>
+<main>
+  <div id="status">Nothing opened yet.</div>
+  <button class="gray" onclick="say('CONTACT CLICKED')">Contact</button>
+</main>
+<script>function say(t) { document.getElementById('status').textContent = t; }</script>
+</html>

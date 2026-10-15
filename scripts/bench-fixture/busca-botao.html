@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — busca</title>
+<!-- L04: a mesma busca, com botão Buscar. -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <form method="get">
+    <input type="search" name="q" placeholder="Buscar produtos" aria-label="Buscar produtos" size="40">
+    <button type="submit">Buscar</button>
+  </form>
+  <div id="status"></div>
+</main>
+<script>
+  const q = new URLSearchParams(location.search).get('q');
+  if (q) document.getElementById('status').textContent = 'Resultados para: ' + q;
+</script>
+</html>
