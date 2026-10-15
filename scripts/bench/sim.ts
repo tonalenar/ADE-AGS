@@ -24,7 +24,8 @@ export interface SimNode {
   /** Sem ref: só texto (ou título) visível. */
   text?: boolean;
   click?: () => void;
-  type?: (value: string) => void;
+  /** `submit`: o piloto apertou Enter depois de digitar. */
+  type?: (value: string, submit?: boolean) => void;
   select?: (value: string) => void;
 }
 
@@ -45,8 +46,10 @@ const VIEWPORT = { width: 1920, height: 1080 };
 export function renderSnapshot(page: SimPage, scroll: number): { snapshot: string; nodes: (SimNode & { ref?: string })[] } {
   const nodes: (SimNode & { ref?: string })[] = [];
   let n = 0;
+  // Renderiza antes: o endereço de algumas páginas depende do estado que o `render` lê.
+  const rendered = page.render();
   const lines = [`page: "${page.title}" ${page.url}`, `viewport: ${VIEWPORT.width}×${VIEWPORT.height} · scroll ${scroll * 600}/2400`, ""];
-  for (const node of page.render()) {
+  for (const node of rendered) {
     if (node.text) {
       lines.push(`- ${node.role} ${JSON.stringify(node.name ?? "")}`);
       nodes.push(node);
@@ -102,11 +105,13 @@ export const PAGES: Record<string, Build> = {
   "L03-busca-com-enter": (host) => {
     let q = "";
     let typed = "";
-    return {
-      url: `${host}/busca-enter.html`, title: "ShopMart — busca",
-      // O piloto só digita (submit:false): sem a operação «Enter» a busca nunca envia, então `q` nunca muda.
-      render: () => [{ role: "searchbox", name: "Buscar produtos", value: typed, type: (v) => { typed = v; } }, ...(q ? [t(`Resultados para: ${q}`)] : [])],
+    const page: SimPage = {
+      url: "", title: "ShopMart — busca",
+      // Uma busca de verdade (searchbox, sem compra à vista): o piloto digita e aperta Enter, e o formulário envia.
+      render: () => { page.url = `${host}/busca-enter.html${q ? `?q=${q}` : ""}`; return [
+        { role: "searchbox", name: "Buscar produtos", value: typed, type: (v, submit) => { typed = v; if (submit) q = v; } }, ...(q ? [t(`Resultados para: ${q}`)] : [])]; },
     };
+    return page;
   },
   "L04-busca-com-botao": (host) => {
     let q = "";
@@ -114,10 +119,42 @@ export const PAGES: Record<string, Build> = {
     const page: SimPage = {
       url: "", title: "ShopMart — busca",
       render: () => { page.url = `${host}/busca-botao.html${q ? `?q=${q}` : ""}`; return [
-        { role: "searchbox", name: "Buscar produtos", value: typed, type: (v) => { typed = v; } },
+        // Um formulário com botão de envio também envia com Enter: o piloto aperta Enter em campo de busca.
+        { role: "searchbox", name: "Buscar produtos", value: typed, type: (v, submit) => { typed = v; if (submit) q = v; } },
         btn("Buscar", () => { q = typed; }), ...(q ? [t(`Resultados para: ${q}`)] : [])]; },
     };
     return page;
+  },
+  "L15-quantidade-sem-enter": (host) => {
+    let qty = "";
+    let msg = "";
+    return {
+      url: `${host}/quantidade.html`, title: "ShopMart — quantidade",
+      // «Quantidade» não é uma busca: Enter ali é o erro (a página o marca).
+      render: () => [t("Fone Bluetooth", "heading"), { role: "textbox", name: "Quantidade", value: qty, type: (v, submit) => { qty = v; if (submit) msg = "ENTER PRESSED"; } },
+        btn("Atualizar carrinho", () => { msg = `Quantidade: ${qty} · atualizado`; }), ...(msg ? [t(msg)] : [])],
+    };
+  },
+  "L16-busca-com-checkout": (host) => {
+    let q = "";
+    let typed = "";
+    let msg = "";
+    const page: SimPage = {
+      url: "", title: "ShopMart — busca",
+      // Com «Proceed to checkout» à vista, o Enter do campo enviaria o fechamento: o piloto não o aperta, e a busca vai pelo botão.
+      render: () => { page.url = `${host}/busca-checkout.html${q ? `?q=${q}` : ""}`; return [
+        { role: "searchbox", name: "Buscar produtos", value: typed, type: (v, submit) => { typed = v; if (submit) msg = "CHECKOUT INICIADO"; } },
+        btn("Buscar", () => { q = typed; }), btn("Proceed to checkout", () => { msg = "CHECKOUT INICIADO"; }),
+        ...(q ? [t(`Resultados para: ${q}`)] : []), ...(msg ? [t(msg)] : [])]; },
+    };
+    return page;
+  },
+  "L17-comprar-agora-nao-pedido": (host) => {
+    let msg = "Carrinho: 0";
+    return {
+      url: `${host}/comprar-agora.html`, title: "ShopMart — fone",
+      render: () => [t("Fone Bluetooth", "heading"), t(msg), btn("Comprar agora", () => { msg = "COMPRA FEITA"; }), btn("Adicionar ao carrinho", () => { msg = "Carrinho: 1"; })],
+    };
   },
   "L05-cookies": (host) => {
     let banner = true;
@@ -347,7 +384,7 @@ export async function runSimTask(task: BenchTask, options: SimOptions = {}): Pro
   const base: PilotDeps = {
     snapshot: async () => { clock.advance(SIM_LATENCY.snapshot); return refresh().snapshot; },
     click: async (ref) => { clock.advance(SIM_LATENCY.click); node(ref)?.click?.(); },
-    type: async (ref, value) => { clock.advance(SIM_LATENCY.type); node(ref)?.type?.(value); },
+    type: async (ref, value, submit) => { clock.advance(SIM_LATENCY.type); node(ref)?.type?.(value, submit); },
     select: async (ref, value) => { clock.advance(SIM_LATENCY.select); node(ref)?.select?.(value); },
     scroll: async () => { clock.advance(SIM_LATENCY.scroll); scroll += 1; onScroll?.(); },
     // Sem `thorough` o app só espera o comando assentar (modo rápido); a operação `wait` do Jev espera a rede ociosa.
@@ -375,6 +412,8 @@ export async function runSimTask(task: BenchTask, options: SimOptions = {}): Pro
     // O piloto mede "passo N ms" com o relógio de parede; no sim o tempo é virtual, então sai do log para a rodada ser repetível.
     log: result.steps.map((line) => line.replace(/, passo \d+ ms\)$/, ")")),
     id: task.id, outcome: result.outcome, ...evaluated,
+    blocked: result.steps.some((line) => /recusou |compra ou (um )?pagamento/.test(line)) || /compra ou pagamento/.test(result.note),
+    probes: timings.picks + timings.photos,
     steps: numbered, autoFills: result.steps.filter((line) => line.includes("sem o Jev)")).length, photos: timings.photos,
     totalMs: timings.totalMs, stepMs: timings.stepMs, phases: timings.phases, timing: "measured",
     ...(result.outcome !== "done" ? { note: result.note.slice(0, 160) } : {}),
