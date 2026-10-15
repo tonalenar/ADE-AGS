@@ -330,6 +330,16 @@ describe("a reserva visual do piloto", () => {
   });
 });
 
+describe("autoFill: campo de texto antes da lista", () => {
+  it("a barra de busca recebe o termo, não o seletor de departamento que tem quase o mesmo nome", async () => {
+    const shop = ['page: "Amazon" https://shop.test/', "viewport: 1000×600 · scroll 0/600", "",
+      '- combobox "Pesquisar em" [ref=e1] value="Todos"', '- textbox "Pesquisar Amazon.com.br" [ref=e2] value=""', '- button "Ir" [ref=e3]'].join("\n");
+    const h = harness([ok("stuck")], [shop]);
+    await runPilot("pesquisar", ["Pesquisa=fone"], undefined, h.deps);
+    expect(h.calls[0]).toBe("type e2 fone");
+  });
+});
+
 describe("elementos sem nome iguais", () => {
   const ICONS = ['page: "Loja" http://shop.test/', "viewport: 1000×600 · scroll 0/600", "", "- clickable [ref=e1]", "- clickable [ref=e2]", '- button "Login" [ref=e3]', '- link "Ajuda" [ref=e4] → /ajuda'].join("\n");
 

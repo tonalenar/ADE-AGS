@@ -116,6 +116,22 @@ impl StepReply {
     }
 }
 
+/**
+ * O texto de uma página para o detector de segredos: sem os ENDEREÇOS. O caminho de um endereço de loja
+ * (`…/Orelhas-Bluetooth-Infantil-COLORIDO-HEADPHONE/dp/B0CGH58XFC`) é longo, de letras e números misturados, e o
+ * detector o lia como uma chave — a Amazon inteira era recusada. O estado já leva só origem + caminho (sem consulta nem
+ * fragmento, que é onde vão tokens), então o que sai daqui não perde nada que importe. Pura.
+ */
+pub(super) fn without_addresses(text: &str) -> String {
+    use std::sync::OnceLock;
+    static ADDRESS: OnceLock<regex::Regex> = OnceLock::new();
+    static ARROW: OnceLock<regex::Regex> = OnceLock::new();
+    let address = ADDRESS.get_or_init(|| regex::Regex::new(r#"[a-zA-Z][a-zA-Z0-9+.-]*://[^\s"')]+"#).unwrap());
+    // `link "Nome" → /caminho/longo-do-link`: o destino de um link, que o piloto mostra ao Jev.
+    let arrow = ARROW.get_or_init(|| regex::Regex::new(r"→ \S+").unwrap());
+    arrow.replace_all(&address.replace_all(text, "<url>"), "→ <path>").into_owned()
+}
+
 fn cut(text: &str, max: usize) -> String {
     text.split_whitespace().collect::<Vec<_>>().join(" ").chars().take(max).collect()
 }
@@ -226,7 +242,9 @@ pub fn pick(db: &DbConnection, query: &StepQuery) -> StepReply {
     }
     // O que o detector de segredos marca não sai, qualquer que seja o provedor.
     let labels = clean.operations.iter().chain(clean.targets.values().flatten());
-    if memory_secret("", &clean.state, None) || labels.into_iter().any(|(_, label)| memory_secret("", label, None)) {
+    if memory_secret("", &without_addresses(&clean.state), None)
+        || labels.into_iter().any(|(_, label)| memory_secret("", &without_addresses(label), None))
+    {
         return StepReply::without_choice("secret", "A página tem algo que parece um segredo: não enviei ao provedor.");
     }
     let api_key = config::load_key();
@@ -336,6 +354,18 @@ mod test {
         assert!(clean.iter().all(|(id, _)| safe_id(id)));
         assert_eq!(clean.iter().filter(|(id, _)| id == "e0").count(), 1);
         assert_eq!(clean_options(&many, 60).len(), 30, "o Jev leva mais que 19");
+    }
+
+    #[test]
+    fn o_endereco_de_uma_loja_nao_e_um_segredo_mas_uma_chave_de_verdade_continua_sendo() {
+        let amazon = "PAGE: \"Fone\" https://www.amazon.com.br/Orelhas-Bluetooth-Infantil-COLORIDO-HEADPHONE-Sem-Fio/dp/B0CGH58XFC\n\
+[e7] link \"Fone De Ouvido\" → /Fone-De-Ouvido-Headphone-Sem-Fio-Bluetooth-P47-Micro-SD-FM-Preto/dp/B0CGH58XFCa";
+        assert!(memory_secret("", amazon, None), "sem tirar os endereços o detector recusa a página");
+        assert!(!memory_secret("", &without_addresses(amazon), None));
+        let leaked = "GOAL: entrar\nVISIBLE TEXT: token sk-ant-api03-aB3dE5gH7jK9mN1pQ3sT5vW7yZ9bC1eF3hJ5kL7nP9rS1tU3wX5yA7cD9fG1hJ3k";
+        assert!(memory_secret("", &without_addresses(leaked), None), "uma chave de verdade no texto continua bloqueada");
+        let credentials = "abrir https://user:senha123@exemplo.com/x";
+        assert!(without_addresses(credentials).contains("<url>"));
     }
 
     #[test]

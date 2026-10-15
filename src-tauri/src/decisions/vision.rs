@@ -174,7 +174,9 @@ pub fn pick(db: &DbConnection, query: &VisualQuery) -> VisualReply {
         return VisualReply::without("off", "A reserva visual só funciona com o Jev.");
     }
     // O objetivo e o histórico saem como texto: o detector de segredos olha pelo menos estes.
-    if memory_secret("", &query.goal, None) || memory_secret("", &query.recent, None) {
+    if memory_secret("", &super::browse::without_addresses(&query.goal), None)
+        || memory_secret("", &super::browse::without_addresses(&query.recent), None)
+    {
         return VisualReply::without("secret", "O objetivo parece conter um segredo: não enviei nada ao provedor.");
     }
     let png = match read_capture(&query.image_path) {

@@ -519,8 +519,9 @@ export async function autoFill(
     let bestScore = 0;
     for (const el of page.elements) {
       if (!(TYPING.has(el.role) || CHOOSING.has(el.role)) || touched.has(el.ref) || el.states.includes("disabled")) continue;
-      const score = similarity(el.name, key);
-      if (score > bestScore) { best = el; bestScore = score; }
+      // Empatando no nome, o campo de TEXTO vence a lista: "Pesquisa" é a barra de busca, não o departamento.
+      const score = similarity(el.name, key) * 2 + (TYPING.has(el.role) ? 1 : 0);
+      if (similarity(el.name, key) > 0 && score > bestScore) { best = el; bestScore = score; }
     }
     if (!best) continue;
     touched.add(best.ref);
