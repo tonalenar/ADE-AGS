@@ -56,6 +56,9 @@ if ($Run) {
     $running | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }
     Start-Sleep -Milliseconds 800
   }
+  # Perfil do WebView2 PRÓPRIO: com o mesmo identificador do app instalado (e de outras instâncias de debug) o
+  # perfil seria compartilhado, e o estado salvo por outra versão (abas, canvas) quebrava telas desta.
+  $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $env:LOCALAPPDATA "ade-ags-dev-localwebview"
   Start-Process $exe
   Write-Host "[dev-local] aberto: $exe"
 }
