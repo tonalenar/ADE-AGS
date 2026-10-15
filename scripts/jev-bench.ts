@@ -23,7 +23,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import {
-  buildReport, canStart, cliText, infraTooHigh, isInfraFailure, unwrapCli, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
+  buildReport, canStart, infraTooHigh, isInfraFailure, unwrapCli, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
   type BenchReport, type BenchTask, type TaskRun,
 } from "./bench/core";
 import { runSimTask } from "./bench/sim";
@@ -149,14 +149,14 @@ async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
   const started = performance.now();
   let text: string;
   try {
-    text = cliText(await ags(args, 150_000));
+    text = await ags(args, 150_000);
   } catch (e) {
     return crash(`act falhou: ${failure(e)}`);
   }
   const totalMs = Math.round(performance.now() - started);
   const report = parseActReport(text);
   let finalSnapshot = report.finalSnapshot;
-  try { finalSnapshot = cliText(await ags(["portal", "snapshot", portal], 60_000)); } catch { /* fica com a página embutida no relatório */ }
+  try { finalSnapshot = await ags(["portal", "snapshot", portal], 60_000); } catch { /* fica com a página embutida no relatório */ }
   const evaluated = evaluate(task, finalSnapshot);
   // O relatório do act traz a linha TEMPOS (somas por fase) e o tempo de cada passo que agiu; o que sobra do relógio de
   // quem rodou vira «outros». Sem o tempo de passo (relatório antigo), vale a média.

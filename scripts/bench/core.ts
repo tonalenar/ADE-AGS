@@ -301,22 +301,6 @@ const HEADS: [string, PilotResult["outcome"]][] = [
 ];
 const FINAL_MARK = "A página agora (o Jev só escolhe onde tocar: confira o resultado):";
 
-/**
- * O `ags portal …` imprime um JSON (`{"portal":{…},"text":"…"}`); o que interessa é o `text`. Texto puro passa como veio.
- * Pura.
- */
-export function cliText(raw: string): string {
-  const trimmed = raw.trim();
-  if (!trimmed.startsWith("{")) return raw;
-  try {
-    const parsed: unknown = JSON.parse(trimmed);
-    const text = typeof parsed === "object" && parsed !== null ? (parsed as { text?: unknown }).text : undefined;
-    return typeof text === "string" ? text : raw;
-  } catch {
-    return raw;
-  }
-}
-
 /** Lê o texto que o `act` devolve (ver `formatResult` em `jevPilot.ts`). Pura. */
 export function parseActReport(report: string): ActReport {
   const lines = report.split("\n");
