@@ -28,3 +28,6 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Resultados do benchmark do piloto (scripts/jev-bench.ts); os de referência ficam em docs/ade-ags/bench/
+bench-results/
