@@ -229,7 +229,7 @@ Returns what changed plus console errors and failed requests caused by the click
         description: "Reach a goal in the browser with several steps at once, much faster than snapshot + click one \
 at a time: Jev (a fast decision model) picks each next click/choice from the page while this tool does it. Use it for \
 flows (log in, fill and submit a form, add to cart, open a section). State the goal with EVERY choice it needs (size, \
-item, section): a vague goal makes it guess. Pass the text to type as fills (\"Field name=value\"; the field name has \
+item, section): a vague goal makes it guess. Prefer ONE call with the WHOLE goal (search, pick the result, add to cart) and raise steps for long flows: every extra call costs a full agent turn, a step costs well under a second. Typing in a search field presses Enter by itself. Pass the text to type as fills (\"Field name=value\"; the field name has \
 to look like the field's label). Typed values never leave the machine. It stops when Jev is unsure, and always \
 returns the page as it ended: check it. Needs Settings → Decisions → Canvas browser (Jev drives) turned on.",
         properties: || {
