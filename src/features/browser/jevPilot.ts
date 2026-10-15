@@ -33,6 +33,8 @@ export interface PageElement {
   href?: string;
   /** Só nas listas nativas: o que se pode escolher. Cada opção vira um alvo (`e12_3` = a 4ª opção do elemento e12). */
   options?: string[];
+  /** O que vem logo antes dele na página (o título e o preço do produto, o link anterior): distingue "Adicionar" de "Adicionar". */
+  near?: string;
 }
 
 export interface ParsedPage {
@@ -43,13 +45,17 @@ export interface ParsedPage {
   text: string[];
   /** O tamanho da janela da página em px CSS (do cabeçalho do snapshot): converte as frações de uma foto em pontos. */
   viewport?: { width: number; height: number };
+  /** Quanto a página já rolou (do cabeçalho do snapshot): rolar muda a página, mesmo sem elemento novo. */
+  scrollY?: number;
 }
 
 const NODE = /^\s*- (\S+)(?: ("(?:[^"\\]|\\.)*"))?(.*)$/;
 const REF = /\[ref=(e\d+)\]/;
 const STATE = /\[([^\]=]+)\]/g;
 const HEADER = /^page: (?:("(?:[^"\\]|\\.)*") )?(\S+)/;
-const VIEWPORT = /^viewport: (\d+)×(\d+)/;
+const VIEWPORT = /^viewport: (\d+)×(\d+)(?: · scroll (\d+)\/(\d+))?/;
+/** Quanto do que vem antes de um elemento entra no `near`. */
+const NEAR_CHARS = 50;
 const VALUE = / value=("(?:[^"\\]|\\.)*")/;
 const OPTIONS = / options=(\[.*\])\s*$/;
 
@@ -61,6 +67,9 @@ function unquote(raw: string | undefined): string {
 /** Lê o texto do `snapshot` (ver `page/snapshotFormat.ts`) de volta em elementos e texto. Pura. */
 export function parseSnapshot(snapshot: string): ParsedPage {
   const page: ParsedPage = { title: "", url: "", elements: [], text: [] };
+  // O texto (e os títulos) desde o último elemento, e o nome desse elemento: é o que fica "perto" do próximo.
+  let since: string[] = [];
+  let previous = "";
   for (const line of snapshot.split("\n")) {
     const header = HEADER.exec(line);
     if (header && !page.url) {
@@ -71,6 +80,7 @@ export function parseSnapshot(snapshot: string): ParsedPage {
     const size = VIEWPORT.exec(line);
     if (size && !page.viewport) {
       page.viewport = { width: Number(size[1]), height: Number(size[2]) };
+      if (size[3] !== undefined) page.scrollY = Number(size[3]);
       continue;
     }
     const node = NODE.exec(line);
@@ -92,13 +102,18 @@ export function parseSnapshot(snapshot: string): ParsedPage {
           if (Array.isArray(parsed)) options = parsed.filter((o): o is string => typeof o === "string");
         } catch { /* sem opções legíveis: a lista fica como um elemento só */ }
       }
+      const nearby = (since.length > 0 ? since.slice(-2) : previous ? [previous] : []).map((t) => (t.length > NEAR_CHARS ? `${t.slice(0, NEAR_CHARS - 1)}…` : t)).join(" | ");
       page.elements.push({
         ref, role, name, states, filled: value ? unquote(value[1]).length > 0 : null,
         ...(target ? { href: target } : {}),
         ...(options?.length ? { options } : {}),
+        ...(nearby ? { near: nearby } : {}),
       });
-    } else if (role === "text" && name) {
+      since = [];
+      previous = name;
+    } else if ((role === "text" || role === "heading") && name) {
       page.text.push(name);
+      since.push(name);
     }
   }
   return page;
@@ -184,7 +199,7 @@ export interface Done {
 }
 
 /** O que o Jev lê de um elemento: o papel, o nome e o estado (marcado, expandido, preenchido), nunca o valor. */
-function labelOf(el: PageElement): string {
+function labelOf(el: PageElement, twins?: Set<string>): string {
   const role = ROLE_LABEL[el.role] ?? el.role;
   const marks = [
     el.states.includes("checked") ? "checked" : null,
@@ -195,7 +210,21 @@ function labelOf(el: PageElement): string {
   ].filter((mark): mark is string => mark !== null);
   // Um link mostra para onde vai: é o que identifica o ícone do carrinho, que não tem nome.
   const where = el.href ? ` → ${el.href}` : "";
-  return `${role}${el.name ? ` "${el.name}"` : ""}${where}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}`;
+  // Vários elementos com o mesmo papel e nome ("Adicionar" ×8): só o que vem antes deles os distingue (o produto, o preço).
+  const near = twins?.has(twinKey(el)) && el.near ? ` [next to: ${el.near}]` : "";
+  return `${role}${el.name ? ` "${el.name}"` : ""}${where}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}${near}`;
+}
+
+/** A chave de "são o mesmo controle": o papel, o nome e o destino. */
+function twinKey(el: PageElement): string {
+  return `${el.role}|${el.name}|${el.href ?? ""}`;
+}
+
+/** Os controles que se repetem na página (mesmo papel, nome e destino). Pura. */
+export function twinsOf(elements: PageElement[]): Set<string> {
+  const seen = new Map<string, number>();
+  for (const el of elements) if (el.name) seen.set(twinKey(el), (seen.get(twinKey(el)) ?? 0) + 1);
+  return new Set([...seen].filter(([, n]) => n > 1).map(([key]) => key));
 }
 
 /** O elemento como se conta o que se fez: o papel e o nome, sem o estado de antes da ação. */
@@ -215,7 +244,7 @@ export function bareUrl(url: string): string {
 
 /** Uma impressão da página: muda quando muda o endereço, os elementos ou o texto. Serve para saber se uma ação teve efeito. Pura. */
 export function fingerprint(page: ParsedPage): string {
-  const body = `${bareUrl(page.url)}|${page.elements.map((e) => `${e.role}:${e.name}:${e.filled}:${e.states.join("+")}`).join(";")}|${page.text.slice(0, 40).join(";")}`;
+  const body = `${bareUrl(page.url)}|${page.elements.map((e) => `${e.role}:${e.name}:${e.filled}:${e.states.join("+")}`).join(";")}|${page.text.slice(0, 40).join(";")}|${page.scrollY ?? ""}`;
   let hash = 5381;
   for (let i = 0; i < body.length; i++) hash = ((hash << 5) + hash + body.charCodeAt(i)) | 0;
   return `${page.elements.length}:${hash}`;
@@ -255,6 +284,7 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
     (overlap(wanted, words(el.name)) + fillKeys.filter((key) => similarity(el.name, key) > 0).length) * 2
     + (TYPING.has(el.role) && fillKeys.length > 0 && el.filled !== true ? 1 : 0);
 
+  const twins = twinsOf(page.elements);
   const groups: Record<Operation, { el: PageElement; index: number }[]> = { click: [], type: [], select: [] };
   // Uma lista nativa com opções vira UM ALVO POR OPÇÃO ("Classificar por → Preço: do menor ao maior"): escolher não
   // precisa de `--fill`, o objetivo já diz qual.
@@ -275,14 +305,14 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
   for (const operation of ["click", "type", "select"] as const) {
     // Com mais de `MAX_PER_HEAD`, ficam os mais ligados ao objetivo; sempre na ordem da página, que é como se lê.
     const kept = [...groups[operation]].sort((a, b) => score(b.el) - score(a.el) || a.index - b.index).slice(0, MAX_PER_HEAD).sort((a, b) => a.index - b.index);
-    if (kept.length > 0) targets[operation] = kept.map(({ el }) => ({ id: el.ref, label: labelOf(el) }));
+    if (kept.length > 0) targets[operation] = kept.map(({ el }) => ({ id: el.ref, label: labelOf(el, twins) }));
     shown.push(...kept);
   }
   if (optionTargets.length > 0) targets.select = [...optionTargets.slice(0, MAX_PER_HEAD), ...(targets.select ?? [])];
   // A pergunta da OPERAÇÃO também precisa ver os elementos (só as de alvo os listam): sem isso o Jev escolhia
   // "rolar" por não saber o que a página oferece. É a tabela `elements` do estado no jev-ultrafast.
   const table = [
-    ...shown.sort((a, b) => a.index - b.index).map(({ el }) => `[${el.ref}] ${labelOf(el)}`),
+    ...shown.sort((a, b) => a.index - b.index).map(({ el }) => `[${el.ref}] ${labelOf(el, twins)}`),
     ...page.elements.filter((el) => el.options?.length && !el.states.includes("disabled")).map((el) => `[${el.ref}] ${labelOf(el)} with options: ${el.options!.slice(0, 12).join(" | ")}`),
   ];
 
@@ -391,7 +421,7 @@ export const MAX_STEPS = 15;
 
 /** A reserva visual só age com estas certezas: o Jev viu um controle (p) e a caixa é firme (confiança). */
 export const MIN_FOUND = 0.6;
-export const MIN_BOX_CONFIDENCE = 0.4;
+export const MIN_BOX_CONFIDENCE = 0.6;
 /** Quantas vezes por execução se tira uma foto: ela é mais cara e sai da máquina. */
 export const MAX_VISUAL = 3;
 

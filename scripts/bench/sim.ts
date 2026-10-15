@@ -305,7 +305,8 @@ export function simPick(query: StepQuery, goal: string, isDone: () => boolean, s
   if (isDone()) return reply("done", null, 0.97);
 
   const wanted = stems(goal);
-  const recent = query.state.split("RECENT ACTIONS:")[1] ?? "";
+  // Só as ações: o que vem depois (o texto visível) não é histórico.
+  const recent = (query.state.split("RECENT ACTIONS:")[1] ?? "").split("VISIBLE TEXT")[0];
   const ops = new Set(query.operations.map((o) => o.id));
   const overlap = (label: string) => { let n = 0; for (const w of stems(label)) if (wanted.has(w)) n++; return n; };
   // Uma palavra inteira em comum pesa mais que uma raiz: «Especificações» casa com o objetivo, «Descrição» só casa com «Descubra».
