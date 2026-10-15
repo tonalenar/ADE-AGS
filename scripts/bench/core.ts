@@ -204,6 +204,8 @@ export interface TaskRun {
   blocked?: boolean;
   /** Consultas ao Jev (operação+elemento) e fotos que a rodada gastou: a cota. */
   probes?: number;
+  /** O relatório do `act` como veio (só no real, cortado): serve para classificar a causa de uma falha. */
+  report?: string;
 }
 
 export interface Verdict {
@@ -231,6 +233,20 @@ export function judge(run: Pick<TaskRun, "outcome" | "criterionOk" | "forbidden"
 export function evaluate(task: Pick<BenchTask, "success" | "forbid">, finalSnapshot: string): { criterionOk: boolean; forbidden: boolean; finalUrl: string } {
   const view = viewOf(finalSnapshot);
   return { criterionOk: check(task.success, view), forbidden: task.forbid ? check(task.forbid, view) : false, finalUrl: view.url };
+}
+
+/**
+ * O CLI `ags portal …` devolve JSON (`{"portal":{…},"text":"…"}`): o texto que interessa (o relatório do act, o snapshot)
+ * vem em `text`. Sem JSON de objeto com `text` string, devolve a saída como veio. Pura.
+ */
+export function unwrapCli(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{")) return raw;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (typeof parsed === "object" && parsed !== null && typeof (parsed as { text?: unknown }).text === "string") return (parsed as { text: string }).text;
+  } catch { /* não era JSON: fica como veio */ }
+  return raw;
 }
 
 // ── Relatório do `ags portal act` ───────────────────────────────────
@@ -331,6 +347,21 @@ export function phasesFromReport(report: Pick<ActReport, "jevMs" | "timings">, t
     phases: { jevMs, snapshotMs: t.snapshot, actionMs: t.acao, waitMs: t.espera, otherMs: Math.max(0, totalMs - jevMs - t.snapshot - t.acao - t.espera) },
     probes: t.consultas + t.fotos,
   };
+}
+
+/**
+ * A rodada falhou por INFRAESTRUTURA (o app, o portal, o CLI), não pelo piloto? `crash` (o comando falhou), `off` (o Jev
+ * desligado, nada rodou) e um `error` cujo texto fala de montagem do canvas ou de tempo esgotado. Pura.
+ */
+export function isInfraFailure(run: Pick<TaskRun, "outcome" | "note" | "report">): boolean {
+  if (run.outcome === "crash" || run.outcome === "off") return true;
+  return run.outcome === "error" && /did not finish mounting|timed? ?out|tempo esgotado|n[ãa]o tem nenhuma p[áa]gina|no page loaded/i.test(`${run.note ?? ""}
+${run.report ?? ""}`);
+}
+
+/** Passou do teto de falhas de infraestrutura? Só vale depois de `minTasks` rodadas (uma falha em duas não é taxa). Pura. */
+export function infraTooHigh(runs: Pick<TaskRun, "outcome" | "note" | "report">[], maxRate = 0.3, minTasks = 4): boolean {
+  return runs.length >= minTasks && runs.filter(isInfraFailure).length / runs.length > maxRate;
 }
 
 // ── Agregação ───────────────────────────────────────────────────────

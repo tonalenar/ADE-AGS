@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { formatResult, type PilotDeps, type PilotResult } from "../jevPilot";
 import {
   all, any, canStart, check, describeCriterion, emptyPhases, evaluate, fold, instrument, judge, median, not, parseActReport,
-  regex, renderMarkdown, renderTaskTable, select, summarize, text, url, viewOf, buildReport, parseTimings, phasesFromReport,
+  regex, renderMarkdown, renderTaskTable, select, summarize, text, url, viewOf, buildReport, parseTimings, phasesFromReport, isInfraFailure, infraTooHigh, unwrapCli,
   type BenchTask, type TaskRun,
 } from "../../../../scripts/bench/core";
 import { PAGES, initialNames, renderSnapshot, runSimTask, virtualClock } from "../../../../scripts/bench/sim";
@@ -375,3 +375,38 @@ describe("o modo sim (laço real, páginas e Jev simulados)", () => {
     expect(s.share.jevMs + s.share.snapshotMs + s.share.actionMs + s.share.waitMs + s.share.otherMs).toBeCloseTo(1, 5);
   });
 });
+
+describe("falhas de infraestrutura", () => {
+  const r = (outcome: TaskRun["outcome"], note?: string, report?: string) => ({ outcome, note, report });
+  it("crash e off são infraestrutura; error só quando fala de montagem ou tempo esgotado", () => {
+    expect(isInfraFailure(r("crash"))).toBe(true);
+    expect(isInfraFailure(r("off"))).toBe(true);
+    expect(isInfraFailure(r("error", "portal did not finish mounting"))).toBe(true);
+    expect(isInfraFailure(r("error", undefined, "ERRO: timed out"))).toBe(true);
+    expect(isInfraFailure(r("error", "A ação falhou; veja o motivo acima"))).toBe(false);
+    expect(isInfraFailure(r("unsure"))).toBe(false);
+    expect(isInfraFailure(r("done"))).toBe(false);
+  });
+  it("o teto de 30% só vale depois de algumas rodadas", () => {
+    expect(infraTooHigh([r("crash"), r("crash")])).toBe(false);
+    expect(infraTooHigh([r("crash"), r("done"), r("done"), r("done")])).toBe(false); // 25%
+    expect(infraTooHigh([r("crash"), r("crash"), r("done"), r("done")])).toBe(true); // 50%
+    expect(infraTooHigh([r("crash"), r("crash"), r("crash"), r("done"), r("done"), r("done"), r("done"), r("done")], 0.4)).toBe(false); // 37,5% com teto 40%
+  });
+});
+
+describe("saída JSON do CLI", () => {
+  it("devolve o campo text e deixa passar o que não é JSON de objeto com text", () => {
+    const body = ['act "g": FEITO', "ok"].join("\n");
+    expect(unwrapCli(JSON.stringify({ portal: { id: "p" }, text: body }))).toBe(body);
+    expect(unwrapCli("page: x http://a")).toBe("page: x http://a");
+    expect(unwrapCli('{"error":"falhou"}')).toBe('{"error":"falhou"}');
+    expect(unwrapCli("{nao json")).toBe("{nao json");
+  });
+  it("o relatório do act embrulhado no JSON do CLI é reconhecido depois de desembrulhar", () => {
+    const wrapped = JSON.stringify({ portal: { id: "p" }, text: ['act "g": FEITO', "ok", "", "Passos:", "1. concluído (p=0.97, 300 ms)"].join("\n") });
+    expect(parseActReport(wrapped).outcome).toBeNull();
+    expect(parseActReport(unwrapCli(wrapped)).outcome).toBe("done");
+  });
+});
+

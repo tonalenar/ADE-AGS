@@ -16,14 +16,14 @@
  * `--real` fala com o app já aberto pelo CLI `ags` (precisa de um terminal de agente do ADE AGS). Nunca faz login real,
  * compra ou envio de dado pessoal: as tarefas públicas param antes de finalizar e o critério `forbid` acusa quem passar.
  */
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import {
-  buildReport, canStart, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
+  buildReport, canStart, infraTooHigh, isInfraFailure, unwrapCli, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
   type BenchReport, type BenchTask, type TaskRun,
 } from "./bench/core";
 import { runSimTask } from "./bench/sim";
@@ -78,7 +78,8 @@ function serveFixtures(): Promise<Server> {
     const path = decodeURIComponent((req.url ?? "/").split("?")[0]);
     const file = resolve(FIXTURES, `.${normalize(path === "/" ? "/index.html" : path)}`);
     if (!file.startsWith(FIXTURES) || !existsSync(file)) { res.writeHead(404).end("não encontrado"); return; }
-    res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream", "cache-control": "no-store" });
+    // `connection: close`: o proxy do app reaproveita conexões e acusa 502 quando o servidor as derruba (visto na 1.ª rodada real).
+    res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream", "cache-control": "no-store", connection: "close" });
     res.end(readFileSync(file));
   });
   return new Promise((ok, err) => { server.once("error", err); server.listen(port, "127.0.0.1", () => ok(server)); });
@@ -102,8 +103,18 @@ for (const s of selection.skipped) console.log(`(pulada ${s.id}: ${s.why})`);
 
 // ── Modo real: o CLI `ags` ──────────────────────────────────────────
 
-function ags(args: string[], timeoutMs = 150_000): string {
-  return execFileSync("ags", args, { encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+// `--cli <ags.exe>` (ou AGS_CLI) escolhe o CLI; o app vem do AGS_HANDSHAKE do ambiente.
+const AGS = value("cli") ?? process.env.AGS_CLI ?? "ags";
+
+// ASSÍNCRONO de propósito: o servidor das fixtures roda neste mesmo processo, e um `execFileSync` o travaria enquanto o app
+// busca a página (foi o que derrubou a 1.ª rodada real: «A página não respondeu em 12 s»).
+function ags(args: string[], timeoutMs = 150_000): Promise<string> {
+  return new Promise((ok, err) => {
+    execFile(AGS, args, { encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
+      if (error) err(Object.assign(error, { stdout, stderr }));
+      else ok(unwrapCli(stdout));
+    });
+  });
 }
 
 async function confirmReal(tasks: BenchTask[], maxProbes: number): Promise<void> {
@@ -118,28 +129,34 @@ async function confirmReal(tasks: BenchTask[], maxProbes: number): Promise<void>
   if (answer.trim() !== "CONFIRMO") fail("Não confirmado. Nada foi rodado.");
 }
 
+/** Por que um comando do CLI falhou: a mensagem, a saída e o erro padrão (é onde o app diz «did not finish mounting»). */
+function failure(e: unknown): string {
+  const err = e as { message?: string; stdout?: string; stderr?: string };
+  return [err.message, err.stdout, err.stderr].filter(Boolean).join(" | ").replace(/\s+/g, " ").slice(0, 400);
+}
+
 async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
   const crash = (note: string): TaskRun => ({
     id: task.id, outcome: "crash", criterionOk: false, forbidden: false, steps: 0, autoFills: 0, photos: 0, totalMs: 0,
-    stepMs: [], phases: emptyPhases(), timing: "reported", finalUrl: "", note: note.slice(0, 200),
+    stepMs: [], phases: emptyPhases(), timing: "reported", finalUrl: "", note: note.slice(0, 400),
   });
   try {
-    ags(["portal", "navigate", portal, absolute(task)], 60_000);
+    await ags(["portal", "navigate", portal, absolute(task)], 60_000);
   } catch (e) {
-    return crash(`navegar falhou: ${e instanceof Error ? e.message : String(e)}`);
+    return crash(`navegar falhou: ${failure(e)}`);
   }
   const args = ["portal", "act", portal, task.goal, ...(task.fills ?? []).flatMap((f) => ["--fill", f]), "--steps", String(task.maxSteps)];
   const started = performance.now();
   let text: string;
   try {
-    text = ags(args, 150_000);
+    text = await ags(args, 150_000);
   } catch (e) {
-    return crash(`act falhou: ${e instanceof Error ? e.message : String(e)}`);
+    return crash(`act falhou: ${failure(e)}`);
   }
   const totalMs = Math.round(performance.now() - started);
   const report = parseActReport(text);
   let finalSnapshot = report.finalSnapshot;
-  try { finalSnapshot = ags(["portal", "snapshot", portal], 60_000); } catch { /* fica com a página embutida no relatório */ }
+  try { finalSnapshot = await ags(["portal", "snapshot", portal], 60_000); } catch { /* fica com a página embutida no relatório */ }
   const evaluated = evaluate(task, finalSnapshot);
   // O relatório do act traz a linha TEMPOS (somas por fase) e o tempo de cada passo que agiu; o que sobra do relógio de
   // quem rodou vira «outros». Sem o tempo de passo (relatório antigo), vale a média.
@@ -149,7 +166,7 @@ async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
     id: task.id, outcome: report.outcome ?? "crash", ...evaluated,
     steps: report.steps, autoFills: report.autoFills, photos: report.photos, totalMs,
     stepMs: report.stepMs.length > 0 ? report.stepMs : Array.from({ length: Math.max(1, report.steps) }, () => perStep),
-    phases, timing: "reported", blocked: report.blocked, ...(probes !== undefined ? { probes } : {}),
+    phases, timing: "reported", blocked: report.blocked, report: text.slice(0, 5000), ...(probes !== undefined ? { probes } : {}),
     ...(report.outcome === null ? { note: "relatório do act não reconhecido" } : {}),
   };
 }
@@ -186,14 +203,16 @@ if (mode === "sim") {
   server = await serveFixtures();
   const portal = value("portal") ?? "bench-jev";
   if (!value("portal")) {
-    try { ags(["portal", "create", portal, absolute(planned[0])], 60_000); } catch (e) { server.close(); fail(`Não consegui criar o portal (rode num terminal de agente do app): ${e instanceof Error ? e.message : String(e)}`); }
+    try { await ags(["portal", "create", portal, absolute(planned[0])], 60_000); } catch (e) { server.close(); fail(`Não consegui criar o portal (rode num terminal de agente do app): ${e instanceof Error ? e.message : String(e)}`); }
   }
   let used = 0;
   for (const task of planned) {
     const run = await runRealTask(task, portal);
     runs.push(run);
-    used += run.probes ?? Math.max(run.steps + run.photos, 1);
-    console.log(`${run.criterionOk ? "ok  " : "FALHA"} ${task.id} — ${run.outcome}, ${run.steps} passos, ${(run.totalMs / 1000).toFixed(1)} s (${used} sondas até aqui)`);
+    used += run.outcome === "crash" ? 0 : run.probes ?? Math.max(run.steps + run.photos, 1);
+    console.log(`${run.criterionOk ? "ok  " : "FALHA"} ${task.id} — ${run.outcome}, ${run.steps} passos, ${(run.totalMs / 1000).toFixed(1)} s (${used} sondas até aqui)${isInfraFailure(run) ? " [infra]" : ""}`);
+    if (infraTooHigh(runs)) { console.log(`
+PARADO: mais de 30% das rodadas falharam por infraestrutura (${runs.filter(isInfraFailure).length}/${runs.length}). Nada mais gastou cota.`); break; }
   }
   server.close();
 }
