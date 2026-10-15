@@ -136,6 +136,26 @@ export function facingSides(a: Box, b: Box): [Side, Side] {
  * La vista que centra un nodo al 100 %. Si no entra en el área, se alinea arriba a la
  * izquierda con un margen: así se ve el comienzo de la terminal en vez de su centro.
  */
+/**
+ * A vista que mostra um nó INTEIRO na tela, no maior zoom que o comporta (até 100 %). Serve para a foto do navegador
+ * do canvas: um nó cortado pela borda da tela daria uma foto cortada. As margens deixam de fora a barra de cima e a
+ * dock de baixo, que ficam por cima do canvas e sairiam na foto.
+ */
+export function revealViewport(
+  box: Box, width: number, height: number,
+  margin = { side: 40, top: 70, bottom: 120 },
+): Viewport {
+  const availableW = Math.max(1, width - 2 * margin.side);
+  const availableH = Math.max(1, height - margin.top - margin.bottom);
+  const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(availableW / box.w, availableH / box.h)));
+  const centerY = margin.top + availableH / 2;
+  return {
+    zoom,
+    x: Math.round(width / 2 - (box.x + box.w / 2) * zoom),
+    y: Math.round(centerY - (box.y + box.h / 2) * zoom),
+  };
+}
+
 export function focusViewport(box: Box, width: number, height: number): Viewport {
   const margin = 24;
   const x = box.w + 2 * margin <= width ? width / 2 - (box.x + box.w / 2) : margin - box.x;

@@ -304,11 +304,24 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       const frame = column.current;
       if (!page || !frame) throw new Error("La página todavía no está cargada.");
       useViewTabsStore.getState().activateView(view.id);
-      const frozen = await freezePage(page, frame);
-      const rect = page.getBoundingClientRect();
-      // Só vale se a página está toda à vista: uma foto cortada deixaria as frações da caixa apontando para o lugar errado.
-      const complete = Math.abs(frozen.screen.width - rect.width) < 2 && Math.abs(frozen.screen.height - rect.height) < 2;
-      return { path: await previewSaveCapture(await canvasToPng(frozen.canvas), "visual"), complete };
+      const shoot = async () => {
+        const frozen = await freezePage(page, frame);
+        const rect = page.getBoundingClientRect();
+        // Só vale se a página está toda à vista: uma foto cortada deixaria as frações da caixa apontando para o lugar errado.
+        return { frozen, complete: Math.abs(frozen.screen.width - rect.width) < 2 && Math.abs(frozen.screen.height - rect.height) < 2 };
+      };
+      let shot = await shoot().catch(() => null);
+      if (!shot || !shot.complete) {
+        // No canvas o nó pode estar cortado pela borda da tela: a vista o mostra inteiro só pelo tempo da foto.
+        window.dispatchEvent(new CustomEvent("ags:canvas-reveal", { detail: { id: view.id } }));
+        try {
+          await new Promise((resolve) => setTimeout(resolve, 450));
+          shot = await shoot();
+        } finally {
+          window.dispatchEvent(new CustomEvent("ags:canvas-reveal", { detail: { id: view.id, restore: true } }));
+        }
+      }
+      return { path: await previewSaveCapture(await canvasToPng(shot.frozen.canvas), "visual"), complete: shot.complete };
     },
     requestPick: (timeoutMs) => new Promise((resolve) => {
       // Un solo pedido a la vez: el anterior se da por cancelado en vez de quedar colgado.
