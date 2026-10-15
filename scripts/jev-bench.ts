@@ -141,13 +141,14 @@ async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
   let finalSnapshot = report.finalSnapshot;
   try { finalSnapshot = ags(["portal", "snapshot", portal], 60_000); } catch { /* fica com a página embutida no relatório */ }
   const evaluated = evaluate(task, finalSnapshot);
-  // O relatório do act só traz o tempo da consulta ao Jev; o resto vira «outros». O tempo por passo é a média.
+  // O relatório do act traz o tempo da consulta ao Jev e o de cada passo que agiu; o resto vira «outros». Sem o tempo
+  // de passo (relatório antigo), vale a média.
   const jevMs = Math.min(report.jevMs, totalMs);
   const perStep = report.steps > 0 ? totalMs / report.steps : totalMs;
   return {
     id: task.id, outcome: report.outcome ?? "crash", ...evaluated,
     steps: report.steps, autoFills: report.autoFills, photos: report.photos, totalMs,
-    stepMs: Array.from({ length: Math.max(1, report.steps) }, () => perStep),
+    stepMs: report.stepMs.length > 0 ? report.stepMs : Array.from({ length: Math.max(1, report.steps) }, () => perStep),
     phases: { ...emptyPhases(), jevMs, otherMs: totalMs - jevMs }, timing: "reported",
     ...(report.outcome === null ? { note: "relatório do act não reconhecido" } : {}),
   };

@@ -38,7 +38,8 @@ export interface SimPage {
   clickAt?: (x: number, y: number) => void;
 }
 
-const VIEWPORT = { width: 1280, height: 800 };
+// O navegador que um agente abre nasce em 1920×1080 (AGENT_PORTAL_VIEWPORT): é com essa janela que a foto aponta.
+const VIEWPORT = { width: 1920, height: 1080 };
 
 /** Renderiza as páginas como o `snapshot` do app as descreveria (ver `page/snapshotFormat.ts`). */
 export function renderSnapshot(page: SimPage, scroll: number): { snapshot: string; nodes: (SimNode & { ref?: string })[] } {
@@ -84,8 +85,8 @@ export const PAGES: Record<string, Build> = {
       url: `${host}/icones.html`, title: "ShopMart — ícones",
       render: () => [unnamed(() => { msg = "PROFILE OPENED"; }), unnamed(() => { msg = "CART OPENED"; }), t(msg), btn("Contact", () => { msg = "CONTACT CLICKED"; })],
       // O carrinho é o segundo ícone, no canto direito do cabeçalho.
-      photo: () => [1214 / 1280, 40 / 800],
-      clickAt: (x, y) => { if (y < 80 && x > 1190) msg = "CART OPENED"; else if (y < 80 && x > 1140) msg = "PROFILE OPENED"; },
+      photo: () => [1866 / 1920, 40 / 1080],
+      clickAt: (x, y) => { if (y < 80 && x > 1830) msg = "CART OPENED"; else if (y < 80 && x > 1760) msg = "PROFILE OPENED"; },
     };
   },
   "L02-lupa-entre-iguais": (host) => {
@@ -94,8 +95,8 @@ export const PAGES: Record<string, Build> = {
     return {
       url: `${host}/lupa.html`, title: "ShopMart — lupa",
       render: () => [unnamed(open("MENU OPEN")), unnamed(open("SEARCH OPEN")), unnamed(open("ALERTS OPEN")), unnamed(open("FAVORITES OPEN")), t(msg)],
-      photo: () => [1100 / 1280, 40 / 800],
-      clickAt: (x, y) => { if (y < 80) msg = x > 1180 ? "FAVORITES OPEN" : x > 1130 ? "ALERTS OPEN" : x > 1070 ? "SEARCH OPEN" : "MENU OPEN"; },
+      photo: () => [1730 / 1920, 40 / 1080],
+      clickAt: (x, y) => { if (y < 80) msg = x > 1830 ? "FAVORITES OPEN" : x > 1760 ? "ALERTS OPEN" : x > 1690 ? "SEARCH OPEN" : "MENU OPEN"; },
     };
   },
   "L03-busca-com-enter": (host) => {
@@ -173,8 +174,8 @@ export const PAGES: Record<string, Build> = {
       url: `${host}/repetidos.html`, title: "ShopMart — cozinha",
       render: () => [t("Cozinha", "heading"), t(msg), ...items.flatMap((name) => [t(name, "heading"), t("R$ preço"), btn("Adicionar", () => { msg = `No carrinho: ${name}`; })])],
       // A Cafeteira é o segundo cartão da primeira fileira.
-      photo: () => [(30 + 1 * 305 + 60) / 1280, 250 / 800],
-      clickAt: (x, y) => { if (y > 200 && y < 300) { const col = Math.floor((x - 30) / 305); if (col >= 0 && col < 4) msg = `No carrinho: ${items[col]}`; } },
+      photo: () => [725 / 1920, 250 / 1080],
+      clickAt: (x, y) => { if (y > 200 && y < 300) { const col = Math.floor((x - 30) / 469); if (col >= 0 && col < 4) msg = `No carrinho: ${items[col]}`; } },
     };
   },
   "L10-lista-e-radio": (host) => {
@@ -209,9 +210,9 @@ export const PAGES: Record<string, Build> = {
     return {
       url: `${host}/foto-garantia.html`, title: "ShopMart — foto do produto",
       render: () => [t(msg), unnamed(() => { msg = "GARANTIA ABERTA"; }), unnamed(() => { msg = "DETALHES ABERTOS"; }), t("Tênis de corrida Aero. R$ 399,90"), btn("Comprar", () => { msg = "COMPRA FEITA"; })],
-      // O botão está no centro da foto: x 230–430 de 640 (a foto começa em x=30), y 150–206 (começa em y≈130).
-      photo: () => [(30 + 330) / 1280, (130 + 178) / 800],
-      clickAt: (x, y) => { const px = x - 30; const py = y - 130; if (py >= 150 && py <= 206) msg = px >= 230 && px <= 430 ? "GARANTIA ABERTA" : px >= 450 && px <= 590 ? "DETALHES ABERTOS" : msg; },
+      // O botão está no centro da foto: x 230–430 de 640 (a foto começa em x=30), y 150–206 (começa em y≈154).
+      photo: () => [360 / 1920, 332 / 1080],
+      clickAt: (x, y) => { const px = x - 30; const py = y - 154; if (py >= 150 && py <= 206) msg = px >= 230 && px <= 430 ? "GARANTIA ABERTA" : px >= 450 && px <= 590 ? "DETALHES ABERTOS" : msg; },
     };
   },
   "L13-abas": (host) => {
@@ -308,9 +309,9 @@ export function simPick(query: StepQuery, goal: string, isDone: () => boolean, s
   if (best && best.score > 0) {
     const second = scored[1];
     const margin = best.score - (second?.score ?? 0);
-    // Vários elementos com o MESMO rótulo (oito «Adicionar»): o texto não distingue, e um Jev calibrado diz que não tem certeza.
+    // Vários elementos com o MESMO rótulo (oito «Adicionar»): o texto não distingue, e um Jev calibrado diz que não tem certeza (medido: as escolhas erradas têm p de 0,20 a 0,32; o piso é MIN_PROBABILITY = 0,40).
     const twins = clicks.filter((o) => o.label === best.o.label).length > 1;
-    return reply("click", best.o.id, twins ? 0.4 : Math.min(0.95, 0.55 + 0.1 * margin + (best.named ? 0.1 : 0)));
+    return reply("click", best.o.id, twins ? 0.3 : Math.min(0.95, 0.55 + 0.1 * margin + (best.named ? 0.1 : 0)));
   }
   // Nada liga ao objetivo: um ícone sem nome é um palpite (a guarda `isAmbiguous` o pega); senão, rolar; senão, desistir.
   const blank = clicks.find((o) => !o.label.includes('"') && !o.label.includes(" → "));
@@ -349,7 +350,8 @@ export async function runSimTask(task: BenchTask, options: SimOptions = {}): Pro
     type: async (ref, value) => { clock.advance(SIM_LATENCY.type); node(ref)?.type?.(value); },
     select: async (ref, value) => { clock.advance(SIM_LATENCY.select); node(ref)?.select?.(value); },
     scroll: async () => { clock.advance(SIM_LATENCY.scroll); scroll += 1; onScroll?.(); },
-    settle: async () => { clock.advance(SIM_LATENCY.settle); },
+    // Sem `thorough` o app só espera o comando assentar (modo rápido); a operação `wait` do Jev espera a rede ociosa.
+    settle: async (thorough) => { clock.advance(thorough ? SIM_LATENCY.settle : SIM_LATENCY.settle / 5); },
     pick: async (query) => {
       clock.advance(SIM_LATENCY.pick);
       return simPick(query, task.goal, () => check(task.success, viewOf(refresh().snapshot)), scrolls);
@@ -370,7 +372,8 @@ export async function runSimTask(task: BenchTask, options: SimOptions = {}): Pro
   const evaluated = evaluate(task, refresh().snapshot);
   const numbered = result.steps.filter((line) => /^\d+\. /.test(line)).length;
   const run: TaskRun = {
-    log: result.steps,
+    // O piloto mede "passo N ms" com o relógio de parede; no sim o tempo é virtual, então sai do log para a rodada ser repetível.
+    log: result.steps.map((line) => line.replace(/, passo \d+ ms\)$/, ")")),
     id: task.id, outcome: result.outcome, ...evaluated,
     steps: numbered, autoFills: result.steps.filter((line) => line.includes("sem o Jev)")).length, photos: timings.photos,
     totalMs: timings.totalMs, stepMs: timings.stepMs, phases: timings.phases, timing: "measured",
