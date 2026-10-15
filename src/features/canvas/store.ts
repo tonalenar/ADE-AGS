@@ -185,7 +185,7 @@ export const canvasActions = {
   unstackNote: (key: string, id: string) => updateBoard(key, (b) => unstack(b, id)),
   /** Crea un portal y devuelve su id y su nombre final. Con `near`, al lado de ese nodo y
    *  conectado a él. */
-  addPortal: (key: string, portal: { name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android"; avd?: string; size?: { w: number; h: number } }) => {
+  addPortal: (key: string, portal: { name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android"; avd?: string; size?: { w: number; h: number }; viewport?: { width: number; height: number } }) => {
     const id = `${PORTAL_PREFIX}${crypto.randomUUID()}`;
     let name = "";
     updateBoard(key, (b) => {

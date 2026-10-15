@@ -1155,7 +1155,7 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
   const drop = useViewTabsStore((s) => s.dropPortalView);
   const view = useViewTabsStore((s) => s.portalViews.find((v) => v.id === id));
   useEffect(() => {
-    ensure(id, cwd, portal.url);
+    ensure(id, cwd, portal.url, portal.viewport);
     // Al borrar el portal (o cerrar el canvas) se suelta la vista y con ella el navegador.
     return () => drop(id);
     // La URL inicial solo cuenta al crear la vista.
@@ -1166,6 +1166,15 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
   useEffect(() => {
     if (key && shown && shown !== portal.url) canvasActions.updatePortal(key, id, { url: shown });
   }, [shown]);
+
+  // A resolução que a pessoa escolher (ou desligar) na barra do navegador também se guarda: reabre como estava.
+  const shownViewport = view?.viewport ?? null;
+  useEffect(() => {
+    if (!key || !view) return;
+    const saved = portal.viewport ?? null;
+    if (shownViewport?.width === saved?.width && shownViewport?.height === saved?.height) return;
+    canvasActions.updatePortal(key, id, shownViewport ? { viewport: shownViewport } : { viewport: undefined });
+  }, [shownViewport?.width, shownViewport?.height]);
 
   useEffect(() => {
     if (!armed) return;

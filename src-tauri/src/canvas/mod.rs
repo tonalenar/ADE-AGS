@@ -94,6 +94,9 @@ pub struct Portal {
     /// El emulador (AVD) que arranca este nodo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avd: Option<String>,
+    /// A resolução com que a página é renderizada (`{ width, height }`); só o frontend a lê. Ausente = ocupa o nó inteiro.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<Value>,
 }
 
 pub const PORTAL_PREFIX: &str = "portal-";
