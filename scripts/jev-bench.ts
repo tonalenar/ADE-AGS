@@ -16,7 +16,7 @@
  * `--real` fala com o app já aberto pelo CLI `ags` (precisa de um terminal de agente do ADE AGS). Nunca faz login real,
  * compra ou envio de dado pessoal: as tarefas públicas param antes de finalizar e o critério `forbid` acusa quem passar.
  */
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { createServer, type Server } from "node:http";
 import { dirname, extname, join, normalize, resolve } from "node:path";
@@ -78,7 +78,8 @@ function serveFixtures(): Promise<Server> {
     const path = decodeURIComponent((req.url ?? "/").split("?")[0]);
     const file = resolve(FIXTURES, `.${normalize(path === "/" ? "/index.html" : path)}`);
     if (!file.startsWith(FIXTURES) || !existsSync(file)) { res.writeHead(404).end("não encontrado"); return; }
-    res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream", "cache-control": "no-store" });
+    // `connection: close`: o proxy do app reaproveita conexões e acusa 502 quando o servidor as derruba (visto na 1.ª rodada real).
+    res.writeHead(200, { "content-type": TYPES[extname(file)] ?? "application/octet-stream", "cache-control": "no-store", connection: "close" });
     res.end(readFileSync(file));
   });
   return new Promise((ok, err) => { server.once("error", err); server.listen(port, "127.0.0.1", () => ok(server)); });
@@ -105,8 +106,15 @@ for (const s of selection.skipped) console.log(`(pulada ${s.id}: ${s.why})`);
 // `--cli <ags.exe>` (ou AGS_CLI) escolhe o CLI; o app vem do AGS_HANDSHAKE do ambiente.
 const AGS = value("cli") ?? process.env.AGS_CLI ?? "ags";
 
-function ags(args: string[], timeoutMs = 150_000): string {
-  return execFileSync(AGS, args, { encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+// ASSÍNCRONO de propósito: o servidor das fixtures roda neste mesmo processo, e um `execFileSync` o travaria enquanto o app
+// busca a página (foi o que derrubou a 1.ª rodada real: «A página não respondeu em 12 s»).
+function ags(args: string[], timeoutMs = 150_000): Promise<string> {
+  return new Promise((ok, err) => {
+    execFile(AGS, args, { encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, windowsHide: true }, (error, stdout, stderr) => {
+      if (error) err(Object.assign(error, { stdout, stderr }));
+      else ok(stdout);
+    });
+  });
 }
 
 async function confirmReal(tasks: BenchTask[], maxProbes: number): Promise<void> {
@@ -133,7 +141,7 @@ async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
     stepMs: [], phases: emptyPhases(), timing: "reported", finalUrl: "", note: note.slice(0, 400),
   });
   try {
-    ags(["portal", "navigate", portal, absolute(task)], 60_000);
+    await ags(["portal", "navigate", portal, absolute(task)], 60_000);
   } catch (e) {
     return crash(`navegar falhou: ${failure(e)}`);
   }
@@ -141,14 +149,14 @@ async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
   const started = performance.now();
   let text: string;
   try {
-    text = ags(args, 150_000);
+    text = await ags(args, 150_000);
   } catch (e) {
     return crash(`act falhou: ${failure(e)}`);
   }
   const totalMs = Math.round(performance.now() - started);
   const report = parseActReport(text);
   let finalSnapshot = report.finalSnapshot;
-  try { finalSnapshot = ags(["portal", "snapshot", portal], 60_000); } catch { /* fica com a página embutida no relatório */ }
+  try { finalSnapshot = await ags(["portal", "snapshot", portal], 60_000); } catch { /* fica com a página embutida no relatório */ }
   const evaluated = evaluate(task, finalSnapshot);
   // O relatório do act traz a linha TEMPOS (somas por fase) e o tempo de cada passo que agiu; o que sobra do relógio de
   // quem rodou vira «outros». Sem o tempo de passo (relatório antigo), vale a média.
@@ -195,7 +203,7 @@ if (mode === "sim") {
   server = await serveFixtures();
   const portal = value("portal") ?? "bench-jev";
   if (!value("portal")) {
-    try { ags(["portal", "create", portal, absolute(planned[0])], 60_000); } catch (e) { server.close(); fail(`Não consegui criar o portal (rode num terminal de agente do app): ${e instanceof Error ? e.message : String(e)}`); }
+    try { await ags(["portal", "create", portal, absolute(planned[0])], 60_000); } catch (e) { server.close(); fail(`Não consegui criar o portal (rode num terminal de agente do app): ${e instanceof Error ? e.message : String(e)}`); }
   }
   let used = 0;
   for (const task of planned) {
