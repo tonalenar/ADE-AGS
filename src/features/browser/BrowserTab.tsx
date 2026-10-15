@@ -21,6 +21,7 @@ import { highlightAgent } from "./agentHighlight";
 import { AgentPicker } from "./AgentPicker";
 import { AnnotationBar, AnnotationCanvas, renderAnnotated, useAnnotationSession } from "./annotate/Annotator";
 import { canvasToPng, freezePage, thumbnail, type FrozenPage } from "./annotate/capture";
+import { isUncovered } from "./annotate/geometry";
 import { composePickMessage, toTargetUrl, type AnnotatedCapture } from "./composeMessage";
 import { composePointer } from "./markedView";
 import { browserToolPrefix, hasBrowserMcp } from "./tabMcp";
@@ -309,9 +310,12 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         const frozen = await freezePage(page, frame);
         const rect = page.getBoundingClientRect();
         // Só vale se a página está toda à vista: uma foto cortada deixaria as frações da caixa apontando para o lugar errado.
+        // E livre: um nó parcialmente atrás da barra lateral cabe na janela, mas a foto sairia com a barra por cima da página
+        // (as alças do nó, pontinhos na borda, não contam).
+        const free = (x: number, y: number) => { const el = document.elementFromPoint(x, y); return !!el && (el === page || frame.contains(el) || !!el.closest(".react-flow__handle, .react-flow__resize-control")); };
         return {
           frozen, rect,
-          complete: Math.abs(frozen.screen.width - rect.width) < 2 && Math.abs(frozen.screen.height - rect.height) < 2,
+          complete: Math.abs(frozen.screen.width - rect.width) < 2 && Math.abs(frozen.screen.height - rect.height) < 2 && isUncovered(rect, free),
         };
       };
       let shot = await shoot().catch(() => null);
