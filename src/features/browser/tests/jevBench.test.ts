@@ -81,14 +81,14 @@ describe("relatório do ags portal act", () => {
     steps: [
       'digitou em search field "Buscar" (valor de q) (pelo nome do campo, sem o Jev)',
       "1. tocou pela foto no ponto (10, 20) (existe p=0.90, caixa conf=0.80, 1400 ms)",
-      '2. clicou button "Buscar" (p=0.95, 450 ms)',
+      '2. clicou button "Buscar" (p=0.95, fim p=0.10, 450 ms, passo 900 ms)',
       "3. concluído (p=0.97, 300 ms)",
     ],
     note: "ok", finalSnapshot: SNAP,
   });
   it("lê desfecho, passos, preenchimentos, fotos, tempo do Jev e a página final", () => {
     const report = parseActReport(formatResult("meta", result("done")));
-    expect(report).toMatchObject({ outcome: "done", steps: 3, autoFills: 1, photos: 1, jevMs: 2150 });
+    expect(report).toMatchObject({ outcome: "done", steps: 3, autoFills: 1, photos: 1, jevMs: 2150, stepMs: [900] });
     expect(report.finalSnapshot).toContain("Carrinho: 1");
   });
   it("reconhece todos os desfechos", () => {
@@ -98,6 +98,14 @@ describe("relatório do ags portal act", () => {
   it("não confunde «PAROU» com «PAROU (Jev sem certeza)»", () => {
     expect(parseActReport(formatResult("g", result("unsure"))).outcome).toBe("unsure");
     expect(parseActReport(formatResult("g", result("stuck"))).outcome).toBe("stuck");
+  });
+  it("aceita o relatório antigo (sem «passo» nem «fim p=»): o tempo por passo fica vazio", () => {
+    const old = parseActReport(['act "g": FEITO', "ok", "", "Passos:", '1. clicou button "Buscar" (p=0.95, 450 ms)', "2. concluído (p=0.97, 300 ms)", "", "A página agora (o Jev só escolhe onde tocar: confira o resultado):", "page: x http://a"].join("\n"));
+    expect(old).toMatchObject({ outcome: "done", steps: 2, jevMs: 750, stepMs: [] });
+  });
+  it("conta a conclusão por pergunta direta como um passo, sem tempo de Jev", () => {
+    const r = parseActReport(['act "g": FEITO', "ok", "", "Passos:", "1. objetivo atingido (pergunta direta p=0.91)", "", "A página agora (o Jev só escolhe onde tocar: confira o resultado):", ""].join("\n"));
+    expect(r).toMatchObject({ outcome: "done", steps: 1, jevMs: 0 });
   });
   it("aguenta um objetivo com aspas e um texto qualquer", () => {
     expect(parseActReport(formatResult('clique em "Entrar"', result("done"))).outcome).toBe("done");

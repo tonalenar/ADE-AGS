@@ -148,17 +148,18 @@ export function instrument(deps: PilotDeps, clock: Clock): { deps: PilotDeps; fi
   };
   const wrapped: PilotDeps = {
     snapshot: () => timed("snapshotMs", () => deps.snapshot()),
-    click: (ref) => timed("actionMs", () => deps.click(ref)),
+    click: (ref, navigates) => timed("actionMs", () => deps.click(ref, navigates)),
     type: (ref, value) => timed("actionMs", () => deps.type(ref, value)),
     select: (ref, value) => timed("actionMs", () => deps.select(ref, value)),
     scroll: () => timed("actionMs", () => deps.scroll()),
-    settle: () => timed("waitMs", () => deps.settle()),
+    settle: (thorough) => timed("waitMs", () => deps.settle(thorough)),
     pick: (query) => {
       picks += 1;
       if (picks > 1) boundaries.push(clock.now());
       return timed("jevMs", () => deps.pick(query));
     },
     ...(deps.visual ? { visual: (goal: string, recent: string) => { photos += 1; return timed("jevMs", () => deps.visual!(goal, recent)); } } : {}),
+    ...(deps.peekAt ? { peekAt: (x: number, y: number) => timed("actionMs", () => deps.peekAt!(x, y)) } : {}),
     ...(deps.clickAt ? { clickAt: (x: number, y: number) => timed("actionMs", () => deps.clickAt!(x, y)) } : {}),
   };
   return {
@@ -235,8 +236,10 @@ export interface ActReport {
   steps: number;
   autoFills: number;
   photos: number;
-  /** A soma dos "NNN ms" que o relatório traz em cada passo (consultas ao Jev). */
+  /** A soma dos "NNN ms" da consulta ao Jev que o relatório traz em cada passo. */
   jevMs: number;
+  /** O tempo de cada passo que agiu ("passo NNN ms", desde 8cd9db5c). Vazio num relatório antigo. */
+  stepMs: number[];
   /** A página final embutida no relatório (pode vir cortada em 6000 caracteres). */
   finalSnapshot: string;
 }
@@ -257,14 +260,18 @@ export function parseActReport(report: string): ActReport {
   let autoFills = 0;
   let photos = 0;
   let jevMs = 0;
+  const stepMs: number[] = [];
   for (const line of stepLines) {
     if (/^\d+\. /.test(line)) steps += 1;
     if (line.includes("sem o Jev)")) autoFills += 1;
     if (line.includes("tocou pela foto")) photos += 1;
-    const ms = /, (\d+) ms\)/.exec(line);
+    // `(p=0.95, fim p=0.10, 450 ms, passo 900 ms)`: o 1.º «ms» é a consulta ao Jev; o «passo» é o passo inteiro.
+    const ms = /, (\d+) ms(?:,|\))/.exec(line);
     if (ms) jevMs += Number(ms[1]);
+    const whole = /passo (\d+) ms\)/.exec(line);
+    if (whole) stepMs.push(Number(whole[1]));
   }
-  return { outcome, steps, autoFills, photos, jevMs, finalSnapshot: at === -1 ? "" : lines.slice(at + 1).join("\n") };
+  return { outcome, steps, autoFills, photos, jevMs, stepMs, finalSnapshot: at === -1 ? "" : lines.slice(at + 1).join("\n") };
 }
 
 // ── Agregação ───────────────────────────────────────────────────────
