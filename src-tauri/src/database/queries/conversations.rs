@@ -97,7 +97,7 @@ fn clean_custom_title(raw: Option<String>) -> Result<Option<String>, String> {
         return Ok(None);
     }
     if t.chars().count() > TITLE_MAX_CHARS {
-        return Err(format!("El título personalizado pasa de {TITLE_MAX_CHARS} caracteres."));
+        return Err(format!("O título personalizado passa de {TITLE_MAX_CHARS} caracteres."));
     }
     Ok(Some(t.to_string()))
 }
@@ -105,10 +105,10 @@ fn clean_custom_title(raw: Option<String>) -> Result<Option<String>, String> {
 /// Valida un texto obligatorio (clave de proyecto, cwd): no vacío y con largo máximo.
 fn check_text(what: &str, value: &str) -> Result<(), String> {
     if value.trim().is_empty() {
-        return Err(format!("{what} no puede estar vacío."));
+        return Err(format!("{what} não pode ficar vazio."));
     }
     if value.chars().count() > TEXT_MAX_CHARS {
-        return Err(format!("{what} pasa de {TEXT_MAX_CHARS} caracteres."));
+        return Err(format!("{what} passa de {TEXT_MAX_CHARS} caracteres."));
     }
     Ok(())
 }
@@ -116,26 +116,49 @@ fn check_text(what: &str, value: &str) -> Result<(), String> {
 fn validate_state(state: &str) -> Result<String, String> {
     match state {
         "active" | "saved" => Ok(state.to_string()),
-        otro => Err(format!("Estado inválido '{otro}': use 'active' o 'saved'.")),
+        otro => Err(format!("Estado inválido '{otro}': use 'active' ou 'saved'.")),
     }
 }
 
-/// Valida la lista de terminales y devuelve su forma serializada para guardarla.
-fn validate_terminals(terminals: &Value) -> Result<String, String> {
-    let items = terminals
-        .as_array()
-        .ok_or_else(|| "Los terminales de la conversación deben ser una lista.".to_string())?;
+/// Quantas conexões (cordas) uma conversa guarda: bem acima do que cabe em 24 terminais.
+const LINKS_MAX_ITEMS: usize = 300;
+
+/// Valida o que a conversa guarda dos terminais e devolve a forma serializada.
+///
+/// Aceita as duas formas: a lista de terminais (a antiga) e o objeto `{ terminals: [...], links: [[a, b], ...] }`
+/// que o frontend grava (as conexões entre os terminais vão junto). Antes só valia a lista, e salvar a conversa
+/// ao trocar de uma para outra falhava sempre.
+fn validate_terminals(value: &Value) -> Result<String, String> {
+    let (items, links) = match value {
+        Value::Array(items) => (items, None),
+        Value::Object(map) => (
+            map.get("terminals")
+                .and_then(Value::as_array)
+                .ok_or_else(|| "Os terminais da conversa precisam ser uma lista.".to_string())?,
+            map.get("links"),
+        ),
+        _ => return Err("Os terminais da conversa precisam ser uma lista.".to_string()),
+    };
     if items.len() > TERMINALS_MAX_ITEMS {
-        return Err(format!(
-            "Una conversación guarda como máximo {TERMINALS_MAX_ITEMS} terminales."
-        ));
+        return Err(format!("Uma conversa guarda no máximo {TERMINALS_MAX_ITEMS} terminais."));
     }
     if items.iter().any(|item| !item.is_object()) {
-        return Err("Cada terminal de la conversación debe ser un objeto.".to_string());
+        return Err("Cada terminal da conversa precisa ser um objeto.".to_string());
     }
-    let json = serde_json::to_string(terminals).map_err(|e| e.to_string())?;
+    if let Some(links) = links {
+        let pairs = links
+            .as_array()
+            .ok_or_else(|| "As conexões da conversa precisam ser uma lista.".to_string())?;
+        let valid = |pair: &Value| {
+            pair.as_array().is_some_and(|p| p.len() == 2 && p.iter().all(|n| n.as_u64().is_some_and(|i| (i as usize) < items.len())))
+        };
+        if pairs.len() > LINKS_MAX_ITEMS || !pairs.iter().all(valid) {
+            return Err("As conexões da conversa precisam ser pares de posições de terminais.".to_string());
+        }
+    }
+    let json = serde_json::to_string(value).map_err(|e| e.to_string())?;
     if json.len() > TERMINALS_MAX_BYTES {
-        return Err("La lista de terminales de la conversación pasa de 64 KB.".to_string());
+        return Err("Os terminais da conversa passam de 64 KB.".to_string());
     }
     Ok(json)
 }
@@ -509,7 +532,11 @@ mod tests {
 
         let veinticinco: Vec<Value> = (0..=TERMINALS_MAX_ITEMS).map(|i| json!({"n": i})).collect();
         assert!(up(&mut conn, Value::Array(veinticinco)).is_err());
-        assert!(up(&mut conn, json!({"tabId": "t1"})).is_err(), "no array");
+        assert!(up(&mut conn, json!({"tabId": "t1"})).is_err(), "objeto sem a lista de terminais");
+        let com_cordas = json!({"terminals": [{"tabId": "t1"}, {"tabId": "t2"}], "links": [[0, 1]]});
+        assert_eq!(up(&mut conn, com_cordas.clone()).unwrap().terminals, com_cordas);
+        assert!(up(&mut conn, json!({"terminals": [{"tabId": "t1"}], "links": [[0, 5]]})).is_err(), "corda para um terminal que não existe");
+        assert!(up(&mut conn, json!({"terminals": [], "links": "x"})).is_err(), "cordas fora de lista");
         assert!(up(&mut conn, json!("texto")).is_err(), "string no es array");
         assert!(up(&mut conn, json!([{"ok": 1}, 7])).is_err(), "item no objeto");
         assert!(up(&mut conn, json!([null])).is_err(), "null no es objeto");
