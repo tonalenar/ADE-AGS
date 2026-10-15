@@ -27,7 +27,12 @@ export async function previewCapture(): Promise<ArrayBuffer> {
 export const previewSaveCapture = (png: Uint8Array, tag?: string) =>
   // `tag` va por cabecera y no en el cuerpo: el cuerpo es el PNG crudo. Termina en el
   // nombre del archivo, para que se vea de quién es la foto sin abrirla.
-  invoke<string>("preview_save_capture", png, tag ? { headers: { "x-ags-tag": tag } } : undefined);
+  invoke<string>("preview_save_capture", png, tag ? { headers: { "x-ags-tag": asciiTag(tag) } } : undefined);
+
+/** Um cabeçalho HTTP só aceita Latin-1: um título com "—" ou "…" derrubava a foto ("String contains non ISO-8859-1 code point"). */
+export function asciiTag(tag: string): string {
+  return tag.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^\x20-\x7e]/g, "").trim() || "captura";
+}
 
 /** Un archivo del disco, listo para ponerlo en un `<input type=file>` de la página. */
 export interface UploadFile {

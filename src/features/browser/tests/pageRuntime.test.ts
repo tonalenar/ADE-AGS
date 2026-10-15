@@ -180,6 +180,17 @@ describe("toque por foto: o controle mais perto do ponto", () => {
   });
 });
 
+describe("opções de uma lista no snapshot", () => {
+  it("a lista mostra o que se pode escolher", () => {
+    const line = formatNode({ depth: 0, role: "combobox", name: "Classificar por", ref: "e12", states: [], value: "Em destaque", options: ["Em destaque", "Preço: do menor ao maior"] });
+    expect(line).toBe('- combobox "Classificar por" [ref=e12] value="Em destaque" options=["Em destaque","Preço: do menor ao maior"]');
+  });
+
+  it("sem opções, a linha é a de sempre", () => {
+    expect(formatNode({ depth: 0, role: "button", name: "Ir", ref: "e1", states: [] })).toBe('- button "Ir" [ref=e1]');
+  });
+});
+
 describe("nome de um elemento sem nome, pelo id", () => {
   it("ids com palavras viram uma pista legível", () => {
     expect(humanizeId("nav-search-submit-button")).toBe("nav search submit button");

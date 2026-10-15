@@ -49,6 +49,32 @@ function pizzaPage() {
   return { actions, state: () => ({ fields, submitted }) };
 }
 
+/** Uma página de resultados de loja: uma lista "Classificar por" (select nativo), um botão de filtros e produtos. */
+function shopPage() {
+  const options = ["Em destaque", "Preço: do menor ao maior", "Preço: do maior ao menor", "Média de avaliações"];
+  let sorted = 0;
+  const snapshot = () => [
+    'page: "Resultados: fone bluetooth" http://shop.test/s?k=fone', "viewport: 1280×800 · scroll 0/2000", "",
+    '- searchbox "Pesquisar" [ref=e1] value="fone bluetooth"',
+    '- button "Ir" [ref=e2]',
+    '- button "Filtros" [ref=e3]',
+    `- combobox "Classificar por" [ref=e4] value="${options[sorted]}" options=${JSON.stringify(options)}`,
+    sorted === 1 ? '- text "Ordenado por: Preço: do menor ao maior"' : `- text "Ordenado por: ${options[sorted]}"`,
+    '- link "Fone Bluetooth P47 R$ 7,21" [ref=e5] → /Fone-Bluetooth-P47/dp/B07C97XS47',
+    '- link "Fone Gamer RGB R$ 49,90" [ref=e6] → /Fone-Gamer-RGB/dp/B08XYZ1234',
+    '- link "Fone Esportivo R$ 31,00" [ref=e7] → /Fone-Esportivo/dp/B09ABC5678',
+  ].join("\n");
+  const actions: Pick<PilotDeps, "click" | "type" | "select" | "scroll" | "settle" | "snapshot"> = {
+    snapshot: async () => snapshot(),
+    click: async () => undefined,
+    type: async () => undefined,
+    select: async (_ref, value) => { sorted = Math.max(0, options.indexOf(value)); },
+    scroll: async () => undefined,
+    settle: async () => undefined,
+  };
+  return { actions, state: () => ({ sorted: options[sorted] }) };
+}
+
 async function connect() {
   const pages = (await (await fetch(`http://127.0.0.1:${port}/json`)).json()) as { type: string; webSocketDebuggerUrl: string }[];
   const ws = new WebSocket(pages.find((p) => p.type === "page")!.webSocketDebuggerUrl);
@@ -87,6 +113,17 @@ const runs: { name: string; goal: string; fills: string[]; expect: (s: ReturnTyp
 ];
 
 const jev = await connect();
+// O cenário da loja: ordenar escolhendo uma OPÇÃO da lista, sem --fill, e concluir sozinho.
+{
+  const shop = shopPage();
+  let calls = 0;
+  let jevMs = 0;
+  const deps: PilotDeps = { ...shop.actions, pick: async (query) => { calls++; const reply = await jev.pick(query); jevMs += reply.latencyMs ?? 0; return reply; } };
+  const started = performance.now();
+  const result = await runPilot("ordenar os resultados por preço, do menor para o maior", [], undefined, deps);
+  console.log(`\n=== loja: ordenar por preço — ${result.outcome.toUpperCase()} — ordenação final: ${shop.state().sorted} — ${calls} consultas (${jevMs} ms), ${Math.round(performance.now() - started)} ms no total`);
+  console.log(result.steps.join("\n"));
+}
 for (const run of runs) {
   const page = pizzaPage();
   let calls = 0;

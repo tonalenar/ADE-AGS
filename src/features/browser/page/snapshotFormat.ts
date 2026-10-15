@@ -19,6 +19,8 @@ export interface SnapshotNode {
   value?: string;
   /** El destino de un link, sin el origen si es el de la página. */
   href?: string;
+  /** Las opciones de una lista nativa (`<select>`): sin ellas no se sabe qué se puede elegir. */
+  options?: string[];
 }
 
 export interface SnapshotMeta {
@@ -40,6 +42,7 @@ export function formatNode(node: SnapshotNode): string {
   for (const state of node.states) line += ` [${state}]`;
   if (node.value !== undefined) line += ` value=${quote(node.value)}`;
   if (node.href) line += ` → ${node.href}`;
+  if (node.options?.length) line += ` options=${JSON.stringify(node.options)}`;
   return line;
 }
 

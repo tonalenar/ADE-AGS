@@ -720,7 +720,13 @@ export const PORTAL_OPS = new Set([
 function pilotDeps(host: BrowserHost): PilotDeps {
   return {
     snapshot: () => inPage(host, { op: "snapshot", all: false }, false),
-    click: (ref) => inPage(host, { op: "click", target: ref }, true),
+    click: async (ref, navigates) => {
+      const loads = host.loadCount();
+      const result = await inPage(host, { op: "click", target: ref }, true);
+      // Um link carrega outra página, que leva segundos: relê só depois (ou depois de 6 s).
+      if (navigates) await host.waitForLoad(loads, 6_000);
+      return result;
+    },
     type: (ref, text) => inPage(host, { op: "type", target: ref, text, clear: true, submit: false }, true),
     select: (ref, value) => inPage(host, { op: "select", target: ref, value }, true),
     scroll: () => inPage(host, { op: "scroll", dy: 600 }, false),

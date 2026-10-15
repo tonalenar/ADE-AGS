@@ -144,23 +144,24 @@ function pagesOf(count: number): string[] {
 
 function harness(script: StepReply[], pages: string[] = pagesOf(8)) {
   const calls: string[] = [];
+  const navs: boolean[] = [];
   let page = 0;
   let pick = 0;
   const asked: StepQuery[] = [];
   const deps: PilotDeps = {
     snapshot: async () => pages[Math.min(page, pages.length - 1)],
-    click: async (ref) => { calls.push(`click ${ref}`); page++; },
+    click: async (ref, navigates) => { calls.push(`click ${ref}`); navs.push(!!navigates); page++; },
     type: async (ref, text) => { calls.push(`type ${ref} ${text}`); page++; },
     select: async (ref, value) => { calls.push(`select ${ref} ${value}`); page++; },
     scroll: async () => { calls.push("scroll"); page++; },
     settle: async () => undefined,
     pick: async (query) => { asked.push(query); return script[Math.min(pick++, script.length - 1)]; },
   };
-  return { deps, calls, asked };
+  return { deps, calls, asked, navs };
 }
 
-const ok = (operation: string, target: string | null = null, probability = 0.9): StepReply =>
-  ({ status: "ok", operation, target, probability, reason: null, latencyMs: 300 });
+const ok = (operation: string, target: string | null = null, probability = 0.9, goalDone: number | null = null): StepReply =>
+  ({ status: "ok", operation, target, probability, goalDone, reason: null, latencyMs: 300 });
 
 describe("o laço do piloto", () => {
   it("digita com o valor do --fill (sem o Jev), clica no que o Jev escolhe e termina no done", async () => {
@@ -394,5 +395,82 @@ describe("campo sensível preenchido", () => {
     expect(sensitiveFilled(parseSnapshot(CLEAN))).toBe(false);
     expect(sensitiveFilled(parseSnapshot('page: "x" http://a.test/\n- textbox "Card number" [ref=e1] value="4111"'))).toBe(true);
     expect(sensitiveFilled(parseSnapshot('page: "x" http://a.test/\n- textbox "Nome" [ref=e1] value="Ana"'))).toBe(false);
+  });
+});
+
+// ── Listas, objetivo atingido e navegação ───────────────────────────
+
+const SORT = [
+  'page: "Resultados" http://shop.test/s?k=fone', "viewport: 1000×600 · scroll 0/600", "",
+  '- combobox "Classificar por" [ref=e1] value="Em destaque" options=["Em destaque","Preço: do menor ao maior","Preço: do maior ao menor"]',
+  '- link "Fone Bluetooth P47" [ref=e2] → /Fone-Bluetooth-P47/dp/B07C97XS47?ref=sr_1_1',
+  '- button "Filtros" [ref=e3]',
+].join("\n");
+
+/** Uma página por passo, com um texto que muda: a impressão da página (o que diz se uma ação teve efeito) não olha o título. */
+function sortPages(count: number): string[] {
+  return Array.from({ length: count }, (_, i) => `${SORT}\n- text "página ${i}"`);
+}
+
+describe("listas com opções", () => {
+  it("o snapshot da lista traz as opções, e cada uma vira um alvo, sem precisar de --fill", () => {
+    const page = parseSnapshot(SORT);
+    expect(page.elements[0].options).toEqual(["Em destaque", "Preço: do menor ao maior", "Preço: do maior ao menor"]);
+    const query = buildStep(page, "ordenar por preço, do menor para o maior", [], []);
+    expect(query.targets.select.map((o) => o.id)).toEqual(["e1_0", "e1_1", "e1_2"]);
+    expect(query.targets.select[1].label).toBe('dropdown "Classificar por" → option "Preço: do menor ao maior"');
+    expect(query.operations.map((o) => o.id)).toContain("select");
+    // a lista com opções não aparece também como elemento solto: a escolha é por opção
+    expect(query.targets.click.map((o) => o.id)).not.toContain("e1");
+    expect(query.state).toContain("with options: Em destaque | Preço: do menor ao maior");
+  });
+
+  it("o piloto escolhe a opção que o Jev apontou (e1_1) na lista e1, sem valor de --fill", async () => {
+    const h = harness([ok("select", "e1_1"), ok("done")], sortPages(6));
+    const result = await runPilot("ordenar por preço, do menor para o maior", [], undefined, h.deps);
+    expect(h.calls).toEqual(["select e1 Preço: do menor ao maior"]);
+    expect(result.steps.join("\n")).toContain('escolheu "Preço: do menor ao maior" em dropdown "Classificar por"');
+    expect(result.outcome).toBe("done");
+  });
+
+  it("uma lista sem opções legíveis continua pedindo --fill", () => {
+    const bare = parseSnapshot('page: "x" http://a.test/\n- combobox "País" [ref=e1] value=""');
+    expect(buildStep(bare, "escolher o país", [], []).operations.map((o) => o.id)).not.toContain("select");
+    expect(buildStep(bare, "escolher o país", ["País"], []).operations.map((o) => o.id)).toContain("select");
+  });
+});
+
+describe("objetivo atingido (pergunta direta)", () => {
+  const pages = () => sortPages(8);
+
+  it("depois de uma ação dele que mudou a página, concluir mesmo com a operação incerta", async () => {
+    const h = harness([ok("select", "e1_1"), ok("click", "e3", 0.2, 0.93)], pages());
+    const result = await runPilot("ordenar por preço", [], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(result.steps.join("\n")).toContain("objetivo atingido (pergunta direta p=0.93)");
+    expect(h.calls).toEqual(["select e1 Preço: do menor ao maior"]); // o clique incerto NÃO aconteceu
+  });
+
+  it("no primeiro passo, ou só com campos preenchidos pelo nome, não vale (ainda não fez nada)", async () => {
+    const first = await runPilot("ordenar", [], undefined, harness([ok("click", "e3", 0.2, 0.99)], pages()).deps);
+    expect(first.outcome).toBe("unsure");
+    const form = pagesOf(8).map((p) => p.replace('value="[x]"', 'value=""'));
+    const onlyFields = await runPilot("entrar", ["email=a@b.c"], undefined, harness([ok("click", "e4", 0.2, 0.99)], form).deps);
+    expect(onlyFields.outcome).toBe("unsure");
+  });
+
+  it("uma ação que não mudou a página não conclui", async () => {
+    const same = Array.from({ length: 5 }, () => SORT);
+    const h = harness([ok("scroll"), ok("click", "e3", 0.2, 0.99)], same);
+    const result = await runPilot("ordenar", [], undefined, h.deps);
+    expect(result.outcome).not.toBe("done");
+  });
+});
+
+describe("clicar num link espera a página carregar", () => {
+  it("um link com destino avisa que vai navegar; um botão, não", async () => {
+    const h = harness([ok("click", "e2"), ok("click", "e3"), ok("done")], sortPages(8));
+    await runPilot("abrir o produto", [], undefined, h.deps);
+    expect(h.navs).toEqual([true, false]);
   });
 });

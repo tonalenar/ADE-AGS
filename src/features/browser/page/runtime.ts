@@ -773,6 +773,11 @@ declare global {
         const href = (el as HTMLAnchorElement).href;
         if (href) entry.href = displayHref(href, location.origin);
       }
+      if (el.tagName === "SELECT") {
+        // As opções de uma lista nativa: é o que um agente (ou o piloto) escolhe ("Preço: do menor ao maior").
+        const options = Array.from((el as HTMLSelectElement).options).slice(0, 40).map((o) => normalizeName(o.text, 60)).filter(Boolean);
+        if (options.length > 0) entry.options = options;
+      }
       add(entry);
       if (!leaf) walkChildren(el, depth + 1);
     };
