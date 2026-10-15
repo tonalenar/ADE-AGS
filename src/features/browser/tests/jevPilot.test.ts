@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, isAmbiguous, isSearchField, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, isAmbiguous, isSearchField, submitsOnType, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -596,6 +596,18 @@ describe("buscas que exigem Enter", () => {
     expect(isSearchField(search)).toBe(true);
     expect(isSearchField(name)).toBe(false);
     expect(isSearchField({ ref: "e9", role: "textbox", name: "Search Amazon", states: [], filled: false })).toBe(true);
+    // o "q" solto é busca; a letra q dentro de outra palavra não é
+    for (const name of ["Quantidade", "Quantity", "Equipe", "Sequência", "Cheque", "Required"]) {
+      expect(isSearchField({ ref: "e9", role: "textbox", name, states: [], filled: false }), name).toBe(false);
+    }
+    expect(isSearchField({ ref: "e9", role: "textbox", name: "q", states: [], filled: false })).toBe(true);
+  });
+
+  it("não aperta Enter com um controle de compra à vista que o objetivo não pediu", () => {
+    const page = parseSnapshot(['page: "Carrinho" http://localhost/cart', '- searchbox "Pesquisar" [ref=e1] value=""', '- button "Proceed to checkout" [ref=e2]'].join("\n"));
+    expect(submitsOnType(page.elements[0], page, "buscar fone")).toBe(false);
+    expect(submitsOnType(page.elements[0], page, "comprar o fone e finalizar")).toBe(true);
+    expect(submitsOnType(page.elements[0], undefined, "buscar fone")).toBe(true);
   });
 
   it("digitar numa busca aperta Enter; num campo comum, não", async () => {

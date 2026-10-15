@@ -511,7 +511,7 @@ export async function runPilot(
     const stepStarted = Date.now();
     let page = parseSnapshot(snapshot);
     // O que não é escolha não vai ao Jev: um campo cujo nome casa com um `--fill` recebe o valor direto.
-    const filled = await autoFill(page, fills, taken, deps);
+    const filled = await autoFill(page, fills, taken, deps, goal);
     if (filled.length > 0) {
       for (const what of filled) {
         history.push({ what, changed: true, auto: true });
@@ -589,7 +589,7 @@ export async function runPilot(
           log.push(`${step}. recusou ${plain(el)}: parece uma compra ou um pagamento, e o objetivo não pediu`);
           return finish("stuck", "O Jev escolheu um controle de compra ou pagamento que o objetivo não pediu: não cliquei. Se é isso mesmo que você quer, diga no objetivo.");
         }
-        what = await act(el, operation, fills, taken, deps, option);
+        what = await act(el, operation, fills, taken, deps, option, { page, goal });
       }
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
@@ -624,6 +624,7 @@ export async function autoFill(
   fills: [string, string][],
   taken: Set<string>,
   deps: PilotDeps,
+  goal = "",
 ): Promise<string[]> {
   const out: string[] = [];
   const touched = new Set<string>();
@@ -639,18 +640,27 @@ export async function autoFill(
     }
     if (!best) continue;
     touched.add(best.ref);
-    out.push(await act(best, operationOf(best), fills, taken, deps));
+    out.push(await act(best, operationOf(best), fills, taken, deps, undefined, { page, goal }));
   }
   return out;
 }
 
 /** Um campo de busca? Digitar nele e apertar Enter é o gesto de pesquisar; a lupa ao lado costuma não ter nome. Pura. */
 export function isSearchField(el: PageElement): boolean {
-  return el.role === "searchbox" || /busca|buscar|pesquis|procur|search|q|query/i.test(el.name);
+  return el.role === "searchbox" || /busca|pesquis|procur|search|\b(q|query)\b/i.test(el.name);
+}
+
+/**
+ * Digitar neste campo aperta Enter? Só numa busca, e nunca com um controle de compra ou pagamento à vista que o objetivo
+ * não pediu: ali o Enter poderia enviar o formulário de fechamento sem passar pela trava dos cliques. Pura.
+ */
+export function submitsOnType(el: PageElement, page: ParsedPage | undefined, goal: string): boolean {
+  if (!isSearchField(el)) return false;
+  return !page?.elements.some((other) => blockedPurchase(`${other.name} ${other.href ?? ""}`, goal));
 }
 
 /** Faz o que a operação pede no elemento e conta o que fez, sem o valor digitado. */
-async function act(el: PageElement, operation: string, fills: [string, string][], taken: Set<string>, deps: PilotDeps, option?: string): Promise<string> {
+async function act(el: PageElement, operation: string, fills: [string, string][], taken: Set<string>, deps: PilotDeps, option?: string, where?: { page: ParsedPage; goal: string }): Promise<string> {
   if (operation === "select" && option !== undefined) {
     await deps.select(el.ref, option);
     return `escolheu "${option}" em ${plain(el)}`;
@@ -659,9 +669,10 @@ async function act(el: PageElement, operation: string, fills: [string, string][]
     const entry = valueFor(el.name, fills, taken);
     if (!entry) throw new Error(`não há valor para ${plain(el)}: passe --fill "<campo>=<valor>"`);
     taken.add(entry[0]);
+    const submit = operation === "type" && submitsOnType(el, where?.page, where?.goal ?? "");
     if (operation === "select") await deps.select(el.ref, entry[1]);
-    else await deps.type(el.ref, entry[1], isSearchField(el));
-    return `${operation === "select" ? "escolheu em" : "digitou em"} ${plain(el)} (valor de ${entry[0]})${operation === "type" && isSearchField(el) ? " e apertou Enter" : ""}`;
+    else await deps.type(el.ref, entry[1], submit);
+    return `${operation === "select" ? "escolheu em" : "digitou em"} ${plain(el)} (valor de ${entry[0]})${submit ? " e apertou Enter" : ""}`;
   }
   // Um link com destino leva a outra página: o piloto espera ela carregar antes de reler (senão "conclui" olhando a antiga).
   const navigates = el.role === "link" && !!el.href && !/^(javascript:|#)/i.test(el.href);
