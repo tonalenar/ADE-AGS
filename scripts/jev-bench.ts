@@ -23,7 +23,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import {
-  buildReport, canStart, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
+  buildReport, canStart, infraTooHigh, isInfraFailure, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
   type BenchReport, type BenchTask, type TaskRun,
 } from "./bench/core";
 import { runSimTask } from "./bench/sim";
@@ -102,8 +102,11 @@ for (const s of selection.skipped) console.log(`(pulada ${s.id}: ${s.why})`);
 
 // ── Modo real: o CLI `ags` ──────────────────────────────────────────
 
+// `--cli <ags.exe>` (ou AGS_CLI) escolhe o CLI; o app vem do AGS_HANDSHAKE do ambiente.
+const AGS = value("cli") ?? process.env.AGS_CLI ?? "ags";
+
 function ags(args: string[], timeoutMs = 150_000): string {
-  return execFileSync("ags", args, { encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
+  return execFileSync(AGS, args, { encoding: "utf8", timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024, windowsHide: true });
 }
 
 async function confirmReal(tasks: BenchTask[], maxProbes: number): Promise<void> {
@@ -118,15 +121,21 @@ async function confirmReal(tasks: BenchTask[], maxProbes: number): Promise<void>
   if (answer.trim() !== "CONFIRMO") fail("Não confirmado. Nada foi rodado.");
 }
 
+/** Por que um comando do CLI falhou: a mensagem, a saída e o erro padrão (é onde o app diz «did not finish mounting»). */
+function failure(e: unknown): string {
+  const err = e as { message?: string; stdout?: string; stderr?: string };
+  return [err.message, err.stdout, err.stderr].filter(Boolean).join(" | ").replace(/\s+/g, " ").slice(0, 400);
+}
+
 async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
   const crash = (note: string): TaskRun => ({
     id: task.id, outcome: "crash", criterionOk: false, forbidden: false, steps: 0, autoFills: 0, photos: 0, totalMs: 0,
-    stepMs: [], phases: emptyPhases(), timing: "reported", finalUrl: "", note: note.slice(0, 200),
+    stepMs: [], phases: emptyPhases(), timing: "reported", finalUrl: "", note: note.slice(0, 400),
   });
   try {
     ags(["portal", "navigate", portal, absolute(task)], 60_000);
   } catch (e) {
-    return crash(`navegar falhou: ${e instanceof Error ? e.message : String(e)}`);
+    return crash(`navegar falhou: ${failure(e)}`);
   }
   const args = ["portal", "act", portal, task.goal, ...(task.fills ?? []).flatMap((f) => ["--fill", f]), "--steps", String(task.maxSteps)];
   const started = performance.now();
@@ -134,7 +143,7 @@ async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
   try {
     text = ags(args, 150_000);
   } catch (e) {
-    return crash(`act falhou: ${e instanceof Error ? e.message : String(e)}`);
+    return crash(`act falhou: ${failure(e)}`);
   }
   const totalMs = Math.round(performance.now() - started);
   const report = parseActReport(text);
@@ -149,7 +158,7 @@ async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
     id: task.id, outcome: report.outcome ?? "crash", ...evaluated,
     steps: report.steps, autoFills: report.autoFills, photos: report.photos, totalMs,
     stepMs: report.stepMs.length > 0 ? report.stepMs : Array.from({ length: Math.max(1, report.steps) }, () => perStep),
-    phases, timing: "reported", blocked: report.blocked, ...(probes !== undefined ? { probes } : {}),
+    phases, timing: "reported", blocked: report.blocked, report: text.slice(0, 5000), ...(probes !== undefined ? { probes } : {}),
     ...(report.outcome === null ? { note: "relatório do act não reconhecido" } : {}),
   };
 }
@@ -193,7 +202,9 @@ if (mode === "sim") {
     const run = await runRealTask(task, portal);
     runs.push(run);
     used += run.probes ?? Math.max(run.steps + run.photos, 1);
-    console.log(`${run.criterionOk ? "ok  " : "FALHA"} ${task.id} — ${run.outcome}, ${run.steps} passos, ${(run.totalMs / 1000).toFixed(1)} s (${used} sondas até aqui)`);
+    console.log(`${run.criterionOk ? "ok  " : "FALHA"} ${task.id} — ${run.outcome}, ${run.steps} passos, ${(run.totalMs / 1000).toFixed(1)} s (${used} sondas até aqui)${isInfraFailure(run) ? " [infra]" : ""}`);
+    if (infraTooHigh(runs)) { console.log(`
+PARADO: mais de 30% das rodadas falharam por infraestrutura (${runs.filter(isInfraFailure).length}/${runs.length}). Nada mais gastou cota.`); break; }
   }
   server.close();
 }
