@@ -16,7 +16,6 @@ import { ResumeOptionsDialog } from "@/features/sessions/ResumeOptionsDialog";
 
 import { isResumable } from "./agentResume";
 import { boardKeyOfTab, useCanvasStore } from "@/features/canvas/store";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { CanvasConversations } from "./CanvasConversations";
 import { joinActiveConversation, startConversation } from "./conversationFlow";
 import { parseConversationSnapshot } from "./conversationModel";
@@ -284,7 +283,6 @@ export function ConversationList({ cwd, groupCwds, projectKey, workspaceId, onOp
     try {
       const row = await startConversation({
         workspaceId, cwd, projectKey,
-        confirmWorking: (names) => ask(t("conversations.canvas.confirmWorking", { names: names.join(", ") }), { title: t("conversations.title"), kind: "warning" }),
       });
       if (row) openNewAgentWith({ cwd, title: t("conversations.newTitle") });
     } catch (e) {

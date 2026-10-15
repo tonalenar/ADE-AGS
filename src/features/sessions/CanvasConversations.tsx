@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ask } from "@tauri-apps/plugin-dialog";
 import { AlertaToast, Button } from "neogestify-ui-components";
 
 import { useCanvasStore, conversationBoardKey } from "@/features/canvas/store";
@@ -91,7 +90,6 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
 
   const ctx: FlowContext = {
     workspaceId, cwd, projectKey,
-    confirmWorking: (names) => ask(t("conversations.canvas.confirmWorking", { names: names.join(", ") }), { title: t("conversations.title"), kind: "warning" }),
   };
 
   const guard = async (id: string, work: () => Promise<void>) => {
@@ -169,7 +167,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
           { key: "open", label: menu.row.state === "active" ? t("conversations.canvas.show") : t("conversations.canvas.open"), onSelect: () => void open(menu.row) },
           ...(menu.row.state === "active"
-            ? [{ key: "save", label: t("conversations.canvas.saveClose"), onSelect: () => void guard(menu.row.id, async () => { await hibernateConversation(menu.row, ctx); }) }]
+            ? [{ key: "save", label: t("conversations.canvas.saveClose"), onSelect: () => void guard(menu.row.id, async () => { await hibernateConversation(menu.row, ctx, "save"); }) }]
             : []),
           { key: "pin", label: menu.row.pinned ? t("conversations.unpin") : t("conversations.pin"), separator: true, onSelect: () => void patch(menu.row, { pinned: !menu.row.pinned }) },
           { key: "rename", label: t("conversations.rename"), onSelect: () => setRenaming({ id: menu.row.id, value: titleOf(menu.row) }) },
@@ -179,7 +177,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
               if (armed !== menu.row.id) { setArmed(menu.row.id); return; }
               setArmed(null);
               void guard(menu.row.id, async () => {
-                if (menu.row.state === "active" && !(await hibernateConversation(menu.row, ctx))) return;
+                if (menu.row.state === "active" && !(await hibernateConversation(menu.row, ctx, "delete"))) return;
                 await deleteConversation(menu.row.id);
                 remove(menu.row.id);
               });
@@ -193,7 +191,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
             if (!row) return;
             setArmed(null);
             void guard(row.id, async () => {
-              if (row.state === "active" && !(await hibernateConversation(row, ctx))) return;
+              if (row.state === "active" && !(await hibernateConversation(row, ctx, "delete"))) return;
               await deleteConversation(row.id);
               remove(row.id);
             });
