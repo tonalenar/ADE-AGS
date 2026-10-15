@@ -19,6 +19,8 @@ export interface SnapshotNode {
   value?: string;
   /** El destino de un link, sin el origen si es el de la página. */
   href?: string;
+  /** Las opciones de una lista nativa (`<select>`): sin ellas no se sabe qué se puede elegir. */
+  options?: string[];
 }
 
 export interface SnapshotMeta {
@@ -40,6 +42,7 @@ export function formatNode(node: SnapshotNode): string {
   for (const state of node.states) line += ` [${state}]`;
   if (node.value !== undefined) line += ` value=${quote(node.value)}`;
   if (node.href) line += ` → ${node.href}`;
+  if (node.options?.length) line += ` options=${JSON.stringify(node.options)}`;
   return line;
 }
 
@@ -84,6 +87,74 @@ export function parseKeyCombo(combo: string): {
   };
 }
 
+/**
+ * Um nome para um elemento que não tem nenhum, tirado do `id` ou do `data-testid`: `nav-search-submit-button` →
+ * "nav search submit button". Só serve de pista (o piloto distingue o ícone da lupa do ícone do carrinho): vale se tem
+ * pelo menos duas palavras de letras, é curto e não parece um hash. `""` = sem pista. Pura.
+ */
+export function humanizeId(raw: string | null | undefined): string {
+  if (!raw) return "";
+  // Um pedaço só de números ("a-autoid-3-announce", "item-42-title") é id gerado, não um nome.
+  if (raw.split(/[\s_.:\-/]+/).some((part) => /^\d+$/.test(part))) return "";
+  const words = raw
+    .replace(/([a-z])([A-Z])/g, "$1 $2")
+    .split(/[\s_.:\-/]+/)
+    .filter((w) => /^[A-Za-z]{2,}$/.test(w));
+  const text = words.join(" ").toLowerCase();
+  if (words.length < 2 || text.length > 40) return "";
+  // "a autoid 3 announce", "x9f2k...": uma palavra sem vogal é lixo gerado, não um nome.
+  if (words.some((w) => !/[aeiouy]/i.test(w))) return "";
+  return text;
+}
+
+/**
+ * Os pontos onde tentar um clique num elemento: o centro primeiro; se algo decorativo o cobre (a Amazon põe uma
+ * camada sobre o título de um produto), os pontos perto das bordas. Pura.
+ */
+export function probePoints(rect: { left: number; top: number; width: number; height: number }): { x: number; y: number }[] {
+  const { left, top, width, height } = rect;
+  const cx = left + width / 2;
+  const cy = top + height / 2;
+  const inset = (size: number) => Math.min(6, Math.max(1, size / 4));
+  const ix = inset(width);
+  const iy = inset(height);
+  return [
+    { x: cx, y: cy },
+    { x: left + ix, y: cy },
+    { x: left + width - ix, y: cy },
+    { x: cx, y: top + iy },
+    { x: cx, y: top + height - iy },
+    { x: left + ix, y: top + iy },
+    { x: left + width - ix, y: top + height - iy },
+  ];
+}
+
+/** Uma caixa na janela da página, em px CSS. */
+export interface Box4 { left: number; top: number; right: number; bottom: number }
+
+/** A distância de um ponto a uma caixa: 0 dentro dela. */
+export function distanceToBox(box: Box4, x: number, y: number): number {
+  const dx = Math.max(box.left - x, 0, x - box.right);
+  const dy = Math.max(box.top - y, 0, y - box.bottom);
+  return Math.hypot(dx, dy);
+}
+
+/**
+ * Qual controle clicável fica com um toque que a foto apontou. Uma caixa de imagem de um alvo pequeno erra por
+ * dezenas de pixels (um ícone de 48 px apontado 30 px ao lado, no vazio entre dois ícones), então o ponto vai para
+ * o controle mais próximo: o menor que o contém, ou o mais perto dentro do `radius`. Se dois estão quase à mesma
+ * distância (`margin`), não adivinha. Pura.
+ */
+export function snapToNearest(boxes: Box4[], x: number, y: number, radius = 40, margin = 6): { index: number } | { ambiguous: true } | null {
+  const scored = boxes.map((box, index) => ({ index, d: distanceToBox(box, x, y), area: (box.right - box.left) * (box.bottom - box.top) }));
+  const inside = scored.filter((c) => c.d === 0).sort((a, b) => a.area - b.area);
+  if (inside.length > 0) return { index: inside[0].index };
+  const near = scored.filter((c) => c.d <= radius).sort((a, b) => a.d - b.d);
+  if (near.length === 0) return null;
+  if (near.length > 1 && near[1].d - near[0].d < margin) return { ambiguous: true };
+  return { index: near[0].index };
+}
+
 /** Cómo se parsea un `target`: un ref de snapshot, un texto visible, o un selector CSS. */
 export type TargetSpec =
   | { kind: "ref"; ref: string }
@@ -95,7 +166,9 @@ export type TargetSpec =
 export function parseTarget(target: string): TargetSpec {
   const t = target.trim();
   // `e12` sale de un snapshot; `u3`, de algo que el usuario marcó en el navegador.
-  if (/^[eu]\d+$/.test(t)) return { kind: "ref", ref: t };
+  // `@e63` também: é como a ajuda de `ags portal click` escreve um ref.
+  const asRef = /^@?([eu]\d+)$/.exec(t);
+  if (asRef) return { kind: "ref", ref: asRef[1] };
   const point = /^@(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)$/.exec(t);
   if (point) return { kind: "point", x: Number(point[1]), y: Number(point[2]) };
   const text = /^text[=:](.+)$/s.exec(t);

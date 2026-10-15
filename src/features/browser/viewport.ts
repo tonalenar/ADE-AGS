@@ -34,6 +34,24 @@ export const VIEWPORT_PRESETS: ViewportPreset[] = [
   { id: "desktop-large", kind: "desktop", width: 1920, height: 1080 },
 ];
 
+/**
+ * A resolução de um navegador aberto por um agente (e a predefinição "Área de trabalho grande"): 1920×1080. Com ela a
+ * página PREENCHE a janela inteira, sem margem: a largura de layout é a de 1920 px (um layout de desktop) e a altura é a
+ * que sobrar na janela, ao mesmo zoom. Qualquer outra resolução continua num quadro com margem, que se arrasta.
+ */
+export const FILL_VIEWPORT: Viewport = { width: 1920, height: 1080 };
+
+export function isFillViewport(viewport: Viewport | null | undefined): boolean {
+  return !!viewport && viewport.width === FILL_VIEWPORT.width && viewport.height === FILL_VIEWPORT.height;
+}
+
+/** O layout de uma página em modo de preencher: a escala (nunca amplia) e o tamanho, em px CSS, da página dentro da janela. Pura. */
+export function fillLayout(viewport: Viewport, box: Viewport, zoom = 1): { scale: number; width: number | null; height: number | null } {
+  if (box.width <= 0 || box.height <= 0) return { scale: 1, width: null, height: null };
+  const scale = Math.max(0.1, Math.min(1, box.width / viewport.width) * zoom);
+  return { scale, width: box.width / scale, height: box.height / scale };
+}
+
 export const MIN_SIDE = 240;
 export const MAX_SIDE = 3840;
 
@@ -68,23 +86,6 @@ export function fitScale(v: Viewport, available: Viewport): number {
   if (available.width <= 0 || available.height <= 0) return 1;
   const scale = Math.min(1, available.width / v.width, available.height / v.height);
   return Math.max(0.1, Math.floor(scale * 100) / 100);
-}
-
-/** Desde este ancho el marco es "de escritorio": lo que importa es el ancho (media queries), no la altura exacta. */
-export const FILL_MIN_WIDTH = 1024;
-
-/**
- * Cómo se dibuja el marco dentro del espacio disponible. Hasta un marco de escritorio (≥ 1024 px) achicado se
- * acomoda por el ANCHO: la página ocupa el ancho entero y la altura se estira o encoge hasta el borde del nodo.
- * Con `fitScale` (el menor de los dos lados) un nodo más ancho que 16:9 achicaba un 1920×1080 por la altura y
- * dejaba una franja vacía a los lados. Teléfono y tablet no se tocan: ahí el tamaño pedido es el que se prueba.
- */
-export function fillLayout(v: Viewport, available: Viewport): { scale: number; width: number; height: number } {
-  const fit = fitScale(v, available);
-  if (fit >= 1 || v.width < FILL_MIN_WIDTH) return { scale: fit, ...v };
-  const scale = Math.min(1, Math.max(0.1, Math.floor((available.width / v.width) * 100 + 1e-6) / 100));
-  const height = Math.max(MIN_SIDE, Math.min(MAX_SIDE, Math.floor(available.height / scale)));
-  return { scale, width: v.width, height };
 }
 
 /** Los cortes de las librerías que más se usan, para leer el ancho en sus términos. */

@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   callerOf, displayPath, formatConsoleArgs, formatValue, MAX_TEXT, toTransferable,
 } from "../page/serialize";
-import { formatNode, formatSnapshot, parseKeyCombo, parseTarget } from "../page/snapshotFormat";
+import { distanceToBox, formatNode, formatSnapshot, humanizeId, parseKeyCombo, parseTarget, probePoints, snapToNearest } from "../page/snapshotFormat";
 
 describe("formatValue", () => {
   it("muestra los primitivos como una consola", () => {
@@ -153,6 +153,80 @@ describe("snapshot", () => {
   });
 });
 
+describe("toque por foto: o controle mais perto do ponto", () => {
+  // A barra da página de teste: perfil em 1162–1210 e carrinho em 1234–1282, ambos de 48 px.
+  const profile = { left: 1162, top: 30, right: 1210, bottom: 78 };
+  const cart = { left: 1234, top: 30, right: 1282, bottom: 78 };
+
+  it("a distância é zero dentro da caixa e cresce para fora", () => {
+    expect(distanceToBox(cart, 1250, 50)).toBe(0);
+    expect(distanceToBox(cart, 1227, 54)).toBe(7);
+    expect(distanceToBox(cart, 1227, 85)).toBeCloseTo(Math.hypot(7, 7));
+  });
+
+  it("o ponto no vazio ao lado do carrinho (o erro real da foto) vai para o carrinho, não para o perfil", () => {
+    expect(snapToNearest([profile, cart], 1227, 54)).toEqual({ index: 1 });
+  });
+
+  it("dentro de um controle fica nele; entre contêineres, no menor", () => {
+    expect(snapToNearest([profile, cart], 1190, 50)).toEqual({ index: 0 });
+    const toolbar = { left: 1100, top: 20, right: 1300, bottom: 90 };
+    expect(snapToNearest([toolbar, cart], 1250, 50)).toEqual({ index: 1 });
+  });
+
+  it("longe de tudo não toca; entre dois à mesma distância não adivinha", () => {
+    expect(snapToNearest([profile, cart], 600, 300)).toBeNull();
+    expect(snapToNearest([profile, cart], 1222, 54)).toEqual({ ambiguous: true });
+  });
+});
+
+describe("opções de uma lista no snapshot", () => {
+  it("a lista mostra o que se pode escolher", () => {
+    const line = formatNode({ depth: 0, role: "combobox", name: "Classificar por", ref: "e12", states: [], value: "Em destaque", options: ["Em destaque", "Preço: do menor ao maior"] });
+    expect(line).toBe('- combobox "Classificar por" [ref=e12] value="Em destaque" options=["Em destaque","Preço: do menor ao maior"]');
+  });
+
+  it("sem opções, a linha é a de sempre", () => {
+    expect(formatNode({ depth: 0, role: "button", name: "Ir", ref: "e1", states: [] })).toBe('- button "Ir" [ref=e1]');
+  });
+});
+
+describe("nome de um elemento sem nome, pelo id", () => {
+  it("ids com palavras viram uma pista legível", () => {
+    expect(humanizeId("nav-search-submit-button")).toBe("nav search submit button");
+    expect(humanizeId("shoppingCartLink")).toBe("shopping cart link");
+    expect(humanizeId("add_to_cart")).toBe("add to cart");
+  });
+
+  it("uma palavra só, lixo gerado ou números não são pista", () => {
+    for (const raw of ["button", "a-autoid-3-announce", "x9f2kq7", "12345", "", null, undefined, "css-1x2y3z-btn-aqwrtkd"]) {
+      expect(humanizeId(raw as string | null | undefined), String(raw)).toBe("");
+    }
+  });
+});
+
+describe("pontos para clicar num elemento", () => {
+  it("o centro vem primeiro, e os outros ficam dentro do elemento", () => {
+    const rect = { left: 100, top: 50, width: 200, height: 40 };
+    const points = probePoints(rect);
+    expect(points[0]).toEqual({ x: 200, y: 70 });
+    for (const p of points) {
+      expect(p.x).toBeGreaterThanOrEqual(100);
+      expect(p.x).toBeLessThanOrEqual(300);
+      expect(p.y).toBeGreaterThanOrEqual(50);
+      expect(p.y).toBeLessThanOrEqual(90);
+    }
+    expect(new Set(points.map((p) => `${p.x},${p.y}`)).size).toBe(points.length);
+  });
+
+  it("um elemento minúsculo não gera pontos fora dele", () => {
+    for (const p of probePoints({ left: 10, top: 10, width: 3, height: 3 })) {
+      expect(p.x).toBeGreaterThanOrEqual(10);
+      expect(p.x).toBeLessThanOrEqual(13);
+    }
+  });
+});
+
 describe("parseTarget", () => {
   it("distingue un ref, un texto y un selector", () => {
     expect(parseTarget("e12")).toEqual({ kind: "ref", ref: "e12" });
@@ -172,6 +246,8 @@ describe("parseTarget", () => {
   it("solo e + número es un ref", () => {
     expect(parseTarget("e12x").kind).toBe("css");
     expect(parseTarget("@120.5,40")).toEqual({ kind: "point", x: 120.5, y: 40 });
+    expect(parseTarget("@e63")).toEqual({ kind: "ref", ref: "e63" });
+    expect(parseTarget("@u3")).toEqual({ kind: "ref", ref: "u3" });
     expect(parseTarget("@x,y").kind).toBe("css");
     expect(parseTarget(".e12").kind).toBe("css");
   });

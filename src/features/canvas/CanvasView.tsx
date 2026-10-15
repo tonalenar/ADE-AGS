@@ -31,7 +31,7 @@ import { DeviceNode } from "./DeviceNode";
 import { FolderNode, baseName, type FolderFlowNode } from "./FolderNode";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
-  HEADER_H, NOTE_HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, safeViewport, terminalRect,
+  HEADER_H, NOTE_HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, revealViewport, safeViewport, terminalRect,
   type Box, type Rect, type Viewport,
 } from "./geometry";
 import { CanvasDock, type DockPanel } from "./CanvasDock";
@@ -239,6 +239,27 @@ function CanvasInner() {
     activateTab(tabId);
     rf.setViewport(focusViewport(box, size.width, size.height), { duration: 220 });
   };
+
+  // O piloto do navegador precisa de uma foto do navegador INTEIRO: se o nó está cortado pela borda da tela, pede
+  // (`ags:canvas-reveal`) que a vista o mostre todo e, depois da foto, que volte a como estava.
+  useEffect(() => {
+    let saved: Viewport | null = null;
+    const onReveal = (event: Event) => {
+      const { id, restore } = (event as CustomEvent<{ id: string; restore?: boolean }>).detail;
+      if (restore) {
+        if (saved) rf.setViewport(saved, { duration: 0 });
+        saved = null;
+        return;
+      }
+      const box = useCanvasStore.getState().boards[key ?? ""]?.portals[id]?.box;
+      const s = sizeRef.current;
+      if (!box || s.width === 0) return;
+      saved = saved ?? rf.getViewport();
+      rf.setViewport(revealViewport(box, s.width, s.height), { duration: 0 });
+    };
+    window.addEventListener("ags:canvas-reveal", onReveal);
+    return () => window.removeEventListener("ags:canvas-reveal", onReveal);
+  }, [rf, key]);
 
   // Elegir un agente desde afuera (la tira de tabs, la paleta) lo trae a la vista si no se ve.
   const lastActive = useRef(activeTabId);
@@ -1134,7 +1155,7 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
   const drop = useViewTabsStore((s) => s.dropPortalView);
   const view = useViewTabsStore((s) => s.portalViews.find((v) => v.id === id));
   useEffect(() => {
-    ensure(id, cwd, portal.url);
+    ensure(id, cwd, portal.url, portal.viewport);
     // Al borrar el portal (o cerrar el canvas) se suelta la vista y con ella el navegador.
     return () => drop(id);
     // La URL inicial solo cuenta al crear la vista.
@@ -1145,6 +1166,15 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
   useEffect(() => {
     if (key && shown && shown !== portal.url) canvasActions.updatePortal(key, id, { url: shown });
   }, [shown]);
+
+  // A resolução que a pessoa escolher (ou desligar) na barra do navegador também se guarda: reabre como estava.
+  const shownViewport = view?.viewport ?? null;
+  useEffect(() => {
+    if (!key || !view) return;
+    const saved = portal.viewport ?? null;
+    if (shownViewport?.width === saved?.width && shownViewport?.height === saved?.height) return;
+    canvasActions.updatePortal(key, id, shownViewport ? { viewport: shownViewport } : { viewport: undefined });
+  }, [shownViewport?.width, shownViewport?.height]);
 
   useEffect(() => {
     if (!armed) return;

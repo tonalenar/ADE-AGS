@@ -20,7 +20,7 @@ interface ViewTabsState {
    *  guarda el canvas). Usan el mismo `BrowserTab`, que los maneja por su id. */
   portalViews: BrowserView[];
   /** Crea la vista de un portal si todavía no existe. */
-  ensurePortalView: (id: string, cwd: string, url: string) => void;
+  ensurePortalView: (id: string, cwd: string, url: string, viewport?: { width: number; height: number }) => void;
   dropPortalView: (id: string) => void;
 
   openFile: (cwd: string, path: string, reveal?: { line: number; column: number }) => void;
@@ -43,16 +43,19 @@ interface ViewTabsState {
   hydrate: (views: ViewTab[]) => void;
 }
 
+/** A resolução com que a página de um navegador aberto por um agente é renderizada. */
+export const AGENT_BROWSER_VIEWPORT = { width: 1920, height: 1080 } as const;
+
 export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
   views: [],
   activeViewId: null,
   keepMountedIds: [],
   portalViews: [],
 
-  ensurePortalView: (id, cwd, url) =>
+  ensurePortalView: (id, cwd, url, viewport) =>
     set((s) => (s.portalViews.some((v) => v.id === id)
       ? s
-      : { portalViews: [...s.portalViews, { kind: "browser", id, cwd, url, title: "" }] })),
+      : { portalViews: [...s.portalViews, { kind: "browser", id, cwd, url, title: "", ...(viewport ? { viewport } : {}) }] })),
   dropPortalView: (id) => set((s) => ({ portalViews: s.portalViews.filter((v) => v.id !== id) })),
 
   openFile: (cwd, path, reveal) => {
@@ -91,7 +94,11 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
   },
 
   openBrowser: (cwd, url = "", opts) => {
-    const view: BrowserView = { kind: "browser", cwd, url, id: crypto.randomUUID(), title: "", owner: opts?.owner };
+    // Um navegador que um agente abre nasce em 1920×1080, como o do canvas (ver `AGENT_BROWSER_VIEWPORT`).
+    const view: BrowserView = {
+      kind: "browser", cwd, url, id: crypto.randomUUID(), title: "", owner: opts?.owner,
+      ...(opts?.owner ? { viewport: { ...AGENT_BROWSER_VIEWPORT } } : {}),
+    };
     const activate = opts?.activate ?? true;
     set((s) => ({
       views: [...s.views, view],
