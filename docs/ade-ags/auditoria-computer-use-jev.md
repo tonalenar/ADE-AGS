@@ -2,8 +2,10 @@
 
 Missão «Auditoria do computer use com o Jev», prioridade 2/3. Este documento é o **esqueleto do relatório**: o
 benchmark repetível do piloto (`ags portal act` / `browser_act`) e as colunas ANTES/DEPOIS das correções de
-precisão e velocidade. A coluna **ANTES (sim)** está preenchida (rodada local, sem custo, commit `ee2a8e80`). As
-colunas **ANTES (real)** e **DEPOIS** esperam as rodadas com o Jev de verdade, que só rodam a pedido do Orquestrador.
+precisão e velocidade. A coluna **ANTES (sim)** está preenchida (rodada local, sem custo, commit `ee2a8e80`, o piloto
+de antes das correções da dev). A rodada **dev atual (sim)** (commit `afecb91c`, já com o merge da `origin/dev`) está em
+«Taxas e tempos». As colunas **ANTES (real)** e **DEPOIS (real)** esperam as rodadas com o Jev de verdade, que só rodam a
+pedido do Orquestrador.
 
 ## Como rodar
 
@@ -109,7 +111,24 @@ P05 e P06 (Amazon) são **frágeis por natureza** (captcha, A/B, layout): uma fa
 | tempo: espera | 19% | 22% | — | — |
 | tempo: outros/não medido | 0% | 0% | — | — |
 
-Tabelas completas por tarefa: [`bench/antes-sim.md`](bench/antes-sim.md) e [`bench/antes-sim-sem-foto.md`](bench/antes-sim-sem-foto.md).
+**Dev atual (sim), commit `afecb91c`** — o mesmo benchmark sobre o piloto da `origin/dev` (modo rápido, foto, 1920×1080,
+`MIN_PROBABILITY` 0,40, `blockedPurchase`), comparado com o ANTES (`bench/dev-atual-sim.md`):
+
+| métrica | ANTES (sim, `ee2a8e80`) | dev atual (sim, `afecb91c`) |
+|---|---|---|
+| concluídas sem ajuda à mão | 13/14 (93%) | 13/14 (93%) |
+| falso «concluído» / «sem certeza» / violações | 0 / 0 / 0 | 0 / 0 / 0 |
+| passos (média · mediana) | 2.6 · 2.5 | 2.6 · 2.5 |
+| tempo total (mediana) | 2.6 s virtuais | 2.1 s virtuais |
+| tempo por passo (mediana) | 910 ms | 710 ms |
+| tempo: Jev / snapshot / ação / espera | 60% / 14% / 7% / 19% | 71% / 16% / 8% / 5% |
+
+**Leia o tempo do sim com cuidado:** a queda da espera (19% → 5%) vem de o sim modelar o modo rápido (`settle` sem
+`thorough` custa 1/5), não de uma medição: o sim confirma que o laço **continua acertando** e **chama `settle` menos**,
+mas o ganho de verdade em segundos só aparece no `--real`. Precisão, no sim, não mudou (a heurística não vê o que a dev
+corrigiu: listas por opção, pergunta direta de fim, escolha do texto pelo objetivo — isso é do Jev real).
+
+Tabelas completas por tarefa: [`bench/antes-sim.md`](bench/antes-sim.md), [`bench/antes-sim-sem-foto.md`](bench/antes-sim-sem-foto.md) e [`bench/dev-atual-sim.md`](bench/dev-atual-sim.md).
 Para preencher DEPOIS: `bun scripts/jev-bench.ts --sim --label depois --compare docs/ade-ags/bench/antes-sim.json`.
 
 ## O que o sim já mostra (leitura do laço, sem Jev real)
@@ -130,13 +149,16 @@ Para preencher DEPOIS: `bun scripts/jev-bench.ts --sim --label depois --compare 
 
 ## Telemetria que falta no relatório do `act`
 
-O relatório (`formatResult` em `jevPilot.ts`) traz só: desfecho, nota, os passos (cada um com `p=` e os ms **da
-consulta ao Jev**) e o `snapshot` final. Para o benchmark real medir por fase falta, em `runPilot`/`formatResult`:
+Desde `8cd9db5c` cada passo que age traz `passo NNN ms` além de `p=`, `fim p=` e os ms **da consulta ao Jev**; o
+`parseActReport` do benchmark já lê os três (o tempo por passo do real deixou de ser a média). Ainda falta, em
+`runPilot`/`formatResult`:
 
-1. **Tempo por fase**: somas de `snapshot`, ação (`click`/`type`/`select`/`scroll`/`clickAt`), espera (`settle`), consulta
-   ao Jev (já há por passo) e foto (`visual`, que hoje só imprime os ms quando toca). Basta embrulhar as `PilotDeps`
-   como faz `instrument()` em `scripts/bench/core.ts` e devolver `timings` em `PilotResult`.
-2. **Tempo de cada passo** (hoje o benchmark real só tem a média).
+1. **Tempo por fase**: somas de `snapshot`, ação (`click`/`type`/`select`/`scroll`/`clickAt`/`peekAt`), espera (`settle`),
+   consulta ao Jev (já há por passo) e foto (`visual`, que hoje só imprime os ms quando toca). Basta embrulhar as
+   `PilotDeps` como faz `instrument()` em `scripts/bench/core.ts` e devolver `timings` em `PilotResult`. Sem isso, o
+   real divide o tempo só em «consulta ao Jev» e «outros».
+2. ~~Tempo de cada passo~~ — feito em `8cd9db5c`. Mas só os passos que **agem** o trazem: o último passo (`concluído`,
+   `objetivo atingido`, `unsure`, `stuck`) fica sem tempo; o benchmark usa o total para o que sobra.
 3. **Um bloco legível por máquina** no fim do relatório (uma linha `TEMPOS: {"jev":…,"snapshot":…,"acao":…,"espera":…,
    "foto":…,"consultas":N,"fotos":N}`) ou `--json` no `portal act`, para o runner não depender de regex nos passos.
 4. **Quantas consultas ao Jev** o piloto gastou (hoje só se deduz contando linhas) e quando parou sem agir (um `unsure`
@@ -161,6 +183,6 @@ Preencher depois da primeira rodada real, por classe: (a) sem caminho (stuck), (
   vão ao provedor: só os nomes dos campos) e, com a senha preenchida, `sensitiveFilled` bloqueia a foto. P04 para antes de
   `Finish`: `forbid` marca `checkout-complete` como violação. Se preferir tirar o login do escopo, basta excluí-las.
 - **Nenhum fluxo faz compra, pagamento ou usa dado pessoal.** Amazon e SauceDemo têm `forbid` (URL de compra/checkout
-  concluído) e o objetivo diz «não finalize». O benchmark não mexe em `blockedPurchase`: ele **não existe neste commit** (`grep` em `src/` e `src-tauri/src/` não acha), então a única trava de compra aqui é o `forbid` + o objetivo; quando o Orquestrador a introduzir, vale por cima. `sensitiveFilled` (jevPilot.ts) segue intacto.
+  concluído) e o objetivo diz «não finalize». O benchmark não mexe em `blockedPurchase` nem em `sensitiveFilled` (`jevPilot.ts`; `blockedPurchase` chegou na dev em `7533bf56`). Ele vale por cima do `forbid`, que continua como segunda trava e como medida: se o piloto algum dia passar por `blockedPurchase`, a tarefa acusa **violação**. Cuidado: P03/P04 dizem «checkout» no objetivo, o que o `blockedPurchase` entende como pedido de compra; é por isso que P04 só vale com o «NÃO clique em Finish» e o `forbid` em `checkout-complete`.
 - O modo real **não inicia nem fecha** instâncias do app: usa o `ags` do terminal onde roda e cria só um portal
   (`bench-jev`; `--portal <nome>` reaproveita outro).
