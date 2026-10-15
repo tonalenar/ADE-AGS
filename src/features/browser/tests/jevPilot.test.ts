@@ -702,3 +702,26 @@ describe("controles repetidos e rolagem", () => {
     expect(down.scrollY).toBe(600);
   });
 });
+
+describe("controle coberto por uma faixa ou modal", () => {
+  it("não desiste: o Jev vê a falha no histórico e escolhe o que está na frente", async () => {
+    const h = harness([ok("click", "e4"), ok("click", "e5"), ok("done")], pagesOf(10).map((p) => p.replace('value="[x]"', 'value=""')));
+    h.deps.click = async (ref) => {
+      h.calls.push(`click ${ref}`);
+      if (ref === "e4") throw new Error('button "Entrar" está coberto por div "Aceitar cookies" (div#banner). Feche o que está na frente.');
+    };
+    const result = await runPilot("entrar", [], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(h.calls).toEqual(["click e4", "click e5"]);
+    // o Jev, na consulta seguinte, lê que o toque falhou e por quê
+    expect(h.asked[1].state).toContain("está coberto por div");
+    expect(h.asked[1].state).toContain("the page did not change");
+  });
+
+  it("se o Jev insiste no mesmo controle coberto, para em vez de girar em círculos", async () => {
+    const h = harness([ok("click", "e4")], pagesOf(10).map((p) => p.replace('value="[x]"', 'value=""')));
+    h.deps.click = async () => { throw new Error("botão está coberto por div (div#modal)."); };
+    const result = await runPilot("entrar", [], undefined, h.deps);
+    expect(result.outcome).toBe("stuck");
+  });
+});

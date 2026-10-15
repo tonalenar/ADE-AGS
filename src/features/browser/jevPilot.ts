@@ -531,6 +531,7 @@ export async function runPilot(
   let lastSignature = "";
   let waits = 0;
   let staleRetries = 0;
+  let coveredRetries = 0;
 
   const finish = (outcome: PilotResult["outcome"], note: string): PilotResult =>
     ({ outcome, steps: log, note: note + emptyFieldsNote(parseSnapshot(snapshot), fills.length), finalSnapshot: snapshot, timings: { ...timings, total: Date.now() - startedAt } });
@@ -683,6 +684,14 @@ export async function runPilot(
         log.push(`${step}. a página mudou antes do toque; li de novo`);
         await deps.settle();
         snapshot = await deps.snapshot();
+        continue;
+      }
+      // Um controle coberto (a faixa de cookies, o modal) não é o fim: o Jev vê a falha no histórico e escolhe fechar o que está na frente.
+      if (/est[áa] coberto por/i.test(message) && coveredRetries < 3) {
+        coveredRetries += 1;
+        const what = `tentou tocar em ${reply.target ?? "um elemento"}, mas falhou: ${message.split(". ")[0].slice(0, 160)}`;
+        log.push(`${step}. ${what}`);
+        history.push({ what, changed: false });
         continue;
       }
       log.push(`${step}. falhou: ${message}`);
