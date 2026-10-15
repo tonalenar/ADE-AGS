@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { formatResult, type PilotDeps, type PilotResult } from "../jevPilot";
 import {
   all, any, canStart, check, describeCriterion, emptyPhases, evaluate, fold, instrument, judge, median, not, parseActReport,
-  regex, renderMarkdown, renderTaskTable, select, summarize, text, url, viewOf, buildReport, parseTimings, phasesFromReport, isInfraFailure, infraTooHigh,
+  regex, renderMarkdown, renderTaskTable, select, summarize, text, url, viewOf, buildReport, parseTimings, phasesFromReport, isInfraFailure, infraTooHigh, cliText, unwrapCli,
   type BenchTask, type TaskRun,
 } from "../../../../scripts/bench/core";
 import { PAGES, initialNames, renderSnapshot, runSimTask, virtualClock } from "../../../../scripts/bench/sim";
@@ -392,5 +392,32 @@ describe("falhas de infraestrutura", () => {
     expect(infraTooHigh([r("crash"), r("done"), r("done"), r("done")])).toBe(false); // 25%
     expect(infraTooHigh([r("crash"), r("crash"), r("done"), r("done")])).toBe(true); // 50%
     expect(infraTooHigh([r("crash"), r("crash"), r("crash"), r("done"), r("done"), r("done"), r("done"), r("done")], 0.4)).toBe(false); // 37,5% com teto 40%
+  });
+});
+
+describe("saída JSON do CLI", () => {
+  it("devolve o campo text e deixa passar o que não é JSON de objeto com text", () => {
+    expect(unwrapCli('{"portal":{"id":"p","name":"n","url":"u"},"text":"act \\"g\\": FEITO\nok"}')).toBe('act "g": FEITO\nok');
+    expect(unwrapCli("page: x http://a")).toBe("page: x http://a");
+    expect(unwrapCli('{"error":"falhou"}')).toBe('{"error":"falhou"}');
+    expect(unwrapCli("{nao json")).toBe("{nao json");
+  });
+  it("o relatório do act embrulhado no JSON do CLI é reconhecido depois de desembrulhar", () => {
+    const wrapped = JSON.stringify({ portal: { id: "p" }, text: ['act "g": FEITO', "ok", "", "Passos:", "1. concluído (p=0.97, 300 ms)"].join("\n") });
+    expect(parseActReport(wrapped).outcome).toBeNull();
+    expect(parseActReport(unwrapCli(wrapped)).outcome).toBe("done");
+  });
+});
+
+describe("saída do CLI", () => {
+  it("tira o texto do JSON do ags portal e deixa texto puro como veio", () => {
+    expect(cliText(JSON.stringify({ portal: { name: "p" }, text: 'act "g": FEITO\nok' }))).toBe('act "g": FEITO\nok');
+    expect(cliText("act puro")).toBe("act puro");
+    expect(cliText('{"error":"x"}')).toBe('{"error":"x"}');
+    expect(cliText("{quebrado")).toBe("{quebrado");
+  });
+  it("o relatório do act dentro do JSON do CLI é reconhecido", () => {
+    const report = formatResult("g", { outcome: "done", steps: ["1. concluído (p=0.97, 300 ms)"], note: "ok", finalSnapshot: SNAP });
+    expect(parseActReport(cliText(JSON.stringify({ portal: {}, text: report }))).outcome).toBe("done");
   });
 });

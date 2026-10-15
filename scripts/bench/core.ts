@@ -235,6 +235,20 @@ export function evaluate(task: Pick<BenchTask, "success" | "forbid">, finalSnaps
   return { criterionOk: check(task.success, view), forbidden: task.forbid ? check(task.forbid, view) : false, finalUrl: view.url };
 }
 
+/**
+ * O CLI `ags portal …` devolve JSON (`{"portal":{…},"text":"…"}`): o texto que interessa (o relatório do act, o snapshot)
+ * vem em `text`. Sem JSON de objeto com `text` string, devolve a saída como veio. Pura.
+ */
+export function unwrapCli(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{")) return raw;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    if (typeof parsed === "object" && parsed !== null && typeof (parsed as { text?: unknown }).text === "string") return (parsed as { text: string }).text;
+  } catch { /* não era JSON: fica como veio */ }
+  return raw;
+}
+
 // ── Relatório do `ags portal act` ───────────────────────────────────
 
 export interface ActReport {
@@ -286,6 +300,22 @@ const HEADS: [string, PilotResult["outcome"]][] = [
   ["PAROU (Jev sem certeza)", "unsure"], ["PAROU", "stuck"], ["FEITO", "done"], ["NÃO RODOU", "off"], ["LIMITE DE PASSOS", "limit"], ["ERRO", "error"],
 ];
 const FINAL_MARK = "A página agora (o Jev só escolhe onde tocar: confira o resultado):";
+
+/**
+ * O `ags portal …` imprime um JSON (`{"portal":{…},"text":"…"}`); o que interessa é o `text`. Texto puro passa como veio.
+ * Pura.
+ */
+export function cliText(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed.startsWith("{")) return raw;
+  try {
+    const parsed: unknown = JSON.parse(trimmed);
+    const text = typeof parsed === "object" && parsed !== null ? (parsed as { text?: unknown }).text : undefined;
+    return typeof text === "string" ? text : raw;
+  } catch {
+    return raw;
+  }
+}
 
 /** Lê o texto que o `act` devolve (ver `formatResult` em `jevPilot.ts`). Pura. */
 export function parseActReport(report: string): ActReport {
