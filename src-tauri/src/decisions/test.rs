@@ -605,6 +605,7 @@ fn local_settings(base_url: String) -> Settings {
         memory_relevance: false,
         turn_routing: false,
         browser_pilot: false,
+        browser_vision: false,
         secondary: None,
     }
 }

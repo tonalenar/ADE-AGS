@@ -91,7 +91,7 @@ fn slug(raw: &str) -> String {
     limpio.trim_matches('-').chars().take(24).collect()
 }
 
-fn capture_dir() -> PathBuf {
+pub(crate) fn capture_dir() -> PathBuf {
     std::env::temp_dir().join("ade-ags").join("capturas")
 }
 

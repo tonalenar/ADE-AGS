@@ -15,6 +15,7 @@ pub const KEY_DELIVERY: &str = "decisions.point.delivery_gate";
 pub const KEY_RELEVANCE: &str = "decisions.point.memory_relevance";
 pub const KEY_ROUTING: &str = "decisions.point.turn_routing";
 pub const KEY_BROWSE: &str = "decisions.point.browser_step";
+pub const KEY_BROWSE_VISION: &str = "decisions.point.browser_vision";
 pub const KEY_SECONDARY_PROVIDER: &str = "decisions.secondary.provider";
 pub const KEY_SECONDARY_URL: &str = "decisions.secondary.base_url";
 pub const KEY_SECONDARY_MODEL: &str = "decisions.secondary.model";
@@ -107,6 +108,14 @@ impl ProviderKind {
         }
     }
 
+    /// Quantas opções cabem numa pergunta.
+    pub fn max_options(self) -> usize {
+        match self {
+            Self::Jev => super::protocol::JEV_MAX_OPTIONS,
+            Self::None | Self::LayaLocal | Self::LayaStudio | Self::Clef => super::protocol::MAX_OPTIONS,
+        }
+    }
+
     pub fn is_configured(self) -> bool {
         !matches!(self, Self::None)
     }
@@ -147,6 +156,8 @@ pub struct Settings {
     pub turn_routing: bool,
     /// O Jev pilota o navegador do canvas: escolhe o próximo elemento a tocar (ver `browse.rs`).
     pub browser_pilot: bool,
+    /// Reserva visual do piloto: o Jev olha uma foto da página (ver `vision.rs`).
+    pub browser_vision: bool,
     /// O segundo provedor da comparação. `None` = só o principal.
     pub secondary: Option<Endpoint>,
 }
@@ -167,6 +178,7 @@ impl Default for Settings {
             memory_relevance: false,
             turn_routing: false,
             browser_pilot: false,
+            browser_vision: false,
             secondary: None,
         }
     }
@@ -225,6 +237,7 @@ impl Settings {
             super::points::POINT_RELEVANCE => self.memory_relevance,
             super::points::POINT_ROUTING => self.turn_routing,
             super::points::POINT_BROWSE => self.browser_pilot,
+            super::points::POINT_BROWSE_VISION => self.browser_vision,
             _ => false,
         }
     }
@@ -279,6 +292,7 @@ pub fn load(conn: &Connection) -> Result<Settings, String> {
     settings.memory_relevance = flag(conn, KEY_RELEVANCE);
     settings.turn_routing = flag(conn, KEY_ROUTING);
     settings.browser_pilot = flag(conn, KEY_BROWSE);
+    settings.browser_vision = flag(conn, KEY_BROWSE_VISION);
     let second = ProviderKind::parse(&text(conn, KEY_SECONDARY_PROVIDER).unwrap_or_default());
     settings.secondary = second.is_configured().then(|| Endpoint {
         provider: second,
@@ -314,6 +328,7 @@ pub fn persist(conn: &Connection, settings: &Settings) -> Result<(), String> {
         (KEY_RELEVANCE, bool_text(settings.memory_relevance)),
         (KEY_ROUTING, bool_text(settings.turn_routing)),
         (KEY_BROWSE, bool_text(settings.browser_pilot)),
+        (KEY_BROWSE_VISION, bool_text(settings.browser_vision)),
     ];
     for (key, value) in rows {
         put(conn, key, &value)?;

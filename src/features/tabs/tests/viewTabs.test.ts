@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  comparablePath, findExisting, isLocalUrl, nextActiveAfterClose, normalizeUrl, relativeTo, toPersisted, viewLabels,
+  comparablePath, findExisting, isLocalUrl, nextActiveAfterClose, normalizeUrl, knownViews, relativeTo, toPersisted, viewLabels,
   viewsOfWorkspace, type ViewTab,
 } from "../viewTabs";
 
@@ -59,6 +59,14 @@ describe("persistencia", () => {
   });
 });
 
+describe("abas salvas por outra versão", () => {
+  it("só as de tipo conhecido voltam", () => {
+    const keep = file("a", "/p", "/p/src/app.ts");
+    const foreign = { kind: "desktop", id: "g", cwd: "/p", title: "Gemini" } as unknown as ViewTab;
+    expect(knownViews([keep, foreign, null as unknown as ViewTab])).toEqual([keep]);
+  });
+});
+
 describe("títulos repetidos", () => {
   it("solo los homónimos llevan la carpeta que los separa", () => {
     const labels = viewLabels([
@@ -78,6 +86,13 @@ describe("títulos repetidos", () => {
     ]);
     expect(labels.get("a")?.hint).toBeNull();
     expect(labels.get("d")?.hint).toBeNull();
+  });
+
+  it("uma aba de tipo desconhecido, sem path (salva por outra versão), fica só com o título", () => {
+    const foreign = { kind: "desktop", id: "g", cwd: "/p", title: "Gemini" } as unknown as Parameters<typeof viewLabels>[0][number];
+    const labels = viewLabels([file("a", "/p", "/p/src/app.ts"), foreign]);
+    expect(labels.get("g")).toEqual({ title: "Gemini", hint: null });
+    expect(labels.get("a")?.hint).toBeNull();
   });
 });
 

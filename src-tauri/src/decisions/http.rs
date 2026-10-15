@@ -2,6 +2,7 @@
 //!
 //! Só mudam a URL base e a chave. Sem retry: no caminho quente um timeout já é a resposta.
 
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use reqwest::blocking::Client;
@@ -46,9 +47,10 @@ impl SystemOneHttpProvider {
             request.wire_with_budget(budget)?
         };
         let url = endpoint(&self.base_url);
-        let client = client(self.timeout)?;
+        let client = client()?;
         let mut call = client
             .post(url)
+            .timeout(self.timeout)
             .header(CONTENT_TYPE, "application/json")
             .json(&body);
         if let Some(key) = self.api_key.as_deref().filter(|key| !key.is_empty()) {
@@ -128,19 +130,27 @@ impl DecisionProvider for HeuristicProvider {
     }
 }
 
-fn client(timeout: Duration) -> Result<Client, DecisionError> {
-    Client::builder()
-        .timeout(timeout)
-        .connect_timeout(timeout)
+/// Um cliente só para todas as consultas: cada `Client::build` abria uma conexão TLS nova (cerca de 200 ms a
+/// mais por decisão). O prazo vale por pedido (`.timeout`), então não prende o cliente a um valor.
+pub(super) fn client() -> Result<&'static Client, DecisionError> {
+    static CLIENT: OnceLock<Client> = OnceLock::new();
+    if let Some(client) = CLIENT.get() {
+        return Ok(client);
+    }
+    let built = Client::builder()
+        .connect_timeout(Duration::from_secs(10))
+        .pool_idle_timeout(Duration::from_secs(90))
+        .tcp_keepalive(Duration::from_secs(30))
         .build()
-        .map_err(|error| DecisionError::Transport(error.to_string()))
+        .map_err(|error| DecisionError::Transport(error.to_string()))?;
+    Ok(CLIENT.get_or_init(|| built))
 }
 
-fn endpoint(base_url: &str) -> String {
+pub(super) fn endpoint(base_url: &str) -> String {
     format!("{}/v1/systemone", base_url.trim_end_matches('/'))
 }
 
-fn map_transport(error: reqwest::Error, secret: Option<&str>) -> DecisionError {
+pub(super) fn map_transport(error: reqwest::Error, secret: Option<&str>) -> DecisionError {
     if error.is_timeout() {
         DecisionError::Timeout
     } else {

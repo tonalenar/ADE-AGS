@@ -34,6 +34,7 @@ import { ApprovalToast } from "@/features/runs/ApprovalToast";
 import { PoolFailoverNotice } from "@/features/accounts/PoolFailoverNotice";
 import { AgentUpdateWatcher } from "@/features/agents/AgentUpdateWatcher";
 import { BotToastHost } from "@/shared/brand/BotToastHost";
+import { AppConfirmHost } from "@/shared/ui/AppConfirmHost";
 import { BotPanel } from "@/features/bot/BotPanel";
 import type { ShellOutletContext } from "@/app/shellContext";
 import { AskDialog } from "@/features/ask/AskDialog";
@@ -239,6 +240,7 @@ export function AppShell() {
       <PoolFailoverNotice />
       <AgentUpdateWatcher />
       <BotToastHost />
+      <AppConfirmHost />
       <BotPanel />
       {/* Los avisos de la esquina, apilados: un permiso pendiente arriba de la versión
           nueva, sin taparse entre ellos. */}

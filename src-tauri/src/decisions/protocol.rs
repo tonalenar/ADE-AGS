@@ -22,6 +22,10 @@ const ERROR_TEXT_BUDGET: usize = 300;
 /// Menos de 20 opções por pergunta. A Laya perde qualidade acima disso.
 pub const MAX_OPTIONS: usize = 19;
 
+/// O Jev aceita muito mais opções por pergunta que a Laya (o piloto do navegador oferece os elementos da página).
+/// O teto é do cliente: o que importa é a qualidade, medida em `browse.rs`.
+pub const JEV_MAX_OPTIONS: usize = 100;
+
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum Question {
@@ -91,10 +95,12 @@ impl DecisionRequest {
         if self.questions.is_empty() {
             return Err(DecisionError::Malformed("sem perguntas".into()));
         }
+        // O teto maior vale para quem usa o orçamento de estado do Jev (ver `ProviderKind::state_char_budget`).
+        let max_options = if budget == STATE_CHAR_BUDGET { MAX_OPTIONS } else { JEV_MAX_OPTIONS };
         for question in self.questions.values() {
-            if question.option_count() > MAX_OPTIONS {
+            if question.option_count() > max_options {
                 return Err(DecisionError::Unprocessable(format!(
-                    "cada pergunta aceita no máximo {MAX_OPTIONS} opções"
+                    "cada pergunta aceita no máximo {max_options} opções"
                 )));
             }
         }

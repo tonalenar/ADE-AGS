@@ -5,6 +5,9 @@
  *
  * Aqui só orquestra: a lógica pura está em `conversationModel.ts` e a persistência no backend.
  */
+import i18n from "i18next";
+import { AlertaToast } from "neogestify-ui-components";
+
 import { boardKeyOfTab, canvasActions, conversationBoardKey, useCanvasStore } from "@/features/canvas/store";
 import { nextFreeBox, type Box } from "@/features/canvas/geometry";
 import { attachSkillsToTab, tabSkillIds } from "@/features/skills/attachSkills";
@@ -21,6 +24,7 @@ import {
 import { activeConversationFor, useConversationsStore } from "./conversationsStore";
 import { createConversation, setActiveConversation, updateConversation } from "./ipc.projectConversations";
 import { refreshSessionTitle } from "./sessionTitle";
+import { confirmSwitchWork, type SwitchIntent } from "./switchConfirm";
 
 export interface FlowContext {
   workspaceId: string;
@@ -28,8 +32,6 @@ export interface FlowContext {
   cwd: string;
   /** A chave do projeto (a raiz do repo): agrupa as conversas dele. */
   projectKey: string;
-  /** Pergunta antes de fechar terminais que ainda estão trabalhando. `true` = pode fechar. */
-  confirmWorking: (names: string[]) => Promise<boolean>;
 }
 
 /** As abas que pertencem ao canvas desta conversa (são nós dele). */
@@ -74,10 +76,10 @@ export async function saveActiveSnapshots(): Promise<void> {
  * Salva a conversa (snapshot dos terminais) e fecha os terminais dela. Devolve `false` se a pessoa desistiu por
  * haver agentes trabalhando. As sessões dos agentes continuam no disco e voltam com `--resume`.
  */
-export async function hibernateConversation(row: ConversationRow, ctx: FlowContext): Promise<boolean> {
+export async function hibernateConversation(row: ConversationRow, _ctx: FlowContext, intent: SwitchIntent = "open"): Promise<boolean> {
   const tabs = tabsOfConversation(row);
   const working = activeAgentWork(tabs, (id) => sustainedTabIds().includes(id));
-  if (working.length > 0 && !(await ctx.confirmWorking(working.map((tab) => tab.title)))) return false;
+  if (working.length > 0 && !(await confirmSwitchWork(working, intent))) return false;
 
   // Títulos reais das sessões antes de fechar (depois a aba some).
   const snapshot = await snapshotOf(row, tabs, true);
@@ -89,6 +91,10 @@ export async function hibernateConversation(row: ConversationRow, ctx: FlowConte
     ...(title && tabs.length > 0 ? { title } : {}),
   });
   useConversationsStore.getState().upsert(saved);
+  // Quem pede para trocar quer ter certeza de que nada se perdeu: a conversa está na lista, para abrir quando quiser.
+  if (tabs.length > 0 && intent !== "delete") {
+    AlertaToast(i18n.t("conversations.switch.savedTitle"), i18n.t("conversations.switch.saved", { title: conversationTitle(saved, snapshot.terminals) }), "success", 4500);
+  }
 
   const close = useTabsStore.getState().closeTab;
   for (const tab of tabs) close(tab.id);
@@ -156,7 +162,7 @@ export function activeConversationOf(projectKey: string): ConversationRow | null
 /** Abre uma conversa salva: antes salva e fecha a ativa. Devolve o id da aba a ativar, ou `null`. */
 export async function openConversation(row: ConversationRow, ctx: FlowContext): Promise<{ ok: boolean; tabId: string | null }> {
   const current = activeConversationOf(ctx.projectKey);
-  if (current && current.id !== row.id && !(await hibernateConversation(current, ctx))) return { ok: false, tabId: null };
+  if (current && current.id !== row.id && !(await hibernateConversation(current, ctx, "open"))) return { ok: false, tabId: null };
   if (row.state === "active" && tabsOfConversation(row).length > 0) {
     return { ok: true, tabId: tabsOfConversation(row)[0].id };
   }
@@ -172,7 +178,7 @@ export async function openConversation(row: ConversationRow, ctx: FlowContext): 
 /** Começa uma conversa nova (vazia): salva e fecha a ativa; quem chama abre o assistente de agente. */
 export async function startConversation(ctx: FlowContext): Promise<ConversationRow | null> {
   const current = activeConversationOf(ctx.projectKey);
-  if (current && !(await hibernateConversation(current, ctx))) return null;
+  if (current && !(await hibernateConversation(current, ctx, "new"))) return null;
   const row = await createConversation(ctx.workspaceId, ctx.projectKey, ctx.cwd);
   await setActiveConversation(ctx.workspaceId, ctx.projectKey, row.id);
   await useConversationsStore.getState().load(ctx.workspaceId);

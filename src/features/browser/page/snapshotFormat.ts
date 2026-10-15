@@ -88,12 +88,16 @@ export function parseKeyCombo(combo: string): {
 export type TargetSpec =
   | { kind: "ref"; ref: string }
   | { kind: "text"; text: string }
-  | { kind: "css"; selector: string };
+  | { kind: "css"; selector: string }
+  /** Um ponto da janela da página, em px CSS: o que a reserva visual do piloto aponta numa foto. */
+  | { kind: "point"; x: number; y: number };
 
 export function parseTarget(target: string): TargetSpec {
   const t = target.trim();
   // `e12` sale de un snapshot; `u3`, de algo que el usuario marcó en el navegador.
   if (/^[eu]\d+$/.test(t)) return { kind: "ref", ref: t };
+  const point = /^@(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)$/.exec(t);
+  if (point) return { kind: "point", x: Number(point[1]), y: Number(point[2]) };
   const text = /^text[=:](.+)$/s.exec(t);
   if (text) return { kind: "text", text: text[1].trim().replace(/^["'](.*)["']$/s, "$1") };
   return { kind: "css", selector: t };
