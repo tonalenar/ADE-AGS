@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, isAmbiguous, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, isAmbiguous, isSearchField, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -579,5 +579,31 @@ describe("a foto não toca duas vezes no mesmo lugar", () => {
     expect(h.clicks).toHaveLength(1);
     expect(result.steps.join("\n")).toContain("mesmo lugar de um toque anterior");
     expect(result.outcome).toBe("unsure");
+  });
+});
+
+describe("buscas que exigem Enter", () => {
+  const SEARCH = [
+    'page: "Loja" http://localhost/',
+    "viewport: 1280×800 · scroll 0/800",
+    '- searchbox "Pesquisar" [ref=e1] value=""',
+    '- button "" [ref=e2]',
+    '- textbox "Nome" [ref=e3] value=""',
+  ].join("\n");
+
+  it("reconhece campos de busca pelo papel ou pelo nome", () => {
+    const [search, , name] = parseSnapshot(SEARCH).elements;
+    expect(isSearchField(search)).toBe(true);
+    expect(isSearchField(name)).toBe(false);
+    expect(isSearchField({ ref: "e9", role: "textbox", name: "Search Amazon", states: [], filled: false })).toBe(true);
+  });
+
+  it("digitar numa busca aperta Enter; num campo comum, não", async () => {
+    const submits: Record<string, boolean> = {};
+    const h = harness([ok("done")], [SEARCH]);
+    h.deps.type = async (ref, _text, submit) => { submits[ref] = !!submit; };
+    const result = await runPilot("buscar", ["Pesquisar=fone", "Nome=Ana"], undefined, h.deps);
+    expect(submits).toEqual({ e1: true, e3: false });
+    expect(result.steps.join("\n")).toContain("e apertou Enter");
   });
 });

@@ -372,7 +372,8 @@ export interface PilotDeps {
   peekAt?: (x: number, y: number) => Promise<string>;
   /** `navigates`: o toque vai levar a outra página (um link com destino): espera ela carregar antes de reler. */
   click: (ref: string, navigates?: boolean) => Promise<unknown>;
-  type: (ref: string, text: string) => Promise<unknown>;
+  /** `submit`: aperta Enter depois de digitar (uma busca só roda assim quando a página não tem botão visível). */
+  type: (ref: string, text: string, submit?: boolean) => Promise<unknown>;
   select: (ref: string, value: string) => Promise<unknown>;
   scroll: () => Promise<unknown>;
   /** Espera a página assentar depois de uma ação (nunca lança). `thorough`: a operação `wait` do Jev, que espera a rede ficar ociosa. */
@@ -643,6 +644,11 @@ export async function autoFill(
   return out;
 }
 
+/** Um campo de busca? Digitar nele e apertar Enter é o gesto de pesquisar; a lupa ao lado costuma não ter nome. Pura. */
+export function isSearchField(el: PageElement): boolean {
+  return el.role === "searchbox" || /busca|buscar|pesquis|procur|search|q|query/i.test(el.name);
+}
+
 /** Faz o que a operação pede no elemento e conta o que fez, sem o valor digitado. */
 async function act(el: PageElement, operation: string, fills: [string, string][], taken: Set<string>, deps: PilotDeps, option?: string): Promise<string> {
   if (operation === "select" && option !== undefined) {
@@ -654,8 +660,8 @@ async function act(el: PageElement, operation: string, fills: [string, string][]
     if (!entry) throw new Error(`não há valor para ${plain(el)}: passe --fill "<campo>=<valor>"`);
     taken.add(entry[0]);
     if (operation === "select") await deps.select(el.ref, entry[1]);
-    else await deps.type(el.ref, entry[1]);
-    return `${operation === "select" ? "escolheu em" : "digitou em"} ${plain(el)} (valor de ${entry[0]})`;
+    else await deps.type(el.ref, entry[1], isSearchField(el));
+    return `${operation === "select" ? "escolheu em" : "digitou em"} ${plain(el)} (valor de ${entry[0]})${operation === "type" && isSearchField(el) ? " e apertou Enter" : ""}`;
   }
   // Um link com destino leva a outra página: o piloto espera ela carregar antes de reler (senão "conclui" olhando a antiga).
   const navigates = el.role === "link" && !!el.href && !/^(javascript:|#)/i.test(el.href);
