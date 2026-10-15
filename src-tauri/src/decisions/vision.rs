@@ -35,6 +35,10 @@ const IMAGES_HEADER: &str = "TypeSafe-Danger-Zone-Images";
 /// Uma foto maior que isto não vai: o corte é do app, não do Jev.
 const MAX_IMAGE_BYTES: usize = 4 * 1024 * 1024;
 const STATE_BYTES: usize = 6_000;
+/// A faixa de ÁREA (largura × altura) que o Jev aceita, medida com a chamada real: 500×300 passa e 485×258 não;
+/// 1500×900 passa e 1600×960 não. O app redimensiona antes (`visualSize.ts`); isto é só a rede de proteção.
+const MIN_AREA: u64 = 135_000;
+const MAX_AREA: u64 = 1_480_000;
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -193,7 +197,20 @@ fn read_capture(path: &str) -> Result<Vec<u8>, String> {
     if !png.starts_with(&[0x89, b'P', b'N', b'G']) || png.len() > MAX_IMAGE_BYTES {
         return Err("A foto da página não é um PNG de tamanho aceitável.".into());
     }
+    let (width, height) = png_size(&png).ok_or("Não consegui ler o tamanho da foto.")?;
+    let area = u64::from(width) * u64::from(height);
+    if !(MIN_AREA..=MAX_AREA).contains(&area) {
+        return Err(format!("A foto tem {width}×{height}: o Jev só aceita áreas entre {MIN_AREA} e {MAX_AREA} pixels."));
+    }
     Ok(png)
+}
+
+/// Largura e altura de um PNG (o cabeçalho IHDR, logo depois da assinatura). Pura.
+pub fn png_size(png: &[u8]) -> Option<(u32, u32)> {
+    if png.len() < 24 || &png[12..16] != b"IHDR" {
+        return None;
+    }
+    Some((u32::from_be_bytes(png[16..20].try_into().ok()?), u32::from_be_bytes(png[20..24].try_into().ok()?)))
 }
 
 fn pick_with(db: &DbConnection, settings: &config::Settings, api_key: Option<&str>, query: &VisualQuery, png: &[u8]) -> VisualReply {
@@ -335,6 +352,16 @@ mod test {
     }
 
     #[test]
+    fn le_o_tamanho_de_um_png() {
+        let mut png = vec![0x89, b'P', b'N', b'G', 0x0D, 0x0A, 0x1A, 0x0A, 0, 0, 0, 13];
+        png.extend_from_slice(b"IHDR");
+        png.extend_from_slice(&485u32.to_be_bytes());
+        png.extend_from_slice(&258u32.to_be_bytes());
+        assert_eq!(png_size(&png), Some((485, 258)));
+        assert_eq!(png_size(&png[..10]), None);
+    }
+
+    #[test]
     fn so_se_le_uma_captura_do_proprio_app() {
         assert!(read_capture("C:/Windows/win.ini").is_err());
         assert!(read_capture("nao-existe.png").is_err());
@@ -373,6 +400,30 @@ mod test {
                 _ => false,
             };
             println!("{} | {goal:<34} existe={found} p={p:?} centro={center:?} conf={confidence:?} {ms} ms", if ok { "ACERTOU" } else { "ERROU  " });
+        }
+    }
+
+    /// SONDA REAL das dimensões (uma chamada paga por tamanho): quais tamanhos de foto o Jev aceita. Usa os `dim-*.png`
+    /// da pasta das capturas. `cargo test --lib sonda_dimensoes -- --ignored --nocapture`.
+    #[test]
+    #[ignore]
+    fn sonda_dimensoes_aceitas_pelo_jev() {
+        let dir = crate::preview::capture::capture_dir();
+        let key = config::load_key().expect("sem chave do Jev no cofre");
+        let settings = config::Settings { provider: ProviderKind::Jev, base_url: "https://api.typesafe.ai".into(), timeout_ms: 8000, ..Default::default() };
+        let mut files: Vec<_> = std::fs::read_dir(&dir).unwrap().filter_map(|e| e.ok()).map(|e| e.path()).filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("dim-"))).collect();
+        files.sort();
+        for path in files {
+            let png = std::fs::read(&path).unwrap();
+            let query = VisualQuery { goal: "open the shopping cart".into(), recent: String::new(), image_path: path.to_string_lossy().into_owned() };
+            let body = request_body(&query);
+            let started = Instant::now();
+            let outcome = send(&settings, Some(&key), "ags-dim", multipart("ags-dim", &body, &png)).and_then(|t| read_reply(&t));
+            let name = path.file_name().unwrap().to_string_lossy().into_owned();
+            match outcome {
+                Ok((found, p, rect, conf)) => println!("OK   {name:<20} existe={found} p={p:?} centro={:?} conf={conf:?} {} ms", rect.map(|r| r.center()), started.elapsed().as_millis()),
+                Err(e) => println!("FALHA {name:<19} {e}"),
+            }
         }
     }
 }

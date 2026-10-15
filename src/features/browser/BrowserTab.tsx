@@ -35,6 +35,7 @@ import { ResponsiveStage } from "./ResponsiveStage";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
 import { ZoomControl } from "./ZoomControl";
+import { visualSize } from "./visualSize";
 import { clampZoom, stepZoom } from "./zoom";
 
 /** Lo que el proxy inyecta en cada página: el selector y el runtime (control del agente y
@@ -321,7 +322,21 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
           window.dispatchEvent(new CustomEvent("ags:canvas-reveal", { detail: { id: view.id, restore: true } }));
         }
       }
-      return { path: await previewSaveCapture(await canvasToPng(shot.frozen.canvas), "visual"), complete: shot.complete };
+      // O Jev só aceita fotos de uma faixa de tamanho (ver `visualSize`): a do nó do canvas costuma ser pequena demais.
+      const source = shot.frozen.canvas;
+      const size = visualSize(source.width, source.height);
+      let canvas = source;
+      if (size.width !== source.width || size.height !== source.height) {
+        canvas = document.createElement("canvas");
+        canvas.width = size.width;
+        canvas.height = size.height;
+        const ctx = canvas.getContext("2d");
+        if (ctx) {
+          ctx.imageSmoothingQuality = "high";
+          ctx.drawImage(source, 0, 0, size.width, size.height);
+        }
+      }
+      return { path: await previewSaveCapture(await canvasToPng(canvas), "visual"), complete: shot.complete };
     },
     requestPick: (timeoutMs) => new Promise((resolve) => {
       // Un solo pedido a la vez: el anterior se da por cancelado en vez de quedar colgado.
