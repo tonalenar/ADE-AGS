@@ -132,7 +132,7 @@ impl DecisionProvider for HeuristicProvider {
 
 /// Um cliente só para todas as consultas: cada `Client::build` abria uma conexão TLS nova (cerca de 200 ms a
 /// mais por decisão). O prazo vale por pedido (`.timeout`), então não prende o cliente a um valor.
-fn client() -> Result<&'static Client, DecisionError> {
+pub(super) fn client() -> Result<&'static Client, DecisionError> {
     static CLIENT: OnceLock<Client> = OnceLock::new();
     if let Some(client) = CLIENT.get() {
         return Ok(client);
@@ -146,11 +146,11 @@ fn client() -> Result<&'static Client, DecisionError> {
     Ok(CLIENT.get_or_init(|| built))
 }
 
-fn endpoint(base_url: &str) -> String {
+pub(super) fn endpoint(base_url: &str) -> String {
     format!("{}/v1/systemone", base_url.trim_end_matches('/'))
 }
 
-fn map_transport(error: reqwest::Error, secret: Option<&str>) -> DecisionError {
+pub(super) fn map_transport(error: reqwest::Error, secret: Option<&str>) -> DecisionError {
     if error.is_timeout() {
         DecisionError::Timeout
     } else {

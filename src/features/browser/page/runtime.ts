@@ -801,6 +801,12 @@ declare global {
       if (!el.isConnected) throw new Error(`${spec.ref} não está mais na página (mudou desde o último snapshot): tire um novo.`);
       return el;
     }
+    if (spec.kind === "point") {
+      // O que há sob o ponto; se está dentro de algo clicável (um ícone dentro de um link), o clicável.
+      const under = document.elementFromPoint(spec.x, spec.y);
+      if (!under) throw new Error(`Não há nada no ponto (${Math.round(spec.x)}, ${Math.round(spec.y)}): fora da janela da página.`);
+      return under.closest("a[href],button,[role=button],[role=link],input,select,textarea,label,summary,[role=tab],[role=menuitem],[role=option],[onclick]") ?? under;
+    }
     if (spec.kind === "text") {
       const wanted = spec.text.toLowerCase();
       const walker = document.createTreeWalker(document.body ?? document.documentElement, NodeFilter.SHOW_TEXT);

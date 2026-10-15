@@ -16,6 +16,8 @@ export interface DecisionSettings {
   turnRouting: boolean;
   /** O Jev pilota o navegador do canvas (`ags portal act`): o texto da página sai da máquina. */
   browserPilot: boolean;
+  /** Reserva visual do piloto: uma FOTO da página sai da máquina quando o texto não basta. */
+  browserVision: boolean;
   keySaved: boolean;
   /** O segundo provedor da comparação (`none` = só o principal). */
   secondaryProvider: DecisionProviderId;
@@ -67,6 +69,7 @@ export function defaultDecisionSettings(): DecisionSettings {
     memoryRelevance: false,
     turnRouting: false,
     browserPilot: false,
+    browserVision: false,
     keySaved: false,
     secondaryProvider: "none",
     secondaryBaseUrl: PROVIDER_URL.jev,

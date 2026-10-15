@@ -171,6 +171,8 @@ describe("parseTarget", () => {
   /// "tomá un snapshot" a quien pasó un selector perfectamente válido.
   it("solo e + número es un ref", () => {
     expect(parseTarget("e12x").kind).toBe("css");
+    expect(parseTarget("@120.5,40")).toEqual({ kind: "point", x: 120.5, y: 40 });
+    expect(parseTarget("@x,y").kind).toBe("css");
     expect(parseTarget(".e12").kind).toBe("css");
   });
 });

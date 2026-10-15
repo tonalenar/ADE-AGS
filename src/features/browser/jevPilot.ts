@@ -39,12 +39,15 @@ export interface ParsedPage {
   elements: PageElement[];
   /** O texto visível, em linhas curtas, na ordem da página. */
   text: string[];
+  /** O tamanho da janela da página em px CSS (do cabeçalho do snapshot): converte as frações de uma foto em pontos. */
+  viewport?: { width: number; height: number };
 }
 
 const NODE = /^\s*- (\S+)(?: ("(?:[^"\\]|\\.)*"))?(.*)$/;
 const REF = /\[ref=(e\d+)\]/;
 const STATE = /\[([^\]=]+)\]/g;
 const HEADER = /^page: (?:("(?:[^"\\]|\\.)*") )?(\S+)/;
+const VIEWPORT = /^viewport: (\d+)×(\d+)/;
 const VALUE = / value=("(?:[^"\\]|\\.)*")/;
 
 function unquote(raw: string | undefined): string {
@@ -60,6 +63,11 @@ export function parseSnapshot(snapshot: string): ParsedPage {
     if (header && !page.url) {
       page.title = unquote(header[1]);
       page.url = header[2];
+      continue;
+    }
+    const size = VIEWPORT.exec(line);
+    if (size && !page.viewport) {
+      page.viewport = { width: Number(size[1]), height: Number(size[2]) };
       continue;
     }
     const node = NODE.exec(line);
@@ -295,8 +303,24 @@ export interface StepReply {
   latencyMs: number | null;
 }
 
+/** O que a reserva visual devolve (ver `decisions/vision.rs`). */
+export interface VisualReply {
+  status: "ok" | "off" | "secret" | "error";
+  found: boolean | null;
+  foundProbability: number | null;
+  /** O centro do alvo, em frações da foto: [x, y]. */
+  center: [number, number] | null;
+  confidence: number | null;
+  reason: string | null;
+  latencyMs: number | null;
+}
+
 export interface PilotDeps {
   snapshot: () => Promise<string>;
+  /** Reserva visual: pede ao Jev que aponte, numa FOTO da página, onde tocar. Opcional. */
+  visual?: (goal: string, recent: string) => Promise<VisualReply>;
+  /** Toca num ponto da janela da página (px CSS). Vai junto de `visual`. */
+  clickAt?: (x: number, y: number) => Promise<unknown>;
   click: (ref: string) => Promise<unknown>;
   type: (ref: string, text: string) => Promise<unknown>;
   select: (ref: string, value: string) => Promise<unknown>;
@@ -310,6 +334,31 @@ export interface PilotDeps {
 export const MIN_PROBABILITY = 0.45;
 export const DEFAULT_STEPS = 8;
 export const MAX_STEPS = 15;
+
+/** A reserva visual só age com estas certezas: o Jev viu um controle (p) e a caixa é firme (confiança). */
+export const MIN_FOUND = 0.6;
+export const MIN_BOX_CONFIDENCE = 0.4;
+/** Quantas vezes por execução se tira uma foto: ela é mais cara e sai da máquina. */
+export const MAX_VISUAL = 3;
+
+/**
+ * O elemento escolhido não tem nome (nem destino de link) e há outros iguais na mesma pergunta? Então o texto não os
+ * distingue — dois ícones sem nome, o perfil e o carrinho — e a escolha do Jev seria um palpite. Pura.
+ */
+export function isAmbiguous(query: StepQuery, operation: string, target: string | null): boolean {
+  const options = query.targets[operation];
+  const chosen = options?.find((o) => o.id === target);
+  if (!chosen || chosen.label.includes('"') || chosen.label.includes(" → ")) return false;
+  return options.filter((o) => o.label === chosen.label).length > 1;
+}
+
+/**
+ * Há um campo de senha, cartão ou token PREENCHIDO? Então a foto não sai: o detector de segredos não lê imagens e
+ * o campo (mesmo mascarado) estaria nela. Pura.
+ */
+export function sensitiveFilled(page: ParsedPage): boolean {
+  return page.elements.some((el) => el.filled === true && /passw|senha|contrase|cvv|cvc|card|cart[aã]o|tarjeta|token|secret|\bpin\b|\bssn\b|\bcpf\b/i.test(el.name));
+}
 
 export interface PilotResult {
   /** `done`, `stuck`, `unsure`, `off`, `limit`, `error`. */
@@ -337,6 +386,43 @@ export async function runPilot(
   const finish = (outcome: PilotResult["outcome"], note: string): PilotResult =>
     ({ outcome, steps: log, note, finalSnapshot: snapshot });
 
+  // A reserva visual: quando o texto não basta, uma foto da página e o Jev aponta onde tocar.
+  const triedPhotos = new Set<string>();
+  let photos = 0;
+  /** `"acted"` = tocou e a página foi relida; um texto = por que não serviu (vai na nota); `null` = não se aplica. */
+  const visualFallback = async (page: ParsedPage, step: number): Promise<"acted" | string | null> => {
+    if (!deps.visual || !deps.clickAt || photos >= MAX_VISUAL) return null;
+    const fp = fingerprint(page);
+    if (triedPhotos.has(fp) || !page.viewport) return null;
+    if (sensitiveFilled(page)) return "A reserva visual não foi usada: há um campo de senha, cartão ou token preenchido e a foto não pode sair.";
+    triedPhotos.add(fp);
+    photos += 1;
+    let reply: VisualReply;
+    try {
+      reply = await deps.visual(goal, history.slice(-5).map((d) => d.what).join("; "));
+    } catch (e) {
+      return `A reserva visual falhou: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    if (reply.status !== "ok") return reply.status === "off" ? "A reserva visual (foto) está desligada em Ajustes → Decisões." : `A reserva visual não rodou: ${reply.reason ?? reply.status}`;
+    const meta = `existe p=${reply.foundProbability?.toFixed(2) ?? "?"}, caixa conf=${reply.confidence?.toFixed(2) ?? "?"}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
+    if (!reply.found || (reply.foundProbability ?? 0) < MIN_FOUND || !reply.center || (reply.confidence ?? 0) < MIN_BOX_CONFIDENCE) {
+      return `A reserva visual também não achou um controle seguro na foto (${meta}).`;
+    }
+    const x = Math.round(reply.center[0] * page.viewport.width);
+    const y = Math.round(reply.center[1] * page.viewport.height);
+    try {
+      await deps.clickAt(x, y);
+    } catch (e) {
+      return `O toque pela foto falhou: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    const what = `tocou pela foto no ponto (${x}, ${y})`;
+    log.push(`${step}. ${what} (${meta})`);
+    await deps.settle();
+    snapshot = await deps.snapshot();
+    history.push({ what, changed: fingerprint(parseSnapshot(snapshot)) !== fp });
+    return "acted";
+  };
+
   for (let step = 1; step <= limit; step++) {
     let page = parseSnapshot(snapshot);
     // O que não é escolha não vai ao Jev: um campo cujo nome casa com um `--fill` recebe o valor direto.
@@ -358,15 +444,24 @@ export async function runPilot(
     }
     const operation = reply.operation;
     const meta = `${reply.probability !== null ? `p=${reply.probability.toFixed(2)}` : "p=?"}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
-    if (reply.probability !== null && reply.probability < MIN_PROBABILITY && operation !== "done") {
-      return finish("unsure", `O Jev não tem certeza do próximo passo (${operation}${reply.target ? ` ${reply.target}` : ""}, ${meta}). Continue você, com \`snapshot\` e \`click\`, ou diga no objetivo a escolha que falta.`);
+    const ambiguous = operation !== "done" && isAmbiguous(query, operation, reply.target);
+    if (ambiguous || (reply.probability !== null && reply.probability < MIN_PROBABILITY && operation !== "done")) {
+      const fallback = await visualFallback(page, step);
+      if (fallback === "acted") continue;
+      if (fallback) log.push(fallback);
+      return finish("unsure", ambiguous
+        ? `O elemento que o Jev escolheu (${reply.target}) não tem nome e há outros iguais na página: só o texto não os distingue (${meta}). Continue você, com \`snapshot\` e \`click\`, ou ligue a reserva visual em Ajustes → Decisões.`
+        : `O Jev não tem certeza do próximo passo (${operation}${reply.target ? ` ${reply.target}` : ""}, ${meta}). Continue você, com \`snapshot\` e \`click\`, ou diga no objetivo a escolha que falta.`);
     }
     if (operation === "done") {
       log.push(`${step}. concluído (${meta})`);
       return finish("done", "O Jev considera o objetivo atingido. Confira na página abaixo.");
     }
     if (operation === "stuck") {
+      const fallback = await visualFallback(page, step);
+      if (fallback === "acted") continue;
       log.push(`${step}. sem caminho (${meta})`);
+      if (fallback) log.push(fallback);
       return finish("stuck", "O Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.");
     }
 

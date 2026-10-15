@@ -5,6 +5,7 @@
 //! aprova memória, despacha tarefa nem fecha missão.
 
 pub(crate) mod browse;
+pub(crate) mod vision;
 pub(crate) mod commands;
 mod config;
 mod http;

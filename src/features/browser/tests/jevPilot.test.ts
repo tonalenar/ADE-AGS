@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  type PilotDeps, type StepQuery, type StepReply,
+  isAmbiguous, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -245,5 +245,121 @@ describe("o laço do piloto", () => {
   it("stuck do Jev encerra sem agir", async () => {
     const result = await runPilot("voar", [], undefined, harness([ok("stuck")]).deps);
     expect(result.outcome).toBe("stuck");
+  });
+});
+
+// ── A reserva visual ────────────────────────────────────────────────
+
+/** A mesma página, com a senha vazia: a foto só sai se nenhum campo sensível está preenchido. */
+const CLEAN = LOGIN.replace('value="[x]"', 'value=""');
+
+const seen = (center: [number, number] | null, found = true, foundProbability = 0.95, confidence = 0.8): VisualReply =>
+  ({ status: "ok", found, foundProbability, center, confidence, reason: null, latencyMs: 280 });
+
+function visualHarness(script: StepReply[], visual: VisualReply | Error, pages = pagesOf(8).map((p) => p.replace('value="[x]"', 'value=""'))) {
+  const h = harness(script, pages);
+  const clicks: [number, number][] = [];
+  const asked: { goal: string; recent: string }[] = [];
+  h.deps.visual = async (goal, recent) => {
+    asked.push({ goal, recent });
+    if (visual instanceof Error) throw visual;
+    return visual;
+  };
+  h.deps.clickAt = async (x, y) => { clicks.push([x, y]); };
+  return { ...h, clicks, asked };
+}
+
+describe("a reserva visual do piloto", () => {
+  it("sem certeza no texto, a foto aponta o ponto e o piloto toca nele (fração × janela da página)", async () => {
+    const h = visualHarness([ok("click", "e4", 0.3), ok("done")], seen([0.5, 0.25]));
+    const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(h.clicks).toEqual([[640, 200]]); // janela 1280×800
+    expect(result.steps.join("\n")).toContain("tocou pela foto no ponto (640, 200)");
+    expect(h.asked[0].goal).toBe("abrir o carrinho");
+  });
+
+  it("o Jev dizendo stuck também tenta a foto antes de desistir", async () => {
+    const h = visualHarness([ok("stuck"), ok("done")], seen([0.1, 0.1]));
+    const result = await runPilot("achar o ícone", [], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(h.clicks.length).toBe(1);
+  });
+
+  it("a foto sem um controle seguro devolve a página ao agente, dizendo isso", async () => {
+    for (const reply of [seen(null, false, 0.97, 0.09), seen([0.5, 0.5], true, 0.4), seen([0.5, 0.5], true, 0.95, 0.2)]) {
+      const h = visualHarness([ok("click", "e4", 0.3)], reply);
+      const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
+      expect(result.outcome).toBe("unsure");
+      expect(h.clicks).toEqual([]);
+      expect(result.steps.join("\n")).toContain("também não achou");
+    }
+  });
+
+  it("com um campo de senha preenchido a foto NÃO sai", async () => {
+    const h = visualHarness([ok("click", "e4", 0.3)], seen([0.5, 0.25]), pagesOf(8));
+    const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
+    expect(result.outcome).toBe("unsure");
+    expect(h.asked).toEqual([]);
+    expect(result.steps.join("\n")).toContain("não pode sair");
+  });
+
+  it("desligada em Ajustes, o piloto segue como antes e avisa onde ligar", async () => {
+    const off: VisualReply = { status: "off", found: null, foundProbability: null, center: null, confidence: null, reason: "desligada", latencyMs: null };
+    const result = await runPilot("abrir o carrinho", [], undefined, visualHarness([ok("click", "e4", 0.3)], off).deps);
+    expect(result.outcome).toBe("unsure");
+    expect(result.steps.join("\n")).toContain("desligada em Ajustes");
+  });
+
+  it("uma falha na foto não derruba o piloto", async () => {
+    const result = await runPilot("abrir o carrinho", [], undefined, visualHarness([ok("click", "e4", 0.3)], new Error("sem rede")).deps);
+    expect(result.outcome).toBe("unsure");
+    expect(result.steps.join("\n")).toContain("sem rede");
+  });
+
+  it("não tira duas fotos da mesma página", async () => {
+    const same = Array.from({ length: 4 }, () => CLEAN);
+    const h = visualHarness([ok("click", "e4", 0.3), ok("click", "e4", 0.3)], seen(null, false), same);
+    await runPilot("abrir o carrinho", [], undefined, h.deps);
+    expect(h.asked.length).toBe(1);
+  });
+
+  it("sem as funções da reserva (outros navegadores), nada muda", async () => {
+    const result = await runPilot("abrir o carrinho", [], undefined, harness([ok("click", "e4", 0.3)], pagesOf(4).map((p) => p.replace('value="[x]"', 'value=""'))).deps);
+    expect(result.outcome).toBe("unsure");
+  });
+});
+
+describe("elementos sem nome iguais", () => {
+  const ICONS = ['page: "Loja" http://shop.test/', "viewport: 1000×600 · scroll 0/600", "", "- clickable [ref=e1]", "- clickable [ref=e2]", '- button "Login" [ref=e3]', '- link "Ajuda" [ref=e4] → /ajuda'].join("\n");
+
+  it("dois ícones sem nome são ambíguos; os com nome, não", () => {
+    const query = buildStep(parseSnapshot(ICONS), "abrir o carrinho", [], []);
+    expect(isAmbiguous(query, "click", "e1")).toBe(true);
+    expect(isAmbiguous(query, "click", "e3")).toBe(false);
+    expect(isAmbiguous(query, "click", "e4")).toBe(false);
+  });
+
+  it("o Jev escolhendo um dos ícones sem nome, mesmo com confiança, aciona a foto em vez de chutar", async () => {
+    const h = visualHarness([ok("click", "e1", 0.8), ok("done")], seen([0.9, 0.1]), Array.from({ length: 6 }, (_, i) => ICONS.replace("Loja", `Loja ${i}`)));
+    const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
+    expect(h.calls).toEqual([]); // não clicou no ícone errado pelo texto
+    expect(h.clicks).toEqual([[900, 60]]); // janela 1000×600
+    expect(result.outcome).toBe("done");
+  });
+
+  it("sem a reserva visual, para e explica que o texto não distingue os ícones", async () => {
+    const result = await runPilot("abrir o carrinho", [], undefined, harness([ok("click", "e1", 0.8)], [ICONS]).deps);
+    expect(result.outcome).toBe("unsure");
+    expect(result.note).toContain("não tem nome");
+  });
+});
+
+describe("campo sensível preenchido", () => {
+  it("senha, cartão ou token preenchidos bloqueiam a foto; vazios ou outros campos, não", () => {
+    expect(sensitiveFilled(parseSnapshot(LOGIN))).toBe(true);
+    expect(sensitiveFilled(parseSnapshot(CLEAN))).toBe(false);
+    expect(sensitiveFilled(parseSnapshot('page: "x" http://a.test/\n- textbox "Card number" [ref=e1] value="4111"'))).toBe(true);
+    expect(sensitiveFilled(parseSnapshot('page: "x" http://a.test/\n- textbox "Nome" [ref=e1] value="Ana"'))).toBe(false);
   });
 });

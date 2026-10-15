@@ -69,6 +69,8 @@ export interface BrowserHost {
   /** Una foto de la página como se ve ahora, guardada en disco. Devuelve la ruta. `tag`
    *  dice de quién es: va en el nombre del archivo. */
   screenshot: (tag?: string) => Promise<string>;
+  /** Uma foto da janela da página para a reserva visual do piloto. `complete` = a página inteira estava à vista (senão a foto sai cortada e as frações não valem). */
+  visualShot: () => Promise<{ path: string; complete: boolean }>;
   /** El panel de debug está abierto: solo mientras lo esté se anota la red. */
   debugOpen: () => boolean;
   /** Abre el panel de debug en la red, que es lo que prende el registro. A la vista de la
@@ -725,6 +727,15 @@ function pilotDeps(host: BrowserHost): PilotDeps {
     // Uma ação pode navegar ou redesenhar: esperar a rede assentar um instante. Se vencer, segue assim mesmo.
     settle: async () => { try { await inPage(host, { op: "wait", idle: true, timeoutMs: 2500 }, false); } catch { /* segue */ } },
     pick: (query) => invoke("decision_pick_step", { query }),
+    // A reserva visual: uma foto da página (só se estiver toda à vista) e o toque no ponto que o Jev apontar.
+    visual: async (goal, recent) => {
+      const shot = await host.visualShot();
+      if (!shot.complete) {
+        return { status: "error", found: null, foundProbability: null, center: null, confidence: null, latencyMs: null, reason: "a página não está toda à vista no canvas: a foto sairia cortada" };
+      }
+      return invoke("decision_pick_visual", { query: { goal, recent, imagePath: shot.path } });
+    },
+    clickAt: (x, y) => inPage(host, { op: "click", target: `@${x},${y}` }, true),
   };
 }
 
