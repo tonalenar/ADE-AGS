@@ -309,7 +309,10 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         const frozen = await freezePage(page, frame);
         const rect = page.getBoundingClientRect();
         // Só vale se a página está toda à vista: uma foto cortada deixaria as frações da caixa apontando para o lugar errado.
-        return { frozen, complete: Math.abs(frozen.screen.width - rect.width) < 2 && Math.abs(frozen.screen.height - rect.height) < 2 };
+        return {
+          frozen, rect,
+          complete: Math.abs(frozen.screen.width - rect.width) < 2 && Math.abs(frozen.screen.height - rect.height) < 2,
+        };
       };
       let shot = await shoot().catch(() => null);
       if (!shot || !shot.complete) {
@@ -336,7 +339,9 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
           ctx.drawImage(source, 0, 0, size.width, size.height);
         }
       }
-      return { path: await previewSaveCapture(await canvasToPng(canvas), "visual"), complete: shot.complete };
+      // As medidas vão junto: quando a foto é recusada por "cortada", são elas que dizem por quê.
+      const detail = `foto ${Math.round(shot.frozen.screen.width)}×${Math.round(shot.frozen.screen.height)} de uma página de ${Math.round(shot.rect.width)}×${Math.round(shot.rect.height)}`;
+      return { path: await previewSaveCapture(await canvasToPng(canvas), "visual"), complete: shot.complete, detail };
     },
     requestPick: (timeoutMs) => new Promise((resolve) => {
       // Un solo pedido a la vez: el anterior se da por cancelado en vez de quedar colgado.

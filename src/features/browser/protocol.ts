@@ -101,7 +101,9 @@ export type PageCommand =
   | { op: "performance" }
   /** Todo lo que se sabe de un elemento: rol, nombre, componente que lo dibujó, dónde está
    *  y con qué estilos. Le asigna un ref (`u1`) que sobrevive a los snapshots. */
-  | { op: "describe"; target: string };
+  | { op: "describe"; target: string }
+  /** O que há sob um alvo (nome, texto, id), sem tocar nele: o piloto olha antes de tocar num ponto apontado por uma foto. */
+  | { op: "peek"; target: string };
 
 export type PageOp = PageCommand["op"];
 

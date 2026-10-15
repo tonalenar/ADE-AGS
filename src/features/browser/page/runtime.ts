@@ -651,7 +651,15 @@ declare global {
       const hint = humanizeId(el.getAttribute(attribute));
       if (hint) return hint;
     }
-    return "";
+    // Sem id, as classes de uma loja costumam dizer o que é ("nav-search-submit"): a de mais palavras.
+    let best = "";
+    let bestWords = 0;
+    for (const token of Array.from(el.classList)) {
+      const hint = humanizeId(token);
+      const count = hint ? hint.split(" ").length : 0;
+      if (count > bestWords) { best = hint; bestWords = count; }
+    }
+    return best;
   }
 
   function statesOf(el: Element, role: string): string[] {
@@ -1562,6 +1570,10 @@ declare global {
       case "cookies": return cookies(command);
       case "performance": return performanceReport();
       case "describe": return describe(command.target);
+      case "peek": {
+        const el = resolve(command.target);
+        return { label: [nameOf(el, roleOf(el) || "clickable"), normalizeName(textOf(el), 80), describeElement(el), el.getAttribute("href") ?? ""].filter(Boolean).join(" | ") };
+      }
       case "drag": return drag(command.from, command.to);
       case "upload": return upload(command.target, command.name, command.mime, command.data);
       case "dialogs": {

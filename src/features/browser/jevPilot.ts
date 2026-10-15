@@ -368,6 +368,8 @@ export interface PilotDeps {
   visual?: (goal: string, recent: string) => Promise<VisualReply>;
   /** Toca num ponto da janela da página (px CSS). Vai junto de `visual`. */
   clickAt?: (x: number, y: number) => Promise<unknown>;
+  /** O que há sob um ponto (nome, texto, id), sem tocar: o piloto confere antes de tocar num ponto apontado por uma foto. */
+  peekAt?: (x: number, y: number) => Promise<string>;
   /** `navigates`: o toque vai levar a outra página (um link com destino): espera ela carregar antes de reler. */
   click: (ref: string, navigates?: boolean) => Promise<unknown>;
   type: (ref: string, text: string) => Promise<unknown>;
@@ -388,6 +390,17 @@ export const MIN_FOUND = 0.6;
 export const MIN_BOX_CONFIDENCE = 0.4;
 /** Quantas vezes por execução se tira uma foto: ela é mais cara e sai da máquina. */
 export const MAX_VISUAL = 3;
+
+/** Controles que fecham uma compra ou pagam. */
+const PURCHASE = /comprar agora|buy now|buy-now|buynow|one-?click|1-click|finalizar (a )?compra|fechar (o )?pedido|confirmar (o )?(pedido|pagamento)|place (your )?order|proceed to checkout|prosseguir para|ir para o pagamento|checkout|pagar agora|pay now/i;
+
+/**
+ * Um controle de compra ou pagamento que o objetivo NÃO pediu? O piloto nunca fecha uma compra por acaso: o Jev escolhe
+ * "o próximo passo" e, perto do carrinho, um deles é "Comprar agora". Se o objetivo fala em comprar/finalizar/pagar, vale. Pura.
+ */
+export function blockedPurchase(label: string, goal: string): boolean {
+  return PURCHASE.test(label) && !PURCHASE.test(goal) && !/\b(comprar|compra|pagar|pagamento|finalizar|buy|purchase|pay)\b/i.test(goal);
+}
 
 /** Com esta certeza de que o objetivo já está atingido (pergunta direta), o piloto conclui mesmo sem uma operação segura. */
 export const MIN_GOAL_DONE = 0.75;
@@ -470,6 +483,13 @@ export async function runPilot(
     // tocou, a página provavelmente só ainda não mostrou o efeito.
     if (tapped.some((t) => Math.hypot(t.x - x, t.y - y) < 48)) {
       return `A foto apontou o mesmo lugar de um toque anterior (${x}, ${y}): não repeti, para não desfazer o que já foi feito. Confira a página.`;
+    }
+    // Antes de tocar num ponto que uma FOTO apontou, olha o que há ali: nunca um botão de compra ou pagamento que o objetivo não pediu.
+    if (deps.peekAt) {
+      const under = await deps.peekAt(x, y).catch(() => "");
+      if (blockedPurchase(under, goal)) {
+        return `A foto apontou um controle de compra ou pagamento (${x}, ${y}) que o objetivo não pediu: não toquei.`;
+      }
     }
     try {
       await deps.clickAt(x, y);
@@ -564,6 +584,10 @@ export async function runPilot(
         const el = page.elements.find((e) => e.ref === refPart);
         if (!el) return finish("error", `O Jev escolheu ${reply.target ?? "?"}, que não está na página.`);
         const option = optionPart !== undefined ? el.options?.[Number(optionPart)] : undefined;
+        if (blockedPurchase(`${el.name} ${el.href ?? ""}`, goal)) {
+          log.push(`${step}. recusou ${plain(el)}: parece uma compra ou um pagamento, e o objetivo não pediu`);
+          return finish("stuck", "O Jev escolheu um controle de compra ou pagamento que o objetivo não pediu: não cliquei. Se é isso mesmo que você quer, diga no objetivo.");
+        }
         what = await act(el, operation, fills, taken, deps, option);
       }
     } catch (e) {

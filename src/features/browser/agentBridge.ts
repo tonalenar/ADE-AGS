@@ -70,7 +70,7 @@ export interface BrowserHost {
    *  dice de quién es: va en el nombre del archivo. */
   screenshot: (tag?: string) => Promise<string>;
   /** Uma foto da janela da página para a reserva visual do piloto. `complete` = a página inteira estava à vista (senão a foto sai cortada e as frações não valem). */
-  visualShot: () => Promise<{ path: string; complete: boolean }>;
+  visualShot: () => Promise<{ path: string; complete: boolean; detail?: string }>;
   /** El panel de debug está abierto: solo mientras lo esté se anota la red. */
   debugOpen: () => boolean;
   /** Abre el panel de debug en la red, que es lo que prende el registro. A la vista de la
@@ -742,10 +742,11 @@ function pilotDeps(host: BrowserHost): PilotDeps {
     visual: async (goal, recent) => {
       const shot = await host.visualShot();
       if (!shot.complete) {
-        return { status: "error", found: null, foundProbability: null, center: null, confidence: null, latencyMs: null, reason: "a página não está toda à vista no canvas: a foto sairia cortada" };
+        return { status: "error", found: null, foundProbability: null, center: null, confidence: null, latencyMs: null, reason: `a página não está toda à vista no canvas: a foto sairia cortada (${shot.detail ?? "sem medidas"})` };
       }
       return invoke("decision_pick_visual", { query: { goal, recent, imagePath: shot.path } });
     },
+    peekAt: async (x, y) => inPage(host, { op: "peek", target: `@${x},${y}` }, false),
     clickAt: async (x, y) => {
       const loads = host.loadCount();
       const result = await inPage(host, { op: "click", target: `@${x},${y}`, fast: true }, false);

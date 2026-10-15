@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  isAmbiguous, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, isAmbiguous, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -496,6 +496,34 @@ describe("clicar num link espera a página carregar", () => {
 // ── Velocidade e o mesmo toque duas vezes ────────────────────────────
 
 const ICONS_PAGE = ['page: "Loja" http://shop.test/', "viewport: 1000×600 · scroll 0/600", "", "- clickable [ref=e1]", "- clickable [ref=e2]"].join("\n");
+
+describe("nunca fecha uma compra por acaso", () => {
+  it("reconhece os botões que fecham compra ou pagam, só quando o objetivo não pediu", () => {
+    expect(blockedPurchase("button | Comprar agora", "adicionar ao carrinho")).toBe(true);
+    expect(blockedPurchase("Place your order", "open the cart")).toBe(true);
+    expect(blockedPurchase("input#buy-now-button", "abrir o carrinho")).toBe(true);
+    expect(blockedPurchase("button | Adicionar ao carrinho", "adicionar ao carrinho")).toBe(false);
+    expect(blockedPurchase("button | Comprar agora", "comprar agora o produto")).toBe(false);
+    expect(blockedPurchase("Finalizar compra", "finalizar a compra do carrinho")).toBe(false);
+  });
+
+  it("o texto: o Jev escolhe 'Comprar agora' sem o objetivo pedir, e o piloto não clica", async () => {
+    const page = ['page: "Produto" http://shop.test/p/1', "viewport: 1000×600 · scroll 0/600", "", '- button "Adicionar ao carrinho" [ref=e1]', '- button "Comprar agora" [ref=e2]'].join("\n");
+    const h = harness([ok("click", "e2")], [page]);
+    const result = await runPilot("adicionar ao carrinho", [], undefined, h.deps);
+    expect(result.outcome).toBe("stuck");
+    expect(h.calls).toEqual([]);
+    expect(result.note).toContain("compra ou pagamento");
+  });
+
+  it("a foto: se o ponto aponta um botão de compra, não toca", async () => {
+    const h = visualHarness([ok("click", "e1", 0.1)], seen([0.5, 0.5]));
+    h.deps.peekAt = async () => "input#buy-now-button | Comprar agora";
+    const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
+    expect(h.clicks).toEqual([]);
+    expect(result.steps.join("\n")).toContain("controle de compra ou pagamento");
+  });
+});
 
 describe("texto da página que vai ao Jev", () => {
   it("as linhas do objetivo vêm primeiro, mesmo no fim de uma página cheia de menu", () => {
