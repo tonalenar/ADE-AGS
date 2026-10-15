@@ -261,6 +261,9 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
   const optionTargets: StepOption[] = [];
   page.elements.forEach((el, index) => {
     if (el.states.includes("disabled")) return;
+    // Um botão de compra ou pagamento que o objetivo não pediu nem é oferecido: o Jev escolhe entre os outros (o
+    // "Adicionar ao carrinho" ao lado de um "Comprar agora") em vez de o piloto parar ao ver a escolha barrada.
+    if (blockedPurchase(`${el.name} ${el.href ?? ""}`, goal)) return;
     if (operationOf(el) === "select" && el.options?.length) {
       el.options.forEach((option, i) => optionTargets.push({ id: `${el.ref}_${i}`, label: `${plain(el)} → option "${option}"` }));
       return;
@@ -425,6 +428,19 @@ export function sensitiveFilled(page: ParsedPage): boolean {
   return page.elements.some((el) => el.filled === true && /passw|senha|contrase|cvv|cvc|card|cart[aã]o|tarjeta|token|secret|\bpin\b|\bssn\b|\bcpf\b/i.test(el.name));
 }
 
+/**
+ * Sem nenhum `--fill`, o piloto não digita: um objetivo como "preencher o nome Ana e enviar" clica em Enviar com o campo
+ * vazio e o Jev ainda acha que terminou. Se a página termina com campos de texto vazios e nada foi passado para eles, o
+ * relatório diz isso (os valores só vêm de `--fill`, nunca do texto do objetivo). Pura.
+ */
+export function emptyFieldsNote(page: ParsedPage, fillCount: number): string {
+  if (fillCount > 0) return "";
+  const empty = page.elements.filter((el) => TYPING.has(el.role) && el.filled === false && el.name && !el.states.includes("disabled") && !isSearchField(el));
+  if (empty.length === 0) return "";
+  const names = empty.slice(0, 4).map((el) => `"${el.name}"`).join(", ");
+  return ` Atenção: nenhum --fill foi passado e há campos vazios na página (${names}): o piloto só digita valores de --fill, nunca os do texto do objetivo.`;
+}
+
 /** Onde foi o tempo do piloto, em ms (somas por fase): o Jev (consulta), o snapshot, a ação, a espera, a foto. */
 export interface Timings {
   jev: number;
@@ -487,7 +503,7 @@ export async function runPilot(
   let staleRetries = 0;
 
   const finish = (outcome: PilotResult["outcome"], note: string): PilotResult =>
-    ({ outcome, steps: log, note, finalSnapshot: snapshot, timings: { ...timings, total: Date.now() - startedAt } });
+    ({ outcome, steps: log, note: note + emptyFieldsNote(parseSnapshot(snapshot), fills.length), finalSnapshot: snapshot, timings: { ...timings, total: Date.now() - startedAt } });
 
   // A reserva visual: quando o texto não basta, uma foto da página e o Jev aponta onde tocar.
   const triedPhotos = new Set<string>();
