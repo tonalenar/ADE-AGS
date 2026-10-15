@@ -724,7 +724,7 @@ function pilotDeps(host: BrowserHost): PilotDeps {
     scroll: () => inPage(host, { op: "scroll", dy: 600 }, false),
     // Uma ação pode navegar ou redesenhar: esperar a rede assentar um instante. Se vencer, segue assim mesmo.
     settle: async () => { try { await inPage(host, { op: "wait", idle: true, timeoutMs: 2500 }, false); } catch { /* segue */ } },
-    pick: (state, options) => invoke("decision_pick_step", { state, options }),
+    pick: (query) => invoke("decision_pick_step", { query }),
   };
 }
 

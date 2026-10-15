@@ -1,8 +1,8 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  MAX_ELEMENTS, MIN_PROBABILITY, bareUrl, buildStep, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  type PilotDeps, type StepOption, type StepReply,
+  MAX_PER_HEAD, MIN_PROBABILITY, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
+  type PilotDeps, type StepQuery, type StepReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -11,9 +11,9 @@ const LOGIN = [
   "",
   '- heading "Bem-vindo"',
   '- text "Entre na sua conta"',
-  '- textbox "E-mail" [ref=e1]',
+  '- textbox "E-mail" [ref=e1] value=""',
   '- textbox "Senha" [ref=e2] value="[x]"',
-  '- checkbox "Lembrar de mim" [ref=e3]',
+  '- checkbox "Lembrar de mim" [ref=e3] [checked]',
   '- button "Entrar" [ref=e4]',
   '- button "Cancelar" [ref=e5] [disabled]',
   '- link "Esqueci a senha" [ref=e6] → /reset',
@@ -27,46 +27,91 @@ describe("leitura do snapshot", () => {
     expect(page.elements.map((e) => e.ref)).toEqual(["e1", "e2", "e3", "e4", "e5", "e6"]);
     expect(page.elements[4].states).toEqual(["disabled"]);
     expect(page.elements[1].states).toEqual([]); // o `[x]` era de dentro do valor
+    expect(page.elements[2].states).toEqual(["checked"]);
     expect(page.text).toEqual(["Entre na sua conta"]);
+  });
+
+  it("sabe se um campo tem valor, sem nunca ler o valor", () => {
+    const page = parseSnapshot(LOGIN);
+    expect(page.elements[0].filled).toBe(false);
+    expect(page.elements[1].filled).toBe(true);
+    expect(page.elements[3].filled).toBeNull(); // um botão não tem valor
+    expect(JSON.stringify(page)).not.toContain("[x]");
   });
 
   it("o endereço vai sem consulta nem fragmento", () => {
     expect(bareUrl("http://localhost:5173/login?token=segredo#x")).toBe("http://localhost:5173/login");
   });
+
+  it("a impressão da página muda quando um campo é preenchido", () => {
+    const before = parseSnapshot(LOGIN);
+    const after = parseSnapshot(LOGIN.replace('[ref=e1] value=""', '[ref=e1] value="a"'));
+    expect(fingerprint(before)).not.toBe(fingerprint(after));
+    expect(fingerprint(before)).toBe(fingerprint(parseSnapshot(LOGIN)));
+  });
 });
 
-describe("a pergunta de cada passo", () => {
+describe("a consulta de cada passo", () => {
   const page = parseSnapshot(LOGIN);
+  const ids = (list: { id: string }[] | undefined) => (list ?? []).map((o) => o.id);
 
-  it("oferece só o que se pode tocar, mais done/scroll/stuck, e nunca o desabilitado", () => {
-    const { options } = buildStep(page, "entrar na conta", ["email", "senha"], []);
-    const ids = options.map((o) => o.id);
-    expect(ids).toEqual(expect.arrayContaining(["e1", "e2", "e3", "e4", "e6", "done", "scroll", "stuck"]));
-    expect(ids).not.toContain("e5");
+  it("separa os elementos por operação e nunca oferece o desabilitado", () => {
+    const query = buildStep(page, "entrar na conta", ["email", "senha"], []);
+    expect(ids(query.targets.click)).toEqual(["e3", "e4", "e6"]);
+    expect(ids(query.targets.type)).toEqual(["e1", "e2"]);
+    expect(ids(query.operations)).toEqual(["click", "type", "scroll", "wait", "done", "stuck"]);
   });
 
-  it("no máximo 19 opções, com os elementos mais ligados ao objetivo", () => {
+  it("digitar e escolher numa lista só são operações se ainda sobra um --fill", () => {
+    const none = buildStep(page, "entrar", [], []);
+    expect(ids(none.operations)).not.toContain("type");
+    expect(none.targets.type).toBeUndefined();
+  });
+
+  it("a operação wait some depois de duas esperas seguidas", () => {
+    expect(ids(buildStep(page, "x", [], [], 2).operations)).not.toContain("wait");
+  });
+
+  it("cada cabeça de alvo leva no máximo MAX_PER_HEAD elementos, os mais ligados ao objetivo", () => {
     const many = ['page: "x" http://a.test/'];
-    for (let i = 1; i <= 40; i++) many.push(`- button "Item ${i}" [ref=e${i}]`);
-    many.push('- button "Finalizar compra" [ref=e41]');
-    const { options } = buildStep(parseSnapshot(many.join("\n")), "finalizar a compra", [], []);
-    expect(options.length).toBeLessThanOrEqual(19);
-    expect(options.length).toBe(MAX_ELEMENTS + 3);
-    expect(options.map((o) => o.id)).toContain("e41");
+    for (let i = 1; i <= 100; i++) many.push(`- button "Item ${i}" [ref=e${i}]`);
+    many.push('- button "Finalizar compra" [ref=e101]');
+    const query = buildStep(parseSnapshot(many.join("\n")), "finalizar a compra", [], []);
+    expect(query.targets.click.length).toBe(MAX_PER_HEAD);
+    expect(ids(query.targets.click)).toContain("e101");
   });
 
-  it("o estado leva o objetivo e os NOMES dos campos, nunca os valores nem a consulta do endereço", () => {
-    const { state } = buildStep(page, "entrar", ["email", "senha"], [{ ref: "e1", what: 'digitou em campo de texto "E-mail"' }]);
-    expect(state).toContain("OBJETIVO: entrar");
+  it("o estado lista os elementos da página, para a pergunta da operação também os ver", () => {
+    const { state } = buildStep(page, "entrar", [], []);
+    expect(state).toContain("ELEMENTS ON THE PAGE:");
+    expect(state).toContain('[e4] button "Entrar"');
+    expect(state).not.toContain("e5"); // o desabilitado fica de fora
+  });
+
+  it("os rótulos mostram o estado, nunca o valor", () => {
+    const query = buildStep(page, "entrar", ["email"], []);
+    const label = (ref: string) => query.targets.click?.concat(query.targets.type ?? []).find((o) => o.id === ref)?.label;
+    expect(label("e1")).toBe('text field "E-mail" (empty)');
+    expect(label("e2")).toBe('text field "Senha" (filled)');
+    expect(label("e3")).toBe('checkbox "Lembrar de mim" (checked)');
+  });
+
+  it("o estado leva o objetivo, os NOMES dos campos e as últimas ações, nunca valores nem a consulta do endereço", () => {
+    const { state } = buildStep(page, "entrar", ["email", "senha"], [
+      { what: 'digitou em text field "E-mail" (valor de email)', changed: true },
+      { what: 'clicou button "Entrar"', changed: false },
+    ]);
+    expect(state).toContain("GOAL: entrar");
     expect(state).toContain("email, senha");
-    expect(state).toContain("JÁ FEITO: 1. digitou em campo de texto");
+    expect(state).toContain('1. digitou em text field "E-mail" (valor de email) → the page changed');
+    expect(state).toContain('2. clicou button "Entrar" → the page did not change');
     expect(state).not.toContain("segredo");
     expect(state).toContain("Entre na sua conta");
   });
 
-  it("o que já foi feito não volta como opção", () => {
-    const { options } = buildStep(page, "entrar", [], [{ ref: "e4", what: "clicou" }]);
-    expect(options.map((o) => o.id)).not.toContain("e4");
+  it("repetir um botão em outra página é legítimo: o que já foi feito não esconde elementos", () => {
+    const query = buildStep(page, "entrar", [], [{ what: 'clicou button "Entrar"', changed: true }]);
+    expect(ids(query.targets.click)).toContain("e4");
   });
 });
 
@@ -92,7 +137,7 @@ function harness(script: StepReply[], pages: string[] = pagesOf(8)) {
   const calls: string[] = [];
   let page = 0;
   let pick = 0;
-  const asked: { state: string; options: StepOption[] }[] = [];
+  const asked: StepQuery[] = [];
   const deps: PilotDeps = {
     snapshot: async () => pages[Math.min(page, pages.length - 1)],
     click: async (ref) => { calls.push(`click ${ref}`); page++; },
@@ -100,16 +145,17 @@ function harness(script: StepReply[], pages: string[] = pagesOf(8)) {
     select: async (ref, value) => { calls.push(`select ${ref} ${value}`); page++; },
     scroll: async () => { calls.push("scroll"); page++; },
     settle: async () => undefined,
-    pick: async (state, options) => { asked.push({ state, options }); return script[Math.min(pick++, script.length - 1)]; },
+    pick: async (query) => { asked.push(query); return script[Math.min(pick++, script.length - 1)]; },
   };
   return { deps, calls, asked };
 }
 
-const ok = (choice: string, probability = 0.9): StepReply => ({ status: "ok", choice, probability, reason: null, latencyMs: 300 });
+const ok = (operation: string, target: string | null = null, probability = 0.9): StepReply =>
+  ({ status: "ok", operation, target, probability, reason: null, latencyMs: 300 });
 
 describe("o laço do piloto", () => {
   it("digita com o valor do --fill (sem o Jev), clica no que o Jev escolhe e termina no done", async () => {
-    const h = harness([ok("e4"), ok("done")]);
+    const h = harness([ok("click", "e4"), ok("done")]);
     const result = await runPilot("entrar", ["email=a@b.c", "senha=123"], undefined, h.deps);
     expect(result.outcome).toBe("done");
     expect(h.calls).toEqual(["type e1 a@b.c", "type e2 123", "click e4"]);
@@ -120,10 +166,13 @@ describe("o laço do piloto", () => {
     // o Jev só foi consultado depois dos campos, e para o que é escolha
     expect(h.asked.length).toBe(2);
     expect(result.steps[0]).toContain("sem o Jev");
+    // a segunda consulta já traz o que foi feito e se a página mudou
+    expect(h.asked[1].state).toContain("RECENT ACTIONS");
+    expect(h.asked[1].state).toContain("clicou button \"Entrar\"");
   });
 
   it("os campos com --fill não gastam passo nem pergunta: o limite é só das escolhas do Jev", async () => {
-    const h = harness([ok("e4")]);
+    const h = harness([ok("click", "e4")]);
     const result = await runPilot("entrar", ["email=a@b.c", "senha=123"], 1, h.deps);
     expect(h.calls.slice(0, 2)).toEqual(["type e1 a@b.c", "type e2 123"]);
     expect(h.asked.length).toBe(1);
@@ -136,8 +185,17 @@ describe("o laço do piloto", () => {
     expect(h.calls).toEqual([]);
   });
 
+  it("o Jev escolhendo digitar num campo sem valor falha dizendo qual --fill falta", async () => {
+    // Dois valores e nenhum parecido com o campo: não adivinha qual vai onde.
+    const h = harness([ok("type", "e1")]);
+    const result = await runPilot("entrar", ["cpf=000", "cep=111"], undefined, h.deps);
+    expect(result.outcome).toBe("error");
+    expect(result.steps.join("\n")).toContain("--fill");
+    expect(h.calls).toEqual([]);
+  });
+
   it("sem certeza (probabilidade baixa), para sem agir e devolve a página", async () => {
-    const h = harness([ok("e4", MIN_PROBABILITY - 0.1)]);
+    const h = harness([ok("click", "e4", MIN_PROBABILITY - 0.1)]);
     const result = await runPilot("entrar", [], undefined, h.deps);
     expect(result.outcome).toBe("unsure");
     expect(h.calls).toEqual([]);
@@ -145,22 +203,14 @@ describe("o laço do piloto", () => {
   });
 
   it("Jev desligado: não age e conta por quê", async () => {
-    const h = harness([{ status: "off", choice: null, probability: null, reason: "O Jev não está pilotando navegadores.", latencyMs: null }]);
+    const h = harness([{ status: "off", operation: null, target: null, probability: null, reason: "O Jev não está pilotando navegadores.", latencyMs: null }]);
     const result = await runPilot("entrar", [], undefined, h.deps);
     expect(result.outcome).toBe("off");
     expect(result.note).toContain("pilotando");
     expect(h.calls).toEqual([]);
   });
 
-  it("um campo sem valor falha dizendo qual --fill falta, sem inventar texto", async () => {
-    const h = harness([ok("e1")]);
-    const result = await runPilot("entrar", [], undefined, h.deps);
-    expect(result.outcome).toBe("error");
-    expect(result.steps.join("\n")).toContain("--fill");
-    expect(h.calls).toEqual([]);
-  });
-
-  it("a mesma escolha na mesma página duas vezes seguidas é um círculo: para", async () => {
+  it("a mesma operação no mesmo elemento da mesma página duas vezes seguidas é um círculo: para", async () => {
     const same = Array.from({ length: 4 }, () => LOGIN);
     const h = harness([ok("scroll"), ok("scroll")], same);
     const result = await runPilot("achar algo", [], undefined, h.deps);
@@ -168,8 +218,16 @@ describe("o laço do piloto", () => {
     expect(h.calls).toEqual(["scroll"]);
   });
 
+  it("wait espera a página e segue; depois de duas esperas seguidas deixa de ser oferecido", async () => {
+    const h = harness([ok("wait"), ok("wait"), ok("done")]);
+    const result = await runPilot("achar algo", [], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(h.calls).toEqual([]);
+    expect(h.asked[2].operations.map((o) => o.id)).not.toContain("wait");
+  });
+
   it("respeita o limite de passos", async () => {
-    const h = harness([ok("e6"), ok("e3"), ok("e4")]);
+    const h = harness([ok("click", "e6"), ok("click", "e3"), ok("click", "e4")]);
     const result = await runPilot("entrar", [], 2, h.deps);
     expect(result.outcome).toBe("limit");
     expect(h.calls.length).toBe(2);

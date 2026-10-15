@@ -107,6 +107,14 @@ impl ProviderKind {
         }
     }
 
+    /// Quantas opções cabem numa pergunta.
+    pub fn max_options(self) -> usize {
+        match self {
+            Self::Jev => super::protocol::JEV_MAX_OPTIONS,
+            Self::None | Self::LayaLocal | Self::LayaStudio | Self::Clef => super::protocol::MAX_OPTIONS,
+        }
+    }
+
     pub fn is_configured(self) -> bool {
         !matches!(self, Self::None)
     }
