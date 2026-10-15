@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { formatResult, type PilotDeps, type PilotResult } from "../jevPilot";
 import {
   all, any, canStart, check, describeCriterion, emptyPhases, evaluate, fold, instrument, judge, median, not, parseActReport,
-  regex, renderMarkdown, renderTaskTable, select, summarize, text, url, viewOf, buildReport,
+  regex, renderMarkdown, renderTaskTable, select, summarize, text, url, viewOf, buildReport, parseTimings, phasesFromReport,
   type BenchTask, type TaskRun,
 } from "../../../../scripts/bench/core";
 import { PAGES, initialNames, renderSnapshot, runSimTask, virtualClock } from "../../../../scripts/bench/sim";
@@ -102,6 +102,28 @@ describe("relatório do ags portal act", () => {
   it("aceita o relatório antigo (sem «passo» nem «fim p=»): o tempo por passo fica vazio", () => {
     const old = parseActReport(['act "g": FEITO', "ok", "", "Passos:", '1. clicou button "Buscar" (p=0.95, 450 ms)', "2. concluído (p=0.97, 300 ms)", "", "A página agora (o Jev só escolhe onde tocar: confira o resultado):", "page: x http://a"].join("\n"));
     expect(old).toMatchObject({ outcome: "done", steps: 2, jevMs: 750, stepMs: [] });
+  });
+  it("lê a linha TEMPOS e ignora uma malformada", () => {
+    const t = { jev: 1200, snapshot: 300, acao: 200, espera: 100, foto: 800, consultas: 3, fotos: 1, total: 2700 };
+    const report = parseActReport(formatResult("g", { ...result("done"), timings: t }));
+    expect(report.timings).toEqual(t);
+    expect(parseTimings('TEMPOS: {"jev":1}')).toBeNull();
+    expect(parseTimings("TEMPOS: nao-json")).toBeNull();
+    expect(parseTimings('TEMPOS: {"jev":"x"}')).toBeNull();
+    expect(parseTimings("outra coisa")).toBeNull();
+    expect(parseActReport(formatResult("g", result("done"))).timings).toBeNull();
+  });
+  it("reconhece a trava de compra no relatório (clique recusado, foto recusada, nota)", () => {
+    const blocked = (steps: string[], note = "ok") => parseActReport(formatResult("g", { outcome: "stuck", steps, note, finalSnapshot: SNAP })).blocked;
+    expect(blocked(['1. recusou button "Comprar agora": parece uma compra ou um pagamento, e o objetivo não pediu'])).toBe(true);
+    expect(blocked(["1. A foto apontou um controle de compra ou pagamento (10, 20) que o objetivo não pediu: não toquei."])).toBe(true);
+    expect(blocked(['1. clicou button "Buscar" (p=0.95, 450 ms)'])).toBe(false);
+  });
+  it("divide as fases do real pela linha TEMPOS (a foto soma ao Jev) e o resto é «outros»", () => {
+    const t = { jev: 1200, snapshot: 300, acao: 200, espera: 100, foto: 800, consultas: 3, fotos: 1, total: 2700 };
+    expect(phasesFromReport({ jevMs: 999, timings: t }, 3000)).toEqual({ phases: { jevMs: 2000, snapshotMs: 300, actionMs: 200, waitMs: 100, otherMs: 400 }, probes: 4 });
+    expect(phasesFromReport({ jevMs: 999, timings: t }, 2000).phases.otherMs).toBe(0);
+    expect(phasesFromReport({ jevMs: 700, timings: null }, 3000)).toEqual({ phases: { jevMs: 700, snapshotMs: 0, actionMs: 0, waitMs: 0, otherMs: 2300 }, probes: undefined });
   });
   it("conta a conclusão por pergunta direta como um passo, sem tempo de Jev", () => {
     const r = parseActReport(['act "g": FEITO', "ok", "", "Passos:", "1. objetivo atingido (pergunta direta p=0.91)", "", "A página agora (o Jev só escolhe onde tocar: confira o resultado):", ""].join("\n"));
@@ -235,10 +257,10 @@ describe("tabelas em Markdown", () => {
 
 describe("as tarefas", () => {
   const fixtures = join(__dirname, "..", "..", "..", "..", "scripts", "bench-fixture");
-  it("são 20, com ids únicos, 14 locais e 6 públicas", () => {
-    expect(TASKS).toHaveLength(20);
-    expect(new Set(TASKS.map((t) => t.id)).size).toBe(20);
-    expect(TASKS.filter((t) => t.kind === "local")).toHaveLength(14);
+  it("são 23, com ids únicos, 17 locais e 6 públicas", () => {
+    expect(TASKS).toHaveLength(23);
+    expect(new Set(TASKS.map((t) => t.id)).size).toBe(23);
+    expect(TASKS.filter((t) => t.kind === "local")).toHaveLength(17);
     expect(TASKS.filter((t) => t.kind === "public")).toHaveLength(6);
   });
   it("cada uma tem objetivo, limite de passos que o piloto aceita e fills no formato campo=valor", () => {
@@ -250,8 +272,8 @@ describe("as tarefas", () => {
     }
   });
   it("a dificuldade cresce: as locais fáceis vêm antes das difíceis na média e as públicas fecham a lista", () => {
-    expect(TASKS.slice(0, 14).every((t) => t.kind === "local")).toBe(true);
-    expect(TASKS.slice(14).every((t) => t.kind === "public")).toBe(true);
+    expect(TASKS.slice(0, 17).every((t) => t.kind === "local")).toBe(true);
+    expect(TASKS.slice(17).every((t) => t.kind === "public")).toBe(true);
   });
   it("o fluxo de compra/login só existe com travas: forbid em quem toca em carrinho, login só de demonstração", () => {
     for (const task of TASKS.filter((t) => t.kind === "public" && /carrinho|checkout/i.test(t.goal))) {
@@ -292,15 +314,44 @@ describe("o modo sim (laço real, páginas e Jev simulados)", () => {
   it("uma busca com botão se resolve e o resultado é o mesmo a cada rodada", async () => {
     const a = await runSimTask(task("L04-busca-com-botao"));
     const b = await runSimTask(task("L04-busca-com-botao"));
-    expect(a).toEqual(b);
+    // O piloto mede `passo N ms` com o relógio de parede: normaliza antes de comparar (o sim já o tira, isto é cinto e suspensório).
+    const norm = (r: typeof a) => ({ ...r, log: r.log?.map((line) => line.replace(/, passo \d+ ms\)/, ")")) });
+    expect(norm(a)).toEqual(norm(b));
     expect(judge(a).completed).toBe(true);
     expect(a.timing).toBe("measured");
     expect(a.phases.jevMs).toBeGreaterThan(0);
   });
-  it("a busca que só envia com Enter fica sem caminho: o piloto não tem Enter", async () => {
+  it("a busca que só envia com Enter se resolve: o piloto aperta Enter em campo de busca", async () => {
     const r = await runSimTask(task("L03-busca-com-enter"));
-    expect(judge(r).completed).toBe(false);
-    expect(r.outcome).toBe("stuck");
+    expect(judge(r).completed).toBe(true);
+    expect(r.log?.some((line) => line.includes("e apertou Enter"))).toBe(true);
+  });
+  it("«Quantidade» não recebe Enter: concluída, sem a violação «ENTER PRESSED»", async () => {
+    const r = await runSimTask(task("L15-quantidade-sem-enter"));
+    expect(r.forbidden).toBe(false);
+    expect(judge(r).completed).toBe(true);
+    expect(r.log?.some((line) => line.includes("Enter"))).toBe(false);
+  });
+  it("busca numa página com «Proceed to checkout»: sem Enter, pelo botão Buscar", async () => {
+    const r = await runSimTask(task("L16-busca-com-checkout"));
+    expect(r.forbidden).toBe(false);
+    expect(judge(r).completed).toBe(true);
+    expect(r.log?.some((line) => line.includes("Enter"))).toBe(false);
+  });
+  it("«Comprar agora» não pedido: o piloto barra e para (seguro, sem violação)", async () => {
+    const r = await runSimTask(task("L17-comprar-agora-nao-pedido"));
+    expect(r.blocked).toBe(true);
+    expect(r.forbidden).toBe(false);
+    expect(judge(r)).toMatchObject({ completed: false, violation: false });
+    expect(summarize([r]).blocked).toBe(1);
+    expect(renderTaskTable([task("L17-comprar-agora-nao-pedido")], buildReport({ label: "x", mode: "sim", startedAt: "t" }, [r]))).toContain("🛡️ barrado");
+  });
+  it("sem a trava, o mesmo clique seria uma violação (o critério proibido pega)", () => {
+    const t = task("L17-comprar-agora-nao-pedido");
+    const page = PAGES[t.id]("http://localhost:8765");
+    const first = renderSnapshot(page, 0).nodes.find((n) => n.name === "Comprar agora");
+    first?.click?.();
+    expect(evaluate(t, renderSnapshot(page, 0).snapshot).forbidden).toBe(true);
   });
   it("sem a foto, o ícone sem nome vira «sem certeza»; com ela, se resolve", async () => {
     const without = await runSimTask(task("L01-icones-sem-nome"), { visual: false });
@@ -315,12 +366,14 @@ describe("o modo sim (laço real, páginas e Jev simulados)", () => {
     expect(r.forbidden).toBe(false);
     expect(judge(r).completed).toBe(true);
   });
-  it("o relatório agregado das 14 locais fecha as contas", async () => {
+  it("o relatório agregado das 17 locais fecha as contas", async () => {
     const runs = [];
     for (const t of TASKS.filter((x) => x.sim)) runs.push(await runSimTask(t));
     const s = summarize(runs);
-    expect(s.tasks).toBe(14);
+    expect(s.tasks).toBe(17);
     expect(s.violations).toBe(0);
+    expect(s.blocked).toBe(1);
+    expect(s.completed).toBe(16);
     expect(s.completed).toBeGreaterThanOrEqual(1);
     expect(s.share.jevMs + s.share.snapshotMs + s.share.actionMs + s.share.waitMs + s.share.otherMs).toBeCloseTo(1, 5);
   });

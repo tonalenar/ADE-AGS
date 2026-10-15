@@ -149,7 +149,7 @@ export function instrument(deps: PilotDeps, clock: Clock): { deps: PilotDeps; fi
   const wrapped: PilotDeps = {
     snapshot: () => timed("snapshotMs", () => deps.snapshot()),
     click: (ref, navigates) => timed("actionMs", () => deps.click(ref, navigates)),
-    type: (ref, value) => timed("actionMs", () => deps.type(ref, value)),
+    type: (ref, value, submit) => timed("actionMs", () => deps.type(ref, value, submit)),
     select: (ref, value) => timed("actionMs", () => deps.select(ref, value)),
     scroll: () => timed("actionMs", () => deps.scroll()),
     settle: (thorough) => timed("waitMs", () => deps.settle(thorough)),
@@ -200,6 +200,10 @@ export interface TaskRun {
   note?: string;
   /** O relatório de passos do piloto (só no sim; o real traz o texto do act). */
   log?: string[];
+  /** O piloto recusou um controle de compra/pagamento que o objetivo não pediu (`blockedPurchase`). */
+  blocked?: boolean;
+  /** Consultas ao Jev (operação+elemento) e fotos que a rodada gastou: a cota. */
+  probes?: number;
 }
 
 export interface Verdict {
@@ -240,8 +244,40 @@ export interface ActReport {
   jevMs: number;
   /** O tempo de cada passo que agiu ("passo NNN ms", desde 8cd9db5c). Vazio num relatório antigo. */
   stepMs: number[];
+  /** A linha `TEMPOS: {json}` do relatório (somas por fase em ms, desde 4ab17b3b). `null` num relatório antigo. */
+  timings: ReportTimings | null;
+  /** O piloto recusou uma compra/pagamento que o objetivo não pediu. */
+  blocked: boolean;
   /** A página final embutida no relatório (pode vir cortada em 6000 caracteres). */
   finalSnapshot: string;
+}
+
+/** O que o `runPilot` mede por dentro (`Timings` em `jevPilot.ts`). */
+export interface ReportTimings {
+  jev: number;
+  snapshot: number;
+  acao: number;
+  espera: number;
+  foto: number;
+  consultas: number;
+  fotos: number;
+  total: number;
+}
+
+const TIMING_KEYS: (keyof ReportTimings)[] = ["jev", "snapshot", "acao", "espera", "foto", "consultas", "fotos", "total"];
+
+/** A linha `TEMPOS: {...}`; ignora o que não for um objeto com todos os números. Pura. */
+export function parseTimings(line: string): ReportTimings | null {
+  if (!line.startsWith("TEMPOS: ")) return null;
+  try {
+    const raw: unknown = JSON.parse(line.slice("TEMPOS: ".length));
+    if (typeof raw !== "object" || raw === null) return null;
+    const record = raw as Record<string, unknown>;
+    if (!TIMING_KEYS.every((key) => typeof record[key] === "number" && Number.isFinite(record[key]))) return null;
+    return Object.fromEntries(TIMING_KEYS.map((key) => [key, record[key] as number])) as unknown as ReportTimings;
+  } catch {
+    return null;
+  }
 }
 
 const HEADS: [string, PilotResult["outcome"]][] = [
@@ -261,7 +297,12 @@ export function parseActReport(report: string): ActReport {
   let photos = 0;
   let jevMs = 0;
   const stepMs: number[] = [];
+  let blocked = false;
+  let timings: ReportTimings | null = null;
   for (const line of stepLines) {
+    timings ??= parseTimings(line);
+    // `recusou …` (clique) ou `… compra ou pagamento … não toquei/não cliquei` (foto, nota): a trava `blockedPurchase`.
+    if (/recusou |compra ou (um )?pagamento/.test(line)) blocked = true;
     if (/^\d+\. /.test(line)) steps += 1;
     if (line.includes("sem o Jev)")) autoFills += 1;
     if (line.includes("tocou pela foto")) photos += 1;
@@ -271,7 +312,25 @@ export function parseActReport(report: string): ActReport {
     const whole = /passo (\d+) ms\)/.exec(line);
     if (whole) stepMs.push(Number(whole[1]));
   }
-  return { outcome, steps, autoFills, photos, jevMs, stepMs, finalSnapshot: at === -1 ? "" : lines.slice(at + 1).join("\n") };
+  return { outcome, steps, autoFills, photos, jevMs, stepMs, timings, blocked, finalSnapshot: at === -1 ? "" : lines.slice(at + 1).join("\n") };
+}
+
+/**
+ * As fases de uma rodada REAL a partir do relatório do act. Com a linha `TEMPOS` há a divisão inteira (a foto soma à
+ * consulta ao Jev); sem ela, só a consulta ao Jev (dos «NNN ms» dos passos). O que o relatório não cobre (o CLI, a
+ * viagem ao app) é `otherMs`: parte de `totalMs`, o relógio de quem rodou. Pura.
+ */
+export function phasesFromReport(report: Pick<ActReport, "jevMs" | "timings">, totalMs: number): { phases: Phases; probes: number | undefined } {
+  const t = report.timings;
+  if (!t) {
+    const jevMs = Math.min(report.jevMs, totalMs);
+    return { phases: { ...emptyPhases(), jevMs, otherMs: totalMs - jevMs }, probes: undefined };
+  }
+  const jevMs = t.jev + t.foto;
+  return {
+    phases: { jevMs, snapshotMs: t.snapshot, actionMs: t.acao, waitMs: t.espera, otherMs: Math.max(0, totalMs - jevMs - t.snapshot - t.acao - t.espera) },
+    probes: t.consultas + t.fotos,
+  };
 }
 
 // ── Agregação ───────────────────────────────────────────────────────
@@ -294,6 +353,8 @@ export interface Summary {
   falseDone: number;
   falseUnsure: number;
   violations: number;
+  /** Rodadas em que o piloto recusou uma compra/pagamento não pedido. */
+  blocked: number;
   meanSteps: number;
   medianSteps: number;
   medianTotalMs: number;
@@ -320,6 +381,7 @@ export function summarize(runs: TaskRun[]): Summary {
     falseDone: verdicts.filter((v) => v.falseDone).length,
     falseUnsure: verdicts.filter((v) => v.falseUnsure).length,
     violations: verdicts.filter((v) => v.violation).length,
+    blocked: runs.filter((r) => r.blocked).length,
     meanSteps: mean(runs.map((r) => r.steps)),
     medianSteps: median(runs.map((r) => r.steps)),
     medianTotalMs: median(runs.map((r) => r.totalMs)),
@@ -352,6 +414,7 @@ const ms0 = (ms: number) => `${Math.round(ms)} ms`;
 function mark(run: TaskRun): string {
   const v = judge(run);
   if (v.violation) return "⛔ violação";
+  if (run.blocked && !v.completed) return "🛡️ barrado";
   if (v.completed) return run.outcome === "done" ? "✅" : `✅ (${run.outcome})`;
   if (v.falseDone) return "❌ falso concluído";
   if (v.falseUnsure) return "❌ falso sem certeza";
@@ -388,6 +451,7 @@ export function renderSummary(report: BenchReport, baseline?: BenchReport): stri
     ["falso «concluído»", (x) => String(x.falseDone)],
     ["falso «sem certeza»", (x) => String(x.falseUnsure)],
     ["violações (comprou/finalizou)", (x) => String(x.violations)],
+    ["compras não pedidas barradas pelo piloto", (x) => String(x.blocked ?? 0)],
     ["passos (média · mediana)", (x) => `${x.meanSteps.toFixed(1)} · ${x.medianSteps}`],
     ["tempo total (mediana)", (x) => secs(x.medianTotalMs)],
     ["tempo por passo (mediana)", (x) => ms0(x.medianStepMs)],
@@ -406,7 +470,7 @@ export function renderFailures(tasks: BenchTask[], report: BenchReport): string 
   const lines = report.runs.filter((r) => !judge(r).completed).map((run) => {
     const task = tasks.find((t) => t.id === run.id);
     const v = judge(run);
-    const why = v.violation ? "fez o que a tarefa proíbe" : v.falseDone ? "disse concluído sem cumprir o critério" : run.outcome === "limit" ? "estourou o limite de passos" : `parou: ${run.outcome}`;
+    const why = v.violation ? "fez o que a tarefa proíbe" : run.blocked ? "o piloto recusou um controle de compra/pagamento (seguro, mas não concluiu)" : v.falseDone ? "disse concluído sem cumprir o critério" : run.outcome === "limit" ? "estourou o limite de passos" : `parou: ${run.outcome}`;
     return `- **${run.id}** (${task?.title ?? "?"}) — ${why}${task?.note ? `. ${task.note}` : ""}${run.note ? ` [${run.note}]` : ""}`;
   });
   return lines.length > 0 ? lines.join("\n") : "Nenhuma.";

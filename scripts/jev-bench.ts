@@ -23,7 +23,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import {
-  buildReport, canStart, describeCriterion, emptyPhases, evaluate, parseActReport, renderMarkdown, select,
+  buildReport, canStart, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
   type BenchReport, type BenchTask, type TaskRun,
 } from "./bench/core";
 import { runSimTask } from "./bench/sim";
@@ -141,15 +141,15 @@ async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
   let finalSnapshot = report.finalSnapshot;
   try { finalSnapshot = ags(["portal", "snapshot", portal], 60_000); } catch { /* fica com a página embutida no relatório */ }
   const evaluated = evaluate(task, finalSnapshot);
-  // O relatório do act traz o tempo da consulta ao Jev e o de cada passo que agiu; o resto vira «outros». Sem o tempo
-  // de passo (relatório antigo), vale a média.
-  const jevMs = Math.min(report.jevMs, totalMs);
+  // O relatório do act traz a linha TEMPOS (somas por fase) e o tempo de cada passo que agiu; o que sobra do relógio de
+  // quem rodou vira «outros». Sem o tempo de passo (relatório antigo), vale a média.
+  const { phases, probes } = phasesFromReport(report, totalMs);
   const perStep = report.steps > 0 ? totalMs / report.steps : totalMs;
   return {
     id: task.id, outcome: report.outcome ?? "crash", ...evaluated,
     steps: report.steps, autoFills: report.autoFills, photos: report.photos, totalMs,
     stepMs: report.stepMs.length > 0 ? report.stepMs : Array.from({ length: Math.max(1, report.steps) }, () => perStep),
-    phases: { ...emptyPhases(), jevMs, otherMs: totalMs - jevMs }, timing: "reported",
+    phases, timing: "reported", blocked: report.blocked, ...(probes !== undefined ? { probes } : {}),
     ...(report.outcome === null ? { note: "relatório do act não reconhecido" } : {}),
   };
 }
@@ -192,7 +192,7 @@ if (mode === "sim") {
   for (const task of planned) {
     const run = await runRealTask(task, portal);
     runs.push(run);
-    used += Math.max(run.steps + run.photos, 1);
+    used += run.probes ?? Math.max(run.steps + run.photos, 1);
     console.log(`${run.criterionOk ? "ok  " : "FALHA"} ${task.id} — ${run.outcome}, ${run.steps} passos, ${(run.totalMs / 1000).toFixed(1)} s (${used} sondas até aqui)`);
   }
   server.close();
