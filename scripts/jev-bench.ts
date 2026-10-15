@@ -23,7 +23,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import {
-  buildReport, canStart, infraTooHigh, isInfraFailure, unwrapCli, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
+  buildReport, canStart, mergeRuns, infraTooHigh, isInfraFailure, unwrapCli, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
   type BenchReport, type BenchTask, type TaskRun,
 } from "./bench/core";
 import { runSimTask } from "./bench/sim";
@@ -46,9 +46,38 @@ const intValue = (name: string, fallback: number): number => {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 };
 
+// `--merge a.json,b.json#id+id,… [--causes causas.json] --label x --out final.json`: junta rodadas parciais (a última de cada tarefa vale)
+// e anota a causa das falhas. Não roda nada.
+const label = value("label") ?? "rodada";
+if (flag("merge")) {
+  // `arquivo.json#L13-abas+L15-quantidade-sem-enter` pega só essas tarefas do arquivo (as outras são de outra rodada).
+  const parts = (value("merge") ?? "").split(",").filter(Boolean).map((spec) => {
+    const [path, only] = spec.split("#");
+    const part = JSON.parse(readFileSync(path, "utf8")) as BenchReport;
+    const ids = only?.split("+").filter(Boolean);
+    return ids && ids.length > 0 ? { ...part, runs: part.runs.filter((r) => ids.includes(r.id)) } : part;
+  });
+  if (parts.length === 0) fail("--merge pede os JSONs separados por vírgula.");
+  const causes = value("causes") ? (JSON.parse(readFileSync(value("causes")!, "utf8")) as Record<string, string>) : {};
+  const merged = mergeRuns(parts, TASKS.map((t) => t.id)).map((r) => (causes[r.id] ? { ...r, cause: causes[r.id] } : r));
+  const excluded = merged.filter(isInfraFailure);
+  const measured = merged.filter((r) => !isInfraFailure(r));
+  const final = buildReport({ label, mode: parts[0].mode, startedAt: parts[0].startedAt, commit: parts[0].commit }, measured);
+  const md = `${renderMarkdown(TASKS, final)}
+
+Fora das taxas (infraestrutura ou site, não do piloto): ${excluded.length > 0 ? excluded.map((r) => `${r.id}${r.cause ? ` — ${r.cause}` : ""}`).join("; ") : "nenhuma"}.
+`;
+  const outPath = value("out") ?? join("bench-results", `jev-bench-merge-${label}.json`);
+  mkdirSync(dirname(resolve(outPath)), { recursive: true });
+  writeFileSync(outPath, `${JSON.stringify({ ...final, excluded: excluded.map((r) => r.id) }, null, 2)}
+`);
+  writeFileSync(outPath.replace(/\.json$/i, "") + ".md", md);
+  console.log(md);
+  process.exit(0);
+}
+
 const mode: "sim" | "real" | null = flag("real") ? "real" : flag("sim") ? "sim" : null;
 const only = value("only")?.split(",").map((s) => s.trim()).filter(Boolean);
-const label = value("label") ?? "rodada";
 const port = intValue("port", 8765);
 
 function fail(message: string): never {
