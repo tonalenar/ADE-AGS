@@ -201,7 +201,7 @@ if (mode === "sim") {
   for (const task of planned) {
     const run = await runRealTask(task, portal);
     runs.push(run);
-    used += run.probes ?? Math.max(run.steps + run.photos, 1);
+    used += run.outcome === "crash" ? 0 : run.probes ?? Math.max(run.steps + run.photos, 1);
     console.log(`${run.criterionOk ? "ok  " : "FALHA"} ${task.id} — ${run.outcome}, ${run.steps} passos, ${(run.totalMs / 1000).toFixed(1)} s (${used} sondas até aqui)${isInfraFailure(run) ? " [infra]" : ""}`);
     if (infraTooHigh(runs)) { console.log(`
 PARADO: mais de 30% das rodadas falharam por infraestrutura (${runs.filter(isInfraFailure).length}/${runs.length}). Nada mais gastou cota.`); break; }
