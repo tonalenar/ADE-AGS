@@ -143,6 +143,18 @@ describe("pilotDeps + livro-razão: o sinal de idempotência do carrinho (3.4)",
     expect(second.prior()[0].pageChangedSince).toBe(true);
   });
 
+  it("guarda o que estava ao lado do botão (produto e preço) para distinguir dois «Adicionar» iguais", async () => {
+    const ledger = createLedger();
+    ledger.beginAct("a");
+    const first = pilotDeps(fakeHost([page(0), page(1)]), [], ledger);
+    await first.snapshot();
+    await first.click("e1", false);
+    first.finish(await first.snapshot());
+    ledger.beginAct("b");
+    const [entry] = ledger.prior(null);
+    expect(entry.near).toContain("Fone Bluetooth");
+  });
+
   it("um act que falhou no meio deixa a ação que já fez no livro-razão", async () => {
     const ledger = createLedger();
     ledger.beginAct("a");

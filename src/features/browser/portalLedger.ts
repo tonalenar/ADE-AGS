@@ -26,6 +26,8 @@ export interface LedgerEntry {
   changed: boolean | null;
   cartBefore: number | null;
   cartAfter: number | null;
+  /** O que estava ao lado do controle (o produto e o preço do «Adicionar»): distingue dois «Adicionar» iguais. */
+  near?: string;
 }
 
 /** O que o piloto recebe: estruturalmente um `Done` (jevPilot.ts), com a marca de «anterior» e a contagem do carrinho. */
@@ -38,6 +40,7 @@ export interface PriorAction {
   goal: string;
   cartBefore: number | null;
   cartAfter: number | null;
+  near?: string;
   /** A página de agora difere da do fim daquele `act`? Só na última ação. `null` = não se sabe (ainda não leu a página). */
   pageChangedSince: boolean | null;
 }
@@ -120,6 +123,7 @@ export function createLedger(now: () => number = Date.now): ActLedger {
           goal: e.goal,
           cartBefore: e.cartBefore,
           cartAfter: e.cartAfter,
+          ...(e.near ? { near: e.near } : {}),
           pageChangedSince: last ? changedSince : null,
         };
       });

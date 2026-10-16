@@ -764,7 +764,7 @@ export type PilotExtras = { prior: () => PriorAction[]; finish: (finalSnapshot: 
 export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLedger = createLedger()): PilotDeps & PilotExtras {
   // O livro-razão (D6/3.4): cada ação é anotada com a contagem do carrinho de antes e, na leitura seguinte, a de depois.
   let lastPage: ParsedPage | null = null;
-  let pendingAction: { what: string; fp: string | null; cartBefore: number | null } | null = null;
+  let pendingAction: { what: string; fp: string | null; cartBefore: number | null; near?: string } | null = null;
   const closeAction = (page: ParsedPage | null): void => {
     if (!pendingAction) return;
     ledger.record({
@@ -772,6 +772,7 @@ export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLe
       changed: page && pendingAction.fp !== null ? fingerprint(page) !== pendingAction.fp : null,
       cartBefore: pendingAction.cartBefore,
       cartAfter: page ? cartCount(page) : null,
+      ...(pendingAction.near ? { near: pendingAction.near } : {}),
     });
     pendingAction = null;
   };
@@ -779,7 +780,7 @@ export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLe
     closeAction(null);
     const el = ref ? lastPage?.elements.find((e) => e.ref === ref) : undefined;
     const what = ref === null ? verb : `${verb} ${el ? `${el.role}${el.name ? ` "${el.name}"` : ""}` : ref}`;
-    pendingAction = { what, fp: lastPage ? fingerprint(lastPage) : null, cartBefore: lastPage ? cartCount(lastPage) : null };
+    pendingAction = { what, fp: lastPage ? fingerprint(lastPage) : null, cartBefore: lastPage ? cartCount(lastPage) : null, ...(el?.near ? { near: el.near } : {}) };
   };
   /** O que a página contou sobre a espera daquele comando (`"waited": "esperou 8,2 s …"`), para o relatório do `act`. */
   const noteWait = (result: string, what: string): void => {
