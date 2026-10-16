@@ -22,6 +22,8 @@
  * Tudo aqui é puro (a página, o Jev e as ações entram por `PilotDeps`), então o laço é testável sem navegador.
  */
 
+import { windowLine, type WindowStats } from "./windowBeat";
+
 export interface PageElement {
   ref: string;
   role: string;
@@ -601,6 +603,8 @@ export interface PilotResult {
   note: string;
   finalSnapshot: string;
   timings?: Timings;
+  /** Saúde do renderizador da UI durante o `act` (Fase 0.1). */
+  window?: WindowStats;
 }
 
 /** As mesmas ações, medindo quanto cada fase leva (soma em `t`). Só embrulha: não decide nada. */
@@ -984,6 +988,7 @@ export function formatResult(goal: string, result: PilotResult): string {
     result.note,
     result.steps.length > 0 ? `\nPassos:\n${result.steps.join("\n")}` : "",
     result.timings ? `\nTEMPOS: ${JSON.stringify(result.timings)}` : "",
+    result.window ? `${windowLine(result.window)}\nJANELA: ${JSON.stringify(result.window)}` : "",
     "\nA página agora (o Jev só escolhe onde tocar: confira o resultado):",
     result.finalSnapshot.length > 6000 ? `${result.finalSnapshot.slice(0, 6000)}\n…` : result.finalSnapshot,
   ].filter(Boolean).join("\n");

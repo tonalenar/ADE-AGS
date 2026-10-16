@@ -1,3 +1,4 @@
+import { startWindowBeat } from "@/features/browser/windowBeat";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { AlertaToast } from "neogestify-ui-components";
@@ -372,6 +373,7 @@ async function handle(command: string, args: Record<string, unknown>): Promise<u
 export function initCliBridge(): () => void {
   let unlisten: UnlistenFn | undefined;
   let disposed = false;
+  const stopBeat = startWindowBeat();
 
   listen<BridgeRequest>("cc-cli-request", async (event) => {
     const { requestId, targetLabel, command, args } = event.payload;
@@ -396,6 +398,7 @@ export function initCliBridge(): () => void {
 
   return () => {
     disposed = true;
+    stopBeat();
     unlisten?.();
   };
 }

@@ -454,6 +454,7 @@ pub fn run() {
             crate::skills::check_session_skills,
             crate::skills::restore_session_skills,
             crate::ipc::bridge::cli_respond,
+            crate::ipc::bridge::ui_heartbeat,
             crate::ipc::mcp::tab_browser_mcp,
             crate::runs::run_start_orchestration,
             crate::runs::run_cancel_run,
