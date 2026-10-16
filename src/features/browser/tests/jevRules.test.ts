@@ -78,7 +78,7 @@ const ok = (operation: string, target: string | null = null, goalDone: number | 
 /** Uma ação de um act anterior como a ponte (portalLedger.ts) a entrega. */
 const before = (over: Partial<PriorAction> = {}): PriorAction => ({
   what: '[feito num act anterior #1 "adicionar o fone"] clicou button "Adicionar"', changed: true, previous: true, actNo: 1, goal: "adicionar o fone",
-  cartBefore: null, cartAfter: null, pageChangedSince: null, ...over,
+  cartBefore: null, cartAfter: null, pageChangedSince: false, ...over,
 });
 
 const SHOP = (cart: number) => [
@@ -93,6 +93,15 @@ describe("regra «passo-satisfeito»", () => {
     await runPilot("ver o carrinho", [], undefined, h.deps);
     expect(h.asked[0].state).toContain('[earlier run #2 "adicionar o fone"] clicou button "Adicionar" — carrinho 0→1');
     expect(h.asked[0].state).not.toContain("feito num act anterior");
+  });
+
+  it("se a página mudou desde o fim do act anterior (outra navegação, outra tarefa), o histórico de antes NÃO entra no estado", async () => {
+    // Benchmark real: L17/L08/L13 davam o objetivo por feito no passo 1 por causa de um «clicou Adicionar» de outra tarefa.
+    const stale = before({ pageChangedSince: true, cartBefore: 0, cartAfter: 1 });
+    const h = portal([ok("done")], [SHOP(0)], [stale]);
+    await runPilot("ver o carrinho", [], undefined, h.deps);
+    expect(h.asked[0].state).not.toContain("earlier run");
+    expect(h.asked[0].state).not.toContain("RECENT ACTIONS");
   });
 
   it("sem livro-razão (ou se ele falha) o act segue como antes", async () => {
@@ -111,6 +120,20 @@ describe("regra «passo-satisfeito»", () => {
     h.deps.prior = () => { order.push("prior"); return []; };
     await runPilot("ver o carrinho", [], undefined, h.deps);
     expect(order.slice(0, 2)).toEqual(["snapshot", "prior"]);
+  });
+});
+
+describe("«acabou» no primeiro passo", () => {
+  it("sem nenhuma ação e com p baixa não vira FEITO: devolve a página (L17, p=0,43)", async () => {
+    const h = portal([{ ...ok("done"), probability: 0.43 }], [SHOP(0)]);
+    const result = await runPilot("adicionar o fone", [], undefined, h.deps);
+    expect(result.outcome).toBe("unsure");
+    expect(result.steps.join("\n")).toContain("antes de qualquer ação");
+  });
+
+  it("com certeza (a página já cumpre o objetivo) conclui como sempre", async () => {
+    const h = portal([{ ...ok("done"), probability: 0.9 }], [SHOP(1)]);
+    expect((await runPilot("ver o carrinho", [], undefined, h.deps)).outcome).toBe("done");
   });
 });
 
@@ -138,6 +161,12 @@ describe("regra «quantidade»", () => {
     const h = portal([ok("click", "e1"), ok("done")], [SHOP(0)], [before({ pageChangedSince: false })]);
     await runPilot("adicionar o fone X ao carrinho", [], undefined, h.deps);
     expect(h.calls).toEqual([]);
+  });
+
+  it("numa página nova (o carrinho voltou a 0) o «adicionar» de um act anterior vale de novo (L07/L17, 2.ª repetição)", async () => {
+    const h = portal([ok("click", "e1"), ok("done")], [SHOP(0)], [before({ pageChangedSince: true, cartBefore: 0, cartAfter: 1 })]);
+    await runPilot("adicionar o fone X ao carrinho", [], undefined, h.deps);
+    expect(h.calls).toEqual(["click e1"]);
   });
 
   it("sem prova (a página mudou desde então e o carrinho não se sabe), o piloto adiciona", async () => {

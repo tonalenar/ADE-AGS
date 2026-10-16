@@ -31,7 +31,7 @@ use crate::util::now_ts;
 
 use super::config;
 use super::http::{self, CallStats, RetryPolicy};
-use super::browse_rules::{self, RULES_VERSION};
+use super::browse_rules;
 use super::log::{self, LogRow};
 use super::points::{memory_secret, POINT_BROWSE};
 use super::protocol::{canonical, canonical_labels, truncate_chars, DecisionRequest, Question};
@@ -281,7 +281,7 @@ pub fn decision_note(answers: &BTreeMap<String, super::protocol::DecisionAnswer>
     if probabilities.is_empty() {
         canonical(answers)
     } else {
-        format!("{}|p:{}|r:{RULES_VERSION}", canonical(answers), probabilities.join(","))
+        format!("{}|p:{}|r:{}", canonical(answers), probabilities.join(","), browse_rules::rules_tag())
     }
 }
 
@@ -581,7 +581,7 @@ mod test {
             ("alvo_click".to_string(), answer("e4", 0.8)),
             ("concluido".to_string(), answer("no", 0.93)),
         ]);
-        assert_eq!(decision_note(&answers), format!("alvo_click=e4;concluido=no;operacao=click|p:alvo_click=0.80,concluido=0.93,operacao=0.90|r:{RULES_VERSION}"));
+        assert_eq!(decision_note(&answers), format!("alvo_click=e4;concluido=no;operacao=click|p:alvo_click=0.80,concluido=0.93,operacao=0.90|r:{}", browse_rules::rules_tag()));
         let bare = BTreeMap::from([("operacao".to_string(), DecisionAnswer { label: "done".into(), probability: None, confidence: None })]);
         assert_eq!(decision_note(&bare), "operacao=done", "sem probabilidade, o rótulo de sempre");
     }

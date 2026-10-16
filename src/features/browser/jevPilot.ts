@@ -623,14 +623,17 @@ export function repeatedAdd(el: PageElement, page: ParsedPage, goal: string, his
     }
   }
   if (twinsOf(page.elements).has(twinKey(el))) return null;
+  // Só com a página do fim do `act` anterior (a ponte diz `pageChangedSince === false` na última ação): numa página nova o carrinho pode
+  // ter voltado a 0 e o «adicionar» de antes não vale mais (benchmark real, L07/L17: a 2.ª repetição era recusada à toa).
+  const priors = history.filter((d) => d.prior);
+  if (priors.length === 0 || priors[priors.length - 1].prior!.pageChangedSince !== false) return null;
   const clicked = `clicou ${el.role}${el.name ? ` "${el.name}"` : ""}`;
-  const earlier = [...history].reverse().find((d) => d.prior && d.prior.what.includes(clicked));
-  const p = earlier?.prior;
+  const p = [...priors].reverse().find((d) => d.prior!.what.includes(clicked))?.prior;
   if (!p) return null;
   if (p.cartBefore !== null && p.cartAfter !== null && p.cartAfter > p.cartBefore) {
     return `este item já foi adicionado num act anterior deste portal (o carrinho subiu de ${p.cartBefore} para ${p.cartAfter}); adicionar de novo duplicaria`;
   }
-  if (p.pageChangedSince === false && p.changed) return "este item já foi adicionado num act anterior e a página é a mesma do fim dele; adicionar de novo duplicaria";
+  if (p.changed) return "este item já foi adicionado num act anterior e a página é a mesma do fim dele; adicionar de novo duplicaria";
   return null;
 }
 
@@ -843,7 +846,12 @@ async function pilotLoop(
   progress.snapshot = snapshot;
   // Só depois da primeira leitura: é aí que a ponte sabe se a página mudou desde o fim do `act` anterior.
   try {
-    history.push(...(deps.prior?.() ?? []).slice(-HISTORY).map((p) => ({
+    // O histórico de um `act` anterior só vale se a página é a MESMA em que ele parou (T5: o segundo `act` na página do carrinho). Se a página
+    // mudou (outra navegação, outra tarefa no mesmo portal), «clicou Adicionar» de antes só confunde: o Jev dava o objetivo por feito no passo 1
+    // e repetia o último clique de outra tarefa (benchmark real, L01/L08/L13/L17).
+    const all = deps.prior?.() ?? [];
+    const samePage = all.length > 0 && all[all.length - 1].pageChangedSince === false;
+    history.push(...(samePage ? all : []).slice(-HISTORY).map((p) => ({
       what: p.what.replace(/^\[feito num act anterior/, "[earlier run"),
       changed: p.changed, auto: p.auto, earlier: true, prior: p,
     })));
@@ -1010,6 +1018,11 @@ async function pilotLoop(
           + (lastByJev?.changed ? " A última ação do piloto mudou a página: o objetivo pode já ter sido atingido, confira antes de continuar." : ""));
     }
     if (operation === "done") {
+      // «Acabou» no PRIMEIRO passo, sem o piloto ter feito nada, com p baixa: não é prova (L17: p=0,43 virou «FEITO (não verificado)»).
+      if (!lastByJev && (reply.probability ?? 0) < MIN_GOAL_DONE) {
+        log.push(`${step}. o Jev disse que acabou antes de qualquer ação, mas sem certeza (${meta})`);
+        return finish("unsure", "O Jev disse que o objetivo já está atingido sem nenhuma ação, mas sem certeza. Confira a página e continue você.");
+      }
       const verdict = doubt();
       if (verdict === "retry") continue;
       if (verdict === "give-up") return unconfirmed();
