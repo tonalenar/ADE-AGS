@@ -4,7 +4,7 @@
  *   --expect text:"Seu carrinho está vazio"   o texto está na página
  *   --expect url:/cart                         o endereço contém isto
  *   --expect count:1                           o carrinho da página tem 1 item (o «N itens» ou os botões de remover)
- *   --expect count:2@Caneca                    «Caneca» aparece 2 vezes (linhas de texto + nomes de controles)
+ *   --expect count:2@Caneca                    há 2 itens «Caneca» (ver countOf: um item com link + «Remover» conta uma vez)
  *   --expect absent:"Algo deu errado"          o texto NÃO está na página
  *
  * O relatório do `act` diz então **FEITO (verificado)**, **FEITO (não verificado)** (sem `--expect` e sem nada suspeito) ou
@@ -85,9 +85,19 @@ export function pageTexts(page: ParsedPage): string[] {
   return [page.title, ...page.text, ...page.elements.map((el) => el.name)].filter(Boolean);
 }
 
-function countOf(texts: string[], needle: string): number {
+/**
+ * Quantos ITENS mencionam o texto. Um item de carrinho aparece várias vezes na página (o título, o link da foto, o link do
+ * nome, o botão «Remover Caneca Azul»): somar tudo dava 2–3 para um item só e um count:1@Caneca correto virava NÃO CONFERE.
+ * Conta-se por categoria e fica o maior: linhas de texto; links (um por par nome+destino, para a foto e o nome não contarem
+ * em dobro); e os demais controles (botões). Duas linhas do carrinho dão 2 em qualquer categoria.
+ */
+function countOf(page: ParsedPage, needle: string): number {
   const n = norm(needle);
-  return texts.filter((t) => norm(t).includes(n)).length;
+  const has = (t: string) => norm(t).includes(n);
+  const lines = page.text.filter(has).length;
+  const links = new Set(page.elements.filter((el) => el.role === "link" && has(el.name)).map((el) => `${norm(el.name)}|${el.href ?? ""}`)).size;
+  const controls = page.elements.filter((el) => el.role !== "link" && has(el.name)).length;
+  return Math.max(lines, links, controls);
 }
 
 function hasText(texts: string[], e: Expectation): boolean {
@@ -114,8 +124,8 @@ export function checkExpectation(e: Expectation, page: ParsedPage): ExpectResult
     }
     case "count": {
       if (e.value) {
-        const seen = countOf(texts, e.value);
-        return { raw: e.raw, ok: seen === e.n, detail: `«${e.value}» aparece ${seen}×, esperado ${e.n}×` };
+        const seen = countOf(page, e.value);
+        return { raw: e.raw, ok: seen === e.n, detail: `${seen} item(ns) com «${e.value}», esperado ${e.n}` };
       }
       const seen = cartCount(page);
       if (seen === null) return { raw: e.raw, ok: false, detail: "a página não parece mostrar um carrinho com contagem" };
@@ -124,9 +134,18 @@ export function checkExpectation(e: Expectation, page: ParsedPage): ExpectResult
   }
 }
 
-const VALIDATION = /campo (é )?obrigat[óo]rio|este campo [ée] obrigat[óo]rio|this field is required|\bis required\b|please (fill|enter|select)|preencha (este|o|os) |e-?mail inv[áa]lido|invalid e-?mail|enter a valid|informe um|digite um (e-?mail|n[úu]mero|valor) v[áa]lido/i;
-const NO_RESULTS = /nenhum resultado|sem resultados|n[ãa]o encontramos|no results? (found|for)|did not match any|0 resultados/i;
-const ERROR_PAGE = /algo deu errado|something went wrong|sorry! something|desculpe[,!]|p[áa]gina n[ãa]o encontrada|page not found|access denied|acesso negado|^404\b|\b(502|503) /i;
+// Frases de ERRO, não de instrução: «Preencha os dados abaixo», «Informe um CEP» e «Please select a size» são o texto normal de um
+// formulário, e «10 resultados» / «503 resultados» / «502 produtos» são contagens de uma busca que deu certo.
+const VALIDATION = /campo (é )?obrigat[óo]rio|este campo [ée] obrigat[óo]rio|this field is required|\b(e-?mail|password|senha|name|field)\b.{0,20}\bis required\b|preencha (este|esse) campo|please fill (out )?this field|please (enter|select|choose) a valid|e-?mail inv[áa]lido|invalid e-?mail|enter a valid|informe um (e-?mail|cpf|cep|telefone|n[úu]mero|valor) v[áa]lido|digite um (e-?mail|n[úu]mero|valor) v[áa]lido/i;
+const NO_RESULTS = /nenhum resultado|sem resultados|n[ãa]o encontramos (nenhum|resultado|produto|nada|itens)|no results? (found|for)|did not match any|(^|[^\d.,])0 resultados/i;
+// Um código de erro HTTP sozinho («404») ou seguido do seu nome — nunca «503 resultados».
+const ERROR_CODE = "(?:http |error |erro )?(?:404|500|502|503|504)";
+const ERROR_PAGE = new RegExp(
+  "algo deu errado|something went wrong|sorry! something|desculpe[,!]|p[áa]gina n[ãa]o encontrada|page not found|access denied|acesso negado"
+  + "|^" + ERROR_CODE + "\\s*$"
+  + "|^" + ERROR_CODE + "\\b\\s*[-–:.|]?\\s*(?:not found|bad gateway|service unavailable|gateway time-?out|internal server error|n[ãa]o encontrad|p[áa]gina|erro)",
+  "i",
+);
 
 /**
  * Verificadores genéricos (5.2), ligados por padrão: o que uma página de «sucesso» não costuma mostrar. Só olha as linhas de
@@ -141,6 +160,11 @@ export function genericProblem(goal: string, page: ParsedPage): string | null {
     if (err) return `a página mostra um erro («${err.slice(0, 80)}»).`;
     const val = page.text.slice(0, 60).find((l) => VALIDATION.test(l));
     if (val) return `o formulário mostra uma mensagem de validação («${val.slice(0, 80)}»): provavelmente não foi enviado.`;
+    // Um campo que a própria página marcou como inválido (aria-invalid) também desmente um envio.
+    const invalid = page.elements.filter((el) => el.states.includes("invalid"));
+    if (invalid.length > 0) {
+      return `${invalid.length} campo(s) marcado(s) como inválido(s) pela página («${invalid.slice(0, 2).map((el) => el.name).join("», «")}»): provavelmente o formulário não foi enviado.`;
+    }
   }
   if (!mentions(/\b(nenhum|sem|zero|no|vazi[oa]|empty)\b/i)) {
     const none = top.find((l) => NO_RESULTS.test(l));
