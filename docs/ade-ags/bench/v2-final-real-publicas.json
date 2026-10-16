@@ -1,0 +1,552 @@
+{
+  "schema": 2,
+  "label": "v2-final-real-publicas",
+  "mode": "real",
+  "startedAt": "2026-10-16T20:54:16.663Z",
+  "commit": "1d6d6e91",
+  "seed": 1,
+  "repeat": 2,
+  "order": "embaralhada por semente, invertida nas repetições ímpares",
+  "runs": [
+    {
+      "id": "P01-wikipedia-busca",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://pt.wikipedia.org/wiki/Alan_Turing",
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2465,
+      "stepMs": [
+        2465
+      ],
+      "phases": {
+        "jevMs": 595,
+        "snapshotMs": 45,
+        "actionMs": 1770,
+        "waitMs": 0,
+        "otherMs": 55
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por Alan Turing e abra o artigo.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em search field \"Pesquisar na Wikipédia\" (valor de Pesquisar) e apertou Enter (pelo nome do campo, sem o Jev)\n1. concluído (p=0.92, fim p=0.98, 591 ms)\n\nTEMPOS: {\"jev\":595,\"snapshot\":45,\"acao\":1770,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":2415}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Alan Turing – Wikipédia, a enciclopédia livre\" https://pt.wikipedia.org/wiki/Alan_Turing\nviewport: 1908×1120 · scroll 0/23920\n\n- link \"Ir para o conteúdo\" [ref=e1] → /wiki/Alan_Turing#bodyContent\n- banner \"no font mode scale\"\n  - navigation \"Site\"\n    - button \"Menu principal\" [ref=e2]\n    - text \"Menu principal\"\n    - text \"mover para a barra lateral\"\n    - text \"Página principal\"\n    - text \"Conteúdo destacado\"\n    - text \"Eventos atuais\"\n    - text \"Esplanada\"\n    - text \"Página aleatória\"\n    - text \"Portais\"\n    - text \"Páginas especiais\"\n    - text \"Informar um erro\"\n    - text \"Colaboração\"\n    - text \"Boas-vindas\"\n    - text \"Ajuda\"\n    - text \"Páginas de testes públicas\"\n    - text \"Portal comunitário\"\n    - text \"Mudanças recentes\"\n    - text \"Manutenção\"\n    - text \"Criar página\"\n    - text \"Páginas novas\"\n    - text \"Contato\"\n  - link [ref=e3] → /wiki/Wikip%C3%A9dia:P%C3%A1gina_principal\n  - search \"vector search box auto expand width\"\n    - form\n      - searchbox \"Pesquisar na Wikipédia\" [ref=e4]\n      - button \"Procurar\" [ref=e5]\n  - navigation \"Ferramentas pessoais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Doar\" [ref=e6] → https://donate.wikimedia.org/?wmf_source=donate&wmf_medium=sidebar&wmf_campaign=pt.wikipedia.org&uselang=pt\n      - listitem\n        - link \"Criar conta\" [ref=e7] → /w/index.php?title=Especial:Criar_conta&returnto=Alan+Turing\n      - listitem\n        - link \"Iniciar sessão\" [ref=e8] → /w/index.php?title=Especial:Entrar&returnto=Alan+Turing\n- navigation \"Conteúdos\"\n  - heading \"Conteúdos\" [level=2]\n  - button \"Esconder Conteúdos\" [ref=e9]\n  - list \"vector toc contents\"\n    - listitem\n      - link \"Início\" [ref=e10] → /wiki/Alan_Turing#\n    - listitem\n      - link \"Infância e educação\" [ref=e11] → /wiki/Alan_Turing#Inf%C3%A2ncia_e_educa%C3%A7%C3%A3o\n      - button \"Alternar a subsecção Infância e educação\" [ref=e12]\n      - list \"toc sublist\"\n        - listitem\n          - link \"Família\" [ref=e13] → /wiki/Alan_Turing#Fam%C3%ADlia\n          - list \"toc sublist\"\n        - listitem\n          - link \"Escola\" [ref=e14] → /wiki/Alan_Turing#Escola\n          - list \"toc escola sublist\"\n        - listitem\n          - link \"Christopher Morcom\" [ref=e15] → /wiki/Alan_Turing#Christopher_Morcom\n          - list \"toc christopher morcom sublist\"\n        - listitem\n          - link \"Universidade e trabalho em computabilidade\" [ref=e16] → /wiki/Alan_Turing#Universidade_e_trabalho_em_computabilidade\n          - list \"vector toc list\"\n    - listitem\n      - link \"Carreira e pesquisa\" [ref=e17] → /wiki/Alan_Turing#Carreira_e_pesquisa\n      - button \"Alternar a subsecção Carreira e pesquisa\" [ref=e18]\n      - list \"toc carreira pesquisa sublist\"\n        - listitem\n          - link \"Criptanálise\" [ref=e19] → /wiki/Alan_Turing#Criptan%C3%A1lise\n          - list \"toc sublist\"\n        - listitem\n          - link \"Bomba eletromecânica\" [ref=e20] → /wiki/Alan_Turing#Bomba_eletromec%C3%A2nica\n          - list \"toc bomba sublist\"\n        - listitem\n          - link \"Hut 8 e o Enigma naval\" [ref=e21] → /wiki/Alan_Turing#Hut_8_e_o_Enigma_naval\n          - list \"vector toc list\"\n        - listitem\n          - link \"Turingery\" [ref=e22] → /wiki/Alan_Turing#Turingery\n          - list \"toc turingery sublist\"\n        - listitem\n          - link \"Delilah\" [ref=e23] → /wiki/Alan_Turing#Delilah\n          - list \"toc delilah sublist\"\n        - listitem\n          - link \"Computadores antigos e o teste de Turing\" [ref=e24] → /wiki/Alan_Turing#Computadores_antigos_e_o_teste_de_Turing\n          - list \"vector toc list\"\n        - listitem\n          - link \"Formação de padrões e biologia matemática\" [ref=e25] → /wiki/Alan_Turing#Forma%C3%A7%C3%A3o_de_padr%C3%B5es_e_biologia_matem%C3%A1tica\n          - list \"toc de biologia sublist\"\n    - listitem\n      - link \"Vida pessoal\" [ref=e26] → /wiki/Alan_Turing#Vida_pessoal\n      - button \"Alternar a subsecção Vida pessoal\" [ref=e27]\n      - list \"toc vida pessoal sublist\"\n        - listitem\n          - link \"Noivado\" [ref=e28] → /wiki/Alan_Turing#Noivado\n          - list \"toc noivado sublist\"\n        - listitem\n          - link \"Condenação por atentado ao pudor\" [ref=e29] → /wiki/Alan_Turing#Condena%C3%A7%C3%A3o_por_atentado_ao_pudor\n          - list \"toc por atentado ao pudor sublist\"\n    - listitem\n      - link \"Morte\" [ref=e30] → /wiki/Alan_Turing#Morte\n      - button \"Alternar a subsecção Morte\" [ref=e31]\n      - list \"toc morte sublist\"\n        - listitem\n          - link \"Desculpas e p",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        2465
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [],
+        "latencyMs": [
+          591
+        ],
+        "tokens": null,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 0
+    },
+    {
+      "id": "P02-wikipedia-link",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://pt.wikipedia.org/wiki/Imp%C3%A9rio_Portugu%C3%AAs",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2618,
+      "stepMs": [
+        2093
+      ],
+      "phases": {
+        "jevMs": 692,
+        "snapshotMs": 110,
+        "actionMs": 1758,
+        "waitMs": 0,
+        "otherMs": 58
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Abra o artigo sobre Portugal clicando em um link «Portugal» do texto do artigo.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou link \"Portugal\" (p=0.97, fim p=0.06, 326 ms, passo 2093 ms)\n2. concluído (p=0.84, fim p=0.69, 357 ms)\n\nTEMPOS: {\"jev\":692,\"snapshot\":110,\"acao\":1758,\"espera\":0,\"foto\":0,\"consultas\":2,\"fotos\":0,\"total\":2568}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Império Português – Wikipédia, a enciclopédia livre\" https://pt.wikipedia.org/wiki/Imp%C3%A9rio_Portugu%C3%AAs\nviewport: 1908×1120 · scroll 0/42935\n\n- link \"Ir para o conteúdo\" [ref=e1] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#bodyContent\n- banner \"no font mode scale\"\n  - navigation \"Site\"\n    - button \"Menu principal\" [ref=e2]\n    - text \"Menu principal\"\n    - text \"mover para a barra lateral\"\n    - text \"Página principal\"\n    - text \"Conteúdo destacado\"\n    - text \"Eventos atuais\"\n    - text \"Esplanada\"\n    - text \"Página aleatória\"\n    - text \"Portais\"\n    - text \"Páginas especiais\"\n    - text \"Informar um erro\"\n    - text \"Colaboração\"\n    - text \"Boas-vindas\"\n    - text \"Ajuda\"\n    - text \"Páginas de testes públicas\"\n    - text \"Portal comunitário\"\n    - text \"Mudanças recentes\"\n    - text \"Manutenção\"\n    - text \"Criar página\"\n    - text \"Páginas novas\"\n    - text \"Contato\"\n  - link [ref=e3] → /wiki/Wikip%C3%A9dia:P%C3%A1gina_principal\n  - search \"vector search box auto expand width\"\n    - form\n      - searchbox \"Pesquisar na Wikipédia\" [ref=e4]\n      - button \"Procurar\" [ref=e5]\n  - navigation \"Ferramentas pessoais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Doar\" [ref=e6] → https://donate.wikimedia.org/?wmf_source=donate&wmf_medium=sidebar&wmf_campaign=pt.wikipedia.org&uselang=pt\n      - listitem\n        - link \"Criar conta\" [ref=e7] → /w/index.php?title=Especial:Criar_conta&returnto=Imp%C3%A9rio+Portugu%C3%AAs\n      - listitem\n        - link \"Iniciar sessão\" [ref=e8] → /w/index.php?title=Especial:Entrar&returnto=Imp%C3%A9rio+Portugu%C3%AAs\n- navigation \"Conteúdos\"\n  - heading \"Conteúdos\" [level=2]\n  - button \"Esconder Conteúdos\" [ref=e9]\n  - list \"vector toc contents\"\n    - listitem\n      - link \"Início\" [ref=e10] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#\n    - listitem\n      - link \"Conceito e historiografia\" [ref=e11] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Conceito_e_historiografia\n      - button \"Alternar a subsecção Conceito e historiografia\" [ref=e12]\n      - list \"toc conceito historiografia sublist\"\n    - listitem\n      - link \"Antecedentes\" [ref=e13] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Antecedentes\n      - list \"toc antecedentes sublist\"\n    - listitem\n      - link \"Primeiro Império (1415–1580)\" [ref=e14] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Primeiro_Imp%C3%A9rio_(1415%E2%80%931580)\n      - button \"Alternar a subsecção Primeiro Império (1415–1580)\" [ref=e15]\n      - list \"toc primeiro sublist\"\n    - listitem\n      - link \"Segundo Império (1580–1822)\" [ref=e16] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Segundo_Imp%C3%A9rio_(1580%E2%80%931822)\n      - button \"Alternar a subsecção Segundo Império (1580–1822)\" [ref=e17]\n      - list \"toc segundo sublist\"\n    - listitem\n      - link \"Terceiro Império (1825–1999)\" [ref=e18] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Terceiro_Imp%C3%A9rio_(1825%E2%80%931999)\n      - button \"Alternar a subsecção Terceiro Império (1825–1999)\" [ref=e19]\n      - list \"toc terceiro sublist\"\n    - listitem\n      - link \"Legado\" [ref=e20] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Legado\n      - list \"toc legado sublist\"\n    - listitem\n      - link \"Ver também\" [ref=e21] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Ver_tamb%C3%A9m\n      - list \"toc ver sublist\"\n    - listitem\n      - link \"Notas e referências\" [ref=e22] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Notas_e_refer%C3%AAncias\n      - button \"Alternar a subsecção Notas e referências\" [ref=e23]\n      - list \"toc notas sublist\"\n    - listitem\n      - link \"Ligações externas\" [ref=e24] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Liga%C3%A7%C3%B5es_externas\n      - list \"toc externas sublist\"\n- main\n  - banner \"no font mode scale\"\n    - heading \"Império Português\" [level=1]\n    - button \"86 idiomas\" [ref=e25]\n  - navigation \"Espaços nominais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Artigo\" [ref=e26] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Discussão\" [ref=e27] → /wiki/Discuss%C3%A3o:Imp%C3%A9rio_Portugu%C3%AAs\n  - navigation \"Visualizações\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Ler\" [ref=e28] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Editar\" [ref=e29] → https://pt.wikipedia.org/w/index.php?title=Especial:Entrar&returnto=Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Ver histórico\" [ref=e30] → /w/index.php?title=Imp%C3%A9rio_Portugu%C3%AAs&action=history\n  - navigation \"Ferramentas de página\"\n    - button \"Ferramentas\" [ref=e31]\n    - text \"Ferramentas\"\n    - text \"m",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        2618
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [],
+        "latencyMs": [
+          326,
+          357
+        ],
+        "tokens": null,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 1
+    },
+    {
+      "id": "P03-saucedemo-carrinho",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/cart.html",
+      "steps": 4,
+      "autoFills": 2,
+      "photos": 0,
+      "totalMs": 4790,
+      "stepMs": [
+        2429,
+        992,
+        996
+      ],
+      "phases": {
+        "jevMs": 1217,
+        "snapshotMs": 8,
+        "actionMs": 3505,
+        "waitMs": 0,
+        "otherMs": 60
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho e abra o carrinho. Não finalize nada.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=1.00, fim p=0.00, 290 ms, passo 2429 ms)\n2. clicou button \"Add to cart\" (p=0.90, fim p=0.00, 313 ms, passo 992 ms)\n3. clicou button \"Cart, 1 items\" (p=0.93, fim p=0.02, 295 ms, passo 996 ms)\n4. objetivo atingido (pergunta direta p=0.97)\n\nTEMPOS: {\"jev\":1217,\"snapshot\":8,\"acao\":3505,\"espera\":0,\"foto\":0,\"consultas\":4,\"fotos\":0,\"total\":4732}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/cart.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 1 items\" [ref=e2]\n  - text \"Your Cart\"\n- main \"cart contents container\"\n  - text \"QTY\"\n  - text \"Description\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e3] → /cart.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$\"\n  - text \"29.99\"\n  - button \"Remove\" [ref=e4]\n  - button \"Continue Shopping\" [ref=e5]\n  - button \"Checkout\" [ref=e6]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e7] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e8] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e9] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\"",
+      "probes": 4,
+      "acts": 1,
+      "actMs": [
+        4790
+      ],
+      "queries": {
+        "count": 4,
+        "bytes": [],
+        "latencyMs": [
+          290,
+          313,
+          295
+        ],
+        "tokens": null,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 2
+    },
+    {
+      "id": "P04-saucedemo-checkout",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/checkout-step-two.html",
+      "steps": 6,
+      "autoFills": 5,
+      "photos": 0,
+      "totalMs": 9614,
+      "stepMs": [
+        2245,
+        1008,
+        995,
+        998,
+        3999
+      ],
+      "phases": {
+        "jevMs": 1896,
+        "snapshotMs": 9,
+        "actionMs": 7652,
+        "waitMs": 0,
+        "otherMs": 57
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho, vá ao checkout, preencha os dados fictícios e continue até o resumo (Overview). NÃO clique em Finish.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=1.00, fim p=0.00, 313 ms, passo 2245 ms)\n2. clicou button \"View details for Sauce Labs Backpack\" (p=0.42, fim p=0.00, 321 ms, passo 1008 ms)\n3. clicou button \"Cart, 1 items\" (p=0.72, fim p=0.00, 311 ms, passo 995 ms)\n4. clicou button \"Checkout\" (p=0.95, fim p=0.00, 313 ms, passo 998 ms)\ndigitou em text field \"First Name\" (valor de First Name) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Last Name\" (valor de Last Name) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Zip/Postal Code\" (valor de Postal Code) (pelo nome do campo, sem o Jev)\n5. clicou button \"Continue\" (p=1.00, fim p=0.00, 300 ms, passo 3999 ms)\n6. objetivo atingido (pergunta direta p=0.93)\n\nTEMPOS: {\"jev\":1896,\"snapshot\":9,\"acao\":7652,\"espera\":0,\"foto\":0,\"consultas\":6,\"fotos\":0,\"total\":9564}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/checkout-step-two.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 1 items\" [ref=e2]\n  - text \"Checkout: Overview\"\n- main \"checkout summary container\"\n  - text \"QTY\"\n  - text \"Description\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e3] → /checkout-step-two.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$29.99\"\n  - text \"Payment Information:\"\n  - text \"SauceCard #31337\"\n  - text \"Shipping Information:\"\n  - text \"Free Pony Express Delivery!\"\n  - text \"Price Total\"\n  - text \"Item total: $\"\n  - text \"29.99\"\n  - text \"Tax: $\"\n  - text \"2.40\"\n  - text \"Total: $\"\n  - text \"32.39\"\n  - button \"Cancel\" [ref=e4]\n  - button \"Finish\" [ref=e5]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e6] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e7] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e8] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\"",
+      "probes": 6,
+      "acts": 1,
+      "actMs": [
+        9614
+      ],
+      "queries": {
+        "count": 6,
+        "bytes": [],
+        "latencyMs": [
+          313,
+          321,
+          311,
+          313,
+          300
+        ],
+        "tokens": null,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 3
+    },
+    {
+      "id": "P04-saucedemo-checkout",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/checkout-step-two.html",
+      "steps": 6,
+      "autoFills": 5,
+      "photos": 0,
+      "totalMs": 9549,
+      "stepMs": [
+        2185,
+        1005,
+        991,
+        1008,
+        3991
+      ],
+      "phases": {
+        "jevMs": 1820,
+        "snapshotMs": 10,
+        "actionMs": 7667,
+        "waitMs": 0,
+        "otherMs": 52
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho, vá ao checkout, preencha os dados fictícios e continue até o resumo (Overview). NÃO clique em Finish.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=1.00, fim p=0.00, 303 ms, passo 2185 ms)\n2. clicou button \"View details for Sauce Labs Backpack\" (p=0.43, fim p=0.00, 288 ms, passo 1005 ms)\n3. clicou button \"Cart, 1 items\" (p=0.79, fim p=0.00, 294 ms, passo 991 ms)\n4. clicou button \"Checkout\" (p=0.91, fim p=0.00, 317 ms, passo 1008 ms)\ndigitou em text field \"First Name\" (valor de First Name) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Last Name\" (valor de Last Name) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Zip/Postal Code\" (valor de Postal Code) (pelo nome do campo, sem o Jev)\n5. clicou button \"Continue\" (p=0.99, fim p=0.00, 289 ms, passo 3991 ms)\n6. objetivo atingido (pergunta direta p=0.92)\n\nTEMPOS: {\"jev\":1820,\"snapshot\":10,\"acao\":7667,\"espera\":0,\"foto\":0,\"consultas\":6,\"fotos\":0,\"total\":9501}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/checkout-step-two.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 1 items\" [ref=e2]\n  - text \"Checkout: Overview\"\n- main \"checkout summary container\"\n  - text \"QTY\"\n  - text \"Description\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e3] → /checkout-step-two.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$29.99\"\n  - text \"Payment Information:\"\n  - text \"SauceCard #31337\"\n  - text \"Shipping Information:\"\n  - text \"Free Pony Express Delivery!\"\n  - text \"Price Total\"\n  - text \"Item total: $\"\n  - text \"29.99\"\n  - text \"Tax: $\"\n  - text \"2.40\"\n  - text \"Total: $\"\n  - text \"32.39\"\n  - button \"Cancel\" [ref=e4]\n  - button \"Finish\" [ref=e5]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e6] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e7] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e8] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\"",
+      "probes": 6,
+      "acts": 1,
+      "actMs": [
+        9549
+      ],
+      "queries": {
+        "count": 6,
+        "bytes": [],
+        "latencyMs": [
+          303,
+          288,
+          294,
+          317,
+          289
+        ],
+        "tokens": null,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 0
+    },
+    {
+      "id": "P03-saucedemo-carrinho",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/cart.html",
+      "steps": 3,
+      "autoFills": 2,
+      "photos": 0,
+      "totalMs": 3469,
+      "stepMs": [
+        2101,
+        1006
+      ],
+      "phases": {
+        "jevMs": 911,
+        "snapshotMs": 5,
+        "actionMs": 2497,
+        "waitMs": 0,
+        "otherMs": 56
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho e abra o carrinho. Não finalize nada.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=1.00, fim p=0.00, 308 ms, passo 2101 ms)\n2. clicou button \"Cart, 1 items\" (p=0.44, fim p=0.12, 294 ms, passo 1006 ms)\n3. objetivo atingido (pergunta direta p=0.89)\n\nTEMPOS: {\"jev\":911,\"snapshot\":5,\"acao\":2497,\"espera\":0,\"foto\":0,\"consultas\":3,\"fotos\":0,\"total\":3414}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/cart.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 1 items\" [ref=e2]\n  - text \"Your Cart\"\n- main \"cart contents container\"\n  - text \"QTY\"\n  - text \"Description\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e3] → /cart.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$\"\n  - text \"29.99\"\n  - button \"Remove\" [ref=e4]\n  - button \"Continue Shopping\" [ref=e5]\n  - button \"Checkout\" [ref=e6]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e7] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e8] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e9] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\"",
+      "probes": 3,
+      "acts": 1,
+      "actMs": [
+        3469
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [],
+        "latencyMs": [
+          308,
+          294
+        ],
+        "tokens": null,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 1
+    },
+    {
+      "id": "P02-wikipedia-link",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://pt.wikipedia.org/wiki/Imp%C3%A9rio_Portugu%C3%AAs",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1475,
+      "stepMs": [
+        971
+      ],
+      "phases": {
+        "jevMs": 698,
+        "snapshotMs": 106,
+        "actionMs": 618,
+        "waitMs": 0,
+        "otherMs": 53
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Abra o artigo sobre Portugal clicando em um link «Portugal» do texto do artigo.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou link \"Portugal\" (p=0.98, fim p=0.06, 346 ms, passo 971 ms)\n2. objetivo atingido (pergunta direta p=0.76)\n\nTEMPOS: {\"jev\":698,\"snapshot\":106,\"acao\":618,\"espera\":0,\"foto\":0,\"consultas\":2,\"fotos\":0,\"total\":1428}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Império Português – Wikipédia, a enciclopédia livre\" https://pt.wikipedia.org/wiki/Imp%C3%A9rio_Portugu%C3%AAs\nviewport: 1908×1120 · scroll 0/42935\n\n- link \"Ir para o conteúdo\" [ref=e1] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#bodyContent\n- banner \"no font mode scale\"\n  - navigation \"Site\"\n    - button \"Menu principal\" [ref=e2]\n    - text \"Menu principal\"\n    - text \"mover para a barra lateral\"\n    - text \"Página principal\"\n    - text \"Conteúdo destacado\"\n    - text \"Eventos atuais\"\n    - text \"Esplanada\"\n    - text \"Página aleatória\"\n    - text \"Portais\"\n    - text \"Páginas especiais\"\n    - text \"Informar um erro\"\n    - text \"Colaboração\"\n    - text \"Boas-vindas\"\n    - text \"Ajuda\"\n    - text \"Páginas de testes públicas\"\n    - text \"Portal comunitário\"\n    - text \"Mudanças recentes\"\n    - text \"Manutenção\"\n    - text \"Criar página\"\n    - text \"Páginas novas\"\n    - text \"Contato\"\n  - link [ref=e3] → /wiki/Wikip%C3%A9dia:P%C3%A1gina_principal\n  - search \"vector search box auto expand width\"\n    - form\n      - searchbox \"Pesquisar na Wikipédia\" [ref=e4]\n      - button \"Procurar\" [ref=e5]\n  - navigation \"Ferramentas pessoais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Doar\" [ref=e6] → https://donate.wikimedia.org/?wmf_source=donate&wmf_medium=sidebar&wmf_campaign=pt.wikipedia.org&uselang=pt\n      - listitem\n        - link \"Criar conta\" [ref=e7] → /w/index.php?title=Especial:Criar_conta&returnto=Imp%C3%A9rio+Portugu%C3%AAs\n      - listitem\n        - link \"Iniciar sessão\" [ref=e8] → /w/index.php?title=Especial:Entrar&returnto=Imp%C3%A9rio+Portugu%C3%AAs\n- navigation \"Conteúdos\"\n  - heading \"Conteúdos\" [level=2]\n  - button \"Esconder Conteúdos\" [ref=e9]\n  - list \"vector toc contents\"\n    - listitem\n      - link \"Início\" [ref=e10] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#\n    - listitem\n      - link \"Conceito e historiografia\" [ref=e11] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Conceito_e_historiografia\n      - button \"Alternar a subsecção Conceito e historiografia\" [ref=e12]\n      - list \"toc conceito historiografia sublist\"\n    - listitem\n      - link \"Antecedentes\" [ref=e13] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Antecedentes\n      - list \"toc antecedentes sublist\"\n    - listitem\n      - link \"Primeiro Império (1415–1580)\" [ref=e14] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Primeiro_Imp%C3%A9rio_(1415%E2%80%931580)\n      - button \"Alternar a subsecção Primeiro Império (1415–1580)\" [ref=e15]\n      - list \"toc primeiro sublist\"\n    - listitem\n      - link \"Segundo Império (1580–1822)\" [ref=e16] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Segundo_Imp%C3%A9rio_(1580%E2%80%931822)\n      - button \"Alternar a subsecção Segundo Império (1580–1822)\" [ref=e17]\n      - list \"toc segundo sublist\"\n    - listitem\n      - link \"Terceiro Império (1825–1999)\" [ref=e18] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Terceiro_Imp%C3%A9rio_(1825%E2%80%931999)\n      - button \"Alternar a subsecção Terceiro Império (1825–1999)\" [ref=e19]\n      - list \"toc terceiro sublist\"\n    - listitem\n      - link \"Legado\" [ref=e20] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Legado\n      - list \"toc legado sublist\"\n    - listitem\n      - link \"Ver também\" [ref=e21] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Ver_tamb%C3%A9m\n      - list \"toc ver sublist\"\n    - listitem\n      - link \"Notas e referências\" [ref=e22] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Notas_e_refer%C3%AAncias\n      - button \"Alternar a subsecção Notas e referências\" [ref=e23]\n      - list \"toc notas sublist\"\n    - listitem\n      - link \"Ligações externas\" [ref=e24] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Liga%C3%A7%C3%B5es_externas\n      - list \"toc externas sublist\"\n- main\n  - banner \"no font mode scale\"\n    - heading \"Império Português\" [level=1]\n    - button \"86 idiomas\" [ref=e25]\n  - navigation \"Espaços nominais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Artigo\" [ref=e26] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Discussão\" [ref=e27] → /wiki/Discuss%C3%A3o:Imp%C3%A9rio_Portugu%C3%AAs\n  - navigation \"Visualizações\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Ler\" [ref=e28] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Editar\" [ref=e29] → /w/index.php?title=Imp%C3%A9rio_Portugu%C3%AAs&veaction=edit\n      - listitem\n        - link \"Editar código fonte\" [ref=e30] → /w/index.php?title=Imp%C3%A9rio_Portugu%C3%AAs&action=edit\n      - listitem\n        - link \"Ver histórico\" [ref=e31] → /w/index.php?title=Imp%C3%A9rio_Portugu%C3%AAs&action=history\n  - navigation \"Ferram",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        1475
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [],
+        "latencyMs": [
+          346
+        ],
+        "tokens": null,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 2
+    },
+    {
+      "id": "P01-wikipedia-busca",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://pt.wikipedia.org/wiki/Alan_Turing",
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1533,
+      "stepMs": [
+        1533
+      ],
+      "phases": {
+        "jevMs": 361,
+        "snapshotMs": 59,
+        "actionMs": 1057,
+        "waitMs": 0,
+        "otherMs": 56
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por Alan Turing e abra o artigo.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em search field \"Pesquisar na Wikipédia\" (valor de Pesquisar) e apertou Enter (pelo nome do campo, sem o Jev)\n1. concluído (p=0.92, fim p=0.96, 355 ms)\n\nTEMPOS: {\"jev\":361,\"snapshot\":59,\"acao\":1057,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":1481}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Alan Turing – Wikipédia, a enciclopédia livre\" https://pt.wikipedia.org/wiki/Alan_Turing\nviewport: 1908×1120 · scroll 0/23920\n\n- link \"Ir para o conteúdo\" [ref=e1] → /wiki/Alan_Turing#bodyContent\n- banner \"no font mode scale\"\n  - navigation \"Site\"\n    - button \"Menu principal\" [ref=e2]\n    - text \"Menu principal\"\n    - text \"mover para a barra lateral\"\n    - text \"Página principal\"\n    - text \"Conteúdo destacado\"\n    - text \"Eventos atuais\"\n    - text \"Esplanada\"\n    - text \"Página aleatória\"\n    - text \"Portais\"\n    - text \"Páginas especiais\"\n    - text \"Informar um erro\"\n    - text \"Colaboração\"\n    - text \"Boas-vindas\"\n    - text \"Ajuda\"\n    - text \"Páginas de testes públicas\"\n    - text \"Portal comunitário\"\n    - text \"Mudanças recentes\"\n    - text \"Manutenção\"\n    - text \"Criar página\"\n    - text \"Páginas novas\"\n    - text \"Contato\"\n  - link [ref=e3] → /wiki/Wikip%C3%A9dia:P%C3%A1gina_principal\n  - search \"vector search box auto expand width\"\n    - form\n      - searchbox \"Pesquisar na Wikipédia\" [ref=e4]\n      - button \"Procurar\" [ref=e5]\n  - navigation \"Ferramentas pessoais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Doar\" [ref=e6] → https://donate.wikimedia.org/?wmf_source=donate&wmf_medium=sidebar&wmf_campaign=pt.wikipedia.org&uselang=pt\n      - listitem\n        - link \"Criar conta\" [ref=e7] → /w/index.php?title=Especial:Criar_conta&returnto=Alan+Turing\n      - listitem\n        - link \"Iniciar sessão\" [ref=e8] → /w/index.php?title=Especial:Entrar&returnto=Alan+Turing\n- navigation \"Conteúdos\"\n  - heading \"Conteúdos\" [level=2]\n  - button \"Esconder Conteúdos\" [ref=e9]\n  - list \"vector toc contents\"\n    - listitem\n      - link \"Início\" [ref=e10] → /wiki/Alan_Turing#\n    - listitem\n      - link \"Infância e educação\" [ref=e11] → /wiki/Alan_Turing#Inf%C3%A2ncia_e_educa%C3%A7%C3%A3o\n      - button \"Alternar a subsecção Infância e educação\" [ref=e12]\n      - list \"toc sublist\"\n        - listitem\n          - link \"Família\" [ref=e13] → /wiki/Alan_Turing#Fam%C3%ADlia\n          - list \"toc sublist\"\n        - listitem\n          - link \"Escola\" [ref=e14] → /wiki/Alan_Turing#Escola\n          - list \"toc escola sublist\"\n        - listitem\n          - link \"Christopher Morcom\" [ref=e15] → /wiki/Alan_Turing#Christopher_Morcom\n          - list \"toc christopher morcom sublist\"\n        - listitem\n          - link \"Universidade e trabalho em computabilidade\" [ref=e16] → /wiki/Alan_Turing#Universidade_e_trabalho_em_computabilidade\n          - list \"vector toc list\"\n    - listitem\n      - link \"Carreira e pesquisa\" [ref=e17] → /wiki/Alan_Turing#Carreira_e_pesquisa\n      - button \"Alternar a subsecção Carreira e pesquisa\" [ref=e18]\n      - list \"toc carreira pesquisa sublist\"\n        - listitem\n          - link \"Criptanálise\" [ref=e19] → /wiki/Alan_Turing#Criptan%C3%A1lise\n          - list \"toc sublist\"\n        - listitem\n          - link \"Bomba eletromecânica\" [ref=e20] → /wiki/Alan_Turing#Bomba_eletromec%C3%A2nica\n          - list \"toc bomba sublist\"\n        - listitem\n          - link \"Hut 8 e o Enigma naval\" [ref=e21] → /wiki/Alan_Turing#Hut_8_e_o_Enigma_naval\n          - list \"vector toc list\"\n        - listitem\n          - link \"Turingery\" [ref=e22] → /wiki/Alan_Turing#Turingery\n          - list \"toc turingery sublist\"\n        - listitem\n          - link \"Delilah\" [ref=e23] → /wiki/Alan_Turing#Delilah\n          - list \"toc delilah sublist\"\n        - listitem\n          - link \"Computadores antigos e o teste de Turing\" [ref=e24] → /wiki/Alan_Turing#Computadores_antigos_e_o_teste_de_Turing\n          - list \"vector toc list\"\n        - listitem\n          - link \"Formação de padrões e biologia matemática\" [ref=e25] → /wiki/Alan_Turing#Forma%C3%A7%C3%A3o_de_padr%C3%B5es_e_biologia_matem%C3%A1tica\n          - list \"toc de biologia sublist\"\n    - listitem\n      - link \"Vida pessoal\" [ref=e26] → /wiki/Alan_Turing#Vida_pessoal\n      - button \"Alternar a subsecção Vida pessoal\" [ref=e27]\n      - list \"toc vida pessoal sublist\"\n        - listitem\n          - link \"Noivado\" [ref=e28] → /wiki/Alan_Turing#Noivado\n          - list \"toc noivado sublist\"\n        - listitem\n          - link \"Condenação por atentado ao pudor\" [ref=e29] → /wiki/Alan_Turing#Condena%C3%A7%C3%A3o_por_atentado_ao_pudor\n          - list \"toc por atentado ao pudor sublist\"\n    - listitem\n      - link \"Morte\" [ref=e30] → /wiki/Alan_Turing#Morte\n      - button \"Alternar a subsecção Morte\" [ref=e31]\n      - list \"toc morte sublist\"\n        - listitem\n          - link \"Desculpas e p",
+      "probes": 1,
+      "acts": 1,
+      "actMs": [
+        1533
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [],
+        "latencyMs": [
+          355
+        ],
+        "tokens": null,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 3
+    }
+  ],
+  "summary": {
+    "tasks": 8,
+    "completed": 6,
+    "completedRate": 0.75,
+    "confirmed": 6,
+    "falseDone": 2,
+    "falseUnsure": 0,
+    "violations": 0,
+    "blocked": 0,
+    "meanSteps": 3.125,
+    "medianSteps": 2.5,
+    "medianTotalMs": 3043.5,
+    "medianStepMs": 1008,
+    "share": {
+      "jevMs": 0.2306197730408583,
+      "snapshotMs": 0.009911863261340918,
+      "actionMs": 0.7468814237039957,
+      "waitMs": 0,
+      "otherMs": 0.012586939993805085
+    },
+    "outcomes": {
+      "done": 8
+    }
+  },
+  "v2": {
+    "gate": {
+      "runs": 8,
+      "tasks": 4,
+      "successes": 6,
+      "successRate": 0.75,
+      "falseDone": 2,
+      "falseStop": 0,
+      "caught": 0,
+      "verifiedWrong": 0,
+      "violations": 0,
+      "stepP50": 1008,
+      "stepP95": 3991.8,
+      "actP50": 3043.5,
+      "actP95": 9591.25,
+      "actsPerTask": 1,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 3.125,
+      "tokensPerTask": null,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": null,
+      "bytesPerQueryP95": null,
+      "queryLatencyP50": 312,
+      "queryLatencyP95": 368.70000000000016
+    },
+    "local": {
+      "runs": 0,
+      "tasks": 0,
+      "successes": 0,
+      "successRate": 0,
+      "falseDone": 0,
+      "falseStop": 0,
+      "caught": 0,
+      "verifiedWrong": 0,
+      "violations": 0,
+      "stepP50": 0,
+      "stepP95": 0,
+      "actP50": 0,
+      "actP95": 0,
+      "actsPerTask": 0,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 0,
+      "tokensPerTask": null,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": null,
+      "bytesPerQueryP95": null,
+      "queryLatencyP50": null,
+      "queryLatencyP95": null
+    },
+    "public": {
+      "runs": 8,
+      "tasks": 4,
+      "successes": 6,
+      "successRate": 0.75,
+      "falseDone": 2,
+      "falseStop": 0,
+      "caught": 0,
+      "verifiedWrong": 0,
+      "violations": 0,
+      "stepP50": 1008,
+      "stepP95": 3991.8,
+      "actP50": 3043.5,
+      "actP95": 9591.25,
+      "actsPerTask": 1,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 3.125,
+      "tokensPerTask": null,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": null,
+      "bytesPerQueryP95": null,
+      "queryLatencyP50": 312,
+      "queryLatencyP95": 368.70000000000016
+    },
+    "probe": {
+      "runs": 0,
+      "tasks": 0,
+      "successes": 0,
+      "successRate": 0,
+      "falseDone": 0,
+      "falseStop": 0,
+      "caught": 0,
+      "verifiedWrong": 0,
+      "violations": 0,
+      "stepP50": 0,
+      "stepP95": 0,
+      "actP50": 0,
+      "actP95": 0,
+      "actsPerTask": 0,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 0,
+      "tokensPerTask": null,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": null,
+      "bytesPerQueryP95": null,
+      "queryLatencyP50": null,
+      "queryLatencyP95": null
+    },
+    "tasks": [
+      {
+        "id": "P01-wikipedia-busca",
+        "kind": "public",
+        "probe": false,
+        "runs": 2,
+        "successes": 2,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1999,
+        "stepP95": 2418.4,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": null
+      },
+      {
+        "id": "P02-wikipedia-link",
+        "kind": "public",
+        "probe": false,
+        "runs": 2,
+        "successes": 0,
+        "falseDone": 2,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1532,
+        "stepP95": 2036.8999999999999,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": null
+      },
+      {
+        "id": "P03-saucedemo-carrinho",
+        "kind": "public",
+        "probe": false,
+        "runs": 2,
+        "successes": 2,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1006,
+        "stepP95": 2363.4,
+        "actsPerTask": 1,
+        "queriesPerTask": 3.5,
+        "tokensPerTask": null
+      },
+      {
+        "id": "P04-saucedemo-checkout",
+        "kind": "public",
+        "probe": false,
+        "runs": 2,
+        "successes": 2,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1008,
+        "stepP95": 3995.4,
+        "actsPerTask": 1,
+        "queriesPerTask": 6,
+        "tokensPerTask": null
+      }
+    ]
+  },
+  "digest": "76c12c89"
+}

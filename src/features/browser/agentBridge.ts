@@ -863,10 +863,17 @@ export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLe
     // do Jev espera de novo, com teto maior (8 s): é o que ele pede quando vê que os resultados ainda carregam.
     settle: async (thorough) => {
       if (!thorough) return;
-      try {
-        const settled = await inPage(host, { op: "settle", fast: true, ceilingMs: 8_000 }, false);
-        noteWait(settled, "esperar a página");
-      } catch { /* segue */ }
+      // Uma lista que só muda quando um pedido lento volta (8 s) não pode ser dada por parada: enquanto a leitura diz que ainda
+      // há pedido em voo, espera de novo, até ~11 s no total (o `wait` do Jev antes parava em ~3 s e o piloto concluía «sem caminho»).
+      const started = Date.now();
+      for (let round = 0; round < 4; round++) {
+        try {
+          const settled = await inPage(host, { op: "settle", fast: true, ceilingMs: 8_000 }, false);
+          noteWait(settled, "esperar a página");
+          const pending = Number(/"pendingRequests":\s*(\d+)/.exec(settled)?.[1] ?? 0);
+          if (pending === 0 || Date.now() - started > 8_000) break;
+        } catch { break; /* segue */ }
+      }
     },
     pick: (query) => invoke("decision_pick_step", { query }),
     // Abre a conexão com o Jev enquanto a primeira página é lida (só age com o piloto ligado).

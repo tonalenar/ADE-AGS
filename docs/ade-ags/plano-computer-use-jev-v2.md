@@ -247,3 +247,68 @@ Quatro frentes independentes depois da Fase 0 (arquivos diferentes): **infra** (
 3. **Orçamento do Jev real** para o benchmark: até a rodada ANTES gastamos ~340 consultas; uma rodada completa com repetição deve passar de 1.000 (estimativa minha). Qual teto aceita por rodada?
 4. A **Amazon** fica como sonda (fora dos portões) ou quer que seja critério de aceite?
 5. Quer que isto rode como **missão** do ADE AGS (4 agentes, uma frente cada) ou prefere que eu execute por aqui, fase a fase?
+
+
+---
+
+## 5. Resultado da execução (16/10/2026)
+
+A missão «Computer use com o Jev: plano v2» rodou em modo frota, foi cancelada pelo usuário por demora, e o trabalho das quatro frentes foi **integrado na `dev` à mão** (`03c64acd`…`1d6d6e91`) e medido de novo sobre o código mesclado, no app instalado (`1d6d6e91`).
+
+### 5.1 Fases
+
+| Fase | Estado | Observação |
+|---|---|---|
+| 0 — medida (0.1 batimento, 0.2 instância isolada, 0.3/0.4 benchmark v2 e fixtures com atraso) | **feita** | `docs/ade-ags/bench/v2-linha-de-base.md` |
+| 1 — janela e infraestrutura (I1–I6) | **feita** | WebView2 sem estrangular janela oculta; erros distintos; relatório parcial; `br`/`zstd`/WAF no proxy; `ags portal close`; **aceite: 0 travamentos em 30 rodadas** (15 minimizada + 15 página pesada) |
+| 2 — observação (O1, O2, O4, O6) | **feita** | guarda semântica por elemento; `[patrocinado]`; resumo que prioriza o objetivo; estados ARIA completos |
+| 3 — espera e execução (E1, E2, D6, E4) | **feita, com ressalva** | espera por estado, combobox, histórico por portal, `target=_blank`. **Ressalva:** ver 5.3 |
+| 4 — decisão (D1–D6) | **feita** | regras versionadas com fixture por regra; HTTP/2 + pré-conexão + repetição; calibração dos limites; bytes/tokens/latência por consulta |
+| 5 — verificação (`--expect`) | **feita** | FEITO (verificado) / (não verificado) / NÃO CONFERE; «verificado» errado = 0 nas rodadas medidas |
+| 6 — visão como reserva | **sem entrega específica** | a reserva visual continua como estava |
+| 7 — portão de qualidade (`--gate`) | **feita** | o simulador tem piso de regressão no CI |
+| 4.4 — modelo pequeno para o texto a digitar | **fora desta missão** | aguarda a escolha do provedor |
+
+### 5.2 Números (Jev real, instância isolada ou app instalado)
+
+| | Base (`ee709f56`) | Depois (`1d6d6e91`) |
+|---|---|---|
+| latência por consulta p50 · p95 | 305 · 341 ms | **229–314 · 320–398 ms** |
+| tempo por passo p50 (locais) | 1007 ms | **391–484 ms** |
+| tempo total mediano de uma tarefa local | 2,5 s | **1,2 s** |
+| bytes por consulta p50 | — | ~4.200–5.300 (≈ 4.000 tokens por tarefa) |
+| travamentos da janela | 3 em 5 rodadas ao vivo | **0 em 30** |
+| sucesso, locais (27 tarefas) | 87% (47/54) | **74% (23/31)**, ver 5.3 |
+| sucesso, públicas (Wikipedia + SauceDemo) | 75% (6/8) | 75% (6/8) |
+| falso «feito» (locais · públicas) | 2 · 1 | 1 · 2 |
+| compras/violações | 0 | 0 |
+
+A **velocidade melhorou** (passo e tarefa pela metade) e a **janela deixou de travar**. A **precisão não melhorou**: nas locais caiu, nas públicas ficou igual.
+
+### 5.3 Por que a precisão local caiu (diagnóstico)
+
+Na rodada final (31 rodadas, 1 repetição na maior parte) os 8 insucessos foram:
+
+- **N04, N05, N06, N09 — esperas curtas.** Filtro que só muda 8 s depois, sugestões a 600 ms, quantidade salva em 700 ms. Na rodada «depois das Fases 1–5» estas passavam (com passos de 8–10 s); depois que a espera de rede ociosa antes de conferir caiu para 1,5 s (`77cf4735`, para ganhar tempo) elas voltaram a falhar. **A espera foi encurtada mais do que o benchmark tolera.**
+- **N01 (anúncio no primeiro resultado), L04 (falso «feito»), L14 (erro), L16 (falso «parou»), L12 (foto):** causa não investigada; com 1 repetição não dá para separar regressão de variação. L12 já era falso «parou» na base; L14 passou numa nova tentativa isolada.
+- **P02:** falso «feito» já conhecido (página longa com links parecidos).
+
+Medido ao vivo no N04 com o app instalado: depois do clique, a operação `wait` do Jev esperava ~3 s por vez (duas vezes) e o piloto concluía «sem caminho» aos ~7 s, um segundo antes de o pedido lento voltar. Corrigido em `agentBridge.ts`: a espera pedida pelo Jev repete enquanto houver pedido em voo, até ~8 s no total.
+
+### 5.4 O que NÃO está verificado
+
+- A correção do 5.3 **foi para a `dev` depois da rodada final**: não foi medida com o Jev real (precisa de um instalador novo e de nova rodada).
+- A rodada final não repetiu todas as tarefas duas vezes (31 de 54 rodadas), por teto de consultas/tempo; os números locais têm incerteza grande (±15 pontos).
+- N09 e N05 podem precisar de mais: o clique rápido não parece ver o pedido em voo logo depois da ação. Hipótese não confirmada; teste novo necessário.
+- Metas do plano **não atingidas**: «≥ 95% local em ≤ 2 `act`», «≥ 90% público», «falso feito ≤ 2%». Atingidas: «0 travamentos em 30», «mediana por consulta ≤ 450 ms», «passo p50 ≤ 500 ms» (locais), `--expect` sem «verificado» errado.
+
+### 5.5 Pendências
+
+1. Instalar o build com a correção do 5.3 e repetir a rodada local completa (27 × 2) para fechar a comparação.
+2. N09/N05: investigar por que a espera do clique rápido não cobre um pedido de 600–700 ms.
+3. Fase 6 (visão): decidir se entra.
+4. 4.4 (texto a digitar por modelo): decidir o provedor.
+5. P02 (links parecidos em página longa) e L12 (botão que só existe na imagem).
+6. Amazon continua como sonda fora dos portões.
+
+Arquivos: `docs/ade-ags/bench/v2-final-real-locais.*`, `v2-final-real-publicas.*`, `v2-final-sim.*`, e as rodadas intermediárias `v2-base-*`, `v2-depois-*`, `v2-depois2-*`, `v2-decisao-*`, `v2-janela-30-rodadas.*`.
