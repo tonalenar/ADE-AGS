@@ -619,7 +619,8 @@ A portal is a browser node on the canvas, visible to the user. You can drive the
 use the browser tools but pointed at that browser:
 
 ```bash
-ags portals                                 # the portals you reach
+ags portals                                 # the portals you reach, each with its state (ready, loading,
+                                            # no runtime, hidden, anti-bot check, no response) and a hint
 ags portal create Docs https://example.com  # next to you, already connected
 ags portal navigate Docs https://example.com/guide
 ags portal snapshot Docs                    # page tree with refs (@e3)
@@ -628,6 +629,7 @@ ags portal type Docs @e2 "search term" --submit
 ags portal press Docs Enter
 ags portal screenshot Docs                  # returns the path of a PNG
 ags portal console Docs --level errors
+ags portal close Docs                       # clean up what you created
 ```
 
 - Also available: `hover`, `select`, `scroll`, `wait`, `history` (back/forward/reload) and
@@ -635,7 +637,10 @@ ags portal console Docs --level errors
 - Take a `snapshot` before clicking: refs (`@e3`) come from it and change after the page does.
 - Not available on a portal: running JavaScript, uploading files, cookies and storage. A
   portal may be on any site; those stay with the user and the project browser tools.
-- There is no delete command: closing a portal stays with the user.
+- Close the portals you created when you finish (`ags portal close <portal>`): they are visible to the
+  user and each loaded page costs memory. Only portals connected to you can be closed.
+- If an action times out the error says why (window hidden, interface busy, page loading, no runtime). An
+  `act` that times out keeps the steps it already did in the error: check `ags portal snapshot` before repeating them.
 
 ### Account pools
 
