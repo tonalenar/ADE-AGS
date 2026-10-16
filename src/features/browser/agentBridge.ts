@@ -37,7 +37,9 @@ import { browserToolPrefix } from "./tabMcp";
 import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
 import { parseExpectations, verifyReport } from "./expect";
-import { formatResult, runPilot, type PilotDeps, type PilotResult } from "./jevPilot";
+import { summarizeSnapshot } from "./finalSummary";
+import { cartCount, fingerprint, formatResult, parseSnapshot, runPilot, type ParsedPage, type PilotDeps, type PilotResult } from "./jevPilot";
+import { createLedger, ledgerOf, type ActLedger, type PriorAction } from "./portalLedger";
 import { beginWindowMeasure } from "./windowBeat";
 
 export interface BrowserHost {
@@ -295,6 +297,9 @@ function cookieTable(rows: CookieRow[]): string {
 function timeoutFor(command: PageCommand): number {
   if (command.op === "wait") return Math.min(command.timeoutMs ?? 5000, 15_000) + 3000;
   if (command.op === "eval") return 30_000;
+  // A espera por estado do runtime sobe até ~12–14 s numa busca lenta: o tope do canal tem de ser maior.
+  if (command.op === "settle") return Math.min(command.ceilingMs ?? 12_000, 14_000) + 4000;
+  if (["click", "press", "type", "select", "hover", "drag", "upload", "scroll"].includes(command.op)) return 18_000;
   return 12_000;
 }
 
@@ -690,9 +695,20 @@ async function execute(
       const syntax = parseExpectations(expects).errors;
       if (syntax.length > 0) throw new Error(syntax.join(" "));
       const endMeasure = beginWindowMeasure();
-      const result = await runPilot(goal, fills, num(request, "steps"), pilotDeps(host));
-      const report = formatResult(goal, { ...result, window: await endMeasure() });
-      return verifyAct(host, report, goal, result.outcome, expects);
+      const waits: string[] = [];
+      const ledger = ledgerOf(host.viewId);
+      ledger.beginAct(goal);
+      const deps = pilotDeps(host, waits, ledger);
+      let result: Awaited<ReturnType<typeof runPilot>> | undefined;
+      try {
+        result = await runPilot(goal, fills, num(request, "steps"), deps);
+      } finally {
+        // Mesmo um `act` que falhou deixa o que já fez no livro-razão: é o que evita repetir a ação no seguinte.
+        deps.finish(result?.finalSnapshot ?? null);
+      }
+      // O resumo final traz o objetivo e a região principal antes do menu (O4), em vez do começo da página.
+      const text = formatResult(goal, { ...result, window: await endMeasure(), finalSnapshot: summarizeSnapshot(result.finalSnapshot, goal) });
+      return verifyAct(host, waitsReport(text, waits), goal, result.outcome, expects);
     }
     default:
       throw new Error(`O navegador não sabe fazer '${op}'.`);
@@ -739,7 +755,37 @@ async function verifyAct(host: BrowserHost, report: string, goal: string, outcom
 }
 
 /** O que o piloto do Jev usa deste navegador: ver `jevPilot.ts`. As ações são as mesmas que o agente faria à mão. */
-function pilotDeps(host: BrowserHost): PilotDeps {
+/**
+ * O que a ponte acrescenta ao que o piloto pede: `prior` (as ações dos `act`s anteriores NESTE portal, D6) e `finish` (fecha o
+ * `act` no livro-razão). `prior` é opcional no piloto: quem não o conhece o ignora.
+ */
+export type PilotExtras = { prior: () => PriorAction[]; finish: (finalSnapshot: string | null) => void };
+
+export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLedger = createLedger()): PilotDeps & PilotExtras {
+  // O livro-razão (D6/3.4): cada ação é anotada com a contagem do carrinho de antes e, na leitura seguinte, a de depois.
+  let lastPage: ParsedPage | null = null;
+  let pendingAction: { what: string; fp: string | null; cartBefore: number | null } | null = null;
+  const closeAction = (page: ParsedPage | null): void => {
+    if (!pendingAction) return;
+    ledger.record({
+      what: pendingAction.what,
+      changed: page && pendingAction.fp !== null ? fingerprint(page) !== pendingAction.fp : null,
+      cartBefore: pendingAction.cartBefore,
+      cartAfter: page ? cartCount(page) : null,
+    });
+    pendingAction = null;
+  };
+  const openAction = (verb: string, ref: string | null): void => {
+    closeAction(null);
+    const el = ref ? lastPage?.elements.find((e) => e.ref === ref) : undefined;
+    const what = ref === null ? verb : `${verb} ${el ? `${el.role}${el.name ? ` "${el.name}"` : ""}` : ref}`;
+    pendingAction = { what, fp: lastPage ? fingerprint(lastPage) : null, cartBefore: lastPage ? cartCount(lastPage) : null };
+  };
+  /** O que a página contou sobre a espera daquele comando (`"waited": "esperou 8,2 s …"`), para o relatório do `act`. */
+  const noteWait = (result: string, what: string): void => {
+    const waited = /"waited":\s*"([^"]+)"/.exec(result)?.[1];
+    if (waited) notes.push(`${what}: ${waited}`);
+  };
   /**
    * Depois de uma ação que levou a OUTRA página (o resultado diz `navigated`, mesmo num botão de formulário que não é link),
    * espera ela carregar e assentar antes de o piloto reler: lida cedo demais, a página nova aparece vazia, o Jev acha que
@@ -748,8 +794,14 @@ function pilotDeps(host: BrowserHost): PilotDeps {
    */
   const landed = async (result: string, loads: number, expected = false): Promise<void> => {
     if (!expected && !/navigated/.test(result)) return;
-    await host.waitForLoad(loads, 6_000);
-    try { await inPage(host, { op: "wait", idle: true, timeoutMs: 1_200 }, false); } catch { /* segue */ }
+    const started = Date.now();
+    // O runtime esperou a navegação pelo ESTADO (E1) e a página nova já existe quando o resultado diz `navigated`. Aqui se
+    // espera ela assentar: carregada, sem pedidos pendentes, DOM quieto (teto de ~12 s se ela ainda está carregando).
+    const loaded = await host.waitForLoad(loads, 12_000);
+    let settled = "";
+    try { settled = await inPage(host, { op: "settle", fast: true, ceilingMs: 12_000 }, false); } catch { /* segue */ }
+    const waited = /"waited":\s*"([^"]+)"/.exec(settled)?.[1];
+    notes.push(`depois da navegação (${Date.now() - started} ms): ${loaded ? "a página nova carregou" : "a página nova NÃO terminou de carregar em 12 s"}${waited ? `; ${waited}` : ""}`);
   };
   return {
     // Um envio de busca pode levar segundos até a página nova existir (a Amazon: ~8 s): se a leitura falha por isso, espera a
@@ -758,7 +810,11 @@ function pilotDeps(host: BrowserHost): PilotDeps {
       const loads = host.loadCount();
       for (let attempt = 0; ; attempt++) {
         try {
-          return await inPage(host, { op: "snapshot", all: false, inView: true }, false);
+          const text = await inPage(host, { op: "snapshot", all: false, inView: true }, false);
+          const page = parseSnapshot(text);
+          closeAction(page);
+          lastPage = page;
+          return text;
         } catch (e) {
           if (attempt >= 2 || !/n[ãa]o respondeu|cambi[óo]|mudou/i.test(e instanceof Error ? e.message : String(e))) throw e;
           await host.waitForLoad(loads, 10_000);
@@ -767,31 +823,40 @@ function pilotDeps(host: BrowserHost): PilotDeps {
     },
     // Tudo `fast` e sem coletar console/rede (`withEffects` falso): o piloto lê a página de novo depois de cada passo, e é isso que importa.
     click: async (ref, navigates) => {
+      openAction("clicou", ref);
       const loads = host.loadCount();
       const result = await inPage(host, { op: "click", target: ref, fast: true }, false);
+      noteWait(result, "clique");
       // Um link carrega outra página, que leva segundos: relê só depois.
       await landed(result, loads, navigates);
       return result;
     },
     type: async (ref, text, submit) => {
+      openAction(submit ? "digitou e enviou em" : "digitou em", ref);
       const loads = host.loadCount();
       const result = await inPage(host, { op: "type", target: ref, text, clear: true, submit: !!submit, fast: true }, false);
+      noteWait(result, submit ? "digitar e enviar" : "digitar");
       // A busca enviada carrega a página de resultados (ou não, numa busca da própria página): só espera se navegou.
       await landed(result, loads);
       return result;
     },
     select: async (ref, value) => {
+      openAction("escolheu em", ref);
       const loads = host.loadCount();
       const result = await inPage(host, { op: "select", target: ref, value, fast: true }, false);
+      noteWait(result, "escolher");
       await landed(result, loads);
       return result;
     },
     scroll: () => inPage(host, { op: "scroll", dy: 600, fast: true }, false),
-    // O comando já esperou a página assentar (60 ms quieta, 350 no máximo). Só a operação `wait` do Jev espera de verdade
-    // (a rede ociosa, até 2,5 s): é o que ele pede quando vê que os resultados ainda carregam.
+    // O comando já esperou a página assentar por ESTADO (sem navegação em curso, rede ociosa, DOM quieto). A operação `wait`
+    // do Jev espera de novo, com teto maior (8 s): é o que ele pede quando vê que os resultados ainda carregam.
     settle: async (thorough) => {
       if (!thorough) return;
-      try { await inPage(host, { op: "wait", idle: true, timeoutMs: 2500 }, false); } catch { /* segue */ }
+      try {
+        const settled = await inPage(host, { op: "settle", fast: true, ceilingMs: 8_000 }, false);
+        noteWait(settled, "esperar a página");
+      } catch { /* segue */ }
     },
     pick: (query) => invoke("decision_pick_step", { query }),
     // A reserva visual: uma foto da página (só se estiver toda à vista) e o toque no ponto que o Jev apontar.
@@ -803,14 +868,32 @@ function pilotDeps(host: BrowserHost): PilotDeps {
       return invoke("decision_pick_visual", { query: { goal, recent, imagePath: shot.path } });
     },
     peekAt: async (x, y) => inPage(host, { op: "peek", target: `@${x},${y}` }, false),
+    prior: () => ledger.prior(lastPage ? fingerprint(lastPage) : null),
+    finish: (finalSnapshot) => {
+      closeAction(null);
+      ledger.endAct(finalSnapshot ? fingerprint(parseSnapshot(finalSnapshot)) : lastPage ? fingerprint(lastPage) : null);
+    },
     clickAt: async (x, y) => {
+      openAction("tocou num ponto da foto", null);
       const loads = host.loadCount();
       const result = await inPage(host, { op: "click", target: `@${x},${y}`, fast: true }, false);
+      noteWait(result, "toque pela foto");
       // Um toque pela foto não sabe se é um link: o resultado diz se navegou (senão o piloto julgaria a página antiga).
       await landed(result, loads);
       return result;
     },
   };
+}
+
+/**
+ * O que a página esperou durante o `act` (E1): cada comando espera por ESTADO, não por tempo, e conta o que viu pendente.
+ * Vai antes de «A página agora», para o agente ver quanto durou uma busca lenta e por quê. Sem espera notável, nada muda.
+ */
+export function waitsReport(text: string, waits: string[]): string {
+  if (waits.length === 0) return text;
+  const block = `\nESPERA (por estado da página, não por tempo fixo):\n${waits.slice(0, 12).map((w) => `- ${w}`).join("\n")}${waits.length > 12 ? `\n- … mais ${waits.length - 12}` : ""}`;
+  const at = text.indexOf("\nA página agora");
+  return at < 0 ? text + block : text.slice(0, at) + block + text.slice(at);
 }
 
 /** Atiende un pedido de un agente sobre un portal, por su id. */

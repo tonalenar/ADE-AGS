@@ -26,10 +26,13 @@ import { componentChain, describeElement, selectorOf } from "./dom";
 import {
   errorKindOf, headerList, headerValue, parseRawHeaders, readResponseBody, requestBodyPreview, MAX_PAGE_BODY,
 } from "./netCapture";
+import { createActivity, describeWait, type SettleReport } from "./activity";
+import { diffFingerprint, scopeSignature, staleMessage, type Fingerprint } from "./guard";
 import { callerOf, clip, displayPath, formatConsoleArgs, formatValue, toTransferable } from "./serialize";
 import {
   installCookieJar, installScrollbars, installStorageSync, JAR_HEADER, OWN_HEADER, takeNatives,
 } from "./siteState";
+import { findSponsoredBlocks, inSponsored } from "./sponsored";
 import { isTouch, sendTouch, setTouch } from "./touch";
 import { CORS_HEADER, CRED_HEADER, HEADERS_HEADER, corsMessage, routeRequest, type Routed } from "./route";
 import {
@@ -205,9 +208,20 @@ declare global {
       return url;
     }
   };
-  /** Pedidos sin terminar, de cualquier origen: es lo que mira `wait { idle }`. Se cuenta
+  /** Pedidos sin terminar (fetch y XHR, de cualquier origen), la navegación en curso y la espera por estado
+   *  (`activity.ts`): es lo que mira `wait { idle }` y lo que hace que una acción espere a una búsqueda lenta. Se cuenta
    *  siempre, con o sin panel de debug. */
-  let inFlight = 0;
+  const activity = createActivity({
+    now: () => Date.now(),
+    setTimer: (fn, ms) => setTimer(fn, ms),
+    clearTimer: (handle) => clearTimer(handle as number),
+    readyState: () => document.readyState,
+    watchDom: (onChange) => {
+      const observer = new MutationObserver(onChange);
+      observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+      return () => observer.disconnect();
+    },
+  });
   /** El panel de debug está abierto: solo ahí se anotan los pedidos (y se leen sus
    *  cuerpos), que es lo que cuesta. Arranca apagado en cada documento; la app lo prende. */
   let recordingNet = false;
@@ -231,7 +245,7 @@ declare global {
       headers.set(CRED_HEADER, request.credentials);
     }
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.blob();
-    inFlight += 1;
+    const endRequest = activity.begin();
     try {
       const response = await nativeFetch!(routed.url, {
         method: request.method,
@@ -254,7 +268,7 @@ declare global {
       if (!routed.forwarded) cookieJar?.seen(response.headers.get(JAR_HEADER));
       return response;
     } finally {
-      inFlight = Math.max(0, inFlight - 1);
+      endRequest();
     }
   }
 
@@ -276,8 +290,15 @@ declare global {
       } catch {
         /* un input raro: fetch decide */
       }
-      inFlight += 1;
-      const result = nativeFetch(input, init).finally(() => { inFlight = Math.max(0, inFlight - 1); });
+      const endRequest = activity.begin();
+      let pendingFetch: Promise<Response>;
+      try {
+        pendingFetch = nativeFetch(input, init);
+      } catch (e) {
+        endRequest();
+        throw e;
+      }
+      const result = pendingFetch.finally(endRequest);
       // Una respuesta del propio servidor puede haber puesto cookies: la página las tiene
       // que encontrar en `document.cookie` apenas la recibe.
       if (!url || !isForeign(url)) {
@@ -374,10 +395,9 @@ declare global {
         cookieJar.seen(this.getResponseHeader(JAR_HEADER));
       });
     }
-    if (info && isForeign(info.url)) {
-      inFlight += 1;
-      this.addEventListener("loadend", () => { inFlight = Math.max(0, inFlight - 1); });
-    }
+    // Todo XHR conta, do propio servidor o de otro origen: una búsqueda lenta casi siempre es del propio.
+    const endRequest = activity.begin();
+    this.addEventListener("loadend", endRequest);
     // Los que pasan por el proxy los registra él.
     if (info && isForeign(info.url) && !routed && recordingNet) {
       const at = Date.now();
@@ -415,7 +435,12 @@ declare global {
         }
       });
     }
-    return xhrSend.call(this, body);
+    try {
+      return xhrSend.call(this, body);
+    } catch (e) {
+      endRequest();
+      throw e;
+    }
   };
 
   /** El cuerpo de un XHR ya terminado, según cómo pidió la página leerlo. */
@@ -540,6 +565,23 @@ declare global {
 
   window.addEventListener("pagehide", flush);
 
+  // La navegación que empezó y todavía no cambió el documento (una búsqueda que el servidor tarda 8 s en contestar): la
+  // acción que la provocó tiene que esperarla. `beforeunload` salta cuando el navegador va a salir de la página; la API
+  // `navigation` (Chromium/WebView2) avisa también de un envío de formulario y dice si lo cancelaron.
+  window.addEventListener("beforeunload", () => activity.markNavigation());
+  const navigationApi = (window as unknown as { navigation?: EventTarget }).navigation;
+  if (navigationApi) {
+    navigationApi.addEventListener("navigate", (event) => {
+      const nav = event as Event & { hashChange?: boolean; downloadRequest?: string | null; destination?: { sameDocument?: boolean } };
+      if (nav.hashChange || nav.downloadRequest || nav.destination?.sameDocument !== false) return;
+      activity.markNavigation();
+      // Si la página la cancela (un router de SPA que maneja el envío), no hay navegación que esperar.
+      queueMicrotask(() => { if (event.defaultPrevented) activity.clearNavigation(); });
+    });
+    navigationApi.addEventListener("navigateerror", () => activity.clearNavigation());
+    navigationApi.addEventListener("navigatesuccess", () => activity.clearNavigation());
+  }
+
   // ── Órdenes ───────────────────────────────────────────────────
 
   /** El puntero que muestra lo que está haciendo el agente. */
@@ -555,6 +597,11 @@ declare global {
    *  usarlos aunque mientras tanto haya vuelto a leer la página. */
   const marked = new Map<string, Element>();
   let markedSeq = 1;
+
+  /** A impressão de cada ref no momento em que foi lido (ver `guard.ts`): antes de agir sobre um ref, o runtime tira
+   *  outra e, se mudou, devolve `stale` sem tocar. Mesmo ciclo de vida dos refs: um snapshot novo substitui tudo. */
+  let prints = new Map<string, Fingerprint>();
+  const markedPrints = new Map<string, Fingerprint>();
 
   const INTERACTIVE_ROLES = new Set([
     "link", "button", "textbox", "searchbox", "checkbox", "radio", "combobox", "listbox", "slider",
@@ -662,15 +709,35 @@ declare global {
     return best;
   }
 
+  /** Os controles que são ligados/desligados: a ausência de `checked` neles é um estado (`unchecked`), não um detalhe. */
+  const CHECKABLE_ROLES = new Set(["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"]);
+
+  function isDisabled(el: Element): boolean {
+    if ((el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") return true;
+    // Um campo dentro de `<fieldset disabled>` não tem o atributo, mas está desabilitado do mesmo jeito.
+    if (isFormControl(el) || el.tagName === "BUTTON") {
+      if (el.closest("fieldset[disabled]") && !el.closest("legend")) return true;
+      try { return el.matches(":disabled"); } catch { return false; }
+    }
+    return false;
+  }
+
   function statesOf(el: Element, role: string): string[] {
     const states: string[] = [];
     const attr = (name: string) => el.getAttribute(name);
-    if ((el as HTMLButtonElement).disabled || attr("aria-disabled") === "true") states.push("disabled");
-    if ((el as HTMLInputElement).checked || attr("aria-checked") === "true") states.push("checked");
-    if (attr("aria-checked") === "mixed" || (el as HTMLInputElement).indeterminate) states.push("mixed");
-    if (attr("aria-expanded") === "true") states.push("expanded");
-    if (attr("aria-expanded") === "false") states.push("collapsed");
+    if (isDisabled(el)) states.push("disabled");
+    const checked = (el as HTMLInputElement).checked || attr("aria-checked") === "true";
+    if (checked) states.push("checked");
+    else if (CHECKABLE_ROLES.has(role) && attr("aria-checked") !== "mixed" && !(el as HTMLInputElement).indeterminate) states.push("unchecked");
+    if (attr("aria-checked") === "mixed" || attr("aria-pressed") === "mixed" || (el as HTMLInputElement).indeterminate) states.push("mixed");
+    // `<summary>` abre e fecha o `<details>` que o contém: o estado está no pai.
+    const details = el.tagName === "SUMMARY" ? el.parentElement : null;
+    if (attr("aria-expanded") === "true" || (details?.tagName === "DETAILS" && (details as HTMLDetailsElement).open)) states.push("expanded");
+    if (attr("aria-expanded") === "false" || (details?.tagName === "DETAILS" && !(details as HTMLDetailsElement).open)) states.push("collapsed");
     if (attr("aria-selected") === "true" || (el as HTMLOptionElement).selected) states.push("selected");
+    const current = attr("aria-current");
+    if (current && current !== "false") states.push("current");
+    if (attr("aria-busy") === "true") states.push("busy");
     if (attr("aria-pressed") === "true") states.push("pressed");
     if ((el as HTMLInputElement).required || attr("aria-required") === "true") states.push("required");
     if ((el as HTMLInputElement).readOnly) states.push("readonly");
@@ -700,6 +767,33 @@ declare global {
     return undefined;
   }
 
+  const SCOPE_SELECTOR = "form,dialog,[role=dialog],li,tr,[role=listitem],[role=row]";
+
+  /** A impressão de um elemento (`guard.ts`). `scopes` guarda o texto de cada escopo já lido: dezenas de botões do mesmo
+   *  `<li>`/`<form>` não releem o texto a cada um. */
+  function fingerprintOf(el: Element, scopes?: Map<Element, string>): Fingerprint {
+    const role = roleOf(el) ?? "clickable";
+    const scopeEl = el.closest(SCOPE_SELECTOR);
+    let scope = "";
+    if (scopeEl) {
+      const cached = scopes?.get(scopeEl);
+      if (cached !== undefined) scope = cached;
+      else {
+        scope = scopeSignature(scopeEl.textContent);
+        scopes?.set(scopeEl, scope);
+      }
+    }
+    return {
+      role,
+      name: nameOf(el, role),
+      value: valueOf(el) ?? "",
+      checked: !!(el as HTMLInputElement).checked || el.getAttribute("aria-checked") === "true",
+      disabled: !!(el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true",
+      href: el.getAttribute("href") ?? "",
+      scope,
+    };
+  }
+
   /** Algo que la página hizo clickeable sin decirlo (`<div onClick>`): se delata por el
    *  cursor, que es lo mismo que mira una persona para saber si algo se toca. */
   function looksClickable(el: Element, style: CSSStyleDeclaration): boolean {
@@ -711,9 +805,18 @@ declare global {
 
   function snapshot(all: boolean, inView = false): string {
     refs = new Map();
+    prints = new Map();
+    const scopes = new Map<Element, string>();
+    // Os blocos de anúncio da página (`sponsored.ts`): tudo o que está dentro ganha `[patrocinado]`.
+    const adBlocks = findSponsoredBlocks(document);
+    const adMemo = new Map<Element, boolean>();
     const nodes: SnapshotNode[] = [];
     const limit = all ? 3000 : 600;
-    let omitted = 0;
+    /** Fora da janela (rolar traz) e além do limite de nós, separados: dizem coisas diferentes ao agente. */
+    let outOfView = 0;
+    let overLimit = 0;
+    let outOfViewControls = 0;
+    let overLimitControls = 0;
     let nextRef = 1;
 
     // `inView` (o piloto): só o que está na janela e perto dela (meia tela acima, uma abaixo). Numa página longa os 600
@@ -727,8 +830,10 @@ declare global {
     };
 
     const add = (node: SnapshotNode): void => {
-      if (nodes.length >= limit) omitted += 1;
-      else nodes.push(node);
+      if (nodes.length >= limit) {
+        overLimit += 1;
+        if (node.ref) overLimitControls += 1;
+      } else nodes.push(node);
     };
 
     const walkChildren = (parent: Node, depth: number): void => {
@@ -746,7 +851,7 @@ declare global {
     const walk = (node: Node, depth: number): void => {
       if (node.nodeType === 3) {
         const text = normalizeName(node.textContent ?? "", 200);
-        if (text && farFromView(node.parentElement)) omitted += 1;
+        if (text && farFromView(node.parentElement)) outOfView += 1;
         else if (text) add({ depth, role: "text", name: text, states: [] });
         return;
       }
@@ -768,7 +873,7 @@ declare global {
         // nada más que texto, va entero en una línea en vez de un renglón por nodo de texto.
         if (visible && !el.shadowRoot && !el.querySelector(HAS_STRUCTURE) && el.childElementCount > 0) {
           const text = normalizeName(textOf(el), 200);
-          if (text && farFromView(el)) omitted += 1;
+          if (text && farFromView(el)) outOfView += 1;
           else if (text) add({ depth, role: "text", name: text, states: [] });
           return;
         }
@@ -776,11 +881,15 @@ declare global {
         return;
       }
 
-      const interactive = INTERACTIVE_ROLES.has(role) || role === "clickable";
+      // Uma lista ARIA própria (`ul role=listbox` de um autocomplete) não se toca: o que se toca são as opções dela, que têm de
+      // aparecer uma a uma. (A lista nativa `<select>` segue sendo um controle só, com as opções em `options=`.)
+      const customListbox = role === "listbox" && el.tagName !== "SELECT";
+      const interactive = (INTERACTIVE_ROLES.has(role) && !customListbox) || role === "clickable";
       const leaf = interactive || (NAME_FROM_CONTENT.has(role) && !el.querySelector(HAS_STRUCTURE));
       // Longe da janela e sem filhos a listar: nem ref nem linha (`omitted` diz que há mais, e rolar traz).
       if (leaf && farFromView(el)) {
-        omitted += 1;
+        outOfView += 1;
+        if (interactive) outOfViewControls += 1;
         return;
       }
       const entry: SnapshotNode = {
@@ -790,9 +899,11 @@ declare global {
         states: statesOf(el, role),
         value: valueOf(el),
       };
+      if (adBlocks.size > 0 && inSponsored(el, adBlocks, adMemo)) entry.states.push("patrocinado");
       if (interactive) {
         entry.ref = `e${nextRef++}`;
         refs.set(entry.ref, el);
+        prints.set(entry.ref, fingerprintOf(el, scopes));
       }
       if (el.tagName === "A") {
         const href = (el as HTMLAnchorElement).href;
@@ -815,7 +926,12 @@ declare global {
       viewport: { width: root.clientWidth, height: window.innerHeight },
       scrollY: window.scrollY,
       documentHeight: root.scrollHeight,
-      omitted,
+      omitted: outOfView + overLimit,
+      outOfView,
+      overLimit,
+      outOfViewControls,
+      overLimitControls,
+      limit,
     });
   }
 
@@ -844,7 +960,8 @@ declare global {
     return hit ? found[hit.index].el : null;
   }
 
-  function resolve(target: string): Element {
+  /** `act`: vai agir sobre o elemento (tocar, digitar, escolher…). Um ref que já não é o que foi lido não é usado: ver `guard.ts`. */
+  function resolve(target: string, act = false): Element {
     // Lo último que la persona marcó con el selector: se resuelve por identidad y no por
     // su selector, que podría no volver a encontrarlo.
     if (target === "pick") {
@@ -858,6 +975,11 @@ declare global {
       const el = refs.get(spec.ref) ?? marked.get(spec.ref);
       if (!el) throw new Error(`Não há nenhum elemento ${spec.ref}: tire um novo snapshot (os refs mudam a cada um).`);
       if (!el.isConnected) throw new Error(`${spec.ref} não está mais na página (mudou desde o último snapshot): tire um novo.`);
+      const printed = prints.get(spec.ref) ?? markedPrints.get(spec.ref);
+      if (act && printed) {
+        const diff = diffFingerprint(printed, fingerprintOf(el));
+        if (diff) throw new Error(staleMessage(spec.ref, diff));
+      }
       return el;
     }
     if (spec.kind === "point") {
@@ -900,31 +1022,47 @@ declare global {
    *  tope. Con timers y no con frames: un iframe que no se está mostrando no pinta. */
   /** O comando em curso é do piloto do Jev: esperas curtas (a página que mudou depois é lida de novo, é barato). */
   let fastCommand = false;
+  /** Os pedidos que já estavam em voo quando o comando começou: não são «da ação» (ver `SettleOptions.baseline`). */
+  let commandBaseline: ReadonlySet<number> | undefined;
 
-  function settle(maxMs = 1500, quietMs = 150): Promise<void> {
+  /** Até quando esperar algo pendente (navegação, pedidos, documento carregando), por tipo de ação. Uma busca é a que
+   *  mais demora (a Amazon leva ~8 s); digitar só espera uma sugestão; o resto, o que uma página costuma levar. */
+  const PENDING_MS = { navigate: 12_000, select: 10_000, drag: 6_000, scroll: 4_000, type: 3_000, hover: 2_000 } as const;
+
+  /**
+   * Espera a página reagir à ação, por ESTADO (`activity.ts`): sem navegação em curso, rede ociosa e DOM quieto. `maxMs` é o
+   * teto quando nada ficou pendente; `pendingMs`, o teto quando algo ficou. Com timers e não com frames: um iframe que não
+   * se está mostrando não pinta. Devolve o relatório do que esperou.
+   */
+  function settle(maxMs = 1500, quietMs = 150, pendingMs: number = PENDING_MS.navigate): Promise<SettleReport> {
     if (fastCommand) {
       // O repositório jev-ultrafast espera 2 quadros ou 50 ms. Aqui, quieto por 60 ms e no máximo 350 ms (um React que re-renderiza).
       maxMs = Math.min(maxMs, 350);
       quietMs = Math.min(quietMs, 60);
     }
-    return new Promise((done) => {
-      let finished = false;
-      let quiet = setTimer(finish, quietMs);
-      const hard = setTimer(finish, maxMs);
-      const observer = new MutationObserver(() => {
-        clearTimer(quiet);
-        quiet = setTimer(finish, quietMs);
-      });
-      observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
-      function finish() {
-        if (finished) return;
-        finished = true;
-        observer.disconnect();
-        clearTimer(quiet);
-        clearTimer(hard);
-        done();
-      }
+    return activity.settle({
+      maxMs, quietMs, pendingMaxMs: pendingMs, netIdleMs: fastCommand ? 120 : 250, minMs: fastCommand ? 100 : quietMs,
+      baseline: commandBaseline,
     });
+  }
+
+  /** O que a espera conta no resultado do comando (só quando valeu a pena contar). */
+  function waitedField(report: SettleReport): { waited?: string } {
+    const note = describeWait(report);
+    return note ? { waited: note } : {};
+  }
+
+  /** A espera explícita do piloto/ponte: depois de uma navegação ou quando o Jev pede para esperar. Conta TODOS os pedidos
+   *  em voo (a página nova acabou de carregar e os pedidos dela são justo o que se quer esperar). */
+  async function settleOp(command: Extract<PageCommand, { op: "settle" }>): Promise<unknown> {
+    const report = await activity.settle({
+      maxMs: command.fast ? 350 : 1500, quietMs: command.fast ? 60 : 150, netIdleMs: command.fast ? 120 : 250,
+      pendingMaxMs: Math.min(Math.max(command.ceilingMs ?? PENDING_MS.navigate, 0), 14_000), minMs: 0,
+    });
+    return {
+      settled: report.reason, readyState: document.readyState, pendingRequests: activity.size(), navigating: activity.navigating(),
+      ...waitedField(report), waitedMs: report.waitedMs,
+    };
   }
 
   function mouse(el: Element, type: string, x: number, y: number): boolean {
@@ -984,11 +1122,12 @@ declare global {
     // verdad (seguir el link, marcar el checkbox, enviar el form).
     if (typeof (target as HTMLElement).click === "function") (target as HTMLElement).click();
     else mouse(target, "click", x, y);
-    await settle();
+    const waited = await settle();
     return {
       clicked: describeElement(el),
       ...(location.href !== before ? { url: location.href } : {}),
       ...invalidForm(target),
+      ...waitedField(waited),
     };
   }
 
@@ -1025,6 +1164,43 @@ declare global {
     el.dispatchEvent(event);
   }
 
+  /** Um campo que abre uma lista de sugestões ao digitar (autocomplete): `role=combobox`, `aria-autocomplete` de lista, ou
+   *  `aria-haspopup=listbox`, ou um popup controlado (`aria-controls` + `aria-expanded`). */
+  function isCombobox(el: Element): boolean {
+    if (el.getAttribute("role")?.trim().split(/s+/)[0] === "combobox") return true;
+    const auto = el.getAttribute("aria-autocomplete");
+    if (auto === "list" || auto === "both") return true;
+    if (el.getAttribute("aria-haspopup") === "listbox") return true;
+    return el.hasAttribute("aria-expanded") && (el.hasAttribute("aria-controls") || el.hasAttribute("aria-owns"));
+  }
+
+  /** As opções visíveis da lista de um combobox: a que ele controla, ou, sem essa ligação, qualquer opção visível. */
+  function visibleOptions(el: Element): Element[] {
+    const ids = `${el.getAttribute("aria-controls") ?? ""} ${el.getAttribute("aria-owns") ?? ""}`.split(/s+/).filter(Boolean);
+    const roots = ids.map((id) => document.getElementById(id)).filter((n): n is HTMLElement => !!n);
+    const found = roots.length > 0
+      ? roots.flatMap((root) => (root.getAttribute("role") === "option" ? [root] : Array.from(root.querySelectorAll("[role=option]"))))
+      : Array.from(document.querySelectorAll("[role=option]"));
+    return found.filter(isVisible);
+  }
+
+  /** Quanto esperar as sugestões depois de digitar (o jev-ultrafast espera ≤ 200 ms): passado isso, o Jev lê o que houver. */
+  const COMBOBOX_OPTIONS_MS = 200;
+
+  /** Espera as opções aparecerem, no máximo `COMBOBOX_OPTIONS_MS` desde `typedAt`. Devolve quantas há. */
+  async function optionsAppear(el: Element, typedAt: number): Promise<number> {
+    for (;;) {
+      const count = visibleOptions(el).length;
+      if (count > 0) {
+        // As opções chegam de uma vez, mas a lista costuma terminar de pintar um instante depois.
+        await new Promise<void>((done) => setTimer(done, 30));
+        return visibleOptions(el).length;
+      }
+      if (Date.now() - typedAt >= COMBOBOX_OPTIONS_MS) return 0;
+      await new Promise<void>((done) => setTimer(done, 25));
+    }
+  }
+
   async function type(el: Element, text: string, clear: boolean, submit: boolean): Promise<unknown> {
     if ((el as HTMLInputElement).disabled) throw new Error(`${describeElement(el)} está desabilitado.`);
     await cursor.toElement(el, `type "${clipLabel(text)}"`);
@@ -1054,8 +1230,12 @@ declare global {
       throw new Error(`${describeElement(el)} não é um campo de texto.`);
     }
     if (submit) return press("Enter", el);
-    await settle(800);
-    return { typed: describeElement(el), value: valueOf(el) ?? "" };
+    const combobox = isCombobox(el);
+    const typedAt = Date.now();
+    const waited = await settle(800, 150, PENDING_MS.type);
+    // Um autocomplete mostra as sugestões um instante depois de digitar; sem esperar, o Jev lê a lista vazia e aperta Enter.
+    const options = combobox ? await optionsAppear(el, typedAt) : null;
+    return { typed: describeElement(el), value: valueOf(el) ?? "", ...(options !== null ? { options } : {}), ...waitedField(waited) };
   }
 
   function focusables(): HTMLElement[] {
@@ -1109,12 +1289,13 @@ declare global {
       }
     }
     el.dispatchEvent(new KeyboardEvent("keyup", init));
-    await settle(1000);
+    const waited = await settle(1000);
     const focused = document.activeElement;
     return {
       pressed: key,
       on: describeElement(el),
       focused: focused && focused !== document.body ? describeElement(focused) : null,
+      ...waitedField(waited),
     };
   }
 
@@ -1134,8 +1315,8 @@ declare global {
     selectEl.value = option.value;
     selectEl.dispatchEvent(new Event("input", { bubbles: true }));
     selectEl.dispatchEvent(new Event("change", { bubbles: true }));
-    await settle(800);
-    return { selected: normalizeName(option.text), value: option.value };
+    const waited = await settle(800, 150, PENDING_MS.select);
+    return { selected: normalizeName(option.text), value: option.value, ...waitedField(waited) };
   }
 
   async function hover(el: Element): Promise<unknown> {
@@ -1154,7 +1335,7 @@ declare global {
     for (const t of ["pointerover", "pointerenter", "pointermove"]) mouse(target, t, x, y);
     mouse(target, "mouseover", x, y);
     mouse(target, "mouseenter", x, y);
-    await settle(800);
+    await settle(800, 150, PENDING_MS.hover);
     return { hovered: describeElement(el), note: "Dispara los eventos del mouse; el :hover de CSS no se puede simular desde la página." };
   }
 
@@ -1162,8 +1343,8 @@ declare global {
    *  arrastre de HTML para lo que usa `draggable`. Sin los dos, la mitad de las listas
    *  ordenables no se enteran. */
   async function drag(fromTarget: string, toTarget: string): Promise<unknown> {
-    const from = resolve(fromTarget);
-    const to = resolve(toTarget);
+    const from = resolve(fromTarget, true);
+    const to = resolve(toTarget, true);
     await cursor.toElement(from, "drag");
     const start = aim(from);
     const end = aim(to);
@@ -1191,13 +1372,13 @@ declare global {
     mouse(end.target, "pointerup", end.x, end.y);
     dragEvent(start.target, "dragend", end.x, end.y);
     cursor.click();
-    await settle();
+    await settle(1500, 150, PENDING_MS.drag);
     return { dragged: describeElement(from), onto: describeElement(to) };
   }
 
   /** Pone un archivo en un `<input type=file>` como si lo hubiera elegido una persona. */
   async function upload(target: string, name: string, mime: string, data: string): Promise<unknown> {
-    const el = resolve(target);
+    const el = resolve(target, true);
     const input = el as HTMLInputElement;
     if (input.tagName !== "INPUT" || input.type !== "file") {
       throw new Error(`${describeElement(el)} não é um <input type="file">.`);
@@ -1210,7 +1391,7 @@ declare global {
     input.files = transfer.files;
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
-    await settle(800);
+    await settle(800, 150, PENDING_MS.select);
     return { uploaded: name, bytes: blob.size, input: describeElement(el) };
   }
 
@@ -1228,7 +1409,7 @@ declare global {
     } else {
       window.scrollBy(0, command.dy ?? Math.round(window.innerHeight * 0.8));
     }
-    await settle(600, 100);
+    await settle(600, 100, PENDING_MS.scroll);
     return { scrollY: Math.round(window.scrollY), documentHeight: root.scrollHeight, viewportHeight: window.innerHeight };
   }
 
@@ -1241,7 +1422,7 @@ declare global {
     // huecos de milisegundos entre una y la siguiente. Hace falta que se sostenga.
     let quietSince: number | null = null;
     const isIdle = (): boolean => {
-      if (inFlight > 0) {
+      if (activity.size() > 0) {
         quietSince = null;
         return false;
       }
@@ -1269,9 +1450,9 @@ declare global {
           return;
         }
         if (ok && idle && (text || selector) && !isIdle()) ok = false;
-        if (ok) done({ waitedMs: Date.now() - started, inFlight });
+        if (ok) done({ waitedMs: Date.now() - started, inFlight: activity.size() });
         else if (Date.now() - started >= timeout) {
-          const what = selector ? `el selector "${selector}"` : text ? `el texto "${text}"` : `la red en reposo (${inFlight} pedido(s) sin terminar)`;
+          const what = selector ? `el selector "${selector}"` : text ? `el texto "${text}"` : `la red en reposo (${activity.size()} pedido(s) sin terminar)`;
           fail(new Error(`${gone ? "Continua presente" : "Não apareceu"} ${what} depois de ${timeout} ms.`));
         } else setTimer(tick, 100);
       };
@@ -1497,6 +1678,7 @@ declare global {
     if (!ref) {
       ref = `u${markedSeq++}`;
       marked.set(ref, el);
+      markedPrints.set(ref, fingerprintOf(el));
     }
 
     const attributes: Record<string, string> = {};
@@ -1559,6 +1741,20 @@ declare global {
     };
   }
 
+  /** Resolve o alvo com a guarda e, feita a ação, anota o elemento como está agora: repetir o mesmo toque no mesmo ref
+   *  («+» duas vezes, digitar de novo no campo) não é uma mudança que o agente não tenha visto. */
+  async function acting<T>(target: string, action: (el: Element) => Promise<T>): Promise<T> {
+    const el = resolve(target, true);
+    const result = await action(el);
+    const spec = parseTarget(target);
+    if (spec.kind === "ref" && el.isConnected) {
+      const fresh = fingerprintOf(el);
+      if (prints.has(spec.ref)) prints.set(spec.ref, fresh);
+      else if (markedPrints.has(spec.ref)) markedPrints.set(spec.ref, fresh);
+    }
+    return result;
+  }
+
   function execute(command: PageCommand): Promise<unknown> | unknown {
     switch (command.op) {
       case "snapshot": return snapshot(!!command.all, !!command.inView);
@@ -1574,13 +1770,14 @@ declare global {
             : "Vuelve a comportarse como con mouse.",
         };
       }
-      case "click": return click(resolve(command.target));
-      case "hover": return hover(resolve(command.target));
-      case "type": return type(resolve(command.target), command.text, !!command.clear, !!command.submit);
-      case "press": return press(command.key, command.target ? resolve(command.target) : undefined);
-      case "select": return select(resolve(command.target), command.value);
+      case "click": return acting(command.target, click);
+      case "hover": return acting(command.target, hover);
+      case "type": return acting(command.target, (el) => type(el, command.text, !!command.clear, !!command.submit));
+      case "press": return command.target ? acting(command.target, (el) => press(command.key, el)) : press(command.key);
+      case "select": return acting(command.target, (el) => select(el, command.value));
       case "scroll": return scroll(command);
       case "wait": return wait(command);
+      case "settle": return settleOp(command);
       case "eval": return evaluate(command.code);
       case "layout": return layout();
       case "storage": return storage(command);
@@ -1609,6 +1806,7 @@ declare global {
     // Mientras dura la orden, los diálogos de la página los contesta el runtime: si no, la
     // acción del agente quedaría esperando a una persona que quizá no está mirando.
     driving = true;
+    commandBaseline = activity.liveIds();
     fastCommand = (command as { fast?: boolean }).fast === true;
     cursor.setFast(fastCommand);
     try {
@@ -1621,6 +1819,7 @@ declare global {
     }
     driving = false;
     fastCommand = false;
+    commandBaseline = undefined;
     cursor.setFast(false);
     // Lo que la acción haya logueado viaja enseguida: la app lo junta con la respuesta.
     flush();
@@ -1648,9 +1847,14 @@ declare global {
   // del proxy antes de que el navegador los siga (en captura: un router de SPA que lea el
   // `href` después ve uno del propio origen y lo maneja él). A otro sitio, la app lo abre
   // con su propio proxy, en vez de que el iframe se vaya directo y pierda el runtime.
+  // Mientras maneja un agente, una página nueva ("_blank", un nombre de ventana, "_top") se abre en ESTE navegador: el
+  // agente tiene un portal, no una ventana más que seguir, y "_top"/"_parent" llevarían la app entera a otro sitio (E4).
+  const staysHere = (target: string | null | undefined): boolean => !target || target === "_self";
+
   document.addEventListener("click", (event) => {
     const link = (event.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
     if (!link) return;
+    if (driving && !staysHere(link.getAttribute("target")) && !link.hasAttribute("download")) link.setAttribute("target", "_self");
     const routed = route(link.href);
     if (routed && !routed.forwarded) link.href = routed.url;
   }, true);
@@ -1666,9 +1870,42 @@ declare global {
   document.addEventListener("submit", (event) => {
     const form = event.target as HTMLFormElement | null;
     if (!(form instanceof HTMLFormElement)) return;
+    if (driving) {
+      if (!staysHere(form.getAttribute("target"))) form.setAttribute("target", "_self");
+      const submitter = (event as SubmitEvent).submitter;
+      if (submitter && !staysHere(submitter.getAttribute("formtarget"))) submitter.setAttribute("formtarget", "_self");
+    }
     const routed = route(form.action);
     if (routed && !routed.forwarded) form.action = routed.url;
   }, true);
+
+  // `window.open(url)` desde la acción de un agente: la misma página, no una ventana nueva. Un sitio de otro origen lo abre la app
+  // con su propio proxy (igual que un link); lo que no es http(s) (`mailto:`, `javascript:`) o no tiene URL, queda como estaba.
+  const nativeOpen = window.open.bind(window);
+  function openHere(raw: string): void {
+    const routed = route(raw);
+    if (routed?.forwarded) post({ type: "nav:open", payload: { url: routed.original } });
+    else location.assign(routed ? routed.url : new URL(raw, location.href).href);
+  }
+  window.open = function (url?: string | URL, target?: string, features?: string): Window | null {
+    const raw = url === undefined || url === null ? "" : String(url);
+    let here = false;
+    try { here = driving && /^https?:$/.test(new URL(raw, location.href).protocol) && raw.trim() !== "" && !raw.startsWith("about:"); } catch { /* una URL rara: queda como estaba */ }
+    if (!here) return nativeOpen(url as string, target, features);
+    openHere(raw);
+    // Quien abre una ventana suele guardarla (`popup.focus()`, `popup.closed`, `popup.location = …`): un doble mínimo, para no romperlo.
+    const stub = {
+      closed: false, name: target ?? "", opener: window,
+      focus: () => undefined, blur: () => undefined, close: () => undefined, postMessage: () => undefined,
+      location: {
+        get href() { return location.href; },
+        set href(next: string) { openHere(String(next)); },
+        assign: (next: string) => openHere(String(next)),
+        replace: (next: string) => openHere(String(next)),
+      },
+    };
+    return stub as unknown as Window;
+  };
 
   post({ type: "page:ready", payload: { doc, url: location.href } }, true);
 })();
