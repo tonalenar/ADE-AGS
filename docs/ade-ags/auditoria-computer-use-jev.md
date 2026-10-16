@@ -283,7 +283,7 @@ or it may not be going through the ADE AGS proxy` (no `act`: «A página não re
 são estruturais (Enter, tratamento do clique coberto) e confiáveis; **L09** e as duas regressões (**L11, P04**) são do tipo que pode ser ruído e pedem
 repetição. A taxa geral de 71% → 86% (+3 tarefas de 21) está **perto do ruído**; os 3 falsos «sem certeza» → 1 e o tempo por passo são os sinais mais firmes.
 
-**Refeitas (ambiente):** L11, L12, P02, P03, P04 (a 1.ª tentativa tinha a foto recusada como «cortada» por o portal não estar todo à vista) e L14
+**Refeitas (ambiente):** L11, L12, P02, P03, P04 (a 1.ª tentativa tinha a foto recusada como «cortada». **Causa confirmada pelo Visual:** não era bug do `complete`: o critério novo da foto exige a página LIVRE, e o painel flutuante «Uso dos agentes», restaurado aberto na instância nova, cobria a metade direita do nó; a recusa estava certa, só a mensagem («cortada», com medidas iguais) engana. Ele fechou o painel e enquadrou o nó; as refeitas rodaram com a foto liberada) e L14
 (fixture corrigida) foram refeitas uma vez em portal novo (`-parte3`); a tentativa anterior de cada uma está em `-parte2`. P03 passou na refeita;
 L11 e P04 falharam por motivos diferentes dos da 1.ª tentativa.
 
