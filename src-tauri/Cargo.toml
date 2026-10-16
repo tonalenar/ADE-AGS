@@ -74,6 +74,8 @@ symlink = "0.1"
 # rustls en vez de la TLS nativa del sistema: evita depender de libssl/openssl-dev
 # instalado en la máquina del usuario para poder compilar/correr.
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
+# El proxy de la vista previa descomprime el HTML gzip/deflate que un sitio manda aunque se le pidió identity.
+flate2 = "1"
 
 # Buscador de texto del panel derecho. `ignore` es el recorrido de ripgrep: respeta
 # `.gitignore` sin tener que invocar a git por cada carpeta, y trae los globs de

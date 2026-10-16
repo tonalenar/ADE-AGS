@@ -410,7 +410,25 @@ fn upstream_request_headers(req: &Request<Incoming>, ctx: &Ctx) -> (reqwest::hea
         (None, Some(browser)) => shown.push(Header::noted(COOKIE.as_str(), browser, HeaderNote::Removed)),
         (None, None) => {}
     }
+    // Sin pedir `identity`, hay sitios (Amazon) que devuelven el HTML comprimido igual: el proxy no lo
+    // tocaba, el runtime no se inyectaba y la página nunca avisaba que cargó.
+    headers.insert(reqwest::header::ACCEPT_ENCODING, HeaderValue::from_static("identity"));
     (headers, shown, jar)
+}
+
+/// Descomprime un HTML que el servidor mandó `gzip` o `deflate` aunque se le pidió `identity`. Con un tope, para que un
+/// cuerpo malicioso no llene la memoria.
+pub(crate) fn inflate(bytes: &[u8], encoding: &str) -> Option<Vec<u8>> {
+    use std::io::Read;
+    const LIMIT: u64 = 64 * 1024 * 1024;
+    let mut out = Vec::new();
+    let ok = if encoding.eq_ignore_ascii_case("deflate") {
+        flate2::read::ZlibDecoder::new(bytes).take(LIMIT).read_to_end(&mut out).is_ok()
+            || { out.clear(); flate2::read::DeflateDecoder::new(bytes).take(LIMIT).read_to_end(&mut out).is_ok() }
+    } else {
+        flate2::read::GzDecoder::new(bytes).take(LIMIT).read_to_end(&mut out).is_ok()
+    };
+    ok.then_some(out)
 }
 
 fn plain_status(status: u16) -> Response<Body> {
@@ -564,7 +582,10 @@ async fn forward(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Respons
         .and_then(|v| v.to_str().ok())
         .filter(|e| !e.eq_ignore_ascii_case("identity"))
         .map(str::to_string);
-    let is_html = content_type.as_deref().is_some_and(|t| t.to_ascii_lowercase().starts_with("text/html")) && encoding.is_none();
+    let html_type = content_type.as_deref().is_some_and(|t| t.to_ascii_lowercase().starts_with("text/html"));
+    // Un HTML comprimido en gzip/deflate se descomprime acá para poder inyectarle el runtime; el resto (br, zstd) pasa tal cual.
+    let inflate_as = encoding.clone().filter(|e| html_type && matches!(e.to_ascii_lowercase().as_str(), "gzip" | "x-gzip" | "deflate"));
+    let is_html = html_type && (encoding.is_none() || inflate_as.is_some());
 
     let mut builder = Response::builder().status(status);
     let mut response_headers = Vec::new();
@@ -577,7 +598,7 @@ async fn forward(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Respons
             set_cookies.push(text);
             continue;
         }
-        if skip_response_header(name.as_str()) || (is_html && *name == CONTENT_LENGTH) {
+        if skip_response_header(name.as_str()) || (is_html && *name == CONTENT_LENGTH) || (inflate_as.is_some() && *name == CONTENT_ENCODING) {
             let note = (!is_hop_by_hop(name.as_str())).then_some(HeaderNote::Removed);
             response_headers.push(Header { name: name.as_str().to_string(), value: text, note });
             continue;
@@ -618,6 +639,17 @@ async fn forward(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Respons
                 ctx.log.finish(seq, Finish::failed(kind, message.clone(), elapsed_ms(started)));
                 return error_page(502, &ctx.target_origin, &message);
             }
+        };
+        let bytes = match &inflate_as {
+            Some(kind) => match inflate(&bytes, kind) {
+                Some(plain) => Bytes::from(plain),
+                None => {
+                    let message = format!("no se pudo descomprimir el HTML ({kind})");
+                    ctx.log.finish(seq, Finish::failed(ErrorKind::Body, message.clone(), elapsed_ms(started)));
+                    return error_page(502, &ctx.target_origin, &message);
+                }
+            },
+            None => bytes,
         };
         if seq != 0 {
             let (captured, truncated) = clip(&bytes, MAX_RESPONSE_BODY);

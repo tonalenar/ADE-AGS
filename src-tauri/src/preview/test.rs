@@ -147,6 +147,12 @@ async fn fake_dev_server() -> u16 {
                     .unwrap_or("")
                     .to_string();
 
+                let encoding_asked = req
+                    .lines()
+                    .find_map(|l| l.strip_prefix("accept-encoding: ").or_else(|| l.strip_prefix("Accept-Encoding: ")))
+                    .unwrap_or("(nada)")
+                    .to_string();
+
                 if path == "/ws" {
                     let head = format!(
                         "HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nX-Origin-Visto: {origin}\r\n\r\n"
@@ -164,6 +170,8 @@ async fn fake_dev_server() -> u16 {
                 let bare = path.split('?').next().unwrap_or("/");
                 let (status, extra, body) = match bare {
                     // Devuelve el `Cookie` con que llegó: lo que el servidor ve de la sesión.
+                    _ if bare.ends_with("/enc") => ("200 OK", "Content-Type: text/plain
+", encoding_asked),
                     _ if bare.ends_with("/eco") => ("200 OK", "Content-Type: text/plain\r\n", cookie),
                     "/" => ("200 OK", "Content-Type: text/html; charset=utf-8\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: frame-ancestors 'none'\r\n",
                             "<html><head><title>Hola</title></head><body>hola</body></html>".to_string()),
@@ -1273,4 +1281,30 @@ fn un_post_sin_cuerpo_viaja_con_content_length_cero() {
         assert!(!needs_zero_length(&m, &empty), "{m}");
     }
     assert!(!needs_zero_length(&Method::POST, &Bytes::from_static(b"x=1")));
+}
+
+/// Amazon devuelve el HTML comprimido aunque el proxy no pida nada: sin el runtime inyectado la página nunca avisaba que
+/// había cargado. El proxy pide `identity` siempre, con lo que la página hubiera pedido o sin nada.
+#[tokio::test(flavor = "multi_thread")]
+async fn el_proxy_pide_identity_al_servidor() {
+    let port = fake_dev_server().await;
+    let target = preview_resolve(format!("http://127.0.0.1:{port}/"), String::new()).await.unwrap();
+    let seen = client()
+        .get(format!("{}/enc", target.proxy_origin))
+        .header("accept-encoding", "gzip, deflate, br")
+        .send().await.unwrap().text().await.unwrap();
+    assert_eq!(seen, "identity");
+}
+
+#[test]
+fn un_html_gzip_o_deflate_se_descomprime_para_inyectarle_el_runtime() {
+    use std::io::Write;
+    let html = b"<html><head><title>x</title></head><body>hola</body></html>";
+    let mut gz = flate2::write::GzEncoder::new(Vec::new(), flate2::Compression::default());
+    gz.write_all(html).unwrap();
+    assert_eq!(super::proxy::inflate(&gz.finish().unwrap(), "gzip").unwrap(), html);
+    let mut zl = flate2::write::ZlibEncoder::new(Vec::new(), flate2::Compression::default());
+    zl.write_all(html).unwrap();
+    assert_eq!(super::proxy::inflate(&zl.finish().unwrap(), "deflate").unwrap(), html);
+    assert!(super::proxy::inflate(b"no es gzip", "gzip").is_none());
 }
