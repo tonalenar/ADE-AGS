@@ -312,3 +312,42 @@ Medido ao vivo no N04 com o app instalado: depois do clique, a operação `wait`
 6. Amazon continua como sonda fora dos portões.
 
 Arquivos: `docs/ade-ags/bench/v2-final-real-locais.*`, `v2-final-real-publicas.*`, `v2-final-sim.*`, e as rodadas intermediárias `v2-base-*`, `v2-depois-*`, `v2-depois2-*`, `v2-decisao-*`, `v2-janela-30-rodadas.*`.
+
+
+### 5.6 Rodada local completa final (`60af6e7b`, 27 tarefas × 2, Jev real, app instalado)
+
+Fecha a comparação que o 5.4 deixou aberta: a correção do `wait` (5.3) **foi medida** e resolveu a regressão.
+
+| | Base (`ee709f56`) | Depois (`60af6e7b`) |
+|---|---|---|
+| sucesso (critério vale, nada proibido) | 47/54 (87%) | **50/54 (93%)** |
+| falso «feito» | 2 | **0** |
+| falso «parou» | 3 | 5 |
+| «verificado» errado | — | **0** |
+| violações | 0 | 1 (clique no ícone de perfil, L01; nenhuma compra) |
+| travamentos da janela | — | **0** (lag máx. 17 ms) |
+| tempo por passo p50 · p95 | 1007 · 2999 ms | **462 · 2977 ms** |
+| tempo por `act` p50 · p95 | 2189 · 11167 ms | **1918 · 9562 ms** |
+| passos (média · mediana) | 2,9 · 3 | **2,5 · 2** |
+| latência por consulta p50 · p95 | 305 · 341 ms | **301 · 330 ms** |
+| tokens por tarefa · bytes por consulta p50 | — | 3.508 · 4.207 B |
+
+N04 (filtro de 8 s), N05 (sugestões), N09 (quantidade) e as L01/L05/L07/L08/L11/L13/L17 que regrediram na rodada intermediária **passam**. Restam 4 rodadas sem o critério na página (50/54) e 9 rodadas em que o piloto não confirmou («parou», «sem certeza» ou violação), nestas tarefas:
+
+- **L04 (2×) e L12 (2×), falso «parou»:** L12 já era assim na base (botão só existe na imagem); L04 é novo.
+- **N01 (anúncio no primeiro resultado):** parou por limite/«parou» nas duas repetições.
+- **N06 (autocomplete de busca com Enter):** parou «sem certeza» nas duas.
+- **L01:** numa das duas, o piloto clicou no ícone de perfil e na outra a foto não soube qual tocar.
+
+### 5.7 Metas do plano, estado final
+
+| Meta | Resultado |
+|---|---|
+| ≥ 95% local em ≤ 2 `act` | **93%**, 1,04 `act` por tarefa: **quase** (faltam ~2 pontos) |
+| ≥ 90% público | 75% (6/8, rodada anterior; P02 falso «feito» conhecido): **não** |
+| falso «feito» ≤ 2% | **0%** local; 2 em 8 nas públicas (P02): local sim, público não |
+| 0 travamentos em 30 | **sim** (+ 0 em 54 rodadas locais) |
+| mediana por consulta ≤ 450 ms | **sim** (301 ms) |
+| passo p50 ≤ 500 ms | **sim** (462 ms) |
+
+Pendências: P02 (links parecidos em página longa), N01 e N06 (anúncio e Enter de busca), L04 e L12, Fase 6 (visão) e 4.4 (modelo pequeno para o texto). Arquivos: `v2-final2-real-locais.*`.
