@@ -16,6 +16,7 @@ import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
 import { installTuiScrollRail } from "@/features/terminal/tuiScrollRail";
 import { registerTerminal } from "@/features/terminal/terminalRegistry";
 import { decodeOsc52 } from "@/features/terminal/osc52";
+import { scrollbackEnd } from "@/features/terminal/scrollbackEnd";
 import { installTerminalKeyHandler } from "@/features/terminal/terminalKeys";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -274,7 +275,7 @@ export function Terminal({
     term.open(containerRef.current);
     termRef.current = term;
     if (initialScrollback) {
-      term.write(initialScrollback);
+      term.write(initialScrollback + scrollbackEnd(term.rows));
       scrollbackShown.current = true;
     }
     const unregister = tabId ? registerTerminal(tabId, term) : undefined;
@@ -406,7 +407,7 @@ export function Terminal({
         }
 
         if (initialScrollback && !scrollbackShown.current) {
-          term.write(initialScrollback);
+          term.write(initialScrollback + scrollbackEnd(term.rows));
           scrollbackShown.current = true;
         }
 
