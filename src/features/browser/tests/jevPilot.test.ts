@@ -196,11 +196,12 @@ describe("o laço do piloto", () => {
     expect(h.calls).toEqual([]);
   });
 
-  it("o Jev escolhendo digitar num campo sem valor falha dizendo qual --fill falta", async () => {
+  it("o Jev escolhendo digitar num campo sem valor não digita e diz qual --fill falta", async () => {
     // Dois valores e nenhum parecido com o campo: não adivinha qual vai onde.
     const h = harness([ok("type", "e1")]);
     const result = await runPilot("entrar", ["cpf=000", "cep=111"], undefined, h.deps);
-    expect(result.outcome).toBe("error");
+    // não é mais um erro seco: o Jev lê a falha e, se insistir no mesmo campo, o piloto para
+    expect(result.outcome).toBe("stuck");
     expect(result.steps.join("\n")).toContain("--fill");
     expect(h.calls).toEqual([]);
   });
@@ -759,7 +760,7 @@ describe("achados da revisão", () => {
 });
 
 describe("rótulo curto o bastante para o provedor", () => {
-  it("o estado vem antes do contexto e o contexto não passa de 40 caracteres", () => {
+  it("o estado vem antes do contexto e o contexto não passa de 48 caracteres", () => {
     const page = parseSnapshot([
       'page: "L" http://localhost/', "viewport: 1280×800 · scroll 0/800",
       '- text "Um título de produto bem comprido que não cabe inteiro"', '- text "R$ 1.299,90"',
@@ -769,6 +770,41 @@ describe("rótulo curto o bastante para o provedor", () => {
     const label = buildStep(page, "marcar", [], []).targets.click[0].label;
     expect(label.indexOf("(")).toBeGreaterThan(-1);
     expect(label.indexOf("checked")).toBeLessThan(label.indexOf("next to"));
-    expect(page.elements[0].near!.length).toBeLessThanOrEqual(40);
+    expect(page.elements[0].near!.length).toBeLessThanOrEqual(48);
+  });
+});
+
+describe("o contexto traz o nome do produto, mesmo quando ele é um link antes do texto", () => {
+  it("link do produto, descrição longa, preço e botão igual: o `near` é o produto e o preço", () => {
+    const page = parseSnapshot([
+      'page: "Loja" http://localhost/', "viewport: 1280×800 · scroll 0/800",
+      '- link "Sauce Labs Backpack" [ref=e1] → /item/4',
+      '- text "carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style"',
+      '- text "$29.99"', '- button "Add to cart" [ref=e2]',
+      '- link "Sauce Labs Bike Light" [ref=e3] → /item/0',
+      '- text "A red light isn\'t the desired state in testing but it sure helps when riding your bike at night."',
+      '- text "$9.99"', '- button "Add to cart" [ref=e4]',
+    ].join("\n"));
+    expect(page.elements[1].near).toBe("Sauce Labs Backpack | $29.99");
+    expect(page.elements[3].near).toBe("Sauce Labs Bike Light | $9.99");
+    const step = buildStep(page, "adicionar a Sauce Labs Backpack ao carrinho", [], []);
+    expect(step.targets.click.map((o) => o.label).filter((l) => l.includes("Add to cart"))).toEqual([
+      'button "Add to cart" [next to: Sauce Labs Backpack | $29.99]',
+      'button "Add to cart" [next to: Sauce Labs Bike Light | $9.99]',
+    ]);
+  });
+});
+
+describe("campo já preenchido e valor que falta", () => {
+  const FORM = [
+    'page: "Etapa 1" http://localhost/e1', "viewport: 1280×800 · scroll 0/800",
+    '- textbox "Nome" [ref=e1] value="[x]"', '- textbox "CEP" [ref=e2] value=""', '- button "Próximo" [ref=e3]',
+  ].join("\n");
+
+  it("'não há valor' não encerra o act: o Jev lê a falha e escolhe o botão", async () => {
+    const h = harness([ok("type", "e1"), ok("click", "e3"), ok("done")], pagesOf(10).map((p) => p.replace('value="[x]"', 'value=""')));
+    const result = await runPilot("entrar", ["Outro=1", "Mais=2"], undefined, h.deps);
+    expect(h.asked[1].state).toContain("não há valor para");
+    expect(result.outcome).not.toBe("error");
   });
 });

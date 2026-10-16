@@ -730,7 +730,7 @@ function pilotDeps(host: BrowserHost): PilotDeps {
     try { await inPage(host, { op: "wait", idle: true, timeoutMs: 1_200 }, false); } catch { /* segue */ }
   };
   return {
-    snapshot: () => inPage(host, { op: "snapshot", all: false }, false),
+    snapshot: () => inPage(host, { op: "snapshot", all: false, inView: true }, false),
     // Tudo `fast` e sem coletar console/rede (`withEffects` falso): o piloto lê a página de novo depois de cada passo, e é isso que importa.
     click: async (ref, navigates) => {
       const loads = host.loadCount();

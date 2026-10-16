@@ -33,7 +33,7 @@ import {
 import { isTouch, sendTouch, setTouch } from "./touch";
 import { CORS_HEADER, CRED_HEADER, HEADERS_HEADER, corsMessage, routeRequest, type Routed } from "./route";
 import {
-  displayHref, formatSnapshot, normalizeName, humanizeId, parseKeyCombo, parseTarget, probePoints, snapToNearest, type Box4, type SnapshotNode,
+  displayHref, farFromWindow, formatSnapshot, normalizeName, humanizeId, parseKeyCombo, parseTarget, probePoints, snapToNearest, type Box4, type SnapshotNode,
 } from "./snapshotFormat";
 
 declare global {
@@ -709,12 +709,22 @@ declare global {
     return !parent || getComputedStyle(parent).cursor !== "pointer";
   }
 
-  function snapshot(all: boolean): string {
+  function snapshot(all: boolean, inView = false): string {
     refs = new Map();
     const nodes: SnapshotNode[] = [];
     const limit = all ? 3000 : 600;
     let omitted = 0;
     let nextRef = 1;
+
+    // `inView` (o piloto): só o que está na janela e perto dela (meia tela acima, uma abaixo). Numa página longa os 600
+    // primeiros nós, em ordem de página, são o menu e o rodapé: o que importa (os resultados) ficava de fora.
+    const viewHeight = window.innerHeight;
+    const farFromView = (el: Element | null): boolean => {
+      if (!inView || !el) return false;
+      const r = el.getBoundingClientRect();
+      // O estilo só se lê quando o elemento já está longe (é o caso raro).
+      return farFromWindow(r, viewHeight, farFromWindow(r, viewHeight, "static") ? getComputedStyle(el).position : "static");
+    };
 
     const add = (node: SnapshotNode): void => {
       if (nodes.length >= limit) omitted += 1;
@@ -736,7 +746,8 @@ declare global {
     const walk = (node: Node, depth: number): void => {
       if (node.nodeType === 3) {
         const text = normalizeName(node.textContent ?? "", 200);
-        if (text) add({ depth, role: "text", name: text, states: [] });
+        if (text && farFromView(node.parentElement)) omitted += 1;
+        else if (text) add({ depth, role: "text", name: text, states: [] });
         return;
       }
       if (node.nodeType !== 1) return;
@@ -757,7 +768,8 @@ declare global {
         // nada más que texto, va entero en una línea en vez de un renglón por nodo de texto.
         if (visible && !el.shadowRoot && !el.querySelector(HAS_STRUCTURE) && el.childElementCount > 0) {
           const text = normalizeName(textOf(el), 200);
-          if (text) add({ depth, role: "text", name: text, states: [] });
+          if (text && farFromView(el)) omitted += 1;
+          else if (text) add({ depth, role: "text", name: text, states: [] });
           return;
         }
         walkChildren(el, depth);
@@ -766,6 +778,11 @@ declare global {
 
       const interactive = INTERACTIVE_ROLES.has(role) || role === "clickable";
       const leaf = interactive || (NAME_FROM_CONTENT.has(role) && !el.querySelector(HAS_STRUCTURE));
+      // Longe da janela e sem filhos a listar: nem ref nem linha (`omitted` diz que há mais, e rolar traz).
+      if (leaf && farFromView(el)) {
+        omitted += 1;
+        return;
+      }
       const entry: SnapshotNode = {
         depth,
         role,
@@ -1544,7 +1561,7 @@ declare global {
 
   function execute(command: PageCommand): Promise<unknown> | unknown {
     switch (command.op) {
-      case "snapshot": return snapshot(!!command.all);
+      case "snapshot": return snapshot(!!command.all, !!command.inView);
       case "touch": {
         const { rules } = setTouch(command.on);
         return {

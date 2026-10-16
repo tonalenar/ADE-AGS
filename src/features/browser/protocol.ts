@@ -72,7 +72,7 @@ export type AppMessage =
  * salen del último snapshot, así que el agente apunta a lo mismo que leyó.
  */
 export type PageCommand =
-  | { op: "snapshot"; all?: boolean }
+  | { op: "snapshot"; all?: boolean; inView?: boolean }
   /** `fast`: o piloto do Jev — sem a viagem animada do cursor e com a espera de "a página assentou" curta (ver `settle`). */
   | { op: "click"; target: string; fast?: boolean }
   | { op: "hover"; target: string }

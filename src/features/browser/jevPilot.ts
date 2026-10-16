@@ -55,7 +55,9 @@ const STATE = /\[([^\]=]+)\]/g;
 const HEADER = /^page: (?:("(?:[^"\\]|\\.)*") )?(\S+)/;
 const VIEWPORT = /^viewport: (\d+)×(\d+)(?: · scroll (\d+)\/(\d+))?/;
 /** Quanto do que vem antes de um elemento entra no `near`. */
-const NEAR_CHARS = 40;
+const NEAR_CHARS = 48;
+/** Quanto do `near` é o título; o resto, o último texto (o preço). */
+const NEAR_TITLE = 32;
 const VALUE = / value=("(?:[^"\\]|\\.)*")/;
 const OPTIONS = / options=(\[.*\])\s*$/;
 
@@ -67,9 +69,9 @@ function unquote(raw: string | undefined): string {
 /** Lê o texto do `snapshot` (ver `page/snapshotFormat.ts`) de volta em elementos e texto. Pura. */
 export function parseSnapshot(snapshot: string): ParsedPage {
   const page: ParsedPage = { title: "", url: "", elements: [], text: [] };
-  // O texto (e os títulos) desde o último elemento, e o nome desse elemento: é o que fica "perto" do próximo.
-  let since: string[] = [];
-  let previous = "";
+  // O que fica "perto" do próximo elemento: o último título (um heading ou o link do produto) e o último texto depois dele (o preço).
+  let title = "";
+  let lastText = "";
   for (const line of snapshot.split("\n")) {
     const header = HEADER.exec(line);
     if (header && !page.url) {
@@ -102,19 +104,20 @@ export function parseSnapshot(snapshot: string): ParsedPage {
           if (Array.isArray(parsed)) options = parsed.filter((o): o is string => typeof o === "string");
         } catch { /* sem opções legíveis: a lista fica como um elemento só */ }
       }
-      const joined = (since.length > 0 ? since.slice(-2) : previous ? [previous] : []).join(" | ");
-      const nearby = joined.length > NEAR_CHARS ? `${joined.slice(0, NEAR_CHARS - 1)}…` : joined;
+      const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+      const nearby = [cut(title, NEAR_TITLE), cut(lastText, NEAR_CHARS - NEAR_TITLE)].filter(Boolean).join(" | ");
       page.elements.push({
         ref, role, name, states, filled: value ? unquote(value[1]).length > 0 : null,
         ...(target ? { href: target } : {}),
         ...(options?.length ? { options } : {}),
         ...(nearby ? { near: nearby } : {}),
       });
-      since = [];
-      previous = name;
+      lastText = "";
+      // O link com nome é o título de quem vem depois (o produto, e o botão «Adicionar» logo abaixo).
+      if (role === "link" && name) title = name;
     } else if ((role === "text" || role === "heading") && name) {
       page.text.push(name);
-      since.push(name);
+      if (role === "heading") { title = name; lastText = ""; } else lastText = name;
     }
   }
   return page;
@@ -539,6 +542,7 @@ export async function runPilot(
   let waits = 0;
   let staleRetries = 0;
   let coveredRetries = 0;
+  let noValueRetries = 0;
 
   const finish = (outcome: PilotResult["outcome"], note: string): PilotResult =>
     ({ outcome, steps: log, note: note + emptyFieldsNote(parseSnapshot(snapshot), fills.length), finalSnapshot: snapshot, timings: { ...timings, total: Date.now() - startedAt } });
@@ -705,6 +709,14 @@ export async function runPilot(
         log.push(`${step}. a página mudou antes do toque; li de novo`);
         await deps.settle();
         snapshot = await deps.snapshot();
+        continue;
+      }
+      // Sem valor de --fill para o campo que o Jev escolheu: ele vê isso no histórico e escolhe outra coisa (um botão, outro campo).
+      if (/n[ãa]o h[áa] valor para/i.test(message) && noValueRetries < 2) {
+        noValueRetries += 1;
+        const what = `tentou digitar em ${reply.target ?? "um campo"}, mas ${message.slice(0, 160)}`;
+        log.push(`${step}. ${what}`);
+        history.push({ what, changed: false });
         continue;
       }
       // Um controle coberto (a faixa de cookies, o modal) não é o fim: o Jev vê a falha no histórico e escolhe fechar o que está na frente.
