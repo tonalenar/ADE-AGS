@@ -881,7 +881,10 @@ declare global {
         return;
       }
 
-      const interactive = INTERACTIVE_ROLES.has(role) || role === "clickable";
+      // Uma lista ARIA própria (`ul role=listbox` de um autocomplete) não se toca: o que se toca são as opções dela, que têm de
+      // aparecer uma a uma. (A lista nativa `<select>` segue sendo um controle só, com as opções em `options=`.)
+      const customListbox = role === "listbox" && el.tagName !== "SELECT";
+      const interactive = (INTERACTIVE_ROLES.has(role) && !customListbox) || role === "clickable";
       const leaf = interactive || (NAME_FROM_CONTENT.has(role) && !el.querySelector(HAS_STRUCTURE));
       // Longe da janela e sem filhos a listar: nem ref nem linha (`omitted` diz que há mais, e rolar traz).
       if (leaf && farFromView(el)) {
@@ -1161,6 +1164,43 @@ declare global {
     el.dispatchEvent(event);
   }
 
+  /** Um campo que abre uma lista de sugestões ao digitar (autocomplete): `role=combobox`, `aria-autocomplete` de lista, ou
+   *  `aria-haspopup=listbox`, ou um popup controlado (`aria-controls` + `aria-expanded`). */
+  function isCombobox(el: Element): boolean {
+    if (el.getAttribute("role")?.trim().split(/s+/)[0] === "combobox") return true;
+    const auto = el.getAttribute("aria-autocomplete");
+    if (auto === "list" || auto === "both") return true;
+    if (el.getAttribute("aria-haspopup") === "listbox") return true;
+    return el.hasAttribute("aria-expanded") && (el.hasAttribute("aria-controls") || el.hasAttribute("aria-owns"));
+  }
+
+  /** As opções visíveis da lista de um combobox: a que ele controla, ou, sem essa ligação, qualquer opção visível. */
+  function visibleOptions(el: Element): Element[] {
+    const ids = `${el.getAttribute("aria-controls") ?? ""} ${el.getAttribute("aria-owns") ?? ""}`.split(/s+/).filter(Boolean);
+    const roots = ids.map((id) => document.getElementById(id)).filter((n): n is HTMLElement => !!n);
+    const found = roots.length > 0
+      ? roots.flatMap((root) => (root.getAttribute("role") === "option" ? [root] : Array.from(root.querySelectorAll("[role=option]"))))
+      : Array.from(document.querySelectorAll("[role=option]"));
+    return found.filter(isVisible);
+  }
+
+  /** Quanto esperar as sugestões depois de digitar (o jev-ultrafast espera ≤ 200 ms): passado isso, o Jev lê o que houver. */
+  const COMBOBOX_OPTIONS_MS = 200;
+
+  /** Espera as opções aparecerem, no máximo `COMBOBOX_OPTIONS_MS` desde `typedAt`. Devolve quantas há. */
+  async function optionsAppear(el: Element, typedAt: number): Promise<number> {
+    for (;;) {
+      const count = visibleOptions(el).length;
+      if (count > 0) {
+        // As opções chegam de uma vez, mas a lista costuma terminar de pintar um instante depois.
+        await new Promise<void>((done) => setTimer(done, 30));
+        return visibleOptions(el).length;
+      }
+      if (Date.now() - typedAt >= COMBOBOX_OPTIONS_MS) return 0;
+      await new Promise<void>((done) => setTimer(done, 25));
+    }
+  }
+
   async function type(el: Element, text: string, clear: boolean, submit: boolean): Promise<unknown> {
     if ((el as HTMLInputElement).disabled) throw new Error(`${describeElement(el)} está desabilitado.`);
     await cursor.toElement(el, `type "${clipLabel(text)}"`);
@@ -1190,8 +1230,12 @@ declare global {
       throw new Error(`${describeElement(el)} não é um campo de texto.`);
     }
     if (submit) return press("Enter", el);
+    const combobox = isCombobox(el);
+    const typedAt = Date.now();
     const waited = await settle(800, 150, PENDING_MS.type);
-    return { typed: describeElement(el), value: valueOf(el) ?? "", ...waitedField(waited) };
+    // Um autocomplete mostra as sugestões um instante depois de digitar; sem esperar, o Jev lê a lista vazia e aperta Enter.
+    const options = combobox ? await optionsAppear(el, typedAt) : null;
+    return { typed: describeElement(el), value: valueOf(el) ?? "", ...(options !== null ? { options } : {}), ...waitedField(waited) };
   }
 
   function focusables(): HTMLElement[] {
