@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  buildStep, parseSnapshot, repeatedAdd, runPilot, type Done, type Ledger, type PilotDeps, type StepQuery, type StepReply,
+  buildStep, parseSnapshot, repeatedAdd, runPilot, type Done, type PilotDeps, type PriorAction, type StepQuery, type StepReply,
 } from "../jevPilot";
 
 // Plano v2, 4.1 (achado D1): as regras do NEXT_ACTION vivem em `decisions/browse_rules.rs`, uma por regra, e cada uma tem aqui
@@ -17,11 +17,11 @@ const labelsOf = (query: StepQuery, operation = "click") => (query.targets[opera
 
 describe("o contrato entre as regras (Rust) e os sinais do piloto (TypeScript)", () => {
   it("as palavras que as regras citam são as que o piloto escreve", () => {
-    for (const signal of ["[sponsored]", "[earlier run]", "[required]"]) expect(RULES_RS).toContain(signal);
-    const query = buildStep(page(['- link "Anúncio" [ref=e1] [patrocinado]', '- textbox "Nome" [ref=e2] [required] value=""']), "x", ["nome"], [{ what: "antes", changed: true, earlier: true }]);
+    for (const signal of ["[sponsored]", "[earlier run", "[required]"]) expect(RULES_RS).toContain(signal);
+    const query = buildStep(page(['- link "Anúncio" [ref=e1] [patrocinado]', '- textbox "Nome" [ref=e2] [required] value=""']), "x", ["nome"], [{ what: "[earlier run #1] antes", changed: true, earlier: true }]);
     expect(labelsOf(query)[0]).toContain("[sponsored]");
     expect(labelsOf(query, "type")[0]).toContain("[required]");
-    expect(query.state).toContain("[earlier run]");
+    expect(query.state).toContain("[earlier run #1]");
   });
 
   it("todas as regras do plano têm id e uma página de teste neste arquivo", () => {
@@ -56,13 +56,13 @@ describe("regra «anuncios»", () => {
 });
 
 /** Um portal de mentira: `pages[i]` é a página depois de i ações; clicar avança. */
-function portal(script: StepReply[], pages: string[], ledger?: Ledger) {
+function portal(script: StepReply[], pages: string[], prior?: PriorAction[]) {
   const calls: string[] = [];
   const asked: StepQuery[] = [];
   let at = 0;
   let pick = 0;
   const deps: PilotDeps = {
-    ledger,
+    prior: prior && (() => prior),
     snapshot: async () => pages[Math.min(at, pages.length - 1)],
     click: async (ref) => { calls.push(`click ${ref}`); at++; },
     type: async () => { at++; }, select: async () => { at++; }, scroll: async () => { at++; },
@@ -75,30 +75,42 @@ function portal(script: StepReply[], pages: string[], ledger?: Ledger) {
 const ok = (operation: string, target: string | null = null, goalDone: number | null = null): StepReply =>
   ({ status: "ok", operation, target, probability: 0.9, goalDone, reason: null, latencyMs: 300 });
 
+/** Uma ação de um act anterior como a ponte (portalLedger.ts) a entrega. */
+const before = (over: Partial<PriorAction> = {}): PriorAction => ({
+  what: '[feito num act anterior #1 "adicionar o fone"] clicou button "Adicionar"', changed: true, previous: true, actNo: 1, goal: "adicionar o fone",
+  cartBefore: null, cartAfter: null, pageChangedSince: null, ...over,
+});
+
 const SHOP = (cart: number) => [
   'page: "Loja" http://loja.test/fone', "viewport: 1280×800 · scroll 0/800", "",
   '- heading "Fone X"', '- text "R$ 99"', '- button "Adicionar" [ref=e1]', `- text "Carrinho: ${cart} itens"`,
 ].join("\n");
 
 describe("regra «passo-satisfeito»", () => {
-  it("o que os act anteriores fizeram entra no estado como [earlier run], e o que este fez é gravado sem a marca", async () => {
-    let saved: Done[] = [];
-    const ledger: Ledger = { load: () => [{ what: 'clicou button "Adicionar"', changed: true }], save: (entries) => { saved = entries; } };
-    const h = portal([ok("done")], [SHOP(1)], ledger);
+  it("o que os act anteriores fizeram entra no estado como [earlier run #N], com a contagem do carrinho que a ponte trouxe", async () => {
+    const prior = before({ what: '[feito num act anterior #2 "adicionar o fone"] clicou button "Adicionar" — carrinho 0→1', cartBefore: 0, cartAfter: 1 });
+    const h = portal([ok("done")], [SHOP(1)], [prior]);
     await runPilot("ver o carrinho", [], undefined, h.deps);
-    expect(h.asked[0].state).toContain('clicou button "Adicionar" [earlier run]');
-    expect(saved.length).toBe(1);
-    expect(saved[0]).not.toHaveProperty("earlier");
+    expect(h.asked[0].state).toContain('[earlier run #2 "adicionar o fone"] clicou button "Adicionar" — carrinho 0→1');
+    expect(h.asked[0].state).not.toContain("feito num act anterior");
   });
 
-  it("grava o livro-razão mesmo quando o act falha no meio", async () => {
-    let saved: Done[] | null = null;
-    const ledger: Ledger = { load: () => [], save: (entries) => { saved = entries; } };
-    const h = portal([ok("click", "e1")], [SHOP(0)], ledger);
-    h.deps.settle = async () => { throw new Error("a janela não respondeu"); };
-    const result = await runPilot("adicionar o fone ao carrinho", [], undefined, h.deps);
-    expect(result.outcome).toBe("error");
-    expect(saved).not.toBeNull();
+  it("sem livro-razão (ou se ele falha) o act segue como antes", async () => {
+    const h = portal([ok("done")], [SHOP(1)]);
+    expect((await runPilot("ver o carrinho", [], undefined, h.deps)).outcome).toBe("done");
+    const broken = portal([ok("done")], [SHOP(1)]);
+    broken.deps.prior = () => { throw new Error("sem ledger"); };
+    expect((await runPilot("ver o carrinho", [], undefined, broken.deps)).outcome).toBe("done");
+  });
+
+  it("pede o livro-razão DEPOIS da primeira leitura da página", async () => {
+    const order: string[] = [];
+    const h = portal([ok("done")], [SHOP(1)]);
+    const snapshot = h.deps.snapshot;
+    h.deps.snapshot = async () => { order.push("snapshot"); return snapshot(); };
+    h.deps.prior = () => { order.push("prior"); return []; };
+    await runPilot("ver o carrinho", [], undefined, h.deps);
+    expect(order.slice(0, 2)).toEqual(["snapshot", "prior"]);
   });
 });
 
@@ -115,12 +127,33 @@ describe("regra «quantidade»", () => {
     expect(h.asked[2].state).toContain("não clicou");
   });
 
-  it("um «adicionar» de um act anterior que mudou a página também não se repete", async () => {
-    const earlier: Done = { what: 'clicou button "Adicionar"', changed: true, add: { key: 'button "Adicionar"|Fone X | R$ 99|http://loja.test/fone', cartBefore: null, cartAfter: null } };
-    const ledger: Ledger = { load: () => [earlier], save: () => undefined };
-    const h = portal([ok("click", "e1"), ok("done")], [SHOP(0)], ledger);
+  it("um «adicionar» de um act anterior que subiu o carrinho não se repete (o caso T5)", async () => {
+    const h = portal([ok("click", "e1"), ok("done")], [SHOP(1)], [before({ cartBefore: 0, cartAfter: 1 })]);
+    const result = await runPilot("adicionar o fone X ao carrinho", [], undefined, h.deps);
+    expect(h.calls).toEqual([]);
+    expect(result.steps.join("\n")).toContain("num act anterior");
+  });
+
+  it("…ou cuja página é a mesma do fim daquele act", async () => {
+    const h = portal([ok("click", "e1"), ok("done")], [SHOP(0)], [before({ pageChangedSince: false })]);
     await runPilot("adicionar o fone X ao carrinho", [], undefined, h.deps);
     expect(h.calls).toEqual([]);
+  });
+
+  it("sem prova (a página mudou desde então e o carrinho não se sabe), o piloto adiciona", async () => {
+    const h = portal([ok("click", "e1"), ok("done")], [SHOP(0)], [before({ pageChangedSince: true })]);
+    await runPilot("adicionar o fone X ao carrinho", [], undefined, h.deps);
+    expect(h.calls).toEqual(["click e1"]);
+  });
+
+  it("vários «Adicionar» iguais na página: o do act anterior pode ser de outro item, então não recusa", async () => {
+    const twins = [
+      'page: "Loja" http://loja.test/lista', "viewport: 1280×800 · scroll 0/800", "",
+      '- heading "Fone A"', '- button "Adicionar" [ref=e1]', '- heading "Fone B"', '- button "Adicionar" [ref=e2]',
+    ].join("\n");
+    const h = portal([ok("click", "e2"), ok("done")], [twins], [before({ cartBefore: 0, cartAfter: 1 })]);
+    await runPilot("adicionar o fone B ao carrinho", [], undefined, h.deps);
+    expect(h.calls).toEqual(["click e2"]);
   });
 
   it("um objetivo que pede duas unidades deixa adicionar de novo", async () => {

@@ -107,7 +107,7 @@ PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os d
   portal press <portal> <tecla> [--target <ref>]   · scroll · select · wait · history
   portal screenshot|console|layout <portal>   Foto, console e medidas
                                               (sem eval, upload nem cookies: isso é do usuário)
-  portal act <portal> \"objetivo\" [--fill campo=valor]... [--steps 8]
+  portal act <portal> \"objetivo\" [--fill campo=valor]... [--expect tipo:valor]... [--steps 8]
                                               O Jev navega sozinho até o objetivo, passo a passo (Ajustes → Decisões → Navegador do canvas)
                                               Prefira UM act com o trajeto inteiro (--steps até 15): cada chamada extra custa um turno seu
 
@@ -923,12 +923,13 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
         }
 
         // `--fill campo=valor` repete (um por campo do formulário): acumula numa lista, como `--pre`.
-        if key == "fill" {
+        // `--expect tipo:valor` também (text:, url:, count:, absent:): o que prova o sucesso do `act`.
+        if key == "fill" || key == "expect" {
             let value = args
                 .get(i + 1)
                 .filter(|v| !v.starts_with("--"))
-                .ok_or("--fill precisa de campo=valor")?;
-            match map.entry("fill".to_string()) {
+                .ok_or_else(|| if key == "fill" { "--fill precisa de campo=valor".to_string() } else { "--expect precisa de tipo:valor (text:, url:, count: ou absent:)".to_string() })?;
+            match map.entry(key.to_string()) {
                 serde_json::map::Entry::Occupied(mut e) => {
                     if let Some(list) = e.get_mut().as_array_mut() {
                         list.push(json!(value));

@@ -148,7 +148,7 @@ describe("snapshot", () => {
       "viewport: 375×667 · scroll 0/2000",
       "",
       '- heading "Hola" [level=1]',
-      "… 12 nodos más (pedí el snapshot completo o hacé scroll)",
+      "… 12 nós omitidos (peça o snapshot completo ou role a página)",
     ]);
   });
 });

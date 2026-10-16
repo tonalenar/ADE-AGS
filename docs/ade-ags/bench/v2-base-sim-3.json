@@ -1,0 +1,4775 @@
+{
+  "schema": 2,
+  "label": "v2-base-sim-3",
+  "mode": "sim",
+  "startedAt": "2026-10-16T18:25:04.764Z",
+  "commit": "ee709f56",
+  "seed": 3,
+  "repeat": 3,
+  "order": "embaralhada por semente, invertida nas repetições ímpares",
+  "runs": [
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)",
+        "1. concluído (p=0.97, 428 ms)"
+      ],
+      "id": "L03-busca-com-enter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-enter.html?q=tenis",
+      "blocked": false,
+      "probes": 1,
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 910,
+      "stepMs": [
+        910
+      ],
+      "phases": {
+        "jevMs": 428,
+        "snapshotMs": 256,
+        "actionMs": 61,
+        "waitMs": 165,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        910
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          728
+        ],
+        "latencyMs": [
+          428
+        ],
+        "tokens": 182,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 0
+    },
+    {
+      "log": [
+        "1. clicou link \"Caneca Térmica Premium\" (p=0.65, 557 ms)",
+        "2. concluído (p=0.90, 485 ms)"
+      ],
+      "id": "N01-anuncio-primeiro-resultado",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/anuncios-busca.html?p=termica",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1395,
+      "stepMs": [
+        910,
+        485
+      ],
+      "phases": {
+        "jevMs": 1042,
+        "snapshotMs": 226,
+        "actionMs": 72,
+        "waitMs": 55,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1395
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          1192,
+          962
+        ],
+        "latencyMs": [
+          557,
+          485
+        ],
+        "tokens": 539,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 1
+    },
+    {
+      "log": [
+        "1. clicou button \"Aumentar quantidade\" (p=0.85, 413 ms)",
+        "2. clicou button \"Aumentar quantidade\" (p=0.85, 535 ms)",
+        "3. concluído (p=0.90, 397 ms)"
+      ],
+      "id": "N09-carrinho-quantidade",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/carrinho-quantidade.html?xhr=700",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2006,
+      "stepMs": [
+        783,
+        826,
+        397
+      ],
+      "phases": {
+        "jevMs": 1345,
+        "snapshotMs": 384,
+        "actionMs": 187,
+        "waitMs": 90,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2006
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          900,
+          994,
+          1058
+        ],
+        "latencyMs": [
+          413,
+          535,
+          397
+        ],
+        "tokens": 738,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 2
+    },
+    {
+      "log": [
+        "1. clicou button \"Fechar\" (p=0.75, 1286 ms)",
+        "2. clicou button \"Adicionar ao carrinho\" (p=0.95, 352 ms)",
+        "3. concluído (p=0.97, 498 ms)"
+      ],
+      "id": "L06-modal-newsletter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/modal.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2799,
+      "stepMs": [
+        1700,
+        601,
+        498
+      ],
+      "phases": {
+        "jevMs": 2136,
+        "snapshotMs": 394,
+        "actionMs": 186,
+        "waitMs": 83,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2799
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          1030,
+          856,
+          921
+        ],
+        "latencyMs": [
+          1286,
+          352,
+          498
+        ],
+        "tokens": 702,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 3
+    },
+    {
+      "log": [
+        "— act 1/2: done",
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.85, 457 ms)",
+        "2. concluído (p=0.90, 343 ms)",
+        "— act 2/2: done",
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.85, 362 ms)",
+        "2. concluído (p=0.90, 437 ms)"
+      ],
+      "id": "N10-carrinho-idempotente",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/carrinho-idempotente.html",
+      "blocked": false,
+      "probes": 4,
+      "steps": 4,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2326,
+      "stepMs": [
+        833,
+        343,
+        713,
+        437
+      ],
+      "phases": {
+        "jevMs": 1599,
+        "snapshotMs": 433,
+        "actionMs": 186,
+        "waitMs": 108,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 2,
+      "actMs": [
+        1176,
+        1150
+      ],
+      "queries": {
+        "count": 4,
+        "bytes": [
+          785,
+          866,
+          784,
+          867
+        ],
+        "latencyMs": [
+          457,
+          343,
+          362,
+          437
+        ],
+        "tokens": 826,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 4
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar Fone Gamer RGB ao carrinho\" (p=0.65, 343 ms)",
+        "2. concluído (p=0.90, 516 ms)"
+      ],
+      "id": "N02-anuncio-carrinho",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/anuncios-carrinho.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1243,
+      "stepMs": [
+        727,
+        516
+      ],
+      "phases": {
+        "jevMs": 859,
+        "snapshotMs": 247,
+        "actionMs": 78,
+        "waitMs": 59,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1243
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          1224,
+          1340
+        ],
+        "latencyMs": [
+          343,
+          516
+        ],
+        "tokens": 641,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 5
+    },
+    {
+      "log": [
+        "digitou em text field \"Quantidade\" (valor de Quantidade) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Atualizar carrinho\" (p=0.95, 475 ms)",
+        "2. concluído (p=0.97, 414 ms)"
+      ],
+      "id": "L15-quantidade-sem-enter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/quantidade.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1524,
+      "stepMs": [
+        1110,
+        414
+      ],
+      "phases": {
+        "jevMs": 889,
+        "snapshotMs": 357,
+        "actionMs": 182,
+        "waitMs": 96,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1524
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          910,
+          1002
+        ],
+        "latencyMs": [
+          475,
+          414
+        ],
+        "tokens": 478,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 6
+    },
+    {
+      "log": [
+        "1. clicou link \"Ver detalhes\" (p=0.95, 533 ms)",
+        "2. clicou button \"Adicionar ao carrinho\" (p=0.95, 528 ms)",
+        "3. concluído (p=0.97, 343 ms)"
+      ],
+      "id": "L08-produto-sem-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/produto-fone.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2060,
+      "stepMs": [
+        934,
+        783,
+        343
+      ],
+      "phases": {
+        "jevMs": 1404,
+        "snapshotMs": 374,
+        "actionMs": 189,
+        "waitMs": 93,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2060
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          1276,
+          969,
+          1034
+        ],
+        "latencyMs": [
+          533,
+          528,
+          343
+        ],
+        "tokens": 820,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 7
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar\" (p=0.95, 514 ms)",
+        "2. concluído (p=0.97, 455 ms)"
+      ],
+      "id": "L09-botoes-repetidos",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/repetidos.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1533,
+      "stepMs": [
+        1078,
+        455
+      ],
+      "phases": {
+        "jevMs": 969,
+        "snapshotMs": 442,
+        "actionMs": 72,
+        "waitMs": 50,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1533
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          2031,
+          2106
+        ],
+        "latencyMs": [
+          514,
+          455
+        ],
+        "tokens": 1034,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 8
+    },
+    {
+      "log": [
+        "1. clicou button \"Aceitar todos\" (p=0.75, 405 ms)",
+        "2. clicou button \"Adicionar ao carrinho\" (p=0.95, 367 ms)",
+        "3. concluído (p=0.97, 403 ms)"
+      ],
+      "id": "L05-cookies",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/cookies.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2042,
+      "stepMs": [
+        772,
+        867,
+        403
+      ],
+      "phases": {
+        "jevMs": 1175,
+        "snapshotMs": 352,
+        "actionMs": 406,
+        "waitMs": 109,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2042
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          1029,
+          836,
+          901
+        ],
+        "latencyMs": [
+          405,
+          367,
+          403
+        ],
+        "tokens": 692,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 9
+    },
+    {
+      "log": [
+        "1. clicou tab \"Especificações\" (p=0.95, 344 ms)",
+        "2. concluído (p=0.97, 367 ms)"
+      ],
+      "id": "L13-abas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/abas.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1389,
+      "stepMs": [
+        1022,
+        367
+      ],
+      "phases": {
+        "jevMs": 711,
+        "snapshotMs": 439,
+        "actionMs": 108,
+        "waitMs": 131,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1389
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          974,
+          1048
+        ],
+        "latencyMs": [
+          344,
+          367
+        ],
+        "tokens": 506,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 10
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.95, 536 ms)",
+        "2. clicou button \"Continuar sem garantia\" (p=0.95, 405 ms)",
+        "3. concluído (p=0.97, 1182 ms)"
+      ],
+      "id": "L07-garantia-upsell",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/garantia.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2743,
+      "stepMs": [
+        904,
+        657,
+        1182
+      ],
+      "phases": {
+        "jevMs": 2123,
+        "snapshotMs": 338,
+        "actionMs": 178,
+        "waitMs": 104,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2743
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          790,
+          1147,
+          954
+        ],
+        "latencyMs": [
+          536,
+          405,
+          1182
+        ],
+        "tokens": 723,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 11
+    },
+    {
+      "log": [
+        "1. rolou a página (p=0.50, 512 ms)",
+        "2. rolou a página (p=0.50, 549 ms)",
+        "3. rolou a página (p=0.50, 349 ms)",
+        "4. clicou button \"Assinar\" (p=0.95, 348 ms)",
+        "5. concluído (p=0.97, 342 ms)"
+      ],
+      "id": "L14-rolar-ate-o-fim",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/rolar.html",
+      "blocked": false,
+      "probes": 5,
+      "steps": 5,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 3238,
+      "stepMs": [
+        885,
+        829,
+        598,
+        584,
+        342
+      ],
+      "phases": {
+        "jevMs": 2100,
+        "snapshotMs": 585,
+        "actionMs": 332,
+        "waitMs": 221,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        3238
+      ],
+      "queries": {
+        "count": 5,
+        "bytes": [
+          789,
+          848,
+          893,
+          1144,
+          1206
+        ],
+        "latencyMs": [
+          512,
+          549,
+          349,
+          348,
+          342
+        ],
+        "tokens": 1220,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 12
+    },
+    {
+      "log": [
+        "1. tocou pela foto no ponto (1866, 40) (existe p=0.90, caixa conf=0.80, 1704 ms)",
+        "2. concluído (p=0.97, 381 ms)"
+      ],
+      "id": "L01-icones-sem-nome",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/icones.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 2864,
+      "stepMs": [
+        2483,
+        381
+      ],
+      "phases": {
+        "jevMs": 2484,
+        "snapshotMs": 243,
+        "actionMs": 89,
+        "waitMs": 48,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2864
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          903,
+          973
+        ],
+        "latencyMs": [
+          399,
+          381
+        ],
+        "tokens": 469,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 13
+    },
+    {
+      "log": [
+        "digitou em text field \"Nome\" (valor de Nome) (pelo nome do campo, sem o Jev)",
+        "digitou em text field \"E-mail\" (valor de E-mail) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Próximo\" (p=0.75, 369 ms)",
+        "digitou em text field \"CEP\" (valor de CEP) (pelo nome do campo, sem o Jev)",
+        "digitou em text field \"Cidade\" (valor de Cidade) (pelo nome do campo, sem o Jev)",
+        "2. clicou button \"Próximo\" (p=0.75, 479 ms)",
+        "3. clicou button \"Enviar pedido de teste\" (p=0.95, 426 ms)",
+        "4. concluído (p=0.97, 440 ms)"
+      ],
+      "id": "L11-formulario-multietapas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/etapas.html",
+      "blocked": false,
+      "probes": 4,
+      "steps": 4,
+      "autoFills": 4,
+      "photos": 0,
+      "totalMs": 3246,
+      "stepMs": [
+        1326,
+        740,
+        740,
+        440
+      ],
+      "phases": {
+        "jevMs": 1714,
+        "snapshotMs": 703,
+        "actionMs": 511,
+        "waitMs": 318,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        3246
+      ],
+      "queries": {
+        "count": 4,
+        "bytes": [
+          1082,
+          1282,
+          1350,
+          1442
+        ],
+        "latencyMs": [
+          369,
+          479,
+          426,
+          440
+        ],
+        "tokens": 1289,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 14
+    },
+    {
+      "log": [
+        "escolheu em dropdown \"Tamanho\" (valor de Tamanho) (pelo nome do campo, sem o Jev)",
+        "1. clicou radio option \"Retirar na loja\" (p=0.95, 450 ms)",
+        "2. clicou button \"Confirmar\" (p=0.75, 496 ms)",
+        "3. concluído (p=0.97, 454 ms)"
+      ],
+      "id": "L10-lista-e-radio",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/selecao.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2245,
+      "stepMs": [
+        1042,
+        749,
+        454
+      ],
+      "phases": {
+        "jevMs": 1400,
+        "snapshotMs": 453,
+        "actionMs": 233,
+        "waitMs": 159,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2245
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          1165,
+          1250,
+          1344
+        ],
+        "latencyMs": [
+          450,
+          496,
+          454
+        ],
+        "tokens": 940,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 15
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.95, 1369 ms)",
+        "2. concluído (p=0.97, 468 ms)"
+      ],
+      "id": "L17-comprar-agora-nao-pedido",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/comprar-agora.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2215,
+      "stepMs": [
+        1747,
+        468
+      ],
+      "phases": {
+        "jevMs": 1837,
+        "snapshotMs": 256,
+        "actionMs": 74,
+        "waitMs": 48,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2215
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          753,
+          835
+        ],
+        "latencyMs": [
+          1369,
+          468
+        ],
+        "tokens": 397,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 16
+    },
+    {
+      "log": [
+        "1. clicou button \"Remover Cabo USB\" (p=0.95, 448 ms)",
+        "2. concluído (p=0.90, 338 ms)"
+      ],
+      "id": "N08-rerender-remover",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": true,
+      "finalUrl": "http://localhost:8765/rerender-carrinho.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1120,
+      "stepMs": [
+        782,
+        338
+      ],
+      "phases": {
+        "jevMs": 786,
+        "snapshotMs": 194,
+        "actionMs": 86,
+        "waitMs": 54,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1120
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          986,
+          979
+        ],
+        "latencyMs": [
+          448,
+          338
+        ],
+        "tokens": 491,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 17
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Buscar\" (p=0.95, 468 ms)",
+        "2. concluído (p=0.97, 374 ms)"
+      ],
+      "id": "L16-busca-com-checkout",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-checkout.html?q=tenis",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1772,
+      "stepMs": [
+        1398,
+        374
+      ],
+      "phases": {
+        "jevMs": 842,
+        "snapshotMs": 663,
+        "actionMs": 154,
+        "waitMs": 113,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1772
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          827,
+          932
+        ],
+        "latencyMs": [
+          468,
+          374
+        ],
+        "tokens": 440,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 18
+    },
+    {
+      "log": [
+        "1. clicou clickable element (p=0.60, 527 ms)",
+        "2. concluído (p=0.97, 512 ms)"
+      ],
+      "id": "L12-garantia-na-foto",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/foto-garantia.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1666,
+      "stepMs": [
+        1154,
+        512
+      ],
+      "phases": {
+        "jevMs": 1039,
+        "snapshotMs": 492,
+        "actionMs": 87,
+        "waitMs": 48,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1666
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          985,
+          1061
+        ],
+        "latencyMs": [
+          527,
+          512
+        ],
+        "tokens": 512,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 19
+    },
+    {
+      "log": [
+        "1. tocou pela foto no ponto (1730, 40) (existe p=0.90, caixa conf=0.80, 1087 ms)",
+        "2. concluído (p=0.97, 389 ms)"
+      ],
+      "id": "L02-lupa-entre-iguais",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/lupa.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 2336,
+      "stepMs": [
+        1947,
+        389
+      ],
+      "phases": {
+        "jevMs": 1949,
+        "snapshotMs": 260,
+        "actionMs": 83,
+        "waitMs": 44,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2336
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          927,
+          997
+        ],
+        "latencyMs": [
+          473,
+          389
+        ],
+        "tokens": 481,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 20
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)",
+        "1. concluído (p=0.97, 356 ms)"
+      ],
+      "id": "L04-busca-com-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-botao.html?q=tenis",
+      "blocked": false,
+      "probes": 1,
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 752,
+      "stepMs": [
+        752
+      ],
+      "phases": {
+        "jevMs": 356,
+        "snapshotMs": 276,
+        "actionMs": 59,
+        "waitMs": 61,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        752
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          895
+        ],
+        "latencyMs": [
+          356
+        ],
+        "tokens": 224,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 21
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar Fone Bluetooth ao carrinho\" (p=0.95, 403 ms)",
+        "2. concluído (p=0.90, 439 ms)"
+      ],
+      "id": "N07-rerender-lista",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/rerender-lista.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1223,
+      "stepMs": [
+        784,
+        439
+      ],
+      "phases": {
+        "jevMs": 842,
+        "snapshotMs": 235,
+        "actionMs": 85,
+        "waitMs": 61,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1223
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          1244,
+          1349
+        ],
+        "latencyMs": [
+          403,
+          439
+        ],
+        "tokens": 648,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 22
+    },
+    {
+      "log": [
+        "digitou em text field \"Cidade\" (valor de Cidade) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Confirmar\" (p=0.95, 368 ms)",
+        "2. rolou a página (p=0.50, 501 ms)",
+        "3. clicou button \"Confirmar\" (p=0.95, 506 ms)",
+        "4. rolou a página (p=0.50, 386 ms)",
+        "5. rolou a página (p=0.50, 362 ms)",
+        "6. sem caminho (p=0.90, 517 ms)",
+        "A reserva visual também não achou um controle seguro na foto (existe p=0.10, caixa conf=0.10, 1237 ms)."
+      ],
+      "id": "N05-autocomplete-cidade",
+      "outcome": "stuck",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/autocomplete-cidade.html",
+      "blocked": false,
+      "probes": 7,
+      "steps": 6,
+      "autoFills": 1,
+      "photos": 1,
+      "totalMs": 5551,
+      "stepMs": [
+        999,
+        782,
+        777,
+        610,
+        629,
+        1754
+      ],
+      "phases": {
+        "jevMs": 3877,
+        "snapshotMs": 896,
+        "actionMs": 494,
+        "waitMs": 284,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        5551
+      ],
+      "queries": {
+        "count": 6,
+        "bytes": [
+          901,
+          998,
+          1039,
+          1099,
+          1140,
+          1181
+        ],
+        "latencyMs": [
+          368,
+          501,
+          506,
+          386,
+          362,
+          517
+        ],
+        "tokens": 1590,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "note": "O Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.",
+      "rep": 0,
+      "order": 23
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)",
+        "1. esperou a página (p=0.70, 414 ms)",
+        "2. esperou a página (p=0.70, 471 ms)",
+        "3. rolou a página (p=0.50, 485 ms)",
+        "4. esperou a página (p=0.70, 350 ms)",
+        "5. clicou link \"Caneca Azul\" (p=0.65, 513 ms)",
+        "6. concluído (p=0.97, 386 ms)"
+      ],
+      "id": "N03-busca-lenta-xhr",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-lenta.html?xhr=8000&q=caneca&p=Caneca",
+      "blocked": false,
+      "probes": 6,
+      "steps": 6,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 9538,
+      "stepMs": [
+        3413,
+        3119,
+        736,
+        1095,
+        789,
+        386
+      ],
+      "phases": {
+        "jevMs": 2619,
+        "snapshotMs": 800,
+        "actionMs": 243,
+        "waitMs": 5876,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        9538
+      ],
+      "queries": {
+        "count": 6,
+        "bytes": [
+          732,
+          782,
+          739,
+          873,
+          1396,
+          905
+        ],
+        "latencyMs": [
+          414,
+          471,
+          485,
+          350,
+          513,
+          386
+        ],
+        "tokens": 1357,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 24
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)",
+        "1. concluído (p=0.90, 470 ms)"
+      ],
+      "id": "N06-autocomplete-busca",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/autocomplete-busca.html?q=fone",
+      "blocked": false,
+      "probes": 1,
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 838,
+      "stepMs": [
+        838
+      ],
+      "phases": {
+        "jevMs": 470,
+        "snapshotMs": 256,
+        "actionMs": 55,
+        "waitMs": 57,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        838
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          756
+        ],
+        "latencyMs": [
+          470
+        ],
+        "tokens": 189,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 25
+    },
+    {
+      "log": [
+        "1. clicou checkbox \"Frete grátis\" (p=0.95, 357 ms)",
+        "2. concluído (p=0.90, 415 ms)"
+      ],
+      "id": "N04-filtro-lento-xhr",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/filtro-lento.html?xhr=8000",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1151,
+      "stepMs": [
+        736,
+        415
+      ],
+      "phases": {
+        "jevMs": 772,
+        "snapshotMs": 240,
+        "actionMs": 86,
+        "waitMs": 53,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1151
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          829,
+          924
+        ],
+        "latencyMs": [
+          357,
+          415
+        ],
+        "tokens": 438,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 26
+    },
+    {
+      "log": [
+        "1. clicou checkbox \"Frete grátis\" (p=0.95, 507 ms)",
+        "2. concluído (p=0.90, 509 ms)"
+      ],
+      "id": "N04-filtro-lento-xhr",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/filtro-lento.html?xhr=8000",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1387,
+      "stepMs": [
+        878,
+        509
+      ],
+      "phases": {
+        "jevMs": 1016,
+        "snapshotMs": 248,
+        "actionMs": 78,
+        "waitMs": 45,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1387
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          829,
+          924
+        ],
+        "latencyMs": [
+          507,
+          509
+        ],
+        "tokens": 438,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 0
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)",
+        "1. concluído (p=0.90, 436 ms)"
+      ],
+      "id": "N06-autocomplete-busca",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/autocomplete-busca.html?q=fone",
+      "blocked": false,
+      "probes": 1,
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 816,
+      "stepMs": [
+        816
+      ],
+      "phases": {
+        "jevMs": 436,
+        "snapshotMs": 269,
+        "actionMs": 56,
+        "waitMs": 55,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        816
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          756
+        ],
+        "latencyMs": [
+          436
+        ],
+        "tokens": 189,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 1
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)",
+        "1. esperou a página (p=0.70, 1307 ms)",
+        "2. esperou a página (p=0.70, 536 ms)",
+        "3. rolou a página (p=0.50, 389 ms)",
+        "4. esperou a página (p=0.70, 1489 ms)",
+        "5. clicou link \"Caneca Azul\" (p=0.65, 385 ms)",
+        "6. concluído (p=0.97, 358 ms)"
+      ],
+      "id": "N03-busca-lenta-xhr",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-lenta.html?xhr=8000&q=caneca&p=Caneca",
+      "blocked": false,
+      "probes": 6,
+      "steps": 6,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 11339,
+      "stepMs": [
+        4345,
+        3179,
+        634,
+        1915,
+        908,
+        358
+      ],
+      "phases": {
+        "jevMs": 4464,
+        "snapshotMs": 832,
+        "actionMs": 456,
+        "waitMs": 5587,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        11339
+      ],
+      "queries": {
+        "count": 6,
+        "bytes": [
+          732,
+          782,
+          739,
+          873,
+          1396,
+          905
+        ],
+        "latencyMs": [
+          1307,
+          536,
+          389,
+          1489,
+          385,
+          358
+        ],
+        "tokens": 1357,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 2
+    },
+    {
+      "log": [
+        "digitou em text field \"Cidade\" (valor de Cidade) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Confirmar\" (p=0.95, 493 ms)",
+        "2. rolou a página (p=0.50, 478 ms)",
+        "3. clicou button \"Confirmar\" (p=0.95, 404 ms)",
+        "4. rolou a página (p=0.50, 487 ms)",
+        "5. rolou a página (p=0.50, 424 ms)",
+        "6. sem caminho (p=0.90, 435 ms)",
+        "A reserva visual também não achou um controle seguro na foto (existe p=0.10, caixa conf=0.10, 1618 ms)."
+      ],
+      "id": "N05-autocomplete-cidade",
+      "outcome": "stuck",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/autocomplete-cidade.html",
+      "blocked": false,
+      "probes": 7,
+      "steps": 6,
+      "autoFills": 1,
+      "photos": 1,
+      "totalMs": 6089,
+      "stepMs": [
+        1279,
+        703,
+        638,
+        726,
+        690,
+        2053
+      ],
+      "phases": {
+        "jevMs": 4339,
+        "snapshotMs": 867,
+        "actionMs": 584,
+        "waitMs": 299,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        6089
+      ],
+      "queries": {
+        "count": 6,
+        "bytes": [
+          901,
+          998,
+          1039,
+          1099,
+          1140,
+          1181
+        ],
+        "latencyMs": [
+          493,
+          478,
+          404,
+          487,
+          424,
+          435
+        ],
+        "tokens": 1590,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "note": "O Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.",
+      "rep": 1,
+      "order": 3
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar Fone Bluetooth ao carrinho\" (p=0.95, 492 ms)",
+        "2. concluído (p=0.90, 540 ms)"
+      ],
+      "id": "N07-rerender-lista",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/rerender-lista.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1560,
+      "stepMs": [
+        1020,
+        540
+      ],
+      "phases": {
+        "jevMs": 1032,
+        "snapshotMs": 246,
+        "actionMs": 108,
+        "waitMs": 174,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1560
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          1244,
+          1349
+        ],
+        "latencyMs": [
+          492,
+          540
+        ],
+        "tokens": 648,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 4
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)",
+        "1. concluído (p=0.97, 396 ms)"
+      ],
+      "id": "L04-busca-com-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-botao.html?q=tenis",
+      "blocked": false,
+      "probes": 1,
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 867,
+      "stepMs": [
+        867
+      ],
+      "phases": {
+        "jevMs": 396,
+        "snapshotMs": 236,
+        "actionMs": 186,
+        "waitMs": 49,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        867
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          895
+        ],
+        "latencyMs": [
+          396
+        ],
+        "tokens": 224,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 5
+    },
+    {
+      "log": [
+        "1. tocou pela foto no ponto (1730, 40) (existe p=0.90, caixa conf=0.80, 1092 ms)",
+        "2. concluído (p=0.97, 394 ms)"
+      ],
+      "id": "L02-lupa-entre-iguais",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/lupa.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 2338,
+      "stepMs": [
+        1944,
+        394
+      ],
+      "phases": {
+        "jevMs": 1964,
+        "snapshotMs": 251,
+        "actionMs": 76,
+        "waitMs": 47,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2338
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          927,
+          997
+        ],
+        "latencyMs": [
+          478,
+          394
+        ],
+        "tokens": 481,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 6
+    },
+    {
+      "log": [
+        "1. clicou clickable element (p=0.60, 544 ms)",
+        "2. concluído (p=0.97, 372 ms)"
+      ],
+      "id": "L12-garantia-na-foto",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/foto-garantia.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1290,
+      "stepMs": [
+        918,
+        372
+      ],
+      "phases": {
+        "jevMs": 916,
+        "snapshotMs": 239,
+        "actionMs": 91,
+        "waitMs": 44,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1290
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          985,
+          1061
+        ],
+        "latencyMs": [
+          544,
+          372
+        ],
+        "tokens": 512,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 7
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Buscar\" (p=0.95, 516 ms)",
+        "2. concluído (p=0.97, 348 ms)"
+      ],
+      "id": "L16-busca-com-checkout",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-checkout.html?q=tenis",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1491,
+      "stepMs": [
+        1143,
+        348
+      ],
+      "phases": {
+        "jevMs": 864,
+        "snapshotMs": 369,
+        "actionMs": 164,
+        "waitMs": 94,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1491
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          827,
+          932
+        ],
+        "latencyMs": [
+          516,
+          348
+        ],
+        "tokens": 440,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 8
+    },
+    {
+      "log": [
+        "1. clicou button \"Remover Cabo USB\" (p=0.95, 348 ms)",
+        "2. concluído (p=0.90, 420 ms)"
+      ],
+      "id": "N08-rerender-remover",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": true,
+      "finalUrl": "http://localhost:8765/rerender-carrinho.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1176,
+      "stepMs": [
+        756,
+        420
+      ],
+      "phases": {
+        "jevMs": 768,
+        "snapshotMs": 263,
+        "actionMs": 103,
+        "waitMs": 42,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1176
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          986,
+          979
+        ],
+        "latencyMs": [
+          348,
+          420
+        ],
+        "tokens": 491,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 9
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.95, 374 ms)",
+        "2. concluído (p=0.97, 475 ms)"
+      ],
+      "id": "L17-comprar-agora-nao-pedido",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/comprar-agora.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1264,
+      "stepMs": [
+        789,
+        475
+      ],
+      "phases": {
+        "jevMs": 849,
+        "snapshotMs": 275,
+        "actionMs": 81,
+        "waitMs": 59,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1264
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          753,
+          835
+        ],
+        "latencyMs": [
+          374,
+          475
+        ],
+        "tokens": 397,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 10
+    },
+    {
+      "log": [
+        "escolheu em dropdown \"Tamanho\" (valor de Tamanho) (pelo nome do campo, sem o Jev)",
+        "1. clicou radio option \"Retirar na loja\" (p=0.95, 447 ms)",
+        "2. clicou button \"Confirmar\" (p=0.75, 369 ms)",
+        "3. concluído (p=0.97, 380 ms)"
+      ],
+      "id": "L10-lista-e-radio",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/selecao.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2415,
+      "stepMs": [
+        1406,
+        629,
+        380
+      ],
+      "phases": {
+        "jevMs": 1196,
+        "snapshotMs": 846,
+        "actionMs": 236,
+        "waitMs": 137,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2415
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          1165,
+          1250,
+          1344
+        ],
+        "latencyMs": [
+          447,
+          369,
+          380
+        ],
+        "tokens": 940,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 11
+    },
+    {
+      "log": [
+        "digitou em text field \"Nome\" (valor de Nome) (pelo nome do campo, sem o Jev)",
+        "digitou em text field \"E-mail\" (valor de E-mail) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Próximo\" (p=0.75, 455 ms)",
+        "digitou em text field \"CEP\" (valor de CEP) (pelo nome do campo, sem o Jev)",
+        "digitou em text field \"Cidade\" (valor de Cidade) (pelo nome do campo, sem o Jev)",
+        "2. clicou button \"Próximo\" (p=0.75, 357 ms)",
+        "3. clicou button \"Enviar pedido de teste\" (p=0.95, 349 ms)",
+        "4. concluído (p=0.97, 510 ms)"
+      ],
+      "id": "L11-formulario-multietapas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/etapas.html",
+      "blocked": false,
+      "probes": 4,
+      "steps": 4,
+      "autoFills": 4,
+      "photos": 0,
+      "totalMs": 3128,
+      "stepMs": [
+        1359,
+        645,
+        614,
+        510
+      ],
+      "phases": {
+        "jevMs": 1671,
+        "snapshotMs": 703,
+        "actionMs": 529,
+        "waitMs": 225,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        3128
+      ],
+      "queries": {
+        "count": 4,
+        "bytes": [
+          1082,
+          1282,
+          1350,
+          1442
+        ],
+        "latencyMs": [
+          455,
+          357,
+          349,
+          510
+        ],
+        "tokens": 1289,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 12
+    },
+    {
+      "log": [
+        "1. tocou pela foto no ponto (1866, 40) (existe p=0.90, caixa conf=0.80, 1629 ms)",
+        "2. concluído (p=0.97, 356 ms)"
+      ],
+      "id": "L01-icones-sem-nome",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/icones.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 2852,
+      "stepMs": [
+        2496,
+        356
+      ],
+      "phases": {
+        "jevMs": 2457,
+        "snapshotMs": 246,
+        "actionMs": 88,
+        "waitMs": 61,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2852
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          903,
+          973
+        ],
+        "latencyMs": [
+          472,
+          356
+        ],
+        "tokens": 469,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 13
+    },
+    {
+      "log": [
+        "1. rolou a página (p=0.50, 343 ms)",
+        "2. rolou a página (p=0.50, 458 ms)",
+        "3. rolou a página (p=0.50, 501 ms)",
+        "4. clicou button \"Assinar\" (p=0.95, 374 ms)",
+        "5. concluído (p=0.97, 361 ms)"
+      ],
+      "id": "L14-rolar-ate-o-fim",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/rolar.html",
+      "blocked": false,
+      "probes": 5,
+      "steps": 5,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 3094,
+      "stepMs": [
+        674,
+        684,
+        754,
+        621,
+        361
+      ],
+      "phases": {
+        "jevMs": 2037,
+        "snapshotMs": 566,
+        "actionMs": 287,
+        "waitMs": 204,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        3094
+      ],
+      "queries": {
+        "count": 5,
+        "bytes": [
+          789,
+          848,
+          893,
+          1144,
+          1206
+        ],
+        "latencyMs": [
+          343,
+          458,
+          501,
+          374,
+          361
+        ],
+        "tokens": 1220,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 14
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.95, 377 ms)",
+        "2. clicou button \"Continuar sem garantia\" (p=0.95, 536 ms)",
+        "3. concluído (p=0.97, 432 ms)"
+      ],
+      "id": "L07-garantia-upsell",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/garantia.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2425,
+      "stepMs": [
+        1000,
+        993,
+        432
+      ],
+      "phases": {
+        "jevMs": 1345,
+        "snapshotMs": 404,
+        "actionMs": 565,
+        "waitMs": 111,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2425
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          790,
+          1147,
+          954
+        ],
+        "latencyMs": [
+          377,
+          536,
+          432
+        ],
+        "tokens": 723,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 15
+    },
+    {
+      "log": [
+        "1. clicou tab \"Especificações\" (p=0.95, 495 ms)",
+        "2. concluído (p=0.97, 467 ms)"
+      ],
+      "id": "L13-abas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/abas.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1370,
+      "stepMs": [
+        903,
+        467
+      ],
+      "phases": {
+        "jevMs": 962,
+        "snapshotMs": 270,
+        "actionMs": 76,
+        "waitMs": 62,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1370
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          974,
+          1048
+        ],
+        "latencyMs": [
+          495,
+          467
+        ],
+        "tokens": 506,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 16
+    },
+    {
+      "log": [
+        "1. clicou button \"Aceitar todos\" (p=0.75, 481 ms)",
+        "2. clicou button \"Adicionar ao carrinho\" (p=0.95, 469 ms)",
+        "3. concluído (p=0.97, 518 ms)"
+      ],
+      "id": "L05-cookies",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/cookies.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2099,
+      "stepMs": [
+        867,
+        714,
+        518
+      ],
+      "phases": {
+        "jevMs": 1468,
+        "snapshotMs": 339,
+        "actionMs": 186,
+        "waitMs": 106,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2099
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          1029,
+          836,
+          901
+        ],
+        "latencyMs": [
+          481,
+          469,
+          518
+        ],
+        "tokens": 692,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 17
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar\" (p=0.95, 378 ms)",
+        "2. concluído (p=0.97, 342 ms)"
+      ],
+      "id": "L09-botoes-repetidos",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/repetidos.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1243,
+      "stepMs": [
+        901,
+        342
+      ],
+      "phases": {
+        "jevMs": 720,
+        "snapshotMs": 191,
+        "actionMs": 276,
+        "waitMs": 56,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1243
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          2031,
+          2106
+        ],
+        "latencyMs": [
+          378,
+          342
+        ],
+        "tokens": 1034,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 18
+    },
+    {
+      "log": [
+        "1. clicou link \"Ver detalhes\" (p=0.95, 487 ms)",
+        "2. clicou button \"Adicionar ao carrinho\" (p=0.95, 364 ms)",
+        "3. concluído (p=0.97, 487 ms)"
+      ],
+      "id": "L08-produto-sem-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/produto-fone.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1960,
+      "stepMs": [
+        863,
+        610,
+        487
+      ],
+      "phases": {
+        "jevMs": 1338,
+        "snapshotMs": 353,
+        "actionMs": 164,
+        "waitMs": 105,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1960
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          1276,
+          969,
+          1034
+        ],
+        "latencyMs": [
+          487,
+          364,
+          487
+        ],
+        "tokens": 820,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 19
+    },
+    {
+      "log": [
+        "digitou em text field \"Quantidade\" (valor de Quantidade) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Atualizar carrinho\" (p=0.95, 470 ms)",
+        "2. concluído (p=0.97, 435 ms)"
+      ],
+      "id": "L15-quantidade-sem-enter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/quantidade.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1563,
+      "stepMs": [
+        1128,
+        435
+      ],
+      "phases": {
+        "jevMs": 905,
+        "snapshotMs": 335,
+        "actionMs": 141,
+        "waitMs": 182,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1563
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          910,
+          1002
+        ],
+        "latencyMs": [
+          470,
+          435
+        ],
+        "tokens": 478,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 20
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar Fone Gamer RGB ao carrinho\" (p=0.65, 409 ms)",
+        "2. concluído (p=0.90, 380 ms)"
+      ],
+      "id": "N02-anuncio-carrinho",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/anuncios-carrinho.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1146,
+      "stepMs": [
+        766,
+        380
+      ],
+      "phases": {
+        "jevMs": 789,
+        "snapshotMs": 206,
+        "actionMs": 89,
+        "waitMs": 62,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1146
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          1224,
+          1340
+        ],
+        "latencyMs": [
+          409,
+          380
+        ],
+        "tokens": 641,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 21
+    },
+    {
+      "log": [
+        "— act 1/2: done",
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.85, 459 ms)",
+        "2. concluído (p=0.90, 363 ms)",
+        "— act 2/2: done",
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.85, 432 ms)",
+        "2. concluído (p=0.90, 374 ms)"
+      ],
+      "id": "N10-carrinho-idempotente",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/carrinho-idempotente.html",
+      "blocked": false,
+      "probes": 4,
+      "steps": 4,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2420,
+      "stepMs": [
+        837,
+        363,
+        846,
+        374
+      ],
+      "phases": {
+        "jevMs": 1628,
+        "snapshotMs": 510,
+        "actionMs": 177,
+        "waitMs": 105,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 2,
+      "actMs": [
+        1200,
+        1220
+      ],
+      "queries": {
+        "count": 4,
+        "bytes": [
+          785,
+          866,
+          784,
+          867
+        ],
+        "latencyMs": [
+          459,
+          363,
+          432,
+          374
+        ],
+        "tokens": 826,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 22
+    },
+    {
+      "log": [
+        "1. clicou button \"Fechar\" (p=0.75, 1203 ms)",
+        "2. clicou button \"Adicionar ao carrinho\" (p=0.95, 550 ms)",
+        "3. concluído (p=0.97, 510 ms)"
+      ],
+      "id": "L06-modal-newsletter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/modal.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2871,
+      "stepMs": [
+        1572,
+        789,
+        510
+      ],
+      "phases": {
+        "jevMs": 2263,
+        "snapshotMs": 340,
+        "actionMs": 162,
+        "waitMs": 106,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2871
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          1030,
+          856,
+          921
+        ],
+        "latencyMs": [
+          1203,
+          550,
+          510
+        ],
+        "tokens": 702,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 23
+    },
+    {
+      "log": [
+        "1. clicou button \"Aumentar quantidade\" (p=0.85, 514 ms)",
+        "2. clicou button \"Aumentar quantidade\" (p=0.85, 400 ms)",
+        "3. concluído (p=0.90, 531 ms)"
+      ],
+      "id": "N09-carrinho-quantidade",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/carrinho-quantidade.html?xhr=700",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2123,
+      "stepMs": [
+        902,
+        690,
+        531
+      ],
+      "phases": {
+        "jevMs": 1445,
+        "snapshotMs": 379,
+        "actionMs": 188,
+        "waitMs": 111,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2123
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          900,
+          994,
+          1058
+        ],
+        "latencyMs": [
+          514,
+          400,
+          531
+        ],
+        "tokens": 738,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 24
+    },
+    {
+      "log": [
+        "1. clicou link \"Caneca Térmica Premium\" (p=0.65, 423 ms)",
+        "2. concluído (p=0.90, 550 ms)"
+      ],
+      "id": "N01-anuncio-primeiro-resultado",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/anuncios-busca.html?p=termica",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1299,
+      "stepMs": [
+        749,
+        550
+      ],
+      "phases": {
+        "jevMs": 973,
+        "snapshotMs": 188,
+        "actionMs": 90,
+        "waitMs": 48,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1299
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          1192,
+          962
+        ],
+        "latencyMs": [
+          423,
+          550
+        ],
+        "tokens": 539,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 25
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)",
+        "1. concluído (p=0.97, 343 ms)"
+      ],
+      "id": "L03-busca-com-enter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-enter.html?q=tenis",
+      "blocked": false,
+      "probes": 1,
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 823,
+      "stepMs": [
+        823
+      ],
+      "phases": {
+        "jevMs": 343,
+        "snapshotMs": 260,
+        "actionMs": 165,
+        "waitMs": 55,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        823
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          728
+        ],
+        "latencyMs": [
+          343
+        ],
+        "tokens": 182,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 26
+    },
+    {
+      "log": [
+        "1. clicou tab \"Especificações\" (p=0.95, 452 ms)",
+        "2. concluído (p=0.97, 498 ms)"
+      ],
+      "id": "L13-abas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/abas.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1359,
+      "stepMs": [
+        861,
+        498
+      ],
+      "phases": {
+        "jevMs": 950,
+        "snapshotMs": 278,
+        "actionMs": 76,
+        "waitMs": 55,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1359
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          974,
+          1048
+        ],
+        "latencyMs": [
+          452,
+          498
+        ],
+        "tokens": 506,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 0
+    },
+    {
+      "log": [
+        "1. clicou checkbox \"Frete grátis\" (p=0.95, 421 ms)",
+        "2. concluído (p=0.90, 394 ms)"
+      ],
+      "id": "N04-filtro-lento-xhr",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/filtro-lento.html?xhr=8000",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1235,
+      "stepMs": [
+        841,
+        394
+      ],
+      "phases": {
+        "jevMs": 815,
+        "snapshotMs": 257,
+        "actionMs": 102,
+        "waitMs": 61,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1235
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          829,
+          924
+        ],
+        "latencyMs": [
+          421,
+          394
+        ],
+        "tokens": 438,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 1
+    },
+    {
+      "log": [
+        "1. clicou button \"Aceitar todos\" (p=0.75, 481 ms)",
+        "2. clicou button \"Adicionar ao carrinho\" (p=0.95, 405 ms)",
+        "3. concluído (p=0.97, 411 ms)"
+      ],
+      "id": "L05-cookies",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/cookies.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1941,
+      "stepMs": [
+        847,
+        683,
+        411
+      ],
+      "phases": {
+        "jevMs": 1297,
+        "snapshotMs": 365,
+        "actionMs": 179,
+        "waitMs": 100,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1941
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          1029,
+          836,
+          901
+        ],
+        "latencyMs": [
+          481,
+          405,
+          411
+        ],
+        "tokens": 692,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 2
+    },
+    {
+      "log": [
+        "digitou em text field \"Cidade\" (valor de Cidade) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Confirmar\" (p=0.95, 344 ms)",
+        "2. rolou a página (p=0.50, 512 ms)",
+        "3. clicou button \"Confirmar\" (p=0.95, 354 ms)",
+        "4. rolou a página (p=0.50, 384 ms)",
+        "5. rolou a página (p=0.50, 497 ms)",
+        "6. sem caminho (p=0.90, 484 ms)",
+        "A reserva visual também não achou um controle seguro na foto (existe p=0.10, caixa conf=0.10, 1548 ms)."
+      ],
+      "id": "N05-autocomplete-cidade",
+      "outcome": "stuck",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/autocomplete-cidade.html",
+      "blocked": false,
+      "probes": 7,
+      "steps": 6,
+      "autoFills": 1,
+      "photos": 1,
+      "totalMs": 5938,
+      "stepMs": [
+        1144,
+        800,
+        568,
+        650,
+        744,
+        2032
+      ],
+      "phases": {
+        "jevMs": 4123,
+        "snapshotMs": 1004,
+        "actionMs": 497,
+        "waitMs": 314,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        5938
+      ],
+      "queries": {
+        "count": 6,
+        "bytes": [
+          901,
+          998,
+          1039,
+          1099,
+          1140,
+          1181
+        ],
+        "latencyMs": [
+          344,
+          512,
+          354,
+          384,
+          497,
+          484
+        ],
+        "tokens": 1590,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "note": "O Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.",
+      "rep": 2,
+      "order": 3
+    },
+    {
+      "log": [
+        "escolheu em dropdown \"Tamanho\" (valor de Tamanho) (pelo nome do campo, sem o Jev)",
+        "1. clicou radio option \"Retirar na loja\" (p=0.95, 434 ms)",
+        "2. clicou button \"Confirmar\" (p=0.75, 541 ms)",
+        "3. concluído (p=0.97, 375 ms)"
+      ],
+      "id": "L10-lista-e-radio",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/selecao.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2419,
+      "stepMs": [
+        1238,
+        806,
+        375
+      ],
+      "phases": {
+        "jevMs": 1350,
+        "snapshotMs": 444,
+        "actionMs": 475,
+        "waitMs": 150,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2419
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          1165,
+          1250,
+          1344
+        ],
+        "latencyMs": [
+          434,
+          541,
+          375
+        ],
+        "tokens": 940,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 4
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar\" (p=0.95, 378 ms)",
+        "2. concluído (p=0.97, 400 ms)"
+      ],
+      "id": "L09-botoes-repetidos",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/repetidos.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1105,
+      "stepMs": [
+        705,
+        400
+      ],
+      "phases": {
+        "jevMs": 778,
+        "snapshotMs": 196,
+        "actionMs": 73,
+        "waitMs": 58,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1105
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          2031,
+          2106
+        ],
+        "latencyMs": [
+          378,
+          400
+        ],
+        "tokens": 1034,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 5
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)",
+        "1. concluído (p=0.97, 434 ms)"
+      ],
+      "id": "L04-busca-com-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-botao.html?q=tenis",
+      "blocked": false,
+      "probes": 1,
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1145,
+      "stepMs": [
+        1145
+      ],
+      "phases": {
+        "jevMs": 434,
+        "snapshotMs": 591,
+        "actionMs": 75,
+        "waitMs": 45,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1145
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          895
+        ],
+        "latencyMs": [
+          434
+        ],
+        "tokens": 224,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 6
+    },
+    {
+      "log": [
+        "1. clicou link \"Ver detalhes\" (p=0.95, 408 ms)",
+        "2. clicou button \"Adicionar ao carrinho\" (p=0.95, 393 ms)",
+        "3. concluído (p=0.97, 498 ms)"
+      ],
+      "id": "L08-produto-sem-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/produto-fone.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1958,
+      "stepMs": [
+        819,
+        641,
+        498
+      ],
+      "phases": {
+        "jevMs": 1299,
+        "snapshotMs": 349,
+        "actionMs": 204,
+        "waitMs": 106,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1958
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          1276,
+          969,
+          1034
+        ],
+        "latencyMs": [
+          408,
+          393,
+          498
+        ],
+        "tokens": 820,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 7
+    },
+    {
+      "log": [
+        "digitou em text field \"Quantidade\" (valor de Quantidade) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Atualizar carrinho\" (p=0.95, 408 ms)",
+        "2. concluído (p=0.97, 494 ms)"
+      ],
+      "id": "L15-quantidade-sem-enter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/quantidade.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1488,
+      "stepMs": [
+        994,
+        494
+      ],
+      "phases": {
+        "jevMs": 902,
+        "snapshotMs": 340,
+        "actionMs": 148,
+        "waitMs": 98,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1488
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          910,
+          1002
+        ],
+        "latencyMs": [
+          408,
+          494
+        ],
+        "tokens": 478,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 8
+    },
+    {
+      "log": [
+        "1. rolou a página (p=0.50, 471 ms)",
+        "2. rolou a página (p=0.50, 531 ms)",
+        "3. rolou a página (p=0.50, 441 ms)",
+        "4. clicou button \"Assinar\" (p=0.95, 408 ms)",
+        "5. concluído (p=0.97, 348 ms)"
+      ],
+      "id": "L14-rolar-ate-o-fim",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/rolar.html",
+      "blocked": false,
+      "probes": 5,
+      "steps": 5,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 3331,
+      "stepMs": [
+        850,
+        776,
+        655,
+        702,
+        348
+      ],
+      "phases": {
+        "jevMs": 2199,
+        "snapshotMs": 603,
+        "actionMs": 331,
+        "waitMs": 198,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        3331
+      ],
+      "queries": {
+        "count": 5,
+        "bytes": [
+          789,
+          848,
+          893,
+          1144,
+          1206
+        ],
+        "latencyMs": [
+          471,
+          531,
+          441,
+          408,
+          348
+        ],
+        "tokens": 1220,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 9
+    },
+    {
+      "log": [
+        "1. clicou button \"Aumentar quantidade\" (p=0.85, 436 ms)",
+        "2. clicou button \"Aumentar quantidade\" (p=0.85, 341 ms)",
+        "3. concluído (p=0.90, 356 ms)"
+      ],
+      "id": "N09-carrinho-quantidade",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/carrinho-quantidade.html?xhr=700",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1906,
+      "stepMs": [
+        970,
+        580,
+        356
+      ],
+      "phases": {
+        "jevMs": 1133,
+        "snapshotMs": 329,
+        "actionMs": 341,
+        "waitMs": 103,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1906
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          900,
+          994,
+          1058
+        ],
+        "latencyMs": [
+          436,
+          341,
+          356
+        ],
+        "tokens": 738,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 10
+    },
+    {
+      "log": [
+        "1. clicou button \"Remover Cabo USB\" (p=0.95, 424 ms)",
+        "2. concluído (p=0.90, 382 ms)"
+      ],
+      "id": "N08-rerender-remover",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": true,
+      "finalUrl": "http://localhost:8765/rerender-carrinho.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1201,
+      "stepMs": [
+        819,
+        382
+      ],
+      "phases": {
+        "jevMs": 806,
+        "snapshotMs": 256,
+        "actionMs": 80,
+        "waitMs": 59,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1201
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          986,
+          979
+        ],
+        "latencyMs": [
+          424,
+          382
+        ],
+        "tokens": 491,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 11
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)",
+        "1. esperou a página (p=0.70, 543 ms)",
+        "2. esperou a página (p=0.70, 489 ms)",
+        "3. rolou a página (p=0.50, 419 ms)",
+        "4. esperou a página (p=0.70, 348 ms)",
+        "5. clicou link \"Caneca Azul\" (p=0.65, 1430 ms)",
+        "6. concluído (p=0.97, 430 ms)"
+      ],
+      "id": "N03-busca-lenta-xhr",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-lenta.html?xhr=8000&q=caneca&p=Caneca",
+      "blocked": false,
+      "probes": 6,
+      "steps": 6,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 10532,
+      "stepMs": [
+        3608,
+        3143,
+        653,
+        984,
+        1714,
+        430
+      ],
+      "phases": {
+        "jevMs": 3659,
+        "snapshotMs": 851,
+        "actionMs": 238,
+        "waitMs": 5784,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        10532
+      ],
+      "queries": {
+        "count": 6,
+        "bytes": [
+          732,
+          782,
+          739,
+          873,
+          1396,
+          905
+        ],
+        "latencyMs": [
+          543,
+          489,
+          419,
+          348,
+          1430,
+          430
+        ],
+        "tokens": 1357,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 12
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)",
+        "1. concluído (p=0.90, 558 ms)"
+      ],
+      "id": "N06-autocomplete-busca",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/autocomplete-busca.html?q=fone",
+      "blocked": false,
+      "probes": 1,
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 852,
+      "stepMs": [
+        852
+      ],
+      "phases": {
+        "jevMs": 558,
+        "snapshotMs": 188,
+        "actionMs": 46,
+        "waitMs": 60,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        852
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          756
+        ],
+        "latencyMs": [
+          558
+        ],
+        "tokens": 189,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 13
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.95, 515 ms)",
+        "2. concluído (p=0.97, 428 ms)"
+      ],
+      "id": "L17-comprar-agora-nao-pedido",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/comprar-agora.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1294,
+      "stepMs": [
+        866,
+        428
+      ],
+      "phases": {
+        "jevMs": 943,
+        "snapshotMs": 218,
+        "actionMs": 94,
+        "waitMs": 39,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1294
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          753,
+          835
+        ],
+        "latencyMs": [
+          515,
+          428
+        ],
+        "tokens": 397,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 14
+    },
+    {
+      "log": [
+        "1. clicou button \"Fechar\" (p=0.75, 534 ms)",
+        "2. clicou button \"Adicionar ao carrinho\" (p=0.95, 493 ms)",
+        "3. concluído (p=0.97, 562 ms)"
+      ],
+      "id": "L06-modal-newsletter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/modal.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2266,
+      "stepMs": [
+        930,
+        774,
+        562
+      ],
+      "phases": {
+        "jevMs": 1589,
+        "snapshotMs": 422,
+        "actionMs": 153,
+        "waitMs": 102,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2266
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          1030,
+          856,
+          921
+        ],
+        "latencyMs": [
+          534,
+          493,
+          562
+        ],
+        "tokens": 702,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 15
+    },
+    {
+      "log": [
+        "digitou em text field \"Nome\" (valor de Nome) (pelo nome do campo, sem o Jev)",
+        "digitou em text field \"E-mail\" (valor de E-mail) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Próximo\" (p=0.75, 432 ms)",
+        "digitou em text field \"CEP\" (valor de CEP) (pelo nome do campo, sem o Jev)",
+        "digitou em text field \"Cidade\" (valor de Cidade) (pelo nome do campo, sem o Jev)",
+        "2. clicou button \"Próximo\" (p=0.75, 423 ms)",
+        "3. clicou button \"Enviar pedido de teste\" (p=0.95, 354 ms)",
+        "4. concluído (p=0.97, 357 ms)"
+      ],
+      "id": "L11-formulario-multietapas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/etapas.html",
+      "blocked": false,
+      "probes": 4,
+      "steps": 4,
+      "autoFills": 4,
+      "photos": 0,
+      "totalMs": 3210,
+      "stepMs": [
+        1552,
+        682,
+        619,
+        357
+      ],
+      "phases": {
+        "jevMs": 1566,
+        "snapshotMs": 889,
+        "actionMs": 496,
+        "waitMs": 259,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        3210
+      ],
+      "queries": {
+        "count": 4,
+        "bytes": [
+          1082,
+          1282,
+          1350,
+          1442
+        ],
+        "latencyMs": [
+          432,
+          423,
+          354,
+          357
+        ],
+        "tokens": 1289,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 16
+    },
+    {
+      "log": [
+        "1. clicou link \"Caneca Térmica Premium\" (p=0.65, 383 ms)",
+        "2. concluído (p=0.90, 443 ms)"
+      ],
+      "id": "N01-anuncio-primeiro-resultado",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/anuncios-busca.html?p=termica",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1219,
+      "stepMs": [
+        776,
+        443
+      ],
+      "phases": {
+        "jevMs": 826,
+        "snapshotMs": 269,
+        "actionMs": 84,
+        "waitMs": 40,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1219
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          1192,
+          962
+        ],
+        "latencyMs": [
+          383,
+          443
+        ],
+        "tokens": 539,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 17
+    },
+    {
+      "log": [
+        "— act 1/2: done",
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.85, 503 ms)",
+        "2. concluído (p=0.90, 434 ms)",
+        "— act 2/2: done",
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.85, 1374 ms)",
+        "2. concluído (p=0.90, 394 ms)"
+      ],
+      "id": "N10-carrinho-idempotente",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/carrinho-idempotente.html",
+      "blocked": false,
+      "probes": 4,
+      "steps": 4,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 3909,
+      "stepMs": [
+        1134,
+        434,
+        1947,
+        394
+      ],
+      "phases": {
+        "jevMs": 2705,
+        "snapshotMs": 943,
+        "actionMs": 164,
+        "waitMs": 97,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 2,
+      "actMs": [
+        1568,
+        2341
+      ],
+      "queries": {
+        "count": 4,
+        "bytes": [
+          785,
+          866,
+          784,
+          867
+        ],
+        "latencyMs": [
+          503,
+          434,
+          1374,
+          394
+        ],
+        "tokens": 826,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 18
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)",
+        "1. concluído (p=0.97, 552 ms)"
+      ],
+      "id": "L03-busca-com-enter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-enter.html?q=tenis",
+      "blocked": false,
+      "probes": 1,
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 884,
+      "stepMs": [
+        884
+      ],
+      "phases": {
+        "jevMs": 552,
+        "snapshotMs": 230,
+        "actionMs": 58,
+        "waitMs": 44,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        884
+      ],
+      "queries": {
+        "count": 1,
+        "bytes": [
+          728
+        ],
+        "latencyMs": [
+          552
+        ],
+        "tokens": 182,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 19
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar Fone Bluetooth ao carrinho\" (p=0.95, 393 ms)",
+        "2. concluído (p=0.90, 436 ms)"
+      ],
+      "id": "N07-rerender-lista",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/rerender-lista.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1255,
+      "stepMs": [
+        819,
+        436
+      ],
+      "phases": {
+        "jevMs": 829,
+        "snapshotMs": 269,
+        "actionMs": 112,
+        "waitMs": 45,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1255
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          1244,
+          1349
+        ],
+        "latencyMs": [
+          393,
+          436
+        ],
+        "tokens": 648,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 20
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Buscar\" (p=0.95, 426 ms)",
+        "2. concluído (p=0.97, 346 ms)"
+      ],
+      "id": "L16-busca-com-checkout",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-checkout.html?q=tenis",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1437,
+      "stepMs": [
+        1091,
+        346
+      ],
+      "phases": {
+        "jevMs": 772,
+        "snapshotMs": 415,
+        "actionMs": 150,
+        "waitMs": 100,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1437
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          827,
+          932
+        ],
+        "latencyMs": [
+          426,
+          346
+        ],
+        "tokens": 440,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 21
+    },
+    {
+      "log": [
+        "1. tocou pela foto no ponto (1866, 40) (existe p=0.90, caixa conf=0.80, 1215 ms)",
+        "2. concluído (p=0.97, 468 ms)"
+      ],
+      "id": "L01-icones-sem-nome",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/icones.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 2628,
+      "stepMs": [
+        2160,
+        468
+      ],
+      "phases": {
+        "jevMs": 2033,
+        "snapshotMs": 465,
+        "actionMs": 79,
+        "waitMs": 51,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2628
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          903,
+          973
+        ],
+        "latencyMs": [
+          350,
+          468
+        ],
+        "tokens": 469,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 22
+    },
+    {
+      "log": [
+        "1. clicou clickable element (p=0.60, 509 ms)",
+        "2. concluído (p=0.97, 523 ms)"
+      ],
+      "id": "L12-garantia-na-foto",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/foto-garantia.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1635,
+      "stepMs": [
+        1112,
+        523
+      ],
+      "phases": {
+        "jevMs": 1032,
+        "snapshotMs": 465,
+        "actionMs": 98,
+        "waitMs": 40,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1635
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          985,
+          1061
+        ],
+        "latencyMs": [
+          509,
+          523
+        ],
+        "tokens": 512,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 23
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar Fone Gamer RGB ao carrinho\" (p=0.65, 433 ms)",
+        "2. concluído (p=0.90, 505 ms)"
+      ],
+      "id": "N02-anuncio-carrinho",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/anuncios-carrinho.html",
+      "blocked": false,
+      "probes": 2,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1367,
+      "stepMs": [
+        862,
+        505
+      ],
+      "phases": {
+        "jevMs": 938,
+        "snapshotMs": 279,
+        "actionMs": 99,
+        "waitMs": 51,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        1367
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          1224,
+          1340
+        ],
+        "latencyMs": [
+          433,
+          505
+        ],
+        "tokens": 641,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 24
+    },
+    {
+      "log": [
+        "1. tocou pela foto no ponto (1730, 40) (existe p=0.90, caixa conf=0.80, 1694 ms)",
+        "2. concluído (p=0.97, 1328 ms)"
+      ],
+      "id": "L02-lupa-entre-iguais",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/lupa.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 3757,
+      "stepMs": [
+        2429,
+        1328
+      ],
+      "phases": {
+        "jevMs": 3406,
+        "snapshotMs": 190,
+        "actionMs": 100,
+        "waitMs": 61,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        3757
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          927,
+          997
+        ],
+        "latencyMs": [
+          384,
+          1328
+        ],
+        "tokens": 481,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 25
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.95, 477 ms)",
+        "2. clicou button \"Continuar sem garantia\" (p=0.95, 352 ms)",
+        "3. concluído (p=0.97, 1042 ms)"
+      ],
+      "id": "L07-garantia-upsell",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/garantia.html",
+      "blocked": false,
+      "probes": 3,
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2532,
+      "stepMs": [
+        926,
+        564,
+        1042
+      ],
+      "phases": {
+        "jevMs": 1871,
+        "snapshotMs": 390,
+        "actionMs": 173,
+        "waitMs": 98,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "acts": 1,
+      "actMs": [
+        2532
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          790,
+          1147,
+          954
+        ],
+        "latencyMs": [
+          477,
+          352,
+          1042
+        ],
+        "tokens": 723,
+        "tokensEstimated": true
+      },
+      "windowHang": false,
+      "rep": 2,
+      "order": 26
+    }
+  ],
+  "summary": {
+    "tasks": 81,
+    "completed": 54,
+    "completedRate": 0.6666666666666666,
+    "confirmed": 54,
+    "falseDone": 24,
+    "falseUnsure": 0,
+    "violations": 3,
+    "blocked": 0,
+    "meanSteps": 2.6666666666666665,
+    "medianSteps": 2,
+    "medianTotalMs": 1772,
+    "medianStepMs": 746.5,
+    "share": {
+      "jevMs": 0.6155892241562753,
+      "snapshotMs": 0.1730008086138656,
+      "actionMs": 0.07821743201259736,
+      "waitMs": 0.13319253521726176,
+      "otherMs": 0
+    },
+    "outcomes": {
+      "done": 78,
+      "stuck": 3
+    }
+  },
+  "v2": {
+    "gate": {
+      "runs": 81,
+      "tasks": 27,
+      "successes": 54,
+      "successRate": 0.6666666666666666,
+      "falseDone": 24,
+      "falseStop": 0,
+      "violations": 3,
+      "stepP50": 746.5,
+      "stepP95": 2037.25,
+      "actP50": 1565.5,
+      "actP95": 5879.949999999998,
+      "actsPerTask": 1.037037037037037,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 2.6666666666666665,
+      "tokensPerTask": 687.6296296296297,
+      "tokensEstimated": true,
+      "bytesPerQueryP50": 976.5,
+      "bytesPerQueryP95": 1396,
+      "queryLatencyP50": 435,
+      "queryLatencyP95": 559
+    },
+    "local": {
+      "runs": 81,
+      "tasks": 27,
+      "successes": 54,
+      "successRate": 0.6666666666666666,
+      "falseDone": 24,
+      "falseStop": 0,
+      "violations": 3,
+      "stepP50": 746.5,
+      "stepP95": 2037.25,
+      "actP50": 1565.5,
+      "actP95": 5879.949999999998,
+      "actsPerTask": 1.037037037037037,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 2.6666666666666665,
+      "tokensPerTask": 687.6296296296297,
+      "tokensEstimated": true,
+      "bytesPerQueryP50": 976.5,
+      "bytesPerQueryP95": 1396,
+      "queryLatencyP50": 435,
+      "queryLatencyP95": 559
+    },
+    "public": {
+      "runs": 0,
+      "tasks": 0,
+      "successes": 0,
+      "successRate": 0,
+      "falseDone": 0,
+      "falseStop": 0,
+      "violations": 0,
+      "stepP50": 0,
+      "stepP95": 0,
+      "actP50": 0,
+      "actP95": 0,
+      "actsPerTask": 0,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 0,
+      "tokensPerTask": null,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": null,
+      "bytesPerQueryP95": null,
+      "queryLatencyP50": null,
+      "queryLatencyP95": null
+    },
+    "probe": {
+      "runs": 0,
+      "tasks": 0,
+      "successes": 0,
+      "successRate": 0,
+      "falseDone": 0,
+      "falseStop": 0,
+      "violations": 0,
+      "stepP50": 0,
+      "stepP95": 0,
+      "actP50": 0,
+      "actP95": 0,
+      "actsPerTask": 0,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 0,
+      "tokensPerTask": null,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": null,
+      "bytesPerQueryP95": null,
+      "queryLatencyP50": null,
+      "queryLatencyP95": null
+    },
+    "tasks": [
+      {
+        "id": "L03-busca-com-enter",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 884,
+        "stepP95": 907.4,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 182
+      },
+      {
+        "id": "N01-anuncio-primeiro-resultado",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 0,
+        "falseDone": 3,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 649.5,
+        "stepP95": 876.5,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 539
+      },
+      {
+        "id": "N09-carrinho-quantidade",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 0,
+        "falseDone": 3,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 690,
+        "stepP95": 942.8,
+        "actsPerTask": 1,
+        "queriesPerTask": 3,
+        "tokensPerTask": 738
+      },
+      {
+        "id": "L06-modal-newsletter",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 774,
+        "stepP95": 1648.8,
+        "actsPerTask": 1,
+        "queriesPerTask": 3,
+        "tokensPerTask": 702
+      },
+      {
+        "id": "N10-carrinho-idempotente",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 0,
+        "falseDone": 3,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 575,
+        "stepP95": 1499.8499999999995,
+        "actsPerTask": 2,
+        "queriesPerTask": 4,
+        "tokensPerTask": 826
+      },
+      {
+        "id": "N02-anuncio-carrinho",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 0,
+        "falseDone": 3,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 621.5,
+        "stepP95": 838,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 641
+      },
+      {
+        "id": "L15-quantidade-sem-enter",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 744,
+        "stepP95": 1123.5,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 478
+      },
+      {
+        "id": "L08-produto-sem-botao",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 641,
+        "stepP95": 905.6,
+        "actsPerTask": 1,
+        "queriesPerTask": 3,
+        "tokensPerTask": 820
+      },
+      {
+        "id": "L09-botoes-repetidos",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 580,
+        "stepP95": 1033.75,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 1034
+      },
+      {
+        "id": "L05-cookies",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 714,
+        "stepP95": 867,
+        "actsPerTask": 1,
+        "queriesPerTask": 3,
+        "tokensPerTask": 692
+      },
+      {
+        "id": "L13-abas",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 679.5,
+        "stepP95": 992.25,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 506
+      },
+      {
+        "id": "L07-garantia-upsell",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 926,
+        "stepP95": 1126,
+        "actsPerTask": 1,
+        "queriesPerTask": 3,
+        "tokensPerTask": 723
+      },
+      {
+        "id": "L14-rolar-ate-o-fim",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 674,
+        "stepP95": 860.5,
+        "actsPerTask": 1,
+        "queriesPerTask": 5,
+        "tokensPerTask": 1220
+      },
+      {
+        "id": "L01-icones-sem-nome",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1314,
+        "stepP95": 2492.75,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 469
+      },
+      {
+        "id": "L11-formulario-multietapas",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 663.5,
+        "stepP95": 1445.85,
+        "actsPerTask": 1,
+        "queriesPerTask": 4,
+        "tokensPerTask": 1289
+      },
+      {
+        "id": "L10-lista-e-radio",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 749,
+        "stepP95": 1338.8,
+        "actsPerTask": 1,
+        "queriesPerTask": 3,
+        "tokensPerTask": 940
+      },
+      {
+        "id": "L17-comprar-agora-nao-pedido",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 632,
+        "stepP95": 1526.75,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 397
+      },
+      {
+        "id": "N08-rerender-remover",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 0,
+        "falseDone": 3,
+        "falseStop": 0,
+        "violations": 3,
+        "stepP50": 588,
+        "stepP95": 809.75,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 491
+      },
+      {
+        "id": "L16-busca-com-checkout",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 732.5,
+        "stepP95": 1334.25,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 440
+      },
+      {
+        "id": "L12-garantia-na-foto",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 720.5,
+        "stepP95": 1143.5,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 512
+      },
+      {
+        "id": "L02-lupa-entre-iguais",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1636,
+        "stepP95": 2308.5,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 481
+      },
+      {
+        "id": "L04-busca-com-botao",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 867,
+        "stepP95": 1117.2,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 224
+      },
+      {
+        "id": "N07-rerender-lista",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 0,
+        "falseDone": 3,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 662,
+        "stepP95": 969.75,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 648
+      },
+      {
+        "id": "N05-autocomplete-cidade",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 0,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 760.5,
+        "stepP95": 2035.1499999999999,
+        "actsPerTask": 1,
+        "queriesPerTask": 6,
+        "tokensPerTask": 1590
+      },
+      {
+        "id": "N03-busca-lenta-xhr",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 3,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 1039.5,
+        "stepP95": 3718.549999999999,
+        "actsPerTask": 1,
+        "queriesPerTask": 6,
+        "tokensPerTask": 1357
+      },
+      {
+        "id": "N06-autocomplete-busca",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 0,
+        "falseDone": 3,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 838,
+        "stepP95": 850.6,
+        "actsPerTask": 1,
+        "queriesPerTask": 1,
+        "tokensPerTask": 189
+      },
+      {
+        "id": "N04-filtro-lento-xhr",
+        "kind": "local",
+        "probe": false,
+        "runs": 3,
+        "successes": 0,
+        "falseDone": 3,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 622.5,
+        "stepP95": 868.75,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 438
+      }
+    ]
+  },
+  "digest": "ca8769ca"
+}

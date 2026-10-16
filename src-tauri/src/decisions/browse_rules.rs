@@ -10,7 +10,7 @@
 //! snapshot (`page/runtime.ts`); um teste do lado TypeScript lê este arquivo e confere que os dois lados usam as mesmas palavras.
 
 /// Sobe a cada mudança de texto de regra. Vai na linha `TEMPOS`/relatório do benchmark para saber que regras rodaram.
-pub const RULES_VERSION: &str = "2026-10-16.1";
+pub const RULES_VERSION: &str = "2026-10-16.2";
 
 /// O núcleo, herdado da versão sem arquivo próprio: sempre uma operação, estado atual, sem repetir, preencher antes de enviar.
 const CORE: &str = "Advance the user's entire goal from the CURRENT page using exactly one operation. \
@@ -39,7 +39,7 @@ sponsored result; choose the first organic (unmarked) match instead, even if it 
     Rule {
         id: "passo-satisfeito",
         text: "Do not repeat satisfied steps. RECENT ACTIONS lists what already happened, including actions from earlier \
-runs on this portal (marked [earlier run]); an action whose result is already visible on the page is done, so move on \
+runs on this portal (marked [earlier run #N]); an action whose result is already visible on the page is done, so move on \
 to the next requirement instead of doing it again.",
     },
     Rule {
@@ -103,7 +103,7 @@ mod test {
     fn as_regras_citam_os_sinais_que_o_piloto_escreve() {
         let by = |id: &str| RULES.iter().find(|rule| rule.id == id).unwrap().text;
         assert!(by("anuncios").contains("[sponsored]"));
-        assert!(by("passo-satisfeito").contains("[earlier run]"));
+        assert!(by("passo-satisfeito").contains("[earlier run #N]"));
         assert!(by("formulario-obrigatorio").contains("[required]"));
     }
 

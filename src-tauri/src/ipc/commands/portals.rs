@@ -175,6 +175,16 @@ pub(crate) fn request_for(action: &str, args: &Value) -> Result<Value, String> {
                 return Err("--fill precisa de `campo=valor` (repita a flag para vários).".into());
             }
             set(&mut req, "fills", Value::Array(fills));
+            // `--expect text:|url:|count:|absent:` (repetível): o piloto confere por código, sem o Jev (plano v2, 5.1).
+            let expects: Vec<Value> = match args.get("expect") {
+                Some(Value::Array(list)) => list.clone(),
+                Some(Value::String(one)) if !one.is_empty() => vec![json!(one)],
+                _ => Vec::new(),
+            };
+            if expects.iter().any(|e| !e.as_str().is_some_and(|s| s.contains(':'))) {
+                return Err("--expect precisa de `tipo:valor` (text:, url:, count: ou absent:); repita a flag para vários.".into());
+            }
+            set(&mut req, "expects", Value::Array(expects));
             if let Some(n) = num(args, "steps")? {
                 set(&mut req, "steps", json!(n));
             }
@@ -357,6 +367,12 @@ mod test {
         assert_eq!(one["fills"], json!(["a=1"]));
         assert!(request_for("act", &json!({})).unwrap_err().contains("--goal"));
         assert!(request_for("act", &json!({ "goal": "x", "fill": ["sem-igual"] })).unwrap_err().contains("campo=valor"));
+
+        let expects = request_for("act", &json!({ "goal": "x", "expect": ["text:Seu carrinho está vazio", "url:/cart"] })).unwrap();
+        assert_eq!(expects["expects"], json!(["text:Seu carrinho está vazio", "url:/cart"]));
+        assert_eq!(request_for("act", &json!({ "goal": "x", "expect": "count:1" })).unwrap()["expects"], json!(["count:1"]));
+        assert_eq!(request_for("act", &json!({ "goal": "x" })).unwrap()["expects"], json!([]));
+        assert!(request_for("act", &json!({ "goal": "x", "expect": ["sem-dois-pontos"] })).unwrap_err().contains("tipo:valor"));
     }
 
     #[test]

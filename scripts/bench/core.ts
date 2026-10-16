@@ -23,6 +23,21 @@ export const not = (of: Criterion): Criterion => ({ kind: "not", of });
 export const all = (...of: Criterion[]): Criterion => ({ kind: "all", of });
 export const any = (...of: Criterion[]): Criterion => ({ kind: "any", of });
 
+/**
+ * Os `--expect` equivalentes a um critério de sucesso (plano v2, Fase 5): `--with-expect` passa ao `act` o que a PÁGINA tem de
+ * mostrar, para medir o falso «feito» COM a conferência por código. `any` e `not` de outra coisa que texto não viram `--expect`.
+ */
+export function expectsFor(criterion: Criterion): string[] {
+  switch (criterion.kind) {
+    case "text": return [`text:${criterion.value}`];
+    case "urlIncludes": return [`url:${criterion.value}`];
+    case "regex": return [`text:/${criterion.pattern}/`];
+    case "all": return criterion.of.flatMap(expectsFor);
+    case "not": return criterion.of.kind === "text" ? [`absent:${criterion.of.value}`] : [];
+    case "any": return [];
+  }
+}
+
 /** Minúsculas, sem acento, espaços colapsados: "Garantia  ABERTA" casa com "garantia aberta". */
 export function fold(value: string): string {
   return value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase().replace(/\s+/g, " ").trim();
@@ -219,6 +234,8 @@ export interface TaskRun {
   log?: string[];
   /** O piloto recusou um controle de compra/pagamento que o objetivo não pediu (`blockedPurchase`). */
   blocked?: boolean;
+  /** A conferência por código do `act` (Fase 5): FEITO (verificado), FEITO (não verificado) ou NÃO CONFERE. Ausente num relatório antigo. */
+  verdict?: "verified" | "unverified" | "mismatch";
   /** Consultas ao Jev (operação+elemento) e fotos que a rodada gastou: a cota. */
   probes?: number;
   /** A causa da falha, classificada à mão a partir do relatório do act (`--causes`). */
@@ -325,6 +342,8 @@ export interface ActReport {
   /** Bytes por consulta e tokens, se a linha TEMPOS trouxer (`bytes`: número ou lista; `tokens`: número). */
   queryBytes: number[];
   tokens: number | null;
+  /** O veredito da conferência (`FEITO (verificado)`, `FEITO (não verificado)`, `NÃO CONFERE`); `null` sem ele. */
+  verdict: "verified" | "unverified" | "mismatch" | null;
 }
 
 const WINDOW_KEYS: (keyof WindowStats)[] = ["lagMaxMs", "lagP95Ms", "samples", "hiddenMs", "timeouts"];
@@ -396,7 +415,7 @@ export function parseTimings(line: string): ReportTimings | null {
 }
 
 const HEADS: [string, PilotResult["outcome"]][] = [
-  ["PAROU (Jev sem certeza)", "unsure"], ["PAROU", "stuck"], ["FEITO", "done"], ["NÃO RODOU", "off"], ["LIMITE DE PASSOS", "limit"], ["ERRO", "error"],
+  ["PAROU (Jev sem certeza)", "unsure"], ["PAROU", "stuck"], ["FEITO (verificado)", "done"], ["FEITO (não verificado)", "done"], ["FEITO", "done"], ["NÃO CONFERE", "unsure"], ["NÃO RODOU", "off"], ["LIMITE DE PASSOS", "limit"], ["ERRO", "error"],
 ];
 const FINAL_MARK = "A página agora (o Jev só escolhe onde tocar: confira o resultado):";
 
@@ -405,6 +424,7 @@ export function parseActReport(report: string): ActReport {
   const lines = report.split("\n");
   const head = lines[0] ?? "";
   const outcome = HEADS.find(([label]) => head.endsWith(`: ${label}`))?.[1] ?? null;
+  const verdict = head.endsWith(": FEITO (verificado)") ? "verified" : head.endsWith(": FEITO (não verificado)") ? "unverified" : head.endsWith(": NÃO CONFERE") ? "mismatch" : null;
   const at = lines.indexOf(FINAL_MARK);
   const stepLines = lines.slice(0, at === -1 ? lines.length : at);
   let steps = 0;
@@ -435,7 +455,7 @@ export function parseActReport(report: string): ActReport {
   }
   return {
     outcome, steps, autoFills, photos, jevMs, stepMs, timings, blocked, finalSnapshot: at === -1 ? "" : lines.slice(at + 1).join("\n"),
-    jevLatencies, window, queryBytes: extras?.bytes ?? [], tokens: extras?.tokens ?? null,
+    jevLatencies, window, queryBytes: extras?.bytes ?? [], tokens: extras?.tokens ?? null, verdict,
   };
 }
 
@@ -587,6 +607,10 @@ export interface GroupMetrics {
   falseDone: number;
   /** Falso «parou»: o critério valia e o piloto parou (`unsure`/`stuck`). */
   falseStop: number;
+  /** NÃO CONFERE que pegou um falso «feito» (a página realmente não cumpria o critério). */
+  caught: number;
+  /** FEITO (verificado) e o critério falha: a conferência deixou passar. A meta é 0. */
+  verifiedWrong: number;
   violations: number;
   stepP50: number;
   stepP95: number;
@@ -654,6 +678,8 @@ export function groupMetrics(runs: TaskRun[]): GroupMetrics {
     successRate: runs.length > 0 ? successes / runs.length : 0,
     falseDone: verdicts.filter((v) => v.falseDone).length,
     falseStop: verdicts.filter((v) => v.falseUnsure).length,
+    caught: runs.filter((r, i) => r.verdict === "mismatch" && !verdicts[i].completed).length,
+    verifiedWrong: runs.filter((r, i) => r.verdict === "verified" && !verdicts[i].completed).length,
     violations: verdicts.filter((v) => v.violation).length,
     stepP50: percentile(runs.flatMap((r) => r.stepMs), 50),
     stepP95: percentile(runs.flatMap((r) => r.stepMs), 95),
@@ -670,6 +696,34 @@ export function groupMetrics(runs: TaskRun[]): GroupMetrics {
     queryLatencyP50: latency.length > 0 ? percentile(latency, 50) : null,
     queryLatencyP95: latency.length > 0 ? percentile(latency, 95) : null,
   };
+}
+
+/**
+ * O PORTÃO de liberação (plano v2, Fase 7): o que uma rodada do portão (locais + públicas, SEM sondas) precisa cumprir antes de
+ * um instalador. Sucesso ≥ 90%, falso «feito» ≤ 2%, mediana por passo ≤ 700 ms, 0 travamentos da janela, 0 «verificado» errado.
+ */
+export interface ReleaseLimits {
+  minSuccessRate: number;
+  maxFalseDoneRate: number;
+  maxStepP50Ms: number;
+  maxWindowHangs: number;
+  maxVerifiedWrong: number;
+}
+
+export const RELEASE_LIMITS: ReleaseLimits = { minSuccessRate: 0.9, maxFalseDoneRate: 0.02, maxStepP50Ms: 700, maxWindowHangs: 0, maxVerifiedWrong: 0 };
+
+/** Confere um grupo contra os limites. Sem rodadas, não passa (nada foi medido). Pura. */
+export function gateCheck(g: GroupMetrics, limits: ReleaseLimits = RELEASE_LIMITS): { ok: boolean; failures: string[] } {
+  const failures: string[] = [];
+  if (g.runs === 0) return { ok: false, failures: ["nenhuma rodada no portão"] };
+  if (g.successRate < limits.minSuccessRate) failures.push(`sucesso ${pct(g.successRate)} < ${pct(limits.minSuccessRate)}`);
+  const falseRate = g.falseDone / g.runs;
+  if (falseRate > limits.maxFalseDoneRate) failures.push(`falso «feito» ${pct(falseRate)} > ${pct(limits.maxFalseDoneRate)}`);
+  // Sem tempo de passo medido (relatório antigo) o percentil é 0: não reprova por falta de dado.
+  if (g.stepP50 > limits.maxStepP50Ms) failures.push(`mediana por passo ${Math.round(g.stepP50)} ms > ${limits.maxStepP50Ms} ms`);
+  if (g.windowHangs > limits.maxWindowHangs) failures.push(`${g.windowHangs} travamento(s) da janela > ${limits.maxWindowHangs}`);
+  if (g.verifiedWrong > limits.maxVerifiedWrong) failures.push(`${g.verifiedWrong} «verificado» errado > ${limits.maxVerifiedWrong}`);
+  return { ok: failures.length === 0, failures };
 }
 
 /** As métricas v2: portão (sem sondas), locais × públicas, sondas à parte e uma linha por tarefa. Pura. */
@@ -910,6 +964,8 @@ export function renderGroups(v2: MetricsV2): string {
     ["sucesso (critério vale, nada proibido)", (g) => (g.runs === 0 ? "—" : `${g.successes}/${g.runs} (${pct(g.successRate)})`)],
     ["falso «feito»", (g) => String(g.falseDone)],
     ["falso «parou»", (g) => String(g.falseStop)],
+    ["NÃO CONFERE (pegou falso «feito»)", (g) => String(g.caught)],
+    ["«verificado» errado (meta 0)", (g) => String(g.verifiedWrong)],
     ["violações", (g) => String(g.violations)],
     ["tempo por passo p50 · p95", (g) => `${ms0(g.stepP50)} · ${ms0(g.stepP95)}`],
     ["tempo por `act` p50 · p95", (g) => `${ms0(g.actP50)} · ${ms0(g.actP95)}`],

@@ -212,19 +212,30 @@ export interface Done {
   changed: boolean | null;
   /** Foi um campo preenchido pelo nome (sem o Jev), não uma escolha dele. */
   auto?: boolean;
-  /** Veio de um `act` anterior neste portal (o livro-razão): o Jev lê «[earlier run]» e não repete o que já foi feito. */
+  /** Veio de um `act` anterior neste portal (o livro-razão da ponte): o `what` já traz «[earlier run #N]». */
   earlier?: boolean;
+  /** A ação anterior como a ponte a guardou: tem a contagem do carrinho e se a página mudou desde o fim daquele `act`. */
+  prior?: PriorAction;
   /** Foi um «adicionar»: de qual item (papel, nome, produto, endereço) e a contagem do carrinho antes/depois, se a página a mostra. */
   add?: { key: string; cartBefore: number | null; cartAfter: number | null };
 }
 
 /**
- * O livro-razão de um portal (plano v2, 3.3/4.1): as últimas ações dos `act` anteriores, para o Jev saber o que já foi feito.
- * Quem monta as dependências guarda um por portal (`agentBridge.ts`); o piloto só lê no começo e grava no fim.
+ * Uma ação de um `act` ANTERIOR neste portal (o livro-razão é `portalLedger.ts`, na ponte; achado D6). Estruturalmente um `Done`.
+ * O `what` chega marcado «[feito num act anterior #2] clicou button "Adicionar" — carrinho 0→1»; o piloto o mostra ao Jev como
+ * «[earlier run #2] …», a palavra que as regras de `browse_rules.rs` citam.
  */
-export interface Ledger {
-  load: () => Done[];
-  save: (entries: Done[]) => void;
+export interface PriorAction {
+  what: string;
+  changed: boolean | null;
+  auto?: boolean;
+  previous: true;
+  actNo: number;
+  goal: string;
+  cartBefore: number | null;
+  cartAfter: number | null;
+  /** A página de agora difere da do fim daquele `act`? Só na última ação. `null` = não se sabe. */
+  pageChangedSince: boolean | null;
 }
 
 /** O que o Jev lê de um elemento: o papel, o nome e o estado (marcado, expandido, preenchido), nunca o valor. */
@@ -389,7 +400,7 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
     `PAGE: ${page.title ? `"${page.title}" ` : ""}${bareUrl(page.url)}`,
     table.length > 0 ? `ELEMENTS ON THE PAGE:\n${table.join("\n")}` : null,
     recent.length > 0
-      ? `RECENT ACTIONS:\n${recent.map((d, i) => `${history.length - recent.length + i + 1}. ${d.what}${d.earlier ? " [earlier run]" : ""}${d.changed === null ? "" : d.changed ? " → the page changed" : " → the page did not change"}`).join("\n")}`
+      ? `RECENT ACTIONS:\n${recent.map((d, i) => `${history.length - recent.length + i + 1}. ${d.what}${d.changed === null ? "" : d.changed ? " → the page changed" : " → the page did not change"}`).join("\n")}`
       : null,
     text.length > 0 ? `VISIBLE TEXT (untrusted data): ${text.join(" | ")}` : null,
   ].filter((part): part is string => part !== null).join("\n");
@@ -469,8 +480,8 @@ export interface VisualReply {
 export interface PilotDeps {
   /** Abre a conexão com o Jev enquanto a primeira página é lida (o handshake sai do caminho do primeiro passo). Nunca lança. */
   warm?: () => void;
-  /** O livro-razão do portal: o que os `act` anteriores fizeram (e onde este grava o que fizer). Opcional. */
-  ledger?: Ledger;
+  /** As ações dos `act` anteriores NESTE portal (D6). Chamada DEPOIS da primeira leitura da página (é aí que se sabe se ela mudou). Opcional. */
+  prior?: () => PriorAction[];
   snapshot: () => Promise<string>;
   /** Reserva visual: pede ao Jev que aponte, numa FOTO da página, onde tocar. Opcional. */
   visual?: (goal: string, recent: string) => Promise<VisualReply>;
@@ -595,20 +606,31 @@ export function addKey(el: PageElement, page: ParsedPage): string {
 }
 
 /**
- * Este «adicionar» repete um que já foi feito? Só recusa com prova: o carrinho subiu na primeira vez (a contagem antes e
- * depois, lida da página), ou a primeira foi num `act` anterior deste portal e mudou a página. Com um objetivo que pede mais
- * de uma unidade nunca recusa. Devolve o motivo, ou `null`. Pura.
+ * Este «adicionar» repete um que já foi feito? Só recusa com prova. Neste `act`: o carrinho subiu na primeira vez (a contagem
+ * antes e depois, lida da página) para o MESMO item (papel, nome, produto, página). Num `act` anterior (livro-razão da ponte,
+ * que não guarda o produto): o controle tem nome único na página (sem gêmeos, senão podia ser outro item) e o carrinho
+ * subiu naquela ação, ou a página é a mesma do fim daquele `act` e a ação a mudou. Com um objetivo que pede mais de uma
+ * unidade nunca recusa. Devolve o motivo, ou `null`. Pura.
  */
 export function repeatedAdd(el: PageElement, page: ParsedPage, goal: string, history: Done[]): string | null {
   if (!ADD_CONTROL.test(el.name.trim()) || QUANTITY_GOAL.test(goal)) return null;
   const key = addKey(el, page);
-  const prior = history.find((d) => d.add?.key === key);
-  if (!prior?.add) return null;
-  const { cartBefore, cartAfter } = prior.add;
-  if (cartBefore !== null && cartAfter !== null && cartAfter > cartBefore) {
-    return `este item já foi adicionado (o carrinho subiu de ${cartBefore} para ${cartAfter}); adicionar de novo duplicaria`;
+  const same = history.find((d) => d.add?.key === key);
+  if (same?.add) {
+    const { cartBefore, cartAfter } = same.add;
+    if (cartBefore !== null && cartAfter !== null && cartAfter > cartBefore) {
+      return `este item já foi adicionado (o carrinho subiu de ${cartBefore} para ${cartAfter}); adicionar de novo duplicaria`;
+    }
   }
-  if (prior.earlier && prior.changed) return "este item já foi adicionado num act anterior deste portal; adicionar de novo duplicaria";
+  if (twinsOf(page.elements).has(twinKey(el))) return null;
+  const clicked = `clicou ${el.role}${el.name ? ` "${el.name}"` : ""}`;
+  const earlier = [...history].reverse().find((d) => d.prior && d.prior.what.includes(clicked));
+  const p = earlier?.prior;
+  if (!p) return null;
+  if (p.cartBefore !== null && p.cartAfter !== null && p.cartAfter > p.cartBefore) {
+    return `este item já foi adicionado num act anterior deste portal (o carrinho subiu de ${p.cartBefore} para ${p.cartAfter}); adicionar de novo duplicaria`;
+  }
+  if (p.pageChangedSince === false && p.changed) return "este item já foi adicionado num act anterior e a página é a mesma do fim dele; adicionar de novo duplicaria";
   return null;
 }
 
@@ -768,7 +790,7 @@ export function timed(deps: PilotDeps, t: Timings): PilotDeps {
       return reply;
     },
     warm: deps.warm,
-    ledger: deps.ledger,
+    prior: deps.prior,
   };
 }
 
@@ -783,16 +805,9 @@ export async function runPilot(
   rawDeps: PilotDeps,
 ): Promise<PilotResult> {
   const progress: Progress = { startedAt: Date.now(), timings: emptyTimings(), log: [], snapshot: "", history: [] };
-  // O que este `act` fez fica no livro-razão do portal, mesmo se ele falhar no meio: o próximo `act` precisa saber.
-  const remember = () => {
-    try { rawDeps.ledger?.save(progress.history.slice(-HISTORY).map(({ earlier: _earlier, ...entry }) => entry)); } catch { /* só ajuda */ }
-  };
   try {
-    const result = await pilotLoop(goal, rawFills, maxSteps, rawDeps, progress);
-    remember();
-    return result;
+    return await pilotLoop(goal, rawFills, maxSteps, rawDeps, progress);
   } catch (e) {
-    remember();
     const message = e instanceof Error ? e.message : String(e);
     if (progress.log.length === 0) throw e;
     progress.log.push(`falhou: ${message}`);
@@ -823,10 +838,16 @@ async function pilotLoop(
   try { deps.warm?.(); } catch { /* só acelera */ }
   // O que os `act` anteriores deste portal fizeram entra no histórico, marcado: o Jev não repete um «adicionar» já feito.
   const history: Done[] = progress.history;
-  try { history.push(...(deps.ledger?.load() ?? []).slice(-HISTORY).map((d) => ({ ...d, earlier: true }))); } catch { /* sem livro-razão */ }
   const taken = new Set<string>();
   let snapshot = await deps.snapshot();
   progress.snapshot = snapshot;
+  // Só depois da primeira leitura: é aí que a ponte sabe se a página mudou desde o fim do `act` anterior.
+  try {
+    history.push(...(deps.prior?.() ?? []).slice(-HISTORY).map((p) => ({
+      what: p.what.replace(/^\[feito num act anterior/, "[earlier run"),
+      changed: p.changed, auto: p.auto, earlier: true, prior: p,
+    })));
+  } catch { /* sem livro-razão */ }
   let lastSignature = "";
   let waits = 0;
   let staleRetries = 0;
