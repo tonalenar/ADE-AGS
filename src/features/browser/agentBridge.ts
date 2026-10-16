@@ -764,7 +764,7 @@ function pilotDeps(host: BrowserHost): PilotDeps {
     visual: async (goal, recent) => {
       const shot = await host.visualShot();
       if (!shot.complete) {
-        return { status: "error", found: null, foundProbability: null, center: null, confidence: null, latencyMs: null, reason: `a página não está toda à vista no canvas: a foto sairia cortada (${shot.detail ?? "sem medidas"})` };
+        return { status: "error", found: null, foundProbability: null, center: null, confidence: null, latencyMs: null, reason: `a página não está toda à vista no canvas (cortada pela borda ou coberta por outro painel): a foto sairia errada (${shot.detail ?? "sem medidas"})` };
       }
       return invoke("decision_pick_visual", { query: { goal, recent, imagePath: shot.path } });
     },

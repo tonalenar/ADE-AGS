@@ -312,9 +312,15 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         // Só vale se a página está toda à vista: uma foto cortada deixaria as frações da caixa apontando para o lugar errado.
         // E livre: um nó parcialmente atrás da barra lateral cabe na janela, mas a foto sairia com a barra por cima da página
         // (as alças do nó, pontinhos na borda, não contam).
-        const free = (x: number, y: number) => { const el = document.elementFromPoint(x, y); return !!el && (el === page || frame.contains(el) || !!el.closest(".react-flow__handle, .react-flow__resize-control")); };
+        let blocker = "";
+        const free = (x: number, y: number) => {
+          const el = document.elementFromPoint(x, y);
+          if (el && (el === page || frame.contains(el) || el.closest(".react-flow__handle, .react-flow__resize-control"))) return true;
+          blocker ||= el ? `${el.tagName.toLowerCase()}${typeof el.className === "string" && el.className ? `.${el.className.split(" ")[0]}` : ""} em ${Math.round(x)},${Math.round(y)}` : `nada (fora da janela) em ${Math.round(x)},${Math.round(y)}`;
+          return false;
+        };
         return {
-          frozen, rect,
+          frozen, rect, blocker,
           complete: Math.abs(frozen.screen.width - rect.width) < 2 && Math.abs(frozen.screen.height - rect.height) < 2 && isUncovered(rect, free),
         };
       };
@@ -344,7 +350,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         }
       }
       // As medidas vão junto: quando a foto é recusada por "cortada", são elas que dizem por quê.
-      const detail = `foto ${Math.round(shot.frozen.screen.width)}×${Math.round(shot.frozen.screen.height)} de uma página de ${Math.round(shot.rect.width)}×${Math.round(shot.rect.height)}`;
+      const detail = `foto ${Math.round(shot.frozen.screen.width)}×${Math.round(shot.frozen.screen.height)} de uma página de ${Math.round(shot.rect.width)}×${Math.round(shot.rect.height)}${shot.blocker ? `; coberta por ${shot.blocker}` : ""}`;
       return { path: await previewSaveCapture(await canvasToPng(canvas), "visual"), complete: shot.complete, detail };
     },
     requestPick: (timeoutMs) => new Promise((resolve) => {
