@@ -830,3 +830,19 @@ describe("avançar um fluxo com p um pouco abaixo do piso", () => {
     expect(h.calls).toEqual(["click e2"]);
   });
 });
+
+describe("digitar só se há campo vazio", () => {
+  const FILLED = [
+    'page: "Etapa 1" http://localhost/e1', "viewport: 1280×800 · scroll 0/800",
+    '- textbox "Nome" [ref=e1] value="[x]"', '- button "Próximo" [ref=e2]',
+  ].join("\n");
+  it("com todos os campos preenchidos, 'type' não é oferecido (os valores que sobram são de outra etapa)", () => {
+    const step = buildStep(parseSnapshot(FILLED), "preencher o pedido", ["CEP"], []);
+    expect(step.operations.map((o) => o.id)).not.toContain("type");
+    expect(step.operations.map((o) => o.id)).toContain("click");
+  });
+  it("com um campo vazio, 'type' é oferecido", () => {
+    const step = buildStep(parseSnapshot(FILLED.replace('value="[x]"', 'value=""')), "preencher o pedido", ["CEP"], []);
+    expect(step.operations.map((o) => o.id)).toContain("type");
+  });
+});

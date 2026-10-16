@@ -325,7 +325,9 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
   const offer = (id: string) => operations.push({ id, label: OPERATION_LABEL[id] });
   if (targets.click) offer("click");
   // Digitar e escolher numa lista precisam de um valor do `--fill`: sem sobrar nenhum, não são operações possíveis.
-  if (targets.type && fillKeys.length > 0) offer("type");
+  // Digitar só é uma escolha do Jev se há um campo VAZIO: com todos preenchidos, os valores que sobram são de outra etapa
+  // (o Jev voltava a "Nome" depois de o piloto o preencher pelo nome e o `act` perdia o passo).
+  if (targets.type && fillKeys.length > 0 && page.elements.some((el) => TYPING.has(el.role) && el.filled !== true && !el.states.includes("disabled"))) offer("type");
   // Escolher numa lista: com opções visíveis não precisa de `--fill`; uma lista sem opções legíveis sim.
   if (targets.select && (optionTargets.length > 0 || fillKeys.length > 0)) offer("select");
   offer("scroll");
