@@ -213,8 +213,8 @@ function labelOf(el: PageElement, twins?: Set<string>): string {
   const where = el.href ? ` → ${el.href}` : "";
   // Vários elementos com o mesmo papel e nome ("Adicionar" ×8): só o que vem antes deles os distingue (o produto, o preço).
   const near = twins?.has(twinKey(el)) && el.near ? ` [next to: ${el.near}]` : "";
-  // Ordem do que mais importa ao que menos: o nome, quem é (o que vem antes), o estado, o destino — o provedor corta em ~110.
-  return `${role}${el.name ? ` "${el.name}"` : ""}${near}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}${where}`;
+  // Ordem do que mais importa ao que menos: o nome, o estado, quem é (o que vem antes), o destino — o provedor corta em ~110.
+  return `${role}${el.name ? ` "${el.name}"` : ""}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}${near}${where}`;
 }
 
 /** A chave de "são o mesmo controle": o papel, o nome e o destino. */
