@@ -426,3 +426,50 @@ Isolados: **L01 6/6** (sem violações), **P02 3/3**. Resta, nas públicas, uma 
 | passo p50 ≤ 500 ms | **sim** (494 ms) |
 
 Pendências finais: L12 (reconhecer que um toque pela foto terminou o objetivo), P04 (variação), Fase 6 (visão como reserva), 4.4 (modelo pequeno para o texto). Arquivos: `v2-final5-real-*`.
+
+
+### 5.12 Pendências L12, P04, públicas e Fase 6 (`fefc0271`, app instalado)
+
+Branch `fix/piloto-pendencias-v2` (PR para a `dev`). Rodadas em `bench/v2-final6-*`: `antes-real-publicas` (código `b02ef413`) e `depois-real-locais` / `depois-real-publicas` (`fefc0271`). A rodada «antes» das locais é a `v2-final5-real-locais` (mesmo código `b02ef413`).
+
+**1. L12 (falso «parou»).** O piloto passa a reconhecer que um toque pela foto cumpriu o objetivo (`photoTapFinished`) quando TUDO confere: o objetivo é um único clique (começa com o verbo de clicar e não tem outra etapa fora do nome entre «»), a foto viu o controle com certeza alta (existe p ≥ 0,9, caixa ≥ 0,85), o toque mudou a página, a página não mostra erro e o texto NOVO fala do controle do objetivo (o nome entre «»). Um toque que caiu no vizinho («DETALHES ABERTOS») não passa. Termina ali, sem outra consulta ao Jev. As travas continuam antes do toque (compra não pedida, campo sensível, mesmo ponto duas vezes). Testes: 4 novos em `jevPilot.test.ts`.
+
+**2. P04 («sem certeza» numa das repetições).** Causa, pelos relatórios `v2-final4`/`v2-final5`: com a mochila JÁ no carrinho (estado que sobra no portal), o Jev escolhe «Cart, 1 items» com p de 0,35 a 0,39, logo abaixo do piso de 0,40, e o `act` para com a página mostrando «Remove». Correção: `cartAdvance` aceita p de 0,30 a 0,40 quando o objetivo fala em carrinho/checkout, o alvo é o controle do carrinho (e não uma compra não pedida), o carrinho tem item e o produto do objetivo está do lado de um «Remover». Junto, o botão com destino («View details for X») passa a ser o título do que vem depois, sem o «View details for»: os «Add to cart» deixam de se distinguir só pelo preço. Em momento nenhum o piloto clica em Finish (trava de compra intacta; `forbid: checkout-complete` em 0 violações).
+
+**3. Públicas ≥ 90%.** `--repeat 4`, 16 rodadas por lado: **antes 16/16, depois 16/16**. A variação do P04 não reapareceu em nenhum dos dois lados, então o número NÃO prova ganho: prova que a regra nova age (P04 rep 1 clicou o carrinho com p=0,39 e a rep 0, com p=0,30, exatamente a faixa que antes parava) e que não há regressão.
+
+**4. Fase 6 (visão como reserva).** O relatório do `act` ganhou a linha `FOTO:` (quantas, tempo de captura × consulta ao Jev, fatia do `act`, e por que cada foto saiu e no que deu) e `TEMPOS` ganhou `fotoJev` e `fotoUsos`. Medido nas rodadas reais `v2-final2…5` (240 `act`): a foto sai em **12%** dos `act`; custa em média **1,07 s** (captura ~0,74 s + Jev ~0,34 s); quando sai, pesa **~49%** do tempo do `act` (6,6% do tempo total). 18 de 29 fotos tocaram e cumpriram o critério, 7 não acharam um controle seguro, 3 terminaram em violação ou falha.
+
+Dois achados: (a) a captura custa ~150 ms quando a janela já mostra o nó e ~700 ms quando precisa enquadrar o nó no canvas (reveal): a diferença é a **espera fixa de 450 ms** do reveal; (b) em 23 de 27 fotos a primeira captura saía incompleta (nó fora da janela) e era descartada. Implementado só o (b): com o nó fora da janela, enquadra direto. Medido com o Jev real (`b02ef413` → `fefc0271`): custo médio por foto **1.270 → 964 ms** e fatia do `act` **53% → 40%** (7 e 8 fotos: amostra pequena). **Não implementado:** tirar a foto após ~150 ms e só esperar o resto se sair incompleta (a espera do reveal é ~60% do custo de uma foto enquadrada): mexe no tempo de pintura do iframe e precisa de novo instalador para medir; fica como proposta, com ganho estimado de ~300 ms por foto enquadrada. O item do reveal que não desvia dos painéis flutuantes continua como estava (a foto os esconde só pelo tempo dela e recusa se algo ainda cobrir).
+
+**5. 4.4 (texto a digitar por modelo pequeno): AGUARDANDO PROVEDOR.** O usuário pediu para não fazer agora. Nada foi implementado.
+
+**Locais, 27 tarefas × 2, Jev real:**
+
+| | `b02ef413` | `fefc0271` |
+|---|---|---|
+| sucesso pela página | 54/54 (100%) | **54/54 (100%)** |
+| o piloto confirmou (`done`) | 52/54 | **54/54** |
+| falso «parou» (L12) | 2 | **0** |
+| falso «feito» · violações · «verificado» errado | 0 · 0 · 0 | 0 · 0 · 0 |
+| travamentos da janela | 0 | 0 |
+| passo p50 | 494 ms | 483 ms |
+| `act` p50 · p95 | 1895 · 9555 ms | 1721 · 9553 ms |
+| latência por consulta p50 · p95 | 299 · 351 ms | 306 · 354 ms |
+| consultas por tarefa | 2,5 | 2,4 |
+
+L12 passou de 2 consultas e `PAROU` para **1 consulta e `FEITO (verificado)`** nas duas repetições. L01 e L02 seguem 2/2 sem violação.
+
+**Públicas (4 tarefas × 4):**
+
+| | `b02ef413` | `fefc0271` |
+|---|---|---|
+| sucesso pela página | 16/16 | 16/16 |
+| falso «feito» · violações | 0 · 0 | 0 · 0 |
+| passo p50 | 715 ms | 720 ms |
+| `act` p50 · p95 | 3012 · 3912 ms | 2364 · 4531 ms |
+| latência por consulta p50 · p95 | 310 · 350 ms | 319 · 402 ms |
+
+Cota do Jev usada nesta sessão: ~400 consultas (locais ~175, públicas ~50 + ~53 do «antes», fotos incluídas), dentro do limite de 1.000.
+
+**Pendências finais:** espera adaptativa do reveal (precisa de novo instalador), 4.4 (aguarda o provedor), Amazon continua como sonda fora dos portões. Meta «≥ 90% público»: **atingida na amostra de 16 rodadas (100%)**, mas as duas amostras são pequenas e o P04 depende de um estado que sobra no portal.
