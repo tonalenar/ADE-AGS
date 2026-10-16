@@ -266,7 +266,7 @@ abaixo); causas em [`bench/depois-real-causas.json`](bench/depois-real-causas.js
 **Mudou de ❌ para ✅:** L03 (Enter), L05 e L06 (o clique coberto vira «tentou tocar… falhou», o Jev fecha o banner/modal e segue),
 L09 (botões repetidos: clicou o «Adicionar» certo, sem foto, p=1,00 — o contexto «next to» parece ter ajudado) e L14 (**atenção:**
 a fixture foi corrigida entre as rodadas; o ANTES da L14 era inválido, ver «Incidentes»). L04 e L16 deixaram de ser «sem certeza»:
-o Enter encerra a busca em 1 passo e a pergunta de fim passou de 0,00–0,01 para 0,69–0,94.
+o Enter encerra a busca em 1 passo (L04: pergunta de fim 0,69, no ANTES 0,00; L16: concluiu em 2 passos, clicando «Buscar»).
 **Mudou de ✅ para ❌ (possíveis regressões):** **L11** (formulário em etapas: depois de preencher pelo nome, o Jev escolheu digitar de novo em
 «Nome» e o piloto falhou com «não há valor para text field Nome»; na 1.ª tentativa parou com p=0,36 em «Próximo») e **P04** (SauceDemo:
 depois do login o Jev escolheu um «Add to cart» com p=0,30, no ANTES p=0,57 — p baixa em 3 de 3 observações no SauceDemo; suspeita: o contexto
