@@ -433,6 +433,7 @@ pub fn run() {
             crate::decisions::delivery::decision_classify_report,
             crate::decisions::routing::decision_route_turn,
             crate::decisions::browse::decision_pick_step,
+            crate::decisions::browse::decision_preconnect,
             crate::decisions::vision::decision_pick_visual,
             crate::database::db_boot_status,
             // Gestión de skills (symlinks globales)
@@ -549,6 +550,8 @@ pub fn run() {
 
             // Avisos del sistema para lo que pasa con la app en segundo plano (ver `notifier`).
             crate::notifier::start(app.handle().clone());
+            // Abre a conexão com o Jev (se o piloto está ligado) antes do primeiro `act`.
+            crate::decisions::browse::preconnect_at_start(app.handle().clone());
             app.manage(crate::window::DeferredRestore::empty());
 
             // Upgrade de schema: la ventana ya puede pintarse (el frontend muestra
