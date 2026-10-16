@@ -175,6 +175,9 @@ async fn fake_dev_server() -> u16 {
                     _ if bare.ends_with("/eco") => ("200 OK", "Content-Type: text/plain\r\n", cookie),
                     "/" => ("200 OK", "Content-Type: text/html; charset=utf-8\r\nX-Frame-Options: DENY\r\nContent-Security-Policy: frame-ancestors 'none'\r\n",
                             "<html><head><title>Hola</title></head><body>hola</body></html>".to_string()),
+                    // AWS WAF: un desafío en JS en vez de la página (plan v2, I4).
+                    "/waf" => ("202 Accepted", "Content-Type: text/html\r\nx-amzn-waf-action: challenge\r\n",
+                               "<html><head><title>x</title></head><body>challenge</body></html>".to_string()),
                     "/app.js" => ("200 OK", "Content-Type: application/javascript\r\n", "console.log(1)".to_string()),
                     "/sesion" => ("200 OK", "Set-Cookie: sid=abc; Path=/app; HttpOnly; SameSite=Lax\r\nSet-Cookie: tema=oscuro; Domain=localhost\r\n", String::new()),
                     "/login" => ("302 Found", &*Box::leak(format!("Location: http://127.0.0.1:{port}/panel\r\n").into_boxed_str()), String::new()),
@@ -1307,4 +1310,56 @@ fn un_html_gzip_o_deflate_se_descomprime_para_inyectarle_el_runtime() {
     zl.write_all(html).unwrap();
     assert_eq!(super::proxy::inflate(&zl.finish().unwrap(), "deflate").unwrap(), html);
     assert!(super::proxy::inflate(b"no es gzip", "gzip").is_none());
+}
+
+#[test]
+fn un_html_brotli_o_zstd_tambien_se_descomprime_para_inyectarle_el_runtime() {
+    use std::io::Write;
+    let html = b"<html><head><title>x</title></head><body>hola ".repeat(50);
+    let mut br = Vec::new();
+    {
+        let mut enc = brotli::CompressorWriter::new(&mut br, 4096, 5, 22);
+        enc.write_all(&html).unwrap();
+    }
+    assert!(br.len() < html.len());
+    assert_eq!(super::proxy::inflate(&br, "br").unwrap(), html);
+    assert_eq!(super::proxy::inflate(&br, "BR").unwrap(), html);
+    let zst = ruzstd::encoding::compress_to_vec(&html[..], ruzstd::encoding::CompressionLevel::Fastest);
+    assert_eq!(super::proxy::inflate(&zst, "zstd").unwrap(), html);
+    // Basura con la etiqueta equivocada: no inventa nada.
+    assert!(super::proxy::inflate(b"no es brotli ni nada", "br").is_none());
+    assert!(super::proxy::inflate(b"no es zstd", "zstd").is_none());
+    assert!(super::proxy::inflate(b"x", "compress").is_none());
+    for known in ["gzip", "x-gzip", "deflate", "br", "zstd", "BR"] {
+        assert!(super::proxy::can_inflate(known), "{known}");
+    }
+    assert!(!super::proxy::can_inflate("identity") && !super::proxy::can_inflate("compress"));
+}
+
+#[test]
+fn el_desafio_aws_waf_es_un_202_con_la_accion() {
+    use super::proxy::waf_challenge_action;
+    let mut h = hyper::HeaderMap::new();
+    assert_eq!(waf_challenge_action(202, &h), None);
+    h.insert("x-amzn-waf-action", "challenge".parse().unwrap());
+    assert_eq!(waf_challenge_action(202, &h).as_deref(), Some("challenge"));
+    // Con otro estado no es un desafío (un 200 trae la página de verdad).
+    assert_eq!(waf_challenge_action(200, &h), None);
+    h.insert("x-amzn-waf-action", "CAPTCHA".parse().unwrap());
+    assert_eq!(waf_challenge_action(202, &h).as_deref(), Some("captcha"));
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn el_proxy_marca_el_desafio_anti_robot_y_lo_quita_con_la_pagina_normal() {
+    use super::proxy::challenge_in_progress;
+    let port = fake_dev_server().await;
+    let origin = format!("http://127.0.0.1:{port}");
+    let target = preview_resolve(format!("{origin}/"), String::new()).await.unwrap();
+    assert_eq!(challenge_in_progress(&origin), None);
+    let res = client().get(format!("{}/waf", target.proxy_origin)).send().await.unwrap();
+    assert_eq!(res.status().as_u16(), 202);
+    assert_eq!(challenge_in_progress(&origin).as_deref(), Some("challenge"));
+    // La página normal del mismo origen (200) cierra el desafío.
+    client().get(format!("{}/", target.proxy_origin)).send().await.unwrap();
+    assert_eq!(challenge_in_progress(&origin), None);
 }
