@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, isAmbiguous, isSearchField, submitsOnType, emptyFieldsNote, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, blockedControl, isAmbiguous, isSearchField, submitsOnType, emptyFieldsNote, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -723,5 +723,37 @@ describe("controle coberto por uma faixa ou modal", () => {
     h.deps.click = async () => { throw new Error("botão está coberto por div (div#modal)."); };
     const result = await runPilot("entrar", [], undefined, h.deps);
     expect(result.outcome).toBe("stuck");
+  });
+});
+
+describe("achados da revisão", () => {
+  it("o valor do --fill só fica gasto depois de digitado: campo coberto falha e o valor volta a valer", async () => {
+    const pages = pagesOf(10);
+    const h = harness([ok("click", "e5"), ok("done")], pages);
+    let covered = true;
+    h.deps.type = async (ref, text) => {
+      if (covered) throw new Error(`text field "E-mail" está coberto por div "cookies" (div#banner). Feche.`);
+      h.calls.push(`type ${ref} ${text}`);
+    };
+    h.deps.click = async (ref) => { h.calls.push(`click ${ref}`); covered = false; };
+    const result = await runPilot("entrar", ["email=a@b.c"], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(h.calls).toContain("type e1 a@b.c");
+  });
+
+  it("o carrinho do Magento (/checkout/cart) não é um botão de compra", () => {
+    const page = parseSnapshot(['page: "Loja" http://localhost/', "viewport: 1280×800 · scroll 0/800", '- link "Carrinho" [ref=e1] → /checkout/cart/'].join("\n"));
+    expect(blockedControl(page.elements[0], "abrir o carrinho")).toBe(false);
+    expect(blockedControl({ ref: "e2", role: "link", name: "Finalizar", states: [], filled: null, href: "/checkout/pay" }, "abrir o carrinho")).toBe(true);
+  });
+
+  it("ícones sem nome e iguais também mostram o que vem antes", () => {
+    const page = parseSnapshot([
+      'page: "Loja" http://localhost/', "viewport: 1280×800 · scroll 0/800",
+      '- text "Perfil"', '- clickable [ref=e1]', '- text "Carrinho"', '- clickable [ref=e2]',
+    ].join("\n"));
+    const labels = buildStep(page, "abrir o carrinho", [], []).targets.click.map((o) => o.label);
+    expect(labels[0]).toContain("next to: Perfil");
+    expect(labels[1]).toContain("next to: Carrinho");
   });
 });

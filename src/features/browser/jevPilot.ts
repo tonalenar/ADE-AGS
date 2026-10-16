@@ -212,7 +212,7 @@ function labelOf(el: PageElement, twins?: Set<string>): string {
   const where = el.href ? ` → ${el.href}` : "";
   // Vários elementos com o mesmo papel e nome ("Adicionar" ×8): só o que vem antes deles os distingue (o produto, o preço).
   const near = twins?.has(twinKey(el)) && el.near ? ` [next to: ${el.near}]` : "";
-  return `${role}${el.name ? ` "${el.name}"` : ""}${where}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}${near}`;
+  return `${role}${el.name ? ` "${el.name}"` : ""}${near}${where}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}`;
 }
 
 /** A chave de "são o mesmo controle": o papel, o nome e o destino. */
@@ -223,7 +223,7 @@ function twinKey(el: PageElement): string {
 /** Os controles que se repetem na página (mesmo papel, nome e destino). Pura. */
 export function twinsOf(elements: PageElement[]): Set<string> {
   const seen = new Map<string, number>();
-  for (const el of elements) if (el.name) seen.set(twinKey(el), (seen.get(twinKey(el)) ?? 0) + 1);
+  for (const el of elements) seen.set(twinKey(el), (seen.get(twinKey(el)) ?? 0) + 1);
   return new Set([...seen].filter(([, n]) => n > 1).map(([key]) => key));
 }
 
@@ -293,7 +293,7 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
     if (el.states.includes("disabled")) return;
     // Um botão de compra ou pagamento que o objetivo não pediu nem é oferecido: o Jev escolhe entre os outros (o
     // "Adicionar ao carrinho" ao lado de um "Comprar agora") em vez de o piloto parar ao ver a escolha barrada.
-    if (blockedPurchase(`${el.name} ${el.href ?? ""}`, goal)) return;
+    if (blockedControl(el, goal)) return;
     if (operationOf(el) === "select" && el.options?.length) {
       el.options.forEach((option, i) => optionTargets.push({ id: `${el.ref}_${i}`, label: `${plain(el)} → option "${option}"` }));
       return;
@@ -427,6 +427,11 @@ export const MAX_VISUAL = 3;
 
 /** Controles que fecham uma compra ou pagam. */
 const PURCHASE = /comprar agora|buy now|buy-now|buynow|one-?click|1-click|finalizar (a )?compra|fechar (o )?pedido|confirmar (o )?(pedido|pagamento)|place (your )?order|proceed to checkout|prosseguir para|ir para o pagamento|checkout|pagar agora|pay now/i;
+
+/** O controle (nome e destino) é uma compra que o objetivo não pediu? O carrinho de `/checkout/cart` (Magento) não é fechar a compra. Pura. */
+export function blockedControl(el: PageElement, goal: string): boolean {
+  return blockedPurchase(`${el.name} ${(el.href ?? "").replace(/checkout\/cart/gi, "/cart")}`, goal);
+}
 
 /**
  * Um controle de compra ou pagamento que o objetivo NÃO pediu? O piloto nunca fecha uma compra por acaso: o Jev escolhe
@@ -595,7 +600,18 @@ export async function runPilot(
     const stepStarted = Date.now();
     let page = parseSnapshot(snapshot);
     // O que não é escolha não vai ao Jev: um campo cujo nome casa com um `--fill` recebe o valor direto.
-    const filled = await autoFill(page, fills, taken, deps, goal);
+    let filled: string[] = [];
+    try {
+      filled = await autoFill(page, fills, taken, deps, goal);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      // Um campo coberto por uma faixa: o Jev a fecha na consulta seguinte e o valor (ainda não gasto) entra depois.
+      if (!(/est[áa] coberto por/i.test(message) && coveredRetries < 3)) throw e;
+      coveredRetries += 1;
+      const what = `tentou preencher um campo, mas falhou: ${message.split(". ")[0].slice(0, 160)}`;
+      log.push(`${step}. ${what}`);
+      history.push({ what, changed: false, auto: true });
+    }
     if (filled.length > 0) {
       for (const what of filled) {
         history.push({ what, changed: true, auto: true });
@@ -669,7 +685,7 @@ export async function runPilot(
         const el = page.elements.find((e) => e.ref === refPart);
         if (!el) return finish("error", `O Jev escolheu ${reply.target ?? "?"}, que não está na página.`);
         const option = optionPart !== undefined ? el.options?.[Number(optionPart)] : undefined;
-        if (blockedPurchase(`${el.name} ${el.href ?? ""}`, goal)) {
+        if (blockedControl(el, goal)) {
           log.push(`${step}. recusou ${plain(el)}: parece uma compra ou um pagamento, e o objetivo não pediu`);
           return finish("stuck", "O Jev escolheu um controle de compra ou pagamento que o objetivo não pediu: não cliquei. Se é isso mesmo que você quer, diga no objetivo.");
         }
@@ -748,7 +764,7 @@ export function isSearchField(el: PageElement): boolean {
  */
 export function submitsOnType(el: PageElement, page: ParsedPage | undefined, goal: string): boolean {
   if (!isSearchField(el)) return false;
-  return !page?.elements.some((other) => blockedPurchase(`${other.name} ${other.href ?? ""}`, goal));
+  return !page?.elements.some((other) => blockedControl(other, goal));
 }
 
 /** Faz o que a operação pede no elemento e conta o que fez, sem o valor digitado. */
@@ -760,10 +776,11 @@ async function act(el: PageElement, operation: string, fills: [string, string][]
   if (operation === "type" || operation === "select") {
     const entry = valueFor(el.name, fills, taken);
     if (!entry) throw new Error(`não há valor para ${plain(el)}: passe --fill "<campo>=<valor>"`);
-    taken.add(entry[0]);
     const submit = operation === "type" && submitsOnType(el, where?.page, where?.goal ?? "");
     if (operation === "select") await deps.select(el.ref, entry[1]);
     else await deps.type(el.ref, entry[1], submit);
+    // O valor só fica gasto depois de digitado: um campo coberto por uma faixa falha e o valor volta a valer.
+    taken.add(entry[0]);
     return `${operation === "select" ? "escolheu em" : "digitou em"} ${plain(el)} (valor de ${entry[0]})${submit ? " e apertou Enter" : ""}`;
   }
   // Um link com destino leva a outra página: o piloto espera ela carregar antes de reler (senão "conclui" olhando a antiga).
