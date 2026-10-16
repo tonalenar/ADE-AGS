@@ -40,6 +40,8 @@ struct LastBeat {
 static LAST_BEAT: Mutex<Option<LastBeat>> = Mutex::new(None);
 /// Cuántas requests vencieron su timeout desde que arrancó el app.
 static TIMEOUTS: AtomicU64 = AtomicU64::new(0);
+/// Pior lag reportado desde a última leitura de `window_report` (cada batimento traz o máximo do último segundo).
+static LAG_PEAK: AtomicU64 = AtomicU64::new(0);
 
 /// Qué dice el último batimento sobre por qué la ventana no respondió: separa "ventana oculta y
 /// estrangulada" de "renderizador ocupado" (plan v2, I1). `since_ms` es hace cuánto llegó.
@@ -118,11 +120,23 @@ fn last_beat_snapshot() -> Option<(u64, u64, bool)> {
 pub fn ui_heartbeat(lag_ms: Option<u64>, hidden: bool) -> u64 {
     // Sin `lag_ms` es solo una consulta del contador (fin del `act`), no un latido real.
     if let Some(lag_ms) = lag_ms {
+        LAG_PEAK.fetch_max(lag_ms, Ordering::Relaxed);
         if let Ok(mut last) = LAST_BEAT.lock() {
             *last = Some(LastBeat { at: Instant::now(), lag_ms, hidden });
         }
     }
     TIMEOUTS.load(Ordering::Relaxed)
+}
+
+/// O que o batimento diz da janela agora, para `ags portals` (aceite da Fase 1): `lagPeakMs` é o pior lag desde a
+/// leitura anterior (a leitura o zera), `silentMs` há quanto tempo não chega batimento.
+pub fn window_report() -> Value {
+    let peak = LAG_PEAK.swap(0, Ordering::Relaxed);
+    let timeouts = TIMEOUTS.load(Ordering::Relaxed);
+    match last_beat_snapshot() {
+        Some((silent_ms, lag_ms, hidden)) => serde_json::json!({ "lagPeakMs": peak, "lastLagMs": lag_ms, "hidden": hidden, "silentMs": silent_ms, "timeouts": timeouts }),
+        None => serde_json::json!({ "lagPeakMs": peak, "lastLagMs": null, "hidden": null, "silentMs": null, "timeouts": timeouts }),
+    }
 }
 
 /// Progreso parcial del `act` por portal (plan v2, Fase 1.4): el frontend lo manda tras cada acción, y si la ventana se
@@ -335,6 +349,19 @@ mod tests {
         assert_eq!(with_partial_progress(err.clone(), None), err);
         let msg = with_partial_progress(err, Some("Ações já feitas (1):\n1. clicou @e3".into()));
         assert!(msg.starts_with("A interface parou") && msg.contains("1. clicou @e3") && msg.contains("ags portal snapshot"));
+    }
+
+    #[test]
+    fn o_relatorio_da_janela_guarda_o_pior_lag_ate_a_proxima_leitura() {
+        ui_heartbeat(Some(900), false);
+        ui_heartbeat(Some(120), false);
+        let first = window_report();
+        assert!(first["lagPeakMs"].as_u64().unwrap() >= 900, "{first}");
+        assert_eq!(first["lastLagMs"], 120);
+        assert_eq!(first["hidden"], false);
+        // A leitura zera o pico: a próxima só vê o que veio depois.
+        ui_heartbeat(Some(30), false);
+        assert_eq!(window_report()["lagPeakMs"], 30);
     }
 
     #[test]
