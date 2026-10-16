@@ -718,18 +718,40 @@ export const PORTAL_OPS = new Set([
 
 /** O que o piloto do Jev usa deste navegador: ver `jevPilot.ts`. As ações são as mesmas que o agente faria à mão. */
 function pilotDeps(host: BrowserHost): PilotDeps {
+  /**
+   * Depois de uma ação que levou a OUTRA página (o resultado diz `navigated`, mesmo num botão de formulário que não é link),
+   * espera ela carregar e assentar antes de o piloto reler: lida cedo demais, a página nova aparece vazia, o Jev acha que
+   * nada mudou e para com o objetivo já cumprido. Sem navegação não espera nada (antes a busca e o toque pela foto
+   * esperavam 2,5 s à toa em cada passo).
+   */
+  const landed = async (result: string, loads: number, expected = false): Promise<void> => {
+    if (!expected && !/navigated/.test(result)) return;
+    await host.waitForLoad(loads, 6_000);
+    try { await inPage(host, { op: "wait", idle: true, timeoutMs: 1_200 }, false); } catch { /* segue */ }
+  };
   return {
-    snapshot: () => inPage(host, { op: "snapshot", all: false }, false),
+    snapshot: () => inPage(host, { op: "snapshot", all: false, inView: true }, false),
     // Tudo `fast` e sem coletar console/rede (`withEffects` falso): o piloto lê a página de novo depois de cada passo, e é isso que importa.
     click: async (ref, navigates) => {
       const loads = host.loadCount();
       const result = await inPage(host, { op: "click", target: ref, fast: true }, false);
-      // Um link carrega outra página, que leva segundos: relê só depois (ou depois de 6 s).
-      if (navigates) await host.waitForLoad(loads, 6_000);
+      // Um link carrega outra página, que leva segundos: relê só depois.
+      await landed(result, loads, navigates);
       return result;
     },
-    type: (ref, text) => inPage(host, { op: "type", target: ref, text, clear: true, submit: false, fast: true }, false),
-    select: (ref, value) => inPage(host, { op: "select", target: ref, value, fast: true }, false),
+    type: async (ref, text, submit) => {
+      const loads = host.loadCount();
+      const result = await inPage(host, { op: "type", target: ref, text, clear: true, submit: !!submit, fast: true }, false);
+      // A busca enviada carrega a página de resultados (ou não, numa busca da própria página): só espera se navegou.
+      await landed(result, loads);
+      return result;
+    },
+    select: async (ref, value) => {
+      const loads = host.loadCount();
+      const result = await inPage(host, { op: "select", target: ref, value, fast: true }, false);
+      await landed(result, loads);
+      return result;
+    },
     scroll: () => inPage(host, { op: "scroll", dy: 600, fast: true }, false),
     // O comando já esperou a página assentar (60 ms quieta, 350 no máximo). Só a operação `wait` do Jev espera de verdade
     // (a rede ociosa, até 2,5 s): é o que ele pede quando vê que os resultados ainda carregam.
@@ -742,7 +764,7 @@ function pilotDeps(host: BrowserHost): PilotDeps {
     visual: async (goal, recent) => {
       const shot = await host.visualShot();
       if (!shot.complete) {
-        return { status: "error", found: null, foundProbability: null, center: null, confidence: null, latencyMs: null, reason: `a página não está toda à vista no canvas: a foto sairia cortada (${shot.detail ?? "sem medidas"})` };
+        return { status: "error", found: null, foundProbability: null, center: null, confidence: null, latencyMs: null, reason: `a página não está toda à vista no canvas (cortada pela borda ou coberta por outro painel): a foto sairia errada (${shot.detail ?? "sem medidas"})` };
       }
       return invoke("decision_pick_visual", { query: { goal, recent, imagePath: shot.path } });
     },
@@ -750,8 +772,8 @@ function pilotDeps(host: BrowserHost): PilotDeps {
     clickAt: async (x, y) => {
       const loads = host.loadCount();
       const result = await inPage(host, { op: "click", target: `@${x},${y}`, fast: true }, false);
-      // Um toque pela foto não sabe se é um link: espera um pouco por uma página nova (senão o piloto julga a antiga).
-      await host.waitForLoad(loads, 2_500);
+      // Um toque pela foto não sabe se é um link: o resultado diz se navegou (senão o piloto julgaria a página antiga).
+      await landed(result, loads);
       return result;
     },
   };

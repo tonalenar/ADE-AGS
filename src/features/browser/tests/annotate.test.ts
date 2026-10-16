@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { arrowWings, cropFor, isLight, placePaper, rectBetween, smoothSegments, toImagePoint } from "../annotate/geometry";
+import { arrowWings, cropFor, isLight, isUncovered, probePoints, placePaper, rectBetween, smoothSegments, toImagePoint } from "../annotate/geometry";
 import {
   addShape, clearShapes, drawShape, EMPTY_HISTORY, redo, undo, type Ctx, type Shape,
 } from "../annotate/shapes";
@@ -144,5 +144,40 @@ describe("pintar", () => {
     drawShape(ctx, { kind: "text", color: "#ef4444", size: 20, at: { x: 10, y: 10 }, text: "hola\nchau" });
     expect(calls.filter((c) => c.startsWith("fillText"))).toEqual(["fillText(hola,10,10)", "fillText(chau,10,35)"]);
     expect(calls.filter((c) => c.startsWith("strokeText"))).toHaveLength(2);
+  });
+});
+
+describe("a página está à vista, e não por baixo de outra coisa", () => {
+  const page = { left: 54, top: 282, width: 658, height: 415 };
+  // Uma barra lateral de 320 px por cima do canvas: a janela inteira "mostra" a página, mas a foto sairia com a barra em cima.
+  const behindSidebar = (x: number) => x >= 320;
+
+  it("sem nada por cima, todos os pontos de prova da página estão livres", () => {
+    expect(isUncovered(page, () => true)).toBe(true);
+  });
+
+  it("uma barra lateral por cima de parte da página a dá como coberta (antes dava 'completa', pois só olhava a janela)", () => {
+    expect(isUncovered(page, (x) => behindSidebar(x))).toBe(false);
+  });
+
+  it("os pontos de prova ficam longe da borda: as alças de redimensionar do nó, que invadem alguns pixels, não contam", () => {
+    const edge = 10;
+    const probe = (x: number, y: number) => x > page.left + edge && x < page.left + page.width - edge
+      && y > page.top + edge && y < page.top + page.height - edge;
+    expect(isUncovered(page, probe)).toBe(true);
+  });
+
+  it("uma página minúscula ou sem área não quebra", () => {
+    expect(isUncovered({ left: 0, top: 0, width: 0, height: 0 }, () => true)).toBe(true);
+    expect(isUncovered({ left: 0, top: 0, width: 10, height: 10 }, () => true)).toBe(true);
+  });
+
+  it("a grade de prova tem 5×5 pontos, todos dentro da página e longe da borda", () => {
+    const points = probePoints(page);
+    expect(points).toHaveLength(25);
+    expect(Math.min(...points.map((p) => p.x))).toBe(page.left + 12);
+    expect(Math.max(...points.map((p) => p.x))).toBe(page.left + page.width - 12);
+    expect(Math.min(...points.map((p) => p.y))).toBe(page.top + 12);
+    expect(Math.max(...points.map((p) => p.y))).toBe(page.top + page.height - 12);
   });
 });

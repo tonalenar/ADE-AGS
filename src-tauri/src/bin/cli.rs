@@ -109,6 +109,7 @@ PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os d
                                               (sem eval, upload nem cookies: isso é do usuário)
   portal act <portal> \"objetivo\" [--fill campo=valor]... [--steps 8]
                                               O Jev navega sozinho até o objetivo, passo a passo (Ajustes → Decisões → Navegador do canvas)
+                                              Prefira UM act com o trajeto inteiro (--steps até 15): cada chamada extra custa um turno seu
 
 CHAT COM O USUÁRIO — o chat dele por conversas (sete cores); o que você escreve no terminal NÃO chega a ele
   say \"texto\" [--progress] [--thread <cor>]    Responde no chat (--progress: aviso, seu turno continua)

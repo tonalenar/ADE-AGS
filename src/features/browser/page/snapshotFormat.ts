@@ -56,6 +56,21 @@ export function formatSnapshot(nodes: SnapshotNode[], meta: SnapshotMeta): strin
   return [...header, "", ...body].join("\n");
 }
 
+/**
+ * Um elemento está longe da janela da página (meia tela acima, uma tela abaixo)? Só o piloto usa: numa página longa o
+ * snapshot em ordem de página gasta os nós no menu e perde os resultados. Sem medidas (largura e altura 0) ou fixo/sticky
+ * (um cabeçalho que acompanha a rolagem) nunca é "longe". Pura.
+ */
+export function farFromWindow(
+  box: { top: number; bottom: number; width: number; height: number },
+  viewHeight: number,
+  position = "static",
+): boolean {
+  if (box.width === 0 && box.height === 0) return false;
+  if (position === "fixed" || position === "sticky") return false;
+  return box.bottom < -viewHeight * 0.5 || box.top > viewHeight * 2;
+}
+
 /** Espacios colapsados y recortado: los nombres son para leer, no para comparar. */
 export function normalizeName(text: string, max = 80): string {
   const flat = text.replace(/\s+/g, " ").trim();

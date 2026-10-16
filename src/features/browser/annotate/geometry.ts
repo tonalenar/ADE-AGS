@@ -61,6 +61,31 @@ export function cropFor(page: Box, clip: Box, viewport: Size, image: Size): Crop
 }
 
 /**
+ * Se a página está LIVRE: nada do app (a barra lateral, a dock, um painel flutuante) por cima dela. A foto é do webview
+ * inteiro, então o que estiver por cima sai nela; só comparar com a janela não vê isso. `free(x, y)` diz se o ponto da tela
+ * pertence à página (na prática `document.elementFromPoint` dentro do iframe ou da sua coluna). A prova é uma grade de
+ * 5×5 pontos longe da borda (as alças do nó invadem alguns pixels), e vale só se TODOS estão livres.
+ */
+/** Os pontos de prova de uma página: uma grade de `steps`×`steps` longe da borda (as alças do nó invadem alguns pixels). */
+export function probePoints(page: Box, steps = 5): Point[] {
+  const inset = Math.min(12, page.width / 4, page.height / 4);
+  const points: Point[] = [];
+  for (let i = 0; i < steps; i++) {
+    for (let j = 0; j < steps; j++) {
+      points.push({
+        x: page.left + inset + ((page.width - 2 * inset) * i) / (steps - 1),
+        y: page.top + inset + ((page.height - 2 * inset) * j) / (steps - 1),
+      });
+    }
+  }
+  return points;
+}
+
+export function isUncovered(page: Box, free: (x: number, y: number) => boolean, steps = 5): boolean {
+  return probePoints(page, steps).every((point) => free(point.x, point.y));
+}
+
+/**
  * Dónde se muestra la página congelada dentro de su columna.
  *
  * Si la columna sigue igual, exactamente donde estaba: es lo que hace que se vea "congelada"

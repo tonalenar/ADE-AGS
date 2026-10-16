@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — garantia</title>
+<!-- L07: depois de adicionar, o site oferece garantia estendida; o carrinho só fecha ao escolher. -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Fone Bluetooth</h1>
+  <p>Fone sem fio, 30 horas de bateria. R$ 249,90</p>
+  <div id="status">Carrinho: 0</div>
+  <button onclick="document.getElementById('upsell').hidden = false">Adicionar ao carrinho</button>
+</main>
+<div class="overlay" id="upsell" hidden>
+  <div class="box">
+    <h2>Proteja a sua compra</h2>
+    <p>Garantia estendida de 2 anos por mais R$ 49,00.</p>
+    <button class="green" onclick="pick('Carrinho: 1 · com garantia')">Adicionar garantia (+R$ 49)</button>
+    <button class="gray" onclick="pick('Carrinho: 1 · sem garantia')">Continuar sem garantia</button>
+  </div>
+</div>
+<script>
+  function pick(t) { document.getElementById('upsell').hidden = true; document.getElementById('status').textContent = t; }
+</script>
+</html>

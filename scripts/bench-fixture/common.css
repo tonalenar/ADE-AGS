@@ -1,0 +1,19 @@
+body { margin: 0; font: 16px system-ui, sans-serif; color: #111; }
+header { background: #282c34; height: 80px; display: flex; align-items: center; gap: 20px; padding: 0 30px; color: #fff; }
+header b { font-size: 22px; }
+header .space { flex: 1; }
+.icon { width: 48px; height: 48px; cursor: pointer; border-radius: 8px; display: grid; place-items: center; }
+.icon:hover { background: #3b4048; }
+.icon svg { width: 28px; height: 28px; stroke: #fff; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+main { padding: 24px 30px; }
+h1 { font-size: 22px; margin: 0 0 16px; }
+#status { font-size: 22px; font-weight: 600; margin-bottom: 20px; min-height: 30px; }
+button { font-size: 16px; padding: 10px 20px; margin: 0 10px 10px 0; border: 0; border-radius: 4px; color: #fff; cursor: pointer; background: #2563eb; }
+button.green { background: #16a34a; } button.gray { background: #6b7280; } button.red { background: #dc2626; }
+input, select { font-size: 16px; padding: 8px; margin: 0 8px 12px 0; }
+label { display: block; margin-bottom: 4px; }
+.grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+.card { border: 1px solid #ddd; border-radius: 8px; padding: 12px; }
+.overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .55); display: grid; place-items: center; z-index: 10; }
+.overlay[hidden] { display: none; }
+.box { background: #fff; border-radius: 8px; padding: 24px; max-width: 420px; }

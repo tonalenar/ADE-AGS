@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — cozinha</title>
+<!-- L09: oito botões «Adicionar» IGUAIS (sem aria-label): só a posição junto do nome do produto os distingue. -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Cozinha</h1>
+  <div id="status">No carrinho: nada</div>
+  <div class="grid" id="grid"></div>
+</main>
+<script>
+  const items = [['Chaleira Elétrica', '129,90'], ['Cafeteira', '219,90'], ['Liquidificador', '179,90'], ['Torradeira', '99,90'],
+                 ['Panela de Pressão', '149,90'], ['Jogo de Facas', '89,90'], ['Fritadeira', '399,90'], ['Batedeira', '259,90']];
+  const grid = document.getElementById('grid');
+  for (const [name, price] of items) {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.innerHTML = '<h3></h3><p>R$ ' + price + '</p>';
+    card.querySelector('h3').textContent = name;
+    const b = document.createElement('button');
+    b.textContent = 'Adicionar';
+    b.onclick = () => { document.getElementById('status').textContent = 'No carrinho: ' + name; };
+    card.appendChild(b);
+    grid.appendChild(card);
+  }
+</script>
+</html>

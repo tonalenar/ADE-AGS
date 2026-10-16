@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — detalhes do produto</title>
+<!-- L13: abas de produto; o peso só aparece na aba Especificações. -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Liquidificador Turbo</h1>
+  <div role="tablist" style="margin-bottom: 12px;">
+    <button role="tab" aria-selected="true" onclick="tab(0, this)">Descrição</button>
+    <button role="tab" aria-selected="false" class="gray" onclick="tab(1, this)">Especificações</button>
+    <button role="tab" aria-selected="false" class="gray" onclick="tab(2, this)">Avaliações</button>
+  </div>
+  <div id="panel">Liquidificador de 1000 W com jarra de vidro.</div>
+</main>
+<script>
+  const panels = ['Liquidificador de 1000 W com jarra de vidro.', 'Peso: 1,2 kg · Tensão: 127 V · Cor: preto', 'Nota média 4,6 de 5 (312 avaliações).'];
+  function tab(i, el) {
+    document.getElementById('panel').textContent = panels[i];
+    document.querySelectorAll('[role=tab]').forEach((b) => { b.setAttribute('aria-selected', String(b === el)); b.className = b === el ? '' : 'gray'; });
+  }
+</script>
+</html>

@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — opções</title>
+<!-- L10: uma lista (tamanho), um grupo de radio (entrega) e um botão Confirmar. -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Camiseta Básica</h1>
+  <label for="size">Tamanho</label>
+  <select id="size">
+    <option value="">Escolha…</option>
+    <option>P</option><option>M</option><option>G</option><option>GG</option>
+  </select>
+  <fieldset style="margin: 12px 0;">
+    <legend>Entrega</legend>
+    <label><input type="radio" name="ship" value="Normal"> Normal (5 dias)</label>
+    <label><input type="radio" name="ship" value="Expressa"> Expressa (1 dia)</label>
+    <label><input type="radio" name="ship" value="Retirar na loja"> Retirar na loja</label>
+  </fieldset>
+  <button onclick="confirmar()">Confirmar</button>
+  <div id="status"></div>
+</main>
+<script>
+  function confirmar() {
+    const size = document.getElementById('size').value;
+    const ship = document.querySelector('input[name=ship]:checked');
+    document.getElementById('status').textContent = size && ship ? 'Confirmado: tamanho ' + size + ', ' + ship.value : 'Faltam opções';
+  }
+</script>
+</html>

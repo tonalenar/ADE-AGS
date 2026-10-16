@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   callerOf, displayPath, formatConsoleArgs, formatValue, MAX_TEXT, toTransferable,
 } from "../page/serialize";
-import { distanceToBox, formatNode, formatSnapshot, humanizeId, parseKeyCombo, parseTarget, probePoints, snapToNearest } from "../page/snapshotFormat";
+import { distanceToBox, farFromWindow, formatNode, formatSnapshot, humanizeId, parseKeyCombo, parseTarget, probePoints, snapToNearest } from "../page/snapshotFormat";
 
 describe("formatValue", () => {
   it("muestra los primitivos como una consola", () => {
@@ -263,5 +263,24 @@ describe("parseKeyCombo", () => {
   it("la tecla + también se puede apretar", () => {
     expect(parseKeyCombo("Control++")).toMatchObject({ key: "+", ctrlKey: true });
     expect(parseKeyCombo("+").key).toBe("+");
+  });
+});
+
+describe("farFromWindow (o snapshot do piloto só traz o que está perto da janela)", () => {
+  const at = (top: number, height = 40) => ({ top, bottom: top + height, width: 200, height });
+  it("na janela, meia tela acima e uma abaixo: perto", () => {
+    expect(farFromWindow(at(100), 800)).toBe(false);
+    expect(farFromWindow(at(-300), 800)).toBe(false); // acima, dentro de meia tela
+    expect(farFromWindow(at(1500), 800)).toBe(false); // abaixo, dentro de uma tela
+  });
+  it("muito abaixo ou muito acima: longe (os resultados de uma página longa entram, o rodapé não)", () => {
+    expect(farFromWindow(at(5000), 800)).toBe(true);
+    expect(farFromWindow(at(-900), 800)).toBe(true);
+  });
+  it("sem medidas, ou fixo/sticky, nunca é longe", () => {
+    expect(farFromWindow({ top: 9000, bottom: 9000, width: 0, height: 0 }, 800)).toBe(false);
+    expect(farFromWindow(at(9000), 800, "fixed")).toBe(false);
+    expect(farFromWindow(at(9000), 800, "sticky")).toBe(false);
+    expect(farFromWindow(at(9000), 800, "absolute")).toBe(true);
   });
 });
