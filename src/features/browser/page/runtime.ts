@@ -26,6 +26,7 @@ import { componentChain, describeElement, selectorOf } from "./dom";
 import {
   errorKindOf, headerList, headerValue, parseRawHeaders, readResponseBody, requestBodyPreview, MAX_PAGE_BODY,
 } from "./netCapture";
+import { diffFingerprint, scopeSignature, staleMessage, type Fingerprint } from "./guard";
 import { callerOf, clip, displayPath, formatConsoleArgs, formatValue, toTransferable } from "./serialize";
 import {
   installCookieJar, installScrollbars, installStorageSync, JAR_HEADER, OWN_HEADER, takeNatives,
@@ -556,6 +557,11 @@ declare global {
   const marked = new Map<string, Element>();
   let markedSeq = 1;
 
+  /** A impressão de cada ref no momento em que foi lido (ver `guard.ts`): antes de agir sobre um ref, o runtime tira
+   *  outra e, se mudou, devolve `stale` sem tocar. Mesmo ciclo de vida dos refs: um snapshot novo substitui tudo. */
+  let prints = new Map<string, Fingerprint>();
+  const markedPrints = new Map<string, Fingerprint>();
+
   const INTERACTIVE_ROLES = new Set([
     "link", "button", "textbox", "searchbox", "checkbox", "radio", "combobox", "listbox", "slider",
     "spinbutton", "switch", "tab", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "treeitem",
@@ -700,6 +706,33 @@ declare global {
     return undefined;
   }
 
+  const SCOPE_SELECTOR = "form,dialog,[role=dialog],li,tr,[role=listitem],[role=row]";
+
+  /** A impressão de um elemento (`guard.ts`). `scopes` guarda o texto de cada escopo já lido: dezenas de botões do mesmo
+   *  `<li>`/`<form>` não releem o texto a cada um. */
+  function fingerprintOf(el: Element, scopes?: Map<Element, string>): Fingerprint {
+    const role = roleOf(el) ?? "clickable";
+    const scopeEl = el.closest(SCOPE_SELECTOR);
+    let scope = "";
+    if (scopeEl) {
+      const cached = scopes?.get(scopeEl);
+      if (cached !== undefined) scope = cached;
+      else {
+        scope = scopeSignature(scopeEl.textContent);
+        scopes?.set(scopeEl, scope);
+      }
+    }
+    return {
+      role,
+      name: nameOf(el, role),
+      value: valueOf(el) ?? "",
+      checked: !!(el as HTMLInputElement).checked || el.getAttribute("aria-checked") === "true",
+      disabled: !!(el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true",
+      href: el.getAttribute("href") ?? "",
+      scope,
+    };
+  }
+
   /** Algo que la página hizo clickeable sin decirlo (`<div onClick>`): se delata por el
    *  cursor, que es lo mismo que mira una persona para saber si algo se toca. */
   function looksClickable(el: Element, style: CSSStyleDeclaration): boolean {
@@ -711,6 +744,8 @@ declare global {
 
   function snapshot(all: boolean, inView = false): string {
     refs = new Map();
+    prints = new Map();
+    const scopes = new Map<Element, string>();
     const nodes: SnapshotNode[] = [];
     const limit = all ? 3000 : 600;
     let omitted = 0;
@@ -793,6 +828,7 @@ declare global {
       if (interactive) {
         entry.ref = `e${nextRef++}`;
         refs.set(entry.ref, el);
+        prints.set(entry.ref, fingerprintOf(el, scopes));
       }
       if (el.tagName === "A") {
         const href = (el as HTMLAnchorElement).href;
@@ -844,7 +880,8 @@ declare global {
     return hit ? found[hit.index].el : null;
   }
 
-  function resolve(target: string): Element {
+  /** `act`: vai agir sobre o elemento (tocar, digitar, escolher…). Um ref que já não é o que foi lido não é usado: ver `guard.ts`. */
+  function resolve(target: string, act = false): Element {
     // Lo último que la persona marcó con el selector: se resuelve por identidad y no por
     // su selector, que podría no volver a encontrarlo.
     if (target === "pick") {
@@ -858,6 +895,11 @@ declare global {
       const el = refs.get(spec.ref) ?? marked.get(spec.ref);
       if (!el) throw new Error(`Não há nenhum elemento ${spec.ref}: tire um novo snapshot (os refs mudam a cada um).`);
       if (!el.isConnected) throw new Error(`${spec.ref} não está mais na página (mudou desde o último snapshot): tire um novo.`);
+      const printed = prints.get(spec.ref) ?? markedPrints.get(spec.ref);
+      if (act && printed) {
+        const diff = diffFingerprint(printed, fingerprintOf(el));
+        if (diff) throw new Error(staleMessage(spec.ref, diff));
+      }
       return el;
     }
     if (spec.kind === "point") {
@@ -1162,8 +1204,8 @@ declare global {
    *  arrastre de HTML para lo que usa `draggable`. Sin los dos, la mitad de las listas
    *  ordenables no se enteran. */
   async function drag(fromTarget: string, toTarget: string): Promise<unknown> {
-    const from = resolve(fromTarget);
-    const to = resolve(toTarget);
+    const from = resolve(fromTarget, true);
+    const to = resolve(toTarget, true);
     await cursor.toElement(from, "drag");
     const start = aim(from);
     const end = aim(to);
@@ -1197,7 +1239,7 @@ declare global {
 
   /** Pone un archivo en un `<input type=file>` como si lo hubiera elegido una persona. */
   async function upload(target: string, name: string, mime: string, data: string): Promise<unknown> {
-    const el = resolve(target);
+    const el = resolve(target, true);
     const input = el as HTMLInputElement;
     if (input.tagName !== "INPUT" || input.type !== "file") {
       throw new Error(`${describeElement(el)} não é um <input type="file">.`);
@@ -1497,6 +1539,7 @@ declare global {
     if (!ref) {
       ref = `u${markedSeq++}`;
       marked.set(ref, el);
+      markedPrints.set(ref, fingerprintOf(el));
     }
 
     const attributes: Record<string, string> = {};
@@ -1559,6 +1602,20 @@ declare global {
     };
   }
 
+  /** Resolve o alvo com a guarda e, feita a ação, anota o elemento como está agora: repetir o mesmo toque no mesmo ref
+   *  («+» duas vezes, digitar de novo no campo) não é uma mudança que o agente não tenha visto. */
+  async function acting<T>(target: string, action: (el: Element) => Promise<T>): Promise<T> {
+    const el = resolve(target, true);
+    const result = await action(el);
+    const spec = parseTarget(target);
+    if (spec.kind === "ref" && el.isConnected) {
+      const fresh = fingerprintOf(el);
+      if (prints.has(spec.ref)) prints.set(spec.ref, fresh);
+      else if (markedPrints.has(spec.ref)) markedPrints.set(spec.ref, fresh);
+    }
+    return result;
+  }
+
   function execute(command: PageCommand): Promise<unknown> | unknown {
     switch (command.op) {
       case "snapshot": return snapshot(!!command.all, !!command.inView);
@@ -1574,11 +1631,11 @@ declare global {
             : "Vuelve a comportarse como con mouse.",
         };
       }
-      case "click": return click(resolve(command.target));
-      case "hover": return hover(resolve(command.target));
-      case "type": return type(resolve(command.target), command.text, !!command.clear, !!command.submit);
-      case "press": return press(command.key, command.target ? resolve(command.target) : undefined);
-      case "select": return select(resolve(command.target), command.value);
+      case "click": return acting(command.target, click);
+      case "hover": return acting(command.target, hover);
+      case "type": return acting(command.target, (el) => type(el, command.text, !!command.clear, !!command.submit));
+      case "press": return command.target ? acting(command.target, (el) => press(command.key, el)) : press(command.key);
+      case "select": return acting(command.target, (el) => select(el, command.value));
       case "scroll": return scroll(command);
       case "wait": return wait(command);
       case "eval": return evaluate(command.code);
