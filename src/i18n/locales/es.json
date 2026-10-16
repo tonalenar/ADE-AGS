@@ -2538,6 +2538,8 @@
   "canvas.portalKind": "Navegador",
   "canvas.portalDelete": "Borrar portal",
   "canvas.portalDeleteConfirm": "¿Borrar?",
+  "canvas.agentDelete": "Cerrar terminal",
+  "canvas.agentDeleteConfirm": "¿Cerrar?",
   "canvas.role": "Rol: {{role}}",
   "canvas.floor.title": "Pisos",
   "canvas.floor.ground": "Planta baja",

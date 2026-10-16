@@ -2538,6 +2538,8 @@
   "canvas.portalKind": "Browser",
   "canvas.portalDelete": "Delete portal",
   "canvas.portalDeleteConfirm": "Delete?",
+  "canvas.agentDelete": "Close terminal",
+  "canvas.agentDeleteConfirm": "Close?",
   "canvas.role": "Role: {{role}}",
   "canvas.floor.title": "Floors",
   "canvas.floor.ground": "Ground",

@@ -2538,6 +2538,8 @@
   "canvas.portalKind": "Navegador",
   "canvas.portalDelete": "Apagar portal",
   "canvas.portalDeleteConfirm": "Apagar?",
+  "canvas.agentDelete": "Fechar terminal",
+  "canvas.agentDeleteConfirm": "Fechar?",
   "canvas.role": "Papel: {{role}}",
   "canvas.floor.title": "Andares",
   "canvas.floor.ground": "Térreo",

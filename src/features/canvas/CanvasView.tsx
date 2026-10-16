@@ -11,7 +11,8 @@ import { invoke } from "@tauri-apps/api/core";
 import { AlertaToast, Button, CloseIcon, useTheme } from "neogestify-ui-components";
 
 import { useTabsStore } from "@/features/tabs/store";
-import { openNewAgentWizard } from "@/features/tabs/tabActions";
+import { agentKey } from "@/features/tabs/layout/layoutTree";
+import { openNewAgentWizard, requestCloseItem } from "@/features/tabs/tabActions";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import type { BrowserView } from "@/features/tabs/viewTabs";
 import type { Tab } from "@/features/tabs/types";
@@ -90,6 +91,8 @@ interface AgentNodeData extends Record<string, unknown> {
   role?: string;
   subagent: boolean;
   onFocus: (tabId: string) => void;
+  /** Fecha o terminal (e o nó) direto do canvas. */
+  onClose: (tabId: string) => void;
   onToggleOrchestrator: (tabId: string) => void;
   /** A pessoa mudou o que o terminal é (função e subagente). */
   onSetRole: (tabId: string, choice: AgentRoleChoice) => void;
@@ -346,6 +349,7 @@ function CanvasInner() {
         role: board.roles[tab.id],
         subagent: board.subagents.includes(tab.id),
         onFocus: focusNode,
+        onClose: (id: string) => { void requestCloseItem(agentKey(id)); },
         onSetRole: (id: string, choice: AgentRoleChoice) => {
           if (!key) return;
           // O agente lê a nova função; os orquestradores ligados a ele recebem o aviso atualizado.
@@ -823,8 +827,15 @@ function CanvasInner() {
 
 const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const { t } = useTranslation();
-  const { tab, box, live, links, orchestrator, role, subagent, onFocus, onToggleOrchestrator, onSetRole } = data;
+  const { tab, box, live, links, orchestrator, role, subagent, onFocus, onClose, onToggleOrchestrator, onSetRole } = data;
   const [editingRole, setEditingRole] = useState(false);
+  // Fechar um terminal derruba o agente: pede um segundo clique (e desarma sozinho se ninguém confirmar).
+  const [closeArmed, setCloseArmed] = useState(false);
+  useEffect(() => {
+    if (!closeArmed) return;
+    const timer = window.setTimeout(() => setCloseArmed(false), 4000);
+    return () => window.clearTimeout(timer);
+  }, [closeArmed]);
   const handle = "ade-port z-10! w-3! h-3! border-2! border-white! dark:border-surface! bg-gray-400! dark:bg-gray-200!";
 
   return (
@@ -899,6 +910,20 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
               text-gray-300 dark:text-white/20 hover:text-gray-600 dark:hover:text-white/60 hover:bg-gray-200/70 dark:hover:bg-white/8"
           >
             <PencilIcon className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="custom"
+            onClick={() => {
+              if (closeArmed) onClose(tab.id);
+              else setCloseArmed(true);
+            }}
+            title={closeArmed ? t("canvas.agentDeleteConfirm") : t("canvas.agentDelete")}
+            aria-label={closeArmed ? t("canvas.agentDeleteConfirm") : t("canvas.agentDelete")}
+            className={`nodrag cc-t shrink-0 flex items-center justify-center h-6 rounded-md
+              ${closeArmed
+                ? "px-2 text-[11px] font-medium text-white bg-red-500 hover:bg-red-600"
+                : "w-6 text-gray-300 dark:text-white/20 hover:text-red-500 hover:bg-gray-200/70 dark:hover:bg-white/8"}`}
+          >
+            {closeArmed ? t("canvas.agentDeleteConfirm") : <CloseIcon className="w-3 h-3" />}
           </Button>
           {links > 0 && (
             <span className="shrink-0 font-mono text-[10.5px] tabular-nums px-1.5 py-0.5 rounded-full
