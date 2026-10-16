@@ -669,15 +669,35 @@ declare global {
     return best;
   }
 
+  /** Os controles que são ligados/desligados: a ausência de `checked` neles é um estado (`unchecked`), não um detalhe. */
+  const CHECKABLE_ROLES = new Set(["checkbox", "radio", "switch", "menuitemcheckbox", "menuitemradio"]);
+
+  function isDisabled(el: Element): boolean {
+    if ((el as HTMLButtonElement).disabled || el.getAttribute("aria-disabled") === "true") return true;
+    // Um campo dentro de `<fieldset disabled>` não tem o atributo, mas está desabilitado do mesmo jeito.
+    if (isFormControl(el) || el.tagName === "BUTTON") {
+      if (el.closest("fieldset[disabled]") && !el.closest("legend")) return true;
+      try { return el.matches(":disabled"); } catch { return false; }
+    }
+    return false;
+  }
+
   function statesOf(el: Element, role: string): string[] {
     const states: string[] = [];
     const attr = (name: string) => el.getAttribute(name);
-    if ((el as HTMLButtonElement).disabled || attr("aria-disabled") === "true") states.push("disabled");
-    if ((el as HTMLInputElement).checked || attr("aria-checked") === "true") states.push("checked");
-    if (attr("aria-checked") === "mixed" || (el as HTMLInputElement).indeterminate) states.push("mixed");
-    if (attr("aria-expanded") === "true") states.push("expanded");
-    if (attr("aria-expanded") === "false") states.push("collapsed");
+    if (isDisabled(el)) states.push("disabled");
+    const checked = (el as HTMLInputElement).checked || attr("aria-checked") === "true";
+    if (checked) states.push("checked");
+    else if (CHECKABLE_ROLES.has(role) && attr("aria-checked") !== "mixed" && !(el as HTMLInputElement).indeterminate) states.push("unchecked");
+    if (attr("aria-checked") === "mixed" || attr("aria-pressed") === "mixed" || (el as HTMLInputElement).indeterminate) states.push("mixed");
+    // `<summary>` abre e fecha o `<details>` que o contém: o estado está no pai.
+    const details = el.tagName === "SUMMARY" ? el.parentElement : null;
+    if (attr("aria-expanded") === "true" || (details?.tagName === "DETAILS" && (details as HTMLDetailsElement).open)) states.push("expanded");
+    if (attr("aria-expanded") === "false" || (details?.tagName === "DETAILS" && !(details as HTMLDetailsElement).open)) states.push("collapsed");
     if (attr("aria-selected") === "true" || (el as HTMLOptionElement).selected) states.push("selected");
+    const current = attr("aria-current");
+    if (current && current !== "false") states.push("current");
+    if (attr("aria-busy") === "true") states.push("busy");
     if (attr("aria-pressed") === "true") states.push("pressed");
     if ((el as HTMLInputElement).required || attr("aria-required") === "true") states.push("required");
     if ((el as HTMLInputElement).readOnly) states.push("readonly");
@@ -752,7 +772,11 @@ declare global {
     const adMemo = new Map<Element, boolean>();
     const nodes: SnapshotNode[] = [];
     const limit = all ? 3000 : 600;
-    let omitted = 0;
+    /** Fora da janela (rolar traz) e além do limite de nós, separados: dizem coisas diferentes ao agente. */
+    let outOfView = 0;
+    let overLimit = 0;
+    let outOfViewControls = 0;
+    let overLimitControls = 0;
     let nextRef = 1;
 
     // `inView` (o piloto): só o que está na janela e perto dela (meia tela acima, uma abaixo). Numa página longa os 600
@@ -766,8 +790,10 @@ declare global {
     };
 
     const add = (node: SnapshotNode): void => {
-      if (nodes.length >= limit) omitted += 1;
-      else nodes.push(node);
+      if (nodes.length >= limit) {
+        overLimit += 1;
+        if (node.ref) overLimitControls += 1;
+      } else nodes.push(node);
     };
 
     const walkChildren = (parent: Node, depth: number): void => {
@@ -785,7 +811,7 @@ declare global {
     const walk = (node: Node, depth: number): void => {
       if (node.nodeType === 3) {
         const text = normalizeName(node.textContent ?? "", 200);
-        if (text && farFromView(node.parentElement)) omitted += 1;
+        if (text && farFromView(node.parentElement)) outOfView += 1;
         else if (text) add({ depth, role: "text", name: text, states: [] });
         return;
       }
@@ -807,7 +833,7 @@ declare global {
         // nada más que texto, va entero en una línea en vez de un renglón por nodo de texto.
         if (visible && !el.shadowRoot && !el.querySelector(HAS_STRUCTURE) && el.childElementCount > 0) {
           const text = normalizeName(textOf(el), 200);
-          if (text && farFromView(el)) omitted += 1;
+          if (text && farFromView(el)) outOfView += 1;
           else if (text) add({ depth, role: "text", name: text, states: [] });
           return;
         }
@@ -819,7 +845,8 @@ declare global {
       const leaf = interactive || (NAME_FROM_CONTENT.has(role) && !el.querySelector(HAS_STRUCTURE));
       // Longe da janela e sem filhos a listar: nem ref nem linha (`omitted` diz que há mais, e rolar traz).
       if (leaf && farFromView(el)) {
-        omitted += 1;
+        outOfView += 1;
+        if (interactive) outOfViewControls += 1;
         return;
       }
       const entry: SnapshotNode = {
@@ -856,7 +883,12 @@ declare global {
       viewport: { width: root.clientWidth, height: window.innerHeight },
       scrollY: window.scrollY,
       documentHeight: root.scrollHeight,
-      omitted,
+      omitted: outOfView + overLimit,
+      outOfView,
+      overLimit,
+      outOfViewControls,
+      overLimitControls,
+      limit,
     });
   }
 

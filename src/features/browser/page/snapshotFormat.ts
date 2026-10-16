@@ -29,8 +29,17 @@ export interface SnapshotMeta {
   viewport: { width: number; height: number };
   scrollY: number;
   documentHeight: number;
-  /** Cuántos nodos quedaron afuera por el tope. */
+  /** Quantos nós ficaram de fora, no total (fora da janela + além do limite). */
   omitted: number;
+  /** Desses, quantos estão fora da janela da página (rolar traz) — só no modo do piloto. */
+  outOfView?: number;
+  /** E quantos passaram do limite de nós (o snapshot completo traz até um limite maior). */
+  overLimit?: number;
+  /** Quantos dos omitidos, de cada causa, são controles (teriam ref): é o que mais importa a quem vai tocar. */
+  outOfViewControls?: number;
+  overLimitControls?: number;
+  /** O limite de nós listados neste snapshot. */
+  limit?: number;
 }
 
 const quote = (s: string) => JSON.stringify(s);
@@ -46,13 +55,33 @@ export function formatNode(node: SnapshotNode): string {
   return line;
 }
 
+/**
+ * A linha que conta o que ficou de fora. Separa o que está fora da janela (rolar traz) do que passou do limite (só o
+ * snapshot completo traz) e diz quantos são controles: «… 25 nós fora da janela (role para ver; 7 são controles) · 30 nós
+ * além do limite de 600 (peça o snapshot completo)». Sem o detalhe (quem monta a meta à mão), a contagem total.
+ */
+export function omittedLine(
+  meta: Pick<SnapshotMeta, "omitted" | "outOfView" | "overLimit" | "outOfViewControls" | "overLimitControls" | "limit">,
+): string {
+  if (meta.outOfView === undefined && meta.overLimit === undefined) {
+    return `… ${meta.omitted} nós omitidos (peça o snapshot completo ou role a página)`;
+  }
+  const controls = (n: number | undefined) => (n && n > 0 ? `; ${n} ${n === 1 ? "é controle" : "são controles"}` : "");
+  const parts: string[] = [];
+  if (meta.outOfView) parts.push(`${meta.outOfView} nós fora da janela (role para ver${controls(meta.outOfViewControls)})`);
+  if (meta.overLimit) {
+    parts.push(`${meta.overLimit} nós além do limite${meta.limit ? ` de ${meta.limit}` : ""} (peça o snapshot completo${controls(meta.overLimitControls)})`);
+  }
+  return `… ${parts.join(" · ")}`;
+}
+
 export function formatSnapshot(nodes: SnapshotNode[], meta: SnapshotMeta): string {
   const header = [
     `page: ${meta.title ? `${quote(meta.title)} ` : ""}${meta.url}`,
     `viewport: ${meta.viewport.width}×${meta.viewport.height} · scroll ${Math.round(meta.scrollY)}/${Math.round(meta.documentHeight)}`,
   ];
   const body = nodes.length ? nodes.map(formatNode) : ["(la página no tiene contenido visible)"];
-  if (meta.omitted > 0) body.push(`… ${meta.omitted} nodos más (pedí el snapshot completo o hacé scroll)`);
+  if (meta.omitted > 0) body.push(omittedLine(meta));
   return [...header, "", ...body].join("\n");
 }
 
