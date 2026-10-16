@@ -698,6 +698,34 @@ export function groupMetrics(runs: TaskRun[]): GroupMetrics {
   };
 }
 
+/**
+ * O PORTÃO de liberação (plano v2, Fase 7): o que uma rodada do portão (locais + públicas, SEM sondas) precisa cumprir antes de
+ * um instalador. Sucesso ≥ 90%, falso «feito» ≤ 2%, mediana por passo ≤ 700 ms, 0 travamentos da janela, 0 «verificado» errado.
+ */
+export interface ReleaseLimits {
+  minSuccessRate: number;
+  maxFalseDoneRate: number;
+  maxStepP50Ms: number;
+  maxWindowHangs: number;
+  maxVerifiedWrong: number;
+}
+
+export const RELEASE_LIMITS: ReleaseLimits = { minSuccessRate: 0.9, maxFalseDoneRate: 0.02, maxStepP50Ms: 700, maxWindowHangs: 0, maxVerifiedWrong: 0 };
+
+/** Confere um grupo contra os limites. Sem rodadas, não passa (nada foi medido). Pura. */
+export function gateCheck(g: GroupMetrics, limits: ReleaseLimits = RELEASE_LIMITS): { ok: boolean; failures: string[] } {
+  const failures: string[] = [];
+  if (g.runs === 0) return { ok: false, failures: ["nenhuma rodada no portão"] };
+  if (g.successRate < limits.minSuccessRate) failures.push(`sucesso ${pct(g.successRate)} < ${pct(limits.minSuccessRate)}`);
+  const falseRate = g.falseDone / g.runs;
+  if (falseRate > limits.maxFalseDoneRate) failures.push(`falso «feito» ${pct(falseRate)} > ${pct(limits.maxFalseDoneRate)}`);
+  // Sem tempo de passo medido (relatório antigo) o percentil é 0: não reprova por falta de dado.
+  if (g.stepP50 > limits.maxStepP50Ms) failures.push(`mediana por passo ${Math.round(g.stepP50)} ms > ${limits.maxStepP50Ms} ms`);
+  if (g.windowHangs > limits.maxWindowHangs) failures.push(`${g.windowHangs} travamento(s) da janela > ${limits.maxWindowHangs}`);
+  if (g.verifiedWrong > limits.maxVerifiedWrong) failures.push(`${g.verifiedWrong} «verificado» errado > ${limits.maxVerifiedWrong}`);
+  return { ok: failures.length === 0, failures };
+}
+
 /** As métricas v2: portão (sem sondas), locais × públicas, sondas à parte e uma linha por tarefa. Pura. */
 export function summarizeV2(tasks: Pick<BenchTask, "id" | "kind" | "probe">[], runs: TaskRun[]): MetricsV2 {
   const meta = new Map(tasks.map((t) => [t.id, t]));

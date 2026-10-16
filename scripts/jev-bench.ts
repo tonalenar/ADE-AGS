@@ -15,6 +15,7 @@
  *   · --repeat N (repetições por tarefa, padrão 1) · --seed S (semente da ordem e da latência simulada, padrão 1)
  *   · --no-alternate (sem inverter a ordem nas repetições ímpares) · --set v1|v2 (só uma leva de tarefas)
  *   · --history (grava também docs/ade-ags/bench/historico/<data>-<modo>-<label>.json/.md e uma linha no índice HISTORICO.md)
+ *   · --gate (Fase 7: sai com código 1 se o portão de liberação falhar: sucesso ≥ 90%, falso «feito» ≤ 2%, passo p50 ≤ 700 ms, 0 travamentos)
  *   · --with-expect (Fase 5: passa ao `act` os `--expect` equivalentes ao critério de cada tarefa e mede NÃO CONFERE / «verificado» errado)
  *   · --sim-guard (sim: liga a guarda semântica simulada da Fase 2.1, para ver o «depois»)
  *   Real: --public (inclui Wikipedia/Amazon) · --demo-login (inclui SauceDemo) · --max-real N (padrão 5 rodadas, já contando as repetições)
@@ -33,7 +34,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import {
-  buildReport, canStart, expectsFor, mergeRuns, renderTrend, infraTooHigh, isInfraFailure, unwrapCli, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
+  buildReport, canStart, expectsFor, gateCheck, mergeRuns, renderTrend, infraTooHigh, isInfraFailure, unwrapCli, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
   fixtureApi, fixtureSearchPage, hashSeed, isWindowHang, mergeQueries, parseDelay, queriesFromReport, repetitionPlan,
   type BenchReport, type BenchTask, type Phases, type QueryStats, type TaskRun, type WindowStats,
 } from "./bench/core";
@@ -401,4 +402,10 @@ if (flag("history")) {
   console.log(`Histórico: ${historyPath}`);
 }
 console.log(`\n${markdown}\n\nJSON: ${out}\nMarkdown: ${mdPath}\nImpressão dos números: ${report.digest}`);
+// `--gate`: o portão de liberação (Fase 7). Sai com código 1 se algum limite falhar.
+if (flag("gate")) {
+  const gate = gateCheck(report.v2!.gate);
+  console.log(gate.ok ? "\nPORTÃO: passou." : `\nPORTÃO: REPROVADO — ${gate.failures.join("; ")}.`);
+  process.exit(gate.ok ? 0 : 1);
+}
 process.exit(0);
