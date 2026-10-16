@@ -137,6 +137,42 @@ describe("«acabou» no primeiro passo", () => {
   });
 });
 
+describe("controle coberto por uma faixa", () => {
+  const COOKIES = [
+    'page: "Loja" http://loja.test/c', "viewport: 1280×800 · scroll 0/800", "",
+    '- button "Adicionar ao carrinho" [ref=e1]', '- button "Aceitar todos" [ref=e2]',
+  ].join(String.fromCharCode(10));
+  const run = async (choices: string[]) => {
+    const calls: string[] = [];
+    let at = 0;
+    let pick = 0;
+    const deps: PilotDeps = {
+      snapshot: async () => COOKIES + (at > 0 ? String.fromCharCode(10) + '- text "passo ' + at + '"' : ""),
+      click: async (ref) => {
+        calls.push(ref);
+        if (ref === "e1" && !calls.includes("e2")) throw new Error("button está coberto por div#banner (#banner)");
+        at++;
+      },
+      type: async () => undefined, select: async () => undefined, scroll: async () => undefined, settle: async () => undefined,
+      pick: async () => (choices[Math.min(pick++, choices.length - 1)] === "done" ? ok("done") : ok("click", choices[Math.min(pick - 1, choices.length - 1)])),
+    };
+    const result = await runPilot("adicionar a mochila", [], undefined, deps);
+    return { calls, result };
+  };
+
+  it("o Jev que repete o controle coberto UMA vez ainda tem a chance de ver a falha e fechar a faixa (L05)", async () => {
+    const { calls, result } = await run(["e1", "e1", "e2", "done"]);
+    expect(calls).toEqual(["e1", "e1", "e2"]);
+    expect(result.outcome).toBe("done");
+  });
+
+  it("…mas na segunda repetição o piloto para em vez de girar em círculos", async () => {
+    const { calls, result } = await run(["e1", "e1", "e1", "e1"]);
+    expect(calls).toEqual(["e1", "e1"]);
+    expect(result.outcome).toBe("stuck");
+  });
+});
+
 describe("regra «quantidade»", () => {
   it("o carrinho subiu na primeira vez: o segundo «adicionar» do mesmo item é recusado, sem clicar", async () => {
     // pág. 0 carrinho 0 → clique → pág. 1 carrinho 1; o Jev insiste no mesmo botão; depois conclui.

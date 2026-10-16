@@ -1101,6 +1101,9 @@ async function pilotLoop(
       // Um controle coberto (a faixa de cookies, o modal) não é o fim: o Jev vê a falha no histórico e escolhe fechar o que está na frente.
       if (/est[áa] coberto por/i.test(message) && coveredRetries < 3) {
         coveredRetries += 1;
+        // O Jev ainda não tinha visto a falha ao escolher o controle coberto: na PRIMEIRA vez, escolher o mesmo de novo não é girar em
+        // círculos (L05: a segunda escolha foi e1 outra vez e o act parou). Na segunda, sim.
+        if (coveredRetries === 1) lastSignature = "";
         const what = `tentou tocar em ${reply.target ?? "um elemento"}, mas falhou: ${message.split(". ")[0].slice(0, 160)}`;
         log.push(`${step}. ${what}`);
         history.push({ what, changed: false });
