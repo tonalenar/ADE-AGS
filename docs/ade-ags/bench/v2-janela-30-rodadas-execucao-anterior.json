@@ -1,0 +1,639 @@
+﻿{
+    "exe":  "C:\\Users\\tonz1n\\AppData\\Local\\Temp\\claude\\C--Users-tonz1n--ags-worktrees-b016944e\\2f623b53-7fa2-4e6b-8087-d1e232517697\\scratchpad\\ade-ags-aceite.exe",
+    "rounds":  15,
+    "jevQueries":  8,
+    "acts":  8,
+    "results":  [
+                    {
+                        "mode":  "minimizada",
+                        "round":  1,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=77 wait=934 snapshot=39 type=785 click=564 wait2=471 screenshot=83",
+                        "lagPeakMs":  34,
+                        "lastLagMs":  5,
+                        "hidden":  false,
+                        "silentMs":  662,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  2,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=59 wait=477 snapshot=47 type=784 click=562 wait2=465 screenshot=78 act=809",
+                        "lagPeakMs":  7,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  917,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  2,
+                                    "head":  "{\"portal\":{\"id\":\"portal-119c0db5-772e-4b7b-9cfb-ec75743086c9\",\"name\":\"aceite-minimizada-2\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"act "
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  3,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=41 wait=479 snapshot=30 type=790 click=563 wait2=466 screenshot=107",
+                        "lagPeakMs":  12,
+                        "lastLagMs":  5,
+                        "hidden":  false,
+                        "silentMs":  279,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  4,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=46 wait=469 snapshot=25 type=772 click=555 wait2=462 screenshot=63 act=761",
+                        "lagPeakMs":  4,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  323,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  3,
+                                    "head":  "{\"portal\":{\"id\":\"portal-e9670292-021c-4fcc-8ffe-7bbbad9f3f4e\",\"name\":\"aceite-minimizada-4\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"act "
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  5,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=48 wait=486 snapshot=27 type=775 click=546 wait2=465 screenshot=67",
+                        "lagPeakMs":  9,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  608,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  6,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=54 wait=482 snapshot=35 type=773 click=555 wait2=460 screenshot=64 act=838",
+                        "lagPeakMs":  7,
+                        "lastLagMs":  6,
+                        "hidden":  false,
+                        "silentMs":  748,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  3,
+                                    "head":  "{\"portal\":{\"id\":\"portal-7b9a391c-8158-442b-ac72-1105dde4aa6c\",\"name\":\"aceite-minimizada-6\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"act "
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  7,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=43 wait=473 snapshot=27 type=785 click=547 wait2=462 screenshot=65",
+                        "lagPeakMs":  6,
+                        "lastLagMs":  6,
+                        "hidden":  false,
+                        "silentMs":  31,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  8,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=46 wait=474 snapshot=25 type=769 click=554 wait2=466 screenshot=66 act=755",
+                        "lagPeakMs":  6,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  69,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  4,
+                                    "head":  "{\"portal\":{\"id\":\"portal-655108f5-f392-41ab-a422-ccdff0aaf5b3\",\"name\":\"aceite-minimizada-8\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"act "
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  9,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=46 wait=486 snapshot=39 type=795 click=559 wait2=463 screenshot=68",
+                        "lagPeakMs":  11,
+                        "lastLagMs":  11,
+                        "hidden":  false,
+                        "silentMs":  405,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  10,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=44 wait=474 snapshot=32 type=783 click=554 wait2=463 screenshot=63 act=764",
+                        "lagPeakMs":  6,
+                        "lastLagMs":  6,
+                        "hidden":  false,
+                        "silentMs":  463,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  4,
+                                    "head":  "{\"portal\":{\"id\":\"portal-0e467635-e531-428a-9452-bca1cb74e648\",\"name\":\"aceite-minimizada-10\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"act"
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  11,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=41 wait=478 snapshot=26 type=773 click=569 wait2=460 screenshot=66",
+                        "lagPeakMs":  5,
+                        "lastLagMs":  5,
+                        "hidden":  false,
+                        "silentMs":  760,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  12,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=128 wait=486 snapshot=36 type=796 click=575 wait2=468 screenshot=83 act=771",
+                        "lagPeakMs":  6,
+                        "lastLagMs":  5,
+                        "hidden":  false,
+                        "silentMs":  986,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  2,
+                                    "head":  "{\"portal\":{\"id\":\"portal-9e0b382d-d782-404a-b054-84a3cc1c3eca\",\"name\":\"aceite-minimizada-12\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"act"
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  13,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=55 wait=475 snapshot=26 type=777 click=543 wait2=453 screenshot=68",
+                        "lagPeakMs":  5,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  275,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  14,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=43 wait=468 snapshot=28 type=772 click=551 wait2=459 screenshot=72 act=785",
+                        "lagPeakMs":  8,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  329,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  1,
+                                    "head":  "{\"portal\":{\"id\":\"portal-6b271634-be49-4d95-ad50-0b53408ab9cf\",\"name\":\"aceite-minimizada-14\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"act"
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  15,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=48 wait=480 snapshot=24 type=774 click=547 wait2=467 screenshot=80",
+                        "lagPeakMs":  6,
+                        "lastLagMs":  6,
+                        "hidden":  false,
+                        "silentMs":  634,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  1,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=65 wait=702 snapshot=187 type=2171 click=2048 wait2=446 screenshot=165",
+                        "lagPeakMs":  93,
+                        "lastLagMs":  9,
+                        "hidden":  false,
+                        "silentMs":  1000,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  2,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=46 wait=578 snapshot=152 type=2316 click=2076 wait2=482 screenshot=195 act=2181",
+                        "lagPeakMs":  7,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  646,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  2,
+                                    "head":  "{\"portal\":{\"id\":\"portal-5772852b-b169-437b-b52d-dabbb96e7d09\",\"name\":\"aceite-pesada-2\",\"url\":\"http://127.0.0.1:8765/pesada.html?q=caneca\"},\"text\":\"act \\\"digite "
+                                }
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  3,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=52 wait=703 snapshot=136 type=2304 click=2038 wait2=452 screenshot=141",
+                        "lagPeakMs":  12,
+                        "lastLagMs":  5,
+                        "hidden":  false,
+                        "silentMs":  84,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  4,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=65 wait=658 snapshot=166 type=2231 click=2045 wait2=444 screenshot=149",
+                        "lagPeakMs":  9,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  428,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  5,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=51 wait=545 snapshot=137 type=2338 click=1048 wait2=460 screenshot=142",
+                        "lagPeakMs":  7,
+                        "lastLagMs":  5,
+                        "hidden":  false,
+                        "silentMs":  738,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  6,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "wait: {\"error\":\"No llegó respuesta\"}",
+                                         "snapshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "type: campo de busca não achado no snapshot",
+                                         "click: botão Buscar não achado no snapshot",
+                                         "wait2: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "screenshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}"
+                                     ],
+                        "stepMs":  "create=50 wait=109 snapshot=29 type=0 click=0 wait2=24 screenshot=25",
+                        "lagPeakMs":  null,
+                        "lastLagMs":  null,
+                        "hidden":  null,
+                        "silentMs":  null,
+                        "bridgeTimeouts":  null,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  7,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "create: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "wait: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "snapshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "type: campo de busca não achado no snapshot",
+                                         "click: botão Buscar não achado no snapshot",
+                                         "wait2: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "screenshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}"
+                                     ],
+                        "stepMs":  "create=22 wait=21 snapshot=20 type=0 click=0 wait2=18 screenshot=20",
+                        "lagPeakMs":  null,
+                        "lastLagMs":  null,
+                        "hidden":  null,
+                        "silentMs":  null,
+                        "bridgeTimeouts":  null,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  8,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "create: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "wait: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "snapshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "type: campo de busca não achado no snapshot",
+                                         "click: botão Buscar não achado no snapshot",
+                                         "wait2: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "screenshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}"
+                                     ],
+                        "stepMs":  "create=22 wait=18 snapshot=18 type=0 click=0 wait2=16 screenshot=18",
+                        "lagPeakMs":  null,
+                        "lastLagMs":  null,
+                        "hidden":  null,
+                        "silentMs":  null,
+                        "bridgeTimeouts":  null,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  9,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "create: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "wait: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "snapshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "type: campo de busca não achado no snapshot",
+                                         "click: botão Buscar não achado no snapshot",
+                                         "wait2: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "screenshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}"
+                                     ],
+                        "stepMs":  "create=16 wait=19 snapshot=17 type=0 click=0 wait2=14 screenshot=16",
+                        "lagPeakMs":  null,
+                        "lastLagMs":  null,
+                        "hidden":  null,
+                        "silentMs":  null,
+                        "bridgeTimeouts":  null,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  10,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "create: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "wait: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "snapshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "type: campo de busca não achado no snapshot",
+                                         "click: botão Buscar não achado no snapshot",
+                                         "wait2: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "screenshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}"
+                                     ],
+                        "stepMs":  "create=19 wait=19 snapshot=29 type=0 click=0 wait2=17 screenshot=19",
+                        "lagPeakMs":  null,
+                        "lastLagMs":  null,
+                        "hidden":  null,
+                        "silentMs":  null,
+                        "bridgeTimeouts":  null,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  11,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "create: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "wait: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "snapshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "type: campo de busca não achado no snapshot",
+                                         "click: botão Buscar não achado no snapshot",
+                                         "wait2: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "screenshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}"
+                                     ],
+                        "stepMs":  "create=52 wait=28 snapshot=29 type=0 click=0 wait2=36 screenshot=29",
+                        "lagPeakMs":  null,
+                        "lastLagMs":  null,
+                        "hidden":  null,
+                        "silentMs":  null,
+                        "bridgeTimeouts":  null,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  12,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "create: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "wait: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "snapshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "type: campo de busca não achado no snapshot",
+                                         "click: botão Buscar não achado no snapshot",
+                                         "wait2: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "screenshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}"
+                                     ],
+                        "stepMs":  "create=30 wait=28 snapshot=26 type=0 click=0 wait2=23 screenshot=22",
+                        "lagPeakMs":  null,
+                        "lastLagMs":  null,
+                        "hidden":  null,
+                        "silentMs":  null,
+                        "bridgeTimeouts":  null,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  13,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "create: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "wait: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "snapshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "type: campo de busca não achado no snapshot",
+                                         "click: botão Buscar não achado no snapshot",
+                                         "wait2: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "screenshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}"
+                                     ],
+                        "stepMs":  "create=23 wait=24 snapshot=26 type=0 click=0 wait2=24 screenshot=65",
+                        "lagPeakMs":  null,
+                        "lastLagMs":  null,
+                        "hidden":  null,
+                        "silentMs":  null,
+                        "bridgeTimeouts":  null,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  14,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "create: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "wait: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "snapshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "type: campo de busca não achado no snapshot",
+                                         "click: botão Buscar não achado no snapshot",
+                                         "wait2: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "screenshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}"
+                                     ],
+                        "stepMs":  "create=39 wait=24 snapshot=25 type=0 click=0 wait2=20 screenshot=26",
+                        "lagPeakMs":  null,
+                        "lastLagMs":  null,
+                        "hidden":  null,
+                        "silentMs":  null,
+                        "bridgeTimeouts":  null,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  15,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "create: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "wait: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "snapshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "type: campo de busca não achado no snapshot",
+                                         "click: botão Buscar não achado no snapshot",
+                                         "wait2: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}",
+                                         "screenshot: {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-38088 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"}"
+                                     ],
+                        "stepMs":  "create=22 wait=21 snapshot=25 type=0 click=0 wait2=20 screenshot=23",
+                        "lagPeakMs":  null,
+                        "lastLagMs":  null,
+                        "hidden":  null,
+                        "silentMs":  null,
+                        "bridgeTimeouts":  null,
+                        "act":  null
+                    }
+                ]
+}
