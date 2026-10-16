@@ -53,6 +53,60 @@ fn beat_diagnosis(beat: Option<(u64, u64, bool)>) -> String {
     }
 }
 
+/// Por qué la ventana no respondió, a partir del último batimento (plan v2, Fase 1.3, I5).
+#[derive(Debug, PartialEq)]
+enum Stall {
+    /// La interfaz nunca avisó que estaba viva desde que abrió el app.
+    NoBeat,
+    /// La ventana estaba oculta o minimizada.
+    Hidden,
+    /// El batimento dejó de llegar con la ventana visible: el renderizador está trabado.
+    Frozen { silent_ms: u64 },
+    /// Late, pero con atraso grande: algo (una página pesada) ocupa el renderizador.
+    Busy { lag_ms: u64 },
+    /// Late sin atraso: la interfaz está sana y la acción simplemente no terminó a tiempo.
+    Alive,
+}
+
+/// El batimento llega una vez por segundo: pasado esto sin noticias, el renderizador no está corriendo.
+const STALE_BEAT_MS: u64 = 3_500;
+/// Atraso del laço de eventos a partir del cual la interfaz se considera ocupada.
+const BUSY_LAG_MS: u64 = 700;
+
+fn classify_stall(beat: Option<(u64, u64, bool)>) -> Stall {
+    match beat {
+        None => Stall::NoBeat,
+        Some((_, _, true)) => Stall::Hidden,
+        Some((since_ms, _, false)) if since_ms > STALE_BEAT_MS => Stall::Frozen { silent_ms: since_ms },
+        Some((_, lag_ms, false)) if lag_ms >= BUSY_LAG_MS => Stall::Busy { lag_ms },
+        Some(_) => Stall::Alive,
+    }
+}
+
+/// El texto del timeout: cada causa dice qué hacer (antes un solo mensaje mandaba traer la ventana al frente aunque ya lo estuviera).
+fn timeout_message(timeout: Duration, beat: Option<(u64, u64, bool)>) -> String {
+    let secs = timeout.as_secs();
+    let diagnosis = beat_diagnosis(beat);
+    match classify_stall(beat) {
+        Stall::Hidden => format!(
+            "A janela do ADE AGS está oculta ou minimizada e não respondeu em {secs} s. Peça ao usuário para trazê-la à frente e repita o comando; o navegador do canvas fica quase parado com a janela escondida. {diagnosis}"
+        ),
+        Stall::Frozen { silent_ms } => format!(
+            "A interface do ADE AGS parou de responder há {} s (a janela está visível): o renderizador está travado, provavelmente por uma página pesada. Espere cerca de 30 s e confira com `ags portals`; não reenvie a ordem agora, ela pode ainda estar rodando. {diagnosis}",
+            silent_ms / 1000
+        ),
+        Stall::Busy { lag_ms } => format!(
+            "A interface do ADE AGS está ocupada (atraso de {lag_ms} ms) e não terminou em {secs} s, provavelmente por uma página pesada. Espere alguns segundos, leia o estado com `ags portal snapshot <portal>` e só então continue; evite várias ordens seguidas. {diagnosis}"
+        ),
+        Stall::Alive => format!(
+            "A interface do ADE AGS está viva, mas a ação não terminou em {secs} s (navegação lenta ou ação longa). Confira com `ags portal snapshot <portal>` antes de repetir: a ação pode já ter acontecido. {diagnosis}"
+        ),
+        Stall::NoBeat => format!(
+            "O ADE AGS ainda não recebeu nenhum sinal de vida da interface (a janela está abrindo ou travou ao carregar). Espere alguns segundos e repita; se persistir, peça ao usuário para olhar a janela. {diagnosis}"
+        ),
+    }
+}
+
 fn last_beat_snapshot() -> Option<(u64, u64, bool)> {
     let beat = (*LAST_BEAT.lock().ok()?)?;
     Some((beat.at.elapsed().as_millis() as u64, beat.lag_ms, beat.hidden))
@@ -69,6 +123,44 @@ pub fn ui_heartbeat(lag_ms: Option<u64>, hidden: bool) -> u64 {
         }
     }
     TIMEOUTS.load(Ordering::Relaxed)
+}
+
+/// Progreso parcial del `act` por portal (plan v2, Fase 1.4): el frontend lo manda tras cada acción, y si la ventana se
+/// traba y el puente vence, el error lleva lo que ya se había hecho en vez de perderlo.
+static ACT_PROGRESS: Mutex<Option<HashMap<String, String>>> = Mutex::new(None);
+/// Tope del texto guardado por portal (el frontend ya lo recorta; esto protege el mapa).
+const MAX_PROGRESS_BYTES: usize = 8 * 1024;
+
+fn clip_progress(report: &str) -> String {
+    if report.len() <= MAX_PROGRESS_BYTES {
+        return report.to_string();
+    }
+    let mut end = MAX_PROGRESS_BYTES;
+    while !report.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n…", &report[..end])
+}
+
+#[tauri::command]
+pub fn portal_act_progress(portal_id: String, report: String) {
+    if let Ok(mut all) = ACT_PROGRESS.lock() {
+        all.get_or_insert_with(HashMap::new).insert(portal_id, clip_progress(&report));
+    }
+}
+
+/// Saca (y olvida) el progreso de un portal. `None` si no hubo ninguna acción.
+pub fn take_act_progress(portal_id: &str) -> Option<String> {
+    let mut all = ACT_PROGRESS.lock().ok()?;
+    all.as_mut()?.remove(portal_id).filter(|r| !r.is_empty())
+}
+
+/// Anexa el progreso parcial a un error del puente (tiempo agotado u otro): el agente sabe qué ya se hizo y no lo repite.
+pub fn with_partial_progress(error: String, progress: Option<String>) -> String {
+    match progress {
+        Some(done) => format!("{error}\n\n{done}\n\nO act pode ter continuado depois da queda: confira o estado com `ags portal snapshot <portal>` antes de repetir qualquer um desses passos."),
+        None => error,
+    }
 }
 
 #[derive(Serialize, Clone)]
@@ -141,9 +233,9 @@ pub fn ask_frontend_within(
 
     let result = rx.recv_timeout(timeout).map_err(|_| {
         let count = TIMEOUTS.fetch_add(1, Ordering::Relaxed) + 1;
-        let diagnosis = beat_diagnosis(last_beat_snapshot());
-        eprintln!("[bridge] timeout #{count} em '{command}' após {} ms. {diagnosis}", timeout.as_millis());
-        format!("A janela do ADE AGS não respondeu a tempo. Se ela estiver minimizada ou escondida, traga-a para a frente: o navegador do canvas só responde com a janela visível. {diagnosis}")
+        let beat = last_beat_snapshot();
+        eprintln!("[bridge] timeout #{count} em '{command}' após {} ms. {}", timeout.as_millis(), beat_diagnosis(beat));
+        timeout_message(timeout, beat)
     });
 
     PENDING.lock().ok().and_then(|mut p| p.remove(&request_id));
@@ -187,6 +279,63 @@ pub fn unwrap_frontend_result(value: Value) -> Result<Value, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn cada_causa_do_timeout_tem_sua_classe() {
+        assert_eq!(classify_stall(None), Stall::NoBeat);
+        assert_eq!(classify_stall(Some((400, 0, true))), Stall::Hidden);
+        // Oculta ganha de tudo, mesmo com o batimento velho: estrangulada.
+        assert_eq!(classify_stall(Some((60_000, 9_000, true))), Stall::Hidden);
+        assert_eq!(classify_stall(Some((20_000, 0, false))), Stall::Frozen { silent_ms: 20_000 });
+        assert_eq!(classify_stall(Some((900, 1_500, false))), Stall::Busy { lag_ms: 1_500 });
+        assert_eq!(classify_stall(Some((900, 40, false))), Stall::Alive);
+        // Bordas: 3,5 s ainda é «viva»; o atraso de 700 ms já é «ocupada».
+        assert_eq!(classify_stall(Some((STALE_BEAT_MS, 0, false))), Stall::Alive);
+        assert_eq!(classify_stall(Some((10, BUSY_LAG_MS, false))), Stall::Busy { lag_ms: BUSY_LAG_MS });
+    }
+
+    #[test]
+    fn as_mensagens_de_timeout_sao_distintas_e_dizem_o_que_fazer() {
+        let t = Duration::from_secs(15);
+        let cases = [
+            (None, "ainda não recebeu nenhum sinal"),
+            (Some((300, 0, true)), "oculta ou minimizada"),
+            (Some((30_000, 0, false)), "parou de responder há 30 s"),
+            (Some((500, 2_000, false)), "ocupada (atraso de 2000 ms)"),
+            (Some((500, 10, false)), "está viva, mas a ação não terminou em 15 s"),
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for (beat, needle) in cases {
+            let msg = timeout_message(t, beat);
+            assert!(msg.contains(needle), "{needle}: {msg}");
+            assert!(seen.insert(msg.chars().take(40).collect::<String>()), "mensagem repetida: {msg}");
+        }
+        // «Traga à frente» só quando a janela está oculta; com a janela visível o texto não manda isso.
+        assert!(timeout_message(t, Some((300, 0, true))).contains("trazê-la à frente"));
+        assert!(!timeout_message(t, Some((500, 10, false))).contains("trazê-la à frente"));
+        assert!(timeout_message(t, Some((30_000, 0, false))).contains("`ags portals`"));
+    }
+
+    #[test]
+    fn o_progresso_parcial_se_guarda_se_recorta_e_se_esquece_ao_tirar() {
+        assert_eq!(take_act_progress("p-nunca"), None);
+        portal_act_progress("p-1".into(), "1. clicou @e3".into());
+        portal_act_progress("p-1".into(), "1. clicou @e3\n2. digitou em @e5".into());
+        assert_eq!(take_act_progress("p-1").as_deref(), Some("1. clicou @e3\n2. digitou em @e5"));
+        assert_eq!(take_act_progress("p-1"), None);
+        // Um texto enorme (com acento na borda) se corta sem quebrar o UTF-8.
+        portal_act_progress("p-2".into(), "ã".repeat(MAX_PROGRESS_BYTES));
+        let clipped = take_act_progress("p-2").unwrap();
+        assert!(clipped.len() <= MAX_PROGRESS_BYTES + 4 && clipped.ends_with('…'));
+    }
+
+    #[test]
+    fn o_erro_do_puente_leva_o_progresso_quando_ha() {
+        let err = "A interface parou".to_string();
+        assert_eq!(with_partial_progress(err.clone(), None), err);
+        let msg = with_partial_progress(err, Some("Ações já feitas (1):\n1. clicou @e3".into()));
+        assert!(msg.starts_with("A interface parou") && msg.contains("1. clicou @e3") && msg.contains("ags portal snapshot"));
+    }
 
     #[test]
     fn diagnostico_sem_batimento() {

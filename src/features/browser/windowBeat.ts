@@ -88,6 +88,11 @@ export function startWindowBeat(): () => void {
   return () => { clearInterval(tick); clearInterval(report); started = false; };
 }
 
+/** Saúde do renderizador desde `since` (ms epoch): o que o `PageChannel` usa para dizer por que a página não respondeu. */
+export function windowSince(since: number): WindowStats {
+  return statsBetween(ring.all(), since, Date.now());
+}
+
 /** Marca o começo de um `act`: devolve a função que fecha a medida. */
 export function beginWindowMeasure(): () => Promise<WindowStats> {
   const since = Date.now();
