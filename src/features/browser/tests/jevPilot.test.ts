@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, blockedControl, isAmbiguous, isSearchField, submitsOnType, emptyFieldsNote, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, blockedControl, obviousAdvance, isAmbiguous, isSearchField, submitsOnType, emptyFieldsNote, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -801,5 +801,32 @@ describe("valor que falta", () => {
     const result = await runPilot("entrar", ["Outro=1", "Mais=2"], undefined, h.deps);
     expect(h.asked[1].state).toContain("não há valor para");
     expect(result.outcome).not.toBe("error");
+  });
+});
+
+describe("avançar um fluxo com p um pouco abaixo do piso", () => {
+  const ETAPA = (nome: string) => [
+    'page: "Etapa 1" http://localhost/e1', "viewport: 1280×800 · scroll 0/800",
+    `- textbox "Nome" [ref=e1] value="${nome}"`, '- button "Próximo" [ref=e2]', '- button "Cancelar" [ref=e3]',
+  ].join("\n");
+
+  it("com os campos preenchidos, o único «Próximo» com p=0,36 vale", () => {
+    const page = parseSnapshot(ETAPA("[x]"));
+    expect(obviousAdvance(page, "click", "e2", 0.36, "enviar o pedido")).toBe(true);
+    expect(obviousAdvance(page, "click", "e2", 0.2, "enviar o pedido")).toBe(false); // muito baixo
+    expect(obviousAdvance(page, "click", "e3", 0.36, "enviar o pedido")).toBe(false); // não é avançar
+    expect(obviousAdvance(page, "type", "e1", 0.36, "enviar o pedido")).toBe(false);
+  });
+
+  it("com um campo vazio na página, não: ainda falta preencher", () => {
+    expect(obviousAdvance(parseSnapshot(ETAPA("")), "click", "e2", 0.36, "enviar o pedido")).toBe(false);
+  });
+
+  it("o laço segue em vez de parar com «sem certeza»", async () => {
+    const h = harness([ok("click", "e2", 0.36), ok("done")], pagesOf(10).map(() => ETAPA("[x]")));
+    h.deps.snapshot = (() => { let n = 0; return async () => ETAPA("[x]").replace("Próximo", `Próximo${n++ > 0 ? " " : ""}`).replace('page: "Etapa 1"', `page: "Etapa ${n}"`); })();
+    const result = await runPilot("enviar o pedido", [], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(h.calls).toEqual(["click e2"]);
   });
 });

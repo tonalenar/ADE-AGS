@@ -424,6 +424,24 @@ export const MIN_PROBABILITY = 0.4;
 export const DEFAULT_STEPS = 8;
 export const MAX_STEPS = 15;
 
+/** Controles que só avançam um fluxo (próxima etapa, enviar o formulário já preenchido). */
+const ADVANCE = /^(pr[óo]xim[oa]|continuar|avan[çc]ar|seguinte|enviar|salvar|confirmar|next|continue|submit|save|send)\b/i;
+
+/** Piso para um controle de avançar, quando não há mais nada a preencher: um «Próximo» sozinho, com p entre 0,30 e 0,40, é o passo óbvio. */
+export const MIN_ADVANCE = 0.3;
+
+/**
+ * Uma escolha com p abaixo do piso, mas que é só avançar um fluxo: um botão «Próximo/Enviar/Continuar» e nenhum campo de
+ * texto vazio (fora a busca) na página. Medido: com os campos já preenchidos o Jev dava p=0,36 ao único «Próximo». Nunca vale
+ * para um controle de compra ou pagamento que o objetivo não pediu. Pura.
+ */
+export function obviousAdvance(page: ParsedPage, operation: string, target: string | null, probability: number | null, goal: string): boolean {
+  if (operation !== "click" || probability === null || probability < MIN_ADVANCE || probability >= MIN_PROBABILITY) return false;
+  const el = page.elements.find((e) => e.ref === target);
+  if (!el || !ADVANCE.test(el.name.trim()) || blockedControl(el, goal)) return false;
+  return !page.elements.some((e) => TYPING.has(e.role) && e.filled === false && !e.states.includes("disabled") && !isSearchField(e));
+}
+
 /** A reserva visual só age com estas certezas: o Jev viu um controle (p) e a caixa é firme (confiança). */
 export const MIN_FOUND = 0.6;
 export const MIN_BOX_CONFIDENCE = 0.6;
@@ -648,7 +666,8 @@ export async function runPilot(
     // `fim` = a pergunta direta "o objetivo já foi atingido?": aparece no relatório para o limite poder ser ajustado com dados.
     const meta = `${reply.probability !== null ? `p=${reply.probability.toFixed(2)}` : "p=?"}${reply.goalDone != null ? `, fim p=${reply.goalDone.toFixed(2)}` : ""}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
     const ambiguous = operation !== "done" && isAmbiguous(query, operation, reply.target);
-    if (ambiguous || (reply.probability !== null && reply.probability < MIN_PROBABILITY && operation !== "done")) {
+    const lowP = reply.probability !== null && reply.probability < MIN_PROBABILITY && operation !== "done";
+    if (ambiguous || (lowP && !obviousAdvance(page, operation, reply.target, reply.probability, goal))) {
       const fallback = await visualFallback(page, step);
       if (fallback === "acted") continue;
       if (fallback) log.push(fallback);
