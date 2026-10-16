@@ -36,7 +36,7 @@ import type { PageChannel } from "./pageChannel";
 import { browserToolPrefix } from "./tabMcp";
 import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
-import { formatResult, runPilot, type PilotDeps } from "./jevPilot";
+import { formatResult, runPilot, type Done, type Ledger, type PilotDeps } from "./jevPilot";
 import { beginWindowMeasure } from "./windowBeat";
 
 export interface BrowserHost {
@@ -720,6 +720,16 @@ export const PORTAL_OPS = new Set([
 ]);
 
 /** O que o piloto do Jev usa deste navegador: ver `jevPilot.ts`. As ações são as mesmas que o agente faria à mão. */
+/** O livro-razão de cada portal (plano v2, 3.3/4.1): o que os `act` anteriores fizeram. Some junto com o portal. */
+const LEDGERS = new WeakMap<BrowserHost, Done[]>();
+
+function ledgerOf(host: BrowserHost): Ledger {
+  return {
+    load: () => LEDGERS.get(host) ?? [],
+    save: (entries) => { LEDGERS.set(host, entries); },
+  };
+}
+
 function pilotDeps(host: BrowserHost): PilotDeps {
   /**
    * Depois de uma ação que levou a OUTRA página (o resultado diz `navigated`, mesmo num botão de formulário que não é link),
@@ -733,6 +743,7 @@ function pilotDeps(host: BrowserHost): PilotDeps {
     try { await inPage(host, { op: "wait", idle: true, timeoutMs: 1_200 }, false); } catch { /* segue */ }
   };
   return {
+    ledger: ledgerOf(host),
     // Um envio de busca pode levar segundos até a página nova existir (a Amazon: ~8 s): se a leitura falha por isso, espera a
     // próxima carga e lê de novo, em vez de abortar o `act` com o que já foi feito.
     snapshot: async () => {

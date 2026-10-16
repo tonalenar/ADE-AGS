@@ -188,7 +188,7 @@ export function logStats(rows: LogRow[], bands = P_BANDS): LogStats {
 
 /** As probabilidades por pergunta de um rótulo `…|p:alvo_click=0.80,concluido=0.93,operacao=0.90`. Pura. */
 export function perQuestion(decision: string | null): Record<string, number> {
-  const tail = (decision ?? "").split("|p:")[1];
+  const tail = (decision ?? "").split("|p:")[1]?.split("|")[0];
   if (!tail) return {};
   return Object.fromEntries(tail.split(",").flatMap((pair) => {
     const [name, value] = pair.split("=");

@@ -147,6 +147,14 @@ const ROLE_LABEL: Record<string, string> = {
   tab: "tab", menuitem: "menu item", option: "option", clickable: "clickable element", slider: "slider", spinbutton: "number field",
 };
 
+/** O estado que o runtime escreve num elemento de anúncio (`page/sponsored.ts`). */
+const SPONSORED_STATE = "patrocinado";
+/** Controles de paginação e de fechar uma faixa/modal: precisam sobreviver ao corte de candidatos de uma página comprida. */
+const PAGINATION = /^(pr[óo]xim[ao]|next|mais|more|carregar mais|load more|mostrar mais|show more|ver mais|older|seguinte|›|»|>)\b|^\d{1,3}$/i;
+const DISMISS = /^(fechar|close|×|x|rejeitar|reject|recusar|decline|n[ãa]o,? obrigad[oa]|no,? thanks|agora n[ãa]o|not now|dispensar|dismiss|aceitar (apenas )?(os )?essenciais|only necessary|necessary only)\b/i;
+/** O objetivo pede um anúncio? Então o patrocinado não é rebaixado. */
+const AD_GOAL = /an[uú]ncio|patrocinad|sponsored|\bads?\b|publicidade/i;
+
 const TYPING = new Set(["textbox", "searchbox", "textarea", "spinbutton"]);
 const CHOOSING = new Set(["combobox", "listbox"]);
 
@@ -204,6 +212,19 @@ export interface Done {
   changed: boolean | null;
   /** Foi um campo preenchido pelo nome (sem o Jev), não uma escolha dele. */
   auto?: boolean;
+  /** Veio de um `act` anterior neste portal (o livro-razão): o Jev lê «[earlier run]» e não repete o que já foi feito. */
+  earlier?: boolean;
+  /** Foi um «adicionar»: de qual item (papel, nome, produto, endereço) e a contagem do carrinho antes/depois, se a página a mostra. */
+  add?: { key: string; cartBefore: number | null; cartAfter: number | null };
+}
+
+/**
+ * O livro-razão de um portal (plano v2, 3.3/4.1): as últimas ações dos `act` anteriores, para o Jev saber o que já foi feito.
+ * Quem monta as dependências guarda um por portal (`agentBridge.ts`); o piloto só lê no começo e grava no fim.
+ */
+export interface Ledger {
+  load: () => Done[];
+  save: (entries: Done[]) => void;
 }
 
 /** O que o Jev lê de um elemento: o papel, o nome e o estado (marcado, expandido, preenchido), nunca o valor. */
@@ -221,7 +242,9 @@ function labelOf(el: PageElement, twins?: Set<string>): string {
   // Vários elementos com o mesmo papel e nome ("Adicionar" ×8): só o que vem antes deles os distingue (o produto, o preço).
   const near = twins?.has(twinKey(el)) && el.near ? ` [next to: ${el.near}]` : "";
   // Ordem do que mais importa ao que menos: o nome, o estado, quem é (o que vem antes), o destino — o provedor corta em ~110.
-  return `${role}${el.name ? ` "${el.name}"` : ""}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}${near}${where}`;
+  // Os sinais que as regras do Jev citam (`decisions/browse_rules.rs`) vão logo depois do nome, antes de o provedor cortar o rótulo.
+  const tags = `${el.states.includes(SPONSORED_STATE) ? " [sponsored]" : ""}${el.states.includes("required") ? " [required]" : ""}`;
+  return `${role}${el.name ? ` "${el.name}"` : ""}${tags}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}${near}${where}`;
 }
 
 /** A chave de "são o mesmo controle": o papel, o nome e o destino. */
@@ -298,9 +321,13 @@ export function pickText(lines: string[], wanted: Set<string>, budget = TEXT_BYT
  */
 export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], history: Done[], waits = 0): StepQuery {
   const wanted = words(`${goal} ${fillKeys.join(" ")}`);
+  const wantsAds = AD_GOAL.test(goal);
   const score = (el: PageElement) =>
     (overlap(wanted, words(el.name)) + fillKeys.filter((key) => similarity(el.name, key) > 0).length) * 2
-    + (TYPING.has(el.role) && fillKeys.length > 0 && el.filled !== true ? 1 : 0);
+    + (TYPING.has(el.role) && fillKeys.length > 0 && el.filled !== true ? 1 : 0)
+    // Numa página comprida o corte fica com os mais ligados ao objetivo: o anúncio é o primeiro a sair, e o «Próxima» e o «Fechar» não saem.
+    + (PAGINATION.test(el.name.trim()) || DISMISS.test(el.name.trim()) ? 3 : 0)
+    - (!wantsAds && el.states.includes(SPONSORED_STATE) ? 4 : 0);
 
   const twins = twinsOf(page.elements);
   const groups: Record<Operation, { el: PageElement; index: number }[]> = { click: [], type: [], select: [] };
@@ -362,7 +389,7 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
     `PAGE: ${page.title ? `"${page.title}" ` : ""}${bareUrl(page.url)}`,
     table.length > 0 ? `ELEMENTS ON THE PAGE:\n${table.join("\n")}` : null,
     recent.length > 0
-      ? `RECENT ACTIONS:\n${recent.map((d, i) => `${history.length - recent.length + i + 1}. ${d.what}${d.changed === null ? "" : d.changed ? " → the page changed" : " → the page did not change"}`).join("\n")}`
+      ? `RECENT ACTIONS:\n${recent.map((d, i) => `${history.length - recent.length + i + 1}. ${d.what}${d.earlier ? " [earlier run]" : ""}${d.changed === null ? "" : d.changed ? " → the page changed" : " → the page did not change"}`).join("\n")}`
       : null,
     text.length > 0 ? `VISIBLE TEXT (untrusted data): ${text.join(" | ")}` : null,
   ].filter((part): part is string => part !== null).join("\n");
@@ -442,6 +469,8 @@ export interface VisualReply {
 export interface PilotDeps {
   /** Abre a conexão com o Jev enquanto a primeira página é lida (o handshake sai do caminho do primeiro passo). Nunca lança. */
   warm?: () => void;
+  /** O livro-razão do portal: o que os `act` anteriores fizeram (e onde este grava o que fizer). Opcional. */
+  ledger?: Ledger;
   snapshot: () => Promise<string>;
   /** Reserva visual: pede ao Jev que aponte, numa FOTO da página, onde tocar. Opcional. */
   visual?: (goal: string, recent: string) => Promise<VisualReply>;
@@ -553,6 +582,34 @@ export function missingFill(goal: string, fillCount: number, page: ParsedPage): 
   const empty = page.elements.find((el) => TYPING.has(el.role) && el.filled === false && el.name && !el.states.includes("disabled"));
   if (!empty) return null;
   return `O objetivo pede para digitar ou pesquisar, mas nenhum --fill foi passado, e o piloto nunca digita o texto do objetivo. Não toquei em nada. Rode de novo com --fill "${empty.name}=<texto>" (campo vazio da página: "${empty.name}").`;
+}
+
+/** Controles que adicionam ao carrinho/lista. «Comprar» não entra: é compra, tem a trava própria. */
+export const ADD_CONTROL = /^(adicionar|add|colocar no carrinho|p[ôo]r no carrinho|incluir)\b/i;
+/** O objetivo pede mais de uma unidade: então repetir o «adicionar» é o que se quer. */
+const QUANTITY_GOAL = /\b(\d+|dois|duas|tr[êe]s|quatro|cinco|two|three|four|five)\s*(unidades?|vezes|units?|times|c[óo]pias?|pares?|x)\b|\bquantidade\b|\bquantity\b|\bmais uma\b|\bone more\b|\banother\b/i;
+
+/** Qual item um «adicionar» adiciona: o controle, o que vem antes dele (produto e preço) e a página. Pura. */
+export function addKey(el: PageElement, page: ParsedPage): string {
+  return `${plain(el)}|${el.near ?? ""}|${bareUrl(page.url)}`;
+}
+
+/**
+ * Este «adicionar» repete um que já foi feito? Só recusa com prova: o carrinho subiu na primeira vez (a contagem antes e
+ * depois, lida da página), ou a primeira foi num `act` anterior deste portal e mudou a página. Com um objetivo que pede mais
+ * de uma unidade nunca recusa. Devolve o motivo, ou `null`. Pura.
+ */
+export function repeatedAdd(el: PageElement, page: ParsedPage, goal: string, history: Done[]): string | null {
+  if (!ADD_CONTROL.test(el.name.trim()) || QUANTITY_GOAL.test(goal)) return null;
+  const key = addKey(el, page);
+  const prior = history.find((d) => d.add?.key === key);
+  if (!prior?.add) return null;
+  const { cartBefore, cartAfter } = prior.add;
+  if (cartBefore !== null && cartAfter !== null && cartAfter > cartBefore) {
+    return `este item já foi adicionado (o carrinho subiu de ${cartBefore} para ${cartAfter}); adicionar de novo duplicaria`;
+  }
+  if (prior.earlier && prior.changed) return "este item já foi adicionado num act anterior deste portal; adicionar de novo duplicaria";
+  return null;
 }
 
 const CART_GOAL = /carrinho|\bcart\b|sacola|basket|cesta/i;
@@ -711,6 +768,7 @@ export function timed(deps: PilotDeps, t: Timings): PilotDeps {
       return reply;
     },
     warm: deps.warm,
+    ledger: deps.ledger,
   };
 }
 
@@ -724,10 +782,17 @@ export async function runPilot(
   maxSteps: number | undefined,
   rawDeps: PilotDeps,
 ): Promise<PilotResult> {
-  const progress: Progress = { startedAt: Date.now(), timings: emptyTimings(), log: [], snapshot: "" };
+  const progress: Progress = { startedAt: Date.now(), timings: emptyTimings(), log: [], snapshot: "", history: [] };
+  // O que este `act` fez fica no livro-razão do portal, mesmo se ele falhar no meio: o próximo `act` precisa saber.
+  const remember = () => {
+    try { rawDeps.ledger?.save(progress.history.slice(-HISTORY).map(({ earlier: _earlier, ...entry }) => entry)); } catch { /* só ajuda */ }
+  };
   try {
-    return await pilotLoop(goal, rawFills, maxSteps, rawDeps, progress);
+    const result = await pilotLoop(goal, rawFills, maxSteps, rawDeps, progress);
+    remember();
+    return result;
   } catch (e) {
+    remember();
     const message = e instanceof Error ? e.message : String(e);
     if (progress.log.length === 0) throw e;
     progress.log.push(`falhou: ${message}`);
@@ -741,7 +806,7 @@ export async function runPilot(
   }
 }
 
-interface Progress { startedAt: number; timings: Timings; log: string[]; snapshot: string }
+interface Progress { startedAt: number; timings: Timings; log: string[]; snapshot: string; history: Done[] }
 
 async function pilotLoop(
   goal: string,
@@ -756,7 +821,9 @@ async function pilotLoop(
   const limit = Math.min(MAX_STEPS, Math.max(1, Math.round(maxSteps ?? DEFAULT_STEPS)));
   // A conexão com o Jev abre enquanto a primeira página é lida: o handshake não cai no primeiro passo.
   try { deps.warm?.(); } catch { /* só acelera */ }
-  const history: Done[] = [];
+  // O que os `act` anteriores deste portal fizeram entra no histórico, marcado: o Jev não repete um «adicionar» já feito.
+  const history: Done[] = progress.history;
+  try { history.push(...(deps.ledger?.load() ?? []).slice(-HISTORY).map((d) => ({ ...d, earlier: true }))); } catch { /* sem livro-razão */ }
   const taken = new Set<string>();
   let snapshot = await deps.snapshot();
   progress.snapshot = snapshot;
@@ -765,6 +832,9 @@ async function pilotLoop(
   let staleRetries = 0;
   let coveredRetries = 0;
   let noValueRetries = 0;
+  let addRefusals = 0;
+  /** O «adicionar» que está para ser clicado: o item e a contagem do carrinho antes (a de depois só se sabe depois de reler). */
+  let pendingAdd: { key: string; cartBefore: number | null } | null = null;
 
   const finish = (outcome: PilotResult["outcome"], note: string): PilotResult =>
     ({ outcome, steps: log, note: note + emptyFieldsNote(parseSnapshot(snapshot), fills.length), finalSnapshot: snapshot, timings: { ...timings, total: Date.now() - startedAt } });
@@ -962,6 +1032,17 @@ async function pilotLoop(
           log.push(`${step}. recusou ${plain(el)}: parece uma compra ou um pagamento, e o objetivo não pediu`);
           return finish("stuck", "O Jev escolheu um controle de compra ou pagamento que o objetivo não pediu: não cliquei. Se é isso mesmo que você quer, diga no objetivo.");
         }
+        // Idempotência (4.1/3.4): um «adicionar» que já foi feito (neste `act` ou num anterior) não se repete.
+        const repeat = operation === "click" ? repeatedAdd(el, page, goal, history) : null;
+        if (repeat) {
+          addRefusals += 1;
+          lastSignature = "";
+          log.push(`${step}. recusou ${plain(el)}: ${repeat}`);
+          if (addRefusals > 2) return finish("unsure", `O Jev insiste em adicionar de novo um item que já foi adicionado (${repeat}). Confira a página.`);
+          history.push({ what: `não clicou ${plain(el)}: ${repeat}`, changed: false, auto: true });
+          continue;
+        }
+        pendingAdd = operation === "click" && ADD_CONTROL.test(el.name.trim()) ? { key: addKey(el, page), cartBefore: cartCount(page) } : null;
         what = await act(el, operation, fills, taken, deps, option, { page, goal });
       }
     } catch (e) {
@@ -999,7 +1080,13 @@ async function pilotLoop(
     log.push(`${step}. ${what} (${meta}, passo ${Date.now() - stepStarted} ms)`);
     await deps.settle();
     snapshot = progress.snapshot = await deps.snapshot();
-    history.push({ what, changed: fingerprint(parseSnapshot(snapshot)) !== fingerprint(page) });
+    const after = parseSnapshot(snapshot);
+    history.push({
+      what,
+      changed: fingerprint(after) !== fingerprint(page),
+      ...(pendingAdd ? { add: { ...pendingAdd, cartAfter: cartCount(after) } } : {}),
+    });
+    pendingAdd = null;
   }
   return finish("limit", `Cheguei ao limite de ${limit} passos sem o Jev dizer que terminou. Confira a página e continue, ou rode de novo.`);
 }
