@@ -26,6 +26,7 @@ import { componentChain, describeElement, selectorOf } from "./dom";
 import {
   errorKindOf, headerList, headerValue, parseRawHeaders, readResponseBody, requestBodyPreview, MAX_PAGE_BODY,
 } from "./netCapture";
+import { createActivity, describeWait, type SettleReport } from "./activity";
 import { diffFingerprint, scopeSignature, staleMessage, type Fingerprint } from "./guard";
 import { callerOf, clip, displayPath, formatConsoleArgs, formatValue, toTransferable } from "./serialize";
 import {
@@ -207,9 +208,20 @@ declare global {
       return url;
     }
   };
-  /** Pedidos sin terminar, de cualquier origen: es lo que mira `wait { idle }`. Se cuenta
+  /** Pedidos sin terminar (fetch y XHR, de cualquier origen), la navegación en curso y la espera por estado
+   *  (`activity.ts`): es lo que mira `wait { idle }` y lo que hace que una acción espere a una búsqueda lenta. Se cuenta
    *  siempre, con o sin panel de debug. */
-  let inFlight = 0;
+  const activity = createActivity({
+    now: () => Date.now(),
+    setTimer: (fn, ms) => setTimer(fn, ms),
+    clearTimer: (handle) => clearTimer(handle as number),
+    readyState: () => document.readyState,
+    watchDom: (onChange) => {
+      const observer = new MutationObserver(onChange);
+      observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+      return () => observer.disconnect();
+    },
+  });
   /** El panel de debug está abierto: solo ahí se anotan los pedidos (y se leen sus
    *  cuerpos), que es lo que cuesta. Arranca apagado en cada documento; la app lo prende. */
   let recordingNet = false;
@@ -233,7 +245,7 @@ declare global {
       headers.set(CRED_HEADER, request.credentials);
     }
     const body = request.method === "GET" || request.method === "HEAD" ? undefined : await request.blob();
-    inFlight += 1;
+    const endRequest = activity.begin();
     try {
       const response = await nativeFetch!(routed.url, {
         method: request.method,
@@ -256,7 +268,7 @@ declare global {
       if (!routed.forwarded) cookieJar?.seen(response.headers.get(JAR_HEADER));
       return response;
     } finally {
-      inFlight = Math.max(0, inFlight - 1);
+      endRequest();
     }
   }
 
@@ -278,8 +290,15 @@ declare global {
       } catch {
         /* un input raro: fetch decide */
       }
-      inFlight += 1;
-      const result = nativeFetch(input, init).finally(() => { inFlight = Math.max(0, inFlight - 1); });
+      const endRequest = activity.begin();
+      let pendingFetch: Promise<Response>;
+      try {
+        pendingFetch = nativeFetch(input, init);
+      } catch (e) {
+        endRequest();
+        throw e;
+      }
+      const result = pendingFetch.finally(endRequest);
       // Una respuesta del propio servidor puede haber puesto cookies: la página las tiene
       // que encontrar en `document.cookie` apenas la recibe.
       if (!url || !isForeign(url)) {
@@ -376,10 +395,9 @@ declare global {
         cookieJar.seen(this.getResponseHeader(JAR_HEADER));
       });
     }
-    if (info && isForeign(info.url)) {
-      inFlight += 1;
-      this.addEventListener("loadend", () => { inFlight = Math.max(0, inFlight - 1); });
-    }
+    // Todo XHR conta, do propio servidor o de otro origen: una búsqueda lenta casi siempre es del propio.
+    const endRequest = activity.begin();
+    this.addEventListener("loadend", endRequest);
     // Los que pasan por el proxy los registra él.
     if (info && isForeign(info.url) && !routed && recordingNet) {
       const at = Date.now();
@@ -417,7 +435,12 @@ declare global {
         }
       });
     }
-    return xhrSend.call(this, body);
+    try {
+      return xhrSend.call(this, body);
+    } catch (e) {
+      endRequest();
+      throw e;
+    }
   };
 
   /** El cuerpo de un XHR ya terminado, según cómo pidió la página leerlo. */
@@ -541,6 +564,23 @@ declare global {
   };
 
   window.addEventListener("pagehide", flush);
+
+  // La navegación que empezó y todavía no cambió el documento (una búsqueda que el servidor tarda 8 s en contestar): la
+  // acción que la provocó tiene que esperarla. `beforeunload` salta cuando el navegador va a salir de la página; la API
+  // `navigation` (Chromium/WebView2) avisa también de un envío de formulario y dice si lo cancelaron.
+  window.addEventListener("beforeunload", () => activity.markNavigation());
+  const navigationApi = (window as unknown as { navigation?: EventTarget }).navigation;
+  if (navigationApi) {
+    navigationApi.addEventListener("navigate", (event) => {
+      const nav = event as Event & { hashChange?: boolean; downloadRequest?: string | null; destination?: { sameDocument?: boolean } };
+      if (nav.hashChange || nav.downloadRequest || nav.destination?.sameDocument !== false) return;
+      activity.markNavigation();
+      // Si la página la cancela (un router de SPA que maneja el envío), no hay navegación que esperar.
+      queueMicrotask(() => { if (event.defaultPrevented) activity.clearNavigation(); });
+    });
+    navigationApi.addEventListener("navigateerror", () => activity.clearNavigation());
+    navigationApi.addEventListener("navigatesuccess", () => activity.clearNavigation());
+  }
 
   // ── Órdenes ───────────────────────────────────────────────────
 
@@ -979,31 +1019,47 @@ declare global {
    *  tope. Con timers y no con frames: un iframe que no se está mostrando no pinta. */
   /** O comando em curso é do piloto do Jev: esperas curtas (a página que mudou depois é lida de novo, é barato). */
   let fastCommand = false;
+  /** Os pedidos que já estavam em voo quando o comando começou: não são «da ação» (ver `SettleOptions.baseline`). */
+  let commandBaseline: ReadonlySet<number> | undefined;
 
-  function settle(maxMs = 1500, quietMs = 150): Promise<void> {
+  /** Até quando esperar algo pendente (navegação, pedidos, documento carregando), por tipo de ação. Uma busca é a que
+   *  mais demora (a Amazon leva ~8 s); digitar só espera uma sugestão; o resto, o que uma página costuma levar. */
+  const PENDING_MS = { navigate: 12_000, select: 10_000, drag: 6_000, scroll: 4_000, type: 3_000, hover: 2_000 } as const;
+
+  /**
+   * Espera a página reagir à ação, por ESTADO (`activity.ts`): sem navegação em curso, rede ociosa e DOM quieto. `maxMs` é o
+   * teto quando nada ficou pendente; `pendingMs`, o teto quando algo ficou. Com timers e não com frames: um iframe que não
+   * se está mostrando não pinta. Devolve o relatório do que esperou.
+   */
+  function settle(maxMs = 1500, quietMs = 150, pendingMs: number = PENDING_MS.navigate): Promise<SettleReport> {
     if (fastCommand) {
       // O repositório jev-ultrafast espera 2 quadros ou 50 ms. Aqui, quieto por 60 ms e no máximo 350 ms (um React que re-renderiza).
       maxMs = Math.min(maxMs, 350);
       quietMs = Math.min(quietMs, 60);
     }
-    return new Promise((done) => {
-      let finished = false;
-      let quiet = setTimer(finish, quietMs);
-      const hard = setTimer(finish, maxMs);
-      const observer = new MutationObserver(() => {
-        clearTimer(quiet);
-        quiet = setTimer(finish, quietMs);
-      });
-      observer.observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
-      function finish() {
-        if (finished) return;
-        finished = true;
-        observer.disconnect();
-        clearTimer(quiet);
-        clearTimer(hard);
-        done();
-      }
+    return activity.settle({
+      maxMs, quietMs, pendingMaxMs: pendingMs, netIdleMs: fastCommand ? 120 : 250, minMs: fastCommand ? 100 : quietMs,
+      baseline: commandBaseline,
     });
+  }
+
+  /** O que a espera conta no resultado do comando (só quando valeu a pena contar). */
+  function waitedField(report: SettleReport): { waited?: string } {
+    const note = describeWait(report);
+    return note ? { waited: note } : {};
+  }
+
+  /** A espera explícita do piloto/ponte: depois de uma navegação ou quando o Jev pede para esperar. Conta TODOS os pedidos
+   *  em voo (a página nova acabou de carregar e os pedidos dela são justo o que se quer esperar). */
+  async function settleOp(command: Extract<PageCommand, { op: "settle" }>): Promise<unknown> {
+    const report = await activity.settle({
+      maxMs: command.fast ? 350 : 1500, quietMs: command.fast ? 60 : 150, netIdleMs: command.fast ? 120 : 250,
+      pendingMaxMs: Math.min(Math.max(command.ceilingMs ?? PENDING_MS.navigate, 0), 14_000), minMs: 0,
+    });
+    return {
+      settled: report.reason, readyState: document.readyState, pendingRequests: activity.size(), navigating: activity.navigating(),
+      ...waitedField(report), waitedMs: report.waitedMs,
+    };
   }
 
   function mouse(el: Element, type: string, x: number, y: number): boolean {
@@ -1063,11 +1119,12 @@ declare global {
     // verdad (seguir el link, marcar el checkbox, enviar el form).
     if (typeof (target as HTMLElement).click === "function") (target as HTMLElement).click();
     else mouse(target, "click", x, y);
-    await settle();
+    const waited = await settle();
     return {
       clicked: describeElement(el),
       ...(location.href !== before ? { url: location.href } : {}),
       ...invalidForm(target),
+      ...waitedField(waited),
     };
   }
 
@@ -1133,8 +1190,8 @@ declare global {
       throw new Error(`${describeElement(el)} não é um campo de texto.`);
     }
     if (submit) return press("Enter", el);
-    await settle(800);
-    return { typed: describeElement(el), value: valueOf(el) ?? "" };
+    const waited = await settle(800, 150, PENDING_MS.type);
+    return { typed: describeElement(el), value: valueOf(el) ?? "", ...waitedField(waited) };
   }
 
   function focusables(): HTMLElement[] {
@@ -1188,12 +1245,13 @@ declare global {
       }
     }
     el.dispatchEvent(new KeyboardEvent("keyup", init));
-    await settle(1000);
+    const waited = await settle(1000);
     const focused = document.activeElement;
     return {
       pressed: key,
       on: describeElement(el),
       focused: focused && focused !== document.body ? describeElement(focused) : null,
+      ...waitedField(waited),
     };
   }
 
@@ -1213,8 +1271,8 @@ declare global {
     selectEl.value = option.value;
     selectEl.dispatchEvent(new Event("input", { bubbles: true }));
     selectEl.dispatchEvent(new Event("change", { bubbles: true }));
-    await settle(800);
-    return { selected: normalizeName(option.text), value: option.value };
+    const waited = await settle(800, 150, PENDING_MS.select);
+    return { selected: normalizeName(option.text), value: option.value, ...waitedField(waited) };
   }
 
   async function hover(el: Element): Promise<unknown> {
@@ -1233,7 +1291,7 @@ declare global {
     for (const t of ["pointerover", "pointerenter", "pointermove"]) mouse(target, t, x, y);
     mouse(target, "mouseover", x, y);
     mouse(target, "mouseenter", x, y);
-    await settle(800);
+    await settle(800, 150, PENDING_MS.hover);
     return { hovered: describeElement(el), note: "Dispara los eventos del mouse; el :hover de CSS no se puede simular desde la página." };
   }
 
@@ -1270,7 +1328,7 @@ declare global {
     mouse(end.target, "pointerup", end.x, end.y);
     dragEvent(start.target, "dragend", end.x, end.y);
     cursor.click();
-    await settle();
+    await settle(1500, 150, PENDING_MS.drag);
     return { dragged: describeElement(from), onto: describeElement(to) };
   }
 
@@ -1289,7 +1347,7 @@ declare global {
     input.files = transfer.files;
     input.dispatchEvent(new Event("input", { bubbles: true }));
     input.dispatchEvent(new Event("change", { bubbles: true }));
-    await settle(800);
+    await settle(800, 150, PENDING_MS.select);
     return { uploaded: name, bytes: blob.size, input: describeElement(el) };
   }
 
@@ -1307,7 +1365,7 @@ declare global {
     } else {
       window.scrollBy(0, command.dy ?? Math.round(window.innerHeight * 0.8));
     }
-    await settle(600, 100);
+    await settle(600, 100, PENDING_MS.scroll);
     return { scrollY: Math.round(window.scrollY), documentHeight: root.scrollHeight, viewportHeight: window.innerHeight };
   }
 
@@ -1320,7 +1378,7 @@ declare global {
     // huecos de milisegundos entre una y la siguiente. Hace falta que se sostenga.
     let quietSince: number | null = null;
     const isIdle = (): boolean => {
-      if (inFlight > 0) {
+      if (activity.size() > 0) {
         quietSince = null;
         return false;
       }
@@ -1348,9 +1406,9 @@ declare global {
           return;
         }
         if (ok && idle && (text || selector) && !isIdle()) ok = false;
-        if (ok) done({ waitedMs: Date.now() - started, inFlight });
+        if (ok) done({ waitedMs: Date.now() - started, inFlight: activity.size() });
         else if (Date.now() - started >= timeout) {
-          const what = selector ? `el selector "${selector}"` : text ? `el texto "${text}"` : `la red en reposo (${inFlight} pedido(s) sin terminar)`;
+          const what = selector ? `el selector "${selector}"` : text ? `el texto "${text}"` : `la red en reposo (${activity.size()} pedido(s) sin terminar)`;
           fail(new Error(`${gone ? "Continua presente" : "Não apareceu"} ${what} depois de ${timeout} ms.`));
         } else setTimer(tick, 100);
       };
@@ -1675,6 +1733,7 @@ declare global {
       case "select": return acting(command.target, (el) => select(el, command.value));
       case "scroll": return scroll(command);
       case "wait": return wait(command);
+      case "settle": return settleOp(command);
       case "eval": return evaluate(command.code);
       case "layout": return layout();
       case "storage": return storage(command);
@@ -1703,6 +1762,7 @@ declare global {
     // Mientras dura la orden, los diálogos de la página los contesta el runtime: si no, la
     // acción del agente quedaría esperando a una persona que quizá no está mirando.
     driving = true;
+    commandBaseline = activity.liveIds();
     fastCommand = (command as { fast?: boolean }).fast === true;
     cursor.setFast(fastCommand);
     try {
@@ -1715,6 +1775,7 @@ declare global {
     }
     driving = false;
     fastCommand = false;
+    commandBaseline = undefined;
     cursor.setFast(false);
     // Lo que la acción haya logueado viaja enseguida: la app lo junta con la respuesta.
     flush();
