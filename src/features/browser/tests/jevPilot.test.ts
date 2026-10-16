@@ -757,3 +757,18 @@ describe("achados da revisão", () => {
     expect(labels[1]).toContain("next to: Carrinho");
   });
 });
+
+describe("rótulo curto o bastante para o provedor", () => {
+  it("o estado vem antes do contexto e o contexto não passa de 40 caracteres", () => {
+    const page = parseSnapshot([
+      'page: "L" http://localhost/', "viewport: 1280×800 · scroll 0/800",
+      '- text "Um título de produto bem comprido que não cabe inteiro"', '- text "R$ 1.299,90"',
+      '- checkbox "Selecionar" [ref=e1] [checked]',
+      '- text "Outro título de produto igualmente comprido e longo"', '- checkbox "Selecionar" [ref=e2]',
+    ].join("\n"));
+    const label = buildStep(page, "marcar", [], []).targets.click[0].label;
+    expect(label.indexOf("(")).toBeGreaterThan(-1);
+    expect(label.indexOf("checked")).toBeLessThan(label.indexOf("next to"));
+    expect(page.elements[0].near!.length).toBeLessThanOrEqual(40);
+  });
+});
