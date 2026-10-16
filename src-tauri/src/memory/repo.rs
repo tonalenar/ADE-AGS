@@ -226,7 +226,7 @@ pub fn render(conn: &Connection, workspace: &str, overrides: &[(String, i64)]) -
 }
 
 pub fn default_root() -> Result<PathBuf,String> {
-    Ok(dirs::home_dir().ok_or("home unavailable")?.join(".ags").join("memory"))
+    Ok(crate::util::datadir::ags_home().ok_or("home unavailable")?.join("memory"))
 }
 
 /// Read provenance only; launching a Run must not export or mutate user files.

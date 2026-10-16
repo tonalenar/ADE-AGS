@@ -185,9 +185,8 @@ fn write_mcp_config(app: &AppHandle, task_id: &str) -> Option<PathBuf> {
 
 /// Dónde va el NDJSON crudo de una tarea.
 fn events_path_for(run_id: &str, task_id: &str) -> Result<PathBuf, String> {
-    let dir = dirs::home_dir()
+    let dir = crate::util::datadir::ags_home()
         .ok_or_else(|| "não foi possível localizar a pasta do usuário".to_string())?
-        .join(".ags")
         .join("runs")
         .join(run_id);
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;

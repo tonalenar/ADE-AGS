@@ -91,8 +91,8 @@ fn managed(root: &Path) -> Vec<PathBuf> {
     if crate::skills::is_mount(&node) {
         out.push(node)
     }
-    if let Some(home) = dirs::home_dir() {
-        let skills = home.join(".ags").join("skills");
+    if let Some(home) = crate::util::datadir::ags_home() {
+        let skills = home.join("skills");
         for folder in [".claude/skills", ".agents/skills"] {
             out.extend(crate::runs::worktrees::managed_links(
                 &root.join(folder),

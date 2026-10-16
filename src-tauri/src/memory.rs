@@ -1708,7 +1708,7 @@ pub fn memory_purge_user(
         purge::Scope {
             memory_root: repo::default_root()?,
             database_file: purge::main_database_file(&conn),
-            events_root: dirs::home_dir().map(|home| home.join(".ags").join("runs")),
+            events_root: crate::util::datadir::ags_home().map(|home| home.join("runs")),
         }
     };
     let result = purge::revisions_coordinated(&db, &sync, &entry_id, revision, &scope);

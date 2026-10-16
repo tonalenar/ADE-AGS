@@ -34,7 +34,7 @@ pub(super) fn db(app: &AppHandle) -> Result<DbConnection, String> {
 }
 
 pub(super) fn data_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    app.path().app_data_dir().map_err(|e| e.to_string())
+    crate::util::datadir::app_data_dir(app)
 }
 
 const COLUMNS: &str = "id, kind, host, login, name, avatar_url, auth, git_user, created_at";

@@ -1,5 +1,6 @@
 //! Piezas chicas que no son de ningún dominio en particular.
 
+pub mod datadir;
 pub mod external_path;
 pub mod launch;
 pub mod legacy;

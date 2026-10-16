@@ -541,7 +541,7 @@ pub fn run() {
             crate::memory::repo_sync::install(app);
             // Las cookies y el storage de cada sitio que se abre en el navegador de las tabs
             // se guardan acá (ver `preview/site.rs`): el motor del webview no los conserva.
-            if let Ok(dir) = app.path().app_data_dir() {
+            if let Ok(dir) = crate::util::datadir::app_data_dir(app.handle()) {
                 crate::preview::set_state_dir(dir.join("browser-state"));
             }
 

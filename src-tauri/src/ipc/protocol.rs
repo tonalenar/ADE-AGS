@@ -18,10 +18,7 @@ use std::path::PathBuf;
 /// Archivo donde la app publica cómo alcanzarla. La CLI lo lee para conectarse cuando no
 /// la lanzó ninguna instancia en particular (una terminal cualquiera del sistema).
 pub fn handshake_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".ags")
-        .join("ipc.json")
+    crate::util::datadir::ags_home().unwrap_or_default().join("ipc.json")
 }
 
 /// La variable con la que cada instancia les dice a sus hijos —las TUIs de sus tabs, las
@@ -67,7 +64,15 @@ pub fn client_handshake_path() -> PathBuf {
         .or_else(|| std::env::var_os("CONTROLCODE_HANDSHAKE"))
         .map(PathBuf::from)
         .filter(|p| p.is_file())
-        .unwrap_or_else(|| global_handshake_for_client(handshake_path()))
+        .unwrap_or_else(|| {
+            // Instância isolada (ADE_AGS_DATA_DIR): só o handshake dela; cair no do app instalado
+            // faria o `ags` falar com a instância errada.
+            if crate::util::datadir::is_isolated() {
+                handshake_path()
+            } else {
+                global_handshake_for_client(handshake_path())
+            }
+        })
 }
 
 /// Dónde buscar el handshake global desde la CLI. En el sandbox de Codex para Windows el
