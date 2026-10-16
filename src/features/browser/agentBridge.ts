@@ -37,7 +37,8 @@ import { browserToolPrefix } from "./tabMcp";
 import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
 import { summarizeSnapshot } from "./finalSummary";
-import { formatResult, runPilot, type PilotDeps } from "./jevPilot";
+import { cartCount, fingerprint, formatResult, parseSnapshot, runPilot, type ParsedPage, type PilotDeps } from "./jevPilot";
+import { createLedger, ledgerOf, type ActLedger, type PriorAction } from "./portalLedger";
 import { beginWindowMeasure } from "./windowBeat";
 
 export interface BrowserHost {
@@ -690,7 +691,16 @@ async function execute(
       const fills = Array.isArray(request.fills) ? request.fills.filter((f): f is string => typeof f === "string") : [];
       const endMeasure = beginWindowMeasure();
       const waits: string[] = [];
-      const result = await runPilot(goal, fills, num(request, "steps"), pilotDeps(host, waits));
+      const ledger = ledgerOf(host.viewId);
+      ledger.beginAct(goal);
+      const deps = pilotDeps(host, waits, ledger);
+      let result: Awaited<ReturnType<typeof runPilot>> | undefined;
+      try {
+        result = await runPilot(goal, fills, num(request, "steps"), deps);
+      } finally {
+        // Mesmo um `act` que falhou deixa o que já fez no livro-razão: é o que evita repetir a ação no seguinte.
+        deps.finish(result?.finalSnapshot ?? null);
+      }
       // O resumo final traz o objetivo e a região principal antes do menu (O4), em vez do começo da página.
       const text = formatResult(goal, { ...result, window: await endMeasure(), finalSnapshot: summarizeSnapshot(result.finalSnapshot, goal) });
       return waitsReport(text, waits);
@@ -727,7 +737,32 @@ export const PORTAL_OPS = new Set([
 ]);
 
 /** O que o piloto do Jev usa deste navegador: ver `jevPilot.ts`. As ações são as mesmas que o agente faria à mão. */
-function pilotDeps(host: BrowserHost, notes: string[] = []): PilotDeps {
+/**
+ * O que a ponte acrescenta ao que o piloto pede: `prior` (as ações dos `act`s anteriores NESTE portal, D6) e `finish` (fecha o
+ * `act` no livro-razão). `prior` é opcional no piloto: quem não o conhece o ignora.
+ */
+export type PilotExtras = { prior: () => PriorAction[]; finish: (finalSnapshot: string | null) => void };
+
+export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLedger = createLedger()): PilotDeps & PilotExtras {
+  // O livro-razão (D6/3.4): cada ação é anotada com a contagem do carrinho de antes e, na leitura seguinte, a de depois.
+  let lastPage: ParsedPage | null = null;
+  let pendingAction: { what: string; fp: string | null; cartBefore: number | null } | null = null;
+  const closeAction = (page: ParsedPage | null): void => {
+    if (!pendingAction) return;
+    ledger.record({
+      what: pendingAction.what,
+      changed: page && pendingAction.fp !== null ? fingerprint(page) !== pendingAction.fp : null,
+      cartBefore: pendingAction.cartBefore,
+      cartAfter: page ? cartCount(page) : null,
+    });
+    pendingAction = null;
+  };
+  const openAction = (verb: string, ref: string | null): void => {
+    closeAction(null);
+    const el = ref ? lastPage?.elements.find((e) => e.ref === ref) : undefined;
+    const what = ref === null ? verb : `${verb} ${el ? `${el.role}${el.name ? ` "${el.name}"` : ""}` : ref}`;
+    pendingAction = { what, fp: lastPage ? fingerprint(lastPage) : null, cartBefore: lastPage ? cartCount(lastPage) : null };
+  };
   /** O que a página contou sobre a espera daquele comando (`"waited": "esperou 8,2 s …"`), para o relatório do `act`. */
   const noteWait = (result: string, what: string): void => {
     const waited = /"waited":\s*"([^"]+)"/.exec(result)?.[1];
@@ -757,7 +792,11 @@ function pilotDeps(host: BrowserHost, notes: string[] = []): PilotDeps {
       const loads = host.loadCount();
       for (let attempt = 0; ; attempt++) {
         try {
-          return await inPage(host, { op: "snapshot", all: false, inView: true }, false);
+          const text = await inPage(host, { op: "snapshot", all: false, inView: true }, false);
+          const page = parseSnapshot(text);
+          closeAction(page);
+          lastPage = page;
+          return text;
         } catch (e) {
           if (attempt >= 2 || !/n[ãa]o respondeu|cambi[óo]|mudou/i.test(e instanceof Error ? e.message : String(e))) throw e;
           await host.waitForLoad(loads, 10_000);
@@ -766,6 +805,7 @@ function pilotDeps(host: BrowserHost, notes: string[] = []): PilotDeps {
     },
     // Tudo `fast` e sem coletar console/rede (`withEffects` falso): o piloto lê a página de novo depois de cada passo, e é isso que importa.
     click: async (ref, navigates) => {
+      openAction("clicou", ref);
       const loads = host.loadCount();
       const result = await inPage(host, { op: "click", target: ref, fast: true }, false);
       noteWait(result, "clique");
@@ -774,6 +814,7 @@ function pilotDeps(host: BrowserHost, notes: string[] = []): PilotDeps {
       return result;
     },
     type: async (ref, text, submit) => {
+      openAction(submit ? "digitou e enviou em" : "digitou em", ref);
       const loads = host.loadCount();
       const result = await inPage(host, { op: "type", target: ref, text, clear: true, submit: !!submit, fast: true }, false);
       noteWait(result, submit ? "digitar e enviar" : "digitar");
@@ -782,6 +823,7 @@ function pilotDeps(host: BrowserHost, notes: string[] = []): PilotDeps {
       return result;
     },
     select: async (ref, value) => {
+      openAction("escolheu em", ref);
       const loads = host.loadCount();
       const result = await inPage(host, { op: "select", target: ref, value, fast: true }, false);
       noteWait(result, "escolher");
@@ -808,7 +850,13 @@ function pilotDeps(host: BrowserHost, notes: string[] = []): PilotDeps {
       return invoke("decision_pick_visual", { query: { goal, recent, imagePath: shot.path } });
     },
     peekAt: async (x, y) => inPage(host, { op: "peek", target: `@${x},${y}` }, false),
+    prior: () => ledger.prior(lastPage ? fingerprint(lastPage) : null),
+    finish: (finalSnapshot) => {
+      closeAction(null);
+      ledger.endAct(finalSnapshot ? fingerprint(parseSnapshot(finalSnapshot)) : lastPage ? fingerprint(lastPage) : null);
+    },
     clickAt: async (x, y) => {
+      openAction("tocou num ponto da foto", null);
       const loads = host.loadCount();
       const result = await inPage(host, { op: "click", target: `@${x},${y}`, fast: true }, false);
       noteWait(result, "toque pela foto");
