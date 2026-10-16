@@ -501,6 +501,58 @@ export function emptyFieldsNote(page: ParsedPage, fillCount: number): string {
   return ` Atenção: nenhum --fill foi passado e há campos vazios na página (${names}): o piloto só digita valores de --fill, nunca os do texto do objetivo.`;
 }
 
+/** Objetivo que pede para digitar/pesquisar: sem `--fill` o piloto não tem o que digitar. */
+const TYPE_GOAL = /\b(pesquis\w*|busc\w*|procur\w*|search\w*|digit\w*|preench\w*|escrev\w*|informe|type|fill)\b/i;
+
+/**
+ * O objetivo manda digitar ou pesquisar, não veio nenhum `--fill` e a página tem um campo vazio: o piloto nunca digita o
+ * texto do objetivo, então clicaria em "Search" com o campo vazio e pararia. Recusa antes de tocar em qualquer coisa, dizendo
+ * o que passar. Devolve o aviso, ou `null` se pode seguir. Pura.
+ */
+export function missingFill(goal: string, fillCount: number, page: ParsedPage): string | null {
+  if (fillCount > 0 || !TYPE_GOAL.test(goal)) return null;
+  const empty = page.elements.find((el) => TYPING.has(el.role) && el.filled === false && el.name && !el.states.includes("disabled"));
+  if (!empty) return null;
+  return `O objetivo pede para digitar ou pesquisar, mas nenhum --fill foi passado, e o piloto nunca digita o texto do objetivo. Não toquei em nada. Rode de novo com --fill "${empty.name}=<texto>" (campo vazio da página: "${empty.name}").`;
+}
+
+const CART_GOAL = /carrinho|\bcart\b|sacola|basket|cesta/i;
+const EMPTY_GOAL = /\b(vazi[oa]s?|esvazi\w*|empty|sem (nenhum )?(item|itens|produtos?)|zero (item|itens|produtos?)|nenhum (item|produto))\b/i;
+const COUNT_GOAL = /\b(\d+|um|uma|dois|duas|tr[êe]s|quatro|cinco|one|two|three|four|five)\s+(item|itens|items|produtos?|products?)\b/i;
+const COUNT_WORDS: Record<string, number> = { um: 1, uma: 1, one: 1, dois: 2, duas: 2, two: 2, tres: 3, "três": 3, three: 3, quatro: 4, four: 4, cinco: 5, five: 5 };
+const REMOVE_CONTROL = /^(remove|remover|excluir|delete|eliminar|quitar)\b/i;
+const COUNT_TEXT = /\b(\d+)\s+(items?|itens|produtos?|products?)\b/i;
+const EMPTY_TEXT = /\b(vazi[oa]|empty|0\s+(items?|itens)|nenhum item|no items)\b/i;
+
+/**
+ * O Jev disse "acabou": a página desmente? Só para objetivos de carrinho com uma contagem ("1 item") ou um estado ("vazio"):
+ * o que o Jev vê é a probabilidade, a página tem o número. Conta os controles "Remover/Remove/Excluir" (um por item) e
+ * lê "N itens" do texto. Devolve o que a página mostra de diferente, ou `null` se confere ou não dá para saber. Pura.
+ */
+export function goalContradiction(goal: string, page: ParsedPage): string | null {
+  if (!CART_GOAL.test(goal)) return null;
+  const removers = page.elements.filter((el) => REMOVE_CONTROL.test(el.name.trim())).length;
+  const lines = [...page.text, ...page.elements.map((el) => el.name)];
+  const said = lines.map((l) => COUNT_TEXT.exec(l)).find((m) => m !== null);
+  const saidCount = said ? Number(said[1]) : null;
+  const saysEmpty = lines.some((l) => EMPTY_TEXT.test(l));
+  const wanted = COUNT_GOAL.exec(goal);
+  if (wanted) {
+    const raw = wanted[1].toLowerCase();
+    const n = /^\d+$/.test(raw) ? Number(raw) : COUNT_WORDS[raw];
+    if (n === undefined) return null;
+    const seen = saidCount ?? (removers > 0 ? removers : null);
+    if (seen !== null && seen !== n) return `o objetivo pede ${n} item(ns), mas a página mostra ${seen}.`;
+    return null;
+  }
+  if (EMPTY_GOAL.test(goal)) {
+    if (saysEmpty && removers === 0) return null;
+    if (removers > 0) return `ainda há ${removers} item(ns) com botão de remover na página.`;
+    if (saidCount !== null && saidCount > 0) return `a página ainda mostra ${saidCount} item(ns).`;
+  }
+  return null;
+}
+
 /** Onde foi o tempo do piloto, em ms (somas por fase): o Jev (consulta), o snapshot, a ação, a espera, a foto. */
 export interface Timings {
   jev: number;
@@ -566,6 +618,13 @@ export async function runPilot(
 
   const finish = (outcome: PilotResult["outcome"], note: string): PilotResult =>
     ({ outcome, steps: log, note: note + emptyFieldsNote(parseSnapshot(snapshot), fills.length), finalSnapshot: snapshot, timings: { ...timings, total: Date.now() - startedAt } });
+
+  const early = missingFill(goal, fills.length, parseSnapshot(snapshot));
+  if (early) {
+    log.push(`0. recusou: ${early.split(". ")[0]}`);
+    return finish("error", early);
+  }
+  let contradictions = 0;
 
   // A reserva visual: quando o texto não basta, uma foto da página e o Jev aponta onde tocar.
   const triedPhotos = new Set<string>();
@@ -661,7 +720,22 @@ export async function runPilot(
     // vazio) o Jev costuma ficar "sem certeza" da PRÓXIMA operação, mas sabe que acabou. Só vale depois de uma ação dele
     // que mudou a página (os campos preenchidos pelo nome não contam).
     const lastByJev = [...history].reverse().find((d) => !d.auto);
+    // "Acabou" é uma probabilidade; a contagem do carrinho está na página. Se ela desmente, o piloto continua em vez de dar
+    // o objetivo por cumprido (duas vezes no máximo: depois devolve a dúvida a quem pediu).
+    const doubt = (): "no" | "retry" | "give-up" => {
+      const why = goalContradiction(goal, page);
+      if (!why) return "no";
+      contradictions += 1;
+      log.push(`${step}. o Jev disse que acabou, mas a página não confere: ${why}`);
+      if (contradictions > 2) return "give-up";
+      history.push({ what: `conferiu a página e o objetivo ainda não foi atingido: ${why}`, changed: false, auto: true });
+      return "retry";
+    };
+    const unconfirmed = () => finish("unsure", "O Jev disse que o objetivo foi atingido, mas a página não confere (veja acima). Continue você, com `snapshot` e `click`.");
     if (lastByJev && lastByJev.changed !== false && (reply.goalDone ?? 0) >= MIN_GOAL_DONE) {
+      const verdict = doubt();
+      if (verdict === "retry") continue;
+      if (verdict === "give-up") return unconfirmed();
       log.push(`${step}. objetivo atingido (pergunta direta p=${reply.goalDone!.toFixed(2)})`);
       return finish("done", "O Jev considera o objetivo atingido. Confira na página abaixo.");
     }
@@ -679,6 +753,9 @@ export async function runPilot(
           + (lastByJev?.changed ? " A última ação do piloto mudou a página: o objetivo pode já ter sido atingido, confira antes de continuar." : ""));
     }
     if (operation === "done") {
+      const verdict = doubt();
+      if (verdict === "retry") continue;
+      if (verdict === "give-up") return unconfirmed();
       log.push(`${step}. concluído (${meta})`);
       return finish("done", "O Jev considera o objetivo atingido. Confira na página abaixo.");
     }

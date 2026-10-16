@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, blockedControl, obviousAdvance, isAmbiguous, isSearchField, submitsOnType, emptyFieldsNote, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, blockedControl, obviousAdvance, isAmbiguous, isSearchField, submitsOnType, emptyFieldsNote, goalContradiction, missingFill, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -844,5 +844,71 @@ describe("digitar só se há campo vazio", () => {
   it("com um campo vazio, 'type' é oferecido", () => {
     const step = buildStep(parseSnapshot(FILLED.replace('value="[x]"', 'value=""')), "preencher o pedido", ["CEP"], []);
     expect(step.operations.map((o) => o.id)).toContain("type");
+  });
+});
+
+describe("conferir o carrinho antes de dar por feito", () => {
+  const head = ['page: "Your Cart" https://shop.test/cart', "viewport: 1000×600 · scroll 0/0", ""];
+  const cartLines = (items: number) => [
+    ...head,
+    ...Array.from({ length: items }, (_, i) => `- button "Remove" [ref=e${i + 1}]`),
+    '- link "Continue Shopping" [ref=e9]',
+  ].join("\n");
+  const cart = (items: number) => parseSnapshot(cartLines(items));
+  const emptyCart = [...head, '- text "Seu carrinho está vazio"'].join("\n");
+
+  it("objetivo de contagem: a página mostra outro número", () => {
+    expect(goalContradiction("adicionar ao carrinho e confirmar que há 1 item", cart(2))).toContain("mostra 2");
+    expect(goalContradiction("adicionar ao carrinho e confirmar que há 1 item", cart(1))).toBeNull();
+    expect(goalContradiction("confirm the cart has two items", cart(2))).toBeNull();
+  });
+
+  it("objetivo de vazio: sobrou item com botão de remover", () => {
+    expect(goalContradiction("esvaziar o carrinho", cart(1))).toContain("ainda há 1");
+    expect(goalContradiction("deixar o carrinho vazio", cart(1))).toContain("ainda há 1");
+    expect(goalContradiction("deixar o carrinho vazio", parseSnapshot(emptyCart))).toBeNull();
+  });
+
+  it("sem carrinho no objetivo, não confere nada", () => {
+    expect(goalContradiction("mostrar 20 itens por página", cart(3))).toBeNull();
+  });
+
+  it("o Jev diz 'feito' com um item sobrando: o piloto continua e só conclui quando a página confere", async () => {
+    const h = harness([ok("click", "e1"), ok("done"), ok("click", "e1"), ok("done")], [cartLines(2), cartLines(1), emptyCart]);
+    const result = await runPilot("deixar o carrinho vazio", [], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(result.steps.join("\n")).toContain("a página não confere");
+  });
+
+  it("depois de duas dúvidas sem a página mudar, devolve 'sem certeza' em vez de 'feito'", async () => {
+    const h = harness([ok("done")], [cartLines(1)]);
+    const result = await runPilot("deixar o carrinho vazio", [], undefined, h.deps);
+    expect(result.outcome).toBe("unsure");
+    expect(result.note).toContain("não confere");
+  });
+});
+
+describe("recusa digitar sem --fill", () => {
+  const snap = ['page: "Wiki" https://w.test', "viewport: 1000×600", "", '- searchbox "Search" [ref=e1] value=""', '- button "Search" [ref=e2]'].join("\n");
+  const searchPage = parseSnapshot(snap);
+
+  it("objetivo de pesquisar, campo vazio e nenhum --fill: diz o que passar", () => {
+    expect(missingFill("pesquise Portugal", 0, searchPage)).toContain('--fill "Search=');
+    expect(missingFill("search for Portugal", 0, searchPage)).not.toBeNull();
+  });
+
+  it("com --fill, ou sem verbo de digitar, ou sem campo vazio, segue", () => {
+    expect(missingFill("pesquise Portugal", 1, searchPage)).toBeNull();
+    expect(missingFill("abrir o carrinho", 0, searchPage)).toBeNull();
+    const filled = parseSnapshot(snap.replace('value=""', 'value="x"'));
+    expect(missingFill("pesquise Portugal", 0, filled)).toBeNull();
+  });
+
+  it("o piloto nem toca na página nem consulta o Jev", async () => {
+    const h = harness([ok("click", "e2")], [snap]);
+    const result = await runPilot("pesquise Portugal", [], undefined, h.deps);
+    expect(result.outcome).toBe("error");
+    expect(h.calls).toEqual([]);
+    expect(h.asked).toHaveLength(0);
   });
 });
