@@ -69,7 +69,7 @@ export interface SimEnv {
  * O snapshot do app já marca anúncios com `[patrocinado]`? Hoje não (achado O2). Quando a frente de observação (2.2)
  * entregar a marca, ligar aqui faz os nós de anúncio das páginas simuladas ganharem o estado, como no app.
  */
-export const SNAPSHOT_MARKS_SPONSORED = false;
+export const SNAPSHOT_MARKS_SPONSORED = true;
 
 // O navegador que um agente abre nasce em 1920×1080 (AGENT_PORTAL_VIEWPORT): é com essa janela que a foto aponta.
 const VIEWPORT = { width: 1920, height: 1080 };
