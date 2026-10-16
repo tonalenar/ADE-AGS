@@ -10,7 +10,7 @@
 //! snapshot (`page/runtime.ts`); um teste do lado TypeScript lê este arquivo e confere que os dois lados usam as mesmas palavras.
 
 /// Sobe a cada mudança de texto de regra. Vai na linha `TEMPOS`/relatório do benchmark para saber que regras rodaram.
-pub const RULES_VERSION: &str = "2026-10-16.2";
+pub const RULES_VERSION: &str = "2026-10-16.3";
 
 /// O núcleo, herdado da versão sem arquivo próprio: sempre uma operação, estado atual, sem repetir, preencher antes de enviar.
 const CORE: &str = "Advance the user's entire goal from the CURRENT page using exactly one operation. \
@@ -56,8 +56,8 @@ is, choose it (or SCROLL on an endless list) before concluding STUCK.",
     Rule {
         id: "modal-cookie",
         text: "A cookie banner, consent bar, newsletter popup or dialog that covers the page comes first: dismiss it with \
-the least-committing control (Reject, Close, X, 'No thanks'), then continue with the goal. Do not fill a popup's \
-form unless the goal is about it.",
+Reject, Close, X or 'No thanks', or with Accept when that is the only way to close it, then continue with the goal. \
+Never choose a control the banner is covering. Do not fill a popup's form unless the goal is about it.",
     },
     Rule {
         id: "formulario-obrigatorio",
@@ -66,14 +66,37 @@ empty required field first. Never submit a form while a required field is empty.
     },
 ];
 
-/// O texto completo da pergunta da operação: o núcleo e as regras, uma por parágrafo. Pura.
-pub fn next_action() -> String {
+/// A variável de depuração que desliga regras (`all` ou ids separados por vírgula): serve a bisectar uma regressão do benchmark real
+/// sem recompilar. Vazia (o normal) = todas as regras ligadas.
+pub const RULES_OFF_ENV: &str = "ADE_AGS_RULES_OFF";
+
+fn rules_off() -> String {
+    std::env::var(RULES_OFF_ENV).unwrap_or_default()
+}
+
+/// O texto da pergunta da operação sem as regras listadas em `off`. Pura.
+pub fn compose(off: &str) -> String {
+    let off: Vec<&str> = off.split(',').map(str::trim).filter(|id| !id.is_empty()).collect();
     let mut text = String::from(CORE);
     for rule in &RULES {
+        if off.contains(&"all") || off.contains(&rule.id) {
+            continue;
+        }
         text.push(' ');
         text.push_str(rule.text);
     }
     text
+}
+
+/// O texto completo da pergunta da operação: o núcleo e as regras, uma por parágrafo.
+pub fn next_action() -> String {
+    compose(&rules_off())
+}
+
+/// O que vai ao log (`|r:`): a versão das regras, e quais estavam desligadas se a variável de depuração estava ligada.
+pub fn rules_tag() -> String {
+    let off = rules_off();
+    if off.trim().is_empty() { RULES_VERSION.to_string() } else { format!("{RULES_VERSION}-off:{}", off.trim()) }
 }
 
 #[cfg(test)]
@@ -91,6 +114,17 @@ mod test {
             assert!(text.contains(rule.text), "a regra {} não entrou na pergunta", rule.id);
         }
         assert!(text.starts_with("Advance the user's entire goal"));
+    }
+
+    #[test]
+    fn da_para_desligar_regras_sem_recompilar() {
+        let todas = compose("");
+        assert!(todas.contains("cookie banner") && todas.contains("[sponsored]"));
+        let sem_cookie = compose("modal-cookie");
+        assert!(!sem_cookie.contains("cookie banner") && sem_cookie.contains("[sponsored]"));
+        assert_eq!(compose("all"), CORE);
+        assert_eq!(compose(" anuncios , quantidade "), compose("anuncios,quantidade"));
+        assert!(!compose("anuncios,quantidade").contains("[sponsored]"));
     }
 
     #[test]
