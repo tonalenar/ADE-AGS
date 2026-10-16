@@ -1508,7 +1508,7 @@ pub fn write_config(
     args: &[&str],
 ) -> Option<std::path::PathBuf> {
     let ags = crate::ipc::install::source_binary(app)?;
-    let dir = dirs::home_dir()?.join(".ags").join("mcp");
+    let dir = crate::util::datadir::ags_home()?.join("mcp");
     std::fs::create_dir_all(&dir).ok()?;
     let path = dir.join(format!("{name}.json"));
     let config = json!({
@@ -1530,7 +1530,7 @@ pub fn write_config(
 /// limpian: sin esto la carpeta crece para siempre con archivos que no apunta nadie.
 /// Devuelve cuántos borró. Best-effort: no poder leer la carpeta no es un error de arranque.
 pub fn sweep_configs(db: &crate::database::DbConnection) -> usize {
-    let Some(dir) = dirs::home_dir().map(|h| h.join(".ags").join("mcp")) else {
+    let Some(dir) = crate::util::datadir::ags_home().map(|h| h.join("mcp")) else {
         return 0;
     };
     let Ok(conn) = db.lock() else { return 0 };

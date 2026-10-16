@@ -59,9 +59,8 @@ pub(crate) fn user_db_path() -> PathBuf {
 }
 
 fn db_path() -> PathBuf {
-    let home = dirs::home_dir().expect("Cannot determine home directory");
-    let dir = home.join(".ags");
-    std::fs::create_dir_all(&dir).expect("Cannot create ~/.ags");
+    let dir = crate::util::datadir::ags_home().expect("Cannot determine home directory");
+    std::fs::create_dir_all(&dir).expect("Cannot create the data directory (~/.ags or ADE_AGS_DATA_DIR)");
     dir.join("data.db")
 }
 
@@ -146,7 +145,31 @@ pub(crate) fn upgrade_schema(conn: &Connection, path: &std::path::Path) -> SqlRe
     if purgadas > 0 {
         eprintln!("se limpiaron {purgadas} filas de ventanas cerradas y vacías");
     }
+    if crate::util::datadir::is_isolated() {
+        seed_decisions_from_installed(conn);
+    }
     Ok(())
+}
+
+/// Instancia isolada (ADE_AGS_DATA_DIR): traz só a configuração NÃO secreta do Jev (`decisions.*`:
+/// provedor, URL, modelo, pontos ligados) do banco do app instalado, lido em modo somente leitura e
+/// só quando a base isolada ainda não tem nenhuma. A chave de API não é copiada: vive no cofre do
+/// sistema (serviço `ade-ags.decisions`), que as duas instâncias já enxergam. Contas de agentes
+/// ficam de fora de propósito.
+fn seed_decisions_from_installed(conn: &Connection) {
+    let Some(real) = dirs::home_dir().map(|h| h.join(".ags").join("data.db")) else { return };
+    let have: i64 = conn
+        .query_row("SELECT COUNT(*) FROM settings WHERE key LIKE 'decisions.%'", [], |r| r.get(0))
+        .unwrap_or(1);
+    if have > 0 || !real.is_file() {
+        return;
+    }
+    let Ok(src) = Connection::open_with_flags(&real, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return };
+    let Ok(mut stmt) = src.prepare("SELECT key, value FROM settings WHERE key LIKE 'decisions.%'") else { return };
+    let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) else { return };
+    for (k, v) in rows.flatten() {
+        let _ = conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?1, ?2)", [k, v]);
+    }
 }
 
 /// SQLite produces a consistent backup, including committed WAL pages. A failed

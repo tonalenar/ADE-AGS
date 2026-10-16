@@ -295,7 +295,7 @@ pub(crate) fn worktree_shell() -> (WorktreeShell, String) {
 }
 
 fn data_dir() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir().ok_or("No se encontró la carpeta del usuario")?.join(".ags");
+    let dir = crate::util::datadir::ags_home().ok_or("Pasta de dados indisponível")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }

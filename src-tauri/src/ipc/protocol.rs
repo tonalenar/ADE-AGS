@@ -18,10 +18,7 @@ use std::path::PathBuf;
 /// Archivo donde la app publica cómo alcanzarla. La CLI lo lee para conectarse cuando no
 /// la lanzó ninguna instancia en particular (una terminal cualquiera del sistema).
 pub fn handshake_path() -> PathBuf {
-    dirs::home_dir()
-        .unwrap_or_default()
-        .join(".ags")
-        .join("ipc.json")
+    crate::util::datadir::ags_home().unwrap_or_default().join("ipc.json")
 }
 
 /// La variable con la que cada instancia les dice a sus hijos —las TUIs de sus tabs, las
@@ -62,6 +59,11 @@ pub fn credential_endpoint(pid: u32) -> String {
 /// El handshake que tiene que usar la CLI: el de la instancia que la lanzó si existe, si no
 /// el global. Si esa instancia se cerró, el global lleva a la que esté abierta ahora.
 pub fn client_handshake_path() -> PathBuf {
+    // ADE_AGS_DATA_DIR é pedido explícito de falar com a instância isolada: vence o AGS_HANDSHAKE
+    // herdado (um terminal aberto dentro do app instalado traria o handshake dele).
+    if crate::util::datadir::is_isolated() {
+        return handshake_path();
+    }
     // CONTROLCODE_HANDSHAKE es el nombre anterior: una app vieja que siga abierta lo exporta así.
     std::env::var_os(HANDSHAKE_ENV)
         .or_else(|| std::env::var_os("CONTROLCODE_HANDSHAKE"))

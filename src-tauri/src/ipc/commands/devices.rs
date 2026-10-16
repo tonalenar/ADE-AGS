@@ -100,7 +100,7 @@ pub(crate) fn swipe_by_direction(dir: &str, w: u32, h: u32) -> Result<(u32, u32,
 
 /// Dónde se guardan las capturas que se le piden a un dispositivo.
 fn shots_dir() -> Result<std::path::PathBuf, String> {
-    let dir = dirs::home_dir().ok_or("Não achei a pasta do usuário.")?.join(".ags").join("screens");
+    let dir = crate::util::datadir::ags_home().ok_or("Pasta de dados indisponível")?.join("screens");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }

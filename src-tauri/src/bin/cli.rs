@@ -490,9 +490,9 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
     if args.get("dryRun").and_then(Value::as_bool).unwrap_or(false) {
         return Ok((json!({"commands":commands,"full":selection.as_ref().is_some_and(|(_,p)|p.full),"risk":selection.as_ref().map(|(_,p)|&p.risk),"unmapped":selection.as_ref().map(|(_,p)|&p.unmapped),"ignored":selection.as_ref().map(|(_,p)|&p.ignored)}), true));
     }
-    let home = dirs::home_dir().ok_or("Não foi possível localizar a pasta do usuário.")?;
-    std::fs::create_dir_all(home.join(".ags")).map_err(|e| e.to_string())?;
-    let conn = rusqlite::Connection::open(home.join(".ags/data.db")).map_err(|e| e.to_string())?;
+    let home = ade_ags_lib::util::datadir::ags_home().ok_or("Não foi possível localizar a pasta do usuário.")?;
+    std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+    let conn = rusqlite::Connection::open(home.join("data.db")).map_err(|e| e.to_string())?;
     // 30 s e não 5: o app grava em WAL ao mesmo tempo, e um "database is locked" aqui jogava
     // fora um verde já obtido (a próxima chamada rodava a suíte de novo).
     conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
@@ -518,7 +518,7 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
         // dos outros. Cada thread para no primeiro passo que falha dela.
         let (rust_steps, quick_steps): (Vec<_>, Vec<_>) = commands.iter().cloned().partition(|step| step.suite == "rust");
         let rust_thread = (!rust_steps.is_empty()).then(|| {
-            let (db, root, mission, actor) = (home.join(".ags/data.db"), root.clone(), mission.clone(), actor.clone());
+            let (db, root, mission, actor) = (home.join("data.db"), root.clone(), mission.clone(), actor.clone());
             std::thread::spawn(move || -> Result<Vec<test_runner::RunResult>, String> {
                 let conn = rusqlite::Connection::open(db).map_err(|e| e.to_string())?;
                 conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
@@ -552,14 +552,14 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
 }
 
 fn execute_standalone_redeliver(args: &Value) -> ExitCode {
-    let home = match dirs::home_dir() {
+    let home = match ade_ags_lib::util::datadir::ags_home() {
         Some(h) => h,
         None => {
             println!("{}", json!({ "error": "não foi possível determinar o diretório home" }));
             return ExitCode::from(EXIT_COMMAND_FAILED);
         }
     };
-    let db_path = home.join(".ags").join("data.db");
+    let db_path = home.join("data.db");
     let conn = match rusqlite::Connection::open(&db_path) {
         Ok(c) => c,
         Err(e) => {

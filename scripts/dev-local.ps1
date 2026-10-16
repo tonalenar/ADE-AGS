@@ -8,12 +8,19 @@
     pwsh scripts/dev-local.ps1 -Run       # compila e (re)abre só a instância de debug desta árvore
     pwsh scripts/dev-local.ps1 -Run -SkipBuild
 
+  INSTÂNCIA ISOLADA: o -Run abre o debug com ADE_AGS_DATA_DIR próprio (padrão
+  %LOCALAPPDATA%de-ags-dev-data; troque com -DataDir): banco, abas, canvas, configurações, contas de agentes
+  e o handshake do IPC ficam lá, nada de ~/.ags do app instalado. Para o `ags` falar COM ELA, no terminal:
+    $env:ADE_AGS_DATA_DIR = "$env:LOCALAPPDATAde-ags-dev-data"; ags <comando>
+  (sem a variável o `ags` continua falando com o app instalado). Detalhes: docs/ade-ags/DEV_LOCAL.md
+
   Antes de trocar o executável guarda a versão anterior em target\debug\ade-ags-before-<hora>.exe
   (mantém as 5 últimas), para voltar atrás copiando um arquivo.
 #>
 param(
   [switch]$Run,
-  [switch]$SkipBuild
+  [switch]$SkipBuild,
+  [string]$DataDir = (Join-Path $env:LOCALAPPDATA "ade-ags-dev-data")
 )
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
@@ -59,6 +66,10 @@ if ($Run) {
   # Perfil do WebView2 PRÓPRIO: com o mesmo identificador do app instalado (e de outras instâncias de debug) o
   # perfil seria compartilhado, e o estado salvo por outra versão (abas, canvas) quebrava telas desta.
   $env:WEBVIEW2_USER_DATA_FOLDER = Join-Path $env:LOCALAPPDATA "ade-ags-dev-localwebview"
+  New-Item -ItemType Directory -Force -Path $DataDir | Out-Null
+  $env:ADE_AGS_DATA_DIR = $DataDir
   Start-Process $exe
   Write-Host "[dev-local] aberto: $exe"
+  Write-Host "[dev-local] dados isolados em: $DataDir"
+  Write-Host "[dev-local] para o ags falar com ela:  `$env:ADE_AGS_DATA_DIR = '$DataDir'; ags status"
 }

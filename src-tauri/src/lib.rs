@@ -42,7 +42,7 @@ pub mod testspeed;
 pub use terminal::SESSION_ENV;
 mod updates;
 mod usage;
-mod util;
+pub mod util;
 mod window;
 
 pub use app::run;
