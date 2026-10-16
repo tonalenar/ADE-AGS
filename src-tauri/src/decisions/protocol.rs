@@ -162,6 +162,46 @@ impl DecisionError {
     }
 }
 
+/// De quem é a falha: quem lê o erro sabe se confere a conexão, a chave ou espera o provedor.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fault {
+    /// A conexão não abriu, caiu ou não resolveu: nada (ou nada útil) chegou ao provedor.
+    Network,
+    /// O provedor recebeu e não deu uma resposta útil: lento, sobrecarregado, erro dele ou resposta quebrada.
+    Provider,
+    /// Aqui: chave recusada, pedido recusado como inválido, provedor desligado.
+    Local,
+}
+
+impl DecisionError {
+    pub fn fault(&self) -> Fault {
+        match self {
+            Self::Transport(_) => Fault::Network,
+            Self::Timeout | Self::Malformed(_) => Fault::Provider,
+            Self::Status { code, .. } if *code >= 500 || *code == 429 => Fault::Provider,
+            Self::Status { .. } | Self::Unauthorized | Self::Unprocessable(_) | Self::Unavailable(_) => Fault::Local,
+        }
+    }
+
+    /// A frase para quem pediu a navegação: de quem é a falha, o que foi tentado e o que fazer. `attempts` e `timeout_ms`
+    /// vêm do cliente (`http::CallStats`). O código (`transport: …`, `http 503`) fica entre parênteses, para quem procura.
+    pub fn explain(&self, attempts: u32, timeout_ms: u64) -> String {
+        let tried = if attempts > 1 { format!(" depois de {attempts} tentativas") } else { String::new() };
+        let what = match self {
+            Self::Transport(_) => format!("falha de REDE ao falar com o Jev{tried}: a conexão não abriu ou caiu; confira a internet e tente de novo"),
+            Self::Timeout => format!("o PROVEDOR do Jev não respondeu em {timeout_ms} ms{tried}: a conexão abriu, mas a resposta demorou"),
+            Self::Status { code: 429, .. } => format!("o PROVEDOR do Jev limitou as consultas (http 429){tried}: espere um pouco"),
+            Self::Status { code, .. } if *code >= 500 => format!("o PROVEDOR do Jev está com problema (http {code}){tried}: tente de novo daqui a pouco"),
+            Self::Status { code, .. } => format!("o Jev recusou o pedido (http {code}): veja Ajustes → Decisões"),
+            Self::Unauthorized => "a chave do Jev foi recusada (401): confira em Ajustes → Decisões".to_string(),
+            Self::Unprocessable(_) => "o Jev recusou o pedido como inválido (422)".to_string(),
+            Self::Malformed(_) => format!("o PROVEDOR do Jev devolveu uma resposta que não consegui ler{tried}"),
+            Self::Unavailable(_) => "o provedor do Jev está desligado ou sem cliente".to_string(),
+        };
+        format!("O Jev não respondeu: {what} ({}).", self.code())
+    }
+}
+
 impl std::fmt::Display for DecisionError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&self.code())

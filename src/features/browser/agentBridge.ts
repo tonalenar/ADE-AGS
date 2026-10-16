@@ -775,6 +775,8 @@ function pilotDeps(host: BrowserHost): PilotDeps {
       try { await inPage(host, { op: "wait", idle: true, timeoutMs: 2500 }, false); } catch { /* segue */ }
     },
     pick: (query) => invoke("decision_pick_step", { query }),
+    // Abre a conexão com o Jev enquanto a primeira página é lida (só age com o piloto ligado).
+    warm: () => { void invoke("decision_preconnect").catch(() => undefined); },
     // A reserva visual: uma foto da página (só se estiver toda à vista) e o toque no ponto que o Jev apontar.
     visual: async (goal, recent) => {
       const shot = await host.visualShot();

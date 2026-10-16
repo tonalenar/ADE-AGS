@@ -2,7 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
-import { formatResult, type PilotDeps, type PilotResult } from "../jevPilot";
+import { emptyTimings, formatResult, type PilotDeps, type PilotResult } from "../jevPilot";
 import {
   all, any, canStart, check, describeCriterion, emptyPhases, evaluate, fold, instrument, judge, median, not, parseActReport,
   regex, renderMarkdown, renderTaskTable, select, summarize, text, url, viewOf, buildReport, parseTimings, phasesFromReport, isInfraFailure, infraTooHigh, unwrapCli, mergeRuns, renderFailures, renderTrend,
@@ -107,7 +107,7 @@ describe("relatório do ags portal act", () => {
   });
   it("lê a linha TEMPOS e ignora uma malformada", () => {
     const t = { jev: 1200, snapshot: 300, acao: 200, espera: 100, foto: 800, consultas: 3, fotos: 1, total: 2700 };
-    const report = parseActReport(formatResult("g", { ...result("done"), timings: t }));
+    const report = parseActReport(formatResult("g", { ...result("done"), timings: { ...emptyTimings(), ...t } }));
     expect(report.timings).toEqual(t);
     expect(parseTimings('TEMPOS: {"jev":1}')).toBeNull();
     expect(parseTimings("TEMPOS: nao-json")).toBeNull();

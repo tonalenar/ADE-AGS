@@ -137,6 +137,8 @@ export interface StepQuery {
   state: string;
   operations: StepOption[];
   targets: Record<string, StepOption[]>;
+  /** Não fazer a pergunta direta «o objetivo já foi atingido?»: o piloto só a usa depois de uma ação dele que mudou a página (plano v2, 4.2). */
+  skipGoalDone?: boolean;
 }
 
 const ROLE_LABEL: Record<string, string> = {
@@ -257,7 +259,16 @@ export function fingerprint(page: ParsedPage): string {
   return `${page.elements.length}:${hash}`;
 }
 
-const TEXT_BYTES = 3000;
+/**
+ * O que corta o estado que vai ao Jev (plano v2, 4.2, achado D2: a latência por consulta acompanha o tamanho do corpo). Cada
+ * número é um botão: o benchmark real diz se a precisão aguenta; voltar atrás é mudar uma constante.
+ */
+/** O texto visível: as linhas que falam do objetivo vêm primeiro, então 1.800 bytes bastam (eram 3.000). */
+export const TEXT_BYTES = 1800;
+/** A tabela de elementos do estado repete o rótulo de cada opção das perguntas de alvo: ali o rótulo corta mais cedo. */
+export const TABLE_LABEL_CHARS = 90;
+/** E leva no máximo estes elementos (os que mais se parecem com o objetivo); as perguntas de alvo continuam com todos. */
+export const MAX_TABLE = 80;
 const HISTORY = 10;
 
 /**
@@ -318,8 +329,13 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
   if (optionTargets.length > 0) targets.select = [...optionTargets.slice(0, MAX_PER_HEAD), ...(targets.select ?? [])];
   // A pergunta da OPERAÇÃO também precisa ver os elementos (só as de alvo os listam): sem isso o Jev escolhia
   // "rolar" por não saber o que a página oferece. É a tabela `elements` do estado no jev-ultrafast.
+  const inTable = shown.length > MAX_TABLE
+    ? [...shown].sort((a, b) => score(b.el) - score(a.el) || a.index - b.index).slice(0, MAX_TABLE)
+    : shown;
+  const clip = (text: string) => (text.length > TABLE_LABEL_CHARS ? `${text.slice(0, TABLE_LABEL_CHARS - 1)}…` : text);
   const table = [
-    ...shown.sort((a, b) => a.index - b.index).map(({ el }) => `[${el.ref}] ${labelOf(el, twins)}`),
+    ...inTable.sort((a, b) => a.index - b.index).map(({ el }) => `[${el.ref}] ${clip(labelOf(el, twins))}`),
+    ...(shown.length > inTable.length ? [`(+${shown.length - inTable.length} more elements offered in the questions below)`] : []),
     ...page.elements.filter((el) => el.options?.length && !el.states.includes("disabled")).map((el) => `[${el.ref}] ${labelOf(el)} with options: ${el.options!.slice(0, 12).join(" | ")}`),
   ];
 
@@ -390,6 +406,25 @@ export interface StepReply {
   goalDone?: number | null;
   reason: string | null;
   latencyMs: number | null;
+  /** O que a consulta custou: bytes, tokens, tentativas, espera (plano v2, 4.2). Ausente num erro antes de enviar. */
+  cost?: QueryCost | null;
+  /** De quem foi a falha: a rede, o provedor ou a configuração local (plano v2, 4.3). */
+  fault?: "rede" | "provedor" | "local" | null;
+}
+
+/** O que uma consulta ao Jev carregou e custou (espelha `QueryCost` em `decisions/browse.rs`). */
+export interface QueryCost {
+  stateBytes: number;
+  requestBytes: number;
+  responseBytes: number;
+  inputTokens: number;
+  outputTokens: number;
+  questions: number;
+  options: number;
+  scanMs: number;
+  attempts: number;
+  backoffMs: number;
+  timeoutMs: number;
 }
 
 /** O que a reserva visual devolve (ver `decisions/vision.rs`). */
@@ -405,6 +440,8 @@ export interface VisualReply {
 }
 
 export interface PilotDeps {
+  /** Abre a conexão com o Jev enquanto a primeira página é lida (o handshake sai do caminho do primeiro passo). Nunca lança. */
+  warm?: () => void;
   snapshot: () => Promise<string>;
   /** Reserva visual: pede ao Jev que aponte, numa FOTO da página, onde tocar. Opcional. */
   visual?: (goal: string, recent: string) => Promise<VisualReply>;
@@ -594,7 +631,40 @@ export interface Timings {
   consultas: number;
   fotos: number;
   total: number;
+  /** Bytes do corpo enviado em cada consulta, na ordem (a linha TEMPOS que o benchmark lê). */
+  bytes: number[];
+  /** Tokens (entrada + saída) somados, como o provedor contou. */
+  tokens: number;
+  /** A latência de cada consulta ao Jev (com as repetições), na ordem; a mediana e o p95 saem daqui. */
+  consultaMs: number[];
+  /** Repetições ao provedor (429/503/529, conexão) e quanto se esperou por elas, em ms. */
+  repeticoes: number;
+  esperaRede: number;
+  /** A varredura de segredos antes de enviar, somada, em ms. */
+  varredura: number;
+  /** Consultas sem a pergunta `concluido` (a última ação não mudou a página). */
+  semConcluido: number;
 }
+
+/** Mediana de uma lista de números (0 se vazia). Pura. */
+export function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+/** O percentil `q` (0–1) pelo método do posto mais próximo (0 se vazia). Pura. */
+export function percentile(values: number[], q: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1))];
+}
+
+export const emptyTimings = (): Timings => ({
+  jev: 0, snapshot: 0, acao: 0, espera: 0, foto: 0, consultas: 0, fotos: 0, total: 0,
+  bytes: [], tokens: 0, consultaMs: [], repeticoes: 0, esperaRede: 0, varredura: 0, semConcluido: 0,
+});
 
 export interface PilotResult {
   /** `done`, `stuck`, `unsure`, `off`, `limit`, `error`. */
@@ -624,7 +694,23 @@ export function timed(deps: PilotDeps, t: Timings): PilotDeps {
     select: wrap("acao", deps.select),
     scroll: wrap("acao", deps.scroll),
     settle: wrap("espera", deps.settle),
-    pick: async (query) => { t.consultas += 1; return wrap("jev", deps.pick)(query); },
+    pick: async (query) => {
+      t.consultas += 1;
+      if (query.skipGoalDone) t.semConcluido += 1;
+      const started = Date.now();
+      const reply = await wrap("jev", deps.pick)(query);
+      t.consultaMs.push(reply.latencyMs ?? Date.now() - started);
+      const cost = reply.cost;
+      if (cost) {
+        t.bytes.push(cost.requestBytes);
+        t.tokens += cost.inputTokens + cost.outputTokens;
+        t.repeticoes += Math.max(0, cost.attempts - 1);
+        t.esperaRede += cost.backoffMs;
+        t.varredura += cost.scanMs;
+      }
+      return reply;
+    },
+    warm: deps.warm,
   };
 }
 
@@ -638,7 +724,7 @@ export async function runPilot(
   maxSteps: number | undefined,
   rawDeps: PilotDeps,
 ): Promise<PilotResult> {
-  const progress: Progress = { startedAt: Date.now(), timings: { jev: 0, snapshot: 0, acao: 0, espera: 0, foto: 0, consultas: 0, fotos: 0, total: 0 }, log: [], snapshot: "" };
+  const progress: Progress = { startedAt: Date.now(), timings: emptyTimings(), log: [], snapshot: "" };
   try {
     return await pilotLoop(goal, rawFills, maxSteps, rawDeps, progress);
   } catch (e) {
@@ -668,6 +754,8 @@ async function pilotLoop(
   const deps = timed(rawDeps, timings);
   const fills = parseFills(rawFills);
   const limit = Math.min(MAX_STEPS, Math.max(1, Math.round(maxSteps ?? DEFAULT_STEPS)));
+  // A conexão com o Jev abre enquanto a primeira página é lida: o handshake não cai no primeiro passo.
+  try { deps.warm?.(); } catch { /* só acelera */ }
   const history: Done[] = [];
   const taken = new Set<string>();
   let snapshot = await deps.snapshot();
@@ -785,6 +873,10 @@ async function pilotLoop(
     }
 
     const query = buildStep(page, goal, fills.map(([key]) => key).filter((key) => !taken.has(key)), history, waits);
+    // A pergunta «o objetivo já foi atingido?» só vale depois de uma ação do Jev que mudou a página (abaixo): sem isso a
+    // resposta seria jogada fora, e custa uma cabeça a mais por consulta.
+    const lastJev = [...history].reverse().find((d) => !d.auto);
+    if (!lastJev || lastJev.changed === false) query.skipGoalDone = true;
     const reply = await deps.pick(query);
     if (reply.status !== "ok" || !reply.operation) {
       return finish(reply.status === "off" ? "off" : "error", reply.reason ?? "O Jev não respondeu.");
@@ -793,7 +885,7 @@ async function pilotLoop(
     // O objetivo já está atingido? Pergunta direta, à parte da operação: depois de acertar (um filtro aplicado, o carrinho
     // vazio) o Jev costuma ficar "sem certeza" da PRÓXIMA operação, mas sabe que acabou. Só vale depois de uma ação dele
     // que mudou a página (os campos preenchidos pelo nome não contam).
-    const lastByJev = [...history].reverse().find((d) => !d.auto);
+    const lastByJev = lastJev;
     // "Acabou" é uma probabilidade; a contagem do carrinho está na página. Se ela desmente, o piloto continua em vez de dar
     // o objetivo por cumprido (duas vezes no máximo: depois devolve a dúvida a quem pediu).
     const doubt = (): "no" | "retry" | "give-up" => {
@@ -978,6 +1070,24 @@ async function act(el: PageElement, operation: string, fills: [string, string][]
   return `clicou ${plain(el)}`;
 }
 
+/**
+ * As consultas ao Jev numa linha legível: quantas, latência (mediana e p95), bytes e tokens. É o que o plano v2 (4.2) mede:
+ * a meta é mediana ≤ 450 ms por consulta. Pura.
+ */
+export function queriesLine(t: Timings): string {
+  if (t.consultas === 0) return "CONSULTAS: nenhuma";
+  const parts = [
+    `${t.consultas} consulta(s)`,
+    t.consultaMs.length > 0 ? `latência mediana ${median(t.consultaMs)} ms, p95 ${percentile(t.consultaMs, 0.95)} ms` : null,
+    t.bytes.length > 0 ? `corpo mediano ${median(t.bytes)} B (máx ${Math.max(...t.bytes)} B)` : null,
+    t.tokens > 0 ? `${t.tokens} tokens` : null,
+    t.semConcluido > 0 ? `${t.semConcluido} sem a pergunta de fim` : null,
+    t.repeticoes > 0 ? `${t.repeticoes} repetição(ões) ao provedor (${t.esperaRede} ms de espera)` : null,
+    t.varredura > 0 ? `varredura de segredos ${t.varredura} ms` : null,
+  ].filter((part): part is string => part !== null);
+  return `CONSULTAS: ${parts.join(" · ")}`;
+}
+
 /** O texto que volta ao agente. */
 export function formatResult(goal: string, result: PilotResult): string {
   const head: Record<PilotResult["outcome"], string> = {
@@ -987,7 +1097,7 @@ export function formatResult(goal: string, result: PilotResult): string {
     `act "${goal}": ${head[result.outcome]}`,
     result.note,
     result.steps.length > 0 ? `\nPassos:\n${result.steps.join("\n")}` : "",
-    result.timings ? `\nTEMPOS: ${JSON.stringify(result.timings)}` : "",
+    result.timings ? `\n${queriesLine(result.timings)}\nTEMPOS: ${JSON.stringify(result.timings)}` : "",
     result.window ? `${windowLine(result.window)}\nJANELA: ${JSON.stringify(result.window)}` : "",
     "\nA página agora (o Jev só escolhe onde tocar: confira o resultado):",
     result.finalSnapshot.length > 6000 ? `${result.finalSnapshot.slice(0, 6000)}\n…` : result.finalSnapshot,

@@ -30,7 +30,7 @@ use crate::database::DbConnection;
 use crate::util::now_ts;
 
 use super::config;
-use super::http;
+use super::http::{self, CallStats, RetryPolicy};
 use super::log::{self, LogRow};
 use super::points::{memory_secret, POINT_BROWSE};
 use super::protocol::{canonical, canonical_labels, truncate_chars, DecisionRequest, Question};
@@ -85,6 +85,10 @@ pub struct StepQuery {
     /// Os elementos de cada operação que precisa de um (`click`, `type`, `select`).
     #[serde(default)]
     pub targets: BTreeMap<String, Vec<StepOption>>,
+    /// Não faz a pergunta direta «o objetivo já foi atingido?»: a última ação não mudou a página, então a resposta seria a
+    /// mesma da consulta anterior (plano v2, 4.2). O piloto só usa o `concluido` depois de uma ação que mudou a página.
+    #[serde(default)]
+    pub skip_goal_done: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -106,6 +110,34 @@ pub struct StepReply {
     /// Por que não houve escolha, em português.
     pub reason: Option<String>,
     pub latency_ms: Option<u64>,
+    /// O que a consulta custou (plano v2, 4.2): vai ao relatório do `act` para o benchmark medir bytes, tokens e a espera.
+    pub cost: Option<QueryCost>,
+    /// De quem foi a falha, se houve: `rede`, `provedor` ou `local` (plano v2, 4.3).
+    pub fault: Option<&'static str>,
+}
+
+/// O custo de uma consulta ao Jev, medido aqui e no cliente HTTP.
+#[derive(Clone, Debug, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct QueryCost {
+    /// O estado (objetivo, página, elementos, texto) em bytes, já cortado.
+    pub state_bytes: usize,
+    /// O corpo inteiro enviado (estado + perguntas + opções), em bytes.
+    pub request_bytes: usize,
+    pub response_bytes: usize,
+    pub input_tokens: i64,
+    pub output_tokens: i64,
+    /// Perguntas na consulta (operação + alvos + `concluido`).
+    pub questions: usize,
+    /// Opções somadas de todas as perguntas.
+    pub options: usize,
+    /// A varredura de segredos antes de enviar, em ms.
+    pub scan_ms: u64,
+    /// Tentativas ao provedor (1 = de primeira) e o que se esperou entre elas.
+    pub attempts: u32,
+    pub backoff_ms: u64,
+    /// O tempo limite da última tentativa (adaptativo).
+    pub timeout_ms: u64,
 }
 
 impl StepReply {
@@ -121,6 +153,8 @@ impl StepReply {
             confidence: None,
             reason: Some(reason.into()),
             latency_ms: None,
+            cost: None,
+            fault: None,
         }
     }
 }
@@ -167,6 +201,7 @@ pub struct CleanQuery {
     pub state: String,
     pub operations: Vec<(String, String)>,
     pub targets: BTreeMap<String, Vec<(String, String)>>,
+    pub skip_goal_done: bool,
 }
 
 pub fn clean_query(query: &StepQuery, max: usize) -> CleanQuery {
@@ -179,7 +214,7 @@ pub fn clean_query(query: &StepQuery, max: usize) -> CleanQuery {
         .map(|(operation, options)| (operation.clone(), clean_options(options, max)))
         .filter(|(_, options)| !options.is_empty())
         .collect();
-    CleanQuery { state: query.state.clone(), operations, targets }
+    CleanQuery { state: query.state.clone(), operations, targets, skip_goal_done: query.skip_goal_done }
 }
 
 fn target_question_id(operation: &str) -> String {
@@ -197,10 +232,12 @@ pub fn request_for(query: &CleanQuery) -> DecisionRequest {
         let instructions = format!("{TARGET} Operation: {}.", operation.to_uppercase());
         questions.insert(target_question_id(operation), Question::choice(&instructions, &refs(options)));
     }
-    questions.insert(
-        GOAL_DONE.to_string(),
-        Question::choice(GOAL_DONE_INSTRUCTIONS, &[("yes", "The whole goal is already satisfied on this page."), ("no", "Something is still missing.")]),
-    );
+    if !query.skip_goal_done {
+        questions.insert(
+            GOAL_DONE.to_string(),
+            Question::choice(GOAL_DONE_INSTRUCTIONS, &[("yes", "The whole goal is already satisfied on this page."), ("no", "Something is still missing.")]),
+        );
+    }
     let mut heuristic = BTreeMap::new();
     heuristic.insert(OPERATION.to_string(), "nenhum".to_string());
     DecisionRequest { state: truncate_chars(query.state.trim(), STATE_BYTES), questions, model: String::new(), heuristic }
@@ -265,25 +302,56 @@ pub fn pick(db: &DbConnection, query: &StepQuery) -> StepReply {
         return StepReply::without_choice("error", "A página não ofereceu opções suficientes para escolher.");
     }
     // O que o detector de segredos marca não sai, qualquer que seja o provedor.
+    let scan_started = Instant::now();
     let labels = clean.operations.iter().chain(clean.targets.values().flatten());
-    if memory_secret("", &without_addresses(&clean.state), None)
-        || labels.into_iter().any(|(_, label)| memory_secret("", &without_addresses(label), None))
-    {
+    let secret = memory_secret("", &without_addresses(&clean.state), None)
+        || labels.into_iter().any(|(_, label)| memory_secret("", &without_addresses(label), None));
+    let scan_ms = millis(scan_started);
+    if secret {
         return StepReply::without_choice("secret", "A página tem algo que parece um segredo: não enviei ao provedor.");
     }
     let api_key = config::load_key();
-    pick_with(db, &settings, api_key.as_deref(), &clean)
+    pick_with(db, &settings, api_key.as_deref(), &clean, scan_ms)
 }
 
-pub(super) fn pick_with(db: &DbConnection, settings: &config::Settings, api_key: Option<&str>, query: &CleanQuery) -> StepReply {
+fn millis(since: Instant) -> u64 {
+    u64::try_from(since.elapsed().as_millis()).unwrap_or(u64::MAX)
+}
+
+/// Quanto uma consulta carregou e custou: bytes (estado e corpo inteiro), tokens, perguntas e opções, e o que o cliente
+/// fez (tentativas, espera, prazo). Pura.
+fn cost_of(request: &DecisionRequest, stats: &CallStats, response: Option<&super::protocol::DecisionResponse>, scan_ms: u64) -> QueryCost {
+    QueryCost {
+        state_bytes: request.state.len(),
+        request_bytes: stats.bytes_out,
+        response_bytes: stats.bytes_in,
+        input_tokens: response.map_or(0, |r| r.input_tokens),
+        output_tokens: response.map_or(0, |r| r.output_tokens),
+        questions: request.questions.len(),
+        options: request.questions.values().map(|q| q.option_count()).sum(),
+        scan_ms,
+        attempts: stats.attempts,
+        backoff_ms: stats.backoff_ms,
+        timeout_ms: stats.timeout_ms,
+    }
+}
+
+pub(super) fn pick_with(db: &DbConnection, settings: &config::Settings, api_key: Option<&str>, query: &CleanQuery, scan_ms: u64) -> StepReply {
     let request = request_for(query);
     let started = Instant::now();
-    let result = http::execute(settings, api_key, &request);
-    let latency = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
+    // O piloto é interativo e perde o `act` inteiro se uma consulta falha: aqui o cliente repete (429/503/529, conexão) e adapta o prazo.
+    let (result, stats) = http::execute_with(settings, api_key, &request, RetryPolicy::Patient);
+    let latency = millis(started);
+    let cost = cost_of(&request, &stats, result.as_ref().ok(), scan_ms);
+    let fault = result.as_ref().err().map(|error| match error.fault() {
+        super::protocol::Fault::Network => "rede",
+        super::protocol::Fault::Provider => "provedor",
+        super::protocol::Fault::Local => "local",
+    });
     let state_hash = super::protocol::state_hash(&request.state);
     let reading = match &result {
         Ok(response) => read_answer(&response.answers, query),
-        Err(error) => Err(format!("O Jev não respondeu ({}).", error.code())),
+        Err(error) => Err(error.explain(stats.attempts, stats.timeout_ms)),
     };
     let (decision, error, input, output) = match &result {
         Ok(response) => (
@@ -332,8 +400,10 @@ pub(super) fn pick_with(db: &DbConnection, settings: &config::Settings, api_key:
             confidence,
             reason: None,
             latency_ms: Some(latency),
+            cost: Some(cost),
+            fault: None,
         },
-        Err(reason) => StepReply::without_choice("error", reason),
+        Err(reason) => StepReply { cost: Some(cost), fault, ..StepReply::without_choice("error", reason) },
     }
 }
 
@@ -343,6 +413,30 @@ pub async fn decision_pick_step(db: tauri::State<'_, DbConnection>, query: StepQ
     tauri::async_runtime::spawn_blocking(move || pick(&db, &query))
         .await
         .map_err(|e| e.to_string())
+}
+
+/// Abre a conexão com o Jev antes da primeira consulta do `act` (ver `http::preconnect`). Só age com o piloto ligado.
+pub fn preconnect(db: &DbConnection) {
+    if let Some(settings) = db.lock().ok().and_then(|conn| config::load(&conn).ok()) {
+        http::preconnect(&settings);
+    }
+}
+
+/// Ao abrir o app: espera a base ficar pronta e pré-conecta, para o primeiro `act` não pagar o handshake.
+pub fn preconnect_at_start(app: tauri::AppHandle) {
+    use tauri::Manager;
+    std::thread::spawn(move || {
+        crate::database::wait_until_db_ready();
+        let db = app.state::<DbConnection>().inner().clone();
+        preconnect(&db);
+    });
+}
+
+/// O frontend chama no começo de um `act`: a conexão abre enquanto ele lê a primeira página.
+#[tauri::command]
+pub async fn decision_preconnect(db: tauri::State<'_, DbConnection>) -> Result<(), String> {
+    let db = db.inner().clone();
+    tauri::async_runtime::spawn_blocking(move || preconnect(&db)).await.map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -363,6 +457,7 @@ mod test {
                 ("type".to_string(), vec![option("e3", "campo \"E-mail\" (vazio)")]),
                 ("select".to_string(), vec![option("e9", "lista \"País\"")]),
             ]),
+            skip_goal_done: false,
         }
     }
 
@@ -417,6 +512,41 @@ mod test {
         assert_eq!(request.questions["operacao"].option_count(), 4);
         assert_eq!(request.questions["alvo_click"].option_count(), 2);
         assert_eq!(request.heuristic["operacao"], "nenhum");
+    }
+
+    #[test]
+    fn sem_o_concluido_quando_a_ultima_acao_nao_mudou_a_pagina() {
+        // 4.2 (D2): a pergunta direta custa uma cabeça por consulta; o piloto só usa a resposta depois de uma ação que mudou a página.
+        let mut skipped = query();
+        skipped.skip_goal_done = true;
+        let clean = clean_query(&skipped, 60);
+        assert!(clean.skip_goal_done);
+        let request = request_for(&clean);
+        let ids: Vec<&str> = request.questions.keys().map(String::as_str).collect();
+        assert_eq!(ids, ["alvo_click", "alvo_type", "operacao"]);
+        let with = request_for(&clean_query(&query(), 60));
+        assert_eq!(with.questions.len(), request.questions.len() + 1);
+    }
+
+    #[test]
+    fn o_custo_conta_bytes_perguntas_opcoes_e_tokens() {
+        let request = request_for(&clean_query(&query(), 60));
+        let stats = CallStats { attempts: 2, bytes_out: 1234, bytes_in: 321, backoff_ms: 250, timeout_ms: 3000 };
+        let response = super::super::protocol::DecisionResponse {
+            answers: BTreeMap::new(),
+            input_tokens: 400,
+            output_tokens: 6,
+            model: "jev".into(),
+        };
+        let cost = cost_of(&request, &stats, Some(&response), 7);
+        assert_eq!((cost.request_bytes, cost.response_bytes, cost.attempts, cost.backoff_ms), (1234, 321, 2, 250));
+        assert_eq!((cost.input_tokens, cost.output_tokens, cost.scan_ms, cost.timeout_ms), (400, 6, 7, 3000));
+        assert_eq!(cost.questions, 4);
+        // operação (4) + alvo_click (2) + alvo_type (1) + concluido (2)
+        assert_eq!(cost.options, 9);
+        assert_eq!(cost.state_bytes, request.state.len());
+        // Falhou antes de haver resposta: sem tokens.
+        assert_eq!(cost_of(&request, &stats, None, 0).input_tokens, 0);
     }
 
     #[test]
