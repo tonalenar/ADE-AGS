@@ -23,7 +23,7 @@ $env:ADE_AGS_DATA_DIR = "$env:LOCALAPPDATA\ade-ags-dev-data"
 ags status        # fala com a instância de debug
 ```
 
-Com a variável definida o `ags` só procura o handshake daquela pasta (nunca cai no do app instalado). Terminais abertos DENTRO da instância já recebem `AGS_HANDSHAKE` e falam com ela sem nada extra. Sem a variável, o `ags` fala com o app instalado como sempre.
+Com a variável definida o `ags` só procura o handshake daquela pasta (nunca cai no do app instalado) e ela vence o `AGS_HANDSHAKE` herdado de um terminal do app instalado. Terminais abertos DENTRO da instância já recebem `AGS_HANDSHAKE` e falam com ela sem nada extra. Sem a variável, o `ags` fala com o app instalado como sempre.
 
 ## Jev e contas
 

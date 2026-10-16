@@ -59,20 +59,17 @@ pub fn credential_endpoint(pid: u32) -> String {
 /// El handshake que tiene que usar la CLI: el de la instancia que la lanzó si existe, si no
 /// el global. Si esa instancia se cerró, el global lleva a la que esté abierta ahora.
 pub fn client_handshake_path() -> PathBuf {
+    // ADE_AGS_DATA_DIR é pedido explícito de falar com a instância isolada: vence o AGS_HANDSHAKE
+    // herdado (um terminal aberto dentro do app instalado traria o handshake dele).
+    if crate::util::datadir::is_isolated() {
+        return handshake_path();
+    }
     // CONTROLCODE_HANDSHAKE es el nombre anterior: una app vieja que siga abierta lo exporta así.
     std::env::var_os(HANDSHAKE_ENV)
         .or_else(|| std::env::var_os("CONTROLCODE_HANDSHAKE"))
         .map(PathBuf::from)
         .filter(|p| p.is_file())
-        .unwrap_or_else(|| {
-            // Instância isolada (ADE_AGS_DATA_DIR): só o handshake dela; cair no do app instalado
-            // faria o `ags` falar com a instância errada.
-            if crate::util::datadir::is_isolated() {
-                handshake_path()
-            } else {
-                global_handshake_for_client(handshake_path())
-            }
-        })
+        .unwrap_or_else(|| global_handshake_for_client(handshake_path()))
 }
 
 /// Dónde buscar el handshake global desde la CLI. En el sandbox de Codex para Windows el
