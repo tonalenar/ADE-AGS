@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { formatResult, type PilotDeps, type PilotResult } from "../jevPilot";
 import {
   all, any, canStart, check, describeCriterion, emptyPhases, evaluate, fold, instrument, judge, median, not, parseActReport,
-  regex, renderMarkdown, renderTaskTable, select, summarize, text, url, viewOf, buildReport, parseTimings, phasesFromReport, isInfraFailure, infraTooHigh, unwrapCli, mergeRuns, renderFailures,
+  regex, renderMarkdown, renderTaskTable, select, summarize, text, url, viewOf, buildReport, parseTimings, phasesFromReport, isInfraFailure, infraTooHigh, unwrapCli, mergeRuns, renderFailures, renderTrend,
   type BenchTask, type TaskRun,
 } from "../../../../scripts/bench/core";
 import { PAGES, initialNames, renderSnapshot, runSimTask, virtualClock } from "../../../../scripts/bench/sim";
@@ -430,5 +430,18 @@ describe("junção de rodadas e causas", () => {
     expect(failures).toContain("L04-busca-com-botao");
     expect(failures).toContain("**Causa:** sem certeza após ação");
     expect(failures).not.toContain("L01-icones-sem-nome");
+  });
+});
+
+describe("tendência entre rodadas", () => {
+  it("mostra o resumo e uma coluna por rodada; tarefa não medida vira «—»", () => {
+    const t = TASKS.slice(0, 2);
+    const a = buildReport({ label: "a", mode: "real", startedAt: "t0" }, [run({ id: t[0].id, outcome: "unsure", criterionOk: false })]);
+    const b = buildReport({ label: "b", mode: "real", startedAt: "t1" }, [run({ id: t[0].id }), run({ id: t[1].id })]);
+    const md = renderTrend(t, [{ name: "ANTES", report: a }, { name: "DEPOIS", report: b }]);
+    expect(md).toContain("| métrica | ANTES | DEPOIS |");
+    expect(md).toContain("0/1 (0%) | 2/2 (100%)");
+    expect(md).toContain(`| ${t[0].id} | ❌ unsure · 2p · 3.0 s | ✅ · 2p · 3.0 s |`);
+    expect(md).toContain(`| ${t[1].id} | — | ✅ · 2p · 3.0 s |`);
   });
 });

@@ -524,6 +524,39 @@ export function mergeRuns(reports: Pick<BenchReport, "runs">[], order: string[])
   return order.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
 }
 
+/**
+ * Várias rodadas lado a lado (ANTES → DEPOIS → DEPOIS 2…): o resumo e uma coluna de resultado por rodada, com os passos e
+ * o tempo da tarefa. A tarefa que uma rodada não mediu aparece como «—». Pura.
+ */
+export function renderTrend(tasks: BenchTask[], rounds: { name: string; report: BenchReport }[]): string {
+  const head = (first: string) => `| ${first} | ${rounds.map((r) => r.name).join(" | ")} |\n|---|${rounds.map(() => "---").join("|")}|`;
+  const rows: [string, (s: Summary) => string][] = [
+    ["tarefas medidas", (s) => String(s.tasks)],
+    ["concluídas sem ajuda à mão (critério vale)", (s) => `${s.completed}/${s.tasks} (${pct(s.completedRate)})`],
+    ["… e o piloto confirmou (done)", (s) => (s.confirmed === undefined ? "—" : `${s.confirmed}/${s.tasks} (${pct(s.confirmed / Math.max(1, s.tasks))})`)],
+    ["falso «concluído»", (s) => String(s.falseDone)],
+    ["falso «sem certeza»", (s) => String(s.falseUnsure)],
+    ["violações", (s) => String(s.violations)],
+    ["tempo por tarefa (mediana)", (s) => secs(s.medianTotalMs)],
+    ["tempo por passo (mediana)", (s) => ms0(s.medianStepMs)],
+    ["fase: consulta ao Jev (+foto)", (s) => pct(s.share.jevMs)],
+    ["fase: snapshot", (s) => pct(s.share.snapshotMs)],
+    ["fase: ação", (s) => pct(s.share.actionMs)],
+    ["fase: espera", (s) => pct(s.share.waitMs)],
+    ["fase: outros/não medido", (s) => pct(s.share.otherMs)],
+  ];
+  const summary = [head("métrica"), ...rows.map(([label, f]) => `| ${label} | ${rounds.map((r) => f(r.report.summary)).join(" | ")} |`)].join("\n");
+  const byRound = rounds.map((r) => new Map(r.report.runs.map((run) => [run.id, run])));
+  const lines = tasks.filter((t) => byRound.some((m) => m.has(t.id))).map((t) => {
+    const cells = byRound.map((m) => {
+      const run = m.get(t.id);
+      return run ? `${mark(run)} · ${run.steps}p · ${secs(run.totalMs)}` : "—";
+    });
+    return `| ${t.id} | ${cells.join(" | ")} |`;
+  });
+  return [summary, "", head("tarefa (resultado · passos · tempo)"), ...lines].join("\n");
+}
+
 export function renderMarkdown(tasks: BenchTask[], report: BenchReport, baseline?: BenchReport): string {
   return [
     `### ${report.label} — modo ${report.mode}${report.commit ? ` · ${report.commit}` : ""} · ${report.startedAt}`,

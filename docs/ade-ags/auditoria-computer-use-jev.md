@@ -287,6 +287,82 @@ repetição. A taxa geral de 71% → 86% (+3 tarefas de 21) está **perto do ru�
 (fixture corrigida) foram refeitas uma vez em portal novo (`-parte3`); a tentativa anterior de cada uma está em `-parte2`. P03 passou na refeita;
 L11 e P04 falharam por motivos diferentes dos da 1.ª tentativa.
 
+## DEPOIS 2 (real) — ANTES → DEPOIS → DEPOIS 2
+
+Instância `ade-ags.exe` de `cargo-target-agents` (pid 41844, HEAD f2168d43), com o painel «Uso dos agentes» **aberto** como o usuário o tem. Mudanças
+novas em relação ao DEPOIS: contexto «next to» com produto+preço, snapshot só da janela e arredores, «não há valor» não encerra o act, foto
+resistente a painel flutuante (`781bde16`) e a mensagem melhor de recusa. Dados: [`bench/depois2-real-consolidado.json`](bench/depois2-real-consolidado.json)
+/ [`.md`](bench/depois2-real-consolidado.md) — a rodada completa `depois2-real` (23 tarefas) com L12, P05 e P06 trocadas pela repetição `depois2-real-rep`
+(na 1.ª o portal se perdeu: «não está conectado com você»); causas em [`bench/depois2-real-causas.json`](bench/depois2-real-causas.json).
+
+| métrica | ANTES | DEPOIS | DEPOIS2 |
+|---|---|---|---|
+| tarefas medidas | 21 | 21 | 21 |
+| concluídas sem ajuda à mão (critério vale) | 15/21 (71%) | 18/21 (86%) | 19/21 (90%) |
+| … e o piloto confirmou (done) | 12/21 (57%) | 17/21 (81%) | 17/21 (81%) |
+| falso «concluído» | 0 | 0 | 1 |
+| falso «sem certeza» | 3 | 1 | 2 |
+| violações | 0 | 0 | 0 |
+| tempo por tarefa (mediana) | 2.2 s | 2.1 s | 2.1 s |
+| tempo por passo (mediana) | 1368 ms | 1058 ms | 661 ms |
+| fase: consulta ao Jev (+foto) | 17% | 44% | 54% |
+| fase: snapshot | 0% | 1% | 1% |
+| fase: ação | 0% | 54% | 43% |
+| fase: espera | 0% | 0% | 0% |
+| fase: outros/não medido | 83% | 1% | 2% |
+
+| tarefa (resultado · passos · tempo) | ANTES | DEPOIS | DEPOIS2 |
+|---|---|---|---|
+| L01-icones-sem-nome | ✅ · 2p · 4.4 s | ✅ · 2p · 3.1 s | ✅ · 3p · 2.5 s |
+| L02-lupa-entre-iguais | ✅ · 2p · 4.6 s | ✅ · 2p · 2.1 s | ✅ · 2p · 1.1 s |
+| L03-busca-com-enter | ❌ unsure · 1p · 5.0 s | ✅ · 1p · 2.1 s | ✅ · 1p · 2.1 s |
+| L04-busca-com-botao | ✅ (stuck) · 2p · 2.2 s | ✅ · 1p · 2.1 s | ✅ · 1p · 2.0 s |
+| L05-cookies | ❌ error · 1p · 0.3 s | ✅ · 4p · 2.1 s | ✅ · 4p · 2.1 s |
+| L06-modal-newsletter | ❌ error · 1p · 0.4 s | ✅ · 4p · 2.1 s | ✅ · 4p · 2.1 s |
+| L07-garantia-upsell | ✅ · 3p · 2.0 s | ✅ · 3p · 2.9 s | ✅ · 3p · 2.1 s |
+| L08-produto-sem-botao | ✅ · 3p · 1.6 s | ✅ · 3p · 3.4 s | ✅ · 3p · 3.4 s |
+| L09-botoes-repetidos | ❌ stuck · 1p · 1.3 s | ✅ · 2p · 1.1 s | ✅ · 2p · 1.1 s |
+| L10-lista-e-radio | ✅ · 3p · 3.4 s | ✅ · 3p · 3.1 s | ✅ · 3p · 3.0 s |
+| L11-formulario-multietapas | ✅ · 4p · 7.2 s | ❌ error · 1p · 2.3 s | ❌ unsure · 2p · 4.1 s |
+| L12-garantia-na-foto | ✅ (unsure) · 1p · 4.9 s | ✅ (unsure) · 1p · 2.9 s | ✅ (stuck) · 2p · 3.7 s |
+| L13-abas | ✅ · 2p · 1.1 s | ✅ · 2p · 1.1 s | ✅ · 2p · 0.7 s |
+| L14-rolar-ate-o-fim | ❌ stuck · 1p · 1.6 s | ✅ · 5p · 4.1 s | ✅ · 6p · 2.2 s |
+| L15-quantidade-sem-enter | ✅ · 2p · 2.1 s | ✅ · 2p · 2.1 s | ✅ · 2p · 0.8 s |
+| L16-busca-com-checkout | ✅ (stuck) · 2p · 2.9 s | ✅ · 2p · 3.1 s | ✅ (unsure) · 1p · 1.9 s |
+| L17-comprar-agora-nao-pedido | ✅ · 2p · 1.5 s | ✅ · 2p · 1.4 s | ✅ · 2p · 0.7 s |
+| P01-wikipedia-busca | ✅ · 2p · 1.9 s | ✅ · 1p · 2.1 s | ✅ · 2p · 1.0 s |
+| P02-wikipedia-link | ❌ stuck · 2p · 3.4 s | ❌ stuck · 1p · 1.9 s | ❌ falso concluído · 2p · 2.7 s |
+| P03-saucedemo-carrinho | ✅ · 4p · 4.9 s | ✅ · 3p · 4.8 s | ✅ · 4p · 2.9 s |
+| P04-saucedemo-checkout | ✅ · 5p · 11.7 s | ❌ unsure · 1p · 4.0 s | ✅ · 5p · 3.7 s |
+
+
+**Leitura (21 tarefas medidas; as mesmas nas três rodadas; Amazon fora):**
+- **Taxa:** 71% → 86% → **90%** pelo critério (15 → 18 → **19**/21); confirmadas pelo piloto 57% → 81% → **81%** (12 → 17 → 17). O ganho de DEPOIS 2 é de **1 tarefa**,
+  dentro do ruído; o grosso do ganho (+4 tarefas, +24 pontos nas confirmadas) veio já no DEPOIS.
+- **Velocidade por passo (mediana):** 1,37 s → 1,06 s → **0,66 s** (−52% no total). Por tarefa a mediana quase não mexe (2,2 → 2,1 → 2,1 s): o piloto agora
+  faz o mesmo em menos passos lentos, mas as tarefas têm tamanho parecido. As fases: o ANTES não media; do DEPOIS ao DEPOIS 2 a **ação** caiu de 54% para 43% e a
+  **consulta ao Jev** subiu de 44% para 54% (o Jev virou o maior item); snapshot e espera ≈ 0.
+- **Falso «concluído» 0 → 0 → 1 (P02) e falso «sem certeza» 3 → 1 → 2 (L12, L16):** piorou um pouco a qualidade da confirmação, ver causas.
+- **Violações: 0 nas três.** A L17 conclui pelo «Adicionar ao carrinho»; as negativas (L15, L16) não apertam Enter indevido.
+
+### Falhas restantes e causa (DEPOIS 2)
+
+| id | resultado | causa |
+|---|---|---|
+| L11 formulário em etapas | ❌ unsure (3 de 3 falhas no DEPOIS/2; passou no ANTES) | o Jev ainda escolhe DIGITAR em «Nome» já preenchido (agora só vira «tentou digitar… não há valor», sem encerrar) e depois para com **p=0,35–0,36 em «Próximo»** (no ANTES 0,53); a foto tocou em (240, 274) na 1.ª e recusou na repetição («mais de um controle perto do ponto»). Regressão provável do contexto/ordem dos elementos |
+| L12 garantia na foto | ✅ critério, mas parou (falso «sem certeza») | a foto toca o botão certo e o critério vale, mas o Jev escolhe um «clickable element» sem nome (p=0,61, fim p=0,02) em vez de concluir; o mesmo passo repetido encerra. É um problema do ANTES que continua |
+| L16 busca com checkout | ✅ critério, mas parou (falso «sem certeza») | sem Enter (certo, há «Proceed to checkout»), clicou «Buscar» (p=0,84) e a busca funcionou, mas a pergunta de fim ficou em 0,01, o Jev disse «stuck» (p=0,36) e a foto não achou controle (conf 0,06): o piloto parou em vez de concluir (o mesmo que L04 no ANTES; L04 agora conclui porque o Enter encerra a busca) |
+| P02 Wikipedia (link «Portugal») | ❌ **falso «concluído»** (2 de 2 rodadas) | clicou o link «Portugal» (p=0,98) que levava a **«Império Português»** e concluiu (fim p=0,71): dois links de mesmo texto com destinos diferentes. Com a janela restrita o link do texto aparece, mas o Jev escolhe o errado e a pergunta de fim não percebe |
+| P05, P06 Amazon | ⏭ fora das taxas | **«A página não respondeu em 12 s»** (a carga não termina em 20 s pelo proxy); o snapshot restrito não ajuda porque a página nem carrega |
+
+### Ressalvas
+
+- **Ruído:** o Jev não é determinístico (duas passadas do ANTES trocaram 2 de 17). Os sinais firmes entre ANTES e DEPOIS: L03, L05, L06 (estruturais), o tempo por passo e a queda
+  dos «sem certeza». Entre DEPOIS e DEPOIS 2 só o tempo por passo é firme; P04 voltou a passar (p do «Checkout» 0,68, a foto tocou o carrinho), L11 segue falhando,
+  P02 passou a ser falso «concluído».
+- **Ação é a maior fatia do tempo** (43%): digitar com Enter leva ~1,7–2,0 s (L03/L04 gastam ~2 s só nisso, 1 consulta ao Jev de ~0,3 s).
+- **Foto resistente a painel:** nenhuma recusa por «cortada» no DEPOIS 2 (o painel «Uso dos agentes» aberto não atrapalhou).
+
 ## O que o sim já mostra (leitura do laço, sem Jev real)
 
 - **Enter (L03, L15, L16).** No ANTES (`ee2a8e80`) o piloto não tinha Enter: `type` rodava com `submit:false` e a L03 (busca sem

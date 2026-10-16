@@ -23,7 +23,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import {
-  buildReport, canStart, mergeRuns, infraTooHigh, isInfraFailure, unwrapCli, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
+  buildReport, canStart, mergeRuns, renderTrend, infraTooHigh, isInfraFailure, unwrapCli, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
   type BenchReport, type BenchTask, type TaskRun,
 } from "./bench/core";
 import { runSimTask } from "./bench/sim";
@@ -75,6 +75,16 @@ Fora das taxas (infraestrutura ou site, não do piloto): ${excluded.length > 0 ?
 `);
   writeFileSync(outPath.replace(/\.json$/i, "") + ".md", md);
   console.log(md);
+  process.exit(0);
+}
+
+// `--trend antes.json,depois.json,depois2.json --names ANTES,DEPOIS,DEPOIS2`: as rodadas lado a lado. Não roda nada.
+if (flag("trend")) {
+  const files = (value("trend") ?? "").split(",").filter(Boolean);
+  const names = (value("names") ?? "").split(",");
+  if (files.length === 0) fail("--trend pede os JSONs separados por vírgula.");
+  const rounds = files.map((p, i) => ({ name: names[i] ?? `rodada ${i + 1}`, report: JSON.parse(readFileSync(p, "utf8")) as BenchReport }));
+  console.log(renderTrend(TASKS, rounds));
   process.exit(0);
 }
 
