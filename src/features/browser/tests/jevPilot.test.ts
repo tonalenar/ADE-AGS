@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, blockedControl, obviousAdvance, isAmbiguous, isSearchField, submitsOnType, emptyFieldsNote, goalContradiction, missingFill, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, blockedControl, obviousAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, goalContradiction, missingFill, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -934,5 +934,38 @@ describe("falha no meio do caminho", () => {
     const h = harness([ok("done")]);
     h.deps.snapshot = async () => { throw new Error("sem página"); };
     await expect(runPilot("x", [], undefined, h.deps)).rejects.toThrow("sem página");
+  });
+});
+
+describe("remover do carrinho: a contagem tem de cair", () => {
+  const head = ['page: "Carrinho" https://shop.test/cart', "viewport: 1000×600 · scroll 0/0", ""];
+  const rows = (n: number) => Array.from({ length: n }, (_, i) => `- button "Excluir" [ref=e${i + 1}]`);
+  const cart = (items: number) => parseSnapshot([...head, ...rows(items)].join("\n"));
+  const emptyPage = [...head, '- text "Seu carrinho está vazio"'].join("\n");
+
+  it("conta os itens do carrinho da página", () => {
+    expect(cartCount(cart(2))).toBe(2);
+    expect(cartCount(parseSnapshot([...head, '- text "Subtotal (3 itens)"'].join("\n")))).toBe(3);
+    expect(cartCount(parseSnapshot(emptyPage))).toBe(0);
+    expect(cartCount(parseSnapshot([...head, '- link "Início" [ref=e1]'].join("\n")))).toBeNull();
+  });
+
+  it("removeu um: conferido; nada mudou: recusa o 'feito'", () => {
+    expect(goalContradiction("remover o produto do carrinho", cart(1), 2)).toBeNull();
+    expect(goalContradiction("remover o produto do carrinho", cart(1), 1)).toContain("nada foi removido");
+    expect(goalContradiction("remove the item from the cart", cart(2), 2)).toContain("nada foi removido");
+  });
+
+  it("sem carrinho no começo (não sabe quantos eram), não confere", () => {
+    expect(goalContradiction("remover o produto do carrinho", cart(1), null)).toBeNull();
+    expect(goalContradiction("remover o produto do carrinho", cart(1), 0)).toBeNull();
+  });
+
+  it("o piloto: o Jev diz 'feito' sem a contagem cair, e só conclui depois que o item sai", async () => {
+    const one = [...head, ...rows(1)].join("\n");
+    const h = harness([ok("done"), ok("click", "e1"), ok("done")], [one, emptyPage]);
+    const result = await runPilot("remover o produto do carrinho", [], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(result.steps.join("\n")).toContain("a página não confere");
   });
 });

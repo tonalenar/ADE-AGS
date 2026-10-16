@@ -529,13 +529,9 @@ const EMPTY_TEXT = /\b(vazi[oa]|empty|0\s+(items?|itens)|nenhum item|no items)\b
  * o que o Jev vê é a probabilidade, a página tem o número. Conta os controles "Remover/Remove/Excluir" (um por item) e
  * lê "N itens" do texto. Devolve o que a página mostra de diferente, ou `null` se confere ou não dá para saber. Pura.
  */
-export function goalContradiction(goal: string, page: ParsedPage): string | null {
+export function goalContradiction(goal: string, page: ParsedPage, initial: number | null = null): string | null {
   if (!CART_GOAL.test(goal)) return null;
-  const removers = page.elements.filter((el) => REMOVE_CONTROL.test(el.name.trim())).length;
-  const lines = [...page.text, ...page.elements.map((el) => el.name)];
-  const said = lines.map((l) => COUNT_TEXT.exec(l)).find((m) => m !== null);
-  const saidCount = said ? Number(said[1]) : null;
-  const saysEmpty = lines.some((l) => EMPTY_TEXT.test(l));
+  const { removers, saidCount, saysEmpty } = cartFacts(page);
   const wanted = COUNT_GOAL.exec(goal);
   if (wanted) {
     const raw = wanted[1].toLowerCase();
@@ -549,8 +545,34 @@ export function goalContradiction(goal: string, page: ParsedPage): string | null
     if (saysEmpty && removers === 0) return null;
     if (removers > 0) return `ainda há ${removers} item(ns) com botão de remover na página.`;
     if (saidCount !== null && saidCount > 0) return `a página ainda mostra ${saidCount} item(ns).`;
+    return null;
+  }
+  // «Remover o produto do carrinho»: não diz quantos sobram, mas a contagem tem de ter caído em relação ao começo.
+  if (REMOVE_GOAL.test(goal) && initial !== null && initial > 0) {
+    const now = cartCount(page);
+    if (now !== null && now >= initial) return `o carrinho ainda tem ${now} item(ns), os mesmos de antes (${initial}): nada foi removido.`;
   }
   return null;
+}
+
+const REMOVE_GOAL = /\b(remov\w*|remove|exclu\w*|delete|apag\w*|tir\w+)\b/i;
+
+function cartFacts(page: ParsedPage): { removers: number; saidCount: number | null; saysEmpty: boolean } {
+  const removers = page.elements.filter((el) => REMOVE_CONTROL.test(el.name.trim())).length;
+  const lines = [...page.text, ...page.elements.map((el) => el.name)];
+  const said = lines.map((l) => COUNT_TEXT.exec(l)).find((m) => m !== null);
+  return { removers, saidCount: said ? Number(said[1]) : null, saysEmpty: lines.some((l) => EMPTY_TEXT.test(l)) };
+}
+
+/**
+ * Quantos itens o carrinho que está na página tem: o «N itens» do texto, ou os botões de remover (um por item); 0 se diz que
+ * está vazio; `null` se a página não parece um carrinho. Pura.
+ */
+export function cartCount(page: ParsedPage): number | null {
+  const { removers, saidCount, saysEmpty } = cartFacts(page);
+  if (saidCount !== null) return saidCount;
+  if (removers > 0) return removers;
+  return saysEmpty ? 0 : null;
 }
 
 /** Onde foi o tempo do piloto, em ms (somas por fase): o Jev (consulta), o snapshot, a ação, a espera, a foto. */
@@ -654,6 +676,8 @@ async function pilotLoop(
     return finish("error", early);
   }
   let contradictions = 0;
+  /** Quantos itens o carrinho tinha ao começar (se a página já é um carrinho): «remover» só vale se isso diminuiu. */
+  const initialCart = cartCount(parseSnapshot(snapshot));
 
   // A reserva visual: quando o texto não basta, uma foto da página e o Jev aponta onde tocar.
   const triedPhotos = new Set<string>();
@@ -752,7 +776,7 @@ async function pilotLoop(
     // "Acabou" é uma probabilidade; a contagem do carrinho está na página. Se ela desmente, o piloto continua em vez de dar
     // o objetivo por cumprido (duas vezes no máximo: depois devolve a dúvida a quem pediu).
     const doubt = (): "no" | "retry" | "give-up" => {
-      const why = goalContradiction(goal, page);
+      const why = goalContradiction(goal, page, initialCart);
       if (!why) return "no";
       contradictions += 1;
       log.push(`${step}. o Jev disse que acabou, mas a página não confere: ${why}`);
