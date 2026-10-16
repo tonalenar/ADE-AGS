@@ -75,10 +75,21 @@ export interface TerminalKeyOptions {
    * pegándose igual: el `paste` normal lo maneja xterm.
    */
   browserPaste?: boolean;
+  /**
+   * Copiar. Com texto selecionado, Ctrl+C (como o Windows Terminal), Ctrl+Shift+C e Ctrl+Insert copiam em vez de mandar
+   * a tecla para a TUI; sem seleção, Ctrl+C segue sendo o interromper de sempre.
+   */
+  getSelection?: () => string;
+  copy?: (text: string) => void;
 }
 
 function isCtrlV(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey">): boolean {
   return event.ctrlKey && !event.altKey && !event.metaKey && event.key.toLowerCase() === "v";
+}
+
+function isCopyKey(event: Pick<KeyboardEvent, "key" | "ctrlKey" | "altKey" | "metaKey">): boolean {
+  if (!event.ctrlKey || event.altKey || event.metaKey) return false;
+  return event.key.toLowerCase() === "c" || event.key === "Insert";
 }
 
 /**
@@ -92,6 +103,15 @@ export function createTerminalKeyHandler(
   let deadPending = false;
 
   return (event) => {
+    if (options.getSelection && options.copy && event.type === "keydown" && isCopyKey(event)) {
+      const text = options.getSelection();
+      if (text) {
+        event.preventDefault();
+        options.copy(text);
+        return false;
+      }
+    }
+
     // Ctrl+V (y Ctrl+Shift+V) lo pega el navegador (ver `TerminalKeyOptions.browserPaste`).
     if (options.browserPaste && isCtrlV(event) && (event.type === "keydown" || event.type === "keyup")) return false;
 

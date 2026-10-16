@@ -15,6 +15,7 @@ import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
 import { installTuiScrollRail } from "@/features/terminal/tuiScrollRail";
 import { registerTerminal } from "@/features/terminal/terminalRegistry";
+import { decodeOsc52 } from "@/features/terminal/osc52";
 import { installTerminalKeyHandler } from "@/features/terminal/terminalKeys";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
@@ -255,7 +256,21 @@ export function Terminal({
     // Tab que no se escapa de la terminal, AltGr y los acentos (ver terminalKeys.ts).
     // En Claude Code (protocolo de Kitty) Ctrl+V lo pega el navegador: así llega la imagen del
     // portapapeles al `onPaste` de más abajo.
-    installTerminalKeyHandler(term, { browserPaste: agentId === "claude-code" });
+    // No OpenCode (que também usa o protocolo de Kitty) é igual: sem isto o xterm engolia o Ctrl+V e nada era colado.
+    // Copiar: com texto selecionado, Ctrl+C / Ctrl+Shift+C / Ctrl+Insert copiam para o sistema.
+    installTerminalKeyHandler(term, {
+      browserPaste: agentId === "claude-code" || !!agentId?.startsWith("opencode"),
+      getSelection: () => term.getSelection(),
+      copy: (text) => { void navigator.clipboard.writeText(text).catch(console.error); },
+    });
+    // O OpenCode captura o mouse e copia o que a pessoa seleciona por OSC 52 (só escrita; ver osc52.ts).
+    if (agentId) {
+      term.parser.registerOscHandler(52, (data) => {
+        const text = decodeOsc52(data);
+        if (text) void navigator.clipboard.writeText(text).catch(console.error);
+        return true;
+      });
+    }
     term.open(containerRef.current);
     termRef.current = term;
     if (initialScrollback) {

@@ -166,3 +166,35 @@ describe("Ctrl+V lo pega el navegador (Claude Code)", () => {
     expect(handler(event("keyup", "v", { ctrlKey: true }))).toBe(true);
   });
 });
+
+describe("copiar com texto selecionado", () => {
+  const copy = () => {
+    const copied: string[] = [];
+    return { copied, handler: (selection: string) => createTerminalKeyHandler(() => {}, { getSelection: () => selection, copy: (t) => copied.push(t) }) };
+  };
+
+  it("Ctrl+C, Ctrl+Shift+C e Ctrl+Insert copiam a seleção e não vão para a TUI", () => {
+    const { copied, handler } = copy();
+    const h = handler("texto");
+    const ev = down("c", { ctrlKey: true });
+    expect(h(ev)).toBe(false);
+    expect(ev.preventDefault).toHaveBeenCalled();
+    expect(h(down("C", { ctrlKey: true, shiftKey: true }))).toBe(false);
+    expect(h(down("Insert", { ctrlKey: true }))).toBe(false);
+    expect(copied).toEqual(["texto", "texto", "texto"]);
+  });
+
+  it("sem seleção, Ctrl+C segue para a TUI (interromper)", () => {
+    const { copied, handler } = copy();
+    expect(handler("")(down("c", { ctrlKey: true }))).toBe(true);
+    expect(copied).toEqual([]);
+  });
+
+  it("sem as opções nada muda, e Ctrl+Alt+C / Cmd+C não copiam", () => {
+    expect(createTerminalKeyHandler(() => {})(down("c", { ctrlKey: true }))).toBe(true);
+    const { copied, handler } = copy();
+    expect(handler("x")(down("c", { ctrlKey: true, altKey: true }))).toBe(true);
+    expect(handler("x")(down("c", { metaKey: true }))).toBe(true);
+    expect(copied).toEqual([]);
+  });
+});
