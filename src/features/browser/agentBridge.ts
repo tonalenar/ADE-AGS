@@ -37,6 +37,7 @@ import { browserToolPrefix } from "./tabMcp";
 import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
 import { formatResult, runPilot, type PilotDeps } from "./jevPilot";
+import { beginWindowMeasure } from "./windowBeat";
 
 export interface BrowserHost {
   viewId: string;
@@ -683,7 +684,9 @@ async function execute(
     case "act": {
       const goal = required(request, "goal");
       const fills = Array.isArray(request.fills) ? request.fills.filter((f): f is string => typeof f === "string") : [];
-      return formatResult(goal, await runPilot(goal, fills, num(request, "steps"), pilotDeps(host)));
+      const endMeasure = beginWindowMeasure();
+      const result = await runPilot(goal, fills, num(request, "steps"), pilotDeps(host));
+      return formatResult(goal, { ...result, window: await endMeasure() });
     }
     default:
       throw new Error(`O navegador não sabe fazer '${op}'.`);

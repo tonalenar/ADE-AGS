@@ -12,9 +12,10 @@
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::{channel, Sender};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 use uuid::Uuid;
 
@@ -26,6 +27,48 @@ lazy_static::lazy_static! {
     /// Requests en vuelo, por id de correlación. Se saca la entrada al responder o al
     /// vencer el timeout, así el mapa no crece.
     static ref PENDING: Mutex<HashMap<String, Sender<Value>>> = Mutex::new(HashMap::new());
+}
+
+/// Último batimento que el frontend reportó (ver `ui_heartbeat`).
+#[derive(Clone, Copy)]
+struct LastBeat {
+    at: Instant,
+    lag_ms: u64,
+    hidden: bool,
+}
+
+static LAST_BEAT: Mutex<Option<LastBeat>> = Mutex::new(None);
+/// Cuántas requests vencieron su timeout desde que arrancó el app.
+static TIMEOUTS: AtomicU64 = AtomicU64::new(0);
+
+/// Qué dice el último batimento sobre por qué la ventana no respondió: separa "ventana oculta y
+/// estrangulada" de "renderizador ocupado" (plan v2, I1). `since_ms` es hace cuánto llegó.
+fn beat_diagnosis(beat: Option<(u64, u64, bool)>) -> String {
+    match beat {
+        None => "Nenhum batimento da interface foi recebido desde que o app abriu.".to_string(),
+        Some((since_ms, lag_ms, hidden)) => format!(
+            "Último batimento da interface há {since_ms} ms (lag {lag_ms} ms, janela {}).",
+            if hidden { "oculta" } else { "visível" }
+        ),
+    }
+}
+
+fn last_beat_snapshot() -> Option<(u64, u64, bool)> {
+    let beat = (*LAST_BEAT.lock().ok()?)?;
+    Some((beat.at.elapsed().as_millis() as u64, beat.lag_ms, beat.hidden))
+}
+
+/// Batimento barato (1/s) del renderizador: guarda el último lag y la visibilidad, y devuelve el
+/// contador de timeouts para que el informe del `act` lo muestre.
+#[tauri::command]
+pub fn ui_heartbeat(lag_ms: Option<u64>, hidden: bool) -> u64 {
+    // Sin `lag_ms` es solo una consulta del contador (fin del `act`), no un latido real.
+    if let Some(lag_ms) = lag_ms {
+        if let Ok(mut last) = LAST_BEAT.lock() {
+            *last = Some(LastBeat { at: Instant::now(), lag_ms, hidden });
+        }
+    }
+    TIMEOUTS.load(Ordering::Relaxed)
 }
 
 #[derive(Serialize, Clone)]
@@ -97,7 +140,10 @@ pub fn ask_frontend_within(
     }
 
     let result = rx.recv_timeout(timeout).map_err(|_| {
-        "A janela do ADE AGS não respondeu a tempo. Se ela estiver minimizada ou escondida, traga-a para a frente: o navegador do canvas só responde com a janela visível.".to_string()
+        let count = TIMEOUTS.fetch_add(1, Ordering::Relaxed) + 1;
+        let diagnosis = beat_diagnosis(last_beat_snapshot());
+        eprintln!("[bridge] timeout #{count} em '{command}' após {} ms. {diagnosis}", timeout.as_millis());
+        format!("A janela do ADE AGS não respondeu a tempo. Se ela estiver minimizada ou escondida, traga-a para a frente: o navegador do canvas só responde com a janela visível. {diagnosis}")
     });
 
     PENDING.lock().ok().and_then(|mut p| p.remove(&request_id));
@@ -136,4 +182,21 @@ pub fn unwrap_frontend_result(value: Value) -> Result<Value, String> {
         return Err(msg.to_string());
     }
     Ok(value)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostico_sem_batimento() {
+        assert!(beat_diagnosis(None).contains("Nenhum batimento"));
+    }
+
+    #[test]
+    fn diagnostico_diz_ha_quanto_tempo_lag_e_visibilidade() {
+        let oculta = beat_diagnosis(Some((4200, 950, true)));
+        assert!(oculta.contains("há 4200 ms") && oculta.contains("lag 950 ms") && oculta.contains("oculta"));
+        assert!(beat_diagnosis(Some((10, 0, false))).contains("visível"));
+    }
 }
