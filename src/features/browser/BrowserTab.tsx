@@ -31,7 +31,7 @@ import { appendBatch, clearNetwork, currentCounts, EMPTY_LOG, startDocument } fr
 import { useDebugStore } from "./debugStore";
 import { DeviceBar } from "./DeviceBar";
 import { previewDetectServers, previewResolve, previewSaveCapture, previewSetRecording, type PreviewTarget } from "./ipc";
-import { PageChannel } from "./pageChannel";
+import { PageChannel, type LoadState } from "./pageChannel";
 import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
@@ -147,9 +147,16 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   /** Un agente está esperando que señales algo: lo dice la barra. */
   const [agentAsking, setAgentAsking] = useState(false);
 
+  /** Quando se pediu a última navegação e o documento novo ainda não avisou (para dizer «navegando» e não «sem runtime»). */
+  const navigatingSince = useRef<number | null>(null);
+  const loadState = useCallback((): LoadState => ({
+    loadCount: doc.current.count,
+    ready: doc.current.ready,
+    navigatingForMs: navigatingSince.current === null ? null : Date.now() - navigatingSince.current,
+  }), []);
   const channel = useMemo(() => new PageChannel(() => (
     targetRef.current ? { window: iframe.current?.contentWindow ?? null, origin: targetRef.current.proxyOrigin } : null
-  )), []);
+  ), loadState), [loadState]);
 
   useEffect(() => () => {
     channel.dispose();
@@ -230,6 +237,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       setAddress(url);
       setError(null);
       setPicking(false);
+      navigatingSince.current = Date.now();
       updateView(view.id, { url, title: new URL(url).host });
       return null;
     } catch (e) {
@@ -239,7 +247,10 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   }, [t, updateView, view.id]);
 
   const reload = useCallback(() => {
-    if (iframe.current && pageUrl.current) iframe.current.src = pageUrl.current;
+    if (iframe.current && pageUrl.current) {
+      navigatingSince.current = Date.now();
+      iframe.current.src = pageUrl.current;
+    }
   }, []);
 
   // Lo que maneja un agente. Todo por refs: el pedido llega por fuera de React, y tiene
@@ -265,6 +276,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     targetOrigin: () => targetRef.current?.targetOrigin ?? null,
     currentUrl: () => shownUrl.current,
     loadCount: () => doc.current.count,
+    loadState,
     waitForLoad: (after, timeoutMs) => new Promise((resolve) => {
       const check = () => doc.current.count > after && doc.current.ready;
       if (check()) {
@@ -431,6 +443,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       } else if (msg.type === "page:ready") {
         const url = display(msg.payload.url);
         channel.documentChanged(url);
+        navigatingSince.current = null;
         doc.current = { id: msg.payload.doc, count: doc.current.count + 1, ready: false };
         setDocId(msg.payload.doc);
         useDebugStore.getState().apply(view.id, (log) => startDocument(log, msg.payload.doc, url, Date.now()));

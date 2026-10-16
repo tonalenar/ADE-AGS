@@ -81,6 +81,9 @@ export type PageCommand =
   | { op: "select"; target: string; value: string; fast?: boolean }
   | { op: "scroll"; target?: string; dy?: number; to?: "top" | "bottom"; fast?: boolean }
   | { op: "wait"; text?: string; selector?: string; gone?: boolean; idle?: boolean; timeoutMs?: number }
+  /** Espera por ESTADO (sem navegação em curso, rede ociosa, DOM quieto), com teto proporcional ao que ficou pendente: o
+   *  que o piloto usa depois de uma navegação ou quando o Jev pede para esperar. `ceilingMs`: o teto com algo pendente. */
+  | { op: "settle"; ceilingMs?: number; fast?: boolean }
   | { op: "drag"; from: string; to: string }
   /** Pone un archivo en un `<input type=file>`. Los bytes van en base64: es lo único que
    *  cruza un `postMessage` sin depender de qué motor lo serialice. */

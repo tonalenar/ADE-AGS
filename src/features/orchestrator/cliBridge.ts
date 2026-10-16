@@ -7,7 +7,7 @@ import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useAgentsStore } from "@/features/agents/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
-import { runBrowserRequest, runPortalRequest, type BrowserRequest } from "@/features/browser/agentBridge";
+import { portalStates, runBrowserRequest, runPortalRequest, type BrowserRequest } from "@/features/browser/agentBridge";
 import type { ViewOwner } from "@/features/tabs/viewTabs";
 import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
@@ -327,6 +327,20 @@ async function handlePortal(args: Record<string, unknown>) {
     const request = args.request as BrowserRequest | undefined;
     if (!cwd || !id || !request || typeof request.op !== "string") throw new Error("Faltam cwd, id ou request");
     return { text: await runPortalRequest(id, cwd, request, ownerOf(args)) };
+  }
+  // `ags portal close`: o agente limpa o que criou (a chave do canvas e o id vêm do backend, que já checou o permisso).
+  if (op === "close") {
+    const key = str(args, "key");
+    const id = str(args, "id");
+    if (!key || !id) throw new Error("Faltam key ou id");
+    canvasActions.removePortal(key, id);
+    await flushSave(key);
+    return { closed: id };
+  }
+  // `ags portals`: o estado de cada portal (carregando, sem runtime, oculto).
+  if (op === "states") {
+    const ids = Array.isArray(args.ids) ? args.ids.filter((i): i is string => typeof i === "string") : [];
+    return { states: portalStates(ids) };
   }
   throw new Error(`Operação de portal desconhecida: ${op}`);
 }
