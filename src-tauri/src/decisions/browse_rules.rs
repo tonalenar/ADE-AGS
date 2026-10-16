@@ -10,7 +10,7 @@
 //! snapshot (`page/runtime.ts`); um teste do lado TypeScript lê este arquivo e confere que os dois lados usam as mesmas palavras.
 
 /// Sobe a cada mudança de texto de regra. Vai na linha `TEMPOS`/relatório do benchmark para saber que regras rodaram.
-pub const RULES_VERSION: &str = "2026-10-16.4";
+pub const RULES_VERSION: &str = "2026-10-16.5";
 
 /// O núcleo, herdado da versão sem arquivo próprio: sempre uma operação, estado atual, sem repetir, preencher antes de enviar.
 const CORE: &str = "Advance the user's entire goal from the CURRENT page using exactly one operation. \
@@ -66,7 +66,7 @@ empty required field first. Never submit a form while a required field is empty.
     },
     Rule {
         id: "abrir-item",
-        text: "If the goal is to open, visit or go to a specific item, link or page, and the CURRENT page already is that item (its title or main heading names it), the goal is satisfied: answer DONE. Never go back to the results or choose a Back link after the wanted page is open.",
+        text: "Only when the goal is JUST to open, visit or go to a specific item, link or page (nothing to add, fill, buy or submit afterwards): if the CURRENT page already is that item (its title or main heading names it), the goal is satisfied: answer DONE. Never go back to the results or choose a Back link after the wanted page is open.",
     },
 ];
 
