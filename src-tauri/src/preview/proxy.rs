@@ -416,19 +416,65 @@ fn upstream_request_headers(req: &Request<Incoming>, ctx: &Ctx) -> (reqwest::hea
     (headers, shown, jar)
 }
 
-/// Descomprime un HTML que el servidor mandó `gzip` o `deflate` aunque se le pidió `identity`. Con un tope, para que un
-/// cuerpo malicioso no llene la memoria.
+/// Las codificaciones que el proxy sabe deshacer para inyectar el runtime en el HTML.
+pub(crate) fn can_inflate(encoding: &str) -> bool {
+    matches!(encoding.to_ascii_lowercase().as_str(), "gzip" | "x-gzip" | "deflate" | "br" | "zstd")
+}
+
+/// Descomprime un HTML que el servidor mandó comprimido (`gzip`, `deflate`, `br` o `zstd`) aunque se le pidió `identity`.
+/// Con un tope, para que un cuerpo malicioso no llene la memoria.
 pub(crate) fn inflate(bytes: &[u8], encoding: &str) -> Option<Vec<u8>> {
     use std::io::Read;
     const LIMIT: u64 = 64 * 1024 * 1024;
     let mut out = Vec::new();
-    let ok = if encoding.eq_ignore_ascii_case("deflate") {
-        flate2::read::ZlibDecoder::new(bytes).take(LIMIT).read_to_end(&mut out).is_ok()
-            || { out.clear(); flate2::read::DeflateDecoder::new(bytes).take(LIMIT).read_to_end(&mut out).is_ok() }
-    } else {
-        flate2::read::GzDecoder::new(bytes).take(LIMIT).read_to_end(&mut out).is_ok()
+    let ok = match encoding.to_ascii_lowercase().as_str() {
+        "deflate" => {
+            flate2::read::ZlibDecoder::new(bytes).take(LIMIT).read_to_end(&mut out).is_ok()
+                || { out.clear(); flate2::read::DeflateDecoder::new(bytes).take(LIMIT).read_to_end(&mut out).is_ok() }
+        }
+        "gzip" | "x-gzip" => flate2::read::GzDecoder::new(bytes).take(LIMIT).read_to_end(&mut out).is_ok(),
+        "br" => brotli_decompressor::Decompressor::new(bytes, 4096).take(LIMIT).read_to_end(&mut out).is_ok(),
+        "zstd" => ruzstd::decoding::StreamingDecoder::new(bytes)
+            .is_ok_and(|mut decoder| (&mut decoder).take(LIMIT).read_to_end(&mut out).is_ok()),
+        _ => false,
     };
     ok.then_some(out)
+}
+
+/// Cuánto dura la marca de «verificación anti-robot en curso» sin que llegue una página normal de ese origen.
+const CHALLENGE_TTL: Duration = Duration::from_secs(90);
+
+/// Origen de destino → cuándo y con qué acción respondió un desafío anti-robot (AWS WAF).
+static CHALLENGES: LazyLock<std::sync::Mutex<HashMap<String, (Instant, String)>>> =
+    LazyLock::new(|| std::sync::Mutex::new(HashMap::new()));
+
+/// `202` + `x-amzn-waf-action`: AWS WAF no entregó la página, entregó un desafío en JS que se resuelve y recarga (plan v2,
+/// I4). Devuelve la acción (`challenge`, `captcha`). Pura.
+pub(crate) fn waf_challenge_action(status: u16, headers: &hyper::HeaderMap) -> Option<String> {
+    if status != 202 {
+        return None;
+    }
+    let action = headers.get("x-amzn-waf-action")?.to_str().ok()?.trim();
+    Some(if action.is_empty() { "challenge".to_string() } else { action.to_ascii_lowercase() })
+}
+
+fn set_challenge(target_origin: &str, action: Option<String>) {
+    let Ok(mut marks) = CHALLENGES.lock() else { return };
+    match action {
+        Some(action) => {
+            marks.insert(target_origin.to_string(), (Instant::now(), action));
+        }
+        None => {
+            marks.remove(target_origin);
+        }
+    }
+}
+
+/// La acción del desafío anti-robot en curso para ese origen (o `None`: no hay, o ya pasó `CHALLENGE_TTL`).
+pub(crate) fn challenge_in_progress(target_origin: &str) -> Option<String> {
+    let marks = CHALLENGES.lock().ok()?;
+    let (at, action) = marks.get(target_origin.trim_end_matches('/'))?;
+    (at.elapsed() < CHALLENGE_TTL).then(|| action.clone())
 }
 
 fn plain_status(status: u16) -> Response<Body> {
@@ -583,8 +629,12 @@ async fn forward(req: Request<Incoming>, ctx: &Ctx, started: Instant) -> Respons
         .filter(|e| !e.eq_ignore_ascii_case("identity"))
         .map(str::to_string);
     let html_type = content_type.as_deref().is_some_and(|t| t.to_ascii_lowercase().starts_with("text/html"));
-    // Un HTML comprimido en gzip/deflate se descomprime acá para poder inyectarle el runtime; el resto (br, zstd) pasa tal cual.
-    let inflate_as = encoding.clone().filter(|e| html_type && matches!(e.to_ascii_lowercase().as_str(), "gzip" | "x-gzip" | "deflate"));
+    // Un desafío anti-robot (202 + x-amzn-waf-action) deja una marca; la primera página HTML normal del origen la quita.
+    if html_type {
+        set_challenge(&ctx.target_origin, waf_challenge_action(status.as_u16(), upstream.headers()));
+    }
+    // Un HTML comprimido (gzip, deflate, br, zstd) se descomprime acá para poder inyectarle el runtime; otra codificación pasa tal cual.
+    let inflate_as = encoding.clone().filter(|e| html_type && can_inflate(e));
     let is_html = html_type && (encoding.is_none() || inflate_as.is_some());
 
     let mut builder = Response::builder().status(status);

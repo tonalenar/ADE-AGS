@@ -32,7 +32,8 @@ import {
   batchHeader, formatElement, formatMarked, type DescribedElement, type MarkedEntry,
 } from "./markedView";
 import { batchById, batchesFor, consumeMarks, newMarkId, pendingCount, type SentBatch } from "./markStore";
-import type { PageChannel } from "./pageChannel";
+import type { LoadState, PageChannel } from "./pageChannel";
+import { portalStateOf, type PortalStateInfo } from "./portalState";
 import { browserToolPrefix } from "./tabMcp";
 import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
@@ -40,6 +41,7 @@ import { parseExpectations, verifyReport } from "./expect";
 import { summarizeSnapshot } from "./finalSummary";
 import { cartCount, fingerprint, formatResult, parseSnapshot, runPilot, type ParsedPage, type PilotDeps, type PilotResult } from "./jevPilot";
 import { createLedger, ledgerOf, type ActLedger, type PriorAction } from "./portalLedger";
+import { backendSink, withProgress } from "./actProgress";
 import { beginWindowMeasure } from "./windowBeat";
 
 export interface BrowserHost {
@@ -62,6 +64,8 @@ export interface BrowserHost {
   currentUrl: () => string;
   /** Cuántas veces cargó un documento con el runtime. Sirve de marca para `waitForLoad`. */
   loadCount: () => number;
+  /** O que se sabe da carga agora (para `ags portals` e para explicar uma falta de resposta). */
+  loadState: () => LoadState;
   /** Espera a que cargue un documento posterior a `after`. `false` si venció el tope. */
   waitForLoad: (after: number, timeoutMs: number) => Promise<boolean>;
   /** Lo que la persona dejó señalado y todavía no mandó a nadie. */
@@ -430,7 +434,9 @@ async function execute(
   request: BrowserRequest,
   opened: boolean,
   /** Quién pregunta: cada agente lee los lotes que le mandaron a él. */
-  owner: ViewOwner | null
+  owner: ViewOwner | null,
+  /** O portal que o agente pilota: o `act` manda a ele o progresso parcial (Fase 1.4). */
+  portalId?: string
 ): Promise<string> {
   const op = request.op;
   switch (op) {
@@ -699,9 +705,10 @@ async function execute(
       const ledger = ledgerOf(host.viewId);
       ledger.beginAct(goal);
       const deps = pilotDeps(host, waits, ledger);
+      const piloted = portalId ? withProgress(deps, backendSink(portalId)) : deps;
       let result: Awaited<ReturnType<typeof runPilot>> | undefined;
       try {
-        result = await runPilot(goal, fills, num(request, "steps"), deps);
+        result = await runPilot(goal, fills, num(request, "steps"), piloted);
       } finally {
         // Mesmo um `act` que falhou deixa o que já fez no livro-razão: é o que evita repetir a ação no seguinte.
         deps.finish(result?.finalSnapshot ?? null);
@@ -896,6 +903,15 @@ export function waitsReport(text: string, waits: string[]): string {
   return at < 0 ? text + block : text.slice(0, at) + block + text.slice(at);
 }
 
+/** O estado de cada portal pedido (`ags portals`): sem esperar o nó aparecer, para que um portal não desenhado conte como «oculto». */
+export function portalStates(ids: string[]): Record<string, PortalStateInfo> {
+  const hidden = typeof document !== "undefined" && document.hidden;
+  return Object.fromEntries(ids.map((id) => {
+    const host = hosts.get(id);
+    return [id, portalStateOf(host && { load: host.loadState() }, hidden)];
+  }));
+}
+
 /** Atiende un pedido de un agente sobre un portal, por su id. */
 export async function runPortalRequest(
   portalId: string,
@@ -912,5 +928,5 @@ export async function runPortalRequest(
   if (request.op !== "navigate" && host.loadCount() === 0 && !(await host.waitForLoad(0, 15_000))) {
     throw new Error("O portal não tem nenhuma página carregada. Comece com `ags portal navigate <portal> <url>`.");
   }
-  return execute(cwd, host, request, false, owner);
+  return execute(cwd, host, request, false, owner, portalId);
 }

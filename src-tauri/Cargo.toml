@@ -76,6 +76,9 @@ symlink = "0.1"
 reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
 # El proxy de la vista previa descomprime el HTML gzip/deflate que un sitio manda aunque se le pidió identity.
 flate2 = "1"
+# ...e também o brotli e o zstd (Fase 1.5, I3): puro Rust, sem compilar C.
+brotli-decompressor = "6"
+ruzstd = "0.8"
 
 # Buscador de texto del panel derecho. `ignore` es el recorrido de ripgrep: respeta
 # `.gitignore` sin tener que invocar a git por cada carpeta, y trae los globs de
@@ -152,6 +155,8 @@ tauri-winrt-notification = "0.8.1"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+# Só para fabricar HTML em brotli nos testes do proxy (já está no Cargo.lock, vem do tauri-utils).
+brotli = "9"
 
 [profile.dev]
 debug = "line-tables-only"
