@@ -204,6 +204,8 @@ export interface TaskRun {
   blocked?: boolean;
   /** Consultas ao Jev (operação+elemento) e fotos que a rodada gastou: a cota. */
   probes?: number;
+  /** A causa da falha, classificada à mão a partir do relatório do act (`--causes`). */
+  cause?: string;
   /** O relatório do `act` como veio (só no real, cortado): serve para classificar a causa de uma falha. */
   report?: string;
 }
@@ -381,6 +383,8 @@ export interface Summary {
   tasks: number;
   completed: number;
   completedRate: number;
+  /** Concluídas E confirmadas pelo piloto (`done`): o critério vale e ele não pediu ajuda. */
+  confirmed: number;
   falseDone: number;
   falseUnsure: number;
   violations: number;
@@ -409,6 +413,7 @@ export function summarize(runs: TaskRun[]): Summary {
     tasks: runs.length,
     completed,
     completedRate: runs.length > 0 ? completed / runs.length : 0,
+    confirmed: runs.filter((r) => judge(r).completed && r.outcome === "done").length,
     falseDone: verdicts.filter((v) => v.falseDone).length,
     falseUnsure: verdicts.filter((v) => v.falseUnsure).length,
     violations: verdicts.filter((v) => v.violation).length,
@@ -478,7 +483,8 @@ export function renderSummary(report: BenchReport, baseline?: BenchReport): stri
   const b = baseline?.summary;
   const rows: [string, (x: Summary) => string][] = [
     ["tarefas", (x) => String(x.tasks)],
-    ["concluídas sem ajuda à mão", (x) => `${x.completed}/${x.tasks} (${pct(x.completedRate)})`],
+    ["concluídas sem ajuda à mão (critério vale na página)", (x) => `${x.completed}/${x.tasks} (${pct(x.completedRate)})`],
+    ["… e o piloto confirmou (`done`)", (x) => (x.confirmed === undefined ? "—" : `${x.confirmed}/${x.tasks}`)],
     ["falso «concluído»", (x) => String(x.falseDone)],
     ["falso «sem certeza»", (x) => String(x.falseUnsure)],
     ["violações (comprou/finalizou)", (x) => String(x.violations)],
@@ -498,13 +504,24 @@ export function renderSummary(report: BenchReport, baseline?: BenchReport): stri
 
 /** As tarefas que falharam, com a causa provável pela classe de falha. Pura. */
 export function renderFailures(tasks: BenchTask[], report: BenchReport): string {
-  const lines = report.runs.filter((r) => !judge(r).completed).map((run) => {
+  const lines = report.runs.filter((r) => !judge(r).completed || judge(r).falseUnsure).map((run) => {
     const task = tasks.find((t) => t.id === run.id);
     const v = judge(run);
     const why = v.violation ? "fez o que a tarefa proíbe" : run.blocked ? "o piloto recusou um controle de compra/pagamento (seguro, mas não concluiu)" : v.falseDone ? "disse concluído sem cumprir o critério" : run.outcome === "limit" ? "estourou o limite de passos" : `parou: ${run.outcome}`;
-    return `- **${run.id}** (${task?.title ?? "?"}) — ${why}${task?.note ? `. ${task.note}` : ""}${run.note ? ` [${run.note}]` : ""}`;
+    const late = judge(run).completed ? "o critério já valia, mas o piloto parou sem confirmar" : why;
+    return `- **${run.id}** (${task?.title ?? "?"}) — ${late}${run.cause ? `. **Causa:** ${run.cause}` : ""}${!run.cause && task?.note ? `. ${task.note}` : ""}${run.note ? ` [${run.note}]` : ""}`;
   });
   return lines.length > 0 ? lines.join("\n") : "Nenhuma.";
+}
+
+/**
+ * Junta rodadas parciais numa só: para cada tarefa vale a ÚLTIMA rodada que a trouxe (uma tarefa refeita por falha de
+ * infraestrutura substitui a anterior). A ordem final é a de `order`. Pura.
+ */
+export function mergeRuns(reports: Pick<BenchReport, "runs">[], order: string[]): TaskRun[] {
+  const byId = new Map<string, TaskRun>();
+  for (const report of reports) for (const run of report.runs) byId.set(run.id, run);
+  return order.flatMap((id) => (byId.has(id) ? [byId.get(id)!] : []));
 }
 
 export function renderMarkdown(tasks: BenchTask[], report: BenchReport, baseline?: BenchReport): string {

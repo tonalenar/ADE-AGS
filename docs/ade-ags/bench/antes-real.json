@@ -1,0 +1,565 @@
+{
+  "schema": 1,
+  "label": "antes-real",
+  "mode": "real",
+  "startedAt": "2026-10-15T23:51:09.368Z",
+  "commit": "eaa8fbca",
+  "runs": [
+    {
+      "id": "L01-icones-sem-nome",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8783/icones.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 4436,
+      "stepMs": [
+        2218,
+        2218
+      ],
+      "phases": {
+        "jevMs": 352,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 4084
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Abra o carrinho de compras: é o ícone do carrinho no canto superior direito da página.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. tocou pela foto no ponto (1843, 56) (existe p=1.00, caixa conf=0.93, 352 ms)\n2. objetivo atingido (pergunta direta p=0.83)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — ícones\" http://localhost:8783/icones.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n  - clickable [ref=e1]\n  - clickable [ref=e2]\n- main\n  - text \"CART OPENED\"\n  - button \"Contact\" [ref=e3]"
+    },
+    {
+      "id": "L02-lupa-entre-iguais",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8774/lupa.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 4626,
+      "stepMs": [
+        2313,
+        2313
+      ],
+      "phases": {
+        "jevMs": 414,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 4212
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Abra a busca do site: clique na lupa no topo da página.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. tocou pela foto no ponto (1728, 45) (existe p=1.00, caixa conf=0.89, 414 ms)\n2. objetivo atingido (pergunta direta p=0.93)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — lupa\" http://localhost:8774/lupa.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - clickable [ref=e1]\n  - text \"ShopMart\"\n  - clickable [ref=e2]\n  - clickable [ref=e3]\n  - clickable [ref=e4]\n- main\n  - text \"SEARCH OPEN\""
+    },
+    {
+      "id": "L03-busca-com-enter",
+      "outcome": "unsure",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8774/busca-enter.html",
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 1,
+      "totalMs": 5042,
+      "stepMs": [
+        5042
+      ],
+      "phases": {
+        "jevMs": 629,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 4413
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por tênis no campo de busca da loja.\": PAROU (Jev sem certeza)\nO Jev não tem certeza do próximo passo (scroll, p=0.33, fim p=0.13, 291 ms). Continue você, com `snapshot` e `click`, ou diga no objetivo a escolha que falta. A última ação do piloto mudou a página: o objetivo pode já ter sido atingido, confira antes de continuar.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)\n1. tocou pela foto no ponto (163, 129) (existe p=0.96, caixa conf=0.87, 338 ms)\nA foto acabou de tocar: confira a página antes de tirar outra (um segundo toque pode desfazer o primeiro).\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8774/busca-enter.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - form\n    - searchbox \"Buscar produtos\" [ref=e1] value=\"tenis\"",
+      "cause": "Enter: a instância ANTES não aperta Enter em campo de busca; sem botão, o piloto digitou e a foto tocou num ponto sem relação (163, 129)"
+    },
+    {
+      "id": "L04-busca-com-botao",
+      "outcome": "stuck",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8774/busca-botao.html?q=tenis",
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2180,
+      "stepMs": [
+        914
+      ],
+      "phases": {
+        "jevMs": 619,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 1561
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por tênis na loja.\": PAROU\nO Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)\n1. clicou button \"Buscar\" (p=0.83, fim p=0.00, 310 ms, passo 914 ms)\n2. sem caminho (p=0.41, fim p=0.01, 309 ms)\nA reserva visual não rodou: a página não está toda à vista no canvas: a foto sairia cortada (foto 1179×688 de uma página de 1179×688)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8774/busca-botao.html?q=tenis\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - form\n    - searchbox \"Buscar produtos\" [ref=e1]\n    - button \"Buscar\" [ref=e2]",
+      "cause": "sem certeza após ação: clicou Buscar (p=0,83) e a página já mostrava «Resultados para: tenis», mas a pergunta de fim deu p=0,01 e o Jev respondeu 'sem caminho'; a foto foi recusada por 'cortada' (1179×688 de 1179×688)"
+    },
+    {
+      "id": "L05-cookies",
+      "outcome": "error",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8774/cookies.html",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 346,
+      "stepMs": [
+        346
+      ],
+      "phases": {
+        "jevMs": 0,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 346
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione a Mochila Urbana ao carrinho.\": ERRO\nA ação falhou; veja o motivo acima e continue você.\n\nPassos:\n1. falhou: button está coberto por div#banner (#banner). Se for um modal ou overlay, feche-o primeiro; se for preciso forçar, use eval.\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — cookies\" http://localhost:8774/cookies.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Mochila Urbana\" [level=1]\n  - text \"Mochila de 20 litros, resistente à água. R$ 189,90\"\n  - text \"Carrinho: 0\"\n  - button \"Adicionar ao carrinho\" [ref=e1]\n- text \"Usamos cookies para melhorar a sua experiência.\"\n- button \"Aceitar todos\" [ref=e2]\n- button \"Recusar\" [ref=e3]\n- button \"Configurar\" [ref=e4]",
+      "cause": "modal/obstáculo: o Jev escolheu «Adicionar ao carrinho» com a faixa de cookies por cima e o clique falhou ('coberto por div#banner'); o piloto não trata o erro, só devolve"
+    },
+    {
+      "id": "L06-modal-newsletter",
+      "outcome": "error",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8774/modal.html",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 382,
+      "stepMs": [
+        382
+      ],
+      "phases": {
+        "jevMs": 0,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 382
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione a Mochila Urbana ao carrinho, sem assinar a newsletter.\": ERRO\nA ação falhou; veja o motivo acima e continue você.\n\nPassos:\n1. falhou: button está coberto por div#modal (#modal). Se for um modal ou overlay, feche-o primeiro; se for preciso forçar, use eval.\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — newsletter\" http://localhost:8774/modal.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Mochila Urbana\" [level=1]\n  - text \"Mochila de 20 litros, resistente à água. R$ 189,90\"\n  - text \"Carrinho: 0\"\n  - button \"Adicionar ao carrinho\" [ref=e1]\n- heading \"Ganhe 10% de desconto\" [level=2]\n- text \"Assine a nossa newsletter.\"\n- textbox \"Seu e-mail\" [ref=e2]\n- button \"Quero o desconto\" [ref=e3]\n- button \"Fechar\" [ref=e4]",
+      "cause": "modal/obstáculo: idem L05, com o modal de newsletter ('coberto por div#modal')"
+    },
+    {
+      "id": "L07-garantia-upsell",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8774/garantia.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2047,
+      "stepMs": [
+        689,
+        988
+      ],
+      "phases": {
+        "jevMs": 672,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 1375
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione o Fone Bluetooth ao carrinho, sem a garantia estendida.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou button \"Adicionar ao carrinho\" (p=0.86, fim p=0.00, 344 ms, passo 689 ms)\n2. clicou button \"Continuar sem garantia\" (p=0.61, fim p=0.01, 328 ms, passo 988 ms)\n3. objetivo atingido (pergunta direta p=0.99)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — garantia\" http://localhost:8774/garantia.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Fone Bluetooth\" [level=1]\n  - text \"Fone sem fio, 30 horas de bateria. R$ 249,90\"\n  - text \"Carrinho: 1 · sem garantia\"\n  - button \"Adicionar ao carrinho\" [ref=e1]"
+    },
+    {
+      "id": "L08-produto-sem-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8774/produto-fone.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1606,
+      "stepMs": [
+        641,
+        511
+      ],
+      "phases": {
+        "jevMs": 624,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 982
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione o Fone Bluetooth ao carrinho.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou link \"Ver detalhes\" (p=0.84, fim p=0.00, 284 ms, passo 641 ms)\n2. clicou button \"Adicionar ao carrinho\" (p=1.00, fim p=0.00, 340 ms, passo 511 ms)\n3. objetivo atingido (pergunta direta p=0.93)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Fone Bluetooth — ShopMart\" http://localhost:8774/produto-fone.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n  - link \"Voltar ao catálogo\" [ref=e1] → /catalogo.html\n- main\n  - heading \"Fone Bluetooth\" [level=1]\n  - text \"Fone sem fio, 30 horas de bateria. R$ 249,90\"\n  - text \"Carrinho: 1\"\n  - button \"Adicionar ao carrinho\" [ref=e2]"
+    },
+    {
+      "id": "L09-botoes-repetidos",
+      "outcome": "stuck",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8783/repetidos.html",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1265,
+      "stepMs": [
+        1265
+      ],
+      "phases": {
+        "jevMs": 297,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 968
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione a Cafeteira ao carrinho.\": PAROU\nO Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.\n\nPassos:\n1. sem caminho (p=0.42, fim p=0.00, 297 ms)\nA reserva visual não rodou: a página não está toda à vista no canvas: a foto sairia cortada (foto 623×688 de uma página de 1179×688)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — cozinha\" http://localhost:8783/repetidos.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Cozinha\" [level=1]\n  - text \"No carrinho: nada\"\n  - heading \"Chaleira Elétrica\" [level=3]\n  - text \"R$ 129,90\"\n  - button \"Adicionar\" [ref=e1]\n  - heading \"Cafeteira\" [level=3]\n  - text \"R$ 219,90\"\n  - button \"Adicionar\" [ref=e2]\n  - heading \"Liquidificador\" [level=3]\n  - text \"R$ 179,90\"\n  - button \"Adicionar\" [ref=e3]\n  - heading \"Torradeira\" [level=3]\n  - text \"R$ 99,90\"\n  - button \"Adicionar\" [ref=e4]\n  - heading \"Panela de Pressão\" [level=3]\n  - text \"R$ 149,90\"\n  - button \"Adicionar\" [ref=e5]\n  - heading \"Jogo de Facas\" [level=3]\n  - text \"R$ 89,90\"\n  - button \"Adicionar\" [ref=e6]\n  - heading \"Fritadeira\" [level=3]\n  - text \"R$ 399,90\"\n  - button \"Adicionar\" [ref=e7]\n  - heading \"Batedeira\" [level=3]\n  - text \"R$ 259,90\"\n  - button \"Adicionar\" [ref=e8]",
+      "cause": "toque pela foto/foto indisponível: 1.ª tentativa tocou pela foto e depois clicou um «Adicionar» (p=0,64) sem acertar a Cafeteira (página 'não está à vista'); refeita: 'sem caminho' e a foto recusada por 'cortada' (623×688 de 1179×688). Botões de mesmo nome passam por isAmbiguous"
+    },
+    {
+      "id": "L10-lista-e-radio",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8774/selecao.html",
+      "steps": 3,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 3384,
+      "stepMs": [
+        2023,
+        993
+      ],
+      "phases": {
+        "jevMs": 647,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 2737
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Escolha o tamanho G, a entrega «Retirar na loja» e confirme.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\nescolheu em dropdown \"Tamanho\" (valor de Tamanho) (pelo nome do campo, sem o Jev)\n1. clicou radio option \"Retirar na loja\" (p=0.59, fim p=0.00, 312 ms, passo 2023 ms)\n2. clicou button \"Confirmar\" (p=0.94, fim p=0.03, 335 ms, passo 993 ms)\n3. objetivo atingido (pergunta direta p=0.99)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — opções\" http://localhost:8774/selecao.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Camiseta Básica\" [level=1]\n  - combobox \"Tamanho\" [ref=e1] value=\"G\" options=[\"Escolha…\",\"P\",\"M\",\"G\",\"GG\"]\n  - text \"Entrega\"\n  - radio \"Normal (5 dias)\" [ref=e2]\n  - radio \"Expressa (1 dia)\" [ref=e3]\n  - radio \"Retirar na loja\" [ref=e4] [checked]\n  - button \"Confirmar\" [ref=e5] [focused]\n  - text \"Confirmado: tamanho G, Retirar na loja\""
+    },
+    {
+      "id": "L11-formulario-multietapas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8774/etapas.html",
+      "steps": 4,
+      "autoFills": 4,
+      "photos": 0,
+      "totalMs": 7158,
+      "stepMs": [
+        2747,
+        3010,
+        989
+      ],
+      "phases": {
+        "jevMs": 888,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 6270
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Preencha o pedido de teste nas três etapas (dados, endereço, revisão) e envie.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Nome\" (valor de Nome) (pelo nome do campo, sem o Jev)\ndigitou em text field \"E-mail\" (valor de E-mail) (pelo nome do campo, sem o Jev)\n1. clicou button \"Próximo\" (p=0.53, fim p=0.00, 307 ms, passo 2747 ms)\ndigitou em text field \"CEP\" (valor de CEP) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Cidade\" (valor de Cidade) (pelo nome do campo, sem o Jev)\n2. clicou button \"Próximo\" (p=0.74, fim p=0.00, 297 ms, passo 3010 ms)\n3. clicou button \"Enviar pedido de teste\" (p=0.97, fim p=0.00, 284 ms, passo 989 ms)\n4. objetivo atingido (pergunta direta p=0.99)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — pedido de teste\" http://localhost:8774/etapas.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Etapa 3 de 3 — Revisão\" [level=1]\n  - text \"Revise: Maria Teste, maria@teste.com, 01001000, Sao Paulo\"\n  - button \"Voltar\" [ref=e1]\n  - button \"Enviar pedido de teste\" [ref=e2] [focused]\n  - text \"Pedido de teste enviado\""
+    },
+    {
+      "id": "L12-garantia-na-foto",
+      "outcome": "unsure",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/foto-garantia.html",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 4861,
+      "stepMs": [
+        4861
+      ],
+      "phases": {
+        "jevMs": 620,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 4241
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Clique no botão «Garantia estendida» que aparece no meio da foto do produto.\": PAROU (Jev sem certeza)\nO elemento que o Jev escolheu (e2) não tem nome e há outros iguais na página: só o texto não os distingue (p=0.55, fim p=0.01, 292 ms). Continue você, com `snapshot` e `click`, ou ligue a reserva visual em Ajustes → Decisões.\n\nPassos:\n1. tocou pela foto no ponto (365, 330) (existe p=1.00, caixa conf=0.90, 328 ms)\nA foto acabou de tocar: confira a página antes de tirar outra (um segundo toque pode desfazer o primeiro).\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — foto do produto\" http://localhost:8781/foto-garantia.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - text \"GARANTIA ABERTA\"\n  - clickable [ref=e1]\n  - clickable [ref=e2]\n  - text \"Tênis de corrida Aero. R$ 399,90\"\n  - button \"Comprar\" [ref=e3]",
+      "cause": "sem certeza após ação: a foto tocou o botão certo (365, 330) e o critério vale, mas o laço perguntou de novo, o Jev escolheu um elemento sem nome (p=0,55) e o piloto parou em vez de concluir"
+    },
+    {
+      "id": "L13-abas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/abas.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1115,
+      "stepMs": [
+        785
+      ],
+      "phases": {
+        "jevMs": 311,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 804
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Descubra o peso do produto abrindo a aba Especificações.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou tab \"Especificações\" (p=1.00, fim p=0.00, 311 ms, passo 785 ms)\n2. objetivo atingido (pergunta direta p=0.99)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — detalhes do produto\" http://localhost:8781/abas.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Liquidificador Turbo\" [level=1]\n  - tablist\n    - tab \"Descrição\" [ref=e1]\n    - tab \"Especificações\" [ref=e2] [selected] [focused]\n    - tab \"Avaliações\" [ref=e3]\n  - text \"Peso: 1,2 kg · Tensão: 127 V · Cor: preto\""
+    },
+    {
+      "id": "L14-rolar-ate-o-fim",
+      "outcome": "stuck",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/rolar.html",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1611,
+      "stepMs": [
+        1247
+      ],
+      "phases": {
+        "jevMs": 284,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 1327
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Role até o fim da página e clique em Assinar.\": PAROU\nO mesmo passo se repetiu sem mudar a página. Continue você.\n\nPassos:\n1. rolou a página (p=0.98, fim p=0.00, 284 ms, passo 1247 ms)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — novidades\" http://localhost:8781/rolar.html\nviewport: 1908×1120 · scroll 600/2454\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Novidades da semana\" [level=1]\n  - text \"Novidade número 1: mais um lançamento da semana. Novidade número 2: mais um lançamento da semana. Novidade número 3: mais um lançamento da semana. Novidade número 4: mais um lançamento da semana. Nov…\"",
+      "cause": "outra (rolar): rolou 1× com p=0,98 e parou por 'o mesmo passo se repetiu': a impressão da página ignora a rolagem"
+    },
+    {
+      "id": "L15-quantidade-sem-enter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/quantidade.html",
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2095,
+      "stepMs": [
+        1753
+      ],
+      "phases": {
+        "jevMs": 307,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 1788
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Defina a quantidade como 3 e clique em Atualizar carrinho.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Quantidade\" (valor de Quantidade) (pelo nome do campo, sem o Jev)\n1. clicou button \"Atualizar carrinho\" (p=0.96, fim p=0.00, 307 ms, passo 1753 ms)\n2. objetivo atingido (pergunta direta p=0.99)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — quantidade\" http://localhost:8781/quantidade.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Fone Bluetooth\" [level=1]\n  - textbox \"Quantidade\" [ref=e1] value=\"3\"\n  - button \"Atualizar carrinho\" [ref=e2] [focused]\n  - text \"Quantidade: 3 · atualizado\""
+    },
+    {
+      "id": "L16-busca-com-checkout",
+      "outcome": "stuck",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/busca-checkout.html?q=tenis",
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2941,
+      "stepMs": [
+        1368
+      ],
+      "phases": {
+        "jevMs": 983,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 1958
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por tênis na loja.\": PAROU\nO Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)\n1. clicou button \"Buscar\" (p=0.84, fim p=0.01, 327 ms, passo 1368 ms)\n2. sem caminho (p=0.58, fim p=0.01, 293 ms)\nA reserva visual também não achou um controle seguro na foto (existe p=0.64, caixa conf=0.27, 363 ms).\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8781/busca-checkout.html?q=tenis\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - form\n    - button \"Proceed to checkout\" [ref=e1]\n    - searchbox \"Buscar produtos\" [ref=e2]\n    - button \"Buscar\" [ref=e3]",
+      "cause": "sem certeza após ação: sem Enter (certo), clicou Buscar (p=0,84) e a busca funcionou, mas depois 'sem caminho' (p=0,58); a foto não achou controle (conf 0,27)"
+    },
+    {
+      "id": "L17-comprar-agora-nao-pedido",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/comprar-agora.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1531,
+      "stepMs": [
+        1180
+      ],
+      "phases": {
+        "jevMs": 305,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 1226
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione o Fone Bluetooth.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou button \"Adicionar ao carrinho\" (p=0.99, fim p=0.00, 305 ms, passo 1180 ms)\n2. objetivo atingido (pergunta direta p=0.85)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — fone\" http://localhost:8781/comprar-agora.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Fone Bluetooth\" [level=1]\n  - text \"Fone sem fio, 30 horas de bateria. R$ 249,90\"\n  - text \"Carrinho: 1\"\n  - button \"Comprar agora\" [ref=e1]\n  - button \"Adicionar ao carrinho\" [ref=e2] [focused]"
+    },
+    {
+      "id": "P01-wikipedia-busca",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://pt.wikipedia.org/wiki/Alan_Turing",
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1918,
+      "stepMs": [
+        1401
+      ],
+      "phases": {
+        "jevMs": 323,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 1595
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por Alan Turing e abra o artigo.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em search field \"Pesquisar na Wikipédia\" (valor de Pesquisar) (pelo nome do campo, sem o Jev)\n1. clicou button \"Procurar\" (p=0.59, fim p=0.00, 323 ms, passo 1401 ms)\n2. objetivo atingido (pergunta direta p=0.93)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Alan Turing – Wikipédia, a enciclopédia livre\" https://pt.wikipedia.org/wiki/Alan_Turing\nviewport: 1908×1120 · scroll 0/7986\n\n- link \"Ir para o conteúdo\" [ref=e1] → /wiki/Alan_Turing#bodyContent\n- banner \"no font mode scale\"\n  - navigation \"Site\"\n    - button \"Menu principal\" [ref=e2]\n    - text \"Menu principal\"\n    - button \"Mover Menu principal para a barra lateral\" [ref=e3]\n    - button \"Esconder Menu principal\" [ref=e4]\n    - text \"Navegação\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Página principal\" [ref=e5] → /wiki/Wikip%C3%A9dia:P%C3%A1gina_principal\n      - listitem\n        - link \"Conteúdo destacado\" [ref=e6] → /wiki/Portal:Conte%C3%BAdo_destacado\n      - listitem\n        - link \"Eventos atuais\" [ref=e7] → /wiki/Portal:Eventos_atuais\n      - listitem\n        - link \"Esplanada\" [ref=e8] → /wiki/Wikip%C3%A9dia:Esplanada\n      - listitem\n        - link \"Página aleatória\" [ref=e9] → /wiki/Especial:Aleat%C3%B3ria\n      - listitem\n        - link \"Portais\" [ref=e10] → /wiki/Portal:%C3%8Dndice\n      - listitem\n        - link \"Páginas especiais\" [ref=e11] → /wiki/Especial:P%C3%A1ginas_especiais\n      - listitem\n        - link \"Informar um erro\" [ref=e12] → /wiki/Wikip%C3%A9dia:Informe_um_erro\n    - text \"Colaboração\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Boas-vindas\" [ref=e13] → /wiki/Wikip%C3%A9dia:Boas-vindas\n      - listitem\n        - link \"Ajuda\" [ref=e14] → /wiki/Ajuda:P%C3%A1gina_principal\n      - listitem\n        - link \"Páginas de testes públicas\" [ref=e15] → /wiki/Ajuda:P%C3%A1gina_de_testes\n      - listitem\n        - link \"Portal comunitário\" [ref=e16] → /wiki/Wikip%C3%A9dia:Portal_comunit%C3%A1rio\n      - listitem\n        - link \"Mudanças recentes\" [ref=e17] → /wiki/Especial:Mudan%C3%A7as_recentes\n      - listitem\n        - link \"Manutenção\" [ref=e18] → /wiki/Wikip%C3%A9dia:Manuten%C3%A7%C3%A3o\n      - listitem\n        - link \"Criar página\" [ref=e19] → /wiki/Ajuda:Guia_de_edi%C3%A7%C3%A3o/Como_come%C3%A7ar_uma_p%C3%A1gina\n      - listitem\n        - link \"Páginas novas\" [ref=e20] → /wiki/Especial:P%C3%A1ginas_novas\n      - listitem\n        - link \"Contato\" [ref=e21] → /wiki/Wikip%C3%A9dia:Contato\n  - link [ref=e22] → /wiki/Wikip%C3%A9dia:P%C3%A1gina_principal\n  - search \"vector search box auto expand width\"\n    - link \"Busca\" [ref=e23] → /wiki/Especial:Pesquisar\n    - form\n      - searchbox \"Pesquisar na Wikipédia\" [ref=e24]\n      - button \"Procurar\" [ref=e25]\n  - navigation \"Ferramentas pessoais\"\n    - list \"vector menu content list\"\n    - list \"vector menu content list\"\n    - navigation \"Aparência\"\n      - button \"Aparência\" [ref=e26]\n    - list \"vector menu content list\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Doar\" [ref=e27] → https://donate.wikimedia.org/?wmf_source=donate&wmf_medium=sidebar&wmf_campaign=pt.wikipedia.org&uselang=pt\n      - listitem\n        - link \"Criar conta\" [ref=e28] → /w/index.php?title=Especial:Criar_conta&returnto=Alan+Turing\n      - listitem\n        - link \"Iniciar sessão\" [ref=e29] → /w/index.php?title=Especial:Entrar&returnto=Alan+Turing\n    - button \"Ferramentas pessoais\" [ref=e30]\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Doar\" [ref=e31] → https://donate.wikimedia.org/?wmf_source=donate&wmf_medium=sidebar&wmf_campaign=pt.wikipedia.org&uselang=pt\n      - listitem\n        - link \"Criar conta\" [ref=e32] → /w/index.php?title=Especial:Criar_conta&returnto=Alan+Turing\n      - listitem\n        - link \"Iniciar sessão\" [ref=e33] → /w/index.php?title=Especial:Entrar&returnto=Alan+Turing\n- navigation \"Conteúdos\"\n  - heading \"Conteúdos\" [level=2]\n  - button \"Mover Conteúdos para a barra lateral\" [ref=e34]\n  - button \"Esconder Conteúdos\" [ref=e35]\n  - list \"vector toc contents\"\n    - listitem\n      - link \"Início\" [ref=e36] → /wiki/Alan_Turing#\n    - listitem\n      - link \"1 Infância e educação\" [ref=e37] → /wiki/Alan_Turing#Inf%C3%A2ncia_e_educa%C3%A7%C3%A3o\n      - button \"Alternar a subsecção Infância e educação\" [ref=e38]\n      - list \"toc sublist\"\n        - listitem\n          - link \"1.1 Família\" [ref=e39] → /wiki/Alan_Turing#Fam%C3%ADlia\n          - list \"toc sublist\"\n        - listitem\n          - link \"1.2 Escola\" [ref=e40] → /wiki/Alan_Turing#Escola\n          - list \"toc escola sublist\"\n        - listitem\n          - link \"1.3 Christopher Morcom\" [ref=e41] → /wiki/Alan_Turing#Christopher_Morcom\n          - list \"toc christopher morcom sublist\"\n        - listitem\n          - link \"1.4 Universidade e trabalho em computabilidade\" [ref=e4"
+    },
+    {
+      "id": "P02-wikipedia-link",
+      "outcome": "stuck",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://pt.wikipedia.org/wiki/Povos_ind%C3%ADgenas_do_Brasil",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 3437,
+      "stepMs": [
+        1718.5,
+        1718.5
+      ],
+      "phases": {
+        "jevMs": 977,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 2460
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Abra o artigo sobre Portugal clicando em um link «Portugal» do texto do artigo.\": PAROU\nO Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.\n\nPassos:\n1. tocou pela foto no ponto (534, 952) (existe p=0.87, caixa conf=0.47, 653 ms)\n2. sem caminho (p=0.56, fim p=0.00, 324 ms)\nA foto acabou de tocar: confira a página antes de tirar outra (um segundo toque pode desfazer o primeiro).\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Povos indígenas do Brasil – Wikipédia, a enciclopédia livre\" https://pt.wikipedia.org/wiki/Povos_ind%C3%ADgenas_do_Brasil\nviewport: 1908×1120 · scroll 0/60565\n\n- link \"Ir para o conteúdo\" [ref=e1] → /wiki/Povos_ind%C3%ADgenas_do_Brasil#bodyContent\n- banner \"no font mode scale\"\n  - navigation \"Site\"\n    - button \"Menu principal\" [ref=e2]\n    - text \"Menu principal\"\n    - text \"mover para a barra lateral\"\n    - text \"Página principal\"\n    - text \"Conteúdo destacado\"\n    - text \"Eventos atuais\"\n    - text \"Esplanada\"\n    - text \"Página aleatória\"\n    - text \"Portais\"\n    - text \"Páginas especiais\"\n    - text \"Informar um erro\"\n    - text \"Colaboração\"\n    - text \"Boas-vindas\"\n    - text \"Ajuda\"\n    - text \"Páginas de testes públicas\"\n    - text \"Portal comunitário\"\n    - text \"Mudanças recentes\"\n    - text \"Manutenção\"\n    - text \"Criar página\"\n    - text \"Páginas novas\"\n    - text \"Contato\"\n  - link [ref=e3] → /wiki/Wikip%C3%A9dia:P%C3%A1gina_principal\n  - search \"vector search box auto expand width\"\n    - form\n      - searchbox \"Pesquisar na Wikipédia\" [ref=e4]\n      - button \"Procurar\" [ref=e5]\n  - navigation \"Ferramentas pessoais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Doar\" [ref=e6] → https://donate.wikimedia.org/?wmf_source=donate&wmf_medium=sidebar&wmf_campaign=pt.wikipedia.org&uselang=pt\n      - listitem\n        - link \"Criar conta\" [ref=e7] → /w/index.php?title=Especial:Criar_conta&returnto=Povos+ind%C3%ADgenas+do+Brasil\n      - listitem\n        - link \"Iniciar sessão\" [ref=e8] → /w/index.php?title=Especial:Entrar&returnto=Povos+ind%C3%ADgenas+do+Brasil\n- navigation \"Conteúdos\"\n  - heading \"Conteúdos\" [level=2]\n  - button \"Esconder Conteúdos\" [ref=e9]\n  - list \"vector toc contents\"\n    - listitem\n      - link \"Início\" [ref=e10] → /wiki/Povos_ind%C3%ADgenas_do_Brasil#\n    - listitem\n      - link \"Definição\" [ref=e11] → /wiki/Povos_ind%C3%ADgenas_do_Brasil#Defini%C3%A7%C3%A3o\n      - list \"toc sublist\"\n    - listitem\n      - link \"Origem\" [ref=e12] → /wiki/Povos_ind%C3%ADgenas_do_Brasil#Origem\n      - button \"Alternar a subsecção Origem\" [ref=e13]\n      - list \"toc origem sublist\"\n    - listitem\n      - link \"As sociedades tradicionais\" [ref=e14] → /wiki/Povos_ind%C3%ADgenas_do_Brasil#As_sociedades_tradicionais\n      - button \"Alternar a subsecção As sociedades tradicionais\" [ref=e15]\n      - list \"toc as sociedades tradicionais sublist\"\n    - listitem\n      - link \"Contato com os europeus e assimilação à sociedade brasileira\" [ref=e16] → /wiki/Povos_ind%C3%ADgenas_do_Brasil#Contato_com_os_europeus_e_assimila%C3%A7%C3%A3o_%C3%A0_sociedade_brasileira\n      - button \"Alternar a subsecção Contato com os europeus e assimilação à sociedade brasilei…\" [ref=e17]\n      - list \"vector toc list\"\n    - listitem\n      - link \"Situação recente\" [ref=e18] → /wiki/Povos_ind%C3%ADgenas_do_Brasil#Situa%C3%A7%C3%A3o_recente\n      - button \"Alternar a subsecção Situação recente\" [ref=e19]\n      - list \"toc recente sublist\"\n    - listitem\n      - link \"Dia dos Povos Indígenas\" [ref=e20] → /wiki/Povos_ind%C3%ADgenas_do_Brasil#Dia_dos_Povos_Ind%C3%ADgenas\n      - list \"toc dia dos povos sublist\"\n    - listitem\n      - link \"Ver também\" [ref=e21] → /wiki/Povos_ind%C3%ADgenas_do_Brasil#Ver_tamb%C3%A9m\n      - list \"toc ver sublist\"\n    - listitem\n      - link \"Referências\" [ref=e22] → /wiki/Povos_ind%C3%ADgenas_do_Brasil#Refer%C3%AAncias\n      - list \"toc sublist\"\n    - listitem\n      - link \"Bibliografia\" [ref=e23] → /wiki/Povos_ind%C3%ADgenas_do_Brasil#Bibliografia\n      - button \"Alternar a subsecção Bibliografia\" [ref=e24]\n      - list \"toc bibliografia sublist\"\n    - listitem\n      - link \"Ligações externas\" [ref=e25] → /wiki/Povos_ind%C3%ADgenas_do_Brasil#Liga%C3%A7%C3%B5es_externas\n      - list \"toc externas sublist\"\n- main\n  - banner \"no font mode scale\"\n    - heading \"Povos indígenas do Brasil\" [level=1]\n    - button \"35 idiomas\" [ref=e26]\n  - navigation \"Espaços nominais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Artigo\" [ref=e27] → /wiki/Povos_ind%C3%ADgenas_do_Brasil\n      - listitem\n        - link \"Discussão\" [ref=e28] → /wiki/Discuss%C3%A3o:Povos_ind%C3%ADgenas_do_Brasil\n  - navigation \"Visualizações\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Ler\" [ref=e29] → /wiki/Povos_ind%C3%ADgenas_do_Brasil\n      - listitem\n        - link \"Editar\" [ref=e30] → /w/index.php?title=Povos_ind%C3%ADgenas_do_Brasil&veaction=edit\n      - listitem\n   ",
+      "cause": "toque pela foto errado: o link «Portugal» no texto longo; a foto tocou (534, 952) sem efeito e o Jev disse 'sem caminho'"
+    },
+    {
+      "id": "P03-saucedemo-carrinho",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/cart.html",
+      "steps": 4,
+      "autoFills": 2,
+      "photos": 0,
+      "totalMs": 4867,
+      "stepMs": [
+        2508,
+        1004,
+        992
+      ],
+      "phases": {
+        "jevMs": 898,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 3969
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho e abra o carrinho. Não finalize nada.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=1.00, fim p=0.00, 288 ms, passo 2508 ms)\n2. clicou button \"Add to cart\" (p=0.57, fim p=0.05, 302 ms, passo 1004 ms)\n3. clicou button \"Cart, 2 items\" (p=0.84, fim p=0.04, 308 ms, passo 992 ms)\n4. objetivo atingido (pergunta direta p=0.94)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/cart.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 2 items\" [ref=e2]\n  - text \"Your Cart\"\n- main \"cart contents container\"\n  - text \"QTY\"\n  - text \"Description\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Bike Light\" [ref=e3] → /cart.html#\n  - text \"A red light isn't the desired state in testing but it sure helps when riding your bike at night. Water-resistant with 3 lighting modes, 1 AAA battery included.\"\n  - text \"$\"\n  - text \"9.99\"\n  - button \"Remove\" [ref=e4]\n  - text \"1\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e5] → /cart.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$\"\n  - text \"29.99\"\n  - button \"Remove\" [ref=e6]\n  - button \"Continue Shopping\" [ref=e7]\n  - button \"Checkout\" [ref=e8]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e9] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e10] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e11] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\""
+    },
+    {
+      "id": "P04-saucedemo-checkout",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/checkout-step-two.html",
+      "steps": 5,
+      "autoFills": 5,
+      "photos": 1,
+      "totalMs": 11690,
+      "stepMs": [
+        2315,
+        498,
+        3999
+      ],
+      "phases": {
+        "jevMs": 1720,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 9970
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho, vá ao checkout, preencha os dados fictícios e continue até o resumo (Overview). NÃO clique em Finish.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=0.99, fim p=0.00, 313 ms, passo 2315 ms)\n2. tocou pela foto no ponto (1824, 22) (existe p=0.89, caixa conf=0.47, 468 ms)\n3. clicou button \"Checkout\" (p=0.50, fim p=0.00, 303 ms, passo 498 ms)\ndigitou em text field \"First Name\" (valor de First Name) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Last Name\" (valor de Last Name) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Zip/Postal Code\" (valor de Postal Code) (pelo nome do campo, sem o Jev)\n4. clicou button \"Continue\" (p=0.99, fim p=0.00, 307 ms, passo 3999 ms)\n5. concluído (p=0.87, fim p=0.58, 329 ms)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/checkout-step-two.html\nviewport: 1908×1120 · scroll 0/1130\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 2 items\" [ref=e2]\n  - text \"Checkout: Overview\"\n- main \"checkout summary container\"\n  - text \"QTY\"\n  - text \"Description\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Bike Light\" [ref=e3] → /checkout-step-two.html#\n  - text \"A red light isn't the desired state in testing but it sure helps when riding your bike at night. Water-resistant with 3 lighting modes, 1 AAA battery included.\"\n  - text \"$9.99\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e4] → /checkout-step-two.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$29.99\"\n  - text \"Payment Information:\"\n  - text \"SauceCard #31337\"\n  - text \"Shipping Information:\"\n  - text \"Free Pony Express Delivery!\"\n  - text \"Price Total\"\n  - text \"Item total: $\"\n  - text \"39.98\"\n  - text \"Tax: $\"\n  - text \"3.20\"\n  - text \"Total: $\"\n  - text \"43.18\"\n  - button \"Cancel\" [ref=e5]\n  - button \"Finish\" [ref=e6]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e7] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e8] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e9] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\""
+    }
+  ],
+  "summary": {
+    "tasks": 21,
+    "completed": 15,
+    "completedRate": 0.7142857142857143,
+    "confirmed": 12,
+    "falseDone": 0,
+    "falseUnsure": 3,
+    "violations": 0,
+    "blocked": 0,
+    "meanSteps": 2.1904761904761907,
+    "medianSteps": 2,
+    "medianTotalMs": 2180,
+    "medianStepMs": 1368,
+    "share": {
+      "jevMs": 0.17318859610726897,
+      "snapshotMs": 0,
+      "actionMs": 0,
+      "waitMs": 0,
+      "otherMs": 0.826811403892731
+    },
+    "outcomes": {
+      "done": 12,
+      "unsure": 2,
+      "stuck": 5,
+      "error": 2
+    }
+  },
+  "excluded": [
+    "P05-amazon-busca-adicionar",
+    "P06-amazon-produto-adicionar"
+  ]
+}

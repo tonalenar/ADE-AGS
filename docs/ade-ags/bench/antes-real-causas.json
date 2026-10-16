@@ -1,0 +1,13 @@
+{
+  "L03-busca-com-enter": "Enter: a instância ANTES não aperta Enter em campo de busca; sem botão, o piloto digitou e a foto tocou num ponto sem relação (163, 129)",
+  "L04-busca-com-botao": "sem certeza após ação: clicou Buscar (p=0,83) e a página já mostrava «Resultados para: tenis», mas a pergunta de fim deu p=0,01 e o Jev respondeu 'sem caminho'; a foto foi recusada por 'cortada' (1179×688 de 1179×688)",
+  "L05-cookies": "modal/obstáculo: o Jev escolheu «Adicionar ao carrinho» com a faixa de cookies por cima e o clique falhou ('coberto por div#banner'); o piloto não trata o erro, só devolve",
+  "L06-modal-newsletter": "modal/obstáculo: idem L05, com o modal de newsletter ('coberto por div#modal')",
+  "L09-botoes-repetidos": "toque pela foto/foto indisponível: 1.ª tentativa tocou pela foto e depois clicou um «Adicionar» (p=0,64) sem acertar a Cafeteira (página 'não está à vista'); refeita: 'sem caminho' e a foto recusada por 'cortada' (623×688 de 1179×688). Botões de mesmo nome passam por isAmbiguous",
+  "L12-garantia-na-foto": "sem certeza após ação: a foto tocou o botão certo (365, 330) e o critério vale, mas o laço perguntou de novo, o Jev escolheu um elemento sem nome (p=0,55) e o piloto parou em vez de concluir",
+  "L14-rolar-ate-o-fim": "outra (rolar): rolou 1× com p=0,98 e parou por 'o mesmo passo se repetiu': a impressão da página ignora a rolagem",
+  "L16-busca-com-checkout": "sem certeza após ação: sem Enter (certo), clicou Buscar (p=0,84) e a busca funcionou, mas depois 'sem caminho' (p=0,58); a foto não achou controle (conf 0,27)",
+  "P02-wikipedia-link": "toque pela foto errado: o link «Portugal» no texto longo; a foto tocou (534, 952) sem efeito e o Jev disse 'sem caminho'",
+  "P05-amazon-busca-adicionar": "site/infra: 'A página não respondeu em 12 s' (Amazon pelo proxy); pulada, sem captcha confirmado",
+  "P06-amazon-produto-adicionar": "site/infra: idem P05"
+}

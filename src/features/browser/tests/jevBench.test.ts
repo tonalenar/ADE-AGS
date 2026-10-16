@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { formatResult, type PilotDeps, type PilotResult } from "../jevPilot";
 import {
   all, any, canStart, check, describeCriterion, emptyPhases, evaluate, fold, instrument, judge, median, not, parseActReport,
-  regex, renderMarkdown, renderTaskTable, select, summarize, text, url, viewOf, buildReport, parseTimings, phasesFromReport, isInfraFailure, infraTooHigh, unwrapCli,
+  regex, renderMarkdown, renderTaskTable, select, summarize, text, url, viewOf, buildReport, parseTimings, phasesFromReport, isInfraFailure, infraTooHigh, unwrapCli, mergeRuns, renderFailures,
   type BenchTask, type TaskRun,
 } from "../../../../scripts/bench/core";
 import { PAGES, initialNames, renderSnapshot, runSimTask, virtualClock } from "../../../../scripts/bench/sim";
@@ -410,3 +410,25 @@ describe("saída JSON do CLI", () => {
   });
 });
 
+
+describe("junção de rodadas e causas", () => {
+  const mk = (id: string, patch: Partial<TaskRun> = {}): TaskRun => run({ id, ...patch });
+  it("a última rodada que trouxe a tarefa vale, na ordem pedida", () => {
+    const first = { runs: [mk("A", { outcome: "unsure", criterionOk: false }), mk("B")] };
+    const second = { runs: [mk("A")] };
+    const merged = mergeRuns([first, second], ["B", "A", "C"]);
+    expect(merged.map((r) => r.id)).toEqual(["B", "A"]);
+    expect(merged[1].outcome).toBe("done");
+  });
+  it("«confirmadas» exige done além do critério; a causa aparece na lista de falhas", () => {
+    const runs = [mk("L04-busca-com-botao", { outcome: "stuck", cause: "sem certeza após ação" }), mk("L01-icones-sem-nome")];
+    const s = summarize(runs);
+    expect(s.completed).toBe(2);
+    expect(s.confirmed).toBe(1);
+    const report = buildReport({ label: "x", mode: "real", startedAt: "t" }, runs);
+    const failures = renderFailures(TASKS, report);
+    expect(failures).toContain("L04-busca-com-botao");
+    expect(failures).toContain("**Causa:** sem certeza após ação");
+    expect(failures).not.toContain("L01-icones-sem-nome");
+  });
+});

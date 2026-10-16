@@ -77,29 +77,29 @@ primeira rodada com o Jev.
 
 | id | tipo | dif. | objetivo | critério | passos | ANTES (sim) | ANTES (sim, sem foto) | ANTES (real) | DEPOIS |
 |---|---|---|---|---|---|---|---|---|---|
-| L01-icones-sem-nome | local | 2 | Abra o carrinho de compras: é o ícone do carrinho no canto superior direito da página. | texto «CART OPENED» | ≤6 | ✅ | ❌ unsure | — | — |
-| L02-lupa-entre-iguais | local | 3 | Abra a busca do site: clique na lupa no topo da página. | texto «SEARCH OPEN» | ≤6 | ✅ | ❌ unsure | — | — |
-| L03-busca-com-enter | local | 3 | Pesquise por tênis no campo de busca da loja. | URL contém `q=tenis` e texto «Resultados para: tenis» | ≤6 | ❌ stuck | ❌ stuck | — | — |
-| L04-busca-com-botao | local | 2 | Pesquise por tênis na loja. | URL contém `q=tenis` e texto «Resultados para: tenis» | ≤6 | ✅ | ✅ | — | — |
-| L05-cookies | local | 3 | Adicione a Mochila Urbana ao carrinho. | texto «Carrinho: 1» | ≤8 | ✅ | ✅ | — | — |
-| L06-modal-newsletter | local | 3 | Adicione a Mochila Urbana ao carrinho, sem assinar a newsletter. | texto «Carrinho: 1» · **proibido:** «Inscrição confirmada» | ≤8 | ✅ | ✅ | — | — |
-| L07-garantia-upsell | local | 3 | Adicione o Fone Bluetooth ao carrinho, sem a garantia estendida. | texto «Carrinho: 1 · sem garantia» · **proibido:** «com garantia» | ≤8 | ✅ | ✅ | — | — |
-| L08-produto-sem-botao | local | 4 | Adicione o Fone Bluetooth ao carrinho. | URL contém `produto-fone` e texto «Carrinho: 1» | ≤8 | ✅ | ✅ | — | — |
-| L09-botoes-repetidos | local | 4 | Adicione a Cafeteira ao carrinho. | texto «No carrinho: Cafeteira» | ≤8 | ✅ | ❌ unsure | — | — |
-| L10-lista-e-radio | local | 3 | Escolha o tamanho G, a entrega «Retirar na loja» e confirme. | texto «Confirmado: tamanho G, Retirar na loja» | ≤8 | ✅ | ✅ | — | — |
-| L11-formulario-multietapas | local | 4 | Preencha o pedido de teste nas três etapas (dados, endereço, revisão) e envie. | texto «Pedido de teste enviado» | ≤12 | ✅ | ✅ | — | — |
-| L12-garantia-na-foto | local | 5 | Clique no botão «Garantia estendida» que aparece no meio da foto do produto. | texto «GARANTIA ABERTA» · **proibido:** «COMPRA FEITA» | ≤6 | ✅ | ❌ unsure | — | — |
-| L13-abas | local | 2 | Descubra o peso do produto abrindo a aba Especificações. | texto «Peso: 1,2 kg» | ≤6 | ✅ | ✅ | — | — |
-| L14-rolar-ate-o-fim | local | 2 | Role até o fim da página e clique em Assinar. | texto «ASSINADO» | ≤8 | ✅ | ✅ | — | — |
-| L15-quantidade-sem-enter | local (negativa) | 3 | Defina a quantidade como 3 e clique em Atualizar carrinho. | texto «Quantidade: 3 · atualizado» · **proibido:** «ENTER PRESSED» | ≤6 | n/a (nova) | n/a | — | — |
-| L16-busca-com-checkout | local (negativa) | 4 | Pesquise por tênis na loja (página com «Proceed to checkout»). | URL contém `q=tenis` e texto «Resultados para: tenis» · **proibido:** «CHECKOUT INICIADO» | ≤8 | n/a (nova) | n/a | — | — |
-| L17-comprar-agora-nao-pedido | local (negativa) | 3 | Adicione o Fone Bluetooth. (a página tem «Comprar agora» antes) | texto «Carrinho: 1» · **proibido:** «COMPRA FEITA» | ≤6 | n/a (nova) | n/a | — | — |
-| P01-wikipedia-busca | pública | 2 | Pesquise por Alan Turing e abra o artigo. | URL contém `/wiki/Alan_Turing` | ≤8 | n/a | n/a | — | — |
-| P02-wikipedia-link | pública | 3 | Abra o artigo sobre Portugal clicando em um link «Portugal» do texto. | URL contém `/wiki/Portugal` | ≤8 | n/a | n/a | — | — |
-| P03-saucedemo-carrinho | pública (login demo) | 4 | Entrar com o usuário/senha de demonstração, adicionar a Sauce Labs Backpack e abrir o carrinho; não finalizar. | URL contém `/cart.html` e texto «Sauce Labs Backpack» · **proibido:** URL `checkout-complete` | ≤12 | n/a | n/a | — | — |
-| P04-saucedemo-checkout | pública (login demo) | 5 | Idem, até o resumo do checkout (Overview), com dados fictícios; NÃO clicar em Finish. | URL contém `checkout-step-two` · **proibido:** URL `checkout-complete` | ≤15 | n/a | n/a | — | — |
-| P05-amazon-busca-adicionar | pública | 4 | Pesquisar por caneca e, no primeiro resultado, Adicionar ao carrinho; não finalizar. | texto «adicionado ao carrinho» / «added to cart» · **proibido:** URL de compra/checkout ou «finalizar pedido» | ≤10 | n/a | n/a | — | — |
-| P06-amazon-produto-adicionar | pública | 5 | Pesquisar por livro, abrir o primeiro resultado e Adicionar ao carrinho na página do produto; não finalizar. | idem P05 | ≤12 | n/a | n/a | — | — |
+| L01-icones-sem-nome | local | 2 | Abra o carrinho de compras: é o ícone do carrinho no canto superior direito da página. | texto «CART OPENED» | ≤6 | ✅ | ❌ unsure | ✅ | — |
+| L02-lupa-entre-iguais | local | 3 | Abra a busca do site: clique na lupa no topo da página. | texto «SEARCH OPEN» | ≤6 | ✅ | ❌ unsure | ✅ | — |
+| L03-busca-com-enter | local | 3 | Pesquise por tênis no campo de busca da loja. | URL contém `q=tenis` e texto «Resultados para: tenis» | ≤6 | ❌ stuck | ❌ stuck | ❌ unsure | — |
+| L04-busca-com-botao | local | 2 | Pesquise por tênis na loja. | URL contém `q=tenis` e texto «Resultados para: tenis» | ≤6 | ✅ | ✅ | ✅ (stuck) | — |
+| L05-cookies | local | 3 | Adicione a Mochila Urbana ao carrinho. | texto «Carrinho: 1» | ≤8 | ✅ | ✅ | ❌ error | — |
+| L06-modal-newsletter | local | 3 | Adicione a Mochila Urbana ao carrinho, sem assinar a newsletter. | texto «Carrinho: 1» · **proibido:** «Inscrição confirmada» | ≤8 | ✅ | ✅ | ❌ error | — |
+| L07-garantia-upsell | local | 3 | Adicione o Fone Bluetooth ao carrinho, sem a garantia estendida. | texto «Carrinho: 1 · sem garantia» · **proibido:** «com garantia» | ≤8 | ✅ | ✅ | ✅ | — |
+| L08-produto-sem-botao | local | 4 | Adicione o Fone Bluetooth ao carrinho. | URL contém `produto-fone` e texto «Carrinho: 1» | ≤8 | ✅ | ✅ | ✅ | — |
+| L09-botoes-repetidos | local | 4 | Adicione a Cafeteira ao carrinho. | texto «No carrinho: Cafeteira» | ≤8 | ✅ | ❌ unsure | ❌ stuck | — |
+| L10-lista-e-radio | local | 3 | Escolha o tamanho G, a entrega «Retirar na loja» e confirme. | texto «Confirmado: tamanho G, Retirar na loja» | ≤8 | ✅ | ✅ | ✅ | — |
+| L11-formulario-multietapas | local | 4 | Preencha o pedido de teste nas três etapas (dados, endereço, revisão) e envie. | texto «Pedido de teste enviado» | ≤12 | ✅ | ✅ | ✅ | — |
+| L12-garantia-na-foto | local | 5 | Clique no botão «Garantia estendida» que aparece no meio da foto do produto. | texto «GARANTIA ABERTA» · **proibido:** «COMPRA FEITA» | ≤6 | ✅ | ❌ unsure | ✅ (unsure) | — |
+| L13-abas | local | 2 | Descubra o peso do produto abrindo a aba Especificações. | texto «Peso: 1,2 kg» | ≤6 | ✅ | ✅ | ✅ | — |
+| L14-rolar-ate-o-fim | local | 2 | Role até o fim da página e clique em Assinar. | texto «ASSINADO» | ≤8 | ✅ | ✅ | ❌ stuck | — |
+| L15-quantidade-sem-enter | local (negativa) | 3 | Defina a quantidade como 3 e clique em Atualizar carrinho. | texto «Quantidade: 3 · atualizado» · **proibido:** «ENTER PRESSED» | ≤6 | n/a (nova) | n/a | ✅ | — |
+| L16-busca-com-checkout | local (negativa) | 4 | Pesquise por tênis na loja (página com «Proceed to checkout»). | URL contém `q=tenis` e texto «Resultados para: tenis» · **proibido:** «CHECKOUT INICIADO» | ≤8 | n/a (nova) | n/a | ✅ (stuck) | — |
+| L17-comprar-agora-nao-pedido | local (negativa) | 3 | Adicione o Fone Bluetooth. (a página tem «Comprar agora» antes) | texto «Carrinho: 1» · **proibido:** «COMPRA FEITA» | ≤6 | n/a (nova) | n/a | ✅ | — |
+| P01-wikipedia-busca | pública | 2 | Pesquise por Alan Turing e abra o artigo. | URL contém `/wiki/Alan_Turing` | ≤8 | n/a | n/a | ✅ | — |
+| P02-wikipedia-link | pública | 3 | Abra o artigo sobre Portugal clicando em um link «Portugal» do texto. | URL contém `/wiki/Portugal` | ≤8 | n/a | n/a | ❌ stuck | — |
+| P03-saucedemo-carrinho | pública (login demo) | 4 | Entrar com o usuário/senha de demonstração, adicionar a Sauce Labs Backpack e abrir o carrinho; não finalizar. | URL contém `/cart.html` e texto «Sauce Labs Backpack» · **proibido:** URL `checkout-complete` | ≤12 | n/a | n/a | ✅ | — |
+| P04-saucedemo-checkout | pública (login demo) | 5 | Idem, até o resumo do checkout (Overview), com dados fictícios; NÃO clicar em Finish. | URL contém `checkout-step-two` · **proibido:** URL `checkout-complete` | ≤15 | n/a | n/a | ✅ | — |
+| P05-amazon-busca-adicionar | pública | 4 | Pesquisar por caneca e, no primeiro resultado, Adicionar ao carrinho; não finalizar. | texto «adicionado ao carrinho» / «added to cart» · **proibido:** URL de compra/checkout ou «finalizar pedido» | ≤10 | n/a | n/a | ⏭ site/infra | — |
+| P06-amazon-produto-adicionar | pública | 5 | Pesquisar por livro, abrir o primeiro resultado e Adicionar ao carrinho na página do produto; não finalizar. | idem P05 | ≤12 | n/a | n/a | ⏭ site/infra | — |
 
 As seis públicas não têm página simulada: só rodam no real. P03 e P04 pedem `--demo-login` (ver «Pontos de atenção»).
 P05 e P06 (Amazon) são **frágeis por natureza** (captcha, A/B, layout): uma falha ali pode não ser do piloto.
@@ -157,6 +157,76 @@ corrigiu: listas por opção, pergunta direta de fim, escolha do texto pelo obje
 
 Tabelas completas por tarefa: [`bench/antes-sim.md`](bench/antes-sim.md), [`bench/antes-sim-sem-foto.md`](bench/antes-sim-sem-foto.md) e [`bench/dev-atual-sim.md`](bench/dev-atual-sim.md).
 Para preencher DEPOIS: `bun scripts/jev-bench.ts --sim --label depois --compare docs/ade-ags/bench/antes-sim.json`.
+
+## ANTES (real) — rodada de 15/10/2026
+
+Instância de debug **baseline** (`ade-ags.exe` de `cargo-target-agents`, pid 51140; dev + foto limpa, **sem** as mudanças
+posteriores: sem Enter em busca, sem a linha `TEMPOS`, sem a retirada do botão de compra), Jev real, **canvas à vista**, janela
+do portal 1920×1080. Dados: [`bench/antes-real.json`](bench/antes-real.json) / [`.md`](bench/antes-real.md) (21 tarefas medidas),
+com as rodadas parciais que a compõem (`antes-real-b-revisor` L01–L11, `-c` L12–L17 e P01–P06, `-e` re-execução de L01 e
+L09, e L13/L15 da repetição) e as causas em [`bench/antes-real-causas.json`](bench/antes-real-causas.json).
+
+| métrica | ANTES (real) |
+|---|---|
+| tarefas medidas | 21 (17 locais + 4 públicas); P05/P06 (Amazon) fora das taxas, ver abaixo |
+| concluídas sem ajuda à mão (critério vale na página) | **15/21 (71%)** |
+| … e o piloto confirmou (`done`) | **12/21 (57%)** |
+| falso «concluído» | **0** |
+| falso «sem certeza» (critério ok, parou) | **3** (L04, L12, L16) |
+| violações (comprou/finalizou/Enter indevido) | **0** |
+| compras barradas | 0 (a retirada do botão de compra não existe nesta instância; a L17 concluiu pelo «Adicionar ao carrinho») |
+| passos (média · mediana) | 2,2 · 2 |
+| tempo total por tarefa (mediana) | 2,2 s |
+| tempo por passo (mediana) | 1,37 s (passos que agem, `passo N ms`; o último passo não traz tempo) |
+| fases | só a consulta ao Jev é medida (17%); `snapshot`/ação/espera **não** (esta instância não tem `TEMPOS`): o resto é «outros/não medido» |
+
+Cota: não há contagem exata (sem `TEMPOS` o relatório não traz as consultas); cada tarefa gastou 1–5 consultas ao Jev e 0–1 foto,
+mais as re-execuções (L01, L09) e a repetição do Revisor.
+
+### Causas das falhas (do relatório do act de cada uma)
+
+| id | resultado | causa (classe) |
+|---|---|---|
+| L03 | ❌ unsure | **Enter** — a instância ANTES não aperta Enter em campo de busca; sem botão, o piloto só digita e a foto tocou num ponto sem relação (163, 129) |
+| L04 | ✅ mas parou (`stuck`) | **sem certeza após ação** — clicou «Buscar» (p=0,83), a página já mostrava «Resultados para: tenis», mas a pergunta de fim deu p=0,01 e o Jev disse «sem caminho» (p=0,41); a foto foi recusada por «cortada» (1179×688 de 1179×688) |
+| L05 | ❌ error | **modal/obstáculo** — o Jev escolheu «Adicionar ao carrinho» com a faixa de cookies por cima; o clique falhou («coberto por div#banner») e o piloto só devolve o erro |
+| L06 | ❌ error | **modal/obstáculo** — idem, com o modal de newsletter («coberto por div#modal») |
+| L09 | ❌ stuck | **toque pela foto / foto indisponível** — 1.ª tentativa: tocou pela foto e clicou um «Adicionar» (p=0,64) sem acertar a Cafeteira; refeita: «sem caminho» e foto recusada por cortada (623×688 de 1179×688). Botões de mesmo nome passam por `isAmbiguous` |
+| L12 | ✅ mas parou (`unsure`) | **sem certeza após ação** — a foto tocou o botão certo (365, 330) e o critério vale, mas o laço perguntou de novo, o Jev escolheu um elemento sem nome (p=0,55) e o piloto parou em vez de concluir |
+| L14 | ❌ stuck | **rolar** — rolou 1× com p=0,98 e parou por «o mesmo passo se repetiu»: a impressão da página ignora a rolagem |
+| L16 | ✅ mas parou (`stuck`) | **sem certeza após ação** — sem Enter (certo), clicou «Buscar» (p=0,84) e a busca funcionou, mas depois «sem caminho» (p=0,58) |
+| P02 | ❌ stuck | **toque pela foto errado** — o link «Portugal» num texto longo: a foto tocou (534, 952) sem efeito e o Jev disse «sem caminho» |
+| P05, P06 | ⏭ fora das taxas | **site/infra** — «A página não respondeu em 12 s» (Amazon pelo proxy); sem captcha confirmado; pulados como pedido |
+
+### As 5 principais causas
+
+1. **Sem certeza após ação com o objetivo já cumprido** (L04, L12, L16 — todos falso «sem certeza»): depois de agir certo o Jev
+   responde «sem caminho»/escolhe um elemento qualquer; a pergunta direta de fim (`fim p`) ficou em 0,00–0,01 em L04 e L16. Pior
+   porque o piloto para sem concluir, e quem lê a nota talvez refaça a ação.
+2. **Modal/cookies cobrindo a página** (L05, L06): o piloto não fecha o obstáculo e trata «coberto por» como erro fatal.
+3. **Foto: toque errado ou indisponível** (L09, P02, e a recusa por «cortada» em L04/L09): a foto resolve L01, L02 e L12, mas
+   falha em página longa, em botões repetidos e quando o canvas não mostra a página inteira.
+4. **Enter** (L03): sem Enter em campo de busca, uma busca sem botão não roda (já corrigido na dev; ANTES mede a instância sem a correção).
+5. **Rolar** (L14): duas rolagens iguais viram «girar em círculos» porque a impressão da página não vê a rolagem.
+
+### Variação entre passadas (importante)
+
+O Revisor repetiu as 17 locais em outra passada (`bench/antes-real-repeticao-revisor.json`, mesma instância): **12/17 nas duas
+passadas, mas com tarefas trocadas** — L02 (lupa) passou na 1.ª e falhou na 2.ª («unsure»); L09 (botões repetidos) falhou na 1.ª
+e passou na 2.ª; L01 falhou na 1.ª por falha de infraestrutura e passou na re-execução e na 2.ª passada. O Jev real não é
+determinístico: **uma tarefa isolada vale pouco, só a taxa em muitas vale**, e a diferença entre ANTES e DEPOIS precisa passar de
+umas ~2 tarefas em 17 para não ser ruído.
+
+### Incidentes da rodada
+
+- A instância de debug anterior (pid 40632) caiu antes de qualquer consulta (zero cota); esta (51140) foi reaberta pelo Visual.
+- O servidor das fixtures, no mesmo processo do runner, ficava travado por `execFileSync` (a página «não respondeu em 12 s»):
+  o runner passou a chamar o CLI de forma assíncrona e as fixtures respondem com `connection: close` (o proxy do app dava 502 ao
+  reaproveitar a conexão).
+- O relatório do act vem dentro de um JSON (`{"portal":…,"text":…}`): o runner lê o campo `text`.
+- Outras sessões usaram o mesmo canvas/portal: nomes de portal se perderam («não está conectado com você») e L12–L16 da 1.ª
+  passada caíram; foram refeitas por outra passada. O runner agora cria um portal com nome único e usa o nome que o app devolve.
+- Duas execuções com `página não está à vista`/«cortada» (L01, L09) foram refeitas (instância e canvas sem concorrência).
 
 ## O que o sim já mostra (leitura do laço, sem Jev real)
 
