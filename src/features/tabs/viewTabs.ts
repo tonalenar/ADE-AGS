@@ -159,6 +159,11 @@ export function toPersisted(views: ViewTab[]): ViewTab[] {
  * exigir el `http://` es hacer tipear lo obvio. Un host sin puerto ni esquema se asume
  * `https`, salvo que sea local.
  */
+/** `about:blank` (ou `about:`): uma página vazia, não um endereço. Um agente cria um portal «vazio» assim. */
+export function isBlankUrl(input: string): boolean {
+  return /^about:(blank)?\/?$/i.test(input.trim());
+}
+
 export function normalizeUrl(input: string): string | null {
   const text = input.trim();
   if (!text) return null;

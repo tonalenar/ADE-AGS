@@ -97,7 +97,7 @@ pub fn ask_frontend_within(
     }
 
     let result = rx.recv_timeout(timeout).map_err(|_| {
-        "A janela não respondeu a tempo (o app está respondendo?)".to_string()
+        "A janela do ADE AGS não respondeu a tempo. Se ela estiver minimizada ou escondida, traga-a para a frente: o navegador do canvas só responde com a janela visível.".to_string()
     });
 
     PENDING.lock().ok().and_then(|mut p| p.remove(&request_id));

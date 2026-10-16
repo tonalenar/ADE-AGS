@@ -10,7 +10,7 @@ import { neighbors } from "@/features/canvas/board";
 import { useCanvasStore } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
-import { normalizeUrl, type BrowserView } from "@/features/tabs/viewTabs";
+import { isBlankUrl, normalizeUrl, type BrowserView } from "@/features/tabs/viewTabs";
 import { pasteIntoTab } from "@/features/terminal/terminalRegistry";
 
 import pickerScript from "./picker.ts?script";
@@ -211,6 +211,8 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
 
   /** `null` si cargó; el motivo si no. */
   const go = useCallback(async (input: string): Promise<string | null> => {
+    // `about:blank` é a página vazia: nada a carregar, e não é um erro.
+    if (isBlankUrl(input)) { setError(null); return null; }
     const url = normalizeUrl(input);
     if (!url) {
       setError(t("browser.invalidUrl"));
@@ -397,7 +399,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
   }, [picks, captures, note]);
 
   useEffect(() => {
-    if (view.url) go(view.url);
+    if (view.url && !isBlankUrl(view.url)) go(view.url);
     else {
       previewDetectServers().then(setServers).catch(() => setServers([]));
       addressRef.current?.focus();

@@ -142,3 +142,14 @@ describe("rutas de Windows", () => {
     expect(relativeTo("/otro/lado.ts", "/home/luis/p")).toBe("/otro/lado.ts");
   });
 });
+
+describe("about:blank", () => {
+  it("é a página vazia, não um endereço (um agente cria um portal vazio assim)", async () => {
+    const { isBlankUrl } = await import("../viewTabs");
+    expect(isBlankUrl("about:blank")).toBe(true);
+    expect(isBlankUrl(" ABOUT:BLANK ")).toBe(true);
+    expect(isBlankUrl("about:")).toBe(true);
+    expect(isBlankUrl("https://about.me")).toBe(false);
+    expect(isBlankUrl("")).toBe(false);
+  });
+});
