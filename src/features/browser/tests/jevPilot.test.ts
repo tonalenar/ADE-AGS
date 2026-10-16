@@ -969,3 +969,32 @@ describe("remover do carrinho: a contagem tem de cair", () => {
     expect(result.steps.join("\n")).toContain("a página não confere");
   });
 });
+
+describe("página de erro nunca é o objetivo cumprido", () => {
+  it("«Desculpe! Algo deu errado» desmente o 'feito'", () => {
+    const page = parseSnapshot(['page: "Amazon.com.br" https://amazon.test/cart', "", '- heading "Desculpe! Algo deu errado" [level=1]'].join("\n"));
+    expect(goalContradiction("adicionar ao carrinho", page)).toContain("mostra um erro");
+    expect(goalContradiction("mostrar a mensagem de erro", page)).toBeNull();
+  });
+
+  it("uma página normal não é confundida com erro", () => {
+    const page = parseSnapshot(['page: "Carrinho" https://shop.test/cart', "", '- text "Seu carrinho"'].join("\n"));
+    expect(goalContradiction("abrir o carrinho", page)).toBeNull();
+  });
+});
+
+describe("busca enviada com Enter", () => {
+  it("lida cedo demais a página é a mesma: o piloto espera e relê antes de perguntar ao Jev", async () => {
+    const before = ['page: "Wiki" https://w.test', "viewport: 1000×600", "", '- searchbox "Search" [ref=e1] value=""', '- button "Search" [ref=e2]'].join("\n");
+    const after = ['page: "Portugal" https://w.test/Portugal', "viewport: 1000×600", "", '- heading "Portugal" [level=1]', '- text "Capital: Lisbon"'].join("\n");
+    const h = harness([ok("done")], [before]);
+    let reads = 0;
+    h.deps.snapshot = async () => (++reads <= 3 ? before : after);
+    const thorough: boolean[] = [];
+    h.deps.settle = async (t) => { thorough.push(!!t); };
+    const result = await runPilot("pesquisar Portugal", ["Search=Portugal"], undefined, h.deps);
+    expect(thorough.filter(Boolean).length).toBeGreaterThanOrEqual(1);
+    expect(h.asked[0].state).toContain("Capital: Lisbon");
+    expect(result.outcome).toBe("done");
+  });
+});

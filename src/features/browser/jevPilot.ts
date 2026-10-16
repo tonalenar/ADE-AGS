@@ -530,6 +530,11 @@ const EMPTY_TEXT = /\b(vazi[oa]|empty|0\s+(items?|itens)|nenhum item|no items)\b
  * lê "N itens" do texto. Devolve o que a página mostra de diferente, ou `null` se confere ou não dá para saber. Pura.
  */
 export function goalContradiction(goal: string, page: ParsedPage, initial: number | null = null): string | null {
+  // Uma página de erro («Desculpe! Algo deu errado») nunca é o objetivo cumprido, a menos que o objetivo fale em erro.
+  if (!/\b(erro|error|falha)\b/i.test(goal)) {
+    const top = [page.title, ...page.text.slice(0, 8)].find((l) => ERROR_PAGE.test(l));
+    if (top) return `a página mostra um erro («${top.slice(0, 80)}»).`;
+  }
   if (!CART_GOAL.test(goal)) return null;
   const { removers, saidCount, saysEmpty } = cartFacts(page);
   const wanted = COUNT_GOAL.exec(goal);
@@ -555,7 +560,9 @@ export function goalContradiction(goal: string, page: ParsedPage, initial: numbe
   return null;
 }
 
-const REMOVE_GOAL = /\b(remov\w*|remove|exclu\w*|delete|apag\w*|tir\w+)\b/i;
+const ERROR_PAGE = /algo deu errado|something went wrong|sorry! something|desculpe[,!]|p[áa]gina n[ãa]o encontrada|page not found|access denied|acesso negado|^404\b|\b(502|503) /i;
+
+const REMOVE_GOAL =/\b(remov\w*|remove|exclu\w*|delete|apag\w*|tir\w+)\b/i;
 
 function cartFacts(page: ParsedPage): { removers: number; saidCount: number | null; saysEmpty: boolean } {
   const removers = page.elements.filter((el) => REMOVE_CONTROL.test(el.name.trim())).length;
@@ -758,9 +765,19 @@ async function pilotLoop(
         history.push({ what, changed: true, auto: true });
         log.push(`${what} (pelo nome do campo, sem o Jev)`);
       }
+      const before = fingerprint(page);
       await deps.settle();
       snapshot = progress.snapshot = await deps.snapshot();
       page = parseSnapshot(snapshot);
+      // Uma busca enviada com Enter leva um tempo até a página de resultados existir (a Amazon: segundos): lida cedo demais,
+      // a página é a MESMA, o Jev "não tem certeza" e o `act` para com a busca já feita. Espera a rede assentar e relê, até 3 vezes.
+      if (filled.some((what) => what.includes("apertou Enter"))) {
+        for (let wait = 0; wait < 3 && fingerprint(page) === before; wait++) {
+          await deps.settle(true);
+          snapshot = progress.snapshot = await deps.snapshot();
+          page = parseSnapshot(snapshot);
+        }
+      }
     }
 
     const query = buildStep(page, goal, fills.map(([key]) => key).filter((key) => !taken.has(key)), history, waits);
