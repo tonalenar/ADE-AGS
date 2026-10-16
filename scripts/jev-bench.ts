@@ -46,7 +46,7 @@ const intValue = (name: string, fallback: number): number => {
   return Number.isFinite(n) && n > 0 ? Math.floor(n) : fallback;
 };
 
-// `--merge a.json,b.json#id+id,… [--causes causas.json] --label x --out final.json`: junta rodadas parciais (a última de cada tarefa vale)
+// `--merge a.json,b.json#id+id,… [--causes causas.json] [--baseline antes.json] --label x --out final.json`: junta rodadas parciais (a última de cada tarefa vale)
 // e anota a causa das falhas. Não roda nada.
 const label = value("label") ?? "rodada";
 if (flag("merge")) {
@@ -63,7 +63,9 @@ if (flag("merge")) {
   const excluded = merged.filter(isInfraFailure);
   const measured = merged.filter((r) => !isInfraFailure(r));
   const final = buildReport({ label, mode: parts[0].mode, startedAt: parts[0].startedAt, commit: parts[0].commit }, measured);
-  const md = `${renderMarkdown(TASKS, final)}
+  const baselinePath = value("baseline");
+  const base = baselinePath ? (JSON.parse(readFileSync(baselinePath, "utf8")) as BenchReport) : undefined;
+  const md = `${renderMarkdown(TASKS, final, base)}
 
 Fora das taxas (infraestrutura ou site, não do piloto): ${excluded.length > 0 ? excluded.map((r) => `${r.id}${r.cause ? ` — ${r.cause}` : ""}`).join("; ") : "nenhuma"}.
 `;

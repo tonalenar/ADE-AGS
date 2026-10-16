@@ -1,0 +1,251 @@
+{
+  "schema": 1,
+  "label": "depois-real",
+  "mode": "real",
+  "startedAt": "2026-10-16T00:08:19.433Z",
+  "commit": "0d72a119",
+  "runs": [
+    {
+      "id": "L01-icones-sem-nome",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8792/icones.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 3135,
+      "stepMs": [
+        1567.5,
+        1567.5
+      ],
+      "phases": {
+        "jevMs": 2043,
+        "snapshotMs": 4,
+        "actionMs": 1051,
+        "waitMs": 0,
+        "otherMs": 37
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Abra o carrinho de compras: é o ícone do carrinho no canto superior direito da página.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. tocou pela foto no ponto (1843, 56) (existe p=1.00, caixa conf=0.92, 405 ms)\n2. objetivo atingido (pergunta direta p=0.89)\n\nTEMPOS: {\"jev\":824,\"snapshot\":4,\"acao\":1051,\"espera\":0,\"foto\":1219,\"consultas\":2,\"fotos\":1,\"total\":3099}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — ícones\" http://localhost:8792/icones.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n  - clickable [ref=e1]\n  - clickable [ref=e2]\n- main\n  - text \"CART OPENED\"\n  - button \"Contact\" [ref=e3]",
+      "probes": 3
+    },
+    {
+      "id": "L02-lupa-entre-iguais",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8792/lupa.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 2108,
+      "stepMs": [
+        1054,
+        1054
+      ],
+      "phases": {
+        "jevMs": 1756,
+        "snapshotMs": 2,
+        "actionMs": 311,
+        "waitMs": 0,
+        "otherMs": 39
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Abra a busca do site: clique na lupa no topo da página.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. tocou pela foto no ponto (1738, 45) (existe p=1.00, caixa conf=0.89, 351 ms)\n2. objetivo atingido (pergunta direta p=0.91)\n\nTEMPOS: {\"jev\":642,\"snapshot\":2,\"acao\":311,\"espera\":0,\"foto\":1114,\"consultas\":2,\"fotos\":1,\"total\":2072}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — lupa\" http://localhost:8792/lupa.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - clickable [ref=e1]\n  - text \"ShopMart\"\n  - clickable [ref=e2]\n  - clickable [ref=e3]\n  - clickable [ref=e4]\n- main\n  - text \"SEARCH OPEN\"",
+      "probes": 3
+    },
+    {
+      "id": "L03-busca-com-enter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8792/busca-enter.html?q=tenis",
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2071,
+      "stepMs": [
+        2071
+      ],
+      "phases": {
+        "jevMs": 331,
+        "snapshotMs": 3,
+        "actionMs": 1699,
+        "waitMs": 0,
+        "otherMs": 38
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por tênis no campo de busca da loja.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)\n1. concluído (p=0.77, fim p=0.94, 326 ms)\n\nTEMPOS: {\"jev\":331,\"snapshot\":3,\"acao\":1699,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":2033}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8792/busca-enter.html?q=tenis\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - form\n    - searchbox \"Buscar produtos\" [ref=e1]\n  - text \"Resultados para: tenis\"",
+      "probes": 1
+    },
+    {
+      "id": "L04-busca-com-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8792/busca-botao.html?q=tenis",
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2071,
+      "stepMs": [
+        2071
+      ],
+      "phases": {
+        "jevMs": 327,
+        "snapshotMs": 2,
+        "actionMs": 1703,
+        "waitMs": 0,
+        "otherMs": 39
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por tênis na loja.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) e apertou Enter (pelo nome do campo, sem o Jev)\n1. concluído (p=0.76, fim p=0.69, 322 ms)\n\nTEMPOS: {\"jev\":327,\"snapshot\":2,\"acao\":1703,\"espera\":0,\"foto\":0,\"consultas\":1,\"fotos\":0,\"total\":2032}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8792/busca-botao.html?q=tenis\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - form\n    - searchbox \"Buscar produtos\" [ref=e1]\n    - button \"Buscar\" [ref=e2]\n  - text \"Resultados para: tenis\"",
+      "probes": 1
+    },
+    {
+      "id": "L05-cookies",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8792/cookies.html",
+      "steps": 4,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2096,
+      "stepMs": [
+        411,
+        1007
+      ],
+      "phases": {
+        "jevMs": 1277,
+        "snapshotMs": 3,
+        "actionMs": 780,
+        "waitMs": 0,
+        "otherMs": 36
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione a Mochila Urbana ao carrinho.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. tentou tocar em e1, mas falhou: button está coberto por div#banner (#banner)\n2. clicou button \"Aceitar todos\" (p=0.54, fim p=0.00, 303 ms, passo 411 ms)\n3. clicou button \"Adicionar ao carrinho\" (p=0.93, fim p=0.00, 326 ms, passo 1007 ms)\n4. objetivo atingido (pergunta direta p=0.99)\n\nTEMPOS: {\"jev\":1277,\"snapshot\":3,\"acao\":780,\"espera\":0,\"foto\":0,\"consultas\":4,\"fotos\":0,\"total\":2062}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — cookies\" http://localhost:8792/cookies.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Mochila Urbana\" [level=1]\n  - text \"Mochila de 20 litros, resistente à água. R$ 189,90\"\n  - text \"Carrinho: 1\"\n  - button \"Adicionar ao carrinho\" [ref=e1] [focused]",
+      "probes": 4
+    },
+    {
+      "id": "L06-modal-newsletter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8792/modal.html",
+      "steps": 4,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2118,
+      "stepMs": [
+        389,
+        1003
+      ],
+      "phases": {
+        "jevMs": 1293,
+        "snapshotMs": 3,
+        "actionMs": 783,
+        "waitMs": 0,
+        "otherMs": 39
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione a Mochila Urbana ao carrinho, sem assinar a newsletter.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. tentou tocar em e1, mas falhou: button está coberto por div#modal (#modal)\n2. clicou button \"Fechar\" (p=0.89, fim p=0.00, 313 ms, passo 389 ms)\n3. clicou button \"Adicionar ao carrinho\" (p=0.84, fim p=0.00, 288 ms, passo 1003 ms)\n4. concluído (p=0.92, fim p=0.70, 349 ms)\n\nTEMPOS: {\"jev\":1293,\"snapshot\":3,\"acao\":783,\"espera\":0,\"foto\":0,\"consultas\":4,\"fotos\":0,\"total\":2081}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — newsletter\" http://localhost:8792/modal.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Mochila Urbana\" [level=1]\n  - text \"Mochila de 20 litros, resistente à água. R$ 189,90\"\n  - text \"Carrinho: 1\"\n  - button \"Adicionar ao carrinho\" [ref=e1] [focused]",
+      "probes": 4
+    },
+    {
+      "id": "L07-garantia-upsell",
+      "outcome": "crash",
+      "criterionOk": false,
+      "forbidden": false,
+      "steps": 0,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 0,
+      "stepMs": [],
+      "phases": {
+        "jevMs": 0,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 0
+      },
+      "timing": "reported",
+      "finalUrl": "",
+      "note": "navegar falhou: Command failed: C:\\Users\\tonz1n\\.ags\\cargo-target-agents\\debug\\ags.exe portal navigate bench-jev-mva7ltdf http://localhost:8792/garantia.html | {\"error\":\"No llegó respuesta\"} "
+    },
+    {
+      "id": "L08-produto-sem-botao",
+      "outcome": "crash",
+      "criterionOk": false,
+      "forbidden": false,
+      "steps": 0,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 0,
+      "stepMs": [],
+      "phases": {
+        "jevMs": 0,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 0
+      },
+      "timing": "reported",
+      "finalUrl": "",
+      "note": "navegar falhou: Command failed: C:\\Users\\tonz1n\\.ags\\cargo-target-agents\\debug\\ags.exe portal navigate bench-jev-mva7ltdf http://localhost:8792/catalogo.html | {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-17488 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"} "
+    },
+    {
+      "id": "L09-botoes-repetidos",
+      "outcome": "crash",
+      "criterionOk": false,
+      "forbidden": false,
+      "steps": 0,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 0,
+      "stepMs": [],
+      "phases": {
+        "jevMs": 0,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 0
+      },
+      "timing": "reported",
+      "finalUrl": "",
+      "note": "navegar falhou: Command failed: C:\\Users\\tonz1n\\.ags\\cargo-target-agents\\debug\\ags.exe portal navigate bench-jev-mva7ltdf http://localhost:8792/repetidos.html | {\"error\":\"Não foi possível conectar ao pipe \\\\\\\\.\\\\pipe\\\\ags-ipc-17488 (O sistema não pode encontrar o arquivo especificado. (os error 2)). Reinicie o app.\"} "
+    }
+  ],
+  "summary": {
+    "tasks": 9,
+    "completed": 6,
+    "completedRate": 0.6666666666666666,
+    "confirmed": 6,
+    "falseDone": 0,
+    "falseUnsure": 0,
+    "violations": 0,
+    "blocked": 0,
+    "meanSteps": 1.5555555555555556,
+    "medianSteps": 1,
+    "medianTotalMs": 2071,
+    "medianStepMs": 1054,
+    "share": {
+      "jevMs": 0.5167291712625929,
+      "snapshotMs": 0.0012500919185234208,
+      "actionMs": 0.46525479814692255,
+      "waitMs": 0,
+      "otherMs": 0.016765938671961175
+    },
+    "outcomes": {
+      "done": 6,
+      "crash": 3
+    }
+  }
+}
