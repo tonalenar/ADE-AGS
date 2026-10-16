@@ -351,3 +351,48 @@ N04 (filtro de 8 s), N05 (sugestões), N09 (quantidade) e as L01/L05/L07/L08/L11
 | passo p50 ≤ 500 ms | **sim** (462 ms) |
 
 Pendências: P02 (links parecidos em página longa), N01 e N06 (anúncio e Enter de busca), L04 e L12, Fase 6 (visão) e 4.4 (modelo pequeno para o texto). Arquivos: `v2-final2-real-locais.*`.
+
+
+### 5.8 Rodada das pendências (L04, N01, N06, P02, L01), `f4ecf88d` e `afb191f6`
+
+Correções (todas na `dev`): a busca que o PILOTO enviou com Enter e que levou a outra página conta como ação dele, com limite de «acabou» de 0,6 (L04); digitar não aperta Enter quando o objetivo manda escolher uma sugestão (N06); regra `abrir-item` (N01); entre links de mesmo nome, só o que vai ao destino citado entre «» (P02); controle sem nome, sem certeza (p < 0,8) e com outro sem nome na pergunta, vai à foto (L01). A regra `abrir-item` foi **estreitada** (`afb191f6`) depois de a primeira versão fazer o P03 abrir o produto em vez de adicioná-lo ao carrinho.
+
+Locais, 27 tarefas × 2, Jev real, app instalado:
+
+| | `60af6e7b` | `f4ecf88d` (antes de estreitar a regra) | `afb191f6` (final) |
+|---|---|---|---|
+| sucesso pela página | 50/54 (93%) | **54/54 (100%)** | **52/54 (96%)** |
+| falso «feito» | 0 | 0 | **0** |
+| falso «parou» | 5 | 2 | 2 (L12) |
+| violações | 1 | 0 | 2 (L01: clicou no ícone de perfil; nenhuma compra) |
+| «verificado» errado | 0 | 0 | 0 |
+| travamentos da janela | 0 | 0 | 0 |
+| tempo por passo p50 | 462 ms | 511 ms | **443 ms** |
+| tempo por `act` p50 | 1918 ms | 1941 ms | **1603 ms** |
+| latência por consulta p50 · p95 | 301 · 330 ms | 302 · 352 ms | **240 · 314 ms** |
+
+N01, N06, L04, N04, N05, N09 e as demais passam. Restam: **L12** (o botão só existe na imagem: o piloto toca certo pela foto e a página confere, mas ele não reconhece sozinho que acabou) e **L01** (a foto aponta o ponto entre o ícone de perfil e o de carrinho e o toque cai no vizinho; 0 violações numa rodada, 2 na seguinte: é ruído do ponto da foto, não resolvido).
+
+Públicas (Wikipedia + SauceDemo, 4 tarefas × 2):
+
+| | `1d6d6e91` | `afb191f6` |
+|---|---|---|
+| sucesso pela página | 6/8 (75%) | 5/8 (63%) |
+| falso «feito» | 2 (P02) | **0** |
+| NÃO CONFERE (o `--expect` pegou) | — | P02 |
+| violações | 0 | 0 |
+
+O P02 deixou de dar falso «feito»: o piloto clica no primeiro «Portugal» (que vai ao «Império Português») e o `--expect url:/wiki/Portugal` acusa **NÃO CONFERE**. O link exato muitas vezes nem está no recorte da janela, então o filtro de links exatos não age: falta ao piloto rolar atrás dele. P04: uma das duas repetições parou «sem certeza».
+
+### 5.9 Metas, estado final
+
+| Meta | Resultado final |
+|---|---|
+| ≥ 95% local em ≤ 2 `act` | **96%** (1,04 `act` por tarefa): **atingida** |
+| ≥ 90% público | 63% (5/8): **não** (P02 sem o link exato no recorte; P04 variável) |
+| falso «feito» ≤ 2% | **0%** local e **0** nas públicas; o P02 virou NÃO CONFERE: **atingida** |
+| 0 travamentos em 30 | **sim** (30 + 54 + 54 + 54 rodadas) |
+| mediana por consulta ≤ 450 ms | **sim** (240 ms) |
+| passo p50 ≤ 500 ms | **sim** (443 ms) |
+
+Pendências finais: P02 (rolar até o link exato), L12 e L01 (dependem da foto), P04 (variável), Fase 6 (visão como reserva) e 4.4 (modelo pequeno para o texto). Arquivos: `v2-final3-real-*`, `v2-final4-real-*`, `v2-pendencias-sim.*`.
