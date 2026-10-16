@@ -102,7 +102,7 @@ describe("histórico que a base já tem", () => {
       workspaceId: "default",
     });
     await flushPendingSave();
-    const payload = save.mock.calls.at(-1)![0] as { tabs: { scrollback: string | null; scrollbackUnchanged: boolean }[] };
+    const payload = save.mock.calls[save.mock.calls.length - 1][0] as { tabs: { scrollback: string | null; scrollbackUnchanged: boolean }[] };
     expect(payload.tabs[0].scrollbackUnchanged).toBe(true);
     expect(payload.tabs[0].scrollback).toBeNull();
   });
@@ -116,7 +116,7 @@ describe("histórico que a base já tem", () => {
       workspaceId: "default",
     });
     await flushPendingSave();
-    const payload = save.mock.calls.at(-1)![0] as { tabs: { scrollbackUnchanged: boolean }[] };
+    const payload = save.mock.calls[save.mock.calls.length - 1][0] as { tabs: { scrollbackUnchanged: boolean }[] };
     expect(payload.tabs[0].scrollbackUnchanged).toBe(true);
   });
 });
