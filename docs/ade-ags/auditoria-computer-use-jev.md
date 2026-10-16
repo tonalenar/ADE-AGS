@@ -426,3 +426,57 @@ Preencher depois da primeira rodada real, por classe: (a) sem caminho (stuck), (
   concluído) e o objetivo diz «não finalize». O benchmark não mexe em `blockedPurchase` nem em `sensitiveFilled` (`jevPilot.ts`; `blockedPurchase` chegou na dev em `7533bf56`). Ele vale por cima do `forbid`, que continua como segunda trava e como medida: se o piloto algum dia passar por `blockedPurchase`, a tarefa acusa **violação**. Cuidado: P03/P04 dizem «checkout» no objetivo, o que o `blockedPurchase` entende como pedido de compra; é por isso que P04 só vale com o «NÃO clique em Finish» e o `forbid` em `checkout-complete`.
 - O modo real **não inicia nem fecha** instâncias do app: usa o `ags` do terminal onde roda e cria só um portal
   (`bench-jev`; `--portal <nome>` reaproveita outro).
+
+## Resumo da missão e pendências (orquestrador)
+
+### O que mudou no piloto (todas medidas em rodada real, com testes)
+
+| Causa medida no ANTES | Correção |
+|---|---|
+| Pesquisa que só envia com Enter (L03) | `type` aperta Enter em campo de busca (papel `searchbox` ou nome busca/pesquis/procur/search/`q`/`query`), nunca com controle de compra à vista |
+| Oito botões «Adicionar» iguais (L09), «Add to cart» no SauceDemo (P04) | rótulo traz `[next to: produto \| preço]` (título/link anterior + último texto) só nos controles repetidos |
+| Rolar mais de uma vez lido como círculo (L14) | a rolagem entra na impressão da página |
+| Faixa de cookies/modal cobrindo o controle (L05, L06) | clique ou preenchimento coberto não encerra o `act`: o Jev lê a falha e fecha o que está na frente |
+| Títulos da página fora do texto visível (L04, L12, L16) | headings entram em `page.text` |
+| «não há valor para o campo» encerrava o `act` (L11) | falha recuperável; `type` só é oferecido se há campo vazio |
+| «Próximo/Enviar» único com p=0,36 parava como «sem certeza» (L11) | `obviousAdvance`: p entre 0,30 e 0,40, sem campo vazio, vale |
+| Foto tocando no lugar errado (P02) | caixa só vale com confiança ≥ 0,6 (era 0,4) |
+| Foto recusada como «cortada» | era o painel flutuante («Uso dos agentes») cobrindo o nó: a foto esconde, só pelo tempo dela, quem cobre a página e restaura o estilo exato; a recusa diz o que cobre |
+| Página longa: os 600 primeiros nós eram menu e rodapé (P02) | o snapshot do piloto traz só a janela e arredores (meia tela acima, uma abaixo); medido na Wikipédia: 133 links do texto da janela, 169 do topo longe saíram, ~60 ms |
+| Botão de compra não pedido parava o piloto (L17) | nem é oferecido ao Jev; `/checkout/cart` não conta como compra |
+| Sem `--fill`, objetivo em prosa não digita (sonda) | o relatório avisa quando há campos vazios e nenhum `--fill` |
+| Sem medida de onde vai o tempo | `TEMPOS: {jev, snapshot, acao, espera, foto, consultas, fotos, total}` no relatório do `act` |
+| Ajuda do CLI/MCP/aviso do portal | incentiva UM `act` com o trajeto inteiro (`--steps` até 15) |
+
+**Bug visual (71% da largura em 1920×1080):** não reproduz na `dev` atual. O commit 28122e8b (preenche a janela) já o corrigia; medido ao vivo em nós de 1004×756 e 670×423, zoom da página de 25% a 300% e zoom do canvas 0,98: o iframe é igual à coluna. O print do usuário provavelmente vem de um app instalado anterior a esse commit.
+
+### Resultado (Jev real, mesmas tarefas, sem login nem compra reais)
+
+| | ANTES | DEPOIS 2 |
+|---|---|---|
+| critério vale na página (sem ajuda à mão) | 15/21 (71%) | 19/21 (90%) |
+| o piloto confirmou (`done`) | 12/21 | 17/21 |
+| falso «concluído» | 0 | 1 (P02) |
+| falso «sem certeza» | 3 | 2 (L12, L16) |
+| violações (compra/finalização) | 0 | 0 |
+| mediana por passo | 1.368 ms | 661 ms |
+| tarefa de 5 passos (P04) | 11,7 s | 3,7 s |
+
+Metas: ≥ 90% sem passos à mão (atingida nas 21 medidas; Amazon fora, ver abaixo), mediana por passo < 1,5 s (atingida), 8–10 ações < 20 s fora o agente (projeção ≈ 7 s a 0,7 s por passo; nenhuma tarefa real de 10 ações foi medida).
+
+### Falhas que restam
+
+- **L11 (formulário em três etapas):** o Jev ainda escolhe digitar em «Nome» já preenchido e depois p=0,35–0,36 em «Próximo». A correção `obviousAdvance` (c6fc66ed) veio depois dessa medição: **não medida ao vivo**.
+- **P02 (Wikipédia):** dois links «Portugal» com destinos diferentes; o Jev escolhe o errado com p=0,98 e conclui (fim p=0,72). Pode ser objetivo ambíguo; falso «concluído» real. Sem correção.
+- **L12 e L16:** o critério vale, mas o Jev não confirma (L12: o objetivo é «clicar», e a página só mostra o efeito; L16: tarefa negativa). Aceitável: o piloto não afirma o que não sabe.
+- **Amazon (P05/P06):** a página não termina de carregar em 20 s pelo proxy do app. Não é do piloto.
+
+### Pendências que dependem do usuário
+
+1. **Instância de debug fechando sozinha:** ~20:35, 21:02, 21:28, 21:39, 21:49 e 21:57 (fechamento normal, guardando as abas). Não achei a causa; hipóteses: alguém fecha a janela extra «ADE AGS», ou os testes locais (`ags test affected`). Se for você, deixe a janela aberta nas rodadas.
+2. **A instância de debug compartilha `data.db`, abas e canvas com o app instalado** e monta terminais reais das abas do usuário. Convém separar o perfil/banco antes de novas rodadas.
+3. **Amazon pelo proxy:** decidir se vale investigar (User-Agent, bloqueio anti-bot, carregamento) ou tirar da lista.
+4. **Painéis flutuantes** («Uso dos agentes», dock) agora não impedem a foto, mas o reveal centra o nó no canvas inteiro e não desvia deles.
+5. **PR da missão:** não aberto (só com o seu pedido). Branch `cc/mission-729fb4ea-6280-4c07-a5bf-c2ff7d37`, base `dev`.
+6. **Estado alterado no seu canvas:** o nó de navegador em branco do workspace Antigravity teve URL e tamanho mexidos nas medições; a URL foi limpa, o tamanho voltou a 1002×895 (era ~1004×896).
+7. **Cota do Jev:** ~340 consultas até a rodada ANTES; o painel Typesafe AI mostra com atraso (o log local `decision_shadow_log` é a fonte).
