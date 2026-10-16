@@ -28,7 +28,7 @@ describe("leitura do snapshot", () => {
     expect(page.elements[4].states).toEqual(["disabled"]);
     expect(page.elements[1].states).toEqual([]); // o `[x]` era de dentro do valor
     expect(page.elements[2].states).toEqual(["checked"]);
-    expect(page.text).toEqual(["Entre na sua conta"]);
+    expect(page.text).toEqual(["Bem-vindo", "Entre na sua conta"]); // os títulos também são texto
   });
 
   it("sabe se um campo tem valor, sem nunca ler o valor", () => {
@@ -664,5 +664,64 @@ describe("campos vazios sem --fill", () => {
   it("não conta a busca como campo esquecido", () => {
     const page = parseSnapshot(['page: "L" http://localhost/', '- searchbox "Pesquisar" [ref=e1] value=""'].join("\n"));
     expect(emptyFieldsNote(page, 0)).toBe("");
+  });
+});
+
+describe("controles repetidos e rolagem", () => {
+  const LISTA = [
+    'page: "Cozinha" http://localhost/c',
+    "viewport: 1280×800 · scroll 0/2400",
+    '- heading "Chaleira" [level=3]',
+    '- text "R$ 129,90"',
+    '- button "Adicionar" [ref=e1]',
+    '- heading "Cafeteira" [level=3]',
+    '- text "R$ 219,90"',
+    '- button "Adicionar" [ref=e2]',
+    '- button "Ajuda" [ref=e3]',
+  ].join("\n");
+
+  it("botões com o mesmo nome mostram o que vem antes deles (o produto e o preço)", () => {
+    const step = buildStep(parseSnapshot(LISTA), "adicionar a Cafeteira", [], []);
+    const labels = step.targets.click.map((o) => o.label);
+    expect(labels[0]).toContain("next to: Chaleira | R$ 129,90");
+    expect(labels[1]).toContain("next to: Cafeteira | R$ 219,90");
+    // quem não se repete não ganha o ruído
+    expect(labels[2]).toBe('button "Ajuda"');
+    expect(isAmbiguous(step, "click", "e2")).toBe(false);
+  });
+
+  it("os títulos contam como texto da página", () => {
+    expect(parseSnapshot(LISTA).text).toEqual(["Chaleira", "R$ 129,90", "Cafeteira", "R$ 219,90"]);
+  });
+
+  it("rolar muda a página mesmo sem elemento novo (senão duas rolagens seguidas parecem um círculo)", () => {
+    const top = parseSnapshot(LISTA);
+    const down = parseSnapshot(LISTA.replace("scroll 0/2400", "scroll 600/2400"));
+    expect(fingerprint(top)).not.toBe(fingerprint(down));
+    expect(top.scrollY).toBe(0);
+    expect(down.scrollY).toBe(600);
+  });
+});
+
+describe("controle coberto por uma faixa ou modal", () => {
+  it("não desiste: o Jev vê a falha no histórico e escolhe o que está na frente", async () => {
+    const h = harness([ok("click", "e4"), ok("click", "e5"), ok("done")], pagesOf(10).map((p) => p.replace('value="[x]"', 'value=""')));
+    h.deps.click = async (ref) => {
+      h.calls.push(`click ${ref}`);
+      if (ref === "e4") throw new Error('button "Entrar" está coberto por div "Aceitar cookies" (div#banner). Feche o que está na frente.');
+    };
+    const result = await runPilot("entrar", [], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(h.calls).toEqual(["click e4", "click e5"]);
+    // o Jev, na consulta seguinte, lê que o toque falhou e por quê
+    expect(h.asked[1].state).toContain("está coberto por div");
+    expect(h.asked[1].state).toContain("the page did not change");
+  });
+
+  it("se o Jev insiste no mesmo controle coberto, para em vez de girar em círculos", async () => {
+    const h = harness([ok("click", "e4")], pagesOf(10).map((p) => p.replace('value="[x]"', 'value=""')));
+    h.deps.click = async () => { throw new Error("botão está coberto por div (div#modal)."); };
+    const result = await runPilot("entrar", [], undefined, h.deps);
+    expect(result.outcome).toBe("stuck");
   });
 });
