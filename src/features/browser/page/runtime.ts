@@ -1847,9 +1847,14 @@ declare global {
   // del proxy antes de que el navegador los siga (en captura: un router de SPA que lea el
   // `href` después ve uno del propio origen y lo maneja él). A otro sitio, la app lo abre
   // con su propio proxy, en vez de que el iframe se vaya directo y pierda el runtime.
+  // Mientras maneja un agente, una página nueva ("_blank", un nombre de ventana, "_top") se abre en ESTE navegador: el
+  // agente tiene un portal, no una ventana más que seguir, y "_top"/"_parent" llevarían la app entera a otro sitio (E4).
+  const staysHere = (target: string | null | undefined): boolean => !target || target === "_self";
+
   document.addEventListener("click", (event) => {
     const link = (event.target as Element | null)?.closest?.("a[href]") as HTMLAnchorElement | null;
     if (!link) return;
+    if (driving && !staysHere(link.getAttribute("target")) && !link.hasAttribute("download")) link.setAttribute("target", "_self");
     const routed = route(link.href);
     if (routed && !routed.forwarded) link.href = routed.url;
   }, true);
@@ -1865,9 +1870,42 @@ declare global {
   document.addEventListener("submit", (event) => {
     const form = event.target as HTMLFormElement | null;
     if (!(form instanceof HTMLFormElement)) return;
+    if (driving) {
+      if (!staysHere(form.getAttribute("target"))) form.setAttribute("target", "_self");
+      const submitter = (event as SubmitEvent).submitter;
+      if (submitter && !staysHere(submitter.getAttribute("formtarget"))) submitter.setAttribute("formtarget", "_self");
+    }
     const routed = route(form.action);
     if (routed && !routed.forwarded) form.action = routed.url;
   }, true);
+
+  // `window.open(url)` desde la acción de un agente: la misma página, no una ventana nueva. Un sitio de otro origen lo abre la app
+  // con su propio proxy (igual que un link); lo que no es http(s) (`mailto:`, `javascript:`) o no tiene URL, queda como estaba.
+  const nativeOpen = window.open.bind(window);
+  function openHere(raw: string): void {
+    const routed = route(raw);
+    if (routed?.forwarded) post({ type: "nav:open", payload: { url: routed.original } });
+    else location.assign(routed ? routed.url : new URL(raw, location.href).href);
+  }
+  window.open = function (url?: string | URL, target?: string, features?: string): Window | null {
+    const raw = url === undefined || url === null ? "" : String(url);
+    let here = false;
+    try { here = driving && /^https?:$/.test(new URL(raw, location.href).protocol) && raw.trim() !== "" && !raw.startsWith("about:"); } catch { /* una URL rara: queda como estaba */ }
+    if (!here) return nativeOpen(url as string, target, features);
+    openHere(raw);
+    // Quien abre una ventana suele guardarla (`popup.focus()`, `popup.closed`, `popup.location = …`): un doble mínimo, para no romperlo.
+    const stub = {
+      closed: false, name: target ?? "", opener: window,
+      focus: () => undefined, blur: () => undefined, close: () => undefined, postMessage: () => undefined,
+      location: {
+        get href() { return location.href; },
+        set href(next: string) { openHere(String(next)); },
+        assign: (next: string) => openHere(String(next)),
+        replace: (next: string) => openHere(String(next)),
+      },
+    };
+    return stub as unknown as Window;
+  };
 
   post({ type: "page:ready", payload: { doc, url: location.href } }, true);
 })();
