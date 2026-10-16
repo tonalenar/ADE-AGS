@@ -795,12 +795,7 @@ describe("o contexto traz o nome do produto, mesmo quando ele é um link antes d
   });
 });
 
-describe("campo já preenchido e valor que falta", () => {
-  const FORM = [
-    'page: "Etapa 1" http://localhost/e1', "viewport: 1280×800 · scroll 0/800",
-    '- textbox "Nome" [ref=e1] value="[x]"', '- textbox "CEP" [ref=e2] value=""', '- button "Próximo" [ref=e3]',
-  ].join("\n");
-
+describe("valor que falta", () => {
   it("'não há valor' não encerra o act: o Jev lê a falha e escolhe o botão", async () => {
     const h = harness([ok("type", "e1"), ok("click", "e3"), ok("done")], pagesOf(10).map((p) => p.replace('value="[x]"', 'value=""')));
     const result = await runPilot("entrar", ["Outro=1", "Mais=2"], undefined, h.deps);
