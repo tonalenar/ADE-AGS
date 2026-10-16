@@ -470,6 +470,6 @@ L12 passou de 2 consultas e `PAROU` para **1 consulta e `FEITO (verificado)`** n
 | `act` p50 · p95 | 3012 · 3912 ms | 2364 · 4531 ms |
 | latência por consulta p50 · p95 | 310 · 350 ms | 319 · 402 ms |
 
-Cota do Jev usada nesta sessão: ~400 consultas (locais ~175, públicas ~50 + ~53 do «antes», fotos incluídas), dentro do limite de 1.000.
+Cota do Jev usada nesta sessão: ~225 consultas ao Jev (175 nas duas rodadas «depois», ~50 no «antes» das públicas) mais as fotos (8 no «depois», 7 no «antes» das públicas), dentro do limite de 1.000.
 
 **Pendências finais:** espera adaptativa do reveal (precisa de novo instalador), 4.4 (aguarda o provedor), Amazon continua como sonda fora dos portões. Meta «≥ 90% público»: **atingida na amostra de 16 rodadas (100%)**, mas as duas amostras são pequenas e o P04 depende de um estado que sobra no portal.
