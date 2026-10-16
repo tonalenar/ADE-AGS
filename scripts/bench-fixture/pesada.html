@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — pesada</title>
+<!-- Fase 1 (aceite da janela): uma página que castiga o renderizador como a Amazon, sem depender dela. ~6000 nós com texto,
+     um laço que ocupa a thread principal 800 ms a cada segundo e um relayout contínuo. A busca no topo funciona como a de busca-botao.html. -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <form method="get">
+    <input type="search" name="q" placeholder="Buscar produtos" aria-label="Buscar produtos" size="40">
+    <button type="submit">Buscar</button>
+  </form>
+  <div id="status"></div>
+  <section id="grade"></section>
+</main>
+<script>
+  const q = new URLSearchParams(location.search).get('q');
+  if (q) document.getElementById('status').textContent = 'Resultados para: ' + q;
+  const grade = document.getElementById('grade');
+  const html = [];
+  for (let i = 0; i < 2000; i++) {
+    html.push(`<article class="c${i % 40}"><a href="#p${i}">Produto ${i}</a><span>${'texto de descrição '.repeat(12)}</span><em>R$ ${(i % 97) + 9},90</em></article>`);
+  }
+  grade.innerHTML = html.join('');
+  // Ocupa a thread principal: 800 ms de trabalho a cada 1000 ms.
+  setInterval(() => { const t = performance.now(); while (performance.now() - t < 800); }, 1000);
+  // Relayout contínuo.
+  setInterval(() => { grade.style.width = (900 + Math.random() * 40) + 'px'; void grade.offsetHeight; }, 50);
+</script>
+</html>

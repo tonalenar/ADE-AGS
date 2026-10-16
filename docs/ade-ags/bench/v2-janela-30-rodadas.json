@@ -1,0 +1,662 @@
+﻿{
+    "exe":  "C:\\Users\\tonz1n\\AppData\\Local\\Temp\\claude\\C--Users-tonz1n--ags-worktrees-b016944e\\2f623b53-7fa2-4e6b-8087-d1e232517697\\scratchpad\\ade-ags-aceite.exe",
+    "rounds":  15,
+    "jevQueries":  6,
+    "acts":  6,
+    "results":  [
+                    {
+                        "mode":  "minimizada",
+                        "round":  1,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  517,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=84 wait=924 snapshot=36 type=785 click=575 wait2=470 screenshot=100",
+                        "lagPeakMs":  78,
+                        "lastLagMs":  6,
+                        "hidden":  false,
+                        "silentMs":  912,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  2,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  531,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=93 wait=491 snapshot=53 type=791 click=541 wait2=451 screenshot=90 act=1023",
+                        "lagPeakMs":  11,
+                        "lastLagMs":  11,
+                        "hidden":  false,
+                        "silentMs":  601,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  11,
+                                    "head":  "{\"portal\":{\"id\":\"portal-a3b71b31-4975-4a39-8791-4f065962b1d8\",\"name\":\"aceite4-minimizada-2\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"act"
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  3,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  534,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=42 wait=477 snapshot=27 type=787 click=539 wait2=458 screenshot=75",
+                        "lagPeakMs":  7,
+                        "lastLagMs":  7,
+                        "hidden":  false,
+                        "silentMs":  41,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  4,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  537,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=40 wait=457 snapshot=20 type=760 click=541 wait2=451 screenshot=78 act=770",
+                        "lagPeakMs":  8,
+                        "lastLagMs":  6,
+                        "hidden":  false,
+                        "silentMs":  166,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  2,
+                                    "head":  "{\"portal\":{\"id\":\"portal-574afed0-5913-44e7-8db4-086120d7b03d\",\"name\":\"aceite4-minimizada-4\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"act"
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  5,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  549,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=38 wait=480 snapshot=36 type=777 click=534 wait2=453 screenshot=77",
+                        "lagPeakMs":  7,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  580,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  6,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  551,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=35 wait=481 snapshot=22 type=776 click=541 wait2=451 screenshot=79 act=786",
+                        "lagPeakMs":  9,
+                        "lastLagMs":  6,
+                        "hidden":  false,
+                        "silentMs":  781,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  5,
+                                    "head":  "{\"portal\":{\"id\":\"portal-b9682ba9-a04a-468c-aeba-f81032d6c66b\",\"name\":\"aceite4-minimizada-6\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"act"
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  7,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  555,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=35 wait=465 snapshot=22 type=770 click=544 wait2=456 screenshot=80",
+                        "lagPeakMs":  8,
+                        "lastLagMs":  8,
+                        "hidden":  false,
+                        "silentMs":  159,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  8,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  557,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=42 wait=480 snapshot=23 type=772 click=546 wait2=457 screenshot=74 act=780",
+                        "lagPeakMs":  10,
+                        "lastLagMs":  10,
+                        "hidden":  false,
+                        "silentMs":  355,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  3,
+                                    "head":  "{\"portal\":{\"id\":\"portal-2477e0cf-32c3-4af9-89bb-8546bdd5e7a5\",\"name\":\"aceite4-minimizada-8\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"act"
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  9,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  559,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=34 wait=468 snapshot=21 type=772 click=537 wait2=451 screenshot=77",
+                        "lagPeakMs":  8,
+                        "lastLagMs":  8,
+                        "hidden":  false,
+                        "silentMs":  755,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  10,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  563,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=33 wait=467 snapshot=20 type=773 click=534 wait2=458 screenshot=79 act=770",
+                        "lagPeakMs":  11,
+                        "lastLagMs":  7,
+                        "hidden":  false,
+                        "silentMs":  930,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  8,
+                                    "head":  "{\"portal\":{\"id\":\"portal-ae6e1578-363e-4103-8fe5-7c6d24d8060b\",\"name\":\"aceite4-minimizada-10\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"ac"
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  11,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  565,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=34 wait=482 snapshot=23 type=780 click=539 wait2=473 screenshot=85",
+                        "lagPeakMs":  9,
+                        "lastLagMs":  9,
+                        "hidden":  false,
+                        "silentMs":  376,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  12,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  552,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=37 wait=479 snapshot=21 type=777 click=555 wait2=450 screenshot=78 act=774",
+                        "lagPeakMs":  9,
+                        "lastLagMs":  9,
+                        "hidden":  false,
+                        "silentMs":  578,
+                        "bridgeTimeouts":  0,
+                        "act":  {
+                                    "queries":  1,
+                                    "lagMaxMs":  3,
+                                    "head":  "{\"portal\":{\"id\":\"portal-80aac675-51b1-42b7-9b3c-8277b984b62a\",\"name\":\"aceite4-minimizada-12\",\"url\":\"http://127.0.0.1:8765/busca-botao.html?q=caneca\"},\"text\":\"ac"
+                                }
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  13,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  541,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=37 wait=482 snapshot=30 type=785 click=536 wait2=457 screenshot=79",
+                        "lagPeakMs":  10,
+                        "lastLagMs":  9,
+                        "hidden":  false,
+                        "silentMs":  999,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  14,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  542,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=41 wait=477 snapshot=21 type=785 click=538 wait2=467 screenshot=75",
+                        "lagPeakMs":  11,
+                        "lastLagMs":  11,
+                        "hidden":  false,
+                        "silentMs":  426,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "minimizada",
+                        "round":  15,
+                        "iconic":  true,
+                        "page":  "busca-botao.html",
+                        "appAlive":  true,
+                        "webviewMb":  542,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  false,
+                        "failures":  [
+                                         "screenshot: {\"error\":\"a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).\"}"
+                                     ],
+                        "stepMs":  "create=34 wait=463 snapshot=21 type=767 click=547 wait2=453 screenshot=76",
+                        "lagPeakMs":  8,
+                        "lastLagMs":  8,
+                        "hidden":  false,
+                        "silentMs":  789,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  1,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  725,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=43 wait=581 snapshot=150 type=2302 click=2028 wait2=450 screenshot=193",
+                        "lagPeakMs":  57,
+                        "lastLagMs":  11,
+                        "hidden":  false,
+                        "silentMs":  308,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  2,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  754,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=44 wait=809 snapshot=101 type=2287 click=1049 wait2=442 screenshot=120",
+                        "lagPeakMs":  20,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  917,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  3,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  753,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=39 wait=563 snapshot=96 type=1359 click=2031 wait2=454 screenshot=133",
+                        "lagPeakMs":  8,
+                        "lastLagMs":  6,
+                        "hidden":  false,
+                        "silentMs":  373,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  4,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  753,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=46 wait=594 snapshot=133 type=2283 click=1059 wait2=480 screenshot=143",
+                        "lagPeakMs":  8,
+                        "lastLagMs":  3,
+                        "hidden":  false,
+                        "silentMs":  890,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  5,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  762,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=40 wait=773 snapshot=133 type=2309 click=1056 wait2=455 screenshot=127",
+                        "lagPeakMs":  5,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  529,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  6,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  762,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=45 wait=580 snapshot=163 type=2280 click=1040 wait2=467 screenshot=134",
+                        "lagPeakMs":  13,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  5,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  7,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  757,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=41 wait=584 snapshot=108 type=2322 click=1044 wait2=445 screenshot=125",
+                        "lagPeakMs":  7,
+                        "lastLagMs":  5,
+                        "hidden":  false,
+                        "silentMs":  413,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  8,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  764,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=38 wait=585 snapshot=115 type=2316 click=1043 wait2=441 screenshot=130",
+                        "lagPeakMs":  7,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  844,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  9,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  763,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=35 wait=576 snapshot=121 type=2315 click=1045 wait2=450 screenshot=133",
+                        "lagPeakMs":  4,
+                        "lastLagMs":  3,
+                        "hidden":  false,
+                        "silentMs":  283,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  10,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  769,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=43 wait=568 snapshot=121 type=2322 click=1057 wait2=460 screenshot=131",
+                        "lagPeakMs":  6,
+                        "lastLagMs":  5,
+                        "hidden":  false,
+                        "silentMs":  759,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  11,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  781,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=40 wait=468 snapshot=108 type=1432 click=1045 wait2=460 screenshot=129",
+                        "lagPeakMs":  7,
+                        "lastLagMs":  6,
+                        "hidden":  false,
+                        "silentMs":  189,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  12,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  786,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=39 wait=587 snapshot=133 type=2294 click=1054 wait2=449 screenshot=131",
+                        "lagPeakMs":  8,
+                        "lastLagMs":  5,
+                        "hidden":  false,
+                        "silentMs":  612,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  13,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  778,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=36 wait=568 snapshot=117 type=1335 click=2057 wait2=450 screenshot=137",
+                        "lagPeakMs":  8,
+                        "lastLagMs":  4,
+                        "hidden":  false,
+                        "silentMs":  78,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  14,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  786,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=45 wait=566 snapshot=108 type=1342 click=2059 wait2=465 screenshot=125",
+                        "lagPeakMs":  10,
+                        "lastLagMs":  5,
+                        "hidden":  false,
+                        "silentMs":  555,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    },
+                    {
+                        "mode":  "pesada",
+                        "round":  15,
+                        "iconic":  false,
+                        "page":  "pesada.html",
+                        "appAlive":  true,
+                        "webviewMb":  787,
+                        "appMb":  37,
+                        "timeout":  false,
+                        "screenshotOk":  true,
+                        "failures":  [
+
+                                     ],
+                        "stepMs":  "create=37 wait=808 snapshot=128 type=1337 click=2042 wait2=441 screenshot=122",
+                        "lagPeakMs":  5,
+                        "lastLagMs":  5,
+                        "hidden":  false,
+                        "silentMs":  225,
+                        "bridgeTimeouts":  0,
+                        "act":  null
+                    }
+                ]
+}

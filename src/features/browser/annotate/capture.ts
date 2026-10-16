@@ -62,7 +62,12 @@ export async function freezePage(page: HTMLElement, column: HTMLElement): Promis
   const viewport = { width: window.innerWidth, height: window.innerHeight };
   const image = await decode(await previewCapture());
   const crop = cropFor(pageBox, columnBox, viewport, { width: image.width, height: image.height });
-  if (!crop) throw new Error("a página não está à vista");
+  if (!crop) {
+    throw new Error(
+      "a página não está à vista: a janela do ADE AGS está minimizada ou escondida, ou o portal está fora da tela/coberto por outro painel. "
+      + "Peça ao usuário para trazer a janela à frente e deixar o portal visível, ou leia a página com `snapshot` (que não precisa de tela).",
+    );
+  }
 
   const canvas = document.createElement("canvas");
   canvas.width = crop.source.width;

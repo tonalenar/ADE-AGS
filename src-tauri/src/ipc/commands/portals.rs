@@ -271,7 +271,7 @@ pub(crate) fn request_for(action: &str, args: &Value) -> Result<Value, String> {
 pub(super) fn portal_list(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let portals = reachable(&canvas::load_boards(), &from);
-    Ok(json!({ "portals": with_states(app, &portals) }))
+    Ok(json!({ "portals": with_states(app, &portals), "window": crate::ipc::bridge::window_report() }))
 }
 
 /// `ags portal close <portal>`: el agente limpia lo que creó. Mismo permiso que el resto: un portal conectado con él.
