@@ -1,0 +1,29 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — fones</title>
+<!-- N02: grade de fones com um anúncio na frente; o objetivo pede o primeiro que não é patrocinado. -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Fones de ouvido</h1>
+  <div id="status">Carrinho: vazio</div>
+  <div data-component-type="sp-sponsored-result" aria-label="Patrocinado">
+    <small>Patrocinado</small>
+    <h2>Fone Gamer RGB</h2><p>R$ 99,90</p>
+    <button aria-label="Adicionar Fone Gamer RGB ao carrinho" onclick="add('Fone Gamer RGB')">Adicionar ao carrinho</button>
+  </div>
+  <div>
+    <h2>Fone Bluetooth Lite</h2><p>R$ 99,90</p>
+    <button aria-label="Adicionar Fone Bluetooth Lite ao carrinho" onclick="add('Fone Bluetooth Lite')">Adicionar ao carrinho</button>
+  </div>
+  <div>
+    <h2>Fone com Fio Clássico</h2><p>R$ 99,90</p>
+    <button aria-label="Adicionar Fone com Fio Clássico ao carrinho" onclick="add('Fone com Fio Clássico')">Adicionar ao carrinho</button>
+  </div>
+</main>
+<script>
+  let cart = "";
+  function add(name) { if (cart) return; cart = name; document.getElementById("status").textContent = "Carrinho: 1 item · " + name; }
+</script>
+</html>

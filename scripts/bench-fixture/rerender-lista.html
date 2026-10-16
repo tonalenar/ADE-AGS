@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — mais vendidos</title>
+<!--
+  N07: «Mais vendidos agora» se reordena sozinho (a cada 1,2 s, alternando duas ordens) REAPROVEITANDO os mesmos nós —
+  o título e o botão de cada cartão ganham outro produto, como o React com chave por índice. Um ref guardado antes do
+  re-render aponta, depois, para outro produto.
+-->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Mais vendidos agora</h1>
+  <div id="status">Carrinho vazio</div>
+  <div class="card"><h2>Teclado Mecânico</h2><button aria-label="Adicionar Teclado Mecânico ao carrinho">Adicionar</button></div>
+  <div class="card"><h2>Fone Bluetooth</h2><button aria-label="Adicionar Fone Bluetooth ao carrinho">Adicionar</button></div>
+  <div class="card"><h2>Mouse Sem Fio</h2><button aria-label="Adicionar Mouse Sem Fio ao carrinho">Adicionar</button></div>
+  <div class="card"><h2>Webcam HD</h2><button aria-label="Adicionar Webcam HD ao carrinho">Adicionar</button></div>
+</main>
+<script>
+  const orders = [
+    ["Teclado Mecânico", "Fone Bluetooth", "Mouse Sem Fio", "Webcam HD"],
+    ["Mouse Sem Fio", "Webcam HD", "Fone Bluetooth", "Teclado Mecânico"],
+  ];
+  const cards = [...document.querySelectorAll(".card")];
+  let turn = 0;
+  // Os nós ficam; só o conteúdo muda (o clique lê o produto do cartão NA HORA do clique).
+  cards.forEach((card) => card.querySelector("button").addEventListener("click", () => {
+    document.getElementById("status").textContent = "No carrinho: " + card.querySelector("h2").textContent;
+  }));
+  setInterval(() => {
+    turn = 1 - turn;
+    orders[turn].forEach((name, i) => {
+      cards[i].querySelector("h2").textContent = name;
+      cards[i].querySelector("button").setAttribute("aria-label", "Adicionar " + name + " ao carrinho");
+    });
+  }, 1200);
+</script>
+</html>

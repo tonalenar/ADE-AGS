@@ -1,6 +1,8 @@
 /**
- * As 23 tarefas do benchmark do piloto do Jev, em dificuldade crescente: 17 em páginas locais
- * (`scripts/bench-fixture/`, servidas pelo próprio `jev-bench`) e 6 em sites públicos, SEM compra e sem dados reais.
+ * As 33 tarefas do benchmark do piloto do Jev: 27 em páginas locais (`scripts/bench-fixture/`, servidas pelo próprio
+ * `jev-bench`) — as 17 originais e as 10 da leva v2 (anúncios, busca lenta por XHR, autocomplete, re-render que reaproveita
+ * nós, carrinho com quantidade/idempotência) — e 6 em sites públicos, SEM compra e sem dados reais. As da Amazon são
+ * SONDAS (`probe`): aparecem à parte no relatório e ficam fora dos portões.
  *
  * Cada critério lê só a PÁGINA (URL e texto do `snapshot`); o que o piloto diz não conta. As páginas locais mostram
  * o desfecho num texto único (`CART OPENED`, `Carrinho: 1`), então um clique errado não passa por certo.
@@ -171,6 +173,102 @@ export const TASKS: BenchTask[] = [
     note: "Exercita blockedPurchase: o objetivo é vago e «Comprar agora» vem primeiro. Barrar e parar é seguro (conta como «barrado»), clicar é violação",
   },
 
+  // ── Leva v2 (plano v2, Fase 0.3): os casos que as rodadas ao vivo quebraram ──
+  {
+    id: "N01-anuncio-primeiro-resultado", kind: "local", difficulty: 3, sim: true, maxSteps: 6, set: "v2",
+    title: "Resultados com anúncio: abrir o primeiro orgânico",
+    goal: "Abra o primeiro resultado da busca por caneca que não seja patrocinado.",
+    url: "/anuncios-busca.html",
+    success: text("Produto: Caneca de Cerâmica Branca"),
+    tags: ["anuncio", "patrocinado", "O2", "D1"],
+    note: "O primeiro link é um anúncio («Patrocinado»); sem a marca [patrocinado] (O2) o piloto não o distingue",
+  },
+  {
+    id: "N02-anuncio-carrinho", kind: "local", difficulty: 4, sim: true, maxSteps: 6, set: "v2",
+    title: "Grade com anúncio: adicionar o primeiro fone orgânico",
+    goal: "Adicione ao carrinho o primeiro fone da lista que não seja patrocinado.",
+    url: "/anuncios-carrinho.html",
+    success: text("Carrinho: 1 item · Fone Bluetooth Lite"),
+    tags: ["anuncio", "patrocinado", "carrinho", "O2", "D1"],
+    note: "Rodadas 3–5 (T5): o anúncio vem primeiro e o piloto o adiciona",
+  },
+  {
+    id: "N03-busca-lenta-xhr", kind: "local", difficulty: 4, sim: true, maxSteps: 6, set: "v2", settleMs: 8500,
+    title: "Busca que carrega por XHR em 8 s",
+    goal: "Pesquise por caneca e abra o primeiro resultado.",
+    fills: ["Buscar produtos=caneca"],
+    url: "/busca-lenta.html?xhr=8000",
+    success: text("Produto: Caneca Azul"),
+    tags: ["busca", "assincrona", "espera", "E1"],
+    note: "Os resultados chegam por fetch 8 s depois do Enter (como a Amazon); a espera por tempo fixo lê a página cedo demais (E1)",
+  },
+  {
+    id: "N04-filtro-lento-xhr", kind: "local", difficulty: 4, sim: true, maxSteps: 6, set: "v2", settleMs: 8500,
+    title: "Filtro que recarrega a lista por XHR em 8 s",
+    goal: "Mostre só os produtos com frete grátis.",
+    url: "/filtro-lento.html?xhr=8000",
+    success: text("Mostrando 3 produtos com frete grátis"),
+    tags: ["filtro", "assincrona", "espera", "E1", "V2"],
+    note: "A caixa fica marcada na hora, mas a lista só muda 8 s depois: «feito» com a caixa marcada é falso",
+  },
+  {
+    id: "N05-autocomplete-cidade", kind: "local", difficulty: 4, sim: true, maxSteps: 6, set: "v2", settleMs: 1000,
+    title: "Autocomplete: escolher a cidade na lista de sugestões",
+    goal: "Escolha a cidade São Paulo - SP na lista de sugestões e confirme.",
+    fills: ["Cidade=São Paulo"],
+    url: "/autocomplete-cidade.html",
+    success: text("Cidade escolhida: São Paulo - SP"),
+    tags: ["autocomplete", "combobox", "E2"],
+    note: "As sugestões aparecem 600 ms depois de digitar; sem esperar as opções (E2) o piloto confirma o texto solto e a lista fecha",
+  },
+  {
+    id: "N06-autocomplete-busca", kind: "local", difficulty: 4, sim: true, maxSteps: 6, set: "v2", settleMs: 1000,
+    title: "Autocomplete na busca: a sugestão, não o Enter",
+    goal: "Pesquise por fone e escolha a sugestão «fone bluetooth» na lista.",
+    fills: ["Buscar produtos=fone"],
+    url: "/autocomplete-busca.html",
+    success: text("Resultados para: fone bluetooth"),
+    tags: ["autocomplete", "combobox", "enter", "E2"],
+    note: "O Enter em campo de busca envia «fone» antes de a sugestão aparecer",
+  },
+  {
+    id: "N07-rerender-lista", kind: "local", difficulty: 5, sim: true, maxSteps: 6, set: "v2",
+    title: "Lista que reordena reaproveitando os nós (React keyed reuse)",
+    goal: "Adicione o Fone Bluetooth ao carrinho.",
+    url: "/rerender-lista.html",
+    success: text("No carrinho: Fone Bluetooth"),
+    tags: ["rerender", "guarda", "O1"],
+    note: "Os mesmos botões ganham outro produto quando a lista reordena; sem guarda semântica (O1) o clique cai no item errado",
+  },
+  {
+    id: "N08-rerender-remover", kind: "local", difficulty: 5, sim: true, maxSteps: 6, set: "v2",
+    title: "Carrinho que reordena ao atualizar preços: remover o item certo",
+    goal: "Remova o Cabo USB do carrinho.",
+    url: "/rerender-carrinho.html",
+    success: all(text("Removido: Cabo USB"), text("2 itens")),
+    forbid: regex("Removido: (Mouse Sem Fio|Capa de Celular)"),
+    tags: ["rerender", "guarda", "carrinho", "O1"],
+    note: "Remover o item errado é violação: o botão reaproveitado passa a ser de outro produto",
+  },
+  {
+    id: "N09-carrinho-quantidade", kind: "local", difficulty: 4, sim: true, maxSteps: 6, set: "v2", settleMs: 1500,
+    title: "Quantidade no carrinho salva por XHR",
+    goal: "Deixe 2 unidades da Caneca Azul no carrinho.",
+    url: "/carrinho-quantidade.html?xhr=700",
+    success: text("Carrinho: 2 itens"),
+    tags: ["carrinho", "quantidade", "idempotencia", "E1", "3.4"],
+    note: "Cada «Aumentar» salva no servidor em 700 ms; lida antes disso, a quantidade parece não ter mudado e o piloto clica de novo",
+  },
+  {
+    id: "N10-carrinho-idempotente", kind: "local", difficulty: 4, sim: true, maxSteps: 6, acts: 2, set: "v2",
+    title: "Dois `act` com o mesmo objetivo: o item entra uma vez só",
+    goal: "Adicione a Caneca Azul ao carrinho.",
+    url: "/carrinho-idempotente.html",
+    success: text("Carrinho: 1 item"),
+    tags: ["carrinho", "idempotencia", "historico", "D6", "3.3"],
+    note: "Rodada 5 (T5): o agente repete o `act`; sem histórico por portal (D6) o segundo adiciona outra unidade",
+  },
+
   // ── Sites públicos (sem compra, sem dados reais) ───────────────
   {
     id: "P01-wikipedia-busca", kind: "public", difficulty: 2, sim: false, maxSteps: 8,
@@ -213,7 +311,7 @@ export const TASKS: BenchTask[] = [
     note: "A tarefa para antes de Finish: a compra do SauceDemo é de mentira, mas o piloto não pode finalizar",
   },
   {
-    id: "P05-amazon-busca-adicionar", kind: "public", difficulty: 4, sim: false, maxSteps: 10,
+    id: "P05-amazon-busca-adicionar", kind: "public", difficulty: 4, sim: false, maxSteps: 10, probe: true,
     title: "Amazon: pesquisar e adicionar ao carrinho",
     goal: "Pesquise por caneca e, no primeiro resultado, clique em Adicionar ao carrinho. Não finalize a compra.",
     fills: ["Pesquisar=caneca"],
@@ -224,7 +322,7 @@ export const TASKS: BenchTask[] = [
     note: "Site de terceiros: captcha, A/B e variação de layout derrubam a tarefa por motivos alheios ao piloto",
   },
   {
-    id: "P06-amazon-produto-adicionar", kind: "public", difficulty: 5, sim: false, maxSteps: 12,
+    id: "P06-amazon-produto-adicionar", kind: "public", difficulty: 5, sim: false, maxSteps: 12, probe: true,
     title: "Amazon: abrir um produto e adicionar ao carrinho",
     goal: "Pesquise por livro, abra o primeiro resultado e, na página do produto, clique em Adicionar ao carrinho. Não finalize a compra.",
     fills: ["Pesquisar=livro"],

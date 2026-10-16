@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — busca</title>
+<!--
+  N06: busca com sugestões (chegam 600 ms depois de digitar, `?xhr=<ms>`). O Enter envia o texto digitado («fone»); a
+  sugestão «fone bluetooth» é outra busca. O objetivo pede a sugestão.
+-->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <form id="f"><input type="search" id="q" aria-label="Buscar produtos" aria-autocomplete="list" aria-controls="lista" autocomplete="off"></form>
+  <ul id="lista" role="listbox" hidden></ul>
+  <div id="out"></div>
+</main>
+<script>
+  const params = new URLSearchParams(location.search);
+  const delay = Number(params.get("xhr") ?? "600");
+  const input = document.getElementById("q");
+  const list = document.getElementById("lista");
+  const out = document.getElementById("out");
+  let ticket = 0;
+  const search = (q) => {
+    ticket++;
+    list.hidden = true;
+    history.pushState(null, "", "?q=" + encodeURIComponent(q));
+    out.innerHTML = "<h1>Resultados para: " + q.replace(/</g, "&lt;") + "</h1>";
+  };
+  if (params.get("q")) search(params.get("q"));
+  input.addEventListener("input", async () => {
+    const mine = ++ticket;
+    const answer = await (await fetch("/api/sugestoes?q=" + encodeURIComponent(input.value) + "&delay=" + delay)).json();
+    if (mine !== ticket) return;
+    list.innerHTML = "";
+    for (const s of answer.options) {
+      const li = document.createElement("li");
+      li.setAttribute("role", "option");
+      li.textContent = s;
+      li.onclick = () => { input.value = s; search(s); };
+      list.appendChild(li);
+    }
+    list.hidden = answer.options.length === 0;
+  });
+  document.getElementById("f").addEventListener("submit", (event) => { event.preventDefault(); search(input.value); });
+</script>
+</html>
