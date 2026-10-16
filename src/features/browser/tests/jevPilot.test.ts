@@ -912,3 +912,27 @@ describe("recusa digitar sem --fill", () => {
     expect(h.asked).toHaveLength(0);
   });
 });
+
+describe("falha no meio do caminho", () => {
+  it("a leitura que falha depois de um passo não joga fora o que já foi feito", async () => {
+    const h = harness([ok("click", "e4"), ok("click", "e4")]);
+    let reads = 0;
+    const original = h.deps.snapshot;
+    h.deps.snapshot = async () => {
+      reads += 1;
+      if (reads >= 3) throw new Error("A página não respondeu em 12 s.");
+      return original();
+    };
+    const result = await runPilot("entrar", ["email=a@b.c", "senha=123"], undefined, h.deps);
+    expect(result.outcome).toBe("error");
+    expect(result.steps.join("\n")).toContain("clicou");
+    expect(result.note).toContain("não respondeu");
+    expect(result.note).toContain("snapshot");
+  });
+
+  it("falha já na primeira leitura continua sendo um erro puro", async () => {
+    const h = harness([ok("done")]);
+    h.deps.snapshot = async () => { throw new Error("sem página"); };
+    await expect(runPilot("x", [], undefined, h.deps)).rejects.toThrow("sem página");
+  });
+});

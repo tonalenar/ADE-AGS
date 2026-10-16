@@ -595,21 +595,50 @@ export function timed(deps: PilotDeps, t: Timings): PilotDeps {
   };
 }
 
+/**
+ * O piloto. Uma falha de leitura ou de ação no meio do caminho (a página nova ainda não respondeu) não joga fora o que já foi
+ * feito: o relatório sai com os passos até ali e o motivo, em vez de só a mensagem de erro.
+ */
 export async function runPilot(
   goal: string,
   rawFills: string[],
   maxSteps: number | undefined,
   rawDeps: PilotDeps,
 ): Promise<PilotResult> {
-  const startedAt = Date.now();
-  const timings: Timings = { jev: 0, snapshot: 0, acao: 0, espera: 0, foto: 0, consultas: 0, fotos: 0, total: 0 };
+  const progress: Progress = { startedAt: Date.now(), timings: { jev: 0, snapshot: 0, acao: 0, espera: 0, foto: 0, consultas: 0, fotos: 0, total: 0 }, log: [], snapshot: "" };
+  try {
+    return await pilotLoop(goal, rawFills, maxSteps, rawDeps, progress);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (progress.log.length === 0) throw e;
+    progress.log.push(`falhou: ${message}`);
+    return {
+      outcome: "error",
+      steps: progress.log,
+      note: `${message} O que o piloto já fez está nos passos acima; a página pode estar carregando: leia com \`snapshot\` e continue.`,
+      finalSnapshot: progress.snapshot,
+      timings: { ...progress.timings, total: Date.now() - progress.startedAt },
+    };
+  }
+}
+
+interface Progress { startedAt: number; timings: Timings; log: string[]; snapshot: string }
+
+async function pilotLoop(
+  goal: string,
+  rawFills: string[],
+  maxSteps: number | undefined,
+  rawDeps: PilotDeps,
+  progress: Progress,
+): Promise<PilotResult> {
+  const { startedAt, timings, log } = progress;
   const deps = timed(rawDeps, timings);
   const fills = parseFills(rawFills);
   const limit = Math.min(MAX_STEPS, Math.max(1, Math.round(maxSteps ?? DEFAULT_STEPS)));
   const history: Done[] = [];
-  const log: string[] = [];
   const taken = new Set<string>();
   let snapshot = await deps.snapshot();
+  progress.snapshot = snapshot;
   let lastSignature = "";
   let waits = 0;
   let staleRetries = 0;
@@ -675,7 +704,7 @@ export async function runPilot(
     const what = `tocou pela foto no ponto (${x}, ${y})`;
     log.push(`${step}. ${what} (${meta})`);
     await deps.settle();
-    snapshot = await deps.snapshot();
+    snapshot = progress.snapshot = await deps.snapshot();
     history.push({ what, changed: fingerprint(parseSnapshot(snapshot)) !== fp });
     photoJustTapped = true;
     return "acted";
@@ -706,7 +735,7 @@ export async function runPilot(
         log.push(`${what} (pelo nome do campo, sem o Jev)`);
       }
       await deps.settle();
-      snapshot = await deps.snapshot();
+      snapshot = progress.snapshot = await deps.snapshot();
       page = parseSnapshot(snapshot);
     }
 
@@ -806,7 +835,7 @@ export async function runPilot(
         lastSignature = "";
         log.push(`${step}. a página mudou antes do toque; li de novo`);
         await deps.settle();
-        snapshot = await deps.snapshot();
+        snapshot = progress.snapshot = await deps.snapshot();
         continue;
       }
       // Sem valor de --fill para o campo que o Jev escolheu: ele vê isso no histórico e escolhe outra coisa (um botão, outro campo).
@@ -832,7 +861,7 @@ export async function runPilot(
     photoJustTapped = false;
     log.push(`${step}. ${what} (${meta}, passo ${Date.now() - stepStarted} ms)`);
     await deps.settle();
-    snapshot = await deps.snapshot();
+    snapshot = progress.snapshot = await deps.snapshot();
     history.push({ what, changed: fingerprint(parseSnapshot(snapshot)) !== fingerprint(page) });
   }
   return finish("limit", `Cheguei ao limite de ${limit} passos sem o Jev dizer que terminou. Confira a página e continue, ou rode de novo.`);

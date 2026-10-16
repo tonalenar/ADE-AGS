@@ -730,7 +730,19 @@ function pilotDeps(host: BrowserHost): PilotDeps {
     try { await inPage(host, { op: "wait", idle: true, timeoutMs: 1_200 }, false); } catch { /* segue */ }
   };
   return {
-    snapshot: () => inPage(host, { op: "snapshot", all: false, inView: true }, false),
+    // Um envio de busca pode levar segundos até a página nova existir (a Amazon: ~8 s): se a leitura falha por isso, espera a
+    // próxima carga e lê de novo, em vez de abortar o `act` com o que já foi feito.
+    snapshot: async () => {
+      const loads = host.loadCount();
+      for (let attempt = 0; ; attempt++) {
+        try {
+          return await inPage(host, { op: "snapshot", all: false, inView: true }, false);
+        } catch (e) {
+          if (attempt >= 2 || !/n[ãa]o respondeu|cambi[óo]|mudou/i.test(e instanceof Error ? e.message : String(e))) throw e;
+          await host.waitForLoad(loads, 10_000);
+        }
+      }
+    },
     // Tudo `fast` e sem coletar console/rede (`withEffects` falso): o piloto lê a página de novo depois de cada passo, e é isso que importa.
     click: async (ref, navigates) => {
       const loads = host.loadCount();
