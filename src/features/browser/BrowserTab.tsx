@@ -21,7 +21,8 @@ import { highlightAgent } from "./agentHighlight";
 import { AgentPicker } from "./AgentPicker";
 import { AnnotationBar, AnnotationCanvas, renderAnnotated, useAnnotationSession } from "./annotate/Annotator";
 import { canvasToPng, freezePage, thumbnail, type FrozenPage } from "./annotate/capture";
-import { isUncovered } from "./annotate/geometry";
+import { hideCovers, hideElement, overlayRootOf } from "./annotate/cover";
+import { isUncovered, probePoints } from "./annotate/geometry";
 import { composePickMessage, toTargetUrl, type AnnotatedCapture } from "./composeMessage";
 import { composePointer } from "./markedView";
 import { browserToolPrefix, hasBrowserMcp } from "./tabMcp";
@@ -307,22 +308,35 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       if (!page || !frame) throw new Error("La página todavía no está cargada.");
       useViewTabsStore.getState().activateView(view.id);
       const shoot = async () => {
-        const frozen = await freezePage(page, frame);
-        const rect = page.getBoundingClientRect();
-        // Só vale se a página está toda à vista: uma foto cortada deixaria as frações da caixa apontando para o lugar errado.
-        // E livre: um nó parcialmente atrás da barra lateral cabe na janela, mas a foto sairia com a barra por cima da página
-        // (as alças do nó, pontinhos na borda, não contam).
-        let blocker = "";
-        const free = (x: number, y: number) => {
-          const el = document.elementFromPoint(x, y);
-          if (el && (el === page || frame.contains(el) || el.closest(".react-flow__handle, .react-flow__resize-control"))) return true;
-          blocker ||= el ? `${el.tagName.toLowerCase()}${typeof el.className === "string" && el.className ? `.${el.className.split(" ")[0]}` : ""} em ${Math.round(x)},${Math.round(y)}` : `nada (fora da janela) em ${Math.round(x)},${Math.round(y)}`;
-          return false;
-        };
-        return {
-          frozen, rect, blocker,
-          complete: Math.abs(frozen.screen.width - rect.width) < 2 && Math.abs(frozen.screen.height - rect.height) < 2 && isUncovered(rect, free),
-        };
+        // Um painel flutuante (uso dos agentes, dock) ou outro nó sobre a página sairia na foto: sai do caminho só pelo tempo dela e
+        // o estilo volta exato no `finally`, mesmo que a foto falhe. O que ainda cobrir depois disso recusa a foto (`complete: false`).
+        const isPage = (el: Element) => el === page || frame.contains(el) || !!el.closest(".react-flow__handle, .react-flow__resize-control");
+        const covers = hideCovers<Element>({
+          blockers: () => probePoints(page.getBoundingClientRect())
+            .map((point) => document.elementFromPoint(point.x, point.y))
+            .filter((el): el is Element => !!el && !isPage(el)),
+          rootOf: (el) => overlayRootOf(el, page),
+          hide: (root) => hideElement(root as HTMLElement),
+        });
+        try {
+          const frozen = await freezePage(page, frame);
+          const rect = page.getBoundingClientRect();
+          // Só vale se a página está toda à vista: uma foto cortada deixaria as frações da caixa apontando para o lugar errado.
+          // E livre: um nó parcialmente atrás da barra lateral cabe na janela, mas a foto sairia com a barra por cima da página.
+          let blocker = "";
+          const free = (x: number, y: number) => {
+            const el = document.elementFromPoint(x, y);
+            if (el && isPage(el)) return true;
+            blocker ||= el ? `${el.tagName.toLowerCase()}${typeof el.className === "string" && el.className ? `.${el.className.split(" ")[0]}` : ""} em ${Math.round(x)},${Math.round(y)}` : `nada (fora da janela) em ${Math.round(x)},${Math.round(y)}`;
+            return false;
+          };
+          return {
+            frozen, rect, blocker,
+            complete: Math.abs(frozen.screen.width - rect.width) < 2 && Math.abs(frozen.screen.height - rect.height) < 2 && isUncovered(rect, free),
+          };
+        } finally {
+          covers.restore();
+        }
       };
       let shot = await shoot().catch(() => null);
       if (!shot || !shot.complete) {

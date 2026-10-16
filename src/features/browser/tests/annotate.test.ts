@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { arrowWings, cropFor, isLight, isUncovered, placePaper, rectBetween, smoothSegments, toImagePoint } from "../annotate/geometry";
+import { arrowWings, cropFor, isLight, isUncovered, probePoints, placePaper, rectBetween, smoothSegments, toImagePoint } from "../annotate/geometry";
 import {
   addShape, clearShapes, drawShape, EMPTY_HISTORY, redo, undo, type Ctx, type Shape,
 } from "../annotate/shapes";
@@ -170,5 +170,14 @@ describe("a página está à vista, e não por baixo de outra coisa", () => {
   it("uma página minúscula ou sem área não quebra", () => {
     expect(isUncovered({ left: 0, top: 0, width: 0, height: 0 }, () => true)).toBe(true);
     expect(isUncovered({ left: 0, top: 0, width: 10, height: 10 }, () => true)).toBe(true);
+  });
+
+  it("a grade de prova tem 5×5 pontos, todos dentro da página e longe da borda", () => {
+    const points = probePoints(page);
+    expect(points).toHaveLength(25);
+    expect(Math.min(...points.map((p) => p.x))).toBe(page.left + 12);
+    expect(Math.max(...points.map((p) => p.x))).toBe(page.left + page.width - 12);
+    expect(Math.min(...points.map((p) => p.y))).toBe(page.top + 12);
+    expect(Math.max(...points.map((p) => p.y))).toBe(page.top + page.height - 12);
   });
 });
