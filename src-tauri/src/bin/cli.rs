@@ -97,8 +97,10 @@ DISPOSITIVOS ANDROID DO CANVAS — um emulador ou telefone conectado a este term
   device shot|tree <dispositivo>              Captura (devolve o caminho do PNG) · elementos com seu texto e onde tocar
 
 PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os da equipe)
-  portals                                     Os portais que você controla
+  portals                                     Os portais que você controla, cada um com seu estado: pronto, carregando, sem runtime,
+                                              oculto (janela escondida ou nó fora de vista), verificação anti-robô ou sem resposta (+ dica do que fazer)
   portal create [<nome>] [<url>]              Cria um ao seu lado, já conectado
+  portal close <portal>                       Fecha um portal conectado com você (limpe o que criou ao terminar)
   open <url>                                  Abre um site: localhost vai para um navegador do canvas (reaproveita o da mesma origem), o resto para o navegador do sistema
   portal navigate <portal> <url>              Vai a uma URL
   portal snapshot <portal> [--full]           A árvore da página, com refs (@e3)
@@ -820,6 +822,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         // `ags portal click Web @e3`: el portal primero, después lo que cada acción pide.
         "portal.create" => &["name", "url"],
         "portal.open" => &["url"],
+        "portal.close" => &["name"],
         "portal.act" => &["name", "goal"],
         "portal.navigate" => &["name", "url"],
         "portal.history" => &["name", "action"],

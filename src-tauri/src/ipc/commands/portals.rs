@@ -20,7 +20,7 @@ use tauri::AppHandle;
 
 use super::peers::{caller, open_tabs};
 use crate::canvas::{self, Boards, Portal};
-use crate::ipc::bridge::{ask_frontend_within, unwrap_frontend_result};
+use crate::ipc::bridge::{ask_frontend_within, take_act_progress, unwrap_frontend_result, with_partial_progress};
 use crate::ipc::protocol::{arg_str, arg_str_opt};
 
 /// Cuánto puede tardar una acción en la página (cargar, esperar un texto…).
@@ -78,6 +78,72 @@ pub(crate) fn resolve_portal<'a>(portals: &'a [Reachable], wanted: &str) -> Resu
 
 fn describe(p: &Reachable) -> Value {
     json!({ "id": p.id, "name": p.portal.name, "url": p.portal.url })
+}
+
+/// El origen (`https://www.amazon.com.br`) de la URL de un portal, para consultar al proxy.
+fn origin_of(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url.trim()).ok()?;
+    matches!(parsed.scheme(), "http" | "https").then(|| parsed.origin().ascii_serialization())
+}
+
+/// La nota de «verificação anti-robô em andamento» si el sitio del portal respondió un desafío hace poco (plan v2, I4).
+fn challenge_note(url: &str) -> Option<String> {
+    let action = crate::preview::challenge_in_progress(&origin_of(url)?)?;
+    Some(format!(
+        "verificação anti-robô em andamento ({action}): o site entregou um desafio em vez da página. Espere uns segundos (`ags portal wait <portal> --idle`) e leia de novo; não é uma página parada nem um erro do portal."
+    ))
+}
+
+/// El estado de cada portal para `ags portals`: lo que el frontend sabe de la carga, y la verificación anti-robot del proxy.
+/// Sin respuesta del frontend (ventana trabada o cerrándose) el estado es «sem resposta» con la causa, no un error del listado.
+fn with_states(app: &AppHandle, portals: &[Reachable]) -> Vec<Value> {
+    let mut by_window: std::collections::BTreeMap<&str, Vec<&Reachable>> = std::collections::BTreeMap::new();
+    for p in portals {
+        by_window.entry(window_of(&p.key)).or_default().push(p);
+    }
+    let mut states: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+    for (window, group) in by_window {
+        let ids: Vec<&str> = group.iter().map(|p| p.id.as_str()).collect();
+        let asked = ask_frontend_within(
+            app,
+            "canvas.portal",
+            &json!({ "op": "states", "ids": ids }),
+            Some(window),
+            std::time::Duration::from_secs(4),
+        )
+        .and_then(unwrap_frontend_result);
+        match asked {
+            Ok(v) => {
+                if let Some(map) = v.get("states").and_then(Value::as_object) {
+                    states.extend(map.iter().map(|(k, v)| (k.clone(), v.clone())));
+                }
+            }
+            Err(why) => {
+                for p in group {
+                    states.insert(p.id.clone(), json!({ "state": "sem resposta", "hint": why }));
+                }
+            }
+        }
+    }
+    portals
+        .iter()
+        .map(|p| {
+            let mut row = describe(p);
+            let info = states.remove(&p.id).unwrap_or_else(|| json!({ "state": "oculto", "hint": "o nó do portal não está desenhado" }));
+            row["state"] = info.get("state").cloned().unwrap_or(Value::Null);
+            row["hint"] = info.get("hint").cloned().unwrap_or(Value::Null);
+            if let Some(note) = challenge_note(&p.portal.url) {
+                row["state"] = json!("verificação anti-robô");
+                row["hint"] = json!(note);
+            }
+            row
+        })
+        .collect()
+}
+
+/// Anexa o progresso parcial do `act` ao erro (se o puente venceu no meio) e limpa o que sobrou.
+fn act_error(portal_id: &str, error: String) -> String {
+    with_partial_progress(error, take_act_progress(portal_id))
 }
 
 /// La ventana que tiene ese canvas: la clave es `ventana|carpeta`.
@@ -192,10 +258,26 @@ pub(crate) fn request_for(action: &str, args: &Value) -> Result<Value, String> {
     Ok(req)
 }
 
-pub(super) fn portal_list(_app: &AppHandle, args: &Value) -> Result<Value, String> {
+pub(super) fn portal_list(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let portals = reachable(&canvas::load_boards(), &from);
-    Ok(json!({ "portals": portals.iter().map(describe).collect::<Vec<_>>() }))
+    Ok(json!({ "portals": with_states(app, &portals) }))
+}
+
+/// `ags portal close <portal>`: el agente limpia lo que creó. Mismo permiso que el resto: un portal conectado con él.
+pub(super) fn portal_close(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let from = caller(args)?;
+    let portals = reachable(&canvas::load_boards(), &from);
+    let target = resolve_portal(&portals, &arg_str(args, "name")?)?;
+    let raw = ask_frontend_within(
+        app,
+        "canvas.portal",
+        &json!({ "op": "close", "key": target.key, "id": target.id }),
+        Some(window_of(&target.key)),
+        std::time::Duration::from_secs(15),
+    )?;
+    unwrap_frontend_result(raw)?;
+    Ok(json!({ "closed": describe(target) }))
 }
 
 /// Crea un portal al lado de quien lo pide y conectado con él.
@@ -281,15 +363,32 @@ pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Resu
     // El proyecto del agente: es el límite de lo que el navegador puede tocar.
     let cwd = open_tabs(app)?.into_iter().find(|t| t.id == from).map(|t| t.cwd).unwrap_or_default();
     let owner = json!({ "kind": "tab", "id": from });
-    let raw = ask_frontend_within(
+    // Un `act` anterior que no terminó no debe pasar su progreso a este.
+    if action == "act" {
+        take_act_progress(&target.id);
+    }
+    let asked = ask_frontend_within(
         app,
         "canvas.portal",
         &json!({ "op": "run", "cwd": cwd, "id": target.id, "request": request, "owner": owner }),
         Some(window_of(&target.key)),
         std::time::Duration::from_secs(if action == "act" { ACT_TIMEOUT_S } else { ACTION_TIMEOUT_S }),
-    )?;
-    let out = unwrap_frontend_result(raw)?;
-    Ok(json!({ "portal": describe(target), "text": out.get("text").cloned().unwrap_or(Value::Null) }))
+    )
+    .and_then(unwrap_frontend_result);
+    let out = match asked {
+        Ok(out) => out,
+        Err(e) if action == "act" => return Err(act_error(&target.id, e)),
+        Err(e) => return Err(e),
+    };
+    if action == "act" {
+        take_act_progress(&target.id);
+    }
+    let mut text = out.get("text").cloned().unwrap_or(Value::Null);
+    // Un desafío anti-robot en curso explica una página «parada»: se lo dice al agente junto al resultado.
+    if let (Some(note), Some(body)) = (challenge_note(&target.portal.url), text.as_str()) {
+        text = json!(format!("[{note}]\n{body}"));
+    }
+    Ok(json!({ "portal": describe(target), "text": text }))
 }
 
 #[cfg(test)]
@@ -298,6 +397,23 @@ mod test {
 
     fn portal(id: &str, name: &str) -> Reachable {
         Reachable { key: "main|/p".into(), id: id.into(), portal: Portal { name: name.into(), ..Default::default() } }
+    }
+
+    #[test]
+    fn o_origem_do_portal_vem_da_url() {
+        assert_eq!(origin_of("https://www.amazon.com.br/s?k=x").as_deref(), Some("https://www.amazon.com.br"));
+        assert_eq!(origin_of(" http://localhost:5173/a ").as_deref(), Some("http://localhost:5173"));
+        assert_eq!(origin_of("about:blank"), None);
+        assert_eq!(origin_of(""), None);
+    }
+
+    #[test]
+    fn um_act_que_cai_leva_o_progresso_no_erro() {
+        crate::ipc::bridge::portal_act_progress("portal-teste-progresso".into(), "Ações já feitas (1):\n1. clicou @e3".into());
+        let msg = act_error("portal-teste-progresso", "A interface parou".into());
+        assert!(msg.contains("A interface parou") && msg.contains("1. clicou @e3"), "{msg}");
+        // Já foi consumido: o próximo erro não repete.
+        assert_eq!(act_error("portal-teste-progresso", "outro".into()), "outro");
     }
 
     #[test]
