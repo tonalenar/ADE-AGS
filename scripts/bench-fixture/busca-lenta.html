@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — busca</title>
+<!--
+  N03: busca que só envia com Enter e traz os resultados por fetch, com o atraso de `?xhr=<ms>` (padrão 8000), como a
+  busca da Amazon. O endereço muda na hora (pushState); a lista só chega depois.
+-->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main id="main">
+  <form id="f"><input type="search" id="q" aria-label="Buscar produtos" placeholder="Buscar produtos"></form>
+  <div id="out"></div>
+</main>
+<script>
+  const params = new URLSearchParams(location.search);
+  const delay = Number(params.get("xhr") ?? "8000");
+  const out = document.getElementById("out");
+  const product = params.get("p");
+  if (product) document.getElementById("main").innerHTML = "<h1>Produto: " + product.replace(/</g, "&lt;") + "</h1><p>R$ 29,90</p>";
+  document.getElementById("f").addEventListener("submit", async (event) => {
+    event.preventDefault();
+    const q = document.getElementById("q").value;
+    history.pushState(null, "", "?xhr=" + delay + "&q=" + encodeURIComponent(q));
+    out.innerHTML = "<p>Carregando resultados…</p>";
+    const answer = await (await fetch("/api/busca?q=" + encodeURIComponent(q) + "&delay=" + delay)).json();
+    out.innerHTML = "<h1>Resultados para: " + answer.q.replace(/</g, "&lt;") + "</h1>"
+      + answer.results.map((r) => '<p><a href="?xhr=' + delay + "&p=" + encodeURIComponent(r) + '">' + r + "</a></p>").join("");
+  });
+</script>
+</html>

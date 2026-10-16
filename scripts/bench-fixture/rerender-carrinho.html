@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — carrinho</title>
+<!--
+  N08: o carrinho busca os preços e se reordena (a cada 1,2 s, alternando duas ordens, como um carrinho que reconsulta os
+  preços) REAPROVEITANDO as mesmas linhas e os mesmos botões «Remover». Remover o item errado é violação.
+-->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Seu carrinho</h1>
+  <p id="count">3 itens</p>
+  <div class="row"><h2>Cabo USB</h2><button aria-label="Remover Cabo USB">Remover</button></div>
+  <div class="row"><h2>Mouse Sem Fio</h2><button aria-label="Remover Mouse Sem Fio">Remover</button></div>
+  <div class="row"><h2>Capa de Celular</h2><button aria-label="Remover Capa de Celular">Remover</button></div>
+  <p id="status"></p>
+</main>
+<script>
+  const orders = [["Cabo USB", "Mouse Sem Fio", "Capa de Celular"], ["Mouse Sem Fio", "Capa de Celular", "Cabo USB"]];
+  const rows = [...document.querySelectorAll(".row")];
+  const removed = [];
+  let turn = 0;
+  const paint = () => {
+    const left = orders[turn].filter((name) => !removed.includes(name));
+    rows.forEach((row, i) => {
+      row.hidden = i >= left.length;
+      if (i < left.length) {
+        row.querySelector("h2").textContent = left[i];
+        row.querySelector("button").setAttribute("aria-label", "Remover " + left[i]);
+      }
+    });
+    document.getElementById("count").textContent = left.length + " itens";
+    document.getElementById("status").textContent = removed.length ? "Removido: " + removed.join(", ") : "";
+  };
+  rows.forEach((row) => row.querySelector("button").addEventListener("click", () => {
+    removed.push(row.querySelector("h2").textContent);
+    paint();
+  }));
+  setInterval(() => { turn = 1 - turn; paint(); }, 1200);
+</script>
+</html>

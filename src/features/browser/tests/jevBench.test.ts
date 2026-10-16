@@ -6,6 +6,8 @@ import { formatResult, type PilotDeps, type PilotResult } from "../jevPilot";
 import {
   all, any, canStart, check, describeCriterion, emptyPhases, evaluate, fold, instrument, judge, median, not, parseActReport,
   regex, renderMarkdown, renderTaskTable, select, summarize, text, url, viewOf, buildReport, parseTimings, phasesFromReport, isInfraFailure, infraTooHigh, unwrapCli, mergeRuns, renderFailures, renderTrend,
+  percentile, groupMetrics, summarizeV2, repetitionPlan, hashSeed, rng, shuffled, parseWindowLine, windowOf, queriesFromReport, mergeQueries, isWindowHang,
+  parseDelay, MAX_DELAY_MS, fixtureApi, fixtureSearchPage,
   type BenchTask, type TaskRun,
 } from "../../../../scripts/bench/core";
 import { PAGES, initialNames, renderSnapshot, runSimTask, virtualClock } from "../../../../scripts/bench/sim";
@@ -257,11 +259,18 @@ describe("tabelas em Markdown", () => {
 
 describe("as tarefas", () => {
   const fixtures = join(__dirname, "..", "..", "..", "..", "scripts", "bench-fixture");
-  it("são 23, com ids únicos, 17 locais e 6 públicas", () => {
-    expect(TASKS).toHaveLength(23);
-    expect(new Set(TASKS.map((t) => t.id)).size).toBe(23);
-    expect(TASKS.filter((t) => t.kind === "local")).toHaveLength(17);
+  it("são 33, com ids únicos, 27 locais (17 + 10 da leva v2) e 6 públicas, 2 delas sondas (Amazon)", () => {
+    expect(TASKS).toHaveLength(33);
+    expect(new Set(TASKS.map((t) => t.id)).size).toBe(33);
+    expect(TASKS.filter((t) => t.kind === "local")).toHaveLength(27);
     expect(TASKS.filter((t) => t.kind === "public")).toHaveLength(6);
+    expect(TASKS.filter((t) => t.set === "v2")).toHaveLength(10);
+    expect(TASKS.filter((t) => t.probe).map((t) => t.id)).toEqual(["P05-amazon-busca-adicionar", "P06-amazon-produto-adicionar"]);
+  });
+  it("a leva v2 cobre anúncios, busca lenta, autocomplete, re-render e carrinho (2 de cada)", () => {
+    const v2 = TASKS.filter((t) => t.set === "v2");
+    for (const tag of ["anuncio", "assincrona", "autocomplete", "rerender"]) expect(v2.filter((t) => t.tags.includes(tag)), tag).toHaveLength(2);
+    expect(v2.filter((t) => t.tags.includes("idempotencia"))).toHaveLength(2);
   });
   it("cada uma tem objetivo, limite de passos que o piloto aceita e fills no formato campo=valor", () => {
     for (const task of TASKS) {
@@ -272,8 +281,8 @@ describe("as tarefas", () => {
     }
   });
   it("a dificuldade cresce: as locais fáceis vêm antes das difíceis na média e as públicas fecham a lista", () => {
-    expect(TASKS.slice(0, 17).every((t) => t.kind === "local")).toBe(true);
-    expect(TASKS.slice(17).every((t) => t.kind === "public")).toBe(true);
+    expect(TASKS.slice(0, 27).every((t) => t.kind === "local")).toBe(true);
+    expect(TASKS.slice(27).every((t) => t.kind === "public")).toBe(true);
   });
   it("o fluxo de compra/login só existe com travas: forbid em quem toca em carrinho, login só de demonstração", () => {
     for (const task of TASKS.filter((t) => t.kind === "public" && /carrinho|checkout/i.test(t.goal))) {
@@ -287,7 +296,7 @@ describe("as tarefas", () => {
   });
   it("as locais têm fixture, página simulada, e os nomes simulados existem no HTML", () => {
     for (const task of TASKS.filter((t) => t.kind === "local")) {
-      const file = join(fixtures, task.url.replace(/^\//, ""));
+      const file = join(fixtures, task.url.replace(/^\//, "").split("?")[0]);
       expect(existsSync(file), `${task.id}: falta ${task.url}`).toBe(true);
       expect(PAGES[task.id], `${task.id}: sem página simulada`).toBeDefined();
       const html = readFileSync(file, "utf8");
@@ -301,7 +310,7 @@ describe("as tarefas", () => {
   });
   it("o critério de sucesso não vale na página inicial simulada (senão a tarefa passa sem fazer nada)", () => {
     for (const task of TASKS.filter((t) => t.sim)) {
-      const page = PAGES[task.id]("http://localhost:8765");
+      const page = PAGES[task.id]("http://localhost:8765", { now: () => 0 });
       const snapshot = renderSnapshot(page, 0).snapshot;
       expect(evaluate(task, snapshot).criterionOk, task.id).toBe(false);
       expect(evaluate(task, snapshot).forbidden, task.id).toBe(false);
@@ -345,7 +354,7 @@ describe("o modo sim (laço real, páginas e Jev simulados)", () => {
   });
   it("sem a trava, o mesmo clique seria uma violação (o critério proibido pega)", () => {
     const t = task("L17-comprar-agora-nao-pedido");
-    const page = PAGES[t.id]("http://localhost:8765");
+    const page = PAGES[t.id]("http://localhost:8765", { now: () => 0 });
     const first = renderSnapshot(page, 0).nodes.find((n) => n.name === "Comprar agora");
     first?.click?.();
     expect(evaluate(t, renderSnapshot(page, 0).snapshot).forbidden).toBe(true);
@@ -363,9 +372,9 @@ describe("o modo sim (laço real, páginas e Jev simulados)", () => {
     expect(r.forbidden).toBe(false);
     expect(judge(r).completed).toBe(true);
   });
-  it("o relatório agregado das 17 locais fecha as contas", async () => {
+  it("o relatório agregado das 17 locais originais fecha as contas", async () => {
     const runs = [];
-    for (const t of TASKS.filter((x) => x.sim)) runs.push(await runSimTask(t));
+    for (const t of TASKS.filter((x) => x.sim && x.set !== "v2")) runs.push(await runSimTask(t));
     const s = summarize(runs);
     expect(s.tasks).toBe(17);
     expect(s.violations).toBe(0);
@@ -430,6 +439,213 @@ describe("junção de rodadas e causas", () => {
     expect(failures).toContain("L04-busca-com-botao");
     expect(failures).toContain("**Causa:** sem certeza após ação");
     expect(failures).not.toContain("L01-icones-sem-nome");
+  });
+});
+
+describe("estatísticas v2 (Fase 0.3)", () => {
+  it("percentil por interpolação linear: p50 = mediana, p95 entre vizinhos, vazio = 0", () => {
+    const xs = Array.from({ length: 20 }, (_, i) => i + 1);
+    expect(percentile(xs, 50)).toBe(median(xs));
+    expect(percentile(xs, 95)).toBeCloseTo(19.05, 10);
+    expect(percentile([5], 95)).toBe(5);
+    expect(percentile([], 50)).toBe(0);
+    expect(percentile([10, 0], 100)).toBe(10);
+    expect(percentile([10, 0], 0)).toBe(0);
+    expect(percentile([3, 1, 2, 4], 50)).toBe(2.5);
+  });
+  it("conta falso «feito» e falso «parou» contra o critério de cada rodada", () => {
+    const g = groupMetrics([
+      run({ id: "a" }), // ok
+      run({ id: "a", outcome: "done", criterionOk: false }), // falso feito
+      run({ id: "b", outcome: "unsure", criterionOk: true }), // falso parou (o critério valia)
+      run({ id: "b", outcome: "stuck", criterionOk: true }), // falso parou
+      run({ id: "c", outcome: "stuck", criterionOk: false }), // parou de verdade: nem falso feito nem falso parou
+      run({ id: "c", outcome: "done", criterionOk: true, forbidden: true }), // violação: também falso feito
+      run({ id: "d", outcome: "limit", criterionOk: false }), // limite: falha simples
+    ]);
+    expect(g).toMatchObject({ runs: 7, tasks: 4, successes: 3, falseDone: 2, falseStop: 2, violations: 1 });
+    expect(g.successRate).toBeCloseTo(3 / 7);
+  });
+  it("p50/p95 por passo e por act, act por tarefa, consultas, tokens estimados e travamentos", () => {
+    const q = (bytes: number[], latencyMs: number[]) => ({ count: bytes.length, bytes, latencyMs, tokens: Math.round(bytes.reduce((a, b) => a + b, 0) / 4), tokensEstimated: true });
+    const g = groupMetrics([
+      run({ stepMs: [100, 200], actMs: [300], acts: 1, queries: q([400, 800], [400, 500]) }),
+      run({ stepMs: [300, 400], actMs: [500, 900], acts: 2, queries: q([1200], [600]), window: { lagMaxMs: 1800 } }),
+      run({ outcome: "crash", criterionOk: false, stepMs: [], note: "act falhou: a janela não respondeu a tempo" }),
+    ]);
+    expect(g.stepP50).toBe(250);
+    expect(g.stepP95).toBeCloseTo(385, 5);
+    // os act: 300, 500, 900 e 3000 (a rodada sem actMs vale pelo tempo total)
+    expect(g.actP50).toBe(700);
+    expect(g.actsPerTask).toBeCloseTo(4 / 3);
+    expect(g.queriesPerTask).toBeCloseTo((2 + 1 + 0) / 3);
+    expect(g.tokensPerTask).toBe((300 + 300) / 2);
+    expect(g.tokensEstimated).toBe(true);
+    expect(g.bytesPerQueryP50).toBe(800);
+    expect(g.queryLatencyP95).toBeCloseTo(590, 5);
+    expect(g.windowHangs).toBe(1);
+    expect(g.lagMaxMs).toBe(1800);
+  });
+  it("sem nenhum dado de consulta nem de janela, mostra «sem dado» (null), não zero", () => {
+    const g = groupMetrics([run({ probes: 3 })]);
+    expect(g.tokensPerTask).toBeNull();
+    expect(g.bytesPerQueryP50).toBeNull();
+    expect(g.lagMaxMs).toBeNull();
+    expect(g.queriesPerTask).toBe(3);
+  });
+  it("sondas ficam fora do portão; locais × públicas separadas", () => {
+    const tasks = [{ id: "L", kind: "local" as const }, { id: "P", kind: "public" as const }, { id: "A", kind: "public" as const, probe: true }];
+    const v2 = summarizeV2(tasks, [run({ id: "L" }), run({ id: "P", outcome: "done", criterionOk: false }), run({ id: "A", outcome: "done", criterionOk: false })]);
+    expect(v2.gate).toMatchObject({ runs: 2, successes: 1, falseDone: 1 });
+    expect(v2.local).toMatchObject({ runs: 1, successes: 1 });
+    expect(v2.public).toMatchObject({ runs: 1, falseDone: 1 });
+    expect(v2.probe).toMatchObject({ runs: 1, falseDone: 1 });
+    expect(v2.tasks.find((t) => t.id === "A")?.probe).toBe(true);
+  });
+  it("semente: a mesma dá a mesma ordem; repetições ímpares invertem a anterior; cada tarefa aparece uma vez por repetição", () => {
+    const ids = ["a", "b", "c", "d", "e", "f"];
+    const p1 = repetitionPlan(ids, 3, 7);
+    expect(repetitionPlan(ids, 3, 7)).toEqual(p1);
+    expect(p1[1].items).toEqual([...p1[0].items].reverse());
+    for (const { items } of p1) expect([...items].sort()).toEqual(ids);
+    expect(repetitionPlan(ids, 1, 8)[0].items).not.toEqual(repetitionPlan(ids, 1, 7)[0].items);
+    expect(repetitionPlan(ids, 2, 7, false)[1].items).not.toEqual([...p1[0].items].reverse());
+    expect(hashSeed(1, "x", 0)).toBe(hashSeed(1, "x", 0));
+    expect(hashSeed(1, "x", 0)).not.toBe(hashSeed(1, "x", 1));
+    const r = rng(42);
+    const xs = [r(), r(), r()];
+    expect(xs.every((x) => x >= 0 && x < 1)).toBe(true);
+    expect(rng(42)()).toBe(xs[0]);
+    expect(shuffled([1, 2, 3], rng(1))).toHaveLength(3);
+  });
+});
+
+describe("relatório do act v2: janela, consultas e travamento", () => {
+  it("lê o batimento da janela em qualquer forma do contrato e ignora o que não é número", () => {
+    expect(parseWindowLine('TEMPOS: {"jev":1,"window":{"lagMaxMs":1900,"lagP95Ms":300,"samples":40,"hiddenMs":0,"timeouts":0}}')).toEqual({ lagMaxMs: 1900, lagP95Ms: 300, samples: 40, hiddenMs: 0, timeouts: 0 });
+    expect(parseWindowLine('window: {"lagMaxMs":120,"samples":"x"}')).toEqual({ lagMaxMs: 120 });
+    expect(parseWindowLine('JANELA: {"window":{"timeouts":1}}')).toEqual({ timeouts: 1 });
+    expect(parseWindowLine("janela: lag máx 2300 ms")).toEqual({ lagMaxMs: 2300 });
+    expect(parseWindowLine('TEMPOS: {"jev":1}')).toBeNull();
+    expect(parseWindowLine("window: {quebrado")).toBeNull();
+    expect(windowOf(null)).toBeNull();
+  });
+  it("o relatório traz latências por consulta (não a da foto), a janela e os bytes/tokens quando houver", () => {
+    const text = [
+      'act "g": FEITO', "ok", "", "Passos:",
+      "1. tocou pela foto no ponto (10, 20) (existe p=0.90, caixa conf=0.80, 1400 ms)",
+      '2. clicou button "Buscar" (p=0.95, fim p=0.10, 450 ms, passo 900 ms)',
+      "3. concluído (p=0.97, 300 ms)",
+      'TEMPOS: {"jev":750,"snapshot":1,"acao":1,"espera":1,"foto":1400,"consultas":2,"fotos":1,"total":2200,"bytes":[1000,2000],"window":{"lagMaxMs":80}}',
+      "", "A página agora (o Jev só escolhe onde tocar: confira o resultado):", "page: x http://a",
+    ].join("\n");
+    const r = parseActReport(text);
+    expect(r.jevLatencies).toEqual([450, 300]);
+    expect(r.window).toEqual({ lagMaxMs: 80 });
+    expect(r.queryBytes).toEqual([1000, 2000]);
+    expect(queriesFromReport(r)).toEqual({ count: 2, bytes: [1000, 2000], latencyMs: [450, 300], tokens: 750, tokensEstimated: true });
+    expect(queriesFromReport({ ...r, tokens: 999 })).toMatchObject({ tokens: 999, tokensEstimated: false });
+    expect(queriesFromReport({ ...r, queryBytes: [] }).tokens).toBeNull();
+    expect(mergeQueries([queriesFromReport(r), queriesFromReport({ ...r, tokens: 10 })])).toMatchObject({ count: 4, tokens: 760, tokensEstimated: true });
+  });
+  it("relatório antigo, sem janela nem bytes: tolerante", () => {
+    const r = parseActReport(['act "g": FEITO', "ok", "", "Passos:", "1. concluído (p=0.97, 300 ms)"].join("\n"));
+    expect(r.window).toBeNull();
+    expect(r.queryBytes).toEqual([]);
+    expect(r.tokens).toBeNull();
+  });
+  it("travamento da janela: timeout da ponte ou timeouts no batimento; falha do piloto não conta", () => {
+    expect(isWindowHang({ outcome: "crash", note: "act falhou: A janela não respondeu a tempo" })).toBe(true);
+    expect(isWindowHang({ outcome: "error", report: "ask_frontend recv_timeout" })).toBe(true);
+    expect(isWindowHang({ outcome: "done", window: { timeouts: 2 } })).toBe(true);
+    expect(isWindowHang({ outcome: "done", note: "a janela não respondeu a tempo" })).toBe(false);
+    expect(isWindowHang({ outcome: "error", note: "A ação falhou" })).toBe(false);
+  });
+});
+
+describe("servidor das fixtures (Fase 0.4)", () => {
+  it("?delay= em ms, com teto, e 0 quando ausente ou inválido", () => {
+    expect(parseDelay("?delay=8000")).toBe(8000);
+    expect(parseDelay("k=caneca&delay=700")).toBe(700);
+    expect(parseDelay("?delay=999999")).toBe(MAX_DELAY_MS);
+    expect(parseDelay("?delay=-5")).toBe(0);
+    expect(parseDelay("?delay=abc")).toBe(0);
+    expect(parseDelay("")).toBe(0);
+  });
+  it("a API responde JSON fictício às fixtures; rota desconhecida é 404", () => {
+    expect(fixtureApi("/api/busca", "q=caneca&delay=8000")?.body).toEqual({ q: "caneca", results: ["Caneca Azul", "Caneca de Vidro", "Caneca Esmaltada"] });
+    expect(fixtureApi("/api/filtro", "frete=1")?.body).toMatchObject({ label: "Mostrando 3 produtos com frete grátis" });
+    expect(fixtureApi("/api/sugestoes", "tipo=cidade&q=s%C3%A3o%20paulo")?.body).toMatchObject({ options: ["São Paulo - SP", "São Paulo de Olivença - AM"] });
+    expect(fixtureApi("/api/sugestoes", "q=fone")?.body).toMatchObject({ options: ["fone bluetooth", "fone com fio", "fone gamer"] });
+    expect(fixtureApi("/api/nada", "")).toBeNull();
+  });
+  it("/s renderiza os resultados no servidor e repassa o atraso no formulário", () => {
+    const html = fixtureSearchPage("?k=caneca&delay=8000");
+    expect(html).toContain("Resultados para: caneca");
+    expect(html).toContain('name="delay" value="8000"');
+    expect(fixtureSearchPage("?k=<x>")).not.toContain("<x>");
+    expect(fixtureSearchPage("?p=Caneca%20Azul")).toContain("Produto: Caneca Azul");
+  });
+});
+
+describe("a leva v2 no simulador (linha de base)", () => {
+  const task = (id: string) => TASKS.find((t) => t.id === id)!;
+  it("as páginas assíncronas: o critério tem de valer na volta E com a página assentada", async () => {
+    // N04: o piloto dá por feito com a lista ainda atualizando (falso feito), embora 8 s depois a lista mude.
+    const n04 = await runSimTask(task("N04-filtro-lento-xhr"));
+    expect(judge(n04).falseDone).toBe(true);
+    // N09: o 2.º «Aumentar» lido antes do XHR vira uma 3.ª unidade.
+    const n09 = await runSimTask(task("N09-carrinho-quantidade"));
+    expect(judge(n09).falseDone).toBe(true);
+    expect(n09.log?.filter((l) => l.includes("Aumentar")).length).toBeGreaterThanOrEqual(2);
+  });
+  it("N07: sem guarda o clique cai no produto que o re-render pôs no lugar; com a guarda simulada (2.1), acerta", async () => {
+    const without = await runSimTask(task("N07-rerender-lista"));
+    expect(judge(without)).toMatchObject({ completed: false, falseDone: true });
+    const withGuard = await runSimTask(task("N07-rerender-lista"), { guard: true });
+    expect(judge(withGuard).completed).toBe(true);
+    expect(withGuard.log?.some((l) => l.includes("a página mudou antes do toque"))).toBe(true);
+  });
+  it("N08: remover o item errado é violação", async () => {
+    const r = await runSimTask(task("N08-rerender-remover"));
+    expect(judge(r).violation).toBe(true);
+  });
+  it("N10: dois act com o mesmo objetivo — o 2.º adiciona de novo (D6) e o critério falha", async () => {
+    const r = await runSimTask(task("N10-carrinho-idempotente"));
+    expect(r.acts).toBe(2);
+    expect(r.actMs).toHaveLength(2);
+    expect(r.totalMs).toBe(r.actMs![0] + r.actMs![1]);
+    expect(judge(r).falseDone).toBe(true);
+  });
+  it("as consultas do sim têm bytes reais da consulta e tokens estimados por bytes/4", async () => {
+    const r = await runSimTask(task("L04-busca-com-botao"));
+    expect(r.queries!.count).toBe(r.queries!.bytes.length);
+    expect(r.queries!.tokens).toBe(Math.round(r.queries!.bytes.reduce((a, b) => a + b, 0) / 4));
+    expect(r.queries!.tokensEstimated).toBe(true);
+  });
+  it("mesma semente ⇒ mesmos números; outra semente muda a latência, não as decisões", async () => {
+    const t = task("L05-cookies");
+    const a = await runSimTask(t, { seed: 11 });
+    const b = await runSimTask(t, { seed: 11 });
+    const c = await runSimTask(t, { seed: 12 });
+    expect(a).toEqual(b);
+    expect(c.totalMs).not.toBe(a.totalMs);
+    expect(c.outcome).toBe(a.outcome);
+    const report = (runs: TaskRun[]) => buildReport({ label: "x", mode: "sim", startedAt: "t", seed: 11, repeat: 1 }, runs, TASKS);
+    expect(report([a]).digest).toBe(report([b]).digest);
+    expect(report([a]).digest).not.toBe(report([c]).digest);
+    expect(report([a]).schema).toBe(2);
+  });
+});
+
+describe("compatibilidade com os JSONs antigos (--compare)", () => {
+  it("um relatório v2 compara com um schema 1 antigo de docs/ade-ags/bench", async () => {
+    const old = JSON.parse(readFileSync(join(__dirname, "..", "..", "..", "..", "docs", "ade-ags", "bench", "antes-sim.json"), "utf8"));
+    const now = buildReport({ label: "v2", mode: "sim", startedAt: "t", seed: 1, repeat: 1 }, [await runSimTask(TASKS[3])], TASKS);
+    const md = renderMarkdown(TASKS, now, old);
+    expect(md).toContain("| métrica | **portão** (sem sondas) |");
+    expect(md).toContain("| métrica | ANTES | DEPOIS |");
+    expect(renderMarkdown(TASKS, old)).toContain("| resultado |");
   });
 });
 

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — canecas</title>
+<!-- N04: a caixa «Frete grátis» marca na hora, mas a lista só muda quando o fetch volta (`?xhr=<ms>`, padrão 8000). -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Canecas e garrafas</h1>
+  <label><input type="checkbox" id="frete"> Frete grátis</label>
+  <p id="status">Mostrando 12 produtos</p>
+  <p>Caneca Azul · R$ 29,90</p>
+  <p>Garrafa Térmica · R$ 59,90</p>
+</main>
+<script>
+  const delay = Number(new URLSearchParams(location.search).get("xhr") ?? "8000");
+  const status = document.getElementById("status");
+  let ticket = 0;
+  document.getElementById("frete").addEventListener("change", async (event) => {
+    const mine = ++ticket;
+    status.textContent = "Atualizando lista…";
+    const answer = await (await fetch("/api/filtro?frete=" + (event.target.checked ? 1 : 0) + "&delay=" + delay)).json();
+    if (mine === ticket) status.textContent = answer.label;
+  });
+</script>
+</html>
