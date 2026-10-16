@@ -31,6 +31,7 @@ import { callerOf, clip, displayPath, formatConsoleArgs, formatValue, toTransfer
 import {
   installCookieJar, installScrollbars, installStorageSync, JAR_HEADER, OWN_HEADER, takeNatives,
 } from "./siteState";
+import { findSponsoredBlocks, inSponsored } from "./sponsored";
 import { isTouch, sendTouch, setTouch } from "./touch";
 import { CORS_HEADER, CRED_HEADER, HEADERS_HEADER, corsMessage, routeRequest, type Routed } from "./route";
 import {
@@ -746,6 +747,9 @@ declare global {
     refs = new Map();
     prints = new Map();
     const scopes = new Map<Element, string>();
+    // Os blocos de anúncio da página (`sponsored.ts`): tudo o que está dentro ganha `[patrocinado]`.
+    const adBlocks = findSponsoredBlocks(document);
+    const adMemo = new Map<Element, boolean>();
     const nodes: SnapshotNode[] = [];
     const limit = all ? 3000 : 600;
     let omitted = 0;
@@ -825,6 +829,7 @@ declare global {
         states: statesOf(el, role),
         value: valueOf(el),
       };
+      if (adBlocks.size > 0 && inSponsored(el, adBlocks, adMemo)) entry.states.push("patrocinado");
       if (interactive) {
         entry.ref = `e${nextRef++}`;
         refs.set(entry.ref, el);
