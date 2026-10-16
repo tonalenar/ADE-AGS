@@ -746,7 +746,7 @@ async function verifyAct(host: BrowserHost, report: string, goal: string, outcom
   if (outcome === "off" || outcome === "error" || (outcome !== "done" && expects.length === 0)) return report;
   try {
     // Uma página com XHR em voo (filtro, quantidade) ainda não mostra o resultado: espera a rede ociosa antes de conferir.
-    try { await inPage(host, { op: "wait", idle: true, timeoutMs: 3_000 }, false); } catch { /* confere com o que há */ }
+    try { await inPage(host, { op: "wait", idle: true, timeoutMs: 1_500 }, false); } catch { /* confere com o que há */ }
     const full = await inPage(host, { op: "snapshot", all: true, inView: false }, false);
     return verifyReport(report, goal, outcome, expects, full);
   } catch {
