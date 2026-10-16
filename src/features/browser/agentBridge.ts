@@ -720,13 +720,19 @@ export const PORTAL_OPS = new Set([
 ]);
 
 /** O que o piloto do Jev usa deste navegador: ver `jevPilot.ts`. As ações são as mesmas que o agente faria à mão. */
+/** Quanto tempo um livro-razão vale: depois disso o que ele diz ("já adicionei") deixou de ser notícia, e recusaria um pedido legítimo. */
+const LEDGER_TTL_MS = 30 * 60_000;
+
 /** O livro-razão de cada portal (plano v2, 3.3/4.1): o que os `act` anteriores fizeram. Some junto com o portal. */
-const LEDGERS = new WeakMap<BrowserHost, Done[]>();
+const LEDGERS = new WeakMap<BrowserHost, { entries: Done[]; at: number }>();
 
 function ledgerOf(host: BrowserHost): Ledger {
   return {
-    load: () => LEDGERS.get(host) ?? [],
-    save: (entries) => { LEDGERS.set(host, entries); },
+    load: () => {
+      const kept = LEDGERS.get(host);
+      return kept && Date.now() - kept.at < LEDGER_TTL_MS ? kept.entries : [];
+    },
+    save: (entries) => { LEDGERS.set(host, { entries, at: Date.now() }); },
   };
 }
 
