@@ -15,6 +15,7 @@
  *   · --repeat N (repetições por tarefa, padrão 1) · --seed S (semente da ordem e da latência simulada, padrão 1)
  *   · --no-alternate (sem inverter a ordem nas repetições ímpares) · --set v1|v2 (só uma leva de tarefas)
  *   · --history (grava também docs/ade-ags/bench/historico/<data>-<modo>-<label>.json/.md e uma linha no índice HISTORICO.md)
+ *   · --with-expect (Fase 5: passa ao `act` os `--expect` equivalentes ao critério de cada tarefa e mede NÃO CONFERE / «verificado» errado)
  *   · --sim-guard (sim: liga a guarda semântica simulada da Fase 2.1, para ver o «depois»)
  *   Real: --public (inclui Wikipedia/Amazon) · --demo-login (inclui SauceDemo) · --max-real N (padrão 5 rodadas, já contando as repetições)
  *   · --max-probes N (padrão 60 consultas ao Jev no pior caso) · --portal <nome> (reaproveita um portal) · --yes
@@ -32,7 +33,7 @@ import { dirname, extname, join, normalize, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createInterface } from "node:readline/promises";
 import {
-  buildReport, canStart, mergeRuns, renderTrend, infraTooHigh, isInfraFailure, unwrapCli, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
+  buildReport, canStart, expectsFor, mergeRuns, renderTrend, infraTooHigh, isInfraFailure, unwrapCli, describeCriterion, emptyPhases, evaluate, parseActReport, phasesFromReport, renderMarkdown, select,
   fixtureApi, fixtureSearchPage, hashSeed, isWindowHang, mergeQueries, parseDelay, queriesFromReport, repetitionPlan,
   type BenchReport, type BenchTask, type Phases, type QueryStats, type TaskRun, type WindowStats,
 } from "./bench/core";
@@ -236,7 +237,7 @@ async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
   } catch (e) {
     return crash(`navegar falhou: ${failure(e)}`);
   }
-  const args = ["portal", "act", portal, task.goal, ...(task.fills ?? []).flatMap((f) => ["--fill", f]), "--steps", String(task.maxSteps)];
+  const args = ["portal", "act", portal, task.goal, ...(task.fills ?? []).flatMap((f) => ["--fill", f]), ...(flag("with-expect") ? expectsFor(task.success).flatMap((e) => ["--expect", e]) : []), "--steps", String(task.maxSteps)];
   // Vários `act` com o mesmo objetivo (N10): o agente que repete; o critério é contado depois do último.
   const acts = Math.max(1, task.acts ?? 1);
   const actMs: number[] = [];
@@ -292,7 +293,7 @@ async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
   const run: TaskRun = {
     id: task.id, outcome: report!.outcome ?? "crash", ...evaluated,
     steps, autoFills, photos, totalMs: actMs.reduce((x, y) => x + y, 0), stepMs,
-    phases, timing: "reported", blocked, report: texts.join("\n\n").slice(0, 5000), ...(probes !== undefined ? { probes } : {}),
+    phases, timing: "reported", blocked, ...(report!.verdict ? { verdict: report!.verdict } : {}), report: texts.join("\n\n").slice(0, 5000), ...(probes !== undefined ? { probes } : {}),
     acts, actMs, queries: mergeQueries(queries), ...(window ? { window } : {}),
     ...(report!.outcome === null ? { note: "relatório do act não reconhecido" } : {}),
   };
@@ -315,7 +316,7 @@ if (mode === "sim") {
   for (const { rep, items } of plan) {
     for (const [order, task] of items.entries()) {
       // A semente da latência é por tarefa e repetição (não pela posição): a ordem não muda os números do sim.
-      const run = { ...(await runSimTask(task, { visual: !flag("no-visual"), guard: flag("sim-guard"), ...(seeded ? { seed: hashSeed(seed, task.id, rep) } : {}) })), rep, order };
+      const run = { ...(await runSimTask(task, { visual: !flag("no-visual"), guard: flag("sim-guard"), withExpect: flag("with-expect"), ...(seeded ? { seed: hashSeed(seed, task.id, rep) } : {}) })), rep, order };
       runs.push(run);
       console.log(`${run.criterionOk && !run.forbidden ? "ok  " : "FALHA"} ${task.id}${tag(rep)} — ${run.outcome}, ${run.steps} passos, ${(run.totalMs / 1000).toFixed(1)} s virtuais`);
       if (flag("verbose")) for (const line of [...(run.log ?? []), ...(run.note ? [`nota: ${run.note}`] : [])]) console.log(`      ${line}`);

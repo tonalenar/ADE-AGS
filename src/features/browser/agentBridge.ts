@@ -36,7 +36,8 @@ import type { PageChannel } from "./pageChannel";
 import { browserToolPrefix } from "./tabMcp";
 import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
-import { formatResult, runPilot, type PilotDeps } from "./jevPilot";
+import { parseExpectations, verifyReport } from "./expect";
+import { formatResult, runPilot, type PilotDeps, type PilotResult } from "./jevPilot";
 import { beginWindowMeasure } from "./windowBeat";
 
 export interface BrowserHost {
@@ -684,9 +685,14 @@ async function execute(
     case "act": {
       const goal = required(request, "goal");
       const fills = Array.isArray(request.fills) ? request.fills.filter((f): f is string => typeof f === "string") : [];
+      // `--expect`: o que prova o sucesso, conferido por código (Fase 5). Um `--expect` que não se entende recusa ANTES de agir.
+      const expects = Array.isArray(request.expects) ? request.expects.filter((e): e is string => typeof e === "string" && e.trim() !== "") : [];
+      const syntax = parseExpectations(expects).errors;
+      if (syntax.length > 0) throw new Error(syntax.join(" "));
       const endMeasure = beginWindowMeasure();
       const result = await runPilot(goal, fills, num(request, "steps"), pilotDeps(host));
-      return formatResult(goal, { ...result, window: await endMeasure() });
+      const report = formatResult(goal, { ...result, window: await endMeasure() });
+      return verifyAct(host, report, goal, result.outcome, expects);
     }
     default:
       throw new Error(`O navegador não sabe fazer '${op}'.`);
@@ -718,6 +724,19 @@ export const PORTAL_OPS = new Set([
   "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll",
   "wait", "screenshot", "console", "layout", "act",
 ]);
+
+/** Confere o `act` contra a página como ficou (um snapshot completo, não só o que está à vista). Nunca lança: sem leitura, o relatório sai como estava. */
+async function verifyAct(host: BrowserHost, report: string, goal: string, outcome: PilotResult["outcome"], expects: string[]): Promise<string> {
+  if (outcome === "off" || outcome === "error" || (outcome !== "done" && expects.length === 0)) return report;
+  try {
+    // Uma página com XHR em voo (filtro, quantidade) ainda não mostra o resultado: espera a rede ociosa antes de conferir.
+    try { await inPage(host, { op: "wait", idle: true, timeoutMs: 3_000 }, false); } catch { /* confere com o que há */ }
+    const full = await inPage(host, { op: "snapshot", all: true, inView: false }, false);
+    return verifyReport(report, goal, outcome, expects, full);
+  } catch {
+    return report;
+  }
+}
 
 /** O que o piloto do Jev usa deste navegador: ver `jevPilot.ts`. As ações são as mesmas que o agente faria à mão. */
 function pilotDeps(host: BrowserHost): PilotDeps {

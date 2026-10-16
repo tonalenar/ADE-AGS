@@ -231,7 +231,7 @@ at a time: Jev (a fast decision model) picks each next click/choice from the pag
 flows (log in, fill and submit a form, add to cart, open a section). State the goal with EVERY choice it needs (size, \
 item, section): a vague goal makes it guess. Prefer ONE call with the WHOLE goal (search, pick the result, add to cart) and raise steps for long flows: every extra call costs a full agent turn, a step costs well under a second. Typing in a search field presses Enter by itself. Pass the text to type as fills (\"Field name=value\"; the field name has \
 to look like the field's label). Typed values never leave the machine. It stops when Jev is unsure, and always \
-returns the page as it ended: check it. Needs Settings → Decisions → Canvas browser (Jev drives) turned on.",
+returns the page as it ended: check it, or pass expects so the tool checks for you (DONE (verified) / DONE (unverified) / DOES NOT MATCH). Needs Settings → Decisions → Canvas browser (Jev drives) turned on.",
         properties: || {
             json!({
                 "goal": { "type": "string", "description": "What to achieve, with every choice spelled out. e.g. \"log in, add the Backpack to the cart and open the cart\"." },
@@ -239,6 +239,11 @@ returns the page as it ended: check it. Needs Settings → Decisions → Canvas 
                     "type": "array",
                     "items": { "type": "string" },
                     "description": "Text to type, one entry per field: \"Username=standard_user\". The name must resemble the field's label.",
+                },
+                "expects": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "What PROVES success, checked by code on the final page (not by Jev): \"text:Your cart is empty\", \"url:/cart\", \"count:1\" (cart items) or \"count:2@Mug\", \"absent:Something went wrong\". Strongly recommended for cart, form submit and filter goals: the report then says DONE (verified) or DOES NOT MATCH.",
                 },
                 "steps": { "type": "number", "description": "Max decisions (1-15). Default 8." },
             })

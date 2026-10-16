@@ -12,7 +12,9 @@ import {
   runPilot, words,
   type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../../src/features/browser/jevPilot";
-import { check, evaluate, fold, instrument, rng, viewOf, type BenchTask, type Clock, type TaskRun } from "./core";
+import { parseExpectations, verify } from "../../src/features/browser/expect";
+import { parseSnapshot } from "../../src/features/browser/jevPilot";
+import { check, evaluate, expectsFor, fold, instrument, rng, viewOf, type BenchTask, type Clock, type TaskRun } from "./core";
 
 // ── O motor de páginas ──────────────────────────────────────────────
 
@@ -584,6 +586,11 @@ export function virtualClock(): Clock & { advance: (ms: number) => void } {
 }
 
 export interface SimOptions {
+  /**
+   * Fase 5: passa ao «act» os `--expect` equivalentes ao critério da tarefa e aplica a conferência por código: um FEITO que a
+   * página desmente vira NÃO CONFERE (outcome `unsure`, veredito `mismatch`). Sem isto o sim não confere nada (como o app antes).
+   */
+  withExpect?: boolean;
   /** Liga a reserva visual (a foto) como no app. Padrão: ligada. */
   visual?: boolean;
   /**
@@ -700,11 +707,21 @@ export async function runSimTask(task: BenchTask, options: SimOptions = {}): Pro
   const settled = evaluate(task, refresh().snapshot);
   const evaluated = { criterionOk: atReturn.criterionOk && settled.criterionOk, forbidden: atReturn.forbidden || settled.forbidden, finalUrl: settled.finalUrl };
   const final = result!;
+  // A conferência por código do app (Fase 5): só com `withExpect`; o app real a faz sempre (os genéricos) e com `--expect` quando passado.
+  let verdict: TaskRun["verdict"];
+  let outcome: TaskRun["outcome"] = final.outcome;
+  if (options.withExpect) {
+    const v = verify(task.goal, final.outcome, parseExpectations(expectsFor(task.success)).expects, parseSnapshot(refresh().snapshot));
+    if (final.outcome === "done") {
+      verdict = v.verdict;
+      if (v.verdict === "mismatch") outcome = "unsure";
+    }
+  }
   const numbered = log.filter((line) => /^\d+\. /.test(line)).length;
   const totalBytes = bytes.reduce((x, y) => x + y, 0);
   const run: TaskRun = {
     log,
-    id: task.id, outcome: final.outcome, ...evaluated,
+    id: task.id, outcome, ...evaluated, ...(verdict ? { verdict } : {}),
     blocked: log.some((line) => /recusou |compra ou (um )?pagamento/.test(line)) || /compra ou pagamento/.test(final.note),
     probes: picks + photos,
     steps: numbered, autoFills: log.filter((line) => line.includes("sem o Jev)")).length, photos,
