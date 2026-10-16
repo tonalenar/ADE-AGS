@@ -36,6 +36,7 @@ import type { PageChannel } from "./pageChannel";
 import { browserToolPrefix } from "./tabMcp";
 import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
+import { summarizeSnapshot } from "./finalSummary";
 import { formatResult, runPilot, type PilotDeps } from "./jevPilot";
 import { beginWindowMeasure } from "./windowBeat";
 
@@ -686,7 +687,8 @@ async function execute(
       const fills = Array.isArray(request.fills) ? request.fills.filter((f): f is string => typeof f === "string") : [];
       const endMeasure = beginWindowMeasure();
       const result = await runPilot(goal, fills, num(request, "steps"), pilotDeps(host));
-      return formatResult(goal, { ...result, window: await endMeasure() });
+      // O resumo final traz o objetivo e a região principal antes do menu (O4), em vez do começo da página.
+      return formatResult(goal, { ...result, window: await endMeasure(), finalSnapshot: summarizeSnapshot(result.finalSnapshot, goal) });
     }
     default:
       throw new Error(`O navegador não sabe fazer '${op}'.`);
