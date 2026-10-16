@@ -274,6 +274,23 @@ pub fn read_answer(
     Ok((operation, Some(target), operation_probability, target_answer.probability, confidence))
 }
 
+/**
+ * O rótulo gravado no log (`provider_decision`): os rótulos escolhidos e, depois de `|p:`, a probabilidade de CADA pergunta
+ * (`operacao=0.90,alvo_click=0.80,concluido=0.07`). O log só guardava a menor delas; sem as outras não dá para calibrar
+ * `MIN_PROBABILITY` e `MIN_GOAL_DONE` por pergunta (plano v2, 4.5). A do `concluido` é a do rótulo escolhido. Pura.
+ */
+pub fn decision_note(answers: &BTreeMap<String, super::protocol::DecisionAnswer>) -> String {
+    let probabilities: Vec<String> = answers
+        .iter()
+        .filter_map(|(id, answer)| answer.probability.map(|p| format!("{id}={p:.2}")))
+        .collect();
+    if probabilities.is_empty() {
+        canonical(answers)
+    } else {
+        format!("{}|p:{}", canonical(answers), probabilities.join(","))
+    }
+}
+
 /// A probabilidade de "sim" na pergunta direta de objetivo atingido. Com duas opções, "não" com p vale 1 − p para o "sim". Pura.
 pub fn goal_done_probability(answers: &BTreeMap<String, super::protocol::DecisionAnswer>) -> Option<f64> {
     let answer = answers.get(GOAL_DONE)?;
@@ -355,7 +372,7 @@ pub(super) fn pick_with(db: &DbConnection, settings: &config::Settings, api_key:
     };
     let (decision, error, input, output) = match &result {
         Ok(response) => (
-            Some(canonical(&response.answers)),
+            Some(decision_note(&response.answers)),
             reading.as_ref().err().map(|e| truncate_chars(e, 300)),
             response.input_tokens,
             response.output_tokens,
@@ -561,6 +578,18 @@ mod test {
         let (operation, target, op_p, target_p, _) = read_answer(&answers, &clean).unwrap();
         assert_eq!((operation.as_str(), target.as_deref()), ("type", Some("e3")));
         assert_eq!((op_p, target_p), (Some(0.9), Some(0.8)));
+    }
+
+    #[test]
+    fn o_log_guarda_a_probabilidade_de_cada_pergunta() {
+        let answers = BTreeMap::from([
+            ("operacao".to_string(), answer("click", 0.9)),
+            ("alvo_click".to_string(), answer("e4", 0.8)),
+            ("concluido".to_string(), answer("no", 0.93)),
+        ]);
+        assert_eq!(decision_note(&answers), "alvo_click=e4;concluido=no;operacao=click|p:alvo_click=0.80,concluido=0.93,operacao=0.90");
+        let bare = BTreeMap::from([("operacao".to_string(), DecisionAnswer { label: "done".into(), probability: None, confidence: None })]);
+        assert_eq!(decision_note(&bare), "operacao=done", "sem probabilidade, o rótulo de sempre");
     }
 
     #[test]
