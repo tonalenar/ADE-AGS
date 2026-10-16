@@ -28,6 +28,7 @@ import type { Tab } from "@/features/tabs/types";
 import {
   periodicScrollbackTargets,
   resetScrollbackScheduleForTests,
+  flushPendingSave,
   runPeriodicScrollbackSave,
   waitForSaves,
 } from "../persistence";
@@ -83,5 +84,39 @@ describe("scrollback periódico", () => {
     await waitForSaves();
     expect(attach).not.toHaveBeenCalled();
     expect(total).not.toHaveBeenCalled();
+  });
+});
+
+describe("histórico que a base já tem", () => {
+  beforeEach(() => {
+    attach.mockClear();
+    save.mockClear();
+    resetScrollbackScheduleForTests();
+  });
+
+  it("uma terminal sem processo (ainda não montou depois de restaurar) não apaga o scrollback guardado", async () => {
+    useTabsStore.setState({
+      tabs: [{ ...tab("canvas", 1), ptyId: null }],
+      activeTabId: "canvas",
+      hydrated: true,
+      workspaceId: "default",
+    });
+    await flushPendingSave();
+    const payload = save.mock.calls.at(-1)![0] as { tabs: { scrollback: string | null; scrollbackUnchanged: boolean }[] };
+    expect(payload.tabs[0].scrollbackUnchanged).toBe(true);
+    expect(payload.tabs[0].scrollback).toBeNull();
+  });
+
+  it("se o processo já não existe e nada foi lido, também mantém o da base", async () => {
+    attach.mockRejectedValueOnce(new Error("sem pty"));
+    useTabsStore.setState({
+      tabs: [tab("morta", 7)],
+      activeTabId: "morta",
+      hydrated: true,
+      workspaceId: "default",
+    });
+    await flushPendingSave();
+    const payload = save.mock.calls.at(-1)![0] as { tabs: { scrollbackUnchanged: boolean }[] };
+    expect(payload.tabs[0].scrollbackUnchanged).toBe(true);
   });
 });
