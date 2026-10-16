@@ -52,7 +52,7 @@ const TARGET_OPERATIONS: [&str; 3] = ["click", "type", "select"];
 
 const GOAL_DONE_INSTRUCTIONS: &str = "Is the user's WHOLE goal already visibly satisfied on the CURRENT page? Judge only from what \
 the page shows now (the page text, the elements' state) and the recent actions. An action that just ran only counts \
-if the page now shows its result. Answer no if any part of the goal is still missing.";
+if the page now shows its result. Answer no if any part of the goal is still missing. If the goal was to OPEN or GO TO an item or page, it is satisfied once the page's title or heading shows that item.";
 
 const TARGET: &str = "Choose the best offered element if the next operation is the one named in this question. \
 Use the user's entire goal, the elements' state, nearby page text and the recent actions. This question only chooses \

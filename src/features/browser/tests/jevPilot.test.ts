@@ -998,3 +998,33 @@ describe("busca enviada com Enter", () => {
     expect(result.outcome).toBe("done");
   });
 });
+
+describe("busca enviada pelo piloto e sugestões (L04, N06)", () => {
+  const home = ['page: "Loja" https://shop.test/', "viewport: 1000×600", "", '- searchbox "Buscar produtos" [ref=e1] value=""', '- button "Buscar" [ref=e2]'].join("\n");
+  const results = ['page: "Resultados" https://shop.test/busca?q=tenis', "viewport: 1000×600", "", '- heading "Resultados para: tenis" [level=1]', '- link "Tênis" [ref=e1]'].join("\n");
+
+  it("L04: a busca que o piloto enviou levou a outra página e o «acabou» com p=0,7 basta", async () => {
+    const h = harness([{ ...ok("done", null, 0.7), goalDone: 0.7 }], [home, results]);
+    const result = await runPilot("Pesquise por tênis na loja.", ["Buscar produtos=tenis"], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+  });
+
+  it("L04: se o Enter não mudou a página, o «acabou» sem ação continua sem valer", async () => {
+    const h = harness([{ ...ok("done", null, 0.7), goalDone: 0.7 }], [home]);
+    const result = await runPilot("Pesquise por tênis na loja.", ["Buscar produtos=tenis"], undefined, h.deps);
+    expect(result.outcome).toBe("unsure");
+  });
+
+  it("N06: se o objetivo manda escolher uma sugestão, digitar não aperta Enter", async () => {
+    const h = harness([ok("done")], [home]);
+    const submits: boolean[] = [];
+    h.deps.type = async (_ref, _text, submit) => { submits.push(!!submit); };
+    await runPilot("Pesquise por fone e escolha a sugestão «fone bluetooth» na lista.", ["Buscar produtos=fone"], undefined, h.deps);
+    expect(submits).toEqual([false]);
+    const submits2: boolean[] = [];
+    const h2 = harness([ok("done")], [home]);
+    h2.deps.type = async (_ref, _text, submit) => { submits2.push(!!submit); };
+    await runPilot("Pesquise por fone na loja.", ["Buscar produtos=fone"], undefined, h2.deps);
+    expect(submits2).toEqual([true]);
+  });
+});

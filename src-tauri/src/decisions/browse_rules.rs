@@ -10,7 +10,7 @@
 //! snapshot (`page/runtime.ts`); um teste do lado TypeScript lê este arquivo e confere que os dois lados usam as mesmas palavras.
 
 /// Sobe a cada mudança de texto de regra. Vai na linha `TEMPOS`/relatório do benchmark para saber que regras rodaram.
-pub const RULES_VERSION: &str = "2026-10-16.3";
+pub const RULES_VERSION: &str = "2026-10-16.4";
 
 /// O núcleo, herdado da versão sem arquivo próprio: sempre uma operação, estado atual, sem repetir, preencher antes de enviar.
 const CORE: &str = "Advance the user's entire goal from the CURRENT page using exactly one operation. \
@@ -30,7 +30,7 @@ pub struct Rule {
 }
 
 /// As regras, na ordem em que o Jev as lê. Cada uma cita um sinal que o piloto escreve no estado.
-pub const RULES: [Rule; 6] = [
+pub const RULES: [Rule; 7] = [
     Rule {
         id: "anuncios",
         text: "Elements marked [sponsored] are advertisements. Never choose one unless the goal asks for an ad or a \
@@ -63,6 +63,10 @@ Never choose a control the banner is covering. Do not fill a popup's form unless
         id: "formulario-obrigatorio",
         text: "Before a Submit, Next, Send or Continue control, every field marked [required] must be filled: fill the \
 empty required field first. Never submit a form while a required field is empty.",
+    },
+    Rule {
+        id: "abrir-item",
+        text: "If the goal is to open, visit or go to a specific item, link or page, and the CURRENT page already is that item (its title or main heading names it), the goal is satisfied: answer DONE. Never go back to the results or choose a Back link after the wanted page is open.",
     },
 ];
 
@@ -128,9 +132,9 @@ mod test {
     }
 
     #[test]
-    fn as_seis_regras_do_plano_existem() {
+    fn as_regras_do_plano_existem() {
         let ids: Vec<&str> = RULES.iter().map(|rule| rule.id).collect();
-        assert_eq!(ids, ["anuncios", "passo-satisfeito", "quantidade", "paginacao", "modal-cookie", "formulario-obrigatorio"]);
+        assert_eq!(ids, ["anuncios", "passo-satisfeito", "quantidade", "paginacao", "modal-cookie", "formulario-obrigatorio", "abrir-item"]);
     }
 
     #[test]

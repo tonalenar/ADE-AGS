@@ -330,6 +330,25 @@ export function pickText(lines: string[], wanted: Set<string>, budget = TEXT_BYT
  * A consulta de um passo: o estado (objetivo, página, últimas ações, texto visível), as operações possíveis e os
  * elementos de cada uma. Os campos a preencher entram só pelo NOME. Pura.
  */
+/**
+ * Do que o objetivo cita entre «», «"» ou aspas, os links que têm esse nome mas NÃO vão para esse destino, quando existe um link
+ * com esse nome que vai (o último trecho do endereço é o próprio nome: `/wiki/Portugal`). Sem um link exato, nada sai. Pura.
+ */
+export function inexactLinks(page: ParsedPage, goal: string): Set<string> {
+  const out = new Set<string>();
+  const slug = (href: string) => {
+    try { return decodeURIComponent(href.split("/").filter(Boolean).pop() ?? "").replace(/[_-]/g, " ").trim().toLowerCase(); } catch { return ""; }
+  };
+  for (const match of goal.matchAll(/[«"“]([^»"”]{2,40})[»"”]/g)) {
+    const wanted = match[1].trim().toLowerCase();
+    const same = page.elements.filter((el) => el.role === "link" && el.name.trim().toLowerCase() === wanted);
+    const exact = same.filter((el) => el.href !== undefined && slug(el.href) === wanted);
+    if (exact.length === 0) continue;
+    for (const el of same) if (!exact.includes(el)) out.add(el.ref);
+  }
+  return out;
+}
+
 export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], history: Done[], waits = 0): StepQuery {
   const wanted = words(`${goal} ${fillKeys.join(" ")}`);
   const wantsAds = AD_GOAL.test(goal);
@@ -341,6 +360,7 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
     - (!wantsAds && el.states.includes(SPONSORED_STATE) ? 4 : 0);
 
   const twins = twinsOf(page.elements);
+  const inexact = inexactLinks(page, goal);
   const groups: Record<Operation, { el: PageElement; index: number }[]> = { click: [], type: [], select: [] };
   // Uma lista nativa com opções vira UM ALVO POR OPÇÃO ("Classificar por → Preço: do menor ao maior"): escolher não
   // precisa de `--fill`, o objetivo já diz qual.
@@ -350,6 +370,9 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
     // Um botão de compra ou pagamento que o objetivo não pediu nem é oferecido: o Jev escolhe entre os outros (o
     // "Adicionar ao carrinho" ao lado de um "Comprar agora") em vez de o piloto parar ao ver a escolha barrada.
     if (blockedControl(el, goal)) return;
+    // Vários links com o MESMO nome do que o objetivo cita entre «», e um deles vai mesmo para esse destino: os outros saem
+    // (P02: «Portugal» levava ao «Império Português»).
+    if (inexact.has(el.ref)) return;
     if (operationOf(el) === "select" && el.options?.length) {
       el.options.forEach((option, i) => optionTargets.push({ id: `${el.ref}_${i}`, label: `${plain(el)} → option "${option}"` }));
       return;
@@ -547,17 +570,26 @@ export function blockedPurchase(label: string, goal: string): boolean {
 
 /** Com esta certeza de que o objetivo já está atingido (pergunta direta), o piloto conclui mesmo sem uma operação segura. */
 export const MIN_GOAL_DONE = 0.75;
+/** Depois de uma busca que o PILOTO enviou (Enter) e que levou a outra página, o «acabou» basta com menos certeza. */
+export const MIN_GOAL_DONE_AFTER_SUBMIT = 0.6;
 
 /**
  * O elemento escolhido não tem nome (nem destino de link) e há outros iguais na mesma pergunta? Então o texto não os
  * distingue — dois ícones sem nome, o perfil e o carrinho — e a escolha do Jev seria um palpite. Pura.
  */
-export function isAmbiguous(query: StepQuery, operation: string, target: string | null): boolean {
+export function isAmbiguous(query: StepQuery, operation: string, target: string | null, probability: number | null = null): boolean {
   const options = query.targets[operation];
   const chosen = options?.find((o) => o.id === target);
   if (!chosen || chosen.label.includes('"') || chosen.label.includes(" → ")) return false;
-  return options.filter((o) => o.label === chosen.label).length > 1;
+  if (options.filter((o) => o.label === chosen.label).length > 1) return true;
+  // Dois ícones sem nome com rótulos que só diferem pelo «perto de»: o Jev escolhe um com p=0,58 e erra metade das vezes (L01).
+  // Sem nome e sem certeza (p < 0,8), com outro controle sem nome na pergunta, é palpite: a foto decide.
+  const unnamed = options.filter((o) => !o.label.includes('"') && !o.label.includes(" → "));
+  return probability !== null && probability < UNNAMED_MIN_PROBABILITY && unnamed.length > 1;
 }
+
+/** Abaixo disto, um controle SEM NOME escolhido entre outros sem nome não é aceito só pelo texto. */
+export const UNNAMED_MIN_PROBABILITY = 0.8;
 
 /**
  * Há um campo de senha, cartão ou token PREENCHIDO? Então a foto não sai: o detector de segredos não lê imagens e
@@ -952,8 +984,11 @@ async function pilotLoop(
       history.push({ what, changed: false, auto: true });
     }
     if (filled.length > 0) {
+      const filledEntries: Done[] = [];
       for (const what of filled) {
-        history.push({ what, changed: true, auto: true });
+        const entry: Done = { what, changed: true, auto: true };
+        filledEntries.push(entry);
+        history.push(entry);
         log.push(`${what} (pelo nome do campo, sem o Jev)`);
       }
       const before = fingerprint(page);
@@ -968,13 +1003,17 @@ async function pilotLoop(
           snapshot = progress.snapshot = await deps.snapshot();
           page = parseSnapshot(snapshot);
         }
+        // O Enter que não mudou a página não conta como ação que levou ao objetivo (abaixo, `lastDid`).
+        if (fingerprint(page) === before) for (const entry of filledEntries) if (entry.what.includes("apertou Enter")) entry.changed = false;
       }
     }
 
     const query = buildStep(page, goal, fills.map(([key]) => key).filter((key) => !taken.has(key)), history, waits);
     // A pergunta «o objetivo já foi atingido?» só vale depois de uma ação do Jev que mudou a página (abaixo): sem isso a
     // resposta seria jogada fora, e custa uma cabeça a mais por consulta.
-    const lastJev = [...history].reverse().find((d) => !d.auto);
+    // Uma busca enviada pelo piloto com Enter (campo preenchido pelo nome) que levou a OUTRA página também é uma ação dele: o
+    // objetivo «pesquise X» termina ali, e o Jev dizia «acabou» com p=0,72 e o `act` parava «sem certeza» (L04).
+    const lastJev = [...history].reverse().find((d) => !d.auto || (d.changed && d.what.includes("apertou Enter")));
     if (!lastJev || lastJev.changed === false) query.skipGoalDone = true;
     const reply = await deps.pick(query);
     if (reply.status !== "ok" || !reply.operation) {
@@ -997,7 +1036,7 @@ async function pilotLoop(
       return "retry";
     };
     const unconfirmed = () => finish("unsure", "O Jev disse que o objetivo foi atingido, mas a página não confere (veja acima). Continue você, com `snapshot` e `click`.");
-    if (lastByJev && lastByJev.changed !== false && (reply.goalDone ?? 0) >= MIN_GOAL_DONE) {
+    if (lastByJev && lastByJev.changed !== false && (reply.goalDone ?? 0) >= (lastByJev.auto ? MIN_GOAL_DONE_AFTER_SUBMIT : MIN_GOAL_DONE)) {
       const verdict = doubt();
       if (verdict === "retry") continue;
       if (verdict === "give-up") return unconfirmed();
@@ -1006,7 +1045,7 @@ async function pilotLoop(
     }
     // `fim` = a pergunta direta "o objetivo já foi atingido?": aparece no relatório para o limite poder ser ajustado com dados.
     const meta = `${reply.probability !== null ? `p=${reply.probability.toFixed(2)}` : "p=?"}${reply.goalDone != null ? `, fim p=${reply.goalDone.toFixed(2)}` : ""}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
-    const ambiguous = operation !== "done" && isAmbiguous(query, operation, reply.target);
+    const ambiguous = operation !== "done" && isAmbiguous(query, operation, reply.target, reply.probability);
     const lowP = reply.probability !== null && reply.probability < MIN_PROBABILITY && operation !== "done";
     if (ambiguous || (lowP && !obviousAdvance(page, operation, reply.target, reply.probability, goal))) {
       const fallback = await visualFallback(page, step);
@@ -1169,8 +1208,13 @@ export function isSearchField(el: PageElement): boolean {
  */
 export function submitsOnType(el: PageElement, page: ParsedPage | undefined, goal: string): boolean {
   if (!isSearchField(el)) return false;
+  // «Pesquise por fone e escolha a sugestão «fone bluetooth»»: o Enter enviaria «fone» antes de a sugestão aparecer (N06).
+  if (SUGGEST_GOAL.test(goal)) return false;
   return !page?.elements.some((other) => blockedControl(other, goal));
 }
+
+/** O objetivo manda ESCOLHER uma sugestão da lista de autocompletar: digitar não pode enviar a busca. */
+const SUGGEST_GOAL = /sugest|suggest|autocomplet/i;
 
 /** Faz o que a operação pede no elemento e conta o que fez, sem o valor digitado. */
 async function act(el: PageElement, operation: string, fills: [string, string][], taken: Set<string>, deps: PilotDeps, option?: string, where?: { page: ParsedPage; goal: string }): Promise<string> {

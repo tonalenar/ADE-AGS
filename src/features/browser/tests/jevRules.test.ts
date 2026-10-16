@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 import {
-  buildStep, parseSnapshot, repeatedAdd, runPilot, type Done, type PilotDeps, type PriorAction, type StepQuery, type StepReply,
+  buildStep, inexactLinks, isAmbiguous, parseSnapshot, repeatedAdd, runPilot, type Done, type PilotDeps, type PriorAction, type StepQuery, type StepReply,
 } from "../jevPilot";
 
 // Plano v2, 4.1 (achado D1): as regras do NEXT_ACTION vivem em `decisions/browse_rules.rs`, uma por regra, e cada uma tem aqui
@@ -25,7 +25,7 @@ describe("o contrato entre as regras (Rust) e os sinais do piloto (TypeScript)",
   });
 
   it("todas as regras do plano têm id e uma página de teste neste arquivo", () => {
-    for (const id of ["anuncios", "passo-satisfeito", "quantidade", "paginacao", "modal-cookie", "formulario-obrigatorio"]) {
+    for (const id of ["anuncios", "passo-satisfeito", "quantidade", "paginacao", "modal-cookie", "formulario-obrigatorio", "abrir-item"]) {
       expect(RULES_RS).toContain(`id: "${id}"`);
       expect(readFileSync(new URL(import.meta.url), "utf8")).toContain(`regra «${id}»`);
     }
@@ -275,5 +275,49 @@ describe("regra «formulario-obrigatorio»", () => {
     expect(fields[0]).toContain("empty");
     expect(fields[1]).not.toContain("[required]");
     expect(labelsOf(query).some((l) => l.includes("Enviar"))).toBe(true);
+  });
+});
+
+describe("regra «abrir-item»", () => {
+  it("o texto manda concluir quando a página já é o item e não voltar aos resultados", () => {
+    expect(RULES_RS).toContain('id: "abrir-item"');
+    expect(RULES_RS).toContain("answer DONE");
+    expect(RULES_RS).toContain("Never go back to the results");
+  });
+});
+
+describe("links com o mesmo nome do objetivo (P02)", () => {
+  const wiki = page([
+    '- link "Portugal" [ref=e1] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs',
+    '- link "Portugal" [ref=e2] → /wiki/Portugal',
+    '- link "Portugal" [ref=e3] → /wiki/Reino_de_Portugal',
+    '- link "Espanha" [ref=e4] → /wiki/Espanha',
+  ]);
+
+  it("só o link que vai para o destino com o nome do objetivo fica; os outros de mesmo nome saem", () => {
+    const refs = [...inexactLinks(wiki, "Abra o artigo clicando em um link «Portugal» do texto")].sort();
+    expect(refs).toEqual(["e1", "e3"]);
+    const query = buildStep(wiki, "Abra o artigo clicando em um link «Portugal» do texto", [], []);
+    const ids = (query.targets.click ?? []).map((t) => t.id);
+    expect(ids).toContain("e2");
+    expect(ids).toContain("e4");
+    expect(ids).not.toContain("e1");
+    expect(ids).not.toContain("e3");
+  });
+
+  it("sem um link exato nada sai, e sem aspas no objetivo também não", () => {
+    const sem = page(['- link "Portugal" [ref=e1] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs', '- link "Portugal" [ref=e2] → /wiki/Reino_de_Portugal']);
+    expect(inexactLinks(sem, "abrir «Portugal»").size).toBe(0);
+    expect(inexactLinks(wiki, "abrir o artigo sobre Portugal").size).toBe(0);
+  });
+});
+
+describe("dois ícones sem nome (L01)", () => {
+  const icons = page(['- text "Perfil"', '- link [ref=e1]', '- text "Carrinho"', '- link [ref=e2]', '- button "Contato" [ref=e3]']);
+  it("sem nome, sem certeza e com outro sem nome: é palpite e a foto decide; com certeza ou com nome, não", () => {
+    const query = buildStep(icons, "abrir o carrinho", [], []);
+    expect(isAmbiguous(query, "click", "e2", 0.58)).toBe(true);
+    expect(isAmbiguous(query, "click", "e2", 0.95)).toBe(false);
+    expect(isAmbiguous(query, "click", "e3", 0.5)).toBe(false);
   });
 });
