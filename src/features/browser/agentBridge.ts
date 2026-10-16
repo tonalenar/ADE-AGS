@@ -814,6 +814,7 @@ export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLe
     notes.push(`depois da navegação (${Date.now() - started} ms): ${loaded ? "a página nova carregou" : "a página nova NÃO terminou de carregar em 12 s"}${waited ? `; ${waited}` : ""}`);
   };
   return {
+    snapshotAll: () => inPage(host, { op: "snapshot", all: true, inView: false }, false),
     // Um envio de busca pode levar segundos até a página nova existir (a Amazon: ~8 s): se a leitura falha por isso, espera a
     // próxima carga e lê de novo, em vez de abortar o `act` com o que já foi feito.
     snapshot: async () => {
@@ -886,17 +887,17 @@ export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLe
       }
       return invoke("decision_pick_visual", { query: { goal, recent, imagePath: shot.path } });
     },
-    peekAt: async (x, y) => inPage(host, { op: "peek", target: `@${x},${y}` }, false),
+    peekAt: async (x, y, second) => inPage(host, { op: "peek", target: `@${x},${y}${second ? "#2" : ""}` }, false),
     // Só o histórico que ainda vale para a página de agora (outra página, ou o carrinho que voltou a 0, não conta).
     prior: () => ledger.prior(lastPage ? fingerprint(lastPage) : null, { url: lastPage?.url, cart: lastPage ? cartCount(lastPage) : null }),
     finish: (finalSnapshot) => {
       closeAction(null);
       ledger.endAct(finalSnapshot ? fingerprint(parseSnapshot(finalSnapshot)) : lastPage ? fingerprint(lastPage) : null);
     },
-    clickAt: async (x, y) => {
-      openAction("tocou num ponto da foto", null);
+    clickAt: async (x, y, second) => {
+      openAction(second ? "tocou no outro ícone sem nome ao lado do ponto da foto" : "tocou num ponto da foto", null);
       const loads = host.loadCount();
-      const result = await inPage(host, { op: "click", target: `@${x},${y}`, fast: true }, false);
+      const result = await inPage(host, { op: "click", target: `@${x},${y}${second ? "#2" : ""}`, fast: true }, false);
       noteWait(result, "toque pela foto");
       // Um toque pela foto não sabe se é um link: o resultado diz se navegou (senão o piloto julgaria a página antiga).
       await landed(result, loads);

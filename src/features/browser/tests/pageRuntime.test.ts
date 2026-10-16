@@ -284,3 +284,10 @@ describe("farFromWindow (o snapshot do piloto só traz o que está perto da jane
     expect(farFromWindow(at(9000), 800, "absolute")).toBe(true);
   });
 });
+
+describe("alvo @x,y#2 (o outro ícone sem nome)", () => {
+  it("é um ponto marcado como segundo toque", () => {
+    expect(parseTarget("@120,40")).toEqual({ kind: "point", x: 120, y: 40 });
+    expect(parseTarget("@120.5,40#2")).toEqual({ kind: "point", x: 120.5, y: 40, second: true });
+  });
+});

@@ -334,6 +334,19 @@ export function pickText(lines: string[], wanted: Set<string>, budget = TEXT_BYT
  * Do que o objetivo cita entre «», «"» ou aspas, os links que têm esse nome mas NÃO vão para esse destino, quando existe um link
  * com esse nome que vai (o último trecho do endereço é o próprio nome: `/wiki/Portugal`). Sem um link exato, nada sai. Pura.
  */
+/** Do que o objetivo cita entre «», os nomes que têm link(s) na página mas NENHUM vai ao destino com esse nome: o exato deve estar fora do recorte. Pura. */
+export function exactLinkMissing(page: ParsedPage, goal: string): boolean {
+  const slug = (href: string) => {
+    try { return decodeURIComponent(href.split("/").filter(Boolean).pop() ?? "").replace(/[_-]/g, " ").trim().toLowerCase(); } catch { return ""; }
+  };
+  for (const match of goal.matchAll(/[«"“]([^»"”]{2,40})[»"”]/g)) {
+    const wanted = match[1].trim().toLowerCase();
+    const same = page.elements.filter((el) => el.role === "link" && el.name.trim().toLowerCase() === wanted);
+    if (same.length > 0 && !same.some((el) => el.href !== undefined && slug(el.href) === wanted)) return true;
+  }
+  return false;
+}
+
 export function inexactLinks(page: ParsedPage, goal: string): Set<string> {
   const out = new Set<string>();
   const slug = (href: string) => {
@@ -506,12 +519,14 @@ export interface PilotDeps {
   /** As ações dos `act` anteriores NESTE portal (D6). Chamada DEPOIS da primeira leitura da página (é aí que se sabe se ela mudou). Opcional. */
   prior?: () => PriorAction[];
   snapshot: () => Promise<string>;
+  /** A página INTEIRA (não só a janela e arredores): para achar um link exato que está fora do recorte (P02). Opcional. */
+  snapshotAll?: () => Promise<string>;
   /** Reserva visual: pede ao Jev que aponte, numa FOTO da página, onde tocar. Opcional. */
   visual?: (goal: string, recent: string) => Promise<VisualReply>;
   /** Toca num ponto da janela da página (px CSS). Vai junto de `visual`. */
-  clickAt?: (x: number, y: number) => Promise<unknown>;
+  clickAt?: (x: number, y: number, second?: boolean) => Promise<unknown>;
   /** O que há sob um ponto (nome, texto, id), sem tocar: o piloto confere antes de tocar num ponto apontado por uma foto. */
-  peekAt?: (x: number, y: number) => Promise<string>;
+  peekAt?: (x: number, y: number, second?: boolean) => Promise<string>;
   /** `navigates`: o toque vai levar a outra página (um link com destino): espera ela carregar antes de reler. */
   click: (ref: string, navigates?: boolean) => Promise<unknown>;
   /** `submit`: aperta Enter depois de digitar (uma busca só roda assim quando a página não tem botão visível). */
@@ -800,6 +815,7 @@ export function timed(deps: PilotDeps, t: Timings): PilotDeps {
     };
   return {
     snapshot: wrap("snapshot", deps.snapshot),
+    snapshotAll: deps.snapshotAll && wrap("snapshot", deps.snapshotAll),
     visual: deps.visual && (async (goal, recent) => { t.fotos += 1; return wrap("foto", deps.visual!)(goal, recent); }),
     clickAt: deps.clickAt && wrap("acao", deps.clickAt),
     peekAt: deps.peekAt && wrap("acao", deps.peekAt),
@@ -906,6 +922,8 @@ async function pilotLoop(
     return finish("error", early);
   }
   let contradictions = 0;
+  /** As páginas (impressões) cuja leitura inteira já foi tentada. */
+  const fullRead = new Set<string>();
   /** Quantos itens o carrinho tinha ao começar (se a página já é um carrinho): «remover» só vale se isso diminuiu. */
   const initialCart = cartCount(parseSnapshot(snapshot));
 
@@ -915,10 +933,38 @@ async function pilotLoop(
   let photos = 0;
   /** O passo anterior foi um toque pela foto: a página ainda pode não ter mostrado o efeito, e um segundo toque desfaz o primeiro. */
   let photoJustTapped = false;
+  /** O último toque pela foto e quantos controles sem nome havia ao lado (a página diz). */
+  let lastTap: { x: number; y: number; neighbors: number } | null = null;
+  let secondTried = false;
   /** `"acted"` = tocou e a página foi relida; um texto = por que não serviu (vai na nota); `null` = não se aplica. */
   const visualFallback = async (page: ParsedPage, step: number): Promise<"acted" | string | null> => {
     if (!deps.visual || !deps.clickAt || photos >= MAX_VISUAL) return null;
-    if (photoJustTapped) return "A foto acabou de tocar: confira a página antes de tirar outra (um segundo toque pode desfazer o primeiro).";
+    if (photoJustTapped) {
+      // A foto apontou o espaço entre dois ícones sem nome (o perfil e o carrinho), o toque caiu num deles e o Jev, na página nova,
+      // continua sem saber o que fazer: o objetivo não foi atingido. Tenta o OUTRO ícone sem nome mais perto do mesmo ponto, uma vez
+      // (L01). Só entre controles SEM nome — dois botões com nome, ou um que o objetivo não pediu, não se adivinha assim.
+      if (lastTap && lastTap.neighbors > 0 && !secondTried && deps.clickAt) {
+        secondTried = true;
+        const { x, y } = lastTap;
+        if (deps.peekAt) {
+          const under = await deps.peekAt(x, y, true).catch(() => "");
+          if (blockedPurchase(under, goal)) return `O vizinho do ponto (${x}, ${y}) é um controle de compra ou pagamento que o objetivo não pediu: não toquei.`;
+        }
+        try {
+          await deps.clickAt(x, y, true);
+        } catch (e) {
+          return `O segundo toque (no controle sem nome ao lado) falhou: ${e instanceof Error ? e.message : String(e)}`;
+        }
+        const what = `tocou no outro ícone sem nome perto do ponto (${x}, ${y})`;
+        log.push(`${step}. ${what} (o primeiro toque da foto não levou ao objetivo)`);
+        const before = fingerprint(page);
+        await deps.settle();
+        snapshot = progress.snapshot = await deps.snapshot();
+        history.push({ what, changed: fingerprint(parseSnapshot(snapshot)) !== before });
+        return "acted";
+      }
+      return "A foto acabou de tocar: confira a página antes de tirar outra (um segundo toque pode desfazer o primeiro).";
+    }
     const fp = fingerprint(page);
     if (triedPhotos.has(fp) || !page.viewport) return null;
     if (sensitiveFilled(page)) return "A reserva visual não foi usada: há um campo de senha, cartão ou token preenchido e a foto não pode sair.";
@@ -950,8 +996,10 @@ async function pilotLoop(
       }
     }
     try {
-      await deps.clickAt(x, y);
+      const result = await deps.clickAt(x, y);
       tapped.push({ x, y });
+      const neighbors = /"unnamedNeighbors":\s*(\d+)/.exec(typeof result === "string" ? result : JSON.stringify(result ?? ""))?.[1];
+      lastTap = { x, y, neighbors: neighbors ? Number(neighbors) : 0 };
     } catch (e) {
       return `O toque pela foto falhou: ${e instanceof Error ? e.message : String(e)}`;
     }
@@ -1008,6 +1056,20 @@ async function pilotLoop(
       }
     }
 
+    // O objetivo cita um nome entre «» e os links com esse nome visíveis não vão ao destino certo: o exato pode estar fora do
+    // recorte (a janela e arredores de uma página longa). Lê a página inteira uma vez por página e usa-a neste passo (P02).
+    if (deps.snapshotAll && exactLinkMissing(page, goal) && !fullRead.has(fingerprint(page))) {
+      fullRead.add(fingerprint(page));
+      try {
+        const full = await deps.snapshotAll();
+        const whole = parseSnapshot(full);
+        if (!exactLinkMissing(whole, goal)) {
+          snapshot = progress.snapshot = full;
+          page = whole;
+          log.push(`${step}. o link exato do objetivo estava fora da janela: li a página inteira`);
+        }
+      } catch { /* segue com o recorte */ }
+    }
     const query = buildStep(page, goal, fills.map(([key]) => key).filter((key) => !taken.has(key)), history, waits);
     // A pergunta «o objetivo já foi atingido?» só vale depois de uma ação do Jev que mudou a página (abaixo): sem isso a
     // resposta seria jogada fora, e custa uma cabeça a mais por consulta.

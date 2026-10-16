@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, blockedControl, obviousAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, goalContradiction, missingFill, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, blockedControl, obviousAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, exactLinkMissing, goalContradiction, missingFill, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -1026,5 +1026,76 @@ describe("busca enviada pelo piloto e sugestões (L04, N06)", () => {
     h2.deps.type = async (_ref, _text, submit) => { submits2.push(!!submit); };
     await runPilot("Pesquise por fone na loja.", ["Buscar produtos=fone"], undefined, h2.deps);
     expect(submits2).toEqual([true]);
+  });
+});
+
+describe("link exato fora do recorte (P02)", () => {
+  const cut = ['page: "Brasil" https://pt.wikipedia.org/wiki/Brasil', "viewport: 1000×600 · scroll 0/40000", "", '- link "Portugal" [ref=e1] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs', '- link "Espanha" [ref=e2] → /wiki/Espanha'].join("\n");
+  const whole = ['page: "Brasil" https://pt.wikipedia.org/wiki/Brasil', "viewport: 1000×600 · scroll 0/40000", "", '- link "Portugal" [ref=e1] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs', '- link "Espanha" [ref=e2] → /wiki/Espanha', '- link "Portugal" [ref=e9] → /wiki/Portugal'].join("\n");
+  const goal = "Abra o artigo clicando em um link «Portugal» do texto";
+
+  it("só acusa quando há link com o nome e nenhum vai ao destino citado", () => {
+    expect(exactLinkMissing(parseSnapshot(cut), goal)).toBe(true);
+    expect(exactLinkMissing(parseSnapshot(whole), goal)).toBe(false);
+    expect(exactLinkMissing(parseSnapshot(cut), "abrir o artigo sobre Portugal")).toBe(false);
+    expect(exactLinkMissing(parseSnapshot(cut), "abrir «Dinamarca»")).toBe(false);
+  });
+
+  it("o piloto lê a página inteira, escolhe entre os links exatos e clica no certo", async () => {
+    const h = harness([ok("click", "e9"), ok("done")], [cut, whole]);
+    let wholeReads = 0;
+    h.deps.snapshotAll = async () => { wholeReads += 1; return whole; };
+    const result = await runPilot(goal, [], undefined, h.deps);
+    expect(wholeReads).toBe(1);
+    expect(h.asked[0].targets.click?.map((t) => t.id)).toContain("e9");
+    expect(h.asked[0].targets.click?.map((t) => t.id)).not.toContain("e1");
+    expect(result.steps.join("\n")).toContain("li a página inteira");
+  });
+
+  it("sem o link exato nem na página inteira, segue com o recorte e não insiste", async () => {
+    const h = harness([ok("click", "e1")], [cut]);
+    let reads = 0;
+    h.deps.snapshotAll = async () => { reads += 1; return cut; };
+    await runPilot(goal, [], undefined, h.deps);
+    expect(reads).toBe(1);
+  });
+});
+
+describe("dois ícones sem nome: o segundo toque (L01)", () => {
+  /** A foto aponta um ponto; o 1.º toque cai num ícone sem nome com um vizinho sem nome; a página nova não diz nada ao Jev. */
+  function twoIcons(neighbors: number) {
+    const pages = [ICONS_PAGE, `${ICONS_PAGE}\n- text "PROFILE OPENED"`, `${ICONS_PAGE}\n- text "CART OPENED"`];
+    const h = visualHarness([ok("click", "e1", 0.3), ok("click", "e1", 0.3), ok("done")], seen([0.5, 0.5]), pages);
+    const calls: string[] = [];
+    let page = 0;
+    h.deps.snapshot = async () => pages[Math.min(page, pages.length - 1)];
+    h.deps.clickAt = async (x, y, second) => {
+      calls.push(`${x},${y}${second ? "#2" : ""}`);
+      page += 1;
+      return second ? "{}" : JSON.stringify({ clicked: "clickable", unnamedNeighbors: neighbors });
+    };
+    h.deps.peekAt = async () => "clickable";
+    return { h, calls };
+  }
+
+  it("com um vizinho sem nome ao lado, o piloto toca nele uma vez quando o primeiro não levou ao objetivo", async () => {
+    const { h, calls } = twoIcons(1);
+    const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
+    expect(calls).toEqual(["500,300", "500,300#2"]);
+    expect(result.steps.join("\n")).toContain("tocou no outro ícone sem nome");
+  });
+
+  it("sem vizinho sem nome, não tenta o segundo toque", async () => {
+    const { h, calls } = twoIcons(0);
+    await runPilot("abrir o carrinho", [], undefined, h.deps);
+    expect(calls).toEqual(["500,300"]);
+  });
+
+  it("o vizinho que é compra ou pagamento não pedido não é tocado", async () => {
+    const { h, calls } = twoIcons(1);
+    h.deps.peekAt = async (_x, _y, second) => (second ? "button | Comprar agora" : "clickable");
+    const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
+    expect(calls).toEqual(["500,300"]);
+    expect(result.steps.join("\n")).toContain("compra ou pagamento");
   });
 });

@@ -205,7 +205,7 @@ export type TargetSpec =
   | { kind: "text"; text: string }
   | { kind: "css"; selector: string }
   /** Um ponto da janela da página, em px CSS: o que a reserva visual do piloto aponta numa foto. */
-  | { kind: "point"; x: number; y: number };
+  | { kind: "point"; x: number; y: number; second?: boolean };
 
 export function parseTarget(target: string): TargetSpec {
   const t = target.trim();
@@ -213,8 +213,9 @@ export function parseTarget(target: string): TargetSpec {
   // `@e63` também: é como a ajuda de `ags portal click` escreve um ref.
   const asRef = /^@?([eu]\d+)$/.exec(t);
   if (asRef) return { kind: "ref", ref: asRef[1] };
-  const point = /^@(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)$/.exec(t);
-  if (point) return { kind: "point", x: Number(point[1]), y: Number(point[2]) };
+  // `@x,y#2`: o SEGUNDO controle sem nome perto do ponto (o primeiro já foi tocado e não era o certo: dois ícones lado a lado).
+  const point = /^@(\d+(?:\.\d+)?),(\d+(?:\.\d+)?)(#2)?$/.exec(t);
+  if (point) return { kind: "point", x: Number(point[1]), y: Number(point[2]), ...(point[3] ? { second: true } : {}) };
   const text = /^text[=:](.+)$/s.exec(t);
   if (text) return { kind: "text", text: text[1].trim().replace(/^["'](.*)["']$/s, "$1") };
   return { kind: "css", selector: t };

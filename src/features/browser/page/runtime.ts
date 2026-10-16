@@ -36,7 +36,7 @@ import { findSponsoredBlocks, inSponsored } from "./sponsored";
 import { isTouch, sendTouch, setTouch } from "./touch";
 import { CORS_HEADER, CRED_HEADER, HEADERS_HEADER, corsMessage, routeRequest, type Routed } from "./route";
 import {
-  displayHref, farFromWindow, formatSnapshot, normalizeName, humanizeId, parseKeyCombo, parseTarget, probePoints, snapToNearest, type Box4, type SnapshotNode,
+  displayHref, distanceToBox, farFromWindow, formatSnapshot, normalizeName, humanizeId, parseKeyCombo, parseTarget, probePoints, snapToNearest, type Box4, type SnapshotNode,
 } from "./snapshotFormat";
 
 declare global {
@@ -940,8 +940,8 @@ declare global {
     return style.display !== "none" && style.visibility !== "hidden" && el.getClientRects().length > 0;
   }
 
-  /** O controle clicável que fica com um ponto: ver `snapToNearest`. `null` = nenhum perto. */
-  function clickableNear(x: number, y: number): Element | null {
+  /** Os controles clicáveis da janela, com a caixa de cada um. */
+  function collectClickables(): { el: Element; box: Box4 }[] {
     const area = window.innerWidth * window.innerHeight;
     const found: { el: Element; box: Box4 }[] = [];
     for (const el of Array.from(document.querySelectorAll("*"))) {
@@ -955,6 +955,21 @@ declare global {
       if (r.width < 2 || r.height < 2 || r.width * r.height > area * 0.4) continue;
       found.push({ el, box: { left: r.left, top: r.top, right: r.right, bottom: r.bottom } });
     }
+    return found;
+  }
+
+  /** Um controle sem nome (um ícone): só a imagem diz o que é. */
+  function isUnnamed(el: Element): boolean {
+    return nameOf(el, roleOf(el) || "clickable") === "";
+  }
+
+  /** O último ponto tocado por foto (o controle que ficou com ele) e quantos controles SEM NOME havia perto dele. */
+  let lastPoint: { el: Element; unnamed: boolean } | null = null;
+  let pointNeighbors = 0;
+
+  /** O controle clicável que fica com um ponto: ver `snapToNearest`. `null` = nenhum perto. */
+  function clickableNear(x: number, y: number): Element | null {
+    const found = collectClickables();
     const hit = snapToNearest(found.map((f) => f.box), x, y);
     if (hit && "ambiguous" in hit) throw new Error(`Há mais de um controle perto do ponto (${Math.round(x)}, ${Math.round(y)}): não sei qual tocar.`);
     return hit ? found[hit.index].el : null;
@@ -983,15 +998,37 @@ declare global {
       return el;
     }
     if (spec.kind === "point") {
+      pointNeighbors = 0;
+      // O segundo toque: a foto apontou entre dois ícones sem nome, o primeiro não era o certo; o vizinho sem nome mais perto do ponto.
+      if (spec.second) {
+        const previous = lastPoint;
+        if (!previous || !previous.unnamed) throw new Error("O toque anterior não foi num controle sem nome: não há vizinho a tentar.");
+        const others = collectClickables()
+          .filter((f) => f.el !== previous.el && !previous.el.contains(f.el) && !f.el.contains(previous.el) && isUnnamed(f.el))
+          .map((f) => ({ el: f.el, d: distanceToBox(f.box, spec.x, spec.y) }))
+          .filter((c) => c.d <= 80)
+          .sort((a, b) => a.d - b.d);
+        if (others.length === 0) throw new Error("Não há outro controle sem nome perto do ponto.");
+        if (act) lastPoint = { el: others[0].el, unnamed: true };
+        return others[0].el;
+      }
       // O que há sob o ponto; se está dentro de algo clicável (um ícone dentro de um link), o clicável.
       const under = document.elementFromPoint(spec.x, spec.y);
       if (!under) throw new Error(`Não há nada no ponto (${Math.round(spec.x)}, ${Math.round(spec.y)}): fora da janela da página.`);
       const direct = under.closest("a[href],button,[role=button],[role=link],input,select,textarea,label,summary,[role=tab],[role=menuitem],[role=option],[onclick]");
-      if (direct) return direct;
       // Um ponto que caiu no vazio ao lado de um controle (a foto erra alguns pixels): vai para o clicável mais perto.
-      const near = clickableNear(spec.x, spec.y);
-      if (!near) throw new Error(`Não há nada clicável perto do ponto (${Math.round(spec.x)}, ${Math.round(spec.y)}).`);
-      return near;
+      const chosen = direct ?? clickableNear(spec.x, spec.y);
+      if (!chosen) throw new Error(`Não há nada clicável perto do ponto (${Math.round(spec.x)}, ${Math.round(spec.y)}).`);
+      if (act) {
+        const unnamed = isUnnamed(chosen);
+        lastPoint = { el: chosen, unnamed };
+        // Quantos outros controles sem nome há até 60 px do ponto: com algum, o piloto pode tentar o vizinho se este não era o certo.
+        if (unnamed) {
+          pointNeighbors = collectClickables()
+            .filter((f) => f.el !== chosen && !chosen.contains(f.el) && !f.el.contains(chosen) && isUnnamed(f.el) && distanceToBox(f.box, spec.x, spec.y) <= 60).length;
+        }
+      }
+      return chosen;
     }
     if (spec.kind === "text") {
       const wanted = spec.text.toLowerCase();
@@ -1747,12 +1784,15 @@ declare global {
     const el = resolve(target, true);
     const result = await action(el);
     const spec = parseTarget(target);
+    const withNeighbors = spec.kind === "point" && pointNeighbors > 0 && result !== null && typeof result === "object"
+      ? { ...(result as object), unnamedNeighbors: pointNeighbors } as T
+      : result;
     if (spec.kind === "ref" && el.isConnected) {
       const fresh = fingerprintOf(el);
       if (prints.has(spec.ref)) prints.set(spec.ref, fresh);
       else if (markedPrints.has(spec.ref)) markedPrints.set(spec.ref, fresh);
     }
-    return result;
+    return withNeighbors;
   }
 
   function execute(command: PageCommand): Promise<unknown> | unknown {
