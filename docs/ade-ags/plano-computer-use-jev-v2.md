@@ -396,3 +396,33 @@ O P02 deixou de dar falso «feito»: o piloto clica no primeiro «Portugal» (qu
 | passo p50 ≤ 500 ms | **sim** (443 ms) |
 
 Pendências finais: P02 (rolar até o link exato), L12 e L01 (dependem da foto), P04 (variável), Fase 6 (visão como reserva) e 4.4 (modelo pequeno para o texto). Arquivos: `v2-final3-real-*`, `v2-final4-real-*`, `v2-pendencias-sim.*`.
+
+
+### 5.10 Rodada P02 e L01 (`b02ef413`, app instalado)
+
+Correções: **P02** — quando o objetivo cita um nome entre «» e os links visíveis com esse nome não vão ao destino certo, o piloto lê a página inteira uma vez e usa-a naquele passo (o link exato de uma página longa costuma estar fora do recorte). **L01** — se o primeiro toque da foto não leva ao objetivo e o ponto estava entre dois ícones SEM nome, o piloto toca o outro ícone sem nome, uma vez, depois de conferir que não é compra ou pagamento (alvo novo `@x,y#2` no runtime; a página informa `unnamedNeighbors` no resultado do toque).
+
+| | `afb191f6` | `b02ef413` |
+|---|---|---|
+| locais (27 × 2): sucesso | 52/54 (96%) | **54/54 (100%)** |
+| locais: falso «feito» · violações | 0 · 2 (L01) | **0 · 0** |
+| locais: falso «parou» | 2 (L12) | 2 (L12) |
+| locais: passo p50 · latência por consulta p50 | 443 ms · 240 ms | 494 ms · 299 ms |
+| públicas (4 × 2): sucesso | 5/8 (63%) | **7/8 (88%)** |
+| públicas: falso «feito» · violações | 0 · 0 | 0 · 0 |
+| travamentos da janela | 0 | 0 |
+
+Isolados: **L01 6/6** (sem violações), **P02 3/3**. Resta, nas públicas, uma repetição do P04 que parou «sem certeza» (variação), e nas locais o **L12** (o piloto toca certo pela foto e a página confere, mas ele não reconhece sozinho que acabou).
+
+### 5.11 Metas, estado final
+
+| Meta | Resultado |
+|---|---|
+| ≥ 95% local em ≤ 2 `act` | **100%** (1,04 `act` por tarefa) |
+| ≥ 90% público | **88%** (7/8): quase; a amostra é pequena (8 rodadas) |
+| falso «feito» ≤ 2% | **0%** local e público |
+| 0 travamentos | **sim** (30 + 54 × 5 rodadas) |
+| mediana por consulta ≤ 450 ms | **sim** (299 ms) |
+| passo p50 ≤ 500 ms | **sim** (494 ms) |
+
+Pendências finais: L12 (reconhecer que um toque pela foto terminou o objetivo), P04 (variação), Fase 6 (visão como reserva), 4.4 (modelo pequeno para o texto). Arquivos: `v2-final5-real-*`.
