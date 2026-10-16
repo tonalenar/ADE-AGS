@@ -167,3 +167,108 @@ describe("pilotDeps + livro-razão: o sinal de idempotência do carrinho (3.4)",
     expect(ledger.prior(null)[0].changed).toBeNull();
   });
 });
+
+describe("portalLedger: histórico que não vale mais não volta (regressão L07/L17 do benchmark real)", () => {
+  const add = (url: string, urlAfter = url) => ({ what: 'clicou button "Adicionar ao carrinho"', changed: true as boolean | null, cartBefore: 0, cartAfter: 1, url, urlAfter });
+
+  it("uma ação feita em OUTRA página (outra tarefa no mesmo portal) não volta como «já adicionado»", () => {
+    const ledger = createLedger();
+    ledger.beginAct("Adicione o fone, sem garantia");
+    ledger.record(add("http://localhost:8765/garantia.html"));
+    ledger.endAct("fp");
+    ledger.beginAct("Adicione o Fone Bluetooth.");
+    expect(ledger.prior("fp2", { url: "http://localhost:8765/comprar-agora.html", cart: 0 })).toEqual([]);
+  });
+
+  it("a mesma página recarregada (carrinho de volta a 0) também não: o item já não está lá", () => {
+    const ledger = createLedger();
+    ledger.beginAct("a");
+    ledger.record(add("http://localhost:8765/garantia.html"));
+    ledger.endAct("fp-com-1");
+    ledger.beginAct("a de novo");
+    expect(ledger.prior("fp-zerado", { url: "http://localhost:8765/garantia.html", cart: 0 })).toEqual([]);
+  });
+
+  it("a mesma página ainda com o item no carrinho continua valendo (o caso do T5 original)", () => {
+    const ledger = createLedger();
+    ledger.beginAct("a");
+    ledger.record(add("http://shop.test/p/fone"));
+    ledger.endAct("fp");
+    ledger.beginAct("b");
+    const prior = ledger.prior("fp", { url: "http://shop.test/p/fone", cart: 1 });
+    expect(prior).toHaveLength(1);
+    expect(prior[0]).toMatchObject({ cartBefore: 0, cartAfter: 1, pageChangedSince: false });
+  });
+
+  it("sem saber o carrinho de agora, mantém (não apaga o que pode valer)", () => {
+    const ledger = createLedger();
+    ledger.beginAct("a");
+    ledger.record(add("http://shop.test/p/fone"));
+    ledger.endAct("fp");
+    ledger.beginAct("b");
+    expect(ledger.prior("fp", { url: "http://shop.test/p/fone", cart: null })).toHaveLength(1);
+  });
+
+  it("a ação que navegou vale tanto na página de onde saiu quanto na de chegada; consulta e fragmento não contam", () => {
+    const ledger = createLedger();
+    ledger.beginAct("a");
+    ledger.record({ what: 'clicou link "Fone"', changed: true, cartBefore: null, cartAfter: null, url: "http://shop.test/busca?q=fone", urlAfter: "http://shop.test/p/fone#specs" });
+    ledger.endAct("fp");
+    ledger.beginAct("b");
+    expect(ledger.prior("fp", { url: "http://shop.test/p/fone?ref=1", cart: null })).toHaveLength(1);
+    expect(ledger.prior("fp", { url: "http://shop.test/busca", cart: null })).toHaveLength(1);
+    expect(ledger.prior("fp", { url: "http://shop.test/outra", cart: null })).toEqual([]);
+  });
+
+  it("ações sem carrinho (digitar, clicar num link) na mesma página não são apagadas pela contagem", () => {
+    const ledger = createLedger();
+    ledger.beginAct("a");
+    ledger.record({ what: 'digitou em searchbox "Buscar"', changed: true, cartBefore: null, cartAfter: null, url: "http://shop.test/", urlAfter: "http://shop.test/" });
+    ledger.endAct("fp");
+    ledger.beginAct("b");
+    expect(ledger.prior("fp", { url: "http://shop.test/", cart: 0 })).toHaveLength(1);
+  });
+});
+
+describe("pilotDeps + livro-razão: o portal reaproveitado entre tarefas (L07 → L17)", () => {
+  it("o act da loja B, com carrinho vazio, não recebe o «adicionar» da loja A", async () => {
+    const ledger = createLedger();
+    ledger.beginAct("Adicione o Fone na loja A");
+    const a = pilotDeps(fakeHost([page(0), page(1)]), [], ledger);
+    await a.snapshot();
+    await a.click("e1", false);
+    a.finish(await a.snapshot());
+
+    ledger.beginAct("Adicione o Fone na loja B");
+    const hostB = fakeHost([page(0).replace("https://shop.test/p", "https://outra.test/fone")]);
+    const b = pilotDeps(hostB, [], ledger);
+    await b.snapshot();
+    expect(b.prior()).toEqual([]);
+  });
+
+  it("a mesma loja recarregada (carrinho 0 de novo) também não", async () => {
+    const ledger = createLedger();
+    ledger.beginAct("a");
+    const a = pilotDeps(fakeHost([page(0), page(1)]), [], ledger);
+    await a.snapshot();
+    await a.click("e1", false);
+    a.finish(await a.snapshot());
+    ledger.beginAct("a de novo");
+    const again = pilotDeps(fakeHost([page(0)]), [], ledger);
+    await again.snapshot();
+    expect(again.prior()).toEqual([]);
+  });
+
+  it("a mesma página com o item ainda no carrinho mantém o histórico (não pode adicionar duas vezes)", async () => {
+    const ledger = createLedger();
+    ledger.beginAct("a");
+    const a = pilotDeps(fakeHost([page(0), page(1)]), [], ledger);
+    await a.snapshot();
+    await a.click("e1", false);
+    a.finish(await a.snapshot());
+    ledger.beginAct("b");
+    const b = pilotDeps(fakeHost([page(1)]), [], ledger);
+    await b.snapshot();
+    expect(b.prior()).toHaveLength(1);
+  });
+});

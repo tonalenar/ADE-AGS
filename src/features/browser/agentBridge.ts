@@ -40,7 +40,7 @@ import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./vi
 import { parseExpectations, verifyReport } from "./expect";
 import { summarizeSnapshot } from "./finalSummary";
 import { cartCount, fingerprint, formatResult, parseSnapshot, runPilot, type ParsedPage, type PilotDeps, type PilotResult } from "./jevPilot";
-import { createLedger, ledgerOf, type ActLedger, type PriorAction } from "./portalLedger";
+import { bareUrl, createLedger, ledgerOf, type ActLedger, type PriorAction } from "./portalLedger";
 import { backendSink, withProgress } from "./actProgress";
 import { beginWindowMeasure } from "./windowBeat";
 
@@ -771,7 +771,7 @@ export type PilotExtras = { prior: () => PriorAction[]; finish: (finalSnapshot: 
 export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLedger = createLedger()): PilotDeps & PilotExtras {
   // O livro-razão (D6/3.4): cada ação é anotada com a contagem do carrinho de antes e, na leitura seguinte, a de depois.
   let lastPage: ParsedPage | null = null;
-  let pendingAction: { what: string; fp: string | null; cartBefore: number | null; near?: string } | null = null;
+  let pendingAction: { what: string; fp: string | null; cartBefore: number | null; near?: string; url?: string } | null = null;
   const closeAction = (page: ParsedPage | null): void => {
     if (!pendingAction) return;
     ledger.record({
@@ -780,6 +780,8 @@ export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLe
       cartBefore: pendingAction.cartBefore,
       cartAfter: page ? cartCount(page) : null,
       ...(pendingAction.near ? { near: pendingAction.near } : {}),
+      ...(pendingAction.url ? { url: bareUrl(pendingAction.url) } : {}),
+      ...(page?.url ? { urlAfter: bareUrl(page.url) } : {}),
     });
     pendingAction = null;
   };
@@ -787,7 +789,7 @@ export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLe
     closeAction(null);
     const el = ref ? lastPage?.elements.find((e) => e.ref === ref) : undefined;
     const what = ref === null ? verb : `${verb} ${el ? `${el.role}${el.name ? ` "${el.name}"` : ""}` : ref}`;
-    pendingAction = { what, fp: lastPage ? fingerprint(lastPage) : null, cartBefore: lastPage ? cartCount(lastPage) : null, ...(el?.near ? { near: el.near } : {}) };
+    pendingAction = { what, fp: lastPage ? fingerprint(lastPage) : null, cartBefore: lastPage ? cartCount(lastPage) : null, ...(el?.near ? { near: el.near } : {}), ...(lastPage?.url ? { url: lastPage.url } : {}) };
   };
   /** O que a página contou sobre a espera daquele comando (`"waited": "esperou 8,2 s …"`), para o relatório do `act`. */
   const noteWait = (result: string, what: string): void => {
@@ -878,7 +880,8 @@ export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLe
       return invoke("decision_pick_visual", { query: { goal, recent, imagePath: shot.path } });
     },
     peekAt: async (x, y) => inPage(host, { op: "peek", target: `@${x},${y}` }, false),
-    prior: () => ledger.prior(lastPage ? fingerprint(lastPage) : null),
+    // Só o histórico que ainda vale para a página de agora (outra página, ou o carrinho que voltou a 0, não conta).
+    prior: () => ledger.prior(lastPage ? fingerprint(lastPage) : null, { url: lastPage?.url, cart: lastPage ? cartCount(lastPage) : null }),
     finish: (finalSnapshot) => {
       closeAction(null);
       ledger.endAct(finalSnapshot ? fingerprint(parseSnapshot(finalSnapshot)) : lastPage ? fingerprint(lastPage) : null);

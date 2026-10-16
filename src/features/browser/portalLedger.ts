@@ -28,6 +28,9 @@ export interface LedgerEntry {
   cartAfter: number | null;
   /** O que estava ao lado do controle (o produto e o preço do «Adicionar»): distingue dois «Adicionar» iguais. */
   near?: string;
+  /** O endereço da página em que a ação foi feita e o da página que ficou depois (sem consulta nem fragmento). */
+  url?: string;
+  urlAfter?: string;
 }
 
 /** O que o piloto recebe: estruturalmente um `Done` (jevPilot.ts), com a marca de «anterior» e a contagem do carrinho. */
@@ -45,6 +48,41 @@ export interface PriorAction {
   pageChangedSince: boolean | null;
 }
 
+/** A página de agora, para descartar o histórico que não vale mais. Tudo opcional: o que não se sabe, não descarta. */
+export interface PriorContext {
+  /** O endereço da página de agora. */
+  url?: string | null;
+  /** Quantos itens o carrinho de agora mostra (`cartCount`). */
+  cart?: number | null;
+}
+
+/** O endereço sem consulta nem fragmento: é com isso que se diz «a mesma página». */
+export function bareUrl(url: string | null | undefined): string {
+  if (!url) return "";
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return url.split(/[?#]/)[0];
+  }
+}
+
+/**
+ * Esta ação ainda diz alguma coisa sobre a página de agora? Não, se foi feita em OUTRA página (outra tarefa no mesmo
+ * portal: o «Adicionar ao carrinho» de uma loja não é o de outra) ou se subiu o carrinho e a página de agora mostra menos
+ * (a página foi recarregada e o item já não está lá). Sem como saber, vale. Pura.
+ */
+export function stillApplies(entry: Pick<LedgerEntry, "url" | "urlAfter" | "cartBefore" | "cartAfter">, now: PriorContext = {}): boolean {
+  const here = bareUrl(now.url);
+  if (here) {
+    const where = [bareUrl(entry.url), bareUrl(entry.urlAfter)].filter(Boolean);
+    if (where.length > 0 && !where.includes(here)) return false;
+  }
+  const raised = entry.cartBefore !== null && entry.cartAfter !== null && entry.cartAfter > entry.cartBefore;
+  if (raised && now.cart !== undefined && now.cart !== null && entry.cartAfter !== null && now.cart < entry.cartAfter) return false;
+  return true;
+}
+
 export interface ActLedger {
   /** O próximo `act` neste portal. Devolve o número dele. */
   beginAct: (goal: string) => number;
@@ -53,7 +91,7 @@ export interface ActLedger {
   /** O fim do `act`: a impressão da página em que parou. */
   endAct: (fingerprint: string | null) => void;
   /** As ações dos `act`s anteriores, marcadas. `fingerprint` = a página de agora (`null` = ainda não se sabe). */
-  prior: (fingerprint: string | null) => PriorAction[];
+  prior: (fingerprint: string | null, now?: PriorContext) => PriorAction[];
   /** Quantas ações há guardadas (para testes). */
   size: () => number;
 }
@@ -101,9 +139,9 @@ export function createLedger(now: () => number = Date.now): ActLedger {
       endFingerprint = fingerprint;
       touched = now();
     },
-    prior(fingerprint) {
-      // Só o que veio de `act`s ANTERIORES ao atual.
-      const before = entries.filter((e) => e.actNo < current);
+    prior(fingerprint, now = {}) {
+      // Só o que veio de `act`s ANTERIORES ao atual e que ainda vale para a página de agora.
+      const before = entries.filter((e) => e.actNo < current && stillApplies(e, now));
       return before.map((e, i) => {
         const last = i === before.length - 1;
         const changedSince = last && fingerprint !== null && endFingerprint !== null ? fingerprint !== endFingerprint : null;
