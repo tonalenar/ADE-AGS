@@ -163,7 +163,7 @@ Para preencher DEPOIS: `bun scripts/jev-bench.ts --sim --label depois --compare 
 Instância de debug **baseline** (`ade-ags.exe` de `cargo-target-agents`, pid 51140; dev + foto limpa, **sem** as mudanças
 posteriores: sem Enter em busca, sem a linha `TEMPOS`, sem a retirada do botão de compra), Jev real, **canvas à vista**, janela
 do portal 1920×1080. Dados: [`bench/antes-real.json`](bench/antes-real.json) / [`.md`](bench/antes-real.md) (21 tarefas medidas),
-com as rodadas parciais que a compõem (`antes-real-b-revisor` L01–L11, `-c` L12–L17 e P01–P06, `-e` re-execução de L01 e
+com as rodadas parciais que a compõem (`antes-real-b` L01–L11, `-c` L12–L17 e P01–P06, `-e` re-execução de L01 e
 L09, e L13/L15 da repetição) e as causas em [`bench/antes-real-causas.json`](bench/antes-real-causas.json).
 
 | métrica | ANTES (real) |
@@ -181,7 +181,7 @@ L09, e L13/L15 da repetição) e as causas em [`bench/antes-real-causas.json`](b
 | fases | só a consulta ao Jev é medida (17%); `snapshot`/ação/espera **não** (esta instância não tem `TEMPOS`): o resto é «outros/não medido» |
 
 Cota: não há contagem exata (sem `TEMPOS` o relatório não traz as consultas); cada tarefa gastou 1–5 consultas ao Jev e 0–1 foto,
-mais as re-execuções (L01, L09) e a repetição do Revisor.
+mais as re-execuções (L01, L09) e a 2.ª passada (rodada D do Bench).
 
 ### Causas das falhas (do relatório do act de cada uma)
 
@@ -209,9 +209,20 @@ mais as re-execuções (L01, L09) e a repetição do Revisor.
 4. **Enter** (L03): sem Enter em campo de busca, uma busca sem botão não roda (já corrigido na dev; ANTES mede a instância sem a correção).
 5. **Rolar** (L14): duas rolagens iguais viram «girar em círculos» porque a impressão da página não vê a rolagem.
 
+**Causa-raiz medida da causa 1 em L04/L16 (sem custo de Jev).** Não é CSP nem script bloqueado: abrindo `busca-botao.html?q=tenis`
+direto, a fixture mostra «Resultados para: tenis». É **tempo**: o `portal click` em «Buscar» devolve `{"navigated":true,"url":"…?q=tenis"}`,
+mas o `snapshot` logo depois ainda não tem o texto, que aparece ~190 ms depois (4 de 4 medições: click em ~1,33 s, texto em ~1,52 s).
+O piloto só espera a página carregar quando o alvo é um **link com `href`**; um botão de formulário que navega não espera, então o Jev
+vê a página vazia, a pergunta de fim dá 0,00 e ele conclui «sem caminho». Correção (já na branch da missão, `1b2eb759`): usar o
+`navigated:true` do resultado do clique para esperar o carregamento. A fixture não muda. L05/L06 («coberto por modal») e L14
+(«rolar muda a página») também já têm correção na branch da missão.
+
+**Foto «cortada»** (L02, L04, L09): causa achada no Visual (`overflow:clip`), só entra no rebuild; no ANTES a foto falha a partir da
+2.ª vez no **mesmo portal** (o runner reaproveita um portal por rodada), então L02/L04/L09 contam esta causa conhecida.
+
 ### Variação entre passadas (importante)
 
-O Revisor repetiu as 17 locais em outra passada (`bench/antes-real-repeticao-revisor.json`, mesma instância): **12/17 nas duas
+O Bench repetiu as 17 locais em uma 2.ª passada (rodada D; um runner de outra sessão fez a 1.ª parte, L01–L11) (`bench/antes-real-repeticao.json`, mesma instância): **12/17 nas duas
 passadas, mas com tarefas trocadas** — L02 (lupa) passou na 1.ª e falhou na 2.ª («unsure»); L09 (botões repetidos) falhou na 1.ª
 e passou na 2.ª; L01 falhou na 1.ª por falha de infraestrutura e passou na re-execução e na 2.ª passada. O Jev real não é
 determinístico: **uma tarefa isolada vale pouco, só a taxa em muitas vale**, e a diferença entre ANTES e DEPOIS precisa passar de
