@@ -1,0 +1,8 @@
+{
+  "L11-formulario-multietapas": "sem valor: depois de os campos serem preenchidos pelo nome, o Jev escolheu DIGITAR de novo em «Nome» e o piloto falhou ('não há valor para text field Nome'); na 1.ª tentativa parou com p=0,36 em «Próximo» (<0,40) e a foto foi recusada por 'cortada'",
+  "L12-garantia-na-foto": "sem certeza após ação (falso): a foto tocou o botão certo (365, 330) e o critério vale, mas o laço perguntou de novo, o Jev disse 'stuck' (p=0,37; fim p=0,01) e o piloto parou em vez de concluir (a guarda 'foto acabou de tocar' impede a 2.ª foto)",
+  "P02-wikipedia-link": "foto/link em texto longo: o Jev diz 'sem caminho' (p=0,54) e a foto achou controle com caixa conf=0,52 (<0,6) e não tocou",
+  "P04-saucedemo-checkout": "p baixa em botões iguais: depois do login o Jev escolheu um 'Add to cart' com p=0,30 (no ANTES, p=0,57) e o piloto parou; a foto não achou controle seguro (conf 0,44). Provável regressão do contexto 'next to' em controles iguais (p caiu em 3 de 3 observações no SauceDemo)",
+  "P05-amazon-busca-adicionar": "site/infra: 'The page did not report finishing the load within 20 s (https://www.amazon.com.br/). It may still be loading, or it may not be going through the ADE AGS proxy' (no act: 'A página não respondeu em 12 s')",
+  "P06-amazon-produto-adicionar": "site/infra: idem P05 (o portal ficou sem página)"
+}
