@@ -60,6 +60,8 @@ const VIEWPORT = /^viewport: (\d+)×(\d+)(?: · scroll (\d+)\/(\d+))?/;
 const NEAR_CHARS = 48;
 /** Quanto do `near` é o título; o resto, o último texto (o preço). */
 const NEAR_TITLE = 32;
+/** O começo de um rótulo que só diz «abre os detalhes»: o que importa no título é o produto que vem depois. */
+const DETAILS_PREFIX = /^(view (product )?details (for|of)|details (for|of)|ver (os )?detalhes d[eoa]s?|detalhes d[eoa]s?|ver mais sobre)\s+/i;
 const VALUE = / value=("(?:[^"\\]|\\.)*")/;
 const OPTIONS = / options=(\[.*\])\s*$/;
 
@@ -115,8 +117,10 @@ export function parseSnapshot(snapshot: string): ParsedPage {
         ...(nearby ? { near: nearby } : {}),
       });
       lastText = "";
-      // O link com nome é o título de quem vem depois (o produto, e o botão «Adicionar» logo abaixo).
-      if (role === "link" && name) title = name;
+      // O link com nome é o título de quem vem depois (o produto, e o botão «Adicionar» logo abaixo). Um BOTÃO com destino também
+      // (o SauceDemo: `button "View details for Sauce Labs Backpack" → /inventory.html#`), sem o «ver detalhes de» que só come o
+      // corte de 32 caracteres: sem isso os «Add to cart» só se distinguiam pelo preço (P04).
+      if (name && (role === "link" || target)) title = name.replace(DETAILS_PREFIX, "") || name;
     } else if ((role === "text" || role === "heading") && name) {
       page.text.push(name);
       if (role === "heading") { title = name; lastText = ""; } else lastText = name;
@@ -561,11 +565,80 @@ export function obviousAdvance(page: ParsedPage, operation: string, target: stri
   return !page.elements.some((e) => TYPING.has(e.role) && e.filled === false && !e.states.includes("disabled") && !isSearchField(e));
 }
 
+/** O controle que abre o carrinho: pelo nome («Cart, 1 items», «Carrinho») ou pelo destino (`/cart.html`). */
+const CART_CONTROL = /^(cart|carrinho|sacola|basket|cesta|shopping cart|meu carrinho|ver carrinho|view cart)\b/i;
+const CHECKOUT_GOAL = /checkout|carrinho|\bcart\b|sacola|basket|cesta/i;
+
+/**
+ * Uma escolha com p abaixo do piso, mas que é só ir ao carrinho a caminho do checkout, com o item do objetivo JÁ no carrinho (P04: a
+ * mochila ficou no carrinho de uma rodada anterior, a página mostra «Remove» ao lado dela e «Cart, 1 items», e o Jev escolhia o
+ * carrinho com p=0,35–0,39). Vale quando: o objetivo fala em carrinho ou checkout; o alvo é o controle do carrinho e não é uma compra
+ * não pedida; o carrinho tem ao menos um item; e, entre os produtos da página com «Adicionar»/«Remover», o que mais se parece com o
+ * objetivo está do lado do «Remover» (um «Adicionar» igual ou mais parecido diz que o item do objetivo ainda não entrou). Pura.
+ */
+export function cartAdvance(page: ParsedPage, operation: string, target: string | null, probability: number | null, goal: string): boolean {
+  if (operation !== "click" || probability === null || probability < MIN_ADVANCE || probability >= MIN_PROBABILITY) return false;
+  if (!CHECKOUT_GOAL.test(goal)) return false;
+  const el = page.elements.find((e) => e.ref === target);
+  if (!el || blockedControl(el, goal) || !(CART_CONTROL.test(el.name.trim()) || /\/cart\b/i.test(el.href ?? ""))) return false;
+  if ((cartCount(page) ?? 0) < 1) return false;
+  const wanted = words(goal);
+  const score = (e: PageElement) => overlap(wanted, words(e.near ?? ""));
+  const removes = page.elements.filter((e) => REMOVE_CONTROL.test(e.name.trim())).map(score);
+  const adds = page.elements.filter((e) => ADD_CONTROL.test(e.name.trim()) && !e.states.includes("disabled")).map(score);
+  if (removes.length === 0) return false;
+  const bestRemove = Math.max(...removes);
+  const bestAdd = adds.length > 0 ? Math.max(...adds) : -1;
+  return bestRemove > bestAdd;
+}
+
 /** A reserva visual só age com estas certezas: o Jev viu um controle (p) e a caixa é firme (confiança). */
 export const MIN_FOUND = 0.6;
 export const MIN_BOX_CONFIDENCE = 0.6;
 /** Quantas vezes por execução se tira uma foto: ela é mais cara e sai da máquina. */
 export const MAX_VISUAL = 3;
+
+/** Para um toque pela foto dar o objetivo por cumprido sozinho, a foto precisa ter visto o controle com esta certeza (L12). */
+export const MIN_PHOTO_DONE_FOUND = 0.9;
+export const MIN_PHOTO_DONE_CONFIDENCE = 0.85;
+
+/** O objetivo é UM clique: começa com o verbo de clicar. */
+const CLICK_GOAL = /^\s*(clique|clicar|clica|toque|tocar|toca|aperte|apertar|pressione|pressionar|click|tap|press)\b/i;
+/** Outra etapa no objetivo: outro verbo de ação ou um conector de sequência. «Clique em X e depois Y» não acaba no X. */
+const MORE_STEPS = /\b(e depois|depois|em seguida|ent[ãa]o|and then|then|after that|adicion\w*|preench\w*|digit\w*|pesquis\w*|busqu\w*|busc[ae]r?|escolh\w*|selecion\w*|v[áa]\b|ir para|abr[ai]r?|confirm\w*|envi[ae]r?|remov\w*|continu\w*|role|rolar|marqu\w*|desmarqu\w*|clique|clicar|toque|tocar|aperte|add|fill|type|search|select|choose|go to|open|submit|remove|continue|scroll|check|uncheck)\b|;/gi;
+/** Palavras do objetivo que não dizem QUAL controle é (o verbo, o tipo de controle, onde ele fica). */
+const GOAL_FILLER = words("clique clicar toque tocar aperte pressione click tap press botão botao button link ícone icone icon controle foto imagem image página pagina page que aparece aparecer meio centro canto lado topo superior inferior direito direita esquerdo esquerda the that appears middle center corner top bottom right left");
+/** O que a página passou a mostrar e que denuncia um erro, mesmo sem ser uma página de erro inteira. */
+const ERROR_TEXT = /\b(erro|error|inv[áa]lid\w*|invalid|falh\w*|failed|n[ãa]o foi poss[íi]vel|could not|tente novamente|try again|negad\w*|denied)\b/i;
+
+/**
+ * Um toque pela foto já cumpriu o objetivo? O botão que só existe na imagem (L12): a foto aponta certo, a página passa a mostrar
+ * «GARANTIA ABERTA», mas o Jev, que só lê o texto, não liga o «tocou no ponto (365, 347)» ao botão do objetivo e responde «fim
+ * p=0,01». Vale só quando TUDO confere: o objetivo é um único clique (nenhuma outra etapa), a foto viu o controle com certeza alta,
+ * o toque mudou a página, a página não mostra erro e o texto NOVO fala do controle do objetivo (o nome entre «», ou as palavras do
+ * objetivo que dizem qual é): um toque que caiu no vizinho («DETALHES ABERTOS») não passa. Devolve o texto novo que prova, ou `null`.
+ * As travas (compra não pedida, campo sensível, o mesmo ponto duas vezes) agem antes do toque. Pura.
+ */
+export function photoTapFinished(
+  goal: string,
+  before: ParsedPage,
+  after: ParsedPage,
+  reply: Pick<VisualReply, "foundProbability" | "confidence">,
+  initialCart: number | null = null,
+): string | null {
+  if (!CLICK_GOAL.test(goal)) return null;
+  // O nome do controle entre «» não é etapa: «Clique em «Continuar»» é um clique só.
+  if ((goal.replace(CLICK_GOAL, "").replace(/[«"“][^»"”]*[»"”]/g, " ").match(MORE_STEPS) ?? []).length > 0) return null;
+  if ((reply.foundProbability ?? 0) < MIN_PHOTO_DONE_FOUND || (reply.confidence ?? 0) < MIN_PHOTO_DONE_CONFIDENCE) return null;
+  if (fingerprint(after) === fingerprint(before) || goalContradiction(goal, after, initialCart)) return null;
+  const quoted = [...goal.matchAll(/[«"“]([^»"”]{2,60})[»"”]/g)].map((m) => m[1]).join(" ");
+  const wanted = new Set([...words(quoted || goal)].filter((w) => !GOAL_FILLER.has(w)));
+  if (wanted.size === 0) return null;
+  const seen = new Set(before.text);
+  const fresh = [...after.text.filter((line) => !seen.has(line)), ...(after.title !== before.title ? [after.title] : [])];
+  if (fresh.some((line) => ERROR_TEXT.test(line))) return null;
+  return fresh.find((line) => overlap(wanted, words(line)) > 0) ?? null;
+}
 
 /** Controles que fecham uma compra ou pagam. */
 const PURCHASE = /comprar agora|buy now|buy-now|buynow|one-?click|1-click|finalizar (a )?compra|fechar (o )?pedido|confirmar (o )?(pedido|pagamento)|place (your )?order|proceed to checkout|prosseguir para|ir para o pagamento|checkout|pagar agora|pay now/i;
@@ -773,6 +846,10 @@ export interface Timings {
   varredura: number;
   /** Consultas sem a pergunta `concluido` (a última ação não mudou a página). */
   semConcluido: number;
+  /** Da soma `foto`, quanto foi a consulta ao Jev (a latência que ele devolve); o resto é tirar, enquadrar e gravar a foto (Fase 6). */
+  fotoJev: number;
+  /** Cada uso da foto: em que passo, por que o texto não bastou e no que deu. */
+  fotoUsos: string[];
 }
 
 /** Mediana de uma lista de números (0 se vazia). Pura. */
@@ -792,7 +869,7 @@ export function percentile(values: number[], q: number): number {
 
 export const emptyTimings = (): Timings => ({
   jev: 0, snapshot: 0, acao: 0, espera: 0, foto: 0, consultas: 0, fotos: 0, total: 0,
-  bytes: [], tokens: 0, consultaMs: [], repeticoes: 0, esperaRede: 0, varredura: 0, semConcluido: 0,
+  bytes: [], tokens: 0, consultaMs: [], repeticoes: 0, esperaRede: 0, varredura: 0, semConcluido: 0, fotoJev: 0, fotoUsos: [],
 });
 
 export interface PilotResult {
@@ -936,8 +1013,16 @@ async function pilotLoop(
   /** O último toque pela foto e quantos controles sem nome havia ao lado (a página diz). */
   let lastTap: { x: number; y: number; neighbors: number } | null = null;
   let secondTried = false;
+  /** O toque pela foto cumpriu o objetivo (um clique só): o texto novo da página que prova. */
+  let photoProof: string | null = null;
+  /** Depois de um toque pela foto: se ele já cumpriu o objetivo, termina aqui (sem outra consulta ao Jev, que não liga o ponto ao botão). */
+  const photoFinished = (step: number): PilotResult | null => {
+    if (!photoProof) return null;
+    log.push(`${step}. objetivo atingido pelo toque da foto: a página passou a mostrar «${photoProof.slice(0, 80)}»`);
+    return finish("done", "A foto apontou o controle do objetivo com certeza alta, e o toque mudou a página de acordo. Confira na página abaixo.");
+  };
   /** `"acted"` = tocou e a página foi relida; um texto = por que não serviu (vai na nota); `null` = não se aplica. */
-  const visualFallback = async (page: ParsedPage, step: number): Promise<"acted" | string | null> => {
+  const photoTry = async (page: ParsedPage, step: number): Promise<"acted" | string | null> => {
     if (!deps.visual || !deps.clickAt || photos >= MAX_VISUAL) return null;
     if (photoJustTapped) {
       // A foto apontou o espaço entre dois ícones sem nome (o perfil e o carrinho), o toque caiu num deles e o Jev, na página nova,
@@ -976,6 +1061,7 @@ async function pilotLoop(
     } catch (e) {
       return `A reserva visual falhou: ${e instanceof Error ? e.message : String(e)}`;
     }
+    timings.fotoJev += reply.latencyMs ?? 0;
     if (reply.status !== "ok") return reply.status === "off" ? "A reserva visual (foto) está desligada em Ajustes → Decisões." : `A reserva visual não rodou: ${reply.reason ?? reply.status}`;
     const meta = `existe p=${reply.foundProbability?.toFixed(2) ?? "?"}, caixa conf=${reply.confidence?.toFixed(2) ?? "?"}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
     if (!reply.found || (reply.foundProbability ?? 0) < MIN_FOUND || !reply.center || (reply.confidence ?? 0) < MIN_BOX_CONFIDENCE) {
@@ -1007,9 +1093,21 @@ async function pilotLoop(
     log.push(`${step}. ${what} (${meta})`);
     await deps.settle();
     snapshot = progress.snapshot = await deps.snapshot();
-    history.push({ what, changed: fingerprint(parseSnapshot(snapshot)) !== fp });
+    const after = parseSnapshot(snapshot);
+    history.push({ what, changed: fingerprint(after) !== fp });
     photoJustTapped = true;
+    photoProof = photoTapFinished(goal, page, after, reply, initialCart);
     return "acted";
+  };
+  /** A foto com o registro do uso (Fase 6): o passo, por que o texto não bastou e no que deu. Só conta quando a foto saiu. */
+  const visualFallback = async (page: ParsedPage, step: number, why: string): Promise<"acted" | string | null> => {
+    const before = photos;
+    const outcome = await photoTry(page, step);
+    if (photos > before) {
+      const result = outcome === "acted" ? (photoProof ? "tocou e cumpriu o objetivo" : "tocou") : (outcome ?? "nada").split(/[.(]/)[0].trim().slice(0, 70);
+      timings.fotoUsos.push(`passo ${step}: ${why} → ${result}`);
+    }
+    return outcome;
   };
 
   for (let step = 1; step <= limit; step++) {
@@ -1109,9 +1207,9 @@ async function pilotLoop(
     const meta = `${reply.probability !== null ? `p=${reply.probability.toFixed(2)}` : "p=?"}${reply.goalDone != null ? `, fim p=${reply.goalDone.toFixed(2)}` : ""}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
     const ambiguous = operation !== "done" && isAmbiguous(query, operation, reply.target, reply.probability);
     const lowP = reply.probability !== null && reply.probability < MIN_PROBABILITY && operation !== "done";
-    if (ambiguous || (lowP && !obviousAdvance(page, operation, reply.target, reply.probability, goal))) {
-      const fallback = await visualFallback(page, step);
-      if (fallback === "acted") continue;
+    if (ambiguous || (lowP && !obviousAdvance(page, operation, reply.target, reply.probability, goal) && !cartAdvance(page, operation, reply.target, reply.probability, goal))) {
+      const fallback = await visualFallback(page, step, ambiguous ? "controle sem nome entre outros iguais" : `sem certeza no texto (p=${reply.probability?.toFixed(2) ?? "?"})`);
+      if (fallback === "acted") { const end = photoFinished(step); if (end) return end; continue; }
       if (fallback) log.push(fallback);
       return finish("unsure", ambiguous
         ? `O elemento que o Jev escolheu (${reply.target}) não tem nome e há outros iguais na página: só o texto não os distingue (${meta}). Continue você, com \`snapshot\` e \`click\`, ou ligue a reserva visual em Ajustes → Decisões.`
@@ -1131,8 +1229,8 @@ async function pilotLoop(
       return finish("done", "O Jev considera o objetivo atingido. Confira na página abaixo.");
     }
     if (operation === "stuck") {
-      const fallback = await visualFallback(page, step);
-      if (fallback === "acted") continue;
+      const fallback = await visualFallback(page, step, "o Jev não viu caminho no texto");
+      if (fallback === "acted") { const end = photoFinished(step); if (end) return end; continue; }
       log.push(`${step}. sem caminho (${meta})`);
       if (fallback) log.push(fallback);
       return finish("stuck", "O Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.");
@@ -1318,6 +1416,17 @@ export function queriesLine(t: Timings): string {
   return `CONSULTAS: ${parts.join(" · ")}`;
 }
 
+/**
+ * O custo da foto num `act` (plano v2, Fase 6): quantas, quanto tempo (o tirar/enquadrar/gravar e a consulta ao Jev), que parte do
+ * `act` isso foi e por que cada uma saiu. Vazio sem foto. Pura.
+ */
+export function photoLine(t: Timings): string {
+  if (t.fotos === 0) return "";
+  const capture = Math.max(0, t.foto - t.fotoJev);
+  const share = t.total > 0 ? ` · ${Math.round((100 * t.foto) / t.total)}% do act` : "";
+  return `FOTO: ${t.fotos} foto(s) · ${t.foto} ms (captura ${capture} ms · Jev ${t.fotoJev} ms)${share}${t.fotoUsos.length > 0 ? ` · ${t.fotoUsos.join("; ")}` : ""}`;
+}
+
 /** O texto que volta ao agente. */
 export function formatResult(goal: string, result: PilotResult): string {
   const head: Record<PilotResult["outcome"], string> = {
@@ -1327,7 +1436,7 @@ export function formatResult(goal: string, result: PilotResult): string {
     `act "${goal}": ${head[result.outcome]}`,
     result.note,
     result.steps.length > 0 ? `\nPassos:\n${result.steps.join("\n")}` : "",
-    result.timings ? `\n${queriesLine(result.timings)}\nTEMPOS: ${JSON.stringify(result.timings)}` : "",
+    result.timings ? `\n${queriesLine(result.timings)}${result.timings.fotos > 0 ? `\n${photoLine(result.timings)}` : ""}\nTEMPOS: ${JSON.stringify(result.timings)}` : "",
     result.window ? `${windowLine(result.window)}\nJANELA: ${JSON.stringify(result.window)}` : "",
     "\nA página agora (o Jev só escolhe onde tocar: confira o resultado):",
     result.finalSnapshot.length > 6000 ? `${result.finalSnapshot.slice(0, 6000)}\n…` : result.finalSnapshot,
