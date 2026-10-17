@@ -74,6 +74,8 @@ export interface Activity {
   size: () => number;
   /** Os ids dos pedidos em voo agora: a `baseline` de uma espera. */
   liveIds: () => Set<number>;
+  /** Há quanto tempo (ms) nenhum pedido começou nem terminou; `Infinity` se a página nunca fez nenhum. */
+  quietFor: () => number;
   markNavigation: () => void;
   clearNavigation: () => void;
   navigating: () => boolean;
@@ -85,15 +87,18 @@ export function createActivity(env: ActivityEnv): Activity {
   const listeners = new Set<(id: number) => void>();
   let seq = 0;
   let navAt: number | null = null;
+  let lastEventAt: number | null = null;
 
   const navigating = (): boolean => navAt !== null && env.now() - navAt < NAV_STALE_MS;
 
   function begin(): () => void {
     const id = ++seq;
     live.add(id);
+    lastEventAt = env.now();
     for (const listener of listeners) listener(id);
     return () => {
       if (!live.delete(id)) return;
+      lastEventAt = env.now();
       for (const listener of listeners) listener(id);
     };
   }
@@ -159,7 +164,9 @@ export function createActivity(env: ActivityEnv): Activity {
     });
   }
 
-  return { begin, size: () => live.size, liveIds: () => new Set(live), markNavigation: () => { navAt = env.now(); }, clearNavigation: () => { navAt = null; }, navigating, settle };
+  const quietFor = (): number => (lastEventAt === null ? Infinity : env.now() - lastEventAt);
+
+  return { begin, size: () => live.size, liveIds: () => new Set(live), quietFor, markNavigation: () => { navAt = env.now(); }, clearNavigation: () => { navAt = null; }, navigating, settle };
 }
 
 /**

@@ -1456,16 +1456,10 @@ declare global {
     const timeout = Math.min(Math.max(command.timeoutMs ?? 5000, 0), 15_000);
     const started = Date.now();
     // "En reposo" no es "cero pedidos ahora": una página que encadena llamadas tiene
-    // huecos de milisegundos entre una y la siguiente. Hace falta que se sostenga.
-    let quietSince: number | null = null;
-    const isIdle = (): boolean => {
-      if (activity.size() > 0) {
-        quietSince = null;
-        return false;
-      }
-      quietSince = quietSince ?? Date.now();
-      return Date.now() - quietSince >= 400;
-    };
+    // huecos de milisegundos entre una y la siguiente. Hace falta que se sostenga — pero
+    // cuenta desde el último pedido, no desde que se empezó a esperar: con la red quieta
+    // hace rato, antes igual se esperaban 400 ms (en el `act`, ~470 ms por paso, J4).
+    const isIdle = (): boolean => activity.size() === 0 && activity.quietFor() >= 400;
     const present = (): boolean => {
       if (idle && !text && !selector) return isIdle();
       if (selector) {

@@ -37,7 +37,7 @@ import { portalStateOf, type PortalStateInfo } from "./portalState";
 import { browserToolPrefix } from "./tabMcp";
 import type { PageCommand, PickedElement, StorageArea } from "./protocol";
 import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./viewport";
-import { parseExpectations, verifyReport } from "./expect";
+import { checkExpectation, parseExpectations, verifyReport } from "./expect";
 import { summarizeSnapshot } from "./finalSummary";
 import { cartCount, fingerprint, formatResult, parseSnapshot, runPilot, type ParsedPage, type PilotDeps, type PilotResult } from "./jevPilot";
 import { bareUrl, createLedger, ledgerOf, type ActLedger, type PriorAction } from "./portalLedger";
@@ -704,7 +704,13 @@ async function execute(
       const waits: string[] = [];
       const ledger = ledgerOf(host.viewId);
       ledger.beginAct(goal);
-      const deps = pilotDeps(host, waits, ledger);
+      const parsedExpects = parseExpectations(expects).expects;
+      // Os `--expect` conferidos pelo piloto durante o `act` (J3/J5), na página INTEIRA como na conferência final.
+      const expectsMet = parsedExpects.length === 0 ? undefined : async (seen?: ParsedPage): Promise<boolean> => {
+        const page = seen ?? parseSnapshot(String(await inPage(host, { op: "snapshot", all: true, inView: false }, false)));
+        return parsedExpects.every((e) => checkExpectation(e, page).ok);
+      };
+      const deps = { ...pilotDeps(host, waits, ledger), expectsMet };
       const piloted = portalId ? withProgress(deps, backendSink(portalId)) : deps;
       let result: Awaited<ReturnType<typeof runPilot>> | undefined;
       try {

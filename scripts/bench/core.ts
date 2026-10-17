@@ -3,7 +3,7 @@
  * classificação de cada rodada, relógio e fases de tempo, agregação de métricas, leitura do relatório do
  * `ags portal act` e as tabelas em Markdown. Nada aqui toca rede, disco ou navegador: é o que o vitest cobre.
  */
-import { parseSnapshot, type PilotDeps, type PilotResult } from "../../src/features/browser/jevPilot";
+import { parseSnapshot, type ParsedPage, type PilotDeps, type PilotResult } from "../../src/features/browser/jevPilot";
 
 // ── Critérios de sucesso ────────────────────────────────────────────
 
@@ -193,6 +193,8 @@ export function instrument(deps: PilotDeps, clock: Clock): { deps: PilotDeps; fi
     ...(deps.visual ? { visual: (goal: string, recent: string) => { photos += 1; return timed("jevMs", () => deps.visual!(goal, recent)); } } : {}),
     ...(deps.peekAt ? { peekAt: (x: number, y: number) => timed("actionMs", () => deps.peekAt!(x, y)) } : {}),
     ...(deps.clickAt ? { clickAt: (x: number, y: number) => timed("actionMs", () => deps.clickAt!(x, y)) } : {}),
+    // Os `--expect` conferidos durante o act (J3/J5): uma leitura de página, contada como snapshot.
+    ...(deps.expectsMet ? { expectsMet: (seen?: ParsedPage) => timed("snapshotMs", () => deps.expectsMet!(seen)) } : {}),
   };
   return {
     deps: wrapped,
