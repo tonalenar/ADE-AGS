@@ -6,7 +6,7 @@
  * Aqui só orquestra: a lógica pura está em `conversationModel.ts` e a persistência no backend.
  */
 import i18n from "i18next";
-import { AlertaToast } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { boardKeyOfTab, canvasActions, conversationBoardKey, useCanvasStore } from "@/features/canvas/store";
 import { nextFreeBox, type Box } from "@/features/canvas/geometry";

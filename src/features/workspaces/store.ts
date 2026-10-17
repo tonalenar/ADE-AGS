@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { AlertaToast } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 import { useTabsStore } from "@/features/tabs/store";
 import { useSkillsStore } from "@/features/skills/store";
 import { broadcastEvent, focusWindow } from "@/shared/ipc/window";

@@ -2,7 +2,8 @@ import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { LANGUAGE_OPTIONS, persistLocale } from "@/i18n/locale";
 import { useEffect, useMemo, useState } from "react";
 import { open } from "@tauri-apps/plugin-dialog";
-import { AlertaToast, Button, EditIcon, FolderIcon, ThemeToggle, Tooltip, TrashIcon } from "neogestify-ui-components";
+import { Button, EditIcon, FolderIcon, ThemeToggle, Tooltip, TrashIcon } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 import { useTranslation } from "react-i18next";
 
 import i18n, { setLanguage } from "@/i18n/index";

@@ -1,13 +1,13 @@
 import { startWindowBeat } from "@/features/browser/windowBeat";
 import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
-import { AlertaToast } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 import { useTabsStore } from "@/features/tabs/store";
 import type { PrelaunchStep } from "@/features/prelaunch/types";
 import { useAgentsStore } from "@/features/agents/store";
 import { attachSkillsToTab } from "@/features/skills/attachSkills";
 import { registerPendingSkillSetup } from "@/features/skills/pendingSkillSetup";
-import { portalStates, runBrowserRequest, runPortalRequest, type BrowserRequest } from "@/features/browser/agentBridge";
+import type { BrowserRequest } from "@/features/browser/agentBridge";
 import type { ViewOwner } from "@/features/tabs/viewTabs";
 import { useRunsStore } from "@/features/runs/store";
 import { useAskStore } from "@/features/ask/askStore";
@@ -170,13 +170,19 @@ function ownerOf(args: Record<string, unknown>): ViewOwner | null {
   return { kind: "tab", id: owner.id, label: tab.title };
 }
 
+/**
+ * O piloto do navegador (agentBridge + jevPilot, ~130 KB) só quando um agente usa o navegador: antes
+ * vinha no entry, porque este arquivo é montado com o app.
+ */
+const browserBridge = () => import("@/features/browser/agentBridge");
+
 /** Un agente usando el navegador de su proyecto, desde el MCP (`ags mcp`). */
 async function handleBrowser(args: Record<string, unknown>): Promise<unknown> {
   const cwd = str(args, "cwd");
   if (!cwd) throw new Error("Falta a pasta do projeto");
   const request = args.request as BrowserRequest | undefined;
   if (!request || typeof request.op !== "string") throw new Error("Falta dizer o que fazer no navegador");
-  return { text: await runBrowserRequest(cwd, request, ownerOf(args)) };
+  return { text: await (await browserBridge()).runBrowserRequest(cwd, request, ownerOf(args)) };
 }
 
 /**
@@ -326,7 +332,7 @@ async function handlePortal(args: Record<string, unknown>) {
     const id = str(args, "id");
     const request = args.request as BrowserRequest | undefined;
     if (!cwd || !id || !request || typeof request.op !== "string") throw new Error("Faltam cwd, id ou request");
-    return { text: await runPortalRequest(id, cwd, request, ownerOf(args)) };
+    return { text: await (await browserBridge()).runPortalRequest(id, cwd, request, ownerOf(args)) };
   }
   // `ags portal close`: o agente limpa o que criou (a chave do canvas e o id vêm do backend, que já checou o permisso).
   if (op === "close") {
@@ -340,7 +346,7 @@ async function handlePortal(args: Record<string, unknown>) {
   // `ags portals`: o estado de cada portal (carregando, sem runtime, oculto).
   if (op === "states") {
     const ids = Array.isArray(args.ids) ? args.ids.filter((i): i is string => typeof i === "string") : [];
-    return { states: portalStates(ids) };
+    return { states: (await browserBridge()).portalStates(ids) };
   }
   throw new Error(`Operação de portal desconhecida: ${op}`);
 }

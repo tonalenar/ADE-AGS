@@ -4,7 +4,7 @@ import {
   Alert, Badge, Button, CheckIcon, CloseIcon, CloudIcon, InfoIcon, Skeleton, StackIcon, Tooltip,
 } from "neogestify-ui-components";
 
-import { Markdown } from "@/shared/ui/Markdown";
+import { Markdown } from "@/shared/ui/LazyMarkdown";
 import { moveSelection, reconcileSelection, useSelectionVisible } from "@/shared/ui/paletteNav";
 import { useSkillsStore } from "@/features/skills/store";
 import { skillDetail } from "@/features/skills/ipc";

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AlertaToast, Button, ArchiveIcon, AddIcon } from "neogestify-ui-components";
+import { Button, ArchiveIcon, AddIcon } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import { RunningIcon } from "@/app/icons";

@@ -8,7 +8,8 @@ import {
   type Edge, type EdgeChange, type Node, type NodeChange, type NodeProps, type Connection,
 } from "@xyflow/react";
 import { invoke } from "@tauri-apps/api/core";
-import { AlertaToast, Button, CloseIcon, useTheme } from "neogestify-ui-components";
+import { Button, CloseIcon, useTheme } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { agentKey } from "@/features/tabs/layout/layoutTree";

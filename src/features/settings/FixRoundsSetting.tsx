@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { getSetting, setSetting } from "@/shared/ipc/settings";
-import { AlertaToast } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 /** A mesma chave que `runs/fixrounds.rs` lee. Sin valor, el teto es 2. */
 const KEY = "fix_rounds.max";
