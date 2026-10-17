@@ -975,7 +975,17 @@ declare global {
   function clickableNear(x: number, y: number): Element | null {
     const found = collectClickables();
     const hit = snapToNearest(found.map((f) => f.box), x, y);
-    if (hit && "ambiguous" in hit) throw new Error(`Há mais de um controle perto do ponto (${Math.round(x)}, ${Math.round(y)}): não sei qual tocar.`);
+    if (hit && "ambiguous" in hit) {
+      // Entre ícones SEM nome, a caixa do grupo vai junto (`[grupo l,t,r,b]`, px CSS): o piloto tira uma foto ampliada só dele.
+      const near = found.filter((f) => distanceToBox(f.box, x, y) <= 40);
+      const group = near.every((f) => isUnnamed(f.el))
+        ? found.filter((f) => isUnnamed(f.el) && distanceToBox(f.box, x, y) <= 160).reduce<Box4 | null>((box, f) => box ? {
+          left: Math.min(box.left, f.box.left), top: Math.min(box.top, f.box.top), right: Math.max(box.right, f.box.right), bottom: Math.max(box.bottom, f.box.bottom),
+        } : f.box, null)
+        : null;
+      const tag = group ? ` [grupo ${[group.left, group.top, group.right, group.bottom].map(Math.round).join(",")}]` : "";
+      throw new Error(`Há mais de um controle perto do ponto (${Math.round(x)}, ${Math.round(y)}): não sei qual tocar.${tag}`);
+    }
     return hit ? found[hit.index].el : null;
   }
 

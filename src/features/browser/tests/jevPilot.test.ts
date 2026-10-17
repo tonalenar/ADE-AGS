@@ -1276,6 +1276,31 @@ describe("dois ícones sem nome: o segundo toque (L01)", () => {
     expect(calls).toEqual(["500,300", "500,300#2"]);
   });
 
+  it("a foto aponta o vão entre ícones sem nome: o piloto não para, tira a foto ampliada do grupo e toca o que ela aponta", async () => {
+    const { h, calls } = twoIcons(0);
+    h.deps.clickAt = async (x, y, second) => {
+      calls.push(`${x},${y}${second ? "#2" : ""}`);
+      if (calls.length === 1) throw new Error(`Há mais de um controle perto do ponto (${x}, ${y}): não sei qual tocar. [grupo 400,270,640,330]`);
+      return "{}";
+    };
+    const regions: (PageRegion | undefined)[] = [];
+    h.deps.visual = async (_goal, _recent, region) => { regions.push(region); return region ? seen([0.25, 0.5]) : seen([0.5, 0.5]); };
+    const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
+    const zoom = zoomRegion({ left: 400, top: 270, right: 640, bottom: 330 }, { width: 1000, height: 600 });
+    expect(regions).toEqual([undefined, zoom]);
+    expect(calls).toEqual(["500,300", `${Math.round(zoom.left + 0.25 * (zoom.right - zoom.left))},${Math.round(zoom.top + 0.5 * (zoom.bottom - zoom.top))}`]);
+    expect(result.steps.join("\n")).toContain("foto ampliada da barra de ícones");
+    expect(result.steps.join("\n")).not.toContain("[grupo");
+  });
+
+  it("o vão ambíguo sem grupo (controles com nome) para como antes, sem a etiqueta interna", async () => {
+    const { h, calls } = twoIcons(0);
+    h.deps.clickAt = async (x, y) => { calls.push(`${x},${y}`); throw new Error(`Há mais de um controle perto do ponto (${x}, ${y}): não sei qual tocar.`); };
+    const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
+    expect(calls).toEqual(["500,300"]);
+    expect(result.steps.join("\n")).toContain("não sei qual tocar");
+  });
+
   it("o recorte: o grupo com folga, largo o bastante, no máximo 3:1 e dentro da janela", () => {
     const bar = zoomRegion({ left: 1700, top: 26, right: 1880, bottom: 74 }, { width: 1920, height: 1120 });
     expect(bar.right).toBeLessThanOrEqual(1920);
