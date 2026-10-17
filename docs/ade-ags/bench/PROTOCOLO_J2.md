@@ -104,3 +104,19 @@ bun scripts/jev-bench.ts --real --set teste --seeds 21-40 --with-expect --yes --
 
 Arquivo: `teste-real-v2.{json,md}`. As 5 falhas que restam são todas `icone`, todas paradas honestas. Agora a foto sai nítida: os pontos variam com o alvo. Mas o toque cai num ícone VIZINHO do certo. O piloto tenta um segundo vizinho e para. Próximo passo provável: perguntar ao Jev, com uma foto recortada e ampliada só da faixa dos ícones, ou numerar os candidatos na foto e fazer uma pergunta de escolha. A próxima medida usa as sementes 41–60.
 
+## Terceira rodada do teste: sementes 41–60 (2026-10-17, app com o #210, dev c6f2fb31)
+
+| | v1 (1–20) | v2 (21–40) | **v3 (41–60)** |
+|---|---|---|---|
+| Sucesso | 88/100 | 95/100 | **94/100** (IC 87,5–97,2%) |
+| Erro silencioso | 0 | 0 | **0** (teto 3,7%) |
+| `adicionar` | 15/20 | 20/20 | 20/20 |
+| `icone` | 13/20 | 15/20 | 14/20 |
+
+Arquivo: `teste-real-v3.{json,md}`. As outras quatro famílias fecham 80/80; tudo o que falta está em `icone`. Com 20 tarefas por família, 14 e 15 são o mesmo número. A foto ampliada da barra rodou em 3 tarefas e acertou as 3. Das 6 falhas:
+
+- 2 têm a foto ampliada apontando o mesmo ícone já tocado (o piloto então chuta o vizinho);
+- 4 nem chegaram lá: a PRIMEIRA foto apontou o vão entre ícones, o runtime recusou ("mais de um controle perto do ponto") e o piloto parou.
+
+**Correção** (próximo PR): no vão ambíguo entre ícones sem nome, o runtime manda junto a caixa do grupo, e o piloto vai direto à foto ampliada, sem tocar antes. A próxima medida usa as sementes 61–80.
+
