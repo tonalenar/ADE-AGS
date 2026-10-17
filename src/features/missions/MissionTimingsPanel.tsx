@@ -123,6 +123,8 @@ export function MissionEfficiencyCard({ missionId, compact = false }: { missionI
         <Metric label={t("missions.efficiency.cost")} value={cost(data.costEstimate)} labelClass={label} valueClass={metric} />
         <Metric label={t("missions.efficiency.agents")} value={String(data.agents)} labelClass={label} valueClass={metric} />
         <Metric label={t("missions.timings.firstDelegation")} value={value(data.firstDelegationMs ?? null)} labelClass={label} valueClass={data.firstDelegationMs == null ? (compact ? "text-gray-500" : "text-gray-400") : metric} />
+        {data.deliveredMs != null ? <Metric label={t("missions.efficiency.delivered")} value={value(data.deliveredMs)} labelClass={label} valueClass={metric} /> : null}
+        {data.finishWaitMs != null ? <Metric label={t("missions.efficiency.finishWait")} value={value(data.finishWaitMs)} labelClass={label} valueClass={metric} /> : null}
       </div>
 
       {testView ? (
