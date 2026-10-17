@@ -1152,7 +1152,8 @@ describe("um toque pela foto que já cumpriu o objetivo (L12)", () => {
     // Fase 6: o relatório diz por que a foto saiu, no que deu e quanto dela foi o Jev.
     expect(result.timings?.fotoUsos).toEqual(["passo 1: controle sem nome entre outros iguais → tocou e cumpriu o objetivo"]);
     expect(result.timings?.fotoJev).toBe(280);
-    expect(formatResult(GOAL, result)).toMatch(/\nFOTO: 1 foto\(s\) · \d+ ms \(captura \d+ ms · Jev 280 ms\) · \d+% do act · passo 1: controle sem nome/);
+    expect(formatResult(GOAL, result)).toMatch(/\nFOTO: 1 foto\(s\) · \d+ ms \(captura \d+ ms · Jev 280 ms\)(?: · \d+% do act)? · passo 1: controle sem nome/);
+    // A parte «% do act» só sai com o act medido (> 0 ms); num relógio rápido ele dá 0 e ela some.
   });
 
   it("sem foto, o relatório não traz a linha FOTO; uma foto que não achou nada diz isso", async () => {

@@ -5,7 +5,7 @@ import { open } from "@tauri-apps/plugin-dialog";
 import { AlertaToast, Button, EditIcon, FolderIcon, ThemeToggle, Tooltip, TrashIcon } from "neogestify-ui-components";
 import { useTranslation } from "react-i18next";
 
-import i18n from "@/i18n/index";
+import i18n, { setLanguage } from "@/i18n/index";
 import { useUiStore, type SettingsSectionId } from "@/app/uiStore";
 import { ContasSection } from "@/features/accounts/ContasSection";
 import { useAgentsStore } from "@/features/agents/store";
@@ -211,7 +211,7 @@ export function SettingsPage() {
   };
 
   const handleLanguage = (lang: string) => {
-    i18n.changeLanguage(lang);
+    void setLanguage(lang);
     persistLocale(localStorage, lang);
   };
 

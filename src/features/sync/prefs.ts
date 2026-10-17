@@ -1,4 +1,4 @@
-import i18n from "@/i18n";
+import { setLanguage } from "@/i18n";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 
 /**
@@ -33,7 +33,7 @@ export function applyPrefs(prefs: Record<string, string>, setTheme: (theme: "lig
     if (value === undefined || value === current[key]) continue;
     try { localStorage.setItem(key, value); } catch { /* sin storage: se aplica igual en memoria */ }
     switch (key) {
-      case "language": i18n.changeLanguage(value).catch(() => {}); break;
+      case "language": setLanguage(value).catch(() => {}); break;
       case "theme": if (value === "light" || value === "dark") setTheme(value); break;
       case "cc-terminal-zoom": useTerminalPrefsStore.getState().setZoom(Number(value)); break;
       case "cc-terminal-input-marks": useTerminalPrefsStore.getState().setInputMarks(value !== "0"); break;
