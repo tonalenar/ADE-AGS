@@ -1183,7 +1183,20 @@ async function pilotLoop(
         const zoomed = await zoomTap(page, step, lastTap);
         // O selo confirmou o ícone já tocado: o vizinho desfaria o acerto (teste J2 v8: a única falha foi essa). Para aqui, com a
         // página como está, e devolve a conferência a quem pediu.
-        if (zoomed === "same") return "A foto numerada da barra confirmou que o ícone tocado é o do objetivo: não toquei o vizinho. Confira a página.";
+        if (zoomed === "same") {
+          // E se o toque mudou a página, num objetivo de um passo só, isso é o objetivo atingido: o Jev de texto, em dúvida,
+          // não muda o que o selo viu (teste J2 v9: os 2 «falsos parou» eram este caso, com a página já certa).
+          const tap = [...history].reverse().find((d) => d.what.startsWith("tocou pela foto"));
+          // Um passo só: nenhum verbo de etapa além do que abre a frase («Abra o perfil…»).
+          const verbs = [...goal.replace(/[«"“][^»"”]*[»"”]/g, " ").matchAll(MORE_STEPS)];
+          const oneStep = verbs.length === 0 || (verbs.length === 1 && (verbs[0].index ?? 0) <= 2);
+          if (tap?.changed && oneStep && !goalContradiction(goal, page, initialCart)) {
+            log.push(`${step}. objetivo atingido: o toque pela foto mudou a página e a foto numerada confirmou que o ícone tocado é o do objetivo`);
+            photoEnd = finish("done", "O toque pela foto mudou a página e a foto numerada da barra confirmou o ícone tocado. Confira na página abaixo.");
+            return "acted";
+          }
+          return "A foto numerada da barra confirmou que o ícone tocado é o do objetivo: não toquei o vizinho. Confira a página.";
+        }
         if (zoomed) return zoomed;
         const { x, y } = lastTap;
         if (deps.peekAt) {

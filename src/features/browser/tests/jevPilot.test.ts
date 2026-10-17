@@ -1388,13 +1388,23 @@ describe("dois ícones sem nome: o segundo toque (L01)", () => {
       expect(result.outcome).toBe("unsure");
     });
 
-    it("o Jev de texto não vê caminho, mas o selo confirma o ícone tocado: o piloto NÃO toca o vizinho (teste J2 v8)", async () => {
+    it("o Jev de texto não vê caminho, mas o selo confirma o ícone tocado e o toque mudou a página: FEITO, sem tocar o vizinho (v8/v9)", async () => {
       const { h, calls } = doneAfterTap(2);
       h.deps.pick = async () => ok("stuck", null, 0.47);
       const result = await runPilot("Abra o perfil da conta: é um dos ícones no topo da página.", [], undefined, h.deps);
       expect(calls).toEqual(["500,300"]);
-      expect(result.steps.join("\n")).toContain("não toquei o vizinho");
+      expect(result.outcome).toBe("done");
+      expect(result.note).toContain("foto numerada da barra confirmou o ícone tocado");
       expect(result.steps.join("\n")).not.toContain("tocou no outro ícone sem nome");
+    });
+
+    it("selo confirma, mas o objetivo tem mais etapas: não dá FEITO, devolve a conferência", async () => {
+      const { h, calls } = doneAfterTap(2);
+      h.deps.pick = async () => ok("stuck", null, 0.47);
+      const result = await runPilot("Abra o perfil da conta e depois troque a senha.", [], undefined, h.deps);
+      expect(calls).toEqual(["500,300"]);
+      expect(result.outcome).not.toBe("done");
+      expect(result.steps.join("\n")).toContain("não toquei o vizinho");
     });
 
     it("lê as caixas de unnamedIcons e ignora o que não for 4 números", () => {
