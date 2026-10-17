@@ -1098,6 +1098,7 @@ async function pilotLoop(
   let photoJustTapped = false;
   /** O último toque pela foto e quantos controles sem nome havia ao lado (a página diz). */
   let lastTap: { x: number; y: number; neighbors: number; group: PageRegion | null; icons?: PageRegion[] } | null = null;
+  const currentTap = () => lastTap;
   let secondTried = false;
   /** O toque pela foto cumpriu o objetivo (um clique só): o texto novo da página que prova. */
   let photoProof: string | null = null;
@@ -1116,7 +1117,7 @@ async function pilotLoop(
    * O segundo toque pela foto AMPLIADA (o recorte do grupo de ícones sem nome). `"acted"` = tocou e releu a página; um texto =
    * por que parou (não tocar é a resposta: compra não pedida); `null` = não serviu, e o piloto tenta o vizinho como antes.
    */
-  const zoomTap = async (page: ParsedPage, step: number, previous: { x: number; y: number; group: PageRegion | null; icons?: PageRegion[] }): Promise<"acted" | string | null> => {
+  const zoomTap = async (page: ParsedPage, step: number, previous: { x: number; y: number; group: PageRegion | null; icons?: PageRegion[] }, why = "o primeiro toque da foto não levou ao objetivo"): Promise<"acted" | "same" | string | null> => {
     if (!previous.group || !page.viewport || !deps.visual || !deps.clickAt || photos >= MAX_VISUAL) return null;
     // Com selos, mais folga em volta: eles vão logo abaixo (ou acima) de cada ícone e não podem sair cortados.
     const region = zoomRegion(previous.group, page.viewport, (previous.icons?.length ?? 0) >= 2 ? 40 : 16);
@@ -1143,6 +1144,11 @@ async function pilotLoop(
       how = `existe p=${reply.foundProbability?.toFixed(2) ?? "?"}, caixa conf=${reply.confidence?.toFixed(2) ?? "?"}`;
     }
     // O recorte confirmou o ícone já tocado: não é o certo (o objetivo não veio), e adivinhar o vizinho continua sendo a saída.
+    // O selo numerado (não a caixa) apontou o ícone já tocado: é a confirmação dele (`"same"`). Pela caixa, não confirma nada.
+    if (chosen && previous.icons?.some((b) => b === chosen) && x >= chosen.left && x <= chosen.right && previous.x >= chosen.left - 4 && previous.x <= chosen.right + 4 && previous.y >= chosen.top - 4 && previous.y <= chosen.bottom + 4) {
+      log.push(`${step}. a foto numerada da barra confirmou o ícone já tocado (${how})`);
+      return "same";
+    }
     if (Math.hypot(x - previous.x, y - previous.y) < 20) return null;
     if (deps.peekAt) {
       const under = await deps.peekAt(x, y).catch(() => "");
@@ -1153,7 +1159,7 @@ async function pilotLoop(
     } catch { return null; }
     tapped.push({ x, y });
     const what = `tocou pela foto ampliada da barra de ícones no ponto (${x}, ${y})`;
-    log.push(`${step}. ${what} (o primeiro toque da foto não levou ao objetivo; ${how})`);
+    log.push(`${step}. ${what} (${why}; ${how})`);
     const before = fingerprint(page);
     await deps.settle();
     snapshot = progress.snapshot = await deps.snapshot();
@@ -1175,7 +1181,7 @@ async function pilotLoop(
         // Antes de adivinhar o vizinho: uma foto AMPLIADA só da barra de ícones sem nome. Na foto inteira o ícone é pequeno e o Jev
         // erra para o lado (teste J2 v2: 5 de 20, todas assim); no recorte ele vê o desenho. Só se não servir, o vizinho mais perto.
         const zoomed = await zoomTap(page, step, lastTap);
-        if (zoomed) return zoomed;
+        if (zoomed && zoomed !== "same") return zoomed;
         const { x, y } = lastTap;
         if (deps.peekAt) {
           const under = await deps.peekAt(x, y, true).catch(() => "");
@@ -1252,7 +1258,7 @@ async function pilotLoop(
           .map(([left, top, right, bottom]) => ({ left, top, right, bottom }));
         const zoomed = await zoomTap(page, step, { x, y, group, icons });
         if (zoomed === "acted") photoJustTapped = true;
-        if (zoomed) return zoomed;
+        if (zoomed && zoomed !== "same") return zoomed;
       }
       return `O toque pela foto falhou: ${message.replace(/\s*\[(grupo|icones) [^\]]*\]/g, "")}`;
     }
@@ -1418,6 +1424,24 @@ async function pilotLoop(
       if (!lastByJev && (reply.probability ?? 0) < MIN_GOAL_DONE) {
         log.push(`${step}. o Jev disse que acabou antes de qualquer ação, mas sem certeza (${meta})`);
         return finish("unsure", "O Jev disse que o objetivo já está atingido sem nenhuma ação, mas sem certeza. Confira a página e continue você.");
+      }
+      // «Acabou», sem certeza, logo depois de um toque pela foto num grupo de ícones sem nome e sem --expect para conferir: não é
+      // prova (teste J2 v7, sem --expect: os 2 falsos «feito» eram o vizinho tocado e um «concluído» com p 0,47–0,55). Quem decide
+      // é a foto numerada da barra (21 de 21 certos): o selo do ícone tocado confirma; outro selo, o piloto toca esse.
+      // (Lido por uma função: `lastTap` só muda dentro dos toques pela foto, e o TypeScript o estreitaria a `null` aqui.)
+      const tap = currentTap();
+      if (photoJustTapped && tap && (tap.icons?.length ?? 0) >= 2 && !secondTried && (reply.probability ?? 0) < MIN_GOAL_DONE
+        && (await expectsNow()) === null) {
+        secondTried = true;
+        const check = await zoomTap(page, step, tap, "conferência do «acabou» sem certeza");
+        if (check === "same") {
+          log.push(`${step}. concluído (${meta}; o ícone tocado conferido pela foto numerada)`);
+          return finish("done", "O Jev considera o objetivo atingido, e a foto numerada da barra confirmou o ícone tocado. Confira na página abaixo.");
+        }
+        if (check === "acted") { const end = photoFinished(step); if (end) return end; continue; }
+        log.push(`${step}. o Jev disse que acabou depois do toque pela foto, mas sem certeza (${meta}), e a foto numerada não confirmou o ícone`);
+        if (check) log.push(check);
+        return finish("unsure", "O toque pela foto caiu num ícone sem nome e o Jev não tem certeza de que era o do objetivo. Confira a página e continue você.");
       }
       const verdict = await settleDone();
       if (verdict === "retry") continue;
