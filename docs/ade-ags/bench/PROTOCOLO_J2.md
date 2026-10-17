@@ -179,3 +179,28 @@ Arquivos: `teste-real-v6.{json,md}`. As cinco famílias fecharam 20/20. O selo n
 - O protocolo pede repetir a medida com sementes novas e também sem `--expect`.
 - As 600 tarefas de teste somam 571/600 (95,2%), e o erro silencioso segue em **0 de 600** (teto 0,5%).
 
+## Sétima rodada: SEM `--expect`, sementes 121–140 (2026-10-17, app com o #214, dev 32509ea7)
+
+O caso do agente que não passa `--expect`: o piloto só tem o "acabou" do Jev e as guardas do próprio piloto.
+
+| | v6 (101–120, **com** `--expect`) | **v7 (121–140, sem `--expect`)** |
+|---|---|---|
+| Sucesso | 100/100 (IC 96,3–100%) | **98/100** (IC 93,0–99,4%) |
+| Erro silencioso | 0 | **2 falsos "feito"** (teto 7,0%) |
+| `icone` | 20/20 | 18/20 |
+| Outras famílias | 80/80 | 80/80 |
+| `act` p50 · p95 | 1,0 · 3,6 s | 1,2 · 3,6 s |
+| Consultas ao Jev por tarefa | 1,1 | **2,1** (sem o atalho dos `--expect`, ele pergunta "acabou?") |
+
+Arquivo: `teste-real-v7-sem-expect.{json,md}`.
+
+**Os 2 falsos "feito" (os primeiros em 700 tarefas) têm a mesma causa.** O objetivo era o perfil. O toque pela foto caiu no vizinho (sino; busca). O Jev de texto disse "concluído" com p = 0,47 e 0,55, e a pergunta "acabou?" deu só 0,09 e 0,12. Sem `--expect`, nada conferia, e o piloto devolveu "FEITO (não verificado)".
+
+**Correção** (este PR): logo depois de um toque pela foto num grupo de ícones sem nome, e sem `--expect`, um "acabou" sem certeza (p < 0,75) passa pela foto numerada da barra (21 de 21 certos até aqui):
+
+- se o selo é o do ícone tocado, vale o "feito", conferido pela foto;
+- se o selo é outro, o piloto toca nele e segue;
+- sem selo, devolve "sem certeza", nunca "feito".
+
+Próxima medida: sementes 141–160, sem `--expect`.
+

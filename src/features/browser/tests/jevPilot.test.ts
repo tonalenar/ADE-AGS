@@ -1346,6 +1346,48 @@ describe("dois ícones sem nome: o segundo toque (L01)", () => {
       expect(calls[1]).toBe(`${Math.round(zoom.left + 0.1 * (zoom.right - zoom.left))},${Math.round(zoom.top + 0.5 * (zoom.bottom - zoom.top))}`);
     });
 
+    /** Sem --expect: o toque pela foto cai no ícone 2 (500,300) e o Jev de texto diz «done» sem certeza. */
+    function doneAfterTap(mark: number | null) {
+      const icons4 = [[400, 276, 448, 324], [476, 276, 524, 324], [540, 276, 588, 324], [600, 276, 648, 324]];
+      const h = visualHarness([ok("click", "e1", 0.3), ok("done", null, 0.5), ok("done", null, 0.9)], seen([0.5, 0.5]), [ICONS_PAGE, `${ICONS_PAGE}\n- text "BUSCA ABERTA"`, `${ICONS_PAGE}\n- text "PERFIL ABERTO"`]);
+      const calls: string[] = [];
+      let page = 0;
+      const pages = [ICONS_PAGE, `${ICONS_PAGE}\n- text "BUSCA ABERTA"`, `${ICONS_PAGE}\n- text "PERFIL ABERTO"`];
+      h.deps.snapshot = async () => pages[Math.min(page, pages.length - 1)];
+      h.deps.clickAt = async (x, y) => {
+        calls.push(`${x},${y}`);
+        page += 1;
+        return calls.length === 1 ? JSON.stringify({ clicked: "clickable", unnamedNeighbors: 3, unnamedGroup: { left: 400, top: 276, right: 648, bottom: 324 }, unnamedIcons: icons4 }) : "{}";
+      };
+      h.deps.peekAt = async () => "clickable";
+      h.deps.visual = async (_goal, _recent, region) => (region ? { ...seen([0.1, 0.5]), mark, markProbability: 0.95 } : seen([0.5, 0.5]));
+      return { h, calls };
+    }
+
+    it("«acabou» sem certeza depois do toque no vizinho: a foto numerada aponta o certo e o piloto toca nele", async () => {
+      const { h, calls } = doneAfterTap(3);
+      const result = await runPilot("Abra o perfil da conta: é um dos ícones no topo da página.", [], undefined, h.deps);
+      expect(calls).toEqual(["500,300", "564,300"]);
+      expect(result.steps.join("\n")).toContain("conferência do «acabou» sem certeza");
+      expect(result.outcome).toBe("done");
+    });
+
+    it("se o selo confirma o ícone tocado, o «acabou» vale (conferido pela foto)", async () => {
+      const { h, calls } = doneAfterTap(2);
+      const result = await runPilot("Abra o perfil da conta: é um dos ícones no topo da página.", [], undefined, h.deps);
+      expect(calls).toEqual(["500,300"]);
+      expect(result.outcome).toBe("done");
+      expect(result.note).toContain("foto numerada da barra confirmou");
+    });
+
+    it("sem selo (o Jev não escolheu número), não dá FEITO: devolve a dúvida", async () => {
+      const { h, calls } = doneAfterTap(null);
+      h.deps.visual = async (_goal, _recent, region) => (region ? { ...seen(null, false, 0.2, 0.1), mark: null, markProbability: null } : seen([0.5, 0.5]));
+      const result = await runPilot("Abra o perfil da conta: é um dos ícones no topo da página.", [], undefined, h.deps);
+      expect(calls).toEqual(["500,300"]);
+      expect(result.outcome).toBe("unsure");
+    });
+
     it("lê as caixas de unnamedIcons e ignora o que não for 4 números", () => {
       expect(iconsIn("[[1,2,3,4],[5,6,7,8]]")).toEqual([{ left: 1, top: 2, right: 3, bottom: 4 }, { left: 5, top: 6, right: 7, bottom: 8 }]);
       expect(iconsIn("[[1,2,3],[\"a\",1,2,3]]")).toBeUndefined();
