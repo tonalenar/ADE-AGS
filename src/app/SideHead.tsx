@@ -79,7 +79,7 @@ export function SideHead({ width }: { width: number }) {
         data-tauri-drag-region
         style={{ width, position: "relative", zIndex: 30 }}
         className={`flex items-center h-10 shrink-0 overflow-hidden
-          bg-gray-100/80 dark:bg-surface-deep/75 backdrop-blur-xl
+          bg-gray-100/80 dark:bg-surface-deep/75
           border-r border-b border-gray-200 dark:border-white/[0.08]
           select-none transition-[width] duration-150
           ${collapsed

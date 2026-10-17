@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import { Terminal as XTerm } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
@@ -94,7 +94,7 @@ function mergeEnv(
   return Object.keys(merged).length > 0 ? merged : null;
 }
 
-export function Terminal({
+function TerminalImpl({
   tabId,
   command = "bash",
   cwd,
@@ -729,3 +729,22 @@ export function Terminal({
     </div>
   );
 }
+
+/**
+ * Mesmas props, fora os callbacks? O efeito de montagem do terminal roda uma vez (`[]`) e guarda os
+ * callbacks daquele momento, então uma função nova a cada render do pai não muda nada aqui; sem isto,
+ * qualquer render do painel (ou cada quadro do paneo do canvas) re-renderizava todas as terminais.
+ * Pura.
+ */
+export function sameTerminalProps(a: TerminalProps, b: TerminalProps): boolean {
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)] as (keyof TerminalProps)[]);
+  for (const key of keys) {
+    const x = a[key];
+    const y = b[key];
+    if (typeof x === "function" && typeof y === "function") continue;
+    if (!Object.is(x, y)) return false;
+  }
+  return true;
+}
+
+export const Terminal = memo(TerminalImpl, sameTerminalProps);
