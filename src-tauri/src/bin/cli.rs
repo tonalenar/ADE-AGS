@@ -476,10 +476,16 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
     let root = dunce::canonicalize(std::path::Path::new(String::from_utf8_lossy(&output.stdout).trim())).map_err(|e|e.to_string())?;
     let suite = args.get("suite").and_then(Value::as_str).unwrap_or("");
     let mut selection = None;
-    let commands = if command == "test.run" { test_runner::suite_commands(suite)? } else if command == "test.status" { vec![] } else if command == "test.affected" {
+    let commands = if command == "test.run" { test_runner::suite_commands_in(&root, suite)? } else if command == "test.status" { vec![] } else if command == "test.affected" {
         let changed = test_runner::changed_files(&root)?;
-        let unsafe_files = test_runner::unsafe_files(&root,&changed)?;
-        let plan = ade_ags_lib::testspeed::affected::plan_with_unsafe(&changed,&unsafe_files).with_changed_base(&test_runner::base_ref(&root));
+        // Fora do layout do ADE-AGS, as suítes detectadas (ver testspeed::project).
+        let plan = match ade_ags_lib::testspeed::project::detect(&root) {
+            ade_ags_lib::testspeed::project::Layout::AdeAgs => {
+                let unsafe_files = test_runner::unsafe_files(&root,&changed)?;
+                ade_ags_lib::testspeed::affected::plan_with_unsafe(&changed,&unsafe_files).with_changed_base(&test_runner::base_ref(&root))
+            }
+            ade_ags_lib::testspeed::project::Layout::Generic(suites) => ade_ags_lib::testspeed::affected::plan_generic(&changed, &suites),
+        };
         eprint!("{}", plan.render_dry_run());
         let commands = plan.steps.iter().map(|step| test_runner::TestCommand {
             suite:step.suite.into(),program:step.program.clone(),args:step.args.clone(),cwd:step.cwd.unwrap_or(".").into()

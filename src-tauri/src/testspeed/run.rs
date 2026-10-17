@@ -76,6 +76,26 @@ pub fn suite_commands(suite: &str) -> Result<Vec<TestCommand>, String> {
     }])
 }
 
+/// Os comandos de uma suíte NESTE repositório: as do ADE-AGS no layout dele, senão as detectadas
+/// (ver `project`).
+pub fn suite_commands_in(root: &Path, suite: &str) -> Result<Vec<TestCommand>, String> {
+    match super::project::detect(root) {
+        super::project::Layout::AdeAgs => suite_commands(suite),
+        super::project::Layout::Generic(suites) => {
+            let found: Vec<TestCommand> = suites.iter().filter(|s| s.suite == suite).cloned().collect();
+            if !found.is_empty() {
+                return Ok(found);
+            }
+            let names: Vec<&str> = suites.iter().map(|s| s.suite.as_str()).collect();
+            Err(if names.is_empty() {
+                "Este repositório não tem suítes de teste que o ags conheça (Cargo, tsconfig + typescript, vitest, scripts.test ou test/*.test.js).".into()
+            } else {
+                format!("Suíte '{suite}' não existe neste repositório. Detectadas: {}.", names.join(", "))
+            })
+        }
+    }
+}
+
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch("CREATE TABLE IF NOT EXISTS test_results (
         id INTEGER PRIMARY KEY AUTOINCREMENT, repository TEXT NOT NULL,
@@ -400,8 +420,9 @@ pub fn full_gate_green(conn: &Connection, root: &Path) -> bool {
     let (Ok(repo), Ok(Some(tree))) = (repository_key(root), clean_tree(root)) else {
         return false;
     };
-    FULL_GATE_SUITES.iter().all(|suite| {
-        let Ok(commands) = suite_commands(suite) else { return false };
+    let suites = super::project::gate_suites(&super::project::detect(root));
+    !suites.is_empty() && suites.iter().all(|suite| {
+        let Ok(commands) = suite_commands_in(root, suite) else { return false };
         let scope = super::scope::scoped_identity(root, &tree, suite);
         matches!(cached_green(conn, &repo, Some(&scope), suite, &command_key(&commands)), Ok(Some(_)))
     })
@@ -667,6 +688,10 @@ mod tests {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src-tauri").join("src").join("lib.rs"), "v1").unwrap();
         std::fs::write(root.join("src").join("App.tsx"), "v1").unwrap();
+        // O layout do ADE-AGS: só nele a chave do cache é por suíte (ver `project`).
+        std::fs::write(root.join("src-tauri").join("Cargo.toml"), "[package]").unwrap();
+        std::fs::create_dir_all(root.join("scripts")).unwrap();
+        std::fs::write(root.join("scripts").join("babel-parse-check.mjs"), "").unwrap();
         git(&root, &["add", "-A"]).unwrap();
         git(&root, &["commit", "-m", "app"]).unwrap();
         let conn = Connection::open_in_memory().unwrap();

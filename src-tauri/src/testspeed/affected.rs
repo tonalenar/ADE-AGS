@@ -122,13 +122,43 @@ pub fn is_agent_metadata(path: &str) -> bool {
         || path.starts_with(".cursor/skills/")
 }
 
-/// A source line that introduces `unsafe` (comments do not count).
+/// A source line that introduces `unsafe` (comments and string literals do not count: a briefing
+/// text saying "código unsafe ou COM" forced the full Rust suite).
 pub fn line_adds_unsafe(added: &str) -> bool {
     let code = added.trim_start();
     if code.starts_with("//") {
         return false;
     }
+    let code = without_strings(code);
+    let code = code.split("//").next().unwrap_or("");
     code.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|word| word == "unsafe")
+}
+
+/// The line with the contents of `"..."` literals blanked out (escapes respected). A line that
+/// opens a literal and does not close it keeps everything after the quote out, which is the
+/// conservative side only for multi-line strings (their next lines still count as code).
+fn without_strings(code: &str) -> String {
+    let mut out = String::with_capacity(code.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    for c in code.chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+                out.push('"');
+            }
+            continue;
+        }
+        if c == '"' {
+            in_string = true;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Motivo de risco de um caminho, se houver. Pura.
@@ -293,6 +323,52 @@ pub fn plan_with_unsafe(changed: &[String], unsafe_files: &[String]) -> Plan {
     }
 
     Plan { steps, full, risk, unmapped, ignored }
+}
+
+/// O nome estático de uma suíte detectada (as de `project` são estas).
+fn static_suite(name: &str) -> &'static str {
+    match name {
+        SUITE_RUST => SUITE_RUST,
+        SUITE_TSC => SUITE_TSC,
+        SUITE_FRONTEND => SUITE_FRONTEND,
+        SUITE_BABEL => SUITE_BABEL,
+        _ => "node",
+    }
+}
+
+/// O que não muda o produto de nenhum repositório: docs, markdown, CI, metadados de agente.
+fn generic_ignored(path: &str) -> bool {
+    is_agent_metadata(path)
+        || path.starts_with("docs/")
+        || path.starts_with(".github/")
+        || path.starts_with(".vscode/")
+        || path.ends_with(".md")
+        || matches!(path, "LICENSE" | ".gitignore" | ".gitattributes" | ".editorconfig")
+}
+
+/// O plano de um repositório sem o layout do ADE-AGS: sem mapa fino, roda as suítes detectadas
+/// inteiras quando algo além de docs mudou. Pura.
+pub fn plan_generic(changed: &[String], suites: &[super::run::TestCommand]) -> Plan {
+    let files: BTreeSet<String> = changed.iter().map(|f| normalize(f)).filter(|f| !f.is_empty()).collect();
+    let (ignored, relevant): (Vec<String>, Vec<String>) = files.into_iter().partition(|f| generic_ignored(f));
+    let steps = if relevant.is_empty() {
+        Vec::new()
+    } else {
+        suites
+            .iter()
+            .map(|s| Step {
+                suite: static_suite(&s.suite),
+                program: s.program.clone(),
+                args: s.args.clone(),
+                cwd: match s.cwd.as_str() {
+                    "." | "" => None,
+                    "src-tauri" => Some("src-tauri"),
+                    _ => None,
+                },
+            })
+            .collect()
+    };
+    Plan { full: !steps.is_empty(), steps, risk: Vec::new(), unmapped: Vec::new(), ignored }
 }
 
 impl Plan {
