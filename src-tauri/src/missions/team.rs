@@ -88,6 +88,21 @@ fn prepare_one(db: &crate::database::DbConnection, mission: &super::Mission, nam
         prelaunch: crate::floors::cargo_target_prelaunch(&target.path), environment })
 }
 
+/// Pré-aprova a pasta dos worktrees em cada conta do Claude Code, para o diálogo "confia nesta
+/// pasta?" não travar os terminais da missão. Melhor esforço: não impede a missão.
+fn trust_claude_worktrees(db: &crate::database::DbConnection, base: &std::path::Path) {
+    let dirs: Vec<String> = db
+        .lock()
+        .ok()
+        .and_then(|conn| {
+            let mut stmt = conn.prepare("SELECT dir FROM agent_accounts WHERE agent_id = 'claude-code'").ok()?;
+            let rows = stmt.query_map([], |r| r.get::<_, String>(0)).ok()?;
+            Some(rows.flatten().collect())
+        })
+        .unwrap_or_default();
+    crate::usage::trust::trust_worktrees_root(base, &dirs);
+}
+
 /// Recruits inherit the same isolation as the initial team, not the lead's cwd.
 pub(crate) fn prepare_recruit(db: &crate::database::DbConnection, mission_id: &str, name: &str) -> Result<TeamWorkspace, String> {
     validate_members(&[name.to_string()])?;
@@ -97,6 +112,7 @@ pub(crate) fn prepare_recruit(db: &crate::database::DbConnection, mission_id: &s
         super::store::get(&conn, mission_id)?.ok_or("Missão não encontrada.")?
     };
     let base = dirs::home_dir().ok_or("Home indisponível.")?.join(".ags").join("worktrees");
+    trust_claude_worktrees(&db, &base);
     prepare_one(db, &mission, name, &base)
 }
 
@@ -113,6 +129,7 @@ pub async fn mission_prepare_team(app: AppHandle, mission_id: String, members: V
             super::store::get(&conn, &mission_id)?.ok_or("Missão não encontrada.")?
         };
         let base = dirs::home_dir().ok_or("Home indisponível.")?.join(".ags").join("worktrees");
+        trust_claude_worktrees(&db, &base);
         // Los worktrees se crean en paralelo (cada `git worktree add` hace un checkout completo y en
         // serie eran ~1 s por integrante antes de que se abriera el canvas). Si git no logra un lock
         // compartido, se reintenta ese integrante.

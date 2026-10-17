@@ -21,7 +21,7 @@ mod terminal;
 mod parse;
 mod pricing;
 mod screen;
-mod trust;
+pub(crate) mod trust;
 mod types;
 #[cfg(test)]
 mod test;
