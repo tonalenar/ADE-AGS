@@ -1181,7 +1181,10 @@ async function pilotLoop(
         // Antes de adivinhar o vizinho: uma foto AMPLIADA só da barra de ícones sem nome. Na foto inteira o ícone é pequeno e o Jev
         // erra para o lado (teste J2 v2: 5 de 20, todas assim); no recorte ele vê o desenho. Só se não servir, o vizinho mais perto.
         const zoomed = await zoomTap(page, step, lastTap);
-        if (zoomed && zoomed !== "same") return zoomed;
+        // O selo confirmou o ícone já tocado: o vizinho desfaria o acerto (teste J2 v8: a única falha foi essa). Para aqui, com a
+        // página como está, e devolve a conferência a quem pediu.
+        if (zoomed === "same") return "A foto numerada da barra confirmou que o ícone tocado é o do objetivo: não toquei o vizinho. Confira a página.";
+        if (zoomed) return zoomed;
         const { x, y } = lastTap;
         if (deps.peekAt) {
           const under = await deps.peekAt(x, y, true).catch(() => "");
