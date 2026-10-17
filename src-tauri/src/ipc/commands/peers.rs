@@ -781,6 +781,100 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     })
 }
 
+/// O modelo que o `peer deliver` mostra quando o JSON não passa: o Handoff Structured v1.
+pub(crate) const HANDOFF_TEMPLATE: &str = r#"{"version":1,"summary":"o que foi entregue, em 1-3 frases","changed_files":[{"path":"src/caminho/relativo.ts","description":"o que mudou"}],"tests":[{"command":"ags test affected","status":"passed"}],"decisions":["decisão tomada"],"risks":["o que pode quebrar"],"next_steps":["o que falta"]}"#;
+
+/// A linha que chega ao terminal do destino: o essencial, sem colar o JSON. Pura.
+pub(crate) fn handoff_line(handoff: &crate::runs::handoff::StructuredHandoff, id: i64) -> String {
+    use crate::runs::handoff::TestStatus;
+    let summary: String = handoff.summary.split_whitespace().collect::<Vec<_>>().join(" ");
+    let summary = if summary.chars().count() > 240 { summary.chars().take(240).collect::<String>() + "…" } else { summary };
+    let passed = handoff.tests.iter().filter(|t| t.status == TestStatus::Passed).count();
+    let failed = handoff.tests.iter().filter(|t| t.status == TestStatus::Failed).count();
+    let mut parts = vec![format!("ENTREGA #{id}: {summary}")];
+    parts.push(format!("{} arquivo(s)", handoff.changed_files.len()));
+    parts.push(format!("testes: {passed} ok, {failed} falhou"));
+    if !handoff.risks.is_empty() {
+        parts.push(format!("{} risco(s)", handoff.risks.len()));
+    }
+    if !handoff.next_steps.is_empty() {
+        parts.push(format!("{} pendência(s)", handoff.next_steps.len()));
+    }
+    format!("{}. Detalhe: `ags peer handoff {id}`.", parts.join(" · "))
+}
+
+/// O texto legível da entrega para o chat da equipe. Pura.
+pub(crate) fn handoff_text(handoff: &crate::runs::handoff::StructuredHandoff) -> String {
+    let mut out = vec![format!("Entrega: {}", handoff.summary.trim())];
+    let list = |title: &str, items: Vec<String>, out: &mut Vec<String>| {
+        if !items.is_empty() {
+            out.push(format!("{title}:\n{}", items.iter().map(|i| format!("- {i}")).collect::<Vec<_>>().join("\n")));
+        }
+    };
+    list("Arquivos", handoff.changed_files.iter().map(|f| match &f.description { Some(d) => format!("{} — {d}", f.path), None => f.path.clone() }).collect(), &mut out);
+    let status = |s: &crate::runs::handoff::TestStatus| match s {
+        crate::runs::handoff::TestStatus::Passed => "passed",
+        crate::runs::handoff::TestStatus::Failed => "failed",
+        crate::runs::handoff::TestStatus::NotRun => "not_run",
+    };
+    list("Testes", handoff.tests.iter().map(|t| format!("{} ({})", t.command, status(&t.status))).collect(), &mut out);
+    list("Decisões", handoff.decisions.clone(), &mut out);
+    list("Riscos", handoff.risks.clone(), &mut out);
+    list("Pendências", handoff.next_steps.clone(), &mut out);
+    out.join("\n")
+}
+
+/// `ags peer deliver [<nome>] --file entrega.json`: a entrega final como Handoff Structured v1.
+/// O JSON é validado, guardado inteiro e o destino (o orquestrador, sem nome) recebe UMA linha com
+/// o essencial e o id. Antes a entrega era texto livre: das 121 mensagens ao orquestrador só 3
+/// traziam os campos pedidos, e o app adivinhava o que era entrega por regex e pelo Jev.
+pub(super) fn peer_deliver(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let from = caller(args)?;
+    let raw = arg_str(args, "text")?;
+    let value: Value = serde_json::from_str(raw.trim())
+        .map_err(|e| format!("A entrega não é um JSON válido ({e}). Modelo:\n{HANDOFF_TEMPLATE}"))?;
+    let handoff = crate::runs::handoff::parse(&value).map_err(|e| format!("{e}. Modelo:\n{HANDOFF_TEMPLATE}"))?;
+    let (me, list) = peers(app, &from)?;
+    let from_name = me.map(|m| m.name).unwrap_or_else(|| from.clone());
+    let boards = crate::canvas::load_boards();
+    let target = match arg_str_opt(args, "to").filter(|t| !t.trim().is_empty()) {
+        Some(to) => resolve_peer(&list, &to)?.clone(),
+        None => list
+            .iter()
+            .find(|t| crate::canvas::is_orchestrator(&boards, &t.id))
+            .cloned()
+            .ok_or_else(|| "Não achei o orquestrador entre os seus pares: diga para quem é a entrega (`ags peer deliver <nome> --file ...`).".to_string())?,
+    };
+    let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
+    let payload = serde_json::to_string(&handoff).map_err(|e| e.to_string())?;
+    let id = {
+        let db = super::shared::db(app)?;
+        let conn = db.inner().lock().map_err(|e| e.to_string())?;
+        crate::missions::messages::record_handoff(&conn, &boards, (&from, &from_name), (&target.id, &target.name), &handoff_text(&handoff), &payload, crate::util::now_ts_ms())?
+    }
+    .ok_or("A entrega estruturada só vale entre agentes da mesma missão. Fora dela, use `ags peer tell`.")?;
+    let line = handoff_line(&handoff, id);
+    let outcome = deliver_now_or_queue(pty, &target.id, outgoing(&from_name, &line, false, false))?;
+    if !matches!(outcome, Delivery::Duplicate | Delivery::Unconfirmed) {
+        emit_peer_message(app, "handoff", &from, Some(&target.id), Some(&line), None);
+    }
+    Ok(json!({ "peer": describe(&target), "handoff": id, "sent": !matches!(outcome, Delivery::Duplicate | Delivery::Unconfirmed), "queued": outcome == Delivery::Queued }))
+}
+
+/// `ags peer handoff <id>`: o JSON inteiro de uma entrega da sua missão.
+pub(super) fn peer_handoff(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let from = caller(args)?;
+    let id: i64 = arg_str(args, "id")?.trim().trim_start_matches('#').parse().map_err(|_| "Use o número da entrega: `ags peer handoff 12`.".to_string())?;
+    let db = super::shared::db(app)?;
+    let conn = db.inner().lock().map_err(|e| e.to_string())?;
+    let (mission, from_name, payload) = crate::missions::messages::handoff(&conn, id)?.ok_or_else(|| format!("Não existe a entrega #{id}."))?;
+    if crate::canvas::team_scope_of_tab(&crate::canvas::load_boards(), &from).as_deref() != Some(mission.as_str()) {
+        return Err(format!("A entrega #{id} é de outra missão."));
+    }
+    let handoff: Value = serde_json::from_str(&payload).map_err(|e| e.to_string())?;
+    Ok(json!({ "id": id, "from": from_name, "handoff": handoff }))
+}
+
 /// Cada quanto e até quando `ci watch` olha os checks do PR.
 const CI_POLL: Duration = Duration::from_secs(30);
 const CI_MAX_WAIT: Duration = Duration::from_secs(90 * 60);
@@ -1226,6 +1320,24 @@ mod test {
         assert!(ask.starts_with("[Mensagem de Líder via ADE AGS] rodar os testes"));
         let tell = framed("Líder", "pronto", false);
         assert!(tell.contains("ags peer tell \"Líder\""));
+    }
+}
+
+#[cfg(test)]
+mod handoff_tests {
+    use super::{handoff_line, handoff_text, HANDOFF_TEMPLATE};
+
+    #[test]
+    fn o_modelo_passa_e_a_linha_resume_sem_colar_o_json() {
+        let value: serde_json::Value = serde_json::from_str(HANDOFF_TEMPLATE).unwrap();
+        let handoff = crate::runs::handoff::parse(&value).expect("o modelo mostrado ao agente tem de ser válido");
+        let line = handoff_line(&handoff, 7);
+        assert!(line.starts_with("ENTREGA #7: o que foi entregue"), "{line}");
+        assert!(line.contains("1 arquivo(s)") && line.contains("testes: 1 ok, 0 falhou") && line.contains("1 risco(s)"));
+        assert!(line.contains("`ags peer handoff 7`") && !line.contains('{'));
+        let text = handoff_text(&handoff);
+        assert!(text.contains("Arquivos:\n- src/caminho/relativo.ts — o que mudou"), "{text}");
+        assert!(text.contains("ags test affected (passed)"));
     }
 }
 

@@ -19,7 +19,8 @@ pub struct MissionMessage {
     pub id: i64,
     pub mission_id: String,
     pub at_ms: i64,
-    /// `tell` (aviso/tarefa) ou `ask` (pergunta que espera resposta).
+    /// `tell` (aviso/tarefa), `ask` (pergunta que espera resposta) ou `handoff` (entrega
+    /// estruturada; o JSON inteiro fica em `mission_handoffs`).
     pub kind: String,
     pub from_tab_id: String,
     pub from_name: String,
@@ -41,7 +42,15 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             to_name TEXT NOT NULL,
             text TEXT NOT NULL
         );
-        CREATE INDEX IF NOT EXISTS idx_mission_messages_mission ON mission_messages(mission_id, id);",
+        CREATE INDEX IF NOT EXISTS idx_mission_messages_mission ON mission_messages(mission_id, id);
+        CREATE TABLE IF NOT EXISTS mission_handoffs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            mission_id TEXT NOT NULL,
+            at_ms INTEGER NOT NULL,
+            from_name TEXT NOT NULL,
+            to_name TEXT NOT NULL,
+            payload TEXT NOT NULL
+        );",
     )
 }
 
@@ -80,7 +89,7 @@ fn record_inner(
     conn: &Connection, boards: &Boards, kind: &str, from: (&str, &str), to: (&str, &str),
     text: &str, at_ms: i64, notice: bool,
 ) -> Result<bool, String> {
-    if !matches!(kind, "tell" | "ask") || text.trim().is_empty() || (from.0 == to.0 && !notice) {
+    if !matches!(kind, "tell" | "ask" | "handoff") || text.trim().is_empty() || (from.0 == to.0 && !notice) {
         return Ok(false);
     }
     // O chat da equipe vale para uma missão e também para uma conversa de projeto (`c:<id>`).
@@ -100,6 +109,43 @@ fn record_inner(
     )
     .map_err(|e| e.to_string())?;
     Ok(true)
+}
+
+/// Guarda uma entrega estruturada: o JSON inteiro (já validado) em `mission_handoffs` e o texto
+/// legível no chat da equipe. Devolve o id da entrega, ou `None` fora de missão.
+pub fn record_handoff(
+    conn: &Connection,
+    boards: &Boards,
+    from: (&str, &str),
+    to: (&str, &str),
+    readable: &str,
+    payload: &str,
+    at_ms: i64,
+) -> Result<Option<i64>, String> {
+    let Some(mission) = team_scope_of_tab(boards, from.0) else { return Ok(None) };
+    if !record_inner(conn, boards, "handoff", from, to, readable, at_ms, false)? {
+        return Ok(None);
+    }
+    conn.execute(
+        "INSERT INTO mission_handoffs (mission_id, at_ms, from_name, to_name, payload) VALUES (?1,?2,?3,?4,?5)",
+        params![mission, at_ms, from.1, to.1, payload],
+    )
+    .map_err(|e| e.to_string())?;
+    Ok(Some(conn.last_insert_rowid()))
+}
+
+/// Uma entrega pelo id: (missão, de quem, JSON). Só leitura.
+pub fn handoff(conn: &Connection, id: i64) -> Result<Option<(String, String, String)>, String> {
+    migrate(conn).map_err(|e| e.to_string())?;
+    match conn.query_row(
+        "SELECT mission_id, from_name, payload FROM mission_handoffs WHERE id = ?1",
+        [id],
+        |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+    ) {
+        Ok(row) => Ok(Some(row)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.to_string()),
+    }
 }
 
 /// As mensagens da missão depois de `after_id`, da mais antiga à mais nova.
@@ -154,6 +200,20 @@ mod tests {
         let other = Board { nodes: json!({ "stranger": {} }), ..Default::default() };
         boards.insert("C:/p#m:m2".into(), other);
         boards
+    }
+
+    #[test]
+    fn a_entrega_estruturada_fica_inteira_e_o_chat_mostra_o_texto() {
+        let conn = Connection::open_in_memory().unwrap();
+        let b = boards();
+        let id = record_handoff(&conn, &b, ("back", "Backend"), ("lead", "Orquestrador"), "Entrega: X", r#"{"version":1}"#, 5).unwrap().unwrap();
+        let (mission, from, payload) = handoff(&conn, id).unwrap().unwrap();
+        assert_eq!((mission.as_str(), from.as_str(), payload.as_str()), ("m1", "Backend", r#"{"version":1}"#));
+        let chat = list(&conn, "m1", 0, 10).unwrap();
+        assert_eq!((chat[0].kind.as_str(), chat[0].text.as_str()), ("handoff", "Entrega: X"));
+        // Fora da missão não grava nada.
+        assert_eq!(record_handoff(&conn, &b, ("ghost", "G"), ("lead", "O"), "x", "{}", 6).unwrap(), None);
+        assert_eq!(handoff(&conn, id + 1).unwrap(), None);
     }
 
     #[test]

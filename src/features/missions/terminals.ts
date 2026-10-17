@@ -269,7 +269,7 @@ export function leadBriefing(
     "MENOS CONVERSA, MAIS REGISTRO:",
     "- Antes de perguntar de novo, releia o objetivo, os achados e a memória aprovada já recebidos. Pergunte apenas a lacuna concreta que bloqueia uma decisão ou o avanço.",
     "- Em tarefas do Mission Runtime, use o Handoff Structured v1 como entrega registrada; consulte `task_result` apenas quando precisar do payload completo. Não peça novamente resumo, arquivos, testes ou decisões que já constem no handoff.",
-    "- Neste canvas de terminais, combine uma única entrega final curta por integrante: resultado, decisões, arquivos tocados, testes e bloqueios. Atualizações intermediárias servem para bloqueios ou mudanças de decisão.",
+    "- Neste canvas de terminais, cada integrante fecha com UMA entrega estruturada (`ags peer deliver`): chega a você como `ENTREGA #<id>: ...` e o detalhe sai com `ags peer handoff <id>`. Não peça de novo o que está nela. Atualizações intermediárias servem para bloqueios ou mudanças de decisão.",
     "",
     "TESTES (rápido e sem repetir):",
     "- Durante o trabalho: `ags test affected`. Ele reaproveita o verde da mesma árvore (`já verde neste hash`), commitada ou não, inclusive de outro worktree: se responder isso, NÃO reexecute cargo, vitest, tsc nem a suíte.",
@@ -360,7 +360,8 @@ export function memberBriefing(
     `- ${BROWSER_HINT}`,
     "",
     ...(deliverToQa ? [`Ao concluir uma entrega, mande-a DIRETO ao QA por \`ags peer tell "${deliverToQa}" --file <arquivo>\` (branch, commit, o que mudou e como testar), sem esperar o orquestrador repassar.`] : []),
-    `Ao concluir, envie UMA mensagem final curta ao orquestrador por \`ags peer tell "${LEAD_NAME}"\`, com resultado, decisões, arquivos tocados, testes e bloqueios. Use caminhos relativos e \`nenhum\` quando um campo estiver vazio.`,
+    "Ao concluir, faça a entrega final ESTRUTURADA ao orquestrador: escreva um JSON (Handoff v1) num arquivo fora do repositório e rode `ags peer deliver --file <arquivo>`. Campos: version 1, summary, changed_files [{path, description}], tests [{command, status: passed|failed|not_run}], decisions, risks, next_steps; caminhos relativos. Se o JSON não passar, o comando mostra um modelo. Ele recebe uma linha com o resumo e o id; o detalhe fica guardado.",
+    `Só se o deliver não estiver disponível, mande UMA mensagem final curta por \`ags peer tell "${LEAD_NAME}"\` com resultado, decisões, arquivos tocados, testes e bloqueios.`,
     ...(mission.id ? [
       `Se aprendeu algo durável e não óbvio no código (uma decisão, uma restrição, uma armadilha), sugira até 1 memória antes de reportar: \`ags memory suggest --mission ${mission.id} --scope workspace --kind decision|constraint|finding --key <nome-curto> --body "..."\`. Mesma chave de uma memória existente = proposta de correção dela. Nunca segredos.`,
     ] : []),

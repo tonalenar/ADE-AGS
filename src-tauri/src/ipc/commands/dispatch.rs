@@ -28,7 +28,7 @@ use super::routine::{
     routine_create, routine_delete, routine_disable, routine_edit, routine_enable, routine_list, routine_run, routine_show,
 };
 use super::chat::{chat_recall, chat_say};
-use super::peers::{ci_watch, peer_ask, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_role, peer_tell};
+use super::peers::{ci_watch, peer_ask, peer_deliver, peer_handoff, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_role, peer_tell};
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
 use super::shared::bridge_call;
@@ -105,6 +105,8 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "peer.list" => peer_list(app, args),
         "peer.ask" => peer_ask(app, args),
         "peer.tell" => peer_tell(app, args),
+        "peer.deliver" => peer_deliver(app, args),
+        "peer.handoff" => peer_handoff(app, args),
         "peer.check" => peer_check(app, args),
         "peer.recruit" => peer_recruit(app, args),
         "peer.connect" => peer_connect(app, args),
