@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, blockedControl, obviousAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, exactLinkMissing, goalContradiction, missingFill, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, blockedControl, obviousAdvance, photoTapFinished, cartAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, exactLinkMissing, goalContradiction, missingFill, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -1058,6 +1058,113 @@ describe("link exato fora do recorte (P02)", () => {
     h.deps.snapshotAll = async () => { reads += 1; return cut; };
     await runPilot(goal, [], undefined, h.deps);
     expect(reads).toBe(1);
+  });
+});
+
+describe("SauceDemo com o item já no carrinho (P04)", () => {
+  const GOAL = "Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho, vá ao checkout, preencha os dados fictícios e continue até o resumo (Overview). NÃO clique em Finish.";
+  const product = (name: string, n: number, control: string) => [
+    `  - button "View details for ${name}" [ref=e${n}] → /inventory.html#`, `  - button "View details for ${name}" [ref=e${n + 1}] → /inventory.html#`,
+    '  - text "Uma descrição comprida do produto."', '  - text "$"', '  - text "29.99"', `  - button "${control}" [ref=e${n + 2}]`];
+  const inventory = (backpack: string, bike: string, cart = "Cart, 1 items") => ['page: "Swag Labs" https://www.saucedemo.com/inventory.html', "viewport: 1920×1120 · scroll 0/1120", "",
+    '- banner "header container"', '  - button "Open Menu" [ref=e1]', `  - button "${cart}" [ref=e2]`, '- main "inventory container"',
+    ...product("Sauce Labs Backpack", 4, backpack), ...product("Sauce Labs Bike Light", 7, bike)].join("\n");
+  const details = ['page: "Swag Labs" https://www.saucedemo.com/inventory-item.html?id=4', "viewport: 1920×1120 · scroll 0/1120", "",
+    '- banner "header container"', '  - button "Cart, 1 items" [ref=e2]', '  - button "Back to products" [ref=e3]', '- main "inventory container"',
+    '  - text "Sauce Labs Backpack"', '  - text "29.99"', '  - button "Remove" [ref=e4]'].join("\n");
+
+  it("o botão com destino «View details for …» é o título dos que vêm depois, sem o «View details for»", () => {
+    const page = parseSnapshot(inventory("Remove", "Add to cart"));
+    expect(page.elements.find((e) => e.ref === "e6")?.near).toBe("Sauce Labs Backpack | 29.99");
+    expect(page.elements.find((e) => e.ref === "e9")?.near).toBe("Sauce Labs Bike Light | 29.99");
+    const query = buildStep(parseSnapshot(inventory("Add to cart", "Add to cart", "Cart")), GOAL, [], []);
+    expect(query.targets.click.find((o) => o.id === "e6")?.label).toContain("[next to: Sauce Labs Backpack | 29.99]");
+  });
+
+  it("ir ao carrinho com p entre 0,30 e 0,40 vale quando o item do objetivo já está nele", () => {
+    expect(cartAdvance(parseSnapshot(inventory("Remove", "Add to cart")), "click", "e2", 0.39, GOAL)).toBe(true);
+    expect(cartAdvance(parseSnapshot(details), "click", "e2", 0.35, GOAL)).toBe(true);
+  });
+
+  it("não vale com outro item no carrinho, carrinho vazio, p baixa demais, outro alvo ou objetivo sem carrinho", () => {
+    const other = parseSnapshot(inventory("Add to cart", "Remove"));
+    expect(cartAdvance(other, "click", "e2", 0.39, GOAL)).toBe(false);
+    expect(cartAdvance(parseSnapshot(inventory("Add to cart", "Add to cart", "Cart")), "click", "e2", 0.39, GOAL)).toBe(false);
+    const inCart = parseSnapshot(inventory("Remove", "Add to cart"));
+    expect(cartAdvance(inCart, "click", "e2", 0.25, GOAL)).toBe(false);
+    expect(cartAdvance(inCart, "click", "e1", 0.39, GOAL)).toBe(false);
+    expect(cartAdvance(inCart, "click", "e2", 0.39, "Abra o menu")).toBe(false);
+    expect(cartAdvance(inCart, "click", "e2", 0.5, GOAL)).toBe(false); // acima do piso não precisa
+  });
+
+  it("o piloto clica no carrinho em vez de parar «sem certeza»", async () => {
+    const h = harness([ok("click", "e2", 0.39)], [inventory("Remove", "Add to cart")]);
+    const result = await runPilot(GOAL, [], 1, h.deps);
+    expect(h.calls).toEqual(["click e2"]);
+    expect(result.outcome).toBe("limit");
+  });
+});
+
+describe("um toque pela foto que já cumpriu o objetivo (L12)", () => {
+  const GOAL = "Clique no botão «Garantia estendida» que aparece no meio da foto do produto.";
+  const shop = (status: string) => ['page: "ShopMart — foto do produto" http://localhost:8765/foto-garantia.html', "viewport: 1920×1120 · scroll 0/1120", "",
+    "- main", `  - text "${status}"`, "  - clickable [ref=e1]", "  - clickable [ref=e2]", '  - text "Tênis de corrida Aero. R$ 399,90"', '  - button "Comprar" [ref=e3]'].join("\n");
+  const before = parseSnapshot(shop("Nada aberto."));
+  const sure = { foundProbability: 1, confidence: 0.91 };
+
+  it("o objetivo de um clique só, a foto certa e o texto novo que fala do controle: acabou", () => {
+    expect(photoTapFinished(GOAL, before, parseSnapshot(shop("GARANTIA ABERTA")), sure)).toBe("GARANTIA ABERTA");
+    expect(photoTapFinished("Clique em «Continuar»", before, parseSnapshot(shop("Continuar: etapa 2")), sure)).toBe("Continuar: etapa 2");
+  });
+
+  it("o toque que caiu no vizinho, a página sem mudança ou com erro: não acabou", () => {
+    expect(photoTapFinished(GOAL, before, parseSnapshot(shop("DETALHES ABERTOS")), sure)).toBeNull();
+    expect(photoTapFinished(GOAL, before, before, sure)).toBeNull();
+    expect(photoTapFinished(GOAL, before, parseSnapshot(shop("Erro ao abrir a garantia")), sure)).toBeNull();
+    expect(photoTapFinished(GOAL, before, parseSnapshot(shop("Garantia: não foi possível carregar")), sure)).toBeNull();
+  });
+
+  it("um objetivo com mais etapas, que não é de clicar, ou uma foto sem certeza alta: não acabou", () => {
+    const after = parseSnapshot(shop("GARANTIA ABERTA"));
+    expect(photoTapFinished("Clique em «Garantia estendida» e depois adicione o produto ao carrinho", before, after, sure)).toBeNull();
+    expect(photoTapFinished("Clique em «Garantia estendida»; escolha 2 anos", before, after, sure)).toBeNull();
+    expect(photoTapFinished("Abra a garantia estendida", before, after, sure)).toBeNull();
+    expect(photoTapFinished(GOAL, before, after, { foundProbability: 1, confidence: 0.7 })).toBeNull();
+    expect(photoTapFinished(GOAL, before, after, { foundProbability: 0.8, confidence: 0.95 })).toBeNull();
+  });
+
+  function tapHarness(result: string) {
+    const h = visualHarness([ok("click", "e1", 0.58, 0.01), ok("click", "e1", 0.5, 0.01)], seen([365 / 1920, 347 / 1120], true, 1, 0.91), [shop("Nada aberto.")]);
+    let tapped = false;
+    h.deps.snapshot = async () => shop(tapped ? result : "Nada aberto.");
+    h.deps.clickAt = async (x, y) => { h.clicks.push([x, y]); tapped = true; };
+    h.deps.peekAt = async () => "clickable";
+    return h;
+  }
+
+  it("o piloto termina logo depois do toque, sem outra consulta ao Jev, e diz o que a página passou a mostrar", async () => {
+    const h = tapHarness("GARANTIA ABERTA");
+    const result = await runPilot(GOAL, [], undefined, h.deps);
+    expect(result.outcome).toBe("done");
+    expect(h.clicks).toEqual([[365, 347]]);
+    expect(h.asked).toHaveLength(1);
+    expect(result.steps.join("\n")).toContain("objetivo atingido pelo toque da foto: a página passou a mostrar «GARANTIA ABERTA»");
+    // Fase 6: o relatório diz por que a foto saiu, no que deu e quanto dela foi o Jev.
+    expect(result.timings?.fotoUsos).toEqual(["passo 1: controle sem nome entre outros iguais → tocou e cumpriu o objetivo"]);
+    expect(result.timings?.fotoJev).toBe(280);
+    expect(formatResult(GOAL, result)).toMatch(/\nFOTO: 1 foto\(s\) · \d+ ms \(captura \d+ ms · Jev 280 ms\) · \d+% do act · passo 1: controle sem nome/);
+  });
+
+  it("sem foto, o relatório não traz a linha FOTO; uma foto que não achou nada diz isso", async () => {
+    const plain = await runPilot("entrar", [], undefined, harness([ok("click", "e4"), ok("done")]).deps);
+    expect(formatResult("entrar", plain)).not.toContain("\nFOTO:");
+    const none = await runPilot("abrir o carrinho", [], undefined, visualHarness([ok("click", "e4", 0.3)], seen(null, false, 0.97, 0.09)).deps);
+    expect(none.timings?.fotoUsos).toEqual(["passo 1: sem certeza no texto (p=0.30) → A reserva visual também não achou um controle seguro na foto"]);
+  });
+
+  it("o toque no vizinho segue como antes: devolve a página sem dar por feito", async () => {
+    const result = await runPilot(GOAL, [], undefined, tapHarness("DETALHES ABERTOS").deps);
+    expect(result.outcome).toBe("unsure");
   });
 });
 

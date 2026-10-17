@@ -671,7 +671,8 @@ export async function runSimTask(task: BenchTask, options: SimOptions = {}): Pro
         const ms = lat(SIM_LATENCY.visual);
         clock.advance(ms);
         const center = page.photo?.(task.goal) ?? null;
-        return { status: "ok", found: center !== null, foundProbability: center ? 0.9 : 0.1, center, confidence: center ? 0.8 : 0.1, reason: null, latencyMs: ms };
+        // Com o controle à vista, os números das rodadas reais (L01, L02, L12: existe p 0,99–1,00, caixa conf 0,89–0,94).
+        return { status: "ok", found: center !== null, foundProbability: center ? 0.99 : 0.1, center, confidence: center ? 0.9 : 0.1, reason: null, latencyMs: ms };
       },
       clickAt: async (x: number, y: number) => { clock.advance(lat(SIM_LATENCY.click)); page.clickAt?.(x, y); },
     }),

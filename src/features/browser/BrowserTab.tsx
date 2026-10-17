@@ -352,7 +352,11 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
           covers.restore();
         }
       };
-      let shot = await shoot().catch(() => null);
+      // Um nó que passa da borda da janela sairia cortado de qualquer jeito: enquadra direto, sem a captura perdida (plano v2, Fase 6:
+      // nas rodadas reais 23 de 27 fotos pagavam uma primeira captura incompleta antes do enquadramento).
+      const box = page.getBoundingClientRect();
+      const inWindow = box.left >= 0 && box.top >= 0 && box.right <= window.innerWidth + 1 && box.bottom <= window.innerHeight + 1;
+      let shot = inWindow ? await shoot().catch(() => null) : null;
       if (!shot || !shot.complete) {
         // No canvas o nó pode estar cortado pela borda da tela: a vista o mostra inteiro só pelo tempo da foto.
         window.dispatchEvent(new CustomEvent("ags:canvas-reveal", { detail: { id: view.id } }));
