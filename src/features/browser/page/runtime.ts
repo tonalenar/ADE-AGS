@@ -958,6 +958,8 @@ declare global {
     return found;
   }
 
+  const roundBox = (b: Box4): Box4 => ({ left: Math.round(b.left), top: Math.round(b.top), right: Math.round(b.right), bottom: Math.round(b.bottom) });
+
   /** Um controle sem nome (um ícone): só a imagem diz o que é. */
   function isUnnamed(el: Element): boolean {
     return nameOf(el, roleOf(el) || "clickable") === "";
@@ -966,6 +968,8 @@ declare global {
   /** O último ponto tocado por foto (o controle que ficou com ele) e quantos controles SEM NOME havia perto dele. */
   let lastPoint: { el: Element; unnamed: boolean } | null = null;
   let pointNeighbors = 0;
+  /** A caixa (px CSS da janela) que envolve o controle tocado e os outros sem nome do mesmo grupo: a foto ampliada do piloto. */
+  let pointGroup: Box4 | null = null;
 
   /** O controle clicável que fica com um ponto: ver `snapToNearest`. `null` = nenhum perto. */
   function clickableNear(x: number, y: number): Element | null {
@@ -999,6 +1003,7 @@ declare global {
     }
     if (spec.kind === "point") {
       pointNeighbors = 0;
+      pointGroup = null;
       // O segundo toque: a foto apontou entre dois ícones sem nome, o primeiro não era o certo; o vizinho sem nome mais perto do ponto.
       if (spec.second) {
         const previous = lastPoint;
@@ -1024,8 +1029,14 @@ declare global {
         lastPoint = { el: chosen, unnamed };
         // Quantos outros controles sem nome há até 60 px do ponto: com algum, o piloto pode tentar o vizinho se este não era o certo.
         if (unnamed) {
-          pointNeighbors = collectClickables()
-            .filter((f) => f.el !== chosen && !chosen.contains(f.el) && !f.el.contains(chosen) && isUnnamed(f.el) && distanceToBox(f.box, spec.x, spec.y) <= 60).length;
+          const others = collectClickables().filter((f) => f.el !== chosen && !chosen.contains(f.el) && !f.el.contains(chosen) && isUnnamed(f.el));
+          pointNeighbors = others.filter((f) => distanceToBox(f.box, spec.x, spec.y) <= 60).length;
+          // O grupo: os sem nome até 160 px do ponto (uma barra de 4 ou 5 ícones), mais o tocado.
+          const own = chosen.getBoundingClientRect();
+          pointGroup = others.filter((f) => distanceToBox(f.box, spec.x, spec.y) <= 160).reduce<Box4>((box, f) => ({
+            left: Math.min(box.left, f.box.left), top: Math.min(box.top, f.box.top),
+            right: Math.max(box.right, f.box.right), bottom: Math.max(box.bottom, f.box.bottom),
+          }), { left: own.left, top: own.top, right: own.right, bottom: own.bottom });
         }
       }
       return chosen;
@@ -1779,7 +1790,7 @@ declare global {
     const result = await action(el);
     const spec = parseTarget(target);
     const withNeighbors = spec.kind === "point" && pointNeighbors > 0 && result !== null && typeof result === "object"
-      ? { ...(result as object), unnamedNeighbors: pointNeighbors } as T
+      ? { ...(result as object), unnamedNeighbors: pointNeighbors, ...(pointGroup ? { unnamedGroup: roundBox(pointGroup) } : {}) } as T
       : result;
     if (spec.kind === "ref" && el.isConnected) {
       const fresh = fingerprintOf(el);

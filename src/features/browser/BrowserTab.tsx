@@ -316,7 +316,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       const frozen = await freezePage(page, frame);
       return previewSaveCapture(await canvasToPng(frozen.canvas), tag);
     },
-    visualShot: async () => {
+    visualShot: async (region) => {
       const page = iframe.current;
       const frame = column.current;
       if (!page || !frame) throw new Error("La página todavía no está cargada.");
@@ -371,8 +371,23 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
           window.dispatchEvent(new CustomEvent("ags:canvas-reveal", { detail: { id: view.id, restore: true } }));
         }
       }
+      // O recorte pedido (a barra de ícones sem nome, em px CSS da página): sai só ele, ampliado pelo `visualSize` logo abaixo.
+      let source = shot.frozen.canvas;
+      if (region && page.offsetWidth > 0 && page.offsetHeight > 0) {
+        const fx = source.width / page.offsetWidth;
+        const fy = source.height / page.offsetHeight;
+        const sx = Math.max(0, Math.round(region.left * fx)), sy = Math.max(0, Math.round(region.top * fy));
+        const sw = Math.min(source.width - sx, Math.round((region.right - region.left) * fx));
+        const sh = Math.min(source.height - sy, Math.round((region.bottom - region.top) * fy));
+        if (sw > 4 && sh > 4) {
+          const crop = document.createElement("canvas");
+          crop.width = sw;
+          crop.height = sh;
+          crop.getContext("2d")?.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
+          source = crop;
+        }
+      }
       // O Jev só aceita fotos de uma faixa de tamanho (ver `visualSize`): a do nó do canvas costuma ser pequena demais.
-      const source = shot.frozen.canvas;
       const size = visualSize(source.width, source.height);
       let canvas = source;
       if (size.width !== source.width || size.height !== source.height) {

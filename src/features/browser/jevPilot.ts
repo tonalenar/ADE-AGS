@@ -536,8 +536,9 @@ export interface PilotDeps {
   snapshot: () => Promise<string>;
   /** A página INTEIRA (não só a janela e arredores): para achar um link exato que está fora do recorte (P02). Opcional. */
   snapshotAll?: () => Promise<string>;
-  /** Reserva visual: pede ao Jev que aponte, numa FOTO da página, onde tocar. Opcional. */
-  visual?: (goal: string, recent: string) => Promise<VisualReply>;
+  /** Reserva visual: pede ao Jev que aponte, numa FOTO da página, onde tocar. Opcional. Com `region` (px CSS da janela), a foto
+   *  é só esse recorte, ampliado, e as frações da resposta valem dentro dele. */
+  visual?: (goal: string, recent: string, region?: PageRegion) => Promise<VisualReply>;
   /** Toca num ponto da janela da página (px CSS). Vai junto de `visual`. */
   clickAt?: (x: number, y: number, second?: boolean) => Promise<unknown>;
   /** O que há sob um ponto (nome, texto, id), sem tocar: o piloto confere antes de tocar num ponto apontado por uma foto. */
@@ -890,6 +891,28 @@ export const emptyTimings = (): Timings => ({
   bytes: [], tokens: 0, consultaMs: [], repeticoes: 0, esperaRede: 0, varredura: 0, semConcluido: 0, fotoJev: 0, fotoUsos: [],
 });
 
+/** Uma região da janela da página, em px CSS. */
+export interface PageRegion { left: number; top: number; right: number; bottom: number }
+
+/**
+ * O recorte da foto ampliada: o grupo de ícones sem nome com folga, largo o bastante e não mais que 3 vezes mais largo que
+ * alto (o Jev recusa faixas finas), dentro da janela. Pura.
+ */
+export function zoomRegion(group: PageRegion, viewport: { width: number; height: number }, pad = 16): PageRegion {
+  let left = group.left - pad, right = group.right + pad, top = group.top - pad, bottom = group.bottom + pad;
+  const grow = (lo: number, hi: number, min: number, max: number): [number, number] => {
+    const need = min - (hi - lo);
+    if (need <= 0) return [lo, hi];
+    let a = lo - need / 2, b = hi + need / 2;
+    if (a < 0) { b -= a; a = 0; }
+    if (b > max) { a -= b - max; b = max; }
+    return [Math.max(0, a), Math.min(max, b)];
+  };
+  [left, right] = grow(Math.max(0, left), Math.min(viewport.width, right), 200, viewport.width);
+  [top, bottom] = grow(Math.max(0, top), Math.min(viewport.height, bottom), (right - left) / 3, viewport.height);
+  return { left: Math.round(left), top: Math.round(top), right: Math.round(right), bottom: Math.round(bottom) };
+}
+
 export interface PilotResult {
   /** `done`, `stuck`, `unsure`, `off`, `limit`, `error`. */
   outcome: "done" | "stuck" | "unsure" | "off" | "limit" | "error";
@@ -911,7 +934,7 @@ export function timed(deps: PilotDeps, t: Timings): PilotDeps {
   return {
     snapshot: wrap("snapshot", deps.snapshot),
     snapshotAll: deps.snapshotAll && wrap("snapshot", deps.snapshotAll),
-    visual: deps.visual && (async (goal, recent) => { t.fotos += 1; return wrap("foto", deps.visual!)(goal, recent); }),
+    visual: deps.visual && (async (goal, recent, region) => { t.fotos += 1; return wrap("foto", deps.visual!)(goal, recent, region); }),
     clickAt: deps.clickAt && wrap("acao", deps.clickAt),
     peekAt: deps.peekAt && wrap("acao", deps.peekAt),
     click: wrap("acao", deps.click),
@@ -1056,7 +1079,7 @@ async function pilotLoop(
   /** O passo anterior foi um toque pela foto: a página ainda pode não ter mostrado o efeito, e um segundo toque desfaz o primeiro. */
   let photoJustTapped = false;
   /** O último toque pela foto e quantos controles sem nome havia ao lado (a página diz). */
-  let lastTap: { x: number; y: number; neighbors: number } | null = null;
+  let lastTap: { x: number; y: number; neighbors: number; group: PageRegion | null } | null = null;
   let secondTried = false;
   /** O toque pela foto cumpriu o objetivo (um clique só): o texto novo da página que prova. */
   let photoProof: string | null = null;
@@ -1065,6 +1088,42 @@ async function pilotLoop(
     if (!photoProof) return null;
     log.push(`${step}. objetivo atingido pelo toque da foto: a página passou a mostrar «${photoProof.slice(0, 80)}»`);
     return finish("done", "A foto apontou o controle do objetivo com certeza alta, e o toque mudou a página de acordo. Confira na página abaixo.");
+  };
+  /**
+   * O segundo toque pela foto AMPLIADA (o recorte do grupo de ícones sem nome). `"acted"` = tocou e releu a página; um texto =
+   * por que parou (não tocar é a resposta: compra não pedida); `null` = não serviu, e o piloto tenta o vizinho como antes.
+   */
+  const zoomTap = async (page: ParsedPage, step: number, previous: { x: number; y: number; group: PageRegion | null }): Promise<"acted" | string | null> => {
+    if (!previous.group || !page.viewport || !deps.visual || !deps.clickAt || photos >= MAX_VISUAL) return null;
+    const region = zoomRegion(previous.group, page.viewport);
+    photos += 1;
+    let reply: VisualReply;
+    try {
+      reply = await deps.visual(goal, `${history.slice(-5).map((d) => d.what).join("; ")}; esta foto é um recorte ampliado da barra de ícones sem nome`, region);
+    } catch { return null; }
+    timings.fotoJev += reply.latencyMs ?? 0;
+    if (reply.status !== "ok" || !reply.found || (reply.foundProbability ?? 0) < MIN_FOUND || !reply.center || (reply.confidence ?? 0) < MIN_BOX_CONFIDENCE) return null;
+    const x = Math.round(region.left + reply.center[0] * (region.right - region.left));
+    const y = Math.round(region.top + reply.center[1] * (region.bottom - region.top));
+    // O recorte confirmou o ícone já tocado: não é o certo (o objetivo não veio), e adivinhar o vizinho continua sendo a saída.
+    if (Math.hypot(x - previous.x, y - previous.y) < 20) return null;
+    if (deps.peekAt) {
+      const under = await deps.peekAt(x, y).catch(() => "");
+      if (blockedPurchase(under, goal)) return `A foto ampliada apontou um controle de compra ou pagamento (${x}, ${y}) que o objetivo não pediu: não toquei.`;
+    }
+    try {
+      await deps.clickAt(x, y);
+    } catch { return null; }
+    tapped.push({ x, y });
+    const what = `tocou pela foto ampliada da barra de ícones no ponto (${x}, ${y})`;
+    log.push(`${step}. ${what} (o primeiro toque da foto não levou ao objetivo; existe p=${reply.foundProbability?.toFixed(2) ?? "?"}, caixa conf=${reply.confidence?.toFixed(2) ?? "?"})`);
+    const before = fingerprint(page);
+    await deps.settle();
+    snapshot = progress.snapshot = await deps.snapshot();
+    const after = parseSnapshot(snapshot);
+    history.push({ what, changed: fingerprint(after) !== before });
+    photoProof = photoTapFinished(goal, page, after, reply, initialCart);
+    return "acted";
   };
   /** `"acted"` = tocou e a página foi relida; um texto = por que não serviu (vai na nota); `null` = não se aplica. */
   const photoTry = async (page: ParsedPage, step: number): Promise<"acted" | string | null> => {
@@ -1075,6 +1134,10 @@ async function pilotLoop(
       // (L01). Só entre controles SEM nome — dois botões com nome, ou um que o objetivo não pediu, não se adivinha assim.
       if (lastTap && lastTap.neighbors > 0 && !secondTried && deps.clickAt) {
         secondTried = true;
+        // Antes de adivinhar o vizinho: uma foto AMPLIADA só da barra de ícones sem nome. Na foto inteira o ícone é pequeno e o Jev
+        // erra para o lado (teste J2 v2: 5 de 20, todas assim); no recorte ele vê o desenho. Só se não servir, o vizinho mais perto.
+        const zoomed = await zoomTap(page, step, lastTap);
+        if (zoomed) return zoomed;
         const { x, y } = lastTap;
         if (deps.peekAt) {
           const under = await deps.peekAt(x, y, true).catch(() => "");
@@ -1129,8 +1192,13 @@ async function pilotLoop(
     try {
       const result = await deps.clickAt(x, y);
       tapped.push({ x, y });
-      const neighbors = /"unnamedNeighbors":\s*(\d+)/.exec(typeof result === "string" ? result : JSON.stringify(result ?? ""))?.[1];
-      lastTap = { x, y, neighbors: neighbors ? Number(neighbors) : 0 };
+      const raw = typeof result === "string" ? result : JSON.stringify(result ?? "");
+      const neighbors = /"unnamedNeighbors":\s*(\d+)/.exec(raw)?.[1];
+      const group = /"unnamedGroup":\s*\{\s*"left":\s*(-?\d+),\s*"top":\s*(-?\d+),\s*"right":\s*(-?\d+),\s*"bottom":\s*(-?\d+)\s*\}/.exec(raw);
+      lastTap = {
+        x, y, neighbors: neighbors ? Number(neighbors) : 0,
+        group: group ? { left: Number(group[1]), top: Number(group[2]), right: Number(group[3]), bottom: Number(group[4]) } : null,
+      };
     } catch (e) {
       return `O toque pela foto falhou: ${e instanceof Error ? e.message : String(e)}`;
     }

@@ -565,6 +565,15 @@ html.dark {
   animation: ags-blink 5.5s linear infinite;
 }
 
+/* Em repouso, em degraus (pixel art): o bot sobe e desce de pixel em pixel, pisca de uma vez e o halo pulsa em
+   escalões. Animado de verdade, mas repinta ~4 vezes por segundo em vez de 60 (o halo tem `feGaussianBlur`). */
+.ags-mascot--idle .ags-mascot__bot,
+.ags-mascot--idle .ags-mascot__shadow { animation-timing-function: steps(6, jump-none); }
+.ags-mascot--idle .ags-mascot__eyes { animation-timing-function: steps(1, end); }
+.ags-mascot--idle .ags-pet__halo,
+.ags-mascot--idle .ags-pet__aura { animation-timing-function: steps(5, jump-none); }
+.ags-mascot--idle .ags-pet__spark { animation-timing-function: steps(8, jump-none); }
+
 /* Trabalhando: balança mais rápido e os propulsores acendem. */
 .ags-mascot--working .ags-mascot__bot,
 .ags-mascot--working .ags-mascot__shadow { animation-duration: 1.1s; }
