@@ -484,6 +484,18 @@ mod tests_e2e {
     }
 }
 
+#[test]
+fn el_fin_del_buffer_no_corta_un_caracter_al_medio() {
+    use super::pty_manager::tail_start;
+    let data = "olá — fim".as_bytes();
+    assert_eq!(tail_start(data, 1000), 0);
+    assert_eq!(&data[tail_start(data, 3)..], b"fim");
+    // «—» tem 3 bytes: pedir 5 cai no meio dele e o começo avança para o próximo caractere.
+    let start = tail_start(data, 7);
+    assert!(std::str::from_utf8(&data[start..]).is_ok(), "{start}");
+    assert_eq!(tail_start(b"", 10), 0);
+}
+
 /// Sin pre-comandos el comando se parte para lanzar el binario directo, y ahí las comillas
 /// importan: una TUI instalada en una ruta con espacios, o un flag con un valor
 /// entrecomillado, llegaban partidos en pedazos.

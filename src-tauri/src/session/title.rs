@@ -335,35 +335,102 @@ pub(super) fn claude_session_file(
     newest_matching(&files, after, None)
 }
 
-pub(super) fn claude_title(path: &Path, fallback: &str) -> SessionTitleResult {
-    let Ok(content) = fs::read_to_string(path) else { return fallback_result(fallback) };
-    let mut first_user_msg: Option<String> = None;
-    let mut user_msgs_seen = 0usize;
+/// O que já se leu de um transcript do Claude: até onde (`offset`, sempre no fim de uma linha) e o
+/// que se achou. O título é o primeiro `summary` do arquivo, ou a primeira mensagem do usuário; as
+/// linhas novas só podem trazer um `summary`, então dá para continuar de onde parou.
+#[derive(Clone, Default)]
+struct ClaudeScan {
+    offset: u64,
+    summary: Option<String>,
+    first_user: Option<String>,
+    users_seen: usize,
+}
 
-    for line in content.lines() {
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+fn claude_scan_cache() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, ClaudeScan>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, ClaudeScan>>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// Continua a leitura de `scan` do ponto em que parou. Uma linha sem `\n` no fim (o agente ainda
+/// escrevendo) fica para a próxima vez.
+fn claude_scan_from(path: &Path, mut scan: ClaudeScan) -> Option<ClaudeScan> {
+    use std::io::{Seek, SeekFrom};
+    let mut file = fs::File::open(path).ok()?;
+    file.seek(SeekFrom::Start(scan.offset)).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        let read = reader.read_until(b'\n', &mut line).ok()?;
+        if read == 0 || line.last() != Some(&b'\n') {
+            break;
+        }
+        scan.offset += read as u64;
+        let Ok(v) = serde_json::from_slice::<Value>(&line) else { continue };
         if v.get("type").and_then(|t| t.as_str()) == Some("summary") {
             if let Some(s) = v.get("summary").and_then(|s| s.as_str()) {
-                return SessionTitleResult { title: truncate(s, 60), source: "summary".into() };
+                scan.summary = Some(s.to_string());
+                break;
             }
         }
-        if first_user_msg.is_none()
-            && user_msgs_seen < TITLE_SCAN_LIMIT
+        if scan.first_user.is_none()
+            && scan.users_seen < TITLE_SCAN_LIMIT
             && v.get("type").and_then(|t| t.as_str()) == Some("user")
         {
-            user_msgs_seen += 1;
-            first_user_msg = v
+            scan.users_seen += 1;
+            scan.first_user = v
                 .get("message")
                 .and_then(|m| m.get("content"))
                 .and_then(extract_text_block)
                 .and_then(|t| clean_message(&t));
         }
     }
+    Some(scan)
+}
 
-    match first_user_msg {
+/// O título de um transcript do Claude. Antes cada chamada lia o arquivo inteiro (`read_to_string`)
+/// e a lista de conversas chamava a cada 20 s por aba aberta, relendo transcripts de vários MB (o
+/// maior, 143 MB). Agora lê só o que o arquivo cresceu desde a última vez; com `summary` achado,
+/// nem abre o arquivo.
+pub(super) fn claude_title(path: &Path, fallback: &str) -> SessionTitleResult {
+    let len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let cached = claude_scan_cache().lock().ok().and_then(|c| c.get(path).cloned());
+    let scan = match cached {
+        Some(scan) if scan.summary.is_some() && len >= scan.offset => Some(scan),
+        // Arquivo menor que o lido: foi reescrito. Recomeça.
+        Some(scan) if len >= scan.offset => claude_scan_from(path, scan),
+        _ => claude_scan_from(path, ClaudeScan::default()),
+    };
+    let Some(scan) = scan else { return fallback_result(fallback) };
+    if let Ok(mut cache) = claude_scan_cache().lock() {
+        cache.insert(path.to_path_buf(), scan.clone());
+    }
+    if let Some(s) = &scan.summary {
+        return SessionTitleResult { title: truncate(s, 60), source: "summary".into() };
+    }
+    match scan.first_user {
         Some(m) => SessionTitleResult { title: truncate(&m, 60), source: "first_message".into() },
         None => fallback_result(fallback),
     }
+}
+
+/// Os títulos de Gemini e Codex, recalculados só quando o arquivo muda (tamanho ou mtime).
+fn cached_title(path: &Path, fallback: &str, compute: impl FnOnce() -> SessionTitleResult) -> SessionTitleResult {
+    type Key = (u64, Option<std::time::SystemTime>, String);
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, (Key, SessionTitleResult)>>> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let meta = fs::metadata(path).ok();
+    let key: Key = (meta.as_ref().map(|m| m.len()).unwrap_or(0), meta.and_then(|m| m.modified().ok()), fallback.to_string());
+    if let Some((k, result)) = cache.lock().ok().and_then(|c| c.get(path).cloned()) {
+        if k == key {
+            return result;
+        }
+    }
+    let result = compute();
+    if let Ok(mut c) = cache.lock() {
+        c.insert(path.to_path_buf(), (key, result.clone()));
+    }
+    result
 }
 
 // ── Gemini CLI: ~/.gemini/tmp/<slug>/chats/session-*.jsonl ───────────────
@@ -1242,7 +1309,7 @@ pub(crate) fn get_session_title_sync(
                 None => gemini_session_file_in(&home, &cwd, None),
             };
             match found {
-                Some(path) => gemini_title(&path, &fallback),
+                Some(path) => cached_title(&path, &fallback, || gemini_title(&path, &fallback)),
                 None => fallback_result(&fallback),
             }
         }
@@ -1252,7 +1319,7 @@ pub(crate) fn get_session_title_sync(
                 None => codex_session_file(&cwd, None, profile),
             };
             match found {
-                Some(path) => codex_title(&path, &fallback),
+                Some(path) => cached_title(&path, &fallback, || codex_title(&path, &fallback)),
                 None => fallback_result(&fallback),
             }
         }

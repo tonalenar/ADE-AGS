@@ -163,3 +163,13 @@ debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# Release: antes valia o padrão (sem LTO, 16 codegen-units, com símbolos), e o ade-ags.exe tinha
+# 40,2 MB. LTO "thin" + 1 codegen-unit deixam o binário menor e o código mais rápido, à custa de um
+# build de release mais demorado; `strip` tira os símbolos do executável. `panic` continua
+# "unwind" de propósito: o app se recupera de mutex envenenado (`into_inner()`) em mais de cem
+# pontos, e com "abort" qualquer pânico numa thread derrubaria o app inteiro.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

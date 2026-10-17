@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
-import { AlertaToast, Button, ArchiveIcon, AddIcon } from "neogestify-ui-components";
+import { Button, ArchiveIcon, AddIcon } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { agentIcon } from "@/features/agents/agentIcons";
 import { RunningIcon } from "@/app/icons";
@@ -47,6 +48,13 @@ const secondsNow = () => Math.floor(Date.now() / 1000);
  * O arquivamento é automático (ao fechar a aba e por checkpoints periódicos); aqui só se fixa, renomeia, oculta
  * (e reexibe) ou continua a partir de uma.
  */
+/** Os dois mapas de títulos dizem o mesmo? Pura. */
+function sameTitles(a: ReadonlyMap<string, string | null>, b: ReadonlyMap<string, string | null>): boolean {
+  if (a.size !== b.size) return false;
+  for (const [key, value] of b) if (!a.has(key) || a.get(key) !== value) return false;
+  return true;
+}
+
 export function ConversationList({ cwd, groupCwds, projectKey, workspaceId, onOpenTab, onTabMenu }: {
   cwd: string;
   /** A raiz do projeto: agrupa as conversas-canvas dele. */
@@ -145,11 +153,14 @@ export function ConversationList({ cwd, groupCwds, projectKey, workspaceId, onOp
     })), [tabs]);
 
   // O título real das conversas em andamento (a sessão do agente). Só entra na lista a que já teve uma mensagem.
+  // O backend guarda o que já leu de cada transcript (`session/title.rs`): a releitura custa só o que cresceu.
   const [openTitles, setOpenTitles] = useState<ReadonlyMap<string, string | null>>(new Map());
   const openSignature = openTabs.map((tab) => `${tab.tabId}:${tab.sessionId ?? ""}`).join("|");
   useEffect(() => {
     let alive = true;
     const run = async () => {
+      // Com a janela oculta ninguém está vendo a lista: não relê nada.
+      if (typeof document !== "undefined" && document.hidden) return;
       const next = new Map<string, string | null>();
       await Promise.all(openTabs.filter((tab) => tab.sessionId && !excludeTabIds.has(tab.tabId)).map(async (tab) => {
         try {
@@ -162,7 +173,8 @@ export function ConversationList({ cwd, groupCwds, projectKey, workspaceId, onOp
           next.set(tab.tabId, null);
         }
       }));
-      if (alive) setOpenTitles(next);
+      // Mesmo conteúdo: não re-renderiza a lista (antes era um Map novo a cada 20 s).
+      if (alive) setOpenTitles((prev) => (sameTitles(prev, next) ? prev : next));
     };
     void run();
     const timer = window.setInterval(() => void run(), 20_000);

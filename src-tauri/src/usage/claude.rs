@@ -209,7 +209,7 @@ lazy_static::lazy_static! {
 /// lo reescribieron y lo leído ya no vale). Se detiene en la última línea completa: una
 /// línea a medio escribir se lee entera la próxima vez.
 pub(crate) fn scan_file(path: &Path, previous: Option<FileScan>) -> FileScan {
-    use std::io::{Read, Seek, SeekFrom};
+    use std::io::{BufRead, Seek, SeekFrom};
     let len = std::fs::metadata(path).map(|m| m.len()).unwrap_or(0);
     let mut scan = previous.filter(|p| p.offset <= len).unwrap_or_default();
     if scan.offset == len {
@@ -219,15 +219,21 @@ pub(crate) fn scan_file(path: &Path, previous: Option<FileScan>) -> FileScan {
     if file.seek(SeekFrom::Start(scan.offset)).is_err() {
         return FileScan::default();
     }
-    let mut bytes = Vec::new();
-    if file.read_to_end(&mut bytes).is_err() {
-        return scan;
-    }
-    let Some(end) = bytes.iter().rposition(|b| *b == b'\n') else { return scan };
-    let chunk = String::from_utf8_lossy(&bytes[..end]);
-    for line in chunk.lines() {
+    // Linha a linha, não o arquivo inteiro na memória: a primeira passada lia com `read_to_end`
+    // transcripts de até 143 MB (764 MB somados) para olhar só as linhas com consumo.
+    let mut reader = std::io::BufReader::with_capacity(256 * 1024, file);
+    let mut raw = Vec::new();
+    loop {
+        raw.clear();
+        let Ok(read) = reader.read_until(b'\n', &mut raw) else { break };
+        if read == 0 || raw.last() != Some(&b'\n') {
+            break;
+        }
+        scan.offset += read as u64;
         // Las dos cosas que interesan: el consumo de un mensaje, y el aviso de límite del
         // servidor. El resto de las líneas no se parsea.
+        let line = String::from_utf8_lossy(&raw);
+        let line = line.trim_end();
         if !line.contains(USAGE_MARK) && !line.contains(QUOTA_MARK) {
             continue;
         }
@@ -247,7 +253,6 @@ pub(crate) fn scan_file(path: &Path, previous: Option<FileScan>) -> FileScan {
             });
         }
     }
-    scan.offset += end as u64 + 1;
     scan
 }
 
@@ -293,21 +298,18 @@ pub async fn agent_account_usage(
 
         // Lo leído antes se reusa; de cada archivo solo se lee lo que creció. Los que ya
         // salieron de la semana se olvidan, para que el cache no crezca con el historial.
-        let scans: Vec<FileScan> = {
-            let mut cache = SCANS.lock().unwrap_or_else(|e| e.into_inner());
-            let wanted: HashSet<&PathBuf> = files.iter().collect();
-            cache.retain(|p, _| !p.starts_with(&root) || wanted.contains(p));
-            files
-                .iter()
-                .map(|path| {
-                    let scan = scan_file(path, cache.remove(path));
-                    cache.insert(path.clone(), scan.clone());
-                    scan
-                })
-                .collect()
-        };
+        // Se suma sobre el propio cache, sin clonar: antes cada llamada (el pet, cada minuto)
+        // copiaba dos veces todos los registros de la semana.
+        let mut cache = SCANS.lock().unwrap_or_else(|e| e.into_inner());
+        let wanted: HashSet<&PathBuf> = files.iter().collect();
+        cache.retain(|p, _| !p.starts_with(&root) || wanted.contains(p));
+        for path in &files {
+            let scan = scan_file(path, cache.remove(path));
+            cache.insert(path.clone(), scan);
+        }
+        let scans: Vec<&FileScan> = files.iter().filter_map(|path| cache.get(path)).collect();
 
-        for scan in &scans {
+        for scan in scans {
             for &(at, resets) in &scan.quotas {
                 // Gana el aviso más reciente: los viejos hablan de ventanas que ya se
                 // reabrieron.

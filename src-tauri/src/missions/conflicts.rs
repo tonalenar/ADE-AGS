@@ -120,9 +120,8 @@ pub async fn mission_conflicts(
     mission_id: String,
 ) -> Result<IntegrationConflicts, String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let db = app.state::<crate::database::DbConnection>();
-        let c = db.lock().map_err(|e| e.to_string())?;
-        let (branch, root) = integration(&c, &mission_id)?;
+        // Só a leitura da integração com o banco aberto; o git roda com o lock solto.
+        let (branch, root) = { let db = app.state::<crate::database::DbConnection>(); let c = db.lock().map_err(|e| e.to_string())?; integration(&c, &mission_id)? };
         read(&root, branch, &mission_id)
     })
     .await
@@ -139,9 +138,7 @@ pub async fn mission_resolve_conflict(
         if has_markers(&content) || content.len() > 2 * 1024 * 1024 {
             return Err("missions.conflicts.markersRemain".into());
         }
-        let db = app.state::<crate::database::DbConnection>();
-        let c = db.lock().map_err(|e| e.to_string())?;
-        let (branch, root) = integration(&c, &mission_id)?;
+        let (branch, root) = { let db = app.state::<crate::database::DbConnection>(); let c = db.lock().map_err(|e| e.to_string())?; integration(&c, &mission_id)? };
         git(&root, &["rev-parse", "--verify", "MERGE_HEAD"])?;
         if !paths(&root)?.contains(&path) {
             return Err("file is not an unresolved conflict".into());
@@ -164,9 +161,7 @@ pub async fn mission_conclude_merge(
     abort: Option<bool>,
 ) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
-        let db = app.state::<crate::database::DbConnection>();
-        let c = db.lock().map_err(|e| e.to_string())?;
-        let (_, root) = integration(&c, &mission_id)?;
+        let (_, root) = { let db = app.state::<crate::database::DbConnection>(); let c = db.lock().map_err(|e| e.to_string())?; integration(&c, &mission_id)? };
         git(&root, &["rev-parse", "--verify", "MERGE_HEAD"])?;
         if abort.unwrap_or(false) {
             git(&root, &["merge", "--abort"])?;

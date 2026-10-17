@@ -35,7 +35,7 @@ import { PoolFailoverNotice } from "@/features/accounts/PoolFailoverNotice";
 import { AgentUpdateWatcher } from "@/features/agents/AgentUpdateWatcher";
 import { BotToastHost } from "@/shared/brand/BotToastHost";
 import { AppConfirmHost } from "@/shared/ui/AppConfirmHost";
-import { BotPanel } from "@/features/bot/BotPanel";
+import { BotPanel } from "@/features/bot/LazyBotPanel";
 import type { ShellOutletContext } from "@/app/shellContext";
 import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";

@@ -63,7 +63,7 @@ const DesignIcon = () => <Svg><rect x="3" y="4" width="8" height="16" rx="1.5" /
 const FitIcon = () => <Svg><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" /></Svg>;
 
 /** Material translúcido de la barra y los paneles (estilo macOS). */
-const material = "bg-white/85 dark:bg-surface-raised/75 backdrop-blur-[30px] backdrop-saturate-[180%] shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]";
+const material = "bg-white/85 dark:bg-surface-raised/75 backdrop-blur-md backdrop-saturate-[160%] shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]";
 const hairline = "border-black/[0.08] dark:border-white/[0.08]";
 
 /** Un botón de la barra: pastilla de 34px; la activa queda en gris elevado. */

@@ -730,6 +730,29 @@ fn claude_user_lines(textos: &[&str]) -> String {
 }
 
 #[test]
+fn claude_title_lee_solo_lo_que_crecio_y_ve_el_summary_nuevo() {
+    let dir = std::env::temp_dir().join(format!("ags-title-inc-{}", uuid::Uuid::new_v4().simple()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let path = dir.join("s.jsonl");
+    let user = |text: &str| format!("{{\"type\":\"user\",\"message\":{{\"content\":\"{text}\"}}}}\n");
+    std::fs::write(&path, user("primeira pergunta de verdade")).unwrap();
+    assert_eq!(super::title::claude_title(&path, "fb").title, "primeira pergunta de verdade");
+    // Linha pela metade (o agente ainda escrevendo): não conta e não se perde.
+    use std::io::Write;
+    let mut f = std::fs::OpenOptions::new().append(true).open(&path).unwrap();
+    f.write_all(b"{\"type\":\"summary\",\"summ").unwrap();
+    assert_eq!(super::title::claude_title(&path, "fb").source, "first_message");
+    f.write_all(b"ary\":\"Resumo da conversa\"}\n").unwrap();
+    drop(f);
+    let r = super::title::claude_title(&path, "fb");
+    assert_eq!((r.title.as_str(), r.source.as_str()), ("Resumo da conversa", "summary"));
+    // Reescrito menor: recomeça do zero.
+    std::fs::write(&path, user("outra")).unwrap();
+    assert_eq!(super::title::claude_title(&path, "fb").title, "outra");
+    let _ = std::fs::remove_dir_all(&dir);
+}
+
+#[test]
 fn claude_title_saltea_los_envoltorios_y_usa_el_primer_mensaje_real() {
     let d = TempDir::new();
     let path = d.write(

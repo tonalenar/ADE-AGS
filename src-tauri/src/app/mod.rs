@@ -1,5 +1,6 @@
 //! El ciclo de vida de la aplicación: arranque, eventos y apagado.
 
+mod disk_hygiene;
 mod housekeeping;
 mod rendering;
 mod run;

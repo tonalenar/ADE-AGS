@@ -4,7 +4,7 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 
 import { getSetting, setSetting } from "@/shared/ipc/settings";
-import { AlertaToast } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 /** La clave que lee `runs/sandbox.rs`. Sin valor es "auto". */
 const SANDBOX_KEY = "runs.sandbox";

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AlertaToast } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { AIChatCard } from "./AIChatCard";
@@ -18,7 +18,7 @@ import { useTerminalPrompts } from "./useTerminalPrompts";
 import { TeamFeed, TeamFilterBar, useMissionApprovals, useTeamFeed, useTeamMessages } from "./TeamFeed";
 import { useRouteSuggestion, withTarget } from "./routeSuggestion";
 import { resolveMention, suggestMentions, type UserNote } from "./teamFeedModel";
-import { ChatMarkdown } from "./ChatMarkdown";
+import { ChatMarkdown } from "./LazyChatMarkdown";
 import { ResponsePicker } from "./ResponsePicker";
 import { CHAT_MARGIN, clampSize, isDefaultSize, loadChatSize, resizeBy, saveChatSize, DEFAULT_CHAT_SIZE, type ChatSize, type ChatSizeState } from "./chatSize";
 import { dateLocale } from "@/i18n/dateLocale";

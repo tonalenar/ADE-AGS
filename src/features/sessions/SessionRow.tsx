@@ -1,18 +1,8 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 import { save } from "@tauri-apps/plugin-dialog";
-import {
-  AlertaConfirmacion,
-  AlertaToast,
-  ArrowRightIcon,
-  Badge,
-  Button,
-  ChevronDownIcon,
-  DocumentIcon,
-  StackIcon,
-  Tooltip,
-  TrashIcon,
-} from "neogestify-ui-components";
+import { ArrowRightIcon, Badge, Button, ChevronDownIcon, DocumentIcon, StackIcon, Tooltip, TrashIcon } from "neogestify-ui-components";
+import { AlertaConfirmacion, AlertaToast } from "@/shared/ui/alerts";
 
 import { useSessionsStore } from "@/features/sessions/store";
 import type { SessionHistoryEntry } from "@/features/sessions/types";

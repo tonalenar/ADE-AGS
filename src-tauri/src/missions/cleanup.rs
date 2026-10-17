@@ -302,12 +302,14 @@ pub async fn mission_cleanup(
     dry_run: Option<bool>,
     db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<CleanupReport, String> {
-    let db = db.inner().clone();
+    let _ = db;
     tauri::async_runtime::spawn_blocking(move || {
         let base = dirs::home_dir()
             .ok_or("Home indisponível")?
             .join(".ags/worktrees");
-        let c = db.lock().map_err(|e| e.to_string())?;
+        // Conexão própria: a limpeza roda git e mede pastas com a base aberta (ver
+        // `open_side_connection`); com a global, o app inteiro esperava.
+        let c = crate::database::open_side_connection().map_err(|e| e.to_string())?;
         cleanup(&c, &mission_id, &base, dry_run.unwrap_or(true))
     })
     .await

@@ -6,7 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { PermissionCard } from "@/features/runs/PermissionCard";
 import { useRunsStore } from "@/features/runs/store";
 import { useMissionsStore } from "@/features/missions/store";
-import { ChatMarkdown } from "./ChatMarkdown";
+import { ChatMarkdown } from "./LazyChatMarkdown";
 import { dateLocale } from "@/i18n/dateLocale";
 import { buildFeed, feedFilterOptions, filterFeed, formatMessageText, parseVigiaText, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, type FeedFilter, type FeedItem, type TeamMessage, type TerminalPromptItem, type UserNote } from "./teamFeedModel";
 import { answerTerminalPrompt } from "./useTerminalPrompts";

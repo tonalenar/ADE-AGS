@@ -787,7 +787,9 @@ mod tests {
             other.busy_timeout(Duration::from_secs(5)).unwrap();
             let claim = Claim::try_new(&other, worker_ids.clone(), "outro".into(), now_ms()).unwrap().unwrap();
             claimed.send(()).unwrap();
-            std::thread::sleep(Duration::from_millis(1500));
+            // Folga para o `run` chegar a esperar a posse mesmo com a suíte inteira rodando em
+            // paralelo: com 1,5 s ele às vezes começava depois do verde gravado e não «esperava».
+            std::thread::sleep(Duration::from_millis(4000));
             other
                 .execute(
                     "INSERT INTO test_results(repository,tree_hash,suite,command_key,commands,duration_ms,passed,clean,finished_at) VALUES(?1,?2,'probe',?3,'[]',1,1,1,?4)",

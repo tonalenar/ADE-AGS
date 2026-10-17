@@ -1,4 +1,4 @@
-import "@/i18n/index";
+import { i18nReady } from "@/i18n/index";
 import "@fontsource-variable/jetbrains-mono";
 import ReactDOM from "react-dom/client";
 import { ThemeProvider } from "neogestify-ui-components";
@@ -43,8 +43,12 @@ const rendering = renderingInfo()
 
 const appReady = whenHomeCanPaint({ loadAgentRegistry, applyRendering: () => rendering, fontsReady });
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <ThemeProvider>
-    <Boot appReady={appReady} />
-  </ThemeProvider>
-);
+// O idioma ativo vem num chunk próprio (ver `i18n/index.ts`): pinta-se depois dele, senão a primeira
+// tela mostraria as chaves. É um arquivo local; mesmo com falha a tela pinta (com as chaves).
+void i18nReady.finally(() => {
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <ThemeProvider>
+      <Boot appReady={appReady} />
+    </ThemeProvider>
+  );
+});

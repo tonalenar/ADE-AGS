@@ -871,6 +871,28 @@ pub fn scrollback_of(id: u32) -> Option<(String, u64)> {
     copy_scrollback_bytes(id).map(|(data, total)| (String::from_utf8_lossy(&data).into_owned(), total))
 }
 
+/// Onde começa o fim de `data` com no máximo `max` bytes, sem cortar um caractere UTF-8 ao meio
+/// (os bytes de continuação `10xxxxxx` do começo ficam de fora). Pura.
+pub(crate) fn tail_start(data: &[u8], max: usize) -> usize {
+    let mut start = data.len().saturating_sub(max);
+    while start < data.len() && (data[start] & 0xC0) == 0x80 {
+        start += 1;
+    }
+    start
+}
+
+/// Só o fim do buffer do PTY (até `max_bytes`), como texto. Quem confere a tela (`peer tell`,
+/// o Vigia, o reenvio de Enter) quer de 4 a 64 KB, e `scrollback_of` clonava o buffer inteiro
+/// (até 3,5 MB) a cada 250 ms, com o lock que também segura as threads que leem os PTYs.
+pub fn tail_of(id: u32, max_bytes: usize) -> Option<String> {
+    let buffers = buffers();
+    let buffer = buffers.get(&id)?;
+    let start = tail_start(&buffer.data, max_bytes);
+    let bytes = buffer.data[start..].to_vec();
+    drop(buffers);
+    Some(String::from_utf8_lossy(&bytes).into_owned())
+}
+
 /// Escribe al PTY desde código Rust (servidor IPC). `pty_write` es la versión `async`
 /// que expone el mismo comportamiento al frontend vía invoke.
 pub fn write_to_pty(id: u32, data: &str) -> Result<(), String> {

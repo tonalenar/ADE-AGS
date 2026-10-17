@@ -1,6 +1,6 @@
-import { Children, isValidElement, useState, type ReactNode } from "react";
+import { Children, isValidElement, memo, useState, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import ReactMarkdown from "react-markdown";
+import ReactMarkdown, { type Components } from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { openUrl } from "@tauri-apps/plugin-opener";
 
@@ -70,50 +70,53 @@ function CodeBlock({ lang, children }: { lang: string; children: ReactNode }) {
  * Markdown de las respuestas de los agentes. Seguro a propósito: `react-markdown` no
  * interpreta HTML crudo (no hay `rehype-raw` ni `dangerouslySetInnerHTML`), los enlaces solo
  * pueden ser http/https y abren en el navegador del sistema, y las imágenes no se cargan
- * (traerlas le contaría al servidor de turno que se leyó el mensaje).
+ * (traerlas le contaría al servidor de turno que se leyó el mensaje). `memo`: el chat de la
+ * equipo re-renderiza con cada tarea o aprobación que cambia, y el texto de un mensaje ya escrito
+ * no cambia.
  */
-export function ChatMarkdown({ text }: { text: string }) {
+export const ChatMarkdown = memo(function ChatMarkdown({ text }: { text: string }) {
   return (
     <div className="chat-md min-w-0 break-words [overflow-wrap:anywhere]">
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        skipHtml
-        components={{
-          h1: (p) => <h1 className="mt-2 mb-1 text-[14px] font-semibold tracking-[-0.01em]" {...p} />,
-          h2: (p) => <h2 className="mt-2 mb-1 text-[13.5px] font-semibold tracking-[-0.01em]" {...p} />,
-          h3: (p) => <h3 className="mt-1.5 mb-0.5 text-[13px] font-semibold" {...p} />,
-          h4: (p) => <h4 className="mt-1.5 mb-0.5 text-[12.5px] font-semibold" {...p} />,
-          // `pre-line`: los saltos de línea simples del agente se respetan, como en una terminal.
-          p: (p) => <p className="my-1.5 whitespace-pre-line first:mt-0 last:mb-0" {...p} />,
-          ul: (p) => <ul className="my-1.5 flex list-disc flex-col gap-0.5 pl-5" {...p} />,
-          ol: (p) => <ol className="my-1.5 flex list-decimal flex-col gap-0.5 pl-5" {...p} />,
-          hr: () => <hr className="my-2 border-black/[0.08] dark:border-white/[0.08]" />,
-          blockquote: (p) => <blockquote className="my-2 border-l-2 border-gray-300 pl-3 text-gray-500 dark:border-white/[0.16] dark:text-gray-400" {...p} />,
-          pre: ({ children }) => <CodeBlock lang={langOf(children)}>{children}</CodeBlock>,
-          code: ({ className, children, ...rest }) => {
-            const block = /language-/.test(className ?? "") || textOf(children).includes("\n");
-            return block
-              ? <code className="block font-mono" {...rest}>{children}</code>
-              : <code className="rounded-[5px] bg-gray-100 px-1 py-px font-mono text-[11.5px] dark:bg-surface-raised" {...rest}>{children}</code>;
-          },
-          table: (p) => <div className="my-2 max-w-full overflow-x-auto"><table className="border-collapse text-[11.5px]" {...p} /></div>,
-          th: (p) => <th className="border-b border-gray-300 px-2 py-1 text-left font-semibold dark:border-white/[0.16]" {...p} />,
-          td: (p) => <td className="border-b border-black/[0.06] px-2 py-1 dark:border-white/[0.08]" {...p} />,
-          a: ({ href, children }) => {
-            const safe = safeHref(href);
-            if (!safe) return <span className="underline decoration-dotted">{children}</span>;
-            return (
-              <a href={safe} title={safe} rel="noreferrer noopener" className="text-accent-600 underline hover:text-accent-500 dark:text-accent-300"
-                onClick={(e) => { e.preventDefault(); openUrl(safe).catch(console.error); }}>
-                {children}
-              </a>
-            );
-          },
-          img: ({ alt }) => <span className="text-[11px] italic opacity-60">{alt ? `🖼 ${alt}` : null}</span>,
-        }}
-      >
+      <ReactMarkdown remarkPlugins={REMARK_PLUGINS} skipHtml components={COMPONENTS}>
         {text}
       </ReactMarkdown>
     </div>
   );
-}
+});
+
+/** Plugins e componentes fixos: recriá-los a cada render fazia o react-markdown reprocessar tudo. */
+const REMARK_PLUGINS = [remarkGfm];
+const COMPONENTS: Components = {
+  h1: (p) => <h1 className="mt-2 mb-1 text-[14px] font-semibold tracking-[-0.01em]" {...p} />,
+  h2: (p) => <h2 className="mt-2 mb-1 text-[13.5px] font-semibold tracking-[-0.01em]" {...p} />,
+  h3: (p) => <h3 className="mt-1.5 mb-0.5 text-[13px] font-semibold" {...p} />,
+  h4: (p) => <h4 className="mt-1.5 mb-0.5 text-[12.5px] font-semibold" {...p} />,
+  // `pre-line`: los saltos de línea simples del agente se respetan, como en una terminal.
+  p: (p) => <p className="my-1.5 whitespace-pre-line first:mt-0 last:mb-0" {...p} />,
+  ul: (p) => <ul className="my-1.5 flex list-disc flex-col gap-0.5 pl-5" {...p} />,
+  ol: (p) => <ol className="my-1.5 flex list-decimal flex-col gap-0.5 pl-5" {...p} />,
+  hr: () => <hr className="my-2 border-black/[0.08] dark:border-white/[0.08]" />,
+  blockquote: (p) => <blockquote className="my-2 border-l-2 border-gray-300 pl-3 text-gray-500 dark:border-white/[0.16] dark:text-gray-400" {...p} />,
+  pre: ({ children }) => <CodeBlock lang={langOf(children)}>{children}</CodeBlock>,
+  code: ({ className, children, ...rest }) => {
+    const block = /language-/.test(className ?? "") || textOf(children).includes("\n");
+    return block
+      ? <code className="block font-mono" {...rest}>{children}</code>
+      : <code className="rounded-[5px] bg-gray-100 px-1 py-px font-mono text-[11.5px] dark:bg-surface-raised" {...rest}>{children}</code>;
+  },
+  table: (p) => <div className="my-2 max-w-full overflow-x-auto"><table className="border-collapse text-[11.5px]" {...p} /></div>,
+  th: (p) => <th className="border-b border-gray-300 px-2 py-1 text-left font-semibold dark:border-white/[0.16]" {...p} />,
+  td: (p) => <td className="border-b border-black/[0.06] px-2 py-1 dark:border-white/[0.08]" {...p} />,
+  a: ({ href, children }) => {
+    const safe = safeHref(href);
+    if (!safe) return <span className="underline decoration-dotted">{children}</span>;
+    return (
+      <a href={safe} title={safe} rel="noreferrer noopener" className="text-accent-600 underline hover:text-accent-500 dark:text-accent-300"
+        onClick={(e) => { e.preventDefault(); openUrl(safe).catch(console.error); }}>
+        {children}
+      </a>
+    );
+  },
+  img: ({ alt }) => <span className="text-[11px] italic opacity-60">{alt ? `🖼 ${alt}` : null}</span>,
+};
+
