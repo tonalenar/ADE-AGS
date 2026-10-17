@@ -225,3 +225,38 @@ fn singular_e_plural_se_encontram_sem_casar_palavras_diferentes() {
     assert_eq!(rank(&docs, "contas", 5).first().map(|h| h.key.as_str()), Some("conta"));
     assert!(rank(&docs, "contrato", 5).is_empty());
 }
+
+#[test]
+fn muitas_fixas_nao_empurram_o_relevante_ao_objetivo_para_fora() {
+    // O caso real: 35 fixas para 10 vagas deixavam o briefing sempre com as mesmas, em ordem alfabética.
+    let mut docs: Vec<Doc> = (0..12)
+        .map(|i| {
+            let mut d = doc(&format!("f{i}"), "workspace", &format!("fixa-{i:02}"), 5, "regra geral do projeto");
+            d.kind = "constraint".into();
+            d
+        })
+        .collect();
+    let mut fixa_relevante = doc("fr", "workspace", "zz-cargo-lock", 5, "o cargo lock trava quando dois agentes compilam");
+    fixa_relevante.kind = "constraint".into();
+    docs.push(fixa_relevante);
+    docs.push(doc("r1", "workspace", "cargo-target-compartilhado", 0, "cargo usa o target compartilhado entre agentes"));
+    docs.push(doc("r2", "workspace", "cargo-build-bin", 0, "cargo build do bin ags com locked"));
+    let (block, keys) = briefing_block_with_keys(&docs, "m-1", "acelerar o cargo build dos agentes", 6, 4_000);
+    assert_eq!(keys.first().map(String::as_str), Some("zz-cargo-lock"), "a fixa relevante vem antes das outras fixas: {block}");
+    assert_eq!(keys.iter().filter(|k| k.starts_with("fixa-")).count(), MAX_PINNED - 1, "{keys:?}");
+    assert!(keys.contains(&"cargo-target-compartilhado".to_string()) && keys.contains(&"cargo-build-bin".to_string()), "{keys:?}");
+    assert_eq!(keys.len(), 6);
+}
+
+#[test]
+fn as_relevantes_que_nao_couberam_sao_citadas_pela_chave_e_linha_longa_nao_barra_as_curtas() {
+    let docs = vec![
+        doc("1", "workspace", "pool-longo", 0, &format!("pool de contas {}", "detalhe ".repeat(40))),
+        doc("2", "workspace", "pool-curto", 0, "pool de contas"),
+        doc("3", "workspace", "pool-extra", 0, "contas do pool"),
+    ];
+    let (block, keys) = briefing_block_with_keys(&docs, "m-1", "pool de contas", 1, 120);
+    assert_eq!(keys.len(), 1, "{block}");
+    assert!(!keys.contains(&"pool-longo".to_string()), "a longa não cabe e a curta entra no lugar: {block}");
+    assert!(block.contains("Também relevantes ao objetivo, sem espaço aqui:") && block.contains("pool-longo"), "{block}");
+}
