@@ -74,6 +74,90 @@ pub fn repo_root(cwd: &Path) -> Result<PathBuf, String> {
     Ok(PathBuf::from(root))
 }
 
+/// O commit atual do repo (um sha, não `HEAD`: gravado como base, `HEAD` andaria junto com o
+/// worktree e o affected não veria nada commitado).
+pub fn head_commit(repo: &Path) -> Option<String> {
+    git(repo, &["rev-parse", "HEAD"], GIT_FAST).ok().filter(|sha| !sha.is_empty())
+}
+
+/// Chave de config da branch (`branch.<nome>.agsbase`) com a base de onde o worktree de uma missão
+/// saiu. O `ags test affected` lê a mesma base: se o worktree nasce de `origin/dev` e o affected
+/// compara com `origin/master`, todo o trabalho já integrado na dev vira "mudado" e cada chamada
+/// roda a suíte cheia.
+pub const BASE_CONFIG_KEY: &str = "agsbase";
+
+/// Branches de integração de git-flow que valem como base quando contêm o padrão do remoto.
+const INTEGRATION_BRANCHES: [&str; 2] = ["origin/dev", "origin/develop"];
+
+/// Os candidatos a base, na ordem de preferência. Pura.
+///
+/// - `configured`: a escolha do usuário (`missions.base_ref`), se resolve.
+/// - `upstream`: o upstream remoto da branch aberta no projeto (o usuário trabalha em cima dele).
+/// - `integration`: `origin/dev`/`origin/develop` que CONTÉM o padrão do remoto (git-flow: o
+///   trabalho do dia a dia está nela, o `master` só recebe as releases).
+/// - `default`: o padrão do remoto (`origin/HEAD`, ou `origin/master`/`origin/main`).
+/// - Nenhum: `None` (repo sem remoto; quem chama decide — a missão parte do commit atual).
+pub fn choose_base(configured: Option<String>, upstream: Option<String>, integration: Option<String>, default: Option<String>) -> Option<String> {
+    configured.or(upstream).or(integration).or(default)
+}
+
+fn resolves(repo: &Path, rev: &str) -> bool {
+    git(repo, &["rev-parse", "--verify", "--quiet", &format!("{rev}^{{commit}}")], GIT_FAST).is_ok()
+}
+
+/// De onde sai o worktree de uma missão (e contra o que o affected compara). `use_upstream`
+/// deve ser `false` dentro de um worktree de agente: o upstream dele é a própria branch publicada,
+/// e comparar com ela pularia testes do que ainda não foi integrado.
+pub fn resolve_base(repo: &Path, configured: Option<&str>, use_upstream: bool) -> Option<String> {
+    let configured = configured.map(str::trim).filter(|r| !r.is_empty() && resolves(repo, r)).map(str::to_string);
+    let upstream = if use_upstream && configured.is_none() {
+        git(repo, &["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"], GIT_FAST)
+            .ok()
+            .filter(|u| !u.is_empty() && resolves(repo, u))
+    } else {
+        None
+    };
+    let default = git(repo, &["symbolic-ref", "--quiet", "--short", "refs/remotes/origin/HEAD"], GIT_FAST)
+        .ok()
+        .filter(|r| resolves(repo, r))
+        .or_else(|| ["origin/master", "origin/main"].into_iter().find(|r| resolves(repo, r)).map(str::to_string));
+    let integration = INTEGRATION_BRANCHES
+        .into_iter()
+        .find(|cand| {
+            resolves(repo, cand)
+                && default.as_deref().is_none_or(|d| git(repo, &["merge-base", "--is-ancestor", d, cand], GIT_FAST).is_ok())
+        })
+        .map(str::to_string);
+    choose_base(configured, upstream, integration, default)
+}
+
+/// A base gravada na branch do worktree (`branch.<atual>.agsbase`), se ainda resolve.
+pub fn recorded_base(worktree: &Path) -> Option<String> {
+    let branch = git(worktree, &["symbolic-ref", "--quiet", "--short", "HEAD"], GIT_FAST).ok()?;
+    let base = git(worktree, &["config", "--get", &format!("branch.{branch}.{BASE_CONFIG_KEY}")], GIT_FAST).ok()?;
+    let base = base.trim().to_string();
+    (!base.is_empty() && resolves(worktree, &base)).then_some(base)
+}
+
+/// Grava a base na branch do worktree. Melhor esforço: sem ela o affected cai em `resolve_base`.
+pub fn record_base(worktree: &Path, branch: &str, base: &str) {
+    let _ = git(worktree, &["config", &format!("branch.{branch}.{BASE_CONFIG_KEY}"), base], GIT_FAST);
+}
+
+/// `git fetch origin` curto e sem prompt, para a base da missão não sair dias atrás. Melhor
+/// esforço: sem rede (ou sem remoto) segue com o que já está no repo.
+pub fn fetch_origin_quietly(repo: &Path) {
+    if git(repo, &["remote", "get-url", "origin"], GIT_FAST).is_err() {
+        return;
+    }
+    let dir = external_path(repo);
+    let mut cmd = crate::util::spawn::hidden_command("git");
+    cmd.arg("-C").arg(&dir).args(["fetch", "--quiet", "--no-tags", "origin"])
+        .env("GIT_TERMINAL_PROMPT", "0")
+        .env("GCM_INTERACTIVE", "never");
+    let _ = output_with_timeout(&mut cmd, GIT_FAST);
+}
+
 /// La parte legible del nombre de rama, sacada del título de la tarea.
 pub fn branch_slug(title: &str) -> String {
     let mut slug = String::new();

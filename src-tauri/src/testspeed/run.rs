@@ -104,19 +104,30 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
 /// NUL delimiters preserve paths containing spaces/newlines; deleted paths remain
 /// in the plan, so deleting a module cannot silently remove its validation.
 ///
-/// The base stays `origin/master`, not the last green tree. A sliding base can
-/// skip a file that was verified only in another worktree, or that changed again
-/// after that green result. Reuse in this wave is the same `HEAD^{tree}` and the
-/// same normalized command, from any worktree of the repository.
+/// The base is where the worktree started (`branch.<name>.agsbase`, written when a
+/// mission creates it), else the repository's integration base (`origin/dev` in
+/// git-flow, or the remote default) — never the last green tree. A sliding base
+/// can skip a file that was verified only in another worktree, or that changed
+/// again after that green result. Before, it was always
+/// `origin/master`: a mission started from `dev` 150+ commits ahead saw `lib.rs` and
+/// `Cargo.lock` as changed and every call ran the full suites.
+pub fn base_ref(root: &Path) -> String {
+    crate::runs::worktrees::recorded_base(root)
+        .or_else(|| crate::runs::worktrees::resolve_base(root, None, false))
+        // Sem base nenhuma, o diff falha com a mensagem de sempre e nenhum teste é pulado.
+        .unwrap_or_else(|| "origin/master".into())
+}
+
 pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
     let mut files = std::collections::BTreeSet::new();
+    let range = format!("{}...HEAD", base_ref(root));
     for args in [
         vec![
             "diff",
             "--name-only",
             "-z",
             "--no-renames",
-            "origin/master...HEAD",
+            range.as_str(),
         ],
         vec!["diff", "--name-only", "-z", "--no-renames", "HEAD"],
         vec!["ls-files", "--others", "--exclude-standard", "-z"],
@@ -124,7 +135,7 @@ pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
         let out = git_raw(root, &args)?;
         if !out.status.success() {
             return Err(format!(
-                "Não foi possível obter arquivos afetados (git {}): {}. Confira origin/master; nenhum teste foi pulado.",
+                "Não foi possível obter arquivos afetados (git {}): {}. Confira a base do worktree (git config branch.<nome>.agsbase); nenhum teste foi pulado.",
                 args.join(" "),
                 String::from_utf8_lossy(&out.stderr)
             ));
@@ -141,7 +152,8 @@ pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
 
 pub fn unsafe_files(root: &Path, changed: &[String]) -> Result<Vec<String>, String> {
     let mut files = std::collections::BTreeSet::new();
-    for revision in ["origin/master...HEAD", "HEAD"] {
+    let range = format!("{}...HEAD", base_ref(root));
+    for revision in [range.as_str(), "HEAD"] {
         let diff = git(
             root,
             &[

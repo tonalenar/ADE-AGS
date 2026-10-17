@@ -74,6 +74,8 @@ fn many_frontend_files_use_changed_flag_and_input_is_deduped() {
     let many: Vec<String> = (0..200).map(|i| format!("src/f{i}.ts")).collect();
     let plan = plan(&many);
     assert_eq!(plan.steps[2].args, [VITEST, "run", "--changed", "origin/master"]);
+    let rebased = super::plan(&many).with_changed_base("origin/dev");
+    assert_eq!(rebased.steps[2].args, [VITEST, "run", "--changed", "origin/dev"]);
     let dup = p(&["./src/a.ts", "src/a.ts"]);
     assert_eq!(dup.steps[2].args.len(), 4);
 }
