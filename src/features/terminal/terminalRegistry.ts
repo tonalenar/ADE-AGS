@@ -83,6 +83,12 @@ function watchTurn(term: Terminal, onEnd: (at: number) => void): void {
 
 /** Cuánto después de enviar el briefing se verifica que el agente arrancó. */
 export const START_CHECK_MS = 25_000;
+/**
+ * Antes de eso, un Enter si la terminal sigue muda: un Enter sobre la caja vacía no hace nada, y el
+ * briefing que quedó pegado sin enviar arranca 15 s antes. En el banco real 26 de 32 arranques
+ * "parados" eran del QA, que arrancaba recién a los 25-40 s, después del Enter de `START_CHECK_MS`.
+ */
+export const EARLY_NUDGE_MS = 10_000;
 /** Plazo para que TODOS los agentes arranquen sin Enter manual (lo mide `ags mission startcheck`). */
 export const START_DEADLINE_MS = 120_000;
 /** Salida dentro de esta ventana tras el envío es el eco del pegado, no trabajo del agente. */
@@ -107,6 +113,10 @@ function watchStart(tabId: string, term: Terminal, timings: SendTimings): void {
     if (worked || terminals.get(tabId) !== term) return;
     term.input("\r");
     timings.onRetry?.(Date.now());
+  }, EARLY_NUDGE_MS);
+  // El Enter ya fue a los `EARLY_NUDGE_MS`: acá solo se avisa que no arrancó.
+  window.setTimeout(() => {
+    if (worked || terminals.get(tabId) !== term) return;
     timings.onStalled?.();
   }, START_CHECK_MS);
   window.setTimeout(() => sub.dispose(), START_DEADLINE_MS);
@@ -252,7 +262,9 @@ export const SUBMIT_RETRY_MS = [900, 2200, 4500, 8000, 12_000, 18_000, 25_000, 3
  */
 export function pasteStillPending(lines: readonly string[]): boolean {
   const input = lines.slice(-6);
-  return input.some((line) => /\[Pasted (?:Content|text)[^\]]*\]/i.test(line) && /^\s*[›>❯]/.test(line.trim() ? line : ""));
+  // A borda da caixa de entrada ("│ › [Pasted…]") não é o prompt: sai antes de olhar.
+  const prompt = (line: string) => line.replace(/^[\s│┃║|]+/, "");
+  return input.some((line) => /\[Pasted (?:Content|text)[^\]]*\]/i.test(line) && /^[›>❯]/.test(prompt(line)));
 }
 
 export interface ScreenText {

@@ -102,6 +102,16 @@ fn unsafe_inside_a_string_or_trailing_comment_is_not_unsafe_code() {
 }
 
 #[test]
+fn scripts_run_only_the_tests_that_read_them() {
+    let code = p(&["scripts/bench/core.ts"]);
+    assert!(!code.full);
+    assert_eq!(code.steps.last().unwrap().args, [VITEST, "related", "--run", "scripts/bench/core.ts"]);
+    let fixture = p(&["scripts/bench-fixture/abas.html"]);
+    assert_eq!(fixture.steps.last().unwrap().args, [VITEST, "related", "--run", "src/features/browser/tests/jevBench.test.ts"]);
+    assert!(p(&["scripts/window-rounds.ps1", "scripts/visual-fixture/a.html"]).is_empty());
+}
+
+#[test]
 fn empty_input_is_an_empty_plan() {
     assert!(p(&[]).is_empty());
 }
