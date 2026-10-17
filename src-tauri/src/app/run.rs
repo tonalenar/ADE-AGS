@@ -102,6 +102,7 @@ pub fn run() {
             crate::terminal::pty_snapshot,
             crate::missions::vigia::vigia_check,
             crate::missions::vigia::vigia_report,
+            crate::missions::vigia::vigia_notify_user,
             crate::terminal::pty_output_total,
             crate::terminal::pty_for_tab,
             crate::terminal::pty_write,
@@ -123,6 +124,7 @@ pub fn run() {
             // El pet sube de nivel con los tokens de los agentes
             crate::missions::mission_start_terminals,
             crate::missions::mission_finish_terminals,
+            crate::missions::mission_delivery_hint,
             crate::missions::mission_redeliver,
             crate::missions::mission_check_duplicate,
             crate::missions::mission_check_duplicate_input,

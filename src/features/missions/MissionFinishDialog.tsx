@@ -1,15 +1,18 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { Alert, AnimateSpin, Button, Input } from "neogestify-ui-components";
 
 import { AppDialog } from "@/shared/ui/AppDialog";
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 
+import { missionDeliveryHint } from "./ipc";
 import type { TerminalDeliveryInput, TerminalTestResult } from "./types";
 
 const SELECT = "w-full";
 
-export function MissionFinishDialog({ onClose, onFinish }: {
+export function MissionFinishDialog({ missionId, onClose, onFinish }: {
+  /** Com ela, o diálogo já abre com os testes registrados e o último PR citado pela equipe. */
+  missionId?: string;
   onClose: () => void;
   onFinish: (input: TerminalDeliveryInput) => Promise<void>;
 }) {
@@ -18,6 +21,25 @@ export function MissionFinishDialog({ onClose, onFinish }: {
   const [pullRequest, setPullRequest] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [suggested, setSuggested] = useState(false);
+  // O que o usuário já mexeu não é sobrescrito pela sugestão que chega depois.
+  const touched = useRef({ test: false, pr: false });
+
+  useEffect(() => {
+    if (!missionId) return;
+    let alive = true;
+    missionDeliveryHint(missionId)
+      .then((hint) => {
+        if (!alive) return;
+        if (hint.testResult && !touched.current.test) setTestResult(hint.testResult);
+        if (hint.pullRequest && !touched.current.pr) setPullRequest(hint.pullRequest);
+        setSuggested(!!hint.testResult || !!hint.pullRequest);
+      })
+      .catch(() => {});
+    return () => {
+      alive = false;
+    };
+  }, [missionId]);
 
   const submit = async () => {
     setBusy(true);
@@ -50,7 +72,7 @@ export function MissionFinishDialog({ onClose, onFinish }: {
       <div className="flex flex-col gap-3.5">
         <label className="flex flex-col gap-1.5">
           <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">{t("missions.delivery.form.testLabel")}</span>
-          <PopupSelect className={SELECT} value={testResult} onChange={(event) => setTestResult(event.target.value as TerminalTestResult)}>
+          <PopupSelect className={SELECT} value={testResult} onChange={(event) => { touched.current.test = true; setTestResult(event.target.value as TerminalTestResult); }}>
             {(["passed", "failed", "not_run"] as const).map((result) => (
               <option key={result} value={result}>{t(`missions.delivery.test.${result}`)}</option>
             ))}
@@ -59,11 +81,12 @@ export function MissionFinishDialog({ onClose, onFinish }: {
 
         <label className="flex flex-col gap-1.5">
           <span className="text-[11px] font-medium text-gray-600 dark:text-gray-300">{t("missions.delivery.form.prLabel")}</span>
-          <Input size="sm" value={pullRequest} onChange={(event) => setPullRequest(event.target.value)}
+          <Input size="sm" value={pullRequest} onChange={(event) => { touched.current.pr = true; setPullRequest(event.target.value); }}
             placeholder={t("missions.delivery.form.prPlaceholder")} className="font-mono" />
           <span className="text-[10.5px] leading-relaxed text-gray-400 dark:text-white/35">{t("missions.delivery.form.prHint")}</span>
         </label>
 
+        {suggested && <span className="text-[10.5px] leading-relaxed text-gray-400 dark:text-white/35">{t("missions.delivery.form.suggested")}</span>}
         <Alert variant="info">{t("missions.delivery.form.hint")}</Alert>
         {error && <Alert variant="warning">{error}</Alert>}
       </div>

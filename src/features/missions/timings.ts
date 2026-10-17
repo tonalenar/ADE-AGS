@@ -4,7 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 export type TimingKind =
   | "boot" | "briefing" | "turn" | "peer_ask" | "peer_message"
   | "orchestrator_stall" | "test" | "fix_round"
-  | "start_briefing" | "start_activity" | "start_retry" | "start_stalled" | "start_all_working";
+  | "start_briefing" | "start_activity" | "start_retry" | "start_stalled" | "start_all_working"
+  | "team_delivered";
 
 export interface TimingSpan {
   id: number;
