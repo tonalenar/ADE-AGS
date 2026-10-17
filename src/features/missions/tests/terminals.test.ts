@@ -20,7 +20,7 @@ describe("finishedMissionTabs", () => {
     expect(finishedMissionTabs(missions, index, tabs)).toEqual(["b", "c"]);
   });
 });
-import { LEAD_NAME, MAX_EXTRA_TERMINALS, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, memoryEnvelope, subagentDefaultBriefing, teamOf, uniqueNames, workspaceFor, type TeamWorkspace } from "../terminals";
+import { LEAD_NAME, MAX_EXTRA_TERMINALS, accountsNeedingLogin, briefingFor, leadBriefing, memberBriefing, memoryEnvelope, qaOf, subagentDefaultBriefing, teamOf, uniqueNames, workspaceFor, type TeamWorkspace } from "../terminals";
 
 describe("isolamento e início rápido", () => {
   const member = { name: "Backend", agentId: "codex", accountId: null, roleId: "backend", roleLabel: "Backend", roleDescription: "API", roleInstructions: "" };
@@ -162,13 +162,17 @@ describe("el equipo de una misión", () => {
     const team = teamOf(squad([{ roleId: "backend" }, { roleId: "qa" }]), roles);
     const text = leadBriefing({ title: "T", objective: "O" }, team);
     expect(text).toContain("TESTES (rápido e sem repetir):");
-    expect(text).toContain("avise o QA");
+    expect(text).toContain("QA DESDE O INÍCIO");
+    expect(text).toContain("entregam DIRETO");
     expect(text).toContain("ags test affected");
     expect(text).toContain("já verde neste hash");
     expect(text).toContain("NÃO reexecute");
     expect(text).toContain("UMA única execução completa");
     expect(text).toContain("ags test run rust");
-    expect(text).toContain("gh pr checks <n> --watch");
+    expect(text).toContain("ags ci watch <n>");
+    expect(text).toContain("TERMINE o turno");
+    expect(text).toContain("no máximo 90 s");
+    expect(text).not.toContain("pergunta e ESPERA");
     expect(text).toContain("TETO DE CORREÇÃO:");
     expect(text).toContain("AGS-CORRECTION member=<nome> branch=<branch> subject=<assunto>");
     expect(text).toContain("Ajustes → Modo orquestrador");
@@ -180,7 +184,7 @@ describe("el equipo de una misión", () => {
     const text = memberBriefing({ title: "T", objective: "O" }, backend);
     expect(text).toContain("TESTES (rápido e sem repetir):");
     expect(text).toContain("ags test affected");
-    expect(text).toContain("gh pr checks <n> --watch");
+    expect(text).toContain("ags ci watch <n>");
     expect(text).toContain("Suíte completa local apenas em cenários de risco elevado");
     expect(text).toContain("já verde neste hash");
     expect(text).toContain("ÚLTIMA rodada");
@@ -190,7 +194,15 @@ describe("el equipo de una misión", () => {
 
   it("sem QA na equipe, o orquestrador não é mandado avisar um QA que não existe", () => {
     const team = teamOf(squad([{ roleId: "backend" }]), roles);
-    expect(leadBriefing({ title: "T", objective: "O" }, team)).not.toContain("avise o QA");
+    expect(leadBriefing({ title: "T", objective: "O" }, team)).not.toContain("QA DESDE O INÍCIO");
+  });
+
+  it("o integrante entrega direto ao QA, e o próprio QA não manda a si mesmo", () => {
+    const [backend, qa] = teamOf(squad([{ roleId: "backend" }, { roleId: "qa" }]), roles);
+    expect(qaOf([backend, qa])?.name).toBe(qa.name);
+    expect(memberBriefing({ title: "T", objective: "O" }, backend, undefined, "", "", qa.name)).toContain(`DIRETO ao QA por \`ags peer tell "${qa.name}"`);
+    expect(memberBriefing({ title: "T", objective: "O" }, qa, undefined, "", "", qa.name)).not.toContain("DIRETO ao QA");
+    expect(memberBriefing({ title: "T", objective: "O" }, backend)).not.toContain("DIRETO ao QA");
   });
 });
 

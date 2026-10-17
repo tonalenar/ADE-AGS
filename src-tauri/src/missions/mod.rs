@@ -540,6 +540,11 @@ pub fn mission_check_duplicate_input(
     )
 }
 
+/// Un PR como lo acepta el diálogo de entrega: número o URL de GitHub (ver `delivery`).
+pub(crate) fn delivery_pr_reference(value: &str) -> Result<String, String> {
+    delivery::normalize_pr_reference(value)
+}
+
 /// Lo que el diálogo "Finalizar" ya trae completado (ver `delivery::DeliveryHint`). Solo lee.
 #[tauri::command]
 pub async fn mission_delivery_hint(app: AppHandle, mission_id: String) -> Result<delivery::DeliveryHint, String> {

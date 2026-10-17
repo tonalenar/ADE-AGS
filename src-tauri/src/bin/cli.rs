@@ -52,7 +52,7 @@ TABS
 
 AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peers                                       Quem está conectado a você
-  peer ask <nome> \"...\" [--timeout 600]      Pergunta e ESPERA a resposta
+  peer ask <nome> \"...\" [--timeout 600]      Pergunta e ESPERA a resposta (orquestrador: 90 s por padrão)
   peer tell <nome> \"...\"                      Avisa algo, sem esperar
   peer tell <nome> --file <caminho>           O mesmo, com o texto em um arquivo (sem confusão de aspas no Windows)
   peer ask <nome> --file <caminho>            O mesmo que ask, com a pergunta em um arquivo
@@ -60,6 +60,8 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
               mandar a uma TUI um comando dela, p. ex. /compact ou /clear)
   peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'  Pergunta a vários AO MESMO TEMPO e espera todos
   peer check <nome> [--lines 60]              O que aparece agora no terminal dele
+  ci watch <PR>                               Segue o CI do PR em segundo plano e cola o resultado
+                                              no seu terminal quando terminar (no lugar de gh pr checks --watch)
   notify \"mensagem\"                           Avisa o usuário (aviso na tela; barra de tarefas)
   Só orquestradores (coroa no canvas):
   peer recruit <nome> [--agent <id>]          Abre um agente novo, já conectado
@@ -802,6 +804,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "peer.recruit" => &["name"],
         "peer.connect" | "peer.disconnect" => &["a", "b"],
         "peer.role" => &["to", "role"],
+        "ci.watch" => &["pr"],
         // `ags note read Plano 10 20`: desde la línea 10, 20 líneas.
         "notify.send" => &["message"],
         // `ags role create "Revisor" "Procure falhas..."`; el texto también va con --file.

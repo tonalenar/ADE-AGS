@@ -781,6 +781,100 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
     })
 }
 
+/// Cada quanto e até quando `ci watch` olha os checks do PR.
+const CI_POLL: Duration = Duration::from_secs(30);
+const CI_MAX_WAIT: Duration = Duration::from_secs(90 * 60);
+/// Erros seguidos do `gh` (sem rede, sem login, PR errado) antes de desistir e avisar.
+const CI_MAX_ERRORS: u32 = 5;
+
+/// O resumo de `gh pr checks <n> --json name,bucket` quando NADA mais está pendente, ou `None`
+/// enquanto falta algum check (ou ainda não há nenhum). Pura.
+pub(crate) fn ci_summary(pr: &str, raw: &str) -> Option<String> {
+    let checks: Vec<Value> = serde_json::from_str(raw).ok()?;
+    if checks.is_empty() {
+        return None;
+    }
+    let bucket = |c: &Value| c.get("bucket").and_then(Value::as_str).unwrap_or("").to_string();
+    if checks.iter().any(|c| bucket(c) == "pending") {
+        return None;
+    }
+    let failed: Vec<String> = checks
+        .iter()
+        .filter(|c| matches!(bucket(c).as_str(), "fail" | "cancel"))
+        .map(|c| c.get("name").and_then(Value::as_str).unwrap_or("?").to_string())
+        .collect();
+    let passed = checks.iter().filter(|c| bucket(c) == "pass").count();
+    Some(if failed.is_empty() {
+        format!("[AGS] CI do PR #{pr} terminou: VERDE ({passed} checks passaram). Siga com a integração/entrega.")
+    } else {
+        format!(
+            "[AGS] CI do PR #{pr} terminou: {} FALHOU ({}); {passed} passaram. Detalhes: `gh pr checks {pr}` e `gh run view --log-failed`.",
+            failed.len(),
+            failed.join(", ")
+        )
+    })
+}
+
+/// `ags ci watch <PR>`: segue os checks do PR em segundo plano e, quando terminam, cola o resultado
+/// no terminal de quem pediu (quando ele estiver quieto). Antes o briefing mandava o orquestrador
+/// bloquear em `gh pr checks --watch`: o turno dele não acabava e as mensagens da equipe ficavam na
+/// fila até 15 min.
+pub(super) fn ci_watch(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let from = caller(args)?;
+    let pr = crate::missions::delivery_pr_reference(&arg_str(args, "pr")?)?;
+    let me = open_tabs(app)?
+        .into_iter()
+        .find(|t| t.id == from)
+        .ok_or_else(|| "A sua aba não está aberta em nenhuma janela.".to_string())?;
+    let pty = pty_id_for_tab(app, &me.id, Some(&me.window))?;
+    let cwd = me.cwd.clone();
+    let shown = pr.rsplit('/').next().unwrap_or(&pr).to_string();
+    let reply_pr = shown.clone();
+    std::thread::spawn(move || {
+        let started = Instant::now();
+        let mut errors = 0;
+        let message = loop {
+            let mut cmd = crate::util::spawn::hidden_command("gh");
+            cmd.args(["pr", "checks", &pr, "--json", "name,bucket"])
+                .current_dir(&cwd)
+                .env("GH_PROMPT_DISABLED", "1")
+                .env("GIT_TERMINAL_PROMPT", "0");
+            // `gh pr checks` sai com código ≠ 0 com check falhando ou pendente: vale o JSON.
+            match crate::util::output_with_timeout(&mut cmd, Duration::from_secs(60)) {
+                Ok(out) if !out.stdout.is_empty() => {
+                    errors = 0;
+                    if let Some(summary) = ci_summary(&shown, &String::from_utf8_lossy(&out.stdout)) {
+                        break summary;
+                    }
+                }
+                Ok(out) => {
+                    errors += 1;
+                    if errors >= CI_MAX_ERRORS {
+                        let why: String = String::from_utf8_lossy(&out.stderr).trim().chars().take(200).collect();
+                        break format!("[AGS] Não consegui acompanhar o CI do PR #{shown} ({why}). Confira com `gh pr checks {shown}`.");
+                    }
+                }
+                Err(error) => {
+                    errors += 1;
+                    if errors >= CI_MAX_ERRORS {
+                        break format!("[AGS] Não consegui acompanhar o CI do PR #{shown} ({error}). Confira com `gh pr checks {shown}`.");
+                    }
+                }
+            }
+            if started.elapsed() >= CI_MAX_WAIT {
+                break format!("[AGS] O CI do PR #{shown} ainda não terminou depois de 90 min. Confira com `gh pr checks {shown}`.");
+            }
+            std::thread::sleep(CI_POLL);
+        };
+        deliver_when_quiet(pty, &from, message);
+    });
+    Ok(json!({
+        "watching": true,
+        "pr": reply_pr,
+        "note": "Vou colar o resultado no seu terminal quando o CI terminar. Encerre o turno (ou siga com outra coisa); não fique em gh pr checks --watch.",
+    }))
+}
+
 /// Avisa al frontend de un mensaje entre agentes (`cc-peer-message`). Un `tell` le da una tarea
 /// al destino; cualquier mensaje del remitente prueba que él sí está activo. Con eso el
 /// detector de "agente parado" (`missions/stalled.ts`) sabe quién debe una respuesta.
@@ -811,6 +905,10 @@ fn emit_peer_message(app: &AppHandle, kind: &str, from_tab_id: &str, to_tab_id: 
 /// mientras trabajan, así que unos segundos sin una sola escritura es que terminaron.
 const TURN_QUIET: Duration = Duration::from_secs(5);
 const DEFAULT_TIMEOUT_S: u64 = 600;
+/// O padrão para quem é orquestrador: ele coordena a equipe inteira e cada minuto preso num `ask`
+/// é a equipe sem resposta (no banco, 29% dos asks esperaram os 600 s e somaram 68 min parados).
+/// Quem precisa de mais pede `--timeout`.
+const LEAD_DEFAULT_TIMEOUT_S: u64 = 90;
 
 /// Un `--batch` bien formado: nombre → pedido, en el orden en que se escribió. Acepta el
 /// JSON como texto (lo que llega de la línea de comandos) o ya como objeto.
@@ -894,7 +992,8 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
 
 pub(super) fn peer_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
-    let timeout = Duration::from_secs(arg_u64_opt(args, "timeout").unwrap_or(DEFAULT_TIMEOUT_S).clamp(10, 3600));
+    let default = if crate::canvas::is_orchestrator(&crate::canvas::load_boards(), &from) { LEAD_DEFAULT_TIMEOUT_S } else { DEFAULT_TIMEOUT_S };
+    let timeout = Duration::from_secs(arg_u64_opt(args, "timeout").unwrap_or(default).clamp(10, 3600));
     let (me, list) = peers(app, &from)?;
     let from_name = me.map(|m| m.name).unwrap_or_else(|| from.clone());
 
@@ -1127,6 +1226,22 @@ mod test {
         assert!(ask.starts_with("[Mensagem de Líder via ADE AGS] rodar os testes"));
         let tell = framed("Líder", "pronto", false);
         assert!(tell.contains("ags peer tell \"Líder\""));
+    }
+}
+
+#[cfg(test)]
+mod ci_tests {
+    use super::ci_summary;
+
+    #[test]
+    fn o_resumo_do_ci_so_sai_quando_nada_esta_pendente() {
+        assert_eq!(ci_summary("12", "[]"), None, "sem check ainda");
+        assert_eq!(ci_summary("12", r#"[{"name":"build","bucket":"pass"},{"name":"lint","bucket":"pending"}]"#), None);
+        let green = ci_summary("12", r#"[{"name":"build","bucket":"pass"},{"name":"docs","bucket":"skipping"}]"#).unwrap();
+        assert!(green.contains("PR #12") && green.contains("VERDE") && green.contains("1 checks"));
+        let red = ci_summary("12", r#"[{"name":"build","bucket":"pass"},{"name":"lint","bucket":"fail"}]"#).unwrap();
+        assert!(red.contains("FALHOU (lint)") && red.contains("gh run view"));
+        assert_eq!(ci_summary("12", "não é json"), None);
     }
 }
 
