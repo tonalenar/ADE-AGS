@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, blockedControl, coverDismiss, zoomRegion, obviousAdvance, photoTapFinished, cartAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, exactLinkMissing, goalContradiction, missingFill, pickText, sensitiveFilled, type PageRegion, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, blockedControl, coverDismiss, zoomRegion, iconsIn, obviousAdvance, photoTapFinished, cartAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, exactLinkMissing, goalContradiction, missingFill, pickText, sensitiveFilled, type PageRegion, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -1299,6 +1299,59 @@ describe("dois ícones sem nome: o segundo toque (L01)", () => {
     const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
     expect(calls).toEqual(["500,300"]);
     expect(result.steps.join("\n")).toContain("não sei qual tocar");
+  });
+
+  describe("os ícones numerados na foto ampliada", () => {
+    const group = { left: 400, top: 270, right: 640, bottom: 330 };
+    const icons = [[400, 276, 448, 324], [460, 276, 508, 324], [520, 276, 568, 324], [580, 276, 628, 324]];
+    const boxes = icons.map(([left, top, right, bottom]) => ({ left, top, right, bottom }));
+    const marked = (mark: number | null, markProbability: number | null): VisualReply => ({ ...seen([0.1, 0.5]), mark, markProbability });
+
+    it("o Jev diz o número e o piloto toca o centro daquele ícone (não a caixa)", async () => {
+      const { h, calls } = twoIcons(3);
+      h.deps.clickAt = async (x, y, second) => {
+        calls.push(`${x},${y}${second ? "#2" : ""}`);
+        return calls.length === 1 ? JSON.stringify({ clicked: "clickable", unnamedNeighbors: 3, unnamedGroup: group, unnamedIcons: icons }) : "{}";
+      };
+      const asked: (PageRegion[] | undefined)[] = [];
+      h.deps.visual = async (_goal, _recent, region, marks) => { asked.push(marks); return region ? marked(3, 0.97) : seen([0.5, 0.5]); };
+      const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
+      expect(asked).toEqual([undefined, boxes]);
+      expect(calls).toEqual(["500,300", "544,300"]);
+      expect(result.steps.join("\n")).toContain("selo 3 de 4");
+    });
+
+    it("no vão ambíguo, os ícones vêm na etiqueta do erro e o número decide", async () => {
+      const { h, calls } = twoIcons(0);
+      h.deps.clickAt = async (x, y) => {
+        calls.push(`${x},${y}`);
+        if (calls.length === 1) throw new Error(`Há mais de um controle perto do ponto (${x}, ${y}): não sei qual tocar. [grupo 400,270,640,330] [icones ${icons.map((b) => b.join(",")).join(";")}]`);
+        return "{}";
+      };
+      h.deps.visual = async (_goal, _recent, region) => (region ? marked(1, 0.9) : seen([0.5, 0.5]));
+      const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
+      expect(calls).toEqual(["500,300", "424,300"]);
+      expect(result.steps.join("\n")).not.toMatch(/\[(grupo|icones)/);
+    });
+
+    it("sem certeza no número (ou número fora dos selos), vale a caixa, como antes", async () => {
+      const { h, calls } = twoIcons(3);
+      h.deps.clickAt = async (x, y, second) => {
+        calls.push(`${x},${y}${second ? "#2" : ""}`);
+        return calls.length === 1 ? JSON.stringify({ clicked: "clickable", unnamedNeighbors: 3, unnamedGroup: group, unnamedIcons: icons }) : "{}";
+      };
+      h.deps.visual = async (_goal, _recent, region) => (region ? marked(2, 0.4) : seen([0.5, 0.5]));
+      await runPilot("abrir o carrinho", [], undefined, h.deps);
+      const zoom = zoomRegion(group, { width: 1000, height: 600 }, 40);
+      expect(calls[1]).toBe(`${Math.round(zoom.left + 0.1 * (zoom.right - zoom.left))},${Math.round(zoom.top + 0.5 * (zoom.bottom - zoom.top))}`);
+    });
+
+    it("lê as caixas de unnamedIcons e ignora o que não for 4 números", () => {
+      expect(iconsIn("[[1,2,3,4],[5,6,7,8]]")).toEqual([{ left: 1, top: 2, right: 3, bottom: 4 }, { left: 5, top: 6, right: 7, bottom: 8 }]);
+      expect(iconsIn("[[1,2,3],[\"a\",1,2,3]]")).toBeUndefined();
+      expect(iconsIn("não é json")).toBeUndefined();
+      expect(iconsIn(undefined)).toBeUndefined();
+    });
   });
 
   it("o recorte: o grupo com folga, largo o bastante, no máximo 3:1 e dentro da janela", () => {

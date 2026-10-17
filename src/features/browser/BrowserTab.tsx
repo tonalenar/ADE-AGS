@@ -316,7 +316,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       const frozen = await freezePage(page, frame);
       return previewSaveCapture(await canvasToPng(frozen.canvas), tag);
     },
-    visualShot: async (region) => {
+    visualShot: async (region, marks) => {
       const page = iframe.current;
       const frame = column.current;
       if (!page || !frame) throw new Error("La página todavía no está cargada.");
@@ -383,7 +383,30 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
           const crop = document.createElement("canvas");
           crop.width = sw;
           crop.height = sh;
-          crop.getContext("2d")?.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
+          const ctx = crop.getContext("2d");
+          ctx?.drawImage(source, sx, sy, sw, sh, 0, 0, sw, sh);
+          // Os selos 1..n (amarelos, número preto) logo abaixo de cada ícone, ou acima se não couber: o Jev responde o NÚMERO.
+          if (ctx && marks && marks.length > 1) {
+            marks.forEach((m, i) => {
+              const cx = ((m.left + m.right) / 2) * fx - sx;
+              const w = (m.right - m.left) * fx;
+              const r = Math.max(7, Math.min(16, w * 0.3));
+              let cy = m.bottom * fy - sy + r + 2;
+              if (cy + r > sh) cy = m.top * fy - sy - r - 2;
+              ctx.beginPath();
+              ctx.arc(cx, cy, r, 0, Math.PI * 2);
+              ctx.fillStyle = "#ffd400";
+              ctx.fill();
+              ctx.lineWidth = Math.max(1.5, r * 0.15);
+              ctx.strokeStyle = "#000";
+              ctx.stroke();
+              ctx.fillStyle = "#000";
+              ctx.font = `800 ${Math.round(r * 1.25)}px system-ui, sans-serif`;
+              ctx.textAlign = "center";
+              ctx.textBaseline = "middle";
+              ctx.fillText(String(i + 1), cx, cy + r * 0.05);
+            });
+          }
           source = crop;
         }
       }

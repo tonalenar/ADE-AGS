@@ -49,7 +49,14 @@ pub struct VisualQuery {
     pub recent: String,
     /// A captura que o app salvou (`preview_save_capture`).
     pub image_path: String,
+    /// Quantos controles a foto traz NUMERADOS (1..n, um selo ao lado de cada ícone sem nome): com 2 ou mais, vai junto uma
+    /// pergunta de escolha `numero` ("qual número é o do objetivo"), que acerta onde a caixa erra para o ícone vizinho.
+    #[serde(default)]
+    pub marks: u32,
 }
+
+/// O máximo de selos numerados: a pergunta de escolha fica curta e os números de um dígito.
+pub const MAX_MARKS: u32 = 9;
 
 #[derive(Clone, Copy, Debug, PartialEq, Serialize)]
 pub struct Rect {
@@ -88,12 +95,23 @@ pub struct VisualReply {
     pub confidence: Option<f64>,
     pub reason: Option<String>,
     pub latency_ms: Option<u64>,
+    /// Com a foto numerada: o número que o Jev escolheu (1..n) e a probabilidade dele.
+    pub mark: Option<u32>,
+    pub mark_probability: Option<f64>,
 }
 
 impl VisualReply {
     fn without(status: &'static str, reason: impl Into<String>) -> Self {
-        Self { status, found: None, found_probability: None, rect: None, center: None, confidence: None, reason: Some(reason.into()), latency_ms: None }
+        Self { status, found: None, found_probability: None, rect: None, center: None, confidence: None, reason: Some(reason.into()), latency_ms: None, mark: None, mark_probability: None }
     }
+}
+
+fn instructions_mark(goal: &str, marks: u32) -> String {
+    format!(
+        "`photo` is a zoomed crop of a web page showing a row of unlabeled icons. Each icon has a yellow badge with a number (1 to {marks}) right next to it. \
+Which number is on the icon that is the right next thing to tap for this goal: {goal} Judge by the icon's drawing (cart, magnifier, person, bell, \
+question mark, ...), not by its position."
+    )
 }
 
 fn instructions_exists(goal: &str) -> String {
@@ -113,7 +131,7 @@ Use the recent actions in the state: do not choose something already done."
 /// O corpo JSON do pedido: a imagem entra por `assets`/`state`, como no exemplo do `box` da documentação. Pura.
 pub fn request_body(query: &VisualQuery) -> Value {
     let recent = if query.recent.trim().is_empty() { "none yet".to_string() } else { truncate_chars(query.recent.trim(), STATE_BYTES) };
-    json!({
+    let mut body = json!({
         "model": VISION_MODEL,
         "state": { "goal": truncate_chars(query.goal.trim(), STATE_BYTES), "recent_actions": recent, "photo": "screenshot-1" },
         "assets": { "screenshot-1": { "type": "image", "part": "screenshot" } },
@@ -125,7 +143,26 @@ pub fn request_body(query: &VisualQuery) -> Value {
             },
             "alvo": { "type": "box", "instructions": instructions_target(query.goal.trim()) },
         },
-    })
+    });
+    let marks = query.marks.min(MAX_MARKS);
+    if marks >= 2 {
+        let criteria: serde_json::Map<String, Value> =
+            (1..=marks).map(|n| (n.to_string(), Value::String(format!("The icon with badge {n} is the one to tap.")))).collect();
+        body["questions"]["numero"] = json!({ "type": "choice", "instructions": instructions_mark(query.goal.trim(), marks), "criteria": criteria });
+    }
+    body
+}
+
+/// Com a foto numerada: o número escolhido (só um dentro de 1..=`marks`) e a probabilidade dele. Pura.
+pub fn read_mark(text: &str, marks: u32) -> Option<(u32, Option<f64>)> {
+    let value: Value = serde_json::from_str(text).ok()?;
+    let answer = value.get("answers")?.get("numero")?;
+    let choice = answer.get("choice")?.as_str()?;
+    let mark: u32 = choice.trim().parse().ok()?;
+    if mark == 0 || mark > marks.min(MAX_MARKS) {
+        return None;
+    }
+    Some((mark, answer.get("probabilities").and_then(|p| p.get(choice)).and_then(Value::as_f64)))
 }
 
 /// O corpo `multipart/form-data`: a parte `request` (JSON) e a foto. Feito à mão para não puxar mais uma dependência. Pura.
@@ -222,7 +259,7 @@ fn pick_with(db: &DbConnection, settings: &config::Settings, api_key: Option<&st
     let started = Instant::now();
     let sent = send(settings, api_key, &boundary, payload);
     let latency = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-    let reading = sent.and_then(|text| read_reply(&text));
+    let reading = sent.and_then(|text| read_reply(&text).map(|parts| (parts, read_mark(&text, query.marks))));
     if let Ok(conn) = db.lock() {
         let _ = log::record(
             &conn,
@@ -234,9 +271,12 @@ fn pick_with(db: &DbConnection, settings: &config::Settings, api_key: Option<&st
                 // Sem o texto do objetivo: o log guarda só quem consultou e como foi.
                 state_hash: super::protocol::state_hash(&query.goal),
                 heuristic: "existe=nenhum".into(),
-                provider_decision: reading.as_ref().ok().map(|(found, _, _, _)| format!("existe={}", if *found { "yes" } else { "no" })),
-                probability: reading.as_ref().ok().and_then(|(_, p, _, _)| *p),
-                confidence: reading.as_ref().ok().and_then(|(_, _, _, c)| *c),
+                provider_decision: reading.as_ref().ok().map(|((found, _, _, _), mark)| {
+                    let found = format!("existe={}", if *found { "yes" } else { "no" });
+                    match mark { Some((n, _)) => format!("{found} numero={n}"), None => found }
+                }),
+                probability: reading.as_ref().ok().and_then(|((_, p, _, _), _)| *p),
+                confidence: reading.as_ref().ok().and_then(|((_, _, _, c), _)| *c),
                 latency_ms: Some(i64::try_from(latency).unwrap_or(i64::MAX)),
                 error: reading.as_ref().err().map(|e| truncate_chars(e, 300)),
                 input_tokens: None,
@@ -245,7 +285,7 @@ fn pick_with(db: &DbConnection, settings: &config::Settings, api_key: Option<&st
         );
     }
     match reading {
-        Ok((found, found_probability, rect, confidence)) => VisualReply {
+        Ok(((found, found_probability, rect, confidence), mark)) => VisualReply {
             status: "ok",
             found: Some(found),
             found_probability,
@@ -254,6 +294,8 @@ fn pick_with(db: &DbConnection, settings: &config::Settings, api_key: Option<&st
             confidence,
             reason: None,
             latency_ms: Some(latency),
+            mark: mark.map(|(n, _)| n),
+            mark_probability: mark.and_then(|(_, p)| p),
         },
         Err(reason) => VisualReply::without("error", reason),
     }
@@ -299,7 +341,7 @@ mod test {
     use super::*;
 
     fn query() -> VisualQuery {
-        VisualQuery { goal: "abrir o carrinho".into(), recent: "1. clicou botão Add to cart".into(), image_path: "x.png".into() }
+        VisualQuery { goal: "abrir o carrinho".into(), recent: "1. clicou botão Add to cart".into(), image_path: "x.png".into(), marks: 0 }
     }
 
     #[test]
@@ -312,6 +354,31 @@ mod test {
         assert_eq!(body["questions"]["existe"]["type"], "choice");
         assert!(body["questions"]["alvo"]["instructions"].as_str().unwrap().contains("`photo`"));
         assert!(body["questions"]["existe"]["instructions"].as_str().unwrap().contains("abrir o carrinho"));
+    }
+
+    #[test]
+    fn com_selos_vai_a_pergunta_de_escolha_e_sem_eles_nao() {
+        assert!(request_body(&query()).get("questions").unwrap().get("numero").is_none());
+        let marked = VisualQuery { marks: 4, ..query() };
+        let body = request_body(&marked);
+        let numero = &body["questions"]["numero"];
+        assert_eq!(numero["type"], "choice");
+        assert_eq!(numero["criteria"].as_object().unwrap().len(), 4);
+        assert!(numero["criteria"]["4"].as_str().unwrap().contains("badge 4"));
+        assert!(numero["instructions"].as_str().unwrap().contains("abrir o carrinho"));
+        // um só selo não é escolha; mais de 9 fica em 9
+        assert!(request_body(&VisualQuery { marks: 1, ..query() })["questions"].get("numero").is_none());
+        assert_eq!(request_body(&VisualQuery { marks: 30, ..query() })["questions"]["numero"]["criteria"].as_object().unwrap().len(), 9);
+    }
+
+    #[test]
+    fn le_o_numero_escolhido_e_recusa_o_que_esta_fora_dos_selos() {
+        let text = r#"{"answers":{"existe":{"choice":"yes","probabilities":{"yes":0.9}},
+            "numero":{"type":"choice","choice":"3","probabilities":{"1":0.05,"2":0.1,"3":0.85}}}}"#;
+        assert_eq!(read_mark(text, 4), Some((3, Some(0.85))));
+        assert_eq!(read_mark(text, 2), None);
+        assert_eq!(read_mark(r#"{"answers":{"numero":{"choice":"zero"}}}"#, 4), None);
+        assert_eq!(read_mark(r#"{"answers":{}}"#, 4), None);
     }
 
     #[test]
@@ -369,6 +436,29 @@ mod test {
         assert!(read_capture("nao-existe.png").is_err());
     }
 
+    /// SONDA REAL da pergunta numerada (5 chamadas pagas): `cargo test --lib sonda_real_numerada -- --ignored --nocapture`.
+    /// Usa `teste-visual-marcas.png` da pasta das capturas: busca, perfil, ajuda, carrinho e sino, com os selos 1 a 5.
+    #[test]
+    #[ignore]
+    fn sonda_real_numerada_com_os_icones_do_teste() {
+        let path = crate::preview::capture::capture_dir().join("teste-visual-marcas.png");
+        let png = read_capture(path.to_str().unwrap()).expect("gere a foto numerada antes");
+        let key = config::load_key().expect("sem chave do Jev no cofre");
+        let settings = config::Settings { provider: ProviderKind::Jev, base_url: "https://api.typesafe.ai".into(), timeout_ms: 8000, ..Default::default() };
+        let cases = [("Abra a busca do site", 1), ("Abra o perfil da conta", 2), ("Abra a ajuda", 3), ("Abra o carrinho de compras", 4), ("Abra as notificações", 5)];
+        for (goal, want) in cases {
+            let query = VisualQuery { goal: goal.into(), recent: String::new(), image_path: path.to_string_lossy().into_owned(), marks: 5 };
+            let body = request_body(&query);
+            let started = Instant::now();
+            let text = send(&settings, Some(&key), "ags-sonda", multipart("ags-sonda", &body, &png)).expect("a chamada falhou");
+            let ms = started.elapsed().as_millis();
+            let mark = read_mark(&text, 5);
+            let (found, _, rect, _) = read_reply(&text).expect("resposta ilegível");
+            println!("{} | {goal:<28} numero={mark:?} (quer {want}) existe={found} centro={:?} {ms} ms",
+                if mark.map(|m| m.0) == Some(want) { "ACERTOU" } else { "ERROU  " }, rect.map(|r| r.center()));
+        }
+    }
+
     /// SONDA REAL (gasta uma chamada paga por caso, com a chave do cofre): `cargo test --lib sonda_real -- --ignored --nocapture`.
     /// Usa a foto fictícia `teste-visual-fake.png` da pasta das capturas: uma barra com dois ícones sem nome (perfil e
     /// carrinho), uma busca e três botões. Mede se o centro da caixa cai em cima do alvo certo e quanto leva.
@@ -388,7 +478,7 @@ mod test {
             ("unsubscribe from the newsletter", None),
         ];
         for (goal, region) in cases {
-            let query = VisualQuery { goal: goal.into(), recent: String::new(), image_path: path.to_string_lossy().into_owned() };
+            let query = VisualQuery { goal: goal.into(), recent: String::new(), image_path: path.to_string_lossy().into_owned(), marks: 0 };
             let body = request_body(&query);
             let boundary = "ags-sonda";
             let started = Instant::now();
@@ -417,7 +507,7 @@ mod test {
         files.sort();
         for path in files {
             let png = std::fs::read(&path).unwrap();
-            let query = VisualQuery { goal: "open the shopping cart".into(), recent: String::new(), image_path: path.to_string_lossy().into_owned() };
+            let query = VisualQuery { goal: "open the shopping cart".into(), recent: String::new(), image_path: path.to_string_lossy().into_owned(), marks: 0 };
             let body = request_body(&query);
             let started = Instant::now();
             let outcome = send(&settings, Some(&key), "ags-dim", multipart("ags-dim", &body, &png)).and_then(|t| read_reply(&t));
