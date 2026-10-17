@@ -223,3 +223,19 @@ Arquivo: `teste-real-v8-sem-expect.{json,md}`. A conferência do "acabou" pela f
 
 **Bug do CI encontrado no caminho:** o teste Rust `memory::repo_sync::tests::pause_discards_the_queue_until_resume` travou o CI até o limite de 30 min uma vez. Na segunda tentativa, passou.
 
+## Nona rodada: SEM `--expect`, sementes 161–180 (2026-10-17, app com o #217, dev a91bdaa1)
+
+| | v7 (sem, antes) | v8 (sem, #216) | **v9 (sem, #217)** |
+|---|---|---|---|
+| Sucesso | 98/100 | 99/100 | **100/100** (IC 96,3–100%) |
+| Falso "feito" | 2 | 0 | **0** |
+| Falso "parou" | 0 | 0 | 2 |
+| SPRT (meta ≥ 98%) | rodar mais | rodar mais | **atinge** |
+| `act` p50 · p95 | 1,2 · 3,6 s | 1,2 · 5,1 s | 1,2 · 5,0 s |
+
+Arquivo: `teste-real-v9-sem-expect.{json,md}`. As cinco famílias fecharam 20/20 **sem o oráculo**. O selo numerado decidiu 14 toques. Ele confirmou o ícone tocado 5 vezes, e em 2 delas o piloto deixou de tocar o vizinho, como o #217 pretendia.
+
+**Os 2 "falsos parou"** são justamente esses 2 casos. A página estava certa, mas o piloto parou com "confira a página" em vez de "feito". **Ajuste** (este PR): quando o selo confirma o ícone tocado, o toque mudou a página e o objetivo é de um passo só, o piloto conclui "feito, conferido pela foto numerada". Num objetivo com mais etapas, continua devolvendo a conferência.
+
+**Total nas nove levas de teste:** 868/900 (88+95+94+97+97+100+98+99+100). O erro silencioso ficou em 2/900, ambos na v7 e já corrigidos. As duas últimas levas (v6 com `--expect`, v9 sem) deram 100/100.
+
