@@ -13,7 +13,7 @@ import { isPortalId, type Board } from "./board";
 
 /** A linha que ensina a abrir um navegador no canvas, já ligado ao agente que a lê. */
 export const BROWSER_HINT =
-  "NAVEGADOR: para abrir um site, o app que você está construindo ou qualquer URL, use `ags portal create \"<nome>\" <url>` — abre um navegador no canvas, já conectado a você (não abra o navegador do sistema). "
+  "NAVEGADOR: REUTILIZE o que você já tem — `ags portals` lista os seus; para outra página use `ags portal navigate \"<nome>\" <url>` no MESMO navegador (um por tarefa enche o canvas; o limite é 4). Só crie um novo se precisar de dois ao mesmo tempo: `ags portal create \"<nome>\" <url>` abre um navegador no canvas, já conectado a você (com um nome que já existe, reaproveita o que está lá); não abra o navegador do sistema. "
   + "Depois: `ags portal snapshot \"<nome>\"` (a página, com refs @e1…), `click`, `type`, `press`, `scroll`, `wait`, `screenshot`; ao terminar, feche o que criou com `ags portal close \"<nome>\"`. "
   + "Para um trajeto de vários cliques (login, formulário), `ags portal act \"<nome>\" \"<objetivo>\" --fill campo=valor` deixa o Jev navegar rápido (se estiver ligado; com o MCP do ADE AGS, a ferramenta `browser_act` faz o mesmo); diga no objetivo TODAS as escolhas (tamanho, item, seção) e prefira UM `act` com o trajeto inteiro (`--steps` até 15) a vários pequenos: cada chamada extra custa um turno seu; confira a página que ele devolve; em carrinho, envio de formulário ou filtro passe `--expect text:\"...\"` (ou `url:/...`, `count:N`, `absent:\"...\"`) e ele confere por código: FEITO (verificado) ou NÃO CONFERE. `ags --help` lista tudo.";
 

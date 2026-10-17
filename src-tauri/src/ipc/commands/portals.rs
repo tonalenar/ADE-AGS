@@ -290,13 +290,47 @@ pub(super) fn portal_close(app: &AppHandle, args: &Value) -> Result<Value, Strin
     Ok(json!({ "closed": describe(target) }))
 }
 
-/// Crea un portal al lado de quien lo pide y conectado con él.
+/// Quantos navegadores um agente pode ter ao mesmo tempo (os conectados a ele). Cada um é uma página viva no canvas: agentes que
+/// criavam um por teste e nunca fechavam enchiam o canvas de navegadores iguais.
+pub(crate) const MAX_PORTALS_PER_AGENT: usize = 4;
+
+/// O portal que já tem esse nome (sem maiúsculas): `create` com um nome que já existe reaproveita em vez de criar outro. Pura.
+pub(crate) fn reusable<'a>(portals: &'a [Reachable], name: &str) -> Option<&'a Reachable> {
+    let needle = name.trim().to_lowercase();
+    if needle.is_empty() {
+        return None;
+    }
+    portals.iter().find(|p| p.portal.name.trim().to_lowercase() == needle)
+}
+
+/// Crea un portal al lado de quien lo pide y conectado con él. Reaproveita o que já tem o mesmo nome e recusa passar do teto.
 pub(super) fn portal_create(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let me = open_tabs(app)?
         .into_iter()
         .find(|t| t.id == from)
         .ok_or_else(|| "A sua aba não está aberta em nenhuma janela.".to_string())?;
+    let mine = reachable(&canvas::load_boards(), &from);
+    if let Some(name) = arg_str_opt(args, "name") {
+        if let Some(existing) = reusable(&mine, &name) {
+            let mut out = json!({ "created": describe(existing), "reused": true });
+            if let Some(url) = arg_str_opt(args, "url").filter(|u| !u.trim().is_empty()) {
+                let mut nav = args.clone();
+                nav["name"] = json!(existing.id);
+                nav["url"] = json!(url.trim());
+                let done = portal_action(app, &nav, "navigate")?;
+                out["navigated"] = done.get("portal").cloned().unwrap_or(Value::Null);
+            }
+            return Ok(out);
+        }
+    }
+    if mine.len() >= MAX_PORTALS_PER_AGENT {
+        return Err(format!(
+            "Você já tem {} navegadores ({}). Reutilize um: `ags portal navigate \"<nome>\" <url>` abre outra página no mesmo, e `ags portal close \"<nome>\"` fecha os que não precisa mais.",
+            mine.len(),
+            mine.iter().map(|p| p.portal.name.as_str()).collect::<Vec<_>>().join(", ")
+        ));
+    }
     let mut req = json!({ "op": "create", "cwd": me.cwd, "near": me.id });
     if let Some(name) = arg_str_opt(args, "name").filter(|n| !n.trim().is_empty()) {
         req["name"] = json!(name.trim());
@@ -407,6 +441,16 @@ mod test {
 
     fn portal(id: &str, name: &str) -> Reachable {
         Reachable { key: "main|/p".into(), id: id.into(), portal: Portal { name: name.into(), ..Default::default() } }
+    }
+
+    #[test]
+    fn create_com_um_nome_que_ja_existe_reaproveita_o_portal() {
+        let portals = vec![portal("p1", "Teste"), portal("p2", "Outro")];
+        assert_eq!(reusable(&portals, " teste ").map(|p| p.id.as_str()), Some("p1"));
+        assert_eq!(reusable(&portals, "OUTRO").map(|p| p.id.as_str()), Some("p2"));
+        assert!(reusable(&portals, "novo").is_none());
+        assert!(reusable(&portals, "  ").is_none());
+        assert!(MAX_PORTALS_PER_AGENT >= 2);
     }
 
     #[test]
