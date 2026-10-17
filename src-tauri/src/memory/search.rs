@@ -211,19 +211,23 @@ fn snippet_of(body: &str) -> (String, bool) {
 
 // ── Banco ───────────────────────────────────────────────────────────
 
-/// As memórias ativas e aprovadas que a missão enxerga: as do workspace e as da própria missão.
+/// As memórias ativas e aprovadas que a missão enxerga: as do workspace e as da própria missão. Numa
+/// missão, só as do repositório dela e as sem repositório (ver `repo_scope`): a missão de um repo Node
+/// não recebe as regras de cargo e Tauri do ADE-AGS.
 pub fn load_docs(conn: &Connection, workspace_id: &str, mission_id: Option<&str>) -> Result<Vec<Doc>, String> {
+    let repo = mission_id.and_then(|m| super::repo_scope::mission_repo_key(conn, m));
     let mut stmt = conn
         .prepare(
             "SELECT e.id, e.scope, e.key, r.kind, e.priority, r.body
                FROM memory_entries e
                JOIN memory_revisions r ON r.entry_id = e.id AND r.revision = e.current_revision
               WHERE e.status = 'active' AND r.status='approved' AND e.workspace_id = ?1
-                AND (e.scope = 'workspace' OR (e.scope = 'mission' AND e.mission_id = ?2))",
+                AND (e.scope = 'workspace' OR (e.scope = 'mission' AND e.mission_id = ?2))
+                AND (?3 IS NULL OR e.repo_key IS NULL OR e.repo_key = ?3)",
         )
         .map_err(|_| "não foi possível ler as memórias".to_string())?;
     let rows = stmt
-        .query_map(params![workspace_id, mission_id], |r| {
+        .query_map(params![workspace_id, mission_id, repo], |r| {
             Ok(Doc { entry_id: r.get(0)?, scope: r.get(1)?, key: r.get(2)?, kind: r.get(3)?, priority: r.get(4)?, body: r.get(5)? })
         })
         .map_err(|_| "não foi possível ler as memórias".to_string())?;

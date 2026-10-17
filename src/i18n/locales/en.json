@@ -2705,6 +2705,7 @@
   "canvas.team.showMore": "Show more",
   "canvas.team.showLess": "Show less",
   "canvas.team.ask": "question",
+  "canvas.team.handoff": "delivery",
   "canvas.team.filter": "Filter the timeline",
   "canvas.team.filterAll": "All",
   "canvas.team.filterApprovals": "Permissions",

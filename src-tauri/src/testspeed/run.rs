@@ -76,6 +76,26 @@ pub fn suite_commands(suite: &str) -> Result<Vec<TestCommand>, String> {
     }])
 }
 
+/// Os comandos de uma suíte NESTE repositório: as do ADE-AGS no layout dele, senão as detectadas
+/// (ver `project`).
+pub fn suite_commands_in(root: &Path, suite: &str) -> Result<Vec<TestCommand>, String> {
+    match super::project::detect(root) {
+        super::project::Layout::AdeAgs => suite_commands(suite),
+        super::project::Layout::Generic(suites) => {
+            let found: Vec<TestCommand> = suites.iter().filter(|s| s.suite == suite).cloned().collect();
+            if !found.is_empty() {
+                return Ok(found);
+            }
+            let names: Vec<&str> = suites.iter().map(|s| s.suite.as_str()).collect();
+            Err(if names.is_empty() {
+                "Este repositório não tem suítes de teste que o ags conheça (Cargo, tsconfig + typescript, vitest, scripts.test ou test/*.test.js).".into()
+            } else {
+                format!("Suíte '{suite}' não existe neste repositório. Detectadas: {}.", names.join(", "))
+            })
+        }
+    }
+}
+
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch("CREATE TABLE IF NOT EXISTS test_results (
         id INTEGER PRIMARY KEY AUTOINCREMENT, repository TEXT NOT NULL,
@@ -400,8 +420,9 @@ pub fn full_gate_green(conn: &Connection, root: &Path) -> bool {
     let (Ok(repo), Ok(Some(tree))) = (repository_key(root), clean_tree(root)) else {
         return false;
     };
-    FULL_GATE_SUITES.iter().all(|suite| {
-        let Ok(commands) = suite_commands(suite) else { return false };
+    let suites = super::project::gate_suites(&super::project::detect(root));
+    !suites.is_empty() && suites.iter().all(|suite| {
+        let Ok(commands) = suite_commands_in(root, suite) else { return false };
         let scope = super::scope::scoped_identity(root, &tree, suite);
         matches!(cached_green(conn, &repo, Some(&scope), suite, &command_key(&commands)), Ok(Some(_)))
     })
@@ -416,6 +437,23 @@ pub struct RunResult {
     pub duration_ms: i64,
     pub tree_hash: Option<String>,
     pub message: String,
+    /// A suíte estava vermelha e passou: o momento de registrar a lição (ver `lesson_hint`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lesson: Option<String>,
+}
+
+/// Quando uma suíte que falhou na última vez passa agora, o agente acabou de descobrir por quê — e é a
+/// lição que se perdia: nada ligava testes e rodadas de correção à memória, e a mesma armadilha era
+/// redescoberta na missão seguinte. O aviso pede a causa em uma memória `finding`, que fica pendente
+/// para o usuário aprovar. `None` em qualquer outro caso. Pura.
+pub fn lesson_hint(previous_failed: bool, passed: bool, suite: &str, mission: Option<&str>) -> Option<String> {
+    if !(previous_failed && passed) {
+        return None;
+    }
+    let mission = mission.map(|m| format!(" --mission {m}")).unwrap_or_default();
+    Some(format!(
+        "A suíte {suite} estava vermelha e passou. Se a causa não é óbvia no código (uma armadilha de ambiente, de ordem, de plataforma), registre a lição para a próxima missão: `ags memory suggest{mission} --scope workspace --kind finding --key <nome-curto> --body \"causa e como evitar\"`. Se foi só um erro de digitação, não registre."
+    ))
 }
 
 pub fn record_span(
@@ -565,6 +603,7 @@ pub fn run(
                     duration_ms: 0,
                     tree_hash: tree,
                     message,
+                    lesson: None,
                 });
             }
             Turn::Mine(claim) => _claim = claim,
@@ -618,6 +657,15 @@ pub fn run(
     let duration_ms = timer.elapsed().as_millis().min(i64::MAX as u128) as i64;
     let after = clean_tree(root)?;
     let clean = tree.is_some() && tree == after;
+    let previous_failed = conn
+        .query_row(
+            "SELECT passed FROM test_results WHERE repository=?1 AND suite=?2 AND command_key=?3 ORDER BY id DESC LIMIT 1",
+            params![repo, suite, key],
+            |r| r.get::<_, bool>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        == Some(false);
     conn.execute("INSERT INTO test_results(repository,tree_hash,suite,command_key,commands,duration_ms,passed,clean,finished_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         params![repo, scope, suite, key, serde_json::to_string(commands).map_err(|e| e.to_string())?, duration_ms, passed, clean, now_ms()]).map_err(|e| e.to_string())?;
     Ok(RunResult {
@@ -632,6 +680,7 @@ pub fn run(
             "árvore suja ou alterada durante o teste: sem reutilização de cache"
         }
         .into(),
+        lesson: lesson_hint(previous_failed, passed, suite, mission),
     })
 }
 
@@ -667,6 +716,10 @@ mod tests {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src-tauri").join("src").join("lib.rs"), "v1").unwrap();
         std::fs::write(root.join("src").join("App.tsx"), "v1").unwrap();
+        // O layout do ADE-AGS: só nele a chave do cache é por suíte (ver `project`).
+        std::fs::write(root.join("src-tauri").join("Cargo.toml"), "[package]").unwrap();
+        std::fs::create_dir_all(root.join("scripts")).unwrap();
+        std::fs::write(root.join("scripts").join("babel-parse-check.mjs"), "").unwrap();
         git(&root, &["add", "-A"]).unwrap();
         git(&root, &["commit", "-m", "app"]).unwrap();
         let conn = Connection::open_in_memory().unwrap();
@@ -872,6 +925,15 @@ mod tests {
             None
         );
     }
+    #[test]
+    fn vermelho_depois_verde_pede_a_licao_e_o_resto_nao() {
+        let hint = lesson_hint(true, true, "rust", Some("m-1")).unwrap();
+        assert!(hint.contains("ags memory suggest --mission m-1") && hint.contains("--kind finding"), "{hint}");
+        assert!(lesson_hint(true, false, "rust", None).is_none());
+        assert!(lesson_hint(false, true, "rust", None).is_none());
+        assert!(!lesson_hint(true, true, "tsc", None).unwrap().contains("--mission"));
+    }
+
     #[test]
     fn tsc_ganha_incremental_fora_da_chave_e_os_outros_comandos_nao() {
         let tsc = TestCommand { suite: "tsc".into(), program: "node".into(), args: vec!["node_modules/typescript/bin/tsc".into(), "--noEmit".into()], cwd: ".".into() };

@@ -19,7 +19,7 @@ export interface TeamMessage {
   id: number;
   missionId: string;
   atMs: number;
-  kind: "tell" | "ask";
+  kind: "tell" | "ask" | "handoff";
   fromTabId: string;
   fromName: string;
   toTabId: string;

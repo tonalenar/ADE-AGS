@@ -81,6 +81,27 @@ fn many_frontend_files_use_changed_flag_and_input_is_deduped() {
 }
 
 #[test]
+fn generic_repos_run_the_detected_suites_unless_only_docs_changed() {
+    use crate::testspeed::run::TestCommand;
+    let suites = vec![TestCommand { suite: "node".into(), program: "node".into(), args: vec!["--test".into()], cwd: ".".into() }];
+    let plan = plan_generic(&["server/index.js".into(), "README.md".into()], &suites);
+    assert_eq!(plan.steps.len(), 1);
+    assert_eq!((plan.steps[0].suite, plan.steps[0].args.clone(), plan.steps[0].cwd), ("node", vec!["--test".to_string()], None));
+    assert_eq!(plan.ignored, ["README.md"]);
+    assert!(plan_generic(&["docs/a.md".into(), ".claude/x".into()], &suites).is_empty());
+    assert!(plan_generic(&["server/index.js".into()], &[]).is_empty(), "sem suíte detectada, nada a rodar");
+}
+
+#[test]
+fn unsafe_inside_a_string_or_trailing_comment_is_not_unsafe_code() {
+    assert!(line_adds_unsafe("    unsafe { libc::kill(pid, 9) };"));
+    assert!(line_adds_unsafe("let p = \"x\"; unsafe { f() }"));
+    assert!(!line_adds_unsafe("    \"Suite completa em código unsafe ou COM\","));
+    assert!(!line_adds_unsafe("let a = \"um \\\" unsafe\";"), "aspas escapadas continuam dentro do texto");
+    assert!(!line_adds_unsafe("let x = 1; // unsafe aqui não"));
+}
+
+#[test]
 fn empty_input_is_an_empty_plan() {
     assert!(p(&[]).is_empty());
 }
