@@ -13,7 +13,7 @@
  * Opções: --out <arquivo.json> (padrão bench-results/jev-bench-<modo>-<label>.json, com .md ao lado) · --label <nome>
  *   · --compare <json> (coluna ANTES) · --port <n> (servidor das fixtures, padrão 8765) · --no-visual (sim sem foto) · --verbose (os passos de cada tarefa)
  *   · --repeat N (repetições por tarefa, padrão 1) · --seed S (semente da ordem e da latência simulada, padrão 1)
- *   · --no-alternate (sem inverter a ordem nas repetições ímpares) · --set v1|v2 (só uma leva de tarefas)
+ *   · --no-alternate (sem inverter a ordem nas repetições ímpares) · --set v1|v2|teste (só uma leva; teste = protocolo J2)
  *   · --history (grava também docs/ade-ags/bench/historico/<data>-<modo>-<label>.json/.md e uma linha no índice HISTORICO.md)
  *   · --gate (Fase 7: sai com código 1 se o portão de liberação falhar: sucesso ≥ 90%, falso «feito» ≤ 2%, passo p50 ≤ 700 ms, 0 travamentos)
  *   · --with-expect (Fase 5: passa ao `act` os `--expect` equivalentes ao critério de cada tarefa e mede NÃO CONFERE / «verificado» errado)
@@ -41,6 +41,7 @@ import {
 } from "./bench/core";
 import { runSimTask } from "./bench/sim";
 import { TASKS } from "./bench/tasks";
+import { TEST_TASKS } from "./bench/tasks-teste";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(here, "bench-fixture");
@@ -111,7 +112,7 @@ function fail(message: string): never {
 }
 
 if (flag("list")) {
-  for (const task of TASKS) {
+  for (const task of value("set") === "teste" ? TEST_TASKS : TASKS) {
     console.log(`${task.id}  [${task.kind}${task.sim ? "+sim" : ""}${task.probe ? ", SONDA (fora dos portões)" : ""}${task.demoLogin ? ", login-demo" : ""}${(task.acts ?? 1) > 1 ? `, ${task.acts} act` : ""}] dif.${task.difficulty} ≤${task.maxSteps} passos`);
     console.log(`    ${task.title}`);
     console.log(`    objetivo: ${task.goal}`);
@@ -167,7 +168,8 @@ if (flag("serve")) {
 if (!mode) process.exit(2);
 
 const set = value("set");
-const selection = select(set === "v1" || set === "v2" ? TASKS.filter((t) => (t.set ?? "v1") === set) : TASKS, {
+// `--set teste`: o conjunto de TESTE do protocolo J2 (100 tarefas geradas, fora das levas v1/v2 e dos números de sempre).
+const selection = select(set === "teste" ? TEST_TASKS : set === "v1" || set === "v2" ? TASKS.filter((t) => (t.set ?? "v1") === set) : TASKS, {
   only, kind: undefined, includePublic: flag("public"), includeDemoLogin: flag("demo-login"), simOnly: mode === "sim",
 });
 if (selection.unknown.length > 0) fail(`Ids desconhecidos: ${selection.unknown.join(", ")} (use --list).`);
