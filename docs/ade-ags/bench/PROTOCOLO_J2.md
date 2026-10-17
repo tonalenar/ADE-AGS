@@ -65,4 +65,28 @@ O `--with-expect` passa ao `act` os `--expect` equivalentes ao critério de cada
 
 As falhas que restam no simulador (N05, N07, N08, N10, e a N09 que oscila) são limitações dele: o simulador não tem a guarda semântica nem o livro-razão do app, e não espera as opções do autocomplete.
 
-O número que vale é o do **real**, com o estado zerado, e ainda não foi rodado.
+O número que vale é o do **real**, com o estado zerado.
+
+## Primeiras rodadas reais (2026-10-17, app 1.8.7 instalado, commit 7731866a)
+
+| | Conjunto original (v1+v2, portões) | Conjunto de TESTE (sementes 1–20) |
+|---|---|---|
+| Sucesso | **31/31 (100%)**, IC 95% 89,0–100% | **88/100 (88%)**, IC 95% 80,2–93,0% |
+| Erro silencioso (falso "feito" + violações) | 0/31 (teto 11,0%) | 0/100 (teto 3,7%) |
+| "Verificado" errado | 0 | 0 |
+| SPRT (meta ≥ 98% contra ≤ 95%) | rodar mais | não atinge |
+| `act` p50 · p95 | 1.151 · 6.615 ms | 1.112 · 3.402 ms |
+| Consultas ao Jev por tarefa | 1,6 | 1,3 |
+
+Arquivos: `original-real-j1.{json,md}` e `teste-real-v1.{json,md}`. As sondas da Amazon (P05, P06) ficaram fora dos portões: o site entregou um desafio anti-robô.
+
+**A diferença entre os dois conjuntos é o tamanho do ajuste fino ao conjunto de desenvolvimento.** As 12 falhas do teste são todas paradas honestas (nenhum falso "feito"), em duas classes:
+
+1. **Botão coberto** (5 de 20 em `adicionar`). A faixa de cookies ou o modal cobre o produto. O Jev, vendo a falha no histórico, escolhe o mesmo botão coberto de novo, e o piloto para por repetição. No L05/L06 ele escolhia "Recusar". **Correção:** o piloto tira o que cobre a página. Ele toca o controle de recusar ou, sem ele, o de fechar (PT, EN, ES); nunca aceita nem assina. Depois o Jev escolhe de novo (`coverDismiss`).
+2. **Ícone sem nome** (7 de 20 em `icone`). Quatro tarefas com alvos diferentes receberam da foto o MESMO ponto, o meio do grupo de ícones. A foto sai da tela, e o nó do bench no canvas desenha a página de 1920 px em ~400 px. Os ícones chegam ao Jev com ~10 px. **Correção:** abaixo de 3/4 do tamanho da página, o nó é enquadrado (com zoom acima de 100%) só pelo tempo da foto.
+
+As sementes 1–20 já foram vistas por quem ajustou o piloto. A próxima medida do teste usa **sementes novas**:
+
+```bash
+bun scripts/jev-bench.ts --real --set teste --seeds 21-40 --with-expect --yes --max-real 100 --max-probes 900 --label teste-real-v2
+```

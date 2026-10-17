@@ -13,7 +13,8 @@
  * Opções: --out <arquivo.json> (padrão bench-results/jev-bench-<modo>-<label>.json, com .md ao lado) · --label <nome>
  *   · --compare <json> (coluna ANTES) · --port <n> (servidor das fixtures, padrão 8765) · --no-visual (sim sem foto) · --verbose (os passos de cada tarefa)
  *   · --repeat N (repetições por tarefa, padrão 1) · --seed S (semente da ordem e da latência simulada, padrão 1)
- *   · --no-alternate (sem inverter a ordem nas repetições ímpares) · --set v1|v2 (só uma leva de tarefas)
+ *   · --no-alternate (sem inverter a ordem nas repetições ímpares) · --set v1|v2|teste (só uma leva; teste = protocolo J2)
+ *   · --seeds 21-40 (com --set teste: outra leva de sementes, para medir de novo sem as páginas já vistas)
  *   · --history (grava também docs/ade-ags/bench/historico/<data>-<modo>-<label>.json/.md e uma linha no índice HISTORICO.md)
  *   · --gate (Fase 7: sai com código 1 se o portão de liberação falhar: sucesso ≥ 90%, falso «feito» ≤ 2%, passo p50 ≤ 700 ms, 0 travamentos)
  *   · --with-expect (Fase 5: passa ao `act` os `--expect` equivalentes ao critério de cada tarefa e mede NÃO CONFERE / «verificado» errado)
@@ -41,6 +42,7 @@ import {
 } from "./bench/core";
 import { runSimTask } from "./bench/sim";
 import { TASKS } from "./bench/tasks";
+import { testTasks } from "./bench/tasks-teste";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(here, "bench-fixture");
@@ -52,6 +54,12 @@ const flag = (name: string) => argv.includes(`--${name}`);
 const value = (name: string): string | undefined => {
   const at = argv.indexOf(`--${name}`);
   return at >= 0 && at + 1 < argv.length && !argv[at + 1].startsWith("--") ? argv[at + 1] : undefined;
+};
+/** `--set teste`: as sementes de `--seeds 21-40` (sem a flag, a primeira leva, 1-20). */
+const teste = () => {
+  const range = /^(\d+)-(\d+)$/.exec(value("seeds") ?? "");
+  if (value("seeds") !== undefined && !range) throw new Error("--seeds espera um intervalo, p. ex. 21-40");
+  return range ? testTasks(Number(range[1]), Number(range[2])) : testTasks();
 };
 const intValue = (name: string, fallback: number): number => {
   const raw = value(name);
@@ -111,13 +119,14 @@ function fail(message: string): never {
 }
 
 if (flag("list")) {
-  for (const task of TASKS) {
+  const listed = value("set") === "teste" ? teste() : TASKS;
+  for (const task of listed) {
     console.log(`${task.id}  [${task.kind}${task.sim ? "+sim" : ""}${task.probe ? ", SONDA (fora dos portões)" : ""}${task.demoLogin ? ", login-demo" : ""}${(task.acts ?? 1) > 1 ? `, ${task.acts} act` : ""}] dif.${task.difficulty} ≤${task.maxSteps} passos`);
     console.log(`    ${task.title}`);
     console.log(`    objetivo: ${task.goal}`);
     console.log(`    sucesso:  ${describeCriterion(task.success)}${task.forbid ? ` · proibido: ${describeCriterion(task.forbid)}` : ""}`);
   }
-  console.log(`\n${TASKS.length} tarefas (${TASKS.filter((t) => t.kind === "local").length} locais, ${TASKS.filter((t) => t.kind === "public").length} públicas; ${TASKS.filter((t) => t.probe).length} sondas fora dos portões).`);
+  console.log(`\n${listed.length} tarefas (${listed.filter((t) => t.kind === "local").length} locais, ${listed.filter((t) => t.kind === "public").length} públicas; ${listed.filter((t) => t.probe).length} sondas fora dos portões).`);
   process.exit(0);
 }
 if (!mode && !flag("serve")) fail("Use --list, --sim, --real ou --serve. Veja o cabeçalho de scripts/jev-bench.ts.");
@@ -167,7 +176,9 @@ if (flag("serve")) {
 if (!mode) process.exit(2);
 
 const set = value("set");
-const selection = select(set === "v1" || set === "v2" ? TASKS.filter((t) => (t.set ?? "v1") === set) : TASKS, {
+// `--set teste`: o conjunto de TESTE do protocolo J2 (100 tarefas geradas, fora das levas v1/v2 e dos números de sempre).
+const universe = set === "teste" ? teste() : TASKS;
+const selection = select(set === "teste" ? universe : set === "v1" || set === "v2" ? TASKS.filter((t) => (t.set ?? "v1") === set) : TASKS, {
   only, kind: undefined, includePublic: flag("public"), includeDemoLogin: flag("demo-login"), simOnly: mode === "sim",
 });
 if (selection.unknown.length > 0) fail(`Ids desconhecidos: ${selection.unknown.join(", ")} (use --list).`);
@@ -379,13 +390,13 @@ PARADO: mais de 30% das rodadas falharam por infraestrutura (${runs.filter(isInf
   server.close();
 }
 
-const report: BenchReport = buildReport({ label, mode, startedAt, commit: commit(), seed, repeat, order: orderName }, runs, TASKS);
+const report: BenchReport = buildReport({ label, mode, startedAt, commit: commit(), seed, repeat, order: orderName }, runs, universe);
 let baseline: BenchReport | undefined;
 const comparePath = value("compare");
 if (comparePath) {
   try { baseline = JSON.parse(readFileSync(comparePath, "utf8")) as BenchReport; } catch (e) { fail(`--compare ilegível (${comparePath}): ${e instanceof Error ? e.message : String(e)}`); }
 }
-const markdown = renderMarkdown(TASKS, report, baseline);
+const markdown = renderMarkdown(universe, report, baseline);
 const out = value("out") ?? join("bench-results", `jev-bench-${mode}-${label}.json`);
 const write = (path: string) => {
   mkdirSync(dirname(resolve(path)), { recursive: true });

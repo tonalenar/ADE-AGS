@@ -131,6 +131,16 @@ describe("revealViewport: o nó inteiro na tela", () => {
     expect(rect.right).toBeLessThanOrEqual(screen.width);
   });
 
+  it("para a foto do piloto, o nó pequeno cresce até encher a tela (passa do 100 %)", () => {
+    const box = { x: 0, y: 0, w: 400, h: 240 };
+    const vp = revealViewport(box, screen.width, screen.height, undefined, 4);
+    expect(vp.zoom).toBeGreaterThan(2.5);
+    const rect = onScreen(box, vp);
+    expect(rect.left).toBeGreaterThanOrEqual(0);
+    expect(rect.right).toBeLessThanOrEqual(screen.width);
+    expect(rect.bottom).toBeLessThanOrEqual(screen.height - 120 + 1);
+  });
+
   it("um nó pequeno fica a 100 %, centrado", () => {
     const box = { x: 0, y: 0, w: 400, h: 300 };
     const vp = revealViewport(box, screen.width, screen.height);

@@ -33,7 +33,7 @@ import { DeviceNode } from "./DeviceNode";
 import { FolderNode, baseName, type FolderFlowNode } from "./FolderNode";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
-  HEADER_H, NOTE_HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, revealViewport, safeViewport, terminalRect,
+  HEADER_H, NOTE_HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, PHOTO_MAX_ZOOM, facingSides, focusViewport, intersects, isLive, revealViewport, safeViewport, terminalRect,
   type Box, type Rect, type Viewport,
 } from "./geometry";
 import { CanvasDock, type DockPanel } from "./CanvasDock";
@@ -249,7 +249,7 @@ function CanvasInner() {
   useEffect(() => {
     let saved: Viewport | null = null;
     const onReveal = (event: Event) => {
-      const { id, restore } = (event as CustomEvent<{ id: string; restore?: boolean }>).detail;
+      const { id, restore, sharp } = (event as CustomEvent<{ id: string; restore?: boolean; sharp?: boolean }>).detail;
       if (restore) {
         if (saved) rf.setViewport(saved, { duration: 0 });
         saved = null;
@@ -259,7 +259,7 @@ function CanvasInner() {
       const s = sizeRef.current;
       if (!box || s.width === 0) return;
       saved = saved ?? rf.getViewport();
-      rf.setViewport(revealViewport(box, s.width, s.height), { duration: 0 });
+      rf.setViewport(revealViewport(box, s.width, s.height, undefined, sharp ? PHOTO_MAX_ZOOM : undefined), { duration: 0 });
     };
     window.addEventListener("ags:canvas-reveal", onReveal);
     return () => window.removeEventListener("ags:canvas-reveal", onReveal);

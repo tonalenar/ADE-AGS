@@ -356,10 +356,14 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
       // nas rodadas reais 23 de 27 fotos pagavam uma primeira captura incompleta antes do enquadramento).
       const box = page.getBoundingClientRect();
       const inWindow = box.left >= 0 && box.top >= 0 && box.right <= window.innerWidth + 1 && box.bottom <= window.innerHeight + 1;
-      let shot = inWindow ? await shoot().catch(() => null) : null;
+      // A foto sai da TELA: um nó pequeno no canvas (a página de 1920 px desenhada em 400) dá ícones de 10 px e o Jev aponta o
+      // meio do grupo (conjunto de teste J2: 4 tarefas, 4 alvos diferentes, o mesmo ponto). Abaixo de 3/4 do tamanho da página,
+      // o nó é enquadrado só pelo tempo da foto, como quando está cortado.
+      const sharp = page.offsetWidth <= 0 || box.width / page.offsetWidth >= 0.75;
+      let shot = inWindow && sharp ? await shoot().catch(() => null) : null;
       if (!shot || !shot.complete) {
-        // No canvas o nó pode estar cortado pela borda da tela: a vista o mostra inteiro só pelo tempo da foto.
-        window.dispatchEvent(new CustomEvent("ags:canvas-reveal", { detail: { id: view.id } }));
+        // No canvas o nó pode estar cortado pela borda da tela, ou pequeno demais: a vista o mostra inteiro e grande só pelo tempo da foto.
+        window.dispatchEvent(new CustomEvent("ags:canvas-reveal", { detail: { id: view.id, sharp: true } }));
         try {
           await new Promise((resolve) => setTimeout(resolve, 450));
           shot = await shoot();
