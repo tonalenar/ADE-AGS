@@ -4,6 +4,12 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// Status em que a missão acabou e o worktree pode ser limpo (as outras travas — trabalho sem commit,
+/// commits fora da base, junções — continuam valendo). `done_without_delivery` faltava: 23 dos 71
+/// worktrees em ~/.ags/worktrees eram de missões assim e nunca podiam ser limpos (dois deles com
+/// 13,7 GB só de `target/`).
+pub(crate) const FINISHED: &[&str] = &["done", "done_without_delivery", "cancelled", "failed"];
+
 static CLEANING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Debug, Clone, Serialize)]
@@ -239,7 +245,7 @@ pub fn cleanup(
     let mut entries = Vec::new();
     for (root, branch) in paths {
         let mut e = inspect(&repo, base, Path::new(&root), &branch, Some(mission.into()));
-        if !matches!(status.as_str(), "done" | "cancelled" | "failed") {
+        if !FINISHED.contains(&status.as_str()) {
             e.blockers.push(format!("missão em andamento: {status}"))
         }
         let mut tabs = conn
@@ -364,7 +370,7 @@ pub fn list(conn: &Connection, cwd: &Path, base: &Path) -> Result<Vec<CleanupEnt
             e.blockers.push("propriedade de worktree ambígua".into());
         }
         if let Some((_, s)) = ownership {
-            if !matches!(s.as_str(), "done" | "cancelled" | "failed") {
+            if !FINISHED.contains(&s.as_str()) {
                 e.blockers.push(format!("missão em andamento: {s}"))
             }
         }
