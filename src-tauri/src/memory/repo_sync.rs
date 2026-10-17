@@ -130,6 +130,10 @@ struct Inner {
     stop: AtomicBool,
     running: AtomicBool,
     notify: Mutex<Option<Arc<dyn Fn(&RepoSyncStatus) + Send + Sync>>>,
+    /// Só em teste: quanto o worker fica parado, COM a trava do estado, entre conferir `stop` e dormir sem prazo. Imita a
+    /// thread perdendo a CPU nessa janela, que é onde o aviso do `Drop` se perdia num runner de CI carregado.
+    #[cfg(test)]
+    before_idle_wait_ms: std::sync::atomic::AtomicU64,
 }
 
 pub struct RepoSync {
@@ -157,6 +161,8 @@ impl RepoSync {
                 state: Mutex::new(SyncState { slots: BTreeMap::new() }),
                 wake: Condvar::new(),
                 stop: AtomicBool::new(false),
+                #[cfg(test)]
+                before_idle_wait_ms: std::sync::atomic::AtomicU64::new(0),
                 running: AtomicBool::new(false),
                 notify: Mutex::new(None),
             }),
@@ -577,7 +583,16 @@ fn worker_loop(inner: Arc<Inner>) {
                 let (guard, _) = inner.wake.wait_timeout(state, delay).unwrap_or_else(|err| err.into_inner());
                 guard
             }
-            None => inner.wake.wait(state).unwrap_or_else(|err| err.into_inner()),
+            None => {
+                #[cfg(test)]
+                {
+                    let ms = inner.before_idle_wait_ms.load(Ordering::SeqCst);
+                    if ms > 0 {
+                        std::thread::sleep(Duration::from_millis(ms));
+                    }
+                }
+                inner.wake.wait(state).unwrap_or_else(|err| err.into_inner())
+            }
         };
     }
 }
@@ -1228,24 +1243,25 @@ mod tests {
         assert_eq!(dirty_rows(&db), 0, "sucesso tem de apagar o marcador");
     }
 
-    /// O `drop` logo depois do `spawn` cai justamente na janela em que o worker confere `stop` e vai dormir: com o aviso
-    /// fora da trava do estado ele se perdia e o `join` travava para sempre. Um vigia transforma o travamento em falha.
+    /// A corrida do CI, determinística: o worker fica parado (com a trava do estado) entre conferir `stop` e dormir sem prazo,
+    /// e o `drop` chega nessa janela. Com o aviso fora da trava ele se perdia e o `join` esperava para sempre (o CI travou
+    /// 30 min em `pause_discards_the_queue_until_resume`, cujo fim cai nessa mesma janela). Um vigia transforma o travamento em falha.
     #[test]
-    fn drop_right_after_spawn_never_hangs() {
+    fn drop_in_the_window_before_the_idle_wait_does_not_hang() {
         let db = fixture();
         let root = TempDir::new();
         let probe = Probe::new(db.clone());
+        let sync = RepoSync::with_runner(db, root.path().to_path_buf(), probe.runner(), hour());
+        sync.inner.before_idle_wait_ms.store(400, Ordering::SeqCst);
+        sync.spawn();
+        // O worker já conferiu `stop` e está parado no gancho, segurando a trava, prestes a dormir.
+        std::thread::sleep(Duration::from_millis(150));
         let (done_tx, done_rx) = std::sync::mpsc::channel();
-        let path = root.path().to_path_buf();
         std::thread::spawn(move || {
-            for _ in 0..3000 {
-                let sync = RepoSync::with_runner(db.clone(), path.clone(), probe.runner(), hour());
-                sync.spawn();
-                drop(sync);
-            }
+            drop(sync);
             let _ = done_tx.send(());
         });
-        assert!(done_rx.recv_timeout(Duration::from_secs(60)).is_ok(), "o drop do RepoSync travou esperando o worker");
+        assert!(done_rx.recv_timeout(Duration::from_secs(5)).is_ok(), "o drop do RepoSync travou esperando o worker (aviso perdido)");
     }
 
     #[test]
