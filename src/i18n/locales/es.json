@@ -1992,6 +1992,7 @@
   "missions.delivery.form.prLabel": "Pull request (opcional)",
   "missions.delivery.form.prPlaceholder": "Número o URL del PR",
   "missions.delivery.form.prHint": "Déjalo vacío solo si no se abrió ningún PR.",
+  "missions.delivery.form.suggested": "Completado con los tests que registró la app y el último PR que citó el equipo. Revísalo antes de finalizar.",
   "missions.delivery.form.hint": "Informa el resultado de las pruebas. Si indicas un PR, ADE consulta sus checks de GitHub; la entrega solo se completa cuando todos están en verde.",
   "missions.delivery.form.submit": "Finalizar misión",
   "missions.edit": "Editar",

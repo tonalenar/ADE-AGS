@@ -266,6 +266,7 @@ export function MissionsSection() {
       )}
       {finishing && (
         <MissionFinishDialog
+          missionId={finishing.id}
           onClose={() => setFinishing(null)}
           onFinish={(delivery) => finish(finishing, delivery)}
         />

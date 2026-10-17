@@ -192,9 +192,64 @@ pub fn vigia_report(app: AppHandle, tab_id: String, text: String) -> Result<(), 
     Ok(())
 }
 
+/// O título e o texto do aviso do sistema de uma missão que pede o usuário. Pura.
+pub(crate) fn user_notice(kind: &str, mission_title: &str, body: &str) -> Option<(String, String)> {
+    let title = mission_title.trim();
+    let title = if title.is_empty() { "Missão" } else { title };
+    match kind {
+        "team_delivered" => Some((
+            format!("Equipe entregou — {title}"),
+            "Todos reportaram e estão parados. Revise e finalize a missão em Missões.".into(),
+        )),
+        "user_decision" => Some((format!("Decisão pendente — {title}"), crate::chat::preview(body, 180))),
+        _ => None,
+    }
+}
+
+/// O Vigia achou algo que só o usuário resolve: a equipe entregou (falta Finalizar) ou há uma
+/// decisão dele pendente. Antes isso ia só para o chat, sem aviso do sistema, e a missão ficava horas
+/// parada (no banco real, 21% do relógio das missões era espera depois da entrega e 44% espera por
+/// decisões no meio). Agora sai também o aviso do sistema (com as regras do notificador: desligável e
+/// só com a app sem foco) e, na entrega, o span `team_delivered`, que separa no tempo da missão o
+/// trabalho da equipe da espera pelo clique. Devolve se o aviso do sistema apareceu.
+#[tauri::command]
+pub fn vigia_notify_user(app: AppHandle, mission_id: Option<String>, mission_title: String, kind: String, body: Option<String>) -> Result<bool, String> {
+    let Some((title, text)) = user_notice(&kind, &mission_title, body.as_deref().unwrap_or("")) else {
+        return Err(format!("Aviso desconhecido '{kind}'."));
+    };
+    if kind == "team_delivered" {
+        if let Some(mission_id) = mission_id.as_deref().filter(|id| !id.starts_with("c:")) {
+            let now = crate::util::now_ts() * 1000;
+            let db = app.state::<crate::database::DbConnection>();
+            let conn = db.lock().map_err(|e| e.to_string())?;
+            let span = super::timings::NewSpan {
+                kind: "team_delivered".into(),
+                actor: "Vigia".into(),
+                target: String::new(),
+                started_ms: now,
+                ended_ms: now,
+                detail: String::new(),
+            };
+            super::timings::add(&conn, mission_id, &span)?;
+        }
+    }
+    Ok(crate::notifier::show_custom(&app, &title, &text))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn o_aviso_ao_usuario_diz_o_que_falta_e_recusa_tipos_desconhecidos() {
+        let (title, body) = user_notice("team_delivered", "Site CredPro", "").unwrap();
+        assert!(title.contains("Equipe entregou") && title.contains("Site CredPro"));
+        assert!(body.contains("finalize"));
+        let (title, body) = user_notice("user_decision", " ", "Posso abrir o PR?").unwrap();
+        assert!(title.contains("Decisão pendente — Missão"));
+        assert_eq!(body, "Posso abrir o PR?");
+        assert!(user_notice("outro", "x", "").is_none());
+    }
 
     #[test]
     fn so_aceita_o_json_e_destinatarios_conhecidos() {

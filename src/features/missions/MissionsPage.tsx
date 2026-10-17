@@ -828,7 +828,7 @@ function MissionDetailView({ summary, detail, squad, approvals, onEdit, onError,
       {workspaceId && <MemoryReviewPanel missionId={mission.id} workspaceId={workspaceId} refreshKey={mission.status} />}
       {workspaceId && <SharedMemoryPanel key={`${workspaceId}-${mission.id}-${focusNonce}`} workspaceId={workspaceId} missionId={mission.id} runs={runs} activeRunId={mission.activeRunId} initialTab={focusTab} />}
       </>)}
-      {finishing && <MissionFinishDialog onClose={() => setFinishing(false)} onFinish={finish} />}
+      {finishing && <MissionFinishDialog missionId={mission.id} onClose={() => setFinishing(false)} onFinish={finish} />}
       {duplicateTarget && (
         <DuplicateMissionDialog
           duplicate={duplicateTarget}

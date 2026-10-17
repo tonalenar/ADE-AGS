@@ -215,18 +215,23 @@ fn briefing_text(docs: &[Doc], chosen: &[usize], mission_id: &str, objective: &s
     }
 }
 
-/// O que o briefing antigo sempre fixava continua fixo: restrições e memórias de prioridade 5 ou mais entram
-/// mesmo que o Jev não as escolha (uma restrição esquecida custa mais que uma linha a mais). Vêm primeiro, sem
-/// repetir o que o Jev já escolheu. Pura.
+/// Restrições e memórias de prioridade 5 ou mais entram mesmo que o Jev não as escolha (uma restrição
+/// esquecida custa mais que uma linha a mais), mas só até `search::MAX_PINNED` contando as que o Jev já
+/// escolheu: antes entravam todas e, com dezenas de fixas, empurravam a escolha do Jev para fora do bloco.
+/// Ficam as de prioridade maior; vêm primeiro, na ordem do carregamento, sem repetir o que o Jev escolheu. Pura.
 pub(crate) fn with_pinned(docs: &[Doc], picked: &[usize]) -> Vec<usize> {
-    let mut out: Vec<usize> = docs
+    let already = picked.iter().filter(|&&i| docs.get(i).is_some_and(search::is_pinned)).count();
+    let mut extra: Vec<usize> = docs
         .iter()
         .enumerate()
-        .filter(|(i, doc)| (doc.kind == "constraint" || doc.priority >= 5) && !memory_secret(&doc.key, &doc.body, None) && !picked.contains(i))
+        .filter(|(i, doc)| search::is_pinned(doc) && !memory_secret(&doc.key, &doc.body, None) && !picked.contains(i))
         .map(|(i, _)| i)
         .collect();
-    out.extend(picked.iter().copied());
-    out
+    extra.sort_by(|&a, &b| docs[b].priority.cmp(&docs[a].priority).then(a.cmp(&b)));
+    extra.truncate(search::MAX_PINNED.saturating_sub(already));
+    extra.sort_unstable();
+    extra.extend(picked.iter().copied());
+    extra
 }
 
 /// O briefing da missão com a escolha do Jev, ou `None` (desligado, sem chave, falha, nada escolhido)
@@ -296,6 +301,16 @@ mod pinned_tests {
         let docs = vec![doc("a", "note", 0), doc("regra", "constraint", 0), doc("alta", "note", 5), doc("b", "note", 4), doc("c", "constraint", 9)];
         assert_eq!(with_pinned(&docs, &[0, 4]), vec![1, 2, 0, 4]);
         assert_eq!(with_pinned(&docs, &[3]), vec![1, 2, 4, 3]);
+    }
+
+    #[test]
+    fn as_fixas_tem_teto_e_ficam_as_de_prioridade_maior() {
+        let mut docs: Vec<Doc> = (0..8).map(|i| doc(&format!("r{i}"), "constraint", i)).collect();
+        docs.push(doc("jev", "note", 0));
+        // Sem nada fixo escolhido: as 4 de prioridade maior (r4..r7), depois a escolha do Jev.
+        assert_eq!(with_pinned(&docs, &[8]), vec![4, 5, 6, 7, 8]);
+        // O Jev já escolheu duas fixas: sobram 2 vagas.
+        assert_eq!(with_pinned(&docs, &[0, 1, 8]), vec![6, 7, 0, 1, 8]);
     }
 }
 

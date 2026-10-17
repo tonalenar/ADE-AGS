@@ -295,6 +295,21 @@ pub fn plan_with_unsafe(changed: &[String], unsafe_files: &[String]) -> Plan {
     Plan { steps, full, risk, unmapped, ignored }
 }
 
+impl Plan {
+    /// Troca a base do `vitest --changed` (o plano puro usa `origin/master`) pela base real do
+    /// worktree, a mesma de `changed_files`.
+    pub fn with_changed_base(mut self, base: &str) -> Self {
+        for step in &mut self.steps {
+            if let Some(at) = step.args.iter().position(|a| a == "--changed") {
+                if let Some(arg) = step.args.get_mut(at + 1) {
+                    *arg = base.to_string();
+                }
+            }
+        }
+        self
+    }
+}
+
 #[cfg(test)]
 #[path = "affected_test.rs"]
 mod test;

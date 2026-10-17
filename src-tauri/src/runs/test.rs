@@ -4671,3 +4671,42 @@ fn un_worktree_que_falla_no_deja_ramas_huerfanas() {
     assert!(err.is_err());
     assert_eq!(sh_git(&repo.0, &["branch", "--list", "cc/*"]), "", "no queda ninguna rama cc/");
 }
+
+#[test]
+fn la_base_de_la_mision_prefiere_eleccion_upstream_integracion_y_default() {
+    let s = |v: &str| Some(v.to_string());
+    assert_eq!(worktrees::choose_base(s("main"), s("origin/x"), s("origin/dev"), s("origin/master")), s("main"));
+    assert_eq!(worktrees::choose_base(None, s("origin/x"), s("origin/dev"), s("origin/master")), s("origin/x"));
+    assert_eq!(worktrees::choose_base(None, None, s("origin/dev"), s("origin/master")), s("origin/dev"));
+    assert_eq!(worktrees::choose_base(None, None, None, s("origin/master")), s("origin/master"));
+    assert_eq!(worktrees::choose_base(None, None, None, None), None);
+}
+
+#[test]
+fn la_base_resuelta_usa_la_dev_de_git_flow_y_queda_grabada_en_el_worktree() {
+    let repo = repo();
+    // Remoto simulado: master y una dev que la contiene y va adelante.
+    sh_git(&repo.0, &["update-ref", "refs/remotes/origin/master", "HEAD"]);
+    std::fs::write(repo.0.join("dev.txt"), "dev\n").unwrap();
+    sh_git(&repo.0, &["add", "."]);
+    sh_git(&repo.0, &["commit", "-q", "-m", "trabajo en dev"]);
+    sh_git(&repo.0, &["update-ref", "refs/remotes/origin/dev", "HEAD"]);
+    assert_eq!(worktrees::resolve_base(&repo.0, None, false).as_deref(), Some("origin/dev"));
+    // La elección del usuario gana, y una ref que no existe se ignora.
+    assert_eq!(worktrees::resolve_base(&repo.0, Some("origin/master"), false).as_deref(), Some("origin/master"));
+    assert_eq!(worktrees::resolve_base(&repo.0, Some("no-existe"), false).as_deref(), Some("origin/dev"));
+
+    let base = Tmp::new("base");
+    let wt = worktrees::create_from(&base.0, &repo.0, "base grabada", "origin/dev").unwrap();
+    assert_eq!(worktrees::recorded_base(&wt.root), None);
+    worktrees::record_base(&wt.root, &wt.branch, "origin/dev");
+    assert_eq!(worktrees::recorded_base(&wt.root).as_deref(), Some("origin/dev"));
+}
+
+#[test]
+fn sin_remoto_no_hay_base_y_la_mision_usa_el_commit_actual() {
+    let repo = repo();
+    assert_eq!(worktrees::resolve_base(&repo.0, None, true), None);
+    let head = worktrees::head_commit(&repo.0).unwrap();
+    assert_eq!(head.len(), 40, "un sha, no la palabra HEAD");
+}
