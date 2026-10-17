@@ -240,6 +240,7 @@ MEMÓRIA COMPARTILHADA (os agentes usam por MCP; veja docs/ade-ags/SHARED_MEMORY
   memory usage [--since <unix-seconds>]      Quem leu a memória: buscas, aberturas e memórias nunca lidas
   memory open <página|entryId|chave>         Página do índice ou UMA entrada inteira (DADOS NÃO CONFIÁVEIS)
   swarm note|question <texto>                Dados de sessão da missão, não memória durável
+  swarm read                                  O quadro da missão: as notas publicadas, numeradas (#1, #2...)
   swarm promote <note-id> <key>              Propõe a nota; aprovação exclusiva do usuário
   memory export                             Exporta Markdown e revisões JSON do workspace da tab (só leitura)
   memory compact [retentionDays]             Só na interface do app; um terminal de agente não pode

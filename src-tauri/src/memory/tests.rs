@@ -108,6 +108,19 @@ fn swarm_notes_are_bounded_untrusted_session_data_and_never_approved() {
 }
 
 #[test]
+fn o_quadro_da_missao_le_as_notas_numeradas_na_ordem_e_so_da_propria_missao() {
+    let conn=db();seed_workspace(&conn,"w1");seed_mission(&conn,"m1","w1");seed_mission(&conn,"m2","w1");
+    assert!(lifecycle::render_board(&lifecycle::swarm_read(&conn,"w1","m1").unwrap()).contains("vazio"));
+    lifecycle::swarm_write(&conn,"w1","m1","note","REGRAS: só no seu worktree").unwrap();
+    lifecycle::swarm_write(&conn,"w1","m1","question","A API pagina?").unwrap();
+    lifecycle::swarm_write(&conn,"w1","m2","note","de outra missão").unwrap();
+    let board=lifecycle::swarm_read(&conn,"w1","m1").unwrap();
+    assert_eq!(board.iter().map(|n|(n.n,n.kind.as_str())).collect::<Vec<_>>(),[(1,"note"),(2,"question")]);
+    let text=lifecycle::render_board(&board);
+    assert!(text.starts_with("#1 [nota] REGRAS") && text.contains("#2 [pergunta] A API pagina?") && !text.contains("outra missão"),"{text}");
+}
+
+#[test]
 fn extended_filters_preserve_cursor_and_classification_without_writing() {
     let conn=db(); seed_workspace(&conn,"w1"); seed_workspace(&conn,"w2"); seed_mission(&conn,"m1","w1");
     activate(&conn,"workspace",None,"sqlite limite conexoes","sqlite usa 20 conexoes");

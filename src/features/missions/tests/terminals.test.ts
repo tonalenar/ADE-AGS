@@ -172,6 +172,8 @@ describe("el equipo de una misión", () => {
     expect(text).toContain("ags ci watch <n>");
     expect(text).toContain("TERMINE o turno");
     expect(text).toContain("no máximo 90 s");
+    expect(text).toContain("ags swarm note --file");
+    expect(memberBriefing({ title: "T", objective: "O" }, team[0])).toContain("ags swarm read");
     expect(text).not.toContain("pergunta e ESPERA");
     expect(text).toContain("TETO DE CORREÇÃO:");
     expect(text).toContain("AGS-CORRECTION member=<nome> branch=<branch> subject=<assunto>");

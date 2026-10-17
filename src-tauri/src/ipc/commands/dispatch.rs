@@ -254,6 +254,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "swarm.note" => missions::swarm_write(app, args, false),
         "swarm.question" => missions::swarm_write(app, args, true),
         "swarm.promote" => missions::swarm_promote(app, args),
+        "swarm.read" => missions::swarm_read(app, args),
         "memory.export" => missions::memory_maintenance(app, args, false),
         "memory.compact" => missions::memory_maintenance(app, args, true),
         "workspace.restore" => super::workspaces::workspace_restore(app, args),

@@ -367,6 +367,16 @@ pub(super) fn swarm_write(app: &AppHandle, args: &Value, question: bool) -> Resu
     }
 }
 
+/// `ags swarm read`: o quadro da missão de quem pede (ver `memory::lifecycle::swarm_read`).
+pub(super) fn swarm_read(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let id = memory_caller_mission(args)?;
+    let db = db(app)?;
+    let conn = db.lock().map_err(|e| e.to_string())?;
+    let mission = crate::missions::store::get(&conn, &id)?.ok_or("mission not found")?;
+    let notes = crate::memory::lifecycle::swarm_read(&conn, &mission.workspace_id, &id)?;
+    Ok(json!({ "text": crate::memory::lifecycle::render_board(&notes), "notes": notes }))
+}
+
 pub(super) fn swarm_promote(app:&AppHandle,args:&Value)->Result<Value,String>{
     let mission=memory_caller_mission(args)?;
     let db=db(app)?;
