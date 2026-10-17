@@ -205,7 +205,7 @@ fn first_time_seen() -> &'static Mutex<HashMap<String, std::time::Instant>> {
 fn first_time_for(target: &str, text: &str) -> bool {
     let mut seen = first_time_seen().lock().unwrap_or_else(|e| e.into_inner());
     seen.retain(|_, at| at.elapsed() < DUPLICATE_WINDOW);
-    let key = format!("{target}\u{1}{text}");
+    let key = dedupe_key(target, text);
     if seen.contains_key(&key) {
         return false;
     }
@@ -216,7 +216,12 @@ fn first_time_for(target: &str, text: &str) -> bool {
 /// Esquece que este texto foi para este destino: a entrega não se confirmou, então o reenvio do
 /// mesmo texto não pode ser tratado como repetido.
 fn forget_sent(target: &str, text: &str) {
-    first_time_seen().lock().unwrap_or_else(|e| e.into_inner()).remove(&format!("{target}{text}"));
+    first_time_seen().lock().unwrap_or_else(|e| e.into_inner()).remove(&dedupe_key(target, text));
+}
+
+/// A chave do dedupe: a mesma em `first_time_for` e `forget_sent`.
+fn dedupe_key(target: &str, text: &str) -> String {
+    format!("{target}\u{1}{text}")
 }
 
 /// O fim da saída do PTY, sem escapes, para conferir se uma mensagem apareceu na tela.
@@ -248,9 +253,16 @@ pub(crate) fn arrived(before: &str, after: &str, snippet: &str) -> bool {
 /// Cola a mensagem e confere que ela apareceu na tela do destino. Um destino rodando um slash
 /// command, por exemplo, engole o texto: sem isto o `peer tell` dizia "enviado" e o reenvio era
 /// recusado como repetido. `false` = não confirmou (e o texto deixa de contar como já enviado).
-fn submit_confirmed(pty: u32, target: &str, message: &str) -> Result<bool, String> {
+///
+/// `sent_as`: o texto com que a mensagem foi registrada no dedupe (`first_time_for`). Na fila ela é
+/// colada com o aviso de atraso no fim; esquecer pelo texto colado não achava o registro, e um reenvio
+/// legítimo de uma entrega que não chegou era recusado como repetido por 10 min.
+fn submit_confirmed(pty: u32, target: &str, message: &str, sent_as: &str) -> Result<bool, String> {
     let before = tail_text(pty);
-    submit_prompt(pty, message)?;
+    if let Err(error) = submit_prompt(pty, message) {
+        forget_sent(target, sent_as);
+        return Err(error);
+    }
     let Some(snippet) = snippet_of(message) else { return Ok(true) };
     let deadline = std::time::Instant::now() + Duration::from_millis(1500);
     loop {
@@ -262,7 +274,7 @@ fn submit_confirmed(pty: u32, target: &str, message: &str) -> Result<bool, Strin
         }
         std::thread::sleep(Duration::from_millis(250));
     }
-    forget_sent(target, message);
+    forget_sent(target, sent_as);
     Ok(false)
 }
 
@@ -317,7 +329,7 @@ fn deliver_when_quiet(pty: u32, target: &str, message: String) -> bool {
     std::thread::spawn(move || {
         let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
         wait_until_quiet(pty, Duration::from_millis(1500), QUEUE_MAX_WAIT, false);
-        let _ = submit_confirmed(pty, &target, &with_stale_note(message, queued_at));
+        let _ = submit_confirmed(pty, &target, &with_stale_note(message.clone(), queued_at), &message);
     });
     true
 }
@@ -334,7 +346,7 @@ fn deliver_now_or_queue(pty: u32, target: &str, message: String) -> Result<Deliv
     let lock = delivery_lock(target);
     if let Ok(_turn) = lock.try_lock() {
         if wait_until_quiet(pty, Duration::from_millis(1500), SENDER_WAIT, false) {
-            return Ok(if submit_confirmed(pty, target, &message)? { Delivery::Now } else { Delivery::Unconfirmed });
+            return Ok(if submit_confirmed(pty, target, &message, &message)? { Delivery::Now } else { Delivery::Unconfirmed });
         }
     }
     // Já registrada como vista acima: a fila entrega sem repetir a checagem de duplicata.
@@ -344,7 +356,7 @@ fn deliver_now_or_queue(pty: u32, target: &str, message: String) -> Result<Deliv
     std::thread::spawn(move || {
         let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
         wait_until_quiet(pty, Duration::from_millis(1500), QUEUE_MAX_WAIT, false);
-        let _ = submit_confirmed(pty, &target, &with_stale_note(message, queued_at));
+        let _ = submit_confirmed(pty, &target, &with_stale_note(message.clone(), queued_at), &message);
     });
     Ok(Delivery::Queued)
 }

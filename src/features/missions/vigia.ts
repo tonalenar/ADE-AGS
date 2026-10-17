@@ -190,7 +190,29 @@ export function isClosure(text: string | null | undefined): boolean {
 interface VigiaAction { to: string; message: string }
 
 /** Estado do Vigia por missão: quando começou e quantos lembretes foram sem resposta. */
-interface Watch { startedAt: number; nudges: number; lastNudge?: number; limitReported: boolean; doneAt?: number }
+export interface Watch { startedAt: number; nudges: number; lastNudge?: number; limitReported: boolean; doneAt?: number }
+
+/**
+ * O estado do Vigia depois de olhar a última TAREFA que o Orquestrador delegou (`latestTask`, o maior
+ * `taskAt` do time). Pura.
+ *
+ * Antes qualquer mensagem do Orquestrador (um "ok", um "obrigado", uma resposta ao usuário) zerava a
+ * conta de lembretes e rearmava o "equipe entregou": no banco real o mesmo "travado há N min" saiu 32
+ * vezes numa missão, sempre como "lembrete 1/3", e o "equipe entregou" 8 vezes em 13 h. Agora só uma
+ * tarefa nova (que já não conta "encerrado"/"aguarde", ver `isClosure`) faz isso.
+ */
+export function refreshWatch(watch: Watch, latestTask: number | undefined): Watch {
+  if (latestTask === undefined) return watch;
+  let next = watch;
+  // Voltou a delegar depois do aviso de "entregou": vale outro quando acabar de novo.
+  if (next.doneAt !== undefined && latestTask > next.doneAt) next = { ...next, doneAt: undefined };
+  // Delegou depois do último lembrete: a conta recomeça.
+  if (next.lastNudge !== undefined && latestTask > next.lastNudge) next = { ...next, nudges: 0, lastNudge: undefined, limitReported: false };
+  return next;
+}
+
+/** O estado guardado por missão some depois disto (missões antigas não ficam no armazenamento). */
+export const WATCH_KEEP_MS = 3 * 24 * 60 * 60_000;
 
 /**
  * Quando cada aba mandou (`sentAt`) e recebeu (`gotAt`) uma mensagem entre agentes, e quando
@@ -219,7 +241,28 @@ function rememberPeers(): void {
     /* sem armazenamento: vale só nesta sessão */
   }
 }
-const watches = new Map<string, Watch>();
+/**
+ * O estado de cada missão também fica guardado: antes vivia só em memória e um HMR ou reabrir o app
+ * repetia o "equipe entregou" e recomeçava a conta de lembretes.
+ */
+const WATCH_STORE_KEY = "ags.vigia.watches.v1";
+function loadWatches(): Map<string, Watch> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(WATCH_STORE_KEY) ?? "{}") as Record<string, Watch>;
+    const cutoff = Date.now() - WATCH_KEEP_MS;
+    return new Map(Object.entries(raw).filter(([, w]) => w && Number.isFinite(w.startedAt) && w.startedAt >= cutoff));
+  } catch {
+    return new Map();
+  }
+}
+const watches = loadWatches();
+function rememberWatches(): void {
+  try {
+    localStorage.setItem(WATCH_STORE_KEY, JSON.stringify(Object.fromEntries(watches)));
+  } catch {
+    /* sem armazenamento: vale só nesta sessão */
+  }
+}
 /** Quando cada aba foi reportada ao modelo; missões com uma consulta em andamento. */
 const lastPoke = new Map<string, number>();
 const inFlight = new Set<string>();
@@ -242,6 +285,11 @@ function poke(tabId: string, text: string, now: number, onSent: () => void): voi
 
 /** Por terminal Codex: desde quando a tela está igual (fora os contadores) em "Working". */
 const loops = new Map<string, LoopWatch>();
+
+/** Aviso do sistema ao usuário (e, na entrega, o span `team_delivered`). Ver `vigia_notify_user`. */
+function notifyUser(missionId: string, missionTitle: string, kind: "team_delivered" | "user_decision", body?: string): void {
+  invoke("vigia_notify_user", { missionId, missionTitle, kind, body: body ?? null }).catch((error: unknown) => console.error("[Vigia] não foi possível avisar o usuário", error));
+}
 
 /** Escreve no chat e no feed; falhas ficam visíveis no console do app. */
 function reportToChat(tabId: string, text: string): void {
@@ -308,8 +356,10 @@ function conversationTeams(tabs: Tab[], boards: Record<string, Board>): WatchedT
 
 /** Um passo: as regras sem modelo primeiro; se não acharem nada, o modelo barato para os ociosos. */
 export function vigiaTick(now = Date.now()): void {
-  // Desligado por padrão: o Vigia só age quando o usuário liga o botão ao lado do chat.
-  if (!useVigiaSwitch.getState().enabled) return;
+  // Desligado por padrão: o Vigia só age (lembra, cutuca, consulta o modelo) quando o usuário liga o
+  // botão ao lado do chat. A detecção de "equipe entregou" roda sempre, só com regras e sem escrever em
+  // terminal nenhum: é ela que avisa o usuário de que falta Finalizar.
+  const enabled = useVigiaSwitch.getState().enabled;
   const { tabs, detectedAgents } = useTabsStore.getState();
   const running = useMissionsStore.getState().missions.filter((m) => m.status === "running");
   const boards = useCanvasStore.getState().boards;
@@ -325,9 +375,13 @@ export function vigiaTick(now = Date.now()): void {
     if (lead) watched.push({ id: mission.id, title: mission.title, startedAt: mission.startedAt, team, lead });
   }
   // Uma conversa com o time montado (sem missão) também é supervisionada.
-  watched.push(...conversationTeams(tabs, boards));
+  if (enabled) watched.push(...conversationTeams(tabs, boards));
   for (const mission of watched) {
     const { team, lead } = mission;
+    if (!enabled) {
+      deliveryOnly(mission, now);
+      continue;
+    }
     watchLoops(team, lead.id, now);
 
     // Fechamento antecipado: o Orquestrador pede o OK para commit/PR com integrante ainda trabalhando.
@@ -353,46 +407,20 @@ export function vigiaTick(now = Date.now()): void {
     // Voltou ao normal: um próximo fechamento antecipado vale um aviso novo.
     closingNudges.delete(mission.id);
 
-    const watch = watches.get(mission.id) ?? { startedAt: missionStartMs(mission.startedAt, now), nudges: 0, limitReported: false };
-    watches.set(mission.id, watch);
-    const leadSent = sentAt.get(lead.id);
-    // Voltou a delegar depois do aviso de "entregou": vale outro quando acabar de novo.
-    if (leadSent !== undefined && watch.doneAt !== undefined && leadSent > watch.doneAt) watch.doneAt = undefined;
-    // O Orquestrador voltou a falar depois do último lembrete: a conta recomeça.
-    if (leadSent !== undefined && watch.lastNudge !== undefined && leadSent > watch.lastNudge) {
-      watch.nudges = 0;
-      watch.lastNudge = undefined;
-      watch.limitReported = false;
-    }
-    const members = team
-      .filter((tab) => tab.id !== lead.id)
-      .map((tab) => ({
-        id: tab.id,
-        name: tab.title,
-        hasTask: gotAt.has(tab.id),
-        lastOutput: lastOutputAt(tab.id),
-        taskAt: taskAt.get(tab.id),
-        reportedAt: finishedAt.get(tab.id),
-      }));
-    const finding = watchdogFinding({
-      now,
-      startedAt: watch.startedAt,
-      lead: { id: lead.id, name: lead.title, lastOutput: lastOutputAt(lead.id) },
-      members,
-      leadLastSent: leadSent,
-      nudges: watch.nudges,
-      lastNudge: watch.lastNudge,
-    });
+    const { watch, finding } = watchState(mission, now);
     if (finding?.kind === "done") {
       if (watch.doneAt === undefined) {
         watch.doneAt = now;
+        rememberWatches();
         reportToChat(lead.id, doneLine());
+        notifyUser(mission.id, mission.title, "team_delivered");
       }
       continue;
     }
     if (finding?.kind === "limit") {
       if (!watch.limitReported) {
         watch.limitReported = true;
+        rememberWatches();
         reportToChat(lead.id, reportLine(finding.stuck, `já lembrei ${NUDGE_LIMIT} vezes e não houve resposta. Parei de insistir: reenvie a tarefa ao integrante parado ou finalize a missão.`));
       }
       continue;
@@ -403,6 +431,7 @@ export function vigiaTick(now = Date.now()): void {
       poke(lead.id, `[${VIGIA_NAME}] ${finding.nudge}`, now, () => {
         watch.nudges += 1;
         watch.lastNudge = Date.now();
+        rememberWatches();
         reportToChat(lead.id, reportLine(finding.stuck, `lembrete ${watch.nudges}/${NUDGE_LIMIT} enviado ao ${lead.title}.`));
       });
       continue;
@@ -430,6 +459,7 @@ export function vigiaTick(now = Date.now()): void {
         for (const action of actions) {
           if (action.to === "usuario") {
             showBotToast({ title: VIGIA_NAME, text: action.message, tone: "warning", ms: 12_000 });
+            notifyUser(mission.id, mission.title, "user_decision", action.message);
             reportToChat(lead.id, reportLine(action.message, "avisei você na tela: a decisão é sua.", "aviso"));
             continue;
           }
@@ -450,6 +480,46 @@ export function vigiaTick(now = Date.now()): void {
       })
       .finally(() => inFlight.delete(mission.id));
   }
+}
+
+/** O estado de uma missão e o que o watchdog acha dela agora, com as regras sem modelo. */
+function watchState(mission: WatchedTeam, now: number): { watch: Watch; finding: WatchFinding | null } {
+  const { team, lead } = mission;
+  const stored = watches.get(mission.id) ?? { startedAt: missionStartMs(mission.startedAt, now), nudges: 0, limitReported: false };
+  const leadSent = sentAt.get(lead.id);
+  const taskTimes = team.filter((tab) => tab.id !== lead.id).map((tab) => taskAt.get(tab.id)).filter((at): at is number => at !== undefined);
+  const watch = refreshWatch(stored, taskTimes.length > 0 ? Math.max(...taskTimes) : undefined);
+  watches.set(mission.id, watch);
+  if (watch !== stored) rememberWatches();
+  const members = team
+    .filter((tab) => tab.id !== lead.id)
+    .map((tab) => ({
+      id: tab.id,
+      name: tab.title,
+      hasTask: gotAt.has(tab.id),
+      lastOutput: lastOutputAt(tab.id),
+      taskAt: taskAt.get(tab.id),
+      reportedAt: finishedAt.get(tab.id),
+    }));
+  const finding = watchdogFinding({
+    now,
+    startedAt: watch.startedAt,
+    lead: { id: lead.id, name: lead.title, lastOutput: lastOutputAt(lead.id) },
+    members,
+    leadLastSent: leadSent,
+    nudges: watch.nudges,
+    lastNudge: watch.lastNudge,
+  });
+  return { watch, finding };
+}
+
+/** Com o Vigia desligado: só a entrega, uma vez por rodada de tarefas, com aviso do sistema. */
+function deliveryOnly(mission: WatchedTeam, now: number): void {
+  const { watch, finding } = watchState(mission, now);
+  if (finding?.kind !== "done" || watch.doneAt !== undefined) return;
+  watch.doneAt = now;
+  rememberWatches();
+  notifyUser(mission.id, mission.title, "team_delivered");
 }
 
 /** O Jev confirma como final uma mensagem ao Orquestrador que a regra local não reconheceu. Com o ponto desligado (padrão) ou com falha, não faz nada. */

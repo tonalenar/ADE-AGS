@@ -1,6 +1,6 @@
 /** @vitest-environment happy-dom */
 import { describe, expect, it } from "vitest";
-import { LEAD_SILENT_MS, NUDGE_LIMIT, OPEN_TASK_MS, UNTASKED_MS, VIGIA_COOLDOWN_MS, doneLine, isClosure, missionStartMs, reportLine, watchdogFinding, type WatchInput } from "../vigia";
+import { LEAD_SILENT_MS, NUDGE_LIMIT, OPEN_TASK_MS, UNTASKED_MS, VIGIA_COOLDOWN_MS, doneLine, isClosure, missionStartMs, refreshWatch, reportLine, watchdogFinding, type Watch, type WatchInput } from "../vigia";
 
 const MIN = 60_000;
 
@@ -154,5 +154,25 @@ describe("Vigia: início da missão vem do banco em segundos", () => {
     expect(watchdogFinding(at(START + UNTASKED_MS - 1))).toBeNull();
     // Passado o limite, aí sim.
     expect(watchdogFinding(at(START + UNTASKED_MS))?.kind).toBe("untasked");
+  });
+});
+
+describe("Vigia: o estado não recomeça com qualquer mensagem do Orquestrador", () => {
+  const base: Watch = { startedAt: 0, nudges: 2, lastNudge: 10 * MIN, limitReported: true, doneAt: 20 * MIN };
+
+  it("sem tarefa nova depois do aviso, nada muda (um 'ok' do Orquestrador não rearma o 'entregou')", () => {
+    expect(refreshWatch(base, undefined)).toBe(base);
+    expect(refreshWatch(base, 5 * MIN)).toBe(base);
+  });
+
+  it("tarefa nova depois do último lembrete zera a conta, mas mantém o 'entregou' se veio antes dele", () => {
+    const next = refreshWatch(base, 15 * MIN);
+    expect(next).toMatchObject({ nudges: 0, lastNudge: undefined, limitReported: false, doneAt: 20 * MIN });
+  });
+
+  it("tarefa nova depois do 'entregou' rearma o aviso para quando acabar de novo", () => {
+    const next = refreshWatch(base, 25 * MIN);
+    expect(next.doneAt).toBeUndefined();
+    expect(next.nudges).toBe(0);
   });
 });
