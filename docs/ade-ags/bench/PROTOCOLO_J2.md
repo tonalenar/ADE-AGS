@@ -90,3 +90,17 @@ As sementes 1–20 já foram vistas por quem ajustou o piloto. A próxima medida
 ```bash
 bun scripts/jev-bench.ts --real --set teste --seeds 21-40 --with-expect --yes --max-real 100 --max-probes 900 --label teste-real-v2
 ```
+
+## Segunda rodada do teste: sementes novas 21–40 (2026-10-17, app com o #208 instalado, dev 896a499e)
+
+| | Teste v1 (sementes 1–20, antes) | Teste v2 (sementes 21–40, depois) |
+|---|---|---|
+| Sucesso | 88/100 (88%), IC 80,2–93,0% | **95/100 (95%)**, IC 88,8–97,8% |
+| Erro silencioso | 0/100 | 0/100 (teto 3,7%) |
+| `adicionar` (botão coberto) | 15/20 | **20/20** |
+| `icone` (sem nome, pela foto) | 13/20 | 15/20 |
+| `act` p50 · p95 | 1.112 · 3.402 ms | 1.017 · 3.100 ms |
+| SPRT (meta ≥ 98%) | não atinge | rodar mais |
+
+Arquivo: `teste-real-v2.{json,md}`. As 5 falhas que restam são todas `icone`, todas paradas honestas. Agora a foto sai nítida: os pontos variam com o alvo. Mas o toque cai num ícone VIZINHO do certo. O piloto tenta um segundo vizinho e para. Próximo passo provável: perguntar ao Jev, com uma foto recortada e ampliada só da faixa dos ícones, ou numerar os candidatos na foto e fazer uma pergunta de escolha. A próxima medida usa as sementes 41–60.
+
