@@ -379,7 +379,8 @@ pub fn correction_brief(round: i64, max: i64, full_gate: bool, failure: &str) ->
         out.push_str(
             "\nEsta é a ÚLTIMA rodada. Ela termina no gate completo, com a suíte inteira, não só no teste afetado. \
 Se já existir pull request, `gh pr checks <número> --watch` É o gate: não repita a suíte localmente. \
-Sem PR, rode pelo `ags` (registra o resultado e reaproveita um verde da mesma árvore) e anote como passou, \
+Sem PR, rode pelo `ags` (registra o resultado e reaproveita um verde da mesma árvore; o app aceita esse verde \
+registrado como gate, então NÃO use --force) e anote como passou, \
 no resultado ou no task_handoff (tests com status passed):\n\
 - ags test run rust\n\
 - ags test run tsc\n\

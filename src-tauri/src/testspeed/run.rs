@@ -364,6 +364,49 @@ pub fn cached_green(
     Ok(latest.and_then(|(passed, at)| passed.then_some(at)))
 }
 
+/// Onde o `tsc` deste worktree guarda o estado incremental: dentro do git dir DO WORKTREE
+/// (`.git/worktrees/<nome>/`, ou `.git/` na pasta principal). Fora da árvore de trabalho de
+/// propósito: um arquivo novo ali sujaria a árvore e mudaria a chave do cache; e não em
+/// `node_modules`, que nos worktrees das missões é uma junção compartilhada entre todos.
+fn tsc_build_info(root: &Path) -> Option<std::path::PathBuf> {
+    let out = git_raw(root, &["rev-parse", "--path-format=absolute", "--git-dir"]).ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!dir.is_empty()).then(|| Path::new(&dir).join("ags-tsc.tsbuildinfo"))
+}
+
+/// Os argumentos que o `tsc --noEmit` ganha para rodar incremental (~17 s a cada árvore nova antes;
+/// com o estado guardado, só o que mudou é rechecado). Ficam FORA do comando registrado: a chave do
+/// cache continua a mesma da suíte e um verde antigo segue valendo. Pura.
+pub fn incremental_args(command: &TestCommand, build_info: Option<&Path>) -> Vec<String> {
+    let is_tsc = command.program == "node" && command.args.first().is_some_and(|a| a.replace('\\', "/").ends_with("typescript/bin/tsc"));
+    let Some(build_info) = build_info.filter(|_| is_tsc) else { return Vec::new() };
+    if command.args.iter().any(|a| a == "--incremental" || a == "--build" || a == "-b") {
+        return Vec::new();
+    }
+    vec!["--incremental".into(), "--tsBuildInfoFile".into(), build_info.to_string_lossy().into_owned()]
+}
+
+/// As suítes do gate completo da última rodada de correção.
+pub const FULL_GATE_SUITES: [&str; 3] = ["rust", "tsc", "frontend"];
+
+/// O gate completo lido do cache, não do texto do agente: `true` se a árvore atual de `root` já tem
+/// verde registrado para `rust`, `tsc` e `frontend` com os comandos da suíte cheia. Antes o gate só
+/// aceitava as frases "ags test run …" no relato, e um agente que já tinha o verde (pelo affected
+/// cheio ou de outro integrante) rodava tudo de novo com `--force` só para poder escrevê-las.
+pub fn full_gate_green(conn: &Connection, root: &Path) -> bool {
+    let (Ok(repo), Ok(Some(tree))) = (repository_key(root), clean_tree(root)) else {
+        return false;
+    };
+    FULL_GATE_SUITES.iter().all(|suite| {
+        let Ok(commands) = suite_commands(suite) else { return false };
+        let scope = super::scope::scoped_identity(root, &tree, suite);
+        matches!(cached_green(conn, &repo, Some(&scope), suite, &command_key(&commands)), Ok(Some(_)))
+    })
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunResult {
@@ -538,6 +581,7 @@ pub fn run(
         let mut child = crate::util::spawn::hidden_command(&command.program);
         child
             .args(&command.args)
+            .args(incremental_args(command, tsc_build_info(root).as_deref()))
             .current_dir(root.join(&command.cwd));
         if command.program == "cargo" {
             // Explicit per-worktree/custom overrides remain available. Default never
@@ -828,6 +872,22 @@ mod tests {
             None
         );
     }
+    #[test]
+    fn tsc_ganha_incremental_fora_da_chave_e_os_outros_comandos_nao() {
+        let tsc = TestCommand { suite: "tsc".into(), program: "node".into(), args: vec!["node_modules/typescript/bin/tsc".into(), "--noEmit".into()], cwd: ".".into() };
+        let info = std::path::Path::new("/repo/.git/ags-tsc.tsbuildinfo");
+        let extra = incremental_args(&tsc, Some(info));
+        assert_eq!(extra[0], "--incremental");
+        assert_eq!(extra[1], "--tsBuildInfoFile");
+        assert!(extra[2].ends_with("ags-tsc.tsbuildinfo"));
+        assert!(incremental_args(&tsc, None).is_empty(), "sem git dir, roda como antes");
+        let rust = suite_commands("rust").unwrap().remove(0);
+        assert!(incremental_args(&rust, Some(info)).is_empty());
+        let mut already = tsc.clone();
+        already.args.push("--incremental".into());
+        assert!(incremental_args(&already, Some(info)).is_empty());
+    }
+
     #[test]
     fn normalized_command_key_ignores_spelling_and_filter_order() {
         let rust_a = TestCommand {

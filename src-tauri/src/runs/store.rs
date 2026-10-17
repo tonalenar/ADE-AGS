@@ -998,7 +998,15 @@ pub fn finish_task(conn: &Connection, task_id: &str, outcome: &TaskOutcome) -> R
     let mut outcome = outcome.clone();
     if outcome.ok {
         if let Some(task) = task_by_id(conn, task_id)? {
-            if task.full_gate && !super::fixrounds::full_gate_satisfied(outcome.result.as_deref().unwrap_or(""), task.structured_handoff.as_ref()) {
+            // O verde já registrado no cache para esta árvore também é evidência (sem repetir a suíte).
+            let green_in_cache = || {
+                let dir = task.worktree_path.as_deref().unwrap_or(task.cwd.as_str());
+                crate::testspeed::run::full_gate_green(conn, std::path::Path::new(dir))
+            };
+            if task.full_gate
+                && !super::fixrounds::full_gate_satisfied(outcome.result.as_deref().unwrap_or(""), task.structured_handoff.as_ref())
+                && !green_in_cache()
+            {
                 outcome.ok = false;
                 outcome.error = Some(super::fixrounds::MISSING_GATE.into());
             }
