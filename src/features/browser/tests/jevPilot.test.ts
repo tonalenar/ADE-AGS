@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, blockedControl, coverDismiss, obviousAdvance, photoTapFinished, cartAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, exactLinkMissing, goalContradiction, missingFill, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, blockedControl, coverDismiss, zoomRegion, obviousAdvance, photoTapFinished, cartAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, exactLinkMissing, goalContradiction, missingFill, pickText, sensitiveFilled, type PageRegion, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -1237,6 +1237,54 @@ describe("dois ícones sem nome: o segundo toque (L01)", () => {
     const { h, calls } = twoIcons(0);
     await runPilot("abrir o carrinho", [], undefined, h.deps);
     expect(calls).toEqual(["500,300"]);
+  });
+
+  it("com o grupo de ícones, o segundo toque vem de uma foto AMPLIADA do grupo, não de adivinhar o vizinho", async () => {
+    const { h, calls } = twoIcons(3);
+    const group = { left: 400, top: 270, right: 640, bottom: 330 };
+    h.deps.clickAt = async (x, y, second) => {
+      calls.push(`${x},${y}${second ? "#2" : ""}`);
+      return calls.length === 1 ? JSON.stringify({ clicked: "clickable", unnamedNeighbors: 3, unnamedGroup: group }) : "{}";
+    };
+    const regions: (PageRegion | undefined)[] = [];
+    h.deps.visual = async (_goal, _recent, region) => {
+      regions.push(region);
+      return region ? seen([0.75, 0.5]) : seen([0.5, 0.5]);
+    };
+    const result = await runPilot("abrir o carrinho", [], undefined, h.deps);
+    const zoom = zoomRegion(group, { width: 1000, height: 600 });
+    expect(regions).toEqual([undefined, zoom]);
+    const x = Math.round(zoom.left + 0.75 * (zoom.right - zoom.left));
+    const y = Math.round(zoom.top + 0.5 * (zoom.bottom - zoom.top));
+    expect(calls).toEqual(["500,300", `${x},${y}`]);
+    expect(result.steps.join("\n")).toContain("foto ampliada da barra de ícones");
+    expect(result.steps.join("\n")).not.toContain("tocou no outro ícone sem nome");
+  });
+
+  it("se a foto ampliada aponta o mesmo ícone já tocado, volta ao vizinho como antes", async () => {
+    const { h, calls } = twoIcons(1);
+    const group = { left: 470, top: 276, right: 530, bottom: 324 };
+    h.deps.clickAt = async (x, y, second) => {
+      calls.push(`${x},${y}${second ? "#2" : ""}`);
+      return calls.length === 1 ? JSON.stringify({ clicked: "clickable", unnamedNeighbors: 1, unnamedGroup: group }) : "{}";
+    };
+    const zoom = zoomRegion(group, { width: 1000, height: 600 });
+    h.deps.visual = async (_goal, _recent, region) => (region
+      ? seen([(500 - zoom.left) / (zoom.right - zoom.left), (300 - zoom.top) / (zoom.bottom - zoom.top)])
+      : seen([0.5, 0.5]));
+    await runPilot("abrir o carrinho", [], undefined, h.deps);
+    expect(calls).toEqual(["500,300", "500,300#2"]);
+  });
+
+  it("o recorte: o grupo com folga, largo o bastante, no máximo 3:1 e dentro da janela", () => {
+    const bar = zoomRegion({ left: 1700, top: 26, right: 1880, bottom: 74 }, { width: 1920, height: 1120 });
+    expect(bar.right).toBeLessThanOrEqual(1920);
+    expect(bar.right - bar.left).toBeGreaterThanOrEqual(200);
+    expect((bar.right - bar.left) / (bar.bottom - bar.top)).toBeLessThanOrEqual(3.01);
+    const tiny = zoomRegion({ left: 0, top: 0, right: 40, bottom: 40 }, { width: 1000, height: 600 });
+    expect(tiny.left).toBe(0);
+    expect(tiny.right - tiny.left).toBeGreaterThanOrEqual(200);
+    expect(tiny.top).toBe(0);
   });
 
   it("o vizinho que é compra ou pagamento não pedido não é tocado", async () => {

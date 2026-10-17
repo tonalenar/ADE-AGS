@@ -310,10 +310,8 @@ export function usePetStatus(): PetStatus {
 /** El pet con su nivel y sus tokens, como en el panel lateral de la referencia. */
 export function PetCard({ pet, className = "" }: { pet: PetStatus; className?: string }) {
   const { state } = useMascotState();
-  // Parado quando ocioso ou dormindo (como na barra de status): as animações infinitas e o halo com
-  // `feGaussianBlur` repintavam o painel o tempo todo. Anima trabalhando, ou com o mouse em cima.
-  const [hovered, setHovered] = useState(false);
-  const still = !hovered && (state === "idle" || state === "sleeping");
+  // Sempre vivo: em repouso ele flutua, pisca e o halo pulsa EM DEGRAUS (pixel art, ~4 quadros por segundo; ver
+  // `.ags-mascot--idle` em App.css), em vez de repintar o SVG com o desfoque do halo a cada quadro.
   const { t } = useTranslation();
   const busy = useAgentActivity((a) => a.count);
 
@@ -325,12 +323,10 @@ export function PetCard({ pet, className = "" }: { pet: PetStatus; className?: s
   return (
     <div role="button" tabIndex={0} title={t("botPanel.open")} aria-label={t("botPanel.open")}
       onClick={openBotPanel}
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); openBotPanel(); } }}
       className={`cursor-pointer flex items-center gap-2 pl-1 pr-3.5 py-1 rounded-2xl border border-gray-200 dark:border-white/10
       bg-white/92 dark:bg-surface-raised/92 shadow-md backdrop-blur hover:border-accent-400/60 transition-colors ${className}`}>
-      <Pet level={pet.level} state={state} size={96} still={still} />
+      <Pet level={pet.level} state={state} size={96} />
       <div className="min-w-[88px]">
         <div className="flex items-baseline justify-between gap-3">
           <span className="text-[12px] font-bold tracking-wider" style={{ color: accent }}>LV <LevelNumber level={pet.level} /></span>
