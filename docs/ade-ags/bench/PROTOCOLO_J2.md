@@ -120,3 +120,20 @@ Arquivo: `teste-real-v3.{json,md}`. As outras quatro famílias fecham 80/80; tud
 
 **Correção** (próximo PR): no vão ambíguo entre ícones sem nome, o runtime manda junto a caixa do grupo, e o piloto vai direto à foto ampliada, sem tocar antes. A próxima medida usa as sementes 61–80.
 
+## Quarta rodada do teste: sementes 61–80 (2026-10-17, app com o #211, dev a4a72380)
+
+| | v1 (1–20) | v2 (21–40) | v3 (41–60) | **v4 (61–80)** |
+|---|---|---|---|---|
+| Sucesso | 88/100 | 95/100 | 94/100 | **97/100** (IC 91,5–99,0%) |
+| Erro silencioso | 0 | 0 | 0 | **0** (teto 3,7%) |
+| `adicionar` | 15/20 | 20/20 | 20/20 | 20/20 |
+| `icone` | 13/20 | 15/20 | 14/20 | **17/20** |
+| Foto ampliada acertou | — | — | 3/3 | 5/5 |
+
+Arquivo: `teste-real-v4.{json,md}`. Somando as quatro levas, são 374/400, com 0 erro silencioso em 400 (teto 0,75%). As 3 falhas que restam são todas de ícone, e em todas a foto ampliada não serviu:
+
+- 2 vezes ela apontou o mesmo ícone já tocado ou não teve certeza, e o vizinho chutado também não era o certo;
+- 1 vez ela não teve certeza depois de um vão ambíguo.
+
+Próximo passo provável: numerar os ícones do grupo na foto ampliada e perguntar ao Jev qual número é o do objetivo (uma pergunta de escolha, em vez de uma caixa). Próxima medida: sementes 81–100.
+
