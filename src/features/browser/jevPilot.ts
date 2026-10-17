@@ -1200,7 +1200,18 @@ async function pilotLoop(
         group: group ? { left: Number(group[1]), top: Number(group[2]), right: Number(group[3]), bottom: Number(group[4]) } : null,
       };
     } catch (e) {
-      return `O toque pela foto falhou: ${e instanceof Error ? e.message : String(e)}`;
+      const message = e instanceof Error ? e.message : String(e);
+      // A foto apontou o vão entre ícones sem nome (o meio da barra): em vez de parar, uma foto AMPLIADA só do grupo, sem tocar
+      // antes (teste J2 v3: 4 de 20 paravam aqui). Sem o grupo, ou se a ampliada não servir, para como antes.
+      const ambiguous = /\[grupo (-?\d+),(-?\d+),(-?\d+),(-?\d+)\]/.exec(message);
+      if (ambiguous) {
+        secondTried = true;
+        const group = { left: Number(ambiguous[1]), top: Number(ambiguous[2]), right: Number(ambiguous[3]), bottom: Number(ambiguous[4]) };
+        const zoomed = await zoomTap(page, step, { x, y, group });
+        if (zoomed === "acted") photoJustTapped = true;
+        if (zoomed) return zoomed;
+      }
+      return `O toque pela foto falhou: ${message.replace(/\s*\[grupo [^\]]*\]/, "")}`;
     }
     const what = `tocou pela foto no ponto (${x}, ${y})`;
     log.push(`${step}. ${what} (${meta})`);
