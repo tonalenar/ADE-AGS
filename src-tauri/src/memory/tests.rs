@@ -108,6 +108,44 @@ fn swarm_notes_are_bounded_untrusted_session_data_and_never_approved() {
 }
 
 #[test]
+fn a_memoria_de_um_repositorio_nao_chega_na_missao_de_outro() {
+    let root = std::env::temp_dir().join(format!("ags-repo-mem-{}", uuid::Uuid::new_v4().simple()));
+    let repo = |name: &str, origin: &str| {
+        let dir = root.join(name);
+        std::fs::create_dir_all(&dir).unwrap();
+        assert!(std::process::Command::new("git").arg("-C").arg(&dir).args(["init", "-q"]).status().unwrap().success());
+        assert!(std::process::Command::new("git").arg("-C").arg(&dir).args(["remote", "add", "origin", origin]).status().unwrap().success());
+        dir.to_string_lossy().into_owned()
+    };
+    let (ade, node) = (repo("ade", "https://github.com/a/ade.git"), repo("node", "https://github.com/a/node.git"));
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    for (id, cwd) in [("m-ade", &ade), ("m-node", &node)] {
+        conn.execute("INSERT INTO missions(id,workspace_id,title,objective,cwd,status,max_parallel,auto_account,created_at,updated_at) VALUES(?1,'w1','t','o',?2,'draft',2,1,0,0)", params![id, cwd]).unwrap();
+    }
+    let suggest = |mission: &str, key: &str| {
+        let p = agent::AgentProposal { mission_id: mission, scope: "workspace", key, kind: "constraint", body: "regra", priority: 0, author: agent::Author::Worker, author_name: "Backend" };
+        let r = agent::propose_for_mission(&conn, &p).unwrap();
+        decide(&conn, &r.entry_id, r.revision, true).unwrap();
+    };
+    suggest("m-ade", "cargo-lock");
+    suggest("m-node", "node-test");
+    // Uma memória de antes da coluna (sem repositório) vale para todos.
+    let legacy = super::propose(&conn, "workspace", "w1", None, &proposal("workspace", "geral", "vale em todos", "create", None), ProposalActor { kind: "user", run_id: None, task_id: None, fact_id: None }).unwrap();
+    decide(&conn, &legacy.entry_id, legacy.revision, true).unwrap();
+    let keys = |mission: &str| {
+        let mut k: Vec<String> = search::load_docs(&conn, "w1", Some(mission)).unwrap().into_iter().map(|d| d.key).collect();
+        k.sort();
+        k
+    };
+    assert_eq!(keys("m-ade"), ["cargo-lock", "geral"]);
+    assert_eq!(keys("m-node"), ["geral", "node-test"]);
+    // Fora de missão (painel, conversa) continua vendo tudo.
+    assert_eq!(search::load_docs(&conn, "w1", None).unwrap().len(), 3);
+    let _ = std::fs::remove_dir_all(&root);
+}
+
+#[test]
 fn o_quadro_da_missao_le_as_notas_numeradas_na_ordem_e_so_da_propria_missao() {
     let conn=db();seed_workspace(&conn,"w1");seed_mission(&conn,"m1","w1");seed_mission(&conn,"m2","w1");
     assert!(lifecycle::render_board(&lifecycle::swarm_read(&conn,"w1","m1").unwrap()).contains("vazio"));

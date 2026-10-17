@@ -207,14 +207,19 @@ fn propose_in(conn: &Connection, workspace_id: &str, mission: Option<&str>, p: &
         reason: Some(if mission.is_some() { format!("Proposta de {} na missão {short}", p.author_name) } else { format!("Proposta de {} numa conversa do projeto", p.author_name) }),
         acknowledge_secret: false,
     };
-    propose(
+    let result = propose(
         conn,
         scope,
         &workspace_id,
         if scope == "mission" { mission } else { None },
         &input,
         ProposalActor { kind: p.author.kind(), run_id: None, task_id: None, fact_id: None },
-    )
+    )?;
+    // A memória nova de uma missão é do repositório dela (ver `repo_scope`).
+    if let Some(mission) = mission {
+        super::repo_scope::tag_new_entry(conn, &result.entry_id, mission)?;
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

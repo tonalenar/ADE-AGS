@@ -1761,6 +1761,7 @@ pub mod review;
 pub mod search;
 pub mod repo;
 pub mod repo_sync;
+pub mod repo_scope;
 pub mod dream;
 pub mod lifecycle;
 pub mod purge;

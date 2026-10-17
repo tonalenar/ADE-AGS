@@ -1173,6 +1173,17 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
         created_at INTEGER NOT NULL,
         PRIMARY KEY(entry_id, revision)
     );")?;
+    // De que repositório é cada memória (ver `memory::repo_scope`). Sem subir user_version, como as
+    // outras aditivas daqui. O preenchimento roda uma vez, quando a coluna nasce; uma falha nele não
+    // impede abrir a base (as memórias ficam sem chave e valem em todos os repositórios, como antes).
+    if table_exists(conn, "memory_entries") && !has_column(conn, "memory_entries", "repo_key") {
+        conn.execute_batch("ALTER TABLE memory_entries ADD COLUMN repo_key TEXT;")?;
+        if table_exists(conn, "missions") {
+            if let Err(error) = crate::memory::repo_scope::backfill(conn) {
+                eprintln!("[memory] não foi possível preencher o repositório das memórias: {error}");
+            }
+        }
+    }
     // Teto de correção. Sem subir user_version: o migrate inteiro roda em toda abertura
     // e os testes cravam a versão 41. Colunas novas têm default para as tasks já gravadas.
     if table_exists(conn, "tasks") {
