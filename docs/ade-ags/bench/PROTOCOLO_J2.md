@@ -158,3 +158,24 @@ O sino era o ícone com pior taxa nas cinco levas (13/21).
 
 **Correção** (este PR): depois de cada toque pela foto (o primeiro, o da foto ampliada e o do vizinho), o piloto confere os `--expect` e termina se eles passaram a valer. Próxima medida: sementes 101–120.
 
+## Sexta rodada do teste: sementes 101–120 (2026-10-17, app com o #214, dev 5ef9153f)
+
+| | v1 | v2 | v3 | v4 | v5 | **v6** |
+|---|---|---|---|---|---|---|
+| Sucesso | 88 | 95 | 94 | 97 | 97 | **100/100** (IC 96,3–100%) |
+| Erro silencioso | 0 | 0 | 0 | 0 | 0 | **0** |
+| `icone` | 13 | 15 | 14 | 17 | 17 | **20/20** |
+| SPRT (meta ≥ 98% contra ≤ 95%) | não atinge | rodar mais | rodar mais | rodar mais | rodar mais | **atinge** |
+| `act` p50 · p95 | 1,1 · 3,4 s | 1,0 · 3,1 s | — | — | — | 1,0 · 3,6 s |
+| Consultas ao Jev por tarefa | 1,3 | 1,3 | — | — | — | **1,1** |
+
+Arquivos: `teste-real-v6.{json,md}`. As cinco famílias fecharam 20/20. O selo numerado decidiu 11 toques e acertou os 11. Em 20 tarefas, os `--expect` encerraram o `act` logo depois do toque pela foto.
+
+**Checagem de regressão no conjunto original** (`original-real-j2.{json,md}`): 31/31 nos portões. As sondas da Amazon continuam barradas pela verificação anti-robô do site; não tentamos contornar.
+
+**Para não ler demais este número:**
+
+- O 100% da v6 é **com** `--expect`, o oráculo do bench: é o melhor caso. Um agente que não passa `--expect` depende do "acabou" do Jev.
+- O protocolo pede repetir a medida com sementes novas e também sem `--expect`.
+- As 600 tarefas de teste somam 571/600 (95,2%), e o erro silencioso segue em **0 de 600** (teto 0,5%).
+
