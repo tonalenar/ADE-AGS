@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { RELEASE_LIMITS, expectsFor, gateCheck, groupMetrics, parseActReport, regex, all, any, not, text, url, emptyPhases, type TaskRun } from "../../../../scripts/bench/core";
+import { RELEASE_LIMITS, expectsFor, gateCheck, groupMetrics, parseActReport, regex, all, any, not, text, url, emptyPhases, sprt, wilson, type TaskRun } from "../../../../scripts/bench/core";
 import { runSimTask } from "../../../../scripts/bench/sim";
 import { TASKS } from "../../../../scripts/bench/tasks";
 
@@ -94,4 +94,25 @@ describe("piso de regressão no simulador (CI)", () => {
     expect(failed, `regrediram: ${failed.join(", ")}`).toEqual([]);
     expect(groupMetrics(runs).successRate).toBeGreaterThanOrEqual(CI_FLOOR.minSuccessRate);
   }, 120_000);
+});
+
+describe("protocolo J2: intervalo de Wilson e SPRT", () => {
+  it("o 100% de amostra pequena não promete 100%", () => {
+    const small = wilson(54, 54);
+    expect(small.high).toBe(1);
+    expect(small.low).toBeGreaterThan(0.92);
+    expect(small.low).toBeLessThan(0.94);
+    expect(wilson(27, 27).low).toBeLessThan(0.88);
+    expect(wilson(0, 0)).toEqual({ low: 0, high: 1 });
+    const half = wilson(50, 100);
+    expect(half.low).toBeLessThan(0.5);
+    expect(half.high).toBeGreaterThan(0.5);
+  });
+
+  it("o SPRT para cedo quando o resultado é claro e pede mais rodadas quando não é", () => {
+    expect(sprt(27, 27)).toBe("rodar mais");
+    expect(sprt(300, 300)).toBe("atinge");
+    expect(sprt(85, 100)).toBe("não atinge");
+    expect(sprt(298, 300)).toBe("atinge");
+  });
 });
