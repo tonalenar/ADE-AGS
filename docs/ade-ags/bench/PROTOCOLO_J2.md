@@ -204,3 +204,22 @@ Arquivo: `teste-real-v7-sem-expect.{json,md}`.
 
 Próxima medida: sementes 141–160, sem `--expect`.
 
+## Oitava rodada: SEM `--expect`, sementes 141–160 (2026-10-17, app com o #216, dev 2a7c9146)
+
+| | v6 (com `--expect`) | v7 (sem, antes do #216) | **v8 (sem, com o #216)** |
+|---|---|---|---|
+| Sucesso | 100/100 | 98/100 | **99/100** (IC 94,6–99,8%) |
+| Falso "feito" | 0 | 2 | **0** |
+| `icone` | 20/20 | 18/20 | 19/20 |
+| `act` p50 · p95 | 1,0 · 3,6 s | 1,2 · 3,6 s | 1,2 · 5,1 s |
+
+Arquivo: `teste-real-v8-sem-expect.{json,md}`. A conferência do "acabou" pela foto numerada rodou 2 vezes, e os falsos "feito" sumiram.
+
+**A única falha** é o último buraco do mesmo caminho. O Jev de texto não viu caminho depois de um toque certo. A foto numerada confirmou o ícone tocado (selo 2 de 4, p = 1,0), mas o caminho do vizinho tratou a confirmação como "não serviu", tocou o vizinho e desfez o acerto.
+
+**Correção** (este PR): com o ícone confirmado pelo selo, o piloto não toca o vizinho. Ele para com a página como está e devolve a conferência a quem pediu.
+
+**Total nas 800 tarefas de teste:** 768/800 (96%). Erro silencioso: 2 em 800, ambos já corrigidos pelo #216.
+
+**Bug do CI encontrado no caminho:** o teste Rust `memory::repo_sync::tests::pause_discards_the_queue_until_resume` travou o CI até o limite de 30 min uma vez. Na segunda tentativa, passou.
+
