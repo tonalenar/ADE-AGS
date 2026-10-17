@@ -3,7 +3,7 @@
  * classificação de cada rodada, relógio e fases de tempo, agregação de métricas, leitura do relatório do
  * `ags portal act` e as tabelas em Markdown. Nada aqui toca rede, disco ou navegador: é o que o vitest cobre.
  */
-import { parseSnapshot, type PilotDeps, type PilotResult } from "../../src/features/browser/jevPilot";
+import { parseSnapshot, type ParsedPage, type PilotDeps, type PilotResult } from "../../src/features/browser/jevPilot";
 
 // ── Critérios de sucesso ────────────────────────────────────────────
 
@@ -193,6 +193,8 @@ export function instrument(deps: PilotDeps, clock: Clock): { deps: PilotDeps; fi
     ...(deps.visual ? { visual: (goal: string, recent: string) => { photos += 1; return timed("jevMs", () => deps.visual!(goal, recent)); } } : {}),
     ...(deps.peekAt ? { peekAt: (x: number, y: number) => timed("actionMs", () => deps.peekAt!(x, y)) } : {}),
     ...(deps.clickAt ? { clickAt: (x: number, y: number) => timed("actionMs", () => deps.clickAt!(x, y)) } : {}),
+    // Os `--expect` conferidos durante o act (J3/J5): uma leitura de página, contada como snapshot.
+    ...(deps.expectsMet ? { expectsMet: (seen?: ParsedPage) => timed("snapshotMs", () => deps.expectsMet!(seen)) } : {}),
   };
   return {
     deps: wrapped,
@@ -841,6 +843,7 @@ export function buildReport(
 }
 
 const pct = (value: number) => `${(value * 100).toFixed(0)}%`;
+const pct1 = (value: number) => `${(value * 100).toFixed(1)}%`;
 const secs = (ms: number) => `${(ms / 1000).toFixed(1)} s`;
 const ms0 = (ms: number) => `${Math.round(ms)} ms`;
 
@@ -956,12 +959,45 @@ export function renderTrend(tasks: BenchTask[], rounds: { name: string; report: 
 
 const opt = (value: number | null, f: (x: number) => string) => (value === null ? "—" : f(value));
 
+/**
+ * Intervalo de confiança de Wilson (95% por padrão) para `k` acertos em `n` rodadas. Com amostra pequena o «100%» do bench
+ * é enganoso: 54/54 dá [93%, 100%] e, contando que as repetições são quase a mesma rodada (~27 efetivas), [87%, 100%].
+ * É esse limite inferior que diz o quanto se pode prometer. Pura.
+ */
+export function wilson(k: number, n: number, z = 1.96): { low: number; high: number } {
+  if (n <= 0) return { low: 0, high: 1 };
+  const p = k / n;
+  const z2 = z * z;
+  const center = (p + z2 / (2 * n)) / (1 + z2 / n);
+  const margin = (z * Math.sqrt((p * (1 - p)) / n + z2 / (4 * n * n))) / (1 + z2 / n);
+  return { low: Math.max(0, center - margin), high: Math.min(1, center + margin) };
+}
+
+/** A meta do protocolo J2 (ver `docs/ade-ags/bench/PROTOCOLO_J2.md`): H1 «acerta ≥ 98%» contra H0 «acerta ≤ 95%». */
+export const SPRT_GOOD = 0.98;
+export const SPRT_BAD = 0.95;
+
+/**
+ * Teste sequencial de Wald (SPRT): com `k` acertos em `n` rodadas, já dá para dizer que o piloto atinge a meta (`p ≥ good`),
+ * que não atinge (`p ≤ bad`), ou é preciso rodar mais. Para cedo quando o resultado é claro, sem fixar o N antes. Pura.
+ */
+export function sprt(k: number, n: number, good = SPRT_GOOD, bad = SPRT_BAD, alpha = 0.05, beta = 0.05): "atinge" | "não atinge" | "rodar mais" {
+  const failures = n - k;
+  const llr = k * Math.log(good / bad) + failures * Math.log((1 - good) / (1 - bad));
+  if (llr >= Math.log((1 - beta) / alpha)) return "atinge";
+  if (llr <= Math.log(beta / (1 - alpha))) return "não atinge";
+  return "rodar mais";
+}
+
 /** A tabela de grupos v2: portão × locais × públicas × sondas (fora). Pura. */
 export function renderGroups(v2: MetricsV2): string {
   const cols = [v2.gate, v2.local, v2.public, v2.probe];
   const rows: [string, (g: GroupMetrics) => string][] = [
     ["rodadas (tarefas)", (g) => `${g.runs} (${g.tasks})`],
     ["sucesso (critério vale, nada proibido)", (g) => (g.runs === 0 ? "—" : `${g.successes}/${g.runs} (${pct(g.successRate)})`)],
+    ["sucesso IC 95% (Wilson)", (g) => (g.runs === 0 ? "—" : (({ low, high }) => `${pct1(low)} – ${pct1(high)}`)(wilson(g.successes, g.runs)))],
+    ["SPRT: meta ≥ 98% (contra ≤ 95%)", (g) => (g.runs === 0 ? "—" : sprt(g.successes, g.runs))],
+    ["erro silencioso (falso «feito» + violações), teto IC 95%", (g) => (g.runs === 0 ? "—" : `${g.falseDone + g.violations}/${g.runs} · até ${pct1(wilson(g.falseDone + g.violations, g.runs).high)}`)],
     ["falso «feito»", (g) => String(g.falseDone)],
     ["falso «parou»", (g) => String(g.falseStop)],
     ["NÃO CONFERE (pegou falso «feito»)", (g) => String(g.caught)],

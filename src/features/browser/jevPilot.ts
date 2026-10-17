@@ -540,6 +540,13 @@ export interface PilotDeps {
   /** Espera a página assentar depois de uma ação (nunca lança). `thorough`: a operação `wait` do Jev, que espera a rede ficar ociosa. */
   settle: (thorough?: boolean) => Promise<void>;
   pick: (query: StepQuery) => Promise<StepReply>;
+  /**
+   * Os `--expect` do agente conferidos na página INTEIRA agora: `true`/`false`, ou `null` sem `--expect`. Opcional. Com ele, o
+   * piloto não aceita «acabou» que os critérios desmentem (J3) e termina sem consultar o Jev quando uma ação dele faz os
+   * critérios passarem a valer (J5). Com `page`, confere só nela (a leitura que o piloto acabou de fazer, sem ler de novo);
+   * sem, lê a página inteira.
+   */
+  expectsMet?: (page?: ParsedPage) => Promise<boolean | null>;
 }
 
 /** Abaixo disto o Jev não está seguro: o piloto para e devolve a página ao agente. Medido em testes reais: as escolhas certas têm p de 0,43 a 0,56 e as erradas de 0,20 a 0,32. */
@@ -919,6 +926,7 @@ export function timed(deps: PilotDeps, t: Timings): PilotDeps {
     },
     warm: deps.warm,
     prior: deps.prior,
+    expectsMet: deps.expectsMet && wrap("snapshot", deps.expectsMet),
   };
 }
 
@@ -982,6 +990,15 @@ async function pilotLoop(
     })));
   } catch { /* sem livro-razão */ }
   let lastSignature = "";
+  /**
+   * Os passos (página, operação, alvo) já tentados neste `act` (J6). Antes só contava o passo IMEDIATAMENTE anterior: um ciclo
+   * A → B → A → B gastava o orçamento inteiro. As exceções que liberam repetir o mesmo passo tiram só ele do conjunto.
+   */
+  const visited = new Set<string>();
+  const forgetSignature = (): void => {
+    visited.delete(lastSignature);
+    lastSignature = "";
+  };
   let waits = 0;
   let staleRetries = 0;
   let coveredRetries = 0;
@@ -999,6 +1016,21 @@ async function pilotLoop(
     return finish("error", early);
   }
   let contradictions = 0;
+  /** Os `--expect` do agente agora, sem nunca derrubar o `act` (uma leitura que falhou vale «não sei»). */
+  const expectsNow = async (page?: ParsedPage): Promise<boolean | null> => {
+    try { return (await deps.expectsMet?.(page)) ?? null; } catch { return null; }
+  };
+  /** Os critérios ANTES de qualquer ação: só um `false` aqui deixa a passagem a `true` encerrar o `act` (J5). */
+  const expectAtStart = await expectsNow();
+  /** Os `--expect` passaram a valer depois de uma ação do piloto: termina sem perguntar ao Jev se acabou. */
+  const expectFinished = async (step: number, before: string, after: ParsedPage): Promise<PilotResult | null> => {
+    if (expectAtStart !== false || fingerprint(after) === before) return null;
+    // Só na página que o piloto acabou de ler: sem leitura extra a cada passo. Um critério fora da janela não termina
+    // aqui, e o `act` segue normal (o «acabou» do Jev confere a página inteira).
+    if ((await expectsNow(after)) !== true) return null;
+    log.push(`${step}. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev`);
+    return finish("done", "Os critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.");
+  };
   /** As páginas (impressões) cuja leitura inteira já foi tentada. */
   const fullRead = new Set<string>();
   /** Quantos itens o carrinho tinha ao começar (se a página já é um carrinho): «remover» só vale se isso diminuiu. */
@@ -1152,6 +1184,8 @@ async function pilotLoop(
         // O Enter que não mudou a página não conta como ação que levou ao objetivo (abaixo, `lastDid`).
         if (fingerprint(page) === before) for (const entry of filledEntries) if (entry.what.includes("apertou Enter")) entry.changed = false;
       }
+      const end = await expectFinished(step, before, page);
+      if (end) return end;
     }
 
     // O objetivo cita um nome entre «» e os links com esse nome visíveis não vão ao destino certo: o exato pode estar fora do
@@ -1196,19 +1230,46 @@ async function pilotLoop(
       return "retry";
     };
     const unconfirmed = () => finish("unsure", "O Jev disse que o objetivo foi atingido, mas a página não confere (veja acima). Continue você, com `snapshot` e `click`.");
-    if (lastByJev && lastByJev.changed !== false && (reply.goalDone ?? 0) >= (lastByJev.auto ? MIN_GOAL_DONE_AFTER_SUBMIT : MIN_GOAL_DONE)) {
+    /**
+     * «Acabou» (pergunta direta ou operação `done`) só vale se a página não desmente (`doubt`) e, com `--expect`, se os critérios
+     * conferem (J3). Antes um «acabou» com p 0,83–0,86 que os critérios desmentiam (P02) saía como FEITO e só a conferência
+     * depois do `act` o pegava; agora o piloto segue, como numa contradição do carrinho, e no máximo duas vezes.
+     */
+    const settleDone = async (): Promise<"verified" | "accepted" | "retry" | "give-up"> => {
       const verdict = doubt();
+      if (verdict !== "no") return verdict;
+      const met = await expectsNow();
+      if (met === true) return "verified";
+      if (met === null) return "accepted";
+      contradictions += 1;
+      log.push(`${step}. o Jev disse que acabou, mas os --expect não conferem na página`);
+      // O mais comum é a página ainda não ter mostrado o efeito (um filtro que recarrega a lista por XHR, N04): espera a rede
+      // assentar e relê antes de perguntar de novo — também na última vez, antes de desistir.
+      await deps.settle(true);
+      snapshot = progress.snapshot = await deps.snapshot();
+      if ((await expectsNow()) === true) return "verified";
+      if (contradictions > 2) return "give-up";
+      history.push({ what: "conferiu os critérios do objetivo e eles ainda não valem: o objetivo não foi atingido", changed: false, auto: true });
+      return "retry";
+    };
+    const doneNote = (verdict: "verified" | "accepted") => verdict === "verified"
+      ? "O Jev considera o objetivo atingido e os critérios --expect conferem na página. Confira abaixo."
+      : "O Jev considera o objetivo atingido. Confira na página abaixo.";
+    if (lastByJev && lastByJev.changed !== false && (reply.goalDone ?? 0) >= (lastByJev.auto ? MIN_GOAL_DONE_AFTER_SUBMIT : MIN_GOAL_DONE)) {
+      const verdict = await settleDone();
       if (verdict === "retry") continue;
       if (verdict === "give-up") return unconfirmed();
       log.push(`${step}. objetivo atingido (pergunta direta p=${reply.goalDone!.toFixed(2)})`);
-      return finish("done", "O Jev considera o objetivo atingido. Confira na página abaixo.");
+      return finish("done", doneNote(verdict));
     }
     // `fim` = a pergunta direta "o objetivo já foi atingido?": aparece no relatório para o limite poder ser ajustado com dados.
     const meta = `${reply.probability !== null ? `p=${reply.probability.toFixed(2)}` : "p=?"}${reply.goalDone != null ? `, fim p=${reply.goalDone.toFixed(2)}` : ""}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
     const ambiguous = operation !== "done" && isAmbiguous(query, operation, reply.target, reply.probability);
     const lowP = reply.probability !== null && reply.probability < MIN_PROBABILITY && operation !== "done";
     if (ambiguous || (lowP && !obviousAdvance(page, operation, reply.target, reply.probability, goal) && !cartAdvance(page, operation, reply.target, reply.probability, goal))) {
-      const fallback = await visualFallback(page, step, ambiguous ? "controle sem nome entre outros iguais" : `sem certeza no texto (p=${reply.probability?.toFixed(2) ?? "?"})`);
+      const fallback = await visualFallback(page, step, ambiguous
+        ? `controle sem nome entre outros iguais (o texto apontava ${reply.target ?? "?"})`
+        : `sem certeza no texto (p=${reply.probability?.toFixed(2) ?? "?"}, ${operation} ${reply.target ?? "?"})`);
       if (fallback === "acted") { const end = photoFinished(step); if (end) return end; continue; }
       if (fallback) log.push(fallback);
       return finish("unsure", ambiguous
@@ -1222,11 +1283,11 @@ async function pilotLoop(
         log.push(`${step}. o Jev disse que acabou antes de qualquer ação, mas sem certeza (${meta})`);
         return finish("unsure", "O Jev disse que o objetivo já está atingido sem nenhuma ação, mas sem certeza. Confira a página e continue você.");
       }
-      const verdict = doubt();
+      const verdict = await settleDone();
       if (verdict === "retry") continue;
       if (verdict === "give-up") return unconfirmed();
       log.push(`${step}. concluído (${meta})`);
-      return finish("done", "O Jev considera o objetivo atingido. Confira na página abaixo.");
+      return finish("done", doneNote(verdict));
     }
     if (operation === "stuck") {
       const fallback = await visualFallback(page, step, "o Jev não viu caminho no texto");
@@ -1236,13 +1297,16 @@ async function pilotLoop(
       return finish("stuck", "O Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.");
     }
 
-    // Girar em círculos: a mesma operação no mesmo elemento da mesma página, duas vezes seguidas.
+    // Girar em círculos: a mesma operação no mesmo elemento da mesma página, de novo (seguida ou num ciclo A → B → A).
     // Esperar não conta: a página carregando é justamente a que ainda não mudou (e são só duas esperas seguidas).
     const signature = `${fingerprint(page)}|${operation}|${reply.target ?? ""}`;
     if (operation !== "wait") {
-      if (signature === lastSignature) {
-        return finish("stuck", "O mesmo passo se repetiu sem mudar a página. Continue você.");
+      if (visited.has(signature)) {
+        return finish("stuck", signature === lastSignature
+          ? "O mesmo passo se repetiu sem mudar a página. Continue você."
+          : "O piloto voltou a um passo que já tinha feito nesta mesma página (está andando em círculos). Continue você.");
       }
+      visited.add(signature);
       lastSignature = signature;
     }
 
@@ -1269,7 +1333,7 @@ async function pilotLoop(
         const repeat = operation === "click" ? repeatedAdd(el, page, goal, history) : null;
         if (repeat) {
           addRefusals += 1;
-          lastSignature = "";
+          forgetSignature();
           log.push(`${step}. recusou ${plain(el)}: ${repeat}`);
           if (addRefusals > 2) return finish("unsure", `O Jev insiste em adicionar de novo um item que já foi adicionado (${repeat}). Confira a página.`);
           history.push({ what: `não clicou ${plain(el)}: ${repeat}`, changed: false, auto: true });
@@ -1283,7 +1347,7 @@ async function pilotLoop(
       // Uma referência que a página já não tem (ela recarregou entre a leitura e o toque): relê e decide de novo.
       if (/tire um novo snapshot|n[ãa]o est[áa] mais na p[áa]gina/i.test(message) && staleRetries < 2) {
         staleRetries += 1;
-        lastSignature = "";
+        forgetSignature();
         log.push(`${step}. a página mudou antes do toque; li de novo`);
         await deps.settle();
         snapshot = progress.snapshot = await deps.snapshot();
@@ -1302,7 +1366,7 @@ async function pilotLoop(
         coveredRetries += 1;
         // O Jev ainda não tinha visto a falha ao escolher o controle coberto: na PRIMEIRA vez, escolher o mesmo de novo não é girar em
         // círculos (L05: a segunda escolha foi e1 outra vez e o act parou). Na segunda, sim.
-        if (coveredRetries === 1) lastSignature = "";
+        if (coveredRetries === 1) forgetSignature();
         const what = `tentou tocar em ${reply.target ?? "um elemento"}, mas falhou: ${message.split(". ")[0].slice(0, 160)}`;
         log.push(`${step}. ${what}`);
         history.push({ what, changed: false });
@@ -1323,6 +1387,8 @@ async function pilotLoop(
       ...(pendingAdd ? { add: { ...pendingAdd, cartAfter: cartCount(after) } } : {}),
     });
     pendingAdd = null;
+    const end = await expectFinished(step, fingerprint(page), after);
+    if (end) return end;
   }
   return finish("limit", `Cheguei ao limite de ${limit} passos sem o Jev dizer que terminou. Confira a página e continue, ou rode de novo.`);
 }

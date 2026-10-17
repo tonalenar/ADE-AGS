@@ -183,3 +183,19 @@ describe("waitsReport: o que o act conta sobre a espera", () => {
     expect(out).toContain("- digitar e enviar: esperou 8,2 s (navegação pendente) — assentou");
   });
 });
+
+describe("activity.quietFor: há quanto tempo a rede está quieta (J4)", () => {
+  it("conta desde o último pedido que começou ou terminou; sem pedido nenhum, é infinito", async () => {
+    const { env, advance } = fakeEnv();
+    const activity = createActivity(env);
+    expect(activity.quietFor()).toBe(Infinity);
+    const end = activity.begin();
+    await advance(1000);
+    expect(activity.quietFor()).toBe(1000);
+    end();
+    expect(activity.quietFor()).toBe(0);
+    await advance(450);
+    // A espera `wait idle` já pode responder: a rede está quieta há mais de 400 ms.
+    expect(activity.size() === 0 && activity.quietFor() >= 400).toBe(true);
+  });
+});

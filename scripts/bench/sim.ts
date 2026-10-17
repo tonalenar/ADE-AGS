@@ -12,7 +12,7 @@ import {
   runPilot, words,
   type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../../src/features/browser/jevPilot";
-import { parseExpectations, verify } from "../../src/features/browser/expect";
+import { checkExpectation, parseExpectations, verify } from "../../src/features/browser/expect";
 import { parseSnapshot } from "../../src/features/browser/jevPilot";
 import { check, evaluate, expectsFor, fold, instrument, rng, viewOf, type BenchTask, type Clock, type TaskRun } from "./core";
 
@@ -676,6 +676,16 @@ export async function runSimTask(task: BenchTask, options: SimOptions = {}): Pro
       },
       clickAt: async (x: number, y: number) => { clock.advance(lat(SIM_LATENCY.click)); page.clickAt?.(x, y); },
     }),
+    ...(options.withExpect ? {
+      expectsMet: async (seen) => {
+        const expects = parseExpectations(expectsFor(task.success)).expects;
+        if (expects.length === 0) return null;
+        // Sem a página vista, uma leitura da página inteira (custa como um snapshot).
+        if (!seen) clock.advance(lat(SIM_LATENCY.snapshot));
+        const now = seen ?? parseSnapshot(renderSnapshot(page, scroll).snapshot);
+        return expects.every((e) => checkExpectation(e, now).ok);
+      },
+    } : {}),
   };
 
   // Vários `act` com o mesmo objetivo na mesma página (N10): cada um é um `runPilot` novo, como o agente chamando de novo.

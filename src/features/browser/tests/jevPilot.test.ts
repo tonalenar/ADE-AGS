@@ -1150,7 +1150,7 @@ describe("um toque pela foto que já cumpriu o objetivo (L12)", () => {
     expect(h.asked).toHaveLength(1);
     expect(result.steps.join("\n")).toContain("objetivo atingido pelo toque da foto: a página passou a mostrar «GARANTIA ABERTA»");
     // Fase 6: o relatório diz por que a foto saiu, no que deu e quanto dela foi o Jev.
-    expect(result.timings?.fotoUsos).toEqual(["passo 1: controle sem nome entre outros iguais → tocou e cumpriu o objetivo"]);
+    expect(result.timings?.fotoUsos).toEqual(["passo 1: controle sem nome entre outros iguais (o texto apontava e1) → tocou e cumpriu o objetivo"]);
     expect(result.timings?.fotoJev).toBe(280);
     expect(formatResult(GOAL, result)).toMatch(/\nFOTO: 1 foto\(s\) · \d+ ms \(captura \d+ ms · Jev 280 ms\)(?: · \d+% do act)? · passo 1: controle sem nome/);
     // A parte «% do act» só sai com o act medido (> 0 ms); num relógio rápido ele dá 0 e ela some.
@@ -1160,7 +1160,7 @@ describe("um toque pela foto que já cumpriu o objetivo (L12)", () => {
     const plain = await runPilot("entrar", [], undefined, harness([ok("click", "e4"), ok("done")]).deps);
     expect(formatResult("entrar", plain)).not.toContain("\nFOTO:");
     const none = await runPilot("abrir o carrinho", [], undefined, visualHarness([ok("click", "e4", 0.3)], seen(null, false, 0.97, 0.09)).deps);
-    expect(none.timings?.fotoUsos).toEqual(["passo 1: sem certeza no texto (p=0.30) → A reserva visual também não achou um controle seguro na foto"]);
+    expect(none.timings?.fotoUsos).toEqual(["passo 1: sem certeza no texto (p=0.30, click e4) → A reserva visual também não achou um controle seguro na foto"]);
   });
 
   it("o toque no vizinho segue como antes: devolve a página sem dar por feito", async () => {
