@@ -64,6 +64,8 @@ const COLUMNS = 2;
 
 export const MIN_ZOOM = 0.15;
 export const MAX_ZOOM = 1;
+/** Só pelo tempo da foto do piloto: o nó cresce até encher a tela, para a página sair nítida (ver `visualShot`). */
+export const PHOTO_MAX_ZOOM = 4;
 
 /** Por debajo de este zoom el texto de la terminal ya no se lee: se muestra la vista previa. */
 export const LIVE_MIN_ZOOM = 0.4;
@@ -144,10 +146,11 @@ export function facingSides(a: Box, b: Box): [Side, Side] {
 export function revealViewport(
   box: Box, width: number, height: number,
   margin = { side: 40, top: 70, bottom: 120 },
+  maxZoom = MAX_ZOOM,
 ): Viewport {
   const availableW = Math.max(1, width - 2 * margin.side);
   const availableH = Math.max(1, height - margin.top - margin.bottom);
-  const zoom = Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.min(availableW / box.w, availableH / box.h)));
+  const zoom = Math.min(maxZoom, Math.max(MIN_ZOOM, Math.min(availableW / box.w, availableH / box.h)));
   const centerY = margin.top + availableH / 2;
   return {
     zoom,

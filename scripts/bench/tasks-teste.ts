@@ -5,6 +5,9 @@
  * Regra do protocolo: quem ajusta o piloto não mexe aqui depois de ver um resultado.
  *
  *   bun scripts/jev-bench.ts --real --set teste --with-expect --yes --max-real 100 --max-probes 900
+ *
+ * Depois de ver as falhas de uma leva de sementes, ela deixa de ser TESTE para quem ajustou o piloto: a medida seguinte
+ * usa sementes novas (`--seeds 21-40`), que geram outras 100 páginas das mesmas famílias.
  */
 import { FAMILIES, SEEDS, scenario, type RawCriterion } from "../bench-fixture/gen/scenario.js";
 import { all, text, url, type BenchTask, type Criterion } from "./core";
@@ -16,9 +19,10 @@ function criterion(raw: RawCriterion): Criterion {
 
 const DIFFICULTY: Record<string, BenchTask["difficulty"]> = { adicionar: 3, busca: 2, filtro: 4, icone: 4, formulario: 3 };
 
-export const TEST_TASKS: BenchTask[] = FAMILIES.flatMap((family) =>
-  Array.from({ length: SEEDS }, (_, i) => {
-    const seed = i + 1;
+/** As tarefas das sementes `first`..`last` (as 1..20 são a primeira leva). */
+export function testTasks(first = 1, last = SEEDS): BenchTask[] {
+  return FAMILIES.flatMap((family) => Array.from({ length: last - first + 1 }, (_, i) => {
+    const seed = first + i;
     const s = scenario(family, seed);
     const task: BenchTask = {
       id: `T-${family}-${String(seed).padStart(2, "0")}`,
@@ -36,5 +40,7 @@ export const TEST_TASKS: BenchTask[] = FAMILIES.flatMap((family) =>
       tags: ["teste", family, s.lang],
     };
     return task;
-  }),
-);
+  }));
+}
+
+export const TEST_TASKS: BenchTask[] = testTasks();

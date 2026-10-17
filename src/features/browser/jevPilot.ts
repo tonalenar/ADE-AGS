@@ -155,7 +155,18 @@ const ROLE_LABEL: Record<string, string> = {
 const SPONSORED_STATE = "patrocinado";
 /** Controles de paginação e de fechar uma faixa/modal: precisam sobreviver ao corte de candidatos de uma página comprida. */
 const PAGINATION = /^(pr[óo]xim[ao]|next|mais|more|carregar mais|load more|mostrar mais|show more|ver mais|older|seguinte|›|»|>)\b|^\d{1,3}$/i;
-const DISMISS = /^(fechar|close|×|x|rejeitar|reject|recusar|decline|n[ãa]o,? obrigad[oa]|no,? thanks|agora n[ãa]o|not now|dispensar|dismiss|aceitar (apenas )?(os )?essenciais|only necessary|necessary only)\b/i;
+const DISMISS = /^(fechar|close|cerrar|×|✕|x|rejeitar|reject|recusar|decline|rechazar|n[ãa]o,? obrigad[oa]|no,? thanks|no,? gracias|agora n[ãa]o|not now|ahora no|dispensar|dismiss|aceitar (apenas )?(os )?essenciais|only necessary|necessary only|solo (las )?necesarias)\b/i;
+/** Entre os controles de fechar, os que recusam: a escolha mais discreta numa faixa de cookies (nunca «aceitar todos»). */
+const REJECT = /^(rejeitar|recusar|reject|decline|rechazar|aceitar (apenas )?(os )?essenciais|only necessary|necessary only|solo (las )?necesarias)\b/i;
+
+/**
+ * O controle que fecha o que cobre a página (a faixa de cookies, o modal da newsletter): recusar antes de fechar, nunca
+ * aceitar nem assinar. `null` = nenhum com cara de fechar (o Jev decide, vendo a falha no histórico). Pura.
+ */
+export function coverDismiss(page: ParsedPage, tried: ReadonlySet<string> = new Set()): PageElement | null {
+  const closers = page.elements.filter((e) => (e.role === "button" || e.role === "link") && !tried.has(e.ref) && DISMISS.test(e.name.trim()));
+  return closers.find((e) => REJECT.test(e.name.trim())) ?? closers[0] ?? null;
+}
 /** O objetivo pede um anúncio? Então o patrocinado não é rebaixado. */
 const AD_GOAL = /an[uú]ncio|patrocinad|sponsored|\bads?\b|publicidade/i;
 
@@ -1002,6 +1013,8 @@ async function pilotLoop(
   let waits = 0;
   let staleRetries = 0;
   let coveredRetries = 0;
+  /** Os «fechar»/«recusar» já tocados para tirar o que cobria a página: não se repetem. */
+  const dismissTried = new Set<string>();
   let noValueRetries = 0;
   let addRefusals = 0;
   /** O «adicionar» que está para ser clicado: o item e a contagem do carrinho antes (a de depois só se sabe depois de reler). */
@@ -1364,6 +1377,24 @@ async function pilotLoop(
       // Um controle coberto (a faixa de cookies, o modal) não é o fim: o Jev vê a falha no histórico e escolhe fechar o que está na frente.
       if (/est[áa] coberto por/i.test(message) && coveredRetries < 3) {
         coveredRetries += 1;
+        // O piloto mesmo tira o que está na frente (recusar/fechar, nunca aceitar nem assinar) e o Jev escolhe de novo, já sem a
+        // faixa: o Jev pequeno, vendo só a falha, tende a insistir no mesmo botão coberto (conjunto de teste J2: 5 de 20).
+        const closer = coverDismiss(page, dismissTried);
+        if (closer) {
+          dismissTried.add(closer.ref);
+          try {
+            const closed = await act(closer, "click", fills, taken, deps, undefined, { page, goal });
+            forgetSignature();
+            log.push(`${step}. ${reply.target ?? "o alvo"} estava coberto: ${closed}, para tirar o que cobria a página (${meta})`);
+            await deps.settle();
+            snapshot = progress.snapshot = await deps.snapshot();
+            const after = parseSnapshot(snapshot);
+            history.push({ what: `${closed} (o que cobria a página)`, changed: fingerprint(after) !== fingerprint(page), auto: true });
+            const end = await expectFinished(step, fingerprint(page), after);
+            if (end) return end;
+            continue;
+          } catch { /* o «fechar» também coberto ou já fora da página: segue a regra de sempre */ }
+        }
         // O Jev ainda não tinha visto a falha ao escolher o controle coberto: na PRIMEIRA vez, escolher o mesmo de novo não é girar em
         // círculos (L05: a segunda escolha foi e1 outra vez e o act parou). Na segunda, sim.
         if (coveredRetries === 1) forgetSignature();

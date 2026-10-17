@@ -65,4 +65,11 @@ const shareLanguage = (lng: string) => {
 shareLanguage(i18n.language);
 i18n.on("languageChanged", shareLanguage);
 
+// O `<html lang>` acompanha a interface (corretor ortográfico dos campos, leitores de tela e a página que o Jev lê).
+const markDocument = (lng: string) => {
+  if (typeof document !== "undefined") document.documentElement.lang = lng;
+};
+markDocument(i18n.language);
+i18n.on("languageChanged", markDocument);
+
 export default i18n;

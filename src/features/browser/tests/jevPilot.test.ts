@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, blockedControl, obviousAdvance, photoTapFinished, cartAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, exactLinkMissing, goalContradiction, missingFill, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, blockedControl, coverDismiss, obviousAdvance, photoTapFinished, cartAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, exactLinkMissing, goalContradiction, missingFill, pickText, sensitiveFilled, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -724,6 +724,46 @@ describe("controle coberto por uma faixa ou modal", () => {
     h.deps.click = async () => { throw new Error("botão está coberto por div (div#modal)."); };
     const result = await runPilot("entrar", [], undefined, h.deps);
     expect(result.outcome).toBe("stuck");
+  });
+});
+
+describe("o piloto tira o que cobre a página (conjunto de teste J2)", () => {
+  const LOJA = (cart: string, banner: boolean) => [
+    'page: "Tienda Ejemplo" http://localhost:8765/gen/loja.html?f=adicionar&s=2',
+    "viewport: 1920×1120 · scroll 0/1120",
+    "",
+    `- text "${cart}"`,
+    '- heading "Caneca Térmica" [level=3]',
+    '- button "Comprar" [ref=e1]',
+    '- heading "Moedor Manual" [level=3]',
+    '- button "Comprar" [ref=e2]',
+    ...(banner ? ['- text "Usamos cookies para mejorar tu experiencia."', '- button "Aceptar" [ref=e3]', '- button "Rechazar" [ref=e4]'] : []),
+  ].join("\n");
+
+  it("recusa antes de fechar e nunca aceita nem assina", () => {
+    expect(coverDismiss(parseSnapshot(LOJA("Carrito: 0", true)))?.ref).toBe("e4");
+    const modal = parseSnapshot(LOJA("Carrito: 0", false).concat("\n", '- button "Suscribirme" [ref=e5]', "\n", '- button "No, gracias" [ref=e6]'));
+    expect(coverDismiss(modal)?.ref).toBe("e6");
+    expect(coverDismiss(parseSnapshot(LOJA("Carrito: 0", false)))).toBeNull();
+    // o que já foi tentado não volta
+    expect(coverDismiss(parseSnapshot(LOJA("Carrito: 0", true)), new Set(["e4"]))).toBeNull();
+  });
+
+  it("o botão coberto faz o piloto tocar «Rechazar» e o Jev escolhe de novo, já sem a faixa", async () => {
+    const pages = [LOJA("Carrito: 0", true), LOJA("Carrito: 0", false), LOJA("Carrito: 1 · Caneca Térmica", false)];
+    let page = 0;
+    const calls: string[] = [];
+    const h = harness([ok("click", "e1"), ok("click", "e1"), ok("done", null, 0.95)], pages);
+    h.deps.snapshot = async () => pages[page];
+    h.deps.click = async (ref) => {
+      calls.push(`click ${ref}`);
+      if (page === 0 && ref !== "e4") throw new Error('button "Comprar" está coberto por div#overlay (#overlay).');
+      page++;
+    };
+    const result = await runPilot("Adicione «Caneca Térmica» ao carrinho.", [], undefined, h.deps);
+    expect(calls).toEqual(["click e1", "click e4", "click e1"]);
+    expect(result.outcome).toBe("done");
+    expect(result.steps.join("\n")).toContain("para tirar o que cobria a página");
   });
 });
 
