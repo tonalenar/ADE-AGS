@@ -1101,8 +1101,13 @@ async function pilotLoop(
   let secondTried = false;
   /** O toque pela foto cumpriu o objetivo (um clique só): o texto novo da página que prova. */
   let photoProof: string | null = null;
+  /** Os --expect passaram a conferir depois de um toque pela foto: o fim, como depois de qualquer outra ação. */
+  let photoEnd: PilotResult | null = null;
   /** Depois de um toque pela foto: se ele já cumpriu o objetivo, termina aqui (sem outra consulta ao Jev, que não liga o ponto ao botão). */
   const photoFinished = (step: number): PilotResult | null => {
+    // Os --expect valem primeiro: o toque pela foto não passava por eles, e o Jev de texto, em dúvida (p≈0,4) na página já certa,
+    // fazia o piloto tocar o vizinho e desfazer o acerto (teste J2 v5: as 3 falhas, todas o sino que já tinha aberto).
+    if (photoEnd) return photoEnd;
     if (!photoProof) return null;
     log.push(`${step}. objetivo atingido pelo toque da foto: a página passou a mostrar «${photoProof.slice(0, 80)}»`);
     return finish("done", "A foto apontou o controle do objetivo com certeza alta, e o toque mudou a página de acordo. Confira na página abaixo.");
@@ -1154,6 +1159,7 @@ async function pilotLoop(
     snapshot = progress.snapshot = await deps.snapshot();
     const after = parseSnapshot(snapshot);
     history.push({ what, changed: fingerprint(after) !== before });
+    photoEnd = await expectFinished(step, before, after);
     photoProof = photoTapFinished(goal, page, after, reply, initialCart);
     return "acted";
   };
@@ -1185,7 +1191,9 @@ async function pilotLoop(
         const before = fingerprint(page);
         await deps.settle();
         snapshot = progress.snapshot = await deps.snapshot();
-        history.push({ what, changed: fingerprint(parseSnapshot(snapshot)) !== before });
+        const after = parseSnapshot(snapshot);
+        history.push({ what, changed: fingerprint(after) !== before });
+        photoEnd = await expectFinished(step, before, after);
         return "acted";
       }
       return "A foto acabou de tocar: confira a página antes de tirar outra (um segundo toque pode desfazer o primeiro).";
@@ -1255,6 +1263,7 @@ async function pilotLoop(
     const after = parseSnapshot(snapshot);
     history.push({ what, changed: fingerprint(after) !== fp });
     photoJustTapped = true;
+    photoEnd = await expectFinished(step, fp, after);
     photoProof = photoTapFinished(goal, page, after, reply, initialCart);
     return "acted";
   };
