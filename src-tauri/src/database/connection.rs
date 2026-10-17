@@ -64,6 +64,19 @@ fn db_path() -> PathBuf {
     dir.join("data.db")
 }
 
+/// Uma conexão própria à mesma base, para o trabalho que mistura banco com git ou disco (limpeza
+/// de worktrees: `git status`/`log`/`worktree remove` e a medição de GBs de `target/`). Com a
+/// conexão global (`DbConnection`) o `Mutex` ficava preso durante tudo isso e o resto do app
+/// (autosave, IPC, Vigia) parava. Em WAL as duas convivem; `busy_timeout` cobre as escritas.
+pub(crate) fn open_side_connection() -> SqlResult<Connection> {
+    let conn = Connection::open(db_path())?;
+    conn.execute_batch(
+        "PRAGMA foreign_keys = ON;
+         PRAGMA busy_timeout = 30000;",
+    )?;
+    Ok(conn)
+}
+
 /// Abre el archivo y deja WAL y las claves foráneas. No migra.
 fn open_configured() -> SqlResult<DbConnection> {
     let path = db_path();
