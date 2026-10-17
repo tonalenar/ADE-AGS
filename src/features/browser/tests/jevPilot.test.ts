@@ -1388,6 +1388,15 @@ describe("dois ícones sem nome: o segundo toque (L01)", () => {
       expect(result.outcome).toBe("unsure");
     });
 
+    it("o Jev de texto não vê caminho, mas o selo confirma o ícone tocado: o piloto NÃO toca o vizinho (teste J2 v8)", async () => {
+      const { h, calls } = doneAfterTap(2);
+      h.deps.pick = async () => ok("stuck", null, 0.47);
+      const result = await runPilot("Abra o perfil da conta: é um dos ícones no topo da página.", [], undefined, h.deps);
+      expect(calls).toEqual(["500,300"]);
+      expect(result.steps.join("\n")).toContain("não toquei o vizinho");
+      expect(result.steps.join("\n")).not.toContain("tocou no outro ícone sem nome");
+    });
+
     it("lê as caixas de unnamedIcons e ignora o que não for 4 números", () => {
       expect(iconsIn("[[1,2,3,4],[5,6,7,8]]")).toEqual([{ left: 1, top: 2, right: 3, bottom: 4 }, { left: 5, top: 6, right: 7, bottom: 8 }]);
       expect(iconsIn("[[1,2,3],[\"a\",1,2,3]]")).toBeUndefined();
