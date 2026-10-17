@@ -103,6 +103,10 @@ pub fn mission_repo_key(conn: &Connection, mission_id: &str) -> Option<String> {
 /// Marca uma memória recém-criada por uma missão com o repositório dela. Correção de uma memória
 /// existente não muda a chave (uma memória sem chave, de antes, continua valendo em todos).
 pub fn tag_new_entry(conn: &Connection, entry_id: &str, mission_id: &str) -> Result<(), String> {
+    // A origem: o dream cita a missão como fonte (antes as revisões de missão não tinham nenhuma e o
+    // dream terminava com «falta de evidência citável»).
+    conn.execute("UPDATE memory_entries SET source_mission = ?1 WHERE id = ?2 AND source_mission IS NULL", params![mission_id, entry_id])
+        .map_err(|e| e.to_string())?;
     let Some(key) = mission_repo_key(conn, mission_id) else { return Ok(()) };
     conn.execute(
         "UPDATE memory_entries SET repo_key = ?1 WHERE id = ?2 AND repo_key IS NULL

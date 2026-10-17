@@ -146,6 +146,22 @@ fn a_memoria_de_um_repositorio_nao_chega_na_missao_de_outro() {
 }
 
 #[test]
+fn o_dream_tem_fontes_das_missoes_em_terminais() {
+    let conn = db();
+    seed_workspace(&conn, "w1");
+    seed_mission(&conn, "m1", "w1");
+    let p = agent::AgentProposal { mission_id: "m1", scope: "workspace", key: "armadilha", kind: "finding", body: "o lock do cargo", priority: 0, author: agent::Author::Worker, author_name: "Backend" };
+    let r = agent::propose_for_mission(&conn, &p).unwrap();
+    decide(&conn, &r.entry_id, r.revision, true).unwrap();
+    crate::missions::messages::migrate(&conn).unwrap();
+    conn.execute("INSERT INTO mission_handoffs(mission_id,at_ms,from_name,to_name,payload) VALUES('m1',1,'Backend','Orquestrador','{\"version\":1,\"summary\":\"feito\"}')", []).unwrap();
+    let history = dream::history(&conn, "w1", 5).unwrap();
+    let sources: Vec<&str> = history["sources"].as_array().unwrap().iter().filter_map(|s| s.as_str()).collect();
+    assert!(sources.contains(&"ags://mission/m1"), "{sources:?}");
+    assert!(sources.iter().any(|s| s.starts_with("ags://mission/m1/handoff/")), "{sources:?}");
+}
+
+#[test]
 fn o_quadro_da_missao_le_as_notas_numeradas_na_ordem_e_so_da_propria_missao() {
     let conn=db();seed_workspace(&conn,"w1");seed_mission(&conn,"m1","w1");seed_mission(&conn,"m2","w1");
     assert!(lifecycle::render_board(&lifecycle::swarm_read(&conn,"w1","m1").unwrap()).contains("vazio"));

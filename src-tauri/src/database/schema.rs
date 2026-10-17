@@ -1176,6 +1176,9 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     // De que repositório é cada memória (ver `memory::repo_scope`). Sem subir user_version, como as
     // outras aditivas daqui. O preenchimento roda uma vez, quando a coluna nasce; uma falha nele não
     // impede abrir a base (as memórias ficam sem chave e valem em todos os repositórios, como antes).
+    if table_exists(conn, "memory_entries") && !has_column(conn, "memory_entries", "source_mission") {
+        conn.execute_batch("ALTER TABLE memory_entries ADD COLUMN source_mission TEXT;")?;
+    }
     if table_exists(conn, "memory_entries") && !has_column(conn, "memory_entries", "repo_key") {
         conn.execute_batch("ALTER TABLE memory_entries ADD COLUMN repo_key TEXT;")?;
         if table_exists(conn, "missions") {
