@@ -1354,6 +1354,23 @@ describe("dois ícones sem nome: o segundo toque (L01)", () => {
     });
   });
 
+  it("o toque pela foto que já fez a página conferir os --expect termina ali: não toca o vizinho (teste J2 v5, o sino)", async () => {
+    const { h, calls } = twoIcons(3);
+    let page = 0;
+    const pages = [ICONS_PAGE, `${ICONS_PAGE}\n- text "NOTIFICAÇÕES ABERTAS"`];
+    h.deps.snapshot = async () => pages[Math.min(page, pages.length - 1)];
+    h.deps.clickAt = async (x, y, second) => {
+      calls.push(`${x},${y}${second ? "#2" : ""}`);
+      page += 1;
+      return JSON.stringify({ clicked: "clickable", unnamedNeighbors: 3 });
+    };
+    h.deps.expectsMet = async (p) => (p ?? parseSnapshot(pages[Math.min(page, pages.length - 1)])).text.some((t) => t.includes("NOTIFICAÇÕES ABERTAS"));
+    const result = await runPilot("Abra as notificações: é um dos ícones no topo da página.", [], undefined, h.deps);
+    expect(calls).toEqual(["500,300"]);
+    expect(result.outcome).toBe("done");
+    expect(result.steps.join("\n")).toContain("os --expect passaram a conferir");
+  });
+
   it("o recorte: o grupo com folga, largo o bastante, no máximo 3:1 e dentro da janela", () => {
     const bar = zoomRegion({ left: 1700, top: 26, right: 1880, bottom: 74 }, { width: 1920, height: 1120 });
     expect(bar.right).toBeLessThanOrEqual(1920);

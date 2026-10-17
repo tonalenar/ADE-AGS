@@ -137,3 +137,24 @@ Arquivo: `teste-real-v4.{json,md}`. Somando as quatro levas, são 374/400, com 0
 
 Próximo passo provável: numerar os ícones do grupo na foto ampliada e perguntar ao Jev qual número é o do objetivo (uma pergunta de escolha, em vez de uma caixa). Próxima medida: sementes 81–100.
 
+## Quinta rodada do teste: sementes 81–100 (2026-10-17, app com o #213, dev 04de2c48)
+
+| | v1 | v2 | v3 | v4 | **v5** |
+|---|---|---|---|---|---|
+| Sucesso | 88 | 95 | 94 | 97 | **97/100** (IC 91,5–99,0%) |
+| Erro silencioso | 0 | 0 | 0 | 0 | **0** |
+| `icone` | 13 | 15 | 14 | 17 | 17/20 |
+| Decidido pelo selo numerado | — | — | — | — | **10/10 certos** |
+
+Somando as cinco levas: 471/500, com **0 erro silencioso em 500** (teto 0,6%). Arquivo: `teste-real-v5.{json,md}`.
+
+**As 3 falhas não eram de mira.** As três tinham o mesmo objetivo: abrir as notificações (o sino). As capturas salvas mostram o cursor do app em cima do sino logo depois do PRIMEIRO toque, e a foto numerada confirmou o mesmo sino (selo certo). O que falhou foi a verificação:
+
+- o toque pela foto não conferia os `--expect`, embora o piloto os confira depois de qualquer outra ação;
+- o atalho "o toque já cumpriu o objetivo" só vale para objetivos "clique em…";
+- o Jev de texto, em dúvida (p≈0,4) na página já certa, levava o piloto a tocar o vizinho, desfazendo o acerto (o estado final era "BUSCA ABERTA").
+
+O sino era o ícone com pior taxa nas cinco levas (13/21).
+
+**Correção** (este PR): depois de cada toque pela foto (o primeiro, o da foto ampliada e o do vizinho), o piloto confere os `--expect` e termina se eles passaram a valer. Próxima medida: sementes 101–120.
+
