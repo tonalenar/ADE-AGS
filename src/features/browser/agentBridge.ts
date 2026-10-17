@@ -78,7 +78,7 @@ export interface BrowserHost {
    *  dice de quién es: va en el nombre del archivo. */
   screenshot: (tag?: string) => Promise<string>;
   /** Uma foto da janela da página para a reserva visual do piloto. `complete` = a página inteira estava à vista (senão a foto sai cortada e as frações não valem). */
-  visualShot: (region?: { left: number; top: number; right: number; bottom: number }) => Promise<{ path: string; complete: boolean; detail?: string }>;
+  visualShot: (region?: { left: number; top: number; right: number; bottom: number }, marks?: { left: number; top: number; right: number; bottom: number }[]) => Promise<{ path: string; complete: boolean; detail?: string }>;
   /** El panel de debug está abierto: solo mientras lo esté se anota la red. */
   debugOpen: () => boolean;
   /** Abre el panel de debug en la red, que es lo que prende el registro. A la vista de la
@@ -900,12 +900,12 @@ export function pilotDeps(host: BrowserHost, notes: string[] = [], ledger: ActLe
     // Abre a conexão com o Jev enquanto a primeira página é lida (só age com o piloto ligado).
     warm: () => { void invoke("decision_preconnect").catch(() => undefined); },
     // A reserva visual: uma foto da página (só se estiver toda à vista) e o toque no ponto que o Jev apontar.
-    visual: async (goal, recent, region) => {
-      const shot = await host.visualShot(region);
+    visual: async (goal, recent, region, marks) => {
+      const shot = await host.visualShot(region, marks);
       if (!shot.complete) {
         return { status: "error", found: null, foundProbability: null, center: null, confidence: null, latencyMs: null, reason: `a página não está toda à vista no canvas (cortada pela borda ou coberta por outro painel): a foto sairia errada (${shot.detail ?? "sem medidas"})` };
       }
-      return invoke("decision_pick_visual", { query: { goal, recent, imagePath: shot.path } });
+      return invoke("decision_pick_visual", { query: { goal, recent, imagePath: shot.path, marks: marks?.length ?? 0 } });
     },
     peekAt: async (x, y, second) => inPage(host, { op: "peek", target: `@${x},${y}${second ? "#2" : ""}` }, false),
     // Só o histórico que ainda vale para a página de agora (outra página, ou o carrinho que voltou a 0, não conta).

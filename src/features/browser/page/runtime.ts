@@ -970,6 +970,9 @@ declare global {
   let pointNeighbors = 0;
   /** A caixa (px CSS da janela) que envolve o controle tocado e os outros sem nome do mesmo grupo: a foto ampliada do piloto. */
   let pointGroup: Box4 | null = null;
+  /** Cada ícone sem nome do grupo, da esquerda para a direita (no máx. 9): os selos numerados da foto ampliada. */
+  let pointIcons: Box4[] = [];
+  const iconsOf = (boxes: Box4[]): Box4[] => boxes.slice().sort((a, b) => (Math.abs(a.top - b.top) > 24 ? a.top - b.top : a.left - b.left)).slice(0, 9).map(roundBox);
 
   /** O controle clicável que fica com um ponto: ver `snapToNearest`. `null` = nenhum perto. */
   function clickableNear(x: number, y: number): Element | null {
@@ -978,12 +981,16 @@ declare global {
     if (hit && "ambiguous" in hit) {
       // Entre ícones SEM nome, a caixa do grupo vai junto (`[grupo l,t,r,b]`, px CSS): o piloto tira uma foto ampliada só dele.
       const near = found.filter((f) => distanceToBox(f.box, x, y) <= 40);
-      const group = near.every((f) => isUnnamed(f.el))
-        ? found.filter((f) => isUnnamed(f.el) && distanceToBox(f.box, x, y) <= 160).reduce<Box4 | null>((box, f) => box ? {
+      const members = near.every((f) => isUnnamed(f.el)) ? found.filter((f) => isUnnamed(f.el) && distanceToBox(f.box, x, y) <= 160) : [];
+      const group = members.length > 0
+        ? members.reduce<Box4 | null>((box, f) => box ? {
           left: Math.min(box.left, f.box.left), top: Math.min(box.top, f.box.top), right: Math.max(box.right, f.box.right), bottom: Math.max(box.bottom, f.box.bottom),
         } : f.box, null)
         : null;
-      const tag = group ? ` [grupo ${[group.left, group.top, group.right, group.bottom].map(Math.round).join(",")}]` : "";
+      const icons = iconsOf(members.map((f) => f.box));
+      const tag = group
+        ? ` [grupo ${[group.left, group.top, group.right, group.bottom].map(Math.round).join(",")}]${icons.length > 1 ? ` [icones ${icons.map((b) => [b.left, b.top, b.right, b.bottom].join(",")).join(";")}]` : ""}`
+        : "";
       throw new Error(`Há mais de um controle perto do ponto (${Math.round(x)}, ${Math.round(y)}): não sei qual tocar.${tag}`);
     }
     return hit ? found[hit.index].el : null;
@@ -1014,6 +1021,7 @@ declare global {
     if (spec.kind === "point") {
       pointNeighbors = 0;
       pointGroup = null;
+      pointIcons = [];
       // O segundo toque: a foto apontou entre dois ícones sem nome, o primeiro não era o certo; o vizinho sem nome mais perto do ponto.
       if (spec.second) {
         const previous = lastPoint;
@@ -1043,6 +1051,7 @@ declare global {
           pointNeighbors = others.filter((f) => distanceToBox(f.box, spec.x, spec.y) <= 60).length;
           // O grupo: os sem nome até 160 px do ponto (uma barra de 4 ou 5 ícones), mais o tocado.
           const own = chosen.getBoundingClientRect();
+          pointIcons = iconsOf([{ left: own.left, top: own.top, right: own.right, bottom: own.bottom }, ...others.filter((f) => distanceToBox(f.box, spec.x, spec.y) <= 160).map((f) => f.box)]);
           pointGroup = others.filter((f) => distanceToBox(f.box, spec.x, spec.y) <= 160).reduce<Box4>((box, f) => ({
             left: Math.min(box.left, f.box.left), top: Math.min(box.top, f.box.top),
             right: Math.max(box.right, f.box.right), bottom: Math.max(box.bottom, f.box.bottom),
@@ -1800,7 +1809,7 @@ declare global {
     const result = await action(el);
     const spec = parseTarget(target);
     const withNeighbors = spec.kind === "point" && pointNeighbors > 0 && result !== null && typeof result === "object"
-      ? { ...(result as object), unnamedNeighbors: pointNeighbors, ...(pointGroup ? { unnamedGroup: roundBox(pointGroup) } : {}) } as T
+      ? { ...(result as object), unnamedNeighbors: pointNeighbors, ...(pointGroup ? { unnamedGroup: roundBox(pointGroup) } : {}), ...(pointIcons.length > 1 ? { unnamedIcons: pointIcons.map((b) => [b.left, b.top, b.right, b.bottom]) } : {}) } as T
       : result;
     if (spec.kind === "ref" && el.isConnected) {
       const fresh = fingerprintOf(el);
