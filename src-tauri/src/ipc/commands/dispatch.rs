@@ -154,6 +154,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "portal.console" => portal_action(app, args, "console"),
         "portal.layout" => portal_action(app, args, "layout"),
         "portal.act" => portal_action(app, args, "act"),
+        "portal.reset" => portal_action(app, args, "reset"),
         // Avisar al usuario (ver `notify`).
         "notify.send" => notify_send(app, args),
         // Papeles para recrutar (ver `role`).

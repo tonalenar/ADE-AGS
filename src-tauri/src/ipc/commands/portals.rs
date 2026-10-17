@@ -32,7 +32,7 @@ const ACT_TIMEOUT_S: u64 = 115;
 /// (`PORTAL_OPS`); está acá también para fallar con un mensaje útil antes de molestarlo.
 pub(crate) const ACTIONS: &[&str] = &[
     "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll", "wait",
-    "screenshot", "console", "layout", "act",
+    "screenshot", "console", "layout", "act", "reset",
 ];
 
 #[derive(Debug, Clone)]

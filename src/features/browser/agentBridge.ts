@@ -40,7 +40,7 @@ import { clampViewport, presetById, VIEWPORT_PRESETS, type Viewport } from "./vi
 import { checkExpectation, parseExpectations, verifyReport } from "./expect";
 import { summarizeSnapshot } from "./finalSummary";
 import { cartCount, fingerprint, formatResult, parseSnapshot, runPilot, type ParsedPage, type PilotDeps, type PilotResult } from "./jevPilot";
-import { bareUrl, createLedger, ledgerOf, type ActLedger, type PriorAction } from "./portalLedger";
+import { bareUrl, createLedger, forgetLedger, ledgerOf, type ActLedger, type PriorAction } from "./portalLedger";
 import { backendSink, withProgress } from "./actProgress";
 import { beginWindowMeasure } from "./windowBeat";
 
@@ -693,6 +693,20 @@ async function execute(
         gone: bool(request, "gone"), idle: bool(request, "idle"), timeoutMs: num(request, "timeout_ms"),
       }, false);
     case "eval": return inPage(host, { op: "eval", code: required(request, "code") }, true);
+    case "reset": {
+      // Começar do zero no site aberto: cookies, localStorage e sessionStorage da página atual e o livro-razão dos `act`
+      // deste portal. É o que o bench faz antes de cada rodada (J1): sem isso o carrinho da rodada anterior continuava lá e
+      // o «adicionar ao carrinho» da SauceDemo nunca era medido (0 de 32 rodadas). Destrói estado, não lê: nada sai daqui.
+      const page = await host.channel.run({ op: "cookies", action: "list" }) as { cookies: { name: string }[] };
+      for (const cookie of page.cookies ?? []) {
+        await host.channel.run({ op: "cookies", action: "delete", name: cookie.name }).catch(() => undefined);
+      }
+      for (const area of ["local", "session"] as const) {
+        await inPage(host, { op: "storage", action: "clear", area }, false).catch(() => undefined);
+      }
+      forgetLedger(host.viewId);
+      return `Portal zerado: ${page.cookies?.length ?? 0} cookie(s), localStorage, sessionStorage e o histórico dos act. Recarregue a página (navigate) para o site começar do zero.`;
+    }
     case "act": {
       const goal = required(request, "goal");
       const fills = Array.isArray(request.fills) ? request.fills.filter((f): f is string => typeof f === "string") : [];
@@ -751,7 +765,7 @@ export async function runBrowserRequest(
  */
 export const PORTAL_OPS = new Set([
   "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll",
-  "wait", "screenshot", "console", "layout", "act",
+  "wait", "screenshot", "console", "layout", "act", "reset",
 ]);
 
 /** Confere o `act` contra a página como ficou (um snapshot completo, não só o que está à vista). Nunca lança: sem leitura, o relatório sai como estava. */

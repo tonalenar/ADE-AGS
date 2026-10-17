@@ -18,6 +18,7 @@
  *   · --gate (Fase 7: sai com código 1 se o portão de liberação falhar: sucesso ≥ 90%, falso «feito» ≤ 2%, passo p50 ≤ 700 ms, 0 travamentos)
  *   · --with-expect (Fase 5: passa ao `act` os `--expect` equivalentes ao critério de cada tarefa e mede NÃO CONFERE / «verificado» errado)
  *   · --sim-guard (sim: liga a guarda semântica simulada da Fase 2.1, para ver o «depois»)
+ *   · --no-reset (real: NÃO zera cookies/storage/livro-razão do portal antes de cada rodada; padrão é zerar, J1)
  *   Real: --public (inclui Wikipedia/Amazon) · --demo-login (inclui SauceDemo) · --max-real N (padrão 5 rodadas, já contando as repetições)
  *   · --max-probes N (padrão 60 consultas ao Jev no pior caso) · --portal <nome> (reaproveita um portal) · --yes
  *
@@ -235,6 +236,12 @@ async function runRealTask(task: BenchTask, portal: string): Promise<TaskRun> {
   };
   try {
     await ags(["portal", "navigate", portal, absolute(task)], 60_000);
+    // Cada rodada começa do zero (J1): sem isto o estado do site (o carrinho da SauceDemo) e o livro-razão dos `act` vinham
+    // da rodada anterior e a tarefa medida era outra. `--no-reset` volta ao comportamento antigo, para comparar.
+    if (!flag("no-reset")) {
+      await ags(["portal", "reset", portal], 60_000);
+      await ags(["portal", "navigate", portal, absolute(task)], 60_000);
+    }
   } catch (e) {
     return crash(`navegar falhou: ${failure(e)}`);
   }

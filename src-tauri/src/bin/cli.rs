@@ -114,6 +114,7 @@ PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os d
   portal press <portal> <tecla> [--target <ref>]   · scroll · select · wait · history
   portal screenshot|console|layout <portal>   Foto, console e medidas
                                               (sem eval, upload nem cookies: isso é do usuário)
+  portal reset <portal>                       Zera o site aberto no portal (cookies, storage) e o histórico dos act: recarregue depois
   portal act <portal> \"objetivo\" [--fill campo=valor]... [--expect tipo:valor]... [--steps 8]
                                               O Jev navega sozinho até o objetivo, passo a passo (Ajustes → Decisões → Navegador do canvas)
                                               Prefira UM act com o trajeto inteiro (--steps até 15): cada chamada extra custa um turno seu
@@ -855,7 +856,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "device.launch" => &["name", "package"],
         "device.tap" | "device.swipe" => &["name"],
         "portal.scroll" | "portal.wait" | "portal.snapshot" | "portal.screenshot" | "portal.console"
-        | "portal.layout" => &["name"],
+        | "portal.layout" | "portal.reset" => &["name"],
         _ => &[],
     }
 }
