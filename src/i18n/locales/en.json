@@ -2464,6 +2464,8 @@
   "missions.efficiency.source.spans": "estimated from turns (mission without work measurement)",
   "missions.efficiency.source.wall": "estimated from the wall clock (mission without work measurement or turns)",
   "missions.efficiency.wall": "Wall time",
+  "missions.efficiency.delivered": "Until the team delivered",
+  "missions.efficiency.finishWait": "Waiting for Finish",
   "missions.efficiency.cost": "Estimated cost",
   "missions.efficiency.agents": "Agents",
   "missions.efficiency.unmeasured": "Unmeasured",

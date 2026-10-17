@@ -250,6 +250,19 @@ pub fn qa_waits(spans: &[Span]) -> i64 {
 #[cfg(test)]
 mod test;
 
+/// O relógio da missão em duas partes, pelo último span `team_delivered` (o Vigia viu a equipe
+/// entregar): do início à entrega (trabalho da equipe) e da entrega ao Finalizar (espera pelo
+/// usuário). No banco, 21% a 59% do relógio era essa espera, misturada no mesmo número. `(None, None)`
+/// sem entrega registrada. Segundos (`started_at`, `ended_at`, `now`) como vêm do banco. Pura.
+pub fn delivery_split(spans: &[Span], started_at: Option<i64>, ended_at: Option<i64>, now: i64) -> (Option<i64>, Option<i64>) {
+    let Some(delivered) = spans.iter().filter(|s| s.kind == "team_delivered").map(|s| s.started_ms).max() else {
+        return (None, None);
+    };
+    let start = started_at.filter(|s| *s > 0).map(|s| s.saturating_mul(1000));
+    let end = ended_at.unwrap_or(now).saturating_mul(1000);
+    (start.map(|s| (delivered - s).max(0)), Some((end - delivered).max(0)))
+}
+
 /// Lead-to-member send evidence; missing evidence or baseline remains unmeasured.
 pub fn first_delegation(spans: &[Span], started_at: Option<i64>) -> (Option<i64>, Option<&'static str>) {
     let baseline = spans.iter().filter(|s| s.kind == "boot").map(|s| s.started_ms).min()

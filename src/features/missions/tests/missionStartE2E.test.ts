@@ -406,7 +406,7 @@ describe("Teste ponta a ponta do início de missão com terminais simulados", ()
 
     // QA continua calado (não produz saída após ECHO_MS)
 
-    // 8. Aos 25s após o envio do briefing (START_CHECK_MS = 25000ms):
+    // 8. Aos 25s após o envio do briefing (START_CHECK_MS = 25000ms; o Enter já foi aos 10 s, EARLY_NUDGE_MS):
     // Decorrido desde o envio: 900ms + 4000ms = 4900ms.
     // Falta avançar START_CHECK_MS - 4900ms = 20100ms.
     expect(START_CHECK_MS).toBe(25_000);

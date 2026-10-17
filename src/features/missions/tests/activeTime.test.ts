@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { accumulate, missionsWorking } from "../activeTime";
+import { ACTIVE_TICK_MS, MAX_TICK_MS, accumulate, missionsWorking, tickMs } from "../activeTime";
 import { missionSeconds } from "@/features/bot/botStats";
 
 describe("missionsWorking", () => {
@@ -68,5 +68,15 @@ describe("estimateOf / formatUsd", () => {
   it("formatea en US$ con coma y — sin dato", () => {
     expect(formatUsd(1.234)).toBe("US$ 1,23");
     expect(formatUsd(null)).toBe("—");
+  });
+});
+
+describe("tickMs: o tic vale o tempo real, com teto", () => {
+  it("com a janela em segundo plano o tic espaçado conta o que passou, até 60 s", () => {
+    expect(tickMs(undefined, 5_000)).toBe(ACTIVE_TICK_MS);
+    expect(tickMs(1_000, 2_000)).toBe(1_000);
+    expect(tickMs(0, 30_000)).toBe(30_000);
+    expect(tickMs(0, 10 * 60_000)).toBe(MAX_TICK_MS);
+    expect(tickMs(5_000, 4_000)).toBe(ACTIVE_TICK_MS);
   });
 });

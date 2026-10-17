@@ -761,10 +761,14 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
         TellBody::Send(body) => body,
     };
 
+    // Mensagem longa vai inteira para um arquivo e no terminal só o começo e o caminho (ver
+    // `spill_to_inbox`). `--raw` (um comando da TUI, como /compact) vai como está.
+    let pasted = if is_raw(args) { text.clone() } else { spill_to_inbox(&target.id, &text) };
+
     // Não se interrompe quem está no meio de um turno, mas também não se prende o remetente:
     // quieto em poucos segundos, vai já; senão entra na fila do destino e é entregue quando ele
     // terminar o turno (ver `deliver_now_or_queue`).
-    let outcome = deliver_now_or_queue(pty, &target.id, outgoing(&from_name, &text, false, is_raw(args)))?;
+    let outcome = deliver_now_or_queue(pty, &target.id, outgoing(&from_name, &pasted, false, is_raw(args)))?;
     // Sem confirmação, o destino pode não ter recebido: não conta como tarefa dada (o Vigia segue
     // cobrando a delegação).
     if !matches!(outcome, Delivery::Duplicate | Delivery::Unconfirmed) {
@@ -873,6 +877,56 @@ pub(super) fn peer_handoff(app: &AppHandle, args: &Value) -> Result<Value, Strin
     }
     let handoff: Value = serde_json::from_str(&payload).map_err(|e| e.to_string())?;
     Ok(json!({ "id": id, "from": from_name, "handoff": handoff }))
+}
+
+/// A partir de quantos caracteres a mensagem vai para um arquivo em vez de ser colada inteira.
+const INBOX_SPILL_CHARS: usize = 1500;
+/// Quanto do começo da mensagem longa ainda vai colado (o essencial chega mesmo sem abrir o arquivo).
+const INBOX_PREVIEW_CHARS: usize = 400;
+/// Arquivos da caixa de entrada mais velhos que isto são apagados ao escrever um novo.
+const INBOX_KEEP: Duration = Duration::from_secs(3 * 24 * 60 * 60);
+
+/// O texto que vai colado no terminal no lugar de uma mensagem longa: o começo e onde está o resto. Pura.
+pub(crate) fn inbox_note(text: &str, path: &str) -> String {
+    let flat: String = text.split_whitespace().collect::<Vec<_>>().join(" ");
+    let preview: String = flat.chars().take(INBOX_PREVIEW_CHARS).collect();
+    format!(
+        "{preview}… [mensagem longa: {} caracteres] Texto completo em {path} — leia o arquivo inteiro antes de agir.",
+        text.chars().count()
+    )
+}
+
+/// Mensagem longa: o texto inteiro em `~/.ags/inbox/<destino>/<instante>.md` e o que se cola é a
+/// nota de `inbox_note`. Colar 1.500+ caracteres no PTY virava «[Pasted text #N]» que engolia o
+/// Enter, e no Codex os parágrafos chegavam grudados («MISSÃOOBJETIVO…»); 34 mensagens do
+/// orquestrador passavam disso. Sem onde gravar, cola inteira como antes.
+fn spill_to_inbox(target: &str, text: &str) -> String {
+    if text.chars().count() <= INBOX_SPILL_CHARS {
+        return text.to_string();
+    }
+    let Some(home) = crate::util::datadir::ags_home() else { return text.to_string() };
+    let safe: String = target.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect();
+    let dir = home.join("inbox").join(safe);
+    if std::fs::create_dir_all(&dir).is_err() {
+        return text.to_string();
+    }
+    if let Ok(entries) = std::fs::read_dir(&dir) {
+        for entry in entries.flatten() {
+            let old = entry.metadata().and_then(|m| m.modified()).ok().and_then(|t| t.elapsed().ok()).is_some_and(|age| age > INBOX_KEEP);
+            if old {
+                let _ = std::fs::remove_file(entry.path());
+            }
+        }
+    }
+    // O nome sai do conteúdo: a mesma mensagem reenviada cai no mesmo arquivo e o dedupe do
+    // `peer tell` (que compara o texto colado) continua pegando a repetição.
+    use sha2::Digest;
+    let digest = format!("{:x}", sha2::Sha256::digest(text.as_bytes()));
+    let path = dir.join(format!("{}.md", &digest[..16]));
+    match std::fs::write(&path, text) {
+        Ok(()) => inbox_note(text, &path.to_string_lossy()),
+        Err(_) => text.to_string(),
+    }
 }
 
 /// Cada quanto e até quando `ci watch` olha os checks do PR.
@@ -1320,6 +1374,21 @@ mod test {
         assert!(ask.starts_with("[Mensagem de Líder via ADE AGS] rodar os testes"));
         let tell = framed("Líder", "pronto", false);
         assert!(tell.contains("ags peer tell \"Líder\""));
+    }
+}
+
+#[cfg(test)]
+mod inbox_tests {
+    use super::{inbox_note, INBOX_PREVIEW_CHARS};
+
+    #[test]
+    fn a_nota_da_mensagem_longa_traz_o_comeco_o_tamanho_e_o_caminho() {
+        let text = format!("REGRAS:\n{}", "palavra ".repeat(400));
+        let note = inbox_note(&text, "C:/Users/x/.ags/inbox/t/1.md");
+        assert!(note.starts_with("REGRAS: palavra"), "{note}");
+        assert!(note.contains(&format!("{} caracteres", text.chars().count())));
+        assert!(note.contains("C:/Users/x/.ags/inbox/t/1.md") && note.contains("leia o arquivo"));
+        assert!(note.chars().count() < INBOX_PREVIEW_CHARS + 200 && !note.contains('\n'));
     }
 }
 

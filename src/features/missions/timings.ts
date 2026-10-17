@@ -73,6 +73,10 @@ export interface MissionEfficiency {
   /** Detalle por turno: unión de los spans `turn` y `peer_ask`. */
   turnMs: number | null;
   wallMs: number | null;
+  /** Do início à última entrega da equipe (`team_delivered`); ausente sem entrega registrada. */
+  deliveredMs?: number | null;
+  /** Da entrega ao Finalizar: espera pelo usuário, não trabalho. */
+  finishWaitMs?: number | null;
   costEstimate: number | null;
   agents: number;
   historyLimit: number;

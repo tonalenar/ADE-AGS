@@ -920,6 +920,8 @@ where
         orchestrate(context, tool, args, send)
     } else if let Some(tool) = GIT_TOOLS.iter().find(|t| t.name == name) {
         git(context, tool, args, send)
+    } else if let Some((_, command)) = PEER_TOOLS.iter().find(|(tool, _)| *tool == name) {
+        peer(context, command, args, send)
     } else if name == ASK_TOOL {
         ask(context, args, send)
     } else {
@@ -1167,6 +1169,9 @@ fn tools_for(context: &McpContext, prefix: &str) -> Vec<Value> {
             .iter()
             .map(|t| schema(t.name, t.description, (t.properties)(), t.required)),
     );
+    if matches!(context, McpContext::Cwd { tab: Some(_), .. }) {
+        tools.extend(peer_schemas());
+    }
     tools.push(ask_schema());
     // Todo el texto de una vez y en un solo lugar: el `name` queda pelado (lo prefija la
     // TUI; ponerlo acá daría `ags_ags_browser_click`) y se prefija el resto
@@ -1280,6 +1285,66 @@ fn tab_tools() -> impl Iterator<Item = (&'static str, bool)> {
 /// `ask_user`: la única tool que va para los dos lados —una tab y una tarea de la flota—
 /// porque la pregunta es la misma: hay algo que solo sabe la persona.
 pub const ASK_TOOL: &str = "ask_user";
+
+/// Falar com a equipe do canvas pelo MCP, com argumentos estruturados: pela CLI era escrever um
+/// arquivo e rodar `ags peer tell --file` (duas chamadas, e aspas que o shell do Windows quebrava).
+/// Só numa aba (o remetente é ela).
+const PEER_TOOLS: &[(&str, &str)] = &[
+    ("peer_tell", "peer.tell"),
+    ("peer_deliver", "peer.deliver"),
+    ("peer_handoff", "peer.handoff"),
+];
+
+fn peer_schemas() -> Vec<Value> {
+    vec![
+        json!({
+            "name": "peer_tell",
+            "description": "Send a message to an agent connected to you on the ADE AGS canvas (a teammate or the orchestrator), without waiting. Use it for tasks, blockers and short updates; the reply arrives in your terminal. Long messages are delivered as a file the recipient reads.",
+            "inputSchema": { "type": "object", "properties": {
+                "to": { "type": "string", "description": "The teammate's name, as `peers` lists it." },
+                "text": { "type": "string", "description": "The message, any length, multi-line allowed." }
+            }, "required": ["to", "text"] },
+        }),
+        json!({
+            "name": "peer_deliver",
+            "description": "Final structured delivery (Handoff v1) to the orchestrator, or to `to`. The recipient gets one line with the summary and an id; the full handoff is stored. Fields: version 1, summary, changed_files [{path, description}], tests [{command, status: passed|failed|not_run}], decisions, risks, next_steps; relative paths.",
+            "inputSchema": { "type": "object", "properties": {
+                "to": { "type": "string", "description": "Optional: who receives it (default: your orchestrator)." },
+                "handoff": { "type": "object", "description": "The Handoff v1 object." }
+            }, "required": ["handoff"] },
+        }),
+        json!({
+            "name": "peer_handoff",
+            "description": "Read the full structured delivery `ENTREGA #<id>` of your mission.",
+            "inputSchema": { "type": "object", "properties": {
+                "id": { "type": "string", "description": "The delivery number." }
+            }, "required": ["id"] },
+        }),
+    ]
+}
+
+fn peer<F>(context: &McpContext, command: &str, arguments: Value, send: &mut F) -> Value
+where
+    F: FnMut(&str, Value) -> Result<Value, String>,
+{
+    let McpContext::Cwd { tab: Some(tab), .. } = context else {
+        return tool_error("As tools de equipe só funcionam numa aba do ADE AGS (falta a aba de origem).");
+    };
+    let mut args = match arguments {
+        Value::Object(map) => map,
+        _ => serde_json::Map::new(),
+    };
+    args.insert("from".into(), json!(tab));
+    // A entrega vem como objeto; o comando recebe o JSON como texto (o mesmo do `--file`).
+    if command == "peer.deliver" {
+        let handoff = args.remove("handoff").unwrap_or(Value::Null);
+        args.insert("text".into(), json!(handoff.to_string()));
+    }
+    match send(command, Value::Object(args)) {
+        Ok(data) => content(data),
+        Err(e) => tool_error(&e),
+    }
+}
 
 fn ask_schema() -> Value {
     json!({

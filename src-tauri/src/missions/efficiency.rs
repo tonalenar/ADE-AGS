@@ -43,6 +43,10 @@ pub struct MissionEfficiency {
     pub first_delegation_ms: Option<i64>,
     pub first_delegation_source: Option<&'static str>,
     pub wall_ms: Option<i64>,
+    /// Do início à última entrega da equipe (ver `timings::delivery_split`).
+    pub delivered_ms: Option<i64>,
+    /// Da última entrega da equipe ao Finalizar (ou a agora): espera pelo usuário, não trabalho.
+    pub finish_wait_ms: Option<i64>,
     /// Soma do custo reportado nos Runs. Ausente quando nenhum Run reportou custo.
     pub cost_estimate: Option<f64>,
     /// Abas distintas vistas em spans da missão; `peer_ask` também conta seu destino.
@@ -91,8 +95,12 @@ pub fn get(conn: &Connection, mission_id: &str) -> Result<MissionEfficiency, Str
     let bands = compare_bands(&history);
     let solo = bands.iter().find(|band| band.band == "1");
 
-    let (first_delegation_ms, first_delegation_source) = timings::first_delegation(&timings::list(conn, mission_id)?, mission.1);
+    let spans = timings::list(conn, mission_id)?;
+    let (first_delegation_ms, first_delegation_source) = timings::first_delegation(&spans, mission.1);
+    let (delivered_ms, finish_wait_ms) = timings::delivery_split(&spans, mission.1, mission.2, now);
     Ok(MissionEfficiency {
+        delivered_ms,
+        finish_wait_ms,
         test_metrics: timings::test_metrics(&timings::list(conn, mission_id)?),
         first_delegation_ms,
         first_delegation_source,

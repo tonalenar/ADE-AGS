@@ -28,6 +28,14 @@ const TEST_KEY_PREFIXES: &[&str] = &["neg-", "test-", "tmp-", "teste-"];
 const TEST_KEYS: &[&str] = &["test", "teste", "tmp", "temp", "foo", "asdf"];
 /// Corpos que não dizem nada: o que se escreve para ver se funciona.
 const PLACEHOLDER_BODIES: &[&str] = &["test", "teste", "testing", "tmp", "ok", "asdf", "foo", "bar", "lorem ipsum", "xxx", "..."];
+/// Semelhança (Jaccard das palavras de chave + corpo) a partir da qual duas memórias do mesmo escopo
+/// são «parecidas». No banco real havia ~8 grupos assim (ex.: `missao-startedat-em-segundos` e
+/// `vigia-unidades-tempo`), que a duplicata exata não pegava.
+const NEAR_DUPLICATE: f64 = 0.6;
+/// Abaixo disto de palavras não se compara: duas memórias curtas se parecem por acaso.
+const NEAR_MIN_WORDS: usize = 4;
+/// Status de missão encerrada: a memória de escopo `mission` dela não chega a mais nenhuma missão.
+const FINISHED_MISSION: &[&str] = &["done", "done_without_delivery", "failed", "cancelled"];
 
 #[derive(Clone, Debug, Serialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -63,6 +71,24 @@ struct ActiveRow {
     key: String,
     kind: String,
     body: String,
+    /// Status da missão dona (escopo `mission`).
+    mission_status: Option<String>,
+    /// A memória de workspace veio de uma missão de teste.
+    from_test_mission: bool,
+}
+
+/// As palavras (já normalizadas pelo mesmo tokenizador da busca) de chave + corpo.
+fn words(row: &ActiveRow) -> HashSet<String> {
+    super::search::tokenize(&format!("{} {}", row.key.replace(['-', '_'], " "), row.body)).into_iter().collect()
+}
+
+/// Jaccard de dois conjuntos de palavras. Pura.
+pub(crate) fn jaccard(a: &HashSet<String>, b: &HashSet<String>) -> f64 {
+    let union = a.union(b).count();
+    if union == 0 {
+        return 0.0;
+    }
+    a.intersection(b).count() as f64 / union as f64
 }
 
 fn normalize_body(body: &str) -> String {
@@ -73,9 +99,11 @@ fn active_rows(conn: &Connection, workspace_id: &str) -> Result<Vec<ActiveRow>, 
     // Mais antiga primeiro: a duplicata que fica é sempre a primeira deste laço.
     let mut stmt = conn
         .prepare(
-            "SELECT e.id, e.scope, e.mission_id, e.key, e.kind, r.body \
+            "SELECT e.id, e.scope, e.mission_id, e.key, e.kind, r.body, m.status, COALESCE(s.is_test, 0) \
              FROM memory_entries e \
              JOIN memory_revisions r ON r.entry_id = e.id AND r.revision = e.current_revision AND r.status = 'approved' \
+             LEFT JOIN missions m ON m.id = e.mission_id \
+             LEFT JOIN missions s ON s.id = e.source_mission \
              WHERE e.workspace_id = ?1 AND e.status = 'active' AND e.current_revision IS NOT NULL \
              ORDER BY e.created_at, e.rowid",
         )
@@ -89,6 +117,8 @@ fn active_rows(conn: &Connection, workspace_id: &str) -> Result<Vec<ActiveRow>, 
                 key: r.get(3)?,
                 kind: r.get(4)?,
                 body: r.get(5)?,
+                mission_status: r.get(6)?,
+                from_test_mission: r.get::<_, i64>(7)? != 0,
             })
         })
         .map_err(|_| "could not read memory entries".to_string())?
@@ -116,6 +146,36 @@ pub fn candidates_for(conn: &Connection, workspace_id: &str) -> Result<Vec<Candi
             None => {
                 first_by_body.insert(group, i);
             }
+        }
+    }
+
+    // (a2) Quase-duplicatas: mesmo escopo e palavras muito parecidas. Só entre as que não são duplicata
+    // exata; a mais antiga fica, a mais nova aponta para ela.
+    let word_sets: Vec<HashSet<String>> = rows.iter().map(words).collect();
+    for i in 0..rows.len() {
+        if !reasons[i].is_empty() || word_sets[i].len() < NEAR_MIN_WORDS {
+            continue;
+        }
+        let similar = (0..i).find(|&j| {
+            reasons[j].is_empty()
+                && rows[j].scope == rows[i].scope
+                && rows[j].mission_id == rows[i].mission_id
+                && word_sets[j].len() >= NEAR_MIN_WORDS
+                && jaccard(&word_sets[i], &word_sets[j]) >= NEAR_DUPLICATE
+        });
+        if let Some(j) = similar {
+            reasons[i].push(format!("parecida com {}", rows[j].key));
+        }
+    }
+
+    // (a3) Memória de missão encerrada: só valia nela (a busca de outra missão não a carrega).
+    for (i, row) in rows.iter().enumerate() {
+        if row.scope == "mission" && row.mission_status.as_deref().is_some_and(|s| FINISHED_MISSION.contains(&s)) {
+            reasons[i].push("missão encerrada".to_string());
+        }
+        // Memória do projeto que nasceu numa missão de teste (ex.: `qa-v9-01`, «Cache timeout 300 s»).
+        if row.scope == "workspace" && row.from_test_mission {
+            reasons[i].push("veio de missão de teste".to_string());
         }
     }
 
@@ -326,6 +386,30 @@ mod tests {
 
     fn reasons_of(list: &[Candidate], key: &str) -> Option<Vec<String>> {
         list.iter().find(|c| c.key == key).map(|c| c.reasons.clone())
+    }
+
+    #[test]
+    fn parecidas_missao_encerrada_e_missao_de_teste_viram_candidatas() {
+        let conn = db();
+        seed(&conn);
+        add(&conn, "workspace", "w1", None, "missao-startedat-em-segundos", "started_at da missão vem em segundos do banco; converter para ms antes de comparar com Date.now");
+        add(&conn, "workspace", "w1", None, "vigia-unidades-tempo", "o started_at da missão vem do banco em segundos: converter para ms antes de comparar com Date.now no Vigia");
+        add(&conn, "workspace", "w1", None, "outra-coisa", "o pool de contas escolhe a conta com cota disponível antes de abrir o terminal");
+        add(&conn, "mission", "w1", Some("m1"), "so-da-missao", "detalhe que só valia nesta missão");
+        let list = candidates_for(&conn, "w1").unwrap();
+        assert_eq!(reasons_of(&list, "vigia-unidades-tempo"), Some(vec!["parecida com missao-startedat-em-segundos".to_string()]));
+        assert_eq!(reasons_of(&list, "missao-startedat-em-segundos"), None, "a mais antiga fica");
+        assert_eq!(reasons_of(&list, "outra-coisa"), None);
+        assert_eq!(reasons_of(&list, "so-da-missao"), None, "missão ainda aberta");
+        conn.execute("UPDATE missions SET status='done', is_test=1 WHERE id='m1'", []).unwrap();
+        let entry = add(&conn, "workspace", "w1", None, "qa-v9-01", "Cache timeout configurado para 300 segundos");
+        conn.execute("UPDATE memory_entries SET source_mission='m1' WHERE id=?1", [&entry.entry_id]).unwrap();
+        let list = candidates_for(&conn, "w1").unwrap();
+        assert_eq!(reasons_of(&list, "so-da-missao"), Some(vec!["missão encerrada".to_string()]));
+        assert_eq!(reasons_of(&list, "qa-v9-01"), Some(vec!["veio de missão de teste".to_string()]));
+        let a: HashSet<String> = ["a", "b"].iter().map(|s| s.to_string()).collect();
+        assert_eq!(jaccard(&a, &a), 1.0);
+        assert_eq!(jaccard(&HashSet::new(), &HashSet::new()), 0.0);
     }
 
     #[test]

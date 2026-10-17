@@ -2464,6 +2464,8 @@
   "missions.efficiency.source.spans": "estimado por los turnos (misión sin medición de trabajo)",
   "missions.efficiency.source.wall": "estimado por el reloj (misión sin medición de trabajo ni turnos)",
   "missions.efficiency.wall": "Tiempo de reloj",
+  "missions.efficiency.delivered": "Hasta que el equipo entregó",
+  "missions.efficiency.finishWait": "Esperando Finalizar",
   "missions.efficiency.cost": "Costo estimado",
   "missions.efficiency.agents": "Agentes",
   "missions.efficiency.unmeasured": "No medido",

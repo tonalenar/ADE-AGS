@@ -96,8 +96,14 @@ impl Plan {
     }
 }
 
+/// Os testes que leem `scripts/bench-fixture/` pelo disco (fora do grafo de imports, que o
+/// `vitest related` segue sozinho).
+const BENCH_FIXTURE_TESTS: &[&str] = &["src/features/browser/tests/jevBench.test.ts"];
+
 enum Kind {
     Frontend,
+    /// Arquivo lido por testes conhecidos sem import: roda esses testes (`vitest related <teste>`).
+    FrontendTests(&'static [&'static str]),
     FrontendAll,
     Rust(String),
     RustAll,
@@ -249,8 +255,21 @@ fn classify(path: &str) -> Kind {
             return Kind::FrontendAll;
         }
     }
-    if path.starts_with("scripts/") {
-        return Kind::FrontendAll;
+    // `scripts/`: o código (bench, manifesto do updater) é importado pelos testes, e o `vitest related`
+    // acha quem o usa; os fixtures do bench são lidos do disco por um teste só; o resto (PowerShell,
+    // fixtures visuais) não é lido por teste nenhum. Antes qualquer arquivo daqui rodava o vitest
+    // inteiro, o babel e o tsc.
+    if let Some(rest) = path.strip_prefix("scripts/") {
+        if rest.starts_with("bench-fixture/") {
+            return Kind::FrontendTests(BENCH_FIXTURE_TESTS);
+        }
+        if rest.starts_with("visual-fixture/") || ext == "ps1" || ext == "md" {
+            return Kind::Ignored;
+        }
+        return match ext {
+            "ts" | "mts" | "mjs" | "js" | "cjs" | "json" => Kind::Frontend,
+            _ => Kind::FrontendAll,
+        };
     }
     Kind::Unmapped
 }
@@ -279,6 +298,7 @@ pub fn plan_with_unsafe(changed: &[String], unsafe_files: &[String]) -> Plan {
         }
         match classify(&file) {
             Kind::Frontend => frontend.push(file),
+            Kind::FrontendTests(tests) => frontend.extend(tests.iter().map(|t| t.to_string())),
             Kind::FrontendAll => frontend_all = true,
             Kind::Rust(m) => {
                 rust_mods.insert(m);

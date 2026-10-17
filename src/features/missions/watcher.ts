@@ -10,7 +10,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { isFinalDelivery, noteDelivery, noteSustained } from "../bot/arcadeSignals";
 import { sustainedTabIds } from "@/features/terminal/activity";
 import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
-import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking } from "./activeTime";
+import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking, tickMs } from "./activeTime";
 import { finishedMissionTabs, missionIndex, useMissionIndex } from "./groups";
 import { STALL_CHECK_MS, applyMessage, parseStallMs, findStalls, markAlerted, stallMessage, type PeerMessage, type PendingTasks } from "./stalled";
 import { useMissionsStore } from "./store";
@@ -237,6 +237,7 @@ export function useMissionWatcher(): void {
       }
     };
     let ticks = 0;
+    let lastTick: number | undefined;
     const flush = () => {
       for (const [id, ms] of pending) invoke("mission_active_add", { missionId: id, ms }).catch(() => undefined);
       pending = new Map();
@@ -245,7 +246,9 @@ export function useMissionWatcher(): void {
       measureTurns();
       const { index: tabToMission, missions: all } = live.current;
       const running = new Set(all.filter((m) => m.status === "running").map((m) => m.id));
-      pending = accumulate(pending, sampleWorking(tabToMission, running), ACTIVE_TICK_MS);
+      const now = Date.now();
+      pending = accumulate(pending, sampleWorking(tabToMission, running, now), tickMs(lastTick, now));
+      lastTick = now;
       ticks += 1;
       if (ticks * ACTIVE_TICK_MS >= ACTIVE_FLUSH_MS) {
         ticks = 0;

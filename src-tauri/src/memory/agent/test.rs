@@ -232,3 +232,21 @@ fn a_mesma_chave_ja_aprovada_vira_proposta_de_correcao() {
         .unwrap();
     assert_eq!((operation.as_str(), status.as_str()), ("update", "proposed"));
 }
+
+#[test]
+fn missao_de_teste_nao_escreve_na_memoria_do_projeto() {
+    let conn = crate::database::test_db();
+    conn.execute_batch(
+        "INSERT INTO workspaces(id,name,created_at,last_active) VALUES('w1','W1',0,0);
+         INSERT INTO missions(id,workspace_id,title,objective,cwd,created_at,updated_at,is_test) VALUES('mt','w1','Teste v9','o','/x',0,0,1);
+         INSERT INTO missions(id,workspace_id,title,objective,cwd,created_at,updated_at,is_test) VALUES('mr','w1','Real','o','/x',0,0,0);",
+    )
+    .unwrap();
+    let scope_of = |mission: &str, key: &str| {
+        let p = AgentProposal { mission_id: mission, scope: "workspace", key, kind: "note", body: "Cache timeout configurado para 300 segundos", priority: 0, author: Author::Worker, author_name: "QA" };
+        let r = propose_for_mission(&conn, &p).unwrap();
+        conn.query_row("SELECT scope FROM memory_entries WHERE id=?1", [&r.entry_id], |row| row.get::<_, String>(0)).unwrap()
+    };
+    assert_eq!(scope_of("mt", "qa-v9-01"), "mission");
+    assert_eq!(scope_of("mr", "real-01"), "workspace");
+}
