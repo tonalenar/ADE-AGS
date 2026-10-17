@@ -34,10 +34,8 @@ pub struct VigiaAction {
 /// O fim da tela de uma aba, legível. Vazio se a aba não tem terminal vivo.
 fn screen_tail(tab_id: &str) -> String {
     let Some(pty) = crate::terminal::pty_for_tab(tab_id.to_string()) else { return String::new() };
-    let Some((text, _)) = crate::terminal::scrollback_of(pty) else { return String::new() };
-    let start = text.len().saturating_sub(SCREEN_CHARS * 4);
-    let start = (start..=text.len()).find(|i| text.is_char_boundary(*i)).unwrap_or(text.len());
-    tail_lines(&crate::orchestrator::digest::strip_ansi(&text[start..]))
+    let Some(text) = crate::terminal::tail_of(pty, SCREEN_CHARS * 4) else { return String::new() };
+    tail_lines(&crate::orchestrator::digest::strip_ansi(&text))
 }
 
 /// As últimas linhas com texto, até o limite de caracteres. Pura.

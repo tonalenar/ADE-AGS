@@ -226,10 +226,8 @@ fn dedupe_key(target: &str, text: &str) -> String {
 
 /// O fim da saída do PTY, sem escapes, para conferir se uma mensagem apareceu na tela.
 fn tail_text(pty: u32) -> String {
-    let Some((text, _)) = crate::terminal::scrollback_of(pty) else { return String::new() };
-    let start = text.len().saturating_sub(64 * 1024);
-    let start = (start..=text.len()).find(|i| text.is_char_boundary(*i)).unwrap_or(text.len());
-    crate::orchestrator::digest::strip_ansi(&text[start..])
+    let Some(text) = crate::terminal::tail_of(pty, 64 * 1024) else { return String::new() };
+    crate::orchestrator::digest::strip_ansi(&text)
 }
 
 /// As primeiras palavras do corpo de uma mensagem com cabeçalho (`[Mensagem de X via ADE AGS] ...`),

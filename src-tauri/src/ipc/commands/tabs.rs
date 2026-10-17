@@ -352,10 +352,8 @@ pub(super) fn submit_prompt(pty_id: u32, text: &str) -> Result<(), String> {
 
 /// O fim da saída do PTY ainda mostra um pegado na caixa de entrada?
 fn paste_still_pending(pty_id: u32) -> bool {
-    let Some((text, _)) = crate::terminal::scrollback_of(pty_id) else { return false };
-    let start = text.len().saturating_sub(4096);
-    let start = (start..=text.len()).find(|i| text.is_char_boundary(*i)).unwrap_or(text.len());
-    pending_paste_in(&crate::orchestrator::digest::strip_ansi(&text[start..]))
+    let Some(text) = crate::terminal::tail_of(pty_id, 4096) else { return false };
+    pending_paste_in(&crate::orchestrator::digest::strip_ansi(&text))
 }
 
 /// Pura: nas últimas linhas com texto, uma linha de prompt (>, ›, ❯) com o marcador de pegado.
