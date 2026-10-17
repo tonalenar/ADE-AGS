@@ -412,8 +412,14 @@ impl RepoSync {
 
 impl Drop for RepoSync {
     fn drop(&mut self) {
-        self.inner.stop.store(true, Ordering::SeqCst);
-        self.inner.wake.notify_all();
+        // Sob a trava do estado: o worker confere `stop` e dorme em `wake.wait` segurando essa trava. Sem ela, o aviso podia
+        // cair entre a conferência e o `wait`, perder-se, e o `join` abaixo esperava para sempre (o CI travou 30 min assim,
+        // em `pause_discards_the_queue_until_resume`; o app podia travar ao fechar).
+        {
+            let _state = self.inner.state.lock().unwrap_or_else(|err| err.into_inner());
+            self.inner.stop.store(true, Ordering::SeqCst);
+            self.inner.wake.notify_all();
+        }
         if let Some(handle) = self.worker.lock().unwrap_or_else(|err| err.into_inner()).take() {
             let _ = handle.join();
         }
@@ -1220,6 +1226,26 @@ mod tests {
             std::thread::sleep(Duration::from_millis(10));
         }
         assert_eq!(dirty_rows(&db), 0, "sucesso tem de apagar o marcador");
+    }
+
+    /// O `drop` logo depois do `spawn` cai justamente na janela em que o worker confere `stop` e vai dormir: com o aviso
+    /// fora da trava do estado ele se perdia e o `join` travava para sempre. Um vigia transforma o travamento em falha.
+    #[test]
+    fn drop_right_after_spawn_never_hangs() {
+        let db = fixture();
+        let root = TempDir::new();
+        let probe = Probe::new(db.clone());
+        let (done_tx, done_rx) = std::sync::mpsc::channel();
+        let path = root.path().to_path_buf();
+        std::thread::spawn(move || {
+            for _ in 0..3000 {
+                let sync = RepoSync::with_runner(db.clone(), path.clone(), probe.runner(), hour());
+                sync.spawn();
+                drop(sync);
+            }
+            let _ = done_tx.send(());
+        });
+        assert!(done_rx.recv_timeout(Duration::from_secs(60)).is_ok(), "o drop do RepoSync travou esperando o worker");
     }
 
     #[test]
