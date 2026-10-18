@@ -15,6 +15,7 @@
  *   · --repeat N (repetições por tarefa, padrão 1) · --seed S (semente da ordem e da latência simulada, padrão 1)
  *   · --no-alternate (sem inverter a ordem nas repetições ímpares) · --set v1|v2|teste (só uma leva; teste = protocolo J2)
  *   · --seeds 21-40 (com --set teste: outra leva de sementes, para medir de novo sem as páginas já vistas)
+ *   · --set teste2 (7 famílias novas: abas, perguntas, paginação, escolha em lista, confirmação, quantidade e menu; aceita --seeds)
  *   · --history (grava também docs/ade-ags/bench/historico/<data>-<modo>-<label>.json/.md e uma linha no índice HISTORICO.md)
  *   · --gate (Fase 7: sai com código 1 se o portão de liberação falhar: sucesso ≥ 90%, falso «feito» ≤ 2%, passo p50 ≤ 700 ms, 0 travamentos)
  *   · --with-expect (Fase 5: passa ao `act` os `--expect` equivalentes ao critério de cada tarefa e mede NÃO CONFERE / «verificado» errado)
@@ -42,7 +43,7 @@ import {
 } from "./bench/core";
 import { runSimTask } from "./bench/sim";
 import { TASKS } from "./bench/tasks";
-import { testTasks } from "./bench/tasks-teste";
+import { testTasks, testTasks2 } from "./bench/tasks-teste";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const FIXTURES = join(here, "bench-fixture");
@@ -55,12 +56,14 @@ const value = (name: string): string | undefined => {
   const at = argv.indexOf(`--${name}`);
   return at >= 0 && at + 1 < argv.length && !argv[at + 1].startsWith("--") ? argv[at + 1] : undefined;
 };
-/** `--set teste`: as sementes de `--seeds 21-40` (sem a flag, a primeira leva, 1-20). */
+/** `--set teste` / `--set teste2`: as sementes de `--seeds 21-40` (sem a flag, a primeira leva, 1-20). */
 const teste = () => {
   const range = /^(\d+)-(\d+)$/.exec(value("seeds") ?? "");
   if (value("seeds") !== undefined && !range) throw new Error("--seeds espera um intervalo, p. ex. 21-40");
-  return range ? testTasks(Number(range[1]), Number(range[2])) : testTasks();
+  const make = value("set") === "teste2" ? testTasks2 : testTasks;
+  return range ? make(Number(range[1]), Number(range[2])) : make();
 };
+const isTeste = (name: string | undefined) => name === "teste" || name === "teste2";
 const intValue = (name: string, fallback: number): number => {
   const raw = value(name);
   const n = raw === undefined ? NaN : Number(raw);
@@ -119,7 +122,7 @@ function fail(message: string): never {
 }
 
 if (flag("list")) {
-  const listed = value("set") === "teste" ? teste() : TASKS;
+  const listed = isTeste(value("set")) ? teste() : TASKS;
   for (const task of listed) {
     console.log(`${task.id}  [${task.kind}${task.sim ? "+sim" : ""}${task.probe ? ", SONDA (fora dos portões)" : ""}${task.demoLogin ? ", login-demo" : ""}${(task.acts ?? 1) > 1 ? `, ${task.acts} act` : ""}] dif.${task.difficulty} ≤${task.maxSteps} passos`);
     console.log(`    ${task.title}`);
@@ -177,8 +180,8 @@ if (!mode) process.exit(2);
 
 const set = value("set");
 // `--set teste`: o conjunto de TESTE do protocolo J2 (100 tarefas geradas, fora das levas v1/v2 e dos números de sempre).
-const universe = set === "teste" ? teste() : TASKS;
-const selection = select(set === "teste" ? universe : set === "v1" || set === "v2" ? TASKS.filter((t) => (t.set ?? "v1") === set) : TASKS, {
+const universe = isTeste(set) ? teste() : TASKS;
+const selection = select(isTeste(set) ? universe : set === "v1" || set === "v2" ? TASKS.filter((t) => (t.set ?? "v1") === set) : TASKS, {
   only, kind: undefined, includePublic: flag("public"), includeDemoLogin: flag("demo-login"), simOnly: mode === "sim",
 });
 if (selection.unknown.length > 0) fail(`Ids desconhecidos: ${selection.unknown.join(", ")} (use --list).`);

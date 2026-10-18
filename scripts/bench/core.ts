@@ -127,7 +127,7 @@ export interface BenchTask {
    */
   settleMs?: number;
   /** De qual leva é (`v1` = as 23 originais; `v2` = as 10 novas do plano v2). */
-  set?: "v1" | "v2" | "teste";
+  set?: "v1" | "v2" | "teste" | "teste2";
 }
 
 // ── Relógio e fases ─────────────────────────────────────────────────
