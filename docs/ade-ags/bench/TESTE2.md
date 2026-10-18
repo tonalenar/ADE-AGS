@@ -62,3 +62,24 @@ Como no conjunto 1: depois de ver as falhas de uma leva, as sementes dela deixam
 
 As sementes 1–20 do conjunto 2 já foram vistas. Uma correção dessas classes se mede com `--seeds 21-40`.
 
+## Segunda rodada real: SEM `--expect`, sementes 21–40 (2026-10-18, app com o #222, dev cf3d798f)
+
+**140/140 (100%)**, IC 95% 97,3–100%, e o **SPRT atinge** a meta. Erro silencioso: **0/140**, sem falso "feito" e sem falso "parou". Arquivo: `teste2-real-v2-sem-expect.{json,md}`.
+
+| Família | v1 (1–20) | **v2 (21–40)** | `act` p50 (v2) |
+|---|---|---|---|
+| `abas` | 20/20 | 20/20 | 0,7 s |
+| `acordeao` | 20/20 | 20/20 | 0,7 s |
+| `selecao` | 20/20 | 20/20 | 1,4 s |
+| `confirmacao` | 20/20 | 20/20 | 1,0 s |
+| `quantidade` | 20/20 | 20/20 | 1,4 s |
+| `paginacao` | 18/20 | **20/20** | 1,4 s |
+| `menu` | 17/20 | **20/20** | 2,1 s |
+
+As duas correções do #222 foram exercitadas em sementes que ninguém tinha visto:
+- a rolagem que não anda virou paginação 2 vezes;
+- o falso cognato apareceu nas sementes 29 e 38 ("Escritório" pedido, "Oficina" na página em espanhol), e as duas passaram;
+- também passaram 32 (EN "Office"), 22 ("Computers") e 24 ("Kitchen").
+
+**Somando os dois conjuntos:** o 1 fez 300/300 nas três últimas levas; o 2 fez 275/280 nas duas levas (as 5 falhas foram as da v1, já corrigidas). Erro silencioso nas 1280 tarefas reais de teste: 2, ambos na v7 do conjunto 1, já corrigidos.
+
