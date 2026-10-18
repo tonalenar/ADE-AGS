@@ -303,7 +303,39 @@ pub(crate) fn reusable<'a>(portals: &'a [Reachable], name: &str) -> Option<&'a R
     portals.iter().find(|p| p.portal.name.trim().to_lowercase() == needle)
 }
 
-/// Crea un portal al lado de quien lo pide y conectado con él. Reaproveita o que já tem o mesmo nome e recusa passar do teto.
+/// Qual navegador já conectado um `create` reaproveita: o de mesmo nome; senão o que já está na origem pedida; senão o
+/// primeiro. A tela de um Android só pelo nome. `None` = nenhum conectado. Pura.
+pub(crate) fn reuse_choice<'a>(portals: &'a [Reachable], name: Option<&str>, url: Option<&str>) -> Option<&'a Reachable> {
+    if let Some(found) = name.and_then(|n| reusable(portals, n)) {
+        return Some(found);
+    }
+    let browsers: Vec<&Reachable> = portals.iter().filter(|p| p.portal.kind.is_none()).collect();
+    if let Some(url) = url {
+        if let Some(found) = browsers.iter().find(|p| same_origin(&p.portal.url, url)) {
+            return Some(found);
+        }
+    }
+    browsers.first().copied()
+}
+
+/// Leva o navegador reaproveitado ao endereço pedido (se houver) e monta a resposta do `create`.
+fn reuse_reply(app: &AppHandle, args: &Value, portal: Value, url: Option<&str>, note: Option<String>) -> Result<Value, String> {
+    let mut out = json!({ "created": portal, "reused": true });
+    if let Some(note) = note {
+        out["note"] = json!(note);
+    }
+    if let (Some(url), Some(id)) = (url, out["created"]["id"].as_str().map(str::to_string)) {
+        let mut nav = args.clone();
+        nav["name"] = json!(id);
+        nav["url"] = json!(url);
+        let done = portal_action(app, &nav, "navigate")?;
+        out["navigated"] = done.get("portal").cloned().unwrap_or(Value::Null);
+    }
+    Ok(out)
+}
+
+/// Crea un portal al lado de quien lo pide y conectado con él. Antes, reaproveita: o navegador já conectado (o de mesmo nome,
+/// o da mesma origem, o primeiro) ou o que ficou no canvas sem dono; só `--new` abre outro de propósito. Recusa passar do teto.
 pub(super) fn portal_create(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let me = open_tabs(app)?
@@ -311,16 +343,29 @@ pub(super) fn portal_create(app: &AppHandle, args: &Value) -> Result<Value, Stri
         .find(|t| t.id == from)
         .ok_or_else(|| "A sua aba não está aberta em nenhuma janela.".to_string())?;
     let mine = reachable(&canvas::load_boards(), &from);
-    if let Some(name) = arg_str_opt(args, "name") {
-        if let Some(existing) = reusable(&mine, &name) {
-            let mut out = json!({ "created": describe(existing), "reused": true });
-            if let Some(url) = arg_str_opt(args, "url").filter(|u| !u.trim().is_empty()) {
-                let mut nav = args.clone();
-                nav["name"] = json!(existing.id);
-                nav["url"] = json!(url.trim());
-                let done = portal_action(app, &nav, "navigate")?;
-                out["navigated"] = done.get("portal").cloned().unwrap_or(Value::Null);
-            }
+    let fresh = args.get("new").and_then(Value::as_bool).unwrap_or(false);
+    let name = arg_str_opt(args, "name").filter(|n| !n.trim().is_empty());
+    let url = arg_str_opt(args, "url").map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+    // Cada agente que navegava abria um navegador novo (um nome por teste): agora o que já está aberto serve, e o nome
+    // diferente só abre outro com `--new`.
+    let choice = if fresh { name.as_deref().and_then(|n| reusable(&mine, n)) } else { reuse_choice(&mine, name.as_deref(), url.as_deref()) };
+    if let Some(existing) = choice {
+        let renamed = name.as_deref().is_some_and(|n| n.trim().to_lowercase() != existing.portal.name.trim().to_lowercase());
+        let note = renamed.then(|| format!("Reaproveitei o navegador «{}», que já estava aberto com você (passe --new para abrir outro).", existing.portal.name));
+        return reuse_reply(app, args, describe(existing), url.as_deref(), note);
+    }
+    if mine.is_empty() && !fresh {
+        let mut req = json!({ "op": "adopt", "cwd": me.cwd, "near": me.id });
+        if let Some(url) = &url {
+            req["url"] = json!(url);
+        }
+        let raw = ask_frontend_within(app, "canvas.portal", &req, Some(&me.window), std::time::Duration::from_secs(30))?;
+        let adopted = unwrap_frontend_result(raw)?;
+        if adopted.get("id").and_then(Value::as_str).is_some() {
+            let label = adopted.get("name").and_then(Value::as_str).unwrap_or("navegador").to_string();
+            let note = format!("Reaproveitei o navegador «{label}», que tinha ficado no canvas sem dono (passe --new para abrir outro).");
+            let mut out = reuse_reply(app, args, adopted, url.as_deref(), Some(note))?;
+            out["adopted"] = json!(true);
             return Ok(out);
         }
     }
@@ -451,6 +496,27 @@ mod test {
         assert!(reusable(&portals, "novo").is_none());
         assert!(reusable(&portals, "  ").is_none());
         assert!(MAX_PORTALS_PER_AGENT >= 2);
+    }
+
+    #[test]
+    fn create_reaproveita_o_navegador_ja_aberto_mesmo_com_outro_nome() {
+        let mut lojinha = portal("p1", "loja");
+        lojinha.portal.url = "http://localhost:8765/gen/loja.html".into();
+        let mut wiki = portal("p2", "wiki");
+        wiki.portal.url = "https://pt.wikipedia.org/wiki/X".into();
+        let mut celular = portal("p3", "celular");
+        celular.portal.kind = Some("android".into());
+        let portals = vec![celular, lojinha, wiki];
+        // o de mesmo nome
+        assert_eq!(reuse_choice(&portals, Some("WIKI"), None).map(|p| p.id.as_str()), Some("p2"));
+        // outro nome: o que já está na origem pedida
+        assert_eq!(reuse_choice(&portals, Some("bench-jev-xyz"), Some("https://pt.wikipedia.org/wiki/Y")).map(|p| p.id.as_str()), Some("p2"));
+        // sem nome nem origem conhecida: o primeiro navegador (nunca a tela do Android)
+        assert_eq!(reuse_choice(&portals, None, Some("https://example.com")).map(|p| p.id.as_str()), Some("p1"));
+        assert_eq!(reuse_choice(&portals, None, None).map(|p| p.id.as_str()), Some("p1"));
+        // o Android só pelo nome
+        assert_eq!(reuse_choice(&portals, Some("celular"), None).map(|p| p.id.as_str()), Some("p3"));
+        assert!(reuse_choice(&[], Some("x"), None).is_none());
     }
 
     #[test]

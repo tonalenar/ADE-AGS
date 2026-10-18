@@ -104,7 +104,8 @@ DISPOSITIVOS ANDROID DO CANVAS — um emulador ou telefone conectado a este term
 PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os da equipe)
   portals                                     Os portais que você controla, cada um com seu estado: pronto, carregando, sem runtime,
                                               oculto (janela escondida ou nó fora de vista), verificação anti-robô ou sem resposta (+ dica do que fazer)
-  portal create [<nome>] [<url>]              Cria um ao seu lado, já conectado (mesmo nome = reaproveita; no máx. 4: reutilize com `portal navigate`)
+  portal create [<nome>] [<url>] [--new]      Abre um navegador ao seu lado, já conectado. Reaproveita o que já está aberto com você
+                                              (ou o que ficou sem dono no canvas) e só navega; --new abre outro (no máx. 4)
   portal close <portal>                       Fecha um portal conectado com você (limpe o que criou ao terminar)
   open <url>                                  Abre um site: localhost vai para um navegador do canvas (reaproveita o da mesma origem), o resto para o navegador do sistema
   portal navigate <portal> <url>              Vai a uma URL
