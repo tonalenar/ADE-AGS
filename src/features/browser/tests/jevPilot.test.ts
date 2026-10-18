@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_PER_HEAD, MIN_PROBABILITY, words, bareUrl, buildStep, fingerprint, formatResult, parseFills, parseSnapshot, runPilot, valueFor,
-  blockedPurchase, blockedControl, coverDismiss, zoomRegion, iconsIn, obviousAdvance, photoTapFinished, cartAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, exactLinkMissing, goalContradiction, missingFill, pickText, sensitiveFilled, type PageRegion, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
+  blockedPurchase, blockedControl, coverDismiss, cannotScroll, pagingControl, meaningsFor, zoomRegion, iconsIn, obviousAdvance, photoTapFinished, cartAdvance, isAmbiguous, isSearchField, submitsOnType, cartCount, emptyFieldsNote, exactLinkMissing, goalContradiction, missingFill, pickText, sensitiveFilled, type PageRegion, type PilotDeps, type StepQuery, type StepReply, type VisualReply,
 } from "../jevPilot";
 
 const LOGIN = [
@@ -764,6 +764,72 @@ describe("o piloto tira o que cobre a página (conjunto de teste J2)", () => {
     expect(calls).toEqual(["click e1", "click e4", "click e1"]);
     expect(result.outcome).toBe("done");
     expect(result.steps.join("\n")).toContain("para tirar o que cobria a página");
+  });
+});
+
+describe("conjunto de teste 2: a lista que continua na paginação e o termo de outro idioma", () => {
+  const LISTA = (shown: string[], more: boolean, scroll = "0/1120") => [
+    'page: "Tienda Ejemplo" http://localhost:8765/gen/loja2.html?f=paginacao&s=15',
+    `viewport: 1920×1120 · scroll ${scroll} · lang es`,
+    "",
+    '- text "Carrito: 0"',
+    ...shown.flatMap((name, i) => [`- heading "${name}" [level=3]`, `- button "Añadir al carrito" [ref=e${i + 1}]`]),
+    ...(more ? ['- button "Anterior" [ref=e90]', '- button "2" [ref=e91]', '- button "Cargar más" [ref=e99]'] : []),
+  ].join("\n");
+
+  it("lê a altura do documento e o idioma; sabe quando a página não rola mais", () => {
+    const page = parseSnapshot(LISTA(["Caneca"], true));
+    expect(page.docHeight).toBe(1120);
+    expect(page.lang).toBe("es");
+    expect(cannotScroll(page)).toBe(true);
+    expect(cannotScroll(parseSnapshot(LISTA(["Caneca"], true, "0/3000")))).toBe(false);
+    // o controle que leva adiante: nem «Anterior» nem o número da página
+    expect(pagingControl(page)?.ref).toBe("e99");
+  });
+
+  it("o Jev pede para rolar uma página que não rola: o piloto toca «Cargar más» e segue até o item", async () => {
+    const pages = [LISTA(["Caneca", "Moedor"], true), LISTA(["Caneca", "Moedor", "Luminária de Mesa"], false)];
+    let page = 0;
+    const calls: string[] = [];
+    const h = harness([ok("scroll", null, 0.54), ok("click", "e3", 0.9), ok("done", null, 0.95)], pages);
+    h.deps.snapshot = async () => pages[page];
+    h.deps.click = async (ref) => { calls.push(`click ${ref}`); if (ref === "e99") page = 1; };
+    h.deps.scroll = async () => { calls.push("scroll"); };
+    const result = await runPilot("Adicione «Luminária de Mesa» ao carrinho.", [], undefined, h.deps);
+    expect(calls).toEqual(["click e99", "click e3"]);
+    expect(result.steps.join("\n")).toContain("a página não rola mais");
+  });
+
+  it("com o item já na página, rolar é rolar (não troca de página à toa)", async () => {
+    const h = harness([ok("scroll", null, 0.54), ok("done", null, 0.95)], [LISTA(["Luminária de Mesa"], true)]);
+    const calls: string[] = [];
+    h.deps.click = async (ref) => { calls.push(`click ${ref}`); };
+    h.deps.scroll = async () => { calls.push("scroll"); };
+    await runPilot("Adicione «Luminária de Mesa» ao carrinho.", [], undefined, h.deps);
+    expect(calls[0]).toBe("scroll");
+  });
+
+  const MENU = (lang: string) => [
+    'page: "Tienda Ejemplo" http://localhost:8765/gen/loja2.html?f=menu&s=12',
+    `viewport: 1920×1120 · scroll 0/1120${lang ? ` · lang ${lang}` : ""}`,
+    "",
+    '- link "Cocina" [ref=e1] → /gen/loja2.html',
+    '- link "Oficina" [ref=e2] → /gen/loja2.html',
+    '- link "Audio" [ref=e3] → /gen/loja2.html',
+  ].join("\n");
+
+  it("numa página em espanhol, «Oficina» ganha [= escritório] quando o objetivo pede o Escritório (o falso cognato)", () => {
+    const page = parseSnapshot(MENU("es"));
+    expect(meaningsFor(page, "Abra a categoria Escritório pelo menu da loja.").get("e2")).toBe("escritório");
+    const step = buildStep(page, "Abra a categoria Escritório pelo menu da loja.", [], []);
+    expect(step.targets.click.find((o) => o.id === "e2")?.label).toContain("[= escritório]");
+    // só o que o objetivo pede: «Cocina» não ganha nada
+    expect(step.targets.click.find((o) => o.id === "e1")?.label).not.toContain("[=");
+  });
+
+  it("numa página em português (ou sem idioma declarado), «Oficina» é a oficina: nada de tradução", () => {
+    expect(meaningsFor(parseSnapshot(MENU("pt-br")), "Abra a categoria Escritório").size).toBe(0);
+    expect(meaningsFor(parseSnapshot(MENU("")), "Abra a categoria Escritório").size).toBe(0);
   });
 });
 

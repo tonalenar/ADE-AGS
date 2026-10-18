@@ -29,6 +29,8 @@ export interface SnapshotMeta {
   viewport: { width: number; height: number };
   scrollY: number;
   documentHeight: number;
+  /** O `<html lang>` da página (`es`, `en-us`…), quando ela declara: o piloto o usa para não ler um termo de outro idioma como se fosse português. */
+  lang?: string;
   /** Quantos nós ficaram de fora, no total (fora da janela + além do limite). */
   omitted: number;
   /** Desses, quantos estão fora da janela da página (rolar traz) — só no modo do piloto. */
@@ -78,7 +80,7 @@ export function omittedLine(
 export function formatSnapshot(nodes: SnapshotNode[], meta: SnapshotMeta): string {
   const header = [
     `page: ${meta.title ? `${quote(meta.title)} ` : ""}${meta.url}`,
-    `viewport: ${meta.viewport.width}×${meta.viewport.height} · scroll ${Math.round(meta.scrollY)}/${Math.round(meta.documentHeight)}`,
+    `viewport: ${meta.viewport.width}×${meta.viewport.height} · scroll ${Math.round(meta.scrollY)}/${Math.round(meta.documentHeight)}${meta.lang ? ` · lang ${meta.lang}` : ""}`,
   ];
   const body = nodes.length ? nodes.map(formatNode) : ["(la página no tiene contenido visible)"];
   if (meta.omitted > 0) body.push(omittedLine(meta));

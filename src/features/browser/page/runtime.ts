@@ -926,6 +926,7 @@ declare global {
       viewport: { width: root.clientWidth, height: window.innerHeight },
       scrollY: window.scrollY,
       documentHeight: root.scrollHeight,
+      ...(/^[a-z]{2,3}(-[a-z0-9]{2,8})?$/i.test(root.lang) ? { lang: root.lang.toLowerCase() } : {}),
       omitted: outOfView + overLimit,
       outOfView,
       overLimit,
