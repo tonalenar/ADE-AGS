@@ -49,6 +49,10 @@ export interface ParsedPage {
   viewport?: { width: number; height: number };
   /** Quanto a página já rolou (do cabeçalho do snapshot): rolar muda a página, mesmo sem elemento novo. */
   scrollY?: number;
+  /** A altura do documento (do cabeçalho): com `scrollY` e a janela, diz se ainda há para onde rolar. */
+  docHeight?: number;
+  /** O idioma que a página declara (`es`, `en-us`), quando declara. */
+  lang?: string;
 }
 
 const NODE = /^\s*- (\S+)(?: ("(?:[^"\\]|\\.)*"))?(.*)$/;
@@ -87,6 +91,9 @@ export function parseSnapshot(snapshot: string): ParsedPage {
     if (size && !page.viewport) {
       page.viewport = { width: Number(size[1]), height: Number(size[2]) };
       if (size[3] !== undefined) page.scrollY = Number(size[3]);
+      if (size[4] !== undefined) page.docHeight = Number(size[4]);
+      const lang = / · lang ([a-z]{2,3}(?:-[a-z0-9]{2,8})?)\b/i.exec(line);
+      if (lang) page.lang = lang[1].toLowerCase();
       continue;
     }
     const node = NODE.exec(line);
@@ -154,7 +161,75 @@ const ROLE_LABEL: Record<string, string> = {
 /** O estado que o runtime escreve num elemento de anúncio (`page/sponsored.ts`). */
 const SPONSORED_STATE = "patrocinado";
 /** Controles de paginação e de fechar uma faixa/modal: precisam sobreviver ao corte de candidatos de uma página comprida. */
-const PAGINATION = /^(pr[óo]xim[ao]|next|mais|more|carregar mais|load more|mostrar mais|show more|ver mais|older|seguinte|›|»|>)\b|^\d{1,3}$/i;
+const PAGINATION = /^(pr[óo]xim[ao]|next|mais|more|carregar mais|load more|mostrar mais|show more|ver mais|older|seguinte|siguiente|cargar m[áa]s|ver m[áa]s|mostrar m[áa]s|m[áa]s|›|»|>)(?![\p{L}\d])|^\d{1,3}$/iu;
+/** Voltar uma página não leva a lista adiante. */
+const PAGE_BACK = /anterior|previous|\bprev\b|voltar|atr[áa]s|‹|«|</i;
+
+/** A página ainda tem para onde rolar? `false` só com as medidas do cabeçalho dizendo que já está no fim. Pura. */
+export function cannotScroll(page: ParsedPage): boolean {
+  if (!page.viewport || page.scrollY === undefined || page.docHeight === undefined) return false;
+  return page.scrollY + page.viewport.height >= page.docHeight - 4;
+}
+
+/** O controle que leva a lista adiante («Próxima», «Carregar mais», «Siguiente»): nunca um número de página nem «anterior». Pura. */
+export function pagingControl(page: ParsedPage): PageElement | null {
+  return page.elements.find((el) => (el.role === "button" || el.role === "link") && !el.states.includes("disabled")
+    && PAGINATION.test(el.name.trim()) && !/^\d{1,3}$/.test(el.name.trim()) && !PAGE_BACK.test(el.name)) ?? null;
+}
+
+/** O item que o objetivo cita entre «» já está na página? (Sem citação: não se sabe, e conta como não.) Pura. */
+function quotedOnPage(page: ParsedPage, goal: string): boolean {
+  const quoted = [...goal.matchAll(/[«"“]([^»"”]{2,80})[»"”]/g)].map((m) => m[1].trim().toLowerCase());
+  if (quoted.length === 0) return false;
+  const seen = [...page.text, ...page.elements.map((el) => el.name)].join("\n").toLowerCase();
+  return quoted.every((q) => seen.includes(q));
+}
+
+/**
+ * Termos comuns de loja e de site em inglês e espanhol, e o que são em português: numa página em outro idioma, o rótulo
+ * ganha `[= …]` quando o objetivo (em português) fala disso. Os falsos cognatos são o motivo (a «Oficina» de uma loja em
+ * espanhol é o escritório, não a oficina). Chaves sem acento, em minúsculas.
+ */
+const GLOSSARY: Record<string, string> = {
+  office: "escritório", oficina: "escritório", kitchen: "cozinha", cocina: "cozinha", home: "casa", hogar: "casa",
+  garden: "jardim", jardin: "jardim", furniture: "móveis", muebles: "móveis", toys: "brinquedos", juguetes: "brinquedos",
+  books: "livros", libros: "livros", sports: "esportes", deportes: "esportes", beauty: "beleza", belleza: "beleza",
+  health: "saúde", salud: "saúde", clothing: "roupas", clothes: "roupas", ropa: "roupas", shoes: "calçados",
+  zapatos: "calçados", calzado: "calçados", electronics: "eletrônicos", electronica: "eletrônicos", computers: "informática",
+  computadoras: "informática", ordenadores: "informática", phones: "celulares", telefonos: "celulares", celulares: "celulares",
+  moviles: "celulares", tools: "ferramentas", herramientas: "ferramentas", automotive: "automotivo", automotriz: "automotivo",
+  pets: "animais", mascotas: "animais", baby: "bebê", bebe: "bebê", bebes: "bebê", grocery: "mercado", groceries: "mercado",
+  supermercado: "mercado", jewelry: "joias", joyeria: "joias", watches: "relógios", relojes: "relógios", bags: "bolsas",
+  bolsos: "bolsas", stationery: "papelaria", papeleria: "papelaria", music: "música", games: "jogos", juegos: "jogos",
+  appliances: "eletrodomésticos", electrodomesticos: "eletrodomésticos", lighting: "iluminação", iluminacion: "iluminação",
+  bathroom: "banheiro", bano: "banheiro", bedroom: "quarto", dormitorio: "quarto", drinks: "bebidas", food: "comida",
+  cart: "carrinho", carrito: "carrinho", basket: "carrinho", checkout: "finalizar compra", account: "conta", cuenta: "conta",
+  "my account": "minha conta", "mi cuenta": "minha conta", help: "ajuda", ayuda: "ajuda", settings: "configurações",
+  ajustes: "configurações", configuracion: "configurações", "sign in": "entrar", "log in": "entrar", login: "entrar",
+  "iniciar sesion": "entrar", ingresar: "entrar", "sign up": "cadastrar", register: "cadastrar", registrarse: "cadastrar",
+  "sign out": "sair", "log out": "sair", "cerrar sesion": "sair", salir: "sair", orders: "pedidos", "my orders": "meus pedidos",
+  "mis pedidos": "meus pedidos", wishlist: "lista de desejos", favorites: "favoritos", notifications: "notificações",
+  notificaciones: "notificações", shipping: "entrega", envio: "entrega", returns: "devoluções", devoluciones: "devoluções",
+  contact: "contato", contacto: "contato", about: "sobre", "about us": "sobre", "sobre nosotros": "sobre", deals: "ofertas",
+  sale: "promoção", rebajas: "promoção", "new arrivals": "novidades", novedades: "novidades",
+};
+const flat = (text: string) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+/**
+ * Numa página que declara outro idioma, o que cada rótulo é em português, quando o objetivo fala disso e o rótulo, como
+ * está escrito, não casa com o objetivo. Por ref. Pura.
+ */
+export function meaningsFor(page: ParsedPage, goal: string): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!page.lang || page.lang.startsWith("pt")) return out;
+  const wanted = words(goal);
+  for (const el of page.elements) {
+    const pt = GLOSSARY[flat(el.name)];
+    if (!pt || overlap(wanted, words(el.name)) > 0 || overlap(wanted, words(pt)) === 0) continue;
+    out.set(el.ref, pt);
+  }
+  return out;
+}
 const DISMISS = /^(fechar|close|cerrar|×|✕|x|rejeitar|reject|recusar|decline|rechazar|n[ãa]o,? obrigad[oa]|no,? thanks|no,? gracias|agora n[ãa]o|not now|ahora no|dispensar|dismiss|aceitar (apenas )?(os )?essenciais|only necessary|necessary only|solo (las )?necesarias)\b/i;
 /** Entre os controles de fechar, os que recusam: a escolha mais discreta numa faixa de cookies (nunca «aceitar todos»). */
 const REJECT = /^(rejeitar|recusar|reject|decline|rechazar|aceitar (apenas )?(os )?essenciais|only necessary|necessary only|solo (las )?necesarias)\b/i;
@@ -254,7 +329,7 @@ export interface PriorAction {
 }
 
 /** O que o Jev lê de um elemento: o papel, o nome e o estado (marcado, expandido, preenchido), nunca o valor. */
-function labelOf(el: PageElement, twins?: Set<string>): string {
+function labelOf(el: PageElement, twins?: Set<string>, meaning?: string): string {
   const role = ROLE_LABEL[el.role] ?? el.role;
   const marks = [
     el.states.includes("checked") ? "checked" : null,
@@ -269,7 +344,7 @@ function labelOf(el: PageElement, twins?: Set<string>): string {
   const near = twins?.has(twinKey(el)) && el.near ? ` [next to: ${el.near}]` : "";
   // Ordem do que mais importa ao que menos: o nome, o estado, quem é (o que vem antes), o destino — o provedor corta em ~110.
   // Os sinais que as regras do Jev citam (`decisions/browse_rules.rs`) vão logo depois do nome, antes de o provedor cortar o rótulo.
-  const tags = `${el.states.includes(SPONSORED_STATE) ? " [sponsored]" : ""}${el.states.includes("required") ? " [required]" : ""}`;
+  const tags = `${meaning ? ` [= ${meaning}]` : ""}${el.states.includes(SPONSORED_STATE) ? " [sponsored]" : ""}${el.states.includes("required") ? " [required]" : ""}`;
   return `${role}${el.name ? ` "${el.name}"` : ""}${tags}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}${near}${where}`;
 }
 
@@ -388,6 +463,8 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
     - (!wantsAds && el.states.includes(SPONSORED_STATE) ? 4 : 0);
 
   const twins = twinsOf(page.elements);
+  // Numa página em outro idioma, o que o rótulo é em português, quando o objetivo fala disso (o falso cognato).
+  const meanings = meaningsFor(page, goal);
   const inexact = inexactLinks(page, goal);
   const groups: Record<Operation, { el: PageElement; index: number }[]> = { click: [], type: [], select: [] };
   // Uma lista nativa com opções vira UM ALVO POR OPÇÃO ("Classificar por → Preço: do menor ao maior"): escolher não
@@ -412,7 +489,7 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
   for (const operation of ["click", "type", "select"] as const) {
     // Com mais de `MAX_PER_HEAD`, ficam os mais ligados ao objetivo; sempre na ordem da página, que é como se lê.
     const kept = [...groups[operation]].sort((a, b) => score(b.el) - score(a.el) || a.index - b.index).slice(0, MAX_PER_HEAD).sort((a, b) => a.index - b.index);
-    if (kept.length > 0) targets[operation] = kept.map(({ el }) => ({ id: el.ref, label: labelOf(el, twins) }));
+    if (kept.length > 0) targets[operation] = kept.map(({ el }) => ({ id: el.ref, label: labelOf(el, twins, meanings.get(el.ref)) }));
     shown.push(...kept);
   }
   if (optionTargets.length > 0) targets.select = [...optionTargets.slice(0, MAX_PER_HEAD), ...(targets.select ?? [])];
@@ -423,7 +500,7 @@ export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], hi
     : shown;
   const clip = (text: string) => (text.length > TABLE_LABEL_CHARS ? `${text.slice(0, TABLE_LABEL_CHARS - 1)}…` : text);
   const table = [
-    ...inTable.sort((a, b) => a.index - b.index).map(({ el }) => `[${el.ref}] ${clip(labelOf(el, twins))}`),
+    ...inTable.sort((a, b) => a.index - b.index).map(({ el }) => `[${el.ref}] ${clip(labelOf(el, twins, meanings.get(el.ref)))}`),
     ...(shown.length > inTable.length ? [`(+${shown.length - inTable.length} more elements offered in the questions below)`] : []),
     ...page.elements.filter((el) => el.options?.length && !el.states.includes("disabled")).map((el) => `[${el.ref}] ${labelOf(el)} with options: ${el.options!.slice(0, 12).join(" | ")}`),
   ];
@@ -1489,8 +1566,15 @@ async function pilotLoop(
     let what: string;
     try {
       if (operation === "scroll") {
-        await deps.scroll();
-        what = "rolou a página";
+        // A página já está no fim e a lista continua na paginação («Carregar mais», «Siguiente»): rolar não anda, e repetir
+        // a rolagem parava o piloto (teste J2 2, paginação: o item estava na 4.ª leva e o Jev pediu para rolar na 3.ª).
+        const pager = cannotScroll(page) && !quotedOnPage(page, goal) ? pagingControl(page) : null;
+        if (pager) {
+          what = `${await act(pager, "click", fills, taken, deps, undefined, { page, goal })} (a página não rola mais: a lista continua na paginação)`;
+        } else {
+          await deps.scroll();
+          what = "rolou a página";
+        }
       } else if (operation === "wait") {
         waits += 1;
         what = "esperou a página";
