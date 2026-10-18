@@ -239,3 +239,22 @@ Arquivo: `teste-real-v9-sem-expect.{json,md}`. As cinco famílias fecharam 20/20
 
 **Total nas nove levas de teste:** 868/900 (88+95+94+97+97+100+98+99+100). O erro silencioso ficou em 2/900, ambos na v7 e já corrigidos. As duas últimas levas (v6 com `--expect`, v9 sem) deram 100/100.
 
+## Décima rodada: SEM `--expect`, sementes 181–200 (2026-10-17, app com #218 e #219, dev 299eead4)
+
+| | v7 | v8 | v9 | **v10** |
+|---|---|---|---|---|
+| Sucesso | 98 | 99 | 100 | **100/100** (IC 96,3–100%) |
+| Falso "feito" | 2 | 0 | 0 | **0** |
+| Falso "parou" | 0 | 0 | 2 | **0** |
+| SPRT (meta ≥ 98%) | rodar mais | rodar mais | atinge | **atinge** |
+| `act` p50 · p95 | 1,2 · 3,6 s | 1,2 · 5,1 s | 1,2 · 5,0 s | 1,1 · 5,0 s |
+
+Arquivo: `teste-real-v10-sem-expect.{json,md}`. É a primeira rodada sem nenhuma falha de nenhum tipo: as 100 tarefas terminaram em "feito" certo, sem o oráculo. O selo numerado decidiu 12 toques. O "feito, conferido pela foto numerada" (#219) entrou em ação 3 vezes, justamente nos casos que na v9 eram "falsos parou".
+
+**Total nas dez levas de teste:** 968/1000. Erro silencioso: 2/1000, ambos na v7 e já corrigidos. As três últimas levas (v6 com `--expect`, v9 e v10 sem) somam 300/300.
+
+**Limites que continuam valendo:**
+- O conjunto de teste tem 5 famílias de páginas geradas. Ele não cobre sites reais variados.
+- O conjunto original cobre parte disso: 31/31. As sondas da Amazon seguem barradas pela verificação anti-robô do site.
+- Para afirmar mais que ~99% com confiança, são necessárias mais levas e mais famílias, não só mais sementes das mesmas.
+
