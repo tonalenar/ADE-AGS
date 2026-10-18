@@ -37,3 +37,28 @@ bun scripts/jev-bench.ts --real --set teste2 --seeds 1-20 --with-expect --yes --
 ```
 
 Como no conjunto 1: depois de ver as falhas de uma leva, as sementes dela deixam de ser teste para quem ajustou o piloto. A medida seguinte usa `--seeds 21-40`.
+
+## Primeira rodada real: SEM `--expect`, sementes 1–20 (2026-10-17, app com dev 299eead4)
+
+**135/140 (96%)**, IC 95% 91,9–98,5%. Erro silencioso: **0/140** (teto 2,7%), sem falso "feito" e sem violações. Houve 1 falso "parou". SPRT: rodar mais. `act` p50 · p95: 1,2 · 2,2 s; 2,9 consultas ao Jev por tarefa. Arquivo: `teste2-real-v1-sem-expect.{json,md}`.
+
+| Família | Sucesso | `act` p50 | Consultas/tarefa |
+|---|---|---|---|
+| `abas` | 20/20 | 0,8 s | 2,0 |
+| `acordeao` | 20/20 | 0,8 s | 2,0 |
+| `selecao` | 20/20 | 1,6 s | 3,6 |
+| `confirmacao` | 20/20 | 1,2 s | 3,0 |
+| `quantidade` | 20/20 | 1,0 s | 2,8 |
+| `paginacao` | **18/20** | 1,7 s | 3,9 |
+| `menu` | **17/20** | 2,2 s | 2,9 |
+
+**As 5 falhas são paradas honestas, em duas classes que o conjunto 1 não tinha:**
+
+1. **"Carregar mais" até o fim** (`paginacao` 15 e 19, ES/EN). O item estava na 4ª leva e eram precisos 3 cliques. O Jev clicou 2 vezes e depois pediu para rolar uma página que nem rola (`scroll 0/1120`). Rolar não mudou nada, e o piloto parou por repetição. Correção provável:
+   - quando o item do objetivo não está na página e há um controle de paginação, ele vence uma rolagem que não pode andar.
+2. **Falso cognato entre idiomas** (`menu` 12, 17 e 19, todas iguais). O objetivo pede a categoria "Escritório", e a página em espanhol a chama de "**Oficina**", que em português é outra coisa. O Jev não fez a ponte, e a foto também não achou. Correções possíveis:
+   - mandar ao Jev o idioma da página (`<html lang>`), pedindo que considere a tradução dos termos do objetivo;
+   - ou uma tabela pequena de equivalências para menus e categorias.
+
+As sementes 1–20 do conjunto 2 já foram vistas. Uma correção dessas classes se mede com `--seeds 21-40`.
+
