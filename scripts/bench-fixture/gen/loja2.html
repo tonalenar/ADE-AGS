@@ -1,0 +1,39 @@
+<!doctype html>
+<html>
+<meta charset="utf-8">
+<title>Loja — conjunto de teste 2</title>
+<!-- Conjunto de TESTE 2 (protocolo J2): a variante sai de `?f=<família>&s=<semente>` (ver scenario2.js e render2.js). -->
+<link rel="stylesheet" href="../common.css">
+<style>
+  html, body { background: #fff; color: #111; color-scheme: light; }
+  .cartline { font-weight: 600; }
+  .price { color: #555; margin: 6px 0 10px; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; margin-bottom: 10px; }
+  ul.list { padding-left: 18px; }
+  ul.list li { margin: 6px 0; }
+  [role=tablist] { border-bottom: 1px solid #ddd; padding-bottom: 8px; }
+  .tab { background: #e5e7eb; color: #111; text-decoration: none; padding: 8px 14px; border-radius: 4px; }
+  .tab.on { background: #2563eb; color: #fff; }
+  .panel { padding: 16px 0; font-size: 18px; }
+  .q { border-bottom: 1px solid #eee; padding: 10px 0; }
+  .q > span { margin-right: 12px; }
+  button.link { background: none; color: #1d4ed8; padding: 0; margin: 0; text-align: left; }
+  button.plus { padding: 2px 10px; }
+  .answer { color: #333; margin: 8px 0 0; }
+  [role=listbox] li { cursor: pointer; list-style: none; padding: 6px 10px; border: 1px solid #ddd; margin: 4px 0; width: 160px; }
+  .qty { min-width: 24px; text-align: center; font-weight: 600; }
+  nav { display: flex; gap: 12px; align-items: center; position: relative; }
+  nav ul.list { position: absolute; top: 46px; left: 0; z-index: 5; margin: 0; padding: 8px 18px; list-style: none;
+    background: #282c34; border-radius: 6px; box-shadow: 0 8px 24px rgba(0, 0, 0, .3); min-width: 180px; }
+  nav a { color: #fff; }
+</style>
+<body>
+<script type="module">
+import { scenario2 } from "./scenario2.js";
+import { render } from "./render2.js";
+
+const params = new URLSearchParams(location.search);
+render(document, scenario2(params.get("f") ?? "abas", Number(params.get("s") ?? "1")), location.search);
+</script>
+</body>
+</html>

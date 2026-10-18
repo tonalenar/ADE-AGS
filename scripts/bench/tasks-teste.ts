@@ -10,6 +10,7 @@
  * usa sementes novas (`--seeds 21-40`), que geram outras 100 páginas das mesmas famílias.
  */
 import { FAMILIES, SEEDS, scenario, type RawCriterion } from "../bench-fixture/gen/scenario.js";
+import { FAMILIES2, SEEDS2, scenario2 } from "../bench-fixture/gen/scenario2.js";
 import { all, text, url, type BenchTask, type Criterion } from "./core";
 
 function criterion(raw: RawCriterion): Criterion {
@@ -44,3 +45,33 @@ export function testTasks(first = 1, last = SEEDS): BenchTask[] {
 }
 
 export const TEST_TASKS: BenchTask[] = testTasks();
+
+const DIFFICULTY2: Record<string, BenchTask["difficulty"]> = { abas: 2, acordeao: 3, paginacao: 3, selecao: 3, confirmacao: 3, quantidade: 3, menu: 3 };
+
+/**
+ * O conjunto de TESTE 2 (`--set teste2`): 7 famílias que o 1 não cobre — abas, perguntas que abrem (com «+» repetido),
+ * paginação, escolha em lista nativa/personalizada, confirmação antes de remover, quantidade e menu. Página
+ * `gen/loja2.html`; as sementes `first`..`last` (1..20 é a primeira leva).
+ */
+export function testTasks2(first = 1, last = SEEDS2): BenchTask[] {
+  return FAMILIES2.flatMap((family) => Array.from({ length: last - first + 1 }, (_, i) => {
+    const seed = first + i;
+    const s = scenario2(family, seed);
+    const task: BenchTask = {
+      id: `T2-${family}-${String(seed).padStart(2, "0")}`,
+      kind: "local",
+      set: "teste2",
+      difficulty: DIFFICULTY2[family] ?? 3,
+      sim: false,
+      maxSteps: 8,
+      title: `${family} · ${s.lang} · semente ${seed}`,
+      goal: s.goal,
+      url: `/gen/loja2.html?f=${family}&s=${seed}`,
+      ...(s.fills.length > 0 ? { fills: s.fills } : {}),
+      success: criterion(s.success),
+      ...(s.forbid ? { forbid: criterion(s.forbid) } : {}),
+      tags: ["teste2", family, s.lang],
+    };
+    return task;
+  }));
+}
