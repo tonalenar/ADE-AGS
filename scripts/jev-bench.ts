@@ -361,7 +361,8 @@ if (mode === "sim") {
   if (planned.length === 0) fail("O teto não deixa rodar nenhuma tarefa: aumente --max-probes.");
   await confirmReal(planned.map((p) => p.task), budget.maxProbes);
   server = await serveFixtures();
-  let portal = value("portal") ?? `bench-jev-${Date.now().toString(36)}`;
+  // Um nome fixo: o app reaproveita o navegador do bench (ou o que ficou sem dono no canvas) em vez de abrir um por rodada.
+  let portal = value("portal") ?? "bench-jev";
   if (!value("portal")) {
     try {
       // O app pode renomear (`bench-jev 2`) se o nome já existe: vale o nome que ele devolve.

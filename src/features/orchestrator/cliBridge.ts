@@ -18,6 +18,7 @@ import { screenOf } from "@/features/terminal/terminalRegistry";
 import { requestPtyLaunch } from "@/features/terminal/ptyLaunch";
 import { boardKey, boardKeyOfTab, canvasActions, flushSave, setWorkMode, useCanvasStore } from "@/features/canvas/store";
 import { AGENT_PORTAL_SIZE, AGENT_PORTAL_VIEWPORT } from "@/features/canvas/board";
+import { orphanPortal } from "@/features/canvas/portalReuse";
 
 /**
  * Lado frontend del puente de la CLI (ver `ipc/bridge.rs`).
@@ -326,6 +327,21 @@ async function handlePortal(args: Record<string, unknown>) {
     if (useCanvasStore.getState().modes[key] !== "canvas") setWorkMode(key, "canvas");
     await flushSave(key);
     return created;
+  }
+  // Antes de criar: o navegador que ficou no canvas sem dono (a aba que o usava fechou) passa a ser de quem pede.
+  if (op === "adopt") {
+    const cwd = str(args, "cwd");
+    const near = str(args, "near");
+    if (!cwd || !near) throw new Error("Faltam cwd ou near");
+    const key = keyFor(near, cwd);
+    const board = useCanvasStore.getState().boards[key];
+    const open = new Set(useTabsStore.getState().tabs.map((t) => t.id));
+    const id = board ? orphanPortal(board, open, str(args, "url")) : null;
+    if (!board || !id) return { id: null };
+    canvasActions.connect(key, id, near);
+    if (useCanvasStore.getState().modes[key] !== "canvas") setWorkMode(key, "canvas");
+    await flushSave(key);
+    return { id, name: board.portals[id].name || id, url: board.portals[id].url ?? "" };
   }
   if (op === "run") {
     const cwd = str(args, "cwd");
