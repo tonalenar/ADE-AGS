@@ -44,6 +44,8 @@ export const discoverSessionId = (args: {
   cwd: string;
   startedAfter: number;
   accountId: string | null;
+  /** Sessões que já são de outras abas abertas: a descoberta não as devolve. */
+  exclude?: string[];
 }) => invoke<string | null>("discover_session_id", args);
 
 /** Dónde está abierta ya esta conversación, si lo está. */

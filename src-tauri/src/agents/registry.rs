@@ -190,6 +190,8 @@ pub struct AgentDef {
     /// há o que adivinhar.
     /// - claude-code: `--session-id <uuid>` (precisa ser um UUID válido).
     pub assign_session: Option<&'static str>,
+    /// Prefixo do id que a app escolhe (`ses_` no OpenCode, que recusa ids sem ele). Vazio = um UUID.
+    pub assign_id_prefix: &'static str,
     pub sessions: SessionSource,
     pub models: ModelSource,
     /// Cómo se le enchufa el servidor MCP de la app.
@@ -230,6 +232,7 @@ pub const AGENTS: &[AgentDef] = &[
         }),
         resume: Some("--resume {session}"),
         assign_session: Some("--session-id {session}"),
+        assign_id_prefix: "",
         sessions: SessionSource::ClaudeProjects,
         models: ModelSource::ClaudeCode,
         mcp: McpStyle::ClaudeFlags,
@@ -243,7 +246,9 @@ pub const AGENTS: &[AgentDef] = &[
         skills_dir: Some(".agents/skills"),
         profile: None,
         resume: Some("--resume {session}"),
+        // Sem flag para escolher o id de uma sessão nova (só `--resume <id|índice|latest>`): a app descobre depois.
         assign_session: None,
+        assign_id_prefix: "",
         sessions: SessionSource::GeminiTmp,
         models: ModelSource::GeminiCatalogue,
         mcp: McpStyle::None,
@@ -268,7 +273,9 @@ pub const AGENTS: &[AgentDef] = &[
             overriding_env: &["CODEX_API_KEY"],
         }),
         resume: Some("resume {session}"),
+        // Codex 0.163: sem flag para escolher o id de uma sessão interativa nova (só `codex resume <id>`).
         assign_session: None,
+        assign_id_prefix: "",
         sessions: SessionSource::CodexRollouts,
         models: ModelSource::CodexAppServer,
         mcp: McpStyle::None,
@@ -296,7 +303,10 @@ pub const AGENTS: &[AgentDef] = &[
             overriding_env: &[],
         }),
         resume: Some("--session {session}"),
-        assign_session: None,
+        // OpenCode 2.0.31: `--session <id>` «continua OU CRIA se não existir» (verificado: `opencode run -s ses_… ` listou a
+        // sessão nova com esse id). O id precisa começar com `ses`.
+        assign_session: Some("--session {session}"),
+        assign_id_prefix: "ses_",
         sessions: SessionSource::ProcessQuery,
         models: ModelSource::OpencodeModels,
         mcp: McpStyle::OpencodeConfig,
@@ -312,7 +322,11 @@ pub const AGENTS: &[AgentDef] = &[
         skills_dir: Some(".agents/skills"),
         profile: None,
         resume: Some("--session {session}"),
+        // A documentação do Kimi se contradiz (uma página diz que `--session <id>` cria se não existir, outras só falam em
+        // retomar) e o CLI não está instalado aqui para confirmar. Para ligar: rodar `kimi --session <id-novo>` e ver se a sessão
+        // nasce com esse id; então `Some("--session {session}")`.
         assign_session: None,
+        assign_id_prefix: "",
         sessions: SessionSource::KimiSessions,
         models: ModelSource::Unknown,
         mcp: McpStyle::None,
@@ -329,6 +343,7 @@ pub const AGENTS: &[AgentDef] = &[
         profile: None,
         resume: None,
         assign_session: None,
+        assign_id_prefix: "",
         sessions: SessionSource::None,
         models: ModelSource::AntigravityModels,
         mcp: McpStyle::None,
@@ -348,6 +363,7 @@ pub const AGENTS: &[AgentDef] = &[
         profile: None,
         resume: None,
         assign_session: None,
+        assign_id_prefix: "",
         sessions: SessionSource::None,
         models: ModelSource::Unknown,
         mcp: McpStyle::None,
@@ -392,12 +408,19 @@ pub struct AgentRegistryEntry {
     pub resume: Option<String>,
     /// Ver [`AgentDef::assign_session`].
     pub assign_session: Option<String>,
+    /// Ver [`AgentDef::assign_id_prefix`].
+    pub assign_id_prefix: String,
     pub supports_accounts: bool,
     pub sessions: SessionSource,
     /// Cómo se le enchufa el servidor MCP. El frontend lo usa para dos cosas: decidir si
     /// la tab arranca con el navegador, y saber con qué nombre tiene que mandar al agente
     /// a usar una tool (OpenCode las prefija con el nombre del servidor).
     pub mcp: McpStyle,
+}
+
+/// A app escolhe o id da sessão deste agente ao abrir a aba (ver [`AgentDef::assign_session`])? Só os de fábrica que o declaram.
+pub fn assigns_session(agent_id: &str) -> bool {
+    AGENTS.iter().any(|a| a.id == agent_id && a.assign_session.is_some())
 }
 
 /// El catálogo estático de TUIs de fábrica. Sin I/O: responde en el acto.
@@ -418,6 +441,7 @@ pub fn agent_registry() -> Vec<AgentRegistryEntry> {
             skills_dir: a.skills_dir.map(str::to_string),
             resume: a.resume.map(str::to_string),
             assign_session: a.assign_session.map(str::to_string),
+            assign_id_prefix: a.assign_id_prefix.to_string(),
             supports_accounts: a.profile.is_some(),
             sessions: a.sessions,
             mcp: a.mcp,

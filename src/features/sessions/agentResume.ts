@@ -62,6 +62,21 @@ export function canAssignSession(agentId: string): boolean {
   return !!agentDef(agentId)?.assignSession;
 }
 
+const BASE62 = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz";
+
+/**
+ * Um id novo no formato que o agente aceita: um UUID, ou, com prefixo declarado no registro (`ses_` no OpenCode, que recusa
+ * qualquer id sem ele), o prefixo + 12 hex + 14 caracteres base62, com a mesma forma dos ids reais do agente. Nunca falha.
+ */
+export function newSessionId(agentId: string): string {
+  const prefix = agentDef(agentId)?.assignIdPrefix ?? "";
+  if (!prefix) return crypto.randomUUID();
+  const bytes = crypto.getRandomValues(new Uint8Array(20));
+  const hex = [...bytes.slice(0, 6)].map((b) => b.toString(16).padStart(2, "0")).join("");
+  const tail = [...bytes.slice(6)].map((b) => BASE62[b % BASE62.length]).join("");
+  return `${prefix}${hex}${tail}`;
+}
+
 /**
  * El comando para ABRIR una sesión nueva con el id que eligió la app.
  *

@@ -25,6 +25,44 @@ pub(super) fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+/// Quando o arquivo NASCEU (segundos), ou, se o sistema de arquivos não informa, quando foi modificado pela última vez.
+///
+/// O piso temporal da descoberta é "isto não pode ser a sessão desta aba porque já existia quando ela abriu". Com o `mtime` esse
+/// piso não separava nada: toda conversa que já existia e continuava sendo escrita (uma feita fora do app, no mesmo projeto, ou de
+/// outra aba) tinha `mtime` recente e passava. O nascimento sim: uma conversa antiga nasceu antes de a aba abrir.
+pub(super) fn birth_secs(path: &Path) -> Option<i64> {
+    let meta = fs::metadata(path).ok()?;
+    let born = meta.created().or_else(|_| meta.modified()).ok()?;
+    Some(born.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64)
+}
+
+std::thread_local! {
+    /// Ids de sessão que a descoberta em curso NÃO pode devolver: já são de outras abas abertas.
+    static EXCLUDED_SESSION_IDS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Enquanto vive, [`is_excluded`] responde por estes ids (só nesta thread). A descoberta o cria e ele se desfaz sozinho.
+pub(super) struct ExcludeGuard;
+
+impl ExcludeGuard {
+    pub(super) fn set(ids: &[String]) -> Self {
+        EXCLUDED_SESSION_IDS.with(|cell| *cell.borrow_mut() = ids.to_vec());
+        ExcludeGuard
+    }
+}
+
+impl Drop for ExcludeGuard {
+    fn drop(&mut self) {
+        EXCLUDED_SESSION_IDS.with(|cell| cell.borrow_mut().clear());
+    }
+}
+
+/// Esta sessão já é de outra aba? Dois agentes iguais na mesma pasta é o caso comum: sem isto, a segunda aba adotava a conversa
+/// da primeira.
+pub(super) fn is_excluded(id: &str) -> bool {
+    EXCLUDED_SESSION_IDS.with(|cell| cell.borrow().iter().any(|taken| taken == id))
+}
+
 pub(super) fn mtime_secs(path: &Path) -> Option<i64> {
     let meta = fs::metadata(path).ok()?;
     let modified = meta.modified().ok()?;
@@ -54,8 +92,8 @@ pub(super) fn newest_matching(
             let mtime = mtime_secs(p)?;
             if let Some(after) = after {
                 // ">=" y no ">": el timestamp tiene resolución de 1s, así que un archivo
-                // creado en el mismo segundo en que arrancó el proceso es válido.
-                if mtime < after {
+                // creado en el mismo segundo en que arrancó el proceso es válido. Con piso, vale el NACIMENTO (ver `birth_secs`).
+                if birth_secs(p)? < after {
                     return None;
                 }
             }
@@ -74,6 +112,12 @@ pub(super) fn newest_matching(
         scored.retain(|(_, _, m)| *m);
     }
 
+    if after.is_some() {
+        // Com piso, a aba procura a sessão que NASCEU depois de abrir: a primeira a aparecer é a dela, e uma conversa de fora que
+        // nasceu depois é a mais nova, não a dela.
+        scored.sort_by_key(|(p, mtime, _)| (birth_secs(p).unwrap_or(i64::MAX), std::cmp::Reverse(*mtime)));
+        return scored.into_iter().next().map(|(p, _, _)| p);
+    }
     scored.sort_by_key(|(_, mtime, _)| *mtime);
     scored.pop().map(|(p, _, _)| p)
 }
@@ -101,19 +145,25 @@ pub(super) fn newest_where(
     after: Option<i64>,
     keep: impl Fn(&Path) -> bool,
 ) -> Option<PathBuf> {
-    candidates
+    let mut found: Vec<(PathBuf, i64, i64)> = candidates
         .iter()
         .filter_map(|p| {
             let mtime = mtime_secs(p)?;
-            // ">=" y no ">" por el mismo motivo que en `newest_matching`: el mtime tiene
-            // resolución de 1s y el archivo puede nacer en el mismo segundo del arranque.
-            if after.is_some_and(|a| mtime < a) {
+            let born = birth_secs(p)?;
+            // ">=" y no ">" por el mismo motivo que en `newest_matching`: el archivo puede nacer en el mismo segundo del
+            // arranque. Con piso, vale el nascimento, não o `mtime` (ver `birth_secs`).
+            if after.is_some_and(|a| born < a) {
                 return None;
             }
-            keep(p).then(|| (p.clone(), mtime))
+            keep(p).then(|| (p.clone(), mtime, born))
         })
-        .max_by_key(|(_, mtime)| *mtime)
-        .map(|(p, _)| p)
+        .collect();
+    if after.is_some() {
+        // Com piso, a mais antiga das que nasceram depois de a aba abrir (ver `newest_matching`).
+        found.sort_by_key(|(_, mtime, born)| (*born, std::cmp::Reverse(*mtime)));
+        return found.into_iter().next().map(|(p, _, _)| p);
+    }
+    found.into_iter().max_by_key(|(_, mtime, _)| *mtime).map(|(p, _, _)| p)
 }
 
 pub(super) fn find_string_field(path: &Path, candidates: &[&str]) -> Option<String> {
@@ -325,13 +375,17 @@ pub(super) fn claude_session_file(
 ) -> Option<PathBuf> {
     let dir = claude_project_dir(cwd, profile);
     if let Some(id) = session_id {
+        // Com um id conhecido, só o arquivo desse id. Cair para «o mais novo da pasta» devolvia a conversa de OUTRA pessoa quando a
+        // da aba ainda não tinha arquivo (uma aba com o id escolhido pela app, antes da primeira mensagem), e o título e a
+        // exportação saíam dela.
         let direct = dir.join(format!("{id}.jsonl"));
-        if direct.exists() {
-            return Some(direct);
-        }
+        return direct.exists().then_some(direct);
     }
     let mut files = Vec::new();
     collect_files(&dir, "jsonl", &mut files);
+    if after.is_some() {
+        files.retain(|p| !p.file_stem().is_some_and(|s| is_excluded(&s.to_string_lossy())));
+    }
     newest_matching(&files, after, None)
 }
 
@@ -546,7 +600,10 @@ pub(super) fn gemini_session_file(cwd: &str, after: Option<i64>, profile: Option
 pub(super) fn gemini_session_file_in(home: &Path, cwd: &str, after: Option<i64>) -> Option<PathBuf> {
     let files = gemini_chat_files(home, cwd);
     if !files.is_empty() {
-        return newest_where(&files, after, gemini_is_main_session);
+        return newest_where(&files, after, |p| {
+            gemini_is_main_session(p)
+                && !(after.is_some() && gemini_meta(p).and_then(|m| m.session_id).is_some_and(|id| is_excluded(&id)))
+        });
     }
 
     // No se pudo ubicar la carpeta del proyecto (instalación vieja con carpetas por hash,
@@ -673,9 +730,9 @@ pub(super) fn codex_session_file(cwd: &str, after: Option<i64>, profile: Option<
 
 pub(super) fn codex_session_file_in(root: &Path, cwd: &str, after: Option<i64>) -> Option<PathBuf> {
     let files = codex_rollouts_in(root);
-    if let Some(found) =
-        newest_where(&files, after, |p| codex_meta(p).is_some_and(|m| m.cwd == Path::new(cwd)))
-    {
+    if let Some(found) = newest_where(&files, after, |p| {
+        codex_meta(p).is_some_and(|m| m.cwd == Path::new(cwd) && !(after.is_some() && m.id.as_deref().is_some_and(is_excluded)))
+    }) {
         return Some(found);
     }
 
@@ -865,11 +922,14 @@ pub(super) fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<Openco
 /// Sesión más reciente del cwd, opcionalmente creada después de `after` (en segundos).
 pub(super) fn opencode_session(cwd: &str, after: Option<i64>, profile: Option<&Path>) -> Option<OpencodeSession> {
     let sessions = opencode_sessions(cwd, profile);
-    let found = sessions.into_iter().find(|s| match after {
+    let mut candidates = sessions.into_iter().filter(|s| match after {
         // `created` viene en MILISEGUNDOS; el resto del módulo trabaja en segundos.
-        Some(t) => s.created / 1000 >= t - OPENCODE_CLOCK_SKEW_S,
+        Some(t) => s.created / 1000 >= t - OPENCODE_CLOCK_SKEW_S && !is_excluded(&s.id),
         None => true,
     });
+    // `opencode_sessions` ordena da mais nova para a mais velha. Com piso, a aba procura a que nasceu logo depois de abrir (a mais
+    // velha das candidatas); sem piso, a mais recente do cwd.
+    let found = if after.is_some() { candidates.last() } else { candidates.next() };
     if found.is_none() {
         if let Some(t) = after {
             eprintln!("[opencode] ninguna sesión de {cwd} creada después de {t}");
@@ -980,6 +1040,9 @@ pub(super) fn kimi_session_dir_in(root: &Path, cwd: Option<&str>, after: Option<
         kimi_session_dirs_in(root).into_iter().map(|d| d.join("state.json")).collect();
 
     let matches_cwd = |state_path: &Path| -> bool {
+        if after.is_some() && state_path.parent().and_then(kimi_session_id).is_some_and(|id| is_excluded(&id)) {
+            return false;
+        }
         let Some(cwd) = cwd else { return true };
         match kimi_state(state_path.parent().unwrap_or(state_path)).as_ref().and_then(kimi_declared_cwd) {
             Some(declared) => declared == Path::new(cwd),
@@ -1036,6 +1099,9 @@ pub(super) fn custom_session_file(agent: &crate::agents::CustomAgent, after: Opt
     let mut files = Vec::new();
     collect_files(&root, "jsonl", &mut files);
     collect_files(&root, "json", &mut files);
+    if after.is_some() {
+        files.retain(|p| !custom_session_id(agent, p).is_some_and(|id| is_excluded(&id)));
+    }
     newest_matching(&files, after, None)
 }
 
@@ -1162,6 +1228,8 @@ pub async fn discover_session_id(
     // Cuenta con la que corre la tab, si no es la del sistema. Se recibe el id y no la
     // ruta: la cuenta puede haberse mudado desde que la tab se guardó.
     account_id: Option<String>,
+    // Sessões que já são de outras abas abertas: a descoberta não as devolve.
+    exclude: Option<Vec<String>>,
     db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Option<String>, String> {
     let db = (*db).clone();
@@ -1174,6 +1242,7 @@ pub async fn discover_session_id(
             started_after,
             profile.as_deref().map(Path::new),
             custom.as_ref(),
+            exclude.as_deref().unwrap_or(&[]),
         )
     })
     .await
@@ -1201,7 +1270,10 @@ pub(crate) fn discover_session_id_sync(
     started_after: i64,
     profile: Option<&Path>,
     custom: Option<&crate::agents::CustomAgent>,
+    exclude: &[String],
 ) -> Option<String> {
+    // `exclude`: as sessões que já são de outras abas abertas (ver `is_excluded`).
+    let _guard = ExcludeGuard::set(exclude);
     discover_unchecked(agent_id, cwd, started_after, profile, custom).filter(|id| is_safe_session_id(id))
 }
 
