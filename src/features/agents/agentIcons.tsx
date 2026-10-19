@@ -1,42 +1,36 @@
 import { MonitorIcon, BoxIcon } from "neogestify-ui-components";
 
-import {
-  AntigravityIcon,
-  ClaudeCodeIcon,
-  CodexIcon,
-  GeminiCliIcon,
-  HermesAgentIcon,
-  KimiIcon,
-  OpenCodeIcon,
-} from "./brandIcons";
+import { HermesAgentIcon, OpenCodeIcon } from "./brandIcons";
+import { AntigravityColorIcon, ClaudeCodeColorIcon, CodexColorIcon, GeminiColorIcon, KimiColorIcon } from "./brandColorIcons";
 
 type AgentIconComponent = (props: { className: string }) => React.JSX.Element;
 
 /**
  * Icono de cada agente soportado, por el `id` que les asigna la auto-detección
- * (ver `agents/detector.rs`): o logo oficial de cada um (`brandIcons.tsx`); a terminal pura, um monitor.
+ * (ver `agents/detector.rs`): o logo oficial de cada um, nas cores originais (`brandColorIcons.tsx`). OpenCode e Hermes não
+ * têm versão colorida (a marca deles é de uma cor só): seguem a cor do texto (`brandIcons.tsx`). A terminal pura, um monitor.
  */
 const BY_ID: Record<string, AgentIconComponent> = {
-  "claude-code": ClaudeCodeIcon,
-  "gemini-cli": GeminiCliIcon,
-  codex: CodexIcon,
+  "claude-code": ClaudeCodeColorIcon,
+  "gemini-cli": GeminiColorIcon,
+  codex: CodexColorIcon,
   opencode: OpenCodeIcon,
-  "kimi-code": KimiIcon,
+  "kimi-code": KimiColorIcon,
   hermes: HermesAgentIcon,
-  antigravity: AntigravityIcon,
+  antigravity: AntigravityColorIcon,
   bash: MonitorIcon,
 };
 
 /** Agentes custom: no tienen un id conocido, así que se infiere por su comando. */
 const BY_COMMAND_HINT: [string, AgentIconComponent][] = [
-  ["claude", ClaudeCodeIcon],
-  ["gemini", GeminiCliIcon],
-  ["codex", CodexIcon],
+  ["claude", ClaudeCodeColorIcon],
+  ["gemini", GeminiColorIcon],
+  ["codex", CodexColorIcon],
   ["opencode", OpenCodeIcon],
-  ["kimi", KimiIcon],
+  ["kimi", KimiColorIcon],
   ["hermes", HermesAgentIcon],
-  ["antigravity", AntigravityIcon],
-  ["agy", AntigravityIcon],
+  ["antigravity", AntigravityColorIcon],
+  ["agy", AntigravityColorIcon],
   ["bash", MonitorIcon],
   ["zsh", MonitorIcon],
   ["fish", MonitorIcon],

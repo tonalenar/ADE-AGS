@@ -10,6 +10,15 @@ export function agentTile(id: string): string {
 }
 
 /**
+ * O fundo ATRÁS do logo do agente. Os logos vão nas cores originais (`brandColorIcons.tsx`), e o caranguejo laranja do Claude
+ * sumiria num ladrilho laranja: o fundo é neutro, como ícone de app. A cor do agente (`agentTile`) continua nos pontos de
+ * identidade do canvas, do chat e das missões.
+ */
+export function agentIconTile(_id: string): string {
+  return "linear-gradient(180deg,#3a3a3e,#202023)";
+}
+
+/**
  * A cor SÓLIDA do agente (o `agentTile` é um gradiente e não serve de borda). Clara o bastante para
  * aparecer no fundo escuro: o tile do Codex é quase preto, aqui vira um cinza claro.
  */
