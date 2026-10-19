@@ -55,7 +55,7 @@ fn test_update_table_factory_agents() {
                     &["install", "--global", "--ignore-scripts", "--no-audit", "--no-fund", "@google/gemini-cli"]
                 );
             }
-            "opencode" | "antigravity" | "kimi-code" | "bash" => {
+            "opencode" | "antigravity" | "kimi-code" | "hermes" | "bash" => {
                 assert_eq!(def.package, None);
                 assert_eq!(def.check, None);
                 assert_eq!(def.update, None);

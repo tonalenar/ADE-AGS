@@ -93,6 +93,13 @@ pub const UPDATE_TABLE: &[UpdateDef] = &[
         update: None,
     },
     UpdateDef {
+        // Instalado por git no home do Hermes; ele mesmo se atualiza com `hermes update`.
+        agent_id: "hermes",
+        package: None,
+        check: None,
+        update: None,
+    },
+    UpdateDef {
         agent_id: "bash",
         package: None,
         check: None,

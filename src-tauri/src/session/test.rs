@@ -977,3 +977,82 @@ fn the_exclusion_only_lives_while_the_discovery_runs() {
     }
     assert!(!is_excluded("x"));
 }
+
+// ── Hermes Agent: sessões no SQLite `state.db` ─────────────────────────────────────────────────────────────
+
+fn hermes_fixture(rows: &[(&str, &str, &str, f64, Option<&str>)], messages: &[(&str, &str, &str)]) -> TempDir {
+    let d = TempDir::new();
+    let conn = rusqlite::Connection::open(d.0.join("state.db")).unwrap();
+    conn.execute_batch(
+        "CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT, cwd TEXT, started_at REAL, title TEXT);
+         CREATE TABLE messages (id INTEGER PRIMARY KEY AUTOINCREMENT, session_id TEXT, role TEXT, content TEXT);",
+    )
+    .unwrap();
+    for (id, source, cwd, started, title) in rows {
+        conn.execute("INSERT INTO sessions VALUES (?1, ?2, ?3, ?4, ?5)", rusqlite::params![id, source, cwd, started, title]).unwrap();
+    }
+    for (session, role, content) in messages {
+        conn.execute("INSERT INTO messages (session_id, role, content) VALUES (?1, ?2, ?3)", rusqlite::params![session, role, content]).unwrap();
+    }
+    d
+}
+
+#[test]
+fn hermes_discovery_takes_the_first_terminal_session_born_after_opening_in_this_folder() {
+    let d = hermes_fixture(
+        &[
+            ("velha", "cli", "/proj", 900.0, None),          // nasceu antes de a aba abrir
+            ("do-desktop", "desktop", "/proj", 1001.0, None), // do app desktop do Hermes, não de um terminal
+            ("outra-pasta", "cli", "/outra", 1002.0, None),
+            ("da-aba", "tui", "/proj/", 1003.5, None),       // barra final: mesma pasta
+            ("de-fora-depois", "cli", "/proj", 1010.0, None),
+        ],
+        &[],
+    );
+    assert_eq!(hermes_session_id(&d.0, "/proj", Some(1000)).as_deref(), Some("da-aba"));
+    // sem piso (um título), a mais recente do cwd
+    assert_eq!(hermes_session_id(&d.0, "/proj", None).as_deref(), Some("de-fora-depois"));
+    // a que já é de outra aba fica de fora
+    let _guard = ExcludeGuard::set(&["da-aba".to_string()]);
+    assert_eq!(hermes_session_id(&d.0, "/proj", Some(1000)).as_deref(), Some("de-fora-depois"));
+}
+
+#[test]
+fn hermes_title_prefers_its_own_title_then_the_first_user_message() {
+    let d = hermes_fixture(
+        &[("com-titulo", "cli", "/p", 1.0, Some("Mudar tema do Hermes")), ("sem-titulo", "cli", "/p", 2.0, None)],
+        &[("sem-titulo", "system", "você é o Hermes"), ("sem-titulo", "user", "arrumar o login do site")],
+    );
+    assert_eq!(hermes_title(&d.0, "com-titulo", "x").title, "Mudar tema do Hermes");
+    let first = hermes_title(&d.0, "sem-titulo", "x");
+    assert_eq!((first.title.as_str(), first.source.as_str()), ("arrumar o login do site", "first_message"));
+    assert_eq!(hermes_title(&d.0, "nao-existe", "Hermes — p").title, "Hermes — p");
+}
+
+#[test]
+fn hermes_without_a_database_finds_nothing() {
+    let d = TempDir::new();
+    assert_eq!(hermes_session_id(&d.0, "/p", Some(0)), None);
+    assert_eq!(hermes_user_texts(&d.0, "x"), None);
+}
+
+#[cfg(windows)]
+#[test]
+fn hermes_folders_compare_like_windows_does() {
+    assert!(hermes_same_dir(r"C:\Users\X\Proj", "c:/users/x/proj/"));
+    assert!(!hermes_same_dir(r"C:\Users\X\Proj", r"C:\Users\X\Proj2"));
+}
+
+/// SONDA REAL (só leitura) do `state.db` deste computador: `cargo test --lib sonda_real_hermes -- --ignored --nocapture`.
+#[test]
+#[ignore]
+fn sonda_real_hermes_state_db() {
+    let home = hermes_home(None);
+    let cwd = r"C:\Users\tonz1n\.antigravity\Auto Vale Oficial 04-06-2026\auto-vale-preven-es";
+    let latest = hermes_session_id(&home, cwd, None);
+    println!("home={} | sessão de terminal mais recente da pasta: {latest:?}", home.display());
+    if let Some(id) = latest {
+        let t = hermes_title(&home, &id, "fallback");
+        println!("título: {} ({})", t.title, t.source);
+    }
+}

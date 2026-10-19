@@ -5,6 +5,7 @@ export function agentTile(id: string): string {
   if (id.startsWith("antigravity") || id.startsWith("gemini")) return "linear-gradient(135deg,#4285f4,#9b72cb)";
   if (id.startsWith("opencode")) return "linear-gradient(180deg,#5e5ce6,#3634a3)";
   if (id.startsWith("kimi")) return "linear-gradient(180deg,#30b0c7,#0a7d93)";
+  if (id.startsWith("hermes")) return "linear-gradient(180deg,#e9b949,#b7791f)";
   return "linear-gradient(180deg,#636366,#48484a)";
 }
 
@@ -18,6 +19,7 @@ export function agentAccent(id: string): string {
   if (id.startsWith("antigravity") || id.startsWith("gemini")) return "#5b8def";
   if (id.startsWith("opencode")) return "#7a78f0";
   if (id.startsWith("kimi")) return "#30b0c7";
+  if (id.startsWith("hermes")) return "#e3b341";
   return "#8e8e93";
 }
 
@@ -39,6 +41,7 @@ export function vendorOf(id: string): string | null {
   if (id.startsWith("antigravity") || id.startsWith("gemini")) return "Google";
   if (id.startsWith("opencode")) return "SST";
   if (id.startsWith("kimi")) return "Moonshot";
+  if (id.startsWith("hermes")) return "Nous Research";
   return null;
 }
 
@@ -56,5 +59,6 @@ export function agentName(id: string): string {
   if (id.startsWith("gemini")) return "Gemini";
   if (id.startsWith("opencode")) return "OpenCode";
   if (id.startsWith("kimi")) return "Kimi";
+  if (id.startsWith("hermes")) return "Hermes";
   return id;
 }

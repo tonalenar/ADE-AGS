@@ -37,6 +37,9 @@ pub enum SessionSource {
     ProcessQuery,
     /// `<home>/sessions/<workDirKey>/<sessionId>/`.
     KimiSessions,
+    /// Hermes Agent: a tabela `sessions` do SQLite `<home>/state.db`, com o `cwd`, a origem (`cli`, `tui`, `desktop`…) e o
+    /// `started_at` de cada sessão.
+    HermesState,
     /// No se le conoce forma de reanudar una sesión puntual.
     None,
 }
@@ -111,6 +114,11 @@ pub enum McpStyle {
     /// las tools le llegan con el nombre del servidor de prefijo:
     /// `ags_browser_click`. (OpenCode.)
     OpencodeConfig,
+    /// Hermes Agent: sem flag nem variável que acrescente um servidor. Mas `HERMES_MANAGED_DIR` aponta uma pasta cujo
+    /// `config.yaml` é MESCLADO por cima da config do usuário (`hermes_cli/managed_scope.py`, `_merge_managed_overlay`): a app
+    /// põe ali só `mcp_servers.ags`, e o resto (modelo, provedores, os outros MCP dele) continua o dele. As tools chegam como
+    /// `mcp__ags__browser_click`, a mesma convenção do Claude Code. (Verificado no código do Hermes 0.21.5.)
+    HermesManaged,
     /// Todavía no se verificó cómo enchufárselo. La tab arranca igual, sin las tools.
     None,
 }
@@ -330,6 +338,25 @@ pub const AGENTS: &[AgentDef] = &[
         sessions: SessionSource::KimiSessions,
         models: ModelSource::Unknown,
         mcp: McpStyle::None,
+    },
+    AgentDef {
+        // Nous Research — Hermes Agent (github.com/NousResearch/hermes-agent), binário `hermes`. Verificado no 0.21.5.
+        id: "hermes",
+        label: "Hermes",
+        command: "hermes",
+        launch_args: None,
+        version_flag: "--version",
+        // As skills do Hermes vivem no home dele (`~/.hermes/skills`), não no projeto: não há pasta para a app ligar.
+        skills_dir: None,
+        // `HERMES_HOME` muda o home inteiro (perfis do próprio Hermes): falta verificar o login isolado antes de oferecer contas.
+        profile: None,
+        // `--resume <id>` retoma pelo id; um id que não existe dá «Session not found» (não cria): a app descobre o id depois.
+        resume: Some("--resume {session}"),
+        assign_session: None,
+        assign_id_prefix: "",
+        sessions: SessionSource::HermesState,
+        models: ModelSource::Unknown,
+        mcp: McpStyle::HermesManaged,
     },
     AgentDef {
         id: "antigravity",

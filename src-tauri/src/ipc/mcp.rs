@@ -1732,9 +1732,29 @@ pub fn tab_browser_mcp(
                 opencode_config_content(&ags.to_string_lossy(), &with_prefix, &prefix),
             );
         }
+        McpStyle::HermesManaged => {
+            let dir = write_hermes_managed(&app, &tab_config_name(&tab_id), &args)?;
+            mcp.env.insert("HERMES_MANAGED_DIR".into(), dir.to_string_lossy().into_owned());
+        }
         McpStyle::None => unreachable!("se descartó arriba"),
     }
     Some(mcp)
+}
+
+/// A pasta «gerenciada» de uma tab do Hermes: só um `config.yaml` com `mcp_servers.ags`, que o Hermes mescla por cima da config
+/// do usuário (ver [`crate::agents::McpStyle::HermesManaged`]). Um por tab, como o `--mcp-config` do Claude: dentro vai o id dela.
+/// O YAML sai em estilo JSON, que é YAML válido e dispensa um gerador de YAML.
+fn write_hermes_managed(app: &tauri::AppHandle, name: &str, args: &[&str]) -> Option<std::path::PathBuf> {
+    let ags = crate::ipc::install::source_binary(app)?;
+    let dir = crate::util::datadir::ags_home()?.join("mcp").join("hermes").join(name);
+    std::fs::create_dir_all(&dir).ok()?;
+    std::fs::write(dir.join("config.yaml"), hermes_managed_config(&ags.to_string_lossy(), args)).ok()?;
+    Some(dir)
+}
+
+/// O `config.yaml` gerenciado: o servidor `ags` e nada mais. Pura.
+pub(crate) fn hermes_managed_config(ags: &str, args: &[&str]) -> String {
+    json!({ "mcp_servers": { SERVER_NAME: { "command": ags, "args": args } } }).to_string()
 }
 
 #[cfg(test)]

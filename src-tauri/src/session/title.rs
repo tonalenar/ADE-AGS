@@ -1090,6 +1090,115 @@ pub(super) fn kimi_title(dir: &Path, fallback: &str) -> SessionTitleResult {
 
 /// Archivo de sesión más reciente de una TUI custom: el más nuevo bajo la carpeta que el
 /// usuario declaró, buscando tanto `.jsonl` como `.json` (las dos formas que usan los CLIs
+// ── Hermes Agent ──────────────────────────────────────────────────────────────────────────────────────────────
+//
+// As sessões vivem no SQLite `<home>/state.db` (tabela `sessions`: `id`, `source`, `cwd`, `started_at` em segundos com
+// fração, `title`; tabela `messages`: `session_id`, `role`, `content`). O home é `HERMES_HOME`, ou `%LOCALAPPDATA%\hermes` no
+// Windows e `~/.hermes` no resto (o próprio Hermes cita `~/AppData/Local/hermes/config.yaml` na ajuda do Windows).
+
+/// Origens de sessão que nascem de um terminal (a da aba). `desktop`, `acp`, `oneshot`, `subagent`, gateways: nunca.
+const HERMES_TERMINAL_SOURCES: [&str; 2] = ["cli", "tui"];
+
+pub(super) fn hermes_home(profile: Option<&Path>) -> PathBuf {
+    if let Some(dir) = profile {
+        return dir.to_path_buf();
+    }
+    if let Some(home) = std::env::var_os("HERMES_HOME").filter(|v| !v.is_empty()) {
+        return PathBuf::from(home);
+    }
+    if cfg!(windows) {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()) {
+            return PathBuf::from(local).join("hermes");
+        }
+    }
+    dirs::home_dir().unwrap_or_default().join(".hermes")
+}
+
+/// O banco do Hermes só para leitura (ele é quem escreve). `None` = sem banco ainda.
+fn hermes_db(home: &Path) -> Option<rusqlite::Connection> {
+    let path = home.join("state.db");
+    if !path.exists() {
+        return None;
+    }
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let conn = rusqlite::Connection::open_with_flags(&path, flags).ok()?;
+    let _ = conn.busy_timeout(std::time::Duration::from_millis(500));
+    Some(conn)
+}
+
+/// A mesma pasta, como o Hermes a gravou: no Windows sem diferença de maiúsculas nem de separador, e sem a barra final. Pura.
+pub(super) fn hermes_same_dir(a: &str, b: &str) -> bool {
+    let norm = |p: &str| {
+        let p = p.trim().trim_end_matches(['/', '\\']).to_string();
+        if cfg!(windows) { p.replace('/', "\\").to_lowercase() } else { p }
+    };
+    norm(a) == norm(b)
+}
+
+/// A sessão de terminal do Hermes neste cwd. Com `after` (a abertura da aba, em segundos), a PRIMEIRA que nasceu depois e que
+/// não é de outra aba (`is_excluded`); sem `after`, a mais recente do cwd.
+pub(super) fn hermes_session_id(home: &Path, cwd: &str, after: Option<i64>) -> Option<String> {
+    let conn = hermes_db(home)?;
+    let mut stmt = conn
+        .prepare("SELECT id, cwd, started_at, source FROM sessions WHERE cwd IS NOT NULL ORDER BY started_at DESC LIMIT 400")
+        .ok()?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, f64>(2)?, r.get::<_, Option<String>>(3)?))
+        })
+        .ok()?;
+    let mut found: Vec<(String, f64)> = rows
+        .flatten()
+        .filter(|(_, dir, _, source)| {
+            hermes_same_dir(dir, cwd) && source.as_deref().is_some_and(|s| HERMES_TERMINAL_SOURCES.contains(&s))
+        })
+        .map(|(id, _, started, _)| (id, started))
+        .collect();
+    match after {
+        Some(after) => {
+            found.retain(|(id, started)| *started as i64 >= after && !is_excluded(id));
+            found.sort_by(|a, b| a.1.total_cmp(&b.1));
+            found.into_iter().next().map(|(id, _)| id)
+        }
+        None => found.into_iter().next().map(|(id, _)| id),
+    }
+}
+
+/// As primeiras mensagens do usuário de uma sessão, como texto. `None` = sem banco ou sessão.
+pub(super) fn hermes_user_texts(home: &Path, session_id: &str) -> Option<Vec<String>> {
+    let conn = hermes_db(home)?;
+    let mut stmt = conn
+        .prepare("SELECT content FROM messages WHERE session_id = ?1 AND role = 'user' ORDER BY id LIMIT 8")
+        .ok()?;
+    let rows = stmt.query_map([session_id], |r| r.get::<_, Option<String>>(0)).ok()?;
+    Some(
+        rows.flatten()
+            .flatten()
+            .filter_map(|content| match serde_json::from_str::<Value>(&content) {
+                // Conteúdo multimodal vem como lista de partes em JSON; texto puro, como string.
+                Ok(value @ Value::Array(_)) => extract_text_block(&value),
+                _ => Some(content),
+            })
+            .collect(),
+    )
+}
+
+/// O título de uma sessão do Hermes: o que ele mesmo deu (`title`), senão a primeira mensagem do usuário.
+pub(super) fn hermes_title(home: &Path, session_id: &str, fallback: &str) -> SessionTitleResult {
+    let named = hermes_db(home).and_then(|conn| {
+        conn.query_row("SELECT title FROM sessions WHERE id = ?1", [session_id], |r| r.get::<_, Option<String>>(0))
+            .ok()
+            .flatten()
+    });
+    if let Some(title) = named.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) {
+        return SessionTitleResult { title: truncate(&title, 80), source: "summary".to_string() };
+    }
+    hermes_user_texts(home, session_id)
+        .and_then(|texts| texts.into_iter().find_map(|t| clean_message(&t)))
+        .map(|first| SessionTitleResult { title: truncate(&first, 80), source: "first_message".to_string() })
+        .unwrap_or_else(|| fallback_result(fallback))
+}
+
 /// conocidos). A diferencia de las TUIs de fábrica no se filtra por cwd — no hay forma
 /// genérica de saber cómo esa TUI mapea un proyecto a una carpeta — así que el filtro por
 /// `after` (el momento en que arrancó ESTE proceso) es lo único que evita agarrar la
@@ -1185,6 +1294,8 @@ pub fn session_file_for(
         // OpenCode no expone un archivo de sesión legible; su transcripción se pide con
         // `opencode export <id>` y la maneja `export::opencode_transcript` aparte.
         SessionSource::ProcessQuery => None,
+        // Hermes: a conversa está no SQLite dele, não num arquivo por sessão.
+        SessionSource::HermesState => None,
         // Kimi guarda la conversación en el wire del agente principal, no en un archivo
         // por sesión: se resuelve primero la carpeta y de ahí se baja al `wire.jsonl`.
         SessionSource::KimiSessions => {
@@ -1318,6 +1429,7 @@ fn discover_unchecked(
             let dir = kimi_session_dir(Some(&cwd), Some(started_after), profile)?;
             kimi_session_id(&dir)
         }
+        SessionSource::HermesState => hermes_session_id(&hermes_home(profile), &cwd, Some(started_after)),
         // TUI custom: solo si el usuario declaró dónde guarda sus sesiones.
         SessionSource::None => {
             let agent = custom?;
@@ -1374,6 +1486,13 @@ pub(crate) fn get_session_title_sync(
             Some(path) => claude_title(&path, &fallback),
             None => fallback_result(&fallback),
         },
+        SessionSource::HermesState => {
+            let home = hermes_home(profile);
+            match session_id.or_else(|| hermes_session_id(&home, &cwd, None)) {
+                Some(id) => hermes_title(&home, &id, &fallback),
+                None => fallback_result(&fallback),
+            }
+        }
         SessionSource::GeminiTmp => {
             let home = gemini_home(profile);
             let found = match session_id.as_deref() {
@@ -1553,6 +1672,10 @@ pub fn session_activity(
             Some(activity_of(texts.iter().map(String::as_str)))
         }
         SessionSource::ProcessQuery => None,
+        SessionSource::HermesState => {
+            let texts = hermes_user_texts(&hermes_home(profile), session_id)?;
+            Some(activity_of(texts.iter().map(String::as_str)))
+        }
         // Kimi no tiene un formato de wire verificado acá: se mide solo con `lastPrompt`. Si
         // ese prompt no sirve, no se afirma "vacía": queda sin medir.
         SessionSource::KimiSessions => {
