@@ -8,7 +8,7 @@ import { useAgentsStore } from "@/features/agents/store";
 import { setAgentRegistry, type AgentRegistryEntry } from "@/features/agents/registry";
 import type { CustomAgent } from "@/features/agents/types";
 
-import { buildAssignCommand, buildResumeCommand, canAssignSession, isResumable } from "../agentResume";
+import { buildAssignCommand, buildResumeCommand, canAssignSession, isResumable, isSafeSessionId, newSessionId } from "../agentResume";
 
 /**
  * El catálogo salido de `src-tauri/src/agents/registry.rs`, leído del fuente.
@@ -38,6 +38,7 @@ function registryFromRust(): AgentRegistryEntry[] {
       const command = rustString(block, "command");
       const resume = /\bresume:\s*Some\("([^"]+)"\)/.exec(block)?.[1] ?? null;
       const assignSession = /\bassign_session:\s*Some\("([^"]+)"\)/.exec(block)?.[1] ?? null;
+      const assignIdPrefix = /\bassign_id_prefix:\s*"([^"]*)"/.exec(block)?.[1] ?? "";
       const skillsDir = /\bskills_dir:\s*Some\("([^"]+)"\)/.exec(block)?.[1] ?? null;
       if (!id || !command) throw new Error(`fila ilegible en registry.rs: ${block.slice(0, 80)}`);
       const mcp = /\bmcp:\s*McpStyle::(\w+)/.exec(block)?.[1];
@@ -49,6 +50,7 @@ function registryFromRust(): AgentRegistryEntry[] {
         skillsDir,
         resume,
         assignSession,
+        assignIdPrefix,
         supportsAccounts: /\bprofile:\s*Some\(/.test(block),
         sessions: "",
         // `ClaudeFlags` en Rust sale como `claudeFlags` por el `rename_all` de serde.
@@ -165,8 +167,23 @@ describe("buildAssignCommand", () => {
     expect(buildAssignCommand("claude-code", "claude", ID)).toBe(`claude --session-id ${ID}`);
   });
 
-  it("las TUIs que no dejan elegir el id arrancan sin argumentos de sesión", () => {
-    for (const id of ["gemini-cli", "codex", "opencode", "kimi-code"]) {
+  it("OpenCode também escolhe o id (`--session` cria se não existir), com o prefixo `ses_` que ele exige", () => {
+    expect(canAssignSession("opencode")).toBe(true);
+    const id = newSessionId("opencode");
+    expect(id).toMatch(/^ses_[0-9a-f]{12}[0-9A-Za-z]{14}$/);
+    expect(isSafeSessionId(id)).toBe(true);
+    expect(buildAssignCommand("opencode", "opencode", id)).toBe(`opencode --session ${id}`);
+    expect(buildResumeCommand("opencode", "opencode", id)).toBe(`opencode --session ${id}`);
+  });
+
+  it("cada agente recebe o formato de id que aceita, e nunca dois iguais", () => {
+    expect(newSessionId("claude-code")).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    const ids = new Set(Array.from({ length: 200 }, () => newSessionId("opencode")));
+    expect(ids.size).toBe(200);
+  });
+
+  it("as TUIs que não dejan elegir el id arrancan sin argumentos de sesión (a app descobre depois, sem as de outras abas)", () => {
+    for (const id of ["gemini-cli", "codex", "kimi-code"]) {
       expect(canAssignSession(id)).toBe(false);
       expect(buildAssignCommand(id, id, ID)).toBe(id);
     }

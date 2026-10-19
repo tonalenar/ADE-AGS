@@ -10,6 +10,7 @@ import { useTheme } from "neogestify-ui-components";
 import "@xterm/xterm/css/xterm.css";
 
 import { isResumable } from "@/features/sessions/agentResume";
+import { useTabsStore } from "@/features/tabs/store";
 import { registerCapabilityResponders } from "@/features/terminal/terminalCapabilities";
 import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
@@ -330,6 +331,8 @@ function TerminalImpl({
         // sistema: sin esto no se encontraría ninguna sesión y la tab se quedaría para
         // siempre sin título ni posibilidad de reanudar.
         accountId: accountId ?? null,
+        // As conversas que já são de outras abas (do mesmo agente): esta aba não pode adotá-las.
+        excludeIds: () => useTabsStore.getState().tabs.filter((t) => t.id !== tabId && t.sessionId).map((t) => t.sessionId as string),
         onFound: onSessionDiscovered,
       });
     };

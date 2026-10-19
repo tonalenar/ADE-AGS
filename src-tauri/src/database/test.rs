@@ -382,32 +382,32 @@ fn setup_db() -> DbConnection {
     std::sync::Arc::new(std::sync::Mutex::new(setup()))
 }
 
-/// El bug reportado: retomar una conversación DESDE ADENTRO de la TUI (`/resume`) dejaba
-/// la tab con el id que se descubrió al arrancar, así que al cerrar se archivaba una
-/// sesión nueva y la conversación continuada quedaba sin actualizar.
-///
-/// Y con la sesión cambiada, el título de la tab es el de la conversación abandonada:
-/// escribirlo pisaría el título bueno de la que se retomó, así que se recalcula.
+/// O que este teste cobria era acompanhar um `/resume` feito DENTRO da TUI: ao fechar, a aba arquivava a sessão que encontrasse
+/// em disco. Mas "a mais nova da pasta" também é a conversa de OUTRA pessoa (Claude Code no terminal ou no app desktop, no mesmo
+/// projeto), e arquivar essa troca a conversa da aba no histórico e na reabertura. Para os agentes em que a app ESCOLHE o id ao
+/// abrir a aba (Claude Code e OpenCode), esse id é a verdade e o que está em disco não o troca. Fica a regra antiga só para
+/// os que não deixam escolher.
 #[test]
-fn archivar_sigue_a_la_sesion_retomada_dentro_de_la_tui() {
+fn archivar_conserva_el_id_que_eligio_la_app_aunque_haya_otra_conversacion_mas_nueva() {
     let db = setup_db();
     let profile = TempDir::new();
-    write_transcript(&profile.0, "/proj", "la-retomada", Some("Charla retomada"));
+    // Uma conversa de fora, no mesmo projeto, escrita depois de a aba abrir.
+    write_transcript(&profile.0, "/proj", "la-de-afuera", Some("Charla de afuera"));
     insert_tab_with_account(
         &db.lock().unwrap(),
         "tab-1",
-        Some("la-de-arranque"),
+        Some("la-que-eligio-la-app"),
         &profile.0,
     );
 
     archive(&db, "tab-1", "ws");
 
     let conn = db.lock().unwrap();
-    assert_eq!(archived_session_id(&conn).as_deref(), Some("la-retomada"));
+    assert_eq!(archived_session_id(&conn).as_deref(), Some("la-que-eligio-la-app"));
     let title: Option<String> = conn
         .query_row("SELECT title FROM session_history", [], |r| r.get(0))
         .unwrap();
-    assert_eq!(title.as_deref(), Some("Charla retomada"));
+    assert_ne!(title.as_deref(), Some("Charla de afuera"), "o título da conversa de fora não pode vir parar nesta entrada");
 }
 
 /// Con dos tabs del mismo agente en la misma carpeta, el archivo más nuevo puede ser el

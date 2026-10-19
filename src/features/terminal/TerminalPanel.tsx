@@ -6,7 +6,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { CANVAS_GROUP, focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { useWorkMode } from "@/features/canvas/store";
 import { agentKey } from "@/features/tabs/layout/layoutTree";
-import { buildAssignCommand, buildResumeCommand, canAssignSession, isResumable, resumeFailed } from "@/features/sessions/agentResume";
+import { buildAssignCommand, buildResumeCommand, canAssignSession, isResumable, newSessionId, resumeFailed } from "@/features/sessions/agentResume";
 
 export function TerminalPanel() {
   const { t } = useTranslation();
@@ -52,7 +52,7 @@ export function TerminalPanel() {
           // carpeta" (que puede ser otra conversa del mismo proyecto, hecha fuera de la app).
           // Con un PTY ya vivo (`ptyId`) no: el proceso que corre no arrancó con este id.
           const assignedId =
-            !tab.sessionId && !tab.ptyId && canAssignSession(tab.agentId) ? crypto.randomUUID() : undefined;
+            !tab.sessionId && !tab.ptyId && canAssignSession(tab.agentId) ? newSessionId(tab.agentId) : undefined;
           launch.current.set(instance, { resuming, assignedId });
         }
         const { resuming: isResuming, assignedId } = launch.current.get(instance)!;

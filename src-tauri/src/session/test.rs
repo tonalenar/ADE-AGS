@@ -486,7 +486,7 @@ fn kimi_de_una_cuenta_busca_sesiones_dentro_del_profile() {
     assert_ne!(kimi_root(None), account.0.join("sessions"));
 
     assert_eq!(
-        discover_session_id_sync("kimi-code", "/proj", 0, Some(&account.0), None).as_deref(),
+        discover_session_id_sync("kimi-code", "/proj", 0, Some(&account.0), None, &[]).as_deref(),
         Some("ses-cuenta"),
     );
     let title = get_session_title_sync(
@@ -628,7 +628,7 @@ fn gemini_de_una_cuenta_busca_en_punto_gemini_del_profile() {
     assert_ne!(system, account.0.join(".gemini"));
 
     assert_eq!(
-        discover_session_id_sync("gemini-cli", "/proj", 0, Some(&account.0), None).as_deref(),
+        discover_session_id_sync("gemini-cli", "/proj", 0, Some(&account.0), None, &[]).as_deref(),
         Some("ses-cuenta"),
     );
     let title = get_session_title_sync(
@@ -897,4 +897,83 @@ fn activity_codex_distingue_tarea_ruido_y_mision() {
 
     d.write("perfil/sessions/2026/08/03/rollout-a.jsonl", &codex_rollout(ACT_ID, "/proj", &format!("{ctx}\n{mission}")));
     assert_eq!(session_activity("codex", "/proj", ACT_ID, Some(&profile), None), Some("mission"));
+}
+
+// ── Descoberta da sessão de uma aba: nascimento, ordem e exclusão ─────────────────────────────────────
+//
+// O piso temporal usava o `mtime`: toda conversa que já existia e continuava sendo escrita (feita fora do app, no mesmo
+// projeto, ou de outra aba) passava e, sendo a mais recente, ganhava. Agora vale o nascimento do arquivo. Os testes pausam de
+// verdade (a resolução do sistema de arquivos é de 1 s) porque a data de criação não se falsifica de forma portável.
+
+fn now_secs() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_secs() as i64
+}
+
+fn pause_one_second() {
+    std::thread::sleep(std::time::Duration::from_millis(1200));
+}
+
+#[test]
+fn discovery_ignores_a_conversation_that_existed_before_the_tab_opened() {
+    let d = TempDir::new();
+    let outside = d.write("sessions/2026/outside.jsonl", &codex_rollout("outside", "/proj", ""));
+    pause_one_second();
+    let opened = now_secs();
+    // A conversa de fora continua sendo escrita depois de a aba abrir: tem o `mtime` mais recente, mas nasceu antes.
+    fs::OpenOptions::new().append(true).open(&outside).unwrap();
+    fs::write(&outside, codex_rollout("outside", "/proj", "mais uma mensagem")).unwrap();
+
+    assert_eq!(codex_session_file_in(&d.0, "/proj", Some(opened)), None, "a conversa que já existia não é a da aba");
+    // Sem piso (um título, não uma descoberta) continua valendo «a mais recente do cwd».
+    assert_eq!(codex_session_file_in(&d.0, "/proj", None), Some(outside));
+}
+
+#[test]
+fn discovery_takes_the_first_session_born_after_opening_not_the_newest() {
+    let d = TempDir::new();
+    let opened = now_secs();
+    let mine = d.write("sessions/2026/mine.jsonl", &codex_rollout("mine", "/proj", ""));
+    pause_one_second();
+    // Uma conversa de fora nasce depois e logo é a mais recente: a da aba é a que apareceu primeiro.
+    d.write("sessions/2026/later.jsonl", &codex_rollout("later", "/proj", ""));
+
+    assert_eq!(codex_session_file_in(&d.0, "/proj", Some(opened)), Some(mine));
+}
+
+#[test]
+fn discovery_skips_sessions_that_belong_to_other_tabs() {
+    let d = TempDir::new();
+    let opened = now_secs();
+    d.write("sessions/2026/first.jsonl", &codex_rollout("first", "/proj", ""));
+    pause_one_second();
+    let second = d.write("sessions/2026/second.jsonl", &codex_rollout("second", "/proj", ""));
+
+    // A outra aba já tem «first»: a segunda aba, aberta no mesmo pasta, não a adota.
+    let _guard = ExcludeGuard::set(&["first".to_string()]);
+    assert_eq!(codex_session_file_in(&d.0, "/proj", Some(opened)), Some(second));
+}
+
+#[test]
+fn gemini_discovery_also_skips_owned_sessions_and_old_conversations() {
+    let d = TempDir::new();
+    d.write("tmp/proj/.project_root", "/home/u/proj");
+    let old = d.write("tmp/proj/chats/session-old.jsonl", &gemini_chat("ses-old", "main", ""));
+    pause_one_second();
+    let opened = now_secs();
+    fs::write(&old, gemini_chat("ses-old", "main", "ainda escrevendo")).unwrap();
+    assert_eq!(gemini_session_file_in(&d.0, "/home/u/proj", Some(opened)), None);
+
+    d.write("tmp/proj/chats/session-taken.jsonl", &gemini_chat("ses-taken", "main", ""));
+    let mine = d.write("tmp/proj/chats/session-mine.jsonl", &gemini_chat("ses-mine", "main", ""));
+    let _guard = ExcludeGuard::set(&["ses-taken".to_string()]);
+    assert_eq!(gemini_session_file_in(&d.0, "/home/u/proj", Some(opened)), Some(mine));
+}
+
+#[test]
+fn the_exclusion_only_lives_while_the_discovery_runs() {
+    {
+        let _guard = ExcludeGuard::set(&["x".to_string()]);
+        assert!(is_excluded("x"));
+    }
+    assert!(!is_excluded("x"));
 }
