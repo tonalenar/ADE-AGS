@@ -10,7 +10,7 @@ import {
 import { useTabsStore } from "@/features/tabs/store";
 import { BranchIcon } from "@/app/icons";
 import { flattenWorkspaces } from "@/features/workspaces/workspaceTree";
-import type { RepoGroup, WorkspaceAgent, WorkspaceNode } from "@/features/workspaces/workspaceTree";
+import type { RepoGroup, WorkspaceNode } from "@/features/workspaces/workspaceTree";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { SkillPalette, type SkillScopeTarget } from "@/features/skills/SkillPalette";
 import { useSnapshotsStore } from "@/features/workspaces/snapshotsStore";
@@ -30,7 +30,7 @@ import { useConversationUi } from "@/features/sessions/conversationUi";
  * piezas distintas y se notaba el salto — al cambiar de workspace parecía que la fila se
  * reemplazaba por otra cosa en vez de crecer.
  */
-function WorkspaceItem({ ws, groupCwds, projectKey, workspaceId, expanded, onActivate, onOpenAgent, onWorkspaceMenu, onAgentMenu }: {
+function WorkspaceItem({ ws, groupCwds, projectKey, workspaceId, expanded, onActivate, onOpenAgent, onWorkspaceMenu }: {
   ws: WorkspaceNode;
   /** As pastas do projeto (raiz e worktrees): de onde saem as conversas. */
   groupCwds: string[];
@@ -41,7 +41,6 @@ function WorkspaceItem({ ws, groupCwds, projectKey, workspaceId, expanded, onAct
   onActivate: () => void;
   onOpenAgent: (id: string) => void;
   onWorkspaceMenu: (e: React.MouseEvent, ws: WorkspaceNode) => void;
-  onAgentMenu: (e: React.MouseEvent, agent: WorkspaceAgent) => void;
 }) {
   const { t } = useTranslation();
   const running = ws.agents.some((a) => a.status === "running");
@@ -128,10 +127,6 @@ function WorkspaceItem({ ws, groupCwds, projectKey, workspaceId, expanded, onAct
         projectKey={projectKey}
         workspaceId={workspaceId}
         onOpenTab={onOpenAgent}
-        onTabMenu={(x, y, tabId) => {
-          const agent = ws.agents.find((a) => a.tabId === tabId);
-          if (agent) onAgentMenu({ clientX: x, clientY: y } as React.MouseEvent, agent);
-        }}
       />
     </div>
   );
@@ -220,19 +215,6 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
       target: { scope: "workspace", workspaceId, cwd: ws.cwd, agentId: null, label: ws.title },
     });
 
-  const onAgentMenu = (e: React.MouseEvent, agent: WorkspaceAgent) =>
-    setMenu({
-      x: e.clientX,
-      y: e.clientY,
-      ws: null,
-      target: {
-        scope: "tab",
-        workspaceId,
-        tabId: agent.tabId,
-        agentId: agent.agentId,
-        label: agent.title,
-      },
-    });
 
   /**
    * Cerrar un workspace entero: se guarda lo que tenía y recién después se cierran sus
@@ -376,7 +358,6 @@ export function WorkspacesPanel({ groups, width }: { groups: RepoGroup[]; width:
                 : openAgent(ws.agents[0].tabId))}
               onOpenAgent={openAgent}
               onWorkspaceMenu={onWorkspaceMenu}
-              onAgentMenu={onAgentMenu}
             />
           ))
         )}
