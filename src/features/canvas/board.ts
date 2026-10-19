@@ -292,6 +292,41 @@ export function setRole(board: Board, tabId: string, role: string | null, subage
   return { ...board, roles, subagents: subagent ? [...others, tabId] : others };
 }
 
+/**
+ * Leva terminais de um canvas para outro (a pasta → a conversa dela), com o lugar de cada um, as ligações que
+ * tocam neles, o papel, a coroa de orquestrador e a marca de subagente. Um canvas de destino ainda vazio herda a
+ * vista do de origem, para a tela não pular. Pura.
+ */
+export function moveTerminals(from: Board, to: Board, ids: string[]): { from: Board; to: Board } {
+  const moving = new Set(ids.filter((id) => id in from.nodes));
+  if (moving.size === 0) return { from, to };
+  const touches = (e: CanvasEdge) => moving.has(e.a) || moving.has(e.b);
+  const pick = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([id]) => moving.has(id)));
+  const drop = <T,>(record: Record<string, T>) => Object.fromEntries(Object.entries(record).filter(([id]) => !moving.has(id)));
+  const known = new Set(to.edges.map((e) => [e.a, e.b].sort().join("|")));
+  const edges = from.edges.filter((e) => touches(e) && !known.has([e.a, e.b].sort().join("|")));
+  const empty = Object.keys(to.nodes).length === 0;
+  return {
+    from: {
+      ...from,
+      nodes: drop(from.nodes),
+      edges: from.edges.filter((e) => !touches(e)),
+      roles: drop(from.roles),
+      subagents: from.subagents.filter((id) => !moving.has(id)),
+      orchestrators: from.orchestrators.filter((id) => !moving.has(id)),
+    },
+    to: {
+      ...to,
+      nodes: { ...to.nodes, ...pick(from.nodes) },
+      edges: [...to.edges, ...edges],
+      roles: { ...to.roles, ...pick(from.roles) },
+      subagents: [...to.subagents, ...from.subagents.filter((id) => moving.has(id) && !to.subagents.includes(id))],
+      orchestrators: [...to.orchestrators, ...from.orchestrators.filter((id) => moving.has(id) && !to.orchestrators.includes(id))],
+      viewport: empty ? from.viewport : to.viewport,
+    },
+  };
+}
+
 export function toggleOrchestrator(board: Board, tabId: string): Board {
   const on = board.orchestrators.includes(tabId);
   return {

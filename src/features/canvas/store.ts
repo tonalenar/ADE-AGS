@@ -8,7 +8,7 @@ import {
   FOLDER_PREFIX, IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addFolder, addImage, addNote, addPortal,
   addStroke, addText, removeFolder, updateFolder,
   emptyBoard, placeInNextGridCell, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
-  buildMissionTeam, setRole, removeStroke, removeText, toggleOrchestrator, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
+  buildMissionTeam, setRole, removeStroke, removeText, toggleOrchestrator, moveTerminals, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
   type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
 } from "./board";
 import { safeViewport, type Box, type Rect, type Viewport } from "./geometry";
@@ -229,6 +229,16 @@ export const canvasActions = {
   disconnect: (key: string, edgeId: string) => updateBoard(key, (board) => removeEdge(board, edgeId)),
   disconnectPair: (key: string, a: string, b: string) => updateBoard(key, (board) => removeEdgeBetween(board, a, b)),
   toggleOrchestrator: (key: string, tabId: string) => updateBoard(key, (board) => toggleOrchestrator(board, tabId)),
+  /** Leva terminais de um canvas para outro, com lugar, ligações, papel e coroa (ver `moveTerminals`). O modo
+   *  (abas ou canvas) vai junto, se o destino ainda não tiver um. */
+  moveTerminals: (fromKey: string, toKey: string, tabIds: string[]) => {
+    const boards = useCanvasStore.getState().boards;
+    const moved = moveTerminals(boards[fromKey] ?? emptyBoard(), boards[toKey] ?? emptyBoard(), tabIds);
+    updateBoard(toKey, () => moved.to);
+    updateBoard(fromKey, () => moved.from);
+    const modes = useCanvasStore.getState().modes;
+    if (!(toKey in modes) && modes[fromKey]) setWorkMode(toKey, modes[fromKey]);
+  },
   /** O que o terminal é: papel (`null` = o orquestrador decide) e se é subagente. */
   setRole: (key: string, tabId: string, role: string | null, subagent: boolean) =>
     updateBoard(key, (board) => setRole(board, tabId, role, subagent)),
