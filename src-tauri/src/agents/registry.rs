@@ -180,6 +180,16 @@ pub struct AgentDef {
     /// - kimi-code: moonshotai.github.io/kimi-code/en/reference/kimi-command.html —
     ///   `--session <id>` (alias `-S`, mayúscula: distinta de `-s`/`--continue`).
     pub resume: Option<&'static str>,
+    /// Argumentos para ABRIR uma sessão com um id escolhido pela app, com o placeholder
+    /// `{session}`. `None` = a TUI não deixa escolher o id, e a app descobre depois.
+    ///
+    /// Sem isto, a sessão de uma tab do Claude Code era "o `.jsonl` mais recente da pasta do
+    /// projeto". Qualquer outra conversa no mesmo projeto (Claude Code no terminal, no app
+    /// desktop, outra tab) escreve nessa pasta, e a tab adotava o id dela: ao reabrir,
+    /// retomava uma conversa que não foi feita dentro da app. Com o id escolhido aqui não
+    /// há o que adivinhar.
+    /// - claude-code: `--session-id <uuid>` (precisa ser um UUID válido).
+    pub assign_session: Option<&'static str>,
     pub sessions: SessionSource,
     pub models: ModelSource,
     /// Cómo se le enchufa el servidor MCP de la app.
@@ -219,6 +229,7 @@ pub const AGENTS: &[AgentDef] = &[
             ],
         }),
         resume: Some("--resume {session}"),
+        assign_session: Some("--session-id {session}"),
         sessions: SessionSource::ClaudeProjects,
         models: ModelSource::ClaudeCode,
         mcp: McpStyle::ClaudeFlags,
@@ -232,6 +243,7 @@ pub const AGENTS: &[AgentDef] = &[
         skills_dir: Some(".agents/skills"),
         profile: None,
         resume: Some("--resume {session}"),
+        assign_session: None,
         sessions: SessionSource::GeminiTmp,
         models: ModelSource::GeminiCatalogue,
         mcp: McpStyle::None,
@@ -256,6 +268,7 @@ pub const AGENTS: &[AgentDef] = &[
             overriding_env: &["CODEX_API_KEY"],
         }),
         resume: Some("resume {session}"),
+        assign_session: None,
         sessions: SessionSource::CodexRollouts,
         models: ModelSource::CodexAppServer,
         mcp: McpStyle::None,
@@ -283,6 +296,7 @@ pub const AGENTS: &[AgentDef] = &[
             overriding_env: &[],
         }),
         resume: Some("--session {session}"),
+        assign_session: None,
         sessions: SessionSource::ProcessQuery,
         models: ModelSource::OpencodeModels,
         mcp: McpStyle::OpencodeConfig,
@@ -298,6 +312,7 @@ pub const AGENTS: &[AgentDef] = &[
         skills_dir: Some(".agents/skills"),
         profile: None,
         resume: Some("--session {session}"),
+        assign_session: None,
         sessions: SessionSource::KimiSessions,
         models: ModelSource::Unknown,
         mcp: McpStyle::None,
@@ -313,6 +328,7 @@ pub const AGENTS: &[AgentDef] = &[
         // Native OS keyring account. Task config isolation does not isolate OAuth accounts.
         profile: None,
         resume: None,
+        assign_session: None,
         sessions: SessionSource::None,
         models: ModelSource::AntigravityModels,
         mcp: McpStyle::None,
@@ -331,6 +347,7 @@ pub const AGENTS: &[AgentDef] = &[
         skills_dir: None,
         profile: None,
         resume: None,
+        assign_session: None,
         sessions: SessionSource::None,
         models: ModelSource::Unknown,
         mcp: McpStyle::None,
@@ -373,6 +390,8 @@ pub struct AgentRegistryEntry {
     pub launch_args: Vec<String>,
     pub skills_dir: Option<String>,
     pub resume: Option<String>,
+    /// Ver [`AgentDef::assign_session`].
+    pub assign_session: Option<String>,
     pub supports_accounts: bool,
     pub sessions: SessionSource,
     /// Cómo se le enchufa el servidor MCP. El frontend lo usa para dos cosas: decidir si
@@ -398,6 +417,7 @@ pub fn agent_registry() -> Vec<AgentRegistryEntry> {
                 .collect(),
             skills_dir: a.skills_dir.map(str::to_string),
             resume: a.resume.map(str::to_string),
+            assign_session: a.assign_session.map(str::to_string),
             supports_accounts: a.profile.is_some(),
             sessions: a.sessions,
             mcp: a.mcp,

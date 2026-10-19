@@ -56,3 +56,22 @@ export function buildResumeCommand(agentId: string, command: string, sessionId?:
   if (!args) return command;
   return `${command} ${args.split("{session}").join(sessionId)}`;
 }
+
+/** ¿Esta TUI deja que la app elija el id de la sesión al abrirla? Solo las de fábrica que lo declaran. */
+export function canAssignSession(agentId: string): boolean {
+  return !!agentDef(agentId)?.assignSession;
+}
+
+/**
+ * El comando para ABRIR una sesión nueva con el id que eligió la app.
+ *
+ * Así la tab sabe su sesión desde el primer segundo y no tiene que adivinarla después. La
+ * adivinanza era "el transcript más reciente de la carpeta del proyecto", y cualquier otra
+ * conversa en ese proyecto (Claude Code en otra terminal o en el app de escritorio) le ganaba:
+ * la tab adoptaba ese id y, al reabrirla, retomaba una conversación hecha fuera de la app.
+ */
+export function buildAssignCommand(agentId: string, command: string, sessionId: string): string {
+  const args = agentDef(agentId)?.assignSession;
+  if (!args || !isSafeSessionId(sessionId)) return command;
+  return `${command} ${args.split("{session}").join(sessionId)}`;
+}

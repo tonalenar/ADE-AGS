@@ -35,6 +35,12 @@ export interface AgentRegistryEntry {
   skillsDir: string | null;
   /** Argumentos de reanudación con el placeholder `{session}`. `null` = no sabe. */
   resume: string | null;
+  /**
+   * Argumentos para ABRIR una sesión con un id elegido por la app (placeholder `{session}`).
+   * Ausente o `null` = la TUI no deja elegirlo y la app lo descubre después. Ver
+   * `AgentDef::assign_session` en `registry.rs`.
+   */
+  assignSession?: string | null;
   supportsAccounts: boolean;
   sessions: string;
   /** Cómo recibe esta TUI el servidor MCP de la app. Espejo de `McpStyle` en

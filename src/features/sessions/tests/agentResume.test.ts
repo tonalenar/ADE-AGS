@@ -8,7 +8,7 @@ import { useAgentsStore } from "@/features/agents/store";
 import { setAgentRegistry, type AgentRegistryEntry } from "@/features/agents/registry";
 import type { CustomAgent } from "@/features/agents/types";
 
-import { buildResumeCommand, isResumable } from "../agentResume";
+import { buildAssignCommand, buildResumeCommand, canAssignSession, isResumable } from "../agentResume";
 
 /**
  * El catálogo salido de `src-tauri/src/agents/registry.rs`, leído del fuente.
@@ -37,6 +37,7 @@ function registryFromRust(): AgentRegistryEntry[] {
       const id = /\bid:\s*"([^"]+)"/.exec(block)?.[1];
       const command = rustString(block, "command");
       const resume = /\bresume:\s*Some\("([^"]+)"\)/.exec(block)?.[1] ?? null;
+      const assignSession = /\bassign_session:\s*Some\("([^"]+)"\)/.exec(block)?.[1] ?? null;
       const skillsDir = /\bskills_dir:\s*Some\("([^"]+)"\)/.exec(block)?.[1] ?? null;
       if (!id || !command) throw new Error(`fila ilegible en registry.rs: ${block.slice(0, 80)}`);
       const mcp = /\bmcp:\s*McpStyle::(\w+)/.exec(block)?.[1];
@@ -47,6 +48,7 @@ function registryFromRust(): AgentRegistryEntry[] {
         command,
         skillsDir,
         resume,
+        assignSession,
         supportsAccounts: /\bprofile:\s*Some\(/.test(block),
         sessions: "",
         // `ClaudeFlags` en Rust sale como `claudeFlags` por el `rename_all` de serde.
@@ -152,5 +154,30 @@ describe("buildResumeCommand", () => {
     expect(buildResumeCommand("bash", "bash", "abc")).toBe("bash");
     useAgentsStore.setState({ customAgents: [customAgent()] });
     expect(buildResumeCommand("mitui", "mitui", "abc")).toBe("mitui");
+  });
+});
+
+describe("buildAssignCommand", () => {
+  const ID = "3f2b6c1e-8d4a-4f6b-9c2d-1a2b3c4d5e6f";
+
+  it("Claude Code abre la sesión con el id que eligió la app", () => {
+    expect(canAssignSession("claude-code")).toBe(true);
+    expect(buildAssignCommand("claude-code", "claude", ID)).toBe(`claude --session-id ${ID}`);
+  });
+
+  it("las TUIs que no dejan elegir el id arrancan sin argumentos de sesión", () => {
+    for (const id of ["gemini-cli", "codex", "opencode", "kimi-code"]) {
+      expect(canAssignSession(id)).toBe(false);
+      expect(buildAssignCommand(id, id, ID)).toBe(id);
+    }
+  });
+
+  it("descarta ids que inyectarían flags o comandos", () => {
+    expect(buildAssignCommand("claude-code", "claude", "x --dangerously-skip-permissions")).toBe("claude");
+    expect(buildAssignCommand("claude-code", "claude", "-x")).toBe("claude");
+  });
+
+  it("al reabrir, el mismo id se retoma con --resume", () => {
+    expect(buildResumeCommand("claude-code", "claude", ID)).toBe(`claude --resume ${ID}`);
   });
 });
