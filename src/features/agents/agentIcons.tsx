@@ -1,48 +1,36 @@
-import {
-  ClaudeIcon,
-  GeminiIcon,
-  OpenAIIcon,
-  StackIcon,
-  MoonIcon,
-  MonitorIcon,
-  BoxIcon,
-} from "neogestify-ui-components";
+import { MonitorIcon, BoxIcon } from "neogestify-ui-components";
+
+import { CodexIcon, HermesAgentIcon, OpenCodeIcon } from "./brandIcons";
+import { AntigravityColorIcon, ClaudeCodeColorIcon, GeminiColorIcon, KimiColorIcon } from "./brandColorIcons";
 
 type AgentIconComponent = (props: { className: string }) => React.JSX.Element;
 
-/** Hermes Agent (Nous Research): o mensageiro veloz, um raio. A biblioteca não tem um ícone dele. */
-function HermesIcon({ className }: { className: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinejoin="round" strokeLinecap="round" className={className} aria-hidden>
-      <path d="M13.5 2.5 5 13.5h6.2l-1.4 8 8.7-11.2h-6.3l1.3-7.8Z" />
-    </svg>
-  );
-}
-
 /**
  * Icono de cada agente soportado, por el `id` que les asigna la auto-detección
- * (ver `agents/detector.rs`). Los que no tienen logo propio en la librería usan uno
- * genérico con sentido: OpenCode → capas (multi-provider), Kimi → luna (Moonshot AI),
- * terminal pura → monitor.
+ * (ver `agents/detector.rs`): o logo oficial de cada um, nas cores originais (`brandColorIcons.tsx`). Codex (o logo da OpenAI), OpenCode e Hermes não
+ * têm versão colorida (a marca deles é de uma cor só): seguem a cor do texto (`brandIcons.tsx`). A terminal pura, um monitor.
  */
 const BY_ID: Record<string, AgentIconComponent> = {
-  "claude-code": ClaudeIcon,
-  "gemini-cli": GeminiIcon,
-  codex: OpenAIIcon,
-  opencode: StackIcon,
-  "kimi-code": MoonIcon,
-  hermes: HermesIcon,
+  "claude-code": ClaudeCodeColorIcon,
+  "gemini-cli": GeminiColorIcon,
+  codex: CodexIcon,
+  opencode: OpenCodeIcon,
+  "kimi-code": KimiColorIcon,
+  hermes: HermesAgentIcon,
+  antigravity: AntigravityColorIcon,
   bash: MonitorIcon,
 };
 
 /** Agentes custom: no tienen un id conocido, así que se infiere por su comando. */
 const BY_COMMAND_HINT: [string, AgentIconComponent][] = [
-  ["claude", ClaudeIcon],
-  ["gemini", GeminiIcon],
-  ["codex", OpenAIIcon],
-  ["opencode", StackIcon],
-  ["kimi", MoonIcon],
-  ["hermes", HermesIcon],
+  ["claude", ClaudeCodeColorIcon],
+  ["gemini", GeminiColorIcon],
+  ["codex", CodexIcon],
+  ["opencode", OpenCodeIcon],
+  ["kimi", KimiColorIcon],
+  ["hermes", HermesAgentIcon],
+  ["antigravity", AntigravityColorIcon],
+  ["agy", AntigravityColorIcon],
   ["bash", MonitorIcon],
   ["zsh", MonitorIcon],
   ["fish", MonitorIcon],
