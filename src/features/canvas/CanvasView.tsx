@@ -18,7 +18,7 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
 import type { BrowserView } from "@/features/tabs/viewTabs";
 import type { Tab } from "@/features/tabs/types";
 import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
-import { forgetOrchestrator, orchestratorNotice, shouldAnnounce } from "./orchestratorNotice";
+import { announceToOrchestrators } from "./orchestratorAnnounce";
 import { portalConnectedNotice } from "./portalNotice";
 
 import { isHiddenNote, shownNote, stackMembers,
@@ -62,19 +62,6 @@ import { applyTabRole } from "./applyRole";
 import type { AgentRoleChoice } from "./agentRole";
 import { boardKeyOfTab, canvasActions, missionOfKey, useActiveBoardKey, useCanvasStore } from "./store";
 import { cleanPreviewLines } from "./previewText";
-
-/** Conta ao orquestrador quem está ligado a ele (só quando a lista de ligados muda). */
-function announceToOrchestrators(key: string, ids: string[]): void {
-  const board = useCanvasStore.getState().boards[key];
-  if (!board) return;
-  const tabs = useTabsStore.getState().tabs;
-  for (const id of ids) {
-    if (!board.orchestrators.includes(id)) { forgetOrchestrator(id); continue; }
-    if (!shouldAnnounce(board, id)) continue;
-    const text = orchestratorNotice(board, tabs, id);
-    if (text) sendWhenReady(id, text);
-  }
-}
 
 /** Avisa o agente quando a pessoa liga uma corda entre ele e um navegador do canvas. */
 function announcePortal(key: string, a: string, b: string): void {

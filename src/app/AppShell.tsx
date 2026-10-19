@@ -9,6 +9,7 @@ import { SideHead } from "@/app/SideHead";
 import { ActivityRail, RAIL_COMPACT_W, RAIL_EXPANDED_W } from "@/app/ActivityRail";
 import { CommandPalette } from "@/features/palette/CommandPalette";
 import { initCanvasSync } from "@/features/canvas/store";
+import { initOrchestratorAnnouncements } from "@/features/canvas/orchestratorAnnounce";
 import { useSessionCheckpoints } from "@/features/sessions/useSessionCheckpoints";
 import { StatusBar } from "@/app/StatusBar";
 import { TabBar } from "@/features/tabs/TabBar";
@@ -179,6 +180,8 @@ export function AppShell() {
     initLayoutSync(myLabel);
     // El canvas de agentes: posiciones y conexiones, por carpeta (ver features/canvas).
     initCanvasSync(myLabel);
+    // O orquestrador sabe quem está no time dele, venha o time de onde vier (ver `orchestratorAnnounce`).
+    initOrchestratorAnnouncements();
     loadWindowState(myLabel)
       .then((restored) => {
         if (restored) {
