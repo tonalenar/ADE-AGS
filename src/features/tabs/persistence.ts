@@ -322,7 +322,8 @@ export async function saveForClose(progress: SaveProgress): Promise<void> {
 
 const HYDRATION_TIMEOUT_MS = 5_000;
 
-function waitForHydration(): Promise<void> {
+/** Quando as tabs desta janela hidrataram (ou o tope de espera passou). A tela de carregamento espera isto. */
+export function waitForHydration(): Promise<void> {
   if (useTabsStore.getState().hydrated) return Promise.resolve();
   return new Promise((resolve) => {
     const done = () => {

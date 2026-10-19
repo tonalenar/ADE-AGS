@@ -201,6 +201,7 @@ pub fn run() {
             crate::session::get_session_title,
             // Gestión de ventanas
             crate::window::restore_deferred_windows,
+            crate::window::app_window_ready,
             crate::window::open_new_window,
             crate::window::broadcast_event,
             crate::window::get_home_dir,
@@ -555,6 +556,17 @@ pub fn run() {
             // Abre a conexão com o Jev (se o piloto está ligado) antes do primeiro `act`.
             crate::decisions::browse::preconnect_at_start(app.handle().clone());
             app.manage(crate::window::DeferredRestore::empty());
+            // A janela principal nasce escondida e a página a mostra (`app_window_ready`). Isto é a rede:
+            // se a página falhar antes de avisar, ela aparece mesmo assim.
+            {
+                let handle = app.handle().clone();
+                std::thread::spawn(move || {
+                    std::thread::sleep(crate::window::REVEAL_FALLBACK);
+                    if let Some(main) = handle.get_webview_window("main") {
+                        crate::window::reveal(&main);
+                    }
+                });
+            }
 
             // Upgrade de schema: la ventana ya puede pintarse (el frontend muestra
             // "actualizando datos" y no monta la home). La copia y la migración siguen
