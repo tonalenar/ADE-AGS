@@ -1,48 +1,42 @@
+import { MonitorIcon, BoxIcon } from "neogestify-ui-components";
+
 import {
-  ClaudeIcon,
-  GeminiIcon,
-  OpenAIIcon,
-  StackIcon,
-  MoonIcon,
-  MonitorIcon,
-  BoxIcon,
-} from "neogestify-ui-components";
+  AntigravityIcon,
+  ClaudeCodeIcon,
+  CodexIcon,
+  GeminiCliIcon,
+  HermesAgentIcon,
+  KimiIcon,
+  OpenCodeIcon,
+} from "./brandIcons";
 
 type AgentIconComponent = (props: { className: string }) => React.JSX.Element;
 
-/** Hermes Agent (Nous Research): o mensageiro veloz, um raio. A biblioteca não tem um ícone dele. */
-function HermesIcon({ className }: { className: string }) {
-  return (
-    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinejoin="round" strokeLinecap="round" className={className} aria-hidden>
-      <path d="M13.5 2.5 5 13.5h6.2l-1.4 8 8.7-11.2h-6.3l1.3-7.8Z" />
-    </svg>
-  );
-}
-
 /**
  * Icono de cada agente soportado, por el `id` que les asigna la auto-detección
- * (ver `agents/detector.rs`). Los que no tienen logo propio en la librería usan uno
- * genérico con sentido: OpenCode → capas (multi-provider), Kimi → luna (Moonshot AI),
- * terminal pura → monitor.
+ * (ver `agents/detector.rs`): o logo oficial de cada um (`brandIcons.tsx`); a terminal pura, um monitor.
  */
 const BY_ID: Record<string, AgentIconComponent> = {
-  "claude-code": ClaudeIcon,
-  "gemini-cli": GeminiIcon,
-  codex: OpenAIIcon,
-  opencode: StackIcon,
-  "kimi-code": MoonIcon,
-  hermes: HermesIcon,
+  "claude-code": ClaudeCodeIcon,
+  "gemini-cli": GeminiCliIcon,
+  codex: CodexIcon,
+  opencode: OpenCodeIcon,
+  "kimi-code": KimiIcon,
+  hermes: HermesAgentIcon,
+  antigravity: AntigravityIcon,
   bash: MonitorIcon,
 };
 
 /** Agentes custom: no tienen un id conocido, así que se infiere por su comando. */
 const BY_COMMAND_HINT: [string, AgentIconComponent][] = [
-  ["claude", ClaudeIcon],
-  ["gemini", GeminiIcon],
-  ["codex", OpenAIIcon],
-  ["opencode", StackIcon],
-  ["kimi", MoonIcon],
-  ["hermes", HermesIcon],
+  ["claude", ClaudeCodeIcon],
+  ["gemini", GeminiCliIcon],
+  ["codex", CodexIcon],
+  ["opencode", OpenCodeIcon],
+  ["kimi", KimiIcon],
+  ["hermes", HermesAgentIcon],
+  ["antigravity", AntigravityIcon],
+  ["agy", AntigravityIcon],
   ["bash", MonitorIcon],
   ["zsh", MonitorIcon],
   ["fish", MonitorIcon],
