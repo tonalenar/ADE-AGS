@@ -4,7 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useTabsStore } from "@/features/tabs/store";
 import type { Tab } from "@/features/tabs/types";
-import { initTabsPersistence } from "@/features/tabs/persistence";
+import { initTabsPersistence, waitForHydration } from "@/features/tabs/persistence";
 import { SideHead } from "@/app/SideHead";
 import { ActivityRail, RAIL_COMPACT_W, RAIL_EXPANDED_W } from "@/app/ActivityRail";
 import { CommandPalette } from "@/features/palette/CommandPalette";
@@ -41,6 +41,7 @@ import { AskDialog } from "@/features/ask/AskDialog";
 import { useAgentsStore } from "@/features/agents/store";
 import { initCliBridge } from "@/features/orchestrator/cliBridge";
 import { restoreDeferredWindowsAfterFirstFrame } from "@/app/afterFirstFrame";
+import { followAppBoot } from "@/app/splash";
 import { useFleetEvents } from "@/features/runs/useFleetEvents";
 import { detectAgents } from "@/features/agents/ipc";
 import { loadWindowState, type RestoredTabRow } from "@/features/tabs/ipc";
@@ -142,7 +143,9 @@ export function AppShell() {
   }, []);
 
   useEffect(() => {
-    detectAgents().then(setDetectedAgents);
+    const agentsReady = detectAgents().then(setDetectedAgents);
+    // A tela de carregamento segue o resto do boot daqui: tabs hidratadas, agentes detectados.
+    void followAppBoot({ tabsHydrated: waitForHydration(), agentsReady });
     // Las TUIs custom viven en SQLite (el backend también las consulta), así que hay que
     // traerlas explícitamente en cada ventana en vez de que se rehidraten solas.
     useAgentsStore.getState().loadCustomAgents().catch(console.error);

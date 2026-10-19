@@ -61,8 +61,8 @@ pub fn restore_windows(app: &AppHandle, rows: Vec<WindowRow>, reuse_main: bool) 
                 if let Some((x, y)) = usable_position(w.pos_x, w.pos_y) {
                     let _ = main_win.set_position(tauri::Position::Physical(tauri::PhysicalPosition { x, y }));
                 }
-                // O app sempre abre em tela cheia; o tamanho guardado fica para quando se restaura a janela.
-                let _ = main_win.maximize();
+                // O app sempre abre em tela cheia, mas a maximização fica para `reveal`: no Windows maximizar
+                // MOSTRA a janela, e ela nasce escondida até a página pintar a tela de carregamento.
             }
             database::mark_window_open(&db, &w.id)?;
             continue;

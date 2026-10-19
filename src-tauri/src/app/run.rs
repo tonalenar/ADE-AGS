@@ -201,6 +201,10 @@ pub fn run() {
             crate::session::get_session_title,
             // Gestión de ventanas
             crate::window::restore_deferred_windows,
+            crate::window::app_window_ready,
+            crate::window::app_boot_progress,
+            crate::window::app_boot_step,
+            crate::window::app_boot_done,
             crate::window::open_new_window,
             crate::window::broadcast_event,
             crate::window::get_home_dir,
@@ -505,6 +509,10 @@ pub fn run() {
         .on_window_event(|window, event| match event {
             tauri::WindowEvent::CloseRequested { api, .. } => {
                 let label = window.label().to_string();
+                // A janelinha de abertura não guarda nada: fecha direto.
+                if label == crate::window::SPLASH_LABEL {
+                    return;
+                }
                 // Un cierre que pide el sistema se frena para guardar con progreso; el
                 // frontend cierra de verdad al terminar (ver `window::close_guard`).
                 use crate::window::close_guard::{Decision, decide};
@@ -555,6 +563,9 @@ pub fn run() {
             // Abre a conexão com o Jev (se o piloto está ligado) antes do primeiro `act`.
             crate::decisions::browse::preconnect_at_start(app.handle().clone());
             app.manage(crate::window::DeferredRestore::empty());
+            // A abertura: a janelinha do robô na frente, a principal carregando escondida (ver `window::splash`).
+            crate::window::open_splash(app.handle());
+            crate::window::arm_fallback(app.handle());
 
             // Upgrade de schema: la ventana ya puede pintarse (el frontend muestra
             // "actualizando datos" y no monta la home). La copia y la migración siguen

@@ -14,6 +14,7 @@
       {
         "title": "ADE AGS",
         "maximized": true,
+        "visible": false,
         "width": 1280,
         "height": 780,
         "minWidth": 900,
