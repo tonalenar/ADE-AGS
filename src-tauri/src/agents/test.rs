@@ -100,6 +100,7 @@ fn el_registro_conserva_los_valores_que_estaban_repartidos() {
             None,
             Some("--session {session}"),
         ),
+        e("hermes", "hermes", None, None, Some("--resume {session}")),
         // bash no es una TUI de agente: no gestiona skills, ni cuentas, ni sesiones.
         e("antigravity", "agy", None, None, None),
         e("bash", if cfg!(windows) { "powershell" } else { "bash" }, None, None, None),

@@ -91,7 +91,9 @@ it("el catálogo se pudo leer del registro de Rust", () => {
 describe("isResumable", () => {
   it("reconoce a las TUIs de fábrica que saben reanudar", () => {
     const resumable = RUST_REGISTRY.filter((a) => a.resume).map((a) => a.id);
-    expect(resumable).toHaveLength(5);
+    expect(resumable).toHaveLength(6);
+    expect(resumable).toContain("hermes");
+    expect(buildResumeCommand("hermes", "hermes", "20260920_183255_ed821b")).toBe("hermes --resume 20260920_183255_ed821b");
     for (const id of resumable) expect(isResumable(id)).toBe(true);
   });
 
