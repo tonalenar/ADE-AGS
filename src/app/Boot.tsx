@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { useTranslation } from "react-i18next";
 
 import App from "@/app/App";
-import { splashDismiss } from "@/app/splash";
+import { revealApp } from "@/app/splash";
 
 type DbPhase = "checking" | "upgrading" | "ready";
 
@@ -63,8 +63,8 @@ export function Boot({ appReady }: { appReady: Promise<void> }) {
   }, []);
 
   useEffect(() => {
-    // A atualização da base tem a sua própria tela: a de carregamento sai da frente.
-    if (db === "upgrading") splashDismiss();
+    // A atualização da base tem a sua própria tela: o app aparece já, sem esperar o resto do boot.
+    if (db === "upgrading") void revealApp();
   }, [db]);
 
   if (db === "upgrading") return <UpdatingSplash />;

@@ -8,10 +8,10 @@ import { loadAgentRegistry } from "@/features/agents/registry";
 import { fontsReady } from "@/features/terminal/fontsReady";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { renderingInfo } from "@/shared/ipc/settings";
-import { splashReached } from "@/app/splash";
+import { reportBootStep } from "@/app/splash";
 
-// O bundle chegou: a janela está de pé e a tela de carregamento passa a "carregando os workspaces".
-splashReached(1);
+// O bundle chegou: a abertura passa a "carregando os workspaces".
+reportBootStep(1);
 
 // El menú de click derecho del webview (Atrás, Recargar, Inspeccionar…) es del navegador,
 // no de la app: recargar tira las terminales vivas. Se deja solo donde se escribe texto,

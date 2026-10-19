@@ -325,28 +325,6 @@ pub fn restore_deferred_windows(app: tauri::AppHandle) -> Result<(), String> {
     restore_windows(&app, rows, true)
 }
 
-/// A janela principal nasce escondida (`visible: false` em tauri.conf.json): visível desde o começo,
-/// ela aparecia branca e no tamanho padrão, sumia ao maximizar e só depois mostrava o app. A página
-/// chama isto assim que a tela de carregamento do `index.html` está no DOM.
-#[tauri::command]
-pub fn app_window_ready(window: tauri::WebviewWindow) {
-    reveal(&window);
-}
-
-/// Mostra uma janela que ainda está escondida, já maximizada. Numa janela visível não faz nada: quem
-/// a desmaximizou não a vê saltar de novo quando uma página recarrega.
-pub fn reveal(window: &tauri::WebviewWindow) {
-    if window.is_visible().unwrap_or(true) {
-        return;
-    }
-    let _ = window.maximize();
-    let _ = window.show();
-    let _ = window.set_focus();
-}
-
-/// Se a página nunca avisar (um erro antes do script do `index.html`), a janela aparece assim mesmo.
-pub const REVEAL_FALLBACK: std::time::Duration = std::time::Duration::from_secs(6);
-
 /// Abre una nueva ventana nativa de Tauri.
 #[tauri::command]
 pub async fn open_new_window(app: tauri::AppHandle, label: String) -> Result<(), String> {

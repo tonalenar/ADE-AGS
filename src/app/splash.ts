@@ -1,81 +1,57 @@
+import { invoke } from "@tauri-apps/api/core";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+
 /**
- * A tela de carregamento: o robô do `index.html`, que a janela pinta antes de o bundle chegar.
+ * O boot da janela principal visto pela janelinha de abertura (`splash.html`, ver
+ * `src-tauri/src/window/splash.rs`). A principal carrega escondida e avisa cada etapa quando ela fica
+ * pronta de verdade; no fim o robô acena e a principal aparece, já maximizada.
  *
- * Ela já nasce com a primeira etapa ("abrindo a janela") em andamento. Daqui o app avança as etapas
- * quando cada coisa fica pronta de verdade e, no fim, o robô acena e a tela se dissolve. O estado
- * mora no próprio DOM (a etapa atual em `data-state` de cada item): sem o elemento, tudo aqui é nada.
+ * Só a janela "main" conversa com a abertura: as outras de um workspace abrem depois, já visíveis.
  */
 
-/** Quantas etapas a lista tem: janela, workspaces, terminais, agentes. */
-export const SPLASH_STEPS = 4;
-/** Quanto o robô acena antes de a tela começar a sumir. */
+/** O fim, na contagem da janelinha (as quatro etapas feitas). */
+export const SPLASH_DONE = 4;
+/** Quanto o robô acena antes de o app aparecer. */
 export const SPLASH_WAVE_MS = 700;
-/** A duração do esmaecer (a `transition` de `#ags-splash` no `index.html`). */
-export const SPLASH_LEAVE_MS = 300;
-/** Quanto a última etapa espera a detecção dos agentes antes de liberar a tela. */
+/** Quanto a última etapa espera a detecção dos agentes antes de liberar o app. */
 export const SPLASH_AGENTS_CAP_MS = 2_500;
 
 const wait = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-function splashRoot(doc: Document): HTMLElement | null {
-  return doc.getElementById("ags-splash");
+function isMainWindow(): boolean {
+  try {
+    return getCurrentWindow().label === "main";
+  } catch {
+    return false;
+  }
 }
 
-/** A etapa atual: a primeira que ainda não terminou. */
-export function splashStep(doc: Document = document): number {
-  const items = Array.from(doc.querySelectorAll<HTMLElement>("#ags-splash-steps li"));
-  const now = items.findIndex((li) => li.dataset.state !== "done");
-  return now === -1 ? items.length : now;
+/** A etapa `step` é a da vez (as anteriores terminaram). */
+export function reportBootStep(step: number): void {
+  if (!isMainWindow()) return;
+  invoke("app_boot_progress", { step }).catch(() => undefined);
 }
 
-/** As etapas antes de `step` terminaram e `step` é a da vez. Nunca volta atrás. */
-export function splashReached(step: number, doc: Document = document): void {
-  const root = splashRoot(doc);
-  if (!root || root.classList.contains("is-done")) return;
-  const target = Math.min(step, SPLASH_STEPS);
-  if (target <= splashStep(doc)) return;
-  const items = Array.from(root.querySelectorAll<HTMLElement>("#ags-splash-steps li"));
-  items.forEach((li, i) => {
-    li.dataset.state = i < target ? "done" : i === target ? "now" : "todo";
-  });
-  const fill = doc.getElementById("ags-splash-fill");
-  if (fill) fill.style.width = target >= SPLASH_STEPS ? "100%" : `${target * 25 + 8}%`;
-  const status = doc.getElementById("ags-splash-status");
-  const current = items[target]?.textContent;
-  if (status && current) status.textContent = `${current}…`;
-}
-
-/** Tudo carregado: o robô acena e a tela se dissolve no app. */
-export async function splashFinish(doc: Document = document): Promise<void> {
-  const root = splashRoot(doc);
-  if (!root || root.classList.contains("is-done")) return;
-  splashReached(SPLASH_STEPS, doc);
-  root.classList.add("is-done");
-  const status = doc.getElementById("ags-splash-status");
-  if (status) status.textContent = root.dataset.readyText ?? "";
-  await wait(SPLASH_WAVE_MS);
-  root.classList.add("is-leaving");
-  await wait(SPLASH_LEAVE_MS);
-  root.remove();
-}
-
-/** Some na hora, sem aceno: o app vai mostrar outra tela (a de atualização da base). */
-export function splashDismiss(doc: Document = document): void {
-  splashRoot(doc)?.remove();
+/** Mostra o app e tira a abertura, sem aceno (ex.: a tela de atualização da base precisa aparecer). */
+export function revealApp(): Promise<void> {
+  if (!isMainWindow()) return Promise.resolve();
+  return invoke("app_boot_done").then(() => undefined, () => undefined);
 }
 
 /**
  * Segue o boot a partir da casca do app montada (a base e o catálogo já estão prontos): os terminais
- * religam quando as tabs da janela hidratam, e a última etapa espera a detecção dos agentes até
- * `capMs`. Uma falha em qualquer das duas não segura a tela.
+ * religam quando as tabs hidratam, e a última etapa espera a detecção dos agentes até `capMs`. Uma falha
+ * em qualquer das duas não segura o app.
  */
 export async function followAppBoot(
-  deps: { tabsHydrated: Promise<unknown>; agentsReady: Promise<unknown>; capMs?: number },
-  doc: Document = document,
+  deps: { tabsHydrated: Promise<unknown>; agentsReady: Promise<unknown>; capMs?: number; waveMs?: number },
+  io: { step: (step: number) => void; done: () => Promise<void> } = { step: reportBootStep, done: revealApp },
 ): Promise<void> {
-  splashReached(2, doc);
+  io.step(2);
   await deps.tabsHydrated.catch(() => undefined);
-  splashReached(3, doc);
+  io.step(3);
   await Promise.race([deps.agentsReady.catch(() => undefined), wait(deps.capMs ?? SPLASH_AGENTS_CAP_MS)]);
-  await splashFinish(doc);
+  io.step(SPLASH_DONE);
+  await wait(deps.waveMs ?? SPLASH_WAVE_MS);
+  await io.done();
 }
