@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from "react";
 
-import { breakpointOf, clampViewport, fillLayout, fitScale, isFillViewport, type Viewport } from "./viewport";
+import { breakpointOf, clampViewport, fillLayout, fitScale, isFillViewport, isPhoneViewport, type Viewport } from "./viewport";
 import { clampZoom, stageSize } from "./zoom";
 
 type Edge = "x" | "y" | "xy";
@@ -51,6 +51,9 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
   const fill = !drag && isFillViewport(viewport);
   const filled = fill && viewport ? fillLayout(viewport, box, z) : null;
   const scale = shown ? (drag?.scale ?? Math.max(0.1, fitScale(shown, available) * z)) : 1;
+  // Num tamanho de celular o quadro vira o aparelho (moldura, cantos, ilha, botões), como num mockup.
+  const phone = !!shown && !fill && isPhoneViewport(shown);
+  const landscape = !!shown && shown.width > shown.height;
 
   const startDrag = (edge: Edge) => (e: React.PointerEvent<HTMLDivElement>) => {
     if (!viewport || e.button !== 0) return;
@@ -107,12 +110,17 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
               transform: filled.scale === 1 ? undefined : `scale(${filled.scale})`, transformOrigin: "0 0",
             }
             : shown
-              ? { width: shown.width, height: shown.height, transform: scale === 1 ? undefined : `scale(${scale})`, transformOrigin: "0 0" }
+              ? {
+                width: shown.width, height: shown.height, transform: scale === 1 ? undefined : `scale(${scale})`, transformOrigin: "0 0",
+                ...(phone ? phoneScreen(scale) : {}),
+              }
               : { ...stageSize(z), transform: z === 1 ? undefined : `scale(${z})`, transformOrigin: "0 0" }}
-          className={shown && !fill ? "bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_32px_-12px_rgba(0,0,0,0.35)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_12px_32px_-12px_rgba(0,0,0,0.8)]" : undefined}
+          className={phone ? "relative bg-white" : shown && !fill ? "bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_32px_-12px_rgba(0,0,0,0.35)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_12px_32px_-12px_rgba(0,0,0,0.8)]" : undefined}
         >
           {children}
+          {phone && <PhoneOverlay landscape={landscape} />}
         </div>
+        {phone && <PhoneButtons landscape={landscape} />}
 
         {shown && !fill && (
           <>
@@ -148,6 +156,57 @@ function Handle({ edge, onPointerDown }: { edge: Edge; onPointerDown: (e: React.
       className={`group absolute z-10 touch-none ${place}`}>
       <span className={`block rounded-full bg-gray-400/70 dark:bg-white/25 group-hover:bg-accent-500 ${grip}
         ${edge === "xy" ? "absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2" : ""}`} />
+    </div>
+  );
+}
+
+/** A moldura do aparelho em pixels de TELA: a página é escalada, então a espessura é dividida pela escala. */
+const BEZEL = 11;
+/** O raio da tela do aparelho, em pixels da página (como um iPhone recente). */
+const SCREEN_RADIUS = 52;
+
+/** A tela do aparelho: cantos arredondados que recortam a página e a moldura preta em volta (por sombra, para não
+ *  mudar o tamanho que a página mede). Pura. */
+export function phoneScreen(scale: number): React.CSSProperties {
+  const px = (n: number) => `${n / Math.max(scale, 0.05)}px`;
+  return {
+    borderRadius: SCREEN_RADIUS,
+    overflow: "hidden",
+    boxShadow: `0 0 0 ${px(BEZEL)} #0b0b0d, 0 0 0 ${px(BEZEL + 1.5)} #3a3a3e, 0 ${px(22)} ${px(54)} rgba(0,0,0,0.45)`,
+  };
+}
+
+/** O que fica por cima da página: a ilha (no topo, ou à esquerda com o aparelho deitado) e a barra de início. Não
+ *  pega clique: a página continua respondendo embaixo. */
+function PhoneOverlay({ landscape }: { landscape: boolean }) {
+  const island: React.CSSProperties = landscape
+    ? { left: 12, top: "50%", transform: "translateY(-50%)", width: 34, height: 118 }
+    : { top: 12, left: "50%", transform: "translateX(-50%)", width: 118, height: 34 };
+  return (
+    <div aria-hidden className="pointer-events-none absolute inset-0 z-10">
+      <div className="absolute rounded-full bg-black" style={island} />
+      <div className="absolute bottom-2 left-1/2 -translate-x-1/2 h-[5px] w-[134px] rounded-full bg-black/35" />
+    </div>
+  );
+}
+
+/** Os botões na lateral do aparelho (volume à esquerda, liga/desliga à direita), em pixels de tela. */
+function PhoneButtons({ landscape }: { landscape: boolean }) {
+  const side = (style: React.CSSProperties) => <span className="absolute rounded-sm bg-[#2a2a2e]" style={style} />;
+  const out = -(BEZEL + 4);
+  return landscape ? (
+    <div aria-hidden className="pointer-events-none absolute inset-0">
+      {side({ top: out, left: "18%", width: 28, height: 3 })}
+      {side({ top: out, left: "26%", width: 46, height: 3 })}
+      {side({ top: out, left: "36%", width: 46, height: 3 })}
+      {side({ bottom: out, left: "30%", width: 66, height: 3 })}
+    </div>
+  ) : (
+    <div aria-hidden className="pointer-events-none absolute inset-0">
+      {side({ left: out, top: "16%", width: 3, height: 28 })}
+      {side({ left: out, top: "24%", width: 3, height: 46 })}
+      {side({ left: out, top: "33%", width: 3, height: 46 })}
+      {side({ right: out, top: "27%", width: 3, height: 66 })}
     </div>
   );
 }
