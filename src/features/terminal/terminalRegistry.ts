@@ -229,12 +229,14 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRet
   if (submit) {
     setTimeout(() => term.input("\r"), 80);
     // Un pegado grande (Codex: "[Pasted Content 3904 chars]") puede tragarse ese Enter y dejar el
-    // briefing escrito sin enviar: el agente nunca arranca. Se mira la pantalla y se reintenta.
+    // briefing escrito sin enviar: el agente nunca arranca. Se mira la pantalla y se reintenta. O Hermes e o
+    // OpenCode não trocam o colado por um marcador: o texto fica inteiro na caixa, com o cursor no fim dele
+    // (`typedTextPending`). Ainda "starting agent…", eles também engolem o Enter.
     SUBMIT_RETRY_MS.forEach((delay) =>
       setTimeout(() => {
         if (terminals.get(tabId) !== term) return;
         const screen = screenOf(tabId, null, 12);
-        if (screen && pasteStillPending(screen.lines)) {
+        if ((screen && pasteStillPending(screen.lines)) || typedTextPending(beforeCursor(term), text)) {
           term.input("\r");
           onRetry?.(Date.now());
         }
@@ -250,6 +252,33 @@ export function sendKeysToTab(tabId: string, keys: string): boolean {
   if (!term) return false;
   term.input(keys);
   return true;
+}
+
+/** O texto até o cursor: as `rows` linhas que acabam na do cursor, esta só até ele. É onde está a caixa de
+ *  entrada de uma TUI esperando o Enter. */
+function beforeCursor(term: Terminal, rows = 4): string {
+  const buf = term.buffer.active;
+  const y = buf.baseY + buf.cursorY;
+  const lines: string[] = [];
+  for (let at = Math.max(0, y - rows + 1); at < y; at++) lines.push(buf.getLine(at)?.translateToString(true) ?? "");
+  lines.push((buf.getLine(y)?.translateToString(true) ?? "").slice(0, buf.cursorX));
+  return lines.join("");
+}
+
+/** Bordas de caixa e espaços: o mesmo texto quebrado em linhas dentro de uma caixa ainda é o mesmo texto. */
+const LAYOUT = /[\s│┃║|▌▐]/g;
+/** Quantos caracteres do fim do texto o cursor tem de ter logo antes dele. */
+const TAIL = 16;
+
+/**
+ * O texto colado continua na caixa de entrada, sem enviar? Sim quando o que vem logo antes do cursor é o fim
+ * dele: depois do envio a caixa fica vazia, e se a pessoa já digitou algo o cursor não está mais ali (um Enter
+ * a mais mandaria o que ela escreveu). Pura.
+ */
+export function typedTextPending(beforeCursorText: string, text: string): boolean {
+  const sent = text.replace(LAYOUT, "");
+  if (sent.length === 0) return false;
+  return beforeCursorText.replace(LAYOUT, "").endsWith(sent.slice(-TAIL));
 }
 
 /** Cuándo (ms tras pegar) se vuelve a mirar si el pegado quedó sin enviar. */

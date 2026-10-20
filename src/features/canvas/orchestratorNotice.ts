@@ -41,15 +41,38 @@ export function orchestratorNotice(board: Board, tabs: NamedTab[], orchestratorI
   return `[ADE AGS] Você é o orquestrador deste canvas e tem ${peers.length === 1 ? "um terminal conectado" : `${peers.length} terminais conectados`} a você: ${names}. `
     + "Rode `ags peers` para ver os nomes exatos. Use `ags peer ask <nome> \"...\"` para pedir algo e esperar a resposta, "
     + "`ags peer tell <nome> \"...\"` para avisar sem esperar e `ags tab output <id>` para ler a tela deles. "
-    + "Delegue o trabalho a eles em vez de fazer tudo sozinho." + decide;
+    + "Delegue o trabalho a eles em vez de fazer tudo sozinho: eles estão parados esperando a primeira tarefa sua." + decide;
+}
+
+/** Onde fica guardado o que já foi dito: sobrevive a reabrir o app, para não avisar de novo um time que não
+ *  mudou (cada aviso custa um turno do orquestrador). */
+const TOLD_KEY = "ade-orchestrator-told";
+
+function loadTold(): Map<string, string> {
+  try {
+    const raw = typeof localStorage === "undefined" ? null : localStorage.getItem(TOLD_KEY);
+    const parsed = raw ? (JSON.parse(raw) as unknown) : null;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return new Map();
+    return new Map(Object.entries(parsed).filter((entry): entry is [string, string] => typeof entry[1] === "string"));
+  } catch {
+    return new Map();
+  }
+}
+
+function saveTold(): void {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(TOLD_KEY, JSON.stringify(Object.fromEntries(told)));
+  } catch {
+    /* sem guardar, no pior caso avisa de novo ao reabrir */
+  }
 }
 
 /** O que já foi dito a cada orquestrador (a lista de ligados), para não repetir o mesmo aviso. */
-const told = new Map<string, string>();
+const told = loadTold();
 
 /** Esquece o que foi dito; a próxima ligação volta a avisar. Usado ao desmarcar o orquestrador. */
 export function forgetOrchestrator(orchestratorId: string): void {
-  told.delete(orchestratorId);
+  if (told.delete(orchestratorId)) saveTold();
 }
 
 /** `true` se há um aviso novo para este orquestrador (a lista de ligados mudou desde o último). */
@@ -60,5 +83,6 @@ export function shouldAnnounce(board: Board, orchestratorId: string): boolean {
     .map((id) => `${id}:${board.roles[id] ?? ""}:${board.subagents.includes(id) ? "s" : ""}`).join("|");
   if (!signature || told.get(orchestratorId) === signature) return false;
   told.set(orchestratorId, signature);
+  saveTold();
   return true;
 }

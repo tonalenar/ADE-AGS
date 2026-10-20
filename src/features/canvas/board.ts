@@ -534,9 +534,12 @@ export function removeNote(board: Board, id: string): Board {
 
 export const PORTAL_SIZE = { w: 640, h: 440 };
 
-/** Um navegador aberto por um agente nasce renderizando em 1920×1080 (uma tela de desktop), como um navegador de verdade… */
-export const AGENT_PORTAL_VIEWPORT = { width: 1920, height: 1080 } as const;
-/** …e num nó maior que o padrão, para a página reduzida continuar legível. */
+/**
+ * Um navegador aberto por um agente nasce num nó maior que o padrão e SEM resolução forçada: a página usa o tamanho
+ * do nó (~1200 px, layout de desktop) em escala 1:1. Antes nascia em 1920×1080 e ia encolhida a 0,6× dentro do nó;
+ * com o canvas afastado o texto virava 6–8 px na tela e ficava borrado (nenhum navegador desenha letra nítida desse
+ * tamanho). A pessoa ainda escolhe uma resolução na barra do navegador quando quiser.
+ */
 export const AGENT_PORTAL_SIZE = { w: 1200, h: 840 } as const;
 /** Un teléfono es alto y angosto. */
 export const PHONE_SIZE = { w: 320, h: 640 };

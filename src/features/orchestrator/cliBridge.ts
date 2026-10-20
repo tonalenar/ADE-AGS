@@ -17,7 +17,7 @@ import { respondToCli } from "./ipc";
 import { screenOf } from "@/features/terminal/terminalRegistry";
 import { requestPtyLaunch } from "@/features/terminal/ptyLaunch";
 import { boardKey, boardKeyOfTab, canvasActions, flushSave, setWorkMode, useCanvasStore } from "@/features/canvas/store";
-import { AGENT_PORTAL_SIZE, AGENT_PORTAL_VIEWPORT } from "@/features/canvas/board";
+import { AGENT_PORTAL_SIZE } from "@/features/canvas/board";
 import { orphanPortal } from "@/features/canvas/portalReuse";
 
 /**
@@ -320,8 +320,9 @@ async function handlePortal(args: Record<string, unknown>) {
     const android = str(args, "kind") === "android";
     const created = canvasActions.addPortal(key, {
       name: str(args, "name"), url: str(args, "url"), near,
-      // Um navegador (não a tela de um Android) que um agente abre: 1920×1080, num nó maior.
-      ...(android ? { kind: "android" as const, avd: str(args, "avd") } : { viewport: { ...AGENT_PORTAL_VIEWPORT }, size: { ...AGENT_PORTAL_SIZE } }),
+      // Um navegador (não a tela de um Android) que um agente abre: num nó maior, sem resolução forçada (a página
+      // usa o tamanho do nó, nítida; ver `AGENT_PORTAL_SIZE`).
+      ...(android ? { kind: "android" as const, avd: str(args, "avd") } : { size: { ...AGENT_PORTAL_SIZE } }),
     });
     // O navegador só existe na tela se o canvas está à vista: quem pediu um navegador quer vê-lo.
     if (useCanvasStore.getState().modes[key] !== "canvas") setWorkMode(key, "canvas");
