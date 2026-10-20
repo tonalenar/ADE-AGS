@@ -269,8 +269,19 @@ export function conversationTitle(row: ConversationRow, terminals: TerminalSnaps
   const custom = cleanText(row.customTitle, CUSTOM_MAX);
   if (custom) return custom;
   const title = typeof row.title === "string" ? row.title.trim() : "";
-  if (title) return title;
-  return cleanText(pickRestoreOrder(terminals)[0]?.title, TITLE_MAX) || FALLBACK_TITLE;
+  if (title && !isAdeNoticeTitle(title)) return title;
+  const lead = cleanText(pickRestoreOrder(terminals)[0]?.title, TITLE_MAX);
+  return lead && !isAdeNoticeTitle(lead) ? lead : FALLBACK_TITLE;
+}
+
+/**
+ * Um título que é, na verdade, um aviso do ADE (`[ADE AGS] NAVEGADOR: …`) ou o resumo que a TUI fez dele
+ * ("Navegador ags portal no canvas"). Ao abrir um agente o aviso era a primeira mensagem e virava o nome da
+ * conversa; o backend já não usa mais (`session/title.rs`), e isto esconde os que ficaram gravados. Pura.
+ */
+export function isAdeNoticeTitle(title: string): boolean {
+  const t = title.trim();
+  return t.startsWith("[ADE AGS]") || t.startsWith("[AGS]") || /ags portal|navegador ags|subagente deste time|orquestrador deste canvas/i.test(t);
 }
 
 /**

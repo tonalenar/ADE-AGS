@@ -14,6 +14,24 @@ const MARKS_KEY = "cc-terminal-input-marks";
 const GPU_KEY = "cc-terminal-gpu";
 const ZOOM_KEY = "cc-terminal-zoom";
 
+/** Lê uma preferência; sem `localStorage` (testes, armazenamento bloqueado) vale o padrão. */
+function readPref(key: string): string | null {
+  try {
+    return typeof localStorage === "undefined" ? null : localStorage.getItem(key);
+  } catch {
+    return null;
+  }
+}
+
+/** Grava uma preferência; sem `localStorage` ela vale só nesta execução. */
+function writePref(key: string, value: string): void {
+  try {
+    if (typeof localStorage !== "undefined") localStorage.setItem(key, value);
+  } catch {
+    /* sem onde guardar */
+  }
+}
+
 interface TerminalPrefsState {
   /** Dibujar una línea de corte en cada envío del usuario. */
   inputMarks: boolean;
@@ -37,28 +55,28 @@ interface TerminalPrefsState {
 export const useTerminalPrefsStore = create<TerminalPrefsState>((set) => ({
   // Por defecto ENCENDIDO: separar visualmente cada intervención en una conversación larga
   // es justo lo que hace navegable el scrollback de un agente.
-  inputMarks: localStorage.getItem(MARKS_KEY) !== "0",
+  inputMarks: readPref(MARKS_KEY) !== "0",
 
   setInputMarks: (value) => {
-    localStorage.setItem(MARKS_KEY, value ? "1" : "0");
+    writePref(MARKS_KEY, value ? "1" : "0");
     set({ inputMarks: value });
   },
 
-  gpuRenderer: localStorage.getItem(GPU_KEY) !== "0",
+  gpuRenderer: readPref(GPU_KEY) !== "0",
 
   setGpuRenderer: (value) => {
-    localStorage.setItem(GPU_KEY, value ? "1" : "0");
+    writePref(GPU_KEY, value ? "1" : "0");
     set({ gpuRenderer: value });
   },
 
   compositing: true,
   setCompositing: (compositing) => set({ compositing }),
 
-  zoom: clampZoom(Number(localStorage.getItem(ZOOM_KEY) ?? TERMINAL_ZOOM.default)),
+  zoom: clampZoom(Number(readPref(ZOOM_KEY) ?? TERMINAL_ZOOM.default)),
 
   setZoom: (value) => {
     const zoom = clampZoom(value);
-    localStorage.setItem(ZOOM_KEY, String(zoom));
+    writePref(ZOOM_KEY, String(zoom));
     set({ zoom });
   },
 }));
