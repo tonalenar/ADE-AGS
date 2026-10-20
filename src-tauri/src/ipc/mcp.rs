@@ -81,7 +81,9 @@ annotate screenshots: browser_marked reads what they marked, browser_pick asks t
 Typical loop: browser_navigate to the dev \
 server URL, browser_snapshot to read the page and get element refs, act with browser_click/browser_type/\
 browser_press using those refs (or give a whole multi-step goal to browser_act, which is faster), then check browser_console and browser_network for errors. Use browser_resize \
-to test responsive layouts. There are no screenshots: read the page through snapshots.\n\
+to test responsive layouts. There are no screenshots in these tools: read the page through snapshots; when you need \
+an image of a page, `ags portal screenshot <portal>` saves a PNG and returns its path. Never launch your own browser \
+window (Playwright/Puppeteer/Selenium with headless: false): it opens outside the canvas.\n\
 Orchestration: split a large objective into tasks that other agents run in parallel (each in its own git \
 worktree), visible to the user in ADE AGS's fleet console. agent_roster shows what can run now; run_plan \
 declares the task DAG; run_await waits for progress; task_result reads what a task delivered; fact_add shares \
