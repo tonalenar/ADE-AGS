@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 
 import { breakpointOf, clampViewport, fillLayout, fitScale, isFillViewport, isPhoneViewport, type Viewport } from "./viewport";
 import { clampZoom, stageSize } from "./zoom";
+import { DEVICE_BEZEL, type DeviceSpec } from "./devices";
 
 type Edge = "x" | "y" | "xy";
 
@@ -16,8 +17,11 @@ type Edge = "x" | "y" | "xy";
  * Un tamaño más grande que el espacio se muestra achicado, pero la página sigue midiendo
  * lo que se pidió: las media queries ven 1440 px aunque en pantalla ocupe la mitad.
  */
-export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
+export function ResponsiveStage({ viewport, onResize, zoom = 1, device = null, children }: {
   viewport: Viewport | null;
+  /** "Celular solto": só o aparelho, centrado no espaço, sem o quadro, as alças nem o rótulo. A árvore é a mesma
+   *  dos outros modos, para o iframe não recarregar ao trocar. */
+  device?: DeviceSpec | null;
   onResize: (viewport: Viewport) => void;
   /** O zoom da página. Sem marco, a página é desenhada maior/menor e escalada de volta; com marco, multiplica a escala. */
   zoom?: number;
@@ -54,6 +58,9 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
   // Num tamanho de celular o quadro vira o aparelho (moldura, cantos, ilha, botões), como num mockup.
   const phone = !!shown && !fill && isPhoneViewport(shown);
   const landscape = !!shown && shown.width > shown.height;
+  // No celular solto a escala é a que cabe o aparelho inteiro (com a moldura) no espaço do palco.
+  const pad = (DEVICE_BEZEL + 10) * 2;
+  const deviceScale = device ? Math.max(0.1, Math.min((box.width - pad) / device.width, (box.height - pad) / device.height)) : 1;
 
   const startDrag = (edge: Edge) => (e: React.PointerEvent<HTMLDivElement>) => {
     if (!viewport || e.button !== 0) return;
@@ -90,21 +97,31 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
   return (
     <div
       ref={stage}
-      className={fill
+      className={device
+        ? "relative flex-1 min-h-0 flex items-center justify-center bg-transparent"
+        : fill
         ? "relative flex-1 min-h-0 overflow-clip bg-white"
         : shown
           ? "relative flex-1 min-h-0 overflow-auto px-7 pt-5 pb-11 bg-gray-100 dark:bg-surface-deep bg-[radial-gradient(circle,rgba(120,130,150,0.22)_1px,transparent_1px)] [background-size:16px_16px]"
           : "relative flex-1 min-h-0 bg-white"}
     >
       <div
-        style={fill
+        className={device ? "ade-device-in" : undefined}
+        style={device
+          ? { position: "relative", width: device.width * deviceScale, height: device.height * deviceScale, flexShrink: 0 }
+          : fill
           ? { position: "absolute", inset: 0, overflow: "clip" }
           : shown
             ? { position: "relative", width: shown.width * scale, height: shown.height * scale, margin: "0 auto", flexShrink: 0 }
             : { position: "absolute", inset: 0, overflow: "clip" }}
       >
         <div
-          style={filled
+          style={device
+            ? {
+              width: device.width, height: device.height, transform: `scale(${deviceScale})`, transformOrigin: "0 0",
+              ...phoneScreen(deviceScale, device.radius),
+            }
+            : filled
             ? {
               width: filled.width ?? "100%", height: filled.height ?? "100%",
               transform: filled.scale === 1 ? undefined : `scale(${filled.scale})`, transformOrigin: "0 0",
@@ -115,14 +132,14 @@ export function ResponsiveStage({ viewport, onResize, zoom = 1, children }: {
                 ...(phone ? phoneScreen(scale) : {}),
               }
               : { ...stageSize(z), transform: z === 1 ? undefined : `scale(${z})`, transformOrigin: "0 0" }}
-          className={phone ? "relative bg-white" : shown && !fill ? "bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_32px_-12px_rgba(0,0,0,0.35)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_12px_32px_-12px_rgba(0,0,0,0.8)]" : undefined}
+          className={device || phone ? "relative bg-white" : shown && !fill ? "bg-white shadow-[0_0_0_1px_rgba(0,0,0,0.08),0_12px_32px_-12px_rgba(0,0,0,0.35)] dark:shadow-[0_0_0_1px_rgba(255,255,255,0.1),0_12px_32px_-12px_rgba(0,0,0,0.8)]" : undefined}
         >
           {children}
-          {phone && <PhoneOverlay landscape={landscape} />}
+          {(device || phone) && <PhoneOverlay landscape={!device && landscape} cutout={device?.cutout ?? "island"} />}
         </div>
-        {phone && <PhoneButtons landscape={landscape} />}
+        {(device || phone) && <PhoneButtons landscape={!device && landscape} />}
 
-        {shown && !fill && (
+        {shown && !fill && !device && (
           <>
             <Handle edge="x" onPointerDown={startDrag("x")} />
             <Handle edge="y" onPointerDown={startDrag("y")} />
@@ -161,16 +178,16 @@ function Handle({ edge, onPointerDown }: { edge: Edge; onPointerDown: (e: React.
 }
 
 /** A moldura do aparelho em pixels de TELA: a página é escalada, então a espessura é dividida pela escala. */
-const BEZEL = 11;
+const BEZEL = DEVICE_BEZEL;
 /** O raio da tela do aparelho, em pixels da página (como um iPhone recente). */
 const SCREEN_RADIUS = 52;
 
 /** A tela do aparelho: cantos arredondados que recortam a página e a moldura preta em volta (por sombra, para não
  *  mudar o tamanho que a página mede). Pura. */
-export function phoneScreen(scale: number): React.CSSProperties {
+export function phoneScreen(scale: number, radius = SCREEN_RADIUS): React.CSSProperties {
   const px = (n: number) => `${n / Math.max(scale, 0.05)}px`;
   return {
-    borderRadius: SCREEN_RADIUS,
+    borderRadius: radius,
     overflow: "hidden",
     boxShadow: `0 0 0 ${px(BEZEL)} #0b0b0d, 0 0 0 ${px(BEZEL + 1.5)} #3a3a3e, 0 ${px(22)} ${px(54)} rgba(0,0,0,0.45)`,
   };
@@ -178,10 +195,15 @@ export function phoneScreen(scale: number): React.CSSProperties {
 
 /** O que fica por cima da página: a ilha (no topo, ou à esquerda com o aparelho deitado) e a barra de início. Não
  *  pega clique: a página continua respondendo embaixo. */
-function PhoneOverlay({ landscape }: { landscape: boolean }) {
-  const island: React.CSSProperties = landscape
-    ? { left: 12, top: "50%", transform: "translateY(-50%)", width: 34, height: 118 }
-    : { top: 12, left: "50%", transform: "translateX(-50%)", width: 118, height: 34 };
+function PhoneOverlay({ landscape, cutout = "island" }: { landscape: boolean; cutout?: "island" | "punch" }) {
+  // A ilha do iPhone, ou o furo da câmera dos Android.
+  const island: React.CSSProperties = cutout === "punch"
+    ? (landscape
+      ? { left: 14, top: "50%", transform: "translateY(-50%)", width: 13, height: 13 }
+      : { top: 14, left: "50%", transform: "translateX(-50%)", width: 13, height: 13 })
+    : landscape
+      ? { left: 12, top: "50%", transform: "translateY(-50%)", width: 34, height: 118 }
+      : { top: 12, left: "50%", transform: "translateX(-50%)", width: 118, height: 34 };
   return (
     <div aria-hidden className="pointer-events-none absolute inset-0 z-10">
       <div className="absolute rounded-full bg-black" style={island} />

@@ -97,6 +97,9 @@ pub struct Portal {
     /// A resolução com que a página é renderizada (`{ width, height }`); só o frontend a lê. Ausente = ocupa o nó inteiro.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub viewport: Option<Value>,
+    /// "Celular solto": o modelo do aparelho que o nó mostra no lugar da janela do navegador; só o frontend lê.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
 }
 
 pub const PORTAL_PREFIX: &str = "portal-";

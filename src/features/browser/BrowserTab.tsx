@@ -16,6 +16,7 @@ import { pasteIntoTab } from "@/features/terminal/terminalRegistry";
 import pickerScript from "./picker.ts?script";
 import runtimeScript from "./page/runtime.ts?script";
 import { registerBrowserHost } from "./agentBridge";
+import type { DeviceSpec } from "./devices";
 import { newMarkId, rememberMarks } from "./markStore";
 import { highlightAgent } from "./agentHighlight";
 import { AgentPicker } from "./AgentPicker";
@@ -81,7 +82,24 @@ const bare = (c: PendingCapture): AnnotatedCapture => ({ id: c.id, path: c.path,
  * Y cuando lo que hay que mostrar es cómo se VE, se anota encima: la página se congela en
  * una foto, se dibuja sobre ella, y la foto con los dibujos va en el mismo mensaje.
  */
-export function BrowserTab({ view, active }: { view: BrowserView; active: boolean }) {
+/** A tela inicial (sem página) no celular solto também fica dentro do aparelho; na janela, solta. */
+function StartStage({ device, viewport, onResize, zoom, children }: {
+  device: DeviceSpec | null;
+  viewport: React.ComponentProps<typeof ResponsiveStage>["viewport"];
+  onResize: React.ComponentProps<typeof ResponsiveStage>["onResize"];
+  zoom: number;
+  children: React.ReactNode;
+}) {
+  if (!device) return <>{children}</>;
+  return <ResponsiveStage viewport={viewport} onResize={onResize} zoom={zoom} device={device}>{children}</ResponsiveStage>;
+}
+
+export function BrowserTab({ view, active, device = null }: {
+  view: BrowserView;
+  active: boolean;
+  /** "Celular solto" (canvas): só o aparelho deste modelo, sem a barra do navegador; a página na resolução dele. */
+  device?: DeviceSpec | null;
+}) {
   const { t } = useTranslation();
   const updateView = useViewTabsStore((s) => s.updateView);
   const tabs = useTabsStore((s) => s.tabs);
@@ -215,6 +233,15 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     updateView(view.id, { touch: next });
     return channel.run({ op: "touch", on: next }, 8000);
   }, [channel, updateView, view.id]);
+
+  // No celular solto a página mede a tela do aparelho e recebe toque, como num celular de verdade. A resolução fica
+  // guardada: voltando para a janela, o quadro continua no mesmo tamanho.
+  useEffect(() => {
+    if (!device) return;
+    const current = viewportRef.current;
+    if (current?.width !== device.width || current?.height !== device.height) setViewport({ width: device.width, height: device.height });
+    if (!touchRef.current) setTouch(true).catch(() => undefined);
+  }, [device?.id]); // eslint-disable-line react-hooks/exhaustive-deps
 
   /** `null` si cargó; el motivo si no. */
   const go = useCallback(async (input: string): Promise<string | null> => {
@@ -829,10 +856,10 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
     .join(" · ");
 
   return (
-    <div ref={root} className="flex flex-col h-full min-h-0 bg-gray-50 dark:bg-surface">
-      {toolbar}
+    <div ref={root} className={`flex flex-col h-full min-h-0 transition-colors duration-300 ${device ? "bg-transparent" : "bg-gray-50 dark:bg-surface"}`}>
+      {device ? null : toolbar}
 
-      {viewport && (
+      {viewport && !device && (
         // Congelada, la página no cambia de tamaño: la barra queda a la vista pero quieta.
         <div inert={frozen ? true : undefined} className={`shrink-0 ${frozen ? "opacity-50" : ""}`}>
           <DeviceBar
@@ -856,7 +883,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
         <div ref={column} data-browser-column className="relative flex flex-col flex-1 min-w-0 min-h-0">
           {shownError}
           {target ? (
-            <ResponsiveStage viewport={viewport} onResize={setViewport} zoom={zoom}>
+            <ResponsiveStage viewport={viewport} onResize={setViewport} zoom={zoom} device={device}>
             <iframe
               ref={iframe}
               src={target.proxiedUrl}
@@ -874,7 +901,8 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
             />
             </ResponsiveStage>
           ) : (
-            <div className="flex flex-1 items-center justify-center p-8 bg-gray-50 dark:bg-surface">
+            <StartStage device={device} viewport={viewport} onResize={setViewport} zoom={zoom}>
+            <div className="flex flex-1 h-full items-center justify-center p-8 bg-gray-50 dark:bg-surface">
               <div className="flex flex-col items-center gap-4 max-w-sm text-center">
                 <span className="flex items-center justify-center w-12 h-12 rounded-2xl
                   bg-accent-500/10 text-accent-600 dark:text-accent-400">
@@ -902,6 +930,7 @@ export function BrowserTab({ view, active }: { view: BrowserView; active: boolea
                 )}
               </div>
             </div>
+            </StartStage>
           )}
           {debugOpen && target && (
             <DebugPanel
