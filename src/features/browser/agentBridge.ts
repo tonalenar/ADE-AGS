@@ -11,7 +11,7 @@
  * pasó en la consola y la red durante la acción, que es lo que un agente probando una
  * página necesita ver sin tener que preguntarlo aparte.
  */
-import { AGENT_PORTAL_SIZE, AGENT_PORTAL_VIEWPORT, neighbors } from "@/features/canvas/board";
+import { AGENT_PORTAL_SIZE, neighbors } from "@/features/canvas/board";
 import { boardKeyOfTab, canvasActions, flushSave, useCanvasStore } from "@/features/canvas/store";
 import { invoke } from "@tauri-apps/api/core";
 
@@ -156,7 +156,7 @@ async function openPortalFor(owner: ViewOwner, url: string): Promise<string | nu
   const key = boardKeyOfTab(tab);
   const board = useCanvasStore.getState().boards[key];
   if (!board || !(owner.id in board.nodes) || useCanvasStore.getState().modes[key] !== "canvas") return null;
-  const created = canvasActions.addPortal(key, { name: undefined, url, near: owner.id, viewport: { ...AGENT_PORTAL_VIEWPORT }, size: { ...AGENT_PORTAL_SIZE } });
+  const created = canvasActions.addPortal(key, { name: undefined, url, near: owner.id, size: { ...AGENT_PORTAL_SIZE } });
   await flushSave(key);
   return created.id;
 }
