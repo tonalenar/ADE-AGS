@@ -607,6 +607,7 @@ fn local_settings(base_url: String) -> Settings {
         browser_pilot: false,
         browser_vision: false,
         secondary: None,
+        model_auto_update: true,
     }
 }
 

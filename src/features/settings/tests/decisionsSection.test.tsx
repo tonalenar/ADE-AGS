@@ -120,7 +120,7 @@ describe("seção Decisões (experimental)", () => {
     };
     await choose("jev");
     expect(Array.from(modelOf().options).map((option) => option.value)).toEqual([
-      "jev-latest", "jev-preview", "jev-1.13.0",
+      "jev-latest", "jev-preview", "jev-1.14.0",
     ]);
     expect(modelOf().value).toBe("jev-latest");
     expect(host.querySelector<HTMLInputElement>('input[aria-label="settings.decisions.baseUrl"]')!.value)

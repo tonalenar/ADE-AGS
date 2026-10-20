@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
-import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
-import { defaultDecisionSettings, isDirty, modelAfterProviderChange, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
+import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, jevModels, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
+import { defaultDecisionSettings, isDirty, modelAfterProviderChange, modelOptions, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
 
 const PROVIDERS: DecisionProviderId[] = ["none", "laya_local", "laya_studio", "jev"];
 const POINT_LABEL: Record<string, string> = {
@@ -147,9 +148,10 @@ export function DecisionsSection() {
   const [conn, setConn] = useState<{ ok: boolean; text: string } | null>(null);
   const [secondaryConn, setSecondaryConn] = useState<{ ok: boolean; text: string } | null>(null);
   const [report, setReport] = useState<ShadowReport | null>(null);
+  const [jevList, setJevList] = useState<string[]>([]);
 
   useEffect(() => {
-    getDecisionSettings()
+    const loadSettings = () => getDecisionSettings()
       .then((loaded) => {
         // Uma config já gravada com um modelo que o provedor não aceita (Jev com multilingual) é corrigida
         // na tela e aparece como alteração a salvar.
@@ -157,7 +159,17 @@ export function DecisionsSection() {
         setSaved(loaded);
       })
       .catch((error: unknown) => setStatus(String(error)));
+    void loadSettings();
+    jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
     decisionShadowReport().then(setReport).catch(() => undefined);
+    // O app subiu o modelo do Jev sozinho: a tela mostra o novo e a lista do que existe.
+    const off = listen<string>("decisions-model-updated", (event) => {
+      void loadSettings();
+      jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
+      setStatus(t("settings.decisions.autoUpdated", { model: event.payload }));
+    });
+    return () => { void off.then((stop) => stop()); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const dirty = useMemo(
@@ -193,6 +205,7 @@ export function DecisionsSection() {
         secondaryProvider: settings.secondaryProvider,
         secondaryBaseUrl: settings.secondaryBaseUrl,
         secondaryModel: modelAfterProviderChange(settings.secondaryModel, settings.secondaryProvider),
+        modelAutoUpdate: settings.modelAutoUpdate,
       });
       if (keyDraft.trim()) await setDecisionKey(keyDraft.trim(), "primary");
       if (secondaryKeyDraft.trim()) await setDecisionKey(secondaryKeyDraft.trim(), "secondary");
@@ -307,9 +320,13 @@ export function DecisionsSection() {
             onChange={(event) => setSettings({ ...settings, model: event.target.value })}
             className="min-w-44"
           >
-            {modelsFor(settings.provider).map((model) => <option key={model} value={model}>{model}</option>)}
+            {modelOptions(settings.provider, jevList, settings.model).map((model) => <option key={model} value={model}>{model}</option>)}
           </PopupSelect>
         </SettingsRow>
+        {settings.provider === "jev" && (
+          <SettingsToggleRow checked={settings.modelAutoUpdate} onChange={(modelAutoUpdate) => setSettings({ ...settings, modelAutoUpdate })}
+            label={t("settings.decisions.autoUpdate")} description={t("settings.decisions.autoUpdateHint")} />
+        )}
         <SettingsRow label={t("settings.decisions.timeout")} hint={t("settings.decisions.timeoutHint")}>
           <span className="flex items-center gap-2">
             <input

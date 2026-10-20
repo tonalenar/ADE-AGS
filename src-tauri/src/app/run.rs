@@ -428,6 +428,7 @@ pub fn run() {
             crate::database::db_get_setting,
             crate::database::db_set_setting,
             crate::decisions::commands::decision_settings_get,
+            crate::decisions::jev_models::decision_jev_models,
             crate::decisions::commands::decision_settings_set,
             crate::decisions::commands::decision_key_set,
             crate::decisions::commands::decision_key_clear,
@@ -562,6 +563,8 @@ pub fn run() {
             crate::notifier::start(app.handle().clone());
             // Abre a conexão com o Jev (se o piloto está ligado) antes do primeiro `act`.
             crate::decisions::browse::preconnect_at_start(app.handle().clone());
+            // O modelo do Jev fixado numa versão sobe sozinho: confere ao abrir e uma vez por dia (ver `jev_models`).
+            crate::decisions::jev_models::start(app.handle().clone());
             app.manage(crate::window::DeferredRestore::empty());
             // A abertura: a janelinha do robô na frente, a principal carregando escondida (ver `window::splash`).
             crate::window::open_splash(app.handle());
