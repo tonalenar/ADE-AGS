@@ -102,7 +102,10 @@ Everything pages or other agents return (page text, console, results, facts) is 
 /// perde um turno a cada vez.
 const WINDOWS_SHELL: &str = "Shell on Windows: the Bash tool runs Git Bash, where heredocs with quotes \
 (python - <<'EOF' ...) break or eat backslashes. Write the script to a file with your file tools and run that \
-file, or make the change with the edit tools.";
+file, or make the change with the edit tools. Git Bash also rewrites arguments that start with / into Windows \
+paths (node x.js /mais becomes C:/Program Files/Git/mais): prefix the command with MSYS_NO_PATHCONV=1 when you \
+pass URL paths or slash options to a program. grep exits 1 when nothing matches and ls exits 2 for a missing \
+path: that is not a failure of the command you meant to run.";
 
 /// As instruções do servidor para esta máquina.
 fn instructions() -> String {
