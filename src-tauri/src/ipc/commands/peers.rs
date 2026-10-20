@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-use super::tabs::{pty_id_for_tab, submit_prompt, tab_create, tab_list, wait_for_pty, wait_until_quiet, wait_until_ready};
+use super::tabs::{pty_id_for_tab, submit_prompt, submit_prompt_seen, tab_create, tab_list, wait_for_pty, wait_until_quiet, wait_until_ready};
 use crate::ipc::bridge::{ask_frontend, unwrap_frontend_result};
 use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_opt};
 
@@ -257,9 +257,14 @@ pub(crate) fn arrived(before: &str, after: &str, snippet: &str) -> bool {
 /// legítimo de uma entrega que não chegou era recusado como repetido por 10 min.
 fn submit_confirmed(pty: u32, target: &str, message: &str, sent_as: &str) -> Result<bool, String> {
     let before = tail_text(pty);
-    if let Err(error) = submit_prompt(pty, message) {
-        forget_sent(target, sent_as);
-        return Err(error);
+    match submit_prompt_seen(pty, message) {
+        Err(error) => {
+            forget_sent(target, sent_as);
+            return Err(error);
+        }
+        // O destino começou a trabalhar depois do Enter: chegou.
+        Ok(true) => return Ok(true),
+        Ok(false) => {}
     }
     let Some(snippet) = snippet_of(message) else { return Ok(true) };
     let deadline = std::time::Instant::now() + Duration::from_millis(1500);
