@@ -163,11 +163,17 @@ export function DecisionsSection() {
     jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
     decisionShadowReport().then(setReport).catch(() => undefined);
     // O app subiu o modelo do Jev sozinho: a tela mostra o novo e a lista do que existe.
-    const off = listen<string>("decisions-model-updated", (event) => {
-      void loadSettings();
-      jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
-      setStatus(t("settings.decisions.autoUpdated", { model: event.payload }));
-    });
+    // Fora do app (nos testes) não há Tauri para ouvir: sem o aviso, a tela funciona igual.
+    let off: Promise<() => void> = Promise.resolve(() => {});
+    try {
+      off = listen<string>("decisions-model-updated", (event) => {
+        void loadSettings();
+        jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
+        setStatus(t("settings.decisions.autoUpdated", { model: event.payload }));
+      }).catch(() => () => {});
+    } catch {
+      /* sem Tauri */
+    }
     return () => { void off.then((stop) => stop()); };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
