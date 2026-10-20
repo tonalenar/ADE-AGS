@@ -24,6 +24,8 @@ export interface DecisionSettings {
   secondaryBaseUrl: string;
   secondaryModel: string;
   secondaryKeySaved: boolean;
+  /** Uma versão fixada do Jev sobe sozinha para a mais nova (o app confere ao abrir e uma vez por dia). */
+  modelAutoUpdate: boolean;
 }
 
 export const PROVIDER_URL: Record<DecisionProviderId, string> = {
@@ -37,21 +39,34 @@ export const PROVIDER_URL: Record<DecisionProviderId, string> = {
 const LAYA_MODELS = ["multilingual", "english", "typed-decisions"] as const;
 
 /** Aliases e o id versionado que o Jev (`api.typesafe.ai`) aceita no campo `model`. */
-const JEV_MODELS = ["jev-latest", "jev-preview", "jev-1.13.0"] as const;
+const JEV_MODELS = ["jev-latest", "jev-preview", "jev-1.14.0"] as const;
+
+/** `jev-1.14.0` e afins: uma versão do Jev, que pode ser mais nova que as que o app conhece. Pura. */
+export function isJevVersion(model: string): boolean {
+  return /^jev-\d+\.\d+\.\d+$/.test(model.trim());
+}
+
+/** O que o seletor de modelo oferece: os nomes do provedor, as versões que o Jev listou e o modelo atual (nunca some
+ *  da lista um modelo que está em uso). Pura. */
+export function modelOptions(provider: DecisionProviderId, listed: readonly string[], current: string): string[] {
+  const base = provider === "jev" && listed.length > 0 ? [...listed] : [...modelsFor(provider)];
+  const shown = modelAfterProviderChange(current, provider);
+  return base.includes(shown) ? base : [...base, shown];
+}
 
 /** O que o dropdown oferece. `none` e a Laya usam os checkpoints; o Jev, os nomes dele. */
 export function modelsFor(provider: DecisionProviderId): readonly string[] {
   return provider === "jev" ? JEV_MODELS : LAYA_MODELS;
 }
 
-/** Padrão do provedor. No Jev é `jev-latest` (hoje `jev-1.13.0`). */
+/** Padrão do provedor. No Jev é `jev-latest` (o próprio Jev o aponta para a versão mais nova). */
 export function defaultModel(provider: DecisionProviderId): string {
   return provider === "jev" ? "jev-latest" : "multilingual";
 }
 
 /** Ao trocar de provedor, um modelo que o destino não aceita vira o padrão dele. */
 export function modelAfterProviderChange(current: string, next: DecisionProviderId): string {
-  return modelsFor(next).includes(current) ? current : defaultModel(next);
+  return modelsFor(next).includes(current) || (next === "jev" && isJevVersion(current)) ? current : defaultModel(next);
 }
 
 export function defaultDecisionSettings(): DecisionSettings {
@@ -75,6 +90,7 @@ export function defaultDecisionSettings(): DecisionSettings {
     secondaryBaseUrl: PROVIDER_URL.jev,
     secondaryModel: defaultModel("jev"),
     secondaryKeySaved: false,
+    modelAutoUpdate: true,
   };
 }
 

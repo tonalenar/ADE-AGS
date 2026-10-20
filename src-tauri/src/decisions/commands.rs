@@ -32,6 +32,7 @@ pub struct DecisionSettingsDto {
     pub secondary_base_url: String,
     pub secondary_model: String,
     pub secondary_key_saved: bool,
+    pub model_auto_update: bool,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -62,6 +63,13 @@ pub struct DecisionSettingsInput {
     pub secondary_base_url: String,
     #[serde(default)]
     pub secondary_model: String,
+    /// Ausente (uma tela antiga) = ligado, o padrão.
+    #[serde(default = "default_true")]
+    pub model_auto_update: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -97,6 +105,7 @@ fn dto(settings: &Settings) -> DecisionSettingsDto {
         secondary_base_url: settings.secondary.as_ref().map_or_else(String::new, |second| second.base_url.clone()),
         secondary_model: settings.secondary.as_ref().map_or_else(String::new, |second| second.model.clone()),
         secondary_key_saved: config::key_saved_in(config::KeySlot::Secondary),
+        model_auto_update: settings.model_auto_update,
     }
 }
 
@@ -131,6 +140,7 @@ fn from_input(input: DecisionSettingsInput) -> Settings {
         turn_routing: input.turn_routing,
         browser_pilot: input.browser_pilot,
         browser_vision: input.browser_vision,
+        model_auto_update: input.model_auto_update,
     }
 }
 
