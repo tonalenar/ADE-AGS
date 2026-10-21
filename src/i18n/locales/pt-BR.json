@@ -3203,5 +3203,8 @@
   "missions.metrics.costSub": "estimativa desta missão",
   "missions.metrics.costBudget": "de {{budget}} de orçamento",
   "missions.metrics.context": "Tokens de contexto",
-  "missions.metrics.contextSub": "após compactação"
+  "missions.metrics.contextSub": "após compactação",
+  "browser.real.label": "Chrome real",
+  "browser.real.hint": "Usa um Chrome de verdade, com perfil próprio do app: dá para entrar em sites que recusam navegador embutido, como a conta Google",
+  "browser.real.window": "Mostrar a janela do Chrome"
 }

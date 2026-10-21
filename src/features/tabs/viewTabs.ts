@@ -66,6 +66,9 @@ export interface BrowserView extends ViewBase {
   touch?: boolean;
   /** O zoom da página (1 = 100%). Ausente = 100%. Não muda o tamanho do navegador, só o da página. */
   zoom?: number;
+  /** Mostra um Chrome de verdade (perfil próprio do app) em vez da página pelo proxy: é onde
+   *  dá para entrar em sites que recusam navegador embutido, como a conta Google. Protótipo. */
+  realChrome?: boolean;
 }
 
 export type ViewTab = FileView | DiffView | BrowserView;

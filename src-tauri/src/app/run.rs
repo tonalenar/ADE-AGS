@@ -81,6 +81,11 @@ pub fn run() {
         .plugin(crate::updates::plugin())
         .manage(db_conn)
         .invoke_handler(tauri::generate_handler![
+            crate::real_browser::real_browser_open,
+            crate::real_browser::real_browser_send,
+            crate::real_browser::real_browser_history,
+            crate::real_browser::real_browser_window,
+            crate::real_browser::real_browser_close,
             crate::design::design_create,
             crate::design::design_delete,
             crate::design::design_archive,

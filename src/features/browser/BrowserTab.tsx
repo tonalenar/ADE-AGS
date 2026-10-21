@@ -35,6 +35,8 @@ import { previewDetectServers, previewResolve, previewSaveCapture, previewSetRec
 import { PageChannel, type LoadState } from "./pageChannel";
 import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
+import { RealBrowserView } from "./RealBrowserView";
+import { realBrowserHistory, realBrowserSend, realBrowserWindow } from "./realBrowser";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
 import { ZoomControl } from "./ZoomControl";
@@ -118,6 +120,9 @@ export function BrowserTab({ view, active, device = null }: {
 
   const [address, setAddress] = useState(view.url);
   const [target, setTarget] = useState<PreviewTarget | null>(null);
+  const real = !!view.realChrome;
+  const realRef = useRef(real);
+  realRef.current = real;
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [picks, setPicks] = useState<PickedElement[]>([]);
@@ -251,6 +256,13 @@ export function BrowserTab({ view, active, device = null }: {
     if (!url) {
       setError(t("browser.invalidUrl"));
       return t("browser.invalidUrl");
+    }
+    if (realRef.current) {
+      setAddress(url);
+      setError(null);
+      updateView(view.id, { url, title: new URL(url).host });
+      realBrowserSend(view.id, "Page.navigate", { url }).catch((e) => setError(String(e)));
+      return null;
     }
     try {
       const resolved = await previewResolve(url, INJECTED);
@@ -714,13 +726,16 @@ export function BrowserTab({ view, active, device = null }: {
 
   const navButtons = (
     <>
-      <ToolButton label={t("browser.back")} disabled={!target} onClick={() => postToPage("history:back")}>
+      <ToolButton label={t("browser.back")} disabled={!target && !real}
+        onClick={() => real ? realBrowserHistory(view.id, -1).catch(console.error) : postToPage("history:back")}>
         <ArrowLeftIcon className="w-4 h-4 stroke-2" />
       </ToolButton>
-      <ToolButton label={t("browser.forward")} disabled={!target} onClick={() => postToPage("history:forward")}>
+      <ToolButton label={t("browser.forward")} disabled={!target && !real}
+        onClick={() => real ? realBrowserHistory(view.id, 1).catch(console.error) : postToPage("history:forward")}>
         <ArrowRightIcon className="w-4 h-4 stroke-2" />
       </ToolButton>
-      <ToolButton label={t("browser.reload")} disabled={!target} onClick={reload}>
+      <ToolButton label={t("browser.reload")} disabled={!target && !real}
+        onClick={() => real ? realBrowserSend(view.id, "Page.reload", {}).catch(console.error) : reload()}>
         <RefreshIcon className="w-4 h-4 stroke-2" />
       </ToolButton>
     </>
@@ -778,6 +793,16 @@ export function BrowserTab({ view, active, device = null }: {
 
   const tabTools = (
     <>
+      <ActionButton hint={t("browser.real.hint")} active={real}
+        onClick={() => updateView(view.id, { realChrome: !real })}>
+        <GlobeIcon className="w-4 h-4" />
+        {t("browser.real.label")}
+      </ActionButton>
+      {real && (
+        <ToolButton label={t("browser.real.window")} onClick={() => realBrowserWindow(view.id, true).catch((e) => setError(String(e)))}>
+          <ExternalIcon className="w-4 h-4 stroke-2" />
+        </ToolButton>
+      )}
       <ZoomControl zoom={zoom} disabled={!target || !!frozen}
         onStep={(dir) => setZoom(stepZoom(zoom, dir))} onReset={() => setZoom(1)} />
       <ToolButton label={viewport ? t("browser.viewport.exit") : t("browser.viewport.enter")} active={!!viewport}
@@ -882,7 +907,13 @@ export function BrowserTab({ view, active, device = null }: {
       <div className={`flex flex-1 min-h-0 ${compact ? "flex-col" : ""}`}>
         <div ref={column} data-browser-column className="relative flex flex-col flex-1 min-w-0 min-h-0">
           {shownError}
-          {target ? (
+          {real ? (
+            <RealBrowserView viewId={view.id} url={view.url} onError={setError}
+              onUrl={(u) => {
+                setAddress(u);
+                try { updateView(view.id, { url: u, title: new URL(u).host || u }); } catch { /* chrome://, about: */ }
+              }} />
+          ) : target ? (
             <ResponsiveStage viewport={viewport} onResize={setViewport} zoom={zoom} device={device}>
             <iframe
               ref={iframe}
