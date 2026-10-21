@@ -4,7 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, TextArea, TrashIcon } from "neogestify-ui-components";
 
 import {
-  BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
+  AccountCircleIcon, BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
 } from "@/app/icons";
 import { neighbors } from "@/features/canvas/board";
 import { useCanvasStore } from "@/features/canvas/store";
@@ -36,7 +36,7 @@ import { PageChannel, type LoadState } from "./pageChannel";
 import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
 import { RealBrowserView } from "./RealBrowserView";
-import { loginStartUrl, realBrowserHistory, realBrowserLogin, realBrowserSend, realBrowserWindow } from "./realBrowser";
+import { isGoogleSignIn, loginStartUrl, realBrowserHistory, realBrowserLogin, realBrowserLoginFinish, realBrowserSend, realBrowserWindow } from "./realBrowser";
 import { listen } from "@tauri-apps/api/event";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
@@ -124,17 +124,25 @@ export function BrowserTab({ view, active, device = null }: {
   const real = !!view.realChrome;
   const realRef = useRef(real);
   realRef.current = real;
+  const viewUrlRef = useRef(view.url);
+  viewUrlRef.current = view.url;
   // Login numa conta: o perfil está aberto num Chrome comum, numa janela própria. Ao fechá-la, o
   // Portal volta (`realKey` remonta a vista, que reabre o perfil já com a sessão).
   const [loggingIn, setLoggingIn] = useState(false);
   const [realKey, setRealKey] = useState(0);
   useEffect(() => {
     const off = listen("real-browser-login-done", () => {
+      // Volta fora da página de login: nela o Portal só mostraria o aviso de novo.
+      if (isGoogleSignIn(viewUrlRef.current)) {
+        const url = "https://myaccount.google.com/";
+        setAddress(url);
+        updateView(view.id, { url, title: "myaccount.google.com" });
+      }
       setLoggingIn(false);
       setRealKey((k) => k + 1);
     });
     return () => { off.then((f) => f()); };
-  }, []);
+  }, [updateView, view.id]);
   const startLogin = () => {
     setLoggingIn(true);
     realBrowserLogin(loginStartUrl(address)).catch((e) => {
@@ -810,17 +818,17 @@ export function BrowserTab({ view, active, device = null }: {
     </>
   );
 
+  // Só ícones: com texto, os botões do Chrome real espremiam a barra de endereço a 21 px.
   const tabTools = (
     <>
-      <ActionButton hint={t("browser.real.hint")} active={real}
+      <ToolButton label={t("browser.real.hint")} active={real}
         onClick={() => updateView(view.id, { realChrome: !real })}>
         <GlobeIcon className="w-4 h-4" />
-        {t("browser.real.label")}
-      </ActionButton>
+      </ToolButton>
       {real && (
-        <ActionButton hint={t("browser.real.loginHint")} active={loggingIn} disabled={loggingIn} onClick={startLogin}>
-          {t("browser.real.login")}
-        </ActionButton>
+        <ToolButton label={t("browser.real.loginHint")} active={loggingIn} disabled={loggingIn} onClick={startLogin}>
+          <AccountCircleIcon className="w-4 h-4" />
+        </ToolButton>
       )}
       {real && (
         <ToolButton label={t("browser.real.window")} onClick={() => realBrowserWindow(view.id, true).catch((e) => setError(String(e)))}>
@@ -932,8 +940,20 @@ export function BrowserTab({ view, active, device = null }: {
         <div ref={column} data-browser-column className="relative flex flex-col flex-1 min-w-0 min-h-0">
           {shownError}
           {real && loggingIn ? (
-            <div className="flex flex-1 items-center justify-center p-8 text-center text-[12.5px] text-gray-600 dark:text-white/60">
-              {t("browser.real.loggingIn")}
+            <div className="flex flex-1 flex-col gap-3 items-center justify-center p-8 text-center text-[12.5px] text-gray-600 dark:text-white/60">
+              <p className="max-w-sm">{t("browser.real.loggingIn")}</p>
+              <Button variant="custom" onClick={() => realBrowserLoginFinish().catch((e) => setError(String(e)))}
+                className="px-3 h-8 rounded-full text-[12px] font-semibold bg-accent-600 text-white hover:bg-accent-500">
+                {t("browser.real.loginDone")}
+              </Button>
+            </div>
+          ) : real && isGoogleSignIn(address) ? (
+            <div className="flex flex-1 flex-col gap-3 items-center justify-center p-8 text-center text-[12.5px] text-gray-600 dark:text-white/60">
+              <p className="max-w-sm">{t("browser.real.signInHere")}</p>
+              <Button variant="custom" onClick={startLogin}
+                className="px-3 h-8 rounded-full text-[12px] font-semibold bg-accent-600 text-white hover:bg-accent-500">
+                {t("browser.real.login")}
+              </Button>
             </div>
           ) : real ? (
             <RealBrowserView key={realKey} viewId={view.id} url={view.url} onError={setError}

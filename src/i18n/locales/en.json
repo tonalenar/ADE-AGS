@@ -3209,5 +3209,7 @@
   "browser.real.window": "Show the Chrome window",
   "browser.real.login": "Sign in to an account",
   "browser.real.loginHint": "Opens this profile in a regular Chrome window so you can sign in (Google refuses sign-in in a controlled Chrome). Close the window when you are done.",
-  "browser.real.loggingIn": "Sign in in the Chrome window that opened. When you are done, close that window: the Portal comes back already signed in."
+  "browser.real.loggingIn": "Sign in in the Chrome window that opened. When you are done, close that window or click below: the Portal comes back already signed in.",
+  "browser.real.loginDone": "I am done signing in",
+  "browser.real.signInHere": "Do not sign in to Google here: Google refuses this Chrome and starts distrusting the profile. Use Sign in to an account, which opens a regular Chrome window."
 }

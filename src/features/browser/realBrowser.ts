@@ -68,5 +68,18 @@ export function loginStartUrl(address: string): string {
   return "https://accounts.google.com/";
 }
 
+/** Uma página de login do Google. Ali o Chrome controlado é recusado e, pior, a tentativa marca o
+ *  perfil, que passa a ser recusado até num Chrome comum. O Portal não deixa digitar nela. */
+export function isGoogleSignIn(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hostname === "accounts.google.com" && /signin|ServiceLogin|AddSession|InteractiveLogin/i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+export const realBrowserLoginFinish = () => invoke<void>("real_browser_login_finish");
+
 /** Abre o perfil do app num Chrome comum (sem controle remoto) para entrar numa conta. */
 export const realBrowserLogin = (url: string) => invoke<void>("real_browser_login", { url });

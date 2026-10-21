@@ -1,11 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { cdpModifiers, keyDownEvent, loginStartUrl, mouseButton, pagePoint } from "../realBrowser";
+import { cdpModifiers, isGoogleSignIn, keyDownEvent, loginStartUrl, mouseButton, pagePoint } from "../realBrowser";
 
 describe("Chrome real: início do login", () => {
   it("começa pela raiz do site, nunca por um endereço de login vencido", () => {
     expect(loginStartUrl("https://accounts.google.com/v3/signin/identifier?continue=x&TL=abc")).toBe("https://accounts.google.com/");
     expect(loginStartUrl("github.com/login")).toBe("https://github.com/");
     expect(loginStartUrl("")).toBe("https://accounts.google.com/");
+  });
+
+  it("reconhece as páginas de login do Google, e só elas", () => {
+    expect(isGoogleSignIn("https://accounts.google.com/v3/signin/identifier?continue=x")).toBe(true);
+    expect(isGoogleSignIn("https://accounts.google.com/ServiceLogin?hl=pt")).toBe(true);
+    expect(isGoogleSignIn("https://myaccount.google.com/")).toBe(false);
+    expect(isGoogleSignIn("https://accounts.google.com/")).toBe(false);
   });
 });
 

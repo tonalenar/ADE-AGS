@@ -97,6 +97,7 @@ async fn ensure_browser(app: &AppHandle) -> Result<u16, String> {
         return Ok(port);
     }
     let _ = std::fs::remove_file(profile.join("DevToolsActivePort"));
+    prepare_profile(&profile);
     let exe = chrome_path().ok_or("Não achei o Chrome nem o Edge instalados.")?;
     // Janela fora da tela: quem mostra a página é o Portal. Sem `--enable-automation` nem
     // `--headless`: para o site, é um Chrome comum. Os três `--disable-*` mantêm a página
@@ -338,6 +339,8 @@ async fn shutdown_browser(app: &AppHandle) -> Result<(), String> {
 pub async fn real_browser_login(app: AppHandle, url: String) -> Result<(), String> {
     shutdown_browser(&app).await?;
     let profile = profile_dir(&app)?;
+    std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
+    prepare_profile(&profile);
     let exe = chrome_path().ok_or("Não achei o Chrome nem o Edge instalados.")?;
     let mut child = std::process::Command::new(exe)
         .arg(format!("--user-data-dir={}", profile.display()))
@@ -346,9 +349,54 @@ pub async fn real_browser_login(app: AppHandle, url: String) -> Result<(), Strin
         .args(["--no-first-run", "--no-default-browser-check", "--window-position=120,80", "--window-size=1280,860", "--new-window", &url])
         .spawn()
         .map_err(|e| format!("Não consegui abrir o Chrome: {e}"))?;
+    *login_pid().lock().unwrap_or_else(|e| e.into_inner()) = Some(child.id());
     tokio::task::spawn_blocking(move || {
         let _ = child.wait();
+        login_pid().lock().unwrap_or_else(|e| e.into_inner()).take();
         emit(&app, "real-browser-login-done", json!({}));
     });
     Ok(())
+}
+
+fn login_pid() -> &'static Mutex<Option<u32>> {
+    static P: OnceLock<Mutex<Option<u32>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(None))
+}
+
+/// "Terminei o login": fecha a janela do Chrome comum como a pessoa faria (WM_CLOSE, sem `/F`), para o
+/// Chrome gravar os cookies da sessão. Só força se ele não sair em 15 s. O aviso de fim vem da thread
+/// que espera o processo, em `real_browser_login`.
+#[tauri::command]
+pub async fn real_browser_login_finish() -> Result<(), String> {
+    let Some(pid) = *login_pid().lock().unwrap_or_else(|e| e.into_inner()) else { return Ok(()) };
+    let close = |force: bool| {
+        let mut cmd = std::process::Command::new("taskkill");
+        if force {
+            cmd.arg("/F");
+        }
+        let _ = cmd.args(["/T", "/PID", &pid.to_string()]).output();
+    };
+    close(false);
+    let deadline = Instant::now() + Duration::from_secs(15);
+    while login_pid().lock().unwrap_or_else(|e| e.into_inner()).is_some() {
+        if Instant::now() >= deadline {
+            close(true);
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(250)).await;
+    }
+    Ok(())
+}
+
+/// Desliga o "continuar rodando em segundo plano" do perfil (`Local State`): sem isso, fechar a janela
+/// de login não encerrava o Chrome e o Portal ficava esperando para sempre.
+fn prepare_profile(profile: &std::path::Path) {
+    let path = profile.join("Local State");
+    let mut state: Value = std::fs::read_to_string(&path)
+        .ok()
+        .and_then(|s| serde_json::from_str(&s).ok())
+        .filter(Value::is_object)
+        .unwrap_or_else(|| json!({}));
+    state["background_mode"] = json!({ "enabled": false });
+    let _ = std::fs::write(&path, state.to_string());
 }
