@@ -341,7 +341,9 @@ pub async fn real_browser_login(app: AppHandle, url: String) -> Result<(), Strin
     let exe = chrome_path().ok_or("Não achei o Chrome nem o Edge instalados.")?;
     let mut child = std::process::Command::new(exe)
         .arg(format!("--user-data-dir={}", profile.display()))
-        .args(["--no-first-run", "--no-default-browser-check", "--new-window", &url])
+        // Posição explícita: o perfil lembra a janela escondida do Chrome controlado, e sem isto a
+        // janela de login abria fora da tela.
+        .args(["--no-first-run", "--no-default-browser-check", "--window-position=120,80", "--window-size=1280,860", "--new-window", &url])
         .spawn()
         .map_err(|e| format!("Não consegui abrir o Chrome: {e}"))?;
     tokio::task::spawn_blocking(move || {

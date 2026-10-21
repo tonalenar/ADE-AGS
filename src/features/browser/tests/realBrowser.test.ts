@@ -1,5 +1,13 @@
 import { describe, expect, it } from "vitest";
-import { cdpModifiers, keyDownEvent, mouseButton, pagePoint } from "../realBrowser";
+import { cdpModifiers, keyDownEvent, loginStartUrl, mouseButton, pagePoint } from "../realBrowser";
+
+describe("Chrome real: início do login", () => {
+  it("começa pela raiz do site, nunca por um endereço de login vencido", () => {
+    expect(loginStartUrl("https://accounts.google.com/v3/signin/identifier?continue=x&TL=abc")).toBe("https://accounts.google.com/");
+    expect(loginStartUrl("github.com/login")).toBe("https://github.com/");
+    expect(loginStartUrl("")).toBe("https://accounts.google.com/");
+  });
+});
 
 const key = (key: string, extra: Partial<{ code: string; keyCode: number; ctrlKey: boolean; shiftKey: boolean }> = {}) => ({
   key, code: extra.code ?? "", keyCode: extra.keyCode ?? 0,

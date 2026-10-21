@@ -36,7 +36,7 @@ import { PageChannel, type LoadState } from "./pageChannel";
 import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
 import { RealBrowserView } from "./RealBrowserView";
-import { realBrowserHistory, realBrowserLogin, realBrowserSend, realBrowserWindow } from "./realBrowser";
+import { loginStartUrl, realBrowserHistory, realBrowserLogin, realBrowserSend, realBrowserWindow } from "./realBrowser";
 import { listen } from "@tauri-apps/api/event";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
@@ -137,7 +137,7 @@ export function BrowserTab({ view, active, device = null }: {
   }, []);
   const startLogin = () => {
     setLoggingIn(true);
-    realBrowserLogin(normalizeUrl(address) ?? "https://accounts.google.com/").catch((e) => {
+    realBrowserLogin(loginStartUrl(address)).catch((e) => {
       setLoggingIn(false);
       setError(String(e));
     });

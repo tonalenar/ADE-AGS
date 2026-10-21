@@ -58,5 +58,15 @@ export function pagePoint(
   };
 }
 
+/** Onde começa o login: a raiz do site. Um endereço de login do meio do fluxo carrega parâmetros que
+ *  vencem (o Google responde 400), então nunca é reaproveitado. Sem endereço, a conta Google. */
+export function loginStartUrl(address: string): string {
+  try {
+    const url = new URL(/^https?:\/\//i.test(address) ? address : `https://${address}`);
+    if (url.protocol === "http:" || url.protocol === "https:") return `${url.origin}/`;
+  } catch { /* endereço vazio ou inválido */ }
+  return "https://accounts.google.com/";
+}
+
 /** Abre o perfil do app num Chrome comum (sem controle remoto) para entrar numa conta. */
 export const realBrowserLogin = (url: string) => invoke<void>("real_browser_login", { url });
