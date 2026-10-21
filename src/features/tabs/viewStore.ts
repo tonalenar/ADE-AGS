@@ -20,7 +20,7 @@ interface ViewTabsState {
    *  guarda el canvas). Usan el mismo `BrowserTab`, que los maneja por su id. */
   portalViews: BrowserView[];
   /** Crea la vista de un portal si todavía no existe. */
-  ensurePortalView: (id: string, cwd: string, url: string, viewport?: { width: number; height: number }) => void;
+  ensurePortalView: (id: string, cwd: string, url: string, viewport?: { width: number; height: number }, realChrome?: boolean) => void;
   dropPortalView: (id: string) => void;
 
   openFile: (cwd: string, path: string, reveal?: { line: number; column: number }) => void;
@@ -52,10 +52,10 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
   keepMountedIds: [],
   portalViews: [],
 
-  ensurePortalView: (id, cwd, url, viewport) =>
+  ensurePortalView: (id, cwd, url, viewport, realChrome) =>
     set((s) => (s.portalViews.some((v) => v.id === id)
       ? s
-      : { portalViews: [...s.portalViews, { kind: "browser", id, cwd, url, title: "", ...(viewport ? { viewport } : {}) }] })),
+      : { portalViews: [...s.portalViews, { kind: "browser", id, cwd, url, title: "", ...(viewport ? { viewport } : {}), ...(realChrome ? { realChrome } : {}) }] })),
   dropPortalView: (id) => set((s) => ({ portalViews: s.portalViews.filter((v) => v.id !== id) })),
 
   openFile: (cwd, path, reveal) => {

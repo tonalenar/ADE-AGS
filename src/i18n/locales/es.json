@@ -3206,10 +3206,9 @@
   "missions.metrics.contextSub": "después de compactar",
   "browser.real.label": "Chrome real",
   "browser.real.hint": "Usa un Chrome de verdad, con perfil propio de la app: permite entrar en sitios que rechazan navegadores embebidos, como la cuenta de Google",
-  "browser.real.window": "Mostrar la ventana de Chrome",
   "browser.real.login": "Iniciar sesión",
   "browser.real.loginHint": "Abre este perfil en un Chrome normal, en su propia ventana, para iniciar sesión (Google rechaza el inicio de sesión en un Chrome controlado). Cierra la ventana al terminar.",
-  "browser.real.loggingIn": "Inicia sesión en la ventana de Chrome que se abrió. Al terminar, ciérrala o haz clic abajo: el Portal vuelve ya con la cuenta.",
+  "browser.real.loggingIn": "La ventana de inicio de sesión de Chrome está encima de este Portal. Inicia sesión ahí; al terminar, haz clic abajo (o cierra la ventana) y el Portal vuelve con la cuenta.",
   "browser.real.loginDone": "Terminé de iniciar sesión",
   "browser.real.signInHere": "No inicies sesión en Google aquí: Google rechaza este Chrome y empieza a desconfiar del perfil. Usa Iniciar sesión, que abre una ventana normal de Chrome."
 }

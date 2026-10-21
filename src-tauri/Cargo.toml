@@ -146,6 +146,9 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Console",
     "Win32_System_Pipes",
     "Win32_System_Threading",
+    # Janelas do Chrome real (`real_browser::win`): estilo, dono, posição e o aviso de janela nova.
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Accessibility",
 ] }
 # Capturas del navegador (ver preview::snapshot): WebView2 entrega el PNG en un IStream.
 # Misma regla que arriba: las versiones que ya trae wry.

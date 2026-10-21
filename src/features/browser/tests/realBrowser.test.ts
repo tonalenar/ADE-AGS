@@ -1,5 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { cdpModifiers, isGoogleSignIn, keyDownEvent, loginStartUrl, mouseButton, pagePoint } from "../realBrowser";
+import { cdpModifiers, isGoogleSignIn, keyDownEvent, loginStartUrl, mouseButton, pageMetrics, pagePoint } from "../realBrowser";
+
+describe("Chrome real: zoom da página", () => {
+  it("150% = página com menos pixels CSS e mais densidade, nítida na tela a 125%", () => {
+    expect(pageMetrics({ width: 900, height: 600 }, 1.5, 1.25)).toEqual({ width: 600, height: 400, deviceScaleFactor: 1.88, mobile: false });
+  });
+  it("100% numa tela comum é o tamanho do Portal", () => {
+    expect(pageMetrics({ width: 1075, height: 639 }, 1, 1)).toEqual({ width: 1075, height: 639, deviceScaleFactor: 1, mobile: false });
+  });
+});
 
 describe("Chrome real: início do login", () => {
   it("começa pela raiz do site, nunca por um endereço de login vencido", () => {

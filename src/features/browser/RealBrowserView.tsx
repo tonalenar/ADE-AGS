@@ -1,12 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
-import { keyDownEvent, cdpModifiers, mouseButton, pagePoint, realBrowserClose, realBrowserOpen, realBrowserSend } from "./realBrowser";
+import { keyDownEvent, cdpModifiers, mouseButton, pageMetrics, pagePoint, realBrowserClose, realBrowserOpen, realBrowserSend } from "./realBrowser";
 
 /** A tela do Chrome real dentro do Portal: mostra os quadros do screencast e devolve mouse e
  *  teclado. O tamanho da página acompanha o tamanho do Portal (sem o zoom do canvas). */
-export function RealBrowserView({ viewId, url, onUrl, onError }: {
+export function RealBrowserView({ viewId, url, zoom, onUrl, onError }: {
   viewId: string;
   url: string;
+  /** O zoom da página (1 = 100%), o mesmo dos botões de zoom do navegador. */
+  zoom: number;
   onUrl: (url: string) => void;
   onError: (message: string) => void;
 }) {
@@ -15,22 +17,36 @@ export function RealBrowserView({ viewId, url, onUrl, onError }: {
   const page = useRef({ width: 1280, height: 800 });
   const [ready, setReady] = useState(false);
   const urlRef = useRef(url);
+  urlRef.current = url;
+  // A última URL que o Chrome mostrou: uma URL nova na vista que não é esta veio da barra de endereço.
+  const shownUrl = useRef(url);
+  const opened = useRef(false);
   const onUrlRef = useRef(onUrl);
   onUrlRef.current = onUrl;
+  const zoomRef = useRef(zoom);
+  zoomRef.current = zoom;
+  // O tamanho em layout (offset), não o da tela: o zoom do canvas não muda a página.
+  const metrics = () => pageMetrics({ width: box.current?.offsetWidth ?? 0, height: box.current?.offsetHeight ?? 0 }, zoomRef.current, devicePixelRatio);
 
   // Abre ao montar; fecha ao desmontar (o login fica no perfil, não na página).
   useEffect(() => {
     const el = box.current;
     if (!el) return;
-    let open = false;
-    realBrowserOpen(viewId, urlRef.current || "about:blank", el.offsetWidth, el.offsetHeight)
-      .then(() => { open = true; })
+    opened.current = false;
+    shownUrl.current = urlRef.current;
+    realBrowserOpen(viewId, urlRef.current || "about:blank", metrics())
+      .then(() => {
+        opened.current = true;
+        // A barra mudou enquanto abria.
+        if (urlRef.current && urlRef.current !== shownUrl.current) {
+          shownUrl.current = urlRef.current;
+          realBrowserSend(viewId, "Page.navigate", { url: urlRef.current }).catch(() => undefined);
+        }
+      })
       .catch((e) => onError(String(e)));
     const resize = new ResizeObserver(() => {
-      if (!open) return;
-      realBrowserSend(viewId, "Emulation.setDeviceMetricsOverride", {
-        width: Math.max(200, el.offsetWidth), height: Math.max(200, el.offsetHeight), deviceScaleFactor: 1, mobile: false,
-      }).catch(() => undefined);
+      if (!opened.current) return;
+      realBrowserSend(viewId, "Emulation.setDeviceMetricsOverride", metrics()).catch(() => undefined);
     });
     resize.observe(el);
     return () => {
@@ -38,6 +54,16 @@ export function RealBrowserView({ viewId, url, onUrl, onError }: {
       realBrowserClose(viewId).catch(() => undefined);
     };
   }, [viewId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (opened.current) realBrowserSend(viewId, "Emulation.setDeviceMetricsOverride", metrics()).catch(() => undefined);
+  }, [zoom]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (!opened.current || !url || url === shownUrl.current) return;
+    shownUrl.current = url;
+    realBrowserSend(viewId, "Page.navigate", { url }).catch((e) => onError(String(e)));
+  }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     const offs = [
@@ -48,7 +74,9 @@ export function RealBrowserView({ viewId, url, onUrl, onError }: {
         setReady(true);
       }),
       listen<{ id: string; url: string }>("real-browser-url", (e) => {
-        if (e.payload.id === viewId) onUrlRef.current(e.payload.url);
+        if (e.payload.id !== viewId) return;
+        shownUrl.current = e.payload.url;
+        onUrlRef.current(e.payload.url);
       }),
     ];
     return () => { offs.forEach((p) => p.then((off) => off())); };

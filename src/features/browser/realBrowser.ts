@@ -1,15 +1,26 @@
 // O Chrome de verdade por trás do Portal (protótipo): ver `src-tauri/src/real_browser.rs`.
 import { invoke } from "@tauri-apps/api/core";
 
-export const realBrowserOpen = (id: string, url: string, width: number, height: number) =>
-  invoke<void>("real_browser_open", { id, url, width: Math.round(width), height: Math.round(height) });
+/** O tamanho da página no Chrome para um Portal de `box` pixels CSS, com o zoom da página e a densidade da tela. É o
+ *  zoom do próprio Chrome: a página tem menos pixels CSS, cada um com mais pixels de verdade; o quadro chega com a
+ *  resolução da tela (nítido a 125%), e o Portal o mostra no tamanho do box. */
+export function pageMetrics(box: { width: number; height: number }, zoom: number, dpr: number) {
+  const z = zoom > 0 ? zoom : 1;
+  return {
+    width: Math.max(200, Math.round(box.width / z)),
+    height: Math.max(200, Math.round(box.height / z)),
+    deviceScaleFactor: Math.round(z * (dpr > 0 ? dpr : 1) * 100) / 100,
+    mobile: false,
+  };
+}
+
+export const realBrowserOpen = (id: string, url: string, metrics: ReturnType<typeof pageMetrics>) =>
+  invoke<void>("real_browser_open", { id, url, width: metrics.width, height: metrics.height, scale: metrics.deviceScaleFactor });
 
 export const realBrowserSend = (id: string, method: string, params: Record<string, unknown>) =>
   invoke<void>("real_browser_send", { id, method, params });
 
 export const realBrowserHistory = (id: string, delta: number) => invoke<void>("real_browser_history", { id, delta });
-
-export const realBrowserWindow = (id: string, show: boolean) => invoke<void>("real_browser_window", { id, show });
 
 export const realBrowserClose = (id: string) => invoke<void>("real_browser_close", { id });
 
@@ -81,5 +92,24 @@ export function isGoogleSignIn(url: string): boolean {
 
 export const realBrowserLoginFinish = () => invoke<void>("real_browser_login_finish");
 
-/** Abre o perfil do app num Chrome comum (sem controle remoto) para entrar numa conta. */
-export const realBrowserLogin = (url: string) => invoke<void>("real_browser_login", { url });
+/** Onde o Portal está na janela do app (pixels CSS). `null` = fora de vista. */
+export type PortalRect = { x: number; y: number; width: number; height: number; scale: number } | null;
+
+/** O retângulo do elemento, ou `null` se ele não está à vista (sem tamanho, ou a janela escondida). */
+export function portalRect(el: Element | null): PortalRect {
+  if (!el || document.visibilityState === "hidden") return null;
+  const r = el.getBoundingClientRect();
+  if (r.width < 1 || r.height < 1 || r.right <= 0 || r.bottom <= 0 || r.left >= innerWidth || r.top >= innerHeight) return null;
+  return { x: r.left, y: r.top, width: r.width, height: r.height, scale: devicePixelRatio };
+}
+
+export function sameRect(a: PortalRect, b: PortalRect): boolean {
+  if (!a || !b) return a === b;
+  return a.scale === b.scale && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
+}
+
+/** Abre o perfil do app num Chrome comum (sem controle remoto), em cima do Portal, para entrar numa conta. */
+export const realBrowserLogin = (url: string, rect: PortalRect) => invoke<void>("real_browser_login", { url, rect });
+
+/** O Portal mudou de lugar ou saiu de vista: a janela de login acompanha. */
+export const realBrowserLoginPlace = (rect: PortalRect) => invoke<void>("real_browser_login_place", { rect });

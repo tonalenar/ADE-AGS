@@ -36,7 +36,8 @@ import { PageChannel, type LoadState } from "./pageChannel";
 import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
 import { RealBrowserView } from "./RealBrowserView";
-import { isGoogleSignIn, loginStartUrl, realBrowserHistory, realBrowserLogin, realBrowserLoginFinish, realBrowserSend, realBrowserWindow } from "./realBrowser";
+import { isGoogleSignIn, loginStartUrl, portalRect, realBrowserHistory, realBrowserLogin, realBrowserLoginFinish, realBrowserLoginPlace, realBrowserSend, sameRect, type PortalRect } from "./realBrowser";
+import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
@@ -130,6 +131,28 @@ export function BrowserTab({ view, active, device = null }: {
   // Portal volta (`realKey` remonta a vista, que reabre o perfil já com a sessão).
   const [loggingIn, setLoggingIn] = useState(false);
   const [realKey, setRealKey] = useState(0);
+  // Durante o login, a janela do Chrome fica em cima do Portal: acompanha o Portal a cada quadro (canvas
+  // arrastado, zoom, painel aberto) e a janela do app quando ela se move. Fora de vista, ela se esconde.
+  useEffect(() => {
+    if (!loggingIn) return;
+    let last: PortalRect | undefined;
+    let frame = 0;
+    const tick = () => {
+      const rect = portalRect(column.current);
+      if (last === undefined || !sameRect(rect, last)) {
+        last = rect;
+        realBrowserLoginPlace(rect).catch(() => undefined);
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    const moved = getCurrentWindow().onMoved(() => { last = undefined; });
+    return () => {
+      cancelAnimationFrame(frame);
+      moved.then((off) => off());
+      realBrowserLoginPlace(null).catch(() => undefined);
+    };
+  }, [loggingIn]);
   useEffect(() => {
     const off = listen("real-browser-login-done", () => {
       // Volta fora da página de login: nela o Portal só mostraria o aviso de novo.
@@ -145,7 +168,7 @@ export function BrowserTab({ view, active, device = null }: {
   }, [updateView, view.id]);
   const startLogin = () => {
     setLoggingIn(true);
-    realBrowserLogin(loginStartUrl(address)).catch((e) => {
+    realBrowserLogin(loginStartUrl(address), portalRect(column.current)).catch((e) => {
       setLoggingIn(false);
       setError(String(e));
     });
@@ -285,10 +308,10 @@ export function BrowserTab({ view, active, device = null }: {
       return t("browser.invalidUrl");
     }
     if (realRef.current) {
+      // Quem navega é a vista do Chrome real, quando a URL dela muda (ou ao terminar de abrir).
       setAddress(url);
       setError(null);
       updateView(view.id, { url, title: new URL(url).host });
-      realBrowserSend(view.id, "Page.navigate", { url }).catch((e) => setError(String(e)));
       return null;
     }
     try {
@@ -830,12 +853,7 @@ export function BrowserTab({ view, active, device = null }: {
           <AccountCircleIcon className="w-4 h-4" />
         </ToolButton>
       )}
-      {real && (
-        <ToolButton label={t("browser.real.window")} onClick={() => realBrowserWindow(view.id, true).catch((e) => setError(String(e)))}>
-          <ExternalIcon className="w-4 h-4 stroke-2" />
-        </ToolButton>
-      )}
-      <ZoomControl zoom={zoom} disabled={!target || !!frozen}
+      <ZoomControl zoom={zoom} disabled={(!target && !real) || !!frozen}
         onStep={(dir) => setZoom(stepZoom(zoom, dir))} onReset={() => setZoom(1)} />
       <ToolButton label={viewport ? t("browser.viewport.exit") : t("browser.viewport.enter")} active={!!viewport}
         onClick={() => {
@@ -914,9 +932,10 @@ export function BrowserTab({ view, active, device = null }: {
 
   return (
     <div ref={root} className={`flex flex-col h-full min-h-0 transition-colors duration-300 ${device ? "bg-transparent" : "bg-gray-50 dark:bg-surface"}`}>
-      {device ? null : toolbar}
+      {/* No login, a barra que vale é a da janela do Chrome (é nela que se confere o endereço): a do Portal some. */}
+      {device || (real && loggingIn) ? null : toolbar}
 
-      {viewport && !device && (
+      {viewport && !device && !(real && loggingIn) && (
         // Congelada, la página no cambia de tamaño: la barra queda a la vista pero quieta.
         <div inert={frozen ? true : undefined} className={`shrink-0 ${frozen ? "opacity-50" : ""}`}>
           <DeviceBar
@@ -956,7 +975,7 @@ export function BrowserTab({ view, active, device = null }: {
               </Button>
             </div>
           ) : real ? (
-            <RealBrowserView key={realKey} viewId={view.id} url={view.url} onError={setError}
+            <RealBrowserView key={realKey} viewId={view.id} url={view.url} zoom={zoom} onError={setError}
               onUrl={(u) => {
                 setAddress(u);
                 try { updateView(view.id, { url: u, title: new URL(u).host || u }); } catch { /* chrome://, about: */ }
