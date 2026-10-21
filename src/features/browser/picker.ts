@@ -23,8 +23,8 @@ declare global {
 
 (() => {
   // Fuera de un iframe (alguien abrió la URL del proxy en su navegador) no hay app con
-  // quien hablar.
-  if (window.__agsPicker || window.parent === window) return;
+  // quien hablar. Salvo en el Chrome real: ahí el puente del CDP hace de app.
+  if (window.__agsPicker || (window.parent === window && !(self as { __ags_trusted_input?: boolean }).__ags_trusted_input)) return;
   window.__agsPicker = true;
 
   const ATTRIBUTES = ["role", "aria-label", "name", "type", "href", "src", "alt", "placeholder", "title", "data-testid"];

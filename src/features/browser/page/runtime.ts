@@ -19,8 +19,9 @@
  * de la página que diga "ignorá tus instrucciones" es texto de la página.
  */
 import type {
-  AppMessage, ConsoleEntry, ConsoleLevel, DebugBatch, PageCommand, PageMessage, PageNetworkEntry, StorageArea,
+  AppMessage, ConsoleEntry, ConsoleLevel, DebugBatch, PageCommand, PageMessage, PageNetworkEntry, StorageArea, NativeInput,
 } from "../protocol";
+import { virtualKeyCode } from "./keys";
 import { createCursor } from "./cursor";
 import { componentChain, describeElement, selectorOf } from "./dom";
 import {
@@ -48,7 +49,8 @@ declare global {
 }
 
 (() => {
-  if (window.__agsPage || window.parent === window) return;
+  // Fora de um iframe só roda no Chrome real, onde a ponte do CDP faz o papel do app (`real_browser::BRIDGE`).
+  if (window.__agsPage || (window.parent === window && !(self as { __ags_trusted_input?: boolean }).__ags_trusted_input)) return;
   window.__agsPage = true;
 
   // Lo primero: la página no puede leer una cookie ni su storage antes de que estén en su
@@ -86,6 +88,31 @@ declare global {
     } catch {
       return false;
     }
+  }
+
+  // ── Toques e teclas de verdade (Chrome real) ──────────────────
+
+  /** No Chrome real (o Portal sem proxy, com este script injetado por CDP), cliques e teclas saem pelo `Input` do CDP:
+   *  eventos de verdade (`isTrusted`), que o site trata como os de uma pessoa. Este script continua achando o elemento, o
+   *  ponto livre e a tecla; o app só executa e responde `input:done`. `false` = não deu (fora do Chrome real, ou sem
+   *  resposta): quem chamou segue com os eventos sintéticos de sempre. */
+  const trustedInput = (self as { __ags_trusted_input?: boolean }).__ags_trusted_input === true;
+  const inputWaiters = new Map<string, (ok: boolean) => void>();
+  function nativeInput(request: NativeInput): Promise<boolean> {
+    if (!trustedInput) return Promise.resolve(false);
+    const id = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+    return new Promise((resolve) => {
+      const timer = setTimer(() => {
+        inputWaiters.delete(id);
+        resolve(false);
+      }, 5000);
+      inputWaiters.set(id, (ok) => {
+        clearTimer(timer);
+        inputWaiters.delete(id);
+        resolve(ok);
+      });
+      if (!post({ type: "input:request", payload: { ...request, id } })) inputWaiters.get(id)?.(false);
+    });
   }
 
   // ── Captura ───────────────────────────────────────────────────
@@ -1178,18 +1205,21 @@ declare global {
     cursor.click();
     const { x, y, target } = aim(el);
     const before = location.href;
-    // Un dedo no pasa por encima antes de apretar: va directo. Es la diferencia que rompe
-    // un menú que solo se abre con `:hover`, y por eso se emula en vez de simplificarse.
-    const approach = isTouch() ? ["pointerdown"] : ["pointerover", "pointerenter", "pointermove", "pointerdown"];
-    if (isTouch()) sendTouch(target, "touchstart", x, y);
-    for (const type of approach) mouse(target, type, x, y);
-    if (typeof (target as HTMLElement).focus === "function") (target as HTMLElement).focus({ preventScroll: true });
-    if (isTouch()) sendTouch(target, "touchend", x, y);
-    mouse(target, "pointerup", x, y);
-    // `click()` y no un MouseEvent a mano: dispara lo que hace el navegador con un click de
-    // verdad (seguir el link, marcar el checkbox, enviar el form).
-    if (typeof (target as HTMLElement).click === "function") (target as HTMLElement).click();
-    else mouse(target, "click", x, y);
+    // No Chrome real, um clique de verdade no ponto livre achado por `aim` (o toque emulado continua sintético).
+    if (isTouch() || !(await nativeInput({ kind: "click", x, y }))) {
+      // Un dedo no pasa por encima antes de apretar: va directo. Es la diferencia que rompe
+      // un menú que solo se abre con `:hover`, y por eso se emula en vez de simplificarse.
+      const approach = isTouch() ? ["pointerdown"] : ["pointerover", "pointerenter", "pointermove", "pointerdown"];
+      if (isTouch()) sendTouch(target, "touchstart", x, y);
+      for (const type of approach) mouse(target, type, x, y);
+      if (typeof (target as HTMLElement).focus === "function") (target as HTMLElement).focus({ preventScroll: true });
+      if (isTouch()) sendTouch(target, "touchend", x, y);
+      mouse(target, "pointerup", x, y);
+      // `click()` y no un MouseEvent a mano: dispara lo que hace el navegador con un click de
+      // verdad (seguir el link, marcar el checkbox, enviar el form).
+      if (typeof (target as HTMLElement).click === "function") (target as HTMLElement).click();
+      else mouse(target, "click", x, y);
+    }
     const waited = await settle();
     return {
       clicked: describeElement(el),
@@ -1279,9 +1309,13 @@ declare global {
         throw new Error(`${describeElement(el)} es un ${(field as HTMLInputElement).type}: use com click, não digitando.`);
       }
       if ((field as HTMLInputElement).readOnly) throw new Error(`${describeElement(el)} é somente leitura.`);
-      nativeSetValue(field, clear ? text : field.value + text);
-      inputEvent(field, text);
-      field.dispatchEvent(new Event("change", { bubbles: true }));
+      if (!(await typeNatively(clear, text))) {
+        nativeSetValue(field, clear ? text : field.value + text);
+        inputEvent(field, text);
+        field.dispatchEvent(new Event("change", { bubbles: true }));
+      }
+    } else if ((el as HTMLElement).isContentEditable && trustedInput && (await typeNatively(clear, text))) {
+      // Digitado de verdade no Chrome real.
     } else if ((el as HTMLElement).isContentEditable) {
       if (clear) {
         const range = document.createRange();
@@ -1306,6 +1340,17 @@ declare global {
     return { typed: describeElement(el), value: valueOf(el) ?? "", ...(options !== null ? { options } : {}), ...waitedField(waited) };
   }
 
+  /** Digita no campo focado pelo `Input` do CDP: com `clear`, seleciona tudo antes (o texto novo substitui; vazio apaga). */
+  async function typeNatively(clear: boolean, text: string): Promise<boolean> {
+    if (!trustedInput) return false;
+    if (clear) {
+      const ok = await nativeInput({ kind: "key", key: "a", code: "KeyA", keyCode: 65, modifiers: 2, commands: ["selectAll"] });
+      if (!ok) return false;
+      if (!text) return nativeInput({ kind: "key", key: "Delete", code: "Delete", keyCode: 46, modifiers: 0 });
+    }
+    return text ? nativeInput({ kind: "text", text }) : true;
+  }
+
   function focusables(): HTMLElement[] {
     const all = Array.from(document.querySelectorAll<HTMLElement>(
       "a[href],button,input:not([type=hidden]),select,textarea,summary,[tabindex],[contenteditable]"
@@ -1328,6 +1373,23 @@ declare global {
       key: combo.key, code, bubbles: true, cancelable: true, composed: true,
       ctrlKey: combo.ctrlKey, shiftKey: combo.shiftKey, altKey: combo.altKey, metaKey: combo.metaKey,
     };
+    // No Chrome real a tecla é de verdade: o navegador faz o que faria (enviar o form, seguir o link, trocar o foco).
+    const modifiers = (combo.altKey ? 1 : 0) | (combo.ctrlKey ? 2 : 0) | (combo.metaKey ? 4 : 0) | (combo.shiftKey ? 8 : 0);
+    const printable = [...combo.key].length === 1 && !combo.ctrlKey && !combo.metaKey;
+    const native = await nativeInput({
+      kind: "key", key: combo.key, code, keyCode: virtualKeyCode(combo.key), modifiers,
+      ...(combo.key === "Enter" ? { text: "\r" } : printable ? { text: combo.key } : {}),
+    });
+    if (native) {
+      const waited = await settle(1000);
+      const focused = document.activeElement;
+      return {
+        pressed: key,
+        on: describeElement(el),
+        focused: focused && focused !== document.body ? describeElement(focused) : null,
+        ...waitedField(waited),
+      };
+    }
     const proceed = el.dispatchEvent(new KeyboardEvent("keydown", init));
 
     // Una tecla sintética no hace lo que haría el teclado de verdad: eso se simula acá,
@@ -1902,6 +1964,10 @@ declare global {
     }
     if (message.type === "net:on" || message.type === "net:off") {
       recordingNet = message.type === "net:on";
+      return;
+    }
+    if (message.type === "input:done") {
+      inputWaiters.get(message.id)?.(message.ok);
       return;
     }
     if (message.type === "connect" || message.type === "hello") flush();

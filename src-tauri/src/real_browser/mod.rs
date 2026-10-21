@@ -277,7 +277,15 @@ fn emit(app: &AppHandle, event: &str, payload: Value) {
 
 /// Abre (ou reabre) a janela do Portal `id` no Chrome controlado e começa a mandar a tela.
 #[tauri::command]
-pub async fn real_browser_open(app: AppHandle, id: String, url: String, width: u32, height: u32, scale: Option<f64>) -> Result<(), String> {
+pub async fn real_browser_open(
+    app: AppHandle,
+    id: String,
+    url: String,
+    width: u32,
+    height: u32,
+    scale: Option<f64>,
+    script: Option<String>,
+) -> Result<(), String> {
     let scale = scale.filter(|s| *s > 0.0).unwrap_or(1.0);
     if lock(pages()).contains_key(&id) {
         send_raw(&id, "Emulation.setDeviceMetricsOverride", metrics(width, height, scale))?;
@@ -286,7 +294,7 @@ pub async fn real_browser_open(app: AppHandle, id: String, url: String, width: u
     let port = ensure_browser(&app).await?;
     // Uma janela por Portal, fora da tela.
     let created = browser_call(port, "Target.createTarget", json!({
-        "url": url, "newWindow": true, "left": -32000, "top": -32000, "width": width.max(200), "height": height.max(200),
+        "url": "about:blank", "newWindow": true, "left": -32000, "top": -32000, "width": width.max(200), "height": height.max(200),
     }))
     .await?;
     let target = created["targetId"].as_str().ok_or("O Chrome não abriu a janela do Portal.")?.to_string();
@@ -316,7 +324,10 @@ pub async fn real_browser_open(app: AppHandle, id: String, url: String, width: u
             let Ok(v) = serde_json::from_str::<Value>(&text) else { continue };
             if let Some(n) = v["id"].as_u64() {
                 if let Some(done) = lock(&reader_pending).remove(&n) {
-                    let _ = done.send(v["result"].clone());
+                    let _ = done.send(match v.get("error") {
+                        Some(err) => json!({ "__error": err["message"] }),
+                        None => v["result"].clone(),
+                    });
                 }
                 continue;
             }
@@ -331,6 +342,15 @@ pub async fn real_browser_open(app: AppHandle, id: String, url: String, width: u
                     }));
                     let ack = json!({ "id": next_id(), "method": "Page.screencastFrameAck", "params": { "sessionId": p["sessionId"] } });
                     let _ = reader_tx.send(ack.to_string());
+                }
+                Some("Runtime.bindingCalled") if v["params"]["name"] == BINDING => {
+                    let Ok(message) = serde_json::from_str::<Value>(v["params"]["payload"].as_str().unwrap_or("")) else { continue };
+                    if message["type"] == "input:request" {
+                        let id = reader_id.clone();
+                        tokio::spawn(async move { native_input(&id, message["payload"].clone()).await });
+                    } else {
+                        emit(&reader_app, "real-browser-page", json!({ "id": reader_id, "message": message }));
+                    }
                 }
                 Some("Page.frameNavigated") if v["params"]["frame"]["parentId"].is_null() => {
                     emit(&reader_app, "real-browser-url", json!({ "id": reader_id, "url": v["params"]["frame"]["url"] }));
@@ -353,7 +373,102 @@ pub async fn real_browser_open(app: AppHandle, id: String, url: String, width: u
     // A janela fica fora de foco o tempo todo; sem isto o cursor de texto nem pisca e alguns campos
     // não reagem como se estivessem focados.
     send_raw(&id, "Emulation.setFocusEmulationEnabled", json!({ "enabled": true }))?;
-    send_raw(&id, "Page.startScreencast", json!({ "format": "jpeg", "quality": 80, "everyNthFrame": 1 }))
+    send_raw(&id, "Page.startScreencast", json!({ "format": "jpeg", "quality": 80, "everyNthFrame": 1 }))?;
+    if let Some(script) = script {
+        // O piloto (o mesmo script que o proxy injeta no outro navegador), em todo documento novo, antes dos da página.
+        // `Runtime.enable` é o que entrega `Runtime.bindingCalled`.
+        send_raw(&id, "Runtime.addBinding", json!({ "name": BINDING }))?;
+        send_raw(&id, "Runtime.enable", json!({}))?;
+        send_raw(&id, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": format!("{BRIDGE}\n;{script}") }))?;
+    }
+    send_raw(&id, "Page.navigate", json!({ "url": url }))
+}
+
+/// O nome do canal da página para o app (`Runtime.addBinding`).
+// Não pode ser `__agsPage`: é a marca de "piloto já instalado" do `runtime.ts`.
+const BINDING: &str = "__agsCdpBridge";
+
+/// Roda antes do piloto em cada documento. No Chrome real a página é a janela principal: o piloto manda para
+/// `window.parent`, que é ela mesma, e a ponte repassa ao app pelo binding. A função do binding é guardada e tirada
+/// do `window` antes de qualquer script da página rodar. `__ags_trusted_input` liga os toques e teclas pelo CDP.
+const BRIDGE: &str = r#"(() => {
+  if (window.__ags_bridge) return;
+  Object.defineProperty(window, "__ags_bridge", { value: true });
+  const send = window.__agsCdpBridge;
+  try { delete window.__agsCdpBridge; } catch (_) {}
+  self.__ags_trusted_input = typeof send === "function";
+  window.addEventListener("message", (e) => {
+    const d = e.data;
+    if (e.source === window && d && d.source === "ags-preview" && typeof send === "function") {
+      try { send(JSON.stringify(d)); } catch (_) {}
+    }
+  });
+})();"#;
+
+/// Entrega uma mensagem do app ao piloto da página (como o `postMessage` do iframe faz no outro navegador).
+async fn post_to_page(id: &str, message: &Value) -> Result<(), String> {
+    let expression = format!("window.postMessage({message}, \"*\")");
+    call(id, "Runtime.evaluate", json!({ "expression": expression })).await.map(|_| ())
+}
+
+/// Um toque ou uma tecla de verdade que o piloto pediu (`input:request`), e a resposta `input:done`.
+async fn native_input(id: &str, request: Value) -> Result<(), String> {
+    let ok = run_native_input(id, &request).await.is_ok();
+    post_to_page(id, &json!({ "source": "ade-ags", "type": "input:done", "id": request["id"], "ok": ok })).await
+}
+
+async fn run_native_input(id: &str, r: &Value) -> Result<(), String> {
+    match r["kind"].as_str() {
+        Some("click") => {
+            let (x, y) = (r["x"].as_f64().unwrap_or(0.0), r["y"].as_f64().unwrap_or(0.0));
+            call(id, "Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": x, "y": y, "button": "none" })).await?;
+            for kind in ["mousePressed", "mouseReleased"] {
+                let buttons = if kind == "mousePressed" { 1 } else { 0 };
+                call(id, "Input.dispatchMouseEvent", json!({ "type": kind, "x": x, "y": y, "button": "left", "buttons": buttons, "clickCount": 1 })).await?;
+            }
+        }
+        Some("key") => {
+            let mut down = json!({
+                "type": if r["text"].is_string() { "keyDown" } else { "rawKeyDown" },
+                "key": r["key"], "code": r["code"], "windowsVirtualKeyCode": r["keyCode"], "modifiers": r["modifiers"],
+            });
+            if r["text"].is_string() {
+                down["text"] = r["text"].clone();
+                down["unmodifiedText"] = r["text"].clone();
+            }
+            if r["commands"].is_array() {
+                down["commands"] = r["commands"].clone();
+            }
+            call(id, "Input.dispatchKeyEvent", down).await?;
+            call(id, "Input.dispatchKeyEvent", json!({
+                "type": "keyUp", "key": r["key"], "code": r["code"], "windowsVirtualKeyCode": r["keyCode"], "modifiers": r["modifiers"],
+            }))
+            .await?;
+        }
+        Some("text") => {
+            call(id, "Input.insertText", json!({ "text": r["text"] })).await?;
+        }
+        _ => return Err("pedido de input desconhecido".into()),
+    }
+    Ok(())
+}
+
+/// Uma mensagem do app para o piloto da página (`page:run`, `connect`, `pick:on`…). Só as do app (`source: ade-ags`).
+#[tauri::command]
+pub async fn real_browser_post(id: String, message: Value) -> Result<(), String> {
+    if message["source"] != "ade-ags" {
+        return Err("Mensagem que não é do app.".into());
+    }
+    post_to_page(&id, &message).await
+}
+
+/// A foto da página como está agora (PNG em base64) e o tamanho dela em px CSS: as fotos do piloto.
+#[tauri::command]
+pub async fn real_browser_screenshot(id: String) -> Result<Value, String> {
+    let layout = call(&id, "Page.getLayoutMetrics", json!({})).await?;
+    let viewport = &layout["cssLayoutViewport"];
+    let shot = call(&id, "Page.captureScreenshot", json!({ "format": "png" })).await?;
+    Ok(json!({ "data": shot["data"], "width": viewport["clientWidth"], "height": viewport["clientHeight"] }))
 }
 
 /// O tamanho da página em pixels CSS e quantos pixels de verdade cada um tem (zoom da página × densidade da tela).
@@ -378,7 +493,14 @@ async fn call(id: &str, method: &str, params: Value) -> Result<Value, String> {
         let msg = json!({ "id": n, "method": method, "params": params });
         page.tx.send(msg.to_string()).map_err(|_| "A conexão com o Chrome caiu.".to_string())?;
     }
-    tokio::time::timeout(Duration::from_secs(5), wait).await.map_err(|_| "O Chrome não respondeu.".to_string())?.map_err(|e| e.to_string())
+    let reply = tokio::time::timeout(Duration::from_secs(10), wait)
+        .await
+        .map_err(|_| "O Chrome não respondeu.".to_string())?
+        .map_err(|e| e.to_string())?;
+    match reply.get("__error") {
+        Some(err) => Err(err.as_str().unwrap_or("erro do Chrome").to_string()),
+        None => Ok(reply),
+    }
 }
 
 /// Os comandos CDP que o Portal pode mandar: entrada, navegação e tamanho. Nada que leia cookies ou rode

@@ -14,8 +14,29 @@ export function pageMetrics(box: { width: number; height: number }, zoom: number
   };
 }
 
-export const realBrowserOpen = (id: string, url: string, metrics: ReturnType<typeof pageMetrics>) =>
-  invoke<void>("real_browser_open", { id, url, width: metrics.width, height: metrics.height, scale: metrics.deviceScaleFactor });
+/** `script`: o piloto dos agentes, que o Chrome roda em todo documento (o mesmo que o proxy injeta no outro navegador). */
+export const realBrowserOpen = (id: string, url: string, metrics: ReturnType<typeof pageMetrics>, script?: string) =>
+  invoke<void>("real_browser_open", { id, url, width: metrics.width, height: metrics.height, scale: metrics.deviceScaleFactor, script });
+
+/** Uma mensagem do app para o piloto da página (`page:run`, `connect`…). */
+export const realBrowserPost = (id: string, message: unknown) => invoke<void>("real_browser_post", { id, message });
+
+/** A foto da página agora: PNG em base64 e o tamanho em px CSS. */
+export const realBrowserScreenshot = (id: string) =>
+  invoke<{ data: string; width: number; height: number }>("real_browser_screenshot", { id });
+
+/** A foto do Chrome real num canvas, com o tamanho da página em px CSS. */
+export async function realBrowserShot(id: string): Promise<{ canvas: HTMLCanvasElement; width: number; height: number }> {
+  const shot = await realBrowserScreenshot(id);
+  const img = new Image();
+  img.src = `data:image/png;base64,${shot.data}`;
+  await img.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  canvas.getContext("2d")?.drawImage(img, 0, 0);
+  return { canvas, width: shot.width || img.naturalWidth, height: shot.height || img.naturalHeight };
+}
 
 export const realBrowserSend = (id: string, method: string, params: Record<string, unknown>) =>
   invoke<void>("real_browser_send", { id, method, params });

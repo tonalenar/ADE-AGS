@@ -33,16 +33,16 @@ import { useDebugStore } from "./debugStore";
 import { DeviceBar } from "./DeviceBar";
 import { previewDetectServers, previewResolve, previewSaveCapture, previewSetRecording, type PreviewTarget } from "./ipc";
 import { PageChannel, type LoadState } from "./pageChannel";
-import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
+import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
 import { RealBrowserView } from "./RealBrowserView";
-import { isGoogleSignIn, loginStartUrl, portalRect, realBrowserHistory, realBrowserLogin, realBrowserLoginFinish, realBrowserLoginPlace, realBrowserSend, sameRect, type PortalRect } from "./realBrowser";
+import { isGoogleSignIn, loginStartUrl, portalRect, realBrowserHistory, realBrowserLogin, realBrowserLoginFinish, realBrowserLoginPlace, realBrowserPost, realBrowserSend, realBrowserShot, sameRect, type PortalRect } from "./realBrowser";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
 import { ZoomControl } from "./ZoomControl";
-import { visualSize } from "./visualSize";
+import { cropForJev, resizeCanvas, visualSize } from "./visualSize";
 import { clampZoom, stepZoom } from "./zoom";
 
 /** Lo que el proxy inyecta en cada página: el selector y el runtime (control del agente y
@@ -227,9 +227,11 @@ export function BrowserTab({ view, active, device = null }: {
     ready: doc.current.ready,
     navigatingForMs: navigatingSince.current === null ? null : Date.now() - navigatingSince.current,
   }), []);
+  // No Chrome real as ordens vão pelo CDP (`real_browser_post`); no outro navegador, pelo `postMessage` do iframe.
   const channel = useMemo(() => new PageChannel(() => (
-    targetRef.current ? { window: iframe.current?.contentWindow ?? null, origin: targetRef.current.proxyOrigin } : null
-  ), loadState), [loadState]);
+    realRef.current ? { post: (message: AppMessage) => { realBrowserPost(view.id, message).catch(() => undefined); } }
+      : targetRef.current ? { window: iframe.current?.contentWindow ?? null, origin: targetRef.current.proxyOrigin } : null
+  ), loadState), [loadState, view.id]);
 
   useEffect(() => () => {
     channel.dispose();
@@ -250,9 +252,13 @@ export function BrowserTab({ view, active, device = null }: {
   }, []);
 
   const postToPage = useCallback((type: SimpleAppMessage["type"]) => {
+    if (realRef.current) {
+      realBrowserPost(view.id, { source: "ade-ags", type } satisfies AppMessage).catch(() => undefined);
+      return;
+    }
     if (!target) return;
     iframe.current?.contentWindow?.postMessage({ source: "ade-ags", type } satisfies AppMessage, target.proxyOrigin);
-  }, [target]);
+  }, [target, view.id]);
 
   // La red se anota solo con el panel de debug abierto, en el proxy y en la página: guardar
   // cabeceras y cuerpos de cada módulo que sirve un servidor de desarrollo es memoria y
@@ -356,7 +362,15 @@ export function BrowserTab({ view, active, device = null }: {
       const failure = await goRef.current(url);
       if (failure) throw new Error(failure);
     },
-    history: (action) => (action === "reload" ? reload() : postRef.current(action === "back" ? "history:back" : "history:forward")),
+    history: (action) => {
+      if (realRef.current) {
+        if (action === "reload") realBrowserSend(view.id, "Page.reload", {}).catch(() => undefined);
+        else realBrowserHistory(view.id, action === "back" ? -1 : 1).catch(() => undefined);
+        return;
+      }
+      if (action === "reload") reload();
+      else postRef.current(action === "back" ? "history:back" : "history:forward");
+    },
     setViewport,
     viewport: () => viewportRef.current,
     setTouch,
@@ -395,6 +409,8 @@ export function BrowserTab({ view, active, device = null }: {
       setDebugOpen(true);
     },
     screenshot: async (tag) => {
+      // No Chrome real a foto vem do próprio Chrome: não depende de a página estar à vista na tela.
+      if (realRef.current) return previewSaveCapture(await canvasToPng((await realBrowserShot(view.id)).canvas), tag);
       const page = iframe.current;
       const frame = column.current;
       if (!page || !frame) throw new Error("La página todavía no está cargada.");
@@ -406,6 +422,16 @@ export function BrowserTab({ view, active, device = null }: {
       return previewSaveCapture(await canvasToPng(frozen.canvas), tag);
     },
     visualShot: async (region, marks) => {
+      if (realRef.current) {
+        const real = await realBrowserShot(view.id);
+        const source = cropForJev(real.canvas, real.width, real.height, region, marks);
+        const size = visualSize(source.width, source.height);
+        return {
+          path: await previewSaveCapture(await canvasToPng(resizeCanvas(source, size)), "visual"),
+          complete: true,
+          detail: `foto ${real.width}×${real.height} do Chrome real`,
+        };
+      }
       const page = iframe.current;
       const frame = column.current;
       if (!page || !frame) throw new Error("La página todavía no está cargada.");
@@ -555,70 +581,86 @@ export function BrowserTab({ view, active, device = null }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!target) return;
-    const display = (url: string) => toTargetUrl(url, target.proxyOrigin, target.targetOrigin);
+  // O que a página manda (o piloto e o selector), venha do iframe ou do Chrome real: `sendBack` responde pelo mesmo caminho.
+  const onPageMessage = useRef<(msg: PageMessage, sendBack: (message: AppMessage) => void, display: (url: string) => string) => void>(() => undefined);
+  onPageMessage.current = (msg, sendBack, display) => {
     const wakeLoadWaiters = () => {
       for (const wake of [...loadWaiters.current]) wake();
     };
+    if (msg.type === "nav") {
+      pageUrl.current = msg.payload.url;
+      const shown = display(msg.payload.url);
+      shownUrl.current = shown;
+      setAddress(shown);
+      let host = shown;
+      try { host = new URL(shown).host; } catch { /* se queda con la URL entera */ }
+      updateView(view.id, { url: shown, title: msg.payload.title || host });
+      doc.current.ready = true;
+      wakeLoadWaiters();
+    } else if (msg.type === "page:ready") {
+      const url = display(msg.payload.url);
+      channel.documentChanged(url);
+      navigatingSince.current = null;
+      doc.current = { id: msg.payload.doc, count: doc.current.count + 1, ready: false };
+      setDocId(msg.payload.doc);
+      useDebugStore.getState().apply(view.id, (log) => startDocument(log, msg.payload.doc, url, Date.now()));
+      // Con esto la página aprende a quién mandarle lo que capturó durante la carga.
+      sendBack({ source: "ade-ags", type: "connect" });
+      // Cada documento arranca sin anotar la red: si el panel está abierto, se le avisa.
+      if (debugOpenRef.current) {
+        sendBack({ source: "ade-ags", type: "net:on" });
+      }
+      // Y el táctil se vuelve a poner: las hojas de estilo de la página nueva están sin
+      // tocar, así que sin esto la emulación se apagaría sola al navegar.
+      if (touchRef.current) channel.run({ op: "touch", on: true }, 8000).catch(() => undefined);
+    } else if (msg.type === "nav:open") {
+      // Un enlace a otro sitio: se abre acá mismo, con el proxy de ese sitio.
+      if (typeof msg.payload?.url === "string" && /^https?:\/\//i.test(msg.payload.url)) {
+        void goRef.current(msg.payload.url);
+      }
+    } else if (msg.type === "page:reply") {
+      channel.reply(msg.payload);
+    } else if (msg.type === "debug:batch") {
+      const batch = { ...msg.payload, url: display(msg.payload.url) };
+      useDebugStore.getState().apply(view.id, (log) => appendBatch(log, batch));
+    } else if (msg.type === "pick:selected") {
+      const el = msg.payload.element;
+      if (pickWaiter.current) {
+        pickWaiter.current(el);
+        return;
+      }
+      setPicks((prev) => [...prev.filter((p) => !(p.selector === el.selector && p.url === el.url)), el]);
+      setPicking(msg.payload.keepPicking);
+      setComposerOpen(true);
+      setSent(null);
+    } else if (msg.type === "pick:cancel") {
+      pickWaiter.current?.(null);
+      setPicking(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!target) return;
+    const display = (url: string) => toTargetUrl(url, target.proxyOrigin, target.targetOrigin);
     const onMessage = (e: MessageEvent) => {
       // Solo lo que manda ESTE iframe: con dos navegadores abiertos, cada uno escucha lo suyo.
       if (e.source !== iframe.current?.contentWindow || !isPageMessage(e.data)) return;
-      const msg = e.data;
-      if (msg.type === "nav") {
-        pageUrl.current = msg.payload.url;
-        const shown = display(msg.payload.url);
-        shownUrl.current = shown;
-        setAddress(shown);
-        let host = shown;
-        try { host = new URL(shown).host; } catch { /* se queda con la URL entera */ }
-        updateView(view.id, { url: shown, title: msg.payload.title || host });
-        doc.current.ready = true;
-        wakeLoadWaiters();
-      } else if (msg.type === "page:ready") {
-        const url = display(msg.payload.url);
-        channel.documentChanged(url);
-        navigatingSince.current = null;
-        doc.current = { id: msg.payload.doc, count: doc.current.count + 1, ready: false };
-        setDocId(msg.payload.doc);
-        useDebugStore.getState().apply(view.id, (log) => startDocument(log, msg.payload.doc, url, Date.now()));
-        // Con esto la página aprende a quién mandarle lo que capturó durante la carga.
-        (e.source as Window).postMessage({ source: "ade-ags", type: "connect" } satisfies AppMessage, target.proxyOrigin);
-        // Cada documento arranca sin anotar la red: si el panel está abierto, se le avisa.
-        if (debugOpenRef.current) {
-          (e.source as Window).postMessage({ source: "ade-ags", type: "net:on" } satisfies AppMessage, target.proxyOrigin);
-        }
-        // Y el táctil se vuelve a poner: las hojas de estilo de la página nueva están sin
-        // tocar, así que sin esto la emulación se apagaría sola al navegar.
-        if (touchRef.current) channel.run({ op: "touch", on: true }, 8000).catch(() => undefined);
-      } else if (msg.type === "nav:open") {
-        // Un enlace a otro sitio: se abre acá mismo, con el proxy de ese sitio.
-        if (typeof msg.payload?.url === "string" && /^https?:\/\//i.test(msg.payload.url)) {
-          void goRef.current(msg.payload.url);
-        }
-      } else if (msg.type === "page:reply") {
-        channel.reply(msg.payload);
-      } else if (msg.type === "debug:batch") {
-        const batch = { ...msg.payload, url: display(msg.payload.url) };
-        useDebugStore.getState().apply(view.id, (log) => appendBatch(log, batch));
-      } else if (msg.type === "pick:selected") {
-        const el = msg.payload.element;
-        if (pickWaiter.current) {
-          pickWaiter.current(el);
-          return;
-        }
-        setPicks((prev) => [...prev.filter((p) => !(p.selector === el.selector && p.url === el.url)), el]);
-        setPicking(msg.payload.keepPicking);
-        setComposerOpen(true);
-        setSent(null);
-      } else if (msg.type === "pick:cancel") {
-        pickWaiter.current?.(null);
-        setPicking(false);
-      }
+      const source = e.source as Window;
+      onPageMessage.current(e.data, (message) => source.postMessage(message, target.proxyOrigin), display);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [channel, target, updateView, view.id]);
+  }, [target]);
+
+  // No Chrome real, o piloto fala pelo CDP (`Runtime.addBinding`) e as URLs já são as de verdade.
+  useEffect(() => {
+    if (!real) return;
+    const off = listen<{ id: string; message: unknown }>("real-browser-page", (e) => {
+      if (e.payload.id !== view.id || !isPageMessage(e.payload.message)) return;
+      onPageMessage.current(e.payload.message, (message) => { realBrowserPost(view.id, message).catch(() => undefined); }, (url) => url);
+    });
+    return () => { off.then((f) => f()); };
+  }, [real, view.id]);
 
   // La página necesita saber si alguien la está mirando: con la tab en segundo plano, el
   // puntero del agente no se anima (nadie lo vería) y cada acción sale más rápido.
@@ -975,7 +1017,7 @@ export function BrowserTab({ view, active, device = null }: {
               </Button>
             </div>
           ) : real ? (
-            <RealBrowserView key={realKey} viewId={view.id} url={view.url} zoom={zoom} onError={setError}
+            <RealBrowserView key={realKey} viewId={view.id} url={view.url} zoom={zoom} script={INJECTED} onError={setError}
               onUrl={(u) => {
                 setAddress(u);
                 try { updateView(view.id, { url: u, title: new URL(u).host || u }); } catch { /* chrome://, about: */ }

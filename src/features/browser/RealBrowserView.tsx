@@ -4,9 +4,11 @@ import { keyDownEvent, cdpModifiers, mouseButton, pageMetrics, pagePoint, realBr
 
 /** A tela do Chrome real dentro do Portal: mostra os quadros do screencast e devolve mouse e
  *  teclado. O tamanho da página acompanha o tamanho do Portal (sem o zoom do canvas). */
-export function RealBrowserView({ viewId, url, zoom, onUrl, onError }: {
+export function RealBrowserView({ viewId, url, zoom, script, onUrl, onError }: {
   viewId: string;
   url: string;
+  /** O piloto dos agentes, injetado em cada documento (ver `real_browser_open`). */
+  script?: string;
   /** O zoom da página (1 = 100%), o mesmo dos botões de zoom do navegador. */
   zoom: number;
   onUrl: (url: string) => void;
@@ -34,7 +36,7 @@ export function RealBrowserView({ viewId, url, zoom, onUrl, onError }: {
     if (!el) return;
     opened.current = false;
     shownUrl.current = urlRef.current;
-    realBrowserOpen(viewId, urlRef.current || "about:blank", metrics())
+    realBrowserOpen(viewId, urlRef.current || "about:blank", metrics(), script)
       .then(() => {
         opened.current = true;
         // A barra mudou enquanto abria.
