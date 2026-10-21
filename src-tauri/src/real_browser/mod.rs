@@ -89,6 +89,14 @@ fn pages() -> &'static Mutex<HashMap<String, Page>> {
     P.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// A última posição do Portal que o front mandou durante um login. Fica fora de `Login` porque as primeiras chegam
+/// enquanto o Chrome controlado ainda está fechando, antes de o login existir: sem isto a janela abria onde o Portal
+/// estava no clique (com a barra dele ainda à vista) e não saía mais de lá.
+fn last_place() -> &'static Mutex<Option<Option<Rect>>> {
+    static P: OnceLock<Mutex<Option<Option<Rect>>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(None))
+}
+
 fn login() -> &'static Mutex<Option<Login>> {
     static L: OnceLock<Mutex<Option<Login>>> = OnceLock::new();
     L.get_or_init(|| Mutex::new(None))
@@ -214,6 +222,10 @@ async fn ensure_browser(app: &AppHandle) -> Result<u16, String> {
             "--disable-backgrounding-occluded-windows",
             "--disable-renderer-backgrounding",
             "--disable-background-timer-throttling",
+            // Barra de rolagem sobreposta (fina, sem setas, por cima do conteúdo, sem reservar largura), que o
+            // Chromium traz desligada no desktop. Medido no Chrome 155: `FluentOverlayScrollbar` sozinha não muda
+            // nada; esta sim. Só neste Chrome: a janela de login não leva nenhuma alteração.
+            "--enable-features=OverlayScrollbar",
             "about:blank",
         ])
         .spawn()
@@ -456,6 +468,7 @@ pub async fn real_browser_login(app: AppHandle, window: WebviewWindow, url: Stri
     if lock(login()).is_some() {
         return Ok(());
     }
+    *lock(last_place()) = Some(screen_rect(&window, rect));
     shutdown_browser(&app).await?;
     let profile = profile_dir(&app)?;
     prepare_profile(&profile);
@@ -467,7 +480,8 @@ pub async fn real_browser_login(app: AppHandle, window: WebviewWindow, url: Stri
     let pid = child.id();
     let mut group = ProcessGroup::new(pid);
     group.adopt(&child);
-    *lock(login()) = Some(Login { pid, group, hwnd: None, rect: screen_rect(&window, rect) });
+    let rect = lock(last_place()).unwrap_or_else(|| screen_rect(&window, rect));
+    *lock(login()) = Some(Login { pid, group, hwnd: None, rect });
 
     #[cfg(windows)]
     let owner = window.hwnd().map(|h| h.0 as isize).unwrap_or(0);
@@ -496,6 +510,7 @@ pub async fn real_browser_login(app: AppHandle, window: WebviewWindow, url: Stri
     tokio::task::spawn_blocking(move || {
         let _ = child.wait();
         lock(login()).take();
+        lock(last_place()).take();
         emit(&app, "real-browser-login-done", json!({}));
     });
     Ok(())
@@ -505,6 +520,12 @@ pub async fn real_browser_login(app: AppHandle, window: WebviewWindow, url: Stri
 #[tauri::command]
 pub fn real_browser_login_place(window: WebviewWindow, rect: Option<PortalRect>) {
     let rect = screen_rect(&window, rect);
+    {
+        let mut last = lock(last_place());
+        if last.is_some() {
+            *last = Some(rect);
+        }
+    }
     let mut slot = lock(login());
     let Some(l) = slot.as_mut() else { return };
     if l.rect == rect {
