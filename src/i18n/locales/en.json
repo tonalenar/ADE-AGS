@@ -3206,5 +3206,8 @@
   "missions.metrics.contextSub": "after compaction",
   "browser.real.label": "Real Chrome",
   "browser.real.hint": "Uses a real Chrome with the app's own profile: lets you sign in to sites that refuse embedded browsers, such as your Google account",
-  "browser.real.window": "Show the Chrome window"
+  "browser.real.window": "Show the Chrome window",
+  "browser.real.login": "Sign in to an account",
+  "browser.real.loginHint": "Opens this profile in a regular Chrome window so you can sign in (Google refuses sign-in in a controlled Chrome). Close the window when you are done.",
+  "browser.real.loggingIn": "Sign in in the Chrome window that opened. When you are done, close that window: the Portal comes back already signed in."
 }

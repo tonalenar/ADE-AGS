@@ -57,3 +57,6 @@ export function pagePoint(
     y: Math.round(((clientY - rect.top) * page.height) / Math.max(rect.height, 1)),
   };
 }
+
+/** Abre o perfil do app num Chrome comum (sem controle remoto) para entrar numa conta. */
+export const realBrowserLogin = (url: string) => invoke<void>("real_browser_login", { url });

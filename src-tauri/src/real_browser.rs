@@ -294,3 +294,59 @@ pub async fn real_browser_close(id: String) -> Result<(), String> {
     }
     Ok(())
 }
+
+/// Fecha o Chrome do perfil do app (o que o app abriu ou um que já estava aberto) e espera o perfil
+/// ficar livre: o mesmo perfil não abre em dois Chromes.
+async fn shutdown_browser(app: &AppHandle) -> Result<(), String> {
+    let profile = profile_dir(app)?;
+    let mut slot = browser().lock().await;
+    pages().lock().unwrap_or_else(|e| e.into_inner()).clear();
+    if let Some(port) = live_port(&profile).await {
+        let version: Result<Value, _> = async {
+            reqwest::Client::new().get(format!("http://127.0.0.1:{port}/json/version")).send().await?.json().await
+        }
+        .await;
+        if let Some(ws_url) = version.ok().and_then(|v| v["webSocketDebuggerUrl"].as_str().map(str::to_string)) {
+            if let Ok((mut ws, _)) = tokio_tungstenite::connect_async(ws_url).await {
+                let _ = ws.send(Message::Text(json!({ "id": 1, "method": "Browser.close" }).to_string().into())).await;
+            }
+        }
+    }
+    if let Some(mut b) = slot.take() {
+        if let Some(child) = b.child.as_mut() {
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while matches!(child.try_wait(), Ok(None)) && Instant::now() < deadline {
+                tokio::time::sleep(Duration::from_millis(150)).await;
+            }
+            let _ = child.kill();
+        }
+    }
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while live_port(&profile).await.is_some() && Instant::now() < deadline {
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    // O Chrome solta o perfil um instante depois de parar de responder.
+    tokio::time::sleep(Duration::from_millis(1200)).await;
+    Ok(())
+}
+
+/// Login numa conta (Google e outros que recusam navegador controlado): abre o perfil do app num
+/// Chrome COMUM, sem porta de depuração, numa janela normal. A pessoa entra na conta ali; quando fecha
+/// a janela, a sessão fica salva no perfil e o app avisa (`real-browser-login-done`) para o Portal
+/// reabrir. Nada é disfarçado: quem faz o login é um Chrome sem nenhuma alteração.
+#[tauri::command]
+pub async fn real_browser_login(app: AppHandle, url: String) -> Result<(), String> {
+    shutdown_browser(&app).await?;
+    let profile = profile_dir(&app)?;
+    let exe = chrome_path().ok_or("Não achei o Chrome nem o Edge instalados.")?;
+    let mut child = std::process::Command::new(exe)
+        .arg(format!("--user-data-dir={}", profile.display()))
+        .args(["--no-first-run", "--no-default-browser-check", "--new-window", &url])
+        .spawn()
+        .map_err(|e| format!("Não consegui abrir o Chrome: {e}"))?;
+    tokio::task::spawn_blocking(move || {
+        let _ = child.wait();
+        emit(&app, "real-browser-login-done", json!({}));
+    });
+    Ok(())
+}

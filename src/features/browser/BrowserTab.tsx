@@ -36,7 +36,8 @@ import { PageChannel, type LoadState } from "./pageChannel";
 import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
 import { RealBrowserView } from "./RealBrowserView";
-import { realBrowserHistory, realBrowserSend, realBrowserWindow } from "./realBrowser";
+import { realBrowserHistory, realBrowserLogin, realBrowserSend, realBrowserWindow } from "./realBrowser";
+import { listen } from "@tauri-apps/api/event";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
 import { ZoomControl } from "./ZoomControl";
@@ -123,6 +124,24 @@ export function BrowserTab({ view, active, device = null }: {
   const real = !!view.realChrome;
   const realRef = useRef(real);
   realRef.current = real;
+  // Login numa conta: o perfil está aberto num Chrome comum, numa janela própria. Ao fechá-la, o
+  // Portal volta (`realKey` remonta a vista, que reabre o perfil já com a sessão).
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [realKey, setRealKey] = useState(0);
+  useEffect(() => {
+    const off = listen("real-browser-login-done", () => {
+      setLoggingIn(false);
+      setRealKey((k) => k + 1);
+    });
+    return () => { off.then((f) => f()); };
+  }, []);
+  const startLogin = () => {
+    setLoggingIn(true);
+    realBrowserLogin(normalizeUrl(address) ?? "https://accounts.google.com/").catch((e) => {
+      setLoggingIn(false);
+      setError(String(e));
+    });
+  };
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [picks, setPicks] = useState<PickedElement[]>([]);
@@ -799,6 +818,11 @@ export function BrowserTab({ view, active, device = null }: {
         {t("browser.real.label")}
       </ActionButton>
       {real && (
+        <ActionButton hint={t("browser.real.loginHint")} active={loggingIn} disabled={loggingIn} onClick={startLogin}>
+          {t("browser.real.login")}
+        </ActionButton>
+      )}
+      {real && (
         <ToolButton label={t("browser.real.window")} onClick={() => realBrowserWindow(view.id, true).catch((e) => setError(String(e)))}>
           <ExternalIcon className="w-4 h-4 stroke-2" />
         </ToolButton>
@@ -907,8 +931,12 @@ export function BrowserTab({ view, active, device = null }: {
       <div className={`flex flex-1 min-h-0 ${compact ? "flex-col" : ""}`}>
         <div ref={column} data-browser-column className="relative flex flex-col flex-1 min-w-0 min-h-0">
           {shownError}
-          {real ? (
-            <RealBrowserView viewId={view.id} url={view.url} onError={setError}
+          {real && loggingIn ? (
+            <div className="flex flex-1 items-center justify-center p-8 text-center text-[12.5px] text-gray-600 dark:text-white/60">
+              {t("browser.real.loggingIn")}
+            </div>
+          ) : real ? (
+            <RealBrowserView key={realKey} viewId={view.id} url={view.url} onError={setError}
               onUrl={(u) => {
                 setAddress(u);
                 try { updateView(view.id, { url: u, title: new URL(u).host || u }); } catch { /* chrome://, about: */ }

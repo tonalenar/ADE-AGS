@@ -3206,5 +3206,8 @@
   "missions.metrics.contextSub": "após compactação",
   "browser.real.label": "Chrome real",
   "browser.real.hint": "Usa um Chrome de verdade, com perfil próprio do app: dá para entrar em sites que recusam navegador embutido, como a conta Google",
-  "browser.real.window": "Mostrar a janela do Chrome"
+  "browser.real.window": "Mostrar a janela do Chrome",
+  "browser.real.login": "Entrar numa conta",
+  "browser.real.loginHint": "Abre este perfil num Chrome comum, numa janela própria, para entrar na conta (o Google recusa o login num Chrome controlado). Feche a janela quando terminar.",
+  "browser.real.loggingIn": "Faça o login na janela do Chrome que abriu. Quando terminar, feche essa janela: o Portal volta já com a conta."
 }

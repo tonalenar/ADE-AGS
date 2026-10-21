@@ -86,6 +86,7 @@ pub fn run() {
             crate::real_browser::real_browser_history,
             crate::real_browser::real_browser_window,
             crate::real_browser::real_browser_close,
+            crate::real_browser::real_browser_login,
             crate::design::design_create,
             crate::design::design_delete,
             crate::design::design_archive,
