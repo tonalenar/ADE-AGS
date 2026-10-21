@@ -35,7 +35,7 @@ export function announceToOrchestrators(key: string, ids: string[]): void {
 export function initOrchestratorAnnouncements(): () => void {
   let timer: ReturnType<typeof setTimeout> | undefined;
   const check = () => {
-    if (!useTabsStore.getState().hydrated) return;
+    if (!useTabsStore.getState().hydrated || !useCanvasStore.getState().loaded) return;
     for (const [key, board] of Object.entries(useCanvasStore.getState().boards)) {
       if (key.includes("#m:") || board.orchestrators.length === 0) continue;
       announceToOrchestrators(key, board.orchestrators);

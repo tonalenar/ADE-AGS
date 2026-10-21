@@ -36,6 +36,9 @@ export function ConversationList({ cwd, groupCwds, projectKey: rawKey, workspace
   const tabs = useTabsStore((s) => s.tabs);
   const hydrated = useTabsStore((s) => s.hydrated);
   const boards = useCanvasStore((s) => s.boards);
+  // Só depois de o canvas salvo carregar: antes disso toda aba parece solta, e a adoção a tirava da conversa dela
+  // (perdendo a coroa e as cordas, que ainda estavam no disco).
+  const canvasLoaded = useCanvasStore((s) => s.loaded);
   const missionOf = useMissionIndex();
   const collapsed = useConversationUi((s) => !!s.projects[projectKey]);
   const toggleProject = useConversationUi((s) => s.toggleProject);
@@ -45,11 +48,11 @@ export function ConversationList({ cwd, groupCwds, projectKey: rawKey, workspace
   // As abas de agente deste projeto que ainda não estão numa conversa (nem numa missão).
   const folders = useMemo(() => new Set(groupCwds.map(comparablePath)), [groupCwds]);
   const loose = useMemo(
-    () => (hydrated ? tabs : [])
+    () => (hydrated && canvasLoaded ? tabs : [])
       .filter((tab) => tab.agentId !== SHELL_AGENT_ID && !missionOf[tab.id] && folders.has(comparablePath(tab.cwd)))
       .filter((tab) => !boardKeyOfTab(tab, boards).includes("#c:"))
       .map((tab) => tab.id),
-    [hydrated, tabs, missionOf, folders, boards],
+    [hydrated, canvasLoaded, tabs, missionOf, folders, boards],
   );
 
   // Elas entram na conversa ativa (criada se não houver). Uma adoção por vez: a próxima vê o estado já mudado.

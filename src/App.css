@@ -801,3 +801,19 @@ button[class*="hover:bg-[var(--nui-danger-hover"]:not(:disabled):hover { backgro
 .react-flow__resize-control.line.ade-rz-line.top, .react-flow__resize-control.line.ade-rz-line.bottom { height: 10px; }
 .react-flow__resize-control.line.ade-rz-line.left:hover, .react-flow__resize-control.line.ade-rz-line.right:hover { background: linear-gradient(90deg, transparent 4px, color-mix(in oklab, var(--color-accent-500) 70%, transparent) 4px, color-mix(in oklab, var(--color-accent-500) 70%, transparent) 6px, transparent 6px); }
 .react-flow__resize-control.line.ade-rz-line.top:hover, .react-flow__resize-control.line.ade-rz-line.bottom:hover { background: linear-gradient(180deg, transparent 4px, color-mix(in oklab, var(--color-accent-500) 70%, transparent) 4px, color-mix(in oklab, var(--color-accent-500) 70%, transparent) 6px, transparent 6px); }
+
+/* Celular solto (portal do canvas): o aparelho e a janela trocam com um crescer suave; a barra desce no lugar. */
+@keyframes ade-device-in {
+  from { opacity: 0; transform: scale(0.94) translateY(10px); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes ade-device-bar-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+.ade-device-in { animation: ade-device-in 0.34s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.ade-window-in { animation: ade-device-in 0.3s cubic-bezier(0.2, 0.8, 0.2, 1) both; }
+.ade-device-bar-in { animation: ade-device-bar-in 0.28s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .ade-device-in, .ade-window-in, .ade-device-bar-in { animation: none; }
+}

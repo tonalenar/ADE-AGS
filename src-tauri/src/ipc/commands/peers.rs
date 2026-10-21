@@ -21,7 +21,7 @@ use std::collections::HashMap;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-use super::tabs::{pty_id_for_tab, submit_prompt, tab_create, tab_list, wait_for_pty, wait_until_quiet, wait_until_ready};
+use super::tabs::{pty_id_for_tab, submit_prompt, submit_prompt_seen, tab_create, tab_list, wait_for_pty, wait_until_quiet, wait_until_ready};
 use crate::ipc::bridge::{ask_frontend, unwrap_frontend_result};
 use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_opt};
 
@@ -257,9 +257,14 @@ pub(crate) fn arrived(before: &str, after: &str, snippet: &str) -> bool {
 /// legítimo de uma entrega que não chegou era recusado como repetido por 10 min.
 fn submit_confirmed(pty: u32, target: &str, message: &str, sent_as: &str) -> Result<bool, String> {
     let before = tail_text(pty);
-    if let Err(error) = submit_prompt(pty, message) {
-        forget_sent(target, sent_as);
-        return Err(error);
+    match submit_prompt_seen(pty, message) {
+        Err(error) => {
+            forget_sent(target, sent_as);
+            return Err(error);
+        }
+        // O destino começou a trabalhar depois do Enter: chegou.
+        Ok(true) => return Ok(true),
+        Ok(false) => {}
     }
     let Some(snippet) = snippet_of(message) else { return Ok(true) };
     let deadline = std::time::Instant::now() + Duration::from_millis(1500);
@@ -1047,6 +1052,29 @@ fn emit_peer_message(app: &AppHandle, kind: &str, from_tab_id: &str, to_tab_id: 
     );
 }
 
+/// O texto de uma resposta de `peer ask` para o chat do time: as linhas com conteúdo, as últimas que cabem. Pura.
+pub(crate) fn reply_text(lines: Option<&Value>) -> Option<String> {
+    let lines: Vec<&str> = lines?.as_array()?.iter().filter_map(Value::as_str).map(str::trim_end).filter(|l| !l.trim().is_empty()).collect();
+    if lines.is_empty() {
+        return None;
+    }
+    let tail = &lines[lines.len().saturating_sub(40)..];
+    Some(tail.join("\n"))
+}
+
+/// Grava a resposta de quem foi perguntado no chat do time e avisa a tela. Não é delegação: não entra nos tempos.
+fn log_reply(app: &AppHandle, from_tab_id: &str, to_tab_id: &str, text: &str) {
+    let boards = crate::canvas::load_boards();
+    let tabs = open_tabs(app).unwrap_or_default();
+    if let Ok(db) = super::shared::db(app) {
+        if let Ok(conn) = db.inner().lock() {
+            let name_of = |id: &str| tabs.iter().find(|t| t.id == id).map(|t| t.name.clone()).unwrap_or_else(|| id.to_string());
+            let _ = crate::missions::messages::record(&conn, &boards, "tell", (from_tab_id, &name_of(from_tab_id)), (to_tab_id, &name_of(to_tab_id)), text, crate::util::now_ts_ms());
+        }
+    }
+    let _ = app.emit("cc-peer-message", json!({ "kind": "tell", "fromTabId": from_tab_id, "toTabId": to_tab_id, "text": text, "atMs": crate::util::now_ts_ms() }));
+}
+
 /// Cuánto silencio marca el fin del turno de un agente. Las TUIs animan un spinner
 /// mientras trabajan, así que unos segundos sin una sola escritura es que terminaron.
 const TURN_QUIET: Duration = Duration::from_secs(5);
@@ -1125,6 +1153,12 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
     );
 
     let reply = screen(app, target, mark, 200)?;
+    // A resposta também entra no chat do time: antes só a pergunta aparecia, e a conversa ficava pela metade.
+    if finished {
+        if let Some(text) = reply_text(reply.get("lines")) {
+            log_reply(app, &target.id, from_id, &text);
+        }
+    }
     Ok(json!({
         "peer": describe(target),
         // `false` = se agotó el tiempo: lo que hay es parcial y el otro sigue trabajando.

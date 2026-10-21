@@ -84,6 +84,20 @@ pub fn record_vigia(conn: &Connection, boards: &Boards, lead: (&str, &str), text
     record_inner(conn, boards, "tell", (lead.0, "Vigia"), lead, text, at_ms, true)
 }
 
+/// Em que chat a mensagem entra. Na mesma missão ou conversa, nela; uma missão só fala dentro dela. Numa conversa
+/// (`c:`), o que um agente diz a outro de outra conversa (ou sem conversa) entra no chat de quem fala, ou no de
+/// quem recebe se quem fala não tem time: antes era descartada calada, e o chat ficava vazio com o orquestrador
+/// e o subagente em canvases diferentes. Pura.
+pub(crate) fn shared_scope(from: Option<String>, to: Option<String>) -> Option<String> {
+    let open = |scope: &Option<String>| scope.as_deref().map_or(true, |s| s.starts_with("c:"));
+    match (from, to) {
+        (Some(a), Some(b)) if a == b => Some(a),
+        (Some(a), to) if a.starts_with("c:") && open(&to) => Some(a),
+        (None, Some(b)) if b.starts_with("c:") => Some(b),
+        _ => None,
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 fn record_inner(
     conn: &Connection, boards: &Boards, kind: &str, from: (&str, &str), to: (&str, &str),
@@ -93,10 +107,9 @@ fn record_inner(
         return Ok(false);
     }
     // O chat da equipe vale para uma missão e também para uma conversa de projeto (`c:<id>`).
-    let Some(mission) = team_scope_of_tab(boards, from.0) else { return Ok(false) };
-    if team_scope_of_tab(boards, to.0).as_deref() != Some(mission.as_str()) {
+    let Some(mission) = shared_scope(team_scope_of_tab(boards, from.0), team_scope_of_tab(boards, to.0)) else {
         return Ok(false);
-    }
+    };
     migrate(conn).map_err(|e| e.to_string())?;
     conn.execute(
         "INSERT INTO mission_messages (mission_id, at_ms, kind, from_tab_id, from_name, to_tab_id, to_name, text) VALUES (?1,?2,?3,?4,?5,?6,?7,?8)",
@@ -270,5 +283,29 @@ mod tests {
         assert_eq!((all[0].from_tab_id.as_str(), all[0].to_tab_id.as_str()), ("lead", "lead"));
         assert_eq!(all[0].text, "**Vigia** — aviso");
         assert!(list(&conn, "m2", 0, 100).unwrap().is_empty());
+    }
+}
+
+#[cfg(test)]
+mod scope_tests {
+    use super::shared_scope;
+
+    fn s(v: &str) -> Option<String> {
+        Some(v.to_string())
+    }
+
+    #[test]
+    fn conversa_aceita_quem_esta_fora_e_missao_nao() {
+        assert_eq!(shared_scope(s("m:1"), s("m:1")), s("m:1"));
+        assert_eq!(shared_scope(s("c:a"), s("c:a")), s("c:a"));
+        // Orquestrador numa conversa, subagente noutra (ou sem): entra no chat de quem fala.
+        assert_eq!(shared_scope(s("c:a"), s("c:b")), s("c:a"));
+        assert_eq!(shared_scope(s("c:a"), None), s("c:a"));
+        assert_eq!(shared_scope(None, s("c:b")), s("c:b"));
+        // Missão só dentro dela.
+        assert_eq!(shared_scope(s("m:1"), s("m:2")), None);
+        assert_eq!(shared_scope(s("m:1"), s("c:a")), None);
+        assert_eq!(shared_scope(s("c:a"), s("m:1")), None);
+        assert_eq!(shared_scope(None, None), None);
     }
 }

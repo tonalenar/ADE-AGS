@@ -234,6 +234,25 @@ const NOISE_TAGS: &[&str] = &[
 /// Cuántos mensajes del usuario se miran, como mucho, buscando uno que sirva de título.
 const TITLE_SCAN_LIMIT: usize = 30;
 
+/// Um aviso que o próprio ADE colou na conversa (`[ADE AGS] NAVEGADOR: …`, `[ADE AGS] Você é um subagente…`, o
+/// `[AGS] …` das missões). Chega como mensagem do usuário, mas não é o assunto da conversa: abrindo um agente, era
+/// a primeira mensagem e virava o título.
+pub(super) fn is_ade_notice(text: &str) -> bool {
+    let t = text.trim_start();
+    t.starts_with("[ADE AGS]") || t.starts_with("[AGS]")
+}
+
+/// Um título que a TUI gerou SOZINHA a partir de um aviso do ADE (o Claude e o OpenCode resumem a primeira
+/// mensagem: "Navegador ags portal no canvas"). Só frases que saem dos avisos, não o nome do app — quem trabalha
+/// no próprio ADE AGS escreve "ADE AGS" no título de verdade.
+pub(super) fn echoes_ade_notice(title: &str) -> bool {
+    let t = title.to_lowercase();
+    is_ade_notice(title)
+        || ["ags portal", "navegador ags", "subagente deste time", "orquestrador deste canvas", "[ade ags]"]
+            .iter()
+            .any(|marker| t.contains(marker))
+}
+
 /// `true` si el mensaje es un envoltorio del sistema y no algo que escribió la persona.
 /// `<pasted_content` también cuenta: `clean_message` lo desenvuelve antes de decidir.
 pub(super) fn is_noise_message(text: &str) -> bool {
@@ -242,6 +261,7 @@ pub(super) fn is_noise_message(text: &str) -> bool {
         || t.starts_with("Caveat:")
         || t.starts_with("[Request interrupted")
         || t.starts_with("<pasted_content")
+        || is_ade_notice(t)
     {
         return true;
     }
@@ -280,7 +300,7 @@ pub(super) fn clean_message(text: &str) -> Option<String> {
 /// una sesión ya guardada merece recalcularse.
 pub fn is_weak_title(title: &str, agent_label: &str) -> bool {
     let t = title.trim();
-    if t.is_empty() || t.starts_with('<') || is_noise_message(t) {
+    if t.is_empty() || t.starts_with('<') || is_noise_message(t) || echoes_ade_notice(t) {
         return true;
     }
     if t == agent_label.trim() {
@@ -422,7 +442,8 @@ fn claude_scan_from(path: &Path, mut scan: ClaudeScan) -> Option<ClaudeScan> {
         scan.offset += read as u64;
         let Ok(v) = serde_json::from_slice::<Value>(&line) else { continue };
         if v.get("type").and_then(|t| t.as_str()) == Some("summary") {
-            if let Some(s) = v.get("summary").and_then(|s| s.as_str()) {
+            // Um resumo feito a partir de um aviso do ADE não serve: segue procurando (outro resumo ou a 1ª mensagem).
+            if let Some(s) = v.get("summary").and_then(|s| s.as_str()).filter(|s| !echoes_ade_notice(s)) {
                 scan.summary = Some(s.to_string());
                 break;
             }
@@ -629,7 +650,8 @@ pub(super) fn gemini_title(path: &Path, fallback: &str) -> SessionTitleResult {
     for line in content.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
         let summary = v.get("summary").and_then(|s| s.as_str())
-            .or_else(|| v.get("$set").and_then(|s| s.get("summary")).and_then(|s| s.as_str()));
+            .or_else(|| v.get("$set").and_then(|s| s.get("summary")).and_then(|s| s.as_str()))
+            .filter(|s| !echoes_ade_notice(s));
         if let Some(s) = summary {
             return SessionTitleResult { title: truncate(s, 60), source: "summary".into() };
         }
@@ -1075,7 +1097,7 @@ pub(super) fn kimi_title(dir: &Path, fallback: &str) -> SessionTitleResult {
     let Some(state) = kimi_state(dir) else { return fallback_result(fallback) };
 
     if let Some(s) = state.get("title").and_then(|v| v.as_str()) {
-        if !s.trim().is_empty() {
+        if !s.trim().is_empty() && !echoes_ade_notice(s) {
             return SessionTitleResult { title: truncate(s, 60), source: "summary".into() };
         }
     }
@@ -1190,7 +1212,7 @@ pub(super) fn hermes_title(home: &Path, session_id: &str, fallback: &str) -> Ses
             .ok()
             .flatten()
     });
-    if let Some(title) = named.map(|t| t.trim().to_string()).filter(|t| !t.is_empty()) {
+    if let Some(title) = named.map(|t| t.trim().to_string()).filter(|t| !t.is_empty() && !echoes_ade_notice(t)) {
         return SessionTitleResult { title: truncate(&title, 80), source: "summary".to_string() };
     }
     hermes_user_texts(home, session_id)
@@ -1532,7 +1554,7 @@ pub(crate) fn get_session_title_sync(
                 None => opencode_session(&cwd, None, profile),
             };
             match found {
-                Some(s) if !s.title.trim().is_empty() && !opencode_is_placeholder_title(&s.title) => {
+                Some(s) if !s.title.trim().is_empty() && !opencode_is_placeholder_title(&s.title) && !echoes_ade_notice(&s.title) => {
                     SessionTitleResult { title: truncate(&s.title, 60), source: "summary".into() }
                 }
                 _ => fallback_result(&fallback),

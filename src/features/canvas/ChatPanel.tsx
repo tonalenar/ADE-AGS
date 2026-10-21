@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { AIChatCard } from "./AIChatCard";
 import { agentTile } from "@/features/agents/agentTile";
 import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
@@ -81,6 +82,8 @@ const TEAM = "__team__";
 
 export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewAgent: () => void }) {
   const { t } = useTranslation();
+  // O texto do chat segue o zoom dos terminais (Ctrl+= / Ctrl+- / Ctrl+0): um só ajuste para ler melhor.
+  const chatZoom = useTerminalPrefsStore((s) => s.zoom);
   const key = useActiveBoardKey();
   const allTabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
@@ -451,8 +454,8 @@ ${text}` : text)); setPicking(false); }} />}
       </div>}
     >
       {teamView ? (teamMessages.length + teamApprovals.length + terminalPrompts.length + notes.length > 0
-        ? <TeamFeed items={teamFeed.items} colors={Object.fromEntries(agents.map((a) => [a.id, agentTile(a.agentId)]))} /> : undefined)
-        : current && messages.length > 0 ? <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.chat.title")}>
+        ? <div style={{ zoom: chatZoom / 100 }}><TeamFeed items={teamFeed.items} colors={Object.fromEntries(agents.map((a) => [a.id, agentTile(a.agentId)]))} /></div> : undefined)
+        : current && messages.length > 0 ? <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.chat.title")} style={{ zoom: chatZoom / 100 }}>
               {messages.map((m) => (
                 <div key={m.id} className={`flex flex-col ${m.kind === "user" ? "items-end" : "items-stretch"}`}>
                   {m.kind !== "user" && current && (

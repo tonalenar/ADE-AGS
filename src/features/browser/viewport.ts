@@ -41,6 +41,11 @@ export const VIEWPORT_PRESETS: ViewportPreset[] = [
  */
 export const FILL_VIEWPORT: Viewport = { width: 1920, height: 1080 };
 
+/** Um tamanho de celular (o lado menor até 480 px, em pé ou deitado): o quadro do navegador vira um aparelho. Pura. */
+export function isPhoneViewport(viewport: Viewport | null | undefined): boolean {
+  return !!viewport && Math.min(viewport.width, viewport.height) <= 480;
+}
+
 export function isFillViewport(viewport: Viewport | null | undefined): boolean {
   return !!viewport && viewport.width === FILL_VIEWPORT.width && viewport.height === FILL_VIEWPORT.height;
 }

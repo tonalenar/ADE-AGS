@@ -153,3 +153,18 @@ describe("shortcutForPath", () => {
     expect(shortcutForPath("/workspaces")).toBeNull();
   });
 });
+
+describe("zoom do texto", () => {
+  const chord = (key: string, shift = false) => ({ key, ctrlKey: true, shiftKey: shift, altKey: false, metaKey: false });
+  it("Ctrl+= e Ctrl++ aumentam, Ctrl+- diminui, Ctrl+0 volta", () => {
+    expect(matchShortcut(chord("="))?.action).toEqual({ kind: "textZoom", delta: 1 });
+    expect(matchShortcut(chord("+", true))?.action).toEqual({ kind: "textZoom", delta: 1 });
+    expect(matchShortcut(chord("+"))?.action).toEqual({ kind: "textZoom", delta: 1 });
+    expect(matchShortcut(chord("-"))?.action).toEqual({ kind: "textZoom", delta: -1 });
+    expect(matchShortcut(chord("0"))?.action).toEqual({ kind: "textZoom", delta: 0 });
+  });
+
+  it("o desfazer do readline (Ctrl+_ = Ctrl+Shift+-) continua chegando ao terminal", () => {
+    expect(matchShortcut(chord("_", true))).toBeNull();
+  });
+});

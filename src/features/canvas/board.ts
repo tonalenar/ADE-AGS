@@ -46,6 +46,8 @@ export interface CanvasPortal {
   avd?: string;
   /** A resolução com que a página é renderizada (a que ela "vê"), independente do tamanho do nó: o nó só a mostra reduzida. */
   viewport?: { width: number; height: number };
+  /** "Celular solto": o navegador sem a janela, só o aparelho deste modelo (ver `browser/devices.ts`). Ausente = a janela. */
+  device?: string;
 }
 
 export const PORTAL_PREFIX = "portal-";

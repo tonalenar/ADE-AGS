@@ -28,7 +28,7 @@ describe("aviso automático ao orquestrador", () => {
     send.mockReset();
     forgetOrchestrator("orq");
     useTabsStore.setState({ tabs: [tab("orq", "Orquestrador"), tab("sub", "OpenCode")] as never, hydrated: true });
-    useCanvasStore.setState({ boards: {} });
+    useCanvasStore.setState({ boards: {}, loaded: true });
     stop = initOrchestratorAnnouncements();
   });
   afterEach(() => {
@@ -51,6 +51,12 @@ describe("aviso automático ao orquestrador", () => {
 
   it("missões ficam de fora: o líder recebe o próprio briefing", () => {
     useCanvasStore.setState({ boards: { "main|/p#m:abc": team() } });
+    vi.advanceTimersByTime(700);
+    expect(send).not.toHaveBeenCalled();
+  });
+
+  it("antes de o canvas salvo carregar, não avisa ninguém (o time ainda está no disco)", () => {
+    useCanvasStore.setState({ loaded: false, boards: { "main|/p#c:1": team() } });
     vi.advanceTimersByTime(700);
     expect(send).not.toHaveBeenCalled();
   });

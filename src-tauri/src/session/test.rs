@@ -1056,3 +1056,33 @@ fn sonda_real_hermes_state_db() {
         println!("título: {} ({})", t.title, t.source);
     }
 }
+
+/// Os avisos que o ADE cola ao abrir um agente (`[ADE AGS] NAVEGADOR: …`) não viram o nome da conversa.
+#[test]
+fn claude_title_pula_os_avisos_do_ade_e_o_resumo_feito_deles() {
+    let d = TempDir::new();
+    let path = d.write(
+        "s.jsonl",
+        &claude_user_lines(&[
+            "[ADE AGS] NAVEGADOR: REUTILIZE o que você já tem — `ags portals` lista os seus",
+            "[ADE AGS] Você é um subagente deste time. O orquestrador vai definir o seu papel",
+            "[AGS] Briefing da missão",
+            "Refatorar o fluxo de login do portal",
+            "(a última linha sem quebra fica para a próxima leitura)",
+        ]),
+    );
+    let result = claude_title(&path, "sin título");
+    assert_eq!(result.title, "Refatorar o fluxo de login do portal");
+    assert_eq!(result.source, "first_message");
+}
+
+#[test]
+fn titulo_gerado_de_um_aviso_do_ade_e_fraco() {
+    assert!(echoes_ade_notice("Navegador ags portal no canvas"));
+    assert!(echoes_ade_notice("[ADE AGS] NAVEGADOR: REUT…"));
+    assert!(is_weak_title("Navegador ags portal no canvas", "OpenCode"));
+    // Quem trabalha no próprio ADE AGS pode ter o nome do app no título de verdade.
+    assert!(!echoes_ade_notice("Corrigir a janela de abertura do ADE AGS"));
+    assert!(is_noise_message("[ADE AGS] Você é o orquestrador deste canvas"));
+    assert!(!is_noise_message("Revisar o portal do cliente"));
+}

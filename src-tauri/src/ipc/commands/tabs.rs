@@ -328,6 +328,12 @@ pub(super) fn wait_until_ready(pty_id: u32) -> bool {
 /// entonces apretar Enter. El silencio entre medio es lo que garantiza que llegue en una
 /// lectura distinta, incluso si la TUI tarda en repintar.
 pub(super) fn submit_prompt(pty_id: u32, text: &str) -> Result<(), String> {
+    submit_prompt_seen(pty_id, text).map(|_| ())
+}
+
+/// O mesmo que `submit_prompt`; `true` se a TUI mostrou que começou a trabalhar depois do Enter (a prova
+/// mais firme de que a mensagem foi enviada).
+pub(super) fn submit_prompt_seen(pty_id: u32, text: &str) -> Result<bool, String> {
     const ECHO_QUIET: std::time::Duration = std::time::Duration::from_millis(250);
     const ECHO_MAX: std::time::Duration = std::time::Duration::from_secs(5);
 
@@ -350,24 +356,52 @@ pub(super) fn submit_prompt(pty_id: u32, text: &str) -> Result<(), String> {
     crate::terminal::write_to_pty(pty_id, "\r")?;
     // Um pegado grande vira "[Pasted Content 3904 chars]" e pode engolir o Enter: a mensagem
     // fica escrita e ninguém a recebe. O Hermes e o OpenCode não usam o marcador: o texto fica
-    // inteiro na caixa (e, ainda "starting agent…", eles engolem o Enter). Se quase nada saiu
-    // depois do Enter e o marcador ou o fim da mensagem segue na tela, manda outro — no máximo
-    // quatro vezes (Enter numa caixa vazia não faz nada).
+    // inteiro na caixa (e, ainda "starting agent…", eles engolem o Enter). Enquanto a TUI não mostra
+    // que está trabalhando ("esc to interrupt") e o marcador ou a mensagem segue na tela, manda outro
+    // — no máximo quatro vezes (Enter numa caixa vazia não faz nada).
+    //
+    // "Saiu muita coisa depois do Enter" só vale se for texto NOVO e variado: o OpenCode anima o título
+    // sem parar (o mesmo punhado de palavras, quadro a quadro), e essa saída dava o Enter engolido por
+    // enviado — a mensagem do orquestrador ficava na caixa até a pessoa apertar Enter. A animação também
+    // empurra a caixa para fora do fim curto da saída, por isso a mensagem é procurada num trecho maior.
     for _ in 0..4 {
         let before = crate::terminal::output_total(pty_id).unwrap_or(0);
         wait_until_quiet(pty_id, std::time::Duration::from_millis(400), std::time::Duration::from_secs(4), false);
-        let wrote = crate::terminal::output_total(pty_id).unwrap_or(0).saturating_sub(before);
-        if wrote > 400 || !paste_still_pending(pty_id, text) {
+        let wrote = crate::terminal::output_total(pty_id).unwrap_or(0).saturating_sub(before) as usize;
+        if tui_working(pty_id) {
+            return Ok(true);
+        }
+        let fresh = crate::terminal::tail_of(pty_id, wrote.min(65_536))
+            .is_some_and(|raw| varied_text(&crate::orchestrator::digest::strip_ansi(&raw)));
+        if fresh || !paste_still_pending(pty_id, text) {
             break;
         }
         crate::terminal::write_to_pty(pty_id, "\r")?;
     }
-    Ok(())
+    Ok(tui_working(pty_id))
+}
+
+/// O fim da tela mostra que o agente está trabalhando agora?
+fn tui_working(pty_id: u32) -> bool {
+    crate::terminal::tail_of(pty_id, 4096)
+        .is_some_and(|raw| working_in(&crate::orchestrator::digest::strip_ansi(&raw)))
+}
+
+/// Pura: o trecho tem texto de verdade (mais de 12 palavras diferentes), e não só uma animação que
+/// repinta as mesmas poucas palavras.
+pub(super) fn varied_text(chunk: &str) -> bool {
+    chunk.split_whitespace().collect::<std::collections::HashSet<_>>().len() > 12
+}
+
+/// Pura: o rodapé de trabalho das TUIs — "esc to interrupt" (Claude, Codex), "esc interrupt" (OpenCode).
+pub(super) fn working_in(screen: &str) -> bool {
+    let lower = screen.to_lowercase();
+    lower.contains("esc to interrupt") || lower.contains("esc interrupt")
 }
 
 /// O fim da saída do PTY ainda mostra o colado na caixa de entrada (o marcador, ou o texto inteiro)?
 fn paste_still_pending(pty_id: u32, message: &str) -> bool {
-    let Some(text) = crate::terminal::tail_of(pty_id, 4096) else { return false };
+    let Some(text) = crate::terminal::tail_of(pty_id, 32_768) else { return false };
     let screen = crate::orchestrator::digest::strip_ansi(&text);
     pending_paste_in(&screen) || typed_text_in(&screen, message)
 }
@@ -422,7 +456,23 @@ pub(super) fn pending_paste_in(screen: &str) -> bool {
 
 #[cfg(test)]
 mod paste_tests {
-    use super::{pending_paste_in, text_shown_in, typed_text_in};
+    use super::{pending_paste_in, text_shown_in, typed_text_in, varied_text, working_in};
+
+    #[test]
+    fn animacao_do_titulo_nao_conta_como_saida_nova() {
+        let frames = "   Teste de resposta AZUL       ".repeat(40);
+        assert!(!varied_text(&frames));
+        let listing: String = (1..=30).map(|n| format!("linha {n} ....
+")).collect();
+        assert!(varied_text(&listing));
+    }
+
+    #[test]
+    fn rodape_de_trabalho_conta_como_enviado() {
+        assert!(working_in("■■⬝⬝⬝⬝⬝⬝ esc interrupt"));
+        assert!(working_in("✻ Thinking… (3s · esc to interrupt)"));
+        assert!(!working_in("Build · Claude Haiku 5.5 · 2.3s   ctrl+p commands"));
+    }
 
     #[test]
     fn texto_descartado_pela_tui_nao_conta_como_escrito() {

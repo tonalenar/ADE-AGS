@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { emptyBoard, moveTerminals, type Board } from "@/features/canvas/board";
-import { conversationTitle, titleSources, type ConversationRow, type TerminalSnapshot } from "../conversationModel";
+import { conversationTitle, isAdeNoticeTitle, titleSources, type ConversationRow, type TerminalSnapshot } from "../conversationModel";
 import { sameProject } from "../conversationsStore";
 
 /** A conversa é a área de trabalho: o título vem do orquestrador e os terminais mudam de canvas inteiros. */
@@ -75,5 +75,15 @@ describe("a mesma área, venha a chave como vier", () => {
   it("a pasta com \\ e a raiz que o git devolve com / são o mesmo projeto", () => {
     expect(sameProject("C:\\Users\\eu\\proj", "c:/Users/eu/proj")).toBe(true);
     expect(sameProject("C:\\Users\\eu\\proj", "C:/Users/eu/outro")).toBe(false);
+  });
+});
+
+describe("o nome da conversa não é um aviso do ADE", () => {
+  const base = { agentLabel: "", command: "", titleIsCustom: false, sessionId: null, accountId: null, prelaunch: [], skillIds: [], box: null, role: null, orchestrator: true };
+  it("um título gravado do aviso cede para o do orquestrador, e sem ele para \"Nova conversa\"", () => {
+    const row = { title: "[ADE AGS] NAVEGADOR: REUTILIZE o que você já tem", customTitle: null } as unknown as ConversationRow;
+    expect(conversationTitle(row, [{ ...base, agentId: "claude-code", title: "Ajustar o faturamento" }])).toBe("Ajustar o faturamento");
+    expect(conversationTitle(row, [{ ...base, agentId: "opencode", title: "Navegador ags portal no canvas" }])).toBe("Nova conversa");
+    expect(isAdeNoticeTitle("Corrigir a abertura do ADE AGS")).toBe(false);
   });
 });

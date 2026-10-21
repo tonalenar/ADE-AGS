@@ -9,6 +9,7 @@ import { fontsReady } from "@/features/terminal/fontsReady";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { renderingInfo } from "@/shared/ipc/settings";
 import { reportBootStep } from "@/app/splash";
+import { installScaledMouseFix } from "@/features/terminal/scaledMouse";
 
 // O bundle chegou: a abertura passa a "carregando os workspaces".
 reportBootStep(1);
@@ -44,6 +45,9 @@ document.addEventListener("contextmenu", (e) => {
 const rendering = renderingInfo()
   .then((info) => useTerminalPrefsStore.getState().setCompositing(info.activeNow))
   .catch(() => {});
+
+// O mouse nas terminais do canvas com zoom: a seleção cai onde o ponteiro está.
+installScaledMouseFix();
 
 const appReady = whenHomeCanPaint({ loadAgentRegistry, applyRendering: () => rendering, fontsReady });
 

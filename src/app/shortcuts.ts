@@ -41,7 +41,9 @@ export type ShortcutAction =
   /** A paleta de comandos: um modal, como Configurações. */
   | { kind: "openPalette" }
   /** `delta` en el ORDEN de la barra de tabs: +1 la siguiente, -1 la anterior. */
-  | { kind: "cycleTab"; delta: 1 | -1 };
+  | { kind: "cycleTab"; delta: 1 | -1 }
+  /** O tamanho do texto dos terminais e do chat: +1 um passo maior, -1 menor, 0 de volta a 100 %. */
+  | { kind: "textZoom"; delta: 1 | -1 | 0 };
 
 export interface Shortcut {
   /** `KeyboardEvent.key` en minúscula. */
@@ -86,6 +88,13 @@ export const SHORTCUTS: Shortcut[] = [
     display: "Ctrl+Shift+Tab",
     labelKey: "shortcuts.prevTab",
   },
+  // O zoom do texto: os acordes que todo app usa. Ctrl+- é o "desfazer" do readline, mas ele continua no Ctrl+_
+  // (Ctrl+Shift+-), que é como se digita; Ctrl+= e Ctrl+0 não têm uso nas TUIs.
+  { key: "=", action: { kind: "textZoom", delta: 1 }, display: "Ctrl+=", labelKey: "shortcuts.zoomIn" },
+  { key: "+", shift: true, action: { kind: "textZoom", delta: 1 }, display: "Ctrl++", labelKey: "shortcuts.zoomIn" },
+  { key: "+", action: { kind: "textZoom", delta: 1 }, display: "Ctrl++", labelKey: "shortcuts.zoomIn" },
+  { key: "-", action: { kind: "textZoom", delta: -1 }, display: "Ctrl+-", labelKey: "shortcuts.zoomOut" },
+  { key: "0", action: { kind: "textZoom", delta: 0 }, display: "Ctrl+0", labelKey: "shortcuts.zoomReset" },
 ];
 
 /** Lo que hace falta de un `KeyboardEvent` — estructural para poder testear sin DOM. */

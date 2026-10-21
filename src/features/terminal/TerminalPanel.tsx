@@ -87,6 +87,8 @@ export function TerminalPanel() {
               pointerEvents: shown ? "auto" : "none",
               zIndex: shown ? 1 : 0,
             }}
+            // A escala do canvas, para o mouse da terminal acertar a célula (ver `scaledMouse.ts`).
+            data-term-scale={shown && placement?.rect?.scale ? placement.rect.scale : undefined}
             onPointerDownCapture={() => {
               if (placement?.groupId === CANVAS_GROUP) activateTab(tab.id);
               else if (placement?.groupId) focusGroup(placement.groupId);

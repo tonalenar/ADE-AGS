@@ -9,6 +9,8 @@ import {
 } from "@xyflow/react";
 import { invoke } from "@tauri-apps/api/core";
 import { Button, CloseIcon, useTheme } from "neogestify-ui-components";
+import { DEFAULT_DEVICE, DEVICE_SCALE, deviceById, deviceNodeSize, deviceScaleOf, stepDeviceScale, type DeviceSpec } from "@/features/browser/devices";
+import { DeviceFloatBar, PhoneModeIcon } from "./DeviceFloatBar";
 import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useTabsStore } from "@/features/tabs/store";
@@ -22,7 +24,7 @@ import { announceToOrchestrators } from "./orchestratorAnnounce";
 import { portalConnectedNotice } from "./portalNotice";
 
 import { isHiddenNote, shownNote, stackMembers,
-  NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isFreeNodeId, neighbors, thin, type CanvasNote, type CanvasPortal, type Stroke,
+  AGENT_PORTAL_SIZE, NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isFreeNodeId, neighbors, thin, type CanvasNote, type CanvasPortal, type Stroke,
 } from "./board";
 import { CanvasToolbar, type DrawStyle, type Tool } from "./CanvasToolbar";
 import { boxFromDrag, defaultSize as defaultPlaceSize, isDrag, loadSizes, rememberSize, sizeLabel, type PlaceKind, type Point, type Size } from "./placeBox";
@@ -1197,11 +1199,36 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
 
   const host = hostOf(shown);
 
+  // "Celular solto": no lugar da janela, só o aparelho (com a página na resolução dele) e uma barra que flutua em
+  // cima. O tamanho do nó dá a escala do aparelho; trocar de modelo ou de escala mantém o nó no mesmo centro.
+  const device = portal.device ? deviceById(portal.device) : null;
+  const deviceScale = device ? deviceScaleOf(device, portal.box) : DEVICE_SCALE.start;
+  const resizeKeepingCenter = (size: { w: number; h: number }) => {
+    if (!key) return;
+    const b = portal.box;
+    canvasActions.moveNode(key, id, { x: Math.round(b.x + (b.w - size.w) / 2), y: b.y, w: size.w, h: size.h });
+  };
+  const toDevice = (spec: DeviceSpec, scale: number) => {
+    if (!key) return;
+    canvasActions.updatePortal(key, id, { device: spec.id });
+    resizeKeepingCenter(deviceNodeSize(spec, scale));
+  };
+  const toWindow = () => {
+    if (!key) return;
+    canvasActions.updatePortal(key, id, { device: undefined });
+    resizeKeepingCenter(AGENT_PORTAL_SIZE);
+  };
+  const askClose = () => {
+    if (!key) return;
+    if (armed) canvasActions.removePortal(key, id);
+    else setArmed(true);
+  };
+
   return (
     // Mesma estrutura do cartão do terminal (`AgentNode`): alças FORA do cartão, bordas como área de
     // arrastar e um contorno de 2 px na cor do nó (azul-céu, a do navegador).
     <div className="relative h-full w-full">
-      <NodeResizer isVisible minWidth={PORTAL_MIN.w} minHeight={PORTAL_MIN.h}
+      <NodeResizer isVisible minWidth={PORTAL_MIN.w} minHeight={PORTAL_MIN.h} keepAspectRatio={!!device}
         lineClassName="ade-rz-line" handleClassName="ade-rz-handle" />
       <CordPort id="l" type="source" position={Position.Left} style={{ top: HEADER_H / 2 }} className={handle} />
       <CordPort id="r" type="source" position={Position.Right} style={{ top: HEADER_H / 2 }} className={handle} />
@@ -1209,9 +1236,17 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
 
       <div
-        className="group h-full w-full flex flex-col rounded-[14px] overflow-hidden transition-shadow duration-150 bg-white dark:bg-surface"
-        style={{ boxShadow: nodeFrame(PORTAL_ACCENT, !!selected, false) }}
+        className={device
+          ? "group h-full w-full flex flex-col"
+          : "group h-full w-full flex flex-col rounded-[14px] overflow-hidden transition-shadow duration-150 bg-white dark:bg-surface ade-window-in"}
+        style={device ? undefined : { boxShadow: nodeFrame(PORTAL_ACCENT, !!selected, false) }}
       >
+        {device ? (
+          <DeviceFloatBar device={device} scale={deviceScale} armed={armed}
+            onModel={(model) => toDevice(deviceById(model), deviceScale)}
+            onScale={(direction) => toDevice(device, stepDeviceScale(deviceScale, direction))}
+            onWindow={toWindow} onClose={askClose} />
+        ) : (
         <div
           className="ade-node-drag flex items-center gap-2.5 pl-4 pr-3 shrink-0 cursor-grab active:cursor-grabbing select-none
             border-b border-black/[0.06] dark:border-[rgba(84,84,88,0.55)] bg-white dark:bg-surface"
@@ -1241,12 +1276,13 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
               ⇄ {links}
             </span>
           )}
+          <Button variant="custom" onClick={() => toDevice(DEFAULT_DEVICE, DEVICE_SCALE.start)}
+            title={t("canvas.device.asPhone")} aria-label={t("canvas.device.asPhone")}
+            className="nodrag cc-t shrink-0 flex items-center justify-center w-6 h-6 rounded-md text-gray-400 dark:text-white/35 hover:text-sky-500 hover:bg-gray-200/70 dark:hover:bg-white/8">
+            <PhoneModeIcon className="w-3.5 h-3.5" />
+          </Button>
           <Button variant="custom"
-            onClick={() => {
-              if (!key) return;
-              if (armed) canvasActions.removePortal(key, id);
-              else setArmed(true);
-            }}
+            onClick={askClose}
             title={armed ? t("canvas.portalDeleteConfirm") : t("canvas.portalDelete")}
             aria-label={armed ? t("canvas.portalDeleteConfirm") : t("canvas.portalDelete")}
             className={`nodrag cc-t shrink-0 flex items-center justify-center h-6 rounded-md
@@ -1257,12 +1293,13 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
             {armed ? t("canvas.portalDeleteConfirm") : <CloseIcon className="w-3 h-3" />}
           </Button>
         </div>
+        )}
 
         {/* `nodrag nowheel nopan`: dentro de la página, arrastrar y la rueda son de la página. */}
         <div className="nodrag nowheel nopan relative flex-1 min-h-0">
           {view && (
             <Suspense fallback={null}>
-              <PortalBody view={view} active={selected} />
+              <PortalBody view={view} active={selected} device={device} />
             </Suspense>
           )}
         </div>
@@ -1280,8 +1317,8 @@ function hostOf(url: string): string {
 }
 
 /** El navegador dentro del portal. `memo`: mover o redimensionar el nodo no lo toca. */
-const PortalBody = memo(function PortalBody({ view, active }: { view: BrowserView; active: boolean }) {
-  return <BrowserTab view={view} active={active} />;
+const PortalBody = memo(function PortalBody({ view, active, device }: { view: BrowserView; active: boolean; device: DeviceSpec | null }) {
+  return <BrowserTab view={view} active={active} device={device} />;
 });
 
 // ── Conexión: ver `cords.tsx` (cordas, ímã y raio) ────────────────────

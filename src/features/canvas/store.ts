@@ -25,9 +25,12 @@ interface CanvasState {
   /** Dónde dibujar cada terminal viva del canvas visible, por id de tab. Lo calcula
    *  `CanvasView` en cada movimiento y lo lee `TerminalPanel`. */
   liveRects: Record<string, Rect>;
+  /** Os canvases salvos já foram lidos do disco. Antes disso "a aba não está em nenhum canvas" é falso: quem decide
+   *  por isso (adotar abas numa conversa, avisar o orquestrador) espera. */
+  loaded: boolean;
 }
 
-export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}, grids: {}, liveRects: {} }));
+export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}, grids: {}, liveRects: {}, loaded: false }));
 
 let windowLabel = "main";
 
@@ -346,7 +349,7 @@ export function initCanvasSync(label: string): () => void {
           .filter(([k]) => k.startsWith(`${label}|`))
           .map(([k, b]) => [k, { ...emptyBoard(), ...b, viewport: safeViewport(b?.viewport), nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], roles: b?.roles ?? {}, subagents: b?.subagents ?? [] }]),
       );
-      useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards } });
+      useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards }, loaded: true });
       unsub = useTabsStore.subscribe(syncBoards);
       syncBoards();
     });
