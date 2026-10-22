@@ -148,7 +148,8 @@ fn prepare_profile(profile: &Path) {
 /// O Chrome sem nada além do perfil e das telas de boas-vindas desligadas.
 fn chrome(profile: &Path) -> Result<std::process::Command, String> {
     let exe = chrome_path().ok_or("Não achei o Chrome nem o Edge instalados.")?;
-    let mut cmd = std::process::Command::new(exe);
+    // Sem console (o helper de todo spawn do app); as janelas do Chrome não dependem disso.
+    let mut cmd = crate::util::spawn::hidden_command(exe);
     cmd.arg(format!("--user-data-dir={}", profile.display()))
         .args(["--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble"]);
     Ok(cmd)
