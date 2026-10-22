@@ -10,7 +10,7 @@ Serve para os sites que recusam navegador embutido, como a conta Google, e para 
 |---|---|---|
 | Chrome controlado | `real_browser/mod.rs` (`ensure_browser`) | `--remote-debugging-port=0`, perfil `<dados>/real-browser-profile`. Janela fora da tela. |
 | Uma janela por Portal | `real_browser_open` (`Target.createTarget` com `newWindow`) | O Chrome só desenha a aba ativa de cada janela. Com várias abas numa janela, os outros Portais congelavam. |
-| Tela | `Page.startScreencast` → evento `real-browser-frame` → `RealBrowserView` | Quadro JPEG na resolução da tela (`deviceScaleFactor` = zoom × `devicePixelRatio`). |
+| Tela | `Page.startScreencast` → último quadro guardado no Rust → protocolo `agsframe` → `<img>` do `RealBrowserView` | JPEG na resolução da tela (`deviceScaleFactor` = zoom × `devicePixelRatio`). Fica só o último quadro, sem fila; o evento `real-browser-frame` só avisa que há um novo, e o Portal busca o mais recente quando acaba de desenhar o atual. |
 | Mouse e teclado da pessoa | `RealBrowserView` → `real_browser_send` (`Input.*`) | Só `Input.*`, `Page.navigate`, `Page.reload` e o tamanho; nada que leia cookie ou rode script. |
 | Zoom | `pageMetrics` (`realBrowser.ts`) | Como o do Chrome: menos px CSS, mais densidade. |
 | Barra de rolagem | `--enable-features=OverlayScrollbar` | Fina, sem setas, sem reservar largura. Medido no Chrome 155: `FluentOverlayScrollbar` sozinha não muda nada. |
@@ -51,6 +51,9 @@ Medido em `httpbin.org/forms/post`:
 - `click`, `input` e `keydown` chegaram com `isTrusted=true`.
 
 ## Limites conhecidos
+
+- Fluidez: num site pesado o screencast do próprio Chrome é o limite. Medido rolando o painel do Play Console, sem nada do app no meio: 8 a 12 quadros/s, e uma página comum (MDN) passa de 45. Mudar qualidade, densidade ou `maxWidth` não alterou isso. No Portal, os quadros recebidos e os mostrados batem.
+- O piloto não troca `XMLHttpRequest.open`/`setRequestHeader` nem o cookie/storage do site no Chrome real: isso é do proxy, e quebrava sites de verdade (o Play Console). Por isso o painel de rede não registra XHR nesse modo.
 
 - Só Windows tem o encaixe da janela de login e a saída da barra de tarefas. Nos outros sistemas, a janela de login abre como janela comum (`win` vazio).
 - O modo celular (resolução emulada, toque) ainda não vale no Chrome real: a página ocupa o Portal.

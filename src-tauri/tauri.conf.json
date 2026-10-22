@@ -29,7 +29,7 @@
         "default-src": "'self'",
         "script-src": "'self'",
         "style-src": "'self' 'unsafe-inline'",
-        "img-src": "'self' data: blob: https: http://localhost:* http://127.0.0.1:*",
+        "img-src": "'self' data: blob: https: http://localhost:* http://127.0.0.1:* agsframe: http://agsframe.localhost",
         "font-src": "'self' data:",
         "media-src": "'self' data: blob:",
         "connect-src": "'self' ipc: http://ipc.localhost",

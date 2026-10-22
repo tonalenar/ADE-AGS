@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { keyDownEvent, cdpModifiers, mouseButton, pageMetrics, pagePoint, realBrowserClose, realBrowserOpen, realBrowserSend } from "./realBrowser";
 
 /** A tela do Chrome real dentro do Portal: mostra os quadros do screencast e devolve mouse e
@@ -68,12 +69,29 @@ export function RealBrowserView({ viewId, url, zoom, script, onUrl, onError }: {
   }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
+    // Busca sempre o quadro mais recente, um de cada vez: chegando outro enquanto este carrega, o próximo pedido já pega
+    // o novo. Os bytes vêm em binário pelo protocolo `agsframe`, não pelo evento.
+    let latest = 0;
+    let loading = false;
+    const show = () => {
+      const shown = img.current;
+      if (!shown || loading || latest === 0) return;
+      loading = true;
+      const seq = latest;
+      shown.src = convertFileSrc(`${viewId}/${seq}`, "agsframe");
+      const done = () => {
+        loading = false;
+        if (latest > seq) show();
+      };
+      shown.decode().then(done, done);
+    };
     const offs = [
-      listen<{ id: string; data: string; width: number; height: number }>("real-browser-frame", (e) => {
-        if (e.payload.id !== viewId || !img.current) return;
-        img.current.src = `data:image/jpeg;base64,${e.payload.data}`;
+      listen<{ id: string; seq: number; width: number; height: number }>("real-browser-frame", (e) => {
+        if (e.payload.id !== viewId) return;
+        latest = Math.max(latest, e.payload.seq);
         page.current = { width: e.payload.width, height: e.payload.height };
         setReady(true);
+        show();
       }),
       listen<{ id: string; url: string }>("real-browser-url", (e) => {
         if (e.payload.id !== viewId) return;
