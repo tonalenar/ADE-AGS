@@ -80,6 +80,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(crate::updates::plugin())
         .manage(db_conn)
+        // A tela do Chrome real, em binário (ver `real_browser::frame_protocol`).
+        .register_uri_scheme_protocol("agsframe", |_ctx, request| crate::real_browser::frame_protocol(&request))
         .invoke_handler(tauri::generate_handler![
             crate::real_browser::real_browser_open,
             crate::real_browser::real_browser_send,

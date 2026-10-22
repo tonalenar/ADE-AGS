@@ -50,15 +50,21 @@ declare global {
 
 (() => {
   // Fora de um iframe só roda no Chrome real, onde a ponte do CDP faz o papel do app (`real_browser::BRIDGE`).
-  if (window.__agsPage || (window.parent === window && !(self as { __ags_trusted_input?: boolean }).__ags_trusted_input)) return;
+  const realChrome = (self as { __ags_trusted_input?: boolean }).__ags_trusted_input === true;
+  if (window.__agsPage || (window.parent === window && !realChrome)) return;
   window.__agsPage = true;
 
   // Lo primero: la página no puede leer una cookie ni su storage antes de que estén en su
   // lugar (ver `siteState.ts`).
+  // No Chrome real, nada disso: cookies e storage são os do próprio Chrome. O pote de cookies lê e grava num endereço
+  // do proxy por XHR SÍNCRONO a cada `document.cookie`; sem proxy, cada leitura travava a página num endereço que não
+  // existe e as cookies do site se perdiam (o Play Console quebrava com "erro inesperado").
   const siteNatives = takeNatives();
-  const cookieJar = installCookieJar(siteNatives);
-  installStorageSync(siteNatives);
-  installScrollbars();
+  const cookieJar = realChrome ? null : installCookieJar(siteNatives);
+  if (!realChrome) {
+    installStorageSync(siteNatives);
+    installScrollbars();
+  }
 
   // Las referencias nativas se toman ahora, antes de que la página pueda envolverlas: un
   // `setTimeout` o un `fetch` parcheados por la página (mocks, polyfills) no pueden
@@ -389,16 +395,21 @@ declare global {
   const xhrOpen = XMLHttpRequest.prototype.open;
   const xhrSend = XMLHttpRequest.prototype.send;
   const xhrSetHeader = XMLHttpRequest.prototype.setRequestHeader;
-  XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
-    let routed: Routed | null = null;
-    try { routed = route(String(url)); } catch { /* una URL rara: el XHR decide */ }
-    xhrInfo.set(this, { method: String(method).toUpperCase(), url: String(url), headers: [], routed });
-    return (xhrOpen as (...args: unknown[]) => void).call(this, method, routed ? routed.url : url, ...rest);
-  };
-  XMLHttpRequest.prototype.setRequestHeader = function (this: XMLHttpRequest, name: string, value: string) {
-    xhrInfo.get(this)?.headers.push({ name: String(name).toLowerCase(), value: String(value) });
-    return xhrSetHeader.call(this, name, value);
-  };
+  // `open` e `setRequestHeader` só existem para o proxy: rotear o pedido e anotá-lo no painel de rede. No Chrome real não
+  // há rota, e trocar `open` quebrava sites de verdade (o Play Console respondia "erro inesperado"; medido trocando uma
+  // função por vez). Lá ficam os do navegador; `send` continua, porque é ele que diz ao piloto que a rede está ocupada.
+  if (!realChrome) {
+    XMLHttpRequest.prototype.open = function (this: XMLHttpRequest, method: string, url: string | URL, ...rest: unknown[]) {
+      let routed: Routed | null = null;
+      try { routed = route(String(url)); } catch { /* una URL rara: el XHR decide */ }
+      xhrInfo.set(this, { method: String(method).toUpperCase(), url: String(url), headers: [], routed });
+      return (xhrOpen as (...args: unknown[]) => void).call(this, method, routed ? routed.url : url, ...rest);
+    };
+    XMLHttpRequest.prototype.setRequestHeader = function (this: XMLHttpRequest, name: string, value: string) {
+      xhrInfo.get(this)?.headers.push({ name: String(name).toLowerCase(), value: String(value) });
+      return xhrSetHeader.call(this, name, value);
+    };
+  }
   XMLHttpRequest.prototype.send = function (this: XMLHttpRequest, body?: Document | XMLHttpRequestBodyInit | null) {
     const info = xhrInfo.get(this);
     const routed = info?.routed ?? null;

@@ -45,6 +45,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
+use base64::Engine as _;
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
@@ -95,6 +96,48 @@ fn pages() -> &'static Mutex<HashMap<String, Page>> {
 fn last_place() -> &'static Mutex<Option<Option<Rect>>> {
     static P: OnceLock<Mutex<Option<Option<Rect>>>> = OnceLock::new();
     P.get_or_init(|| Mutex::new(None))
+}
+
+/// O último quadro de cada Portal (número de sequência e JPEG), servido por `frame_protocol`.
+fn frames() -> &'static Mutex<HashMap<String, (u64, Arc<Vec<u8>>)>> {
+    static F: OnceLock<Mutex<HashMap<String, (u64, Arc<Vec<u8>>)>>> = OnceLock::new();
+    F.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// O protocolo `agsframe`: `<portal>/<seq>` devolve o último quadro do Portal (o `seq` só fura o cache do webview).
+pub fn frame_protocol(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
+    let id = portal_of(request.uri().path());
+    let frame = lock(frames()).get(&id).map(|(_, bytes)| bytes.clone());
+    let builder = tauri::http::Response::builder().header("Cache-Control", "no-store").header("Access-Control-Allow-Origin", "*");
+    match frame {
+        Some(bytes) => builder.header("Content-Type", "image/jpeg").body(bytes.as_ref().clone()),
+        None => builder.status(404).body(Vec::new()),
+    }
+    .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
+}
+
+/// O Portal de um caminho `/<portal>/<seq>`. `convertFileSrc` codifica a barra (`%2F`): decodifica antes de separar.
+fn portal_of(path: &str) -> String {
+    percent_decode(path.trim_start_matches('/')).split('/').next().unwrap_or("").to_string()
+}
+
+/// `%2D` → `-`: o id do Portal chega codificado por `convertFileSrc`.
+fn percent_decode(s: &str) -> String {
+    let bytes = s.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        if bytes[i] == b'%' && i + 2 < bytes.len() {
+            if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
+                out.push(b);
+                i += 3;
+                continue;
+            }
+        }
+        out.push(bytes[i]);
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
 }
 
 fn login() -> &'static Mutex<Option<Login>> {
@@ -335,14 +378,27 @@ pub async fn real_browser_open(
             match v["method"].as_str() {
                 Some("Page.screencastFrame") => {
                     let p = &v["params"];
+                    // Fica só o ÚLTIMO quadro (um novo substitui o anterior, nunca uma fila), servido em binário pelo
+                    // protocolo `agsframe`; o evento só avisa que há um novo, e o Portal busca o mais recente quando termina
+                    // de desenhar o atual. Por isso a confirmação ao Chrome é imediata: ele trabalha no ritmo dele, a tela no
+                    // dela. Medido: com o quadro em base64 no evento, ou com a confirmação esperando a ida e volta até o
+                    // Portal, a tela não passava de ~10-11 quadros/s com o Chrome produzindo ~42.
+                    let ack = json!({ "id": next_id(), "method": "Page.screencastFrameAck", "params": { "sessionId": p["sessionId"] } });
+                    let _ = reader_tx.send(ack.to_string());
+                    let Some(bytes) = p["data"].as_str().and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok()) else { continue };
+                    let seq = {
+                        let mut frames = lock(frames());
+                        let slot = frames.entry(reader_id.clone()).or_insert_with(|| (0, Arc::new(Vec::new())));
+                        slot.0 += 1;
+                        slot.1 = Arc::new(bytes);
+                        slot.0
+                    };
                     emit(&reader_app, "real-browser-frame", json!({
                         "id": reader_id,
-                        "data": p["data"],
+                        "seq": seq,
                         "width": p["metadata"]["deviceWidth"],
                         "height": p["metadata"]["deviceHeight"],
                     }));
-                    let ack = json!({ "id": next_id(), "method": "Page.screencastFrameAck", "params": { "sessionId": p["sessionId"] } });
-                    let _ = reader_tx.send(ack.to_string());
                 }
                 Some("Runtime.bindingCalled") if v["params"]["name"] == BINDING => {
                     let Ok(message) = serde_json::from_str::<Value>(v["params"]["payload"].as_str().unwrap_or("")) else { continue };
@@ -374,7 +430,7 @@ pub async fn real_browser_open(
     // A janela fica fora de foco o tempo todo; sem isto o cursor de texto nem pisca e alguns campos
     // não reagem como se estivessem focados.
     send_raw(&id, "Emulation.setFocusEmulationEnabled", json!({ "enabled": true }))?;
-    send_raw(&id, "Page.startScreencast", json!({ "format": "jpeg", "quality": 80, "everyNthFrame": 1 }))?;
+    send_raw(&id, "Page.startScreencast", json!({ "format": "jpeg", "quality": 65, "everyNthFrame": 1 }))?;
     if let Some(script) = script {
         // O piloto (o mesmo script que o proxy injeta no outro navegador), em todo documento novo, antes dos da página.
         // `Runtime.enable` é o que entrega `Runtime.bindingCalled`.
@@ -542,6 +598,7 @@ pub async fn real_browser_close(app: AppHandle, id: String) -> Result<(), String
         let target = pages.remove(&id).map(|p| p.target);
         (target, pages.is_empty())
     };
+    lock(frames()).remove(&id);
     let port = browser().lock().await.as_ref().map(|b| b.port);
     if let (Some(port), Some(target)) = (port, target) {
         let _ = browser_call(port, "Target.closeTarget", json!({ "targetId": target })).await;
@@ -690,6 +747,14 @@ mod test {
         let portal = PortalRect { x: 100.0, y: 50.0, width: 800.0, height: 700.0, scale: 1.25 };
         // Janela do app em (10, 20), página em 125%.
         assert_eq!(login_rect(portal, (10, 20)), Rect { x: 135, y: 83, w: 1000, h: 875 });
+    }
+
+    #[test]
+    fn id_do_portal_chega_decodificado() {
+        assert_eq!(super::portal_of("/portal-a4cc%2F247"), "portal-a4cc");
+        assert_eq!(super::portal_of("/portal-a4cc/247"), "portal-a4cc");
+        assert_eq!(super::percent_decode("portal%2Da4cc%2D12"), "portal-a4cc-12");
+        assert_eq!(super::percent_decode("abc"), "abc");
     }
 
     #[test]
