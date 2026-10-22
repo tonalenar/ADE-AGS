@@ -4,7 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import { Alert, ArrowLeftIcon, ArrowRightIcon, Button, CloseIcon, TextArea, TrashIcon } from "neogestify-ui-components";
 
 import {
-  BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
+  AccountCircleIcon, BugIcon, DevicesIcon, DotsIcon, ExternalIcon, GlobeIcon, PenIcon, PickIcon, RefreshIcon, SendIcon,
 } from "@/app/icons";
 import { neighbors } from "@/features/canvas/board";
 import { useCanvasStore } from "@/features/canvas/store";
@@ -33,12 +33,16 @@ import { useDebugStore } from "./debugStore";
 import { DeviceBar } from "./DeviceBar";
 import { previewDetectServers, previewResolve, previewSaveCapture, previewSetRecording, type PreviewTarget } from "./ipc";
 import { PageChannel, type LoadState } from "./pageChannel";
-import { isPageMessage, type AppMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
+import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
+import { RealBrowserView } from "./RealBrowserView";
+import { isGoogleSignIn, loginStartUrl, portalRect, realBrowserHistory, realBrowserLogin, realBrowserLoginFinish, realBrowserLoginPlace, realBrowserPost, realBrowserSend, realBrowserShot, sameRect, type PortalRect } from "./realBrowser";
+import { getCurrentWindow } from "@tauri-apps/api/window";
+import { listen } from "@tauri-apps/api/event";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
 import { presetById, type Viewport } from "./viewport";
 import { ZoomControl } from "./ZoomControl";
-import { visualSize } from "./visualSize";
+import { cropForJev, resizeCanvas, visualSize } from "./visualSize";
 import { clampZoom, stepZoom } from "./zoom";
 
 /** Lo que el proxy inyecta en cada página: el selector y el runtime (control del agente y
@@ -118,6 +122,57 @@ export function BrowserTab({ view, active, device = null }: {
 
   const [address, setAddress] = useState(view.url);
   const [target, setTarget] = useState<PreviewTarget | null>(null);
+  const real = !!view.realChrome;
+  const realRef = useRef(real);
+  realRef.current = real;
+  const viewUrlRef = useRef(view.url);
+  viewUrlRef.current = view.url;
+  // Login numa conta: o perfil está aberto num Chrome comum, numa janela própria. Ao fechá-la, o
+  // Portal volta (`realKey` remonta a vista, que reabre o perfil já com a sessão).
+  const [loggingIn, setLoggingIn] = useState(false);
+  const [realKey, setRealKey] = useState(0);
+  // Durante o login, a janela do Chrome fica em cima do Portal: acompanha o Portal a cada quadro (canvas
+  // arrastado, zoom, painel aberto) e a janela do app quando ela se move. Fora de vista, ela se esconde.
+  useEffect(() => {
+    if (!loggingIn) return;
+    let last: PortalRect | undefined;
+    let frame = 0;
+    const tick = () => {
+      const rect = portalRect(column.current);
+      if (last === undefined || !sameRect(rect, last)) {
+        last = rect;
+        realBrowserLoginPlace(rect).catch(() => undefined);
+      }
+      frame = requestAnimationFrame(tick);
+    };
+    frame = requestAnimationFrame(tick);
+    const moved = getCurrentWindow().onMoved(() => { last = undefined; });
+    return () => {
+      cancelAnimationFrame(frame);
+      moved.then((off) => off());
+      realBrowserLoginPlace(null).catch(() => undefined);
+    };
+  }, [loggingIn]);
+  useEffect(() => {
+    const off = listen("real-browser-login-done", () => {
+      // Volta fora da página de login: nela o Portal só mostraria o aviso de novo.
+      if (isGoogleSignIn(viewUrlRef.current)) {
+        const url = "https://myaccount.google.com/";
+        setAddress(url);
+        updateView(view.id, { url, title: "myaccount.google.com" });
+      }
+      setLoggingIn(false);
+      setRealKey((k) => k + 1);
+    });
+    return () => { off.then((f) => f()); };
+  }, [updateView, view.id]);
+  const startLogin = () => {
+    setLoggingIn(true);
+    realBrowserLogin(loginStartUrl(address), portalRect(column.current)).catch((e) => {
+      setLoggingIn(false);
+      setError(String(e));
+    });
+  };
   const [error, setError] = useState<string | null>(null);
   const [picking, setPicking] = useState(false);
   const [picks, setPicks] = useState<PickedElement[]>([]);
@@ -172,9 +227,11 @@ export function BrowserTab({ view, active, device = null }: {
     ready: doc.current.ready,
     navigatingForMs: navigatingSince.current === null ? null : Date.now() - navigatingSince.current,
   }), []);
+  // No Chrome real as ordens vão pelo CDP (`real_browser_post`); no outro navegador, pelo `postMessage` do iframe.
   const channel = useMemo(() => new PageChannel(() => (
-    targetRef.current ? { window: iframe.current?.contentWindow ?? null, origin: targetRef.current.proxyOrigin } : null
-  ), loadState), [loadState]);
+    realRef.current ? { post: (message: AppMessage) => { realBrowserPost(view.id, message).catch(() => undefined); } }
+      : targetRef.current ? { window: iframe.current?.contentWindow ?? null, origin: targetRef.current.proxyOrigin } : null
+  ), loadState), [loadState, view.id]);
 
   useEffect(() => () => {
     channel.dispose();
@@ -195,9 +252,13 @@ export function BrowserTab({ view, active, device = null }: {
   }, []);
 
   const postToPage = useCallback((type: SimpleAppMessage["type"]) => {
+    if (realRef.current) {
+      realBrowserPost(view.id, { source: "ade-ags", type } satisfies AppMessage).catch(() => undefined);
+      return;
+    }
     if (!target) return;
     iframe.current?.contentWindow?.postMessage({ source: "ade-ags", type } satisfies AppMessage, target.proxyOrigin);
-  }, [target]);
+  }, [target, view.id]);
 
   // La red se anota solo con el panel de debug abierto, en el proxy y en la página: guardar
   // cabeceras y cuerpos de cada módulo que sirve un servidor de desarrollo es memoria y
@@ -252,6 +313,13 @@ export function BrowserTab({ view, active, device = null }: {
       setError(t("browser.invalidUrl"));
       return t("browser.invalidUrl");
     }
+    if (realRef.current) {
+      // Quem navega é a vista do Chrome real, quando a URL dela muda (ou ao terminar de abrir).
+      setAddress(url);
+      setError(null);
+      updateView(view.id, { url, title: new URL(url).host });
+      return null;
+    }
     try {
       const resolved = await previewResolve(url, INJECTED);
       // La misma dirección otra vez es "recargá": el `src` no cambia y el iframe no se
@@ -294,7 +362,15 @@ export function BrowserTab({ view, active, device = null }: {
       const failure = await goRef.current(url);
       if (failure) throw new Error(failure);
     },
-    history: (action) => (action === "reload" ? reload() : postRef.current(action === "back" ? "history:back" : "history:forward")),
+    history: (action) => {
+      if (realRef.current) {
+        if (action === "reload") realBrowserSend(view.id, "Page.reload", {}).catch(() => undefined);
+        else realBrowserHistory(view.id, action === "back" ? -1 : 1).catch(() => undefined);
+        return;
+      }
+      if (action === "reload") reload();
+      else postRef.current(action === "back" ? "history:back" : "history:forward");
+    },
     setViewport,
     viewport: () => viewportRef.current,
     setTouch,
@@ -333,6 +409,8 @@ export function BrowserTab({ view, active, device = null }: {
       setDebugOpen(true);
     },
     screenshot: async (tag) => {
+      // No Chrome real a foto vem do próprio Chrome: não depende de a página estar à vista na tela.
+      if (realRef.current) return previewSaveCapture(await canvasToPng((await realBrowserShot(view.id)).canvas), tag);
       const page = iframe.current;
       const frame = column.current;
       if (!page || !frame) throw new Error("La página todavía no está cargada.");
@@ -344,6 +422,16 @@ export function BrowserTab({ view, active, device = null }: {
       return previewSaveCapture(await canvasToPng(frozen.canvas), tag);
     },
     visualShot: async (region, marks) => {
+      if (realRef.current) {
+        const real = await realBrowserShot(view.id);
+        const source = cropForJev(real.canvas, real.width, real.height, region, marks);
+        const size = visualSize(source.width, source.height);
+        return {
+          path: await previewSaveCapture(await canvasToPng(resizeCanvas(source, size)), "visual"),
+          complete: true,
+          detail: `foto ${real.width}×${real.height} do Chrome real`,
+        };
+      }
       const page = iframe.current;
       const frame = column.current;
       if (!page || !frame) throw new Error("La página todavía no está cargada.");
@@ -493,70 +581,86 @@ export function BrowserTab({ view, active, device = null }: {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  useEffect(() => {
-    if (!target) return;
-    const display = (url: string) => toTargetUrl(url, target.proxyOrigin, target.targetOrigin);
+  // O que a página manda (o piloto e o selector), venha do iframe ou do Chrome real: `sendBack` responde pelo mesmo caminho.
+  const onPageMessage = useRef<(msg: PageMessage, sendBack: (message: AppMessage) => void, display: (url: string) => string) => void>(() => undefined);
+  onPageMessage.current = (msg, sendBack, display) => {
     const wakeLoadWaiters = () => {
       for (const wake of [...loadWaiters.current]) wake();
     };
+    if (msg.type === "nav") {
+      pageUrl.current = msg.payload.url;
+      const shown = display(msg.payload.url);
+      shownUrl.current = shown;
+      setAddress(shown);
+      let host = shown;
+      try { host = new URL(shown).host; } catch { /* se queda con la URL entera */ }
+      updateView(view.id, { url: shown, title: msg.payload.title || host });
+      doc.current.ready = true;
+      wakeLoadWaiters();
+    } else if (msg.type === "page:ready") {
+      const url = display(msg.payload.url);
+      channel.documentChanged(url);
+      navigatingSince.current = null;
+      doc.current = { id: msg.payload.doc, count: doc.current.count + 1, ready: false };
+      setDocId(msg.payload.doc);
+      useDebugStore.getState().apply(view.id, (log) => startDocument(log, msg.payload.doc, url, Date.now()));
+      // Con esto la página aprende a quién mandarle lo que capturó durante la carga.
+      sendBack({ source: "ade-ags", type: "connect" });
+      // Cada documento arranca sin anotar la red: si el panel está abierto, se le avisa.
+      if (debugOpenRef.current) {
+        sendBack({ source: "ade-ags", type: "net:on" });
+      }
+      // Y el táctil se vuelve a poner: las hojas de estilo de la página nueva están sin
+      // tocar, así que sin esto la emulación se apagaría sola al navegar.
+      if (touchRef.current) channel.run({ op: "touch", on: true }, 8000).catch(() => undefined);
+    } else if (msg.type === "nav:open") {
+      // Un enlace a otro sitio: se abre acá mismo, con el proxy de ese sitio.
+      if (typeof msg.payload?.url === "string" && /^https?:\/\//i.test(msg.payload.url)) {
+        void goRef.current(msg.payload.url);
+      }
+    } else if (msg.type === "page:reply") {
+      channel.reply(msg.payload);
+    } else if (msg.type === "debug:batch") {
+      const batch = { ...msg.payload, url: display(msg.payload.url) };
+      useDebugStore.getState().apply(view.id, (log) => appendBatch(log, batch));
+    } else if (msg.type === "pick:selected") {
+      const el = msg.payload.element;
+      if (pickWaiter.current) {
+        pickWaiter.current(el);
+        return;
+      }
+      setPicks((prev) => [...prev.filter((p) => !(p.selector === el.selector && p.url === el.url)), el]);
+      setPicking(msg.payload.keepPicking);
+      setComposerOpen(true);
+      setSent(null);
+    } else if (msg.type === "pick:cancel") {
+      pickWaiter.current?.(null);
+      setPicking(false);
+    }
+  };
+
+  useEffect(() => {
+    if (!target) return;
+    const display = (url: string) => toTargetUrl(url, target.proxyOrigin, target.targetOrigin);
     const onMessage = (e: MessageEvent) => {
       // Solo lo que manda ESTE iframe: con dos navegadores abiertos, cada uno escucha lo suyo.
       if (e.source !== iframe.current?.contentWindow || !isPageMessage(e.data)) return;
-      const msg = e.data;
-      if (msg.type === "nav") {
-        pageUrl.current = msg.payload.url;
-        const shown = display(msg.payload.url);
-        shownUrl.current = shown;
-        setAddress(shown);
-        let host = shown;
-        try { host = new URL(shown).host; } catch { /* se queda con la URL entera */ }
-        updateView(view.id, { url: shown, title: msg.payload.title || host });
-        doc.current.ready = true;
-        wakeLoadWaiters();
-      } else if (msg.type === "page:ready") {
-        const url = display(msg.payload.url);
-        channel.documentChanged(url);
-        navigatingSince.current = null;
-        doc.current = { id: msg.payload.doc, count: doc.current.count + 1, ready: false };
-        setDocId(msg.payload.doc);
-        useDebugStore.getState().apply(view.id, (log) => startDocument(log, msg.payload.doc, url, Date.now()));
-        // Con esto la página aprende a quién mandarle lo que capturó durante la carga.
-        (e.source as Window).postMessage({ source: "ade-ags", type: "connect" } satisfies AppMessage, target.proxyOrigin);
-        // Cada documento arranca sin anotar la red: si el panel está abierto, se le avisa.
-        if (debugOpenRef.current) {
-          (e.source as Window).postMessage({ source: "ade-ags", type: "net:on" } satisfies AppMessage, target.proxyOrigin);
-        }
-        // Y el táctil se vuelve a poner: las hojas de estilo de la página nueva están sin
-        // tocar, así que sin esto la emulación se apagaría sola al navegar.
-        if (touchRef.current) channel.run({ op: "touch", on: true }, 8000).catch(() => undefined);
-      } else if (msg.type === "nav:open") {
-        // Un enlace a otro sitio: se abre acá mismo, con el proxy de ese sitio.
-        if (typeof msg.payload?.url === "string" && /^https?:\/\//i.test(msg.payload.url)) {
-          void goRef.current(msg.payload.url);
-        }
-      } else if (msg.type === "page:reply") {
-        channel.reply(msg.payload);
-      } else if (msg.type === "debug:batch") {
-        const batch = { ...msg.payload, url: display(msg.payload.url) };
-        useDebugStore.getState().apply(view.id, (log) => appendBatch(log, batch));
-      } else if (msg.type === "pick:selected") {
-        const el = msg.payload.element;
-        if (pickWaiter.current) {
-          pickWaiter.current(el);
-          return;
-        }
-        setPicks((prev) => [...prev.filter((p) => !(p.selector === el.selector && p.url === el.url)), el]);
-        setPicking(msg.payload.keepPicking);
-        setComposerOpen(true);
-        setSent(null);
-      } else if (msg.type === "pick:cancel") {
-        pickWaiter.current?.(null);
-        setPicking(false);
-      }
+      const source = e.source as Window;
+      onPageMessage.current(e.data, (message) => source.postMessage(message, target.proxyOrigin), display);
     };
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, [channel, target, updateView, view.id]);
+  }, [target]);
+
+  // No Chrome real, o piloto fala pelo CDP (`Runtime.addBinding`) e as URLs já são as de verdade.
+  useEffect(() => {
+    if (!real) return;
+    const off = listen<{ id: string; message: unknown }>("real-browser-page", (e) => {
+      if (e.payload.id !== view.id || !isPageMessage(e.payload.message)) return;
+      onPageMessage.current(e.payload.message, (message) => { realBrowserPost(view.id, message).catch(() => undefined); }, (url) => url);
+    });
+    return () => { off.then((f) => f()); };
+  }, [real, view.id]);
 
   // La página necesita saber si alguien la está mirando: con la tab en segundo plano, el
   // puntero del agente no se anima (nadie lo vería) y cada acción sale más rápido.
@@ -714,13 +818,16 @@ export function BrowserTab({ view, active, device = null }: {
 
   const navButtons = (
     <>
-      <ToolButton label={t("browser.back")} disabled={!target} onClick={() => postToPage("history:back")}>
+      <ToolButton label={t("browser.back")} disabled={!target && !real}
+        onClick={() => real ? realBrowserHistory(view.id, -1).catch(console.error) : postToPage("history:back")}>
         <ArrowLeftIcon className="w-4 h-4 stroke-2" />
       </ToolButton>
-      <ToolButton label={t("browser.forward")} disabled={!target} onClick={() => postToPage("history:forward")}>
+      <ToolButton label={t("browser.forward")} disabled={!target && !real}
+        onClick={() => real ? realBrowserHistory(view.id, 1).catch(console.error) : postToPage("history:forward")}>
         <ArrowRightIcon className="w-4 h-4 stroke-2" />
       </ToolButton>
-      <ToolButton label={t("browser.reload")} disabled={!target} onClick={reload}>
+      <ToolButton label={t("browser.reload")} disabled={!target && !real}
+        onClick={() => real ? realBrowserSend(view.id, "Page.reload", {}).catch(console.error) : reload()}>
         <RefreshIcon className="w-4 h-4 stroke-2" />
       </ToolButton>
     </>
@@ -776,9 +883,19 @@ export function BrowserTab({ view, active, device = null }: {
     </>
   );
 
+  // Só ícones: com texto, os botões do Chrome real espremiam a barra de endereço a 21 px.
   const tabTools = (
     <>
-      <ZoomControl zoom={zoom} disabled={!target || !!frozen}
+      <ToolButton label={t("browser.real.hint")} active={real}
+        onClick={() => updateView(view.id, { realChrome: !real })}>
+        <GlobeIcon className="w-4 h-4" />
+      </ToolButton>
+      {real && (
+        <ToolButton label={t("browser.real.loginHint")} active={loggingIn} disabled={loggingIn} onClick={startLogin}>
+          <AccountCircleIcon className="w-4 h-4" />
+        </ToolButton>
+      )}
+      <ZoomControl zoom={zoom} disabled={(!target && !real) || !!frozen}
         onStep={(dir) => setZoom(stepZoom(zoom, dir))} onReset={() => setZoom(1)} />
       <ToolButton label={viewport ? t("browser.viewport.exit") : t("browser.viewport.enter")} active={!!viewport}
         onClick={() => {
@@ -857,9 +974,10 @@ export function BrowserTab({ view, active, device = null }: {
 
   return (
     <div ref={root} className={`flex flex-col h-full min-h-0 transition-colors duration-300 ${device ? "bg-transparent" : "bg-gray-50 dark:bg-surface"}`}>
-      {device ? null : toolbar}
+      {/* No login, a barra que vale é a da janela do Chrome (é nela que se confere o endereço): a do Portal some. */}
+      {device || (real && loggingIn) ? null : toolbar}
 
-      {viewport && !device && (
+      {viewport && !device && !(real && loggingIn) && (
         // Congelada, la página no cambia de tamaño: la barra queda a la vista pero quieta.
         <div inert={frozen ? true : undefined} className={`shrink-0 ${frozen ? "opacity-50" : ""}`}>
           <DeviceBar
@@ -882,7 +1000,29 @@ export function BrowserTab({ view, active, device = null }: {
       <div className={`flex flex-1 min-h-0 ${compact ? "flex-col" : ""}`}>
         <div ref={column} data-browser-column className="relative flex flex-col flex-1 min-w-0 min-h-0">
           {shownError}
-          {target ? (
+          {real && loggingIn ? (
+            <div className="flex flex-1 flex-col gap-3 items-center justify-center p-8 text-center text-[12.5px] text-gray-600 dark:text-white/60">
+              <p className="max-w-sm">{t("browser.real.loggingIn")}</p>
+              <Button variant="custom" onClick={() => realBrowserLoginFinish().catch((e) => setError(String(e)))}
+                className="px-3 h-8 rounded-full text-[12px] font-semibold bg-accent-600 text-white hover:bg-accent-500">
+                {t("browser.real.loginDone")}
+              </Button>
+            </div>
+          ) : real && isGoogleSignIn(address) ? (
+            <div className="flex flex-1 flex-col gap-3 items-center justify-center p-8 text-center text-[12.5px] text-gray-600 dark:text-white/60">
+              <p className="max-w-sm">{t("browser.real.signInHere")}</p>
+              <Button variant="custom" onClick={startLogin}
+                className="px-3 h-8 rounded-full text-[12px] font-semibold bg-accent-600 text-white hover:bg-accent-500">
+                {t("browser.real.login")}
+              </Button>
+            </div>
+          ) : real ? (
+            <RealBrowserView key={realKey} viewId={view.id} url={view.url} zoom={zoom} script={INJECTED} onError={setError}
+              onUrl={(u) => {
+                setAddress(u);
+                try { updateView(view.id, { url: u, title: new URL(u).host || u }); } catch { /* chrome://, about: */ }
+              }} />
+          ) : target ? (
             <ResponsiveStage viewport={viewport} onResize={setViewport} zoom={zoom} device={device}>
             <iframe
               ref={iframe}

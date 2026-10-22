@@ -1,0 +1,136 @@
+// O Chrome de verdade por trás do Portal (protótipo): ver `src-tauri/src/real_browser.rs`.
+import { invoke } from "@tauri-apps/api/core";
+
+/** O tamanho da página no Chrome para um Portal de `box` pixels CSS, com o zoom da página e a densidade da tela. É o
+ *  zoom do próprio Chrome: a página tem menos pixels CSS, cada um com mais pixels de verdade; o quadro chega com a
+ *  resolução da tela (nítido a 125%), e o Portal o mostra no tamanho do box. */
+export function pageMetrics(box: { width: number; height: number }, zoom: number, dpr: number) {
+  const z = zoom > 0 ? zoom : 1;
+  return {
+    width: Math.max(200, Math.round(box.width / z)),
+    height: Math.max(200, Math.round(box.height / z)),
+    deviceScaleFactor: Math.round(z * (dpr > 0 ? dpr : 1) * 100) / 100,
+    mobile: false,
+  };
+}
+
+/** `script`: o piloto dos agentes, que o Chrome roda em todo documento (o mesmo que o proxy injeta no outro navegador). */
+export const realBrowserOpen = (id: string, url: string, metrics: ReturnType<typeof pageMetrics>, script?: string) =>
+  invoke<void>("real_browser_open", { id, url, width: metrics.width, height: metrics.height, scale: metrics.deviceScaleFactor, script });
+
+/** Uma mensagem do app para o piloto da página (`page:run`, `connect`…). */
+export const realBrowserPost = (id: string, message: unknown) => invoke<void>("real_browser_post", { id, message });
+
+/** A foto da página agora: PNG em base64 e o tamanho em px CSS. */
+export const realBrowserScreenshot = (id: string) =>
+  invoke<{ data: string; width: number; height: number }>("real_browser_screenshot", { id });
+
+/** A foto do Chrome real num canvas, com o tamanho da página em px CSS. */
+export async function realBrowserShot(id: string): Promise<{ canvas: HTMLCanvasElement; width: number; height: number }> {
+  const shot = await realBrowserScreenshot(id);
+  const img = new Image();
+  img.src = `data:image/png;base64,${shot.data}`;
+  await img.decode();
+  const canvas = document.createElement("canvas");
+  canvas.width = img.naturalWidth;
+  canvas.height = img.naturalHeight;
+  canvas.getContext("2d")?.drawImage(img, 0, 0);
+  return { canvas, width: shot.width || img.naturalWidth, height: shot.height || img.naturalHeight };
+}
+
+export const realBrowserSend = (id: string, method: string, params: Record<string, unknown>) =>
+  invoke<void>("real_browser_send", { id, method, params });
+
+export const realBrowserHistory = (id: string, delta: number) => invoke<void>("real_browser_history", { id, delta });
+
+export const realBrowserClose = (id: string) => invoke<void>("real_browser_close", { id });
+
+/** Os modificadores no formato do CDP: Alt=1, Ctrl=2, Meta=4, Shift=8. */
+export function cdpModifiers(e: { altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean }): number {
+  return (e.altKey ? 1 : 0) | (e.ctrlKey ? 2 : 0) | (e.metaKey ? 4 : 0) | (e.shiftKey ? 8 : 0);
+}
+
+/** Atalhos de edição que o Chrome só executa se vierem como `commands` no evento de tecla. */
+const EDIT_COMMANDS: Record<string, string> = { a: "selectAll", c: "copy", v: "paste", x: "cut", z: "undo", y: "redo" };
+
+/** O evento `keyDown` do CDP para uma tecla apertada no Portal. `null` = ignorar (tecla morta). */
+export function keyDownEvent(e: {
+  key: string; code: string; keyCode: number; altKey: boolean; ctrlKey: boolean; metaKey: boolean; shiftKey: boolean;
+}): Record<string, unknown> | null {
+  if (e.key === "Dead" || e.key === "Process") return null;
+  const modifiers = cdpModifiers(e);
+  const base = { key: e.key, code: e.code, windowsVirtualKeyCode: e.keyCode, modifiers };
+  const shortcut = e.ctrlKey || e.metaKey;
+  if (shortcut) {
+    const command = EDIT_COMMANDS[e.key.toLowerCase()];
+    return { ...base, type: "rawKeyDown", ...(command ? { commands: [command] } : {}) };
+  }
+  // Caractere digitável (inclusive acentuado, depois da tecla morta): vai com o texto.
+  if ([...e.key].length === 1) return { ...base, type: "keyDown", text: e.key, unmodifiedText: e.key };
+  if (e.key === "Enter") return { ...base, type: "keyDown", text: "\r", unmodifiedText: "\r" };
+  return { ...base, type: "rawKeyDown" };
+}
+
+const BUTTONS = ["left", "middle", "right", "back", "forward"] as const;
+
+export function mouseButton(button: number): string {
+  return BUTTONS[button] ?? "none";
+}
+
+/** A posição do ponteiro na página do Chrome: desfaz o tamanho com que o quadro aparece na tela
+ *  (inclusive o zoom do canvas, que está no `getBoundingClientRect`). */
+export function pagePoint(
+  clientX: number, clientY: number,
+  rect: { left: number; top: number; width: number; height: number },
+  page: { width: number; height: number },
+): { x: number; y: number } {
+  return {
+    x: Math.round(((clientX - rect.left) * page.width) / Math.max(rect.width, 1)),
+    y: Math.round(((clientY - rect.top) * page.height) / Math.max(rect.height, 1)),
+  };
+}
+
+/** Onde começa o login: a raiz do site. Um endereço de login do meio do fluxo carrega parâmetros que
+ *  vencem (o Google responde 400), então nunca é reaproveitado. Sem endereço, a conta Google. */
+export function loginStartUrl(address: string): string {
+  try {
+    const url = new URL(/^https?:\/\//i.test(address) ? address : `https://${address}`);
+    if (url.protocol === "http:" || url.protocol === "https:") return `${url.origin}/`;
+  } catch { /* endereço vazio ou inválido */ }
+  return "https://accounts.google.com/";
+}
+
+/** Uma página de login do Google. Ali o Chrome controlado é recusado e, pior, a tentativa marca o
+ *  perfil, que passa a ser recusado até num Chrome comum. O Portal não deixa digitar nela. */
+export function isGoogleSignIn(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return u.hostname === "accounts.google.com" && /signin|ServiceLogin|AddSession|InteractiveLogin/i.test(u.pathname);
+  } catch {
+    return false;
+  }
+}
+
+export const realBrowserLoginFinish = () => invoke<void>("real_browser_login_finish");
+
+/** Onde o Portal está na janela do app (pixels CSS). `null` = fora de vista. */
+export type PortalRect = { x: number; y: number; width: number; height: number; scale: number } | null;
+
+/** O retângulo do elemento, ou `null` se ele não está à vista (sem tamanho, ou a janela escondida). */
+export function portalRect(el: Element | null): PortalRect {
+  if (!el || document.visibilityState === "hidden") return null;
+  const r = el.getBoundingClientRect();
+  if (r.width < 1 || r.height < 1 || r.right <= 0 || r.bottom <= 0 || r.left >= innerWidth || r.top >= innerHeight) return null;
+  return { x: r.left, y: r.top, width: r.width, height: r.height, scale: devicePixelRatio };
+}
+
+export function sameRect(a: PortalRect, b: PortalRect): boolean {
+  if (!a || !b) return a === b;
+  return a.scale === b.scale && Math.abs(a.x - b.x) < 0.5 && Math.abs(a.y - b.y) < 0.5 && Math.abs(a.width - b.width) < 0.5 && Math.abs(a.height - b.height) < 0.5;
+}
+
+/** Abre o perfil do app num Chrome comum (sem controle remoto), em cima do Portal, para entrar numa conta. */
+export const realBrowserLogin = (url: string, rect: PortalRect) => invoke<void>("real_browser_login", { url, rect });
+
+/** O Portal mudou de lugar ou saiu de vista: a janela de login acompanha. */
+export const realBrowserLoginPlace = (rect: PortalRect) => invoke<void>("real_browser_login_place", { rect });

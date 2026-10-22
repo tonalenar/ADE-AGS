@@ -44,7 +44,16 @@ export type PageMessage =
    *  página empieza a mandar lo que capturó. */
   | { source: PageSource; type: "page:ready"; payload: { doc: string; url: string } }
   | { source: PageSource; type: "page:reply"; payload: PageReply }
-  | { source: PageSource; type: "debug:batch"; payload: DebugBatch };
+  | { source: PageSource; type: "debug:batch"; payload: DebugBatch }
+  /** Só no Chrome real: o runtime pede um toque ou uma tecla de verdade (o `Input` do CDP). Responde-se `input:done`. */
+  | { source: PageSource; type: "input:request"; payload: NativeInput & { id: string } };
+
+/** Um toque ou uma tecla que o Chrome real executa pelo CDP. `x`/`y` em px CSS da janela da página; `modifiers` no
+ *  formato do CDP (Alt=1, Ctrl=2, Meta=4, Shift=8). */
+export type NativeInput =
+  | { kind: "click"; x: number; y: number }
+  | { kind: "key"; key: string; code: string; keyCode: number; modifiers: number; text?: string; commands?: string[] }
+  | { kind: "text"; text: string };
 
 /** Lo que la app le pide a la página por su cuenta (el selector, la historia). */
 export type SimpleAppMessage = {
@@ -58,7 +67,8 @@ export type SimpleAppMessage = {
 
 export type AppMessage =
   | SimpleAppMessage
-  | { source: AppSource; type: "page:run"; id: string; command: PageCommand };
+  | { source: AppSource; type: "page:run"; id: string; command: PageCommand }
+  | { source: AppSource; type: "input:done"; id: string; ok: boolean };
 
 // ── Órdenes que se ejecutan adentro de la página ─────────────────
 

@@ -29,6 +29,7 @@ mod android;
 mod pet;
 mod prelaunch;
 mod preview;
+mod real_browser;
 mod roles;
 mod routines;
 mod runs;

@@ -100,6 +100,9 @@ pub struct Portal {
     /// "Celular solto": o modelo do aparelho que o nó mostra no lugar da janela do navegador; só o frontend lê.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub device: Option<String>,
+    /// O Portal mostra um Chrome de verdade (`real_browser`); só o frontend lê.
+    #[serde(default, rename = "realChrome", skip_serializing_if = "Option::is_none")]
+    pub real_chrome: Option<bool>,
 }
 
 pub const PORTAL_PREFIX: &str = "portal-";

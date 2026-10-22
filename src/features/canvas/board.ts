@@ -48,6 +48,8 @@ export interface CanvasPortal {
   viewport?: { width: number; height: number };
   /** "Celular solto": o navegador sem a janela, só o aparelho deste modelo (ver `browser/devices.ts`). Ausente = a janela. */
   device?: string;
+  /** O Portal mostra um Chrome de verdade (ver `browser/RealBrowserView`). Ausente = o navegador pelo proxy. */
+  realChrome?: boolean;
 }
 
 export const PORTAL_PREFIX = "portal-";

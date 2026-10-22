@@ -1170,7 +1170,7 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
   const drop = useViewTabsStore((s) => s.dropPortalView);
   const view = useViewTabsStore((s) => s.portalViews.find((v) => v.id === id));
   useEffect(() => {
-    ensure(id, cwd, portal.url, portal.viewport);
+    ensure(id, cwd, portal.url, portal.viewport, portal.realChrome);
     // Al borrar el portal (o cerrar el canvas) se suelta la vista y con ella el navegador.
     return () => drop(id);
     // La URL inicial solo cuenta al crear la vista.
@@ -1190,6 +1190,13 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
     if (shownViewport?.width === saved?.width && shownViewport?.height === saved?.height) return;
     canvasActions.updatePortal(key, id, shownViewport ? { viewport: shownViewport } : { viewport: undefined });
   }, [shownViewport?.width, shownViewport?.height]);
+
+  // O Chrome real também: o Portal reabre no mesmo modo.
+  const shownReal = !!view?.realChrome;
+  useEffect(() => {
+    if (!key || !view || shownReal === !!portal.realChrome) return;
+    canvasActions.updatePortal(key, id, { realChrome: shownReal || undefined });
+  }, [shownReal]);
 
   useEffect(() => {
     if (!armed) return;
