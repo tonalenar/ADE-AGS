@@ -16,6 +16,9 @@ describe("agente trabalhando não dispara o aviso de parado", () => {
   it("reconhece a tela de trabalho", () => {
     expect(isWorking(["• Working (4m 39s • esc to interrupt)"])).toBe(true);
     expect(isWorking(["Running hooks… 3s"])).toBe(true);
+    // OpenCode: a barra animada e "esc interrupt", sem o "to".
+    expect(isWorking(["┃  Build  Claude Haiku 5.5", "  ■■⬝⬝⬝⬝⬝⬝  esc interrupt"])).toBe(true);
+    expect(isWorking(["  Build · Claude Haiku 5.5 · 2.3s   ctrl+p commands"])).toBe(false);
     expect(isWorking(["> "])).toBe(false);
   });
 

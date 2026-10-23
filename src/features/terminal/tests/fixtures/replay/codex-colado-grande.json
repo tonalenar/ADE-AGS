@@ -1,0 +1,75 @@
+{
+  "format": "ade-replay",
+  "version": 1,
+  "id": "codex-colado-grande",
+  "agent": "codex",
+  "title": "Codex: colado grande vira [Pasted Content 3904 chars] e engole o Enter",
+  "origin": {
+    "kind": "synthesized",
+    "basis": "Marcador e rodapé copiados de pasteSubmit.test.ts e missionStartE2E.test.ts (\"› [Pasted Content 3904 chars]\", \"medium · ~\\\\ADE-AGS\"); composer do ratatui desenhado por posição (CUP).",
+    "recordedAt": null,
+    "platform": null,
+    "tuiVersion": null
+  },
+  "terminal": {
+    "cols": 100,
+    "rows": 30
+  },
+  "message": "[Mensagem de Orquestrador via ADE AGS] Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de regressão com arquivo:linha. Você é o Revisor desta missão. Leia o plano em docs/plano.md, revise cada arquivo alterado e aponte riscos de re",
+  "chunks": [
+    {
+      "atMs": 0,
+      "data": "\u001b[2J\u001b[H\u001b[1m>_ OpenAI Codex\u001b[0m (v0.46.0)\r\n\r\n\u001b[2mmodel:\u001b[0m     gpt-6.1-sol medium   \u001b[2m/model to change\u001b[0m\r\n\u001b[2mdirectory:\u001b[0m ~\\ADE-AGS\r\n\r\n\u001b[2m•\u001b[0m Pronto. Aguardando a próxima tarefa.\r\n\r\n\u001b[26;1H\u001b[2K\u001b[27;1H\u001b[2K› \u001b[2mAsk Codex to do anything\u001b[0m\u001b[28;1H\u001b[2K\u001b[29;1H\u001b[2K  \u001b[2mmedium · ~\\ADE-AGS\u001b[0m\u001b[27;3H"
+    },
+    {
+      "atMs": 200,
+      "data": "\u001b[?25l\u001b[27;1H\u001b[2K› [Pasted Content 3904 chars]\u001b[27;30H\u001b[?25h"
+    },
+    {
+      "atMs": 2600,
+      "data": "\u001b[?25l\u001b[27;1H\u001b[2K› \u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;255;255;255mW\u001b[38;2;255;255;255mo\u001b[38;2;150;150;150mr\u001b[38;2;150;150;150mk\u001b[38;2;150;150;150mi\u001b[38;2;150;150;150mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(0s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    },
+    {
+      "atMs": 3600,
+      "data": "\u001b[?25l\u001b[25;1H\u001b[2K\u001b[2m•\u001b[0m \u001b[38;2;150;150;150mW\u001b[38;2;150;150;150mo\u001b[38;2;150;150;150mr\u001b[38;2;150;150;150mk\u001b[38;2;255;255;255mi\u001b[38;2;255;255;255mn\u001b[38;2;150;150;150mg\u001b[0m \u001b[2m(1s • esc to interrupt)\u001b[0m\u001b[27;3H\u001b[?25h"
+    }
+  ],
+  "checkpoints": [
+    {
+      "atMs": 2000,
+      "since": 400,
+      "label": "Enter engolido: o marcador continua na caixa",
+      "expect": {
+        "pastePending": true,
+        "working": false,
+        "fresh": false,
+        "typedPending": false,
+        "textShown": true,
+        "enterRetry": true,
+        "screenContains": "[Pasted Content 3904 chars]"
+      }
+    },
+    {
+      "atMs": 2000,
+      "since": 0,
+      "label": "o colado apareceu na tela (peer tell confirma)",
+      "expect": {
+        "arrived": true
+      }
+    },
+    {
+      "atMs": 3700,
+      "label": "o Enter reenviado pegou",
+      "expect": {
+        "working": true,
+        "pastePending": false
+      },
+      "xfail": {
+        "rust": [
+          "pastePending"
+        ],
+        "reason": "O ratatui desenha por posição (CUP), sem quebra de linha: sem os escapes, o composer antigo e o novo ficam na mesma 'linha' do texto cru, e o marcador de antes ainda conta. Inofensivo no laço de envio, que olha o rodapé de trabalho antes; mas o acerto de 2000 ms também é por acaso (a 'linha' começa com o › do composer)."
+      }
+    }
+  ]
+}

@@ -273,7 +273,7 @@ export function sendKeysToTab(tabId: string, keys: string): boolean {
 
 /** O texto até o cursor: as `rows` linhas que acabam na do cursor, esta só até ele. É onde está a caixa de
  *  entrada de uma TUI esperando o Enter. */
-function beforeCursor(term: Terminal, rows = 4): string {
+export function beforeCursor(term: Terminal, rows = 4): string {
   const buf = term.buffer.active;
   const y = buf.baseY + buf.cursorY;
   const lines: string[] = [];

@@ -95,6 +95,8 @@ const WORKING = [
   /running (hooks?|tools?|command)/i,
   /\bmanaging tasks\b/i,
   /\bthinking( with \w+ effort)?\b/i,
+  // O rodapé do OpenCode ("■■⬝⬝⬝⬝⬝⬝  esc interrupt"), o mesmo que o backend já reconhece (`working_in`).
+  /\besc interrupt\b/i,
 ];
 
 /** A tela mostra que o agente está trabalhando? Pura. */

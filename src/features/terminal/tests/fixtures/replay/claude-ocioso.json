@@ -1,0 +1,101 @@
+{
+  "format": "ade-replay",
+  "version": 1,
+  "id": "claude-ocioso",
+  "agent": "claude-code",
+  "title": "Claude Code ocioso depois de terminar o turno",
+  "origin": {
+    "kind": "synthesized",
+    "basis": "Tela de fim de turno do Claude Code (resposta ⏺ e caixa ❯ vazia entre réguas, como em pasteSubmit.test.ts); região redesenhada como o Ink faz.",
+    "recordedAt": null,
+    "platform": null,
+    "tuiVersion": null
+  },
+  "terminal": {
+    "cols": 100,
+    "rows": 30
+  },
+  "task": {
+    "atMs": 100
+  },
+  "chunks": [
+    {
+      "atMs": 0,
+      "data": "\u001b[?25l\u001b[38;2;215;119;87m╭───────────────────────────────────────────────────╮\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m \u001b[38;2;215;119;87m✻\u001b[0m Welcome to \u001b[1mClaude Code\u001b[0m!                         \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m                                                   \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m   \u001b[2m/help for help, /status for your current setup\u001b[0m  \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m                                                   \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m   \u001b[2mcwd: C:\\proj\\parser\u001b[0m                             \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m╰───────────────────────────────────────────────────╯\u001b[0m\r\n\r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n❯ \r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n  \u001b[2m? for shortcuts\u001b[0m\r\n"
+    },
+    {
+      "atMs": 100,
+      "data": "\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[2m>\u001b[0m [Mensagem de Orquestrador via ADE AGS] Rode os testes do parser e me mande o resultado.\r\n\r\n\u001b[38;2;215;119;87m✻\u001b[0m \u001b[38;2;215;119;87mThinking…\u001b[0m \u001b[2m(0s · esc to interrupt)\u001b[0m\r\n\r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n❯ \r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n  \u001b[2m? for shortcuts\u001b[0m\r\n"
+    },
+    {
+      "atMs": 1000,
+      "data": "\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[38;2;215;119;87m✻\u001b[0m \u001b[38;2;215;119;87mThinking…\u001b[0m \u001b[2m(1s · esc to interrupt)\u001b[0m\r\n\r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n❯ \r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n  \u001b[2m? for shortcuts\u001b[0m\r\n"
+    },
+    {
+      "atMs": 2000,
+      "data": "\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[38;2;215;119;87m✻\u001b[0m \u001b[38;2;215;119;87mThinking…\u001b[0m \u001b[2m(2s · esc to interrupt)\u001b[0m\r\n\r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n❯ \r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n  \u001b[2m? for shortcuts\u001b[0m\r\n"
+    },
+    {
+      "atMs": 3000,
+      "data": "\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[38;2;80;200;120m⏺\u001b[0m \u001b[1mBash\u001b[0m(bun test parser)\r\n  ⎿  \u001b[2m12 pass, 0 fail\u001b[0m\r\n\r\n\u001b[38;2;215;119;87m✻\u001b[0m \u001b[38;2;215;119;87mThinking…\u001b[0m \u001b[2m(3s · esc to interrupt)\u001b[0m\r\n\r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n❯ \r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n  \u001b[2m? for shortcuts\u001b[0m\r\n"
+    },
+    {
+      "atMs": 4000,
+      "data": "\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[38;2;215;119;87m✻\u001b[0m \u001b[38;2;215;119;87mThinking…\u001b[0m \u001b[2m(4s · esc to interrupt)\u001b[0m\r\n\r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n❯ \r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n  \u001b[2m? for shortcuts\u001b[0m\r\n"
+    },
+    {
+      "atMs": 4600,
+      "data": "\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[38;2;255;255;255m⏺\u001b[0m Pronto: os 12 testes do parser passaram e nenhum falhou. Mandei o relatório ao\r\n  Orquestrador com ags peer tell e encerrei o turno.\r\n\r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n❯ \r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n  \u001b[2m? for shortcuts\u001b[0m\r\n\u001b[?25h"
+    }
+  ],
+  "checkpoints": [
+    {
+      "atMs": 3500,
+      "label": "ainda pensando",
+      "expect": {
+        "working": true
+      }
+    },
+    {
+      "atMs": 5000,
+      "since": 4500,
+      "label": "terminou: resposta nova e caixa vazia",
+      "expect": {
+        "working": false,
+        "fresh": true,
+        "waitingApproval": false,
+        "pastePending": false,
+        "screenQuestion": false,
+        "asksToClose": false,
+        "screenContains": "os 12 testes do parser passaram"
+      },
+      "xfail": {
+        "rust": [
+          "working"
+        ],
+        "reason": "O Rust (tui_working) procura 'esc to interrupt' nos últimos 4 KB crus do PTY, não na tela: os quadros do spinner de antes do fim do turno ainda estão nesses 4 KB. Um Enter engolido logo depois do fim de um turno pode ser dado por enviado."
+      }
+    },
+    {
+      "atMs": 60000,
+      "label": "quieto há menos de 2 min",
+      "expect": {
+        "stalled": false
+      }
+    },
+    {
+      "atMs": 130000,
+      "label": "quieto há mais de 2 min com a tarefa aberta",
+      "expect": {
+        "stalled": true,
+        "working": false
+      },
+      "xfail": {
+        "rust": [
+          "working"
+        ],
+        "reason": "Nada saiu depois do fim do turno: o spinner antigo continua nos últimos 4 KB crus (ver o checkpoint de 5000 ms)."
+      }
+    }
+  ]
+}
