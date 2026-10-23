@@ -61,7 +61,7 @@ describe("o próprio harness", () => {
 describe("replay pelos detectores do front (xterm real, relógio falso)", () => {
   for (const { fixture } of all) {
     it(`${fixture.id} (${fixture.origin.kind})`, async () => {
-      if (process.env.REPLAY_TIMELINE) console.log(`${fixture.id}\n${await timeline(fixture)}`);
+      if (process.env.REPLAY_TIMELINE) process.stderr.write(`\n${fixture.id}\n${await timeline(fixture)}\n`);
       const mismatches = await replayTs(fixture);
       expect(mismatches, `${fixture.title}\n${explain(mismatches)}`).toEqual([]);
     });

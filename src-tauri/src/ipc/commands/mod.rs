@@ -11,6 +11,7 @@ mod peers;
 pub mod routine;
 mod role;
 mod portals;
+mod replay;
 mod devices;
 pub mod pool;
 mod browser;

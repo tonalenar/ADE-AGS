@@ -778,6 +778,8 @@ pub async fn pty_create(
                     // Modo push del orquestador (Fase 9): si nadie observa esta tab, esto
                     // es una lectura atómica y vuelve.
                     crate::orchestrator::watch::observe(id, &buf[..n]);
+                    // Gravador dos testes por replay: desligado, é uma leitura atômica e volta.
+                    super::recorder::observe(id, &buf[..n]);
                     let data = text.push(&buf[..n]);
                     if !data.is_empty() {
                         app_clone.emit(&event_name, PtyDataPayload { data, end: Some(stream_end) }).ok();
@@ -850,6 +852,12 @@ pub fn pty_attach(id: u32) -> Result<String, String> {
 /// `None` = ese PTY ya no existe.
 pub fn output_total(id: u32) -> Option<u64> {
     buffers().get(&id).map(|b| b.total_bytes)
+}
+
+/// Colunas e linhas do PTY vivo (o gravador do replay guarda o tamanho junto com a saída).
+pub(crate) fn pty_size(id: u32) -> Option<(u16, u16)> {
+    let size = registry().get(&id)?.master.get_size().ok()?;
+    Some((size.cols, size.rows))
 }
 
 /// Bytes escritos desde que el PTY arrancó, sin copiar el scrollback. El guardado
