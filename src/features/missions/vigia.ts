@@ -9,6 +9,7 @@ import type { Tab } from "@/features/tabs/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { lastOutputAt } from "@/features/terminal/activity";
 import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
+import { structuredOf, structuredVerdict, workingWith } from "@/features/terminal/structuredState";
 import { showBotToast } from "@/shared/brand/botToastStore";
 import { missionIndex, tabsByMission } from "./groups";
 import { useMissionsStore } from "./store";
@@ -272,7 +273,9 @@ const pokes = new Map<string, number>();
 
 /** Pode escrever no terminal desta aba agora? Ver `pokeAllowed`. */
 function mayPoke(tabId: string, now: number): boolean {
-  return pokeAllowed(pokes.get(tabId), sentAt.get(tabId), isWorking(screenOf(tabId)?.lines ?? []), now);
+  // A tela, somada ao transcript (Claude Code/Codex) quando há canal estruturado: um turno aberto no
+  // transcript (ferramenta longa e calada, diálogo de aprovação) também segura a cutucada.
+  return pokeAllowed(pokes.get(tabId), sentAt.get(tabId), workingWith(tabId, isWorking(screenOf(tabId)?.lines ?? [])), now);
 }
 
 function poke(tabId: string, text: string, now: number, onSent: () => void): void {
@@ -389,7 +392,7 @@ export function vigiaTick(now = Date.now()): void {
       leadLines: screenOf(lead.id)?.lines ?? null,
       members: team.filter((tab) => tab.id !== lead.id).map((tab) => ({
         name: tab.title.split(" — ")[0],
-        working: isWorking(screenOf(tab.id)?.lines ?? []),
+        working: workingWith(tab.id, isWorking(screenOf(tab.id)?.lines ?? [])),
         owesReport: taskAt.has(tab.id) && !memberFinished(taskAt.get(tab.id), finishedAt.get(tab.id)),
       })),
     });
@@ -440,7 +443,8 @@ export function vigiaTick(now = Date.now()): void {
     if (inFlight.has(mission.id)) continue;
     // Equipe que já entregou, ou integrante que já reportou a tarefa: parados com razão, não travados.
     if (watch.doneAt !== undefined) continue;
-    const idle = idleCandidates(team, now, lastOutputAt, lastPoke).filter((tab) => !memberFinished(taskAt.get(tab.id), finishedAt.get(tab.id)));
+    // Sem saída há 90 s mas com o turno aberto no transcript não é ocioso: é uma ferramenta longa.
+    const idle = idleCandidates(team, now, lastOutputAt, lastPoke).filter((tab) => !memberFinished(taskAt.get(tab.id), finishedAt.get(tab.id)) && structuredVerdict(structuredOf(tab.id)) !== true);
     if (idle.length === 0) continue;
     const pick = vigiaAgentFor(lead.agentId, available);
     if (!pick) continue;

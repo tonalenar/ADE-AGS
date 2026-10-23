@@ -127,6 +127,11 @@ export interface StallProbe {
   lastOutputAt: (tabId: string) => number | undefined;
   lastInputAt: (tabId: string) => number | undefined;
   screen: (tabId: string) => readonly string[] | null;
+  /**
+   * "Trabalhando" combinando a tela com o transcript (ver `structuredState.ts`). Sem isto, só a tela
+   * (`isWorking`), como antes.
+   */
+  working?: (tabId: string, lines: readonly string[]) => boolean;
 }
 
 export interface Stall {
@@ -153,7 +158,8 @@ export function findStalls(pending: PendingTasks, probe: StallProbe, stallMs = S
     const lines = probe.screen(task.tabId);
     // Trabalhando (spinner, "esc to interrupt") não é parado, mesmo sem escrever: antes o aviso
     // disparava com o agente em plena execução.
-    if (lines && (isWaitingForUser(lines) || isWorking(lines))) continue;
+    const working = probe.working ? probe.working(task.tabId, lines ?? []) : lines !== null && isWorking(lines);
+    if ((lines && isWaitingForUser(lines)) || working) continue;
     out.push({
       tabId: task.tabId,
       fromTabId: task.fromTabId,
