@@ -63,7 +63,9 @@ import { RoutinesPanel } from "./RoutinesPanel";
 import { RoleEditDialog } from "./RoleEditDialog";
 import { applyTabRole } from "./applyRole";
 import type { AgentRoleChoice } from "./agentRole";
-import { boardKeyOfTab, canvasActions, missionOfKey, useActiveBoardKey, useCanvasStore } from "./store";
+import { boardKeyOfTab, canvasActions, compareOfKey, missionOfKey, useActiveBoardKey, useCanvasStore } from "./store";
+import { ComparisonBar } from "@/features/compare/ComparisonBar";
+import { openCompareDialog } from "@/features/compare/store";
 import { cleanPreviewLines } from "./previewText";
 
 /** Avisa o agente quando a pessoa liga uma corda entre ele e um navegador do canvas. */
@@ -776,7 +778,9 @@ function CanvasInner() {
           onUseSize={() => { if (lastPlaced) setSizes((cur) => rememberSize(cur, lastPlaced.kind, lastPlaced.size)); setLastPlaced(null); }}
           onResetSize={() => { if (armed) setSizes((cur) => rememberSize(cur, armed, null)); }}
           onImage={() => fileInput.current?.click()}
-          onUndo={() => key && canvasActions.undoStroke(key)} canUndo={board.drawings.length > 0} />
+          onUndo={() => key && canvasActions.undoStroke(key)} canUndo={board.drawings.length > 0}
+          onCompare={() => openCompareDialog(allTabs.find((tab) => tab.id === activeTabId)?.cwd ?? "")} />
+        {compareOfKey(key) && <ComparisonBar comparisonId={compareOfKey(key)!} />}
         {panel === "routines" && <RoutinesPanel onClose={() => setPanel(null)} />}
         {panel === "design" && design.details.length > 0 && (
           <DesignPanel details={design.details} reload={design.reload} initial={designFocus} onClose={() => { setPanel(null); setDesignFocus(null); }} />
