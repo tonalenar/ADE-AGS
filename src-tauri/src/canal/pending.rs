@@ -292,10 +292,10 @@ pub fn sync(conn: &Connection, owner: &Owner<'_>, now_signals: &[Signal], now: i
                 params![owner.tab_id, owner.tab_name, owner.agent_id, owner.session_id, s.kind.as_str(), s.key, redact(&s.title), redact(&s.detail), options, now],
             )
             .map_err(|e| e.to_string())?;
-        if inserted > 0 {
-            if let Some(item) = get(conn, conn.last_insert_rowid())? {
-                created.push(item);
-            }
+        if inserted > 0
+            && let Some(item) = get(conn, conn.last_insert_rowid())?
+        {
+            created.push(item);
         }
     }
     // O que estava pendente e não aparece mais foi resolvido na própria TUI (a pessoa respondeu,

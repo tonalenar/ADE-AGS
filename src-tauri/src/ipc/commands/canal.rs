@@ -45,9 +45,12 @@ struct TabRow {
     profile: Option<PathBuf>,
 }
 
-/// As abas das janelas abertas. `all` = todas (para expirar pendências de aba fechada).
+/// Uma linha de `tabs`: id, título, agente, cwd, sessão e conta.
+type RawTab = (String, Option<String>, String, String, Option<String>, Option<String>);
+
+/// As abas das janelas abertas (todas: as fechadas expiram as pendências), com a pasta da conta das que têm canal.
 fn open_tabs(db: &DbConnection) -> Result<Vec<TabRow>, String> {
-    let rows: Vec<(String, Option<String>, String, String, Option<String>, Option<String>)> = {
+    let rows: Vec<RawTab> = {
         let conn = db.lock().map_err(|e| e.to_string())?;
         let mut stmt = conn
             .prepare(
