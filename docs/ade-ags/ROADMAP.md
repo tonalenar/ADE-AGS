@@ -1,5 +1,13 @@
 # Roadmap ADE AGS
 
+## Canal estruturado em paralelo ao terminal
+
+O estado das abas de Claude Code e Codex lido do transcript que a própria TUI grava (turno aberto ou
+encerrado, ferramentas pendentes, pergunta com opções, tokens), com a tela como reserva: segura a
+entrega de mensagens e as cutucadas do Vigia com o turno aberto (modo `veto`, padrão), `ags tab state`,
+e aprovações e perguntas dos integrantes como pendências no SQLite (`ags peer pending`/`answer`).
+Achados por agente, desenho e limites em [CANAL_ESTRUTURADO.md](./CANAL_ESTRUTURADO.md).
+
 ## Fila de mensagens entre agentes durável e editável
 
 Toda mensagem entre agentes tem id e registro no SQLite (`peer_messages`), a entrega sobrevive ao
