@@ -344,7 +344,7 @@ pub(super) fn claude_project_slug(cwd: &str) -> String {
 /// Con una cuenta alternativa, TODO lo de Claude Code vive ahí adentro — incluidos los
 /// transcripts — así que buscar en `~/.claude` daría siempre "sin sesión": ni título ni
 /// resume. `None` = la cuenta del sistema.
-pub(super) fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
+pub(crate) fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
     let root = match profile {
         Some(dir) => dir.to_path_buf(),
         None => dirs::home_dir().unwrap_or_default().join(".claude"),
@@ -696,7 +696,7 @@ pub(super) fn gemini_title(path: &Path, fallback: &str) -> SessionTitleResult {
 // session id de OTRO proyecto y reanudar la conversación equivocada. Comparar `payload.cwd`
 // como ruta, y no como substring, elimina las dos cosas.
 
-pub(super) fn codex_root(profile: Option<&Path>) -> PathBuf {
+pub(crate) fn codex_root(profile: Option<&Path>) -> PathBuf {
     if let Some(dir) = profile {
         return dir.join("sessions");
     }

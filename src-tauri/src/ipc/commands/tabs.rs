@@ -42,6 +42,18 @@ pub(super) fn tab_list(app: &AppHandle) -> Result<Value, String> {
         .map_err(|e| e.to_string())?
         .filter_map(|r| r.ok())
         .collect();
+    drop(stmt);
+    drop(conn);
+    // O estado lido do transcript (Claude Code e Codex), se a aba tem: `ags tab state <id>` dá o resto.
+    let rows: Vec<Value> = rows
+        .into_iter()
+        .map(|mut row| {
+            if let Some(s) = row.get("id").and_then(Value::as_str).and_then(crate::canal::snapshot) {
+                row["structured"] = s.brief();
+            }
+            row
+        })
+        .collect();
 
     Ok(json!({ "tabs": rows }))
 }

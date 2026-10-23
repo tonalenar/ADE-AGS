@@ -41,6 +41,8 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
         crate::ipc::start_routine_scheduler(app.clone());
         // A fila das mensagens entre agentes volta a andar de onde parou (ver `peer_queue`).
         crate::ipc::start_peer_queue(app.clone());
+        // O canal estruturado: o estado de cada aba de Claude Code/Codex lido do transcript (ver `canal`).
+        crate::ipc::start_canal(app.clone());
         // El pet es de la pantalla: sin ventanas (headless) no hay a quién mostrárselo.
         crate::pet::start(app.clone());
     }
@@ -174,6 +176,7 @@ pub fn run() {
             crate::ipc::commands::peer_queue::peer_queue_move,
             crate::ipc::commands::peer_queue::peer_queue_cancel,
             crate::ipc::commands::peer_queue::peer_queue_send_now,
+            crate::ipc::commands::canal::structured_state_all,
             crate::ipc::commands::routine::routine_list_all,
             crate::ipc::commands::routine::routine_set_enabled,
             crate::ipc::commands::routine::routine_set_catch_up,
