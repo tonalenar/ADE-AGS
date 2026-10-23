@@ -294,6 +294,10 @@ pub fn run() {
             crate::forge::forge_checkout_pull,
             crate::forge::forge_releases,
             crate::forge::forge_labels,
+            // Guia de revisão de PR por IA (só lê o PR; nunca escreve no GitHub)
+            crate::forge::forge_pull_files,
+            crate::forge::review_guide_get,
+            crate::forge::review_guide_generate,
             // Sincronización de skills y configuración por un repo privado
             crate::sync::sync_status,
             crate::sync::sync_setup,
