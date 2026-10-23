@@ -1,5 +1,11 @@
 # Roadmap ADE AGS
 
+## Fila de mensagens entre agentes durável e editável
+
+Toda mensagem entre agentes tem id e registro no SQLite (`peer_messages`), a entrega sobrevive ao
+reinício, `--id` torna o reenvio idempotente e o selo "N na fila" deixa o usuário editar, reordenar,
+cancelar ou enviar já. Detalhes em [FILA_DE_MENSAGENS.md](./FILA_DE_MENSAGENS.md).
+
 ## Etapa 20 — ponto 1: notificações com identidade ADE AGS
 
 AUMID explícito antes das janelas, atalho por usuário com o bot e reparo idempotente,
@@ -323,3 +329,7 @@ Redução drástica do tempo de feedback de testes para agentes e humanos atrav�
 ## Portal com Chrome real
 
 O Portal pode mostrar um Chrome de verdade (perfil próprio do app), todo dentro do app: tela por screencast, login do Google numa janela de Chrome comum encaixada sobre o Portal, uma janela por Portal, zoom, barra de rolagem sobreposta, e o Jev pilotando com cliques e teclas de verdade (`isTrusted`). Desenho, decisões (sem esconder a automação) e limites: [PORTAL_CHROME_REAL.md](./PORTAL_CHROME_REAL.md).
+
+## Testes por replay das telas dos agentes
+
+Fixtures com a saída crua do PTY (pedaços com o instante em que chegaram) passam pelos detectores de verdade, no front (xterm real, relógio falso) e no backend (fim cru do PTY), sem app nem PTY. Gravador só para desenvolvimento (`ags replay start/stop`, com `ADE_AGS_REPLAY_RECORD=1`). Formato, gravador, fixtures e o que já acharam: [REPLAY_TESTES.md](./REPLAY_TESTES.md).

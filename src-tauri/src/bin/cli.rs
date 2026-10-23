@@ -63,6 +63,10 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peer deliver [<nome>] --file entrega.json   Entrega final estruturada (Handoff v1) ao orquestrador
                                               (ou a <nome>): ele recebe uma linha com o resumo e o id
   peer handoff <id>                           O JSON inteiro de uma entrega da sua missão
+             (tell/ask/deliver --id <req>: o seu id do pedido. O mesmo id é a mesma mensagem:
+              nunca é digitada duas vezes, nem num reenvio depois de um reinício do app)
+  peer queue [list]                           O que você mandou e ainda espera na fila (id, destino, idade)
+  peer queue cancel <id>                      Cancela uma mensagem sua que ainda não foi entregue
   ci watch <PR>                               Segue o CI do PR em segundo plano e cola o resultado
                                               no seu terminal quando terminar (no lugar de gh pr checks --watch)
   notify \"mensagem\"                           Avisa o usuário (aviso na tela; barra de tarefas)
@@ -814,6 +818,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         // `ags peer deliver --file entrega.json` (ao orquestrador) ou `ags peer deliver QA --file ...`.
         "peer.deliver" => &["to", "text"],
         "peer.handoff" => &["id"],
+        // `ags peer queue`, `ags peer queue cancel 12`.
+        "peer.queue" => &["action", "id"],
         // `ags note read Plano 10 20`: desde la línea 10, 20 líneas.
         "notify.send" => &["message"],
         // `ags role create "Revisor" "Procure falhas..."`; el texto también va con --file.

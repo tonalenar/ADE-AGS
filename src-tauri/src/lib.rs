@@ -25,6 +25,7 @@ mod memory;
 pub mod missions;
 mod notifier;
 mod orchestrator;
+mod peer_queue;
 mod android;
 mod pet;
 mod prelaunch;

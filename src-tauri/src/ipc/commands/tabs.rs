@@ -353,6 +353,10 @@ pub(super) fn submit_prompt_seen(pty_id: u32, text: &str) -> Result<bool, String
         crate::terminal::write_to_pty(pty_id, text)?;
         wait_until_quiet(pty_id, ECHO_QUIET, ECHO_MAX, false);
     }
+    // O rodapé de trabalho só vale se apareceu DEPOIS do Enter: nos últimos KB da saída ainda estão os quadros do
+    // spinner do turno anterior, e um Enter engolido logo depois de um turno curto era dado por enviado (achado
+    // pelo replay, fixture `claude-ocioso`).
+    let enter_at = crate::terminal::output_total(pty_id).unwrap_or(0);
     crate::terminal::write_to_pty(pty_id, "\r")?;
     // Um pegado grande vira "[Pasted Content 3904 chars]" e pode engolir o Enter: a mensagem
     // fica escrita e ninguém a recebe. O Hermes e o OpenCode não usam o marcador: o texto fica
@@ -368,7 +372,7 @@ pub(super) fn submit_prompt_seen(pty_id: u32, text: &str) -> Result<bool, String
         let before = crate::terminal::output_total(pty_id).unwrap_or(0);
         wait_until_quiet(pty_id, std::time::Duration::from_millis(400), std::time::Duration::from_secs(4), false);
         let wrote = crate::terminal::output_total(pty_id).unwrap_or(0).saturating_sub(before) as usize;
-        if tui_working(pty_id) {
+        if working_since(pty_id, enter_at) {
             return Ok(true);
         }
         let fresh = crate::terminal::tail_of(pty_id, wrote.min(65_536))
@@ -378,13 +382,15 @@ pub(super) fn submit_prompt_seen(pty_id: u32, text: &str) -> Result<bool, String
         }
         crate::terminal::write_to_pty(pty_id, "\r")?;
     }
-    Ok(tui_working(pty_id))
+    Ok(working_since(pty_id, enter_at))
 }
 
-/// O fim da tela mostra que o agente está trabalhando agora?
-fn tui_working(pty_id: u32) -> bool {
-    crate::terminal::tail_of(pty_id, 4096)
-        .is_some_and(|raw| working_in(&crate::orchestrator::digest::strip_ansi(&raw)))
+/// O que saiu desde `since` (o total do PTY no Enter) mostra que o agente está trabalhando?
+fn working_since(pty_id: u32, since: u64) -> bool {
+    let wrote = crate::terminal::output_total(pty_id).unwrap_or(0).saturating_sub(since) as usize;
+    wrote > 0
+        && crate::terminal::tail_of(pty_id, wrote.min(65_536))
+            .is_some_and(|raw| working_in(&crate::orchestrator::digest::strip_ansi(&raw)))
 }
 
 /// Pura: o trecho tem texto de verdade (mais de 12 palavras diferentes), e não só uma animação que
@@ -440,7 +446,9 @@ pub(super) fn typed_text_in(screen: &str, message: &str) -> bool {
     without_layout(screen).contains(&tail)
 }
 
-/// Pura: nas últimas linhas com texto, uma linha de prompt (>, ›, ❯) com o marcador de pegado.
+/// Pura: nas últimas linhas com texto, uma linha de prompt (>, ›, ❯) com o marcador de pegado. A borda
+/// da caixa de entrada ("│ › [Pasted…] │") não é o prompt: sai antes de olhar, como no front
+/// (`pasteStillPending`).
 pub(super) fn pending_paste_in(screen: &str) -> bool {
     screen
         .lines()
@@ -448,7 +456,7 @@ pub(super) fn pending_paste_in(screen: &str) -> bool {
         .filter(|line| !line.trim().is_empty())
         .take(6)
         .any(|line| {
-            let trimmed = line.trim_start();
+            let trimmed = line.trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '│' | '┃' | '║' | '|'));
             (trimmed.starts_with('>') || trimmed.starts_with('›') || trimmed.starts_with('❯'))
                 && (line.contains("[Pasted Content") || line.contains("[Pasted text"))
         })
@@ -503,6 +511,9 @@ mod paste_tests {
         assert!(pending_paste_in("› [Pasted text #1 +30 lines]"));
         assert!(!pending_paste_in("> pergunta enviada\n⏺ resposta"));
         assert!(!pending_paste_in("  [Pasted text #1 +30 lines] (histórico)\n> "));
+        // Dentro da caixa com borda (o mesmo caso de pasteSubmit.test.ts no front).
+        assert!(pending_paste_in("╭────╮\n│ › [Pasted Content 3904 chars]  │\n╰────╯"));
+        assert!(!pending_paste_in("│ texto citando [Pasted text #1] na resposta │"));
     }
 }
 

@@ -21,7 +21,9 @@ use std::collections::HashMap;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
+use super::peer_queue::{self, Delivery, Sent};
 use super::tabs::{pty_id_for_tab, submit_prompt, submit_prompt_seen, tab_create, tab_list, wait_for_pty, wait_until_quiet, wait_until_ready};
+use crate::peer_queue::store::NewMessage;
 use crate::ipc::bridge::{ask_frontend, unwrap_frontend_result};
 use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_opt};
 
@@ -191,39 +193,6 @@ pub(crate) fn framed(from_name: &str, text: &str, expects_reply: bool) -> String
     format!("[Mensagem de {from_name} via ADE AGS] {text}\n({how})")
 }
 
-/// Mensagens já entregues (ou na fila) ao mesmo destino, por (destino, texto), com quando. Uma
-/// tarefa que se repete igual (o orquestrador reenvia, ou um tell que deu timeout e ficou na fila)
-/// não chega DUAS vezes ao agente: era isso que fazia integrantes já liberados refazerem o trabalho.
-const DUPLICATE_WINDOW: Duration = Duration::from_secs(10 * 60);
-
-/// `true` na primeira vez que este texto vai para este destino dentro da janela; `false` se é repetido.
-fn first_time_seen() -> &'static Mutex<HashMap<String, std::time::Instant>> {
-    static SEEN: OnceLock<Mutex<HashMap<String, std::time::Instant>>> = OnceLock::new();
-    SEEN.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-fn first_time_for(target: &str, text: &str) -> bool {
-    let mut seen = first_time_seen().lock().unwrap_or_else(|e| e.into_inner());
-    seen.retain(|_, at| at.elapsed() < DUPLICATE_WINDOW);
-    let key = dedupe_key(target, text);
-    if seen.contains_key(&key) {
-        return false;
-    }
-    seen.insert(key, std::time::Instant::now());
-    true
-}
-
-/// Esquece que este texto foi para este destino: a entrega não se confirmou, então o reenvio do
-/// mesmo texto não pode ser tratado como repetido.
-fn forget_sent(target: &str, text: &str) {
-    first_time_seen().lock().unwrap_or_else(|e| e.into_inner()).remove(&dedupe_key(target, text));
-}
-
-/// A chave do dedupe: a mesma em `first_time_for` e `forget_sent`.
-fn dedupe_key(target: &str, text: &str) -> String {
-    format!("{target}\u{1}{text}")
-}
-
 /// O fim da saída do PTY, sem escapes, para conferir se uma mensagem apareceu na tela.
 fn tail_text(pty: u32) -> String {
     let Some(text) = crate::terminal::tail_of(pty, 64 * 1024) else { return String::new() };
@@ -250,21 +219,13 @@ pub(crate) fn arrived(before: &str, after: &str, snippet: &str) -> bool {
 
 /// Cola a mensagem e confere que ela apareceu na tela do destino. Um destino rodando um slash
 /// command, por exemplo, engole o texto: sem isto o `peer tell` dizia "enviado" e o reenvio era
-/// recusado como repetido. `false` = não confirmou (e o texto deixa de contar como já enviado).
-///
-/// `sent_as`: o texto com que a mensagem foi registrada no dedupe (`first_time_for`). Na fila ela é
-/// colada com o aviso de atraso no fim; esquecer pelo texto colado não achava o registro, e um reenvio
-/// legítimo de uma entrega que não chegou era recusado como repetido por 10 min.
-fn submit_confirmed(pty: u32, target: &str, message: &str, sent_as: &str) -> Result<bool, String> {
+/// recusado como repetido. `false` = não confirmou: o registro da mensagem fica `unconfirmed`, e
+/// esse estado não conta no dedupe (ver `peer_queue::store::admit`), então o reenvio passa.
+pub(super) fn submit_confirmed(pty: u32, message: &str) -> Result<bool, String> {
     let before = tail_text(pty);
-    match submit_prompt_seen(pty, message) {
-        Err(error) => {
-            forget_sent(target, sent_as);
-            return Err(error);
-        }
-        // O destino começou a trabalhar depois do Enter: chegou.
-        Ok(true) => return Ok(true),
-        Ok(false) => {}
+    // O destino começou a trabalhar depois do Enter: chegou.
+    if submit_prompt_seen(pty, message)? {
+        return Ok(true);
     }
     let Some(snippet) = snippet_of(message) else { return Ok(true) };
     let deadline = std::time::Instant::now() + Duration::from_millis(1500);
@@ -277,24 +238,16 @@ fn submit_confirmed(pty: u32, target: &str, message: &str, sent_as: &str) -> Res
         }
         std::thread::sleep(Duration::from_millis(250));
     }
-    forget_sent(target, sent_as);
     Ok(false)
 }
 
 /// Um cadeado por terminal de destino: duas mensagens para o mesmo agente (dois remetentes,
 /// ou um tell e um ask) nunca são coladas ao mesmo tempo na mesma caixa de entrada.
-fn delivery_lock(target: &str) -> std::sync::Arc<Mutex<()>> {
+pub(super) fn delivery_lock(target: &str) -> std::sync::Arc<Mutex<()>> {
     static LOCKS: OnceLock<Mutex<HashMap<String, std::sync::Arc<Mutex<()>>>>> = OnceLock::new();
     let mut map = LOCKS.get_or_init(|| Mutex::new(HashMap::new())).lock().unwrap_or_else(|e| e.into_inner());
     map.entry(target.to_string()).or_default().clone()
 }
-
-/// Quanto o comando de quem envia espera o destino ficar quieto. Passou disso, a mensagem vai
-/// para a fila e o remetente segue trabalhando (antes ele ficava preso até 60 s pelo trabalho
-/// do outro).
-const SENDER_WAIT: Duration = Duration::from_secs(3);
-/// Até quando a fila espera o destino terminar o turno antes de entregar mesmo assim.
-const QUEUE_MAX_WAIT: Duration = Duration::from_secs(15 * 60);
 
 /// A partir de quanto tempo na fila uma mensagem ganha o aviso de que pode estar velha.
 const STALE_AFTER: Duration = Duration::from_secs(20);
@@ -311,57 +264,6 @@ pub(crate) fn stale_note(waited: Duration) -> Option<String> {
     Some(format!(
         "(Esta mensagem foi escrita há {how}, enquanto você trabalhava, e ficou na fila até agora: o remetente viu o estado de ANTES. Se você já mudou algo que ela cita, confira antes de agir e não refaça o que já fez.)"
     ))
-}
-
-/// A mensagem com o aviso de atraso, se ela esperou o bastante.
-fn with_stale_note(message: String, queued_at: Instant) -> String {
-    match stale_note(queued_at.elapsed()) {
-        Some(note) => format!("{message}\n{note}"),
-        None => message,
-    }
-}
-
-/// Entrega `message` quando o destino parar de escrever, numa thread própria. `false` se era repetida.
-fn deliver_when_quiet(pty: u32, target: &str, message: String) -> bool {
-    if !first_time_for(target, &message) {
-        return false;
-    }
-    let lock = delivery_lock(target);
-    let target = target.to_string();
-    let queued_at = Instant::now();
-    std::thread::spawn(move || {
-        let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
-        wait_until_quiet(pty, Duration::from_millis(1500), QUEUE_MAX_WAIT, false);
-        let _ = submit_confirmed(pty, &target, &with_stale_note(message.clone(), queued_at), &message);
-    });
-    true
-}
-
-/// O que aconteceu com uma mensagem: entregue já, na fila, ou descartada por ser repetida.
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Delivery { Now, Queued, Duplicate, Unconfirmed }
-
-/// Entrega já se o destino se aquietar em até `SENDER_WAIT`; senão enfileira; repetida, não manda.
-fn deliver_now_or_queue(pty: u32, target: &str, message: String) -> Result<Delivery, String> {
-    if !first_time_for(target, &message) {
-        return Ok(Delivery::Duplicate);
-    }
-    let lock = delivery_lock(target);
-    if let Ok(_turn) = lock.try_lock() {
-        if wait_until_quiet(pty, Duration::from_millis(1500), SENDER_WAIT, false) {
-            return Ok(if submit_confirmed(pty, target, &message, &message)? { Delivery::Now } else { Delivery::Unconfirmed });
-        }
-    }
-    // Já registrada como vista acima: a fila entrega sem repetir a checagem de duplicata.
-    let lock = delivery_lock(target);
-    let target = target.to_string();
-    let queued_at = Instant::now();
-    std::thread::spawn(move || {
-        let _turn = lock.lock().unwrap_or_else(|e| e.into_inner());
-        wait_until_quiet(pty, Duration::from_millis(1500), QUEUE_MAX_WAIT, false);
-        let _ = submit_confirmed(pty, &target, &with_stale_note(message.clone(), queued_at), &message);
-    });
-    Ok(Delivery::Queued)
 }
 
 pub(super) fn peer_list(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -460,9 +362,13 @@ Você é um subagente de {}: execute as tarefas que ele enviar e responda com ag
     } else {
         crate::canvas::roles::briefing(&role)
     };
-    let outcome = deliver_now_or_queue(pty, &target.id, framed(&me.name, &text, false))?;
+    let new = NewMessage {
+        client_id: None, kind: "role", from_tab_id: &me.id, from_name: &me.name,
+        to_tab_id: &target.id, to_name: &target.name, text: &text, raw: false, reply: false,
+    };
+    let sent = peer_queue::deliver_now_or_queue(app, pty, &new)?;
     Ok(json!({ "peer": describe(&target), "role": role.id, "subagent": subagent,
-        "delivered": matches!(outcome, Delivery::Now | Delivery::Queued) }))
+        "delivered": matches!(sent.delivery, Delivery::Now | Delivery::Queued), "messageId": sent.message.id }))
 }
 
 pub(super) fn peer_disconnect(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -764,28 +670,51 @@ pub(super) fn peer_tell(app: &AppHandle, args: &Value) -> Result<Value, String> 
         TellBody::Send(body) => body,
     };
 
-    // Mensagem longa vai inteira para um arquivo e no terminal só o começo e o caminho (ver
-    // `spill_to_inbox`). `--raw` (um comando da TUI, como /compact) vai como está.
-    let pasted = if is_raw(args) { text.clone() } else { spill_to_inbox(&target.id, &text) };
-
     // Não se interrompe quem está no meio de um turno, mas também não se prende o remetente:
     // quieto em poucos segundos, vai já; senão entra na fila do destino e é entregue quando ele
-    // terminar o turno (ver `deliver_now_or_queue`).
-    let outcome = deliver_now_or_queue(pty, &target.id, outgoing(&from_name, &pasted, false, is_raw(args)))?;
+    // terminar o turno (ver `peer_queue::deliver_now_or_queue`). Mensagem longa vai inteira para um
+    // arquivo na hora da entrega (`spill_to_inbox`); `--raw` (um comando da TUI) vai como está.
+    let client_id = peer_queue::client_id_arg(args);
+    let new = NewMessage {
+        client_id: client_id.as_deref(), kind: "tell", from_tab_id: &from, from_name: &from_name,
+        to_tab_id: &target.id, to_name: &target.name, text: &text, raw: is_raw(args), reply: false,
+    };
+    let sent = peer_queue::deliver_now_or_queue(app, pty, &new)?;
     // Sem confirmação, o destino pode não ter recebido: não conta como tarefa dada (o Vigia segue
     // cobrando a delegação).
-    if !matches!(outcome, Delivery::Duplicate | Delivery::Unconfirmed) {
+    if counts_as_sent(sent.delivery) {
         emit_peer_message(app, "tell", &from, Some(&target.id), Some(&text), Some(&text));
     }
-    Ok(match outcome {
-        Delivery::Now => json!({ "peer": describe(target), "sent": true }),
-        Delivery::Queued => json!({ "peer": describe(target), "sent": true, "queued": true,
+    Ok(tell_reply(describe(target), &sent))
+}
+
+/// Entregue ou na fila: conta como mensagem dada (`cc-peer-message`, chat da equipe, tempos).
+fn counts_as_sent(delivery: Delivery) -> bool {
+    matches!(delivery, Delivery::Now | Delivery::Queued)
+}
+
+/// Pura: a resposta do `peer tell` para o remetente. Os campos de antes (`sent`, `queued`,
+/// `unconfirmed`, `duplicate`) continuam; agora vêm também o id da mensagem e o estado dela.
+pub(crate) fn tell_reply(peer: Value, sent: &Sent) -> Value {
+    let mut out = match sent.delivery {
+        Delivery::Now => json!({ "peer": peer, "sent": true }),
+        Delivery::Queued => json!({ "peer": peer, "sent": true, "queued": true,
             "note": "O destino está trabalhando: a mensagem será entregue quando ele terminar o turno. Siga com o seu trabalho." }),
-        Delivery::Unconfirmed => json!({ "peer": describe(target), "sent": false, "unconfirmed": true,
+        Delivery::Unconfirmed => json!({ "peer": peer, "sent": false, "unconfirmed": true,
             "note": "O texto foi escrito no terminal do destino, mas não apareceu na tela dele (talvez ele esteja rodando um comando ou um slash command). Espere ele ficar livre e reenvie: o reenvio não conta como repetido." }),
-        Delivery::Duplicate => json!({ "peer": describe(target), "sent": false, "duplicate": true,
-            "note": "Essa mesma mensagem já foi entregue a este agente há pouco; não foi enviada de novo." }),
-    })
+        Delivery::Cancelled => json!({ "peer": peer, "sent": false, "cancelled": true,
+            "note": "O usuário cancelou esta mensagem na fila antes da entrega. Não reenvie sem um motivo novo." }),
+        Delivery::Duplicate if sent.repeat => json!({ "peer": peer, "sent": false, "duplicate": true, "repeat": true,
+            "note": format!("Esse id já foi usado: é a mesma mensagem #{} ({}). Ela não foi enviada de novo.", sent.message.id, sent.message.state.label()) }),
+        Delivery::Duplicate => json!({ "peer": peer, "sent": false, "duplicate": true,
+            "note": "Essa mesma mensagem já foi entregue a este agente há pouco; não foi enviada de novo. Se é um pedido novo de verdade, mande com um --id novo." }),
+    };
+    out["messageId"] = json!(sent.message.id);
+    out["state"] = json!(sent.message.state);
+    if let Some(cid) = &sent.message.client_id {
+        out["clientId"] = json!(cid);
+    }
+    out
 }
 
 /// O modelo que o `peer deliver` mostra quando o JSON não passa: o Handoff Structured v1.
@@ -853,19 +782,44 @@ pub(super) fn peer_deliver(app: &AppHandle, args: &Value) -> Result<Value, Strin
             .ok_or_else(|| "Não achei o orquestrador entre os seus pares: diga para quem é a entrega (`ags peer deliver <nome> --file ...`).".to_string())?,
     };
     let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
-    let payload = serde_json::to_string(&handoff).map_err(|e| e.to_string())?;
-    let id = {
-        let db = super::shared::db(app)?;
-        let conn = db.inner().lock().map_err(|e| e.to_string())?;
-        crate::missions::messages::record_handoff(&conn, &boards, (&from, &from_name), (&target.id, &target.name), &handoff_text(&handoff), &payload, crate::util::now_ts_ms())?
+    // O mesmo `--id` é a mesma entrega: não grava outra em `mission_handoffs` nem digita de novo.
+    // Se a de antes não chegou (sem confirmação), o reenvio leva a MESMA linha, com o mesmo número.
+    let client_id = peer_queue::client_id_arg(args);
+    let earlier = peer_queue::by_client_id(app, &from, client_id.as_deref())?;
+    if let Some(earlier) = earlier.as_ref().filter(|m| !m.state.can_become(crate::peer_queue::store::State::Queued)) {
+        let sent = Sent { delivery: Delivery::Duplicate, message: earlier.clone(), repeat: true };
+        let mut out = tell_reply(describe(&target), &sent);
+        out["handoff"] = json!(handoff_id_of(&earlier.text));
+        return Ok(out);
     }
-    .ok_or("A entrega estruturada só vale entre agentes da mesma missão. Fora dela, use `ags peer tell`.")?;
-    let line = handoff_line(&handoff, id);
-    let outcome = deliver_now_or_queue(pty, &target.id, outgoing(&from_name, &line, false, false))?;
-    if !matches!(outcome, Delivery::Duplicate | Delivery::Unconfirmed) {
+    let (id, line) = match earlier {
+        Some(earlier) => (handoff_id_of(&earlier.text), earlier.text),
+        None => {
+            let payload = serde_json::to_string(&handoff).map_err(|e| e.to_string())?;
+            let id = {
+                let db = super::shared::db(app)?;
+                let conn = db.inner().lock().map_err(|e| e.to_string())?;
+                crate::missions::messages::record_handoff(&conn, &boards, (&from, &from_name), (&target.id, &target.name), &handoff_text(&handoff), &payload, crate::util::now_ts_ms())?
+            }
+            .ok_or("A entrega estruturada só vale entre agentes da mesma missão. Fora dela, use `ags peer tell`.")?;
+            (Some(id), handoff_line(&handoff, id))
+        }
+    };
+    let new = NewMessage {
+        client_id: client_id.as_deref(), kind: "handoff", from_tab_id: &from, from_name: &from_name,
+        to_tab_id: &target.id, to_name: &target.name, text: &line, raw: false, reply: false,
+    };
+    let sent = peer_queue::deliver_now_or_queue(app, pty, &new)?;
+    if counts_as_sent(sent.delivery) {
         emit_peer_message(app, "handoff", &from, Some(&target.id), Some(&line), None);
     }
-    Ok(json!({ "peer": describe(&target), "handoff": id, "sent": !matches!(outcome, Delivery::Duplicate | Delivery::Unconfirmed), "queued": outcome == Delivery::Queued }))
+    Ok(json!({ "peer": describe(&target), "handoff": id, "sent": counts_as_sent(sent.delivery), "queued": sent.delivery == Delivery::Queued,
+        "messageId": sent.message.id, "state": sent.message.state }))
+}
+
+/// Pura: o número da entrega na linha `ENTREGA #<id>: ...`.
+pub(crate) fn handoff_id_of(line: &str) -> Option<i64> {
+    line.strip_prefix("ENTREGA #")?.split(':').next()?.trim().parse().ok()
 }
 
 /// `ags peer handoff <id>`: o JSON inteiro de uma entrega da sua missão.
@@ -903,7 +857,7 @@ pub(crate) fn inbox_note(text: &str, path: &str) -> String {
 /// nota de `inbox_note`. Colar 1.500+ caracteres no PTY virava «[Pasted text #N]» que engolia o
 /// Enter, e no Codex os parágrafos chegavam grudados («MISSÃOOBJETIVO…»); 34 mensagens do
 /// orquestrador passavam disso. Sem onde gravar, cola inteira como antes.
-fn spill_to_inbox(target: &str, text: &str) -> String {
+pub(super) fn spill_to_inbox(target: &str, text: &str) -> String {
     if text.chars().count() <= INBOX_SPILL_CHARS {
         return text.to_string();
     }
@@ -977,8 +931,10 @@ pub(super) fn ci_watch(app: &AppHandle, args: &Value) -> Result<Value, String> {
         .into_iter()
         .find(|t| t.id == from)
         .ok_or_else(|| "A sua aba não está aberta em nenhuma janela.".to_string())?;
-    let pty = pty_id_for_tab(app, &me.id, Some(&me.window))?;
+    // Sem processo na aba, não há onde colar o resultado: falha já, como antes.
+    pty_id_for_tab(app, &me.id, Some(&me.window))?;
     let cwd = me.cwd.clone();
+    let app = app.clone();
     let shown = pr.rsplit('/').next().unwrap_or(&pr).to_string();
     let reply_pr = shown.clone();
     std::thread::spawn(move || {
@@ -1017,7 +973,14 @@ pub(super) fn ci_watch(app: &AppHandle, args: &Value) -> Result<Value, String> {
             }
             std::thread::sleep(CI_POLL);
         };
-        deliver_when_quiet(pty, &from, message);
+        // Vai pela fila do próprio terminal: entra quando ele estiver quieto, sem cabeçalho.
+        let new = NewMessage {
+            client_id: None, kind: "notice", from_tab_id: &from, from_name: "ADE AGS",
+            to_tab_id: &from, to_name: &me.name, text: &message, raw: true, reply: false,
+        };
+        if let Err(error) = peer_queue::enqueue(&app, &new) {
+            eprintln!("[ci watch] não foi possível pôr o resultado na fila: {error}");
+        }
     });
     Ok(json!({
         "watching": true,
@@ -1112,8 +1075,17 @@ pub(crate) fn parse_batch(raw: &Value) -> Result<Vec<(String, String)>, String> 
 
 /// Uma pergunta a um agente conectado, esperando o turno dele. É o que `peer ask` faz com
 /// um destino e o que `peer ask --batch` faz com vários ao mesmo tempo.
-fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, text: &str, timeout: Duration, raw: bool) -> Result<Value, String> {
+#[allow(clippy::too_many_arguments)]
+fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, text: &str, timeout: Duration, raw: bool, client_id: Option<&str>) -> Result<Value, String> {
     let pty = pty_id_for_tab(app, &target.id, Some(&target.window))?;
+    // O mesmo `--id` é a mesma pergunta: não se pergunta de novo, lê-se a resposta.
+    if let Some(earlier) = peer_queue::by_client_id(app, from_id, client_id)?.filter(|m| !m.state.can_become(crate::peer_queue::store::State::Queued)) {
+        return Ok(ask_repeat(target, &earlier));
+    }
+    let new = NewMessage {
+        client_id, kind: "ask", from_tab_id: from_id, from_name, to_tab_id: &target.id, to_name: &target.name,
+        text, raw, reply: false,
+    };
     let started_ms = crate::util::now_ts_ms();
     let started = Instant::now();
     remember_ask(&target.id, AskStatus { started_ms, ended_ms: None, mark: None, finished: None, from: from_id.into(), sent: false });
@@ -1131,17 +1103,32 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
             "startedMs": started_ms, "endedMs": crate::util::now_ts_ms(), "finished": false }));
         // Ocupado: antes a pergunta era descartada ("busy", sent:false) e quem perguntou esperava
         // algo que nunca chegaria. Agora ela entra na fila do destino e vai ao fim do turno dele.
-        if !deliver_when_quiet(pty, &target.id, outgoing(from_name, text, false, raw)) {
+        let sent = peer_queue::enqueue(app, &new)?;
+        if sent.repeat {
+            return Ok(ask_repeat(target, &sent.message));
+        }
+        if sent.delivery == Delivery::Duplicate {
             return Ok(json!({ "peer": describe(target), "finished": false, "sent": false, "reply": [], "status": "duplicate", "duplicate": true,
+                "messageId": sent.message.id,
                 "note": "Essa mesma pergunta já foi enviada a este agente há pouco; leia a resposta com `ags peer check`." }));
         }
         emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text));
         return Ok(json!({ "peer": describe(target), "finished": false, "sent": true, "queued": true, "reply": [], "status": "queued",
+            "messageId": sent.message.id,
             "note": format!("{0} está trabalhando: a pergunta foi enfileirada e será entregue ao fim do turno dele, com o pedido de responder por ags peer tell. Siga com outra coisa; se precisar, leia a tela com ags peer check \"{0}\".", target.name) }));
     }
     let delivery = delivery_lock(&target.id);
     let _turn = delivery.lock().unwrap_or_else(|e| e.into_inner());
-    submit_prompt(pty, &outgoing(from_name, text, true, raw))?;
+    // Destino livre: a pergunta vai direto, sem fila, mas com registro (id e recibo).
+    let record = match peer_queue::begin_direct(app, &NewMessage { reply: true, ..new.clone() })? {
+        Ok(record) => record,
+        Err(sent) => return Ok(ask_repeat(target, &sent.message)),
+    };
+    if let Err(error) = submit_prompt(pty, &outgoing(from_name, text, true, raw)) {
+        peer_queue::end_direct(app, &record, Some(&error));
+        return Err(error);
+    }
+    peer_queue::end_direct(app, &record, None);
     emit_peer_message(app, "ask", from_id, Some(&target.id), None, Some(text));
     remember_ask(&target.id, AskStatus { started_ms, ended_ms: None, mark, finished: None, from: from_id.into(), sent: true });
     let finished = wait_turn(pty, before, timeout.saturating_sub(started.elapsed()));
@@ -1167,7 +1154,15 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
         "sent": true,
         "status": if finished { "finished" } else { "timed_out" },
         "reply": reply.get("lines").cloned().unwrap_or(json!([])),
+        "messageId": record.id,
     }))
+}
+
+/// A resposta de um `peer ask` com um `--id` já usado: a pergunta não vai de novo.
+fn ask_repeat(target: &OpenTab, earlier: &crate::peer_queue::store::PeerMessage) -> Value {
+    json!({ "peer": describe(target), "finished": false, "sent": false, "reply": [], "status": "duplicate", "duplicate": true,
+        "repeat": true, "messageId": earlier.id, "state": earlier.state,
+        "note": format!("Esse id já foi usado: é a mesma pergunta #{} ({}). Leia a resposta com `ags peer check \"{}\"`.", earlier.id, earlier.state.label(), target.name) })
 }
 
 pub(super) fn peer_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
@@ -1184,7 +1179,8 @@ pub(super) fn peer_ask(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let to = arg_str(args, "to")?;
     let text = arg_str(args, "text")?;
     let target = resolve_peer(&list, &to)?.clone();
-    ask_one(app, &target, &from, &from_name, &text, timeout, is_raw(args))
+    let client_id = peer_queue::client_id_arg(args);
+    ask_one(app, &target, &from, &from_name, &text, timeout, is_raw(args), client_id.as_deref())
 }
 
 /// `peer ask --batch`: pergunta a vários ao mesmo tempo e devolve cada resposta. Todos os
@@ -1212,7 +1208,7 @@ fn ask_batch(
     let results: Vec<Value> = std::thread::scope(|scope| {
         let handles: Vec<_> = targets
             .iter()
-            .map(|(target, text)| scope.spawn(move || ask_one(app, target, from_id, from_name, text, timeout, raw)))
+            .map(|(target, text)| scope.spawn(move || ask_one(app, target, from_id, from_name, text, timeout, raw, None)))
             .collect();
         handles
             .into_iter()
@@ -1443,6 +1439,47 @@ mod handoff_tests {
 }
 
 #[cfg(test)]
+mod queue_reply_tests {
+    use super::{handoff_id_of, tell_reply};
+    use crate::ipc::commands::peer_queue::{Delivery, Sent};
+    use crate::peer_queue::store::{PeerMessage, State};
+    use serde_json::json;
+
+    fn sent(delivery: Delivery, state: State, repeat: bool) -> Sent {
+        let message = PeerMessage {
+            id: 12, client_id: Some("req-9".into()), kind: "tell".into(), from_tab_id: "a".into(), from_name: "Líder".into(),
+            to_tab_id: "b".into(), to_name: "QA".into(), text: "oi".into(), raw: false, reply: false, state, position: 1,
+            force_now: false, attempts: 0, created_at: 0, updated_at: 0, delivered_at: None, edited_at: None, note: None,
+        };
+        Sent { delivery, message, repeat }
+    }
+
+    /// Os campos de antes continuam (quem chama depende deles); id e estado vêm junto.
+    #[test]
+    fn a_resposta_do_tell_mantem_o_contrato_e_traz_o_id() {
+        let now = tell_reply(json!("QA"), &sent(Delivery::Now, State::Delivered, false));
+        assert_eq!((now["sent"].clone(), now["messageId"].clone(), now["state"].clone()), (json!(true), json!(12), json!("delivered")));
+        let queued = tell_reply(json!("QA"), &sent(Delivery::Queued, State::Queued, false));
+        assert_eq!((queued["sent"].clone(), queued["queued"].clone()), (json!(true), json!(true)));
+        let lost = tell_reply(json!("QA"), &sent(Delivery::Unconfirmed, State::Unconfirmed, false));
+        assert_eq!((lost["sent"].clone(), lost["unconfirmed"].clone()), (json!(false), json!(true)));
+        let dup = tell_reply(json!("QA"), &sent(Delivery::Duplicate, State::Delivered, false));
+        assert_eq!((dup["sent"].clone(), dup["duplicate"].clone(), dup.get("repeat").is_none()), (json!(false), json!(true), true));
+        let same = tell_reply(json!("QA"), &sent(Delivery::Duplicate, State::Queued, true));
+        assert_eq!((same["repeat"].clone(), same["clientId"].clone()), (json!(true), json!("req-9")));
+        assert!(same["note"].as_str().unwrap().contains("#12") && same["note"].as_str().unwrap().contains("na fila"));
+        let gone = tell_reply(json!("QA"), &sent(Delivery::Cancelled, State::Cancelled, false));
+        assert_eq!((gone["sent"].clone(), gone["cancelled"].clone()), (json!(false), json!(true)));
+    }
+
+    #[test]
+    fn o_numero_da_entrega_sai_da_linha() {
+        assert_eq!(handoff_id_of("ENTREGA #42: pronto · 1 arquivo(s)"), Some(42));
+        assert_eq!(handoff_id_of("outra coisa"), None);
+    }
+}
+
+#[cfg(test)]
 mod ci_tests {
     use super::ci_summary;
 
@@ -1460,21 +1497,6 @@ mod ci_tests {
 
 #[cfg(test)]
 mod dedupe_tests {
-    use super::first_time_for;
-
-    /// AGS-023: a mesma mensagem não vai duas vezes ao mesmo agente dentro da janela.
-    #[test]
-    fn a_mesma_mensagem_ao_mesmo_destino_nao_repete() {
-        assert!(first_time_for("tab-dedupe-a", "tarefa X"));
-        assert!(!first_time_for("tab-dedupe-a", "tarefa X"));
-        // Outro destino ou outro texto continuam válidos.
-        assert!(first_time_for("tab-dedupe-b", "tarefa X"));
-        assert!(first_time_for("tab-dedupe-a", "tarefa Y"));
-        // Entrega não confirmada: o reenvio do mesmo texto passa.
-        super::forget_sent("tab-dedupe-a", "tarefa X");
-        assert!(first_time_for("tab-dedupe-a", "tarefa X"));
-    }
-
     #[test]
     fn o_trecho_do_corpo_vem_depois_do_cabecalho_e_raw_nao_confere() {
         use super::{framed, snippet_of};

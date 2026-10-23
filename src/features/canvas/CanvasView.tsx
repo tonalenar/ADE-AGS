@@ -44,6 +44,7 @@ import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ChatPanel } from "./ChatPanel";
 import { agentAccent, agentTile, nodeFrame } from "@/features/agents/agentTile";
 import { activeTabIds } from "@/features/terminal/activity";
+import { PeerQueueBadge } from "@/features/peerQueue/PeerQueueBadge";
 import { CORD_MAGNET, CordConnectionLine, CordEdge, CordPort, cordColor, flashNode } from "./cords";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { DesignPanel } from "./design/DesignPanel";
@@ -878,6 +879,8 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
             <span className={`${PILL} max-w-32 truncate ${rolePill(role)}`} title={t("canvas.role", { role })}>{role}</span>
           ) : null}
           {subagent && <span className={`${PILL} bg-black/[0.06] text-gray-500 dark:bg-white/[0.08] dark:text-white/60`}>{t("role.subagentTag")}</span>}
+          {/* "N na fila": o que outros agentes mandaram e espera este terminar o turno. */}
+          <PeerQueueBadge tabId={tab.id} name={tab.title.split(" — ")[0]} variant="node" />
           {/* `nodrag`: sin esto el clic arrastraría el nodo en vez de apretar el botón. */}
           <Button variant="custom"
             onClick={() => onToggleOrchestrator(tab.id)}

@@ -246,6 +246,23 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRet
   return true;
 }
 
+/**
+ * Cola `text` na entrada da TUI da tab SEM Enter, para a pessoa completar e enviar ela mesma (o trecho de
+ * terminal). Texto de várias linhas só vai com *bracketed paste* ligado: sem ele o xterm troca cada quebra
+ * por um Enter, e o trecho seria enviado aos pedaços. `offline` = sem terminal viva (pede o lançamento).
+ */
+export function insertIntoTab(tabId: string, text: string): "ok" | "offline" | "no-multiline" {
+  const term = terminals.get(tabId);
+  if (!term) return "offline";
+  if (tabPtyState(tabId) === "idle") {
+    requestPtyLaunch(tabId);
+    return "offline";
+  }
+  if (/[\r\n]/.test(text) && !term.modes.bracketedPasteMode) return "no-multiline";
+  term.paste(text);
+  return "ok";
+}
+
 /** Escribe teclas cruas na terminal da tab (ex.: "1" ou Esc para responder a um menu do TUI). `false` se não há terminal viva. */
 export function sendKeysToTab(tabId: string, keys: string): boolean {
   const term = terminals.get(tabId);
@@ -256,7 +273,7 @@ export function sendKeysToTab(tabId: string, keys: string): boolean {
 
 /** O texto até o cursor: as `rows` linhas que acabam na do cursor, esta só até ele. É onde está a caixa de
  *  entrada de uma TUI esperando o Enter. */
-function beforeCursor(term: Terminal, rows = 4): string {
+export function beforeCursor(term: Terminal, rows = 4): string {
   const buf = term.buffer.active;
   const y = buf.baseY + buf.cursorY;
   const lines: string[] = [];

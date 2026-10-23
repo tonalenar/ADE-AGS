@@ -103,6 +103,12 @@ function readSeen(): Record<string, number> {
   }
 }
 
+export interface ChatJump {
+  tabId: string;
+  thread: string;
+  text?: string;
+}
+
 interface UnreadState {
   /** Hasta cuándo se vio cada (agente, hilo). */
   seen: Record<string, number>;
@@ -111,9 +117,10 @@ interface UnreadState {
   /** Qué (agente, hilo) está a la vista en el panel de chat: ahí no se suena. */
   viewing: { tabId: string; thread: string } | null;
   sound: boolean;
-  /** Pedido de abrir el chat en este (agente, hilo): lo toma el panel y lo borra. */
-  jump: { tabId: string; thread: string } | null;
-  setJump: (j: { tabId: string; thread: string } | null) => void;
+  /** Pedido de abrir el chat en este (agente, hilo): lo toma el panel y lo borra. Com `text`, o painel o
+   *  acrescenta ao rascunho (o trecho de terminal); um `thread` que não é hilo mantém o que está aberto. */
+  jump: ChatJump | null;
+  setJump: (j: ChatJump | null) => void;
   setViewing: (v: { tabId: string; thread: string } | null) => void;
   setSound: (on: boolean) => void;
   /** `baseline`: la carga inicial de un agente; lo que ya hay no es "nuevo". Los avisos en vivo cuentan todo. */

@@ -34,6 +34,7 @@ use super::runs::{run_approve, run_orchestrate};
 use super::shared::bridge_call;
 use super::skills::{skill_edit, skill_install, skill_list, skill_new, skill_search, skill_show};
 use super::tabs::{tab_create, tab_list, tab_output, tab_send};
+use super::replay::{replay_start, replay_status, replay_stop};
 use super::watch::{watch_add, watch_list, watch_remove, watch_wait};
 use super::windows::{window_create, window_list};
 use super::workspaces::{workspace_list, workspace_open, workspace_status};
@@ -112,6 +113,8 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "peer.connect" => peer_connect(app, args),
         "peer.disconnect" => peer_disconnect(app, args),
         "peer.role" => peer_role(app, args),
+        // A fila persistente das mensagens que você mandou (ver `peer_queue`).
+        "peer.queue" => super::peer_queue::peer_queue(app, args),
         // Segue o CI de um PR e avisa no terminal de quem pediu (ver `peers::ci_watch`).
         "ci.watch" => ci_watch(app, args),
         // Las notas del canvas conectadas con quien pide (ver `notes`).
@@ -184,6 +187,10 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "watch.remove" => watch_remove(app, args),
         "watch.list" => watch_list(app),
         "watch.wait" => watch_wait(args),
+        // Gravador dos testes por replay (só com ADE_AGS_REPLAY_RECORD=1; ver docs/ade-ags/REPLAY_TESTES.md).
+        "replay.start" => replay_start(app, args),
+        "replay.stop" => replay_stop(app, args),
+        "replay.status" => replay_status(),
         "window.list" => window_list(app),
         "window.create" => window_create(app),
         "workspace.list" => workspace_list(app),
