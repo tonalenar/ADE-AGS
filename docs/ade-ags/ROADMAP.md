@@ -333,3 +333,7 @@ O Portal pode mostrar um Chrome de verdade (perfil próprio do app), todo dentro
 ## Testes por replay das telas dos agentes
 
 Fixtures com a saída crua do PTY (pedaços com o instante em que chegaram) passam pelos detectores de verdade, no front (xterm real, relógio falso) e no backend (fim cru do PTY), sem app nem PTY. Gravador só para desenvolvimento (`ags replay start/stop`, com `ADE_AGS_REPLAY_RECORD=1`). Formato, gravador, fixtures e o que já acharam: [REPLAY_TESTES.md](./REPLAY_TESTES.md).
+
+## Comparar modelos
+
+O mesmo pedido para 2 a 6 agentes/modelos, cada um num worktree e numa branch `cmp/<slug>-<id>/<pick>`, em terminais lado a lado num canvas próprio, com barra de status, diff por modelo, "Manter este" e descarte que nunca perde trabalho sem confirmação (o descartado fica em `refs/ags/descartes/`). Detalhes em [COMPARAR_MODELOS.md](./COMPARAR_MODELOS.md).
