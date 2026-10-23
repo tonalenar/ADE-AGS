@@ -409,6 +409,11 @@ fn la_ayuda_nombra_todos_los_grupos_que_la_app_atiende() {
         if group == "user" || group == "forge" || group == "mcp" || group == "memory" {
             continue;
         }
+        // `replay.*` é o gravador de telas para os testes por replay: só de desenvolvimento, só responde com o app
+        // aberto com `ADE_AGS_REPLAY_RECORD=1`, e fica fora da ajuda de propósito (ver docs/ade-ags/REPLAY_TESTES.md).
+        if group == "replay" {
+            continue;
+        }
         // Como COMANDO, no en cualquier parte: buscar la palabra suelta daba por
         // documentado a `run` porque la ayuda decía "la app no corre".
         let listed = USAGE.lines().any(|line| {
