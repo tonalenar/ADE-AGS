@@ -15,6 +15,8 @@ pub fn save_pasted_image(request: tauri::ipc::Request<'_>) -> Result<String, Str
 }
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+pub(crate) mod replay;
 mod pty_manager;
 mod session;
 #[cfg(windows)]

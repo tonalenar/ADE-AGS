@@ -1,0 +1,37 @@
+{
+  "format": "ade-replay",
+  "version": 1,
+  "id": "claude-lead-pede-ok",
+  "agent": "claude-code",
+  "title": "Orquestrador (Claude Code) encerra o turno pedindo o OK para commit e PR",
+  "origin": {
+    "kind": "synthesized",
+    "basis": "Frases cobertas por vigiaClosing.ts (\"posso fazer…\") numa tela de fim de turno do Claude Code.",
+    "recordedAt": null,
+    "platform": null,
+    "tuiVersion": null
+  },
+  "terminal": {
+    "cols": 100,
+    "rows": 30
+  },
+  "chunks": [
+    {
+      "atMs": 0,
+      "data": "\u001b[?25l\u001b[38;2;215;119;87m╭───────────────────────────────────────────────────╮\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m \u001b[38;2;215;119;87m✻\u001b[0m Welcome to \u001b[1mClaude Code\u001b[0m!                         \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m                                                   \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m   \u001b[2m/help for help, /status for your current setup\u001b[0m  \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m                                                   \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m   \u001b[2mcwd: C:\\proj\\parser\u001b[0m                             \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m╰───────────────────────────────────────────────────╯\u001b[0m\r\n\r\n\u001b[2m>\u001b[0m [Mensagem de Revisor via ADE AGS] Revisão concluída: nenhum problema bloqueante.\r\n\r\n\u001b[38;2;255;255;255m⏺\u001b[0m Recebi a revisão. Integrei as mudanças dos dois integrantes e rodei a suíte afetada.\r\n\r\n\u001b[38;2;255;255;255m⏺\u001b[0m Tudo pronto e testado. Posso fazer o commit e abrir o PR?\r\n\r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n❯ \r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n  \u001b[2m? for shortcuts\u001b[0m\r\n\u001b[?25h"
+    }
+  ],
+  "checkpoints": [
+    {
+      "atMs": 100,
+      "label": "pergunta na tela, turno encerrado",
+      "expect": {
+        "working": false,
+        "waitingApproval": false,
+        "asksToClose": true,
+        "screenQuestion": true,
+        "pastePending": false
+      }
+    }
+  ]
+}
