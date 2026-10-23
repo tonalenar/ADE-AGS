@@ -31,3 +31,7 @@ dist-ssr
 
 # Resultados do benchmark do piloto (scripts/jev-bench.ts); os de referência ficam em docs/ade-ags/bench/
 bench-results/
+
+# Planos e rascunhos de agentes não entram no repositório (AGENTS.md §6.3)
+/plan*.md
+.plans/
