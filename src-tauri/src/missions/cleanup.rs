@@ -91,7 +91,7 @@ fn size(path: &Path) -> Result<u64, String> {
     Ok(total)
 }
 
-fn managed(root: &Path) -> Vec<PathBuf> {
+pub(crate) fn managed(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let node = root.join("node_modules");
     if crate::skills::is_mount(&node) {
