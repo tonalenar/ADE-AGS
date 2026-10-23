@@ -7,7 +7,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   DevicePoll, DeviceStart, ForgeItem, ForgeItemDetail, ForgeKind, ForgeKindInfo, ForgeRepo, GitAccount,
-  Label, NewIssue, NewPull, NewRelease, Release, RepoTarget,
+  GuideLookup, GuideOutcome, GuideRequest, Label, NewIssue, NewPull, NewRelease, PullFile, Release, RepoTarget,
 } from "./types";
 
 export const forgeKinds = () => invoke<ForgeKindInfo[]>("forge_kinds");
@@ -52,6 +52,16 @@ export const forgeDefaultBranch = (cwd: string) => invoke<string | null>("forge_
 /** Devuelve el nombre de la rama local (`pr/<n>`). */
 export const forgeCheckoutPull = (cwd: string, number: number) =>
   invoke<string>("forge_checkout_pull", { cwd, number });
+
+/** Os arquivos do PR com o diff de cada um (a vista do guia de revisão). */
+export const forgePullFiles = (cwd: string, number: number) =>
+  invoke<PullFile[]>("forge_pull_files", { cwd, number });
+/** O guia de revisão em cache deste PR, e se ficou para trás do commit atual. Ver `forge/guide_commands.rs`. */
+export const reviewGuideGet = (cwd: string, number: number) =>
+  invoke<GuideLookup>("review_guide_get", { cwd, number });
+/** Gera o guia com UMA chamada headless de um agente (somente leitura). Nunca escreve no GitHub. */
+export const reviewGuideGenerate = (cwd: string, number: number, request: GuideRequest) =>
+  invoke<GuideOutcome>("review_guide_generate", { cwd, number, request });
 
 /** Las etiquetas del repo, para sugerirlas al abrir un issue. */
 export const forgeLabels = (cwd: string) => invoke<Label[]>("forge_labels", { cwd });

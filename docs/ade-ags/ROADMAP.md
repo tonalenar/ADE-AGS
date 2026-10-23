@@ -348,3 +348,6 @@ A cada mensagem que chega a um agente numa aba (peers, `ags tab send`, chat, rot
 ## Comparar modelos
 
 O mesmo pedido para 2 a 6 agentes/modelos, cada um num worktree e numa branch `cmp/<slug>-<id>/<pick>`, em terminais lado a lado num canvas próprio, com barra de status, diff por modelo, "Manter este" e descarte que nunca perde trabalho sem confirmação (o descartado fica em `refs/ags/descartes/`). Detalhes em [COMPARAR_MODELOS.md](./COMPARAR_MODELOS.md).
+## Guia de revisão de PR por IA
+
+Na tela de um PR, um agente (somente leitura, uma chamada headless) monta um roteiro de leitura com paradas: arquivos e linhas, por que importa, o que olhar de perto, trecho e perguntas. JSON validado estrito, com uma tentativa de conserto; cache por commit da cabeça, com aviso de desatualizado; passo a passo com teclado e visitadas; diff do arquivo no painel; "Perguntar sobre isto" abre um agente com o texto pré-preenchido, sem enviar. Nada é publicado no GitHub. Desenho, contrato e limites: [GUIA_REVISAO_PR.md](./GUIA_REVISAO_PR.md).
