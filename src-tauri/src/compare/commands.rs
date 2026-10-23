@@ -90,6 +90,9 @@ fn setup_for(repo: &Path, root: &Path, pick: &str) -> Setup {
 /// partir do commit atual da pasta. Se um falha, os já criados (ainda limpos) são removidos.
 pub fn prepare_in(registry: &Path, base: &Path, cwd: &Path, title: &str, picks: &[ComparePick], isolate: bool, id: &str) -> Result<Prepared, String> {
     validate_picks(picks)?;
+    if !cwd.is_dir() {
+        return Err(format!("A pasta não existe: {}", cwd.display()));
+    }
     let title = title.trim();
     if title.chars().count() > 120 {
         return Err("O título deve ter até 120 caracteres.".into());
@@ -322,16 +325,22 @@ pub async fn compare_prepare(
     .await
 }
 
-#[tauri::command]
-pub fn compare_attach(id: String, tabs: Vec<TabLink>) -> Result<Comparison, String> {
-    let _guard = lock();
-    attach_in(&registry_path()?, &id, &tabs)
-}
+// Nada aqui roda na thread principal: uma preparação segura o `LOCK` por segundos (checkout de
+// vários worktrees) e um comando síncrono esperando por ele congelaria a janela.
 
 #[tauri::command]
-pub fn compare_list() -> Result<Vec<Comparison>, String> {
-    let _guard = lock();
-    Ok(read_registry(&registry_path()?))
+pub async fn compare_attach(id: String, tabs: Vec<TabLink>) -> Result<Comparison, String> {
+    blocking(move || {
+        let _guard = lock();
+        attach_in(&registry_path()?, &id, &tabs)
+    })
+    .await
+}
+
+/// Sem o `LOCK`: o registro é gravado por troca atômica (`rename`), então a leitura nunca vê meio arquivo.
+#[tauri::command]
+pub async fn compare_list() -> Result<Vec<Comparison>, String> {
+    blocking(move || Ok(read_registry(&registry_path()?))).await
 }
 
 #[tauri::command]
@@ -349,9 +358,12 @@ pub async fn compare_diff(id: String, pick: String) -> Result<DiffView, String> 
 }
 
 #[tauri::command]
-pub fn compare_keep(id: String, pick: String) -> Result<Comparison, String> {
-    let _guard = lock();
-    keep_in(&registry_path()?, &id, &pick)
+pub async fn compare_keep(id: String, pick: String) -> Result<Comparison, String> {
+    blocking(move || {
+        let _guard = lock();
+        keep_in(&registry_path()?, &id, &pick)
+    })
+    .await
 }
 
 #[tauri::command]

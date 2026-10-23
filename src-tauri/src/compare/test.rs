@@ -86,6 +86,13 @@ fn as_escolhas_sao_de_dois_a_seis_e_unicas() {
 }
 
 #[test]
+fn arquivo_preso_pelo_terminal_recem_fechado_e_repetido() {
+    assert!(super::git::removal_is_transient("error: failed to delete 'C:/x': Directory not empty"));
+    assert!(super::git::removal_is_transient("fatal: Permission denied"));
+    assert!(!super::git::removal_is_transient("fatal: 'x' is not a working tree"));
+}
+
+#[test]
 fn numstat_conta_arquivos_e_linhas_e_binarios() {
     assert_eq!(parse_numstat("3\t1\tsrc/a.ts\n-\t-\timg.png\n\n10\t0\tb.rs\n"), (3, 13, 1));
     assert_eq!(parse_numstat(""), (0, 0, 0));
@@ -120,6 +127,7 @@ fn sem_repositorio_isolar_falha_e_sem_isolamento_todos_usam_a_pasta() {
     let base = dir.join("worktrees");
     let picks = Fixture::picks(&["a", "b"]);
     assert!(prepare_in(&registry, &base, &dir, "pergunta", &picks, true, "id0001").is_err());
+    assert!(prepare_in(&registry, &base, &dir.join("nao-existe"), "pergunta", &picks, false, "id0003").is_err());
     assert!(read_registry(&registry).is_empty(), "uma falha não registra nada");
     let shared = prepare_in(&registry, &base, &dir, "pergunta", &picks, false, "id0002").unwrap();
     assert!(!shared.comparison.isolated);

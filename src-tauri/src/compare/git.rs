@@ -80,12 +80,19 @@ pub struct FinishReport {
     pub needs_commit: bool,
 }
 
+/// Erro de quem ainda segura um arquivo do worktree (o terminal acabou de fechar): vale repetir. Pura.
+pub(crate) fn removal_is_transient(error: &str) -> bool {
+    let e = error.to_lowercase();
+    crate::missions::team::is_transient_git_error(error)
+        || ["failed to delete", "directory not empty", "resource busy", "being used by another process"].iter().any(|n| e.contains(n))
+}
+
 /// Uma ação de git que pode esbarrar num arquivo preso por um instante (Windows): repete.
 fn with_retry(mut op: impl FnMut() -> Result<String, String>) -> Result<String, String> {
     let mut last = op();
     for wait in REMOVE_BACKOFF_MS {
         match &last {
-            Err(e) if crate::missions::team::is_transient_git_error(e) => {
+            Err(e) if removal_is_transient(e) => {
                 std::thread::sleep(Duration::from_millis(wait));
                 last = op();
             }
