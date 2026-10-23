@@ -202,6 +202,21 @@ pub fn create_from(base: &Path, project_cwd: &Path, title: &str, start: &str) ->
     add_worktree(base, project_cwd, &short, &branch, Some(start))
 }
 
+/// Worktree numa branch NOVA com nome escolhido por quem chama (a comparação de modelos usa
+/// `cmp/<slug>-<id>/<pick>`, fora do prefixo `cc/`). Recusa nome vazio ou começando com `-`
+/// (viraria flag do git); o resto das regras de nome o próprio `git worktree add -b` confere.
+pub fn create_named(base: &Path, project_cwd: &Path, branch: &str, start: &str) -> Result<Worktree, String> {
+    if branch.trim().is_empty() || branch.starts_with('-') || start.starts_with('-') {
+        return Err("Nome de branch ou origem inválido.".into());
+    }
+    let repo = repo_root(project_cwd)?;
+    if git(&repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")], GIT_FAST).is_ok() {
+        return Err(format!("A branch '{branch}' já existe."));
+    }
+    let short = Uuid::new_v4().simple().to_string()[..8].to_string();
+    add_worktree(base, project_cwd, &short, branch, Some(start))
+}
+
 /// Worktree sobre una rama que ya existe (la del usuario, no una nueva). Se niega si esa
 /// rama ya está abierta en otro worktree o en la carpeta principal: git lo rechazaría igual,
 /// pero con un mensaje que no dice qué hacer.
@@ -269,6 +284,10 @@ fn add_worktree(base: &Path, project_cwd: &Path, short: &str, branch: &str, star
     let root = external_path(&base.join(short));
 
     std::fs::create_dir_all(base).map_err(|e| e.to_string())?;
+    // Uma branch que já existia antes do `-b` é do usuário: se o `worktree add` falhar por causa
+    // dela, a limpeza abaixo não pode apagá-la.
+    let existed = start.is_some()
+        && git(&repo, &["rev-parse", "--verify", "--quiet", &format!("refs/heads/{branch}")], GIT_FAST).is_ok();
     let root_arg = root.to_string_lossy();
     let result = match start {
         Some(start) => git(&repo, &["worktree", "add", "-b", branch, &root_arg, start], GIT_SLOW),
@@ -279,7 +298,7 @@ fn add_worktree(base: &Path, project_cwd: &Path, short: &str, branch: &str, star
         // rama recién creada sin worktree: se limpia para no acumular ramas huérfanas en cada reintento.
         // Una rama que ya existía es del usuario y no se toca.
         let _ = git(&repo, &["worktree", "prune"], GIT_SLOW);
-        if start.is_some() && !root.exists() {
+        if start.is_some() && !existed && !root.exists() {
             let _ = git(&repo, &["branch", "-D", branch], GIT_SLOW);
         }
         return Err(e);

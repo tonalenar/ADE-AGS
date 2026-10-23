@@ -345,3 +345,6 @@ Fixtures com a saída crua do PTY (pedaços com o instante em que chegaram) pass
 ## Pontos de restauração das abas
 
 A cada mensagem que chega a um agente numa aba (peers, `ags tab send`, chat, rotinas, missões e o Enter no terminal), uma foto dos arquivos da pasta vai para uma ref git escondida (`refs/ags/checkpoints/<aba>/<n>`), sem tocar branch, índice nem stash. No menu da aba: "Pontos de restauração…" (ver o diff desde um ponto, voltar os arquivos até ele com ponto de segurança e trava de pasta compartilhada) e "Marcar ponto". A conversa do agente não volta. Desenho e limites: [CHECKPOINTS_ABAS.md](./CHECKPOINTS_ABAS.md).
+## Comparar modelos
+
+O mesmo pedido para 2 a 6 agentes/modelos, cada um num worktree e numa branch `cmp/<slug>-<id>/<pick>`, em terminais lado a lado num canvas próprio, com barra de status, diff por modelo, "Manter este" e descarte que nunca perde trabalho sem confirmação (o descartado fica em `refs/ags/descartes/`). Detalhes em [COMPARAR_MODELOS.md](./COMPARAR_MODELOS.md).

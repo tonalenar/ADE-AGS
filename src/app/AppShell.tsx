@@ -8,6 +8,7 @@ import { initTabsPersistence, waitForHydration } from "@/features/tabs/persisten
 import { SideHead } from "@/app/SideHead";
 import { ActivityRail, RAIL_COMPACT_W, RAIL_EXPANDED_W } from "@/app/ActivityRail";
 import { CommandPalette } from "@/features/palette/CommandPalette";
+import { CompareHost } from "@/features/compare/CompareHost";
 import { initCanvasSync } from "@/features/canvas/store";
 import { initOrchestratorAnnouncements } from "@/features/canvas/orchestratorAnnounce";
 import { useSessionCheckpoints } from "@/features/sessions/useSessionCheckpoints";
@@ -339,6 +340,7 @@ export function AppShell() {
       <StatusBar repo={activeRepo} />
 
       <CommandPalette />
+      <CompareHost />
     </div>
   );
 }
