@@ -440,7 +440,9 @@ pub(super) fn typed_text_in(screen: &str, message: &str) -> bool {
     without_layout(screen).contains(&tail)
 }
 
-/// Pura: nas últimas linhas com texto, uma linha de prompt (>, ›, ❯) com o marcador de pegado.
+/// Pura: nas últimas linhas com texto, uma linha de prompt (>, ›, ❯) com o marcador de pegado. A borda
+/// da caixa de entrada ("│ › [Pasted…] │") não é o prompt: sai antes de olhar, como no front
+/// (`pasteStillPending`).
 pub(super) fn pending_paste_in(screen: &str) -> bool {
     screen
         .lines()
@@ -448,7 +450,7 @@ pub(super) fn pending_paste_in(screen: &str) -> bool {
         .filter(|line| !line.trim().is_empty())
         .take(6)
         .any(|line| {
-            let trimmed = line.trim_start();
+            let trimmed = line.trim_start_matches(|c: char| c.is_whitespace() || matches!(c, '│' | '┃' | '║' | '|'));
             (trimmed.starts_with('>') || trimmed.starts_with('›') || trimmed.starts_with('❯'))
                 && (line.contains("[Pasted Content") || line.contains("[Pasted text"))
         })
@@ -503,6 +505,9 @@ mod paste_tests {
         assert!(pending_paste_in("› [Pasted text #1 +30 lines]"));
         assert!(!pending_paste_in("> pergunta enviada\n⏺ resposta"));
         assert!(!pending_paste_in("  [Pasted text #1 +30 lines] (histórico)\n> "));
+        // Dentro da caixa com borda (o mesmo caso de pasteSubmit.test.ts no front).
+        assert!(pending_paste_in("╭────╮\n│ › [Pasted Content 3904 chars]  │\n╰────╯"));
+        assert!(!pending_paste_in("│ texto citando [Pasted text #1] na resposta │"));
     }
 }
 
