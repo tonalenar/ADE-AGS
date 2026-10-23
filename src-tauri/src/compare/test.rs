@@ -176,6 +176,7 @@ fn remover_sem_confirmar_nunca_apaga_trabalho() {
     assert_eq!(dry.entries[0].dirty, vec!["app.txt".to_string()]);
     assert_eq!(dry.entries[1].commits.len(), 1);
     assert!(dry.entries.iter().all(|e| !e.removed));
+    assert!(dry.entries[0].needs_confirmation && dry.entries[1].needs_confirmation && !dry.entries[2].needs_confirmation);
 
     let report = remove_in(&f.registry, &f.base, &cmp.id, &picks, false, false).unwrap();
     assert!(!report.entries[0].removed && !report.entries[1].removed, "{report:?}");
@@ -225,6 +226,7 @@ fn caminho_fora_da_pasta_de_worktrees_nunca_e_removido() {
     let report = super::git::remove_entry(&f.repo, &other, &cmp.id, entry, cmp.base.as_deref().unwrap(), true, false);
     assert!(!report.removed);
     assert!(report.blockers.iter().any(|b| b.contains("fora da pasta")), "{report:?}");
+    assert!(!report.needs_confirmation, "trava dura não se confirma");
     assert!(Path::new(entry.root.as_ref().unwrap()).exists());
 }
 
@@ -240,7 +242,7 @@ fn manter_um_e_encerrar_deixa_a_branch_com_o_trabalho() {
     let a = PathBuf::from(cmp.entries[0].root.clone().unwrap());
     std::fs::write(a.join("app.txt"), "resultado\n").unwrap();
     let blocked = finish_in(&f.registry, &f.base, &cmp.id, false, false).unwrap();
-    assert!(!blocked.removed && blocked.dirty == vec!["app.txt".to_string()], "{blocked:?}");
+    assert!(!blocked.removed && blocked.needs_commit && blocked.dirty == vec!["app.txt".to_string()], "{blocked:?}");
     assert!(a.exists());
 
     let done = finish_in(&f.registry, &f.base, &cmp.id, true, false).unwrap();

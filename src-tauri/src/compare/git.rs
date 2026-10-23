@@ -62,6 +62,8 @@ pub struct RemoveEntry {
     pub saved_ref: Option<String>,
     /// A branch ficou (não foi possível apagá-la com segurança).
     pub branch_kept: bool,
+    /// Só falta o usuário confirmar o descarte (`discard`); nenhuma trava dura.
+    pub needs_confirmation: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Default, PartialEq)]
@@ -74,6 +76,8 @@ pub struct FinishReport {
     pub committed: bool,
     pub blockers: Vec<String>,
     pub dirty: Vec<String>,
+    /// Só falta o usuário confirmar o commit do que está sem commit (`commit_pending`).
+    pub needs_commit: bool,
 }
 
 /// Uma ação de git que pode esbarrar num arquivo preso por um instante (Windows): repete.
@@ -252,6 +256,7 @@ pub fn remove_entry(repo: &Path, base_dir: &Path, cmp_id: &str, entry: &CompareE
     let has_work = !report.dirty.is_empty() || !report.commits.is_empty();
     if has_work && !discard {
         report.blockers.push("há trabalho que seria perdido: confirme o descarte".into());
+        report.needs_confirmation = true;
         return report;
     }
     if dry_run {
@@ -324,6 +329,7 @@ pub fn finish_entry(base_dir: &Path, repo: &Path, entry: &CompareEntry, commit_p
     }
     if !report.dirty.is_empty() && !commit_pending {
         report.blockers.push("há mudanças sem commit: confirme o commit na branch".into());
+        report.needs_commit = true;
         return report;
     }
     if dry_run {
