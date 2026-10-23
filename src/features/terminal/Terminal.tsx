@@ -16,6 +16,7 @@ import { installInputMarks } from "@/features/terminal/terminalMarks";
 import { keepScrollbarVisible } from "@/features/terminal/terminalScrollbar";
 import { installTuiScrollRail } from "@/features/terminal/tuiScrollRail";
 import { registerTerminal } from "@/features/terminal/terminalRegistry";
+import { ExcerptAction } from "@/features/terminal/ExcerptAction";
 import { decodeOsc52 } from "@/features/terminal/osc52";
 import { scrollbackEnd } from "@/features/terminal/scrollbackEnd";
 import { installTerminalKeyHandler } from "@/features/terminal/terminalKeys";
@@ -119,6 +120,9 @@ function TerminalImpl({
   const startedRef = useRef(false);
   const scrollbackShown = useRef(false);
   const termRef = useRef<XTerm | null>(null);
+  // A caixa inteira e o xterm já aberto, para o botão "Enviar trecho…" (ver `ExcerptAction.tsx`).
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [liveTerm, setLiveTerm] = useState<XTerm | null>(null);
   const { t } = useTranslation();
   const [status, setStatus] = useState<TerminalStatus>("connecting");
   const { theme } = useTheme();
@@ -275,6 +279,7 @@ function TerminalImpl({
     }
     term.open(containerRef.current);
     termRef.current = term;
+    setLiveTerm(term);
     if (initialScrollback) {
       term.write(initialScrollback + scrollbackEnd(term.rows));
       scrollbackShown.current = true;
@@ -654,6 +659,7 @@ function TerminalImpl({
         ptyIdRef.current = null;
       }
       termRef.current = null;
+      setLiveTerm(null);
       unregister?.();
       term.dispose();
     };
@@ -710,6 +716,7 @@ function TerminalImpl({
     // que casi siempre sobran unos píxeles abajo y a la derecha que no llegan a una celda.
     // Con el mismo color que la terminal, esa franja no se ve.
     <div
+      ref={rootRef}
       className="relative flex flex-col h-full w-full"
       style={{ background: TERMINAL_THEMES[theme].background }}
     >
@@ -729,6 +736,8 @@ function TerminalImpl({
           style={{ position: "relative", flex: 1, minWidth: 0, minHeight: 0, overflow: "hidden" }}
         />
       </div>
+      {/* Por último e fora do contêiner do xterm: não mexe na montagem dele (desmontar mata o PTY). */}
+      {tabId && liveTerm && rootRef.current && <ExcerptAction tabId={tabId} term={liveTerm} host={rootRef.current} />}
     </div>
   );
 }

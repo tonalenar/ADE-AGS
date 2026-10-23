@@ -13,7 +13,8 @@ import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
 
 const TOOL = "cc-t flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white";
-import { unreadOf, useUnreadStore } from "./chatUnread";
+import { unreadOf, useUnreadStore, type ChatJump } from "./chatUnread";
+import { appendToDraft } from "@/features/terminal/terminalExcerpt";
 import { useActiveBoardKey, boardKeyOfTab, conversationOfKey, missionOfKey, useCanvasStore } from "./store";
 import { useTerminalPrompts } from "./useTerminalPrompts";
 import { TeamFeed, TeamFilterBar, useMissionApprovals, useTeamFeed, useTeamMessages } from "./TeamFeed";
@@ -171,10 +172,23 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
   const jump = useUnreadStore((s) => s.jump);
 
   // Se llegó desde un aviso del sistema: se abre ese agente en ese hilo.
+  // O mesmo pedido só uma vez: em desenvolvimento o efeito roda duas vezes e o trecho entraria em dobro.
+  const consumedJump = useRef<ChatJump | null>(null);
   useEffect(() => {
-    if (!jump) return;
+    if (!jump || consumedJump.current === jump) return;
+    consumedJump.current = jump;
     if ((THREADS as readonly string[]).includes(jump.thread)) setThread(jump.thread as Thread);
     setTabId(jump.tabId);
+    // Um trecho de terminal: vai para o fim do rascunho, sem enviar, e o cursor fica pronto para a pergunta.
+    const text = jump.text;
+    if (text) {
+      setDraft((d) => appendToDraft(d, text));
+      requestAnimationFrame(() => {
+        const box = sentinel.current?.parentElement?.querySelector("textarea");
+        box?.focus();
+        box?.setSelectionRange(box.value.length, box.value.length);
+      });
+    }
     useUnreadStore.getState().setJump(null);
   }, [jump]);
 

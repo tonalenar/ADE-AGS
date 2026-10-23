@@ -100,6 +100,8 @@ vi.mock("@/features/browser/tabMcp", () => ({
   withBrowserMcp: async (command: string) => ({ command, env: {} }),
 }));
 vi.mock("@/features/canvas/store", () => ({ missionOfTab: () => null }));
+// O botão "Enviar trecho…" não entra no ciclo do PTY que este teste mede.
+vi.mock("@/features/terminal/ExcerptAction", () => ({ ExcerptAction: () => null }));
 
 import { Terminal, sameTerminalProps } from "@/features/terminal/Terminal";
 
