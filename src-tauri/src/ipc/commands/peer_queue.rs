@@ -129,7 +129,9 @@ pub(super) fn deliver_now_or_queue(app: &AppHandle, pty: u32, new: &NewMessage<'
         if let Ok(_turn) = lock.try_lock() {
             // Com outras esperando, esta não passa na frente: vai para o fim da fila.
             let first = with_db(app, |conn| store::head(conn, &msg.to_tab_id))?.map(|h| h.id) == Some(msg.id);
-            if first && wait_until_quiet(pty, QUIET, SENDER_WAIT, false) {
+            // Com o transcript dizendo que o destino está no meio de um turno (uma ferramenta longa e
+            // calada, um diálogo de aprovação), a tela quieta não basta: vai para a fila (ver `canal`).
+            if first && !crate::canal::busy(&msg.to_tab_id) && wait_until_quiet(pty, QUIET, SENDER_WAIT, false) {
                 let Some(claimed) = with_db(app, |conn| store::claim(conn, msg.id, now()))? else {
                     // O usuário a cancelou nesses segundos.
                     return Ok(Sent { delivery: Delivery::Cancelled, message: fresh(app, msg), repeat: false });
@@ -262,7 +264,12 @@ fn wait_turn(app: &AppHandle, to: &str, pty: u32) -> Turn {
         // `require_output`: um terminal que acabou de nascer (arranque do app) ainda não escreveu
         // nada; quieto assim não é "terminou o turno", é "a TUI nem abriu".
         if wait_until_quiet(pty, QUIET, Duration::from_millis(left as u64).min(WAIT_SLICE), true) {
-            return Turn::Ready;
+            // Quieto na tela, mas o transcript diz que o turno segue aberto: espera mais uma fatia.
+            // Só segura, nunca solta antes: sem canal (ou estado velho) `busy` é falso. O prazo de
+            // `QUEUE_MAX_WAIT` continua valendo.
+            if !crate::canal::busy(to) {
+                return Turn::Ready;
+            }
         }
         if crate::terminal::output_total(pty).is_none() {
             return Turn::PtyGone;

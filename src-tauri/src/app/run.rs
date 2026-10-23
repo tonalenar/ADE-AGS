@@ -41,6 +41,8 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
         crate::ipc::start_routine_scheduler(app.clone());
         // A fila das mensagens entre agentes volta a andar de onde parou (ver `peer_queue`).
         crate::ipc::start_peer_queue(app.clone());
+        // O canal estruturado: o estado de cada aba de Claude Code/Codex lido do transcript (ver `canal`).
+        crate::ipc::start_canal(app.clone());
         // El pet es de la pantalla: sin ventanas (headless) no hay a quién mostrárselo.
         crate::pet::start(app.clone());
     }
@@ -128,6 +130,15 @@ pub fn run() {
             crate::canvas::assets::canvas_asset_save,
             crate::canvas::assets::canvas_asset_load,
             // Pisos: worktrees aislados del proyecto, cada uno con su canvas
+            crate::compare::compare_check,
+            crate::compare::compare_prepare,
+            crate::compare::compare_attach,
+            crate::compare::compare_list,
+            crate::compare::compare_status,
+            crate::compare::compare_diff,
+            crate::compare::compare_keep,
+            crate::compare::compare_remove,
+            crate::compare::compare_finish,
             crate::floors::floor_list,
             crate::floors::floor_create,
             crate::floors::floor_delete,
@@ -153,6 +164,13 @@ pub fn run() {
             crate::runs::checkpoints::run_rollback_preview,
             crate::runs::checkpoints::run_rollback,
             crate::runs::checkpoints::run_checkpoint_create,
+            crate::tab_checkpoints::tab_checkpoint_auto,
+            crate::tab_checkpoints::tab_checkpoint_create,
+            crate::tab_checkpoints::tab_checkpoints_list,
+            crate::tab_checkpoints::tab_checkpoint_diff,
+            crate::tab_checkpoints::tab_checkpoint_restore,
+            crate::tab_checkpoints::tab_checkpoints_delete,
+            crate::tab_checkpoints::tab_checkpoints_prune,
             crate::runs::checkpoints::run_restore_checkpoint,
             crate::pet::pet_status,
             crate::ipc::commands::pool::pool_list_all,
@@ -174,6 +192,7 @@ pub fn run() {
             crate::ipc::commands::peer_queue::peer_queue_move,
             crate::ipc::commands::peer_queue::peer_queue_cancel,
             crate::ipc::commands::peer_queue::peer_queue_send_now,
+            crate::ipc::commands::canal::structured_state_all,
             crate::ipc::commands::routine::routine_list_all,
             crate::ipc::commands::routine::routine_set_enabled,
             crate::ipc::commands::routine::routine_set_catch_up,
@@ -294,6 +313,10 @@ pub fn run() {
             crate::forge::forge_checkout_pull,
             crate::forge::forge_releases,
             crate::forge::forge_labels,
+            // Guia de revisão de PR por IA (só lê o PR; nunca escreve no GitHub)
+            crate::forge::forge_pull_files,
+            crate::forge::review_guide_get,
+            crate::forge::review_guide_generate,
             // Sincronización de skills y configuración por un repo privado
             crate::sync::sync_status,
             crate::sync::sync_setup,
@@ -572,6 +595,8 @@ pub fn run() {
         })
         .setup(|app| {
             crate::memory::repo_sync::install(app);
+            // Os envios às abas (peers, `ags tab send`, chat…) tiram um ponto de restauração antes.
+            crate::tab_checkpoints::install(app.handle());
             // Las cookies y el storage de cada sitio que se abre en el navegador de las tabs
             // se guardan acá (ver `preview/site.rs`): el motor del webview no los conserva.
             if let Ok(dir) = crate::util::datadir::app_data_dir(app.handle()) {

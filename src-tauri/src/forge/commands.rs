@@ -250,7 +250,7 @@ pub async fn forge_set_repo_account(app: AppHandle, root: String, account_id: St
     store::set_repo_choice(&db(&app)?.lock().unwrap(), &root, &account_id)
 }
 
-async fn repo_api(app: &AppHandle, cwd: &str) -> Result<(RepoTarget, Api), ForgeError> {
+pub(super) async fn repo_api(app: &AppHandle, cwd: &str) -> Result<(RepoTarget, Api), ForgeError> {
     let t = target(app, cwd).await?;
     let api = api_for(app, &t).await?;
     Ok((t, api))

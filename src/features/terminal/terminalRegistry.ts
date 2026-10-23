@@ -13,11 +13,22 @@ import { requestPtyLaunch } from "./ptyLaunch";
  * línea de un mensaje de varias líneas llegaría como un Enter y lo mandaría a medias.
  */
 const terminals = new Map<string, Terminal>();
-const submittedListeners = new Set<(tabId: string, at: number) => void>();
+/** `typed` = o que estava antes do cursor no Enter (a caixa de entrada da TUI), para rotular o envio. */
+type SubmittedListener = (tabId: string, at: number, typed: string) => void;
+const submittedListeners = new Set<SubmittedListener>();
 
-export function onPromptSubmitted(listener: (tabId: string, at: number) => void): () => void {
+export function onPromptSubmitted(listener: SubmittedListener): () => void {
   submittedListeners.add(listener);
   return () => { submittedListeners.delete(listener); };
+}
+
+/** O último texto que o app colou com Enter em cada aba (o colado grande vira um marcador na tela). */
+const lastPaste = new Map<string, { text: string; at: number }>();
+
+/** O texto que o app colou nesta aba há menos de `within` ms, se houve. */
+export function recentPaste(tabId: string, now = Date.now(), within = 3000): string | null {
+  const paste = lastPaste.get(tabId);
+  return paste && now - paste.at <= within ? paste.text : null;
 }
 
 /** Mensajes para agentes que todavía no terminaron de arrancar. */
@@ -51,6 +62,8 @@ export interface SendTimings {
   onActivity?: (at: number) => void;
   /** Se reenvió un Enter porque el briefing seguía pegado sin enviar (o no hubo actividad). */
   onRetry?: (at: number) => void;
+  /** Só pega o texto na caixa, sem Enter: a pessoa revisa e envia (a pergunta do guia de revisão). */
+  draft?: boolean;
 }
 
 const queuedTimings = new Map<string, SendTimings>();
@@ -134,7 +147,7 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
     if (terminals.get(tabId) !== term) return;
     queued.delete(tabId);
     queuedTimings.delete(tabId);
-    pasteIntoTab(tabId, text, true, timings?.onRetry);
+    pasteIntoTab(tabId, text, !timings?.draft, timings?.onRetry);
     timings?.onSent?.(Date.now());
     if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
     if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);
@@ -199,8 +212,11 @@ export function sendWhenReady(tabId: string, text: string, timings?: SendTimings
 export function registerTerminal(tabId: string, term: Terminal): () => void {
   terminals.set(tabId, term);
   const input = term.onData((data) => {
-    if (data === "\r" || data === "\n") {
-      for (const listener of submittedListeners) listener(tabId, Date.now());
+    if ((data === "\r" || data === "\n") && submittedListeners.size > 0) {
+      let typed = "";
+      try { typed = beforeCursor(term, 3); } catch { /* buffer em troca: sem rótulo */ }
+      const at = Date.now();
+      for (const listener of submittedListeners) listener(tabId, at, typed);
     }
   });
   const pending = queued.get(tabId);
@@ -224,6 +240,7 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRet
     return false;
   }
   term.paste(text);
+  if (submit) lastPaste.set(tabId, { text, at: Date.now() });
   // El Enter va aparte y un momento después: algunas TUIs todavía están procesando el
   // pegado cuando llega, y lo toman como parte de él en vez de como "enviar".
   if (submit) {

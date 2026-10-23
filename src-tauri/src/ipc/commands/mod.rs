@@ -16,6 +16,7 @@ mod replay;
 mod devices;
 pub mod pool;
 mod browser;
+pub mod canal;
 mod dispatch;
 mod events;
 mod missions;

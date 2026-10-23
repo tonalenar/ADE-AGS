@@ -4,8 +4,10 @@
 
 mod accounts;
 mod agents;
+mod canal;
 mod canvas;
 mod chat;
+mod compare;
 mod app;
 mod bus;
 mod database;
@@ -39,6 +41,7 @@ mod session;
 mod skills;
 mod squads;
 mod sync;
+mod tab_checkpoints;
 mod terminal;
 pub mod testspeed;
 pub use terminal::SESSION_ENV;

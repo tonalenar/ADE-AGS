@@ -92,7 +92,7 @@ fn prepare_one(db: &crate::database::DbConnection, mission: &super::Mission, nam
 
 /// Pré-aprova a pasta dos worktrees em cada conta do Claude Code, para o diálogo "confia nesta
 /// pasta?" não travar os terminais da missão. Melhor esforço: não impede a missão.
-fn trust_claude_worktrees(db: &crate::database::DbConnection, base: &std::path::Path) {
+pub(crate) fn trust_claude_worktrees(db: &crate::database::DbConnection, base: &std::path::Path) {
     let dirs: Vec<String> = db
         .lock()
         .ok()

@@ -12,6 +12,7 @@ import {
   type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
 } from "./board";
 import { safeViewport, type Box, type Rect, type Viewport } from "./geometry";
+import { buildComparisonBoard, type ComparisonNode } from "@/features/compare/layout";
 
 export type WorkMode = "tabs" | "canvas";
 
@@ -57,6 +58,20 @@ export function conversationOfKey(key: string | null): string | null {
   return key && at >= 0 ? key.slice(at + CONV_SEP.length) : null;
 }
 
+/** O que separa a pasta da comparação de modelos na chave do seu canvas (ver `features/compare`). */
+const COMPARE_SEP = "#cmp:";
+
+/** A chave do canvas de uma comparação de modelos: o da pasta escolhida, com a comparação colada. */
+export function compareBoardKey(cwd: string, comparisonId: string): string {
+  return `${boardKey(cwd)}${COMPARE_SEP}${comparisonId}`;
+}
+
+/** A comparação de que é um canvas, se for de uma. */
+export function compareOfKey(key: string | null): string | null {
+  const at = key?.indexOf(COMPARE_SEP) ?? -1;
+  return key && at >= 0 ? key.slice(at + COMPARE_SEP.length) : null;
+}
+
 /** La clave del canvas de una misión en terminales: el de su carpeta, con la misión pegada. */
 export function missionBoardKey(cwd: string, missionId: string): string {
   return `${boardKey(cwd)}${MISSION_SEP}${missionId}`;
@@ -77,7 +92,7 @@ export function boardKeyOfTab(tab: { id: string; cwd: string }, boards: Record<s
   const prefix = `${windowLabel}|`;
   for (const [key, board] of Object.entries(boards)) {
     // O canvas de uma missão ou de uma conversa de projeto: a aba pertence ao em que é um nó.
-    if (key.startsWith(prefix) && (key.includes(MISSION_SEP) || key.includes(CONV_SEP)) && tab.id in board.nodes) return key;
+    if (key.startsWith(prefix) && (key.includes(MISSION_SEP) || key.includes(CONV_SEP) || key.includes(COMPARE_SEP)) && tab.id in board.nodes) return key;
   }
   return boardKey(tab.cwd);
 }
@@ -261,6 +276,9 @@ export const canvasActions = {
    *  `key` es `missionBoardKey`. Crea el canvas si no existe. */
   buildMissionTeam: (key: string, leadId: string, members: { tabId: string; roleId?: string | null; subagent?: boolean }[]) =>
     updateBoard(key, (board) => buildMissionTeam(board, leadId, members)),
+  /** O canvas de uma comparação de modelos: os terminais lado a lado sob o título (ver `compare/layout.ts`). */
+  buildComparison: (key: string, titleId: string, title: string, entries: ComparisonNode[]) =>
+    updateBoard(key, (board) => buildComparisonBoard(board, titleId, title, entries)),
   setLiveRects: (liveRects: Record<string, Rect>) => {
     const prev = useCanvasStore.getState().liveRects;
     if (JSON.stringify(prev) !== JSON.stringify(liveRects)) useCanvasStore.setState({ liveRects });

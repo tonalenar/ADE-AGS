@@ -8,9 +8,11 @@ import { initTabsPersistence, waitForHydration } from "@/features/tabs/persisten
 import { SideHead } from "@/app/SideHead";
 import { ActivityRail, RAIL_COMPACT_W, RAIL_EXPANDED_W } from "@/app/ActivityRail";
 import { CommandPalette } from "@/features/palette/CommandPalette";
+import { CompareHost } from "@/features/compare/CompareHost";
 import { initCanvasSync } from "@/features/canvas/store";
 import { initOrchestratorAnnouncements } from "@/features/canvas/orchestratorAnnounce";
 import { useSessionCheckpoints } from "@/features/sessions/useSessionCheckpoints";
+import { useTabCheckpointsCapture } from "@/features/tabCheckpoints/useTabCheckpointsCapture";
 import { StatusBar } from "@/app/StatusBar";
 import { TabBar } from "@/features/tabs/TabBar";
 import { WorkspacesPanel } from "@/features/workspaces/WorkspacesPanel";
@@ -72,6 +74,8 @@ function toFrontendTab(row: RestoredTabRow): Tab {
 export function AppShell() {
   useFileDropToTerminal();
   useSessionCheckpoints();
+  // Ponto de restauração dos arquivos a cada mensagem num agente, e a limpeza das abas fechadas.
+  useTabCheckpointsCapture();
   const tabs = useTabsStore((s) => s.tabs);
   const setDetectedAgents = useTabsStore((s) => s.setDetectedAgents);
   const activateTab = useTabsStore((s) => s.activateTab);
@@ -336,6 +340,7 @@ export function AppShell() {
       <StatusBar repo={activeRepo} />
 
       <CommandPalette />
+      <CompareHost />
     </div>
   );
 }
