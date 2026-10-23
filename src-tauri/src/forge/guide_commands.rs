@@ -153,6 +153,10 @@ pub async fn forge_pull_files(app: AppHandle, cwd: String, number: u64) -> Resul
     api.pull_files(&t.path, number).await
 }
 
+/// O que as tentativas deram: o guia (ou os erros), a última resposta crua, o custo somado e
+/// quantas foram.
+type Attempts = (Result<super::guide::ReviewGuide, Vec<String>>, String, Option<f64>, u32);
+
 fn attempt(db: &DbConnection, a: &Assignment, cwd: &str, prompt: &str) -> Result<(String, Option<f64>), String> {
     let outcome = run_read_only(
         db,
@@ -213,7 +217,7 @@ pub async fn review_guide_generate(
 
     let result = {
         let (db, a, workdir) = (db.clone(), assignment.clone(), workdir.clone());
-        blocking(move || -> Result<(Result<_, Vec<String>>, String, Option<f64>, u32), String> {
+        blocking(move || -> Result<Attempts, String> {
             let (first, cost1) = attempt(&db, &a, &workdir, &prompt)?;
             match parse_guide(&first, &paths) {
                 Ok(guide) => Ok((Ok(guide), first, cost1, 1)),
