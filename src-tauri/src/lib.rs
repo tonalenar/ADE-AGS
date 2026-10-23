@@ -4,6 +4,7 @@
 
 mod accounts;
 mod agents;
+mod canal;
 mod canvas;
 mod chat;
 mod app;

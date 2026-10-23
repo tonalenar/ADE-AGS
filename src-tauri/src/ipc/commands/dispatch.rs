@@ -102,6 +102,8 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "tab.send" => tab_send(app, args),
         "tab.create" => tab_create(app, args),
         "tab.close" => bridge_call(app, "tab.close", args),
+        // O estado lido do transcript da TUI (ver `canal`).
+        "tab.state" => super::canal::tab_state(app, args),
         // Conversar con los agentes conectados en el canvas (ver `peers`).
         "peer.list" => peer_list(app, args),
         "peer.ask" => peer_ask(app, args),
@@ -115,6 +117,9 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "peer.role" => peer_role(app, args),
         // A fila persistente das mensagens que você mandou (ver `peer_queue`).
         "peer.queue" => super::peer_queue::peer_queue(app, args),
+        // Aprovações e perguntas dos integrantes, vistas pelo canal estruturado (ver `canal`).
+        "peer.pending" => super::canal::peer_pending(app, args),
+        "peer.answer" => super::canal::peer_answer(app, args),
         // Segue o CI de um PR e avisa no terminal de quem pediu (ver `peers::ci_watch`).
         "ci.watch" => ci_watch(app, args),
         // Las notas del canvas conectadas con quien pide (ver `notes`).

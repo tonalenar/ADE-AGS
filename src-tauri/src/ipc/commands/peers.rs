@@ -1091,7 +1091,9 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
     remember_ask(&target.id, AskStatus { started_ms, ended_ms: None, mark: None, finished: None, from: from_id.into(), sent: false });
     let _guard = AskGuard { from: from_id, target: &target.id, started_ms };
     // Reserve the maximum echo wait of submit_prompt inside the caller's deadline.
-    let quiet = wait_until_quiet(pty, Duration::from_millis(1500), timeout.saturating_sub(Duration::from_secs(5)).min(Duration::from_secs(60)), false);
+    // O transcript diz que o destino está no meio de um turno: nem espera a tela, vai para a fila (ver `canal`).
+    let quiet = !crate::canal::busy(&target.id)
+        && wait_until_quiet(pty, Duration::from_millis(1500), timeout.saturating_sub(Duration::from_secs(5)).min(Duration::from_secs(60)), false);
 
     // La marca: desde qué línea de la terminal empieza la respuesta.
     let mark = screen(app, target, None, 1)?.get("end").and_then(Value::as_u64);

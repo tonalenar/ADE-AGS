@@ -35,7 +35,9 @@ TESTES LOCAIS (no worktree atual, sem precisar do app)
     ags tab send <id> \"rode os testes\" =  ags tab send --tab <id> --text \"...\"
 
 TABS
-  tab list                                    Tabs abertas agora
+  tab list                                    Tabs abertas agora (com o estado do transcript, se houver)
+  tab state <id>                              O estado lido do transcript da TUI (Claude Code, Codex):
+                                              turno aberto/encerrado, ferramentas pendentes, pergunta, tokens
   tab create <caminho> --agent <id>           Abre uma tab nova
              [--skills a,b]                   · skills a anexar, por nome
              [--account <nome>]               · conta dessa TUI (veja `accounts`)
@@ -67,6 +69,9 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
               nunca é digitada duas vezes, nem num reenvio depois de um reinício do app)
   peer queue [list]                           O que você mandou e ainda espera na fila (id, destino, idade)
   peer queue cancel <id>                      Cancela uma mensagem sua que ainda não foi entregue
+  peer pending [--all]                        Aprovações e perguntas dos integrantes que esperam resposta
+  peer answer <id> <resposta> [--enter]       Responde uma pendência (só orquestradores): num diálogo, o número
+                                              da opção, y, n ou esc; numa pergunta de fim de turno, o texto
   ci watch <PR>                               Segue o CI do PR em segundo plano e cola o resultado
                                               no seu terminal quando terminar (no lugar de gh pr checks --watch)
   notify \"mensagem\"                           Avisa o usuário (aviso na tela; barra de tarefas)
@@ -798,7 +803,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "skill.search" => &["query"],
         // El texto va segundo: `ags tab send <id> "corré los tests"`.
         "tab.send" => &["tab", "text"],
-        "tab.output" | "tab.close" | "watch.add" | "watch.remove" => &["tab"],
+        "tab.output" | "tab.close" | "tab.state" | "watch.add" | "watch.remove" => &["tab"],
         "tab.create" => &["cwd"],
         "workspace.open" => &["workspace"],
         // `ags mission wait <id>`, `ags mission accept <id> <tarea>`.
@@ -820,6 +825,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "peer.handoff" => &["id"],
         // `ags peer queue`, `ags peer queue cancel 12`.
         "peer.queue" => &["action", "id"],
+        // `ags peer answer 12 1`: a pendência e a resposta.
+        "peer.answer" => &["id", "text"],
         // `ags note read Plano 10 20`: desde la línea 10, 20 líneas.
         "notify.send" => &["message"],
         // `ags role create "Revisor" "Procure falhas..."`; el texto también va con --file.

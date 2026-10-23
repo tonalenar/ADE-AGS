@@ -1267,6 +1267,9 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     // mensagem, para a entrega sobreviver ao reinício. Só aditiva e sem subir user_version, como as
     // outras daqui (subir força o backup VACUUM e quebra os testes que cravam a versão).
     crate::peer_queue::migrate(conn)?;
+    // Pendências dos integrantes (aprovações e perguntas vistas pelo canal estruturado, ver `canal`):
+    // também só aditiva e sem subir user_version.
+    crate::canal::migrate(conn)?;
     set_user_version(conn, SCHEMA_VERSION)
 }
 

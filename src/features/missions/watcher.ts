@@ -5,6 +5,7 @@ import { listen } from "@tauri-apps/api/event";
 import { useCanvasStore } from "@/features/canvas/store";
 import { activeTabIds, activitySnapshot, lastInputAt, lastOutputAt, sustainedTabIds as sustainedNow } from "@/features/terminal/activity";
 import { onPromptSubmitted, pasteIntoTab, screenOf } from "@/features/terminal/terminalRegistry";
+import { startStructuredState, workingWith } from "@/features/terminal/structuredState";
 import { useTabsStore } from "@/features/tabs/store";
 
 import { isFinalDelivery, noteDelivery, noteSustained } from "../bot/arcadeSignals";
@@ -12,7 +13,7 @@ import { sustainedTabIds } from "@/features/terminal/activity";
 import { useMemoryPendingNotice } from "../memory/useMemoryPendingNotice";
 import { ACTIVE_FLUSH_MS, ACTIVE_TICK_MS, accumulate, sampleWorking, tickMs } from "./activeTime";
 import { finishedMissionTabs, missionIndex, useMissionIndex } from "./groups";
-import { STALL_CHECK_MS, applyMessage, parseStallMs, findStalls, markAlerted, stallMessage, type PeerMessage, type PendingTasks } from "./stalled";
+import { STALL_CHECK_MS, applyMessage, parseStallMs, findStalls, isWorking, markAlerted, stallMessage, type PeerMessage, type PendingTasks } from "./stalled";
 import { useMissionsStore } from "./store";
 import { LEAD_NAME } from "./terminals";
 import { recordSpan } from "./timings";
@@ -44,6 +45,8 @@ export interface PeerTimingEvent {
 export function useMissionWatcher(): void {
   // O Vigia de cada missão é acordado pelo app quando alguém fica sem saída (ver `vigia.ts`).
   useVigiaDriver();
+  // O estado lido dos transcripts (Claude Code/Codex), para o Vigia e os detectores de parado.
+  useEffect(() => startStructuredState(), []);
   const workspaceId = useTabsStore((s) => s.workspaceId);
   const tabs = useTabsStore((s) => s.tabs);
   const missions = useMissionsStore((s) => s.missions);
@@ -161,7 +164,7 @@ export function useMissionWatcher(): void {
       const probe = {
         now,
         isActive: (id: string) => active.has(id),
-        isWorking: (id: string) => working.has(id),
+        isWorking: (id: string) => workingWith(id, working.has(id)),
         lastOutputAt,
         lastInputAt,
         screen: (id: string) => screenOf(id)?.lines ?? null,
@@ -204,6 +207,7 @@ export function useMissionWatcher(): void {
         lastOutputAt,
         lastInputAt,
         screen: (id) => screenOf(id)?.lines ?? null,
+        working: (id, lines) => workingWith(id, isWorking(lines)),
       }, stallMs);
       const sent = stalls.filter((s) => {
         // No se interrumpe al orquestador a mitad de un turno: se reintenta en el próximo tic.
