@@ -51,6 +51,8 @@ export interface SendTimings {
   onActivity?: (at: number) => void;
   /** Se reenvió un Enter porque el briefing seguía pegado sin enviar (o no hubo actividad). */
   onRetry?: (at: number) => void;
+  /** Só pega o texto na caixa, sem Enter: a pessoa revisa e envia (a pergunta do guia de revisão). */
+  draft?: boolean;
 }
 
 const queuedTimings = new Map<string, SendTimings>();
@@ -134,7 +136,7 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
     if (terminals.get(tabId) !== term) return;
     queued.delete(tabId);
     queuedTimings.delete(tabId);
-    pasteIntoTab(tabId, text, true, timings?.onRetry);
+    pasteIntoTab(tabId, text, !timings?.draft, timings?.onRetry);
     timings?.onSent?.(Date.now());
     if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
     if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);

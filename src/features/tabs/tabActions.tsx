@@ -59,6 +59,9 @@ interface WizardFor {
   skillIds?: string[];
   prelaunch?: PrelaunchStep[];
   prompt?: string;
+  /** Como `prompt`, mas só pré-preenchido na caixa do agente, sem enviar: a pessoa edita e
+   *  manda (ver «Perguntar sobre isto» no guia de revisão). Com `draft`, `prompt` é ignorado. */
+  draft?: string;
 }
 
 /** Abre el asistente de agente nuevo en `cwd`; lo que se elija arranca con `prompt`. */
@@ -217,7 +220,8 @@ export function TabDialogs() {
         onClose={() => { clearPlacement(); close({ wizardOpen: false, wizardFor: null }); }}
         onConfirm={({ agent, skillIds, accountId, prelaunch, memoryBlock, role }) => {
           const cwd = wizardFor?.cwd ?? activeTab?.cwd;
-          const prompt = wizardFor?.prompt;
+          const draft = wizardFor?.draft;
+          const prompt = draft ?? wizardFor?.prompt;
           if (!cwd) return;
           const tabId = useTabsStore.getState().addTab({ cwd, agent, accountId, prelaunch });
           // O terminal nasce no retângulo que a pessoa desenhou no canvas, se desenhou um.
@@ -242,9 +246,10 @@ export function TabDialogs() {
             wantsMemory ? tabMemoryMessage({ id: tabId, agentId: agent.id, memoryBlock }, workspaceId).catch(() => null) : Promise.resolve(null),
           ]).then(([briefing, memory]) => {
             // Um shell não lê isto; um agente fica sabendo que abre o navegador no canvas, ligado a ele.
-            const hint = agent.id === "bash" ? null : `[ADE AGS] ${BROWSER_HINT}`;
+            // Num rascunho o aviso fica de fora: é a pergunta da pessoa, não um briefing.
+            const hint = agent.id === "bash" || draft ? null : `[ADE AGS] ${BROWSER_HINT}`;
             const text = [briefing, startupText(memory, prompt), hint].filter(Boolean).join("\n\n");
-            if (text) sendWhenReady(tabId, text);
+            if (text) sendWhenReady(tabId, text, draft ? { draft: true } : undefined);
           });
         }}
       />
