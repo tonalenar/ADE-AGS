@@ -3210,5 +3210,20 @@
   "browser.real.loginHint": "Opens this profile in a regular Chrome window so you can sign in (Google refuses sign-in in a controlled Chrome). Close the window when you are done.",
   "browser.real.loggingIn": "The Chrome sign-in window is on top of this Portal. Sign in there; when you are done, click below (or close the window) and the Portal comes back signed in.",
   "browser.real.loginDone": "I am done signing in",
-  "browser.real.signInHere": "Do not sign in to Google here: Google refuses this Chrome and starts distrusting the profile. Use Sign in to an account, which opens a regular Chrome window."
+  "browser.real.signInHere": "Do not sign in to Google here: Google refuses this Chrome and starts distrusting the profile. Use Sign in to an account, which opens a regular Chrome window.",
+  "terminal.excerpt.header": "[Excerpt from «{{source}}», lines {{from}}–{{to}}]",
+  "terminal.excerpt.headerLine": "[Excerpt from «{{source}}», line {{line}}]",
+  "terminal.excerpt.truncated": "[… excerpt truncated: limit of {{lines}} lines or {{kb}} KB]",
+  "terminal.excerpt.action": "Send excerpt…",
+  "terminal.excerpt.actionHint": "Send the selected excerpt to another agent or to the chat",
+  "terminal.excerpt.copy": "Copy",
+  "terminal.excerpt.chat": "This tab's chat",
+  "terminal.excerpt.chatCanvas": "This tab's chat (opens the canvas)",
+  "terminal.excerpt.noAgents": "No other agent open",
+  "terminal.excerpt.title": "Terminal excerpt",
+  "terminal.excerpt.pasted": "Excerpt pasted into {{name}}, not sent: type your question and press Enter.",
+  "terminal.excerpt.offline": "{{name}}'s terminal is not running: open its tab and try again.",
+  "terminal.excerpt.noMultiline": "{{name}} does not accept multi-line pastes right now. The excerpt was copied: paste it when its input is ready.",
+  "terminal.excerpt.empty": "The selection is empty.",
+  "terminal.excerpt.cut": "Large excerpt: it was cut to {{lines}} lines or {{kb}} KB."
 }

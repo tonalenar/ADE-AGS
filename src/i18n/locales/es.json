@@ -3210,5 +3210,20 @@
   "browser.real.loginHint": "Abre este perfil en un Chrome normal, en su propia ventana, para iniciar sesión (Google rechaza el inicio de sesión en un Chrome controlado). Cierra la ventana al terminar.",
   "browser.real.loggingIn": "La ventana de inicio de sesión de Chrome está encima de este Portal. Inicia sesión ahí; al terminar, haz clic abajo (o cierra la ventana) y el Portal vuelve con la cuenta.",
   "browser.real.loginDone": "Terminé de iniciar sesión",
-  "browser.real.signInHere": "No inicies sesión en Google aquí: Google rechaza este Chrome y empieza a desconfiar del perfil. Usa Iniciar sesión, que abre una ventana normal de Chrome."
+  "browser.real.signInHere": "No inicies sesión en Google aquí: Google rechaza este Chrome y empieza a desconfiar del perfil. Usa Iniciar sesión, que abre una ventana normal de Chrome.",
+  "terminal.excerpt.header": "[Fragmento de «{{source}}», líneas {{from}}–{{to}}]",
+  "terminal.excerpt.headerLine": "[Fragmento de «{{source}}», línea {{line}}]",
+  "terminal.excerpt.truncated": "[… fragmento recortado: límite de {{lines}} líneas o {{kb}} KB]",
+  "terminal.excerpt.action": "Enviar fragmento…",
+  "terminal.excerpt.actionHint": "Enviar el fragmento seleccionado a otro agente o al chat",
+  "terminal.excerpt.copy": "Copiar",
+  "terminal.excerpt.chat": "Chat de esta pestaña",
+  "terminal.excerpt.chatCanvas": "Chat de esta pestaña (abre el canvas)",
+  "terminal.excerpt.noAgents": "No hay otro agente abierto",
+  "terminal.excerpt.title": "Fragmento de terminal",
+  "terminal.excerpt.pasted": "Fragmento pegado en {{name}}, sin enviar: escribe la pregunta y pulsa Enter.",
+  "terminal.excerpt.offline": "La terminal de {{name}} no está en ejecución: abre su pestaña e inténtalo de nuevo.",
+  "terminal.excerpt.noMultiline": "{{name}} no acepta pegar varias líneas ahora. El fragmento se copió: pégalo cuando su entrada esté lista.",
+  "terminal.excerpt.empty": "La selección está vacía.",
+  "terminal.excerpt.cut": "Fragmento grande: se recortó a {{lines}} líneas o {{kb}} KB."
 }
