@@ -155,3 +155,86 @@ export function isForgeError(e: unknown): e is ForgeError {
 export function forgeErrorOf(e: unknown): ForgeError {
   return isForgeError(e) ? e : { kind: "api", message: String(e) };
 }
+
+// ── guia de revisão de PR (ver `src-tauri/src/forge/guide.rs`) ─────────
+
+/** Um arquivo que um PR toca, com o diff unificado quando o host o dá. */
+export interface PullFile {
+  path: string;
+  oldPath: string | null;
+  /** `added`, `removed`, `modified` o `renamed`. */
+  status: string;
+  additions: number;
+  deletions: number;
+  patch: string | null;
+}
+
+export interface LineRange { start: number; end: number }
+
+export interface GuideStopFile {
+  path: string;
+  /** Linhas na versão NOVA do arquivo. */
+  lines?: LineRange;
+}
+
+/** Uma parada do roteiro: uma área do PR, por que importa e o que olhar de perto. */
+export interface GuideStop {
+  id: string;
+  title: string;
+  files: GuideStopFile[];
+  why: string;
+  lookClosely: string[];
+  excerpt?: string;
+  questions?: string[];
+}
+
+export type GuideRisk = "low" | "medium" | "high";
+
+export interface ReviewGuide {
+  summary: string;
+  risk: GuideRisk;
+  stops: GuideStop[];
+}
+
+/** O guia gravado em cache, por PR e pelo commit da cabeça. */
+export interface GuideEntry {
+  version: number;
+  repo: string;
+  number: number;
+  headSha: string;
+  /** Milissegundos. */
+  createdAt: number;
+  agentId: string;
+  model: string | null;
+  costUsd: number | null;
+  attempts: number;
+  guide: ReviewGuide;
+}
+
+export interface GuideLookup {
+  entry: GuideEntry | null;
+  /** O commit da cabeça agora; `null` = não se soube. */
+  headSha: string | null;
+  /** O guia é de outro commit: o PR andou depois. */
+  stale: boolean;
+}
+
+export interface GuideOutcome {
+  /** `null` = as duas tentativas falharam a validação; veja `raw` e `errors`. */
+  entry: GuideEntry | null;
+  raw: string | null;
+  errors: string[];
+  agentId: string;
+  model: string | null;
+}
+
+export interface GuideRequest {
+  /** `null` = automático. */
+  agentId: string | null;
+  accountId: string | null;
+  autoAccount: boolean;
+  model: string | null;
+  lang: string;
+  /** Onde o agente roda (o worktree do PR, se houver). */
+  workdir: string | null;
+}

@@ -18,6 +18,7 @@ import { invalidateRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { itemPrompt } from "./agentPrompt";
 import { forgeCheckoutPull, forgeComment, forgeImage, forgeItem, forgeMergePull, resolveForgeImage } from "./ipc";
 import { forgeErrorOf, type ForgeItem, type ForgeItemDetail } from "./types";
+import { ReviewGuidePanel } from "./ReviewGuidePanel";
 
 type MergeMethod = "merge" | "squash" | "rebase";
 
@@ -231,6 +232,9 @@ export function ItemDetailView({ cwd, workspaces, item, pr, onBack, onChanged }:
 
           {note && <p className="text-[12px] text-emerald-600 dark:text-emerald-400">{note}</p>}
           {error && <p className="text-[12px] text-red-500 dark:text-red-400 break-words">{error}</p>}
+
+          {/* ── guia de revisão por IA (só PRs; nunca publica nada no GitHub) ── */}
+          {pr && <ReviewGuidePanel cwd={cwd} item={shown} workspaces={workspaces} />}
 
           {/* ── descripción e hilo ─────────────────────────────────── */}
           <div className="rounded-xl border border-gray-200 dark:border-white/8 overflow-hidden">
