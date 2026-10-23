@@ -27,6 +27,7 @@ Comando aditivo `memory_review_summary_workspace` agrega as missões com propost
 pendentes preservando evidência e classificações do resumo existente. Somente lê;
 decisões permanecem explícitas por usuário. Contrato e limites em
 [MEMORY_REVIEW_WORKSPACE.md](./MEMORY_REVIEW_WORKSPACE.md).
+
 ## Etapa 15 — início rápido (ponto 1)
 
 Implementado em `feat/etapa15-inicio-rapido`: preparação persistida e idempotente de um worktree/branch por integrante (inclusive Orquestrador e recruits de missão), a partir de origin/master; junction de dependências e target Cargo isolado; contexto de precheck/memória preenchido para toda a equipe; briefing exige delegação em ~2 min antes de explorar e membros aguardam a tarefa. QG e CLI mostram `firstDelegationMs` e sua fonte real/histórica, preservando ausência em cinza. Schema v32 aditivo e testes de migração, isolamento, retry e lançamento. Comparação posterior em missão real depende de executar o app atualizado; não foi inventado ganho. Contrato e evidências em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
@@ -186,9 +187,11 @@ Ponto 1: precheck de instalação, sessão, catálogo por conta e limite antes d
 
 Ponto 1, revisão QA: aviso de erro traduzido na lista de missões e bloqueio preventivo quando a conta principal não está exposta no roster.
 Ponto 2: failover opcional por autenticação, modelo ou saldo no mesmo pool/TUI, com uma troca por task, cooldown e auditoria traduzida. Ver [MISSION_SUCCESS.md](./MISSION_SUCCESS.md) e [POOL_FAILOVER.md](./POOL_FAILOVER.md).
+
 ## 17. Classificação de falhas (Etapa 10, ponto 3)
 
 **Implementado:** classificação tipada e persistida no fechamento (`failureClassification` + `failureDetail`), exposta por `mission_list`, `mission_get` e pelos resumos da CLI. O Frontend mostra causa e ação no QG e no detalhe da missão. Ver [MISSION_FAILURES.md](./MISSION_FAILURES.md).
+
 ## 17. Taxa de sucesso das missões (Etapa 10)
 
 **Ponto 6 (medição) implementado no front:** cartão com histórico, 7 e 30 dias, canceladas à parte e missões de teste/E2E por marcação explícita (`isTest`). Pendente: backend gravar `isTest`. Detalhes em [MISSION_SUCCESS.md](./MISSION_SUCCESS.md).
@@ -202,12 +205,15 @@ Ponto 6, backend: marcação explícita `isTest` na criação/início (CLI `--te
 ## Etapa 11 — eficiência entre agentes, ponto 2 (peer ask)
 
 **Implementado:** prazo inclui preparação/envio; `peer check` consulta status e resposta parcial da última pergunta sem repetir o pedido. `mission timings` apresenta ranking de gargalos por agente a partir de `peer_ask` e `turn`. Turnos após o briefing também são registrados, com dono único e preservação de `detail: "briefing"`. Eventos de comunicação do ponto 1 são reutilizados por destino, inclusive em batch/recruit. Detalhes e limites de inferência em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+
 ## Etapa 11 — Eficiência entre agentes
 
 **Ponto 3 implementado:** ao criar o worktree, a app prepara a junction de `node_modules` no Windows ou symlink em Unix, sem substituir diretórios existentes; falhas geram aviso sem bloquear o recruit. O briefing inicial inclui caminho, shell e comandos de validação, com `cargo test --lib` filtrado. O target Cargo compartilhado é configurável como `per-worktree` para evitar disputa de lock entre agentes simultâneos, com o custo de recompilar dependências uma vez por worktree. O procedimento multiplataforma está em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
+
 ## Etapa 11 — eficiência entre agentes (P4)
 
 **Ponto 4 implementado:** o QG e o painel da missão mostram tempo ativo sem sobreposição, tempo de relógio, custo reportado pelos Runs, agentes observados e comparação com até 30 missões concluídas do workspace, agrupadas por faixa de agentes. O briefing só recomenda recrutar quando o trabalho é independente e paralelizável e há expectativa de terminar mais rápido do que com um agente só. Métricas, limites e API estão em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md); a linha de base anterior do QA está em [AGENT_EFFICIENCY_BASELINE.md](./AGENT_EFFICIENCY_BASELINE.md).
+
 ## Etapa 11 — eficiência entre agentes (ponto 5)
 
 **Menos conversa, mais memória:** o briefing consulta os registros existentes antes de perguntar; integrantes enviam uma única entrega final com resultado, decisões, arquivos, testes e bloqueios. Handoff Structured permanece como registro de entrega entre Tasks do Mission Runtime; Shared Memory guarda somente conhecimento aprovado e duradouro. Detalhes e comparação estática de tokens em [AGENT_EFFICIENCY.md](./AGENT_EFFICIENCY.md).
@@ -298,6 +304,7 @@ Cinco pontos de melhoria estrutural focados na velocidade de inicialização das
 - [x] Dedupe de designs por missão/título, consolidação sem perder propostas existentes (v37), aliases dos IDs antigos, arquivar e excluir via Tauri/CLI.
 - [x] Dono pela aba criadora (`from`/`ADE_TAB_ID`); evento distingue design novo de reuso.
 - [x] Identidade do build em `ags --version` e comparação do CLI adjacente com a app, com limite de tempo e testes.
+
 ## Etapa 19 — Design no canvas principal e acabamento
 
 - [x] **Design no canvas principal (Frontend)**: pranchetas dispostas diretamente como nós do canvas com molduras agrupadas por página/design (`layoutGroups`), origem livre à direita (`freeOrigin`), foco automático e enquadramento (`fitViewport`).
@@ -345,9 +352,11 @@ Fixtures com a saída crua do PTY (pedaços com o instante em que chegaram) pass
 ## Pontos de restauração das abas
 
 A cada mensagem que chega a um agente numa aba (peers, `ags tab send`, chat, rotinas, missões e o Enter no terminal), uma foto dos arquivos da pasta vai para uma ref git escondida (`refs/ags/checkpoints/<aba>/<n>`), sem tocar branch, índice nem stash. No menu da aba: "Pontos de restauração…" (ver o diff desde um ponto, voltar os arquivos até ele com ponto de segurança e trava de pasta compartilhada) e "Marcar ponto". A conversa do agente não volta. Desenho e limites: [CHECKPOINTS_ABAS.md](./CHECKPOINTS_ABAS.md).
+
 ## Comparar modelos
 
 O mesmo pedido para 2 a 6 agentes/modelos, cada um num worktree e numa branch `cmp/<slug>-<id>/<pick>`, em terminais lado a lado num canvas próprio, com barra de status, diff por modelo, "Manter este" e descarte que nunca perde trabalho sem confirmação (o descartado fica em `refs/ags/descartes/`). Detalhes em [COMPARAR_MODELOS.md](./COMPARAR_MODELOS.md).
+
 ## Guia de revisão de PR por IA
 
 Na tela de um PR, um agente (somente leitura, uma chamada headless) monta um roteiro de leitura com paradas: arquivos e linhas, por que importa, o que olhar de perto, trecho e perguntas. JSON validado estrito, com uma tentativa de conserto; cache por commit da cabeça, com aviso de desatualizado; passo a passo com teclado e visitadas; diff do arquivo no painel; "Perguntar sobre isto" abre um agente com o texto pré-preenchido, sem enviar. Nada é publicado no GitHub. Desenho, contrato e limites: [GUIA_REVISAO_PR.md](./GUIA_REVISAO_PR.md).
