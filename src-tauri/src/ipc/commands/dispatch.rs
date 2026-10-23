@@ -112,6 +112,8 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "peer.connect" => peer_connect(app, args),
         "peer.disconnect" => peer_disconnect(app, args),
         "peer.role" => peer_role(app, args),
+        // A fila persistente das mensagens que você mandou (ver `peer_queue`).
+        "peer.queue" => super::peer_queue::peer_queue(app, args),
         // Segue o CI de um PR e avisa no terminal de quem pediu (ver `peers::ci_watch`).
         "ci.watch" => ci_watch(app, args),
         // Las notas del canvas conectadas con quien pide (ver `notes`).

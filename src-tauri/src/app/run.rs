@@ -39,6 +39,8 @@ fn start_ui(app: &tauri::AppHandle) -> Result<(), String> {
         // Las rotinas se disparan solas, con la app abierta (ver `routines`). En modo
         // headless no hay ventanas: no habría a quién avisar ni terminal donde escribir.
         crate::ipc::start_routine_scheduler(app.clone());
+        // A fila das mensagens entre agentes volta a andar de onde parou (ver `peer_queue`).
+        crate::ipc::start_peer_queue(app.clone());
         // El pet es de la pantalla: sin ventanas (headless) no hay a quién mostrárselo.
         crate::pet::start(app.clone());
     }
@@ -166,6 +168,12 @@ pub fn run() {
             crate::android::android_key,
             crate::android::android_text,
             // Rotinas: mensajes programados a un agente o al usuario
+            crate::ipc::commands::peer_queue::peer_queue_counts,
+            crate::ipc::commands::peer_queue::peer_queue_list,
+            crate::ipc::commands::peer_queue::peer_queue_edit,
+            crate::ipc::commands::peer_queue::peer_queue_move,
+            crate::ipc::commands::peer_queue::peer_queue_cancel,
+            crate::ipc::commands::peer_queue::peer_queue_send_now,
             crate::ipc::commands::routine::routine_list_all,
             crate::ipc::commands::routine::routine_set_enabled,
             crate::ipc::commands::routine::routine_set_catch_up,

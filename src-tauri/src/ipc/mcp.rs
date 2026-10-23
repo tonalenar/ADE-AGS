@@ -1322,7 +1322,8 @@ fn peer_schemas() -> Vec<Value> {
             "description": "Send a message to an agent connected to you on the ADE AGS canvas (a teammate or the orchestrator), without waiting. Use it for tasks, blockers and short updates; the reply arrives in your terminal. Long messages are delivered as a file the recipient reads.",
             "inputSchema": { "type": "object", "properties": {
                 "to": { "type": "string", "description": "The teammate's name, as `peers` lists it." },
-                "text": { "type": "string", "description": "The message, any length, multi-line allowed." }
+                "text": { "type": "string", "description": "The message, any length, multi-line allowed." },
+                "id": { "type": "string", "description": "Optional request id you choose. The same id is the same message: it is never typed twice, even if you retry after a restart. Use a new id for a new message." }
             }, "required": ["to", "text"] },
         }),
         json!({
@@ -1330,7 +1331,8 @@ fn peer_schemas() -> Vec<Value> {
             "description": "Final structured delivery (Handoff v1) to the orchestrator, or to `to`. The recipient gets one line with the summary and an id; the full handoff is stored. Fields: version 1, summary, changed_files [{path, description}], tests [{command, status: passed|failed|not_run}], decisions, risks, next_steps; relative paths.",
             "inputSchema": { "type": "object", "properties": {
                 "to": { "type": "string", "description": "Optional: who receives it (default: your orchestrator)." },
-                "handoff": { "type": "object", "description": "The Handoff v1 object." }
+                "handoff": { "type": "object", "description": "The Handoff v1 object." },
+                "id": { "type": "string", "description": "Optional request id: retrying with the same id never records or delivers the handoff twice." }
             }, "required": ["handoff"] },
         }),
         json!({

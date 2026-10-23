@@ -8,6 +8,7 @@ mod notify;
 mod floor;
 pub mod chat;
 mod peers;
+pub mod peer_queue;
 pub mod routine;
 mod role;
 mod portals;
