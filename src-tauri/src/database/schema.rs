@@ -1263,6 +1263,10 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     if table_exists(conn, "squads") && !has_column(conn, "squads", "extra_members") {
         conn.execute_batch("ALTER TABLE squads ADD COLUMN extra_members TEXT NOT NULL DEFAULT '[]';")?;
     }
+    // Fila persistente das mensagens entre agentes (`peer_queue`): id, estado e ordem de cada
+    // mensagem, para a entrega sobreviver ao reinício. Só aditiva e sem subir user_version, como as
+    // outras daqui (subir força o backup VACUUM e quebra os testes que cravam a versão).
+    crate::peer_queue::migrate(conn)?;
     set_user_version(conn, SCHEMA_VERSION)
 }
 

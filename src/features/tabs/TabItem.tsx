@@ -4,6 +4,7 @@ import { Button } from "neogestify-ui-components";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { agentIcon } from "@/features/agents/agentIcons";
+import { PeerQueueBadge } from "@/features/peerQueue/PeerQueueBadge";
 import type { AgentPaint } from "@/features/browser/agentPaint";
 import type { Tab } from "@/features/tabs/types";
 
@@ -115,6 +116,9 @@ export function TabItem({
           )}
         </span>
       )}
+
+      {/* Mensagens de outros agentes esperando este terminal terminar o turno (some sem fila). */}
+      {!isEditing && <PeerQueueBadge tabId={tab.id} name={tab.title} variant="tab" />}
 
       {/* Sin PTY todavía = arrancando. Es lo único que se puede afirmar del estado. */}
       <span

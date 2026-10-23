@@ -20,6 +20,7 @@ mod transport;
 mod test;
 
 pub use commands::routine::start_scheduler as start_routine_scheduler;
+pub use commands::peer_queue::start_resume as start_peer_queue;
 
 /// Compactar e restaurar apagam ou recuperam dados. Só a interface (comando Tauri)
 /// pode executá-los. Um terminal de agente, mesmo com o token IPC, não.
