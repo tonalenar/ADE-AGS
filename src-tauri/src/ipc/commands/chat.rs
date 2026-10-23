@@ -15,7 +15,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 use super::peers::{caller, open_tabs};
-use super::tabs::{pty_id_for_tab, submit_prompt, wait_until_quiet};
+use super::tabs::{pty_id_for_tab, submit_prompt_as, wait_until_quiet};
 use crate::chat::{self, Conversation, Kind, Message};
 use crate::ipc::protocol::arg_str_opt;
 
@@ -156,7 +156,7 @@ pub fn chat_send(app: AppHandle, tab_id: String, thread: String, text: String) -
     changed(&app, &tab_id);
 
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(60), false);
-    if let Err(e) = submit_prompt(pty, &chat::framed(thread, &text)) {
+    if let Err(e) = submit_prompt_as(pty, &chat::framed(thread, &text), "chat") {
         let _ = chat::update(&tab_id, |conv| {
             conv.messages.retain(|m| m.id != message.id);
             Ok(())

@@ -22,7 +22,7 @@ use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
 use super::peer_queue::{self, Delivery, Sent};
-use super::tabs::{pty_id_for_tab, submit_prompt, submit_prompt_seen, tab_create, tab_list, wait_for_pty, wait_until_quiet, wait_until_ready};
+use super::tabs::{pty_id_for_tab, submit_prompt_as, submit_prompt_seen, tab_create, tab_list, wait_for_pty, wait_until_quiet, wait_until_ready};
 use crate::peer_queue::store::NewMessage;
 use crate::ipc::bridge::{ask_frontend, unwrap_frontend_result};
 use crate::ipc::protocol::{arg_str, arg_str_opt, arg_u64_opt};
@@ -224,7 +224,7 @@ pub(crate) fn arrived(before: &str, after: &str, snippet: &str) -> bool {
 pub(super) fn submit_confirmed(pty: u32, message: &str) -> Result<bool, String> {
     let before = tail_text(pty);
     // O destino começou a trabalhar depois do Enter: chegou.
-    if submit_prompt_seen(pty, message)? {
+    if submit_prompt_seen(pty, message, "peer")? {
         return Ok(true);
     }
     let Some(snippet) = snippet_of(message) else { return Ok(true) };
@@ -549,7 +549,7 @@ pub(super) fn peer_recruit(app: &AppHandle, args: &Value) -> Result<Value, Strin
         }
         let pty = wait_for_pty(app, &tab_id, Some(&me.window))?;
         let ready = wait_until_ready(pty);
-        submit_prompt(pty, &framed(&me.name, &text, false))?;
+        submit_prompt_as(pty, &framed(&me.name, &text, false), "peer")?;
         emit_peer_message(app, "tell", &me.id, Some(&tab_id), Some(&text), Some(&text));
         out["promptSent"] = json!(true);
         out["promptWaitedForReady"] = json!(ready);
@@ -641,7 +641,7 @@ fn notify_orchestrator(app: &AppHandle, from: &str, from_name: &str, peers: &[Op
     };
     let Ok(pty) = pty_id_for_tab(app, &lead.id, Some(&lead.window)) else { return };
     wait_until_quiet(pty, Duration::from_millis(1500), Duration::from_secs(20), false);
-    if submit_prompt(pty, &outgoing(from_name, message, false, false)).is_ok() {
+    if submit_prompt_as(pty, &outgoing(from_name, message, false, false), "peer").is_ok() {
         emit_peer_message(app, "tell", from, Some(&lead.id), Some(message), Some(message));
     }
 }
@@ -1124,7 +1124,7 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
         Ok(record) => record,
         Err(sent) => return Ok(ask_repeat(target, &sent.message)),
     };
-    if let Err(error) = submit_prompt(pty, &outgoing(from_name, text, true, raw)) {
+    if let Err(error) = submit_prompt_as(pty, &outgoing(from_name, text, true, raw), "peer") {
         peer_queue::end_direct(app, &record, Some(&error));
         return Err(error);
     }

@@ -328,14 +328,23 @@ pub(super) fn wait_until_ready(pty_id: u32) -> bool {
 /// entonces apretar Enter. El silencio entre medio es lo que garantiza que llegue en una
 /// lectura distinta, incluso si la TUI tarda en repintar.
 pub(super) fn submit_prompt(pty_id: u32, text: &str) -> Result<(), String> {
-    submit_prompt_seen(pty_id, text).map(|_| ())
+    submit_prompt_as(pty_id, text, "ags")
+}
+
+/// `submit_prompt` dizendo quem manda (`peer`, `chat`, `rotina`): vai para a ficha do ponto de restauração.
+pub(super) fn submit_prompt_as(pty_id: u32, text: &str, author: &str) -> Result<(), String> {
+    submit_prompt_seen(pty_id, text, author).map(|_| ())
 }
 
 /// O mesmo que `submit_prompt`; `true` se a TUI mostrou que começou a trabalhar depois do Enter (a prova
 /// mais firme de que a mensagem foi enviada).
-pub(super) fn submit_prompt_seen(pty_id: u32, text: &str) -> Result<bool, String> {
+pub(super) fn submit_prompt_seen(pty_id: u32, text: &str, author: &str) -> Result<bool, String> {
     const ECHO_QUIET: std::time::Duration = std::time::Duration::from_millis(250);
     const ECHO_MAX: std::time::Duration = std::time::Duration::from_secs(5);
+
+    // Ponto de restauração da pasta da aba antes de a mensagem chegar (em segundo plano: não atrasa
+    // o envio; sem repositório git ou sem mudança desde o último, não faz nada).
+    crate::tab_checkpoints::on_submit(pty_id, text, author);
 
     crate::terminal::write_to_pty(pty_id, text)?;
     wait_until_quiet(pty_id, ECHO_QUIET, ECHO_MAX, false);
