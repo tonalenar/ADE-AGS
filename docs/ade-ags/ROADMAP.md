@@ -333,3 +333,7 @@ O Portal pode mostrar um Chrome de verdade (perfil próprio do app), todo dentro
 ## Testes por replay das telas dos agentes
 
 Fixtures com a saída crua do PTY (pedaços com o instante em que chegaram) passam pelos detectores de verdade, no front (xterm real, relógio falso) e no backend (fim cru do PTY), sem app nem PTY. Gravador só para desenvolvimento (`ags replay start/stop`, com `ADE_AGS_REPLAY_RECORD=1`). Formato, gravador, fixtures e o que já acharam: [REPLAY_TESTES.md](./REPLAY_TESTES.md).
+
+## Guia de revisão de PR por IA
+
+Na tela de um PR, um agente (somente leitura, uma chamada headless) monta um roteiro de leitura com paradas: arquivos e linhas, por que importa, o que olhar de perto, trecho e perguntas. JSON validado estrito, com uma tentativa de conserto; cache por commit da cabeça, com aviso de desatualizado; passo a passo com teclado e visitadas; diff do arquivo no painel; "Perguntar sobre isto" abre um agente com o texto pré-preenchido, sem enviar. Nada é publicado no GitHub. Desenho, contrato e limites: [GUIA_REVISAO_PR.md](./GUIA_REVISAO_PR.md).
