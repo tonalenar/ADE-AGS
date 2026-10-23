@@ -20,6 +20,9 @@ struct PtySession {
     /// La tab de la app a la que pertenece (`ADE_TAB_ID`), para no dejar dos terminales vivos
     /// de la misma tab. `None` en los PTYs que no son de una tab.
     tab_id: Option<String>,
+    /// A pasta em que o processo nasceu (o `cwd` da aba). Os pontos de restauração tiram a foto
+    /// dela, e a restauração confere quem mais está na mesma pasta.
+    cwd: String,
     /// Token que este processo herda em `ADE_SESSION`. Sai do registro junto com o PTY.
     session_token: Option<String>,
     /// Perfil do Codex com o token, fora do argv. Some só quando o arquivo existe.
@@ -741,6 +744,7 @@ pub async fn pty_create(
             killer: child,
             group,
             tab_id: tab_id.clone(),
+            cwd: cwd.clone(),
             session_token: session_token.clone(),
             codex_profile,
         });
@@ -824,6 +828,26 @@ pub(super) fn newest_for_tab<'a>(sessions: impl Iterator<Item = (u32, Option<&'a
 pub fn pty_for_tab(tab_id: String) -> Option<u32> {
     let reg = registry();
     newest_for_tab(reg.iter().map(|(id, s)| (*id, s.tab_id.as_deref())), &tab_id)
+}
+
+/// A aba e a pasta de um PTY vivo. `None` = o PTY não existe ou não é de uma aba.
+pub fn tab_and_cwd_of(id: u32) -> Option<(String, String)> {
+    let reg = registry();
+    let session = reg.get(&id)?;
+    Some((session.tab_id.clone()?, session.cwd.clone()))
+}
+
+/// Toda aba com terminal vivo e a pasta dele (a do terminal mais novo de cada aba).
+pub fn live_tab_dirs() -> Vec<(String, String)> {
+    let reg = registry();
+    let mut newest: std::collections::HashMap<String, (u32, String)> = std::collections::HashMap::new();
+    for (id, session) in reg.iter() {
+        let Some(tab) = session.tab_id.clone() else { continue };
+        if newest.get(&tab).is_none_or(|(seen, _)| seen < id) {
+            newest.insert(tab, (*id, session.cwd.clone()));
+        }
+    }
+    newest.into_iter().map(|(tab, (_, cwd))| (tab, cwd)).collect()
 }
 
 /// Se "conecta" a un PTY que ya existe (p. ej. al mover una tab a otra ventana sin

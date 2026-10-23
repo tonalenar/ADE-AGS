@@ -155,6 +155,13 @@ pub fn run() {
             crate::runs::checkpoints::run_rollback_preview,
             crate::runs::checkpoints::run_rollback,
             crate::runs::checkpoints::run_checkpoint_create,
+            crate::tab_checkpoints::tab_checkpoint_auto,
+            crate::tab_checkpoints::tab_checkpoint_create,
+            crate::tab_checkpoints::tab_checkpoints_list,
+            crate::tab_checkpoints::tab_checkpoint_diff,
+            crate::tab_checkpoints::tab_checkpoint_restore,
+            crate::tab_checkpoints::tab_checkpoints_delete,
+            crate::tab_checkpoints::tab_checkpoints_prune,
             crate::runs::checkpoints::run_restore_checkpoint,
             crate::pet::pet_status,
             crate::ipc::commands::pool::pool_list_all,
@@ -575,6 +582,8 @@ pub fn run() {
         })
         .setup(|app| {
             crate::memory::repo_sync::install(app);
+            // Os envios às abas (peers, `ags tab send`, chat…) tiram um ponto de restauração antes.
+            crate::tab_checkpoints::install(app.handle());
             // Las cookies y el storage de cada sitio que se abre en el navegador de las tabs
             // se guardan acá (ver `preview/site.rs`): el motor del webview no los conserva.
             if let Ok(dir) = crate::util::datadir::app_data_dir(app.handle()) {

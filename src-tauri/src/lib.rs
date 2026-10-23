@@ -40,6 +40,7 @@ mod session;
 mod skills;
 mod squads;
 mod sync;
+mod tab_checkpoints;
 mod terminal;
 pub mod testspeed;
 pub use terminal::SESSION_ENV;

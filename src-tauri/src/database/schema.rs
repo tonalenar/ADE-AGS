@@ -1270,6 +1270,9 @@ fn migrate_mission_success(conn: &Connection) -> SqlResult<()> {
     // Pendências dos integrantes (aprovações e perguntas vistas pelo canal estruturado, ver `canal`):
     // também só aditiva e sem subir user_version.
     crate::canal::migrate(conn)?;
+    // Pontos de restauração das abas (`tab_checkpoints`): fichas das fotos em refs escondidas. Só
+    // aditiva, sem subir user_version.
+    crate::tab_checkpoints::migrate(conn)?;
     set_user_version(conn, SCHEMA_VERSION)
 }
 

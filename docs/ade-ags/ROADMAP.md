@@ -341,3 +341,7 @@ O Portal pode mostrar um Chrome de verdade (perfil próprio do app), todo dentro
 ## Testes por replay das telas dos agentes
 
 Fixtures com a saída crua do PTY (pedaços com o instante em que chegaram) passam pelos detectores de verdade, no front (xterm real, relógio falso) e no backend (fim cru do PTY), sem app nem PTY. Gravador só para desenvolvimento (`ags replay start/stop`, com `ADE_AGS_REPLAY_RECORD=1`). Formato, gravador, fixtures e o que já acharam: [REPLAY_TESTES.md](./REPLAY_TESTES.md).
+
+## Pontos de restauração das abas
+
+A cada mensagem que chega a um agente numa aba (peers, `ags tab send`, chat, rotinas, missões e o Enter no terminal), uma foto dos arquivos da pasta vai para uma ref git escondida (`refs/ags/checkpoints/<aba>/<n>`), sem tocar branch, índice nem stash. No menu da aba: "Pontos de restauração…" (ver o diff desde um ponto, voltar os arquivos até ele com ponto de segurança e trava de pasta compartilhada) e "Marcar ponto". A conversa do agente não volta. Desenho e limites: [CHECKPOINTS_ABAS.md](./CHECKPOINTS_ABAS.md).
