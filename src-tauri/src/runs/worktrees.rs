@@ -140,8 +140,25 @@ pub fn recorded_base(worktree: &Path) -> Option<String> {
 }
 
 /// Grava a base na branch do worktree. Melhor esforço: sem ela o affected cai em `resolve_base`.
+///
+/// Os worktrees de um repositório dividem o mesmo `.git/config`, e a comparação de modelos (e o time
+/// de uma missão) cria vários em paralelo: duas gravações ao mesmo tempo disputam o `config.lock` e
+/// uma falhava calada (no CI do Linux, mais rápido, a base de um dos worktrees sumia). Por isso as
+/// gravações passam por uma trava do processo e tentam de novo se o git acusar trava de arquivo.
 pub fn record_base(worktree: &Path, branch: &str, base: &str) {
-    let _ = git(worktree, &["config", &format!("branch.{branch}.{BASE_CONFIG_KEY}"), base], GIT_FAST);
+    static CONFIG_WRITE: std::sync::Mutex<()> = std::sync::Mutex::new(());
+    let key = format!("branch.{branch}.{BASE_CONFIG_KEY}");
+    let _turn = CONFIG_WRITE.lock().unwrap_or_else(|e| e.into_inner());
+    for wait in [0u64, 100, 300, 800] {
+        if wait > 0 {
+            std::thread::sleep(Duration::from_millis(wait));
+        }
+        match git(worktree, &["config", &key, base], GIT_FAST) {
+            Ok(_) => return,
+            Err(e) if e.to_lowercase().contains("lock") => continue,
+            Err(_) => return,
+        }
+    }
 }
 
 /// `git fetch origin` curto e sem prompt, para a base da missão não sair dias atrás. Melhor
