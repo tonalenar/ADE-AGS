@@ -223,10 +223,9 @@ pub(crate) fn arrived(before: &str, after: &str, snippet: &str) -> bool {
 /// esse estado não conta no dedupe (ver `peer_queue::store::admit`), então o reenvio passa.
 pub(super) fn submit_confirmed(pty: u32, message: &str) -> Result<bool, String> {
     let before = tail_text(pty);
-    match submit_prompt_seen(pty, message)? {
-        // O destino começou a trabalhar depois do Enter: chegou.
-        true => return Ok(true),
-        false => {}
+    // O destino começou a trabalhar depois do Enter: chegou.
+    if submit_prompt_seen(pty, message)? {
+        return Ok(true);
     }
     let Some(snippet) = snippet_of(message) else { return Ok(true) };
     let deadline = std::time::Instant::now() + Duration::from_millis(1500);

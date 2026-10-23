@@ -229,10 +229,10 @@ fn find_pty(app: &AppHandle, to: &str) -> Pty {
                 return Pty::Closed;
             };
             let window = row.get("window").and_then(Value::as_str);
-            if let Ok(pty) = pty_id_for_tab(app, to, window) {
-                if crate::terminal::output_total(pty).is_some() {
-                    return Pty::Found(pty);
-                }
+            if let Ok(pty) = pty_id_for_tab(app, to, window)
+                && crate::terminal::output_total(pty).is_some()
+            {
+                return Pty::Found(pty);
             }
         }
         if Instant::now() >= deadline {
