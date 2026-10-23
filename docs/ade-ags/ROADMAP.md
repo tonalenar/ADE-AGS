@@ -1,5 +1,11 @@
 # Roadmap ADE AGS
 
+## Fila de mensagens entre agentes durável e editável
+
+Toda mensagem entre agentes tem id e registro no SQLite (`peer_messages`), a entrega sobrevive ao
+reinício, `--id` torna o reenvio idempotente e o selo "N na fila" deixa o usuário editar, reordenar,
+cancelar ou enviar já. Detalhes em [FILA_DE_MENSAGENS.md](./FILA_DE_MENSAGENS.md).
+
 ## Etapa 20 — ponto 1: notificações com identidade ADE AGS
 
 AUMID explícito antes das janelas, atalho por usuário com o bot e reparo idempotente,
