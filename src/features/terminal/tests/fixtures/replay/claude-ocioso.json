@@ -68,12 +68,6 @@
         "screenQuestion": false,
         "asksToClose": false,
         "screenContains": "os 12 testes do parser passaram"
-      },
-      "xfail": {
-        "rust": [
-          "working"
-        ],
-        "reason": "O Rust (tui_working) procura 'esc to interrupt' nos últimos 4 KB crus do PTY, não na tela: os quadros do spinner de antes do fim do turno ainda estão nesses 4 KB. Um Enter engolido logo depois do fim de um turno pode ser dado por enviado."
       }
     },
     {
