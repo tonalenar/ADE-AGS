@@ -27,8 +27,15 @@ fn tail(buffer: &[u8], max: usize) -> String {
 fn verdict(fixture: &Fixture, at: u64, since: Option<u64>) -> Result<serde_json::Map<String, Value>, String> {
     let buffer = fixture.output_until(at)?;
     let message = fixture.message.clone().unwrap_or_default();
-    // `tui_working`: os últimos 4 KB.
-    let working = working_in(&strip_ansi(&tail(&buffer, 4096)));
+    // Com `since` (o Enter), o que `submit_prompt_seen` olha: o rodapé de trabalho só na saída depois dele
+    // (`working_since`). Sem `since`, a tela crua dos últimos 4 KB.
+    let working = match since {
+        Some(since) => {
+            let wrote = buffer.len().saturating_sub(fixture.output_until(since)?.len());
+            wrote > 0 && working_in(&strip_ansi(&tail(&buffer, wrote.min(65_536))))
+        }
+        None => working_in(&strip_ansi(&tail(&buffer, 4096))),
+    };
     // `paste_still_pending` e `text_on_screen`: os últimos 32 KB.
     let screen = strip_ansi(&tail(&buffer, 32_768));
     let marker = pending_paste_in(&screen);
