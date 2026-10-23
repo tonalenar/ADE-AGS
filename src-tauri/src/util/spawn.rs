@@ -73,14 +73,32 @@ pub fn into_tokio(mut command: Command) -> tokio::process::Command {
 
 /// Como `Command::output()`, com prazo, kill do grupo e uma linha de log.
 pub fn output(cmd: &mut Command, timeout: Duration) -> io::Result<Output> {
+    output_with_input(cmd, None, timeout)
+}
+
+/// Como [`output`], escrevendo `input` na entrada padrão do filho (numa thread, para um filho
+/// que só lê depois de escrever não travar os dois). Sem `input`, a entrada é nula.
+///
+/// É por onde vai um prompt grande para uma CLI de agente: na linha de comando o Windows
+/// recusa mais de ~32 mil caracteres.
+pub fn output_with_input(cmd: &mut Command, input: Option<Vec<u8>>, timeout: Duration) -> io::Result<Output> {
     apply_window(cmd, WindowMode::Hidden);
     prepare_session(cmd);
     let started = Instant::now();
     let program = program_of(cmd);
     let argv = redact_argv(cmd.get_args());
 
-    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(Stdio::null()).spawn()?;
+    let stdin = if input.is_some() { Stdio::piped() } else { Stdio::null() };
+    let mut child = cmd.stdout(Stdio::piped()).stderr(Stdio::piped()).stdin(stdin).spawn()?;
     let mut guard = GroupGuard::adopt(&child);
+
+    if let (Some(bytes), Some(mut pipe)) = (input, child.stdin.take()) {
+        // Ao terminar, o `pipe` cai e a entrada fecha: é o EOF que a CLI espera.
+        std::thread::spawn(move || {
+            use std::io::Write;
+            let _ = pipe.write_all(&bytes);
+        });
+    }
 
     let mut out_pipe = child.stdout.take();
     let mut err_pipe = child.stderr.take();
@@ -355,6 +373,21 @@ mod tests {
         assert!(src[flags..].contains("creation_flags"), "a flag tem que ir para o Command");
         assert!(body.find("apply_window").unwrap() < body.find("Command::from").unwrap(), "{body}");
         assert!(src.contains("WindowMode::OwnWindow"));
+    }
+
+    #[test]
+    fn a_entrada_chega_ao_filho_e_fecha() {
+        #[cfg(windows)]
+        let mut cmd = {
+            let mut c = hidden_command("findstr");
+            c.arg("^");
+            c
+        };
+        #[cfg(not(windows))]
+        let mut cmd = hidden_command("cat");
+        let out = output_with_input(&mut cmd, Some(b"linha do prompt\n".to_vec()), Duration::from_secs(20))
+            .expect("o filho tem que terminar quando a entrada fecha");
+        assert!(String::from_utf8_lossy(&out.stdout).contains("linha do prompt"));
     }
 
     #[test]
