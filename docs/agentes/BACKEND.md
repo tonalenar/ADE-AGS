@@ -89,7 +89,8 @@ Cuidados:
 - Testes:
   - num `test.rs` ao lado do módulo (`#[cfg(test)] mod test;`);
   - nomes como frase (`fn las_carpetas_van_antes_que_los_archivos`);
-  - teste de rede leva `#[ignore = "necesita red"]`; teste com CLI real leva `#[ignore]` (`CC_E2E_<AGENTE>_MODEL`).
+  - teste de rede leva `#[ignore = "necesita red"]`; teste com CLI real leva `#[ignore = "<motivo>"]` (`CC_E2E_<AGENTE>_MODEL`). `#[ignore]` sem motivo reprova no `bun run check:test-lint`;
+  - nada de `thread::sleep` para esperar: use canal, evento ou `tokio::time::pause`.
 - `mod.rs` só declara e reexporta.
 - Mexa no ambiente do processo só antes de existir qualquer thread. Veja os `// SAFETY:` em `app/rendering.rs`, `ipc/server.rs` e `util/path_env.rs`; a ordem de `app::run` importa.
 - As versões de `windows`/`windows-sys`/`webview2-com` precisam casar com as que o tauri/wry usa; senão o app quebra com `STATUS_ENTRYPOINT_NOT_FOUND`.

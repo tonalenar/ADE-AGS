@@ -2,10 +2,11 @@
 
 Guia para qualquer agente de IA (Claude Code, Codex, Gemini, OpenCode, Kimi, Hermes, Antigravity…) que trabalhe neste repositório.
 
-Este arquivo tem três partes:
+Este arquivo tem quatro partes:
 - o que vale **sempre**: as regras de ouro e o idioma;
 - o **índice** dos tópicos;
-- os comandos essenciais.
+- os comandos essenciais;
+- o que conferir **antes do PR**: superfícies, prova e planos.
 
 O detalhe de cada tópico fica no arquivo próprio, em [`docs/agentes/`](docs/agentes/). **Antes de mexer num tópico, leia o arquivo dele.** As regras de ouro valem mesmo que uma tarefa pareça pedir o contrário: na dúvida, pergunte ao usuário.
 
@@ -60,6 +61,16 @@ Ele roda agentes de código em **terminais reais (PTY)**, com arquivos, diff, gi
 
 ### 2.5 Testes
 - No dia a dia, use **`ags test affected`**. A suíte completa local fica só para migração de schema, `unsafe`/Win32 e mudança de schema IPC. No resto, confie no CI.
+- Teste não espera relógio de verdade nem faz polling; teste pulado leva `// quarantine: <motivo ou #issue>`. Quem cobra é o `bun run check:test-lint` (detalhes em [FLUXO_DE_TRABALHO.md](docs/agentes/FLUXO_DE_TRABALHO.md#lint-dos-testes)).
+
+### 2.6 Formas de se machucar
+| Não faça | Por que dói | Faça assim |
+|---|---|---|
+| Encerrar processo por nome ou padrão (`taskkill /IM`, `Stop-Process -Name`, `pkill`) | Pega o app instalado e os agentes do usuário (claude, codex, node…) | Encerre só o PID que você abriu. O `dev-local.ps1` filtra pelo caminho do executável |
+| Mexer em `%LOCALAPPDATA%\ADE AGS\` ou nos dados reais (`~/.ags`, `data.db`) | Derruba os terminais e mexe no estado do usuário | Instância isolada: `pwsh scripts/dev-local.ps1 -Run` (`ADE_AGS_DATA_DIR` próprio). Para o `ags` falar com ela, defina `$env:ADE_AGS_DATA_DIR` |
+| Atualizar o app em uso (checkout, HMR, instalação) com missão rodando | O HMR do Vite já derrubou PTYs de missão | Espere a missão fechar ou avise do risco antes |
+| `gh` sem `--repo tonalenar/ADE-AGS` | Abre PR ou issue no upstream `luis3132/ControlCode` | Sempre `--repo tonalenar/ADE-AGS` |
+| Esperar com `sleep`/`Start-Sleep` em laço | Gasta tempo e esconde a falha | `gh pr checks <n> --watch`, `ags watch`, `ags events wait` |
 
 ---
 
@@ -80,7 +91,7 @@ Ele roda agentes de código em **terminais reais (PTY)**, com arquivos, diff, gi
 
 | Vai mexer em… | Leia | A regra que mais importa |
 |---|---|---|
-| Git, testes, CI, commits, PRs, docs | [docs/agentes/FLUXO_DE_TRABALHO.md](docs/agentes/FLUXO_DE_TRABALHO.md) | PR para `dev` com `--repo`; Conventional Commits em PT-BR; o que foi verificado e o que não foi |
+| Git, testes, CI, commits, PRs, docs | [docs/agentes/FLUXO_DE_TRABALHO.md](docs/agentes/FLUXO_DE_TRABALHO.md) | PR para `dev` com `--repo`; Conventional Commits em PT-BR; lint dos testes com baseline; o que foi verificado e o que não foi |
 | `src/` (React, stores, i18n, estilo, testes vitest) | [docs/agentes/FRONTEND.md](docs/agentes/FRONTEND.md) | não remontar terminais; 3 catálogos de i18n; nunca um hex |
 | `src-tauri/` (módulos, comandos Tauri, banco, helpers) | [docs/agentes/BACKEND.md](docs/agentes/BACKEND.md) | `util::spawn`, `external_path`, migração aditiva, nada de lock do banco durante I/O |
 | CLI `ags`, MCP, protocolo IPC, dados em disco | [docs/agentes/CLI_MCP.md](docs/agentes/CLI_MCP.md) | nunca polling (`watch`/`events wait`); comando novo atualiza a skill |
@@ -102,6 +113,37 @@ Para **usar** o app pela CLI (abrir abas, peers, portais, memória), siga a skil
 | Instalar deps | `bun install` |
 | Rodar isolado | `pwsh scripts/dev-local.ps1 -Run` |
 | Typecheck + Babel | `bunx tsc --noEmit` · `bun run check:babel` |
+| Lint dos testes | `bun run check:test-lint` |
 | Testes | `ags test affected` · `bun run test` · `cd src-tauri && cargo test --lib --bin ags` |
 | Esperar CI | `gh pr checks <n> --repo tonalenar/ADE-AGS --watch` |
 | Abrir PR | `gh pr create --repo tonalenar/ADE-AGS --base dev` |
+
+---
+
+## 6. Antes de abrir o PR
+
+### 6.1 Toque em todas as superfícies
+Mudou um comportamento? Ele aparece em mais de um lugar. Confira cada linha e diga no PR o que não se aplica.
+
+| Superfície | Onde |
+|---|---|
+| UI: abas e canvas | `src/features/tabs/`, `src/features/canvas/` (a mesma ação costuma existir nos dois) |
+| CLI `ags` | USAGE em `src-tauri/src/bin/cli.rs` e a skill `skills/ags-orchestrator/SKILL.md` (com a versão) |
+| MCP | tools em `src-tauri/src/ipc/mcp.rs`; o que só o front executa, em `src/features/orchestrator/cliBridge.ts` |
+| i18n | `src/i18n/locales/{pt-BR,en,es}.json` |
+| Docs | o doc do tema em `docs/ade-ags/` e a seção do `ROADMAP.md`; regra nova vai para `AGENTS.md` ou `docs/agentes/` |
+| Testes | vitest em `src/**/tests/`, Rust no `test.rs` do módulo, contrato da CLI em `ipc/test.rs` |
+
+### 6.2 Política de prova
+| Tipo de mudança | Prova |
+|---|---|
+| Bug de lógica | Primeiro um teste que falha; depois a correção que o faz passar |
+| Bug visual | Captura antes e depois, na instância isolada |
+| Desempenho, custo, tempo | Número medido, com o comando que mediu. Sem medição, escreva "não medido" |
+
+No PR, diga o que foi verificado e o que não foi.
+
+### 6.3 Não commitar planos
+- Plano, rascunho e lista de tarefas de agente não entram no repositório.
+- Guarde fora do repo ou em `.plans/` (ignorado pelo git, como `/plan*.md` na raiz).
+- O que vale guardar vira doc em `docs/ade-ags/` ou decisão em `docs/decisoes/`.

@@ -17,6 +17,7 @@
 | Dev com Vite (porta 1420) | `bun run tauri dev` |
 | Typecheck | `bunx tsc --noEmit` |
 | Babel | `bun run check:babel` |
+| Lint dos testes | `bun run check:test-lint` (`-- --todas` lista tudo; `-- --update-baseline` regrava o baseline) |
 | Testes front | `bun run test` / `bunx vitest run <arquivo>` |
 | Testes Rust | `cd src-tauri && cargo test --lib --bin ags` |
 | Só o afetado | `ags test affected [--dry-run]` · `ags test run frontend\|rust\|tsc\|babel` · `ags test status` |
@@ -29,12 +30,27 @@
 - Suíte completa local **só** em três casos: migração de schema ou DDL; `unsafe`, COM ou Win32; mudança de schema IPC.
 - Não remova targets nem worktrees de uma missão em andamento.
 
+## Lint dos testes
+`scripts/test-lint.mjs` varre os `*.test.ts(x)` de `src/` e o código de teste Rust (`test.rs`, `*_test.rs`, os `mod` puxados por `#[cfg(test)]` e os blocos `#[cfg(test)] mod x { … }`). Strings e comentários não contam.
+
+| Regra | Pega | Como resolver |
+|---|---|---|
+| `espera-real` | `setTimeout`/`setInterval`/`sleep(N)` com mais de 10 ms num arquivo sem `vi.useFakeTimers()`; `thread::sleep`/`tokio::time::sleep` acima de 10 ms ou com duração não literal | Fake timers (`vi.useFakeTimers`, `tokio::time::pause`) ou esperar o evento |
+| `polling` | Laço que dorme (`while`/`for`/`loop` com sleep ou timer acima de 10 ms) e `while (Date.now() < fim)` | Esperar o evento, o canal ou a promessa |
+| `skip-sem-motivo` | `it.skip`, `describe.skip`, `test.skipIf`, `xit`, `#[ignore]` | `// quarantine: <motivo ou #issue>` na linha ou logo acima. No Rust, `#[ignore = "motivo"]` também vale |
+| `supressao-sem-motivo` | `@ts-ignore`, `@ts-expect-error`, `@ts-nocheck`, `eslint-disable`, `biome-ignore`, `#[allow]`/`#[expect]` | Motivo depois da diretiva (`@ts-expect-error <motivo>`, `eslint-disable-line regra -- <motivo>`); no Rust, `// <motivo>` acima ou `reason = "…"` |
+
+- As violações antigas ficam em `scripts/test-lint-baseline.json`, contadas por arquivo e regra. O check falha só quando uma contagem passa do baseline.
+- **Para encolher o baseline:** rode `bun run check:test-lint -- --todas`, corrija uma violação, rode `bun run check:test-lint -- --update-baseline` e commite o baseline menor junto com a correção.
+- **Nunca** use o `--update-baseline` para engolir violação nova. Um baseline que cresce no diff do PR precisa de motivo escrito.
+- O próprio checker tem teste: `src/app/tests/testLint.test.ts`.
+
 ## CI (`.github/workflows/ci.yml`)
 Roda em todo PR, mas ignora `**.md` e `docs/**`.
 
 | SO | Job | O que roda | Tempo |
 |---|---|---|---|
-| Linux | `test` | `bunx tsc --noEmit` → `node scripts/babel-parse-check.mjs src` → `bun run test` → `cargo test --lib --bin ags` | ~4 min |
+| Linux | `test` | `bunx tsc --noEmit` → `node scripts/babel-parse-check.mjs src` → `node scripts/test-lint.mjs` → `bun run test` → `cargo test --lib --bin ags` | ~4 min |
 | Windows | `check (windows)` | `cargo check --lib --bins --tests` | ~1m40s |
 
 - Não há clippy nem fmt no CI.
@@ -55,6 +71,7 @@ Roda em todo PR, mas ignora `**.md` e `docs/**`.
 ## PRs
 - Crie com `gh pr create --repo tonalenar/ADE-AGS --base dev`. **Sempre `--repo`**: sem ele, o `gh` deste clone aponta para o upstream.
 - Descrição em PT-BR: o que muda, como foi testado, **o que foi verificado e o que não foi**.
+- Antes de abrir, confira a §6 do [`AGENTS.md`](../../AGENTS.md#6-antes-de-abrir-o-pr): superfícies, prova e planos.
 - Sem merge, push para `dev`/`master`, tag, release ou reinstalação sem OK do usuário.
 - Mudou um comportamento visível ou um contrato? Atualize o doc correspondente em `docs/ade-ags/` e a seção do `ROADMAP.md`.
 - Não commite `site api/` (projeto de teste de missões), binários de `src-tauri/binaries/` nem pastas de agente (`.claude/`, `.agents/`, `.codex/`…).

@@ -90,6 +90,7 @@ React 19 + TypeScript + Vite 7 + Tailwind 4 + Zustand 5, com xterm e @xyflow. O 
   - declara `// @vitest-environment happy-dom` no arquivo;
   - monta com `createRoot` + `act` e `IS_REACT_ACT_ENVIRONMENT = true`.
 - O Tauri é mockado com `vi.mock("@tauri-apps/api/core", …)`.
+- Tempo: `vi.useFakeTimers()` + `vi.advanceTimersByTime…`, nunca `await new Promise((r) => setTimeout(r, 500))`. O `bun run check:test-lint` reprova espera real, polling e `.skip` sem `// quarantine: <motivo>`.
 - Lógica fica em `.ts` separado do `.tsx` (ex.: `floorsModel.ts`, `teamFeedModel.ts`), para testar sem DOM.
 - Comandos:
   - `bun run test`;
