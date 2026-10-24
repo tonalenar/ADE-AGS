@@ -1,10 +1,22 @@
 // O Chrome de verdade por trás do Portal (protótipo): ver `src-tauri/src/real_browser.rs`.
+import { isLocalUrl } from "@/features/tabs/viewTabs";
 import { invoke } from "@tauri-apps/api/core";
 
 /** A densidade mínima com que o Chrome desenha a página. O quadro que ele entrega é limitado ao tamanho da janela dele
  *  (cerca de 1,25× o box, medido), mas ele o reduz com um bom filtro a partir do desenho: desenhar a 2× e entregar a
  *  1,25× sai bem mais nítido que desenhar já a 1,25× (medido numa página de texto pequeno, comparando com o Chrome
  *  nativo na mesma escala: 0,36 → 0,65; de 2,0 em diante não muda). */
+/**
+ * Um site de fora (Google, Trello, um painel na nuvem) abre no Chrome de verdade; só o servidor desta
+ * máquina vai pelo proxy (selector, mocks e rede ficam à mão). Pelo proxy o site vê um cliente
+ * estranho (o Google responde `/sorry` com reCAPTCHA recusado) e a página roda na origem do proxy.
+ * `realChrome` explícito (a pessoa ligou ou desligou o botão) sempre vale. Pura.
+ */
+export function shouldOpenInRealChrome(url: string, realChrome: boolean | undefined): boolean {
+  if (realChrome !== undefined) return realChrome;
+  return /^https?:\/\//i.test(url) && !isLocalUrl(url);
+}
+
 export const MIN_RENDER_DENSITY = 2;
 
 /** Quantos pixels, no máximo, o Chrome desenha por quadro: acima disso (nó muito grande) o desenho a 2× pesa demais. */
