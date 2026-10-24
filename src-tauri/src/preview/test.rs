@@ -220,7 +220,9 @@ async fn el_html_llega_con_el_selector_y_sin_las_trabas_para_mostrarse() {
         .send().await.unwrap().text().await.unwrap();
     // Adelante, el origen real de la página: el runtime lo usa para rutear los pedidos.
     let prelude = format!("self.__ags_target=\"{}\";\n", target.target_origin);
-    assert_eq!(picker, format!("{prelude}window.__picker=1"), "sirve el script que mandó la app");
+    assert!(picker.starts_with(&prelude) && picker.ends_with("window.__picker=1"), "sirve el script que mandó la app");
+    // Un panel de vidrio esmerilado dentro del iframe reducido sale borroso: el prelude lo apaga.
+    assert!(picker.contains("backdrop-filter:none"), "apaga el backdrop-filter");
 
     // Lo que no es HTML pasa intacto.
     let js = client().get(format!("{}/app.js", target.proxy_origin)).send().await.unwrap().text().await.unwrap();

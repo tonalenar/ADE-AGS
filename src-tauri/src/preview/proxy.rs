@@ -153,6 +153,12 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
+/// El iframe del Portal va reducido por `transform` y dentro del zoom del canvas. En esa pila el
+/// Chrome rasteriza en baja resolución toda capa con `backdrop-filter` (panel de vidrio esmerilado):
+/// el texto del panel sale borroso (0,25 de la nitidez nativa, medido). Sin el desenfoque del fondo
+/// el panel sigue translúcido y el texto vuelve a 1,0.
+const NO_BACKDROP_BLUR: &str = "(function(){try{var s=document.createElement('style');s.textContent='*,*::before,*::after{-webkit-backdrop-filter:none!important;backdrop-filter:none!important}';(document.head||document.documentElement).appendChild(s)}catch(e){}})();";
+
 async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Response<Body> {
     if !request_is_ours(&req, ctx.proxy_port) {
         return plain_status(403);
@@ -161,8 +167,9 @@ async fn handle(req: Request<Incoming>, ctx: Arc<Ctx>) -> Response<Body> {
         // Adelante, el origen REAL de la página: el runtime lo necesita para saber qué
         // pedidos van a su propio servidor y cuáles a otro (ver `cors.rs`).
         let prelude = format!(
-            "self.__ags_target={};\n",
-            serde_json::to_string(&ctx.target_origin).unwrap_or_else(|_| "null".into())
+            "self.__ags_target={};\n{}\n",
+            serde_json::to_string(&ctx.target_origin).unwrap_or_else(|_| "null".into()),
+            NO_BACKDROP_BLUR
         );
         let script = PICKER.read().map(|p| p.clone()).unwrap_or_default();
         return Response::builder()
