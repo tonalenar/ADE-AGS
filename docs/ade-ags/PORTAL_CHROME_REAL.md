@@ -13,6 +13,7 @@ Serve para os sites que recusam navegador embutido, como a conta Google, e para 
 | Tela | `Page.startScreencast` → último quadro guardado no Rust → protocolo `agsframe` → `<img>` do `RealBrowserView` | JPEG na resolução da tela (`deviceScaleFactor` = zoom × `devicePixelRatio`). Fica só o último quadro, sem fila; o evento `real-browser-frame` só avisa que há um novo, e o Portal busca o mais recente quando acaba de desenhar o atual. |
 | Mouse e teclado da pessoa | `RealBrowserView` → `real_browser_send` (`Input.*`) | Só `Input.*`, `Page.navigate`, `Page.reload` e o tamanho; nada que leia cookie ou rode script. |
 | Zoom | `pageMetrics` (`realBrowser.ts`) | Como o do Chrome: menos px CSS, mais densidade. |
+| Nitidez | `MIN_RENDER_DENSITY` (`realBrowser.ts`) + JPEG 85 | O Chrome desenha a página a no mínimo 2× e o quadro (limitado ao tamanho da janela dele) é reduzido por ele com bom filtro. Medido numa página de texto pequeno, contra o Chrome nativo na mesma escala (variância do laplaciano): 0,36 com a densidade da tela (1,25) → 0,65 a 2×; de 2 a 4 não muda. Fluidez rolando a MDN: 47 a 68 quadros/s. |
 | Barra de rolagem | `--enable-features=OverlayScrollbar` | Fina, sem setas, sem reservar largura. Medido no Chrome 155: `FluentOverlayScrollbar` sozinha não muda nada. |
 | Fora da barra de tarefas | `real_browser/win.rs` | `WS_EX_TOOLWINDOW` em cada janela nova (`SetWinEventHook`). |
 | Fim junto com o app | `terminal::containment::ProcessGroup` | Job Object com `KILL_ON_JOB_CLOSE`: não sobra Chrome órfão segurando o perfil, nem num fechamento à força. |

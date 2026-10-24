@@ -430,7 +430,7 @@ pub async fn real_browser_open(
     // A janela fica fora de foco o tempo todo; sem isto o cursor de texto nem pisca e alguns campos
     // não reagem como se estivessem focados.
     send_raw(&id, "Emulation.setFocusEmulationEnabled", json!({ "enabled": true }))?;
-    send_raw(&id, "Page.startScreencast", json!({ "format": "jpeg", "quality": 65, "everyNthFrame": 1 }))?;
+    send_raw(&id, "Page.startScreencast", json!({ "format": "jpeg", "quality": 85, "everyNthFrame": 1 }))?;
     if let Some(script) = script {
         // O piloto (o mesmo script que o proxy injeta no outro navegador), em todo documento novo, antes dos da página.
         // `Runtime.enable` é o que entrega `Runtime.bindingCalled`.

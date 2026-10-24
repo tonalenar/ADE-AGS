@@ -2,11 +2,20 @@ import { describe, expect, it } from "vitest";
 import { cdpModifiers, isGoogleSignIn, keyDownEvent, loginStartUrl, mouseButton, pageMetrics, pagePoint } from "../realBrowser";
 
 describe("Chrome real: zoom da página", () => {
-  it("150% = página com menos pixels CSS e mais densidade, nítida na tela a 125%", () => {
-    expect(pageMetrics({ width: 900, height: 600 }, 1.5, 1.25)).toEqual({ width: 600, height: 400, deviceScaleFactor: 1.88, mobile: false });
+  it("150% = página com menos pixels CSS e mais densidade", () => {
+    expect(pageMetrics({ width: 900, height: 600 }, 1.5, 1.25)).toEqual({ width: 600, height: 400, deviceScaleFactor: 3, mobile: false });
   });
-  it("100% numa tela comum é o tamanho do Portal", () => {
-    expect(pageMetrics({ width: 1075, height: 639 }, 1, 1)).toEqual({ width: 1075, height: 639, deviceScaleFactor: 1, mobile: false });
+  it("100% numa tela comum: o tamanho do Portal, desenhado a 2×", () => {
+    expect(pageMetrics({ width: 1075, height: 639 }, 1, 1)).toEqual({ width: 1075, height: 639, deviceScaleFactor: 2, mobile: false });
+  });
+  it("tela de densidade maior que 2 não perde densidade", () => {
+    expect(pageMetrics({ width: 1075, height: 639 }, 1, 2.5).deviceScaleFactor).toBe(2.5);
+  });
+  it("nó enorme: o teto de pixels baixa a densidade, mas nunca abaixo da da tela", () => {
+    const m = pageMetrics({ width: 3000, height: 2000 }, 1, 1.25);
+    expect(m.deviceScaleFactor).toBeLessThan(2);
+    expect(m.deviceScaleFactor).toBeGreaterThanOrEqual(1.25);
+    expect(pageMetrics({ width: 6000, height: 4000 }, 1, 1.25).deviceScaleFactor).toBe(1.25);
   });
 });
 

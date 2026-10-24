@@ -1,15 +1,26 @@
 // O Chrome de verdade por trás do Portal (protótipo): ver `src-tauri/src/real_browser.rs`.
 import { invoke } from "@tauri-apps/api/core";
 
+/** A densidade mínima com que o Chrome desenha a página. O quadro que ele entrega é limitado ao tamanho da janela dele
+ *  (cerca de 1,25× o box, medido), mas ele o reduz com um bom filtro a partir do desenho: desenhar a 2× e entregar a
+ *  1,25× sai bem mais nítido que desenhar já a 1,25× (medido numa página de texto pequeno, comparando com o Chrome
+ *  nativo na mesma escala: 0,36 → 0,65; de 2,0 em diante não muda). */
+export const MIN_RENDER_DENSITY = 2;
+
+/** Quantos pixels, no máximo, o Chrome desenha por quadro: acima disso (nó muito grande) o desenho a 2× pesa demais. */
+export const MAX_RENDER_PIXELS = 8_000_000;
+
 /** O tamanho da página no Chrome para um Portal de `box` pixels CSS, com o zoom da página e a densidade da tela. É o
- *  zoom do próprio Chrome: a página tem menos pixels CSS, cada um com mais pixels de verdade; o quadro chega com a
- *  resolução da tela (nítido a 125%), e o Portal o mostra no tamanho do box. */
+ *  zoom do próprio Chrome: a página tem menos pixels CSS, cada um com mais pixels de verdade. */
 export function pageMetrics(box: { width: number; height: number }, zoom: number, dpr: number) {
   const z = zoom > 0 ? zoom : 1;
+  const area = Math.max(1, box.width * box.height);
+  // O teto de pixels vale mesmo contra a densidade da tela: nunca abaixo dela, nem acima do que o nó aguenta.
+  const density = Math.max(dpr > 0 ? dpr : 1, Math.min(MIN_RENDER_DENSITY, Math.sqrt(MAX_RENDER_PIXELS / area)));
   return {
     width: Math.max(200, Math.round(box.width / z)),
     height: Math.max(200, Math.round(box.height / z)),
-    deviceScaleFactor: Math.round(z * (dpr > 0 ? dpr : 1) * 100) / 100,
+    deviceScaleFactor: Math.round(z * density * 100) / 100,
     mobile: false,
   };
 }
