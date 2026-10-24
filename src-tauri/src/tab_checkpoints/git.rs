@@ -169,6 +169,9 @@ pub fn worktree_tree(root: &Path) -> Result<Tree, String> {
     let env = [("GIT_INDEX_FILE", env_value.as_str())];
 
     let from_copy = real_index(root).is_some_and(|real| std::fs::copy(real, &index.path).is_ok());
+    if from_copy {
+        mark_recent_entries_racy(&index.path);
+    }
     let mut unreadable = Vec::new();
     let staged = from_copy && add_all(root, &env).map(|u| unreadable = u).is_ok();
     if !staged {
@@ -181,6 +184,21 @@ pub fn worktree_tree(root: &Path) -> Result<Tree, String> {
     }
     let tree = run(root, &["write-tree"], &env, GIT_FAST)?;
     Ok(Tree { tree, head, unreadable })
+}
+
+/// Faz o `git` reler o conteúdo dos arquivos mexidos nos últimos segundos. O índice copiado guarda o
+/// tamanho e a hora de cada arquivo; um arquivo reescrito com o mesmo tamanho dentro da mesma
+/// "tique" do relógio do disco (comum em disco com hora grossa) passaria por inalterado e a foto
+/// sairia com o conteúdo velho. O `git` só desconfia de uma entrada mais nova que o próprio índice,
+/// então recuamos a hora da cópia: tudo de poucos segundos para cá é conferido pelo conteúdo, e o
+/// resto continua barato (só o stat).
+fn mark_recent_entries_racy(index: &Path) {
+    let past = std::time::SystemTime::now()
+        .checked_sub(std::time::Duration::from_secs(10))
+        .unwrap_or(std::time::UNIX_EPOCH);
+    if let Ok(file) = std::fs::OpenOptions::new().write(true).open(index) {
+        let _ = file.set_modified(past);
+    }
 }
 
 /// `git add -A` que não para num arquivo que não dá para ler (aberto com trava exclusiva por outro
