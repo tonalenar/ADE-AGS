@@ -103,9 +103,12 @@ fn open_configured() -> SqlResult<DbConnection> {
     Ok(Arc::new(Mutex::new(conn)))
 }
 
+/// `true` quando a base é de uma versão anterior e precisa migrar. Uma base de versão
+/// MAIOR que a desta build é erro (ver [`super::schema::refuse_newer`]), nunca "pronta".
 fn needs_upgrade(conn: &DbConnection) -> SqlResult<bool> {
     let guard = conn.lock().unwrap_or_else(|err| err.into_inner());
     let version: i32 = guard.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    super::schema::refuse_newer(version)?;
     Ok(version > 0 && version < super::schema::SCHEMA_VERSION)
 }
 
@@ -282,6 +285,48 @@ mod backup_tests {
         drop(copy);
         drop(conn);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn base_mais_nova_que_o_binario_e_recusada_sem_regravar_a_versao() {
+        let root = std::env::temp_dir().join(format!("ade-db-newer-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("data.db");
+        let conn = Connection::open(&path).unwrap();
+        super::super::schema::migrate(&conn).unwrap();
+        let newer = super::super::schema::SCHEMA_VERSION + 1;
+        conn.pragma_update(None, "user_version", newer).unwrap();
+
+        let err = upgrade_schema(&conn, &path).expect_err("uma base mais nova não abre");
+        let msg = err.to_string();
+        assert!(msg.contains("versão mais nova do ADE AGS"), "{msg}");
+        assert!(msg.contains(&format!("(v{newer})")), "{msg}");
+        assert!(msg.contains("atualize o app") || msg.contains("Atualize o app"), "{msg}");
+        assert_eq!(user_version(&conn), newer, "a versão não pode ser rebaixada");
+        assert!(
+            std::fs::read_dir(&root)
+                .unwrap()
+                .all(|e| e.unwrap().path().extension().is_none_or(|ext| ext != "backup")),
+            "nem copia: não há upgrade"
+        );
+
+        let shared: DbConnection = Arc::new(Mutex::new(conn));
+        let err = needs_upgrade(&shared).expect_err("prepare_db também recusa");
+        assert!(err.to_string().contains(&format!("(v{newer})")));
+        let guard = shared.lock().unwrap();
+        assert_eq!(user_version(&guard), newer);
+        drop(guard);
+        drop(shared);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn base_da_mesma_versao_ou_anterior_nao_e_recusada() {
+        use super::super::schema::{refuse_newer, SCHEMA_VERSION};
+        assert!(refuse_newer(0).is_ok());
+        assert!(refuse_newer(SCHEMA_VERSION - 1).is_ok());
+        assert!(refuse_newer(SCHEMA_VERSION).is_ok());
+        assert!(refuse_newer(SCHEMA_VERSION + 1).is_err());
     }
 
     fn user_version(conn: &Connection) -> i32 {

@@ -262,6 +262,9 @@ pub async fn reset_default_workspace(app: tauri::AppHandle) -> Result<(), String
 /// `std::process::exit`, salteando por completo el ciclo de eventos de Tauri.
 #[tauri::command]
 pub fn confirm_exit_all(app: tauri::AppHandle) {
+    // `process::exit` pula o `RunEvent::Exit`: a limpeza única (IPC + sessões PTY) tem
+    // que rodar aqui, antes do cleanup do Tauri.
+    crate::app::shutdown_once();
     app.cleanup_before_exit();
     std::process::exit(0);
 }

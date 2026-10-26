@@ -22,6 +22,26 @@ fn user_version(conn: &Connection) -> SqlResult<i32> {
     conn.query_row("PRAGMA user_version", [], |r| r.get(0))
 }
 
+/// Frase que a pessoa vê quando a base veio de uma build mais nova que esta.
+pub(crate) fn newer_db_message(found: i32) -> String {
+    format!(
+        "Este banco é de uma versão mais nova do ADE AGS (v{found}); esta versão do app só          conhece até a v{SCHEMA_VERSION}. Atualize o app para abrir seus dados. Nada foi alterado no banco."
+    )
+}
+
+/// Recusa uma base estampada por uma build mais nova. Migrar para trás não existe: rodar
+/// as migrações e regravar `user_version` com o número desta build "rebaixaria" a base
+/// em silêncio, e a build nova depois pularia as migrações que já achava aplicadas.
+pub(crate) fn refuse_newer(version: i32) -> SqlResult<()> {
+    if version > SCHEMA_VERSION {
+        return Err(rusqlite::Error::SqliteFailure(
+            rusqlite::ffi::Error::new(rusqlite::ffi::SQLITE_CANTOPEN),
+            Some(newer_db_message(version)),
+        ));
+    }
+    Ok(())
+}
+
 fn set_user_version(conn: &Connection, v: i32) -> SqlResult<()> {
     // `PRAGMA` no acepta parámetros, y `v` es una constante nuestra, no entrada de nadie.
     conn.execute_batch(&format!("PRAGMA user_version = {v};"))
@@ -77,6 +97,8 @@ fn detect_legacy_version(conn: &Connection) -> i32 {
 /// workspaces de alguien.
 pub fn migrate(conn: &Connection) -> SqlResult<()> {
     let mut version = user_version(conn)?;
+    // Antes de qualquer `ALTER` ou `set_user_version`: uma base mais nova sai intacta.
+    refuse_newer(version)?;
     if version == 0 {
         version = detect_legacy_version(conn);
     }
