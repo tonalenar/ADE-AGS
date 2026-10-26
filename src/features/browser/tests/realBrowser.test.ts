@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cdpModifiers, isGoogleSignIn, keyDownEvent, loginStartUrl, mouseButton, pageMetrics, pagePoint } from "../realBrowser";
+import { cdpModifiers, isGoogleSignIn, keyDownEvent, loginStartUrl, mouseButton, pageMetrics, pagePoint, shouldOpenInRealChrome } from "../realBrowser";
 
 describe("Chrome real: zoom da página", () => {
   it("150% = página com menos pixels CSS e mais densidade", () => {
@@ -67,5 +67,23 @@ describe("Chrome real: mouse", () => {
     expect(mouseButton(0)).toBe("left");
     expect(mouseButton(2)).toBe("right");
     expect(cdpModifiers({ altKey: true, ctrlKey: true, metaKey: false, shiftKey: true })).toBe(11);
+  });
+});
+
+describe("shouldOpenInRealChrome", () => {
+  it("site de fora abre no Chrome real; servidor local fica no proxy", () => {
+    expect(shouldOpenInRealChrome("https://www.google.com/search?q=x", undefined)).toBe(true);
+    expect(shouldOpenInRealChrome("https://gestaoautovale.com.br/mapa", undefined)).toBe(true);
+    expect(shouldOpenInRealChrome("http://127.0.0.1:8790/mapa", undefined)).toBe(false);
+    expect(shouldOpenInRealChrome("http://localhost:3000", undefined)).toBe(false);
+    expect(shouldOpenInRealChrome("http://app.local/", undefined)).toBe(false);
+  });
+  it("a escolha explícita da pessoa sempre vale", () => {
+    expect(shouldOpenInRealChrome("https://www.google.com", false)).toBe(false);
+    expect(shouldOpenInRealChrome("http://localhost:3000", true)).toBe(true);
+  });
+  it("só http(s) conta", () => {
+    expect(shouldOpenInRealChrome("about:blank", undefined)).toBe(false);
+    expect(shouldOpenInRealChrome("file:///c:/x.html", undefined)).toBe(false);
   });
 });

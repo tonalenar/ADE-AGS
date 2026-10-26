@@ -36,7 +36,7 @@ import { PageChannel, type LoadState } from "./pageChannel";
 import { isPageMessage, type AppMessage, type PageMessage, type PickedElement, type SimpleAppMessage } from "./protocol";
 import { ResponsiveStage } from "./ResponsiveStage";
 import { RealBrowserView } from "./RealBrowserView";
-import { isGoogleSignIn, loginStartUrl, portalRect, realBrowserHistory, realBrowserLogin, realBrowserLoginFinish, realBrowserLoginPlace, realBrowserPost, realBrowserSend, realBrowserShot, sameRect, type PortalRect } from "./realBrowser";
+import { isGoogleSignIn, loginStartUrl, portalRect, shouldOpenInRealChrome, realBrowserHistory, realBrowserLogin, realBrowserLoginFinish, realBrowserLoginPlace, realBrowserPost, realBrowserSend, realBrowserShot, sameRect, type PortalRect } from "./realBrowser";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { ActionButton, ToolbarSeparator, ToolButton } from "./toolbarButtons";
@@ -125,6 +125,8 @@ export function BrowserTab({ view, active, device = null }: {
   const real = !!view.realChrome;
   const realRef = useRef(real);
   realRef.current = real;
+  const viewRealRef = useRef(view.realChrome);
+  viewRealRef.current = view.realChrome;
   const viewUrlRef = useRef(view.url);
   viewUrlRef.current = view.url;
   // Login numa conta: o perfil está aberto num Chrome comum, numa janela própria. Ao fechá-la, o
@@ -313,11 +315,12 @@ export function BrowserTab({ view, active, device = null }: {
       setError(t("browser.invalidUrl"));
       return t("browser.invalidUrl");
     }
-    if (realRef.current) {
-      // Quem navega é a vista do Chrome real, quando a URL dela muda (ou ao terminar de abrir).
+    if (realRef.current || shouldOpenInRealChrome(url, viewRealRef.current)) {
+      // Quem navega é a vista do Chrome real, quando a URL dela muda (ou ao terminar de abrir). Um site de
+      // fora liga o Chrome real sozinho (ver `shouldOpenInRealChrome`): a pessoa pode desligar no botão.
       setAddress(url);
       setError(null);
-      updateView(view.id, { url, title: new URL(url).host });
+      updateView(view.id, realRef.current ? { url, title: new URL(url).host } : { url, title: new URL(url).host, realChrome: true });
       return null;
     }
     try {
