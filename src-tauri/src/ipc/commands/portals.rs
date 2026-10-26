@@ -32,7 +32,7 @@ const ACT_TIMEOUT_S: u64 = 115;
 /// (`PORTAL_OPS`); está acá también para fallar con un mensaje útil antes de molestarlo.
 pub(crate) const ACTIONS: &[&str] = &[
     "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll", "wait",
-    "screenshot", "console", "layout", "act", "reset",
+    "screenshot", "console", "layout", "act", "reset", "run-tool",
 ];
 
 #[derive(Debug, Clone)]
@@ -254,6 +254,30 @@ pub(crate) fn request_for(action: &str, args: &Value) -> Result<Value, String> {
             if let Some(n) = num(args, "steps")? {
                 set(&mut req, "steps", json!(n));
             }
+            // `--save <nome>`: se o Jev chegar ao objetivo, o caminho vira uma ferramenta (`ags portal run`).
+            if let Some(save) = arg_str_opt(args, "save") {
+                if !crate::jev_tools::valid_name(&save) {
+                    return Err(format!("--save \"{save}\": comece com letra minúscula e use só minúsculas, dígitos e _."));
+                }
+                set(&mut req, "save", json!(save));
+                if let Some(read) = arg_str_opt(args, "read") {
+                    set(&mut req, "read", json!(read));
+                }
+                set(&mut req, "replace", json!(flag(args, "replace")));
+            }
+        }
+        // `ags portal run`: a ferramenta já carregada por `portal_run` e as entradas (`--input campo=valor`, repetível).
+        "run-tool" => {
+            set(&mut req, "tool", args.get("toolJson").cloned().ok_or("Faltou a ferramenta.")?);
+            let inputs: Vec<Value> = match args.get("input") {
+                Some(Value::Array(list)) => list.clone(),
+                Some(Value::String(one)) if !one.is_empty() => vec![json!(one)],
+                _ => Vec::new(),
+            };
+            if inputs.iter().any(|f| !f.as_str().is_some_and(|s| s.contains('='))) {
+                return Err("--input precisa de `campo=valor` (repita a flag para vários).".into());
+            }
+            set(&mut req, "inputs", Value::Array(inputs));
         }
         "console" => {
             if let Some(l) = arg_str_opt(args, "level") {
@@ -441,6 +465,28 @@ pub(super) fn portal_open(app: &AppHandle, args: &Value) -> Result<Value, String
     Ok(json!({ "opened": "canvas", "created": made.get("created").cloned().unwrap_or(Value::Null) }))
 }
 
+/// `ags portal run <portal> <ferramenta> [--input campo=valor]…`: refaz sem o Jev um caminho gravado por `act --save`.
+pub(super) fn portal_run(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let name = arg_str_opt(args, "tool").ok_or("`ags portal run` precisa do nome da ferramenta: ags portal run <portal> <ferramenta>.")?;
+    let tool = crate::jev_tools::load_in(&crate::jev_tools::dir()?, &name)?;
+    let mut with_tool = args.clone();
+    with_tool["toolJson"] = tool;
+    portal_action(app, &with_tool, "run-tool")
+}
+
+/// `ags portal tools`: as ferramentas gravadas.
+pub(super) fn portal_tools(_app: &AppHandle, _args: &Value) -> Result<Value, String> {
+    let dir = crate::jev_tools::dir()?;
+    Ok(json!({ "dir": dir.display().to_string(), "tools": crate::jev_tools::list_in(&dir) }))
+}
+
+/// `ags portal forget <ferramenta>`: apaga uma ferramenta gravada.
+pub(super) fn portal_forget(_app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let name = arg_str_opt(args, "tool").ok_or("`ags portal forget` precisa do nome da ferramenta.")?;
+    crate::jev_tools::delete_in(&crate::jev_tools::dir()?, &name)?;
+    Ok(json!({ "forgot": name }))
+}
+
 /// `ags portal <acción> <portal> …`: lo que el agente le pide a ese navegador.
 pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Result<Value, String> {
     let from = caller(args)?;
@@ -461,7 +507,7 @@ pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Resu
         "canvas.portal",
         &json!({ "op": "run", "cwd": cwd, "id": target.id, "request": request, "owner": owner }),
         Some(window_of(&target.key)),
-        std::time::Duration::from_secs(if action == "act" { ACT_TIMEOUT_S } else { ACTION_TIMEOUT_S }),
+        std::time::Duration::from_secs(if action == "act" || action == "run-tool" { ACT_TIMEOUT_S } else { ACTION_TIMEOUT_S }),
     )
     .and_then(unwrap_frontend_result);
     let out = match asked {
@@ -580,6 +626,27 @@ mod test {
             let err = request_for(banned, &json!({})).unwrap_err();
             assert!(err.contains("não admite"), "{banned}: {err}");
         }
+    }
+
+    #[test]
+    fn act_com_save_leva_o_nome_a_leitura_e_o_replace_e_recusa_nome_ruim() {
+        let req = request_for("act", &json!({ "goal": "buscar", "save": "busca_loja", "read": "rows:li|nome=h3", "replace": true })).unwrap();
+        assert_eq!(req["save"], "busca_loja");
+        assert_eq!(req["read"], "rows:li|nome=h3");
+        assert_eq!(req["replace"], true);
+        assert!(request_for("act", &json!({ "goal": "x" })).unwrap().get("save").is_none());
+        assert!(request_for("act", &json!({ "goal": "x", "save": "Busca Loja" })).unwrap_err().contains("minúscula"));
+    }
+
+    #[test]
+    fn run_tool_leva_a_ferramenta_e_as_entradas() {
+        let tool = json!({ "name": "busca_loja" });
+        let req = request_for("run-tool", &json!({ "toolJson": tool, "input": ["busca=fone"] })).unwrap();
+        assert_eq!(req["op"], "run-tool");
+        assert_eq!(req["tool"]["name"], "busca_loja");
+        assert_eq!(req["inputs"], json!(["busca=fone"]));
+        assert!(request_for("run-tool", &json!({ "toolJson": tool, "input": ["sem-igual"] })).unwrap_err().contains("campo=valor"));
+        assert!(request_for("run-tool", &json!({})).is_err());
     }
 
     #[test]

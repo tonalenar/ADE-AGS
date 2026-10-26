@@ -128,6 +128,10 @@ PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os d
   portal act <portal> \"objetivo\" [--fill campo=valor]... [--expect tipo:valor]... [--steps 8]
                                               O Jev navega sozinho até o objetivo, passo a passo (Ajustes → Decisões → Navegador do canvas)
                                               Prefira UM act com o trajeto inteiro (--steps até 15): cada chamada extra custa um turno seu
+                                              --save <nome> [--read text|rows:<sel>|campo=<sel>] [--replace]: se der certo, vira ferramenta
+  portal run <portal> <ferramenta> [--input campo=valor]...
+                                              Refaz SEM o Jev (sem modelo, em segundos) o caminho gravado e devolve a leitura · só leitura
+  portal tools | portal forget <ferramenta>   As ferramentas gravadas (~/.ags/jev-tools) · apaga uma
 
 CHAT COM O USUÁRIO — o chat dele por conversas (sete cores); o que você escreve no terminal NÃO chega a ele
   say \"texto\" [--progress] [--thread <cor>]    Responde no chat (--progress: aviso, seu turno continua)
@@ -855,6 +859,8 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "portal.open" => &["url"],
         "portal.close" => &["name"],
         "portal.act" => &["name", "goal"],
+        "portal.run" => &["name", "tool"],
+        "portal.forget" => &["tool"],
         "portal.navigate" => &["name", "url"],
         "portal.history" => &["name", "action"],
         "portal.click" | "portal.hover" => &["name", "target"],
@@ -958,11 +964,16 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
 
         // `--fill campo=valor` repete (um por campo do formulário): acumula numa lista, como `--pre`.
         // `--expect tipo:valor` também (text:, url:, count:, absent:): o que prova o sucesso do `act`.
-        if key == "fill" || key == "expect" {
+        // `--input campo=valor` também (as entradas de `ags portal run`).
+        if key == "fill" || key == "expect" || key == "input" {
             let value = args
                 .get(i + 1)
                 .filter(|v| !v.starts_with("--"))
-                .ok_or_else(|| if key == "fill" { "--fill precisa de campo=valor".to_string() } else { "--expect precisa de tipo:valor (text:, url:, count: ou absent:)".to_string() })?;
+                .ok_or_else(|| match key {
+                    "fill" => "--fill precisa de campo=valor".to_string(),
+                    "input" => "--input precisa de campo=valor".to_string(),
+                    _ => "--expect precisa de tipo:valor (text:, url:, count: ou absent:)".to_string(),
+                })?;
             match map.entry(key.to_string()) {
                 serde_json::map::Entry::Occupied(mut e) => {
                     if let Some(list) = e.get_mut().as_array_mut() {
