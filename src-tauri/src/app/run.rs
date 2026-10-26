@@ -59,8 +59,12 @@ pub fn run() {
     crate::util::legacy::migrate_on_startup();
     // Si hay que subir el schema, acá solo se abre el archivo. La copia y la migración
     // corren después de que la ventana puede pintarse (ver `setup`).
-    let (db_conn, _upgrade_pending) =
-        crate::database::prepare_db().expect("Failed to initialize SQLite database");
+    // Uma falha aqui (inclusive uma base de versão mais nova que este binário) precisa ser
+    // lida: no release do Windows um `expect` sumiria sem janela nem console.
+    let (db_conn, _upgrade_pending) = match crate::database::prepare_db() {
+        Ok(ready) => ready,
+        Err(error) => super::fatal::exit_with_startup_error(&error.to_string()),
+    };
     // El hilo espera `db_is_ready`: no checkpointa mientras el splash corre el
     // `VACUUM INTO` y la migración. Después mira el `-wal` cada 30 s, fuera del purge.
     crate::database::spawn_wal_maintenance(db_conn.clone());
@@ -649,14 +653,9 @@ pub fn run() {
             // si hay varias ventanas abiertas y se intenta salir de la app entera, se pausa
             // la salida y se le pregunta al frontend si quiere cerrar todo o solo la actual.
             if let tauri::RunEvent::Exit = event {
-                // Sin esto quedaría un handshake apuntando a un puerto muerto, y la CLI
-                // reportaría "no se pudo conectar" en vez de "la app no está corriendo".
-                crate::ipc::cleanup();
-                // Sin esto, cerrar la app deja corriendo lo que hayan lanzado los agentes
-                // (servidores de desarrollo, watchers). El registry de PTYs es un
-                // `lazy_static` y Rust no corre destructores de estáticos al salir, así
-                // que el `Drop` que limpia cada grupo hay que dispararlo a mano.
-                crate::terminal::kill_all_sessions();
+                // Handshake do IPC e sessões PTY: a mesma limpeza do "fechar tudo" e dos
+                // sinais, uma vez só. Ver `app/shutdown.rs`.
+                super::shutdown_once();
             }
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 let windows = app_handle.webview_windows();
