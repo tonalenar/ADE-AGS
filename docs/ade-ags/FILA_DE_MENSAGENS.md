@@ -102,12 +102,65 @@ refused  (recusa de política; só auditoria, final, nunca é digitada)
   Aba fechada: o que esperava vira `expired`. Aba sem terminal por 2 min: a fila fica e o entregador
   sai (uma mensagem nova ou "enviar agora" o liga de novo).
 - O aviso de atraso (`stale_note`, ≥ 20 s) vai em toda mensagem que esperou, menos nas `--raw`.
+- **Destino ocupado = espera** (já era assim): o entregador espera o destino quieto na tela E sem turno
+  aberto no transcript (`canal::busy`), em fatias de 3 s; esperar não gasta tentativa.
+- **Rechecagem logo antes de agir**: depois da espera, o entregador relê `canal::busy` imediatamente
+  antes do `claim`; o destino que voltou a trabalhar no meio não recebe agora (o laço volta a esperar).
+  "Enviar agora" e o prazo de 15 min vencido seguem entregando como antes. A entrega já
+  (`deliver_now_or_queue`) relê o `busy` depois dos 3 s de quieto, pelo mesmo motivo.
+- **Tentativas como estado** (`attempts`): o `claim` soma 1; o `ask` direto nasce com 1 e o reenvio
+  direto com o mesmo `--id` soma 1. Uma mensagem entregue com `attempts > 1` já foi tentada (digitada
+  sem confirmação e reenviada com o mesmo id) e o destino pode já ter agido nela: o texto chega com o
+  prefixo `[reenvio; pode já ter sido recebida]` (`peer_queue::retry_marked`; nunca em `--raw`). Uma
+  `expired` nunca foi digitada (attempts 0), então o reenvio dela chega sem o prefixo.
+
+## Falha definitiva volta ao remetente
+
+Quando uma mensagem levada pelo **entregador** (ou decidida no **arranque**) termina `unconfirmed` ou
+`expired`, o remetente recebe, pela própria fila, um aviso (`kind = notice`, `raw`, de "ADE AGS"):
+
+> [AGS] Você pediu a X: "<começo da tarefa ou do texto>" e não chegou (<motivo>). Diga isso à pessoa e
+> ofereça o que você mesmo pode fazer.
+
+(Para `unconfirmed`, "e não há confirmação de que chegou".) O começo é a linha `Tarefa:` do envelope,
+ou a primeira linha do texto, em até 120 caracteres; o motivo é a `note` da mensagem.
+
+- Chave própria por mensagem e tentativa (`client_id = falha-entrega-<id>-<attempts>`): dois avisos ao
+  mesmo remetente, de pedidos diferentes, nunca colapsam no dedupe por texto; a mesma falha processada
+  duas vezes é o mesmo aviso.
+- `notice` não gera `notice`: um aviso que falha não vira outro (sem recursão).
+- Não conta nos tetos: o aviso é do app (`limits: None`) e `notice` não entra no fan-out nem na
+  profundidade.
+- Remetente que não existe mais (fora da lista de abas) = nada. Sem a lista das abas, ninguém é avisado.
+- A entrega já e o `ask` direto não geram aviso: o próprio comando já respondeu ao remetente que não chegou.
+- Funções: `store::failure_notice`, `failure_text`, `failure_key`, `task_gist`;
+  `expire_queued_for` devolve as expiradas; `resume` enfileira os avisos e inclui a aba do remetente
+  nos destinos que voltam a andar; no IPC, `notify_failures`.
+
+## Relógio
+
+Todo prazo da fila (dedupe de 10 min, janela de fan-out e de tratamento, prazo de 15 min do
+entregador, expiração de 1 h no arranque, limpeza de 7 dias, tombstone de 30 dias) é comparado com o
+relógio do **SQLite** (`store::db_now`: `julianday('now')` em ms), não com o do processo. Em produção o
+IPC passa esse "agora" a toda função do store (`with_db_now`); `created_at`/`updated_at` também são
+gravados com ele. Quem escreve no mesmo banco (o app e qualquer processo da CLI) concorda sobre
+"agora". Os testes seguem injetando o `now` em cada função.
+
+## Sem lease (decisão)
+
+A auditoria (item 13) sugere um lease renovado pela atividade do PTY. Não foi feito: **só o app
+entrega**. A CLI e as tools MCP só pedem (pelo IPC); nenhum outro processo toma mensagens da fila. A
+exclusão já é garantida por `store::claim` (`queued → delivering` numa só escrita), pelo
+`delivery_lock` por destino e por um entregador por destino; no arranque, o que estava `delivering`
+vira `unconfirmed` e nunca é digitado de novo. Um lease só faria sentido com dois entregadores
+disputando a mesma fila (por exemplo, um daemon headless entregando junto com o app).
 
 ## Arranque do app
 
 `start_resume` (em `app/run.rs`, fora do modo headless): `delivering` vira `unconfirmed` (não se sabe
 se chegou, então não se digita de novo); `queued` de aba que não existe mais, ou com mais de 1 h, vira
-`expired`; o resto volta a andar, com o aviso de atraso.
+`expired`; o resto volta a andar, com o aviso de atraso. Cada uma que terminou `unconfirmed`/`expired` ali gera o aviso
+ao remetente (se ele ainda está aberto).
 
 ## Interface e CLI
 
@@ -118,3 +171,26 @@ se chegou, então não se digita de novo); `queued` de aba que não existe mais,
   `peer_queue_cancel`, `peer_queue_send_now`.
 - `ags peer queue [list]` (o que você mandou e espera), `ags peer queue refused` (as suas recusas) e
   `ags peer queue cancel <id>` (só as suas).
+
+## Vigia e detector de parados (o lado da janela)
+
+- **Ciclo sem sobreposição**: o Vigia roda em `repeatAfterEach` (`missions/repeatAfterEach.ts`), não em
+  `setInterval`: o próximo ciclo só é agendado 30 s depois que o anterior terminou, inclusive a consulta
+  ao modelo (`vigiaTick` devolve a promessa delas). Erro num ciclo vai ao console e o laço segue. O
+  detector de parados (`watcher.ts`) continua em `setInterval` porque o tic dele é síncrono (não
+  sobrepõe).
+- **Interruptor checado onde o trabalho começa**: `vigiaActive()` (`vigiaSwitch.ts`) é lido logo antes
+  de cada ação (cutucar, avisar o usuário com a resposta do modelo) e de novo dentro de `sendWhenReady`,
+  na hora de colar (`SendTimings.guard`). Falha fechada: precisa do botão ligado nesta janela E do
+  armazenamento dizendo ligado; leitura que falha (ou outra janela que desligou) = não age.
+- **Ocioso rechecado antes de cutucar**: o mesmo `guard` relê "trabalhando" (a tela somada ao estado do
+  canal estruturado, que o backend empurra a cada mudança do transcript) logo antes de colar; ocupado
+  = não cola (`onSkipped`). O Vigia não sonda o PTY.
+- **Diagnóstico do silêncio** (`stalled.ts`): o aviso diz "não escreveu nada desde que recebeu a tarefa"
+  ou "parou depois de N eventos de saída" (blocos de saída contados em `terminal/activity.ts::outputCount`
+  desde a tarefa).
+- **Silêncio não conta com a janela atrasada**: com `document.hidden` ou um tic que chegou com mais de 3×
+  o intervalo de atraso (`uiBehindUntil`), o relógio de silêncio recomeça dali: a saída do agente nesse
+  tempo pode ainda não ter chegado à janela. Sinal usado só o que a própria janela mede (visibilidade e
+  atraso do timer); não há sinal confiável de backpressure do PTY na janela.
+
