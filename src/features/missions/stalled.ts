@@ -44,6 +44,8 @@ export interface PeerMessage {
   toTabId: string | null;
   /** El texto del `tell` (para distinguir una tarea de un simple "obrigado"). */
   text?: string | null;
+  /** Una línea para la interfaz ("X pediu a Y: <tarefa>"); los mensajes viejos no la traen. */
+  summary?: string | null;
   atMs: number;
 }
 

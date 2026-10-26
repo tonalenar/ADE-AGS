@@ -1319,12 +1319,15 @@ fn peer_schemas() -> Vec<Value> {
     vec![
         json!({
             "name": "peer_tell",
-            "description": "Send a message to an agent connected to you on the ADE AGS canvas (a teammate or the orchestrator), without waiting. Use it for tasks, blockers and short updates; the reply arrives in your terminal. Long messages are delivered as a file the recipient reads.",
+            "description": "Send a message to an agent connected to you on the ADE AGS canvas (a teammate or the orchestrator), without waiting. Use it for tasks, blockers and short updates; the reply arrives later in your terminal as a separate message, so end your turn after sending. Long messages are delivered as a file the recipient reads. A policy refusal (unknown or ambiguous name, yourself, duplicate, depth or fan-out cap) comes back as `refused: true` with `reason` and `message`: answer with what you have or ask the person.",
             "inputSchema": { "type": "object", "properties": {
                 "to": { "type": "string", "description": "The teammate's name, as `peers` lists it." },
-                "text": { "type": "string", "description": "The message, any length, multi-line allowed." },
+                "text": { "type": "string", "description": "The message, any length, multi-line allowed. Optional when `task` is given (then it becomes context)." },
+                "task": { "type": "string", "description": "Optional typed envelope: what you need done. The recipient reads 'X pediu sua ajuda nisto. Tarefa / Restrições / Como é uma boa resposta'." },
+                "constraints": { "type": "string", "description": "Optional: limits the recipient must respect (envelope)." },
+                "expecting": { "type": "string", "description": "Optional: what a good answer looks like (envelope)." },
                 "id": { "type": "string", "description": "Optional request id you choose. The same id is the same message: it is never typed twice, even if you retry after a restart. Use a new id for a new message." }
-            }, "required": ["to", "text"] },
+            }, "required": ["to"] },
         }),
         json!({
             "name": "peer_deliver",

@@ -17,7 +17,7 @@ use rusqlite::Connection;
 use serde_json::{json, Value};
 use tauri::{AppHandle, Emitter};
 
-use super::peers::{caller, delivery_lock, outgoing, spill_to_inbox, stale_note, submit_confirmed};
+use super::peers::{caller, delivery_lock, outgoing, outgoing_peer, spill_to_inbox, stale_note, submit_confirmed};
 use super::tabs::{pty_id_for_tab, tab_list, wait_until_quiet};
 use crate::ipc::protocol::arg_str_opt;
 use crate::peer_queue::store::{self, Admission, NewMessage, PeerMessage, State};
@@ -36,9 +36,10 @@ const WAIT_SLICE: Duration = Duration::from_secs(3);
 /// Quanto o entregador espera o terminal do destino existir (no arranque, o PTY nasce depois).
 const PTY_WAIT: Duration = Duration::from_secs(120);
 
-/// O que aconteceu com uma mensagem: entregue já, na fila, repetida, sem confirmação ou cancelada.
+/// O que aconteceu com uma mensagem: entregue já, na fila, repetida, sem confirmação, cancelada ou
+/// recusada por um teto (aí `Sent::message` é a linha da recusa, com o motivo e a frase).
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub(crate) enum Delivery { Now, Queued, Duplicate, Unconfirmed, Cancelled }
+pub(crate) enum Delivery { Now, Queued, Duplicate, Unconfirmed, Cancelled, Refused }
 
 /// O resultado de mandar uma mensagem: o que aconteceu e o registro dela.
 #[derive(Clone, Debug)]
@@ -77,7 +78,13 @@ pub(super) fn client_id_arg(args: &Value) -> Option<String> {
 /// caminho, se ele foi para a caixa de entrada). Uma mensagem que esperou ganha o aviso de que pode
 /// estar velha; `--raw` não, porque é um comando da TUI (`/compact`) e o aviso o quebraria.
 pub(crate) fn compose(msg: &PeerMessage, body: &str, waited: Duration) -> String {
-    let text = outgoing(&msg.from_name, body, msg.reply, msg.raw);
+    // O corpo de uma mensagem de par (`tell`/`ask`) vai no envelope de conteúdo não confiável; o que o
+    // próprio app escreve (papel, linha da entrega, aviso) vai como sempre.
+    let text = if matches!(msg.kind.as_str(), "tell" | "ask") {
+        outgoing_peer(&msg.from_name, body, msg.reply, msg.raw)
+    } else {
+        outgoing(&msg.from_name, body, msg.reply, msg.raw)
+    };
     match stale_note(waited).filter(|_| !msg.raw) {
         Some(note) => format!("{text}\n{note}"),
         None => text,
@@ -91,7 +98,19 @@ fn admit(app: &AppHandle, new: &NewMessage<'_>, initial: State) -> Result<Result
         Admission::New(message) => Ok(message),
         Admission::Repeat(message) => Err(Sent { delivery: Delivery::Duplicate, message, repeat: true }),
         Admission::Duplicate(message) => Err(Sent { delivery: Delivery::Duplicate, message, repeat: false }),
+        Admission::Refused(refusal) => Err(Sent { delivery: Delivery::Refused, message: refusal.record, repeat: false }),
     })
+}
+
+/// Os tetos, sem gravar nada: `Some((motivo, frase))` se a mensagem seria recusada. Para o `peer ask`
+/// recusar antes de esperar o destino ficar quieto (o `admit` confere de novo, na transação).
+pub(super) fn refusal_preview(app: &AppHandle, new: &NewMessage<'_>) -> Result<Option<(&'static str, String)>, String> {
+    Ok(with_db(app, |conn| store::check_limits(conn, new, now()))?.map(|(reason, message, _)| (reason, message)))
+}
+
+/// Grava a recusa de política decidida antes da fila (destino errado, si mesmo, sem tarefa).
+pub(super) fn refuse(app: &AppHandle, new: &NewMessage<'_>, reason: &str, message: &str) -> Result<PeerMessage, String> {
+    with_db(app, |conn| store::record_refusal(conn, new, reason, message, now()))
 }
 
 /// Digita uma mensagem já tomada da fila (`delivering`) e fecha o registro. `Ok(false)` = escrita,
@@ -175,16 +194,8 @@ pub(super) fn end_direct(app: &AppHandle, msg: &PeerMessage, error: Option<&str>
 
 /// Uma mensagem já registrada com este id do chamador, se houver.
 pub(super) fn by_client_id(app: &AppHandle, from: &str, client_id: Option<&str>) -> Result<Option<PeerMessage>, String> {
-    let Some(cid) = store::clean_client_id(client_id)? else { return Ok(None) };
-    with_db(app, |conn| {
-        conn.query_row(
-            "SELECT id FROM peer_messages WHERE from_tab_id = ?1 AND client_id = ?2",
-            rusqlite::params![from, cid],
-            |r| r.get::<_, i64>(0),
-        )
-        .ok()
-        .map_or(Ok(None), |id| store::get(conn, id))
-    })
+    // Inclui o tombstone: a chave de um registro que já saiu na limpeza continua valendo.
+    with_db(app, |conn| store::by_client_id(conn, from, client_id))
 }
 
 // ── O entregador de cada destino ──────────────────────────────────────
@@ -410,6 +421,18 @@ pub(super) fn peer_queue(app: &AppHandle, args: &Value) -> Result<Value, String>
             let at = now();
             Ok(json!({ "messages": rows.iter().map(|m| summary(m, at)).collect::<Vec<_>>() }))
         }
+        // As recusas de política que você recebeu (auditoria): motivo, destino, a frase.
+        "refused" => {
+            let rows = with_db(app, |conn| store::refusals_from(conn, &from, 20))?;
+            let at = now();
+            Ok(json!({ "refused": rows.iter().map(|m| {
+                let mut line = summary(m, at);
+                line["reason"] = json!(m.reason);
+                line["message"] = json!(m.note);
+                line["depth"] = json!(m.depth);
+                line
+            }).collect::<Vec<_>>() }))
+        }
         "cancel" => {
             let raw = client_id_arg(args).ok_or("Uso: ags peer queue cancel <id>")?;
             let id: i64 = raw.trim().trim_start_matches('#').parse().map_err(|_| "Use o número da mensagem: `ags peer queue cancel 12`.".to_string())?;
@@ -421,7 +444,7 @@ pub(super) fn peer_queue(app: &AppHandle, args: &Value) -> Result<Value, String>
             changed(app, Some(&msg.to_tab_id));
             Ok(json!({ "cancelled": true, "message": summary(&msg, now()) }))
         }
-        other => Err(format!("Ação desconhecida '{other}'. Use: ags peer queue [list|cancel <id>]")),
+        other => Err(format!("Ação desconhecida '{other}'. Use: ags peer queue [list|refused|cancel <id>]")),
     }
 }
 
@@ -434,18 +457,25 @@ mod test {
             id: 7, client_id: Some("r1".into()), kind: "tell".into(), from_tab_id: "a".into(), from_name: "Líder".into(),
             to_tab_id: "b".into(), to_name: "QA".into(), text: "\n  rode os testes\nsegunda linha".into(), raw, reply,
             state: State::Queued, position: 1, force_now: false, attempts: 0, created_at: 1_000, updated_at: 1_000,
-            delivered_at: None, edited_at: None, note: None,
+            delivered_at: None, edited_at: None, note: None, depth: 0, parent_id: None, answer_of: None, reason: None,
         }
     }
 
     #[test]
     fn a_mensagem_que_esperou_leva_o_aviso_e_o_comando_raw_nao() {
         let quick = compose(&msg(false, false), "oi", Duration::from_secs(2));
-        assert!(quick.starts_with("[Mensagem de Líder via ADE AGS] oi") && !quick.contains("na fila"), "{quick}");
+        assert!(quick.starts_with("[Mensagem de Líder via ADE AGS] ") && !quick.contains("na fila"), "{quick}");
+        assert!(quick.contains("<untrusted_data source=\"peer:Líder\">
+oi
+</untrusted_data>"), "{quick}");
         let late = compose(&msg(false, false), "oi", Duration::from_secs(300));
         assert!(late.contains("ficou na fila") && late.contains("5 min"), "{late}");
         assert_eq!(compose(&msg(true, false), "/compact", Duration::from_secs(300)), "/compact");
         assert!(compose(&msg(false, true), "?", Duration::ZERO).contains("Responda normalmente"));
+        // O que o próprio app escreve (o briefing de papel) não vai como conteúdo não confiável.
+        let mut role = msg(false, false);
+        role.kind = "role".into();
+        assert!(!compose(&role, "Seu papel", Duration::ZERO).contains("untrusted_data"));
     }
 
     #[test]

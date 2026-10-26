@@ -264,7 +264,7 @@ fn notify_due(app: &AppHandle, db: &DbConnection) {
         let text = notice_text(&item);
         let new = NewMessage {
             client_id: None, kind: "notice", from_tab_id: &item.tab_id, from_name: "ADE AGS",
-            to_tab_id: &lead, to_name: names.get(&lead).map(String::as_str).unwrap_or(""), text: &text, raw: true, reply: false,
+            to_tab_id: &lead, to_name: names.get(&lead).map(String::as_str).unwrap_or(""), text: &text, raw: true, reply: false, ..Default::default()
         };
         match peer_queue::enqueue(app, &new) {
             Ok(_) => {

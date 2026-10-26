@@ -8,10 +8,16 @@
 //!   │             └───────► unconfirmed ──┐
 //!   ├──► cancelled  (o usuário cancelou)   │ reenvio com o mesmo id
 //!   └──► expired    (aba fechada / velha) ─┴──► queued
+//! refused  (recusa de política: teto, duplicada, destino errado — só auditoria, nunca vai)
 //! ```
 //!
 //! A ordem da fila de um destino é a coluna `position` (menor primeiro). "Enviar agora" põe a
 //! mensagem na frente e marca `force_now`: o entregador não espera o destino ficar quieto.
+//!
+//! Tetos (ver [`admit`]): cada mensagem `tell`/`ask` grava a sua `depth`, lida do SQLite (a
+//! "mensagem em tratamento" de quem envia, ver [`in_treatment`]), e quem envia tem um número
+//! máximo de pedidos novos por janela. Passou de um teto, a mensagem é recusada ANTES de qualquer
+//! coisa ser digitada, e a recusa fica gravada com o motivo.
 
 use std::collections::HashSet;
 
@@ -24,8 +30,24 @@ pub const DUPLICATE_WINDOW_MS: i64 = 10 * 60 * 1000;
 pub const RESUME_MAX_AGE_MS: i64 = 60 * 60 * 1000;
 /// Registros já resolvidos (entregues, cancelados…) ficam este tempo e depois saem.
 const KEEP_FINISHED_MS: i64 = 7 * 24 * 60 * 60 * 1000;
+/// A chave (`--id`) de um registro que saiu continua valendo este tempo (tombstone): o mesmo id
+/// não roda de novo depois da limpeza de 7 dias.
+pub const KEEP_KEYS_MS: i64 = 30 * 24 * 60 * 60 * 1000;
 /// Tamanho máximo de um id do chamador (`--id`).
 const MAX_CLIENT_ID: usize = 128;
+
+/// Profundidade máxima de uma mensagem: sem mensagem em tratamento é 0; quem trata uma de
+/// profundidade `d` e pede algo a um terceiro manda `d + 1`. Acima disto, recusa.
+pub const MAX_PEER_DEPTH: i64 = 2;
+/// A janela da contagem de pedidos novos de uma aba (fan-out).
+pub const FANOUT_WINDOW_MS: i64 = 10 * 60 * 1000;
+/// Quantos pedidos novos (respostas não contam) uma aba manda na janela.
+pub const MAX_FANOUT: i64 = 5;
+/// O mesmo para o orquestrador: ele distribui o trabalho da equipe inteira (abrir uma missão de 6
+/// integrantes já são 6 pedidos), então o teto dele é maior.
+pub const LEAD_MAX_FANOUT: i64 = 15;
+/// Uma mensagem recebida e não respondida há mais que isto não está mais "em tratamento".
+pub const TREATMENT_WINDOW_MS: i64 = 30 * 60 * 1000;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -36,6 +58,7 @@ pub enum State {
     Unconfirmed,
     Cancelled,
     Expired,
+    Refused,
 }
 
 impl State {
@@ -47,6 +70,7 @@ impl State {
             State::Unconfirmed => "unconfirmed",
             State::Cancelled => "cancelled",
             State::Expired => "expired",
+            State::Refused => "refused",
         }
     }
 
@@ -58,12 +82,13 @@ impl State {
             "unconfirmed" => State::Unconfirmed,
             "cancelled" => State::Cancelled,
             "expired" => State::Expired,
+            "refused" => State::Refused,
             _ => return None,
         })
     }
 
     /// As transições permitidas. `unconfirmed`/`expired` → `queued` só num reenvio com o mesmo id:
-    /// o app disse ao remetente que a mensagem não chegou (ou nunca foi digitada).
+    /// o app disse ao remetente que a mensagem não chegou (ou nunca foi digitada). `refused` é final.
     pub fn can_become(self, next: State) -> bool {
         use State::*;
         matches!(
@@ -81,6 +106,7 @@ impl State {
             State::Unconfirmed => "entregue sem confirmação",
             State::Cancelled => "cancelada",
             State::Expired => "expirada",
+            State::Refused => "recusada",
         }
     }
 }
@@ -112,12 +138,76 @@ pub struct PeerMessage {
     pub updated_at: i64,
     pub delivered_at: Option<i64>,
     pub edited_at: Option<i64>,
-    /// Por que terminou assim (aba fechada, não apareceu na tela…).
+    /// Por que terminou assim (aba fechada, não apareceu na tela, a frase da recusa…).
     pub note: Option<String>,
+    /// Quantos repasses entre agentes vieram antes deste (ver [`MAX_PEER_DEPTH`]).
+    pub depth: i64,
+    /// A mensagem que quem enviou estava tratando quando mandou esta.
+    pub parent_id: Option<i64>,
+    /// Esta é a resposta (ao remetente) da mensagem `answer_of`: não é um pedido novo.
+    pub answer_of: Option<i64>,
+    /// O motivo de uma recusa (`depth`, `fanout`, `duplicate`, `unknown_target`…).
+    pub reason: Option<String>,
+}
+
+/// Os campos do envelope tipado (`--task`, `--constraints`, `--expecting`).
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct Envelope {
+    pub task: Option<String>,
+    pub constraints: Option<String>,
+    pub expecting: Option<String>,
+}
+
+impl Envelope {
+    /// Algum campo veio?
+    pub fn is_present(&self) -> bool {
+        self.task.is_some() || self.constraints.is_some() || self.expecting.is_some()
+    }
+
+    /// O bloco fixo que o destino lê. `free` (o texto livre, se veio junto) vira contexto; sem
+    /// `--task`, o texto livre é a tarefa. `None` se não há tarefa nenhuma. Pura.
+    pub fn text(&self, from_name: &str, free: Option<&str>) -> Option<String> {
+        let free = free.map(str::trim).filter(|f| !f.is_empty());
+        let (task, context) = match self.task.as_deref().map(str::trim).filter(|t| !t.is_empty()) {
+            Some(task) => (task, free),
+            None => (free?, None),
+        };
+        let or = |v: &Option<String>, empty: &'static str| v.as_deref().map(str::trim).filter(|v| !v.is_empty()).unwrap_or(empty).to_string();
+        let mut out = format!("{from_name} pediu sua ajuda nisto.\nTarefa: {task}\n");
+        if let Some(context) = context {
+            out.push_str(&format!("Contexto: {context}\n"));
+        }
+        out.push_str(&format!(
+            "Restrições: {}\nComo é uma boa resposta: {}\nResponda como você mesmo.",
+            or(&self.constraints, "nenhuma além das suas instruções"),
+            or(&self.expecting, "não especificado")
+        ));
+        Some(out)
+    }
+
+    /// Os campos, numa linha, para a chave de idempotência. Pura.
+    fn key_part(&self) -> String {
+        let n = |v: &Option<String>| normalize(v.as_deref().unwrap_or(""));
+        format!("{}\u{1f}{}\u{1f}{}", n(&self.task), n(&self.constraints), n(&self.expecting))
+    }
+}
+
+/// Os tetos que valem para uma mensagem (`None` = mensagem do próprio app, sem teto).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Limits {
+    pub max_depth: i64,
+    pub max_fanout: i64,
+}
+
+impl Limits {
+    /// Os tetos padrão; o orquestrador tem o fan-out maior.
+    pub fn for_sender(orchestrator: bool) -> Limits {
+        Limits { max_depth: MAX_PEER_DEPTH, max_fanout: if orchestrator { LEAD_MAX_FANOUT } else { MAX_FANOUT } }
+    }
 }
 
 /// O que chega para entrar na fila.
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, Default)]
 pub struct NewMessage<'a> {
     pub client_id: Option<&'a str>,
     pub kind: &'a str,
@@ -128,6 +218,18 @@ pub struct NewMessage<'a> {
     pub text: &'a str,
     pub raw: bool,
     pub reply: bool,
+    /// Os campos do envelope (entram na chave de idempotência).
+    pub envelope: Option<&'a Envelope>,
+    /// Os tetos de profundidade e fan-out. `None` = sem teto.
+    pub limits: Option<Limits>,
+}
+
+/// Uma recusa de política: o motivo, a frase para quem enviou e a linha gravada.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Refusal {
+    pub reason: &'static str,
+    pub message: String,
+    pub record: PeerMessage,
 }
 
 /// O que `admit` fez com a mensagem.
@@ -137,13 +239,17 @@ pub enum Admission {
     New(PeerMessage),
     /// O mesmo id do chamador já existe: é a MESMA mensagem, e não vai de novo.
     Repeat(PeerMessage),
-    /// Sem id, o mesmo texto já foi (ou está indo) para o mesmo destino há pouco.
+    /// Sem id, a mesma mensagem já foi (ou está indo) para o mesmo destino há pouco. A recusa
+    /// também fica gravada (motivo `duplicate`).
     Duplicate(PeerMessage),
+    /// Um teto (profundidade ou fan-out) recusou a mensagem: nada vai ser digitado.
+    Refused(Refusal),
 }
 
-pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
-    conn.execute_batch(
-        "CREATE TABLE IF NOT EXISTS peer_messages (
+/// A tabela inteira, com o nome dado (a migração reconstrói numa tabela nova quando precisa).
+fn table_sql(name: &str) -> String {
+    format!(
+        "CREATE TABLE IF NOT EXISTS {name} (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             client_id TEXT,
             kind TEXT NOT NULL,
@@ -154,7 +260,7 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             text TEXT NOT NULL,
             raw INTEGER NOT NULL DEFAULT 0,
             reply INTEGER NOT NULL DEFAULT 0,
-            state TEXT NOT NULL CHECK(state IN ('queued','delivering','delivered','unconfirmed','cancelled','expired')),
+            state TEXT NOT NULL CHECK(state IN ('queued','delivering','delivered','unconfirmed','cancelled','expired','refused')),
             position INTEGER NOT NULL DEFAULT 0,
             force_now INTEGER NOT NULL DEFAULT 0,
             attempts INTEGER NOT NULL DEFAULT 0,
@@ -162,17 +268,84 @@ pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
             updated_at INTEGER NOT NULL,
             delivered_at INTEGER,
             edited_at INTEGER,
-            note TEXT
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS idx_peer_messages_client
+            note TEXT,
+            depth INTEGER NOT NULL DEFAULT 0,
+            parent_id INTEGER,
+            answer_of INTEGER,
+            reason TEXT,
+            dedupe_key TEXT
+        );"
+    )
+}
+
+/// As colunas da primeira versão da tabela: são as que a reconstrução copia.
+const BASE_COLUMNS: &str = "id, client_id, kind, from_tab_id, from_name, to_tab_id, to_name, text, raw, reply, state, \
+    position, force_now, attempts, created_at, updated_at, delivered_at, edited_at, note";
+
+fn has_column(conn: &Connection, table: &str, column: &str) -> rusqlite::Result<bool> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table})"))?;
+    let names = stmt.query_map([], |r| r.get::<_, String>(1))?.collect::<Result<Vec<_>, _>>()?;
+    Ok(names.iter().any(|n| n == column))
+}
+
+/// Aditiva e idempotente; não sobe `user_version`. O CHECK do estado não se altera no SQLite: uma
+/// tabela antiga (sem `refused`) é reconstruída uma vez, copiando todas as linhas.
+pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
+    conn.execute_batch(&table_sql("peer_messages"))?;
+    let sql: String = conn.query_row(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'peer_messages'",
+        [],
+        |r| r.get(0),
+    )?;
+    if !sql.contains("'refused'") {
+        conn.execute_batch(&format!(
+            "SAVEPOINT peer_messages_v2;
+             DROP TABLE IF EXISTS peer_messages_v2;
+             {}
+             INSERT INTO peer_messages_v2 ({BASE_COLUMNS}) SELECT {BASE_COLUMNS} FROM peer_messages;
+             DROP TABLE peer_messages;
+             ALTER TABLE peer_messages_v2 RENAME TO peer_messages;
+             RELEASE peer_messages_v2;",
+            table_sql("peer_messages_v2")
+        ))?;
+    }
+    for (column, ddl) in [
+        ("depth", "INTEGER NOT NULL DEFAULT 0"),
+        ("parent_id", "INTEGER"),
+        ("answer_of", "INTEGER"),
+        ("reason", "TEXT"),
+        ("dedupe_key", "TEXT"),
+    ] {
+        if !has_column(conn, "peer_messages", column)? {
+            conn.execute_batch(&format!("ALTER TABLE peer_messages ADD COLUMN {column} {ddl};"))?;
+        }
+    }
+    conn.execute_batch(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_peer_messages_client
             ON peer_messages(from_tab_id, client_id) WHERE client_id IS NOT NULL;
         CREATE INDEX IF NOT EXISTS idx_peer_messages_queue
-            ON peer_messages(to_tab_id, state, position);",
+            ON peer_messages(to_tab_id, state, position);
+        CREATE INDEX IF NOT EXISTS idx_peer_messages_from
+            ON peer_messages(from_tab_id, created_at);
+        CREATE INDEX IF NOT EXISTS idx_peer_messages_dedupe
+            ON peer_messages(dedupe_key, created_at) WHERE dedupe_key IS NOT NULL;
+        CREATE TABLE IF NOT EXISTS peer_message_keys (
+            from_tab_id TEXT NOT NULL,
+            client_id TEXT NOT NULL,
+            message_id INTEGER NOT NULL,
+            kind TEXT NOT NULL,
+            to_tab_id TEXT NOT NULL,
+            to_name TEXT NOT NULL DEFAULT '',
+            state TEXT NOT NULL,
+            created_at INTEGER NOT NULL,
+            done_at INTEGER NOT NULL,
+            PRIMARY KEY (from_tab_id, client_id)
+        );",
     )
 }
 
 const COLUMNS: &str = "id, client_id, kind, from_tab_id, from_name, to_tab_id, to_name, text, raw, reply, state, \
-    position, force_now, attempts, created_at, updated_at, delivered_at, edited_at, note";
+    position, force_now, attempts, created_at, updated_at, delivered_at, edited_at, note, depth, parent_id, answer_of, reason";
 
 fn row(r: &Row<'_>) -> rusqlite::Result<PeerMessage> {
     let state: String = r.get(10)?;
@@ -187,7 +360,7 @@ fn row(r: &Row<'_>) -> rusqlite::Result<PeerMessage> {
         text: r.get(7)?,
         raw: r.get::<_, i64>(8)? != 0,
         reply: r.get::<_, i64>(9)? != 0,
-        // O CHECK da tabela só deixa os seis; um valor estranho não derruba a lista.
+        // O CHECK da tabela só deixa os sete; um valor estranho não derruba a lista.
         state: State::parse(&state).unwrap_or(State::Expired),
         position: r.get(11)?,
         force_now: r.get::<_, i64>(12)? != 0,
@@ -197,6 +370,10 @@ fn row(r: &Row<'_>) -> rusqlite::Result<PeerMessage> {
         delivered_at: r.get(16)?,
         edited_at: r.get(17)?,
         note: r.get(18)?,
+        depth: r.get(19)?,
+        parent_id: r.get(20)?,
+        answer_of: r.get(21)?,
+        reason: r.get(22)?,
     })
 }
 
@@ -231,7 +408,258 @@ fn next_position(conn: &Connection, to: &str) -> Result<i64, String> {
     .map_err(|e| e.to_string())
 }
 
-/// Registra a mensagem e decide se ela vai: nova, a mesma de um id já usado, ou repetida.
+/// O texto como entra na chave: sem espaços nas pontas e com os brancos de dentro juntados. Pura.
+pub fn normalize(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
+}
+
+/// A chave de idempotência derivada no servidor: hash de remetente, destino, texto normalizado e
+/// campos do envelope. Com `--raw` (um comando da TUI) o remetente não entra: o mesmo `/compact` de
+/// qualquer um é repetido. Pura.
+pub fn dedupe_key(new: &NewMessage<'_>) -> String {
+    use sha2::Digest;
+    let from = if new.raw { "*" } else { new.from_tab_id };
+    let envelope = new.envelope.map(Envelope::key_part).unwrap_or_default();
+    let input = format!(
+        "v1\u{1e}{}\u{1e}{from}\u{1e}{}\u{1e}{}\u{1e}{envelope}",
+        new.raw as u8,
+        new.to_tab_id,
+        normalize(new.text)
+    );
+    format!("{:x}", sha2::Sha256::digest(input.as_bytes()))
+}
+
+/// Roda `f` numa transação `BEGIN IMMEDIATE` (o lock de escrita é pego já, antes da contagem dos
+/// tetos): contar e gravar acontecem juntos, sem outro processo no meio. Dentro de uma transação
+/// que já existe, vira um SAVEPOINT.
+fn immediate<T>(conn: &Connection, f: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
+    let (begin, commit, rollback) = if conn.is_autocommit() {
+        ("BEGIN IMMEDIATE", "COMMIT", "ROLLBACK")
+    } else {
+        ("SAVEPOINT peer_admit", "RELEASE peer_admit", "ROLLBACK TO peer_admit; RELEASE peer_admit")
+    };
+    conn.execute_batch(begin).map_err(|e| e.to_string())?;
+    match f(conn) {
+        Ok(value) => {
+            if let Err(error) = conn.execute_batch(commit) {
+                let _ = conn.execute_batch(rollback);
+                return Err(error.to_string());
+            }
+            Ok(value)
+        }
+        Err(error) => {
+            let _ = conn.execute_batch(rollback);
+            Err(error)
+        }
+    }
+}
+
+/// A mensagem que `tab` está tratando: a última `tell`/`ask` recebida (entregue, não `--raw`, não
+/// uma resposta) há menos de [`TREATMENT_WINDOW_MS`] e que ela ainda não respondeu (não mandou nada
+/// ao remetente dela depois). Vem do banco, nunca de uma variável de ambiente que o processo forja.
+pub fn in_treatment(conn: &Connection, tab: &str, now: i64) -> Result<Option<PeerMessage>, String> {
+    Ok(query(
+        conn,
+        "AS m WHERE m.to_tab_id = ?1 AND m.from_tab_id != ?1 AND m.kind IN ('tell', 'ask') AND m.raw = 0
+           AND m.state = 'delivered' AND m.answer_of IS NULL
+           AND COALESCE(m.delivered_at, m.created_at) >= ?2
+           AND NOT EXISTS (
+             SELECT 1 FROM peer_messages AS r
+              WHERE r.from_tab_id = ?1 AND r.to_tab_id = m.from_tab_id AND r.state != 'refused'
+                AND r.created_at >= COALESCE(m.delivered_at, m.created_at))
+         ORDER BY COALESCE(m.delivered_at, m.created_at) DESC, m.id DESC LIMIT 1",
+        params![tab, now - TREATMENT_WINDOW_MS],
+    )?
+    .into_iter()
+    .next())
+}
+
+/// De onde vem uma mensagem: profundidade, a mensagem em tratamento e se esta a responde.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Default)]
+pub struct Lineage {
+    pub depth: i64,
+    pub parent_id: Option<i64>,
+    pub answer_of: Option<i64>,
+}
+
+/// Pura: a linhagem dada a mensagem em tratamento. Responder a quem pediu mantém a profundidade
+/// (um vai e volta entre dois agentes nunca cresce); pedir a um terceiro soma um.
+pub fn lineage_from(parent: Option<&PeerMessage>, to_tab_id: &str) -> Lineage {
+    match parent {
+        None => Lineage::default(),
+        Some(p) if p.from_tab_id == to_tab_id => Lineage { depth: p.depth, parent_id: Some(p.id), answer_of: Some(p.id) },
+        Some(p) => Lineage { depth: p.depth + 1, parent_id: Some(p.id), answer_of: None },
+    }
+}
+
+fn lineage(conn: &Connection, new: &NewMessage<'_>, now: i64) -> Result<Lineage, String> {
+    if new.raw || !matches!(new.kind, "tell" | "ask") {
+        return Ok(Lineage::default());
+    }
+    Ok(lineage_from(in_treatment(conn, new.from_tab_id, now)?.as_ref(), new.to_tab_id))
+}
+
+/// Quantos pedidos novos (`tell`/`ask`, sem `--raw`, que não são respostas nem recusas) `from`
+/// mandou desde `since`.
+pub fn fanout_since(conn: &Connection, from: &str, since: i64) -> Result<i64, String> {
+    conn.query_row(
+        "SELECT COUNT(*) FROM peer_messages WHERE from_tab_id = ?1 AND kind IN ('tell', 'ask') AND raw = 0
+            AND answer_of IS NULL AND state != 'refused' AND created_at >= ?2",
+        params![from, since],
+        |r| r.get(0),
+    )
+    .map_err(|e| e.to_string())
+}
+
+/// A frase que oferece saída, comum a toda recusa.
+pub const REFUSAL_WAY_OUT: &str = "Responda com o que você tem ou pergunte à pessoa.";
+
+/// Pura: a frase de uma recusa por teto.
+pub fn limit_message(reason: &str, to_name: &str, value: i64, cap: i64) -> String {
+    match reason {
+        "depth" => format!(
+            "Não enviei a {to_name}: este pedido já vem de uma cadeia de {value} repasses entre agentes (teto: {cap}). Não repasse de novo; {}",
+            lower_first(REFUSAL_WAY_OUT)
+        ),
+        "fanout" => format!(
+            "Não enviei a {to_name}: você já mandou {value} pedidos novos nos últimos {} min (teto: {cap}). Junte os pedidos num só ou espere as respostas; {}",
+            FANOUT_WINDOW_MS / 60_000,
+            lower_first(REFUSAL_WAY_OUT)
+        ),
+        _ => format!("Não enviei a {to_name}. {REFUSAL_WAY_OUT}"),
+    }
+}
+
+fn lower_first(text: &str) -> String {
+    let mut chars = text.chars();
+    match chars.next() {
+        Some(first) => first.to_lowercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// Pura: a frase da recusa de uma mensagem repetida.
+pub fn duplicate_message(to_name: &str, earlier: &PeerMessage) -> String {
+    format!(
+        "Não enviei de novo a {to_name}: a mesma mensagem já foi há pouco (#{}, {}). {REFUSAL_WAY_OUT} Se é um pedido novo de verdade, mande com um --id novo.",
+        earlier.id,
+        earlier.state.label()
+    )
+}
+
+/// Os tetos, só lendo: `Some((motivo, frase, linhagem))` se a mensagem seria recusada. O `peer ask`
+/// chama antes de esperar o destino ficar quieto; `admit` repete dentro da transação.
+pub fn check_limits(conn: &Connection, new: &NewMessage<'_>, now: i64) -> Result<Option<(&'static str, String, Lineage)>, String> {
+    let Some(limits) = new.limits else { return Ok(None) };
+    if new.raw || !matches!(new.kind, "tell" | "ask") {
+        return Ok(None);
+    }
+    let lin = lineage(conn, new, now)?;
+    let name = if new.to_name.is_empty() { new.to_tab_id } else { new.to_name };
+    if lin.depth > limits.max_depth {
+        return Ok(Some(("depth", limit_message("depth", name, lin.depth, limits.max_depth), lin)));
+    }
+    if lin.answer_of.is_none() {
+        let sent = fanout_since(conn, new.from_tab_id, now - FANOUT_WINDOW_MS)?;
+        if sent >= limits.max_fanout {
+            return Ok(Some(("fanout", limit_message("fanout", name, sent, limits.max_fanout), lin)));
+        }
+    }
+    Ok(None)
+}
+
+fn insert(conn: &Connection, new: &NewMessage<'_>, client_id: Option<&str>, state: State, lin: Lineage, refusal: Option<(&str, &str)>, now: i64) -> Result<PeerMessage, String> {
+    let (position, key) = if state == State::Refused { (0, None) } else { (next_position(conn, new.to_tab_id)?, Some(dedupe_key(new))) };
+    conn.execute(
+        "INSERT INTO peer_messages (client_id, kind, from_tab_id, from_name, to_tab_id, to_name, text, raw, reply,
+             state, position, created_at, updated_at, depth, parent_id, answer_of, reason, note, dedupe_key)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+        params![
+            client_id,
+            new.kind,
+            new.from_tab_id,
+            new.from_name,
+            new.to_tab_id,
+            new.to_name,
+            new.text,
+            new.raw as i64,
+            new.reply as i64,
+            state.as_str(),
+            position,
+            now,
+            lin.depth,
+            lin.parent_id,
+            lin.answer_of,
+            refusal.map(|r| r.0),
+            refusal.map(|r| r.1),
+            key,
+        ],
+    )
+    .map_err(|e| e.to_string())?;
+    let id = conn.last_insert_rowid();
+    get(conn, id)?.ok_or_else(|| "A mensagem não foi gravada.".to_string())
+}
+
+/// Grava a linha de auditoria de uma recusa de política decidida fora de `admit` (destino que não
+/// existe ou é ambíguo, mandar para si mesmo, sem tarefa). Nada é digitado; a linha nunca vai.
+pub fn record_refusal(conn: &Connection, new: &NewMessage<'_>, reason: &str, message: &str, now: i64) -> Result<PeerMessage, String> {
+    let kind = if matches!(new.kind, "tell" | "ask" | "handoff" | "role" | "notice") { new.kind } else { "tell" };
+    let text = if new.text.trim().is_empty() { "(sem texto)" } else { new.text };
+    let new = NewMessage { kind, text, ..new.clone() };
+    insert(conn, &new, None, State::Refused, Lineage::default(), Some((reason, message)), now)
+}
+
+/// A mensagem de um `--id` que não existe mais na tabela, refeita do tombstone.
+fn from_tombstone(conn: &Connection, from: &str, cid: &str) -> Result<Option<PeerMessage>, String> {
+    conn.query_row(
+        "SELECT message_id, kind, to_tab_id, to_name, state, created_at, done_at FROM peer_message_keys
+          WHERE from_tab_id = ?1 AND client_id = ?2",
+        params![from, cid],
+        |r| {
+            let state: String = r.get(4)?;
+            Ok(PeerMessage {
+                id: r.get(0)?,
+                client_id: Some(cid.to_string()),
+                kind: r.get(1)?,
+                from_tab_id: from.to_string(),
+                from_name: String::new(),
+                to_tab_id: r.get(2)?,
+                to_name: r.get(3)?,
+                // Nunca vazio: quem reenvia pelo mesmo id (o `peer deliver`) cai de novo no `admit`, que devolve `Repeat`.
+                text: "(registro apagado na limpeza)".into(),
+                raw: false,
+                reply: false,
+                state: State::parse(&state).unwrap_or(State::Delivered),
+                position: 0,
+                force_now: false,
+                attempts: 0,
+                created_at: r.get(5)?,
+                updated_at: r.get(6)?,
+                delivered_at: None,
+                edited_at: None,
+                note: Some("O registro saiu na limpeza; a chave continua valendo e a mensagem não roda de novo.".into()),
+                depth: 0,
+                parent_id: None,
+                answer_of: None,
+                reason: None,
+            })
+        },
+    )
+    .optional()
+    .map_err(|e| e.to_string())
+}
+
+/// A mensagem registrada com este id do chamador (ou o tombstone dela), se houver.
+pub fn by_client_id(conn: &Connection, from: &str, client_id: Option<&str>) -> Result<Option<PeerMessage>, String> {
+    let Some(cid) = clean_client_id(client_id)? else { return Ok(None) };
+    if let Some(found) = query(conn, "WHERE from_tab_id = ?1 AND client_id = ?2", params![from, cid])?.into_iter().next() {
+        return Ok(Some(found));
+    }
+    from_tombstone(conn, from, &cid)
+}
+
+/// Registra a mensagem e decide se ela vai: nova, a mesma de um id já usado, repetida ou recusada
+/// por um teto. Tudo numa transação `BEGIN IMMEDIATE`: a contagem dos tetos e a gravação andam juntas.
 ///
 /// `initial`: `Queued` (entra na fila e o entregador a leva) ou `Delivering` (quem chama já tem o
 /// terminal do destino e digita agora, como o `peer ask` com o destino livre).
@@ -246,11 +674,14 @@ pub fn admit(conn: &Connection, new: &NewMessage<'_>, initial: State, now: i64) 
         return Err("A mensagem está vazia.".into());
     }
     let client_id = clean_client_id(new.client_id)?;
+    immediate(conn, |conn| admit_inner(conn, new, client_id.as_deref(), initial, now))
+}
+
+fn admit_inner(conn: &Connection, new: &NewMessage<'_>, client_id: Option<&str>, initial: State, now: i64) -> Result<Admission, String> {
     prune(conn, now)?;
 
-    if let Some(cid) = client_id.as_deref() {
-        let found = query(conn, "WHERE from_tab_id = ?1 AND client_id = ?2", params![new.from_tab_id, cid])?;
-        if let Some(existing) = found.into_iter().next() {
+    if let Some(cid) = client_id {
+        if let Some(existing) = by_client_id(conn, new.from_tab_id, Some(cid))? {
             if existing.to_tab_id != new.to_tab_id {
                 return Err(format!(
                     "O id '{cid}' já foi usado na mensagem #{} para {}. Use outro id para outra mensagem.",
@@ -259,7 +690,8 @@ pub fn admit(conn: &Connection, new: &NewMessage<'_>, initial: State, now: i64) 
                 ));
             }
             // Não chegou (ou nunca foi digitada): o reenvio com o mesmo id a põe de novo na fila.
-            if existing.state.can_become(State::Queued) {
+            // (Um tombstone não tem linha para voltar: é sempre repetição.)
+            if existing.state.can_become(State::Queued) && get(conn, existing.id)?.is_some() {
                 let position = next_position(conn, new.to_tab_id)?;
                 conn.execute(
                     "UPDATE peer_messages SET state = ?1, position = ?2, force_now = 0, note = NULL, updated_at = ?3 WHERE id = ?4",
@@ -272,53 +704,55 @@ pub fn admit(conn: &Connection, new: &NewMessage<'_>, initial: State, now: i64) 
             return Ok(Admission::Repeat(existing));
         }
     } else if !new.reply {
-        // Sem id, vale o dedupe de antes, agora no banco (sobrevive ao reinício): mesmo destino,
-        // mesmo texto, do mesmo remetente (com `--raw`, de qualquer um), há menos de 10 min. A que
-        // não se confirmou ou foi cancelada não conta: o reenvio dela passa.
+        // Sem id, vale a chave derivada no servidor (sobrevive ao reinício): mesmo remetente (com
+        // `--raw`, qualquer um), mesmo destino, mesmo texto normalizado e mesmo envelope, há menos de
+        // 10 min. A que não se confirmou ou foi cancelada não conta: o reenvio dela passa.
         let found = query(
             conn,
-            "WHERE to_tab_id = ?1 AND text = ?2 AND raw = ?3 AND reply = 0 AND (raw = 1 OR from_tab_id = ?4)
-               AND state IN ('queued', 'delivering', 'delivered') AND created_at >= ?5
+            "WHERE dedupe_key = ?1 AND reply = 0 AND state IN ('queued', 'delivering', 'delivered') AND created_at >= ?2
              ORDER BY id DESC LIMIT 1",
-            params![new.to_tab_id, new.text, new.raw as i64, new.from_tab_id, now - DUPLICATE_WINDOW_MS],
+            params![dedupe_key(new), now - DUPLICATE_WINDOW_MS],
         )?;
         if let Some(existing) = found.into_iter().next() {
+            let name = if new.to_name.is_empty() { new.to_tab_id } else { new.to_name };
+            if matches!(new.kind, "tell" | "ask") {
+                insert(conn, new, None, State::Refused, Lineage::default(), Some(("duplicate", &duplicate_message(name, &existing))), now)?;
+            }
             return Ok(Admission::Duplicate(existing));
         }
     }
 
-    let position = next_position(conn, new.to_tab_id)?;
-    conn.execute(
-        "INSERT INTO peer_messages (client_id, kind, from_tab_id, from_name, to_tab_id, to_name, text, raw, reply,
-             state, position, created_at, updated_at)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12)",
-        params![
-            client_id,
-            new.kind,
-            new.from_tab_id,
-            new.from_name,
-            new.to_tab_id,
-            new.to_name,
-            new.text,
-            new.raw as i64,
-            new.reply as i64,
-            initial.as_str(),
-            position,
-            now
-        ],
-    )
-    .map_err(|e| e.to_string())?;
-    let id = conn.last_insert_rowid();
-    Ok(Admission::New(get(conn, id)?.ok_or("A mensagem não foi gravada.")?))
+    if let Some((reason, message, lin)) = check_limits(conn, new, now)? {
+        let record = insert(conn, new, None, State::Refused, lin, Some((reason, &message)), now)?;
+        return Ok(Admission::Refused(Refusal { reason, message, record }));
+    }
+    let lin = lineage(conn, new, now)?;
+    Ok(Admission::New(insert(conn, new, client_id, initial, lin, None, now)?))
 }
 
-/// Apaga os registros já resolvidos há mais de 7 dias. A fila em si nunca é apagada.
+/// Apaga os registros já resolvidos há mais de 7 dias. A fila em si nunca é apagada. A chave
+/// (`--id`) de cada um que sai fica num tombstone por [`KEEP_KEYS_MS`]: apagar a linha devolvia a
+/// chave, e o mesmo id rodava de novo.
 pub fn prune(conn: &Connection, now: i64) -> Result<usize, String> {
+    let cutoff = now - KEEP_FINISHED_MS;
     conn.execute(
-        "DELETE FROM peer_messages WHERE state IN ('delivered', 'unconfirmed', 'cancelled', 'expired') AND updated_at < ?1",
-        [now - KEEP_FINISHED_MS],
+        "INSERT OR IGNORE INTO peer_message_keys (from_tab_id, client_id, message_id, kind, to_tab_id, to_name, state, created_at, done_at)
+         SELECT from_tab_id, client_id, id, kind, to_tab_id, to_name, state, created_at, updated_at FROM peer_messages
+          WHERE client_id IS NOT NULL AND state IN ('delivered', 'unconfirmed', 'cancelled', 'expired') AND updated_at < ?1",
+        [cutoff],
+    )
+    .map_err(|e| e.to_string())?;
+    conn.execute("DELETE FROM peer_message_keys WHERE done_at < ?1", [now - KEEP_KEYS_MS]).map_err(|e| e.to_string())?;
+    conn.execute(
+        "DELETE FROM peer_messages WHERE state IN ('delivered', 'unconfirmed', 'cancelled', 'expired', 'refused') AND updated_at < ?1",
+        [cutoff],
     )
     .map_err(|e| e.to_string())
+}
+
+/// As recusas que um remetente recebeu (a auditoria), mais novas primeiro.
+pub fn refusals_from(conn: &Connection, from: &str, limit: i64) -> Result<Vec<PeerMessage>, String> {
+    query(conn, "WHERE from_tab_id = ?1 AND state = 'refused' ORDER BY id DESC LIMIT ?2", params![from, limit])
 }
 
 /// A próxima da fila de um destino.

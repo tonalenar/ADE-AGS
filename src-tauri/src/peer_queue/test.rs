@@ -7,7 +7,7 @@ fn db() -> rusqlite::Connection {
 }
 
 fn tell<'a>(from: &'a str, to: &'a str, text: &'a str) -> NewMessage<'a> {
-    NewMessage { client_id: None, kind: "tell", from_tab_id: from, from_name: "Líder", to_tab_id: to, to_name: "QA", text, raw: false, reply: false }
+    NewMessage { client_id: None, kind: "tell", from_tab_id: from, from_name: "Líder", to_tab_id: to, to_name: "QA", text, raw: false, reply: false, ..Default::default() }
 }
 
 fn new_id(a: Admission) -> i64 {
@@ -306,4 +306,237 @@ fn tipo_e_texto_sao_validados() {
     assert!(admit(&conn, &NewMessage { kind: "outro", ..tell("x", "t", "a") }, State::Queued, 1).is_err());
     assert!(admit(&conn, &tell("x", "t", "  "), State::Queued, 1).unwrap_err().contains("vazia"));
     assert!(admit(&conn, &tell("x", "t", "a"), State::Delivered, 1).is_err());
+}
+
+// ── Contrato do peer: envelope, chave derivada, recusas, tetos, tombstone ──
+
+fn delivered(conn: &rusqlite::Connection, id: i64, now: i64) {
+    claim(conn, id, now).unwrap().unwrap();
+    assert!(finish(conn, id, true, None, now).unwrap());
+}
+
+fn limited<'a>(from: &'a str, to: &'a str, text: &'a str) -> NewMessage<'a> {
+    NewMessage { limits: Some(Limits::for_sender(false)), ..tell(from, to, text) }
+}
+
+fn admitted(a: Admission) -> PeerMessage {
+    match a {
+        Admission::New(m) => m,
+        other => panic!("esperava nova, veio {other:?}"),
+    }
+}
+
+#[test]
+fn o_envelope_vira_o_bloco_fixo_e_o_texto_livre_continua_valendo() {
+    let env = Envelope { task: Some("revise o diff".into()), constraints: Some("não mexa em testes".into()), expecting: Some("lista de achados".into()) };
+    let text = env.text("Líder", Some("é o PR 12")).unwrap();
+    assert_eq!(
+        text,
+        "Líder pediu sua ajuda nisto.\nTarefa: revise o diff\nContexto: é o PR 12\nRestrições: não mexa em testes\nComo é uma boa resposta: lista de achados\nResponda como você mesmo."
+    );
+    // Sem --task, o texto livre é a tarefa; sem nada, não há tarefa.
+    let only = Envelope { expecting: Some("sim ou não".into()), ..Default::default() };
+    assert!(only.text("X", Some("pode?")).unwrap().contains("Tarefa: pode?\nRestrições: nenhuma"));
+    assert_eq!(only.text("X", None), None);
+    assert!(!Envelope::default().is_present() && only.is_present());
+}
+
+#[test]
+fn a_chave_derivada_normaliza_o_texto_e_inclui_o_envelope() {
+    let a = tell("a", "b", "rode   os\n testes ");
+    let b = tell("a", "b", "rode os testes");
+    assert_eq!(dedupe_key(&a), dedupe_key(&b), "espaços não fazem outra mensagem");
+    assert_ne!(dedupe_key(&a), dedupe_key(&tell("z", "b", "rode os testes")), "outro remetente");
+    assert_ne!(dedupe_key(&a), dedupe_key(&tell("a", "c", "rode os testes")), "outro destino");
+    let env = Envelope { task: Some("t".into()), ..Default::default() };
+    let other = Envelope { task: Some("t".into()), constraints: Some("só leitura".into()), ..Default::default() };
+    assert_ne!(dedupe_key(&NewMessage { envelope: Some(&env), ..b.clone() }), dedupe_key(&NewMessage { envelope: Some(&other), ..b.clone() }));
+    // O mesmo texto com espaços diferentes é repetido pela fila.
+    let conn = db();
+    new_id(admit(&conn, &a, State::Queued, 1).unwrap());
+    assert!(matches!(admit(&conn, &b, State::Queued, 2).unwrap(), Admission::Duplicate(_)));
+}
+
+#[test]
+fn a_repetida_grava_uma_linha_recusada_com_o_motivo() {
+    let conn = db();
+    let first = new_id(admit(&conn, &tell("a", "b", "tarefa X"), State::Queued, 1_000).unwrap());
+    assert!(matches!(admit(&conn, &tell("a", "b", "tarefa X"), State::Queued, 2_000).unwrap(), Admission::Duplicate(m) if m.id == first));
+    let refused = refusals_from(&conn, "a", 10).unwrap();
+    assert_eq!(refused.len(), 1);
+    assert_eq!((refused[0].state, refused[0].reason.as_deref(), refused[0].client_id.as_deref()), (State::Refused, Some("duplicate"), None));
+    assert!(refused[0].note.as_deref().unwrap().contains("pergunte à pessoa"));
+    // A recusa não entra na fila, nem na contagem, nem no que o remetente tem pendente.
+    assert_eq!(queued_for(&conn, "b").unwrap().len(), 1);
+    assert_eq!(pending_from(&conn, "a").unwrap().len(), 1);
+    assert_eq!(pending_counts(&conn).unwrap(), vec![("b".to_string(), 1)]);
+}
+
+#[test]
+fn a_profundidade_vem_da_mensagem_em_tratamento_e_tem_teto() {
+    let conn = db();
+    // A pede a B: profundidade 0.
+    let ab = admitted(admit(&conn, &limited("A", "B", "faça X"), State::Queued, 1_000).unwrap());
+    assert_eq!((ab.depth, ab.parent_id), (0, None));
+    delivered(&conn, ab.id, 1_100);
+    // B trata a de A e pede a C: 1; C pede a D: 2.
+    let bc = admitted(admit(&conn, &limited("B", "C", "parte de X"), State::Queued, 1_200).unwrap());
+    assert_eq!((bc.depth, bc.parent_id, bc.answer_of), (1, Some(ab.id), None));
+    delivered(&conn, bc.id, 1_300);
+    let cd = admitted(admit(&conn, &limited("C", "D", "pedaço"), State::Queued, 1_400).unwrap());
+    assert_eq!(cd.depth, 2);
+    delivered(&conn, cd.id, 1_500);
+    // D pediria a E com 3: recusa, antes de qualquer coisa ir para a fila de E.
+    match admit(&conn, &limited("D", "E", "mais um"), State::Queued, 1_600).unwrap() {
+        Admission::Refused(r) => {
+            assert_eq!((r.reason, r.record.state, r.record.depth), ("depth", State::Refused, 3));
+            assert!(r.message.contains("teto: 2") && r.message.contains("pergunte à pessoa"), "{}", r.message);
+        }
+        other => panic!("{other:?}"),
+    }
+    assert!(head(&conn, "E").unwrap().is_none());
+    // Sem tetos (mensagem do app), não há recusa.
+    assert!(matches!(admit(&conn, &tell("D", "E", "mais um"), State::Queued, 1_700).unwrap(), Admission::New(m) if m.depth == 3));
+    assert_eq!(MAX_PEER_DEPTH, 2);
+}
+
+#[test]
+fn responder_a_quem_pediu_nao_aprofunda_e_fecha_o_tratamento() {
+    let conn = db();
+    let task = new_id(admit(&conn, &limited("Lider", "QA", "rode os testes"), State::Queued, 1_000).unwrap());
+    delivered(&conn, task, 1_100);
+    assert_eq!(in_treatment(&conn, "QA", 1_200).unwrap().map(|m| m.id), Some(task));
+    let answer = admitted(admit(&conn, &limited("QA", "Lider", "passou"), State::Queued, 1_300).unwrap());
+    assert_eq!((answer.depth, answer.answer_of), (0, Some(task)));
+    delivered(&conn, answer.id, 1_400);
+    // Respondida, sai do tratamento; a resposta não é "trabalho" para o Lider.
+    assert_eq!(in_treatment(&conn, "QA", 1_500).unwrap(), None);
+    assert_eq!(in_treatment(&conn, "Lider", 1_500).unwrap(), None);
+    // O vai e volta segue em 0 por quantas rodadas forem.
+    let again = admitted(admit(&conn, &limited("Lider", "QA", "agora o lint"), State::Queued, 1_600).unwrap());
+    assert_eq!(again.depth, 0);
+    // Velha demais (mais que a janela), não conta mais.
+    delivered(&conn, again.id, 1_700);
+    assert!(in_treatment(&conn, "QA", 1_700 + TREATMENT_WINDOW_MS + 1).unwrap().is_none());
+}
+
+#[test]
+fn o_fan_out_tem_teto_por_janela_e_respostas_nao_contam() {
+    let conn = db();
+    let names: Vec<String> = (0..MAX_FANOUT).map(|i| format!("t{i}")).collect();
+    for (i, to) in names.iter().enumerate() {
+        assert!(matches!(admit(&conn, &limited("A", to, "x"), State::Queued, 1_000 + i as i64).unwrap(), Admission::New(_)));
+    }
+    match admit(&conn, &limited("A", "t9", "x"), State::Queued, 2_000).unwrap() {
+        Admission::Refused(r) => assert!(r.reason == "fanout" && r.message.contains("teto: 5"), "{}", r.message),
+        other => panic!("{other:?}"),
+    }
+    // O orquestrador tem o teto maior.
+    let lead = NewMessage { limits: Some(Limits::for_sender(true)), ..tell("A", "t9", "x") };
+    assert!(matches!(admit(&conn, &lead, State::Queued, 2_001).unwrap(), Admission::New(_)));
+    // Passada a janela, volta a valer.
+    assert!(matches!(admit(&conn, &limited("A", "t8", "y"), State::Queued, 2_001 + FANOUT_WINDOW_MS + 10).unwrap(), Admission::New(_)));
+    // Uma resposta a quem pediu não conta no teto.
+    let conn = db();
+    let task = new_id(admit(&conn, &limited("Lider", "B", "faça"), State::Queued, 1).unwrap());
+    delivered(&conn, task, 2);
+    let helpers: Vec<String> = (0..MAX_FANOUT).map(|i| format!("u{i}")).collect();
+    for (i, to) in helpers.iter().enumerate() {
+        new_id(admit(&conn, &limited("B", to, "ajuda"), State::Queued, 10 + i as i64).unwrap());
+    }
+    assert!(matches!(admit(&conn, &limited("B", "Lider", "pronto"), State::Queued, 100).unwrap(), Admission::New(m) if m.answer_of == Some(task)));
+}
+
+#[test]
+fn conferir_os_tetos_so_le() {
+    let conn = db();
+    let names: Vec<String> = (0..MAX_FANOUT).map(|i| format!("t{i}")).collect();
+    for (i, to) in names.iter().enumerate() {
+        new_id(admit(&conn, &limited("A", to, "x"), State::Queued, i as i64).unwrap());
+    }
+    let msg = limited("A", "z", "x");
+    let (reason, _, _) = check_limits(&conn, &msg, 100).unwrap().unwrap();
+    assert_eq!(reason, "fanout");
+    assert!(refusals_from(&conn, "A", 10).unwrap().is_empty(), "a prévia não grava");
+    assert!(check_limits(&conn, &tell("A", "z", "x"), 100).unwrap().is_none(), "sem tetos, sem recusa");
+}
+
+#[test]
+fn a_recusa_de_politica_fica_gravada_e_nunca_vai() {
+    let conn = db();
+    let row = record_refusal(&conn, &tell("a", "Fantasma", ""), "unknown_target", "Não enviei: 'Fantasma' não está conectado.", 5).unwrap();
+    assert_eq!((row.state, row.reason.as_deref(), row.text.as_str()), (State::Refused, Some("unknown_target"), "(sem texto)"));
+    assert!(head(&conn, "Fantasma").unwrap().is_none() && pending_from(&conn, "a").unwrap().is_empty());
+    assert!(!State::Refused.can_become(State::Queued), "recusada é final");
+    assert_eq!(State::parse("refused"), Some(State::Refused));
+}
+
+#[test]
+fn admit_roda_numa_transacao_e_dentro_de_outra_vira_savepoint() {
+    let conn = db();
+    assert!(conn.is_autocommit());
+    new_id(admit(&conn, &tell("a", "b", "um"), State::Queued, 1).unwrap());
+    assert!(conn.is_autocommit(), "a transação fechou");
+    conn.execute_batch("BEGIN").unwrap();
+    new_id(admit(&conn, &tell("a", "b", "dois"), State::Queued, 2).unwrap());
+    assert!(!conn.is_autocommit());
+    conn.execute_batch("ROLLBACK").unwrap();
+    assert_eq!(queued_for(&conn, "b").unwrap().len(), 1, "o savepoint segue a transação de fora");
+    // Um erro desfaz o que a admissão fez.
+    let mut bad = tell("a", "c", "x");
+    bad.client_id = Some("k");
+    new_id(admit(&conn, &bad, State::Queued, 3).unwrap());
+    bad.to_tab_id = "d";
+    assert!(admit(&conn, &bad, State::Queued, 4).is_err());
+    assert!(conn.is_autocommit());
+}
+
+#[test]
+fn a_chave_do_id_sobrevive_a_limpeza_como_tombstone() {
+    let conn = db();
+    let mut m = tell("a", "b", "deploy");
+    m.client_id = Some("req-deploy");
+    let id = new_id(admit(&conn, &m, State::Queued, 0).unwrap());
+    delivered(&conn, id, 1);
+    let week = 8 * 24 * 60 * 60 * 1000;
+    prune(&conn, week).unwrap();
+    assert!(get(&conn, id).unwrap().is_none(), "a linha saiu");
+    // O mesmo id não roda de novo: é repetição, com o id antigo.
+    match admit(&conn, &m, State::Queued, week + 1).unwrap() {
+        Admission::Repeat(x) => assert_eq!((x.id, x.state, x.client_id.as_deref()), (id, State::Delivered, Some("req-deploy"))),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(by_client_id(&conn, "a", Some("req-deploy")).unwrap().map(|x| x.id), Some(id));
+    // Para outro destino, o id continua sendo de outra mensagem.
+    let mut other = m.clone();
+    other.to_tab_id = "c";
+    assert!(admit(&conn, &other, State::Queued, week + 2).unwrap_err().contains("outro id"));
+    // Depois do TTL do tombstone, a chave volta.
+    assert!(matches!(admit(&conn, &m, State::Queued, 1 + KEEP_KEYS_MS + 1).unwrap(), Admission::New(_)));
+}
+
+#[test]
+fn a_migracao_reconstroi_a_tabela_antiga_sem_perder_linhas() {
+    let conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch(
+        "CREATE TABLE peer_messages (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT, kind TEXT NOT NULL, from_tab_id TEXT NOT NULL,
+            from_name TEXT NOT NULL, to_tab_id TEXT NOT NULL, to_name TEXT NOT NULL DEFAULT '', text TEXT NOT NULL,
+            raw INTEGER NOT NULL DEFAULT 0, reply INTEGER NOT NULL DEFAULT 0,
+            state TEXT NOT NULL CHECK(state IN ('queued','delivering','delivered','unconfirmed','cancelled','expired')),
+            position INTEGER NOT NULL DEFAULT 0, force_now INTEGER NOT NULL DEFAULT 0, attempts INTEGER NOT NULL DEFAULT 0,
+            created_at INTEGER NOT NULL, updated_at INTEGER NOT NULL, delivered_at INTEGER, edited_at INTEGER, note TEXT);
+         INSERT INTO peer_messages (client_id, kind, from_tab_id, from_name, to_tab_id, text, state, position, created_at, updated_at)
+            VALUES ('r1', 'tell', 'a', 'Líder', 'b', 'antiga', 'queued', 1, 10, 10);",
+    )
+    .unwrap();
+    migrate(&conn).unwrap();
+    migrate(&conn).unwrap();
+    let old = head(&conn, "b").unwrap().unwrap();
+    assert_eq!((old.text.as_str(), old.client_id.as_deref(), old.depth), ("antiga", Some("r1"), 0));
+    record_refusal(&conn, &tell("a", "b", "x"), "self", "frase", 20).unwrap();
+    // O índice do id do chamador voltou.
+    let mut same = tell("a", "b", "antiga");
+    same.client_id = Some("r1");
+    assert!(matches!(admit(&conn, &same, State::Queued, 30).unwrap(), Admission::Repeat(_)));
 }
