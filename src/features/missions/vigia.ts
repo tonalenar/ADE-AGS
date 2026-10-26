@@ -17,7 +17,8 @@ import { isWorking } from "./stalled";
 import { prematureClosing } from "./vigiaClosing";
 import { LOOP_DONE, loopStep, loopStuck, type LoopWatch } from "./vigiaLoop";
 import { isFinalReport, memberFinished, pokeAllowed } from "./vigiaPoke";
-import { useVigiaSwitch } from "./vigiaSwitch";
+import { repeatAfterEach } from "./repeatAfterEach";
+import { vigiaActive } from "./vigiaSwitch";
 
 /**
  * O Vigia: um vigia BARATO, em segundo plano e SEM TERMINAL, que destrava a missão e conta no chat
@@ -271,19 +272,37 @@ const lastErrorReport = new Map<string, number>();
 /** Quando o Vigia escreveu pela última vez no terminal de cada aba (uma cutucada por vez). */
 const pokes = new Map<string, number>();
 
-/** Pode escrever no terminal desta aba agora? Ver `pokeAllowed`. */
+/** O destino está trabalhando agora? A tela, somada ao transcript (Claude Code/Codex) quando há canal. */
+function busyNow(tabId: string): boolean {
+  return workingWith(tabId, isWorking(screenOf(tabId)?.lines ?? []));
+}
+
+/** Pode escrever no terminal desta aba agora? Ver `pokeAllowed`. O interruptor vem primeiro (falha fechada). */
 function mayPoke(tabId: string, now: number): boolean {
-  // A tela, somada ao transcript (Claude Code/Codex) quando há canal estruturado: um turno aberto no
-  // transcript (ferramenta longa e calada, diálogo de aprovação) também segura a cutucada.
-  return pokeAllowed(pokes.get(tabId), sentAt.get(tabId), workingWith(tabId, isWorking(screenOf(tabId)?.lines ?? [])), now);
+  // Um turno aberto no transcript (ferramenta longa e calada, diálogo de aprovação) também segura a cutucada.
+  return vigiaActive() && pokeAllowed(pokes.get(tabId), sentAt.get(tabId), busyNow(tabId), now);
+}
+
+/**
+ * Pura: a rechecagem logo antes de colar (a decisão veio do ciclo; entre ela e a colagem a TUI pode ter
+ * voltado a trabalhar, ou o usuário desligou o Vigia). Só cola com o Vigia ligado e o destino parado.
+ */
+export function pokeGuard(active: () => boolean, busy: () => boolean): boolean {
+  return active() && !busy();
 }
 
 function poke(tabId: string, text: string, now: number, onSent: () => void): void {
+  const guard = () => pokeGuard(vigiaActive, () => busyNow(tabId));
+  // Checado AQUI (onde o trabalho começa) e de novo dentro de `sendWhenReady`, logo antes de colar.
+  if (!guard()) return;
   pokes.set(tabId, now);
-  sendWhenReady(tabId, text, { onSent: (at) => {
-    pokes.set(tabId, at);
-    onSent();
-  } });
+  sendWhenReady(tabId, text, {
+    guard,
+    onSent: (at) => {
+      pokes.set(tabId, at);
+      onSent();
+    },
+  });
 }
 
 /** Por terminal Codex: desde quando a tela está igual (fora os contadores) em "Working". */
@@ -357,12 +376,17 @@ function conversationTeams(tabs: Tab[], boards: Record<string, Board>): WatchedT
   return out;
 }
 
-/** Um passo: as regras sem modelo primeiro; se não acharem nada, o modelo barato para os ociosos. */
-export function vigiaTick(now = Date.now()): void {
+/**
+ * Um passo: as regras sem modelo primeiro; se não acharem nada, o modelo barato para os ociosos. A
+ * promessa termina quando as consultas ao modelo deste passo terminam: o ciclo (`repeatAfterEach`) só
+ * agenda o próximo depois disso.
+ */
+export function vigiaTick(now = Date.now()): Promise<void> {
+  const pending: Promise<unknown>[] = [];
   // Desligado por padrão: o Vigia só age (lembra, cutuca, consulta o modelo) quando o usuário liga o
   // botão ao lado do chat. A detecção de "equipe entregou" roda sempre, só com regras e sem escrever em
   // terminal nenhum: é ela que avisa o usuário de que falta Finalizar.
-  const enabled = useVigiaSwitch.getState().enabled;
+  const enabled = vigiaActive();
   const { tabs, detectedAgents } = useTabsStore.getState();
   const running = useMissionsStore.getState().missions.filter((m) => m.status === "running");
   const boards = useCanvasStore.getState().boards;
@@ -450,7 +474,7 @@ export function vigiaTick(now = Date.now()): void {
     if (!pick) continue;
     for (const tab of idle) lastPoke.set(tab.id, now);
     inFlight.add(mission.id);
-    invoke<VigiaAction[]>("vigia_check", {
+    pending.push(invoke<VigiaAction[]>("vigia_check", {
       agentId: pick.agentId,
       model: pick.model,
       effort: pick.effort,
@@ -461,6 +485,8 @@ export function vigiaTick(now = Date.now()): void {
     })
       .then((actions) => {
         for (const action of actions) {
+          // A resposta chega até 2 min depois: o Vigia pode ter sido desligado no meio.
+          if (!vigiaActive()) return;
           if (action.to === "usuario") {
             showBotToast({ title: VIGIA_NAME, text: action.message, tone: "warning", ms: 12_000 });
             notifyUser(mission.id, mission.title, "user_decision", action.message);
@@ -482,8 +508,9 @@ export function vigiaTick(now = Date.now()): void {
         const reason = String(error).slice(0, 160);
         reportToChat(lead.id, reportLine(`o modelo do Vigia não respondeu (${reason}).`, "nada; as regras sem modelo continuam valendo e tento de novo no próximo ciclo.", "aviso"));
       })
-      .finally(() => inFlight.delete(mission.id));
+      .finally(() => inFlight.delete(mission.id)));
   }
+  return Promise.allSettled(pending).then(() => undefined);
 }
 
 /** O estado de uma missão e o que o watchdog acha dela agora, com as regras sem modelo. */
@@ -543,7 +570,8 @@ function askJevIfFinal(fromTabId: string, text: string | null | undefined, at: n
 /** Liga o ciclo do Vigia e escuta as mensagens entre agentes (para saber quem delegou e quem tem tarefa). */
 export function useVigiaDriver(): void {
   useEffect(() => {
-    const timer = window.setInterval(() => vigiaTick(), VIGIA_TICK_MS);
+    // O próximo ciclo só depois do anterior (e da consulta ao modelo dele); erro num ciclo não para o laço.
+    const stop = repeatAfterEach(() => vigiaTick(), VIGIA_TICK_MS, (error) => console.error("[Vigia] ciclo falhou", error));
     const off = listen<{ kind?: string; fromTabId: string; toTabId: string | null; atMs: number; text?: string | null }>("cc-peer-message", (e) => {
       const at = e.payload.atMs || Date.now();
       sentAt.set(e.payload.fromTabId, at);
@@ -563,7 +591,7 @@ export function useVigiaDriver(): void {
       rememberPeers();
     });
     return () => {
-      window.clearInterval(timer);
+      stop();
       off.then((fn) => fn());
     };
   }, []);

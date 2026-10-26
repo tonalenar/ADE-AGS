@@ -273,7 +273,7 @@ fn contagem_por_destino_e_o_que_cada_remetente_tem_pendente() {
     assert_eq!(pending_from(&conn, "x").unwrap().len(), 2);
     cancel(&conn, c, "x", 2).unwrap();
     assert_eq!(pending_counts(&conn).unwrap(), vec![("t1".to_string(), 2)]);
-    assert_eq!(expire_queued_for(&conn, "t1", "fechada", 3).unwrap(), 2);
+    assert_eq!(expire_queued_for(&conn, "t1", "fechada", 3).unwrap().len(), 2);
     assert!(pending_counts(&conn).unwrap().is_empty());
 }
 
@@ -539,4 +539,115 @@ fn a_migracao_reconstroi_a_tabela_antiga_sem_perder_linhas() {
     let mut same = tell("a", "b", "antiga");
     same.client_id = Some("r1");
     assert!(matches!(admit(&conn, &same, State::Queued, 30).unwrap(), Admission::Repeat(_)));
+}
+
+// ── Faixa 2: falha volta ao remetente, tentativas, relógio do SQLite ───
+
+fn failed_tell(conn: &rusqlite::Connection, from: &str, to: &str, text: &str, at: i64) -> PeerMessage {
+    let id = new_id(admit(conn, &tell(from, to, text), State::Queued, at).unwrap());
+    claim(conn, id, at + 1).unwrap().unwrap();
+    assert!(finish(conn, id, false, Some("O texto foi escrito no terminal do destino, mas não apareceu na tela dele."), at + 2).unwrap());
+    get(conn, id).unwrap().unwrap()
+}
+
+#[test]
+fn a_falha_definitiva_volta_ao_remetente_como_aviso() {
+    let conn = db();
+    let failed = failed_tell(&conn, "lider", "qa", "rode os testes do backend", 1_000);
+    let notice = failure_notice(&conn, &failed, 2_000).unwrap().expect("aviso");
+    assert_eq!((notice.kind.as_str(), notice.to_tab_id.as_str(), notice.state, notice.raw), ("notice", "lider", State::Queued, true));
+    assert!(notice.text.starts_with("[AGS] Você pediu a QA: \"rode os testes do backend\""), "{}", notice.text);
+    assert!(notice.text.contains("(o texto foi escrito no terminal do destino, mas não apareceu na tela dele)"), "{}", notice.text);
+    assert!(notice.text.ends_with("Diga isso à pessoa e ofereça o que você mesmo pode fazer."), "{}", notice.text);
+    // A mesma falha processada de novo é o mesmo aviso (chave própria por mensagem).
+    assert!(failure_notice(&conn, &failed, 2_001).unwrap().is_none());
+    // Duas falhas para o mesmo destino, com o mesmo texto, não colapsam: cada uma tem a sua chave.
+    let other = failed_tell(&conn, "lider", "qa", "rode os testes do backend", 3_000 + DUPLICATE_WINDOW_MS);
+    assert!(failure_notice(&conn, &other, 4_000 + DUPLICATE_WINDOW_MS).unwrap().is_some());
+    assert_eq!(queued_for(&conn, "lider").unwrap().len(), 2);
+}
+
+#[test]
+fn o_aviso_de_falha_nao_gera_aviso_nem_conta_no_fan_out() {
+    let conn = db();
+    let failed = failed_tell(&conn, "lider", "qa", "tarefa", 1_000);
+    let notice = failure_notice(&conn, &failed, 2_000).unwrap().unwrap();
+    // O aviso também falhou (a aba do remetente não mostrou): nada de aviso do aviso.
+    claim(&conn, notice.id, 2_100).unwrap().unwrap();
+    finish(&conn, notice.id, false, None, 2_200).unwrap();
+    let notice = get(&conn, notice.id).unwrap().unwrap();
+    assert!(failure_notice(&conn, &notice, 2_300).unwrap().is_none());
+    // Não conta no fan-out de quem pediu.
+    assert_eq!(fanout_since(&conn, "lider", 0).unwrap(), 1, "só o tell original conta");
+    // Entregue ou ainda na fila: não há falha a avisar.
+    let ok = new_id(admit(&conn, &tell("lider", "qa", "outra"), State::Queued, 3_000).unwrap());
+    assert!(failure_notice(&conn, &get(&conn, ok).unwrap().unwrap(), 3_001).unwrap().is_none());
+}
+
+#[test]
+fn a_aba_fechada_expira_a_fila_e_devolve_as_expiradas() {
+    let conn = db();
+    let env = Envelope { task: Some("revisar o PR #12".into()), ..Default::default() };
+    let text = env.text("Líder", None).unwrap();
+    admit(&conn, &NewMessage { envelope: Some(&env), ..tell("lider", "qa", &text) }, State::Queued, 1).unwrap();
+    let expired = expire_queued_for(&conn, "qa", "A aba de destino foi fechada.", 5).unwrap();
+    assert_eq!(expired.len(), 1);
+    let notice = failure_notice(&conn, &expired[0], 6).unwrap().unwrap();
+    // No envelope, o começo é a linha da tarefa.
+    assert!(notice.text.contains("Você pediu a QA: \"revisar o PR #12\" e não chegou (a aba de destino foi fechada)"), "{}", notice.text);
+}
+
+#[test]
+fn no_arranque_a_falha_avisa_so_o_remetente_que_ainda_existe() {
+    let conn = db();
+    let now = 10 * RESUME_MAX_AGE_MS;
+    admit(&conn, &tell("lider", "fechada", "pedido 1"), State::Queued, now - 60_000).unwrap();
+    admit(&conn, &tell("sumiu", "fechada", "pedido 2"), State::Queued, now - 60_000).unwrap();
+    let tabs: HashSet<String> = ["lider".to_string()].into_iter().collect();
+    assert_eq!(resume(&conn, &tabs, now).unwrap(), vec!["lider".to_string()], "a fila do remetente anda com o aviso");
+    let lider = queued_for(&conn, "lider").unwrap();
+    assert_eq!(lider.len(), 1);
+    assert!(lider[0].text.contains("\"pedido 1\""));
+    assert!(queued_for(&conn, "sumiu").unwrap().is_empty(), "remetente que não existe: nada");
+}
+
+#[test]
+fn tentativas_contam_no_claim_no_reenvio_e_no_ask_direto() {
+    let conn = db();
+    let mut m = tell("a", "b", "x");
+    m.client_id = Some("r1");
+    let id = new_id(admit(&conn, &m, State::Queued, 1).unwrap());
+    assert_eq!(claim(&conn, id, 2).unwrap().unwrap().attempts, 1);
+    finish(&conn, id, false, None, 3).unwrap();
+    // O reenvio com o mesmo id de uma que não se confirmou chega com attempts 2 (marca de reenvio).
+    new_id(admit(&conn, &m, State::Queued, 4).unwrap());
+    assert_eq!(claim(&conn, id, 5).unwrap().unwrap().attempts, 2);
+    // O ask direto nasce na primeira tentativa; o reenvio direto conta 2.
+    let mut ask = NewMessage { kind: "ask", reply: true, ..tell("a", "c", "status?") };
+    ask.client_id = Some("q1");
+    let direct = admitted(admit(&conn, &ask, State::Delivering, 10).unwrap());
+    assert_eq!(direct.attempts, 1);
+    finish(&conn, direct.id, false, Some("falhou"), 11).unwrap();
+    assert_eq!(admitted(admit(&conn, &ask, State::Delivering, 12).unwrap()).attempts, 2);
+}
+
+#[test]
+fn o_relogio_e_o_do_sqlite() {
+    let conn = db();
+    let sql = db_now(&conn).unwrap();
+    let rust = crate::util::now_ts_ms();
+    assert!((sql - rust).abs() < 5_000, "sqlite {sql} x processo {rust}");
+    // Gravado e comparado com o mesmo relógio, o dedupe vale (o relógio é injetado nos testes acima).
+    let first = new_id(admit(&conn, &tell("a", "b", "mesmo"), State::Queued, sql).unwrap());
+    assert!(matches!(admit(&conn, &tell("a", "b", "mesmo"), State::Queued, db_now(&conn).unwrap()).unwrap(), Admission::Duplicate(m) if m.id == first));
+}
+
+#[test]
+fn o_comeco_da_tarefa_e_uma_linha_curta() {
+    assert_eq!(task_gist("\n  rode   os testes\nsegunda"), "rode os testes");
+    assert_eq!(task_gist("Líder pediu sua ajuda nisto.\nTarefa: revisar\nRestrições: x"), "revisar");
+    let long = "a".repeat(300);
+    let gist = task_gist(&long);
+    assert_eq!(gist.chars().count(), 120);
+    assert!(gist.ends_with('…'));
 }

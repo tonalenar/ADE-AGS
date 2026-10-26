@@ -64,6 +64,13 @@ export interface SendTimings {
   onRetry?: (at: number) => void;
   /** Só pega o texto na caixa, sem Enter: a pessoa revisa e envia (a pergunta do guia de revisão). */
   draft?: boolean;
+  /**
+   * Conferido logo antes de colar (depois da espera da TUI): `false` = não cola, descarta a mensagem
+   * e chama `onSkipped`. É onde quem cutuca rechecha o interruptor e se o destino voltou a trabalhar.
+   */
+  guard?: () => boolean;
+  /** O `guard` disse não: nada foi colado. */
+  onSkipped?: () => void;
 }
 
 const queuedTimings = new Map<string, SendTimings>();
@@ -135,6 +142,15 @@ function watchStart(tabId: string, term: Terminal, timings: SendTimings): void {
   window.setTimeout(() => sub.dispose(), START_DEADLINE_MS);
 }
 
+/** O `guard` de quem manda; se ele falha, não cola (falha fechada). */
+function safeGuard(guard: () => boolean): boolean {
+  try {
+    return guard();
+  } catch {
+    return false;
+  }
+}
+
 /** Espera a que la TUI termine de arrancar y le manda `text`. */
 function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
   let timer: number | undefined;
@@ -147,6 +163,10 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
     if (terminals.get(tabId) !== term) return;
     queued.delete(tabId);
     queuedTimings.delete(tabId);
+    if (timings?.guard && !safeGuard(timings.guard)) {
+      timings.onSkipped?.();
+      return;
+    }
     pasteIntoTab(tabId, text, !timings?.draft, timings?.onRetry);
     timings?.onSent?.(Date.now());
     if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);

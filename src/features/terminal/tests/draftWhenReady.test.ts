@@ -46,3 +46,43 @@ describe("sendWhenReady com draft", () => {
     unregister();
   });
 });
+
+describe("sendWhenReady com guard (rechecagem logo antes de colar)", () => {
+  afterEach(() => vi.useRealTimers());
+
+  it("o guard que diz não na hora de colar descarta a mensagem e avisa", () => {
+    vi.useFakeTimers();
+    const term = fakeTerm();
+    const unregister = registerTerminal("tab-guard", term as never);
+    let allowed = true;
+    const onSkipped = vi.fn();
+    const onSent = vi.fn();
+    sendWhenReady("tab-guard", "[Vigia] lembrete", { draft: true, guard: () => allowed, onSkipped, onSent });
+    // Durante a espera da TUI o destino voltou a trabalhar (ou o Vigia foi desligado).
+    allowed = false;
+    term.parsed.forEach((cb) => cb());
+    vi.advanceTimersByTime(60_000);
+    expect(term.paste).not.toHaveBeenCalled();
+    expect(onSent).not.toHaveBeenCalled();
+    expect(onSkipped).toHaveBeenCalledTimes(1);
+    unregister();
+  });
+
+  it("guard que lança é um não (falha fechada); guard que diz sim cola", () => {
+    vi.useFakeTimers();
+    const bad = fakeTerm();
+    const offBad = registerTerminal("tab-guard-2", bad as never);
+    sendWhenReady("tab-guard-2", "x", { draft: true, guard: () => { throw new Error("falhou"); } });
+    bad.parsed.forEach((cb) => cb());
+    vi.advanceTimersByTime(2_600);
+    expect(bad.paste).not.toHaveBeenCalled();
+    offBad();
+    const good = fakeTerm();
+    const offGood = registerTerminal("tab-guard-3", good as never);
+    sendWhenReady("tab-guard-3", "y", { draft: true, guard: () => true });
+    good.parsed.forEach((cb) => cb());
+    vi.advanceTimersByTime(2_600);
+    expect(good.paste).toHaveBeenCalledWith("y");
+    offGood();
+  });
+});

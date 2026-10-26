@@ -32,6 +32,8 @@ export interface PendingTask {
   at: number;
   /** Ya se avisó de esta tarea: no se repite. */
   alerted: boolean;
+  /** Cuántos bloques de salida tenía la pestaña cuando recibió la tarea (para el "paró tras N"). */
+  outputsAtTask?: number;
 }
 
 /** Tareas sin respuesta, por pestaña de destino. */
@@ -70,13 +72,33 @@ export function parseStallMs(raw: string | null | undefined): number {
  * pendiente (una nueva reemplaza la anterior y reinicia el reloj). Cualquier mensaje DE un
  * agente prueba que está atendiendo y cierra la tarea que debía. Pura.
  */
-export function applyMessage(pending: PendingTasks, msg: PeerMessage, isLead: (tabId: string) => boolean): Map<string, PendingTask> {
+export function applyMessage(
+  pending: PendingTasks,
+  msg: PeerMessage,
+  isLead: (tabId: string) => boolean,
+  outputCount?: (tabId: string) => number,
+): Map<string, PendingTask> {
   const next = new Map(pending);
   next.delete(msg.fromTabId);
   if (msg.kind === "tell" && msg.toTabId && isLead(msg.fromTabId) && !isLead(msg.toTabId) && !isAck(msg.text)) {
-    next.set(msg.toTabId, { tabId: msg.toTabId, fromTabId: msg.fromTabId, at: msg.atMs, alerted: false });
+    next.set(msg.toTabId, { tabId: msg.toTabId, fromTabId: msg.fromTabId, at: msg.atMs, alerted: false, outputsAtTask: outputCount?.(msg.toTabId) });
   }
   return next;
+}
+
+/** Un tic que llega con este atraso (o más) sobre el intervalo esperado = la interfaz se quedó atrás. */
+export const UI_LAG_FACTOR = 3;
+
+/**
+ * Hasta cuándo nuestro lado estuvo atrasado: la ventana escondida (`document.hidden`; la webview
+ * escondida estrangula los timers) o un tic que llegó mucho más tarde de lo esperado (event loop
+ * trabado). El silencio solo cuenta desde ahí: lo que el agente escribió mientras tanto puede no haber
+ * llegado todavía a `lastOutputAt`. Pura.
+ */
+export function uiBehindUntil(prev: number | undefined, lastTickAt: number | undefined, now: number, hidden: boolean, intervalMs: number): number | undefined {
+  if (hidden) return now;
+  if (lastTickAt !== undefined && now - lastTickAt > intervalMs * UI_LAG_FACTOR) return now;
+  return prev;
 }
 
 const WAITING_FOR_USER = [
@@ -134,6 +156,10 @@ export interface StallProbe {
    * (`isWorking`), como antes.
    */
   working?: (tabId: string, lines: readonly string[]) => boolean;
+  /** Cuántos bloques de salida escribió la pestaña hasta ahora (ver `outputCount`). */
+  outputCount?: (tabId: string) => number;
+  /** Nuestro lado estuvo atrasado hasta acá (ver `uiBehindUntil`): el silencio cuenta desde ahí. */
+  uiBehindUntil?: number;
 }
 
 export interface Stall {
@@ -145,6 +171,8 @@ export interface Stall {
   quietMs: number;
   /** ¿Escribió algo tras la tarea? `false` = nunca arrancó. */
   worked: boolean;
+  /** Cuántos bloques de salida escribió desde la tarea (si se sabe). */
+  events?: number;
   lastLine: string;
 }
 
@@ -155,19 +183,22 @@ export function findStalls(pending: PendingTasks, probe: StallProbe, stallMs = S
     if (task.alerted || probe.isActive(task.tabId)) continue;
     const output = probe.lastOutputAt(task.tabId) ?? 0;
     const input = probe.lastInputAt(task.tabId) ?? 0;
-    const quietMs = probe.now - Math.max(task.at, output, input);
+    // Con la interfaz escondida o atrasada no se cuenta silencio: vuelve a contar cuando ella vuelve.
+    const quietMs = probe.now - Math.max(task.at, output, input, probe.uiBehindUntil ?? 0);
     if (quietMs < stallMs) continue;
     const lines = probe.screen(task.tabId);
     // Trabalhando (spinner, "esc to interrupt") não é parado, mesmo sem escrever: antes o aviso
     // disparava com o agente em plena execução.
     const working = probe.working ? probe.working(task.tabId, lines ?? []) : lines !== null && isWorking(lines);
     if ((lines && isWaitingForUser(lines)) || working) continue;
+    const events = probe.outputCount && task.outputsAtTask !== undefined ? Math.max(0, probe.outputCount(task.tabId) - task.outputsAtTask) : undefined;
     out.push({
       tabId: task.tabId,
       fromTabId: task.fromTabId,
       sinceTaskMs: probe.now - task.at,
       quietMs,
       worked: output > task.at + ECHO_GRACE_MS,
+      events,
       lastLine: lines ? lastScreenLine(lines) : "",
     });
   }
@@ -176,7 +207,11 @@ export function findStalls(pending: PendingTasks, probe: StallProbe, stallMs = S
 
 /** El aviso que recibe el orquestador (texto para el agente, en PT-BR como los briefings). Pura. */
 export function stallMessage(name: string, stall: Stall): string {
-  const state = stall.worked ? "trabalhou e se calou sem responder" : "não escreveu nada desde que recebeu a tarefa";
+  const state = !stall.worked
+    ? "não escreveu nada desde que recebeu a tarefa"
+    : stall.events !== undefined && stall.events > 0
+      ? `parou depois de ${stall.events} ${stall.events === 1 ? "evento" : "eventos"} de saída, sem responder`
+      : "trabalhou e se calou sem responder";
   const line = stall.lastLine ? `Última linha da tela: "${stall.lastLine}".` : "A tela dele está vazia.";
   return [
     `[Aviso automático do ADE AGS] O agente "${name}" recebeu uma tarefa há ${formatDuration(stall.sinceTaskMs)} e está parado há ${formatDuration(stall.quietMs)} (${state}).`,

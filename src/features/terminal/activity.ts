@@ -41,6 +41,8 @@ const streakStart = new Map<string, number>();
 const lastInput = new Map<string, number>();
 /** Última salida de cada pestaña, sin caducar (`lastOutput` se poda a los `QUIET_MS`). */
 const lastSeen = new Map<string, number>();
+/** Cuántos bloques de salida (sin el eco) escribió cada pestaña: el "paró tras N eventos" del aviso de parado. */
+const outputEvents = new Map<string, number>();
 let timer: ReturnType<typeof setInterval> | null = null;
 
 /** Quiénes están activos a la hora `now`. Pura, para probar sin reloj. */
@@ -104,6 +106,7 @@ export function markOutput(tabId: string | undefined, agentId: string | undefine
   if (prev === undefined || now - prev > STREAK_GAP_MS) streakStart.set(tabId, now);
   lastOutput.set(tabId, now);
   lastSeen.set(tabId, now);
+  outputEvents.set(tabId, (outputEvents.get(tabId) ?? 0) + 1);
   if (!useAgentActivity.getState().working) refresh(now);
   if (!timer) timer = setInterval(() => refresh(), 1000);
 }
@@ -118,6 +121,11 @@ export function lastOutputAt(tabId: string): number | undefined {
   return lastSeen.get(tabId);
 }
 
+/** Cuántos bloques de salida escribió el agente de la pestaña (sin el eco del usuario). */
+export function outputCount(tabId: string): number {
+  return outputEvents.get(tabId) ?? 0;
+}
+
 /** Cuándo escribió por última vez el usuario en esa pestaña. */
 export function lastInputAt(tabId: string): number | undefined {
   return lastInput.get(tabId);
@@ -128,6 +136,7 @@ export function forgetTab(tabId: string | undefined): void {
   if (!tabId) return;
   lastSeen.delete(tabId);
   lastOutput.delete(tabId);
+  outputEvents.delete(tabId);
   streakStart.delete(tabId);
   lastInput.delete(tabId);
   refresh();
