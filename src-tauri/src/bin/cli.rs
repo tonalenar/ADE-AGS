@@ -55,7 +55,12 @@ TABS
 AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peers                                       Quem está conectado a você
   peer ask <nome> \"...\" [--timeout 600]      Pergunta e ESPERA a resposta (orquestrador: 90 s por padrão)
-  peer tell <nome> \"...\"                      Avisa algo, sem esperar
+  peer tell <nome> \"...\"                      Entrega e volta já: encerre o turno; a resposta chega depois
+             [--task \"...\"]                    · envelope tipado (tell/ask): o destino lê \"X pediu sua ajuda nisto.
+             [--constraints \"...\"]             · Tarefa / Restrições / Como é uma boa resposta\"; o texto livre vira contexto
+             [--expecting \"...\"]
+             (recusas de política — destino errado ou ambíguo, si mesmo, repetida, teto — saem com exit 0 e
+              {refused:true, reason, message}; tetos: profundidade 2 e 5 pedidos novos por 10 min, 15 no orquestrador)
   peer tell <nome> --file <caminho>           O mesmo, com o texto em um arquivo (sem confusão de aspas no Windows)
   peer ask <nome> --file <caminho>            O mesmo que ask, com a pergunta em um arquivo
              (ask/tell --raw: o texto como está, sem o cabeçalho \"[Mensagem de ...]\"; para
@@ -68,6 +73,7 @@ AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
              (tell/ask/deliver --id <req>: o seu id do pedido. O mesmo id é a mesma mensagem:
               nunca é digitada duas vezes, nem num reenvio depois de um reinício do app)
   peer queue [list]                           O que você mandou e ainda espera na fila (id, destino, idade)
+  peer queue refused                          As suas últimas recusas (motivo e a frase)
   peer queue cancel <id>                      Cancela uma mensagem sua que ainda não foi entregue
   peer pending [--all]                        Aprovações e perguntas dos integrantes que esperam resposta
   peer answer <id> <resposta> [--enter]       Responde uma pendência (só orquestradores): num diálogo, o número
