@@ -12,6 +12,10 @@ export interface BotToast {
   onAction?: () => void;
   /** Cuánto dura en pantalla, en milisegundos. */
   ms: number;
+  /** Se queda hasta que alguien lo cierre o lo reemplace (un trabajo en curso). Ignora `ms`. */
+  sticky?: boolean;
+  /** Barra de progreso: 0–100, o `null` si no se sabe cuánto falta. Sin el campo, no hay barra. */
+  progress?: number | null;
 }
 
 export type BotToastInput = Omit<BotToast, "id" | "ms" | "tone"> & { tone?: BotToastTone; ms?: number };
@@ -24,6 +28,8 @@ interface BotToastState {
   toasts: BotToast[];
   push: (input: BotToastInput) => number;
   dismiss: (id: number) => void;
+  /** Cambia un aviso que sigue en pantalla (el texto o el progreso de un trabajo en curso). */
+  update: (id: number, patch: Partial<Pick<BotToast, "title" | "text" | "tone" | "progress">>) => void;
 }
 
 let nextId = 1;
@@ -37,6 +43,7 @@ export const useBotToastStore = create<BotToastState>((set) => ({
     return id;
   },
   dismiss: (id) => set((state) => ({ toasts: state.toasts.filter((toast) => toast.id !== id) })),
+  update: (id, patch) => set((state) => ({ toasts: state.toasts.map((toast) => (toast.id === id ? { ...toast, ...patch } : toast)) })),
 }));
 
 /** Un aviso con el bot dentro del globo (ver `BotToastHost`). Se puede llamar desde cualquier lado. */
