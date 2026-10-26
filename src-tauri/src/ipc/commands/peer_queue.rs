@@ -7,7 +7,16 @@
 //! - um destino de cada vez (`delivery_lock`);
 //! - a mensagem sai da fila com `store::claim` (`queued` → `delivering`) numa só escrita, então
 //!   nunca é digitada duas vezes, nem por duas threads nem depois de um reinício;
-//! - o texto é lido do banco na hora da entrega: vale a versão que o usuário editou.
+//! - o texto é lido do banco na hora da entrega: vale a versão que o usuário editou;
+//! - logo antes de tomar a mensagem, o estado do transcript (`canal::busy`) é lido de novo: o
+//!   destino que voltou a trabalhar no meio da espera não recebe nada;
+//! - "agora" é o relógio do SQLite (`store::db_now`), o mesmo para todo processo que escreve no banco;
+//! - a mensagem do entregador que termina `unconfirmed`/`expired` volta ao remetente como aviso
+//!   (`store::failure_notice`); a de quem mandou e ficou esperando a resposta (entrega já, `ask`
+//!   direto) não, porque o próprio comando já disse que não chegou.
+//!
+//! Sem lease: só o app entrega (a CLI só pede, pelo IPC), então não há dois entregadores disputando a
+//! mesma mensagem; o `claim` numa só escrita e o `delivery_lock` bastam. Ver FILA_DE_MENSAGENS.md.
 
 use std::collections::HashSet;
 use std::sync::{Mutex, OnceLock};
@@ -50,14 +59,46 @@ pub(crate) struct Sent {
     pub repeat: bool,
 }
 
-fn now() -> i64 {
-    crate::util::now_ts_ms()
-}
-
 fn with_db<T>(app: &AppHandle, f: impl FnOnce(&Connection) -> Result<T, String>) -> Result<T, String> {
     let db = super::shared::db(app)?;
     let conn = db.inner().lock().map_err(|e| e.to_string())?;
     f(&conn)
+}
+
+/// `with_db` com o "agora" do relógio do SQLite: todo prazo da fila se compara com ele.
+fn with_db_now<T>(app: &AppHandle, f: impl FnOnce(&Connection, i64) -> Result<T, String>) -> Result<T, String> {
+    with_db(app, |conn| {
+        let now = store::db_now(conn)?;
+        f(conn, now)
+    })
+}
+
+/// Avisa cada remetente (ainda aberto) de que a mensagem dele não chegou, pela fila dele.
+fn notify_failures(app: &AppHandle, failed: &[PeerMessage]) {
+    let failed: Vec<&PeerMessage> = failed.iter().filter(|m| m.kind != "notice").collect();
+    if failed.is_empty() {
+        return;
+    }
+    // Sem a lista das abas não se sabe se o remetente existe: melhor não avisar ninguém.
+    let Ok(listed) = tab_list(app) else { return };
+    let live = live_ids(&listed);
+    for msg in failed {
+        if !live.contains(&msg.from_tab_id) {
+            continue;
+        }
+        if let Ok(Some(notice)) = with_db_now(app, |conn, now| store::failure_notice(conn, msg, now)) {
+            changed(app, Some(&notice.to_tab_id));
+            ensure_worker(app, &notice.to_tab_id);
+        }
+    }
+}
+
+fn live_ids(listed: &Value) -> HashSet<String> {
+    listed
+        .get("tabs")
+        .and_then(Value::as_array)
+        .map(|rows| rows.iter().filter_map(|r| r.get("id").and_then(Value::as_str).map(str::to_string)).collect())
+        .unwrap_or_default()
 }
 
 /// Avisa a interface que a fila de um destino mudou (o selo e a lista se atualizam).
@@ -85,15 +126,23 @@ pub(crate) fn compose(msg: &PeerMessage, body: &str, waited: Duration) -> String
     } else {
         outgoing(&msg.from_name, body, msg.reply, msg.raw)
     };
-    match stale_note(waited).filter(|_| !msg.raw) {
+    let text = match stale_note(waited).filter(|_| !msg.raw) {
         Some(note) => format!("{text}\n{note}"),
         None => text,
-    }
+    };
+    retry_marked(msg, text)
+}
+
+/// Pura: com `attempts > 1` a mensagem já foi tentada (digitada sem confirmação, ou reenviada com o
+/// mesmo id) e o destino pode já ter agido nela: o texto entregue começa com `store::RETRY_MARK`.
+/// `--raw` não (é um comando da TUI e o aviso o quebraria).
+pub(crate) fn retry_marked(msg: &PeerMessage, text: String) -> String {
+    if msg.attempts > 1 && !msg.raw { format!("{} {text}", store::RETRY_MARK) } else { text }
 }
 
 /// Registra a mensagem. `Err(Sent)` = não vai (mesmo id já usado, ou repetida pelo texto).
 fn admit(app: &AppHandle, new: &NewMessage<'_>, initial: State) -> Result<Result<PeerMessage, Sent>, String> {
-    let admission = with_db(app, |conn| store::admit(conn, new, initial, now()))?;
+    let admission = with_db_now(app, |conn, now| store::admit(conn, new, initial, now))?;
     Ok(match admission {
         Admission::New(message) => Ok(message),
         Admission::Repeat(message) => Err(Sent { delivery: Delivery::Duplicate, message, repeat: true }),
@@ -105,18 +154,20 @@ fn admit(app: &AppHandle, new: &NewMessage<'_>, initial: State) -> Result<Result
 /// Os tetos, sem gravar nada: `Some((motivo, frase))` se a mensagem seria recusada. Para o `peer ask`
 /// recusar antes de esperar o destino ficar quieto (o `admit` confere de novo, na transação).
 pub(super) fn refusal_preview(app: &AppHandle, new: &NewMessage<'_>) -> Result<Option<(&'static str, String)>, String> {
-    Ok(with_db(app, |conn| store::check_limits(conn, new, now()))?.map(|(reason, message, _)| (reason, message)))
+    Ok(with_db_now(app, |conn, now| store::check_limits(conn, new, now))?.map(|(reason, message, _)| (reason, message)))
 }
 
 /// Grava a recusa de política decidida antes da fila (destino errado, si mesmo, sem tarefa).
 pub(super) fn refuse(app: &AppHandle, new: &NewMessage<'_>, reason: &str, message: &str) -> Result<PeerMessage, String> {
-    with_db(app, |conn| store::record_refusal(conn, new, reason, message, now()))
+    with_db_now(app, |conn, now| store::record_refusal(conn, new, reason, message, now))
 }
 
 /// Digita uma mensagem já tomada da fila (`delivering`) e fecha o registro. `Ok(false)` = escrita,
-/// mas não apareceu na tela.
-fn type_claimed(app: &AppHandle, pty: u32, msg: &PeerMessage) -> Result<bool, String> {
-    let waited = Duration::from_millis((now() - msg.created_at).max(0) as u64);
+/// mas não apareceu na tela. `notify`: a que não se confirmou volta ao remetente como aviso (só o
+/// entregador; quem entrega já devolve o resultado ao próprio remetente).
+fn type_claimed(app: &AppHandle, pty: u32, msg: &PeerMessage, notify: bool) -> Result<bool, String> {
+    let at = with_db(app, store::db_now).unwrap_or_else(|_| crate::util::now_ts_ms());
+    let waited = Duration::from_millis((at - msg.created_at).max(0) as u64);
     // Mensagem longa vai inteira para um arquivo e no terminal só o começo e o caminho. Só o `tell`
     // com cabeçalho: era assim antes da fila (a pergunta e a linha da entrega vão inteiras).
     let body = if msg.kind == "tell" && !msg.raw { spill_to_inbox(&msg.to_tab_id, &msg.text) } else { msg.text.clone() };
@@ -126,8 +177,13 @@ fn type_claimed(app: &AppHandle, pty: u32, msg: &PeerMessage) -> Result<bool, St
         Ok(false) => Some("O texto foi escrito no terminal do destino, mas não apareceu na tela dele.".to_string()),
         Err(error) => Some(error.clone()),
     };
-    let _ = with_db(app, |conn| store::finish(conn, msg.id, matches!(result, Ok(true)), note.as_deref(), now()));
+    let closed = with_db_now(app, |conn, now| store::finish(conn, msg.id, matches!(result, Ok(true)), note.as_deref(), now));
     changed(app, Some(&msg.to_tab_id));
+    if notify && !matches!(result, Ok(true)) && matches!(closed, Ok(true))
+        && let Ok(Some(done)) = with_db(app, |conn| store::get(conn, msg.id))
+    {
+        notify_failures(app, &[done]);
+    }
     result
 }
 
@@ -150,12 +206,17 @@ pub(super) fn deliver_now_or_queue(app: &AppHandle, pty: u32, new: &NewMessage<'
             let first = with_db(app, |conn| store::head(conn, &msg.to_tab_id))?.map(|h| h.id) == Some(msg.id);
             // Com o transcript dizendo que o destino está no meio de um turno (uma ferramenta longa e
             // calada, um diálogo de aprovação), a tela quieta não basta: vai para a fila (ver `canal`).
-            if first && !crate::canal::busy(&msg.to_tab_id) && wait_until_quiet(pty, QUIET, SENDER_WAIT, false) {
-                let Some(claimed) = with_db(app, |conn| store::claim(conn, msg.id, now()))? else {
+            // `busy` de novo depois da espera: o destino pode ter aberto um turno nesses segundos.
+            if first
+                && !crate::canal::busy(&msg.to_tab_id)
+                && wait_until_quiet(pty, QUIET, SENDER_WAIT, false)
+                && !crate::canal::busy(&msg.to_tab_id)
+            {
+                let Some(claimed) = with_db_now(app, |conn, now| store::claim(conn, msg.id, now))? else {
                     // O usuário a cancelou nesses segundos.
                     return Ok(Sent { delivery: Delivery::Cancelled, message: fresh(app, msg), repeat: false });
                 };
-                let confirmed = type_claimed(app, pty, &claimed)?;
+                let confirmed = type_claimed(app, pty, &claimed, false)?;
                 let delivery = if confirmed { Delivery::Now } else { Delivery::Unconfirmed };
                 return Ok(Sent { delivery, message: fresh(app, claimed), repeat: false });
             }
@@ -188,7 +249,7 @@ pub(super) fn begin_direct(app: &AppHandle, new: &NewMessage<'_>) -> Result<Resu
 
 /// Fecha o registro de um `begin_direct`.
 pub(super) fn end_direct(app: &AppHandle, msg: &PeerMessage, error: Option<&str>) {
-    let _ = with_db(app, |conn| store::finish(conn, msg.id, error.is_none(), error, now()));
+    let _ = with_db_now(app, |conn, now| store::finish(conn, msg.id, error.is_none(), error, now));
     changed(app, Some(&msg.to_tab_id));
 }
 
@@ -255,22 +316,24 @@ fn find_pty(app: &AppHandle, to: &str) -> Pty {
     }
 }
 
-enum Turn { Ready, PtyGone, Empty }
+/// `Ready(quiet)`: `quiet` = a vez veio do destino quieto (não de "enviar agora" nem do prazo); só aí
+/// o entregador relê `canal::busy` logo antes de tomar a mensagem.
+enum Turn { Ready(bool), PtyGone, Empty }
 
 /// Espera a vez da próxima mensagem: o destino quieto, o usuário pediu "enviar agora", ou o prazo
 /// de `QUEUE_MAX_WAIT` dela acabou (aí vai mesmo assim, como antes).
 fn wait_turn(app: &AppHandle, to: &str, pty: u32) -> Turn {
     loop {
-        let head = match with_db(app, |conn| store::head(conn, to)) {
-            Ok(Some(head)) => head,
+        let (head, now) = match with_db_now(app, |conn, now| Ok((store::head(conn, to)?, now))) {
+            Ok((Some(head), now)) => (head, now),
             _ => return Turn::Empty,
         };
         if head.force_now {
-            return Turn::Ready;
+            return Turn::Ready(false);
         }
-        let left = head.created_at + QUEUE_MAX_WAIT.as_millis() as i64 - now();
+        let left = head.created_at + QUEUE_MAX_WAIT.as_millis() as i64 - now;
         if left <= 0 {
-            return Turn::Ready;
+            return Turn::Ready(false);
         }
         // `require_output`: um terminal que acabou de nascer (arranque do app) ainda não escreveu
         // nada; quieto assim não é "terminou o turno", é "a TUI nem abriu".
@@ -279,7 +342,7 @@ fn wait_turn(app: &AppHandle, to: &str, pty: u32) -> Turn {
             // Só segura, nunca solta antes: sem canal (ou estado velho) `busy` é falso. O prazo de
             // `QUEUE_MAX_WAIT` continua valendo.
             if !crate::canal::busy(to) {
-                return Turn::Ready;
+                return Turn::Ready(true);
             }
         }
         if crate::terminal::output_total(pty).is_none() {
@@ -300,8 +363,9 @@ fn run_worker(app: &AppHandle, to: &str) {
         let pty = match find_pty(app, to) {
             Pty::Found(pty) => pty,
             Pty::Closed => {
-                let _ = with_db(app, |conn| store::expire_queued_for(conn, to, "A aba de destino foi fechada.", now()));
+                let expired = with_db_now(app, |conn, now| store::expire_queued_for(conn, to, "A aba de destino foi fechada.", now)).unwrap_or_default();
                 changed(app, Some(to));
+                notify_failures(app, &expired);
                 continue;
             }
             // A aba existe mas o terminal não abriu: a fila fica (visível na interface). Uma mensagem
@@ -312,14 +376,19 @@ fn run_worker(app: &AppHandle, to: &str) {
                 return;
             }
         };
-        match wait_turn(app, to, pty) {
-            Turn::Ready => {}
+        let quiet = match wait_turn(app, to, pty) {
+            Turn::Ready(quiet) => quiet,
             Turn::PtyGone | Turn::Empty => continue,
-        }
+        };
         // A próxima é lida de novo: enquanto esperava, o usuário pode ter reordenado ou cancelado.
         let Ok(Some(head)) = with_db(app, |conn| store::head(conn, to)) else { continue };
-        let Ok(Some(claimed)) = with_db(app, |conn| store::claim(conn, head.id, now())) else { continue };
-        let _ = type_claimed(app, pty, &claimed);
+        // Rechecagem logo antes de agir: o destino que voltou a trabalhar no meio não recebe agora
+        // (o laço espera a próxima fatia). "Enviar agora" e o prazo vencido seguem como antes.
+        if quiet && !head.force_now && crate::canal::busy(to) {
+            continue;
+        }
+        let Ok(Some(claimed)) = with_db_now(app, |conn, now| store::claim(conn, head.id, now)) else { continue };
+        let _ = type_claimed(app, pty, &claimed, true);
     }
 }
 
@@ -331,12 +400,9 @@ pub fn start_resume(app: AppHandle) {
         crate::database::wait_until_db_ready();
         // Sem a lista das abas não se sabe quem existe: melhor não expirar nada.
         let Ok(listed) = tab_list(&app) else { return };
-        let live: HashSet<String> = listed
-            .get("tabs")
-            .and_then(Value::as_array)
-            .map(|rows| rows.iter().filter_map(|r| r.get("id").and_then(Value::as_str).map(str::to_string)).collect())
-            .unwrap_or_default();
-        let Ok(targets) = with_db(&app, |conn| store::resume(conn, &live, now())) else { return };
+        let live = live_ids(&listed);
+        // `resume` também enfileira o aviso ao remetente de cada uma que terminou aqui.
+        let Ok(targets) = with_db_now(&app, |conn, now| store::resume(conn, &live, now)) else { return };
         for to in &targets {
             ensure_worker(&app, to);
         }
@@ -368,7 +434,7 @@ pub fn peer_queue_list(app: AppHandle, tab_id: String) -> Result<Vec<PeerMessage
 
 #[tauri::command]
 pub fn peer_queue_edit(app: AppHandle, id: i64, text: String) -> Result<PeerMessage, String> {
-    let msg = with_db(&app, |conn| store::edit(conn, id, &text, now()))?;
+    let msg = with_db_now(&app, |conn, now| store::edit(conn, id, &text, now))?;
     changed(&app, Some(&msg.to_tab_id));
     Ok(msg)
 }
@@ -376,14 +442,14 @@ pub fn peer_queue_edit(app: AppHandle, id: i64, text: String) -> Result<PeerMess
 /// Sobe (`delta` < 0) ou desce (> 0) uma casa. Devolve a fila nova.
 #[tauri::command]
 pub fn peer_queue_move(app: AppHandle, id: i64, delta: i64) -> Result<Vec<PeerMessage>, String> {
-    let list = with_db(&app, |conn| store::move_by(conn, id, delta.signum(), now()))?;
+    let list = with_db_now(&app, |conn, now| store::move_by(conn, id, delta.signum(), now))?;
     changed(&app, list.first().map(|m| m.to_tab_id.as_str()));
     Ok(list)
 }
 
 #[tauri::command]
 pub fn peer_queue_cancel(app: AppHandle, id: i64) -> Result<PeerMessage, String> {
-    let msg = with_db(&app, |conn| store::cancel(conn, id, "Cancelada pelo usuário.", now()))?;
+    let msg = with_db_now(&app, |conn, now| store::cancel(conn, id, "Cancelada pelo usuário.", now))?;
     changed(&app, Some(&msg.to_tab_id));
     Ok(msg)
 }
@@ -391,7 +457,7 @@ pub fn peer_queue_cancel(app: AppHandle, id: i64) -> Result<PeerMessage, String>
 /// "Enviar agora": a mensagem vai para a frente e é digitada sem esperar o destino ficar quieto.
 #[tauri::command]
 pub fn peer_queue_send_now(app: AppHandle, id: i64) -> Result<PeerMessage, String> {
-    let msg = with_db(&app, |conn| store::send_now(conn, id, now()))?;
+    let msg = with_db_now(&app, |conn, now| store::send_now(conn, id, now))?;
     changed(&app, Some(&msg.to_tab_id));
     ensure_worker(&app, &msg.to_tab_id);
     Ok(msg)
@@ -417,14 +483,12 @@ pub(super) fn peer_queue(app: &AppHandle, args: &Value) -> Result<Value, String>
     let action = arg_str_opt(args, "action").unwrap_or_else(|| "list".into());
     match action.as_str() {
         "list" => {
-            let rows = with_db(app, |conn| store::pending_from(conn, &from))?;
-            let at = now();
+            let (rows, at) = with_db_now(app, |conn, now| Ok((store::pending_from(conn, &from)?, now)))?;
             Ok(json!({ "messages": rows.iter().map(|m| summary(m, at)).collect::<Vec<_>>() }))
         }
         // As recusas de política que você recebeu (auditoria): motivo, destino, a frase.
         "refused" => {
-            let rows = with_db(app, |conn| store::refusals_from(conn, &from, 20))?;
-            let at = now();
+            let (rows, at) = with_db_now(app, |conn, now| Ok((store::refusals_from(conn, &from, 20)?, now)))?;
             Ok(json!({ "refused": rows.iter().map(|m| {
                 let mut line = summary(m, at);
                 line["reason"] = json!(m.reason);
@@ -440,9 +504,9 @@ pub(super) fn peer_queue(app: &AppHandle, args: &Value) -> Result<Value, String>
             if msg.from_tab_id != from {
                 return Err(format!("A mensagem #{id} não é sua: só quem mandou cancela pela CLI (o usuário cancela qualquer uma na interface)."));
             }
-            let msg = with_db(app, |conn| store::cancel(conn, id, "Cancelada pelo remetente.", now()))?;
+            let (msg, at) = with_db_now(app, |conn, now| Ok((store::cancel(conn, id, "Cancelada pelo remetente.", now)?, now)))?;
             changed(app, Some(&msg.to_tab_id));
-            Ok(json!({ "cancelled": true, "message": summary(&msg, now()) }))
+            Ok(json!({ "cancelled": true, "message": summary(&msg, at) }))
         }
         other => Err(format!("Ação desconhecida '{other}'. Use: ags peer queue [list|refused|cancel <id>]")),
     }
@@ -476,6 +540,21 @@ oi
         let mut role = msg(false, false);
         role.kind = "role".into();
         assert!(!compose(&role, "Seu papel", Duration::ZERO).contains("untrusted_data"));
+    }
+
+    #[test]
+    fn a_que_ja_foi_tentada_chega_marcada_como_reenvio() {
+        let mut again = msg(false, false);
+        again.attempts = 1;
+        assert!(!compose(&again, "oi", Duration::ZERO).starts_with(store::RETRY_MARK), "primeira tentativa: sem marca");
+        again.attempts = 2;
+        let text = compose(&again, "oi", Duration::ZERO);
+        assert!(text.starts_with("[reenvio; pode já ter sido recebida] [Mensagem de Líder"), "{text}");
+        // `--raw` é um comando da TUI: a marca o quebraria.
+        let mut raw = msg(true, false);
+        raw.attempts = 3;
+        assert_eq!(compose(&raw, "/compact", Duration::ZERO), "/compact");
+        assert_eq!(retry_marked(&raw, "/compact".into()), "/compact");
     }
 
     #[test]

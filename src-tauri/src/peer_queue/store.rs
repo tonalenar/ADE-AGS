@@ -11,6 +11,10 @@
 //! refused  (recusa de política: teto, duplicada, destino errado — só auditoria, nunca vai)
 //! ```
 //!
+//! Falha definitiva: a mensagem do entregador (ou do arranque) que termina `unconfirmed` ou
+//! `expired` volta ao remetente como aviso (`notice`, ver [`failure_notice`]). O relógio de todo
+//! prazo é o do SQLite ([`db_now`]).
+//!
 //! A ordem da fila de um destino é a coluna `position` (menor primeiro). "Enviar agora" põe a
 //! mensagem na frente e marca `force_now`: o entregador não espera o destino ficar quieto.
 //!
@@ -48,6 +52,20 @@ pub const MAX_FANOUT: i64 = 5;
 pub const LEAD_MAX_FANOUT: i64 = 15;
 /// Uma mensagem recebida e não respondida há mais que isto não está mais "em tratamento".
 pub const TREATMENT_WINDOW_MS: i64 = 30 * 60 * 1000;
+
+/// O começo do texto de uma mensagem que já foi tentada antes (ver `attempts`): o destino pode já ter
+/// recebido e agido na primeira vez.
+pub const RETRY_MARK: &str = "[reenvio; pode já ter sido recebida]";
+
+/// O relógio do SQLite, em ms desde a época. Todo prazo da fila (dedupe, tetos, expiração, limpeza,
+/// tombstone) é comparado com colunas gravadas no banco; em produção quem chama o store passa ESTE
+/// relógio (ver `ipc/commands/peer_queue.rs::with_db_now`), não o do processo: dois processos que
+/// escrevem no mesmo banco (app e CLI) nunca discordam de "agora". Os testes injetam o `now` direto
+/// em cada função.
+pub fn db_now(conn: &Connection) -> Result<i64, String> {
+    conn.query_row("SELECT CAST(ROUND((julianday('now') - 2440587.5) * 86400000.0) AS INTEGER)", [], |r| r.get(0))
+        .map_err(|e| e.to_string())
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "lowercase")]
@@ -570,10 +588,12 @@ pub fn check_limits(conn: &Connection, new: &NewMessage<'_>, now: i64) -> Result
 
 fn insert(conn: &Connection, new: &NewMessage<'_>, client_id: Option<&str>, state: State, lin: Lineage, refusal: Option<(&str, &str)>, now: i64) -> Result<PeerMessage, String> {
     let (position, key) = if state == State::Refused { (0, None) } else { (next_position(conn, new.to_tab_id)?, Some(dedupe_key(new))) };
+    // Quem já nasce `delivering` (o `ask` direto) está na primeira tentativa: o reenvio dela conta 2.
+    let attempts = (state == State::Delivering) as i64;
     conn.execute(
         "INSERT INTO peer_messages (client_id, kind, from_tab_id, from_name, to_tab_id, to_name, text, raw, reply,
-             state, position, created_at, updated_at, depth, parent_id, answer_of, reason, note, dedupe_key)
-         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
+             state, position, created_at, updated_at, depth, parent_id, answer_of, reason, note, dedupe_key, attempts)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
         params![
             client_id,
             new.kind,
@@ -593,6 +613,7 @@ fn insert(conn: &Connection, new: &NewMessage<'_>, client_id: Option<&str>, stat
             refusal.map(|r| r.0),
             refusal.map(|r| r.1),
             key,
+            attempts,
         ],
     )
     .map_err(|e| e.to_string())?;
@@ -694,7 +715,10 @@ fn admit_inner(conn: &Connection, new: &NewMessage<'_>, client_id: Option<&str>,
             if existing.state.can_become(State::Queued) && get(conn, existing.id)?.is_some() {
                 let position = next_position(conn, new.to_tab_id)?;
                 conn.execute(
-                    "UPDATE peer_messages SET state = ?1, position = ?2, force_now = 0, note = NULL, updated_at = ?3 WHERE id = ?4",
+                    // `attempts` fica (o `claim` soma): a que já foi tentada chega como reenvio. No direto
+                    // (`delivering`) não há `claim`, então a tentativa conta aqui.
+                    "UPDATE peer_messages SET state = ?1, position = ?2, force_now = 0, note = NULL, updated_at = ?3,
+                        attempts = attempts + (CASE WHEN ?1 = 'delivering' THEN 1 ELSE 0 END) WHERE id = ?4",
                     params![initial.as_str(), position, now, existing.id],
                 )
                 .map_err(|e| e.to_string())?;
@@ -908,13 +932,95 @@ pub fn send_now(conn: &Connection, id: i64, now: i64) -> Result<PeerMessage, Str
     get(conn, id)?.ok_or_else(|| not_queued(conn, id))
 }
 
-/// Tudo o que esperava um destino que não existe mais vira `expired`.
-pub fn expire_queued_for(conn: &Connection, to: &str, note: &str, now: i64) -> Result<usize, String> {
-    conn.execute(
-        "UPDATE peer_messages SET state = 'expired', note = ?1, updated_at = ?2 WHERE to_tab_id = ?3 AND state = 'queued'",
-        params![note, now, to],
+/// Tudo o que esperava um destino que não existe mais vira `expired`. Devolve as que expiraram (para
+/// o aviso ao remetente, ver [`failure_notice`]).
+pub fn expire_queued_for(conn: &Connection, to: &str, note: &str, now: i64) -> Result<Vec<PeerMessage>, String> {
+    let waiting = query(conn, "WHERE to_tab_id = ?1 AND state = 'queued' ORDER BY position, id", [to])?;
+    let mut out = Vec::new();
+    for msg in waiting {
+        let changed = conn
+            .execute(
+                "UPDATE peer_messages SET state = 'expired', note = ?1, updated_at = ?2 WHERE id = ?3 AND state = 'queued'",
+                params![note, now, msg.id],
+            )
+            .map_err(|e| e.to_string())?;
+        if changed == 1 {
+            out.extend(get(conn, msg.id)?);
+        }
+    }
+    Ok(out)
+}
+
+/// Pura: o começo do pedido, numa linha, para o aviso de falha. No envelope, a linha `Tarefa:`.
+pub fn task_gist(text: &str) -> String {
+    const MAX: usize = 120;
+    let lines: Vec<&str> = text.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let line = lines
+        .iter()
+        .find_map(|l| l.strip_prefix("Tarefa:").map(str::trim))
+        .or_else(|| lines.iter().copied().find(|l| !l.ends_with("pediu sua ajuda nisto.")))
+        .unwrap_or("");
+    let flat = normalize(line);
+    if flat.chars().count() <= MAX {
+        return flat;
+    }
+    let cut: String = flat.chars().take(MAX - 1).collect();
+    format!("{}…", cut.trim_end())
+}
+
+/// Pura: o aviso à aba que mandou uma mensagem que não chegou (`expired`) ou que foi digitada sem
+/// aparecer na tela (`unconfirmed`).
+pub fn failure_text(failed: &PeerMessage) -> String {
+    let to = if failed.to_name.is_empty() { &failed.to_tab_id } else { &failed.to_name };
+    let why = failed
+        .note
+        .as_deref()
+        .map(|n| lower_first(n.trim().trim_end_matches('.')))
+        .filter(|n| !n.is_empty())
+        .unwrap_or_else(|| failed.state.label().to_string());
+    let outcome = if failed.state == State::Unconfirmed { "e não há confirmação de que chegou" } else { "e não chegou" };
+    format!(
+        "[AGS] Você pediu a {to}: \"{}\" {outcome} ({why}). Diga isso à pessoa e ofereça o que você mesmo pode fazer.",
+        task_gist(&failed.text)
     )
-    .map_err(|e| e.to_string())
+}
+
+/// A chave do aviso de falha: uma por mensagem e tentativa. Dois avisos para o mesmo destino (dois
+/// pedidos diferentes) nunca colapsam; a mesma falha processada duas vezes é o mesmo aviso. Pura.
+pub fn failure_key(failed: &PeerMessage) -> String {
+    format!("falha-entrega-{}-{}", failed.id, failed.attempts)
+}
+
+/// Enfileira para o REMETENTE o aviso de que a mensagem dele terminou sem ser entregue
+/// (`unconfirmed` ou `expired`). Nunca para um aviso (`notice` não gera `notice`, então um aviso que
+/// falha não vira outro), nem para quem mandou a si mesmo. Sem teto (é do app: `limits: None`, e o
+/// `notice` não conta no fan-out). Quem chama confere antes que o remetente ainda existe.
+pub fn failure_notice(conn: &Connection, failed: &PeerMessage, now: i64) -> Result<Option<PeerMessage>, String> {
+    if failed.kind == "notice" || failed.from_tab_id == failed.to_tab_id || failed.from_tab_id.is_empty() {
+        return Ok(None);
+    }
+    if !matches!(failed.state, State::Unconfirmed | State::Expired) {
+        return Ok(None);
+    }
+    let key = failure_key(failed);
+    let text = failure_text(failed);
+    let new = NewMessage {
+        client_id: Some(&key),
+        kind: "notice",
+        from_tab_id: &failed.from_tab_id,
+        from_name: "ADE AGS",
+        to_tab_id: &failed.from_tab_id,
+        to_name: &failed.from_name,
+        text: &text,
+        raw: true,
+        reply: false,
+        envelope: None,
+        limits: None,
+    };
+    Ok(match admit(conn, &new, State::Queued, now)? {
+        Admission::New(msg) => Some(msg),
+        _ => None,
+    })
 }
 
 /// O que fazer, no arranque do app, com uma mensagem que estava pendente.
@@ -939,31 +1045,39 @@ pub fn resume_decision(msg: &PeerMessage, live_tabs: &HashSet<String>, now: i64)
 }
 
 /// No arranque: aplica `resume_decision` a tudo o que estava pendente e devolve os destinos cuja
-/// fila deve voltar a andar.
+/// fila deve voltar a andar. Cada mensagem que terminou ali (`expired`/`unconfirmed`) gera o aviso
+/// ao remetente, se ele ainda está aberto (ver [`failure_notice`]); a aba dele entra nos destinos.
 pub fn resume(conn: &Connection, live_tabs: &HashSet<String>, now: i64) -> Result<Vec<String>, String> {
     let pending = query(conn, "WHERE state IN ('queued', 'delivering') ORDER BY id", [])?;
     let mut targets: Vec<String> = Vec::new();
+    let mut failed: Vec<i64> = Vec::new();
     for msg in pending {
-        match resume_decision(&msg, live_tabs, now) {
+        let (sql, note) = match resume_decision(&msg, live_tabs, now) {
             Resume::Keep => {
                 if !targets.contains(&msg.to_tab_id) {
                     targets.push(msg.to_tab_id.clone());
                 }
+                continue;
             }
-            Resume::Expire(note) => {
-                conn.execute(
-                    "UPDATE peer_messages SET state = 'expired', note = ?1, updated_at = ?2 WHERE id = ?3 AND state = 'queued'",
-                    params![note, now, msg.id],
-                )
-                .map_err(|e| e.to_string())?;
-            }
-            Resume::Unconfirm(note) => {
-                conn.execute(
-                    "UPDATE peer_messages SET state = 'unconfirmed', note = ?1, updated_at = ?2 WHERE id = ?3 AND state = 'delivering'",
-                    params![note, now, msg.id],
-                )
-                .map_err(|e| e.to_string())?;
-            }
+            Resume::Expire(note) => ("UPDATE peer_messages SET state = 'expired', note = ?1, updated_at = ?2 WHERE id = ?3 AND state = 'queued'", note),
+            Resume::Unconfirm(note) => (
+                "UPDATE peer_messages SET state = 'unconfirmed', note = ?1, updated_at = ?2 WHERE id = ?3 AND state = 'delivering'",
+                note,
+            ),
+        };
+        if conn.execute(sql, params![note, now, msg.id]).map_err(|e| e.to_string())? == 1 {
+            failed.push(msg.id);
+        }
+    }
+    for id in failed {
+        let Some(msg) = get(conn, id)? else { continue };
+        if !live_tabs.contains(&msg.from_tab_id) {
+            continue;
+        }
+        if let Some(notice) = failure_notice(conn, &msg, now)?
+            && !targets.contains(&notice.to_tab_id)
+        {
+            targets.push(notice.to_tab_id);
         }
     }
     targets.sort();

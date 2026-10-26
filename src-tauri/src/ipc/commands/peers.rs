@@ -1289,7 +1289,7 @@ fn ask_one(app: &AppHandle, target: &OpenTab, from_id: &str, from_name: &str, te
         Err(sent) if sent.delivery == Delivery::Refused => return Ok(ask_refused(target, &sent.message)),
         Err(sent) => return Ok(ask_repeat(target, &sent.message)),
     };
-    if let Err(error) = submit_prompt_as(pty, &outgoing_peer(from_name, text, true, raw), "peer") {
+    if let Err(error) = submit_prompt_as(pty, &peer_queue::retry_marked(&record, outgoing_peer(from_name, text, true, raw)), "peer") {
         peer_queue::end_direct(app, &record, Some(&error));
         return Err(error);
     }
