@@ -266,11 +266,8 @@ impl UpdateExecutor for OfficialExecutor {
 }
 /// Bounded pipes and process containment: children cannot keep readers blocking on timeout.
 pub fn execute_process(cmd: &mut Command, timeout: Duration) -> io::Result<String> {
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        cmd.creation_flags(0x08000000);
-    }
+    // Quem chama pode ter montado o comando por fora do helper: garante o `CREATE_NO_WINDOW`.
+    crate::util::spawn::apply_window(cmd, crate::util::spawn::WindowMode::Hidden);
     let mut child = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
