@@ -61,6 +61,20 @@ fn portals() -> &'static Mutex<HashMap<String, String>> {
     P.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
+/// O último endereço pedido para um Portal que ainda está abrindo: a aba manda navegar logo ao montar, antes de o
+/// WebView existir. Quem abre consome isto no lugar da URL inicial.
+fn pending() -> &'static Mutex<HashMap<String, String>> {
+    static P: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(HashMap::new()))
+}
+
+/// Um Portal abre de cada vez: dois WebView2 criando o ambiente da mesma pasta de dados juntos, o segundo falha
+/// (`0x8007139F`, "o recurso não está no estado correto").
+fn opening() -> &'static tokio::sync::Mutex<()> {
+    static O: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
+    O.get_or_init(|| tokio::sync::Mutex::new(()))
+}
+
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
@@ -94,6 +108,7 @@ fn navigable(url: &str) -> Option<tauri::Url> {
 /// reposiciona: navegar é com `real_browser_navigate`.
 #[tauri::command]
 pub async fn real_browser_open(app: AppHandle, window: tauri::Window, id: String, url: String, place: Place, script: Option<String>) -> Result<(), String> {
+    let _one_at_a_time = opening().lock().await;
     if lock(portals()).contains_key(&id) {
         return real_browser_place(app, id, place);
     }
@@ -147,7 +162,8 @@ async fn open(app: &AppHandle, window: &tauri::Window, id: &str, url: &str, plac
     }
     native::cdp(&webview, "Emulation.setDefaultBackgroundColorOverride", json!({ "color": { "r": 255, "g": 255, "b": 255, "a": 1 } })).await?;
     apply_place(&webview, place)?;
-    if let Some(target) = navigable(url) {
+    let url = lock(pending()).remove(id).unwrap_or_else(|| url.to_string());
+    if let Some(target) = navigable(&url) {
         webview.navigate(target).map_err(|e| e.to_string())?;
     }
     Ok(())
@@ -219,8 +235,12 @@ pub fn real_browser_place(app: AppHandle, id: String, place: Place) -> Result<()
 /// A barra de endereço (ou um agente) mandou ir para `url`. A mesma URL de novo é recarregar, como no T3.
 #[tauri::command]
 pub fn real_browser_navigate(app: AppHandle, id: String, url: String) -> Result<(), String> {
-    let page = webview(&app, &id)?;
     let target = navigable(&url).ok_or("Endereço que o navegador não abre.")?;
+    let Ok(page) = webview(&app, &id) else {
+        // Ainda abrindo: vai direto para cá quando abrir.
+        lock(pending()).insert(id, url);
+        return Ok(());
+    };
     if page.url().ok().as_ref() == Some(&target) {
         return page.reload().map_err(|e| e.to_string());
     }
@@ -242,6 +262,7 @@ pub async fn real_browser_history(app: AppHandle, id: String, delta: i32) -> Res
 /// Fecha o navegador do Portal.
 #[tauri::command]
 pub fn real_browser_close(app: AppHandle, id: String) -> Result<(), String> {
+    lock(pending()).remove(&id);
     let Some(label) = lock(portals()).remove(&id) else { return Ok(()) };
     if let Some(page) = app.get_webview(&label) {
         page.close().map_err(|e| e.to_string())?;
