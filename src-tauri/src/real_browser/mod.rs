@@ -4,13 +4,15 @@
 //! navegador embutido de propósito: o app intermediário veria a senha. Aqui o Portal usa um Chrome real com
 //! um perfil só do app (`<dados>/real-browser-profile`), em dois modos:
 //!
-//! - **Navegar** (o normal): o Chrome é aberto com `--remote-debugging-port=0` e fica fora da tela, sem
-//!   botão na barra de tarefas. Cada Portal tem a **própria janela** do Chrome (o Chrome só desenha a aba
-//!   ativa de cada janela; com várias abas numa janela só, os outros Portais congelavam). A tela chega por
-//!   `Page.startScreencast` e mouse e teclado voltam por CDP. A porta 0 faz o Chrome se declarar
-//!   automatizado (`navigator.webdriver`, ver MDN), e assim fica: o app não esconde isso de site nenhum.
-//! - **Entrar numa conta**: por isso mesmo, o Google recusa o login no modo acima — e a tentativa ainda
-//!   marca o perfil. O login é feito num Chrome COMUM (sem porta de depuração, sem nenhuma alteração), no
+//! - **Navegar** (o normal): o Chrome é aberto com `--remote-debugging-port=<porta livre>` e fica fora da
+//!   tela, sem botão na barra de tarefas. Cada Portal tem a **própria janela** do Chrome (o Chrome só desenha
+//!   a aba ativa de cada janela; com várias abas numa janela só, os outros Portais congelavam). A tela chega
+//!   por `Page.startScreencast` e mouse e teclado voltam por CDP. A porta não é a 0: a 0 liga
+//!   `navigator.webdriver` e o Google barrava toda pesquisa com a página de "tráfego incomum" (ver
+//!   `free_port`). É o estado do navegador embutido do T3 Code, um `<webview>` do Electron que o app controla
+//!   pelo `webContents.debugger`, sem porta 0 nem `--enable-automation`.
+//! - **Entrar numa conta**: o Google recusa login em qualquer Chrome com porta de depuração — e a tentativa
+//!   ainda marca o perfil. O login é feito num Chrome COMUM (sem porta de depuração, sem nenhuma alteração), no
 //!   mesmo perfil, numa janela que o app posiciona em cima do Portal (ver `win`). A pessoa digita direto no
 //!   Chrome, que mostra o endereço; a senha não passa pelo app, que é o que o Google pede.
 //!
@@ -198,12 +200,26 @@ fn chrome(profile: &Path) -> Result<std::process::Command, String> {
     Ok(cmd)
 }
 
-/// A porta que o Chrome anotou em `DevToolsActivePort`, se ele responde nela.
+/// A porta anotada em `DevToolsActivePort` (pelo Chrome de versões anteriores do app, ou por `ensure_browser`), se o
+/// Chrome responde nela.
 async fn live_port(profile: &Path) -> Option<u16> {
     let text = std::fs::read_to_string(profile.join("DevToolsActivePort")).ok()?;
     let port: u16 = text.lines().next()?.trim().parse().ok()?;
+    responds(port).await.then_some(port)
+}
+
+async fn responds(port: u16) -> bool {
     let url = format!("http://127.0.0.1:{port}/json/version");
-    reqwest::Client::new().get(url).timeout(Duration::from_secs(2)).send().await.ok()?.status().is_success().then_some(port)
+    let reply = reqwest::Client::new().get(url).timeout(Duration::from_secs(2)).send().await;
+    reply.is_ok_and(|r| r.status().is_success())
+}
+
+/// Uma porta livre no 127.0.0.1 agora. Não a porta 0: com ela o Chrome liga `navigator.webdriver`, e o Google
+/// responde a qualquer pesquisa com a página de "tráfego incomum" (`/sorry`). Medido no Chrome 156: porta 0 →
+/// `webdriver = true` e `/sorry`; porta fixa → `false` e a pesquisa normal.
+fn free_port() -> Result<u16, String> {
+    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).map_err(|e| format!("Sem porta livre para o Chrome: {e}"))?;
+    listener.local_addr().map(|a| a.port()).map_err(|e| e.to_string())
 }
 
 /// Um comando no nível do navegador (não de uma página), numa conexão curta.
@@ -256,11 +272,12 @@ async fn ensure_browser(app: &AppHandle) -> Result<u16, String> {
     }
     let _ = std::fs::remove_file(profile.join("DevToolsActivePort"));
     prepare_profile(&profile);
+    let port = free_port()?;
     // Fora da tela e fora da barra de tarefas: quem mostra a página é o Portal. Os `--disable-*` mantêm
     // a página desenhando com a janela fora de vista (senão o screencast para).
-    let child = chrome(&profile)?
+    let mut child = chrome(&profile)?
+        .arg(format!("--remote-debugging-port={port}"))
         .args([
-            "--remote-debugging-port=0",
             "--window-position=-32000,-32000",
             "--window-size=1280,800",
             "--disable-backgrounding-occluded-windows",
@@ -279,9 +296,15 @@ async fn ensure_browser(app: &AppHandle) -> Result<u16, String> {
     win::watch_windows(child.id(), |hwnd, _| win::hide_from_taskbar(hwnd));
     let deadline = Instant::now() + Duration::from_secs(20);
     loop {
-        if let Some(port) = live_port(&profile).await {
+        if responds(port).await {
+            // Com porta fixa o Chrome não escreve `DevToolsActivePort`: anotada aqui, a limpeza acima ainda acha
+            // um Chrome que tenha sobrado no perfil.
+            let _ = std::fs::write(profile.join("DevToolsActivePort"), format!("{port}\n"));
             *slot = Some(Browser { child, group, port });
             return Ok(port);
+        }
+        if !matches!(child.try_wait(), Ok(None)) {
+            return Err("O Chrome fechou antes de responder na porta de depuração.".into());
         }
         if Instant::now() >= deadline {
             return Err("O Chrome abriu mas não respondeu na porta de depuração.".into());
@@ -761,5 +784,13 @@ mod test {
     fn portal_pequeno_ganha_janela_minima_centrada_nele() {
         let portal = PortalRect { x: 0.0, y: 0.0, width: 200.0, height: 100.0, scale: 1.0 };
         assert_eq!(login_rect(portal, (0, 0)), Rect { x: -140, y: -250, w: 480, h: 600 });
+    }
+
+    #[test]
+    fn porta_do_chrome_nunca_e_a_zero() {
+        // A 0 liga `navigator.webdriver` no Chrome, e o Google barra as pesquisas.
+        let port = super::free_port().unwrap();
+        assert_ne!(port, 0);
+        assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "a porta devolvida tem que estar livre");
     }
 }
