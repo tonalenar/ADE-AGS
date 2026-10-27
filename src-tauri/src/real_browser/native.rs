@@ -19,7 +19,7 @@ use webview2_com::Microsoft::Web::WebView2::Win32::{
     COREWEBVIEW2_MOVE_FOCUS_REASON_PROGRAMMATIC, COREWEBVIEW2_SCROLLBAR_STYLE_DEFAULT,
 };
 use webview2_com::{
-    take_pwstr, CallDevToolsProtocolMethodCompletedHandler, CoreWebView2EnvironmentOptions, CreateCoreWebView2ControllerCompletedHandler,
+    take_pwstr, AddScriptToExecuteOnDocumentCreatedCompletedHandler, CallDevToolsProtocolMethodCompletedHandler, CoreWebView2EnvironmentOptions, CreateCoreWebView2ControllerCompletedHandler,
     CreateCoreWebView2EnvironmentCompletedHandler, DevToolsProtocolEventReceivedEventHandler, DocumentTitleChangedEventHandler,
     HistoryChangedEventHandler, NavigationCompletedEventHandler, NavigationStartingEventHandler, NewWindowRequestedEventHandler,
     SourceChangedEventHandler,
@@ -268,6 +268,22 @@ pub async fn cdp(app: &AppHandle, id: &str, method: &str, params: Value) -> Resu
         .map_err(|_| format!("O navegador não respondeu a {method}."))?
         .map_err(|_| format!("O navegador recusou {method}."))??;
     serde_json::from_str(&reply).map_err(|e| e.to_string())
+}
+
+/// Um script em todo documento novo, antes dos da página (o `AddScriptToExecuteOnDocumentCreated` do WebView2, o
+/// mesmo dos scripts de inicialização do Tauri). Pelo CDP (`Page.addScriptToEvaluateOnNewDocument`) o WebView2
+/// aceitava e não rodava.
+pub async fn add_script(app: &AppHandle, id: &str, source: String) -> Result<(), String> {
+    let (done, wait) = oneshot::channel::<Result<(), String>>();
+    with_portal(app, id, move |portal| {
+        let handler = AddScriptToExecuteOnDocumentCreatedCompletedHandler::create(Box::new(move |result, _| {
+            let _ = done.send(result.map_err(|e| e.message()));
+            Ok(())
+        }));
+        let _ = unsafe { portal.core.AddScriptToExecuteOnDocumentCreated(&HSTRING::from(source), &handler) };
+    })
+    .await?;
+    wait.await.map_err(|_| "O navegador recusou o piloto.".to_string())?
 }
 
 /// Onde a janela do Portal fica (px físicos, relativos à janela do app), o zoom da página e o que dela aparece

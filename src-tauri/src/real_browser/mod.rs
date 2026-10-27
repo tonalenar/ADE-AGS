@@ -49,6 +49,9 @@ mod native {
         Err(NO.into())
     }
     pub fn close(_: &AppHandle, _: &str) {}
+    pub async fn add_script(_: &AppHandle, _: &str, _: String) -> Result<(), String> {
+        Err(NO.into())
+    }
 }
 
 use std::collections::{HashMap, HashSet};
@@ -142,7 +145,7 @@ pub async fn real_browser_open(app: AppHandle, window: tauri::Window, id: String
         if let Some(script) = script {
             native::cdp(&app, &id, "Runtime.addBinding", json!({ "name": BINDING })).await?;
             native::cdp(&app, &id, "Runtime.enable", json!({})).await?;
-            native::cdp(&app, &id, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": format!("{BRIDGE}\n;{script}") })).await?;
+            native::add_script(&app, &id, format!("{BRIDGE}\n;{script}")).await?;
         }
         let white = json!({ "color": { "r": 255, "g": 255, "b": 255, "a": 1 } });
         let _ = native::cdp(&app, &id, "Emulation.setDefaultBackgroundColorOverride", white).await;
