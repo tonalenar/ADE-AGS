@@ -23,6 +23,8 @@ describe("folderLabel", () => {
   it("encurta o home com ~, como o Claude Code", () => {
     expect(folderLabel("C:\\Users\\eu\\.antigravity\\ADE-AGS", "C:\\Users\\eu")).toEqual({ name: "ADE-AGS", parent: "~\\.antigravity" });
     expect(folderLabel("C:\\Users\\eu\\proj", "c:\\users\\eu\\")).toEqual({ name: "proj", parent: "~" });
+    // cwd com `/` e home com `\`, como vem do sistema no Windows.
+    expect(folderLabel("C:/Users/eu/.antigravity/ADE-AGS", "C:\\Users\\eu")).toEqual({ name: "ADE-AGS", parent: "~/.antigravity" });
   });
 
   it("fora do home mostra o caminho do pai inteiro", () => {

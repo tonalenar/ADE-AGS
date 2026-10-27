@@ -9,9 +9,11 @@ export function folderLabel(cwd: string, home: string | null): { name: string; p
   const sep = cwd.includes("\\") ? "\\" : "/";
   let parent = (/^[\\/]/.test(cwd) ? sep : "") + parts.join(sep);
   if (home) {
+    // O home vem do sistema (com `\` no Windows) e o cwd pode vir com `/`: compara sem olhar a barra.
+    const key = (p: string) => p.replace(/\\/g, "/").toLowerCase();
     const h = home.replace(/[\\/]+$/, "");
-    if (parent.toLowerCase() === h.toLowerCase()) parent = "~";
-    else if (parent.toLowerCase().startsWith(h.toLowerCase() + sep)) parent = "~" + parent.slice(h.length);
+    if (key(parent) === key(h)) parent = "~";
+    else if (key(parent).startsWith(key(h) + "/")) parent = "~" + parent.slice(h.length);
   }
   return { name, parent };
 }
