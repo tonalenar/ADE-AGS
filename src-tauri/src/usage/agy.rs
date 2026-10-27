@@ -211,6 +211,7 @@ mod tests {
 
     /// Contra o `agy` desta máquina: `cargo test --lib usage::agy -- --ignored`. Não gasta tokens.
     #[test]
+    // quarantine: precisa do `agy` instalado e com login; o CI não tem nenhum dos dois.
     #[ignore]
     fn ao_vivo_le_o_login_local() {
         let program = crate::util::find_program("agy").expect("agy no PATH");
