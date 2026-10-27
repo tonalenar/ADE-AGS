@@ -354,9 +354,14 @@ pub async fn real_browser_open(
     height: u32,
     scale: Option<f64>,
     script: Option<String>,
+    fresh: Option<bool>,
 ) -> Result<(), String> {
     let scale = scale.filter(|s| *s > 0.0).unwrap_or(1.0);
-    if lock(pages()).contains_key(&id) {
+    // `fresh`: troca a janela do Portal por uma nova (a antiga só fecha depois, para o Chrome não sair sem janela).
+    let mut stale = None;
+    if fresh == Some(true) {
+        stale = lock(pages()).remove(&id).map(|p| p.target);
+    } else if lock(pages()).contains_key(&id) {
         send_raw(&id, "Emulation.setDeviceMetricsOverride", metrics(width, height, scale))?;
         return send_raw(&id, "Page.navigate", json!({ "url": url }));
     }
@@ -450,6 +455,9 @@ pub async fn real_browser_open(
     });
 
     lock(pages()).insert(id.clone(), Page { target, tx, pending });
+    if let Some(stale) = stale {
+        let _ = browser_call(port, "Target.closeTarget", json!({ "targetId": stale })).await;
+    }
     send_raw(&id, "Page.enable", json!({}))?;
     send_raw(&id, "Emulation.setDeviceMetricsOverride", metrics(width, height, scale))?;
     // A janela fica fora de foco o tempo todo; sem isto o cursor de texto nem pisca e alguns campos

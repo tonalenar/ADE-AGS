@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { keyDownEvent, cdpModifiers, mouseButton, pageMetrics, pagePoint, realBrowserClose, realBrowserOpen, realBrowserSend, isEchoOfReported, rememberReported } from "./realBrowser";
+import { keyDownEvent, cdpModifiers, mouseButton, pageMetrics, pagePoint, realBrowserClose, realBrowserOpen, realBrowserSend, isEchoOfReported, noteNavigation, rememberReported, type Navigation } from "./realBrowser";
 
 /** A tela do Chrome real dentro do Portal: mostra os quadros do screencast e devolve mouse e
  *  teclado. O tamanho da página acompanha o tamanho do Portal (sem o zoom do canvas). */
@@ -28,9 +28,17 @@ export function RealBrowserView({ viewId, url, zoom, script, onUrl, onError }: {
   // na segunda; sem isto, a primeira parecia vir da barra de endereço, o Portal navegava de volta e o Google
   // redirecionava de novo — a página piscava em laço e não aceitava clique nenhum.
   const reported = useRef(new Map<string, number>());
+  // O laço de recarga: as últimas navegações, o último clique/tecla e quando a janela já foi trocada por uma nova.
+  const navs = useRef<Navigation[]>([]);
+  const lastInput = useRef(0);
+  const renewedAt = useRef(0);
+  const scriptRef = useRef(script);
+  scriptRef.current = script;
   const opened = useRef(false);
   const onUrlRef = useRef(onUrl);
   onUrlRef.current = onUrl;
+  const onErrorRef = useRef(onError);
+  onErrorRef.current = onError;
   const zoomRef = useRef(zoom);
   zoomRef.current = zoom;
   // O tamanho em layout (offset), não o da tela: o zoom do canvas não muda a página.
@@ -100,9 +108,21 @@ export function RealBrowserView({ viewId, url, zoom, script, onUrl, onError }: {
       }),
       listen<{ id: string; url: string }>("real-browser-url", (e) => {
         if (e.payload.id !== viewId) return;
+        const now = Date.now();
         shownUrl.current = e.payload.url;
-        rememberReported(reported.current, e.payload.url, Date.now());
+        rememberReported(reported.current, e.payload.url, now);
         onUrlRef.current(e.payload.url);
+        if (!noteNavigation(navs.current, e.payload.url, now, lastInput.current)) return;
+        navs.current = [];
+        if (now - renewedAt.current < 60_000) {
+          // A janela nova também entrou em laço: para de vez, senão o site marca o IP (o Google responde `/sorry`).
+          realBrowserSend(viewId, "Page.navigate", { url: "about:blank" }).catch(() => undefined);
+          onErrorRef.current("A página ficou recarregando sem parar e foi interrompida. Tente abrir o endereço de novo daqui a pouco.");
+          return;
+        }
+        // O estado que prende a página no laço é da janela (uma nova, no mesmo perfil e logada, fica parada).
+        renewedAt.current = now;
+        realBrowserOpen(viewId, e.payload.url, metrics(), scriptRef.current, true).catch((err) => onErrorRef.current(String(err)));
       }),
     ];
     return () => { offs.forEach((p) => p.then((off) => off())); };
@@ -129,6 +149,7 @@ export function RealBrowserView({ viewId, url, zoom, script, onUrl, onError }: {
   const mouse = (type: string) => (e: React.MouseEvent) => {
     e.stopPropagation();
     if (type === "mousePressed") {
+      lastInput.current = Date.now();
       e.preventDefault();
       box.current?.focus();
     }
@@ -155,6 +176,7 @@ export function RealBrowserView({ viewId, url, zoom, script, onUrl, onError }: {
       onMouseMove={mouse("mouseMoved")}
       onContextMenu={(e) => e.preventDefault()}
       onKeyDown={(e) => {
+        lastInput.current = Date.now();
         e.preventDefault();
         e.stopPropagation();
         const event = keyDownEvent(e);

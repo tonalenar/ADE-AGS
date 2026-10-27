@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cdpModifiers, isEchoOfReported, isGoogleSignIn, keyDownEvent, loginStartUrl, mouseButton, pageMetrics, pagePoint, rememberReported, REPORTED_URL_MS, shouldOpenInRealChrome } from "../realBrowser";
+import { cdpModifiers, isEchoOfReported, isGoogleSignIn, keyDownEvent, loginStartUrl, mouseButton, navigationKey, noteNavigation, RELOAD_LOOP, type Navigation, pageMetrics, pagePoint, rememberReported, REPORTED_URL_MS, shouldOpenInRealChrome } from "../realBrowser";
 
 describe("Chrome real: zoom da página", () => {
   it("150% = página com menos pixels CSS e mais densidade", () => {
@@ -108,5 +108,33 @@ describe("eco das URLs que o Chrome informou", () => {
     const reported = new Map<string, number>();
     for (let i = 0; i < 5; i++) rememberReported(reported, `https://a/${i}`, i, 3);
     expect([...reported.keys()]).toEqual(["https://a/2", "https://a/3", "https://a/4"]);
+  });
+});
+
+describe("laço de recarga da página", () => {
+  const feed = (urls: string[], step: number, lastInput = 0, start = 1_000) => {
+    const navs: Navigation[] = [];
+    return urls.map((u, i) => noteNavigation(navs, u, start + i * step, lastInput));
+  };
+  const google = Array.from({ length: RELOAD_LOOP.count }, (_, i) => `https://www.google.com/?zx=${i}`);
+
+  it("ignora a query: cada recarga do Google tem um zx novo", () => {
+    expect(navigationKey("https://www.google.com/?zx=1#a")).toBe(navigationKey("https://www.google.com/?zx=2"));
+    expect(navigationKey("https://www.google.com/search")).not.toBe(navigationKey("https://www.google.com/"));
+  });
+
+  it("acusa o laço só na N-ésima recarga seguida", () => {
+    const hits = feed(google, 700);
+    expect(hits.slice(0, -1).every((h) => !h)).toBe(true);
+    expect(hits[hits.length - 1]).toBe(true);
+  });
+
+  it("um redirecionamento normal ou navegações espaçadas não são laço", () => {
+    expect(feed(["https://a.com/", "https://accounts.google.com/x", "https://a.com/"], 200).some(Boolean)).toBe(false);
+    expect(feed(google, RELOAD_LOOP.windowMs / (RELOAD_LOOP.count - 2)).some(Boolean)).toBe(false);
+  });
+
+  it("navegações depois de um clique ou tecla são da pessoa", () => {
+    expect(feed(google, 700, 1_500).some(Boolean)).toBe(false);
   });
 });

@@ -34,6 +34,33 @@ export function isEchoOfReported(reported: Map<string, number>, url: string, now
   return at !== undefined && now - at < REPORTED_URL_MS;
 }
 
+/** Quantas navegações seguidas para o mesmo endereço (sem contar a query), sem a pessoa mexer, e em quanto tempo,
+ *  já são um laço de recarga. Um redirecionamento normal são 2-4; o Google logo depois de entrar na conta pelo Portal
+ *  chegou a recarregar `/?zx=…` a cada ~0,7 s sem parar, só naquela aba (uma aba nova no mesmo perfil fica parada). */
+export const RELOAD_LOOP = { count: 6, windowMs: 6_000 };
+
+export type Navigation = { at: number; key: string };
+
+/** O endereço sem query nem âncora: `/?zx=1` e `/?zx=2` contam como a mesma página. */
+export function navigationKey(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.origin}${u.pathname}`;
+  } catch {
+    return url;
+  }
+}
+
+/** Anota a navegação e diz se a página entrou em laço: as últimas `count` foram para o mesmo endereço, dentro da
+ *  janela, todas depois do último clique ou tecla (quem recarrega é a página, não a pessoa). Guarda só as `count`. */
+export function noteNavigation(navs: Navigation[], url: string, now: number, lastInput: number): boolean {
+  navs.push({ at: now, key: navigationKey(url) });
+  while (navs.length > RELOAD_LOOP.count) navs.shift();
+  if (navs.length < RELOAD_LOOP.count) return false;
+  const first = navs[0];
+  return now - first.at <= RELOAD_LOOP.windowMs && first.at > lastInput && navs.every((n) => n.key === first.key);
+}
+
 export const MIN_RENDER_DENSITY = 2;
 
 /** Quantos pixels, no máximo, o Chrome desenha por quadro: acima disso (nó muito grande) o desenho a 2× pesa demais. */
@@ -55,8 +82,9 @@ export function pageMetrics(box: { width: number; height: number }, zoom: number
 }
 
 /** `script`: o piloto dos agentes, que o Chrome roda em todo documento (o mesmo que o proxy injeta no outro navegador). */
-export const realBrowserOpen = (id: string, url: string, metrics: ReturnType<typeof pageMetrics>, script?: string) =>
-  invoke<void>("real_browser_open", { id, url, width: metrics.width, height: metrics.height, scale: metrics.deviceScaleFactor, script });
+/** `fresh`: troca a janela do Portal por uma nova, mesmo já aberta (sai de um laço de recarga). */
+export const realBrowserOpen = (id: string, url: string, metrics: ReturnType<typeof pageMetrics>, script?: string, fresh?: boolean) =>
+  invoke<void>("real_browser_open", { id, url, width: metrics.width, height: metrics.height, scale: metrics.deviceScaleFactor, script, fresh });
 
 /** Uma mensagem do app para o piloto da página (`page:run`, `connect`…). */
 export const realBrowserPost = (id: string, message: unknown) => invoke<void>("real_browser_post", { id, message });
