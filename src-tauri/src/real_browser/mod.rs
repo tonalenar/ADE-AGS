@@ -11,10 +11,12 @@
 //!   `navigator.webdriver` e o Google barrava toda pesquisa com a página de "tráfego incomum" (ver
 //!   `free_port`). É o estado do navegador embutido do T3 Code, um `<webview>` do Electron que o app controla
 //!   pelo `webContents.debugger`, sem porta 0 nem `--enable-automation`.
-//! - **Entrar numa conta**: o Google recusa login em qualquer Chrome com porta de depuração — e a tentativa
-//!   ainda marca o perfil. O login é feito num Chrome COMUM (sem porta de depuração, sem nenhuma alteração), no
-//!   mesmo perfil, numa janela que o app posiciona em cima do Portal (ver `win`). A pessoa digita direto no
-//!   Chrome, que mostra o endereço; a senha não passa pelo app, que é o que o Google pede.
+//!   O login do Google também vai direto no Portal: sem a porta 0 o Google aceita o formulário (medido no
+//!   Chrome 156: o e-mail é processado normalmente). Nesse caso as teclas, senha inclusive, passam pelo app
+//!   até o Chrome (`Input.dispatchKeyEvent`), como qualquer outra digitação no Portal.
+//! - **Entrar numa conta** (a alternativa, se o Google recusar no Portal): um Chrome COMUM (sem porta de
+//!   depuração, sem nenhuma alteração), no mesmo perfil, numa janela que o app posiciona em cima do Portal
+//!   (ver `win`). A pessoa digita direto no Chrome, que mostra o endereço; a senha não passa pelo app.
 //!
 //! A conexão CDP fica toda aqui no Rust: o Chrome não é aberto com `--remote-allow-origins`, então nenhuma
 //! página (nem a do app, nem um site) consegue falar com a porta de depuração e pegar a sessão logada.

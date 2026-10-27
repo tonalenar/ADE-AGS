@@ -1011,20 +1011,27 @@ export function BrowserTab({ view, active, device = null }: {
                 {t("browser.real.loginDone")}
               </Button>
             </div>
-          ) : real && isGoogleSignIn(address) ? (
-            <div className="flex flex-1 flex-col gap-3 items-center justify-center p-8 text-center text-[12.5px] text-gray-600 dark:text-white/60">
-              <p className="max-w-sm">{t("browser.real.signInHere")}</p>
-              <Button variant="custom" onClick={startLogin}
-                className="px-3 h-8 rounded-full text-[12px] font-semibold bg-accent-600 text-white hover:bg-accent-500">
-                {t("browser.real.login")}
-              </Button>
-            </div>
           ) : real ? (
+            <>
+            {/* O login do Google vai direto no Portal: sem a porta 0 o Chrome não se declara automatizado e o
+                Google aceita o formulário (ver `real_browser::free_port`). Se ainda assim recusar ("este navegador
+                pode não ser seguro"), a faixa oferece o Chrome comum por cima do Portal. */}
+            {isGoogleSignIn(address) && (
+              <div className="flex shrink-0 items-center gap-2 px-3 py-1.5 text-[11.5px]
+                bg-sky-500/10 text-sky-800 dark:text-sky-200 border-b border-sky-500/20">
+                <span className="flex-1 min-w-0">{t("browser.real.signInHere")}</span>
+                <Button variant="custom" onClick={startLogin}
+                  className="shrink-0 px-2.5 h-6 rounded-full text-[11px] font-semibold bg-accent-600 text-white hover:bg-accent-500">
+                  {t("browser.real.login")}
+                </Button>
+              </div>
+            )}
             <RealBrowserView key={realKey} viewId={view.id} url={view.url} zoom={zoom} script={INJECTED} onError={setError}
               onUrl={(u) => {
                 setAddress(u);
                 try { updateView(view.id, { url: u, title: new URL(u).host || u }); } catch { /* chrome://, about: */ }
               }} />
+            </>
           ) : target ? (
             <ResponsiveStage viewport={viewport} onResize={setViewport} zoom={zoom} device={device}>
             <iframe
