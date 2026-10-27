@@ -192,13 +192,68 @@ fn prepare_profile(profile: &Path) {
     let _ = std::fs::write(&path, state.to_string());
 }
 
-/// O Chrome sem nada além do perfil e das telas de boas-vindas desligadas.
+/// A marca de um login do Google feito com as sessões presas ao dispositivo (ver `NO_BOUND_SESSIONS`).
+const BOUND_SESSION_PARAMS: &str = "bound_session_credentials_bound_session_params";
+
+/// Tira a marca das sessões presas ao dispositivo do perfil (`Default/Preferences`) e diz se ela estava lá: os
+/// cookies daquele login só se mantêm renovados com o DBSC, então o chamador os apaga e a pessoa entra de novo.
+fn forget_bound_sessions(profile: &Path) -> bool {
+    let path = profile.join("Default").join("Preferences");
+    let Some(mut prefs) = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()) else {
+        return false;
+    };
+    let had = prefs.as_object_mut().and_then(|o| o.remove(BOUND_SESSION_PARAMS)).is_some_and(|v| v.as_object().is_some_and(|o| !o.is_empty()));
+    if had {
+        let _ = std::fs::write(&path, prefs.to_string());
+    }
+    had
+}
+
+/// Os domínios do login do Google (o `/sorry` e a conta valem para todos eles).
+fn is_google_cookie(domain: &str) -> bool {
+    let host = domain.trim_start_matches('.');
+    ["google.com", "google.com.br", "youtube.com"].iter().any(|d| host == *d || host.ends_with(&format!(".{d}")))
+}
+
+/// Apaga os cookies do Google do perfil (vencendo cada um: `Storage.setCookies` no navegador inteiro).
+async fn clear_google_cookies(port: u16) -> Result<(), String> {
+    let all = browser_call(port, "Storage.getCookies", json!({})).await?;
+    let expired: Vec<Value> = all["cookies"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter(|c| c["domain"].as_str().is_some_and(is_google_cookie))
+        .map(|c| {
+            let mut p = json!({
+                "name": c["name"], "value": "", "domain": c["domain"], "path": c["path"],
+                "secure": c["secure"], "httpOnly": c["httpOnly"], "expires": 1,
+            });
+            if !c["partitionKey"].is_null() {
+                p["partitionKey"] = c["partitionKey"].clone();
+            }
+            p
+        })
+        .collect();
+    if expired.is_empty() {
+        return Ok(());
+    }
+    browser_call(port, "Storage.setCookies", json!({ "cookies": expired })).await.map(|_| ())
+}
+
+/// As sessões presas ao dispositivo (DBSC): com elas, o login do Google vira cookies de poucos minutos que o Chrome
+/// renova sozinho com uma chave do TPM. No Chrome do Portal (fechado à força, controlado pelo CDP) a renovação falhava:
+/// logado, o Google recarregava `/?zx=…` a cada ~0,7 s em qualquer aba, até o IP cair no `/sorry`. Sem elas o Google
+/// emite os cookies comuns, como faz para qualquer navegador sem DBSC. Vale também para a janela de login, que usa o
+/// mesmo perfil: um login feito lá com DBSC deixaria cookies que este Chrome não renova.
+const NO_BOUND_SESSIONS: &str = "--disable-features=EnableBoundSessionCredentials,DeviceBoundSessions";
+
+/// O Chrome sem nada além do perfil, das telas de boas-vindas desligadas e das sessões presas ao dispositivo.
 fn chrome(profile: &Path) -> Result<std::process::Command, String> {
     let exe = chrome_path().ok_or("Não achei o Chrome nem o Edge instalados.")?;
     // Sem console (o helper de todo spawn do app); as janelas do Chrome não dependem disso.
     let mut cmd = crate::util::spawn::hidden_command(exe);
     cmd.arg(format!("--user-data-dir={}", profile.display()))
-        .args(["--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble"]);
+        .args(["--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble", NO_BOUND_SESSIONS]);
     Ok(cmd)
 }
 
@@ -274,6 +329,7 @@ async fn ensure_browser(app: &AppHandle) -> Result<u16, String> {
     }
     let _ = std::fs::remove_file(profile.join("DevToolsActivePort"));
     prepare_profile(&profile);
+    let bound = forget_bound_sessions(&profile);
     let port = free_port()?;
     // Fora da tela e fora da barra de tarefas: quem mostra a página é o Portal. Os `--disable-*` mantêm
     // a página desenhando com a janela fora de vista (senão o screencast para).
@@ -302,6 +358,10 @@ async fn ensure_browser(app: &AppHandle) -> Result<u16, String> {
             // Com porta fixa o Chrome não escreve `DevToolsActivePort`: anotada aqui, a limpeza acima ainda acha
             // um Chrome que tenha sobrado no perfil.
             let _ = std::fs::write(profile.join("DevToolsActivePort"), format!("{port}\n"));
+            if bound {
+                // O login antigo, preso ao dispositivo, não se renova mais: sai, e o próximo login é comum.
+                let _ = clear_google_cookies(port).await;
+            }
             *slot = Some(Browser { child, group, port });
             return Ok(port);
         }
@@ -802,5 +862,37 @@ mod test {
         let port = super::free_port().unwrap();
         assert_ne!(port, 0);
         assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "a porta devolvida tem que estar livre");
+    }
+
+    #[test]
+    fn chrome_do_portal_sem_sessoes_presas_ao_dispositivo() {
+        // Os nomes exatos do Chrome 156: com eles ligados, o Google recarregava sem parar depois do login.
+        for feature in ["EnableBoundSessionCredentials", "DeviceBoundSessions"] {
+            assert!(super::NO_BOUND_SESSIONS.split(['=', ',']).any(|f| f == feature), "{feature}");
+        }
+        assert!(super::NO_BOUND_SESSIONS.starts_with("--disable-features="));
+    }
+
+    #[test]
+    fn esquece_a_marca_das_sessoes_presas_uma_vez_so() {
+        let dir = std::env::temp_dir().join(format!("ags-bound-{}", std::process::id()));
+        std::fs::create_dir_all(dir.join("Default")).unwrap();
+        let prefs = dir.join("Default").join("Preferences");
+        std::fs::write(&prefs, r#"{"bound_session_credentials_bound_session_params":{"https://google.com/":{"x":"y"}},"keep":1}"#).unwrap();
+        assert!(super::forget_bound_sessions(&dir));
+        let left: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&prefs).unwrap()).unwrap();
+        assert_eq!(left, serde_json::json!({ "keep": 1 }));
+        assert!(!super::forget_bound_sessions(&dir), "na segunda vez não há mais o que apagar");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn cookies_do_google_e_so_eles() {
+        for d in [".google.com", "accounts.google.com", "www.google.com.br", ".youtube.com"] {
+            assert!(super::is_google_cookie(d), "{d}");
+        }
+        for d in ["notgoogle.com", "google.com.evil.io", ".github.com"] {
+            assert!(!super::is_google_cookie(d), "{d}");
+        }
     }
 }
