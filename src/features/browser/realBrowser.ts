@@ -17,6 +17,23 @@ export function shouldOpenInRealChrome(url: string, realChrome: boolean | undefi
   return /^https?:\/\//i.test(url) && !isLocalUrl(url);
 }
 
+/** Quanto tempo uma URL informada pelo Chrome ainda conta como "dele": a corrida entre duas trocas seguidas de URL
+ *  dura alguns quadros, e digitar um endereço na barra leva bem mais que isto. */
+export const REPORTED_URL_MS = 3_000;
+
+/** Anota uma URL que o próprio Chrome informou agora, guardando só as `max` mais recentes. */
+export function rememberReported(reported: Map<string, number>, url: string, now: number, max = 32): void {
+  reported.delete(url);
+  reported.set(url, now);
+  while (reported.size > max) reported.delete(reported.keys().next().value!);
+}
+
+/** A URL nova da vista é só um eco atrasado do que o Chrome acabou de informar (e não um endereço digitado)? */
+export function isEchoOfReported(reported: Map<string, number>, url: string, now: number): boolean {
+  const at = reported.get(url);
+  return at !== undefined && now - at < REPORTED_URL_MS;
+}
+
 export const MIN_RENDER_DENSITY = 2;
 
 /** Quantos pixels, no máximo, o Chrome desenha por quadro: acima disso (nó muito grande) o desenho a 2× pesa demais. */

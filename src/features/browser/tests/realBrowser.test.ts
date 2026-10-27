@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cdpModifiers, isGoogleSignIn, keyDownEvent, loginStartUrl, mouseButton, pageMetrics, pagePoint, shouldOpenInRealChrome } from "../realBrowser";
+import { cdpModifiers, isEchoOfReported, isGoogleSignIn, keyDownEvent, loginStartUrl, mouseButton, pageMetrics, pagePoint, rememberReported, REPORTED_URL_MS, shouldOpenInRealChrome } from "../realBrowser";
 
 describe("Chrome real: zoom da página", () => {
   it("150% = página com menos pixels CSS e mais densidade", () => {
@@ -85,5 +85,28 @@ describe("shouldOpenInRealChrome", () => {
   it("só http(s) conta", () => {
     expect(shouldOpenInRealChrome("about:blank", undefined)).toBe(false);
     expect(shouldOpenInRealChrome("file:///c:/x.html", undefined)).toBe(false);
+  });
+});
+
+describe("eco das URLs que o Chrome informou", () => {
+  it("a URL antiga de duas trocas seguidas (o Google depois do login) não faz o Portal navegar de volta", () => {
+    const reported = new Map<string, number>();
+    rememberReported(reported, "https://www.google.com/", 1_000);
+    rememberReported(reported, "https://www.google.com/?zx=17931", 1_040);
+    // A vista renderiza a primeira quando o Chrome já está na segunda: é eco, não endereço digitado.
+    expect(isEchoOfReported(reported, "https://www.google.com/", 1_100)).toBe(true);
+  });
+
+  it("um endereço digitado depois da janela navega, mesmo que o Chrome já o tenha mostrado antes", () => {
+    const reported = new Map<string, number>();
+    rememberReported(reported, "https://www.google.com/", 1_000);
+    expect(isEchoOfReported(reported, "https://www.google.com/", 1_000 + REPORTED_URL_MS)).toBe(false);
+    expect(isEchoOfReported(reported, "https://example.com/", 1_100)).toBe(false);
+  });
+
+  it("guarda só as mais recentes", () => {
+    const reported = new Map<string, number>();
+    for (let i = 0; i < 5; i++) rememberReported(reported, `https://a/${i}`, i, 3);
+    expect([...reported.keys()]).toEqual(["https://a/2", "https://a/3", "https://a/4"]);
   });
 });

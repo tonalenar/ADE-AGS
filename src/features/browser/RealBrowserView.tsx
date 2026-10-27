@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import { keyDownEvent, cdpModifiers, mouseButton, pageMetrics, pagePoint, realBrowserClose, realBrowserOpen, realBrowserSend } from "./realBrowser";
+import { keyDownEvent, cdpModifiers, mouseButton, pageMetrics, pagePoint, realBrowserClose, realBrowserOpen, realBrowserSend, isEchoOfReported, rememberReported } from "./realBrowser";
 
 /** A tela do Chrome real dentro do Portal: mostra os quadros do screencast e devolve mouse e
  *  teclado. O tamanho da página acompanha o tamanho do Portal (sem o zoom do canvas). */
@@ -23,6 +23,11 @@ export function RealBrowserView({ viewId, url, zoom, script, onUrl, onError }: {
   urlRef.current = url;
   // A última URL que o Chrome mostrou: uma URL nova na vista que não é esta veio da barra de endereço.
   const shownUrl = useRef(url);
+  // As URLs que o PRÓPRIO Chrome acabou de informar (com quando). Uma página que troca de URL duas vezes
+  // seguidas (o Google depois do login: `/` e logo `/?zx=…`) faz a vista renderizar a primeira quando o Chrome já está
+  // na segunda; sem isto, a primeira parecia vir da barra de endereço, o Portal navegava de volta e o Google
+  // redirecionava de novo — a página piscava em laço e não aceitava clique nenhum.
+  const reported = useRef(new Map<string, number>());
   const opened = useRef(false);
   const onUrlRef = useRef(onUrl);
   onUrlRef.current = onUrl;
@@ -63,7 +68,7 @@ export function RealBrowserView({ viewId, url, zoom, script, onUrl, onError }: {
   }, [zoom]); // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
-    if (!opened.current || !url || url === shownUrl.current) return;
+    if (!opened.current || !url || url === shownUrl.current || isEchoOfReported(reported.current, url, Date.now())) return;
     shownUrl.current = url;
     realBrowserSend(viewId, "Page.navigate", { url }).catch((e) => onError(String(e)));
   }, [url]); // eslint-disable-line react-hooks/exhaustive-deps
@@ -96,6 +101,7 @@ export function RealBrowserView({ viewId, url, zoom, script, onUrl, onError }: {
       listen<{ id: string; url: string }>("real-browser-url", (e) => {
         if (e.payload.id !== viewId) return;
         shownUrl.current = e.payload.url;
+        rememberReported(reported.current, e.payload.url, Date.now());
         onUrlRef.current(e.payload.url);
       }),
     ];
