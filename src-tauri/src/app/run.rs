@@ -88,16 +88,13 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(crate::updates::plugin())
         .manage(db_conn)
-        // A tela do Chrome real, em binário (ver `real_browser::frame_protocol`).
-        .register_uri_scheme_protocol("agsframe", |_ctx, request| crate::real_browser::frame_protocol(&request))
         .invoke_handler(tauri::generate_handler![
             crate::real_browser::real_browser_open,
-            crate::real_browser::real_browser_send,
+            crate::real_browser::real_browser_place,
+            crate::real_browser::real_browser_navigate,
             crate::real_browser::real_browser_history,
             crate::real_browser::real_browser_close,
-            crate::real_browser::real_browser_login,
-            crate::real_browser::real_browser_login_finish,
-            crate::real_browser::real_browser_login_place,
+            crate::real_browser::real_browser_focus,
             crate::real_browser::real_browser_post,
             crate::real_browser::real_browser_screenshot,
             crate::design::design_create,
