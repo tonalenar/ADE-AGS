@@ -402,6 +402,7 @@ pub fn run() {
             crate::accounts::antigravity_oauth::antigravity_oauth_cancel,
             crate::accounts::antigravity_oauth::antigravity_oauth_verify,
             crate::accounts::antigravity_access::antigravity_account_discovery,
+            crate::usage::agy::antigravity_cli_usage,
             crate::usage::agent_account_usage,
             crate::usage::claude_live_usage,
             crate::usage::mission_tokens,
