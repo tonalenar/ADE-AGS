@@ -992,19 +992,43 @@ pub async fn pty_kill(id: u32) -> Result<(), String> {
     // Em duas linhas de propósito: o `if let` segurava o registro durante o kill e o wait
     // (até ~300 ms), travando todas as outras terminais a cada agente fechado.
     let removed = registry().remove(&id);
-    if let Some(mut session) = removed {
+    if let Some(session) = removed {
         forget_session(&session);
-        // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
-        // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los
-        // hijos y se pierde el vínculo). Con cgroups o Job Objects el orden da igual.
-        session.group.kill_all();
-        session.killer.kill().map_err(|e| format!("Kill error: {e}"))?;
-        // Se reclama el status para que el hijo no quede zombie: `kill` solo manda la
-        // señal, no espera a que el proceso muera de verdad.
-        let _ = session.killer.wait();
+        // Esperar o filho bloqueia: vai para uma thread de bloqueio, não para o runtime.
+        tokio::task::spawn_blocking(move || stop_session(session))
+            .await
+            .map_err(|e| format!("Kill error: {e}"))??;
     }
     buffers().remove(&id);
     Ok(())
+}
+
+/// Quanto o `pty_kill` espera o processo sair depois do sinal.
+const KILL_WAIT: std::time::Duration = std::time::Duration::from_secs(5);
+
+fn stop_session(mut session: PtySession) -> Result<(), String> {
+    // El grupo va PRIMERO: el respaldo por `ppid` de unix necesita al padre todavía
+    // vivo para poder recorrer el árbol (una vez muerto, el kernel reasigna a los
+    // hijos y se pierde el vínculo). Con cgroups o Job Objects el orden da igual.
+    session.group.kill_all();
+    // No Windows o Job Object já levou o processo, e `TerminateProcess` num processo morto
+    // falha com "acesso negado". Falhar ao matar só é erro se ele continua vivo.
+    let killed = session.killer.kill();
+    // Se reclama el status para que el hijo no quede zombie, mas com prazo: um processo que
+    // não sai não pode travar quem chamou (o "Atualizar" ficava parado em 8%).
+    let deadline = std::time::Instant::now() + KILL_WAIT;
+    loop {
+        if let Ok(Some(_)) = session.killer.try_wait() {
+            return Ok(());
+        }
+        if std::time::Instant::now() >= deadline {
+            return match killed {
+                Err(e) => Err(format!("Kill error: {e}")),
+                Ok(()) => Err("Kill error: o processo não saiu".into()),
+            };
+        }
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
 }
 
 /// Mata todas las sesiones vivas y su descendencia. Se llama al salir de la app.

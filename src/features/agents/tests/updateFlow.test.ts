@@ -97,6 +97,25 @@ describe("updateAgentRestarting", () => {
     expect(calls.filter((c) => c.startsWith("restart:"))).toHaveLength(2);
   });
 
+  it("un ptyKill que falla (proceso ya llevado por el grupo) no traba el flujo", async () => {
+    const { deps, calls } = world();
+    const kill = deps.ptyKill;
+    // Mata de verdad y aun así responde error, como `TerminateProcess` sobre un proceso muerto.
+    deps.ptyKill = async (pid) => { await kill(pid); throw new Error("Kill error: Acesso negado"); };
+    const out = await updateAgentRestarting("codex", deps);
+    expect(out.result.ok).toBe(true);
+    expect(calls).toEqual(["kill:11", "kill:12", "update:true", "restartApp"]);
+  });
+
+  it("sin respuesta de ptyForTab la terminal cuenta como viva y no se actualiza", async () => {
+    const { deps, calls } = world();
+    deps.ptyForTab = async () => { throw new Error("ipc caído"); };
+    const out = await updateAgentRestarting("codex", deps);
+    expect(out.result).toMatchObject({ ok: false, error: "busy_terminal" });
+    expect(calls.some((c) => c.startsWith("update:"))).toBe(false);
+    expect(calls.filter((c) => c.startsWith("restart:"))).toHaveLength(2);
+  });
+
   it("sin terminales abiertas del agente actualiza y reinicia igual", async () => {
     const { deps, calls } = world({ ptys: {}, infos: [info({ reason: null, canAutoUpdate: true, busy: false })] });
     const out = await updateAgentRestarting("codex", deps);
