@@ -1691,7 +1691,7 @@ pub struct TabMcp {
 /// para que `sweep_configs` pueda saber de qué tab es y para poder leerlo a mano cuando algo
 /// falla. Los ids son UUID, pero se filtra igual: un nombre de archivo no se construye con
 /// algo que vino de afuera sin mirarlo.
-fn tab_config_name(tab_id: &str) -> String {
+pub(crate) fn tab_config_name(tab_id: &str) -> String {
     let safe: String = tab_id
         .chars()
         .filter(|c| c.is_ascii_alphanumeric() || *c == '-' || *c == '_')

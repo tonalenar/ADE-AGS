@@ -37,7 +37,11 @@ const BAR_BUTTON = `flex items-center justify-center h-7 self-center shrink-0 ro
  */
 /** `showLights`: con el panel izquierdo plegado su encabezado queda en 48px y los tres
  *  botones de ventana no entran, así que se mudan acá, al principio de la tira. */
-export function TabBar({ showLights = false }: { showLights?: boolean }) {
+export function TabBar({ showLights = false, trailing }: {
+  showLights?: boolean;
+  /** O que vai no fim da franja, depois do modo (os botões dos painéis, ver `PanelButtons`). */
+  trailing?: React.ReactNode;
+}) {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const tabs = useTabsStore((s) => s.tabs);
@@ -168,6 +172,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
         {/* El resto de la franja es para arrastrar la ventana. */}
         <div className="flex-1 h-full" data-tauri-drag-region />
         {activeTab && <ModeToggle />}
+        {trailing}
       </div>
 
       <TabDialogs />

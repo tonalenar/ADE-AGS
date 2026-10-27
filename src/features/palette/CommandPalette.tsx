@@ -183,12 +183,20 @@ function PaletteDialog() {
         run: ui.toggleWorkspaces,
       },
       {
-        id: "act:explorer",
+        id: "act:sidePanel",
         group: "actions",
-        title: ui.explorerCollapsed ? t("palette.cmd.showExplorer") : t("palette.cmd.hideExplorer"),
-        keywords: ["explorer", "files", "arquivos", "panel", "painel"],
+        title: ui.sidePanelHidden ? t("palette.cmd.showSidePanel") : t("palette.cmd.hideSidePanel"),
+        keywords: ["panel", "painel", "context", "contexto", "pr", "tarefas"],
         icon: <PanelIcon className={`${icon} -scale-x-100`} />,
-        run: ui.toggleExplorer,
+        run: ui.toggleSidePanel,
+      },
+      {
+        id: "act:files",
+        group: "actions",
+        title: t("palette.cmd.files"),
+        keywords: ["explorer", "files", "arquivos", "árvore"],
+        icon: <PanelIcon className={`${icon} -scale-x-100`} />,
+        run: () => ui.openDrawer("files"),
       },
       {
         id: "act:rail",
@@ -219,7 +227,7 @@ function PaletteDialog() {
 
     return list;
     // `ui` muda de identidade a cada render do store; os campos usados estão listados.
-  }, [tabs, activeTab, approvals, workspaces, theme, canvasKey, canvasOn, ui.workspacesCollapsed, ui.explorerCollapsed, ui.railExpanded, t]);
+  }, [tabs, activeTab, approvals, workspaces, theme, canvasKey, canvasOn, ui.workspacesCollapsed, ui.sidePanelHidden, ui.railExpanded, t]);
 
   // Sem busca, os grupos na ordem fixa. Com busca, uma lista só por relevância — os
   // grupos atrapalhariam: o melhor resultado tem que ser o primeiro, venha de onde vier.
