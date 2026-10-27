@@ -211,9 +211,9 @@ MISSÕES (também sem interface: `ade-ags --headless`)
                                               Busca a memória vigente agora ou nesse instante (datas em UTC)
   memory history --mission <id> --key <nome> --scope workspace|mission
                                               Revisões aprovadas e seus intervalos de validade
-  memory suggest --mission <id> --key <nome> --body \"...\" [--scope workspace|mission]
+  memory suggest [--mission <id>] --key <nome> --body \"...\" [--scope workspace|mission]
                  [--kind decision|constraint|finding|file|note] [--priority 0-3]
-                                              SUGERE uma memória (fica pendente; o usuário aprova)
+                                              SUGERE uma memória (fica pendente; o usuário aprova); fora de missão, só --scope workspace
   mission accept <id> <tarefa>                Junta na integração da missão
   mission apply <id>                          Leva o aceito para o projeto
   mission redeliver <id> [--pr <N>] [--test passed|failed|not_run]

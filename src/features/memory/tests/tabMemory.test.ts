@@ -4,7 +4,7 @@ const mocks = vi.hoisted(() => ({ invoke: vi.fn(), sendWhenReady: vi.fn() }));
 vi.mock("@tauri-apps/api/core", () => ({ invoke: mocks.invoke }));
 vi.mock("@/features/terminal/terminalRegistry", () => ({ sendWhenReady: mocks.sendWhenReady }));
 
-import { injectTabMemory, memoryBlockFor, startupText, tabMemoryMessage } from "../tabMemory";
+import { injectTabMemory, MEMORY_SUGGEST_HINT, memoryBlockFor, startupText, tabMemoryMessage } from "../tabMemory";
 
 describe("injectTabMemory", () => {
   beforeEach(() => { mocks.invoke.mockReset(); mocks.sendWhenReady.mockReset(); });
@@ -48,5 +48,13 @@ describe("injectTabMemory", () => {
     mocks.invoke.mockResolvedValueOnce("  ");
     expect(await injectTabMemory({ id: "t", agentId: "codex", memoryBlock: true }, "ws")).toBe(false);
     expect(mocks.sendWhenReady).not.toHaveBeenCalled();
+  });
+});
+
+describe("MEMORY_SUGGEST_HINT", () => {
+  it("ensina a sugerir memória do projeto sem missão, sempre pendente do usuário", () => {
+    expect(MEMORY_SUGGEST_HINT).toContain("ags memory suggest --scope workspace");
+    expect(MEMORY_SUGGEST_HINT).not.toContain("--mission");
+    expect(MEMORY_SUGGEST_HINT).toContain("pendente até o usuário aprovar");
   });
 });
