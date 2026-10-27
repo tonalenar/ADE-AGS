@@ -36,6 +36,16 @@ export async function injectTabMemory(tab: TabLike, workspaceId: string): Promis
   return true;
 }
 
+/**
+ * A linha que ensina um agente FORA de missão a sugerir memória. Só os briefings de missão diziam isso
+ * (`terminals.ts`), e numa conversa de projeto nenhum agente sugeria nada: a caixa de sugestões do
+ * workspace ficava vazia. Sem `--mission`, a proposta vai para a memória do projeto e espera o usuário.
+ */
+export const MEMORY_SUGGEST_HINT =
+  "MEMÓRIA: se aprender algo durável e não óbvio sobre este projeto (uma decisão, uma restrição, uma armadilha), sugira até 1 memória ao terminar a tarefa: "
+  + "`ags memory suggest --scope workspace --kind decision|constraint|finding --key <nome-curto> --body \"...\"`. "
+  + "Fica pendente até o usuário aprovar; a mesma chave de uma memória existente propõe a correção dela. Nunca segredos.";
+
 /** A memória nunca vai para um shell, mesmo que o interruptor tenha ficado ligado antes de trocar de agente. */
 export const memoryBlockFor = (agentId: string, memoryBlock: boolean): boolean => memoryBlock && agentId !== SHELL_AGENT_ID;
 

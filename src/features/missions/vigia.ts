@@ -5,6 +5,8 @@ import { listen } from "@tauri-apps/api/event";
 import { linkedPeers } from "@/features/canvas/orchestratorNotice";
 import { boardKeyOfTab, conversationOfKey, useCanvasStore } from "@/features/canvas/store";
 import type { Board } from "@/features/canvas/board";
+import { conversationTitle, parseTerminals } from "@/features/sessions/conversationModel";
+import { useConversationsStore } from "@/features/sessions/conversationsStore";
 import type { Tab } from "@/features/tabs/types";
 import { useTabsStore } from "@/features/tabs/store";
 import { lastOutputAt } from "@/features/terminal/activity";
@@ -19,6 +21,7 @@ import { LOOP_DONE, loopStep, loopStuck, type LoopWatch } from "./vigiaLoop";
 import { isFinalReport, memberFinished, pokeAllowed } from "./vigiaPoke";
 import { repeatAfterEach } from "./repeatAfterEach";
 import { vigiaActive } from "./vigiaSwitch";
+import { conversationWatchable, freshEntries, PEERS_KEEP_MS, userDecisionAllowed } from "./vigiaConversation";
 
 /**
  * O Vigia: um vigia BARATO, em segundo plano e SEM TERMINAL, que destrava a missão e conta no chat
@@ -225,7 +228,9 @@ const STORE_KEY = "ags.vigia.peers.v1";
 function loadPeers(): { sent: Map<string, number>; got: Map<string, number>; task: Map<string, number>; finished: Map<string, number> } {
   try {
     const raw = JSON.parse(localStorage.getItem(STORE_KEY) ?? "{}") as Record<string, Record<string, number>>;
-    const toMap = (o: Record<string, number> | undefined) => new Map(Object.entries(o ?? {}).filter(([, v]) => Number.isFinite(v)));
+    // As antigas saem: a mesma aba reaproveitada trazia "tem tarefa"/"reportou" de outro projeto.
+    const cutoff = Date.now() - PEERS_KEEP_MS;
+    const toMap = (o: Record<string, number> | undefined) => freshEntries(o, cutoff);
     return { sent: toMap(raw.sent), got: toMap(raw.got), task: toMap(raw.task), finished: toMap(raw.finished) };
   } catch {
     return { sent: new Map(), got: new Map(), task: new Map(), finished: new Map() };
@@ -347,6 +352,7 @@ export function missionStartMs(startedAtSec: number | null, now: number): number
 /** O que o Vigia supervisiona: uma missão em andamento ou o time montado numa conversa de projeto. */
 interface WatchedTeam {
   id: string;
+  kind: "mission" | "conversation";
   title: string;
   /** Epoch em segundos (como vem do banco) ou `null` = desde que o Vigia viu o time. */
   startedAt: number | null;
@@ -359,8 +365,13 @@ const closingNudges = new Map<string, { at: number; count: number }>();
 /** O mesmo aviso de fechamento antecipado não se repete antes disto. */
 export const CLOSING_COOLDOWN_MS = 3 * 60_000;
 
-/** Os times de conversa: o Orquestrador do canvas `#c:` com os terminais ligados a ele por corda. */
-function conversationTeams(tabs: Tab[], boards: Record<string, Board>): WatchedTeam[] {
+/**
+ * Os times de conversa: o Orquestrador do canvas `#c:` com os terminais ligados a ele por corda que já
+ * receberam tarefa dele. Fica de fora a conversa guardada, a sem delegação e a dormente (ver
+ * `conversationWatchable`); um terminal ligado sem tarefa não é cobrado nem segura o "entregou".
+ */
+function conversationTeams(tabs: Tab[], boards: Record<string, Board>, now: number): WatchedTeam[] {
+  const rows = useConversationsStore.getState().rows;
   const out: WatchedTeam[] = [];
   for (const [key, board] of Object.entries(boards)) {
     const conversation = conversationOfKey(key);
@@ -369,12 +380,30 @@ function conversationTeams(tabs: Tab[], boards: Record<string, Board>): WatchedT
     const lead = open.find((tab) => board.orchestrators.includes(tab.id));
     if (!lead) continue;
     const linked = new Set(linkedPeers(board, lead.id));
-    const team = [lead, ...open.filter((tab) => tab.id !== lead.id && linked.has(tab.id))];
-    if (team.length < 2) continue;
-    out.push({ id: `c:${conversation}`, title: lead.title.split(" — ")[0], startedAt: null, team, lead });
+    const members = open.filter((tab) => tab.id !== lead.id && linked.has(tab.id) && taskAt.has(tab.id));
+    const team = [lead, ...members];
+    const row = rows.find((r) => r.id === conversation) ?? null;
+    if (!conversationWatchable({
+      now,
+      state: row?.state ?? null,
+      taskTimes: members.map((tab) => taskAt.get(tab.id) as number),
+      activity: team.flatMap((tab) => [lastOutputAt(tab.id), sentAt.get(tab.id)]),
+    })) continue;
+    // O nome da conversa, não o do terminal ("Decisão pendente — Claude Code" não dizia qual era).
+    const title = row ? conversationTitle(row, parseTerminals(row.terminals)) : lead.title.split(" — ")[0];
+    out.push({ id: `c:${conversation}`, kind: "conversation", title, startedAt: null, team, lead });
   }
   return out;
 }
+
+/** A última tarefa que o Orquestrador delegou a alguém do time (a "rodada"). */
+function latestTask(mission: WatchedTeam): number | undefined {
+  const times = mission.team.filter((tab) => tab.id !== mission.lead.id).map((tab) => taskAt.get(tab.id)).filter((at): at is number => at !== undefined);
+  return times.length > 0 ? Math.max(...times) : undefined;
+}
+
+/** A rodada em que cada missão já avisou "Decisão pendente" ao usuário. */
+const userDecisionRounds = new Map<string, number>();
 
 /**
  * Um passo: as regras sem modelo primeiro; se não acharem nada, o modelo barato para os ociosos. A
@@ -399,10 +428,10 @@ export function vigiaTick(now = Date.now()): Promise<void> {
       .filter((tab): tab is NonNullable<typeof tab> => !!tab && tab.agentId !== "bash");
     const board = Object.entries(boards).find(([key]) => key.endsWith(`#m:${mission.id}`))?.[1];
     const lead = team.find((tab) => board?.orchestrators.includes(tab.id)) ?? team[0];
-    if (lead) watched.push({ id: mission.id, title: mission.title, startedAt: mission.startedAt, team, lead });
+    if (lead) watched.push({ id: mission.id, kind: "mission", title: mission.title, startedAt: mission.startedAt, team, lead });
   }
-  // Uma conversa com o time montado (sem missão) também é supervisionada.
-  if (enabled) watched.push(...conversationTeams(tabs, boards));
+  // Uma conversa com o time montado (sem missão) também é supervisionada, enquanto tem trabalho delegado.
+  if (enabled) watched.push(...conversationTeams(tabs, boards, now));
   for (const mission of watched) {
     const { team, lead } = mission;
     if (!enabled) {
@@ -468,7 +497,9 @@ export function vigiaTick(now = Date.now()): Promise<void> {
     // Equipe que já entregou, ou integrante que já reportou a tarefa: parados com razão, não travados.
     if (watch.doneAt !== undefined) continue;
     // Sem saída há 90 s mas com o turno aberto no transcript não é ocioso: é uma ferramenta longa.
-    const idle = idleCandidates(team, now, lastOutputAt, lastPoke).filter((tab) => !memberFinished(taskAt.get(tab.id), finishedAt.get(tab.id)) && structuredVerdict(structuredOf(tab.id)) !== true);
+    // Numa conversa o Orquestrador parado está esperando o usuário, que conversa com ele: não é ocioso.
+    const suspects = mission.kind === "conversation" ? team.filter((tab) => tab.id !== lead.id) : team;
+    const idle = idleCandidates(suspects, now, lastOutputAt, lastPoke).filter((tab) => !memberFinished(taskAt.get(tab.id), finishedAt.get(tab.id)) && structuredVerdict(structuredOf(tab.id)) !== true);
     if (idle.length === 0) continue;
     const pick = vigiaAgentFor(lead.agentId, available);
     if (!pick) continue;
@@ -488,6 +519,14 @@ export function vigiaTick(now = Date.now()): Promise<void> {
           // A resposta chega até 2 min depois: o Vigia pode ter sido desligado no meio.
           if (!vigiaActive()) return;
           if (action.to === "usuario") {
+            // Uma vez por rodada de tarefas numa missão; numa conversa, só o registro no chat.
+            if (mission.kind === "conversation") {
+              reportToChat(lead.id, reportLine(action.message, "nada: o Orquestrador está esperando a sua resposta nesta conversa.", "aviso"));
+              continue;
+            }
+            const round = latestTask(mission);
+            if (!userDecisionAllowed(mission.kind, userDecisionRounds.get(mission.id), round)) continue;
+            userDecisionRounds.set(mission.id, round ?? 0);
             showBotToast({ title: VIGIA_NAME, text: action.message, tone: "warning", ms: 12_000 });
             notifyUser(mission.id, mission.title, "user_decision", action.message);
             reportToChat(lead.id, reportLine(action.message, "avisei você na tela: a decisão é sua.", "aviso"));

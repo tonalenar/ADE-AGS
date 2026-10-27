@@ -20,7 +20,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID, type AgentInfo, type Tab } from "@/features/tabs/types";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { NewAgentDialog } from "@/features/tabs/wizard/NewAgentDialog";
-import { memoryBlockFor, startupText, tabMemoryMessage } from "@/features/memory/tabMemory";
+import { MEMORY_SUGGEST_HINT, memoryBlockFor, startupText, tabMemoryMessage } from "@/features/memory/tabMemory";
 import { BROWSER_HINT } from "@/features/canvas/portalNotice";
 import { sendWhenReady } from "@/features/terminal/terminalRegistry";
 import { CheckpointsDialog } from "@/features/tabCheckpoints/CheckpointsDialog";
@@ -282,9 +282,10 @@ export function TabDialogs() {
             applyTabRole(tabId, role).catch(() => null),
             wantsMemory ? tabMemoryMessage({ id: tabId, agentId: agent.id, memoryBlock }, workspaceId).catch(() => null) : Promise.resolve(null),
           ]).then(([briefing, memory]) => {
-            // Um shell não lê isto; um agente fica sabendo que abre o navegador no canvas, ligado a ele.
-            // Num rascunho o aviso fica de fora: é a pergunta da pessoa, não um briefing.
-            const hint = agent.id === "bash" || draft ? null : `[ADE AGS] ${BROWSER_HINT}`;
+            // Um shell não lê isto; um agente fica sabendo que abre o navegador no canvas, ligado a ele,
+            // e que pode sugerir memória ao projeto. Num rascunho o aviso fica de fora: é a pergunta da
+            // pessoa, não um briefing.
+            const hint = agent.id === "bash" || draft ? null : `[ADE AGS] ${BROWSER_HINT}\n${MEMORY_SUGGEST_HINT}`;
             const text = [briefing, startupText(memory, prompt), hint].filter(Boolean).join("\n\n");
             if (text) sendWhenReady(tabId, text, draft ? { draft: true } : undefined);
           });
