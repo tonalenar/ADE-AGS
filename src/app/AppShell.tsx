@@ -332,10 +332,11 @@ export function AppShell() {
             repo={activeRepo}
             title={activeRepo?.branch ?? activeTab?.cwd.split(/[\\/]/).filter(Boolean).pop() ?? ""}
           />
-        </div>
 
-        {/* Direita: o painel da sessão do agente ativo (ambiente, contexto, conectores, alterações, tarefas). */}
-        {!sidePanelHidden && <SessionPanel tab={activeTab} repo={activeRepo} />}
+          {/* O painel da sessão do agente ativo (ambiente, contexto, conectores, alterações, tarefas):
+              cartões flutuando no canto de cima, sem coluna — o conteúdo fica com a largura toda. */}
+          {!sidePanelHidden && isWorkspace && activeTab && <SessionPanel tab={activeTab} repo={activeRepo} />}
+        </div>
 
         {/* Onde as telas cheias se montam (ver `pageHost`): tudo à direita do riel, por cima
             dos painéis e da área de trabalho. Sempre montado e vazio, sem pegar cliques; as

@@ -14,7 +14,7 @@ import type { Tab } from "@/features/tabs/types";
 import { homeDir } from "@/shared/ipc/window";
 
 import { ConnectorsSection, ContextSection } from "./AgentSections";
-import { Row, Section } from "./Section";
+import { CARD, Row, Section } from "./Section";
 import { backgroundTasks, branchPulls, folderLabel, formatElapsed } from "./panelModel";
 
 const PR_STATE: Record<string, string> = { open: "text-emerald-500", merged: "text-violet-500", closed: "text-gray-400" };
@@ -87,10 +87,13 @@ export function SessionPanel({ tab, repo }: { tab: Tab | null; repo: RepoInfo | 
   const repoName = repo?.root ? folderLabel(repo.root, null).name : folder?.name;
 
   return (
-    <aside className="cc-fade cc-scroll flex flex-col gap-2 shrink-0 min-h-0 w-72 p-2 overflow-y-auto
-      bg-gray-50 dark:bg-surface-sunken border-l border-gray-200 dark:border-white/7">
+    // Flutuante, sem coluna: cartões soltos no canto de cima, por cima do conteúdo, que segue com a
+    // largura toda (e a barra do canvas no canto de baixo). Só os cartões pegam clique; o vão entre
+    // eles e o resto da área continuam do terminal ou do canvas embaixo. O alto para antes da barra.
+    <aside data-session-panel className="cc-fade cc-scroll absolute top-2 right-2 z-[33] flex flex-col gap-2 w-72
+      max-h-[calc(100%-5.5rem)] overflow-y-auto pointer-events-none [&>*]:pointer-events-auto">
       {!tab ? (
-        <p className="px-3 py-6 text-center text-[12px] text-gray-400 dark:text-white/35">{t("sidePanel.empty")}</p>
+        <p className={`${CARD} px-3 py-4 text-center text-[12px] text-gray-400 dark:text-white/35`}>{t("sidePanel.empty")}</p>
       ) : (
         <>
           <Section id="env" title={t("sidePanel.env.title")}>

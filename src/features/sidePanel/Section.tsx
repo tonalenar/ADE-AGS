@@ -1,6 +1,10 @@
 import { useState, type ReactNode } from "react";
 import { Button } from "neogestify-ui-components";
 
+/** O fundo de um cartão do painel: opaco, porque flutua por cima de terminal e canvas. */
+export const CARD = `rounded-xl border border-gray-200 dark:border-white/[0.08] bg-gray-50/95 dark:bg-surface-sunken/95
+  backdrop-blur-md shadow-lg shadow-black/10 dark:shadow-black/40`;
+
 const OPEN_KEY = "cc-side-panel-sections";
 
 function loadOpen(): Record<string, boolean> {
@@ -31,7 +35,7 @@ export function Section({ id, title, aside, children, defaultOpen = true }: {
     }
   };
   return (
-    <section className="rounded-xl border border-gray-200 dark:border-white/7 bg-white/60 dark:bg-white/[0.02]">
+    <section className={CARD}>
       <Button variant="custom" onClick={toggle} aria-expanded={open}
         className="cc-t flex items-center gap-1.5 w-full h-9 px-3 text-left">
         <span className="text-[12.5px] font-semibold text-gray-800 dark:text-gray-100">{title}</span>
