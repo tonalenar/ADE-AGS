@@ -1,546 +1,296 @@
-//! Portal com um Chrome de verdade.
+//! O navegador do Portal: um WebView2 de verdade dentro da janela do app, como o navegador do T3 Code.
 //!
-//! O navegador normal do canvas passa a página pelo proxy local (`preview`), e o Google recusa login em
-//! navegador embutido de propósito: o app intermediário veria a senha. Aqui o Portal usa um Chrome real com
-//! um perfil só do app (`<dados>/real-browser-profile`), em dois modos:
+//! O T3 Code (Electron) mostra sites numa `<webview>`: um Chromium embutido, com perfil próprio
+//! (`persist:t3code-preview-…`), o user agent padrão e o controle do agente pelo `webContents.debugger` — o CDP de
+//! dentro do processo, sem porta de depuração, então a página nunca se vê automatizada (`navigator.webdriver`
+//! falso). O Google aceita o login nele sem nada especial: não há troca de user agent nem cópia de cookies.
+//! O equivalente no Tauri é um WebView2 filho da janela (`Window::add_child`):
 //!
-//! - **Navegar** (o normal): o Chrome é aberto com `--remote-debugging-port=<porta livre>` e fica fora da
-//!   tela, sem botão na barra de tarefas. Cada Portal tem a **própria janela** do Chrome (o Chrome só desenha
-//!   a aba ativa de cada janela; com várias abas numa janela só, os outros Portais congelavam). A tela chega
-//!   por `Page.startScreencast` e mouse e teclado voltam por CDP. A porta não é a 0: a 0 liga
-//!   `navigator.webdriver` e o Google barrava toda pesquisa com a página de "tráfego incomum" (ver
-//!   `free_port`). É o estado do navegador embutido do T3 Code, um `<webview>` do Electron que o app controla
-//!   pelo `webContents.debugger`, sem porta 0 nem `--enable-automation`.
-//!   O login do Google também vai direto no Portal: sem a porta 0 o Google aceita o formulário (medido no
-//!   Chrome 156: o e-mail é processado normalmente). Nesse caso as teclas, senha inclusive, passam pelo app
-//!   até o Chrome (`Input.dispatchKeyEvent`), como qualquer outra digitação no Portal.
-//! - **Entrar numa conta** (a alternativa, se o Google recusar no Portal): um Chrome COMUM (sem porta de
-//!   depuração, sem nenhuma alteração), no mesmo perfil, numa janela que o app posiciona em cima do Portal
-//!   (ver `win`). A pessoa digita direto no Chrome, que mostra o endereço; a senha não passa pelo app.
+//! - **Perfil próprio**: `<dados>/portal-webview`, uma pasta de dados só dos Portais (o WebView2 sobe outro
+//!   navegador para ela), separada da do app. O login fica nela entre as sessões.
+//! - **CDP de dentro**: `ICoreWebView2::CallDevToolsProtocolMethod` e `GetDevToolsProtocolEventReceiver`, o
+//!   mesmo papel do `webContents.debugger`. Por ele passam o piloto dos agentes (o script em todo documento, o
+//!   canal `Runtime.addBinding`), as fotos e os toques de verdade que o piloto pede.
+//! - **Pop-ups de verdade**: um `window.open` com tamanho (o login do Google, OAuth) abre a janela do próprio
+//!   WebView2, com o `opener` vivo, como a `BrowserWindow` filha do T3. Um link para aba nova abre no mesmo Portal.
+//! - **Nada navega sozinho**: só a barra de endereço (`real_browser_navigate`), os botões e o agente mandam
+//!   navegar. A URL que a página informa vai para a barra e para o estado salvo, e nunca volta como navegação —
+//!   no T3 o `src` da `<webview>` é fixado na criação pelo mesmo motivo.
 //!
-//! A conexão CDP fica toda aqui no Rust: o Chrome não é aberto com `--remote-allow-origins`, então nenhuma
-//! página (nem a do app, nem um site) consegue falar com a porta de depuração e pegar a sessão logada.
-//! Os dois Chromes vão num Job Object (`terminal::containment`): morrem com o app, mesmo num fechamento
-//! à força, e não sobra Chrome órfão segurando o perfil.
+//! A página é uma janela nativa por cima do app: quem decide onde ela fica é o Portal (`real_browser_place`),
+//! que manda o retângulo dele, a parte à vista e os buracos onde há algo do app por cima (menus, diálogos,
+//! painéis). Aqui isso vira a região da janela (`SetWindowRgn`): fora dela a página não aparece nem recebe
+//! clique, e o app por baixo aparece. Fora de vista a região fica vazia, sem esconder a página: ela continua
+//! desenhando, e as fotos dos agentes saem mesmo com o Portal em outra aba.
 
 #[cfg(windows)]
-mod win;
-#[cfg(not(windows))]
-mod win {
-    //! Fora do Windows a janela de login abre como uma janela comum do Chrome.
-    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-    pub struct Rect {
-        pub x: i32,
-        pub y: i32,
-        pub w: i32,
-        pub h: i32,
-    }
-    pub fn hide_from_taskbar(_: isize) {}
-    pub fn adopt_as_owned(_: isize, _: isize) {}
-    pub fn place(_: isize, _: Option<Rect>) {}
-    pub fn focus(_: isize) {}
-    pub fn close(_: isize) {}
-    pub fn watch_windows(_: u32, _: impl FnMut(isize, bool) + Send + 'static) {}
-}
+mod native;
 
 use std::collections::HashMap;
-use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
-use std::time::{Duration, Instant};
+use std::sync::{Mutex, OnceLock};
 
-use base64::Engine as _;
-use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, WebviewWindow};
-use tokio::sync::{mpsc, oneshot};
-use tokio_tungstenite::tungstenite::Message;
+use tauri::{AppHandle, Emitter, Manager};
 
-use crate::terminal::containment::ProcessGroup;
-
-pub use win::Rect;
-
-/// O Chrome controlado. O `ProcessGroup` (Job Object) leva junto o Chrome e todos os processos dele.
-struct Browser {
-    child: std::process::Child,
-    group: ProcessGroup,
-    port: u16,
+/// Um retângulo em pixels CSS do app.
+#[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
+pub struct Rect {
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
 }
 
-struct Page {
-    target: String,
-    tx: mpsc::UnboundedSender<String>,
-    pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>>,
+/// Onde o Portal está: `rect` relativo à janela; `visible` e `holes` relativos ao próprio Portal.
+#[derive(Debug, Clone, Deserialize)]
+pub struct Place {
+    pub rect: Rect,
+    /// O zoom da página (o do Portal vezes o do canvas).
+    pub zoom: f64,
+    /// A parte do Portal à vista (o resto está fora do canvas ou atrás de outra aba). `None` = nada à vista.
+    pub visible: Option<Rect>,
+    /// O que do app está por cima da página, dentro da parte à vista.
+    #[serde(default)]
+    pub holes: Vec<Rect>,
 }
 
-/// A janela de login em andamento.
-struct Login {
-    pid: u32,
-    group: ProcessGroup,
-    /// A janela do Chrome, quando aparecer.
-    hwnd: Option<isize>,
-    /// Onde ela deve ficar (em cima do Portal); `None` = o Portal não está à vista.
-    rect: Option<Rect>,
-}
-
-fn browser() -> &'static tokio::sync::Mutex<Option<Browser>> {
-    static B: OnceLock<tokio::sync::Mutex<Option<Browser>>> = OnceLock::new();
-    B.get_or_init(|| tokio::sync::Mutex::new(None))
-}
-
-fn pages() -> &'static Mutex<HashMap<String, Page>> {
-    static P: OnceLock<Mutex<HashMap<String, Page>>> = OnceLock::new();
+/// Os Portais abertos: o rótulo do WebView de cada um.
+fn portals() -> &'static Mutex<HashMap<String, String>> {
+    static P: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
     P.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// A última posição do Portal que o front mandou durante um login. Fica fora de `Login` porque as primeiras chegam
-/// enquanto o Chrome controlado ainda está fechando, antes de o login existir: sem isto a janela abria onde o Portal
-/// estava no clique (com a barra dele ainda à vista) e não saía mais de lá.
-fn last_place() -> &'static Mutex<Option<Option<Rect>>> {
-    static P: OnceLock<Mutex<Option<Option<Rect>>>> = OnceLock::new();
-    P.get_or_init(|| Mutex::new(None))
-}
-
-/// O último quadro de cada Portal (número de sequência e JPEG), servido por `frame_protocol`.
-fn frames() -> &'static Mutex<HashMap<String, (u64, Arc<Vec<u8>>)>> {
-    static F: OnceLock<Mutex<HashMap<String, (u64, Arc<Vec<u8>>)>>> = OnceLock::new();
-    F.get_or_init(|| Mutex::new(HashMap::new()))
-}
-
-/// O protocolo `agsframe`: `<portal>/<seq>` devolve o último quadro do Portal (o `seq` só fura o cache do webview).
-pub fn frame_protocol(request: &tauri::http::Request<Vec<u8>>) -> tauri::http::Response<Vec<u8>> {
-    let id = portal_of(request.uri().path());
-    let frame = lock(frames()).get(&id).map(|(_, bytes)| bytes.clone());
-    let builder = tauri::http::Response::builder().header("Cache-Control", "no-store").header("Access-Control-Allow-Origin", "*");
-    match frame {
-        Some(bytes) => builder.header("Content-Type", "image/jpeg").body(bytes.as_ref().clone()),
-        None => builder.status(404).body(Vec::new()),
-    }
-    .unwrap_or_else(|_| tauri::http::Response::new(Vec::new()))
-}
-
-/// O Portal de um caminho `/<portal>/<seq>`. `convertFileSrc` codifica a barra (`%2F`): decodifica antes de separar.
-fn portal_of(path: &str) -> String {
-    percent_decode(path.trim_start_matches('/')).split('/').next().unwrap_or("").to_string()
-}
-
-/// `%2D` → `-`: o id do Portal chega codificado por `convertFileSrc`.
-fn percent_decode(s: &str) -> String {
-    let bytes = s.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut i = 0;
-    while i < bytes.len() {
-        if bytes[i] == b'%' && i + 2 < bytes.len() {
-            if let Ok(b) = u8::from_str_radix(&s[i + 1..i + 3], 16) {
-                out.push(b);
-                i += 3;
-                continue;
-            }
-        }
-        out.push(bytes[i]);
-        i += 1;
-    }
-    String::from_utf8_lossy(&out).into_owned()
-}
-
-fn login() -> &'static Mutex<Option<Login>> {
-    static L: OnceLock<Mutex<Option<Login>>> = OnceLock::new();
-    L.get_or_init(|| Mutex::new(None))
 }
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
 }
 
-fn next_id() -> u64 {
-    static N: AtomicU64 = AtomicU64::new(1);
-    N.fetch_add(1, Ordering::Relaxed)
+/// O rótulo do WebView de um Portal (o Tauri só aceita letras, números e `-/:_`).
+fn label_of(id: &str) -> String {
+    let safe: String = id.chars().map(|c| if c.is_ascii_alphanumeric() || "-_".contains(c) { c } else { '_' }).collect();
+    format!("portal-{safe}")
 }
 
-/// O Chrome instalado; sem ele, o Edge (também Chromium, mesmo protocolo).
-fn chrome_path() -> Option<PathBuf> {
-    let env = |k: &str| std::env::var_os(k).map(PathBuf::from);
-    [
-        env("ProgramFiles").map(|p| p.join(r"Google\Chrome\Application\chrome.exe")),
-        env("ProgramFiles(x86)").map(|p| p.join(r"Google\Chrome\Application\chrome.exe")),
-        env("LOCALAPPDATA").map(|p| p.join(r"Google\Chrome\Application\chrome.exe")),
-        env("ProgramFiles(x86)").map(|p| p.join(r"Microsoft\Edge\Application\msedge.exe")),
-        env("ProgramFiles").map(|p| p.join(r"Microsoft\Edge\Application\msedge.exe")),
-    ]
-    .into_iter()
-    .flatten()
-    .find(|p| p.is_file())
-}
-
-fn profile_dir(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = crate::util::datadir::app_data_dir(app)?.join("real-browser-profile");
-    std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir)
-}
-
-/// Desliga o "continuar rodando em segundo plano" do perfil (`Local State`): sem isso, fechar a janela de
-/// login não encerrava o Chrome e o Portal ficava esperando.
-fn prepare_profile(profile: &Path) {
-    let path = profile.join("Local State");
-    let mut state: Value = std::fs::read_to_string(&path)
-        .ok()
-        .and_then(|s| serde_json::from_str(&s).ok())
-        .filter(Value::is_object)
-        .unwrap_or_else(|| json!({}));
-    state["background_mode"] = json!({ "enabled": false });
-    let _ = std::fs::write(&path, state.to_string());
-}
-
-/// A marca de um login do Google feito com as sessões presas ao dispositivo (ver `NO_BOUND_SESSIONS`).
-const BOUND_SESSION_PARAMS: &str = "bound_session_credentials_bound_session_params";
-
-/// Tira a marca das sessões presas ao dispositivo do perfil (`Default/Preferences`) e diz se ela estava lá: os
-/// cookies daquele login só se mantêm renovados com o DBSC, então o chamador os apaga e a pessoa entra de novo.
-fn forget_bound_sessions(profile: &Path) -> bool {
-    let path = profile.join("Default").join("Preferences");
-    let Some(mut prefs) = std::fs::read_to_string(&path).ok().and_then(|s| serde_json::from_str::<Value>(&s).ok()) else {
-        return false;
-    };
-    let had = prefs.as_object_mut().and_then(|o| o.remove(BOUND_SESSION_PARAMS)).is_some_and(|v| v.as_object().is_some_and(|o| !o.is_empty()));
-    if had {
-        let _ = std::fs::write(&path, prefs.to_string());
-    }
-    had
-}
-
-/// Os domínios do login do Google (o `/sorry` e a conta valem para todos eles).
-fn is_google_cookie(domain: &str) -> bool {
-    let host = domain.trim_start_matches('.');
-    ["google.com", "google.com.br", "youtube.com"].iter().any(|d| host == *d || host.ends_with(&format!(".{d}")))
-}
-
-/// Apaga os cookies do Google do perfil (vencendo cada um: `Storage.setCookies` no navegador inteiro).
-async fn clear_google_cookies(port: u16) -> Result<(), String> {
-    let all = browser_call(port, "Storage.getCookies", json!({})).await?;
-    let expired: Vec<Value> = all["cookies"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter(|c| c["domain"].as_str().is_some_and(is_google_cookie))
-        .map(|c| {
-            let mut p = json!({
-                "name": c["name"], "value": "", "domain": c["domain"], "path": c["path"],
-                "secure": c["secure"], "httpOnly": c["httpOnly"], "expires": 1,
-            });
-            if !c["partitionKey"].is_null() {
-                p["partitionKey"] = c["partitionKey"].clone();
-            }
-            p
-        })
-        .collect();
-    if expired.is_empty() {
-        return Ok(());
-    }
-    browser_call(port, "Storage.setCookies", json!({ "cookies": expired })).await.map(|_| ())
-}
-
-/// As sessões presas ao dispositivo (DBSC): com elas, o login do Google vira cookies de poucos minutos que o Chrome
-/// renova sozinho com uma chave do TPM. No Chrome do Portal (fechado à força, controlado pelo CDP) a renovação falhava:
-/// logado, o Google recarregava `/?zx=…` a cada ~0,7 s em qualquer aba, até o IP cair no `/sorry`. Sem elas o Google
-/// emite os cookies comuns, como faz para qualquer navegador sem DBSC. Vale também para a janela de login, que usa o
-/// mesmo perfil: um login feito lá com DBSC deixaria cookies que este Chrome não renova.
-const NO_BOUND_SESSIONS: &str = "--disable-features=EnableBoundSessionCredentials,DeviceBoundSessions";
-
-/// O Chrome sem nada além do perfil, das telas de boas-vindas desligadas e das sessões presas ao dispositivo.
-fn chrome(profile: &Path) -> Result<std::process::Command, String> {
-    let exe = chrome_path().ok_or("Não achei o Chrome nem o Edge instalados.")?;
-    // Sem console (o helper de todo spawn do app); as janelas do Chrome não dependem disso.
-    let mut cmd = crate::util::spawn::hidden_command(exe);
-    cmd.arg(format!("--user-data-dir={}", profile.display()))
-        .args(["--no-first-run", "--no-default-browser-check", "--hide-crash-restore-bubble", NO_BOUND_SESSIONS]);
-    Ok(cmd)
-}
-
-/// A porta anotada em `DevToolsActivePort` (pelo Chrome de versões anteriores do app, ou por `ensure_browser`), se o
-/// Chrome responde nela.
-async fn live_port(profile: &Path) -> Option<u16> {
-    let text = std::fs::read_to_string(profile.join("DevToolsActivePort")).ok()?;
-    let port: u16 = text.lines().next()?.trim().parse().ok()?;
-    responds(port).await.then_some(port)
-}
-
-async fn responds(port: u16) -> bool {
-    let url = format!("http://127.0.0.1:{port}/json/version");
-    let reply = reqwest::Client::new().get(url).timeout(Duration::from_secs(2)).send().await;
-    reply.is_ok_and(|r| r.status().is_success())
-}
-
-/// Uma porta livre no 127.0.0.1 agora. Não a porta 0: com ela o Chrome liga `navigator.webdriver`, e o Google
-/// responde a qualquer pesquisa com a página de "tráfego incomum" (`/sorry`). Medido no Chrome 156: porta 0 →
-/// `webdriver = true` e `/sorry`; porta fixa → `false` e a pesquisa normal.
-fn free_port() -> Result<u16, String> {
-    let listener = std::net::TcpListener::bind(("127.0.0.1", 0)).map_err(|e| format!("Sem porta livre para o Chrome: {e}"))?;
-    listener.local_addr().map(|a| a.port()).map_err(|e| e.to_string())
-}
-
-/// Um comando no nível do navegador (não de uma página), numa conexão curta.
-async fn browser_call(port: u16, method: &str, params: Value) -> Result<Value, String> {
-    let version: Value = reqwest::Client::new()
-        .get(format!("http://127.0.0.1:{port}/json/version"))
-        .send()
-        .await
-        .map_err(|e| e.to_string())?
-        .json()
-        .await
-        .map_err(|e| e.to_string())?;
-    let ws_url = version["webSocketDebuggerUrl"].as_str().ok_or("O Chrome não respondeu.")?;
-    let (mut ws, _) = tokio_tungstenite::connect_async(ws_url).await.map_err(|e| e.to_string())?;
-    ws.send(Message::Text(json!({ "id": 1, "method": method, "params": params }).to_string().into()))
-        .await
-        .map_err(|e| e.to_string())?;
-    let reply = async {
-        while let Some(Ok(Message::Text(text))) = ws.next().await {
-            let v: Value = serde_json::from_str(&text).unwrap_or_default();
-            if v["id"] == 1 {
-                return match v.get("error") {
-                    Some(err) => Err(err["message"].as_str().unwrap_or("erro do Chrome").to_string()),
-                    None => Ok(v["result"].clone()),
-                };
-            }
-        }
-        Err("A conexão com o Chrome caiu.".to_string())
-    };
-    tokio::time::timeout(Duration::from_secs(10), reply).await.map_err(|_| "O Chrome não respondeu.".to_string())?
-}
-
-/// Abre o Chrome controlado do perfil (ou devolve a porta do que já está aberto).
-async fn ensure_browser(app: &AppHandle) -> Result<u16, String> {
-    let mut slot = browser().lock().await;
-    if let Some(b) = slot.as_mut() {
-        if matches!(b.child.try_wait(), Ok(None)) {
-            return Ok(b.port);
-        }
-        *slot = None;
-    }
-    if lock(login()).is_some() {
-        return Err("Há um login em andamento: termine-o para o Portal voltar.".into());
-    }
-    let profile = profile_dir(app)?;
-    // Um Chrome de uma versão anterior do app (sem Job Object) pode ter ficado aberto no perfil.
-    if let Some(port) = live_port(&profile).await {
-        let _ = browser_call(port, "Browser.close", json!({})).await;
-        wait_profile_free(&profile).await;
-    }
-    let _ = std::fs::remove_file(profile.join("DevToolsActivePort"));
-    prepare_profile(&profile);
-    let bound = forget_bound_sessions(&profile);
-    let port = free_port()?;
-    // Fora da tela e fora da barra de tarefas: quem mostra a página é o Portal. Os `--disable-*` mantêm
-    // a página desenhando com a janela fora de vista (senão o screencast para).
-    let mut child = chrome(&profile)?
-        .arg(format!("--remote-debugging-port={port}"))
-        .args([
-            "--window-position=-32000,-32000",
-            "--window-size=1280,800",
-            "--disable-backgrounding-occluded-windows",
-            "--disable-renderer-backgrounding",
-            "--disable-background-timer-throttling",
-            // Barra de rolagem sobreposta (fina, sem setas, por cima do conteúdo, sem reservar largura), que o
-            // Chromium traz desligada no desktop. Medido no Chrome 155: `FluentOverlayScrollbar` sozinha não muda
-            // nada; esta sim. Só neste Chrome: a janela de login não leva nenhuma alteração.
-            "--enable-features=OverlayScrollbar",
-            "about:blank",
-        ])
-        .spawn()
-        .map_err(|e| format!("Não consegui abrir o Chrome: {e}"))?;
-    let mut group = ProcessGroup::new(child.id());
-    group.adopt(&child);
-    win::watch_windows(child.id(), |hwnd, _| win::hide_from_taskbar(hwnd));
-    let deadline = Instant::now() + Duration::from_secs(20);
-    loop {
-        if responds(port).await {
-            // Com porta fixa o Chrome não escreve `DevToolsActivePort`: anotada aqui, a limpeza acima ainda acha
-            // um Chrome que tenha sobrado no perfil.
-            let _ = std::fs::write(profile.join("DevToolsActivePort"), format!("{port}\n"));
-            if bound {
-                // O login antigo, preso ao dispositivo, não se renova mais: sai, e o próximo login é comum.
-                let _ = clear_google_cookies(port).await;
-            }
-            *slot = Some(Browser { child, group, port });
-            return Ok(port);
-        }
-        if !matches!(child.try_wait(), Ok(None)) {
-            return Err("O Chrome fechou antes de responder na porta de depuração.".into());
-        }
-        if Instant::now() >= deadline {
-            return Err("O Chrome abriu mas não respondeu na porta de depuração.".into());
-        }
-        tokio::time::sleep(Duration::from_millis(150)).await;
-    }
-}
-
-/// Espera o perfil ficar livre (o mesmo perfil não abre em dois Chromes).
-async fn wait_profile_free(profile: &Path) {
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while live_port(profile).await.is_some() && Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-    // O Chrome solta o perfil um instante depois de parar de responder.
-    tokio::time::sleep(Duration::from_millis(800)).await;
-}
-
-/// Fecha o Chrome controlado: primeiro como o X da janela (grava a sessão), depois à força.
-async fn shutdown_browser(app: &AppHandle) -> Result<(), String> {
-    let mut slot = browser().lock().await;
-    lock(pages()).clear();
-    let Some(mut b) = slot.take() else { return Ok(()) };
-    let _ = browser_call(b.port, "Browser.close", json!({})).await;
-    let deadline = Instant::now() + Duration::from_secs(8);
-    while matches!(b.child.try_wait(), Ok(None)) && Instant::now() < deadline {
-        tokio::time::sleep(Duration::from_millis(150)).await;
-    }
-    b.group.kill_all();
-    wait_profile_free(&profile_dir(app)?).await;
-    Ok(())
+fn webview(app: &AppHandle, id: &str) -> Result<tauri::Webview, String> {
+    let label = lock(portals()).get(id).cloned().ok_or("O navegador deste Portal não está aberto.")?;
+    app.get_webview(&label).ok_or_else(|| "O navegador deste Portal fechou.".to_string())
 }
 
 fn emit(app: &AppHandle, event: &str, payload: Value) {
     let _ = app.emit(event, payload);
 }
 
-/// Abre (ou reabre) a janela do Portal `id` no Chrome controlado e começa a mandar a tela.
+/// Só http(s) e `about:blank` abrem no Portal; um esquema de app (`mailto:`, `slack:`) não navega.
+fn navigable(url: &str) -> Option<tauri::Url> {
+    let parsed = tauri::Url::parse(url).ok()?;
+    match parsed.scheme() {
+        "http" | "https" => Some(parsed),
+        "about" if url == "about:blank" => Some(parsed),
+        _ => None,
+    }
+}
+
+/// Abre o navegador do Portal `id` em cima dele, já com o piloto dos agentes, e carrega `url`. Aberto, só
+/// reposiciona: navegar é com `real_browser_navigate`.
 #[tauri::command]
-pub async fn real_browser_open(
-    app: AppHandle,
-    id: String,
-    url: String,
-    width: u32,
-    height: u32,
-    scale: Option<f64>,
-    script: Option<String>,
-    fresh: Option<bool>,
-) -> Result<(), String> {
-    let scale = scale.filter(|s| *s > 0.0).unwrap_or(1.0);
-    // `fresh`: troca a janela do Portal por uma nova (a antiga só fecha depois, para o Chrome não sair sem janela).
-    let mut stale = None;
-    if fresh == Some(true) {
-        stale = lock(pages()).remove(&id).map(|p| p.target);
-    } else if lock(pages()).contains_key(&id) {
-        send_raw(&id, "Emulation.setDeviceMetricsOverride", metrics(width, height, scale))?;
-        return send_raw(&id, "Page.navigate", json!({ "url": url }));
+pub async fn real_browser_open(app: AppHandle, window: tauri::Window, id: String, url: String, place: Place, script: Option<String>) -> Result<(), String> {
+    if lock(portals()).contains_key(&id) {
+        return real_browser_place(app, id, place);
     }
-    let port = ensure_browser(&app).await?;
-    // Uma janela por Portal, fora da tela.
-    let created = browser_call(port, "Target.createTarget", json!({
-        "url": "about:blank", "newWindow": true, "left": -32000, "top": -32000, "width": width.max(200), "height": height.max(200),
-    }))
-    .await?;
-    let target = created["targetId"].as_str().ok_or("O Chrome não abriu a janela do Portal.")?.to_string();
-    let (ws, _) = tokio_tungstenite::connect_async(format!("ws://127.0.0.1:{port}/devtools/page/{target}"))
-        .await
-        .map_err(|e| e.to_string())?;
-    let (mut sink, mut stream) = ws.split();
-    let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-    let pending: Arc<Mutex<HashMap<u64, oneshot::Sender<Value>>>> = Default::default();
+    open(&app, &window, &id, &url, &place, script).await
+}
 
-    tokio::spawn(async move {
-        while let Some(text) = rx.recv().await {
-            if sink.send(Message::Text(text.into())).await.is_err() {
-                break;
-            }
-        }
-    });
+#[cfg(windows)]
+async fn open(app: &AppHandle, window: &tauri::Window, id: &str, url: &str, place: &Place, script: Option<String>) -> Result<(), String> {
+    use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
+    use tauri::{LogicalPosition, LogicalSize, WebviewUrl};
 
-    let reader_tx = tx.clone();
-    let reader_pending = pending.clone();
-    let reader_id = id.clone();
-    let reader_target = target.clone();
-    let reader_app = app.clone();
-    tokio::spawn(async move {
-        while let Some(Ok(msg)) = stream.next().await {
-            let Message::Text(text) = msg else { continue };
-            let Ok(v) = serde_json::from_str::<Value>(&text) else { continue };
-            if let Some(n) = v["id"].as_u64() {
-                if let Some(done) = lock(&reader_pending).remove(&n) {
-                    let _ = done.send(match v.get("error") {
-                        Some(err) => json!({ "__error": err["message"] }),
-                        None => v["result"].clone(),
-                    });
-                }
-                continue;
+    let label = label_of(id);
+    let profile = crate::util::datadir::app_data_dir(app)?.join("portal-webview");
+    std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
+    let (popup_app, popup_label) = (app.clone(), label.clone());
+    let (title_app, title_id) = (app.clone(), id.to_string());
+    let (load_app, load_id) = (app.clone(), id.to_string());
+    let builder = WebviewBuilder::new(&label, WebviewUrl::External("about:blank".parse().map_err(|_| "about:blank")?))
+        .data_directory(profile)
+        .on_new_window(move |url, features| {
+            if url.as_str() == "about:blank" && features.size().is_none() {
+                return NewWindowResponse::Deny;
             }
-            match v["method"].as_str() {
-                Some("Page.screencastFrame") => {
-                    let p = &v["params"];
-                    // Fica só o ÚLTIMO quadro (um novo substitui o anterior, nunca uma fila), servido em binário pelo
-                    // protocolo `agsframe`; o evento só avisa que há um novo, e o Portal busca o mais recente quando termina
-                    // de desenhar o atual. Por isso a confirmação ao Chrome é imediata: ele trabalha no ritmo dele, a tela no
-                    // dela. Medido: com o quadro em base64 no evento, ou com a confirmação esperando a ida e volta até o
-                    // Portal, a tela não passava de ~10-11 quadros/s com o Chrome produzindo ~42.
-                    let ack = json!({ "id": next_id(), "method": "Page.screencastFrameAck", "params": { "sessionId": p["sessionId"] } });
-                    let _ = reader_tx.send(ack.to_string());
-                    let Some(bytes) = p["data"].as_str().and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok()) else { continue };
-                    let seq = {
-                        let mut frames = lock(frames());
-                        let slot = frames.entry(reader_id.clone()).or_insert_with(|| (0, Arc::new(Vec::new())));
-                        slot.0 += 1;
-                        slot.1 = Arc::new(bytes);
-                        slot.0
-                    };
-                    emit(&reader_app, "real-browser-frame", json!({
-                        "id": reader_id,
-                        "seq": seq,
-                        "width": p["metadata"]["deviceWidth"],
-                        "height": p["metadata"]["deviceHeight"],
-                    }));
-                }
-                Some("Runtime.bindingCalled") if v["params"]["name"] == BINDING => {
-                    let Ok(message) = serde_json::from_str::<Value>(v["params"]["payload"].as_str().unwrap_or("")) else { continue };
-                    if message["type"] == "input:request" {
-                        let id = reader_id.clone();
-                        tokio::spawn(async move { native_input(&id, message["payload"].clone()).await });
-                    } else {
-                        emit(&reader_app, "real-browser-page", json!({ "id": reader_id, "message": message }));
-                    }
-                }
-                Some("Page.frameNavigated") if v["params"]["frame"]["parentId"].is_null() => {
-                    emit(&reader_app, "real-browser-url", json!({ "id": reader_id, "url": v["params"]["frame"]["url"] }));
-                }
-                _ => {}
+            // Um pop-up (com tamanho: login do Google, OAuth) precisa do `opener` vivo: abre a janela do WebView2.
+            if features.size().is_some() || features.position().is_some() {
+                return NewWindowResponse::Allow;
             }
-        }
-        // Só esquece a página se ela ainda é esta (um Portal reaberto já tem outra).
-        let mut pages = lock(pages());
-        if pages.get(&reader_id).is_some_and(|p| p.target == reader_target) {
-            pages.remove(&reader_id);
-        }
-        drop(pages);
-        emit(&reader_app, "real-browser-closed", json!({ "id": reader_id }));
-    });
-
-    lock(pages()).insert(id.clone(), Page { target, tx, pending });
-    if let Some(stale) = stale {
-        let _ = browser_call(port, "Target.closeTarget", json!({ "targetId": stale })).await;
-    }
-    send_raw(&id, "Page.enable", json!({}))?;
-    send_raw(&id, "Emulation.setDeviceMetricsOverride", metrics(width, height, scale))?;
-    // A janela fica fora de foco o tempo todo; sem isto o cursor de texto nem pisca e alguns campos
-    // não reagem como se estivessem focados.
-    send_raw(&id, "Emulation.setFocusEmulationEnabled", json!({ "enabled": true }))?;
-    send_raw(&id, "Page.startScreencast", json!({ "format": "jpeg", "quality": 85, "everyNthFrame": 1 }))?;
+            // Um link para aba nova abre no mesmo Portal (o T3 abre uma aba dele; o Portal tem uma página só).
+            if navigable(url.as_str()).is_some() {
+                if let Some(page) = popup_app.get_webview(&popup_label) {
+                    tauri::async_runtime::spawn(async move { let _ = page.navigate(url); });
+                }
+            }
+            NewWindowResponse::Deny
+        })
+        .on_document_title_changed(move |_, title| emit(&title_app, "real-browser-title", json!({ "id": title_id, "title": title })))
+        .on_page_load(move |_, payload| {
+            let loading = matches!(payload.event(), PageLoadEvent::Started);
+            emit(&load_app, "real-browser-load", json!({ "id": load_id, "loading": loading, "url": payload.url().as_str() }));
+        });
+    let webview = window
+        .add_child(builder, LogicalPosition::new(place.rect.x, place.rect.y), LogicalSize::new(place.rect.width.max(1.0), place.rect.height.max(1.0)))
+        .map_err(|e| format!("Não consegui abrir o navegador do Portal: {e}"))?;
+    lock(portals()).insert(id.to_string(), label);
+    native::watch(&webview, app.clone(), id.to_string());
+    // O piloto antes da primeira página: o canal (binding), os eventos dele e o script em todo documento novo.
     if let Some(script) = script {
-        // O piloto (o mesmo script que o proxy injeta no outro navegador), em todo documento novo, antes dos da página.
-        // `Runtime.enable` é o que entrega `Runtime.bindingCalled`.
-        send_raw(&id, "Runtime.addBinding", json!({ "name": BINDING }))?;
-        send_raw(&id, "Runtime.enable", json!({}))?;
-        send_raw(&id, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": format!("{BRIDGE}\n;{script}") }))?;
+        native::cdp(&webview, "Runtime.addBinding", json!({ "name": BINDING })).await?;
+        native::cdp(&webview, "Runtime.enable", json!({})).await?;
+        native::cdp(&webview, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": format!("{BRIDGE}\n;{script}") })).await?;
     }
-    send_raw(&id, "Page.navigate", json!({ "url": url }))
+    native::cdp(&webview, "Emulation.setDefaultBackgroundColorOverride", json!({ "color": { "r": 255, "g": 255, "b": 255, "a": 1 } })).await?;
+    apply_place(&webview, place)?;
+    if let Some(target) = navigable(url) {
+        webview.navigate(target).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+async fn open(_: &AppHandle, _: &tauri::Window, _: &str, _: &str, _: &Place, _: Option<String>) -> Result<(), String> {
+    Err("O navegador do Portal por enquanto só existe no Windows.".into())
+}
+
+fn apply_place(webview: &tauri::Webview, place: &Place) -> Result<(), String> {
+    use tauri::{LogicalPosition, LogicalSize};
+    let r = place.rect;
+    webview
+        .set_bounds(tauri::Rect {
+            position: LogicalPosition::new(r.x, r.y).into(),
+            size: LogicalSize::new(r.width.max(1.0), r.height.max(1.0)).into(),
+        })
+        .map_err(|e| e.to_string())?;
+    if place.zoom > 0.0 {
+        webview.set_zoom(place.zoom).map_err(|e| e.to_string())?;
+    }
+    #[cfg(windows)]
+    native::clip(webview, region(place));
+    Ok(())
+}
+
+/// A parte da página que aparece, em retângulos relativos ao Portal: a parte à vista menos os buracos.
+/// Vazia = nada aparece (a página continua desenhando).
+pub fn region(place: &Place) -> Vec<Rect> {
+    let Some(visible) = place.visible else { return Vec::new() };
+    let mut parts = vec![visible];
+    for hole in &place.holes {
+        parts = parts.into_iter().flat_map(|part| subtract(part, *hole)).collect();
+    }
+    parts.retain(|r| r.width > 0.0 && r.height > 0.0);
+    parts
+}
+
+/// `a` menos `b`: até quatro faixas (em cima, embaixo, à esquerda, à direita do pedaço de `b` dentro de `a`).
+fn subtract(a: Rect, b: Rect) -> Vec<Rect> {
+    let (ax2, ay2, bx2, by2) = (a.x + a.width, a.y + a.height, b.x + b.width, b.y + b.height);
+    let (ix, iy, ix2, iy2) = (a.x.max(b.x), a.y.max(b.y), ax2.min(bx2), ay2.min(by2));
+    if ix >= ix2 || iy >= iy2 {
+        return vec![a];
+    }
+    let mut out = Vec::new();
+    if iy > a.y {
+        out.push(Rect { x: a.x, y: a.y, width: a.width, height: iy - a.y });
+    }
+    if iy2 < ay2 {
+        out.push(Rect { x: a.x, y: iy2, width: a.width, height: ay2 - iy2 });
+    }
+    if ix > a.x {
+        out.push(Rect { x: a.x, y: iy, width: ix - a.x, height: iy2 - iy });
+    }
+    if ix2 < ax2 {
+        out.push(Rect { x: ix2, y: iy, width: ax2 - ix2, height: iy2 - iy });
+    }
+    out
+}
+
+/// O Portal mudou de lugar, de tamanho, de zoom, saiu de vista ou ganhou algo por cima.
+#[tauri::command]
+pub fn real_browser_place(app: AppHandle, id: String, place: Place) -> Result<(), String> {
+    apply_place(&webview(&app, &id)?, &place)
+}
+
+/// A barra de endereço (ou um agente) mandou ir para `url`. A mesma URL de novo é recarregar, como no T3.
+#[tauri::command]
+pub fn real_browser_navigate(app: AppHandle, id: String, url: String) -> Result<(), String> {
+    let page = webview(&app, &id)?;
+    let target = navigable(&url).ok_or("Endereço que o navegador não abre.")?;
+    if page.url().ok().as_ref() == Some(&target) {
+        return page.reload().map_err(|e| e.to_string());
+    }
+    page.navigate(target).map_err(|e| e.to_string())
+}
+
+/// Voltar (-1), avançar (+1) ou recarregar (0).
+#[tauri::command]
+pub async fn real_browser_history(app: AppHandle, id: String, delta: i32) -> Result<(), String> {
+    let page = webview(&app, &id)?;
+    if delta == 0 {
+        return page.reload().map_err(|e| e.to_string());
+    }
+    #[cfg(windows)]
+    native::history(&page, delta);
+    Ok(())
+}
+
+/// Fecha o navegador do Portal.
+#[tauri::command]
+pub fn real_browser_close(app: AppHandle, id: String) -> Result<(), String> {
+    let Some(label) = lock(portals()).remove(&id) else { return Ok(()) };
+    if let Some(page) = app.get_webview(&label) {
+        page.close().map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// O foco do teclado vai para a página (um clique nela já faz isso; aqui é para a barra de endereço devolver).
+#[tauri::command]
+pub fn real_browser_focus(app: AppHandle, id: String) -> Result<(), String> {
+    webview(&app, &id)?.set_focus().map_err(|e| e.to_string())
+}
+
+/// Uma mensagem do app para o piloto da página (`page:run`, `connect`, `pick:on`…). Só as do app (`source: ade-ags`).
+#[tauri::command]
+pub async fn real_browser_post(app: AppHandle, id: String, message: Value) -> Result<(), String> {
+    if message["source"] != "ade-ags" {
+        return Err("Mensagem que não é do app.".into());
+    }
+    post_to_page(&webview(&app, &id)?, &message).await
+}
+
+/// A foto da página como está agora (PNG em base64) e o tamanho dela em px CSS: as fotos do piloto.
+#[tauri::command]
+pub async fn real_browser_screenshot(app: AppHandle, id: String) -> Result<Value, String> {
+    let page = webview(&app, &id)?;
+    let layout = cdp(&page, "Page.getLayoutMetrics", json!({})).await?;
+    let viewport = &layout["cssLayoutViewport"];
+    let shot = cdp(&page, "Page.captureScreenshot", json!({ "format": "png" })).await?;
+    Ok(json!({ "data": shot["data"], "width": viewport["clientWidth"], "height": viewport["clientHeight"] }))
+}
+
+async fn cdp(page: &tauri::Webview, method: &str, params: Value) -> Result<Value, String> {
+    #[cfg(windows)]
+    return native::cdp(page, method, params).await;
+    #[cfg(not(windows))]
+    {
+        let _ = (page, method, params);
+        Err("só no Windows".into())
+    }
 }
 
 /// O nome do canal da página para o app (`Runtime.addBinding`).
 // Não pode ser `__agsPage`: é a marca de "piloto já instalado" do `runtime.ts`.
 const BINDING: &str = "__agsCdpBridge";
 
-/// Roda antes do piloto em cada documento. No Chrome real a página é a janela principal: o piloto manda para
-/// `window.parent`, que é ela mesma, e a ponte repassa ao app pelo binding. A função do binding é guardada e tirada
-/// do `window` antes de qualquer script da página rodar. `__ags_trusted_input` liga os toques e teclas pelo CDP.
+/// Roda antes do piloto em cada documento. A página é a janela principal: o piloto manda para `window.parent`, que
+/// é ela mesma, e a ponte repassa ao app pelo binding. A função do binding é guardada e tirada do `window` antes de
+/// qualquer script da página rodar. `__ags_trusted_input` liga os toques e teclas pelo CDP.
 const BRIDGE: &str = r#"(() => {
   if (window.__ags_bridge) return;
   Object.defineProperty(window, "__ags_bridge", { value: true });
@@ -555,26 +305,43 @@ const BRIDGE: &str = r#"(() => {
   });
 })();"#;
 
+/// Uma mensagem que o piloto mandou pelo binding: `input:request` é com o Rust (toque ou tecla de verdade), o resto
+/// vai para o Portal.
+#[cfg_attr(not(windows), allow(dead_code))]
+fn on_binding(app: &AppHandle, id: &str, payload: &str) {
+    let Ok(message) = serde_json::from_str::<Value>(payload) else { return };
+    if message["type"] == "input:request" {
+        let (app, id) = (app.clone(), id.to_string());
+        tauri::async_runtime::spawn(async move {
+            if let Ok(page) = webview(&app, &id) {
+                native_input(&page, message["payload"].clone()).await;
+            }
+        });
+    } else {
+        emit(app, "real-browser-page", json!({ "id": id, "message": message }));
+    }
+}
+
 /// Entrega uma mensagem do app ao piloto da página (como o `postMessage` do iframe faz no outro navegador).
-async fn post_to_page(id: &str, message: &Value) -> Result<(), String> {
+async fn post_to_page(page: &tauri::Webview, message: &Value) -> Result<(), String> {
     let expression = format!("window.postMessage({message}, \"*\")");
-    call(id, "Runtime.evaluate", json!({ "expression": expression })).await.map(|_| ())
+    cdp(page, "Runtime.evaluate", json!({ "expression": expression })).await.map(|_| ())
 }
 
 /// Um toque ou uma tecla de verdade que o piloto pediu (`input:request`), e a resposta `input:done`.
-async fn native_input(id: &str, request: Value) -> Result<(), String> {
-    let ok = run_native_input(id, &request).await.is_ok();
-    post_to_page(id, &json!({ "source": "ade-ags", "type": "input:done", "id": request["id"], "ok": ok })).await
+async fn native_input(page: &tauri::Webview, request: Value) {
+    let ok = run_native_input(page, &request).await.is_ok();
+    let _ = post_to_page(page, &json!({ "source": "ade-ags", "type": "input:done", "id": request["id"], "ok": ok })).await;
 }
 
-async fn run_native_input(id: &str, r: &Value) -> Result<(), String> {
+async fn run_native_input(page: &tauri::Webview, r: &Value) -> Result<(), String> {
     match r["kind"].as_str() {
         Some("click") => {
             let (x, y) = (r["x"].as_f64().unwrap_or(0.0), r["y"].as_f64().unwrap_or(0.0));
-            call(id, "Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": x, "y": y, "button": "none" })).await?;
+            cdp(page, "Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": x, "y": y, "button": "none" })).await?;
             for kind in ["mousePressed", "mouseReleased"] {
                 let buttons = if kind == "mousePressed" { 1 } else { 0 };
-                call(id, "Input.dispatchMouseEvent", json!({ "type": kind, "x": x, "y": y, "button": "left", "buttons": buttons, "clickCount": 1 })).await?;
+                cdp(page, "Input.dispatchMouseEvent", json!({ "type": kind, "x": x, "y": y, "button": "left", "buttons": buttons, "clickCount": 1 })).await?;
             }
         }
         Some("key") => {
@@ -589,310 +356,68 @@ async fn run_native_input(id: &str, r: &Value) -> Result<(), String> {
             if r["commands"].is_array() {
                 down["commands"] = r["commands"].clone();
             }
-            call(id, "Input.dispatchKeyEvent", down).await?;
-            call(id, "Input.dispatchKeyEvent", json!({
+            cdp(page, "Input.dispatchKeyEvent", down).await?;
+            cdp(page, "Input.dispatchKeyEvent", json!({
                 "type": "keyUp", "key": r["key"], "code": r["code"], "windowsVirtualKeyCode": r["keyCode"], "modifiers": r["modifiers"],
             }))
             .await?;
         }
         Some("text") => {
-            call(id, "Input.insertText", json!({ "text": r["text"] })).await?;
+            cdp(page, "Input.insertText", json!({ "text": r["text"] })).await?;
         }
         _ => return Err("pedido de input desconhecido".into()),
     }
     Ok(())
 }
 
-/// Uma mensagem do app para o piloto da página (`page:run`, `connect`, `pick:on`…). Só as do app (`source: ade-ags`).
-#[tauri::command]
-pub async fn real_browser_post(id: String, message: Value) -> Result<(), String> {
-    if message["source"] != "ade-ags" {
-        return Err("Mensagem que não é do app.".into());
-    }
-    post_to_page(&id, &message).await
-}
-
-/// A foto da página como está agora (PNG em base64) e o tamanho dela em px CSS: as fotos do piloto.
-#[tauri::command]
-pub async fn real_browser_screenshot(id: String) -> Result<Value, String> {
-    let layout = call(&id, "Page.getLayoutMetrics", json!({})).await?;
-    let viewport = &layout["cssLayoutViewport"];
-    let shot = call(&id, "Page.captureScreenshot", json!({ "format": "png" })).await?;
-    Ok(json!({ "data": shot["data"], "width": viewport["clientWidth"], "height": viewport["clientHeight"] }))
-}
-
-/// O tamanho da página em pixels CSS e quantos pixels de verdade cada um tem (zoom da página × densidade da tela).
-fn metrics(width: u32, height: u32, scale: f64) -> Value {
-    json!({ "width": width.max(200), "height": height.max(200), "deviceScaleFactor": scale, "mobile": false })
-}
-
-fn send_raw(id: &str, method: &str, params: Value) -> Result<(), String> {
-    let pages = lock(pages());
-    let page = pages.get(id).ok_or("O Chrome real deste Portal não está aberto.")?;
-    let msg = json!({ "id": next_id(), "method": method, "params": params });
-    page.tx.send(msg.to_string()).map_err(|_| "A conexão com o Chrome caiu.".to_string())
-}
-
-async fn call(id: &str, method: &str, params: Value) -> Result<Value, String> {
-    let (done, wait) = oneshot::channel();
-    let n = next_id();
-    {
-        let pages = lock(pages());
-        let page = pages.get(id).ok_or("O Chrome real deste Portal não está aberto.")?;
-        lock(&page.pending).insert(n, done);
-        let msg = json!({ "id": n, "method": method, "params": params });
-        page.tx.send(msg.to_string()).map_err(|_| "A conexão com o Chrome caiu.".to_string())?;
-    }
-    let reply = tokio::time::timeout(Duration::from_secs(10), wait)
-        .await
-        .map_err(|_| "O Chrome não respondeu.".to_string())?
-        .map_err(|e| e.to_string())?;
-    match reply.get("__error") {
-        Some(err) => Err(err.as_str().unwrap_or("erro do Chrome").to_string()),
-        None => Ok(reply),
-    }
-}
-
-/// Os comandos CDP que o Portal pode mandar: entrada, navegação e tamanho. Nada que leia cookies ou rode
-/// script arbitrário.
-const ALLOWED: &[&str] = &[
-    "Input.dispatchMouseEvent",
-    "Input.dispatchKeyEvent",
-    "Input.insertText",
-    "Page.navigate",
-    "Page.reload",
-    "Emulation.setDeviceMetricsOverride",
-];
-
-#[tauri::command]
-pub fn real_browser_send(id: String, method: String, params: Value) -> Result<(), String> {
-    if !ALLOWED.contains(&method.as_str()) {
-        return Err(format!("Comando não permitido no Chrome real: {method}"));
-    }
-    send_raw(&id, &method, params)
-}
-
-/// Voltar (-1) ou avançar (+1) no histórico da página.
-#[tauri::command]
-pub async fn real_browser_history(id: String, delta: i32) -> Result<(), String> {
-    let history = call(&id, "Page.getNavigationHistory", json!({})).await?;
-    let index = history["currentIndex"].as_i64().unwrap_or(0) + i64::from(delta);
-    let Some(entry) = history["entries"].as_array().and_then(|e| e.get(usize::try_from(index).ok()?)) else {
-        return Ok(());
-    };
-    send_raw(&id, "Page.navigateToHistoryEntry", json!({ "entryId": entry["id"] }))
-}
-
-/// Fecha a janela do Portal. Fechada a última, fecha também o Chrome.
-#[tauri::command]
-pub async fn real_browser_close(app: AppHandle, id: String) -> Result<(), String> {
-    let (target, empty) = {
-        let mut pages = lock(pages());
-        let target = pages.remove(&id).map(|p| p.target);
-        (target, pages.is_empty())
-    };
-    lock(frames()).remove(&id);
-    let port = browser().lock().await.as_ref().map(|b| b.port);
-    if let (Some(port), Some(target)) = (port, target) {
-        let _ = browser_call(port, "Target.closeTarget", json!({ "targetId": target })).await;
-    }
-    if empty {
-        shutdown_browser(&app).await?;
-    }
-    Ok(())
-}
-
-/// Onde o Portal está na janela do app, em pixels CSS (o `getBoundingClientRect` dele), e quantos pixels
-/// físicos vale um pixel CSS ali (`devicePixelRatio`). A escala vem da página e não do monitor: ela já
-/// inclui o zoom do próprio app.
-#[derive(Debug, Clone, Copy, Deserialize)]
-pub struct PortalRect {
-    pub x: f64,
-    pub y: f64,
-    pub width: f64,
-    pub height: f64,
-    pub scale: f64,
-}
-
-/// A menor janela de login que ainda mostra a página inteira; num Portal menor (canvas com zoom baixo)
-/// ela fica centrada sobre ele.
-const LOGIN_MIN: (i32, i32) = (480, 600);
-
-/// O retângulo de tela (pixels físicos) da janela de login sobre o Portal. Pura.
-pub fn login_rect(portal: PortalRect, client_origin: (i32, i32)) -> Rect {
-    let scale = if portal.scale > 0.0 { portal.scale } else { 1.0 };
-    let w = ((portal.width * scale).round() as i32).max(LOGIN_MIN.0);
-    let h = ((portal.height * scale).round() as i32).max(LOGIN_MIN.1);
-    let cx = client_origin.0 as f64 + (portal.x + portal.width / 2.0) * scale;
-    let cy = client_origin.1 as f64 + (portal.y + portal.height / 2.0) * scale;
-    Rect { x: (cx - w as f64 / 2.0).round() as i32, y: (cy - h as f64 / 2.0).round() as i32, w, h }
-}
-
-fn screen_rect(window: &WebviewWindow, portal: Option<PortalRect>) -> Option<Rect> {
-    let portal = portal.filter(|p| p.width >= 1.0 && p.height >= 1.0)?;
-    let origin = window.inner_position().ok()?;
-    Some(login_rect(portal, (origin.x, origin.y)))
-}
-
-/// Login numa conta: fecha o Chrome controlado e abre o perfil num Chrome COMUM, em cima do Portal. A
-/// sessão fica no perfil; quando a janela fecha, o app avisa (`real-browser-login-done`) e o Portal volta.
-#[tauri::command]
-pub async fn real_browser_login(app: AppHandle, window: WebviewWindow, url: String, rect: Option<PortalRect>) -> Result<(), String> {
-    if lock(login()).is_some() {
-        return Ok(());
-    }
-    *lock(last_place()) = Some(screen_rect(&window, rect));
-    shutdown_browser(&app).await?;
-    let profile = profile_dir(&app)?;
-    prepare_profile(&profile);
-    // Começa fora da tela: só aparece quando já estiver em cima do Portal.
-    let mut child = chrome(&profile)?
-        .args(["--window-position=-32000,-32000", "--window-size=1280,860", "--new-window", &url])
-        .spawn()
-        .map_err(|e| format!("Não consegui abrir o Chrome: {e}"))?;
-    let pid = child.id();
-    let mut group = ProcessGroup::new(pid);
-    group.adopt(&child);
-    let rect = lock(last_place()).unwrap_or_else(|| screen_rect(&window, rect));
-    *lock(login()) = Some(Login { pid, group, hwnd: None, rect });
-
-    #[cfg(windows)]
-    let owner = window.hwnd().map(|h| h.0 as isize).unwrap_or(0);
-    #[cfg(not(windows))]
-    let owner = 0isize;
-    win::watch_windows(pid, move |hwnd, frame| {
-        let mut slot = lock(login());
-        let Some(l) = slot.as_mut().filter(|l| l.pid == pid) else { return };
-        if !frame {
-            return;
-        }
-        if l.hwnd.is_none() {
-            l.hwnd = Some(hwnd);
-            win::adopt_as_owned(hwnd, owner);
-            win::place(hwnd, l.rect);
-            if l.rect.is_some() {
-                win::focus(hwnd);
-            }
-        } else if Some(hwnd) != l.hwnd {
-            // Outra janela do mesmo login (um pop-up do Google): também fica com o app como dono.
-            win::adopt_as_owned(hwnd, owner);
-            win::place(hwnd, l.rect);
-        }
-    });
-
-    tokio::task::spawn_blocking(move || {
-        let _ = child.wait();
-        lock(login()).take();
-        lock(last_place()).take();
-        emit(&app, "real-browser-login-done", json!({}));
-    });
-    Ok(())
-}
-
-/// O Portal mudou de lugar (canvas arrastado, zoom, janela do app movida) ou saiu de vista (`None`).
-#[tauri::command]
-pub fn real_browser_login_place(window: WebviewWindow, rect: Option<PortalRect>) {
-    let rect = screen_rect(&window, rect);
-    {
-        let mut last = lock(last_place());
-        if last.is_some() {
-            *last = Some(rect);
-        }
-    }
-    let mut slot = lock(login());
-    let Some(l) = slot.as_mut() else { return };
-    if l.rect == rect {
-        return;
-    }
-    l.rect = rect;
-    if let Some(hwnd) = l.hwnd {
-        win::place(hwnd, rect);
-    }
-}
-
-/// "Terminei o login": fecha a janela como o X dela (o Chrome grava a sessão e sai). Só força se ele
-/// não sair em 15 s. O aviso de fim vem da thread que espera o processo, em `real_browser_login`.
-#[tauri::command]
-pub async fn real_browser_login_finish() -> Result<(), String> {
-    let Some((pid, hwnd)) = lock(login()).as_ref().map(|l| (l.pid, l.hwnd)) else { return Ok(()) };
-    if let Some(hwnd) = hwnd {
-        win::close(hwnd);
-    }
-    let deadline = Instant::now() + Duration::from_secs(15);
-    while lock(login()).as_ref().is_some_and(|l| l.pid == pid) {
-        if Instant::now() >= deadline {
-            if let Some(l) = lock(login()).as_mut() {
-                l.group.kill_all();
-            }
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-    Ok(())
-}
-
 #[cfg(test)]
 mod test {
-    use super::{login_rect, PortalRect, Rect};
+    use super::{label_of, navigable, region, subtract, Place, Rect};
 
-    #[test]
-    fn janela_de_login_fica_em_cima_do_portal() {
-        let portal = PortalRect { x: 100.0, y: 50.0, width: 800.0, height: 700.0, scale: 1.25 };
-        // Janela do app em (10, 20), página em 125%.
-        assert_eq!(login_rect(portal, (10, 20)), Rect { x: 135, y: 83, w: 1000, h: 875 });
+    fn r(x: f64, y: f64, width: f64, height: f64) -> Rect {
+        Rect { x, y, width, height }
+    }
+
+    fn area(parts: &[Rect]) -> f64 {
+        parts.iter().map(|p| p.width * p.height).sum()
     }
 
     #[test]
-    fn id_do_portal_chega_decodificado() {
-        assert_eq!(super::portal_of("/portal-a4cc%2F247"), "portal-a4cc");
-        assert_eq!(super::portal_of("/portal-a4cc/247"), "portal-a4cc");
-        assert_eq!(super::percent_decode("portal%2Da4cc%2D12"), "portal-a4cc-12");
-        assert_eq!(super::percent_decode("abc"), "abc");
+    fn buraco_no_meio_deixa_quatro_faixas() {
+        let parts = subtract(r(0.0, 0.0, 100.0, 100.0), r(40.0, 40.0, 20.0, 20.0));
+        assert_eq!(parts.len(), 4);
+        assert_eq!(area(&parts), 100.0 * 100.0 - 20.0 * 20.0);
     }
 
     #[test]
-    fn portal_pequeno_ganha_janela_minima_centrada_nele() {
-        let portal = PortalRect { x: 0.0, y: 0.0, width: 200.0, height: 100.0, scale: 1.0 };
-        assert_eq!(login_rect(portal, (0, 0)), Rect { x: -140, y: -250, w: 480, h: 600 });
+    fn buraco_fora_nao_muda_nada_e_buraco_maior_apaga_tudo() {
+        assert_eq!(subtract(r(0.0, 0.0, 10.0, 10.0), r(20.0, 20.0, 5.0, 5.0)), vec![r(0.0, 0.0, 10.0, 10.0)]);
+        assert!(subtract(r(10.0, 10.0, 10.0, 10.0), r(0.0, 0.0, 50.0, 50.0)).is_empty());
     }
 
     #[test]
-    fn porta_do_chrome_nunca_e_a_zero() {
-        // A 0 liga `navigator.webdriver` no Chrome, e o Google barra as pesquisas.
-        let port = super::free_port().unwrap();
-        assert_ne!(port, 0);
-        assert!(std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(), "a porta devolvida tem que estar livre");
+    fn regiao_e_a_parte_a_vista_menos_o_que_esta_por_cima() {
+        let place = |visible, holes| Place { rect: r(0.0, 0.0, 800.0, 600.0), zoom: 1.0, visible, holes };
+        assert!(region(&place(None, vec![])).is_empty(), "fora de vista não aparece nada");
+        assert_eq!(region(&place(Some(r(0.0, 0.0, 800.0, 300.0)), vec![])), vec![r(0.0, 0.0, 800.0, 300.0)]);
+        // Um menu de 200×100 no canto de cima à direita.
+        let parts = region(&place(Some(r(0.0, 0.0, 800.0, 600.0)), vec![r(600.0, 0.0, 200.0, 100.0)]));
+        assert_eq!(area(&parts), 800.0 * 600.0 - 200.0 * 100.0);
     }
 
     #[test]
-    fn chrome_do_portal_sem_sessoes_presas_ao_dispositivo() {
-        // Os nomes exatos do Chrome 156: com eles ligados, o Google recarregava sem parar depois do login.
-        for feature in ["EnableBoundSessionCredentials", "DeviceBoundSessions"] {
-            assert!(super::NO_BOUND_SESSIONS.split(['=', ',']).any(|f| f == feature), "{feature}");
+    fn so_http_https_e_about_blank_navegam() {
+        assert!(navigable("https://accounts.google.com/").is_some());
+        assert!(navigable("http://localhost:5173/").is_some());
+        assert!(navigable("about:blank").is_some());
+        for bad in ["javascript:alert(1)", "file:///C:/Windows/win.ini", "mailto:a@b.c", "about:config", "nada"] {
+            assert!(navigable(bad).is_none(), "{bad}");
         }
-        assert!(super::NO_BOUND_SESSIONS.starts_with("--disable-features="));
     }
 
     #[test]
-    fn esquece_a_marca_das_sessoes_presas_uma_vez_so() {
-        let dir = std::env::temp_dir().join(format!("ags-bound-{}", std::process::id()));
-        std::fs::create_dir_all(dir.join("Default")).unwrap();
-        let prefs = dir.join("Default").join("Preferences");
-        std::fs::write(&prefs, r#"{"bound_session_credentials_bound_session_params":{"https://google.com/":{"x":"y"}},"keep":1}"#).unwrap();
-        assert!(super::forget_bound_sessions(&dir));
-        let left: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&prefs).unwrap()).unwrap();
-        assert_eq!(left, serde_json::json!({ "keep": 1 }));
-        assert!(!super::forget_bound_sessions(&dir), "na segunda vez não há mais o que apagar");
-        let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn cookies_do_google_e_so_eles() {
-        for d in [".google.com", "accounts.google.com", "www.google.com.br", ".youtube.com"] {
-            assert!(super::is_google_cookie(d), "{d}");
-        }
-        for d in ["notgoogle.com", "google.com.evil.io", ".github.com"] {
-            assert!(!super::is_google_cookie(d), "{d}");
-        }
+    fn rotulo_do_webview_so_com_caracteres_aceitos() {
+        assert_eq!(label_of("view-1a2b"), "portal-view-1a2b");
+        assert_eq!(label_of("a b/c:d"), "portal-a_b_c_d");
     }
 }
