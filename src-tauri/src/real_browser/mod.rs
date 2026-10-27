@@ -126,8 +126,14 @@ async fn open(app: &AppHandle, window: &tauri::Window, id: &str, url: &str, plac
     let (popup_app, popup_label) = (app.clone(), label.clone());
     let (title_app, title_id) = (app.clone(), id.to_string());
     let (load_app, load_id) = (app.clone(), id.to_string());
-    let builder = WebviewBuilder::new(&label, WebviewUrl::External("about:blank".parse().map_err(|_| "about:blank")?))
-        .data_directory(profile)
+    let mut builder = WebviewBuilder::new(&label, WebviewUrl::External("about:blank".parse().map_err(|_| "about:blank")?)).data_directory(profile);
+    // As mesmas flags do WebView do app (`tauri.conf.json`): o WebView2 recusa (`0x8007139F`) dois ambientes com opções
+    // diferentes na mesma pasta, e `WEBVIEW2_USER_DATA_FOLDER` (uma instância isolada) põe todos na mesma. Elas também
+    // mantêm a página desenhando encoberta ou recortada (`CalculateNativeWinOcclusion` desligado).
+    if let Some(args) = app.config().app.windows.first().and_then(|w| w.additional_browser_args.clone()) {
+        builder = builder.additional_browser_args(&args);
+    }
+    let builder = builder
         .on_new_window(move |url, features| {
             if url.as_str() == "about:blank" && features.size().is_none() {
                 return NewWindowResponse::Deny;
