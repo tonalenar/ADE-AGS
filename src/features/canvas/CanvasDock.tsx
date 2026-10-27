@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { MiniMap, useNodesInitialized, useReactFlow } from "@xyflow/react";
 import { Button, CloseIcon } from "neogestify-ui-components";
@@ -12,8 +12,9 @@ import { unreadOf, useUnreadStore } from "./chatUnread";
 import { useDockWidth } from "./dockWidth";
 import { FloorBar } from "./FloorBar";
 import { RING_COLORS, Ring } from "./Ring";
+import { agyTopPercent } from "./antigravityQuota";
 import { UsageBoard } from "./UsageBoard";
-import { startUsagePolling, useUsageStore } from "./usageStore";
+import { refreshAllUsage, startUsagePolling, useUsageStore } from "./usageStore";
 
 /** Qué panel está abierto sobre la barra. Uno a la vez: todos nacen en el mismo lugar. */
 export type DockPanel = "layers" | "map" | "chat" | "routines" | "design";
@@ -40,6 +41,11 @@ function useUsageRings(): { claude: number | null; codex: number | null; antigra
     return null;
   });
   const antigravity = useUsageStore((st) => {
+    // Primeiro o `agy /usage` (grupos e janelas); sem ele, as contas OAuth (`fetchAvailableModels`).
+    if ((st.agy.usage?.fetchedAt ?? 0) > 0) {
+      const top = agyTopPercent(st.agy.usage?.groups);
+      if (top !== null) return top;
+    }
     for (const e of Object.values(st.antigravity)) if (e.meters && e.meters.length > 0) return e.meters[0].percent;
     return null;
   });
@@ -59,6 +65,12 @@ const MapIcon = () => <Svg><path d="M9 4L3 6v14l6-2 6 2 6-2V4l-6 2-6-2Z" /><path
 const ChatIcon = () => <Svg><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1-4.5A8 8 0 1 1 21 12Z" /></Svg>;
 const EyeIcon = () => <Svg><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12Z" /><circle cx="12" cy="12" r="3" /></Svg>;
 const ClockIcon = () => <Svg><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></Svg>;
+const RefreshIcon = ({ spin }: { spin: boolean }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round"
+    className={`w-3.5 h-3.5 ${spin ? "animate-spin" : ""}`} aria-hidden>
+    <path d="M20 11a8 8 0 0 0-14.3-4.9L4 8" /><path d="M4 3v5h5" /><path d="M4 13a8 8 0 0 0 14.3 4.9L20 16" /><path d="M20 21v-5h-5" />
+  </svg>
+);
 const DesignIcon = () => <Svg><rect x="3" y="4" width="8" height="16" rx="1.5" /><rect x="13" y="4" width="8" height="9" rx="1.5" /></Svg>;
 const FitIcon = () => <Svg><path d="M4 9V5h4M20 9V5h-4M4 15v4h4M20 15v4h-4" /></Svg>;
 
@@ -165,13 +177,16 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
   const [usageOpen, setUsageOpen] = useState(readUsageOpen);
   useEffect(() => writeUsageOpen(usageOpen), [usageOpen]);
   const toggleUsage = () => setUsageOpen((v) => !v);
+  const closeUsage = useCallback(() => setUsageOpen(false), []);
 
   return (
     <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
       {panel === "layers" && (
         <div className={`${popover} p-2`} style={sameWidth}><FloorBar inline /></div>
       )}
-      {usageOpen && panel === null && <UsagePanel accounts={accounts} onClose={toggleUsage} width={dockWidth} />}
+      {usageOpen && panel === null && (
+        <UsagePanel accounts={accounts} onClose={closeUsage} width={dockWidth} dockRef={dockRef} />
+      )}
       {panel === "map" && (
         // Tamanho próprio (não o da dock): um mapa de 500 px de largura não cabia em nada e os nós sumiam.
         <div className={`${popover} p-1.5`} style={{ width: MAP_SIZE.w + 12 }}>
@@ -244,13 +259,47 @@ export function CanvasDock({ zoom, panel, onTogglePanel, onOpenChat, onFit, onRe
  * El panel "Uso dos agentes": el cupo del plan de cada cuenta con sesión — anillo, barras
  * por límite y cuándo se reinicia (ver `UsageBoard`).
  */
-function UsagePanel({ accounts, onClose, width }: { accounts: AgentAccount[]; onClose: () => void; width: number }) {
+function UsagePanel({ accounts, onClose, width, dockRef }: {
+  accounts: AgentAccount[]; onClose: () => void; width: number; dockRef: React.RefObject<HTMLDivElement | null>;
+}) {
   const { t } = useTranslation();
+  const ref = useRef<HTMLDivElement>(null);
+  const [refreshing, setRefreshing] = useState(false);
+  const busy = useUsageStore((st) => Object.values(st.busy).some(Boolean));
+  const refreshAll = () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    void refreshAllUsage(accounts).finally(() => setRefreshing(false));
+  };
+  // Fecha com um clique fora ou Esc. A barra fica de fora: o anel de Uso já alterna o painel, e os
+  // outros botões dela abrem o próprio painel, que esconde este.
+  useEffect(() => {
+    const onDown = (e: PointerEvent) => {
+      const target = e.target as Node | null;
+      if (!target || ref.current?.contains(target) || dockRef.current?.contains(target)) return;
+      onClose();
+    };
+    // Esc de um terminal é do agente (interrompe o Claude): só fecha com o foco no painel ou em nada.
+    const onKey = (e: KeyboardEvent) => {
+      const focus = document.activeElement;
+      if (e.key === "Escape" && (!focus || focus === document.body || ref.current?.contains(focus))) onClose();
+    };
+    document.addEventListener("pointerdown", onDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [onClose, dockRef]);
   return (
-    <div className={`${popover} w-[22rem] max-h-[calc(100%-6.5rem)] flex flex-col`} style={width > 0 ? { width } : undefined}>
+    <div ref={ref} className={`${popover} w-[22rem] max-h-[calc(100%-6.5rem)] flex flex-col`} style={width > 0 ? { width } : undefined}>
       <div className={`flex items-center gap-1 pl-4 pr-2 h-11 shrink-0 border-b ${hairline}`}>
         <span className="text-[13px] font-semibold tracking-[-0.01em] text-gray-800 dark:text-gray-100">{t("canvas.dock.usageTitle")}</span>
         <span className="flex-1" />
+        <Button variant="custom" onClick={refreshAll} disabled={refreshing} aria-label={t("canvas.usage.refreshAll")} title={t("canvas.usage.refreshAll")}
+          className="cc-t w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.06] hover:text-gray-700 dark:hover:text-gray-200 disabled:opacity-60">
+          <RefreshIcon spin={refreshing || busy} />
+        </Button>
         <Button variant="custom" onClick={onClose} aria-label={t("canvas.dock.close")}
           className="cc-t w-7 h-7 flex items-center justify-center rounded-md text-gray-400 hover:bg-gray-100 dark:hover:bg-white/[0.06] hover:text-gray-700 dark:hover:text-gray-200">
           <CloseIcon className="w-3 h-3" />

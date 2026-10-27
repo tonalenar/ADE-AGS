@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { modelMeters } from "../antigravityQuota";
+import { agyTopPercent, modelMeters } from "../antigravityQuota";
 
 describe("modelMeters", () => {
   it("convierte lo que queda en lo usado y ordena por el más gastado", () => {
@@ -20,5 +20,16 @@ describe("modelMeters", () => {
     ]);
     expect(meters).toHaveLength(1);
     expect(meters[0].percent).toBe(0);
+  });
+});
+
+describe("agyTopPercent", () => {
+  it("es la ventana más gastada de todos los grupos, o null sin ventanas", () => {
+    expect(agyTopPercent([
+      { name: "A", windows: [{ id: "w", kind: "weekly", usedPct: 7.8 }, { id: "s", kind: "session", usedPct: 0 }] },
+      { name: "B", windows: [{ id: "x", kind: "weekly", usedPct: 41.6 }] },
+    ])).toBe(42);
+    expect(agyTopPercent([{ name: "A", windows: [] }])).toBeNull();
+    expect(agyTopPercent(null)).toBeNull();
   });
 });
