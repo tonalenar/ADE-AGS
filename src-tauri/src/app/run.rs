@@ -530,6 +530,9 @@ pub fn run() {
             crate::database::db_delete_session_history,
             crate::session::session_markdown,
             crate::session::export_session_markdown,
+            // Painel lateral da aba ativa: contexto usado e conectores MCP
+            crate::session::panel::tab_context_usage,
+            crate::session::panel::tab_connectors,
             crate::agents::list_custom_agents,
             crate::agents::upsert_custom_agent,
             crate::agents::delete_custom_agent,

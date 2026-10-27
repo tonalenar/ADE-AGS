@@ -16,7 +16,9 @@ import { useTabCheckpointsCapture } from "@/features/tabCheckpoints/useTabCheckp
 import { StatusBar } from "@/app/StatusBar";
 import { TabBar } from "@/features/tabs/TabBar";
 import { WorkspacesPanel } from "@/features/workspaces/WorkspacesPanel";
-import { ExplorerPanel } from "@/features/explorer/ExplorerPanel";
+import { ExplorerDrawer } from "@/features/sidePanel/ExplorerDrawer";
+import { PanelButtons } from "@/features/sidePanel/PanelButtons";
+import { SessionPanel } from "@/features/sidePanel/SessionPanel";
 import { RouteModal } from "@/app/RouteModal";
 import { PAGE_HOST_ID } from "@/shared/ui/pageHost";
 import { EditorArea } from "@/features/tabs/EditorArea";
@@ -97,6 +99,7 @@ export function AppShell() {
   const activeTabId = useTabsStore((s) => s.activeTabId);
   const workspacesCollapsed = useUiStore((s) => s.workspacesCollapsed);
   const railExpanded = useUiStore((s) => s.railExpanded);
+  const sidePanelHidden = useUiStore((s) => s.sidePanelHidden);
   const settingsOpen = useUiStore((s) => s.settingsOpen);
   const setSettingsOpen = useUiStore((s) => s.setSettingsOpen);
   const accountsOpen = useUiStore((s) => s.accountsOpen);
@@ -268,7 +271,8 @@ export function AppShell() {
           la derecha de la barra de título se mudó al riel y a la barra de abajo. */}
       <div className="flex shrink-0">
         <SideHead width={sideWidth} />
-        <TabBar showLights={workspacesCollapsed && !railExpanded} />
+        <TabBar showLights={workspacesCollapsed && !railExpanded}
+          trailing={<PanelButtons changes={activeRepo?.changedCount ?? 0} />} />
       </div>
 
       <div className="relative flex flex-1 min-h-0">
@@ -321,14 +325,17 @@ export function AppShell() {
             className="absolute inset-0 z-[35] pointer-events-none"
             style={{ transform: "translateZ(0)" }}
           />
+
+          {/* Arquivos, busca e git: uma gaveta por cima do conteúdo, aberta pelos botões do topo. */}
+          <ExplorerDrawer
+            cwd={activeTab?.cwd ?? null}
+            repo={activeRepo}
+            title={activeRepo?.branch ?? activeTab?.cwd.split(/[\\/]/).filter(Boolean).pop() ?? ""}
+          />
         </div>
 
-        {/* Derecha: los archivos del workspace activo. */}
-        <ExplorerPanel
-          cwd={activeTab?.cwd ?? null}
-          repo={activeRepo}
-          title={activeRepo?.branch ?? activeTab?.cwd.split(/[\\/]/).filter(Boolean).pop() ?? ""}
-        />
+        {/* Direita: o painel da sessão do agente ativo (ambiente, contexto, conectores, alterações, tarefas). */}
+        {!sidePanelHidden && <SessionPanel tab={activeTab} repo={activeRepo} />}
 
         {/* Onde as telas cheias se montam (ver `pageHost`): tudo à direita do riel, por cima
             dos painéis e da área de trabalho. Sempre montado e vazio, sem pegar cliques; as

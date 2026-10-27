@@ -3,18 +3,17 @@ import { create } from "zustand";
 /** As seções da tela de Configurações (a barra lateral da prancheta 5). */
 export type SettingsSectionId = "general" | "appearance" | "accounts" | "agents" | "memory" | "terminal" | "shortcuts" | "decisions" | "advanced";
 
-/** Las secciones del panel derecho. */
+/** O que a gaveta da direita mostra (abre pelos botões do canto de cima, ver `PanelButtons`). */
 export type ExplorerView = "files" | "search" | "scm";
-
-const VIEWS: ExplorerView[] = ["files", "search", "scm"];
 
 interface UiState {
   /** Panel izquierdo (workspaces) plegado: queda solo el riel de iconos. */
   workspacesCollapsed: boolean;
-  /** Panel derecho (explorador) plegado: queda su columna de iconos. */
-  explorerCollapsed: boolean;
-  /** Qué sección del panel derecho se ve. */
-  explorerView: ExplorerView;
+  /** O painel da sessão (Ambiente, Contexto, Conectores, Alterações, Tarefas) escondido. */
+  sidePanelHidden: boolean;
+  /** A gaveta aberta por cima do conteúdo (arquivos, busca ou git); `null` = fechada. Não é lembrada:
+   *  abre quando se pede e fecha ao clicar fora. */
+  drawer: ExplorerView | null;
   /** Columna de repositorios del marketplace plegada, para que las skills se lleven
    *  todo el ancho: gestionar repos es algo que se hace de vez en cuando. */
   marketplaceReposCollapsed: boolean;
@@ -38,15 +37,10 @@ interface UiState {
   paletteOpen: boolean;
 
   toggleWorkspaces: () => void;
-  toggleExplorer: () => void;
-  /**
-   * Muestra ESA sección, desplegando el panel si hacía falta.
-   *
-   * Antes los iconos del panel plegado solo lo desplegaban, y se abría en la última sección
-   * que había quedado: apretar el icono de git mostraba el árbol de archivos. Un icono
-   * tiene que llevar a lo que dibuja.
-   */
-  openExplorer: (view: ExplorerView) => void;
+  toggleSidePanel: () => void;
+  /** Abre a gaveta NESTA vista; apertar a que já está aberta a fecha, como numa barra de atividades. */
+  openDrawer: (view: ExplorerView) => void;
+  closeDrawer: () => void;
   toggleMarketplaceRepos: () => void;
   setSettingsOpen: (open: boolean) => void;
   setAccountsOpen: (open: boolean) => void;
@@ -58,15 +52,14 @@ const KEY = "cc-ui-panels";
 
 /** Se recuerda entre arranques: que un panel que plegaste vuelva abierto cada vez es de
  *  las cosas que más molestan de una app de trabajo. */
-function load(): Pick<UiState, "workspacesCollapsed" | "explorerCollapsed" | "explorerView" | "marketplaceReposCollapsed" | "railExpanded"> {
+function load(): Pick<UiState, "workspacesCollapsed" | "sidePanelHidden" | "marketplaceReposCollapsed" | "railExpanded"> {
   try {
     const raw = localStorage.getItem(KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<UiState>;
       return {
         workspacesCollapsed: Boolean(parsed.workspacesCollapsed),
-        explorerCollapsed: Boolean(parsed.explorerCollapsed),
-        explorerView: VIEWS.includes(parsed.explorerView as ExplorerView) ? parsed.explorerView as ExplorerView : "files",
+        sidePanelHidden: Boolean(parsed.sidePanelHidden),
         marketplaceReposCollapsed: Boolean(parsed.marketplaceReposCollapsed),
         railExpanded: Boolean(parsed.railExpanded),
       };
@@ -74,15 +67,14 @@ function load(): Pick<UiState, "workspacesCollapsed" | "explorerCollapsed" | "ex
   } catch {
     /* localStorage puede fallar o traer basura; los valores por defecto sirven igual */
   }
-  return { workspacesCollapsed: false, explorerCollapsed: false, explorerView: "files", marketplaceReposCollapsed: false, railExpanded: false };
+  return { workspacesCollapsed: false, sidePanelHidden: false, marketplaceReposCollapsed: false, railExpanded: false };
 }
 
 function persist(state: UiState) {
   try {
     localStorage.setItem(KEY, JSON.stringify({
       workspacesCollapsed: state.workspacesCollapsed,
-      explorerCollapsed: state.explorerCollapsed,
-      explorerView: state.explorerView,
+      sidePanelHidden: state.sidePanelHidden,
       marketplaceReposCollapsed: state.marketplaceReposCollapsed,
       railExpanded: state.railExpanded,
     }));
@@ -104,14 +96,13 @@ export const useUiStore = create<UiState>((set, get) => ({
     set({ workspacesCollapsed: !get().workspacesCollapsed });
     persist(get());
   },
-  toggleExplorer: () => {
-    set({ explorerCollapsed: !get().explorerCollapsed });
+  toggleSidePanel: () => {
+    set({ sidePanelHidden: !get().sidePanelHidden });
     persist(get());
   },
-  openExplorer: (explorerView) => {
-    set({ explorerView, explorerCollapsed: false });
-    persist(get());
-  },
+  drawer: null,
+  openDrawer: (view) => set({ drawer: get().drawer === view ? null : view }),
+  closeDrawer: () => set({ drawer: null }),
   toggleMarketplaceRepos: () => {
     set({ marketplaceReposCollapsed: !get().marketplaceReposCollapsed });
     persist(get());
