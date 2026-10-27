@@ -297,10 +297,11 @@ pub(crate) fn parse_claude_status(stdout: &str) -> AccountHealth {
 }
 
 /// `codex login status`: "Logged in using ChatGPT" / "Logged in using an API key - ***" con
-/// 0, "Not logged in" con 1.
+/// 0, "Not logged in" con 1. Desde 0.164 la key sale como "API key configured - ***".
 pub(crate) fn parse_codex_status(success: bool, stdout: &str) -> AccountHealth {
     let line = stdout.lines().map(str::trim).find(|l| !l.is_empty() && !l.starts_with("WARNING")).unwrap_or("");
-    let status = if success && line.starts_with("Logged in") { HealthStatus::Ok } else { HealthStatus::NotLoggedIn };
+    let logged = line.starts_with("Logged in") || line.starts_with("API key configured");
+    let status = if success && logged { HealthStatus::Ok } else { HealthStatus::NotLoggedIn };
     AccountHealth::new(status, line)
 }
 

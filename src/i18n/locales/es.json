@@ -2840,7 +2840,7 @@
   "agents.update.done": "{{label}} actualizado a {{version}}",
   "agents.update.doneNoVersion": "{{label}} actualizado",
   "agents.update.failed": "No se pudo actualizar {{label}}: {{error}}",
-  "agents.update.reason.not_npm": "Instalado fuera de npm: actualízalo a mano",
+  "agents.update.reason.not_npm": "Instalado de una forma que ADE no actualiza (solo npm, bun o Claude nativo): actualízalo a mano",
   "agents.update.reason.no_updater": "Sin actualizador automático para este agente",
   "agents.update.reason.check_failed": "No se pudo comprobar la versión más nueva",
   "agents.update.reason.busy_terminal": "Cierra las terminales abiertas de este agente para actualizar",
