@@ -4,7 +4,8 @@
 //! (`persist:t3code-preview-…`), o user agent padrão e o controle do agente pelo `webContents.debugger` — o CDP de
 //! dentro do processo, sem porta de depuração, então a página nunca se vê automatizada (`navigator.webdriver`
 //! falso). O Google aceita o login nele sem nada especial: não há troca de user agent nem cópia de cookies.
-//! O equivalente no Tauri é um WebView2 filho da janela (`Window::add_child`):
+//! O equivalente aqui é um WebView2 numa janela filha dentro da janela do app, criado direto pela API do WebView2
+//! (ver `native`: um `Webview` filho do Tauri faz a janela principal deixar de ser achada pelo nome):
 //!
 //! - **Perfil próprio**: `<dados>/portal-webview`, uma pasta de dados só dos Portais (o WebView2 sobe outro
 //!   navegador para ela), separada da do app. O login fica nela entre as sessões.
@@ -25,13 +26,37 @@
 
 #[cfg(windows)]
 mod native;
+#[cfg(not(windows))]
+mod native {
+    //! Fora do Windows ainda não há navegador nativo no Portal.
+    use serde_json::Value;
+    use tauri::AppHandle;
+    const NO: &str = "O navegador do Portal por enquanto só existe no Windows.";
+    pub async fn create(_: &AppHandle, _: isize, _: &str, _: std::path::PathBuf, _: String, _: [i32; 4]) -> Result<(), String> {
+        Err(NO.into())
+    }
+    pub async fn cdp(_: &AppHandle, _: &str, _: &str, _: Value) -> Result<Value, String> {
+        Err(NO.into())
+    }
+    pub fn place(_: &AppHandle, _: &str, _: [i32; 4], _: f64, _: Vec<[i32; 4]>) {}
+    pub async fn navigate(_: &AppHandle, _: &str, _: String) -> Result<(), String> {
+        Err(NO.into())
+    }
+    pub async fn history(_: &AppHandle, _: &str, _: i32) -> Result<(), String> {
+        Err(NO.into())
+    }
+    pub async fn focus(_: &AppHandle, _: &str) -> Result<(), String> {
+        Err(NO.into())
+    }
+    pub fn close(_: &AppHandle, _: &str) {}
+}
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Mutex, OnceLock};
 
 use serde::Deserialize;
 use serde_json::{json, Value};
-use tauri::{AppHandle, Emitter, Manager};
+use tauri::{AppHandle, Emitter};
 
 /// Um retângulo em pixels CSS do app.
 #[derive(Debug, Clone, Copy, Deserialize, PartialEq)]
@@ -55,21 +80,20 @@ pub struct Place {
     pub holes: Vec<Rect>,
 }
 
-/// Os Portais abertos: o rótulo do WebView de cada um.
-fn portals() -> &'static Mutex<HashMap<String, String>> {
-    static P: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
-    P.get_or_init(|| Mutex::new(HashMap::new()))
+/// Os Portais abertos.
+fn portals() -> &'static Mutex<HashSet<String>> {
+    static P: OnceLock<Mutex<HashSet<String>>> = OnceLock::new();
+    P.get_or_init(|| Mutex::new(HashSet::new()))
 }
 
 /// O último endereço pedido para um Portal que ainda está abrindo: a aba manda navegar logo ao montar, antes de o
-/// WebView existir. Quem abre consome isto no lugar da URL inicial.
+/// navegador existir. Quem abre consome isto no lugar da URL inicial.
 fn pending() -> &'static Mutex<HashMap<String, String>> {
     static P: OnceLock<Mutex<HashMap<String, String>>> = OnceLock::new();
     P.get_or_init(|| Mutex::new(HashMap::new()))
 }
 
-/// Um Portal abre de cada vez: dois WebView2 criando o ambiente da mesma pasta de dados juntos, o segundo falha
-/// (`0x8007139F`, "o recurso não está no estado correto").
+/// Um Portal abre de cada vez (o primeiro cria o ambiente do WebView2 que os outros usam).
 fn opening() -> &'static tokio::sync::Mutex<()> {
     static O: OnceLock<tokio::sync::Mutex<()>> = OnceLock::new();
     O.get_or_init(|| tokio::sync::Mutex::new(()))
@@ -77,17 +101,6 @@ fn opening() -> &'static tokio::sync::Mutex<()> {
 
 fn lock<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     m.lock().unwrap_or_else(|e| e.into_inner())
-}
-
-/// O rótulo do WebView de um Portal (o Tauri só aceita letras, números e `-/:_`).
-fn label_of(id: &str) -> String {
-    let safe: String = id.chars().map(|c| if c.is_ascii_alphanumeric() || "-_".contains(c) { c } else { '_' }).collect();
-    format!("portal-{safe}")
-}
-
-fn webview(app: &AppHandle, id: &str) -> Result<tauri::Webview, String> {
-    let label = lock(portals()).get(id).cloned().ok_or("O navegador deste Portal não está aberto.")?;
-    app.get_webview(&label).ok_or_else(|| "O navegador deste Portal fechou.".to_string())
 }
 
 fn emit(app: &AppHandle, event: &str, payload: Value) {
@@ -104,97 +117,51 @@ fn navigable(url: &str) -> Option<tauri::Url> {
     }
 }
 
+/// `r` (px CSS) em px físicos: `[x, y, largura, altura]`, cobrindo o retângulo inteiro.
+fn physical(r: Rect, scale: f64) -> [i32; 4] {
+    let (x, y) = ((r.x * scale).floor() as i32, (r.y * scale).floor() as i32);
+    [x, y, ((r.x + r.width) * scale).ceil() as i32 - x, ((r.y + r.height) * scale).ceil() as i32 - y]
+}
+
 /// Abre o navegador do Portal `id` em cima dele, já com o piloto dos agentes, e carrega `url`. Aberto, só
 /// reposiciona: navegar é com `real_browser_navigate`.
 #[tauri::command]
 pub async fn real_browser_open(app: AppHandle, window: tauri::Window, id: String, url: String, place: Place, script: Option<String>) -> Result<(), String> {
     let _one_at_a_time = opening().lock().await;
-    if lock(portals()).contains_key(&id) {
-        return real_browser_place(app, id, place);
+    if !lock(portals()).contains(&id) {
+        let parent = window_handle(&window)?;
+        let profile = crate::util::datadir::app_data_dir(&app)?.join("portal-webview");
+        std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
+        // As mesmas flags do WebView do app (`tauri.conf.json`): também mantêm a página desenhando encoberta ou
+        // recortada (`CalculateNativeWinOcclusion` desligado).
+        let args = app.config().app.windows.first().and_then(|w| w.additional_browser_args.clone()).unwrap_or_default();
+        let scale = window.scale_factor().unwrap_or(1.0);
+        native::create(&app, parent, &id, profile, args, physical(place.rect, scale)).await?;
+        lock(portals()).insert(id.clone());
+        // O piloto antes da primeira página: o canal (binding) e o script em todo documento novo.
+        if let Some(script) = script {
+            native::cdp(&app, &id, "Runtime.addBinding", json!({ "name": BINDING })).await?;
+            native::cdp(&app, &id, "Runtime.enable", json!({})).await?;
+            native::cdp(&app, &id, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": format!("{BRIDGE}\n;{script}") })).await?;
+        }
+        let white = json!({ "color": { "r": 255, "g": 255, "b": 255, "a": 1 } });
+        let _ = native::cdp(&app, &id, "Emulation.setDefaultBackgroundColorOverride", white).await;
+        let url = lock(pending()).remove(&id).unwrap_or(url);
+        if navigable(&url).is_some() {
+            native::navigate(&app, &id, url).await?;
+        }
     }
-    open(&app, &window, &id, &url, &place, script).await
+    real_browser_place(app, window, id, place)
 }
 
-#[cfg(windows)]
-async fn open(app: &AppHandle, window: &tauri::Window, id: &str, url: &str, place: &Place, script: Option<String>) -> Result<(), String> {
-    use tauri::webview::{NewWindowResponse, PageLoadEvent, WebviewBuilder};
-    use tauri::{LogicalPosition, LogicalSize, WebviewUrl};
-
-    let label = label_of(id);
-    let profile = crate::util::datadir::app_data_dir(app)?.join("portal-webview");
-    std::fs::create_dir_all(&profile).map_err(|e| e.to_string())?;
-    let (popup_app, popup_label) = (app.clone(), label.clone());
-    let (title_app, title_id) = (app.clone(), id.to_string());
-    let (load_app, load_id) = (app.clone(), id.to_string());
-    let mut builder = WebviewBuilder::new(&label, WebviewUrl::External("about:blank".parse().map_err(|_| "about:blank")?)).data_directory(profile);
-    // As mesmas flags do WebView do app (`tauri.conf.json`): o WebView2 recusa (`0x8007139F`) dois ambientes com opções
-    // diferentes na mesma pasta, e `WEBVIEW2_USER_DATA_FOLDER` (uma instância isolada) põe todos na mesma. Elas também
-    // mantêm a página desenhando encoberta ou recortada (`CalculateNativeWinOcclusion` desligado).
-    if let Some(args) = app.config().app.windows.first().and_then(|w| w.additional_browser_args.clone()) {
-        builder = builder.additional_browser_args(&args);
-    }
-    let builder = builder
-        .on_new_window(move |url, features| {
-            if url.as_str() == "about:blank" && features.size().is_none() {
-                return NewWindowResponse::Deny;
-            }
-            // Um pop-up (com tamanho: login do Google, OAuth) precisa do `opener` vivo: abre a janela do WebView2.
-            if features.size().is_some() || features.position().is_some() {
-                return NewWindowResponse::Allow;
-            }
-            // Um link para aba nova abre no mesmo Portal (o T3 abre uma aba dele; o Portal tem uma página só).
-            if navigable(url.as_str()).is_some() {
-                if let Some(page) = popup_app.get_webview(&popup_label) {
-                    tauri::async_runtime::spawn(async move { let _ = page.navigate(url); });
-                }
-            }
-            NewWindowResponse::Deny
-        })
-        .on_document_title_changed(move |_, title| emit(&title_app, "real-browser-title", json!({ "id": title_id, "title": title })))
-        .on_page_load(move |_, payload| {
-            let loading = matches!(payload.event(), PageLoadEvent::Started);
-            emit(&load_app, "real-browser-load", json!({ "id": load_id, "loading": loading, "url": payload.url().as_str() }));
-        });
-    let webview = window
-        .add_child(builder, LogicalPosition::new(place.rect.x, place.rect.y), LogicalSize::new(place.rect.width.max(1.0), place.rect.height.max(1.0)))
-        .map_err(|e| format!("Não consegui abrir o navegador do Portal: {e}"))?;
-    lock(portals()).insert(id.to_string(), label);
-    native::watch(&webview, app.clone(), id.to_string());
-    // O piloto antes da primeira página: o canal (binding), os eventos dele e o script em todo documento novo.
-    if let Some(script) = script {
-        native::cdp(&webview, "Runtime.addBinding", json!({ "name": BINDING })).await?;
-        native::cdp(&webview, "Runtime.enable", json!({})).await?;
-        native::cdp(&webview, "Page.addScriptToEvaluateOnNewDocument", json!({ "source": format!("{BRIDGE}\n;{script}") })).await?;
-    }
-    native::cdp(&webview, "Emulation.setDefaultBackgroundColorOverride", json!({ "color": { "r": 255, "g": 255, "b": 255, "a": 1 } })).await?;
-    apply_place(&webview, place)?;
-    let url = lock(pending()).remove(id).unwrap_or_else(|| url.to_string());
-    if let Some(target) = navigable(&url) {
-        webview.navigate(target).map_err(|e| e.to_string())?;
-    }
-    Ok(())
-}
-
-#[cfg(not(windows))]
-async fn open(_: &AppHandle, _: &tauri::Window, _: &str, _: &str, _: &Place, _: Option<String>) -> Result<(), String> {
-    Err("O navegador do Portal por enquanto só existe no Windows.".into())
-}
-
-fn apply_place(webview: &tauri::Webview, place: &Place) -> Result<(), String> {
-    use tauri::{LogicalPosition, LogicalSize};
-    let r = place.rect;
-    webview
-        .set_bounds(tauri::Rect {
-            position: LogicalPosition::new(r.x, r.y).into(),
-            size: LogicalSize::new(r.width.max(1.0), r.height.max(1.0)).into(),
-        })
-        .map_err(|e| e.to_string())?;
-    if place.zoom > 0.0 {
-        webview.set_zoom(place.zoom).map_err(|e| e.to_string())?;
-    }
+fn window_handle(window: &tauri::Window) -> Result<isize, String> {
     #[cfg(windows)]
-    native::clip(webview, region(place));
-    Ok(())
+    return window.hwnd().map(|h| h.0 as isize).map_err(|e| e.to_string());
+    #[cfg(not(windows))]
+    {
+        let _ = window;
+        Ok(0)
+    }
 }
 
 /// A parte da página que aparece, em retângulos relativos ao Portal: a parte à vista menos os buracos.
@@ -234,52 +201,45 @@ fn subtract(a: Rect, b: Rect) -> Vec<Rect> {
 
 /// O Portal mudou de lugar, de tamanho, de zoom, saiu de vista ou ganhou algo por cima.
 #[tauri::command]
-pub fn real_browser_place(app: AppHandle, id: String, place: Place) -> Result<(), String> {
-    apply_place(&webview(&app, &id)?, &place)
+pub fn real_browser_place(app: AppHandle, window: tauri::Window, id: String, place: Place) -> Result<(), String> {
+    let scale = window.scale_factor().unwrap_or(1.0);
+    let parts = region(&place).into_iter().map(|r| physical(r, scale)).map(|[x, y, w, h]| [x, y, x + w, y + h]).collect();
+    native::place(&app, &id, physical(place.rect, scale), place.zoom, parts);
+    Ok(())
 }
 
 /// A barra de endereço (ou um agente) mandou ir para `url`. A mesma URL de novo é recarregar, como no T3.
 #[tauri::command]
-pub fn real_browser_navigate(app: AppHandle, id: String, url: String) -> Result<(), String> {
-    let target = navigable(&url).ok_or("Endereço que o navegador não abre.")?;
-    let Ok(page) = webview(&app, &id) else {
+pub async fn real_browser_navigate(app: AppHandle, id: String, url: String) -> Result<(), String> {
+    navigable(&url).ok_or("Endereço que o navegador não abre.")?;
+    if !lock(portals()).contains(&id) {
         // Ainda abrindo: vai direto para cá quando abrir.
         lock(pending()).insert(id, url);
         return Ok(());
-    };
-    if page.url().ok().as_ref() == Some(&target) {
-        return page.reload().map_err(|e| e.to_string());
     }
-    page.navigate(target).map_err(|e| e.to_string())
+    native::navigate(&app, &id, url).await
 }
 
 /// Voltar (-1), avançar (+1) ou recarregar (0).
 #[tauri::command]
 pub async fn real_browser_history(app: AppHandle, id: String, delta: i32) -> Result<(), String> {
-    let page = webview(&app, &id)?;
-    if delta == 0 {
-        return page.reload().map_err(|e| e.to_string());
-    }
-    #[cfg(windows)]
-    native::history(&page, delta);
-    Ok(())
+    native::history(&app, &id, delta).await
 }
 
 /// Fecha o navegador do Portal.
 #[tauri::command]
 pub fn real_browser_close(app: AppHandle, id: String) -> Result<(), String> {
     lock(pending()).remove(&id);
-    let Some(label) = lock(portals()).remove(&id) else { return Ok(()) };
-    if let Some(page) = app.get_webview(&label) {
-        page.close().map_err(|e| e.to_string())?;
+    if lock(portals()).remove(&id) {
+        native::close(&app, &id);
     }
     Ok(())
 }
 
-/// O foco do teclado vai para a página (um clique nela já faz isso; aqui é para a barra de endereço devolver).
+/// O foco do teclado vai para a página.
 #[tauri::command]
-pub fn real_browser_focus(app: AppHandle, id: String) -> Result<(), String> {
-    webview(&app, &id)?.set_focus().map_err(|e| e.to_string())
+pub async fn real_browser_focus(app: AppHandle, id: String) -> Result<(), String> {
+    native::focus(&app, &id).await
 }
 
 /// Uma mensagem do app para o piloto da página (`page:run`, `connect`, `pick:on`…). Só as do app (`source: ade-ags`).
@@ -288,27 +248,16 @@ pub async fn real_browser_post(app: AppHandle, id: String, message: Value) -> Re
     if message["source"] != "ade-ags" {
         return Err("Mensagem que não é do app.".into());
     }
-    post_to_page(&webview(&app, &id)?, &message).await
+    post_to_page(&app, &id, &message).await
 }
 
 /// A foto da página como está agora (PNG em base64) e o tamanho dela em px CSS: as fotos do piloto.
 #[tauri::command]
 pub async fn real_browser_screenshot(app: AppHandle, id: String) -> Result<Value, String> {
-    let page = webview(&app, &id)?;
-    let layout = cdp(&page, "Page.getLayoutMetrics", json!({})).await?;
+    let layout = native::cdp(&app, &id, "Page.getLayoutMetrics", json!({})).await?;
     let viewport = &layout["cssLayoutViewport"];
-    let shot = cdp(&page, "Page.captureScreenshot", json!({ "format": "png" })).await?;
+    let shot = native::cdp(&app, &id, "Page.captureScreenshot", json!({ "format": "png" })).await?;
     Ok(json!({ "data": shot["data"], "width": viewport["clientWidth"], "height": viewport["clientHeight"] }))
-}
-
-async fn cdp(page: &tauri::Webview, method: &str, params: Value) -> Result<Value, String> {
-    #[cfg(windows)]
-    return native::cdp(page, method, params).await;
-    #[cfg(not(windows))]
-    {
-        let _ = (page, method, params);
-        Err("só no Windows".into())
-    }
 }
 
 /// O nome do canal da página para o app (`Runtime.addBinding`).
@@ -339,36 +288,32 @@ fn on_binding(app: &AppHandle, id: &str, payload: &str) {
     let Ok(message) = serde_json::from_str::<Value>(payload) else { return };
     if message["type"] == "input:request" {
         let (app, id) = (app.clone(), id.to_string());
-        tauri::async_runtime::spawn(async move {
-            if let Ok(page) = webview(&app, &id) {
-                native_input(&page, message["payload"].clone()).await;
-            }
-        });
+        tauri::async_runtime::spawn(async move { native_input(&app, &id, message["payload"].clone()).await });
     } else {
         emit(app, "real-browser-page", json!({ "id": id, "message": message }));
     }
 }
 
 /// Entrega uma mensagem do app ao piloto da página (como o `postMessage` do iframe faz no outro navegador).
-async fn post_to_page(page: &tauri::Webview, message: &Value) -> Result<(), String> {
+async fn post_to_page(app: &AppHandle, id: &str, message: &Value) -> Result<(), String> {
     let expression = format!("window.postMessage({message}, \"*\")");
-    cdp(page, "Runtime.evaluate", json!({ "expression": expression })).await.map(|_| ())
+    native::cdp(app, id, "Runtime.evaluate", json!({ "expression": expression })).await.map(|_| ())
 }
 
 /// Um toque ou uma tecla de verdade que o piloto pediu (`input:request`), e a resposta `input:done`.
-async fn native_input(page: &tauri::Webview, request: Value) {
-    let ok = run_native_input(page, &request).await.is_ok();
-    let _ = post_to_page(page, &json!({ "source": "ade-ags", "type": "input:done", "id": request["id"], "ok": ok })).await;
+async fn native_input(app: &AppHandle, id: &str, request: Value) {
+    let ok = run_native_input(app, id, &request).await.is_ok();
+    let _ = post_to_page(app, id, &json!({ "source": "ade-ags", "type": "input:done", "id": request["id"], "ok": ok })).await;
 }
 
-async fn run_native_input(page: &tauri::Webview, r: &Value) -> Result<(), String> {
+async fn run_native_input(app: &AppHandle, id: &str, r: &Value) -> Result<(), String> {
     match r["kind"].as_str() {
         Some("click") => {
             let (x, y) = (r["x"].as_f64().unwrap_or(0.0), r["y"].as_f64().unwrap_or(0.0));
-            cdp(page, "Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": x, "y": y, "button": "none" })).await?;
+            native::cdp(app, id, "Input.dispatchMouseEvent", json!({ "type": "mouseMoved", "x": x, "y": y, "button": "none" })).await?;
             for kind in ["mousePressed", "mouseReleased"] {
                 let buttons = if kind == "mousePressed" { 1 } else { 0 };
-                cdp(page, "Input.dispatchMouseEvent", json!({ "type": kind, "x": x, "y": y, "button": "left", "buttons": buttons, "clickCount": 1 })).await?;
+                native::cdp(app, id, "Input.dispatchMouseEvent", json!({ "type": kind, "x": x, "y": y, "button": "left", "buttons": buttons, "clickCount": 1 })).await?;
             }
         }
         Some("key") => {
@@ -383,14 +328,14 @@ async fn run_native_input(page: &tauri::Webview, r: &Value) -> Result<(), String
             if r["commands"].is_array() {
                 down["commands"] = r["commands"].clone();
             }
-            cdp(page, "Input.dispatchKeyEvent", down).await?;
-            cdp(page, "Input.dispatchKeyEvent", json!({
+            native::cdp(app, id, "Input.dispatchKeyEvent", down).await?;
+            native::cdp(app, id, "Input.dispatchKeyEvent", json!({
                 "type": "keyUp", "key": r["key"], "code": r["code"], "windowsVirtualKeyCode": r["keyCode"], "modifiers": r["modifiers"],
             }))
             .await?;
         }
         Some("text") => {
-            cdp(page, "Input.insertText", json!({ "text": r["text"] })).await?;
+            native::cdp(app, id, "Input.insertText", json!({ "text": r["text"] })).await?;
         }
         _ => return Err("pedido de input desconhecido".into()),
     }
@@ -399,7 +344,7 @@ async fn run_native_input(page: &tauri::Webview, r: &Value) -> Result<(), String
 
 #[cfg(test)]
 mod test {
-    use super::{label_of, navigable, region, subtract, Place, Rect};
+    use super::{navigable, physical, region, subtract, Place, Rect};
 
     fn r(x: f64, y: f64, width: f64, height: f64) -> Rect {
         Rect { x, y, width, height }
@@ -443,8 +388,9 @@ mod test {
     }
 
     #[test]
-    fn rotulo_do_webview_so_com_caracteres_aceitos() {
-        assert_eq!(label_of("view-1a2b"), "portal-view-1a2b");
-        assert_eq!(label_of("a b/c:d"), "portal-a_b_c_d");
+    fn px_fisicos_cobrem_o_retangulo_inteiro() {
+        assert_eq!(physical(r(10.0, 20.0, 100.0, 50.0), 1.0), [10, 20, 100, 50]);
+        // Em 125% um retângulo de 10,4 px não pode perder a última coluna.
+        assert_eq!(physical(r(0.5, 0.5, 10.4, 10.4), 1.25), [0, 0, 14, 14]);
     }
 }
