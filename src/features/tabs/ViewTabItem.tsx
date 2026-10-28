@@ -6,7 +6,7 @@ import type { AgentPaint } from "@/features/browser/agentPaint";
 
 import type { ViewTab } from "./viewTabs";
 
-const ICON = { file: DocumentIcon, diff: BranchIcon, browser: GlobeIcon } as const;
+const ICON = { file: DocumentIcon, diff: BranchIcon, browser: GlobeIcon, desktop: GlobeIcon } as const;
 
 /**
  * Una tab de archivo, diff o navegador en la barra de arriba.
@@ -49,7 +49,7 @@ export function ViewTabItem({
       onClick={onActivate}
       // Click del medio cierra, como en cualquier navegador o editor.
       onAuxClick={(e) => { if (e.button === 1) { e.preventDefault(); onClose(); } }}
-      title={paintHint ?? (view.kind === "browser" ? view.url || title : view.kind === "file" ? view.path : `${view.root}/${view.path}`)}
+      title={paintHint ?? (view.kind === "desktop" ? title : view.kind === "browser" ? view.url || title : view.kind === "file" ? view.path : `${view.root}/${view.path}`)}
       className={`group relative flex items-center gap-2 h-7 pl-2.5 pr-1 shrink-0
         max-w-52 min-w-24 rounded-md cursor-pointer select-none text-[12.5px] transition-colors duration-150 ${className}
         ${paint && !isActive ? paint.tint : ""}

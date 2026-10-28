@@ -190,7 +190,11 @@ pub fn save_board(key: &str, board: Board) -> Result<(), String> {
 /// Las notas no cuentan: una nota no es alguien a quien hablarle, y dos agentes conectados
 /// a la misma nota comparten esa nota, no un canal entre ellos.
 pub fn peers_of(boards: &Boards, tab: &str) -> BTreeSet<String> {
-    linked(boards, tab).into_iter().filter(|id| !is_note(id) && !is_portal(id)).collect()
+    linked(boards, tab).into_iter().filter(|id| !is_note(id) && (!is_portal(id) || is_gemini(boards, id))).collect()
+}
+
+pub fn is_gemini(boards: &Boards, id: &str) -> bool {
+    boards.values().any(|b| b.portals.get(id).is_some_and(|p| p.kind.as_deref()==Some("gemini")))
 }
 
 /// Las notas que `tab` puede leer y escribir: las conectadas con ella y, si es

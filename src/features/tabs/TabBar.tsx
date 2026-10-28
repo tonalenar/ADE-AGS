@@ -45,6 +45,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
   const views = useViewTabsStore((s) => s.views);
   const activeViewId = useViewTabsStore((s) => s.activeViewId);
   const openBrowser = useViewTabsStore((s) => s.openBrowser);
+  const openGemini = useViewTabsStore((s) => s.openGemini);
   const showTerminal = useViewTabsStore((s) => s.showTerminal);
   const layout = useWorkspaceLayout();
   // En el canvas no hay grupos: dividir no aplica.
@@ -136,6 +137,15 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
         >
           <AddIcon className="w-5 h-5" />
         </Button>
+        {activeTab && (
+          <Button variant="icon"
+            onClick={() => { openGemini(activeTab.cwd); navigate("/workspace"); }}
+            title={t("geminiDesktop.open")}
+            aria-label={t("geminiDesktop.open")}
+            data-tauri-drag-region="false"
+            className={`${BAR_BUTTON} w-7 p-0`}
+          ><span aria-hidden="true" className="text-base text-blue-500">✦</span></Button>
+        )}
         {activeTab && (
           <Button variant="icon"
             // Un navegador es del workspace: se abre al lado de sus agentes, para probar lo

@@ -29,6 +29,7 @@ interface ViewTabsState {
   /** Devuelve el id de la tab. `activate: false` la abre sin sacar al usuario de lo que mira;
    *  `owner` la marca como manejada por un agente. */
   openBrowser: (cwd: string, url?: string, opts?: { activate?: boolean; owner?: ViewOwner }) => string;
+  openGemini: (cwd: string) => string;
   keepMounted: (id: string) => void;
   activateView: (id: string) => void;
   /** Volver a la terminal. */
@@ -106,6 +107,18 @@ export const useViewTabsStore = create<ViewTabsState>((set, get) => ({
       keepMountedIds: activate ? s.keepMountedIds : [...s.keepMountedIds, view.id],
     }));
     return view.id;
+  },
+
+  openGemini: (cwd) => {
+    // The official app has one main window. Keep one logical view per ADE window too.
+    const existing = get().views.find((v) => v.kind === "desktop" && v.app === "gemini");
+    if (existing) {
+      set((s) => ({ activeViewId: existing.id, views: s.views.map((v) => v.id === existing.id ? { ...v, cwd } : v) }));
+      return existing.id;
+    }
+    const id = crypto.randomUUID();
+    set((s) => ({ views: [...s.views, { kind: "desktop", app: "gemini", cwd, id, title: "Gemini Desktop" }], activeViewId: id }));
+    return id;
   },
 
   keepMounted: (id) =>

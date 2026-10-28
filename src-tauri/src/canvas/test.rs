@@ -1,5 +1,19 @@
 use super::*;
 
+#[test]
+fn gemini_desktop_is_a_peer_and_its_crown_reaches_the_team_but_browsers_are_not_peers() {
+    let mut b=Board::default();
+    b.portals.insert("portal-g".into(),Portal{kind:Some("gemini".into()),..Default::default()});
+    b.portals.insert("portal-web".into(),Portal::default());
+    b.edges=vec![edge("a","portal-g","worker"),edge("b","worker","qa"),edge("c","worker","portal-web")];
+    let mut all=Boards::from([("main|/p".into(),b)]);
+    assert!(peers_of(&all,"worker").contains("portal-g"));
+    assert!(!peers_of(&all,"worker").contains("portal-web"));
+    assert!(!reachable(&all,"portal-g").contains("qa"));
+    all.get_mut("main|/p").unwrap().orchestrators.push("portal-g".into());
+    assert!(reachable(&all,"portal-g").contains("qa"));
+}
+
 fn connected(b: &Boards, from: &str, to: &str) -> bool {
     peers_of(b, from).contains(to)
 }

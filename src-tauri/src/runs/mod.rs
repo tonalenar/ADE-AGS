@@ -31,9 +31,9 @@ pub mod checkpoints;
 pub(crate) mod routing;
 mod rules;
 pub mod sandbox;
-mod scheduler;
+pub(crate) mod scheduler;
 pub(crate) mod store;
-mod supervisor;
+pub(crate) mod supervisor;
 #[cfg(test)]
 mod test;
 pub(crate) mod types;
@@ -528,6 +528,8 @@ pub fn run_list_facts(run_id: String, db: tauri::State<DbConnection>) -> Result<
 /// al registro, no por nombre: un provider nuevo con `HeadlessAgent` entra solo, y la
 /// terminal de emergencia queda afuera por no tenerlo.
 pub(crate) fn ensure_headless(agent_id: &str) -> Result<(), String> {
+    // Desktop participants have a durable, assisted execution transport, not a CLI.
+    if agent_id == crate::desktop_apps::GEMINI_DESKTOP { return Ok(()); }
     let adapter = crate::agents::adapter_for(agent_id)
         .ok_or_else(|| format!("'{agent_id}' não é um provider conhecido"))?;
     if !adapter.capabilities().headless {
@@ -539,6 +541,7 @@ pub(crate) fn ensure_headless(agent_id: &str) -> Result<(), String> {
 }
 
 pub(crate) fn ensure_orchestration(agent_id: &str) -> Result<(), String> {
+    if agent_id == crate::desktop_apps::GEMINI_DESKTOP { return Ok(()); }
     ensure_headless(agent_id)?;
     let adapter = crate::agents::adapter_for(agent_id).ok_or("provider unavailable")?;
     if !adapter.capabilities().orchestration {

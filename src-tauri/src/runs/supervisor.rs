@@ -206,6 +206,9 @@ pub struct LaunchExtras {
 /// Arranca la tarea en segundo plano. Vuelve en cuanto el proceso quedó lanzado; lo que
 /// pase después llega por eventos.
 pub fn start(app: &AppHandle, task: Task, extras: LaunchExtras) -> Result<(), String> {
+    if task.agent_id == crate::desktop_apps::GEMINI_DESKTOP {
+        return crate::desktop_apps::participant::start(app, task, extras);
+    }
     // Se llama también desde afuera del runtime async: el hilo de una conexión del IPC (un
     // agente que despacha su plan) o un comando síncrono. Lanzar el proceso y la tarea que
     // lo espera necesita estar adentro de tokio.

@@ -7,9 +7,12 @@ import { useLocation } from "react-router-dom";
 const BrowserTab = lazy(() => import("@/features/browser/BrowserTab").then((m) => ({ default: m.BrowserTab })));
 const DiffTab = lazy(() => import("@/features/editor/DiffTab").then((m) => ({ default: m.DiffTab })));
 const FileTab = lazy(() => import("@/features/editor/FileTab").then((m) => ({ default: m.FileTab })));
+const GeminiDesktopTab = lazy(() => import("@/features/desktopApps/GeminiDesktopTab"));
 import { focusGroup, placeStyle, usePlacements, type Rect } from "@/features/tabs/layout/layoutStore";
 import { viewKey } from "@/features/tabs/layout/layoutTree";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
+import { canvasActions, useActiveBoardKey, useCanvasStore, useWorkMode } from "@/features/canvas/store";
+import { comparablePath, type ViewTab } from "@/features/tabs/viewTabs";
 
 /**
  * Donde se dibujan las tabs de archivo, diff y navegador: encima de las terminales.
@@ -21,14 +24,34 @@ import { useViewTabsStore } from "@/features/tabs/viewStore";
  */
 export function ViewTabsHost() {
   const views = useViewTabsStore((s) => s.views);
+  const activeViewId = useViewTabsStore((s) => s.activeViewId);
+  const mode = useWorkMode();
+  const boardKey = useActiveBoardKey();
+  const portals = useCanvasStore((s) => boardKey ? s.boards[boardKey]?.portals : undefined);
+  const desktopRects = useCanvasStore((s) => s.desktopRects);
+  const desktop = views.find((v) => v.kind === "desktop");
+  useEffect(() => {
+    if (mode !== "canvas" || !boardKey || !desktop || activeViewId !== desktop.id) return;
+    const { id } = canvasActions.addPortal(boardKey, { kind: "gemini", name: "Gemini Desktop", at: { x: 20, y: 20 } });
+    const box = useCanvasStore.getState().boards[boardKey]?.portals[id]?.box;
+    if (box && (box.w < 640 || box.h < 420)) canvasActions.moveNode(boardKey,id,{ w: Math.max(box.w,1000), h: Math.max(box.h,700) });
+    canvasActions.focusDesktop(boardKey,id);
+    useViewTabsStore.getState().showTerminal();
+  }, [mode, boardKey, desktop, activeViewId]);
   const keepMountedIds = useViewTabsStore((s) => s.keepMountedIds);
   const onWorkspace = useLocation().pathname.startsWith("/workspace");
   // Solo las del workspace activo tienen lugar: una de otro nunca se muestra.
   const { visible, focusedItem } = usePlacements();
   const lastRect = useRef(new Map<string, Rect | null>());
+  const desktopNode = mode === "canvas" && portals ? Object.entries(portals).find(([, p]) => p.kind === "gemini") : undefined;
+  const desktopRect = desktopNode && desktopRects[desktopNode[0]];
+  const boardCwd = boardKey?.split("|").slice(1).join("|").split("#m:")[0];
+  const placementOf = (view: ViewTab) => view.kind === "desktop" && mode === "canvas"
+    ? (desktopRect && !activeViewId && boardCwd === comparablePath(view.cwd) ? { groupId: "canvas", rect: desktopRect } : undefined)
+    : visible.get(viewKey(view.id));
 
   const [seen, setSeen] = useState<Set<string>>(new Set());
-  const visibleIds = views.filter((v) => visible.has(viewKey(v.id))).map((v) => v.id);
+  const visibleIds = views.filter((v) => placementOf(v) !== undefined).map((v) => v.id);
   const unseen = visibleIds.filter((id) => !seen.has(id)).join("|");
   useEffect(() => {
     if (unseen) setSeen((prev) => new Set([...prev, ...unseen.split("|")]));
@@ -56,7 +79,7 @@ export function ViewTabsHost() {
     <div style={{ position: "absolute", inset: 0, zIndex: 5, pointerEvents: "none" }}>
       {views.map((view) => {
         const key = viewKey(view.id);
-        const placement = visible.get(key);
+        const placement = placementOf(view);
         const shown = placement !== undefined;
         if (!shown && !seen.has(view.id) && !keepMountedIds.includes(view.id)) return null;
         if (placement) lastRect.current.set(key, placement.rect);
@@ -76,6 +99,7 @@ export function ViewTabsHost() {
               {view.kind === "file" && <FileTab view={view} active={shown && onWorkspace} focused={focused} />}
               {view.kind === "diff" && <DiffTab view={view} active={shown && onWorkspace} />}
               {view.kind === "browser" && <BrowserTab view={view} active={focused} />}
+              {view.kind === "desktop" && <GeminiDesktopTab view={view} active={shown && onWorkspace} canvas={mode === "canvas"} />}
             </Suspense>
           </div>
         );

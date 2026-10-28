@@ -1,6 +1,6 @@
 import { create } from "zustand";
 
-import { accountEnv, codexAccountUsage, discoverAntigravityAccount } from "@/features/accounts/ipc";
+import { accountEnv, antigravityCliUsage, codexAccountUsage, discoverAntigravityAccount, type AgyUsage } from "@/features/accounts/ipc";
 import type { AgentAccount, CodexUsage } from "@/features/accounts/types";
 import { modelMeters, type ModelMeter } from "./antigravityQuota";
 import { agentAccountUsage, claudeLiveUsage, isUsageFresh, planLabel, type LiveUsage } from "@/features/accounts/usage";
@@ -23,13 +23,25 @@ export interface AntigravityEntry {
   fetchedAt: number;
 }
 
+/** O login local do `agy` (`agy -p /usage`). Não é uma conta da ADE: o Antigravity não tem perfis. */
+export interface AgyEntry {
+  /** `null` = ainda não se soube. `installed: false` = sem `agy`, a seção não aparece. */
+  usage: AgyUsage | null;
+  failed: boolean;
+}
+
+/** Chave de `busy` do `agy`; as contas usam o próprio id. */
+export const AGY_KEY = "agy:local";
+
 interface UsageState {
   claude: Record<string, LiveUsage>;
   codex: Record<string, CodexEntry>;
   antigravity: Record<string, AntigravityEntry>;
+  agy: AgyEntry;
   plan: Record<string, string | null>;
   busy: Record<string, boolean>;
   refresh: (account: AgentAccount, force: boolean) => Promise<void>;
+  refreshAgy: (force: boolean) => Promise<void>;
 }
 
 const patch = <K extends "claude" | "codex" | "plan" | "busy" | "antigravity">(key: K, id: string, value: UsageState[K][string]) =>
@@ -44,8 +56,27 @@ export const useUsageStore = create<UsageState>((set, get) => ({
   claude: {},
   codex: {},
   antigravity: {},
+  agy: { usage: null, failed: false },
   plan: {},
   busy: {},
+
+  async refreshAgy(force) {
+    set(patch("busy", AGY_KEY, true));
+    try {
+      // Um processo curto, sem tokens: o `/usage` não chama o modelo. Como Codex, o fresco fica.
+      let usage = await antigravityCliUsage(force);
+      if (!force && usage.installed && !(usage.fetchedAt > 0 && isUsageFresh(usage.fetchedAt, Math.floor(Date.now() / 1000)))) {
+        if (usage.fetchedAt > 0) set({ agy: { usage, failed: false } });
+        usage = await antigravityCliUsage(true);
+      }
+      set({ agy: { usage, failed: false } });
+    } catch {
+      // Conserva a última leitura boa; o anel cai para as contas OAuth (`fetchAvailableModels`).
+      set((s) => ({ agy: { usage: s.agy.usage, failed: true } }));
+    } finally {
+      set(patch("busy", AGY_KEY, false));
+    }
+  },
 
   async refresh(account, force) {
     const id = account.id;
@@ -112,6 +143,19 @@ export const useUsageStore = create<UsageState>((set, get) => ({
   },
 }));
 
+/**
+ * O botão do cabeçalho do painel: tudo ao vivo, já. `agy`, Codex e Antigravity em paralelo; as
+ * de Claude de uma em uma, como no barrido (cada consulta levanta uma TUI).
+ */
+export async function refreshAllUsage(accounts: AgentAccount[]): Promise<void> {
+  const { refresh, refreshAgy } = useUsageStore.getState();
+  await Promise.all([
+    refreshAgy(true),
+    ...accounts.filter((a) => a.agentId === "codex" || a.agentId === "antigravity").map((a) => refresh(a, true)),
+  ]);
+  for (const a of accounts.filter((x) => x.agentId === "claude-code")) await refresh(a, true);
+}
+
 let timer: number | undefined;
 let running = "";
 let onVisible: (() => void) | undefined;
@@ -139,10 +183,11 @@ export function startUsagePolling(accounts: AgentAccount[]): () => void {
   running = sig;
   const sweep = async () => {
     if (document.visibilityState === "hidden") return;
-    const { refresh } = useUsageStore.getState();
-    await Promise.all(
-      accounts.filter((a) => a.agentId === "codex" || a.agentId === "antigravity").map((a) => refresh(a, false)),
-    );
+    const { refresh, refreshAgy } = useUsageStore.getState();
+    await Promise.all([
+      refreshAgy(false),
+      ...accounts.filter((a) => a.agentId === "codex" || a.agentId === "antigravity").map((a) => refresh(a, false)),
+    ]);
     for (const a of accounts.filter((x) => x.agentId === "claude-code")) await refresh(a, false);
   };
   onVisible = () => {

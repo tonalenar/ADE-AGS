@@ -44,6 +44,21 @@ fn input(name: &str) -> SquadInput {
     }
 }
 
+#[test]
+fn gemini_desktop_can_fill_squad_roles_or_lead_without_claiming_model_control() {
+    let conn=test_db();
+    let mut draft=input("Desktop");
+    draft.lead.agent_id=crate::desktop_apps::GEMINI_DESKTOP.into();
+    draft.lead.model=None;
+    draft.members.push(member("qa",crate::desktop_apps::GEMINI_DESKTOP));
+    let valid=store::validate(&conn,&draft).unwrap();
+    let saved=store::create(&conn,&valid).unwrap();
+    assert_eq!(saved.lead.agent_id,crate::desktop_apps::GEMINI_DESKTOP);
+    assert_eq!(saved.lead.availability,AssignmentAvailability::Available);
+    draft.lead.model=Some("unsupported-model-control".into());
+    assert!(store::validate(&conn,&draft).unwrap_err().contains("selected in its app"));
+}
+
 fn create(conn: &Connection, name: &str) -> super::Squad {
     let input = input(name);
     let valid = store::validate(conn, &input).unwrap();

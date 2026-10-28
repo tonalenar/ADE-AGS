@@ -32,6 +32,8 @@ import { setPlacement } from "./placement";
 import { DrawingLayer } from "./DrawingLayer";
 import { ImageNode, TextNode, type ImageFlowNode, type TextFlowNode } from "./ExtraNodes";
 import { DeviceNode } from "./DeviceNode";
+import { GeminiDesktopNode } from "@/features/desktopApps/GeminiDesktopNode";
+import { focusGeminiViewport, geminiCanvasRect } from "@/features/desktopApps/geometry";
 import { FolderNode, baseName, type FolderFlowNode } from "./FolderNode";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
@@ -210,6 +212,17 @@ function CanvasInner() {
   // Dónde va cada terminal viva. Fuera del área no se dibuja: una terminal que nadie ve no
   // tiene por qué repintar.
   useEffect(() => {
+    const desktopRects: Record<string, Rect> = {};
+    for (const [id, portal] of Object.entries(board.portals)) {
+      if (portal.kind !== "gemini") continue;
+      const rect = geminiCanvasRect(portal.box,vp,size);
+      if (rect) desktopRects[id] = rect;
+    }
+    useCanvasStore.setState({ desktopRects });
+  }, [board.portals, vp, size]);
+  useEffect(() => () => { useCanvasStore.setState({ desktopRects: {} }); }, []);
+
+  useEffect(() => {
     if (!live || size.width === 0) {
       canvasActions.setLiveRects({});
       return;
@@ -313,6 +326,18 @@ function CanvasInner() {
   const fileInput = useRef<HTMLInputElement>(null);
   // Una nota o un portal seleccionado no es un agente activo: se lleva aparte.
   const [selectedNote, setSelectedNote] = useState<string | null>(null);
+  const desktopFocus = useCanvasStore((s) => s.desktopFocus);
+  useEffect(() => {
+    if (!desktopFocus || desktopFocus.key !== key || size.width <= 0 || size.height <= 0) return;
+    const portal = board.portals[desktopFocus.id];
+    if (portal?.kind !== "gemini") return;
+    const next = focusGeminiViewport(portal.box,size);
+    setSelectedNote(desktopFocus.id);
+    setVp(next);
+    void rf.setViewport(next);
+    canvasActions.setViewport(key,next);
+    useCanvasStore.setState({desktopFocus:null});
+  }, [desktopFocus,key,board.portals,size,rf,setVp]);
   // As cordas são controladas: a seleção tem de viver aqui, senão o clique é descartado e o ✕ e o
   // Delete nunca aparecem (era por isso que não dava para desconectar).
   const [selectedEdge, setSelectedEdge] = useState<string | null>(null);
@@ -386,7 +411,7 @@ function CanvasInner() {
     selected: id === selectedNote,
     dragHandle: ".ade-node-drag",
     deletable: false,
-    data: { id, cwd: portalCwd, portal, links: neighbors(board, id).length },
+    data: { id, cwd: portal.kind === "gemini" ? key?.split("|").slice(1).join("|").split("#m:")[0] ?? portalCwd : portalCwd, portal, links: neighbors(board, id).length },
   })), [board, selectedNote, portalCwd]);
 
   const rawTextNodes: TextFlowNode[] = useMemo(() => Object.entries(board.texts).map(([id, text]) => ({
@@ -772,6 +797,7 @@ function CanvasInner() {
       })()}
       <div className="absolute inset-0 pointer-events-none" style={{ zIndex: 20 }}>
         <CanvasToolbar
+          onGemini={() => { if (!key) return; const c = viewCenter(); canvasActions.addPortal(key, { name: "Gemini Desktop", kind: "gemini", at: { x: c.x - 500, y: c.y - 350 } }); useViewTabsStore.getState().openGemini(key.split("|").slice(1).join("|").split("#m:")[0]); }}
           tool={tool} onTool={setTool} style={drawStyle} onStyle={setDrawStyle}
           armed={armed} onArm={setArmed} lastPlaced={lastPlaced}
           defaultSize={armed && sizes[armed] ? defaultPlaceSize(armed, sizes) : null}
@@ -1340,6 +1366,7 @@ const PortalBody = memo(function PortalBody({ view, active, device }: { view: Br
 /** Un portal es un navegador, o la pantalla de un Android (`kind: "android"`). */
 const PortalOrDevice = memo(function PortalOrDevice(props: NodeProps<PortalFlowNode>) {
   const { data, selected } = props;
+  if (data.portal.kind === "gemini") return <GeminiDesktopNode id={data.id} cwd={data.cwd} portal={data.portal} selected={!!selected} />;
   return data.portal.kind === "android"
     ? <DeviceNode id={data.id} portal={data.portal} links={data.links} selected={!!selected} />
     : <PortalNode {...props} />;

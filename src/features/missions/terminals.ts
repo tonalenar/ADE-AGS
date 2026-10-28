@@ -424,10 +424,14 @@ export async function startMissionInTerminals(
   const startedAt = Date.now();
   const team = teamOf(squad, roles);
   const leadAgentId = squad?.lead.agentId ?? mission.leadAgentId ?? "claude-code";
+  const desktopCount = [leadAgentId, ...team.map((m) => m.agentId)].filter((id) => id === "gemini-desktop").length;
+  if (desktopCount > 1) throw new Error("Em missões no canvas, use uma função para o Gemini Desktop. Para várias tarefas Gemini em fila, use a execução em console.");
+  if (desktopCount && !(await invoke<{ installed: boolean }>("gemini_desktop_status")).installed) throw new Error("Gemini Desktop não está instalado.");
 
   // Todo se valida ANTES de marcar la misión o abrir nada: una TUI que no está instalada no
   // puede dejar la misión a medias.
   const agentFor = (id: string, model?: string | null, effort?: string | null, fast?: boolean | null) => {
+    if (id === "gemini-desktop") return { id, label: "Gemini Desktop · aplicativo local", command: "", available: true };
     const found = detectedAgents.find((a) => a.id === id);
     if (!found || !found.available) throw new Error(`O agente '${id}' não está disponível nesta máquina.`);
     // O nível de permissões e o modelo/esforço do Squad vão no comando (e portanto também ao
@@ -462,7 +466,9 @@ export async function startMissionInTerminals(
   // `ags mission timings` como el span "boot" de "Preparar equipe".
   recordSpan(mission.id, { kind: "boot", actor: "Preparar equipe", startedMs: startedAt, endedMs: Date.now() });
 
-  const leadTabId = addTab({
+  const key = missionBoardKey(mission.cwd, mission.id);
+  const desktopNode = () => canvasActions.addPortal(key, { kind: "gemini", name: leadAgentId === "gemini-desktop" ? LEAD_NAME : "Gemini Desktop", at: { x: 20, y: 20 } }).id;
+  const leadTabId = leadAgentId === "gemini-desktop" ? desktopNode() : addTab({
     cwd: leadWorkspace.cwd,
     prelaunch: [{ command: leadWorkspace.prelaunch }],
     agent: leadAgent,
@@ -471,17 +477,18 @@ export async function startMissionInTerminals(
     accountId: squad && !squad.lead.autoAccount ? squad.lead.accountId ?? undefined : mission.autoAccount ? undefined : mission.leadAccountId ?? undefined,
   });
   const memberTabIds = team.map((m, i) =>
-    addTab({ cwd: memberWorkspaces[i].cwd, prelaunch: [{ command: memberWorkspaces[i].prelaunch }], agent: memberAgents[i], title: m.name, titleIsCustom: true, accountId: m.accountId ?? undefined }),
+    m.agentId === "gemini-desktop" ? desktopNode() : addTab({ cwd: memberWorkspaces[i].cwd, prelaunch: [{ command: memberWorkspaces[i].prelaunch }], agent: memberAgents[i], title: m.name, titleIsCustom: true, accountId: m.accountId ?? undefined }),
   );
 
-  const key = missionBoardKey(mission.cwd, mission.id);
   canvasActions.buildMissionTeam(
     key,
     leadTabId,
     memberTabIds.map((tabId, i) => ({ tabId, roleId: team[i].roleId ? team[i].roleLabel : null, subagent: team[i].subagent })),
   );
   setWorkMode(key, "canvas");
-  activateTab(leadTabId);
+  const firstTerminal = leadAgentId === "gemini-desktop" ? memberTabIds.find((_,i) => team[i].agentId !== "gemini-desktop") : leadTabId;
+  if (firstTerminal) activateTab(firstTerminal);
+  if (desktopCount) (await import("@/features/tabs/viewStore")).useViewTabsStore.getState().openGemini(mission.cwd);
 
   // Cronómetro: cuánto tardó cada terminal en estar lista, y cuánto en contestar el briefing.
   const openedAt = Date.now();
@@ -520,10 +527,13 @@ export async function startMissionInTerminals(
       },
     };
   };
-  sendWhenReady(leadTabId, briefingFor(leadAgentId, leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined, prepared.workspaces, hasVigia)), timed(LEAD_NAME, leadTabId, true));
-  memberTabIds.forEach((tabId, i) =>
-    sendWhenReady(tabId, briefingFor(team[i].agentId, memberBriefing(mission, team[i], memberWorkspaces[i], findings, memory, qaOf(team)?.name)), timed(team[i].name, tabId)),
-  );
+  const sendBriefing = async (agentId: string, tabId: string, text: string, actor: string, lead = false) => {
+    if (agentId === "gemini-desktop") {
+      await invoke("gemini_desktop_consult_create", { cwd: mission.cwd, prompt: `${text}\n\nINTEGRAÇÃO ADE PELO GEMINI DESKTOP: você não executa comandos ADE diretamente. Use o plano de tarefas estruturado esperado pelo orquestrador; a ADE enviará os pedidos aos terminais e agentes conectados e capturará as respostas pelo aplicativo Gemini já conectado. O usuário ainda revisa e aplica o plano antes da execução. Não afirme ter executado comandos nem enviado mensagens.` });
+    } else sendWhenReady(tabId, briefingFor(agentId,text),timed(actor,tabId,lead));
+  };
+  await sendBriefing(leadAgentId,leadTabId,leadBriefing(mission, team, findings, memory, squad ? squad.defaultSubagent ?? null : undefined, prepared.workspaces, hasVigia),LEAD_NAME,true);
+  await Promise.all(memberTabIds.map((tabId,i) => sendBriefing(team[i].agentId,tabId,memberBriefing(mission,team[i],memberWorkspaces[i],findings,memory,qaOf(team)?.name),team[i].name)));
 
   return { leadTabId, memberTabIds };
 }

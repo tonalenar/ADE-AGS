@@ -298,6 +298,11 @@ SERVIDOR MCP (não é você quem digita: o app o inicia)
   `--mcp-config` escrito em ~/.ags/mcp/. Não precisa instalar o CLI para
   funcionar: o arquivo aponta para o binário que vem dentro do app.
 
+GEMINI DESKTOP (Windows; consultas assistidas)
+  gemini status                               Estado do aplicativo original
+  gemini consult --cwd . --prompt \"...\"        Registrar um pedido para o painel Gemini
+  gemini result <id>                          Ler o estado e a resposta entregue
+
 OUTROS
   app status                                  Versão e estado do app
   --json-args '{...}'                         Passa argumentos crus em JSON
@@ -443,7 +448,7 @@ pub(crate) fn main() -> ExitCode {
         }
     } else { parsed };
     let mut parsed=parsed;
-    if command.starts_with("worktrees.") {
+    if command.starts_with("worktrees.") || command == "gemini.consult" {
         let requested=parsed.get("cwd").and_then(Value::as_str).unwrap_or(".");
         match std::path::absolute(requested) {
             Ok(path)=>{parsed["cwd"]=Value::String(path.to_string_lossy().into_owned());},
@@ -793,6 +798,7 @@ fn run_defaults(mut args: Value, shell_cwd: &std::path::Path) -> Result<Value, S
 
 fn positionals(command: &str) -> &'static [&'static str] {
     match command {
+        "gemini.result" => &["id"],
         "test.run" => &["suite"],
         "design.create" => &["title"],
         "design.get" | "design.delete" | "design.archive" | "design.approve.all" => &["designId"],
