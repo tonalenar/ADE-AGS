@@ -10,7 +10,10 @@ struct TempDir(PathBuf);
 
 impl TempDir {
     fn new(label: &str) -> Self {
-        let dir = std::env::temp_dir().join(format!("ade-attach-test-{label}-{}", uuid::Uuid::new_v4()));
+        // O caminho real: no macOS a pasta temporária fica em `/var`, que é um link para `/private/var`, e a checagem de
+        // pasta redirecionada (de propósito) recusaria o caminho com o link.
+        let base = std::env::temp_dir();
+        let dir = base.canonicalize().unwrap_or(base).join(format!("ade-attach-test-{label}-{}", uuid::Uuid::new_v4()));
         Self(dir)
     }
 
