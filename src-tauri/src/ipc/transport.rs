@@ -367,7 +367,9 @@ mod tests {
     #[test]
     fn the_credential_socket_reports_this_process() {
         use std::os::unix::net::{UnixListener, UnixStream};
-        let path = std::env::temp_dir().join(format!("ags-peer-{}-{}.sock", std::process::id(), uuid::Uuid::new_v4()));
+        // Nome curto: o caminho de um socket unix tem limite (104 bytes no macOS), e lá a pasta temporária já é longa.
+        let id = uuid::Uuid::new_v4().simple().to_string();
+        let path = std::env::temp_dir().join(format!("ags-{}-{}.sock", std::process::id(), &id[..8]));
         let _ = std::fs::remove_file(&path);
         let listener = UnixListener::bind(&path).unwrap();
         let _client = UnixStream::connect(&path).unwrap();

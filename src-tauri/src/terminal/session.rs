@@ -176,28 +176,19 @@ fn parent_pid(pid: u32) -> Option<u32> {
     None
 }
 
-/// `getpeereid` não traz PID. A árvore usa `sysctl` (`KERN_PROC_PID`),
-/// o mesmo dado que `proc_pidinfo` expõe em `pbi_ppid`.
+/// `getpeereid` não traz PID. O pai vem de `proc_pidinfo(PROC_PIDTBSDINFO)`, em `pbi_ppid`.
+/// (Não `sysctl(KERN_PROC_PID)`: a `libc` não expõe `kinfo_proc` no macOS e o build quebrava.)
 #[cfg(target_os = "macos")]
 fn parent_pid(pid: u32) -> Option<u32> {
-    let mut mib = [libc::CTL_KERN, libc::KERN_PROC, libc::KERN_PROC_PID, pid as libc::c_int];
-    let mut info: libc::kinfo_proc = unsafe { std::mem::zeroed() };
-    let mut len = std::mem::size_of::<libc::kinfo_proc>() as libc::size_t;
-    let rc = unsafe {
-        libc::sysctl(
-            mib.as_mut_ptr(),
-            mib.len() as libc::c_uint,
-            &mut info as *mut libc::kinfo_proc as *mut libc::c_void,
-            &mut len,
-            std::ptr::null_mut(),
-            0,
-        )
+    let mut info: libc::proc_bsdinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdinfo>() as libc::c_int;
+    let read = unsafe {
+        libc::proc_pidinfo(pid as libc::c_int, libc::PROC_PIDTBSDINFO, 0, &mut info as *mut libc::proc_bsdinfo as *mut libc::c_void, size)
     };
-    if rc != 0 {
+    if read != size {
         return None;
     }
-    let ppid = info.kp_eproc.e_ppid;
-    if ppid <= 0 { None } else { Some(ppid as u32) }
+    Some(info.pbi_ppid).filter(|ppid| *ppid > 0)
 }
 
 /// `CreateToolhelp32Snapshot` enxerga o pai. Se o PID não está no
