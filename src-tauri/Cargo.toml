@@ -50,6 +50,7 @@ serde_json = "1"
 portable-pty = "0.8"
 anyhow = "1"
 tokio = { version = "1", features = ["full"] }
+tokio-tungstenite = "0.24"
 
 # Fase 0 — Persistencia SQLite
 rusqlite = { version = "0.31", features = ["bundled"] }
@@ -73,7 +74,12 @@ symlink = "0.1"
 # Fase 6 — Marketplace de skills (registries remotos)
 # rustls en vez de la TLS nativa del sistema: evita depender de libssl/openssl-dev
 # instalado en la máquina del usuario para poder compilar/correr.
-reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["blocking", "json", "rustls-tls", "stream", "http2"] }
+# El proxy de la vista previa descomprime el HTML gzip/deflate que un sitio manda aunque se le pidió identity.
+flate2 = "1"
+# ...e também o brotli e o zstd (Fase 1.5, I3): puro Rust, sem compilar C.
+brotli-decompressor = "6"
+ruzstd = "0.8"
 
 # Buscador de texto del panel derecho. `ignore` es el recorrido de ripgrep: respeta
 # `.gitignore` sin tener que invocar a git por cada carpeta, y trae los globs de
@@ -140,6 +146,7 @@ windows-sys = { version = "0.61", features = [
     "Win32_System_Console",
     "Win32_System_Pipes",
     "Win32_System_Threading",
+    # Janelas do Chrome real (`real_browser::win`): estilo, dono, posição e o aviso de janela nova.
     "Win32_UI_WindowsAndMessaging",
     "Win32_UI_HiDpi",
     "Win32_UI_Accessibility",
@@ -153,9 +160,21 @@ tauri-winrt-notification = "0.8.1"
 
 [dev-dependencies]
 tauri = { version = "2", features = ["test"] }
+# Só para fabricar HTML em brotli nos testes do proxy (já está no Cargo.lock, vem do tauri-utils).
+brotli = "9"
 
 [profile.dev]
 debug = "line-tables-only"
 
 [profile.dev.package."*"]
 debug = false
+
+# Release: antes valia o padrão (sem LTO, 16 codegen-units, com símbolos), e o ade-ags.exe tinha
+# 40,2 MB. LTO "thin" + 1 codegen-unit deixam o binário menor e o código mais rápido, à custa de um
+# build de release mais demorado; `strip` tira os símbolos do executável. `panic` continua
+# "unwind" de propósito: o app se recupera de mutex envenenado (`into_inner()`) em mais de cem
+# pontos, e com "abort" qualquer pânico numa thread derrubaria o app inteiro.
+[profile.release]
+lto = "thin"
+codegen-units = 1
+strip = true

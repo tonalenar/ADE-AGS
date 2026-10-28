@@ -540,6 +540,24 @@ pub fn mission_check_duplicate_input(
     )
 }
 
+/// Un PR como lo acepta el diálogo de entrega: número o URL de GitHub (ver `delivery`).
+pub(crate) fn delivery_pr_reference(value: &str) -> Result<String, String> {
+    delivery::normalize_pr_reference(value)
+}
+
+/// Lo que el diálogo "Finalizar" ya trae completado (ver `delivery::DeliveryHint`). Solo lee.
+#[tauri::command]
+pub async fn mission_delivery_hint(app: AppHandle, mission_id: String) -> Result<delivery::DeliveryHint, String> {
+    let db = db_of(&app)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = db.lock().map_err(|e| e.to_string())?;
+        let mission = store::get(&conn, &mission_id)?.ok_or_else(|| format!("não há nenhuma missão {mission_id}"))?;
+        Ok(delivery::delivery_hint(&conn, &mission.id, std::path::Path::new(&mission.cwd), mission.started_at))
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// Finaliza una misión en terminales y registra la evidencia de entrega.
 #[tauri::command]
 pub async fn mission_finish_terminals(
@@ -739,7 +757,23 @@ pub(crate) fn memory_briefing(db: &DbConnection, mission_id: &str) -> Result<Str
     if let Some(text) = crate::decisions::relevance::briefing(db, &mission.workspace_id, &mission.id, &mission.objective, &docs) {
         return Ok(text);
     }
-    Ok(crate::memory::search::briefing_block(&docs, &mission.id, &mission.objective, 10, 2_600))
+    let (text, keys) = crate::memory::search::briefing_block_with_keys(&docs, &mission.id, &mission.objective, 10, 2_600);
+    // O caminho comum também conta como injeção: sem isto o painel de uso via só o que o Jev escolhia.
+    if !keys.is_empty() {
+        if let Ok(conn) = db.lock() {
+            crate::memory::usage::record(&conn, &crate::memory::usage::UsageRow {
+                ts: crate::memory::usage::now(),
+                workspace_id: &mission.workspace_id,
+                mission_id: Some(&mission.id),
+                tab_id: None,
+                action: "injected",
+                query: None,
+                hits: u32::try_from(keys.len()).unwrap_or(u32::MAX),
+                entry_keys: &keys,
+            });
+        }
+    }
+    Ok(text)
 }
 
 #[tauri::command]

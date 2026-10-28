@@ -5,7 +5,7 @@ use crate::database::DbConnection;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 use super::profiles::{read_identity, spec_for};
 
@@ -45,9 +45,7 @@ pub fn validate_name(name: &str) -> Result<(), String> {
 // ── Almacén ─────────────────────────────────────────────────────
 
 pub(super) fn accounts_root(app: &AppHandle) -> Result<PathBuf, String> {
-    let base = app
-        .path()
-        .app_data_dir()
+    let base = crate::util::datadir::app_data_dir(app)
         .map_err(|e| format!("No se pudo resolver la carpeta de datos de la app: {e}"))?;
     Ok(base.join("accounts"))
 }

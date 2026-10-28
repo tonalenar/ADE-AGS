@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
-  comparablePath, findExisting, isLocalUrl, nextActiveAfterClose, normalizeUrl, relativeTo, toPersisted, viewLabels,
+  comparablePath, findExisting, isLocalUrl, nextActiveAfterClose, normalizeUrl, knownViews, relativeTo, toPersisted, viewLabels,
   viewsOfWorkspace, type ViewTab,
 } from "../viewTabs";
 
@@ -59,6 +59,14 @@ describe("persistencia", () => {
   });
 });
 
+describe("abas salvas por outra versão", () => {
+  it("só as de tipo conhecido voltam", () => {
+    const keep = file("a", "/p", "/p/src/app.ts");
+    const foreign = { kind: "desktop", id: "g", cwd: "/p", title: "Gemini" } as unknown as ViewTab;
+    expect(knownViews([keep, foreign, null as unknown as ViewTab])).toEqual([keep]);
+  });
+});
+
 describe("títulos repetidos", () => {
   it("solo los homónimos llevan la carpeta que los separa", () => {
     const labels = viewLabels([
@@ -78,6 +86,13 @@ describe("títulos repetidos", () => {
     ]);
     expect(labels.get("a")?.hint).toBeNull();
     expect(labels.get("d")?.hint).toBeNull();
+  });
+
+  it("uma aba de tipo desconhecido, sem path (salva por outra versão), fica só com o título", () => {
+    const foreign = { kind: "desktop", id: "g", cwd: "/p", title: "Gemini" } as unknown as Parameters<typeof viewLabels>[0][number];
+    const labels = viewLabels([file("a", "/p", "/p/src/app.ts"), foreign]);
+    expect(labels.get("g")).toEqual({ title: "Gemini", hint: null });
+    expect(labels.get("a")?.hint).toBeNull();
   });
 });
 
@@ -125,5 +140,16 @@ describe("rutas de Windows", () => {
     expect(relativeTo("C:\\proyecto\\src\\app.ts", "C:/proyecto")).toBe("src/app.ts");
     expect(relativeTo("/home/luis/p/src/a.ts", "/home/luis/p")).toBe("src/a.ts");
     expect(relativeTo("/otro/lado.ts", "/home/luis/p")).toBe("/otro/lado.ts");
+  });
+});
+
+describe("about:blank", () => {
+  it("é a página vazia, não um endereço (um agente cria um portal vazio assim)", async () => {
+    const { isBlankUrl } = await import("../viewTabs");
+    expect(isBlankUrl("about:blank")).toBe(true);
+    expect(isBlankUrl(" ABOUT:BLANK ")).toBe(true);
+    expect(isBlankUrl("about:")).toBe(true);
+    expect(isBlankUrl("https://about.me")).toBe(false);
+    expect(isBlankUrl("")).toBe(false);
   });
 });

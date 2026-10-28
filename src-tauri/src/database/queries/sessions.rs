@@ -115,6 +115,14 @@ pub fn resolve_for_archive(db: &DbConnection, tab_id: &str) -> ResolvedSession {
     let Some(input) = input else { return ResolvedSession::default() };
     let profile = input.profile.as_deref().map(std::path::Path::new);
 
+    // O id que a app ESCOLHEU ao abrir a aba (agentes que deixam escolher) é a verdade: redescobrir "a sessão mais nova da pasta"
+    // aqui o trocaria pelo de uma conversa de fora, e é esse id que reabre a aba e entra no histórico. Fica o que a app gravou.
+    // (Perde-se acompanhar um `/resume` feito dentro da TUI: pior seria arquivar a conversa de outra pessoa.)
+    if input.session_id.is_some() && crate::agents::assigns_session(&input.agent_id) {
+        let title = resolve_title(&input, input.session_id.clone(), profile);
+        return ResolvedSession { session_id: input.session_id, title };
+    }
+
     // Sin el lock: acá se lee disco y, para algunas TUIs, se lanza un proceso.
     let found = crate::session::discover_session_id_sync(
         &input.agent_id,
@@ -122,6 +130,7 @@ pub fn resolve_for_archive(db: &DbConnection, tab_id: &str) -> ResolvedSession {
         input.opened_at - REDISCOVERY_LOOKBACK_S,
         profile,
         input.custom.as_ref(),
+        &[],
     );
 
     // Traza deliberada: este camino solo se puede observar con una TUI real retomando una
@@ -163,6 +172,12 @@ pub fn resolve_for_archive(db: &DbConnection, tab_id: &str) -> ResolvedSession {
         }
     };
 
+    let title = resolve_title(&input, session_id.clone(), profile);
+    ResolvedSession { session_id, title }
+}
+
+/// O título com que arquivar a aba, resolvido contra a sessão real.
+fn resolve_title(input: &ArchiveInput, session_id: Option<String>, profile: Option<&std::path::Path>) -> Option<String> {
     // El título se resuelve contra la sesión real y no se confía en el que traía la tab.
     // Dos motivos, los dos verificados sobre un historial de verdad:
     //
@@ -174,25 +189,22 @@ pub fn resolve_for_archive(db: &DbConnection, tab_id: &str) -> ResolvedSession {
     //   ("Claude Code — carpeta"). En una base real eso era el 100% de las entradas.
     //
     // Un título puesto a mano por el usuario manda siempre y no se toca.
-    let title = if input.title_is_custom {
-        input.title
-    } else {
-        Some(
-            crate::session::get_session_title_sync(
-                &input.agent_id,
-                &input.cwd,
-                session_id.clone(),
-                input.title.clone().unwrap_or_default(),
-                profile,
-                input.custom.as_ref(),
-            )
-            .title,
+    if input.title_is_custom {
+        return input.title.clone();
+    }
+    Some(
+        crate::session::get_session_title_sync(
+            &input.agent_id,
+            &input.cwd,
+            session_id,
+            input.title.clone().unwrap_or_default(),
+            profile,
+            input.custom.as_ref(),
         )
-        .filter(|t| !t.is_empty())
-        .or(input.title)
-    };
-
-    ResolvedSession { session_id, title }
+        .title,
+    )
+    .filter(|t| !t.is_empty())
+    .or_else(|| input.title.clone())
 }
 
 /// Escribe la tab en el historial. `resolved` viene de [`resolve_for_archive`], que hay

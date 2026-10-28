@@ -119,6 +119,20 @@ fn fixture_worktree_cleanup_dry_run_preserva_arquivos_e_ramos() {
 }
 
 #[test]
+fn missao_encerrada_sem_entrega_tambem_pode_ter_o_worktree_limpo() {
+    let repo = TempRepo::new("nodelivery");
+    let wt = repo.base.join("wt-nodelivery");
+    repo.git(&["worktree", "add", "-b", "cc/branch-nodelivery", &wt.to_string_lossy(), "master"]);
+    let conn = repo.db("m-nd", &wt, "cc/branch-nodelivery", "done_without_delivery");
+    let report = crate::missions::cleanup::cleanup(&conn, "m-nd", &repo.base, true).unwrap();
+    assert!(report.entries[0].blockers.iter().all(|b| !b.contains("missão em andamento")), "{:?}", report.entries[0].blockers);
+    let running = repo.db("m-run", &wt, "cc/branch-nodelivery", "running");
+    let report = crate::missions::cleanup::cleanup(&running, "m-run", &repo.base, true).unwrap();
+    assert!(report.entries[0].blockers.iter().any(|b| b.contains("missão em andamento")));
+    let _ = repo.git(&["worktree", "remove", "--force", &wt.to_string_lossy()]);
+}
+
+#[test]
 fn fixture_worktree_cleanup_alteracoes_nao_commitadas_bloqueiam_remocao() {
     let repo = TempRepo::new("dirty");
     let wt_dirty = repo.base.join("wt-dirty");

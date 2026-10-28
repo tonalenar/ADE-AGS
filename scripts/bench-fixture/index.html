@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>Bench — páginas do benchmark do piloto</title>
+<!--
+  Páginas locais do benchmark do piloto do Jev (`scripts/jev-bench.ts`). O `jev-bench` as serve sozinho;
+  à mão: `python -m http.server 8765 --directory scripts/bench-fixture`. Nenhuma pede login, compra ou dado real.
+-->
+<link rel="stylesheet" href="common.css">
+<main>
+  <h1>Páginas do benchmark</h1>
+  <ul>
+    <li><a href="icones.html">L01 ícones sem nome</a></li>
+    <li><a href="lupa.html">L02 lupa entre iguais</a></li>
+    <li><a href="busca-enter.html">L03 busca com Enter</a></li>
+    <li><a href="busca-botao.html">L04 busca com botão</a></li>
+    <li><a href="cookies.html">L05 cookies</a></li>
+    <li><a href="modal.html">L06 modal de newsletter</a></li>
+    <li><a href="garantia.html">L07 garantia</a></li>
+    <li><a href="catalogo.html">L08 produto sem botão de carrinho</a></li>
+    <li><a href="repetidos.html">L09 botões repetidos</a></li>
+    <li><a href="selecao.html">L10 lista e radio</a></li>
+    <li><a href="etapas.html">L11 formulário em etapas</a></li>
+    <li><a href="foto-garantia.html">L12 garantia na foto</a></li>
+    <li><a href="abas.html">L13 abas</a></li>
+    <li><a href="rolar.html">L14 rolar até o fim</a></li>
+    <li><a href="quantidade.html">L15 quantidade sem Enter</a></li>
+    <li><a href="busca-checkout.html">L16 busca com checkout</a></li>
+    <li><a href="comprar-agora.html">L17 comprar agora não pedido</a></li>
+  </ul>
+  <h2>Leva v2</h2>
+  <ul>
+    <li><a href="anuncios-busca.html">N01 anúncio no primeiro resultado</a></li>
+    <li><a href="anuncios-carrinho.html">N02 anúncio na grade do carrinho</a></li>
+    <li><a href="busca-lenta.html?xhr=8000">N03 busca lenta por XHR (8 s)</a></li>
+    <li><a href="filtro-lento.html?xhr=8000">N04 filtro lento por XHR (8 s)</a></li>
+    <li><a href="autocomplete-cidade.html">N05 autocomplete de cidade</a></li>
+    <li><a href="autocomplete-busca.html">N06 autocomplete na busca</a></li>
+    <li><a href="rerender-lista.html">N07 lista que reaproveita nós</a></li>
+    <li><a href="rerender-carrinho.html">N08 carrinho que reaproveita nós</a></li>
+    <li><a href="carrinho-quantidade.html?xhr=700">N09 quantidade salva por XHR</a></li>
+    <li><a href="carrinho-idempotente.html">N10 carrinho idempotente (dois act)</a></li>
+    <li><a href="s?k=caneca&amp;delay=8000">/s — resultados no servidor com atraso de 8 s</a></li>
+  </ul>
+</main>

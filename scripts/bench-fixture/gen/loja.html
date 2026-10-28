@@ -1,0 +1,146 @@
+<!doctype html>
+<html>
+<meta charset="utf-8">
+<title>Loja — conjunto de teste</title>
+<!-- Conjunto de TESTE (protocolo J2): a variante sai de `?f=<família>&s=<semente>` (ver scenario.js). -->
+<link rel="stylesheet" href="../common.css">
+<style>
+  html, body { background: #fff; color: #111; color-scheme: light; }
+  .cartline { font-weight: 600; }
+  .price { color: #555; margin: 6px 0 10px; }
+  .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+  .hidden { display: none; }
+  ul.list { padding-left: 18px; }
+</style>
+<body>
+<header>
+  <b id="store"></b>
+  <span class="space"></span>
+  <span id="icons" class="row"></span>
+  <span id="cart" class="cartline"></span>
+</header>
+<main>
+  <div id="status"></div>
+  <div id="app"></div>
+</main>
+<div id="overlay" class="overlay" hidden><div class="box" id="box"></div></div>
+<script type="module">
+import { scenario } from "./scenario.js";
+
+const params = new URLSearchParams(location.search);
+const s = scenario(params.get("f") ?? "adicionar", Number(params.get("s") ?? "1"));
+const v = s.view;
+document.documentElement.lang = s.lang;
+document.getElementById("store").textContent = s.store;
+const app = document.getElementById("app");
+const status = document.getElementById("status");
+const el = (tag, props = {}, ...children) => {
+  const node = Object.assign(document.createElement(tag), props);
+  for (const child of children) node.append(child);
+  return node;
+};
+const overlay = document.getElementById("overlay");
+const box = document.getElementById("box");
+const showOverlay = (...children) => { box.replaceChildren(...children); overlay.hidden = false; };
+const hideOverlay = () => { overlay.hidden = true; box.replaceChildren(); };
+
+if (s.family === "adicionar") {
+  const cart = document.getElementById("cart");
+  cart.textContent = `${v.cart}: 0`;
+  const grid = el("div", { className: "grid" });
+  for (const name of v.products) {
+    grid.append(el("div", { className: "card" },
+      el("h3", { textContent: name }),
+      el("div", { className: "price", textContent: `R$ ${(49 + name.length * 7).toFixed(2).replace(".", ",")}` }),
+      el("button", { textContent: v.add, onclick: () => { cart.textContent = `${v.cart}: 1 · ${name}`; } }),
+    ));
+  }
+  app.append(el("h1", { textContent: s.store }), grid);
+  if (v.obstacle === "cookies") {
+    showOverlay(el("p", { textContent: v.cookies }),
+      el("button", { className: "green", textContent: v.accept, onclick: hideOverlay }),
+      el("button", { className: "gray", textContent: v.reject, onclick: hideOverlay }));
+  } else if (v.obstacle === "modal") {
+    showOverlay(el("h2", { textContent: v.news }),
+      el("input", { placeholder: "email@exemplo.test", ariaLabel: "E-mail" }),
+      el("button", { textContent: v.subscribe, onclick: () => { status.textContent = v.subscribed; hideOverlay(); } }),
+      el("button", { className: "gray", textContent: v.close, onclick: hideOverlay }));
+  }
+}
+
+if (s.family === "busca") {
+  const q = params.get("q");
+  const input = el("input", { type: "search", name: "q", placeholder: v.label, ariaLabel: v.label });
+  const form = el("form", { method: "get", className: "row" }, input);
+  for (const [key, value] of [["f", s.family], ["s", String(s.seed)]]) form.append(el("input", { type: "hidden", name: key, value }));
+  if (v.mode === "botao") form.append(el("button", { type: "submit", textContent: v.button }));
+  app.append(el("h1", { textContent: s.store }), form);
+  if (q) {
+    status.textContent = `${v.results} ${q}`;
+    app.append(el("ul", { className: "list" }, ...v.products.filter((p) => p.toLowerCase().includes(q.toLowerCase())).map((p) => el("li", { textContent: p }))));
+  } else {
+    app.append(el("ul", { className: "list" }, ...v.products.map((p) => el("li", { textContent: p }))));
+  }
+}
+
+if (s.family === "filtro") {
+  const list = el("ul", { className: "list" });
+  const render = (only) => {
+    const shown = only ? v.products.filter((p) => p.on) : v.products;
+    list.replaceChildren(...shown.map((p) => el("li", { textContent: p.name })));
+    status.textContent = only ? v.showing : v.all;
+  };
+  const box = el("input", { type: "checkbox", id: "f1" });
+  // A lista só muda quando a resposta chega (XHR com atraso), como numa loja de verdade.
+  box.onchange = () => {
+    fetch(`/api/filtro?delay=${v.delay}`).catch(() => null).then(() => render(box.checked));
+  };
+  app.append(el("h1", { textContent: s.store }), el("div", { className: "row" }, box, el("label", { htmlFor: "f1", textContent: v.label })), list);
+  render(false);
+}
+
+if (s.family === "icone") {
+  // Ícones SEM nome (sem texto e sem aria-label): só a foto os distingue.
+  const SVG = {
+    carrinho: '<circle cx="9" cy="20" r="1.5"/><circle cx="18" cy="20" r="1.5"/><path d="M2 3h3l2.6 12.4a2 2 0 0 0 2 1.6h7.8a2 2 0 0 0 2-1.6L21 8H6"/>',
+    busca: '<circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/>',
+    perfil: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
+    notificacoes: '<path d="M6 8a6 6 0 0 1 12 0c0 7 3 9 3 9H3s3-2 3-9"/><path d="M10 21a2 2 0 0 0 4 0"/>',
+    ajuda: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9a2.5 2.5 0 0 1 5 0c0 2-2.5 2-2.5 4"/><path d="M12 17h.01"/>',
+  };
+  const icons = document.getElementById("icons");
+  for (const kind of v.icons) {
+    const div = el("div", { className: "icon", onclick: () => { status.textContent = v.done[kind]; } });
+    div.innerHTML = `<svg viewBox="0 0 24 24">${SVG[kind]}</svg>`;
+    icons.append(div);
+  }
+  app.append(el("h1", { textContent: s.store }), el("p", { textContent: "—" }));
+}
+
+if (s.family === "formulario") {
+  const form = el("form", {});
+  const step1 = el("div", {});
+  const step2 = el("div", { className: v.steps === 2 ? "hidden" : "" });
+  const inputs = {};
+  v.keys.forEach((key, i) => {
+    const id = `campo-${key}`;
+    inputs[key] = el("input", { id, name: key, type: key === "email" ? "email" : "text" });
+    const row = el("div", {}, el("label", { htmlFor: id, textContent: v.labels[key] }), inputs[key]);
+    (v.steps === 2 && i > 0 ? step2 : step1).append(row);
+  });
+  form.append(step1);
+  if (v.steps === 2) {
+    const next = el("button", { type: "button", textContent: v.next, onclick: () => { step2.classList.remove("hidden"); next.remove(); } });
+    step1.append(next);
+  }
+  form.append(step2, el("button", { type: "submit", textContent: v.send }));
+  form.onsubmit = (e) => {
+    e.preventDefault();
+    if (v.keys.some((k) => !inputs[k].value.trim())) { status.textContent = "—"; return; }
+    status.textContent = `${v.sent} ${inputs.nome.value.trim()}`;
+  };
+  app.append(el("h1", { textContent: s.store }), form);
+}
+</script>
+</body>
+</html>

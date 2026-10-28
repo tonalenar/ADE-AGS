@@ -8,10 +8,11 @@ import {
   FOLDER_PREFIX, IMAGE_PREFIX, NOTE_PREFIX, PORTAL_PREFIX, TEXT_PREFIX, addEdge, addFolder, addImage, addNote, addPortal,
   addStroke, addText, removeFolder, updateFolder,
   emptyBoard, placeInNextGridCell, reconcile, removeEdge, removeEdgeBetween, removeImage, removeNote, removePortal,
-  buildMissionTeam, setRole, removeStroke, removeText, toggleOrchestrator, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
+  buildMissionTeam, setRole, removeStroke, removeText, toggleOrchestrator, moveTerminals, undoStroke, updateNote, bringToFront, setNoteBox, stackInto, unstack, updatePortal, updateText,
   type Board, type CanvasFolder, type CanvasNote, type CanvasPortal, type CanvasText, type Stroke,
 } from "./board";
 import { safeViewport, type Box, type Rect, type Viewport } from "./geometry";
+import { buildComparisonBoard, type ComparisonNode } from "@/features/compare/layout";
 
 export type WorkMode = "tabs" | "canvas";
 
@@ -27,9 +28,12 @@ interface CanvasState {
   liveRects: Record<string, Rect>;
   desktopRects: Record<string, Rect>;
   desktopFocus: { key: string; id: string; nonce: number } | null;
+  /** Os canvases salvos já foram lidos do disco. Antes disso "a aba não está em nenhum canvas" é falso: quem decide
+   *  por isso (adotar abas numa conversa, avisar o orquestrador) espera. */
+  loaded: boolean;
 }
 
-export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}, grids: {}, liveRects: {}, desktopRects: {}, desktopFocus: null }));
+export const useCanvasStore = create<CanvasState>(() => ({ boards: {}, modes: {}, grids: {}, liveRects: {}, desktopRects: {}, desktopFocus: null, loaded: false }));
 let desktopFocusSequence = 0;
 
 let windowLabel = "main";
@@ -57,6 +61,20 @@ export function conversationOfKey(key: string | null): string | null {
   return key && at >= 0 ? key.slice(at + CONV_SEP.length) : null;
 }
 
+/** O que separa a pasta da comparação de modelos na chave do seu canvas (ver `features/compare`). */
+const COMPARE_SEP = "#cmp:";
+
+/** A chave do canvas de uma comparação de modelos: o da pasta escolhida, com a comparação colada. */
+export function compareBoardKey(cwd: string, comparisonId: string): string {
+  return `${boardKey(cwd)}${COMPARE_SEP}${comparisonId}`;
+}
+
+/** A comparação de que é um canvas, se for de uma. */
+export function compareOfKey(key: string | null): string | null {
+  const at = key?.indexOf(COMPARE_SEP) ?? -1;
+  return key && at >= 0 ? key.slice(at + COMPARE_SEP.length) : null;
+}
+
 /** La clave del canvas de una misión en terminales: el de su carpeta, con la misión pegada. */
 export function missionBoardKey(cwd: string, missionId: string): string {
   return `${boardKey(cwd)}${MISSION_SEP}${missionId}`;
@@ -77,7 +95,7 @@ export function boardKeyOfTab(tab: { id: string; cwd: string }, boards: Record<s
   const prefix = `${windowLabel}|`;
   for (const [key, board] of Object.entries(boards)) {
     // O canvas de uma missão ou de uma conversa de projeto: a aba pertence ao em que é um nó.
-    if (key.startsWith(prefix) && (key.includes(MISSION_SEP) || key.includes(CONV_SEP)) && tab.id in board.nodes) return key;
+    if (key.startsWith(prefix) && (key.includes(MISSION_SEP) || key.includes(CONV_SEP) || key.includes(COMPARE_SEP)) && tab.id in board.nodes) return key;
   }
   return boardKey(tab.cwd);
 }
@@ -189,7 +207,7 @@ export const canvasActions = {
   unstackNote: (key: string, id: string) => updateBoard(key, (b) => unstack(b, id)),
   /** Crea un portal y devuelve su id y su nombre final. Con `near`, al lado de ese nodo y
    *  conectado a él. */
-  addPortal: (key: string, portal: { name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android" | "gemini"; avd?: string; size?: { w: number; h: number } }) => {
+  addPortal: (key: string, portal: { name?: string; url?: string; near?: string; at?: { x: number; y: number }; kind?: "android" | "gemini"; avd?: string; size?: { w: number; h: number }; viewport?: { width: number; height: number } }) => {
     const existing = portal.kind === "gemini" && Object.entries(useCanvasStore.getState().boards[key]?.portals ?? {}).find(([, p]) => p.kind === "gemini");
     if (existing) return { id: existing[0], name: existing[1].name };
     const id = `${PORTAL_PREFIX}${crypto.randomUUID()}`;
@@ -235,6 +253,16 @@ export const canvasActions = {
   disconnect: (key: string, edgeId: string) => updateBoard(key, (board) => removeEdge(board, edgeId)),
   disconnectPair: (key: string, a: string, b: string) => updateBoard(key, (board) => removeEdgeBetween(board, a, b)),
   toggleOrchestrator: (key: string, tabId: string) => updateBoard(key, (board) => toggleOrchestrator(board, tabId)),
+  /** Leva terminais de um canvas para outro, com lugar, ligações, papel e coroa (ver `moveTerminals`). O modo
+   *  (abas ou canvas) vai junto, se o destino ainda não tiver um. */
+  moveTerminals: (fromKey: string, toKey: string, tabIds: string[]) => {
+    const boards = useCanvasStore.getState().boards;
+    const moved = moveTerminals(boards[fromKey] ?? emptyBoard(), boards[toKey] ?? emptyBoard(), tabIds);
+    updateBoard(toKey, () => moved.to);
+    updateBoard(fromKey, () => moved.from);
+    const modes = useCanvasStore.getState().modes;
+    if (!(toKey in modes) && modes[fromKey]) setWorkMode(toKey, modes[fromKey]);
+  },
   /** O que o terminal é: papel (`null` = o orquestrador decide) e se é subagente. */
   setRole: (key: string, tabId: string, role: string | null, subagent: boolean) =>
     updateBoard(key, (board) => setRole(board, tabId, role, subagent)),
@@ -254,6 +282,9 @@ export const canvasActions = {
    *  `key` es `missionBoardKey`. Crea el canvas si no existe. */
   buildMissionTeam: (key: string, leadId: string, members: { tabId: string; roleId?: string | null; subagent?: boolean }[]) =>
     updateBoard(key, (board) => buildMissionTeam(board, leadId, members)),
+  /** O canvas de uma comparação de modelos: os terminais lado a lado sob o título (ver `compare/layout.ts`). */
+  buildComparison: (key: string, titleId: string, title: string, entries: ComparisonNode[]) =>
+    updateBoard(key, (board) => buildComparisonBoard(board, titleId, title, entries)),
   setLiveRects: (liveRects: Record<string, Rect>) => {
     const prev = useCanvasStore.getState().liveRects;
     if (JSON.stringify(prev) !== JSON.stringify(liveRects)) useCanvasStore.setState({ liveRects });
@@ -342,7 +373,7 @@ export function initCanvasSync(label: string): () => void {
           .filter(([k]) => k.startsWith(`${label}|`))
           .map(([k, b]) => [k, { ...emptyBoard(), ...b, viewport: safeViewport(b?.viewport), nodes: b?.nodes ?? {}, edges: b?.edges ?? [], orchestrators: b?.orchestrators ?? [], notes: b?.notes ?? {}, portals: b?.portals ?? {}, texts: b?.texts ?? {}, images: b?.images ?? {}, folders: b?.folders ?? {}, drawings: b?.drawings ?? [], roles: b?.roles ?? {}, subagents: b?.subagents ?? [] }]),
       );
-      useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards } });
+      useCanvasStore.setState({ boards: { ...mine, ...useCanvasStore.getState().boards }, loaded: true });
       unsub = useTabsStore.subscribe(syncBoards);
       syncBoards();
     });

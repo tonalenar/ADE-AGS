@@ -2,7 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { useTranslation } from "react-i18next";
 import { listen } from "@tauri-apps/api/event";
-import { AddIcon, AlertaToast, Button, Tooltip } from "neogestify-ui-components";
+import { AddIcon, Button, Tooltip } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useUiStore } from "@/app/uiStore";
 import { useSquadsStore } from "@/features/squads/store";
@@ -266,6 +267,7 @@ export function MissionsSection() {
       )}
       {finishing && (
         <MissionFinishDialog
+          missionId={finishing.id}
           onClose={() => setFinishing(null)}
           onFinish={(delivery) => finish(finishing, delivery)}
         />

@@ -25,6 +25,44 @@ pub(super) fn truncate(s: &str, max: usize) -> String {
     }
 }
 
+/// Quando o arquivo NASCEU (segundos), ou, se o sistema de arquivos não informa, quando foi modificado pela última vez.
+///
+/// O piso temporal da descoberta é "isto não pode ser a sessão desta aba porque já existia quando ela abriu". Com o `mtime` esse
+/// piso não separava nada: toda conversa que já existia e continuava sendo escrita (uma feita fora do app, no mesmo projeto, ou de
+/// outra aba) tinha `mtime` recente e passava. O nascimento sim: uma conversa antiga nasceu antes de a aba abrir.
+pub(super) fn birth_secs(path: &Path) -> Option<i64> {
+    let meta = fs::metadata(path).ok()?;
+    let born = meta.created().or_else(|_| meta.modified()).ok()?;
+    Some(born.duration_since(UNIX_EPOCH).ok()?.as_secs() as i64)
+}
+
+std::thread_local! {
+    /// Ids de sessão que a descoberta em curso NÃO pode devolver: já são de outras abas abertas.
+    static EXCLUDED_SESSION_IDS: std::cell::RefCell<Vec<String>> = const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// Enquanto vive, [`is_excluded`] responde por estes ids (só nesta thread). A descoberta o cria e ele se desfaz sozinho.
+pub(super) struct ExcludeGuard;
+
+impl ExcludeGuard {
+    pub(super) fn set(ids: &[String]) -> Self {
+        EXCLUDED_SESSION_IDS.with(|cell| *cell.borrow_mut() = ids.to_vec());
+        ExcludeGuard
+    }
+}
+
+impl Drop for ExcludeGuard {
+    fn drop(&mut self) {
+        EXCLUDED_SESSION_IDS.with(|cell| cell.borrow_mut().clear());
+    }
+}
+
+/// Esta sessão já é de outra aba? Dois agentes iguais na mesma pasta é o caso comum: sem isto, a segunda aba adotava a conversa
+/// da primeira.
+pub(super) fn is_excluded(id: &str) -> bool {
+    EXCLUDED_SESSION_IDS.with(|cell| cell.borrow().iter().any(|taken| taken == id))
+}
+
 pub(super) fn mtime_secs(path: &Path) -> Option<i64> {
     let meta = fs::metadata(path).ok()?;
     let modified = meta.modified().ok()?;
@@ -54,8 +92,8 @@ pub(super) fn newest_matching(
             let mtime = mtime_secs(p)?;
             if let Some(after) = after {
                 // ">=" y no ">": el timestamp tiene resolución de 1s, así que un archivo
-                // creado en el mismo segundo en que arrancó el proceso es válido.
-                if mtime < after {
+                // creado en el mismo segundo en que arrancó el proceso es válido. Con piso, vale el NACIMENTO (ver `birth_secs`).
+                if birth_secs(p)? < after {
                     return None;
                 }
             }
@@ -74,6 +112,12 @@ pub(super) fn newest_matching(
         scored.retain(|(_, _, m)| *m);
     }
 
+    if after.is_some() {
+        // Com piso, a aba procura a sessão que NASCEU depois de abrir: a primeira a aparecer é a dela, e uma conversa de fora que
+        // nasceu depois é a mais nova, não a dela.
+        scored.sort_by_key(|(p, mtime, _)| (birth_secs(p).unwrap_or(i64::MAX), std::cmp::Reverse(*mtime)));
+        return scored.into_iter().next().map(|(p, _, _)| p);
+    }
     scored.sort_by_key(|(_, mtime, _)| *mtime);
     scored.pop().map(|(p, _, _)| p)
 }
@@ -101,19 +145,25 @@ pub(super) fn newest_where(
     after: Option<i64>,
     keep: impl Fn(&Path) -> bool,
 ) -> Option<PathBuf> {
-    candidates
+    let mut found: Vec<(PathBuf, i64, i64)> = candidates
         .iter()
         .filter_map(|p| {
             let mtime = mtime_secs(p)?;
-            // ">=" y no ">" por el mismo motivo que en `newest_matching`: el mtime tiene
-            // resolución de 1s y el archivo puede nacer en el mismo segundo del arranque.
-            if after.is_some_and(|a| mtime < a) {
+            let born = birth_secs(p)?;
+            // ">=" y no ">" por el mismo motivo que en `newest_matching`: el archivo puede nacer en el mismo segundo del
+            // arranque. Con piso, vale el nascimento, não o `mtime` (ver `birth_secs`).
+            if after.is_some_and(|a| born < a) {
                 return None;
             }
-            keep(p).then(|| (p.clone(), mtime))
+            keep(p).then(|| (p.clone(), mtime, born))
         })
-        .max_by_key(|(_, mtime)| *mtime)
-        .map(|(p, _)| p)
+        .collect();
+    if after.is_some() {
+        // Com piso, a mais antiga das que nasceram depois de a aba abrir (ver `newest_matching`).
+        found.sort_by_key(|(_, mtime, born)| (*born, std::cmp::Reverse(*mtime)));
+        return found.into_iter().next().map(|(p, _, _)| p);
+    }
+    found.into_iter().max_by_key(|(_, mtime, _)| *mtime).map(|(p, _, _)| p)
 }
 
 pub(super) fn find_string_field(path: &Path, candidates: &[&str]) -> Option<String> {
@@ -184,6 +234,25 @@ const NOISE_TAGS: &[&str] = &[
 /// Cuántos mensajes del usuario se miran, como mucho, buscando uno que sirva de título.
 const TITLE_SCAN_LIMIT: usize = 30;
 
+/// Um aviso que o próprio ADE colou na conversa (`[ADE AGS] NAVEGADOR: …`, `[ADE AGS] Você é um subagente…`, o
+/// `[AGS] …` das missões). Chega como mensagem do usuário, mas não é o assunto da conversa: abrindo um agente, era
+/// a primeira mensagem e virava o título.
+pub(super) fn is_ade_notice(text: &str) -> bool {
+    let t = text.trim_start();
+    t.starts_with("[ADE AGS]") || t.starts_with("[AGS]")
+}
+
+/// Um título que a TUI gerou SOZINHA a partir de um aviso do ADE (o Claude e o OpenCode resumem a primeira
+/// mensagem: "Navegador ags portal no canvas"). Só frases que saem dos avisos, não o nome do app — quem trabalha
+/// no próprio ADE AGS escreve "ADE AGS" no título de verdade.
+pub(super) fn echoes_ade_notice(title: &str) -> bool {
+    let t = title.to_lowercase();
+    is_ade_notice(title)
+        || ["ags portal", "navegador ags", "subagente deste time", "orquestrador deste canvas", "[ade ags]"]
+            .iter()
+            .any(|marker| t.contains(marker))
+}
+
 /// `true` si el mensaje es un envoltorio del sistema y no algo que escribió la persona.
 /// `<pasted_content` también cuenta: `clean_message` lo desenvuelve antes de decidir.
 pub(super) fn is_noise_message(text: &str) -> bool {
@@ -192,6 +261,7 @@ pub(super) fn is_noise_message(text: &str) -> bool {
         || t.starts_with("Caveat:")
         || t.starts_with("[Request interrupted")
         || t.starts_with("<pasted_content")
+        || is_ade_notice(t)
     {
         return true;
     }
@@ -230,7 +300,7 @@ pub(super) fn clean_message(text: &str) -> Option<String> {
 /// una sesión ya guardada merece recalcularse.
 pub fn is_weak_title(title: &str, agent_label: &str) -> bool {
     let t = title.trim();
-    if t.is_empty() || t.starts_with('<') || is_noise_message(t) {
+    if t.is_empty() || t.starts_with('<') || is_noise_message(t) || echoes_ade_notice(t) {
         return true;
     }
     if t == agent_label.trim() {
@@ -274,7 +344,7 @@ pub(super) fn claude_project_slug(cwd: &str) -> String {
 /// Con una cuenta alternativa, TODO lo de Claude Code vive ahí adentro — incluidos los
 /// transcripts — así que buscar en `~/.claude` daría siempre "sin sesión": ni título ni
 /// resume. `None` = la cuenta del sistema.
-pub(super) fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
+pub(crate) fn claude_project_dir(cwd: &str, profile: Option<&Path>) -> PathBuf {
     let root = match profile {
         Some(dir) => dir.to_path_buf(),
         None => dirs::home_dir().unwrap_or_default().join(".claude"),
@@ -325,45 +395,117 @@ pub(super) fn claude_session_file(
 ) -> Option<PathBuf> {
     let dir = claude_project_dir(cwd, profile);
     if let Some(id) = session_id {
+        // Com um id conhecido, só o arquivo desse id. Cair para «o mais novo da pasta» devolvia a conversa de OUTRA pessoa quando a
+        // da aba ainda não tinha arquivo (uma aba com o id escolhido pela app, antes da primeira mensagem), e o título e a
+        // exportação saíam dela.
         let direct = dir.join(format!("{id}.jsonl"));
-        if direct.exists() {
-            return Some(direct);
-        }
+        return direct.exists().then_some(direct);
     }
     let mut files = Vec::new();
     collect_files(&dir, "jsonl", &mut files);
+    if after.is_some() {
+        files.retain(|p| !p.file_stem().is_some_and(|s| is_excluded(&s.to_string_lossy())));
+    }
     newest_matching(&files, after, None)
 }
 
-pub(super) fn claude_title(path: &Path, fallback: &str) -> SessionTitleResult {
-    let Ok(content) = fs::read_to_string(path) else { return fallback_result(fallback) };
-    let mut first_user_msg: Option<String> = None;
-    let mut user_msgs_seen = 0usize;
+/// O que já se leu de um transcript do Claude: até onde (`offset`, sempre no fim de uma linha) e o
+/// que se achou. O título é o primeiro `summary` do arquivo, ou a primeira mensagem do usuário; as
+/// linhas novas só podem trazer um `summary`, então dá para continuar de onde parou.
+#[derive(Clone, Default)]
+struct ClaudeScan {
+    offset: u64,
+    summary: Option<String>,
+    first_user: Option<String>,
+    users_seen: usize,
+}
 
-    for line in content.lines() {
-        let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
+fn claude_scan_cache() -> &'static std::sync::Mutex<std::collections::HashMap<PathBuf, ClaudeScan>> {
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, ClaudeScan>>> = std::sync::OnceLock::new();
+    CACHE.get_or_init(Default::default)
+}
+
+/// Continua a leitura de `scan` do ponto em que parou. Uma linha sem `\n` no fim (o agente ainda
+/// escrevendo) fica para a próxima vez.
+fn claude_scan_from(path: &Path, mut scan: ClaudeScan) -> Option<ClaudeScan> {
+    use std::io::{Seek, SeekFrom};
+    let mut file = fs::File::open(path).ok()?;
+    file.seek(SeekFrom::Start(scan.offset)).ok()?;
+    let mut reader = BufReader::new(file);
+    let mut line = Vec::new();
+    loop {
+        line.clear();
+        let read = reader.read_until(b'\n', &mut line).ok()?;
+        if read == 0 || line.last() != Some(&b'\n') {
+            break;
+        }
+        scan.offset += read as u64;
+        let Ok(v) = serde_json::from_slice::<Value>(&line) else { continue };
         if v.get("type").and_then(|t| t.as_str()) == Some("summary") {
-            if let Some(s) = v.get("summary").and_then(|s| s.as_str()) {
-                return SessionTitleResult { title: truncate(s, 60), source: "summary".into() };
+            // Um resumo feito a partir de um aviso do ADE não serve: segue procurando (outro resumo ou a 1ª mensagem).
+            if let Some(s) = v.get("summary").and_then(|s| s.as_str()).filter(|s| !echoes_ade_notice(s)) {
+                scan.summary = Some(s.to_string());
+                break;
             }
         }
-        if first_user_msg.is_none()
-            && user_msgs_seen < TITLE_SCAN_LIMIT
+        if scan.first_user.is_none()
+            && scan.users_seen < TITLE_SCAN_LIMIT
             && v.get("type").and_then(|t| t.as_str()) == Some("user")
         {
-            user_msgs_seen += 1;
-            first_user_msg = v
+            scan.users_seen += 1;
+            scan.first_user = v
                 .get("message")
                 .and_then(|m| m.get("content"))
                 .and_then(extract_text_block)
                 .and_then(|t| clean_message(&t));
         }
     }
+    Some(scan)
+}
 
-    match first_user_msg {
+/// O título de um transcript do Claude. Antes cada chamada lia o arquivo inteiro (`read_to_string`)
+/// e a lista de conversas chamava a cada 20 s por aba aberta, relendo transcripts de vários MB (o
+/// maior, 143 MB). Agora lê só o que o arquivo cresceu desde a última vez; com `summary` achado,
+/// nem abre o arquivo.
+pub(super) fn claude_title(path: &Path, fallback: &str) -> SessionTitleResult {
+    let len = fs::metadata(path).map(|m| m.len()).unwrap_or(0);
+    let cached = claude_scan_cache().lock().ok().and_then(|c| c.get(path).cloned());
+    let scan = match cached {
+        Some(scan) if scan.summary.is_some() && len >= scan.offset => Some(scan),
+        // Arquivo menor que o lido: foi reescrito. Recomeça.
+        Some(scan) if len >= scan.offset => claude_scan_from(path, scan),
+        _ => claude_scan_from(path, ClaudeScan::default()),
+    };
+    let Some(scan) = scan else { return fallback_result(fallback) };
+    if let Ok(mut cache) = claude_scan_cache().lock() {
+        cache.insert(path.to_path_buf(), scan.clone());
+    }
+    if let Some(s) = &scan.summary {
+        return SessionTitleResult { title: truncate(s, 60), source: "summary".into() };
+    }
+    match scan.first_user {
         Some(m) => SessionTitleResult { title: truncate(&m, 60), source: "first_message".into() },
         None => fallback_result(fallback),
     }
+}
+
+/// Os títulos de Gemini e Codex, recalculados só quando o arquivo muda (tamanho ou mtime).
+fn cached_title(path: &Path, fallback: &str, compute: impl FnOnce() -> SessionTitleResult) -> SessionTitleResult {
+    type Key = (u64, Option<std::time::SystemTime>, String);
+    static CACHE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashMap<PathBuf, (Key, SessionTitleResult)>>> = std::sync::OnceLock::new();
+    let cache = CACHE.get_or_init(Default::default);
+    let meta = fs::metadata(path).ok();
+    let key: Key = (meta.as_ref().map(|m| m.len()).unwrap_or(0), meta.and_then(|m| m.modified().ok()), fallback.to_string());
+    if let Some((k, result)) = cache.lock().ok().and_then(|c| c.get(path).cloned()) {
+        if k == key {
+            return result;
+        }
+    }
+    let result = compute();
+    if let Ok(mut c) = cache.lock() {
+        c.insert(path.to_path_buf(), (key, result.clone()));
+    }
+    result
 }
 
 // ── Gemini CLI: ~/.gemini/tmp/<slug>/chats/session-*.jsonl ───────────────
@@ -479,7 +621,10 @@ pub(super) fn gemini_session_file(cwd: &str, after: Option<i64>, profile: Option
 pub(super) fn gemini_session_file_in(home: &Path, cwd: &str, after: Option<i64>) -> Option<PathBuf> {
     let files = gemini_chat_files(home, cwd);
     if !files.is_empty() {
-        return newest_where(&files, after, gemini_is_main_session);
+        return newest_where(&files, after, |p| {
+            gemini_is_main_session(p)
+                && !(after.is_some() && gemini_meta(p).and_then(|m| m.session_id).is_some_and(|id| is_excluded(&id)))
+        });
     }
 
     // No se pudo ubicar la carpeta del proyecto (instalación vieja con carpetas por hash,
@@ -505,7 +650,8 @@ pub(super) fn gemini_title(path: &Path, fallback: &str) -> SessionTitleResult {
     for line in content.lines() {
         let Ok(v) = serde_json::from_str::<Value>(line) else { continue };
         let summary = v.get("summary").and_then(|s| s.as_str())
-            .or_else(|| v.get("$set").and_then(|s| s.get("summary")).and_then(|s| s.as_str()));
+            .or_else(|| v.get("$set").and_then(|s| s.get("summary")).and_then(|s| s.as_str()))
+            .filter(|s| !echoes_ade_notice(s));
         if let Some(s) = summary {
             return SessionTitleResult { title: truncate(s, 60), source: "summary".into() };
         }
@@ -550,7 +696,7 @@ pub(super) fn gemini_title(path: &Path, fallback: &str) -> SessionTitleResult {
 // session id de OTRO proyecto y reanudar la conversación equivocada. Comparar `payload.cwd`
 // como ruta, y no como substring, elimina las dos cosas.
 
-pub(super) fn codex_root(profile: Option<&Path>) -> PathBuf {
+pub(crate) fn codex_root(profile: Option<&Path>) -> PathBuf {
     if let Some(dir) = profile {
         return dir.join("sessions");
     }
@@ -606,9 +752,9 @@ pub(super) fn codex_session_file(cwd: &str, after: Option<i64>, profile: Option<
 
 pub(super) fn codex_session_file_in(root: &Path, cwd: &str, after: Option<i64>) -> Option<PathBuf> {
     let files = codex_rollouts_in(root);
-    if let Some(found) =
-        newest_where(&files, after, |p| codex_meta(p).is_some_and(|m| m.cwd == Path::new(cwd)))
-    {
+    if let Some(found) = newest_where(&files, after, |p| {
+        codex_meta(p).is_some_and(|m| m.cwd == Path::new(cwd) && !(after.is_some() && m.id.as_deref().is_some_and(is_excluded)))
+    }) {
         return Some(found);
     }
 
@@ -798,11 +944,14 @@ pub(super) fn opencode_sessions(cwd: &str, profile: Option<&Path>) -> Vec<Openco
 /// Sesión más reciente del cwd, opcionalmente creada después de `after` (en segundos).
 pub(super) fn opencode_session(cwd: &str, after: Option<i64>, profile: Option<&Path>) -> Option<OpencodeSession> {
     let sessions = opencode_sessions(cwd, profile);
-    let found = sessions.into_iter().find(|s| match after {
+    let mut candidates = sessions.into_iter().filter(|s| match after {
         // `created` viene en MILISEGUNDOS; el resto del módulo trabaja en segundos.
-        Some(t) => s.created / 1000 >= t - OPENCODE_CLOCK_SKEW_S,
+        Some(t) => s.created / 1000 >= t - OPENCODE_CLOCK_SKEW_S && !is_excluded(&s.id),
         None => true,
     });
+    // `opencode_sessions` ordena da mais nova para a mais velha. Com piso, a aba procura a que nasceu logo depois de abrir (a mais
+    // velha das candidatas); sem piso, a mais recente do cwd.
+    let found = if after.is_some() { candidates.last() } else { candidates.next() };
     if found.is_none() {
         if let Some(t) = after {
             eprintln!("[opencode] ninguna sesión de {cwd} creada después de {t}");
@@ -913,6 +1062,9 @@ pub(super) fn kimi_session_dir_in(root: &Path, cwd: Option<&str>, after: Option<
         kimi_session_dirs_in(root).into_iter().map(|d| d.join("state.json")).collect();
 
     let matches_cwd = |state_path: &Path| -> bool {
+        if after.is_some() && state_path.parent().and_then(kimi_session_id).is_some_and(|id| is_excluded(&id)) {
+            return false;
+        }
         let Some(cwd) = cwd else { return true };
         match kimi_state(state_path.parent().unwrap_or(state_path)).as_ref().and_then(kimi_declared_cwd) {
             Some(declared) => declared == Path::new(cwd),
@@ -945,7 +1097,7 @@ pub(super) fn kimi_title(dir: &Path, fallback: &str) -> SessionTitleResult {
     let Some(state) = kimi_state(dir) else { return fallback_result(fallback) };
 
     if let Some(s) = state.get("title").and_then(|v| v.as_str()) {
-        if !s.trim().is_empty() {
+        if !s.trim().is_empty() && !echoes_ade_notice(s) {
             return SessionTitleResult { title: truncate(s, 60), source: "summary".into() };
         }
     }
@@ -960,6 +1112,115 @@ pub(super) fn kimi_title(dir: &Path, fallback: &str) -> SessionTitleResult {
 
 /// Archivo de sesión más reciente de una TUI custom: el más nuevo bajo la carpeta que el
 /// usuario declaró, buscando tanto `.jsonl` como `.json` (las dos formas que usan los CLIs
+// ── Hermes Agent ──────────────────────────────────────────────────────────────────────────────────────────────
+//
+// As sessões vivem no SQLite `<home>/state.db` (tabela `sessions`: `id`, `source`, `cwd`, `started_at` em segundos com
+// fração, `title`; tabela `messages`: `session_id`, `role`, `content`). O home é `HERMES_HOME`, ou `%LOCALAPPDATA%\hermes` no
+// Windows e `~/.hermes` no resto (o próprio Hermes cita `~/AppData/Local/hermes/config.yaml` na ajuda do Windows).
+
+/// Origens de sessão que nascem de um terminal (a da aba). `desktop`, `acp`, `oneshot`, `subagent`, gateways: nunca.
+const HERMES_TERMINAL_SOURCES: [&str; 2] = ["cli", "tui"];
+
+pub(super) fn hermes_home(profile: Option<&Path>) -> PathBuf {
+    if let Some(dir) = profile {
+        return dir.to_path_buf();
+    }
+    if let Some(home) = std::env::var_os("HERMES_HOME").filter(|v| !v.is_empty()) {
+        return PathBuf::from(home);
+    }
+    if cfg!(windows) {
+        if let Some(local) = std::env::var_os("LOCALAPPDATA").filter(|v| !v.is_empty()) {
+            return PathBuf::from(local).join("hermes");
+        }
+    }
+    dirs::home_dir().unwrap_or_default().join(".hermes")
+}
+
+/// O banco do Hermes só para leitura (ele é quem escreve). `None` = sem banco ainda.
+fn hermes_db(home: &Path) -> Option<rusqlite::Connection> {
+    let path = home.join("state.db");
+    if !path.exists() {
+        return None;
+    }
+    let flags = rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX;
+    let conn = rusqlite::Connection::open_with_flags(&path, flags).ok()?;
+    let _ = conn.busy_timeout(std::time::Duration::from_millis(500));
+    Some(conn)
+}
+
+/// A mesma pasta, como o Hermes a gravou: no Windows sem diferença de maiúsculas nem de separador, e sem a barra final. Pura.
+pub(super) fn hermes_same_dir(a: &str, b: &str) -> bool {
+    let norm = |p: &str| {
+        let p = p.trim().trim_end_matches(['/', '\\']).to_string();
+        if cfg!(windows) { p.replace('/', "\\").to_lowercase() } else { p }
+    };
+    norm(a) == norm(b)
+}
+
+/// A sessão de terminal do Hermes neste cwd. Com `after` (a abertura da aba, em segundos), a PRIMEIRA que nasceu depois e que
+/// não é de outra aba (`is_excluded`); sem `after`, a mais recente do cwd.
+pub(super) fn hermes_session_id(home: &Path, cwd: &str, after: Option<i64>) -> Option<String> {
+    let conn = hermes_db(home)?;
+    let mut stmt = conn
+        .prepare("SELECT id, cwd, started_at, source FROM sessions WHERE cwd IS NOT NULL ORDER BY started_at DESC LIMIT 400")
+        .ok()?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, f64>(2)?, r.get::<_, Option<String>>(3)?))
+        })
+        .ok()?;
+    let mut found: Vec<(String, f64)> = rows
+        .flatten()
+        .filter(|(_, dir, _, source)| {
+            hermes_same_dir(dir, cwd) && source.as_deref().is_some_and(|s| HERMES_TERMINAL_SOURCES.contains(&s))
+        })
+        .map(|(id, _, started, _)| (id, started))
+        .collect();
+    match after {
+        Some(after) => {
+            found.retain(|(id, started)| *started as i64 >= after && !is_excluded(id));
+            found.sort_by(|a, b| a.1.total_cmp(&b.1));
+            found.into_iter().next().map(|(id, _)| id)
+        }
+        None => found.into_iter().next().map(|(id, _)| id),
+    }
+}
+
+/// As primeiras mensagens do usuário de uma sessão, como texto. `None` = sem banco ou sessão.
+pub(super) fn hermes_user_texts(home: &Path, session_id: &str) -> Option<Vec<String>> {
+    let conn = hermes_db(home)?;
+    let mut stmt = conn
+        .prepare("SELECT content FROM messages WHERE session_id = ?1 AND role = 'user' ORDER BY id LIMIT 8")
+        .ok()?;
+    let rows = stmt.query_map([session_id], |r| r.get::<_, Option<String>>(0)).ok()?;
+    Some(
+        rows.flatten()
+            .flatten()
+            .filter_map(|content| match serde_json::from_str::<Value>(&content) {
+                // Conteúdo multimodal vem como lista de partes em JSON; texto puro, como string.
+                Ok(value @ Value::Array(_)) => extract_text_block(&value),
+                _ => Some(content),
+            })
+            .collect(),
+    )
+}
+
+/// O título de uma sessão do Hermes: o que ele mesmo deu (`title`), senão a primeira mensagem do usuário.
+pub(super) fn hermes_title(home: &Path, session_id: &str, fallback: &str) -> SessionTitleResult {
+    let named = hermes_db(home).and_then(|conn| {
+        conn.query_row("SELECT title FROM sessions WHERE id = ?1", [session_id], |r| r.get::<_, Option<String>>(0))
+            .ok()
+            .flatten()
+    });
+    if let Some(title) = named.map(|t| t.trim().to_string()).filter(|t| !t.is_empty() && !echoes_ade_notice(t)) {
+        return SessionTitleResult { title: truncate(&title, 80), source: "summary".to_string() };
+    }
+    hermes_user_texts(home, session_id)
+        .and_then(|texts| texts.into_iter().find_map(|t| clean_message(&t)))
+        .map(|first| SessionTitleResult { title: truncate(&first, 80), source: "first_message".to_string() })
+        .unwrap_or_else(|| fallback_result(fallback))
+}
+
 /// conocidos). A diferencia de las TUIs de fábrica no se filtra por cwd — no hay forma
 /// genérica de saber cómo esa TUI mapea un proyecto a una carpeta — así que el filtro por
 /// `after` (el momento en que arrancó ESTE proceso) es lo único que evita agarrar la
@@ -969,6 +1230,9 @@ pub(super) fn custom_session_file(agent: &crate::agents::CustomAgent, after: Opt
     let mut files = Vec::new();
     collect_files(&root, "jsonl", &mut files);
     collect_files(&root, "json", &mut files);
+    if after.is_some() {
+        files.retain(|p| !custom_session_id(agent, p).is_some_and(|id| is_excluded(&id)));
+    }
     newest_matching(&files, after, None)
 }
 
@@ -1052,6 +1316,8 @@ pub fn session_file_for(
         // OpenCode no expone un archivo de sesión legible; su transcripción se pide con
         // `opencode export <id>` y la maneja `export::opencode_transcript` aparte.
         SessionSource::ProcessQuery => None,
+        // Hermes: a conversa está no SQLite dele, não num arquivo por sessão.
+        SessionSource::HermesState => None,
         // Kimi guarda la conversación en el wire del agente principal, no en un archivo
         // por sesión: se resuelve primero la carpeta y de ahí se baja al `wire.jsonl`.
         SessionSource::KimiSessions => {
@@ -1095,6 +1361,8 @@ pub async fn discover_session_id(
     // Cuenta con la que corre la tab, si no es la del sistema. Se recibe el id y no la
     // ruta: la cuenta puede haberse mudado desde que la tab se guardó.
     account_id: Option<String>,
+    // Sessões que já são de outras abas abertas: a descoberta não as devolve.
+    exclude: Option<Vec<String>>,
     db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<Option<String>, String> {
     let db = (*db).clone();
@@ -1107,6 +1375,7 @@ pub async fn discover_session_id(
             started_after,
             profile.as_deref().map(Path::new),
             custom.as_ref(),
+            exclude.as_deref().unwrap_or(&[]),
         )
     })
     .await
@@ -1134,7 +1403,10 @@ pub(crate) fn discover_session_id_sync(
     started_after: i64,
     profile: Option<&Path>,
     custom: Option<&crate::agents::CustomAgent>,
+    exclude: &[String],
 ) -> Option<String> {
+    // `exclude`: as sessões que já são de outras abas abertas (ver `is_excluded`).
+    let _guard = ExcludeGuard::set(exclude);
     discover_unchecked(agent_id, cwd, started_after, profile, custom).filter(|id| is_safe_session_id(id))
 }
 
@@ -1179,6 +1451,7 @@ fn discover_unchecked(
             let dir = kimi_session_dir(Some(&cwd), Some(started_after), profile)?;
             kimi_session_id(&dir)
         }
+        SessionSource::HermesState => hermes_session_id(&hermes_home(profile), &cwd, Some(started_after)),
         // TUI custom: solo si el usuario declaró dónde guarda sus sesiones.
         SessionSource::None => {
             let agent = custom?;
@@ -1235,6 +1508,13 @@ pub(crate) fn get_session_title_sync(
             Some(path) => claude_title(&path, &fallback),
             None => fallback_result(&fallback),
         },
+        SessionSource::HermesState => {
+            let home = hermes_home(profile);
+            match session_id.or_else(|| hermes_session_id(&home, &cwd, None)) {
+                Some(id) => hermes_title(&home, &id, &fallback),
+                None => fallback_result(&fallback),
+            }
+        }
         SessionSource::GeminiTmp => {
             let home = gemini_home(profile);
             let found = match session_id.as_deref() {
@@ -1242,7 +1522,7 @@ pub(crate) fn get_session_title_sync(
                 None => gemini_session_file_in(&home, &cwd, None),
             };
             match found {
-                Some(path) => gemini_title(&path, &fallback),
+                Some(path) => cached_title(&path, &fallback, || gemini_title(&path, &fallback)),
                 None => fallback_result(&fallback),
             }
         }
@@ -1252,7 +1532,7 @@ pub(crate) fn get_session_title_sync(
                 None => codex_session_file(&cwd, None, profile),
             };
             match found {
-                Some(path) => codex_title(&path, &fallback),
+                Some(path) => cached_title(&path, &fallback, || codex_title(&path, &fallback)),
                 None => fallback_result(&fallback),
             }
         }
@@ -1274,7 +1554,7 @@ pub(crate) fn get_session_title_sync(
                 None => opencode_session(&cwd, None, profile),
             };
             match found {
-                Some(s) if !s.title.trim().is_empty() && !opencode_is_placeholder_title(&s.title) => {
+                Some(s) if !s.title.trim().is_empty() && !opencode_is_placeholder_title(&s.title) && !echoes_ade_notice(&s.title) => {
                     SessionTitleResult { title: truncate(&s.title, 60), source: "summary".into() }
                 }
                 _ => fallback_result(&fallback),
@@ -1414,6 +1694,10 @@ pub fn session_activity(
             Some(activity_of(texts.iter().map(String::as_str)))
         }
         SessionSource::ProcessQuery => None,
+        SessionSource::HermesState => {
+            let texts = hermes_user_texts(&hermes_home(profile), session_id)?;
+            Some(activity_of(texts.iter().map(String::as_str)))
+        }
         // Kimi no tiene un formato de wire verificado acá: se mide solo con `lastPrompt`. Si
         // ese prompt no sirve, no se afirma "vacía": queda sin medir.
         SessionSource::KimiSessions => {

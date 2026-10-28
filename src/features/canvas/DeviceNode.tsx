@@ -4,7 +4,8 @@ import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { NodeResizer, Position } from "@xyflow/react";
 import { CordPort } from "./cords";
-import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
+import { Button, CloseIcon } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { PHONE_MIN, type CanvasPortal } from "./board";
 import { NOTE_HEADER_H } from "./geometry";

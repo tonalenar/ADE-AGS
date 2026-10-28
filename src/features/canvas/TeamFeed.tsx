@@ -6,7 +6,7 @@ import { listen } from "@tauri-apps/api/event";
 import { PermissionCard } from "@/features/runs/PermissionCard";
 import { useRunsStore } from "@/features/runs/store";
 import { useMissionsStore } from "@/features/missions/store";
-import { ChatMarkdown } from "./ChatMarkdown";
+import { ChatMarkdown } from "./LazyChatMarkdown";
 import { dateLocale } from "@/i18n/dateLocale";
 import { buildFeed, feedFilterOptions, filterFeed, formatMessageText, parseVigiaText, isContinuation, isVigiaMessage, mergeMessages, needsCollapse, type FeedFilter, type FeedItem, type TeamMessage, type TerminalPromptItem, type UserNote } from "./teamFeedModel";
 import { answerTerminalPrompt } from "./useTerminalPrompts";
@@ -255,6 +255,7 @@ export function TeamFeed({ items, colors = {} }: {
             <Avatar name={m.toName} color={colors[m.toTabId]} />
             <span title={m.toName} className="max-w-[34%] truncate text-gray-600 dark:text-white/65">{m.toName}</span>
             {m.kind === "ask" && <span className="shrink-0 rounded-full bg-violet-500/15 px-1.5 text-[10px] font-medium leading-4 text-violet-600 dark:text-violet-300">{t("canvas.team.ask")}</span>}
+            {m.kind === "handoff" && <span className="shrink-0 rounded-full bg-emerald-500/15 px-1.5 text-[10px] font-medium leading-4 text-emerald-600 dark:text-emerald-300">{t("canvas.team.handoff")}</span>}
             <span className="ml-auto font-mono text-[11px] tabular-nums text-gray-400 dark:text-white/35">{clock(m.atMs)}</span>
           </div>
         )}

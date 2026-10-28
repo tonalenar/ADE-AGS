@@ -8,19 +8,23 @@ import {
   type Edge, type EdgeChange, type Node, type NodeChange, type NodeProps, type Connection,
 } from "@xyflow/react";
 import { invoke } from "@tauri-apps/api/core";
-import { AlertaToast, Button, CloseIcon, useTheme } from "neogestify-ui-components";
+import { Button, CloseIcon, useTheme } from "neogestify-ui-components";
+import { DEFAULT_DEVICE, DEVICE_SCALE, deviceById, deviceNodeSize, deviceScaleOf, stepDeviceScale, type DeviceSpec } from "@/features/browser/devices";
+import { DeviceFloatBar, PhoneModeIcon } from "./DeviceFloatBar";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useTabsStore } from "@/features/tabs/store";
-import { openNewAgentWizard } from "@/features/tabs/tabActions";
+import { agentKey } from "@/features/tabs/layout/layoutTree";
+import { openNewAgentWizard, requestCloseItem } from "@/features/tabs/tabActions";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import type { BrowserView } from "@/features/tabs/viewTabs";
 import type { Tab } from "@/features/tabs/types";
 import { screenOf, sendWhenReady } from "@/features/terminal/terminalRegistry";
-import { forgetOrchestrator, orchestratorNotice, shouldAnnounce } from "./orchestratorNotice";
+import { announceToOrchestrators } from "./orchestratorAnnounce";
 import { portalConnectedNotice } from "./portalNotice";
 
 import { isHiddenNote, shownNote, stackMembers,
-  NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isFreeNodeId, neighbors, thin, type CanvasNote, type CanvasPortal, type Stroke,
+  AGENT_PORTAL_SIZE, NOTE_MIN, PORTAL_MIN, boxOf, emptyBoard, isFreeNodeId, neighbors, thin, type CanvasNote, type CanvasPortal, type Stroke,
 } from "./board";
 import { CanvasToolbar, type DrawStyle, type Tool } from "./CanvasToolbar";
 import { boxFromDrag, defaultSize as defaultPlaceSize, isDrag, loadSizes, rememberSize, sizeLabel, type PlaceKind, type Point, type Size } from "./placeBox";
@@ -33,7 +37,7 @@ import { focusGeminiViewport, geminiCanvasRect } from "@/features/desktopApps/ge
 import { FolderNode, baseName, type FolderFlowNode } from "./FolderNode";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
 import {
-  HEADER_H, NOTE_HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, facingSides, focusViewport, intersects, isLive, safeViewport, terminalRect,
+  HEADER_H, NOTE_HEADER_H, MAX_ZOOM, MIN_ZOOM, NODE_MIN, PHOTO_MAX_ZOOM, facingSides, focusViewport, intersects, isLive, revealViewport, safeViewport, terminalRect,
   type Box, type Rect, type Viewport,
 } from "./geometry";
 import { CanvasDock, type DockPanel } from "./CanvasDock";
@@ -42,6 +46,7 @@ import { PetCard, usePetStatus } from "@/shared/brand/Pet";
 import { ChatPanel } from "./ChatPanel";
 import { agentAccent, agentTile, nodeFrame } from "@/features/agents/agentTile";
 import { activeTabIds } from "@/features/terminal/activity";
+import { PeerQueueBadge } from "@/features/peerQueue/PeerQueueBadge";
 import { CORD_MAGNET, CordConnectionLine, CordEdge, CordPort, cordColor, flashNode } from "./cords";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { DesignPanel } from "./design/DesignPanel";
@@ -60,21 +65,10 @@ import { RoutinesPanel } from "./RoutinesPanel";
 import { RoleEditDialog } from "./RoleEditDialog";
 import { applyTabRole } from "./applyRole";
 import type { AgentRoleChoice } from "./agentRole";
-import { boardKeyOfTab, canvasActions, missionOfKey, useActiveBoardKey, useCanvasStore } from "./store";
+import { boardKeyOfTab, canvasActions, compareOfKey, missionOfKey, useActiveBoardKey, useCanvasStore } from "./store";
+import { ComparisonBar } from "@/features/compare/ComparisonBar";
+import { openCompareDialog } from "@/features/compare/store";
 import { cleanPreviewLines } from "./previewText";
-
-/** Conta ao orquestrador quem está ligado a ele (só quando a lista de ligados muda). */
-function announceToOrchestrators(key: string, ids: string[]): void {
-  const board = useCanvasStore.getState().boards[key];
-  if (!board) return;
-  const tabs = useTabsStore.getState().tabs;
-  for (const id of ids) {
-    if (!board.orchestrators.includes(id)) { forgetOrchestrator(id); continue; }
-    if (!shouldAnnounce(board, id)) continue;
-    const text = orchestratorNotice(board, tabs, id);
-    if (text) sendWhenReady(id, text);
-  }
-}
 
 /** Avisa o agente quando a pessoa liga uma corda entre ele e um navegador do canvas. */
 function announcePortal(key: string, a: string, b: string): void {
@@ -92,6 +86,8 @@ interface AgentNodeData extends Record<string, unknown> {
   role?: string;
   subagent: boolean;
   onFocus: (tabId: string) => void;
+  /** Fecha o terminal (e o nó) direto do canvas. */
+  onClose: (tabId: string) => void;
   onToggleOrchestrator: (tabId: string) => void;
   /** A pessoa mudou o que o terminal é (função e subagente). */
   onSetRole: (tabId: string, choice: AgentRoleChoice) => void;
@@ -253,6 +249,27 @@ function CanvasInner() {
     rf.setViewport(focusViewport(box, size.width, size.height), { duration: 220 });
   };
 
+  // O piloto do navegador precisa de uma foto do navegador INTEIRO: se o nó está cortado pela borda da tela, pede
+  // (`ags:canvas-reveal`) que a vista o mostre todo e, depois da foto, que volte a como estava.
+  useEffect(() => {
+    let saved: Viewport | null = null;
+    const onReveal = (event: Event) => {
+      const { id, restore, sharp } = (event as CustomEvent<{ id: string; restore?: boolean; sharp?: boolean }>).detail;
+      if (restore) {
+        if (saved) rf.setViewport(saved, { duration: 0 });
+        saved = null;
+        return;
+      }
+      const box = useCanvasStore.getState().boards[key ?? ""]?.portals[id]?.box;
+      const s = sizeRef.current;
+      if (!box || s.width === 0) return;
+      saved = saved ?? rf.getViewport();
+      rf.setViewport(revealViewport(box, s.width, s.height, undefined, sharp ? PHOTO_MAX_ZOOM : undefined), { duration: 0 });
+    };
+    window.addEventListener("ags:canvas-reveal", onReveal);
+    return () => window.removeEventListener("ags:canvas-reveal", onReveal);
+  }, [rf, key]);
+
   // Elegir un agente desde afuera (la tira de tabs, la paleta) lo trae a la vista si no se ve.
   const lastActive = useRef(activeTabId);
   useEffect(() => {
@@ -350,6 +367,7 @@ function CanvasInner() {
         role: board.roles[tab.id],
         subagent: board.subagents.includes(tab.id),
         onFocus: focusNode,
+        onClose: (id: string) => { void requestCloseItem(agentKey(id)); },
         onSetRole: (id: string, choice: AgentRoleChoice) => {
           if (!key) return;
           // O agente lê a nova função; os orquestradores ligados a ele recebem o aviso atualizado.
@@ -786,7 +804,9 @@ function CanvasInner() {
           onUseSize={() => { if (lastPlaced) setSizes((cur) => rememberSize(cur, lastPlaced.kind, lastPlaced.size)); setLastPlaced(null); }}
           onResetSize={() => { if (armed) setSizes((cur) => rememberSize(cur, armed, null)); }}
           onImage={() => fileInput.current?.click()}
-          onUndo={() => key && canvasActions.undoStroke(key)} canUndo={board.drawings.length > 0} />
+          onUndo={() => key && canvasActions.undoStroke(key)} canUndo={board.drawings.length > 0}
+          onCompare={() => openCompareDialog(allTabs.find((tab) => tab.id === activeTabId)?.cwd ?? "")} />
+        {compareOfKey(key) && <ComparisonBar comparisonId={compareOfKey(key)!} />}
         {panel === "routines" && <RoutinesPanel onClose={() => setPanel(null)} />}
         {panel === "design" && design.details.length > 0 && (
           <DesignPanel details={design.details} reload={design.reload} initial={designFocus} onClose={() => { setPanel(null); setDesignFocus(null); }} />
@@ -828,8 +848,15 @@ function CanvasInner() {
 
 const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlowNode>) {
   const { t } = useTranslation();
-  const { tab, box, live, links, orchestrator, role, subagent, onFocus, onToggleOrchestrator, onSetRole } = data;
+  const { tab, box, live, links, orchestrator, role, subagent, onFocus, onClose, onToggleOrchestrator, onSetRole } = data;
   const [editingRole, setEditingRole] = useState(false);
+  // Fechar um terminal derruba o agente: pede um segundo clique (e desarma sozinho se ninguém confirmar).
+  const [closeArmed, setCloseArmed] = useState(false);
+  useEffect(() => {
+    if (!closeArmed) return;
+    const timer = window.setTimeout(() => setCloseArmed(false), 4000);
+    return () => window.clearTimeout(timer);
+  }, [closeArmed]);
   const handle = "ade-port z-10! w-3! h-3! border-2! border-white! dark:border-surface! bg-gray-400! dark:bg-gray-200!";
 
   return (
@@ -882,6 +909,8 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
             <span className={`${PILL} max-w-32 truncate ${rolePill(role)}`} title={t("canvas.role", { role })}>{role}</span>
           ) : null}
           {subagent && <span className={`${PILL} bg-black/[0.06] text-gray-500 dark:bg-white/[0.08] dark:text-white/60`}>{t("role.subagentTag")}</span>}
+          {/* "N na fila": o que outros agentes mandaram e espera este terminar o turno. */}
+          <PeerQueueBadge tabId={tab.id} name={tab.title.split(" — ")[0]} variant="node" />
           {/* `nodrag`: sin esto el clic arrastraría el nodo en vez de apretar el botón. */}
           <Button variant="custom"
             onClick={() => onToggleOrchestrator(tab.id)}
@@ -904,6 +933,20 @@ const AgentNode = memo(function AgentNode({ data, selected }: NodeProps<AgentFlo
               text-gray-300 dark:text-white/20 hover:text-gray-600 dark:hover:text-white/60 hover:bg-gray-200/70 dark:hover:bg-white/8"
           >
             <PencilIcon className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="custom"
+            onClick={() => {
+              if (closeArmed) onClose(tab.id);
+              else setCloseArmed(true);
+            }}
+            title={closeArmed ? t("canvas.agentDeleteConfirm") : t("canvas.agentDelete")}
+            aria-label={closeArmed ? t("canvas.agentDeleteConfirm") : t("canvas.agentDelete")}
+            className={`nodrag cc-t shrink-0 flex items-center justify-center h-6 rounded-md
+              ${closeArmed
+                ? "px-2 text-[11px] font-medium text-white bg-red-500 hover:bg-red-600"
+                : "w-6 text-gray-300 dark:text-white/20 hover:text-red-500 hover:bg-gray-200/70 dark:hover:bg-white/8"}`}
+          >
+            {closeArmed ? t("canvas.agentDeleteConfirm") : <CloseIcon className="w-3 h-3" />}
           </Button>
           {links > 0 && (
             <span className="shrink-0 font-mono text-[10.5px] tabular-nums px-1.5 py-0.5 rounded-full
@@ -1160,7 +1203,7 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
   const drop = useViewTabsStore((s) => s.dropPortalView);
   const view = useViewTabsStore((s) => s.portalViews.find((v) => v.id === id));
   useEffect(() => {
-    ensure(id, cwd, portal.url);
+    ensure(id, cwd, portal.url, portal.viewport, portal.realChrome);
     // Al borrar el portal (o cerrar el canvas) se suelta la vista y con ella el navegador.
     return () => drop(id);
     // La URL inicial solo cuenta al crear la vista.
@@ -1172,6 +1215,22 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
     if (key && shown && shown !== portal.url) canvasActions.updatePortal(key, id, { url: shown });
   }, [shown]);
 
+  // A resolução que a pessoa escolher (ou desligar) na barra do navegador também se guarda: reabre como estava.
+  const shownViewport = view?.viewport ?? null;
+  useEffect(() => {
+    if (!key || !view) return;
+    const saved = portal.viewport ?? null;
+    if (shownViewport?.width === saved?.width && shownViewport?.height === saved?.height) return;
+    canvasActions.updatePortal(key, id, shownViewport ? { viewport: shownViewport } : { viewport: undefined });
+  }, [shownViewport?.width, shownViewport?.height]);
+
+  // O Chrome real também: o Portal reabre no mesmo modo.
+  const shownReal = !!view?.realChrome;
+  useEffect(() => {
+    if (!key || !view || shownReal === !!portal.realChrome) return;
+    canvasActions.updatePortal(key, id, { realChrome: shownReal || undefined });
+  }, [shownReal]);
+
   useEffect(() => {
     if (!armed) return;
     const timer = window.setTimeout(() => setArmed(false), 3000);
@@ -1180,11 +1239,36 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
 
   const host = hostOf(shown);
 
+  // "Celular solto": no lugar da janela, só o aparelho (com a página na resolução dele) e uma barra que flutua em
+  // cima. O tamanho do nó dá a escala do aparelho; trocar de modelo ou de escala mantém o nó no mesmo centro.
+  const device = portal.device ? deviceById(portal.device) : null;
+  const deviceScale = device ? deviceScaleOf(device, portal.box) : DEVICE_SCALE.start;
+  const resizeKeepingCenter = (size: { w: number; h: number }) => {
+    if (!key) return;
+    const b = portal.box;
+    canvasActions.moveNode(key, id, { x: Math.round(b.x + (b.w - size.w) / 2), y: b.y, w: size.w, h: size.h });
+  };
+  const toDevice = (spec: DeviceSpec, scale: number) => {
+    if (!key) return;
+    canvasActions.updatePortal(key, id, { device: spec.id });
+    resizeKeepingCenter(deviceNodeSize(spec, scale));
+  };
+  const toWindow = () => {
+    if (!key) return;
+    canvasActions.updatePortal(key, id, { device: undefined });
+    resizeKeepingCenter(AGENT_PORTAL_SIZE);
+  };
+  const askClose = () => {
+    if (!key) return;
+    if (armed) canvasActions.removePortal(key, id);
+    else setArmed(true);
+  };
+
   return (
     // Mesma estrutura do cartão do terminal (`AgentNode`): alças FORA do cartão, bordas como área de
     // arrastar e um contorno de 2 px na cor do nó (azul-céu, a do navegador).
     <div className="relative h-full w-full">
-      <NodeResizer isVisible minWidth={PORTAL_MIN.w} minHeight={PORTAL_MIN.h}
+      <NodeResizer isVisible minWidth={PORTAL_MIN.w} minHeight={PORTAL_MIN.h} keepAspectRatio={!!device}
         lineClassName="ade-rz-line" handleClassName="ade-rz-handle" />
       <CordPort id="l" type="source" position={Position.Left} style={{ top: HEADER_H / 2 }} className={handle} />
       <CordPort id="r" type="source" position={Position.Right} style={{ top: HEADER_H / 2 }} className={handle} />
@@ -1192,9 +1276,17 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
       <CordPort id="b" type="source" position={Position.Bottom} className={handle} />
 
       <div
-        className="group h-full w-full flex flex-col rounded-[14px] overflow-hidden transition-shadow duration-150 bg-white dark:bg-surface"
-        style={{ boxShadow: nodeFrame(PORTAL_ACCENT, !!selected, false) }}
+        className={device
+          ? "group h-full w-full flex flex-col"
+          : "group h-full w-full flex flex-col rounded-[14px] overflow-hidden transition-shadow duration-150 bg-white dark:bg-surface ade-window-in"}
+        style={device ? undefined : { boxShadow: nodeFrame(PORTAL_ACCENT, !!selected, false) }}
       >
+        {device ? (
+          <DeviceFloatBar device={device} scale={deviceScale} armed={armed}
+            onModel={(model) => toDevice(deviceById(model), deviceScale)}
+            onScale={(direction) => toDevice(device, stepDeviceScale(deviceScale, direction))}
+            onWindow={toWindow} onClose={askClose} />
+        ) : (
         <div
           className="ade-node-drag flex items-center gap-2.5 pl-4 pr-3 shrink-0 cursor-grab active:cursor-grabbing select-none
             border-b border-black/[0.06] dark:border-[rgba(84,84,88,0.55)] bg-white dark:bg-surface"
@@ -1224,12 +1316,13 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
               ⇄ {links}
             </span>
           )}
+          <Button variant="custom" onClick={() => toDevice(DEFAULT_DEVICE, DEVICE_SCALE.start)}
+            title={t("canvas.device.asPhone")} aria-label={t("canvas.device.asPhone")}
+            className="nodrag cc-t shrink-0 flex items-center justify-center w-6 h-6 rounded-md text-gray-400 dark:text-white/35 hover:text-sky-500 hover:bg-gray-200/70 dark:hover:bg-white/8">
+            <PhoneModeIcon className="w-3.5 h-3.5" />
+          </Button>
           <Button variant="custom"
-            onClick={() => {
-              if (!key) return;
-              if (armed) canvasActions.removePortal(key, id);
-              else setArmed(true);
-            }}
+            onClick={askClose}
             title={armed ? t("canvas.portalDeleteConfirm") : t("canvas.portalDelete")}
             aria-label={armed ? t("canvas.portalDeleteConfirm") : t("canvas.portalDelete")}
             className={`nodrag cc-t shrink-0 flex items-center justify-center h-6 rounded-md
@@ -1240,12 +1333,13 @@ const PortalNode = memo(function PortalNode({ data, selected }: NodeProps<Portal
             {armed ? t("canvas.portalDeleteConfirm") : <CloseIcon className="w-3 h-3" />}
           </Button>
         </div>
+        )}
 
         {/* `nodrag nowheel nopan`: dentro de la página, arrastrar y la rueda son de la página. */}
         <div className="nodrag nowheel nopan relative flex-1 min-h-0">
           {view && (
             <Suspense fallback={null}>
-              <PortalBody view={view} active={selected} />
+              <PortalBody view={view} active={selected} device={device} />
             </Suspense>
           )}
         </div>
@@ -1263,8 +1357,8 @@ function hostOf(url: string): string {
 }
 
 /** El navegador dentro del portal. `memo`: mover o redimensionar el nodo no lo toca. */
-const PortalBody = memo(function PortalBody({ view, active }: { view: BrowserView; active: boolean }) {
-  return <BrowserTab view={view} active={active} />;
+const PortalBody = memo(function PortalBody({ view, active, device }: { view: BrowserView; active: boolean; device: DeviceSpec | null }) {
+  return <BrowserTab view={view} active={active} device={device} />;
 });
 
 // ── Conexión: ver `cords.tsx` (cordas, ímã y raio) ────────────────────

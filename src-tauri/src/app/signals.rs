@@ -63,8 +63,7 @@ pub(super) fn cleanup_on_signals() {
         // solo por el bucle.
         while unsafe { libc::read(read_fd, buf.as_mut_ptr() as *mut libc::c_void, 1) } <= 0 {}
 
-        crate::terminal::kill_all_sessions();
-        crate::ipc::cleanup();
+        super::shutdown_once();
         // Código de salida convencional para una muerte por señal, para que quien mandó el
         // kill vea lo que espera.
         std::process::exit(128 + RECEIVED.load(Ordering::SeqCst));

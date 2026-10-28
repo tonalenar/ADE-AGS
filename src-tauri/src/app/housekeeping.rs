@@ -62,6 +62,13 @@ fn run(app: AppHandle) {
         crate::skills::migrate_legacy_skill(&db);
         crate::skills::ensure_bundled_skills(&app, &db);
     }
+
+    // Por último, e depois de um tempo: apagar caches e backups velhos mexe no disco e não tem
+    // pressa. Com outra instância aberta (a de desenvolvimento, por exemplo) não se mexe em nada.
+    if !crate::ipc::other_instance_alive() {
+        std::thread::sleep(Duration::from_secs(30));
+        super::disk_hygiene::run();
+    }
 }
 
 #[tauri::command]

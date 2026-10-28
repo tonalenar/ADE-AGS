@@ -57,7 +57,7 @@ struct Endpoints {
 /// O Client ID que o usuário fixou para o próprio aplicativo OAuth (um arquivo local: o ID não é segredo).
 /// Sem isso vale o embutido na compilação, que é do aplicativo OAuth de quem publicou o projeto original.
 fn override_path() -> Option<std::path::PathBuf> {
-    dirs::home_dir().map(|home| home.join(".ags").join("forge-oauth.json"))
+    crate::util::datadir::ags_home().map(|home| home.join("forge-oauth.json"))
 }
 
 fn read_overrides() -> serde_json::Map<String, Value> {

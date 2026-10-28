@@ -539,14 +539,13 @@ src-tauri/src/
   util/           running helper processes with timeouts
   window/         native window management and saved layouts
 skills/           the orchestration skill shipped with the app
-plan.md           the original phased development plan
 ```
 
 ---
 
 ## Roadmap
 
-Development started from the phased plan in [`plan.md`](./plan.md), and has since grown past it.
+Development started from a phased plan (no longer in the tree; see `git log -- plan.md`), and has since grown past it.
 
 | Phase | Status |
 |---|---|

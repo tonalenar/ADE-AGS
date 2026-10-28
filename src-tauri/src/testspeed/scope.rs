@@ -25,6 +25,7 @@ pub fn suite_reads(suite: &str, path: &str) -> bool {
                 || path == "rust-toolchain.toml"
                 || path == "src/features/orchestrator/cliBridge.ts" // `ipc/test.rs` inclui o arquivo
                 || path.starts_with("src/features/runs/tests/fixtures/") // `runs/handoff/test.rs`
+                || path.starts_with("src/features/terminal/tests/fixtures/replay/") // `ipc/commands/replay_test.rs`
         }
         "frontend" | "tsc" | "babel" => {
             !path.starts_with("src-tauri/")
@@ -56,7 +57,8 @@ pub(crate) fn scope_hash(listing: &[u8], suite: &str) -> String {
 
 /// A identidade da suíte para esta árvore. Sem git, ou com `AGS_TEST_SCOPE=off`, é a árvore inteira.
 pub fn scoped_identity(root: &Path, tree: &str, suite: &str) -> String {
-    if std::env::var("AGS_TEST_SCOPE").is_ok_and(|v| v == "off") {
+    // Fora do layout do ADE-AGS não se sabe o que cada suíte lê: a árvore inteira, que é seguro.
+    if std::env::var("AGS_TEST_SCOPE").is_ok_and(|v| v == "off") || !super::project::detect(root).is_ade() {
         return tree.to_string();
     }
     match super::run::git_raw(root, &["ls-tree", "-r", "-z", tree]) {
@@ -100,6 +102,7 @@ mod tests {
         // O Rust lê estes arquivos do frontend...
         assert!(suite_reads("rust", "src/features/orchestrator/cliBridge.ts"));
         assert!(suite_reads("rust", "src/features/runs/tests/fixtures/handoff-v1.json"));
+        assert!(suite_reads("rust", "src/features/terminal/tests/fixtures/replay/codex-laco.json"));
         assert!(!suite_reads("rust", "skills/git-helper/SKILL.md"), "markdown nunca entra");
         assert!(suite_reads("rust", "skills/git-helper/run.mjs"));
         assert!(!suite_reads("rust", "src/features/missions/vigia.ts"));

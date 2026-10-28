@@ -3,7 +3,7 @@ import { useTranslation } from "react-i18next";
 
 import type { BulkOutcome } from "./bulkReview";
 import { approveDream, diffLines, reviewableDreams } from "./dreamReview";
-import { AlertaToast } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 import * as memoryIpc from "./ipc";
 import type { MemoryDream } from "./types";
 import { dateLocale } from "@/i18n/dateLocale";

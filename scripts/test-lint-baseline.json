@@ -1,0 +1,60 @@
+{
+  "_leia": "Violações antigas do lint de testes (scripts/test-lint.mjs). Só deve diminuir: corrija e rode `bun run check:test-lint -- --update-baseline`.",
+  "violacoes": {
+    "src-tauri/src/bus.rs": {
+      "espera-real": 1
+    },
+    "src-tauri/src/decisions/hints.rs": {
+      "supressao-sem-motivo": 1
+    },
+    "src-tauri/src/decisions/test.rs": {
+      "espera-real": 1,
+      "polling": 1
+    },
+    "src-tauri/src/decisions/vision.rs": {
+      "skip-sem-motivo": 3
+    },
+    "src-tauri/src/explorer/test.rs": {
+      "espera-real": 1
+    },
+    "src-tauri/src/forge/test.rs": {
+      "skip-sem-motivo": 1
+    },
+    "src-tauri/src/ipc/test.rs": {
+      "espera-real": 2
+    },
+    "src-tauri/src/memory/repo_sync.rs": {
+      "espera-real": 6
+    },
+    "src-tauri/src/runs/test.rs": {
+      "supressao-sem-motivo": 1
+    },
+    "src-tauri/src/session/test.rs": {
+      "espera-real": 1,
+      "skip-sem-motivo": 1
+    },
+    "src-tauri/src/terminal/attachments_test.rs": {
+      "espera-real": 2
+    },
+    "src-tauri/src/terminal/test.rs": {
+      "espera-real": 2,
+      "polling": 2
+    },
+    "src-tauri/src/testspeed/run.rs": {
+      "espera-real": 1
+    },
+    "src-tauri/src/usage/live.rs": {
+      "espera-real": 2,
+      "polling": 2
+    },
+    "src/features/browser/tests/combobox.test.ts": {
+      "espera-real": 4
+    },
+    "src/features/browser/tests/settleRuntime.test.ts": {
+      "espera-real": 2
+    },
+    "src/features/terminal/tests/deferredPty.test.tsx": {
+      "espera-real": 3
+    }
+  }
+}

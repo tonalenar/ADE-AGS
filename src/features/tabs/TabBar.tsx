@@ -81,7 +81,7 @@ export function TabBar({ showLights = false }: { showLights?: boolean }) {
         // Las pestañas van como pastillas dentro de la franja: un poco de aire arriba, abajo y
         // entre ellas (gap-1), y se estiran a la altura interior.
         className="cc-scroll-x flex items-stretch gap-1 px-1.5 py-1.5 flex-1 min-w-0 h-10
-          bg-gray-100/80 dark:bg-surface-deep/75 backdrop-blur-xl
+          bg-gray-100/80 dark:bg-surface-deep/75
           border-b border-gray-200 dark:border-white/[0.08]"
         style={{ position: "relative", zIndex: 0 }}
       >

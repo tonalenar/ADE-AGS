@@ -28,3 +28,13 @@ describe("botToastStore", () => {
     expect(left[0]).toMatchObject({ tone: "warning", ms: 1000 });
   });
 });
+
+describe("aviso com progresso", () => {
+  it("update muda só o que veio e mantém o resto", () => {
+    const id = useBotToastStore.getState().push({ title: "A", text: "x", sticky: true, progress: 10 });
+    useBotToastStore.getState().update(id, { progress: 55 });
+    const toast = useBotToastStore.getState().toasts.find((t) => t.id === id);
+    expect(toast).toMatchObject({ title: "A", text: "x", sticky: true, progress: 55 });
+    useBotToastStore.getState().dismiss(id);
+  });
+});

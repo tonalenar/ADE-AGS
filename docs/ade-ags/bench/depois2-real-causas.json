@@ -1,0 +1,7 @@
+{
+  "L11-formulario-multietapas": "sem certeza: «não há valor» já não encerra o act (corrigido), mas o Jev ainda escolhe DIGITAR em «Nome» já preenchido e depois para com p=0,35–0,36 em «Próximo» (no ANTES p=0,53); a foto tocou em (240, 274) na 1.ª e recusou na repetição ('mais de um controle perto do ponto'). Falhou nas 3 rodadas do DEPOIS/DEPOIS 2",
+  "L12-garantia-na-foto": "falso «sem certeza»: a foto toca o botão certo (365, 342) e o critério vale, mas o Jev escolhe um «clickable element» sem nome (p=0,61, fim p=0,02) e o mesmo passo repetido encerra; na 1.ª rodada o portal se perdeu ('não está conectado'), vale a repetição",
+  "P02-wikipedia-link": "falso «concluído»: o link «Portugal» clicado (p=0,98) levava a «Império Português» e o piloto concluiu (fim p=0,71–0,72); reproduzido nas 2 rodadas. Dois links de mesmo texto com destinos diferentes",
+  "P05-amazon-busca-adicionar": "site/infra: 'A página não respondeu em 12 s' (Amazon pelo proxy; a carga não termina em 20 s). Na 1.ª rodada o portal também se perdeu",
+  "P06-amazon-produto-adicionar": "site/infra: idem P05"
+}

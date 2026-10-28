@@ -20,6 +20,7 @@ pub(crate) mod fixrounds;
 pub(crate) mod handoff;
 pub(crate) mod ledger;
 pub(crate) mod model_discovery;
+pub(crate) mod oneshot;
 pub mod orchestration;
 mod plan;
 pub(crate) mod policy;

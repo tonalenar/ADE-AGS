@@ -142,16 +142,21 @@ async function scrollbackFor(
   opts: SaveOpts,
   extra: ReadonlySet<number>,
 ): Promise<{ text: string | null; keep: boolean }> {
-  if (ptyId == null) return { text: null, keep: false };
+  // Sem processo (a terminal ainda não montou depois de restaurar, ou o PTY já morreu) não há o que ler:
+  // mandar `null` apagaria o histórico que a base já tem. Foi assim que o histórico de uma missão sumiu
+  // depois de reiniciar o PC: o primeiro guardado, com as terminais do canvas ainda sem PTY, gravou vazio.
+  if (ptyId == null) return { text: null, keep: true };
   if (opts.refreshScrollback || extra.has(ptyId) || opts.onlyPtyIds?.has(ptyId)) {
-    return { text: await fetchScrollback(ptyId), keep: false };
+    const text = await fetchScrollback(ptyId);
+    return { text, keep: text === null };
   }
   if (opts.onlyPtyIds) {
     const cached = scrollbackCache.get(ptyId);
     if (cached !== undefined) return { text: cached, keep: false };
     return { text: null, keep: true };
   }
-  return { text: await cachedOrFetchScrollback(ptyId), keep: false };
+  const text = await cachedOrFetchScrollback(ptyId);
+  return { text, keep: text === null };
 }
 
 async function saveNow(opts: SaveOpts = {}, progress?: SaveProgress) {
@@ -317,7 +322,8 @@ export async function saveForClose(progress: SaveProgress): Promise<void> {
 
 const HYDRATION_TIMEOUT_MS = 5_000;
 
-function waitForHydration(): Promise<void> {
+/** Quando as tabs desta janela hidrataram (ou o tope de espera passou). A tela de carregamento espera isto. */
+export function waitForHydration(): Promise<void> {
   if (useTabsStore.getState().hydrated) return Promise.resolve();
   return new Promise((resolve) => {
     const done = () => {

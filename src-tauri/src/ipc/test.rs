@@ -664,6 +664,38 @@ fn una_tool_del_navegador_viaja_como_browser_run_con_su_carpeta() {
     );
 }
 
+#[test]
+fn browser_act_viaja_como_browser_run_com_o_objetivo_e_os_valores() {
+    let (responses, sent) = mcp_session(
+        &McpContext::Cwd { cwd: "/home/u/proyecto".into(), tab: None, mission: None, role: None },
+        &[
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized" }),
+            call(3, "browser_act", json!({ "goal": "fazer login e abrir o carrinho", "fills": ["Username=ana"], "steps": 6 })),
+        ],
+        |_, _| Ok(json!({ "text": "act: FEITO" })),
+    );
+    assert_eq!(responses[0]["result"]["content"][0]["text"], "act: FEITO");
+    assert_eq!(sent[0].0, "browser.run");
+    assert_eq!(
+        sent[0].1["request"],
+        json!({ "op": "act", "goal": "fazer login e abrir o carrinho", "fills": ["Username=ana"], "steps": 6 })
+    );
+}
+
+#[test]
+fn browser_act_esta_na_lista_de_ferramentas_do_navegador_e_exige_o_objetivo() {
+    assert!(super::mcp::browser_tool_names().iter().any(|name| name.ends_with("browser_act")));
+    let (responses, _) = mcp_session(
+        &McpContext::Cwd { cwd: "/p".into(), tab: None, mission: None, role: None },
+        &[json!({ "jsonrpc": "2.0", "id": 1, "method": "tools/list" })],
+        |_, _| Ok(json!({})),
+    );
+    let tools = responses[0]["result"]["tools"].as_array().expect("lista de tools");
+    let act = tools.iter().find(|t| t["name"] == "browser_act").expect("browser_act listada");
+    assert_eq!(act["inputSchema"]["required"], json!(["goal"]));
+    assert!(act["inputSchema"]["properties"]["fills"]["type"] == "array");
+}
+
 /// El `--mcp-config` de cada agente lleva la ruta de `ags` sacada de al lado de la app.
 /// Si no se encuentra, la tab arranca SIN navegador y sin orquestación, en silencio, y el
 /// botón de instalar la CLI falla — así que tiene que encontrarse en los cinco

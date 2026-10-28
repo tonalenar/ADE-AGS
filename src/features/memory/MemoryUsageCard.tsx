@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertaToast, Button } from "neogestify-ui-components";
+import { Button } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { AppDialog } from "@/shared/ui/AppDialog";
 

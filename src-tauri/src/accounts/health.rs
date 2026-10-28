@@ -386,11 +386,7 @@ pub(super) fn codex_login_with_api_key(dir: &Path, key: &str) -> Result<(), Stri
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
-    #[cfg(windows)]
-    {
-        use std::os::windows::process::CommandExt;
-        command.creation_flags(0x0800_0000); // CREATE_NO_WINDOW
-    }
+    // `util::program` já nasce sem console (`spawn::hidden_command`).
     let mut child = command.spawn().map_err(|e| format!("No se pudo ejecutar codex: {e}"))?;
     if let Some(mut stdin) = child.stdin.take() {
         stdin

@@ -59,10 +59,22 @@ pub(crate) fn user_db_path() -> PathBuf {
 }
 
 fn db_path() -> PathBuf {
-    let home = dirs::home_dir().expect("Cannot determine home directory");
-    let dir = home.join(".ags");
-    std::fs::create_dir_all(&dir).expect("Cannot create ~/.ags");
+    let dir = crate::util::datadir::ags_home().expect("Cannot determine home directory");
+    std::fs::create_dir_all(&dir).expect("Cannot create the data directory (~/.ags or ADE_AGS_DATA_DIR)");
     dir.join("data.db")
+}
+
+/// Uma conexão própria à mesma base, para o trabalho que mistura banco com git ou disco (limpeza
+/// de worktrees: `git status`/`log`/`worktree remove` e a medição de GBs de `target/`). Com a
+/// conexão global (`DbConnection`) o `Mutex` ficava preso durante tudo isso e o resto do app
+/// (autosave, IPC, Vigia) parava. Em WAL as duas convivem; `busy_timeout` cobre as escritas.
+pub(crate) fn open_side_connection() -> SqlResult<Connection> {
+    let conn = Connection::open(db_path())?;
+    conn.execute_batch(
+        "PRAGMA foreign_keys = ON;
+         PRAGMA busy_timeout = 30000;",
+    )?;
+    Ok(conn)
 }
 
 /// Abre el archivo y deja WAL y las claves foráneas. No migra.
@@ -91,9 +103,12 @@ fn open_configured() -> SqlResult<DbConnection> {
     Ok(Arc::new(Mutex::new(conn)))
 }
 
+/// `true` quando a base é de uma versão anterior e precisa migrar. Uma base de versão
+/// MAIOR que a desta build é erro (ver [`super::schema::refuse_newer`]), nunca "pronta".
 fn needs_upgrade(conn: &DbConnection) -> SqlResult<bool> {
     let guard = conn.lock().unwrap_or_else(|err| err.into_inner());
     let version: i32 = guard.pragma_query_value(None, "user_version", |row| row.get(0))?;
+    super::schema::refuse_newer(version)?;
     Ok(version > 0 && version < super::schema::SCHEMA_VERSION)
 }
 
@@ -146,7 +161,31 @@ pub(crate) fn upgrade_schema(conn: &Connection, path: &std::path::Path) -> SqlRe
     if purgadas > 0 {
         eprintln!("se limpiaron {purgadas} filas de ventanas cerradas y vacías");
     }
+    if crate::util::datadir::is_isolated() {
+        seed_decisions_from_installed(conn);
+    }
     Ok(())
+}
+
+/// Instancia isolada (ADE_AGS_DATA_DIR): traz só a configuração NÃO secreta do Jev (`decisions.*`:
+/// provedor, URL, modelo, pontos ligados) do banco do app instalado, lido em modo somente leitura e
+/// só quando a base isolada ainda não tem nenhuma. A chave de API não é copiada: vive no cofre do
+/// sistema (serviço `ade-ags.decisions`), que as duas instâncias já enxergam. Contas de agentes
+/// ficam de fora de propósito.
+fn seed_decisions_from_installed(conn: &Connection) {
+    let Some(real) = dirs::home_dir().map(|h| h.join(".ags").join("data.db")) else { return };
+    let have: i64 = conn
+        .query_row("SELECT COUNT(*) FROM settings WHERE key LIKE 'decisions.%'", [], |r| r.get(0))
+        .unwrap_or(1);
+    if have > 0 || !real.is_file() {
+        return;
+    }
+    let Ok(src) = Connection::open_with_flags(&real, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY) else { return };
+    let Ok(mut stmt) = src.prepare("SELECT key, value FROM settings WHERE key LIKE 'decisions.%'") else { return };
+    let Ok(rows) = stmt.query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?))) else { return };
+    for (k, v) in rows.flatten() {
+        let _ = conn.execute("INSERT OR IGNORE INTO settings (key, value) VALUES (?1, ?2)", [k, v]);
+    }
 }
 
 /// SQLite produces a consistent backup, including committed WAL pages. A failed
@@ -246,6 +285,48 @@ mod backup_tests {
         drop(copy);
         drop(conn);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn base_mais_nova_que_o_binario_e_recusada_sem_regravar_a_versao() {
+        let root = std::env::temp_dir().join(format!("ade-db-newer-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let path = root.join("data.db");
+        let conn = Connection::open(&path).unwrap();
+        super::super::schema::migrate(&conn).unwrap();
+        let newer = super::super::schema::SCHEMA_VERSION + 1;
+        conn.pragma_update(None, "user_version", newer).unwrap();
+
+        let err = upgrade_schema(&conn, &path).expect_err("uma base mais nova não abre");
+        let msg = err.to_string();
+        assert!(msg.contains("versão mais nova do ADE AGS"), "{msg}");
+        assert!(msg.contains(&format!("(v{newer})")), "{msg}");
+        assert!(msg.contains("atualize o app") || msg.contains("Atualize o app"), "{msg}");
+        assert_eq!(user_version(&conn), newer, "a versão não pode ser rebaixada");
+        assert!(
+            std::fs::read_dir(&root)
+                .unwrap()
+                .all(|e| e.unwrap().path().extension().is_none_or(|ext| ext != "backup")),
+            "nem copia: não há upgrade"
+        );
+
+        let shared: DbConnection = Arc::new(Mutex::new(conn));
+        let err = needs_upgrade(&shared).expect_err("prepare_db também recusa");
+        assert!(err.to_string().contains(&format!("(v{newer})")));
+        let guard = shared.lock().unwrap();
+        assert_eq!(user_version(&guard), newer);
+        drop(guard);
+        drop(shared);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn base_da_mesma_versao_ou_anterior_nao_e_recusada() {
+        use super::super::schema::{refuse_newer, SCHEMA_VERSION};
+        assert!(refuse_newer(0).is_ok());
+        assert!(refuse_newer(SCHEMA_VERSION - 1).is_ok());
+        assert!(refuse_newer(SCHEMA_VERSION).is_ok());
+        assert!(refuse_newer(SCHEMA_VERSION + 1).is_err());
     }
 
     fn user_version(conn: &Connection) -> i32 {

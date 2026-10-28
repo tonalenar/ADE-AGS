@@ -94,6 +94,15 @@ pub struct Portal {
     /// El emulador (AVD) que arranca este nodo.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub avd: Option<String>,
+    /// A resolução com que a página é renderizada (`{ width, height }`); só o frontend a lê. Ausente = ocupa o nó inteiro.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub viewport: Option<Value>,
+    /// "Celular solto": o modelo do aparelho que o nó mostra no lugar da janela do navegador; só o frontend lê.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub device: Option<String>,
+    /// O Portal mostra um Chrome de verdade (`real_browser`); só o frontend lê.
+    #[serde(default, rename = "realChrome", skip_serializing_if = "Option::is_none")]
+    pub real_chrome: Option<bool>,
 }
 
 pub const PORTAL_PREFIX: &str = "portal-";
@@ -143,7 +152,7 @@ lazy_static::lazy_static! {
 }
 
 fn file_path() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir().ok_or("No se encontró la carpeta del usuario")?.join(".ags");
+    let dir = crate::util::datadir::ags_home().ok_or("Pasta de dados indisponível")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("canvas.json"))
 }

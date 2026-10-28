@@ -182,6 +182,12 @@ fn propose_in(conn: &Connection, workspace_id: &str, mission: Option<&str>, p: &
         "workspace" | "mission" => p.scope,
         other => return Err(format!("O escopo '{other}' não existe. Use 'workspace' (vale para o projeto) ou 'mission'.")),
     };
+    // Missão de teste não escreve na memória do projeto: no banco real entraram notas sintéticas de QA
+    // (`qa-v9-01`, «Cache timeout configurado para 300 segundos») aprovadas em lote. Fica na missão.
+    let is_test = mission.is_some_and(|m| {
+        conn.query_row("SELECT COALESCE(is_test, 0) FROM missions WHERE id = ?1", [m], |r| r.get::<_, i64>(0)).unwrap_or(0) != 0
+    });
+    let scope = if is_test { "mission" } else { scope };
     if looks_like_secret(p.body) || looks_like_secret(p.key) {
         return Err("A proposta parece conter uma credencial (chave, token ou senha). Memória não guarda segredos: reescreva sem o valor.".into());
     }
@@ -207,14 +213,19 @@ fn propose_in(conn: &Connection, workspace_id: &str, mission: Option<&str>, p: &
         reason: Some(if mission.is_some() { format!("Proposta de {} na missão {short}", p.author_name) } else { format!("Proposta de {} numa conversa do projeto", p.author_name) }),
         acknowledge_secret: false,
     };
-    propose(
+    let result = propose(
         conn,
         scope,
         &workspace_id,
         if scope == "mission" { mission } else { None },
         &input,
         ProposalActor { kind: p.author.kind(), run_id: None, task_id: None, fact_id: None },
-    )
+    )?;
+    // A memória nova de uma missão é do repositório dela (ver `repo_scope`).
+    if let Some(mission) = mission {
+        super::repo_scope::tag_new_entry(conn, &result.entry_id, mission)?;
+    }
+    Ok(result)
 }
 
 #[cfg(test)]

@@ -167,6 +167,42 @@ fn kimi_code() {
 }
 
 #[test]
+fn hermes() {
+    let agent = adapter("hermes");
+    let def = agent.def();
+    let caps = agent.capabilities();
+
+    assert_eq!(def.command, "hermes");
+    assert_eq!(def.label, "Hermes");
+    // `--resume <id>` retoma, mas um id inexistente dá «Session not found»: a app não escolhe o id, descobre depois.
+    assert_eq!(def.resume, Some("--resume {session}"));
+    assert_eq!(def.assign_session, None);
+    assert_eq!(def.sessions, SessionSource::HermesState);
+    assert_eq!(def.mcp, McpStyle::HermesManaged);
+    // As skills vivem no home do Hermes, não no projeto; contas e modelos ainda não verificados.
+    assert_eq!(def.skills_dir, None);
+    assert!(def.profile.is_none());
+
+    assert!(caps.sessions);
+    assert!(caps.resume);
+    assert!(caps.mcp);
+    assert!(!caps.accounts);
+    assert!(!caps.headless);
+    assert!(adapter_for("hermes").is_some());
+}
+
+#[test]
+fn hermes_recebe_o_mcp_numa_config_gerenciada_que_so_traz_o_ags() {
+    let yaml = crate::ipc::mcp::hermes_managed_config(r"C:\Program Files\ADE AGSgs.exe", &["mcp", "--cwd", r"C:\proj", "--tab", "t1"]);
+    // YAML em estilo JSON: válido para o Hermes, sem gerador de YAML.
+    let parsed: serde_json::Value = serde_json::from_str(&yaml).expect("JSON válido é YAML válido");
+    let servers = parsed["mcp_servers"].as_object().expect("mcp_servers");
+    assert_eq!(servers.len(), 1, "só o servidor da app: o resto da config continua a do usuário");
+    assert_eq!(servers["ags"]["command"], r"C:\Program Files\ADE AGSgs.exe");
+    assert_eq!(servers["ags"]["args"][4], "t1");
+}
+
+#[test]
 fn bash_no_finge_capabilities_de_agente() {
     let agent = adapter("bash");
     let caps = agent.capabilities();

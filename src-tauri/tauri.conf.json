@@ -14,12 +14,14 @@
       {
         "title": "ADE AGS",
         "maximized": true,
+        "visible": false,
         "width": 1280,
         "height": 780,
         "minWidth": 900,
         "minHeight": 600,
         "decorations": false,
-        "transparent": true
+        "transparent": true,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection,CalculateNativeWinOcclusion --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows"
       }
     ],
     "security": {
@@ -27,7 +29,7 @@
         "default-src": "'self'",
         "script-src": "'self'",
         "style-src": "'self' 'unsafe-inline'",
-        "img-src": "'self' data: blob: https: http://localhost:* http://127.0.0.1:*",
+        "img-src": "'self' data: blob: https: http://localhost:* http://127.0.0.1:* agsframe: http://agsframe.localhost",
         "font-src": "'self' data:",
         "media-src": "'self' data: blob:",
         "connect-src": "'self' ipc: http://ipc.localhost",

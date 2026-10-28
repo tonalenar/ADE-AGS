@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { addEdge, addNote, addPortal, boxOf, emptyBoard, reconcile, removePortal, uniquePortalName, updatePortal } from "../board";
+import { AGENT_PORTAL_SIZE, addEdge, addNote, addPortal, boxOf, emptyBoard, reconcile, removePortal, uniquePortalName, updatePortal } from "../board";
 
 describe("portales", () => {
   it("un portal creado cerca de un agente queda conectado y a su derecha", () => {
@@ -42,5 +42,28 @@ describe("portales", () => {
     expect(b.edges).toEqual([]);
     expect(boxOf(b, "portal-1")).toBeUndefined();
     expect(boxOf(b, "portal-2")).toBeDefined();
+  });
+});
+
+describe("navegador aberto por um agente: nó maior, página no tamanho do nó", () => {
+  it("sem resolução forçada (a página não é encolhida e fica nítida de longe), num nó maior", () => {
+    const { board } = addPortal(emptyBoard(), { id: "portal-1", url: "http://localhost:5173", size: { ...AGENT_PORTAL_SIZE } });
+    expect(board.portals["portal-1"].viewport).toBeUndefined();
+    expect(board.portals["portal-1"].box.w).toBe(AGENT_PORTAL_SIZE.w);
+    expect(board.portals["portal-1"].box.h).toBe(AGENT_PORTAL_SIZE.h);
+  });
+
+  it("o que a pessoa abre à mão não ganha resolução (ocupa o nó), e a tela de um Android nunca tem", () => {
+    expect(addPortal(emptyBoard(), { id: "portal-1" }).board.portals["portal-1"].viewport).toBeUndefined();
+    const phone = addPortal(emptyBoard(), { id: "portal-2", kind: "android", viewport: { width: 1920, height: 1080 } }).board.portals["portal-2"];
+    expect(phone.viewport).toBeUndefined();
+  });
+
+  it("a resolução se muda e se desliga depois (a pessoa tira o modo de resolução na barra)", () => {
+    let b = addPortal(emptyBoard(), { id: "portal-1", viewport: { width: 1920, height: 1080 } }).board;
+    b = updatePortal(b, "portal-1", { viewport: { width: 390, height: 844 } });
+    expect(b.portals["portal-1"].viewport).toEqual({ width: 390, height: 844 });
+    b = updatePortal(b, "portal-1", { viewport: undefined });
+    expect(b.portals["portal-1"].viewport).toBeUndefined();
   });
 });

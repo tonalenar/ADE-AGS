@@ -66,6 +66,9 @@ export interface BrowserView extends ViewBase {
   touch?: boolean;
   /** O zoom da página (1 = 100%). Ausente = 100%. Não muda o tamanho do navegador, só o da página. */
   zoom?: number;
+  /** Mostra um Chrome de verdade (perfil próprio do app) em vez da página pelo proxy: é onde
+   *  dá para entrar em sites que recusam navegador embutido, como a conta Google. Protótipo. */
+  realChrome?: boolean;
 }
 
 export interface DesktopAppView extends ViewBase {
@@ -137,6 +140,18 @@ export function nextActiveAfterClose(views: ViewTab[], id: string, activeId: str
 }
 
 /** Lo que se guarda para restaurar. Lo efímero (sin guardar, a dónde saltar) no. */
+/** Os tipos de aba que esta versão sabe desenhar. */
+const KNOWN_KINDS = new Set<string>(["file", "diff", "browser"]);
+
+/**
+ * Das abas salvas, só as de um tipo conhecido. O estado fica no `localStorage` do perfil do WebView2, que
+ * outra versão do app (um build de debug, um instalador mais novo ou mais antigo) pode ter escrito com abas de
+ * um tipo que esta não conhece: sem componente para elas, a tela inteira caía num erro.
+ */
+export function knownViews(views: ViewTab[]): ViewTab[] {
+  return views.filter((v) => !!v && typeof v === "object" && KNOWN_KINDS.has((v as { kind?: string }).kind ?? ""));
+}
+
 export function toPersisted(views: ViewTab[]): ViewTab[] {
   return views.map((v) => {
     if (v.kind !== "file") return v;
@@ -152,6 +167,11 @@ export function toPersisted(views: ViewTab[]): ViewTab[] {
  * exigir el `http://` es hacer tipear lo obvio. Un host sin puerto ni esquema se asume
  * `https`, salvo que sea local.
  */
+/** `about:blank` (ou `about:`): uma página vazia, não um endereço. Um agente cria um portal «vazio» assim. */
+export function isBlankUrl(input: string): boolean {
+  return /^about:(blank)?\/?$/i.test(input.trim());
+}
+
 export function normalizeUrl(input: string): string | null {
   const text = input.trim();
   if (!text) return null;
@@ -190,14 +210,17 @@ export function viewLabels(views: ViewTab[]): Map<string, { title: string; hint:
   // distinguen por el ícono, y agregarles la carpeta a los dos no separa nada.
   const clashKey = (v: ViewTab) => `${v.kind}:${v.title}`;
   const byTitle = new Map<string, ViewTab[]>();
+  // Uma aba sem `path` (de um tipo que esta versão não conhece, salva por outra) não tem pasta para
+  // diferenciar: fica só com o título, em vez de derrubar a tela.
+  const hasPath = (v: ViewTab): v is Exclude<ViewTab, BrowserView | DesktopAppView> => v.kind !== "browser" && typeof (v as { path?: unknown }).path === "string";
   for (const v of views) {
-    if (v.kind === "browser" || v.kind === "desktop") continue;
+    if (!hasPath(v)) continue;
     const list = byTitle.get(clashKey(v)) ?? [];
     list.push(v);
     byTitle.set(clashKey(v), list);
   }
   for (const v of views) {
-    if (v.kind === "browser" || v.kind === "desktop") {
+    if (!hasPath(v)) {
       out.set(v.id, { title: v.title, hint: null });
       continue;
     }

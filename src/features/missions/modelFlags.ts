@@ -4,7 +4,7 @@
  * Sin esto, un terminal de misión arrancaba con el modelo por defecto de cada TUI y el
  * Squad ("Sol 6.1, medio") se ignoraba. Los flags salen de `--help` de cada CLI:
  * Codex `-m` y `-c model_reasoning_effort=…`; Antigravity `--model` y `--effort`; Claude
- * Code `--model` y `--effort`. Otros agentes no reciben nada.
+ * Code `--model` y `--effort`; OpenCode solo `--model`. Otros agentes no reciben nada.
  */
 
 /** Ids de modelo y niveles de esfuerzo seguros para ir en una línea de comando. */
@@ -16,6 +16,8 @@ const MODEL_FLAG: Record<string, string> = {
   antigravity: "--model",
   "claude-code": "--model",
   "gemini-cli": "-m",
+  // OpenCode: `opencode --model <provedor/modelo>` (o formato que o catálogo dele lista).
+  opencode: "--model",
 };
 
 /**

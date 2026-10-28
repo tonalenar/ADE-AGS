@@ -2,7 +2,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "neogestify-ui-components";
 
 import { agentIcon } from "@/features/agents/agentIcons";
-import { agentTile, agentVendor } from "@/features/agents/agentTile";
+import { agentIconTile, agentVendor } from "@/features/agents/agentTile";
 import type { AgentInfo } from "@/features/tabs/types";
 
 interface AgentPickerStepProps {
@@ -59,7 +59,7 @@ export function AgentPickerStep({ agents, selected, lastId, onSelect }: AgentPic
             `}
           >
             <span className="shrink-0 flex items-center justify-center w-[30px] h-[30px] rounded-lg text-white shadow-[inset_0_0_0_0.5px_rgba(255,255,255,0.18)]"
-              style={{ background: agentTile(agent.id) }}>
+              style={{ background: agentIconTile(agent.id) }}>
               <AgentIcon className="w-4 h-4" />
             </span>
             {isSelected && (

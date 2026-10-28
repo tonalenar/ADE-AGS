@@ -46,7 +46,7 @@ lazy_static::lazy_static! {
 }
 
 fn file_path() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir().ok_or("Não foi possível achar a pasta do usuário")?.join(".ags");
+    let dir = crate::util::datadir::ags_home().ok_or("Pasta de dados indisponível")?;
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir.join("canvas-roles.json"))
 }

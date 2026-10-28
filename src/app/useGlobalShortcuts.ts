@@ -8,6 +8,8 @@ import { tabsOfWorkspace } from "@/features/tabs/workspaceTabs";
 import { useViewTabsStore } from "@/features/tabs/viewStore";
 import { viewsOfWorkspace } from "@/features/tabs/viewTabs";
 import { useUiStore } from "@/app/uiStore";
+import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
+import { TERMINAL_ZOOM } from "@/features/terminal/theme";
 
 import { WORKSPACE_PATH, matchShortcut, nextTabId, resolveGoto } from "./shortcuts";
 
@@ -35,6 +37,13 @@ export function useGlobalShortcuts() {
       // El estado se lee al APRETAR, no al montar: así el handler se registra una sola vez
       // en vez de volver a suscribirse cada vez que se abre o se cierra una tab.
       const { tabs, activeTabId, activateTab } = useTabsStore.getState();
+
+      if (shortcut.action.kind === "textZoom") {
+        const { zoom, setZoom } = useTerminalPrefsStore.getState();
+        const { delta } = shortcut.action;
+        setZoom(delta === 0 ? TERMINAL_ZOOM.default : zoom + delta * TERMINAL_ZOOM.step);
+        return;
+      }
 
       if (shortcut.action.kind === "openPalette") {
         const { paletteOpen, setPaletteOpen } = useUiStore.getState();

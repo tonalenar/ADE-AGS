@@ -1,0 +1,153 @@
+{
+  "schema": 1,
+  "label": "depois2-real-rep",
+  "mode": "real",
+  "startedAt": "2026-10-16T00:47:57.540Z",
+  "commit": "c20cb5ff",
+  "runs": [
+    {
+      "id": "L11-formulario-multietapas",
+      "outcome": "unsure",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8797/etapas.html",
+      "steps": 1,
+      "autoFills": 2,
+      "photos": 0,
+      "totalMs": 3787,
+      "stepMs": [
+        3787
+      ],
+      "phases": {
+        "jevMs": 2067,
+        "snapshotMs": 4,
+        "actionMs": 1650,
+        "waitMs": 0,
+        "otherMs": 66
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Preencha o pedido de teste nas três etapas (dados, endereço, revisão) e envie.\": PAROU (Jev sem certeza)\nO Jev não tem certeza do próximo passo (click e3, p=0.35, fim p=0.00, 283 ms). Continue você, com `snapshot` e `click`, ou diga no objetivo a escolha que falta.\n\nPassos:\ndigitou em text field \"Nome\" (valor de Nome) (pelo nome do campo, sem o Jev)\ndigitou em text field \"E-mail\" (valor de E-mail) (pelo nome do campo, sem o Jev)\n1. tentou digitar em e1, mas não há valor para text field \"Nome\": passe --fill \"<campo>=<valor>\"\nO toque pela foto falhou: Há mais de um controle perto do ponto (250, 269): não sei qual tocar.\n\nTEMPOS: {\"jev\":794,\"snapshot\":4,\"acao\":1650,\"espera\":0,\"foto\":1273,\"consultas\":2,\"fotos\":1,\"total\":3726}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — pedido de teste\" http://localhost:8797/etapas.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Etapa 1 de 3 — Dados\" [level=1]\n  - textbox \"Nome\" [ref=e1] value=\"Maria Teste\"\n  - textbox \"E-mail\" [ref=e2] [focused] value=\"maria@teste.com\"\n  - button \"Próximo\" [ref=e3]",
+      "probes": 3
+    },
+    {
+      "id": "L12-garantia-na-foto",
+      "outcome": "stuck",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8797/foto-garantia.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 3673,
+      "stepMs": [
+        998
+      ],
+      "phases": {
+        "jevMs": 2011,
+        "snapshotMs": 7,
+        "actionMs": 1609,
+        "waitMs": 0,
+        "otherMs": 46
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Clique no botão «Garantia estendida» que aparece no meio da foto do produto.\": PAROU\nO mesmo passo se repetiu sem mudar a página. Continue você.\n\nPassos:\n1. tocou pela foto no ponto (365, 342) (existe p=1.00, caixa conf=0.91, 349 ms)\n2. clicou clickable element (p=0.61, fim p=0.02, 304 ms, passo 998 ms)\n\nTEMPOS: {\"jev\":905,\"snapshot\":7,\"acao\":1609,\"espera\":0,\"foto\":1106,\"consultas\":3,\"fotos\":1,\"total\":3630}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — foto do produto\" http://localhost:8797/foto-garantia.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - text \"GARANTIA ABERTA\"\n  - clickable [ref=e1]\n  - clickable [ref=e2]\n  - text \"Tênis de corrida Aero. R$ 399,90\"\n  - button \"Comprar\" [ref=e3]",
+      "probes": 4
+    },
+    {
+      "id": "P02-wikipedia-link",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://pt.wikipedia.org/wiki/Imp%C3%A9rio_Portugu%C3%AAs",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2416,
+      "stepMs": [
+        1859
+      ],
+      "phases": {
+        "jevMs": 680,
+        "snapshotMs": 161,
+        "actionMs": 1514,
+        "waitMs": 0,
+        "otherMs": 61
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Abra o artigo sobre Portugal clicando em um link «Portugal» do texto do artigo.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou link \"Portugal\" (p=0.98, fim p=0.08, 321 ms, passo 1859 ms)\n2. concluído (p=0.83, fim p=0.71, 328 ms)\n\nTEMPOS: {\"jev\":680,\"snapshot\":161,\"acao\":1514,\"espera\":0,\"foto\":0,\"consultas\":2,\"fotos\":0,\"total\":2363}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Império Português – Wikipédia, a enciclopédia livre\" https://pt.wikipedia.org/wiki/Imp%C3%A9rio_Portugu%C3%AAs\nviewport: 1908×1120 · scroll 0/42935\n\n- link \"Ir para o conteúdo\" [ref=e1] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#bodyContent\n- banner \"no font mode scale\"\n  - navigation \"Site\"\n    - button \"Menu principal\" [ref=e2]\n    - text \"Menu principal\"\n    - text \"mover para a barra lateral\"\n    - text \"Página principal\"\n    - text \"Conteúdo destacado\"\n    - text \"Eventos atuais\"\n    - text \"Esplanada\"\n    - text \"Página aleatória\"\n    - text \"Portais\"\n    - text \"Páginas especiais\"\n    - text \"Informar um erro\"\n    - text \"Colaboração\"\n    - text \"Boas-vindas\"\n    - text \"Ajuda\"\n    - text \"Páginas de testes públicas\"\n    - text \"Portal comunitário\"\n    - text \"Mudanças recentes\"\n    - text \"Manutenção\"\n    - text \"Criar página\"\n    - text \"Páginas novas\"\n    - text \"Contato\"\n  - link [ref=e3] → /wiki/Wikip%C3%A9dia:P%C3%A1gina_principal\n  - search \"vector search box auto expand width\"\n    - form\n      - searchbox \"Pesquisar na Wikipédia\" [ref=e4]\n      - button \"Procurar\" [ref=e5]\n  - navigation \"Ferramentas pessoais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Doar\" [ref=e6] → https://donate.wikimedia.org/?wmf_source=donate&wmf_medium=sidebar&wmf_campaign=pt.wikipedia.org&uselang=pt\n      - listitem\n        - link \"Criar conta\" [ref=e7] → /w/index.php?title=Especial:Criar_conta&returnto=Imp%C3%A9rio+Portugu%C3%AAs\n      - listitem\n        - link \"Iniciar sessão\" [ref=e8] → /w/index.php?title=Especial:Entrar&returnto=Imp%C3%A9rio+Portugu%C3%AAs\n- navigation \"Conteúdos\"\n  - heading \"Conteúdos\" [level=2]\n  - button \"Esconder Conteúdos\" [ref=e9]\n  - list \"vector toc contents\"\n    - listitem\n      - link \"Início\" [ref=e10] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#\n    - listitem\n      - link \"Conceito e historiografia\" [ref=e11] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Conceito_e_historiografia\n      - button \"Alternar a subsecção Conceito e historiografia\" [ref=e12]\n      - list \"toc conceito historiografia sublist\"\n    - listitem\n      - link \"Antecedentes\" [ref=e13] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Antecedentes\n      - list \"toc antecedentes sublist\"\n    - listitem\n      - link \"Primeiro Império (1415–1580)\" [ref=e14] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Primeiro_Imp%C3%A9rio_(1415%E2%80%931580)\n      - button \"Alternar a subsecção Primeiro Império (1415–1580)\" [ref=e15]\n      - list \"toc primeiro sublist\"\n    - listitem\n      - link \"Segundo Império (1580–1822)\" [ref=e16] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Segundo_Imp%C3%A9rio_(1580%E2%80%931822)\n      - button \"Alternar a subsecção Segundo Império (1580–1822)\" [ref=e17]\n      - list \"toc segundo sublist\"\n    - listitem\n      - link \"Terceiro Império (1825–1999)\" [ref=e18] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Terceiro_Imp%C3%A9rio_(1825%E2%80%931999)\n      - button \"Alternar a subsecção Terceiro Império (1825–1999)\" [ref=e19]\n      - list \"toc terceiro sublist\"\n    - listitem\n      - link \"Legado\" [ref=e20] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Legado\n      - list \"toc legado sublist\"\n    - listitem\n      - link \"Ver também\" [ref=e21] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Ver_tamb%C3%A9m\n      - list \"toc ver sublist\"\n    - listitem\n      - link \"Notas e referências\" [ref=e22] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Notas_e_refer%C3%AAncias\n      - button \"Alternar a subsecção Notas e referências\" [ref=e23]\n      - list \"toc notas sublist\"\n    - listitem\n      - link \"Ligações externas\" [ref=e24] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs#Liga%C3%A7%C3%B5es_externas\n      - list \"toc externas sublist\"\n- main\n  - banner \"no font mode scale\"\n    - heading \"Império Português\" [level=1]\n    - button \"86 idiomas\" [ref=e25]\n  - navigation \"Espaços nominais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Artigo\" [ref=e26] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Discussão\" [ref=e27] → /wiki/Discuss%C3%A3o:Imp%C3%A9rio_Portugu%C3%AAs\n  - navigation \"Visualizações\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Ler\" [ref=e28] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Editar\" [ref=e29] → https://pt.wikipedia.org/w/index.php?title=Especial:Entrar&returnto=Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Ver histórico\" [ref=e30] → /w/index.php?title=Imp%C3%A9rio_Portugu%C3%AAs&action=history\n  - navigation \"Ferramentas de página\"\n    - button \"Ferramentas\" [ref=e31]\n    - text \"Ferramentas\"\n    - text \"m",
+      "probes": 2
+    },
+    {
+      "id": "P05-amazon-busca-adicionar",
+      "outcome": "crash",
+      "criterionOk": false,
+      "forbidden": false,
+      "steps": 0,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 0,
+      "stepMs": [],
+      "phases": {
+        "jevMs": 0,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 0
+      },
+      "timing": "reported",
+      "finalUrl": "",
+      "note": "act falhou: Command failed: C:\\Users\\tonz1n\\.ags\\cargo-target-agents\\debug\\ags.exe portal act bench-jev-mva90sbx Pesquise por caneca e, no primeiro resultado, clique em Adicionar ao carrinho. Não finalize a compra. --fill Pesquisar=caneca --steps 10 | {\"error\":\"A página não respondeu em 12 s. Ainda está carregando, ou navegou para um site que não passa pelo proxy?\"} "
+    },
+    {
+      "id": "P06-amazon-produto-adicionar",
+      "outcome": "crash",
+      "criterionOk": false,
+      "forbidden": false,
+      "steps": 0,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 0,
+      "stepMs": [],
+      "phases": {
+        "jevMs": 0,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 0
+      },
+      "timing": "reported",
+      "finalUrl": "",
+      "note": "act falhou: Command failed: C:\\Users\\tonz1n\\.ags\\cargo-target-agents\\debug\\ags.exe portal act bench-jev-mva90sbx Pesquise por livro, abra o primeiro resultado e, na página do produto, clique em Adicionar ao carrinho. Não finalize a compra. --fill Pesquisar=livro --steps 12 | {\"error\":\"A página não respondeu em 12 s. Ainda está carregando, ou navegou para um site que não passa pelo proxy?\"} "
+    }
+  ],
+  "summary": {
+    "tasks": 5,
+    "completed": 1,
+    "completedRate": 0.2,
+    "confirmed": 0,
+    "falseDone": 1,
+    "falseUnsure": 1,
+    "violations": 0,
+    "blocked": 0,
+    "meanSteps": 1,
+    "medianSteps": 1,
+    "medianTotalMs": 2416,
+    "medianStepMs": 1859,
+    "share": {
+      "jevMs": 0.48177399756986633,
+      "snapshotMs": 0.017415957877683273,
+      "actionMs": 0.4832928311057108,
+      "waitMs": 0,
+      "otherMs": 0.01751721344673957
+    },
+    "outcomes": {
+      "unsure": 1,
+      "stuck": 1,
+      "done": 1,
+      "crash": 2
+    }
+  }
+}

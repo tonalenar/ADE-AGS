@@ -1,4 +1,4 @@
-import "@/i18n/index";
+import { i18nReady } from "@/i18n/index";
 import "@fontsource-variable/jetbrains-mono";
 import ReactDOM from "react-dom/client";
 import { ThemeProvider } from "neogestify-ui-components";
@@ -8,6 +8,11 @@ import { loadAgentRegistry } from "@/features/agents/registry";
 import { fontsReady } from "@/features/terminal/fontsReady";
 import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { renderingInfo } from "@/shared/ipc/settings";
+import { reportBootStep } from "@/app/splash";
+import { installScaledMouseFix } from "@/features/terminal/scaledMouse";
+
+// O bundle chegou: a abertura passa a "carregando os workspaces".
+reportBootStep(1);
 
 // El menú de click derecho del webview (Atrás, Recargar, Inspeccionar…) es del navegador,
 // no de la app: recargar tira las terminales vivas. Se deja solo donde se escribe texto,
@@ -41,10 +46,17 @@ const rendering = renderingInfo()
   .then((info) => useTerminalPrefsStore.getState().setCompositing(info.activeNow))
   .catch(() => {});
 
+// O mouse nas terminais do canvas com zoom: a seleção cai onde o ponteiro está.
+installScaledMouseFix();
+
 const appReady = whenHomeCanPaint({ loadAgentRegistry, applyRendering: () => rendering, fontsReady });
 
-ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
-  <ThemeProvider>
-    <Boot appReady={appReady} />
-  </ThemeProvider>
-);
+// O idioma ativo vem num chunk próprio (ver `i18n/index.ts`): pinta-se depois dele, senão a primeira
+// tela mostraria as chaves. É um arquivo local; mesmo com falha a tela pinta (com as chaves).
+void i18nReady.finally(() => {
+  ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+    <ThemeProvider>
+      <Boot appReady={appReady} />
+    </ThemeProvider>
+  );
+});

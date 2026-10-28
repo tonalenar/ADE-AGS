@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { remoteHosts, parseTimeout, clampTimeout, defaultDecisionSettings, defaultModel, isDirty, isLocalUrl, modelAfterProviderChange, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
+import { remoteHosts, parseTimeout, clampTimeout, defaultDecisionSettings, defaultModel, isDirty, isJevVersion, isLocalUrl, modelAfterProviderChange, modelOptions, modelsFor, sendsOffMachine, urlAfterProviderChange, urlHost } from "../decisionsModel";
 
 describe("ajustes das decisões em sombra", () => {
   it("nasce desligado, em multilingual, com a Laya local e 800 ms", () => {
@@ -21,7 +21,7 @@ describe("ajustes das decisões em sombra", () => {
     expect(modelsFor("laya_local")).toEqual(["multilingual", "english", "typed-decisions"]);
     expect(modelsFor("laya_studio")).toEqual(["multilingual", "english", "typed-decisions"]);
     expect(modelsFor("none")).toEqual(["multilingual", "english", "typed-decisions"]);
-    expect(modelsFor("jev")).toEqual(["jev-latest", "jev-preview", "jev-1.13.0"]);
+    expect(modelsFor("jev")).toEqual(["jev-latest", "jev-preview", "jev-1.14.0"]);
     expect(defaultModel("jev")).toBe("jev-latest");
     expect(defaultModel("laya_local")).toBe("multilingual");
 
@@ -89,5 +89,24 @@ describe("ajustes das decisões em sombra", () => {
     expect(sendsOffMachine({ provider: "laya_local", baseUrl: "http://localhost:8000" })).toBe(false);
     expect(sendsOffMachine({ provider: "laya_studio", baseUrl: "https://api.laya.studio" })).toBe(true);
     expect(sendsOffMachine({ provider: "laya_local", baseUrl: "https://laya.interno.exemplo" })).toBe(true);
+  });
+});
+
+describe("versões do Jev", () => {
+  it("aceita uma versão que o app ainda não conhece, sem voltar para jev-latest", () => {
+    expect(isJevVersion("jev-1.15.2")).toBe(true);
+    expect(isJevVersion("jev-latest")).toBe(false);
+    expect(modelAfterProviderChange("jev-1.15.2", "jev")).toBe("jev-1.15.2");
+    expect(modelAfterProviderChange("jev-1.15.2", "laya_local")).toBe("multilingual");
+  });
+
+  it("o seletor usa a lista do Jev e nunca esconde o modelo em uso", () => {
+    expect(modelOptions("jev", ["jev-latest", "jev-preview", "jev-1.15.0", "jev-1.14.0"], "jev-1.15.0")).toEqual(["jev-latest", "jev-preview", "jev-1.15.0", "jev-1.14.0"]);
+    expect(modelOptions("jev", [], "jev-1.16.0")).toEqual(["jev-latest", "jev-preview", "jev-1.14.0", "jev-1.16.0"]);
+    expect(modelOptions("laya_local", ["jev-1.14.0"], "english")).toEqual(["multilingual", "english", "typed-decisions"]);
+  });
+
+  it("atualizar sozinho vem ligado", () => {
+    expect(defaultDecisionSettings().modelAutoUpdate).toBe(true);
   });
 });

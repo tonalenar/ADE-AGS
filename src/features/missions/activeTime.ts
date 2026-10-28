@@ -21,6 +21,19 @@ export function missionsWorking(
   return [...out];
 }
 
+/** Un tic no vale más que esto: con la app suspendida (o el equipo dormido) no se inventa trabajo. */
+export const MAX_TICK_MS = 60_000;
+
+/**
+ * Cuánto vale este tic: el tiempo real desde el anterior, no `ACTIVE_TICK_MS` fijo. Con la ventana
+ * minimizada el WebView espacia los `setInterval` (hasta uno por minuto) y cada tic sumaba 1 s: el
+ * tiempo activo de una misión con la app en segundo plano salía muy por debajo del real. Pura.
+ */
+export function tickMs(previous: number | undefined, now: number): number {
+  if (previous === undefined || now <= previous) return ACTIVE_TICK_MS;
+  return Math.min(now - previous, MAX_TICK_MS);
+}
+
 /** Suma un tic a cada misión que trabaja. Pura (devuelve un mapa nuevo). */
 export function accumulate(pending: ReadonlyMap<string, number>, working: readonly string[], ms: number): Map<string, number> {
   const next = new Map(pending);

@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertaToast, AnimateSpin, Button, CheckCircleIcon } from "neogestify-ui-components";
+import { AnimateSpin, Button, CheckCircleIcon } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useTabsStore } from "@/features/tabs/store";
 import { SHELL_AGENT_ID } from "@/features/tabs/types";

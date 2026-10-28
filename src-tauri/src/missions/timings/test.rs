@@ -169,3 +169,13 @@ fn qa_waits_measures_explicit_and_peer_ask_wait() {
     let qa_wait = span(3, "qa_wait", 30_000, 45_000);
     assert_eq!(qa_waits(&[qa_ask, other_ask, qa_wait]), 30_000);
 }
+
+#[test]
+fn o_relogio_se_divide_em_trabalho_ate_a_entrega_e_espera_pelo_finalizar() {
+    // Começou em t=100 s; a equipe entregou aos 160 s, voltou a ter tarefa e entregou de novo aos 400 s.
+    let spans = vec![span(1, "turn", 100_000, 150_000), span(2, "team_delivered", 160_000, 160_000), span(3, "team_delivered", 400_000, 400_000)];
+    assert_eq!(delivery_split(&spans, Some(100), Some(1_000), 2_000), (Some(300_000), Some(600_000)));
+    // Ainda sem Finalizar: a espera conta até agora.
+    assert_eq!(delivery_split(&spans, Some(100), None, 500), (Some(300_000), Some(100_000)));
+    assert_eq!(delivery_split(&spans[..1], Some(100), None, 500), (None, None), "sem entrega, nada a dividir");
+}

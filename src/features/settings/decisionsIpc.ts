@@ -79,6 +79,9 @@ export interface ShadowReport {
 
 export const getDecisionSettings = () => invoke<DecisionSettings>("decision_settings_get");
 
+/** Os modelos do Jev: os apelidos e as versões que ele listou por último (a mais nova primeiro). */
+export const jevModels = () => invoke<string[]>("decision_jev_models");
+
 export type KeySlot = "primary" | "secondary";
 
 export const setDecisionSettings = (settings: Omit<DecisionSettings, "keySaved" | "secondaryKeySaved">) =>

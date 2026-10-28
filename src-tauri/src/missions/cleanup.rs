@@ -4,6 +4,12 @@ use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
+/// Status em que a missão acabou e o worktree pode ser limpo (as outras travas — trabalho sem commit,
+/// commits fora da base, junções — continuam valendo). `done_without_delivery` faltava: 23 dos 71
+/// worktrees em ~/.ags/worktrees eram de missões assim e nunca podiam ser limpos (dois deles com
+/// 13,7 GB só de `target/`).
+pub(crate) const FINISHED: &[&str] = &["done", "done_without_delivery", "cancelled", "failed"];
+
 static CLEANING: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
 #[derive(Debug, Clone, Serialize)]
@@ -85,14 +91,14 @@ fn size(path: &Path) -> Result<u64, String> {
     Ok(total)
 }
 
-fn managed(root: &Path) -> Vec<PathBuf> {
+pub(crate) fn managed(root: &Path) -> Vec<PathBuf> {
     let mut out = Vec::new();
     let node = root.join("node_modules");
     if crate::skills::is_mount(&node) {
         out.push(node)
     }
-    if let Some(home) = dirs::home_dir() {
-        let skills = home.join(".ags").join("skills");
+    if let Some(home) = crate::util::datadir::ags_home() {
+        let skills = home.join("skills");
         for folder in [".claude/skills", ".agents/skills"] {
             out.extend(crate::runs::worktrees::managed_links(
                 &root.join(folder),
@@ -239,7 +245,7 @@ pub fn cleanup(
     let mut entries = Vec::new();
     for (root, branch) in paths {
         let mut e = inspect(&repo, base, Path::new(&root), &branch, Some(mission.into()));
-        if !matches!(status.as_str(), "done" | "cancelled" | "failed") {
+        if !FINISHED.contains(&status.as_str()) {
             e.blockers.push(format!("missão em andamento: {status}"))
         }
         let mut tabs = conn
@@ -296,12 +302,14 @@ pub async fn mission_cleanup(
     dry_run: Option<bool>,
     db: tauri::State<'_, crate::database::DbConnection>,
 ) -> Result<CleanupReport, String> {
-    let db = db.inner().clone();
+    let _ = db;
     tauri::async_runtime::spawn_blocking(move || {
         let base = dirs::home_dir()
             .ok_or("Home indisponível")?
             .join(".ags/worktrees");
-        let c = db.lock().map_err(|e| e.to_string())?;
+        // Conexão própria: a limpeza roda git e mede pastas com a base aberta (ver
+        // `open_side_connection`); com a global, o app inteiro esperava.
+        let c = crate::database::open_side_connection().map_err(|e| e.to_string())?;
         cleanup(&c, &mission_id, &base, dry_run.unwrap_or(true))
     })
     .await
@@ -364,7 +372,7 @@ pub fn list(conn: &Connection, cwd: &Path, base: &Path) -> Result<Vec<CleanupEnt
             e.blockers.push("propriedade de worktree ambígua".into());
         }
         if let Some((_, s)) = ownership {
-            if !matches!(s.as_str(), "done" | "cancelled" | "failed") {
+            if !FINISHED.contains(&s.as_str()) {
                 e.blockers.push(format!("missão em andamento: {s}"))
             }
         }

@@ -21,19 +21,20 @@ use super::notify::notify_send;
 use super::notes::{note_create, note_edit, note_list, note_read, note_write};
 use super::devices::{device_action, device_create, device_list};
 use super::pool::{pool_create, pool_delete, pool_list};
-use super::portals::{portal_action, portal_create, portal_list, portal_open};
+use super::portals::{portal_action, portal_close, portal_create, portal_list, portal_open};
 use super::role::{role_create, role_edit, role_list, role_show};
 use super::floor::{floor_create, floor_list};
 use super::routine::{
     routine_create, routine_delete, routine_disable, routine_edit, routine_enable, routine_list, routine_run, routine_show,
 };
 use super::chat::{chat_recall, chat_say};
-use super::peers::{peer_ask, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_role, peer_tell};
+use super::peers::{ci_watch, peer_ask, peer_deliver, peer_handoff, peer_check, peer_connect, peer_disconnect, peer_list, peer_recruit, peer_role, peer_tell};
 use super::browser::browser_run;
 use super::runs::{run_approve, run_orchestrate};
 use super::shared::bridge_call;
 use super::skills::{skill_edit, skill_install, skill_list, skill_new, skill_search, skill_show};
 use super::tabs::{tab_create, tab_list, tab_output, tab_send};
+use super::replay::{replay_start, replay_status, replay_stop};
 use super::watch::{watch_add, watch_list, watch_remove, watch_wait};
 use super::windows::{window_create, window_list};
 use super::workspaces::{workspace_list, workspace_open, workspace_status};
@@ -104,15 +105,26 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "tab.send" => tab_send(app, args),
         "tab.create" => tab_create(app, args),
         "tab.close" => bridge_call(app, "tab.close", args),
+        // O estado lido do transcript da TUI (ver `canal`).
+        "tab.state" => super::canal::tab_state(app, args),
         // Conversar con los agentes conectados en el canvas (ver `peers`).
         "peer.list" => peer_list(app, args),
         "peer.ask" => peer_ask(app, args),
         "peer.tell" => peer_tell(app, args),
+        "peer.deliver" => peer_deliver(app, args),
+        "peer.handoff" => peer_handoff(app, args),
         "peer.check" => peer_check(app, args),
         "peer.recruit" => peer_recruit(app, args),
         "peer.connect" => peer_connect(app, args),
         "peer.disconnect" => peer_disconnect(app, args),
         "peer.role" => peer_role(app, args),
+        // A fila persistente das mensagens que você mandou (ver `peer_queue`).
+        "peer.queue" => super::peer_queue::peer_queue(app, args),
+        // Aprovações e perguntas dos integrantes, vistas pelo canal estruturado (ver `canal`).
+        "peer.pending" => super::canal::peer_pending(app, args),
+        "peer.answer" => super::canal::peer_answer(app, args),
+        // Segue o CI de um PR e avisa no terminal de quem pediu (ver `peers::ci_watch`).
+        "ci.watch" => ci_watch(app, args),
         // Las notas del canvas conectadas con quien pide (ver `notes`).
         "note.list" => note_list(app, args),
         "note.read" => note_read(app, args),
@@ -138,6 +150,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "portal.list" => portal_list(app, args),
         "portal.create" => portal_create(app, args),
         "portal.open" => portal_open(app, args),
+        "portal.close" => portal_close(app, args),
         "portal.navigate" => portal_action(app, args, "navigate"),
         "portal.history" => portal_action(app, args, "history"),
         "portal.snapshot" => portal_action(app, args, "snapshot"),
@@ -152,6 +165,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "portal.console" => portal_action(app, args, "console"),
         "portal.layout" => portal_action(app, args, "layout"),
         "portal.act" => portal_action(app, args, "act"),
+        "portal.reset" => portal_action(app, args, "reset"),
         // Avisar al usuario (ver `notify`).
         "notify.send" => notify_send(app, args),
         // Papeles para recrutar (ver `role`).
@@ -181,6 +195,10 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "watch.remove" => watch_remove(app, args),
         "watch.list" => watch_list(app),
         "watch.wait" => watch_wait(args),
+        // Gravador dos testes por replay (só com ADE_AGS_REPLAY_RECORD=1; ver docs/ade-ags/REPLAY_TESTES.md).
+        "replay.start" => replay_start(app, args),
+        "replay.stop" => replay_stop(app, args),
+        "replay.status" => replay_status(),
         "window.list" => window_list(app),
         "window.create" => window_create(app),
         "workspace.list" => workspace_list(app),
@@ -252,6 +270,7 @@ pub fn dispatch(app: &AppHandle, command: &str, args: &Value) -> Response {
         "swarm.note" => missions::swarm_write(app, args, false),
         "swarm.question" => missions::swarm_write(app, args, true),
         "swarm.promote" => missions::swarm_promote(app, args),
+        "swarm.read" => missions::swarm_read(app, args),
         "memory.export" => missions::memory_maintenance(app, args, false),
         "memory.compact" => missions::memory_maintenance(app, args, true),
         "workspace.restore" => super::workspaces::workspace_restore(app, args),

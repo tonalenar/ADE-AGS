@@ -1,10 +1,11 @@
 import { Fragment, useEffect, useMemo, useState } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { useTranslation } from "react-i18next";
 
 import { PopupSelect } from "@/shared/ui/PopupSelect";
 import { SettingsGroup, SettingsRow, SettingsSection, SettingsToggleRow } from "@/features/settings/SettingsSection";
-import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
-import { defaultDecisionSettings, isDirty, modelAfterProviderChange, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
+import { clearDecisionKey, decisionShadowCsv, decisionShadowReport, getDecisionSettings, jevModels, setDecisionKey, setDecisionSettings, testDecisionConnection, type Comparison, type Judged, type KeySlot, type PointReport, type QuestionReport, type ShadowReport } from "@/features/settings/decisionsIpc";
+import { defaultDecisionSettings, isDirty, modelAfterProviderChange, modelOptions, modelsFor, parseTimeout, remoteHosts, urlAfterProviderChange, type DecisionProviderId, type DecisionSettings } from "@/features/settings/decisionsModel";
 
 const PROVIDERS: DecisionProviderId[] = ["none", "laya_local", "laya_studio", "jev"];
 const POINT_LABEL: Record<string, string> = {
@@ -16,6 +17,7 @@ const POINT_LABEL: Record<string, string> = {
   memory_relevance: "settings.decisions.point.relevance",
   turn_routing: "settings.decisions.point.routing",
   browser_step: "settings.decisions.point.browser",
+  browser_vision: "settings.decisions.point.browserVision",
 };
 
 const FIELD = "h-8 rounded-lg border border-gray-300 bg-white px-2.5 text-[13px] text-gray-900 outline-none transition-shadow placeholder:text-gray-400 focus:border-accent-500 focus:ring-[3px] focus:ring-accent-500/25 dark:border-white/15 dark:bg-surface-raised dark:text-gray-100 dark:placeholder:text-white/30";
@@ -146,9 +148,10 @@ export function DecisionsSection() {
   const [conn, setConn] = useState<{ ok: boolean; text: string } | null>(null);
   const [secondaryConn, setSecondaryConn] = useState<{ ok: boolean; text: string } | null>(null);
   const [report, setReport] = useState<ShadowReport | null>(null);
+  const [jevList, setJevList] = useState<string[]>([]);
 
   useEffect(() => {
-    getDecisionSettings()
+    const loadSettings = () => getDecisionSettings()
       .then((loaded) => {
         // Uma config já gravada com um modelo que o provedor não aceita (Jev com multilingual) é corrigida
         // na tela e aparece como alteração a salvar.
@@ -156,7 +159,23 @@ export function DecisionsSection() {
         setSaved(loaded);
       })
       .catch((error: unknown) => setStatus(String(error)));
+    void loadSettings();
+    jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
     decisionShadowReport().then(setReport).catch(() => undefined);
+    // O app subiu o modelo do Jev sozinho: a tela mostra o novo e a lista do que existe.
+    // Fora do app (nos testes) não há Tauri para ouvir: sem o aviso, a tela funciona igual.
+    let off: Promise<() => void> = Promise.resolve(() => {});
+    try {
+      off = listen<string>("decisions-model-updated", (event) => {
+        void loadSettings();
+        jevModels().then((list) => setJevList(Array.isArray(list) ? list : [])).catch(() => undefined);
+        setStatus(t("settings.decisions.autoUpdated", { model: event.payload }));
+      }).catch(() => () => {});
+    } catch {
+      /* sem Tauri */
+    }
+    return () => { void off.then((stop) => stop()); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const dirty = useMemo(
@@ -188,9 +207,11 @@ export function DecisionsSection() {
         memoryRelevance: settings.memoryRelevance,
         turnRouting: settings.turnRouting,
         browserPilot: settings.browserPilot,
+        browserVision: settings.browserVision,
         secondaryProvider: settings.secondaryProvider,
         secondaryBaseUrl: settings.secondaryBaseUrl,
         secondaryModel: modelAfterProviderChange(settings.secondaryModel, settings.secondaryProvider),
+        modelAutoUpdate: settings.modelAutoUpdate,
       });
       if (keyDraft.trim()) await setDecisionKey(keyDraft.trim(), "primary");
       if (secondaryKeyDraft.trim()) await setDecisionKey(secondaryKeyDraft.trim(), "secondary");
@@ -305,9 +326,13 @@ export function DecisionsSection() {
             onChange={(event) => setSettings({ ...settings, model: event.target.value })}
             className="min-w-44"
           >
-            {modelsFor(settings.provider).map((model) => <option key={model} value={model}>{model}</option>)}
+            {modelOptions(settings.provider, jevList, settings.model).map((model) => <option key={model} value={model}>{model}</option>)}
           </PopupSelect>
         </SettingsRow>
+        {settings.provider === "jev" && (
+          <SettingsToggleRow checked={settings.modelAutoUpdate} onChange={(modelAutoUpdate) => setSettings({ ...settings, modelAutoUpdate })}
+            label={t("settings.decisions.autoUpdate")} description={t("settings.decisions.autoUpdateHint")} />
+        )}
         <SettingsRow label={t("settings.decisions.timeout")} hint={t("settings.decisions.timeoutHint")}>
           <span className="flex items-center gap-2">
             <input
@@ -419,6 +444,7 @@ export function DecisionsSection() {
         <SettingsToggleRow checked={settings.memoryRelevance} onChange={(memoryRelevance) => setSettings({ ...settings, memoryRelevance })} label={t("settings.decisions.point.relevance")} description={t("settings.decisions.point.relevanceHint")} />
         <SettingsToggleRow checked={settings.turnRouting} onChange={(turnRouting) => setSettings({ ...settings, turnRouting })} label={t("settings.decisions.point.routing")} description={t("settings.decisions.point.routingHint")} />
         <SettingsToggleRow checked={settings.browserPilot} onChange={(browserPilot) => setSettings({ ...settings, browserPilot })} label={t("settings.decisions.point.browser")} description={t("settings.decisions.point.browserHint")} />
+        <SettingsToggleRow checked={settings.browserVision} onChange={(browserVision) => setSettings({ ...settings, browserVision })} label={t("settings.decisions.point.browserVision")} description={t("settings.decisions.point.browserVisionHint")} />
       </SettingsGroup>
 
       <div className="flex flex-wrap items-center gap-2">

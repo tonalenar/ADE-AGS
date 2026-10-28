@@ -1,16 +1,16 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ask } from "@tauri-apps/plugin-dialog";
-import { AlertaToast, Button } from "neogestify-ui-components";
+import { Button } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useCanvasStore, conversationBoardKey } from "@/features/canvas/store";
 import { useTabsStore } from "@/features/tabs/store";
 import { ContextMenu } from "@/shared/ui/ContextMenu";
 import { elapsed } from "@/features/workspaces/useRepoInfo";
 
-import { parseConversationSnapshot, conversationTitle, type ConversationRow } from "./conversationModel";
+import { parseConversationSnapshot, conversationTitle, titleSources, type ConversationRow } from "./conversationModel";
 import { hibernateConversation, openConversation, tabsOfConversation, type FlowContext } from "./conversationFlow";
-import { useConversationsStore } from "./conversationsStore";
+import { sameProject, useConversationsStore } from "./conversationsStore";
 import { deleteConversation, updateConversation } from "./ipc.projectConversations";
 import { sessionTitle } from "./ipc";
 
@@ -54,19 +54,16 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
     return () => window.clearTimeout(timer);
   }, [armed]);
 
-  // O contexto da conversa vira o título: o assunto real da sessão do orquestrador (ou do primeiro agente que já
-  // tenha um), não "Claude Code — C:\\pasta". Relido de tempos em tempos enquanto a conversa está ativa.
+  // O contexto da conversa vira o título: o assunto real da sessão do orquestrador, não "Claude Code — C:\\pasta".
+  // Relido de tempos em tempos: o título acompanha o contexto do orquestrador enquanto a conversa está ativa.
   useEffect(() => {
     let alive = true;
     const refresh = async () => {
       const { rows: all } = useConversationsStore.getState();
-      for (const row of all.filter((r) => r.projectKey === projectKey && r.state === "active" && !r.customTitle)) {
+      for (const row of all.filter((r) => sameProject(r.projectKey, projectKey) && r.state === "active" && !r.customTitle)) {
         const board = useCanvasStore.getState().boards[conversationBoardKey(row.cwd, row.id)];
-        const lead = new Set(board?.orchestrators ?? []);
-        const members = tabsOfConversation(row)
-          .filter((tab) => tab.agentId !== "bash" && !tab.titleIsCustom)
-          .sort((a, b) => Number(lead.has(b.id)) - Number(lead.has(a.id)));
-        for (const tab of members) {
+        // Só o orquestrador dá o título (sem coroa, o primeiro agente aberto): nunca a tarefa de um subagente.
+        for (const tab of titleSources(tabsOfConversation(row), board)) {
           const found = await sessionTitle({ agentId: tab.agentId, cwd: tab.cwd, sessionId: tab.sessionId ?? null, fallback: "", accountId: tab.accountId ?? null }).catch(() => null);
           const title = found && found.source !== "fallback" ? found.title.trim() : "";
           if (!alive) return;
@@ -84,14 +81,13 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
 
   const mine = useMemo(
     () => rows
-      .filter((r) => r.projectKey === projectKey && !r.hidden)
+      .filter((r) => sameProject(r.projectKey, projectKey) && !r.hidden)
       .sort((a, b) => Number(b.pinned) - Number(a.pinned) || (a.state === b.state ? b.lastActiveAt - a.lastActiveAt : a.state === "active" ? -1 : 1)),
     [rows, projectKey],
   );
 
   const ctx: FlowContext = {
     workspaceId, cwd, projectKey,
-    confirmWorking: (names) => ask(t("conversations.canvas.confirmWorking", { names: names.join(", ") }), { title: t("conversations.title"), kind: "warning" }),
   };
 
   const guard = async (id: string, work: () => Promise<void>) => {
@@ -169,7 +165,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
         <ContextMenu x={menu.x} y={menu.y} onClose={() => setMenu(null)} items={[
           { key: "open", label: menu.row.state === "active" ? t("conversations.canvas.show") : t("conversations.canvas.open"), onSelect: () => void open(menu.row) },
           ...(menu.row.state === "active"
-            ? [{ key: "save", label: t("conversations.canvas.saveClose"), onSelect: () => void guard(menu.row.id, async () => { await hibernateConversation(menu.row, ctx); }) }]
+            ? [{ key: "save", label: t("conversations.canvas.saveClose"), onSelect: () => void guard(menu.row.id, async () => { await hibernateConversation(menu.row, ctx, "save"); }) }]
             : []),
           { key: "pin", label: menu.row.pinned ? t("conversations.unpin") : t("conversations.pin"), separator: true, onSelect: () => void patch(menu.row, { pinned: !menu.row.pinned }) },
           { key: "rename", label: t("conversations.rename"), onSelect: () => setRenaming({ id: menu.row.id, value: titleOf(menu.row) }) },
@@ -179,7 +175,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
               if (armed !== menu.row.id) { setArmed(menu.row.id); return; }
               setArmed(null);
               void guard(menu.row.id, async () => {
-                if (menu.row.state === "active" && !(await hibernateConversation(menu.row, ctx))) return;
+                if (menu.row.state === "active" && !(await hibernateConversation(menu.row, ctx, "delete"))) return;
                 await deleteConversation(menu.row.id);
                 remove(menu.row.id);
               });
@@ -193,7 +189,7 @@ export function CanvasConversations({ projectKey, cwd, workspaceId, onOpened }: 
             if (!row) return;
             setArmed(null);
             void guard(row.id, async () => {
-              if (row.state === "active" && !(await hibernateConversation(row, ctx))) return;
+              if (row.state === "active" && !(await hibernateConversation(row, ctx, "delete"))) return;
               await deleteConversation(row.id);
               remove(row.id);
             });

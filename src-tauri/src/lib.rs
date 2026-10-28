@@ -4,8 +4,10 @@
 
 mod accounts;
 mod agents;
+mod canal;
 mod canvas;
 mod chat;
+mod compare;
 mod app;
 mod bus;
 mod database;
@@ -26,10 +28,12 @@ mod memory;
 pub mod missions;
 mod notifier;
 mod orchestrator;
+mod peer_queue;
 mod android;
 mod pet;
 mod prelaunch;
 mod preview;
+mod real_browser;
 mod roles;
 mod routines;
 mod runs;
@@ -38,12 +42,13 @@ mod session;
 mod skills;
 mod squads;
 mod sync;
+mod tab_checkpoints;
 mod terminal;
 pub mod testspeed;
 pub use terminal::SESSION_ENV;
 mod updates;
 mod usage;
-mod util;
+pub mod util;
 mod window;
 
 pub use app::run;

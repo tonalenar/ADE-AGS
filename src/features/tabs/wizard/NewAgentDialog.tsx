@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { AlertaToast, Button, FolderIcon } from "neogestify-ui-components";
+import { Button, FolderIcon } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useAccountsStore } from "@/features/accounts/store";
 import { resolveAccountChoice } from "@/features/accounts/pools";

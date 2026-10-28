@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
-import { ask } from "@tauri-apps/plugin-dialog";
+import { appConfirm } from "@/shared/ui/appConfirm";
 import { Button } from "neogestify-ui-components";
 
 import { getRoster } from "@/features/runs/ipc";
@@ -75,7 +75,10 @@ export function RoleEditDialog({ name, label, subagent, tab, tunable = true, onC
     if (isAgent && tuningChanged(before, effort, fast)) {
       // Reiniciar no meio de um turno o interrompe: pergunta antes.
       if (isWorking(screenOf(tab.id)?.lines ?? [])) {
-        const ok = await ask(t("role.restartConfirm", { name }), { title: t("role.editTitle"), kind: "warning" });
+        const ok = await appConfirm({
+          title: t("role.editTitle"), lead: t("role.restartConfirm", { name }),
+          confirmLabel: t("role.restartApply"), cancelLabel: t("role.restartBack"),
+        });
         if (!ok) return;
       }
       const { updateTab, restartAgent } = useTabsStore.getState();

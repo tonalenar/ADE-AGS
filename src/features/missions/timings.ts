@@ -4,7 +4,8 @@ import { invoke } from "@tauri-apps/api/core";
 export type TimingKind =
   | "boot" | "briefing" | "turn" | "peer_ask" | "peer_message"
   | "orchestrator_stall" | "test" | "fix_round"
-  | "start_briefing" | "start_activity" | "start_retry" | "start_stalled" | "start_all_working";
+  | "start_briefing" | "start_activity" | "start_retry" | "start_stalled" | "start_all_working"
+  | "team_delivered";
 
 export interface TimingSpan {
   id: number;
@@ -72,6 +73,10 @@ export interface MissionEfficiency {
   /** Detalle por turno: unión de los spans `turn` y `peer_ask`. */
   turnMs: number | null;
   wallMs: number | null;
+  /** Do início à última entrega da equipe (`team_delivered`); ausente sem entrega registrada. */
+  deliveredMs?: number | null;
+  /** Da entrega ao Finalizar: espera pelo usuário, não trabalho. */
+  finishWaitMs?: number | null;
   costEstimate: number | null;
   agents: number;
   historyLimit: number;

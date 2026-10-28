@@ -13,11 +13,22 @@ import { requestPtyLaunch } from "./ptyLaunch";
  * línea de un mensaje de varias líneas llegaría como un Enter y lo mandaría a medias.
  */
 const terminals = new Map<string, Terminal>();
-const submittedListeners = new Set<(tabId: string, at: number) => void>();
+/** `typed` = o que estava antes do cursor no Enter (a caixa de entrada da TUI), para rotular o envio. */
+type SubmittedListener = (tabId: string, at: number, typed: string) => void;
+const submittedListeners = new Set<SubmittedListener>();
 
-export function onPromptSubmitted(listener: (tabId: string, at: number) => void): () => void {
+export function onPromptSubmitted(listener: SubmittedListener): () => void {
   submittedListeners.add(listener);
   return () => { submittedListeners.delete(listener); };
+}
+
+/** O último texto que o app colou com Enter em cada aba (o colado grande vira um marcador na tela). */
+const lastPaste = new Map<string, { text: string; at: number }>();
+
+/** O texto que o app colou nesta aba há menos de `within` ms, se houve. */
+export function recentPaste(tabId: string, now = Date.now(), within = 3000): string | null {
+  const paste = lastPaste.get(tabId);
+  return paste && now - paste.at <= within ? paste.text : null;
 }
 
 /** Mensajes para agentes que todavía no terminaron de arrancar. */
@@ -51,6 +62,15 @@ export interface SendTimings {
   onActivity?: (at: number) => void;
   /** Se reenvió un Enter porque el briefing seguía pegado sin enviar (o no hubo actividad). */
   onRetry?: (at: number) => void;
+  /** Só pega o texto na caixa, sem Enter: a pessoa revisa e envia (a pergunta do guia de revisão). */
+  draft?: boolean;
+  /**
+   * Conferido logo antes de colar (depois da espera da TUI): `false` = não cola, descarta a mensagem
+   * e chama `onSkipped`. É onde quem cutuca rechecha o interruptor e se o destino voltou a trabalhar.
+   */
+  guard?: () => boolean;
+  /** O `guard` disse não: nada foi colado. */
+  onSkipped?: () => void;
 }
 
 const queuedTimings = new Map<string, SendTimings>();
@@ -83,6 +103,12 @@ function watchTurn(term: Terminal, onEnd: (at: number) => void): void {
 
 /** Cuánto después de enviar el briefing se verifica que el agente arrancó. */
 export const START_CHECK_MS = 25_000;
+/**
+ * Antes de eso, un Enter si la terminal sigue muda: un Enter sobre la caja vacía no hace nada, y el
+ * briefing que quedó pegado sin enviar arranca 15 s antes. En el banco real 26 de 32 arranques
+ * "parados" eran del QA, que arrancaba recién a los 25-40 s, después del Enter de `START_CHECK_MS`.
+ */
+export const EARLY_NUDGE_MS = 10_000;
 /** Plazo para que TODOS los agentes arranquen sin Enter manual (lo mide `ags mission startcheck`). */
 export const START_DEADLINE_MS = 120_000;
 /** Salida dentro de esta ventana tras el envío es el eco del pegado, no trabajo del agente. */
@@ -107,9 +133,22 @@ function watchStart(tabId: string, term: Terminal, timings: SendTimings): void {
     if (worked || terminals.get(tabId) !== term) return;
     term.input("\r");
     timings.onRetry?.(Date.now());
+  }, EARLY_NUDGE_MS);
+  // El Enter ya fue a los `EARLY_NUDGE_MS`: acá solo se avisa que no arrancó.
+  window.setTimeout(() => {
+    if (worked || terminals.get(tabId) !== term) return;
     timings.onStalled?.();
   }, START_CHECK_MS);
   window.setTimeout(() => sub.dispose(), START_DEADLINE_MS);
+}
+
+/** O `guard` de quem manda; se ele falha, não cola (falha fechada). */
+function safeGuard(guard: () => boolean): boolean {
+  try {
+    return guard();
+  } catch {
+    return false;
+  }
 }
 
 /** Espera a que la TUI termine de arrancar y le manda `text`. */
@@ -124,7 +163,11 @@ function sendWhenSettled(tabId: string, term: Terminal, text: string): void {
     if (terminals.get(tabId) !== term) return;
     queued.delete(tabId);
     queuedTimings.delete(tabId);
-    pasteIntoTab(tabId, text, true, timings?.onRetry);
+    if (timings?.guard && !safeGuard(timings.guard)) {
+      timings.onSkipped?.();
+      return;
+    }
+    pasteIntoTab(tabId, text, !timings?.draft, timings?.onRetry);
     timings?.onSent?.(Date.now());
     if (timings?.onTurnEnd) watchTurn(term, timings.onTurnEnd);
     if (timings?.onStalled || timings?.onActivity) watchStart(tabId, term, timings);
@@ -189,8 +232,11 @@ export function sendWhenReady(tabId: string, text: string, timings?: SendTimings
 export function registerTerminal(tabId: string, term: Terminal): () => void {
   terminals.set(tabId, term);
   const input = term.onData((data) => {
-    if (data === "\r" || data === "\n") {
-      for (const listener of submittedListeners) listener(tabId, Date.now());
+    if ((data === "\r" || data === "\n") && submittedListeners.size > 0) {
+      let typed = "";
+      try { typed = beforeCursor(term, 3); } catch { /* buffer em troca: sem rótulo */ }
+      const at = Date.now();
+      for (const listener of submittedListeners) listener(tabId, at, typed);
     }
   });
   const pending = queued.get(tabId);
@@ -214,17 +260,20 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRet
     return false;
   }
   term.paste(text);
+  if (submit) lastPaste.set(tabId, { text, at: Date.now() });
   // El Enter va aparte y un momento después: algunas TUIs todavía están procesando el
   // pegado cuando llega, y lo toman como parte de él en vez de como "enviar".
   if (submit) {
     setTimeout(() => term.input("\r"), 80);
     // Un pegado grande (Codex: "[Pasted Content 3904 chars]") puede tragarse ese Enter y dejar el
-    // briefing escrito sin enviar: el agente nunca arranca. Se mira la pantalla y se reintenta.
+    // briefing escrito sin enviar: el agente nunca arranca. Se mira la pantalla y se reintenta. O Hermes e o
+    // OpenCode não trocam o colado por um marcador: o texto fica inteiro na caixa, com o cursor no fim dele
+    // (`typedTextPending`). Ainda "starting agent…", eles também engolem o Enter.
     SUBMIT_RETRY_MS.forEach((delay) =>
       setTimeout(() => {
         if (terminals.get(tabId) !== term) return;
         const screen = screenOf(tabId, null, 12);
-        if (screen && pasteStillPending(screen.lines)) {
+        if ((screen && pasteStillPending(screen.lines)) || typedTextPending(beforeCursor(term), text)) {
           term.input("\r");
           onRetry?.(Date.now());
         }
@@ -234,12 +283,56 @@ export function pasteIntoTab(tabId: string, text: string, submit: boolean, onRet
   return true;
 }
 
+/**
+ * Cola `text` na entrada da TUI da tab SEM Enter, para a pessoa completar e enviar ela mesma (o trecho de
+ * terminal). Texto de várias linhas só vai com *bracketed paste* ligado: sem ele o xterm troca cada quebra
+ * por um Enter, e o trecho seria enviado aos pedaços. `offline` = sem terminal viva (pede o lançamento).
+ */
+export function insertIntoTab(tabId: string, text: string): "ok" | "offline" | "no-multiline" {
+  const term = terminals.get(tabId);
+  if (!term) return "offline";
+  if (tabPtyState(tabId) === "idle") {
+    requestPtyLaunch(tabId);
+    return "offline";
+  }
+  if (/[\r\n]/.test(text) && !term.modes.bracketedPasteMode) return "no-multiline";
+  term.paste(text);
+  return "ok";
+}
+
 /** Escribe teclas cruas na terminal da tab (ex.: "1" ou Esc para responder a um menu do TUI). `false` se não há terminal viva. */
 export function sendKeysToTab(tabId: string, keys: string): boolean {
   const term = terminals.get(tabId);
   if (!term) return false;
   term.input(keys);
   return true;
+}
+
+/** O texto até o cursor: as `rows` linhas que acabam na do cursor, esta só até ele. É onde está a caixa de
+ *  entrada de uma TUI esperando o Enter. */
+export function beforeCursor(term: Terminal, rows = 4): string {
+  const buf = term.buffer.active;
+  const y = buf.baseY + buf.cursorY;
+  const lines: string[] = [];
+  for (let at = Math.max(0, y - rows + 1); at < y; at++) lines.push(buf.getLine(at)?.translateToString(true) ?? "");
+  lines.push((buf.getLine(y)?.translateToString(true) ?? "").slice(0, buf.cursorX));
+  return lines.join("");
+}
+
+/** Bordas de caixa e espaços: o mesmo texto quebrado em linhas dentro de uma caixa ainda é o mesmo texto. */
+const LAYOUT = /[\s│┃║|▌▐]/g;
+/** Quantos caracteres do fim do texto o cursor tem de ter logo antes dele. */
+const TAIL = 16;
+
+/**
+ * O texto colado continua na caixa de entrada, sem enviar? Sim quando o que vem logo antes do cursor é o fim
+ * dele: depois do envio a caixa fica vazia, e se a pessoa já digitou algo o cursor não está mais ali (um Enter
+ * a mais mandaria o que ela escreveu). Pura.
+ */
+export function typedTextPending(beforeCursorText: string, text: string): boolean {
+  const sent = text.replace(LAYOUT, "");
+  if (sent.length === 0) return false;
+  return beforeCursorText.replace(LAYOUT, "").endsWith(sent.slice(-TAIL));
 }
 
 /** Cuándo (ms tras pegar) se vuelve a mirar si el pegado quedó sin enviar. */
@@ -252,7 +345,9 @@ export const SUBMIT_RETRY_MS = [900, 2200, 4500, 8000, 12_000, 18_000, 25_000, 3
  */
 export function pasteStillPending(lines: readonly string[]): boolean {
   const input = lines.slice(-6);
-  return input.some((line) => /\[Pasted (?:Content|text)[^\]]*\]/i.test(line) && /^\s*[›>❯]/.test(line.trim() ? line : ""));
+  // A borda da caixa de entrada ("│ › [Pasted…]") não é o prompt: sai antes de olhar.
+  const prompt = (line: string) => line.replace(/^[\s│┃║|]+/, "");
+  return input.some((line) => /\[Pasted (?:Content|text)[^\]]*\]/i.test(line) && /^[›>❯]/.test(prompt(line)));
 }
 
 export interface ScreenText {

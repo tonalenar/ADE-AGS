@@ -9,6 +9,9 @@ describe("pasteStillPending", () => {
 
   it("detecta o marcador do Claude Code na caixa de entrada", () => {
     expect(pasteStillPending(["────", "❯ [Pasted text #1 +30 lines]", "────"])).toBe(true);
+    // Dentro da caixa com borda.
+    expect(pasteStillPending(["╭────╮", "│ › [Pasted Content 3904 chars]  │", "╰────╯"])).toBe(true);
+    expect(pasteStillPending(["│ texto citando [Pasted text #1] na resposta │"])).toBe(false);
   });
 
   it("não reenvia quando a caixa está vazia", () => {

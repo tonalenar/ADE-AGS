@@ -96,8 +96,14 @@ impl Plan {
     }
 }
 
+/// Os testes que leem `scripts/bench-fixture/` pelo disco (fora do grafo de imports, que o
+/// `vitest related` segue sozinho).
+const BENCH_FIXTURE_TESTS: &[&str] = &["src/features/browser/tests/jevBench.test.ts"];
+
 enum Kind {
     Frontend,
+    /// Arquivo lido por testes conhecidos sem import: roda esses testes (`vitest related <teste>`).
+    FrontendTests(&'static [&'static str]),
     FrontendAll,
     Rust(String),
     RustAll,
@@ -122,13 +128,43 @@ pub fn is_agent_metadata(path: &str) -> bool {
         || path.starts_with(".cursor/skills/")
 }
 
-/// A source line that introduces `unsafe` (comments do not count).
+/// A source line that introduces `unsafe` (comments and string literals do not count: a briefing
+/// text saying "código unsafe ou COM" forced the full Rust suite).
 pub fn line_adds_unsafe(added: &str) -> bool {
     let code = added.trim_start();
     if code.starts_with("//") {
         return false;
     }
+    let code = without_strings(code);
+    let code = code.split("//").next().unwrap_or("");
     code.split(|c: char| !(c.is_alphanumeric() || c == '_')).any(|word| word == "unsafe")
+}
+
+/// The line with the contents of `"..."` literals blanked out (escapes respected). A line that
+/// opens a literal and does not close it keeps everything after the quote out, which is the
+/// conservative side only for multi-line strings (their next lines still count as code).
+fn without_strings(code: &str) -> String {
+    let mut out = String::with_capacity(code.len());
+    let mut in_string = false;
+    let mut escaped = false;
+    for c in code.chars() {
+        if in_string {
+            if escaped {
+                escaped = false;
+            } else if c == '\\' {
+                escaped = true;
+            } else if c == '"' {
+                in_string = false;
+                out.push('"');
+            }
+            continue;
+        }
+        if c == '"' {
+            in_string = true;
+        }
+        out.push(c);
+    }
+    out
 }
 
 /// Motivo de risco de um caminho, se houver. Pura.
@@ -219,8 +255,21 @@ fn classify(path: &str) -> Kind {
             return Kind::FrontendAll;
         }
     }
-    if path.starts_with("scripts/") {
-        return Kind::FrontendAll;
+    // `scripts/`: o código (bench, manifesto do updater) é importado pelos testes, e o `vitest related`
+    // acha quem o usa; os fixtures do bench são lidos do disco por um teste só; o resto (PowerShell,
+    // fixtures visuais) não é lido por teste nenhum. Antes qualquer arquivo daqui rodava o vitest
+    // inteiro, o babel e o tsc.
+    if let Some(rest) = path.strip_prefix("scripts/") {
+        if rest.starts_with("bench-fixture/") {
+            return Kind::FrontendTests(BENCH_FIXTURE_TESTS);
+        }
+        if rest.starts_with("visual-fixture/") || ext == "ps1" || ext == "md" {
+            return Kind::Ignored;
+        }
+        return match ext {
+            "ts" | "mts" | "mjs" | "js" | "cjs" | "json" => Kind::Frontend,
+            _ => Kind::FrontendAll,
+        };
     }
     Kind::Unmapped
 }
@@ -249,6 +298,7 @@ pub fn plan_with_unsafe(changed: &[String], unsafe_files: &[String]) -> Plan {
         }
         match classify(&file) {
             Kind::Frontend => frontend.push(file),
+            Kind::FrontendTests(tests) => frontend.extend(tests.iter().map(|t| t.to_string())),
             Kind::FrontendAll => frontend_all = true,
             Kind::Rust(m) => {
                 rust_mods.insert(m);
@@ -293,6 +343,67 @@ pub fn plan_with_unsafe(changed: &[String], unsafe_files: &[String]) -> Plan {
     }
 
     Plan { steps, full, risk, unmapped, ignored }
+}
+
+/// O nome estático de uma suíte detectada (as de `project` são estas).
+fn static_suite(name: &str) -> &'static str {
+    match name {
+        SUITE_RUST => SUITE_RUST,
+        SUITE_TSC => SUITE_TSC,
+        SUITE_FRONTEND => SUITE_FRONTEND,
+        SUITE_BABEL => SUITE_BABEL,
+        _ => "node",
+    }
+}
+
+/// O que não muda o produto de nenhum repositório: docs, markdown, CI, metadados de agente.
+fn generic_ignored(path: &str) -> bool {
+    is_agent_metadata(path)
+        || path.starts_with("docs/")
+        || path.starts_with(".github/")
+        || path.starts_with(".vscode/")
+        || path.ends_with(".md")
+        || matches!(path, "LICENSE" | ".gitignore" | ".gitattributes" | ".editorconfig")
+}
+
+/// O plano de um repositório sem o layout do ADE-AGS: sem mapa fino, roda as suítes detectadas
+/// inteiras quando algo além de docs mudou. Pura.
+pub fn plan_generic(changed: &[String], suites: &[super::run::TestCommand]) -> Plan {
+    let files: BTreeSet<String> = changed.iter().map(|f| normalize(f)).filter(|f| !f.is_empty()).collect();
+    let (ignored, relevant): (Vec<String>, Vec<String>) = files.into_iter().partition(|f| generic_ignored(f));
+    let steps = if relevant.is_empty() {
+        Vec::new()
+    } else {
+        suites
+            .iter()
+            .map(|s| Step {
+                suite: static_suite(&s.suite),
+                program: s.program.clone(),
+                args: s.args.clone(),
+                cwd: match s.cwd.as_str() {
+                    "." | "" => None,
+                    "src-tauri" => Some("src-tauri"),
+                    _ => None,
+                },
+            })
+            .collect()
+    };
+    Plan { full: !steps.is_empty(), steps, risk: Vec::new(), unmapped: Vec::new(), ignored }
+}
+
+impl Plan {
+    /// Troca a base do `vitest --changed` (o plano puro usa `origin/master`) pela base real do
+    /// worktree, a mesma de `changed_files`.
+    pub fn with_changed_base(mut self, base: &str) -> Self {
+        for step in &mut self.steps {
+            if let Some(at) = step.args.iter().position(|a| a == "--changed") {
+                if let Some(arg) = step.args.get_mut(at + 1) {
+                    *arg = base.to_string();
+                }
+            }
+        }
+        self
+    }
 }
 
 #[cfg(test)]

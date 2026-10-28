@@ -187,6 +187,14 @@ impl AgentAdapter for Kimi {
     }
 }
 
+struct Hermes;
+
+impl AgentAdapter for Hermes {
+    fn def(&self) -> &'static AgentDef {
+        row("hermes")
+    }
+}
+
 struct Bash;
 
 impl AgentAdapter for Bash {
@@ -204,6 +212,7 @@ static GEMINI: Gemini = Gemini;
 static CODEX: Codex = Codex;
 static OPENCODE: OpenCode = OpenCode;
 static KIMI: Kimi = Kimi;
+static HERMES: Hermes = Hermes;
 static BASH: Bash = Bash;
 
 /// El mismo orden que [`super::registry::AGENTS`]. La detección y el catálogo del frontend
@@ -218,7 +227,7 @@ impl AgentAdapter for Antigravity {
     }
 }
 static ANTIGRAVITY: Antigravity = Antigravity;
-static ADAPTERS: [&dyn AgentAdapter; 7] = [&CLAUDE, &GEMINI, &CODEX, &OPENCODE, &KIMI, &ANTIGRAVITY, &BASH];
+static ADAPTERS: [&dyn AgentAdapter; 8] = [&CLAUDE, &GEMINI, &CODEX, &OPENCODE, &KIMI, &HERMES, &ANTIGRAVITY, &BASH];
 
 /// Todos los providers de fábrica. No aloca: son estáticos.
 pub fn adapters() -> &'static [&'static dyn AgentAdapter] {

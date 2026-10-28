@@ -157,6 +157,63 @@ impl PrState {
     }
 }
 
+/// O que o diálogo "Finalizar" já pode trazer preenchido: o app tem os resultados de teste e as
+/// mensagens da equipe, e antes pedia tudo à mão (a missão ficava esperando o usuário digitar o que o
+/// próprio app sabia). É sugestão: o usuário confere e muda.
+#[derive(Serialize, Clone, Debug, PartialEq, Eq, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct DeliveryHint {
+    pub test_result: Option<TestResult>,
+    pub pull_request: Option<String>,
+}
+
+/// O resultado a sugerir pelo último resultado de cada suíte: alguma vermelha = falhou; todas verdes
+/// = passou; nenhuma = sem sugestão. Pura.
+pub(crate) fn suggested_test_result(latest: &[(String, bool)]) -> Option<TestResult> {
+    if latest.is_empty() {
+        None
+    } else if latest.iter().any(|(_, passed)| !passed) {
+        Some(TestResult::Failed)
+    } else {
+        Some(TestResult::Passed)
+    }
+}
+
+/// O último PR citado nas mensagens (da mais nova para a mais velha): uma URL de pull do GitHub ou
+/// "PR #n". Já normalizado como o diálogo aceita. Pura.
+pub(crate) fn last_pr_mention(texts: &[String]) -> Option<String> {
+    let url = regex::Regex::new(r"https://github\.com/[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+/pull/\d+").ok()?;
+    let short = regex::Regex::new(r"(?i)\bPR\s*#\s*(\d+)\b").ok()?;
+    texts.iter().rev().find_map(|text| {
+        let by_url = url.find_iter(text).last().and_then(|m| normalize_pr_reference(m.as_str()).ok());
+        by_url.or_else(|| short.captures_iter(text).last().and_then(|c| normalize_pr_reference(&c[1]).ok()))
+    })
+}
+
+pub(crate) fn delivery_hint(conn: &rusqlite::Connection, mission_id: &str, cwd: &Path, started_at_sec: Option<i64>) -> DeliveryHint {
+    let since_ms = started_at_sec.unwrap_or(0) * 1000;
+    let latest: Vec<(String, bool)> = crate::testspeed::run::repository_key(cwd)
+        .ok()
+        .and_then(|repo| {
+            let mut stmt = conn
+                .prepare(
+                    "SELECT t.suite, t.passed FROM test_results t
+                      WHERE t.repository = ?1 AND t.finished_at >= ?2 AND t.suite IN ('rust','tsc','frontend','babel')
+                        AND t.id = (SELECT MAX(id) FROM test_results u
+                                     WHERE u.repository = t.repository AND u.suite = t.suite AND u.finished_at >= ?2)",
+                )
+                .ok()?;
+            let rows = stmt.query_map(rusqlite::params![repo, since_ms], |r| Ok((r.get::<_, String>(0)?, r.get::<_, bool>(1)?))).ok()?;
+            Some(rows.flatten().collect())
+        })
+        .unwrap_or_default();
+    let texts: Vec<String> = conn
+        .prepare("SELECT text FROM mission_messages WHERE mission_id = ?1 ORDER BY at_ms, id")
+        .and_then(|mut stmt| stmt.query_map([mission_id], |r| r.get::<_, String>(0)).map(|rows| rows.flatten().collect()))
+        .unwrap_or_default();
+    DeliveryHint { test_result: suggested_test_result(&latest), pull_request: last_pr_mention(&texts) }
+}
+
 pub(crate) fn normalize_pr_reference(value: &str) -> Result<String, String> {
     let clean = value.trim().trim_start_matches('#');
     if let Ok(number) = clean.parse::<u64>() {
@@ -414,5 +471,21 @@ mod tests {
         assert_eq!(repo_from_reference("https://github.com/tonalenar/ADE-AGS/pull/68").as_deref(), Some("tonalenar/ADE-AGS"));
         assert_eq!(repo_from_reference("68"), None);
         assert_eq!(repo_from_reference("https://github.com/a/b/pull/123?diff=unified#issuecomment-1"), Some("a/b".into()));
+    }
+
+    #[test]
+    fn a_sugestao_do_finalizar_le_os_testes_e_o_ultimo_pr_citado() {
+        use super::*;
+        assert_eq!(suggested_test_result(&[]), None);
+        assert_eq!(suggested_test_result(&[("rust".into(), true), ("tsc".into(), true)]), Some(TestResult::Passed));
+        assert_eq!(suggested_test_result(&[("rust".into(), true), ("tsc".into(), false)]), Some(TestResult::Failed));
+        let texts = vec![
+            "abri o PR #12 para a dev".to_string(),
+            "PR https://github.com/tonalenar/ADE-AGS/pull/203 aberto, CI verde".to_string(),
+            "obrigado".to_string(),
+        ];
+        assert_eq!(last_pr_mention(&texts).as_deref(), Some("https://github.com/tonalenar/ADE-AGS/pull/203"));
+        assert_eq!(last_pr_mention(&texts[..1]).as_deref(), Some("12"));
+        assert_eq!(last_pr_mention(&["sem pr aqui".to_string()]), None);
     }
 }

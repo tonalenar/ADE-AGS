@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — pedido de teste</title>
+<!-- L11: formulário em três etapas (dados, endereço, revisão). Só dados fictícios; nada é enviado a lugar nenhum. -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1 id="title">Etapa 1 de 3 — Dados</h1>
+  <section id="s1">
+    <label for="nome">Nome</label><input id="nome">
+    <label for="email">E-mail</label><input id="email" type="email">
+    <button onclick="go(2)">Próximo</button>
+  </section>
+  <section id="s2" hidden>
+    <label for="cep">CEP</label><input id="cep">
+    <label for="cidade">Cidade</label><input id="cidade">
+    <button class="gray" onclick="go(1)">Voltar</button>
+    <button onclick="go(3)">Próximo</button>
+  </section>
+  <section id="s3" hidden>
+    <p id="resumo"></p>
+    <button class="gray" onclick="go(2)">Voltar</button>
+    <button class="green" onclick="document.getElementById('status').textContent = 'Pedido de teste enviado'">Enviar pedido de teste</button>
+  </section>
+  <div id="status"></div>
+</main>
+<script>
+  const titles = ['', 'Etapa 1 de 3 — Dados', 'Etapa 2 de 3 — Endereço', 'Etapa 3 de 3 — Revisão'];
+  function go(n) {
+    if (n === 3) document.getElementById('resumo').textContent =
+      'Revise: ' + nome.value + ', ' + email.value + ', ' + cep.value + ', ' + cidade.value;
+    for (let i = 1; i <= 3; i++) document.getElementById('s' + i).hidden = i !== n;
+    document.getElementById('title').textContent = titles[n];
+  }
+</script>
+</html>

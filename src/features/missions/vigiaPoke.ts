@@ -33,6 +33,8 @@ export const REPORT_MIN_CHARS = 100;
  * Uma mensagem a outro integrante (ex.: "confirmado, obrigado" ao QA) nunca é entrega. Pura.
  */
 export function isFinalReport(text: string | null | undefined, kind = "tell", name?: string, toLead = false): boolean {
+  // `ags peer deliver`: a entrega estruturada é final por definição, sem adivinhar pelo texto.
+  if (kind === "handoff") return true;
   if (kind !== "tell") return false;
   const firstLine = (text ?? "").trim().split(/\r?\n/, 1)[0];
   let plain = firstLine;

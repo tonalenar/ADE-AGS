@@ -76,6 +76,26 @@ pub fn suite_commands(suite: &str) -> Result<Vec<TestCommand>, String> {
     }])
 }
 
+/// Os comandos de uma suíte NESTE repositório: as do ADE-AGS no layout dele, senão as detectadas
+/// (ver `project`).
+pub fn suite_commands_in(root: &Path, suite: &str) -> Result<Vec<TestCommand>, String> {
+    match super::project::detect(root) {
+        super::project::Layout::AdeAgs => suite_commands(suite),
+        super::project::Layout::Generic(suites) => {
+            let found: Vec<TestCommand> = suites.iter().filter(|s| s.suite == suite).cloned().collect();
+            if !found.is_empty() {
+                return Ok(found);
+            }
+            let names: Vec<&str> = suites.iter().map(|s| s.suite.as_str()).collect();
+            Err(if names.is_empty() {
+                "Este repositório não tem suítes de teste que o ags conheça (Cargo, tsconfig + typescript, vitest, scripts.test ou test/*.test.js).".into()
+            } else {
+                format!("Suíte '{suite}' não existe neste repositório. Detectadas: {}.", names.join(", "))
+            })
+        }
+    }
+}
+
 pub fn migrate(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch("CREATE TABLE IF NOT EXISTS test_results (
         id INTEGER PRIMARY KEY AUTOINCREMENT, repository TEXT NOT NULL,
@@ -104,19 +124,30 @@ fn git(root: &Path, args: &[&str]) -> Result<String, String> {
 /// NUL delimiters preserve paths containing spaces/newlines; deleted paths remain
 /// in the plan, so deleting a module cannot silently remove its validation.
 ///
-/// The base stays `origin/master`, not the last green tree. A sliding base can
-/// skip a file that was verified only in another worktree, or that changed again
-/// after that green result. Reuse in this wave is the same `HEAD^{tree}` and the
-/// same normalized command, from any worktree of the repository.
+/// The base is where the worktree started (`branch.<name>.agsbase`, written when a
+/// mission creates it), else the repository's integration base (`origin/dev` in
+/// git-flow, or the remote default) — never the last green tree. A sliding base
+/// can skip a file that was verified only in another worktree, or that changed
+/// again after that green result. Before, it was always
+/// `origin/master`: a mission started from `dev` 150+ commits ahead saw `lib.rs` and
+/// `Cargo.lock` as changed and every call ran the full suites.
+pub fn base_ref(root: &Path) -> String {
+    crate::runs::worktrees::recorded_base(root)
+        .or_else(|| crate::runs::worktrees::resolve_base(root, None, false))
+        // Sem base nenhuma, o diff falha com a mensagem de sempre e nenhum teste é pulado.
+        .unwrap_or_else(|| "origin/master".into())
+}
+
 pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
     let mut files = std::collections::BTreeSet::new();
+    let range = format!("{}...HEAD", base_ref(root));
     for args in [
         vec![
             "diff",
             "--name-only",
             "-z",
             "--no-renames",
-            "origin/master...HEAD",
+            range.as_str(),
         ],
         vec!["diff", "--name-only", "-z", "--no-renames", "HEAD"],
         vec!["ls-files", "--others", "--exclude-standard", "-z"],
@@ -124,7 +155,7 @@ pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
         let out = git_raw(root, &args)?;
         if !out.status.success() {
             return Err(format!(
-                "Não foi possível obter arquivos afetados (git {}): {}. Confira origin/master; nenhum teste foi pulado.",
+                "Não foi possível obter arquivos afetados (git {}): {}. Confira a base do worktree (git config branch.<nome>.agsbase); nenhum teste foi pulado.",
                 args.join(" "),
                 String::from_utf8_lossy(&out.stderr)
             ));
@@ -141,7 +172,8 @@ pub fn changed_files(root: &Path) -> Result<Vec<String>, String> {
 
 pub fn unsafe_files(root: &Path, changed: &[String]) -> Result<Vec<String>, String> {
     let mut files = std::collections::BTreeSet::new();
-    for revision in ["origin/master...HEAD", "HEAD"] {
+    let range = format!("{}...HEAD", base_ref(root));
+    for revision in [range.as_str(), "HEAD"] {
         let diff = git(
             root,
             &[
@@ -352,6 +384,50 @@ pub fn cached_green(
     Ok(latest.and_then(|(passed, at)| passed.then_some(at)))
 }
 
+/// Onde o `tsc` deste worktree guarda o estado incremental: dentro do git dir DO WORKTREE
+/// (`.git/worktrees/<nome>/`, ou `.git/` na pasta principal). Fora da árvore de trabalho de
+/// propósito: um arquivo novo ali sujaria a árvore e mudaria a chave do cache; e não em
+/// `node_modules`, que nos worktrees das missões é uma junção compartilhada entre todos.
+fn tsc_build_info(root: &Path) -> Option<std::path::PathBuf> {
+    let out = git_raw(root, &["rev-parse", "--path-format=absolute", "--git-dir"]).ok()?;
+    if !out.status.success() {
+        return None;
+    }
+    let dir = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (!dir.is_empty()).then(|| Path::new(&dir).join("ags-tsc.tsbuildinfo"))
+}
+
+/// Os argumentos que o `tsc --noEmit` ganha para rodar incremental (~17 s a cada árvore nova antes;
+/// com o estado guardado, só o que mudou é rechecado). Ficam FORA do comando registrado: a chave do
+/// cache continua a mesma da suíte e um verde antigo segue valendo. Pura.
+pub fn incremental_args(command: &TestCommand, build_info: Option<&Path>) -> Vec<String> {
+    let is_tsc = command.program == "node" && command.args.first().is_some_and(|a| a.replace('\\', "/").ends_with("typescript/bin/tsc"));
+    let Some(build_info) = build_info.filter(|_| is_tsc) else { return Vec::new() };
+    if command.args.iter().any(|a| a == "--incremental" || a == "--build" || a == "-b") {
+        return Vec::new();
+    }
+    vec!["--incremental".into(), "--tsBuildInfoFile".into(), build_info.to_string_lossy().into_owned()]
+}
+
+/// As suítes do gate completo da última rodada de correção.
+pub const FULL_GATE_SUITES: [&str; 3] = ["rust", "tsc", "frontend"];
+
+/// O gate completo lido do cache, não do texto do agente: `true` se a árvore atual de `root` já tem
+/// verde registrado para `rust`, `tsc` e `frontend` com os comandos da suíte cheia. Antes o gate só
+/// aceitava as frases "ags test run …" no relato, e um agente que já tinha o verde (pelo affected
+/// cheio ou de outro integrante) rodava tudo de novo com `--force` só para poder escrevê-las.
+pub fn full_gate_green(conn: &Connection, root: &Path) -> bool {
+    let (Ok(repo), Ok(Some(tree))) = (repository_key(root), clean_tree(root)) else {
+        return false;
+    };
+    let suites = super::project::gate_suites(&super::project::detect(root));
+    !suites.is_empty() && suites.iter().all(|suite| {
+        let Ok(commands) = suite_commands_in(root, suite) else { return false };
+        let scope = super::scope::scoped_identity(root, &tree, suite);
+        matches!(cached_green(conn, &repo, Some(&scope), suite, &command_key(&commands)), Ok(Some(_)))
+    })
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RunResult {
@@ -361,6 +437,23 @@ pub struct RunResult {
     pub duration_ms: i64,
     pub tree_hash: Option<String>,
     pub message: String,
+    /// A suíte estava vermelha e passou: o momento de registrar a lição (ver `lesson_hint`).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub lesson: Option<String>,
+}
+
+/// Quando uma suíte que falhou na última vez passa agora, o agente acabou de descobrir por quê — e é a
+/// lição que se perdia: nada ligava testes e rodadas de correção à memória, e a mesma armadilha era
+/// redescoberta na missão seguinte. O aviso pede a causa em uma memória `finding`, que fica pendente
+/// para o usuário aprovar. `None` em qualquer outro caso. Pura.
+pub fn lesson_hint(previous_failed: bool, passed: bool, suite: &str, mission: Option<&str>) -> Option<String> {
+    if !(previous_failed && passed) {
+        return None;
+    }
+    let mission = mission.map(|m| format!(" --mission {m}")).unwrap_or_default();
+    Some(format!(
+        "A suíte {suite} estava vermelha e passou. Se a causa não é óbvia no código (uma armadilha de ambiente, de ordem, de plataforma), registre a lição para a próxima missão: `ags memory suggest{mission} --scope workspace --kind finding --key <nome-curto> --body \"causa e como evitar\"`. Se foi só um erro de digitação, não registre."
+    ))
 }
 
 pub fn record_span(
@@ -510,6 +603,7 @@ pub fn run(
                     duration_ms: 0,
                     tree_hash: tree,
                     message,
+                    lesson: None,
                 });
             }
             Turn::Mine(claim) => _claim = claim,
@@ -526,6 +620,7 @@ pub fn run(
         let mut child = crate::util::spawn::hidden_command(&command.program);
         child
             .args(&command.args)
+            .args(incremental_args(command, tsc_build_info(root).as_deref()))
             .current_dir(root.join(&command.cwd));
         if command.program == "cargo" {
             // Explicit per-worktree/custom overrides remain available. Default never
@@ -562,6 +657,15 @@ pub fn run(
     let duration_ms = timer.elapsed().as_millis().min(i64::MAX as u128) as i64;
     let after = clean_tree(root)?;
     let clean = tree.is_some() && tree == after;
+    let previous_failed = conn
+        .query_row(
+            "SELECT passed FROM test_results WHERE repository=?1 AND suite=?2 AND command_key=?3 ORDER BY id DESC LIMIT 1",
+            params![repo, suite, key],
+            |r| r.get::<_, bool>(0),
+        )
+        .optional()
+        .map_err(|e| e.to_string())?
+        == Some(false);
     conn.execute("INSERT INTO test_results(repository,tree_hash,suite,command_key,commands,duration_ms,passed,clean,finished_at) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9)",
         params![repo, scope, suite, key, serde_json::to_string(commands).map_err(|e| e.to_string())?, duration_ms, passed, clean, now_ms()]).map_err(|e| e.to_string())?;
     Ok(RunResult {
@@ -576,6 +680,7 @@ pub fn run(
             "árvore suja ou alterada durante o teste: sem reutilização de cache"
         }
         .into(),
+        lesson: lesson_hint(previous_failed, passed, suite, mission),
     })
 }
 
@@ -611,6 +716,10 @@ mod tests {
         std::fs::create_dir_all(root.join("src")).unwrap();
         std::fs::write(root.join("src-tauri").join("src").join("lib.rs"), "v1").unwrap();
         std::fs::write(root.join("src").join("App.tsx"), "v1").unwrap();
+        // O layout do ADE-AGS: só nele a chave do cache é por suíte (ver `project`).
+        std::fs::write(root.join("src-tauri").join("Cargo.toml"), "[package]").unwrap();
+        std::fs::create_dir_all(root.join("scripts")).unwrap();
+        std::fs::write(root.join("scripts").join("babel-parse-check.mjs"), "").unwrap();
         git(&root, &["add", "-A"]).unwrap();
         git(&root, &["commit", "-m", "app"]).unwrap();
         let conn = Connection::open_in_memory().unwrap();
@@ -678,7 +787,9 @@ mod tests {
             other.busy_timeout(Duration::from_secs(5)).unwrap();
             let claim = Claim::try_new(&other, worker_ids.clone(), "outro".into(), now_ms()).unwrap().unwrap();
             claimed.send(()).unwrap();
-            std::thread::sleep(Duration::from_millis(1500));
+            // Folga para o `run` chegar a esperar a posse mesmo com a suíte inteira rodando em
+            // paralelo: com 1,5 s ele às vezes começava depois do verde gravado e não «esperava».
+            std::thread::sleep(Duration::from_millis(4000));
             other
                 .execute(
                     "INSERT INTO test_results(repository,tree_hash,suite,command_key,commands,duration_ms,passed,clean,finished_at) VALUES(?1,?2,'probe',?3,'[]',1,1,1,?4)",
@@ -816,6 +927,31 @@ mod tests {
             None
         );
     }
+    #[test]
+    fn vermelho_depois_verde_pede_a_licao_e_o_resto_nao() {
+        let hint = lesson_hint(true, true, "rust", Some("m-1")).unwrap();
+        assert!(hint.contains("ags memory suggest --mission m-1") && hint.contains("--kind finding"), "{hint}");
+        assert!(lesson_hint(true, false, "rust", None).is_none());
+        assert!(lesson_hint(false, true, "rust", None).is_none());
+        assert!(!lesson_hint(true, true, "tsc", None).unwrap().contains("--mission"));
+    }
+
+    #[test]
+    fn tsc_ganha_incremental_fora_da_chave_e_os_outros_comandos_nao() {
+        let tsc = TestCommand { suite: "tsc".into(), program: "node".into(), args: vec!["node_modules/typescript/bin/tsc".into(), "--noEmit".into()], cwd: ".".into() };
+        let info = std::path::Path::new("/repo/.git/ags-tsc.tsbuildinfo");
+        let extra = incremental_args(&tsc, Some(info));
+        assert_eq!(extra[0], "--incremental");
+        assert_eq!(extra[1], "--tsBuildInfoFile");
+        assert!(extra[2].ends_with("ags-tsc.tsbuildinfo"));
+        assert!(incremental_args(&tsc, None).is_empty(), "sem git dir, roda como antes");
+        let rust = suite_commands("rust").unwrap().remove(0);
+        assert!(incremental_args(&rust, Some(info)).is_empty());
+        let mut already = tsc.clone();
+        already.args.push("--incremental".into());
+        assert!(incremental_args(&already, Some(info)).is_empty());
+    }
+
     #[test]
     fn normalized_command_key_ignores_spelling_and_filter_order() {
         let rust_a = TestCommand {

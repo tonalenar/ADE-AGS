@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="pt-BR">
+<meta charset="utf-8">
+<title>ShopMart — novidades</title>
+<!-- L14: página longa; o botão Assinar só é criado quando a rolagem chega ao fim da página. -->
+<link rel="stylesheet" href="common.css">
+<header><b>ShopMart</b></header>
+<main>
+  <h1>Novidades da semana</h1>
+  <div id="long"></div>
+  <div id="footer" style="min-height: 120px;"><div id="status"></div></div>
+</main>
+<script>
+  const long = document.getElementById('long');
+  for (let i = 1; i <= 18; i++) { const p = document.createElement('p'); p.style.cssText = 'height: 120px; margin: 0;'; p.textContent = 'Novidade número ' + i + ': mais um lançamento da semana.'; long.appendChild(p); }
+  const footer = document.getElementById('footer');
+  // Por sondagem da posição do rodapé, não por IntersectionObserver nem por evento de rolagem: no portal do app nenhum dos dois
+  // disparou (medido na rodada real: o botão nunca nascia e a L14 falhava por defeito da fixture).
+  let made = false;
+  const timer = setInterval(() => {
+    if (made || footer.getBoundingClientRect().top > window.innerHeight - 40) return;
+    made = true;
+    clearInterval(timer);
+    const b = document.createElement('button');
+    b.textContent = 'Assinar';
+    b.onclick = () => { document.getElementById('status').textContent = 'ASSINADO'; };
+    footer.prepend(b);
+  }, 150);
+</script>
+</html>

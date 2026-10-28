@@ -1,4 +1,9 @@
+import { stallMessage, type PageStallFacts } from "./pageErrors";
 import type { AppMessage, PageCommand, PageOp, PageReply } from "./protocol";
+import { windowSince } from "./windowBeat";
+
+/** O que o navegador sabe da carga, para explicar uma falta de resposta (ver `pageErrors.ts`). */
+export interface LoadState { loadCount: number; ready: boolean; navigatingForMs: number | null }
 
 /** Las órdenes que pueden hacer navegar a la página: si el documento cambia antes de que
  *  contesten, es que funcionaron. */
@@ -21,20 +26,33 @@ interface Pending {
 export class PageChannel {
   private pending = new Map<string, Pending>();
 
-  constructor(private readonly target: () => { window: Window | null; origin: string } | null) {}
+  constructor(
+    /** A página do iframe (`postMessage`), ou um transporte próprio (`post`: o Chrome real, pelo CDP). */
+    private readonly target: () => { window: Window | null; origin: string } | { post: (message: AppMessage) => void } | null,
+    private readonly loadState: () => LoadState = () => ({ loadCount: 1, ready: true, navigatingForMs: null }),
+  ) {}
 
   run(command: PageCommand, timeoutMs = 10_000): Promise<unknown> {
     const target = this.target();
-    if (!target?.window) return Promise.reject(new Error("Não há nenhuma página carregada no navegador."));
+    if (!target || ("window" in target && !target.window)) return Promise.reject(new Error("Não há nenhuma página carregada no navegador."));
     const id = crypto.randomUUID();
     return new Promise((resolve, reject) => {
+      const startedAt = Date.now();
       const timer = setTimeout(() => {
         this.pending.delete(id);
-        reject(new Error(`A página não respondeu em ${Math.round(timeoutMs / 1000)} s. `
-          + "Ainda está carregando, ou navegou para um site que não passa pelo proxy?"));
+        const window = windowSince(startedAt);
+        const facts: PageStallFacts = {
+          timeoutMs,
+          hidden: window.hiddenMs > 0 || (typeof document !== "undefined" && document.hidden),
+          lagMaxMs: window.lagMaxMs,
+          ...this.loadState(),
+        };
+        reject(new Error(stallMessage(facts)));
       }, timeoutMs);
       this.pending.set(id, { op: command.op, resolve, reject, timer });
-      target.window!.postMessage({ source: "ade-ags", type: "page:run", id, command } satisfies AppMessage, target.origin);
+      const message = { source: "ade-ags", type: "page:run", id, command } satisfies AppMessage;
+      if ("post" in target) target.post(message);
+      else target.window!.postMessage(message, target.origin);
     });
   }
 

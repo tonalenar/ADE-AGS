@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>ShopMart — visual fixture</title>
+<!--
+  Página de teste da reserva visual do piloto do Jev (`ags portal act`): dois ícones SEM NOME (perfil e carrinho,
+  sem texto, sem aria-label, sem link) e três botões com nome. Só a foto distingue o perfil do carrinho.
+    python -m http.server 8099 --directory scripts/visual-fixture
+    ags open http://localhost:8099/
+-->
+<style>
+  body { margin: 0; font: 16px system-ui, sans-serif; }
+  header { background: #282c34; height: 100px; display: flex; align-items: center; gap: 24px; padding: 0 30px; color: #fff; }
+  header b { font-size: 22px; }
+  header .space { flex: 1; }
+  .icon { width: 48px; height: 48px; cursor: pointer; border-radius: 8px; display: grid; place-items: center; }
+  .icon:hover { background: #3b4048; }
+  .icon svg { width: 30px; height: 30px; stroke: #fff; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+  main { padding: 30px; }
+  #status { font-size: 24px; font-weight: 600; margin-bottom: 24px; }
+  button { font-size: 16px; padding: 12px 22px; margin-right: 12px; border: 0; border-radius: 4px; color: #fff; cursor: pointer; }
+  .blue { background: #2563eb; } .green { background: #16a34a; } .gray { background: #6b7280; }
+</style>
+<header>
+  <b>ShopMart</b>
+  <span class="space"></span>
+  <div class="icon" onclick="say('PROFILE OPENED')">
+    <svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>
+  </div>
+  <div class="icon" onclick="say('CART OPENED')">
+    <svg viewBox="0 0 24 24"><path d="M3 4h3l2.5 11h10L21 7H7"/><circle cx="10" cy="19" r="1.5"/><circle cx="17" cy="19" r="1.5"/></svg>
+  </div>
+</header>
+<main>
+  <div id="status">Nothing opened yet.</div>
+  <button class="blue" onclick="say('LOGIN CLICKED')">Login</button>
+  <button class="green" onclick="say('SIGN UP CLICKED')">Sign up</button>
+  <button class="gray" onclick="say('CONTACT CLICKED')">Contact</button>
+</main>
+<script>function say(text) { document.getElementById('status').textContent = text; }</script>
+</html>

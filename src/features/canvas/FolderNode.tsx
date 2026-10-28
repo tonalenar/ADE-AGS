@@ -2,7 +2,8 @@ import { memo, useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { NodeResizer, type Node, type NodeProps } from "@xyflow/react";
 import { open as pickFolder } from "@tauri-apps/plugin-dialog";
-import { AlertaToast, Button, CloseIcon } from "neogestify-ui-components";
+import { Button, CloseIcon } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { readDir } from "@/features/explorer/ipc";
 import type { DirEntry } from "@/features/explorer/types";

@@ -37,6 +37,7 @@ const ICONS = {
   draw: <Svg><path d="M4 20l1-4L16.5 4.5a2.1 2.1 0 0 1 3 3L8 19l-4 1Z" /><path d="M14 7l3 3" /></Svg>,
   erase: <Svg><path d="M7 20h11M5 13l8-8a2 2 0 0 1 3 0l3 3a2 2 0 0 1 0 3l-8 8H9l-4-4a2 2 0 0 1 0-2Z" /><path d="M9 9l6 6" /></Svg>,
   undo: <Svg><path d="M9 14L4 9l5-5" /><path d="M4 9h10a6 6 0 0 1 0 12h-3" /></Svg>,
+  compare: <Svg><rect x="3" y="5" width="7" height="14" rx="1.5" /><rect x="14" y="5" width="7" height="14" rx="1.5" /><path d="M10 9h4M10 15h4" /></Svg>,
 };
 
 function ToolButton({ label, active, onClick, children, disabled }: {
@@ -54,7 +55,7 @@ function ToolButton({ label, active, onClick, children, disabled }: {
 }
 
 /** Material translúcido de las dos cápsulas de la barra (estilo macOS). */
-const material = "border-black/[0.08] dark:border-white/[0.08] bg-white/85 dark:bg-surface-raised/75 backdrop-blur-[30px] backdrop-saturate-[180%] shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]";
+const material = "border-black/[0.08] dark:border-white/[0.08] bg-white/85 dark:bg-surface-raised/75 backdrop-blur-md backdrop-saturate-[160%] shadow-[0_0_0_0.5px_rgba(255,255,255,0.08),0_10px_30px_rgba(0,0,0,0.45),0_2px_6px_rgba(0,0,0,0.3)]";
 
 const Divider = () => <span aria-hidden className="w-px h-5 mx-0.5 bg-black/10 dark:bg-white/[0.08]" />;
 
@@ -67,7 +68,7 @@ const Divider = () => <span aria-hidden className="w-px h-5 mx-0.5 bg-black/10 d
  * volver a "seleccionar".
  */
 export function CanvasToolbar({
-  tool, onTool, armed, onArm, lastPlaced, defaultSize, onUseSize, onResetSize, onImage, onGemini, style, onStyle, onUndo, canUndo,
+  tool, onTool, armed, onArm, lastPlaced, defaultSize, onUseSize, onResetSize, onImage, onGemini, style, onStyle, onUndo, canUndo, onCompare,
 }: {
   tool: Tool;
   onTool: (tool: Tool) => void;
@@ -86,6 +87,8 @@ export function CanvasToolbar({
   onStyle: (style: DrawStyle) => void;
   onUndo: () => void;
   canUndo: boolean;
+  /** Abre "Comparar modelos" (o mesmo pedido para vários agentes, cada um no seu worktree). */
+  onCompare?: () => void;
 }) {
   const { t } = useTranslation();
   const drawing = tool === "draw" || tool === "erase";
@@ -105,6 +108,12 @@ export function CanvasToolbar({
         {onGemini && <ToolButton label={t("geminiDesktop.open")} onClick={onGemini}><span aria-hidden="true">✦</span></ToolButton>}
         <Divider />
         <ToolButton label={t("canvas.tool.draw")} active={drawing} onClick={() => { onArm(null); onTool(tool === "draw" ? "select" : "draw"); }}>{ICONS.draw}</ToolButton>
+        {onCompare && (
+          <>
+            <Divider />
+            <ToolButton label={t("compare.toolbar")} onClick={() => { onArm(null); onTool("select"); onCompare(); }}>{ICONS.compare}</ToolButton>
+          </>
+        )}
       </div>
 
       {(armed || lastPlaced) && (

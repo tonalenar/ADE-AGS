@@ -69,7 +69,7 @@ export function StatusBar({ repo }: { repo: RepoInfo | null }) {
 
   return (
     <footer className="relative flex items-center gap-2.5 h-6 shrink-0 px-3
-      bg-gray-100/80 dark:bg-surface-sunken/75 backdrop-blur-xl
+      bg-gray-100/80 dark:bg-surface-sunken/75
       border-t border-gray-200 dark:border-white/[0.08]
       text-[11px] tabular-nums text-gray-500 dark:text-white/50 select-none">
 

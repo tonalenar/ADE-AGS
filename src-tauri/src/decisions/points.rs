@@ -29,6 +29,9 @@ pub const POINT_ROUTING: &str = "turn_routing";
 /// O piloto do navegador: o Jev escolhe o próximo elemento a tocar numa página (ver `browse.rs`). Ajuda de verdade
 /// (o agente pediu `ags portal act`); desligado por padrão, porque o texto da página sai da máquina.
 pub const POINT_BROWSE: &str = "browser_step";
+/// Reserva do piloto: quando o texto da página não basta, o Jev olha uma FOTO dela e aponta onde tocar (ver `vision.rs`).
+/// Desligado por padrão, à parte do piloto de texto: a foto sai da máquina e o detector de segredos não lê imagens.
+pub const POINT_BROWSE_VISION: &str = "browser_vision";
 
 /// Rótulos que a pergunta aceita mas que a heurística do ponto nunca devolve. O relatório os
 /// separa: um "desacordo" aí não é erro de ninguém, é o provedor dizendo algo que o código

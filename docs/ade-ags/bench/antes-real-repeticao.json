@@ -1,0 +1,449 @@
+{
+  "schema": 1,
+  "label": "antes-real-d",
+  "mode": "real",
+  "startedAt": "2026-10-15T23:55:58.165Z",
+  "commit": "68eedeee",
+  "runs": [
+    {
+      "id": "L01-icones-sem-nome",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/icones.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 4861,
+      "stepMs": [
+        2430.5,
+        2430.5
+      ],
+      "phases": {
+        "jevMs": 332,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 4529
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Abra o carrinho de compras: é o ícone do carrinho no canto superior direito da página.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. tocou pela foto no ponto (1843, 50) (existe p=1.00, caixa conf=0.93, 332 ms)\n2. objetivo atingido (pergunta direta p=0.87)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — ícones\" http://localhost:8781/icones.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n  - clickable [ref=e1]\n  - clickable [ref=e2]\n- main\n  - text \"CART OPENED\"\n  - button \"Contact\" [ref=e3]"
+    },
+    {
+      "id": "L02-lupa-entre-iguais",
+      "outcome": "unsure",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/lupa.html",
+      "steps": 0,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1175,
+      "stepMs": [
+        1175
+      ],
+      "phases": {
+        "jevMs": 295,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 880
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Abra a busca do site: clique na lupa no topo da página.\": PAROU (Jev sem certeza)\nO elemento que o Jev escolheu (e1) não tem nome e há outros iguais na página: só o texto não os distingue (p=0.68, fim p=0.02, 295 ms). Continue você, com `snapshot` e `click`, ou ligue a reserva visual em Ajustes → Decisões.\n\nPassos:\nA reserva visual não rodou: a página não está toda à vista no canvas: a foto sairia cortada (foto 623×688 de uma página de 1179×688)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — lupa\" http://localhost:8781/lupa.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - clickable [ref=e1]\n  - text \"ShopMart\"\n  - clickable [ref=e2]\n  - clickable [ref=e3]\n  - clickable [ref=e4]\n- main\n  - text \"Nothing opened yet.\""
+    },
+    {
+      "id": "L03-busca-com-enter",
+      "outcome": "unsure",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/busca-enter.html",
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 1,
+      "totalMs": 4994,
+      "stepMs": [
+        4994
+      ],
+      "phases": {
+        "jevMs": 644,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 4350
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por tênis no campo de busca da loja.\": PAROU (Jev sem certeza)\nO Jev não tem certeza do próximo passo (scroll, p=0.36, fim p=0.18, 303 ms). Continue você, com `snapshot` e `click`, ou diga no objetivo a escolha que falta.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)\n1. tocou pela foto no ponto (163, 129) (existe p=0.96, caixa conf=0.86, 341 ms)\nA foto acabou de tocar: confira a página antes de tirar outra (um segundo toque pode desfazer o primeiro).\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8781/busca-enter.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - form\n    - searchbox \"Buscar produtos\" [ref=e1] [focused] value=\"tenis\""
+    },
+    {
+      "id": "L04-busca-com-botao",
+      "outcome": "stuck",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/busca-botao.html?q=tenis",
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2414,
+      "stepMs": [
+        852
+      ],
+      "phases": {
+        "jevMs": 965,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 1449
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por tênis na loja.\": PAROU\nO Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)\n1. clicou button \"Buscar\" (p=0.84, fim p=0.00, 290 ms, passo 852 ms)\n2. sem caminho (p=0.47, fim p=0.01, 327 ms)\nA reserva visual também não achou um controle seguro na foto (existe p=0.87, caixa conf=0.12, 348 ms).\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8781/busca-botao.html?q=tenis\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - form\n    - searchbox \"Buscar produtos\" [ref=e1]\n    - button \"Buscar\" [ref=e2]"
+    },
+    {
+      "id": "L05-cookies",
+      "outcome": "error",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/cookies.html",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 331,
+      "stepMs": [
+        331
+      ],
+      "phases": {
+        "jevMs": 0,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 331
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione a Mochila Urbana ao carrinho.\": ERRO\nA ação falhou; veja o motivo acima e continue você.\n\nPassos:\n1. falhou: button está coberto por div#banner (#banner). Se for um modal ou overlay, feche-o primeiro; se for preciso forçar, use eval.\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — cookies\" http://localhost:8781/cookies.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Mochila Urbana\" [level=1]\n  - text \"Mochila de 20 litros, resistente à água. R$ 189,90\"\n  - text \"Carrinho: 0\"\n  - button \"Adicionar ao carrinho\" [ref=e1]\n- text \"Usamos cookies para melhorar a sua experiência.\"\n- button \"Aceitar todos\" [ref=e2]\n- button \"Recusar\" [ref=e3]\n- button \"Configurar\" [ref=e4]"
+    },
+    {
+      "id": "L06-modal-newsletter",
+      "outcome": "error",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/modal.html",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 354,
+      "stepMs": [
+        354
+      ],
+      "phases": {
+        "jevMs": 0,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 354
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione a Mochila Urbana ao carrinho, sem assinar a newsletter.\": ERRO\nA ação falhou; veja o motivo acima e continue você.\n\nPassos:\n1. falhou: button está coberto por div#modal (#modal). Se for um modal ou overlay, feche-o primeiro; se for preciso forçar, use eval.\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — newsletter\" http://localhost:8781/modal.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Mochila Urbana\" [level=1]\n  - text \"Mochila de 20 litros, resistente à água. R$ 189,90\"\n  - text \"Carrinho: 0\"\n  - button \"Adicionar ao carrinho\" [ref=e1]\n- heading \"Ganhe 10% de desconto\" [level=2]\n- text \"Assine a nossa newsletter.\"\n- textbox \"Seu e-mail\" [ref=e2]\n- button \"Quero o desconto\" [ref=e3]\n- button \"Fechar\" [ref=e4]"
+    },
+    {
+      "id": "L07-garantia-upsell",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/garantia.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2691,
+      "stepMs": [
+        1366,
+        997
+      ],
+      "phases": {
+        "jevMs": 662,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 2029
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione o Fone Bluetooth ao carrinho, sem a garantia estendida.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou button \"Adicionar ao carrinho\" (p=0.89, fim p=0.00, 297 ms, passo 1366 ms)\n2. clicou button \"Continuar sem garantia\" (p=0.56, fim p=0.01, 365 ms, passo 997 ms)\n3. objetivo atingido (pergunta direta p=0.99)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — garantia\" http://localhost:8781/garantia.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Fone Bluetooth\" [level=1]\n  - text \"Fone sem fio, 30 horas de bateria. R$ 249,90\"\n  - text \"Carrinho: 1 · sem garantia\"\n  - button \"Adicionar ao carrinho\" [ref=e1]"
+    },
+    {
+      "id": "L08-produto-sem-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/produto-fone.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1447,
+      "stepMs": [
+        643,
+        420
+      ],
+      "phases": {
+        "jevMs": 604,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 843
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione o Fone Bluetooth ao carrinho.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou link \"Ver detalhes\" (p=0.88, fim p=0.00, 296 ms, passo 643 ms)\n2. clicou button \"Adicionar ao carrinho\" (p=1.00, fim p=0.00, 308 ms, passo 420 ms)\n3. objetivo atingido (pergunta direta p=0.94)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Fone Bluetooth — ShopMart\" http://localhost:8781/produto-fone.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n  - link \"Voltar ao catálogo\" [ref=e1] → /catalogo.html\n- main\n  - heading \"Fone Bluetooth\" [level=1]\n  - text \"Fone sem fio, 30 horas de bateria. R$ 249,90\"\n  - text \"Carrinho: 1\"\n  - button \"Adicionar ao carrinho\" [ref=e2] [focused]"
+    },
+    {
+      "id": "L09-botoes-repetidos",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/repetidos.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 5565,
+      "stepMs": [
+        716
+      ],
+      "phases": {
+        "jevMs": 658,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 4907
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione a Cafeteira ao carrinho.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou button \"Adicionar\" (p=0.43, fim p=0.00, 318 ms, passo 716 ms)\n2. tocou pela foto no ponto (547, 319) (existe p=1.00, caixa conf=0.74, 340 ms)\n3. objetivo atingido (pergunta direta p=0.84)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — cozinha\" http://localhost:8781/repetidos.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Cozinha\" [level=1]\n  - text \"No carrinho: Cafeteira\"\n  - heading \"Chaleira Elétrica\" [level=3]\n  - text \"R$ 129,90\"\n  - button \"Adicionar\" [ref=e1]\n  - heading \"Cafeteira\" [level=3]\n  - text \"R$ 219,90\"\n  - button \"Adicionar\" [ref=e2] [focused]\n  - heading \"Liquidificador\" [level=3]\n  - text \"R$ 179,90\"\n  - button \"Adicionar\" [ref=e3]\n  - heading \"Torradeira\" [level=3]\n  - text \"R$ 99,90\"\n  - button \"Adicionar\" [ref=e4]\n  - heading \"Panela de Pressão\" [level=3]\n  - text \"R$ 149,90\"\n  - button \"Adicionar\" [ref=e5]\n  - heading \"Jogo de Facas\" [level=3]\n  - text \"R$ 89,90\"\n  - button \"Adicionar\" [ref=e6]\n  - heading \"Fritadeira\" [level=3]\n  - text \"R$ 399,90\"\n  - button \"Adicionar\" [ref=e7]\n  - heading \"Batedeira\" [level=3]\n  - text \"R$ 259,90\"\n  - button \"Adicionar\" [ref=e8]"
+    },
+    {
+      "id": "L10-lista-e-radio",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/selecao.html",
+      "steps": 3,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2575,
+      "stepMs": [
+        1229,
+        992
+      ],
+      "phases": {
+        "jevMs": 625,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 1950
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Escolha o tamanho G, a entrega «Retirar na loja» e confirme.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\nescolheu em dropdown \"Tamanho\" (valor de Tamanho) (pelo nome do campo, sem o Jev)\n1. clicou radio option \"Retirar na loja\" (p=0.56, fim p=0.00, 291 ms, passo 1229 ms)\n2. clicou button \"Confirmar\" (p=0.92, fim p=0.03, 334 ms, passo 992 ms)\n3. objetivo atingido (pergunta direta p=0.99)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — opções\" http://localhost:8781/selecao.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Camiseta Básica\" [level=1]\n  - combobox \"Tamanho\" [ref=e1] value=\"G\" options=[\"Escolha…\",\"P\",\"M\",\"G\",\"GG\"]\n  - text \"Entrega\"\n  - radio \"Normal (5 dias)\" [ref=e2]\n  - radio \"Expressa (1 dia)\" [ref=e3]\n  - radio \"Retirar na loja\" [ref=e4] [checked]\n  - button \"Confirmar\" [ref=e5] [focused]\n  - text \"Confirmado: tamanho G, Retirar na loja\""
+    },
+    {
+      "id": "L11-formulario-multietapas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/etapas.html",
+      "steps": 4,
+      "autoFills": 4,
+      "photos": 0,
+      "totalMs": 7058,
+      "stepMs": [
+        2720,
+        3002,
+        993
+      ],
+      "phases": {
+        "jevMs": 946,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 6112
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Preencha o pedido de teste nas três etapas (dados, endereço, revisão) e envie.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Nome\" (valor de Nome) (pelo nome do campo, sem o Jev)\ndigitou em text field \"E-mail\" (valor de E-mail) (pelo nome do campo, sem o Jev)\n1. clicou button \"Próximo\" (p=0.54, fim p=0.00, 287 ms, passo 2720 ms)\ndigitou em text field \"CEP\" (valor de CEP) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Cidade\" (valor de Cidade) (pelo nome do campo, sem o Jev)\n2. clicou button \"Próximo\" (p=0.67, fim p=0.00, 303 ms, passo 3002 ms)\n3. clicou button \"Enviar pedido de teste\" (p=0.96, fim p=0.00, 356 ms, passo 993 ms)\n4. objetivo atingido (pergunta direta p=0.99)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — pedido de teste\" http://localhost:8781/etapas.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Etapa 3 de 3 — Revisão\" [level=1]\n  - text \"Revise: Maria Teste, maria@teste.com, 01001000, Sao Paulo\"\n  - button \"Voltar\" [ref=e1]\n  - button \"Enviar pedido de teste\" [ref=e2] [focused]\n  - text \"Pedido de teste enviado\""
+    },
+    {
+      "id": "L12-garantia-na-foto",
+      "outcome": "unsure",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/foto-garantia.html",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 7057,
+      "stepMs": [
+        7057
+      ],
+      "phases": {
+        "jevMs": 594,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 6463
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Clique no botão «Garantia estendida» que aparece no meio da foto do produto.\": PAROU (Jev sem certeza)\nO elemento que o Jev escolheu (e2) não tem nome e há outros iguais na página: só o texto não os distingue (p=0.47, fim p=0.01, 279 ms). Continue você, com `snapshot` e `click`, ou ligue a reserva visual em Ajustes → Decisões.\n\nPassos:\n1. tocou pela foto no ponto (355, 330) (existe p=1.00, caixa conf=0.94, 315 ms)\nA foto acabou de tocar: confira a página antes de tirar outra (um segundo toque pode desfazer o primeiro).\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — foto do produto\" http://localhost:8781/foto-garantia.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - text \"GARANTIA ABERTA\"\n  - clickable [ref=e1]\n  - clickable [ref=e2]\n  - text \"Tênis de corrida Aero. R$ 399,90\"\n  - button \"Comprar\" [ref=e3]"
+    },
+    {
+      "id": "L13-abas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/abas.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1115,
+      "stepMs": [
+        785
+      ],
+      "phases": {
+        "jevMs": 311,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 804
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Descubra o peso do produto abrindo a aba Especificações.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou tab \"Especificações\" (p=1.00, fim p=0.00, 311 ms, passo 785 ms)\n2. objetivo atingido (pergunta direta p=0.99)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — detalhes do produto\" http://localhost:8781/abas.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Liquidificador Turbo\" [level=1]\n  - tablist\n    - tab \"Descrição\" [ref=e1]\n    - tab \"Especificações\" [ref=e2] [selected] [focused]\n    - tab \"Avaliações\" [ref=e3]\n  - text \"Peso: 1,2 kg · Tensão: 127 V · Cor: preto\""
+    },
+    {
+      "id": "L14-rolar-ate-o-fim",
+      "outcome": "stuck",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/rolar.html",
+      "steps": 1,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1088,
+      "stepMs": [
+        751
+      ],
+      "phases": {
+        "jevMs": 293,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 795
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Role até o fim da página e clique em Assinar.\": PAROU\nO mesmo passo se repetiu sem mudar a página. Continue você.\n\nPassos:\n1. rolou a página (p=0.99, fim p=0.00, 293 ms, passo 751 ms)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — novidades\" http://localhost:8781/rolar.html\nviewport: 1908×1120 · scroll 600/2454\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Novidades da semana\" [level=1]\n  - text \"Novidade número 1: mais um lançamento da semana. Novidade número 2: mais um lançamento da semana. Novidade número 3: mais um lançamento da semana. Novidade número 4: mais um lançamento da semana. Nov…\""
+    },
+    {
+      "id": "L15-quantidade-sem-enter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/quantidade.html",
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2095,
+      "stepMs": [
+        1753
+      ],
+      "phases": {
+        "jevMs": 307,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 1788
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Defina a quantidade como 3 e clique em Atualizar carrinho.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Quantidade\" (valor de Quantidade) (pelo nome do campo, sem o Jev)\n1. clicou button \"Atualizar carrinho\" (p=0.96, fim p=0.00, 307 ms, passo 1753 ms)\n2. objetivo atingido (pergunta direta p=0.99)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — quantidade\" http://localhost:8781/quantidade.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Fone Bluetooth\" [level=1]\n  - textbox \"Quantidade\" [ref=e1] value=\"3\"\n  - button \"Atualizar carrinho\" [ref=e2] [focused]\n  - text \"Quantidade: 3 · atualizado\""
+    },
+    {
+      "id": "L16-busca-com-checkout",
+      "outcome": "stuck",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/busca-checkout.html?q=tenis",
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2948,
+      "stepMs": [
+        1389
+      ],
+      "phases": {
+        "jevMs": 959,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 1989
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Pesquise por tênis na loja.\": PAROU\nO Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.\n\nPassos:\ndigitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)\n1. clicou button \"Buscar\" (p=0.88, fim p=0.00, 308 ms, passo 1389 ms)\n2. sem caminho (p=0.64, fim p=0.01, 316 ms)\nA reserva visual também não achou um controle seguro na foto (existe p=0.93, caixa conf=0.14, 335 ms).\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — busca\" http://localhost:8781/busca-checkout.html?q=tenis\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - form\n    - button \"Proceed to checkout\" [ref=e1]\n    - searchbox \"Buscar produtos\" [ref=e2]\n    - button \"Buscar\" [ref=e3]"
+    },
+    {
+      "id": "L17-comprar-agora-nao-pedido",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8781/comprar-agora.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1527,
+      "stepMs": [
+        1188
+      ],
+      "phases": {
+        "jevMs": 306,
+        "snapshotMs": 0,
+        "actionMs": 0,
+        "waitMs": 0,
+        "otherMs": 1221
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Adicione o Fone Bluetooth.\": FEITO\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou button \"Adicionar ao carrinho\" (p=0.98, fim p=0.01, 306 ms, passo 1188 ms)\n2. objetivo atingido (pergunta direta p=0.87)\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"ShopMart — fone\" http://localhost:8781/comprar-agora.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner\n  - text \"ShopMart\"\n- main\n  - heading \"Fone Bluetooth\" [level=1]\n  - text \"Fone sem fio, 30 horas de bateria. R$ 249,90\"\n  - text \"Carrinho: 1\"\n  - button \"Comprar agora\" [ref=e1]\n  - button \"Adicionar ao carrinho\" [ref=e2] [focused]"
+    }
+  ],
+  "summary": {
+    "tasks": 17,
+    "completed": 12,
+    "completedRate": 0.7058823529411765,
+    "falseDone": 0,
+    "falseUnsure": 3,
+    "violations": 0,
+    "blocked": 0,
+    "meanSteps": 1.9411764705882353,
+    "medianSteps": 2,
+    "medianTotalMs": 2414,
+    "medianStepMs": 1175,
+    "share": {
+      "jevMs": 0.17245156709605436,
+      "snapshotMs": 0,
+      "actionMs": 0,
+      "waitMs": 0,
+      "otherMs": 0.8275484329039456
+    },
+    "outcomes": {
+      "done": 9,
+      "unsure": 3,
+      "stuck": 3,
+      "error": 2
+    }
+  }
+}

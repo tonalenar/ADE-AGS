@@ -1,0 +1,503 @@
+{
+  "schema": 2,
+  "label": "dec-r1p",
+  "mode": "real",
+  "startedAt": "2026-10-16T20:22:50.240Z",
+  "commit": "f02dfe99",
+  "seed": 1,
+  "repeat": 2,
+  "order": "embaralhada por semente, invertida nas repetições ímpares",
+  "runs": [
+    {
+      "id": "P02-wikipedia-link",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://pt.wikipedia.org/wiki/Imp%C3%A9rio_Portugu%C3%AAs",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 2051,
+      "stepMs": [
+        994
+      ],
+      "phases": {
+        "jevMs": 711,
+        "snapshotMs": 144,
+        "actionMs": 647,
+        "waitMs": 0,
+        "otherMs": 549
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "unverified",
+      "report": "act \"Abra o artigo sobre Portugal clicando em um link «Portugal» do texto do artigo.\": FEITO (não verificado)\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou link \"Portugal\" (p=1.00, 333 ms, passo 994 ms)\n2. objetivo atingido (pergunta direta p=0.79)\n\nCONSULTAS: 2 consulta(s) · latência mediana 345 ms, p95 357 ms · corpo mediano 19398 B (máx 20653 B) · 16468 tokens · 1 sem a pergunta de fim · varredura de segredos 4 ms\nTEMPOS: {\"jev\":711,\"snapshot\":144,\"acao\":647,\"espera\":0,\"foto\":0,\"consultas\":2,\"fotos\":0,\"total\":1512,\"bytes\":[18143,20653],\"tokens\":16468,\"consultaMs\":[333,357],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":4,\"semConcluido\":1}\njanela: lag máx 10 ms (p95 10 ms)\nJANELA: {\"lagMaxMs\":10,\"lagP95Ms\":10,\"samples\":15,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- depois da navegação (413 ms): a página nova carregou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Império Português – Wikipédia, a enciclopédia livre\" https://pt.wikipedia.org/wiki/Imp%C3%A9rio_Portugu%C3%AAs\nviewport: 1908×1120 · scroll 0/42935\n(resumo: a página é grande; vêm primeiro as linhas do objetivo, a camada de cima e a região principal)\n\n… 75 linhas omitidas\n- main\n  - banner \"no font mode scale\"\n    - heading \"Império Português\" [level=1]\n    - button \"86 idiomas\" [ref=e25]\n  - navigation \"Espaços nominais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Artigo\" [ref=e26] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Discussão\" [ref=e27] → /wiki/Discuss%C3%A3o:Imp%C3%A9rio_Portugu%C3%AAs\n  - navigation \"Visualizações\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Ler\" [ref=e28] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Editar\" [ref=e29] → https://pt.wikipedia.org/w/index.php?title=Especial:Entrar&returnto=Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Ver histórico\" [ref=e30] → /w/index.php?title=Imp%C3%A9rio_Portugu%C3%AAs&action=history\n  - navigation \"Ferramentas de página\"\n    - button \"Ferramentas\" [ref=e31]\n    - text \"Ferramentas\"\n    - text \"mover para a barra lateral\"\n    - text \"Geral\"\n    - text \"Páginas afluentes\"\n    - text \"Alterações relacionadas\"\n    - text \"Enviar ficheiro\"\n    - text \"Hiperligação permanente\"\n    - text \"Informação da página\"\n    - text \"Citar esta página\"\n    - text \"Obter URL encurtado\"\n    - text \"Mudar para o analisador sintático antigo\"\n    - text \"Imprimir/exportar\"\n    - text \"Criar um livro\"\n    - text \"Transferir como PDF\"\n    - text \"Versão para impressão\"\n    - text \"Noutros projetos\"\n    - text \"Wikimedia Commons\"\n    - text \"Elemento Wikidata\"\n  - navigation \"Aparência\"\n    - text \"Aparência\"\n    - button \"Esconder Aparência\" [ref=e32]\n  - link \"Esta é uma versão em áudio do artigo. Clique aqui para ouvi-lo.\" [ref=e33] → https://pt.wikipedia.org/wiki/Ficheiro:Pt-Imp%C3%A9rio_Portugu%C3%AAs_intro.ogg\n  - table\n    - row\n      - columnheader \"Império Colonial Português (1933-1951) Império Português\"\n    - row\n      - columnheader\n        - table\n          - row\n            - cell\n              - table\n            - cell \"1415 — 1999\"\n            - cell\n              - table\n    - row\n      - columnheader\n        - table\n          - row\n            - cell\n              - link \"Escudo\" [ref=e34] → https://pt.wikipedia.org/wiki/Ficheiro:Shield_of_the_Kingdom_of_Portugal_(1481-1910).png\n          - row\n            - cell \"Escudo\"\n    - row\n      - cell\n        - link [ref=e35] → https://pt.wikipedia.org/wiki/Ficheiro:All_areas_of_the_world_that_were_once_part_of_the_Portuguese_Empire.png\n        - text \"Mapa dos territórios que um dia foram parte do Império Português\"\n    - row\n      - cell \"Continente\"\n      - cell\n        - link \"Europa\" [ref=e36] → https://pt.wikipedia.org/wiki/Europa\n        - text \",\"\n        - link \"África\" [ref=e37] → https://pt.wikipedia.org/wiki/%C3%81frica\n        - text \",\"\n        - link \"América\" [ref=e38] → https://pt.wikipedia.org/wiki/Am%C3%A9rica\n        - text \"e\"\n        - link \"Ásia\" [ref=e39] → https://pt.wikipedia.org/wiki/%C3%81sia\n    - row\n      - cell \"Capital\"\n      - cell\n        - link \"Lisboa\" [ref=e40] → https://pt.wikipedia.org/wiki/Lisboa\n        - text \"(1385-1808)\"\n        - link \"Rio de Janeiro\" [ref=e41] → https://pt.wikipedia.org/wiki/Rio_de_Janeiro_(cidade)\n        - text \"(1808-1821)\"\n        - link \"Lisboa\" [ref=e42] → https://pt.wikipedia.org/wiki/Lisboa\n        - text \"(1821-1999)\"\n    - row\n      - cell \"Atualmente parte de\"\n      - cell\n        - text \"Lista\"\n    - row\n      - columnheader\n    - row\n      - cell \"Língua oficial\"\n      - cell\n        - link \"Português\" [ref=e43] → https://pt.wikipedia.org/wiki/L%C3%ADngua_portuguesa\n    - row\n      - cell \"Religião\"\n      - cell\n    … 1 linhas omitidas\n    - row\n      - columnheader\n    - row\n      - cell\n      … 1 linhas omitidas\n      - cell\n        … 6 linhas omitidas\n      ",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        2051
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          18143,
+          20653
+        ],
+        "latencyMs": [
+          333
+        ],
+        "tokens": 16468,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 10
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 0
+    },
+    {
+      "id": "P03-saucedemo-carrinho",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/cart.html",
+      "steps": 4,
+      "autoFills": 2,
+      "photos": 0,
+      "totalMs": 2438,
+      "stepMs": [
+        736,
+        483,
+        437
+      ],
+      "phases": {
+        "jevMs": 1238,
+        "snapshotMs": 13,
+        "actionMs": 716,
+        "waitMs": 0,
+        "otherMs": 471
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "unverified",
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho e abra o carrinho. Não finalize nada.\": FEITO (não verificado)\nCONFERÊNCIA:\n  Dica: diga o que prova o sucesso com --expect (text:\"…\", url:/…, count:N ou absent:\"…\") e eu confiro por código, sem o Jev.\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=1.00, 323 ms, passo 736 ms)\n2. clicou button \"Add to cart\" (p=0.88, fim p=0.00, 296 ms, passo 483 ms)\n3. clicou button \"Cart, 1 items\" (p=0.93, fim p=0.04, 301 ms, passo 437 ms)\n4. objetivo atingido (pergunta direta p=0.96)\n\nCONSULTAS: 4 consulta(s) · latência mediana 299 ms, p95 323 ms · corpo mediano 6854 B (máx 8375 B) · 8898 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":1238,\"snapshot\":13,\"acao\":716,\"espera\":0,\"foto\":0,\"consultas\":4,\"fotos\":0,\"total\":1968,\"bytes\":[4015,8360,8375,5347],\"tokens\":8898,\"consultaMs\":[323,296,301,296],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1}\njanela: lag máx 5 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":5,\"lagP95Ms\":5,\"samples\":19,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/cart.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 1 items\" [ref=e2]\n  - text \"Your Cart\"\n- main \"cart contents container\"\n  - text \"QTY\"\n  - text \"Description\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e3] → /cart.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$\"\n  - text \"29.99\"\n  - button \"Remove\" [ref=e4]\n  - button \"Continue Shopping\" [ref=e5]\n  - button \"Checkout\" [ref=e6]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e7] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e8] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e9] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\"",
+      "probes": 4,
+      "acts": 1,
+      "actMs": [
+        2438
+      ],
+      "queries": {
+        "count": 4,
+        "bytes": [
+          4015,
+          8360,
+          8375,
+          5347
+        ],
+        "latencyMs": [
+          323,
+          296,
+          301
+        ],
+        "tokens": 8898,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 5
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 1
+    },
+    {
+      "id": "P04-saucedemo-checkout",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/checkout-step-two.html",
+      "steps": 6,
+      "autoFills": 5,
+      "photos": 0,
+      "totalMs": 3673,
+      "stepMs": [
+        682,
+        455,
+        433,
+        434,
+        904
+      ],
+      "phases": {
+        "jevMs": 1816,
+        "snapshotMs": 12,
+        "actionMs": 1370,
+        "waitMs": 0,
+        "otherMs": 475
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "unverified",
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho, vá ao checkout, preencha os dados fictícios e continue até o resumo (Overview). NÃO clique em Finish.\": FEITO (não verificado)\nCONFERÊNCIA:\n  Dica: diga o que prova o sucesso com --expect (text:\"…\", url:/…, count:N ou absent:\"…\") e eu confiro por código, sem o Jev.\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=0.99, 280 ms, passo 682 ms)\n2. clicou button \"View details for Sauce Labs Backpack\" (p=0.40, fim p=0.00, 317 ms, passo 455 ms)\n3. clicou button \"Cart, 1 items\" (p=0.46, fim p=0.00, 297 ms, passo 433 ms)\n4. clicou button \"Checkout\" (p=0.95, fim p=0.00, 295 ms, passo 434 ms)\ndigitou em text field \"First Name\" (valor de First Name) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Last Name\" (valor de Last Name) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Zip/Postal Code\" (valor de Postal Code) (pelo nome do campo, sem o Jev)\n5. clicou button \"Continue\" (p=0.99, fim p=0.00, 320 ms, passo 904 ms)\n6. objetivo atingido (pergunta direta p=0.94)\n\nCONSULTAS: 6 consulta(s) · latência mediana 296 ms, p95 320 ms · corpo mediano 5579 B (máx 8476 B) · 11663 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":1816,\"snapshot\":12,\"acao\":1370,\"espera\":0,\"foto\":0,\"consultas\":6,\"fotos\":0,\"total\":3204,\"bytes\":[4171,8476,5326,5581,5577,5993],\"tokens\":11663,\"consultaMs\":[280,317,297,295,320,281],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1}\njanela: lag máx 5 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":5,\"lagP95Ms\":5,\"samples\":32,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/checkout-step-two.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 1 items\" [ref=e2]\n  - text \"Checkout: Overview\"\n- main \"checkout summary container\"\n  - text \"QTY\"\n  - text \"Description\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e3] → /checkout-step-two.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$29.99\"\n  - text \"Payment Information:\"\n  - text \"SauceCard #31337\"\n  - text \"Shipping Information:\"\n  - text \"Free Pony Express Delivery!\"\n  - text \"Price Total\"\n  - text \"Item total: $\"\n  - text \"29.99\"\n  - text \"Tax: $\"\n  - text \"2.40\"\n  - text \"Total: $\"\n  - text \"32.39\"\n  - button \"Cancel\" [ref=e4]\n  - button \"Finish\" [ref=e5]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e6] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e7] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e8] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\"",
+      "probes": 6,
+      "acts": 1,
+      "actMs": [
+        3673
+      ],
+      "queries": {
+        "count": 6,
+        "bytes": [
+          4171,
+          8476,
+          5326,
+          5581,
+          5577,
+          5993
+        ],
+        "latencyMs": [
+          280,
+          317,
+          297,
+          295,
+          320
+        ],
+        "tokens": 11663,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 5
+      },
+      "windowHang": false,
+      "rep": 0,
+      "order": 2
+    },
+    {
+      "id": "P04-saucedemo-checkout",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/checkout-step-two.html",
+      "steps": 5,
+      "autoFills": 5,
+      "photos": 1,
+      "totalMs": 4597,
+      "stepMs": [
+        697,
+        452,
+        822
+      ],
+      "phases": {
+        "jevMs": 2939,
+        "snapshotMs": 15,
+        "actionMs": 1178,
+        "waitMs": 0,
+        "otherMs": 465
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "unverified",
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho, vá ao checkout, preencha os dados fictícios e continue até o resumo (Overview). NÃO clique em Finish.\": FEITO (não verificado)\nCONFERÊNCIA:\n  Dica: diga o que prova o sucesso com --expect (text:\"…\", url:/…, count:N ou absent:\"…\") e eu confiro por código, sem o Jev.\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=0.99, 297 ms, passo 697 ms)\n2. tocou pela foto no ponto (1834, 22) (existe p=0.93, caixa conf=0.69, 641 ms)\n3. clicou button \"Checkout\" (p=0.92, fim p=0.00, 318 ms, passo 452 ms)\ndigitou em text field \"First Name\" (valor de First Name) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Last Name\" (valor de Last Name) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Zip/Postal Code\" (valor de Postal Code) (pelo nome do campo, sem o Jev)\n4. clicou button \"Continue\" (p=0.99, fim p=0.00, 293 ms, passo 822 ms)\n5. objetivo atingido (pergunta direta p=0.88)\n\nCONSULTAS: 5 consulta(s) · latência mediana 297 ms, p95 318 ms · corpo mediano 5505 B (máx 8476 B) · 9868 tokens · 1 sem a pergunta de fim · varredura de segredos 1 ms\nTEMPOS: {\"jev\":1524,\"snapshot\":15,\"acao\":1178,\"espera\":0,\"foto\":1415,\"consultas\":5,\"fotos\":1,\"total\":4134,\"bytes\":[4171,8476,5505,5501,5916],\"tokens\":9868,\"consultaMs\":[297,301,318,293,291],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":1,\"semConcluido\":1}\njanela: lag máx 24 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":24,\"lagP95Ms\":5,\"samples\":42,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/checkout-step-two.html\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 1 items\" [ref=e2]\n  - text \"Checkout: Overview\"\n- main \"checkout summary container\"\n  - text \"QTY\"\n  - text \"Description\"\n  - text \"1\"\n  - button \"View details for Sauce Labs Backpack\" [ref=e3] → /checkout-step-two.html#\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$29.99\"\n  - text \"Payment Information:\"\n  - text \"SauceCard #31337\"\n  - text \"Shipping Information:\"\n  - text \"Free Pony Express Delivery!\"\n  - text \"Price Total\"\n  - text \"Item total: $\"\n  - text \"29.99\"\n  - text \"Tax: $\"\n  - text \"2.40\"\n  - text \"Total: $\"\n  - text \"32.39\"\n  - button \"Cancel\" [ref=e4]\n  - button \"Finish\" [ref=e5]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e6] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e7] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e8] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\"",
+      "probes": 6,
+      "acts": 1,
+      "actMs": [
+        4597
+      ],
+      "queries": {
+        "count": 5,
+        "bytes": [
+          4171,
+          8476,
+          5505,
+          5501,
+          5916
+        ],
+        "latencyMs": [
+          297,
+          318,
+          293
+        ],
+        "tokens": 9868,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 24
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 0
+    },
+    {
+      "id": "P03-saucedemo-carrinho",
+      "outcome": "unsure",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://www.saucedemo.com/inventory-item.html?id=4",
+      "steps": 2,
+      "autoFills": 2,
+      "photos": 0,
+      "totalMs": 2652,
+      "stepMs": [
+        697,
+        440
+      ],
+      "phases": {
+        "jevMs": 2083,
+        "snapshotMs": 7,
+        "actionMs": 529,
+        "waitMs": 0,
+        "otherMs": 33
+      },
+      "timing": "reported",
+      "blocked": false,
+      "report": "act \"Entre com o usuário e a senha de demonstração, adicione a Sauce Labs Backpack ao carrinho e abra o carrinho. Não finalize nada.\": PAROU (Jev sem certeza)\nO Jev não tem certeza do próximo passo (click e2, p=0.31, fim p=0.06, 282 ms). Continue você, com `snapshot` e `click`, ou diga no objetivo a escolha que falta. A última ação do piloto mudou a página: o objetivo pode já ter sido atingido, confira antes de continuar.\n\nPassos:\ndigitou em text field \"Username\" (valor de Username) (pelo nome do campo, sem o Jev)\ndigitou em text field \"Password\" (valor de Password) (pelo nome do campo, sem o Jev)\n1. clicou button \"Login\" (p=1.00, 292 ms, passo 697 ms)\n2. clicou button \"View details for Sauce Labs Backpack\" (p=0.44, fim p=0.13, 302 ms, passo 440 ms)\nA reserva visual também não achou um controle seguro na foto (existe p=0.87, caixa conf=0.44, 453 ms).\n\nCONSULTAS: 3 consulta(s) · latência mediana 292 ms, p95 302 ms · corpo mediano 5170 B (máx 8320 B) · 5886 tokens · 1 sem a pergunta de fim\nTEMPOS: {\"jev\":892,\"snapshot\":7,\"acao\":529,\"espera\":0,\"foto\":1191,\"consultas\":3,\"fotos\":1,\"total\":2621,\"bytes\":[4015,8320,5170],\"tokens\":5886,\"consultaMs\":[292,302,282],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":0,\"semConcluido\":1}\njanela: lag máx 9 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":9,\"lagP95Ms\":5,\"samples\":26,\"hiddenMs\":0,\"timeouts\":0}\n\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Swag Labs\" https://www.saucedemo.com/inventory-item.html?id=4\nviewport: 1920×1120 · scroll 0/1120\n\n- banner \"header container\"\n  - button \"Open Menu\" [ref=e1]\n  - img \"Open Menu\"\n  - text \"Swag Labs\"\n  - button \"Cart, 1 items\" [ref=e2]\n  - button \"Back to products\" [ref=e3]\n- main \"inventory container\"\n  - img \"Sauce Labs Backpack\"\n  - text \"Sauce Labs Backpack\"\n  - text \"carry.allTheThings() with the sleek, streamlined Sly Pack that melds uncompromising style with unequaled laptop and tablet protection.\"\n  - text \"$\"\n  - text \"29.99\"\n  - button \"Remove\" [ref=e4]\n- contentinfo\n  - list\n    - listitem\n      - link \"X\" [ref=e5] → https://x.com/saucelabs\n    - listitem\n      - link \"Facebook\" [ref=e6] → https://www.facebook.com/saucelabs\n    - listitem\n      - link \"LinkedIn\" [ref=e7] → https://www.linkedin.com/company/sauce-labs/\n  - text \"©\"\n  - text \"2026\"\n  - text \"Sauce Labs. All Rights Reserved. Terms of Service | Privacy Policy\"",
+      "probes": 4,
+      "acts": 1,
+      "actMs": [
+        2652
+      ],
+      "queries": {
+        "count": 3,
+        "bytes": [
+          4015,
+          8320,
+          5170
+        ],
+        "latencyMs": [
+          292,
+          302
+        ],
+        "tokens": 5886,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 9
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 1
+    },
+    {
+      "id": "P02-wikipedia-link",
+      "outcome": "done",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "https://pt.wikipedia.org/wiki/Imp%C3%A9rio_Portugu%C3%AAs",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1761,
+      "stepMs": [
+        757
+      ],
+      "phases": {
+        "jevMs": 689,
+        "snapshotMs": 129,
+        "actionMs": 404,
+        "waitMs": 0,
+        "otherMs": 539
+      },
+      "timing": "reported",
+      "blocked": false,
+      "verdict": "unverified",
+      "report": "act \"Abra o artigo sobre Portugal clicando em um link «Portugal» do texto do artigo.\": FEITO (não verificado)\nO Jev considera o objetivo atingido. Confira na página abaixo.\n\nPassos:\n1. clicou link \"Portugal\" (p=0.99, 339 ms, passo 757 ms)\n2. concluído (p=0.91, fim p=0.73, 330 ms)\n\nCONSULTAS: 2 consulta(s) · latência mediana 335 ms, p95 339 ms · corpo mediano 19398 B (máx 20653 B) · 16469 tokens · 1 sem a pergunta de fim · varredura de segredos 5 ms\nTEMPOS: {\"jev\":689,\"snapshot\":129,\"acao\":404,\"espera\":0,\"foto\":0,\"consultas\":2,\"fotos\":0,\"total\":1230,\"bytes\":[18143,20653],\"tokens\":16469,\"consultaMs\":[339,330],\"repeticoes\":0,\"esperaRede\":0,\"varredura\":5,\"semConcluido\":1}\njanela: lag máx 5 ms (p95 5 ms)\nJANELA: {\"lagMaxMs\":5,\"lagP95Ms\":5,\"samples\":13,\"hiddenMs\":0,\"timeouts\":0}\n\nESPERA (por estado da página, não por tempo fixo):\n- depois da navegação (321 ms): a página nova carregou\nA página agora (o Jev só escolhe onde tocar: confira o resultado):\npage: \"Império Português – Wikipédia, a enciclopédia livre\" https://pt.wikipedia.org/wiki/Imp%C3%A9rio_Portugu%C3%AAs\nviewport: 1908×1120 · scroll 0/42935\n(resumo: a página é grande; vêm primeiro as linhas do objetivo, a camada de cima e a região principal)\n\n… 75 linhas omitidas\n- main\n  - banner \"no font mode scale\"\n    - heading \"Império Português\" [level=1]\n    - button \"86 idiomas\" [ref=e25]\n  - navigation \"Espaços nominais\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Artigo\" [ref=e26] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Discussão\" [ref=e27] → /wiki/Discuss%C3%A3o:Imp%C3%A9rio_Portugu%C3%AAs\n  - navigation \"Visualizações\"\n    - list \"vector menu content list\"\n      - listitem\n        - link \"Ler\" [ref=e28] → /wiki/Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Editar\" [ref=e29] → https://pt.wikipedia.org/w/index.php?title=Especial:Entrar&returnto=Imp%C3%A9rio_Portugu%C3%AAs\n      - listitem\n        - link \"Ver histórico\" [ref=e30] → /w/index.php?title=Imp%C3%A9rio_Portugu%C3%AAs&action=history\n  - navigation \"Ferramentas de página\"\n    - button \"Ferramentas\" [ref=e31]\n    - text \"Ferramentas\"\n    - text \"mover para a barra lateral\"\n    - text \"Geral\"\n    - text \"Páginas afluentes\"\n    - text \"Alterações relacionadas\"\n    - text \"Enviar ficheiro\"\n    - text \"Hiperligação permanente\"\n    - text \"Informação da página\"\n    - text \"Citar esta página\"\n    - text \"Obter URL encurtado\"\n    - text \"Mudar para o analisador sintático antigo\"\n    - text \"Imprimir/exportar\"\n    - text \"Criar um livro\"\n    - text \"Transferir como PDF\"\n    - text \"Versão para impressão\"\n    - text \"Noutros projetos\"\n    - text \"Wikimedia Commons\"\n    - text \"Elemento Wikidata\"\n  - navigation \"Aparência\"\n    - text \"Aparência\"\n    - button \"Esconder Aparência\" [ref=e32]\n  - link \"Esta é uma versão em áudio do artigo. Clique aqui para ouvi-lo.\" [ref=e33] → https://pt.wikipedia.org/wiki/Ficheiro:Pt-Imp%C3%A9rio_Portugu%C3%AAs_intro.ogg\n  - table\n    - row\n      - columnheader \"Império Colonial Português (1933-1951) Império Português\"\n    - row\n      - columnheader\n        - table\n          - row\n            - cell\n              - table\n            - cell \"1415 — 1999\"\n            - cell\n              - table\n    - row\n      - columnheader\n        - table\n          - row\n            - cell\n              - link \"Escudo\" [ref=e34] → https://pt.wikipedia.org/wiki/Ficheiro:Shield_of_the_Kingdom_of_Portugal_(1481-1910).png\n          - row\n            - cell \"Escudo\"\n    - row\n      - cell\n        - link [ref=e35] → https://pt.wikipedia.org/wiki/Ficheiro:All_areas_of_the_world_that_were_once_part_of_the_Portuguese_Empire.png\n        - text \"Mapa dos territórios que um dia foram parte do Império Português\"\n    - row\n      - cell \"Continente\"\n      - cell\n        - link \"Europa\" [ref=e36] → https://pt.wikipedia.org/wiki/Europa\n        - text \",\"\n        - link \"África\" [ref=e37] → https://pt.wikipedia.org/wiki/%C3%81frica\n        - text \",\"\n        - link \"América\" [ref=e38] → https://pt.wikipedia.org/wiki/Am%C3%A9rica\n        - text \"e\"\n        - link \"Ásia\" [ref=e39] → https://pt.wikipedia.org/wiki/%C3%81sia\n    - row\n      - cell \"Capital\"\n      - cell\n        - link \"Lisboa\" [ref=e40] → https://pt.wikipedia.org/wiki/Lisboa\n        - text \"(1385-1808)\"\n        - link \"Rio de Janeiro\" [ref=e41] → https://pt.wikipedia.org/wiki/Rio_de_Janeiro_(cidade)\n        - text \"(1808-1821)\"\n        - link \"Lisboa\" [ref=e42] → https://pt.wikipedia.org/wiki/Lisboa\n        - text \"(1821-1999)\"\n    - row\n      - cell \"Atualmente parte de\"\n      - cell\n        - text \"Lista\"\n    - row\n      - columnheader\n    - row\n      - cell \"Língua oficial\"\n      - cell\n        - link \"Português\" [ref=e43] → https://pt.wikipedia.org/wiki/L%C3%ADngua_portuguesa\n    - row\n      - cell \"Religião\"\n      - cell\n    … 1 linhas omitidas\n    - row\n      - columnheader\n    - row\n      - cell\n      … 1 linhas omitidas\n      - cell\n        … 6 linhas omitidas\n        - link",
+      "probes": 2,
+      "acts": 1,
+      "actMs": [
+        1761
+      ],
+      "queries": {
+        "count": 2,
+        "bytes": [
+          18143,
+          20653
+        ],
+        "latencyMs": [
+          339,
+          330
+        ],
+        "tokens": 16469,
+        "tokensEstimated": false
+      },
+      "window": {
+        "lagMaxMs": 5
+      },
+      "windowHang": false,
+      "rep": 1,
+      "order": 2
+    }
+  ],
+  "summary": {
+    "tasks": 6,
+    "completed": 3,
+    "completedRate": 0.5,
+    "confirmed": 3,
+    "falseDone": 2,
+    "falseUnsure": 0,
+    "violations": 0,
+    "blocked": 0,
+    "meanSteps": 3.5,
+    "medianSteps": 3,
+    "medianTotalMs": 2545,
+    "medianStepMs": 682,
+    "share": {
+      "jevMs": 0.5518285581178662,
+      "snapshotMs": 0.01863498718844631,
+      "actionMs": 0.282087118565106,
+      "waitMs": 0,
+      "otherMs": 0.1474493361285814
+    },
+    "outcomes": {
+      "done": 5,
+      "unsure": 1
+    }
+  },
+  "v2": {
+    "gate": {
+      "runs": 6,
+      "tasks": 3,
+      "successes": 3,
+      "successRate": 0.5,
+      "falseDone": 2,
+      "falseStop": 0,
+      "caught": 0,
+      "verifiedWrong": 0,
+      "violations": 0,
+      "stepP50": 682,
+      "stepP95": 930.9999999999999,
+      "actP50": 2545,
+      "actP95": 4366,
+      "actsPerTask": 1,
+      "windowHangs": 0,
+      "lagMaxMs": 24,
+      "queriesPerTask": 3.6666666666666665,
+      "tokensPerTask": 11542,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": 5748.5,
+      "bytesPerQueryP95": 20527.5,
+      "queryLatencyP50": 301.5,
+      "queryLatencyP95": 334.5
+    },
+    "local": {
+      "runs": 0,
+      "tasks": 0,
+      "successes": 0,
+      "successRate": 0,
+      "falseDone": 0,
+      "falseStop": 0,
+      "caught": 0,
+      "verifiedWrong": 0,
+      "violations": 0,
+      "stepP50": 0,
+      "stepP95": 0,
+      "actP50": 0,
+      "actP95": 0,
+      "actsPerTask": 0,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 0,
+      "tokensPerTask": null,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": null,
+      "bytesPerQueryP95": null,
+      "queryLatencyP50": null,
+      "queryLatencyP95": null
+    },
+    "public": {
+      "runs": 6,
+      "tasks": 3,
+      "successes": 3,
+      "successRate": 0.5,
+      "falseDone": 2,
+      "falseStop": 0,
+      "caught": 0,
+      "verifiedWrong": 0,
+      "violations": 0,
+      "stepP50": 682,
+      "stepP95": 930.9999999999999,
+      "actP50": 2545,
+      "actP95": 4366,
+      "actsPerTask": 1,
+      "windowHangs": 0,
+      "lagMaxMs": 24,
+      "queriesPerTask": 3.6666666666666665,
+      "tokensPerTask": 11542,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": 5748.5,
+      "bytesPerQueryP95": 20527.5,
+      "queryLatencyP50": 301.5,
+      "queryLatencyP95": 334.5
+    },
+    "probe": {
+      "runs": 0,
+      "tasks": 0,
+      "successes": 0,
+      "successRate": 0,
+      "falseDone": 0,
+      "falseStop": 0,
+      "caught": 0,
+      "verifiedWrong": 0,
+      "violations": 0,
+      "stepP50": 0,
+      "stepP95": 0,
+      "actP50": 0,
+      "actP95": 0,
+      "actsPerTask": 0,
+      "windowHangs": 0,
+      "lagMaxMs": null,
+      "queriesPerTask": 0,
+      "tokensPerTask": null,
+      "tokensEstimated": false,
+      "bytesPerQueryP50": null,
+      "bytesPerQueryP95": null,
+      "queryLatencyP50": null,
+      "queryLatencyP95": null
+    },
+    "tasks": [
+      {
+        "id": "P02-wikipedia-link",
+        "kind": "public",
+        "probe": false,
+        "runs": 2,
+        "successes": 0,
+        "falseDone": 2,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 875.5,
+        "stepP95": 982.15,
+        "actsPerTask": 1,
+        "queriesPerTask": 2,
+        "tokensPerTask": 16468.5
+      },
+      {
+        "id": "P03-saucedemo-carrinho",
+        "kind": "public",
+        "probe": false,
+        "runs": 2,
+        "successes": 1,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 483,
+        "stepP95": 728.2,
+        "actsPerTask": 1,
+        "queriesPerTask": 3.5,
+        "tokensPerTask": 7392
+      },
+      {
+        "id": "P04-saucedemo-checkout",
+        "kind": "public",
+        "probe": false,
+        "runs": 2,
+        "successes": 2,
+        "falseDone": 0,
+        "falseStop": 0,
+        "violations": 0,
+        "stepP50": 568.5,
+        "stepP95": 875.3,
+        "actsPerTask": 1,
+        "queriesPerTask": 5.5,
+        "tokensPerTask": 10765.5
+      }
+    ]
+  },
+  "digest": "ed7c3adb"
+}

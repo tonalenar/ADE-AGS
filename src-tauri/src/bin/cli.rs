@@ -24,7 +24,7 @@ USO
   ags <grupo> <ação> [valor] [--flag valor ...]
 
 TESTES LOCAIS (no worktree atual, sem precisar do app)
-  test affected [--dry-run] [--force]          Testes afetados desde origin/master + alterações locais
+  test affected [--dry-run] [--force]          Testes afetados desde a base do worktree + alterações locais
   test run <frontend|rust|tsc|babel> [--force]  Suíte completa; reutiliza o verde só com a árvore limpa
   test status                                Últimos resultados deste repositório
   test smoke                                 Roteiro fixo do CLI contra o app aberto (tab, mission, peers, memory, --file)
@@ -35,7 +35,9 @@ TESTES LOCAIS (no worktree atual, sem precisar do app)
     ags tab send <id> \"rode os testes\" =  ags tab send --tab <id> --text \"...\"
 
 TABS
-  tab list                                    Tabs abertas agora
+  tab list                                    Tabs abertas agora (com o estado do transcript, se houver)
+  tab state <id>                              O estado lido do transcript da TUI (Claude Code, Codex):
+                                              turno aberto/encerrado, ferramentas pendentes, pergunta, tokens
   tab create <caminho> --agent <id>           Abre uma tab nova
              [--skills a,b]                   · skills a anexar, por nome
              [--account <nome>]               · conta dessa TUI (veja `accounts`)
@@ -52,14 +54,32 @@ TABS
 
 AGENTES CONECTADOS (canvas) — só alcança os conectados a este terminal
   peers                                       Quem está conectado a você
-  peer ask <nome> \"...\" [--timeout 600]      Pergunta e ESPERA a resposta
-  peer tell <nome> \"...\"                      Avisa algo, sem esperar
+  peer ask <nome> \"...\" [--timeout 600]      Pergunta e ESPERA a resposta (orquestrador: 90 s por padrão)
+  peer tell <nome> \"...\"                      Entrega e volta já: encerre o turno; a resposta chega depois
+             [--task \"...\"]                    · envelope tipado (tell/ask): o destino lê \"X pediu sua ajuda nisto.
+             [--constraints \"...\"]             · Tarefa / Restrições / Como é uma boa resposta\"; o texto livre vira contexto
+             [--expecting \"...\"]
+             (recusas de política — destino errado ou ambíguo, si mesmo, repetida, teto — saem com exit 0 e
+              {refused:true, reason, message}; tetos: profundidade 2 e 5 pedidos novos por 10 min, 15 no orquestrador)
   peer tell <nome> --file <caminho>           O mesmo, com o texto em um arquivo (sem confusão de aspas no Windows)
   peer ask <nome> --file <caminho>            O mesmo que ask, com a pergunta em um arquivo
              (ask/tell --raw: o texto como está, sem o cabeçalho \"[Mensagem de ...]\"; para
               mandar a uma TUI um comando dela, p. ex. /compact ou /clear)
   peer ask --batch '{\"A\":\"...\",\"B\":\"...\"}'  Pergunta a vários AO MESMO TEMPO e espera todos
   peer check <nome> [--lines 60]              O que aparece agora no terminal dele
+  peer deliver [<nome>] --file entrega.json   Entrega final estruturada (Handoff v1) ao orquestrador
+                                              (ou a <nome>): ele recebe uma linha com o resumo e o id
+  peer handoff <id>                           O JSON inteiro de uma entrega da sua missão
+             (tell/ask/deliver --id <req>: o seu id do pedido. O mesmo id é a mesma mensagem:
+              nunca é digitada duas vezes, nem num reenvio depois de um reinício do app)
+  peer queue [list]                           O que você mandou e ainda espera na fila (id, destino, idade)
+  peer queue refused                          As suas últimas recusas (motivo e a frase)
+  peer queue cancel <id>                      Cancela uma mensagem sua que ainda não foi entregue
+  peer pending [--all]                        Aprovações e perguntas dos integrantes que esperam resposta
+  peer answer <id> <resposta> [--enter]       Responde uma pendência (só orquestradores): num diálogo, o número
+                                              da opção, y, n ou esc; numa pergunta de fim de turno, o texto
+  ci watch <PR>                               Segue o CI do PR em segundo plano e cola o resultado
+                                              no seu terminal quando terminar (no lugar de gh pr checks --watch)
   notify \"mensagem\"                           Avisa o usuário (aviso na tela; barra de tarefas)
   Só orquestradores (coroa no canvas):
   peer recruit <nome> [--agent <id>]          Abre um agente novo, já conectado
@@ -97,8 +117,11 @@ DISPOSITIVOS ANDROID DO CANVAS — um emulador ou telefone conectado a este term
   device shot|tree <dispositivo>              Captura (devolve o caminho do PNG) · elementos com seu texto e onde tocar
 
 PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os da equipe)
-  portals                                     Os portais que você controla
-  portal create [<nome>] [<url>]              Cria um ao seu lado, já conectado
+  portals                                     Os portais que você controla, cada um com seu estado: pronto, carregando, sem runtime,
+                                              oculto (janela escondida ou nó fora de vista), verificação anti-robô ou sem resposta (+ dica do que fazer)
+  portal create [<nome>] [<url>] [--new]      Abre um navegador ao seu lado, já conectado. Reaproveita o que já está aberto com você
+                                              (ou o que ficou sem dono no canvas) e só navega; --new abre outro (no máx. 4)
+  portal close <portal>                       Fecha um portal conectado com você (limpe o que criou ao terminar)
   open <url>                                  Abre um site: localhost vai para um navegador do canvas (reaproveita o da mesma origem), o resto para o navegador do sistema
   portal navigate <portal> <url>              Vai a uma URL
   portal snapshot <portal> [--full]           A árvore da página, com refs (@e3)
@@ -107,8 +130,10 @@ PORTAIS DO CANVAS — navegadores conectados a este terminal (orquestrador: os d
   portal press <portal> <tecla> [--target <ref>]   · scroll · select · wait · history
   portal screenshot|console|layout <portal>   Foto, console e medidas
                                               (sem eval, upload nem cookies: isso é do usuário)
-  portal act <portal> \"objetivo\" [--fill campo=valor]... [--steps 8]
+  portal reset <portal>                       Zera o site aberto no portal (cookies, storage) e o histórico dos act: recarregue depois
+  portal act <portal> \"objetivo\" [--fill campo=valor]... [--expect tipo:valor]... [--steps 8]
                                               O Jev navega sozinho até o objetivo, passo a passo (Ajustes → Decisões → Navegador do canvas)
+                                              Prefira UM act com o trajeto inteiro (--steps até 15): cada chamada extra custa um turno seu
 
 CHAT COM O USUÁRIO — o chat dele por conversas (sete cores); o que você escreve no terminal NÃO chega a ele
   say \"texto\" [--progress] [--thread <cor>]    Responde no chat (--progress: aviso, seu turno continua)
@@ -232,6 +257,7 @@ MEMÓRIA COMPARTILHADA (os agentes usam por MCP; veja docs/ade-ags/SHARED_MEMORY
   memory usage [--since <unix-seconds>]      Quem leu a memória: buscas, aberturas e memórias nunca lidas
   memory open <página|entryId|chave>         Página do índice ou UMA entrada inteira (DADOS NÃO CONFIÁVEIS)
   swarm note|question <texto>                Dados de sessão da missão, não memória durável
+  swarm read                                  O quadro da missão: as notas publicadas, numeradas (#1, #2...)
   swarm promote <note-id> <key>              Propõe a nota; aprovação exclusiva do usuário
   memory export                             Exporta Markdown e revisões JSON do workspace da tab (só leitura)
   memory compact [retentionDays]             Só na interface do app; um terminal de agente não pode
@@ -478,10 +504,16 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
     let root = dunce::canonicalize(std::path::Path::new(String::from_utf8_lossy(&output.stdout).trim())).map_err(|e|e.to_string())?;
     let suite = args.get("suite").and_then(Value::as_str).unwrap_or("");
     let mut selection = None;
-    let commands = if command == "test.run" { test_runner::suite_commands(suite)? } else if command == "test.status" { vec![] } else if command == "test.affected" {
+    let commands = if command == "test.run" { test_runner::suite_commands_in(&root, suite)? } else if command == "test.status" { vec![] } else if command == "test.affected" {
         let changed = test_runner::changed_files(&root)?;
-        let unsafe_files = test_runner::unsafe_files(&root,&changed)?;
-        let plan = ade_ags_lib::testspeed::affected::plan_with_unsafe(&changed,&unsafe_files);
+        // Fora do layout do ADE-AGS, as suítes detectadas (ver testspeed::project).
+        let plan = match ade_ags_lib::testspeed::project::detect(&root) {
+            ade_ags_lib::testspeed::project::Layout::AdeAgs => {
+                let unsafe_files = test_runner::unsafe_files(&root,&changed)?;
+                ade_ags_lib::testspeed::affected::plan_with_unsafe(&changed,&unsafe_files).with_changed_base(&test_runner::base_ref(&root))
+            }
+            ade_ags_lib::testspeed::project::Layout::Generic(suites) => ade_ags_lib::testspeed::affected::plan_generic(&changed, &suites),
+        };
         eprint!("{}", plan.render_dry_run());
         let commands = plan.steps.iter().map(|step| test_runner::TestCommand {
             suite:step.suite.into(),program:step.program.clone(),args:step.args.clone(),cwd:step.cwd.unwrap_or(".").into()
@@ -494,9 +526,9 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
     if args.get("dryRun").and_then(Value::as_bool).unwrap_or(false) {
         return Ok((json!({"commands":commands,"full":selection.as_ref().is_some_and(|(_,p)|p.full),"risk":selection.as_ref().map(|(_,p)|&p.risk),"unmapped":selection.as_ref().map(|(_,p)|&p.unmapped),"ignored":selection.as_ref().map(|(_,p)|&p.ignored)}), true));
     }
-    let home = dirs::home_dir().ok_or("Não foi possível localizar a pasta do usuário.")?;
-    std::fs::create_dir_all(home.join(".ags")).map_err(|e| e.to_string())?;
-    let conn = rusqlite::Connection::open(home.join(".ags/data.db")).map_err(|e| e.to_string())?;
+    let home = ade_ags_lib::util::datadir::ags_home().ok_or("Não foi possível localizar a pasta do usuário.")?;
+    std::fs::create_dir_all(&home).map_err(|e| e.to_string())?;
+    let conn = rusqlite::Connection::open(home.join("data.db")).map_err(|e| e.to_string())?;
     // 30 s e não 5: o app grava em WAL ao mesmo tempo, e um "database is locked" aqui jogava
     // fora um verde já obtido (a próxima chamada rodava a suíte de novo).
     conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
@@ -522,7 +554,7 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
         // dos outros. Cada thread para no primeiro passo que falha dela.
         let (rust_steps, quick_steps): (Vec<_>, Vec<_>) = commands.iter().cloned().partition(|step| step.suite == "rust");
         let rust_thread = (!rust_steps.is_empty()).then(|| {
-            let (db, root, mission, actor) = (home.join(".ags/data.db"), root.clone(), mission.clone(), actor.clone());
+            let (db, root, mission, actor) = (home.join("data.db"), root.clone(), mission.clone(), actor.clone());
             std::thread::spawn(move || -> Result<Vec<test_runner::RunResult>, String> {
                 let conn = rusqlite::Connection::open(db).map_err(|e| e.to_string())?;
                 conn.execute_batch("PRAGMA busy_timeout=30000; PRAGMA foreign_keys=ON;").map_err(|e| e.to_string())?;
@@ -556,14 +588,14 @@ fn execute_tests_inner(command: &str, args: &Value) -> Result<(Value, bool), Str
 }
 
 fn execute_standalone_redeliver(args: &Value) -> ExitCode {
-    let home = match dirs::home_dir() {
+    let home = match ade_ags_lib::util::datadir::ags_home() {
         Some(h) => h,
         None => {
             println!("{}", json!({ "error": "não foi possível determinar o diretório home" }));
             return ExitCode::from(EXIT_COMMAND_FAILED);
         }
     };
-    let db_path = home.join(".ags").join("data.db");
+    let db_path = home.join("data.db");
     let conn = match rusqlite::Connection::open(&db_path) {
         Ok(c) => c,
         Err(e) => {
@@ -783,7 +815,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "skill.search" => &["query"],
         // El texto va segundo: `ags tab send <id> "corré los tests"`.
         "tab.send" => &["tab", "text"],
-        "tab.output" | "tab.close" | "watch.add" | "watch.remove" => &["tab"],
+        "tab.output" | "tab.close" | "tab.state" | "watch.add" | "watch.remove" => &["tab"],
         "tab.create" => &["cwd"],
         "workspace.open" => &["workspace"],
         // `ags mission wait <id>`, `ags mission accept <id> <tarea>`.
@@ -799,6 +831,14 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "peer.recruit" => &["name"],
         "peer.connect" | "peer.disconnect" => &["a", "b"],
         "peer.role" => &["to", "role"],
+        "ci.watch" => &["pr"],
+        // `ags peer deliver --file entrega.json` (ao orquestrador) ou `ags peer deliver QA --file ...`.
+        "peer.deliver" => &["to", "text"],
+        "peer.handoff" => &["id"],
+        // `ags peer queue`, `ags peer queue cancel 12`.
+        "peer.queue" => &["action", "id"],
+        // `ags peer answer 12 1`: a pendência e a resposta.
+        "peer.answer" => &["id", "text"],
         // `ags note read Plano 10 20`: desde la línea 10, 20 líneas.
         "notify.send" => &["message"],
         // `ags role create "Revisor" "Procure falhas..."`; el texto también va con --file.
@@ -825,6 +865,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         // `ags portal click Web @e3`: el portal primero, después lo que cada acción pide.
         "portal.create" => &["name", "url"],
         "portal.open" => &["url"],
+        "portal.close" => &["name"],
         "portal.act" => &["name", "goal"],
         "portal.navigate" => &["name", "url"],
         "portal.history" => &["name", "action"],
@@ -841,7 +882,7 @@ fn positionals(command: &str) -> &'static [&'static str] {
         "device.launch" => &["name", "package"],
         "device.tap" | "device.swipe" => &["name"],
         "portal.scroll" | "portal.wait" | "portal.snapshot" | "portal.screenshot" | "portal.console"
-        | "portal.layout" => &["name"],
+        | "portal.layout" | "portal.reset" => &["name"],
         _ => &[],
     }
 }
@@ -928,12 +969,13 @@ fn parse_flags(args: &[String], positionals: &[&str]) -> Result<Value, String> {
         }
 
         // `--fill campo=valor` repete (um por campo do formulário): acumula numa lista, como `--pre`.
-        if key == "fill" {
+        // `--expect tipo:valor` também (text:, url:, count:, absent:): o que prova o sucesso do `act`.
+        if key == "fill" || key == "expect" {
             let value = args
                 .get(i + 1)
                 .filter(|v| !v.starts_with("--"))
-                .ok_or("--fill precisa de campo=valor")?;
-            match map.entry("fill".to_string()) {
+                .ok_or_else(|| if key == "fill" { "--fill precisa de campo=valor".to_string() } else { "--expect precisa de tipo:valor (text:, url:, count: ou absent:)".to_string() })?;
+            match map.entry(key.to_string()) {
                 serde_json::map::Entry::Occupied(mut e) => {
                     if let Some(list) = e.get_mut().as_array_mut() {
                         list.push(json!(value));

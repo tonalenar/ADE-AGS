@@ -1,0 +1,74 @@
+{
+  "format": "ade-replay",
+  "version": 1,
+  "id": "claude-aprovacao",
+  "agent": "claude-code",
+  "title": "Claude Code esperando aprovação (Do you want to proceed? / ❯ 1. Yes)",
+  "origin": {
+    "kind": "synthesized",
+    "basis": "Diálogo de permissão do Claude Code coberto por WAITING_FOR_USER em stalled.ts (\"do you want to proceed\", \"1. Yes\").",
+    "recordedAt": null,
+    "platform": null,
+    "tuiVersion": null
+  },
+  "terminal": {
+    "cols": 100,
+    "rows": 30
+  },
+  "task": {
+    "atMs": 100
+  },
+  "chunks": [
+    {
+      "atMs": 0,
+      "data": "\u001b[?25l\u001b[38;2;215;119;87m╭───────────────────────────────────────────────────╮\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m \u001b[38;2;215;119;87m✻\u001b[0m Welcome to \u001b[1mClaude Code\u001b[0m!                         \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m                                                   \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m   \u001b[2m/help for help, /status for your current setup\u001b[0m  \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m                                                   \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m│\u001b[0m   \u001b[2mcwd: C:\\proj\\parser\u001b[0m                             \u001b[38;2;215;119;87m│\u001b[0m\r\n\u001b[38;2;215;119;87m╰───────────────────────────────────────────────────╯\u001b[0m\r\n\r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n❯ \r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n  \u001b[2m? for shortcuts\u001b[0m\r\n"
+    },
+    {
+      "atMs": 100,
+      "data": "\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[2m>\u001b[0m Faça o push do branch de testes\r\n\r\n\u001b[38;2;215;119;87m✻\u001b[0m \u001b[38;2;215;119;87mThinking…\u001b[0m \u001b[2m(0s · esc to interrupt)\u001b[0m\r\n\r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n❯ \r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n  \u001b[2m? for shortcuts\u001b[0m\r\n"
+    },
+    {
+      "atMs": 1000,
+      "data": "\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[38;2;215;119;87m✻\u001b[0m \u001b[38;2;215;119;87mThinking…\u001b[0m \u001b[2m(1s · esc to interrupt)\u001b[0m\r\n\r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n❯ \r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n  \u001b[2m? for shortcuts\u001b[0m\r\n"
+    },
+    {
+      "atMs": 2000,
+      "data": "\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[1A\u001b[2K\u001b[G\u001b[38;2;80;200;120m⏺\u001b[0m \u001b[1mBash\u001b[0m(git push origin feat/replay-testes)\r\n\r\n\u001b[2m────────────────────────────────────────────────────────────────────────────────────────────────────\u001b[0m\r\n \u001b[1mBash command\u001b[0m\r\n\r\n   git push origin feat/replay-testes\r\n   \u001b[2mEnvia o branch de testes para o remoto\u001b[0m\r\n\r\n Do you want to proceed?\r\n \u001b[38;2;177;185;249m❯ 1. Yes\u001b[0m\r\n   2. Yes, and don't ask again for git push commands in C:\\proj\\parser\r\n   3. No, and tell Claude what to do differently \u001b[2m(esc)\u001b[0m\r\n"
+    }
+  ],
+  "checkpoints": [
+    {
+      "atMs": 1500,
+      "label": "pensando antes do diálogo",
+      "expect": {
+        "working": true,
+        "waitingApproval": false
+      }
+    },
+    {
+      "atMs": 2500,
+      "label": "diálogo de aprovação na tela",
+      "expect": {
+        "working": false,
+        "waitingApproval": true,
+        "screenQuestion": false,
+        "pastePending": false,
+        "screenContains": "Do you want to proceed?"
+      },
+      "xfail": {
+        "rust": [
+          "working"
+        ],
+        "reason": "Mesmo caso do claude-ocioso: os quadros do spinner de antes do diálogo ainda estão nos últimos 4 KB crus."
+      }
+    },
+    {
+      "atMs": 200000,
+      "label": "esperando o usuário há mais de 3 min: não é agente parado",
+      "expect": {
+        "stalled": false,
+        "waitingApproval": true
+      }
+    }
+  ]
+}

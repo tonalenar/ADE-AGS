@@ -37,7 +37,8 @@ describe("Complete PT-BR locale", () => {
     vi.stubGlobal("localStorage", { getItem: () => null });
     vi.stubGlobal("navigator", { language: "pt-BR" });
     try {
-      const { default: i18n } = await import("../index");
+      const { default: i18n, i18nReady } = await import("../index");
+      await i18nReady;
       expect(i18n.language).toBe("pt-BR");
       expect(i18n.hasResourceBundle("pt-BR", "translation")).toBe(true);
       expect(i18n.options.fallbackLng).toEqual(["en"]);

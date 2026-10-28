@@ -1,0 +1,437 @@
+{
+  "schema": 1,
+  "label": "dev-atual",
+  "mode": "sim",
+  "startedAt": "2026-10-15T23:24:01.995Z",
+  "commit": "afecb91c",
+  "runs": [
+    {
+      "log": [
+        "1. tocou pela foto no ponto (1866, 40) (existe p=0.90, caixa conf=0.80, 1400 ms)",
+        "2. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L01-icones-sem-nome",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/icones.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 2680,
+      "stepMs": [
+        2230,
+        450
+      ],
+      "phases": {
+        "jevMs": 2300,
+        "snapshotMs": 240,
+        "actionMs": 90,
+        "waitMs": 50,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    },
+    {
+      "log": [
+        "1. tocou pela foto no ponto (1730, 40) (existe p=0.90, caixa conf=0.80, 1400 ms)",
+        "2. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L02-lupa-entre-iguais",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/lupa.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 2680,
+      "stepMs": [
+        2230,
+        450
+      ],
+      "phases": {
+        "jevMs": 2300,
+        "snapshotMs": 240,
+        "actionMs": 90,
+        "waitMs": 50,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)",
+        "1. rolou a página (p=0.50, 450 ms)"
+      ],
+      "id": "L03-busca-com-enter",
+      "outcome": "stuck",
+      "criterionOk": false,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-enter.html",
+      "steps": 1,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1500,
+      "stepMs": [
+        1050,
+        450
+      ],
+      "phases": {
+        "jevMs": 900,
+        "snapshotMs": 360,
+        "actionMs": 140,
+        "waitMs": 100,
+        "otherMs": 0
+      },
+      "timing": "measured",
+      "note": "O mesmo passo se repetiu sem mudar a página. Continue você."
+    },
+    {
+      "log": [
+        "digitou em search field \"Buscar produtos\" (valor de Buscar produtos) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Buscar\" (p=0.95, 450 ms)",
+        "2. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L04-busca-com-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/busca-botao.html?q=tenis",
+      "steps": 2,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 1510,
+      "stepMs": [
+        1060,
+        450
+      ],
+      "phases": {
+        "jevMs": 900,
+        "snapshotMs": 360,
+        "actionMs": 150,
+        "waitMs": 100,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    },
+    {
+      "log": [
+        "1. clicou button \"Aceitar todos\" (p=0.75, 450 ms)",
+        "2. clicou button \"Adicionar ao carrinho\" (p=0.95, 450 ms)",
+        "3. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L05-cookies",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/cookies.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1990,
+      "stepMs": [
+        830,
+        710,
+        450
+      ],
+      "phases": {
+        "jevMs": 1350,
+        "snapshotMs": 360,
+        "actionMs": 180,
+        "waitMs": 100,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    },
+    {
+      "log": [
+        "1. clicou button \"Fechar\" (p=0.75, 450 ms)",
+        "2. clicou button \"Adicionar ao carrinho\" (p=0.95, 450 ms)",
+        "3. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L06-modal-newsletter",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/modal.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1990,
+      "stepMs": [
+        830,
+        710,
+        450
+      ],
+      "phases": {
+        "jevMs": 1350,
+        "snapshotMs": 360,
+        "actionMs": 180,
+        "waitMs": 100,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    },
+    {
+      "log": [
+        "1. clicou button \"Adicionar ao carrinho\" (p=0.95, 450 ms)",
+        "2. clicou button \"Continuar sem garantia\" (p=0.95, 450 ms)",
+        "3. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L07-garantia-upsell",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/garantia.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1990,
+      "stepMs": [
+        830,
+        710,
+        450
+      ],
+      "phases": {
+        "jevMs": 1350,
+        "snapshotMs": 360,
+        "actionMs": 180,
+        "waitMs": 100,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    },
+    {
+      "log": [
+        "1. clicou link \"Ver detalhes\" (p=0.95, 450 ms)",
+        "2. clicou button \"Adicionar ao carrinho\" (p=0.95, 450 ms)",
+        "3. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L08-produto-sem-botao",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/produto-fone.html",
+      "steps": 3,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1990,
+      "stepMs": [
+        830,
+        710,
+        450
+      ],
+      "phases": {
+        "jevMs": 1350,
+        "snapshotMs": 360,
+        "actionMs": 180,
+        "waitMs": 100,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    },
+    {
+      "log": [
+        "1. tocou pela foto no ponto (725, 250) (existe p=0.90, caixa conf=0.80, 1400 ms)",
+        "2. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L09-botoes-repetidos",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/repetidos.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 2680,
+      "stepMs": [
+        2230,
+        450
+      ],
+      "phases": {
+        "jevMs": 2300,
+        "snapshotMs": 240,
+        "actionMs": 90,
+        "waitMs": 50,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    },
+    {
+      "log": [
+        "escolheu em dropdown \"Tamanho\" (valor de Tamanho) (pelo nome do campo, sem o Jev)",
+        "1. clicou radio option \"Retirar na loja\" (p=0.95, 450 ms)",
+        "2. clicou button \"Confirmar\" (p=0.75, 450 ms)",
+        "3. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L10-lista-e-radio",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/selecao.html",
+      "steps": 3,
+      "autoFills": 1,
+      "photos": 0,
+      "totalMs": 2220,
+      "stepMs": [
+        1060,
+        710,
+        450
+      ],
+      "phases": {
+        "jevMs": 1350,
+        "snapshotMs": 480,
+        "actionMs": 240,
+        "waitMs": 150,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    },
+    {
+      "log": [
+        "digitou em text field \"Nome\" (valor de Nome) (pelo nome do campo, sem o Jev)",
+        "digitou em text field \"E-mail\" (valor de E-mail) (pelo nome do campo, sem o Jev)",
+        "1. clicou button \"Próximo\" (p=0.75, 450 ms)",
+        "digitou em text field \"CEP\" (valor de CEP) (pelo nome do campo, sem o Jev)",
+        "digitou em text field \"Cidade\" (valor de Cidade) (pelo nome do campo, sem o Jev)",
+        "2. clicou button \"Próximo\" (p=0.75, 450 ms)",
+        "3. clicou button \"Enviar pedido de teste\" (p=0.95, 450 ms)",
+        "4. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L11-formulario-multietapas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/etapas.html",
+      "steps": 4,
+      "autoFills": 4,
+      "photos": 0,
+      "totalMs": 3280,
+      "stepMs": [
+        1410,
+        710,
+        710,
+        450
+      ],
+      "phases": {
+        "jevMs": 1800,
+        "snapshotMs": 720,
+        "actionMs": 510,
+        "waitMs": 250,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    },
+    {
+      "log": [
+        "1. tocou pela foto no ponto (360, 332) (existe p=0.90, caixa conf=0.80, 1400 ms)",
+        "2. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L12-garantia-na-foto",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/foto-garantia.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 1,
+      "totalMs": 2680,
+      "stepMs": [
+        2230,
+        450
+      ],
+      "phases": {
+        "jevMs": 2300,
+        "snapshotMs": 240,
+        "actionMs": 90,
+        "waitMs": 50,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    },
+    {
+      "log": [
+        "1. clicou tab \"Especificações\" (p=0.95, 450 ms)",
+        "2. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L13-abas",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/abas.html",
+      "steps": 2,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 1280,
+      "stepMs": [
+        830,
+        450
+      ],
+      "phases": {
+        "jevMs": 900,
+        "snapshotMs": 240,
+        "actionMs": 90,
+        "waitMs": 50,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    },
+    {
+      "log": [
+        "1. rolou a página (p=0.50, 450 ms)",
+        "2. rolou a página (p=0.50, 450 ms)",
+        "3. rolou a página (p=0.50, 450 ms)",
+        "4. clicou button \"Assinar\" (p=0.95, 450 ms)",
+        "5. concluído (p=0.97, 450 ms)"
+      ],
+      "id": "L14-rolar-ate-o-fim",
+      "outcome": "done",
+      "criterionOk": true,
+      "forbidden": false,
+      "finalUrl": "http://localhost:8765/rolar.html",
+      "steps": 5,
+      "autoFills": 0,
+      "photos": 0,
+      "totalMs": 3380,
+      "stepMs": [
+        820,
+        700,
+        700,
+        710,
+        450
+      ],
+      "phases": {
+        "jevMs": 2250,
+        "snapshotMs": 600,
+        "actionMs": 330,
+        "waitMs": 200,
+        "otherMs": 0
+      },
+      "timing": "measured"
+    }
+  ],
+  "summary": {
+    "tasks": 14,
+    "completed": 13,
+    "completedRate": 0.9285714285714286,
+    "falseDone": 0,
+    "falseUnsure": 0,
+    "violations": 0,
+    "meanSteps": 2.642857142857143,
+    "medianSteps": 2.5,
+    "medianTotalMs": 2105,
+    "medianStepMs": 710,
+    "share": {
+      "jevMs": 0.7127158555729984,
+      "snapshotMs": 0.1620094191522763,
+      "actionMs": 0.07974882260596547,
+      "waitMs": 0.04552590266875981,
+      "otherMs": 0
+    },
+    "outcomes": {
+      "done": 13,
+      "stuck": 1
+    }
+  }
+}

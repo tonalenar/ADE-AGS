@@ -2,27 +2,41 @@
  * O piloto do navegador: `ags portal act <portal> "objetivo"`.
  *
  * Um agente que navega com `snapshot` + `click` gasta um turno de um modelo grande por clique: ler a árvore da
- * página inteira, pensar, tocar, repetir. Quase todo clique é uma ESCOLHA entre poucos elementos ("qual destes
- * leva ao objetivo?"), e é para isso que serve o Jev (decisões tipadas, ≤19 opções, centenas de milissegundos).
+ * página inteira, pensar, tocar, repetir. Quase todo clique é uma ESCOLHA entre elementos ("qual destes leva ao
+ * objetivo?"), e é para isso que serve o Jev (decisões tipadas, centenas de milissegundos). O desenho vem do
+ * `browser-use/jev-ultrafast` (MIT): operação + elemento numa só consulta.
  *
  * O laço, a cada passo:
  *
- *   1. `snapshot` da página → elementos tocáveis (cada um com seu ref) e o texto visível;
- *   2. os 15 elementos mais ligados ao objetivo + `done` / `scroll` / `stuck` viram as opções da pergunta;
- *   3. o Jev escolhe uma (com a probabilidade); abaixo do mínimo, PARA e devolve a página ao agente;
- *   4. a escolha vira uma ação (`click`, `type` com o valor de `--fill`, `select`, `scroll`).
+ *   1. `snapshot` da página → elementos tocáveis (cada um com seu ref, seu estado e se está preenchido);
+ *   2. os campos cujo nome casa com um `--fill` são preenchidos direto, sem o Jev (digitar o nome em "Customer
+ *      name" não é uma escolha);
+ *   3. UMA consulta ao Jev leva a pergunta da OPERAÇÃO (clicar, digitar, escolher numa lista, rolar, esperar,
+ *      concluir…) e uma de ALVO por operação que precisa de um elemento; só vale o alvo da operação escolhida;
+ *   4. abaixo da probabilidade mínima, PARA e devolve a página ao agente;
+ *   5. a escolha vira uma ação (`click`, `type` com o valor de `--fill`, `select`, `scroll`).
  *
  * O Jev só escolhe ONDE tocar. O texto digitado vem sempre de `--fill` (campo=valor) — nunca vai ao provedor, só
- * os nomes dos campos — e quem pediu confere o resultado na página que volta no fim.
+ * os nomes dos campos e se estão preenchidos — e quem pediu confere o resultado na página que volta no fim.
  *
  * Tudo aqui é puro (a página, o Jev e as ações entram por `PilotDeps`), então o laço é testável sem navegador.
  */
+
+import { windowLine, type WindowStats } from "./windowBeat";
 
 export interface PageElement {
   ref: string;
   role: string;
   name: string;
   states: string[];
+  /** Só nos campos: tem valor? (O valor em si nunca é lido.) `null` = não é um campo com valor. */
+  filled: boolean | null;
+  /** Só nos links: para onde vão, sem consulta nem fragmento (`/cart.html`). Diz o que um ícone sem nome é. */
+  href?: string;
+  /** Só nas listas nativas: o que se pode escolher. Cada opção vira um alvo (`e12_3` = a 4ª opção do elemento e12). */
+  options?: string[];
+  /** O que vem logo antes dele na página (o título e o preço do produto, o link anterior): distingue "Adicionar" de "Adicionar". */
+  near?: string;
 }
 
 export interface ParsedPage {
@@ -31,12 +45,29 @@ export interface ParsedPage {
   elements: PageElement[];
   /** O texto visível, em linhas curtas, na ordem da página. */
   text: string[];
+  /** O tamanho da janela da página em px CSS (do cabeçalho do snapshot): converte as frações de uma foto em pontos. */
+  viewport?: { width: number; height: number };
+  /** Quanto a página já rolou (do cabeçalho do snapshot): rolar muda a página, mesmo sem elemento novo. */
+  scrollY?: number;
+  /** A altura do documento (do cabeçalho): com `scrollY` e a janela, diz se ainda há para onde rolar. */
+  docHeight?: number;
+  /** O idioma que a página declara (`es`, `en-us`), quando declara. */
+  lang?: string;
 }
 
 const NODE = /^\s*- (\S+)(?: ("(?:[^"\\]|\\.)*"))?(.*)$/;
 const REF = /\[ref=(e\d+)\]/;
 const STATE = /\[([^\]=]+)\]/g;
 const HEADER = /^page: (?:("(?:[^"\\]|\\.)*") )?(\S+)/;
+const VIEWPORT = /^viewport: (\d+)×(\d+)(?: · scroll (\d+)\/(\d+))?/;
+/** Quanto do que vem antes de um elemento entra no `near`. */
+const NEAR_CHARS = 48;
+/** Quanto do `near` é o título; o resto, o último texto (o preço). */
+const NEAR_TITLE = 32;
+/** O começo de um rótulo que só diz «abre os detalhes»: o que importa no título é o produto que vem depois. */
+const DETAILS_PREFIX = /^(view (product )?details (for|of)|details (for|of)|ver (os )?detalhes d[eoa]s?|detalhes d[eoa]s?|ver mais sobre)\s+/i;
+const VALUE = / value=("(?:[^"\\]|\\.)*")/;
+const OPTIONS = / options=(\[.*\])\s*$/;
 
 function unquote(raw: string | undefined): string {
   if (!raw) return "";
@@ -46,11 +77,23 @@ function unquote(raw: string | undefined): string {
 /** Lê o texto do `snapshot` (ver `page/snapshotFormat.ts`) de volta em elementos e texto. Pura. */
 export function parseSnapshot(snapshot: string): ParsedPage {
   const page: ParsedPage = { title: "", url: "", elements: [], text: [] };
+  // O que fica "perto" do próximo elemento: o último título (um heading ou o link do produto) e o último texto depois dele (o preço).
+  let title = "";
+  let lastText = "";
   for (const line of snapshot.split("\n")) {
     const header = HEADER.exec(line);
     if (header && !page.url) {
       page.title = unquote(header[1]);
       page.url = header[2];
+      continue;
+    }
+    const size = VIEWPORT.exec(line);
+    if (size && !page.viewport) {
+      page.viewport = { width: Number(size[1]), height: Number(size[2]) };
+      if (size[3] !== undefined) page.scrollY = Number(size[3]);
+      if (size[4] !== undefined) page.docHeight = Number(size[4]);
+      const lang = / · lang ([a-z]{2,3}(?:-[a-z0-9]{2,8})?)\b/i.exec(line);
+      if (lang) page.lang = lang[1].toLowerCase();
       continue;
     }
     const node = NODE.exec(line);
@@ -62,38 +105,169 @@ export function parseSnapshot(snapshot: string): ParsedPage {
       // O valor e o destino de um link vêm depois dos estados: cortá-los evita ler um `[` de dentro de um valor.
       const flags = rest.replace(REF, "").split(" value=")[0].split(" → ")[0];
       const states = [...flags.matchAll(STATE)].map((m) => m[1]);
-      page.elements.push({ ref, role, name, states });
-    } else if (role === "text" && name) {
+      const value = VALUE.exec(rest);
+      const target = rest.split(" → ")[1]?.trim().split(/[?#]/)[0].slice(0, 80);
+      let options: string[] | undefined;
+      const listed = OPTIONS.exec(rest);
+      if (listed) {
+        try {
+          const parsed: unknown = JSON.parse(listed[1]);
+          if (Array.isArray(parsed)) options = parsed.filter((o): o is string => typeof o === "string");
+        } catch { /* sem opções legíveis: a lista fica como um elemento só */ }
+      }
+      const cut = (text: string, max: number) => (text.length > max ? `${text.slice(0, max - 1)}…` : text);
+      const nearby = [cut(title, NEAR_TITLE), cut(lastText, NEAR_CHARS - NEAR_TITLE)].filter(Boolean).join(" | ");
+      page.elements.push({
+        ref, role, name, states, filled: value ? unquote(value[1]).length > 0 : null,
+        ...(target ? { href: target } : {}),
+        ...(options?.length ? { options } : {}),
+        ...(nearby ? { near: nearby } : {}),
+      });
+      lastText = "";
+      // O link com nome é o título de quem vem depois (o produto, e o botão «Adicionar» logo abaixo). Um BOTÃO com destino também
+      // (o SauceDemo: `button "View details for Sauce Labs Backpack" → /inventory.html#`), sem o «ver detalhes de» que só come o
+      // corte de 32 caracteres: sem isso os «Add to cart» só se distinguiam pelo preço (P04).
+      if (name && (role === "link" || target)) title = name.replace(DETAILS_PREFIX, "") || name;
+    } else if ((role === "text" || role === "heading") && name) {
       page.text.push(name);
+      if (role === "heading") { title = name; lastText = ""; } else lastText = name;
     }
   }
   return page;
 }
 
-// ── Opções ──────────────────────────────────────────────────────────
+// ── Operações e elementos ───────────────────────────────────────────
 
 export interface StepOption {
   id: string;
   label: string;
 }
 
+/** O que o `decision_pick_step` recebe: o estado, as operações e os elementos de cada uma. */
+export interface StepQuery {
+  state: string;
+  operations: StepOption[];
+  targets: Record<string, StepOption[]>;
+  /** Não fazer a pergunta direta «o objetivo já foi atingido?»: o piloto só a usa depois de uma ação dele que mudou a página (plano v2, 4.2). */
+  skipGoalDone?: boolean;
+}
+
 const ROLE_LABEL: Record<string, string> = {
-  button: "botão", link: "link", textbox: "campo de texto", searchbox: "campo de busca", textarea: "campo de texto",
-  combobox: "lista de opções", listbox: "lista de opções", checkbox: "caixa de marcar", radio: "opção", switch: "chave",
-  tab: "aba", menuitem: "item de menu", option: "opção", clickable: "elemento clicável", slider: "controle", spinbutton: "campo numérico",
+  button: "button", link: "link", textbox: "text field", searchbox: "search field", textarea: "text area",
+  combobox: "dropdown", listbox: "list", checkbox: "checkbox", radio: "radio option", switch: "switch",
+  tab: "tab", menuitem: "menu item", option: "option", clickable: "clickable element", slider: "slider", spinbutton: "number field",
 };
+
+/** O estado que o runtime escreve num elemento de anúncio (`page/sponsored.ts`). */
+const SPONSORED_STATE = "patrocinado";
+/** Controles de paginação e de fechar uma faixa/modal: precisam sobreviver ao corte de candidatos de uma página comprida. */
+const PAGINATION = /^(pr[óo]xim[ao]|next|mais|more|carregar mais|load more|mostrar mais|show more|ver mais|older|seguinte|siguiente|cargar m[áa]s|ver m[áa]s|mostrar m[áa]s|m[áa]s|›|»|>)(?![\p{L}\d])|^\d{1,3}$/iu;
+/** Voltar uma página não leva a lista adiante. */
+const PAGE_BACK = /anterior|previous|\bprev\b|voltar|atr[áa]s|‹|«|</i;
+
+/** A página ainda tem para onde rolar? `false` só com as medidas do cabeçalho dizendo que já está no fim. Pura. */
+export function cannotScroll(page: ParsedPage): boolean {
+  if (!page.viewport || page.scrollY === undefined || page.docHeight === undefined) return false;
+  return page.scrollY + page.viewport.height >= page.docHeight - 4;
+}
+
+/** O controle que leva a lista adiante («Próxima», «Carregar mais», «Siguiente»): nunca um número de página nem «anterior». Pura. */
+export function pagingControl(page: ParsedPage): PageElement | null {
+  return page.elements.find((el) => (el.role === "button" || el.role === "link") && !el.states.includes("disabled")
+    && PAGINATION.test(el.name.trim()) && !/^\d{1,3}$/.test(el.name.trim()) && !PAGE_BACK.test(el.name)) ?? null;
+}
+
+/** O item que o objetivo cita entre «» já está na página? (Sem citação: não se sabe, e conta como não.) Pura. */
+function quotedOnPage(page: ParsedPage, goal: string): boolean {
+  const quoted = [...goal.matchAll(/[«"“]([^»"”]{2,80})[»"”]/g)].map((m) => m[1].trim().toLowerCase());
+  if (quoted.length === 0) return false;
+  const seen = [...page.text, ...page.elements.map((el) => el.name)].join("\n").toLowerCase();
+  return quoted.every((q) => seen.includes(q));
+}
+
+/**
+ * Termos comuns de loja e de site em inglês e espanhol, e o que são em português: numa página em outro idioma, o rótulo
+ * ganha `[= …]` quando o objetivo (em português) fala disso. Os falsos cognatos são o motivo (a «Oficina» de uma loja em
+ * espanhol é o escritório, não a oficina). Chaves sem acento, em minúsculas.
+ */
+const GLOSSARY: Record<string, string> = {
+  office: "escritório", oficina: "escritório", kitchen: "cozinha", cocina: "cozinha", home: "casa", hogar: "casa",
+  garden: "jardim", jardin: "jardim", furniture: "móveis", muebles: "móveis", toys: "brinquedos", juguetes: "brinquedos",
+  books: "livros", libros: "livros", sports: "esportes", deportes: "esportes", beauty: "beleza", belleza: "beleza",
+  health: "saúde", salud: "saúde", clothing: "roupas", clothes: "roupas", ropa: "roupas", shoes: "calçados",
+  zapatos: "calçados", calzado: "calçados", electronics: "eletrônicos", electronica: "eletrônicos", computers: "informática",
+  computadoras: "informática", ordenadores: "informática", phones: "celulares", telefonos: "celulares", celulares: "celulares",
+  moviles: "celulares", tools: "ferramentas", herramientas: "ferramentas", automotive: "automotivo", automotriz: "automotivo",
+  pets: "animais", mascotas: "animais", baby: "bebê", bebe: "bebê", bebes: "bebê", grocery: "mercado", groceries: "mercado",
+  supermercado: "mercado", jewelry: "joias", joyeria: "joias", watches: "relógios", relojes: "relógios", bags: "bolsas",
+  bolsos: "bolsas", stationery: "papelaria", papeleria: "papelaria", music: "música", games: "jogos", juegos: "jogos",
+  appliances: "eletrodomésticos", electrodomesticos: "eletrodomésticos", lighting: "iluminação", iluminacion: "iluminação",
+  bathroom: "banheiro", bano: "banheiro", bedroom: "quarto", dormitorio: "quarto", drinks: "bebidas", food: "comida",
+  cart: "carrinho", carrito: "carrinho", basket: "carrinho", checkout: "finalizar compra", account: "conta", cuenta: "conta",
+  "my account": "minha conta", "mi cuenta": "minha conta", help: "ajuda", ayuda: "ajuda", settings: "configurações",
+  ajustes: "configurações", configuracion: "configurações", "sign in": "entrar", "log in": "entrar", login: "entrar",
+  "iniciar sesion": "entrar", ingresar: "entrar", "sign up": "cadastrar", register: "cadastrar", registrarse: "cadastrar",
+  "sign out": "sair", "log out": "sair", "cerrar sesion": "sair", salir: "sair", orders: "pedidos", "my orders": "meus pedidos",
+  "mis pedidos": "meus pedidos", wishlist: "lista de desejos", favorites: "favoritos", notifications: "notificações",
+  notificaciones: "notificações", shipping: "entrega", envio: "entrega", returns: "devoluções", devoluciones: "devoluções",
+  contact: "contato", contacto: "contato", about: "sobre", "about us": "sobre", "sobre nosotros": "sobre", deals: "ofertas",
+  sale: "promoção", rebajas: "promoção", "new arrivals": "novidades", novedades: "novidades",
+};
+const flat = (text: string) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim();
+
+/**
+ * Numa página que declara outro idioma, o que cada rótulo é em português, quando o objetivo fala disso e o rótulo, como
+ * está escrito, não casa com o objetivo. Por ref. Pura.
+ */
+export function meaningsFor(page: ParsedPage, goal: string): Map<string, string> {
+  const out = new Map<string, string>();
+  if (!page.lang || page.lang.startsWith("pt")) return out;
+  const wanted = words(goal);
+  for (const el of page.elements) {
+    const pt = GLOSSARY[flat(el.name)];
+    if (!pt || overlap(wanted, words(el.name)) > 0 || overlap(wanted, words(pt)) === 0) continue;
+    out.set(el.ref, pt);
+  }
+  return out;
+}
+const DISMISS = /^(fechar|close|cerrar|×|✕|x|rejeitar|reject|recusar|decline|rechazar|n[ãa]o,? obrigad[oa]|no,? thanks|no,? gracias|agora n[ãa]o|not now|ahora no|dispensar|dismiss|aceitar (apenas )?(os )?essenciais|only necessary|necessary only|solo (las )?necesarias)\b/i;
+/** Entre os controles de fechar, os que recusam: a escolha mais discreta numa faixa de cookies (nunca «aceitar todos»). */
+const REJECT = /^(rejeitar|recusar|reject|decline|rechazar|aceitar (apenas )?(os )?essenciais|only necessary|necessary only|solo (las )?necesarias)\b/i;
+
+/**
+ * O controle que fecha o que cobre a página (a faixa de cookies, o modal da newsletter): recusar antes de fechar, nunca
+ * aceitar nem assinar. `null` = nenhum com cara de fechar (o Jev decide, vendo a falha no histórico). Pura.
+ */
+export function coverDismiss(page: ParsedPage, tried: ReadonlySet<string> = new Set()): PageElement | null {
+  const closers = page.elements.filter((e) => (e.role === "button" || e.role === "link") && !tried.has(e.ref) && DISMISS.test(e.name.trim()));
+  return closers.find((e) => REJECT.test(e.name.trim())) ?? closers[0] ?? null;
+}
+/** O objetivo pede um anúncio? Então o patrocinado não é rebaixado. */
+const AD_GOAL = /an[uú]ncio|patrocinad|sponsored|\bads?\b|publicidade/i;
 
 const TYPING = new Set(["textbox", "searchbox", "textarea", "spinbutton"]);
 const CHOOSING = new Set(["combobox", "listbox"]);
 
-/** Quantos elementos entram na pergunta: o limite do Jev (19) menos as três opções fixas. */
-export const MAX_ELEMENTS = 15;
+type Operation = "click" | "type" | "select";
 
-const FIXED: StepOption[] = [
-  { id: "done", label: "o objetivo já foi atingido: a página mostra o resultado" },
-  { id: "scroll", label: "rolar a página para baixo para ver mais elementos" },
-  { id: "stuck", label: "nenhuma destas opções leva ao objetivo" },
-];
+function operationOf(el: PageElement): Operation {
+  if (TYPING.has(el.role)) return "type";
+  if (CHOOSING.has(el.role)) return "select";
+  return "click";
+}
+
+/** Quantos elementos entram em cada pergunta de alvo. O Jev acertou 15 de 15 até 80 opções; fica folga. */
+export const MAX_PER_HEAD = 100;
+
+const OPERATION_LABEL: Record<string, string> = {
+  click: "Click an element, button, menu option, autocomplete suggestion, radio or calendar day.",
+  type: "Enter or replace text in an editable field. The caller supplies the value.",
+  select: "Choose a value in a dropdown.",
+  scroll: "Scroll down to reveal more of the page.",
+  wait: "Wait: the needed control is absent or the results are still loading.",
+  done: "Every requirement of the goal is visibly satisfied on the page.",
+  stuck: "No offered operation can make progress.",
+};
 
 /** Palavras que servem para comparar: minúsculas, sem acento, só as de 3+ letras. Pura. */
 export function words(text: string): Set<string> {
@@ -120,15 +294,75 @@ function similarity(a: string, b: string): number {
   return overlap(words(a), words(b)) + contains;
 }
 
-/** O que já foi feito neste laço: o ref e a descrição, para não repetir nem dar voltas. */
+/** O que já foi feito neste laço, para o Jev não repetir e ver se a página mudou. */
 export interface Done {
-  ref: string;
-  /** "clicou botão "Entrar"". */
+  /** "clicou button "Entrar"" — nunca o valor digitado. */
   what: string;
+  /** A página mudou depois da ação? `null` = ainda não se sabe. */
+  changed: boolean | null;
+  /** Foi um campo preenchido pelo nome (sem o Jev), não uma escolha dele. */
+  auto?: boolean;
+  /** Veio de um `act` anterior neste portal (o livro-razão da ponte): o `what` já traz «[earlier run #N]». */
+  earlier?: boolean;
+  /** A ação anterior como a ponte a guardou: tem a contagem do carrinho e se a página mudou desde o fim daquele `act`. */
+  prior?: PriorAction;
+  /** Foi um «adicionar»: de qual item (papel, nome, produto, endereço) e a contagem do carrinho antes/depois, se a página a mostra. */
+  add?: { key: string; cartBefore: number | null; cartAfter: number | null };
 }
 
-function labelOf(el: PageElement): string {
-  return `${ROLE_LABEL[el.role] ?? el.role}${el.name ? ` "${el.name}"` : ""}${el.states.includes("checked") ? " [marcada]" : ""}`;
+/**
+ * Uma ação de um `act` ANTERIOR neste portal (o livro-razão é `portalLedger.ts`, na ponte; achado D6). Estruturalmente um `Done`.
+ * O `what` chega marcado «[feito num act anterior #2] clicou button "Adicionar" — carrinho 0→1»; o piloto o mostra ao Jev como
+ * «[earlier run #2] …», a palavra que as regras de `browse_rules.rs` citam.
+ */
+export interface PriorAction {
+  what: string;
+  changed: boolean | null;
+  auto?: boolean;
+  previous: true;
+  actNo: number;
+  goal: string;
+  cartBefore: number | null;
+  cartAfter: number | null;
+  /** A página de agora difere da do fim daquele `act`? Só na última ação. `null` = não se sabe. */
+  pageChangedSince: boolean | null;
+}
+
+/** O que o Jev lê de um elemento: o papel, o nome e o estado (marcado, expandido, preenchido), nunca o valor. */
+function labelOf(el: PageElement, twins?: Set<string>, meaning?: string): string {
+  const role = ROLE_LABEL[el.role] ?? el.role;
+  const marks = [
+    el.states.includes("checked") ? "checked" : null,
+    el.states.includes("expanded") ? "expanded" : null,
+    el.states.includes("selected") ? "selected" : null,
+    el.states.includes("pressed") ? "pressed" : null,
+    el.filled === null ? null : el.filled ? "filled" : "empty",
+  ].filter((mark): mark is string => mark !== null);
+  // Um link mostra para onde vai: é o que identifica o ícone do carrinho, que não tem nome.
+  const where = el.href ? ` → ${el.href}` : "";
+  // Vários elementos com o mesmo papel e nome ("Adicionar" ×8): só o que vem antes deles os distingue (o produto, o preço).
+  const near = twins?.has(twinKey(el)) && el.near ? ` [next to: ${el.near}]` : "";
+  // Ordem do que mais importa ao que menos: o nome, o estado, quem é (o que vem antes), o destino — o provedor corta em ~110.
+  // Os sinais que as regras do Jev citam (`decisions/browse_rules.rs`) vão logo depois do nome, antes de o provedor cortar o rótulo.
+  const tags = `${meaning ? ` [= ${meaning}]` : ""}${el.states.includes(SPONSORED_STATE) ? " [sponsored]" : ""}${el.states.includes("required") ? " [required]" : ""}`;
+  return `${role}${el.name ? ` "${el.name}"` : ""}${tags}${marks.length > 0 ? ` (${marks.join(", ")})` : ""}${near}${where}`;
+}
+
+/** A chave de "são o mesmo controle": o papel, o nome e o destino. */
+function twinKey(el: PageElement): string {
+  return `${el.role}|${el.name}|${el.href ?? ""}`;
+}
+
+/** Os controles que se repetem na página (mesmo papel, nome e destino). Pura. */
+export function twinsOf(elements: PageElement[]): Set<string> {
+  const seen = new Map<string, number>();
+  for (const el of elements) seen.set(twinKey(el), (seen.get(twinKey(el)) ?? 0) + 1);
+  return new Set([...seen].filter(([, n]) => n > 1).map(([key]) => key));
+}
+
+/** O elemento como se conta o que se fez: o papel e o nome, sem o estado de antes da ação. */
+function plain(el: PageElement): string {
+  return `${ROLE_LABEL[el.role] ?? el.role}${el.name ? ` "${el.name}"` : ""}`;
 }
 
 /** O endereço sem consulta nem fragmento: é onde costumam ir tokens e códigos. Pura. */
@@ -141,53 +375,164 @@ export function bareUrl(url: string): string {
   }
 }
 
-const TEXT_BYTES = 1200;
+/** Uma impressão da página: muda quando muda o endereço, os elementos ou o texto. Serve para saber se uma ação teve efeito. Pura. */
+export function fingerprint(page: ParsedPage): string {
+  const body = `${bareUrl(page.url)}|${page.elements.map((e) => `${e.role}:${e.name}:${e.filled}:${e.states.join("+")}`).join(";")}|${page.text.slice(0, 40).join(";")}|${page.scrollY ?? ""}`;
+  let hash = 5381;
+  for (let i = 0; i < body.length; i++) hash = ((hash << 5) + hash + body.charCodeAt(i)) | 0;
+  return `${page.elements.length}:${hash}`;
+}
 
 /**
- * A pergunta de um passo: o estado (objetivo, página, o já feito, o texto visível) e as opções. Os campos a
- * preencher entram só pelo NOME. Pura.
+ * O que corta o estado que vai ao Jev (plano v2, 4.2, achado D2: a latência por consulta acompanha o tamanho do corpo). Cada
+ * número é um botão: o benchmark real diz se a precisão aguenta; voltar atrás é mudar uma constante.
  */
-export function buildStep(
-  page: ParsedPage,
-  goal: string,
-  fillKeys: string[],
-  done: Done[],
-): { state: string; options: StepOption[] } {
-  const wanted = words(`${goal} ${fillKeys.join(" ")}`);
-  const used = new Set(done.map((d) => d.ref));
-  const seenLabels = new Set<string>();
-  const candidates = page.elements
-    .map((el, index) => ({ el, index, label: labelOf(el) }))
-    .filter(({ el, label }) => {
-      if (el.states.includes("disabled") || used.has(el.ref) || seenLabels.has(label)) return false;
-      seenLabels.add(label);
-      return true;
-    })
-    .map((c) => ({
-      ...c,
-      // Um campo de texto só vale pontos se ainda há o que preencher.
-      score: (overlap(wanted, words(c.el.name)) + fillKeys.filter((key) => similarity(c.el.name, key) > 0).length) * 2 + (TYPING.has(c.el.role) && fillKeys.length > 0 ? 1 : 0),
-    }));
-  const top = [...candidates].sort((a, b) => b.score - a.score || a.index - b.index).slice(0, MAX_ELEMENTS);
-  // Na ordem da página: é como uma pessoa lê, e ajuda o Jev a ver o fluxo.
-  top.sort((a, b) => a.index - b.index);
-  const options: StepOption[] = [...top.map((c) => ({ id: c.el.ref, label: c.label })), ...FIXED];
+/** O texto visível: as linhas que falam do objetivo vêm primeiro, então 1.800 bytes bastam (eram 3.000). */
+export const TEXT_BYTES = 1800;
+/** A tabela de elementos do estado repete o rótulo de cada opção das perguntas de alvo: ali o rótulo corta mais cedo. */
+export const TABLE_LABEL_CHARS = 90;
+/** E leva no máximo estes elementos (os que mais se parecem com o objetivo); as perguntas de alvo continuam com todos. */
+export const MAX_TABLE = 80;
+const HISTORY = 10;
 
-  const text: string[] = [];
+/**
+ * Do texto visível da página, o que vai ao Jev: as linhas que falam do OBJETIVO (e do que já foi feito) primeiro, e o
+ * começo da página no que sobrar do orçamento, na ordem em que aparecem. Antes eram só os primeiros 1.500 bytes, que numa
+ * loja são o cabeçalho e o menu: "Seu carrinho está vazio" nem chegava, e a pergunta "o objetivo já foi atingido?" dava 0,00.
+ * Pura.
+ */
+export function pickText(lines: string[], wanted: Set<string>, budget = TEXT_BYTES): string[] {
+  const scored = lines.map((line, index) => ({ line, index, score: overlap(wanted, words(line)) }));
+  const chosen = new Set<number>();
   let bytes = 0;
-  for (const line of page.text) {
-    if (bytes + line.length > TEXT_BYTES) break;
-    text.push(line);
-    bytes += line.length + 1;
+  const take = (item: { line: string; index: number }) => {
+    if (chosen.has(item.index) || bytes + item.line.length > budget) return;
+    chosen.add(item.index);
+    bytes += item.line.length + 1;
+  };
+  // Primeiro as que mais se parecem com o objetivo, e só depois o começo da página.
+  scored.filter((s) => s.score > 0).sort((a, b) => b.score - a.score || a.index - b.index).forEach(take);
+  scored.forEach(take);
+  return [...chosen].sort((a, b) => a - b).map((index) => lines[index]);
+}
+
+/**
+ * A consulta de um passo: o estado (objetivo, página, últimas ações, texto visível), as operações possíveis e os
+ * elementos de cada uma. Os campos a preencher entram só pelo NOME. Pura.
+ */
+/**
+ * Do que o objetivo cita entre «», «"» ou aspas, os links que têm esse nome mas NÃO vão para esse destino, quando existe um link
+ * com esse nome que vai (o último trecho do endereço é o próprio nome: `/wiki/Portugal`). Sem um link exato, nada sai. Pura.
+ */
+/** Do que o objetivo cita entre «», os nomes que têm link(s) na página mas NENHUM vai ao destino com esse nome: o exato deve estar fora do recorte. Pura. */
+export function exactLinkMissing(page: ParsedPage, goal: string): boolean {
+  const slug = (href: string) => {
+    try { return decodeURIComponent(href.split("/").filter(Boolean).pop() ?? "").replace(/[_-]/g, " ").trim().toLowerCase(); } catch { return ""; }
+  };
+  for (const match of goal.matchAll(/[«"“]([^»"”]{2,40})[»"”]/g)) {
+    const wanted = match[1].trim().toLowerCase();
+    const same = page.elements.filter((el) => el.role === "link" && el.name.trim().toLowerCase() === wanted);
+    if (same.length > 0 && !same.some((el) => el.href !== undefined && slug(el.href) === wanted)) return true;
   }
+  return false;
+}
+
+export function inexactLinks(page: ParsedPage, goal: string): Set<string> {
+  const out = new Set<string>();
+  const slug = (href: string) => {
+    try { return decodeURIComponent(href.split("/").filter(Boolean).pop() ?? "").replace(/[_-]/g, " ").trim().toLowerCase(); } catch { return ""; }
+  };
+  for (const match of goal.matchAll(/[«"“]([^»"”]{2,40})[»"”]/g)) {
+    const wanted = match[1].trim().toLowerCase();
+    const same = page.elements.filter((el) => el.role === "link" && el.name.trim().toLowerCase() === wanted);
+    const exact = same.filter((el) => el.href !== undefined && slug(el.href) === wanted);
+    if (exact.length === 0) continue;
+    for (const el of same) if (!exact.includes(el)) out.add(el.ref);
+  }
+  return out;
+}
+
+export function buildStep(page: ParsedPage, goal: string, fillKeys: string[], history: Done[], waits = 0): StepQuery {
+  const wanted = words(`${goal} ${fillKeys.join(" ")}`);
+  const wantsAds = AD_GOAL.test(goal);
+  const score = (el: PageElement) =>
+    (overlap(wanted, words(el.name)) + fillKeys.filter((key) => similarity(el.name, key) > 0).length) * 2
+    + (TYPING.has(el.role) && fillKeys.length > 0 && el.filled !== true ? 1 : 0)
+    // Numa página comprida o corte fica com os mais ligados ao objetivo: o anúncio é o primeiro a sair, e o «Próxima» e o «Fechar» não saem.
+    + (PAGINATION.test(el.name.trim()) || DISMISS.test(el.name.trim()) ? 3 : 0)
+    - (!wantsAds && el.states.includes(SPONSORED_STATE) ? 4 : 0);
+
+  const twins = twinsOf(page.elements);
+  // Numa página em outro idioma, o que o rótulo é em português, quando o objetivo fala disso (o falso cognato).
+  const meanings = meaningsFor(page, goal);
+  const inexact = inexactLinks(page, goal);
+  const groups: Record<Operation, { el: PageElement; index: number }[]> = { click: [], type: [], select: [] };
+  // Uma lista nativa com opções vira UM ALVO POR OPÇÃO ("Classificar por → Preço: do menor ao maior"): escolher não
+  // precisa de `--fill`, o objetivo já diz qual.
+  const optionTargets: StepOption[] = [];
+  page.elements.forEach((el, index) => {
+    if (el.states.includes("disabled")) return;
+    // Um botão de compra ou pagamento que o objetivo não pediu nem é oferecido: o Jev escolhe entre os outros (o
+    // "Adicionar ao carrinho" ao lado de um "Comprar agora") em vez de o piloto parar ao ver a escolha barrada.
+    if (blockedControl(el, goal)) return;
+    // Vários links com o MESMO nome do que o objetivo cita entre «», e um deles vai mesmo para esse destino: os outros saem
+    // (P02: «Portugal» levava ao «Império Português»).
+    if (inexact.has(el.ref)) return;
+    if (operationOf(el) === "select" && el.options?.length) {
+      el.options.forEach((option, i) => optionTargets.push({ id: `${el.ref}_${i}`, label: `${plain(el)} → option "${option}"` }));
+      return;
+    }
+    groups[operationOf(el)].push({ el, index });
+  });
+  const targets: Record<string, StepOption[]> = {};
+  const shown: { el: PageElement; index: number }[] = [];
+  for (const operation of ["click", "type", "select"] as const) {
+    // Com mais de `MAX_PER_HEAD`, ficam os mais ligados ao objetivo; sempre na ordem da página, que é como se lê.
+    const kept = [...groups[operation]].sort((a, b) => score(b.el) - score(a.el) || a.index - b.index).slice(0, MAX_PER_HEAD).sort((a, b) => a.index - b.index);
+    if (kept.length > 0) targets[operation] = kept.map(({ el }) => ({ id: el.ref, label: labelOf(el, twins, meanings.get(el.ref)) }));
+    shown.push(...kept);
+  }
+  if (optionTargets.length > 0) targets.select = [...optionTargets.slice(0, MAX_PER_HEAD), ...(targets.select ?? [])];
+  // A pergunta da OPERAÇÃO também precisa ver os elementos (só as de alvo os listam): sem isso o Jev escolhia
+  // "rolar" por não saber o que a página oferece. É a tabela `elements` do estado no jev-ultrafast.
+  const inTable = shown.length > MAX_TABLE
+    ? [...shown].sort((a, b) => score(b.el) - score(a.el) || a.index - b.index).slice(0, MAX_TABLE)
+    : shown;
+  const clip = (text: string) => (text.length > TABLE_LABEL_CHARS ? `${text.slice(0, TABLE_LABEL_CHARS - 1)}…` : text);
+  const table = [
+    ...inTable.sort((a, b) => a.index - b.index).map(({ el }) => `[${el.ref}] ${clip(labelOf(el, twins, meanings.get(el.ref)))}`),
+    ...(shown.length > inTable.length ? [`(+${shown.length - inTable.length} more elements offered in the questions below)`] : []),
+    ...page.elements.filter((el) => el.options?.length && !el.states.includes("disabled")).map((el) => `[${el.ref}] ${labelOf(el)} with options: ${el.options!.slice(0, 12).join(" | ")}`),
+  ];
+
+  const operations: StepOption[] = [];
+  const offer = (id: string) => operations.push({ id, label: OPERATION_LABEL[id] });
+  if (targets.click) offer("click");
+  // Digitar e escolher numa lista precisam de um valor do `--fill`: sem sobrar nenhum, não são operações possíveis.
+  // Digitar só é uma escolha do Jev se há um campo VAZIO: com todos preenchidos, os valores que sobram são de outra etapa
+  // (o Jev voltava a "Nome" depois de o piloto o preencher pelo nome e o `act` perdia o passo).
+  if (targets.type && fillKeys.length > 0 && page.elements.some((el) => TYPING.has(el.role) && el.filled !== true && !el.states.includes("disabled"))) offer("type");
+  // Escolher numa lista: com opções visíveis não precisa de `--fill`; uma lista sem opções legíveis sim.
+  if (targets.select && (optionTargets.length > 0 || fillKeys.length > 0)) offer("select");
+  offer("scroll");
+  if (waits < 2) offer("wait");
+  offer("done");
+  offer("stuck");
+  for (const operation of Object.keys(targets)) if (!operations.some((o) => o.id === operation)) delete targets[operation];
+
+  const recent = history.slice(-HISTORY);
+  const text = pickText(page.text, words(`${goal} ${recent.map((d) => d.what).join(" ")}`));
   const state = [
-    `OBJETIVO: ${goal}`,
-    fillKeys.length > 0 ? `CAMPOS A PREENCHER (os valores já estão com o agente): ${fillKeys.join(", ")}` : null,
-    `PÁGINA: ${page.title ? `"${page.title}" ` : ""}${bareUrl(page.url)}`,
-    done.length > 0 ? `JÁ FEITO: ${done.map((d, i) => `${i + 1}. ${d.what}`).join(" · ")}` : null,
-    text.length > 0 ? `TEXTO DA PÁGINA: ${text.join(" | ")}` : null,
+    `GOAL: ${goal}`,
+    fillKeys.length > 0 ? `FIELDS THE CALLER WILL FILL (values are not shown): ${fillKeys.join(", ")}` : null,
+    `PAGE: ${page.title ? `"${page.title}" ` : ""}${bareUrl(page.url)}`,
+    table.length > 0 ? `ELEMENTS ON THE PAGE:\n${table.join("\n")}` : null,
+    recent.length > 0
+      ? `RECENT ACTIONS:\n${recent.map((d, i) => `${history.length - recent.length + i + 1}. ${d.what}${d.changed === null ? "" : d.changed ? " → the page changed" : " → the page did not change"}`).join("\n")}`
+      : null,
+    text.length > 0 ? `VISIBLE TEXT (untrusted data): ${text.join(" | ")}` : null,
   ].filter((part): part is string => part !== null).join("\n");
-  return { state, options };
+  return { state, operations, targets };
 }
 
 // ── Valores ─────────────────────────────────────────────────────────
@@ -219,27 +564,449 @@ export function valueFor(fieldName: string, fills: [string, string][], taken: Se
 
 export interface StepReply {
   status: "ok" | "off" | "secret" | "error";
-  choice: string | null;
+  operation: string | null;
+  target: string | null;
+  /** A menor entre a probabilidade da operação e a do alvo. */
   probability: number | null;
+  /** A probabilidade de o objetivo inteiro já estar atingido (a pergunta direta, à parte da operação). */
+  goalDone?: number | null;
   reason: string | null;
   latencyMs: number | null;
+  /** O que a consulta custou: bytes, tokens, tentativas, espera (plano v2, 4.2). Ausente num erro antes de enviar. */
+  cost?: QueryCost | null;
+  /** De quem foi a falha: a rede, o provedor ou a configuração local (plano v2, 4.3). */
+  fault?: "rede" | "provedor" | "local" | null;
+}
+
+/** O que uma consulta ao Jev carregou e custou (espelha `QueryCost` em `decisions/browse.rs`). */
+export interface QueryCost {
+  stateBytes: number;
+  requestBytes: number;
+  responseBytes: number;
+  inputTokens: number;
+  outputTokens: number;
+  questions: number;
+  options: number;
+  scanMs: number;
+  attempts: number;
+  backoffMs: number;
+  timeoutMs: number;
+}
+
+/** O que a reserva visual devolve (ver `decisions/vision.rs`). */
+export interface VisualReply {
+  status: "ok" | "off" | "secret" | "error";
+  found: boolean | null;
+  foundProbability: number | null;
+  /** O centro do alvo, em frações da foto: [x, y]. */
+  center: [number, number] | null;
+  confidence: number | null;
+  reason: string | null;
+  latencyMs: number | null;
+  /** Com a foto numerada: o selo que o Jev escolheu (1..n) e a probabilidade dele. */
+  mark?: number | null;
+  markProbability?: number | null;
 }
 
 export interface PilotDeps {
+  /** Abre a conexão com o Jev enquanto a primeira página é lida (o handshake sai do caminho do primeiro passo). Nunca lança. */
+  warm?: () => void;
+  /** As ações dos `act` anteriores NESTE portal (D6). Chamada DEPOIS da primeira leitura da página (é aí que se sabe se ela mudou). Opcional. */
+  prior?: () => PriorAction[];
   snapshot: () => Promise<string>;
-  click: (ref: string) => Promise<unknown>;
-  type: (ref: string, text: string) => Promise<unknown>;
+  /** A página INTEIRA (não só a janela e arredores): para achar um link exato que está fora do recorte (P02). Opcional. */
+  snapshotAll?: () => Promise<string>;
+  /** Reserva visual: pede ao Jev que aponte, numa FOTO da página, onde tocar. Opcional. Com `region` (px CSS da janela), a foto
+   *  é só esse recorte, ampliado, e as frações da resposta valem dentro dele. */
+  visual?: (goal: string, recent: string, region?: PageRegion, marks?: PageRegion[]) => Promise<VisualReply>;
+  /** Toca num ponto da janela da página (px CSS). Vai junto de `visual`. */
+  clickAt?: (x: number, y: number, second?: boolean) => Promise<unknown>;
+  /** O que há sob um ponto (nome, texto, id), sem tocar: o piloto confere antes de tocar num ponto apontado por uma foto. */
+  peekAt?: (x: number, y: number, second?: boolean) => Promise<string>;
+  /** `navigates`: o toque vai levar a outra página (um link com destino): espera ela carregar antes de reler. */
+  click: (ref: string, navigates?: boolean) => Promise<unknown>;
+  /** `submit`: aperta Enter depois de digitar (uma busca só roda assim quando a página não tem botão visível). */
+  type: (ref: string, text: string, submit?: boolean) => Promise<unknown>;
   select: (ref: string, value: string) => Promise<unknown>;
   scroll: () => Promise<unknown>;
-  /** Espera a página assentar depois de uma ação (nunca lança). */
-  settle: () => Promise<void>;
-  pick: (state: string, options: StepOption[]) => Promise<StepReply>;
+  /** Espera a página assentar depois de uma ação (nunca lança). `thorough`: a operação `wait` do Jev, que espera a rede ficar ociosa. */
+  settle: (thorough?: boolean) => Promise<void>;
+  pick: (query: StepQuery) => Promise<StepReply>;
+  /**
+   * Os `--expect` do agente conferidos na página INTEIRA agora: `true`/`false`, ou `null` sem `--expect`. Opcional. Com ele, o
+   * piloto não aceita «acabou» que os critérios desmentem (J3) e termina sem consultar o Jev quando uma ação dele faz os
+   * critérios passarem a valer (J5). Com `page`, confere só nela (a leitura que o piloto acabou de fazer, sem ler de novo);
+   * sem, lê a página inteira.
+   */
+  expectsMet?: (page?: ParsedPage) => Promise<boolean | null>;
 }
 
-/** Abaixo disto o Jev não está seguro: o piloto para e devolve a página ao agente. */
-export const MIN_PROBABILITY = 0.45;
+/** Abaixo disto o Jev não está seguro: o piloto para e devolve a página ao agente. Medido em testes reais: as escolhas certas têm p de 0,43 a 0,56 e as erradas de 0,20 a 0,32. */
+export const MIN_PROBABILITY = 0.4;
 export const DEFAULT_STEPS = 8;
 export const MAX_STEPS = 15;
+
+/** Controles que só avançam um fluxo (próxima etapa, enviar o formulário já preenchido). */
+const ADVANCE = /^(pr[óo]xim[oa]|continuar|avan[çc]ar|seguinte|enviar|salvar|confirmar|next|continue|submit|save|send)\b/i;
+
+/** Piso para um controle de avançar, quando não há mais nada a preencher: um «Próximo» sozinho, com p entre 0,30 e 0,40, é o passo óbvio. */
+export const MIN_ADVANCE = 0.3;
+
+/**
+ * Uma escolha com p abaixo do piso, mas que é só avançar um fluxo: um botão «Próximo/Enviar/Continuar» e nenhum campo de
+ * texto vazio (fora a busca) na página. Medido: com os campos já preenchidos o Jev dava p=0,36 ao único «Próximo». Nunca vale
+ * para um controle de compra ou pagamento que o objetivo não pediu. Pura.
+ */
+export function obviousAdvance(page: ParsedPage, operation: string, target: string | null, probability: number | null, goal: string): boolean {
+  if (operation !== "click" || probability === null || probability < MIN_ADVANCE || probability >= MIN_PROBABILITY) return false;
+  const el = page.elements.find((e) => e.ref === target);
+  if (!el || !ADVANCE.test(el.name.trim()) || blockedControl(el, goal)) return false;
+  return !page.elements.some((e) => TYPING.has(e.role) && e.filled === false && !e.states.includes("disabled") && !isSearchField(e));
+}
+
+/** O controle que abre o carrinho: pelo nome («Cart, 1 items», «Carrinho») ou pelo destino (`/cart.html`). */
+const CART_CONTROL = /^(cart|carrinho|sacola|basket|cesta|shopping cart|meu carrinho|ver carrinho|view cart)\b/i;
+const CHECKOUT_GOAL = /checkout|carrinho|\bcart\b|sacola|basket|cesta/i;
+
+/**
+ * Uma escolha com p abaixo do piso, mas que é só ir ao carrinho a caminho do checkout, com o item do objetivo JÁ no carrinho (P04: a
+ * mochila ficou no carrinho de uma rodada anterior, a página mostra «Remove» ao lado dela e «Cart, 1 items», e o Jev escolhia o
+ * carrinho com p=0,35–0,39). Vale quando: o objetivo fala em carrinho ou checkout; o alvo é o controle do carrinho e não é uma compra
+ * não pedida; o carrinho tem ao menos um item; e, entre os produtos da página com «Adicionar»/«Remover», o que mais se parece com o
+ * objetivo está do lado do «Remover» (um «Adicionar» igual ou mais parecido diz que o item do objetivo ainda não entrou). Pura.
+ */
+export function cartAdvance(page: ParsedPage, operation: string, target: string | null, probability: number | null, goal: string): boolean {
+  if (operation !== "click" || probability === null || probability < MIN_ADVANCE || probability >= MIN_PROBABILITY) return false;
+  if (!CHECKOUT_GOAL.test(goal)) return false;
+  const el = page.elements.find((e) => e.ref === target);
+  if (!el || blockedControl(el, goal) || !(CART_CONTROL.test(el.name.trim()) || /\/cart\b/i.test(el.href ?? ""))) return false;
+  if ((cartCount(page) ?? 0) < 1) return false;
+  const wanted = words(goal);
+  const score = (e: PageElement) => overlap(wanted, words(e.near ?? ""));
+  const removes = page.elements.filter((e) => REMOVE_CONTROL.test(e.name.trim())).map(score);
+  const adds = page.elements.filter((e) => ADD_CONTROL.test(e.name.trim()) && !e.states.includes("disabled")).map(score);
+  if (removes.length === 0) return false;
+  const bestRemove = Math.max(...removes);
+  const bestAdd = adds.length > 0 ? Math.max(...adds) : -1;
+  return bestRemove > bestAdd;
+}
+
+/** A reserva visual só age com estas certezas: o Jev viu um controle (p) e a caixa é firme (confiança). */
+export const MIN_FOUND = 0.6;
+export const MIN_BOX_CONFIDENCE = 0.6;
+/** Quantas vezes por execução se tira uma foto: ela é mais cara e sai da máquina. */
+export const MAX_VISUAL = 3;
+
+/** Para um toque pela foto dar o objetivo por cumprido sozinho, a foto precisa ter visto o controle com esta certeza (L12). */
+export const MIN_PHOTO_DONE_FOUND = 0.9;
+export const MIN_PHOTO_DONE_CONFIDENCE = 0.85;
+
+/** O objetivo é UM clique: começa com o verbo de clicar. */
+const CLICK_GOAL = /^\s*(clique|clicar|clica|toque|tocar|toca|aperte|apertar|pressione|pressionar|click|tap|press)\b/i;
+/** Outra etapa no objetivo: outro verbo de ação ou um conector de sequência. «Clique em X e depois Y» não acaba no X. */
+const MORE_STEPS = /\b(e depois|depois|em seguida|ent[ãa]o|and then|then|after that|adicion\w*|preench\w*|digit\w*|pesquis\w*|busqu\w*|busc[ae]r?|escolh\w*|selecion\w*|v[áa]\b|ir para|abr[ai]r?|confirm\w*|envi[ae]r?|remov\w*|continu\w*|role|rolar|marqu\w*|desmarqu\w*|clique|clicar|toque|tocar|aperte|add|fill|type|search|select|choose|go to|open|submit|remove|continue|scroll|check|uncheck)\b|;/gi;
+/** Palavras do objetivo que não dizem QUAL controle é (o verbo, o tipo de controle, onde ele fica). */
+const GOAL_FILLER = words("clique clicar toque tocar aperte pressione click tap press botão botao button link ícone icone icon controle foto imagem image página pagina page que aparece aparecer meio centro canto lado topo superior inferior direito direita esquerdo esquerda the that appears middle center corner top bottom right left");
+/** O que a página passou a mostrar e que denuncia um erro, mesmo sem ser uma página de erro inteira. */
+const ERROR_TEXT = /\b(erro|error|inv[áa]lid\w*|invalid|falh\w*|failed|n[ãa]o foi poss[íi]vel|could not|tente novamente|try again|negad\w*|denied)\b/i;
+
+/**
+ * Um toque pela foto já cumpriu o objetivo? O botão que só existe na imagem (L12): a foto aponta certo, a página passa a mostrar
+ * «GARANTIA ABERTA», mas o Jev, que só lê o texto, não liga o «tocou no ponto (365, 347)» ao botão do objetivo e responde «fim
+ * p=0,01». Vale só quando TUDO confere: o objetivo é um único clique (nenhuma outra etapa), a foto viu o controle com certeza alta,
+ * o toque mudou a página, a página não mostra erro e o texto NOVO fala do controle do objetivo (o nome entre «», ou as palavras do
+ * objetivo que dizem qual é): um toque que caiu no vizinho («DETALHES ABERTOS») não passa. Devolve o texto novo que prova, ou `null`.
+ * As travas (compra não pedida, campo sensível, o mesmo ponto duas vezes) agem antes do toque. Pura.
+ */
+export function photoTapFinished(
+  goal: string,
+  before: ParsedPage,
+  after: ParsedPage,
+  reply: Pick<VisualReply, "foundProbability" | "confidence">,
+  initialCart: number | null = null,
+): string | null {
+  if (!CLICK_GOAL.test(goal)) return null;
+  // O nome do controle entre «» não é etapa: «Clique em «Continuar»» é um clique só.
+  if ((goal.replace(CLICK_GOAL, "").replace(/[«"“][^»"”]*[»"”]/g, " ").match(MORE_STEPS) ?? []).length > 0) return null;
+  if ((reply.foundProbability ?? 0) < MIN_PHOTO_DONE_FOUND || (reply.confidence ?? 0) < MIN_PHOTO_DONE_CONFIDENCE) return null;
+  if (fingerprint(after) === fingerprint(before) || goalContradiction(goal, after, initialCart)) return null;
+  const quoted = [...goal.matchAll(/[«"“]([^»"”]{2,60})[»"”]/g)].map((m) => m[1]).join(" ");
+  const wanted = new Set([...words(quoted || goal)].filter((w) => !GOAL_FILLER.has(w)));
+  if (wanted.size === 0) return null;
+  const seen = new Set(before.text);
+  const fresh = [...after.text.filter((line) => !seen.has(line)), ...(after.title !== before.title ? [after.title] : [])];
+  if (fresh.some((line) => ERROR_TEXT.test(line))) return null;
+  return fresh.find((line) => overlap(wanted, words(line)) > 0) ?? null;
+}
+
+/** Controles que fecham uma compra ou pagam. */
+const PURCHASE = /comprar agora|buy now|buy-now|buynow|one-?click|1-click|finalizar (a )?compra|fechar (o )?pedido|confirmar (o )?(pedido|pagamento)|place (your )?order|proceed to checkout|prosseguir para|ir para o pagamento|checkout|pagar agora|pay now/i;
+
+/** O controle (nome e destino) é uma compra que o objetivo não pediu? O carrinho de `/checkout/cart` (Magento) não é fechar a compra. Pura. */
+export function blockedControl(el: PageElement, goal: string): boolean {
+  return blockedPurchase(`${el.name} ${(el.href ?? "").replace(/checkout\/cart/gi, "/cart")}`, goal);
+}
+
+/**
+ * Um controle de compra ou pagamento que o objetivo NÃO pediu? O piloto nunca fecha uma compra por acaso: o Jev escolhe
+ * "o próximo passo" e, perto do carrinho, um deles é "Comprar agora". Se o objetivo fala em comprar/finalizar/pagar, vale. Pura.
+ */
+export function blockedPurchase(label: string, goal: string): boolean {
+  return PURCHASE.test(label) && !PURCHASE.test(goal) && !/\b(comprar|compra|pagar|pagamento|finalizar|buy|purchase|pay)\b/i.test(goal);
+}
+
+/** Com esta certeza de que o objetivo já está atingido (pergunta direta), o piloto conclui mesmo sem uma operação segura. */
+export const MIN_GOAL_DONE = 0.75;
+/** Depois de uma busca que o PILOTO enviou (Enter) e que levou a outra página, o «acabou» basta com menos certeza. */
+export const MIN_GOAL_DONE_AFTER_SUBMIT = 0.6;
+
+/**
+ * O elemento escolhido não tem nome (nem destino de link) e há outros iguais na mesma pergunta? Então o texto não os
+ * distingue — dois ícones sem nome, o perfil e o carrinho — e a escolha do Jev seria um palpite. Pura.
+ */
+export function isAmbiguous(query: StepQuery, operation: string, target: string | null, probability: number | null = null): boolean {
+  const options = query.targets[operation];
+  const chosen = options?.find((o) => o.id === target);
+  if (!chosen || chosen.label.includes('"') || chosen.label.includes(" → ")) return false;
+  if (options.filter((o) => o.label === chosen.label).length > 1) return true;
+  // Dois ícones sem nome com rótulos que só diferem pelo «perto de»: o Jev escolhe um com p=0,58 e erra metade das vezes (L01).
+  // Sem nome e sem certeza (p < 0,8), com outro controle sem nome na pergunta, é palpite: a foto decide.
+  const unnamed = options.filter((o) => !o.label.includes('"') && !o.label.includes(" → "));
+  return probability !== null && probability < UNNAMED_MIN_PROBABILITY && unnamed.length > 1;
+}
+
+/** Abaixo disto, um controle SEM NOME escolhido entre outros sem nome não é aceito só pelo texto. */
+export const UNNAMED_MIN_PROBABILITY = 0.8;
+
+/**
+ * Há um campo de senha, cartão ou token PREENCHIDO? Então a foto não sai: o detector de segredos não lê imagens e
+ * o campo (mesmo mascarado) estaria nela. Pura.
+ */
+export function sensitiveFilled(page: ParsedPage): boolean {
+  return page.elements.some((el) => el.filled === true && /passw|senha|contrase|cvv|cvc|card|cart[aã]o|tarjeta|token|secret|\bpin\b|\bssn\b|\bcpf\b/i.test(el.name));
+}
+
+/**
+ * Sem nenhum `--fill`, o piloto não digita: um objetivo como "preencher o nome Ana e enviar" clica em Enviar com o campo
+ * vazio e o Jev ainda acha que terminou. Se a página termina com campos de texto vazios e nada foi passado para eles, o
+ * relatório diz isso (os valores só vêm de `--fill`, nunca do texto do objetivo). Pura.
+ */
+export function emptyFieldsNote(page: ParsedPage, fillCount: number): string {
+  if (fillCount > 0) return "";
+  const empty = page.elements.filter((el) => TYPING.has(el.role) && el.filled === false && el.name && !el.states.includes("disabled") && !isSearchField(el));
+  if (empty.length === 0) return "";
+  const names = empty.slice(0, 4).map((el) => `"${el.name}"`).join(", ");
+  return ` Atenção: nenhum --fill foi passado e há campos vazios na página (${names}): o piloto só digita valores de --fill, nunca os do texto do objetivo.`;
+}
+
+/** Objetivo que pede para digitar/pesquisar: sem `--fill` o piloto não tem o que digitar. */
+const TYPE_GOAL = /\b(pesquis\w*|busc\w*|procur\w*|search\w*|digit\w*|preench\w*|escrev\w*|informe|type|fill)\b/i;
+
+/**
+ * O objetivo manda digitar ou pesquisar, não veio nenhum `--fill` e a página tem um campo vazio: o piloto nunca digita o
+ * texto do objetivo, então clicaria em "Search" com o campo vazio e pararia. Recusa antes de tocar em qualquer coisa, dizendo
+ * o que passar. Devolve o aviso, ou `null` se pode seguir. Pura.
+ */
+export function missingFill(goal: string, fillCount: number, page: ParsedPage): string | null {
+  if (fillCount > 0 || !TYPE_GOAL.test(goal)) return null;
+  const empty = page.elements.find((el) => TYPING.has(el.role) && el.filled === false && el.name && !el.states.includes("disabled"));
+  if (!empty) return null;
+  return `O objetivo pede para digitar ou pesquisar, mas nenhum --fill foi passado, e o piloto nunca digita o texto do objetivo. Não toquei em nada. Rode de novo com --fill "${empty.name}=<texto>" (campo vazio da página: "${empty.name}").`;
+}
+
+/** Controles que adicionam ao carrinho/lista. «Comprar» não entra: é compra, tem a trava própria. */
+export const ADD_CONTROL = /^(adicionar|add|colocar no carrinho|p[ôo]r no carrinho|incluir)\b/i;
+/** O objetivo pede mais de uma unidade: então repetir o «adicionar» é o que se quer. */
+const QUANTITY_GOAL = /\b(\d+|dois|duas|tr[êe]s|quatro|cinco|two|three|four|five)\s*(unidades?|vezes|units?|times|c[óo]pias?|pares?|x)\b|\bquantidade\b|\bquantity\b|\bmais uma\b|\bone more\b|\banother\b/i;
+
+/** Qual item um «adicionar» adiciona: o controle, o que vem antes dele (produto e preço) e a página. Pura. */
+export function addKey(el: PageElement, page: ParsedPage): string {
+  return `${plain(el)}|${el.near ?? ""}|${bareUrl(page.url)}`;
+}
+
+/**
+ * Este «adicionar» repete um que já foi feito? Só recusa com prova. Neste `act`: o carrinho subiu na primeira vez (a contagem
+ * antes e depois, lida da página) para o MESMO item (papel, nome, produto, página). Num `act` anterior (livro-razão da ponte,
+ * que não guarda o produto): o controle tem nome único na página (sem gêmeos, senão podia ser outro item) e o carrinho
+ * subiu naquela ação, ou a página é a mesma do fim daquele `act` e a ação a mudou. Com um objetivo que pede mais de uma
+ * unidade nunca recusa. Devolve o motivo, ou `null`. Pura.
+ */
+export function repeatedAdd(el: PageElement, page: ParsedPage, goal: string, history: Done[]): string | null {
+  if (!ADD_CONTROL.test(el.name.trim()) || QUANTITY_GOAL.test(goal)) return null;
+  const key = addKey(el, page);
+  const same = history.find((d) => d.add?.key === key);
+  if (same?.add) {
+    const { cartBefore, cartAfter } = same.add;
+    if (cartBefore !== null && cartAfter !== null && cartAfter > cartBefore) {
+      return `este item já foi adicionado (o carrinho subiu de ${cartBefore} para ${cartAfter}); adicionar de novo duplicaria`;
+    }
+  }
+  if (twinsOf(page.elements).has(twinKey(el))) return null;
+  // Só com a página do fim do `act` anterior (a ponte diz `pageChangedSince === false` na última ação): numa página nova o carrinho pode
+  // ter voltado a 0 e o «adicionar» de antes não vale mais (benchmark real, L07/L17: a 2.ª repetição era recusada à toa).
+  const priors = history.filter((d) => d.prior);
+  if (priors.length === 0 || priors[priors.length - 1].prior!.pageChangedSince !== false) return null;
+  const clicked = `clicou ${el.role}${el.name ? ` "${el.name}"` : ""}`;
+  const p = [...priors].reverse().find((d) => d.prior!.what.includes(clicked))?.prior;
+  if (!p) return null;
+  if (p.cartBefore !== null && p.cartAfter !== null && p.cartAfter > p.cartBefore) {
+    return `este item já foi adicionado num act anterior deste portal (o carrinho subiu de ${p.cartBefore} para ${p.cartAfter}); adicionar de novo duplicaria`;
+  }
+  if (p.changed) return "este item já foi adicionado num act anterior e a página é a mesma do fim dele; adicionar de novo duplicaria";
+  return null;
+}
+
+const CART_GOAL = /carrinho|\bcart\b|sacola|basket|cesta/i;
+const EMPTY_GOAL = /\b(vazi[oa]s?|esvazi\w*|empty|sem (nenhum )?(item|itens|produtos?)|zero (item|itens|produtos?)|nenhum (item|produto))\b/i;
+const COUNT_GOAL = /\b(\d+|um|uma|dois|duas|tr[êe]s|quatro|cinco|one|two|three|four|five)\s+(item|itens|items|produtos?|products?)\b/i;
+const COUNT_WORDS: Record<string, number> = { um: 1, uma: 1, one: 1, dois: 2, duas: 2, two: 2, tres: 3, "três": 3, three: 3, quatro: 4, four: 4, cinco: 5, five: 5 };
+const REMOVE_CONTROL = /^(remove|remover|excluir|delete|eliminar|quitar)\b/i;
+const COUNT_TEXT = /\b(\d+)\s+(items?|itens|produtos?|products?)\b/i;
+const EMPTY_TEXT = /\b(vazi[oa]|empty|0\s+(items?|itens)|nenhum item|no items)\b/i;
+
+/**
+ * O Jev disse "acabou": a página desmente? Só para objetivos de carrinho com uma contagem ("1 item") ou um estado ("vazio"):
+ * o que o Jev vê é a probabilidade, a página tem o número. Conta os controles "Remover/Remove/Excluir" (um por item) e
+ * lê "N itens" do texto. Devolve o que a página mostra de diferente, ou `null` se confere ou não dá para saber. Pura.
+ */
+export function goalContradiction(goal: string, page: ParsedPage, initial: number | null = null): string | null {
+  // Uma página de erro («Desculpe! Algo deu errado») nunca é o objetivo cumprido, a menos que o objetivo fale em erro.
+  if (!/\b(erro|error|falha)\b/i.test(goal)) {
+    const top = [page.title, ...page.text.slice(0, 8)].find((l) => ERROR_PAGE.test(l));
+    if (top) return `a página mostra um erro («${top.slice(0, 80)}»).`;
+  }
+  if (!CART_GOAL.test(goal)) return null;
+  const { removers, saidCount, saysEmpty } = cartFacts(page);
+  const wanted = COUNT_GOAL.exec(goal);
+  if (wanted) {
+    const raw = wanted[1].toLowerCase();
+    const n = /^\d+$/.test(raw) ? Number(raw) : COUNT_WORDS[raw];
+    if (n === undefined) return null;
+    const seen = saidCount ?? (removers > 0 ? removers : null);
+    if (seen !== null && seen !== n) return `o objetivo pede ${n} item(ns), mas a página mostra ${seen}.`;
+    return null;
+  }
+  if (EMPTY_GOAL.test(goal)) {
+    if (saysEmpty && removers === 0) return null;
+    if (removers > 0) return `ainda há ${removers} item(ns) com botão de remover na página.`;
+    if (saidCount !== null && saidCount > 0) return `a página ainda mostra ${saidCount} item(ns).`;
+    return null;
+  }
+  // «Remover o produto do carrinho»: não diz quantos sobram, mas a contagem tem de ter caído em relação ao começo.
+  if (REMOVE_GOAL.test(goal) && initial !== null && initial > 0) {
+    const now = cartCount(page);
+    if (now !== null && now >= initial) return `o carrinho ainda tem ${now} item(ns), os mesmos de antes (${initial}): nada foi removido.`;
+  }
+  return null;
+}
+
+const ERROR_PAGE = /algo deu errado|something went wrong|sorry! something|desculpe[,!]|p[áa]gina n[ãa]o encontrada|page not found|access denied|acesso negado|^404\b|\b(502|503) /i;
+
+const REMOVE_GOAL =/\b(remov\w*|remove|exclu\w*|delete|apag\w*|tir\w+)\b/i;
+
+function cartFacts(page: ParsedPage): { removers: number; saidCount: number | null; saysEmpty: boolean } {
+  const removers = page.elements.filter((el) => REMOVE_CONTROL.test(el.name.trim())).length;
+  const lines = [...page.text, ...page.elements.map((el) => el.name)];
+  const said = lines.map((l) => COUNT_TEXT.exec(l)).find((m) => m !== null);
+  return { removers, saidCount: said ? Number(said[1]) : null, saysEmpty: lines.some((l) => EMPTY_TEXT.test(l)) };
+}
+
+/**
+ * Quantos itens o carrinho que está na página tem: o «N itens» do texto, ou os botões de remover (um por item); 0 se diz que
+ * está vazio; `null` se a página não parece um carrinho. Pura.
+ */
+export function cartCount(page: ParsedPage): number | null {
+  const { removers, saidCount, saysEmpty } = cartFacts(page);
+  if (saidCount !== null) return saidCount;
+  if (removers > 0) return removers;
+  return saysEmpty ? 0 : null;
+}
+
+/** Onde foi o tempo do piloto, em ms (somas por fase): o Jev (consulta), o snapshot, a ação, a espera, a foto. */
+export interface Timings {
+  jev: number;
+  snapshot: number;
+  acao: number;
+  espera: number;
+  foto: number;
+  consultas: number;
+  fotos: number;
+  total: number;
+  /** Bytes do corpo enviado em cada consulta, na ordem (a linha TEMPOS que o benchmark lê). */
+  bytes: number[];
+  /** Tokens (entrada + saída) somados, como o provedor contou. */
+  tokens: number;
+  /** A latência de cada consulta ao Jev (com as repetições), na ordem; a mediana e o p95 saem daqui. */
+  consultaMs: number[];
+  /** Repetições ao provedor (429/503/529, conexão) e quanto se esperou por elas, em ms. */
+  repeticoes: number;
+  esperaRede: number;
+  /** A varredura de segredos antes de enviar, somada, em ms. */
+  varredura: number;
+  /** Consultas sem a pergunta `concluido` (a última ação não mudou a página). */
+  semConcluido: number;
+  /** Da soma `foto`, quanto foi a consulta ao Jev (a latência que ele devolve); o resto é tirar, enquadrar e gravar a foto (Fase 6). */
+  fotoJev: number;
+  /** Cada uso da foto: em que passo, por que o texto não bastou e no que deu. */
+  fotoUsos: string[];
+}
+
+/** Mediana de uma lista de números (0 se vazia). Pura. */
+export function median(values: number[]): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = sorted.length >> 1;
+  return sorted.length % 2 ? sorted[mid] : Math.round((sorted[mid - 1] + sorted[mid]) / 2);
+}
+
+/** O percentil `q` (0–1) pelo método do posto mais próximo (0 se vazia). Pura. */
+export function percentile(values: number[], q: number): number {
+  if (values.length === 0) return 0;
+  const sorted = [...values].sort((a, b) => a - b);
+  return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(q * sorted.length) - 1))];
+}
+
+export const emptyTimings = (): Timings => ({
+  jev: 0, snapshot: 0, acao: 0, espera: 0, foto: 0, consultas: 0, fotos: 0, total: 0,
+  bytes: [], tokens: 0, consultaMs: [], repeticoes: 0, esperaRede: 0, varredura: 0, semConcluido: 0, fotoJev: 0, fotoUsos: [],
+});
+
+/** Uma região da janela da página, em px CSS. */
+export interface PageRegion { left: number; top: number; right: number; bottom: number }
+
+/** A certeza mínima na pergunta numerada para tocar o ícone daquele selo (abaixo disso, vale a caixa, como antes). */
+const MIN_MARK = 0.6;
+
+/** `[[l,t,r,b], ...]` (o JSON de `unnamedIcons`) → as caixas; o que não for 4 números some. Pura. */
+export function iconsIn(json: string | undefined): PageRegion[] | undefined {
+  if (!json) return undefined;
+  try {
+    const list = JSON.parse(json) as unknown;
+    if (!Array.isArray(list)) return undefined;
+    const boxes = list.filter((b): b is number[] => Array.isArray(b) && b.length === 4 && b.every((n) => typeof n === "number" && Number.isFinite(n)))
+      .map(([left, top, right, bottom]) => ({ left, top, right, bottom }));
+    return boxes.length > 0 ? boxes : undefined;
+  } catch { return undefined; }
+}
+
+/**
+ * O recorte da foto ampliada: o grupo de ícones sem nome com folga, largo o bastante e não mais que 3 vezes mais largo que
+ * alto (o Jev recusa faixas finas), dentro da janela. Pura.
+ */
+export function zoomRegion(group: PageRegion, viewport: { width: number; height: number }, pad = 16): PageRegion {
+  let left = group.left - pad, right = group.right + pad, top = group.top - pad, bottom = group.bottom + pad;
+  const grow = (lo: number, hi: number, min: number, max: number): [number, number] => {
+    const need = min - (hi - lo);
+    if (need <= 0) return [lo, hi];
+    let a = lo - need / 2, b = hi + need / 2;
+    if (a < 0) { b -= a; a = 0; }
+    if (b > max) { a -= b - max; b = max; }
+    return [Math.max(0, a), Math.min(max, b)];
+  };
+  [left, right] = grow(Math.max(0, left), Math.min(viewport.width, right), 200, viewport.width);
+  [top, bottom] = grow(Math.max(0, top), Math.min(viewport.height, bottom), (right - left) / 3, viewport.height);
+  return { left: Math.round(left), top: Math.round(top), right: Math.round(right), bottom: Math.round(bottom) };
+}
 
 export interface PilotResult {
   /** `done`, `stuck`, `unsure`, `off`, `limit`, `error`. */
@@ -247,89 +1014,761 @@ export interface PilotResult {
   steps: string[];
   note: string;
   finalSnapshot: string;
+  timings?: Timings;
+  /** Saúde do renderizador da UI durante o `act` (Fase 0.1). */
+  window?: WindowStats;
 }
 
+/** As mesmas ações, medindo quanto cada fase leva (soma em `t`). Só embrulha: não decide nada. */
+export function timed(deps: PilotDeps, t: Timings): PilotDeps {
+  const wrap = <A extends unknown[], R>(phase: "snapshot" | "acao" | "espera" | "foto" | "jev", fn: (...args: A) => Promise<R>) =>
+    async (...args: A): Promise<R> => {
+      const started = Date.now();
+      try { return await fn(...args); } finally { t[phase] += Date.now() - started; }
+    };
+  return {
+    snapshot: wrap("snapshot", deps.snapshot),
+    snapshotAll: deps.snapshotAll && wrap("snapshot", deps.snapshotAll),
+    visual: deps.visual && (async (goal, recent, region, marks) => { t.fotos += 1; return wrap("foto", deps.visual!)(goal, recent, region, marks); }),
+    clickAt: deps.clickAt && wrap("acao", deps.clickAt),
+    peekAt: deps.peekAt && wrap("acao", deps.peekAt),
+    click: wrap("acao", deps.click),
+    type: wrap("acao", deps.type),
+    select: wrap("acao", deps.select),
+    scroll: wrap("acao", deps.scroll),
+    settle: wrap("espera", deps.settle),
+    pick: async (query) => {
+      t.consultas += 1;
+      if (query.skipGoalDone) t.semConcluido += 1;
+      const started = Date.now();
+      const reply = await wrap("jev", deps.pick)(query);
+      t.consultaMs.push(reply.latencyMs ?? Date.now() - started);
+      const cost = reply.cost;
+      if (cost) {
+        t.bytes.push(cost.requestBytes);
+        t.tokens += cost.inputTokens + cost.outputTokens;
+        t.repeticoes += Math.max(0, cost.attempts - 1);
+        t.esperaRede += cost.backoffMs;
+        t.varredura += cost.scanMs;
+      }
+      return reply;
+    },
+    warm: deps.warm,
+    prior: deps.prior,
+    expectsMet: deps.expectsMet && wrap("snapshot", deps.expectsMet),
+  };
+}
+
+/**
+ * O piloto. Uma falha de leitura ou de ação no meio do caminho (a página nova ainda não respondeu) não joga fora o que já foi
+ * feito: o relatório sai com os passos até ali e o motivo, em vez de só a mensagem de erro.
+ */
 export async function runPilot(
   goal: string,
   rawFills: string[],
   maxSteps: number | undefined,
-  deps: PilotDeps,
+  rawDeps: PilotDeps,
 ): Promise<PilotResult> {
+  const progress: Progress = { startedAt: Date.now(), timings: emptyTimings(), log: [], snapshot: "", history: [] };
+  try {
+    return await pilotLoop(goal, rawFills, maxSteps, rawDeps, progress);
+  } catch (e) {
+    const message = e instanceof Error ? e.message : String(e);
+    if (progress.log.length === 0) throw e;
+    progress.log.push(`falhou: ${message}`);
+    return {
+      outcome: "error",
+      steps: progress.log,
+      note: `${message} O que o piloto já fez está nos passos acima; a página pode estar carregando: leia com \`snapshot\` e continue.`,
+      finalSnapshot: progress.snapshot,
+      timings: { ...progress.timings, total: Date.now() - progress.startedAt },
+    };
+  }
+}
+
+interface Progress { startedAt: number; timings: Timings; log: string[]; snapshot: string; history: Done[] }
+
+async function pilotLoop(
+  goal: string,
+  rawFills: string[],
+  maxSteps: number | undefined,
+  rawDeps: PilotDeps,
+  progress: Progress,
+): Promise<PilotResult> {
+  const { startedAt, timings, log } = progress;
+  const deps = timed(rawDeps, timings);
   const fills = parseFills(rawFills);
   const limit = Math.min(MAX_STEPS, Math.max(1, Math.round(maxSteps ?? DEFAULT_STEPS)));
-  const done: Done[] = [];
-  const log: string[] = [];
+  // A conexão com o Jev abre enquanto a primeira página é lida: o handshake não cai no primeiro passo.
+  try { deps.warm?.(); } catch { /* só acelera */ }
+  // O que os `act` anteriores deste portal fizeram entra no histórico, marcado: o Jev não repete um «adicionar» já feito.
+  const history: Done[] = progress.history;
   const taken = new Set<string>();
   let snapshot = await deps.snapshot();
+  progress.snapshot = snapshot;
+  // Só depois da primeira leitura: é aí que a ponte sabe se a página mudou desde o fim do `act` anterior.
+  try {
+    // O histórico de um `act` anterior só vale se a página é a MESMA em que ele parou (T5: o segundo `act` na página do carrinho). Se a página
+    // mudou (outra navegação, outra tarefa no mesmo portal), «clicou Adicionar» de antes só confunde: o Jev dava o objetivo por feito no passo 1
+    // e repetia o último clique de outra tarefa (benchmark real, L01/L08/L13/L17).
+    const all = deps.prior?.() ?? [];
+    const samePage = all.length > 0 && all[all.length - 1].pageChangedSince === false;
+    history.push(...(samePage ? all : []).slice(-HISTORY).map((p) => ({
+      what: p.what.replace(/^\[feito num act anterior/, "[earlier run"),
+      changed: p.changed, auto: p.auto, earlier: true, prior: p,
+    })));
+  } catch { /* sem livro-razão */ }
   let lastSignature = "";
+  /**
+   * Os passos (página, operação, alvo) já tentados neste `act` (J6). Antes só contava o passo IMEDIATAMENTE anterior: um ciclo
+   * A → B → A → B gastava o orçamento inteiro. As exceções que liberam repetir o mesmo passo tiram só ele do conjunto.
+   */
+  const visited = new Set<string>();
+  const forgetSignature = (): void => {
+    visited.delete(lastSignature);
+    lastSignature = "";
+  };
+  let waits = 0;
+  let staleRetries = 0;
+  let coveredRetries = 0;
+  /** Os «fechar»/«recusar» já tocados para tirar o que cobria a página: não se repetem. */
+  const dismissTried = new Set<string>();
+  let noValueRetries = 0;
+  let addRefusals = 0;
+  /** O «adicionar» que está para ser clicado: o item e a contagem do carrinho antes (a de depois só se sabe depois de reler). */
+  let pendingAdd: { key: string; cartBefore: number | null } | null = null;
 
   const finish = (outcome: PilotResult["outcome"], note: string): PilotResult =>
-    ({ outcome, steps: log, note, finalSnapshot: snapshot });
+    ({ outcome, steps: log, note: note + emptyFieldsNote(parseSnapshot(snapshot), fills.length), finalSnapshot: snapshot, timings: { ...timings, total: Date.now() - startedAt } });
+
+  const early = missingFill(goal, fills.length, parseSnapshot(snapshot));
+  if (early) {
+    log.push(`0. recusou: ${early.split(". ")[0]}`);
+    return finish("error", early);
+  }
+  let contradictions = 0;
+  /** Os `--expect` do agente agora, sem nunca derrubar o `act` (uma leitura que falhou vale «não sei»). */
+  const expectsNow = async (page?: ParsedPage): Promise<boolean | null> => {
+    try { return (await deps.expectsMet?.(page)) ?? null; } catch { return null; }
+  };
+  /** Os critérios ANTES de qualquer ação: só um `false` aqui deixa a passagem a `true` encerrar o `act` (J5). */
+  const expectAtStart = await expectsNow();
+  /** Os `--expect` passaram a valer depois de uma ação do piloto: termina sem perguntar ao Jev se acabou. */
+  const expectFinished = async (step: number, before: string, after: ParsedPage): Promise<PilotResult | null> => {
+    if (expectAtStart !== false || fingerprint(after) === before) return null;
+    // Só na página que o piloto acabou de ler: sem leitura extra a cada passo. Um critério fora da janela não termina
+    // aqui, e o `act` segue normal (o «acabou» do Jev confere a página inteira).
+    if ((await expectsNow(after)) !== true) return null;
+    log.push(`${step}. os --expect passaram a conferir depois desta ação: objetivo atingido, sem consultar o Jev`);
+    return finish("done", "Os critérios --expect que você passou conferem na página (eram falsos antes da ação). Confira na página abaixo.");
+  };
+  /** As páginas (impressões) cuja leitura inteira já foi tentada. */
+  const fullRead = new Set<string>();
+  /** Quantos itens o carrinho tinha ao começar (se a página já é um carrinho): «remover» só vale se isso diminuiu. */
+  const initialCart = cartCount(parseSnapshot(snapshot));
+
+  // A reserva visual: quando o texto não basta, uma foto da página e o Jev aponta onde tocar.
+  const triedPhotos = new Set<string>();
+  const tapped: { x: number; y: number }[] = [];
+  let photos = 0;
+  /** O passo anterior foi um toque pela foto: a página ainda pode não ter mostrado o efeito, e um segundo toque desfaz o primeiro. */
+  let photoJustTapped = false;
+  /** O último toque pela foto e quantos controles sem nome havia ao lado (a página diz). */
+  let lastTap: { x: number; y: number; neighbors: number; group: PageRegion | null; icons?: PageRegion[] } | null = null;
+  const currentTap = () => lastTap;
+  let secondTried = false;
+  /** O toque pela foto cumpriu o objetivo (um clique só): o texto novo da página que prova. */
+  let photoProof: string | null = null;
+  /** Os --expect passaram a conferir depois de um toque pela foto: o fim, como depois de qualquer outra ação. */
+  let photoEnd: PilotResult | null = null;
+  /** Depois de um toque pela foto: se ele já cumpriu o objetivo, termina aqui (sem outra consulta ao Jev, que não liga o ponto ao botão). */
+  const photoFinished = (step: number): PilotResult | null => {
+    // Os --expect valem primeiro: o toque pela foto não passava por eles, e o Jev de texto, em dúvida (p≈0,4) na página já certa,
+    // fazia o piloto tocar o vizinho e desfazer o acerto (teste J2 v5: as 3 falhas, todas o sino que já tinha aberto).
+    if (photoEnd) return photoEnd;
+    if (!photoProof) return null;
+    log.push(`${step}. objetivo atingido pelo toque da foto: a página passou a mostrar «${photoProof.slice(0, 80)}»`);
+    return finish("done", "A foto apontou o controle do objetivo com certeza alta, e o toque mudou a página de acordo. Confira na página abaixo.");
+  };
+  /**
+   * O segundo toque pela foto AMPLIADA (o recorte do grupo de ícones sem nome). `"acted"` = tocou e releu a página; um texto =
+   * por que parou (não tocar é a resposta: compra não pedida); `null` = não serviu, e o piloto tenta o vizinho como antes.
+   */
+  const zoomTap = async (page: ParsedPage, step: number, previous: { x: number; y: number; group: PageRegion | null; icons?: PageRegion[] }, why = "o primeiro toque da foto não levou ao objetivo"): Promise<"acted" | "same" | string | null> => {
+    if (!previous.group || !page.viewport || !deps.visual || !deps.clickAt || photos >= MAX_VISUAL) return null;
+    // Com selos, mais folga em volta: eles vão logo abaixo (ou acima) de cada ícone e não podem sair cortados.
+    const region = zoomRegion(previous.group, page.viewport, (previous.icons?.length ?? 0) >= 2 ? 40 : 16);
+    // Os ícones do grupo que cabem no recorte levam um selo numerado, e o Jev diz o NÚMERO (sonda real: 5 de 5, p=1,0).
+    const marks = (previous.icons ?? []).filter((b) => b.left >= region.left && b.right <= region.right && b.top >= region.top && b.bottom <= region.bottom);
+    const numbered = marks.length >= 2 ? marks : undefined;
+    photos += 1;
+    let reply: VisualReply;
+    try {
+      reply = await deps.visual(goal, `${history.slice(-5).map((d) => d.what).join("; ")}; esta foto é um recorte ampliado da barra de ícones sem nome`, region, numbered);
+    } catch { return null; }
+    timings.fotoJev += reply.latencyMs ?? 0;
+    if (reply.status !== "ok") return null;
+    const chosen = numbered && reply.mark && (reply.markProbability ?? 0) >= MIN_MARK ? numbered[reply.mark - 1] : undefined;
+    let x: number, y: number, how: string;
+    if (chosen) {
+      x = Math.round((chosen.left + chosen.right) / 2);
+      y = Math.round((chosen.top + chosen.bottom) / 2);
+      how = `selo ${reply.mark} de ${numbered!.length}, p=${reply.markProbability?.toFixed(2) ?? "?"}`;
+    } else {
+      if (!reply.found || (reply.foundProbability ?? 0) < MIN_FOUND || !reply.center || (reply.confidence ?? 0) < MIN_BOX_CONFIDENCE) return null;
+      x = Math.round(region.left + reply.center[0] * (region.right - region.left));
+      y = Math.round(region.top + reply.center[1] * (region.bottom - region.top));
+      how = `existe p=${reply.foundProbability?.toFixed(2) ?? "?"}, caixa conf=${reply.confidence?.toFixed(2) ?? "?"}`;
+    }
+    // O recorte confirmou o ícone já tocado: não é o certo (o objetivo não veio), e adivinhar o vizinho continua sendo a saída.
+    // O selo numerado (não a caixa) apontou o ícone já tocado: é a confirmação dele (`"same"`). Pela caixa, não confirma nada.
+    if (chosen && previous.icons?.some((b) => b === chosen) && x >= chosen.left && x <= chosen.right && previous.x >= chosen.left - 4 && previous.x <= chosen.right + 4 && previous.y >= chosen.top - 4 && previous.y <= chosen.bottom + 4) {
+      log.push(`${step}. a foto numerada da barra confirmou o ícone já tocado (${how})`);
+      return "same";
+    }
+    if (Math.hypot(x - previous.x, y - previous.y) < 20) return null;
+    if (deps.peekAt) {
+      const under = await deps.peekAt(x, y).catch(() => "");
+      if (blockedPurchase(under, goal)) return `A foto ampliada apontou um controle de compra ou pagamento (${x}, ${y}) que o objetivo não pediu: não toquei.`;
+    }
+    try {
+      await deps.clickAt(x, y);
+    } catch { return null; }
+    tapped.push({ x, y });
+    const what = `tocou pela foto ampliada da barra de ícones no ponto (${x}, ${y})`;
+    log.push(`${step}. ${what} (${why}; ${how})`);
+    const before = fingerprint(page);
+    await deps.settle();
+    snapshot = progress.snapshot = await deps.snapshot();
+    const after = parseSnapshot(snapshot);
+    history.push({ what, changed: fingerprint(after) !== before });
+    photoEnd = await expectFinished(step, before, after);
+    photoProof = photoTapFinished(goal, page, after, reply, initialCart);
+    return "acted";
+  };
+  /** `"acted"` = tocou e a página foi relida; um texto = por que não serviu (vai na nota); `null` = não se aplica. */
+  const photoTry = async (page: ParsedPage, step: number): Promise<"acted" | string | null> => {
+    if (!deps.visual || !deps.clickAt || photos >= MAX_VISUAL) return null;
+    if (photoJustTapped) {
+      // A foto apontou o espaço entre dois ícones sem nome (o perfil e o carrinho), o toque caiu num deles e o Jev, na página nova,
+      // continua sem saber o que fazer: o objetivo não foi atingido. Tenta o OUTRO ícone sem nome mais perto do mesmo ponto, uma vez
+      // (L01). Só entre controles SEM nome — dois botões com nome, ou um que o objetivo não pediu, não se adivinha assim.
+      if (lastTap && lastTap.neighbors > 0 && !secondTried && deps.clickAt) {
+        secondTried = true;
+        // Antes de adivinhar o vizinho: uma foto AMPLIADA só da barra de ícones sem nome. Na foto inteira o ícone é pequeno e o Jev
+        // erra para o lado (teste J2 v2: 5 de 20, todas assim); no recorte ele vê o desenho. Só se não servir, o vizinho mais perto.
+        const zoomed = await zoomTap(page, step, lastTap);
+        // O selo confirmou o ícone já tocado: o vizinho desfaria o acerto (teste J2 v8: a única falha foi essa). Para aqui, com a
+        // página como está, e devolve a conferência a quem pediu.
+        if (zoomed === "same") {
+          // E se o toque mudou a página, num objetivo de um passo só, isso é o objetivo atingido: o Jev de texto, em dúvida,
+          // não muda o que o selo viu (teste J2 v9: os 2 «falsos parou» eram este caso, com a página já certa).
+          const tap = [...history].reverse().find((d) => d.what.startsWith("tocou pela foto"));
+          // Um passo só: nenhum verbo de etapa além do que abre a frase («Abra o perfil…»).
+          const verbs = [...goal.replace(/[«"“][^»"”]*[»"”]/g, " ").matchAll(MORE_STEPS)];
+          const oneStep = verbs.length === 0 || (verbs.length === 1 && (verbs[0].index ?? 0) <= 2);
+          if (tap?.changed && oneStep && !goalContradiction(goal, page, initialCart)) {
+            log.push(`${step}. objetivo atingido: o toque pela foto mudou a página e a foto numerada confirmou que o ícone tocado é o do objetivo`);
+            photoEnd = finish("done", "O toque pela foto mudou a página e a foto numerada da barra confirmou o ícone tocado. Confira na página abaixo.");
+            return "acted";
+          }
+          return "A foto numerada da barra confirmou que o ícone tocado é o do objetivo: não toquei o vizinho. Confira a página.";
+        }
+        if (zoomed) return zoomed;
+        const { x, y } = lastTap;
+        if (deps.peekAt) {
+          const under = await deps.peekAt(x, y, true).catch(() => "");
+          if (blockedPurchase(under, goal)) return `O vizinho do ponto (${x}, ${y}) é um controle de compra ou pagamento que o objetivo não pediu: não toquei.`;
+        }
+        try {
+          await deps.clickAt(x, y, true);
+        } catch (e) {
+          return `O segundo toque (no controle sem nome ao lado) falhou: ${e instanceof Error ? e.message : String(e)}`;
+        }
+        const what = `tocou no outro ícone sem nome perto do ponto (${x}, ${y})`;
+        log.push(`${step}. ${what} (o primeiro toque da foto não levou ao objetivo)`);
+        const before = fingerprint(page);
+        await deps.settle();
+        snapshot = progress.snapshot = await deps.snapshot();
+        const after = parseSnapshot(snapshot);
+        history.push({ what, changed: fingerprint(after) !== before });
+        photoEnd = await expectFinished(step, before, after);
+        return "acted";
+      }
+      return "A foto acabou de tocar: confira a página antes de tirar outra (um segundo toque pode desfazer o primeiro).";
+    }
+    const fp = fingerprint(page);
+    if (triedPhotos.has(fp) || !page.viewport) return null;
+    if (sensitiveFilled(page)) return "A reserva visual não foi usada: há um campo de senha, cartão ou token preenchido e a foto não pode sair.";
+    triedPhotos.add(fp);
+    photos += 1;
+    let reply: VisualReply;
+    try {
+      reply = await deps.visual(goal, history.slice(-5).map((d) => d.what).join("; "));
+    } catch (e) {
+      return `A reserva visual falhou: ${e instanceof Error ? e.message : String(e)}`;
+    }
+    timings.fotoJev += reply.latencyMs ?? 0;
+    if (reply.status !== "ok") return reply.status === "off" ? "A reserva visual (foto) está desligada em Ajustes → Decisões." : `A reserva visual não rodou: ${reply.reason ?? reply.status}`;
+    const meta = `existe p=${reply.foundProbability?.toFixed(2) ?? "?"}, caixa conf=${reply.confidence?.toFixed(2) ?? "?"}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
+    if (!reply.found || (reply.foundProbability ?? 0) < MIN_FOUND || !reply.center || (reply.confidence ?? 0) < MIN_BOX_CONFIDENCE) {
+      return `A reserva visual também não achou um controle seguro na foto (${meta}).`;
+    }
+    const x = Math.round(reply.center[0] * page.viewport.width);
+    const y = Math.round(reply.center[1] * page.viewport.height);
+    // O mesmo lugar duas vezes desfaz o que a primeira fez (um filtro ligado vira desligado): se a foto aponta onde já se
+    // tocou, a página provavelmente só ainda não mostrou o efeito.
+    if (tapped.some((t) => Math.hypot(t.x - x, t.y - y) < 48)) {
+      return `A foto apontou o mesmo lugar de um toque anterior (${x}, ${y}): não repeti, para não desfazer o que já foi feito. Confira a página.`;
+    }
+    // Antes de tocar num ponto que uma FOTO apontou, olha o que há ali: nunca um botão de compra ou pagamento que o objetivo não pediu.
+    if (deps.peekAt) {
+      const under = await deps.peekAt(x, y).catch(() => "");
+      if (blockedPurchase(under, goal)) {
+        return `A foto apontou um controle de compra ou pagamento (${x}, ${y}) que o objetivo não pediu: não toquei.`;
+      }
+    }
+    try {
+      const result = await deps.clickAt(x, y);
+      tapped.push({ x, y });
+      const raw = typeof result === "string" ? result : JSON.stringify(result ?? "");
+      const neighbors = /"unnamedNeighbors":\s*(\d+)/.exec(raw)?.[1];
+      const group = /"unnamedGroup":\s*\{\s*"left":\s*(-?\d+),\s*"top":\s*(-?\d+),\s*"right":\s*(-?\d+),\s*"bottom":\s*(-?\d+)\s*\}/.exec(raw);
+      lastTap = {
+        x, y, neighbors: neighbors ? Number(neighbors) : 0,
+        group: group ? { left: Number(group[1]), top: Number(group[2]), right: Number(group[3]), bottom: Number(group[4]) } : null,
+        icons: iconsIn(/"unnamedIcons":\s*(\[\s*\[[^\]]*\](?:\s*,\s*\[[^\]]*\])*\s*\])/.exec(raw)?.[1]),
+      };
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      // A foto apontou o vão entre ícones sem nome (o meio da barra): em vez de parar, uma foto AMPLIADA só do grupo, sem tocar
+      // antes (teste J2 v3: 4 de 20 paravam aqui). Sem o grupo, ou se a ampliada não servir, para como antes.
+      const ambiguous = /\[grupo (-?\d+),(-?\d+),(-?\d+),(-?\d+)\]/.exec(message);
+      if (ambiguous) {
+        secondTried = true;
+        const group = { left: Number(ambiguous[1]), top: Number(ambiguous[2]), right: Number(ambiguous[3]), bottom: Number(ambiguous[4]) };
+        const icons = /\[icones ([-\d,;]+)\]/.exec(message)?.[1].split(";").map((b) => b.split(",").map(Number)).filter((b) => b.length === 4 && b.every(Number.isFinite))
+          .map(([left, top, right, bottom]) => ({ left, top, right, bottom }));
+        const zoomed = await zoomTap(page, step, { x, y, group, icons });
+        if (zoomed === "acted") photoJustTapped = true;
+        if (zoomed && zoomed !== "same") return zoomed;
+      }
+      return `O toque pela foto falhou: ${message.replace(/\s*\[(grupo|icones) [^\]]*\]/g, "")}`;
+    }
+    const what = `tocou pela foto no ponto (${x}, ${y})`;
+    log.push(`${step}. ${what} (${meta})`);
+    await deps.settle();
+    snapshot = progress.snapshot = await deps.snapshot();
+    const after = parseSnapshot(snapshot);
+    history.push({ what, changed: fingerprint(after) !== fp });
+    photoJustTapped = true;
+    photoEnd = await expectFinished(step, fp, after);
+    photoProof = photoTapFinished(goal, page, after, reply, initialCart);
+    return "acted";
+  };
+  /** A foto com o registro do uso (Fase 6): o passo, por que o texto não bastou e no que deu. Só conta quando a foto saiu. */
+  const visualFallback = async (page: ParsedPage, step: number, why: string): Promise<"acted" | string | null> => {
+    const before = photos;
+    const outcome = await photoTry(page, step);
+    if (photos > before) {
+      const result = outcome === "acted" ? (photoProof ? "tocou e cumpriu o objetivo" : "tocou") : (outcome ?? "nada").split(/[.(]/)[0].trim().slice(0, 70);
+      timings.fotoUsos.push(`passo ${step}: ${why} → ${result}`);
+    }
+    return outcome;
+  };
 
   for (let step = 1; step <= limit; step++) {
-    const page = parseSnapshot(snapshot);
-    const { state, options } = buildStep(page, goal, fills.map(([key]) => key).filter((key) => !taken.has(key)), done);
-    const reply = await deps.pick(state, options);
-    if (reply.status !== "ok" || !reply.choice) {
+    const stepStarted = Date.now();
+    let page = parseSnapshot(snapshot);
+    // O que não é escolha não vai ao Jev: um campo cujo nome casa com um `--fill` recebe o valor direto.
+    let filled: string[] = [];
+    try {
+      filled = await autoFill(page, fills, taken, deps, goal);
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e);
+      // Um campo coberto por uma faixa: o Jev a fecha na consulta seguinte e o valor (ainda não gasto) entra depois.
+      if (!(/est[áa] coberto por/i.test(message) && coveredRetries < 3)) {
+        log.push(`${step}. falhou: ${message}`);
+        return finish("error", "O preenchimento falhou; veja o motivo acima e continue você.");
+      }
+      coveredRetries += 1;
+      const what = `tentou preencher um campo, mas falhou: ${message.split(". ")[0].slice(0, 160)}`;
+      log.push(`${step}. ${what}`);
+      history.push({ what, changed: false, auto: true });
+    }
+    if (filled.length > 0) {
+      const filledEntries: Done[] = [];
+      for (const what of filled) {
+        const entry: Done = { what, changed: true, auto: true };
+        filledEntries.push(entry);
+        history.push(entry);
+        log.push(`${what} (pelo nome do campo, sem o Jev)`);
+      }
+      const before = fingerprint(page);
+      await deps.settle();
+      snapshot = progress.snapshot = await deps.snapshot();
+      page = parseSnapshot(snapshot);
+      // Uma busca enviada com Enter leva um tempo até a página de resultados existir (a Amazon: segundos): lida cedo demais,
+      // a página é a MESMA, o Jev "não tem certeza" e o `act` para com a busca já feita. Espera a rede assentar e relê, até 3 vezes.
+      if (filled.some((what) => what.includes("apertou Enter"))) {
+        for (let wait = 0; wait < 3 && fingerprint(page) === before; wait++) {
+          await deps.settle(true);
+          snapshot = progress.snapshot = await deps.snapshot();
+          page = parseSnapshot(snapshot);
+        }
+        // O Enter que não mudou a página não conta como ação que levou ao objetivo (abaixo, `lastDid`).
+        if (fingerprint(page) === before) for (const entry of filledEntries) if (entry.what.includes("apertou Enter")) entry.changed = false;
+      }
+      const end = await expectFinished(step, before, page);
+      if (end) return end;
+    }
+
+    // O objetivo cita um nome entre «» e os links com esse nome visíveis não vão ao destino certo: o exato pode estar fora do
+    // recorte (a janela e arredores de uma página longa). Lê a página inteira uma vez por página e usa-a neste passo (P02).
+    if (deps.snapshotAll && exactLinkMissing(page, goal) && !fullRead.has(fingerprint(page))) {
+      fullRead.add(fingerprint(page));
+      try {
+        const full = await deps.snapshotAll();
+        const whole = parseSnapshot(full);
+        if (!exactLinkMissing(whole, goal)) {
+          snapshot = progress.snapshot = full;
+          page = whole;
+          log.push(`${step}. o link exato do objetivo estava fora da janela: li a página inteira`);
+        }
+      } catch { /* segue com o recorte */ }
+    }
+    const query = buildStep(page, goal, fills.map(([key]) => key).filter((key) => !taken.has(key)), history, waits);
+    // A pergunta «o objetivo já foi atingido?» só vale depois de uma ação do Jev que mudou a página (abaixo): sem isso a
+    // resposta seria jogada fora, e custa uma cabeça a mais por consulta.
+    // Uma busca enviada pelo piloto com Enter (campo preenchido pelo nome) que levou a OUTRA página também é uma ação dele: o
+    // objetivo «pesquise X» termina ali, e o Jev dizia «acabou» com p=0,72 e o `act` parava «sem certeza» (L04).
+    const lastJev = [...history].reverse().find((d) => !d.auto || (d.changed && d.what.includes("apertou Enter")));
+    if (!lastJev || lastJev.changed === false) query.skipGoalDone = true;
+    const reply = await deps.pick(query);
+    if (reply.status !== "ok" || !reply.operation) {
       return finish(reply.status === "off" ? "off" : "error", reply.reason ?? "O Jev não respondeu.");
     }
-    const meta = `${reply.probability !== null ? `p=${reply.probability.toFixed(2)}` : "p=?"}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
-    if (reply.probability !== null && reply.probability < MIN_PROBABILITY && reply.choice !== "done") {
-      return finish("unsure", `O Jev não tem certeza do próximo passo (${reply.choice}, ${meta}). Continue você, com \`snapshot\` e \`click\`.`);
+    const operation = reply.operation;
+    // O objetivo já está atingido? Pergunta direta, à parte da operação: depois de acertar (um filtro aplicado, o carrinho
+    // vazio) o Jev costuma ficar "sem certeza" da PRÓXIMA operação, mas sabe que acabou. Só vale depois de uma ação dele
+    // que mudou a página (os campos preenchidos pelo nome não contam).
+    const lastByJev = lastJev;
+    // "Acabou" é uma probabilidade; a contagem do carrinho está na página. Se ela desmente, o piloto continua em vez de dar
+    // o objetivo por cumprido (duas vezes no máximo: depois devolve a dúvida a quem pediu).
+    const doubt = (): "no" | "retry" | "give-up" => {
+      const why = goalContradiction(goal, page, initialCart);
+      if (!why) return "no";
+      contradictions += 1;
+      log.push(`${step}. o Jev disse que acabou, mas a página não confere: ${why}`);
+      if (contradictions > 2) return "give-up";
+      history.push({ what: `conferiu a página e o objetivo ainda não foi atingido: ${why}`, changed: false, auto: true });
+      return "retry";
+    };
+    const unconfirmed = () => finish("unsure", "O Jev disse que o objetivo foi atingido, mas a página não confere (veja acima). Continue você, com `snapshot` e `click`.");
+    /**
+     * «Acabou» (pergunta direta ou operação `done`) só vale se a página não desmente (`doubt`) e, com `--expect`, se os critérios
+     * conferem (J3). Antes um «acabou» com p 0,83–0,86 que os critérios desmentiam (P02) saía como FEITO e só a conferência
+     * depois do `act` o pegava; agora o piloto segue, como numa contradição do carrinho, e no máximo duas vezes.
+     */
+    const settleDone = async (): Promise<"verified" | "accepted" | "retry" | "give-up"> => {
+      const verdict = doubt();
+      if (verdict !== "no") return verdict;
+      const met = await expectsNow();
+      if (met === true) return "verified";
+      if (met === null) return "accepted";
+      contradictions += 1;
+      log.push(`${step}. o Jev disse que acabou, mas os --expect não conferem na página`);
+      // O mais comum é a página ainda não ter mostrado o efeito (um filtro que recarrega a lista por XHR, N04): espera a rede
+      // assentar e relê antes de perguntar de novo — também na última vez, antes de desistir.
+      await deps.settle(true);
+      snapshot = progress.snapshot = await deps.snapshot();
+      if ((await expectsNow()) === true) return "verified";
+      if (contradictions > 2) return "give-up";
+      history.push({ what: "conferiu os critérios do objetivo e eles ainda não valem: o objetivo não foi atingido", changed: false, auto: true });
+      return "retry";
+    };
+    const doneNote = (verdict: "verified" | "accepted") => verdict === "verified"
+      ? "O Jev considera o objetivo atingido e os critérios --expect conferem na página. Confira abaixo."
+      : "O Jev considera o objetivo atingido. Confira na página abaixo.";
+    if (lastByJev && lastByJev.changed !== false && (reply.goalDone ?? 0) >= (lastByJev.auto ? MIN_GOAL_DONE_AFTER_SUBMIT : MIN_GOAL_DONE)) {
+      const verdict = await settleDone();
+      if (verdict === "retry") continue;
+      if (verdict === "give-up") return unconfirmed();
+      log.push(`${step}. objetivo atingido (pergunta direta p=${reply.goalDone!.toFixed(2)})`);
+      return finish("done", doneNote(verdict));
     }
-    if (reply.choice === "done") {
+    // `fim` = a pergunta direta "o objetivo já foi atingido?": aparece no relatório para o limite poder ser ajustado com dados.
+    const meta = `${reply.probability !== null ? `p=${reply.probability.toFixed(2)}` : "p=?"}${reply.goalDone != null ? `, fim p=${reply.goalDone.toFixed(2)}` : ""}${reply.latencyMs !== null ? `, ${reply.latencyMs} ms` : ""}`;
+    const ambiguous = operation !== "done" && isAmbiguous(query, operation, reply.target, reply.probability);
+    const lowP = reply.probability !== null && reply.probability < MIN_PROBABILITY && operation !== "done";
+    if (ambiguous || (lowP && !obviousAdvance(page, operation, reply.target, reply.probability, goal) && !cartAdvance(page, operation, reply.target, reply.probability, goal))) {
+      const fallback = await visualFallback(page, step, ambiguous
+        ? `controle sem nome entre outros iguais (o texto apontava ${reply.target ?? "?"})`
+        : `sem certeza no texto (p=${reply.probability?.toFixed(2) ?? "?"}, ${operation} ${reply.target ?? "?"})`);
+      if (fallback === "acted") { const end = photoFinished(step); if (end) return end; continue; }
+      if (fallback) log.push(fallback);
+      return finish("unsure", ambiguous
+        ? `O elemento que o Jev escolheu (${reply.target}) não tem nome e há outros iguais na página: só o texto não os distingue (${meta}). Continue você, com \`snapshot\` e \`click\`, ou ligue a reserva visual em Ajustes → Decisões.`
+        : `O Jev não tem certeza do próximo passo (${operation}${reply.target ? ` ${reply.target}` : ""}, ${meta}). Continue você, com \`snapshot\` e \`click\`, ou diga no objetivo a escolha que falta.`
+          + (lastByJev?.changed ? " A última ação do piloto mudou a página: o objetivo pode já ter sido atingido, confira antes de continuar." : ""));
+    }
+    if (operation === "done") {
+      // «Acabou» no PRIMEIRO passo, sem o piloto ter feito nada, com p baixa: não é prova (L17: p=0,43 virou «FEITO (não verificado)»).
+      if (!lastByJev && (reply.probability ?? 0) < MIN_GOAL_DONE) {
+        log.push(`${step}. o Jev disse que acabou antes de qualquer ação, mas sem certeza (${meta})`);
+        return finish("unsure", "O Jev disse que o objetivo já está atingido sem nenhuma ação, mas sem certeza. Confira a página e continue você.");
+      }
+      // «Acabou», sem certeza, logo depois de um toque pela foto num grupo de ícones sem nome e sem --expect para conferir: não é
+      // prova (teste J2 v7, sem --expect: os 2 falsos «feito» eram o vizinho tocado e um «concluído» com p 0,47–0,55). Quem decide
+      // é a foto numerada da barra (21 de 21 certos): o selo do ícone tocado confirma; outro selo, o piloto toca esse.
+      // (Lido por uma função: `lastTap` só muda dentro dos toques pela foto, e o TypeScript o estreitaria a `null` aqui.)
+      const tap = currentTap();
+      if (photoJustTapped && tap && (tap.icons?.length ?? 0) >= 2 && !secondTried && (reply.probability ?? 0) < MIN_GOAL_DONE
+        && (await expectsNow()) === null) {
+        secondTried = true;
+        const check = await zoomTap(page, step, tap, "conferência do «acabou» sem certeza");
+        if (check === "same") {
+          log.push(`${step}. concluído (${meta}; o ícone tocado conferido pela foto numerada)`);
+          return finish("done", "O Jev considera o objetivo atingido, e a foto numerada da barra confirmou o ícone tocado. Confira na página abaixo.");
+        }
+        if (check === "acted") { const end = photoFinished(step); if (end) return end; continue; }
+        log.push(`${step}. o Jev disse que acabou depois do toque pela foto, mas sem certeza (${meta}), e a foto numerada não confirmou o ícone`);
+        if (check) log.push(check);
+        return finish("unsure", "O toque pela foto caiu num ícone sem nome e o Jev não tem certeza de que era o do objetivo. Confira a página e continue você.");
+      }
+      const verdict = await settleDone();
+      if (verdict === "retry") continue;
+      if (verdict === "give-up") return unconfirmed();
       log.push(`${step}. concluído (${meta})`);
-      return finish("done", "O Jev considera o objetivo atingido. Confira na página abaixo.");
+      return finish("done", doneNote(verdict));
     }
-    if (reply.choice === "stuck") {
+    if (operation === "stuck") {
+      const fallback = await visualFallback(page, step, "o Jev não viu caminho no texto");
+      if (fallback === "acted") { const end = photoFinished(step); if (end) return end; continue; }
       log.push(`${step}. sem caminho (${meta})`);
+      if (fallback) log.push(fallback);
       return finish("stuck", "O Jev não viu nenhuma opção que leve ao objetivo. Continue você, ou descreva melhor o objetivo.");
     }
 
-    // Girar em círculos: a mesma escolha na mesma página, duas vezes seguidas.
-    const signature = `${bareUrl(page.url)}|${reply.choice}|${page.elements.length}`;
-    if (signature === lastSignature) {
-      return finish("stuck", "O mesmo passo se repetiu sem mudar a página. Continue você.");
+    // Girar em círculos: a mesma operação no mesmo elemento da mesma página, de novo (seguida ou num ciclo A → B → A).
+    // Esperar não conta: a página carregando é justamente a que ainda não mudou (e são só duas esperas seguidas).
+    const signature = `${fingerprint(page)}|${operation}|${reply.target ?? ""}`;
+    if (operation !== "wait") {
+      if (visited.has(signature)) {
+        return finish("stuck", signature === lastSignature
+          ? "O mesmo passo se repetiu sem mudar a página. Continue você."
+          : "O piloto voltou a um passo que já tinha feito nesta mesma página (está andando em círculos). Continue você.");
+      }
+      visited.add(signature);
+      lastSignature = signature;
     }
-    lastSignature = signature;
 
+    let what: string;
     try {
-      if (reply.choice === "scroll") {
-        await deps.scroll();
-        log.push(`${step}. rolou a página (${meta})`);
+      if (operation === "scroll") {
+        // A página já está no fim e a lista continua na paginação («Carregar mais», «Siguiente»): rolar não anda, e repetir
+        // a rolagem parava o piloto (teste J2 2, paginação: o item estava na 4.ª leva e o Jev pediu para rolar na 3.ª).
+        const pager = cannotScroll(page) && !quotedOnPage(page, goal) ? pagingControl(page) : null;
+        if (pager) {
+          what = `${await act(pager, "click", fills, taken, deps, undefined, { page, goal })} (a página não rola mais: a lista continua na paginação)`;
+        } else {
+          await deps.scroll();
+          what = "rolou a página";
+        }
+      } else if (operation === "wait") {
+        waits += 1;
+        what = "esperou a página";
+        await deps.settle(true);
       } else {
-        const el = page.elements.find((e) => e.ref === reply.choice);
-        if (!el) return finish("error", `O Jev escolheu ${reply.choice}, que não está na página.`);
-        const what = await act(el, fills, taken, deps);
-        done.push({ ref: el.ref, what });
-        log.push(`${step}. ${what} (${meta})`);
+        // `e12_3` = a 4ª opção da lista e12.
+        const [refPart, optionPart] = (reply.target ?? "").split("_");
+        const el = page.elements.find((e) => e.ref === refPart);
+        if (!el) return finish("error", `O Jev escolheu ${reply.target ?? "?"}, que não está na página.`);
+        const option = optionPart !== undefined ? el.options?.[Number(optionPart)] : undefined;
+        if (blockedControl(el, goal)) {
+          log.push(`${step}. recusou ${plain(el)}: parece uma compra ou um pagamento, e o objetivo não pediu`);
+          return finish("stuck", "O Jev escolheu um controle de compra ou pagamento que o objetivo não pediu: não cliquei. Se é isso mesmo que você quer, diga no objetivo.");
+        }
+        // Idempotência (4.1/3.4): um «adicionar» que já foi feito (neste `act` ou num anterior) não se repete.
+        const repeat = operation === "click" ? repeatedAdd(el, page, goal, history) : null;
+        if (repeat) {
+          addRefusals += 1;
+          forgetSignature();
+          log.push(`${step}. recusou ${plain(el)}: ${repeat}`);
+          if (addRefusals > 2) return finish("unsure", `O Jev insiste em adicionar de novo um item que já foi adicionado (${repeat}). Confira a página.`);
+          history.push({ what: `não clicou ${plain(el)}: ${repeat}`, changed: false, auto: true });
+          continue;
+        }
+        pendingAdd = operation === "click" && ADD_CONTROL.test(el.name.trim()) ? { key: addKey(el, page), cartBefore: cartCount(page) } : null;
+        what = await act(el, operation, fills, taken, deps, option, { page, goal });
       }
     } catch (e) {
-      log.push(`${step}. falhou: ${e instanceof Error ? e.message : String(e)}`);
+      const message = e instanceof Error ? e.message : String(e);
+      // Uma referência que a página já não tem (ela recarregou entre a leitura e o toque): relê e decide de novo.
+      if (/tire um novo snapshot|n[ãa]o est[áa] mais na p[áa]gina/i.test(message) && staleRetries < 2) {
+        staleRetries += 1;
+        forgetSignature();
+        log.push(`${step}. a página mudou antes do toque; li de novo`);
+        await deps.settle();
+        snapshot = progress.snapshot = await deps.snapshot();
+        continue;
+      }
+      // Sem valor de --fill para o campo que o Jev escolheu: ele vê isso no histórico e escolhe outra coisa (um botão, outro campo).
+      if (/n[ãa]o h[áa] valor para/i.test(message) && noValueRetries < 2) {
+        noValueRetries += 1;
+        const what = `tentou digitar em ${reply.target ?? "um campo"}, mas ${message.slice(0, 160)}`;
+        log.push(`${step}. ${what}`);
+        history.push({ what, changed: false });
+        continue;
+      }
+      // Um controle coberto (a faixa de cookies, o modal) não é o fim: o Jev vê a falha no histórico e escolhe fechar o que está na frente.
+      if (/est[áa] coberto por/i.test(message) && coveredRetries < 3) {
+        coveredRetries += 1;
+        // O piloto mesmo tira o que está na frente (recusar/fechar, nunca aceitar nem assinar) e o Jev escolhe de novo, já sem a
+        // faixa: o Jev pequeno, vendo só a falha, tende a insistir no mesmo botão coberto (conjunto de teste J2: 5 de 20).
+        const closer = coverDismiss(page, dismissTried);
+        if (closer) {
+          dismissTried.add(closer.ref);
+          try {
+            const closed = await act(closer, "click", fills, taken, deps, undefined, { page, goal });
+            forgetSignature();
+            log.push(`${step}. ${reply.target ?? "o alvo"} estava coberto: ${closed}, para tirar o que cobria a página (${meta})`);
+            await deps.settle();
+            snapshot = progress.snapshot = await deps.snapshot();
+            const after = parseSnapshot(snapshot);
+            history.push({ what: `${closed} (o que cobria a página)`, changed: fingerprint(after) !== fingerprint(page), auto: true });
+            const end = await expectFinished(step, fingerprint(page), after);
+            if (end) return end;
+            continue;
+          } catch { /* o «fechar» também coberto ou já fora da página: segue a regra de sempre */ }
+        }
+        // O Jev ainda não tinha visto a falha ao escolher o controle coberto: na PRIMEIRA vez, escolher o mesmo de novo não é girar em
+        // círculos (L05: a segunda escolha foi e1 outra vez e o act parou). Na segunda, sim.
+        if (coveredRetries === 1) forgetSignature();
+        const what = `tentou tocar em ${reply.target ?? "um elemento"}, mas falhou: ${message.split(". ")[0].slice(0, 160)}`;
+        log.push(`${step}. ${what}`);
+        history.push({ what, changed: false });
+        continue;
+      }
+      log.push(`${step}. falhou: ${message}`);
       return finish("error", "A ação falhou; veja o motivo acima e continue você.");
     }
+    if (operation !== "wait") waits = 0;
+    photoJustTapped = false;
+    log.push(`${step}. ${what} (${meta}, passo ${Date.now() - stepStarted} ms)`);
     await deps.settle();
-    snapshot = await deps.snapshot();
+    snapshot = progress.snapshot = await deps.snapshot();
+    const after = parseSnapshot(snapshot);
+    history.push({
+      what,
+      changed: fingerprint(after) !== fingerprint(page),
+      ...(pendingAdd ? { add: { ...pendingAdd, cartAfter: cartCount(after) } } : {}),
+    });
+    pendingAdd = null;
+    const end = await expectFinished(step, fingerprint(page), after);
+    if (end) return end;
   }
   return finish("limit", `Cheguei ao limite de ${limit} passos sem o Jev dizer que terminou. Confira a página e continue, ou rode de novo.`);
 }
 
-/** Faz o que o elemento pede e conta o que fez, sem o valor digitado. */
-async function act(el: PageElement, fills: [string, string][], taken: Set<string>, deps: PilotDeps): Promise<string> {
-  if (TYPING.has(el.role) || CHOOSING.has(el.role)) {
-    const entry = valueFor(el.name, fills, taken);
-    if (!entry) {
-      // Um campo sem valor: clicar (abrir a lista, focar) é o máximo que dá para fazer sem inventar um texto.
-      if (CHOOSING.has(el.role)) { await deps.click(el.ref); return `abriu ${labelOf(el)}`; }
-      throw new Error(`não há valor para ${labelOf(el)}: passe --fill "<campo>=<valor>"`);
+/**
+ * Preenche, sem perguntar ao Jev, os campos cujo nome casa com um `--fill` ainda não usado: digitar o nome em
+ * "Customer name" não é uma escolha. Devolve o que fez (sem os valores). Só usa `deps`.
+ */
+export async function autoFill(
+  page: ParsedPage,
+  fills: [string, string][],
+  taken: Set<string>,
+  deps: PilotDeps,
+  goal = "",
+): Promise<string[]> {
+  const out: string[] = [];
+  const touched = new Set<string>();
+  for (const [key] of fills) {
+    if (taken.has(key)) continue;
+    let best: PageElement | null = null;
+    let bestScore = 0;
+    for (const el of page.elements) {
+      if (!(TYPING.has(el.role) || CHOOSING.has(el.role)) || touched.has(el.ref) || el.states.includes("disabled")) continue;
+      // Empatando no nome, o campo de TEXTO vence a lista: "Pesquisa" é a barra de busca, não o departamento.
+      const score = similarity(el.name, key) * 2 + (TYPING.has(el.role) ? 1 : 0);
+      if (similarity(el.name, key) > 0 && score > bestScore) { best = el; bestScore = score; }
     }
-    taken.add(entry[0]);
-    if (CHOOSING.has(el.role)) await deps.select(el.ref, entry[1]);
-    else await deps.type(el.ref, entry[1]);
-    return `${CHOOSING.has(el.role) ? "escolheu em" : "digitou em"} ${labelOf(el)} (valor de ${entry[0]})`;
+    if (!best) continue;
+    touched.add(best.ref);
+    out.push(await act(best, operationOf(best), fills, taken, deps, undefined, { page, goal }));
   }
-  await deps.click(el.ref);
-  return `clicou ${labelOf(el)}`;
+  return out;
+}
+
+/** Um campo de busca? Digitar nele e apertar Enter é o gesto de pesquisar; a lupa ao lado costuma não ter nome. Pura. */
+export function isSearchField(el: PageElement): boolean {
+  return el.role === "searchbox" || /busca|pesquis|procur|search|\b(q|query)\b/i.test(el.name);
+}
+
+/**
+ * Digitar neste campo aperta Enter? Só numa busca, e nunca com um controle de compra ou pagamento à vista que o objetivo
+ * não pediu: ali o Enter poderia enviar o formulário de fechamento sem passar pela trava dos cliques. Pura.
+ */
+export function submitsOnType(el: PageElement, page: ParsedPage | undefined, goal: string): boolean {
+  if (!isSearchField(el)) return false;
+  // «Pesquise por fone e escolha a sugestão «fone bluetooth»»: o Enter enviaria «fone» antes de a sugestão aparecer (N06).
+  if (SUGGEST_GOAL.test(goal)) return false;
+  return !page?.elements.some((other) => blockedControl(other, goal));
+}
+
+/** O objetivo manda ESCOLHER uma sugestão da lista de autocompletar: digitar não pode enviar a busca. */
+const SUGGEST_GOAL = /sugest|suggest|autocomplet/i;
+
+/** Faz o que a operação pede no elemento e conta o que fez, sem o valor digitado. */
+async function act(el: PageElement, operation: string, fills: [string, string][], taken: Set<string>, deps: PilotDeps, option?: string, where?: { page: ParsedPage; goal: string }): Promise<string> {
+  if (operation === "select" && option !== undefined) {
+    await deps.select(el.ref, option);
+    return `escolheu "${option}" em ${plain(el)}`;
+  }
+  if (operation === "type" || operation === "select") {
+    const entry = valueFor(el.name, fills, taken);
+    if (!entry) throw new Error(`não há valor para ${plain(el)}: passe --fill "<campo>=<valor>"`);
+    const submit = operation === "type" && submitsOnType(el, where?.page, where?.goal ?? "");
+    if (operation === "select") await deps.select(el.ref, entry[1]);
+    else await deps.type(el.ref, entry[1], submit);
+    // O valor só fica gasto depois de digitado: um campo coberto por uma faixa falha e o valor volta a valer.
+    taken.add(entry[0]);
+    return `${operation === "select" ? "escolheu em" : "digitou em"} ${plain(el)} (valor de ${entry[0]})${submit ? " e apertou Enter" : ""}`;
+  }
+  // Um link com destino leva a outra página: o piloto espera ela carregar antes de reler (senão "conclui" olhando a antiga).
+  const navigates = el.role === "link" && !!el.href && !/^(javascript:|#)/i.test(el.href);
+  await deps.click(el.ref, navigates);
+  return `clicou ${plain(el)}`;
+}
+
+/**
+ * As consultas ao Jev numa linha legível: quantas, latência (mediana e p95), bytes e tokens. É o que o plano v2 (4.2) mede:
+ * a meta é mediana ≤ 450 ms por consulta. Pura.
+ */
+export function queriesLine(t: Timings): string {
+  if (t.consultas === 0) return "CONSULTAS: nenhuma";
+  const parts = [
+    `${t.consultas} consulta(s)`,
+    t.consultaMs.length > 0 ? `latência mediana ${median(t.consultaMs)} ms, p95 ${percentile(t.consultaMs, 0.95)} ms` : null,
+    t.bytes.length > 0 ? `corpo mediano ${median(t.bytes)} B (máx ${Math.max(...t.bytes)} B)` : null,
+    t.tokens > 0 ? `${t.tokens} tokens` : null,
+    t.semConcluido > 0 ? `${t.semConcluido} sem a pergunta de fim` : null,
+    t.repeticoes > 0 ? `${t.repeticoes} repetição(ões) ao provedor (${t.esperaRede} ms de espera)` : null,
+    t.varredura > 0 ? `varredura de segredos ${t.varredura} ms` : null,
+  ].filter((part): part is string => part !== null);
+  return `CONSULTAS: ${parts.join(" · ")}`;
+}
+
+/**
+ * O custo da foto num `act` (plano v2, Fase 6): quantas, quanto tempo (o tirar/enquadrar/gravar e a consulta ao Jev), que parte do
+ * `act` isso foi e por que cada uma saiu. Vazio sem foto. Pura.
+ */
+export function photoLine(t: Timings): string {
+  if (t.fotos === 0) return "";
+  const capture = Math.max(0, t.foto - t.fotoJev);
+  const share = t.total > 0 ? ` · ${Math.round((100 * t.foto) / t.total)}% do act` : "";
+  return `FOTO: ${t.fotos} foto(s) · ${t.foto} ms (captura ${capture} ms · Jev ${t.fotoJev} ms)${share}${t.fotoUsos.length > 0 ? ` · ${t.fotoUsos.join("; ")}` : ""}`;
 }
 
 /** O texto que volta ao agente. */
@@ -341,6 +1780,8 @@ export function formatResult(goal: string, result: PilotResult): string {
     `act "${goal}": ${head[result.outcome]}`,
     result.note,
     result.steps.length > 0 ? `\nPassos:\n${result.steps.join("\n")}` : "",
+    result.timings ? `\n${queriesLine(result.timings)}${result.timings.fotos > 0 ? `\n${photoLine(result.timings)}` : ""}\nTEMPOS: ${JSON.stringify(result.timings)}` : "",
+    result.window ? `${windowLine(result.window)}\nJANELA: ${JSON.stringify(result.window)}` : "",
     "\nA página agora (o Jev só escolhe onde tocar: confira o resultado):",
     result.finalSnapshot.length > 6000 ? `${result.finalSnapshot.slice(0, 6000)}\n…` : result.finalSnapshot,
   ].filter(Boolean).join("\n");

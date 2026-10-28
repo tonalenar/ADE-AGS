@@ -15,6 +15,7 @@ import { useTabsStore } from "@/features/tabs/store";
 import { useWorkspacesStore } from "@/features/workspaces/store";
 import { useFocusInside } from "@/shared/ui/useFocusInside";
 import { boardKeyOfTab, setWorkMode, useCanvasStore } from "@/features/canvas/store";
+import { openCompareDialog } from "@/features/compare/store";
 
 import { rank, type Searchable } from "./match";
 
@@ -158,6 +159,14 @@ function PaletteDialog() {
 
     list.push(
       {
+        id: "act:compare",
+        group: "actions",
+        title: t("compare.paletteCmd"),
+        keywords: ["compare", "comparar", "modelos", "models", "worktree", "multi"],
+        icon: <StackIcon className={icon} />,
+        run: () => { openCompareDialog(activeTab?.cwd ?? ""); },
+      },
+      {
         id: "act:theme",
         group: "actions",
         title: theme === "dark" ? t("palette.cmd.lightTheme") : t("palette.cmd.darkTheme"),
@@ -210,7 +219,7 @@ function PaletteDialog() {
 
     return list;
     // `ui` muda de identidade a cada render do store; os campos usados estão listados.
-  }, [tabs, approvals, workspaces, theme, canvasKey, canvasOn, ui.workspacesCollapsed, ui.explorerCollapsed, ui.railExpanded, t]);
+  }, [tabs, activeTab, approvals, workspaces, theme, canvasKey, canvasOn, ui.workspacesCollapsed, ui.explorerCollapsed, ui.railExpanded, t]);
 
   // Sem busca, os grupos na ordem fixa. Com busca, uma lista só por relevância — os
   // grupos atrapalhariam: o melhor resultado tem que ser o primeiro, venha de onde vier.

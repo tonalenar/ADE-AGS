@@ -78,7 +78,7 @@ pub fn parse_id(id: &str) -> Option<(String, Format)> {
 }
 
 fn dir() -> Result<PathBuf, String> {
-    let dir = dirs::home_dir().ok_or("No se encontró la carpeta del usuario")?.join(".ags").join("canvas-assets");
+    let dir = crate::util::datadir::ags_home().ok_or("Pasta de dados indisponível")?.join("canvas-assets");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     Ok(dir)
 }

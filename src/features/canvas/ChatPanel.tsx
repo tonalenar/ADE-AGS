@@ -2,9 +2,10 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import { AlertaToast } from "neogestify-ui-components";
+import { AlertaToast } from "@/shared/ui/alerts";
 
 import { useTabsStore } from "@/features/tabs/store";
+import { useTerminalPrefsStore } from "@/features/terminal/prefsStore";
 import { AIChatCard } from "./AIChatCard";
 import { agentTile } from "@/features/agents/agentTile";
 import { ContextMenu, type ContextMenuItem } from "@/shared/ui/ContextMenu";
@@ -12,13 +13,14 @@ import { useRepoInfo } from "@/features/workspaces/useRepoInfo";
 import { open as pickFile } from "@tauri-apps/plugin-dialog";
 
 const TOOL = "cc-t flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-md text-gray-500 hover:bg-black/[0.05] hover:text-gray-900 dark:text-gray-400 dark:hover:bg-white/[0.07] dark:hover:text-white";
-import { unreadOf, useUnreadStore } from "./chatUnread";
+import { unreadOf, useUnreadStore, type ChatJump } from "./chatUnread";
+import { appendToDraft } from "@/features/terminal/terminalExcerpt";
 import { useActiveBoardKey, boardKeyOfTab, conversationOfKey, missionOfKey, useCanvasStore } from "./store";
 import { useTerminalPrompts } from "./useTerminalPrompts";
 import { TeamFeed, TeamFilterBar, useMissionApprovals, useTeamFeed, useTeamMessages } from "./TeamFeed";
 import { useRouteSuggestion, withTarget } from "./routeSuggestion";
 import { resolveMention, suggestMentions, type UserNote } from "./teamFeedModel";
-import { ChatMarkdown } from "./ChatMarkdown";
+import { ChatMarkdown } from "./LazyChatMarkdown";
 import { ResponsePicker } from "./ResponsePicker";
 import { CHAT_MARGIN, clampSize, isDefaultSize, loadChatSize, resizeBy, saveChatSize, DEFAULT_CHAT_SIZE, type ChatSize, type ChatSizeState } from "./chatSize";
 import { dateLocale } from "@/i18n/dateLocale";
@@ -81,6 +83,8 @@ const TEAM = "__team__";
 
 export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewAgent: () => void }) {
   const { t } = useTranslation();
+  // O texto do chat segue o zoom dos terminais (Ctrl+= / Ctrl+- / Ctrl+0): um só ajuste para ler melhor.
+  const chatZoom = useTerminalPrefsStore((s) => s.zoom);
   const key = useActiveBoardKey();
   const allTabs = useTabsStore((s) => s.tabs);
   const activeTabId = useTabsStore((s) => s.activeTabId);
@@ -168,10 +172,23 @@ export function ChatPanel({ onClose, onNewAgent }: { onClose: () => void; onNewA
   const jump = useUnreadStore((s) => s.jump);
 
   // Se llegó desde un aviso del sistema: se abre ese agente en ese hilo.
+  // O mesmo pedido só uma vez: em desenvolvimento o efeito roda duas vezes e o trecho entraria em dobro.
+  const consumedJump = useRef<ChatJump | null>(null);
   useEffect(() => {
-    if (!jump) return;
+    if (!jump || consumedJump.current === jump) return;
+    consumedJump.current = jump;
     if ((THREADS as readonly string[]).includes(jump.thread)) setThread(jump.thread as Thread);
     setTabId(jump.tabId);
+    // Um trecho de terminal: vai para o fim do rascunho, sem enviar, e o cursor fica pronto para a pergunta.
+    const text = jump.text;
+    if (text) {
+      setDraft((d) => appendToDraft(d, text));
+      requestAnimationFrame(() => {
+        const box = sentinel.current?.parentElement?.querySelector("textarea");
+        box?.focus();
+        box?.setSelectionRange(box.value.length, box.value.length);
+      });
+    }
     useUnreadStore.getState().setJump(null);
   }, [jump]);
 
@@ -451,8 +468,8 @@ ${text}` : text)); setPicking(false); }} />}
       </div>}
     >
       {teamView ? (teamMessages.length + teamApprovals.length + terminalPrompts.length + notes.length > 0
-        ? <TeamFeed items={teamFeed.items} colors={Object.fromEntries(agents.map((a) => [a.id, agentTile(a.agentId)]))} /> : undefined)
-        : current && messages.length > 0 ? <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.chat.title")}>
+        ? <div style={{ zoom: chatZoom / 100 }}><TeamFeed items={teamFeed.items} colors={Object.fromEntries(agents.map((a) => [a.id, agentTile(a.agentId)]))} /></div> : undefined)
+        : current && messages.length > 0 ? <div className="space-y-4 [&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-lg [&_pre]:bg-gray-100 [&_pre]:p-3 [&_pre]:font-mono [&_pre]:text-[12px] [&_pre]:leading-4 dark:[&_pre]:bg-surface-deep [&_code]:font-mono [&_code]:text-[12px]" role="log" aria-label={t("canvas.chat.title")} style={{ zoom: chatZoom / 100 }}>
               {messages.map((m) => (
                 <div key={m.id} className={`flex flex-col ${m.kind === "user" ? "items-end" : "items-stretch"}`}>
                   {m.kind !== "user" && current && (

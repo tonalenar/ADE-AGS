@@ -23,6 +23,8 @@
 mod api;
 mod commands;
 mod credentials;
+mod guide;
+mod guide_commands;
 mod oauth;
 mod provider;
 mod secret;
@@ -30,8 +32,11 @@ mod store;
 pub(crate) mod tools;
 #[cfg(test)]
 mod test;
+#[cfg(test)]
+mod guide_test;
 
 pub use commands::*;
+pub use guide_commands::*;
 pub(crate) use credentials::git_env_for_remote;
 
 /// Lo que usa la sincronización (ver `crate::sync`): la API de una cuenta y cómo

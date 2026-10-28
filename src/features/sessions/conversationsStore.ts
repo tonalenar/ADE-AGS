@@ -5,6 +5,12 @@ import { comparablePath } from "@/features/tabs/viewTabs";
 import type { ConversationRow } from "./conversationModel";
 import { listConversations } from "./ipc.projectConversations";
 
+/** A mesma chave de projeto, venha com \ ou /: antes de o git responder, a chave é a pasta como a aba a tem;
+ *  depois, a raiz que o git devolve. Comparar cru fazia a mesma pasta ganhar duas conversas ativas. */
+export function sameProject(a: string, b: string): boolean {
+  return comparablePath(a) === comparablePath(b);
+}
+
 interface ConversationsState {
   rows: ConversationRow[];
   loading: boolean;

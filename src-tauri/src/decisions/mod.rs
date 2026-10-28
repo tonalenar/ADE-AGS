@@ -5,9 +5,12 @@
 //! aprova memória, despacha tarefa nem fecha missão.
 
 pub(crate) mod browse;
+mod browse_rules;
+pub(crate) mod vision;
 pub(crate) mod commands;
 mod config;
 mod http;
+pub mod jev_models;
 pub(crate) mod delivery;
 pub(crate) mod hints;
 pub(crate) mod log;

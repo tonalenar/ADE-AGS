@@ -14,6 +14,8 @@ import {
   type PeerMessage,
   type PendingTasks,
   type StallProbe,
+  UI_LAG_FACTOR,
+  uiBehindUntil,
 } from "../stalled";
 
 const isLead = (id: string) => id === "lead";
@@ -197,5 +199,36 @@ describe("plazo configurable", () => {
     expect(parseStallMs(null)).toBe(STALL_MS);
     expect(parseStallMs("abc")).toBe(STALL_MS);
     expect(parseStallMs(String(MIN_STALL_MS - 1))).toBe(STALL_MS);
+  });
+});
+
+describe("diagnóstico do silêncio e a interface atrasada", () => {
+  it("conta os eventos de saída desde a tarefa e diz onde parou", () => {
+    const counts: Record<string, number> = { a: 40 };
+    const pending = applyMessage(new Map(), tell("a"), isLead, (id) => counts[id] ?? 0);
+    expect(pending.get("a")?.outputsAtTask).toBe(40);
+    counts.a = 47;
+    const [stall] = findStalls(pending, probe({ lastOutputAt: () => 1000 + 10_000, now: 1000 + 10_000 + STALL_MS + 1, outputCount: (id) => counts[id] ?? 0 }));
+    expect(stall.events).toBe(7);
+    expect(stallMessage("QA", stall)).toContain("parou depois de 7 eventos de saída");
+    expect(stallMessage("QA", { ...stall, events: 1 })).toContain("parou depois de 1 evento de saída");
+    // Sem nenhuma saída depois da tarefa: o outro diagnóstico.
+    expect(stallMessage("QA", { ...stall, worked: false, events: 0 })).toContain("não escreveu nada desde que recebeu a tarefa");
+  });
+
+  it("enquanto a interface está escondida ou atrasada, o silêncio não conta", () => {
+    const pending = applyMessage(new Map(), tell("a"), isLead);
+    const now = 1000 + STALL_MS + 1;
+    expect(findStalls(pending, probe({ now }))).toHaveLength(1);
+    // A janela voltou há 10 s: o silêncio recomeça dali.
+    expect(findStalls(pending, probe({ now, uiBehindUntil: now - 10_000 }))).toHaveLength(0);
+    expect(findStalls(pending, probe({ now: now + STALL_MS, uiBehindUntil: now - 10_000 }))).toHaveLength(1);
+  });
+
+  it("uiBehindUntil: escondida = agora; tic muito atrasado = agora; normal = o de antes", () => {
+    expect(uiBehindUntil(undefined, 0, 5000, true, 5000)).toBe(5000);
+    expect(uiBehindUntil(undefined, 0, 5000 * UI_LAG_FACTOR + 1, false, 5000)).toBe(5000 * UI_LAG_FACTOR + 1);
+    expect(uiBehindUntil(123, 0, 5000, false, 5000)).toBe(123);
+    expect(uiBehindUntil(undefined, undefined, 5000, false, 5000)).toBeUndefined();
   });
 });

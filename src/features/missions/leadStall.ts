@@ -145,7 +145,8 @@ export function findScreenAsks(
 ): PendingAsk[] {
   const out: PendingAsk[] = [];
   for (const [memberTabId, leadTabId] of members) {
-    if (pending.has(memberTabId) || probe.isActive(memberTabId)) continue;
+    // `isWorking` conta o transcript: uma pergunta velha na tela de quem está no meio de um turno não vale.
+    if (pending.has(memberTabId) || probe.isActive(memberTabId) || probe.isWorking(memberTabId)) continue;
     const lastOut = probe.lastOutputAt(memberTabId);
     if (lastOut === undefined || probe.now - lastOut < quietMs) continue;
     const lines = probe.screen(memberTabId);

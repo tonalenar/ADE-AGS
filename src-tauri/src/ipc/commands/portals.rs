@@ -20,7 +20,7 @@ use tauri::AppHandle;
 
 use super::peers::{caller, open_tabs};
 use crate::canvas::{self, Boards, Portal};
-use crate::ipc::bridge::{ask_frontend_within, unwrap_frontend_result};
+use crate::ipc::bridge::{ask_frontend_within, take_act_progress, unwrap_frontend_result, with_partial_progress};
 use crate::ipc::protocol::{arg_str, arg_str_opt};
 
 /// Cuánto puede tardar una acción en la página (cargar, esperar un texto…).
@@ -32,7 +32,7 @@ const ACT_TIMEOUT_S: u64 = 115;
 /// (`PORTAL_OPS`); está acá también para fallar con un mensaje útil antes de molestarlo.
 pub(crate) const ACTIONS: &[&str] = &[
     "navigate", "history", "snapshot", "click", "hover", "type", "press", "select", "scroll", "wait",
-    "screenshot", "console", "layout", "act",
+    "screenshot", "console", "layout", "act", "reset",
 ];
 
 #[derive(Debug, Clone)]
@@ -79,6 +79,72 @@ pub(crate) fn resolve_portal<'a>(portals: &'a [Reachable], wanted: &str) -> Resu
 
 fn describe(p: &Reachable) -> Value {
     json!({ "id": p.id, "name": p.portal.name, "url": p.portal.url })
+}
+
+/// El origen (`https://www.amazon.com.br`) de la URL de un portal, para consultar al proxy.
+fn origin_of(url: &str) -> Option<String> {
+    let parsed = url::Url::parse(url.trim()).ok()?;
+    matches!(parsed.scheme(), "http" | "https").then(|| parsed.origin().ascii_serialization())
+}
+
+/// La nota de «verificação anti-robô em andamento» si el sitio del portal respondió un desafío hace poco (plan v2, I4).
+fn challenge_note(url: &str) -> Option<String> {
+    let action = crate::preview::challenge_in_progress(&origin_of(url)?)?;
+    Some(format!(
+        "verificação anti-robô em andamento ({action}): o site entregou um desafio em vez da página. Espere uns segundos (`ags portal wait <portal> --idle`) e leia de novo; não é uma página parada nem um erro do portal."
+    ))
+}
+
+/// El estado de cada portal para `ags portals`: lo que el frontend sabe de la carga, y la verificación anti-robot del proxy.
+/// Sin respuesta del frontend (ventana trabada o cerrándose) el estado es «sem resposta» con la causa, no un error del listado.
+fn with_states(app: &AppHandle, portals: &[Reachable]) -> Vec<Value> {
+    let mut by_window: std::collections::BTreeMap<&str, Vec<&Reachable>> = std::collections::BTreeMap::new();
+    for p in portals {
+        by_window.entry(window_of(&p.key)).or_default().push(p);
+    }
+    let mut states: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+    for (window, group) in by_window {
+        let ids: Vec<&str> = group.iter().map(|p| p.id.as_str()).collect();
+        let asked = ask_frontend_within(
+            app,
+            "canvas.portal",
+            &json!({ "op": "states", "ids": ids }),
+            Some(window),
+            std::time::Duration::from_secs(4),
+        )
+        .and_then(unwrap_frontend_result);
+        match asked {
+            Ok(v) => {
+                if let Some(map) = v.get("states").and_then(Value::as_object) {
+                    states.extend(map.iter().map(|(k, v)| (k.clone(), v.clone())));
+                }
+            }
+            Err(why) => {
+                for p in group {
+                    states.insert(p.id.clone(), json!({ "state": "sem resposta", "hint": why }));
+                }
+            }
+        }
+    }
+    portals
+        .iter()
+        .map(|p| {
+            let mut row = describe(p);
+            let info = states.remove(&p.id).unwrap_or_else(|| json!({ "state": "oculto", "hint": "o nó do portal não está desenhado" }));
+            row["state"] = info.get("state").cloned().unwrap_or(Value::Null);
+            row["hint"] = info.get("hint").cloned().unwrap_or(Value::Null);
+            if let Some(note) = challenge_note(&p.portal.url) {
+                row["state"] = json!("verificação anti-robô");
+                row["hint"] = json!(note);
+            }
+            row
+        })
+        .collect()
+}
+
+/// Anexa o progresso parcial do `act` ao erro (se o puente venceu no meio) e limpa o que sobrou.
+fn act_error(portal_id: &str, error: String) -> String {
+    with_partial_progress(error, take_act_progress(portal_id))
 }
 
 /// La ventana que tiene ese canvas: la clave es `ventana|carpeta`.
@@ -176,6 +242,16 @@ pub(crate) fn request_for(action: &str, args: &Value) -> Result<Value, String> {
                 return Err("--fill precisa de `campo=valor` (repita a flag para vários).".into());
             }
             set(&mut req, "fills", Value::Array(fills));
+            // `--expect text:|url:|count:|absent:` (repetível): o piloto confere por código, sem o Jev (plano v2, 5.1).
+            let expects: Vec<Value> = match args.get("expect") {
+                Some(Value::Array(list)) => list.clone(),
+                Some(Value::String(one)) if !one.is_empty() => vec![json!(one)],
+                _ => Vec::new(),
+            };
+            if expects.iter().any(|e| !e.as_str().is_some_and(|s| s.contains(':'))) {
+                return Err("--expect precisa de `tipo:valor` (text:, url:, count: ou absent:); repita a flag para vários.".into());
+            }
+            set(&mut req, "expects", Value::Array(expects));
             if let Some(n) = num(args, "steps")? {
                 set(&mut req, "steps", json!(n));
             }
@@ -193,19 +269,114 @@ pub(crate) fn request_for(action: &str, args: &Value) -> Result<Value, String> {
     Ok(req)
 }
 
-pub(super) fn portal_list(_app: &AppHandle, args: &Value) -> Result<Value, String> {
+pub(super) fn portal_list(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let portals = reachable(&canvas::load_boards(), &from);
-    Ok(json!({ "portals": portals.iter().map(describe).collect::<Vec<_>>() }))
+    Ok(json!({ "portals": with_states(app, &portals), "window": crate::ipc::bridge::window_report() }))
 }
 
-/// Crea un portal al lado de quien lo pide y conectado con él.
+/// `ags portal close <portal>`: el agente limpia lo que creó. Mismo permiso que el resto: un portal conectado con él.
+pub(super) fn portal_close(app: &AppHandle, args: &Value) -> Result<Value, String> {
+    let from = caller(args)?;
+    let portals = reachable(&canvas::load_boards(), &from);
+    let target = resolve_portal(&portals, &arg_str(args, "name")?)?;
+    let raw = ask_frontend_within(
+        app,
+        "canvas.portal",
+        &json!({ "op": "close", "key": target.key, "id": target.id }),
+        Some(window_of(&target.key)),
+        std::time::Duration::from_secs(15),
+    )?;
+    unwrap_frontend_result(raw)?;
+    Ok(json!({ "closed": describe(target) }))
+}
+
+/// Quantos navegadores um agente pode ter ao mesmo tempo (os conectados a ele). Cada um é uma página viva no canvas: agentes que
+/// criavam um por teste e nunca fechavam enchiam o canvas de navegadores iguais.
+pub(crate) const MAX_PORTALS_PER_AGENT: usize = 4;
+
+/// O portal que já tem esse nome (sem maiúsculas): `create` com um nome que já existe reaproveita em vez de criar outro. Pura.
+pub(crate) fn reusable<'a>(portals: &'a [Reachable], name: &str) -> Option<&'a Reachable> {
+    let needle = name.trim().to_lowercase();
+    if needle.is_empty() {
+        return None;
+    }
+    portals.iter().find(|p| p.portal.name.trim().to_lowercase() == needle)
+}
+
+/// Qual navegador já conectado um `create` reaproveita: o de mesmo nome; senão o que já está na origem pedida; senão o
+/// primeiro. A tela de um Android só pelo nome. `None` = nenhum conectado. Pura.
+pub(crate) fn reuse_choice<'a>(portals: &'a [Reachable], name: Option<&str>, url: Option<&str>) -> Option<&'a Reachable> {
+    if let Some(found) = name.and_then(|n| reusable(portals, n)) {
+        return Some(found);
+    }
+    let browsers: Vec<&Reachable> = portals.iter().filter(|p| p.portal.kind.is_none()).collect();
+    if let Some(url) = url {
+        if let Some(found) = browsers.iter().find(|p| same_origin(&p.portal.url, url)) {
+            return Some(found);
+        }
+    }
+    browsers.first().copied()
+}
+
+/// Leva o navegador reaproveitado ao endereço pedido (se houver) e monta a resposta do `create`.
+fn reuse_reply(app: &AppHandle, args: &Value, portal: Value, url: Option<&str>, note: Option<String>) -> Result<Value, String> {
+    let mut out = json!({ "created": portal, "reused": true });
+    if let Some(note) = note {
+        out["note"] = json!(note);
+    }
+    if let (Some(url), Some(id)) = (url, out["created"]["id"].as_str().map(str::to_string)) {
+        let mut nav = args.clone();
+        nav["name"] = json!(id);
+        nav["url"] = json!(url);
+        let done = portal_action(app, &nav, "navigate")?;
+        out["navigated"] = done.get("portal").cloned().unwrap_or(Value::Null);
+    }
+    Ok(out)
+}
+
+/// Crea un portal al lado de quien lo pide y conectado con él. Antes, reaproveita: o navegador já conectado (o de mesmo nome,
+/// o da mesma origem, o primeiro) ou o que ficou no canvas sem dono; só `--new` abre outro de propósito. Recusa passar do teto.
 pub(super) fn portal_create(app: &AppHandle, args: &Value) -> Result<Value, String> {
     let from = caller(args)?;
     let me = open_tabs(app)?
         .into_iter()
         .find(|t| t.id == from)
         .ok_or_else(|| "A sua aba não está aberta em nenhuma janela.".to_string())?;
+    let mine = reachable(&canvas::load_boards(), &from);
+    let fresh = args.get("new").and_then(Value::as_bool).unwrap_or(false);
+    let name = arg_str_opt(args, "name").filter(|n| !n.trim().is_empty());
+    let url = arg_str_opt(args, "url").map(|u| u.trim().to_string()).filter(|u| !u.is_empty());
+    // Cada agente que navegava abria um navegador novo (um nome por teste): agora o que já está aberto serve, e o nome
+    // diferente só abre outro com `--new`.
+    let choice = if fresh { name.as_deref().and_then(|n| reusable(&mine, n)) } else { reuse_choice(&mine, name.as_deref(), url.as_deref()) };
+    if let Some(existing) = choice {
+        let renamed = name.as_deref().is_some_and(|n| n.trim().to_lowercase() != existing.portal.name.trim().to_lowercase());
+        let note = renamed.then(|| format!("Reaproveitei o navegador «{}», que já estava aberto com você (passe --new para abrir outro).", existing.portal.name));
+        return reuse_reply(app, args, describe(existing), url.as_deref(), note);
+    }
+    if mine.is_empty() && !fresh {
+        let mut req = json!({ "op": "adopt", "cwd": me.cwd, "near": me.id });
+        if let Some(url) = &url {
+            req["url"] = json!(url);
+        }
+        let raw = ask_frontend_within(app, "canvas.portal", &req, Some(&me.window), std::time::Duration::from_secs(30))?;
+        let adopted = unwrap_frontend_result(raw)?;
+        if adopted.get("id").and_then(Value::as_str).is_some() {
+            let label = adopted.get("name").and_then(Value::as_str).unwrap_or("navegador").to_string();
+            let note = format!("Reaproveitei o navegador «{label}», que tinha ficado no canvas sem dono (passe --new para abrir outro).");
+            let mut out = reuse_reply(app, args, adopted, url.as_deref(), Some(note))?;
+            out["adopted"] = json!(true);
+            return Ok(out);
+        }
+    }
+    if mine.len() >= MAX_PORTALS_PER_AGENT {
+        return Err(format!(
+            "Você já tem {} navegadores ({}). Reutilize um: `ags portal navigate \"<nome>\" <url>` abre outra página no mesmo, e `ags portal close \"<nome>\"` fecha os que não precisa mais.",
+            mine.len(),
+            mine.iter().map(|p| p.portal.name.as_str()).collect::<Vec<_>>().join(", ")
+        ));
+    }
     let mut req = json!({ "op": "create", "cwd": me.cwd, "near": me.id });
     if let Some(name) = arg_str_opt(args, "name").filter(|n| !n.trim().is_empty()) {
         req["name"] = json!(name.trim());
@@ -282,15 +453,32 @@ pub(super) fn portal_action(app: &AppHandle, args: &Value, action: &str) -> Resu
     // El proyecto del agente: es el límite de lo que el navegador puede tocar.
     let cwd = open_tabs(app)?.into_iter().find(|t| t.id == from).map(|t| t.cwd).unwrap_or_default();
     let owner = json!({ "kind": "tab", "id": from });
-    let raw = ask_frontend_within(
+    // Un `act` anterior que no terminó no debe pasar su progreso a este.
+    if action == "act" {
+        take_act_progress(&target.id);
+    }
+    let asked = ask_frontend_within(
         app,
         "canvas.portal",
         &json!({ "op": "run", "cwd": cwd, "id": target.id, "request": request, "owner": owner }),
         Some(window_of(&target.key)),
         std::time::Duration::from_secs(if action == "act" { ACT_TIMEOUT_S } else { ACTION_TIMEOUT_S }),
-    )?;
-    let out = unwrap_frontend_result(raw)?;
-    Ok(json!({ "portal": describe(target), "text": out.get("text").cloned().unwrap_or(Value::Null) }))
+    )
+    .and_then(unwrap_frontend_result);
+    let out = match asked {
+        Ok(out) => out,
+        Err(e) if action == "act" => return Err(act_error(&target.id, e)),
+        Err(e) => return Err(e),
+    };
+    if action == "act" {
+        take_act_progress(&target.id);
+    }
+    let mut text = out.get("text").cloned().unwrap_or(Value::Null);
+    // Un desafío anti-robot en curso explica una página «parada»: se lo dice al agente junto al resultado.
+    if let (Some(note), Some(body)) = (challenge_note(&target.portal.url), text.as_str()) {
+        text = json!(format!("[{note}]\n{body}"));
+    }
+    Ok(json!({ "portal": describe(target), "text": text }))
 }
 
 #[cfg(test)]
@@ -299,6 +487,54 @@ mod test {
 
     fn portal(id: &str, name: &str) -> Reachable {
         Reachable { key: "main|/p".into(), id: id.into(), portal: Portal { name: name.into(), ..Default::default() } }
+    }
+
+    #[test]
+    fn create_com_um_nome_que_ja_existe_reaproveita_o_portal() {
+        let portals = vec![portal("p1", "Teste"), portal("p2", "Outro")];
+        assert_eq!(reusable(&portals, " teste ").map(|p| p.id.as_str()), Some("p1"));
+        assert_eq!(reusable(&portals, "OUTRO").map(|p| p.id.as_str()), Some("p2"));
+        assert!(reusable(&portals, "novo").is_none());
+        assert!(reusable(&portals, "  ").is_none());
+        assert!(MAX_PORTALS_PER_AGENT >= 2);
+    }
+
+    #[test]
+    fn create_reaproveita_o_navegador_ja_aberto_mesmo_com_outro_nome() {
+        let mut lojinha = portal("p1", "loja");
+        lojinha.portal.url = "http://localhost:8765/gen/loja.html".into();
+        let mut wiki = portal("p2", "wiki");
+        wiki.portal.url = "https://pt.wikipedia.org/wiki/X".into();
+        let mut celular = portal("p3", "celular");
+        celular.portal.kind = Some("android".into());
+        let portals = vec![celular, lojinha, wiki];
+        // o de mesmo nome
+        assert_eq!(reuse_choice(&portals, Some("WIKI"), None).map(|p| p.id.as_str()), Some("p2"));
+        // outro nome: o que já está na origem pedida
+        assert_eq!(reuse_choice(&portals, Some("bench-jev-xyz"), Some("https://pt.wikipedia.org/wiki/Y")).map(|p| p.id.as_str()), Some("p2"));
+        // sem nome nem origem conhecida: o primeiro navegador (nunca a tela do Android)
+        assert_eq!(reuse_choice(&portals, None, Some("https://example.com")).map(|p| p.id.as_str()), Some("p1"));
+        assert_eq!(reuse_choice(&portals, None, None).map(|p| p.id.as_str()), Some("p1"));
+        // o Android só pelo nome
+        assert_eq!(reuse_choice(&portals, Some("celular"), None).map(|p| p.id.as_str()), Some("p3"));
+        assert!(reuse_choice(&[], Some("x"), None).is_none());
+    }
+
+    #[test]
+    fn o_origem_do_portal_vem_da_url() {
+        assert_eq!(origin_of("https://www.amazon.com.br/s?k=x").as_deref(), Some("https://www.amazon.com.br"));
+        assert_eq!(origin_of(" http://localhost:5173/a ").as_deref(), Some("http://localhost:5173"));
+        assert_eq!(origin_of("about:blank"), None);
+        assert_eq!(origin_of(""), None);
+    }
+
+    #[test]
+    fn um_act_que_cai_leva_o_progresso_no_erro() {
+        crate::ipc::bridge::portal_act_progress("portal-teste-progresso".into(), "Ações já feitas (1):\n1. clicou @e3".into());
+        let msg = act_error("portal-teste-progresso", "A interface parou".into());
+        assert!(msg.contains("A interface parou") && msg.contains("1. clicou @e3"), "{msg}");
+        // Já foi consumido: o próximo erro não repete.
+        assert_eq!(act_error("portal-teste-progresso", "outro".into()), "outro");
     }
 
     #[test]
@@ -358,6 +594,12 @@ mod test {
         assert_eq!(one["fills"], json!(["a=1"]));
         assert!(request_for("act", &json!({})).unwrap_err().contains("--goal"));
         assert!(request_for("act", &json!({ "goal": "x", "fill": ["sem-igual"] })).unwrap_err().contains("campo=valor"));
+
+        let expects = request_for("act", &json!({ "goal": "x", "expect": ["text:Seu carrinho está vazio", "url:/cart"] })).unwrap();
+        assert_eq!(expects["expects"], json!(["text:Seu carrinho está vazio", "url:/cart"]));
+        assert_eq!(request_for("act", &json!({ "goal": "x", "expect": "count:1" })).unwrap()["expects"], json!(["count:1"]));
+        assert_eq!(request_for("act", &json!({ "goal": "x" })).unwrap()["expects"], json!([]));
+        assert!(request_for("act", &json!({ "goal": "x", "expect": ["sem-dois-pontos"] })).unwrap_err().contains("tipo:valor"));
     }
 
     #[test]

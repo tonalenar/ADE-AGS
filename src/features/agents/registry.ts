@@ -35,12 +35,20 @@ export interface AgentRegistryEntry {
   skillsDir: string | null;
   /** Argumentos de reanudación con el placeholder `{session}`. `null` = no sabe. */
   resume: string | null;
+  /**
+   * Argumentos para ABRIR una sesión con un id elegido por la app (placeholder `{session}`).
+   * Ausente o `null` = la TUI no deja elegirlo y la app lo descubre después. Ver
+   * `AgentDef::assign_session` en `registry.rs`.
+   */
+  assignSession?: string | null;
+  /** Prefixo do id que a app escolhe (`ses_` no OpenCode). Vazio ou ausente = um UUID. */
+  assignIdPrefix?: string;
   supportsAccounts: boolean;
   sessions: string;
   /** Cómo recibe esta TUI el servidor MCP de la app. Espejo de `McpStyle` en
    *  `registry.rs`: `claudeFlags` por flags, `opencodeConfig` por su config, `none` = no
    *  se le enchufa (arranca igual, sin navegador ni orquestación). */
-  mcp: "claudeFlags" | "opencodeConfig" | "none";
+  mcp: "claudeFlags" | "opencodeConfig" | "hermesManaged" | "none";
 }
 
 let REGISTRY: AgentRegistryEntry[] = [];
