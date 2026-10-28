@@ -16,6 +16,17 @@
 #[path = "../src/terminal/containment.rs"]
 mod containment;
 
+/// O `containment.rs` chama `crate::util::spawn::hidden_command` no unix (o `ps` da árvore de processos). Sem a lib,
+/// aqui é um `Command` comum: no unix não há janela de console a esconder.
+#[cfg(unix)]
+mod util {
+    pub mod spawn {
+        pub fn hidden_command(program: impl AsRef<std::ffi::OsStr>) -> std::process::Command {
+            std::process::Command::new(program)
+        }
+    }
+}
+
 use containment::ProcessGroup;
 use portable_pty::{native_pty_system, CommandBuilder, PtySize};
 use std::io::Read;

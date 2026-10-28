@@ -290,9 +290,7 @@ pub(crate) mod unix_tree {
     /// `(pid, ppid)` de todos los procesos del sistema. Se usa `ps` y no `/proc` porque
     /// este camino existe sobre todo para macOS, que no tiene `/proc`.
     fn snapshot() -> Vec<(u32, u32)> {
-        // `std::process::Command` direto: no unix não há janela de console a esconder, e este arquivo também entra
-        // no `examples/orphan_probe` por `#[path]`, onde `crate::util` não existe (o build de Linux e macOS quebrava).
-        let out = match std::process::Command::new("ps").args(["-eo", "pid=,ppid="]).output() {
+        let out = match crate::util::spawn::hidden_command("ps").args(["-eo", "pid=,ppid="]).output() {
             Ok(o) => o,
             Err(_) => return Vec::new(),
         };
